@@ -41,6 +41,10 @@ import cargo_capacity_guard_state as capacity_state
 
 DEFAULT_FACTOR = 2.0
 COVERAGE_DOMAINS = ("root", "performance-baseline", "performance-candidate")
+COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX = (
+    r"(^|[/\\])scripts[/\\]html[/\\]performance-harness[/\\]src[/\\]"
+    r"([^/\\]+[/\\])*[^/\\]+(_tests|_test_support)\.rs$"
+)
 COVERAGE_DIAGNOSTIC_DOMAINS = ("root",)
 CHECK_DOMAINS = COVERAGE_DOMAINS
 CLIPPY_DENY_FLAGS = [
@@ -1116,7 +1120,7 @@ def coverage_selection(root: Path, target: Path, domain: str, command: list[str]
         switches.add("--profraw-only")
     values = {"--manifest-path"} if action == "clean" else {
         "--manifest-path", "--features", "--fail-under-lines", "--fail-uncovered-lines",
-        "--output-path", "--jobs", "-j", "--profile",
+        "--output-path", "--jobs", "-j", "--profile", "--ignore-filename-regex",
     }
     options: dict[str, str] = {}
     index = 0
@@ -1159,12 +1163,19 @@ def coverage_selection(root: Path, target: Path, domain: str, command: list[str]
                 raise RuntimeError("coverage thresholds must remain 100/0")
         if domain == "root":
             required.add("--all-features")
-            if "--features" in options or "--no-default-features" in options:
+            if ("--features" in options or "--no-default-features" in options
+                    or "--ignore-filename-regex" in options):
                 raise RuntimeError("root coverage feature selection differs")
         else:
             required |= {"--no-default-features", "--features"}
             if "--all-features" in options or options.get("--features") != domain.removeprefix("performance-"):
                 raise RuntimeError("coverage arm feature selection differs")
+            if collection:
+                if options.get("--ignore-filename-regex") != COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX:
+                    raise RuntimeError("performance coverage requires the fixed test-only source exclusion")
+                _validate_test_only_coverage_scope(root)
+            elif "--ignore-filename-regex" in options:
+                raise RuntimeError("strict performance coverage cannot exclude source files")
         jobs = options.get("--jobs", "1")
         if not jobs.isdecimal() or int(jobs) < 1:
             raise RuntimeError("coverage jobs must be positive")
@@ -1176,6 +1187,33 @@ def coverage_selection(root: Path, target: Path, domain: str, command: list[str]
         raise RuntimeError("coverage command omits required domain options")
     _validate_coverage_environment(root, target, selected, environment, manifest)
     return action, selected
+
+
+def _validate_test_only_coverage_scope(root: Path) -> None:
+    source_root = root / "scripts/html/performance-harness/src"
+    try:
+        source_root_real = source_root.resolve(strict=True)
+        matches = [
+            path for path in source_root.rglob("*.rs")
+            if re.search(COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX,
+                         path.relative_to(root).as_posix()) is not None
+        ]
+    except (OSError, ValueError) as error:
+        raise RuntimeError("test-only coverage source scope is unavailable") from error
+    if not matches:
+        raise RuntimeError("test-only coverage exclusion matched no source files")
+    for path in matches:
+        try:
+            resolved = path.resolve(strict=True)
+            if (path.is_symlink() or not resolved.is_relative_to(source_root_real)
+                    or not path.is_file()):
+                raise RuntimeError("test-only coverage source escaped its fixed scope")
+            source = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError, ValueError) as error:
+            raise RuntimeError("test-only coverage source cannot be authenticated") from error
+        first_line = source.splitlines()[0] if source else ""
+        if first_line != "#![cfg(test)]":
+            raise RuntimeError("test-only coverage source must start with its cfg(test) inner attribute")
 
 
 def _validate_coverage_environment(root: Path, target: Path, selected: Path,

@@ -329,11 +329,13 @@ class LocalCoverageContextTests(unittest.TestCase):
             root = Path(temporary)
             repo = root / "repo"
             package_root = root / "registry" / "fixture-1.0.0"
+            outside = root / "outside.rs"
             (repo / "crates").mkdir(parents=True)
             (package_root / "src").mkdir(parents=True)
             manifest = package_root / "Cargo.toml"
             manifest.write_text("[package]\nname='fixture'\nversion='1.0.0'\n")
             (package_root / "src" / "lib.rs").write_text("pub const VALUE: u8 = 1;\n")
+            outside.write_text("external source must not be followed\n")
             package_id = "registry+https://example.invalid#index#fixture@1.0.0"
             metadata: dict[str, object] = {
                 "packages": [{"id": package_id, "name": "fixture", "version": "1.0.0",
@@ -341,7 +343,7 @@ class LocalCoverageContextTests(unittest.TestCase):
                               "manifest_path": str(manifest)}],
                 "resolve": {"nodes": [{"id": package_id, "features": [], "deps": []}]},
             }
-            (package_root / "src" / "linked.rs").symlink_to(package_root / "src" / "lib.rs")
+            (package_root / "src" / "linked.rs").symlink_to("../../../outside.rs")
             with self.assertRaisesRegex(local_context.LocalCoverageContextError,
                                         "cargo_dependency_source_symlink"):
                 local_context._record_cargo_metadata(repo, "root", metadata, {}, {})
@@ -351,6 +353,101 @@ class LocalCoverageContextTests(unittest.TestCase):
             with self.assertRaisesRegex(local_context.LocalCoverageContextError,
                                         "cargo_dependency_source_unavailable"):
                 local_context._record_cargo_metadata(repo, "root", metadata, {}, {})
+
+    def test_dependency_tree_digest_binds_internal_regular_file_symlink(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "skia" / "src" / "ports" / "fontations"
+            target = root / "skia" / "bazel" / "external" / "fontations" / "Cargo.toml"
+            second_target = root / "skia" / "bazel" / "external" / "other" / "Cargo.toml"
+            source.mkdir(parents=True)
+            target.parent.mkdir(parents=True)
+            second_target.parent.mkdir(parents=True)
+            target.write_text("[package]\nname='fontations'\n")
+            second_target.write_text(target.read_text())
+            link = source / "Cargo.toml"
+            link.symlink_to("../../../bazel/external/fontations/Cargo.toml")
+
+            original = local_context._dependency_tree_digest(root)
+            target.write_text("[package]\nname='fontations-updated'\n")
+            changed_bytes = local_context._dependency_tree_digest(root)
+            link.unlink()
+            link.symlink_to("../../../bazel/external/other/Cargo.toml")
+            changed_link = local_context._dependency_tree_digest(root)
+
+        self.assertNotEqual(original[0], changed_bytes[0])
+        self.assertNotEqual(changed_bytes[0], changed_link[0])
+
+    def test_unsupported_dependency_symlink_shapes_fail_closed(self) -> None:
+        for kind in ("chain", "dangling", "cycle", "directory", "external-directory-alias"):
+            with self.subTest(kind=kind), TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / "src").mkdir()
+                (root / "Cargo.toml").write_text("[package]\nname='fixture'\n")
+                (root / "src" / "target.rs").write_text("pub const VALUE: u8 = 1;\n")
+                link = root / "src" / "linked.rs"
+                if kind == "chain":
+                    (root / "src" / "alias.rs").symlink_to("target.rs")
+                    link.symlink_to("alias.rs")
+                elif kind == "dangling":
+                    link.symlink_to("absent.rs")
+                elif kind == "cycle":
+                    link.symlink_to("cycle-peer.rs")
+                    (root / "src" / "cycle-peer.rs").symlink_to("linked.rs")
+                elif kind == "directory":
+                    (root / "src" / "folder").mkdir()
+                    link.symlink_to("folder", target_is_directory=True)
+                else:
+                    outside = root / "outside"
+                    outside.mkdir()
+                    (outside / "target.rs").write_text("external\n")
+                    (root / "src" / "z-directory-alias").symlink_to(
+                        outside, target_is_directory=True
+                    )
+                    (root / "src" / "a-file-alias.rs").symlink_to(
+                        "z-directory-alias/target.rs"
+                    )
+                expected_reason = (
+                    "cargo_dependency_source_symlink"
+                    if kind == "external-directory-alias"
+                    else None
+                )
+                if expected_reason is None:
+                    with self.assertRaises(local_context.LocalCoverageContextError):
+                        local_context._dependency_tree_digest(root)
+                else:
+                    with self.assertRaisesRegex(
+                        local_context.LocalCoverageContextError, expected_reason
+                    ):
+                        local_context._dependency_tree_digest(root)
+
+    def test_dependency_symlink_replacement_during_read_is_rejected(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "src"
+            source.mkdir()
+            (source / "first.rs").write_text("first\n")
+            (source / "second.rs").write_text("second\n")
+            link = source / "linked.rs"
+            link.symlink_to("first.rs")
+            original_readlink = os.readlink
+            replaced = False
+
+            def replace_link(name: str, *, dir_fd: int | None = None) -> str:
+                nonlocal replaced
+                target = original_readlink(name, dir_fd=dir_fd)
+                if name == "linked.rs" and not replaced:
+                    replaced = True
+                    link.unlink()
+                    link.symlink_to("second.rs")
+                return target
+
+            with patch.object(os, "readlink", side_effect=replace_link):
+                with self.assertRaisesRegex(
+                    local_context.LocalCoverageContextError,
+                    "cargo_dependency_source_changed",
+                ):
+                    local_context._dependency_tree_digest(root)
 
     def test_dependency_tree_digest_closes_scandir_descriptors(self) -> None:
         with TemporaryDirectory() as temporary:

@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 pub(crate) struct TestSupport;
 
 impl TestSupport {

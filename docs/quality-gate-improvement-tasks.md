@@ -16,6 +16,10 @@ IssueのClose条件は担当が実行できる実装・自動検証・公開へ�
 
 ## 現在の状態（2026-10-26）
 
+Q19の実performance coverage producerはR2692で成功したが、cacheable:falseだった。Skia公開依存内の同一package内regular fileへの相対symlinkを従来collectorが一律拒否していたことをR2694で特定し、外部・絶対・連鎖・欠損・非regularを拒否したままlink identityとtarget contentを束縛する修正を追加した。R2698の実Cargo stageはaccepted。R2704のcontext回帰は24成功・既存opt-in benchmark1skip、R2706の容量/実行guard178件、R2707のresult認証14件が成功した。これは実cache hit/CAS復元/改ざん拒否の一連の受入完了ではない。
+
+承認済みの純テスト判定コード分離をperformance harnessへ適用し、標準llvm-covの固定filename regexをcollectionとcache identityへ接続した。対象は先頭行に実`#![cfg(test)]`属性を持つharness内の純テストfileだけで、コメント/raw string偽装の負例を追加した。実装100%/未計測0・rootの計測範囲・全テスト実行は維持する。実sessionのclick/resize/全Y/復帰と異常系の回帰を追加。R2709と修正後R2711の既存静的DAGはactual0・source前後一致。R2710の契約全1287件は1281成功/6失敗を保持し、期待値・fixture・空振り変異を是正後、R2711で失敗6件、R2712で共通fixtureの影響を含む関連171件が全成功した。未変更の1116件を最新ソースで再実行したとは扱わない。現行実producerの両arm100%・安全な結果再利用・正式117・最終性能・完全公開は引き続き未完了。
+
 最新の完了済み診断はR2630の製品PNG 92/117合格・残25件、R2632のHTML84/84合格・最低91.49827・出力font一致である。R2631の全runtimeは2,683成功・失敗0・既存ignored24・実行漏れ0。いずれも診断vendor経路であり、公開registry採用・最終性能・完全リリースの合格へ代用しない。R2623の93件からは新規C4 deployment合格1件が脱落しており、Arial修正を回復済みとしない。旧R2582の92件からの合格脱落はない。
 
 複数fragmentの共通anchor補正と、配色分離参照の実browser executableを記録する修正は検証中。R2660の既存Moon静的ゲート・関連Bun・source前後一致はactual0。その後に先頭以降の非zero dyを拒否する負例を1件追加したため、最新ソースのRust検査・117再採点は未完了である。ブラウザ情報の記録誤りは既存参照画像の改変とは区別し、原画像は保持する。

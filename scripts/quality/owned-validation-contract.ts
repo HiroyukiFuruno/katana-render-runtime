@@ -1399,6 +1399,8 @@ function rustMembers(context: ContractContext): string[] {
   return [...new Set(members)].sort((left, right) => right.length - left.length);
 }
 
+const PERFORMANCE_TEST_ONLY_COVERAGE_REGEX = String.raw`(^|[/\\])scripts[/\\]html[/\\]performance-harness[/\\]src[/\\]([^/\\]+[/\\])*[^/\\]+(_tests|_test_support)\.rs$`;
+
 function performanceCoverageCommands(arm: (typeof PERFORMANCE_ARMS)[number]): string[] {
   const directory = `llvm-cov-performance-${arm}`;
   const domain = `performance-${arm}`;
@@ -1406,9 +1408,21 @@ function performanceCoverageCommands(arm: (typeof PERFORMANCE_ARMS)[number]): st
   const prefix = `CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/${directory}" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain ${domain} -- {{CARGO}} llvm-cov`;
   const manifest = ` --manifest-path ${PERFORMANCE_MANIFEST}`;
   const selection = `--no-default-features --features ${arm}`;
-  const report = `--json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/${arm}.json"`;
+  const report = `--ignore-filename-regex {{quote(COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX)}} --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/${arm}.json"`;
   const collector = `${prefix}${manifest} --workspace --all-targets ${selection} --locked --profile krr-coverage ${report}{{TEST_THREAD_ARGS}}`;
   return [`${cleanPrefix} clean${manifest} --workspace --locked`, collector];
+}
+
+function performanceCoverageExclusionContract(context: ContractContext): boolean {
+  const justfile = context.read("Justfile");
+  const guard = context.read("scripts/build/cargo_capacity_guard.py");
+  return (
+    justfile.includes(
+      `COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX := "${PERFORMANCE_TEST_ONLY_COVERAGE_REGEX.replaceAll("\\", "\\\\")}"`,
+    ) &&
+    guard.includes(String.raw`r"(^|[/\\])scripts[/\\]html[/\\]performance-harness[/\\]src[/\\]"`) &&
+    guard.includes(String.raw`r"([^/\\]+[/\\])*[^/\\]+(_tests|_test_support)\.rs$"`)
+  );
 }
 function localCoverageCommand(producer: "root" | "performance", phase: "begin" | "finish"): string {
   if (phase === "finish")
@@ -1680,6 +1694,12 @@ function performanceManifestAndLock(context: ContractContext, members: string[])
   }
 }
 function checkPerformanceRecipeCommands(context: ContractContext): void {
+  if (!performanceCoverageExclusionContract(context))
+    add(
+      context,
+      "performance-harness-recipe-unverified",
+      "COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX",
+    );
   for (const [recipe, expected] of Object.entries(performanceRecipeCommands())) {
     if (!exactPerformanceRecipe(context, recipe, expected))
       add(context, "performance-harness-recipe-unverified", recipe);

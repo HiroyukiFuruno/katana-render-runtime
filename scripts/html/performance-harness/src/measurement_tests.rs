@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use super::{measure_post_operation, HtmlBrowserSession, HtmlBrowserViewport};
 use crate::options::{CatalogInput, CatalogOperationPlan, OperationPlan};
 use crate::test_support::TestSupport;
@@ -191,19 +193,21 @@ fn assert_real_session_resize(
         "https://example.test/resize",
         viewport,
     )?;
-    let generation_before = session
-        .latest_frame()
-        .ok_or("missing initial frame")?
-        .generation;
-    let resized = super::narrower_resize_viewport(viewport)?;
-    session.resize(resized)?;
-    let generation_after = super::validate_resized_frame(&session, resized, generation_before)?;
+    let result = super::measure_same_session_resize(&mut session, viewport)?;
+    let evidence = &result["resize_evidence"];
     let frame = session.latest_frame().ok_or("missing resized frame")?;
-    assert_eq!(resized.width, expected_width);
-    assert_eq!(frame.viewport, resized);
-    assert_eq!(resized.height, height);
-    assert!((resized.device_scale_factor - scale).abs() < f32::EPSILON);
+    assert_eq!(evidence["to_viewport"]["width"], expected_width);
+    assert_eq!(frame.viewport.width, expected_width);
+    assert_eq!(frame.viewport.height, height);
+    assert!((frame.viewport.device_scale_factor - scale).abs() < f32::EPSILON);
+    let generation_before = evidence["generation_before"]
+        .as_u64()
+        .ok_or("missing pre-resize generation")?;
+    let generation_after = evidence["generation_after"]
+        .as_u64()
+        .ok_or("missing post-resize generation")?;
     assert!(generation_after > generation_before);
+    assert_eq!(evidence["real_raster_frame"], true);
     assert!(!frame.pixels.is_empty());
     session.close()?;
     Ok(())
@@ -216,6 +220,19 @@ fn real_session_resize_handles_minimum_regular_and_scaled_viewports(
         [(1, 1, 1.0, 2), (1280, 900, 1.0, 960), (1280, 900, 2.0, 960)]
     {
         assert_real_session_resize(width, height, scale, expected_width)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn resize_viewport_rejects_invalid_height_and_scale_in_both_width_paths(
+) -> Result<(), Box<dyn std::error::Error>> {
+    for (width, height, scale) in [(1, 0, 1.0), (2, 0, 1.0), (1, 1, 0.0), (2, 1, 0.0)] {
+        let mut viewport = HtmlBrowserViewport::new(2, 1, 1.0)?;
+        viewport.width = width;
+        viewport.height = height;
+        viewport.device_scale_factor = scale;
+        assert!(super::narrower_resize_viewport(viewport).is_err());
     }
     Ok(())
 }

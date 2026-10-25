@@ -2796,7 +2796,7 @@ test("actual Rust native width test trace remains mandatory with isolated strict
   expect(report.nativeWidthTrace.consumerSources).toEqual([
     {
       path: `${nativeWidthTraceDirectory}/js_runtime.rs`,
-      sha256: "b3d10ef7896536ae924c2188b338bafeb3ff9642a3f557e5cf6ecec35a93291f",
+      sha256: "184b6738bd8d38d9e8e02f64cc42aa561bc4349282caa341bc171431a234c265",
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_tests.rs`,
@@ -3619,10 +3619,12 @@ function performanceHarnessRecipes(root: string, overrides: Record<string, strin
     "check-standard": `${fixtureRecipeBodies()["check-standard"]}\njust fmt-check\njust coverage`,
     ...overrides,
   });
+  const coverageTestOnlyRegex = String.raw`(^|[/\\])scripts[/\\]html[/\\]performance-harness[/\\]src[/\\]([^/\\]+[/\\])*[^/\\]+(_tests|_test_support)\.rs$`;
   const declarations = [
     "REPO_ROOT := justfile_directory()",
     'COVERAGE_MIN_LINES := env_var_or_default("COVERAGE_MIN_LINES", "100")',
     'COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES", "0")',
+    `COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX := "${coverageTestOnlyRegex.replaceAll("\\", "\\\\")}"`,
   ];
   write(
     root,
@@ -3638,7 +3640,12 @@ function performanceHarnessFixture(): string {
   write(
     root,
     "scripts/build/cargo_capacity_guard.py",
-    "# 固定CLI辺だけを検査するmetadata fixture。\n",
+    String.raw`# 固定CLI辺だけを検査するmetadata fixture。
+COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX = (
+    r"(^|[/\\])scripts[/\\]html[/\\]performance-harness[/\\]src[/\\]"
+    r"([^/\\]+[/\\])*[^/\\]+(_tests|_test_support)\.rs$"
+)
+`,
   );
   write(
     root,

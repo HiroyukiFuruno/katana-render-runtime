@@ -13,6 +13,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from types import ModuleType
 from typing import cast
 
 from native_nextest_coverage_commands import nextest_arguments, report_arguments
@@ -236,7 +237,7 @@ def validate_collection_policy(value: object, domains: tuple[str, ...]) -> None:
         _require_complete_line_totals(lines, domain)
 
 
-def _coverage_selection() -> Callable[..., tuple[str, Path]]:
+def _capacity_guard_module() -> ModuleType:
     build_path = str(Path(__file__).resolve().parents[1] / "build")
     imported = sys.modules.get("cargo_capacity_guard")
     if imported is not None:
@@ -251,6 +252,18 @@ def _coverage_selection() -> Callable[..., tuple[str, Path]]:
             raise CoverageResultError("existing coverage command parser is unavailable") from error
         finally:
             sys.path.remove(build_path)
+    return imported
+
+
+def _coverage_test_only_ignore_regex() -> str:
+    value = getattr(_capacity_guard_module(), "COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX", None)
+    if not isinstance(value, str):
+        raise CoverageResultError("existing coverage source exclusion is unavailable")
+    return value
+
+
+def _coverage_selection() -> Callable[..., tuple[str, Path]]:
+    imported = _capacity_guard_module()
     selector = getattr(imported, "coverage_selection", None)
     if not callable(selector):
         raise CoverageResultError("existing coverage command parser is unavailable")
@@ -266,7 +279,8 @@ def _domain_command(root: Path, domain: str, report_name: str, threads: str) -> 
         feature = domain.removeprefix("performance-")
         argv.extend(["--manifest-path", "scripts/html/performance-harness/Cargo.toml", "--workspace",
                      "--all-targets", "--no-default-features", "--features", feature, "--locked",
-                     "--profile", "krr-coverage", "--json"])
+                     "--profile", "krr-coverage", "--ignore-filename-regex",
+                     _coverage_test_only_ignore_regex(), "--json"])
         just_target = "performance-harness-coverage"
         argv.extend(["--output-path", f"{REPORT_DIRECTORY}/{report_name}"])
         if threads != "default":

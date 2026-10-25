@@ -4198,6 +4198,10 @@ class CoverageDomainUnitTests(unittest.TestCase):
             manifest = root / "scripts/html/performance-harness/Cargo.toml"
             manifest.parent.mkdir(parents=True)
             manifest.write_text('[workspace]\n')
+            if domain != "root":
+                test_source = root / "scripts/html/performance-harness/src/main_tests.rs"
+                test_source.parent.mkdir(parents=True)
+                test_source.write_text("#![cfg(test)]\n")
             state = root / "tmp/.cargo-capacity-guard.json"
             state.parent.mkdir()
             state.write_text(json.dumps({"baseline_bytes": 16777216, "factor": 2.0,
@@ -4227,7 +4231,8 @@ class CoverageDomainUnitTests(unittest.TestCase):
                                 str(root / "tmp/quality/standalone-performance-coverage" /
                                     f"{domain.removeprefix('performance-')}.json")]
                     if domain != "root":
-                        command += ["--profile", "krr-coverage"]
+                        command += ["--profile", "krr-coverage", "--ignore-filename-regex",
+                                    guard.COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX]
                 else:
                     command += ["--fail-under-lines", "100", "--fail-uncovered-lines", "0"]
                 command += (["--all-features", "--locked"] if domain == "root" else
@@ -4311,6 +4316,36 @@ class CoverageDomainUnitTests(unittest.TestCase):
                 self.assertEqual(self.calls[-1], args.command)
                 self.assertNotIn("--fail-under-lines", args.command)
                 self.assertNotIn("--fail-uncovered-lines", args.command)
+
+    def test_performance_collection_rejects_missing_wide_or_unmarked_exclusions(self) -> None:
+        for mutation in ("missing", "wide", "unmarked", "commented", "raw-string"):
+            with self.subTest(mutation=mutation), self.fixture(
+                    "performance-baseline", "test", collection=True) as (root, args, environment):
+                option = "--ignore-filename-regex"
+                index = args.command.index(option)
+                if mutation == "missing":
+                    del args.command[index:index + 2]
+                elif mutation == "wide":
+                    args.command[index + 1] = r".*_tests\.rs$"
+                elif mutation == "unmarked":
+                    marker = root / "scripts/html/performance-harness/src/main_tests.rs"
+                    marker.write_text("fn test_source() {}\n")
+                elif mutation == "commented":
+                    marker = root / "scripts/html/performance-harness/src/main_tests.rs"
+                    marker.write_text("/*\n#![cfg(test)]\n*/\nfn production_source() {}\n")
+                else:
+                    marker = root / "scripts/html/performance-harness/src/main_tests.rs"
+                    marker.write_text('let marker = r#"\n#![cfg(test)]\n"#;\nfn production_source() {}\n')
+                with self.assertRaisesRegex(RuntimeError, "test-only|exclusion|cfg\\(test\\)"):
+                    self.execute(root, args, environment)
+                self.assert_no_worker()
+
+    def test_root_collection_rejects_performance_test_exclusion(self) -> None:
+        with self.fixture("root", "test", collection=True) as (root, args, environment):
+            args.command += ["--ignore-filename-regex", guard.COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX]
+            with self.assertRaisesRegex(RuntimeError, "root coverage|unknown"):
+                self.execute(root, args, environment)
+            self.assert_no_worker()
 
     def test_coverage_diagnostic_root_accepts_only_fixed_initial_nextest_probe(self) -> None:
         with self.fixture(diagnostic=True) as (root, args, environment):

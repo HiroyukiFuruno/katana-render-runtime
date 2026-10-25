@@ -3125,8 +3125,8 @@ describe("reviewed Chrome font identity probe process route", () => {
 
   test("accepts only the actual synchronous probe in its production caller context", () => {
     const importerSource = importerSources.get(importerPaths[0] ?? "");
-    expect(importerSource).toContain(
-      "await runCatalogStage90Captures(binary, plan.conditionPlan, plan.output, plan.resume)",
+    expect(importerSource).toMatch(
+      /await runCatalogStage90Captures\(\s*binary,\s*plan\.conditionPlan,\s*plan\.output,\s*plan\.resume,\s*plan\.chromeExecutable,\s*\);/,
     );
     for (const importer of importerPaths) {
       const importerSourceForRoute = importerSources.get(importer);
@@ -3310,6 +3310,7 @@ function coverageFixtureJustfile(base: string): string {
   return `${missingFactsDefinitions.join("\n")}${missingFactsDefinitions.length > 0 ? "\n" : ""}${base}
 COVERAGE_MIN_LINES := env_var_or_default("COVERAGE_MIN_LINES", "100")
 COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES", "0")
+COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX := "(^|[/\\\\])scripts[/\\\\]html[/\\\\]performance-harness[/\\\\]src[/\\\\]([^/\\\\]+[/\\\\])*[^/\\\\]+(_tests|_test_support)\\.rs$"
 ${runtimeRecipes.join("\n")}
 root-test-and-coverage: plantuml-install
     CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"
@@ -3317,9 +3318,9 @@ performance-harness-coverage:
     mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"
     python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer performance
     CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-baseline" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-baseline -- {{CARGO}} llvm-cov clean --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --locked
-    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-baseline" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-baseline -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features baseline --locked --profile krr-coverage --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/baseline.json"{{TEST_THREAD_ARGS}}
+    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-baseline" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-baseline -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features baseline --locked --profile krr-coverage --ignore-filename-regex {{quote(COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX)}} --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/baseline.json"{{TEST_THREAD_ARGS}}
     CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-candidate" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-candidate -- {{CARGO}} llvm-cov clean --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --locked
-    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-candidate" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-candidate -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features candidate --locked --profile krr-coverage --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/candidate.json"{{TEST_THREAD_ARGS}}
+    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-candidate" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-candidate -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features candidate --locked --profile krr-coverage --ignore-filename-regex {{quote(COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX)}} --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/candidate.json"{{TEST_THREAD_ARGS}}
     python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-finish --producer performance --producer-exit 0
 coverage-result-check:
     python3 scripts/release/native_coverage_local_aggregate.py --repo "{{REPO_ROOT}}"
@@ -3671,18 +3672,18 @@ test.each([
           .read("Justfile")
           ?.replace('"COVERAGE_MIN_LINES", "100"', '"COVERAGE_MIN_LINES", "99"') ?? "",
     });
-  else if (fault === "performance profile missing" || fault === "performance profile wrong")
-    replaceSources(snapshot, {
-      Justfile:
-        snapshot
-          .read("Justfile")
-          ?.replace(
-            "--features baseline --locked --profile krr-coverage --json",
-            fault === "performance profile missing"
-              ? "--features baseline --locked --json"
-              : "--features baseline --locked --profile wrong-profile --json",
-          ) ?? "",
-    });
+  else if (fault === "performance profile missing" || fault === "performance profile wrong") {
+    const before = snapshot.read("Justfile");
+    if (before === undefined) throw new Error("Justfile fixture is missing");
+    const after = before.replace(
+      "--features baseline --locked --profile krr-coverage --ignore-filename-regex {{quote(COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX)}} --json",
+      fault === "performance profile missing"
+        ? "--features baseline --locked --ignore-filename-regex {{quote(COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX)}} --json"
+        : "--features baseline --locked --profile wrong-profile --ignore-filename-regex {{quote(COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX)}} --json",
+    );
+    expect(after).not.toBe(before);
+    replaceSources(snapshot, { Justfile: after });
+  }
   expect(checkHarnessContract(snapshot).length).toBeGreaterThan(0);
 });
 

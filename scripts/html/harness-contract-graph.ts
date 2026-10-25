@@ -4201,8 +4201,10 @@ function moonCoverageRecipesVerified(
       .map((line) => line.trim())
       .filter((line) => line.includes(" llvm-cov ") && !line.includes(" llvm-cov clean "));
   const suffix = "{{TEST_THREAD_ARGS}}";
+  const ignoreFilenameRegex =
+    "--ignore-filename-regex {{quote(COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX)}}";
   const performanceCommand = (variant: "baseline" | "candidate") =>
-    `CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-${variant}" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-${variant} -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features ${variant} --locked --profile krr-coverage --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/${variant}.json"` +
+    `CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-${variant}" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-${variant} -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features ${variant} --locked --profile krr-coverage ${ignoreFilenameRegex} --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/${variant}.json"` +
     suffix;
   if (!/^COVERAGE_MIN_LINES := env_var_or_default\("COVERAGE_MIN_LINES", "100"\)$/m.test(justfile))
     errors.push("root coverage threshold default differs");

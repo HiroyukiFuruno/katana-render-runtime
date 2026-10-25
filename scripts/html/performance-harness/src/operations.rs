@@ -173,57 +173,5 @@ fn pointer_click_inputs(x: f32, y: f32) -> [HtmlBrowserInput; POINTER_EVENT_SEQU
 }
 
 #[cfg(test)]
-mod tests {
-    use super::measure_full_y;
-    #[cfg(feature = "baseline")]
-    use baseline::{HtmlBrowserSource, HtmlBrowserViewport, HtmlRuntime};
-    #[cfg(feature = "candidate")]
-    use candidate::{HtmlBrowserSource, HtmlBrowserViewport, HtmlRuntime};
-
-    #[test]
-    fn full_y_records_bottom_frame_and_returns_real_session_to_top(
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        for height in [80, 1800] {
-            let viewport = HtmlBrowserViewport::new(160, 120, 1.0)?;
-            let html = format!(
-                "<style>body{{margin:0}}</style><div style='height:{height}px;background:#abcdef'></div>"
-            );
-            let source = HtmlBrowserSource::new(html, "https://example.test/full-y.html")?;
-            let mut session = HtmlRuntime.open(source, viewport)?;
-            let (measurement, steps, final_y, max_scroll) = measure_full_y(&mut session, viewport)?;
-            assert_eq!(steps > 0, max_scroll > 0.0);
-            assert_eq!(final_y, max_scroll);
-            assert_eq!(
-                measurement["frame"]["scroll_y"].as_f64(),
-                Some(f64::from(max_scroll))
-            );
-            assert_eq!(
-                session.latest_frame().map(|frame| frame.scroll_y),
-                Some(0.0)
-            );
-            assert_full_y_measurement(&measurement)?;
-            session.close()?;
-        }
-        Ok(())
-    }
-
-    fn assert_full_y_measurement(
-        measurement: &serde_json::Value,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let elapsed = measurement["elapsed_ms"]
-            .as_f64()
-            .ok_or("missing elapsed")?;
-        let maximum = measurement["max_frame_elapsed_ms"]
-            .as_f64()
-            .ok_or("missing maximum frame time")?;
-        assert!(elapsed.is_finite() && maximum.is_finite());
-        assert!(maximum >= 0.0 && elapsed >= maximum);
-        assert!(
-            measurement["peak_rss_bytes"]
-                .as_u64()
-                .ok_or("missing RSS")?
-                > 0
-        );
-        Ok(())
-    }
-}
+#[path = "operations_tests.rs"]
+mod tests;

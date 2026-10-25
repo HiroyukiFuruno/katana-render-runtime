@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use super::{assert_error_message, open_fixture_at, HtmlBrowserViewport, VIEWPORT};
 use crate::options::{LegacyOperationPlan, OperationPlan};
 use std::{fs, path::Path};
@@ -58,6 +60,20 @@ fn legacy_click_with_changed_pixels_rejects_wrong_state_sha(
         "expected DOM state evidence SHA does not match its file",
         "wrong state SHA was accepted",
     )
+}
+
+#[test]
+fn legacy_click_records_advanced_generation_for_changed_pixels(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let html = legacy_click_target_html(true);
+    let result = legacy_operation_result(
+        html.as_str(),
+        &crate::provenance::hex_digest(br#"{"expanded":true}"#),
+    )?;
+    assert!(result["generation_after"].as_u64() > result["generation_before"].as_u64());
+    assert_ne!(result["pixel_sha_before"], result["pixel_sha_after"]);
+    assert_eq!(result["visual_change_observed"], true);
+    Ok(())
 }
 
 #[test]

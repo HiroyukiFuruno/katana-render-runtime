@@ -34,6 +34,9 @@ def initialize_fixture_repository(root: Path) -> tuple[str, dict[str, str], dict
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"input:{relative}\n", encoding="utf-8")
+    test_only_source = root / "scripts/html/performance-harness/src/main_tests.rs"
+    test_only_source.parent.mkdir(parents=True, exist_ok=True)
+    test_only_source.write_text("#![cfg(test)]\n", encoding="utf-8")
     (root / ".gitignore").write_text("tmp/\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.name", "KRR coverage fixture"], cwd=root, check=True)
@@ -135,7 +138,8 @@ class NativeCoverageResultTests(unittest.TestCase):
         self.assertEqual(command["argv"], [
             "cargo", "llvm-cov", "--manifest-path", "scripts/html/performance-harness/Cargo.toml",
             "--workspace", "--all-targets", "--no-default-features", "--features", "baseline",
-            "--locked", "--profile", "krr-coverage", "--json", "--output-path",
+            "--locked", "--profile", "krr-coverage", "--ignore-filename-regex",
+            coverage_result._coverage_test_only_ignore_regex(), "--json", "--output-path",
             "tmp/quality/standalone-performance-coverage/baseline.json",
         ])
         for mutation in ("missing", "wrong"):

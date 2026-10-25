@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use super::{dispatch_catalog_input, perform, validate_catalog_dispatch_plan};
 use crate::options::{CatalogInput, CatalogOperationPlan, CatalogViewport};
 use crate::{HtmlBrowserSession, HtmlBrowserViewport};

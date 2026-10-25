@@ -16,6 +16,11 @@ from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import cast
+from native_coverage_dependency_tree import (
+    LocalCoverageContextError as LocalCoverageContextError,
+    _file_identity as _file_identity,
+    _internal_file_symlink_entry,
+)
 
 SCHEMA = "krr-native-local-coverage-context-v1"
 CONTEXT_STAGE_WORKERS = 3
@@ -51,10 +56,6 @@ MISS_REASON_CODES = frozenset({
     "cargo_dependency_source_changed", "cargo_dependency_source_symlink",
     "cargo_dependency_source_unsupported_file", "identity_record_collision",
 })
-
-
-class LocalCoverageContextError(ValueError):
-    """Raised internally when the supported local host cannot be proven."""
 
 
 def _sha256(data: bytes) -> str:
@@ -327,13 +328,8 @@ def _cargo_metadata_commands(repo: Path, host: str) -> list[tuple[str, list[str]
     ]
 
 
-def _file_identity(metadata: os.stat_result) -> tuple[int, int, int, int, int, int]:
-    return (metadata.st_dev, metadata.st_ino, metadata.st_mode, metadata.st_size,
-            metadata.st_mtime_ns, metadata.st_ctime_ns)
-
-
 def _dependency_tree_digest(root: Path) -> tuple[str, int, int]:
-    """Hash a resolved external package tree without following symlinks."""
+    """Hash package files and safe internal regular-file symlinks."""
     root = root.resolve(strict=True)
     directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
     nofollow = getattr(os, "O_NOFOLLOW", 0)
@@ -342,6 +338,7 @@ def _dependency_tree_digest(root: Path) -> tuple[str, int, int]:
     except OSError as error:
         raise LocalCoverageContextError("cargo_dependency_source_unavailable") from error
     entries: list[dict[str, object]] = []
+    symlink_targets: list[str] = []
     total_bytes = 0
 
     def visit(directory_fd: int, relative: str) -> None:
@@ -365,7 +362,12 @@ def _dependency_tree_digest(root: Path) -> tuple[str, int, int]:
             except OSError as error:
                 raise LocalCoverageContextError("cargo_dependency_source_unavailable") from error
             if stat.S_ISLNK(before.st_mode):
-                raise LocalCoverageContextError("cargo_dependency_source_symlink")
+                entry, target = _internal_file_symlink_entry(
+                    root, directory_fd, name, child_relative, before
+                )
+                entries.append(entry)
+                symlink_targets.append(target)
+                continue
             if stat.S_ISDIR(before.st_mode):
                 entries.append({"path": child_relative, "type": "directory"})
                 try:
@@ -413,6 +415,11 @@ def _dependency_tree_digest(root: Path) -> tuple[str, int, int]:
     if not entries:
         raise LocalCoverageContextError("cargo_dependency_source_unavailable")
     entries.sort(key=lambda item: cast(str, item["path"]))
+    regular_files = {
+        cast(str, entry["path"]) for entry in entries if entry["type"] == "file"
+    }
+    if any(target not in regular_files for target in symlink_targets):
+        raise LocalCoverageContextError("cargo_dependency_source_changed")
     return _sha256(_canonical(entries)), len(entries), total_bytes
 
 
