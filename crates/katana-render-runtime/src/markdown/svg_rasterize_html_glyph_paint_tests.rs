@@ -2,7 +2,7 @@ use super::super::PreparedSpan;
 use super::super::XAlignment;
 use super::super::uniform_raster_scale;
 use super::{
-    aligned_position_x, aligned_x, apply_run_origin_x_snap, is_identity_linear, scale_translation,
+    aligned_position_x, aligned_x, apply_run_origin_snap, is_identity_linear, scale_translation,
     text_font,
 };
 use skia_safe::{FontMgr, FontStyle, Point as SkiaPoint};
@@ -13,6 +13,13 @@ const FRACTIONAL_RASTER_SCALE: f32 = 0.999_974_55;
 const EXPECTED_EFFECTIVE_SIZE: f32 = 13.99;
 const TEST_FILL: [u8; 4] = [0, 0, 0, u8::MAX];
 const TEST_FONT_UNITS_PER_EM: f32 = 2_048.0;
+const RUN_ORIGIN_INPUT_X: f32 = 10.02;
+const RUN_ORIGIN_FRACTIONAL_Y: f32 = 13.999_64;
+const RUN_ORIGIN_RELATIVE_X: f32 = 10.103_119;
+const RUN_ORIGIN_RELATIVE_Y: f32 = 8.321;
+const RUN_ORIGIN_SNAPPED_X: f32 = 10.015_625;
+const RUN_ORIGIN_SNAPPED_Y: f32 = 13.984_375;
+const ROUND_TO_NEAREST_ULP_BOUND: f32 = 0.5;
 
 #[test]
 fn glyph_batching_rejects_non_identity_linear_transforms() {
@@ -122,32 +129,65 @@ fn trial_keeps_nonzero_anchor_with_ratio_adjusted_width_at_each_dpr() {
 }
 
 #[test]
-fn run_origin_snap_preserves_relative_positions_at_dpr_one_and_two() {
-    let css_scale = FRACTIONAL_RASTER_SCALE;
-    let advance = 10.103_119;
+fn run_origin_snap_truncates_both_axes_and_preserves_relative_positions() {
     for dpr in [1.0, 2.0] {
-        let raster_scale = css_scale * dpr;
-        for css_origin in [10.02, -10.02] {
-            let mut positions = [
-                SkiaPoint::new(css_origin * dpr, 2.0),
-                SkiaPoint::new((css_origin + advance) * dpr, 7.0),
-            ];
-            let original_gap = positions[1].x - positions[0].x;
-            apply_run_origin_x_snap(&origin_snap_span(css_scale), &mut positions, raster_scale);
-            let expected = if css_origin > 0.0 {
-                10.015_625
-            } else {
-                -10.015_625
-            };
-            assert!((positions[0].x / dpr - expected).abs() < 0.000_001);
-            assert!((positions[1].x - positions[0].x - original_gap).abs() < 0.000_001);
-            assert_eq!(positions.map(|position| position.y), [2.0, 7.0]);
+        for css_origin in [RUN_ORIGIN_INPUT_X, -RUN_ORIGIN_INPUT_X] {
+            assert_run_origin_snap_at_dpr(dpr, css_origin);
         }
     }
 }
 
+fn assert_run_origin_snap_at_dpr(dpr: f32, css_origin: f32) {
+    let css_y = RUN_ORIGIN_FRACTIONAL_Y.copysign(css_origin);
+    let raster_scale = FRACTIONAL_RASTER_SCALE * dpr;
+    let mut positions = [
+        SkiaPoint::new(css_origin * dpr, css_y * dpr),
+        SkiaPoint::new(
+            (css_origin + RUN_ORIGIN_RELATIVE_X) * dpr,
+            (css_y + RUN_ORIGIN_RELATIVE_Y) * dpr,
+        ),
+    ];
+    let original_positions = positions;
+    apply_run_origin_snap(
+        &origin_snap_span(FRACTIONAL_RASTER_SCALE),
+        &mut positions,
+        raster_scale,
+    );
+    let expected_x = RUN_ORIGIN_SNAPPED_X.copysign(css_origin);
+    let expected_y = RUN_ORIGIN_SNAPPED_Y.copysign(css_y);
+    assert!((positions[0].x / dpr - expected_x).abs() < 0.000_001);
+    assert!((positions[0].y / dpr - expected_y).abs() < 0.000_001);
+    assert_relative_gaps_preserved(original_positions, positions);
+}
+
+fn assert_relative_gaps_preserved(before: [SkiaPoint; 2], after: [SkiaPoint; 2]) {
+    let before_x = [before[0].x, before[1].x];
+    let after_x = [after[0].x, after[1].x];
+    let before_y = [before[0].y, before[1].y];
+    let after_y = [after[0].y, after[1].y];
+    assert!((gap(after_x) - gap(before_x)).abs() <= gap_rounding_bound(before_x, after_x));
+    assert!((gap(after_y) - gap(before_y)).abs() <= gap_rounding_bound(before_y, after_y));
+}
+
+fn gap(coordinates: [f32; 2]) -> f32 {
+    coordinates[1] - coordinates[0]
+}
+
+fn gap_rounding_bound(before: [f32; 2], after: [f32; 2]) -> f32 {
+    let ulps = [after[0], after[1], gap(before), gap(after)]
+        .into_iter()
+        .map(f32_ulp)
+        .sum::<f32>();
+    ROUND_TO_NEAREST_ULP_BOUND * ulps
+}
+
+fn f32_ulp(value: f32) -> f32 {
+    let magnitude = value.abs();
+    f32::from_bits(magnitude.to_bits() + 1) - magnitude
+}
+
 #[test]
-fn run_origin_snap_leaves_unsupported_and_single_glyph_paths_unchanged() {
+fn run_origin_snap_leaves_unsupported_layout_and_missing_metadata_unchanged() {
     let layout = super::super::anchor::LayoutAnchor {
         width: 7.0,
         anchor: resvg::usvg::TextAnchor::Middle,
@@ -160,12 +200,38 @@ fn run_origin_snap_leaves_unsupported_and_single_glyph_paths_unchanged() {
     }));
     let mut positions = [SkiaPoint::new(-10.02, 3.0), SkiaPoint::new(1.25, 3.0)];
     let original = positions;
-    apply_run_origin_x_snap(&span, &mut positions, 1.0);
+    apply_run_origin_snap(&span, &mut positions, 1.0);
     assert_eq!(positions, original);
 
     span.x_alignment = None;
-    apply_run_origin_x_snap(&span, &mut positions, 1.0);
+    apply_run_origin_snap(&span, &mut positions, 1.0);
     assert_eq!(positions, original);
+}
+
+#[test]
+fn run_origin_snap_leaves_invalid_device_scales_unchanged() {
+    let first = SkiaPoint::new(RUN_ORIGIN_INPUT_X, RUN_ORIGIN_FRACTIONAL_Y);
+    let original = [
+        first,
+        SkiaPoint::new(
+            first.x + RUN_ORIGIN_RELATIVE_X,
+            first.y + RUN_ORIGIN_RELATIVE_Y,
+        ),
+    ];
+    let invalid_scale_pairs = [
+        (1.0, 0.0),
+        (1.0, f32::NAN),
+        (1.0, f32::INFINITY),
+        (0.0, 0.0),
+        (0.0, f32::NAN),
+        (0.0, f32::INFINITY),
+        (0.0, 1.0),
+    ];
+    for (css_scale, raster_scale) in invalid_scale_pairs {
+        let mut positions = original;
+        apply_run_origin_snap(&origin_snap_span(css_scale), &mut positions, raster_scale);
+        assert_eq!(positions, original);
+    }
 }
 
 fn origin_snap_span(css_scale: f32) -> PreparedSpan {

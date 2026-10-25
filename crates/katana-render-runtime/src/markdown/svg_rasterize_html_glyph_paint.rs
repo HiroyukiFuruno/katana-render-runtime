@@ -42,7 +42,7 @@ fn draw_identity_glyphs(
             SkiaPoint::new(transform.tx, transform.ty)
         })
         .collect::<Vec<_>>();
-    apply_run_origin_x_snap(span, &mut positions, raster_scale);
+    apply_run_origin_snap(span, &mut positions, raster_scale);
     canvas.draw_glyphs_at(
         &span.glyph_ids,
         positions.as_slice(),
@@ -53,29 +53,39 @@ fn draw_identity_glyphs(
     Ok(())
 }
 
-fn apply_run_origin_x_snap(span: &PreparedSpan, positions: &mut [SkiaPoint], raster_scale: f32) {
-    let Some(first_x) = positions.first().map(|position| position.x) else {
+fn apply_run_origin_snap(span: &PreparedSpan, positions: &mut [SkiaPoint], raster_scale: f32) {
+    let Some(origin) = positions.first() else {
         return;
     };
-    let Some(delta) = run_origin_x_delta(span, first_x, raster_scale) else {
+    let Some(device_scale) = run_origin_device_scale(span, raster_scale) else {
         return;
     };
+    let x_delta = run_origin_axis_delta(origin.x, device_scale).unwrap_or(0.0);
+    let y_delta = run_origin_axis_delta(origin.y, device_scale).unwrap_or(0.0);
     for position in positions {
-        position.x += delta;
+        position.x += x_delta;
+        position.y += y_delta;
     }
 }
 
-fn run_origin_x_delta(span: &PreparedSpan, origin_x: f32, raster_scale: f32) -> Option<f32> {
+fn run_origin_device_scale(span: &PreparedSpan, raster_scale: f32) -> Option<f32> {
     let alignment = span.x_alignment?;
     if alignment.layout.is_some() {
         return None;
     }
     let css_scale = alignment.origin_snap_css_scale?;
     let device_scale = raster_scale / css_scale;
-    if !origin_x.is_finite() || !device_scale.is_finite() || device_scale <= 0.0 {
+    if !device_scale.is_finite() || device_scale <= 0.0 {
         return None;
     }
-    let css_origin = origin_x / device_scale;
+    Some(device_scale)
+}
+
+fn run_origin_axis_delta(origin: f32, device_scale: f32) -> Option<f32> {
+    if !origin.is_finite() {
+        return None;
+    }
+    let css_origin = origin / device_scale;
     let snapped_origin = super::anchor::trunc_layout_unit(css_origin)?;
     Some((snapped_origin - css_origin) * device_scale)
 }

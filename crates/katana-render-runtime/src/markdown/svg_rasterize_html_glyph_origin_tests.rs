@@ -11,9 +11,12 @@ fn run_origin_snap_requires_simple_one_to_one_multi_glyph_text() -> Result<(), S
         ("Ag", "", true),
         ("A", "", false),
         ("Ag", r#" dx="1""#, false),
+        ("ABCD", r#" dy="3 0 0 0""#, true),
+        ("ABCD", r#" dy="0 3 0 0""#, false),
     ] {
         assert_eligibility(fixture.database.clone(), content, attributes, expected)?;
     }
+    assert!(!super::super::alignment_dy_supported(&[f32::NAN]));
     Ok(())
 }
 

@@ -380,7 +380,7 @@ fn alignment_text_supported(
 ) -> bool {
     text.layouted().len() == 1
         && all_zero(text.dx())
-        && all_zero(text.dy())
+        && alignment_dy_supported(text.dy())
         && all_zero(text.rotate())
         && text.writing_mode() == usvg::WritingMode::LeftToRight
         && source_span.letter_spacing() == 0.0
@@ -388,6 +388,11 @@ fn alignment_text_supported(
         && source_span.text_length().is_none()
         && matches!(chunk.text_flow(), usvg::TextFlow::Linear)
         && !prepared.glyphs.is_empty()
+}
+
+fn alignment_dy_supported(values: &[f32]) -> bool {
+    values.first().is_none_or(|first| first.is_finite())
+        && values.iter().skip(1).all(|value| *value == 0.0)
 }
 
 fn all_zero(values: &[f32]) -> bool {
