@@ -7,6 +7,7 @@ use std::{
 };
 
 pub(in super::super) type SharedBytes = Arc<dyn AsRef<[u8]> + Send + Sync>;
+pub(in super::super) type SharedSourceSeed = (PathBuf, FileStamp, SharedBytes);
 
 struct Mapping {
     stamp: FileStamp,
@@ -17,9 +18,24 @@ struct Mapping {
 pub(in super::super) struct SharedSources {
     cache: SourceCache,
     paths: BTreeMap<PathBuf, Mapping>,
+    seeded: Vec<SharedSourceSeed>,
 }
 
 impl SharedSources {
+    pub(in super::super) fn with_seeds(seeded: &[SharedSourceSeed]) -> Self {
+        Self {
+            seeded: seeded.to_vec(),
+            ..Self::default()
+        }
+    }
+
+    pub(in super::super) fn seeded(&self, path: &Path, stamp: &FileStamp) -> Option<&SharedBytes> {
+        self.seeded
+            .iter()
+            .find(|(seed_path, seed_stamp, _)| seed_path == path && seed_stamp == stamp)
+            .map(|(_, _, data)| data)
+    }
+
     pub(in super::super) fn get(&mut self, path: &Path, stamp: &FileStamp) -> Option<SharedBytes> {
         #[cfg(test)]
         super::super::raster_observer::count(super::super::raster_observer::Metric::SourceGet);

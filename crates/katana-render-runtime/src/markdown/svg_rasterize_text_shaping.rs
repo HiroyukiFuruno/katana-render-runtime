@@ -69,6 +69,7 @@ use font::matching_font_face;
 #[cfg(test)]
 pub(super) use tests::diagnostic_resolved_font_runs;
 pub(super) use usvg_cmap::install as install_html_font_resolver;
+pub(super) use usvg_cmap::loaded_html_font;
 
 pub(super) fn with_font_face_cache_scope<T>(operation: impl FnOnce() -> T) -> T {
     /* WHY: 同一frameのlayoutからraster完了までlibrary-owned metricsを共有する。 */
@@ -199,6 +200,8 @@ pub(super) fn html_text_font_runs(
 
 #[path = "svg_rasterize_text_harfrust.rs"]
 mod harfrust;
+#[cfg(target_os = "macos")]
+pub(in crate::markdown::svg_rasterize) use harfrust::eligible_immutable_system_path;
 #[path = "svg_rasterize_text_shaping_svg_metrics.rs"]
 mod svg_metrics;
 pub(super) use svg_metrics::svg_dom_layout_ascent;

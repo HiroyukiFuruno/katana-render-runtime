@@ -129,7 +129,7 @@ fn interface_family(face: &FaceInfo) -> bool {
 }
 
 fn native_face_source(source: &Source) -> bool {
-    matches!(source, Source::File(path) if native_system_font_path(path))
+    matches!(source, Source::File(path) | Source::SharedFile(path, _) if native_system_font_path(path))
 }
 
 fn registered_interface_source(source: &Source) -> bool {
@@ -141,7 +141,7 @@ fn registered_interface_source(source: &Source) -> bool {
 
 fn source_path(source: &Source) -> Option<&Path> {
     match source {
-        Source::File(path) => Some(path),
+        Source::File(path) | Source::SharedFile(path, _) => Some(path),
         _ => None,
     }
 }

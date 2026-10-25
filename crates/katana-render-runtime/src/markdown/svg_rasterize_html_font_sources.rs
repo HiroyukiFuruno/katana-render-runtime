@@ -25,8 +25,12 @@ pub(super) use source_identity::load_font_paths_once;
 #[cfg(target_os = "macos")]
 #[path = "svg_rasterize_html_font_known_builder.rs"]
 mod known_builder;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", test))]
 pub(super) use known_builder::build as build_known_html_font_db;
+#[cfg(all(target_os = "macos", test))]
+pub(super) use known_builder::build_with_shared_budget as build_known_html_font_db_with_shared_budget;
+#[cfg(target_os = "macos")]
+pub(super) use known_builder::build_with_shared_sources as build_known_html_font_db_with_shared_sources;
 
 #[cfg(target_os = "macos")]
 #[path = "svg_rasterize_html_font_interface_bold.rs"]
@@ -81,11 +85,12 @@ fn normalize_macos_hiragino_weights(database: &mut usvg::fontdb::Database) {
                 .families
                 .iter()
                 .any(|(family, _)| family == "Hiragino Sans");
-            let is_native = matches!(
-                &face.source,
-                usvg::fontdb::Source::File(path)
-                    if path.to_string_lossy().starts_with("/System/Library/Fonts/")
-            );
+            let is_native = match &face.source {
+                usvg::fontdb::Source::File(path) | usvg::fontdb::Source::SharedFile(path, _) => {
+                    path.to_string_lossy().starts_with("/System/Library/Fonts/")
+                }
+                _ => false,
+            };
             if is_hiragino && is_native && face.weight.0 != weight {
                 Some((face.clone(), weight))
             } else {

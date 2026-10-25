@@ -21,11 +21,13 @@ fn lazy_sharedfile_tree_and_clone_keep_maps_until_final_tree_drop() -> Result<()
     assert!(database.upgrade().is_some());
     assert!(maps.iter().all(|data| data.upgrade().is_some()));
     assert_real_render(&retained)?;
-    assert_persistent_memo_is_file()?;
+    assert_persistent_memo_keeps_proven_mapping()?;
     drop(retained);
     assert!(database.upgrade().is_none());
+    assert!(maps.iter().all(|data| data.upgrade().is_some()));
+    assert_persistent_memo_keeps_proven_mapping()?;
+    super::super::super::cache_test_support::evict_cached_mappings()?;
     assert!(maps.iter().all(|data| data.upgrade().is_none()));
-    assert_persistent_memo_is_file()?;
     Ok(())
 }
 
@@ -98,26 +100,24 @@ fn assert_no_eager(snapshot: &raster_observer::Snapshot) {
     }
 }
 
-fn assert_persistent_memo_is_file() -> Result<(), String> {
-    SvgRasterizeOps::with_html_font_render_scope(assert_persistent_file_in_scope)
+fn assert_persistent_memo_keeps_proven_mapping() -> Result<(), String> {
+    SvgRasterizeOps::with_html_font_render_scope(assert_persistent_mapping_in_scope)
 }
 
-fn assert_persistent_file_in_scope() -> Result<(), String> {
+fn assert_persistent_mapping_in_scope() -> Result<(), String> {
     let request = HtmlFontRequest::from_text("Arial", TEXT);
     let cached = discovery_cache::known_for(&request).ok_or("known memo missing")?;
     let selected = text_shaping::known_matching(&cached.database, "Arial", NORMAL_WEIGHT, false)
-        .ok_or("original File selection missing")?;
+        .ok_or("cached font selection missing")?;
     let face = cached
         .database
         .face(selected)
         .ok_or("cached face missing")?;
-    assert!(matches!(face.source, Source::File(_)));
-    assert!(
-        cached
-            .database
-            .faces()
-            .all(|face| !matches!(face.source, Source::SharedFile(_, _)))
-    );
+    assert!(matches!(face.source, Source::SharedFile(_, _)));
+    assert!(cached.database.faces().all(|face| match &face.source {
+        Source::SharedFile(path, data) => cached.proof.owns_immutable_source(path, data),
+        _ => true,
+    }));
     Ok(())
 }
 

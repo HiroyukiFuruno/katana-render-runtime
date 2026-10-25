@@ -44,7 +44,7 @@ fn mapped_handle(font: Font, key: CacheKey, length: u64) -> FontHandle {
     }
 }
 
-pub(super) fn eligible_source(
+pub(in crate::markdown::svg_rasterize) fn eligible_source(
     database: &Database,
     face_id: ID,
     path: &Path,
@@ -54,11 +54,17 @@ pub(super) fn eligible_source(
     let Some((Source::File(source), source_index)) = database.face_source(face_id) else {
         return Ok(false);
     };
-    if source != path
-        || source_index != face_index
-        || length > MAX_SOURCE_BYTES
-        || !path.starts_with(SYSTEM_FONT_ROOT)
-    {
+    if source != path || source_index != face_index {
+        return Ok(false);
+    }
+    eligible_path(path, length)
+}
+
+pub(in crate::markdown::svg_rasterize) fn eligible_path(
+    path: &Path,
+    length: u64,
+) -> Result<bool, String> {
+    if length > MAX_SOURCE_BYTES || !path.starts_with(SYSTEM_FONT_ROOT) {
         return Ok(false);
     }
     let canonical = path.canonicalize().map_err(|error| error.to_string())?;

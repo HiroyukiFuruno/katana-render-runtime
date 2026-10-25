@@ -46,6 +46,7 @@ impl CreationProof {
             Source::File(path) => {
                 face.source = self.selected_file_source(path, sources, reused)?;
             }
+            Source::SharedFile(path, data) if self.owns_immutable_source(path, data) => {}
             Source::Binary(_) => {}
             Source::SharedFile(_, _) => return None,
         }
@@ -65,10 +66,10 @@ impl CreationProof {
         /* WHY: 同一 admission の全不在走査は前後で完了し、公開前の finish でも再検証する。 */
         admission.matches(self, database, id)
             && !self.failed
-            && self
-                .stamps
-                .iter()
-                .all(|(path, stamp)| observe_path_stamp(path).as_ref() == Ok(stamp))
+            && self.stamps.iter().all(|(path, stamp)| {
+                self.immutable_shared.contains_key(path)
+                    || observe_path_stamp(path).as_ref() == Ok(stamp)
+            })
             && self.prefix_current(database)
     }
 }

@@ -136,6 +136,8 @@ fn selected_face_default_standalone_parse_uses_selected_route_and_final_tree_dro
     assert_standalone_pixels(&clone, svg)?;
     drop(clone);
     assert!(weak_db.upgrade().is_none());
+    assert!(maps.iter().all(|w| w.upgrade().is_some()));
+    super::super::super::cache_test_support::evict_cached_mappings()?;
     assert!(maps.iter().all(|w| w.upgrade().is_none()));
     Ok(())
 }

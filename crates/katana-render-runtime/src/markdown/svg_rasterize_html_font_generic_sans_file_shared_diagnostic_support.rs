@@ -73,7 +73,7 @@ pub(super) fn validate_timing_stages(arm: &Arm) -> Result<(), String> {
     };
     if names
         != [
-            "known_database_lookup",
+            "file_fixture_database_build",
             setup,
             "lazy_parse_inclusive",
             "render_tree",

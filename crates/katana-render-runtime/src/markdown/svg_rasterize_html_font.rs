@@ -216,6 +216,10 @@ mod decision_observer;
 #[path = "svg_rasterize_html_font_raster_observer.rs"]
 pub(in crate::markdown::svg_rasterize) mod raster_observer;
 
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_html_font_cache_test_support.rs"]
+mod cache_test_support;
+
 #[cfg(test)]
 mod diagnostic_binary_fixture {
     #[cfg(target_os = "macos")]

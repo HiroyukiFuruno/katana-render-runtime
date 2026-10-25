@@ -1,5 +1,9 @@
-use super::CachedFace;
+use super::{CachedFace, FaceMetadata};
 use resvg::usvg::{self, AlignmentBaseline, DominantBaseline, TextFlow};
+
+#[path = "svg_rasterize_html_glyph_baseline_primary.rs"]
+mod primary;
+pub(super) use primary::resolved_policy;
 
 const HALF_METRIC: f32 = 0.5;
 
@@ -14,6 +18,7 @@ pub(super) struct Policy {
     kind: PolicyKind,
     font_size: f32,
     css_scale: Option<f32>,
+    primary_shift: Option<f32>,
 }
 
 pub(super) fn uniform_policy(text: &usvg::Text) -> Option<Policy> {
@@ -31,6 +36,7 @@ pub(super) fn uniform_policy(text: &usvg::Text) -> Option<Policy> {
                 kind: span_kind(span)?,
                 font_size: span.font_size().get(),
                 css_scale,
+                primary_shift: None,
             };
             if policy.is_some_and(|value: Policy| {
                 value.font_size != current.font_size || !same_kind(value.kind, current.kind)
@@ -76,6 +82,28 @@ pub(super) fn glyph_shift(
     face: &CachedFace,
     policy: Policy,
 ) -> f32 {
+    if let Some(shift) = policy.primary_shift {
+        return shift;
+    }
+    metrics_shift(
+        database,
+        face_id,
+        &FaceMetadata {
+            upem: face.upem,
+            unsupported: false,
+            ascent: face.ascent,
+            descent: face.descent,
+        },
+        policy,
+    )
+}
+
+fn metrics_shift(
+    database: &usvg::fontdb::Database,
+    face_id: usvg::fontdb::ID,
+    face: &FaceMetadata,
+    policy: Policy,
+) -> f32 {
     let scale = policy.font_size / face.upem;
     let ascent = face.ascent * scale;
     let descent = face.descent * scale;
@@ -95,7 +123,7 @@ pub(super) fn glyph_shift(
 fn css_baseline_shift(
     database: &usvg::fontdb::Database,
     face_id: usvg::fontdb::ID,
-    face: &CachedFace,
+    face: &FaceMetadata,
     policy: Policy,
     css_scale: f32,
 ) -> Option<f32> {
@@ -152,3 +180,7 @@ fn legacy_glyph_shift(
 #[cfg(test)]
 #[path = "svg_rasterize_html_glyph_baseline_unit_tests.rs"]
 mod tests;
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_html_glyph_baseline_origin_tests.rs"]
+mod origin_tests;

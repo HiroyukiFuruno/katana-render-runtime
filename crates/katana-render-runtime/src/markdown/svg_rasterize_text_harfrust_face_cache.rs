@@ -6,7 +6,7 @@ use std::{cell::RefCell, marker::PhantomData, rc::Rc};
 mod entry;
 #[cfg(target_os = "macos")]
 #[path = "svg_rasterize_text_harfrust_immutable_mapping.rs"]
-mod immutable_mapping;
+pub(super) mod immutable_mapping;
 #[path = "svg_rasterize_text_harfrust_lazy_table.rs"]
 mod lazy_table;
 #[path = "svg_rasterize_text_harfrust_face_cache_load.rs"]

@@ -7,6 +7,8 @@ pub(super) mod face_cache;
 
 #[path = "svg_rasterize_text_harfrust_line_metrics.rs"]
 mod line_metrics;
+#[cfg(target_os = "macos")]
+pub(in crate::markdown::svg_rasterize) use face_cache::immutable_mapping::eligible_path as eligible_immutable_system_path;
 pub(super) use line_metrics::{
     cached_face_line_metrics, diagnosed_cached_face_line_metrics, parsed_face_line_metrics,
 };

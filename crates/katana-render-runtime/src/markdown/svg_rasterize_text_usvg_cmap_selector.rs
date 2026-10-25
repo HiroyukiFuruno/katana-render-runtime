@@ -4,6 +4,12 @@ use resvg::usvg::{
 };
 use std::sync::Arc;
 
+#[path = "svg_rasterize_text_usvg_cmap_selector_loaded.rs"]
+mod loaded;
+pub(in crate::markdown::svg_rasterize) use loaded::loaded_html_font;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+use loaded::requests_system_font;
+
 #[cfg(target_os = "macos")]
 const INTERFACE_BOLD_FONT_WEIGHT: u16 = 700;
 
@@ -27,13 +33,7 @@ pub(in super::super) fn html_font_selector() -> usvg::FontSelectionFn<'static> {
             return selection;
         }
         #[cfg(any(target_os = "macos", target_os = "ios"))]
-        if font.families().iter().any(|family| match family {
-            usvg::FontFamily::Named(name) => matches!(
-                name.to_ascii_lowercase().as_str(),
-                "system-ui" | "-apple-system" | "blinkmacsystemfont"
-            ),
-            _ => false,
-        }) {
+        if requests_system_font(font) {
             return system_selector::select(font, database);
         }
         select_font_case_insensitively(font, database).or_else(|| stock(font, database))

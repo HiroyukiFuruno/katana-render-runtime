@@ -1,10 +1,23 @@
 use super::super::proof::CreationProof;
+use super::super::{HtmlFontRequest, discovery::KnownCacheValue, sources as font_sources};
 use super::{MODE, Mode, SourceRoute, active, error, sources, stage, update};
 use resvg::usvg::fontdb::{Database, ID};
 use std::{cell::Cell, sync::Arc, time::Instant};
 
 const SELECTED_RECORDS: usize = 2;
 const SHARED_SELECTED_RECORDS: usize = 3;
+
+pub(in super::super) fn file_fixture_database(
+    request: &HtmlFontRequest,
+) -> Option<KnownCacheValue> {
+    /* WHY: 保存形式の対照は実Fileから構築し、製品cacheのSharedFileをFileと偽って計測しない。 */
+    let (database, proof) = font_sources::build_known_html_font_db(request);
+    let database = Arc::new(database);
+    proof.current(&database).then_some(KnownCacheValue {
+        database,
+        proof: Arc::new(proof),
+    })
+}
 
 pub(in super::super) fn select_database(
     db: &Arc<Database>,

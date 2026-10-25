@@ -114,7 +114,7 @@ impl<'a> HtmlGlyphRasterizer<'a> {
     }
 
     fn prepare(&self, text: &usvg::Text) -> Result<Prepared, String> {
-        let policy = baseline::uniform_policy(text);
+        let policy = baseline::resolved_policy(self, text)?;
         let mut prepared = Vec::new();
         for span in text
             .layouted()

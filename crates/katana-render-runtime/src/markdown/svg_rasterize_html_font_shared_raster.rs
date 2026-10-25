@@ -30,6 +30,7 @@ pub(super) fn build(
     original: &Database,
     prefix: &[FaceInfo],
     stamps: &BTreeMap<PathBuf, FileStamp>,
+    immutable_shared: &BTreeMap<PathBuf, usize>,
 ) -> Option<FreshDatabase> {
     let mut database = Database::new();
     copy_generic_families(original, &mut database);
@@ -38,7 +39,7 @@ pub(super) fn build(
     for face in original.faces() {
         let mut fresh = face.clone();
         if prefix.iter().any(|allowed| allowed.id == face.id) {
-            fresh.source = shared_source(&mut sources, stamps, &face.source)?;
+            fresh.source = shared_source(&mut sources, stamps, immutable_shared, &face.source)?;
         }
         fresh.id = ID::dummy();
         ids.push((face.id, database.push_face_info(fresh)));
@@ -50,6 +51,7 @@ pub(super) fn build(
 fn shared_source(
     sources: &mut SharedSources,
     stamps: &BTreeMap<PathBuf, FileStamp>,
+    immutable_shared: &BTreeMap<PathBuf, usize>,
     source: &Source,
 ) -> Option<Source> {
     match source {
@@ -58,6 +60,13 @@ fn shared_source(
             Some(Source::SharedFile(path.clone(), data))
         }
         Source::Binary(_) => Some(source.clone()),
+        Source::SharedFile(path, data)
+            if immutable_shared.get(path).is_some_and(|identity| {
+                *identity == std::sync::Arc::as_ptr(data) as *const () as usize
+            }) =>
+        {
+            Some(source.clone())
+        }
         Source::SharedFile(_, _) => None,
     }
 }
@@ -76,7 +85,7 @@ fn remap_prefix(
         .collect()
 }
 
-fn copy_generic_families(original: &Database, database: &mut Database) {
+pub(super) fn copy_generic_families(original: &Database, database: &mut Database) {
     database.set_serif_family(original.family_name(&Family::Serif).to_owned());
     database.set_sans_serif_family(original.family_name(&Family::SansSerif).to_owned());
     database.set_cursive_family(original.family_name(&Family::Cursive).to_owned());

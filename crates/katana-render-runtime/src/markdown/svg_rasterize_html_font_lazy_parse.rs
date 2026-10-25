@@ -165,10 +165,7 @@ mod diagnostic {
         SvgRasterizeOps,
     };
     use super::super::{lazy_diagnostic, raster_observer};
-    use super::{
-        HtmlFontRequest, KnownOptions, discovery_cache, install, parse, prepared_ascii,
-        text_shaping,
-    };
+    use super::{HtmlFontRequest, KnownOptions, install, parse, prepared_ascii, text_shaping};
     use resvg::usvg;
     use std::sync::{Arc, atomic::AtomicBool};
 
@@ -205,8 +202,8 @@ mod diagnostic {
     ) -> Option<KnownOptions> {
         let request = HtmlFontRequest::from_markup(markup);
         let text = prepared_ascii(svg)?;
-        let Some(value) = lazy_diagnostic::measure("known_database_lookup", || {
-            discovery_cache::known_for(&request)
+        let Some(value) = lazy_diagnostic::measure("file_fixture_database_build", || {
+            lazy_diagnostic::file_fixture_database(&request)
         }) else {
             raster_observer::prepare_known_unavailable();
             return None;

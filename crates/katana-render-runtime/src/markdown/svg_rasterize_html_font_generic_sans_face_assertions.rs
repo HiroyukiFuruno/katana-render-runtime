@@ -5,7 +5,7 @@ use super::super::super::admit;
 use super::super::TEXT;
 use crate::markdown::svg_rasterize::{RasterizedSvg, SvgRasterizeOps, text_shaping};
 use resvg::usvg::fontdb::{Database, FaceInfo, ID, Source};
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 const FONT_SIZE_PX: f32 = 16.0;
 
@@ -26,23 +26,50 @@ pub(in super::super) fn admitted(
 }
 
 pub(in super::super) fn assert_same_face(
-    left: &Database,
+    left_db: &Database,
     left_id: ID,
-    right: &Database,
+    right_db: &Database,
     right_id: ID,
 ) -> Result<(), String> {
-    let left = left.face(left_id).ok_or("known face missing")?;
-    let right = right.face(right_id).ok_or("eager face missing")?;
+    let left = left_db.face(left_id).ok_or("known face missing")?;
+    let right = right_db.face(right_id).ok_or("eager face missing")?;
     assert_same_file_backed_source(left, right)?;
+    assert_same_face_bytes(left_db, left_id, right_db, right_id)?;
     assert_same_face_metadata(left, right);
     Ok(())
 }
 
 fn assert_same_file_backed_source(left: &FaceInfo, right: &FaceInfo) -> Result<(), String> {
-    let (Source::File(left_path), Source::File(right_path)) = (&left.source, &right.source) else {
-        return Err("real Arial faces must be file-backed".to_string());
-    };
+    let left_path = file_backed_path(&left.source).ok_or("known face is not file-backed")?;
+    let right_path = file_backed_path(&right.source).ok_or("eager face is not file-backed")?;
     assert_eq!(left_path, right_path);
+    Ok(())
+}
+
+fn file_backed_path(source: &Source) -> Option<&Path> {
+    match source {
+        Source::File(path) | Source::SharedFile(path, _) => Some(path),
+        Source::Binary(_) => None,
+    }
+}
+
+fn assert_same_face_bytes(
+    left: &Database,
+    left_id: ID,
+    right: &Database,
+    right_id: ID,
+) -> Result<(), String> {
+    let bytes_match = left
+        .with_face_data(left_id, |left_bytes, left_index| {
+            right.with_face_data(right_id, |right_bytes, right_index| {
+                left_index == right_index && left_bytes == right_bytes
+            })
+        })
+        .flatten()
+        .ok_or("real face bytes are unavailable")?;
+    if !bytes_match {
+        return Err("real face bytes or source indices differ".into());
+    }
     Ok(())
 }
 

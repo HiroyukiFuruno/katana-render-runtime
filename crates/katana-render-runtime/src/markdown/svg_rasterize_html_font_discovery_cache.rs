@@ -1,9 +1,16 @@
+#[cfg(test)]
+use super::sources;
 use super::{
     CacheValue, DatabaseKey, HtmlFontDatabaseCache, HtmlFontRequest,
-    MAX_CACHED_HTML_FONT_DATABASES, MeasuredDatabase, html_font_db_for_text, sources,
+    MAX_CACHED_HTML_FONT_DATABASES, MeasuredDatabase, html_font_db_for_text,
 };
 #[cfg(target_os = "macos")]
 use super::{DiscoveryMode, discovery::KnownCacheValue, html_font_cache};
+#[path = "svg_rasterize_html_font_discovery_cache_build.rs"]
+mod cache_build;
+use cache_build::build_miss;
+#[cfg(test)]
+use cache_build::{retained_mapping_bytes, within_mapping_budget};
 use resvg::usvg;
 use std::sync::Arc;
 
@@ -16,13 +23,19 @@ impl HtmlFontDatabaseCache {
             self.entries.push_back(entry);
             return result;
         }
-        let value = build(&key);
+        self.evict_oldest_if_full();
+        let value = build_miss(&key, &self.entries);
         let result = copy_value(&value);
         self.entries.push_back((key, value));
-        if self.entries.len() > MAX_CACHED_HTML_FONT_DATABASES {
+        result
+    }
+}
+
+impl HtmlFontDatabaseCache {
+    fn evict_oldest_if_full(&mut self) {
+        if self.entries.len() >= MAX_CACHED_HTML_FONT_DATABASES {
             self.entries.pop_front();
         }
-        result
     }
 }
 
@@ -31,22 +44,6 @@ fn copy_value(value: &CacheValue) -> CacheValue {
         database: Arc::clone(&value.database),
         #[cfg(target_os = "macos")]
         proof: value.proof.clone(),
-    }
-}
-
-fn build(key: &DatabaseKey) -> CacheValue {
-    #[cfg(target_os = "macos")]
-    if key.discovery == DiscoveryMode::KnownOnly {
-        let (database, proof) = sources::build_known_html_font_db(&key.request);
-        return CacheValue {
-            database: Arc::new(database),
-            proof: Some(Arc::new(proof)),
-        };
-    }
-    CacheValue {
-        database: Arc::new(sources::build_html_font_db(&key.request)),
-        #[cfg(target_os = "macos")]
-        proof: None,
     }
 }
 
@@ -138,3 +135,7 @@ pub(in crate::markdown::svg_rasterize) fn measured_database(
     super::decision_observer::record(&selected, family, text, weight, italic);
     selected
 }
+
+#[cfg(test)]
+#[path = "svg_rasterize_html_font_discovery_cache_tests.rs"]
+mod tests;

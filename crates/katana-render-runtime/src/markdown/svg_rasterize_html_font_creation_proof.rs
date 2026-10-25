@@ -1,13 +1,19 @@
 #[path = "svg_rasterize_html_font_creation_identity.rs"]
 mod identity;
+#[path = "svg_rasterize_html_font_creation_immutable_sources.rs"]
+mod immutable_sources;
 #[path = "svg_rasterize_html_font_creation_selected_shared_face.rs"]
 mod selected_shared_face;
+#[path = "svg_rasterize_html_font_creation_source_loader.rs"]
+mod source_loader;
 pub(super) use identity::same_face;
 #[cfg(test)]
 use identity::same_source;
 
-use super::super::super::text_shaping::{FileStamp, observe_path_stamp, stamp_path_uncached};
-use resvg::usvg::fontdb::{Database, FaceInfo, ID, Source};
+use super::super::super::text_shaping::{FileStamp, observe_path_stamp};
+#[cfg(test)]
+use resvg::usvg::fontdb::Source;
+use resvg::usvg::fontdb::{Database, FaceInfo};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -20,11 +26,13 @@ pub(super) struct CreationProof {
     loaded_paths: std::collections::BTreeSet<PathBuf>,
     absent: Vec<PathBuf>,
     prefix: Vec<FaceInfo>,
+    immutable_shared: BTreeMap<PathBuf, usize>,
     failed: bool,
     original_database: OnceLock<Weak<Database>>,
 }
 
 impl CreationProof {
+    #[cfg(test)]
     pub(super) fn load(&mut self, database: &mut Database, paths: &[&str]) {
         self.original_database.take();
         for path in paths {
@@ -32,20 +40,9 @@ impl CreationProof {
         }
     }
 
+    #[cfg(test)]
     fn load_one(&mut self, database: &mut Database, path: &Path) {
-        if self.record_missing(path) {
-            return;
-        }
-        let already_loaded = self.mark_loaded_identity(path);
-        let before = stamp_path_uncached(path)
-            .ok()
-            .filter(FileStamp::durable_reusable);
-        let load_failed = !already_loaded
-            && database
-                .load_font_source(Source::File(path.to_path_buf()))
-                .is_empty();
-        let after = stamp_path_uncached(path).ok();
-        self.record_load(path, before, after, already_loaded, load_failed);
+        source_loader::load_one(self, database, path, None);
     }
 
     fn record_missing(&mut self, path: &Path) -> bool {
@@ -100,10 +97,10 @@ impl CreationProof {
         super::raster_observer::count(super::raster_observer::Metric::ProofCurrent);
         !self.failed
             && self.absent_current()
-            && self
-                .stamps
-                .iter()
-                .all(|(path, stamp)| observe_path_stamp(path).as_ref() == Ok(stamp))
+            && self.stamps.iter().all(|(path, stamp)| {
+                self.immutable_shared.contains_key(path)
+                    || observe_path_stamp(path).as_ref() == Ok(stamp)
+            })
             && self.prefix_current(database)
     }
 
@@ -146,8 +143,12 @@ impl CreationProof {
         if !self.selected_current(database) {
             return None;
         }
-        let (transient, prefix) =
-            super::shared_raster::build(database, &self.prefix, &self.stamps)?;
+        let (transient, prefix) = super::shared_raster::build(
+            database,
+            &self.prefix,
+            &self.stamps,
+            &self.immutable_shared,
+        )?;
         if !self.selected_current(database) {
             return None;
         }
@@ -156,6 +157,7 @@ impl CreationProof {
             loaded_paths: self.loaded_paths.clone(),
             absent: self.absent.clone(),
             prefix,
+            immutable_shared: self.immutable_shared.clone(),
             failed: self.failed,
             original_database: OnceLock::new(),
         };
@@ -163,36 +165,6 @@ impl CreationProof {
         proof
             .current(&transient)
             .then(|| (transient, Arc::new(proof)))
-    }
-
-    fn present_files_current_uncached(&self) -> bool {
-        self.stamps.iter().all(|(path, stamp)| {
-            stamp.durable_reusable() && {
-                #[cfg(test)]
-                super::raster_observer::count(
-                    super::raster_observer::Metric::PositiveFreshEvaluation,
-                );
-                stamp_path_uncached(path).as_ref() == Ok(stamp)
-            }
-        })
-    }
-
-    pub(super) fn selected_current(&self, database: &Database) -> bool {
-        #[cfg(test)]
-        super::raster_observer::count(super::raster_observer::Metric::ProofSelectedCurrent);
-        /* WHY: 同一境界の不在パス走査だけをまとめ、世代の登録・直接検証は両方残す。 */
-        !self.failed
-            && self
-                .stamps
-                .iter()
-                .all(|(path, stamp)| observe_path_stamp(path).as_ref() == Ok(stamp))
-            && self.prefix_current(database)
-            && self.present_files_current_uncached()
-            && self.absent_current()
-    }
-
-    pub(super) fn contains(&self, id: ID) -> bool {
-        self.prefix.iter().any(|face| face.id == id)
     }
 }
 
@@ -203,3 +175,7 @@ mod shared_tests;
 #[cfg(test)]
 #[path = "svg_rasterize_html_font_original_arc_proof_tests.rs"]
 mod original_arc_tests;
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_html_font_creation_preload_tests.rs"]
+mod preload_tests;
