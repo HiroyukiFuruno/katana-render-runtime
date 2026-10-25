@@ -10,7 +10,6 @@ mod source;
 #[derive(Default)]
 pub(in crate::markdown::svg_rasterize) struct AuthoredTextContext {
     unique_text: HashSet<String>,
-    safe_multi_fragment_text: HashSet<String>,
 }
 
 impl AuthoredTextContext {
@@ -20,16 +19,6 @@ impl AuthoredTextContext {
         }
         if let [chunk] = text.chunks() {
             return self.matches_text(chunk.text());
-        }
-        false
-    }
-
-    pub(in crate::markdown::svg_rasterize) fn admits_multi_fragment_alignment(
-        &self,
-        text: &resvg::usvg::Text,
-    ) -> bool {
-        if let [chunk] = text.chunks() {
-            return self.safe_multi_fragment_text.contains(chunk.text());
         }
         false
     }
@@ -53,11 +42,6 @@ pub(super) fn collect(document: &Document<'_>) -> AuthoredTextContext {
     let text_counts = source::text_occurrences(&text_nodes);
     let mut context = AuthoredTextContext::default();
     for root in text_nodes {
-        if let Some(text) = source::multi_fragment_text(root, &styles)
-            && text_counts.get(&text) == Some(&1)
-        {
-            context.safe_multi_fragment_text.insert(text);
-        }
         let Some(text) = source::nested_single_line_text(root, &styles) else {
             continue;
         };

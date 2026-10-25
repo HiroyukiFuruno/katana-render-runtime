@@ -46,10 +46,6 @@ mod ttc_integration_tests;
 mod typeface_tests;
 
 #[cfg(all(test, target_os = "macos"))]
-#[path = "svg_rasterize_html_glyph_anchor_fragment_tests.rs"]
-mod anchor_fragment_tests;
-
-#[cfg(all(test, target_os = "macos"))]
 #[path = "svg_rasterize_html_glyph_coretext.rs"]
 mod coretext;
 
@@ -83,24 +79,6 @@ pub(crate) struct HtmlGlyphRasterizer<'a> {
 
 pub(super) fn has_nested_middle_candidate(tree: &usvg::Tree) -> bool {
     baseline::has_nested_middle_candidate(tree)
-}
-
-pub(super) fn has_multi_fragment_anchor_candidate(tree: &usvg::Tree) -> bool {
-    contains_multi_fragment_anchor_candidate(tree.root().children())
-}
-
-fn contains_multi_fragment_anchor_candidate(nodes: &[usvg::Node]) -> bool {
-    nodes.iter().any(|node| match node {
-        usvg::Node::Group(group) => contains_multi_fragment_anchor_candidate(group.children()),
-        usvg::Node::Text(text) => {
-            if let [chunk] = text.chunks() {
-                chunk.anchor() != usvg::TextAnchor::Start && chunk.spans().len() > 1
-            } else {
-                false
-            }
-        }
-        usvg::Node::Path(_) | usvg::Node::Image(_) => false,
-    })
 }
 
 enum Prepared {
@@ -185,23 +163,7 @@ impl<'a> HtmlGlyphRasterizer<'a> {
             if let Some(span) = prepared.first_mut() {
                 span.x_alignment = Some(alignment);
             }
-        } else if self.admits_source_multi_fragment_alignment(text)
-            && let Some(anchor_x) = anchor::multi_fragment_anchor_x(text, prepared)
-        {
-            let alignment = XAlignment {
-                anchor_x,
-                layout: None,
-                origin_snap_css_scale: None,
-            };
-            for span in prepared {
-                span.x_alignment = Some(alignment);
-            }
         }
-    }
-
-    fn admits_source_multi_fragment_alignment(&self, text: &usvg::Text) -> bool {
-        self.authored_text_context
-            .is_some_and(|context| context.admits_multi_fragment_alignment(text))
     }
 
     fn prepare_span(

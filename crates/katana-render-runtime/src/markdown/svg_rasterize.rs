@@ -326,9 +326,7 @@ impl SvgRasterizeOps {
         compatible_svg: &str,
         provenance: &GeneratedClipProvenance,
     ) -> Result<Option<provenance::AuthoredSvgContext>, SvgRasterizeError> {
-        if !html_glyph::has_nested_middle_candidate(tree)
-            && !html_glyph::has_multi_fragment_anchor_candidate(tree)
-        {
+        if !html_glyph::has_nested_middle_candidate(tree) {
             return Ok(None);
         }
         let needs_authored_clip_ids =

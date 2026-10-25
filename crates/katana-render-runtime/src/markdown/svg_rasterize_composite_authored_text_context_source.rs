@@ -134,40 +134,8 @@ pub(super) fn has_use_element(document: &Document<'_>) -> bool {
         .any(|node| node.is_element() && node.tag_name().name().eq_ignore_ascii_case("use"))
 }
 
-pub(super) fn multi_fragment_text(
-    root: Node<'_, '_>,
-    sensitive_selectors: &[simplecss::Selector<'_>],
-) -> Option<String> {
-    if !svg_namespace(root)
-        || in_ambiguous_context(root)
-        || root.descendants().any(|node| {
-            node.is_element()
-                && (node.attribute("textLength").is_some()
-                    || node.attribute("text-length").is_some())
-        })
-        || !styles_are_unambiguous(root, sensitive_selectors)
-    {
-        return None;
-    }
-    inventory::source_text(root)
-}
-
 pub(super) fn text_occurrences(nodes: &[Node<'_, '_>]) -> HashMap<String, usize> {
     inventory::text_occurrences(nodes)
-}
-
-fn styles_are_unambiguous(root: Node<'_, '_>, selectors: &[simplecss::Selector<'_>]) -> bool {
-    root.descendants()
-        .filter(|node| node.is_element())
-        .all(|node| node_style_is_unambiguous(node, selectors))
-}
-
-fn node_style_is_unambiguous(node: Node<'_, '_>, selectors: &[simplecss::Selector<'_>]) -> bool {
-    node.attribute("style")
-        .is_none_or(css::inline_style_is_safe)
-        && selectors.iter().all(|selector| {
-            !super::super::super::preprocess::source_selector_matches(node, selector)
-        })
 }
 
 fn svg_namespace(node: Node<'_, '_>) -> bool {
