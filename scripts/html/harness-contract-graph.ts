@@ -4541,7 +4541,7 @@ const MOON_TERMINAL_SOURCES = {
   "scripts/hooks/run_parallel_checks.py":
     "6590d3482195d88452d2592a2a690e114c7e060270e95908c735c695256ac180",
   "scripts/html/harness-contract-cli.ts":
-    "a01d34a3ed29579712620987d15be70365977af03c1a0572641ddc7c4ed17130",
+    "0d90c6357befd55ca02de162a3970a0f6f70285080d9a6c61e4d14e24fdf90d5",
 } as const;
 
 function moonTerminalSourcesRegistered(
@@ -4620,11 +4620,16 @@ function moonRoots(
   const moon = policy.moon;
   if (!moon) throw new Error("moon policy missing");
   const workspace = yamlRecord(read(moon.workspace));
+  const cache = object(workspace.cache);
+  const cas = object(cache?.cas);
+  const experiments = object(workspace.experiments);
   if (
     object(workspace.projects)?.[moon.project] !== "." ||
-    workspace.versionConstraint !== "=2.6.2"
+    workspace.versionConstraint !== "=2.6.2" ||
+    cas?.verifyIntegrity !== true ||
+    experiments?.casOutputsCache !== true
   )
-    throw new Error("moon project/version binding differs");
+    throw new Error("moon version, project, and verified CAS cache binding differs");
   const tasks = moonTasks(yamlRecord(read(moon.config)), moon.project);
   moonCoverageGraphVerified(moon, tasks, recipes, read("Justfile") ?? "", errors);
   const reachable = moonBarrier(moon, tasks, errors, policy.rust);

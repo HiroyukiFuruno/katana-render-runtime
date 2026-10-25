@@ -16,6 +16,12 @@ IssueのClose条件は担当が実行できる実装・自動検証・公開へ�
 
 ## 現在の状態（2026-10-26）
 
+R2762〜R2767でfork PR #3の最新HEADレビュー・未解決0・Ready後の必須3 OSを含む8 checks成功を確認し、expected HEADを指定した通常の保護mergeを完了した（merge `c01f0165059e472f45472cccddc573d32c13548a`）。merged sourceでkatana-usvgのpackage/compile検証は成功したが、crates.io uploadは403認証失敗。ユーザーへ端末の認証更新を依頼中で、2crate公開・KRR採用・Releaseは未完了。旧0.48.1 Draftは公開しない。
+
+R2763/R2770/R2771/R2772は現行commit `9feed535`のperformance producer限定で、実cache miss、hit、出力復元、receipt改ざん拒否から再検査・validへの回復を確認した。R2766のpostprocessorが論理target stateをcache状態と誤認した失敗は保持し、元のaction/hydration rawからR2770で訂正した。実バックエンドはlegacy archiveでありCASではない。CAS出力と読み取りintegrityの本番設定・契約を修正中で、物理manifest/blobを含む実証は未完了。限定成功をroot/full coverage・描画・性能・公開の合格へ代用しない。
+
+R2775で実運用MoonのCAS出力・read integrityを両trueへ接続し、欠落/false拒否と既存inputSha256によるworkspace束縛を検証した。契約検査、関連Bun97件、source-static-foundationが全exit0・source前後一致。R2774はCLI変更に伴うterminal producer固定SHA不一致でexit1、後続をスキップした失敗として保持。修正では既存出力schemaを保ち、実ファイルSHA pinを更新した。実CASのhit/復元/改ざん検証はこの静的成功とは別に未完了。
+
 R2747でperformance harnessの標準LLVM line coverageがbaseline982/982・candidate989/989の100%になり、既存strict producer validatorもvalid:true・refreshed:falseで成功した。AST・重複・両arm Clippy・実collectionが全exit0、source前後一致。証跡は `tmp/quality/native-cache-exact-catalog-parser-gap-r2747/result.json`、retained-outputs、strict-producer-acceptanceのraw。これはperformance producer限定で、root/full aggregate・cache hit・公開の完了ではない。R2743の標準Moon静的DAG・Python context/aggregate・関連Bun契約も全exit0で保持する。
 
 残1行は単体と実CLIのparse_operation_planが別々の行を欠き、LLVMが被覆行の和集合ではなくinstantiation間の最大被覆数を合算するため残っていた。R2745の既存binary/profdataに対するreport-only診断で各21行中20行を確認し、実CLIのCatalog viewport不一致回帰を追加した。高さ欠落・metadata追加だけでは総数が変わらなかったR2743/R2744と、共通helperの引数型不整合でLint101・重いcollection未実行だったR2746を保持する。型修正後R2747で厳格な集計のまま100%になった。入力・画像・採点閾値・計測対象の追加除外は行っていない。

@@ -236,6 +236,10 @@ export function moonRunContract(
     .looseObject({
       projects: z.looseObject({ krr: z.literal(".") }),
       versionConstraint: z.literal("=2.6.2"),
+      cache: z.strictObject({
+        cas: z.strictObject({ verifyIntegrity: z.literal(true) }),
+      }),
+      experiments: z.strictObject({ casOutputsCache: z.literal(true) }),
       hasher: z.strictObject({
         ignorePatterns: z.tuple([z.literal("!/.moon/cache/**")]),
       }),

@@ -230,7 +230,8 @@ function moonFixture(): HarnessSnapshot {
   snapshot.policy.rust = { lintRecipe: "lint", workspace: "Cargo.toml" };
   snapshot.policy.codeRoots.push("crates/");
   replaceSources(snapshot, {
-    ".moon/workspace.yml": "projects:\n  krr: '.'\nversionConstraint: '=2.6.2'\n",
+    ".moon/workspace.yml":
+      "projects:\n  krr: '.'\nversionConstraint: '=2.6.2'\ncache:\n  cas:\n    verifyIntegrity: true\nexperiments:\n  casOutputsCache: true\n",
     "moon.yml": JSON.stringify({
       taskOptions: { cache: false, runInCI: "always", shell: false },
       tasks,
@@ -2297,6 +2298,34 @@ describe("fixed moon quality graph and managed language scopes", () => {
   });
   test("observes check bridge → fixed entry → required static barrier → HTML leaf", () => {
     expect(checkHarnessContract(moonFixture())).toEqual([]);
+  });
+  test.each([
+    [
+      "CAS read integrity missing",
+      (source: string) => source.replace("    verifyIntegrity: true\n", ""),
+    ],
+    [
+      "CAS read integrity disabled",
+      (source: string) => source.replace("verifyIntegrity: true", "verifyIntegrity: false"),
+    ],
+    [
+      "CAS output caching missing",
+      (source: string) => source.replace("  casOutputsCache: true\n", ""),
+    ],
+    [
+      "CAS output caching disabled",
+      (source: string) => source.replace("casOutputsCache: true", "casOutputsCache: false"),
+    ],
+  ] as const)("rejects workspace %s", (_name, mutate) => {
+    const snapshot = moonFixture();
+    const source = snapshot.read(".moon/workspace.yml");
+    if (source === undefined) throw new Error("Moon workspace fixture is missing");
+    const changed = mutate(source);
+    expect(changed).not.toBe(source);
+    replaceSources(snapshot, { ".moon/workspace.yml": changed });
+    expect(checkHarnessContract(snapshot)).toContain(
+      "moon contract invalid: moon version, project, and verified CAS cache binding differs",
+    );
   });
   test("rejects a heavy task without the static ancestor", () => {
     const snapshot = moonFixture();
@@ -4584,6 +4613,9 @@ test.each([
 
 test("private Moon CLI defaults omitted request entry to coverage", () => {
   withTerminalFixture((fixture) => {
+    const workspacePath = path.join(fixture.root, ".moon/workspace.yml");
+    const workspaceSha = createHash("sha256").update(fs.readFileSync(workspacePath)).digest("hex");
+    expect(fixture.contract.inputSha256[".moon/workspace.yml"]).toBe(workspaceSha);
     delete fixture.request.entry;
     expect(verifyMoonRun(fixture.root, terminalRequest(fixture)).status).toBe("verified");
   });

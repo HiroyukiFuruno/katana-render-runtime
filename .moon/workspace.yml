@@ -4,6 +4,13 @@ projects:
 versionConstraint: '=2.6.2'
 telemetry: false
 
+cache:
+  cas:
+    verifyIntegrity: true
+
+experiments:
+  casOutputsCache: true
+
 hasher:
   ignorePatterns:
     - "!/.moon/cache/**"
