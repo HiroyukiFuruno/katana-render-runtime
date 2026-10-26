@@ -6,6 +6,17 @@ use tiny_skia::Transform;
 #[path = "svg_rasterize_html_glyph_paint_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "svg_rasterize_html_glyph_paint_capture.rs"]
+mod capture;
+
+#[cfg(test)]
+#[path = "svg_rasterize_html_glyph_paint_capture_tests.rs"]
+mod capture_tests;
+
+#[cfg(test)]
+pub(in crate::markdown::svg_rasterize) use capture::Scope as PaintCaptureScope;
+
 #[cfg(all(test, target_os = "macos"))]
 #[path = "svg_rasterize_html_glyph_paint_hanging_origin_tests.rs"]
 mod hanging_origin_tests;
@@ -47,7 +58,8 @@ fn draw_identity_glyphs(
         })
         .collect::<Vec<_>>();
     apply_run_origin_snap(span, &mut positions, raster_scale);
-    canvas.draw_glyphs_at(
+    draw_glyphs_at(
+        canvas,
         &span.glyph_ids,
         positions.as_slice(),
         SkiaPoint::new(0.0, 0.0),
@@ -106,9 +118,10 @@ fn draw_transformed_glyphs(
         let matrix =
             super::surface::skia_matrix(normalized_transform(span, glyph, raster_scale), 0.0, 0.0);
         canvas.concat(&matrix);
-        canvas.draw_glyphs_at(
+        draw_glyphs_at(
+            canvas,
             std::slice::from_ref(glyph_id),
-            &[SkiaPoint::new(0.0, 0.0)][..],
+            &[SkiaPoint::new(0.0, 0.0)],
             SkiaPoint::new(0.0, 0.0),
             font,
             paint,
@@ -116,6 +129,19 @@ fn draw_transformed_glyphs(
         canvas.restore_to_count(save);
     }
     Ok(())
+}
+
+fn draw_glyphs_at(
+    canvas: &Canvas,
+    glyph_ids: &[u16],
+    positions: &[SkiaPoint],
+    origin: SkiaPoint,
+    font: &Font,
+    paint: &Paint,
+) {
+    #[cfg(test)]
+    capture::record_draw(font, glyph_ids, positions, origin, canvas.local_to_device());
+    canvas.draw_glyphs_at(glyph_ids, positions, origin, font, paint);
 }
 
 pub(super) fn normalized_transform(

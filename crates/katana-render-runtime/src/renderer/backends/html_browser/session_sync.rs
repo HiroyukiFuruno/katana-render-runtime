@@ -18,6 +18,13 @@ impl HtmlBrowserSession {
     pub(super) fn sync_interactive_state(&mut self) -> Result<(), HtmlBrowserError> {
         let updates = self.take_interactive_updates()?;
         self.sync_interactive_frame_with_metrics(updates.frame, updates.metrics)?;
+        /* WHY: 公開側で受理した世代だけinner画素を解放し、未受理frameは再試行に残す。 */
+        if let (Some(interactive), Some(generation)) = (
+            self.interactive.as_mut(),
+            self.latest_frame.as_ref().map(|frame| frame.generation),
+        ) {
+            interactive.release_frame_if_generation(generation);
+        }
         if updates.navigation.is_some() {
             self.pending_navigation = updates.navigation;
         }

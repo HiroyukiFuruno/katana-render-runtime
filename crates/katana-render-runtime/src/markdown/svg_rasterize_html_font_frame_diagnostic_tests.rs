@@ -18,10 +18,17 @@ struct SvgCapture {
     resolved_svg_sha: String,
 }
 
+struct CaptureAssets {
+    svg: SvgCapture,
+    actual_binary_sha: String,
+}
+
 #[test]
 #[ignore = "diagnostic only; requires a fresh request and output directory"]
 fn ignored_html_frame_and_font_audit_are_saved_together() -> Result<(), String> {
     let (request, html, source_sha, origin) = read_request()?;
+    let glyph_paint_capture =
+        crate::markdown::svg_rasterize::html_glyph::PaintCaptureScope::enter();
     let (session, audit) =
         super::open_html_with_audit(&html, &origin, request.width, request.height)?;
     let frame = session
@@ -33,7 +40,15 @@ fn ignored_html_frame_and_font_audit_are_saved_together() -> Result<(), String> 
     {
         return Err("actual frame viewport differs from request".to_owned());
     }
-    save_capture(&request, &source_sha, &origin, frame, audit)
+    let glyph_paint_capture = glyph_paint_capture.snapshot().report_value();
+    save_capture(
+        &request,
+        &source_sha,
+        &origin,
+        frame,
+        audit,
+        glyph_paint_capture,
+    )
 }
 
 fn read_request() -> Result<(Request, String, String, String), String> {
@@ -82,28 +97,66 @@ fn save_capture(
     origin: &str,
     frame: &crate::HtmlBrowserFrame,
     audit: serde_json::Value,
+    glyph_paint_capture: serde_json::Value,
 ) -> Result<(), String> {
+    let actual_binary_sha = actual_binary_sha()?;
+    save_frame_png(request, frame)?;
+    let assets = CaptureAssets {
+        svg: save_svg_capture(request, &audit)?,
+        actual_binary_sha,
+    };
+    let report = capture_report(
+        request,
+        source_sha,
+        origin,
+        frame,
+        &assets,
+        &audit,
+        glyph_paint_capture,
+    );
+    write_report(request, &report)
+}
+
+fn actual_binary_sha() -> Result<String, String> {
     let binary = std::fs::read(std::env::current_exe().map_err(|error| error.to_string())?)
         .map_err(|error| error.to_string())?;
+    Ok(super::super::output::sha256(&binary))
+}
+
+fn save_frame_png(request: &Request, frame: &crate::HtmlBrowserFrame) -> Result<(), String> {
     let png = encode_png(&frame.pixels, frame.viewport.width, frame.viewport.height)?;
-    write_fresh(&request.output.join("frame.png"), &png)?;
-    let svg = save_svg_capture(request, &audit)?;
-    let report = serde_json::json!({
+    write_fresh(&request.output.join("frame.png"), &png)
+}
+
+fn capture_report(
+    request: &Request,
+    source_sha: &str,
+    origin: &str,
+    frame: &crate::HtmlBrowserFrame,
+    assets: &CaptureAssets,
+    audit: &serde_json::Value,
+    glyph_paint_capture: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
         "sourceSha256": source_sha,
-        "renderInputSvgSha256": svg.render_input_sha,
-        "renderInputPaintCall": svg.render_input_paint_call,
+        "renderInputSvgSha256": assets.svg.render_input_sha,
+        "renderInputPaintCall": assets.svg.render_input_paint_call,
         "resolvedSvgPath": request.output.join("resolved-svg.svg"),
-        "resolvedSvgSha256": svg.resolved_svg_sha,
+        "resolvedSvgSha256": assets.svg.resolved_svg_sha,
         "origin": origin,
         "viewport": {"width": frame.viewport.width, "height": frame.viewport.height, "scale": frame.viewport.device_scale_factor, "scrollY": frame.scroll_y},
-        "actualBinarySha256": super::super::output::sha256(&binary),
+        "actualBinarySha256": assets.actual_binary_sha,
         "rgbaSha256": super::super::output::sha256(&frame.pixels),
+        "glyphPaintCapture": glyph_paint_capture,
         "formalAcceptance": false,
         "audit": audit,
-    });
+    })
+}
+
+fn write_report(request: &Request, report: &serde_json::Value) -> Result<(), String> {
     write_fresh(
         &request.output.join("report.json"),
-        &serde_json::to_vec_pretty(&report).map_err(|error| error.to_string())?,
+        &serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?,
     )
 }
 

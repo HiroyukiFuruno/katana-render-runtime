@@ -110,6 +110,16 @@ impl HtmlInteractiveSession {
         self.latest_frame.as_ref()
     }
 
+    pub(in crate::renderer::backends) fn release_frame_if_generation(&mut self, generation: u64) {
+        if self
+            .latest_frame
+            .as_ref()
+            .is_some_and(|frame| frame.generation == generation)
+        {
+            self.latest_frame = None;
+        }
+    }
+
     pub(in crate::renderer::backends) fn latest_scroll_metrics(
         &self,
     ) -> Option<&HtmlBrowserScrollMetrics> {

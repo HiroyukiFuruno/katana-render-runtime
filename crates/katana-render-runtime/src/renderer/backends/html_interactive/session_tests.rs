@@ -11,6 +11,9 @@ const RESIZED_VIEWPORT_LOGICAL_HEIGHT: f32 = 120.0;
 #[path = "session_resize_fractional_tests.rs"]
 mod fractional_resize;
 
+#[path = "session_frame_release_tests.rs"]
+mod frame_release;
+
 fn required_frame(session: &HtmlInteractiveSession) -> Result<&HtmlBrowserFrame, HtmlBrowserError> {
     session
         .latest_frame()

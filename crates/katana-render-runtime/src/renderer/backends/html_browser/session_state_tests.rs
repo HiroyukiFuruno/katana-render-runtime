@@ -43,20 +43,95 @@ fn assert_sync_rejects_out_of_order_frame(session: &mut HtmlBrowserSession) -> T
         .latest_frame()
         .cloned()
         .ok_or_else(|| "initial frame must exist".to_string())?;
-    let newer = HtmlBrowserFrame::new(
-        initial.generation + 1,
+    let unaccepted = refresh_unaccepted_frame(session)?;
+    let public_ahead = frame_ahead_of(&initial, &unaccepted)?;
+
+    assert_sync_rejects_unaccepted_frame(session, &unaccepted, &public_ahead);
+    assert_retry_accepts_unaccepted_frame(session, &initial, &unaccepted, &public_ahead)?;
+    Ok(())
+}
+
+fn refresh_unaccepted_frame(session: &mut HtmlBrowserSession) -> TestResult<HtmlBrowserFrame> {
+    let interactive = session
+        .interactive
+        .as_mut()
+        .ok_or_else(|| "interactive runtime must exist".to_string())?;
+    interactive
+        .refresh_frame()
+        .map_err(|error| error.to_string())?;
+    interactive
+        .latest_frame()
+        .cloned()
+        .ok_or_else(|| "refreshed inner frame must exist".to_string())
+}
+
+fn frame_ahead_of(
+    initial: &HtmlBrowserFrame,
+    unaccepted: &HtmlBrowserFrame,
+) -> Result<HtmlBrowserFrame, String> {
+    HtmlBrowserFrame::new(
+        unaccepted.generation + 1,
         initial.origin.clone(),
         initial.viewport,
         initial.pixel_format,
         initial.pixels.clone(),
     )
-    .map_err(|error| error.to_string())?;
-    session.latest_frame = Some(newer);
+    .map_err(|error| error.to_string())
+}
+
+fn assert_sync_rejects_unaccepted_frame(
+    session: &mut HtmlBrowserSession,
+    unaccepted: &HtmlBrowserFrame,
+    public_ahead: &HtmlBrowserFrame,
+) {
+    session.latest_frame = Some(public_ahead.clone());
     assert!(matches!(
         session.sync_interactive_state(),
         Err(HtmlBrowserError::StaleFrameGeneration { .. })
     ));
+    assert_eq!(session.latest_frame(), Some(public_ahead));
+    assert_eq!(
+        session
+            .interactive
+            .as_ref()
+            .and_then(HtmlInteractiveSession::latest_frame),
+        Some(unaccepted)
+    );
+}
+
+fn assert_retry_accepts_unaccepted_frame(
+    session: &mut HtmlBrowserSession,
+    initial: &HtmlBrowserFrame,
+    unaccepted: &HtmlBrowserFrame,
+    public_ahead: &HtmlBrowserFrame,
+) -> TestResult {
+    session.latest_frame = Some(initial.clone());
+    session
+        .sync_interactive_state()
+        .map_err(|error| error.to_string())?;
+    let accepted = session
+        .latest_frame()
+        .ok_or_else(|| "retried frame must be accepted".to_string())?;
+    assert_eq!(accepted.generation, unaccepted.generation);
+    assert_eq!(accepted.pixels, unaccepted.pixels);
+    assert!(
+        session
+            .interactive
+            .as_ref()
+            .is_some_and(|interactive| interactive.latest_frame().is_none())
+    );
+    assert_eq!(initial.generation + 1, accepted.generation);
+    assert!(session.latest_frame().is_some_and(|frame| {
+        frame.generation == accepted.generation && frame.pixels == unaccepted.pixels
+    }));
+    assert_snapshot_pixels(initial, accepted);
+    assert_eq!(public_ahead.generation, unaccepted.generation + 1);
+    assert_snapshot_pixels(public_ahead, initial);
     Ok(())
+}
+
+fn assert_snapshot_pixels(snapshot: &HtmlBrowserFrame, expected: &HtmlBrowserFrame) {
+    assert_eq!(snapshot.pixels, expected.pixels);
 }
 
 fn assert_missing_runtime_and_closed_state(session: &mut HtmlBrowserSession) -> TestResult {

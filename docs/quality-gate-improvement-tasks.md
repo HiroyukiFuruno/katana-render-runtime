@@ -1,5 +1,19 @@
 # 品質ゲート改善の作業台帳
 
+R2995/R2997は実描画引数のtest-only観測と、公開フレーム受入後の同世代inner画素解放を統合した限定検証。foundation・厳格Clippy・ASTは全0、既存krr-coverage診断laneの8回帰が全成功、source前後一致。8件以外の2,964件は未実行であり、完全ゲート・coverage100%・性能非劣化ではない。受入失敗時の未受理frame保持→同じframeの再試行成功、独立snapshot、同長buffer再利用、同世代no-opを維持した。証跡は `tmp/quality/reserved-warm-owner-r2939/glyph-capture-and-frame-retirement-{foundation,ast,lint}-r2995/` と `glyph-capture-and-frame-retirement-native-r2997/`。画像解放の表示時間・RSSは未測定。
+
+R2987は同じ実frameの描画引数を25件、上限超過0で取得した。frameはR2966のC4 component実製品PNGとRGBA8 2,910,064bytes・SHA256 `e0847447bda528b5c0a5eb2d8d4979d65d51c9b4dd4f8ce5619593de51ec00c3`まで一致。原記録は `tmp/quality/c4-native-glyph-paint-capture-r2981/capture/report.json` と `tmp/quality/c4-native-glyph-catalog-and-capture-r2987/result.json`。Chrome R2970とは25描画のglyph ID・順序・font sizeが一致し、複数tspanの19描画だけ有効sizeへのadvance補正とspan幅ceil64→middle anchor→run原点trunc64が適用されない原因へ絞った。診断計算では19原点を再現したが、製品修正・合格数増加はまだない。既存の一致済み6描画は補正を重ねない。実装時は先頭座標から幅を逆算せず、既存HarfRustの全文shape結果を使い、適格な同face/size・水平middle chunkだけへ限定する。
+
+R2991のlintはコンパイル成功後に固定容量超過を拒否し、未完了のcoverage profileを温存せず、収集済み8回帰のbinaryを凍結してR2992でそのprofileを正規clean、通常debugの全実ファイル不変を確認した。R2995の追加の通常debug全target no-runはlinker errno28で実exit101。これは既存の最適化済みroot診断laneではない不要な追加ビルドであり、成功に読み替えない。R2996の既存 `just clean` は0、空き151,490,560→5,575,393,280bytes、凍結binaryのSHAを維持し、両owner lockを再取得してR2997の既存laneへ復帰した。容量閾値は変更していない。限定回帰は既存 `native-nextest-diagnostic` と同profileの実catalogを優先し、別の通常debug全target buildを追加しない。
+
+coverage分類を訂正した。CoreText rendererの39未計測行は製品経路ではなく、12図で0/12合格として不採用にしたtest-only prototype。必要な製品・検証helperとしての継続要否を、不採用記録と専用回帰の責務で判断する。これとは別に、101未計測行のfont-memory段階診断は継続目的があるため維持する。未計測を単に除外して100%にしない。根拠は `docs/svg-library-adoption-assessment.md` と現行のmodule cfg・呼出元。
+
+R2966/R2969の最新ローカル候補は実製品PNGを117件すべて取得・採点し、99以上95件、未達22件。以前の51件から44件増え、既存合格の脱落0件。EN48/59、JA47/58。残件はC4 11、Ishikawa 2、Kanban 2、Wardley 4、XY 2、ZenUML 1。原指摘の日本語継承図03-02は99.894068点。証跡は `tmp/quality/local-fork-native117-delta-r2969/summary.json` と `tmp/quality/local-fork-managed-mermaid-r2966/run/receipt.json`。全件99未達によるactual exit1を保持する。承認済みforkのローカルpath依存であり、registry配布版での正式リリース受入とは区別する。以降の旧51件という記述は過去時点の記録。
+
+R2967のHTML一条件ABBA診断では初回frame 7〜15ms、対照82〜210ms。ただしOS最大RSSは候補47〜48MB、対照41.3MBで非劣化未達。84条件全体の現在source合格へ転用しない。R2978は既存standalone producerで標準linkerの `-dead_strip_dylibs` 候補をrelease buildしactual0/source不変、不要なApplicationServicesリンクが除去されたことを確認。R2979の同一条件ABBAは全4worker actual0、候補最大RSS46.74〜46.84MB、対照41.30〜41.32MBで、依然非劣化未達。採用済み・解決済みとは扱わない。証跡は `tmp/quality/unused-framework-release-candidate-r2978/result.json` と `tmp/quality/current-fork-html-worker-control-r2979/summary.json`。
+
+R2976の直接standalone manifest buildはCargo既定の入れ子targetを使用し、guardの計測対象root targetと一致しなかった。actual0を有効な容量・build証跡へ転用しない。R2977で意図しない生成物を正規Cargo cleanし、より厳格なprofile guardによる拒否actual2を保持した。弱いguardへの切替では迂回せず、R2978では既存の正式standalone build APIへ戻した。standalone検査では実targetをmetadataで照合し、既存producerとadmissionの環境を使う。R2978前に収集済みdebug profileを正規cleanしたため、次のroot検査では必要binaryを標準producerで再生成する。
+
 R2865はC4観測の責務分割後、並列foundation・厳格Clippy・ASTが全0、source前後一致。R2867は標準Cargo launcherによる全workspace/all-targets/all-featuresのtest build0、実catalogで選んだC4観測と異常系判定の2caseが各1件成功、source前後一致。製品117画像の合格とは区別する。先行R2866は担当が解決済みCargo実体を直接実行し、依存crate内のtoolchain指定から子rustcが変わってE0514となった失敗。raw/実exit101を保持し、cleanや検査条件変更をせず標準launcherへ戻して解消。再発防止をAGENTSへ固定した。
 
 R2867の同一render操作内font source auditはArial/Arial Boldを確認した。独立Chromeの描画途中観測R2868との比較ではglobal bold16のgetBBox高は18対17.3671875、User bold14の幅は31.140625対31.30859375、metadataにも微小差がある。フォント名の取り違えだけと断定しない。CoreTextの同一face/sizeのglyph境界はKRRの値と一致する診断があり、Chrome側の実metrics/ink計算経路を追う。観測用コードの成功を描画修正完了にしない。

@@ -9,9 +9,19 @@ const NEGATIVE_VIEWPORT_WIDTH: u32 = 0;
 const SOURCE: &str = "<body style=\"margin:0;background:red\"></body>";
 const FRAME_ORIGIN: &str = "https://example.test/frame.html";
 
+fn assert_synchronized_inner_frame_released(session: &HtmlBrowserSession) {
+    assert!(
+        session
+            .interactive
+            .as_ref()
+            .is_some_and(|interactive| interactive.latest_frame().is_none())
+    );
+}
+
 #[test]
 fn unchanged_generation_keeps_public_frame_and_pending_update_state() {
     with_frame_session(SOURCE, FRAME_ORIGIN, FRAME_WIDTH, FRAME_HEIGHT, |session| {
+        assert_synchronized_inner_frame_released(session);
         assert!(session.take_frame_update().is_some());
         let pointer = session.latest_frame().map(|frame| frame.pixels.as_ptr());
         assert!(session.latest_frame().cloned().is_some_and(|initial| {
@@ -32,6 +42,7 @@ fn unchanged_generation_keeps_public_frame_and_pending_update_state() {
                 session.latest_frame().map(|frame| frame.pixels.as_ptr()),
                 pointer
             );
+            assert_synchronized_inner_frame_released(session);
             assert!(session.take_frame_update().is_none());
             assert!(session.take_navigation().is_none());
             true
@@ -42,10 +53,12 @@ fn unchanged_generation_keeps_public_frame_and_pending_update_state() {
 #[test]
 fn refreshed_frame_and_public_error_preserve_owned_prior_snapshot() {
     with_frame_session(SOURCE, FRAME_ORIGIN, FRAME_WIDTH, FRAME_HEIGHT, |session| {
+        assert_synchronized_inner_frame_released(session);
         let pointer = session.latest_frame().map(|frame| frame.pixels.as_ptr());
         assert!(session.latest_frame().cloned().is_some_and(|initial| {
             let saved_pixels = initial.pixels.clone();
             assert!(session.refresh_frame().is_ok());
+            assert_synchronized_inner_frame_released(session);
             assert_eq!(
                 session.latest_frame().map(|frame| frame.pixels.as_ptr()),
                 pointer
@@ -58,6 +71,7 @@ fn refreshed_frame_and_public_error_preserve_owned_prior_snapshot() {
             assert!(initial.pixels == saved_pixels);
             assert!(session.take_frame_update().is_some());
             assert_resize_preserves_owned_snapshot(session, &initial);
+            assert_synchronized_inner_frame_released(session);
             assert_public_error_keeps_current_frame(session);
             true
         }));

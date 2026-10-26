@@ -34,6 +34,9 @@ use super::physical_font_face as ttc;
 mod types;
 
 #[cfg(test)]
+pub(super) use paint::PaintCaptureScope;
+
+#[cfg(test)]
 #[path = "svg_rasterize_html_glyph_tests.rs"]
 mod tests;
 
