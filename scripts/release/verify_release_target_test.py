@@ -24,7 +24,9 @@ REQUIRED_RELEASE_COMMITS = VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_COMMITS
 REQUIRED_CANDIDATE_ANCESTORS = (
     VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_CANDIDATE_ANCESTORS
 )
-CURRENT_RELEASE_VALIDATION_SNAPSHOT = "536658729364519837b50b10e1fb2ad8139ced1e"
+# Git履歴fixtureは祖先・version・内容契約を検証し、完全品質の証跡には使わない。
+CURRENT_RELEASE_VALIDATION_SNAPSHOT = "655fb2dda555e623265777ad48ca2eb78042edce"
+REJECTED_STALE_V0424_VALIDATION_SNAPSHOT = "536658729364519837b50b10e1fb2ad8139ced1e"
 REJECTED_V0424_VALIDATION_SNAPSHOT = "db20e187c39e56589dadb2356da150bd3e820987"
 PUBLISHED_V0423_SNAPSHOT = "8654789f69d24401b8ae67036db1cdb3e7f4294e"
 PUBLISHED_V0422_SNAPSHOT = "185d056de67282a4056729296e57c164a6a343d6"
@@ -175,6 +177,12 @@ class VerifyReleaseTargetTests(unittest.TestCase):
         result = self.run_check("v0.4.24", "v0.4.23")
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_current_release_validation_snapshot_passes_release_content_contract(self) -> None:
+        result = self.run_check(
+            "v0.4.24", "v0.4.23", CURRENT_RELEASE_VALIDATION_SNAPSHOT
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_allows_idempotent_retry_after_v0424(self) -> None:
         result = self.run_check("v0.4.24", "v0.4.24")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -200,6 +208,13 @@ class VerifyReleaseTargetTests(unittest.TestCase):
     def test_rejects_the_old_v0424_release_validation_snapshot(self) -> None:
         result = self.run_check(
             "v0.4.24", "v0.4.23", REJECTED_V0424_VALIDATION_SNAPSHOT
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("required release candidate ancestor", result.stderr)
+
+    def test_rejects_stale_v0424_validation_snapshot_missing_later_pins(self) -> None:
+        result = self.run_check(
+            "v0.4.24", "v0.4.23", REJECTED_STALE_V0424_VALIDATION_SNAPSHOT
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("required release candidate ancestor", result.stderr)
