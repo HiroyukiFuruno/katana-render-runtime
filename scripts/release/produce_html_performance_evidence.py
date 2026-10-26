@@ -26,6 +26,7 @@ from typing import BinaryIO, Literal, NamedTuple, TypedDict, cast, overload
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 
 import verify_html_performance_evidence as gate
+import html_performance_inventory as inventory_ops
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "build"))
 LOCAL_CAPACITY_BASELINE = 2363047936
@@ -535,6 +536,8 @@ MEASUREMENT_LIMITS: dict[MeasurementRole, float] = {
 }
 MEASUREMENT_CLEANUP_SECONDS = 10.0
 MEASUREMENT_TERM_SECONDS = 2.0
+MAX_WORKER_ATTEMPTS = 3
+MAX_WORKER_LOAD = 0.25
 
 
 def _measurement_exit(process: subprocess.Popen[bytes]) -> bool:
@@ -906,6 +909,12 @@ class NativeCliCommandEvidence(NamedTuple):
     lifecycle: gate.JsonObject
 
 
+class WorkerAttemptObservation(NamedTuple):
+    record: gate.JsonObject
+    result: subprocess.CompletedProcess[bytes] | None
+    error: BaseException | None
+
+
 def observe_native_cli_command(args: Sequence[str], *, role: MeasurementRole,
                                log_directory: Path, cwd: Path, env: Mapping[str, str],
                                attempt_token: str, label: str,
@@ -1116,16 +1125,7 @@ def produce_candidate_build_proof(root: Path, output: Path, capacity_document: P
 
 
 def inventory(path: Path) -> gate.JsonObject:
-    # 計測区間ではregistryと容量ガード対象target全体の内容変化を検出する。
-    if not path.exists():
-        return {"root": str(path), "exists": False, "files": []}
-    rows: list[gate.JsonObject] = []
-    for member in sorted(path.rglob("*")):
-        if member.is_symlink():
-            rows.append({"path": str(member.relative_to(path)), "link": os.readlink(member)})
-        elif member.is_file():
-            rows.append({"path": str(member.relative_to(path)), "sha256": gate.sha256(member), "size": member.stat().st_size})
-    return {"root": str(path), "exists": True, "files": rows}
+    return inventory_ops.inventory(path)
 
 
 def file_state(path: Path) -> gate.JsonObject:
@@ -1148,10 +1148,16 @@ def quiet() -> float:
 
 def await_quiet() -> float:
     deadline = time.monotonic() + 900
-    while quiet() > 0.25:
+    while quiet() > MAX_WORKER_LOAD:
         gate.require(time.monotonic() < deadline, "quiet load0.25 was not reached")
         time.sleep(5)
     return quiet()
+
+
+def worker_attempts_directory(folder: Path, arm: str, pair: int) -> Path:
+    gate.require(arm in ("baseline", "candidate"), "unknown performance arm")
+    gate.require(pair >= 0, "negative performance pair index")
+    return folder / "worker-attempts" / f"{arm}-{pair}"
 
 
 def worker_sample(stdout: bytes, sample: int, viewport: Viewport) -> gate.JsonObject:
@@ -1163,6 +1169,178 @@ def worker_sample(stdout: bytes, sample: int, viewport: Viewport) -> gate.JsonOb
         gate._integer(actual_viewport[field], "worker viewport " + field)
     gate._numeric(actual_viewport["scale"], "worker viewport scale")
     return payload
+
+
+def write_exclusive(path: Path, value: object) -> FilePin:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp",
+                                                  dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(encoded(value))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return {"path": str(path.resolve()), "sha256": gate.sha256(path)}
+
+
+def binary_sha_or_none(path: Path) -> str | None:
+    try:
+        if path.is_symlink() or path.resolve() != path:
+            return None
+        return gate.sha256(path)
+    except (OSError, RuntimeError):
+        return None
+
+
+def worker_started_from_lifecycle(path: Path) -> bool | None:
+    try:
+        lifecycle = gate._object(gate.read_json(path), "worker lifecycle")
+        identity = lifecycle.get("identity")
+        if not isinstance(identity, dict):
+            return None
+        pid = identity.get("pid")
+    except (OSError, ValueError):
+        return None
+    return True if type(pid) is int and pid > 0 else None
+
+
+def observe_worker_attempt(
+    build: ArmBuildResult,
+    sample: int,
+    attempt: int,
+    fixture: Path,
+    report_path: Path,
+    plan_path: Path,
+    width: int,
+    height: int,
+    scale: int,
+    cwd: Path,
+    env: Mapping[str, str],
+    log_directory: Path,
+) -> WorkerAttemptObservation:
+    load_before = await_quiet()
+    gate.require(math.isfinite(load_before) and 0 <= load_before <= MAX_WORKER_LOAD,
+                 "worker pre-load did not reach quiet limit")
+    binary_before = binary_sha_or_none(build.binary)
+    if binary_before != build.binary_sha256:
+        return WorkerAttemptObservation({
+            "sample": sample, "attempt": attempt, "loadRatioBefore": load_before,
+            "loadRatioAfter": None, "binarySha256Before": binary_before,
+            "binarySha256After": None, "actualExit": None,
+            "workerStarted": False, "accepted": False,
+            "reason": "worker binary changed before measurement",
+        }, None, None)
+    argv = [str(build.binary), "--worker", str(sample), str(fixture), str(report_path),
+            str(plan_path), str(width), str(height), str(scale)]
+    lifecycle_paths: list[Path] = []
+    result: subprocess.CompletedProcess[bytes] | None = None
+    error: BaseException | None = None
+    try:
+        result = _measurement_command(argv, cwd=cwd, env=env, role="worker",
+            log_directory=log_directory, check=False, lifecycle_sink=lifecycle_paths.append)
+    except BaseException as caught:
+        error = caught
+    load_after = quiet()
+    binary_after = binary_sha_or_none(build.binary)
+    lifecycle: FilePin | None = None
+    if len(lifecycle_paths) == 1:
+        lifecycle_path = lifecycle_paths[0]
+        lifecycle = {"path": str(lifecycle_path.resolve()), "sha256": gate.sha256(lifecycle_path)}
+    actual_exit = result.returncode if result is not None else None
+    worker_started: bool | None = True if result is not None else None
+    if result is None and len(lifecycle_paths) == 1:
+        worker_started = worker_started_from_lifecycle(lifecycle_paths[0])
+    record: gate.JsonObject = {
+        "sample": sample, "attempt": attempt, "loadRatioBefore": load_before,
+        "loadRatioAfter": load_after if math.isfinite(load_after) else None,
+        "binarySha256Before": binary_before, "binarySha256After": binary_after,
+        "actualExit": actual_exit, "lifecycle": lifecycle,
+        "workerStarted": worker_started, "accepted": False,
+    }
+    if error is not None:
+        record["reason"] = "worker command raised"
+        record["errorType"] = type(error).__name__
+    elif result is not None and result.returncode != 0:
+        record["reason"] = "worker command exited nonzero"
+    elif binary_after != build.binary_sha256:
+        record["reason"] = "worker binary changed during measurement"
+    elif not math.isfinite(load_after) or not 0 <= load_after <= MAX_WORKER_LOAD:
+        record["reason"] = "host load exceeded limit"
+    return WorkerAttemptObservation(record, result, error)
+
+
+def collect_worker_sample(
+    build: ArmBuildResult,
+    sample: int,
+    fixture: Path,
+    report_path: Path,
+    plan_path: Path,
+    width: int,
+    height: int,
+    scale: int,
+    cwd: Path,
+    env: Mapping[str, str],
+    log_directory: Path,
+    attempts_directory: Path,
+) -> tuple[gate.JsonObject, dict[str, float], list[gate.JsonObject]]:
+    attempts: list[gate.JsonObject] = []
+    for attempt in range(1, MAX_WORKER_ATTEMPTS + 1):
+        observation = observe_worker_attempt(build, sample, attempt, fixture,
+            report_path, plan_path,
+            width, height, scale, cwd, env, log_directory)
+        record = observation.record
+        result = observation.result
+        if observation.error is None and record.get("reason") is None and result is not None:
+            try:
+                payload = worker_sample(result.stdout, sample, {"width": width, "height": height,
+                                                                 "scale": scale})
+            except BaseException as error:
+                record["reason"] = "worker sample invalid"
+                record["errorType"] = type(error).__name__
+                pin = write_exclusive(attempts_directory / f"attempt-{sample}-{attempt}.json", record)
+                record["attemptRecord"] = pin
+                attempts.append(record)
+                raise
+            record["accepted"] = True
+            pin = write_exclusive(attempts_directory / f"attempt-{sample}-{attempt}.json", record)
+            record["attemptRecord"] = pin
+            attempts.append(record)
+            return payload, {"before": cast(float, record["loadRatioBefore"]),
+                             "after": cast(float, record["loadRatioAfter"])}, attempts
+        pin = write_exclusive(attempts_directory / f"attempt-{sample}-{attempt}.json", record)
+        record["attemptRecord"] = pin
+        attempts.append(record)
+        if observation.error is not None:
+            raise observation.error
+        if result is not None and result.returncode != 0:
+            raise subprocess.CalledProcessError(result.returncode, result.args,
+                                                output=result.stdout, stderr=result.stderr)
+        if record.get("reason") == "worker binary changed during measurement":
+            raise ValueError("worker binary changed during measurement")
+        if record.get("reason") == "worker binary changed before measurement":
+            raise ValueError("frozen build binary changed before measurement")
+        if record.get("reason") != "host load exceeded limit":
+            raise ValueError("worker sample invalid")
+        if attempt == MAX_WORKER_ATTEMPTS:
+            raise ValueError("host load remained above limit after three attempts")
+    raise ValueError("worker attempt loop ended without a sample")
+
+
+def write_condition_checkpoint(
+    folder: Path,
+    expected: Mapping[str, object],
+    result: Mapping[str, object],
+    manifest: Mapping[str, object],
+) -> FilePin:
+    return write_exclusive(folder / "condition-checkpoint.json", {
+        "schema": "krr-html-performance-condition-checkpoint-v1",
+        "formalAccepted": False, "endpointValidated": False,
+        "expected": dict(expected), "result": dict(result), "manifest": dict(manifest),
+    })
 
 
 def validate_interaction(value: object, fixture_sha256: str) -> None:
@@ -1601,6 +1779,8 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     environment_sha = before_pin["sha256"]
     transport_attempts: list[dict[str, FilePin]] = []
     expected_all: list[tuple[Path, ExpectedPerformance, gate.JsonObject, FilePin]] = []
+    checkpoint_pins: list[FilePin] = []
+    worker_attempt_pins: list[FilePin] = []
     for row in measurement_rows:
         fixture = cast(Path, row["fixture"])
         plan_path = cast(Path, row["plan_path"])
@@ -1647,15 +1827,17 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 environment = _performance_worker_environment(expected["provenance"]["rustc"], expected["provenance"]["cargo"], environment_sha, lock, build_inputs.snapshot)
                 samples: list[gate.JsonObject] = []
                 loads: list[dict[str, float]] = []
+                worker_attempts: list[gate.JsonObject] = []
                 for sample in range(5):
-                    load_before = await_quiet()
-                    require_frozen_binary(builds[arm])
-                    stdout = command([str(binary), "--worker", str(sample), str(fixture), str(report_path), str(plan_path), str(width), str(height), str(viewport_value["scale"])], cwd=root, env=environment, role="worker", log_directory=lifecycle)
-                    load_after = quiet()
-                    gate.require(load_after <= 0.25 and gate.sha256(binary) == arms[raw_arm]["binary_sha256"], "worker load/binary changed")
-                    payload = worker_sample(stdout, sample, viewport_value)
+                    payload, sample_load, sample_attempts = collect_worker_sample(
+                        builds[arm], sample, fixture, report_path, plan_path, width, height,
+                        viewport_value["scale"], root, environment, lifecycle,
+                        worker_attempts_directory(folder, arm, pair))
                     samples.append(payload)
-                    loads.append({"before": load_before, "after": load_after})
+                    loads.append(sample_load)
+                    worker_attempts.extend(sample_attempts)
+                    worker_attempt_pins.extend(
+                        cast(FilePin, attempt["attemptRecord"]) for attempt in sample_attempts)
                 report: gate.JsonObject = {"arm": raw_arm, "pair_index": pair, "measurement_executed": True, "sample_count": 5, "source_sha256": expected["fixture_sha256"], "operation_plan_sha256": expected["operation_plan_sha256"], "operation": expected["operation"], "expected_dom_state_sha256": expected["expected_dom_state_sha256"], "viewport": viewport_value, "provenance": {**expected["provenance"], "binary_sha256": arms[raw_arm]["binary_sha256"], "source_snapshot_sha256": build_inputs.snapshot["sha256"], "deps_lock_sha256": gate.LOCK_SHA}, "samples": samples}
                 if row["catalog"]:
                     report.update({"condition_id": row["condition_id"], "case_id": row["case_id"],
@@ -1665,7 +1847,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 report_pin = write(report_path, report)
                 expected["reportPins"].append(report_pin)
                 reports.append(report_path)
-                order.append({"arm": arm, "pair_index": pair, "executable": str(binary), "executable_sha256": arms[raw_arm]["binary_sha256"], "output": str(report_path), "load_ratio_before": max(x["before"] for x in loads), "load_ratio_after": max(x["after"] for x in loads), "workerLoads": loads})
+                order.append({"arm": arm, "pair_index": pair, "executable": str(binary), "executable_sha256": arms[raw_arm]["binary_sha256"], "output": str(report_path), "load_ratio_before": max(x["before"] for x in loads), "load_ratio_after": max(x["after"] for x in loads), "workerLoads": loads, "workerAttempts": worker_attempts})
         manifest_data: gate.JsonObject = {"measurement_executed": True, "input_sha256": expected["fixture_sha256"], "environment_sha256": environment_sha, "platform": platform.platform(), "order": order}
         if row["catalog"]:
             manifest_data.update({"condition_id": row["condition_id"], "operation_evidence_ref": row["operation_evidence"]})
@@ -1675,6 +1857,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         result: gate.JsonObject = {"formalAccepted": False, "performanceAccepted": False, "measurementExecuted": True, "policy": {"policyPass": all(ok for phase in policy.values() for ok in phase.values()), "policy": policy, "deltaThreshold": 0, "quietLoadLimit": 0.25, "phaseRecords": len(gate.PHASES) * 50, "aggregate": aggregate}}
         if row["catalog"]:
             result["catalogCondition"] = expected["catalogCondition"]
+        checkpoint_pins.append(write_condition_checkpoint(folder, expected, result, manifest_data))
         expected_all.append((folder, expected, result, manifest_pin))
     after_context = context(root, target, input_paths, lifecycle, git_query=git_query)
     end_pin = write(output / "context-end.json", after_context)
@@ -1685,7 +1868,8 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     flags = {name: before_endpoint[key] == after_endpoint[key] for name, key in mapping.items()}
     refs: list[FilePin] = [build_inputs.source_before, source_end, approved, build_inputs.snapshot,
                            before_pin, end_pin, build_inputs.capacity_input, *build_pins,
-                           *[FilePin(path=str(p), sha256=gate.sha256(p)) for p in binaries.values()]]
+                           *[FilePin(path=str(p), sha256=gate.sha256(p)) for p in binaries.values()],
+                           *checkpoint_pins, *worker_attempt_pins]
     for row in measurement_rows:
         refs.append(FilePin(path=str(row["plan_path"]), sha256=gate.sha256(cast(Path, row["plan_path"]))))
         if row["dom"] is not None:

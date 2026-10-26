@@ -330,6 +330,242 @@ class ContextEnvironmentPrivacyTest(unittest.TestCase):
                 "KRR_PERF_SOURCE_SNAPSHOT_PATH": "snapshot.json"})
 
 
+class WorkerAttemptContractTest(unittest.TestCase):
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.binary = self.root / "worker"
+        self.binary.write_bytes(b"frozen worker")
+        self.build = producer.ArmBuildResult([], self.binary, gate.sha256(self.binary), {}, [])
+        self.fixture = self.root / "input.html"
+        self.fixture.write_text("<p>fixture</p>")
+        self.plan = self.root / "plan.json"
+        self.plan.write_text("{}")
+        self.logs = self.root / "raw"
+        self.attempts = self.root / "attempts"
+        self.viewport = {"width": 800, "height": 600, "scale": 1}
+
+    def command_result(
+        self, *, returncode: int = 0, mutate_binary: bool = False,
+        elapsed_ms: float = 1.0,
+    ) -> Callable[..., subprocess.CompletedProcess[bytes]]:
+        def execute(
+            args: Sequence[str], *, role: str,
+            log_directory: Path, cwd: Path | None = None,
+            env: Mapping[str, str] | None = None, check: bool = True,
+            lifecycle_sink: Callable[[Path], None] | None = None,
+        ) -> subprocess.CompletedProcess[bytes]:
+            self.assertEqual(role, "worker")
+            self.assertIs(check, False)
+            if mutate_binary:
+                self.binary.write_bytes(b"changed worker")
+            log_directory.mkdir(parents=True, exist_ok=True)
+            lifecycle = log_directory / f"worker-{len(list(log_directory.glob('worker-*.json')))}.json"
+            lifecycle.write_text(json.dumps({"argv": list(args), "exitCode": returncode,
+                                             "raw": []}))
+            if lifecycle_sink is not None:
+                lifecycle_sink(lifecycle)
+            payload = json.dumps({"sample": 0, "viewport": self.viewport,
+                                  "elapsed_ms": elapsed_ms}).encode()
+            return subprocess.CompletedProcess(args, returncode, payload, b"worker stderr")
+        return execute
+
+    def test_retries_only_host_load_and_records_both_attempts(self) -> None:
+        with patch.object(producer, "await_quiet", return_value=0.1), \
+             patch.object(producer, "quiet", side_effect=[0.31, 0.1]), \
+             patch.object(producer, "_measurement_command",
+                          side_effect=self.command_result()) as run:
+            sample, loads, attempts = producer.collect_worker_sample(
+                self.build, 0, self.fixture, self.root / "reports.json", self.plan, 800, 600, 1,
+                self.root, {"PATH": os.environ.get("PATH", "")}, self.logs, self.attempts,
+            )
+        self.assertEqual(sample["elapsed_ms"], 1.0)
+        self.assertEqual(loads, {"before": 0.1, "after": 0.1})
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(attempts[0]["reason"], "host load exceeded limit")
+        self.assertIs(attempts[0]["accepted"], False)
+        self.assertIs(attempts[1]["accepted"], True)
+        self.assertIs(attempts[1]["workerStarted"], True)
+        self.assertEqual(attempts[0]["loadRatioBefore"], 0.1)
+        self.assertEqual(attempts[0]["loadRatioAfter"], 0.31)
+        self.assertEqual(attempts[0]["actualExit"], 0)
+        lifecycle = attempts[0]["lifecycle"]
+        self.assertTrue(Path(lifecycle["path"]).is_file())
+        self.assertEqual(gate.sha256(Path(lifecycle["path"])), lifecycle["sha256"])
+        self.assertEqual(attempts[0]["binarySha256Before"], attempts[0]["binarySha256After"])
+        self.assertEqual(len(run.call_args_list), 2)
+        self.assertEqual(len(list(self.attempts.glob("*.json"))), 2)
+
+    def test_persistent_host_load_stops_after_three_recorded_attempts(self) -> None:
+        with patch.object(producer, "await_quiet", return_value=0.1), \
+             patch.object(producer, "quiet", return_value=0.3), \
+             patch.object(producer, "_measurement_command",
+                          side_effect=self.command_result()) as run:
+            with self.assertRaisesRegex(ValueError, "host load remained above limit"):
+                producer.collect_worker_sample(
+                    self.build, 0, self.fixture, self.root / "reports.json", self.plan, 800, 600, 1,
+                    self.root, {"PATH": os.environ.get("PATH", "")}, self.logs, self.attempts,
+                )
+        self.assertEqual(len(run.call_args_list), 3)
+        self.assertEqual(len(list(self.attempts.glob("*.json"))), 3)
+
+    def test_worker_binary_change_is_distinct_and_immediate(self) -> None:
+        with patch.object(producer, "await_quiet", return_value=0.1), \
+             patch.object(producer, "quiet", return_value=0.1), \
+             patch.object(producer, "_measurement_command",
+                          side_effect=self.command_result(mutate_binary=True)) as run:
+            with self.assertRaisesRegex(ValueError, "worker binary changed during measurement"):
+                producer.collect_worker_sample(
+                    self.build, 0, self.fixture, self.root / "reports.json", self.plan, 800, 600, 1,
+                    self.root, {"PATH": os.environ.get("PATH", "")}, self.logs, self.attempts,
+                )
+        self.assertEqual(len(run.call_args_list), 1)
+        attempt = json.loads(next(self.attempts.glob("*.json")).read_text())
+        self.assertNotEqual(attempt["binarySha256Before"], attempt["binarySha256After"])
+
+    def test_worker_failure_preserves_exit_and_is_not_retried(self) -> None:
+        with patch.object(producer, "await_quiet", return_value=0.1), \
+             patch.object(producer, "quiet", return_value=0.1), \
+             patch.object(producer, "_measurement_command",
+                          side_effect=self.command_result(returncode=7)) as run:
+            with self.assertRaises(subprocess.CalledProcessError) as caught:
+                producer.collect_worker_sample(
+                    self.build, 0, self.fixture, self.root / "reports.json", self.plan, 800, 600, 1,
+                    self.root, {"PATH": os.environ.get("PATH", "")}, self.logs, self.attempts,
+                )
+        self.assertEqual(caught.exception.returncode, 7)
+        self.assertEqual(caught.exception.output, json.dumps({
+            "sample": 0, "viewport": self.viewport, "elapsed_ms": 1.0,
+        }).encode())
+        self.assertEqual(caught.exception.stderr, b"worker stderr")
+        self.assertEqual(len(run.call_args_list), 1)
+        attempt = json.loads(next(self.attempts.glob("*.json")).read_text())
+        self.assertEqual(attempt["actualExit"], 7)
+        self.assertIs(attempt["accepted"], False)
+
+    def test_elapsed_time_does_not_trigger_host_load_retry(self) -> None:
+        with patch.object(producer, "await_quiet", return_value=0.1), \
+             patch.object(producer, "quiet", return_value=0.1), \
+             patch.object(producer, "_measurement_command",
+                          side_effect=self.command_result(elapsed_ms=90_000.0)) as run:
+            sample, _loads, attempts = producer.collect_worker_sample(
+                self.build, 0, self.fixture, self.root / "reports.json", self.plan, 800, 600, 1,
+                self.root, {"PATH": os.environ.get("PATH", "")}, self.logs, self.attempts,
+            )
+        self.assertEqual(sample["elapsed_ms"], 90_000.0)
+        self.assertEqual(len(run.call_args_list), 1)
+        self.assertIs(attempts[0]["accepted"], True)
+
+    def test_worker_attempt_records_are_unique_across_arms_and_pairs(self) -> None:
+        with patch.object(producer, "await_quiet", return_value=0.1), \
+             patch.object(producer, "quiet", return_value=0.1), \
+             patch.object(producer, "_measurement_command",
+                          side_effect=self.command_result()) as run:
+            for arm in ("baseline", "candidate"):
+                for pair in range(2):
+                    attempt_directory = producer.worker_attempts_directory(
+                        self.attempts, arm, pair,
+                    )
+                    producer.collect_worker_sample(
+                        self.build, 0, self.fixture, self.root / "reports.json", self.plan,
+                        800, 600, 1, self.root, {"PATH": os.environ.get("PATH", "")},
+                        self.logs, attempt_directory,
+                    )
+        saved = list(self.attempts.rglob("attempt-0-1.json"))
+        self.assertEqual(len(saved), 4)
+        self.assertEqual(len({path.parent for path in saved}), 4)
+        self.assertEqual(len(run.call_args_list), 4)
+
+    def test_pre_worker_binary_mismatch_is_recorded_without_launch(self) -> None:
+        self.binary.write_bytes(b"changed before worker")
+        with patch.object(producer, "await_quiet", return_value=0.1), \
+             patch.object(producer, "_measurement_command") as run:
+            with self.assertRaisesRegex(ValueError, "binary changed before measurement"):
+                producer.collect_worker_sample(
+                    self.build, 0, self.fixture, self.root / "reports.json", self.plan,
+                    800, 600, 1, self.root, {"PATH": os.environ.get("PATH", "")},
+                    self.logs, self.attempts,
+                )
+        run.assert_not_called()
+        attempt = json.loads(next(self.attempts.glob("attempt-0-1.json")).read_text())
+        actual_sha = gate.sha256(self.binary)
+        self.assertEqual(attempt["binarySha256Before"], actual_sha)
+        self.assertIsNone(attempt["binarySha256After"])
+        self.assertEqual(attempt["reason"], "worker binary changed before measurement")
+        self.assertIs(attempt["workerStarted"], False)
+        self.assertIsNone(attempt["actualExit"])
+
+    def test_worker_start_is_unknown_when_launch_has_no_pid_record(self) -> None:
+        def fail_before_spawn(*_args: object, **_kwargs: object) -> None:
+            raise FileNotFoundError("worker executable unavailable")
+
+        with patch.object(producer, "await_quiet", return_value=0.1), \
+             patch.object(producer, "quiet", return_value=0.1), \
+             patch.object(producer, "_measurement_command", side_effect=fail_before_spawn):
+            with self.assertRaisesRegex(FileNotFoundError, "worker executable unavailable"):
+                producer.collect_worker_sample(
+                    self.build, 0, self.fixture, self.root / "reports.json", self.plan,
+                    800, 600, 1, self.root, {"PATH": os.environ.get("PATH", "")},
+                    self.logs, self.attempts,
+                )
+        attempt = json.loads(next(self.attempts.glob("attempt-0-1.json")).read_text())
+        self.assertIsNone(attempt["workerStarted"])
+        self.assertIsNone(attempt["actualExit"])
+        self.assertIsNone(attempt["lifecycle"])
+        self.assertEqual(attempt["loadRatioAfter"], 0.1)
+
+    def test_worker_start_is_true_when_timeout_lifecycle_records_pid(self) -> None:
+        def timeout_after_spawn(
+            args: Sequence[str], *, log_directory: Path,
+            lifecycle_sink: Callable[[Path], None] | None = None, **_kwargs: object,
+        ) -> None:
+            lifecycle = log_directory / "worker-timeout.json"
+            lifecycle.parent.mkdir(parents=True, exist_ok=True)
+            lifecycle.write_text(json.dumps({"identity": {"pid": 4242}, "exitCode": -15}))
+            if lifecycle_sink is not None:
+                lifecycle_sink(lifecycle)
+            raise subprocess.TimeoutExpired(args, 60)
+
+        with patch.object(producer, "await_quiet", return_value=0.1), \
+             patch.object(producer, "quiet", return_value=0.1), \
+             patch.object(producer, "_measurement_command", side_effect=timeout_after_spawn):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                producer.collect_worker_sample(
+                    self.build, 0, self.fixture, self.root / "reports.json", self.plan,
+                    800, 600, 1, self.root, {"PATH": os.environ.get("PATH", "")},
+                    self.logs, self.attempts,
+                )
+        attempt = json.loads(next(self.attempts.glob("attempt-0-1.json")).read_text())
+        self.assertIs(attempt["workerStarted"], True)
+        self.assertIsNone(attempt["actualExit"])
+        self.assertEqual(attempt["loadRatioAfter"], 0.1)
+
+    def test_quiet_wait_uses_the_worker_load_limit(self) -> None:
+        with patch.object(producer, "quiet", side_effect=[0.3, 0.25, 0.25]), \
+             patch.object(producer.time, "sleep") as sleep:
+            self.assertEqual(producer.await_quiet(), producer.MAX_WORKER_LOAD)
+        sleep.assert_called_once_with(5)
+        self.assertEqual(producer.MAX_WORKER_LOAD, 0.25)
+
+    def test_condition_checkpoint_is_nonfinal_and_exclusive(self) -> None:
+        folder = self.root / "condition"
+        checkpoint = producer.write_condition_checkpoint(
+            folder, {"fixture_sha256": "a" * 64}, {"formalAccepted": False},
+            {"measurement_executed": True},
+        )
+        value = json.loads(Path(checkpoint["path"]).read_text())
+        self.assertIs(value["formalAccepted"], False)
+        self.assertIs(value["endpointValidated"], False)
+        self.assertEqual(value["expected"]["fixture_sha256"], "a" * 64)
+        self.assertEqual(value["result"]["formalAccepted"], False)
+        self.assertTrue(value["manifest"]["measurement_executed"])
+        with self.assertRaises(FileExistsError):
+            producer.write_condition_checkpoint(
+                folder, {"fixture_sha256": "b" * 64}, {}, {},
+            )
+
+
 class CapacityBindingUnitTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()

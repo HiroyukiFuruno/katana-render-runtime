@@ -26,7 +26,19 @@ IssueのClose条件は担当が実行できる実装・自動検証・公開へ�
 
 ## 現在の状態（2026-10-26）
 
-最新の実行結果は以下のR2885〜R2902を優先し、それ以前の記録は対応sourceの履歴として保持する。HEAD `526c5c14` のR2885では製品native PNGの全117件を採点し、99以上51件・未達66件・未採点0件。R2850の既存合格46件はすべて維持し、脱落0件。macOSのgeneric sansを独立Chromeで確認したHelveticaへ合わせた修正は`e8ac617f`に含む。代表C4のSVG矩形16観測は最大差約0.000001pxだが、実PNG全体の合格へ代用しない。参照・入力・配色方針・採点閾値は不変。
+R2904でno-scroll集計修正を`043aec40`、R2906でrelease必須commit/内容固定を`f8e3ce19`へ通常hookでcommitした。R2905は固定後の3回帰と並列source-static-foundationがactual0・source不変。R2907の同HEADでHTML84条件は再び全90以上・font identity establishedだが、性能producerは`worker load/binary changed`で中断。完了したpair-manifestは3条件分あり、元raw・失敗resultを保持する。失敗時のload値は現行errorに保存されておらず、後から再構成しない。中断後にbaseline/candidate両frozen binaryのSHA保持は確認したが、これを失敗瞬間の証明には転用しない。
+
+- [ ] PERFORMANCE-WORKER-RECOVERY: 0.25を超えたhost負荷だけを無効sampleとしてbounded再実行し、全attemptのraw/理由を保持する。binary変化・command失敗をretryで隠さず、各pair5sample・全84条件・表示3秒未満・時間/RSS非劣化を維持する。途中conditionのexpected/aggregateは先にcheckpointへ排他的保存するが、最終endpoint検証前の成功や安全な再利用と認定しない。
+- [ ] PERFORMANCE-INVENTORY-PARALLEL: 旧R2902の計測contextはregistry261,462ファイル/6,246,047,813 bytesとtarget3,472ファイル/2,531,552,967 bytesを全SHA照合した。同じ全対象・全bytes・順序を維持した読み取り並列化を標準ライブラリで実装・比較検証する。metadataだけへの置換や検査省略はしない。速度効果は未測定。
+- [ ] PERFORMANCE-CHECKPOINT-TRUST: 既存Git-dir private anchorとimmutable receiptをHTML条件のidentityへ適用する設計を進める。coverageの`performance` anchorとの名前空間衝突を避ける。途中checkpointは正式合格と分け、改ざん・source/binary/font/config/state差分・無効sampleの再利用を拒否する。既存library/仕組みを再利用し、新しい汎用cache frameworkをKRRへ作らない。
+
+worker負荷対処と途中checkpointの限定実装を追加した。主担当の差分確認で、arm/pair間のattempt保存先衝突・起動前binary変化の記録漏れ・manifest重複構築を検出し、修正前回帰の失敗から修正後producer70件・Ruff/strict mypyのactual0まで確認した（`tmp/quality/worker-collision-suite-1793014855004094000/`）。全量inventoryの並列moduleは回帰6件成功。配線後の自己比較になるテストを主担当が指摘し、固定期待値・独立hashlib値へ修正した。統合後のproducer70件・verifier89件・inventory6件は全成功。最初のfoundationは新規2fileが未追跡という正常な拒否でactual1を保持し、Gitの検査対象へ登録後に再検証する。
+
+全量inventoryのABBA比較は`tmp/quality/html-performance-inventory-validation-20261026/`へ保存した。targetの3,472行/2,531,552,967 bytesは全出力一致・前後snapshot安定で、旧18.544秒/新0.988秒/新0.951秒/旧1.544秒。旧初回のcold差を含む平均で一般化せず、後半でも新方式が短いことを採用判断の一根拠とする。Skia srcの小標本は旧約204ms/新約223msで改善なし。registryの261,462行/6,246,047,813 bytesは4出力すべて一致したがdirectorySnapshotStable=false・actual1で、記録された310.322/73.830/100.977/307.997秒を正式な速度比較へ採用しない。全byte検査・返却schema・順序を維持し、追加の読取中変更拒否とbounded並列化を統合する。正式HTML性能合格の証拠には代用しない。
+
+Git intent-to-addで新2fileを検査対象へ登録後、既存foundationとproducer70/verifier89/inventory6の165件がactual0・全source前後一致（`tmp/quality/html-performance-inventory-validation-20261026/final-validation-20261026-001/`）。後続の主担当レビューで、起動前に取得していないafter SHAと例外時の起動有無を補完しないよう修正し、未観測はnull・開始前拒否はfalse・process/PID証拠ありはtrueへ区別した。producer72件とRuff/strict mypyはactual0・対象source不変（`tmp/quality/worker-metadata-verified-1793022649397573000/`）。metadata修正後の最終統合確認もfoundation・producer72/verifier89/inventory6の167件がactual0・source前後一致（同`final-validation-20261026-002/`）。主担当が全6観測のstdout/stderr実SHAとactual0を照合した。本記録の更新は文書のみであり、実装は同じ検証済みSHAを維持する。全84性能の正式合格・安全な途中再利用は未達。
+
+Mermaid品質の最新一括結果はR2885を参照し、それ以前の記録は対応sourceの履歴として保持する。HEAD `526c5c14` のR2885では製品native PNGの全117件を採点し、99以上51件・未達66件・未採点0件。R2850の既存合格46件はすべて維持し、脱落0件。macOSのgeneric sansを独立Chromeで確認したHelveticaへ合わせた修正は`e8ac617f`に含む。代表C4のSVG矩形16観測は最大差約0.000001pxだが、実PNG全体の合格へ代用しない。参照・入力・配色方針・採点閾値は不変。
 
 R2902のno-scroll集計不備は、実bottom・全scroll値0・同一viewport・有限正の寸法とscale・実content範囲を証明できる場合だけelapsed0を受理する限定修正とした。他phase・scroll必要時・負値・非有限値・不足証明は拒否する。新回帰を含む30件、対象Ruff/strict mypyは実argv・source前後SHA・raw・actual0を結び付けて再検証した（`tmp/quality/html-full-y-zero-noop-r2902/observed-runs/4821ede0b57b3ba0fe63b46e/`）。主担当は一度偽陽性になり得たRSS欠落を指摘し、有効base受理と1項目変異拒否へ修正済み。R2903の既存並列source-static-foundationもactual0・source不変。これらは性能全84条件の合格ではなく、R2902原失敗は保持する。
 
