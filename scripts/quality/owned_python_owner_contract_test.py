@@ -7,7 +7,9 @@ import ast
 import argparse
 import sys
 import subprocess
+import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from types import ModuleType
 from typing import cast
@@ -285,6 +287,41 @@ class MoonOwnerAstContractTests(unittest.TestCase):
             },
         }
         module.validate_root_test_coverage_contract(valid)
+        justfile = (Path(__file__).resolve().parents[2] / "Justfile").read_text()
+        private_marker = "\n[private]\nperformance-harness-coverage-run:\n"
+        public_prefix, private_body = justfile.split(private_marker, 1)
+        mutations = [
+            (
+                "public recipe bypasses lock wrapper",
+                justfile.replace(
+                    "python3 scripts/hooks/run_locked_command.py --performance-coverage",
+                    "just performance-harness-coverage-run",
+                    1,
+                ),
+            ),
+            (
+                "private producer marker missing",
+                justfile.replace(
+                    private_marker,
+                    "\nperformance-harness-coverage-run:\n",
+                    1,
+                ),
+            ),
+            (
+                "candidate coverage arm missing",
+                public_prefix
+                + private_marker
+                + private_body.replace("--features candidate", "--features baseline", 1),
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for label, changed_justfile in mutations:
+                with self.subTest(binding=label):
+                    (root / "Justfile").write_text(changed_justfile)
+                    with patch.object(module, "ROOT", root):
+                        with self.assertRaises(AssertionError):
+                            module.validate_root_test_coverage_contract(valid)
         for task, field, replacement in [
             ("unit-test", "outputs", ["tmp/quality/standalone-performance-coverage/root.json"]),
             ("performance-coverage", "outputs", ["tmp/quality/standalone-performance-coverage/baseline.json"]),

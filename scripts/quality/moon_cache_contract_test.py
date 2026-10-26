@@ -283,13 +283,25 @@ def validate_root_test_coverage_contract(declared: dict[str, object]) -> None:
         "    just performance-harness-coverage",
         "    just coverage-result-check",
     ]
-    performance = justfile.split("\nperformance-harness-coverage:", 1)[1].split(
+    performance = justfile.split("\nperformance-harness-coverage:\n", 1)[1].split(
         "\n\n", 1
     )[0]
-    assert performance.count(" llvm-cov --manifest-path ") == 2
-    assert (
-        "--features baseline" in performance and "--features candidate" in performance
-    )
+    assert performance.splitlines() == [
+        "    python3 scripts/hooks/run_locked_command.py --performance-coverage",
+    ]
+    private_marker = "\n[private]\nperformance-harness-coverage-run:\n"
+    assert justfile.count(private_marker) == 1
+    performance_run = justfile.split(private_marker, 1)[1].split("\n\n", 1)[0]
+    assert performance_run.splitlines() == [
+        '    mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"',
+        '    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-begin --producer performance',
+        '    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-baseline" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-baseline -- {{CARGO}} llvm-cov clean --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --locked',
+        '    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-baseline" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-baseline -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features baseline --locked --profile krr-coverage --ignore-filename-regex {{quote(COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX)}} --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/baseline.json"{{TEST_THREAD_ARGS}}',
+        '    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-candidate" python3 scripts/build/cargo_capacity_guard.py --coverage-domain performance-candidate -- {{CARGO}} llvm-cov clean --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --locked',
+        '    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-performance-candidate" python3 scripts/build/cargo_capacity_guard.py --coverage-collection-domain performance-candidate -- {{CARGO}} llvm-cov --manifest-path scripts/html/performance-harness/Cargo.toml --workspace --all-targets --no-default-features --features candidate --locked --profile krr-coverage --ignore-filename-regex {{quote(COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX)}} --json --output-path "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage/candidate.json"{{TEST_THREAD_ARGS}}',
+        '    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collect-finish --producer performance --producer-exit 0',
+        '    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-collection-validate --producer performance',
+    ]
 
 
 def production_task_input_binding(
@@ -904,7 +916,7 @@ def main() -> int:
             json.dumps(
                 {
                     "projects": {"probe": "."},
-                    "versionConstraint": "=2.6.2",
+                    "versionConstraint": "=2.6.4",
                     "telemetry": False,
                     "hasher": {"ignorePatterns": ["!/.moon/cache/**"]},
                     "pipeline": {

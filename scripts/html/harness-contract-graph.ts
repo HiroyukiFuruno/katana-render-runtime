@@ -4541,7 +4541,7 @@ const MOON_TERMINAL_SOURCES = {
   "scripts/hooks/run_parallel_checks.py":
     "6590d3482195d88452d2592a2a690e114c7e060270e95908c735c695256ac180",
   "scripts/html/harness-contract-cli.ts":
-    "0d90c6357befd55ca02de162a3970a0f6f70285080d9a6c61e4d14e24fdf90d5",
+    "949d04ce668ffdbf98b5bca0aa66d201b450999c6edd8ad4747920b391e5d068",
 } as const;
 
 function moonTerminalSourcesRegistered(
@@ -4625,7 +4625,7 @@ function moonRoots(
   const experiments = object(workspace.experiments);
   if (
     object(workspace.projects)?.[moon.project] !== "." ||
-    workspace.versionConstraint !== "=2.6.2" ||
+    workspace.versionConstraint !== "=2.6.4" ||
     cas?.verifyIntegrity !== true ||
     experiments?.casOutputsCache !== true
   )

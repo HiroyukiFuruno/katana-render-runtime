@@ -231,7 +231,7 @@ function moonFixture(): HarnessSnapshot {
   snapshot.policy.codeRoots.push("crates/");
   replaceSources(snapshot, {
     ".moon/workspace.yml":
-      "projects:\n  krr: '.'\nversionConstraint: '=2.6.2'\ncache:\n  cas:\n    verifyIntegrity: true\nexperiments:\n  casOutputsCache: true\n",
+      "projects:\n  krr: '.'\nversionConstraint: '=2.6.4'\ncache:\n  cas:\n    verifyIntegrity: true\nexperiments:\n  casOutputsCache: true\n",
     "moon.yml": JSON.stringify({
       taskOptions: { cache: false, runInCI: "always", shell: false },
       tasks,
@@ -4454,7 +4454,7 @@ test("runtime bundle named entry binds the one cache-enabled fingerprint leaf", 
   ).toThrow("unsafe moon task options lint");
 });
 
-test("Moon v2.6.2 cache manifest binds the observed string version", () => {
+test("Moon v2.6.4 cache manifest binds the observed string version", () => {
   const fingerprint = {
     schema: "krr-runtime-bundle-tool-fingerprint-v1",
     platform: "darwin",
@@ -4465,7 +4465,7 @@ test("Moon v2.6.2 cache manifest binds the observed string version", () => {
       node: { version: "v24.0.0", executableSha256: "3".repeat(64) },
       bash: { version: "5.2", executableSha256: "4".repeat(64) },
       moon: {
-        version: "2.6.2",
+        version: "2.6.4",
         executableSha256: "5".repeat(64),
         wrapperSha256: "6".repeat(64),
         utilsSha256: "7".repeat(64),

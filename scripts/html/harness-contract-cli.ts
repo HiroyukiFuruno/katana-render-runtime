@@ -66,7 +66,7 @@ const runContract = z.strictObject({
   schema: z.literal(1),
   project: z.literal("krr"),
   entry: moonEntry,
-  version: z.literal("2.6.2"),
+  version: z.literal("2.6.4"),
   inputSha256,
   tasks: z.record(z.string().min(1), moonTask),
 });
@@ -235,7 +235,7 @@ export function moonRunContract(
   const workspace = z
     .looseObject({
       projects: z.looseObject({ krr: z.literal(".") }),
-      versionConstraint: z.literal("=2.6.2"),
+      versionConstraint: z.literal("=2.6.4"),
       cache: z.strictObject({
         cas: z.strictObject({ verifyIntegrity: z.literal(true) }),
       }),
@@ -245,7 +245,7 @@ export function moonRunContract(
       }),
     })
     .parse(Bun.YAML.parse(text(".moon/workspace.yml")));
-  z.looseObject({ devDependencies: z.looseObject({ "@moonrepo/cli": z.literal("2.6.2") }) }).parse(
+  z.looseObject({ devDependencies: z.looseObject({ "@moonrepo/cli": z.literal("2.6.4") }) }).parse(
     JSON.parse(text("package.json")),
   );
   const policy = policyContract.parse(

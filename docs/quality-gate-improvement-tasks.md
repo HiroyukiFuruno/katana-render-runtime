@@ -16,6 +16,12 @@ IssueのClose条件は担当が実行できる実装・自動検証・公開へ�
 
 ## 現在の状態（2026-10-26）
 
+既知の選定境界: Moon 2.6.2のlocal CAS hydrationがverifyIntegrityを通さない制約は、下記「2026-10-17」のCAS隔離実験とreceipt adapter方針で既に確認・対処方針選定済み。再発見を新規ブロッカーやMoon forkの前提にしない。Moonは未信頼のtransportとして使い、KRR固有の非cacheableな最終認証が全成果物の署名・SHA・source/tool/environmentを照合し、不一致は実producerへ戻して再検証する。この既存設計の実プロジェクト証明を必須とし、Moon単独のread-integrity成功と混同しない。一般runner/cache storeは新設しない。
+
+R2779〜R2782はclean source `27332619`で実CAS manifest/blobと3成果物のSHA・実bytes一致、同key hit、成果物退避後の復元を確認した。R2783ではreceipt用CAS blobの1byte改変をMoonがcachedとしてhydrateしたが、必須の非cacheable acceptanceが拒否（before1）、実producer再検査0、after0/validへ回復し、coverage2報告は初回と同一。元blobは復元済み。外側postprocessorがMoon actionだけで再実行を判定したfalseを保持し、実際のacceptance内refreshをR2784で別評価した。Moon単独integrityの合格へ代用しない。Root/full coverage・CI・描画/性能は未完了。依存更新として公開済みMoon 2.6.4を取り込み評価中で、既存CAS制約の解消は未認定。
+
+R2785でMoon 2.6.4へ通常の依存更新を行い、R2789で契約・Python owner23テスト・source-static-foundationが全0/source前後一致となった。Moon関連Bun97件はR2786で全成功を保持。R2786のowner AST pin不一致、R2787/R2788の旧public recipe契約と先頭改行の取り違えは失敗ログを保持し、public lock wrapperとprivate producer8行を正確に固定し直した。wrapper bypass/private marker欠落/candidate arm欠落の負例を追加、owner AST pinを実sourceへ同期した。Moon 2.6.4でもlocal CAS read経路の既知制約は変わらず、必須adapterを維持する。次は現行clean sourceのRoot producer/full集計へ進む。
+
 R2762〜R2767でfork PR #3の最新HEADレビュー・未解決0・Ready後の必須3 OSを含む8 checks成功を確認し、expected HEADを指定した通常の保護mergeを完了した（merge `c01f0165059e472f45472cccddc573d32c13548a`）。merged sourceでkatana-usvgのpackage/compile検証は成功したが、crates.io uploadは403認証失敗。ユーザーへ端末の認証更新を依頼中で、2crate公開・KRR採用・Releaseは未完了。旧0.48.1 Draftは公開しない。
 
 R2763/R2770/R2771/R2772は現行commit `9feed535`のperformance producer限定で、実cache miss、hit、出力復元、receipt改ざん拒否から再検査・validへの回復を確認した。R2766のpostprocessorが論理target stateをcache状態と誤認した失敗は保持し、元のaction/hydration rawからR2770で訂正した。実バックエンドはlegacy archiveでありCASではない。CAS出力と読み取りintegrityの本番設定・契約を修正中で、物理manifest/blobを含む実証は未完了。限定成功をroot/full coverage・描画・性能・公開の合格へ代用しない。
