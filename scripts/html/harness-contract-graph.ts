@@ -4192,6 +4192,8 @@ function moonCoverageRecipesVerified(
   const performance = recipes.get("performance-harness-coverage-run") ?? "";
   const rootCommand =
     'CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"';
+  const performanceWrapperCommand =
+    "CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/hooks/run_locked_command.py --performance-coverage";
   const rootCommands = root
     .split("\n")
     .map((line) => line.trim())
@@ -4224,10 +4226,7 @@ function moonCoverageRecipesVerified(
   )
     errors.push("root combined coverage producer differs");
   const performanceReports = reportLines(performance);
-  if (
-    performanceWrapper.trim() !==
-    "python3 scripts/hooks/run_locked_command.py --performance-coverage"
-  )
+  if (performanceWrapper.trim() !== performanceWrapperCommand)
     errors.push("performance coverage lock wrapper differs");
   if (!/^\[private\]\s*\nperformance-harness-coverage-run:/m.test(justfile))
     errors.push("performance coverage run recipe is not private");

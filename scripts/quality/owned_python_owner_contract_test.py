@@ -288,14 +288,50 @@ class MoonOwnerAstContractTests(unittest.TestCase):
         }
         module.validate_root_test_coverage_contract(valid)
         justfile = (Path(__file__).resolve().parents[2] / "Justfile").read_text()
+        cache_key_marker = "\nnative-coverage-cache-key producer:\n"
+        cache_key_prefix, cache_key_body = justfile.split(cache_key_marker, 1)
         private_marker = "\n[private]\nperformance-harness-coverage-run:\n"
         public_prefix, private_body = justfile.split(private_marker, 1)
         mutations = [
             (
                 "public recipe bypasses lock wrapper",
                 justfile.replace(
-                    "python3 scripts/hooks/run_locked_command.py --performance-coverage",
+                    "CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/hooks/run_locked_command.py --performance-coverage",
                     "just performance-harness-coverage-run",
+                    1,
+                ),
+            ),
+            (
+                "cache key omits producer environment",
+                cache_key_prefix
+                + cache_key_marker
+                + cache_key_body.replace(
+                    "CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} ",
+                    "",
+                    1,
+                ),
+            ),
+            (
+                "cache key changes CARGO override",
+                cache_key_prefix
+                + cache_key_marker
+                + cache_key_body.replace("CARGO={{quote(CARGO)}}", "CARGO=cargo", 1),
+            ),
+            (
+                "cache key changes thread override",
+                cache_key_prefix
+                + cache_key_marker
+                + cache_key_body.replace(
+                    "TEST_THREADS={{quote(TEST_THREADS)}}",
+                    "TEST_THREADS=1",
+                    1,
+                ),
+            ),
+            (
+                "performance wrapper omits producer environment",
+                justfile.replace(
+                    "CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/hooks/run_locked_command.py --performance-coverage",
+                    "python3 scripts/hooks/run_locked_command.py --performance-coverage",
                     1,
                 ),
             ),

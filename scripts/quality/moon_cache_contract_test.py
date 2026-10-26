@@ -265,6 +265,12 @@ def validate_root_test_coverage_contract(declared: dict[str, object]) -> None:
         }
     ]
     justfile = (ROOT / "Justfile").read_text()
+    cache_key_recipe = justfile.split("\nnative-coverage-cache-key producer:\n", 1)[
+        1
+    ].split("\n\n", 1)[0]
+    assert cache_key_recipe.splitlines() == [
+        '    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-key --producer {{quote(producer)}} --moon-fingerprint',
+    ]
     assert (
         "unit-test: plantuml-install\n    {{CARGO}} test --workspace --all-targets --all-features --locked{{TEST_THREAD_ARGS}}"
         in justfile
@@ -287,7 +293,7 @@ def validate_root_test_coverage_contract(declared: dict[str, object]) -> None:
         "\n\n", 1
     )[0]
     assert performance.splitlines() == [
-        "    python3 scripts/hooks/run_locked_command.py --performance-coverage",
+        "    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/hooks/run_locked_command.py --performance-coverage",
     ]
     private_marker = "\n[private]\nperformance-harness-coverage-run:\n"
     assert justfile.count(private_marker) == 1

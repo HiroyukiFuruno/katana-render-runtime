@@ -109,10 +109,10 @@ unit-test: plantuml-install
 
 # Root unit tests and line coverage share one fresh instrumented test run.
 native-coverage-cache-key producer:
-    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-key --producer {{quote(producer)}} --moon-fingerprint
+    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-key --producer {{quote(producer)}} --moon-fingerprint
 
 native-coverage-cache-diagnose producer:
-    python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-diagnose --producer {{quote(producer)}}
+    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-diagnose --producer {{quote(producer)}}
 
 # WHY: 正式coverageの合格とは分け、既存runner候補の全件実行コストを測る。
 native-nextest-diagnostic filter="": plantuml-install runtime-bundle-check
@@ -184,7 +184,7 @@ performance-harness-lint retained_profile="":
 
 # profileは分離し、全出力は同じroot targetの固定aggregate容量へ含める。
 performance-harness-coverage:
-    python3 scripts/hooks/run_locked_command.py --performance-coverage
+    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/hooks/run_locked_command.py --performance-coverage
 
 [private]
 performance-harness-coverage-run:

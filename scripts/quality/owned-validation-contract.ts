@@ -113,7 +113,7 @@ const PERFORMANCE_MANIFEST = `${PERFORMANCE_HARNESS}/Cargo.toml`;
 const PERFORMANCE_ARMS = ["baseline", "candidate"] as const;
 const PERFORMANCE_COVERAGE_RUN_RECIPE = "performance-harness-coverage-run";
 const PERFORMANCE_COVERAGE_WRAPPER =
-  "python3 scripts/hooks/run_locked_command.py --performance-coverage";
+  "CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/hooks/run_locked_command.py --performance-coverage";
 const PERFORMANCE_RECIPES = {
   format: "performance-harness-fmt-check",
   lint: "performance-harness-lint",
@@ -1470,7 +1470,7 @@ function performanceRecipeCommands(): Record<string, string[]> {
   const deny = PERFORMANCE_CLIPPY_DENY.map((name) => `-D ${name}`).join(" ");
   return {
     "native-coverage-cache-key": [
-      'python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-key --producer {{quote(producer)}} --moon-fingerprint',
+      'CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-key --producer {{quote(producer)}} --moon-fingerprint',
     ],
     [PERFORMANCE_RECIPES.format]: [
       `{{CARGO}} fmt --manifest-path ${PERFORMANCE_MANIFEST} --all -- --check`,

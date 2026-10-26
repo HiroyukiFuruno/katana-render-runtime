@@ -22,6 +22,8 @@ R2779〜R2782はclean source `27332619`で実CAS manifest/blobと3成果物のSH
 
 R2785でMoon 2.6.4へ通常の依存更新を行い、R2789で契約・Python owner23テスト・source-static-foundationが全0/source前後一致となった。Moon関連Bun97件はR2786で全成功を保持。R2786のowner AST pin不一致、R2787/R2788の旧public recipe契約と先頭改行の取り違えは失敗ログを保持し、public lock wrapperとprivate producer8行を正確に固定し直した。wrapper bypass/private marker欠落/candidate arm欠落の負例を追加、owner AST pinを実sourceへ同期した。Moon 2.6.4でもlocal CAS read経路の既知制約は変わらず、必須adapterを維持する。次は現行clean sourceのRoot producer/full集計へ進む。
 
+Moon更新は通常hookのRust Clippy成功後に固定容量を超えたR2790を保持し、既存just clean（R2792、source/index不変・凍結4binary SHA保持・閾値変更なし）後、通常hookでcommit `7b03937`へ取り込んだ。R2791のRoot実行は開始前にprobe identity不一致で拒否され、Rustテスト未実行。添付root.json/root-local-resultは旧成果物で現行合格ではない。probe自体はcacheable:true/token:nullで、エラー文のnon-cacheableから状態を断定しない。Just key側では省略、実Root側では明示していたCARGO/TEST_THREADSの非対称を共通prefixへ揃え、performanceと診断入口も同じ環境へ接続した。digest除外・nonce操作なし。R2794で契約・Python owner・関連Bun・foundationが全0/source前後一致。clean sourceへcommitしてRoot実行を再試行する。
+
 R2762〜R2767でfork PR #3の最新HEADレビュー・未解決0・Ready後の必須3 OSを含む8 checks成功を確認し、expected HEADを指定した通常の保護mergeを完了した（merge `c01f0165059e472f45472cccddc573d32c13548a`）。merged sourceでkatana-usvgのpackage/compile検証は成功したが、crates.io uploadは403認証失敗。ユーザーへ端末の認証更新を依頼中で、2crate公開・KRR採用・Releaseは未完了。旧0.48.1 Draftは公開しない。
 
 R2763/R2770/R2771/R2772は現行commit `9feed535`のperformance producer限定で、実cache miss、hit、出力復元、receipt改ざん拒否から再検査・validへの回復を確認した。R2766のpostprocessorが論理target stateをcache状態と誤認した失敗は保持し、元のaction/hydration rawからR2770で訂正した。実バックエンドはlegacy archiveでありCASではない。CAS出力と読み取りintegrityの本番設定・契約を修正中で、物理manifest/blobを含む実証は未完了。限定成功をroot/full coverage・描画・性能・公開の合格へ代用しない。

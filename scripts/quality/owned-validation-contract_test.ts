@@ -3966,6 +3966,36 @@ test.each([
     "manifest",
   ],
   [
+    "native-coverage-cache-key",
+    "CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} ",
+    "",
+    "cache-key environment mismatch",
+  ],
+  [
+    "native-coverage-cache-key",
+    "CARGO={{quote(CARGO)}}",
+    "CARGO=cargo",
+    "cache-key CARGO override",
+  ],
+  [
+    "native-coverage-cache-key",
+    "TEST_THREADS={{quote(TEST_THREADS)}}",
+    "TEST_THREADS=1",
+    "cache-key thread override",
+  ],
+  [
+    "performance-harness-coverage",
+    "CARGO={{quote(CARGO)}}",
+    "CARGO=cargo",
+    "wrapper CARGO override",
+  ],
+  [
+    "performance-harness-coverage",
+    "TEST_THREADS={{quote(TEST_THREADS)}}",
+    "TEST_THREADS=1",
+    "wrapper thread override",
+  ],
+  [
     "performance-harness-coverage-run",
     "--coverage-collection-domain performance-candidate",
     "--coverage-collection-domain performance-baseline",
@@ -4139,6 +4169,10 @@ test.each(["||", "&&", ";", "\n"])(
 test.each([
   ["public bypass", "just performance-harness-coverage-run"],
   ["wrong mode", "python3 scripts/hooks/run_locked_command.py --protect-root-producer"],
+  [
+    "missing producer environment",
+    "python3 scripts/hooks/run_locked_command.py --performance-coverage",
+  ],
 ])("standalone performance coverage wrapper rejects %s", (_name, body) => {
   const root = performanceHarnessFixture();
   performanceHarnessRecipes(root, { "performance-harness-coverage": body });

@@ -3345,10 +3345,12 @@ COVERAGE_MIN_LINES := env_var_or_default("COVERAGE_MIN_LINES", "100")
 COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES", "0")
 COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX := "(^|[/\\\\])scripts[/\\\\]html[/\\\\]performance-harness[/\\\\]src[/\\\\]([^/\\\\]+[/\\\\])*[^/\\\\]+(_tests|_test_support)\\.rs$"
 ${runtimeRecipes.join("\n")}
+native-coverage-cache-key producer:
+    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-key --producer {{quote(producer)}} --moon-fingerprint
 root-test-and-coverage: plantuml-install
     CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"
 performance-harness-coverage:
-    python3 scripts/hooks/run_locked_command.py --performance-coverage
+    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/hooks/run_locked_command.py --performance-coverage
 [private]
 performance-harness-coverage-run:
     mkdir -p "{{REPO_ROOT}}/tmp/quality/standalone-performance-coverage"
@@ -3767,7 +3769,7 @@ test("local coverage entry preserves static barrier and required heavy closure",
   expect(snapshot.graph.local.has("scripts/quality/owned-validation-contract.ts")).toBe(true);
   const justfile = snapshot.read("Justfile") ?? "";
   expect(justfile).toContain(
-    "performance-harness-coverage:\n    python3 scripts/hooks/run_locked_command.py --performance-coverage",
+    "performance-harness-coverage:\n    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/hooks/run_locked_command.py --performance-coverage",
   );
   expect(justfile).toMatch(/\[private\]\s*\nperformance-harness-coverage-run:/);
 });
