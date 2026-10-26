@@ -60,7 +60,7 @@ export function captureCatalogProducerContext(
   };
 }
 
-function captureFontEnvironment(repositoryRoot: string): FontEnvironment {
+export function captureFontEnvironment(repositoryRoot: string): FontEnvironment {
   const output = execFileSync(
     "python3",
     ["scripts/release/native_coverage_result_cli.py", "--repo", repositoryRoot, "font-context"],
@@ -162,7 +162,7 @@ function isContext(value: unknown): value is CatalogCaptureProducerContext {
   );
 }
 
-function isFontEnvironment(value: unknown): value is FontEnvironment {
+export function isFontEnvironment(value: unknown): value is FontEnvironment {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const environment = value as Record<string, unknown>;
   return (

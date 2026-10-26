@@ -2,8 +2,14 @@ import { describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { FontEnvironment } from "../html/catalog-capture-producer-context";
 import { makeOnePixelPng } from "./mermaid_pair_test_support";
 import { fileSha256 } from "./mermaid-pair-manifest";
+import {
+  assertNativeFrameFontContext,
+  readNativeFrameCaptureConfig,
+  readNativeFrameFontContext,
+} from "./native-frame-capture-context";
 import type { NativeFrameEvidence } from "./native-frame-evidence";
 import {
   NATIVE_FRAME_TARGETS,
@@ -15,8 +21,28 @@ import {
 import { MagickOps } from "./reference_image_ops";
 import { PAINT_PROJECTED_REFERENCE_TARGET_SLUGS_JA } from "./reference_svg_geometry";
 
+function nativeFrameConfigDefaults() {
+  const filePath = path.join(import.meta.dir, "native-frame-capture-defaults.json");
+  return readNativeFrameCaptureConfig({ path: filePath, sha256: fileSha256(filePath) });
+}
+
+function validFontContext(): FontEnvironment {
+  return {
+    schema: "krr-font-environment-v1",
+    cacheable: true,
+    platform: "fixture",
+    inventorySha256: "a".repeat(64),
+    recordCount: 1,
+    missReasons: [],
+    pythonVersion: "fixture",
+    pythonExecutableSha256: "b".repeat(64),
+  };
+}
+
 function fixture(language: "en" | "ja" = "en", requestedSlugs?: string[]) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "krr-native-frame-evidence-"));
+  const root = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "krr-native-frame-evidence-")),
+  );
   const write = (name: string, body: string) => {
     const file = path.join(root, name);
     fs.writeFileSync(file, body, { flag: "wx", mode: 0o600 });
@@ -25,8 +51,8 @@ function fixture(language: "en" | "ja" = "en", requestedSlugs?: string[]) {
   const probeBinary = write("probe", "probe");
   const runtime = write("runtime", "runtime");
   const sourceManifest = write("source-manifest.json", "manifest");
-  const config = write("config.json", "config");
-  const fontContext = write("font-context.json", "font-context");
+  const config = write("config.json", JSON.stringify(nativeFrameConfigDefaults()));
+  const fontContext = write("font-context.json", JSON.stringify(validFontContext()));
   const validPng = makeOnePixelPng();
   const targets =
     requestedSlugs ??
@@ -99,6 +125,11 @@ function fixture(language: "en" | "ja" = "en", requestedSlugs?: string[]) {
   };
 }
 
+function rewritePin(pin: { path: string; sha256: string }, value: unknown): void {
+  fs.writeFileSync(pin.path, JSON.stringify(value), { flag: "w" });
+  pin.sha256 = fileSha256(pin.path);
+}
+
 describe("native frame evidence", () => {
   test("preserves no-viewBox fallback and rejects malformed natural dimensions", () => {
     const fallback = nativeFrameCaptureWrapper('<svg id="unit"/>', { width: 10, height: 8 });
@@ -169,6 +200,36 @@ describe("native frame evidence", () => {
       expect(() => verifyNativeFrameEvidence(changed, "en")).toThrow(
         "Native frame inventory differs",
       );
+    } finally {
+      fs.rmSync(data.root, { recursive: true, force: true });
+    }
+  });
+
+  test("binds config, frame values, and cacheable font context", () => {
+    const data = fixture();
+    try {
+      const font = readNativeFrameFontContext(data.value.fontContext);
+      expect(() => assertNativeFrameFontContext(data.value.fontContext, font)).not.toThrow();
+      expect(() =>
+        assertNativeFrameFontContext(data.value.fontContext, { ...font, platform: "other" }),
+      ).toThrow("Native frame font context differs");
+      const row = data.value.rows[0];
+      if (row === undefined) throw new Error("missing native frame fixture");
+      const changedRows: NativeFrameEvidence = {
+        ...data.value,
+        rows: [{ ...row, frame: { ...row.frame, scale: 2 } }, ...data.value.rows.slice(1)],
+      };
+      expect(() => verifyNativeFrameEvidence(changedRows, "en")).toThrow("pinned capture config");
+      rewritePin(data.value.config, { ...nativeFrameConfigDefaults(), theme: "light" });
+      expect(() => verifyNativeFrameEvidence(data.value, "en")).toThrow();
+      rewritePin(data.value.config, nativeFrameConfigDefaults());
+      rewritePin(data.value.fontContext, {
+        ...validFontContext(),
+        cacheable: false,
+        recordCount: 0,
+        missReasons: ["unavailable"],
+      });
+      expect(() => verifyNativeFrameEvidence(data.value, "en")).toThrow();
     } finally {
       fs.rmSync(data.root, { recursive: true, force: true });
     }

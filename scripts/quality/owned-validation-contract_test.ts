@@ -1735,95 +1735,61 @@ test.each([
     }),
   );
 });
-test.each([
-  [
-    "evidence",
-    "missing",
-    "./scripts/mermaid/native_frame_evidence_test.ts",
-    "./scripts/mermaid/native_frame_build_proof_test.ts",
-    "./scripts/mermaid/native-render-batch_test.ts",
-  ],
-  [
-    "evidence",
-    "duplicated",
-    "./scripts/mermaid/native_frame_evidence_test.ts",
-    "./scripts/mermaid/native_frame_build_proof_test.ts",
-    "./scripts/mermaid/native-render-batch_test.ts",
-  ],
-  [
-    "evidence",
-    "moved",
-    "./scripts/mermaid/native_frame_evidence_test.ts",
-    "./scripts/mermaid/native_frame_build_proof_test.ts",
-    "./scripts/mermaid/native-render-batch_test.ts",
-  ],
-  [
-    "build proof",
-    "missing",
-    "./scripts/mermaid/native_frame_build_proof_test.ts",
-    "./scripts/mermaid/native_render_provenance_test.ts",
-    "./scripts/mermaid/native_frame_evidence_test.ts",
-  ],
-  [
-    "build proof",
-    "duplicated",
-    "./scripts/mermaid/native_frame_build_proof_test.ts",
-    "./scripts/mermaid/native_render_provenance_test.ts",
-    "./scripts/mermaid/native_frame_evidence_test.ts",
-  ],
-  [
-    "build proof",
-    "moved",
-    "./scripts/mermaid/native_frame_build_proof_test.ts",
-    "./scripts/mermaid/native_render_provenance_test.ts",
-    "./scripts/mermaid/native_frame_evidence_test.ts",
-  ],
-  [
-    "product score",
-    "missing",
-    "./scripts/mermaid/native_product_score_test.ts",
-    "./scripts/quality/duplication-check_test.ts",
-    "./scripts/runtime-bundles/runtime-bundle-checks_test.ts",
-  ],
-  [
-    "product score",
-    "duplicated",
-    "./scripts/mermaid/native_product_score_test.ts",
-    "./scripts/quality/duplication-check_test.ts",
-    "./scripts/runtime-bundles/runtime-bundle-checks_test.ts",
-  ],
-  [
-    "product score",
-    "moved",
-    "./scripts/mermaid/native_product_score_test.ts",
-    "./scripts/quality/duplication-check_test.ts",
-    "./scripts/runtime-bundles/runtime-bundle-checks_test.ts",
-  ],
-] as const)(
-  "native %s registration rejects %s drift",
-  (_testName, mutation, token, previous, next) => {
-    const root = parserFixture();
-    const recipe = actualRecipeBody("runtime-asset-script-test");
-    expect(recipe).toContain(token);
-    const mutated =
-      mutation === "missing"
-        ? recipe.replace(` ${token}`, "")
-        : mutation === "duplicated"
-          ? recipe.replace(` ${token}`, ` ${token} ${token}`)
-          : recipe
-              .replace(` ${token}`, "")
-              .replace(` ${previous} ${next}`, ` ${token} ${previous} ${next}`);
-    expect(mutated).not.toBe(recipe);
-    recipes(root, { "runtime-asset-script-test": mutated });
-    track(root);
-    expect(inspectOwnedValidationContract(root).issues).toContainEqual(
-      expect.objectContaining({
-        code: "parser-body-onload-test-unregistered",
-        path: "runtime-asset-script-test",
-      }),
-    );
-  },
-);
+test.each(
+  (
+    [
+      [
+        "evidence",
+        "./scripts/mermaid/native_frame_evidence_test.ts",
+        "./scripts/mermaid/native_frame_build_proof_test.ts",
+        "./scripts/mermaid/native_frame_capture_context_test.ts",
+      ],
+      [
+        "build proof",
+        "./scripts/mermaid/native_frame_build_proof_test.ts",
+        "./scripts/mermaid/native_render_provenance_test.ts",
+        "./scripts/mermaid/native_frame_evidence_test.ts",
+      ],
+      [
+        "product score",
+        "./scripts/mermaid/native_product_score_test.ts",
+        "./scripts/quality/duplication-check_test.ts",
+        "./scripts/runtime-bundles/runtime-bundle-checks_test.ts",
+      ],
+      [
+        "capture context",
+        "./scripts/mermaid/native_frame_capture_context_test.ts",
+        "./scripts/mermaid/native_frame_evidence_test.ts",
+        "./scripts/mermaid/native-render-batch_test.ts",
+      ],
+    ] as const
+  ).flatMap(([label, token, previous, next]) =>
+    (["missing", "duplicated", "moved"] as const).map(
+      (mutation) => [label, mutation, token, previous, next] as const,
+    ),
+  ),
+)("native %s registration rejects %s drift", (_testName, mutation, token, previous, next) => {
+  const root = parserFixture();
+  const recipe = actualRecipeBody("runtime-asset-script-test");
+  expect(recipe).toContain(token);
+  const mutated =
+    mutation === "missing"
+      ? recipe.replace(` ${token}`, "")
+      : mutation === "duplicated"
+        ? recipe.replace(` ${token}`, ` ${token} ${token}`)
+        : recipe
+            .replace(` ${token}`, "")
+            .replace(` ${previous} ${next}`, ` ${token} ${previous} ${next}`);
+  expect(mutated).not.toBe(recipe);
+  recipes(root, { "runtime-asset-script-test": mutated });
+  track(root);
+  expect(inspectOwnedValidationContract(root).issues).toContainEqual(
+    expect.objectContaining({
+      code: "parser-body-onload-test-unregistered",
+      path: "runtime-asset-script-test",
+    }),
+  );
+});
 test.each([
   ["missing", (recipe: string, token: string) => recipe.replace(` ${token}`, "")],
   [

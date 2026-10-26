@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { gunzipSync, gzipSync, constants as zlibConstants } from "node:zlib";
 
 import {
   type AssetEntry,
@@ -471,9 +472,18 @@ function assertStableSources(
   }
 }
 
-function readCurrentReport(reportPath: string): unknown {
+export function readCurrentReport(reportPath: string): unknown {
   if (!lstatSync(reportPath).isFile()) fail("jscpd did not produce report.json");
-  return JSON.parse(readFileSync(reportPath, "utf8"));
+  const bytes = readFileSync(reportPath);
+  const compressed = reportPath.endsWith(".json.gz");
+  if (compressed) {
+    const filenameDigest = path.basename(reportPath).match(/^([a-f0-9]{64})\.json\.gz$/)?.[1];
+    if (filenameDigest === undefined || sha256(bytes) !== filenameDigest) {
+      fail("content-addressed compressed report hash mismatch");
+    }
+  }
+  const reportBytes = compressed ? gunzipSync(bytes) : bytes;
+  return JSON.parse(reportBytes.toString("utf8"));
 }
 
 export function runJscpd(
@@ -528,7 +538,7 @@ export function runJscpd(
     const reportPath = path.join(engineOutput, "report.json");
     if (!lstatSync(reportPath).isFile()) fail("jscpd did not produce report.json");
     const digest = storeJscpdReport(output, readFileSync(reportPath), role);
-    return path.join(output, "reports", `${digest}.json`);
+    return path.join(output, "reports", `${digest}.json.gz`);
   } finally {
     if (config !== undefined) rmSync(config.directory, { recursive: true, force: true });
     if (engineOutput !== undefined) rmSync(engineOutput, { recursive: true, force: true });
@@ -554,18 +564,42 @@ export function storeJscpdReport(
   role: "probe" | "final" | "latest",
 ): string {
   mkdirSync(output, { recursive: true });
-  const digest = sha256(report);
+  const contentSha256 = sha256(report);
+  const compressed = gzipSync(report, { level: zlibConstants.Z_BEST_SPEED });
+  const digest = sha256(compressed);
   const reportsDirectory = path.join(output, "reports");
   mkdirSync(reportsDirectory, { recursive: true });
-  const archivedReport = path.join(reportsDirectory, `${digest}.json`);
+  const archivedReport = path.join(reportsDirectory, `${digest}.json.gz`);
   if (lstatMaybeFile(archivedReport)) {
-    if (sha256(readFileSync(archivedReport)) !== digest)
-      fail(`content-addressed report hash mismatch: ${archivedReport}`);
+    const previous = readFileSync(archivedReport);
+    let previousReport: Buffer;
+    try {
+      previousReport = gunzipSync(previous);
+    } catch {
+      fail(`content-addressed compressed report is invalid: ${archivedReport}`);
+    }
+    if (
+      sha256(previous) !== digest ||
+      !previous.equals(compressed) ||
+      sha256(previousReport) !== contentSha256
+    ) {
+      fail(`content-addressed compressed report hash mismatch: ${archivedReport}`);
+    }
   } else {
-    writeAtomically(archivedReport, report);
+    writeAtomically(archivedReport, compressed);
   }
   const roleRecord = Buffer.from(
-    `${JSON.stringify({ role, sha256: digest, report: `reports/${digest}.json` }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        role,
+        sha256: digest,
+        contentSha256,
+        encoding: "gzip",
+        report: `reports/${digest}.json.gz`,
+      },
+      null,
+      2,
+    )}\n`,
   );
   writeAtomically(path.join(reportsDirectory, `${role}-latest.json`), roleRecord);
   if (role === "final" || role === "latest")

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
+import type { FontEnvironment } from "../html/catalog-capture-producer-context";
 import {
   assertCallerSourceBinding,
   type LanguageResult,
@@ -27,6 +28,7 @@ import {
 } from "./managed-full-compare-results";
 import { fileSha256 } from "./mermaid-pair-manifest";
 import { digestFileRecords } from "./native-build-receipt";
+import { readNativeFrameCaptureConfig } from "./native-frame-capture-context";
 import type { ReferenceScoreRow } from "./reference_score";
 import { ReferenceScorePolicy } from "./reference_score_policy";
 
@@ -198,6 +200,9 @@ test("managed native frame verification and capture follow raster PNG production
   expect(rasterOutputValidation).toBeGreaterThan(rasterProcess);
   expect(sidecarValidation).toBeGreaterThan(rasterOutputValidation);
   expect(frameCapture).toBeGreaterThan(rasterOutputValidation);
+  expect(source).toContain("readNativeFrameCaptureConfig(capture.config)");
+  expect(source).toContain("scale: config.scale");
+  expect(source).toContain("scrollY: config.scrollY");
 });
 
 test("managed full acceptance rejects partial inventory or any score below 99", () => {
@@ -966,8 +971,8 @@ function executableProbeLanguage(repositoryRoot: string, parent: string, code: "
     officialPairDirectory: pairDirectory,
     nativeFrameCapture: {
       probeBinary: pinnedFile(parent, `${code}/probe`, 0o644),
-      config: pinnedFile(parent, `${code}/config.json`),
-      fontContext: pinnedFile(parent, `${code}/font-context.json`),
+      config: pinnedJson(parent, `${code}/config.json`, nativeFrameConfigDefaults()),
+      fontContext: pinnedJson(parent, `${code}/font-context.json`, managedFontContextFixture()),
       buildProof: {
         bundleManifest: pinnedFile(parent, `${code}/bundle/bundle.json`),
         artifactPath: "candidate/bin",
@@ -983,4 +988,29 @@ function pinnedFile(parent: string, name: string, mode = 0o600) {
   fs.writeFileSync(filePath, name, { flag: "wx", mode });
   fs.chmodSync(filePath, mode);
   return { path: filePath, sha256: fileSha256(filePath) };
+}
+
+function pinnedJson(parent: string, name: string, value: unknown) {
+  const filePath = path.join(parent, name);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(value)}\n`, { flag: "wx", mode: 0o600 });
+  return { path: filePath, sha256: fileSha256(filePath) };
+}
+
+function nativeFrameConfigDefaults() {
+  const filePath = path.join(process.cwd(), "scripts/mermaid/native-frame-capture-defaults.json");
+  return readNativeFrameCaptureConfig({ path: filePath, sha256: fileSha256(filePath) });
+}
+
+function managedFontContextFixture(): FontEnvironment {
+  return {
+    schema: "krr-font-environment-v1",
+    cacheable: true,
+    platform: process.platform,
+    inventorySha256: "a".repeat(64),
+    recordCount: 1,
+    missReasons: [],
+    pythonVersion: "fixture",
+    pythonExecutableSha256: "b".repeat(64),
+  };
 }

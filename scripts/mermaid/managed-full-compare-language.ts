@@ -21,6 +21,7 @@ import {
   nativeFrameBuildProofArgv,
   requireNativeFrameBuildFacts,
 } from "./native-frame-build-proof";
+import { readNativeFrameCaptureConfig } from "./native-frame-capture-context";
 import {
   captureNativeFrameEvidence,
   scoreNativeFramePaintProjection,
@@ -776,7 +777,8 @@ function captureNativeFrame(
   workspace: string,
   slugs: readonly string[],
 ): { evidence: ReturnType<typeof verifyNativeFrameEvidence>; pin: FilePin } {
-  const captureDirectory = path.join(workspace, "native-frame"),
+  const config = readNativeFrameCaptureConfig(capture.config),
+    captureDirectory = path.join(workspace, "native-frame"),
     evidence = captureNativeFrameEvidence({
       language,
       sourceSvgDirectory: svgDirectory,
@@ -788,8 +790,8 @@ function captureNativeFrame(
       config: capture.config,
       fontContext: capture.fontContext,
       root: request.repositoryRoot,
-      scale: 1,
-      scrollY: 0,
+      scale: config.scale,
+      scrollY: config.scrollY,
       slugs,
     });
   return { evidence, pin: filePin(path.join(captureDirectory, "native-frame-evidence.json")) };

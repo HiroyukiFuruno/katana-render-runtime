@@ -1507,7 +1507,7 @@ const DUPLICATION_CLI_FIXTURE = {
     "scripts/quality/duplication-schema.ts",
     "scripts/quality/owned-source-inventory.ts",
   ],
-  moduleAstSha256: "e65943a768e7ab81a1ab0cf207c803a69ce62b5b6841a2a8e44f10e8d9811d57",
+  moduleAstSha256: "584f3961cc5acd276cdc32836fe13ecfec918d3f19f71341a1d1da76cef71211",
 };
 
 // 一時repoで現sourceをhash照合してからCLIを起動するtest fixtureだけを実sourceへ結ぶ。

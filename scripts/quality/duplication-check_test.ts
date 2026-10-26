@@ -14,9 +14,11 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { gunzipSync } from "node:zlib";
 import {
   assertNoUnapprovedClones,
   assertToolSucceeded,
+  readCurrentReport,
   resolveCliArguments,
   runAndValidateInventoryProbe,
   runJscpd,
@@ -550,7 +552,7 @@ describe("jscpd configuration isolation", () => {
       const finalRecord = JSON.parse(
         readFileSync(path.join(output, "reports", "final-latest.json"), "utf8"),
       ) as { report: string };
-      expect(readFileSync(path.join(output, finalRecord.report))).toEqual(
+      expect(gunzipSync(readFileSync(path.join(output, finalRecord.report)))).toEqual(
         readFileSync(path.join(output, "report.json")),
       );
       expect(readFileSync(probePath)).toEqual(archivedProbe);
@@ -607,7 +609,7 @@ describe("jscpd configuration isolation", () => {
 });
 
 describe("jscpd report preservation", () => {
-  test("archives probe and final reports without replacing earlier content", () => {
+  test("archives compressed probe and final reports without replacing raw latest content", () => {
     const output = mkdtempSync(path.join(os.tmpdir(), "krr-dup-report-history-"));
     const latest = path.join(output, "report.json");
     const firstReport = Buffer.from(JSON.stringify(report(1)));
@@ -615,24 +617,63 @@ describe("jscpd report preservation", () => {
     writeFileSync(latest, "pre-existing final report");
     try {
       const probeSha = storeJscpdReport(output, firstReport, "probe");
-      const archivedProbe = path.join(output, "reports", `${probeSha}.json`);
+      const archivedProbe = path.join(output, "reports", `${probeSha}.json.gz`);
+      const compressedProbe = readFileSync(archivedProbe);
+      const contentSha = sha256(firstReport);
+      expect(sha256(compressedProbe)).toBe(probeSha);
+      expect(probeSha).not.toBe(contentSha);
+      expect(gunzipSync(compressedProbe)).toEqual(firstReport);
       expect(readFileSync(latest, "utf8")).toBe("pre-existing final report");
-      expect(readFileSync(archivedProbe)).toEqual(firstReport);
       expect(
         JSON.parse(readFileSync(path.join(output, "reports", "probe-latest.json"), "utf8")),
       ).toEqual({
         role: "probe",
         sha256: probeSha,
-        report: `reports/${probeSha}.json`,
+        contentSha256: contentSha,
+        encoding: "gzip",
+        report: `reports/${probeSha}.json.gz`,
       });
 
       expect(storeJscpdReport(output, firstReport, "probe")).toBe(probeSha);
-      expect(readFileSync(archivedProbe)).toEqual(firstReport);
+      expect(readFileSync(archivedProbe)).toEqual(compressedProbe);
+      expect(storeJscpdReport(output, firstReport, "final")).toBe(probeSha);
+      expect(
+        JSON.parse(readFileSync(path.join(output, "reports", "final-latest.json"), "utf8")),
+      ).toMatchObject({ role: "final", sha256: probeSha });
+      expect(readFileSync(archivedProbe)).toEqual(compressedProbe);
       const finalSha = storeJscpdReport(output, finalReport, "final");
       expect(finalSha).not.toBe(probeSha);
       expect(readFileSync(latest)).toEqual(finalReport);
-      expect(readFileSync(archivedProbe)).toEqual(firstReport);
-      expect(readFileSync(path.join(output, "reports", `${finalSha}.json`))).toEqual(finalReport);
+      expect(gunzipSync(readFileSync(archivedProbe))).toEqual(firstReport);
+      expect(gunzipSync(readFileSync(path.join(output, "reports", `${finalSha}.json.gz`)))).toEqual(
+        finalReport,
+      );
+      expect(
+        JSON.parse(readFileSync(path.join(output, "reports", "probe-latest.json"), "utf8")).role,
+      ).toBe("probe");
+      expect(
+        JSON.parse(readFileSync(path.join(output, "reports", "final-latest.json"), "utf8")).role,
+      ).toBe("final");
+    } finally {
+      rmSync(output, { recursive: true, force: true });
+    }
+  });
+
+  test("reuses only intact gzip CAS content and rejects corrupt gzip and legacy JSON remains readable", () => {
+    const output = mkdtempSync(path.join(os.tmpdir(), "krr-dup-report-corrupt-"));
+    try {
+      const bytes = Buffer.from(JSON.stringify(report(1)));
+      const digest = storeJscpdReport(output, bytes, "probe");
+      const archived = path.join(output, "reports", `${digest}.json.gz`);
+      writeFileSync(archived, "corrupt gzip");
+      expect(() => storeJscpdReport(output, bytes, "probe")).toThrow(
+        "content-addressed compressed report is invalid",
+      );
+      expect(() => readCurrentReport(archived)).toThrow();
+
+      const legacy = path.join(output, "legacy-report.json");
+      writeFileSync(legacy, bytes);
+      expect(readCurrentReport(legacy)).toEqual(report(1));
     } finally {
       rmSync(output, { recursive: true, force: true });
     }
@@ -683,7 +724,7 @@ describe("jscpd report preservation", () => {
       const before = hashes();
       const probePath = runAndValidateInventoryProbe(fixtureRepo, output, policy, new Map(), paths);
       const probeBytes = readFileSync(probePath);
-      const probe = reportSchema.parse(JSON.parse(probeBytes.toString()));
+      const probe = reportSchema.parse(JSON.parse(gunzipSync(probeBytes).toString()));
       expect(probe.statistics.total.sources).toBe(6);
       expect(probe.statistics.formats.rust.sources).toBe(3);
       expect(() => validateInventoryReport(paths.slice(0, 2), probe, policy)).toThrow(
@@ -699,7 +740,7 @@ describe("jscpd report preservation", () => {
         policy.minTokens,
         "final",
       );
-      const final = reportSchema.parse(JSON.parse(readFileSync(finalPath, "utf8")));
+      const final = reportSchema.parse(readCurrentReport(finalPath));
       expect(final.statistics.total.sources).toBe(5);
       expect(final.statistics.formats.rust.sources).toBe(2);
       expect(final.duplicates.length).toBeGreaterThan(0);
@@ -707,7 +748,9 @@ describe("jscpd report preservation", () => {
       expect(unresolved).toBe(final.duplicates.length);
       expect(() => assertNoUnapprovedClones(unresolved)).toThrow("unapproved clone");
       expect(readFileSync(probePath)).toEqual(probeBytes);
-      expect(readFileSync(path.join(output, "report.json"))).toEqual(readFileSync(finalPath));
+      expect(readFileSync(path.join(output, "report.json"))).toEqual(
+        gunzipSync(readFileSync(finalPath)),
+      );
       writeFileSync(shortSource, "const SHORT: usize = 2;\n");
       expect(() => validateReport(fixtureRepo, paths, before, hashes(), final, policy)).toThrow(
         "source changed",
@@ -786,7 +829,9 @@ describe("jscpd report preservation", () => {
         new Map(),
         paths,
       );
-      const missingLatestProbe = JSON.parse(readFileSync(missingLatestProbePath, "utf8")) as {
+      const missingLatestProbe = JSON.parse(
+        gunzipSync(readFileSync(missingLatestProbePath)).toString("utf8"),
+      ) as {
         statistics: { total: { clones: number } };
       };
       expect(missingLatestProbe.statistics.total.clones).toBeGreaterThan(0);
@@ -805,7 +850,8 @@ describe("jscpd report preservation", () => {
       );
       expect(readFileSync(emptyLatestPath, "utf8")).toBe("");
       expect(
-        JSON.parse(readFileSync(emptyLatestProbePath, "utf8")).statistics.total.clones,
+        JSON.parse(gunzipSync(readFileSync(emptyLatestProbePath)).toString("utf8")).statistics.total
+          .clones,
       ).toBeGreaterThan(0);
 
       const acceptedLatestOutput = path.join(outputRoot, "accepted-latest");
@@ -818,7 +864,7 @@ describe("jscpd report preservation", () => {
         75,
         "final",
       );
-      const acceptedReport = JSON.parse(readFileSync(acceptedReportPath, "utf8")) as {
+      const acceptedReport = readCurrentReport(acceptedReportPath) as {
         statistics: { total: { clones: number } };
       };
       expect(acceptedReport.statistics.total.clones).toBeGreaterThan(0);
@@ -830,7 +876,9 @@ describe("jscpd report preservation", () => {
         new Map(),
         paths,
       );
-      const actualProbe = JSON.parse(readFileSync(actualProbePath, "utf8")) as {
+      const actualProbe = JSON.parse(
+        gunzipSync(readFileSync(actualProbePath)).toString("utf8"),
+      ) as {
         statistics: { total: { clones: number } };
       };
       expect(actualProbe.statistics.total.clones).toBeGreaterThan(

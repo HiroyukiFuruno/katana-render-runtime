@@ -4000,15 +4000,22 @@ function restoreReviewedFeatureCatalogTestProcess(lines: string[]): string[] | u
   return restored;
 }
 function removeReviewedRuntimeAssetTests(lines: string[]): string[] | undefined {
+  const withoutFrameContext = removeReviewedTestToken(
+    lines,
+    "./scripts/mermaid/native_frame_capture_context_test.ts",
+    "./scripts/mermaid/native_frame_evidence_test.ts",
+    "./scripts/mermaid/native-render-batch_test.ts",
+  );
+  if (!withoutFrameContext) return undefined;
   const bboxTest = "./scripts/mermaid/dom_svg_bbox_visibility_contract_test.ts";
-  const withoutBbox = lines.some((line) => unitCommand(line).includes(bboxTest))
+  const withoutBbox = withoutFrameContext.some((line) => unitCommand(line).includes(bboxTest))
     ? removeReviewedTestToken(
-        lines,
+        withoutFrameContext,
         bboxTest,
         "./scripts/mermaid/dom_plain_text_measure_contract_test.ts",
         `./${MANAGED_FULL_COMPARE_TEST}`,
       )
-    : lines;
+    : withoutFrameContext;
   if (!withoutBbox) return undefined;
   const withoutGeometry = removeReviewedTestToken(
     withoutBbox,

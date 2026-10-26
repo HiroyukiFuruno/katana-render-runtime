@@ -2,9 +2,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { DOMParser } from "@xmldom/xmldom";
 import { z } from "zod";
+import { captureFontEnvironment } from "../html/catalog-capture-producer-context";
 import { assertExactlyOneReportedInputSha } from "../html/reference-capture";
 import { DiagramTheme } from "./diagram_theme";
 import { fileSha256 } from "./mermaid-pair-manifest";
+import {
+  assertNativeFrameFontContext,
+  readNativeFrameCaptureConfig,
+  readNativeFrameFontContext,
+} from "./native-frame-capture-context";
 import { rasterCaptureHtml } from "./rasterize-svg-dir";
 import { MagickOps } from "./reference_image_ops";
 import type { ReferencePair } from "./reference_pair_repository";
@@ -90,15 +96,21 @@ export function captureNativeFrameEvidence(
     outputDirectory: path.resolve(options.outputDirectory),
     root: path.resolve(options.root),
   };
+  const config = readNativeFrameCaptureConfig(options.config);
+  if (config.scale !== options.scale || config.scrollY !== options.scrollY) {
+    throw new Error("Native frame capture arguments differ from the pinned config");
+  }
+  assertNativeFrameFontContext(options.fontContext, captureFontEnvironment(normalized.root));
   fs.mkdirSync(normalized.outputDirectory, { recursive: true, mode: 0o700 });
   const targets = requestedFrameTargets(normalized),
-    evidence = buildNativeFrameEvidence(normalized, targets),
-    evidencePath = path.join(options.outputDirectory, "native-frame-evidence.json");
+    evidence = buildNativeFrameEvidence(normalized, targets);
+  verifyNativeFrameEvidence(evidence, normalized.language, targets);
+  assertNativeFrameFontContext(options.fontContext, captureFontEnvironment(normalized.root));
+  const evidencePath = path.join(options.outputDirectory, "native-frame-evidence.json");
   fs.writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, {
     flag: "wx",
     mode: 0o600,
   });
-  verifyNativeFrameEvidence(evidence, normalized.language, targets);
   return evidence;
 }
 
@@ -312,8 +324,15 @@ export function verifyNativeFrameEvidence(
   verifyPin(evidence.probeBinary, "native frame probe binary");
   verifyPin(evidence.runtime, "native frame runtime");
   verifyPin(evidence.sourceManifest, "native frame source manifest");
-  verifyPin(evidence.config, "native frame config");
-  verifyPin(evidence.fontContext, "native frame font context");
+  const config = readNativeFrameCaptureConfig(evidence.config);
+  readNativeFrameFontContext(evidence.fontContext);
+  if (
+    evidence.rows.some(
+      (row) => row.frame.scale !== config.scale || row.frame.scrollY !== config.scrollY,
+    )
+  ) {
+    throw new Error("Native frame rows differ from the pinned capture config");
+  }
   const decoder = new MagickOps(
     path.join(process.cwd(), "tmp", "native-frame-image-validation"),
     null,
