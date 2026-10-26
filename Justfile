@@ -128,7 +128,7 @@ root-test-and-coverage: plantuml-install
 
 # WHY: 未計測行の診断用詳細JSONを正式なroot.jsonと分離し、閾値判定には使わない。
 native-root-coverage-detail:
-    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-diagnostic-domain root -- {{CARGO}} llvm-cov report --profile krr-coverage --locked --json --show-missing-lines --output-path "{{REPO_ROOT}}/tmp/quality/root-coverage-detail.json"
+    CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-diagnostic-domain root -- {{CARGO}} llvm-cov report --workspace --profile krr-coverage --locked --json --show-missing-lines --output-path "{{REPO_ROOT}}/tmp/quality/root-coverage-detail.json"
 
 # 継続利用するPythonは固定版のLintと厳格型検査を両方通す。
 python-lint:

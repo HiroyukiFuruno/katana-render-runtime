@@ -116,7 +116,7 @@ class NativeCoverageResultTests(unittest.TestCase):
         self.assertEqual(command["justTarget"], "root-test-and-coverage")
         self.assertEqual(command["selectedTarget"], "target/llvm-cov-target")
         self.assertEqual(command["argv"], [
-            "cargo", "llvm-cov", "report", "--profile", "krr-coverage", "--locked", "--json",
+            "cargo", "llvm-cov", "report", "--workspace", "--profile", "krr-coverage", "--locked", "--json",
             "--show-missing-lines", "--output-path", "tmp/quality/standalone-performance-coverage/root.json",
         ])
         self.assertEqual(command["testScope"], {

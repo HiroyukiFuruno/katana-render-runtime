@@ -197,7 +197,7 @@ class NativeNextestRetryLibraryContractTests(unittest.TestCase):
     def _coverage_report(self, stage: str) -> dict[str, object]:
         report_path = self.evidence / f"{stage}.json"
         result = self._run([
-            "llvm-cov", "report", "--profile", "krr-coverage", "--locked",
+            "llvm-cov", "report", "--workspace", "--profile", "krr-coverage", "--locked",
             "--json", "--output-path", str(report_path),
         ], f"{stage}-command")
         self.assertEqual(result.returncode, 0, result.stderr)

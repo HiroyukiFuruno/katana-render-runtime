@@ -52,7 +52,7 @@ class RootCoverageCommandTests(unittest.TestCase):
         ])
         arguments = commands.report_arguments(Path("/krr"))
         self.assertEqual(arguments, [
-            "llvm-cov", "report", "--profile", "krr-coverage", "--locked", "--json",
+            "llvm-cov", "report", "--workspace", "--profile", "krr-coverage", "--locked", "--json",
             "--show-missing-lines", "--output-path",
             "/krr/tmp/quality/standalone-performance-coverage/root.json",
         ])

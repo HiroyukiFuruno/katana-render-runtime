@@ -4275,6 +4275,38 @@ class CoverageDomainUnitTests(unittest.TestCase):
     def assert_no_worker(self) -> None:
         self.assertFalse(any(command[-1] != "--version" for command in self.calls))
 
+    def assert_overcapacity_report_retains_artifacts(self, root: Path, args: argparse.Namespace,
+                                                     environment: dict[str, str]) -> None:
+        artifact = root / "target/llvm-cov-target/krr-coverage/deps/mathjax_consumer_facts-1234567890abcdef"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_bytes(b"coverage object")
+        measured = {"metric_available": True, "baseline_bytes": 100, "current_bytes": 300,
+                    "threshold_bytes": 200, "over_capacity": True}
+        with patch("cargo_capacity_guard.inspect", return_value=measured), \
+                patch("cargo_capacity_guard.evict_artifacts") as evict:
+            result = self.execute(root, args, environment)
+        report = json.loads(self.output.getvalue())
+        self.assertEqual(result, 1)
+        self.assertEqual(report["clean_skipped"], "coverage-artifacts-retained")
+        self.assertEqual(report["cleanup_status"], "skipped")
+        self.assertTrue(report["remaining_over_capacity"])
+        self.assertEqual(artifact.read_bytes(), b"coverage object")
+        evict.assert_not_called()
+        self.assert_no_worker()
+
+    def test_overcapacity_coverage_reports_retain_artifacts_and_fail_closed(self) -> None:
+        for diagnostic in (False, True):
+            with self.subTest(diagnostic=diagnostic), self.fixture(
+                    "root", "test", collection=not diagnostic, diagnostic=diagnostic) as (root, args, environment):
+                output = root / ("tmp/quality/root-coverage-detail.json" if diagnostic else
+                                 "tmp/quality/standalone-performance-coverage/root.json")
+                output.parent.mkdir(parents=True)
+                if diagnostic:
+                    environment.pop("LLVM_PROFILE_FILE_NAME")
+                args.command = ["cargo", "llvm-cov", "report", "--workspace", "--profile", "krr-coverage",
+                                "--locked", "--json", "--show-missing-lines", "--output-path", str(output)]
+                self.assert_overcapacity_report_retains_artifacts(root, args, environment)
+
     def test_coverage_domains_clean_and_default_test_preserve_exit_and_state(self) -> None:
         for domain in ("root", "performance-baseline", "performance-candidate"):
             for action in ("clean", "test"):
@@ -4397,16 +4429,19 @@ class CoverageDomainUnitTests(unittest.TestCase):
             environment.pop("LLVM_PROFILE_FILE_NAME")
             output = root / "tmp/quality/root-coverage-detail.json"
             output.parent.mkdir(parents=True)
-            command = ["cargo", "llvm-cov", "report", "--profile", "krr-coverage", "--locked",
+            command = ["cargo", "llvm-cov", "report", "--workspace", "--profile", "krr-coverage", "--locked",
                        "--json", "--show-missing-lines", "--output-path", str(output)]
             args.command = command
             self.assertEqual(self.execute(root, args, environment, code=7), 7)
             self.assertEqual(self.calls[-1], command)
             self.assertFalse(any("nextest" in item for item in self.calls))
+            wrong_profile_command = list(command)
+            wrong_profile_command[wrong_profile_command.index("--profile") + 1] = "dev"
             candidates = (
+                [item for item in command if item != "--workspace"],
                 command + ["--summary-only"],
                 command + ["--fail-under-lines", "100"],
-                [*command[:4], "dev", *command[5:]],
+                wrong_profile_command,
                 [*command[:-1], str(root / "tmp/quality/other.json")],
                 [*command[:-1], str(root / "tmp/quality/../quality/root-coverage-detail.json")],
                 [item for item in command if item != "--locked"],
@@ -4431,7 +4466,7 @@ class CoverageDomainUnitTests(unittest.TestCase):
                 environment.pop("LLVM_PROFILE_FILE_NAME")
                 output = root / "tmp/quality/root-coverage-detail.json"
                 output.parent.mkdir(parents=True)
-                command = ["cargo", "llvm-cov", "report", "--profile", "krr-coverage", "--locked",
+                command = ["cargo", "llvm-cov", "report", "--workspace", "--profile", "krr-coverage", "--locked",
                            "--json", "--show-missing-lines", "--output-path", str(output)]
                 args.command = command
                 if kind == "leaf-symlink":
@@ -4587,7 +4622,7 @@ class CoverageDomainUnitTests(unittest.TestCase):
                                 candidate.append(mutation[1])
                         guard.coverage_selection(root, target, "root", candidate, environment, collection=True)
 
-                report = ["cargo", "llvm-cov", "report", "--profile", "krr-coverage", "--locked",
+                report = ["cargo", "llvm-cov", "report", "--workspace", "--profile", "krr-coverage", "--locked",
                           "--json", "--show-missing-lines", "--output-path",
                           str(root / "tmp/quality/standalone-performance-coverage/root.json")]
                 report_environment = {key: value for key, value in environment.items()
@@ -4595,7 +4630,7 @@ class CoverageDomainUnitTests(unittest.TestCase):
                 self.assertEqual(guard.coverage_selection(root, target, "root", report,
                                                           report_environment, collection=True),
                                  ("report", target / "llvm-cov-target"))
-                report_mutations: tuple[tuple[str, str | None], ...] = (("--profile", "dev"), ("--no-clean", None),
+                report_mutations: tuple[tuple[str, str | None], ...] = (("--workspace", None), ("--profile", "dev"), ("--no-clean", None),
                                  ("--output-path", str(root / "tmp/quality/other.json")),
                                  ("--json", None), ("--summary-only", None),
                                  ("--show-missing-lines", None))
@@ -4605,7 +4640,7 @@ class CoverageDomainUnitTests(unittest.TestCase):
                         if mutation[0] in {"--profile", "--output-path"}:
                             index = candidate.index(mutation[0])
                             candidate[index + 1] = mutation[1] or ""
-                        elif mutation[0] in {"--json", "--show-missing-lines"}:
+                        elif mutation[0] in {"--json", "--show-missing-lines", "--workspace"}:
                             candidate.remove(mutation[0])
                         else:
                             candidate.append(mutation[0])

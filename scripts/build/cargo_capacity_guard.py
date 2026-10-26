@@ -1297,7 +1297,7 @@ def _coverage_report_selection(root: Path, target: Path, words: list[str],
                                environment: Mapping[str, str]) -> tuple[str, Path]:
     selected = target / "llvm-cov-target"
     output = root / "tmp/quality/standalone-performance-coverage/root.json"
-    expected = ["cargo", "llvm-cov", "report", "--profile", "krr-coverage", "--locked",
+    expected = ["cargo", "llvm-cov", "report", "--workspace", "--profile", "krr-coverage", "--locked",
                 "--json", "--show-missing-lines", "--output-path", str(output)]
     if words != expected:
         raise RuntimeError("root coverage report differs from its fixed report contract")
@@ -1334,7 +1334,7 @@ def _coverage_diagnostic_report_selection(root: Path, target: Path, words: list[
                                           environment: Mapping[str, str]) -> tuple[str, Path]:
     selected = target / "llvm-cov-target"
     output = root / "tmp/quality/root-coverage-detail.json"
-    expected = ["cargo", "llvm-cov", "report", "--profile", "krr-coverage", "--locked",
+    expected = ["cargo", "llvm-cov", "report", "--workspace", "--profile", "krr-coverage", "--locked",
                 "--json", "--show-missing-lines", "--output-path", str(output)]
     if words != expected:
         raise RuntimeError("root coverage diagnostic report differs from its fixed report contract")
@@ -2016,7 +2016,14 @@ def run(args: argparse.Namespace) -> int:
         )
         report["baseline_eligible"] = baseline_eligible
         removed: list[str] = []
-        if report["over_capacity"]:
+        coverage_report = (
+            coverage is not None and coverage[0] == "report"
+            or coverage_diagnostic_inputs is not None and coverage_diagnostic_inputs[0] == "report"
+        )
+        if report["over_capacity"] and coverage_report:
+            # producer receiptなしでは計測対象objectの完全な閉包を証明できず、部分reportを防ぐ。
+            report["clean_skipped"] = "coverage-artifacts-retained"
+        elif report["over_capacity"]:
             cleanup_goal = int(_number(report["baseline_bytes"], "baseline bytes"))
             report["active_sweep_maxsize_bytes"] = cleanup_goal
             report["cleanup_goal_bytes"] = cleanup_goal
