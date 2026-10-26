@@ -951,7 +951,7 @@ dependencies = [
  "markup5ever",
  "nix",
  "percent-encoding",
- "resvg 0.48.1",
+ "resvg",
  "rustybuzz",
  "serde",
  "serde_json",
@@ -987,6 +987,7 @@ dependencies = [
  "include_dir",
  "jni",
  "katana-render-runtime-assets 0.4.24",
+ "katana-resvg",
  "kurbo",
  "log",
  "markup5ever",
@@ -995,7 +996,6 @@ dependencies = [
  "objc2-core-text",
  "percent-encoding",
  "read-fonts 0.46.0",
- "resvg 0.49.0",
  "rustybuzz",
  "serde",
  "serde_json",
@@ -1028,6 +1028,48 @@ checksum = "729af5d660bb6f439ced0a7c56d86ad1cd15b6f1092becc70afd97d41c5a6073"
 [[package]]
 name = "katana-render-runtime-assets"
 version = "0.4.24"
+
+[[package]]
+name = "katana-resvg"
+version = "0.49.0-katana.1"
+dependencies = [
+ "bytemuck",
+ "gif",
+ "image-webp",
+ "katana-usvg",
+ "log",
+ "pico-args",
+ "rgb",
+ "svgtypes",
+ "tiny-skia",
+ "zune-jpeg",
+]
+
+[[package]]
+name = "katana-usvg"
+version = "0.49.0-katana.1"
+dependencies = [
+ "base64",
+ "data-url",
+ "flate2",
+ "fontdb",
+ "harfrust 0.12.0",
+ "imagesize",
+ "kurbo",
+ "log",
+ "pico-args",
+ "roxmltree 0.21.2",
+ "simplecss",
+ "siphasher",
+ "skrifa",
+ "strict-num",
+ "svgtypes",
+ "tiny-skia-path",
+ "unicode-bidi",
+ "unicode-script",
+ "unicode-vo",
+ "xmlwriter",
+]
 
 [[package]]
 name = "krr-html-performance-harness"
@@ -1525,25 +1567,7 @@ dependencies = [
  "rgb",
  "svgtypes",
  "tiny-skia",
- "usvg 0.48.1",
- "zune-jpeg",
-]
-
-[[package]]
-name = "resvg"
-version = "0.49.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1572844b6727a1bf842190e9947641a68ac44bed83f50afb4bd1407a2564bee8"
-dependencies = [
- "bytemuck",
- "gif",
- "image-webp",
- "log",
- "pico-args",
- "rgb",
- "svgtypes",
- "tiny-skia",
- "usvg 0.49.0",
+ "usvg",
  "zune-jpeg",
 ]
 
@@ -2319,34 +2343,6 @@ name = "usvg"
 version = "0.48.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "977d0a4abdef933f424a99fe09f95576e089b90aebc6f016a3bc813762493e91"
-dependencies = [
- "base64",
- "data-url",
- "flate2",
- "fontdb",
- "harfrust 0.12.0",
- "imagesize",
- "kurbo",
- "log",
- "pico-args",
- "roxmltree 0.21.2",
- "simplecss",
- "siphasher",
- "skrifa",
- "strict-num",
- "svgtypes",
- "tiny-skia-path",
- "unicode-bidi",
- "unicode-script",
- "unicode-vo",
- "xmlwriter",
-]
-
-[[package]]
-name = "usvg"
-version = "0.49.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d09b73ee83641d390ad7ffd9000f347b16eb128e437675b6ff277ea5c7fcf22c"
 dependencies = [
  "base64",
  "data-url",

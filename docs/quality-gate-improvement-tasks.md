@@ -24,7 +24,27 @@ IssueのClose条件は担当が実行できる実装・自動検証・公開へ�
 
   続く型修正後に標準型検査全11構成、対象2fileの全20件96assert、Biome・重複1,473ソース0・diff検査がactual0（`tmp/quality/managed-reader-typecheck-s9t73yb0/`、`managed-reader-tests-xo7oh5z7/`、`managed-reader-static-57248y3a/`）。主担当がraw・exit・テストSHA`7e81a12d`と型だけの差分を確認し、採点判定への接続と欠落拒否の修正項目を対応済みとする。現行製品117件の各99・完全ゲート・性能・公開は別の未完了項目であり、この局所成功へ代用しない。
 
-## 現在の状態（2026-10-26）
+## 現在の状態（2026-10-27）
+
+R2955は負例の対象recipe修正後の並列source-static-foundation actual0。R2957の通常commit hookはRust検査通過後、standalone lintのpost-build容量4,946,059,264Bが固定上限4,726,095,872Bを超えたためactual1。ソース検査失敗やcommit成功として扱わない。R2959で実行・report回収済みのkrr-coverage profileだけ標準Cargo cleanで整理した（actual0）。そのprofileの将来warm予約は解除し、結果とログは保存、通常debug5,571fileのinventory前後完全一致とcoverage先へのsymlinkなしを確認した。通常build outputにもcoverage path参照0を事後確認。R2960で通常commit hookを再実行し、閾値・検査条件を変えず続行する。
+
+R2950の対象Bun 2file実行で負例mutationが別recipeを変更する3失敗を確認したため、検証済child PIDだけSIGTERMし、ownerでactual -15を回収した。部分実行を全成功へ扱わず、queued commitも成功assertで未実行となった。R2952は対象60件中55成功・5失敗（actual1）。既存justRecipesの返却にはsyntheticな依存headerが含まれ、raw Justfile全体との置換へ直接使うと無作用になる問題を追加確認した。R2954で実bodyだけを置換し、raw存在・変更非同一・再parseの対象recipe期待値をassertする修正後、5負例/35assert全成功・717filtered（actual0）。後続の静的検査とcommitを続ける。以前の部分実行を現行full Bun成功へ転用しない。
+
+R2949は承認済みforkを接続した現行ソースでroot全2,942件が成功（25skip）、tests/reportのactual exitはともに0、source前後不変。前回6失敗は解消した。物理証跡は`tmp/quality/reserved-warm-owner-r2939/regenerated-fork-root-r2949/`、既存producerの実行は`tmp/quality/standalone-performance-coverage/root-nextest-attempts/b968b2c0-efc2-43d0-bb95-b1422a07ee96/`。report生成成功と100%合格を区別し、root.jsonのline coverageは66,523/67,765行（98.167195%）であり、100%条件は未達。ローカルpath候補のため正式公開依存での受入・安全なcache再利用へ転用しない。Mermaid製品PNGは再採点前で51/117合格・66未達のまま。R2948の非実行可能な不完全生成物は権限緩和せず、R2949で対象2packageだけ正規clean・再生成し、保持依存rlibのSHAを照合した。bounded build jobs=2を標準recipeとその契約へ接続し、ゲート範囲・固定容量閾値は維持した。
+
+R2935の現行root全テストは2,942件実行・2,936成功・6失敗・25skip、actual100、source前後不変。coverage report段階には進んでいない。fill-only候補は代表2図とも99未達で、fractional同色背景の失敗経路にも適用されるためR2937で採用を撤回し、2つの自担当Rust fileだけHEADへ戻した。候補差分・元ファイル・SHAは`tmp/quality/fill-only-candidate-withdrawal-r2937/`に保存し、成果件数へ数えない。残るstroke bbox・ex・混在font回帰を切り分け、release-checkの古いargv期待値は現実装の`--workspace`を含める形に強化して修正した。
+
+R2938/R2940で承認済みfork c01f0165のkatana-usvg/katana-resvg 0.49.0-katana.1をKRRのローカル診断候補へ接続した。KRRの既存SVG公開APIは変えず、公開名・repo配置の新たな決定や公開は行っていない。root/standalone harnessのCargo metadataはactual0で両候補を確認。lock差分はpublic resvg/usvg 0.49.0を対応するローカル2packageへ置換した分だけで、その他のpackage/version/source集合は不変。外部作業treeの3,712実ファイルのSHAを承認済みGit archiveと照合した（`tmp/quality/reserved-warm-owner-r2939/fork-candidate-metadata-r2940/`）。現在のharness lock pinだけ既存sync APIで同期し、過去の証跡は変更していない。path依存は診断中だけであり、最終公開にはregistry取得版への切替が必要。正式な117件集計は引き続き51合格・66未達。
+
+容量復旧ではlocal just clean、private just clean-all、既存cargo-sweepによる旧cache1.62GiB整理を実行した。R2934は旧frozenテスト実行ファイル15件を標準gzipで可逆圧縮し、raw2,502,446,536→881,595,396bytes・全展開SHA一致・処理後空き6,156,873,728bytesを確認。後続でtarget消失を観測したためwarm前提を撤回し、原因は未特定として記録する。現在は既存のterminal-report/root-nextest flockを保持する実行中owner（PID88914、terminal session83561）で、検査の間もwarm成果物を予約する。固定容量閾値は変更していない。
+
+R2913はopaque fill-only pathを既存Skia adapterへ渡す限定候補を2 Rust fileで実装し、標準all-feature debug libtestの関連9件と、R2885と同じEN C4 context simple入力のPNG取得がactual0、source前後不変だった（`tmp/quality/mermaid-fill-only-diagnostic-r2913/result.json`）。R2914の既存RGB channel edge支持比較では対照98.63016、候補98.65729（+0.02713）で99未達。全117件の合格数は51、未達66のまま変更しない。限定テスト成功・SVG作業・fork準備を製品PNG合格数の増加に数えない。R2914は初回失敗と成功で同名ログを使ったため正式証跡に採用せず、元記録を保持して排他的なfresh runで再確認する。参照画像・採点実装・配色条件は変更していない。
+
+fresh R2914bは出力subdir不足で採点前actual1、R2914cはactual0で上記2スコアを再現した。ただし保存argvに説明文字列が混在し、正式証跡へ昇格しない。R2915は同一libtest binary SHAを確認し、EN C4 component（旧98.95543）の同じ956×761入力を取得、関連9件/capture/source前後照合はactual0。R2916で同じ既存比較の対照と候補を回収する。全117合格数の更新には全体再採点が必要で、代表診断だけで増加扱いしない。
+
+R2916はcallerの候補path誤記で採点前に失敗し、その記録を保持した。実在する`mermaid-fill-only-component-r2915/font-audit.png`を指定したfresh R2917はactual0、対照98.95543・候補98.99641（+0.04098）、参照・両入力のSHA前後一致。同ROI・寸法で既存関数の結果を主担当が確認したが、99には0.00359不足し、丸めて合格にしない。C4 context/componentの2例とも未達で、まだ全117受入の増加はない。
+
+R2918のcomponent局所診断はedge画像の差分36px、glyph配置から推定した文字矩形内27px・外9pxだった（`tmp/quality/fill-only-local-diagnostic-r2918/report.json`）。近似矩形なので図形線の混入を除外できず、文字描画が主な次の調査対象という範囲に留める。要求Open Sansが実Helveticaへ解決されたことだけでは不具合と判断しない。Chromeも同じfallbackを採用し得るため、比較元の実faceとの不一致が証明されるまでgeneric font選択を変更しない。
 
 R2904でno-scroll集計修正を`043aec40`、R2906でrelease必須commit/内容固定を`f8e3ce19`へ通常hookでcommitした。R2905は固定後の3回帰と並列source-static-foundationがactual0・source不変。R2907の同HEADでHTML84条件は再び全90以上・font identity establishedだが、性能producerは`worker load/binary changed`で中断。完了したpair-manifestは3条件分あり、元raw・失敗resultを保持する。失敗時のload値は現行errorに保存されておらず、後から再構成しない。中断後にbaseline/candidate両frozen binaryのSHA保持は確認したが、これを失敗瞬間の証明には転用しない。
 
@@ -46,7 +66,7 @@ R2886/R2887とR2902の新規採取でHTML84条件すべて90以上・出力font�
 
 R2898のENOSPC、R2900のprivate clean-all actual1を保持し、R2901で旧legacy cacheのMach-O144件を標準gzipで可逆圧縮した。全件の展開後raw SHAを照合し、source・画像・入力・固定容量上限は不変。raw10,986,580,832→圧縮4,022,308,667 bytes、実空きは処理後17,406,596KiB。過去binaryの保全であり、現行検査成功の代用にしない。
 
-fork公開用の共通tokenは帰宅後に本人が`.zshenv`の`KATANA_SERIES_GENERIC_TOKEN`を更新し、新しいterminalでprivateの`just cargo_token_updates`を実行する予定。既存の公開対象・権限は維持し、新規公開権限とkatana-usvg/katana-resvgを追加する。同recipeはGitHub Actions secrets更新のみであり、local公開は更新後の共通tokenを新しい環境から読み込んで使う。追加のcargo loginは要求しない。本人の登録完了はまだ確認しておらず、古いtokenの再試行はしない。
+fork公開用の共通tokenは帰宅後に本人が`.zshenv`の`KATANA_SERIES_GENERIC_TOKEN`を更新し、新しいterminalでprivateの`just cargo_token_updates`を実行する予定。ユーザー依頼でprivate直下Justfileの同recipeへ、stdinからの`cargo login --registry crates-io`を追加し、local Cargo認証と既存GitHub Actions secretsを一括更新できるようにした。zsh構文検査とjust recipe一覧取得だけ成功し、recipe自体は実行していない（`tmp/quality/private-token-update-recipe-20261026/result.json`）。実行は本人が担当する。既存の公開対象・権限は維持するが、SVGの配布単位・命名はその後のユーザー質問を踏まえて未確定として扱い、新名称への公開・repo移動は実行しない。KRRには既存公開SVG rasterize APIがあり、forkの2crateは内部依存の配布単位であって利用側に追加APIを要求するものではない。本人の登録完了はまだ確認しておらず、古いtokenの再試行はしない。
 
 R2840でnative captureの実設定/font環境契約と重複レポート圧縮を`02c7963a`へ通常hookでcommitし、R2841のrelease内容/祖先/version回帰3件成功後、対象固定を`b3db4d6a`へcommitした。R2843はこのsourceのcanonical candidate build proof actual0・bundle検証成功。R2844はCLI compile0後にtarget5,580,656,640 bytesが固定4,726,095,872 bytesを超えて失敗。R2845の既存just clean actual0・source不変・凍結binary6件保持後、R2847でcurrent CLI buildとnative PNG EN59/JA58を全取得した。formal scorerはC4投影参照とcandidateの寸法差で中断し、reference-context.json未生成のためaggregateは不合格。117件すべての数値が99未満だったという結果ではない。
 
