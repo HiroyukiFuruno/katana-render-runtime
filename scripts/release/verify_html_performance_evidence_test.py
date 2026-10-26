@@ -1330,16 +1330,64 @@ class PerformanceEvidenceTest(unittest.TestCase):
         for sample in json_array_at(report, "samples"):
             sample_object = json_object(sample)
             sample_object["catalog_condition"] = sample_condition
+            sample_viewport = json_object(sample_object["viewport"])
             full_y = json_object_at(sample_object, "phases", "full_y")
             full_y.update(
+                elapsed_ms=0,
                 actual_bottom=True,
                 scroll_steps=0,
                 max_scroll=0,
                 final_scroll_y=0,
+                max_frame_elapsed_ms=0,
             )
-            json_object(full_y["frame"])["scroll_y"] = 0
+            frame = json_object(full_y["frame"])
+            frame.update(
+                scroll_y=0,
+                content_height=sample_viewport["height"],
+                viewport=sample_viewport,
+            )
         gate._validate_report(report, expected)
+        self.assertEqual(
+            gate.aggregate_reports([report], expected)["phases"]["full_y"]["elapsed_ms"][
+                "median"
+            ],
+            0,
+        )
 
+        for field, invalid in (
+            ("actual_bottom", False),
+            ("scroll_steps", 1),
+            ("max_scroll", 1),
+            ("final_scroll_y", 1),
+            ("max_frame_elapsed_ms", 1),
+        ):
+            invalid_report = json.loads(json.dumps(report))
+            invalid_full_y = json_object_at(
+                invalid_report, "samples", 0, "phases", "full_y"
+            )
+            invalid_full_y[field] = invalid
+            invalid_frame = json_object(invalid_full_y["frame"])
+            if field in ("max_scroll", "final_scroll_y"):
+                invalid_frame["scroll_y"] = 1
+            elif field == "scroll_steps":
+                invalid_full_y.update(max_scroll=1, final_scroll_y=1)
+                invalid_frame["scroll_y"] = 1
+            with self.subTest(no_scroll_evidence=field), self.assertRaises(ValueError):
+                gate._validate_report(invalid_report, expected)
+
+        for phase in set(gate.PHASES) - {"full_y"}:
+            invalid_report = json.loads(json.dumps(report))
+            measured = json_object_at(invalid_report, "samples", 0, "phases", phase)
+            if phase in ("post_operation", "same_session_resize"):
+                measured = json_object(measured["measurement"])
+            measured["elapsed_ms"] = 0
+            with self.subTest(zero_elapsed_phase=phase), self.assertRaisesRegex(
+                ValueError, "must be finite and positive"
+            ):
+                gate._validate_report(invalid_report, expected)
+
+        for sample in json_array_at(report, "samples"):
+            json_object_at(sample, "phases", "full_y")["elapsed_ms"] = 10
         full_y = json_object_at(report, "samples", 0, "phases", "full_y")
         for invalid_steps in (-1, 1):
             full_y["scroll_steps"] = invalid_steps
@@ -1354,6 +1402,98 @@ class PerformanceEvidenceTest(unittest.TestCase):
             json_object(full_y["frame"])["scroll_y"] = 1
         with self.assertRaisesRegex(ValueError, "full-Y span incomplete"):
             gate._validate_report(report, expected)
+
+    def test_zero_full_y_time_rejects_missing_proof_and_invalid_elapsed(self) -> None:
+        viewport = {"width": 1280, "height": 900, "scale": 1}
+        full_y = {
+            "elapsed_ms": 0,
+            "peak_rss_bytes": 1,
+            "actual_bottom": True,
+            "scroll_steps": 0,
+            "max_scroll": 0,
+            "final_scroll_y": 0,
+            "max_frame_elapsed_ms": 0,
+            "frame": {
+                "scroll_y": 0,
+                "content_height": 900,
+                "viewport": viewport,
+            },
+        }
+        sample = {"viewport": viewport, "phases": {"full_y": full_y}}
+        self.assertEqual(
+            gate._phase_sample(sample, "full_y"),
+            (0.0, 1.0),
+        )
+        for field in (
+            "actual_bottom",
+            "scroll_steps",
+            "max_scroll",
+            "final_scroll_y",
+            "max_frame_elapsed_ms",
+        ):
+            incomplete = {key: value for key, value in full_y.items() if key != field}
+            with self.subTest(missing_proof=field), self.assertRaisesRegex(
+                ValueError, "must be finite and positive"
+            ):
+                gate._phase_sample({"viewport": viewport, "phases": {"full_y": incomplete}}, "full_y")
+        incomplete_frame = {**full_y, "frame": {}}
+        with self.assertRaisesRegex(ValueError, "must be finite and positive"):
+            gate._phase_sample(
+                {"viewport": viewport, "phases": {"full_y": incomplete_frame}}, "full_y"
+            )
+        base_frame = json_object(full_y["frame"])
+        mismatched_frame = {
+            **full_y,
+            "frame": {
+                **base_frame,
+                "viewport": {"width": 1279, "height": 900, "scale": 1},
+            },
+        }
+        with self.assertRaisesRegex(ValueError, "must be finite and positive"):
+            gate._phase_sample(
+                {"viewport": viewport, "phases": {"full_y": mismatched_frame}}, "full_y"
+            )
+        too_tall_frame = {
+            **full_y,
+            "frame": {**base_frame, "content_height": 901},
+        }
+        with self.assertRaisesRegex(ValueError, "must be finite and positive"):
+            gate._phase_sample(
+                {"viewport": viewport, "phases": {"full_y": too_tall_frame}}, "full_y"
+            )
+        for content_height in (0, -1, math.nan, math.inf, True, None):
+            invalid_frame = {**full_y, "frame": {**base_frame, "content_height": content_height}}
+            with self.subTest(content_height=content_height), self.assertRaisesRegex(
+                ValueError, "must be finite and positive"
+            ):
+                gate._phase_sample(
+                    {"viewport": viewport, "phases": {"full_y": invalid_frame}}, "full_y"
+                )
+
+        for key, invalid_viewport_value in (("height", 0), ("scale", 0), ("scale", math.inf)):
+            invalid_viewport = {**viewport, key: invalid_viewport_value}
+            invalid_frame = {**full_y, "frame": {**base_frame, "viewport": invalid_viewport}}
+            with self.subTest(viewport_field=key), self.assertRaisesRegex(
+                ValueError, "must be finite and positive"
+            ):
+                gate._phase_sample(
+                    {"viewport": invalid_viewport, "phases": {"full_y": invalid_frame}},
+                    "full_y",
+                )
+
+        for elapsed in (-1, math.nan, math.inf, True, None):
+            invalid = {**full_y, "elapsed_ms": elapsed}
+            expected_error = (
+                "must be numeric"
+                if elapsed is True or elapsed is None
+                else "must be finite and positive"
+            )
+            with self.subTest(elapsed_ms=elapsed), self.assertRaisesRegex(
+                ValueError, expected_error
+            ):
+                gate._phase_sample(
+                    {"viewport": viewport, "phases": {"full_y": invalid}}, "full_y"
+                )
 
     def test_p95_only_regression_is_rejected(self) -> None:
         path = self.bundle / "0/reports/candidate-4.json"

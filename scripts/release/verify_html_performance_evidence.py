@@ -1126,6 +1126,56 @@ def _percentile(values: list[float], percentile: float) -> float:
     return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
 
 
+def _is_proven_zero_scroll_full_y(sample: JsonObject, value: JsonObject) -> bool:
+    frame = value.get("frame")
+    viewport = sample.get("viewport")
+    frame_viewport = frame.get("viewport") if isinstance(frame, dict) else None
+    content_height = frame.get("content_height") if isinstance(frame, dict) else None
+    if (
+        not isinstance(viewport, dict)
+        or not isinstance(frame_viewport, dict)
+        or frame_viewport != viewport
+    ):
+        return False
+    height = viewport.get("height")
+    scale = _finite_number(viewport.get("scale"))
+    content_height_number = _finite_number(content_height)
+    if (
+        type(height) is not int
+        or height <= 0
+        or scale is None
+        or scale <= 0
+        or content_height_number is None
+        or content_height_number <= 0
+    ):
+        return False
+    logical_height = height / scale
+    return (
+        value.get("actual_bottom") is True
+        and type(value.get("scroll_steps")) is int
+        and value["scroll_steps"] == 0
+        and _is_finite_zero(value.get("max_scroll"))
+        and _is_finite_zero(value.get("final_scroll_y"))
+        and _is_finite_zero(value.get("max_frame_elapsed_ms"))
+        and isinstance(frame, dict)
+        and _is_finite_zero(frame.get("scroll_y"))
+        and math.isfinite(logical_height)
+        and math.floor(content_height_number + 0.5) <= logical_height
+    )
+
+
+def _finite_number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def _is_finite_zero(value: object) -> bool:
+    number = _finite_number(value)
+    return number is not None and number == 0
+
+
 def _phase_sample(sample: JsonObject, phase: str) -> tuple[float, float]:
     phases = sample.get("phases")
     if not isinstance(phases, dict) or phase not in phases:
@@ -1137,7 +1187,13 @@ def _phase_sample(sample: JsonObject, phase: str) -> tuple[float, float]:
         value = value.get("measurement")
     if not isinstance(value, dict):
         raise ValueError(f"phase {phase} must be an object")
-    elapsed = _number(value.get("elapsed_ms"), f"{phase}.elapsed_ms")
+    raw_elapsed = value.get("elapsed_ms")
+    zero_scroll_full_y = phase == "full_y" and _is_proven_zero_scroll_full_y(sample, value)
+    elapsed = (
+        0.0
+        if zero_scroll_full_y and _is_finite_zero(raw_elapsed)
+        else _number(raw_elapsed, f"{phase}.elapsed_ms")
+    )
     rss = _number(value.get("peak_rss_bytes"), f"{phase}.peak_rss_bytes")
     return elapsed, rss
 

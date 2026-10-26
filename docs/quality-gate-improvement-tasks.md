@@ -26,6 +26,16 @@ IssueのClose条件は担当が実行できる実装・自動検証・公開へ�
 
 ## 現在の状態（2026-10-26）
 
+最新の実行結果は以下のR2885〜R2902を優先し、それ以前の記録は対応sourceの履歴として保持する。HEAD `526c5c14` のR2885では製品native PNGの全117件を採点し、99以上51件・未達66件・未採点0件。R2850の既存合格46件はすべて維持し、脱落0件。macOSのgeneric sansを独立Chromeで確認したHelveticaへ合わせた修正は`e8ac617f`に含む。代表C4のSVG矩形16観測は最大差約0.000001pxだが、実PNG全体の合格へ代用しない。参照・入力・配色方針・採点閾値は不変。
+
+R2902のno-scroll集計不備は、実bottom・全scroll値0・同一viewport・有限正の寸法とscale・実content範囲を証明できる場合だけelapsed0を受理する限定修正とした。他phase・scroll必要時・負値・非有限値・不足証明は拒否する。新回帰を含む30件、対象Ruff/strict mypyは実argv・source前後SHA・raw・actual0を結び付けて再検証した（`tmp/quality/html-full-y-zero-noop-r2902/observed-runs/4821ede0b57b3ba0fe63b46e/`）。主担当は一度偽陽性になり得たRSS欠落を指摘し、有効base受理と1項目変異拒否へ修正済み。R2903の既存並列source-static-foundationもactual0・source不変。これらは性能全84条件の合格ではなく、R2902原失敗は保持する。
+
+R2886/R2887とR2902の新規採取でHTML84条件すべて90以上・出力font完全一致を確認した。ただし表示時間・RSSの非劣化は未合格。R2902は同じ既存ownerがcaptureから性能producerまで連続して保持し、baseline/candidateの実worker各25sampleを最初の1条件で取得した後、candidateの1sampleだけ短文no-scrollの`full_y.elapsed_ms=0`となり、正値必須の集計で拒否された。元report・traceback・失敗resultを`tmp/quality/html-owned-capture-performance-controller-r2902/`と`tmp/html-performance-current-r2902/`へ保持し、0秒の架空補正や検査済み扱いはしない。実no-scrollの証明条件と集計契約の回帰を修正中。後続83条件と性能の合否は未取得。
+
+R2898のENOSPC、R2900のprivate clean-all actual1を保持し、R2901で旧legacy cacheのMach-O144件を標準gzipで可逆圧縮した。全件の展開後raw SHAを照合し、source・画像・入力・固定容量上限は不変。raw10,986,580,832→圧縮4,022,308,667 bytes、実空きは処理後17,406,596KiB。過去binaryの保全であり、現行検査成功の代用にしない。
+
+fork公開用の共通tokenは帰宅後に本人が`.zshenv`の`KATANA_SERIES_GENERIC_TOKEN`を更新し、新しいterminalでprivateの`just cargo_token_updates`を実行する予定。既存の公開対象・権限は維持し、新規公開権限とkatana-usvg/katana-resvgを追加する。同recipeはGitHub Actions secrets更新のみであり、local公開は更新後の共通tokenを新しい環境から読み込んで使う。追加のcargo loginは要求しない。本人の登録完了はまだ確認しておらず、古いtokenの再試行はしない。
+
 R2840でnative captureの実設定/font環境契約と重複レポート圧縮を`02c7963a`へ通常hookでcommitし、R2841のrelease内容/祖先/version回帰3件成功後、対象固定を`b3db4d6a`へcommitした。R2843はこのsourceのcanonical candidate build proof actual0・bundle検証成功。R2844はCLI compile0後にtarget5,580,656,640 bytesが固定4,726,095,872 bytesを超えて失敗。R2845の既存just clean actual0・source不変・凍結binary6件保持後、R2847でcurrent CLI buildとnative PNG EN59/JA58を全取得した。formal scorerはC4投影参照とcandidateの寸法差で中断し、reference-context.json未生成のためaggregateは不合格。117件すべての数値が99未満だったという結果ではない。
 
 R2850はR2847のnative frame証跡をcanonical inventoryで検証し、既存scoreNativeProductRowsで非C4/Tree101件を診断採点した。46件99以上・55件未達、C4/Tree16件は未採点。全体の正式合格へ転用しない。旧R2672の92/117はChromeによるSVG再rasterであり、実native PNG結果と混同しない。R2848のexpectedSlugs引数不足とR2849の診断caller作業dir不足は保持し、R2850で修正・actual0。R2852は独立Chromeと既存strict capture wrapperでC4の文字矩形/Canvas metricsを取得した。R2851の旧R2679 control診断は選択font metricsだけ取得、root/line観測0でactual101。旧binaryの成功・現行source合格として扱わない。
