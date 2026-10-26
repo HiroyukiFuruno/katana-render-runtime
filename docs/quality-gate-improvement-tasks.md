@@ -6,6 +6,10 @@ R2867の同一render操作内font source auditはArial/Arial Boldを確認した
 
 R2869の通常commit hookは全target test build後の7,024,209,920Bを固定閾値4,726,095,872Bで拒否した。R2870の既存just cleanはexit0、source/index不変と凍結6binaryのSHA維持を確認。実空き7,236,788→13,812,836KiBへ回復し、閾値を変えず通常hookを再実行する。R2867で実行済みの対象binaryは履歴証跡として保持し、clean後の現物や今後の変更の合格へ再認定しない。
 
+R2871は通常hookを通してC4観測をcommit `3c02ed1651bd5adf536e414e53d702beb2556095`へ保存。R2872/R2873の独立Chrome診断でKRRと同じArial file bytesをFontFaceへ明示すると4文字列のgetBBoxがKRRと一致した。通常sans-serifとは異なり、R2873のCDP実font選択はHelvetica/Helvetica-Bold。したがってHarfRustの境界算式を補正する仮説は撤回し、macOS generic sansをArialへ固定した実装を是正する。明示Arial、他OS、公開bundled SVG契約は維持。参照画像・vendor/configは変更せず、source修正後のC4観測と正式117製品PNG、HTML/性能で採否判定する。R2872/R2873自体は原因診断で、製品修正・全体合格ではない。
+
+R2875はmacOS generic Helvetica修正のfoundation・厳格Clippy・ASTが全0/source不変（R2874のneedless return拒否を保持して修正）。R2876は同条件test build0、C4観測/判定2caseとgeneric sans通常16caseが全0/source不変。R2877で独立raw JSの同一request/configと照合し、viewBox `0 -70 1148 494.01255798339844`が完全一致、16観測の座標/寸法最大差は0.00000095367431640625px。実選択PS名もHelvetica/Helvetica-Boldを確認した。参照画像は不変。これは代表1図のgeometry回復であり、117製品PNG・HTML・性能の正式合格へ代用しない。
+
 最新ユーザー指示を優先する。`[ ]` は未対応・未検証、`[/]` は検証済みのユーザー指摘対応を示す。実装だけで完了にしない。再開時は本台帳と現行実測計画を読み、証跡を確認して続行する。
 
 本ファイルを指摘事項の唯一のチェックリストとする。実行状態は終了hook台帳、測定設定は現行計画、詳細な証跡は各結果ファイルに置き、別文書へ同じ未完了チェックリストを増やさない。新しい指摘には既存項目との対応または新しいIDを付ける。担当終了と要件完了を区別する。

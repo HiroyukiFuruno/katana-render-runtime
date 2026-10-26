@@ -5,46 +5,54 @@ use std::sync::Arc;
 
 const TEXT: &str = "KatanA renderer context";
 
-struct ExpectedArialStyle {
+struct ExpectedGenericSansStyle {
     weight: u16,
     italic: bool,
-    post_script_name: &'static str,
+    mac_post_script_name: &'static str,
+    other_post_script_name: &'static str,
 }
 
-const EXPECTED_ARIAL_STYLES: &[ExpectedArialStyle] = &[
-    ExpectedArialStyle {
+const EXPECTED_GENERIC_SANS_STYLES: &[ExpectedGenericSansStyle] = &[
+    ExpectedGenericSansStyle {
         weight: 400,
         italic: false,
-        post_script_name: "ArialMT",
+        mac_post_script_name: "Helvetica",
+        other_post_script_name: "ArialMT",
     },
-    ExpectedArialStyle {
+    ExpectedGenericSansStyle {
         weight: 700,
         italic: false,
-        post_script_name: "Arial-BoldMT",
+        mac_post_script_name: "Helvetica-Bold",
+        other_post_script_name: "Arial-BoldMT",
     },
-    ExpectedArialStyle {
+    ExpectedGenericSansStyle {
         weight: 400,
         italic: true,
-        post_script_name: "Arial-ItalicMT",
+        mac_post_script_name: "Helvetica-Oblique",
+        other_post_script_name: "Arial-ItalicMT",
     },
-    ExpectedArialStyle {
+    ExpectedGenericSansStyle {
         weight: 700,
         italic: true,
-        post_script_name: "Arial-BoldItalicMT",
+        mac_post_script_name: "Helvetica-BoldOblique",
+        other_post_script_name: "Arial-BoldItalicMT",
     },
 ];
 
 #[test]
-fn unknown_open_sans_falls_back_to_arial_for_all_requested_styles() -> Result<(), String> {
+fn unknown_open_sans_falls_back_to_configured_sans_for_all_requested_styles() -> Result<(), String>
+{
     let request = HtmlFontRequest::from_text("Open Sans, sans-serif", TEXT);
     let (database, proof) = sources::build_known_html_font_db(&request);
     let database = Arc::new(database);
-    assert_eq!(database.family_name(&Family::SansSerif), "Arial");
+    let expected_family = configured_sans_family();
+    assert_eq!(database.family_name(&Family::SansSerif), expected_family);
     assert!(text_shaping::known_matching(&database, "Open Sans", 400, false).is_none());
-    for style in EXPECTED_ARIAL_STYLES {
+    for style in configured_sans_styles() {
         assert_open_sans_fallback_style(&database, &proof, style)?;
     }
     assert_explicit_family("Helvetica")?;
+    assert_explicit_family("Arial")?;
     assert_explicit_family("Trebuchet MS")?;
     Ok(())
 }
@@ -52,19 +60,19 @@ fn unknown_open_sans_falls_back_to_arial_for_all_requested_styles() -> Result<()
 fn assert_open_sans_fallback_style(
     database: &Arc<Database>,
     proof: &super::CreationProof,
-    style: &ExpectedArialStyle,
+    style: &ExpectedGenericSansStyle,
 ) -> Result<(), String> {
     let selected = selected_face(database, "Open Sans, sans-serif", style)?;
     let generic = selected_face(database, "sans-serif", style)?;
     assert_eq!(selected, generic);
     assert!(admit_in_scope(database, proof, "Open Sans, sans-serif", style).is_none());
     let admitted = admit_in_scope(database, proof, "sans-serif, Open Sans", style)
-        .ok_or("known font admission rejected generic Arial face")?;
+        .ok_or("known font admission rejected configured generic sans face")?;
     assert_eq!(selected, admitted);
     let face = database
         .face(selected)
-        .ok_or("selected Arial face missing")?;
-    assert_eq!(face.post_script_name, style.post_script_name);
+        .ok_or("selected generic sans face missing")?;
+    assert_eq!(face.post_script_name, expected_post_script_name(style));
     Ok(())
 }
 
@@ -72,7 +80,7 @@ fn admit_in_scope(
     database: &Arc<Database>,
     proof: &super::CreationProof,
     family: &str,
-    style: &ExpectedArialStyle,
+    style: &ExpectedGenericSansStyle,
 ) -> Option<ID> {
     SvgRasterizeOps::with_html_font_render_scope(|| {
         super::admit(database, proof, family, TEXT, style.weight, style.italic)
@@ -82,7 +90,7 @@ fn admit_in_scope(
 fn assert_explicit_family(family: &str) -> Result<(), String> {
     let request = HtmlFontRequest::from_text(family, TEXT);
     let (database, _) = sources::build_known_html_font_db(&request);
-    let style = &EXPECTED_ARIAL_STYLES[0];
+    let style = &EXPECTED_GENERIC_SANS_STYLES[0];
     let selected = selected_face(&database, family, style)?;
     let face = database
         .face(selected)
@@ -101,8 +109,28 @@ fn assert_explicit_family(family: &str) -> Result<(), String> {
 fn selected_face(
     database: &Database,
     family: &str,
-    style: &ExpectedArialStyle,
+    style: &ExpectedGenericSansStyle,
 ) -> Result<ID, String> {
     text_shaping::known_matching(database, family, style.weight, style.italic)
         .ok_or_else(|| format!("font face for {family} is missing"))
+}
+
+fn configured_sans_family() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Helvetica"
+    } else {
+        "Arial"
+    }
+}
+
+fn configured_sans_styles() -> &'static [ExpectedGenericSansStyle] {
+    EXPECTED_GENERIC_SANS_STYLES
+}
+
+fn expected_post_script_name(style: &ExpectedGenericSansStyle) -> &'static str {
+    if cfg!(target_os = "macos") {
+        style.mac_post_script_name
+    } else {
+        style.other_post_script_name
+    }
 }

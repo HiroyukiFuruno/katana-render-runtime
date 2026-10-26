@@ -22,8 +22,15 @@ fn configure_html_sans_serif_family(database: &mut usvg::fontdb::Database) {
 }
 
 pub(in super::super) fn configured_html_sans_serif_family() -> &'static str {
-    /* WHY: ChromeのmacOS HTML sans-serif既定はArialで、native SVGのfont profileとは別に保つ。 */
-    "Arial"
+    /* WHY: macOSのHTML sans-serifはChromeの実選択に合わせる。 */
+    #[cfg(target_os = "macos")]
+    {
+        "Helvetica"
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "Arial"
+    }
 }
 
 fn configure_html_serif_family(database: &mut usvg::fontdb::Database) {
