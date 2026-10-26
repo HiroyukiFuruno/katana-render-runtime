@@ -3994,6 +3994,12 @@ test.each([
   ["root-test-and-coverage", "CARGO={{quote(CARGO)}}", "CARGO=cargo", "CARGO override"],
   [
     "root-test-and-coverage",
+    "CARGO_BUILD_JOBS={{quote(JOBS)}}",
+    "CARGO_BUILD_JOBS=1",
+    "bounded build jobs override",
+  ],
+  [
+    "root-test-and-coverage",
     "TEST_THREADS={{quote(TEST_THREADS)}}",
     "TEST_THREADS=1",
     "thread override",

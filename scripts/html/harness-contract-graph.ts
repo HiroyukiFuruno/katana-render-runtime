@@ -4191,7 +4191,7 @@ function moonCoverageRecipesVerified(
   const performanceWrapper = recipes.get("performance-harness-coverage") ?? "";
   const performance = recipes.get("performance-harness-coverage-run") ?? "";
   const rootCommand =
-    'CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"';
+    'CARGO={{quote(CARGO)}} CARGO_BUILD_JOBS={{quote(JOBS)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"';
   const performanceWrapperCommand =
     "CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/hooks/run_locked_command.py --performance-coverage";
   const rootCommands = root

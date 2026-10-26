@@ -3348,7 +3348,7 @@ ${runtimeRecipes.join("\n")}
 native-coverage-cache-key producer:
     CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-key --producer {{quote(producer)}} --moon-fingerprint
 root-test-and-coverage: plantuml-install
-    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"
+    CARGO={{quote(CARGO)}} CARGO_BUILD_JOBS={{quote(JOBS)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"
 performance-harness-coverage:
     CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/hooks/run_locked_command.py --performance-coverage
 [private]
@@ -3750,13 +3750,27 @@ test.each(combinedCoverageFaults)("combined coverage contract rejects %s", (_fau
 
 test.each([
   ["CARGO override", "CARGO={{quote(CARGO)}}", "CARGO=cargo"],
+  ["bounded build jobs missing", "CARGO_BUILD_JOBS={{quote(JOBS)}} ", ""],
+  ["bounded build jobs changed", "CARGO_BUILD_JOBS={{quote(JOBS)}}", "CARGO_BUILD_JOBS=1"],
   ["thread override", "TEST_THREADS={{quote(TEST_THREADS)}}", "TEST_THREADS=1"],
   ["repo override", '--repo "{{REPO_ROOT}}"', '--repo "tmp/repo"'],
 ])("root coverage delegation rejects %s", (_name, before, after) => {
   const snapshot = combinedCoverageMoonFixture();
   const justfile = snapshot.read("Justfile") ?? "";
-  expect(justfile).toContain(before);
-  replaceSources(snapshot, { Justfile: justfile.replace(before, after) });
+  const recipe = justRecipes(justfile).get("root-test-and-coverage") ?? "";
+  const bodyStart = recipe.indexOf("\n");
+  expect(bodyStart).toBeGreaterThanOrEqual(0);
+  const recipeBody = recipe.slice(bodyStart + 1);
+  expect(recipeBody).toContain(before);
+  expect(justfile).toContain(recipeBody);
+  const changedBody = recipeBody.replace(before, after);
+  expect(changedBody).not.toBe(recipeBody);
+  const changedJustfile = justfile.replace(recipeBody, changedBody);
+  expect(changedJustfile).not.toBe(justfile);
+  expect(justRecipes(changedJustfile).get("root-test-and-coverage")).toBe(
+    recipe.replace(before, after),
+  );
+  replaceSources(snapshot, { Justfile: changedJustfile });
   expect(checkHarnessContract(snapshot).length).toBeGreaterThan(0);
 });
 

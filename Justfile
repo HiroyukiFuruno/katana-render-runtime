@@ -105,7 +105,7 @@ dependency-leak:
 
 # Run workspace tests
 unit-test: plantuml-install
-    {{CARGO}} test --workspace --all-targets --all-features --locked{{TEST_THREAD_ARGS}}
+    CARGO_BUILD_JOBS={{quote(JOBS)}} {{CARGO}} test --workspace --all-targets --all-features --locked{{TEST_THREAD_ARGS}}
 
 # Root unit tests and line coverage share one fresh instrumented test run.
 native-coverage-cache-key producer:
@@ -124,7 +124,7 @@ native-nextest-diagnostic filter="": plantuml-install runtime-bundle-check
       NEXTEST_STATE_DIR="{{REPO_ROOT}}/target/nextest-diagnostic-state" LLVM_PROFILE_FILE_NAME="krr-nextest-diagnostic-${diagnostic_run_id}-%4m.profraw" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-diagnostic-domain root "${retain_args[@]}" -- {{CARGO}} llvm-cov nextest --workspace --all-targets --all-features --locked --cargo-profile krr-coverage --no-report --no-fail-fast --retries 0 --user-config-file "{{REPO_ROOT}}/scripts/release/nextest-local-user.toml"{{NEXTEST_THREAD_ARGS}}{{if filter == "" { "" } else { " -E " + quote(filter) }}}
 
 root-test-and-coverage: plantuml-install
-    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"
+    CARGO={{quote(CARGO)}} CARGO_BUILD_JOBS={{quote(JOBS)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"
 
 # WHY: 未計測行の診断用詳細JSONを正式なroot.jsonと分離し、閾値判定には使わない。
 native-root-coverage-detail:

@@ -1501,7 +1501,7 @@ function performanceRecipeCommands(): Record<string, string[]> {
     ],
     "root-test-and-coverage": [
       "just plantuml-install",
-      'CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"',
+      'CARGO={{quote(CARGO)}} CARGO_BUILD_JOBS={{quote(JOBS)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"',
     ],
   };
 }

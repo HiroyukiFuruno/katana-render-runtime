@@ -234,15 +234,24 @@ fn coverage_gate_remains_strict_and_includes_integration_targets()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = workspace_root()?;
     let justfile = std::fs::read_to_string(root.join("Justfile"))?;
+    let unit = recipe_body(&justfile, "unit-test")?;
     let coverage = recipe_body(&justfile, "coverage")?;
     let recipe = recipe_body(&justfile, "root-test-and-coverage")?;
     let aggregate = recipe_body(&justfile, "coverage-result-check")?;
 
+    assert_unit_test_recipe(unit);
     assert_coverage_recipe_arms(coverage);
     assert_root_coverage_contract(root, &justfile, recipe)?;
     assert_coverage_aggregate_contract(aggregate);
     assert_coverage_defaults(&justfile);
     Ok(())
+}
+
+fn assert_unit_test_recipe(recipe: &str) {
+    assert_eq!(
+        recipe.trim(),
+        "plantuml-install\n    CARGO_BUILD_JOBS={{quote(JOBS)}} {{CARGO}} test --workspace --all-targets --all-features --locked{{TEST_THREAD_ARGS}}"
+    );
 }
 
 fn assert_coverage_recipe_arms(coverage: &str) {
@@ -294,7 +303,7 @@ fn assert_root_coverage_recipe(justfile: &str, recipe: &str) {
     );
     assert_eq!(
         recipe.trim(),
-        "plantuml-install\n    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo \"{{REPO_ROOT}}\""
+        "plantuml-install\n    CARGO={{quote(CARGO)}} CARGO_BUILD_JOBS={{quote(JOBS)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo \"{{REPO_ROOT}}\""
     );
 }
 
@@ -319,7 +328,7 @@ fn assert_root_coverage_commands(commands: &str) {
             "\"llvm-cov\", \"clean\", \"--workspace\", \"--profraw-only\"",
             "\"llvm-cov\", \"nextest\", \"--workspace\", \"--all-targets\", \"--all-features\"",
             "\"--cargo-profile\", \"krr-coverage\", \"--no-report\"",
-            "\"llvm-cov\", \"report\", \"--profile\", \"krr-coverage\"",
+            "\"llvm-cov\", \"report\", \"--workspace\", \"--profile\", \"krr-coverage\"",
             "\"--show-missing-lines\", \"--output-path\", str(repo / REPORT_DIRECTORY / \"root.json\")",
         ],
     );
