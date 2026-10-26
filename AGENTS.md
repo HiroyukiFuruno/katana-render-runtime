@@ -42,6 +42,7 @@
 
 ## 限定Rust検証の実行条件
 
+- Rustup管理下のCargoは既存Justfileのlauncher経由で起動する。証跡の実体SHA取得に解決した`cargo.executable`を実行argvへ置き換えない。実体を直呼びすると子rustcのRustup選択が依存crate内のtoolchain指定へ変わり、同一targetで異なるcompilerが混在する。E0514時は実argv・依存側toolchain指定を照合し、標準launcherで再実行する。容量やcache破損と断定して不要なcleanをしない。
 - Cargoを伴わない予備の直接rustfmt検査も、対象manifestのeditionを明示する（現workspaceは`--edition 2024`）。既定editionによる整形成功を`cargo fmt`と同条件の成功に扱わず、不要な既存整形差分を混入させない。正式判定では既存`fmt-check`を維持する。
 - 絞り込み検証も既存recipeを優先する。引数を受けるrecipeがない場合は `just --command cargo ...` を使い、Justfileの作業場所・dotenv・export済みの `RUSTFLAGS` 等を保持する。既存ゲートと同じworkspace・features・targetsを保ち、libtestのcase filterで絞る。変更が必要なら別fingerprintとなる範囲を明記し、別条件の成功を元ゲートへ転用しない。別条件の直接Cargo実行で依存物を再コンパイルしない。既存binaryの診断実行は、同じbinaryの物理SHAと対象caseを記録し、ソース変更後の合格へ転用しない。
 - Rustのmodule名とcase名をファイル名から推測しない。importは実際の`mod`宣言と可視性へ照合し、限定caseの完全名は同条件のコンパイル済みbinaryの`--list`等、既存runnerの実catalogへ照合する。catalogのbinary SHAとrawを保存し、選択した各caseが意図した件数だけ実行されたことを確認する。0件や未選択のcaseを成功に含めない。

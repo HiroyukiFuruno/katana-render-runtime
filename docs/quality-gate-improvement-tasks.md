@@ -1,5 +1,11 @@
 # 品質ゲート改善の作業台帳
 
+R2865はC4観測の責務分割後、並列foundation・厳格Clippy・ASTが全0、source前後一致。R2867は標準Cargo launcherによる全workspace/all-targets/all-featuresのtest build0、実catalogで選んだC4観測と異常系判定の2caseが各1件成功、source前後一致。製品117画像の合格とは区別する。先行R2866は担当が解決済みCargo実体を直接実行し、依存crate内のtoolchain指定から子rustcが変わってE0514となった失敗。raw/実exit101を保持し、cleanや検査条件変更をせず標準launcherへ戻して解消。再発防止をAGENTSへ固定した。
+
+R2867の同一render操作内font source auditはArial/Arial Boldを確認した。独立Chromeの描画途中観測R2868との比較ではglobal bold16のgetBBox高は18対17.3671875、User bold14の幅は31.140625対31.30859375、metadataにも微小差がある。フォント名の取り違えだけと断定しない。CoreTextの同一face/sizeのglyph境界はKRRの値と一致する診断があり、Chrome側の実metrics/ink計算経路を追う。観測用コードの成功を描画修正完了にしない。
+
+R2869の通常commit hookは全target test build後の7,024,209,920Bを固定閾値4,726,095,872Bで拒否した。R2870の既存just cleanはexit0、source/index不変と凍結6binaryのSHA維持を確認。実空き7,236,788→13,812,836KiBへ回復し、閾値を変えず通常hookを再実行する。R2867で実行済みの対象binaryは履歴証跡として保持し、clean後の現物や今後の変更の合格へ再認定しない。
+
 最新ユーザー指示を優先する。`[ ]` は未対応・未検証、`[/]` は検証済みのユーザー指摘対応を示す。実装だけで完了にしない。再開時は本台帳と現行実測計画を読み、証跡を確認して続行する。
 
 本ファイルを指摘事項の唯一のチェックリストとする。実行状態は終了hook台帳、測定設定は現行計画、詳細な証跡は各結果ファイルに置き、別文書へ同じ未完了チェックリストを増やさない。新しい指摘には既存項目との対応または新しいIDを付ける。担当終了と要件完了を区別する。
@@ -15,6 +21,12 @@ IssueのClose条件は担当が実行できる実装・自動検証・公開へ�
   続く型修正後に標準型検査全11構成、対象2fileの全20件96assert、Biome・重複1,473ソース0・diff検査がactual0（`tmp/quality/managed-reader-typecheck-s9t73yb0/`、`managed-reader-tests-xo7oh5z7/`、`managed-reader-static-57248y3a/`）。主担当がraw・exit・テストSHA`7e81a12d`と型だけの差分を確認し、採点判定への接続と欠落拒否の修正項目を対応済みとする。現行製品117件の各99・完全ゲート・性能・公開は別の未完了項目であり、この局所成功へ代用しない。
 
 ## 現在の状態（2026-10-26）
+
+R2840でnative captureの実設定/font環境契約と重複レポート圧縮を`02c7963a`へ通常hookでcommitし、R2841のrelease内容/祖先/version回帰3件成功後、対象固定を`b3db4d6a`へcommitした。R2843はこのsourceのcanonical candidate build proof actual0・bundle検証成功。R2844はCLI compile0後にtarget5,580,656,640 bytesが固定4,726,095,872 bytesを超えて失敗。R2845の既存just clean actual0・source不変・凍結binary6件保持後、R2847でcurrent CLI buildとnative PNG EN59/JA58を全取得した。formal scorerはC4投影参照とcandidateの寸法差で中断し、reference-context.json未生成のためaggregateは不合格。117件すべての数値が99未満だったという結果ではない。
+
+R2850はR2847のnative frame証跡をcanonical inventoryで検証し、既存scoreNativeProductRowsで非C4/Tree101件を診断採点した。46件99以上・55件未達、C4/Tree16件は未採点。全体の正式合格へ転用しない。旧R2672の92/117はChromeによるSVG再rasterであり、実native PNG結果と混同しない。R2848のexpectedSlugs引数不足とR2849の診断caller作業dir不足は保持し、R2850で修正・actual0。R2852は独立Chromeと既存strict capture wrapperでC4の文字矩形/Canvas metricsを取得した。R2851の旧R2679 control診断は選択font metricsだけ取得、root/line観測0でactual101。旧binaryの成功・現行source合格として扱わない。
+
+- [ ] INLINE-SVG-NATIVE-TEXT: 実native captureはnativeFrameCaptureWrapperでSVGをHTMLへinline挿入し、HTML probeでframe化する。font-family/styleの適用、inline SVGのtext provenanceとSkia/resvg分岐を実callerから追い、Chrome再rasterとnative PNGの差を修正する。主担当が当初候補にした公開rasterize_svgのpost-parse dispatch変更は、bundle font固定という既存契約に反し、今回のcapture入口でもないため実装前に撤回した。担当のsource確認によりRust変更0で止めた。公開低level APIのhost font独立性を維持し、無関係なbackend変更や比較元の付替えで解消したことにしない。実経路を検出できる回帰、現行117製品PNG全99以上、HTML84/消費側契約と速度/RSS非劣化で修正を採否判定する。
 
 R2834の通常commitはnative observerのENOSPCで完了せず、HEADは`d14f2463`・stage差分を保持した。Git本体の終了コードは欠落しており補完しない。R2835の承認済みprivate `just clean-all`はactual1で実空き容量を回復できなかった。R2838で非アクティブな生成済み重複検査レポート1,683件・11,320,880,557 bytesを829,886,384 bytesのgzip archiveへ保存し、全memberのraw SHA/件数と元file stampを照合してから元cacheを整理した。最新role pointer・source不変、実空き5,933,117,440→16,368,459,776 bytes。archiveは過去証跡の保全専用で現行合格に転用しない。既存固定容量上限は変更していない。
 
@@ -58,10 +70,10 @@ R2715の認証拒否は、Moon producerと直接validatorの環境fingerprint差
 
 | 対象 | 最新の完了済み証拠 | 残る受入条件 |
 | --- | --- | --- |
-| Mermaid #108 | R2672の診断PNGは92/117が99以上・残25・新規合格/脱落0。multi-fragment候補は効果が小さく撤回した | 旧R1511 HTMLの再rasterを現行製品へ代用しない。fresh CLI→SVG→PNG/frameの正式117件・全99以上が必要 |
+| Mermaid #108 | R2847で現行sourceのCLI/SVG/native PNG117取得。R2850の製品PNG診断は非C4/Tree101件中46件99以上・55件未達、C4/Tree16件未採点 | C4のSVG geometry寸法差とnative textの差を修正し、正式117件全99以上。旧R2672のChrome再raster92/117を代用しない |
 | HTML #109 | R2673で84/84が90以上・最低91.49827・出力font一致established | 公開registry採用後の全84、私有原本全Y/実末尾/全目次、consumer XY/resize契約、初回/再表示/resizeの時間とRSS非劣化。99は#106 |
 | runtime | 撤回後R2680は2,683成功・失敗0・既存ignored24・実行漏れ0、source/binary不変 | 最新全workspace品質ゲート・coverage100%/未計測0・最終性能は別工程 |
-| fork依存 | PR #3 HEAD5a776257。旧headの3 OS必須CI成功後、Windows一般jobのexplorer依存pin不整合を修正。R2737のWindows-target依存解決/locked repeat成功、R2738通常commit/push | 最新headのCodex reviewはrunning、Draft。最新3 OS CI→expected SHA保護merge→2crate公開→KRR registry採用。旧head CIやDraft skipを代用しない |
+| fork依存 | PR #3はHEAD5a776257のreview/未解決0/必須3 OS CI後にexpected SHA通常merge済み、c01f0165。R2836でusvg package検証compile0、upload403（共通tokenの権限不足） | 新規/更新公開と対象crateに適合する認証→2crate公開→KRR registry採用。未公開のpath/git依存を最終releaseへ残さない |
 | 公開 | KRRはrelease/v0.4.24、正式公開は未完了 | 最新変更commit・release inclusion同期、Draft PR→最新review/個別reply・resolve→Ready→必須3 OS CI→保護merge、GitHub Release/3crate公開、#108/#109 close、安全なcleanup |
 
 forkの既存P2は上流0.49由来のmask/context-fill課題としてIssue #4へ分離し、元threadへの個別reply/resolveを確認した。承認済み3修正の公開範囲を維持し、第四patchは採用していない。旧0.48.1 Draft Releaseは未公開のまま、現行0.49の公開成功へ代用しない。既存のcrates.io 403は保持し、現行publishで再確認するまで認証復旧済みとしない。

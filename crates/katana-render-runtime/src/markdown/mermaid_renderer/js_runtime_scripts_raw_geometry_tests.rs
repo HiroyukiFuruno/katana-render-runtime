@@ -1,5 +1,7 @@
 use super::{DiagramRuntimeScript, MermaidRuntimeScripts};
 use crate::markdown::{diagram_js_runtime::DiagramV8Runtime, runtime_assets::RuntimeAsset};
+#[path = "js_runtime_scripts_raw_geometry_c4_observer_test_support.rs"]
+mod c4_geometry_observer;
 #[path = "js_runtime_scripts_raw_geometry_class_git_diagnostic_tests.rs"]
 mod class_git_diagnostic;
 #[path = "js_runtime_scripts_raw_geometry_er_attribute_tests.rs"]
@@ -107,12 +109,16 @@ fn raw_geometry_driver(
 ) -> String {
     let actor_labels = serde_json::json!(actor_labels);
     let metric_labels = serde_json::json!(metric_labels);
+    let body = format!(
+        "{RAW_GEOMETRY_DRIVER_PREFIX}{}{RAW_GEOMETRY_DRIVER_SUFFIX}",
+        c4_geometry_observer::SOURCE
+    );
     format!(
-        "(async () => {{const request = {request}; const config = {config}; const productionEntryPoint = {production_entrypoint}; const actorLabels = {actor_labels}; const metricLabels = {metric_labels};\n{RAW_GEOMETRY_DRIVER_BODY}\n}})();"
+        "(async () => {{const request = {request}; const config = {config}; const productionEntryPoint = {production_entrypoint}; const actorLabels = {actor_labels}; const metricLabels = {metric_labels};\n{body}\n}})();"
     )
 }
 
-const RAW_GEOMETRY_DRIVER_BODY: &str = r#"const vendor = globalThis.mermaid ?? globalThis.window.mermaid;
+const RAW_GEOMETRY_DRIVER_PREFIX: &str = r#"const vendor = globalThis.mermaid ?? globalThis.window.mermaid;
 if (!vendor || typeof vendor.render !== 'function') throw new Error('vendor absent');
 let initializeInput, renderInput, svgId, renderCalls = 0;
 let fontMeasureCalls = 0, svgFontMetricCalls = 0;
@@ -122,14 +128,6 @@ const svgFontMetricTraceLimit = 32;
 const recordAllSvgFontMetrics = metricLabels.length === 0;
 const svgTextBoxObservations = [];
 const svgTextBoxTraceLimit = 16;
-const c4GeometryObservations = [];
-const c4GeometryTraceLimit = 16;
-let c4GeometryObserverEnabled = false;
-let c4GeometryHookCalls = {getBBox: 0, getBoundingClientRect: 0};
-const c4GeometryHookNodes = [];
-let c4GeometryPrototype;
-let c4GetBBoxHook;
-let c4GetBoundingClientRectHook;
 const originalInitialize = vendor.initialize.bind(vendor);
 const originalRender = vendor.render.bind(vendor);
 const originalMeasureText = globalThis.__katanaMeasureText;
@@ -165,50 +163,9 @@ if (actorLabels.length > 0) {
     return box;
   };
 }
-if (/^C4(?:Context|Container|Component|Dynamic|Deployment)\b/.test(String(request.source ?? ''))) {
-  c4GeometryObserverEnabled = true;
-  const svgProbe = globalThis.document?.createElementNS?.(
-    'http://www.w3.org/2000/svg',
-    'svg',
-  );
-  const elementPrototype = svgProbe && Object.getPrototypeOf(svgProbe);
-  const originalGetBBox = elementPrototype?.getBBox;
-  const originalGetBoundingClientRect = elementPrototype?.getBoundingClientRect;
-  if (typeof originalGetBBox !== 'function' || typeof originalGetBoundingClientRect !== 'function')
-    throw new Error('C4 geometry observers absent');
-  const isObserved = (node) =>
-    (node.localName === 'svg' && node.getAttribute('id') === svgId) ||
-    (node.localName === 'line' && node.hasAttribute('x1') && node.hasAttribute('y1'));
-  const nodeDescriptor = (node) => ({
-    localName: node.localName,
-    id: node.getAttribute('id'),
-    x1: node.getAttribute('x1'),
-    y1: node.getAttribute('y1'),
-    x2: node.getAttribute('x2'),
-    y2: node.getAttribute('y2'),
-  });
-  c4GeometryPrototype = elementPrototype;
-  c4GetBBoxHook = function(...args) {
-    c4GeometryHookCalls.getBBox += 1;
-    const box = originalGetBBox.apply(this, args);
-    if (c4GeometryHookNodes.length < c4GeometryTraceLimit)
-      c4GeometryHookNodes.push({kind: 'getBBox', node: nodeDescriptor(this)});
-    if (isObserved(this) && c4GeometryObservations.length < c4GeometryTraceLimit)
-      c4GeometryObservations.push({kind: 'getBBox', node: nodeDescriptor(this), box});
-    return box;
-  };
-  c4GetBoundingClientRectHook = function(...args) {
-    c4GeometryHookCalls.getBoundingClientRect += 1;
-    const box = originalGetBoundingClientRect.apply(this, args);
-    if (c4GeometryHookNodes.length < c4GeometryTraceLimit)
-      c4GeometryHookNodes.push({kind: 'getBoundingClientRect', node: nodeDescriptor(this)});
-    if (isObserved(this) && c4GeometryObservations.length < c4GeometryTraceLimit)
-      c4GeometryObservations.push({kind: 'getBoundingClientRect', node: nodeDescriptor(this), box});
-    return box;
-  };
-  elementPrototype.getBBox = c4GetBBoxHook;
-  elementPrototype.getBoundingClientRect = c4GetBoundingClientRectHook;
-}
+"#;
+
+const RAW_GEOMETRY_DRIVER_SUFFIX: &str = r#"
 if (productionEntryPoint) {
   globalThis.__katanaMeasureText = function(...args) {
     fontMeasureCalls += 1;

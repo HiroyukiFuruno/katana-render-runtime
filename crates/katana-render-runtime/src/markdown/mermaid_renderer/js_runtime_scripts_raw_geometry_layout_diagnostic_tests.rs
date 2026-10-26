@@ -6,6 +6,10 @@ use super::{
 };
 use serde_json::json;
 
+#[path = "js_runtime_scripts_raw_geometry_c4_observation_tests.rs"]
+mod c4_observation_tests;
+use c4_observation_tests::assert_c4_observations;
+
 fn assert_layout_render_identity(
     path: &str,
     request: &serde_json::Value,
@@ -82,28 +86,44 @@ fn captures_c4_layout_measurements_before_serialization() -> Result<(), String> 
     let source = fixture_mermaid_source(C4_SOURCE)?;
     let request = raw_geometry_request(&source);
     let config = raw_geometry_vendor_config();
-    let envelope =
-        render_vendor_raw_and_processed_with_metric_labels(&request, &config, C4_METRIC_LABELS)?;
+    let (envelope, font_source_audit) = render_c4_with_font_source_audit(&request, &config)?;
     assert_layout_render_identity(C4_PATH, &request, &config, &envelope)?;
-    write_c4_diagnostic_record(&source, request, config, &envelope)?;
+    write_c4_diagnostic_record(&source, request, config, &envelope, font_source_audit)?;
     assert_c4_observations(&envelope)
 }
 
-fn assert_c4_observations(envelope: &serde_json::Value) -> Result<(), String> {
-    let observations = envelope
-        .get("c4GeometryObservations")
-        .and_then(serde_json::Value::as_array)
-        .ok_or("C4 geometry observations are missing")?;
-    if !observations
-        .iter()
-        .any(|row| row["node"]["localName"] == "svg")
-        || !observations
-            .iter()
-            .any(|row| row["node"]["localName"] == "line")
-    {
-        return Err("C4 root and relation geometry observations are incomplete".into());
-    }
-    Ok(())
+#[cfg(target_os = "macos")]
+fn render_c4_with_font_source_audit(
+    request: &serde_json::Value,
+    config: &serde_json::Value,
+) -> Result<(serde_json::Value, serde_json::Value), String> {
+    let (envelope, mut audit) =
+        crate::markdown::svg_rasterize::SvgRasterizeOps::with_actual_font_source_audit(|| {
+            render_vendor_raw_and_processed_with_metric_labels(request, config, C4_METRIC_LABELS)
+        })
+        .map_err(|error| error.to_string())?;
+    audit
+        .as_object_mut()
+        .ok_or("C4 font source audit is not an object")?
+        .insert("available".to_string(), json!(true));
+    Ok((envelope?, audit))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn render_c4_with_font_source_audit(
+    request: &serde_json::Value,
+    config: &serde_json::Value,
+) -> Result<(serde_json::Value, serde_json::Value), String> {
+    let envelope =
+        render_vendor_raw_and_processed_with_metric_labels(request, config, C4_METRIC_LABELS)?;
+    Ok((
+        envelope,
+        json!({
+            "available": false,
+            "faces": [],
+            "route": "non-macos-no-audit"
+        }),
+    ))
 }
 
 fn write_c4_diagnostic_record(
@@ -111,19 +131,18 @@ fn write_c4_diagnostic_record(
     request: serde_json::Value,
     config: serde_json::Value,
     envelope: &serde_json::Value,
+    font_source_audit: serde_json::Value,
 ) -> Result<(), String> {
     let mut record = diagnostic_record(C4_PATH, source, request, config, envelope.clone())?;
-    record
+    let fields = record
         .as_object_mut()
-        .ok_or("C4 diagnostic record is not an object")?
-        .insert(
-            "c4GeometryObservations".to_string(),
-            envelope["c4GeometryObservations"].clone(),
-        );
-    record
-        .as_object_mut()
-        .ok_or("C4 diagnostic record is not an object")?
-        .insert("c4Observer".to_string(), c4_observer_fields(envelope));
+        .ok_or("C4 diagnostic record is not an object")?;
+    fields.insert(
+        "c4GeometryObservations".to_string(),
+        envelope["c4GeometryObservations"].clone(),
+    );
+    fields.insert("c4Observer".to_string(), c4_observer_fields(envelope));
+    fields.insert("actualFontSourceAudit".to_string(), font_source_audit);
     write_diagnostic_record(C4_OUTPUT_ENV, record)
 }
 
