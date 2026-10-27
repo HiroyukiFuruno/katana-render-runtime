@@ -1,7 +1,6 @@
 """性能producerのruntime同期preflightと失敗伝播を検証する単体契約。"""
 from __future__ import annotations
 
-import importlib.util
 import copy
 import json
 import errno
@@ -27,26 +26,20 @@ from types import FrameType
 import produce_html_performance_evidence as typed_producer
 import verify_html_performance_evidence as gate
 
-spec = importlib.util.spec_from_file_location(
-    "performance_producer", Path(__file__).with_name("produce_html_performance_evidence.py")
-)
-if spec is None or spec.loader is None:
-    raise RuntimeError("performance producer module loader is unavailable")
-producer = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(producer)
+producer = typed_producer
 
 
 class CatalogProducerOperationTest(unittest.TestCase):
     def test_formal_cli_requires_catalog_before_calling_producer(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, \
-             patch.object(producer.sys, "argv", [
+             patch.object(sys, "argv", [
                  "produce_html_performance_evidence.py",
                  "--repo", temporary,
                  "--output", str(Path(temporary) / "tmp/evidence"),
                  "--capacity-binding", str(Path(temporary) / "capacity.json"),
                  "--capacity-binding-sha256", "a" * 64,
              ]), \
-             patch.object(producer.sys, "stderr", io.StringIO()), \
+             patch.object(sys, "stderr", io.StringIO()), \
              patch.object(producer, "produce") as run:
             with self.assertRaises(SystemExit) as caught:
                 producer.main()
@@ -69,7 +62,7 @@ class CatalogProducerOperationTest(unittest.TestCase):
             output = root / "tmp/evidence"
             capacity = root / "capacity.json"
             manifest = root / "catalog-stage90-captures.json"
-            with patch.object(producer.sys, "argv", [
+            with patch.object(sys, "argv", [
                 "produce_html_performance_evidence.py",
                 "--repo", str(root),
                 "--output", str(output),
@@ -87,7 +80,7 @@ class CatalogProducerOperationTest(unittest.TestCase):
             output = root / "tmp/evidence"
             capacity = root / "capacity.json"
             manifest = root / "catalog-stage90-captures.json"
-            with patch.object(producer.sys, "argv", [
+            with patch.object(sys, "argv", [
                 "produce_html_performance_evidence.py", "--repo", str(root),
                 "--output", str(output), "--capacity-binding", str(capacity),
                 "--capacity-binding-sha256", "d" * 64, "--catalog-plan", str(manifest),
@@ -119,7 +112,7 @@ class CatalogProducerOperationTest(unittest.TestCase):
                 ]
                 if diagnostic:
                     argv.append("--diagnostic-only")
-                with patch.object(producer.sys, "argv", argv), \
+                with patch.object(sys, "argv", argv), \
                      patch.object(producer, "produce", side_effect=assert_lock_is_held):
                     producer.main()
 
@@ -128,11 +121,11 @@ class CatalogProducerOperationTest(unittest.TestCase):
             root = Path(temporary).resolve()
             output = root / "tmp/candidate-build"
             capacity = root / "capacity.json"
-            with patch.object(producer.sys, "argv", [
+            with patch.object(sys, "argv", [
                 "produce_html_performance_evidence.py", "--repo", str(root),
                 "--output", str(output), "--capacity-binding", str(capacity),
                 "--capacity-binding-sha256", "c" * 64, "--candidate-build-only",
-            ]), patch.object(producer.sys, "stdout", io.StringIO()), \
+            ]), patch.object(sys, "stdout", io.StringIO()), \
                  patch.object(producer, "produce_candidate_build_proof",
                               return_value={"buildProofValidated": True}) as run:
                 producer.main()
@@ -167,8 +160,9 @@ class TransportBundleUnitTests(unittest.TestCase):
             root = Path(temporary).resolve()
             source = root / "source.json"
             source.write_text("{}")
-            pin = {"path": str(source), "sha256": gate.sha256(source)}
-            attempts = [{"expected": pin, "result": pin, "pairManifest": pin}]
+            pin: typed_producer.FilePin = {"path": str(source), "sha256": gate.sha256(source)}
+            attempts: list[dict[str, typed_producer.FilePin]] = [
+                {"expected": pin, "result": pin, "pairManifest": pin}]
             bundle = root / "bundle"
             relative_paths = producer.write_transport_bundle(bundle, "a" * 40, [pin, pin], attempts)
             manifest = gate.Bundle(bundle)
@@ -188,7 +182,7 @@ class TransportBundleUnitTests(unittest.TestCase):
             private.write_bytes(b"private bytes")
             executable.chmod(0o555)
             private.chmod(0o600)
-            pins = [
+            pins: list[typed_producer.FilePin] = [
                 {"path": str(path), "sha256": gate.sha256(path)}
                 for path in (executable, private)
             ]
@@ -221,8 +215,8 @@ class RuntimeSyncPreflightTest(unittest.TestCase):
         validator = ["bun", "run", "scripts/html/fidelity-acceptance-cli.ts",
                      "catalog-stage90-validate-captures", pins[0]["path"], pins[1]["path"]]
         completed = subprocess.CompletedProcess(validator, 0, stdout=b"{}", stderr=b"")
-        with patch.object(producer.platform, "system", return_value="Darwin"), \
-             patch.object(producer.platform, "machine", return_value="arm64"), \
+        with patch.object(platform, "system", return_value="Darwin"), \
+             patch.object(platform, "machine", return_value="arm64"), \
              patch.object(producer, "load_catalog_conditions", return_value=([], *pins)), \
              patch.object(producer, "source", return_value={"head": "initial"}), \
              patch.object(producer, "_measurement_command", return_value=completed) as run, \
@@ -246,8 +240,8 @@ class RuntimeSyncPreflightTest(unittest.TestCase):
     def test_stale_runtime_check_propagates_before_output_build_or_measurement(self) -> None:
         check = ["just", "runtime-bundle-check"]
         failed = subprocess.CalledProcessError(31, check)
-        with patch.object(producer.platform, "system", return_value="Darwin"), \
-             patch.object(producer.platform, "machine", return_value="arm64"), \
+        with patch.object(platform, "system", return_value="Darwin"), \
+             patch.object(platform, "machine", return_value="arm64"), \
              patch.object(producer, "source", return_value={"head": "initial"}) as source, \
              patch.object(producer, "_measurement_command", side_effect=failed) as run, \
              patch.object(producer, "write") as write, \
@@ -268,8 +262,8 @@ class RuntimeSyncPreflightTest(unittest.TestCase):
 
     def test_source_change_during_successful_sync_check_rejects_inventory(self) -> None:
         check = ["just", "runtime-bundle-check"]
-        with patch.object(producer.platform, "system", return_value="Darwin"), \
-             patch.object(producer.platform, "machine", return_value="arm64"), \
+        with patch.object(platform, "system", return_value="Darwin"), \
+             patch.object(platform, "machine", return_value="arm64"), \
              patch.object(producer, "source", side_effect=[{"head": "initial"}, {"head": "changed"}]) as source, \
              patch.object(producer, "_measurement_command", return_value=subprocess.CompletedProcess(check, 0)) as run, \
              patch.object(producer, "write") as write, \
@@ -290,8 +284,8 @@ class RuntimeSyncPreflightTest(unittest.TestCase):
         )
         for failure in failures:
             with self.subTest(failure=failure), \
-                    patch.object(producer.platform, "system", return_value="Darwin"), \
-                    patch.object(producer.platform, "machine", return_value="arm64"), \
+                    patch.object(platform, "system", return_value="Darwin"), \
+                    patch.object(platform, "machine", return_value="arm64"), \
                     patch.object(producer, "source", return_value={"head": "unit source"}), \
                     patch.object(producer, "_measurement_command", side_effect=failure), \
                     patch.object(producer, "load_capacity_binding") as capacity, \
@@ -323,7 +317,8 @@ class ContextEnvironmentPrivacyTest(unittest.TestCase):
             self.assertNotEqual(producer._environment_sha256(changed), environment_sha)
             self.assertEqual(dict(os.environ), worker_environment_before)
             worker = producer._performance_worker_environment(
-                "rustc", "cargo", "context-pin", root / "Cargo.lock", {"path": "snapshot.json"})
+                "rustc", "cargo", "context-pin", root / "Cargo.lock",
+                {"path": "snapshot.json", "sha256": "s" * 64})
             self.assertEqual(worker, {**worker_environment_before, "KRR_PERF_RUSTC": "rustc",
                 "KRR_PERF_CARGO": "cargo", "KRR_PERF_ENVIRONMENT_SHA256": "context-pin",
                 "KRR_PERF_LOCK_PATH": str(root / "Cargo.lock"),
@@ -337,18 +332,18 @@ class WorkerAttemptContractTest(unittest.TestCase):
         self.root = Path(temporary.name).resolve()
         self.binary = self.root / "worker"
         self.binary.write_bytes(b"frozen worker")
-        self.build = producer.ArmBuildResult([], self.binary, gate.sha256(self.binary), {}, [])
+        self.build = typed_producer.ArmBuildResult([], self.binary, gate.sha256(self.binary), {}, [])
         self.fixture = self.root / "input.html"
         self.fixture.write_text("<p>fixture</p>")
         self.plan = self.root / "plan.json"
         self.plan.write_text("{}")
         self.logs = self.root / "raw"
         self.attempts = self.root / "attempts"
-        self.viewport = {"width": 800, "height": 600, "scale": 1}
+        self.viewport: typed_producer.Viewport = {"width": 800, "height": 600, "scale": 1}
 
     def command_result(
         self, *, returncode: int = 0, mutate_binary: bool = False,
-        elapsed_ms: float = 1.0,
+        elapsed_ms: float = 1.0, closed: bool = False,
     ) -> Callable[..., subprocess.CompletedProcess[bytes]]:
         def execute(
             args: Sequence[str], *, role: str,
@@ -362,11 +357,14 @@ class WorkerAttemptContractTest(unittest.TestCase):
                 self.binary.write_bytes(b"changed worker")
             log_directory.mkdir(parents=True, exist_ok=True)
             lifecycle = log_directory / f"worker-{len(list(log_directory.glob('worker-*.json')))}.json"
-            lifecycle.write_text(json.dumps({"argv": list(args), "exitCode": returncode,
-                                             "raw": []}))
+            lifecycle_value = {"argv": list(args), "exitCode": returncode, "raw": []}
+            if closed:
+                lifecycle_value.update({"identity": {"pid": 4242}, "groupClosed": True,
+                    "rawFdsClosed": True, "failure": None, "cleanupFailure": None})
+            lifecycle.write_text(json.dumps(lifecycle_value))
             if lifecycle_sink is not None:
                 lifecycle_sink(lifecycle)
-            payload = json.dumps({"sample": 0, "viewport": self.viewport,
+            payload = json.dumps({"sample": int(args[2]), "viewport": self.viewport,
                                   "elapsed_ms": elapsed_ms}).encode()
             return subprocess.CompletedProcess(args, returncode, payload, b"worker stderr")
         return execute
@@ -390,9 +388,11 @@ class WorkerAttemptContractTest(unittest.TestCase):
         self.assertEqual(attempts[0]["loadRatioBefore"], 0.1)
         self.assertEqual(attempts[0]["loadRatioAfter"], 0.31)
         self.assertEqual(attempts[0]["actualExit"], 0)
-        lifecycle = attempts[0]["lifecycle"]
-        self.assertTrue(Path(lifecycle["path"]).is_file())
-        self.assertEqual(gate.sha256(Path(lifecycle["path"])), lifecycle["sha256"])
+        lifecycle = gate._object(attempts[0]["lifecycle"], "worker lifecycle pin")
+        lifecycle_path = Path(gate._text(lifecycle["path"], "worker lifecycle path"))
+        lifecycle_sha = gate._text(lifecycle["sha256"], "worker lifecycle SHA")
+        self.assertTrue(lifecycle_path.is_file())
+        self.assertEqual(gate.sha256(lifecycle_path), lifecycle_sha)
         self.assertEqual(attempts[0]["binarySha256Before"], attempts[0]["binarySha256After"])
         self.assertEqual(len(run.call_args_list), 2)
         self.assertEqual(len(list(self.attempts.glob("*.json"))), 2)
@@ -443,6 +443,179 @@ class WorkerAttemptContractTest(unittest.TestCase):
         attempt = json.loads(next(self.attempts.glob("*.json")).read_text())
         self.assertEqual(attempt["actualExit"], 7)
         self.assertIs(attempt["accepted"], False)
+
+    def _collect_failed_worker_sample(
+        self, *, returncode: int, closed: bool,
+    ) -> tuple[list[gate.JsonObject], subprocess.CalledProcessError]:
+        failures: list[gate.JsonObject] = []
+        with patch.object(producer, "await_quiet", return_value=0.1), \
+             patch.object(producer, "quiet", return_value=0.1), \
+             patch.object(producer, "_measurement_command",
+                          side_effect=self.command_result(returncode=returncode, closed=closed)):
+            with self.assertRaises(subprocess.CalledProcessError) as caught:
+                producer.collect_worker_sample(
+                    self.build, 0, self.fixture, self.root / "reports.json", self.plan, 800, 600, 1,
+                    self.root, {"PATH": os.environ.get("PATH", "")}, self.logs, self.attempts,
+                    failures.extend,
+                )
+        return failures, caught.exception
+
+    def test_closed_baseline_failure_can_continue_without_a_sample(self) -> None:
+        failures, error = self._collect_failed_worker_sample(returncode=7, closed=True)
+        self.assertTrue(producer._worker_failure_can_continue("baseline", failures, error))
+        self.assertEqual(len(failures), 1)
+        self.assertIs(failures[0]["accepted"], False)
+        self.assertEqual(failures[0]["actualExit"], 7)
+
+    def test_incomplete_baseline_failure_is_not_treated_as_candidate_success(self) -> None:
+        failures, error = self._collect_failed_worker_sample(returncode=7, closed=True)
+        self.assertFalse(producer._worker_failure_can_continue("candidate", failures, error))
+
+    def test_closed_baseline_failure_keeps_attempt_pin_for_transport(self) -> None:
+        failures: list[gate.JsonObject] = []
+        with patch.object(producer, "await_quiet", return_value=0.1), \
+             patch.object(producer, "quiet", return_value=0.1), \
+             patch.object(producer, "_measurement_command",
+                          side_effect=self.command_result(returncode=7, closed=True)):
+            with self.assertRaises(subprocess.CalledProcessError):
+                producer.collect_worker_sample(
+                    self.build, 0, self.fixture, self.root / "reports.json", self.plan, 800, 600, 1,
+                    self.root, {"PATH": os.environ.get("PATH", "")}, self.logs, self.attempts,
+                    failures.extend,
+                )
+        pins: list[typed_producer.FilePin] = []
+        producer._append_worker_attempt_pins(pins, failures)
+        self.assertEqual(len(pins), 1)
+        self.assertTrue(Path(pins[0]["path"]).is_file())
+
+    def test_baseline_failure_with_unknown_closure_fails_closed(self) -> None:
+        failures, error = self._collect_failed_worker_sample(returncode=7, closed=False)
+        self.assertFalse(producer._worker_failure_can_continue("baseline", failures, error))
+
+    def test_signal_terminated_baseline_failure_fails_closed(self) -> None:
+        failures, error = self._collect_failed_worker_sample(returncode=-15, closed=True)
+        self.assertFalse(producer._worker_failure_can_continue("baseline", failures, error))
+
+    def test_condition_collection_keeps_candidates_after_baseline_failure(self) -> None:
+        candidate_binary = self.root / "candidate-worker"
+        candidate_binary.write_bytes(b"candidate worker")
+        candidate_build = typed_producer.ArmBuildResult([], candidate_binary,
+                                                         gate.sha256(candidate_binary), {}, [])
+        snapshot: typed_producer.FilePin = {"path": str(self.plan), "sha256": gate.sha256(self.plan)}
+        artifact: typed_producer.FilePin = {"path": str(self.plan), "sha256": gate.sha256(self.plan)}
+        arms: dict[str, typed_producer.ArmPin] = {
+            "baseline-0.4.23": {"binary_sha256": self.build.binary_sha256,
+                "source_snapshot_sha256": snapshot["sha256"], "lock_sha256": gate.LOCK_SHA,
+                "build_artifact_ref": artifact},
+            "candidate": {"binary_sha256": candidate_build.binary_sha256,
+                "source_snapshot_sha256": snapshot["sha256"], "lock_sha256": gate.LOCK_SHA,
+                "build_artifact_ref": artifact},
+        }
+        expected: typed_producer.ExpectedPerformance = {
+            "fixture_sha256": gate.sha256(self.fixture),
+            "operation_plan_sha256": gate.sha256(self.plan),
+            "operation": "test", "expected_dom_state_sha256": gate.sha256(self.plan),
+            "viewport": self.viewport,
+            "provenance": {"rustc": "rustc", "cargo": "cargo", "environment_sha256": "e" * 64},
+            "arms": arms, "reportPins": [], "operationPlanRef": artifact,
+            "domStateRef": artifact,
+        }
+        row: gate.JsonObject = {"catalog": False}
+        baseline_calls = 0
+        candidate_calls = 0
+
+        def collect_sample(
+            build: typed_producer.ArmBuildResult, sample: int, _fixture: Path,
+            _report_path: Path, _plan_path: Path, _width: int, _height: int,
+            _scale: int, _root: Path, _environment: Mapping[str, str],
+            _lifecycle: Path, attempts_directory: Path,
+            failure_sink: Callable[[list[gate.JsonObject]], None] | None = None,
+        ) -> tuple[gate.JsonObject, dict[str, float], list[gate.JsonObject]]:
+            nonlocal baseline_calls, candidate_calls
+            if build is self.build:
+                baseline_calls += 1
+            else:
+                candidate_calls += 1
+            attempts_directory.mkdir(parents=True, exist_ok=True)
+            if build is self.build and baseline_calls == 1:
+                lifecycle_path = self.logs / "baseline-failure.json"
+                lifecycle_path.parent.mkdir(parents=True, exist_ok=True)
+                lifecycle_path.write_text(json.dumps({"identity": {"pid": 4242},
+                    "groupClosed": True, "rawFdsClosed": True, "failure": None,
+                    "cleanupFailure": None, "exitCode": 7}))
+                lifecycle_pin: typed_producer.FilePin = {
+                    "path": str(lifecycle_path), "sha256": gate.sha256(lifecycle_path)}
+                record: gate.JsonObject = {"sample": sample, "attempt": 1, "actualExit": 7,
+                    "workerStarted": True, "accepted": False,
+                    "loadRatioBefore": 0.1, "loadRatioAfter": 0.1,
+                    "lifecycle": lifecycle_pin,
+                    "attemptRecord": producer.write(attempts_directory / "attempt.json", {
+                        "sample": sample, "actualExit": 7})}
+                if failure_sink is not None:
+                    failure_sink([record])
+                raise subprocess.CalledProcessError(7, ["worker"])
+            success_record: gate.JsonObject = {"sample": sample, "attempt": 1, "actualExit": 0,
+                "workerStarted": True, "accepted": True,
+                "loadRatioBefore": 0.1, "loadRatioAfter": 0.1,
+                "attemptRecord": producer.write(attempts_directory / f"attempt-{sample}.json", {
+                    "sample": sample, "actualExit": 0})}
+            return ({"sample": sample, "viewport": self.viewport, "elapsed_ms": 1.0},
+                    {"before": 0.1, "after": 0.1}, [success_record])
+
+        with patch.object(producer, "collect_worker_sample", side_effect=collect_sample):
+            collection = producer._collect_condition_worker_pairs(
+                folder=self.root / "condition", row=row, expected=expected,
+                fixture=self.fixture, plan_path=self.plan, width=800, height=600,
+                viewport=self.viewport, builds={"baseline": self.build, "candidate": candidate_build},
+                binaries={"baseline": self.binary, "candidate": candidate_binary}, arms=arms,
+                root=self.root, lifecycle=self.logs, lock=self.plan, snapshot=snapshot,
+                environment_sha="e" * 64,
+            )
+        self.assertEqual(baseline_calls, 1)
+        self.assertEqual(candidate_calls, 25)
+        self.assertEqual(sum(item.get("status") == "missing" for item in collection.order), 4)
+        self.assertEqual(sum(item.get("status") == "incomplete" for item in collection.order), 1)
+        incomplete = next(item for item in collection.order
+                          if item.get("status") == "incomplete")
+        self.assertEqual(incomplete["workerLoads"], [])
+        failed_loads = gate._array(incomplete["failedWorkerLoads"], "failed worker loads")
+        self.assertEqual(failed_loads, [{"before": 0.1, "after": 0.1}])
+        self.assertNotIn("status", gate._object(failed_loads[0], "failed worker load"))
+        self.assertEqual(len(collection.reports), 10)
+        self.assertEqual(collection.actual_phase_records, len(gate.PHASES) * 25)
+
+    def test_partial_baseline_failure_keeps_successful_samples_and_attempts(self) -> None:
+        failures: list[gate.JsonObject] = []
+        samples: list[gate.JsonObject] = []
+        loads: list[dict[str, float]] = []
+        attempts: list[gate.JsonObject] = []
+        commands = iter([self.command_result(), self.command_result(),
+                         self.command_result(returncode=7, closed=True)])
+
+        def run_command(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+            return next(commands)(*args, **kwargs)
+
+        with patch.object(producer, "await_quiet", return_value=0.1), \
+             patch.object(producer, "quiet", return_value=0.1), \
+             patch.object(producer, "_measurement_command", side_effect=run_command):
+            for sample in range(3):
+                try:
+                    payload, sample_load, sample_attempts = producer.collect_worker_sample(
+                        self.build, sample, self.fixture, self.root / "reports.json", self.plan,
+                        800, 600, 1, self.root, {"PATH": os.environ.get("PATH", "")},
+                        self.logs, self.attempts, failures.extend,
+                    )
+                except subprocess.CalledProcessError as error:
+                    self.assertTrue(producer._worker_failure_can_continue("baseline", failures, error))
+                    attempts.extend(failures)
+                    break
+                samples.append(payload)
+                loads.append(sample_load)
+                attempts.extend(sample_attempts)
+        self.assertEqual([sample["sample"] for sample in samples], [0, 1])
+        self.assertEqual(len(loads), 2)
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(attempts[-1]["actualExit"], 7)
 
     def test_elapsed_time_does_not_trigger_host_load_retry(self) -> None:
         with patch.object(producer, "await_quiet", return_value=0.1), \
@@ -543,7 +716,7 @@ class WorkerAttemptContractTest(unittest.TestCase):
 
     def test_quiet_wait_uses_the_worker_load_limit(self) -> None:
         with patch.object(producer, "quiet", side_effect=[0.3, 0.25, 0.25]), \
-             patch.object(producer.time, "sleep") as sleep:
+             patch.object(time, "sleep") as sleep:
             self.assertEqual(producer.await_quiet(), producer.MAX_WORKER_LOAD)
         sleep.assert_called_once_with(5)
         self.assertEqual(producer.MAX_WORKER_LOAD, 0.25)
@@ -1049,8 +1222,8 @@ class CapacityBindingUnitTests(unittest.TestCase):
                       _input_bytes: bytes | None, _text: bool) -> str:
             return ""
 
-        with patch.object(producer.platform, "system", return_value="Darwin"), \
-             patch.object(producer.platform, "machine", return_value="arm64"), \
+        with patch.object(platform, "system", return_value="Darwin"), \
+             patch.object(platform, "machine", return_value="arm64"), \
              patch.object(producer, "_make_git_query",
                           return_value=git_query), \
              patch.object(producer, "source", side_effect=[initial, initial, initial, initial]), \
@@ -1060,13 +1233,13 @@ class CapacityBindingUnitTests(unittest.TestCase):
                           )) as command, \
              patch.object(producer, "load_capacity_binding", return_value=binding), \
              patch.object(producer, "guarded_arm_build", side_effect=build) as build_call, \
-             patch.object(producer.gate, "current_source", return_value={}), \
-             patch.object(producer.gate, "LOCK_SHA", self.lock_sha), \
-             patch.object(producer.gate, "validate_candidate_build_proof",
+             patch.object(gate, "current_source", return_value={}), \
+             patch.object(gate, "LOCK_SHA", self.lock_sha), \
+             patch.object(gate, "validate_candidate_build_proof",
                           return_value=facts) as validate, \
              patch.object(producer, "_validate_catalog_capture_envelope",
                           side_effect=AssertionError), \
-             patch.object(producer.gate, "verify", side_effect=AssertionError), \
+             patch.object(gate, "verify", side_effect=AssertionError), \
              patch.object(producer, "await_quiet", side_effect=AssertionError):
             result = producer.produce_candidate_build_proof(
                 self.root, output, self.document, gate.sha256(self.document),

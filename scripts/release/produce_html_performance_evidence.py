@@ -191,6 +191,15 @@ class ExpectedPerformance(_ExpectedFields, total=False):
     fontIdentityProbeBinary: FilePin
 
 
+class ConditionWorkerCollection(NamedTuple):
+    order: list[gate.JsonObject]
+    reports: list[Path]
+    report_pins: list[FilePin]
+    failures: list[gate.JsonObject]
+    worker_attempt_pins: list[FilePin]
+    actual_phase_records: int
+
+
 class CapacityBinding(NamedTuple):
     document: Path
     document_sha256: str
@@ -1208,6 +1217,54 @@ def worker_started_from_lifecycle(path: Path) -> bool | None:
     return True if type(pid) is int and pid > 0 else None
 
 
+def _closed_nonzero_baseline_failure(
+    attempts: Sequence[gate.JsonObject], error: BaseException,
+) -> bool:
+    if not isinstance(error, subprocess.CalledProcessError) or not attempts:
+        return False
+    record = attempts[-1]
+    actual_exit = record.get("actualExit")
+    lifecycle_value = record.get("lifecycle")
+    if (type(actual_exit) is not int or actual_exit <= 0
+            or actual_exit != error.returncode or record.get("workerStarted") is not True
+            or not isinstance(lifecycle_value, dict)):
+        return False
+    lifecycle_pin = cast(FilePin, lifecycle_value)
+    try:
+        lifecycle_path = Path(lifecycle_pin["path"])
+        if gate.sha256(lifecycle_path) != lifecycle_pin["sha256"]:
+            return False
+        lifecycle = gate._object(gate.read_json(lifecycle_path), "worker lifecycle")
+        identity = gate._object(lifecycle.get("identity"), "worker identity")
+        pid = identity.get("pid")
+    except (KeyError, OSError, TypeError, ValueError):
+        return False
+    return (type(pid) is int and pid > 0 and lifecycle.get("groupClosed") is True
+            and lifecycle.get("rawFdsClosed") is True
+            and lifecycle.get("failure") is None
+            and lifecycle.get("cleanupFailure") is None
+            and lifecycle.get("exitCode") == actual_exit)
+
+
+def _worker_failure_can_continue(
+    arm: str, attempts: Sequence[gate.JsonObject], error: BaseException,
+) -> bool:
+    return arm == "baseline" and _closed_nonzero_baseline_failure(attempts, error)
+
+
+def _baseline_slot_is_missing(
+    arm: str, baseline_failure: gate.JsonObject | None,
+) -> bool:
+    return arm == "baseline" and baseline_failure is not None
+
+
+def _append_worker_attempt_pins(
+    destination: list[FilePin], attempts: Sequence[gate.JsonObject],
+) -> None:
+    destination.extend(cast(FilePin, gate._object(attempt["attemptRecord"], "worker attempt record"))
+                      for attempt in attempts)
+
+
 def observe_worker_attempt(
     build: ArmBuildResult,
     sample: int,
@@ -1286,8 +1343,14 @@ def collect_worker_sample(
     env: Mapping[str, str],
     log_directory: Path,
     attempts_directory: Path,
+    failure_sink: Callable[[list[gate.JsonObject]], None] | None = None,
 ) -> tuple[gate.JsonObject, dict[str, float], list[gate.JsonObject]]:
     attempts: list[gate.JsonObject] = []
+
+    def preserve_failure() -> None:
+        if failure_sink is not None:
+            failure_sink(attempts)
+
     for attempt in range(1, MAX_WORKER_ATTEMPTS + 1):
         observation = observe_worker_attempt(build, sample, attempt, fixture,
             report_path, plan_path,
@@ -1304,6 +1367,7 @@ def collect_worker_sample(
                 pin = write_exclusive(attempts_directory / f"attempt-{sample}-{attempt}.json", record)
                 record["attemptRecord"] = pin
                 attempts.append(record)
+                preserve_failure()
                 raise
             record["accepted"] = True
             pin = write_exclusive(attempts_directory / f"attempt-{sample}-{attempt}.json", record)
@@ -1315,18 +1379,25 @@ def collect_worker_sample(
         record["attemptRecord"] = pin
         attempts.append(record)
         if observation.error is not None:
+            preserve_failure()
             raise observation.error
         if result is not None and result.returncode != 0:
+            preserve_failure()
             raise subprocess.CalledProcessError(result.returncode, result.args,
                                                 output=result.stdout, stderr=result.stderr)
         if record.get("reason") == "worker binary changed during measurement":
+            preserve_failure()
             raise ValueError("worker binary changed during measurement")
         if record.get("reason") == "worker binary changed before measurement":
+            preserve_failure()
             raise ValueError("frozen build binary changed before measurement")
         if record.get("reason") != "host load exceeded limit":
+            preserve_failure()
             raise ValueError("worker sample invalid")
         if attempt == MAX_WORKER_ATTEMPTS:
+            preserve_failure()
             raise ValueError("host load remained above limit after three attempts")
+    preserve_failure()
     raise ValueError("worker attempt loop ended without a sample")
 
 
@@ -1603,6 +1674,132 @@ def load_catalog_conditions(root: Path, manifest_path: Path) -> tuple[list[Catal
             {"path": str(plan_path), "sha256": plan_sha})
 
 
+def _build_worker_report(
+    expected: Mapping[str, object], row: Mapping[str, object], arms: Mapping[str, ArmPin],
+    raw_arm: str, pair: int, viewport: Viewport, snapshot_sha256: str,
+    samples: Sequence[gate.JsonObject], failure: gate.JsonObject | None,
+) -> gate.JsonObject:
+    provenance = cast(Provenance, expected["provenance"])
+    report: gate.JsonObject = {
+        "arm": raw_arm, "pair_index": pair, "measurement_executed": bool(samples),
+        "sample_count": len(samples), "source_sha256": expected["fixture_sha256"],
+        "operation_plan_sha256": expected["operation_plan_sha256"],
+        "operation": expected["operation"],
+        "expected_dom_state_sha256": expected["expected_dom_state_sha256"],
+        "viewport": viewport,
+        "provenance": {**provenance,
+            "binary_sha256": arms[raw_arm]["binary_sha256"],
+            "source_snapshot_sha256": snapshot_sha256, "deps_lock_sha256": gate.LOCK_SHA},
+        "samples": list(samples),
+    }
+    if failure is not None:
+        report["failure"] = failure
+    if row["catalog"]:
+        report.update({"condition_id": row["condition_id"], "case_id": row["case_id"],
+            "state": row["state"], "operation_kind": row["operation_kind"],
+            "operation_evidence_ref": row["operation_evidence"],
+            "catalog_condition": expected["catalogCondition"]})
+    return report
+
+
+def _collect_condition_worker_pairs(
+    *, folder: Path, row: Mapping[str, object], expected: ExpectedPerformance,
+    fixture: Path, plan_path: Path, width: int, height: int, viewport: Viewport,
+    builds: Mapping[str, ArmBuildResult], binaries: Mapping[str, Path],
+    arms: Mapping[str, ArmPin], root: Path, lifecycle: Path, lock: Path,
+    snapshot: FilePin, environment_sha: str,
+) -> ConditionWorkerCollection:
+    order: list[gate.JsonObject] = []
+    reports: list[Path] = []
+    report_pins: list[FilePin] = []
+    failures: list[gate.JsonObject] = []
+    worker_attempt_pins: list[FilePin] = []
+    baseline_failure: gate.JsonObject | None = None
+    actual_phase_records = 0
+    for pair in range(5):
+        for arm in (("baseline", "candidate") if pair % 2 == 0 else ("candidate", "baseline")):
+            binary = binaries[arm]
+            report_path = folder / "reports" / f"{arm}-{pair}.json"
+            raw_arm = "baseline-0.4.23" if arm == "baseline" else arm
+            if _baseline_slot_is_missing(arm, baseline_failure):
+                missing_failure: gate.JsonObject = {"status": "missing",
+                    "reason": "baseline skipped after prior worker failure",
+                    "afterFailure": baseline_failure}
+                failures.append(missing_failure)
+                report = _build_worker_report(expected, row, arms, raw_arm, pair, viewport,
+                                              snapshot["sha256"], [], missing_failure)
+                report_pin = write(report_path, report)
+                report_pins.append(report_pin)
+                reports.append(report_path)
+                order.append({"arm": arm, "pair_index": pair, "executable": str(binary),
+                    "executable_sha256": arms[raw_arm]["binary_sha256"],
+                    "output": str(report_path), "load_ratio_before": None,
+                    "load_ratio_after": None, "workerLoads": [], "workerAttempts": [],
+                    "status": "missing", "failure": missing_failure})
+                continue
+            provenance = expected["provenance"]
+            environment = _performance_worker_environment(
+                provenance["rustc"], provenance["cargo"],
+                environment_sha, lock, snapshot)
+            samples: list[gate.JsonObject] = []
+            loads: list[dict[str, float]] = []
+            worker_attempts: list[gate.JsonObject] = []
+            failed_attempts: list[gate.JsonObject] = []
+            try:
+                for sample in range(5):
+                    payload, sample_load, sample_attempts = collect_worker_sample(
+                        builds[arm], sample, fixture, report_path, plan_path, width, height,
+                        viewport["scale"], root, environment, lifecycle,
+                        worker_attempts_directory(folder, arm, pair), failed_attempts.extend)
+                    samples.append(payload)
+                    loads.append(sample_load)
+                    worker_attempts.extend(sample_attempts)
+                    worker_attempt_pins.extend(
+                        cast(FilePin, attempt["attemptRecord"]) for attempt in sample_attempts)
+            except BaseException as error:
+                if not _worker_failure_can_continue(arm, failed_attempts, error):
+                    raise
+                _append_worker_attempt_pins(worker_attempt_pins, failed_attempts)
+                failed_record = failed_attempts[-1]
+                worker_attempts.extend(failed_attempts)
+                failure_load = {"before": failed_record["loadRatioBefore"],
+                                "after": failed_record["loadRatioAfter"]}
+                failure: gate.JsonObject = {"status": "incomplete", "reason": "baseline worker exited nonzero",
+                    "sample": failed_record["sample"], "attempt": failed_record["attempt"],
+                    "actualExit": failed_record["actualExit"],
+                    "errorType": type(error).__name__}
+                failures.append(failure)
+                baseline_failure = failure
+                actual_phase_records += len(gate.PHASES) * len(samples)
+                report = _build_worker_report(expected, row, arms, raw_arm, pair, viewport,
+                                              snapshot["sha256"], samples, failure)
+                report_pin = write(report_path, report)
+                report_pins.append(report_pin)
+                reports.append(report_path)
+                order.append({"arm": arm, "pair_index": pair, "executable": str(binary),
+                    "executable_sha256": arms[raw_arm]["binary_sha256"],
+                    "output": str(report_path),
+                    "load_ratio_before": failed_record["loadRatioBefore"],
+                    "load_ratio_after": failed_record["loadRatioAfter"],
+                    "workerLoads": loads, "failedWorkerLoads": [failure_load],
+                    "workerAttempts": worker_attempts,
+                    "status": "incomplete", "failure": failure})
+                continue
+            report = _build_worker_report(expected, row, arms, raw_arm, pair, viewport,
+                                          snapshot["sha256"], samples, None)
+            report_pin = write(report_path, report)
+            report_pins.append(report_pin)
+            reports.append(report_path)
+            actual_phase_records += len(gate.PHASES) * len(samples)
+            order.append({"arm": arm, "pair_index": pair, "executable": str(binary),
+                "executable_sha256": arms[raw_arm]["binary_sha256"],
+                "output": str(report_path), "load_ratio_before": max(x["before"] for x in loads),
+                "load_ratio_after": max(x["after"] for x in loads),
+                "workerLoads": loads, "workerAttempts": worker_attempts})
+    return ConditionWorkerCollection(order, reports, report_pins, failures,
+                                     worker_attempt_pins, actual_phase_records)
+
+
 def produce(root: Path, output: Path, capacity_document: Path | None = None,
             capacity_document_sha256: str | None = None,
             catalog_manifest_path: Path | None = None, *,
@@ -1817,44 +2014,38 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 "path": cast(str, row["font_identity_binary_path"]),
                 "sha256": cast(str, row["font_identity_binary_sha256"]),
             }
-        order: list[gate.JsonObject] = []
-        reports: list[Path] = []
-        for pair in range(5):
-            for arm in (("baseline", "candidate") if pair % 2 == 0 else ("candidate", "baseline")):
-                binary = binaries[arm]
-                report_path = folder / "reports" / f"{arm}-{pair}.json"
-                raw_arm = "baseline-0.4.23" if arm == "baseline" else arm
-                environment = _performance_worker_environment(expected["provenance"]["rustc"], expected["provenance"]["cargo"], environment_sha, lock, build_inputs.snapshot)
-                samples: list[gate.JsonObject] = []
-                loads: list[dict[str, float]] = []
-                worker_attempts: list[gate.JsonObject] = []
-                for sample in range(5):
-                    payload, sample_load, sample_attempts = collect_worker_sample(
-                        builds[arm], sample, fixture, report_path, plan_path, width, height,
-                        viewport_value["scale"], root, environment, lifecycle,
-                        worker_attempts_directory(folder, arm, pair))
-                    samples.append(payload)
-                    loads.append(sample_load)
-                    worker_attempts.extend(sample_attempts)
-                    worker_attempt_pins.extend(
-                        cast(FilePin, attempt["attemptRecord"]) for attempt in sample_attempts)
-                report: gate.JsonObject = {"arm": raw_arm, "pair_index": pair, "measurement_executed": True, "sample_count": 5, "source_sha256": expected["fixture_sha256"], "operation_plan_sha256": expected["operation_plan_sha256"], "operation": expected["operation"], "expected_dom_state_sha256": expected["expected_dom_state_sha256"], "viewport": viewport_value, "provenance": {**expected["provenance"], "binary_sha256": arms[raw_arm]["binary_sha256"], "source_snapshot_sha256": build_inputs.snapshot["sha256"], "deps_lock_sha256": gate.LOCK_SHA}, "samples": samples}
-                if row["catalog"]:
-                    report.update({"condition_id": row["condition_id"], "case_id": row["case_id"],
-                        "state": row["state"], "operation_kind": row["operation_kind"],
-                        "operation_evidence_ref": row["operation_evidence"],
-                        "catalog_condition": expected["catalogCondition"]})
-                report_pin = write(report_path, report)
-                expected["reportPins"].append(report_pin)
-                reports.append(report_path)
-                order.append({"arm": arm, "pair_index": pair, "executable": str(binary), "executable_sha256": arms[raw_arm]["binary_sha256"], "output": str(report_path), "load_ratio_before": max(x["before"] for x in loads), "load_ratio_after": max(x["after"] for x in loads), "workerLoads": loads, "workerAttempts": worker_attempts})
+        collection = _collect_condition_worker_pairs(
+            folder=folder, row=row, expected=expected, fixture=fixture,
+            plan_path=plan_path, width=width, height=height, viewport=viewport_value,
+            builds=builds, binaries=binaries, arms=arms, root=root, lifecycle=lifecycle,
+            lock=lock, snapshot=build_inputs.snapshot, environment_sha=environment_sha,
+        )
+        order = collection.order
+        reports = collection.reports
+        condition_failures = collection.failures
+        worker_attempt_pins.extend(collection.worker_attempt_pins)
+        expected["reportPins"].extend(collection.report_pins)
+        actual_phase_records = collection.actual_phase_records
         manifest_data: gate.JsonObject = {"measurement_executed": True, "input_sha256": expected["fixture_sha256"], "environment_sha256": environment_sha, "platform": platform.platform(), "order": order}
         if row["catalog"]:
             manifest_data.update({"condition_id": row["condition_id"], "operation_evidence_ref": row["operation_evidence"]})
+        if condition_failures:
+            manifest_data.update({"measurement_status": "incomplete", "failures": condition_failures})
         manifest_pin = write(folder / "reports/pair-manifest.json", manifest_data)
-        aggregate = gate.aggregate_comparison(reports, {**expected})
-        policy = {p: {k: v <= 0 for k, v in values.items()} for p, values in aggregate["comparison"].items()}
-        result: gate.JsonObject = {"formalAccepted": False, "performanceAccepted": False, "measurementExecuted": True, "policy": {"policyPass": all(ok for phase in policy.values() for ok in phase.values()), "policy": policy, "deltaThreshold": 0, "quietLoadLimit": 0.25, "phaseRecords": len(gate.PHASES) * 50, "aggregate": aggregate}}
+        if condition_failures:
+            measurement_policy = {"policyPass": False, "status": "incomplete",
+                "reason": "baseline worker failure", "policy": {},
+                "deltaThreshold": 0, "quietLoadLimit": 0.25,
+                "expectedPhaseRecords": len(gate.PHASES) * 50,
+                "phaseRecords": actual_phase_records, "aggregate": None}
+        else:
+            aggregate = gate.aggregate_comparison(reports, {**expected})
+            policy = {p: {k: v <= 0 for k, v in values.items()} for p, values in aggregate["comparison"].items()}
+            measurement_policy = {"policyPass": all(ok for phase in policy.values() for ok in phase.values()),
+                "policy": policy, "deltaThreshold": 0, "quietLoadLimit": 0.25,
+                "phaseRecords": actual_phase_records, "aggregate": aggregate}
+        result: gate.JsonObject = {"formalAccepted": False, "performanceAccepted": False,
+            "measurementExecuted": True, "policy": measurement_policy}
         if row["catalog"]:
             result["catalogCondition"] = expected["catalogCondition"]
         checkpoint_pins.append(write_condition_checkpoint(folder, expected, result, manifest_data))
