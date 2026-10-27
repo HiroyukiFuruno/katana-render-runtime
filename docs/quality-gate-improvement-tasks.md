@@ -1,5 +1,13 @@
 # 品質ゲート改善の作業台帳
 
+2026-10-27 R3188〜R3197: C4同一font ownerの全文計測候補は、関連6回帰と境界3回帰を通過し、通常hook成功後 `4aac4be3` へ保存した。しかし現行117件の製品PNGを再取得・採点したR3195では、画像99以上100件・未達17件、構造を含む総合合格97件・未合格20件。英語C4 component/dynamic/deploymentのPNGは旧R3042とSHAまで同一で、SVG内の親子transform小数値だけが変わり、既存合格3件が構造検査で脱落した。画質改善なし・既存合格脱落のため当該候補を不採用とし、R3196で当該commitだけを打ち消した。R3197で7対象pathが候補前 `8a227625` とbyte一致することを確認済み。採点基準・raw JS基準・既存参照・配色は変更しない。R3195は不採用候補の正式な失敗記録として保持し、復帰後ソースの合格に転用しない。証跡: `tmp/quality/c4-committed-managed-mermaid-r3195/run/receipt.json` と各言語 `comparison/native-product-comparison/scores.json`。
+
+R3189: CLI producerのcapacity preflightだけがmonotonic時計を記録し、epoch時計のFD closureと比較不能だった不具合を2箇所修正した。26回帰・厳格静的検査・通常hookを通し `8a227625` へコミット済み。R3195では実CLI build receiptのreaderが通過し、英語59/日本語58のSVGと実PNG取得まで完了した。過去の失敗証跡は書き換えていない。
+
+R3190/R3193の容量失敗は原実行を保持する。前者は通常debugと完了COV profileの合計5,059,284,992B、後者はframe比較用buildとCLI buildの合計6,209,204,224Bで、固定上限4,726,095,872Bを超えた。R3191は消費済みCOV profileだけを既存Cargo cleanで整理して通常commit成功。R3194は既存just clean成功後、export済みframe proofの既存strict verifier成功を確認し、R3195はCLIだけを再生成した。今後もframe proofをportable bundleへexport・検証後、次のCLI buildへ移る前に完了build phaseを整理する。予約済みwarm成果物・使用中build・参照証跡は保持し、閾値を上げない。
+
+R3185/R3186/R3187: 全root testは3,064成功・旧C4境界期待1失敗・既存25skip。旧期待を更新したR3188の関連3件は全成功したが、候補自体は上記の実画像評価で不採用。root coverage診断は75,183/81,786=91.926491%、vendor SVGは7,633/13,203（missing5,570）、それ以外は67,550/68,583（missing1,033）。本体内包で外部sourceが新たに分母へ入った事実を区別し、勝手に除外して100%へ変更しない。immutable snapshot: `tmp/quality/current-c4-full-coverage-gap-snapshot-r3187/`。HTML84の現行再検証・全phase時間/RSS非劣化・coverage100%・全体ゲート・レビュー/CI/公開は未完了。
+
 R3170: release祖先へ最新5commitを加えた回帰20件は17成功・3失敗。2件は意図的に変更した製品内容に対する旧content digestの拒否、1件は旧正例snapshot `c5215a...` が新必須祖先を含まない拒否であり、いずれも原失敗を保持する。台帳・運用指示を履歴へ固定後、既存 `release-target-manifest-update` で現コミットのnon-gate内容digestを更新し、正常snapshotを現内容へ進めて再検証する。旧snapshotの拒否・必須祖先・内容改変拒否の条件は削らない。
 
 2026-10-27 R3168/R3169: 通常hook成功後、描画・HTML利用契約の境界回帰35ファイルを `ac3de8e03842a3a7fbefcb432f5d29e76e9b92e1`、SVG本体内包・来歴/配布検査・通常Nextest統合を `8b8b71f1c8a09ed1aac5da93a146921a99c2ae29` へ分離してコミットした。新SVG crate/token待ちは取り下げ済み。R3161の配布内容検査0、R3162の現行source consumer契約22件全成功、R3163のprovenance/license回帰4件全成功、R3164の最新foundation0/source前後一致。レビューで指摘された古いmetadata pinは現一次情報との照合で誤指摘として撤回し、license集合の重複拒否は既存Zodへ追加した。R3165は完了済みdebug testのバイナリ2件を診断用に凍結し、既存just cleanが0・凍結SHA保持。R3166の新managed CLI buildは0だが未コミットsource時点の証跡で、現HEAD正式受入へ代用しない。R3167のcandidate frame proofはclean committed source必須を検出してbuild前にactual1。現在の変更を正式履歴へ固定し、新HEADで両producerを新規実行する。最新修正・Actions/Rust依存・今回2commitをrelease必須祖先へ固定中。Mermaid残17は旧診断、現117/HTML84画像と性能・coverage100%・公開は未完了。
