@@ -39,7 +39,7 @@ jobs:
 
       - name: Install Java runtime
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v5.1.0
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "21"
@@ -52,20 +52,20 @@ jobs:
 
       - name: Install Rust
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
-        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
           components: clippy, rustfmt, llvm-tools-preview
 
       - name: Cache cargo
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
-        uses: Swatinem/rust-cache@v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: release-preflight-ubuntu-stable-all-features
 
       - name: Install Bun
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
 
@@ -75,7 +75,7 @@ jobs:
 
       - name: Install just
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
-        uses: taiki-e/install-action@just
+        uses: taiki-e/install-action@53aaa72a1fed2d5b9189d6d54c38e29bf9be2ab9 # just
 
       - name: Install capacity cleanup tool
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
@@ -83,11 +83,11 @@ jobs:
 
       - name: Install cargo-llvm-cov
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@f9ee2b3488b5862cca1caf86effaa61f55953001 # cargo-llvm-cov
 
       - name: Install cargo-nextest
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-nextest@0.9.148
 
