@@ -196,11 +196,12 @@ async function dependsUpdateCommandGroups(): Promise<{
 const mutationLockCommand =
   "python3 scripts/hooks/run_locked_command.py --protect-root-producer -- just depends-update-mutations";
 const dependencyMutationSteps = [
-  "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa",
+  "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa --exclude harfrust",
   'python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"',
   "{{CARGO}} update",
   'python3 scripts/release/update_html_performance_harness_lock.py --cargo "{{CARGO}}"',
   "bun update --latest '!@moonrepo/*'",
+  "bunx --no-install biome migrate --write",
   "bun run scripts/runtime-assets/depends-update-all.ts",
   'bun run scripts/drawio/resource-update.ts --resources "{{DRAWIO_RESOURCE_DIR}}" --manifest "{{DRAWIO_RESOURCE_MANIFEST}}"',
   "bun run scripts/runtime-assets/runtime-package-asset-compressor.ts --write",
@@ -222,8 +223,9 @@ test("一括更新はRustのmajorとpinned依存を含め、TypeScriptを旧版�
   expect(mutationLines).toContain(
     'python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"',
   );
-  expect(mutationLines).toContain("{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa");
+  expect(mutationLines).toContain("{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa --exclude harfrust");
   expect(mutationLines).toContain("bun update --latest '!@moonrepo/*'");
+  expect(mutationLines).toContain("bunx --no-install biome migrate --write");
   expect(mutationLines).not.toContain("bun add -d typescript@");
 });
 

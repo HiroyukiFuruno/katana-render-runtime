@@ -26,16 +26,16 @@ pub const MERMAID_ZENUML_JS_CHECKSUM: &str =
 pub const MERMAID_ZENUML_DOWNLOAD_URL: &str =
     "https://cdn.jsdelivr.net/npm/@mermaid-js/mermaid-zenuml@1.0.1/dist/mermaid-zenuml.min.js";
 
-pub const ZENUML_CORE_JS_VERSION: &str = "4.10.7";
+pub const ZENUML_CORE_JS_VERSION: &str = "4.11.0";
 pub const ZENUML_CORE_JS_CHECKSUM: &str =
-    "9a1ac5d8f768acc8fe6807cc80e96356a3d4388cd1ebed91eb2a0b5fd7e14217";
+    "5660006a3d202a5ae85c1b90db18af679d87be9f11158250c17dc0fe089d3a08";
 pub const ZENUML_CORE_DOWNLOAD_URL: &str =
-    "https://cdn.jsdelivr.net/npm/@zenuml/core@4.10.7/dist/zenuml.js";
+    "https://cdn.jsdelivr.net/npm/@zenuml/core@4.11.0/dist/zenuml.js";
 
-pub const DRAWIO_JS_VERSION: &str = "32.5.5";
+pub const DRAWIO_JS_VERSION: &str = "32.6.1";
 pub const DRAWIO_JS_CHECKSUM: &str =
-    "a60f2899ff00829165097272f46b7c6de618575673b8770e295d53c13625a5a7";
-pub const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases/tag/v32.5.5";
+    "9dafdfb2b62172aa78f91feae0b25af71c5a1d322764ce3794dd2899e8ea0f2e";
+pub const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases/tag/v32.6.1";
 
 pub const MATHJAX_JS_VERSION: &str = "4.1.3";
 pub const MATHJAX_JS_CHECKSUM: &str =

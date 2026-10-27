@@ -25,6 +25,7 @@ MODULE_SPEC.loader.exec_module(freshness)
 
 class MetadataDependency(TypedDict, total=False):
     name: str
+    rename: str | None
     pkg: str
     req: str
     source: str
@@ -363,6 +364,7 @@ class DependencyFreshnessTest(unittest.TestCase):
         registry = "registry+https://github.com/rust-lang/crates.io-index"
         runtime_id = "path+file:///workspace/crates/katana-render-runtime#katana-render-runtime@0.1.0"
         skrifa_id = f"{registry}#skrifa@0.44.0"
+        harfrust_id = f"{registry}#harfrust@0.12.0"
         return {
             "workspace_members": [runtime_id],
             "packages": [
@@ -374,6 +376,13 @@ class DependencyFreshnessTest(unittest.TestCase):
                     "manifest_path": str(root / "crates/katana-render-runtime/Cargo.toml"),
                     "dependencies": [
                         {"name": "skrifa", "source": registry, "req": "^0.44", "kind": None},
+                        {
+                            "name": "harfrust",
+                            "rename": "svg_harfrust",
+                            "source": registry,
+                            "req": "^0.12.0",
+                            "kind": None,
+                        },
                     ],
                 },
                 {
@@ -384,12 +393,27 @@ class DependencyFreshnessTest(unittest.TestCase):
                     "manifest_path": "/registry/skrifa/Cargo.toml",
                     "dependencies": [],
                 },
+                {
+                    "id": harfrust_id,
+                    "name": "harfrust",
+                    "version": "0.12.0",
+                    "source": registry,
+                    "manifest_path": "/registry/harfrust/Cargo.toml",
+                    "dependencies": [],
+                },
             ],
             "resolve": {
                 "nodes": [
                     {
                         "id": runtime_id,
-                        "deps": [{"name": "skrifa", "pkg": skrifa_id, "dep_kinds": [{"kind": None}]}],
+                        "deps": [
+                            {"name": "skrifa", "pkg": skrifa_id, "dep_kinds": [{"kind": None}]},
+                            {
+                                "name": "svg_harfrust",
+                                "pkg": harfrust_id,
+                                "dep_kinds": [{"kind": None}],
+                            },
+                        ],
                     },
                     {"id": skrifa_id, "deps": []},
                 ]
@@ -422,12 +446,13 @@ class DependencyFreshnessTest(unittest.TestCase):
             [("serde", "1.0.0", None), ("skrifa", "0.44.0", "="), ("usvg", "0.48.1", "=")],
         )
 
-    def write_krr_skrifa_manifest(self, requirement: str) -> Path:
+    def write_krr_skrifa_manifest(self, requirement: str, harfrust_requirement: str = "^0.12.0") -> Path:
         krr_manifest = self.root / "crates/katana-render-runtime/Cargo.toml"
         krr_manifest.parent.mkdir(parents=True, exist_ok=True)
         krr_manifest.write_text(
             '[package]\nname = "katana-render-runtime"\nversion = "0.1.0"\n'
-            f'[dependencies]\nskrifa = "{requirement}"\n',
+            f'[dependencies]\nskrifa = "{requirement}"\n'
+            f'svg_harfrust = {{ package = "harfrust", version = "{harfrust_requirement}" }}\n',
             encoding="utf-8",
         )
         engine = self.root / "crates/katana-render-runtime/vendor/svg-engine"
@@ -503,6 +528,87 @@ class DependencyFreshnessTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "external resvg/usvg"):
             freshness.verified_krr_usvg_skrifa_manifest(self.root, self.metadata_for_krr_usvg_skrifa(self.root))
+
+    def test_embedded_harfrust_alias_contract_rejects_invalid_shape(self) -> None:
+        cases = (
+            (
+                "requirement",
+                lambda metadata: metadata["packages"][0]["dependencies"][1].__setitem__("req", "^0.13"),
+                "alias requirement",
+            ),
+            (
+                "metadata-shape",
+                lambda metadata: metadata["packages"][0]["dependencies"][1].__setitem__("name", "wrong-package"),
+                "direct normal SVG HarfRust alias",
+            ),
+            ("package", lambda metadata: self._rewrite_alias_manifest_package("wrong-package"), "alias"),
+            (
+                "resolved-version",
+                lambda metadata: self._rewrite_harfrust_package(metadata, "0.13.0"),
+                "0.12 API",
+            ),
+            (
+                "registry",
+                lambda metadata: self._rewrite_harfrust_package(
+                    metadata, "0.12.0", "git+https://example.test/harfrust"
+                ),
+                "approved registry",
+            ),
+            (
+                "edge",
+                lambda metadata: metadata["resolve"]["nodes"][0]["deps"][1].__setitem__("pkg", "missing"),
+                "resolved KRR SVG HarfRust alias",
+            ),
+            ("missing", lambda metadata: self._remove_alias_manifest(), "alias"),
+        )
+        for _, mutate, message in cases:
+            with self.subTest(message=message):
+                self.write_krr_skrifa_manifest("0.44")
+                metadata = self.metadata_for_krr_usvg_skrifa(self.root)
+                mutate(metadata)
+                with self.assertRaisesRegex(ValueError, message):
+                    freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
+
+        self.write_krr_skrifa_manifest("0.44", harfrust_requirement="^0.13")
+        with self.assertRaisesRegex(ValueError, "alias requirement"):
+            freshness.verified_krr_usvg_skrifa_manifest(
+                self.root, self.metadata_for_krr_usvg_skrifa(self.root)
+            )
+
+        self.write_krr_skrifa_manifest("0.44", harfrust_requirement="^0.12.99")
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            freshness.verified_krr_usvg_skrifa_manifest(
+                self.root, self.metadata_for_krr_usvg_skrifa(self.root)
+            )
+
+        self.write_krr_skrifa_manifest("0.44", harfrust_requirement="^0.12.99")
+        metadata = self.metadata_for_krr_usvg_skrifa(self.root)
+        metadata["packages"][0]["dependencies"][1]["req"] = "^0.12.99"
+        with self.assertRaisesRegex(ValueError, "0.12 API"):
+            freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
+
+    def _rewrite_alias_manifest_package(self, package: str) -> None:
+        manifest = self.root / "crates/katana-render-runtime/Cargo.toml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace('package = "harfrust"', f'package = "{package}"'),
+            encoding="utf-8",
+        )
+
+    def _remove_alias_manifest(self) -> None:
+        manifest = self.root / "crates/katana-render-runtime/Cargo.toml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace(
+                'svg_harfrust = { package = "harfrust", version = "^0.12.0" }\n', ""
+            ),
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _rewrite_harfrust_package(metadata: CargoMetadata, version: str, source: str | None = None) -> None:
+        package = next(package for package in metadata["packages"] if package["name"] == "harfrust")
+        package["version"] = version
+        if source is not None:
+            package["source"] = source
 
     def test_stale_direct_rust_manifest_dependency_rejects_release(self) -> None:
         (self.root / "Cargo.toml").write_text(

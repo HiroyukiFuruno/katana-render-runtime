@@ -41,6 +41,8 @@ KRR_SVG_ENGINE_ROOT = Path("crates/katana-render-runtime/vendor/svg-engine")
 KRR_SVG_ENGINE_PROVENANCE = KRR_SVG_ENGINE_ROOT / "PROVENANCE.json"
 KRR_SVG_ENGINE_COMMIT = "c01f0165059e472f45472cccddc573d32c13548a"
 KRR_SVG_ENGINE_SOURCE_FILE_COUNT = 48
+KRR_SVG_HARFRUST_ALIAS = "svg_harfrust"
+KRR_SVG_HARFRUST_PACKAGE = "harfrust"
 
 
 class _StripAuthorizationRedirectHandler(request.HTTPRedirectHandler):
@@ -217,6 +219,26 @@ def _parse_cargo_requirement(requirement: str) -> list[CargoRequirementTerm]:
     if not terms:
         raise ValueError(f"unsupported Cargo version requirement: {requirement!r}")
     return terms
+
+
+def _embedded_harfrust_requirement(requirement: object) -> tuple[int, int, int] | None:
+    if not isinstance(requirement, str):
+        return None
+    try:
+        terms = _parse_cargo_requirement(requirement.strip())
+    except ValueError:
+        return None
+    if len(terms) != 1:
+        return None
+    term = terms[0]
+    if term.prerelease is not None or term.operator not in {"", "^"}:
+        return None
+    if len(term.parts) not in {2, 3} or term.parts[:2] != (0, 12):
+        return None
+    major = term.parts[0]
+    minor = term.parts[1]
+    patch = term.parts[2] if len(term.parts) == 3 else 0
+    return major, minor, patch
 
 
 def cargo_requirement_matches(requirement: str, version: Version) -> bool:
@@ -462,11 +484,40 @@ def verified_krr_usvg_skrifa_manifest(root: Path, metadata: dict[str, object]) -
     dependencies = manifest_payload.get("dependencies")
     if not isinstance(dependencies, dict) or any(name in dependencies for name in ("resvg", "usvg")):
         raise ValueError("KRR manifest retains an external resvg/usvg dependency")
+    alias_declaration = dependencies.get(KRR_SVG_HARFRUST_ALIAS)
+    if not isinstance(alias_declaration, dict) or alias_declaration.get("package") != KRR_SVG_HARFRUST_PACKAGE:
+        raise ValueError("KRR SVG HarfRust alias does not target the approved package")
+    alias_requirement = _embedded_harfrust_requirement(alias_declaration.get("version"))
+    if alias_requirement is None:
+        raise ValueError("KRR SVG HarfRust alias requirement is not compatible with the embedded 0.12 API")
 
     runtime_dependencies = runtime.get("dependencies")
     runtime_edges = runtime_node.get("deps")
     if not isinstance(runtime_dependencies, list) or not isinstance(runtime_edges, list):
         raise ValueError("KRR runtime metadata is missing dependency edges")
+    direct_harfrust = [
+        dependency
+        for dependency in runtime_dependencies
+        if isinstance(dependency, dict)
+        and dependency.get("name") == KRR_SVG_HARFRUST_PACKAGE
+        and dependency.get("rename") == KRR_SVG_HARFRUST_ALIAS
+        and dependency.get("kind") is None
+    ]
+    if len(direct_harfrust) != 1:
+        raise ValueError("expected one direct normal SVG HarfRust alias in KRR")
+    metadata_alias_requirement = _embedded_harfrust_requirement(direct_harfrust[0].get("req"))
+    if metadata_alias_requirement is None:
+        raise ValueError("KRR SVG HarfRust alias requirement is not compatible with the embedded 0.12 API")
+    if metadata_alias_requirement != alias_requirement:
+        raise ValueError("KRR SVG HarfRust alias requirement does not match its manifest")
+    resolved_harfrust = [
+        dependency
+        for dependency in runtime_edges
+        if isinstance(dependency, dict)
+        and dependency.get("name") == KRR_SVG_HARFRUST_ALIAS
+    ]
+    if len(resolved_harfrust) != 1:
+        raise ValueError("expected one resolved KRR SVG HarfRust alias")
     direct_skrifa = [
         dependency
         for dependency in runtime_dependencies
@@ -487,6 +538,31 @@ def verified_krr_usvg_skrifa_manifest(root: Path, metadata: dict[str, object]) -
     packages = metadata.get("packages")
     if not isinstance(packages, list):
         raise ValueError("cargo metadata is missing packages")
+    harfrust_package_id = resolved_harfrust[0].get("pkg")
+    resolved_harfrust_package = next(
+        (package for package in packages if isinstance(package, dict) and package.get("id") == harfrust_package_id),
+        None,
+    )
+    if (
+        not isinstance(resolved_harfrust_package, dict)
+        or resolved_harfrust_package.get("name") != KRR_SVG_HARFRUST_PACKAGE
+        or not isinstance(resolved_harfrust_package.get("source"), str)
+        or not resolved_harfrust_package["source"].startswith("registry+")
+    ):
+        raise ValueError("resolved KRR SVG HarfRust alias is not the approved registry package")
+    if direct_harfrust[0].get("source") != resolved_harfrust_package["source"]:
+        raise ValueError("KRR SVG HarfRust alias source does not match registry resolution")
+    try:
+        resolved_harfrust_version = Version.parse(str(resolved_harfrust_package.get("version", "")))
+    except ValueError:
+        resolved_harfrust_version = None
+    if (
+        resolved_harfrust_version is None
+        or not resolved_harfrust_version.stable
+        or resolved_harfrust_version.parts[:2] != (0, 12)
+        or resolved_harfrust_version.parts < alias_requirement
+    ):
+        raise ValueError("resolved KRR SVG HarfRust alias is not compatible with the embedded 0.12 API")
     package_id = resolved_skrifa[0].get("pkg")
     resolved_package = next((package for package in packages if isinstance(package, dict) and package.get("id") == package_id), None)
     if not isinstance(resolved_package, dict) or not isinstance(resolved_package.get("source"), str) or not resolved_package["source"].startswith("registry+"):
@@ -604,7 +680,7 @@ def rust_manifest_dependencies(root: Path, coupled_skrifa_manifest: Path | None 
                     coupled_manifest is not None
                     and manifest.resolve() == coupled_manifest
                     and scope == "dependencies"
-                    and declared_name == "skrifa"
+                    and declared_name in {"skrifa", KRR_SVG_HARFRUST_ALIAS}
                 ):
                     continue
                 version: object | None = declaration

@@ -286,31 +286,41 @@ class UpdateUsvgSkrifaPairTest(unittest.TestCase):
         self.assertEqual(runner.call_count, 2)
         self.assertTrue(all("update" not in call.args[0] for call in runner.call_args_list))
 
-    def test_depends_update_all_orders_usvg_pair_and_harness_lock_before_bun(self) -> None:
+    def test_depends_update_all_orders_inline_svg_boundary_before_bun(self) -> None:
         justfile = (ROOT / "Justfile").read_text(encoding="utf-8")
         recipe = justfile.split("depends-update-mutations:\n", maxsplit=1)[1].split("\n\n", maxsplit=1)[0]
         commands = [line.strip() for line in recipe.splitlines() if line.strip()]
-        broad_upgrade = "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa"
+        broad_upgrade = "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa --exclude harfrust"
         html_pair = "python3 scripts/release/update_html5ever_pair.py --cargo \"{{CARGO}}\""
         lock_update = "{{CARGO}} update"
-        skrifa_pair = "python3 scripts/release/update_usvg_skrifa_pair.py --cargo \"{{CARGO}}\""
         harness_lock = "python3 scripts/release/update_html_performance_harness_lock.py --cargo \"{{CARGO}}\""
         bun_update = "bun update --latest '!@moonrepo/*'"
+        biome_migrate = "bunx --no-install biome migrate --write"
 
-        for command in (broad_upgrade, html_pair, lock_update, skrifa_pair, harness_lock, bun_update):
+        for command in (
+            broad_upgrade,
+            html_pair,
+            lock_update,
+            harness_lock,
+            bun_update,
+            biome_migrate,
+        ):
             self.assertEqual(commands.count(command), 1, f"expected one {command!r}")
+        self.assertNotIn(
+            "python3 scripts/release/update_usvg_skrifa_pair.py --cargo \"{{CARGO}}\"",
+            commands,
+        )
         broad_index = commands.index(broad_upgrade)
         html_index = commands.index(html_pair)
         lock_index = commands.index(lock_update)
-        skrifa_index = commands.index(skrifa_pair)
         harness_index = commands.index(harness_lock)
         bun_update_index = commands.index(bun_update)
+        biome_index = commands.index(biome_migrate)
         self.assertLess(broad_index, html_index)
         self.assertLess(html_index, lock_index)
-        self.assertLess(lock_index, skrifa_index)
-        self.assertLess(skrifa_index, harness_index)
-        self.assertLess(skrifa_index, bun_update_index)
+        self.assertLess(lock_index, harness_index)
         self.assertLess(harness_index, bun_update_index)
+        self.assertLess(bun_update_index, biome_index)
 
 
 if __name__ == "__main__":

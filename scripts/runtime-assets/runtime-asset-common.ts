@@ -89,8 +89,8 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
   {
     kind: "zenuml-core",
     displayName: "ZenUML Core",
-    version: "4.10.7",
-    checksum: "9a1ac5d8f768acc8fe6807cc80e96356a3d4388cd1ebed91eb2a0b5fd7e14217",
+    version: "4.11.0",
+    checksum: "5660006a3d202a5ae85c1b90db18af679d87be9f11158250c17dc0fe089d3a08",
     fileName: "zenuml.js",
     rustVersionConst: "ZENUML_CORE_JS_VERSION",
     rustChecksumConst: "ZENUML_CORE_JS_CHECKSUM",
@@ -104,8 +104,8 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
   {
     kind: "drawio",
     displayName: "Draw.io",
-    version: "32.5.5",
-    checksum: "a60f2899ff00829165097272f46b7c6de618575673b8770e295d53c13625a5a7",
+    version: "32.6.1",
+    checksum: "9dafdfb2b62172aa78f91feae0b25af71c5a1d322764ce3794dd2899e8ea0f2e",
     fileName: "drawio.min.js",
     rustVersionConst: "DRAWIO_JS_VERSION",
     rustChecksumConst: "DRAWIO_JS_CHECKSUM",

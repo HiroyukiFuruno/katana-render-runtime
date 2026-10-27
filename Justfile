@@ -41,9 +41,9 @@ COVERAGE_MIN_LINES := env_var_or_default("COVERAGE_MIN_LINES", "100")
 COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES", "0")
 MERMAID_JS_VERSION := "12.2.0-krr.pr6823.1"
 MERMAID_ZENUML_JS_VERSION := "1.0.1"
-DRAWIO_JS_VERSION := "32.5.5"
+DRAWIO_JS_VERSION := "32.6.1"
 MATHJAX_JS_VERSION := "4.1.3"
-ZENUML_CORE_JS_VERSION := "4.10.7"
+ZENUML_CORE_JS_VERSION := "4.11.0"
 PLANTUML_JAR_VERSION := "1.2026.9"
 PLANTUML_JAR_CHECKSUM := "1dbb847646f0f440595fecd5f991e902aae47dc3391a01f64bab548089241a46"
 MERMAID_JS := env_var_or_default("MERMAID_JS", "crates/katana-render-runtime/vendor/mermaid/" + MERMAID_JS_VERSION + "/mermaid.min.js")
@@ -714,11 +714,12 @@ depends-update-all:
 
 [private]
 depends-update-mutations:
-    {{CARGO}} upgrade -i allow --pinned allow --exclude skrifa
+    {{CARGO}} upgrade -i allow --pinned allow --exclude skrifa --exclude harfrust
     python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"
     {{CARGO}} update
     python3 scripts/release/update_html_performance_harness_lock.py --cargo "{{CARGO}}"
     bun update --latest '!@moonrepo/*'
+    bunx --no-install biome migrate --write
     bun run scripts/runtime-assets/depends-update-all.ts
     bun run scripts/drawio/resource-update.ts --resources "{{DRAWIO_RESOURCE_DIR}}" --manifest "{{DRAWIO_RESOURCE_MANIFEST}}"
     bun run scripts/runtime-assets/runtime-package-asset-compressor.ts --write

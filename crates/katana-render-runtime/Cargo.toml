@@ -17,14 +17,14 @@ include = [
     "src/renderer/backends/html_runtime/*.js",
     "src/markdown/diagram_runtime/generated/*.js",
     "src/markdown/diagram_runtime/generated/*.sha256",
-    "vendor/drawio/32.5.5/drawio.min.js.sha256",
-    "vendor/drawio/32.5.5/LICENSE",
+    "vendor/drawio/32.6.1/drawio.min.js.sha256",
+    "vendor/drawio/32.6.1/LICENSE",
     "vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js.br",
     "vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js.sha256",
     "vendor/mermaid/12.2.0-krr.pr6823.1/LICENSE",
     "vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js.sha256",
     "vendor/plantuml/1.2026.9/plantuml.jar.sha256",
-    "vendor/zenuml-core/4.10.7/zenuml.js.sha256",
+    "vendor/zenuml-core/4.11.0/zenuml.js.sha256",
     "src/markdown/generated/zenuml-runtime-assets.bin.br",
     "src/markdown/drawio_renderer/generated/drawio-resources.bin.br",
 ]
@@ -48,20 +48,20 @@ bytemuck = "1.25"
 data-url = "0.3"
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 fontdb = { version = "0.24", default-features = false, features = ["fs", "fontconfig", "memmap"] }
-gif = "0.14.1"
+gif = "0.14.2"
 image-webp = "0.2.4"
 imagesize = "0.15"
 rgb = "0.8"
-roxmltree = "0.21.1"
+roxmltree = "0.21.2"
 siphasher = "1"
-strict-num = "0.1.1"
+strict-num = "0.2.0"
 svg_harfrust = { package = "harfrust", version = "0.12.0" }
 tiny-skia-path = "0.12"
 unicode-bidi = "0.3"
 unicode-script = "0.5"
 unicode-vo = "0.1"
 xmlwriter = "0.1"
-zune-jpeg = "0.5.9"
+zune-jpeg = "0.5.15"
 skrifa = "^0.44"
 log = "0.4"
 rustybuzz = { workspace = true }
