@@ -2,6 +2,7 @@
 
 ## 最新の再開地点（2026-10-28）
 
+- [ ] R3259で閉じたHTML性能batch/resumeを `5d66c235` にコミットし、R3260でrelease必須祖先・内容manifestの22回帰が成功、R3261で固定を `e4981c1b` にコミットした。Mermaidのprimitive metadata候補は実PNG改善がなくR3265で保全・撤回（`rejected-primitive-only-candidate-r3265/candidate.patch`）。dispatch統一候補もR3270の11回帰は成功したが実C4画像はRGBA・98.65729とも親と不変。R3272の実frame監査でtextRasterizerPresent=true・objectBoundingBox=false・Skia path12hit/fallback0を確認し、元からcustom Skia経路だったと確定した。効果のないbackend変更・候補回帰をR3273で撤回し、実経路を記録する診断だけを保持する。ChromeのSwiftShader有効化argvは実使用の証明ではなく、実raster backendは未取得。次の描画候補は実経路への作用を確認してから採点・性能測定へ進む。
 - [ ] R3250〜R3258でHTML性能の閉じたbatch/resumeと正しい親版referenceの回帰を修正した。151 Python fileのstrict型検査、producer95件・verifier91件・親reference3件が成功し、R3257の重複1組を共通fixtureへ集約後、R3258の通常foundationがactual0。予算切れを実測失敗と分離し、完了済み部分を再利用する一方、84条件未完了・実policy失敗を正式合格にしない。実parent `371274ed` の固定proof readerも受入成功。実84条件batch・完全性能の確認は未完了。
 - [/] R3253〜R3256のarc許容誤差候補は不採用。build/fmtは成功したが、SVG pathのA命令は別のsvgtypes経路で数値回帰が失敗し、代表C4実PNGスコアは親と同じ98.65729だった。候補差分を `tmp/quality/rejected-arc-candidate-r3256/candidate.patch`（SHA d422919921dd9c56f0c567d5da274f5e0674bbfe93685074cf3819d053de315a）へ保持し、製品・来歴・候補テスト7ファイルを元へ復帰した。改善なしを採用済みとして積み上げない。
 - [ ] R3232/R3233では `371274ed` のHTML84条件を再取得・厳格検査し、84/84が90以上、最低91.49827、出力font一致establishedを確認した。R3239では消失した検証binaryを同一SHA `8ee924a616b8e058119477dc113dbd3d85b22052595364d4562558047233cce1` へ再生成し、既存のresume検査で画像を再利用した。Cargo target外にも同じ物理objectのhardlinkとretention.jsonを保持する。以後の未検証変更へ成功を転用しない。

@@ -35,31 +35,45 @@ impl SvgCompositeRenderer {
         authored_clip_info: &AuthoredClipInfo,
         text_rasterizer: Option<&dyn TextRasterizer>,
     ) -> Result<(), String> {
+        #[cfg(all(test, target_os = "macos"))]
+        super::SvgRasterizeOps::record_render_dispatch(
+            text_rasterizer.is_some(),
+            authored_clip_info.has_object_bounding_box,
+        );
         if authored_clip_info.has_object_bounding_box {
             resvg::render(tree, transform, pixmap);
             return Ok(());
         }
-        let needs_authored_clip_ids = Self::needs_authored_clip_ids(tree);
-        match text_rasterizer {
-            Some(text_rasterizer) => render_children_with_text(
-                tree.root(),
-                transform.pre_concat(tree.root().transform()),
-                pixmap,
-                authored_clip_info,
-                Some(text_rasterizer),
-            ),
-            None if needs_authored_clip_ids => {
-                render_children_with_text(tree.root(), transform, pixmap, authored_clip_info, None)
-            }
-            None => {
-                resvg::render(tree, transform, pixmap);
-                Ok(())
-            }
-        }
+        render_root_children(tree, transform, pixmap, authored_clip_info, text_rasterizer)
     }
-
     pub(crate) fn needs_authored_clip_ids(tree: &usvg::Tree) -> bool {
         contains_clip_ancestor_blend(tree.root(), false, &AuthoredClipInfo::default())
+    }
+}
+
+fn render_root_children(
+    tree: &usvg::Tree,
+    transform: Transform,
+    pixmap: &mut tiny_skia::PixmapMut<'_>,
+    authored_clip_info: &AuthoredClipInfo,
+    text_rasterizer: Option<&dyn TextRasterizer>,
+) -> Result<(), String> {
+    let needs_authored_clip_ids = SvgCompositeRenderer::needs_authored_clip_ids(tree);
+    match text_rasterizer {
+        Some(text_rasterizer) => render_children_with_text(
+            tree.root(),
+            transform.pre_concat(tree.root().transform()),
+            pixmap,
+            authored_clip_info,
+            Some(text_rasterizer),
+        ),
+        None if needs_authored_clip_ids => {
+            render_children_with_text(tree.root(), transform, pixmap, authored_clip_info, None)
+        }
+        None => {
+            resvg::render(tree, transform, pixmap);
+            Ok(())
+        }
     }
 }
 fn contains_clip_ancestor_blend(

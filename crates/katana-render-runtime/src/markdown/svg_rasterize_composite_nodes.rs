@@ -23,13 +23,26 @@ pub(super) fn render_node(
             text_rasterizer,
         ),
         usvg::Node::Path(path_node) if text_rasterizer.is_some() => {
-            if path::render_if_supported(path_node, transform, pixmap)? {
-                Ok(())
-            } else {
-                render_existing_path_node(node, transform, pixmap)
-            }
+            render_path_node(node, path_node, transform, pixmap)
         }
         _ => render_existing_path_node(node, transform, pixmap),
+    }
+}
+
+fn render_path_node(
+    node: &usvg::Node,
+    path_node: &usvg::Path,
+    transform: Transform,
+    pixmap: &mut tiny_skia::PixmapMut<'_>,
+) -> Result<(), String> {
+    if path::render_if_supported(path_node, transform, pixmap)? {
+        #[cfg(all(test, target_os = "macos"))]
+        super::super::SvgRasterizeOps::record_path_route(true);
+        Ok(())
+    } else {
+        #[cfg(all(test, target_os = "macos"))]
+        super::super::SvgRasterizeOps::record_path_route(false);
+        render_existing_path_node(node, transform, pixmap)
     }
 }
 

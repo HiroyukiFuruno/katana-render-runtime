@@ -55,6 +55,19 @@ pub(super) struct Capture {
     html_font_markups: Vec<serde_json::Value>,
     #[cfg(test)]
     html_font_markups_dropped: usize,
+    #[cfg(test)]
+    render_dispatches: Vec<RenderDispatch>,
+    #[cfg(test)]
+    path_custom_hits: u64,
+    #[cfg(test)]
+    path_fallback_hits: u64,
+}
+#[cfg(test)]
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RenderDispatch {
+    text_rasterizer_present: bool,
+    object_bounding_box_clip: bool,
 }
 thread_local! {
     static ROUTE: Cell<Option<SourceRoute>> = const { Cell::new(None) };
@@ -154,8 +167,35 @@ impl crate::markdown::svg_rasterize::SvgRasterizeOps {
                 "finalGlyphPaintCalls": capture.final_glyph_paint_calls,
                 "htmlFontMarkups": capture.html_font_markups,
                 "htmlFontMarkupsDropped": capture.html_font_markups_dropped,
+                "renderDispatches": capture.render_dispatches,
+                "pathCustomHits": capture.path_custom_hits,
+                "pathFallbackHits": capture.path_fallback_hits,
             }),
         ))
+    }
+
+    #[cfg(test)]
+    pub(in crate::markdown::svg_rasterize) fn record_render_dispatch(
+        text_rasterizer_present: bool,
+        object_bounding_box_clip: bool,
+    ) {
+        update(1, |capture| {
+            capture.render_dispatches.push(RenderDispatch {
+                text_rasterizer_present,
+                object_bounding_box_clip,
+            });
+        });
+    }
+
+    #[cfg(test)]
+    pub(in crate::markdown::svg_rasterize) fn record_path_route(custom: bool) {
+        update(1, |capture| {
+            if custom {
+                capture.path_custom_hits = capture.path_custom_hits.saturating_add(1);
+            } else {
+                capture.path_fallback_hits = capture.path_fallback_hits.saturating_add(1);
+            }
+        });
     }
 
     #[cfg(test)]
