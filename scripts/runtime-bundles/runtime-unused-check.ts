@@ -1238,7 +1238,40 @@ if (import.meta.main) {
       if (process.argv.slice(2).join("\0") !== "--gate")
         throw new Error("unknown/duplicate standard gate arguments");
       const report = runStandardUnusedGate(root, directory);
-      console.log(JSON.stringify({ ...report, artifactDirectory: directory }, null, 2));
+      const unresolvedCount =
+        report.counts["declaration-only"] +
+        report.counts.unknown +
+        report.counts["other-diagnostic"];
+      const unresolvedDiagnostics = report.rows
+        .filter((row) => row.status !== "resolved")
+        .map(({ diagnosticIndex, status, diagnostic, reasons }) => ({
+          diagnosticIndex,
+          status,
+          diagnostic,
+          reasons,
+        }));
+      console.log(
+        JSON.stringify(
+          {
+            kind: report.kind,
+            lintAccepted: report.lintAccepted,
+            rawExitCode: report.rawExitCode,
+            rawSummarySource: "standard-biome-report",
+            rawSummary: report.rawSummary,
+            counts: report.counts,
+            unresolvedCount,
+            unresolvedDiagnostics,
+            rawInputCount: report.rawInputCount,
+            contextFailureCount: report.contextFailures.length,
+            acceptedConsumerClosure: report.acceptedConsumerClosure,
+            fullRuntimeAcceptance: report.fullRuntimeAcceptance,
+            artifactDirectory: directory,
+            fullReportPath: path.join(directory, "gate.json"),
+          },
+          null,
+          2,
+        ),
+      );
       process.exitCode = report.lintAccepted ? 0 : 1;
     } else {
       const report = await auditRuntimeUnused(root, directory, actualOfficialStrictInputs());
