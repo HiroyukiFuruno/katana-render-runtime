@@ -25,7 +25,7 @@ REQUIRED_CANDIDATE_ANCESTORS = (
     VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_CANDIDATE_ANCESTORS
 )
 # Git履歴fixtureは祖先・version・内容契約を検証し、完全品質の証跡には使わない。
-CURRENT_RELEASE_VALIDATION_SNAPSHOT = "c5215a281321a00a8a9059c7e9fa36c10aa54c3d"
+CURRENT_RELEASE_VALIDATION_SNAPSHOT = "050c412132355a5293538564b0f9e9162e46ab08"
 REJECTED_STALE_V0424_VALIDATION_SNAPSHOT = "536658729364519837b50b10e1fb2ad8139ced1e"
 REJECTED_V0424_VALIDATION_SNAPSHOT = "db20e187c39e56589dadb2356da150bd3e820987"
 PUBLISHED_V0423_SNAPSHOT = "8654789f69d24401b8ae67036db1cdb3e7f4294e"
@@ -213,17 +213,51 @@ class VerifyReleaseTargetTests(unittest.TestCase):
         self.assertIn("required release candidate ancestor", result.stderr)
 
     def test_rejects_stale_v0424_validation_snapshot_missing_later_pins(self) -> None:
-        result = self.run_check(
-            "v0.4.24", "v0.4.23", REJECTED_STALE_V0424_VALIDATION_SNAPSHOT
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("required release candidate ancestor", result.stderr)
+        for snapshot in (
+            REJECTED_STALE_V0424_VALIDATION_SNAPSHOT,
+            "c5215a281321a00a8a9059c7e9fa36c10aa54c3d",
+        ):
+            with self.subTest(snapshot=snapshot):
+                result = self.run_check("v0.4.24", "v0.4.23", snapshot)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("required release candidate ancestor", result.stderr)
 
     def test_rejects_head_missing_a_v0424_candidate_ancestor(self) -> None:
         for commit in REQUIRED_CANDIDATE_ANCESTORS:
             parent = self.source_git("rev-parse", f"{commit}^")
             result = self.run_check("v0.4.24", "v0.4.23", parent)
             self.assertNotEqual(result.returncode, 0, commit)
+
+    def test_missing_required_commits_uses_git_reachability_and_preserves_order(self) -> None:
+        self.assertEqual(
+            VERIFY_RELEASE_TARGET.missing_required_commits("HEAD"), []
+        )
+        latest = REQUIRED_CANDIDATE_ANCESTORS[-1]
+        parent = self.source_git("rev-parse", f"{latest}^")
+        self.assertEqual(
+            VERIFY_RELEASE_TARGET.missing_required_commits(parent), [latest]
+        )
+        first = REQUIRED_CANDIDATE_ANCESTORS[0]
+        oldest_parent = self.source_git("rev-parse", f"{first}^")
+        self.assertEqual(
+            VERIFY_RELEASE_TARGET.missing_required_commits(oldest_parent, (latest, first)),
+            [latest, first],
+        )
+
+    def test_missing_required_commits_fails_closed_for_invalid_refs(self) -> None:
+        required = (REQUIRED_CANDIDATE_ANCESTORS[0],)
+        self.assertEqual(
+            VERIFY_RELEASE_TARGET.missing_required_commits("does-not-exist", required),
+            list(required),
+        )
+        self.assertEqual(
+            VERIFY_RELEASE_TARGET.missing_required_commits("--not", required),
+            list(required),
+        )
+        self.assertEqual(
+            VERIFY_RELEASE_TARGET.missing_required_commits("HEAD", ("0" * 40,)),
+            ["0" * 40],
+        )
 
     def test_rejects_reviewed_release_head_missing_the_required_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

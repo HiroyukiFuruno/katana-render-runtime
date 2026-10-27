@@ -90,6 +90,11 @@ REQUIRED_RELEASE_COMMITS = (
     "e8ac617f639fcf7a44b9c7b538b420c75ed11190",
     "043aec401ac88de3f9795452205480a92bd8d6c0",
     "c5215a281321a00a8a9059c7e9fa36c10aa54c3d",
+    "50e11e3c0ada72f12f26a110dc643bf5d4384b5a",
+    "100dc7bef33ee24b858bd713c32d171df80cbe03",
+    "ea1017f038805df371dafd106b2bbbd121372b49",
+    "ac3de8e03842a3a7fbefcb432f5d29e76e9b92e1",
+    "8b8b71f1c8a09ed1aac5da93a146921a99c2ae29",
 )
 # 公開snapshotが旧版の必須commitを全て含むため、今回のcommitだけを追加確認する。
 REQUIRED_RELEASE_SOURCE_COMMITS = (
@@ -107,7 +112,7 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0423_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "dc70d60200cd628a0494a9d6c694e96e829273b5e4c5d13bbc14cb9ef5aca71a"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "99a28f6d312c7bf6aa71b74f634a2339edcf2efb03a469dbe8cad0db786127e0"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
@@ -213,17 +218,38 @@ def missing_required_commits(
     head_ref: str,
     required_commits: tuple[str, ...] = REQUIRED_RELEASE_CANDIDATE_ANCESTORS,
 ) -> list[str]:
-    missing: list[str] = []
-    for commit in required_commits:
-        result = subprocess.run(
-            ["git", "merge-base", "--is-ancestor", commit, head_ref],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        if result.returncode != 0:
-            missing.append(commit)
-    return missing
+    if not required_commits or any(
+        re.fullmatch(r"[0-9a-f]{40}", commit) is None for commit in required_commits
+    ):
+        return list(required_commits)
+    head = subprocess.run(
+        ["git", "rev-parse", "--verify", "--end-of-options", f"{head_ref}^{{commit}}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    resolved_head = head.stdout.strip()
+    if (
+        head.returncode != 0
+        or not re.fullmatch(r"[0-9a-f]{40}", resolved_head)
+        or (head.stdout and not head.stdout.endswith("\n"))
+    ):
+        return list(required_commits)
+    result = subprocess.run(
+        ["git", "rev-list", "--end-of-options", *required_commits, f"^{resolved_head}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    lines = result.stdout.splitlines()
+    if (
+        result.returncode != 0
+        or (result.stdout and not result.stdout.endswith("\n"))
+        or any(re.fullmatch(r"[0-9a-f]{40}", line) is None for line in lines)
+    ):
+        return list(required_commits)
+    unreachable = set(lines)
+    return [commit for commit in required_commits if commit in unreachable]
 
 
 def release_manifest_sha256(
