@@ -32,13 +32,13 @@ def _capacity_preflight(bindings: Bindings, root: Path, attempt: Path) -> JsonOb
     def observe(log_directory: Path) -> tuple[subprocess.CompletedProcess[bytes], Path, JsonObject,
                                                 JsonObject, int, int]:
         lifecycle_paths: list[Path] = []
-        started_ns = time.monotonic_ns()
+        started_ns = time.time_ns()
         result = owner._measurement_command(
             argv, role="preflight", log_directory=log_directory,
             cwd=root, env=dict(bindings.child_environment), check=False,
             lifecycle_sink=lifecycle_paths.append, native_attempt_token=attempt.name,
         )
-        ended_ns = time.monotonic_ns()
+        ended_ns = time.time_ns()
         guard.require(len(lifecycle_paths) == 1, "capacity preflight lifecycle must be unique")
         lifecycle_path = lifecycle_paths[0]
         lifecycle = guard.parse_json(lifecycle_path.read_bytes())

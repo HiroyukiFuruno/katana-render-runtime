@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from collections.abc import Callable
 from pathlib import Path
@@ -138,6 +139,24 @@ class InputAdmissionTests(unittest.TestCase):
         self.assertIsNone(evidence["cleanupObservation"])
         self.assertIsNone(evidence["refreshObservation"])
         self.assertTrue((attempt / "capacity-preflight.json").is_file())
+
+    def test_capacity_preflight_uses_epoch_clock_for_owner_interval(self) -> None:
+        target = self.root / "target"
+        report = self._fresh_capacity_report(target, 1024)
+        attempt, _lifecycle, binding = self._preflight_fixture("k", report)
+        measured, _calls = self._measured_sequence(attempt, [(report, 0, "")])
+        epoch_ns = [1_793_106_260_504_587_000, 1_793_106_260_742_883_000]
+
+        with (
+            patch.object(time, "time_ns", side_effect=epoch_ns) as clock,
+            patch.object(time, "monotonic_ns", side_effect=AssertionError("monotonic clock used")),
+            patch.object(owner, "_measurement_command", side_effect=measured),
+        ):
+            evidence = producer._capacity_preflight(cast(bindings.Bindings, binding), self.root, attempt)
+
+        self.assertEqual(evidence["startedNs"], str(epoch_ns[0]))
+        self.assertEqual(evidence["endedNs"], str(epoch_ns[1]))
+        self.assertEqual(clock.call_count, 2)
 
     def test_capacity_preflight_reobserves_once_after_cleanup_and_preserves_both_runs(self) -> None:
         target = self.root / "target"
