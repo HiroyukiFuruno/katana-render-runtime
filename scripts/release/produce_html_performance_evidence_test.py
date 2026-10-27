@@ -24,12 +24,31 @@ from collections.abc import Callable, Mapping, Sequence
 from types import FrameType
 
 import produce_html_performance_evidence as typed_producer
+import html_performance_reference as reference
 import verify_html_performance_evidence as gate
 
 producer = typed_producer
 
 
 class CatalogProducerOperationTest(unittest.TestCase):
+    def _catalog_cli_fixture(
+        self, temporary: str,
+    ) -> tuple[Path, Path, Path, Path]:
+        root = Path(temporary).resolve()
+        return (root, root / "tmp/evidence", root / "capacity.json",
+                root / "catalog-stage90-captures.json")
+
+    def _catalog_cli_argv(
+        self, root: Path, output: Path, capacity: Path, manifest: Path,
+        checksum: str, *extra: str,
+    ) -> list[str]:
+        return [
+            "produce_html_performance_evidence.py", "--repo", str(root),
+            "--output", str(output), "--capacity-binding", str(capacity),
+            "--capacity-binding-sha256", checksum, "--catalog-plan", str(manifest),
+            *extra,
+        ]
+
     def test_formal_cli_requires_catalog_before_calling_producer(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, \
              patch.object(sys, "argv", [
@@ -58,23 +77,25 @@ class CatalogProducerOperationTest(unittest.TestCase):
 
     def test_formal_cli_forwards_catalog_manifest_to_producer(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            output = root / "tmp/evidence"
-            capacity = root / "capacity.json"
-            manifest = root / "catalog-stage90-captures.json"
-            with patch.object(sys, "argv", [
-                "produce_html_performance_evidence.py",
-                "--repo", str(root),
-                "--output", str(output),
-                "--capacity-binding", str(capacity),
-                "--capacity-binding-sha256", "b" * 64,
-                "--catalog-plan", str(manifest),
-            ]), patch.object(producer, "produce") as run:
+            root, output, capacity, manifest = self._catalog_cli_fixture(temporary)
+            with patch.object(sys, "argv", self._catalog_cli_argv(
+                root, output, capacity, manifest, "b" * 64,
+            )), patch.object(producer, "produce") as run:
                 producer.main()
             run.assert_called_once_with(root.resolve(), output.resolve(), capacity,
                                         "b" * 64, manifest.resolve())
 
     def test_diagnostic_cli_forwards_catalog_manifest_without_formal_acceptance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root, output, capacity, manifest = self._catalog_cli_fixture(temporary)
+            with patch.object(sys, "argv", self._catalog_cli_argv(
+                root, output, capacity, manifest, "d" * 64, "--diagnostic-only",
+            )), patch.object(producer, "produce") as run:
+                producer.main()
+            run.assert_called_once_with(root, output, capacity, "d" * 64, manifest,
+                                        _allow_catalog_diagnostic=True)
+
+    def test_batch_cli_forwards_max_conditions_without_changing_catalog_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             output = root / "tmp/evidence"
@@ -83,12 +104,139 @@ class CatalogProducerOperationTest(unittest.TestCase):
             with patch.object(sys, "argv", [
                 "produce_html_performance_evidence.py", "--repo", str(root),
                 "--output", str(output), "--capacity-binding", str(capacity),
-                "--capacity-binding-sha256", "d" * 64, "--catalog-plan", str(manifest),
-                "--diagnostic-only",
+                "--capacity-binding-sha256", "f" * 64, "--catalog-plan", str(manifest),
+                "--max-conditions", "12",
             ]), patch.object(producer, "produce") as run:
                 producer.main()
-            run.assert_called_once_with(root, output, capacity, "d" * 64, manifest,
-                                        _allow_catalog_diagnostic=True)
+            run.assert_called_once_with(root, output, capacity, "f" * 64, manifest,
+                                        max_conditions=12)
+
+    def test_batch_cli_forwards_closed_batch_resume(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            output = root / "tmp/resumed"
+            capacity = root / "capacity.json"
+            manifest = root / "catalog-stage90-captures.json"
+            batch = root / "tmp/first-batch"
+            with patch.object(sys, "argv", [
+                "produce_html_performance_evidence.py", "--repo", str(root),
+                "--output", str(output), "--capacity-binding", str(capacity),
+                "--capacity-binding-sha256", "g" * 64, "--catalog-plan", str(manifest),
+                "--resume-batch", str(batch),
+            ]), patch.object(producer, "produce") as run:
+                producer.main()
+            run.assert_called_once_with(root, output, capacity, "g" * 64, manifest,
+                                        resume_batch=batch)
+
+    def test_reference_parent_cli_forwards_explicit_wrapper_pin(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            output = root / "tmp/evidence"
+            capacity = root / "capacity.json"
+            manifest = root / "catalog-stage90-captures.json"
+            wrapper = root / "reference-parent-wrapper.json"
+            with patch.object(sys, "argv", [
+                "produce_html_performance_evidence.py", "--repo", str(root),
+                "--output", str(output), "--capacity-binding", str(capacity),
+                "--capacity-binding-sha256", "h" * 64, "--catalog-plan", str(manifest),
+                "--reference-parent-wrapper", str(wrapper),
+                "--reference-parent-wrapper-sha256", "i" * 64,
+            ]), patch.object(producer, "produce") as run:
+                producer.main()
+            run.assert_called_once_with(
+                root, output, capacity, "h" * 64, manifest,
+                reference_parent_wrapper=wrapper,
+                reference_parent_wrapper_sha256="i" * 64,
+            )
+
+    def test_reference_parent_loader_failure_happens_before_measurements(self) -> None:
+        initial: gate.JsonObject = {"head": "a" * 40, "files": [], "inventoryDigest": "b" * 64}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            wrapper = root / "reference-parent-wrapper.json"
+            with patch.object(platform, "system", return_value="Darwin"), \
+                 patch.object(platform, "machine", return_value="arm64"), \
+                 patch.object(producer, "_make_git_query", return_value=lambda *_args: ""), \
+                 patch.object(producer, "source", return_value=initial), \
+                 patch.object(producer, "load_catalog_conditions",
+                              return_value=(None, None, None)), \
+                 patch.object(producer, "load_reference_parent",
+                              side_effect=ValueError("reference parent rejected")), \
+                 patch.object(producer, "_measurement_command") as command:
+                with self.assertRaisesRegex(ValueError, "reference parent rejected"):
+                    producer.produce(
+                        root, root / "tmp/evidence", root / "capacity.json", "j" * 64,
+                        root / "catalog.json", reference_parent_wrapper=wrapper,
+                        reference_parent_wrapper_sha256="k" * 64,
+                    )
+            command.assert_not_called()
+
+    def test_reference_parent_arm_keeps_original_source_role_and_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            baseline_binary = root / "baseline"
+            candidate_binary = root / "candidate"
+            baseline_binary.write_bytes(b"baseline")
+            candidate_binary.write_bytes(b"candidate")
+            parent = reference.ReferenceParentProof(
+                reference.REFERENCE_ROLE, "candidate", "3" * 40,
+                "a" * 64, gate.sha256(baseline_binary), gate.LOCK_SHA,
+                "d" * 64, "e" * 64, "f" * 64, (),
+                root / "parent-build.json", baseline_binary,
+            )
+            contract = reference.reference_parent_contract(parent)
+            builds = {
+                "baseline": producer.ArmBuildResult([], baseline_binary,
+                                                     gate.sha256(baseline_binary), {}, []),
+                "candidate": producer.ArmBuildResult([], candidate_binary,
+                                                      gate.sha256(candidate_binary), {}, []),
+            }
+            refs: dict[str, typed_producer.FilePin] = {
+                arm: {"path": str(root / (arm + ".json")), "sha256": "b" * 64}
+                for arm in builds
+            }
+            arms = producer.expected_arm_pins(
+                builds, "c" * 64, refs, reference_parent=parent,
+                reference_contract=contract,
+            )
+            self.assertEqual(set(arms), {reference.REFERENCE_ROLE, "candidate"})
+            self.assertEqual(arms[reference.REFERENCE_ROLE]["source_snapshot_sha256"], "a" * 64)
+            self.assertEqual(arms["candidate"]["source_snapshot_sha256"], "c" * 64)
+
+    def test_reference_parent_loader_forwards_query_and_all_dependency_refs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            wrapper = root / "wrapper.json"
+            build = root / "build.json"
+            binary = root / "binary"
+            dependency = root / "dependency.raw"
+            wrapper.write_text("{}")
+            build.write_text("{}")
+            binary.write_bytes(b"binary")
+            dependency.write_bytes(b"dependency")
+            proof = reference.ReferenceParentProof(
+                reference.REFERENCE_ROLE, "candidate", "3" * 40,
+                "a" * 64, gate.sha256(binary), gate.LOCK_SHA,
+                "d" * 64, gate.sha256(build), gate.sha256(wrapper),
+                (reference.FilePin(str(dependency), gate.sha256(dependency)),),
+                build, binary,
+            )
+
+            def query(root: Path, args: Sequence[str], input_bytes: bytes | None,
+                      text: bool) -> str:
+                del root, args, input_bytes, text
+                return "3" * 40
+
+            with patch.object(reference, "load_reference_parent_proof",
+                              return_value=proof) as loader:
+                _, contract, _, refs = producer.load_reference_parent(
+                    root, wrapper, gate.sha256(wrapper), git_query=query,
+                )
+            self.assertIsNotNone(loader.call_args.kwargs["git_query"])
+            self.assertEqual(contract["dependencyRefs"],
+                             [{"path": str(dependency), "sha256": gate.sha256(dependency)}])
+            self.assertEqual({pin["path"] for pin in refs},
+                             {str(wrapper), str(dependency)})
 
     def test_full_cli_holds_canonical_locks_during_production(self) -> None:
         for diagnostic in (False, True):
@@ -197,6 +345,136 @@ class TransportBundleUnitTests(unittest.TestCase):
                 self.assertFalse(os.access(transported_private, os.X_OK))
             self.assertEqual(gate.sha256(transported_executable), pins[0]["sha256"])
             self.assertEqual(gate.sha256(transported_private), pins[1]["sha256"])
+
+
+class HtmlPerformanceBatchUnitTests(unittest.TestCase):
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self._batch_counter = 0
+
+    def create_batch(
+        self,
+        condition_ids: Sequence[str] = ("case-a", "case-b"),
+        complete_ids: Sequence[str] | None = None,
+        policy_accepted: bool = True,
+    ) -> tuple[Path, Path]:
+        self._batch_counter += 1
+        batch = self.root / f"batch-{self._batch_counter}"
+        files: list[typed_producer.FilePin] = []
+        source_before = producer.write(batch / "source-before.json", {"head": "a"})
+        source_end = producer.write(batch / "source-end.json", {"head": "a"})
+        context_before = producer.write(batch / "context-before.json", {"stable": True})
+        context_end = producer.write(batch / "context-end.json", {"stable": True})
+        files.extend([source_before, source_end, context_before, context_end])
+        attempts: list[dict[str, typed_producer.FilePin]] = []
+        for condition_id in condition_ids:
+            expected = producer.write(batch / f"{condition_id}-expected.json", {
+                "catalogCondition": {"condition_id": condition_id},
+            })
+            result = producer.write(batch / f"{condition_id}-result.json", {})
+            manifest = producer.write(batch / f"{condition_id}-manifest.json", {})
+            attempts.append({"expected": expected, "result": result, "pairManifest": manifest})
+            files.extend([expected, result, manifest])
+        bundle = batch / "bundle"
+        producer.write_transport_bundle(bundle, "a" * 40, files, attempts)
+        producer.write_batch_receipt(
+            batch, head="a" * 40, source_before=source_before, source_end=source_end,
+            context_before=context_before, context_end=context_end, build_artifacts={},
+            build_pins=[], condition_ids=condition_ids,
+            complete_condition_ids=condition_ids if complete_ids is None else complete_ids,
+            policy_accepted=policy_accepted, attempts=attempts, bundle=bundle,
+        )
+        return batch, bundle
+
+    def test_closed_batch_reader_reuses_only_complete_attempts(self) -> None:
+        batch, _ = self.create_batch(complete_ids=("case-a",))
+        build_facts = {"baseline": {"proof": "validated"}, "candidate": {"proof": "validated"}}
+        with patch.object(gate, "validate_expected_builds", return_value=build_facts) as builds, \
+             patch.object(gate, "validate_attempt") as validate:
+            receipt, _, attempts = producer.load_closed_batch(batch, self.root)
+        self.assertEqual(receipt["completeConditionIds"], ["case-a"])
+        self.assertEqual(len(attempts), 1)
+        builds.assert_called_once()
+        validate.assert_called_once()
+        self.assertIs(validate.call_args.kwargs["validated_builds"], build_facts)
+
+    def test_batch_reader_rejects_source_drift_and_edited_pin(self) -> None:
+        batch, _ = self.create_batch()
+        (batch / "source-before.json").write_bytes(b'{"changed":true}')
+        with patch.object(gate, "validate_attempt"):
+            with self.assertRaises((ValueError, KeyError)):
+                producer.load_closed_batch(batch, self.root)
+
+    def test_batch_reader_rejects_duplicate_missing_or_reordered_ids(self) -> None:
+        for ids in (("case-a", "case-a"), ("case-a",), ("case-b", "case-a")):
+            with self.subTest(ids=ids):
+                batch, _ = self.create_batch()
+                receipt_path = batch / "batch-receipt.json"
+                receipt = json.loads(receipt_path.read_text())
+                receipt["conditionIds"] = list(ids)
+                receipt_path.write_bytes(producer.encoded(receipt))
+                with patch.object(gate, "validate_attempt"):
+                    with self.assertRaises((ValueError, KeyError)):
+                        producer.load_closed_batch(batch, self.root)
+
+    def test_partial_zero_sample_is_rejected_by_existing_attempt_validator(self) -> None:
+        batch, _ = self.create_batch(complete_ids=("case-a",))
+        with patch.object(gate, "validate_expected_builds", return_value={"baseline": {}, "candidate": {}}), \
+             patch.object(gate, "validate_attempt", side_effect=ValueError("zero samples")):
+            with self.assertRaisesRegex(ValueError, "zero samples"):
+                producer.load_closed_batch(batch, self.root)
+
+    def test_policy_false_never_promotes_batch_or_fishes_missing_conditions(self) -> None:
+        batch, _ = self.create_batch(policy_accepted=False)
+        receipt = gate.read_json(batch / "batch-receipt.json")
+        self.assertIs(receipt["policyAccepted"], False)
+        self.assertIs(receipt["formalAccepted"], False)
+        rows: list[gate.JsonObject] = [
+            {"condition_id": value} for value in ("a", "b", "c")
+        ]
+        selected = producer._select_batch_rows(rows, {"a"}, 1)
+        self.assertEqual([row["condition_id"] for row in selected], ["b"])
+        self.assertFalse(producer._batch_formal_acceptance(["a"] * 84, ["a"] * 84, False))
+
+    def test_budgeted_batch_can_resume_full_acceptance_but_policy_failure_cannot_clear(self) -> None:
+        accepted: gate.JsonObject = {"policy": {"policyPass": True}}
+        failed: gate.JsonObject = {"policy": {"policyPass": False}}
+        self.assertTrue(producer._batch_policy_accepted(
+            producer.BatchBudgetExhausted("bounded"), [accepted], True))
+        self.assertFalse(producer._batch_formal_acceptance(["case-a"], ["case-a"], True))
+        self.assertTrue(producer._batch_policy_accepted(None, [accepted] * 84, True))
+        self.assertFalse(producer._batch_formal_acceptance(["case-a"] * 84,
+                                                           ["case-a"] * 84, False))
+        self.assertFalse(producer._batch_policy_accepted(None, [failed], True))
+        self.assertFalse(producer._batch_policy_accepted(
+            producer.BatchBudgetExhausted("bounded"), [accepted], False))
+
+    def test_old_run_without_new_receipt_is_not_a_resumable_batch(self) -> None:
+        with patch.object(gate, "validate_attempt"):
+            with self.assertRaises(FileNotFoundError):
+                producer.load_closed_batch(self.root / "r3242", self.root)
+
+    def test_formal_verification_is_reserved_for_the_complete_84_union(self) -> None:
+        ids = [f"condition-{index}" for index in range(84)]
+        self.assertTrue(producer._batch_formal_acceptance(ids, ids, True))
+        self.assertFalse(producer._batch_formal_acceptance(ids[:-1], ids[:-1], True))
+
+    def test_expired_batch_deadline_stops_before_starting_a_worker(self) -> None:
+        binary = self.root / "worker"
+        binary.write_bytes(b"worker")
+        build = producer.ArmBuildResult([], binary, gate.sha256(binary), {}, [])
+        with patch.object(time, "monotonic", return_value=2.0), \
+             patch.object(producer, "quiet", return_value=0.1), \
+             patch.object(producer, "_measurement_command") as command:
+            with self.assertRaises(producer.BatchBudgetExhausted):
+                producer.observe_worker_attempt(
+                    build, 0, 1, self.root / "fixture.html", self.root / "report.json",
+                    self.root / "plan.json", 800, 600, 1, self.root, {}, self.root,
+                    batch_deadline=1.0,
+                )
+        command.assert_not_called()
 
 
 class RuntimeSyncPreflightTest(unittest.TestCase):
@@ -496,31 +774,46 @@ class WorkerAttemptContractTest(unittest.TestCase):
         failures, error = self._collect_failed_worker_sample(returncode=-15, closed=True)
         self.assertFalse(producer._worker_failure_can_continue("baseline", failures, error))
 
-    def test_condition_collection_keeps_candidates_after_baseline_failure(self) -> None:
+    def _condition_case(
+        self,
+    ) -> tuple[typed_producer.ArmBuildResult, Path, typed_producer.FilePin,
+               dict[str, typed_producer.ArmPin], typed_producer.ExpectedPerformance,
+               gate.JsonObject]:
         candidate_binary = self.root / "candidate-worker"
         candidate_binary.write_bytes(b"candidate worker")
-        candidate_build = typed_producer.ArmBuildResult([], candidate_binary,
-                                                         gate.sha256(candidate_binary), {}, [])
-        snapshot: typed_producer.FilePin = {"path": str(self.plan), "sha256": gate.sha256(self.plan)}
-        artifact: typed_producer.FilePin = {"path": str(self.plan), "sha256": gate.sha256(self.plan)}
+        candidate_build = typed_producer.ArmBuildResult(
+            [], candidate_binary, gate.sha256(candidate_binary), {}, [])
+        snapshot: typed_producer.FilePin = {
+            "path": str(self.plan), "sha256": gate.sha256(self.plan)}
+        artifact: typed_producer.FilePin = {
+            "path": str(self.plan), "sha256": gate.sha256(self.plan)}
         arms: dict[str, typed_producer.ArmPin] = {
-            "baseline-0.4.23": {"binary_sha256": self.build.binary_sha256,
-                "source_snapshot_sha256": snapshot["sha256"], "lock_sha256": gate.LOCK_SHA,
-                "build_artifact_ref": artifact},
-            "candidate": {"binary_sha256": candidate_build.binary_sha256,
-                "source_snapshot_sha256": snapshot["sha256"], "lock_sha256": gate.LOCK_SHA,
-                "build_artifact_ref": artifact},
+            "baseline-0.4.23": {
+                "binary_sha256": self.build.binary_sha256,
+                "source_snapshot_sha256": snapshot["sha256"],
+                "lock_sha256": gate.LOCK_SHA, "build_artifact_ref": artifact,
+            },
+            "candidate": {
+                "binary_sha256": candidate_build.binary_sha256,
+                "source_snapshot_sha256": snapshot["sha256"],
+                "lock_sha256": gate.LOCK_SHA, "build_artifact_ref": artifact,
+            },
         }
         expected: typed_producer.ExpectedPerformance = {
             "fixture_sha256": gate.sha256(self.fixture),
             "operation_plan_sha256": gate.sha256(self.plan),
             "operation": "test", "expected_dom_state_sha256": gate.sha256(self.plan),
             "viewport": self.viewport,
-            "provenance": {"rustc": "rustc", "cargo": "cargo", "environment_sha256": "e" * 64},
+            "provenance": {"rustc": "rustc", "cargo": "cargo",
+                            "environment_sha256": "e" * 64},
             "arms": arms, "reportPins": [], "operationPlanRef": artifact,
             "domStateRef": artifact,
         }
-        row: gate.JsonObject = {"catalog": False}
+        return (candidate_build, candidate_binary, snapshot, arms, expected,
+                {"catalog": False})
+
+    def test_condition_collection_keeps_candidates_after_baseline_failure(self) -> None:
+        candidate_build, candidate_binary, snapshot, arms, expected, row = self._condition_case()
         baseline_calls = 0
         candidate_calls = 0
 
@@ -530,6 +823,7 @@ class WorkerAttemptContractTest(unittest.TestCase):
             _scale: int, _root: Path, _environment: Mapping[str, str],
             _lifecycle: Path, attempts_directory: Path,
             failure_sink: Callable[[list[gate.JsonObject]], None] | None = None,
+            *, batch_deadline: float | None = None,
         ) -> tuple[gate.JsonObject, dict[str, float], list[gate.JsonObject]]:
             nonlocal baseline_calls, candidate_calls
             if build is self.build:
@@ -583,6 +877,31 @@ class WorkerAttemptContractTest(unittest.TestCase):
         self.assertNotIn("status", gate._object(failed_loads[0], "failed worker load"))
         self.assertEqual(len(collection.reports), 10)
         self.assertEqual(collection.actual_phase_records, len(gate.PHASES) * 25)
+
+    def test_condition_collection_budget_stops_before_next_worker(self) -> None:
+        candidate_build, candidate_binary, snapshot, arms, expected, row = self._condition_case()
+        calls = 0
+
+        def collect_sample(*_args: object, **_kwargs: object) -> tuple[
+            gate.JsonObject, dict[str, float], list[gate.JsonObject]
+        ]:
+            nonlocal calls
+            calls += 1
+            raise producer.BatchBudgetExhausted("expired")
+
+        with patch.object(producer, "_require_batch_budget", return_value=None), \
+             patch.object(producer, "collect_worker_sample", side_effect=collect_sample):
+            with self.assertRaises(producer.BatchBudgetExhausted):
+                producer._collect_condition_worker_pairs(
+                    folder=self.root / "condition", row=row, expected=expected,
+                    fixture=self.fixture, plan_path=self.plan, width=800, height=600,
+                    viewport=self.viewport,
+                    builds={"baseline": self.build, "candidate": candidate_build},
+                    binaries={"baseline": self.binary, "candidate": candidate_binary},
+                    arms=arms, root=self.root, lifecycle=self.logs, lock=self.plan,
+                    snapshot=snapshot, environment_sha="e" * 64, batch_deadline=1.0,
+                )
+        self.assertEqual(calls, 1)
 
     def test_partial_baseline_failure_keeps_successful_samples_and_attempts(self) -> None:
         failures: list[gate.JsonObject] = []

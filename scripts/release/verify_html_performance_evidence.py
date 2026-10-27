@@ -206,10 +206,27 @@ LOCK_SHA = "94c1a2cc5959e5687ace14ef02ad516dfe1797e581704c7b9b37df9105e83ed2"
 SOURCE_KEYS = ("inventoryDigest", "head", "index", "files", "trackedPaths", "untrackedPaths", "missingTrackedPaths")
 ENDPOINT_FLAGS = ("sourceBeforeEqualsEnd", "inputsBeforeEqualsEnd", "registryBeforeEqualsEnd", "cacheBeforeEqualsEnd", "cacheUnionBeforeEqualsEnd", "cacheUnionScopeRestored", "configBeforeEqualsEnd", "preferenceBeforeEqualsEnd", "toolContextBeforeEqualsEnd")
 HARNESS_ROOT = "scripts/html/performance-harness/"
+DEFAULT_BASELINE_ARM_ID = "baseline-0.4.23"
+REFERENCE_PARENT_ARM_ID = "reference-parent-371274ed"
 
 
 class PendingEvidence(ValueError):
     pass
+
+
+def baseline_arm_id(expected: Mapping[str, object]) -> str:
+    """期待値が選択する比較基準armを返す。旧証跡は既定で不変にする。"""
+    reference = expected.get("referenceParent")
+    if reference is None:
+        return DEFAULT_BASELINE_ARM_ID
+    value = _object(reference, "reference parent contract")
+    require(value.get("role") == REFERENCE_PARENT_ARM_ID
+            and value.get("referenceKind") == "correct-parent-source"
+            and value.get("publishedSdk") is False,
+            "reference parent contract identity differs")
+    arm_id = _text(value.get("armId"), "reference parent arm id")
+    require(arm_id == REFERENCE_PARENT_ARM_ID, "reference parent arm id differs")
+    return arm_id
 
 
 def require(ok: bool, message: str) -> None:
@@ -1010,6 +1027,34 @@ def validate_candidate_build_proof(directory: Path, root: Path, bundle_manifest_
             "cargoExecutableSha256": result["cargoExecutableSha256"]}
 
 
+def _validate_reference_parent_wrapper(bundle: Bundle, root: Path, expected: JsonObject, *,
+                                       git_query: GitQuery | None = None) -> JsonObject:
+    """Validate the retained candidate proof through the explicit parent-reference wrapper."""
+    contract = _object(expected.get("referenceParent"), "reference parent contract")
+    wrapper_ref = _object(contract.get("wrapperRef"), "reference parent wrapper reference")
+    wrapper = bundle.file(wrapper_ref)
+    helper = importlib.import_module("html_performance_reference")
+    def query(path: Path, args: Sequence[str]) -> str:
+        return git(path, *args, git_query=git_query)
+    proof = helper.load_reference_parent_proof(
+        wrapper, root, git_query=query,
+        file_resolver=lambda value, _label: bundle.file(value),
+    )
+    arm = _object(_object(expected["arms"], "expected arms")[REFERENCE_PARENT_ARM_ID], "reference parent arm")
+    require(arm["binary_sha256"] == proof.binary_sha256
+            and arm["source_snapshot_sha256"] == proof.source_snapshot_sha256
+            and arm["lock_sha256"] == proof.lock_sha256,
+            "reference parent expected arm differs")
+    return {"arm": "baseline", "binarySha256": proof.binary_sha256,
+            "head": proof.head, "sourceSnapshotSha256": proof.source_snapshot_sha256,
+            "lockSha256": proof.lock_sha256,
+            "buildArtifactSha256": proof.wrapper_sha256,
+            "cargoExecutableSha256": proof.cargo_sha256,
+            "originalBuildArtifactSha256": proof.original_build_artifact_sha256,
+            "dependencyRefs": [{"path": pin.logical_path, "sha256": pin.sha256}
+                               for pin in proof.dependency_refs]}
+
+
 def committed_records(root: Path, ref: str = "HEAD", *, git_query: GitQuery | None = None) -> SourceRecords:
     tree = _git_output(root, ("ls-tree", "-r", "-z", ref), git_query=git_query)
     if not isinstance(tree, bytes):
@@ -1063,7 +1108,8 @@ def current_source(root: Path, before: JsonObject, *, git_query: GitQuery | None
 
 
 def source_contract(bundle: Bundle, root: Path, expected: JsonObject, *,
-                    git_query: GitQuery | None = None) -> SourceContract:
+                    git_query: GitQuery | None = None,
+                    validated_builds: Mapping[str, JsonObject] | None = None) -> SourceContract:
     contract = _object(expected["sourcePair"], "source pair")
     before, end, approved = (bundle.json(contract[k]) for k in ("before", "end", "approvedSourceRef"))
     require(all(document.get("stableEndpoints") is True for document in (before, end, approved)), "unstable source endpoint")
@@ -1080,9 +1126,19 @@ def source_contract(bundle: Bundle, root: Path, expected: JsonObject, *,
     require(actual[HARNESS_ROOT + "Cargo.lock"][0] == LOCK_SHA, "harness lock differs")
     require(snapshot["digest"] == hashlib.sha256(json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()).hexdigest(), "snapshot digest differs")
     snapshot_ref = _object(contract["snapshot"], "source snapshot reference")
-    for arm_value in _object(expected["arms"], "expected arms").values():
+    expected_baseline = baseline_arm_id(expected)
+    for raw_arm, arm_value in _object(expected["arms"], "expected arms").items():
         arm = _object(arm_value, "expected arm")
-        require(arm["source_snapshot_sha256"] == snapshot_ref["sha256"] and arm["lock_sha256"] == LOCK_SHA, "shared build provenance differs")
+        if raw_arm == expected_baseline and expected_baseline == REFERENCE_PARENT_ARM_ID:
+            if validated_builds is None or "baseline" not in validated_builds:
+                raise ValueError("verified reference parent build is missing")
+            build = validated_builds["baseline"]
+            require(arm["source_snapshot_sha256"] == build["sourceSnapshotSha256"]
+                    and arm["lock_sha256"] == build["lockSha256"],
+                    "reference parent build provenance differs")
+        else:
+            require(arm["source_snapshot_sha256"] == snapshot_ref["sha256"]
+                    and arm["lock_sha256"] == LOCK_SHA, "shared build provenance differs")
     return {"head": _text(before["head"], "source HEAD"), "source": saved, "snapshot": _text(snapshot_ref["sha256"], "snapshot SHA256")}
 
 
@@ -1346,7 +1402,7 @@ def aggregate_comparison(report_paths: list[Path], expected: JsonObject) -> Comp
     if len(report_paths) != 10 or len({path.resolve() for path in report_paths}) != 10:
         raise ValueError("exactly ten distinct pair reports are required")
     grouped: dict[str, dict[int, JsonObject]] = {"baseline": {}, "candidate": {}}
-    report_arm_for_filename = {"baseline": "baseline-0.4.23", "candidate": "candidate"}
+    report_arm_for_filename = {"baseline": baseline_arm_id(expected), "candidate": "candidate"}
     pattern = re.compile(r"^(baseline|candidate)-(\d+)\.json$")
     for path in report_paths:
         match = pattern.match(path.name)
@@ -1402,7 +1458,8 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
     expected_arms = _object(expected["arms"], "expected arms")
     provenance = _object(expected["provenance"], "expected provenance")
     source_pair = _object(expected["sourcePair"], "source pair")
-    require(set(expected_arms) == {"baseline-0.4.23", "candidate"}, "versioned baseline/candidate required")
+    expected_baseline = baseline_arm_id(expected)
+    require(set(expected_arms) == {expected_baseline, "candidate"}, "versioned baseline/candidate required")
     catalog_expected = expected.get("catalogCondition")
     for key in ("fixture_sha256", "operation_plan_sha256"):
         digest(expected[key])
@@ -1414,7 +1471,7 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
             digest(expected_arm[key])
     if validated_builds is not None:
         require(set(validated_builds) == {"baseline", "candidate"}, "validated build arms differ")
-        for raw_arm, arm in (("baseline-0.4.23", "baseline"), ("candidate", "candidate")):
+        for raw_arm, arm in ((expected_baseline, "baseline"), ("candidate", "candidate")):
             expected_arm = _object(expected_arms[raw_arm], "expected arm")
             build = validated_builds[arm]
             build_ref = _object(expected_arm.get("build_artifact_ref"), "build artifact reference")
@@ -1431,7 +1488,8 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
     width, height = (_integer(viewport[key], "viewport dimension") for key in ("width", "height"))
     require(set(viewport) == {"width", "height", "scale"} and type(viewport["scale"]) in (int, float) and viewport["scale"] == 1, "invalid viewport types/scale")
     require(isinstance(expected["operation"], str) and bool(expected["operation"]), "missing operation")
-    source = source_contract(bundle, root, expected, git_query=git_query)
+    source = source_contract(bundle, root, expected, git_query=git_query,
+                             validated_builds=validated_builds)
     endpoints = _object(expected["endpointRefs"], "endpoint references")
     before_context, end_context = (bundle.json(endpoints[k]) for k in ("before", "end"))
     mapping = {"sourceBeforeEqualsEnd": "source", "inputsBeforeEqualsEnd": "inputs", "registryBeforeEqualsEnd": "registry", "cacheBeforeEqualsEnd": "cache", "cacheUnionBeforeEqualsEnd": "cacheUnion", "cacheUnionScopeRestored": "scope", "configBeforeEqualsEnd": "config", "preferenceBeforeEqualsEnd": "preference", "toolContextBeforeEqualsEnd": "toolContext"}
@@ -1548,7 +1606,7 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
         row, pin = order[index], pins[index]
         pair = index // 2
         arm = ("baseline", "candidate")[index % 2] if pair % 2 == 0 else ("candidate", "baseline")[index % 2]
-        raw_arm = "baseline-0.4.23" if arm == "baseline" else arm
+        raw_arm = expected_baseline if arm == "baseline" else arm
         binary_sha = _object(expected_arms[raw_arm], "expected arm")["binary_sha256"]
         require(row["arm"] == arm and type(row["pair_index"]) is int and row["pair_index"] == pair and row["executable_sha256"] == binary_sha, "pair order/binary differs")
         bundle.file({"path": row["executable"], "sha256": binary_sha})
@@ -1670,6 +1728,23 @@ def _require_formal_release_result(result: JsonObject) -> None:
             "HTML performance non-regression is not established")
 
 
+def validate_expected_builds(bundle: Bundle, root: Path, first_expected: JsonObject, *,
+                             git_query: GitQuery | None = None) -> dict[str, JsonObject]:
+    """Validate each immutable arm proof once for the whole catalog batch."""
+    first_arms = _object(first_expected["arms"], "expected arms")
+    expected_baseline = baseline_arm_id(first_expected)
+    validated: dict[str, JsonObject] = {}
+    for raw_arm, arm in ((expected_baseline, "baseline"), ("candidate", "candidate")):
+        arm_value = _object(first_arms[raw_arm], "expected arm")
+        if arm == "baseline" and expected_baseline == REFERENCE_PARENT_ARM_ID:
+            validated[arm] = _validate_reference_parent_wrapper(
+                bundle, root, first_expected, git_query=git_query)
+        else:
+            validated[arm] = _validate_build_proof(
+                bundle, root, arm_value.get("build_artifact_ref"), arm, git_query=git_query)
+    return validated
+
+
 def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
             require_catalog: bool, diagnostic_catalog: bool = False) -> JsonObject:
     bundle = Bundle(directory)
@@ -1683,12 +1758,8 @@ def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
         require(len(attempts) == 84, "catalog performance requires all 84 conditions")
         validated_builds: dict[str, JsonObject] | None = None
         if not diagnostic_catalog:
-            first_arms = _object(first_expected["arms"], "expected arms")
-            validated_builds = {}
-            for raw_arm, arm in (("baseline-0.4.23", "baseline"), ("candidate", "candidate")):
-                arm_value = _object(first_arms[raw_arm], "expected arm")
-                validated_builds[arm] = _validate_build_proof(
-                    bundle, root, arm_value.get("build_artifact_ref"), arm, git_query=git_query)
+            validated_builds = validate_expected_builds(
+                bundle, root, first_expected, git_query=git_query)
         values = [validate_attempt(bundle, root, attempt, git_query=git_query,
                                    validated_builds=validated_builds) for attempt in attempts]
         manifest_refs = {json.dumps(value["catalogManifestRef"], sort_keys=True) for value in values}

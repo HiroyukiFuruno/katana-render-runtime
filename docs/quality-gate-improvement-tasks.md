@@ -2,6 +2,13 @@
 
 ## 最新の再開地点（2026-10-28）
 
+- [ ] R3250〜R3258でHTML性能の閉じたbatch/resumeと正しい親版referenceの回帰を修正した。151 Python fileのstrict型検査、producer95件・verifier91件・親reference3件が成功し、R3257の重複1組を共通fixtureへ集約後、R3258の通常foundationがactual0。予算切れを実測失敗と分離し、完了済み部分を再利用する一方、84条件未完了・実policy失敗を正式合格にしない。実parent `371274ed` の固定proof readerも受入成功。実84条件batch・完全性能の確認は未完了。
+- [/] R3253〜R3256のarc許容誤差候補は不採用。build/fmtは成功したが、SVG pathのA命令は別のsvgtypes経路で数値回帰が失敗し、代表C4実PNGスコアは親と同じ98.65729だった。候補差分を `tmp/quality/rejected-arc-candidate-r3256/candidate.patch`（SHA d422919921dd9c56f0c567d5da274f5e0674bbfe93685074cf3819d053de315a）へ保持し、製品・来歴・候補テスト7ファイルを元へ復帰した。改善なしを採用済みとして積み上げない。
+- [ ] R3232/R3233では `371274ed` のHTML84条件を再取得・厳格検査し、84/84が90以上、最低91.49827、出力font一致establishedを確認した。R3239では消失した検証binaryを同一SHA `8ee924a616b8e058119477dc113dbd3d85b22052595364d4562558047233cce1` へ再生成し、既存のresume検査で画像を再利用した。Cargo target外にも同じ物理objectのhardlinkとretention.jsonを保持する。以後の未検証変更へ成功を転用しない。
+- [ ] R3242の性能測定は12条件を完了し、13番目で旧版失敗後も現行sampleを継続したが、外側1800秒上限で終了した。実exit -15・groupClosed/rawFdsClosed true、619試行を保存。完了12条件の現行300sampleの最大秒数は初回0.153557、再表示0.027842、同一session resize0.025975。全84性能・メモリ非劣化ではない。正しいcheckpoint位置はrun直下の `*/condition-checkpoint.json` で、`conditions/` はoperation plan格納先。誤った集計先で「0 sample」と報告した点は訂正済み。R3244の別endpoint診断はsource/inputs/registry/cache/cacheUnion/scope/config/preference/toolContext全一致だが、旧失敗runを正式合格へ再認定しない。HTML専用の閉じたbatch・安全なresumeを既存reader/transportで実装し、最終84件の完全検査を維持する。
+- [ ] R3235の代表C4 context実frameとR3195の実製品PNGは、decode後RGBA SHA `24da70abca8e8749608f39fd87ae4638fe88e67c8447ee399a776d86562864fa` が一致した。R3240の同一HTMLを既存observer Chromeで取得し、Helvetica TTC index0/1とTrebuchet MSの実file/faceがKRRと一致した。文字矩形外が差分SSEの約8割を占める探索結果は診断に限定する。arc設定候補はR3256で撤回済み。raw JS基準・99基準・配色は変更しない。
+- [/] 容量不足に対しR3228 root clean、R3229承認済みprivate clean-allを実行。後者は部分削除後に使用中target保護で全体actual1だった。R3238は古いcontent-addressed facts binary389件（元2,746,715,192bytes）を、既存のgzip・復号SHA一致・fsync manifestの順序でlossless退役し、最新receipt binaryを保持、空き6,753,509,376bytesを確認した。現在の正解画像・比較画像・raw・私有資料を削除せず、固定閾値を変更していない。target消失の実行者/PIDは未取得で、読み取り調査や特定ownerが原因と断定しない。
+
 - [/] 待機中REPLの排他保持で本人の依存更新を妨げた問題を是正。実行単位のcontext managerへ変更し、取得失敗時だけ短い案内を出す修正は18回帰・静的検査・通常hook成功後 `5cb38ab1` にコミット済み。既存の排他・使用中成果物の保護は維持。実際の別processによる両lock取得・解放も確認した。
 - [/] Biomeの144件は初期の`noUnusedVariables`診断で、結合後の実参照を個別に証明した解決済み144件・未解決0件だった。通常error/warningの格下げはない。通常出力の要約化と未解決診断の位置/内容表示を `8996131c` へ保存し、通常Biome gate成功・異常系10回帰成功を確認。完全なraw/proofは`gate.json`等へ保持する。全runtime受入成功とは混同しない。
 - [/] 依存更新後のBiome schema同期を `43ea4b42` にコミットした。公式migrateの差分はschema 2.6.2→2.6.3だけ。今後は`bun update`直後に公式`biome migrate --write`を実行する。recipe契約のBun回帰、現行sourceの静的検査・厳格Clippy・通常commit hookは成功。通常warning/errorを許容する設定は追加していない。

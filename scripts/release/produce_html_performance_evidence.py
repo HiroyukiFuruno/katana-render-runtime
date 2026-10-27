@@ -27,6 +27,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 
 import verify_html_performance_evidence as gate
 import html_performance_inventory as inventory_ops
+import html_performance_reference as reference
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "build"))
 LOCAL_CAPACITY_BASELINE = 2363047936
@@ -151,6 +152,13 @@ class ContextSnapshot(TypedDict):
     toolContext: ToolContext
 
 
+class BatchOptions(TypedDict, total=False):
+    max_conditions: int
+    resume_batch: Path
+    reference_parent_wrapper: Path
+    reference_parent_wrapper_sha256: str
+
+
 def _environment_sha256(environment: Mapping[str, str]) -> str:
     canonical = json.dumps(dict(environment), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode()).hexdigest()
@@ -189,6 +197,7 @@ class ExpectedPerformance(_ExpectedFields, total=False):
     fontIdentityRequestRef: SizedFilePin
     fontIdentityResponseRef: SizedFilePin
     fontIdentityProbeBinary: FilePin
+    referenceParent: gate.JsonObject
 
 
 class ConditionWorkerCollection(NamedTuple):
@@ -361,8 +370,8 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
     environment = dict(os.environ)
     environment["CARGO_TARGET_DIR"] = str(target)
     references = capacity.collect_protected_references(list(binding.references), environment.get("CARGO_CAPACITY_PROTECTED_REFS"))
-    for reference in references:
-        path = Path(reference)
+    for protected_reference in references:
+        path = Path(protected_reference)
         gate.require(path.is_file() and not path.is_symlink() and path.resolve() == path,
                      "protected reference must be a canonical regular file")
     factor = environment.get("CARGO_CAPACITY_FACTOR")
@@ -494,17 +503,43 @@ def require_frozen_binary(build: ArmBuildResult) -> None:
 
 
 def expected_arm_pins(builds: Mapping[str, ArmBuildResult], snapshot_sha256: str,
-                      build_artifact_refs: Mapping[str, FilePin]) -> dict[str, ArmPin]:
+                      build_artifact_refs: Mapping[str, FilePin], *,
+                      reference_parent: reference.ReferenceParentProof | None = None,
+                      reference_contract: gate.JsonObject | None = None) -> dict[str, ArmPin]:
     arms: dict[str, ArmPin] = {}
+    baseline_id = (gate.baseline_arm_id({"referenceParent": reference_contract})
+                   if reference_contract is not None else gate.DEFAULT_BASELINE_ARM_ID)
     for arm, build in builds.items():
         require_frozen_binary(build)
-        arms["baseline-0.4.23" if arm == "baseline" else arm] = {
+        source_snapshot = (reference_parent.source_snapshot_sha256
+                           if arm == "baseline" and reference_parent is not None
+                           else snapshot_sha256)
+        arms[baseline_id if arm == "baseline" else arm] = {
             "binary_sha256": build.binary_sha256,
-            "source_snapshot_sha256": snapshot_sha256,
+            "source_snapshot_sha256": source_snapshot,
             "lock_sha256": gate.LOCK_SHA,
             "build_artifact_ref": build_artifact_refs[arm],
         }
     return arms
+
+
+def load_reference_parent(
+    root: Path, wrapper: Path, wrapper_sha256: str, *,
+    git_query: gate.GitQuery | None = None,
+) -> tuple[reference.ReferenceParentProof, gate.JsonObject, FilePin, list[FilePin]]:
+    wrapper = wrapper.resolve()
+    _pinned_file(wrapper, wrapper_sha256)
+
+    def query(path: Path, args: tuple[str, ...]) -> str:
+        return gate.git(path, *args, git_query=git_query)
+    proof = reference.load_reference_parent_proof(wrapper, root, git_query=query)
+    contract = reference.reference_parent_contract(proof)
+    wrapper_pin: FilePin = {"path": str(wrapper), "sha256": proof.wrapper_sha256}
+    contract["wrapperRef"] = wrapper_pin
+    refs: list[FilePin] = [wrapper_pin]
+    for pin in proof.dependency_refs:
+        refs.append({"path": pin.logical_path, "sha256": pin.sha256})
+    return proof, contract, wrapper_pin, refs
 
 
 def encoded(value: object) -> bytes:
@@ -538,6 +573,205 @@ def write_transport_bundle(bundle: Path, head: str, refs: Sequence[FilePin],
     write(bundle / "bundle.json", transport)
     return relative_paths
 
+
+BATCH_RECEIPT_SCHEMA = "krr-html-performance-batch-receipt-v1"
+
+
+def _receipt_file_pin(value: object, label: str) -> FilePin:
+    pin = gate._object(value, label)
+    path = Path(gate._text(pin.get("path"), label + " path"))
+    checksum = gate._text(pin.get("sha256"), label + " SHA")
+    _pinned_file(path, checksum)
+    return {"path": str(path), "sha256": checksum}
+
+
+def _attempt_condition_id(bundle: gate.Bundle, attempt: Mapping[str, object]) -> str:
+    expected = bundle.json(attempt["expected"])
+    catalog = gate._object(expected.get("catalogCondition"), "batch catalog condition")
+    return gate._text(catalog.get("condition_id"), "batch condition id")
+
+
+def write_batch_receipt(
+    output: Path,
+    *,
+    head: str,
+    source_before: FilePin,
+    source_end: FilePin,
+    context_before: FilePin,
+    context_end: FilePin,
+    build_artifacts: Mapping[str, FilePin],
+    build_pins: Sequence[FilePin],
+    condition_ids: Sequence[str],
+    complete_condition_ids: Sequence[str],
+    policy_accepted: bool,
+    attempts: Sequence[Mapping[str, FilePin]],
+    bundle: Path,
+) -> FilePin:
+    ordered_ids = list(condition_ids)
+    complete_ids = list(complete_condition_ids)
+    gate.require(len(ordered_ids) == len(set(ordered_ids)), "batch condition ids are duplicated")
+    gate.require(set(complete_ids) <= set(ordered_ids),
+                 "batch complete condition is outside the batch")
+    batch_attempts = [dict(attempt) for attempt in attempts]
+    receipt: gate.JsonObject = {
+        "schema": BATCH_RECEIPT_SCHEMA,
+        "status": "closed",
+        "formalAccepted": policy_accepted and len(complete_ids) == 84 and len(ordered_ids) == 84,
+        "policyAccepted": policy_accepted,
+        "head": head,
+        "conditionIds": ordered_ids,
+        "completeConditionIds": complete_ids,
+        "source": {"before": source_before, "end": source_end},
+        "contexts": {"before": context_before, "end": context_end},
+        "buildArtifacts": dict(build_artifacts),
+        "buildPins": list(build_pins),
+        "attempts": batch_attempts,
+        "bundle": {"path": str((bundle / "bundle.json").resolve()),
+                    "sha256": gate.sha256(bundle / "bundle.json")},
+    }
+    return write_exclusive(output / "batch-receipt.json", receipt)
+
+
+def _complete_batch_attempts(
+    bundle: gate.Bundle,
+    attempts: Sequence[dict[str, FilePin]],
+    complete_ids: Sequence[str],
+) -> list[dict[str, FilePin]]:
+    selected = [attempt for attempt in attempts
+                if _attempt_condition_id(bundle, attempt) in set(complete_ids)]
+    gate.require(len(selected) == len(complete_ids),
+                 "batch complete condition ids are duplicated")
+    actual_ids = [_attempt_condition_id(bundle, attempt) for attempt in selected]
+    gate.require(actual_ids == list(complete_ids),
+                 "batch complete condition order differs from attempts")
+    return selected
+
+
+def load_closed_batch(
+    batch: Path,
+    root: Path,
+    *,
+    git_query: gate.GitQuery | None = None,
+) -> tuple[gate.JsonObject, gate.Bundle, list[dict[str, FilePin]]]:
+    receipt_path = batch / "batch-receipt.json"
+    receipt = gate.read_json(receipt_path)
+    gate.require(receipt.get("schema") == BATCH_RECEIPT_SCHEMA,
+                 "unsupported HTML performance batch receipt")
+    gate.require(receipt.get("status") == "closed",
+                 "HTML performance batch endpoint is not closed")
+    gate.require(type(receipt.get("policyAccepted")) is bool,
+                 "batch policy result is missing")
+    condition_ids = [gate._text(value, "batch condition id")
+                     for value in gate._array(receipt.get("conditionIds"), "batch condition ids")]
+    gate.require(len(condition_ids) == len(set(condition_ids)),
+                 "batch condition ids are duplicated")
+    bundle_ref = _receipt_file_pin(receipt.get("bundle"), "batch bundle")
+    gate.require(Path(bundle_ref["path"]) == (batch / "bundle" / "bundle.json").resolve(),
+                 "batch bundle path differs")
+    bundle = gate.Bundle(Path(bundle_ref["path"]).parent)
+    gate.require(bundle.manifest.get("head") == receipt.get("head"),
+                 "batch bundle HEAD differs")
+    all_attempts = [cast(dict[str, FilePin], attempt)
+                    for attempt in gate._objects(receipt.get("attempts"), "batch attempts")]
+    manifest_attempts = gate._objects(bundle.manifest.get("attempts"), "bundle attempts")
+    gate.require(all_attempts == manifest_attempts, "batch receipt attempts differ from bundle")
+    actual_ids = [_attempt_condition_id(bundle, attempt) for attempt in all_attempts]
+    gate.require(actual_ids == condition_ids, "batch condition order differs from attempts")
+    complete_ids = [gate._text(value, "complete batch condition id")
+                    for value in gate._array(receipt.get("completeConditionIds"),
+                                             "complete batch condition ids")]
+    gate.require(len(complete_ids) == len(set(complete_ids))
+                 and set(complete_ids) <= set(actual_ids),
+                 "batch complete condition ids are invalid")
+    attempts = _complete_batch_attempts(bundle, all_attempts, complete_ids)
+    for label in ("source", "contexts"):
+        section = gate._object(receipt.get(label), "batch " + label)
+        for endpoint in ("before", "end"):
+            pin = _receipt_file_pin(section.get(endpoint),
+                                    "batch " + label + " " + endpoint)
+            bundle.file(pin)
+    for arm, value in gate._object(receipt.get("buildArtifacts"), "batch build artifacts").items():
+        gate.require(arm in {"baseline", "candidate"}, "unknown batch build arm")
+        bundle.file(_receipt_file_pin(value, "batch " + arm + " artifact"))
+    for value in gate._array(receipt.get("buildPins"), "batch build pins"):
+        bundle.file(_receipt_file_pin(value, "batch build pin"))
+    validated_builds: Mapping[str, gate.JsonObject] = {}
+    if attempts:
+        first_expected = bundle.json(attempts[0]["expected"])
+        validated_builds = gate.validate_expected_builds(
+            bundle, root, first_expected, git_query=git_query,
+        )
+    for attempt in attempts:
+        attempt_object: gate.JsonObject = {
+            key: value for key, value in attempt.items()
+        }
+        gate.validate_attempt(bundle, root, attempt_object, git_query=git_query,
+                             validated_builds=validated_builds)
+    return receipt, bundle, attempts
+
+
+def _row_condition_id(row: Mapping[str, object]) -> str:
+    return gate._text(row.get("condition_id"), "measurement condition id")
+
+
+def _same_arm_identity(left: Mapping[str, object], right: Mapping[str, object]) -> bool:
+    return all(left.get(key) == right.get(key)
+               for key in ("binary_sha256", "source_snapshot_sha256", "lock_sha256"))
+
+
+def _select_batch_rows(
+    rows: Sequence[gate.JsonObject], completed_ids: set[str], limit: int | None,
+) -> list[gate.JsonObject]:
+    remaining = [row for row in rows if _row_condition_id(row) not in completed_ids]
+    return remaining if limit is None else remaining[:limit]
+
+
+def _batch_formal_acceptance(
+    condition_ids: Sequence[str], complete_ids: Sequence[str], policy_accepted: bool,
+) -> bool:
+    return policy_accepted and len(condition_ids) == 84 and len(complete_ids) == 84
+
+
+def _resume_condition_plan(
+    batch: Path, bundle: gate.Bundle, condition_id: str,
+) -> tuple[Path, gate.JsonObject, FilePin]:
+    label = re.sub(r"[^a-zA-Z0-9.-]+", "_", condition_id)
+    path = batch / "conditions" / label / "operation-plan.json"
+    pin: FilePin = {"path": str(path.resolve()), "sha256": gate.sha256(path)}
+    _pinned_file(path, pin["sha256"])
+    bundle.file(pin)
+    return path, bundle.json(pin), pin
+
+
+def _validate_resume_batch(
+    receipt: Mapping[str, object],
+    bundle: gate.Bundle,
+    attempts: Sequence[Mapping[str, FilePin]],
+    *,
+    head: str,
+    source: gate.JsonObject,
+    before_context: ContextSnapshot,
+    after_context: ContextSnapshot,
+    arms: Mapping[str, ArmPin],
+) -> None:
+    gate.require(receipt.get("head") == head, "resume batch HEAD differs")
+    source_refs = gate._object(receipt.get("source"), "resume source refs")
+    context_refs = gate._object(receipt.get("contexts"), "resume context refs")
+    gate.require(bundle.json(source_refs["before"]) == source,
+                 "resume source-before differs")
+    gate.require(bundle.json(context_refs["before"]) == before_context,
+                 "resume context-before differs")
+    gate.require(bundle.json(context_refs["end"]) == after_context,
+                 "resume context-end differs")
+    for attempt in attempts:
+        expected = bundle.json(attempt["expected"])
+        old_arms = gate._object(expected.get("arms"), "resume expected arms")
+        baseline_id = gate.baseline_arm_id(expected)
+        gate.require(all(_same_arm_identity(gate._object(old_arms.get(raw_arm), "resume arm"),
+                                            gate._object(arms.get(raw_arm), "current arm"))
+                         for raw_arm in (baseline_id, "candidate")),
+                     "resume build pins differ")
+
 MeasurementRole = Literal["tool-query", "metadata", "preflight", "build", "worker"]
 # 軽いquery、graph解決、同期検査、release build、単一workerに別の停止上限を置く。
 MEASUREMENT_LIMITS: dict[MeasurementRole, float] = {
@@ -547,6 +781,30 @@ MEASUREMENT_CLEANUP_SECONDS = 10.0
 MEASUREMENT_TERM_SECONDS = 2.0
 MAX_WORKER_ATTEMPTS = 3
 MAX_WORKER_LOAD = 0.25
+# 作業上限は新規worker起動だけを制限し、終了コンテキスト保存用の外側余裕は残す。
+BATCH_WORK_BUDGET_SECONDS = 1_200.0
+
+
+class BatchBudgetExhausted(RuntimeError):
+    """A bounded batch stopped before starting another measurement process."""
+
+
+def _batch_policy_accepted(
+    batch_failure: BaseException | None,
+    results: Sequence[gate.JsonObject],
+    resumed_policy_accepted: bool,
+) -> bool:
+    if batch_failure is not None and not isinstance(batch_failure, BatchBudgetExhausted):
+        return False
+    return resumed_policy_accepted and all(
+        gate._object(result.get("policy"), "condition policy").get("policyPass") is True
+        for result in results
+    )
+
+
+def _require_batch_budget(deadline: float | None) -> None:
+    if deadline is not None and time.monotonic() >= deadline:
+        raise BatchBudgetExhausted("bounded HTML performance batch budget exhausted")
 
 
 def _measurement_exit(process: subprocess.Popen[bytes]) -> bool:
@@ -1155,11 +1413,16 @@ def quiet() -> float:
     return ratio
 
 
-def await_quiet() -> float:
-    deadline = time.monotonic() + 900
+def await_quiet(batch_deadline: float | None = None) -> float:
+    quiet_deadline = time.monotonic() + 900
     while quiet() > MAX_WORKER_LOAD:
-        gate.require(time.monotonic() < deadline, "quiet load0.25 was not reached")
-        time.sleep(5)
+        _require_batch_budget(batch_deadline)
+        gate.require(time.monotonic() < quiet_deadline, "quiet load0.25 was not reached")
+        sleep_seconds = 5.0
+        if batch_deadline is not None:
+            sleep_seconds = min(sleep_seconds, max(0.0, batch_deadline - time.monotonic()))
+        time.sleep(sleep_seconds)
+    _require_batch_budget(batch_deadline)
     return quiet()
 
 
@@ -1265,6 +1528,12 @@ def _append_worker_attempt_pins(
                       for attempt in attempts)
 
 
+def _worker_attempt_pins_in(folder: Path) -> list[FilePin]:
+    return [{"path": str(path.resolve()), "sha256": gate.sha256(path)}
+            for path in sorted(folder.rglob("attempt-*.json"))
+            if path.is_file() and not path.is_symlink()]
+
+
 def observe_worker_attempt(
     build: ArmBuildResult,
     sample: int,
@@ -1278,8 +1547,10 @@ def observe_worker_attempt(
     cwd: Path,
     env: Mapping[str, str],
     log_directory: Path,
+    *,
+    batch_deadline: float | None = None,
 ) -> WorkerAttemptObservation:
-    load_before = await_quiet()
+    load_before = await_quiet(batch_deadline)
     gate.require(math.isfinite(load_before) and 0 <= load_before <= MAX_WORKER_LOAD,
                  "worker pre-load did not reach quiet limit")
     binary_before = binary_sha_or_none(build.binary)
@@ -1291,6 +1562,7 @@ def observe_worker_attempt(
             "workerStarted": False, "accepted": False,
             "reason": "worker binary changed before measurement",
         }, None, None)
+    _require_batch_budget(batch_deadline)
     argv = [str(build.binary), "--worker", str(sample), str(fixture), str(report_path),
             str(plan_path), str(width), str(height), str(scale)]
     lifecycle_paths: list[Path] = []
@@ -1344,6 +1616,8 @@ def collect_worker_sample(
     log_directory: Path,
     attempts_directory: Path,
     failure_sink: Callable[[list[gate.JsonObject]], None] | None = None,
+    *,
+    batch_deadline: float | None = None,
 ) -> tuple[gate.JsonObject, dict[str, float], list[gate.JsonObject]]:
     attempts: list[gate.JsonObject] = []
 
@@ -1352,9 +1626,11 @@ def collect_worker_sample(
             failure_sink(attempts)
 
     for attempt in range(1, MAX_WORKER_ATTEMPTS + 1):
+        _require_batch_budget(batch_deadline)
         observation = observe_worker_attempt(build, sample, attempt, fixture,
             report_path, plan_path,
-            width, height, scale, cwd, env, log_directory)
+            width, height, scale, cwd, env, log_directory,
+            batch_deadline=batch_deadline)
         record = observation.record
         result = observation.result
         if observation.error is None and record.get("reason") is None and result is not None:
@@ -1707,7 +1983,7 @@ def _collect_condition_worker_pairs(
     fixture: Path, plan_path: Path, width: int, height: int, viewport: Viewport,
     builds: Mapping[str, ArmBuildResult], binaries: Mapping[str, Path],
     arms: Mapping[str, ArmPin], root: Path, lifecycle: Path, lock: Path,
-    snapshot: FilePin, environment_sha: str,
+    snapshot: FilePin, environment_sha: str, batch_deadline: float | None = None,
 ) -> ConditionWorkerCollection:
     order: list[gate.JsonObject] = []
     reports: list[Path] = []
@@ -1717,10 +1993,12 @@ def _collect_condition_worker_pairs(
     baseline_failure: gate.JsonObject | None = None
     actual_phase_records = 0
     for pair in range(5):
+        _require_batch_budget(batch_deadline)
         for arm in (("baseline", "candidate") if pair % 2 == 0 else ("candidate", "baseline")):
+            _require_batch_budget(batch_deadline)
             binary = binaries[arm]
             report_path = folder / "reports" / f"{arm}-{pair}.json"
-            raw_arm = "baseline-0.4.23" if arm == "baseline" else arm
+            raw_arm = gate.baseline_arm_id(expected) if arm == "baseline" else arm
             if _baseline_slot_is_missing(arm, baseline_failure):
                 missing_failure: gate.JsonObject = {"status": "missing",
                     "reason": "baseline skipped after prior worker failure",
@@ -1750,7 +2028,8 @@ def _collect_condition_worker_pairs(
                     payload, sample_load, sample_attempts = collect_worker_sample(
                         builds[arm], sample, fixture, report_path, plan_path, width, height,
                         viewport["scale"], root, environment, lifecycle,
-                        worker_attempts_directory(folder, arm, pair), failed_attempts.extend)
+                        worker_attempts_directory(folder, arm, pair), failed_attempts.extend,
+                        batch_deadline=batch_deadline)
                     samples.append(payload)
                     loads.append(sample_load)
                     worker_attempts.extend(sample_attempts)
@@ -1804,11 +2083,35 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             capacity_document_sha256: str | None = None,
             catalog_manifest_path: Path | None = None, *,
             _allow_legacy_diagnostic: bool = False,
-            _allow_catalog_diagnostic: bool = False) -> None:
+            _allow_catalog_diagnostic: bool = False,
+            max_conditions: int | None = None,
+            resume_batch: Path | None = None,
+            reference_parent_wrapper: Path | None = None,
+            reference_parent_wrapper_sha256: str | None = None) -> None:
     if catalog_manifest_path is None and not _allow_legacy_diagnostic:
         raise ValueError("catalog capture manifest required for formal performance production")
     gate.require(platform.system() == "Darwin" and platform.machine() == "arm64", "measurement lane requires macOS Apple Silicon")
     gate.require(not output.exists() and output.is_relative_to(root / "tmp"), "fresh ignored owned output required")
+    if max_conditions is not None:
+        gate.require(catalog_manifest_path is not None and 0 < max_conditions <= 84,
+                     "batch max conditions requires a catalog and is between 1 and 84")
+    gate.require(resume_batch is None or catalog_manifest_path is not None,
+                 "batch resume requires a catalog")
+    gate.require((reference_parent_wrapper is None) == (reference_parent_wrapper_sha256 is None),
+                 "reference parent wrapper requires its SHA256")
+    gate.require(reference_parent_wrapper is None or catalog_manifest_path is not None,
+                 "reference parent wrapper requires a catalog")
+    batch_mode = max_conditions is not None or resume_batch is not None
+    batch_deadline = (time.monotonic() + BATCH_WORK_BUDGET_SECONDS
+                      if batch_mode else None)
+    batch_failure: BaseException | None = None
+    resumed_receipt: gate.JsonObject | None = None
+    resumed_bundle: gate.Bundle | None = None
+    resumed_attempts: list[dict[str, FilePin]] = []
+    if resume_batch is not None:
+        resumed_receipt, resumed_bundle, resumed_attempts = load_closed_batch(
+            resume_batch.resolve(), root,
+        )
     catalog_conditions: list[CatalogCondition] | None = None
     catalog_manifest_pin: FilePin | None = None
     catalog_plan_pin: FilePin | None = None
@@ -1820,6 +2123,16 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     gate.require(not lifecycle.exists(), "fresh measurement lifecycle output required")
     git_query = _make_git_query(lifecycle)
     initial = source(root, git_query=git_query)
+    reference_proof: reference.ReferenceParentProof | None = None
+    reference_contract: gate.JsonObject | None = None
+    reference_wrapper_pin: FilePin | None = None
+    reference_transport_refs: list[FilePin] = []
+    if reference_parent_wrapper is not None and reference_parent_wrapper_sha256 is not None:
+        (reference_proof, reference_contract, reference_wrapper_pin,
+         reference_transport_refs) = load_reference_parent(
+            root, reference_parent_wrapper, reference_parent_wrapper_sha256,
+            git_query=git_query,
+        )
     catalog_capture_validation: gate.JsonObject | None = None
     if catalog_conditions is not None:
         if catalog_manifest_pin is None or catalog_plan_pin is None:
@@ -1894,17 +2207,34 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     build_artifact_refs: dict[str, FilePin] = {}
     build_pins: list[FilePin] = []
     for arm in ("baseline", "candidate"):
-        build = guarded_arm_build(root, harness, arm, binding, source_records, output / "builds" / arm)
+        if arm == "baseline" and reference_proof is not None and reference_wrapper_pin is not None:
+            build = ArmBuildResult([], reference_proof.frozen_binary_path,
+                                   reference_proof.binary_sha256, {}, [])
+        else:
+            build = guarded_arm_build(root, harness, arm, binding, source_records,
+                                      output / "builds" / arm)
         capacity_configs = build.configs
-        build.proof.update({"sourceBeforeRef": build_inputs.source_before,
-                            "sourceSnapshotRef": build_inputs.snapshot,
-                            "capacityInputRef": build_inputs.capacity_input})
-        build_artifact_pin = write(output / "builds" / arm / "build-artifact.json", build.proof)
+        if arm == "baseline" and reference_wrapper_pin is not None:
+            build_artifact_pin = reference_wrapper_pin
+            build_pins.append(reference_wrapper_pin)
+        else:
+            build.proof.update({"sourceBeforeRef": build_inputs.source_before,
+                                "sourceSnapshotRef": build_inputs.snapshot,
+                                "capacityInputRef": build_inputs.capacity_input})
+            build_artifact_pin = write(output / "builds" / arm / "build-artifact.json", build.proof)
         build_artifact_refs[arm] = build_artifact_pin
-        build_pins.extend([*build.pins, build_artifact_pin])
+        if arm != "baseline" or reference_wrapper_pin is None:
+            build_pins.extend([*build.pins, build_artifact_pin])
         binaries[arm] = build.binary
         builds[arm] = build
         gate.require(source(root, git_query=git_query) == initial, "source changed during build")
+    resumed_ids: set[str] = set()
+    if resumed_receipt is not None and resumed_bundle is not None:
+        resumed_ids = {
+            gate._text(value, "resumed condition id")
+            for value in gate._array(resumed_receipt.get("completeConditionIds"),
+                                     "resumed complete condition ids")
+        }
     measurement_rows: list[gate.JsonObject] = []
     if catalog_conditions is None:
         assert fixture is not None and plan_path is not None and dom is not None and plan is not None and plan_pin is not None
@@ -1937,6 +2267,25 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 "font_identity_response": condition["font_identity_response"],
                 "font_identity_binary_path": condition["font_identity_binary_path"],
                 "font_identity_binary_sha256": condition["font_identity_binary_sha256"]})
+    if resume_batch is not None and resumed_bundle is not None:
+        for row in measurement_rows:
+            condition_id = _row_condition_id(row)
+            old_path, old_plan, old_pin = _resume_condition_plan(
+                resume_batch.resolve(), resumed_bundle, condition_id,
+            )
+            row["plan_path"], row["plan"], row["plan_pin"] = old_path, old_plan, old_pin
+    all_measurement_rows = measurement_rows
+    all_condition_ids = ([_row_condition_id(row) for row in all_measurement_rows]
+                         if catalog_conditions is not None else [])
+    gate.require(len(all_condition_ids) == len(set(all_condition_ids)),
+                 "measurement condition ids are duplicated")
+    if resumed_receipt is not None:
+        gate.require(resumed_ids <= set(all_condition_ids),
+                     "resume batch contains an unknown condition")
+        measurement_rows = [row for row in all_measurement_rows
+                            if _row_condition_id(row) not in resumed_ids]
+    if max_conditions is not None:
+        measurement_rows = measurement_rows[:max_conditions]
     font_probe_input_paths: list[Path] = []
     if catalog_conditions:
         first_catalog = catalog_conditions[0]
@@ -1947,38 +2296,64 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         ]
     provenance_input_paths = [
         Path(cast(str, ref["path"]))
-        for row in measurement_rows if row["catalog"]
+        for row in all_measurement_rows if row["catalog"]
         for ref in gate.provenance_file_refs(
             gate.read_json(Path(cast(FilePin, row["operation_evidence"])["path"]))
         )
     ]
-    input_paths = [*[cast(Path, row["fixture"]) for row in measurement_rows],
-                   *[cast(Path, row["plan_path"]) for row in measurement_rows],
-                   *[cast(Path, row["dom"]) for row in measurement_rows if row["dom"] is not None],
-                   *[Path(cast(FilePin, row["operation_evidence"])["path"]) for row in measurement_rows if row["catalog"]],
-                   *[Path(cast(FilePin, row["capture"])["path"]) for row in measurement_rows if row["catalog"]],
-                   *[Path(pin["path"]) for row in measurement_rows if row["catalog"]
+    input_paths = [*[cast(Path, row["fixture"]) for row in all_measurement_rows],
+                   *[cast(Path, row["plan_path"]) for row in all_measurement_rows],
+                   *[cast(Path, row["dom"]) for row in all_measurement_rows if row["dom"] is not None],
+                   *[Path(cast(FilePin, row["operation_evidence"])["path"]) for row in all_measurement_rows if row["catalog"]],
+                   *[Path(cast(FilePin, row["capture"])["path"]) for row in all_measurement_rows if row["catalog"]],
+                   *[Path(pin["path"]) for row in all_measurement_rows if row["catalog"]
                      for pin in cast(list[FilePin], row["link_captures"])],
-                   *[Path(cast(SizedFilePin, row["chrome_capture"])['path']) for row in measurement_rows if row["catalog"]],
-                   *[Path(cast(SizedFilePin, row["chrome_receipt"])['path']) for row in measurement_rows if row["catalog"]],
+                   *[Path(cast(SizedFilePin, row["chrome_capture"])['path']) for row in all_measurement_rows if row["catalog"]],
+                   *[Path(cast(SizedFilePin, row["chrome_receipt"])['path']) for row in all_measurement_rows if row["catalog"]],
                    *font_probe_input_paths,
                    *provenance_input_paths,
                    *([catalog_manifest_path] if catalog_manifest_path is not None else []),
                    *([Path(catalog_plan_pin["path"])] if catalog_plan_pin is not None else []),
                    *([Path(catalog_capture_validation_pin["path"])] if catalog_capture_validation_pin is not None else []),
                    lock, output / "shared-source-snapshot.json", *binaries.values(),
+                   *[Path(pin["path"]) for pin in reference_transport_refs],
                    binding.document, binding.state, binding.registry, *capacity_configs,
                    *[Path(pin["path"]) for pin in build_pins]]
     input_paths = list(dict.fromkeys(input_paths))
-    arms = expected_arm_pins(builds, build_inputs.snapshot["sha256"], build_artifact_refs)
+    if resumed_bundle is not None and resumed_receipt is not None:
+        context_refs = gate._object(resumed_receipt.get("contexts"), "resume context refs")
+        old_context = resumed_bundle.json(context_refs["before"])
+        input_paths = [
+            Path(gate._text(item.get("path"), "resumed context input path"))
+            for item in gate._objects(old_context.get("inputs"), "resumed context inputs")
+        ]
+    arms = expected_arm_pins(
+        builds, build_inputs.snapshot["sha256"], build_artifact_refs,
+        reference_parent=reference_proof, reference_contract=reference_contract,
+    )
     before_context = context(root, target, input_paths, lifecycle, git_query=git_query)
     before_pin = write(output / "context-before.json", before_context)
     environment_sha = before_pin["sha256"]
-    transport_attempts: list[dict[str, FilePin]] = []
+    if resumed_receipt is not None and resumed_bundle is not None:
+        for attempt in resumed_attempts:
+            expected_value = resumed_bundle.json(attempt["expected"])
+            old_arms = gate._object(expected_value.get("arms"), "resume expected arms")
+            baseline_id = gate.baseline_arm_id(expected_value)
+            gate.require(all(_same_arm_identity(
+                gate._object(old_arms.get(raw_arm), "resume arm"),
+                gate._object(arms.get(raw_arm), "current arm"),
+            ) for raw_arm in (baseline_id, "candidate")),
+                         "resume build pins differ from current build")
+    transport_attempts: list[dict[str, FilePin]] = list(resumed_attempts)
     expected_all: list[tuple[Path, ExpectedPerformance, gate.JsonObject, FilePin]] = []
     checkpoint_pins: list[FilePin] = []
     worker_attempt_pins: list[FilePin] = []
     for row in measurement_rows:
+        try:
+            _require_batch_budget(batch_deadline)
+        except BatchBudgetExhausted as error:
+            batch_failure = error
+            break
         fixture = cast(Path, row["fixture"])
         plan_path = cast(Path, row["plan_path"])
         plan_pin = cast(FilePin, gate._object(row["plan_pin"], "operation plan pin"))
@@ -1998,6 +2373,8 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         dom_ref: FilePin = ({"path": str(row_dom), "sha256": dom_sha256} if row_dom is not None
                            else cast(FilePin, row["operation_evidence"]))
         expected: ExpectedPerformance = {"fixture_sha256": fixture_sha256, "operation_plan_sha256": plan_pin["sha256"], "operation": operation_name, "expected_dom_state_sha256": dom_sha256, "viewport": viewport_value, "provenance": {"rustc": before_context["toolContext"]["rustc"], "cargo": before_context["toolContext"]["cargo"], "environment_sha256": environment_sha}, "arms": arms, "reportPins": [], "operationPlanRef": plan_pin, "domStateRef": dom_ref}
+        if reference_contract is not None:
+            expected["referenceParent"] = dict(reference_contract)
         if row["catalog"]:
             catalog_identity = {key: row[key] for key in ("condition_id", "case_id", "state", "operation_kind", "target_selector")}
             catalog_identity["fixture_path"] = str(fixture)
@@ -2014,12 +2391,24 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 "path": cast(str, row["font_identity_binary_path"]),
                 "sha256": cast(str, row["font_identity_binary_sha256"]),
             }
-        collection = _collect_condition_worker_pairs(
-            folder=folder, row=row, expected=expected, fixture=fixture,
-            plan_path=plan_path, width=width, height=height, viewport=viewport_value,
-            builds=builds, binaries=binaries, arms=arms, root=root, lifecycle=lifecycle,
-            lock=lock, snapshot=build_inputs.snapshot, environment_sha=environment_sha,
-        )
+        try:
+            collection = _collect_condition_worker_pairs(
+                folder=folder, row=row, expected=expected, fixture=fixture,
+                plan_path=plan_path, width=width, height=height, viewport=viewport_value,
+                builds=builds, binaries=binaries, arms=arms, root=root, lifecycle=lifecycle,
+                lock=lock, snapshot=build_inputs.snapshot, environment_sha=environment_sha,
+                batch_deadline=batch_deadline,
+            )
+        except BatchBudgetExhausted as error:
+            worker_attempt_pins.extend(_worker_attempt_pins_in(folder))
+            batch_failure = error
+            break
+        except BaseException as error:
+            if not batch_mode:
+                raise
+            worker_attempt_pins.extend(_worker_attempt_pins_in(folder))
+            batch_failure = error
+            break
         order = collection.order
         reports = collection.reports
         condition_failures = collection.failures
@@ -2051,6 +2440,11 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         checkpoint_pins.append(write_condition_checkpoint(folder, expected, result, manifest_data))
         expected_all.append((folder, expected, result, manifest_pin))
     after_context = context(root, target, input_paths, lifecycle, git_query=git_query)
+    if resumed_receipt is not None and resumed_bundle is not None:
+        _validate_resume_batch(
+            resumed_receipt, resumed_bundle, resumed_attempts, head=head, source=initial,
+            before_context=before_context, after_context=after_context, arms=arms,
+        )
     end_pin = write(output / "context-end.json", after_context)
     source_end = write(output / "source-end.json", after_context["source"])
     mapping = {"sourceBeforeEqualsEnd": "source", "inputsBeforeEqualsEnd": "inputs", "registryBeforeEqualsEnd": "registry", "cacheBeforeEqualsEnd": "cache", "cacheUnionBeforeEqualsEnd": "cacheUnion", "cacheUnionScopeRestored": "scope", "configBeforeEqualsEnd": "config", "preferenceBeforeEqualsEnd": "preference", "toolContextBeforeEqualsEnd": "toolContext"}
@@ -2061,7 +2455,14 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                            before_pin, end_pin, build_inputs.capacity_input, *build_pins,
                            *[FilePin(path=str(p), sha256=gate.sha256(p)) for p in binaries.values()],
                            *checkpoint_pins, *worker_attempt_pins]
-    for row in measurement_rows:
+    refs.extend(reference_transport_refs)
+    if resumed_bundle is not None:
+        refs.extend(
+            FilePin(path=gate._text(item.get("originalPath"), "resumed bundle path"),
+                    sha256=gate._text(item.get("sha256"), "resumed bundle SHA"))
+            for item in gate._objects(resumed_bundle.manifest.get("files"), "resumed bundle files")
+        )
+    for row in all_measurement_rows:
         refs.append(FilePin(path=str(row["plan_path"]), sha256=gate.sha256(cast(Path, row["plan_path"]))))
         if row["dom"] is not None:
             refs.append(FilePin(path=str(row["dom"]), sha256=gate.sha256(cast(Path, row["dom"]))))
@@ -2098,13 +2499,61 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     # 生成物だけを輸送し、巨大なCargo targetは公開artifactへ混入させない。
     bundle = output / "bundle"
     write_transport_bundle(bundle, head, refs, transport_attempts)
+    current_bundle = gate.Bundle(bundle)
+    attempt_ids = [_attempt_condition_id(current_bundle, attempt)
+                   for attempt in transport_attempts]
+    gate.require(len(attempt_ids) == len(set(attempt_ids)),
+                 "batch attempts contain duplicate conditions")
+    complete_ids = list(resumed_ids)
+    complete_ids.extend(
+        _row_condition_id(row)
+        for row, (_, _, result, _) in zip(measurement_rows, expected_all, strict=True)
+        if gate._object(result.get("policy"), "condition policy").get("status") != "incomplete"
+    )
+    gate.require(len(complete_ids) == len(set(complete_ids)),
+                 "batch complete conditions are duplicated")
+    policy_accepted = _batch_policy_accepted(
+        batch_failure, [result for _, _, result, _ in expected_all],
+        resumed_receipt is None or resumed_receipt.get("policyAccepted") is True,
+    )
+    if catalog_manifest_path is not None:
+        validated_builds: Mapping[str, gate.JsonObject] | None = None
+        if transport_attempts and not _allow_catalog_diagnostic:
+            first_expected = current_bundle.json(transport_attempts[0]["expected"])
+            validated_builds = gate.validate_expected_builds(
+                current_bundle, root, first_expected, git_query=git_query,
+            )
+        for attempt in transport_attempts:
+            if _attempt_condition_id(current_bundle, attempt) in set(complete_ids):
+                gate.validate_attempt(
+                    current_bundle, root,
+                    {key: value for key, value in attempt.items()}, git_query=git_query,
+                    validated_builds=validated_builds,
+                )
+        write_batch_receipt(
+            output, head=head, source_before=build_inputs.source_before,
+            source_end=source_end, context_before=before_pin, context_end=end_pin,
+            build_artifacts=build_artifact_refs, build_pins=build_pins,
+            condition_ids=attempt_ids, complete_condition_ids=complete_ids,
+            policy_accepted=policy_accepted,
+            attempts=transport_attempts, bundle=bundle,
+        )
     if catalog_manifest_path is None:
         gate._verify_legacy_diagnostic(bundle, root, git_query=git_query)
-    elif _allow_catalog_diagnostic:
+    elif _batch_formal_acceptance(attempt_ids, complete_ids, policy_accepted) and _allow_catalog_diagnostic:
         gate._verify_catalog_diagnostic(bundle, root, git_query=git_query)
-    else:
+    elif _batch_formal_acceptance(attempt_ids, complete_ids, policy_accepted):
         gate.verify(bundle, root, git_query=git_query)
-    print(json.dumps({"head": head, "bundle": str(bundle), "checks": len(expected_all) * 20, "phaseRecords": len(expected_all) * len(gate.PHASES) * 50}))
+    print(json.dumps({"head": head, "bundle": str(bundle), "checks": len(transport_attempts) * 20,
+                      "completeConditions": len(complete_ids),
+                      "conditions": len(attempt_ids),
+                      "formalAccepted": _batch_formal_acceptance(
+                          attempt_ids, complete_ids, policy_accepted,
+                      ),
+                      "phaseRecords": len(expected_all) * len(gate.PHASES) * 50,
+                      "batchFailure": type(batch_failure).__name__ if batch_failure else None}))
+    if batch_failure is not None:
+        raise batch_failure
 
 
 def main() -> None:
@@ -2114,6 +2563,16 @@ def main() -> None:
     parser.add_argument("--capacity-binding", type=Path)
     parser.add_argument("--capacity-binding-sha256")
     parser.add_argument("--catalog-plan", type=Path)
+    parser.add_argument(
+        "--max-conditions", type=int,
+        help="run at most this many not-yet-complete catalog conditions",
+    )
+    parser.add_argument(
+        "--resume-batch", type=Path,
+        help="reuse only the closed, strictly validated conditions from this batch",
+    )
+    parser.add_argument("--reference-parent-wrapper", type=Path)
+    parser.add_argument("--reference-parent-wrapper-sha256")
     parser.add_argument("--candidate-build-only", action="store_true")
     parser.add_argument(
         "--diagnostic-only",
@@ -2123,7 +2582,10 @@ def main() -> None:
     args = parser.parse_args()
     if args.candidate_build_only:
         if (args.catalog_plan is not None or args.capacity_binding is None
-                or args.capacity_binding_sha256 is None or args.diagnostic_only):
+                or args.capacity_binding_sha256 is None or args.diagnostic_only
+                or args.max_conditions is not None or args.resume_batch is not None
+                or args.reference_parent_wrapper is not None
+                or args.reference_parent_wrapper_sha256 is not None):
             parser.error("candidate build-only mode requires capacity binding pins and no catalog plan")
         repo = args.repo.resolve()
         with candidate_build_locks(repo):
@@ -2134,14 +2596,28 @@ def main() -> None:
         return
     if args.catalog_plan is None:
         parser.error("--catalog-plan is required for HTML performance production")
+    if args.max_conditions is not None and not 0 < args.max_conditions <= 84:
+        parser.error("--max-conditions must be between 1 and 84")
+    if (args.reference_parent_wrapper is None) != (args.reference_parent_wrapper_sha256 is None):
+        parser.error("reference parent wrapper requires --reference-parent-wrapper-sha256")
     repo = args.repo.resolve()
     arguments = (repo, args.output.resolve(), args.capacity_binding,
                  args.capacity_binding_sha256, args.catalog_plan.resolve())
+    batch_options: BatchOptions = {}
+    if args.max_conditions is not None:
+        batch_options["max_conditions"] = args.max_conditions
+    if args.resume_batch is not None:
+        batch_options["resume_batch"] = args.resume_batch.resolve()
+    if args.reference_parent_wrapper is not None:
+        batch_options["reference_parent_wrapper"] = args.reference_parent_wrapper.resolve()
+        batch_options["reference_parent_wrapper_sha256"] = cast(
+            str, args.reference_parent_wrapper_sha256,
+        )
     with candidate_build_locks(repo):
         if args.diagnostic_only:
-            produce(*arguments, _allow_catalog_diagnostic=True)
+            produce(*arguments, _allow_catalog_diagnostic=True, **batch_options)
         else:
-            produce(*arguments)
+            produce(*arguments, **batch_options)
 
 
 if __name__ == "__main__":

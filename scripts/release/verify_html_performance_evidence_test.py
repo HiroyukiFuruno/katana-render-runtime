@@ -1584,6 +1584,23 @@ class PerformanceEvidenceTest(unittest.TestCase):
         self.reject()
 
 
+class BaselineArmContractTest(unittest.TestCase):
+    def test_default_keeps_legacy_public_sdk_arm(self) -> None:
+        self.assertEqual(gate.baseline_arm_id({}), "baseline-0.4.23")
+
+    def test_reference_parent_arm_requires_non_sdk_identity(self) -> None:
+        expected = {"referenceParent": {
+            "role": "reference-parent-371274ed",
+            "armId": "reference-parent-371274ed",
+            "referenceKind": "correct-parent-source",
+            "publishedSdk": False,
+        }}
+        self.assertEqual(gate.baseline_arm_id(expected), "reference-parent-371274ed")
+        expected["referenceParent"]["publishedSdk"] = True
+        with self.assertRaisesRegex(ValueError, "identity differs"):
+            gate.baseline_arm_id(expected)
+
+
 class PerformanceAcquisitionTest(unittest.TestCase):
     def setUp(self) -> None:
         self.fixture: PerformanceEvidenceTest = PerformanceEvidenceTest(
