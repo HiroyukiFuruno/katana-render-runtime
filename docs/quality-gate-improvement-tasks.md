@@ -1,6 +1,10 @@
 # 品質ゲート改善の作業台帳
 
-2026-10-27追加指示: GitHub ActionsとRust依存を最新の互換版へ更新し、未公開のv0.4.24をpatch releaseする。Actionsは4workflow/42参照を公式full SHAへ更新済み、実CI未確認。R3098の既存cargo upgrade dry-runはactual0でkatana-ast-lint0.5.3、brotli-decompressor6.2.0、taffy0.15.1、skia-safe0.156.0を更新候補として確認（まだRust依存未変更）。Skia更新は描画・性能の実測で採否判断する。local forkの間は既存registry専用pair/freshness readerを正式合格へ迂回しない。
+2026-10-27追加指示: GitHub ActionsとRust依存を最新の互換版へ更新し、未公開のv0.4.24をpatch releaseする。描画・検証修正は通常hook成功後50e11e3c、Actions4workflow/42参照の公式full SHA化は契約検査・通常commit成功後100dc7beへ保存済み。R3105でkatana-ast-lint0.5.3、brotli-decompressor6.2.0、taffy0.15.1、skia-safe0.156.0を実更新し、root/harness lock同期を含む全4操作がactual0、5ファイル変更。R3107の完全静的DAGがactual0/source不変、R3108の全Rust3,005件が全成功（25skip、167.988秒）。local forkの間は既存registry専用pair/freshness readerを正式合格へ迂回しない。
+
+R3108の正式coverage reportは、target7,396,634,624Bが固定上限を超え、集計前のguardでactual1。R3109の既存admissionはactual0/COV全inventory保持、その後の既存diagnostic reportはactual0。現行診断は67,239/68,509＝98.14622896%、missing1,270/270ファイル（位置一覧は216ファイル/913unique行で別分母）。source前後/R3110後のmanifestが一致し、immutable診断copyを `tmp/quality/latest-rust-coverage-gap-snapshot-r3112/` へ保存した。製品・維持helperを含むため一括除外しない。非重複の着手群はsvg_rasterize126ファイル/710件、HTML/CLI72ファイル/189件、linter/Mermaid/bridge等72ファイル/371件。正式100%・未計測0は未達。
+
+R3110/R3111はSkia更新後の実候補26件と、binary/input/PNG SHAを再照合して再利用したR3091対照による診断。全26候補PNGが更新前とファイルSHAまで完全一致、対照pixel一致・旧score再現、合格脱落0。未達18件中Ishikawa1件改善・残17件というR3092結果を維持した。SDK版差で残件が解消する仮説は当該26件では支持されない。全117の正式再取得/採点、HTML84の現行受入・性能、公開は未完了。
 
 R3094は658件中654成功・4失敗（旧inline容量guardを対象にしたmutationが共通recipe化に未追従）。失敗rawを保持し、testのみを現行recipeへ修正したR3095は関連18件全成功/587未実行、8.18秒。R3096は厳格型・重複・diff検査すべてactual0。R3097/R3101の通常commitは容量で失敗し、commit未作成。direct lintにも既存admissionをClippy前後で呼ぶ修正とR3099の関連回帰成功、R3100の実admission成功/COV inventory不変を確認した。ただし後続harnessが使用するdebugとCOVの合計が固定上限を超えるため、完了したR3090/R3091用COV予約を解除した。次はRust依存更新でsourceが変わるため、その旧profileを将来のwarm実行へ予約しない。R3102は既存locked Cargo cleanで当該profileのみ整理してactual0、通常debug全inventory完全一致、測定ログ・画像は保持。通常hookを省略せず再実行する。
 
@@ -166,9 +170,9 @@ R2715の認証拒否は、Moon producerと直接validatorの環境fingerprint差
 
 | 対象 | 最新の完了済み証拠 | 残る受入条件 |
 | --- | --- | --- |
-| Mermaid #108 | 最新完了一括測定R3042/R3043は製品PNG99/117件が99以上、18件未達（C4 9、Ishikawa 2、Kanban 2、Wardley 4、ZenUML 1）。既存合格の脱落0。後続の候補修正はまだ未採点 | 18件の共通描画原因を修正し、現行sourceとregistry依存で正式117件全99以上。旧SVG/Chrome再rasterの成功を代用しない |
+| Mermaid #108 | R3042/R3043の過去一括は99/117・18未達。旧候補metadataのinode変更があり現行正式受入へ再認定しない。R3092/R3111診断は旧未達18件中1件改善・残17件、合格対照脱落0。Skia更新前後26PNGはbyte一致 | 残17件の共通描画原因を修正し、現行sourceとregistry依存で正式117件全99以上。旧SVG/Chrome再rasterや部分診断を代用しない |
 | HTML #109 | 旧sourceのR2907は画像84/84が90以上・出力font一致established。R3039は1条件ABBAの部分性能測定。現行sourceの全84正式合格ではない | 公開registry採用後の全84画像/動的/出力font、私有原本全Y/実末尾/全目次、consumer XY/resize契約、全phaseの時間/RSS非劣化と表示3秒未満。最終99は#106 |
-| runtime | 撤回後R2680は2,683成功・失敗0・既存ignored24・実行漏れ0、source/binary不変 | 最新全workspace品質ゲート・coverage100%/未計測0・最終性能は別工程 |
+| runtime | R3107完全静的0、R3108全3,005test成功/25skip、source不変。R3109の現行coverage診断98.14622896%・missing1,270。正式reportは容量guardで未集計 | 最新全workspace品質ゲート・coverage100%/未計測0・最終性能。製品・維持helperを除外しない |
 | fork依存 | PR #3はHEAD5a776257のreview/未解決0/必須3 OS CI後にexpected SHA通常merge済み、c01f0165。R2836でusvg package検証compile0、upload403（共通tokenの権限不足） | 新規/更新公開と対象crateに適合する認証→2crate公開→KRR registry採用。未公開のpath/git依存を最終releaseへ残さない |
 | 公開 | KRRはrelease/v0.4.24、正式公開は未完了 | 最新変更commit・release inclusion同期、Draft PR→最新review/個別reply・resolve→Ready→必須3 OS CI→保護merge、GitHub Release/3crate公開、#108/#109 close、安全なcleanup |
 

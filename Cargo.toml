@@ -29,7 +29,7 @@ description = "Versioned render runtime for KatanA diagrams and math (Mermaid, D
 [workspace.dependencies]
 katana-render-runtime = { path = "crates/katana-render-runtime", version = "0.4.24" }
 katana-render-runtime-assets = { path = "crates/katana-render-runtime-assets", version = "=0.4.24" }
-katana-ast-lint = "0.5.2"
+katana-ast-lint = "0.5.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "=3.27.0"
@@ -43,7 +43,7 @@ proc-macro2 = { version = "1", features = ["span-locations"] }
 syn = { version = "3", features = ["full", "visit"] }
 toml = "1.1"
 base64 = "0.23"
-brotli-decompressor = "6.1.1"
+brotli-decompressor = "6.2.0"
 include_dir = "0.7.4"
 jni = { version = "0.22.4", features = ["invocation"] }
 resvg = { package = "katana-resvg", version = "=0.49.0-katana.1", path = "../katana-resvg/crates/resvg" }
@@ -61,6 +61,6 @@ xmltree = "0.12"
 icu_properties = "2.4.0"
 percent-encoding = "2.3"
 cssparser = "0.38"
-taffy = { version = "0.15.0", default-features = false, features = ["std", "taffy_tree", "block_layout", "flexbox", "grid", "content_size", "parse"] }
+taffy = { version = "0.15.1", default-features = false, features = ["std", "taffy_tree", "block_layout", "flexbox", "grid", "content_size", "parse"] }
 unicode-linebreak = "0.1.5"
 unicode-width = "0.2.2"
