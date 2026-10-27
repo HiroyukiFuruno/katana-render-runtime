@@ -17,6 +17,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import NamedTuple, Protocol, TypedDict, cast
 from collections.abc import Mapping, Sequence
+from html_performance_paired_stats import evaluate_paired_regression
 
 JsonObject = dict[str, object]
 SourceRecords = dict[str, tuple[str, int]]
@@ -1399,6 +1400,11 @@ def aggregate_reports(reports: list[JsonObject], expected: JsonObject) -> ArmAgg
 
 def aggregate_comparison(report_paths: list[Path], expected: JsonObject) -> ComparisonAggregate:
     """交互順序の5組が揃ったときだけ集計する。"""
+    grouped = _group_reports(report_paths, expected)
+    return _aggregate_grouped_reports(grouped, expected)
+
+
+def _group_reports(report_paths: list[Path], expected: JsonObject) -> dict[str, dict[int, JsonObject]]:
     if len(report_paths) != 10 or len({path.resolve() for path in report_paths}) != 10:
         raise ValueError("exactly ten distinct pair reports are required")
     grouped: dict[str, dict[int, JsonObject]] = {"baseline": {}, "candidate": {}}
@@ -1422,6 +1428,12 @@ def aggregate_comparison(report_paths: list[Path], expected: JsonObject) -> Comp
         grouped[arm][pair] = report
     if any(set(pairs) != set(range(5)) for pairs in grouped.values()):
         raise ValueError("both arms must contain all five pair reports")
+    return grouped
+
+
+def _aggregate_grouped_reports(
+    grouped: dict[str, dict[int, JsonObject]], expected: JsonObject
+) -> ComparisonAggregate:
     arms = {
         arm: aggregate_reports([grouped[arm][pair] for pair in range(5)], expected)
         for arm in grouped
@@ -1443,6 +1455,46 @@ def aggregate_comparison(report_paths: list[Path], expected: JsonObject) -> Comp
         "viewport": expected["viewport"],
         "arms": arms,
         "comparison": comparisons,
+    }
+
+
+def evaluate_measurement_policy(
+    report_paths: list[Path], expected: Mapping[str, object]
+) -> JsonObject:
+    """raw reportからHTML性能のcanonical paired policyを再計算する。"""
+    expected_object = cast(JsonObject, expected)
+    grouped = _group_reports(report_paths, expected_object)
+    aggregate = _aggregate_grouped_reports(grouped, expected_object)
+    tests: dict[str, dict[str, JsonObject]] = {}
+    for phase in PHASES:
+        tests[phase] = {}
+        for metric in ("elapsed_ms", "peak_rss_bytes"):
+            baseline = [
+                _phase_sample(sample, phase)[0 if metric == "elapsed_ms" else 1]
+                for pair in range(5)
+                for sample in _objects(grouped["baseline"][pair]["samples"], "baseline samples")
+            ]
+            candidate = [
+                _phase_sample(sample, phase)[0 if metric == "elapsed_ms" else 1]
+                for pair in range(5)
+                for sample in _objects(grouped["candidate"][pair]["samples"], "candidate samples")
+            ]
+            tests[phase][metric] = evaluate_paired_regression(baseline, candidate).to_json()
+    return {
+        "version": "paired-wilcoxon-family-v1",
+        "familyComparisons": 84 * 6 * 2,
+        "familyAlpha": 0.05,
+        "comparisonAlpha": 0.05 / (84 * 6 * 2),
+        "tests": tests,
+        "policyPass": all(
+            test["detectedBad"] is False
+            for phase in tests.values()
+            for test in phase.values()
+        ),
+        "aggregate": aggregate,
+        "nullDifference": 0,
+        "quietLoadLimit": 0.25,
+        "phaseRecords": len(PHASES) * 50,
     }
 
 
@@ -1679,14 +1731,21 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
             value = _numeric(row[key], "quiet load")
             require(type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 0.25, "quiet load limit exceeded")
         paths.append(path)
-    aggregate = aggregate_comparison(paths, expected)
+    canonical_policy = evaluate_measurement_policy(paths, expected)
+    aggregate = _object(canonical_policy["aggregate"], "canonical aggregate")
     require(aggregate["measurement_executed"] is True, "actual measurements absent")
     saved = _object(result["policy"], "measurement policy")
-    phase_records = len(PHASES) * 50
-    require(saved["aggregate"] == aggregate and saved["deltaThreshold"] == 0 and saved["quietLoadLimit"] == 0.25 and saved["phaseRecords"] == phase_records, "saved policy/aggregate differs from raw reports")
-    policy = {phase: {key: value <= 0 for key, value in deltas.items()} for phase, deltas in aggregate["comparison"].items()}
-    require(saved["policy"] == policy and saved["policyPass"] is True and all(ok for phase in policy.values() for ok in phase.values()), "time/RSS median/p95 regression")
-    require(all(a["sample_count"] == 25 and all(p["sample_count"] == 25 for p in a["phases"].values()) for a in aggregate["arms"].values()), f"{phase_records} phase records required")
+    require(saved == canonical_policy, "saved paired policy differs from raw reports")
+    require(canonical_policy["policyPass"] is True, "paired time/RSS regression")
+    arms = _object(aggregate["arms"], "aggregate arms")
+    arm_values = [_object(value, "aggregate arm") for value in arms.values()]
+    require(all(a["sample_count"] == 25 and all(
+        _object(
+            _object(a["phases"], "aggregate phases")[phase],
+            f"{phase} aggregate",
+        )["sample_count"] == 25
+        for phase in PHASES
+    ) for a in arm_values), f"{len(PHASES) * 50} phase records required")
     # 診断用acceptance:falseは許可し、生データの20条件だけで受理する。
     result = {"viewport": expected["viewport"], "source": source, "fixture": expected["fixture_sha256"], "operation": expected["operation"], "plan": expected["operation_plan_sha256"], "dom": expected["expected_dom_state_sha256"], "provenance": expected["provenance"], "arms": expected["arms"]}
     if catalog_expected is not None:

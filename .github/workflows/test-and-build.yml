@@ -154,6 +154,13 @@ jobs:
         if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: bun install --frozen-lockfile
 
+      - name: Install Python analysis tools
+        if: matrix.os == 'ubuntu-latest'
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.0"
+          enable-cache: true
+
       - name: Install cargo-llvm-cov
         if: matrix.os == 'ubuntu-latest'
         uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
@@ -664,6 +671,12 @@ jobs:
         with:
           python-version: '3.13'
 
+      - name: Install Python analysis tools
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.0"
+          enable-cache: true
+
       - name: Initialize fixed capacity reference before interaction Cargo
         run: python3 scripts/build/initialize_ci_capacity_state.py --root "$PWD"
 
@@ -747,6 +760,12 @@ jobs:
       - name: Install JavaScript dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install Python analysis tools
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.0"
+          enable-cache: true
+
       - name: Install just
         uses: taiki-e/install-action@53aaa72a1fed2d5b9189d6d54c38e29bf9be2ab9 # just
 
@@ -761,7 +780,11 @@ jobs:
       - name: Acquire completed producer from this CI generation
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/release/verify_html_performance_evidence.py --acquire-current-producer
+        run: >-
+          KRR_HTML_PERFORMANCE_SCIPY_VERSION=1.18.1
+          uv run --isolated
+          --with-requirements scripts/release/html-performance-requirements.lock
+          python scripts/release/run_html_performance.py verify --acquire-current-producer
 
       - name: Resolve version
         id: version

@@ -1138,6 +1138,23 @@ function scriptStatic(
   return environment;
 }
 
+const PYTHON_RUNTIME_BINDINGS = [
+  'HTML_PERFORMANCE_SCIPY_VERSION := "1.18.1"',
+  'HTML_PERFORMANCE_SCIPY_ENV := "KRR_HTML_PERFORMANCE_SCIPY_VERSION=" + HTML_PERFORMANCE_SCIPY_VERSION',
+  'HTML_PERFORMANCE_TYPING_PATH := "scripts/release/typings"',
+  'HTML_PERFORMANCE_PYTHON_REQUIREMENTS := REPO_ROOT + "/scripts/release/html-performance-requirements.lock"',
+] as const;
+
+function pythonRuntimeBindingsVerified(context: ContractContext): boolean {
+  const definitions = new Set(
+    context
+      .read("Justfile")
+      .split(/\r?\n/)
+      .map((line) => line.trim()),
+  );
+  return PYTHON_RUNTIME_BINDINGS.every((binding) => definitions.has(binding));
+}
+
 function pythonStatic(context: ContractContext, name: string): void {
   const policy = context.policy.python;
   if (!policy || !name.startsWith("scripts/")) {
@@ -1158,14 +1175,54 @@ function pythonStatic(context: ContractContext, name: string): void {
         "F,E4,E7,E9,B,UP",
         "scripts",
       ].join("\0") ||
-    !registered(context, policy.lintRecipe)
+    !registered(context, policy.lintRecipe) ||
+    !pythonRuntimeBindingsVerified(context)
   )
     add(context, "python-lint-unregistered", name);
   if (
-    types !== ["uvx", "--from", `mypy==${policy.mypy}`, "mypy", "--strict", "scripts"].join("\0") ||
-    !registered(context, policy.typeRecipe)
+    types !==
+      [
+        "MYPYPATH={{HTML_PERFORMANCE_TYPING_PATH}}",
+        "{{HTML_PERFORMANCE_SCIPY_ENV}}",
+        "uvx",
+        "--with-requirements",
+        "{{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}}",
+        "--from",
+        `mypy==${policy.mypy}`,
+        "mypy",
+        "--strict",
+        "scripts",
+      ].join("\0") ||
+    !registered(context, policy.typeRecipe) ||
+    !pythonRuntimeBindingsVerified(context)
   )
     add(context, "python-type-unregistered", name);
+}
+const HTML_PERFORMANCE_TEST_WRAPPER = "scripts/release/run_html_performance.py";
+const HTML_PERFORMANCE_TEST_WRAPPER_SHA256 =
+  "37e5ec612ef7ca1899c5cd69346ecea4da6de2a8220bfc2bc96ef838566f12dc";
+function pythonPerformanceTestSelection(
+  context: ContractContext,
+  words: string[],
+  name: string,
+): boolean {
+  if (!name.startsWith("scripts/release/") || !context.visible.has(HTML_PERFORMANCE_TEST_WRAPPER))
+    return false;
+  if (!context.tracked.has(HTML_PERFORMANCE_TEST_WRAPPER)) return false;
+  if (sha(context.read(HTML_PERFORMANCE_TEST_WRAPPER)) !== HTML_PERFORMANCE_TEST_WRAPPER_SHA256)
+    return false;
+  const expected = [
+    "{{HTML_PERFORMANCE_SCIPY_ENV}}",
+    "uv",
+    "run",
+    "--isolated",
+    "--with-requirements",
+    "{{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}}",
+    "python",
+    HTML_PERFORMANCE_TEST_WRAPPER,
+    "test",
+  ];
+  return words.join("\0") === expected.join("\0");
 }
 function hasRuffConfiguration(root: string, name: string): boolean {
   if (name.endsWith("ruff.toml")) return true;
@@ -2289,7 +2346,8 @@ function unitRegisteredInRecipeBodies(
       return registeredLines.some((line) =>
         language === "bun"
           ? bunSelection(context, unitCommand(line, allowRtkProxyCommand), name)
-          : pythonSelection(context, unitCommand(line, allowRtkProxyCommand), name),
+          : pythonSelection(context, unitCommand(line, allowRtkProxyCommand), name) ||
+            pythonPerformanceTestSelection(context, unitCommand(line, allowRtkProxyCommand), name),
       );
     });
   });

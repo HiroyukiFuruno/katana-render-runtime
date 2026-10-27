@@ -15,6 +15,7 @@ export const OWNED_SOURCE_FORMATS: Readonly<Record<string, Format>> = {
   ".mjs": "javascript",
   ".cjs": "javascript",
   ".py": "python",
+  ".pyi": "python",
 };
 
 export function readOwnedRepositoryIndex(repo: string): { tracked: string[]; untracked: string[] } {

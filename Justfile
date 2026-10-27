@@ -43,6 +43,11 @@ MERMAID_JS_VERSION := "12.2.0-krr.pr6823.1"
 MERMAID_ZENUML_JS_VERSION := "1.0.1"
 DRAWIO_JS_VERSION := "32.6.1"
 MATHJAX_JS_VERSION := "4.1.3"
+HTML_PERFORMANCE_SCIPY_VERSION := "1.18.1"
+HTML_PERFORMANCE_NUMPY_VERSION := "2.5.4"
+HTML_PERFORMANCE_SCIPY_ENV := "KRR_HTML_PERFORMANCE_SCIPY_VERSION=" + HTML_PERFORMANCE_SCIPY_VERSION
+HTML_PERFORMANCE_TYPING_PATH := "scripts/release/typings"
+HTML_PERFORMANCE_PYTHON_REQUIREMENTS := REPO_ROOT + "/scripts/release/html-performance-requirements.lock"
 ZENUML_CORE_JS_VERSION := "4.11.0"
 PLANTUML_JAR_VERSION := "1.2026.9"
 PLANTUML_JAR_CHECKSUM := "1dbb847646f0f440595fecd5f991e902aae47dc3391a01f64bab548089241a46"
@@ -138,7 +143,7 @@ python-lint:
     uvx --from ruff==0.16.10 ruff check --select F,E4,E7,E9,B,UP scripts
 
 python-typecheck:
-    uvx --from mypy==2.4.0 mypy --strict scripts
+    MYPYPATH={{HTML_PERFORMANCE_TYPING_PATH}} {{HTML_PERFORMANCE_SCIPY_ENV}} uvx --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} --from mypy==2.4.0 mypy --strict scripts
 
 # 所有コードとテストの未承認重複を必須検査として検出する。
 duplication-check:
@@ -146,7 +151,7 @@ duplication-check:
 
 # harness lockと明示pinの同期を個別に早期確認する。
 html-performance-lock-pin-check:
-    python3 -m unittest scripts.release.verify_html_performance_evidence_test.PerformanceEvidenceTest.test_current_harness_lock_matches_explicit_pin
+    python3 -m unittest discover -s scripts/release -p verify_html_performance_evidence_test.py -k test_current_harness_lock_matches_explicit_pin --failfast
 
 # 検証コードの管理・解析範囲・標準導線の登録漏れを拒否する。
 html-harness-contract-check:
@@ -515,7 +520,7 @@ runtime-package-asset-check:
 # Verify repository hook and release cleanup contracts
 automation-contract-test:
     python3 -m unittest discover -s scripts/hooks -p '*_test.py' --failfast
-    python3 -m unittest discover -s scripts/release -p '*_test.py' --failfast
+    {{HTML_PERFORMANCE_SCIPY_ENV}} uv run --isolated --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} python scripts/release/run_html_performance.py test
     python3 -m unittest discover -s scripts/quality -p '*_test.py' --failfast
     python3 -m unittest discover -s scripts/mermaid -p '*_test.py' --failfast
     python3 -m unittest discover -s scripts/validation-timing -p test_measure.py --failfast
@@ -623,11 +628,11 @@ release-openspec-archive:
 
 # 同一committed sourceの3幅・実測時間/RSSを再集計し、劣化時は公開を止める。
 html-performance-nonregression-check:
-    python3 scripts/release/verify_html_performance_evidence.py
+    {{HTML_PERFORMANCE_SCIPY_ENV}} uv run --isolated --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} python scripts/release/run_html_performance.py verify
 
 # 同一SHAの完了した実測CIからimmutableな生計測証跡を取得する。
 html-performance-evidence-acquire:
-    python3 scripts/release/verify_html_performance_evidence.py --acquire
+    {{HTML_PERFORMANCE_SCIPY_ENV}} uv run --isolated --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} python scripts/release/run_html_performance.py verify --acquire
 
 # 既存catalog CLIで84条件のstage90 raw capture manifestを作る。
 html-performance-catalog-captures output_root prior_observation='' prior_finalized='' chrome_executable='' chrome_sha256='' font_observer='false':
@@ -674,7 +679,7 @@ html-performance-evidence-produce catalog_manifest:
       if [[ ! -f "$manifest" || -L "$manifest" ]]; then echo "catalog stage90 capture manifest is missing or not a regular file: $manifest" >&2; exit 2; fi; \
       binding_path="{{REPO_ROOT}}/tmp/html-performance-capacity/binding.json"; \
       binding_sha256="$(python3 scripts/build/initialize_ci_capacity_state.py --root "{{REPO_ROOT}}" --interaction-report "{{REPO_ROOT}}/tmp/html-interaction-suite/krr.json")"; \
-      python3 scripts/release/produce_html_performance_evidence.py --repo "{{REPO_ROOT}}" --capacity-binding "$binding_path" --capacity-binding-sha256 "$binding_sha256" --catalog-plan "$manifest"
+      {{HTML_PERFORMANCE_SCIPY_ENV}} uv run --isolated --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} python scripts/release/run_html_performance.py produce --repo "{{REPO_ROOT}}" --capacity-binding "$binding_path" --capacity-binding-sha256 "$binding_sha256" --catalog-plan "$manifest"
 
 # HTML受入れとは独立にcandidate build proofだけを生成・検証する。
 html-performance-candidate-build-proof output capacity_binding capacity_binding_sha256:

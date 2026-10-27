@@ -131,6 +131,12 @@ jobs:
       - name: Install JavaScript dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install Python analysis tools
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.0"
+          enable-cache: true
+
       - name: Acquire completed exact-source paired performance evidence
         env:
           GH_TOKEN: ${{ github.token }}

@@ -215,7 +215,7 @@ class NativeCoverageReuseTests(unittest.TestCase):
         self.assertIn("actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", workflow)
         self.assertIn("actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", workflow)
         self.assertIn("actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6", workflow)
-        self.assertIn("actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131", workflow)
+        self.assertIn("actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333", workflow)
         self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/master'", test_job)
         self.assertIn("github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'", test_job)
         self.assertIn("if: matrix.os == 'ubuntu-latest'", test_job)

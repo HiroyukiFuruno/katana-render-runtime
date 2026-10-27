@@ -71,7 +71,16 @@ function recipeRegistered(name: string, snapshot: HarnessSnapshot): boolean {
 function pythonRegistered(name: string, snapshot: HarnessSnapshot): boolean {
   const policy = snapshot.policy.python;
   if (!policy || !name.startsWith("scripts/")) return false;
-  const recipes = justRecipes(snapshot.read("Justfile") ?? "");
+  const justfile = snapshot.read("Justfile") ?? "";
+  const requiredRuntimePins = [
+    'HTML_PERFORMANCE_SCIPY_VERSION := "1.18.1"',
+    'HTML_PERFORMANCE_SCIPY_ENV := "KRR_HTML_PERFORMANCE_SCIPY_VERSION=" + HTML_PERFORMANCE_SCIPY_VERSION',
+    'HTML_PERFORMANCE_TYPING_PATH := "scripts/release/typings"',
+    'HTML_PERFORMANCE_PYTHON_REQUIREMENTS := REPO_ROOT + "/scripts/release/html-performance-requirements.lock"',
+  ];
+  const definitions = new Set(justfile.split(/\r?\n/).map((line) => line.trim()));
+  if (!requiredRuntimePins.every((pin) => definitions.has(pin))) return false;
+  const recipes = justRecipes(justfile);
   const lint = shellWords(recipes.get(policy.lintRecipe) ?? "");
   const types = shellWords(recipes.get(policy.typeRecipe) ?? "");
   const lintCommand = [
@@ -84,7 +93,18 @@ function pythonRegistered(name: string, snapshot: HarnessSnapshot): boolean {
     "F,E4,E7,E9,B,UP",
     "scripts",
   ];
-  const typeCommand = ["uvx", "--from", `mypy==${policy.mypy}`, "mypy", "--strict", "scripts"];
+  const typeCommand = [
+    "MYPYPATH={{HTML_PERFORMANCE_TYPING_PATH}}",
+    "{{HTML_PERFORMANCE_SCIPY_ENV}}",
+    "uvx",
+    "--with-requirements",
+    "{{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}}",
+    "--from",
+    `mypy==${policy.mypy}`,
+    "mypy",
+    "--strict",
+    "scripts",
+  ];
   return (
     lint.join("\0") === lintCommand.join("\0") &&
     types.join("\0") === typeCommand.join("\0") &&

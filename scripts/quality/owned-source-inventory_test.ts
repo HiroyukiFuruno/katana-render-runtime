@@ -67,6 +67,12 @@ test("format selection remains explicit without removing test source from that l
   expect(inventory(repo, ["python"])).toEqual(["scripts/helper_test.py"]);
 });
 
+test("Python stub sources remain in the owned duplication inventory", () => {
+  const repo = fixture();
+  write(repo, "scripts/release/typings/scipy/__init__.pyi", "from typing import Any\n");
+  expect(inventory(repo, ["python"])).toEqual(["scripts/release/typings/scipy/__init__.pyi"]);
+});
+
 test("cached sources remain visible even if a later ignore pattern matches", () => {
   const repo = fixture();
   write(repo, "scripts/helper.ts");

@@ -751,6 +751,14 @@ class BuildArtifactArgvTest(unittest.TestCase):
                                                          gate.sha256(state), bound)
 
 
+def _set_policy_test_field(value: JsonObject, field: str, replacement: object) -> None:
+    policy = gate._object(value["policy"], "measurement policy")
+    tests = gate._object(policy["tests"], "paired tests")
+    cold_open = gate._object(tests["cold_open"], "cold-open tests")
+    elapsed = gate._object(cold_open["elapsed_ms"], "cold-open elapsed test")
+    elapsed[field] = replacement
+
+
 class PerformanceEvidenceTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
@@ -1055,9 +1063,8 @@ class PerformanceEvidenceTest(unittest.TestCase):
                     }
                 )
                 reports.append(self.bundle / f"{index}/reports/{arm}-{pair}.json")
-        aggregate = gate.aggregate_comparison(reports, expected)
-        policy = {p: {k: v <= 0 for k, v in values.items()} for p, values in aggregate["comparison"].items()}
-        result = {"measurementExecuted": True, "performanceAccepted": False, "formalAccepted": False, **{k: True for k in gate.ENDPOINT_FLAGS}, "policy": {"policyPass": True, "policy": policy, "deltaThreshold": 0, "quietLoadLimit": 0.25, "phaseRecords": len(gate.PHASES) * 50, "aggregate": aggregate}}
+        policy = gate.evaluate_measurement_policy(reports, expected)
+        result = {"measurementExecuted": True, "performanceAccepted": False, "formalAccepted": False, **{k: True for k in gate.ENDPOINT_FLAGS}, "policy": policy}
         expected_pin = self.add_file(attempt + "/expected-enriched.json", f"{index}/expected-enriched.json", expected)
         result_pin = self.add_file(attempt + "/result.json", f"{index}/result.json", result)
         manifest_pin = self.add_file(attempt + "/pair-manifest.json", f"{index}/pair-manifest.json", manifest)
@@ -1108,13 +1115,10 @@ class PerformanceEvidenceTest(unittest.TestCase):
 
     def reaggregate(self, index: int) -> None:
         expected = gate.read_json(self.expected_paths[index])
-        aggregate = gate.aggregate_comparison(self.report_paths[index], expected)
-        policy = {p: {k: v <= 0 for k, v in values.items()} for p, values in aggregate["comparison"].items()}
+        policy = gate.evaluate_measurement_policy(self.report_paths[index], expected)
         self.mutate_json(
             self.result_paths[index],
-            lambda value: json_object_at(value, "policy").update(
-                aggregate=aggregate, policy=policy, policyPass=True
-            ),
+            lambda value: json_object_at(value, "policy").update(policy),
         )
 
     def reject(self) -> None:
@@ -1233,7 +1237,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
                     for path in candidates:
                         self.change_candidate_metric(path, phase, metric, baseline + 1)
                     self.reaggregate(0)
-                    with self.assertRaisesRegex(ValueError, "time/RSS median/p95 regression"):
+                    with self.assertRaisesRegex(ValueError, "paired time/RSS regression"):
                         gate._verify_legacy_diagnostic(self.bundle, self.root)
                     for path in candidates:
                         self.change_candidate_metric(path, phase, metric, baseline)
@@ -1503,13 +1507,40 @@ class PerformanceEvidenceTest(unittest.TestCase):
         delta = result["policy"]["aggregate"]["comparison"]["cold_open"]
         self.assertEqual(delta["elapsed_ms_delta_median"], 0)
         self.assertGreater(delta["elapsed_ms_delta_p95"], 0)
-        with self.assertRaisesRegex(ValueError, "time/RSS median/p95 regression"):
-            gate._verify_legacy_diagnostic(self.bundle, self.root)
+        gate._verify_legacy_diagnostic(self.bundle, self.root)
 
     def test_false_policy_flag_fails(self) -> None:
         self.mutate_json(
             self.result_paths[0],
             lambda value: json_object_at(value, "policy").update(policyPass=False),
+        )
+        self.reject()
+
+    def test_policy_version_fails_when_corrupted(self) -> None:
+        self.mutate_json(
+            self.result_paths[0],
+            lambda value: json_object_at(value, "policy").update(version="wrong"),
+        )
+        self.reject()
+
+    def test_policy_method_fails_when_corrupted(self) -> None:
+        self.mutate_json(
+            self.result_paths[0],
+            lambda value: _set_policy_test_field(value, "method", "wrong"),
+        )
+        self.reject()
+
+    def test_policy_family_alpha_fails_when_corrupted(self) -> None:
+        self.mutate_json(
+            self.result_paths[0],
+            lambda value: json_object_at(value, "policy").update(comparisonAlpha=0.05),
+        )
+        self.reject()
+
+    def test_policy_p_value_fails_when_corrupted(self) -> None:
+        self.mutate_json(
+            self.result_paths[0],
+            lambda value: _set_policy_test_field(value, "pValue", 0.0),
         )
         self.reject()
 

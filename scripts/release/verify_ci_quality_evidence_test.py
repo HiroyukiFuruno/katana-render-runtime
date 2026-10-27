@@ -860,6 +860,12 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
     def test_html_performance_requires_fresh_all84_capture_manifest(self) -> None:
         workflow = (self.ROOT / ".github/workflows/test-and-build.yml").read_text(encoding="utf-8")
         justfile = (self.ROOT / "Justfile").read_text(encoding="utf-8")
+        paired_performance = workflow[workflow.index("  paired-performance:\n") :]
+        self.assertIn(
+            "uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e",
+            paired_performance,
+        )
+        self.assertIn('version: "0.13.0"', paired_performance)
         capture_step = self.workflow_step(workflow, "Capture all 84 HTML catalog conditions")
         measure_step = self.workflow_step(workflow, "Measure all 84 catalog conditions against baseline")
 
@@ -895,7 +901,10 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
             workflow.index("Capture all 84 HTML catalog conditions"),
             workflow.index("Measure all 84 catalog conditions against baseline"),
         )
-        self.assertIn("html-performance-catalog-captures output_root prior_observation='' prior_finalized='':", justfile)
+        self.assertIn(
+            "html-performance-catalog-captures output_root prior_observation='' prior_finalized='' chrome_executable='' chrome_sha256='' font_observer='false':",
+            justfile,
+        )
         self.assertIn('capture_args+=("$prior_observation" "$prior_finalized")', justfile)
         self.assertIn("catalog-stage90-plan", justfile)
         self.assertIn("--require-capacity --print-json", justfile)
@@ -922,6 +931,17 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
 
     def test_ubuntu_ci_owns_the_quality_steps_and_bounded_coverage(self) -> None:
         workflow = (self.ROOT / ".github/workflows/test-and-build.yml").read_text(encoding="utf-8")
+        test_job = workflow[workflow.index("  test:\n") : workflow.index("  paired-performance:\n")]
+        self.assertIn(
+            "- name: Install Python analysis tools\n"
+            "        if: matrix.os == 'ubuntu-latest'\n"
+            "        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e",
+            test_job,
+        )
+        self.assertLess(
+            test_job.index("- name: Install Python analysis tools"),
+            test_job.index("run: just check-contracts"),
+        )
         for step in MODULE.REQUIRED_STEPS:
             self.assertIn(f"- name: {step}", workflow)
         coverage = workflow[workflow.index("- name: Run coverage") :]
@@ -968,7 +988,7 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
                 "if-no-files-found: warn",
             ),
         }
-        upload_pin = "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+        upload_pin = "uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9"
         for name, required_attributes in expected_artifacts.items():
             block = self.workflow_step(workflow, name)
             with self.subTest(artifact=name):
@@ -1019,7 +1039,12 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
         self.assertIn("needs.test.result == 'success'", ci_preflight)
         self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", ci_preflight)
         self.assertIn("startsWith(github.head_ref, 'release/v')", ci_preflight)
-        self.assertIn("verify_html_performance_evidence.py --acquire-current-producer", ci_preflight)
+        self.assertIn(
+            "uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e",
+            ci_preflight,
+        )
+        self.assertIn('version: "0.13.0"', ci_preflight)
+        self.assertIn("run_html_performance.py verify --acquire-current-producer", ci_preflight)
         self.assertIn("release-preflight-check", ci_preflight)
 
         workflow = (self.ROOT / ".github/workflows/release-preflight.yml").read_text(encoding="utf-8")

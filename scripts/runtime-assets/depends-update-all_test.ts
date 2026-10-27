@@ -223,7 +223,9 @@ test("一括更新はRustのmajorとpinned依存を含め、TypeScriptを旧版�
   expect(mutationLines).toContain(
     'python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"',
   );
-  expect(mutationLines).toContain("{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa --exclude harfrust");
+  expect(mutationLines).toContain(
+    "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa --exclude harfrust",
+  );
   expect(mutationLines).toContain("bun update --latest '!@moonrepo/*'");
   expect(mutationLines).toContain("bunx --no-install biome migrate --write");
   expect(mutationLines).not.toContain("bun add -d typescript@");

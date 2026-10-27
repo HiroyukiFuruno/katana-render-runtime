@@ -25,7 +25,7 @@ REQUIRED_CANDIDATE_ANCESTORS = (
     VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_CANDIDATE_ANCESTORS
 )
 # Git履歴fixtureは祖先・version・内容契約を検証し、完全品質の証跡には使わない。
-CURRENT_RELEASE_VALIDATION_SNAPSHOT = "5d66c235706b92d4f071175403fd9059b94b6671"
+CURRENT_RELEASE_VALIDATION_SNAPSHOT = "23720b157e17b58eabb8f60cca1434e0c9d2be4e"
 REJECTED_STALE_V0424_VALIDATION_SNAPSHOT = "536658729364519837b50b10e1fb2ad8139ced1e"
 REJECTED_V0424_VALIDATION_SNAPSHOT = "db20e187c39e56589dadb2356da150bd3e820987"
 PUBLISHED_V0423_SNAPSHOT = "8654789f69d24401b8ae67036db1cdb3e7f4294e"
@@ -499,7 +499,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                     env=isolated_git_environment(),
                 )
                 git("push", "-q", str(fresh_origin), "candidate:refs/heads/candidate")
-                subprocess.run(
+                clone = subprocess.run(
                     [
                         "git",
                         "clone",
@@ -510,11 +510,12 @@ class VerifyReleaseTargetTests(unittest.TestCase):
                         str(fresh_origin),
                         str(fresh_repository),
                     ],
-                    check=True,
+                    check=False,
                     capture_output=True,
                     text=True,
                     env=isolated_git_environment(),
                 )
+                self.assertEqual(clone.returncode, 0, clone.stderr)
 
                 def fresh_git(*args: str) -> subprocess.CompletedProcess[str]:
                     return subprocess.run(

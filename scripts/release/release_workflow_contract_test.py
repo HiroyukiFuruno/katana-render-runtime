@@ -336,7 +336,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("run: just coverage", coverage_step)
         self.assertIn("timeout-minutes: 45", coverage_step)
 
-        self.assertIn("uses: Swatinem/rust-cache@v2.9.2", self.ci)
+        self.assertIn("uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0", self.ci)
         cache = self.workflow_step(self.ci, "Cache Rust build outputs")
         self.assertNotIn("if: matrix.os != 'ubuntu-latest'", cache)
         self.assertIn("shared-key: ci-v2-${{ matrix.os }}-stable-default", cache)
@@ -643,15 +643,15 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                 "--failfast",
             ],
             [
-                "python3",
-                "-m",
-                "unittest",
-                "discover",
-                "-s",
-                "scripts/release",
-                "-p",
-                "*_test.py",
-                "--failfast",
+                "{{HTML_PERFORMANCE_SCIPY_ENV}}",
+                "uv",
+                "run",
+                "--isolated",
+                "--with-requirements",
+                "{{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}}",
+                "python",
+                "scripts/release/run_html_performance.py",
+                "test",
             ],
             [
                 "python3",
@@ -719,9 +719,42 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             ],
             self.release[self.release.index("  release:\n") :],
         ):
-            self.assertIn("uses: oven-sh/setup-bun@v2", job)
-            self.assertIn("bun-version: 1.4.3", job)
+            self.assertIn("uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6", job)
+            self.assertIn("bun-version: 1.4.4", job)
             self.assertIn("run: bun install --frozen-lockfile", job)
+
+    def test_performance_retry_uses_pinned_uv_in_release_source(self) -> None:
+        self.assertIn(
+            "uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e",
+            self.retry,
+        )
+        self.assertIn('version: "0.13.0"', self.retry)
+        self.assertIn(
+            "--with-requirements release-tools/scripts/release/html-performance-requirements.lock",
+            self.retry,
+        )
+        self.assertIn(
+            "python release-tools/scripts/release/run_html_performance.py verify",
+            self.retry,
+        )
+        self.assertIn('--repo "$GITHUB_WORKSPACE/release-source"', self.retry)
+        self.assertIn(
+            '--evidence-dir "$GITHUB_WORKSPACE/release-source/tmp/html-performance-release-evidence"',
+            self.retry,
+        )
+        self.assertNotIn("release-source/scripts/release/html-performance-requirements.lock", self.retry)
+        self.assertNotIn("python release-source/scripts/release/run_html_performance.py", self.retry)
+
+    def test_release_performance_jobs_install_pinned_uv_before_wrapper_recipes(self) -> None:
+        release_job = self.release[self.release.index("  release:\n") :]
+        for label, workflow in (("release", release_job), ("preflight", self.preflight)):
+            with self.subTest(workflow=label):
+                self.assertIn(
+                    "uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e",
+                    workflow,
+                )
+                self.assertIn('version: "0.13.0"', workflow)
+                self.assertIn("just html-performance-evidence-acquire", workflow)
 
     def test_release_target_check_requires_dependency_freshness_before_tagging(
         self,

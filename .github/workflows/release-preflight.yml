@@ -73,6 +73,13 @@ jobs:
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
         run: bun install --frozen-lockfile
 
+      - name: Install Python analysis tools
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.0"
+          enable-cache: true
+
       - name: Install just
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
         uses: taiki-e/install-action@53aaa72a1fed2d5b9189d6d54c38e29bf9be2ab9 # just

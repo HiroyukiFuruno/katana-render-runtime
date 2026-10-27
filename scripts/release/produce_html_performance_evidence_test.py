@@ -15,7 +15,7 @@ import signal
 import socket
 import time
 import threading
-from typing import BinaryIO
+from typing import BinaryIO, cast
 import tempfile
 import unittest
 from pathlib import Path
@@ -437,6 +437,35 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         selected = producer._select_batch_rows(rows, {"a"}, 1)
         self.assertEqual([row["condition_id"] for row in selected], ["b"])
         self.assertFalse(producer._batch_formal_acceptance(["a"] * 84, ["a"] * 84, False))
+
+    def test_complete_condition_policy_uses_canonical_measurement_helper(self) -> None:
+        expected = cast(typed_producer.ExpectedPerformance, {})
+        canonical: gate.JsonObject = {
+            "version": "paired-wilcoxon-family-v1", "policyPass": True,
+        }
+        with patch.object(gate, "evaluate_measurement_policy",
+                          return_value=canonical) as evaluate:
+            result = producer._condition_measurement_policy(
+                [self.root / "baseline-0.json"], expected, [], 300,
+            )
+        self.assertIs(result, canonical)
+        evaluate.assert_called_once_with(
+            [self.root / "baseline-0.json"], expected,
+        )
+
+    def test_incomplete_condition_policy_does_not_fabricate_canonical_statistics(self) -> None:
+        expected = cast(typed_producer.ExpectedPerformance, {})
+        failure: gate.JsonObject = {"status": "incomplete"}
+        with patch.object(gate, "evaluate_measurement_policy") as evaluate:
+            result = producer._condition_measurement_policy(
+                [], expected, [failure], 12,
+            )
+        self.assertIs(result["policyPass"], False)
+        self.assertEqual(result["phaseRecords"], 12)
+        self.assertEqual(result["nullDifference"], 0)
+        self.assertNotIn("deltaThreshold", result)
+        self.assertNotIn("statistics", result)
+        evaluate.assert_not_called()
 
     def test_budgeted_batch_can_resume_full_acceptance_but_policy_failure_cannot_clear(self) -> None:
         accepted: gate.JsonObject = {"policy": {"policyPass": True}}
@@ -2215,6 +2244,22 @@ class MeasurementLifecycleUnitTests(unittest.TestCase):
             self.assertIs(record["groupClosed"], False)
             self.assertIs(record["rawFdsClosed"], True)
             self.assertIn("spawn rejected", gate._text(record["failure"], "failure"))
+
+    def test_native_spawn_failure_still_observes_raw_fd_closure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            logs = root / "raw"
+            with patch.object(typed_producer, "_native_raw_fd_closure", return_value={"holders": []}) as closure:
+                with self.assertRaises(FileNotFoundError):
+                    typed_producer._measurement_command(
+                        [str(root / "missing-worker")], role="worker", log_directory=logs,
+                        cwd=root, env=dict(os.environ), native_attempt_token="spawn-failure",
+                    )
+            self.assertTrue(closure.called)
+            record = gate.read_json(next(logs.iterdir()) / "lifecycle.json")
+            self.assertIs(record["groupClosed"], False)
+            self.assertIs(record["rawFdsClosed"], True)
+            self.assertNotIn("native cleanup deadline missing", str(record))
 
 
 if __name__ == "__main__":

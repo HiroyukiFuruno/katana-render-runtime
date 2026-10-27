@@ -239,7 +239,7 @@ function moonFixture(): HarnessSnapshot {
     [snapshot.policy.localBridge.source]:
       'command = ["bun", "run", "moon", "--concurrency", str(jobs), "exec", "krr:check", "--on-failure", "continue", "--no-actions"]',
     [snapshot.policy.ciWorkflow]: "jobs:\n  test:\n    steps:\n      - run: just check\n",
-    Justfile: `${snapshot.read("Justfile")}lint:\n    cargo clippy --workspace --all-targets --all-features -- -D warnings\npython-lint:\n    uvx --from ruff==0.16.10 ruff check --select F,E4,E7,E9,B,UP scripts\npython-typecheck:\n    uvx --from mypy==2.4.0 mypy --strict scripts\nbiome:\n    bun run biome\ntypecheck:\n    bun run typecheck\nduplication-check:\n    bun scripts/quality/duplication-check.ts\nowned-validation-contract-check:\n    bun scripts/quality/owned-validation-contract.ts\n`,
+    Justfile: `${snapshot.read("Justfile")}HTML_PERFORMANCE_SCIPY_VERSION := "1.18.1"\nHTML_PERFORMANCE_SCIPY_ENV := "KRR_HTML_PERFORMANCE_SCIPY_VERSION=" + HTML_PERFORMANCE_SCIPY_VERSION\nHTML_PERFORMANCE_TYPING_PATH := "scripts/release/typings"\nHTML_PERFORMANCE_PYTHON_REQUIREMENTS := REPO_ROOT + "/scripts/release/html-performance-requirements.lock"\nlint:\n    cargo clippy --workspace --all-targets --all-features -- -D warnings\npython-lint:\n    uvx --from ruff==0.16.10 ruff check --select F,E4,E7,E9,B,UP scripts\npython-typecheck:\n    MYPYPATH={{HTML_PERFORMANCE_TYPING_PATH}} {{HTML_PERFORMANCE_SCIPY_ENV}} uvx --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} --from mypy==2.4.0 mypy --strict scripts\nbiome:\n    bun run biome\ntypecheck:\n    bun run typecheck\nduplication-check:\n    bun scripts/quality/duplication-check.ts\nowned-validation-contract-check:\n    bun scripts/quality/owned-validation-contract.ts\n`,
     "Cargo.toml": '[workspace]\nmembers = ["crates/renderer"]\n',
     "crates/renderer/Cargo.toml": '[package]\nname = "renderer"\n',
     "crates/renderer/src/lib.rs": "pub fn render() {}",
@@ -2257,20 +2257,27 @@ describe("fixed moon quality graph and managed language scopes", () => {
     });
     expect(checkHarnessContract(snapshot)).toContain("local contract preflight missing");
   });
-  test.each(["wrong-version", "wrong-select"])(
+  test.each(["wrong-version", "wrong-select", "wrong-scipy-env", "commented-scipy-env"])(
     "rejects weakened Python policy execution: %s",
     (fault) => {
       const snapshot = moonFixture();
       snapshot.declaredCode = ["scripts/html/managed.py"];
       snapshot.tracked.add("scripts/html/managed.py");
       replaceSources(snapshot, {
-        Justfile:
-          snapshot
-            .read("Justfile")
-            ?.replace(
-              fault === "wrong-version" ? "ruff==0.16.10" : "F,E4,E7,E9,B,UP",
-              fault === "wrong-version" ? "ruff==0.15.0" : "F",
-            ) ?? "",
+        Justfile: (() => {
+          const justfile = snapshot.read("Justfile") ?? "";
+          if (fault === "wrong-version") return justfile.replace("ruff==0.16.10", "ruff==0.15.0");
+          if (fault === "wrong-select") return justfile.replace("F,E4,E7,E9,B,UP", "F");
+          if (fault === "wrong-scipy-env")
+            return justfile.replace(
+              'HTML_PERFORMANCE_SCIPY_ENV := "KRR_HTML_PERFORMANCE_SCIPY_VERSION=" + HTML_PERFORMANCE_SCIPY_VERSION',
+              'HTML_PERFORMANCE_SCIPY_ENV := "KRR_HTML_PERFORMANCE_SCIPY_VERSION=0.0.0"',
+            );
+          return justfile.replace(
+            'HTML_PERFORMANCE_SCIPY_ENV := "KRR_HTML_PERFORMANCE_SCIPY_VERSION=" + HTML_PERFORMANCE_SCIPY_VERSION',
+            '# HTML_PERFORMANCE_SCIPY_ENV := "KRR_HTML_PERFORMANCE_SCIPY_VERSION=" + HTML_PERFORMANCE_SCIPY_VERSION\nHTML_PERFORMANCE_SCIPY_ENV := "KRR_HTML_PERFORMANCE_SCIPY_VERSION=0.0.0"',
+          );
+        })(),
       });
       expect(checkHarnessContract(snapshot)).toContain(
         "Python Ruff + strict type check registration unavailable: scripts/html/managed.py",
@@ -2385,6 +2392,17 @@ describe("fixed moon quality graph and managed language scopes", () => {
     snapshot.declaredCode = ["scripts/html/managed.py"];
     snapshot.tracked.add("scripts/html/managed.py");
     expect(checkHarnessContract(snapshot)).toEqual([]);
+    const currentJustfile = snapshot.read("Justfile") ?? "";
+    replaceSources(snapshot, {
+      Justfile: currentJustfile.replace(
+        'HTML_PERFORMANCE_TYPING_PATH := "scripts/release/typings"',
+        'HTML_PERFORMANCE_TYPING_PATH := "scripts/release/other-typings"',
+      ),
+    });
+    expect(checkHarnessContract(snapshot)).toContain(
+      "Python Ruff + strict type check registration unavailable: scripts/html/managed.py",
+    );
+    replaceSources(snapshot, { Justfile: currentJustfile });
     replaceSources(snapshot, {
       Justfile: snapshot.read("Justfile")?.replace("mypy --strict scripts", "mypy scripts") ?? "",
     });

@@ -1062,8 +1062,8 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
             except BaseException as error:
                 primary = error
             finally:
+                cleanup_deadline = time.monotonic() + MEASUREMENT_CLEANUP_SECONDS
                 if process is not None:
-                    cleanup_deadline = time.monotonic() + MEASUREMENT_CLEANUP_SECONDS
                     try:
                         previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM, signal.SIGHUP})
                     except BaseException as error:
@@ -2079,6 +2079,19 @@ def _collect_condition_worker_pairs(
                                      worker_attempt_pins, actual_phase_records)
 
 
+def _condition_measurement_policy(
+    reports: list[Path], expected: ExpectedPerformance,
+    failures: Sequence[gate.JsonObject], actual_phase_records: int,
+) -> gate.JsonObject:
+    if failures:
+        return {"policyPass": False, "status": "incomplete",
+                "reason": "baseline worker failure", "policy": {},
+                "nullDifference": 0, "quietLoadLimit": 0.25,
+                "expectedPhaseRecords": len(gate.PHASES) * 50,
+                "phaseRecords": actual_phase_records, "aggregate": None}
+    return gate.evaluate_measurement_policy(reports, {**expected})
+
+
 def produce(root: Path, output: Path, capacity_document: Path | None = None,
             capacity_document_sha256: str | None = None,
             catalog_manifest_path: Path | None = None, *,
@@ -2421,18 +2434,9 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         if condition_failures:
             manifest_data.update({"measurement_status": "incomplete", "failures": condition_failures})
         manifest_pin = write(folder / "reports/pair-manifest.json", manifest_data)
-        if condition_failures:
-            measurement_policy = {"policyPass": False, "status": "incomplete",
-                "reason": "baseline worker failure", "policy": {},
-                "deltaThreshold": 0, "quietLoadLimit": 0.25,
-                "expectedPhaseRecords": len(gate.PHASES) * 50,
-                "phaseRecords": actual_phase_records, "aggregate": None}
-        else:
-            aggregate = gate.aggregate_comparison(reports, {**expected})
-            policy = {p: {k: v <= 0 for k, v in values.items()} for p, values in aggregate["comparison"].items()}
-            measurement_policy = {"policyPass": all(ok for phase in policy.values() for ok in phase.values()),
-                "policy": policy, "deltaThreshold": 0, "quietLoadLimit": 0.25,
-                "phaseRecords": actual_phase_records, "aggregate": aggregate}
+        measurement_policy = _condition_measurement_policy(
+            reports, expected, condition_failures, actual_phase_records,
+        )
         result: gate.JsonObject = {"formalAccepted": False, "performanceAccepted": False,
             "measurementExecuted": True, "policy": measurement_policy}
         if row["catalog"]:

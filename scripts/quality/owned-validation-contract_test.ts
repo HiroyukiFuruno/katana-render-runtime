@@ -98,7 +98,10 @@ const recipeBodies: Record<string, string> = {
   biome: "bun run biome",
   typecheck: "bun run typecheck",
   "python-lint": "uvx --from ruff==0.16.10 ruff check --select F,E4,E7,E9,B,UP scripts",
-  "python-typecheck": "uvx --from mypy==2.4.0 mypy --strict scripts",
+  "python-typecheck":
+    "MYPYPATH={{HTML_PERFORMANCE_TYPING_PATH}} {{HTML_PERFORMANCE_SCIPY_ENV}} uvx --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} --from mypy==2.4.0 mypy --strict scripts",
+  "automation-contract-test":
+    "{{HTML_PERFORMANCE_SCIPY_ENV}} uv run --isolated --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} python scripts/release/run_html_performance.py test",
   lint: rootLintRecipe,
   unit: "bun test --path-ignore-patterns 'tmp/**' ./scripts\npython3 -m unittest discover -s scripts -p '*_test.py'",
   "runtime-asset-script-test":
@@ -141,6 +144,10 @@ const fixtureJustDefinitions = [
   'RTK := env_var_or_default("RTK", `command -v rtk 2> /dev/null || true`)',
   'RTK_CMD := if RTK == "" { "" } else { RTK + " " }',
   'RTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }',
+  'HTML_PERFORMANCE_SCIPY_VERSION := "1.18.1"',
+  'HTML_PERFORMANCE_SCIPY_ENV := "KRR_HTML_PERFORMANCE_SCIPY_VERSION=" + HTML_PERFORMANCE_SCIPY_VERSION',
+  'HTML_PERFORMANCE_TYPING_PATH := "scripts/release/typings"',
+  'HTML_PERFORMANCE_PYTHON_REQUIREMENTS := REPO_ROOT + "/scripts/release/html-performance-requirements.lock"',
   'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
   fixtureCargoBuildDefinition,
 ].join("\n");
@@ -385,6 +392,7 @@ function writeCurrentMoonFixtureInputs(root: string): void {
     "moon.yml",
     "scripts/release/native_coverage_result_cli.py",
     "scripts/release/native_coverage_local_aggregate.py",
+    "scripts/release/run_html_performance.py",
   ])
     write(root, name, fs.readFileSync(path.join(actualRoot, name), "utf8"));
 }
@@ -1241,7 +1249,7 @@ test("fixture sources stay classified when its shell registration is unsupported
       runtimeUnitPaths.filter((name) => name.endsWith(".ts")).length +
       svgEngineProvenanceSources.length,
     javascript: 2 + runtimeUnitPaths.filter((name) => name.endsWith(".js")).length,
-    python: 7,
+    python: 8,
   });
   expect(report.units).toEqual({
     bun: [
@@ -2437,11 +2445,7 @@ test.each([
     "uvx --from ruff==0.16.10 ruff check scripts",
     "python-lint-unregistered:scripts/tool_test.py",
   ],
-  [
-    "python-typecheck",
-    "uvx --from mypy==2.4.0 mypy scripts",
-    "python-type-unregistered:scripts/tool_test.py",
-  ],
+  ["python-typecheck", "mypy scripts", "python-type-unregistered:scripts/tool_test.py"],
   ["unit", "bun test scripts/tool.ts", "unit-local-missing:scripts/tool_test.ts"],
   ["unit", "bun test scripts", "unit-local-missing:scripts/tool_test.ts"],
   [
@@ -2473,6 +2477,20 @@ test.each([
   const root = fixture();
   recipes(root, { [name]: body });
   expect(codes(root)).toContain(expected);
+});
+test("Python static registration rejects an altered scientific environment binding", () => {
+  const root = fixture();
+  recipes(root);
+  const justfile = fs.readFileSync(path.join(root, "Justfile"), "utf8");
+  write(
+    root,
+    "Justfile",
+    justfile.replace(
+      'HTML_PERFORMANCE_SCIPY_ENV := "KRR_HTML_PERFORMANCE_SCIPY_VERSION=" + HTML_PERFORMANCE_SCIPY_VERSION',
+      'HTML_PERFORMANCE_SCIPY_ENV := "KRR_HTML_PERFORMANCE_SCIPY_VERSION=0.0.0"',
+    ),
+  );
+  expect(codes(root)).toContain("python-type-unregistered:scripts/tool_test.py");
 });
 test.each([
   [
