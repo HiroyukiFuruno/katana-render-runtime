@@ -1,5 +1,18 @@
 # 品質ゲート改善の作業台帳
 
+## 最新の再開地点（2026-10-28）
+
+- [/] 待機中REPLの排他保持で本人の依存更新を妨げた問題を是正。実行単位のcontext managerへ変更し、取得失敗時だけ短い案内を出す修正は18回帰・静的検査・通常hook成功後 `5cb38ab1` にコミット済み。既存の排他・使用中成果物の保護は維持。実際の別processによる両lock取得・解放も確認した。
+- [/] Biomeの144件は初期の`noUnusedVariables`診断で、結合後の実参照を個別に証明した解決済み144件・未解決0件だった。通常error/warningの格下げはない。通常出力の要約化と未解決診断の位置/内容表示を `8996131c` へ保存し、通常Biome gate成功・異常系10回帰成功を確認。完全なraw/proofは`gate.json`等へ保持する。全runtime受入成功とは混同しない。
+- [/] 依存更新後のBiome schema同期を `43ea4b42` にコミットした。公式migrateの差分はschema 2.6.2→2.6.3だけ。今後は`bun update`直後に公式`biome migrate --write`を実行する。recipe契約のBun回帰、現行sourceの静的検査・厳格Clippy・通常commit hookは成功。通常warning/errorを許容する設定は追加していない。
+- [ ] `katana-ast-lint`は依存宣言だけで未使用だった。診断位置の互換APIへ実委譲しAST48回帰成功、通常hook成功後 `a1a6883b` にコミットした。属性判定はKRRのsyn3と公開libのsyn2がABI非互換でE0308となり候補を撤回、既存の全検査を維持した。AST framework全体の移譲完了とは扱わない。Rust未利用依存の既存gateがない点も、cargo-machete等の既存toolを優先して再発防止対象として追跡する。
+- [ ] 本人が実行した依存更新差分を保持し `43ea4b42` へ統合した。Drawio32.6.1/ZenUML Core4.11.0、JS/Rust/lockfile更新後の静的検査と厳格ClippyはR3222 actual0、freshness70回帰成功。SVG HarfRust0.12→0.15は4件の実コンパイルエラーで非互換を確認し不採用。native0.15を維持しSVG側0.12を復帰。cargo-editはalias名のexcludeを無視することを公式dry-runで確認し、canonical名harfrustの除外を使用する。SVG互換req/package/registry/解決edgeを限定検証し、native側freshnessは維持する。harness lock/pin同期はR3216 actual0。画像・全root test・coverage・性能を含む完全検証は未完。
+- [ ] HTML：`e30e2b67`で84/84が90以上、最低91.49827、出力font一致established、source前後一致をR3201/R3202で確認した。その後の依存更新・修正sourceへ旧成功を転用せず、最終再検証する。R3203の正式性能測定は旧版0.4.23がinert JSONをJSとして実行して停止。旧版を理由に本人へ判断を委ねない最新指示に従い、終了を証明した旧版の描画失敗後も現行版と後続条件を測る修正を `29b15e85` へコミットした。79回帰、149 Python fileのstrict型検査、重複検査を含むfoundation、厳格Clippy、独立レビュー、通常hookは成功。失敗/不足/比較不能を保存し、未実行sampleの補完や不完全測定の合格化はしない。新collectorによる全84性能測定は未完。
+- [ ] Mermaid：最新完了一括R3195は画像99以上100/117、画像未達17。C4候補の構造脱落3件を含む総合合格は97/117であり、候補を`cd23a3aa`で撤回した。最新版全117は未再採点。R2821は不変、Mermaid case28はstandalone ZenUML Core更新とは別経路で、同一Mermaid/plugin資源の範囲では再利用可能。旧版Drawio/standalone ZenUMLへの成功を最新版へ転用しない。
+- [ ] coverage100%・未計測0、正当なcache再利用、全品質ゲート、最新依存の検証、Draft/review/reply/resolve/Ready/3OS CI/protected merge、既存3crateとGitHub Release公開、Issue close、cleanupを継続する。新SVG別crate/token公開は不要。未完事項をこの概要だけで消さず、以下の履歴/元チェック項目も一次情報として照合する。
+
+直近証跡は `tmp/quality/reserved-warm-owner-r2939/` のR3201〜R3225、HTML画像は `tmp/html-performance-stage90/r3201/`、性能の中断rawは `tmp/quality/current-single-crate-html84-performance-r3203*`。R3219のsyntax失敗、R3220の型失敗、R3221の新test重複2箇所の失敗も原rawを保持。共通化後R3222でfoundationとClippyは成功し、例外や基準緩和は追加していない。原本・過去receipt・失敗結果は上書きしない。
+
 2026-10-27 R3188〜R3197: C4同一font ownerの全文計測候補は、関連6回帰と境界3回帰を通過し、通常hook成功後 `4aac4be3` へ保存した。しかし現行117件の製品PNGを再取得・採点したR3195では、画像99以上100件・未達17件、構造を含む総合合格97件・未合格20件。英語C4 component/dynamic/deploymentのPNGは旧R3042とSHAまで同一で、SVG内の親子transform小数値だけが変わり、既存合格3件が構造検査で脱落した。画質改善なし・既存合格脱落のため当該候補を不採用とし、R3196で当該commitだけを打ち消した。R3197で7対象pathが候補前 `8a227625` とbyte一致することを確認済み。採点基準・raw JS基準・既存参照・配色は変更しない。R3195は不採用候補の正式な失敗記録として保持し、復帰後ソースの合格に転用しない。証跡: `tmp/quality/c4-committed-managed-mermaid-r3195/run/receipt.json` と各言語 `comparison/native-product-comparison/scores.json`。
 
 R3189: CLI producerのcapacity preflightだけがmonotonic時計を記録し、epoch時計のFD closureと比較不能だった不具合を2箇所修正した。26回帰・厳格静的検査・通常hookを通し `8a227625` へコミット済み。R3195では実CLI build receiptのreaderが通過し、英語59/日本語58のSVGと実PNG取得まで完了した。過去の失敗証跡は書き換えていない。
