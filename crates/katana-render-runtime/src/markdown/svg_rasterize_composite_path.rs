@@ -69,15 +69,14 @@ fn prepare_path(node: &usvg::Path) -> Result<Option<PreparedPath>, String> {
     let Some(fill) = style::fill(node.fill(), node.rendering_mode()) else {
         return Ok(None);
     };
-    let Some(Some(stroke)) = style::stroke(node.stroke(), node.rendering_mode()) else {
+    let Some(stroke) = style::stroke(node.stroke(), node.rendering_mode()) else {
         return Ok(None);
     };
+    if fill.is_none() && stroke.is_none() {
+        return Ok(None);
+    }
     let path = geometry::convert(node.data(), node.fill().map(|value| value.rule()))?;
-    Ok(Some(PreparedPath {
-        path,
-        fill,
-        stroke: Some(stroke),
-    }))
+    Ok(Some(PreparedPath { path, fill, stroke }))
 }
 
 fn draw_path(canvas: &skia_safe::Canvas, prepared: &PreparedPath, order: usvg::PaintOrder) {

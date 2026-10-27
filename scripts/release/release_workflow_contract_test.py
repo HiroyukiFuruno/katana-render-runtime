@@ -574,40 +574,50 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self,
     ) -> None:
         root = Path(__file__).parents[2]
-        cases: tuple[tuple[str, tuple[str, ...]], ...] = (
+        filter_cases: tuple[tuple[str, tuple[str, ...]], ...] = (
             ("", ("--test-threads=2",)),
             ("class diagram [ja]", ("--test-threads=2", "-E", "class diagram [ja]")),
         )
-        for filter_value, expected_suffix in cases:
-            with self.subTest(filter=filter_value):
-                completed = subprocess.run(
-                    ["just", "--dry-run", "native-nextest-diagnostic", filter_value],
-                    cwd=root,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-                commands = [
-                    shlex.split(line)
-                    for line in (completed.stdout + completed.stderr).splitlines()
-                    if "llvm-cov" in line and "nextest" in line
-                ]
-                self.assertEqual(len(commands), 1)
-                command = commands[0]
-                self.assertIn("--workspace", command)
-                self.assertIn("--all-targets", command)
-                self.assertIn("--all-features", command)
-                self.assertIn("--no-report", command)
-                for token in expected_suffix:
-                    self.assertIn(token, command)
-                if filter_value:
-                    self.assertLess(command.index("-E"), len(command) - 1)
-                    self.assertEqual(command[command.index("-E") + 1], filter_value)
-                else:
-                    self.assertNotIn("-E", command)
-                rendered = completed.stdout + completed.stderr
-                self.assertIn("plantuml-lgpl", rendered)
-                self.assertIn("bun run runtime-bundle:check", rendered)
+        job_cases: tuple[tuple[str | None, str], ...] = ((None, "2"), ("3", "3"))
+        for filter_value, expected_suffix in filter_cases:
+            for supplied_jobs, expected_jobs in job_cases:
+                with self.subTest(filter=filter_value, jobs=supplied_jobs):
+                    environment = os.environ.copy()
+                    if supplied_jobs is None:
+                        environment.pop("JOBS", None)
+                    else:
+                        environment["JOBS"] = supplied_jobs
+                    environment["TEST_THREADS"] = "2"
+                    completed = subprocess.run(
+                        ["just", "--dry-run", "native-nextest-diagnostic", filter_value],
+                        cwd=root,
+                        env=environment,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+                    commands = [
+                        shlex.split(line)
+                        for line in (completed.stdout + completed.stderr).splitlines()
+                        if "llvm-cov" in line and "nextest" in line
+                    ]
+                    self.assertEqual(len(commands), 1)
+                    command = commands[0]
+                    self.assertIn(f"CARGO_BUILD_JOBS={expected_jobs}", command)
+                    self.assertIn("--workspace", command)
+                    self.assertIn("--all-targets", command)
+                    self.assertIn("--all-features", command)
+                    self.assertIn("--no-report", command)
+                    for token in expected_suffix:
+                        self.assertIn(token, command)
+                    if filter_value:
+                        self.assertLess(command.index("-E"), len(command) - 1)
+                        self.assertEqual(command[command.index("-E") + 1], filter_value)
+                    else:
+                        self.assertNotIn("-E", command)
+                    rendered = completed.stdout + completed.stderr
+                    self.assertIn("plantuml-lgpl", rendered)
+                    self.assertIn("bun run runtime-bundle:check", rendered)
 
     def test_automation_contract_tests_fail_fast_with_all_discovery_scopes(
         self,

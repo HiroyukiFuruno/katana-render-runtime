@@ -79,7 +79,7 @@ pub(super) fn shape_run_character_metrics(
     shape_run_character_metrics_with_trim(database, face_id, text, font, font_feature_settings)
 }
 
-pub(super) fn shape_run_character_metrics_with_trim(
+pub(in crate::markdown::svg_rasterize) fn shape_run_character_metrics_with_trim(
     database: &usvg::fontdb::Database,
     face_id: usvg::fontdb::ID,
     text: &str,

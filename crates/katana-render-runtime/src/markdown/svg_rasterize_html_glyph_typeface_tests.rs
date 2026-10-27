@@ -202,6 +202,7 @@ pub(super) fn prepare_pixel_span(
         font_size: SAMPLE_FONT_SIZE,
         baseline_shift: 0.0,
         x_alignment: None,
+        chunk_alignment: None,
     })
 }
 

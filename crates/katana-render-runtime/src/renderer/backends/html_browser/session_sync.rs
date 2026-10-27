@@ -17,14 +17,7 @@ struct InteractiveCandidates<'a> {
 impl HtmlBrowserSession {
     pub(super) fn sync_interactive_state(&mut self) -> Result<(), HtmlBrowserError> {
         let updates = self.take_interactive_updates()?;
-        self.sync_interactive_frame_with_metrics(updates.frame, updates.metrics)?;
-        /* WHY: 公開側で受理した世代だけinner画素を解放し、未受理frameは再試行に残す。 */
-        if let (Some(interactive), Some(generation)) = (
-            self.interactive.as_mut(),
-            self.latest_frame.as_ref().map(|frame| frame.generation),
-        ) {
-            interactive.release_frame_if_generation(generation);
-        }
+        self.publish_prepared_interactive_frame(updates.frame, updates.metrics);
         if updates.navigation.is_some() {
             self.pending_navigation = updates.navigation;
         }
@@ -36,16 +29,18 @@ impl HtmlBrowserSession {
         let navigation = self.take_interactive_navigation()?;
         let candidates =
             Self::candidate_interactive_updates(self.interactive.as_ref(), latest_generation)?;
-        let frame = Self::prepare_interactive_frame(
+        let transfer = Self::prepare_interactive_frame(
             self.state,
             &mut self.source,
             &mut self.latest_frame,
             &mut self.frame_update_pending,
             candidates.frame,
         )?;
+        let metrics = candidates.metrics;
+        let frame = self.take_prepared_interactive_frame(transfer);
         Ok(InteractiveUpdates {
             frame,
-            metrics: candidates.metrics,
+            metrics,
             navigation,
         })
     }
@@ -108,6 +103,7 @@ impl HtmlBrowserSession {
         Ok(())
     }
 
+    #[cfg(test)]
     fn sync_interactive_frame_with_metrics(
         &mut self,
         frame: Option<HtmlBrowserFrame>,
@@ -156,6 +152,7 @@ impl HtmlBrowserSession {
         Ok(())
     }
 
+    #[cfg(test)]
     fn accept_interactive_frame_with_metrics(
         &mut self,
         frame: HtmlBrowserFrame,
@@ -200,3 +197,7 @@ impl HtmlBrowserSession {
 #[cfg(test)]
 #[path = "session_sync_contract_tests.rs"]
 mod contract_tests;
+
+#[cfg(test)]
+#[path = "session_frame_transfer_tests.rs"]
+mod frame_transfer_tests;

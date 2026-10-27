@@ -173,6 +173,7 @@ impl HtmlBrowserSession {
         self.sync_interactive_state()
     }
 
+    #[cfg(test)]
     fn accept_frame(&mut self, frame: HtmlBrowserFrame) -> Result<(), HtmlBrowserError> {
         Self::validate_frame(
             self.state,

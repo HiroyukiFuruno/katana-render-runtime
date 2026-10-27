@@ -110,6 +110,10 @@ impl HtmlInteractiveSession {
         self.latest_frame.as_ref()
     }
 
+    pub(in crate::renderer::backends) fn take_frame(&mut self) -> Option<HtmlBrowserFrame> {
+        self.latest_frame.take()
+    }
+
     pub(in crate::renderer::backends) fn release_frame_if_generation(&mut self, generation: u64) {
         if self
             .latest_frame

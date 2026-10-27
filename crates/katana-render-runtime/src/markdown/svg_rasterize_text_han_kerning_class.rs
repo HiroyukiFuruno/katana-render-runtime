@@ -168,3 +168,7 @@ pub(super) fn should_kern_last(current: HanClass, previous: HanClass) -> bool {
             HanClass::Close | HanClass::CloseNarrow | HanClass::Middle
         )
 }
+
+#[cfg(test)]
+#[path = "svg_rasterize_text_han_kerning_class_tests.rs"]
+mod tests;

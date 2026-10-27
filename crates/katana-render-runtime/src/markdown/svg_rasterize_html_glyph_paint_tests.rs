@@ -252,5 +252,6 @@ fn trial_span(alignment: Option<XAlignment>) -> PreparedSpan {
         font_size: SOURCE_FONT_SIZE,
         baseline_shift: 0.0,
         x_alignment: alignment,
+        chunk_alignment: None,
     }
 }

@@ -1,5 +1,19 @@
 # 品質ゲート改善の作業台帳
 
+R3026〜R3030でAA統合テストの誤oracleを訂正した。R1959原HTML3件は現行test入力とbyte一致、R1960の独立Chrome PNG/RGBA pinsを再照合し、Chrome自身にもAA境界の30→29があると確認した。pure maskの全coverage同色不変、clip付きfullrect/background-onlyの30固定は維持し、AA-onlyは同条件の独立Skia SrcOver直描画controlとの全RGBA一致へ分離した。Src指定の実験はR3024で無効（対象33中31成功/2失敗）と確認して不採用、mask式/入力/正解画像/99基準は変更していない。
+
+R3026 format/foundation/ASTはactual0、R3027の描画/HTML関連1,637件は全成功（1,370未実行）、source前後一致。R3028のglyph専用auditは代表C4を取得後、文字なしclipped入力で「observed glyphsなし」を拒否したため、その失敗rawを保持。R3029は同じ現行binaryの既存汎用feature runnerで原HTML3件の実frameを新規取得し、source/input/reference SHAの不変を確認した。R3030の既存MagickOpsによる元ChromeとのRGB RMSE/MAE最小scoreはclipped99.9336271（66pixel差）、AA-only99.9356699（62pixel差）、background100（差0）、最大channel差1。差を許容pixel数で丸めず全画素の指標と実差を保存した。元Chrome記録はlegacy独立診断であり、modern formal receiptや全117合格へ再認定しない。
+
+同じ現行binaryの代表C4 component実PNGは再取得でも99.02469（control98.95543再現）。全117の最新完了件数は95合格/22未達のまま。証跡は `tmp/quality/reserved-warm-owner-r2939/parallel-rendering-candidates-native-r3027/observation.json`、`tmp/quality/renderer-oracle-separated-capture-r3028/result.json`、`tmp/quality/current-generic-aa-oracle-r3029/result.json`、`tmp/quality/current-oracle-scores-r3030/result.json`。次は現行sourceの全117再取得/採点とHTML性能計測。
+
+R3018〜R3021ではsingle middle spanの幅ceil64→原点trunc64と、一般的なopaque solid fill-only pathのSkia対応を候補として検証した。format/foundation/ASTはactual0、対象25/25成功。関連1,635件中1,634成功・1失敗（fractional generated clip内の同色backdropが期待30に対し29）、source前後一致。失敗を基準変更で通さず候補未採用のまま保持する。診断の代表C4 component実製品PNGはcontrol98.95543を再現し、候補99.02469。独立参照・scorer・配色評価は不変。全117の最新完了件数は引き続き95合格/22未達であり、代表1件を全件結果へ加算しない。原証跡は `tmp/quality/reserved-warm-owner-r2939/parallel-rendering-candidates-native-r3019/observation.json` と `tmp/quality/c4-chunk-product-{capture-r3020,score-r3021}/result.json`。次は不透明paintのAA合成の同色不変を直し、関連回帰→全117再採点へ進む。
+
+R3014/R3015は複数spanの文字幅・原点補正とHTML initial/resizeの所有frame移譲の関連検証。format・source-static-foundation・ASTはactual0、chunk回帰13/13、描画/HTML関連回帰1,630/1,630成功（1,370未実行）、検査前後source一致。証跡は `tmp/quality/reserved-warm-owner-r2939/glyph-property-contract-{foundation,ast,native}-r3014/` と `parallel-rendering-candidates-native-r3015/`。完全ゲート・coverage100%・全117画像合格の代用にはしない。R3008/R3009/R3010の失敗は保持し、usvgが保持するtextLength/kerning/自動wghtの実モデルに照合した回帰で訂正した。
+
+R3012/R3013の代表C4 component実frameは25描画・観測超過0。Chromeとのglyph ID/順序/font sizeが一致し、24/25描画の原点が一致した。配色投影済みの既存独立参照・採点器を変更せず、対照98.95543を再現、候補98.98257で未達。全117の最新完了結果は95合格/22未達のまま。残り1原点の1/64px差と、矢印/角に残る差を別に追跡する。原証跡は `tmp/quality/c4-chunk-product-{capture-r3012,score-r3013}/result.json`。
+
+R3001/R3002はeb9f05ad時点のHTML release候補の一条件ABBA診断。初回frame6.8〜19.7ms、OS最大RSS42.43〜42.45MB（対照41.35〜41.40MB）で、以前の候補47〜48MBから低下したが非劣化未達。新しいowned initial/resize移譲はこの計測より後の修正であり、性能改善済みとは扱わない。証跡は `tmp/quality/frame-owner-release-candidate-r3001/result.json` と `tmp/quality/current-fork-html-worker-control-r3002/summary.json`。
+
 R2995/R2997は実描画引数のtest-only観測と、公開フレーム受入後の同世代inner画素解放を統合した限定検証。foundation・厳格Clippy・ASTは全0、既存krr-coverage診断laneの8回帰が全成功、source前後一致。8件以外の2,964件は未実行であり、完全ゲート・coverage100%・性能非劣化ではない。受入失敗時の未受理frame保持→同じframeの再試行成功、独立snapshot、同長buffer再利用、同世代no-opを維持した。証跡は `tmp/quality/reserved-warm-owner-r2939/glyph-capture-and-frame-retirement-{foundation,ast,lint}-r2995/` と `glyph-capture-and-frame-retirement-native-r2997/`。画像解放の表示時間・RSSは未測定。
 
 R2987は同じ実frameの描画引数を25件、上限超過0で取得した。frameはR2966のC4 component実製品PNGとRGBA8 2,910,064bytes・SHA256 `e0847447bda528b5c0a5eb2d8d4979d65d51c9b4dd4f8ce5619593de51ec00c3`まで一致。原記録は `tmp/quality/c4-native-glyph-paint-capture-r2981/capture/report.json` と `tmp/quality/c4-native-glyph-catalog-and-capture-r2987/result.json`。Chrome R2970とは25描画のglyph ID・順序・font sizeが一致し、複数tspanの19描画だけ有効sizeへのadvance補正とspan幅ceil64→middle anchor→run原点trunc64が適用されない原因へ絞った。診断計算では19原点を再現したが、製品修正・合格数増加はまだない。既存の一致済み6描画は補正を重ねない。実装時は先頭座標から幅を逆算せず、既存HarfRustの全文shape結果を使い、適格な同face/size・水平middle chunkだけへ限定する。

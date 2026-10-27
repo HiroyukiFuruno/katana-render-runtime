@@ -3,22 +3,35 @@ use super::super::{AuthoredClipInfo, SvgCompositeRenderer};
 use resvg::usvg;
 use tiny_skia::{Pixmap, Transform};
 
+#[path = "svg_rasterize_composite_fill_only_tests.rs"]
+mod fill_only;
+
 const SIZE: u32 = 64;
 const TRANSLATE_X: f32 = 20.0;
 const TRANSLATE_Y: f32 = 30.0;
 const EVEN_ODD_PATH: &str = "M4 4H60V60H4Z M20 20H44V44H20Z";
 const SQUARE_PATH: &str = "M12 12H52V52H12Z";
+const OUTER_FILL_SAMPLE: (u32, u32) = (10, 10);
+const EVEN_ODD_HOLE_SAMPLE: (u32, u32) = (30, 30);
 
 #[test]
-fn opaque_fill_rule_is_preserved_with_required_stroke() -> Result<(), String> {
-    let rendered = render_path(
-        EVEN_ODD_PATH,
+fn opaque_fill_rule_is_preserved_with_and_without_stroke() -> Result<(), String> {
+    for attributes in [
         "fill=\"#ff0000\" fill-rule=\"evenodd\" stroke=\"#0000ff\" stroke-width=\"2\"",
-        Transform::identity(),
-    )?;
-    let outer = rendered.pixel(10, 10).ok_or("missing filled path pixel")?;
+        "fill=\"#ff0000\" fill-rule=\"evenodd\"",
+    ] {
+        assert_fill_rule_pixels(attributes)?;
+    }
+    Ok(())
+}
+
+fn assert_fill_rule_pixels(attributes: &str) -> Result<(), String> {
+    let rendered = render_path(EVEN_ODD_PATH, attributes, Transform::identity())?;
+    let outer = rendered
+        .pixel(OUTER_FILL_SAMPLE.0, OUTER_FILL_SAMPLE.1)
+        .ok_or("missing filled path pixel")?;
     let hole = rendered
-        .pixel(30, 30)
+        .pixel(EVEN_ODD_HOLE_SAMPLE.0, EVEN_ODD_HOLE_SAMPLE.1)
         .ok_or("missing even-odd hole pixel")?;
     assert_eq!(outer.alpha(), 255);
     assert_eq!(outer.red(), 255);
@@ -28,10 +41,20 @@ fn opaque_fill_rule_is_preserved_with_required_stroke() -> Result<(), String> {
 }
 
 #[test]
-fn caller_transform_is_preserved() -> Result<(), String> {
+fn caller_transform_is_preserved_with_and_without_stroke() -> Result<(), String> {
+    for attributes in [
+        "fill=\"#00ff00\" stroke=\"#000000\" stroke-width=\"1\"",
+        "fill=\"#00ff00\"",
+    ] {
+        assert_transformed_fill_pixels(attributes)?;
+    }
+    Ok(())
+}
+
+fn assert_transformed_fill_pixels(attributes: &str) -> Result<(), String> {
     let rendered = render_path(
         "M2 2H12V12H2Z",
-        "fill=\"#00ff00\" stroke=\"#000000\" stroke-width=\"1\"",
+        attributes,
         Transform::from_translate(TRANSLATE_X, TRANSLATE_Y),
     )?;
     assert!(is_visible(&rendered, 25, 35));
@@ -111,7 +134,7 @@ fn unsupported_styles_keep_the_existing_resvg_pixels() -> Result<(), String> {
         "fill=\"none\" stroke=\"#00ff00\" stroke-width=\"12\" stroke-linejoin=\"miter-clip\"",
         "fill=\"#ff0000\" fill-opacity=\"0.5\" stroke=\"url(#g)\" stroke-width=\"4\"",
         "fill=\"url(#g)\" stroke=\"#00ff00\" stroke-width=\"4\"",
-        "fill=\"#ff0000\"",
+        "fill=\"none\" stroke=\"none\"",
         "fill=\"#ff0000\" fill-opacity=\"0\" stroke=\"#0000ff\" stroke-width=\"4\"",
         "fill=\"#ff0000\" fill-opacity=\"0.5\" stroke=\"#0000ff\" stroke-width=\"4\"",
         "fill=\"#ff0000\" stroke=\"#0000ff\" stroke-opacity=\"0.5\" stroke-width=\"4\"",

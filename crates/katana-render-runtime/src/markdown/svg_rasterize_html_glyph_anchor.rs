@@ -67,7 +67,10 @@ pub(super) fn run_origin_css_scale(text: &usvg::Text, prepared: &[PreparedSpan])
     uniform_css_scale(text.abs_transform())
 }
 
-fn one_ordered_scalar_per_glyph(text: &str, glyphs: &[usvg::layout::PositionedGlyph]) -> bool {
+pub(super) fn one_ordered_scalar_per_glyph(
+    text: &str,
+    glyphs: &[usvg::layout::PositionedGlyph],
+) -> bool {
     if text.chars().count() != glyphs.len() || glyphs.len() < 2 {
         return false;
     }

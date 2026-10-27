@@ -2,6 +2,9 @@ use super::mask::composite_crop_with_mask;
 use super::mask::composite_with_mask;
 use crate::{HtmlBrowserSession, HtmlBrowserSource, HtmlBrowserViewport};
 
+#[path = "svg_rasterize_composite_mask_aa_control_tests.rs"]
+mod aa_control;
+
 const WIDTH: u32 = 4;
 const HEIGHT: u32 = 3;
 const CANVAS_WIDTH: u32 = 6;
@@ -134,18 +137,14 @@ fn assert_invalid_crop(
 }
 
 #[test]
-fn fractional_generated_clip_preserves_uniform_backdrop_and_aa_control() -> Result<(), String> {
+fn fractional_generated_clip_preserves_uniform_backdrop() -> Result<(), String> {
     let clipped = render_html_frame(
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><defs><clipPath id="clip"><rect x="4.296875" y="4.296875" width="32" height="32"/></clipPath></defs><g clip-path="url(#clip)"><rect width="48" height="48" fill="#1e1e1e"/></g></svg>"##,
-    )?;
-    let aa_only = render_html_frame(
-        r##"<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect x="4.296875" y="4.296875" width="32" height="32" fill="#1e1e1e"/></svg>"##,
     )?;
     let background_only =
         render_html_frame(r##"<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"/>"##)?;
     for (case, pixels) in [
         ("fractional clip", clipped),
-        ("AA-only shape", aa_only),
         ("background only", background_only),
     ] {
         if let Some((index, pixel)) = pixels

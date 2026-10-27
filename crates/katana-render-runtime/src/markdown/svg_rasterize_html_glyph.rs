@@ -23,6 +23,8 @@ thread_local! {
 mod anchor;
 #[path = "svg_rasterize_html_glyph_baseline.rs"]
 mod baseline;
+#[path = "svg_rasterize_html_glyph_chunk.rs"]
+mod chunk;
 #[path = "svg_rasterize_html_glyph_paint.rs"]
 mod paint;
 #[path = "svg_rasterize_html_glyph_runs.rs"]
@@ -152,11 +154,18 @@ impl<'a> HtmlGlyphRasterizer<'a> {
                 return Ok(Prepared::Unsupported);
             }
         }
-        self.apply_horizontal_alignment(text, &mut prepared);
+        self.apply_horizontal_alignment(text, &mut prepared)?;
         Ok(Prepared::Ready(prepared))
     }
 
-    fn apply_horizontal_alignment(&self, text: &usvg::Text, prepared: &mut [PreparedSpan]) {
+    fn apply_horizontal_alignment(
+        &self,
+        text: &usvg::Text,
+        prepared: &mut [PreparedSpan],
+    ) -> Result<(), String> {
+        if chunk::apply_single_middle(text, prepared)? {
+            return Ok(());
+        }
         if let Some(anchor_x) = single_horizontal_alignment(text, prepared) {
             let alignment = XAlignment {
                 anchor_x,
@@ -166,7 +175,9 @@ impl<'a> HtmlGlyphRasterizer<'a> {
             if let Some(span) = prepared.first_mut() {
                 span.x_alignment = Some(alignment);
             }
+            return Ok(());
         }
+        chunk::apply(self.database, text, prepared)
     }
 
     fn prepare_span(
@@ -241,6 +252,7 @@ impl<'a> HtmlGlyphRasterizer<'a> {
             font_size: input.font_size,
             baseline_shift,
             x_alignment: None,
+            chunk_alignment: None,
         }
     }
 
@@ -592,4 +604,5 @@ struct PreparedSpan {
     font_size: f32,
     baseline_shift: f32,
     x_alignment: Option<XAlignment>,
+    chunk_alignment: Option<chunk::SpanAlignment>,
 }

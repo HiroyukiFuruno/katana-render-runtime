@@ -154,6 +154,9 @@ pub(super) fn normalized_transform(
         .pre_scale(span.upem / span.font_size, span.upem / span.font_size)
         .post_translate(0.0, span.baseline_shift);
     let mut transform = scale_translation(transform, raster_scale);
+    if let Some(alignment) = span.chunk_alignment {
+        return super::chunk::position(alignment, transform, raster_scale);
+    }
     if let Some(alignment) = span.x_alignment {
         transform.tx = aligned_position_x(span, alignment, transform.tx, raster_scale);
     }
@@ -240,15 +243,24 @@ fn text_paint(span: &PreparedSpan) -> Paint {
 
 fn text_font(span: &PreparedSpan, typeface: &Typeface, raster_scale: f32) -> Font {
     let size = span
-        .x_alignment
+        .chunk_alignment
+        .map(|alignment| alignment.paint_css_size * raster_scale / alignment.css_scale)
+        .or_else(|| single_span_font_size(span, raster_scale));
+    let size = match size {
+        Some(size) => size,
+        None => {
+            super::super::SvgRasterizeOps::effective_html_font_size(span.font_size * raster_scale)
+        }
+    };
+    font_for_face(typeface, size)
+}
+
+fn single_span_font_size(span: &PreparedSpan, raster_scale: f32) -> Option<f32> {
+    span.x_alignment
         .and_then(|alignment| alignment.layout)
         .and_then(|layout| {
             super::anchor::paint_size(span.font_size, layout.css_scale, raster_scale)
         })
-        .unwrap_or_else(|| {
-            super::super::SvgRasterizeOps::effective_html_font_size(span.font_size * raster_scale)
-        });
-    font_for_face(typeface, size)
 }
 
 pub(super) fn font_for_face(typeface: &Typeface, size: f32) -> Font {

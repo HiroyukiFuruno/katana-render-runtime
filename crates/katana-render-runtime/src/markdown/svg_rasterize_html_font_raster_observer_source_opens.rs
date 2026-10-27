@@ -54,3 +54,7 @@ impl OpenTracker {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "svg_rasterize_html_font_raster_observer_source_opens_tests.rs"]
+mod tests;
