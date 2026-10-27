@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
@@ -12,7 +13,13 @@ from unittest.mock import patch
 
 from local_review_lock import review_lock
 from local_review_state import ReviewError
-from run_locked_command import _cargo_clean_target, run_locked_command
+from run_locked_command import (
+    _LockContentionError,
+    _acquire_lock,
+    _cargo_clean_target,
+    _main,
+    run_locked_command,
+)
 
 
 class LockedCommandTest(unittest.TestCase):
@@ -439,6 +446,29 @@ raise SystemExit(9)
             self.assertEqual(run_locked_command(["--", str(missing)], lock), 1)
             with review_lock(lock):
                 self.assertTrue(lock.exists())
+
+    def test_main_reports_lock_contention_without_traceback(self) -> None:
+        for arguments in (["--", "child"], ["--performance-coverage"]):
+            with self.subTest(arguments=arguments):
+                stderr = io.StringIO()
+                with patch(
+                    "run_locked_command.run_locked_command",
+                    side_effect=_LockContentionError("busy"),
+                ), patch("run_locked_command.sys.stderr", stderr):
+                    self.assertEqual(_main(arguments), 1)
+                self.assertEqual(
+                    stderr.getvalue(),
+                    "another verification or update is active; retry after it finishes\n",
+                )
+                self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_lock_body_review_error_is_not_reclassified(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            error = ReviewError("body failure")
+            with self.assertRaises(ReviewError) as raised:
+                with _acquire_lock(Path(directory) / "review.lock"):
+                    raise error
+            self.assertIs(raised.exception, error)
 
     def test_invalid_command_is_rejected_without_locking(self) -> None:
         self.assertEqual(run_locked_command([]), 2)

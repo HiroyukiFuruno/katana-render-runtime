@@ -3,16 +3,38 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from contextlib import ExitStack
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from local_review_lock import review_lock
+from local_review_state import ReviewError
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCK_PATH = ROOT / ".moon/cache/krr-terminal-report.lock"
 ROOT_PRODUCER_LOCK_PATH = ROOT / "tmp/quality/standalone-performance-coverage/root-nextest-producer.lock"
 PERFORMANCE_COVERAGE_MODE = "--performance-coverage"
 PERFORMANCE_COVERAGE_COMMAND = ["just", "performance-harness-coverage-run"]
+LOCK_CONTENTION_MESSAGE = (
+    "another verification or update is active; retry after it finishes"
+)
+
+
+class _LockContentionError(ReviewError):
+    pass
+
+
+@contextmanager
+def _acquire_lock(path: Path) -> Iterator[None]:
+    lock_stack = ExitStack()
+    try:
+        try:
+            lock_stack.enter_context(review_lock(path))
+        except ReviewError as error:
+            raise _LockContentionError from error
+        yield
+    finally:
+        lock_stack.close()
 
 
 def _cargo_clean_target(command_arguments: list[str], root: Path) -> Path | None:
@@ -101,7 +123,7 @@ def run_locked_command(
             )
             return 2
         root_producer_lock_path.parent.mkdir(parents=True, exist_ok=True)
-        with review_lock(root_producer_lock_path):
+        with _acquire_lock(root_producer_lock_path):
             return _run_child(PERFORMANCE_COVERAGE_COMMAND, root)
 
     protect_root_producer = bool(arguments) and arguments[0] == "--protect-root-producer"
@@ -114,11 +136,11 @@ def run_locked_command(
         return 2
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with ExitStack() as locks:
-        locks.enter_context(review_lock(lock_path))
+        locks.enter_context(_acquire_lock(lock_path))
         if protect_root_producer:
             # root coverageと同じ非待機ロックで、生成中の成果物をcleanから保護する。
             root_producer_lock_path.parent.mkdir(parents=True, exist_ok=True)
-            locks.enter_context(review_lock(root_producer_lock_path))
+            locks.enter_context(_acquire_lock(root_producer_lock_path))
             try:
                 protected_reference = _protected_clean_reference(command_arguments, root)
             except (OSError, RuntimeError) as error:
@@ -133,5 +155,13 @@ def run_locked_command(
         return _run_child(command_arguments[1:], root)
 
 
+def _main(arguments: list[str]) -> int:
+    try:
+        return run_locked_command(arguments)
+    except _LockContentionError:
+        print(LOCK_CONTENTION_MESSAGE, file=sys.stderr)
+        return 1
+
+
 if __name__ == "__main__":
-    raise SystemExit(run_locked_command(sys.argv[1:]))
+    raise SystemExit(_main(sys.argv[1:]))

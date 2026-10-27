@@ -108,6 +108,7 @@
 
 - 同じrepo・検査範囲の実行所有者は1名に固定する。toolが`session_id`または実行中cellを返したら、そのIDで終了コードを回収する。終了ファイルがまだ無いことを再起動理由にしない。再試行は旧プロセスの終了・実終了コード・ログ保全を確認してから新runへ進む。
 - 標準品質ゲートは既存のterminal-report排他lockを使う。限定検証も同じ既存`local_review_lock.review_lock`で所有権を確保し、取得できなければ既存ownerの結果を回収する。独立して並列化できる検査は、所有者が既存DAG内で並列実行する。重複起動時は各runの実PID・argv・中断結果を保持し、current sourceの成功へ転用しない。
+- 排他lockの寿命は実際の検査・更新・その子processの終了回収までとする。永続REPL、会話、調査や次のコマンドの準備中まで保持しない。各実行のcontext managerで取得・解放し、例外時も解放する。自分で排他を取得する標準producerには親から同じlockを重ねない。アンチパターン: idleのREPLがlockを持ち続け、本人の`just depends-update-all`を妨げる。正: 実行中だけ排他し、終了後は別processによる取得・解放も確認する。競合時もlock fileの削除や排他回避で通さない。検索語: `idle lock retention`, `command scoped lock`, `depends-update-all lock`。
 
 - main agent は司令塔として、設計、ハーネス、担当分離、統合レビュー、最終ゲートを担う。分離可能なreview指摘修正をmainが直列実装しない。
 - 変更ファイルと責務を先に棚卸しし、同時実行枠の範囲で1ファイルまたは非重複責務ごとにsubagentへ並列委譲する。空き枠を放置して直列化しない。
