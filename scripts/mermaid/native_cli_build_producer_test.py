@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import native_cli_build_bindings as bindings
 import cargo_capacity_guard_native_cli_observation as guard
+import cargo_capacity_guard as capacity_guard
 from cargo_capacity_guard import JsonObject, validate_build_executable
 import produce_native_cli_build_receipt as producer
 import produce_html_performance_evidence as owner
@@ -117,28 +118,120 @@ class InputAdmissionTests(unittest.TestCase):
 
     def test_capacity_preflight_is_no_child_guard_before_request_environment(self) -> None:
         target = self.root / "target"
-        report = {**guard.policy(target), "metric_available": True, "current_bytes": 1024,
-                  "over_capacity": False, "removed": ["finite artifact eviction"],
-                  "cleanup_status": "completed"}
-        attempt, lifecycle, binding = self._preflight_fixture("d", report)
-        observed: list[list[str]] = []
+        report = self._fresh_capacity_report(target, 1024)
+        attempt, _lifecycle, binding = self._preflight_fixture("d", report)
+        measured, observed = self._measured_sequence(attempt, [(report, 0, "")])
+        original = measured
 
-        def measured(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
-            observed.append(argv)
+        def checked(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
             self.assertEqual(kwargs["check"], False)
             self.assertNotIn(guard.REQUEST_ENV, cast(dict[str, str], kwargs["env"]))
-            callback = cast(Callable[[Path], None], kwargs["lifecycle_sink"])
-            callback(lifecycle)
-            return subprocess.CompletedProcess(argv, 0, (json.dumps(report) + "\n").encode(), b"")
+            return original(argv, **kwargs)
 
-        with patch.object(owner, "_measurement_command", side_effect=measured):
+        with patch.object(owner, "_measurement_command", side_effect=checked):
                 evidence = producer._capacity_preflight(cast(bindings.Bindings, binding), self.root, attempt)
         self.assertEqual(len(observed), 1)
         self.assertIn("--require-capacity", observed[0])
         self.assertNotIn("build", observed[0])
         self.assertEqual(evidence["actualExit"], 0)
-        self.assertEqual(cast(JsonObject, evidence["report"])["cleanup_status"], "completed")
+        self.assertEqual(cast(JsonObject, evidence["report"])["cleanup_status"], "not-needed")
+        self.assertIsNone(evidence["cleanupObservation"])
+        self.assertIsNone(evidence["refreshObservation"])
         self.assertTrue((attempt / "capacity-preflight.json").is_file())
+
+    def test_capacity_preflight_reobserves_once_after_cleanup_and_preserves_both_runs(self) -> None:
+        target = self.root / "target"
+        policy = guard.policy(target)
+        threshold = cast(int, policy["baseline_bytes"]) * cast(int, policy["factor"])
+        initial = self._cleanup_capacity_report(target, threshold + 1000, threshold - 1000)
+        fresh = self._fresh_capacity_report(target, threshold - 1000)
+        attempt, _lifecycle, binding = self._preflight_fixture("h", initial)
+        measured, calls = self._measured_sequence(attempt, [(initial, 0, "stderr-0"), (fresh, 0, "stderr-1")])
+
+        with patch.object(owner, "_measurement_command", side_effect=measured):
+            evidence = producer._capacity_preflight(cast(bindings.Bindings, binding), self.root, attempt)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0], calls[1])
+        self.assertEqual(cast(JsonObject, evidence["report"])["current_bytes"], threshold - 1000)
+        cleanup = json.loads((attempt / "capacity-preflight-cleanup-observation.json").read_text())
+        refresh = json.loads((attempt / "capacity-preflight-refresh-observation.json").read_text())
+        self.assertEqual(cleanup["actualExit"], 0)
+        self.assertEqual(cleanup["report"]["current_bytes"], threshold + 1000)
+        self.assertEqual(cleanup["report"]["post_clean_bytes"], threshold - 1000)
+        self.assertEqual(guard.file_record(self._sequence_stdout(attempt, 0)), cleanup["stdout"])
+        self.assertEqual(guard.file_record(self._sequence_stdout(attempt, 1)), evidence["stdout"])
+        self.assertEqual(evidence["cleanupObservation"], guard.file_record(
+            attempt / "capacity-preflight-cleanup-observation.json"))
+        self.assertEqual(evidence["refreshObservation"], guard.file_record(
+            attempt / "capacity-preflight-refresh-observation.json"))
+        self.assertEqual(guard.file_record(self._sequence_stdout(attempt, 1)), refresh["stdout"])
+        self.assertEqual(cleanup["actualExit"], 0)
+        self.assertEqual(evidence["actualExit"], 0)
+
+    def test_capacity_preflight_rejects_second_cleanup_or_invalid_fresh_report(self) -> None:
+        target = self.root / "target"
+        policy = guard.policy(target)
+        threshold = cast(int, policy["baseline_bytes"]) * cast(int, policy["factor"])
+        initial = self._cleanup_capacity_report(target, threshold + 1000, threshold - 1000)
+        missing_clean_status = self._fresh_capacity_report(target, threshold - 1000)
+        del missing_clean_status["cleanup_status"]
+        negative_cases = [
+            (initial, {**self._fresh_capacity_report(target, threshold - 1000),
+                       "removed": ["second cleanup"]}, 2),
+            (initial, {**self._fresh_capacity_report(target, threshold - 1000),
+                       "cleanup_attempts": [{"attempt": 1}]}, 2),
+            (initial, self._fresh_capacity_report(target, threshold + 1000), 2),
+            (initial, {**self._fresh_capacity_report(target, threshold - 1000),
+                       "metric_available": False}, 2),
+            (initial, missing_clean_status, 2),
+            ({key: value for key, value in self._fresh_capacity_report(target, threshold - 1000).items()
+              if key != "cleanup_status"}, None, 1),
+            ({**initial, "cleanup_status": "failed"}, None, 1),
+            ({**initial, "cleanup_status": "dry-run"}, None, 1),
+            ({**initial, "cleanup_status": "unexpected"}, None, 1),
+        ]
+        for index, (first, fresh, expected_calls) in enumerate(negative_cases):
+            with self.subTest(case=index):
+                attempt, _lifecycle, binding = self._preflight_fixture(str(index + 1), first)
+                sequence = [(first, 0, "")]
+                if fresh is not None:
+                    sequence.append((fresh, 0, ""))
+                measured, calls = self._measured_sequence(attempt, sequence)
+
+                with patch.object(owner, "_measurement_command", side_effect=measured):
+                    with self.assertRaises(RuntimeError):
+                        producer._capacity_preflight(cast(bindings.Bindings, binding), self.root, attempt)
+                self.assertEqual(len(calls), expected_calls)
+                self.assertTrue((attempt / "capacity-preflight-cleanup-observation.json").is_file())
+                first_sidecar = json.loads(
+                    (attempt / "capacity-preflight-cleanup-observation.json").read_text()
+                )
+                self.assertEqual(first_sidecar["actualExit"], 0)
+                self.assertEqual(guard.file_record(
+                    Path(first_sidecar["stdout"]["path"])), first_sidecar["stdout"])
+                if fresh is not None:
+                    self.assertTrue((attempt / "capacity-preflight-refresh-observation.json").is_file())
+                    fresh_sidecar = json.loads(
+                        (attempt / "capacity-preflight-refresh-observation.json").read_text()
+                    )
+                    self.assertEqual(fresh_sidecar["actualExit"], 0)
+                    self.assertEqual(guard.file_record(
+                        Path(fresh_sidecar["stdout"]["path"])), fresh_sidecar["stdout"])
+
+    def test_capacity_preflight_does_not_retry_nonzero_cleanup_run(self) -> None:
+        target = self.root / "target"
+        policy = guard.policy(target)
+        threshold = cast(int, policy["baseline_bytes"]) * cast(int, policy["factor"])
+        report = self._cleanup_capacity_report(self.root / "target", threshold + 1000, threshold - 1000)
+        attempt, _lifecycle, binding = self._preflight_fixture("j", report)
+        measured, calls = self._measured_sequence(attempt, [(report, 1, "failed")])
+
+        with patch.object(owner, "_measurement_command", side_effect=measured):
+            with self.assertRaisesRegex(RuntimeError, "capacity preflight did not admit"):
+                producer._capacity_preflight(cast(bindings.Bindings, binding), self.root, attempt)
+        self.assertEqual(len(calls), 1)
+        cleanup = json.loads((attempt / "capacity-preflight-cleanup-observation.json").read_text())
+        self.assertEqual(cleanup["actualExit"], 1)
 
     def test_capacity_preflight_failure_stops_before_cargo(self) -> None:
         attempt = self.root / "tmp" / ("e" * 64)
@@ -189,7 +282,7 @@ class InputAdmissionTests(unittest.TestCase):
         attempt = self.root / "tmp" / (token * 64)
         attempt.mkdir(parents=True)
         target = self.root / "target"
-        target.mkdir()
+        target.mkdir(exist_ok=True)
         if retain_debug:
             (target / "debug").mkdir(parents=True)
         stdout = attempt / "stdout.raw"
@@ -204,6 +297,61 @@ class InputAdmissionTests(unittest.TestCase):
             child_environment={"PATH": os.environ["PATH"], "CARGO_CAPACITY_PROTECTED_REFS": "[]"},
         )
         return attempt, lifecycle, binding
+
+    def _fresh_capacity_report(self, target: Path, current: int) -> JsonObject:
+        return {**guard.policy(target), "metric_available": True, "current_bytes": current,
+                "over_capacity": current > cast(int, guard.policy(target)["baseline_bytes"])
+                * cast(int, guard.policy(target)["factor"]), "removed": [],
+                "cleanup_status": "not-needed"}
+
+    def _cleanup_capacity_report(self, target: Path, current: int, post_clean: int) -> JsonObject:
+        policy = guard.policy(target)
+        threshold = cast(int, policy["baseline_bytes"]) * cast(int, policy["factor"])
+        soft_goal = cast(int, policy["baseline_bytes"])
+        shortfall: JsonObject = {"attempt": 1, "maxsize_bytes": soft_goal, "exit_code": 1,
+            "output": "insufficient closed inactive artifact capacity; active profiles retained",
+            "classification": "closed-inactive-shortfall", "no_mutation": True,
+            "staged_paths": [], "invalidated_profiles": [], "pre_clean_bytes": current,
+            "post_clean_bytes": current, "actual_removed_bytes": 0, "eviction_details": {},
+            "dry_run": False}
+        cleanup: JsonObject = {"attempt": 2, "maxsize_bytes": threshold, "exit_code": 0,
+            "output": "finite artifact eviction after soft-goal shortfall", "pre_clean_bytes": current,
+            "post_clean_bytes": post_clean, "actual_removed_bytes": max(current - post_clean, 0),
+            "dry_run": False}
+        report: JsonObject = {**policy, "metric_available": True, "current_bytes": current,
+            "over_capacity": current > threshold, "removed": ["finite artifact eviction"],
+            "cleanup_status": "incomplete", "clean_exitcode": 0,
+            "post_clean_bytes": post_clean, "actual_removed_bytes": max(current - post_clean, 0),
+            "cleanup_goal_bytes": soft_goal, "cleanup_goal_reached": post_clean <= soft_goal,
+            "remaining_over_capacity": post_clean > threshold,
+            "cleanup_attempts": [shortfall, cleanup], "finite_cleanup": {},
+            "clean_output": "attempt 1: soft-goal shortfall; attempt 2: hard-cap cleanup"}
+        self.assertTrue(capacity_guard._safe_incomplete_cleanup_below_hardcap(report))
+        return report
+
+    def _sequence_stdout(self, attempt: Path, index: int) -> Path:
+        return attempt / f"capacity-sequence-{index}.raw"
+
+    def _measured_sequence(
+        self, attempt: Path, sequence: list[tuple[JsonObject, int, str]]
+    ) -> tuple[Callable[..., subprocess.CompletedProcess[bytes]], list[list[str]]]:
+        calls: list[list[str]] = []
+
+        def measured(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+            index = len(calls)
+            calls.append(argv.copy())
+            report, exit_code, error = sequence[index]
+            stdout = self._sequence_stdout(attempt, index)
+            stderr = attempt / f"capacity-sequence-{index}.err"
+            stdout.write_text(json.dumps(report) + "\n")
+            stderr.write_text(error)
+            lifecycle = attempt / f"capacity-sequence-{index}.json"
+            lifecycle.write_text(json.dumps({"exitCode": exit_code, "groupClosed": True,
+                "rawFdsClosed": True, "raw": [{"path": str(stdout)}, {"path": str(stderr)}]}))
+            cast(Callable[[Path], None], kwargs["lifecycle_sink"])(lifecycle)
+            return subprocess.CompletedProcess(argv, exit_code, stdout.read_bytes(), stderr.read_bytes())
+
+        return measured, calls
 
     def test_capacity_preflight_rejects_debug_profile_symlink(self) -> None:
         attempt = self.root / "tmp" / ("g" * 64)

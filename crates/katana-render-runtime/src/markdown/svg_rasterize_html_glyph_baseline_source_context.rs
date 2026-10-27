@@ -11,9 +11,10 @@ fn contains_candidate(nodes: &[Node]) -> bool {
     nodes.iter().any(|node| match node {
         Node::Group(group) => contains_candidate(group.children()),
         Node::Text(text) => {
-            quick_nested_middle_candidate(text)
-                && uniform_policy_with_nested_context(text, true)
-                    .is_some_and(|policy| policy.kind == PolicyKind::Middle)
+            super::middle::additional_middle_layout_supported(text)
+                || (quick_nested_middle_candidate(text)
+                    && uniform_policy_with_nested_context(text, true)
+                        .is_some_and(|policy| policy.kind == PolicyKind::Middle))
         }
         Node::Path(_) | Node::Image(_) => false,
     })

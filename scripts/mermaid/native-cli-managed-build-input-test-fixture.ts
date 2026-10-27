@@ -194,7 +194,7 @@ export function createManagedReaderInputs() {
     toolchainAbsent: chains.filter((file) => !fs.existsSync(file)),
   };
   const owned = (
-    role: "build" | "metadata" | "tool-query",
+    role: "build" | "metadata" | "preflight" | "tool-query",
     name: string,
     argv: string[],
     pid: number,
@@ -203,7 +203,12 @@ export function createManagedReaderInputs() {
     env: { [key: string]: string } = environment,
     time?: { startedNs: string; endedNs: string },
   ) => {
-    const folder = `tmp/${token}/lifecycle/${name}`;
+    const preflightFolder =
+      name === "capacity-preflight-refresh" ? "capacity-preflight-refresh" : "capacity-preflight";
+    const folder =
+      role === "preflight"
+        ? `tmp/${token}/${preflightFolder}/preflight-unit`
+        : `tmp/${token}/lifecycle/${name}`;
     const stdout = save(`${folder}/stdout.raw`, bytes),
       stderr = save(`${folder}/stderr.raw`, "");
     const startedNs = time?.startedNs ?? (role === "build" ? "30" : "10");
@@ -237,7 +242,7 @@ export function createManagedReaderInputs() {
         spawnObservedMonotonic: 1,
         observationLimit: "trusted dedicated session/group; non-atomic PID observations",
       },
-      runLimitSeconds: { build: 1800, metadata: 120, "tool-query": 30 }[role],
+      runLimitSeconds: { build: 1800, metadata: 120, preflight: 120, "tool-query": 30 }[role],
       cleanupLimitSeconds: 10,
       elapsedSeconds: 0.1,
       groupClosed: true,

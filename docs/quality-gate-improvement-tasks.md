@@ -1,5 +1,27 @@
 # 品質ゲート改善の作業台帳
 
+2026-10-27追加指示: GitHub ActionsとRust依存を最新の互換版へ更新し、未公開のv0.4.24をpatch releaseする。Actionsは4workflow/42参照を公式full SHAへ更新済み、実CI未確認。R3098の既存cargo upgrade dry-runはactual0でkatana-ast-lint0.5.3、brotli-decompressor6.2.0、taffy0.15.1、skia-safe0.156.0を更新候補として確認（まだRust依存未変更）。Skia更新は描画・性能の実測で採否判断する。local forkの間は既存registry専用pair/freshness readerを正式合格へ迂回しない。
+
+R3094は658件中654成功・4失敗（旧inline容量guardを対象にしたmutationが共通recipe化に未追従）。失敗rawを保持し、testのみを現行recipeへ修正したR3095は関連18件全成功/587未実行、8.18秒。R3096は厳格型・重複・diff検査すべてactual0。R3097/R3101の通常commitは容量で失敗し、commit未作成。direct lintにも既存admissionをClippy前後で呼ぶ修正とR3099の関連回帰成功、R3100の実admission成功/COV inventory不変を確認した。ただし後続harnessが使用するdebugとCOVの合計が固定上限を超えるため、完了したR3090/R3091用COV予約を解除した。次はRust依存更新でsourceが変わるため、その旧profileを将来のwarm実行へ予約しない。R3102は既存locked Cargo cleanで当該profileのみ整理してactual0、通常debug全inventory完全一致、測定ログ・画像は保持。通常hookを省略せず再実行する。
+
+最新の検証はR3089の完全静的DAG actual0、R3090の描画/HTML関連1,660件全成功（1,370未実行、56.961秒）、各source前後一致。flat middleへの追加補正はR3076でXY合格2件を劣化させたため取り下げ、既存単一行経路を維持し明示複数行だけへ限定した。R3091の現行候補26件と対照26件の実frame取得は全成功/source不変。R3092診断採点はactual0、対照26件すべて旧製品RGBAと完全一致・旧score再現。未達18件のうちEN Ishikawa4分類が97.42844→99.181339となり1件改善・残17件、合格対照の脱落0。XYはEN99.085241/JA99.107524へ復帰した。証跡は `tmp/quality/current-common-rendering-product-probe-r3091/result.json` と `tmp/quality/current-common-rendering-product-score-r3092/result.json`。全117件の現行正式合格や性能非劣化の代用にしない。
+
+R3054/R3062の透過圧縮はbytes/SHA/mode/mtimeを保持したが、原子的置換でinodeを変えた。R3042 en/jaのcandidate-svg/render-bindings.jsonが対象に含まれ、既存strict readerでは旧候補の物理identityを再認定できない。下記99/117は過去の完了測定値であり、現行正式受入には新しい候補の取得・採点が必要。独立raw JS R2821原本、候補PNGの内容、保護binaryは不変。旧pinを書き換えず、新runへ再取得する。物理identity束縛済み証跡の置換禁止をAGENTSへ固定し、既存readerの同内容inode置換拒否回帰を追加中。
+
+R3089は静的検査の入口capacity-admissionがCOVの予約保持を渡しておらず、warm inventory2,866件から341件へ減少した。静的成功とキャッシュ保持失敗を区別する。R3090は必要分を再buildして成功した。入口にも既存retain-profileを適用する限定修正を実施中。固定閾値4,726,095,872Bや品質条件は変更しない。
+
+最新の完了一括測定R3042/R3043は製品PNG117件中99件が99以上、未達18件（C4 9、Ishikawa 2、Kanban 2、Wardley 4、ZenUML 1）。以前の95件から4件増え、合格済みの脱落0。EN51/59・JA48/58。source前後一致、未達18件によるactual exit1を保持する。承認済みforkのlocal path依存でありregistry配布版のリリース受入とは区別する。証跡は `tmp/quality/current-native117-delta-r3043/summary.json` と `tmp/quality/current-rendering-managed-mermaid-r3042/run/receipt.json`。
+
+R3039の正規build proof binaryによるHTML一条件ABBAは全4worker成功。初回frameは候補0.00710〜0.00758秒、対照0.0800〜0.0857秒、最大RSSは候補37.78〜38.09MB、対照41.25〜41.35MB。ただし再表示・resizeには1ms未満の増加が残り、全84条件・全phase非劣化合格ではない。証跡は `tmp/quality/current-owned-frame-html-worker-control-r3039/summary.json`。
+
+次のglyph変換正規化と容量整理後の再admission修正はR3049の完全静的DAG成功・source前後一致、容量関連25回帰成功。R3051のRust検証はV8 archive作成時の実ディスク不足でactual101となり、テスト未実行。R3052は未起動。R3053の承認済みprivate clean-allは一部repoの安全ガードでactual1、部分整理後の空き6.37GB・凍結5binaryのSHA保持を確認した。R3055では過去metadata raw810件をmacOS標準の透過圧縮で整理し、内容SHA・mode・mtimeを保持して11,529,895,936B回収、完了時空き15,769,063,424B。元ログを削除せず、固定閾値も変更していない。証跡は `tmp/quality/lossless-query-compression-r3054/result.json`。
+
+[ ] HTML同一render内でASCII抽出/provenance検証のXML解析を共有する候補を実装。DTD・empty provenance・強制resvg・hash/tree ID検証を維持する回帰を追加したが、検証は未完。R3056 fmtは新テストの閉じbrace欠落でactual1、作者が修正済み、静的DAGは未起動。性能改善済みとは扱わない。
+
+[ ] Mermaidのdominant-baseline:middle適格性を、既存計算のまま同face/size・水平・明示改行等へ限定して拡張する。Ishikawaの差分が複数行textへ集中し、Wardleyのdy省略も既存laneから外れることを確認した。新shape/cache/per-span snapや図名による補正は禁止。glyph正規化とは独立に回帰・実画像で確認する。
+
+[ ] 容量cleanup後のfresh admissionは25回帰を通過したが、reviewで最終managed receiptからcleanup sidecarへFileRecord連鎖がないと確認。producer/schema/strict readerと回帰で束縛し、旧receiptは履歴診断として保持する。受入条件や閾値は下げない。
+
 R3026〜R3030でAA統合テストの誤oracleを訂正した。R1959原HTML3件は現行test入力とbyte一致、R1960の独立Chrome PNG/RGBA pinsを再照合し、Chrome自身にもAA境界の30→29があると確認した。pure maskの全coverage同色不変、clip付きfullrect/background-onlyの30固定は維持し、AA-onlyは同条件の独立Skia SrcOver直描画controlとの全RGBA一致へ分離した。Src指定の実験はR3024で無効（対象33中31成功/2失敗）と確認して不採用、mask式/入力/正解画像/99基準は変更していない。
 
 R3026 format/foundation/ASTはactual0、R3027の描画/HTML関連1,637件は全成功（1,370未実行）、source前後一致。R3028のglyph専用auditは代表C4を取得後、文字なしclipped入力で「observed glyphsなし」を拒否したため、その失敗rawを保持。R3029は同じ現行binaryの既存汎用feature runnerで原HTML3件の実frameを新規取得し、source/input/reference SHAの不変を確認した。R3030の既存MagickOpsによる元ChromeとのRGB RMSE/MAE最小scoreはclipped99.9336271（66pixel差）、AA-only99.9356699（62pixel差）、background100（差0）、最大channel差1。差を許容pixel数で丸めず全画素の指標と実差を保存した。元Chrome記録はlegacy独立診断であり、modern formal receiptや全117合格へ再認定しない。
@@ -144,8 +166,8 @@ R2715の認証拒否は、Moon producerと直接validatorの環境fingerprint差
 
 | 対象 | 最新の完了済み証拠 | 残る受入条件 |
 | --- | --- | --- |
-| Mermaid #108 | R2847で現行sourceのCLI/SVG/native PNG117取得。R2850の製品PNG診断は非C4/Tree101件中46件99以上・55件未達、C4/Tree16件未採点 | C4のSVG geometry寸法差とnative textの差を修正し、正式117件全99以上。旧R2672のChrome再raster92/117を代用しない |
-| HTML #109 | R2673で84/84が90以上・最低91.49827・出力font一致established | 公開registry採用後の全84、私有原本全Y/実末尾/全目次、consumer XY/resize契約、初回/再表示/resizeの時間とRSS非劣化。99は#106 |
+| Mermaid #108 | 最新完了一括測定R3042/R3043は製品PNG99/117件が99以上、18件未達（C4 9、Ishikawa 2、Kanban 2、Wardley 4、ZenUML 1）。既存合格の脱落0。後続の候補修正はまだ未採点 | 18件の共通描画原因を修正し、現行sourceとregistry依存で正式117件全99以上。旧SVG/Chrome再rasterの成功を代用しない |
+| HTML #109 | 旧sourceのR2907は画像84/84が90以上・出力font一致established。R3039は1条件ABBAの部分性能測定。現行sourceの全84正式合格ではない | 公開registry採用後の全84画像/動的/出力font、私有原本全Y/実末尾/全目次、consumer XY/resize契約、全phaseの時間/RSS非劣化と表示3秒未満。最終99は#106 |
 | runtime | 撤回後R2680は2,683成功・失敗0・既存ignored24・実行漏れ0、source/binary不変 | 最新全workspace品質ゲート・coverage100%/未計測0・最終性能は別工程 |
 | fork依存 | PR #3はHEAD5a776257のreview/未解決0/必須3 OS CI後にexpected SHA通常merge済み、c01f0165。R2836でusvg package検証compile0、upload403（共通tokenの権限不足） | 新規/更新公開と対象crateに適合する認証→2crate公開→KRR registry採用。未公開のpath/git依存を最終releaseへ残さない |
 | 公開 | KRRはrelease/v0.4.24、正式公開は未完了 | 最新変更commit・release inclusion同期、Draft PR→最新review/個別reply・resolve→Ready→必須3 OS CI→保護merge、GitHub Release/3crate公開、#108/#109 close、安全なcleanup |

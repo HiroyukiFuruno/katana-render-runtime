@@ -10,11 +10,21 @@ pub(super) fn uniform_policy_with_nested_context(
     text: &usvg::Text,
     nested_text_context: bool,
 ) -> Option<Policy> {
+    uniform_policy_with_context(text, nested_text_context, false)
+}
+
+pub(super) fn uniform_policy_with_context(
+    text: &usvg::Text,
+    nested_text_context: bool,
+    additional_text_context: bool,
+) -> Option<Policy> {
     if text.writing_mode() != usvg::WritingMode::LeftToRight {
         return None;
     }
     let css_scale = super::super::anchor::uniform_css_scale(text.abs_transform());
-    let middle_supported = css_scale.is_some() && middle::layout_supported(text);
+    let middle_supported = css_scale.is_some()
+        && (middle::layout_supported(text)
+            || (additional_text_context && middle::additional_middle_layout_supported(text)));
     let nested_middle_supported =
         css_scale.is_some() && nested_text_context && middle::nested_layout_supported(text);
     let mut policy = None;

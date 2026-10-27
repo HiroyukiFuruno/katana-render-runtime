@@ -130,6 +130,11 @@ impl<'a> HtmlGlyphRasterizer<'a> {
             .is_some_and(|context| context.matches(text))
     }
 
+    pub(super) fn has_authored_additional_text_context(&self, text: &usvg::Text) -> bool {
+        self.authored_text_context
+            .is_some_and(|context| context.matches_additional(text))
+    }
+
     #[cfg(all(test, target_os = "macos"))]
     pub(super) fn new_coretext(database: &'a usvg::fontdb::Database) -> Self {
         Self {

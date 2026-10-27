@@ -2,8 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
+import type { JsonValue } from "./mermaid-pair-manifest";
 import {
   canonicalRegularFile,
+  digestStringRecord,
   type FileRecord,
   validateCapacityReport,
   verifyFileRecord,
@@ -12,6 +14,8 @@ import {
   type ManagedObservation,
   type ManagedReceipt,
   type ManagedRequest,
+  managedCapacityObservationSchema,
+  managedCapacityPreflightSchema,
   managedLifecycleSchema,
   managedOwnedSchema,
 } from "./native-cli-managed-build-schema";
@@ -60,6 +64,245 @@ export function verifyManagedCapacity(root: string, before: FileRecord, after: F
   measurement.strict().parse(afterValue);
 }
 
+type CapacityPreflight = ReturnType<typeof managedCapacityPreflightSchema.parse>;
+type CapacityObservation = ReturnType<typeof managedCapacityObservationSchema.parse>;
+type CapacityEvidence = CapacityPreflight | CapacityObservation;
+type CapacityEvidenceSchema = CapacityEvidence["schema"];
+type PreflightLogDirectory = "capacity-preflight" | "capacity-preflight-refresh";
+
+function verifyPreflightObservation(
+  pin: FileRecord,
+  expectedPath: string,
+  schema: "krr-native-cli-capacity-preflight-v1",
+  root: string,
+  python: string,
+  attempt: string,
+  attemptToken: string,
+  logDirectory: PreflightLogDirectory,
+  environment: { [key: string]: string },
+): CapacityPreflight;
+function verifyPreflightObservation(
+  pin: FileRecord,
+  expectedPath: string,
+  schema:
+    | "krr-native-cli-capacity-preflight-cleanup-v1"
+    | "krr-native-cli-capacity-preflight-refresh-v1",
+  root: string,
+  python: string,
+  attempt: string,
+  attemptToken: string,
+  logDirectory: PreflightLogDirectory,
+  environment: { [key: string]: string },
+): CapacityObservation;
+function verifyPreflightObservation(
+  pin: FileRecord,
+  expectedPath: string,
+  schema: CapacityEvidenceSchema,
+  root: string,
+  python: string,
+  attempt: string,
+  attemptToken: string,
+  logDirectory: PreflightLogDirectory,
+  environment: { [key: string]: string },
+): CapacityEvidence {
+  requireBound(pin.path === expectedPath, "capacity preflight evidence path differs");
+  const evidence = parseCapacityEvidence(read(pin));
+  requireBound(
+    evidence.schema === schema && evidence.cwd === root,
+    "capacity preflight evidence differs",
+  );
+  verifyPreflightOutputs(evidence, root, attempt, attemptToken, logDirectory, environment);
+  verifyPreflightCommand(evidence, root, python);
+  return evidence;
+}
+
+function parseCapacityEvidence(value: unknown): CapacityEvidence {
+  const accepted = managedCapacityPreflightSchema.safeParse(value);
+  return accepted.success ? accepted.data : managedCapacityObservationSchema.parse(value);
+}
+
+function verifyPreflightOutputs(
+  evidence: CapacityEvidence,
+  root: string,
+  attempt: string,
+  attemptToken: string,
+  logDirectory: PreflightLogDirectory,
+  environment: { [key: string]: string },
+): void {
+  const lifecycle = managedLifecycleSchema.parse(read(evidence.lifecycle));
+  requireBound(
+    path.basename(evidence.lifecycle.path) === "lifecycle.json" &&
+      path.dirname(path.dirname(evidence.lifecycle.path)) === path.join(attempt, logDirectory),
+    "capacity preflight log directory differs",
+  );
+  owned(
+    managedOwnedSchema.parse({
+      argv: evidence.argv,
+      stdout: evidence.stdout,
+      stderr: evidence.stderr,
+      label: "capacity preflight",
+      cwd: root,
+      attemptToken,
+      environment,
+      environmentSha256: digestStringRecord(environment),
+      pid: lifecycle.identity.pid,
+      actualExit: evidence.actualExit,
+      startedNs: evidence.startedNs,
+      endedNs: evidence.endedNs,
+      reaped: evidence.reaped,
+      errors: [],
+    }),
+    evidence.lifecycle,
+    "preflight",
+  );
+  const actualReport = parseManagedJson(
+    fs.readFileSync(evidence.stdout.path, "utf8"),
+    "capacity preflight report",
+  );
+  same(actualReport, evidence.report, "capacity preflight raw report");
+}
+
+function verifyPreflightCommand(evidence: CapacityEvidence, root: string, python: string): void {
+  const expected = [
+    python,
+    path.join(root, "scripts/build/cargo_capacity_guard.py"),
+    "--root",
+    root,
+    "--target",
+    path.join(root, "target"),
+    "--state",
+    path.join(root, "tmp/.cargo-capacity-guard.json"),
+    "--require-capacity",
+    "--print-json",
+  ];
+  const fixedArguments = isDeepStrictEqual(evidence.argv, expected);
+  const retainedDebugProfile =
+    evidence.argv.length === expected.length + 2 &&
+    isDeepStrictEqual(evidence.argv.slice(0, expected.length), expected) &&
+    evidence.argv[expected.length] === "--retain-profile" &&
+    evidence.argv[expected.length + 1] === path.join(root, "target/debug");
+  requireBound(fixedArguments || retainedDebugProfile, "capacity preflight admission argv differs");
+}
+
+function verifyAcceptedPreflight(receipt: ManagedReceipt): CapacityPreflight {
+  const attempt = path.dirname(receipt.request.path);
+  const acceptedContents = managedCapacityPreflightSchema.parse(read(receipt.capacityPreflight));
+  const accepted = verifyPreflightObservation(
+    receipt.capacityPreflight,
+    path.join(attempt, "capacity-preflight.json"),
+    "krr-native-cli-capacity-preflight-v1",
+    receipt.cwd,
+    receipt.snapshotAfter.tools.python3.path,
+    attempt,
+    receipt.attemptToken,
+    acceptedContents.refreshObservation === null
+      ? "capacity-preflight"
+      : "capacity-preflight-refresh",
+    receipt.snapshotAfter.environment,
+  );
+  return managedCapacityPreflightSchema.parse(accepted);
+}
+
+function verifyPreflightReport(value: JsonValue, root: string): void {
+  const report = z.record(z.string(), z.unknown()).parse(value);
+  validateCapacityReport(value, "capacity preflight", root);
+  requireBound(
+    report.cleanup_status === "not-needed" &&
+      Array.isArray(report.removed) &&
+      report.removed.length === 0 &&
+      (report.cleanup_attempts === undefined ||
+        (Array.isArray(report.cleanup_attempts) && report.cleanup_attempts.length === 0)),
+    "accepted capacity preflight includes cleanup",
+  );
+}
+
+function verifyCleanupPreflightPair(receipt: ManagedReceipt, accepted: CapacityPreflight): void {
+  const root = receipt.cwd;
+  const attempt = path.dirname(receipt.request.path);
+  const cleanupPin = accepted.cleanupObservation;
+  const refreshPin = accepted.refreshObservation;
+  if (cleanupPin === null || refreshPin === null)
+    throw new Error("Managed native CLI capacity preflight evidence pair differs");
+  const cleanup = verifyPreflightObservation(
+    cleanupPin,
+    path.join(attempt, "capacity-preflight-cleanup-observation.json"),
+    "krr-native-cli-capacity-preflight-cleanup-v1",
+    root,
+    receipt.snapshotAfter.tools.python3.path,
+    attempt,
+    receipt.attemptToken,
+    "capacity-preflight",
+    receipt.snapshotAfter.environment,
+  );
+  const refresh = verifyPreflightObservation(
+    refreshPin,
+    path.join(attempt, "capacity-preflight-refresh-observation.json"),
+    "krr-native-cli-capacity-preflight-refresh-v1",
+    root,
+    receipt.snapshotAfter.tools.python3.path,
+    attempt,
+    receipt.attemptToken,
+    "capacity-preflight-refresh",
+    receipt.snapshotAfter.environment,
+  );
+  verifyCleanupRefreshAgreement(accepted, cleanup, refresh, root);
+}
+
+function verifyCleanupRefreshAgreement(
+  accepted: CapacityPreflight,
+  cleanup: CapacityObservation,
+  refresh: CapacityObservation,
+  root: string,
+): void {
+  same(accepted.argv, cleanup.argv, "cleanup capacity preflight argv");
+  same(accepted.argv, refresh.argv, "refresh capacity preflight argv");
+  same(accepted.report, refresh.report, "fresh capacity preflight report");
+  same(accepted.lifecycle, refresh.lifecycle, "fresh capacity preflight lifecycle");
+  same(accepted.stdout, refresh.stdout, "fresh capacity preflight stdout");
+  same(accepted.stderr, refresh.stderr, "fresh capacity preflight stderr");
+  const rawCleanup = parseManagedJson(
+    fs.readFileSync(cleanup.stdout.path, "utf8"),
+    "cleanup capacity report",
+  );
+  verifyCleanupCapacityReport(rawCleanup, root);
+}
+
+function verifyCleanupCapacityReport(value: JsonValue, root: string): void {
+  const initial = z.record(z.string(), z.unknown()).parse(value);
+  const policy = managedCapacitySchema.shape.capacityPolicy.strip().parse(initial);
+  requireBound(
+    (initial.cleanup_status === "completed" || initial.cleanup_status === "incomplete") &&
+      initial.metric_available === true &&
+      initial.clean_exitcode === 0 &&
+      initial.over_capacity === true &&
+      typeof initial.current_bytes === "number" &&
+      Number.isSafeInteger(initial.current_bytes) &&
+      initial.current_bytes > policy.threshold_bytes &&
+      initial.remaining_over_capacity === false &&
+      typeof initial.post_clean_bytes === "number" &&
+      Number.isSafeInteger(initial.post_clean_bytes) &&
+      initial.post_clean_bytes >= 0 &&
+      initial.post_clean_bytes <= policy.threshold_bytes &&
+      policy.target === path.join(root, "target"),
+    "cleanup capacity preflight report differs",
+  );
+}
+
+export function verifyManagedCapacityPreflight(receipt: ManagedReceipt): void {
+  const accepted = verifyAcceptedPreflight(receipt);
+  const rawReport = parseManagedJson(
+    fs.readFileSync(accepted.stdout.path, "utf8"),
+    "accepted capacity preflight report",
+  );
+  verifyPreflightReport(rawReport, receipt.cwd);
+  const hasCleanup = accepted.cleanupObservation !== null;
+  requireBound(
+    hasCleanup === (accepted.refreshObservation !== null),
+    "capacity preflight evidence pair differs",
+  );
+  if (hasCleanup) verifyCleanupPreflightPair(receipt, accepted);
+}
+
 export function verifyManagedCargo(
   receipt: ManagedReceipt,
   request: ManagedRequest,
@@ -73,6 +316,7 @@ export function verifyManagedCargo(
       observation.ownedCargo.stderr.path === path.join(attempt, "cargo.stderr.raw"),
     "guard output roles differ",
   );
+  verifyManagedCapacityPreflight(receipt);
   const metadata = managedOwnedSchema.parse(read(request.metadataObservation));
   owned(metadata, receipt.metadataLifecycle, "metadata");
   owned(receipt.buildObservation, receipt.buildLifecycle, "build");

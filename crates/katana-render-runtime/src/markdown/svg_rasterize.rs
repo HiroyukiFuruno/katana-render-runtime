@@ -273,12 +273,14 @@ impl SvgRasterizeOps {
         compatible_svg: &str,
         provenance: &GeneratedClipProvenance,
     ) -> Result<RasterizedSvg, SvgRasterizeError> {
+        let document = usvg::roxmltree::Document::parse(compatible_svg);
         Self::render_html_tree_with_text_provenance(
             tree,
             scale,
             compatible_svg,
             provenance,
             &GeneratedHtmlTextProvenance::default(),
+            &document,
         )
     }
 
@@ -289,12 +291,13 @@ impl SvgRasterizeOps {
         compatible_svg: &str,
         provenance: &GeneratedClipProvenance,
         html_text: &GeneratedHtmlTextProvenance,
+        document: &html_text_provenance::ParsedHtmlDocument<'_>,
     ) -> Result<RasterizedSvg, SvgRasterizeError> {
         #[cfg(test)]
         if std::env::var("KRR_HTML_FEATURE_RESVG_TEXT_RASTER").is_ok_and(|value| value == "1") {
             return Self::render_tree_with_provenance(tree, scale, compatible_svg, provenance);
         }
-        let routing = html_text.validated_routing(compatible_svg, tree)?;
+        let routing = html_text.validated_routing_with_document(document, tree)?;
         if routing.all_text_verified {
             return Self::render_tree_with_provenance(tree, scale, compatible_svg, provenance);
         }

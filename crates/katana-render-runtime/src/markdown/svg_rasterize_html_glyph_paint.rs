@@ -149,9 +149,7 @@ pub(super) fn normalized_transform(
     glyph: &resvg::usvg::layout::PositionedGlyph,
     raster_scale: f32,
 ) -> Transform {
-    let transform = glyph
-        .transform()
-        .pre_scale(span.upem / span.font_size, span.upem / span.font_size)
+    let transform = normalize_font_linear(glyph.transform(), span.font_size, span.upem)
         .post_translate(0.0, span.baseline_shift);
     let mut transform = scale_translation(transform, raster_scale);
     if let Some(alignment) = span.chunk_alignment {
@@ -161,6 +159,19 @@ pub(super) fn normalized_transform(
         transform.tx = aligned_position_x(span, alignment, transform.tx, raster_scale);
     }
     transform
+}
+
+fn normalize_font_linear(transform: Transform, font_size: f32, upem: f32) -> Transform {
+    /* WHY: usvgと同じ倍率で除算し、逆数との積の丸めで恒等変換を歪ませない。 */
+    let scale = font_size / upem;
+    Transform::from_row(
+        transform.sx / scale,
+        transform.ky / scale,
+        transform.kx / scale,
+        transform.sy / scale,
+        transform.tx,
+        transform.ty,
+    )
 }
 
 fn aligned_position_x(

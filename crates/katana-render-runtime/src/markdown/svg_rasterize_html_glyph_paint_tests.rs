@@ -8,6 +8,9 @@ use super::{
 use skia_safe::{FontMgr, FontStyle, Point as SkiaPoint};
 use tiny_skia::Transform;
 
+#[path = "svg_rasterize_html_glyph_paint_normalization_tests.rs"]
+mod normalization;
+
 const SOURCE_FONT_SIZE: f32 = 14.0;
 const FRACTIONAL_RASTER_SCALE: f32 = 0.999_974_55;
 const EXPECTED_EFFECTIVE_SIZE: f32 = 13.99;

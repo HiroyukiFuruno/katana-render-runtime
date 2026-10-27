@@ -1,6 +1,6 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use resvg::usvg::roxmltree::Document;
+use resvg::usvg::roxmltree::{Document, Node};
 
 #[path = "svg_rasterize_composite_authored_text_css.rs"]
 mod css;
@@ -10,6 +10,7 @@ mod source;
 #[derive(Default)]
 pub(in crate::markdown::svg_rasterize) struct AuthoredTextContext {
     unique_text: HashSet<String>,
+    additional: Vec<source::AdditionalTextProof>,
 }
 
 impl AuthoredTextContext {
@@ -25,6 +26,13 @@ impl AuthoredTextContext {
 
     pub(super) fn matches_text(&self, text: &str) -> bool {
         self.unique_text.contains(text)
+    }
+
+    pub(in crate::markdown::svg_rasterize) fn matches_additional(
+        &self,
+        text: &resvg::usvg::Text,
+    ) -> bool {
+        self.additional.iter().any(|proof| proof.matches(text))
     }
 }
 
@@ -42,12 +50,26 @@ pub(super) fn collect(document: &Document<'_>) -> AuthoredTextContext {
     let text_counts = source::text_occurrences(&text_nodes);
     let mut context = AuthoredTextContext::default();
     for root in text_nodes {
-        let Some(text) = source::nested_single_line_text(root, &styles) else {
-            continue;
-        };
-        if text_counts.get(&text) == Some(&1) {
-            context.unique_text.insert(text);
-        }
+        collect_root(&mut context, root, &styles, &text_counts);
     }
     context
+}
+
+fn collect_root(
+    context: &mut AuthoredTextContext,
+    root: Node<'_, '_>,
+    styles: &[simplecss::Selector<'_>],
+    counts: &HashMap<String, usize>,
+) {
+    if let Some(text) = source::nested_single_line_text(root, styles)
+        && counts.get(&text) == Some(&1)
+    {
+        context.unique_text.insert(text);
+    }
+    /* WHY: 追加laneは原DOMの明示複数行を別に証明し、既存nested証明を迂回させない。 */
+    if let Some(proof) = source::additional_text(root, styles)
+        && counts.get(proof.source_text()) == Some(&1)
+    {
+        context.additional.push(proof);
+    }
 }

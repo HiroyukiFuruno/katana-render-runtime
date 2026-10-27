@@ -29,17 +29,21 @@ fn validated(
     provenance: &GeneratedHtmlTextProvenance,
     svg: &str,
 ) -> Result<HashSet<String>, String> {
-    let tree = parse(svg)?;
-    provenance
-        .validated_ids(svg, &tree)
-        .map_err(|error| error.to_string())
+    routing(provenance, svg).map(|routing| routing.ids)
 }
 
 fn routing(provenance: &GeneratedHtmlTextProvenance, svg: &str) -> Result<HtmlTextRouting, String> {
     let tree = parse(svg)?;
-    provenance
+    let document = resvg::usvg::roxmltree::Document::parse(svg);
+    let shared = provenance
+        .validated_routing_with_document(&document, &tree)
+        .map_err(|error| error.to_string())?;
+    let original = provenance
         .validated_routing(svg, &tree)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    assert_eq!(shared.ids, original.ids);
+    assert_eq!(shared.all_text_verified, original.all_text_verified);
+    Ok(shared)
 }
 
 fn embedded_text_image(id: Option<&str>) -> String {
@@ -170,5 +174,14 @@ fn malformed_source_is_rejected_when_provenance_exists() -> Result<(), String> {
     let _ = recorded_markup(&mut provenance);
     let tree = parse(r#"<svg xmlns="http://www.w3.org/2000/svg" width="80" height="24"/>"#)?;
     assert!(provenance.validated_ids("<svg>", &tree).is_err());
+    Ok(())
+}
+
+#[test]
+fn shared_document_hash_ranges_follow_original_utf8_source() -> Result<(), String> {
+    let mut provenance = GeneratedHtmlTextProvenance::default();
+    let markup = recorded_markup(&mut provenance);
+    let svg = wrap(&format!("<!-- 日本語の前置き -->{markup}"));
+    assert!(routing(&provenance, &svg)?.all_text_verified);
     Ok(())
 }

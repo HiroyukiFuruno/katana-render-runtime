@@ -152,6 +152,31 @@ describe("managed CLI strict unit boundaries; no actual build evidence", () => {
       fs.rmSync(fixture.root, { recursive: true, force: true });
     }
   });
+  test("owned raw FD closure rejects leaf inode replacement with unchanged bytes SHA size and mode", () => {
+    const fixture = createManagedReaderFixture();
+    try {
+      const observed = fixture.receipt.buildObservation;
+      owned(observed, fixture.receipt.buildLifecycle, "build");
+      const raw = observed.stdout.path,
+        before = fs.statSync(raw, { bigint: true }),
+        bytes = fs.readFileSync(raw),
+        sha256 = fileSha256(raw),
+        replacement = `${raw}.replacement`;
+      fs.writeFileSync(replacement, bytes, { flag: "wx", mode: Number(before.mode) });
+      fs.chmodSync(replacement, Number(before.mode));
+      fs.renameSync(replacement, raw);
+      const after = fs.statSync(raw, { bigint: true });
+      expect(fs.readFileSync(raw)).toEqual(bytes);
+      expect(fileSha256(raw)).toBe(sha256);
+      expect([after.size, after.mode, after.dev]).toEqual([before.size, before.mode, before.dev]);
+      expect(after.ino).not.toBe(before.ino);
+      expect(() => owned(observed, fixture.receipt.buildLifecycle, "build")).toThrow(
+        /raw inode differs/,
+      );
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
   test("owned artifact roles reject distinct paths that alias one inode", () => {
     const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "krr-role-unit-")));
     const first = path.join(directory, "first"),

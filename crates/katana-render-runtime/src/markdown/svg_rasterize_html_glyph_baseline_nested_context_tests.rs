@@ -47,15 +47,40 @@ fn assert_direct_text_remains_unadmitted() -> Result<(), String> {
     };
     assert!(super::has_nested_middle_candidate(&tree));
     assert!(super::uniform_policy_with_nested_context(text, false).is_none());
+    assert!(super::resolved_policy(&HtmlGlyphRasterizer::new(tree.fontdb()), text)?.is_none());
     let context =
         provenance::authored_svg_context(&source, &GeneratedClipProvenance::default(), false)
             .map_err(|error| error.to_string())?;
     assert!(!context.text.matches(text));
+    assert!(!context.text.matches_additional(text));
     let rasterizer = HtmlGlyphRasterizer::with_resvg_text_and_source_context(
         tree.fontdb(),
         HashSet::new(),
         &context.text,
     );
+    assert!(super::resolved_policy(&rasterizer, text)?.is_none());
+    Ok(())
+}
+
+#[test]
+fn nested_middle_rejects_absent_and_mismatched_context() -> Result<(), String> {
+    let tree = tree(SOURCE)?;
+    let Some(Node::Text(text)) = tree.node_by_id("run") else {
+        return Err("nested source text missing".to_owned());
+    };
+    assert!(super::uniform_policy_with_nested_context(text, false).is_none());
+    assert!(super::resolved_policy(&HtmlGlyphRasterizer::new(tree.fontdb()), text)?.is_none());
+    let other_source = SOURCE.replace(SAMPLE, "Different");
+    let context =
+        provenance::authored_svg_context(&other_source, &GeneratedClipProvenance::default(), false)
+            .map_err(|error| error.to_string())?;
+    let rasterizer = HtmlGlyphRasterizer::with_resvg_text_and_source_context(
+        tree.fontdb(),
+        HashSet::new(),
+        &context.text,
+    );
+    assert!(!context.text.matches(text));
+    assert!(!context.text.matches_additional(text));
     assert!(super::resolved_policy(&rasterizer, text)?.is_none());
     Ok(())
 }

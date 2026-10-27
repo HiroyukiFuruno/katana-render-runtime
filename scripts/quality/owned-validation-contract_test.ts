@@ -77,7 +77,9 @@ const rootLintRecipe = [
   'retained_args=(--retain-profile "$retained_profile"); \\',
   'retained_profile_arg="$retained_profile"; \\',
   "fi; \\",
+  "just capacity-admission; \\",
   `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity; \\`,
+  "just capacity-admission; \\",
   'just performance-harness-lint "$retained_profile_arg"',
 ].join("\n");
 const recipeBodies: Record<string, string> = {
@@ -3575,6 +3577,7 @@ function performanceHarnessRecipes(root: string, overrides: Record<string, strin
     "coverage",
     "coverage-result-check",
     "root-test-and-coverage",
+    "capacity-admission",
     "performance-harness-fmt-check",
     "performance-harness-lint",
     "performance-harness-coverage",
@@ -3671,7 +3674,66 @@ checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
   return root;
 }
 test("root Clippy route retains only the canonical coverage profile", () => {
-  expect(inspectOwnedValidationContract(performanceHarnessFixture()).issues).not.toContainEqual(
+  const issues = inspectStandalonePerformanceRoute(performanceHarnessFixture()).issues;
+  expect(issues).not.toContainEqual(
+    expect.objectContaining({ code: "performance-harness-recipe-unverified", path: "lint" }),
+  );
+  expect(issues).not.toContainEqual(
+    expect.objectContaining({ code: "capacity-admission-unverified", path: "capacity-admission" }),
+  );
+});
+test.each([
+  ["retention argument", '--retain-profile "$retained_profile"', ""],
+  ["physical directory check", '&& ! -L "$retained_profile"', ""],
+  ["profile path", "target/llvm-cov-target/krr-coverage", "target/debug"],
+  ["required admission", "--require-capacity", ""],
+  ["JSON observation", "--print-json", ""],
+  ["extra command", "--print-json", "--print-json; echo success"],
+  ["retained args forwarding", `"\${retained_args[@]}"`, '""'],
+])("capacity admission rejects changed COV retention contract: %s", (_label, before, after) => {
+  const root = performanceHarnessFixture();
+  const actual = actualRecipeBody("capacity-admission", true);
+  expect(actual).toContain(before);
+  const mutated = actual.replace(before, after);
+  expect(mutated).not.toBe(actual);
+  performanceHarnessRecipes(root, { "capacity-admission": mutated });
+  expect(inspectStandalonePerformanceRoute(root).issues).toContainEqual(
+    expect.objectContaining({ code: "capacity-admission-unverified", path: "capacity-admission" }),
+  );
+});
+test.each([
+  "root Clippy command missing",
+  "first capacity admission missing",
+  "final capacity admission missing",
+  "both capacity admissions after Clippy",
+  "extra command after Clippy",
+])("root Clippy route rejects %s", (label) => {
+  const root = performanceHarnessFixture();
+  const actual = actualRecipeBody("lint");
+  const clippy = actual
+    .split("\n")
+    .find((line) => line.includes("--check-domain root -- {{CARGO}} clippy"));
+  const admission = "just capacity-admission; " + "\\";
+  const harness = 'just performance-harness-lint "$retained_profile_arg"';
+  if (!clippy) throw new Error("root Clippy command is missing from the real recipe");
+  const admissionLines = actual.split("\n").filter((line) => line === admission);
+  expect(admissionLines).toHaveLength(2);
+  const finalAdmissionIndex = actual.lastIndexOf(admission);
+  expect(actual).toContain(harness);
+  const mutated =
+    label === "root Clippy command missing"
+      ? actual.replace(clippy, "")
+      : label === "first capacity admission missing"
+        ? actual.replace(`${admission}\n`, "")
+        : label === "final capacity admission missing"
+          ? actual.slice(0, finalAdmissionIndex) +
+            actual.slice(finalAdmissionIndex + admission.length)
+          : label === "both capacity admissions after Clippy"
+            ? actual.replace(`${admission}\n${clippy}`, `${clippy}\n${admission}`)
+            : actual.replace(clippy, `${clippy}\necho cargo clippy`);
+  expect(mutated).not.toBe(actual);
+  performanceHarnessRecipes(root, { lint: mutated });
+  expect(inspectStandalonePerformanceRoute(root).issues).toContainEqual(
     expect.objectContaining({ code: "performance-harness-recipe-unverified", path: "lint" }),
   );
 });
@@ -3687,7 +3749,7 @@ test.each([
   const mutated = actual.replace(before, after);
   expect(mutated).not.toBe(actual);
   performanceHarnessRecipes(root, { lint: mutated });
-  expect(inspectOwnedValidationContract(root).issues).toContainEqual(
+  expect(inspectStandalonePerformanceRoute(root).issues).toContainEqual(
     expect.objectContaining({ code: "performance-harness-recipe-unverified", path: "lint" }),
   );
 });

@@ -146,9 +146,9 @@ fn phase_snapshot(
     start: Instant,
     session: &impl SessionFrame,
 ) -> Result<PhaseSnapshot, Box<dyn std::error::Error>> {
+    let frame = session.frame_state()?;
     let elapsed_ms = start.elapsed().as_secs_f64() * MILLISECONDS_PER_SECOND;
     let peak_rss_bytes = peak_rss_bytes()?;
-    let frame = session.frame_state()?;
     Ok(serde_json::Map::from_iter([
         ("elapsed_ms".to_owned(), serde_json::json!(elapsed_ms)),
         (

@@ -145,8 +145,9 @@ fn assert_same_real_pixels(tree: &resvg::usvg::Tree) -> Result<(), String> {
 #[test]
 fn inactive_diagnostic_preparation_uses_real_proof_tree_and_pixels() -> Result<(), String> {
     assert!(!super::super::lazy_diagnostic::active());
+    let document = resvg::usvg::roxmltree::Document::parse(SVG);
     let (options, valid, selected, context) =
-        super::diagnostic::prepare(SVG, SVG).ok_or("real known preparation unavailable")?;
+        super::diagnostic::prepare(&document, SVG).ok_or("real known preparation unavailable")?;
     assert!(context.is_none());
     assert!(
         options

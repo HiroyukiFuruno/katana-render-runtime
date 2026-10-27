@@ -22,7 +22,7 @@ export {
   managedSnapshotSchema,
   managedSourceSchema,
 } from "./native-cli-managed-input-schema";
-export const managedBuildSchemaName = "krr-native-cli-managed-build-v1";
+export const managedBuildSchemaName = "krr-native-cli-managed-build-v2";
 export const managedOwnedSchema = z
   .object({
     argv: strings,
@@ -119,6 +119,35 @@ const cargoOwned = managedOwnedSchema
   .strict();
 // Cargo自身のJSONは外部API。保存rawとの全文比較後に必要なAPI値を検査する。
 const cargoJson = z.record(z.string(), z.unknown());
+const capacityEvidence = z
+  .object({
+    argv: strings,
+    cwd: z.string(),
+    actualExit: z.literal(0),
+    reaped: z.literal(true),
+    stdout: managedFileSchema,
+    stderr: managedFileSchema,
+    lifecycle: managedFileSchema,
+    startedNs: ns,
+    endedNs: ns,
+    report: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+export const managedCapacityObservationSchema = capacityEvidence
+  .extend({
+    schema: z.enum([
+      "krr-native-cli-capacity-preflight-cleanup-v1",
+      "krr-native-cli-capacity-preflight-refresh-v1",
+    ]),
+  })
+  .strict();
+export const managedCapacityPreflightSchema = capacityEvidence
+  .extend({
+    schema: z.literal("krr-native-cli-capacity-preflight-v1"),
+    cleanupObservation: managedFileSchema.nullable(),
+    refreshObservation: managedFileSchema.nullable(),
+  })
+  .strict();
 export const managedObservationSchema = z
   .object({
     schema: z.literal("krr-native-cli-guard-observation-v1"),
@@ -160,6 +189,7 @@ export const managedReceiptSchema = z
     expectedSource: managedFileSchema,
     expectedProtectedRegistry: managedFileSchema,
     request: managedFileSchema,
+    capacityPreflight: managedFileSchema,
     observation: managedFileSchema,
     metadataLifecycle: managedFileSchema,
     hostPrebuild: z

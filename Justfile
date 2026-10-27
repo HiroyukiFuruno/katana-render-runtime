@@ -78,6 +78,7 @@ html-first-frame-check input expected_sha256 report="tmp/html-first-frame.json":
     python3 scripts/release/verify_html_first_frame.py --input "{{input}}" --expected-sha256 "{{expected_sha256}}" --binary "{{env_var_or_default('CARGO_TARGET_DIR', 'target')}}/release/examples/html_initial_frame_probe" --report "{{report}}"
 
 # Run strict Clippy checks
+# WHY: root Clippyの前後で容量を確認し、後続の計測検査前にCOVを保持して再整理する。
 lint:
     @set -euo pipefail; \
       retained_profile="{{REPO_ROOT}}/target/llvm-cov-target/krr-coverage"; \
@@ -87,7 +88,9 @@ lint:
         retained_args=(--retain-profile "$retained_profile"); \
         retained_profile_arg="$retained_profile"; \
       fi; \
+      just capacity-admission; \
       RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "${retained_args[@]}" --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity; \
+      just capacity-admission; \
       just performance-harness-lint "$retained_profile_arg"
 
 # Run Rust syntax based structural checks
@@ -388,7 +391,13 @@ rust-facts-host-prebuild:
 
 # Admit the canonical Cargo target before the host prebuild without starting a child.
 capacity-admission:
-    python3 scripts/build/cargo_capacity_guard.py --root {{quote(REPO_ROOT)}} --target {{quote(REPO_ROOT + "/target")}} --state {{quote(REPO_ROOT + "/tmp/.cargo-capacity-guard.json")}} --require-capacity --print-json
+    @set -euo pipefail; \
+      retained_profile="{{REPO_ROOT}}/target/llvm-cov-target/krr-coverage"; \
+      retained_args=(); \
+      if [[ -d "$retained_profile" && ! -L "$retained_profile" ]]; then \
+        retained_args=(--retain-profile "$retained_profile"); \
+      fi; \
+      python3 scripts/build/cargo_capacity_guard.py --root "{{REPO_ROOT}}" --target "{{REPO_ROOT}}/target" --state "{{REPO_ROOT}}/tmp/.cargo-capacity-guard.json" --require-capacity --print-json "${retained_args[@]}"
 
 mathjax-owned-evidence:
     NODE_ENV=test bun scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts

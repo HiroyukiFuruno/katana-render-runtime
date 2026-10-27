@@ -1454,8 +1454,21 @@ function expectedRootLintRecipeLines(): string[] {
     'retained_args=(--retain-profile "$retained_profile"); \\',
     'retained_profile_arg="$retained_profile"; \\',
     "fi; \\",
+    "just capacity-admission; \\",
     `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- ${deny}; \\`,
+    "just capacity-admission; \\",
     'just performance-harness-lint "$retained_profile_arg"',
+  ];
+}
+function expectedCapacityAdmissionRecipeLines(): string[] {
+  return [
+    "@set -euo pipefail; \\",
+    'retained_profile="{{REPO_ROOT}}/target/llvm-cov-target/krr-coverage"; \\',
+    "retained_args=(); \\",
+    'if [[ -d "$retained_profile" && ! -L "$retained_profile" ]]; then \\',
+    'retained_args=(--retain-profile "$retained_profile"); \\',
+    "fi; \\",
+    `python3 scripts/build/cargo_capacity_guard.py --root "{{REPO_ROOT}}" --target "{{REPO_ROOT}}/target" --state "{{REPO_ROOT}}/tmp/.cargo-capacity-guard.json" --require-capacity --print-json "\${retained_args[@]}"`,
   ];
 }
 function rootLintCargoCommand(context: ContractContext): string | undefined {
@@ -1463,7 +1476,7 @@ function rootLintCargoCommand(context: ContractContext): string | undefined {
   const expected = expectedRootLintRecipeLines();
   return actual.length === expected.length &&
     actual.every((line, index) => line === expected[index])
-    ? actual[8]
+    ? actual[9]
     : undefined;
 }
 function performanceRecipeCommands(): Record<string, string[]> {
@@ -1722,6 +1735,10 @@ function performanceParentSuffix(lane: string, recipe: string): string[] {
 }
 function performanceRoutes(context: ContractContext): void {
   checkPerformanceRecipeCommands(context);
+  if (
+    !exactPerformanceRecipe(context, "capacity-admission", expectedCapacityAdmissionRecipeLines())
+  )
+    add(context, "capacity-admission-unverified", "capacity-admission");
   if (rootLintCargoCommand(context) === undefined)
     add(context, "performance-harness-recipe-unverified", "lint");
   for (const [lane, recipe] of Object.entries(PERFORMANCE_RECIPES)) {

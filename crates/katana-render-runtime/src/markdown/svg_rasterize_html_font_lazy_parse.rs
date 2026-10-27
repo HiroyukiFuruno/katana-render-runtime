@@ -1,4 +1,4 @@
-use super::super::super::text_shaping;
+use super::super::super::{html_text_provenance::ParsedHtmlDocument, text_shaping};
 use super::{HtmlFontRequest, discovery_cache, html_rasterizer_options};
 use resvg::usvg;
 #[path = "svg_rasterize_html_font_selected_face.rs"]
@@ -14,11 +14,30 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+#[cfg(test)]
 pub(in crate::markdown::svg_rasterize) fn parse(
     svg: &str,
     markup: &str,
 ) -> Result<usvg::Tree, usvg::Error> {
-    let Some((options, valid, selected, context)) = prepare(svg, markup) else {
+    parse_document(svg, markup).map(|(tree, _)| tree)
+}
+
+fn parse_document<'input>(
+    svg: &'input str,
+    markup: &str,
+) -> Result<(usvg::Tree, ParsedHtmlDocument<'input>), usvg::Error> {
+    /* WHY: 同じ入力の ASCII 判定と provenance 検証で XML 解析を共有し、失敗順序は変えない。 */
+    let document = usvg::roxmltree::Document::parse(svg);
+    let tree = parse_with_document(svg, markup, &document)?;
+    Ok((tree, document))
+}
+
+fn parse_with_document(
+    svg: &str,
+    markup: &str,
+    document: &ParsedHtmlDocument<'_>,
+) -> Result<usvg::Tree, usvg::Error> {
+    let Some((options, valid, selected, context)) = prepare(document, markup) else {
         #[cfg(test)]
         super::raster_observer::prepare_unavailable();
         return eager(svg, markup);
@@ -64,8 +83,8 @@ fn eager(svg: &str, markup: &str) -> Result<usvg::Tree, usvg::Error> {
     result
 }
 
-fn decoded_ascii(svg: &str) -> Option<String> {
-    let document = usvg::roxmltree::Document::parse(svg).ok()?;
+fn decoded_ascii(document: &ParsedHtmlDocument<'_>) -> Option<String> {
+    let document = document.as_ref().ok()?;
     let text = document
         .descendants()
         .filter(|node| {
@@ -87,7 +106,7 @@ pub(in crate::markdown::svg_rasterize) fn rasterize(
     html_text: &super::super::super::GeneratedHtmlTextProvenance,
 ) -> Result<super::super::super::RasterizedSvg, super::super::super::SvgRasterizeError> {
     let compatible = super::super::super::SvgRasterizeOps::preprocess_for_rasterizer(svg);
-    let tree = parse(&compatible, svg)
+    let (tree, document) = parse_document(&compatible, svg)
         .map_err(|error| super::super::super::SvgRasterizeError::ParseFailed(error.to_string()))?;
     super::super::super::SvgRasterizeOps::render_html_tree_with_text_provenance(
         &tree,
@@ -95,6 +114,7 @@ pub(in crate::markdown::svg_rasterize) fn rasterize(
         &compatible,
         provenance,
         html_text,
+        &document,
     )
 }
 
@@ -105,13 +125,13 @@ type KnownOptions = (
     Option<Arc<selected_face::Context>>,
 );
 
-fn prepare(svg: &str, markup: &str) -> Option<KnownOptions> {
+fn prepare(document: &ParsedHtmlDocument<'_>, markup: &str) -> Option<KnownOptions> {
     #[cfg(test)]
     if super::lazy_diagnostic::active() {
-        return diagnostic::prepare(svg, markup);
+        return diagnostic::prepare(document, markup);
     }
     let request = HtmlFontRequest::from_markup(markup);
-    let text = prepared_ascii(svg)?;
+    let text = prepared_ascii(document)?;
     let Some(value) = discovery_cache::known_for(&request) else {
         #[cfg(test)]
         super::raster_observer::prepare_known_unavailable();
@@ -148,8 +168,8 @@ fn legacy_options(context: &selected_face::Context) -> Option<LegacyOptions> {
     Some((options, valid, selected))
 }
 
-fn prepared_ascii(svg: &str) -> Option<String> {
-    let Some(text) = decoded_ascii(svg) else {
+fn prepared_ascii(document: &ParsedHtmlDocument<'_>) -> Option<String> {
+    let Some(text) = decoded_ascii(document) else {
         #[cfg(test)]
         super::raster_observer::prepare_ascii_unavailable();
         return None;
@@ -165,7 +185,10 @@ mod diagnostic {
         SvgRasterizeOps,
     };
     use super::super::{lazy_diagnostic, raster_observer};
-    use super::{HtmlFontRequest, KnownOptions, install, parse, prepared_ascii, text_shaping};
+    use super::{
+        HtmlFontRequest, KnownOptions, ParsedHtmlDocument, install, parse_document, prepared_ascii,
+        text_shaping,
+    };
     use resvg::usvg;
     use std::sync::{Arc, atomic::AtomicBool};
 
@@ -177,8 +200,9 @@ mod diagnostic {
     ) -> Result<RasterizedSvg, SvgRasterizeError> {
         let paint_call = lazy_diagnostic::begin_final_glyph_paint_call();
         let compatible = SvgRasterizeOps::preprocess_for_rasterizer(svg);
-        let tree = lazy_diagnostic::measure("lazy_parse_inclusive", || parse(&compatible, svg))
-            .map_err(|error| SvgRasterizeError::ParseFailed(error.to_string()))?;
+        let (tree, document) =
+            lazy_diagnostic::measure("lazy_parse_inclusive", || parse_document(&compatible, svg))
+                .map_err(|error| SvgRasterizeError::ParseFailed(error.to_string()))?;
         let rendered = lazy_diagnostic::measure("render_tree", || {
             SvgRasterizeOps::render_html_tree_with_text_provenance(
                 &tree,
@@ -186,6 +210,7 @@ mod diagnostic {
                 &compatible,
                 provenance,
                 html_text,
+                &document,
             )
         });
         if rendered.is_ok()
@@ -197,11 +222,11 @@ mod diagnostic {
     }
 
     pub(in crate::markdown::svg_rasterize) fn prepare(
-        svg: &str,
+        document: &ParsedHtmlDocument<'_>,
         markup: &str,
     ) -> Option<KnownOptions> {
         let request = HtmlFontRequest::from_markup(markup);
-        let text = prepared_ascii(svg)?;
+        let text = prepared_ascii(document)?;
         let Some(value) = lazy_diagnostic::measure("file_fixture_database_build", || {
             lazy_diagnostic::file_fixture_database(&request)
         }) else {
@@ -253,3 +278,7 @@ mod diagnostic {
 #[cfg(all(test, target_os = "macos"))]
 #[path = "svg_rasterize_text_coverage_gap_tests.rs"]
 mod coverage_gap_tests;
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_html_xml_shared_tests.rs"]
+mod xml_shared_tests;

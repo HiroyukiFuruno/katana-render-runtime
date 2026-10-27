@@ -3,53 +3,19 @@ use crate::markdown::svg_rasterize::{
     html_glyph::{FaceMetadata, HtmlGlyphRasterizer, anchor, paint},
     text_shaping::svg_dom_layout_ascent,
 };
-use resvg::usvg::{self, TextFlow, fontdb::ID};
+use resvg::usvg::fontdb::ID;
 use skia_safe::Font;
+
+#[path = "svg_rasterize_html_glyph_baseline_middle_eligibility.rs"]
+mod eligibility;
+#[cfg(test)]
+use eligibility::layout_supported_with_zero_first_dy;
+pub(super) use eligibility::{
+    additional_middle_layout_supported, layout_supported, nested_layout_supported,
+};
 
 const HALF_METRIC: f32 = 0.5;
 const USVG_X_HEIGHT_RATIO: f32 = 0.45;
-
-pub(super) fn layout_supported(text: &usvg::Text) -> bool {
-    layout_supported_with_zero_first_dy(text, false)
-}
-
-pub(super) fn nested_layout_supported(text: &usvg::Text) -> bool {
-    layout_supported_with_zero_first_dy(text, true)
-        && text.dy().first().is_some_and(|first_dy| *first_dy == 0.0)
-}
-
-fn layout_supported_with_zero_first_dy(text: &usvg::Text, allow_zero_first_dy: bool) -> bool {
-    let [chunk] = text.chunks() else { return false };
-    let dy = text.dy();
-    let Some(first_dy) = dy.first() else {
-        return false;
-    };
-    let Some(first_span) = chunk.spans().first() else {
-        return false;
-    };
-    text.writing_mode() == usvg::WritingMode::LeftToRight
-        && matches!(chunk.text_flow(), TextFlow::Linear)
-        && super::super::alignment_dy_supported(dy)
-        && first_dy.is_finite()
-        && (*first_dy != 0.0 || allow_zero_first_dy)
-        && super::super::all_zero(text.dx())
-        && super::super::all_zero(text.rotate())
-        && chunk.spans().iter().all(source_span_has_default_spacing)
-        && layout_spans_supported(text.layouted(), first_span.font_size().get())
-}
-
-fn layout_spans_supported(spans: &[usvg::layout::Span], font_size: f32) -> bool {
-    spans.iter().any(|span| !span.positioned_glyphs.is_empty())
-        && spans.iter().all(|span| {
-            let glyphs = &span.positioned_glyphs;
-            super::super::horizontal_glyphs(glyphs)
-                && glyphs.iter().all(|glyph| glyph.font_size() == font_size)
-        })
-}
-
-fn source_span_has_default_spacing(span: &usvg::TextSpan) -> bool {
-    span.letter_spacing() == 0.0 && span.word_spacing() == 0.0 && span.text_length().is_none()
-}
 
 pub(super) fn shift(
     rasterizer: &HtmlGlyphRasterizer<'_>,
@@ -145,3 +111,7 @@ fn quantized_x_height(value: f32) -> Option<f32> {
 #[cfg(test)]
 #[path = "svg_rasterize_html_glyph_baseline_middle_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "svg_rasterize_html_glyph_baseline_middle_lane_tests.rs"]
+mod lane_tests;

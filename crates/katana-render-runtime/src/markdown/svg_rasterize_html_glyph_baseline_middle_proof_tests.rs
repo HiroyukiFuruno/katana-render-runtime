@@ -1,0 +1,79 @@
+use super::{FONT_FAMILY, MULTILINE, fixture, source, text};
+use crate::markdown::svg_rasterize::{
+    GeneratedClipProvenance,
+    provenance::{self, AuthoredTextContext},
+};
+
+#[test]
+fn multiline_proof_rejects_unsupported_stylesheet() -> Result<(), String> {
+    let styled = source(MULTILINE, "", FONT_FAMILY).replace(
+        "</svg>",
+        "<style>@media screen { text {font-size:14px} }</style></svg>",
+    );
+    assert_rejected_proof(MULTILINE, &styled)
+}
+
+#[test]
+fn additional_proof_rejects_complex_hierarchy_and_descendant_style() -> Result<(), String> {
+    for body in [
+        "<tspan x='0' dy='0'><tspan>AB</tspan></tspan><tspan x='0' dy='16.8'>CD</tspan>",
+        "<tspan x='0' dy='0'>AB</tspan><tspan x='0' dy='16.8' font-size='14'>CD</tspan>",
+        "<tspan x='0' dy='0'>AB</tspan><tspan x='0' dy='16.8' style='font-size:14px'>CD</tspan>",
+    ] {
+        let candidate = source(body, "", FONT_FAMILY);
+        assert_rejected_proof(MULTILINE, &candidate)?;
+    }
+    let candidate = source(MULTILINE, "", FONT_FAMILY)
+        .replace("</svg>", "<style>tspan {font-size:14px}</style></svg>");
+    assert_rejected_proof(MULTILINE, &candidate)
+}
+
+#[test]
+fn multiline_proof_rejects_duplicate_use_and_chunk_mismatch() -> Result<(), String> {
+    let original = source(MULTILINE, "", FONT_FAMILY);
+    for candidate in [
+        original.replace("</svg>", "<text>ABCD</text></svg>"),
+        original.replace("</svg>", "<use href='#run'/></svg>"),
+        original.replace("16.8", "20"),
+        original
+            .replace(">AB</tspan>", ">A</tspan>")
+            .replace(">CD</tspan>", ">BCD</tspan>"),
+    ] {
+        assert_rejected_proof(MULTILINE, &candidate)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn multiline_proof_rejects_text_and_origin_mismatch() -> Result<(), String> {
+    let original = source(MULTILINE, "", FONT_FAMILY);
+    for candidate in [
+        original.replace(">AB</tspan>", ">XY</tspan>"),
+        original.replace("y='20'", "y='21'"),
+    ] {
+        assert_rejected_proof(MULTILINE, &candidate)?;
+    }
+    Ok(())
+}
+
+fn assert_rejected_proof(body: &str, candidate: &str) -> Result<(), String> {
+    let tree = fixture(body, "")?;
+    let text = text(&tree)?;
+    let context = context(candidate)?;
+    assert!(!context.matches_additional(text), "{candidate}");
+    assert!(
+        super::super::super::policy::uniform_policy_with_context(
+            text,
+            false,
+            context.matches_additional(text)
+        )
+        .is_none()
+    );
+    Ok(())
+}
+
+fn context(source: &str) -> Result<AuthoredTextContext, String> {
+    provenance::authored_svg_context(source, &GeneratedClipProvenance::default(), false)
+        .map(|context| context.text)
+        .map_err(|error| error.to_string())
+}

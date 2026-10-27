@@ -11,8 +11,7 @@ mod middle;
 #[path = "svg_rasterize_html_glyph_baseline_policy.rs"]
 mod policy;
 #[cfg(test)]
-use policy::uniform_policy;
-use policy::uniform_policy_with_nested_context;
+use policy::{uniform_policy, uniform_policy_with_nested_context};
 #[path = "svg_rasterize_html_glyph_baseline_source_context.rs"]
 mod source_context;
 pub(super) use source_context::has_nested_middle_candidate;

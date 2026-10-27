@@ -3,8 +3,11 @@ use std::collections::HashMap;
 use resvg::usvg::roxmltree::{Document, Node};
 
 use super::css;
+#[path = "svg_rasterize_composite_authored_text_context_additional.rs"]
+mod additional;
 #[path = "svg_rasterize_composite_authored_text_context_inventory.rs"]
 mod inventory;
+pub(super) use additional::{AdditionalTextProof, additional_text};
 
 const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
 const SENSITIVE_ATTRIBUTES: [&str; 30] = [

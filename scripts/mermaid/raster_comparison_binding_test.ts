@@ -600,6 +600,22 @@ test("comparison input drift is rejected after initial read", () => {
   fs.writeFileSync(input, "replacement");
   expect(() => binding.assertUnchanged()).toThrow("endpoint drift");
 });
+test("comparison config leaf inode replacement rejects unchanged bytes SHA size and mode", () => {
+  const f = fixture(),
+    binding = RasterComparisonBinding.read(f.configPath, f.originalExpectedSha, ["unit"]);
+  const before = physicalFileIdentity(f.configPath),
+    bytes = fs.readFileSync(f.configPath),
+    replacement = `${f.configPath}.replacement`;
+  fs.writeFileSync(replacement, bytes, { flag: "wx", mode: before.mode });
+  fs.chmodSync(replacement, before.mode);
+  fs.renameSync(replacement, f.configPath);
+  const after = physicalFileIdentity(f.configPath);
+  expect(fs.readFileSync(f.configPath)).toEqual(bytes);
+  expect({ ...after, ino: before.ino }).toEqual(before);
+  expect(after.ino).not.toBe(before.ino);
+  expect(() => binding.readObservedFile(f.configPath)).toThrow("input changed");
+  expect(() => binding.assertUnchanged()).toThrow("endpoint drift");
+});
 test("symlink and directory inputs cannot stand in for pinned regular files", () => {
   const f = fixture(),
     symlink = path.join(f.directory, "symlink");

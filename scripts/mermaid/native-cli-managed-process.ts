@@ -38,7 +38,7 @@ export function read(pin: FileRecord): ReturnType<typeof parseJsonValue> {
 export function owned(
   record: ManagedOwned,
   lifecyclePin: FileRecord,
-  role: "build" | "metadata" | "tool-query",
+  role: "build" | "metadata" | "preflight" | "tool-query",
 ): void {
   const lifecycle = managedLifecycleSchema.parse(read(lifecyclePin));
   requireBound(
@@ -52,7 +52,8 @@ export function owned(
       lifecycle.identity.pid === record.pid &&
       lifecycle.identity.sessionId === record.pid &&
       lifecycle.identity.processGroupId === record.pid &&
-      lifecycle.runLimitSeconds === { build: 1800, metadata: 120, "tool-query": 30 }[role] &&
+      lifecycle.runLimitSeconds ===
+        { build: 1800, metadata: 120, preflight: 120, "tool-query": 30 }[role] &&
       BigInt(record.endedNs) >= BigInt(record.startedNs),
     "owner lifecycle binding differs",
   );

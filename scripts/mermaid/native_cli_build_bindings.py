@@ -25,7 +25,7 @@ from cargo_capacity_guard import (
     load_state,
 )
 
-SCHEMA = "krr-native-cli-managed-build-v1"
+SCHEMA = "krr-native-cli-managed-build-v2"
 CONTROL_MANIFEST_SCHEMA = "krr-native-cli-managed-control-inputs-v1"
 CONTROL_MANIFEST_NAME = "scripts/mermaid/native-cli-managed-control-inputs.json"
 CONTROL_MANIFEST = Path(__file__).with_name("native-cli-managed-control-inputs.json")

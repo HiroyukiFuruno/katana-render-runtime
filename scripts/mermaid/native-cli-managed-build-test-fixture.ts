@@ -15,6 +15,7 @@ import { hostFixtureInputs } from "../runtime-bundles/runtime-rust-facts-host-te
 import type { FileRecord } from "./native-build-receipt";
 import { createManagedReaderInputs } from "./native-cli-managed-build-input-test-fixture";
 import {
+  managedCapacityPreflightSchema,
   managedObservationSchema,
   managedReceiptSchema,
   managedRequestSchema,
@@ -30,7 +31,7 @@ function identity(pin: FileRecord) {
     ctimeNs: stat.ctimeNs.toString(),
   };
 }
-export function createManagedReaderFixture() {
+export function createManagedReaderFixture(withCapacityCleanup = false) {
   const {
     root,
     token,
@@ -217,6 +218,7 @@ export function createManagedReaderFixture() {
   const report = {
     ...measurement,
     removed: [],
+    cleanup_attempts: [],
     cleanup_status: "not-needed",
     actual_removed_bytes: 0,
     post_clean_bytes: null,
@@ -253,6 +255,96 @@ export function createManagedReaderFixture() {
     scope: "synthetic reader unit graph; not native execution",
   });
   const observationPin = json(`tmp/${token}/observation.json`, observation);
+  const preflightReport = {
+    ...policy,
+    state: capacity.state.path,
+    current_bytes: 1,
+    over_capacity: false,
+    metric_available: true,
+    removed: [],
+    cleanup_status: "not-needed",
+    actual_removed_bytes: 0,
+    post_clean_bytes: null,
+    remaining_over_capacity: false,
+    baseline_eligible: false,
+  };
+  const preflightArgv = [
+    tool("python3").path,
+    path.join(root, "scripts/build/cargo_capacity_guard.py"),
+    "--root",
+    root,
+    "--target",
+    path.join(root, "target"),
+    "--state",
+    path.join(root, "tmp/.cargo-capacity-guard.json"),
+    "--require-capacity",
+    "--print-json",
+  ];
+  const preflightRun = (label: string, stdoutReport: Record<string, unknown>, pid: number) =>
+    owned("preflight", label, preflightArgv, pid, label, JSON.stringify(stdoutReport));
+  const preflightRecord = (
+    schema: string,
+    run: ReturnType<typeof preflightRun>,
+    report: Record<string, unknown>,
+  ) => ({
+    schema,
+    argv: run.observation.argv,
+    cwd: run.observation.cwd,
+    actualExit: run.observation.actualExit,
+    reaped: run.observation.reaped,
+    stdout: run.observation.stdout,
+    stderr: run.observation.stderr,
+    lifecycle: run.lifecycle,
+    startedNs: run.observation.startedNs,
+    endedNs: run.observation.endedNs,
+    report,
+  });
+  let cleanupObservation: FileRecord | null = null;
+  let refreshObservation: FileRecord | null = null;
+  let acceptedRun = preflightRun("capacity-preflight", preflightReport, 106);
+  if (withCapacityCleanup) {
+    const cleanupReport = {
+      ...policy,
+      state: capacity.state.path,
+      current_bytes: 4726096872,
+      over_capacity: true,
+      metric_available: true,
+      removed: ["finite artifact eviction"],
+      cleanup_status: "incomplete",
+      clean_exitcode: 0,
+      post_clean_bytes: 4726094872,
+      remaining_over_capacity: false,
+      cleanup_attempts: [{ exit_code: 0, dry_run: false }],
+      finite_cleanup: {},
+    };
+    const cleanupRun = preflightRun("capacity-preflight-cleanup", cleanupReport, 107);
+    const cleanupEvidence = preflightRecord(
+      "krr-native-cli-capacity-preflight-cleanup-v1",
+      cleanupRun,
+      cleanupReport,
+    );
+    cleanupObservation = json(
+      `tmp/${token}/capacity-preflight-cleanup-observation.json`,
+      cleanupEvidence,
+    );
+    const refreshRun = preflightRun("capacity-preflight-refresh", preflightReport, 108);
+    const refreshEvidence = preflightRecord(
+      "krr-native-cli-capacity-preflight-refresh-v1",
+      refreshRun,
+      preflightReport,
+    );
+    refreshObservation = json(
+      `tmp/${token}/capacity-preflight-refresh-observation.json`,
+      refreshEvidence,
+    );
+    acceptedRun = refreshRun;
+  }
+  const preflightEvidence = managedCapacityPreflightSchema.parse({
+    ...preflightRecord("krr-native-cli-capacity-preflight-v1", acceptedRun, preflightReport),
+    cleanupObservation,
+    refreshObservation,
+  });
+  const capacityPreflight = json(`tmp/${token}/capacity-preflight.json`, preflightEvidence);
   const toolProbes = ["cargo", "rustc"].map((name, index) =>
     owned(
       "tool-query",
@@ -337,7 +429,7 @@ export function createManagedReaderFixture() {
     receipt: hostReceipt,
   };
   const receipt = managedReceiptSchema.parse({
-    schema: "krr-native-cli-managed-build-v1",
+    schema: "krr-native-cli-managed-build-v2",
     status: "completed",
     accepted: true,
     attemptToken: token,
@@ -345,6 +437,7 @@ export function createManagedReaderFixture() {
     expectedSource,
     expectedProtectedRegistry: registry,
     request: requestPin,
+    capacityPreflight,
     observation: observationPin,
     metadataLifecycle: metadata.lifecycle,
     hostPrebuild,

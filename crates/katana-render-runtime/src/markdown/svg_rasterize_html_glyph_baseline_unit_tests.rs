@@ -75,7 +75,8 @@ fn baseline_policy_is_conservative_for_nonuniform_text() -> Result<(), String> {
 }
 
 #[test]
-fn middle_policy_rejects_missing_leading_dy_and_unsupported_transforms() -> Result<(), String> {
+fn middle_policy_requires_source_proof_and_rejects_unsupported_transforms() -> Result<(), String> {
+    /* WHY: dyなし・0の追加laneにも原DOMの肯定証明が必要で、modelだけでは認めない。 */
     for body in [
         r#"<text id="run" dominant-baseline="middle" x="0" y="20">AB</text>"#,
         r#"<text id="run" dominant-baseline="middle" dy="0" x="0" y="20">AB</text>"#,

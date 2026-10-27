@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   assertCurrentGitSourceSet,
   digestStringRecord,
+  type FileRecord,
   validateCapacityReport,
   verifyNativeBuildReceipt,
 } from "./native-build-receipt";
@@ -77,6 +78,90 @@ function observation(fixture: Fixture) {
     fixture.receipt.observation.path,
     JSON.stringify(fixture.observation),
   );
+}
+function updateCapacityPreflight(
+  fixture: Fixture,
+  update: (value: { [key: string]: unknown }) => void,
+) {
+  const pin = fixture.receipt.capacityPreflight;
+  const value = JSON.parse(fs.readFileSync(pin.path, "utf8")) as { [key: string]: unknown };
+  update(value);
+  fixture.receipt.capacityPreflight = writeFile(pin.path, JSON.stringify(value));
+}
+function updatePreflightCommand(fixture: Fixture, update: (argv: string[]) => string[]) {
+  const pin = fixture.receipt.capacityPreflight;
+  const evidence = JSON.parse(fs.readFileSync(pin.path, "utf8")) as { [key: string]: unknown };
+  const argv = update(z.array(z.string()).parse(evidence.argv));
+  const lifecyclePin = z.object({ path: z.string() }).passthrough().parse(evidence.lifecycle);
+  const lifecycle = JSON.parse(fs.readFileSync(lifecyclePin.path, "utf8")) as {
+    [key: string]: unknown;
+  };
+  evidence.argv = argv;
+  lifecycle.argv = argv;
+  evidence.lifecycle = writeFile(lifecyclePin.path, JSON.stringify(lifecycle));
+  fixture.receipt.capacityPreflight = writeFile(pin.path, JSON.stringify(evidence));
+}
+function updatePreflightClosure(
+  fixture: Fixture,
+  update: (closure: Record<string, unknown>, ownerPid: number) => void,
+) {
+  const pin = fixture.receipt.capacityPreflight;
+  const evidence = JSON.parse(fs.readFileSync(pin.path, "utf8")) as Record<string, unknown>;
+  const lifecyclePin = z.object({ path: z.string() }).passthrough().parse(evidence.lifecycle);
+  const lifecycle = JSON.parse(fs.readFileSync(lifecyclePin.path, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  const closure = z.record(z.string(), z.unknown()).parse(lifecycle.nativeRawFdClosure);
+  const ownerIdentity = z.record(z.string(), z.unknown()).parse(lifecycle.identity);
+  update(closure, z.number().parse(ownerIdentity.pid));
+  lifecycle.nativeRawFdClosure = closure;
+  evidence.lifecycle = writeFile(lifecyclePin.path, JSON.stringify(lifecycle));
+  fixture.receipt.capacityPreflight = writeFile(pin.path, JSON.stringify(evidence));
+}
+function updateCapacityEvidenceReport(
+  evidencePin: FileRecord,
+  update: (report: Record<string, unknown>) => void,
+) {
+  const evidence = JSON.parse(fs.readFileSync(evidencePin.path, "utf8")) as Record<string, unknown>;
+  const stdout = z.object({ path: z.string() }).passthrough().parse(evidence.stdout);
+  const report = z.record(z.string(), z.unknown()).parse(evidence.report);
+  update(report);
+  evidence.stdout = writeFile(stdout.path, JSON.stringify(report));
+  const lifecyclePin = z.object({ path: z.string() }).passthrough().parse(evidence.lifecycle);
+  const lifecycle = JSON.parse(fs.readFileSync(lifecyclePin.path, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  const raw = z.array(z.record(z.string(), z.unknown())).parse(lifecycle.raw);
+  const firstRaw = raw[0];
+  if (firstRaw === undefined) throw new Error("preflight raw stdout missing");
+  firstRaw.sha256 = z.object({ sha256: z.string() }).parse(evidence.stdout).sha256;
+  lifecycle.raw = raw;
+  evidence.lifecycle = writeFile(lifecyclePin.path, JSON.stringify(lifecycle));
+  evidence.report = report;
+  return writeFile(evidencePin.path, JSON.stringify(evidence));
+}
+function updateAcceptedPreflightReport(
+  fixture: Fixture,
+  update: (report: Record<string, unknown>) => void,
+) {
+  fixture.receipt.capacityPreflight = updateCapacityEvidenceReport(
+    fixture.receipt.capacityPreflight,
+    update,
+  );
+}
+function updateCleanupPreflightReport(
+  fixture: Fixture,
+  update: (report: Record<string, unknown>) => void,
+) {
+  const pin = fixture.receipt.capacityPreflight;
+  const accepted = JSON.parse(fs.readFileSync(pin.path, "utf8")) as Record<string, unknown>;
+  const cleanupPin = z
+    .object({ path: z.string(), size: z.number(), sha256: z.string() })
+    .parse(accepted.cleanupObservation);
+  accepted.cleanupObservation = updateCapacityEvidenceReport(cleanupPin, update);
+  fixture.receipt.capacityPreflight = writeFile(pin.path, JSON.stringify(accepted));
 }
 
 function capacityData(
@@ -242,6 +327,242 @@ test("managed phase pair accepts execution before and plain measurement after in
     fs.rmSync(f.root, { recursive: true, force: true });
   }
 });
+
+test("managed v2 receipt binds the no-clean preflight FileRecord", () => {
+  const f = createManagedReaderFixture();
+  try {
+    expect(f.receipt.schema).toBe("krr-native-cli-managed-build-v2");
+    expect(f.receipt.capacityPreflight.path).toBe(
+      path.join(path.dirname(f.receiptPath), "capacity-preflight.json"),
+    );
+    verify(f);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("managed preflight rejects cleanup attempts even when all report pins agree", () => {
+  const f = createManagedReaderFixture();
+  try {
+    updateAcceptedPreflightReport(f, (report) => {
+      report.cleanup_attempts = [{ exit_code: 0, dry_run: false }];
+    });
+    expect(() => verify(f)).toThrow(/accepted capacity preflight includes cleanup/);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+for (const [label, update] of [
+  [
+    "observer argv",
+    (closure: Record<string, unknown>) => {
+      closure.argv = [...z.array(z.string()).parse(closure.argv), "--unexpected"];
+    },
+  ],
+  [
+    "observer tool pin",
+    (closure: Record<string, unknown>) => {
+      closure.toolBefore = closure.stdout;
+    },
+  ],
+  [
+    "observer raw pin",
+    (closure: Record<string, unknown>) => {
+      const stdout = z.record(z.string(), z.unknown()).parse(closure.stdout);
+      stdout.path = `${z.string().parse(stdout.path)}.other`;
+      closure.stdout = stdout;
+    },
+  ],
+  [
+    "owner process identity",
+    (closure: Record<string, unknown>, ownerPid: number) => {
+      const identity = z.record(z.string(), z.unknown()).parse(closure.identity);
+      identity.pid = ownerPid;
+      identity.sessionId = identity.pid;
+      identity.processGroupId = identity.pid;
+      closure.identity = identity;
+    },
+  ],
+  [
+    "owner time boundary",
+    (closure: Record<string, unknown>) => {
+      closure.startedNs = "0";
+    },
+  ],
+  [
+    "environment pin",
+    (closure: Record<string, unknown>) => {
+      const environment = z.record(z.string(), z.string()).parse(closure.environment);
+      environment.EXTRA = "changed";
+      closure.environment = environment;
+      closure.environmentSha256 = digestStringRecord(environment);
+    },
+  ],
+] as const)
+  test(`managed preflight raw-FD closure rejects ${label}`, () => {
+    const f = createManagedReaderFixture();
+    try {
+      updatePreflightClosure(f, update);
+      expect(() => verify(f)).toThrow();
+    } finally {
+      fs.rmSync(f.root, { recursive: true, force: true });
+    }
+  });
+
+test("managed v2 receipt binds cleanup and fresh preflight observations", () => {
+  const f = createManagedReaderFixture(true);
+  try {
+    const preflight = JSON.parse(fs.readFileSync(f.receipt.capacityPreflight.path, "utf8")) as {
+      cleanupObservation: FileRecord;
+      refreshObservation: FileRecord;
+    };
+    expect(preflight.cleanupObservation.path).toBe(
+      path.join(path.dirname(f.receiptPath), "capacity-preflight-cleanup-observation.json"),
+    );
+    expect(preflight.refreshObservation.path).toBe(
+      path.join(path.dirname(f.receiptPath), "capacity-preflight-refresh-observation.json"),
+    );
+    expect(verify(f).sourceFileCount).toBe(f.receipt.snapshotAfter.source.length);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("managed cleanup preflight rejects negative post-clean capacity with bound pins", () => {
+  const f = createManagedReaderFixture(true);
+  try {
+    updateCleanupPreflightReport(f, (report) => {
+      report.post_clean_bytes = -1;
+    });
+    expect(() => verify(f)).toThrow(/cleanup capacity preflight report differs/);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("managed v2 receipt rejects a cleanup pin from a different attempt", () => {
+  const f = createManagedReaderFixture(true);
+  const other = createManagedReaderFixture(true);
+  try {
+    f.receipt.capacityPreflight = other.receipt.capacityPreflight;
+    expect(() => verify(f)).toThrow(/capacity preflight evidence path differs/);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+    fs.rmSync(other.root, { recursive: true, force: true });
+  }
+});
+
+test("managed v1 receipt remains outside current v2 acceptance", () => {
+  const f = createManagedReaderFixture();
+  try {
+    Object.assign(f.receipt, { schema: "krr-native-cli-managed-build-v1" });
+    expect(() => verify(f)).toThrow();
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("managed preflight accepts the producer's validated retained debug profile", () => {
+  const f = createManagedReaderFixture();
+  try {
+    updatePreflightCommand(f, (argv) => [
+      ...argv,
+      "--retain-profile",
+      path.join(f.root, "target/debug"),
+    ]);
+    expect(verify(f).sourceFileCount).toBe(f.receipt.snapshotAfter.source.length);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+for (const [label, update] of [
+  ["duplicate root option", (argv: string[]) => [...argv, "--root", "/other"]],
+  ["duplicate target option", (argv: string[]) => [...argv, "--target", "/other/target"]],
+  ["extra dry-run option", (argv: string[]) => [...argv, "--dry-run"]],
+  [
+    "duplicate retain profile option",
+    (argv: string[]) => {
+      const targetIndex = argv.indexOf("--target");
+      const target = argv[targetIndex + 1];
+      if (target === undefined) return argv;
+      return [
+        ...argv,
+        "--retain-profile",
+        path.join(target, "debug"),
+        "--retain-profile",
+        path.join("/other", "target/debug"),
+      ];
+    },
+  ],
+] as const)
+  test(`managed preflight rejects ${label}`, () => {
+    const f = createManagedReaderFixture();
+    try {
+      verify(f);
+      updatePreflightCommand(f, update);
+      expect(() => verify(f)).toThrow(/capacity preflight admission argv differs/);
+    } finally {
+      fs.rmSync(f.root, { recursive: true, force: true });
+    }
+  });
+
+for (const [label, mutate] of [
+  [
+    "missing preflight pin",
+    (f: Fixture) => Object.assign(f.receipt, { capacityPreflight: undefined }),
+  ],
+  [
+    "accepted preflight file changed after its receipt pin",
+    (f: Fixture) => fs.appendFileSync(f.receipt.capacityPreflight.path, "\n"),
+  ],
+  [
+    "wrong preflight path",
+    (f: Fixture) =>
+      Object.assign(f.receipt, {
+        capacityPreflight: {
+          ...f.receipt.capacityPreflight,
+          path: path.join(path.dirname(f.receiptPath), "other-preflight.json"),
+        },
+      }),
+  ],
+  [
+    "missing cleanup sidecar pin",
+    (f: Fixture) =>
+      updateCapacityPreflight(f, (value) => {
+        value.cleanupObservation = null;
+      }),
+  ],
+  [
+    "cleanup sidecar changed after pin",
+    (f: Fixture) => {
+      const preflight = JSON.parse(fs.readFileSync(f.receipt.capacityPreflight.path, "utf8")) as {
+        cleanupObservation: FileRecord;
+      };
+      fs.appendFileSync(preflight.cleanupObservation.path, "\n");
+    },
+  ],
+  [
+    "cleanup sidecar bound to refresh path",
+    (f: Fixture) =>
+      updateCapacityPreflight(f, (value) => {
+        const refresh = value.refreshObservation as FileRecord;
+        value.cleanupObservation = refresh;
+      }),
+  ],
+] as const) {
+  test(`managed v2 receipt rejects ${label}`, () => {
+    const f = createManagedReaderFixture(true);
+    try {
+      verify(f);
+      mutate(f);
+      expect(() => verify(f)).toThrow();
+    } finally {
+      fs.rmSync(f.root, { recursive: true, force: true });
+    }
+  });
+}
 
 test("managed phase pair accepts a clean bootstrap with an empty eligible baseline", () => {
   const f = createManagedReaderFixture();
