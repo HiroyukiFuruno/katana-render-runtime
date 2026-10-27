@@ -8,6 +8,9 @@ use tiny_skia::{Pixmap, Transform};
 #[path = "svg_rasterize_html_glyph_origin_tests.rs"]
 mod origin_tests;
 
+#[path = "svg_rasterize_html_glyph_preparation_tests.rs"]
+mod preparation_tests;
+
 const FIXTURE_WIDTH: u32 = 160;
 const FIXTURE_HEIGHT: u32 = 80;
 
