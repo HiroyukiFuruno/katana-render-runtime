@@ -11,6 +11,9 @@ globalThis.mermaid = {
     const expected = globalThis.__katanaMeasureText('AVA', family, 16, 400, false);
     const widths = ['nested', 'mixed', 'direct'].map((mode) => {
       const text = document.createElementNS(ns, 'text');
+      text.setAttribute('font-family', family);
+      text.setAttribute('font-size', '16');
+      text.setAttribute('font-weight', '400');
       const outer = mode === 'direct' ? text : document.createElementNS(ns, 'tspan');
       if (mode !== 'direct') text.appendChild(outer);
       const middle = document.createElementNS(ns, 'tspan');
@@ -247,6 +250,20 @@ fn svg_direct_text_with_nested_tspan_keeps_text_node_runs() -> Result<(), String
 #[test]
 fn svg_same_font_nested_text_preserves_shaped_run_kerning() -> Result<(), String> {
     let rendered = render_svg_fixture(SAME_FONT_SHAPED_RUN_FIXTURE)?;
+    assert!(
+        rendered.contains(r##"data-shaped-runs="true"##),
+        "{rendered}"
+    );
+    Ok(())
+}
+
+#[test]
+fn svg_c4_same_font_nested_text_preserves_space_shaping() -> Result<(), String> {
+    let fixture = SAME_FONT_SHAPED_RUN_FIXTURE
+        .replace("classdiagram", "c4")
+        .replace("'AVA'", "'A A'")
+        .replace("middle.textContent = 'V'", "middle.textContent = ' '");
+    let rendered = render_svg_fixture(&fixture)?;
     assert!(
         rendered.contains(r##"data-shaped-runs="true"##),
         "{rendered}"

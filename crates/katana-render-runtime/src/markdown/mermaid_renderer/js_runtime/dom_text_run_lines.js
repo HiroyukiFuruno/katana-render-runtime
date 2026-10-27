@@ -79,6 +79,14 @@ function katanaSameTextRunFont(left, right) {
 function katanaAppendOrderedTextRun(node, text, font, state) {
   const owner = node.nodeType === 3 ? node.parentNode : node;
   const lastFragment = state.pending?.fragments.at(-1);
+  if (state.pending && katanaIsC4Diagram() && state.pending.font.anchor !== font.anchor)
+    katanaFlushOrderedTextRun(state);
+  if (
+    state.pending &&
+    katanaIsC4Diagram() &&
+    !katanaCanMergeC4NativeTextOwnerPair(state.pending.fragments.at(-1)?.node, owner)
+  )
+    katanaFlushOrderedTextRun(state);
   let nativeWordBoundary = false;
   if (
     state.pending &&
@@ -138,18 +146,71 @@ function katanaMeasuredPendingTextRuns(pending, text) {
 
 /* WHY: fallback/C4の幅補正はowner依存なので、Nativeで測れない文字を別ownerへ波及させない。 */
 function katanaCanMergeNativeTextOwners(nodeOrPending) {
-  if (
-    katanaIsC4Diagram() ||
-    katanaIsRequirementDiagram() ||
-    typeof globalThis.__katanaMeasureText !== "function"
-  )
+  if (katanaIsRequirementDiagram() || typeof globalThis.__katanaMeasureText !== "function")
     return false;
+  if (katanaIsC4Diagram()) {
+    return (
+      katanaMermaidNativeAdvanceRuntime() &&
+      typeof globalThis.__katanaMeasureSvgTextMetrics === "function" &&
+      katanaCanMergeC4NativeTextOwners(nodeOrPending)
+    );
+  }
   if (katanaIsMermaidClassDiagram()) return true;
   if (!katanaIsBlockDiagram()) return false;
   const nodes = Array.isArray(nodeOrPending?.fragments)
     ? nodeOrPending.fragments.map((fragment) => fragment.node)
     : [nodeOrPending];
   return nodes.every(katanaIsBlockTextOwnerMergeSafe);
+}
+
+function katanaCanMergeC4NativeTextOwners(nodeOrPending) {
+  const nodes = Array.isArray(nodeOrPending?.fragments)
+    ? nodeOrPending.fragments.map((fragment) => fragment.node)
+    : [nodeOrPending];
+  if (nodes.length === 0) return false;
+  const font = nodeOrPending?.font ?? katanaResolvedNodeTextFont(nodes[0]);
+  return (
+    font.nativeAdvanceEligible === true &&
+    font.size > 0 &&
+    nodes.every((node) => katanaCanMergeC4NativeTextOwnerPair(nodes[0], node))
+  );
+}
+
+function katanaCanMergeC4NativeTextOwnerPair(left, right) {
+  return (
+    katanaIsC4NativeTextOwner(left) &&
+    katanaIsC4NativeTextOwner(right) &&
+    katanaNearestSvgTextAncestor(left) !== null &&
+    katanaNearestSvgTextAncestor(left) === katanaNearestSvgTextAncestor(right) &&
+    katanaNativeTextOwnerTransform(left) === katanaNativeTextOwnerTransform(right) &&
+    katanaIsNativeTextOwnerDirectionSafe(left) &&
+    katanaIsNativeTextOwnerDirectionSafe(right)
+  );
+}
+
+function katanaIsC4NativeTextOwner(node) {
+  return node?.nodeType === 1 && node.namespaceURI === "http://www.w3.org/2000/svg";
+}
+
+function katanaNearestSvgTextAncestor(node) {
+  for (let current = node; current; current = current.parentNode) {
+    if (
+      current.nodeType === 1 &&
+      current.namespaceURI === "http://www.w3.org/2000/svg" &&
+      current.localName === "text"
+    )
+      return current;
+  }
+  return null;
+}
+
+function katanaNativeTextOwnerTransform(node) {
+  return String(
+    node.getAttribute?.("transform") ||
+      node.style?.getPropertyValue?.("transform") ||
+      katanaCssComputedStyleValue(node, "transform") ||
+      "",
+  ).trim();
 }
 
 function katanaIsBlockDiagram() {
