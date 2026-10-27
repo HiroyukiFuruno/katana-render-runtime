@@ -1,3 +1,5 @@
+#[path = "js_runtime_native_width_c4_tests.rs"]
+mod c4_tests;
 #[path = "js_runtime_native_width_helpers.rs"]
 mod helpers;
 #[path = "js_runtime_native_width_ishikawa_tests.rs"]
@@ -34,11 +36,6 @@ service renderer(server)[Renderer] in app
 service svg(database)[SVG cache] in app
 markdown:R -- L:renderer
 renderer:R -- L:svg"#;
-const C4_SOURCE: &str = r#"C4Dynamic
-title Runtime width probe
-Container(spa, "Single Page Application", "javascript and react")
-Container(api, "API Application", "Java and Spring Boot")
-Rel(spa, api, "Uses", "JSON/HTTPS")"#;
 const ARCHITECTURE_BETA_FIXTURE_MARKDOWN: &str =
     include_str!("../../../../../tests/fixtures/mermaid/ja/09-02-architecture-beta.md");
 
@@ -134,11 +131,22 @@ fn architecture_beta_fixture_records_native_service_bbox_inputs() -> Result<(), 
 }
 
 fn architecture_beta_source() -> Result<&'static str, String> {
-    ARCHITECTURE_BETA_FIXTURE_MARKDOWN
+    mermaid_fixture_source(ARCHITECTURE_BETA_FIXTURE_MARKDOWN)
+}
+
+fn mermaid_fixture_source(markdown: &str) -> Result<&str, String> {
+    markdown
         .split("~~~mermaid\n")
         .nth(1)
         .and_then(|value| value.split("\n~~~").next())
-        .ok_or_else(|| "architecture-beta fixture Mermaid source missing".to_string())
+        .ok_or_else(|| "fixture Mermaid source missing".to_string())
+}
+
+#[test]
+fn mermaid_fixture_source_rejects_missing_source_fence() {
+    for markdown in ["", "# No diagram\n\n~~~text\nexample\n~~~"] {
+        assert!(mermaid_fixture_source(markdown).is_err());
+    }
 }
 
 fn assert_architecture_beta_labels(result: &helpers::MeasurementFixture) -> Result<(), String> {
@@ -188,19 +196,6 @@ fn service_bbox(
         .filter(|width| width.is_finite() && *width > 0.0)
         .ok_or("architecture service bbox width missing or invalid")?;
     Ok((id, service_width))
-}
-
-#[test]
-fn nonclass_c4_uses_native_advance_for_svg_text() -> Result<(), String> {
-    let result = render_fixture(C4_SOURCE)?;
-    assert!(
-        result
-            .calls
-            .iter()
-            .any(|call| call_text(call).contains("Application")),
-        "actual C4 SVG text did not invoke native bridge"
-    );
-    assert_bridge_widths_match_rust(&result.calls)
 }
 
 #[test]

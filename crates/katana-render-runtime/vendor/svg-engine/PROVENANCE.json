@@ -1,0 +1,692 @@
+{
+  "schema": "krr-svg-engine-source-provenance-v1",
+  "sourceRepository": "https://github.com/HiroyukiFuruno/katana-resvg",
+  "upstreamRepository": "https://github.com/linebender/resvg",
+  "sourceCommit": "c01f0165059e472f45472cccddc573d32c13548a",
+  "licenseExpression": "Apache-2.0 OR MIT",
+  "excludedSourcePaths": [
+    "crates/usvg/src/main.rs",
+    "crates/resvg/src/main.rs"
+  ],
+  "enabledFeatures": [
+    "memmap-fonts",
+    "raster-images",
+    "svgz",
+    "system-fonts",
+    "text",
+    "writer"
+  ],
+  "sourceFileCount": 48,
+  "upstreamTestCount": 2,
+  "adaptationPolicy": {
+    "cratePaths": "crate:: becomes crate::svg_engine::<source engine>::, including rustdoc links",
+    "resvgUsvgPaths": "resvg/lib.rs retains its used internal alias; all other resvg usvg:: paths become crate::svg_engine::usvg::",
+    "harfrustAlias": "usvg harfrust:: becomes svg_harfrust:: (original 0.12 dependency identity)",
+    "enabledFeaturePredicates": "The original enabled feature counts are retained per file; constant evaluation removes 79 true cfg attributes and four false branches. OS and test conditions are retained; KRR has no optional public SVG-engine feature contract.",
+    "allowAttributes": "The original 46 allow attributes are retained verbatim. Two scoped boundary attributes permit observed external Clippy lints (22 in usvg/lib.rs, 18 in resvg/lib.rs) plus dead_code and unused_imports. Four resvg lints already allowed upstream are omitted from the added list to avoid duplicate attributes. No blanket all, non_minimal_cfg, unsafe-code override, or additional exclusion is introduced.",
+    "sourceSemantics": "No shaping, geometry, paint, parser, or test expectation changes"
+  },
+  "files": [
+    {
+      "source": "crates/usvg/src/lib.rs",
+      "destination": "usvg/lib.rs",
+      "sourceSha256": "5660bd30e03e5e5421a58f218b3d3c18774b53a12be81d7421739547329f4f36",
+      "transplantedSha256": "15fabe610787a1ba7905b45fe2d9c07f8fa0c2dbf5b8204f719fea3c0c48bed0",
+      "sourceBytes": 2665,
+      "transplantedBytes": 3349,
+      "adaptations": {
+        "cratePaths": 0,
+        "enabledFeaturePredicates": {
+          "text": 3,
+          "writer": 3
+        },
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/clippath.rs",
+      "destination": "usvg/parser/clippath.rs",
+      "sourceSha256": "7c5fe4eca5cd4913b528e11578d19a5b79ecfe5fb8983e793e389ffb3ef3094e",
+      "transplantedSha256": "ef8efe8667681f98785a7e94d90c03aeee86a2809b31899b74448c831fc59878",
+      "sourceBytes": 3661,
+      "transplantedBytes": 3679,
+      "adaptations": {
+        "cratePaths": 1,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/converter.rs",
+      "destination": "usvg/parser/converter.rs",
+      "sourceSha256": "e658958b50f48996944cc8cb2025cd2c40cd9acadcd00d993e733806758f0a50",
+      "transplantedSha256": "ba60db5f46ad04f9b20ca4f50c8ef59c2eab7f22fd1ff7b13b7e189a14f8ecca",
+      "sourceBytes": 37306,
+      "transplantedBytes": 36136,
+      "adaptations": {
+        "cratePaths": 6,
+        "enabledFeaturePredicates": {
+          "text": 42
+        },
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/filter.rs",
+      "destination": "usvg/parser/filter.rs",
+      "sourceSha256": "b3c9485b5abf41ce9d7a7a711cff27a307260b4496bc0518ef43d37f9d73a74b",
+      "transplantedSha256": "c2a187122f9364716d0a162e46909f179836d959fb67699357c8f981dced4fba",
+      "sourceBytes": 42587,
+      "transplantedBytes": 42641,
+      "adaptations": {
+        "cratePaths": 3,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/image.rs",
+      "destination": "usvg/parser/image.rs",
+      "sourceSha256": "8b25d3be7b87818db7bd28745f9d816a72a60463f08f00530fbf7cad12979be1",
+      "transplantedSha256": "12a6630f28229b03a376ff787933fbb71ad444f8db0e7d5df1ef359d58c41923",
+      "sourceBytes": 12821,
+      "transplantedBytes": 12893,
+      "adaptations": {
+        "cratePaths": 4,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/marker.rs",
+      "destination": "usvg/parser/marker.rs",
+      "sourceSha256": "d52e892d9654a07789f489bf4df1bca1eab52b12ed03a4d14a052ddb821ce264",
+      "transplantedSha256": "001ec40bdb4a73f55a463c1410865d1480b2990dfda3f6793b066b0b9d60ea87",
+      "sourceBytes": 15621,
+      "transplantedBytes": 15639,
+      "adaptations": {
+        "cratePaths": 1,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/mask.rs",
+      "destination": "usvg/parser/mask.rs",
+      "sourceSha256": "064a4ade88e5ecdab1b27bfe4074540364836bf5bdc862575bb2af93961bedfb",
+      "transplantedSha256": "257c9b179087faa5f26e7c82be6495668cb92204c13d982d1454c050e3263b9c",
+      "sourceBytes": 4883,
+      "transplantedBytes": 4901,
+      "adaptations": {
+        "cratePaths": 1,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/mod.rs",
+      "destination": "usvg/parser/mod.rs",
+      "sourceSha256": "ebf56fe3aeddfda8b230d947c00d53e0a9d0b3d90b03cf5032456311ccf4bd7c",
+      "transplantedSha256": "4828c33d1fa2c2a80a676ea12445f3af46f6274f5bfe5d904bb658e1a91b2b58",
+      "sourceBytes": 6283,
+      "transplantedBytes": 6017,
+      "adaptations": {
+        "cratePaths": 2,
+        "enabledFeaturePredicates": {
+          "text": 4,
+          "writer": 1,
+          "svgz": 3
+        },
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/options.rs",
+      "destination": "usvg/parser/options.rs",
+      "sourceSha256": "d8d43effeb3092c1ff9d3f53a4b04e6c9a9a144df4325b602639e82be799a1d6",
+      "transplantedSha256": "458ba22ecf3b0599661f35874f12c0b246d7a2d442f3eda5474281ff57447ce4",
+      "sourceBytes": 4716,
+      "transplantedBytes": 4559,
+      "adaptations": {
+        "cratePaths": 3,
+        "enabledFeaturePredicates": {
+          "text": 7
+        },
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/paint_server.rs",
+      "destination": "usvg/parser/paint_server.rs",
+      "sourceSha256": "d9ff7a1ad27634194bb4e26580f0ba4a59d215c605e0164bf79f6cc5ecd2f602",
+      "transplantedSha256": "dd7b37871dfadfce25a296711226c65347ddf5f5595624a42a5cbc500748d90d",
+      "sourceBytes": 33432,
+      "transplantedBytes": 33431,
+      "adaptations": {
+        "cratePaths": 2,
+        "enabledFeaturePredicates": {
+          "text": 1
+        },
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/shapes.rs",
+      "destination": "usvg/parser/shapes.rs",
+      "sourceSha256": "6c441d77c6ca2a9e574a24c2d79edcf8ab4f88de012e3b9e425ec4c4b8dc6928",
+      "transplantedSha256": "a08d4dc2850cbc86da318c8539e94d5a4cee49090784f1d2b0d1bfe91f72d382",
+      "sourceBytes": 10085,
+      "transplantedBytes": 10103,
+      "adaptations": {
+        "cratePaths": 1,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/style.rs",
+      "destination": "usvg/parser/style.rs",
+      "sourceSha256": "d2b1f038f7f88f4f778b3a8534f701981e7e9eb7e26774b63df3b92e277f496d",
+      "transplantedSha256": "c158e0a12e4575e64cb470ae10de70782257e0e451fb6ba8ed1a0ce612e65fff",
+      "sourceBytes": 9682,
+      "transplantedBytes": 9718,
+      "adaptations": {
+        "cratePaths": 2,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/svgtree/mod.rs",
+      "destination": "usvg/parser/svgtree/mod.rs",
+      "sourceSha256": "2e0c2d815903e2a2310229cb18796b294a5ee139c474d041c4e07dacf20ecf70",
+      "transplantedSha256": "3b1f9b1c9f3e8a94d1fef16f88d775507d2837e9fa5a19a853ec276d3c061627",
+      "sourceBytes": 32110,
+      "transplantedBytes": 32128,
+      "adaptations": {
+        "cratePaths": 1,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/svgtree/names.rs",
+      "destination": "usvg/parser/svgtree/names.rs",
+      "sourceSha256": "9f9d7175429f3dda9794d68d0c8176188c2e289e8e7d89eb31b4ef4e8aa1df3c",
+      "transplantedSha256": "9f9d7175429f3dda9794d68d0c8176188c2e289e8e7d89eb31b4ef4e8aa1df3c",
+      "sourceBytes": 19081,
+      "transplantedBytes": 19081,
+      "adaptations": {
+        "cratePaths": 0,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/svgtree/parse.rs",
+      "destination": "usvg/parser/svgtree/parse.rs",
+      "sourceSha256": "b0855f6fa14823201addb09252ac6112b186b0f2af568052dfd6ee55dc56acf6",
+      "transplantedSha256": "b0855f6fa14823201addb09252ac6112b186b0f2af568052dfd6ee55dc56acf6",
+      "sourceBytes": 26763,
+      "transplantedBytes": 26763,
+      "adaptations": {
+        "cratePaths": 0,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/svgtree/text.rs",
+      "destination": "usvg/parser/svgtree/text.rs",
+      "sourceSha256": "418b73948d1a819a8f3bf09f0a7f3c139707080a8cc76ef863d7c79402b25a41",
+      "transplantedSha256": "418b73948d1a819a8f3bf09f0a7f3c139707080a8cc76ef863d7c79402b25a41",
+      "sourceBytes": 12133,
+      "transplantedBytes": 12133,
+      "adaptations": {
+        "cratePaths": 0,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/switch.rs",
+      "destination": "usvg/parser/switch.rs",
+      "sourceSha256": "2b6a3f70473673189f080080f2c81a0c68c6124b398636802f39bda44ea73342",
+      "transplantedSha256": "0f3f67a1a0c804e16a3263230121f2cca9e217ce088bd2a4a55a3c0827f63e79",
+      "sourceBytes": 4975,
+      "transplantedBytes": 4993,
+      "adaptations": {
+        "cratePaths": 1,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/text.rs",
+      "destination": "usvg/parser/text.rs",
+      "sourceSha256": "7c318e58e4ef0d401c5d342f0b37d86006b855b25c55410d4c65b5f8136c8249",
+      "transplantedSha256": "c81b9f2ecf6f8e5e98bab5f704ace096ba364c9b91473a412366e4d2a2908db6",
+      "sourceBytes": 33408,
+      "transplantedBytes": 33462,
+      "adaptations": {
+        "cratePaths": 3,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/units.rs",
+      "destination": "usvg/parser/units.rs",
+      "sourceSha256": "cda6516a88bfe1b47726f9f60b76eaf11098f9b26f583ba93f3d075fb9dc35a8",
+      "transplantedSha256": "43dc5cb166f7020f44d4f04c92b683cf5e96ff865a7fb490bd706da63d404677",
+      "sourceBytes": 5919,
+      "transplantedBytes": 5528,
+      "adaptations": {
+        "cratePaths": 2,
+        "enabledFeaturePredicates": {
+          "text": 7
+        },
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/parser/use_node.rs",
+      "destination": "usvg/parser/use_node.rs",
+      "sourceSha256": "735709bc7a5bb88f956379443810561a5a152f1ddcf42d30045342dab391037f",
+      "transplantedSha256": "eb3adc20cb913ac2ceb150a3eeb1cac06b7090f0f71d2d2f14c8cd11fa62c620",
+      "sourceBytes": 13040,
+      "transplantedBytes": 13112,
+      "adaptations": {
+        "cratePaths": 4,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/text/colr.rs",
+      "destination": "usvg/text/colr.rs",
+      "sourceSha256": "51ce8d6ec262cde94276f9748ab256217dfd14d10ec0b4b8447bcf18548beb42",
+      "transplantedSha256": "89ed261b0c59ea137a06dbeadad90893069993064418f00bce7ebc36bb1e96b8",
+      "sourceBytes": 19989,
+      "transplantedBytes": 20007,
+      "adaptations": {
+        "cratePaths": 1,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/text/flatten.rs",
+      "destination": "usvg/text/flatten.rs",
+      "sourceSha256": "b27b10e17bcf35fbbae67198451cbc40406276ed916e2e66d45a561a253f7c3b",
+      "transplantedSha256": "cf220a8b466ec5deb2195783e345bdf05638d8ede3ba14e0e9af83434dffa6ac",
+      "sourceBytes": 16066,
+      "transplantedBytes": 16228,
+      "adaptations": {
+        "cratePaths": 9,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/text/layout.rs",
+      "destination": "usvg/text/layout.rs",
+      "sourceSha256": "355f6c97d4abbe31d01d3e12498396ae04f738ed63587f95e9a98e3d306d36eb",
+      "transplantedSha256": "c58f22229d7f0eaa0a4085b329f68574ecd49d05b69877a20fb06fde44842e5b",
+      "sourceBytes": 68205,
+      "transplantedBytes": 68459,
+      "adaptations": {
+        "cratePaths": 13,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 5
+      }
+    },
+    {
+      "source": "crates/usvg/src/text/mod.rs",
+      "destination": "usvg/text/mod.rs",
+      "sourceSha256": "4fe878e63464b869202c0e85c574fc5e12211b659b4a030fabaa4e28a975b88f",
+      "transplantedSha256": "260703bc3ad5bca2527c72311dbf79ae68b0277c65e403fe7c071ee988ced7a8",
+      "sourceBytes": 9109,
+      "transplantedBytes": 9163,
+      "adaptations": {
+        "cratePaths": 3,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/text/transform.rs",
+      "destination": "usvg/text/transform.rs",
+      "sourceSha256": "0623f88365eacc5606d667560a22d14157abd47b7e3cdd3ddbb6fa075630dbf4",
+      "transplantedSha256": "0623f88365eacc5606d667560a22d14157abd47b7e3cdd3ddbb6fa075630dbf4",
+      "sourceBytes": 505,
+      "transplantedBytes": 505,
+      "adaptations": {
+        "cratePaths": 0,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/tree/filter.rs",
+      "destination": "usvg/tree/filter.rs",
+      "sourceSha256": "99ae02862d62de80d800c5bed3b6d2cc5207f32c4bee61237482e87a1c3fe41b",
+      "transplantedSha256": "f80120f60dbf84cb1f494d83ab1a1b2956313719ed7fd2fef3e0e5e37f3cbb4d",
+      "sourceBytes": 24297,
+      "transplantedBytes": 24315,
+      "adaptations": {
+        "cratePaths": 1,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/tree/geom.rs",
+      "destination": "usvg/tree/geom.rs",
+      "sourceSha256": "6f9668d43d5b9c95446b6a5bef6ab0e13e639da3b2f3dda28ff47281ae050a59",
+      "transplantedSha256": "6f9668d43d5b9c95446b6a5bef6ab0e13e639da3b2f3dda28ff47281ae050a59",
+      "sourceBytes": 4769,
+      "transplantedBytes": 4769,
+      "adaptations": {
+        "cratePaths": 0,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/tree/mod.rs",
+      "destination": "usvg/tree/mod.rs",
+      "sourceSha256": "b1754318ff918ecc347657bedcc9414e60a8864334b430ee9bd4a6ab566760e7",
+      "transplantedSha256": "c8239b74778cdf1e0e50a5809d07c11d771a5826f0c07d287a9eefd775694140",
+      "sourceBytes": 53256,
+      "transplantedBytes": 53216,
+      "adaptations": {
+        "cratePaths": 1,
+        "enabledFeaturePredicates": {
+          "text": 2
+        },
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/tree/text.rs",
+      "destination": "usvg/tree/text.rs",
+      "sourceSha256": "0bca06ea94d0a4a78809c32d75c448317ad3c7d413253f99cad5a55d820802f5",
+      "transplantedSha256": "5b214200ec090abd2c8ef92029e7050ee2856fde514981af0a702e08c3ee5fa7",
+      "sourceBytes": 18978,
+      "transplantedBytes": 18831,
+      "adaptations": {
+        "cratePaths": 2,
+        "enabledFeaturePredicates": {
+          "text": 7
+        },
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/usvg/src/writer.rs",
+      "destination": "usvg/writer.rs",
+      "sourceSha256": "bf6d90456d56f0becbb0682c76354a6228419f2dbc61c031e4d408687cad40cb",
+      "transplantedSha256": "0ac6e7cef8f3456d312fce610a44c7c67a4f7b23a1243d294c962928d6488979",
+      "sourceBytes": 58954,
+      "transplantedBytes": 58990,
+      "adaptations": {
+        "cratePaths": 2,
+        "enabledFeaturePredicates": {},
+        "harfrustAliasPaths": 0
+      }
+    },
+    {
+      "source": "crates/resvg/src/clip.rs",
+      "destination": "resvg/clip.rs",
+      "sourceSha256": "bbfece2b312ea419c8c8844d01051946b66797aeab2675c71574414ecb95a067",
+      "transplantedSha256": "935b068b400b82eb23c1a0cc9d54a7e810850010e6527e56866a0aa7fe452e8b",
+      "sourceBytes": 2892,
+      "transplantedBytes": 3063,
+      "adaptations": {
+        "cratePaths": 2,
+        "enabledFeaturePredicates": {},
+        "usvgPaths": 7
+      }
+    },
+    {
+      "source": "crates/resvg/src/filter/box_blur.rs",
+      "destination": "resvg/filter/box_blur.rs",
+      "sourceSha256": "a25c600532f7a7b3df9022f10c17243a24ba718d64958c566f26feade3d9c5a2",
+      "transplantedSha256": "a25c600532f7a7b3df9022f10c17243a24ba718d64958c566f26feade3d9c5a2",
+      "sourceBytes": 10915,
+      "transplantedBytes": 10915,
+      "adaptations": {
+        "cratePaths": 0,
+        "enabledFeaturePredicates": {},
+        "usvgPaths": 0
+      }
+    },
+    {
+      "source": "crates/resvg/src/filter/color_matrix.rs",
+      "destination": "resvg/filter/color_matrix.rs",
+      "sourceSha256": "5f721bd5b56bd6ceeba3e0dfce8cf788d49943dd808ea6beca2b045345f8f616",
+      "transplantedSha256": "c6d4f33091178f4af139e12fca8a532c2958741c7f2ca0cb5f76681e759cbd84",
+      "sourceBytes": 3736,
+      "transplantedBytes": 3755,
+      "adaptations": {
+        "cratePaths": 0,
+        "enabledFeaturePredicates": {},
+        "usvgPaths": 1
+      }
+    },
+    {
+      "source": "crates/resvg/src/filter/component_transfer.rs",
+      "destination": "resvg/filter/component_transfer.rs",
+      "sourceSha256": "78c6961374d9d0829cb37dca470dee1e4a868f8597c91a2735646ab76edf562d",
+      "transplantedSha256": "d216fb938a0a0c50ea55a843d6ab408b12fcd988ace1db0d70250149283a218d",
+      "sourceBytes": 2251,
+      "transplantedBytes": 2270,
+      "adaptations": {
+        "cratePaths": 0,
+        "enabledFeaturePredicates": {},
+        "usvgPaths": 1
+      }
+    },
+    {
+      "source": "crates/resvg/src/filter/composite.rs",
+      "destination": "resvg/filter/composite.rs",
+      "sourceSha256": "391394fceb347771bb6c930882635f99e022a7b6108df66cf7616aa83d13a1af",
+      "transplantedSha256": "b263ead9aab613dc4c41c67f7362d315f530172860c43261c0afc7f5daac284c",
+      "sourceBytes": 1381,
+      "transplantedBytes": 1400,
+      "adaptations": {
+        "cratePaths": 0,
+        "enabledFeaturePredicates": {},
+        "usvgPaths": 1
+      }
+    },
+    {
+      "source": "crates/resvg/src/filter/convolve_matrix.rs",
+      "destination": "resvg/filter/convolve_matrix.rs",
+      "sourceSha256": "d4e8b2e7604b93866a8d02ac1524e16c914e5803f0a05285f40cef6785631a09",
+      "transplantedSha256": "11f25241fd8882b0718182a19829b27205f8a9dfdd6b7edb378e8e168feeb7a3",
+      "sourceBytes": 3598,
+      "transplantedBytes": 3617,
+      "adaptations": {
+        "cratePaths": 0,
+        "enabledFeaturePredicates": {},
+        "usvgPaths": 1
+      }
+    },
+    {
+      "source": "crates/resvg/src/filter/displacement_map.rs",
+      "destination": "resvg/filter/displacement_map.rs",
+      "sourceSha256": "e54274bb502bd7d262c6daa98b447ef2c90ee49a084e32f6892782bd9d678687",
+      "transplantedSha256": "89a38471131da53b32c9b1cff96f2678379b25301b38ce5f498c61aba99fa0f7",
+      "sourceBytes": 1823,
+      "transplantedBytes": 1842,
+      "adaptations": {
+        "cratePaths": 0,
+        "enabledFeaturePredicates": {},
+        "usvgPaths": 1
+      }
+    },
+    {
+      "source": "crates/resvg/src/filter/iir_blur.rs",
+      "destination": "resvg/filter/iir_blur.rs",
+      "sourceSha256": "b489b4d6c905ca246b72a9d9cddb2ffd40cbef7ca2b51c15d63d13902e9cc5a4",
+      "transplantedSha256": "b489b4d6c905ca246b72a9d9cddb2ffd40cbef7ca2b51c15d63d13902e9cc5a4",
+      "sourceBytes": 4191,
+      "transplantedBytes": 4191,
+      "adaptations": {
+        "cratePaths": 0,
+        "enabledFeaturePredicates": {},
+        "usvgPaths": 0
+      }
+    },
+    {
+      "source": "crates/resvg/src/filter/lighting.rs",
+      "destination": "resvg/filter/lighting.rs",
+      "sourceSha256": "55c68c61f27b831d81f30c62e3adf56f131d40664ce34ece4acfacfe0ddcdf71",
+      "transplantedSha256": "2e894939bff126b6ea7e79121722d331133560607f2f9f155a4645b05cdd609f",
+      "sourceBytes": 13983,
+      "transplantedBytes": 14021,
+      "adaptations": {
+        "cratePaths": 0,
+        "enabledFeaturePredicates": {},
+        "usvgPaths": 2
+      }
+    },
+    {
+      "source": "crates/resvg/src/filter/mod.rs",
+      "destination": "resvg/filter/mod.rs",
+      "sourceSha256": "478810f477d240503d51881920dba43958d32aab69a8b293b074f132cecd8bf9",
+      "transplantedSha256": "feeb7e79614d3ba10125a97ec7d3110b034d41292739fd309eb95bfefdec2387",
+      "sourceBytes": 36494,
+      "transplantedBytes": 38242,
+      "adaptations": {
+        "cratePaths": 4,
+        "enabledFeaturePredicates": {},
+        "usvgPaths": 88
+      }
+    },
+    {
+      "source": "crates/resvg/src/filter/morphology.rs",
+      "destination": "resvg/filter/morphology.rs",
+      "sourceSha256": "5444eec7f659319fc6ccda51d2b24b7bff316f89e501903b7a5f6fb9e9ab1a9d",
+      "transplantedSha256": "1f6599734ec979ee2c515520c9f5ee728a9b0d72f41343edd59d2477674ddb02",
+      "sourceBytes": 2042,
+      "transplantedBytes": 2061,
+      "adaptations": {
+        "cratePaths": 0,
+        "enabledFeaturePredicates": {},
+        "usvgPaths": 1
+      }
+    },
+    {
+      "source": "crates/resvg/src/filter/turbulence.rs",
+      "destination": "resvg/filter/turbulence.rs",
+      "sourceSha256": "2b4c288e174664836d17f829831809bee0fc55f02e6eab8425447f2ab778d974",
+      "transplantedSha256": "8021970d2483d0b587eeb4a28b411cb5fda069f4ac585447b84498fc2550527e",
+      "sourceBytes": 8299,
+      "transplantedBytes": 8318,
+      "adaptations": {
+        "cratePaths": 0,
+        "enabledFeaturePredicates": {},
+        "usvgPaths": 1
+      }
+    },
+    {
+      "source": "crates/resvg/src/geom.rs",
+      "destination": "resvg/geom.rs",
+      "sourceSha256": "2231dd54f9444399f2a2c528b8c163b0a930f4861e9e32927f62fa2289fa10e3",
+      "transplantedSha256": "2231dd54f9444399f2a2c528b8c163b0a930f4861e9e32927f62fa2289fa10e3",
+      "sourceBytes": 707,
+      "transplantedBytes": 707,
+      "adaptations": {
+        "cratePaths": 0,
+        "enabledFeaturePredicates": {},
+        "usvgPaths": 0
+      }
+    },
+    {
+      "source": "crates/resvg/src/image.rs",
+      "destination": "resvg/image.rs",
+      "sourceSha256": "41b548fc8627822cda2357c653eb86092f91eabd45ff8ed5d3f9b16fee89734e",
+      "transplantedSha256": "a28865a9a25cb41f9b8038a517e9f870d9cc50b505cc1604032375b2eaee2c48",
+      "sourceBytes": 6702,
+      "transplantedBytes": 6782,
+      "adaptations": {
+        "cratePaths": 2,
+        "enabledFeaturePredicates": {
+          "raster-images": 3
+        },
+        "usvgPaths": 14
+      }
+    },
+    {
+      "source": "crates/resvg/src/lib.rs",
+      "destination": "resvg/lib.rs",
+      "sourceSha256": "d90f2f77488c28ff6e79ce334dcffdb05eefc5fcfd718ba1d0316c023c8f19f3",
+      "transplantedSha256": "f70a83c5e1b8a79c710eb85071ca2e9e4ca624b0ea725fb66d8ea2c6887d1a2e",
+      "sourceBytes": 2909,
+      "transplantedBytes": 3639,
+      "adaptations": {
+        "cratePaths": 0,
+        "enabledFeaturePredicates": {},
+        "internalUsvgAlias": 1,
+        "usvgPaths": 0
+      }
+    },
+    {
+      "source": "crates/resvg/src/mask.rs",
+      "destination": "resvg/mask.rs",
+      "sourceSha256": "dc9e0d6dd22d2dd9981ff68e27f2ac45d303f574c4ca293877dfdd5af2a3c37d",
+      "transplantedSha256": "0a3cefedf57858fce9e4b4379b5a69250ccf0257faa57de885bc4c45c282e467",
+      "sourceBytes": 1364,
+      "transplantedBytes": 1459,
+      "adaptations": {
+        "cratePaths": 2,
+        "enabledFeaturePredicates": {},
+        "usvgPaths": 3
+      }
+    },
+    {
+      "source": "crates/resvg/src/path.rs",
+      "destination": "resvg/path.rs",
+      "sourceSha256": "cf49f94eba8a16cc3f730f544b49fbf1928b053dc4620c485677d1500dd897c7",
+      "transplantedSha256": "1a9902829432bda49aa0f19920fe299bdcaa27ca9d4c111351ee8ff312728978",
+      "sourceBytes": 6426,
+      "transplantedBytes": 6920,
+      "adaptations": {
+        "cratePaths": 2,
+        "enabledFeaturePredicates": {},
+        "usvgPaths": 24
+      }
+    },
+    {
+      "source": "crates/resvg/src/render.rs",
+      "destination": "resvg/render.rs",
+      "sourceSha256": "09907a79e6a25ba284805dffe0d23edc3348d1cf07539696df9a09fc9825eafb",
+      "transplantedSha256": "779e6a8c99cb1e25e2b59aabb3e08ae8dc539ab8a84658a9b792548150f1e442",
+      "sourceBytes": 7345,
+      "transplantedBytes": 8048,
+      "adaptations": {
+        "cratePaths": 9,
+        "enabledFeaturePredicates": {},
+        "usvgPaths": 28
+      }
+    }
+  ],
+  "licenses": [
+    {
+      "source": "LICENSE-APACHE",
+      "destination": "LICENSE-APACHE",
+      "sourceSha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+      "transplantedSha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9"
+    },
+    {
+      "source": "LICENSE-MIT",
+      "destination": "LICENSE-MIT",
+      "sourceSha256": "f5d934dc281b44e0003ee461ac740b18b6629a454decd872c774d34e4ee0b21d",
+      "transplantedSha256": "f5d934dc281b44e0003ee461ac740b18b6629a454decd872c774d34e4ee0b21d"
+    }
+  ],
+  "updateProcedure": "See README.md; changes require a new approved source commit, exclusive destination inventory, recorded source/adapted SHA256, and KRR owner validation."
+}

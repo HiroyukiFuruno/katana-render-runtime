@@ -56,7 +56,7 @@ globalThis.__katanaMeasureSvgTextMetrics = (...args) => {
       kind: "svg",
       args,
       width: metrics.advance,
-      metrics: { advance: metrics.advance, ascent: metrics.ascent, descent: metrics.descent },
+      metrics: { ...metrics },
     });
   }
   return metrics;

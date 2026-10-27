@@ -108,7 +108,7 @@ dependency-leak:
 
 # Run workspace tests
 unit-test: plantuml-install
-    CARGO_BUILD_JOBS={{quote(JOBS)}} {{CARGO}} test --workspace --all-targets --all-features --locked{{TEST_THREAD_ARGS}}
+    CARGO_BUILD_JOBS={{quote(JOBS)}} {{CARGO}} nextest run --workspace --all-targets --all-features --locked --no-fail-fast --retries 0 --user-config-file "{{REPO_ROOT}}/scripts/release/nextest-local-user.toml"{{NEXTEST_THREAD_ARGS}}
 
 # Root unit tests and line coverage share one fresh instrumented test run.
 native-coverage-cache-key producer:
@@ -305,6 +305,7 @@ runtime-classic-generation-evidence:
     bun scripts/runtime-bundles/bundle-runtime.ts --check --classic-generation-evidence
 
 runtime-asset-script-other-run:
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-assets/svg-engine-provenance_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-assets/runtime-asset-common_test.ts ./scripts/runtime-assets/update_test.ts ./scripts/runtime-assets/latest-check_test.ts ./scripts/runtime-assets/update_zenuml_test.ts ./scripts/runtime-assets/depends-update-all_test.ts ./scripts/runtime-assets/runtime-package-asset-compressor_test.ts ./scripts/runtime-assets/mermaid-patched-build-recipe_test.ts ./scripts/mermaid/official_renderer_i18n_test.ts ./scripts/mermaid/diagram_update_markdown_assets_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-rust-facts-host_test.ts ./scripts/runtime-bundles/runtime-rust-facts-host-freshness_test.ts ./scripts/runtime-bundles/runtime-mathjax-audit-evidence_test.ts
     python3 scripts/quality/moon_cache_contract_test.py --moon bun run moon
@@ -483,6 +484,7 @@ html-interaction-check:
 
 [private]
 runtime-package-asset-check:
+    bun run scripts/runtime-assets/svg-engine-provenance.ts "{{REPO_ROOT}}"
     bun run scripts/runtime-assets/runtime-package-asset-compressor.ts --check
     @package_files="$({{CARGO}} package -p katana-render-runtime --locked --allow-dirty --list)"; \
     for kind_file in "mermaid/{{MERMAID_JS_VERSION}}/mermaid.min.js"; do \
@@ -715,7 +717,6 @@ depends-update-mutations:
     {{CARGO}} upgrade -i allow --pinned allow --exclude skrifa
     python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"
     {{CARGO}} update
-    python3 scripts/release/update_usvg_skrifa_pair.py --cargo "{{CARGO}}"
     python3 scripts/release/update_html_performance_harness_lock.py --cargo "{{CARGO}}"
     bun update --latest '!@moonrepo/*'
     bun run scripts/runtime-assets/depends-update-all.ts

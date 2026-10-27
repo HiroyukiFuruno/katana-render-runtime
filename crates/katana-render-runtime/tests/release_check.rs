@@ -250,7 +250,7 @@ fn coverage_gate_remains_strict_and_includes_integration_targets()
 fn assert_unit_test_recipe(recipe: &str) {
     assert_eq!(
         recipe.trim(),
-        "plantuml-install\n    CARGO_BUILD_JOBS={{quote(JOBS)}} {{CARGO}} test --workspace --all-targets --all-features --locked{{TEST_THREAD_ARGS}}"
+        "plantuml-install\n    CARGO_BUILD_JOBS={{quote(JOBS)}} {{CARGO}} nextest run --workspace --all-targets --all-features --locked --no-fail-fast --retries 0 --user-config-file \"{{REPO_ROOT}}/scripts/release/nextest-local-user.toml\"{{NEXTEST_THREAD_ARGS}}"
     );
 }
 
@@ -555,7 +555,7 @@ fn dependency_update_all_keeps_direct_transitive_and_strict_quality_gates()
         .collect::<Vec<_>>();
     let positions = dependency_update_command_positions(&commands)?;
 
-    assert_dependency_update_command_order(&commands, positions);
+    assert_dependency_update_command_order(&commands, positions)?;
     let scheduler = std::fs::read_to_string(root.join("scripts/hooks/run_parallel_checks.py"))?;
     let moon = std::fs::read_to_string(root.join("moon.yml"))?;
     let moon_workspace = std::fs::read_to_string(root.join(".moon/workspace.yml"))?;
@@ -565,7 +565,7 @@ fn dependency_update_all_keeps_direct_transitive_and_strict_quality_gates()
 
 fn dependency_update_command_positions(
     commands: &[&str],
-) -> Result<(usize, usize, usize, usize), std::io::Error> {
+) -> Result<(usize, usize, usize), std::io::Error> {
     let broad_upgrade = commands
         .iter()
         .position(|line| line.starts_with("{{CARGO}} upgrade "))
@@ -578,24 +578,14 @@ fn dependency_update_command_positions(
         .iter()
         .position(|line| *line == "{{CARGO}} update")
         .ok_or_else(|| std::io::Error::other("Cargo lockfile update command is missing"))?;
-    let usvg_skrifa_pair_update = commands
-        .iter()
-        .position(|line| line.contains("scripts/release/update_usvg_skrifa_pair.py"))
-        .ok_or_else(|| std::io::Error::other("usvg/skrifa pair update command is missing"))?;
-
-    Ok((
-        broad_upgrade,
-        html_pair_update,
-        lockfile_update,
-        usvg_skrifa_pair_update,
-    ))
+    Ok((broad_upgrade, html_pair_update, lockfile_update))
 }
 
 fn assert_dependency_update_command_order(
     commands: &[&str],
-    positions: (usize, usize, usize, usize),
-) {
-    let (broad_upgrade, html_pair_update, lockfile_update, usvg_skrifa_pair_update) = positions;
+    positions: (usize, usize, usize),
+) -> Result<(), std::io::Error> {
+    let (broad_upgrade, html_pair_update, lockfile_update) = positions;
     assert_eq!(
         commands[broad_upgrade],
         "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa"
@@ -605,37 +595,21 @@ fn assert_dependency_update_command_order(
         "python3 scripts/release/update_html5ever_pair.py --cargo \"{{CARGO}}\""
     );
     assert!(broad_upgrade < html_pair_update && html_pair_update < lockfile_update);
-    assert_usvg_skrifa_pair_order(commands, lockfile_update, usvg_skrifa_pair_update);
-}
-
-fn assert_usvg_skrifa_pair_order(commands: &[&str], lockfile_update: usize, pair_update: usize) {
-    assert_eq!(
-        commands[pair_update],
-        "python3 scripts/release/update_usvg_skrifa_pair.py --cargo \"{{CARGO}}\""
-    );
-    assert_eq!(
-        commands
-            .iter()
-            .filter(|line| line.contains("scripts/release/update_usvg_skrifa_pair.py"))
-            .count(),
-        1,
-        "usvg/skrifa pair synchronization must run exactly once"
-    );
+    let harness_lock_update = commands
+        .iter()
+        .position(|line| {
+            *line == "python3 scripts/release/update_html_performance_harness_lock.py --cargo \"{{CARGO}}\""
+        })
+        .ok_or_else(|| std::io::Error::other("HTML performance harness lock update command is missing"))?;
+    let bun_update = commands
+        .iter()
+        .position(|line| *line == "bun update --latest '!@moonrepo/*'")
+        .ok_or_else(|| std::io::Error::other("Bun dependency update command is missing"))?;
     assert!(
-        lockfile_update < pair_update
-            && commands
-                .iter()
-                .position(|line| {
-                    *line == "python3 scripts/release/update_html_performance_harness_lock.py --cargo \"{{CARGO}}\""
-                })
-                .zip(commands
-                    .iter()
-                    .position(|line| *line == "bun update --latest '!@moonrepo/*'"))
-                .is_some_and(|(harness_lock_update, bun_update)| {
-                    pair_update < harness_lock_update && harness_lock_update < bun_update
-                }),
-        "dependency updates must synchronize both Rust pairs and the harness lock before Bun"
+        lockfile_update < harness_lock_update && harness_lock_update < bun_update,
+        "dependency updates must synchronize the Cargo lock and harness lock before Bun"
     );
+    Ok(())
 }
 
 fn assert_dependency_update_quality_gates(

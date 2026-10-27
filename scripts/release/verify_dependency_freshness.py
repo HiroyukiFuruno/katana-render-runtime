@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
 import re
@@ -20,21 +19,14 @@ from pathlib import Path
 from typing import IO
 from urllib import error, parse, request
 
-USVG_SKRIFA_PAIR_PATH = Path(__file__).with_name("update_usvg_skrifa_pair.py")
-USVG_SKRIFA_PAIR_SPEC = importlib.util.spec_from_file_location("_krr_usvg_skrifa_pair", USVG_SKRIFA_PAIR_PATH)
-if USVG_SKRIFA_PAIR_SPEC is None or USVG_SKRIFA_PAIR_SPEC.loader is None:
-    raise ImportError(f"cannot load selected usvg/Skrifa compatibility rules: {USVG_SKRIFA_PAIR_PATH}")
-usvg_skrifa_pair = importlib.util.module_from_spec(USVG_SKRIFA_PAIR_SPEC)
-USVG_SKRIFA_PAIR_SPEC.loader.exec_module(usvg_skrifa_pair)
-
-_loader_root = str(USVG_SKRIFA_PAIR_PATH.resolve().parent)
+_loader_root = str(Path(__file__).resolve().parent)
 sys.path.insert(0, _loader_root)
 try:
     from toml_loader import load_toml_parser
 finally:
     sys.path.remove(_loader_root)
 
-_expected_loader = USVG_SKRIFA_PAIR_PATH.with_name("toml_loader.py").resolve()
+_expected_loader = Path(_loader_root, "toml_loader.py").resolve()
 if any(Path(origin).resolve() != _expected_loader for origin in (sys.modules["toml_loader"].__file__ or "", load_toml_parser.__code__.co_filename)):
     raise ImportError("loaded TOML helper is outside the owned release directory")
 tomllib = load_toml_parser()
@@ -45,6 +37,10 @@ RUNTIME_CATALOG = Path("scripts/runtime-assets/runtime-asset-common.ts")
 RUNTIME_CATALOG_CLI = Path(__file__).resolve().parents[1] / "runtime-assets/runtime-asset-common.ts"
 NON_RELEASE_CARGO_MANIFEST_PARTS = {"target", "vendor", ".git", ".worktrees", "tmp"}
 KRR_SKRIFA_MANIFEST = Path("crates/katana-render-runtime/Cargo.toml")
+KRR_SVG_ENGINE_ROOT = Path("crates/katana-render-runtime/vendor/svg-engine")
+KRR_SVG_ENGINE_PROVENANCE = KRR_SVG_ENGINE_ROOT / "PROVENANCE.json"
+KRR_SVG_ENGINE_COMMIT = "c01f0165059e472f45472cccddc573d32c13548a"
+KRR_SVG_ENGINE_SOURCE_FILE_COUNT = 48
 
 
 class _StripAuthorizationRedirectHandler(request.HTTPRedirectHandler):
@@ -405,24 +401,101 @@ def cargo_metadata(root: Path) -> dict[str, object]:
     return _string_keyed_object(payload, "cargo metadata response must be a JSON object")
 
 
+def _runtime_metadata(metadata: dict[str, object]) -> tuple[dict[str, object], dict[str, object]]:
+    packages = metadata.get("packages")
+    workspace_members = metadata.get("workspace_members")
+    nodes = metadata.get("resolve")
+    if not isinstance(packages, list) or not isinstance(workspace_members, list) or not isinstance(nodes, dict):
+        raise ValueError("cargo metadata is missing KRR runtime resolution")
+    runtime = [
+        package
+        for package in packages
+        if isinstance(package, dict)
+        and package.get("id") in workspace_members
+        and package.get("name") == "katana-render-runtime"
+    ]
+    if len(runtime) != 1:
+        raise ValueError("expected one resolved KRR runtime package")
+    runtime_id = runtime[0].get("id")
+    resolve_nodes = nodes.get("nodes")
+    if not isinstance(runtime_id, str) or not isinstance(resolve_nodes, list):
+        raise ValueError("cargo metadata is missing KRR runtime resolution nodes")
+    runtime_nodes = [node for node in resolve_nodes if isinstance(node, dict) and node.get("id") == runtime_id]
+    if len(runtime_nodes) != 1:
+        raise ValueError("expected one resolved KRR runtime node")
+    return runtime[0], runtime_nodes[0]
+
+
 def verified_krr_usvg_skrifa_manifest(root: Path, metadata: dict[str, object]) -> Path | None:
-    """Return KRR's paired direct dependency manifest after strict graph validation."""
+    """Return KRR's embedded SVG-engine manifest after strict provenance validation."""
     manifest = root / KRR_SKRIFA_MANIFEST
     if not manifest.is_file():
         return None
-    runtime, _, usvg, _ = usvg_skrifa_pair.select_usvg_package(metadata)
+    provenance_path = root / KRR_SVG_ENGINE_PROVENANCE
+    engine_root = root / KRR_SVG_ENGINE_ROOT
+    if not provenance_path.is_file() or not engine_root.is_dir():
+        raise ValueError("KRR embedded SVG engine source or provenance is missing")
+    try:
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"KRR embedded SVG engine provenance is invalid: {error}") from error
+    if not isinstance(provenance, dict):
+        raise ValueError("KRR embedded SVG engine provenance must be an object")
+    if provenance.get("schema") != "krr-svg-engine-source-provenance-v1":
+        raise ValueError("KRR embedded SVG engine provenance has an unexpected schema")
+    if provenance.get("sourceCommit") != KRR_SVG_ENGINE_COMMIT:
+        raise ValueError("KRR embedded SVG engine provenance has an unexpected source commit")
+    if provenance.get("licenseExpression") != "Apache-2.0 OR MIT":
+        raise ValueError("KRR embedded SVG engine provenance has an unexpected license")
+    if provenance.get("sourceFileCount") != KRR_SVG_ENGINE_SOURCE_FILE_COUNT:
+        raise ValueError("KRR embedded SVG engine provenance has an unexpected source file count")
+    for relative_path in ("usvg/lib.rs", "resvg/lib.rs"):
+        source_path = engine_root / relative_path
+        if not source_path.is_file() or not source_path.read_bytes().strip():
+            raise ValueError(f"KRR embedded SVG engine source is missing or empty: {source_path}")
+
+    runtime, runtime_node = _runtime_metadata(metadata)
     metadata_manifest = runtime.get("manifest_path")
     if not isinstance(metadata_manifest, str) or Path(metadata_manifest).resolve() != manifest.resolve():
         raise ValueError("resolved KRR package does not match the expected runtime manifest")
-    requirement = usvg_skrifa_pair.skrifa_requirement(usvg)
-    try:
-        manifest_text = manifest.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as error:
-        raise ValueError(f"failed to read paired KRR manifest {manifest}: {error}") from error
-    _, requires_sync = usvg_skrifa_pair.sync_manifest_text(manifest_text, requirement)
-    if requires_sync:
-        raise ValueError("KRR direct skrifa requirement does not match selected usvg")
-    usvg_skrifa_pair.validate_resolution(metadata, requirement)
+    manifest_payload = _load_manifest_payload(root, manifest)
+    dependencies = manifest_payload.get("dependencies")
+    if not isinstance(dependencies, dict) or any(name in dependencies for name in ("resvg", "usvg")):
+        raise ValueError("KRR manifest retains an external resvg/usvg dependency")
+
+    runtime_dependencies = runtime.get("dependencies")
+    runtime_edges = runtime_node.get("deps")
+    if not isinstance(runtime_dependencies, list) or not isinstance(runtime_edges, list):
+        raise ValueError("KRR runtime metadata is missing dependency edges")
+    direct_skrifa = [
+        dependency
+        for dependency in runtime_dependencies
+        if isinstance(dependency, dict) and dependency.get("name") == "skrifa" and dependency.get("kind") is None
+    ]
+    if len(direct_skrifa) != 1:
+        raise ValueError("expected one direct normal skrifa dependency in KRR")
+    requirement = direct_skrifa[0].get("req")
+    if not isinstance(requirement, str) or not re.fullmatch(r"\^?0\.44(?:\.\d+)?", requirement.strip()):
+        raise ValueError("KRR direct skrifa requirement is not compatible with the embedded 0.44 API")
+    resolved_skrifa = [
+        dependency
+        for dependency in runtime_edges
+        if isinstance(dependency, dict) and dependency.get("name") == "skrifa"
+    ]
+    if len(resolved_skrifa) != 1:
+        raise ValueError("expected one resolved KRR skrifa dependency")
+    packages = metadata.get("packages")
+    if not isinstance(packages, list):
+        raise ValueError("cargo metadata is missing packages")
+    package_id = resolved_skrifa[0].get("pkg")
+    resolved_package = next((package for package in packages if isinstance(package, dict) and package.get("id") == package_id), None)
+    if not isinstance(resolved_package, dict) or not isinstance(resolved_package.get("source"), str) or not resolved_package["source"].startswith("registry+"):
+        raise ValueError("resolved KRR skrifa dependency is not a registry package")
+    declared_source = direct_skrifa[0].get("source")
+    if declared_source != resolved_package["source"]:
+        raise ValueError("KRR direct skrifa dependency source does not match registry resolution")
+    if not re.fullmatch(r"0\.44(?:\.\d+)?", str(resolved_package.get("version", ""))):
+        raise ValueError("resolved KRR skrifa dependency is not compatible with the embedded 0.44 API")
     return manifest.resolve()
 
 

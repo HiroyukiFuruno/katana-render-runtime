@@ -997,16 +997,23 @@ dependencies = [
  "anyhow",
  "base64",
  "brotli-decompressor",
+ "bytemuck",
  "cssparser 0.38.0",
+ "data-url",
+ "flate2",
+ "fontdb",
  "fontique",
+ "gif",
+ "harfrust 0.12.0",
  "harfrust 0.15.0",
  "html5ever",
  "icu_properties",
  "image",
+ "image-webp",
+ "imagesize",
  "include_dir",
  "jni",
  "katana-render-runtime-assets 0.4.24",
- "katana-resvg",
  "kurbo",
  "log",
  "markup5ever",
@@ -1015,20 +1022,28 @@ dependencies = [
  "objc2-core-text",
  "percent-encoding",
  "read-fonts 0.46.0",
+ "rgb",
+ "roxmltree 0.21.2",
  "rustybuzz",
  "serde",
  "serde_json",
  "sha2",
  "simplecss",
+ "siphasher",
  "skia-safe",
  "skrifa",
+ "strict-num",
  "svgtypes",
  "taffy 0.15.1",
  "tendril",
  "thiserror",
  "tiny-skia",
+ "tiny-skia-path",
  "tracing",
+ "unicode-bidi",
  "unicode-linebreak",
+ "unicode-script",
+ "unicode-vo",
  "unicode-width",
  "ureq",
  "url",
@@ -1036,6 +1051,8 @@ dependencies = [
  "write-fonts",
  "xml5ever",
  "xmltree",
+ "xmlwriter",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -1047,48 +1064,6 @@ checksum = "729af5d660bb6f439ced0a7c56d86ad1cd15b6f1092becc70afd97d41c5a6073"
 [[package]]
 name = "katana-render-runtime-assets"
 version = "0.4.24"
-
-[[package]]
-name = "katana-resvg"
-version = "0.49.0-katana.1"
-dependencies = [
- "bytemuck",
- "gif",
- "image-webp",
- "katana-usvg",
- "log",
- "pico-args",
- "rgb",
- "svgtypes",
- "tiny-skia",
- "zune-jpeg",
-]
-
-[[package]]
-name = "katana-usvg"
-version = "0.49.0-katana.1"
-dependencies = [
- "base64",
- "data-url",
- "flate2",
- "fontdb",
- "harfrust 0.12.0",
- "imagesize",
- "kurbo",
- "log",
- "pico-args",
- "roxmltree 0.21.2",
- "simplecss",
- "siphasher",
- "skrifa",
- "strict-num",
- "svgtypes",
- "tiny-skia-path",
- "unicode-bidi",
- "unicode-script",
- "unicode-vo",
- "xmlwriter",
-]
 
 [[package]]
 name = "krr-html-performance-harness"

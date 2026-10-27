@@ -199,7 +199,6 @@ const dependencyMutationSteps = [
   "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa",
   'python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"',
   "{{CARGO}} update",
-  'python3 scripts/release/update_usvg_skrifa_pair.py --cargo "{{CARGO}}"',
   'python3 scripts/release/update_html_performance_harness_lock.py --cargo "{{CARGO}}"',
   "bun update --latest '!@moonrepo/*'",
   "bun run scripts/runtime-assets/depends-update-all.ts",
@@ -224,9 +223,6 @@ test("一括更新はRustのmajorとpinned依存を含め、TypeScriptを旧版�
     'python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"',
   );
   expect(mutationLines).toContain("{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa");
-  expect(mutationLines).toContain(
-    'python3 scripts/release/update_usvg_skrifa_pair.py --cargo "{{CARGO}}"',
-  );
   expect(mutationLines).toContain("bun update --latest '!@moonrepo/*'");
   expect(mutationLines).not.toContain("bun add -d typescript@");
 });

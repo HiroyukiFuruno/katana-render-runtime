@@ -3,6 +3,7 @@ globalThis.__krrActualBBoxTraceOverflow = false;
 globalThis.__krrActualBBoxTraceFailure = null;
 const nativeWidthBBoxTraceLimit = 64;
 const nativeWidthSvgNamespace = "http://www.w3.org/2000/svg";
+const nativeWidthC4DiagnosticLabel = "BankingCustomerA";
 const svgProbe = document.createElementNS("http://www.w3.org/2000/svg", "svg");
 const svgPrototypeCandidate = svgProbe && Object.getPrototypeOf(svgProbe);
 if (!hasNativeWidthBBox(svgPrototypeCandidate))
@@ -41,7 +42,7 @@ function hasNativeWidthBBox(value) {
 
 /** @param {NativeWidthTraceNode} node @param {NativeWidthTraceBox} box */
 function recordActualBBox(node, box) {
-  if (!nativeWidthIsArchitectureBBoxTarget(node)) return;
+  if (!nativeWidthIsArchitectureBBoxTarget(node) && !nativeWidthIsC4DiagnosticTarget(node)) return;
   if (globalThis.__krrActualBBoxes.length >= nativeWidthBBoxTraceLimit) {
     globalThis.__krrActualBBoxTraceOverflow = true;
     return;
@@ -69,6 +70,15 @@ function nativeWidthIsArchitectureBBoxTarget(node) {
     if (parent.localName === "svg") return false;
   }
   return false;
+}
+
+/** @param {NativeWidthTraceNode} node @returns {boolean} */
+function nativeWidthIsC4DiagnosticTarget(node) {
+  return (
+    node.namespaceURI === nativeWidthSvgNamespace &&
+    ["text", "tspan"].includes(node.localName) &&
+    String(node.textContent ?? "").replace(/\s+/g, "") === nativeWidthC4DiagnosticLabel
+  );
 }
 
 /** @param {NativeWidthTraceNode} node @returns {boolean} */

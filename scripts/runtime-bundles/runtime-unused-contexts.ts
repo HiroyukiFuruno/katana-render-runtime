@@ -687,9 +687,11 @@ const nativeWidthV8CompilerCall = "ScriptCompiler::compile_with_origin(scope, so
 const nativeWidthLegacyRoute = {
   [nativeWidthHelper]: "a21a8b260625067348d8531512c8a489d3c71ec651e3b6710c1c69c4bb4da45b",
   [`${nativeWidthBase}js_runtime_native_width_tests.rs`]:
-    "bf9bfcd14bbe08f98dabb4ed0978eb861701c5d24a814b31f8d00fa88ef8fdbd",
-  [nativeWidthTrace]: "eb3d446b8a44c890b5ac2d7e77f42493dffc10627df81986aca9e6953c50c6b0",
-  [nativeWidthBBoxTrace]: "a1c72bb7a16e809b52fbd98a79a079749e4ceb1154ada17781b1007ede8a64cf",
+    "9eb7b0ea3f92aab02ffa0367b3c06ca4d9e36bb6ce406e8dcee2131914d73729",
+  [`${nativeWidthBase}js_runtime_native_width_c4_tests.rs`]:
+    "23f0a46c985e135c195b2826f06e7ab944565ba5041790df2832b711ad8af318",
+  [nativeWidthTrace]: "80953163facdebd8d765bb26923f838873043eb673eacf40963c64c0233ffd0e",
+  [nativeWidthBBoxTrace]: "36751923cccf5e76c16e4cdcbb48b9bed74354e5ea208c793c6415a85661b16b",
 } as const;
 const nativeWidthRoute = [
   ...new Set([

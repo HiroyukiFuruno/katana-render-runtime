@@ -1,0 +1,1383 @@
+{
+  "rules": {
+    "comment-style": {
+      "enabled": true,
+      "allow": [
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/clip.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/box_blur.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/color_matrix.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/component_transfer.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/composite.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/convolve_matrix.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/displacement_map.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/iir_blur.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/lighting.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/morphology.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/turbulence.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/geom.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/image.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/lib.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/mask.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/path.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/render.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/lib.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/clippath.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/converter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/filter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/image.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/marker.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/mask.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/options.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/paint_server.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/shapes.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/style.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/names.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/parse.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/switch.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/units.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/use_node.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/colr.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/flatten.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/layout.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/transform.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/filter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/geom.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/writer.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        }
+      ]
+    },
+    "error-first": {
+      "enabled": true,
+      "allow": [
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/clip.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/box_blur.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/color_matrix.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/component_transfer.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/composite.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/convolve_matrix.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/displacement_map.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/iir_blur.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/lighting.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/morphology.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/turbulence.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/geom.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/image.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/lib.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/mask.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/path.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/render.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/lib.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/clippath.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/converter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/filter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/image.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/marker.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/mask.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/options.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/paint_server.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/shapes.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/style.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/names.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/parse.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/switch.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/units.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/use_node.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/colr.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/flatten.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/layout.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/transform.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/filter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/geom.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/writer.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        }
+      ]
+    },
+    "file-length": {
+      "enabled": true,
+      "allow": [
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/clip.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/box_blur.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/color_matrix.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/component_transfer.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/composite.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/convolve_matrix.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/displacement_map.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/iir_blur.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/lighting.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/morphology.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/turbulence.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/geom.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/image.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/lib.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/mask.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/path.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/render.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/lib.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/clippath.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/converter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/filter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/image.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/marker.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/mask.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/options.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/paint_server.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/shapes.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/style.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/names.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/parse.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/switch.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/units.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/use_node.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/colr.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/flatten.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/layout.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/transform.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/filter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/geom.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/writer.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        }
+      ]
+    },
+    "magic-numbers": {
+      "enabled": true,
+      "allow": [
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/clip.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/box_blur.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/color_matrix.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/component_transfer.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/composite.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/convolve_matrix.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/displacement_map.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/iir_blur.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/lighting.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/morphology.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/turbulence.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/geom.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/image.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/lib.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/mask.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/path.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/render.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/lib.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/clippath.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/converter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/filter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/image.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/marker.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/mask.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/options.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/paint_server.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/shapes.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/style.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/names.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/parse.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/switch.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/units.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/use_node.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/colr.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/flatten.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/layout.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/transform.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/filter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/geom.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/writer.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        }
+      ]
+    },
+    "nesting-depth": {
+      "enabled": true,
+      "allow": [
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/clip.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/box_blur.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/color_matrix.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/component_transfer.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/composite.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/convolve_matrix.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/displacement_map.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/iir_blur.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/lighting.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/morphology.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/turbulence.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/geom.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/image.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/lib.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/mask.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/path.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/render.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/lib.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/clippath.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/converter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/filter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/image.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/marker.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/mask.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/options.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/paint_server.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/shapes.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/style.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/names.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/parse.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/switch.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/units.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/use_node.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/colr.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/flatten.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/layout.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/transform.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/filter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/geom.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/writer.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        }
+      ]
+    },
+    "pub-free-fn": {
+      "enabled": true,
+      "allow": [
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/clip.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/box_blur.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/color_matrix.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/component_transfer.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/composite.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/convolve_matrix.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/displacement_map.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/iir_blur.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/lighting.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/morphology.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/turbulence.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/geom.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/image.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/lib.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/mask.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/path.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/render.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/lib.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/clippath.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/converter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/filter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/image.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/marker.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/mask.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/options.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/paint_server.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/shapes.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/style.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/names.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/parse.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/switch.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/units.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/use_node.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/colr.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/flatten.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/layout.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/transform.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/filter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/geom.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/writer.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        }
+      ]
+    },
+    "type-separation": {
+      "enabled": true,
+      "allow": [
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/clip.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/box_blur.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/color_matrix.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/component_transfer.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/composite.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/convolve_matrix.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/displacement_map.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/iir_blur.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/lighting.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/morphology.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/filter/turbulence.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/geom.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/image.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/lib.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/mask.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/path.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/resvg/render.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/lib.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/clippath.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/converter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/filter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/image.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/marker.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/mask.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/options.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/paint_server.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/shapes.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/style.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/names.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/parse.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/svgtree/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/switch.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/units.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/parser/use_node.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/colr.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/flatten.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/layout.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/text/transform.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/filter.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/geom.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/mod.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/text.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        },
+        {
+          "path": "crates/katana-render-runtime/vendor/svg-engine/usvg/writer.rs",
+          "reason": "origin/license/maintenance: approved c01f0165059e472f45472cccddc573d32c13548a source under Apache-2.0 OR MIT; reassess on upstream update."
+        }
+      ]
+    }
+  }
+}

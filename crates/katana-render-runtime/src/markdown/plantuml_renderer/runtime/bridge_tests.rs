@@ -7,6 +7,9 @@ use crate::markdown::plantuml_renderer::theme::{
     PlantUmlRenderStyle, PlantUmlThemeConfig, PlantUmlThemeOps,
 };
 
+#[path = "bridge_mixed_renderer_tests.rs"]
+mod mixed_renderer_tests;
+
 #[test]
 fn bridge_renders_light_and_dark_svg_with_pinned_local_plantuml_runtime() -> Result<(), String> {
     let _guard = env_guard()?;

@@ -272,7 +272,7 @@ def validate_root_test_coverage_contract(declared: dict[str, object]) -> None:
         '    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-key --producer {{quote(producer)}} --moon-fingerprint',
     ]
     assert (
-        "unit-test: plantuml-install\n    {{CARGO}} test --workspace --all-targets --all-features --locked{{TEST_THREAD_ARGS}}"
+        "unit-test: plantuml-install\n    CARGO_BUILD_JOBS={{quote(JOBS)}} {{CARGO}} nextest run --workspace --all-targets --all-features --locked --no-fail-fast --retries 0 --user-config-file \"{{REPO_ROOT}}/scripts/release/nextest-local-user.toml\"{{NEXTEST_THREAD_ARGS}}"
         in justfile
     )
     assert "root-test-and-coverage: plantuml-install\n" in justfile

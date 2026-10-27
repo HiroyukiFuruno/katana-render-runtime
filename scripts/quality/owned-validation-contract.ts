@@ -28,6 +28,7 @@ import {
   generatedRuntimeRustAssetInputPaths,
   generatedRuntimeRustAssetPaths,
 } from "../runtime-assets/runtime-package-asset-compressor";
+import { verifySvgEngineProvenance } from "../runtime-assets/svg-engine-provenance";
 import { OFFICIAL_BROWSER_CONSUMER_PINS } from "../runtime-bundles/official-browser-consumer-contract";
 import {
   astObject,
@@ -93,12 +94,14 @@ const NATIVE_WIDTH_TEST_CONSUMERS = {
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime.rs`]:
     "184b6738bd8d38d9e8e02f64cc42aa561bc4349282caa341bc171431a234c265",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_tests.rs`]:
-    "bf9bfcd14bbe08f98dabb4ed0978eb861701c5d24a814b31f8d00fa88ef8fdbd",
+    "9eb7b0ea3f92aab02ffa0367b3c06ca4d9e36bb6ce406e8dcee2131914d73729",
+  [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_c4_tests.rs`]:
+    "23f0a46c985e135c195b2826f06e7ab944565ba5041790df2832b711ad8af318",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_ishikawa_tests.rs`]:
     "8d818595edc6750bafbead131fef9beea1987a9995a0a2613cabf1b2de3d5a9f",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_helpers.rs`]:
     "a21a8b260625067348d8531512c8a489d3c71ec651e3b6710c1c69c4bb4da45b",
-  [NATIVE_WIDTH_BBOX_TRACE]: "a1c72bb7a16e809b52fbd98a79a079749e4ceb1154ada17781b1007ede8a64cf",
+  [NATIVE_WIDTH_BBOX_TRACE]: "36751923cccf5e76c16e4cdcbb48b9bed74354e5ea208c793c6415a85661b16b",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_oracle_boundary_tests.rs`]:
     "f4375e4ca17e4d1931efbf21020b7b48bf06079ed9ae00de3ea160d31683731f",
 };
@@ -195,6 +198,9 @@ const CLASSIC_GENERATION_EVIDENCE_PRODUCER =
 const CLASSIC_GENERATION_EVIDENCE_RECIPE = "runtime-classic-generation-evidence";
 const RUNTIME_ASSET_PREFLIGHT_RECIPE = "runtime-asset-script-preflight-run";
 const RUNTIME_ASSET_OTHER_RECIPE = "runtime-asset-script-other-run";
+const SVG_ENGINE_PROVENANCE_TEST_COMMAND =
+  "bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-assets/svg-engine-provenance_test.ts";
+const SVG_ENGINE_VENDOR_ROOT = "crates/katana-render-runtime/vendor/svg-engine";
 const RUNTIME_ASSET_AGGREGATE_RECIPE = "runtime-asset-script-aggregate-run";
 const RUNTIME_UNUSED_REGRESSION = "runtime-unused-script-regression";
 const RUNTIME_UNUSED_REGRESSION_RECIPE = "runtime-unused-script-regression-run";
@@ -2194,7 +2200,9 @@ function playwrightInputsVerified(context: ContractContext): boolean {
   }
 }
 function playwrightRegistered(context: ContractContext, lane: Set<string>): boolean {
-  const lines = unconditionalRecipeCommands(runtimeAssetRecipeBody(context));
+  const lines = unconditionalRecipeCommands(runtimeAssetRecipeBody(context)).filter(
+    (line) => line !== SVG_ENGINE_PROVENANCE_TEST_COMMAND,
+  );
   const reviewed = normalizeMovedRuntimeAssetCommands(lines);
   return (
     reviewed !== undefined &&
@@ -2383,7 +2391,9 @@ function hostEvidenceRecipesRegistered(context: ContractContext): boolean {
     unusedRegressionRecipeVerified(context) &&
     runtimeUnusedLeafRecipesVerified(context) &&
     (commands[0] === HOST_EVIDENCE_TEST_COMMAND ||
-      normalizeMovedRuntimeAssetCommands(commands)?.[0] === HOST_EVIDENCE_TEST_COMMAND) &&
+      normalizeMovedRuntimeAssetCommands(
+        commands.filter((line) => line !== SVG_ENGINE_PROVENANCE_TEST_COMMAND),
+      )?.[0] === HOST_EVIDENCE_TEST_COMMAND) &&
     reviewedSplitRuntimeAssetTestCommands(context) !== undefined &&
     [
       [
@@ -3785,11 +3795,14 @@ function reviewedSplitRuntimeAssetTestCommands(context: ContractContext): string
 }
 function runtimeAssetTestCommands(context: ContractContext): string[] | undefined {
   const commands = unconditionalRecipeCommands(runtimeAssetRecipeBody(context));
+  const provenanceCommands = commands.filter((line) => line === SVG_ENGINE_PROVENANCE_TEST_COMMAND);
+  if (provenanceCommands.length !== 1) return undefined;
+  const reviewedCommands = commands.filter((line) => line !== SVG_ENGINE_PROVENANCE_TEST_COMMAND);
   const unused = unconditionalRecipeCommands(runtimeUnusedRecipeBody(context));
   if (!unusedRegressionRecipeVerified(context)) return undefined;
-  const reviewed = reviewedRuntimeAssetTestCommands(commands);
+  const reviewed = reviewedRuntimeAssetTestCommands(reviewedCommands);
   if (!reviewed) return undefined;
-  return [...reviewed, ...unused];
+  return [SVG_ENGINE_PROVENANCE_TEST_COMMAND, ...reviewed, ...unused];
 }
 function reviewedRuntimeAssetTestCommands(
   lines: string[],
@@ -4520,6 +4533,28 @@ function maintainedSources(
   });
 }
 
+function verifiedSvgEngineSources(context: ContractContext, all: string[]): Map<string, string> {
+  const prefix = `${SVG_ENGINE_VENDOR_ROOT}/`;
+  if (!all.some((file) => relative(context.root, file).startsWith(prefix))) return new Map();
+  try {
+    const paths = verifySvgEngineProvenance(context.root);
+    const absolute = paths.map((name) => path.resolve(context.root, name));
+    if (absolute.some((file) => !all.includes(file))) {
+      add(context, "svg-engine-provenance-source-unregistered", SVG_ENGINE_VENDOR_ROOT);
+      return new Map();
+    }
+    return new Map(absolute.map((file) => [file, "svg-engine-provenance"]));
+  } catch (error) {
+    add(
+      context,
+      "svg-engine-provenance-invalid",
+      SVG_ENGINE_VENDOR_ROOT,
+      error instanceof Error ? error.message : String(error),
+    );
+    return new Map();
+  }
+}
+
 const GENERATED_RUST_OUTPUT_DIRS = [
   "crates/katana-render-runtime/src/markdown/drawio_renderer/generated/",
   "crates/katana-render-runtime/src/markdown/generated/",
@@ -4553,6 +4588,7 @@ function recordGeneratedRustSet(
 function generatedRustCheckRoute(context: ContractContext): { local: boolean; ci: boolean } {
   const recipe = "runtime-package-asset-check";
   const expectedBody = [
+    'bun run scripts/runtime-assets/svg-engine-provenance.ts "{{REPO_ROOT}}"',
     "bun run scripts/runtime-assets/runtime-package-asset-compressor.ts --check",
     '@package_files="$({{CARGO}} package -p katana-render-runtime --locked --allow-dirty --list)"; \\',
     'for kind_file in "mermaid/{{MERMAID_JS_VERSION}}/mermaid.min.js"; do \\',
@@ -4587,8 +4623,8 @@ function generatedRustCheckRoute(context: ContractContext): { local: boolean; ci
   const expectedCommand = [
     "bun",
     "run",
-    "scripts/runtime-assets/runtime-package-asset-compressor.ts",
-    "--check",
+    "scripts/runtime-assets/svg-engine-provenance.ts",
+    "{{REPO_ROOT}}",
   ];
   const checkCommandPresent =
     actualBody.length === expectedBody.length &&
@@ -4722,6 +4758,58 @@ function inspectSources(
   return digest;
 }
 
+function validateOwnedRepositorySources(
+  context: ContractContext,
+  root: string,
+  policy: z.infer<typeof policySchema>,
+  tracked: Set<string>,
+  visible: Set<string>,
+  report: OwnedValidationReport,
+): { files: string[]; generated: ReturnType<typeof generatedRustContract> } | undefined {
+  const raw = [...new Set([...context.index.tracked, ...context.index.untracked])]
+    .filter((name) => OWNED_SOURCE_FORMATS[path.extname(name)])
+    .sort();
+  if (!sourceSafety(context, raw)) return undefined;
+  for (const name of raw) {
+    if (!policy.roots.includes(name.split("/")[0] ?? ""))
+      add(context, "unclassified-source-root", name);
+  }
+  const all = collectOwnedSourcePaths(root, { ...policy, excludes: [] });
+  const upstream = verifiedThirdPartyJavascript(
+    root,
+    all,
+    policy.assetManifest,
+    policy.assetResourcesRoot,
+    policy.assetSourceKinds,
+  );
+  for (const [file, evidence] of verifiedSvgEngineSources(context, all))
+    upstream.set(file, evidence);
+  if (!tracked.has(policy.assetManifest)) add(context, "untracked-authority", policy.assetManifest);
+  const generated = generatedRustContract(context, visible);
+  report.generatedRustAssets = {
+    paths: generated.paths,
+    inputCount: generated.inputCount,
+    inputDigest: generated.inputDigest,
+    byteVerification: "not-executed",
+    requiredCheck: "runtime-package-asset-check",
+    localCheckRegistered: generated.local,
+    ciCheckRegistered: generated.ci,
+  };
+  report.moonCacheFixture = moonCacheFixtureBinding(context);
+  const generatedAbsolutePaths = new Set(generated.paths.map((name) => path.resolve(root, name)));
+  return {
+    files: maintainedSources(
+      context,
+      policy.excludes,
+      all,
+      upstream,
+      generatedAbsolutePaths,
+      report,
+    ),
+    generated,
+  };
+}
+
 export function inspectOwnedValidationContract(directory: string): OwnedValidationReport {
   const root = fs.realpathSync(directory);
   const index = readOwnedRepositoryIndex(root);
@@ -4729,9 +4817,6 @@ export function inspectOwnedValidationContract(directory: string): OwnedValidati
   const visible = new Set([...index.tracked, ...index.untracked]);
   const { context, pkg, biome } = metadata(root, index, tracked, visible);
   const policy = policySchema.parse(json(root, "scripts/quality/duplication-policy.json"));
-  const raw = [...new Set([...index.tracked, ...index.untracked])]
-    .filter((name) => OWNED_SOURCE_FORMATS[path.extname(name)])
-    .sort();
   const report: OwnedValidationReport = {
     schema: 1,
     staticContractOnly: true,
@@ -4854,39 +4939,9 @@ export function inspectOwnedValidationContract(directory: string): OwnedValidati
       "The NativeWidth hash route binds its Rust input inventory, guarded facts recipe and focused test to the MathJax audit lanes; metadata does not execute the native route or verify performance.",
     ],
   };
-  if (!sourceSafety(context, raw)) return report;
-  for (const name of raw)
-    if (!policy.roots.includes(name.split("/")[0] ?? ""))
-      add(context, "unclassified-source-root", name);
-  const all = collectOwnedSourcePaths(root, { ...policy, excludes: [] });
-  const upstream = verifiedThirdPartyJavascript(
-    root,
-    all,
-    policy.assetManifest,
-    policy.assetResourcesRoot,
-    policy.assetSourceKinds,
-  );
-  if (!tracked.has(policy.assetManifest)) add(context, "untracked-authority", policy.assetManifest);
-  const generated = generatedRustContract(context, visible);
-  report.generatedRustAssets = {
-    paths: generated.paths,
-    inputCount: generated.inputCount,
-    inputDigest: generated.inputDigest,
-    byteVerification: "not-executed",
-    requiredCheck: "runtime-package-asset-check",
-    localCheckRegistered: generated.local,
-    ciCheckRegistered: generated.ci,
-  };
-  report.moonCacheFixture = moonCacheFixtureBinding(context);
-  const generatedAbsolutePaths = new Set(generated.paths.map((name) => path.resolve(root, name)));
-  const files = maintainedSources(
-    context,
-    policy.excludes,
-    all,
-    upstream,
-    generatedAbsolutePaths,
-    report,
-  );
+  const sources = validateOwnedRepositorySources(context, root, policy, tracked, visible, report);
+  if (!sources) return report;
+  const { files, generated } = sources;
   staleIncludes(context, "biome.json", biome.files.includes);
   const types = typeScopes(context, pkg);
   report.parserBodyOnload = parserBodyOnloadBinding(context, biome, types);

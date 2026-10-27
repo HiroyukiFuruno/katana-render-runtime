@@ -10,11 +10,21 @@
 //! internals. Interactive viewers use the in-process Rust/V8 browser-session API.
 
 extern crate self as markup5ever_rcdom;
+/* WHY: 既存の内部SVG参照を維持し、別crateの公開を配布条件にしない。 */
+extern crate self as resvg;
+
+#[cfg(test)]
+pub(crate) use svg_engine::resvg::tiny_skia;
+pub(crate) use svg_engine::{
+    resvg::{render, render_node},
+    usvg,
+};
 
 mod css_parser_shared;
 mod html_dom;
 pub mod markdown;
 pub mod renderer;
+mod svg_engine;
 mod system;
 mod v8_script;
 

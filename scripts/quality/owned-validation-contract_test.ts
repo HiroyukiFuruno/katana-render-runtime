@@ -1,4 +1,13 @@
-import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -95,6 +104,7 @@ const recipeBodies: Record<string, string> = {
   "runtime-asset-script-test":
     "python3 scripts/quality/moon_cache_contract_test.py --moon bun run moon",
   "runtime-package-asset-check": [
+    'bun run scripts/runtime-assets/svg-engine-provenance.ts "{{REPO_ROOT}}"',
     "bun run scripts/runtime-assets/runtime-package-asset-compressor.ts --check",
     '@package_files="$({{CARGO}} package -p katana-render-runtime --locked --allow-dirty --list)"; \\',
     'for kind_file in "mermaid/{{MERMAID_JS_VERSION}}/mermaid.min.js"; do \\',
@@ -139,6 +149,11 @@ const capacityGuardUnitCommand =
   "{{RTK_PROXY_CMD}}python3 -m unittest discover -s scripts/build -p 'cargo_capacity_guard*test.py' -v";
 const runtimeAssetUnitFixtureSource =
   'import { test } from "bun:test";\ntest("canonical recipe fixture source", () => {});\n';
+const svgEngineProvenanceSources = [
+  "scripts/runtime-assets/svg-engine-provenance.ts",
+  "scripts/runtime-assets/svg-engine-provenance-schema.ts",
+  "scripts/runtime-assets/svg-engine-provenance-manifest.ts",
+] as const;
 const playwrightGeometryTestPath = "scripts/mermaid/reference_svg_geometry_browser_test.ts";
 const playwrightUnitPaths = [
   "scripts/html/feature-catalog_test.ts",
@@ -373,6 +388,11 @@ function writeCurrentMoonFixtureInputs(root: string): void {
   ])
     write(root, name, fs.readFileSync(path.join(actualRoot, name), "utf8"));
 }
+function writeSvgEngineProvenanceFixture(root: string): void {
+  const actualRoot = path.resolve(import.meta.dir, "../..");
+  for (const name of svgEngineProvenanceSources)
+    write(root, name, fs.readFileSync(path.join(actualRoot, name), "utf8"));
+}
 function writeParserBindingFixture(root: string): void {
   const directory = "crates/katana-render-runtime/src/renderer/backends/html_runtime";
   const canonical = `${directory}/parser_body_onload.ts`;
@@ -605,6 +625,7 @@ function buildFixture(): string {
   for (const [name, source] of Object.entries(sources)) write(root, name, source);
   writeRuntimeAssetUnitFixtures(root);
   writeCurrentMoonFixtureInputs(root);
+  writeSvgEngineProvenanceFixture(root);
   writeJson(root, "scripts/quality/duplication-policy.json", duplication);
   writeJson(root, duplication.assetManifest, {
     version: 1,
@@ -631,7 +652,12 @@ function buildFixture(): string {
       biome: "biome check --error-on-warnings",
       typecheck: "tsc --noEmit",
     },
-    devDependencies: { typescript: "7.0.2", biome: "2.4.8", playwright: "1.64.1" },
+    devDependencies: {
+      typescript: "7.0.2",
+      biome: "2.4.8",
+      playwright: "1.64.1",
+      zod: "4.6.7",
+    },
   });
   write(root, "bun.lock", "{}\n");
   writeJson(root, "biome.json", {
@@ -1212,7 +1238,8 @@ test("fixture sources stay classified when its shell registration is unsupported
     typescript:
       14 +
       playwrightUnitPaths.length +
-      runtimeUnitPaths.filter((name) => name.endsWith(".ts")).length,
+      runtimeUnitPaths.filter((name) => name.endsWith(".ts")).length +
+      svgEngineProvenanceSources.length,
     javascript: 2 + runtimeUnitPaths.filter((name) => name.endsWith(".js")).length,
     python: 7,
   });
@@ -2255,16 +2282,22 @@ test("official Tomli files, provenance, and its strict Python 3.8 Ruff config ar
     detail: "",
   });
 });
-test("Tomli provenance bytes contribute to the source fingerprint", () => {
-  const root = tomliVendorFixture();
-  const original = inspectOwnedValidationContract(root);
-  const provenancePath = path.join(root, "scripts/release/_tomli/upstream-provenance.json");
-  const provenance = JSON.parse(fs.readFileSync(provenancePath, "utf8"));
-  fs.writeFileSync(provenancePath, `${JSON.stringify(provenance, null, 4)}\n`);
-  track(root);
-  const reformatted = inspectOwnedValidationContract(root);
-  expect(reformatted.issues).toEqual([]);
-  expect(reformatted.sourceDigest).not.toBe(original.sourceDigest);
+describe("Tomli provenance source fingerprint", () => {
+  let root: string;
+  let originalDigest: string;
+  beforeEach(() => {
+    root = tomliVendorFixture();
+    originalDigest = inspectOwnedValidationContract(root).sourceDigest;
+  });
+  test("provenance bytes contribute to the source fingerprint", () => {
+    const provenancePath = path.join(root, "scripts/release/_tomli/upstream-provenance.json");
+    const provenance = JSON.parse(fs.readFileSync(provenancePath, "utf8"));
+    fs.writeFileSync(provenancePath, `${JSON.stringify(provenance, null, 4)}\n`);
+    track(root);
+    const reformatted = inspectOwnedValidationContract(root);
+    expect(reformatted.issues).toEqual([]);
+    expect(reformatted.sourceDigest).not.toBe(originalDigest);
+  });
 });
 test("Tomli provenance file pins compare by keys and values, independent of JSON property order", () => {
   const root = tomliVendorFixture();
@@ -2691,6 +2724,7 @@ function nativeWidthTraceFixture(): string {
     nativeWidthHostPath,
     `${nativeWidthTraceDirectory}/js_runtime.rs`,
     `${nativeWidthTraceDirectory}/js_runtime_native_width_tests.rs`,
+    `${nativeWidthTraceDirectory}/js_runtime_native_width_c4_tests.rs`,
     `${nativeWidthTraceDirectory}/js_runtime_native_width_ishikawa_tests.rs`,
     `${nativeWidthTraceDirectory}/js_runtime_native_width_oracle_boundary_tests.rs`,
     `${nativeWidthTraceDirectory}/js_runtime_native_width_helpers.rs`,
@@ -2768,7 +2802,11 @@ test("actual Rust native width test trace remains mandatory with isolated strict
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_tests.rs`,
-      sha256: "bf9bfcd14bbe08f98dabb4ed0978eb861701c5d24a814b31f8d00fa88ef8fdbd",
+      sha256: "9eb7b0ea3f92aab02ffa0367b3c06ca4d9e36bb6ce406e8dcee2131914d73729",
+    },
+    {
+      path: `${nativeWidthTraceDirectory}/js_runtime_native_width_c4_tests.rs`,
+      sha256: "23f0a46c985e135c195b2826f06e7ab944565ba5041790df2832b711ad8af318",
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_ishikawa_tests.rs`,
@@ -2780,7 +2818,7 @@ test("actual Rust native width test trace remains mandatory with isolated strict
     },
     {
       path: nativeWidthBBoxTracePath,
-      sha256: "a1c72bb7a16e809b52fbd98a79a079749e4ceb1154ada17781b1007ede8a64cf",
+      sha256: "36751923cccf5e76c16e4cdcbb48b9bed74354e5ea208c793c6415a85661b16b",
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_oracle_boundary_tests.rs`,

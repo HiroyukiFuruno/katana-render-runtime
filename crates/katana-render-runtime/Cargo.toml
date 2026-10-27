@@ -13,6 +13,7 @@ include = [
     "assets/fonts/**",
     "assets/test-fixtures/font-probes/**",
     "src/**/*.rs",
+    "vendor/svg-engine/**",
     "src/renderer/backends/html_runtime/*.js",
     "src/markdown/diagram_runtime/generated/*.js",
     "src/markdown/diagram_runtime/generated/*.sha256",
@@ -43,7 +44,24 @@ html5ever = { workspace = true }
 markup5ever = { workspace = true }
 tendril = { workspace = true }
 xml5ever = { workspace = true }
-resvg = { workspace = true }
+bytemuck = "1.25"
+data-url = "0.3"
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+fontdb = { version = "0.24", default-features = false, features = ["fs", "fontconfig", "memmap"] }
+gif = "0.14.1"
+image-webp = "0.2.4"
+imagesize = "0.15"
+rgb = "0.8"
+roxmltree = "0.21.1"
+siphasher = "1"
+strict-num = "0.1.1"
+svg_harfrust = { package = "harfrust", version = "0.12.0" }
+tiny-skia-path = "0.12"
+unicode-bidi = "0.3"
+unicode-script = "0.5"
+unicode-vo = "0.1"
+xmlwriter = "0.1"
+zune-jpeg = "0.5.9"
 skrifa = "^0.44"
 log = "0.4"
 rustybuzz = { workspace = true }

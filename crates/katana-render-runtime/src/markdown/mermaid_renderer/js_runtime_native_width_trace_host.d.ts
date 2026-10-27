@@ -2,6 +2,11 @@ interface NativeWidthSvgMetrics {
   advance: number;
   ascent: number;
   descent: number;
+  layoutAscent?: number;
+  inkLeft?: number;
+  inkTop?: number;
+  inkRight?: number;
+  inkBottom?: number;
 }
 interface NativeWidthTraceCall {
   kind: "css" | "canvas" | "svg";
