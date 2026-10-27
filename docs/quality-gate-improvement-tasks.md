@@ -1,6 +1,23 @@
 # 品質ゲート改善の作業台帳
 
-2026-10-27追加指示: GitHub ActionsとRust依存を最新の互換版へ更新し、未公開のv0.4.24をpatch releaseする。描画・検証修正は通常hook成功後50e11e3c、Actions4workflow/42参照の公式full SHA化は契約検査・通常commit成功後100dc7beへ保存済み。R3105でkatana-ast-lint0.5.3、brotli-decompressor6.2.0、taffy0.15.1、skia-safe0.156.0を実更新し、root/harness lock同期を含む全4操作がactual0、5ファイル変更。R3107の完全静的DAGがactual0/source不変、R3108の全Rust3,005件が全成功（25skip、167.988秒）。local forkの間は既存registry専用pair/freshness readerを正式合格へ迂回しない。
+R3170: release祖先へ最新5commitを加えた回帰20件は17成功・3失敗。2件は意図的に変更した製品内容に対する旧content digestの拒否、1件は旧正例snapshot `c5215a...` が新必須祖先を含まない拒否であり、いずれも原失敗を保持する。台帳・運用指示を履歴へ固定後、既存 `release-target-manifest-update` で現コミットのnon-gate内容digestを更新し、正常snapshotを現内容へ進めて再検証する。旧snapshotの拒否・必須祖先・内容改変拒否の条件は削らない。
+
+2026-10-27 R3168/R3169: 通常hook成功後、描画・HTML利用契約の境界回帰35ファイルを `ac3de8e03842a3a7fbefcb432f5d29e76e9b92e1`、SVG本体内包・来歴/配布検査・通常Nextest統合を `8b8b71f1c8a09ed1aac5da93a146921a99c2ae29` へ分離してコミットした。新SVG crate/token待ちは取り下げ済み。R3161の配布内容検査0、R3162の現行source consumer契約22件全成功、R3163のprovenance/license回帰4件全成功、R3164の最新foundation0/source前後一致。レビューで指摘された古いmetadata pinは現一次情報との照合で誤指摘として撤回し、license集合の重複拒否は既存Zodへ追加した。R3165は完了済みdebug testのバイナリ2件を診断用に凍結し、既存just cleanが0・凍結SHA保持。R3166の新managed CLI buildは0だが未コミットsource時点の証跡で、現HEAD正式受入へ代用しない。R3167のcandidate frame proofはclean committed source必須を検出してbuild前にactual1。現在の変更を正式履歴へ固定し、新HEADで両producerを新規実行する。最新修正・Actions/Rust依存・今回2commitをrelease必須祖先へ固定中。Mermaid残17は旧診断、現117/HTML84画像と性能・coverage100%・公開は未完了。
+
+R3160: R3159のNextest記録 `4caeeb4b-2905-4cf7-b9e2-7e50abfb9cdd` を実再生actual0し、C4観測stdoutを検査の再実行なしで回収した。`Banking Customer A` の全文advance137.94921875と3分割advance合計137.94921875は一致し、現BBox幅137.96875は分割ceil64合計と一致する。このラベルにおけるkerning欠落仮説を否定し、C4 owner mergeを憶測で製品へ追加しない。残差は独立raw JS座標・高さとの比較へ戻す。製品・正解データ・scorer未変更。証跡: `tmp/quality/reserved-warm-owner-r2939/current-nextest-recording-replay-r3160/observation.json`。
+
+2026-10-27 R3159: R3157のimport4件を修正後、完全静的DAG actual0、通常Nextestのworkspace/all-targets/all-featuresが3,064件全成功・既存25skip（172.940秒）、source前後一致。実Mermaid→SVG描画→実JNI PlantUML→Mermaid再描画の同一process回帰、C4全文/分割幅の観測、共有XML/HTML関連回帰もこの母集団で成功した。通常Cargo全testを同一processで実行したR3150のSIGKILLは原失敗として保持し、原因確定へすり替えない。現行3,064件成功はcoverage100%、Mermaid117の画像99、HTML84画像90/性能非劣化・公開の成功ではない。証跡: `tmp/quality/reserved-warm-owner-r2939/single-crate-current-nextest-all-r3159/observation.json`、Nextest run ID `4caeeb4b-2905-4cf7-b9e2-7e50abfb9cdd`。
+
+2026-10-27 R3157継続: 単一crate統合後の最新静的検査はactual101、source前後一致。追加したC4観測moduleの未利用import1件と、Mermaid→実JNI PlantUML→Mermaid同一process回帰のimport階層3件を検出し、重いNextestは未起動のまま停止した。非重複担当へ修正を分離し、検査成功へ読み替えない。R3155の300行上限超過はC4観測を97行の専用moduleへ分離しR3156の正式fmt成功・source consumer pin同期で対処済み。C4Context実入力では位置属性なしの隣接tspanが同一text祖先内で単語ごとに計測される事実を確認したが、全文shapeとの差・実画像の改善は未測定。残17件は旧診断のまま、現行全117・HTML84正式受入と性能非劣化・coverage100%・公開は未完了。
+
+2026-10-27最新配布指示: 修正版SVG実装はAPIだけでなくKRR本体の単一crateへ内包する。`katana-usvg`・`katana-resvg`の個別公開、追加token登録、当該403の解消はリリース条件から取り下げる。既存のKRR本体・assets・CLIの公開条件は維持する。以下の過去記録にあるSVGの別crate/registry公開前提は履歴であり、現在の指示ではない。内部統合ではライセンス・upstream由来と当方修正の識別・更新手順を維持し、未公開path/git依存を配布物に残さない。画像・性能・coverage・完全品質ゲートは変更しない。
+
+- [x] 承認済みSVG修正をKRR内部モジュールへ統合する。`vendor/svg-engine`に48 Rust sourceと2ライセンス・来歴・更新手順を収容し、KRR内の非公開aliasで既存参照を維持した。root/性能harnessの両lockから別SVG 2packageを除去し、registry依存をKRRの直接依存へ移した。
+- [ ] 単一KRR配布物の検証・描画・性能・完全ゲート・公開を完了する。R3143の完全静的18taskはactual0/source前後一致。R3145のBun624件は622成功・2失敗を保持し、fixture件数と2回の解析を同一testへ詰め込んだ配置を修正した。R3147は失敗2caseだけを実行し2/2成功（604filtered）、timeout延長なし。Python依存回帰69件はR3146で全成功。これらを新sourceの完全test/coverageや全117図の正式合格へ代用しない。
+- [x] 別SVG path依存のcrate外README symlinkによるcache拒否を解消する。既存診断R3133がactual0、contextCacheable=true・missReasons=[]・anchorReadable=true。キャッシュの実復元・安全性・coverage100%は引き続き未完了。
+- [/] 別SVG crateの公開/token更新待ちを取り下げる。根拠は「403出ても関係ない」「krrに統合」「crateすら分ける必要なくない」「回答済み」という最新ユーザー指示。
+
+2026-10-27追加指示: GitHub ActionsとRust依存を最新の互換版へ更新し、未公開のv0.4.24をpatch releaseする。描画・検証修正は通常hook成功後50e11e3c、Actions4workflow/42参照の公式full SHA化は契約検査・通常commit成功後100dc7beへ保存済み。R3105でkatana-ast-lint0.5.3、brotli-decompressor6.2.0、taffy0.15.1、skia-safe0.156.0を実更新し、root/harness lock同期を含む全4操作がactual0、5ファイル変更。R3107の完全静的DAGがactual0/source不変、R3108の全Rust3,005件が全成功（25skip、167.988秒）。内部統合後は別crateのregistry版ではなく、KRR配布物内の実装・来歴を正式に検証する。
 
 R3108の正式coverage reportは、target7,396,634,624Bが固定上限を超え、集計前のguardでactual1。R3109の既存admissionはactual0/COV全inventory保持、その後の既存diagnostic reportはactual0。現行診断は67,239/68,509＝98.14622896%、missing1,270/270ファイル（位置一覧は216ファイル/913unique行で別分母）。source前後/R3110後のmanifestが一致し、immutable診断copyを `tmp/quality/latest-rust-coverage-gap-snapshot-r3112/` へ保存した。製品・維持helperを含むため一括除外しない。非重複の着手群はsvg_rasterize126ファイル/710件、HTML/CLI72ファイル/189件、linter/Mermaid/bridge等72ファイル/371件。正式100%・未計測0は未達。
 
