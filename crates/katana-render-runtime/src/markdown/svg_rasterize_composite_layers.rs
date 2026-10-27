@@ -5,6 +5,10 @@ use tiny_skia::{BlendMode, IntRect, Mask, MaskType, Pixmap, PixmapPaint, Transfo
 const LAYER_EDGE_PADDING: i32 = 2;
 const LAYER_SIZE_PADDING: u32 = 4;
 
+#[cfg(test)]
+#[path = "svg_rasterize_composite_layers_boundary_tests.rs"]
+mod boundary_tests;
+
 pub(super) fn render_clipped_group(
     group: &usvg::Group,
     transform: Transform,

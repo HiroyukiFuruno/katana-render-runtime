@@ -123,3 +123,27 @@ fn polygon_right_bottom_returns_finite_extrema_for_unordered_points() {
         );
     }
 }
+
+#[test]
+fn viewport_polygon_intersection_keeps_all_four_clip_boundaries() -> Result<(), String> {
+    let polygon =
+        polygon::clip_viewport_polygon(&clip(10.0, 8.0), &viewport(-1.0, -1.0, 12.0, 10.0))?;
+    assert_eq!(polygon.len(), RECT_CORNER_COUNT);
+    for corner in [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0)] {
+        assert!(
+            polygon.contains(&corner),
+            "missing clipped corner {corner:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn collapsed_polygon_with_no_active_normal_cannot_expose_viewport_pixels() {
+    let mut collapsed = clip(10.0, 8.0);
+    collapsed.transformed_corners = [(0.0, 0.0); RECT_CORNER_COUNT];
+    assert_eq!(
+        polygon::clip_viewport_polygon(&collapsed, &viewport(0.0, 0.0, 10.0, 8.0)),
+        Ok(Vec::new())
+    );
+}

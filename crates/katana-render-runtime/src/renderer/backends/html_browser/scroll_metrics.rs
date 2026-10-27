@@ -121,3 +121,7 @@ fn validate_scroll_bounds(metrics: &HtmlBrowserScrollMetrics) -> Result<(), Html
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "scroll_metrics_contract_tests.rs"]
+mod contract_tests;

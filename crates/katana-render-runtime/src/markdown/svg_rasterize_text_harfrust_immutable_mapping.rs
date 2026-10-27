@@ -89,6 +89,10 @@ fn eligible_mount(filesystem: &str, flags: nix::mount::MntFlags, same_device: bo
 }
 
 #[cfg(test)]
+#[path = "svg_rasterize_text_harfrust_immutable_mapping_boundary_tests.rs"]
+mod boundary_tests;
+
+#[cfg(test)]
 mod tests {
     use super::{eligible_mount, eligible_source};
     use nix::mount::MntFlags;

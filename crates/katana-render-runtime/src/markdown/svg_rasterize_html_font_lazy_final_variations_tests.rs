@@ -36,10 +36,7 @@ fn effective_opsz_observation_matches_usvg_version_bound_rules() {
 
 #[test]
 fn normalized_observation_ignores_unknown_axes() -> Result<(), String> {
-    let mut database = Database::new();
-    let shared_font_bytes = Arc::new(FONT_BYTES.to_vec());
-    let ids = database.load_font_source(Source::Binary(shared_font_bytes));
-    let face_id = *ids.first().ok_or("bundled font did not load")?;
+    let (database, face_id) = bundled_face()?;
     let unknown = [FontVariation::new(*b"zzzz", 1.0)];
     assert!(super::variations::normalized_coords(&database, face_id, &unknown)?.is_empty());
     assert!(
@@ -56,6 +53,58 @@ fn observation_inputs_reject_nonfinite_and_mixed_face_sizes() {
     assert!(super::variations::validate_observation_inputs(&variation, &[f32::NAN]).is_err());
     let nonfinite = [FontVariation::new(*b"wght", f32::INFINITY)];
     assert!(super::variations::validate_observation_inputs(&nonfinite, &[16.0]).is_err());
+    assert!(super::variations::validate_observation_inputs(&variation, &[]).is_err());
+}
+
+pub(super) fn bundled_face() -> Result<(Database, ID), String> {
+    let mut database = Database::new();
+    let ids = database.load_font_source(Source::Binary(Arc::new(FONT_BYTES.to_vec())));
+    let face_id = *ids.first().ok_or("bundled font did not load")?;
+    Ok((database, face_id))
+}
+
+#[test]
+fn normalized_observation_rejects_duplicate_and_nonfinite_axes() -> Result<(), String> {
+    let (database, face_id) = bundled_face()?;
+    let duplicate = vec![FontVariation::new(*b"wght", 400.0); 2];
+    let mut cases = vec![(duplicate, "duplicate variation axis")];
+    for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        cases.push((
+            vec![FontVariation::new(*b"wght", value)],
+            "non-finite variation value",
+        ));
+    }
+    for (variations, expected) in cases {
+        let result = super::variations::normalized_coords(&database, face_id, &variations);
+        assert!(result.is_err_and(|error| error.contains(expected)));
+    }
+    Ok(())
+}
+
+#[test]
+fn normalized_observation_rejects_a_removed_real_face() -> Result<(), String> {
+    let (mut database, face_id) = bundled_face()?;
+    database.remove_face(face_id);
+    let result = super::variations::normalized_coords(&database, face_id, &[]);
+    assert!(result.is_err_and(|error| error.contains("font face data unavailable")));
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn face_observation_rejects_duplicate_applied_variable_axis() -> Result<(), String> {
+    let (database, _) = sfns_face()?;
+    let tree = super::test_support::font_tree(database)?;
+    let (_, source) = super::test_support::text_span(&tree)?;
+    let mut span = source.clone();
+    span.variations = vec![FontVariation::new(*b"wght", 400.0); 2];
+    let glyph = span
+        .positioned_glyphs
+        .first()
+        .ok_or("variable fixture glyph missing")?;
+    let result = super::variations::face_observation(tree.fontdb(), &span, glyph.font, glyph);
+    assert!(result.is_err_and(|error| error.contains("duplicate variation axis")));
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]

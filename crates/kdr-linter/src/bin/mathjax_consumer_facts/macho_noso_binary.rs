@@ -112,3 +112,7 @@ impl MachOReader {
         Ok(json!({"symbolIndex": index, "name": name}))
     }
 }
+
+#[cfg(test)]
+#[path = "macho_noso_binary_tests.rs"]
+mod tests;

@@ -6,6 +6,9 @@ use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
 use resvg::usvg::fontdb::{Database, Source};
 use std::sync::Arc;
 
+#[path = "svg_rasterize_html_font_lazy_final_glyph_validation_tests.rs"]
+mod validation_tests;
+
 #[test]
 fn actual_raster_route_retains_each_top_and_embedded_svg_tree() -> Result<(), String> {
     let (first, second) = svg_inputs();

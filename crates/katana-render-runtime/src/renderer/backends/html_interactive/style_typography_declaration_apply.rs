@@ -195,4 +195,13 @@ mod tests {
         );
         assert!(FontShorthandParser::style(&["invalid"], style.font_weight).is_none());
     }
+
+    #[test]
+    fn invalid_text_spacing_trim_preserves_the_previous_valid_assignment() {
+        let mut style = CssStyle::browser_default();
+        assert!(style.apply_typography_property("text-spacing-trim", "space-all"));
+        let previous = style.text_spacing_trim;
+        assert!(style.apply_typography_property("text-spacing-trim", "unsupported"));
+        assert_eq!(style.text_spacing_trim, previous);
+    }
 }

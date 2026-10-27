@@ -201,3 +201,7 @@ mod contract_tests;
 #[cfg(test)]
 #[path = "session_frame_transfer_tests.rs"]
 mod frame_transfer_tests;
+
+#[cfg(test)]
+#[path = "session_sync_real_frame_tests.rs"]
+mod real_frame_tests;

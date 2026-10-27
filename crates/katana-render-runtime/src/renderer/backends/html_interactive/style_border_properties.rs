@@ -176,4 +176,13 @@ mod tests {
         assert!(style.border_bottom_width.is_none());
         assert!(style.border_left_width.is_none());
     }
+
+    #[test]
+    fn invalid_border_side_style_keeps_prior_edge_and_records_authored_border() {
+        let mut style = CssStyle::browser_default();
+        style.apply_border_side_style("border-top-style", "solid");
+        style.apply_border_side_style("border-top-style", "unsupported");
+        assert_eq!(style.border_top_style, Some(CssBorderStyle::Solid));
+        assert!(style.explicit_border);
+    }
 }

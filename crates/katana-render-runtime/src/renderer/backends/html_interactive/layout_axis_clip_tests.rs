@@ -87,3 +87,37 @@ fn degenerate_zero_source_axes_return_specific_errors() {
         Err("degenerate owner x axis for paint clip transform".to_string())
     );
 }
+
+#[test]
+fn zero_source_dimensions_reject_both_undefined_owner_axes() {
+    const COLLAPSED: [(f32, f32); 4] = [(0.0, 0.0); 4];
+    for result in [
+        axis_x(0.0, 0.0, (0.0, 0.0), &COLLAPSED),
+        axis_y(0.0, 0.0, (0.0, 0.0), &COLLAPSED),
+    ] {
+        assert_eq!(
+            result,
+            Err("zero-size owner cannot define paint clip transform".to_owned())
+        );
+    }
+}
+
+#[test]
+fn disjoint_paint_clip_and_non_finite_inverse_have_distinct_results() {
+    use super::super::layout::HtmlLayoutRenderer;
+    use super::super::types::OverflowClip;
+    use super::{local_polygon, transformed_clip_path};
+    use tiny_skia::Transform;
+
+    const OUTSIDE_VIEWPORT: f32 = 10_000.0;
+    let renderer = HtmlLayoutRenderer::default();
+    let clip = OverflowClip::new(1, OUTSIDE_VIEWPORT, OUTSIDE_VIEWPORT, 1.0, 1.0, 0.0, 0.0);
+    assert_eq!(
+        transformed_clip_path(&renderer, &clip, Transform::identity()),
+        Ok("M 0 0 Z".to_owned())
+    );
+    assert_eq!(
+        local_polygon(vec![(f64::MAX, 0.0)], Transform::identity(), &renderer),
+        Err("non-finite inverse owner transform point".to_owned())
+    );
+}

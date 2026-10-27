@@ -3,6 +3,9 @@ use resvg::usvg::Text;
 use std::cell::Cell;
 use tiny_skia::{Color, Paint, PixmapMut, Rect, Transform};
 
+#[path = "svg_rasterize_html_linear_component_transfer_boundary_tests.rs"]
+mod boundary_tests;
+
 const SIZE: u32 = 40;
 const CHANNEL_COUNT: usize = 4;
 type RenderResult = (Vec<[u8; CHANNEL_COUNT]>, usize);

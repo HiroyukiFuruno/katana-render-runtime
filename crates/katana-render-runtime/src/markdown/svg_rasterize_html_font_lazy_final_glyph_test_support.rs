@@ -5,6 +5,38 @@ use super::MAX_FINAL_GLYPH_RECORDS;
 pub(super) const PRIMARY_TEST_FONT_SIZE: usize = 16;
 pub(super) const ALTERNATE_TEST_FONT_SIZE: usize = 17;
 
+pub(super) fn font_tree(
+    database: resvg::usvg::fontdb::Database,
+) -> Result<resvg::usvg::Tree, String> {
+    let family = database
+        .faces()
+        .find_map(|face| face.families.first().map(|family| family.0.clone()))
+        .ok_or("fixture database has no font family")?;
+    let options = resvg::usvg::Options {
+        font_family: family,
+        fontdb: std::sync::Arc::new(database),
+        ..Default::default()
+    };
+    resvg::usvg::Tree::from_str(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"><text id="audit-run" x="1" y="24" font-size="16">AV</text></svg>"#,
+        &options,
+    )
+    .map_err(|error| error.to_string())
+}
+
+pub(super) fn text_span(
+    tree: &resvg::usvg::Tree,
+) -> Result<(&resvg::usvg::Text, &resvg::usvg::layout::Span), String> {
+    let Some(resvg::usvg::Node::Text(text)) = tree.node_by_id("audit-run") else {
+        return Err("font audit fixture text is missing".to_owned());
+    };
+    let span = text
+        .layouted()
+        .first()
+        .ok_or("font audit fixture span is missing")?;
+    Ok((text, span))
+}
+
 pub(super) fn svg_with_many_text_spans() -> String {
     let spans = (0..=MAX_FINAL_GLYPH_RECORDS)
         .map(|index| {

@@ -19,6 +19,24 @@ fn paint_capture_records_actual_identity_draw_arguments() -> Result<(), String> 
     assert_identity_capture(&span, &snapshot)
 }
 
+#[test]
+fn paint_capture_report_serializes_empty_and_actual_draw_snapshots() -> Result<(), String> {
+    let (_, captured) = capture_fixture_draw(false)?;
+    for (snapshot, status) in [
+        (capture::Snapshot::default(), "empty"),
+        (captured, "captured"),
+    ] {
+        let report = snapshot.report_value();
+        assert_eq!(report["status"], status);
+        assert_eq!(report["rows"], serde_json::json!(snapshot.events));
+        assert_eq!(report["capturedDrawCount"], snapshot.events.len());
+        assert_eq!(report["hasRows"], !snapshot.events.is_empty());
+        assert_eq!(report["dropped"], 0);
+        assert_eq!(report["complete"], true);
+    }
+    Ok(())
+}
+
 fn assert_identity_capture(
     span: &PreparedSpan,
     snapshot: &capture::Snapshot,
@@ -138,6 +156,10 @@ fn assert_event_limit(font: &Font) {
     record_test_event(font, 0.0);
     assert_eq!(scope.snapshot().events.len(), capture::MAX_EVENTS_FOR_TEST);
     assert_eq!(scope.snapshot().dropped, 1);
+    let report = scope.snapshot().report_value();
+    assert_eq!(report["status"], "overflow");
+    assert_eq!(report["dropped"], 1);
+    assert_eq!(report["complete"], false);
 }
 
 fn assert_glyph_limit(font: &Font) {

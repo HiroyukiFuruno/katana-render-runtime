@@ -239,4 +239,19 @@ mod tests {
         style.apply_border_side_width("width", "12px");
         assert_eq!(style.border_top_width, Some(9.0));
     }
+
+    #[test]
+    fn maintained_simple_overflow_helper_preserves_axis_contract_and_rejects_other_names() {
+        let mut style = CssStyle::browser_default();
+        assert!(style.apply_simple_box_property("overflow", "scroll hidden"));
+        assert_eq!(
+            style.specified_overflow_axes(),
+            (CssOverflowAxis::Scroll, CssOverflowAxis::Hidden)
+        );
+        assert!(!style.apply_overflow_property("width", "scroll"));
+        assert_eq!(
+            style.specified_overflow_axes(),
+            (CssOverflowAxis::Scroll, CssOverflowAxis::Hidden)
+        );
+    }
 }

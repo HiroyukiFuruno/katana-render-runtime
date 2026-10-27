@@ -182,3 +182,7 @@ impl HtmlInteractiveSession {
 #[cfg(all(test, target_os = "macos"))]
 #[path = "session_render_font_work_observer.rs"]
 mod font_work;
+
+#[cfg(test)]
+#[path = "session_render_layout_contract_tests.rs"]
+mod contract_tests;

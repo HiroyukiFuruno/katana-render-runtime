@@ -181,3 +181,7 @@ fn is_select_element(node: &Handle) -> bool {
 pub(super) fn is_html_element(name: &html5ever::QualName) -> bool {
     name.ns.as_str() == "http://www.w3.org/1999/xhtml"
 }
+
+#[cfg(test)]
+#[path = "html_document_form_boundary_tests.rs"]
+mod boundary_tests;

@@ -88,3 +88,7 @@ impl Subscriber for CaptureSubscriber {
         state.event(fields);
     }
 }
+
+#[cfg(test)]
+#[path = "render_attestation_classic_span_tests.rs"]
+mod span_tests;

@@ -1,8 +1,37 @@
 use super::source;
 use syn::parse::Parser;
-use syn::{Expr, FnArg, ImplItemFn, Stmt, Type};
+use syn::{Expr, Stmt};
 
-pub(super) fn require_svg_id_signature(method: &ImplItemFn) -> Result<(), String> {
+#[path = "native_width_hash_ast_signatures.rs"]
+mod signatures;
+
+pub(super) fn named_reference(
+    argument: &syn::FnArg,
+    name: &str,
+    target: &str,
+    mutable: bool,
+) -> bool {
+    signatures::named_reference(argument, name, target, mutable)
+}
+
+fn named_value(argument: &syn::FnArg, name: &str, target: &str) -> bool {
+    signatures::named_value(argument, name, target)
+}
+
+fn plugin_key_signature(argument: &syn::FnArg) -> bool {
+    signatures::plugin_key_signature(argument)
+}
+
+fn return_type(output: &syn::ReturnType, expected: &str) -> bool {
+    signatures::return_type(output, expected)
+}
+
+#[cfg(test)]
+fn type_path_is(ty: &syn::Type, expected: &str) -> bool {
+    signatures::type_path_is(ty, expected)
+}
+
+pub(super) fn require_svg_id_signature(method: &syn::ImplItemFn) -> Result<(), String> {
     let parameters = method.sig.inputs.iter().collect::<Vec<_>>();
     let [source, preset] = parameters.as_slice() else {
         return Err("svg-id-hash-route:signature".into());
@@ -16,7 +45,7 @@ pub(super) fn require_svg_id_signature(method: &ImplItemFn) -> Result<(), String
     Ok(())
 }
 
-pub(super) fn require_cache_signature(method: &ImplItemFn) -> Result<(), String> {
+pub(super) fn require_cache_signature(method: &syn::ImplItemFn) -> Result<(), String> {
     let parameters = method.sig.inputs.iter().collect::<Vec<_>>();
     let [source, js, preset, mode, plugin_key] = parameters.as_slice() else {
         return Err("render-cache-hash-route:signature".into());
@@ -31,59 +60,6 @@ pub(super) fn require_cache_signature(method: &ImplItemFn) -> Result<(), String>
         return Err("render-cache-hash-route:signature".into());
     }
     Ok(())
-}
-
-pub(super) fn named_reference(argument: &FnArg, name: &str, target: &str, mutable: bool) -> bool {
-    let FnArg::Typed(argument) = argument else {
-        return false;
-    };
-    if !matches!(&*argument.pat, syn::Pat::Ident(pattern) if pattern.ident == name) {
-        return false;
-    }
-    let Type::Reference(reference) = &*argument.ty else {
-        return false;
-    };
-    reference.mutability.is_some() == mutable && type_path_is(&reference.elem, target)
-}
-
-fn named_value(argument: &FnArg, name: &str, target: &str) -> bool {
-    let FnArg::Typed(argument) = argument else {
-        return false;
-    };
-    matches!(&*argument.pat, syn::Pat::Ident(pattern) if pattern.ident == name)
-        && type_path_is(&argument.ty, target)
-}
-
-fn plugin_key_signature(argument: &FnArg) -> bool {
-    let FnArg::Typed(argument) = argument else {
-        return false;
-    };
-    if !matches!(&*argument.pat, syn::Pat::Ident(pattern) if pattern.ident == "zenuml_plugin_key") {
-        return false;
-    }
-    let Type::Tuple(tuple) = &*argument.ty else {
-        return false;
-    };
-    tuple.elems.len() == 2
-        && tuple.elems.iter().all(|element| {
-            matches!(element, Type::Reference(reference) if type_path_is(&reference.elem, "str"))
-        })
-}
-
-fn return_type(output: &syn::ReturnType, expected: &str) -> bool {
-    matches!(output, syn::ReturnType::Type(_, ty) if type_path_is(ty, expected))
-}
-
-pub(super) fn type_path_is(ty: &Type, expected: &str) -> bool {
-    let Type::Path(path) = ty else {
-        return false;
-    };
-    path.path.segments.len() == 1
-        && path
-            .path
-            .segments
-            .first()
-            .is_some_and(|segment| segment.ident == expected)
 }
 
 pub(super) fn require_format_return(
@@ -197,3 +173,7 @@ fn string_argument(
 ) -> bool {
     matches!(arguments.first(), Some(Expr::Lit(literal)) if matches!(&literal.lit, syn::Lit::Str(string) if string.value() == value))
 }
+
+#[cfg(test)]
+#[path = "native_width_hash_ast_tests.rs"]
+mod tests;

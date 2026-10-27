@@ -4,6 +4,10 @@ mod candidates;
 #[path = "input_focus_tab_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "input_focus_tab_source_tests.rs"]
+mod source_tests;
+
 pub(super) use candidates::focus_candidates;
 
 pub(super) fn next_candidate(

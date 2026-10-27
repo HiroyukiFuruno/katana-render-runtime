@@ -15,6 +15,19 @@ const FAMILY: &str = "Trebuchet MS";
 const SAMPLE: &str = "AV";
 
 #[test]
+fn physical_font_stage_helpers_verify_and_draw_selected_source()
+-> Result<(), Box<dyn std::error::Error>> {
+    /* WHY: ignored診断を実行しない通常laneでも、物理source照合と実描画の退行を検知する。 */
+    let database = acquire_font_database();
+    profile_selected_font(&database)
+}
+
+#[test]
+fn physical_font_stage_rejects_a_database_without_the_selected_family() {
+    assert!(selected_physical_font(&Database::new()).is_err());
+}
+
+#[test]
 #[cfg(target_os = "macos")]
 #[ignore = "staged font initialization RSS/time diagnostic"]
 fn macos_font_initialization_stages_report_time_and_rss() -> Result<(), Box<dyn std::error::Error>>
