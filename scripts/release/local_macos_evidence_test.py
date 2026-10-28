@@ -21,6 +21,8 @@ from types import TracebackType
 from typing import Literal, Protocol, runtime_checkable
 from unittest.mock import Mock, patch
 
+from local_macos_workflow_contract_test import workflow_job, workflow_steps
+
 
 MODULE_PATH = Path(__file__).with_name("local_macos_evidence.py")
 SPEC = importlib.util.spec_from_file_location("local_macos_evidence", MODULE_PATH)
@@ -201,7 +203,7 @@ STABLE_RUST = {
     "rustfmt_cli": "1.10.0-stable (b940084d7e 2026-09-28)",
 }
 
-BUN_BINARY = b"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 1.4.3; else exit 0; fi\n"
+BUN_BINARY = b"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 1.4.4; else exit 0; fi\n"
 
 
 def fixture_bun_archive(binary: bytes = BUN_BINARY) -> bytes:
@@ -383,7 +385,7 @@ def valid_comment() -> dict[str, object]:
         "tools": {
             "macos": "15.0", "architecture": "arm64", "rust_host": "aarch64-apple-darwin",
             "rustc": f"rustc {STABLE_RUST['rustc']}",
-            "cargo": f"cargo {STABLE_RUST['cargo_cli']}", "java": 'openjdk version "21.0.12" 2025-01-21', "bun": "1.4.3",
+            "cargo": f"cargo {STABLE_RUST['cargo_cli']}", "java": 'openjdk version "21.0.12" 2025-01-21', "bun": "1.4.4",
             "clippy": f"clippy {STABLE_RUST['clippy_cli']}",
             "rustfmt": f"rustfmt {STABLE_RUST['rustfmt_cli']}",
             "java_home": "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
@@ -582,6 +584,48 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             fetch=snapshots(valid_comment()), now=NOW, expected_workflow_digest="d" * 64,
         ))
 
+    def test_old_workflow_and_bun_proofs_are_not_reused(self) -> None:
+        good = valid_comment()
+        payload = json.loads(comment_body(good).split("\n", 1)[1])
+        old_workflow = "8d396285903838be6fad97a76ab391e3f94565dfe289a5ee1d7341c470634db9"
+        old_scope = {**payload, "workflow_sha256": old_workflow,
+                     "scope_sha256": EVIDENCE.scope_digest(old_workflow)}
+        old_bun = {**payload, "tools": {**payload["tools"], "bun": "1.4.3"}}
+        for stale in (old_scope, old_bun):
+            comment = {**good, "body": EVIDENCE.MARKER + "\n" + json.dumps(stale)}
+            self.assertFalse(EVIDENCE.verify_from_api(
+                REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
+                fetch=snapshots(comment), now=NOW, expected_workflow_digest="d" * 64,
+            ))
+
+    def test_macos_chrome_lane_is_always_run_by_ci(self) -> None:
+        workflow = EVIDENCE.WORKFLOW.read_text(encoding="utf-8")
+        steps = {
+            "Install Chrome for the macOS official producer browser test":
+                "bunx playwright install chrome",
+            "Run macOS official producer browser test": "just macos-browser-contract-test",
+        }
+        def assert_chrome_lane(source: str) -> None:
+            parsed = workflow_steps(workflow_job(source, "test"))
+            for name, command in steps.items():
+                matches = [step for step in parsed if step.get("name") == name]
+                self.assertEqual(len(matches), 1)
+                self.assertEqual(matches[0].get("if"), "matrix.platform == 'mac-arm64'")
+                self.assertEqual(matches[0].get("run"), command)
+                self.assertEqual(EVIDENCE.MAC_WORKFLOW_STEP_COMMANDS[name], ())
+
+        assert_chrome_lane(workflow)
+        guarded = workflow.replace(
+            "if: matrix.platform == 'mac-arm64'\n        run: just macos-browser-contract-test",
+            "if: matrix.platform == 'mac-arm64' && steps.mac_proof.outputs.reuse != 'true'\n"
+            "        run: just macos-browser-contract-test",
+            1,
+        )
+        self.assertNotEqual(guarded, workflow)
+        with self.assertRaises(AssertionError):
+            assert_chrome_lane(guarded)
+        self.assertTrue(EVIDENCE.workflow_scope_supported())
+
     def test_rejects_proof_from_scope_without_lint_child_environment_policy(self) -> None:
         comment = valid_comment()
         payload = json.loads(comment_body(comment).split("\n", 1)[1])
@@ -703,9 +747,9 @@ class LocalMacosEvidenceTest(unittest.TestCase):
         good = valid_comment()
         payload = json.loads(comment_body(good).split("\n", 1)[1])
         for java, bun in (
-            ('openjdk version "17.0.13" 2024-10-15', "1.4.3"),
-            ('openjdk version "22.0.1" 2024-10-15', "1.4.3"),
-            ("Java runtime unknown", "1.4.3"),
+            ('openjdk version "17.0.13" 2024-10-15', "1.4.4"),
+            ('openjdk version "22.0.1" 2024-10-15', "1.4.4"),
+            ("Java runtime unknown", "1.4.4"),
             ('openjdk version "21.0.12" 2025-01-21', "1.4.1"),
         ):
             changed = {**payload, "tools": {**payload["tools"], "java": java, "bun": bun}}
@@ -732,13 +776,13 @@ class LocalMacosEvidenceTest(unittest.TestCase):
         command["executables"]["java"][0] = "/jdk/21/bin/java"
         EVIDENCE.validate_pinned_tools({**valid_tools,
             "java": 'java version "21.0.12"', "java_home": "/jdk/21",
-            "java_vendor": "Eclipse Adoptium", "bun": "1.4.3",
+            "java_vendor": "Eclipse Adoptium", "bun": "1.4.4",
             "command_binding": json.dumps(command),
         })
         for java, bun in (
-            ('java version "17.0.13"', "1.4.3"),
-            ('java version "22.0.1"', "1.4.3"),
-            ("unparseable", "1.4.3"),
+            ('java version "17.0.13"', "1.4.4"),
+            ('java version "22.0.1"', "1.4.4"),
+            ("unparseable", "1.4.4"),
             ('java version "21.0.12"', "1.4.1"),
         ):
             with self.subTest(collection_java=java, collection_bun=bun):
@@ -751,7 +795,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 with self.assertRaises(EVIDENCE.EvidenceError):
                     EVIDENCE.validate_pinned_tools({
                         "java": 'java version "21.0.12"', "java_home": "/jdk/21",
-                        "java_vendor": vendor, "bun": "1.4.3",
+                        "java_vendor": vendor, "bun": "1.4.4",
                     })
 
     def test_java_home_is_derived_from_and_matches_the_java_21_runtime(self) -> None:
@@ -1914,7 +1958,7 @@ git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
             "cargo": "cargo stable", "java": 'openjdk version "17.0.13"',
             "java_home": "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home",
             "java_vendor": "Eclipse Adoptium",
-            "bun": "1.4.3", "just": "just 1.40.0", "graphviz": "dot - graphviz version 12.0.0",
+            "bun": "1.4.4", "just": "just 1.40.0", "graphviz": "dot - graphviz version 12.0.0",
         }
         with tempfile.TemporaryDirectory() as directory:
             with collector_validation_patches(
@@ -1934,7 +1978,7 @@ git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
             "cargo": f"cargo {STABLE_RUST['cargo_cli']}", "java": 'openjdk version "21.0.12"',
             "java_home": "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
             "java_vendor": "Eclipse Adoptium",
-            "bun": "1.4.3", "just": "just 1.40.0", "graphviz": "dot - graphviz version 12.0.0",
+            "bun": "1.4.4", "just": "just 1.40.0", "graphviz": "dot - graphviz version 12.0.0",
         }
         with tempfile.TemporaryDirectory() as directory:
             with collector_validation_patches(
@@ -1977,7 +2021,7 @@ class TrustedBunTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             wrapper = Path(temporary) / "bun"
             wrapper.write_text(
-                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 1.4.3; fi\nexit 0\n",
+                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 1.4.4; fi\nexit 0\n",
                 encoding="utf-8",
             )
             wrapper.chmod(0o755)
@@ -1988,7 +2032,7 @@ class TrustedBunTest(unittest.TestCase):
                 (str(wrapper), "install", "--frozen-lockfile"),
                 capture_output=True, text=True, check=False,
             )
-            self.assertEqual((version.returncode, version.stdout.strip()), (0, "1.4.3"))
+            self.assertEqual((version.returncode, version.stdout.strip()), (0, "1.4.4"))
             self.assertEqual(install.returncode, 0)
             with self.assertRaisesRegex(EVIDENCE.EvidenceError, "official Bun release"):
                 EVIDENCE.assert_official_bun_binary(wrapper, BUN_BINARY_SHA256)
@@ -2317,7 +2361,7 @@ class TrustedJustTest(unittest.TestCase):
                 EVIDENCE.assert_command_binding(binding, just)
                 wrapper = (
                     b"#!/bin/sh\n# no-op wrapper with a different digest\n"
-                    b"if [ \"$1\" = \"--version\" ]; then echo 1.4.3; fi\nexit 0\n"
+                    b"if [ \"$1\" = \"--version\" ]; then echo 1.4.4; fi\nexit 0\n"
                 )
                 (brew_bin / "bun").write_bytes(wrapper)
                 alternate_just_dir = inputs / "recheck/trusted-just"
@@ -2339,7 +2383,7 @@ class TrustedJustTest(unittest.TestCase):
                     (str(brew_bin / "bun"), "install", "--frozen-lockfile"),
                     capture_output=True, text=True, check=False,
                 )
-                self.assertEqual((wrapper_version.returncode, wrapper_version.stdout.strip()), (0, "1.4.3"))
+                self.assertEqual((wrapper_version.returncode, wrapper_version.stdout.strip()), (0, "1.4.4"))
                 self.assertEqual(wrapper_install.returncode, 0)
                 self.assertEqual(binding.executables["bun"][1], BUN_BINARY_SHA256)
 

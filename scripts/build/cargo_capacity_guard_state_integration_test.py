@@ -276,7 +276,7 @@ class CapacityStateIntegrationTest(unittest.TestCase):
         self.assertEqual(sentinel.read_bytes(), b"preserve")
 
     def write_recipe_python_shim(
-        self, launcher: Path, script: Path, capture: Path, initializer_exit: int = 0
+        self, launcher: Path, script: Path, initializer_exit: int = 0
     ) -> None:
         script.write_text(
             "import json, os, sys\n"
@@ -288,9 +288,27 @@ class CapacityStateIntegrationTest(unittest.TestCase):
             "    if args[1:] != expected: raise SystemExit('initializer argv differs')\n"
             "    print('a' * 64)\n"
             f"    raise SystemExit({initializer_exit})\n"
-            "elif args[0] == 'scripts/release/produce_html_performance_evidence.py':\n"
-            "    Path(os.environ['KRR_TEST_CAPTURE']).write_text(json.dumps(args[1:]))\n"
             "else: raise SystemExit('unexpected python command')\n",
+            encoding="utf-8",
+        )
+        python_path = sys.executable.replace("\\", "/")
+        launcher.write_text(
+            "#!/usr/bin/env bash\n"
+            f"exec {shlex.quote(python_path)} {shlex.quote(script.as_posix())} \"$@\"\n",
+            encoding="utf-8",
+        )
+        launcher.chmod(0o755)
+
+    def write_recipe_uv_shim(self, launcher: Path, script: Path) -> None:
+        script.write_text(
+            "import json, os, sys\n"
+            "from pathlib import Path\n"
+            "args = sys.argv[1:]\n"
+            "lock = str(Path(os.environ['KRR_TEST_ROOT']) / 'scripts/release/html-performance-requirements.lock')\n"
+            "expected = ['run', '--isolated', '--with-requirements', lock, 'python', "
+            "'scripts/release/run_html_performance.py', 'produce']\n"
+            "if args[:len(expected)] != expected: raise SystemExit('uv argv differs')\n"
+            "Path(os.environ['KRR_TEST_CAPTURE']).write_text(json.dumps(args[len(expected):]))\n",
             encoding="utf-8",
         )
         python_path = sys.executable.replace("\\", "/")
@@ -309,8 +327,9 @@ class CapacityStateIntegrationTest(unittest.TestCase):
         fake_bin.mkdir()
         capture = fake_bin / "producer-argv.json"
         self.write_recipe_python_shim(
-            fake_bin / "python3", fake_bin / "python shim.py", capture, initializer_exit
+            fake_bin / "python3", fake_bin / "python shim.py", initializer_exit
         )
+        self.write_recipe_uv_shim(fake_bin / "uv", fake_bin / "uv shim.py")
         manifest = self.root / "catalog-stage90-captures.json"
         if manifest_exists:
             manifest.write_text(
@@ -356,7 +375,7 @@ class CapacityStateIntegrationTest(unittest.TestCase):
         self.assertLess(setup_index, initializer_index)
         self.assertLess(initializer_index, interaction_index)
         self.assertIn(
-            "uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0",
+            "uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0",
             paired,
         )
         self.assertIn("python-version: '3.13'", paired)

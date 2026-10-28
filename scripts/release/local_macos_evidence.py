@@ -37,7 +37,7 @@ else:
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/test-and-build.yml"
-SUPPORTED_WORKFLOW_SHA256 = "8d396285903838be6fad97a76ab391e3f94565dfe289a5ee1d7341c470634db9"
+SUPPORTED_WORKFLOW_SHA256 = "89c03294fae8bd814116647d53aad7f1c4ade9346d4178c7afbbd3d0648b22b5"
 SCHEMA = 1
 FRESHNESS_SECONDS = 24 * 60 * 60
 MARKER = "<!-- krr-local-macos-evidence:v1 -->"
@@ -135,8 +135,8 @@ MAX_JUST_BINARY_BYTES = 32 * 1024 * 1024
 MAX_JUST_ARCHIVE_ENTRIES = 128
 MAX_JUST_ARCHIVE_CONTENT_BYTES = 16 * 1024 * 1024
 BUN_RELEASE_REPOSITORY = "oven-sh/bun"
-BUN_RELEASE_TAG = "bun-v1.4.3"
-BUN_VERSION = "1.4.3"
+BUN_RELEASE_TAG = "bun-v1.4.4"
+BUN_VERSION = "1.4.4"
 BUN_ASSET_NAME = "bun-darwin-aarch64.zip"
 MAX_BUN_ASSET_BYTES = 32 * 1024 * 1024
 MAX_BUN_BINARY_BYTES = 80 * 1024 * 1024
@@ -156,6 +156,8 @@ MAC_WORKFLOW_STEP_COMMANDS: dict[str, tuple[str, ...]] = {
     "Install JavaScript dependencies": ("bun-install",),
     "Install cargo-nextest": (),
     "Install just": (),
+    "Install Chrome for the macOS official producer browser test": (),
+    "Run macOS official producer browser test": (),
     "Rebuild V8 static archive on macOS arm64": ("rebuild-v8", "build-cli"),
     "Check Rust types": ("rust-check",),
     "Check formatting": ("format",),
@@ -1208,7 +1210,7 @@ def validate_pinned_tools(versions: Any) -> None:
     if not isinstance(java_home, str) or not Path(java_home).is_absolute():
         raise EvidenceError("local proof requires a validated absolute Java home")
     if versions.get("bun") != BUN_VERSION:
-        raise EvidenceError("local proof requires Bun 1.4.3, matching the macOS CI setup")
+        raise EvidenceError("local proof requires Bun 1.4.4, matching the macOS CI setup")
     if (
         versions.get("bun_release") != BUN_RELEASE_TAG
         or versions.get("bun_asset") != BUN_ASSET_NAME

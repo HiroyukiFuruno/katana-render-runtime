@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { z } from "zod";
 import {
   FINGERPRINT_SCHEMA,
   type RuntimeBundleToolFingerprint,
@@ -91,6 +92,16 @@ describe("runtime bundle tool fingerprint CLI", () => {
   test("binds the real Bun, Just, Node, Moon and installed Moon package bytes", () => {
     const { baseline, baseEnvironment } = requireRuns(runs);
     const fingerprint: unknown = JSON.parse(baseline.stdout);
+    const moonPackage = z
+      .object({ version: z.string() })
+      .parse(
+        JSON.parse(
+          fs.readFileSync(
+            path.join(repositoryRoot, "node_modules/@moonrepo/cli/package.json"),
+            "utf8",
+          ),
+        ),
+      );
     expect(fingerprint).toMatchObject({
       schema: FINGERPRINT_SCHEMA,
       platform: process.platform,
@@ -110,7 +121,7 @@ describe("runtime bundle tool fingerprint CLI", () => {
           executableSha256: expect.stringMatching(hash),
         },
         moon: {
-          version: expect.stringContaining("2.6.2"),
+          version: `moon ${moonPackage.version}`,
           executableSha256: expect.stringMatching(hash),
           wrapperSha256: expect.stringMatching(hash),
           utilsSha256: expect.stringMatching(hash),

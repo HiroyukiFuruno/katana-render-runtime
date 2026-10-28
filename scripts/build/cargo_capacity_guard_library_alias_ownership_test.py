@@ -4,6 +4,7 @@ from dataclasses import replace
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -206,11 +207,14 @@ class LibraryAliasTests(unittest.TestCase):
                   return_value=SelectedCacheOwnership(root, target, target / "debug", (), lambda: None)),
             patch("cargo_capacity_guard_library_alias_ownership.create_different_flags_ownership", flags_factory),
             patch("cargo_capacity_guard_library_alias_ownership.create_debug_object_ownership"),
+            patch("cargo_capacity_guard_library_alias_ownership._make_compact_noso_query",
+                  return_value=(lambda _paths: {}, ())) as compact_factory,
         ):
             create_library_alias_ownership(
                 root, target, workspace, str(cargo), logs,
                 metadata_only=metadata_only, archives_only=archives_only,
             )
+        self.assertEqual(compact_factory.call_count, int(sys.platform == "darwin" and not metadata_only))
         value = flags_factory.call_args.kwargs["include_standard_metadata"]
         if not isinstance(value, bool):
             raise AssertionError("standard metadata opt-in was not boolean")

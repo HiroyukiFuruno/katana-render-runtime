@@ -280,7 +280,7 @@ def validate_root_test_coverage_contract(declared: dict[str, object]) -> None:
         1
     ].split("\n\n", 1)[0]
     assert producer.splitlines() == [
-        '    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"',
+        '    CARGO={{quote(CARGO)}} CARGO_BUILD_JOBS={{quote(JOBS)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"',
     ]
     coverage_recipe = justfile.split("\ncoverage:", 1)[1].split("\n\n", 1)[0]
     coverage_commands = [line for line in coverage_recipe.splitlines() if line]
@@ -330,7 +330,7 @@ def production_task_input_binding(
     declared_path = evidence_dir / "production-declared-inputs.json"
     declared_path.write_text(declared_output)
     declared = moon_json_object(json.loads(declared_output))
-    assert len(declared) == 46, "Production Moon task count changed"
+    assert len(declared) == 47, "Production Moon task count changed"
     validate_root_test_coverage_contract(declared)
     runtime_preflight = moon_json_object(declared.get("runtime-asset-script-preflight"))
     classic_evidence = moon_json_object(
@@ -367,6 +367,14 @@ def production_task_input_binding(
         "html-performance-lock-pin-check",
     ]
     assert lock_pin_check.get("deps", []) == []
+    performance_acceptance = moon_json_object(
+        declared.get("performance-coverage-acceptance")
+    )
+    assert performance_acceptance.get("command") == [
+        "just",
+        "performance-coverage-result-check",
+    ]
+    assert performance_acceptance.get("deps") == ["performance-coverage"]
     foundation = moon_json_object(declared.get("source-static-foundation"))
     foundation_deps = foundation.get("deps")
     assert isinstance(foundation_deps, list)
@@ -429,7 +437,7 @@ def production_task_input_binding(
         "Actual Moon task names differ from current YAML"
     )
     # Moon自身が追加する設定入力を保持し、宣言した入力だけとの混同を防ぐ。
-    config_glob = "/.moon/*.{yml,yaml,jsonc,json,pkl,hcl,toml}"
+    config_glob = "/.moon/{extensions,toolchains}.{yml,yaml,jsonc,json,pkl,hcl,toml}"
     expected = [*DIRECT_INPUTS, config_glob]
     for name, raw in tasks.items():
         task = moon_json_object(raw)
