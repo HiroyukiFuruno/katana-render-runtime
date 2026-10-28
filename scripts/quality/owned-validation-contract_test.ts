@@ -2976,7 +2976,7 @@ test("actual Rust native width test trace remains mandatory with isolated strict
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_c4_description_tests.rs`,
-      sha256: "c4a278cb940d76229ee901ae1c123e980b32fd9dbf5e04ef6b06c200946777bd",
+      sha256: "e6b128ef8dc4aa6334b7ce3e4e19e3a13ce7c5c6f80782ddae80e352ae88495b",
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_c4_tests.rs`,
@@ -2992,7 +2992,7 @@ test("actual Rust native width test trace remains mandatory with isolated strict
     },
     {
       path: nativeWidthBBoxTracePath,
-      sha256: "12b040861be055ac70267ff4520db572dfef21ded952e98f5ee0a953c6559484",
+      sha256: "e5360e4fcffa0ca4f44cb98492e0681708aa7553fcac67ff57dafcb912081a8a",
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_oracle_boundary_tests.rs`,

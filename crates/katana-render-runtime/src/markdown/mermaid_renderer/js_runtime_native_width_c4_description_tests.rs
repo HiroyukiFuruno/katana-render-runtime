@@ -32,6 +32,10 @@ fn assert_description_row(observations: &[Value], expected: &[&str]) -> Result<(
         .iter()
         .find(|row| row["text"] == text)
         .ok_or("description row missing")?;
+    assert_eq!(
+        row["grouped"], true,
+        "C4 description was not grouped: {row}"
+    );
     let parts = row["parts"].as_array().ok_or("description parts missing")?;
     let actual: Vec<_> = parts.iter().map(|part| part["text"].as_str()).collect();
     assert_eq!(

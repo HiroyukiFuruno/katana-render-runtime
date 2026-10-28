@@ -203,8 +203,12 @@ mod harfrust;
 #[cfg(target_os = "macos")]
 pub(in crate::markdown::svg_rasterize) use harfrust::eligible_immutable_system_path;
 pub(super) use harfrust::shape_run_character_metrics_with_trim;
+#[path = "svg_rasterize_text_shaping_svg_fragments.rs"]
+mod svg_fragments;
 #[path = "svg_rasterize_text_shaping_svg_metrics.rs"]
 mod svg_metrics;
+pub(super) use svg_fragments::SvgTextFragmentLayout;
+pub(super) use svg_fragments::shaped_svg_fragment_layout;
 pub(super) use svg_metrics::svg_dom_layout_ascent;
 #[path = "svg_rasterize_text_shaping_x_height.rs"]
 mod svg_x_height;

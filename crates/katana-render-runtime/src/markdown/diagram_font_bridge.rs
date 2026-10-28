@@ -107,6 +107,26 @@ pub(super) fn font_measure_request_with_size_policy(
     args: &v8::FunctionCallbackArguments,
     allow_zero: bool,
 ) -> Option<FontMeasureRequest> {
+    font_measure_request_with_text(scope, args, allow_zero, |scope| {
+        args.get(FONT_MEASURE_TEXT_ARG).to_rust_string_lossy(scope)
+    })
+}
+
+pub(super) fn font_measure_request_with_known_text(
+    scope: &mut v8::PinScope,
+    args: &v8::FunctionCallbackArguments,
+    allow_zero: bool,
+    text: String,
+) -> Option<FontMeasureRequest> {
+    font_measure_request_with_text(scope, args, allow_zero, |_| text)
+}
+
+fn font_measure_request_with_text(
+    scope: &mut v8::PinScope,
+    args: &v8::FunctionCallbackArguments,
+    allow_zero: bool,
+    text: impl FnOnce(&mut v8::PinScope) -> String,
+) -> Option<FontMeasureRequest> {
     let original_size = font_measure_number(scope, args, FONT_MEASURE_SIZE_ARG, DEFAULT_FONT_SIZE)
         .filter(|value| *value > 0.0 || (allow_zero && *value == 0.0))?;
     let size = original_size as f32;
@@ -118,7 +138,7 @@ pub(super) fn font_measure_request_with_size_policy(
         .filter(|value| (MIN_FONT_WEIGHT..=MAX_FONT_WEIGHT).contains(value))
         .map(|value| value as u16)?;
     Some(FontMeasureRequest {
-        text: args.get(FONT_MEASURE_TEXT_ARG).to_rust_string_lossy(scope),
+        text: text(scope),
         family: args
             .get(FONT_MEASURE_FAMILY_ARG)
             .to_rust_string_lossy(scope),

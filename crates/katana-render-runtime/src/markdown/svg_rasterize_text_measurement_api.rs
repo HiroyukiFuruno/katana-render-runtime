@@ -1,8 +1,18 @@
 #[cfg(test)]
 use super::HtmlTextMeasurementToken;
 use super::{SvgRasterizeError, SvgRasterizeOps, text, text_shaping};
+use text_shaping::SvgTextFragmentLayout;
 
 impl SvgRasterizeOps {
+    pub(crate) fn measure_svg_fragment_layout(
+        fragments: &[String],
+        family: &str,
+        size: f32,
+        weight: u16,
+        italic: bool,
+    ) -> Result<Option<SvgTextFragmentLayout>, SvgRasterizeError> {
+        text_shaping::shaped_svg_fragment_layout(fragments, family, size, weight, italic)
+    }
     #[cfg(test)]
     pub(crate) fn prepare_html_text_measurement<'a>(
         text: &'a str,

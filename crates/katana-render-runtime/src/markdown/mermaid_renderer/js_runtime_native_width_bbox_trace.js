@@ -60,20 +60,41 @@ function recordC4DescriptionRows(node, box) {
         text: line.text,
         bbox: { x: box.x, y: box.y, width: box.width, height: box.height },
         wholeAdvance: whole?.advance ?? null,
-        parts: line.parts.map((part) => ({
-          text: part.text,
-          x: part.x + left - line.x,
-          sourceWidth: part.width,
-          advance: katanaRunLayoutAdvance(part),
-          family: part.font.family,
-          fontSize: part.font.size,
-          weight: part.font.weight,
-        })),
+        grouped: line.parts.length === 1 && first.fragmentAdvances !== undefined,
+        parts: nativeWidthDescriptionParts(line, left),
       });
     }
   } finally {
     actualPhase = true;
   }
+}
+
+/** @param {NativeWidthTextLine} line @param {number} left @returns {NativeWidthC4DescriptionRow["parts"]} */
+function nativeWidthDescriptionParts(line, left) {
+  return line.parts.flatMap((part) => {
+    const texts = part.fragmentTexts ?? [part.text];
+    const advances = part.fragmentAdvances ?? [part.width];
+    if (texts.length !== advances.length) throw new Error("C4 fragment observation mismatch");
+    let x = part.x + left - line.x;
+    return texts.map((text, index) => {
+      const sourceWidth = advances[index];
+      if (sourceWidth === undefined) throw new Error("C4 fragment width missing");
+      const advance = part.fragmentAdvances
+        ? katanaSvgAdvance(sourceWidth)
+        : katanaRunLayoutAdvance(part);
+      const observed = {
+        text,
+        x,
+        sourceWidth,
+        advance,
+        family: part.font.family,
+        fontSize: part.font.size,
+        weight: part.font.weight,
+      };
+      x += advance;
+      return observed;
+    });
+  });
 }
 
 /** @param {unknown} value @returns {value is Pick<NativeWidthTraceNode, "getBBox">} */

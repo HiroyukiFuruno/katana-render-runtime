@@ -2,6 +2,10 @@ use super::super::features::features_for_face;
 use super::{FontShape, HARFRUST_SCALE, face_cache, font_variations, shape_buffer_with_features};
 use resvg::usvg;
 
+#[path = "svg_rasterize_text_svg_fragment_run.rs"]
+mod fragment_run;
+pub(in crate::markdown::svg_rasterize) use fragment_run::shape_fragment_run;
+
 const SVG_INK_BOUNDS_LENGTH: usize = 4;
 const SVG_INK_BOUNDS_MAX_X_INDEX: usize = 2;
 const SVG_INK_BOUNDS_MAX_Y_INDEX: usize = 3;

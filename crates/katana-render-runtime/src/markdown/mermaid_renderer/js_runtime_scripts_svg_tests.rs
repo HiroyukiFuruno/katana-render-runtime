@@ -7,6 +7,8 @@ mod bbox_float;
 mod canvas_context;
 #[path = "js_runtime_scripts_svg_computed_style_tests.rs"]
 mod computed_style;
+#[path = "js_runtime_scripts_svg_fragment_group_tests.rs"]
+mod fragment_group;
 #[path = "js_runtime_scripts_svg_namespace_tests.rs"]
 mod namespace;
 #[path = "js_runtime_scripts_svg_style_tests.rs"]

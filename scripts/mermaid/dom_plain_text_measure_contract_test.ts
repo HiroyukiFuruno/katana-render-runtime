@@ -143,6 +143,7 @@ function measureSvgFallbackMetricCell(
     "svg_transform_bounds.js",
     "dom_layout.js",
     "dom_text_measure.js",
+    "dom_text_fragment_layout.js",
     "dom_text_run_lines.js",
   ]) {
     runInContext(readFileSync(new URL(name, RUNTIME_DIRECTORY), "utf8"), context);

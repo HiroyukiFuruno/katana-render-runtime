@@ -2,6 +2,17 @@
 
 ## 最新の再開地点（2026-10-28）
 
+- [/] R3601通常commit hookは新テストのClippy型複雑度1件・過剰精度2件で失敗し、元rawを保持した。型aliasと同一f32 bit表現へ修正し、R3602 fmt/AST/通常commit hook全actual0。writer31+inventoryの独立commitを保存した。上流license6件のCRLFがGit indexでLFへ正規化される差も発見し、root fixtureだけ`-text`として原bytesを維持。99ファイル全件でworktree/index bytes一致を確認した。SVG/HTML/Officeの新公開単位は作成していない。
+
+- [/] 境界修正後のR3596 release test build actual0。R3597実catalog2,892件・binary物理pinと選択43件を保存し、43/43成功。R3598 glyphは115成功/既存ignore1。R3599は存在しないJust recipeを指定した起動失敗actual1として保持し、正規Moon recipeでR3600 foundationを実行してactual0。検査範囲・閾値・例外は変更なし。関心別commit後、現sourceの正式画像・HTML性能・coverage・完全gate・公開工程を継続する。
+
+- [/] R3594はfmt/AST/admission/release lib test build全actual0。R3595実catalog2,891件から42ケースを照合して42/42成功（writer31+inventory1、fragment backend6、bridge1、C4実生成/既存描画/DOM guard3）。C4説明2行はgrouped=true、bbox幅144.25/133.390625で独立Chrome R3566と一致し、旧KRRの0.640625過大幅を共通経路で解消した。製品画像スコアは未採点。レビューでfragment4097件以上のunsupportedがthrowになるP2を見つけ、正当配列はnullで従来経路へ戻し不正入力throwを維持する修正・4096/4097境界回帰を追加。R3596再fmt/AST/admission成功、最新build回収中。R3595はこの境界修正前binaryの結果として保持する。
+
+- [ ] R3593はAST actual0、release lib test build actual101。新fragment adapterのprivate再export2件と未使用型import1件を実compiler rawで確認し、module内の可視範囲だけを修正した。公開API・受入条件・参照は変更なし。R3594 fmt-check actual0、AST再検証中。新adapter・writer31件の機能検査と現source画像採点は未完了で、R3560の正式107/117合格を現sourceの合格へ転用しない。
+
+- [ ] `e188c955`へ診断/型付きC4観測、`edb982f6`へUnicode字形位置の製品修正を通常hook成功後に保存。現在はC4のfragment layout内部adapter（既存Harfrustを全文1回shape、同一face/scalar/ink/変換条件付き）と上流writer31件のrstest接続を実装済み・統合検証中。公開API/repo/crate追加なし。root fixture99ファイルはupstream c01f016の元bytes/licenseを維持し、writer入力31/期待31、font34、mode21/9/1と全SHA/追加欠落の回帰を追加。rstest0.28.0は同期ケース用でdefault機能を無効にし、root lockへ3package追加、harness更新とbundle生成はR3584〜86 actual0。R3588 foundationはactual0、R3589 ASTは新test関数3件の長さを検出してactual101、Rust機能検査は未起動。担当を分けて判定を維持したhelper分割を完了し、再検証する。画像改善・性能・coverage合格を先取りしない。
+- [ ] writer fixtureは既存規約と同じworkspace専用のroot配置であり、公開archive単体のunit testにroot fixtureがないP2制約は既存include_strテスト群にも共通する。今回はpackageへ約7MBのtest dataを増やさず、cfg/excludeでworkspace検査も隠さない。通常の公開package build/配布検証と、repository/CIでの全31ケース・inventory検査は維持する。
+
 - [/] R3576のfoundation/AST/限定release build/容量再検証は全actual0。新観測は既存の型付きbbox traceへ統合し、inline JS/runtime組立の重複を避けた。R3578は実catalog2,851件からC4観測1件とglyph116件を照合し、C4成功・glyph115成功/既存ignore1、source前後manifest SHA `749c139b2f857c21f39c0b976e8842462061d12ec65ff2c2eed243301d06e648` 一致。Unicode候補はbyte/scalar対応をspanごとに分離する限定対応で、実CJK描画改善はまだ未計測。現KRRの説明2行の個別合算144.890625/134.03125、全文shape144.217529/133.365356を実測した。同じHelveticaのChromeは倍率1でsplit144.25/133.390625、full144.21875/133.375となる。文字片境界のshape文脈と丸めを既存ライブラリで維持する最小adapterを検討し、paint側の微小CTM条件と混同しない。
 
 - [/] HEAD `90bc9125`の新policy正式一括R3560は117件を全取得・採点し、正式107合格/10未合格/未計測0（画像点だけなら109件99以上）。未合格はC4 EN full/container・JA08-02〜06の7件、Kanban日英2件、JA ZenUML1件。画像99以上のC4日英fullも構造差のため正式合格へ含めない。旧policyの106件と同条件の増減として比較しない。EN fullの局所transform実差0.3203125は親子で相殺されるが、現在の構造契約は不合格。診断maxTransformDeltaが拒否差を除外して過小表示する問題も見つかり、合否を変えず修正する。

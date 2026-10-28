@@ -95,7 +95,7 @@ fn accumulate_svg_font_run_metrics(
     Some(includes_primary)
 }
 
-fn include_svg_primary_strut(
+pub(super) fn include_svg_primary_strut(
     database: &resvg::usvg::fontdb::Database,
     base: resvg::usvg::fontdb::ID,
     font: FontShape,
@@ -186,7 +186,7 @@ fn union_ink_bounds(
     }
 }
 
-fn validated_svg_run_metrics(result: SvgTextRunMetrics) -> Option<SvgTextRunMetrics> {
+pub(super) fn validated_svg_run_metrics(result: SvgTextRunMetrics) -> Option<SvgTextRunMetrics> {
     ([result.advance, result.ascent, result.descent]
         .into_iter()
         .all(f32::is_finite)

@@ -1,6 +1,9 @@
 use super::DiagramTryCatchScope;
 use super::diagram_font_bridge::{font_measure_number, font_measure_request_with_size_policy};
 
+#[path = "diagram_svg_fragment_font_bridge.rs"]
+mod fragment;
+
 const FONT_X_HEIGHT_FAMILY_ARG: i32 = 0;
 const FONT_X_HEIGHT_SIZE_ARG: i32 = 1;
 const FONT_X_HEIGHT_WEIGHT_ARG: i32 = 2;
@@ -27,6 +30,7 @@ pub(super) fn install(scope: &mut DiagramTryCatchScope<'_, '_, '_, '_>) -> Resul
     global
         .set(scope, x_height_name.into(), x_height_callback.into())
         .ok_or_else(|| "SVG font x-height bridge registration failed".to_string())?;
+    fragment::install(scope, global)?;
     Ok(())
 }
 

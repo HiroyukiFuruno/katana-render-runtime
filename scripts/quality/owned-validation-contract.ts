@@ -96,14 +96,14 @@ const NATIVE_WIDTH_TEST_CONSUMERS = {
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_tests.rs`]:
     "5b58a94792571378a1d04a0e1d3ba42279b6b2c7b103c3a41a1861e285a6b1fb",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_c4_description_tests.rs`]:
-    "c4a278cb940d76229ee901ae1c123e980b32fd9dbf5e04ef6b06c200946777bd",
+    "e6b128ef8dc4aa6334b7ce3e4e19e3a13ce7c5c6f80782ddae80e352ae88495b",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_c4_tests.rs`]:
     "23f0a46c985e135c195b2826f06e7ab944565ba5041790df2832b711ad8af318",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_ishikawa_tests.rs`]:
     "8d818595edc6750bafbead131fef9beea1987a9995a0a2613cabf1b2de3d5a9f",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_helpers.rs`]:
     "7b366d9a6ba873fc5393b01a2520d6b75b54f13ffd271148820f91009240e8ba",
-  [NATIVE_WIDTH_BBOX_TRACE]: "12b040861be055ac70267ff4520db572dfef21ded952e98f5ee0a953c6559484",
+  [NATIVE_WIDTH_BBOX_TRACE]: "e5360e4fcffa0ca4f44cb98492e0681708aa7553fcac67ff57dafcb912081a8a",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_oracle_boundary_tests.rs`]:
     "f4375e4ca17e4d1931efbf21020b7b48bf06079ed9ae00de3ea160d31683731f",
 };

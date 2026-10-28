@@ -78,6 +78,7 @@ function katanaSameTextRunFont(left, right) {
 
 function katanaAppendOrderedTextRun(node, text, font, state) {
   const owner = node.nodeType === 3 ? node.parentNode : node;
+  const c4Row = katanaC4FragmentRow(owner, font, state);
   const lastFragment = state.pending?.fragments.at(-1);
   let nativeWordBoundary = false;
   if (
@@ -97,10 +98,11 @@ function katanaAppendOrderedTextRun(node, text, font, state) {
     (!katanaSameTextRunFont(state.pending.font, font) ||
       ((!katanaCanMergeNativeTextOwners(state.pending.node) ||
         !katanaCanMergeNativeTextOwners(owner)) &&
-        state.pending.node !== owner))
+        state.pending.node !== owner &&
+        !(c4Row && state.pending.c4Row === c4Row)))
   )
     katanaFlushOrderedTextRun(state);
-  state.pending ??= { node: owner, texts: [], fragments: [], font, svgNativeEligible: true };
+  state.pending ??= { node: owner, texts: [], fragments: [], font, svgNativeEligible: true, c4Row };
   state.pending.svgNativeEligible &&= font.nativeAdvanceEligible === true;
   state.pending.texts.push(text);
   const last = state.pending.fragments.at(-1);
@@ -122,6 +124,8 @@ function katanaMeasuredPendingTextRuns(pending, text) {
   if (pending.fragments.length === 1) {
     return [katanaMeasuredTextRun(pending.node, text, pending.font)];
   }
+  const c4 = katanaC4FragmentRun(pending, text);
+  if (c4 !== null) return [c4];
   const svgMetrics =
     pending.svgNativeEligible && katanaCanMergeNativeTextOwners(pending)
       ? katanaNativeSvgRunMetrics(pending.node, text, pending.font)

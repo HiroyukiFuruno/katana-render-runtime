@@ -48,6 +48,10 @@ export const SharedDomFragments = {
         `${MERMAID_JS_RUNTIME}/dom_text_font_context.js`,
       ),
       RuntimeFragmentFactory.verbatim(
+        "dom-text-fragment-layout.js",
+        `${MERMAID_JS_RUNTIME}/dom_text_fragment_layout.js`,
+      ),
+      RuntimeFragmentFactory.verbatim(
         "dom-text-run-lines.js",
         `${MERMAID_JS_RUNTIME}/dom_text_run_lines.js`,
       ),

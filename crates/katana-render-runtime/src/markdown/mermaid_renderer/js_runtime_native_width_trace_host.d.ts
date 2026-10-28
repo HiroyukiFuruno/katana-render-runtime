@@ -39,6 +39,8 @@ interface NativeWidthTextRun {
   text: string;
   x: number;
   width: number;
+  fragmentTexts?: string[];
+  fragmentAdvances?: number[];
   font: {
     family: string;
     size: number;
@@ -57,6 +59,7 @@ interface NativeWidthC4DescriptionRow {
   text: string;
   bbox: NativeWidthTraceBox;
   wholeAdvance: number | null;
+  grouped: boolean;
   parts: Array<{
     text: string;
     x: number;
@@ -104,6 +107,7 @@ declare var __krrBridgeCalls: number;
 declare const document: NativeWidthTraceDocument;
 declare function katanaOrderedTextLines(node: NativeWidthTraceNode): NativeWidthTextLine[];
 declare function katanaRunLayoutAdvance(run: NativeWidthTextRun): number;
+declare function katanaSvgAdvance(value: number): number;
 declare function katanaAnchoredTextLeft(anchor: string, x: number, width: number): number;
 declare function katanaNativeSvgRunMetrics(
   node: NativeWidthTraceNode,
