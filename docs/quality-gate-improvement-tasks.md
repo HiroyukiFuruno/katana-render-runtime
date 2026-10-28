@@ -2,6 +2,7 @@
 
 ## 最新の再開地点（2026-10-28）
 
+- [ ] 描画`5c4d20db`、検証効率`1b8236d0`、release必須pin`21885380`を通常hook後に保存し、#108/#109を実測へ同期。R3382全Bunは1344件中1343成功・MathJax実repo検査1件が5005.69msでtimeout。失敗を合格扱いしない。既存Bun CPU profiler R3385で不要なRTK引数探索を特定し、同条件を先行拒否する同義修正後R3386の関連5件が成功、MathJaxは3511ms。全体の手動反復は続けず、標準full gateで最終確認する。現行正式117/HTML84/性能・coverage100/0・公開工程は未完了。次は静的確認・同義修正のcommit/source固定後、既存正規producerで新しいcandidate build proofを作り全117を取得する。
 - [ ] R3364で文字サイズtrackingとmarker clipの失敗2件・対照成功2件を実再現し、製品2修正後R3368は4/4成功。R3370は既存RGB採点でWardley4図すべて99以上（JA full99.206372/simple99.545229、EN full99.855975/simple99.88195）。同条件Chromeに対する代表C4形状は98.65729→98.80211で未達、Kanban日英2図は旧製品とRGBA完全一致。これは診断7図であり全117正式合格へ転用しない。source・README・vendor来歴pinを同期。R3375通常foundation actual0（型・重複・登録・Python・資源等）、fresh/終端拒否と既存timeoutの5回帰もactual0。次は残Rust/Biomeの結果回収、関心分離commitと現sourceの正式117/HTML84/性能・coverage・公開工程。新fullBunはまだ未実行。
 - [ ] 可変font対応はClippyのnested ifをlet-chainへ修正し、通常commit hook actual0で`189f16ed`へ保存。次の非重複担当は、(1)Harfrust point_sizeへCSS pxを渡す回帰→修正、(2)marker暗黙viewport clipだけ既存CrispEdgesでhard-edge化する回帰→修正、(3)検証inspection内のcompiler/Bun pin照合共有と終端再照合。いずれも製品画像・正式gateは未合格。公開fresh resolverの途中差替え拒否は維持し、mtime cache・全root cache・timeout延長・clip省略・正解改変は禁止する。
 - [ ] R3352でWardley4図は既存RGB採点のまま全改善（EN simple 98.52416/full 97.12243、JA simple 98.60361/full 98.94229）だが99未達。R3354のC4/Kanban代表3図は旧製品PNGと全RGBA一致。新4回帰と既存glyph98件は成功、既存ignore1。R3355全Bun契約は1341件中1339成功・2件timeoutでactual1。R3356の全libtest追加診断はactual -9で未完了、正式nextest合格へ転用しない。次は既存harfrustへのCSS文字サイズ接続と、marker暗黙viewport clipのhard-edge化を非重複で調査・修正する。正解画像・score・clip範囲は維持する。

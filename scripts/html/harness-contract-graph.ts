@@ -470,7 +470,9 @@ function ownedRtkProxyDryRunCallVerified(
   context: SourceCodeContext | undefined,
   processes: Map<string, ProcessBinding>,
 ): boolean {
+  if (context?.name !== "scripts/quality/owned-validation-contract_test.ts") return false;
   const binding = processMethod(object(node.callee), processes);
+  if (binding?.api !== "node" || binding.method !== "spawnSync") return false;
   const args = Array.isArray(node.arguments) ? node.arguments : [];
   const recipes = object(object(args[1])?.expression);
   const recipeElements = Array.isArray(recipes?.elements) ? recipes.elements : [];
@@ -482,9 +484,6 @@ function ownedRtkProxyDryRunCallVerified(
     properties.find((item) => item.type === "KeyValueProperty" && object(item.key)?.value === name);
   const environment = properties.find((item) => item.type === "Identifier" && item.value === "env");
   return (
-    context?.name === "scripts/quality/owned-validation-contract_test.ts" &&
-    binding?.api === "node" &&
-    binding.method === "spawnSync" &&
     args.length === 3 &&
     args.every((argument) => !object(argument)?.spread) &&
     literal(object(args[0])?.expression) === "just" &&
