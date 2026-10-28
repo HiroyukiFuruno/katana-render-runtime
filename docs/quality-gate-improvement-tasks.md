@@ -1,6 +1,8 @@
 # 品質ゲート改善の作業台帳
 
-## 最新の再開地点（2026-10-28）
+## 最新の再開地点（2026-10-29）
+
+- [/] writer31+inventoryを`98f1a26d`、C4全文shape/fragment集約を`c96cb389`、必須祖先と内容固定を`69ca1cc8`へ通常hook成功後に保存。R3604 release回帰22件成功。R3606 release-target-checkは新Rollup互換版を検出してactual1、既存locked更新R3607 actual0、Rollup4.65.1→4.66.0と対応platform lockのみが変更。Rust/描画vendor/runtime bundleに追加差分なし。R3608 foundation actual0。変更を保存・release固定同期後、独立raw参照と現sourceの正式117/HTML84/性能を取り直す。最新完了一括はR3560の正式107/117合格（10未合格）であり、今回のC4/Unicode修正後は未採点。HTML84の過去画像合格を現source性能合格へ転用しない。
 
 - [/] R3601通常commit hookは新テストのClippy型複雑度1件・過剰精度2件で失敗し、元rawを保持した。型aliasと同一f32 bit表現へ修正し、R3602 fmt/AST/通常commit hook全actual0。writer31+inventoryの独立commitを保存した。上流license6件のCRLFがGit indexでLFへ正規化される差も発見し、root fixtureだけ`-text`として原bytesを維持。99ファイル全件でworktree/index bytes一致を確認した。SVG/HTML/Officeの新公開単位は作成していない。
 
