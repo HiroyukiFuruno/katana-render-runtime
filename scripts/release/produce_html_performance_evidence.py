@@ -517,7 +517,9 @@ def expected_arm_pins(builds: Mapping[str, ArmBuildResult], snapshot_sha256: str
         arms[baseline_id if arm == "baseline" else arm] = {
             "binary_sha256": build.binary_sha256,
             "source_snapshot_sha256": source_snapshot,
-            "lock_sha256": gate.LOCK_SHA,
+            "lock_sha256": (reference_parent.lock_sha256
+                            if arm == "baseline" and reference_parent is not None
+                            else gate.LOCK_SHA),
             "build_artifact_ref": build_artifact_refs[arm],
         }
     return arms

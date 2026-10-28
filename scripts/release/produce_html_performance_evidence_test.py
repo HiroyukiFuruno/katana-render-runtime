@@ -180,7 +180,7 @@ class CatalogProducerOperationTest(unittest.TestCase):
             candidate_binary.write_bytes(b"candidate")
             parent = reference.ReferenceParentProof(
                 reference.REFERENCE_ROLE, "candidate", "3" * 40,
-                "a" * 64, gate.sha256(baseline_binary), gate.LOCK_SHA,
+                "a" * 64, gate.sha256(baseline_binary), reference.PARENT_LOCK_SHA256,
                 "d" * 64, "e" * 64, "f" * 64, (),
                 root / "parent-build.json", baseline_binary,
             )
@@ -201,7 +201,9 @@ class CatalogProducerOperationTest(unittest.TestCase):
             )
             self.assertEqual(set(arms), {reference.REFERENCE_ROLE, "candidate"})
             self.assertEqual(arms[reference.REFERENCE_ROLE]["source_snapshot_sha256"], "a" * 64)
+            self.assertEqual(arms[reference.REFERENCE_ROLE]["lock_sha256"], reference.PARENT_LOCK_SHA256)
             self.assertEqual(arms["candidate"]["source_snapshot_sha256"], "c" * 64)
+            self.assertEqual(arms["candidate"]["lock_sha256"], gate.LOCK_SHA)
 
     def test_reference_parent_loader_forwards_query_and_all_dependency_refs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1766,6 +1768,7 @@ class FrozenBinaryCarryUnitTests(unittest.TestCase):
             expected = typed_producer.expected_arm_pins({"baseline": build}, "snapshot", build_ref)
             self.assertEqual(expected["baseline-0.4.23"]["binary_sha256"], checksum)
             self.assertEqual(expected["baseline-0.4.23"]["source_snapshot_sha256"], "snapshot")
+            self.assertEqual(expected["baseline-0.4.23"]["lock_sha256"], gate.LOCK_SHA)
             for method in ("write", "replace"):
                 with self.subTest(method=method):
                     if method == "write":

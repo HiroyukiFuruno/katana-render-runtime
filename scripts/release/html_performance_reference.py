@@ -7,6 +7,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
+from html_performance_harness_dependency_closure import verify_harness_closure
+
 JsonObject = dict[str, object]
 GitQuery = Callable[[Path, tuple[str, ...]], str]
 FileResolver = Callable[[object, str], Path]
@@ -134,15 +136,40 @@ def load_reference_parent_proof(wrapper_path: Path, root: Path, *,
     records = snapshot.get("records") if isinstance(snapshot, dict) else None
     if not isinstance(records, list):
         raise ValueError("original source snapshot records are missing")
+    harness_records: dict[str, dict[str, object]] = {}
     for record in records:
         if not isinstance(record, dict):
             raise ValueError("original source snapshot record is invalid")
         record_path = _text(record.get("path"), "source snapshot path")
         if record_path.startswith("scripts/html/performance-harness/"):
-            path = root / record_path
-            _require(path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == record.get("sha256")
-                     and path.stat().st_size == record.get("size"),
-                     "current harness source differs from parent snapshot")
+            if record_path in harness_records:
+                raise ValueError("original harness source snapshot has duplicate paths")
+            harness_records[record_path] = record
+    harness_lock_path = "scripts/html/performance-harness/Cargo.lock"
+    _require(len(harness_records) == 34 and harness_lock_path in harness_records,
+             "original harness source snapshot inventory differs")
+    if git_query is None:
+        raise ValueError("parent commit query is required")
+    for revision in (PARENT_HEAD, "HEAD"):
+        tracked = git_query(root, ("ls-tree", "-r", "--name-only", revision,
+                                   "--", "scripts/html/performance-harness/"))
+        paths = [path for path in tracked.splitlines() if path]
+        _require(len(paths) == len(set(paths)) and set(paths) == set(harness_records),
+                 "HTML harness source inventory differs from pinned parent")
+    for record_path, record in harness_records.items():
+        record_sha = _sha(record.get("sha256"), "source snapshot SHA256")
+        record_size = record.get("size")
+        if isinstance(record_size, bool) or not isinstance(record_size, int) or record_size < 0:
+            raise ValueError("source snapshot size is invalid")
+        if record_path == harness_lock_path:
+            _require(record_sha == PARENT_LOCK_SHA256 and record_size > 0,
+                     "original harness lock snapshot pin differs")
+            continue
+        path = root / record_path
+        _require(path.is_file() and not path.is_symlink()
+                 and hashlib.sha256(path.read_bytes()).hexdigest() == record_sha
+                 and path.stat().st_size == record_size,
+                 "current harness source differs from parent snapshot")
     _require(build_sha == PARENT_BUILD_ARTIFACT_SHA256
              and _sha(wrapper.get("originalBuildArtifactSha256"), "original build artifact SHA")
              == PARENT_BUILD_ARTIFACT_SHA256,
@@ -194,12 +221,22 @@ def load_reference_parent_proof(wrapper_path: Path, root: Path, *,
         historical = ("/target/" in path_text or "/tmp/" in path_text) and not runtime_input
         _require(historical or runtime_input or path_text.endswith("scripts/html/performance-harness/Cargo.lock"),
                  "parent context input classification is unknown")
-        if runtime_input or path_text.endswith("scripts/html/performance-harness/Cargo.lock"):
+        if path_text.endswith("scripts/html/performance-harness/Cargo.lock"):
+            input_sha = _sha(input_ref.get("sha256"), "parent context Cargo.lock SHA256")
+            _require(input_sha == PARENT_LOCK_SHA256, "parent context Cargo.lock pin differs")
+        elif runtime_input:
             file_ref(input_ref, "parent runtime input")
-    if git_query is None:
-        raise ValueError("parent commit query is required")
     resolved = git_query(root, ("rev-parse", "--verify", PARENT_HEAD + "^{commit}")).strip()
     _require(resolved == PARENT_HEAD, "reference parent commit is unavailable")
+    parent_lock_text = git_query(root, ("show", PARENT_HEAD + ":" + harness_lock_path))
+    parent_lock = parent_lock_text.encode("utf8")
+    _require(harness_records[harness_lock_path]["size"] == len(parent_lock),
+             "original harness lock snapshot size differs")
+    current_lock_path = root / harness_lock_path
+    _require(current_lock_path.is_file() and not current_lock_path.is_symlink(),
+             "current harness Cargo.lock is not a regular file")
+    current_lock = current_lock_path.read_bytes()
+    verify_harness_closure(parent_lock, current_lock, PARENT_LOCK_SHA256)
     return ReferenceParentProof(REFERENCE_ROLE, "candidate", PARENT_HEAD, source_snapshot[1],
                                 binary[1], PARENT_LOCK_SHA256, cargo_sha, build_sha, wrapper_sha256,
                                 tuple(dependency_refs), build_path, binary[0])
