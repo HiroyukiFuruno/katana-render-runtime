@@ -7,3 +7,7 @@ pub(crate) mod resvg;
 #[rustfmt::skip]
 #[path = "../vendor/svg-engine/usvg/lib.rs"]
 pub(crate) mod usvg;
+
+#[cfg(test)]
+#[path = "svg_engine_writer_tests.rs"]
+mod writer_tests;

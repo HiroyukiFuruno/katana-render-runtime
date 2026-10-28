@@ -1,6 +1,9 @@
 crates/katana-canvas-forge/vendor/**/*.js binary
 crates/katana-render-runtime/vendor/**/*.js binary
 
+# 上流fixtureとライセンスの原bytesを、checkout時の改行変換から保護する。
+tests/fixtures/svg-engine/upstream/** -text
+
 # WHY: 公開ライセンス原文の行末空白は原文保持のため、この1パスだけ検査対象外にする。
 crates/katana-render-runtime/assets/test-fixtures/font-probes/licenses/Recursive-OFL-1.1.txt whitespace=-blank-at-eol
 # WHY: 既存vendor patchの差分コンテキスト空白と終端空行を原文どおり保持する。

@@ -11,6 +11,12 @@ mod archive_index {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=src/markdown/generated/zenuml-runtime-assets.bin.br");
     println!("cargo:rerun-if-changed=src/markdown/generated/zenuml-runtime-assets-index.rs");
+    if PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/svg-engine/upstream")
+        .is_dir()
+    {
+        println!("cargo:rerun-if-changed=../../tests/fixtures/svg-engine/upstream");
+    }
 
     let mut decompressor = brotli_decompressor::Decompressor::new(ARCHIVE, BROTLI_BUFFER_SIZE);
     let mut archive = Vec::new();
