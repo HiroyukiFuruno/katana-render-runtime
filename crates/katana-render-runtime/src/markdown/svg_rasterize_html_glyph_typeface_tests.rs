@@ -203,6 +203,7 @@ pub(super) fn prepare_pixel_span(
         baseline_shift: 0.0,
         x_alignment: None,
         chunk_alignment: None,
+        variable_instance: None,
     })
 }
 

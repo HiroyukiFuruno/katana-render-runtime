@@ -30,6 +30,13 @@ pub(super) fn draw_span(
     typeface: &Typeface,
     raster_scale: f32,
 ) -> Result<(), String> {
+    #[cfg(test)]
+    if let Some(instance) = &span.variable_instance {
+        if instance.face.typeface.as_skia()?.unique_id() != typeface.unique_id() {
+            return Err("variable paint typeface differs from the measured instance".into());
+        }
+        capture::record_instance(typeface, &instance.applied_axes);
+    }
     let paint = text_paint(span);
     let font = text_font(span, typeface, raster_scale);
     if span

@@ -35,6 +35,7 @@ pub(super) struct SpanInput {
     pub(super) opacity: u8,
     pub(super) font: usvg::fontdb::ID,
     pub(super) face: CachedFace,
+    pub(super) variable_instance: Option<std::rc::Rc<super::instances::VariableInstance>>,
     pub(super) font_size: f32,
     pub(super) glyph_ids: Vec<u16>,
 }
@@ -45,4 +46,16 @@ pub(super) struct FaceMetadata {
     pub(super) ascent: f32,
     pub(super) descent: f32,
     pub(super) x_height: Option<f32>,
+}
+
+impl CachedFace {
+    pub(super) fn metadata(&self) -> FaceMetadata {
+        FaceMetadata {
+            upem: self.upem,
+            unsupported: false,
+            ascent: self.ascent,
+            descent: self.descent,
+            x_height: self.x_height,
+        }
+    }
 }

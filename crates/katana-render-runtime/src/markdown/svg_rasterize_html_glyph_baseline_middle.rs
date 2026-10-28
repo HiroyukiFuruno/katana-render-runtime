@@ -22,6 +22,7 @@ pub(super) fn shift(
     id: ID,
     metadata: &FaceMetadata,
     policy: Policy,
+    variable_face: Option<&super::CachedFace>,
 ) -> Result<Option<f32>, String> {
     let Some(scale) = policy.css_scale else {
         return Ok(None);
@@ -32,16 +33,31 @@ pub(super) fn shift(
     let Some(css_size) = anchor::paint_size(policy.font_size, scale, scale) else {
         return Ok(None);
     };
-    let Some(face) = rasterizer.ensure_face(id)? else {
+    let Some(font) = font_for_shift(rasterizer, id, variable_face, css_size)? else {
+        return Ok(None);
+    };
+    Ok(shift_for_font(
+        rasterizer, id, metadata, policy, scale, &font,
+    ))
+}
+
+fn font_for_shift(
+    rasterizer: &HtmlGlyphRasterizer<'_>,
+    id: ID,
+    variable_face: Option<&super::CachedFace>,
+    css_size: f32,
+) -> Result<Option<Font>, String> {
+    let face = match variable_face {
+        Some(face) => Some(face.clone()),
+        None => rasterizer.ensure_face(id)?,
+    };
+    let Some(face) = face else {
         return Ok(None);
     };
     let Ok(typeface) = face.typeface.as_skia() else {
         return Ok(None);
     };
-    let font = paint::font_for_face(typeface, css_size);
-    Ok(shift_for_font(
-        rasterizer, id, metadata, policy, scale, &font,
-    ))
+    Ok(Some(paint::font_for_face(typeface, css_size)))
 }
 
 fn shift_for_font(

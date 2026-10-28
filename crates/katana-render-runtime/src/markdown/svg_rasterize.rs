@@ -24,6 +24,9 @@ pub(super) mod font_file_fixture;
 #[path = "svg_rasterize_html_glyph.rs"]
 mod html_glyph;
 #[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_glyph_variations.rs"]
+mod html_glyph_variations;
+#[cfg(target_os = "macos")]
 #[path = "svg_rasterize_html_shadow.rs"]
 mod html_shadow;
 #[path = "svg_rasterize_text_measurement_api.rs"]

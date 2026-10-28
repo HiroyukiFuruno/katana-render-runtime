@@ -32,6 +32,8 @@ mod runs;
 #[path = "svg_rasterize_html_glyph_surface.rs"]
 mod surface;
 use super::physical_font_face as ttc;
+#[path = "svg_rasterize_html_glyph_instances.rs"]
+mod instances;
 #[path = "svg_rasterize_html_glyph_types.rs"]
 mod types;
 
@@ -76,6 +78,7 @@ fn default_backend() -> RasterBackend {
 pub(crate) struct HtmlGlyphRasterizer<'a> {
     database: &'a usvg::fontdb::Database,
     faces: RefCell<HashMap<usvg::fontdb::ID, Option<CachedFace>>>,
+    variable_faces: RefCell<instances::Cache>,
     font_mgr: OnceCell<FontMgr>,
     backend: RasterBackend,
     resvg_text_ids: HashSet<String>,
@@ -96,6 +99,7 @@ impl<'a> HtmlGlyphRasterizer<'a> {
         Self {
             database,
             faces: RefCell::new(HashMap::new()),
+            variable_faces: RefCell::new(instances::Cache::default()),
             font_mgr: OnceCell::new(),
             backend: default_backend(),
             resvg_text_ids: HashSet::new(),
@@ -140,6 +144,7 @@ impl<'a> HtmlGlyphRasterizer<'a> {
         Self {
             database,
             faces: RefCell::new(HashMap::new()),
+            variable_faces: RefCell::new(instances::Cache::default()),
             font_mgr: OnceCell::new(),
             backend: RasterBackend::CoreText,
             resvg_text_ids: HashSet::new(),
@@ -213,7 +218,9 @@ impl<'a> HtmlGlyphRasterizer<'a> {
         opacity: u8,
         run: &runs::GlyphRun,
     ) -> Result<Option<SpanInput>, String> {
-        let Some(face) = self.ensure_face(run.font)? else {
+        let Some((face, variable_instance)) =
+            self.ensure_run_face(span, run.font, run.font_size)?
+        else {
             return Ok(None);
         };
         let glyphs = &span.positioned_glyphs[run.start..run.end];
@@ -228,6 +235,7 @@ impl<'a> HtmlGlyphRasterizer<'a> {
             opacity,
             font: run.font,
             face,
+            variable_instance,
             font_size: run.font_size,
             glyph_ids,
         }))
@@ -258,6 +266,7 @@ impl<'a> HtmlGlyphRasterizer<'a> {
             baseline_shift,
             x_alignment: None,
             chunk_alignment: None,
+            variable_instance: input.variable_instance,
         }
     }
 
@@ -327,31 +336,20 @@ impl<'a> HtmlGlyphRasterizer<'a> {
     }
 
     fn face_metadata(&self, id: usvg::fontdb::ID) -> Result<FaceMetadata, String> {
-        let Some((upem, variable, color_or_bitmap, metrics)) = self
-            .database
-            .with_face_data(id, |bytes, face_index| {
-                let font = FontRef::from_index(bytes, face_index).ok()?;
-                Some((
-                    font.head().ok()?.units_per_em() as f32,
-                    !font.axes().is_empty(),
-                    font.colr().is_ok() || font.svg().is_ok() || !font.bitmap_strikes().is_empty(),
-                    font.metrics(
-                        skrifa::prelude::Size::unscaled(),
-                        &font.axes().location(std::iter::empty::<(&str, f32)>()),
-                    ),
-                ))
+        self.face_metadata_at(id, None)
+    }
+
+    fn face_metadata_at(
+        &self,
+        id: usvg::fontdb::ID,
+        variations: Option<&[usvg::FontVariation]>,
+    ) -> Result<FaceMetadata, String> {
+        self.database
+            .with_face_data(id, |bytes, index| {
+                parsed_face_metadata(bytes, index, variations)
             })
             .flatten()
-        else {
-            return Err(format!("SVG font face {id:?} cannot be parsed"));
-        };
-        Ok(FaceMetadata {
-            upem,
-            unsupported: variable || color_or_bitmap,
-            ascent: metrics.ascent.round(),
-            descent: metrics.descent.round(),
-            x_height: metrics.x_height,
-        })
+            .ok_or_else(|| format!("SVG font face {id:?} cannot be parsed"))
     }
 
     fn map_face_data(&self, id: usvg::fontdb::ID, path: &Path) -> Result<Data, String> {
@@ -372,6 +370,39 @@ impl<'a> HtmlGlyphRasterizer<'a> {
         }
         Ok(data)
     }
+}
+
+fn parsed_face_metadata(
+    bytes: &[u8],
+    index: u32,
+    variations: Option<&[usvg::FontVariation]>,
+) -> Option<FaceMetadata> {
+    let font = FontRef::from_index(bytes, index).ok()?;
+    let metrics = font_metrics_at(&font, variations);
+    let variable = !font.axes().is_empty();
+    let color_or_bitmap =
+        font.colr().is_ok() || font.svg().is_ok() || !font.bitmap_strikes().is_empty();
+    Some(FaceMetadata {
+        upem: font.head().ok()?.units_per_em() as f32,
+        unsupported: (variable && variations.is_none()) || color_or_bitmap,
+        ascent: metrics.ascent.round(),
+        descent: metrics.descent.round(),
+        x_height: metrics.x_height,
+    })
+}
+
+fn font_metrics_at(
+    font: &FontRef<'_>,
+    variations: Option<&[usvg::FontVariation]>,
+) -> skrifa::metrics::Metrics {
+    let location = match variations {
+        Some(axes) => font.axes().location(
+            axes.iter()
+                .map(|axis| (skrifa::Tag::from_be_bytes(axis.tag), axis.value)),
+        ),
+        None => font.axes().location(std::iter::empty::<(&str, f32)>()),
+    };
+    font.metrics(skrifa::prelude::Size::unscaled(), &location)
 }
 
 fn glyph_ids(glyphs: &[usvg::layout::PositionedGlyph]) -> Option<Vec<u16>> {
@@ -564,6 +595,11 @@ impl HtmlGlyphRasterizer<'_> {
         raster_scale: f32,
     ) -> Result<(), String> {
         for span in prepared {
+            if let Some(instance) = &span.variable_instance {
+                let typeface = instance.face.typeface.as_skia()?;
+                surface::draw_span(skia_surface.canvas(), &span, typeface, raster_scale)?;
+                continue;
+            }
             let Some(face) = self.ensure_face(span.font)? else {
                 return Err(format!(
                     "cached SVG font face {:?} became unavailable",
@@ -610,4 +646,5 @@ struct PreparedSpan {
     baseline_shift: f32,
     x_alignment: Option<XAlignment>,
     chunk_alignment: Option<chunk::SpanAlignment>,
+    variable_instance: Option<std::rc::Rc<instances::VariableInstance>>,
 }

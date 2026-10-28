@@ -1,5 +1,7 @@
+use resvg::usvg::FontVariation;
 use skia_safe::{Font, M44, Point};
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 const MAX_EVENTS: usize = 256;
 const MAX_GLYPHS_PER_EVENT: usize = 512;
@@ -9,6 +11,7 @@ const MATRIX_COMPONENT_COUNT: usize = 16;
 pub(in crate::markdown::svg_rasterize) struct Snapshot {
     pub(in crate::markdown::svg_rasterize) events: Vec<serde_json::Value>,
     pub(in crate::markdown::svg_rasterize) dropped: usize,
+    instances: HashMap<u32, Vec<serde_json::Value>>,
 }
 
 impl Snapshot {
@@ -84,13 +87,46 @@ pub(super) fn record_draw(
             snapshot.dropped = snapshot.dropped.saturating_add(1);
             return;
         }
+        let coordinates = snapshot
+            .instances
+            .get(&font.typeface().unique_id())
+            .map(Vec::as_slice);
         snapshot.events.push(draw_event_value(
             font,
             glyph_ids,
             positions,
             origin,
             local_to_device,
+            coordinates,
         ));
+    });
+}
+
+pub(super) fn record_instance(typeface: &skia_safe::Typeface, applied: &[FontVariation]) {
+    ACTIVE.with(|active| {
+        let mut active = active.borrow_mut();
+        let Some(snapshot) = active.as_mut() else {
+            return;
+        };
+        if snapshot.instances.len() >= MAX_EVENTS
+            && !snapshot.instances.contains_key(&typeface.unique_id())
+        {
+            snapshot.dropped = snapshot.dropped.saturating_add(1);
+            return;
+        }
+        snapshot
+            .instances
+            .entry(typeface.unique_id())
+            .or_insert_with(|| {
+                applied
+                    .iter()
+                    .map(|axis| {
+                        serde_json::json!({
+                            "tag": String::from_utf8_lossy(&axis.tag), "value": axis.value,
+                        })
+                    })
+                    .collect()
+            });
     });
 }
 
@@ -100,6 +136,7 @@ fn draw_event_value(
     positions: &[Point],
     origin: Point,
     local_to_device: M44,
+    applied_coordinates: Option<&[serde_json::Value]>,
 ) -> serde_json::Value {
     let typeface = font.typeface();
     let mut matrix = [0.0; MATRIX_COMPONENT_COUNT];
@@ -107,6 +144,7 @@ fn draw_event_value(
     serde_json::json!({
         "typefaceFamily": typeface.family_name(),
         "typefaceStyle": format!("{:?}", typeface.font_style()),
+        "appliedVariationCoordinates": applied_coordinates,
         "font": font_value(font),
         "glyphIds": glyph_ids,
         "positions": position_values(positions),

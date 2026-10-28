@@ -2,6 +2,8 @@
 
 ## 最新の再開地点（2026-10-28）
 
+- [ ] R3352でWardley4図は既存RGB採点のまま全改善（EN simple 98.52416/full 97.12243、JA simple 98.60361/full 98.94229）だが99未達。R3354のC4/Kanban代表3図は旧製品PNGと全RGBA一致。新4回帰と既存glyph98件は成功、既存ignore1。R3355全Bun契約は1341件中1339成功・2件timeoutでactual1。R3356の全libtest追加診断はactual -9で未完了、正式nextest合格へ転用しない。次は既存harfrustへのCSS文字サイズ接続と、marker暗黙viewport clipのhard-edge化を非重複で調査・修正する。正解画像・score・clip範囲は維持する。
+- [ ] R3348で可変fontのSkia instance対応は通常fmt・AST・固定容量admission・release test buildが全actual0。既存Skrifaの実variation座標をSkiaへ渡し、適用値を読戻してcache keyと照合する。R3350の新4回帰は4/4成功、R3351のWardley日英4図の実frame取得も全成功。採点・既存合格の非脱落・性能・全体gateは未確認で、採用済みとしない。予約binaryとSHAは`tmp/quality/reserved-variable-font-binary-r3349/retention.json`。統計実装は`0cc46bfa`、必須履歴固定は`d8391cf0`へ通常hook後コミット済み。
 - [ ] R3340の通常Biome gateはactual0。初回R3338のformat error3件は対象ファイルだけ公式formatterで修正し、raw144警告は既存の実参照証明144件・未解決0の扱いを維持した。R3337の実宣言なりすまし拒否5件・release固定22件もactual0。統計実装の変更をcheckpointへ保存した後、可変fontの限定Skia対応を実装する。全1338 Bun suite、117図99、HTML84実性能、coverage100/0と公開工程は引き続き未完了。
 - [/] Rustの成果物保存・lock解放・unsupported fillを実binaryのcatalogと照合して6+1件成功、通常hook後`23720b15`へコミット済み。空textはusvgがnodeを消すため不正なfixtureと分かり、当該新testだけ撤回した。製品コードをテスト都合で変更していない。
 - [ ] 統計・科学runtimeの通常Python suiteはR3325で817件成功（既存skip1）。独立High reviewで発見したuv導入不足・旧tag retry参照のP1は修正・再レビュー解消済み。R3332のBun契約全1338件は1316成功・22失敗で、共通fixtureの固定宣言不足と実source数期待の陳腐化だった。修正後R3333の対象25件とCI契約110件が成功、実宣言をコメントで偽装できない修正後のR3337 foundation・否定回帰・release祖先/内容固定22件も成功。通常BiomeをR3338で確認中。最新全Bun suite・全体gate・84条件性能は未完了として保持する。

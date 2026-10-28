@@ -54,18 +54,7 @@ pub(super) fn glyph_shift(
         /* WHY: Middleは解決済み主font補正を持つpolicyだけが適用される。 */
         return 0.0;
     }
-    metrics_shift(
-        database,
-        face_id,
-        &FaceMetadata {
-            upem: face.upem,
-            unsupported: false,
-            ascent: face.ascent,
-            descent: face.descent,
-            x_height: face.x_height,
-        },
-        policy,
-    )
+    metrics_shift(database, face_id, &face.metadata(), policy)
 }
 
 fn metrics_shift(

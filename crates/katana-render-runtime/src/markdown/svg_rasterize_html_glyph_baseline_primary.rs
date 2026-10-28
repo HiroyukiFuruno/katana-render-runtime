@@ -24,7 +24,7 @@ pub(in super::super) fn resolved_policy(
     if policy.kind == super::PolicyKind::Hanging {
         return resolve_hanging_policy(rasterizer, text, policy);
     }
-    let Some((id, metadata)) = primary_face_metadata(rasterizer, text)? else {
+    let Some((id, metadata, _)) = primary_face_metadata(rasterizer, text)? else {
         return Ok(Some(policy));
     };
     if !metadata.unsupported {
@@ -39,7 +39,7 @@ fn resolve_hanging_policy(
     text: &usvg::Text,
     mut policy: Policy,
 ) -> Result<Option<Policy>, String> {
-    let Some((id, metadata)) = primary_face_metadata(rasterizer, text)? else {
+    let Some((id, metadata, _)) = primary_face_metadata(rasterizer, text)? else {
         return Ok(None);
     };
     if metadata.unsupported || !has_known_missing_base_table(rasterizer.database, id) {
@@ -66,23 +66,30 @@ fn resolve_middle_policy(
     text: &usvg::Text,
     mut policy: Policy,
 ) -> Result<Option<Policy>, String> {
-    let Some((id, metadata)) = primary_face_metadata(rasterizer, text)? else {
+    let Some((id, metadata, variable_face)) = primary_face_metadata(rasterizer, text)? else {
         return Ok(None);
     };
     if metadata.unsupported {
         return Ok(None);
     }
-    let Some(shift) = middle::shift(rasterizer, id, &metadata, policy)? else {
+    let Some(shift) = middle::shift(rasterizer, id, &metadata, policy, variable_face.as_ref())?
+    else {
         return Ok(None);
     };
     policy.primary_shift = Some(shift);
     Ok(Some(policy))
 }
 
+type PrimaryFace = (
+    usvg::fontdb::ID,
+    super::FaceMetadata,
+    Option<super::CachedFace>,
+);
+
 fn primary_face_metadata(
     rasterizer: &HtmlGlyphRasterizer<'_>,
     text: &usvg::Text,
-) -> Result<Option<(usvg::fontdb::ID, super::FaceMetadata)>, String> {
+) -> Result<Option<PrimaryFace>, String> {
     let mut spans = text.chunks().iter().flat_map(|chunk| chunk.spans());
     let Some(first) = spans.next() else {
         return Ok(None);
@@ -93,5 +100,11 @@ fn primary_face_metadata(
     let Some(id) = loaded_html_font(first.font(), rasterizer.database) else {
         return Ok(None);
     };
-    Ok(Some((id, rasterizer.face_metadata(id)?)))
+    let metadata = rasterizer.face_metadata(id)?;
+    if metadata.unsupported
+        && let Some(face) = rasterizer.primary_variable_face(text, id)?
+    {
+        return Ok(Some((id, face.metadata(), Some(face))));
+    }
+    Ok(Some((id, metadata, None)))
 }

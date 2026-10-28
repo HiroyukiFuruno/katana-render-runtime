@@ -4,7 +4,7 @@ use resvg::usvg::{
 };
 use skrifa::{FontRef, MetadataProvider, Tag};
 
-pub(in super::super) fn applied_design_coordinates(
+pub(in crate::markdown::svg_rasterize) fn applied_design_coordinates(
     fontdb: &Database,
     face_id: ID,
     variations: &[FontVariation],
