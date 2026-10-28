@@ -4,6 +4,7 @@ use skia_safe::{Paint, PaintStyle};
 use super::solid_color;
 
 const OPAQUE_OPACITY: f32 = 1.0;
+const TRANSPARENT_OPACITY: f32 = 0.0;
 
 pub(super) fn fill(
     fill: Option<&usvg::Fill>,
@@ -15,6 +16,9 @@ pub(super) fn fill(
     let usvg::Paint::Color(color) = fill.paint() else {
         return None;
     };
+    if fill.opacity().get() == TRANSPARENT_OPACITY {
+        return Some(None);
+    }
     if fill.opacity().get() != OPAQUE_OPACITY {
         return None;
     }
@@ -35,10 +39,13 @@ pub(super) fn stroke(
     let usvg::Paint::Color(color) = stroke.paint() else {
         return None;
     };
-    if stroke.opacity().get() != OPAQUE_OPACITY {
+    if stroke.dasharray().is_some() || stroke.linejoin() == usvg::LineJoin::MiterClip {
         return None;
     }
-    if stroke.dasharray().is_some() || stroke.linejoin() == usvg::LineJoin::MiterClip {
+    if stroke.opacity().get() == TRANSPARENT_OPACITY {
+        return Some(None);
+    }
+    if stroke.opacity().get() != OPAQUE_OPACITY {
         return None;
     }
     let join = line_join(stroke.linejoin())?;

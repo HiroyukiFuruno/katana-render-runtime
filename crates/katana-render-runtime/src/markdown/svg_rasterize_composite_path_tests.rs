@@ -5,6 +5,8 @@ use tiny_skia::{Pixmap, Transform};
 
 #[path = "svg_rasterize_composite_fill_only_tests.rs"]
 mod fill_only;
+#[path = "svg_rasterize_composite_path_opacity_tests.rs"]
+mod opacity;
 
 const SIZE: u32 = 64;
 const TRANSLATE_X: f32 = 20.0;
@@ -135,7 +137,6 @@ fn unsupported_styles_keep_the_existing_resvg_pixels() -> Result<(), String> {
         "fill=\"#ff0000\" fill-opacity=\"0.5\" stroke=\"url(#g)\" stroke-width=\"4\"",
         "fill=\"url(#g)\" stroke=\"#00ff00\" stroke-width=\"4\"",
         "fill=\"none\" stroke=\"none\"",
-        "fill=\"#ff0000\" fill-opacity=\"0\" stroke=\"#0000ff\" stroke-width=\"4\"",
         "fill=\"#ff0000\" fill-opacity=\"0.5\" stroke=\"#0000ff\" stroke-width=\"4\"",
         "fill=\"#ff0000\" stroke=\"#0000ff\" stroke-opacity=\"0.5\" stroke-width=\"4\"",
     ] {
