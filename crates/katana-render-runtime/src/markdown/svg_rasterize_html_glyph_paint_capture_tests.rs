@@ -9,6 +9,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[path = "svg_rasterize_html_glyph_paint_capture_source_tests.rs"]
+mod source_tests;
+
 const FAMILY: &str = "Noto Sans";
 const SAMPLE: &str = "AV";
 static TEMP_FONT_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -53,6 +56,7 @@ fn assert_identity_capture(
     assert_eq!(glyph_ids.len(), span.glyph_ids.len());
     assert_eq!(positions.len(), glyph_ids.len());
     assert_eq!(event["origin"], serde_json::json!([0.0, 0.0]));
+    source_tests::assert_identity_source(span, event);
     assert_eq!(
         event["localToDeviceColumnMajor"].as_array().map(Vec::len),
         Some(16)
@@ -90,7 +94,8 @@ fn paint_capture_records_transformed_draw_local_to_device_matrix() -> Result<(),
     assert_eq!(snapshot.dropped, 0);
     assert_eq!(snapshot.events.len(), span.glyph_ids.len());
     assert!(snapshot.events.len() > 1);
-    for event in snapshot.events {
+    for (index, event) in snapshot.events.into_iter().enumerate() {
+        source_tests::assert_transformed_source(index, &event);
         assert_transformed_capture(&event)?;
     }
     Ok(())

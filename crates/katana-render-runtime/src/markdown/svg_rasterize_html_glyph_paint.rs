@@ -65,6 +65,8 @@ fn draw_identity_glyphs(
         })
         .collect::<Vec<_>>();
     apply_run_origin_snap(span, &mut positions, raster_scale);
+    #[cfg(test)]
+    capture::record_source(span, raster_scale, None);
     draw_glyphs_at(
         canvas,
         &span.glyph_ids,
@@ -120,11 +122,17 @@ fn draw_transformed_glyphs(
     paint: &Paint,
     raster_scale: f32,
 ) -> Result<(), String> {
+    #[cfg(test)]
+    let mut glyph_indices = 0..;
     for (glyph, glyph_id) in span.glyphs.iter().zip(&span.glyph_ids) {
         let save = canvas.save();
         let matrix =
             super::surface::skia_matrix(normalized_transform(span, glyph, raster_scale), 0.0, 0.0);
         canvas.concat(&matrix);
+        #[cfg(test)]
+        {
+            capture::record_source(span, raster_scale, glyph_indices.next());
+        }
         draw_glyphs_at(
             canvas,
             std::slice::from_ref(glyph_id),

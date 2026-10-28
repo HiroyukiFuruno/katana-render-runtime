@@ -95,7 +95,7 @@ fn constant_baseline(span: &PreparedSpan) -> bool {
     span.glyphs.iter().all(|glyph| glyph.transform().ty == y)
 }
 
-fn layout_matches(layout: &usvg::layout::Span, span: &PreparedSpan) -> bool {
+pub(super) fn layout_matches(layout: &usvg::layout::Span, span: &PreparedSpan) -> bool {
     layout.positioned_glyphs.len() == span.glyphs.len()
         && layout
             .positioned_glyphs

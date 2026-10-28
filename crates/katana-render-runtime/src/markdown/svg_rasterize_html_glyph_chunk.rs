@@ -4,6 +4,8 @@ use tiny_skia::{Point, Transform};
 
 #[path = "svg_rasterize_html_glyph_chunk_eligibility.rs"]
 mod eligibility;
+#[cfg(test)]
+pub(super) use eligibility::row_diagnostic;
 #[cfg(all(test, target_os = "macos"))]
 #[path = "svg_rasterize_html_glyph_single_middle_tests.rs"]
 mod single_middle_tests;
@@ -50,18 +52,38 @@ pub(super) fn apply(
     text: &usvg::Text,
     prepared: &mut [PreparedSpan],
 ) -> Result<(), String> {
-    let Some(input) = eligibility::input(text, prepared) else {
+    let inputs = if let Some(input) = eligibility::input(text, prepared) {
+        vec![(input, 0..prepared.len())]
+    } else if let Some(inputs) = eligibility::row_inputs(text, prepared) {
+        inputs
+    } else {
         return Ok(());
     };
-    let metrics = character_metrics(database, &input)?;
+    let mut alignments = Vec::with_capacity(prepared.len());
+    for (input, range) in inputs {
+        append_row_alignments(database, &input, &prepared[range], &mut alignments)?;
+    }
+    for (span, alignment) in prepared.iter_mut().zip(alignments) {
+        span.chunk_alignment = Some(alignment);
+    }
+    Ok(())
+}
+
+fn append_row_alignments(
+    database: &usvg::fontdb::Database,
+    input: &eligibility::Input<'_>,
+    spans: &[PreparedSpan],
+    alignments: &mut Vec<SpanAlignment>,
+) -> Result<(), String> {
+    let metrics = character_metrics(database, input)?;
     let widths = span_widths(input.chunk, &metrics)?;
     let mut cursor = f64::from(input.anchor_x * input.css_scale) - widths.iter().sum::<f64>() / 2.0;
-    for ((source, span), width) in input.chunk.spans().iter().zip(prepared).zip(widths) {
+    for ((source, span), width) in input.chunk.spans().iter().zip(spans).zip(widths) {
         let offset = metrics
             .get(source.start())
             .ok_or("chunk span offset is missing")?
             .1;
-        span.chunk_alignment = Some(span_alignment(span, &input, cursor + f64::from(offset))?);
+        alignments.push(span_alignment(span, input, cursor + f64::from(offset))?);
         cursor += width;
     }
     Ok(())
@@ -76,15 +98,21 @@ fn character_metrics(
         input.source_font.weight(),
         input.source_font.style() != usvg::FontStyle::Normal,
     );
-    /* WHY: span境界のkerningと末尾空白のadvanceを保つためchunk全体を一度だけshapeする。 */
-    super::super::text_shaping::shape_run_character_metrics_with_trim(
-        database,
-        input.face,
-        input.chunk.text(),
-        font,
-        None,
-    )
-    .ok_or_else(|| "eligible SVG chunk character metrics could not be shaped".to_owned())
+    let mut metrics = Vec::with_capacity(input.chunk.text().len());
+    for span in input.chunk.spans() {
+        let text = input
+            .chunk
+            .text()
+            .get(span.start()..span.end())
+            .ok_or("eligible SVG chunk span text is missing")?;
+        /* WHY: SVGのspan境界でkerningが分断されるため、span内だけをshapeする。 */
+        let shaped = super::super::text_shaping::shape_run_character_metrics_with_trim(
+            database, input.face, text, font, None,
+        )
+        .ok_or_else(|| "eligible SVG chunk character metrics could not be shaped".to_owned())?;
+        metrics.extend(shaped);
+    }
+    Ok(metrics)
 }
 
 fn span_widths(chunk: &usvg::TextChunk, metrics: &[(f32, f32)]) -> Result<Vec<f64>, String> {

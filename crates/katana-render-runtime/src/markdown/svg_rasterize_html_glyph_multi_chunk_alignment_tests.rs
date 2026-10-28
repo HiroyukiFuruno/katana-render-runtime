@@ -4,6 +4,11 @@ use resvg::usvg::{Node, Options, Tree};
 use serde_json::Value;
 use std::sync::Arc;
 
+#[path = "svg_rasterize_html_glyph_multi_chunk_nested_rows_tests.rs"]
+mod nested_rows;
+#[path = "svg_rasterize_html_glyph_single_row_spans_tests.rs"]
+mod single_row_spans;
+
 const CHUNK_COUNT: usize = 2;
 const COORDINATE_COUNT: usize = 2;
 const FIXTURE_WIDTH: i32 = 160;

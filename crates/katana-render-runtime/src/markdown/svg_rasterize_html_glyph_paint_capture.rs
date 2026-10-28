@@ -1,3 +1,9 @@
+#[path = "svg_rasterize_html_glyph_paint_capture_draw.rs"]
+mod draw;
+#[path = "svg_rasterize_html_glyph_paint_capture_source.rs"]
+mod source;
+pub(super) use source::record_source;
+
 use resvg::usvg::FontVariation;
 use skia_safe::{Font, M44, Point};
 use std::cell::RefCell;
@@ -5,13 +11,14 @@ use std::collections::HashMap;
 
 const MAX_EVENTS: usize = 256;
 const MAX_GLYPHS_PER_EVENT: usize = 512;
-const MATRIX_COMPONENT_COUNT: usize = 16;
 
 #[derive(Clone, Default)]
 pub(in crate::markdown::svg_rasterize) struct Snapshot {
     pub(in crate::markdown::svg_rasterize) events: Vec<serde_json::Value>,
     pub(in crate::markdown::svg_rasterize) dropped: usize,
     instances: HashMap<u32, Vec<serde_json::Value>>,
+    pending_source: Option<serde_json::Value>,
+    pending_source_oversized: bool,
 }
 
 impl Snapshot {
@@ -83,23 +90,45 @@ pub(super) fn record_draw(
         let Some(snapshot) = active.as_mut() else {
             return;
         };
-        if snapshot.events.len() >= MAX_EVENTS || glyph_ids.len() > MAX_GLYPHS_PER_EVENT {
-            snapshot.dropped = snapshot.dropped.saturating_add(1);
-            return;
-        }
-        let coordinates = snapshot
-            .instances
-            .get(&font.typeface().unique_id())
-            .map(Vec::as_slice);
-        snapshot.events.push(draw_event_value(
+        append_draw(
+            snapshot,
             font,
             glyph_ids,
             positions,
             origin,
             local_to_device,
-            coordinates,
-        ));
+        );
     });
+}
+
+fn append_draw(
+    snapshot: &mut Snapshot,
+    font: &Font,
+    glyph_ids: &[u16],
+    positions: &[Point],
+    origin: Point,
+    local_to_device: M44,
+) {
+    let source = snapshot.pending_source.take();
+    let oversized = std::mem::take(&mut snapshot.pending_source_oversized);
+    if snapshot.events.len() >= MAX_EVENTS || glyph_ids.len() > MAX_GLYPHS_PER_EVENT || oversized {
+        snapshot.dropped = snapshot.dropped.saturating_add(1);
+        return;
+    }
+    let coordinates = snapshot
+        .instances
+        .get(&font.typeface().unique_id())
+        .map(Vec::as_slice);
+    let mut event = draw::draw_event_value(
+        font,
+        glyph_ids,
+        positions,
+        origin,
+        local_to_device,
+        coordinates,
+    );
+    event["sourceSpan"] = source.unwrap_or(serde_json::Value::Null);
+    snapshot.events.push(event);
 }
 
 pub(super) fn record_instance(typeface: &skia_safe::Typeface, applied: &[FontVariation]) {
@@ -128,52 +157,6 @@ pub(super) fn record_instance(typeface: &skia_safe::Typeface, applied: &[FontVar
                     .collect()
             });
     });
-}
-
-fn draw_event_value(
-    font: &Font,
-    glyph_ids: &[u16],
-    positions: &[Point],
-    origin: Point,
-    local_to_device: M44,
-    applied_coordinates: Option<&[serde_json::Value]>,
-) -> serde_json::Value {
-    let typeface = font.typeface();
-    let mut matrix = [0.0; MATRIX_COMPONENT_COUNT];
-    local_to_device.get_col_major(&mut matrix);
-    serde_json::json!({
-        "typefaceFamily": typeface.family_name(),
-        "typefaceStyle": format!("{:?}", typeface.font_style()),
-        "appliedVariationCoordinates": applied_coordinates,
-        "font": font_value(font),
-        "glyphIds": glyph_ids,
-        "positions": position_values(positions),
-        "origin": [origin.x, origin.y],
-        "localToDeviceColumnMajor": matrix,
-    })
-}
-
-fn font_value(font: &Font) -> serde_json::Value {
-    serde_json::json!({
-        "size": font.size(),
-        "scaleX": font.scale_x(),
-        "skewX": font.skew_x(),
-        "subpixel": font.is_subpixel(),
-        "linearMetrics": font.is_linear_metrics(),
-        "baselineSnap": font.is_baseline_snap(),
-        "embeddedBitmaps": font.is_embedded_bitmaps(),
-        "embolden": font.is_embolden(),
-        "forceAutoHinting": font.is_force_auto_hinting(),
-        "hinting": format!("{:?}", font.hinting()),
-        "edging": format!("{:?}", font.edging()),
-    })
-}
-
-fn position_values(positions: &[Point]) -> Vec<[f32; 2]> {
-    positions
-        .iter()
-        .map(|position| [position.x, position.y])
-        .collect()
 }
 
 #[cfg(test)]

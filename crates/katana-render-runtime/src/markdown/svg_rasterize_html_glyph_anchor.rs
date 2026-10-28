@@ -71,7 +71,14 @@ pub(super) fn one_ordered_scalar_per_glyph(
     text: &str,
     glyphs: &[usvg::layout::PositionedGlyph],
 ) -> bool {
-    if text.chars().count() != glyphs.len() || glyphs.len() < 2 {
+    glyphs.len() >= 2 && nonempty_ordered_scalar_per_glyph(text, glyphs)
+}
+
+pub(super) fn nonempty_ordered_scalar_per_glyph(
+    text: &str,
+    glyphs: &[usvg::layout::PositionedGlyph],
+) -> bool {
+    if text.chars().count() != glyphs.len() || glyphs.is_empty() {
         return false;
     }
     let mut characters = text.chars();
