@@ -81,17 +81,6 @@ function katanaSvgPathBox(node) {
   return null;
 }
 
-function katanaSvgParsedPathBox(pathData) {
-  if (!pathData) {
-    return null;
-  }
-  const bounds = katanaParsedSerializedPathDataBox(pathData);
-  if (!bounds) {
-    return null;
-  }
-  return katanaBox(bounds[0], bounds[1], bounds[2] - bounds[0], bounds[3] - bounds[1]);
-}
-
 function katanaSvgPointsBox(node) {
   if (["polygon", "polyline"].includes(node.localName)) {
     return katanaOptionalNumberListBox(node.getAttribute("points"));

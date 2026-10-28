@@ -3,6 +3,60 @@ use super::transformed_box;
 
 const BOUNDS_TOLERANCE: f64 = 1e-10;
 
+#[cfg(target_os = "macos")]
+#[test]
+fn skia_svg_arc_path_reports_tight_bounds_for_fractional_geometry() -> Result<(), String> {
+    let source = "M0,0 a10.209112313464553,43.139366149902344 0 0 1 0,-86.27873229980469 l226.20911231346454,0 a10.209112313464553,43.139366149902344 0 0 1 0,86.27873229980469";
+    let path = skia_safe::Path::from_svg(source).ok_or("Skia rejected valid SVG arc")?;
+    let bounds = path.compute_tight_bounds();
+    assert!(bounds.is_finite());
+    assert!(
+        bounds.width() > 246.0 && bounds.width() < 247.0,
+        "{bounds:?}"
+    );
+    assert!((bounds.height() - 86.27873).abs() < 0.001, "{bounds:?}");
+    println!(
+        "skia_fractional_arc_bounds={bounds:?} width_bits={:08x}",
+        bounds.width().to_bits()
+    );
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn skia_svg_full_fractional_arc_path_reports_bounds() -> Result<(), String> {
+    let source = "M0,0 a10.209112313464553,43.139366149902344 0,0,1 0,-86.27873229980469 l226.20911231346454,0 a10.209112313464553,43.139366149902344 0,0,1 0,86.27873229980469 M226.20911231346454,-86.27873229980469 a10.209112313464553,43.139366149902344 0,0,0 0,86.27873229980469 l-226.20911231346454,0";
+    let path = skia_safe::Path::from_svg(source).ok_or("Skia rejected valid SVG arc")?;
+    let bounds = path.compute_tight_bounds();
+    assert!(bounds.is_finite() && bounds.width() > 246.0 && bounds.width() < 247.0);
+    println!(
+        "skia_full_fractional_arc_bounds={bounds:?} width_bits={:08x}",
+        bounds.width().to_bits()
+    );
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn v8_svg_path_bounds_bridge_handles_valid_and_unsupported_paths() -> Result<(), String> {
+    let script = r#"(() => {
+      const bounds = globalThis.__katanaSvgPathBounds('M1,2 L11,2 L11,7 Z');
+      const invalid = globalThis.__katanaSvgPathBounds('not a path');
+      const empty = globalThis.__katanaSvgPathBounds('');
+      const nul = globalThis.__katanaSvgPathBounds('M0,0\0L1,1');
+      return JSON.stringify({bounds, invalid, empty, nul});
+    })()"#;
+    let output =
+        DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed("path-bounds", script)])?;
+    let result: serde_json::Value =
+        serde_json::from_str(&output).map_err(|error| error.to_string())?;
+    assert_eq!(
+        result,
+        serde_json::json!({"bounds":{"x":1,"y":2,"width":10,"height":5},"invalid":null,"empty":null,"nul":null})
+    );
+    Ok(())
+}
+
 const V8_BOUNDARY_CASES_SCRIPT: &str = r#"(() => {
     const transform = globalThis.__katanaTransformSvgBox;
     const cases = [
