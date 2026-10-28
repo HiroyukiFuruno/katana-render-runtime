@@ -1599,7 +1599,12 @@ fn shape_text_with_font(
             // TODO: explicitly set language?
             buffer.guess_segment_properties();
 
-            let output = shaper.shape(buffer, ShapeOptions::new().features(&features));
+            let output = shaper.shape(
+                buffer,
+                ShapeOptions::new()
+                    .point_size(Some(font_size))
+                    .features(&features),
+            );
 
             let positions = output.glyph_positions();
             let infos = output.glyph_infos();

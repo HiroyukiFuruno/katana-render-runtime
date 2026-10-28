@@ -277,3 +277,6 @@ fn has_color(pixels: &[u8], color: [u8; RGB_CHANNEL_COUNT]) -> bool {
 
 #[path = "svg_rasterize_preprocess_marker_exact_public_tests.rs"]
 mod exact_public_tests;
+
+#[path = "svg_rasterize_preprocess_marker_viewport_tests.rs"]
+mod viewport_tests;

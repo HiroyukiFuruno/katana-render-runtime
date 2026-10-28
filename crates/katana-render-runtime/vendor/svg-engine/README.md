@@ -10,7 +10,7 @@ Apache-2.0 / MITのライセンス本文を同梱する。
 元ソース内の `cfg(test)` とテスト2件は保持する。別crateのmanifest、CLI、外部fixture、
 crate外を参照するREADMEのsymlinkは持ち込まない。
 
-KRR内部の `crate::svg_engine::{usvg,resvg}` として接続するため、次の機械的な適応だけを行った。
+KRR内部の `crate::svg_engine::{usvg,resvg}` として接続するため、次の機械的な適応を行った。
 
 - 元の `crate::` 参照を、各ソースの所属する内部モジュールへの参照へ変更した。
 - resvgからのusvg参照を `crate::svg_engine::usvg` へ変更した。
@@ -37,7 +37,14 @@ resvgの `identity_op` / `too_many_arguments` / `upper_case_acronyms` / `wrong_s
 元の属性による許可を保持し、追加リストでは重複させない。
 これはKRRの `src/svg_engine.rs` に置いていた属性の移動であり、KRR自身の実装には適用しない。
 `clippy::non_minimal_cfg`、一括の `all`、`forbid(unsafe_code)` の無効化は含めない。
-描画、字形処理、構文解析の処理内容とテストの期待値は変更していない。
+初回移植後、独立Chromeとの比較と失敗回帰に基づき、次の限定的な修正を追加した。
+
+- usvgの文字整形では、HarfRustへCSS文字サイズを渡し、サイズ依存のtrackingを適用する。
+  字形ID・variation座標・原SVGを手作業で加工しない。
+- markerの暗黙viewport clipだけをhard-edgeにする。clip範囲とtransformを維持し、
+  markerの子図形と通常のuser clipのアンチエイリアスは変更しない。
+
+元のテスト2件と期待値は保持し、新しい回帰はKRR側へ追加する。
 `PROVENANCE.json` に、元commit、全ファイルの元パス・移植先・両SHA256・変更件数と、
 ライセンスのSHA256を記録している。SHA256は各ファイルの全バイトから算出する。
 

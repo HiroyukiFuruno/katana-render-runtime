@@ -10,8 +10,8 @@ use tiny_skia_path::Point;
 use super::converter;
 use super::svgtree::{AId, EId, SvgNode};
 use crate::svg_engine::usvg::{
-    ApproxEqUlps, ApproxZeroUlps, ClipPath, Fill, Group, Node, NonZeroRect, Path, Transform,
-    ViewBox,
+    ApproxEqUlps, ApproxZeroUlps, ClipPath, Fill, Group, Node, NonZeroRect, Path,
+    ShapeRendering, Transform, ViewBox,
 };
 
 // Similar to `tiny_skia_path::PathSegment`, but without the `QuadTo`.
@@ -129,6 +129,7 @@ fn resolve(
             clip_rect.to_rect(),
         )))?;
         path.fill = Some(Fill::default());
+        path.rendering_mode = ShapeRendering::CrispEdges;
 
         clip_path.root.children.push(Node::Path(Box::new(path)));
         clip_path.root.calculate_bounding_boxes();

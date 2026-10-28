@@ -24,7 +24,7 @@
     "harfrustAlias": "usvg harfrust:: becomes svg_harfrust:: (original 0.12 dependency identity)",
     "enabledFeaturePredicates": "The original enabled feature counts are retained per file; constant evaluation removes 79 true cfg attributes and four false branches. OS and test conditions are retained; KRR has no optional public SVG-engine feature contract.",
     "allowAttributes": "The original 46 allow attributes are retained verbatim. Two scoped boundary attributes permit observed external Clippy lints (22 in usvg/lib.rs, 18 in resvg/lib.rs) plus dead_code and unused_imports. Four resvg lints already allowed upstream are omitted from the added list to avoid duplicate attributes. No blanket all, non_minimal_cfg, unsafe-code override, or additional exclusion is introduced.",
-    "sourceSemantics": "No shaping, geometry, paint, parser, or test expectation changes"
+    "sourceSemantics": "Initial mechanical transplant preserves upstream behavior; subsequent scoped fixes pass CSS font size to HarfRust tracking and use hard-edge clipping only for implicit marker viewports. Original SVG, glyph IDs, and variation coordinates are not manually rewritten. Clip bounds, transforms, user-clip antialiasing, and upstream test expectations are preserved."
   },
   "files": [
     {
@@ -101,9 +101,9 @@
       "source": "crates/usvg/src/parser/marker.rs",
       "destination": "usvg/parser/marker.rs",
       "sourceSha256": "d52e892d9654a07789f489bf4df1bca1eab52b12ed03a4d14a052ddb821ce264",
-      "transplantedSha256": "001ec40bdb4a73f55a463c1410865d1480b2990dfda3f6793b066b0b9d60ea87",
+      "transplantedSha256": "6591ced381dad59cc1e198729015470913aa262b6a3a5ca0f8fee55f7584f115",
       "sourceBytes": 15621,
-      "transplantedBytes": 15639,
+      "transplantedBytes": 15713,
       "adaptations": {
         "cratePaths": 1,
         "enabledFeaturePredicates": {},
@@ -332,9 +332,9 @@
       "source": "crates/usvg/src/text/layout.rs",
       "destination": "usvg/text/layout.rs",
       "sourceSha256": "355f6c97d4abbe31d01d3e12498396ae04f738ed63587f95e9a98e3d306d36eb",
-      "transplantedSha256": "c58f22229d7f0eaa0a4085b329f68574ecd49d05b69877a20fb06fde44842e5b",
+      "transplantedSha256": "a3e73fd378dbbe1807470505f8099bdf8bb71484418cca011b283feb94c59ce5",
       "sourceBytes": 68205,
-      "transplantedBytes": 68459,
+      "transplantedBytes": 68576,
       "adaptations": {
         "cratePaths": 13,
         "enabledFeaturePredicates": {},
