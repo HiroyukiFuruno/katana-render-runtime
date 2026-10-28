@@ -2,6 +2,16 @@
 
 ## 最新の再開地点（2026-10-29）
 
+- [/] R3726はChrome常時CIの実条件/commandを既存parserで直接検査し、reuse guard混入を拒否する負例も含めmacOS証跡65件成功。標準biome15項目とstatic foundationもactual0。R3723の実Moon全契約が成功し、レビュー済みowner AST固定を現行へ同期。R3725はowner負例23件、登録/依存/異常変異59件が成功。通常hookを維持したR3727で、host整合9d98d8c1、raw SVG/viewport検証a61a5cce、現CI/tool契約de78de07、Canvas診断775328fc、runtime整形d1e1cf6d、Node型26.6.6 c24ee95bを関心別に保存。製品PNGの新正式117、現HTML84/性能、完全gate/coverageとcache実効性、PR/CI/公開は依然未完。以降の実行中情報は終了hook台帳と`tmp/quality/resumed-owner-r3509/`の新規run/handoffでも保持し、古い成功を現HEADへ転用しない。
+
+- [/] R3718標準完全checkは8分31秒でactual1（26完了/4失敗/14skip）。Rust静的検査を通過し、runtime-unused全310件が実producerで310/310成功。失敗はcapacity fixture2系統、Moon契約の旧task/recipe固定、macOSローカル証跡の旧workflow/Bun固定、fingerprint testの旧Moon版固定で、capacity不足ではない。実装の拒否を外さずfixture/現在の公開tool契約へ同期中。R3719実Moon packageとの完全version照合6/6、R3720 alias34/34・macOS証跡65/65、R3721 state21/21はactual0。macOS証跡で新Chrome CI laneを省略せず、旧workflow/Bun証跡拒否を追加。R3722のMoon契約は実2.6.4が追加するglobal-config inputの旧期待で失敗し、実観測JSONと全taskを照合中。完全gate/coverage/最新画像/性能/公開は未合格。
+
+- [/] R3715完全checkは通常Biome指摘10件で静的14完了/1失敗/29skip。未使用147件は既存解析で解決しcontextFailure0。通常指摘は整形・import順・複雑度で、cohesive helper分割とsafe formatterで修正。外部APIがdefaultを要求する既存Playwright例外へmacOS設定1件だけ追加（ユーザーの外部境界事前許可に基づく）。R3716 bundle再生成actual0、R3717標準biome laneは15項目完了/actual0・未解決0。source凍結後R3718完全checkを実行中。旧全体失敗を保持し、最新full/画像/性能の合格は未宣言。
+
+- [/] R3712全unused検査は307成功/3失敗（310件）、残3件はいずれも旧文字列に一致せず変異が発生しない負例fixtureだった。変異対象を現sourceへ更新しR3713で3/3成功。静的foundationは新しい共通AST判定の重複1件を必須gateで検出し停止、原reportを`tmp/quality/resumed-owner-r3509/duplication-original-r3713/report.json`へ保持。共通declaration判定だけ抽出し、代入/更新と関数宣言の異なる意味を維持。R3714の型・重複・Python・bundle・harness等のfoundationはactual0。source凍結後、R3715で標準`just check`を実行中。限定成功と全体合格を区別する。
+
+- [/] 累計作業時間はユーザー申告15日5時間。「4日」と短縮した説明を訂正し、直近区間と累計を混同しない。R3695の標準依存更新は@types/node26.6.6のみ変更し、後続checkは実CARGO launcher形式の旧検証モデルで失敗。限定修正後、R3699は静的14完了/1失敗/29skip。旧consumer pin、named sizing callback、strict viewport操作のAST検証モデルを現sourceへ追随し、検出範囲・閾値を維持して統合中。R3703の実browser19/19、R3708同Just環境でのhost準備、R3709のMathJax限定検査はactual0。R3706 direct Bunでの環境不一致を隠さず保持し、同Just起動で解消。R3710は全runtime-unusedファイルを同環境で再検証中。古い検査モデルの修正は描画合格件数へ加算しない。正式117/HTML84/性能/coverage/PR/公開は未完了。
+
 - [/] 通常hook成功後に、性能親依存照合を`e27112dd`、Chrome実フォント観測/原失敗・退出保持を`ac8f2bbf`、CSS要求と物理faceを保つ日本語fallbackを`a7f56cfa`、対象C4観測を`bc6b6524`、既存Skiaによる一般path fill bbox/上限付き再利用を`45ebff29`へ関心別commitした。R3686は実catalogに照合した54/54成功、R3687/R3688は物理照合付き版でもJA28が98.95101→99.811875を維持。Macintosh ASCII PostScript名がttf-parser Unicode decoderで読めず正規Helveticaを拒否した3失敗を修正し、異常encoding/同名別source/collection index/source generationの拒否を維持。raw画像・SVG・合格閾値は変更していない。C4 JA08-02の生成境界幅は346.6273193359375となりrawと一致。共通fragment影響の追加確認R3691は実Draw.io/ZenUMLの既存2caseともactual0。最新正式一括件数は依然R3617の108/117（9未合格、未計測0）であり、新source全117/HTML84/性能はこれから正式再検証する。
 - [ ] Q19/Q20/Q21の漏れ防止：既存Moon/Nextest/llvm-cov＋限定adapterによる再利用・静的先行並列・重複必須・macOS任意local証跡からCI fallbackの配線は実装済み。新しい汎用基盤は増設しない。現sourceの実100%/未計測0を使い、native/root/性能armsのmiss→hit→復元、CAS/receipt改変の拒否と再実検査、begin後失敗した旧成功拒否/重複owner拒否、JS7leafの現epoch再利用を既存の隔離検証で確認する。保護済み原本の改変は禁止。旧source実験を最新全体合格に転用しない。CIは最新PR/base/HEADの検証とrequired3OSの実成功を確認し、macOS任意証跡の提出自体をReady/公開の前提にしない。
 
