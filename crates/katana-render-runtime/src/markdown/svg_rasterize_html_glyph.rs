@@ -1,6 +1,8 @@
 use super::composite::TextRasterizer;
 use resvg::usvg;
-use skia_safe::{AlphaType, ColorType, Data, FontMgr, ImageInfo, surfaces};
+use skia_safe::{
+    AlphaType, Borrows, Canvas, ColorType, Data, FontMgr, ImageInfo, Surface, surfaces,
+};
 use skrifa::{FontRef, MetadataProvider, raw::TableProvider};
 use std::cell::{OnceCell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -51,6 +53,10 @@ mod ttc_integration_tests;
 #[cfg(all(test, target_os = "macos"))]
 #[path = "svg_rasterize_html_glyph_typeface_tests.rs"]
 mod typeface_tests;
+
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_html_glyph_composite_tests.rs"]
+mod composite_tests;
 
 #[cfg(all(test, target_os = "macos"))]
 #[path = "svg_rasterize_html_glyph_coretext.rs"]
@@ -544,8 +550,7 @@ impl HtmlGlyphRasterizer<'_> {
         ) else {
             return Ok(true);
         };
-        let pixels = self.draw_prepared(prepared, full_transform, &crop)?;
-        surface::composite_rgba(pixmap, &pixels, crop)?;
+        self.draw_prepared(prepared, full_transform, crop, pixmap)?;
         Ok(true)
     }
 
@@ -553,13 +558,15 @@ impl HtmlGlyphRasterizer<'_> {
         &self,
         prepared: Vec<PreparedSpan>,
         full_transform: Transform,
-        crop: &surface::Crop,
-    ) -> Result<Vec<u8>, String> {
+        crop: surface::Crop,
+        pixmap: &mut PixmapMut<'_>,
+    ) -> Result<(), String> {
         #[cfg(all(test, target_os = "macos"))]
         if matches!(self.backend, RasterBackend::CoreText) {
-            return coretext::draw_prepared(self, prepared, full_transform, crop);
+            let pixels = coretext::draw_prepared(self, prepared, full_transform, &crop)?;
+            return surface::composite_rgba(pixmap, &pixels, crop);
         }
-        self.draw_skia_prepared(prepared, full_transform, crop)
+        self.draw_skia_prepared(prepared, full_transform, &crop, pixmap)
     }
 
     fn draw_skia_prepared(
@@ -567,25 +574,19 @@ impl HtmlGlyphRasterizer<'_> {
         prepared: Vec<PreparedSpan>,
         full_transform: Transform,
         crop: &surface::Crop,
-    ) -> Result<Vec<u8>, String> {
+        pixmap: &mut PixmapMut<'_>,
+    ) -> Result<(), String> {
         /* WHY: BlinkのSVG文字と同様に、等方倍率をfont sizeへ移してstrike選択を揃える。 */
         let (raster_scale, canvas_transform) = skia_transforms(full_transform);
-        let mut pixels = vec![0; crop.width as usize * crop.height as usize * RGBA_CHANNELS];
-        let info = ImageInfo::new(
-            (crop.width as i32, crop.height as i32),
-            ColorType::RGBA8888,
-            AlphaType::Premul,
-            None,
-        );
-        let mut skia_surface =
-            surfaces::wrap_pixels(&info, pixels.as_mut_slice(), info.min_row_bytes(), None)
-                .ok_or_else(|| "Skia text surface allocation failed".to_string())?;
-        let matrix = surface::skia_matrix(canvas_transform, crop.x as f32, crop.y as f32);
+        let mut skia_surface = wrap_pixmap(pixmap)?;
+        /* WHY: 旧crop surfaceのdevice境界を、変換設定前の整数clipで維持する。 */
+        clip_crop(skia_surface.canvas(), crop);
+        let matrix = surface::skia_matrix(canvas_transform, 0.0, 0.0);
         let matrix = skia_safe::M44::from(&matrix);
         skia_surface.canvas().set_matrix(&matrix);
         self.draw_spans(&mut skia_surface, prepared, raster_scale)?;
         drop(skia_surface);
-        Ok(pixels)
+        Ok(())
     }
 
     fn draw_spans(
@@ -611,6 +612,30 @@ impl HtmlGlyphRasterizer<'_> {
         }
         Ok(())
     }
+}
+
+fn wrap_pixmap<'a>(pixmap: &'a mut PixmapMut<'_>) -> Result<Borrows<'a, Surface>, String> {
+    let info = ImageInfo::new(
+        (pixmap.width() as i32, pixmap.height() as i32),
+        ColorType::RGBA8888,
+        AlphaType::Premul,
+        None,
+    );
+    surfaces::wrap_pixels(&info, pixmap.data_mut(), info.min_row_bytes(), None)
+        .ok_or_else(|| "Skia text surface allocation failed".to_string())
+}
+
+fn clip_crop(canvas: &Canvas, crop: &surface::Crop) {
+    canvas.clip_rect(
+        skia_safe::Rect::from_xywh(
+            crop.x as f32,
+            crop.y as f32,
+            crop.width as f32,
+            crop.height as f32,
+        ),
+        None,
+        false,
+    );
 }
 
 fn uniform_raster_scale(transform: Transform) -> f32 {

@@ -1,7 +1,9 @@
 pub(super) use super::paint::draw_span;
 use resvg::usvg;
 use skia_safe::Matrix;
-use tiny_skia::{IntRect, PixmapMut, Point, Transform};
+#[cfg(test)]
+use tiny_skia::PixmapMut;
+use tiny_skia::{IntRect, Point, Transform};
 
 const BBOX_CORNER_COUNT: usize = 4;
 
@@ -116,6 +118,7 @@ pub(super) fn skia_matrix(transform: Transform, x: f32, y: f32) -> Matrix {
     )
 }
 
+#[cfg(test)]
 pub(super) fn composite_rgba(
     pixmap: &mut PixmapMut<'_>,
     pixels: &[u8],
