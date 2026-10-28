@@ -2,6 +2,8 @@
 
 ## 最新の再開地点（2026-10-28）
 
+- [ ] `18155b95`でrelease必須祖先に`9a50d116`/`2ae668e2`を追加、内容manifestを正規producerで同期し、祖先・旧snapshot拒否・内容改変拒否の22回帰はR3527で成功。R3529 foundationはactual0だが、続くrelease-target-checkがRust互換lockの更新を検出してactual1となったため、古いlockのまま正式画像取得へ進まず、既存locked `depends-update-mutations`を実行したR3530はactual0。unicode-width0.2.2→0.2.3、globset0.4.20→0.4.21、ignore0.4.33→0.4.34、xattr1.6.1→1.7.0。JS/runtime資産は差分なし。root/harness lockとharness LOCK_SHAを同期し、R3531 foundation、R3532 lock同期回帰とfreshness70回帰は全actual0。GitHub Actionsは4workflowのfull-SHA参照62箇所を上流release/tagと照合し更新不要。tool専用taiki-e参照は既存default toolを維持し、rust-toolchain stable HEAD一致もmainで再確認した。更新差分のcommitと新しい内容manifest同期・再検証を続行する。
+
 - [/] 参照生成の実経路・新policyの登録・platform別の実回帰を`9a50d116`へ、複数row/spanの文字間隔修正を`2ae668e2`へ、それぞれ通常hook actual0で保存した。R3502 foundation actual0、R3501 macOSの実producer browser1件成功、R3503共通browser17件成功。R3499関連Bunは256成功・新fixture4失敗を保持し、source/captureを一体更新するfixtureへ修正したR3500は当該ファイル全成功。R3519でAST成功後ClippyがRowInputの型複雑度を検出し、型alias抽出後の通常hookは成功。検査例外・閾値変更なし。
 - [/] R3504の製品build・R3505のglyph111成功/既存ignore1、alignment9件成功。R3506/3507の同一入力・viewportのChrome対照でC4 EN fullは98.30248→99.29706（丸め修正前97.81484）。R3508の17実frame取得は全actual0。R3510は出力名規則、R3511はcanonical candidate SVGの代わりにnative内部SVGを渡したinventory不一致で拒否され、原失敗を保持。正しい入力で新policy参照を生成したR3512は診断17件中99以上8→9、旧合格の脱落0。未達8件はC4 EN container、JA08-03〜06、Kanban日英、JA ZenUML。全117の正式件数へ加算しない。計測専用codeを責務別moduleへ整理した後、R3522再build、R3523 glyph111成功/ignore1、R3524の実frame bytes不変も確認した。
 - [ ] 次はrelease必須祖先・内容manifestの現HEAD同期、独立raw JS117件の新policy取得、現sourceの正式native117採点。HTML84現source/実font一致・表示時間/メモリ・coverage100%/未計測0・全体gate・review/3OS CI/公開は未完了。日本語C4の未補正glyph行には仮説上0.02〜0.15pxの幅差があるが、Chrome差の主因とは未証明。現行metricsはscalar数、SVG span境界はUTF-8 byteであり、ASCII制限だけを外さず、同一faceでの文字境界観測とUnicode境界回帰を先行する。

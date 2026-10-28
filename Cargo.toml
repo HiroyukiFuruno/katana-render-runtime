@@ -62,4 +62,4 @@ percent-encoding = "2.3"
 cssparser = "0.38"
 taffy = { version = "0.15.1", default-features = false, features = ["std", "taffy_tree", "block_layout", "flexbox", "grid", "content_size", "parse"] }
 unicode-linebreak = "0.1.5"
-unicode-width = "0.2.2"
+unicode-width = "0.2.3"
