@@ -20,6 +20,7 @@ import {
   assignStrictSvg,
   closeCaptureObservation,
   observeCaptureSnapshot,
+  prepareStrictSvgCapture,
   resizeSvgCapture,
 } from "./raster-capture-observation";
 import { RasterProductionSession } from "./raster-production-session";
@@ -319,6 +320,10 @@ export class SvgBrowserRasterizer {
     svg: string,
     fixture: Fixture | undefined,
   ) {
+    const preparedViewport =
+      this.options.referenceMode === "strictVendorOriginal"
+        ? await prepareStrictSvgCapture(page, svg)
+        : null;
     if (this.options.referenceMode !== "strictVendorOriginal") {
       await this.installSourceFonts(page, sourceSvg);
     }
@@ -363,7 +368,7 @@ export class SvgBrowserRasterizer {
         path: path.relative(process.cwd(), assetPath),
         sha256: fileSha256(assetPath),
       }));
-      const config = this.pairConfig(fixture, svg);
+      const config = this.pairConfig(fixture, svg, preparedViewport);
       const provenanceDocument = { config, runtimeAssets };
       const serializedProvenance = Buffer.from(JSON.stringify(provenanceDocument));
       const manifest = publishMermaidPair({
@@ -453,7 +458,11 @@ export class SvgBrowserRasterizer {
     };
   }
 
-  private pairConfig(fixture: Fixture | undefined, svg: string) {
+  private pairConfig(
+    fixture: Fixture | undefined,
+    svg: string,
+    preparedViewport: { width: number; height: number } | null,
+  ) {
     const playwrightPackage = parseJsonValue(
       fs.readFileSync(path.resolve("node_modules/playwright/package.json"), "utf8"),
       "Playwright package metadata",
@@ -473,9 +482,10 @@ export class SvgBrowserRasterizer {
     const nativeBindingConfig = strict ? this.nativeBindingConfig(fixture) : {};
     return {
       theme: this.theme.name,
-      viewport: { width: 1520, height: 845, deviceScaleFactor: 1 },
+      viewport: { ...(preparedViewport ?? { width: 1520, height: 845 }), deviceScaleFactor: 1 },
+      initialViewport: { width: 1520, height: 845, deviceScaleFactor: 1 },
       captureResize: strict
-        ? "capture-box-only-raw-svg-v1"
+        ? "raw-svg-viewbox-viewport-before-assignment-v1"
         : "svg-viewbox-or-dimensions-ceil-plus-24px-padding-v1",
       sourceFontUrls: strict ? [] : SvgSourceFonts.urls(svg),
       externalImageWaitPolicy: strict

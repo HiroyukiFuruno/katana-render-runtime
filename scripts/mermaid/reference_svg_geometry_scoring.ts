@@ -62,6 +62,8 @@ interface ScoredPaintProjectedPair {
     pngSha256: string;
     width: number;
     height: number;
+    candidateCaptureViewport: PaintProjectedReferenceRecord["candidateCaptureViewport"];
+    officialCaptureViewport: PaintProjectedReferenceRecord["officialCaptureViewport"];
     graphicsElementCount: number;
     paintVisibilitySha256: string;
   };
@@ -222,6 +224,8 @@ function pairEvidence(
       pngSha256: rendered.projectedReferencePngSha256,
       width: rendered.width,
       height: rendered.height,
+      candidateCaptureViewport: rendered.candidateCaptureViewport,
+      officialCaptureViewport: rendered.officialCaptureViewport,
       graphicsElementCount: rendered.graphicsElementCount,
       paintVisibilitySha256: rendered.paintVisibilitySha256,
     },
@@ -254,7 +258,8 @@ function buildEvidence(
       version: rendered.browserVersion,
       executablePath: rendered.browserExecutablePath,
       executableSha256: rendered.browserExecutableSha256,
-      viewport: rendered.viewport,
+      captureViewportPolicy: rendered.policy,
+      initialViewport: rendered.initialViewport,
     },
     pairs,
   };

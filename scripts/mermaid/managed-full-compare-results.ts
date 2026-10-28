@@ -15,6 +15,50 @@ const projectedRasterBoundsFields = {
   height: z.number().int().positive(),
 };
 
+const fixedInitialViewportSchema = z
+  .object({
+    width: z.literal(1520),
+    height: z.literal(845),
+    deviceScaleFactor: z.literal(1),
+  })
+  .strict();
+
+const actualCaptureViewportSchema = z
+  .object({
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    deviceScaleFactor: z.literal(1),
+  })
+  .strict();
+
+const projectedBrowserSchema = z
+  .object({
+    version: z.string().min(1),
+    executablePath: z.string().min(1),
+    executableSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    viewport: fixedInitialViewportSchema.optional(),
+    captureViewportPolicy: z
+      .literal("browser-candidate-paint-projected-onto-official-geometry-raw-viewport-v2")
+      .optional(),
+    initialViewport: fixedInitialViewportSchema.optional(),
+  })
+  .strict()
+  .superRefine((browser, context) => {
+    const isCurrent = browser.captureViewportPolicy !== undefined;
+    if (isCurrent && (browser.initialViewport === undefined || browser.viewport !== undefined)) {
+      context.addIssue({
+        code: "custom",
+        message: "Current projected raster must bind its initial viewport",
+      });
+    }
+    if (!isCurrent && (browser.viewport === undefined || browser.initialViewport !== undefined)) {
+      context.addIssue({
+        code: "custom",
+        message: "Legacy projected raster must retain its fixed viewport",
+      });
+    }
+  });
+
 const scoreRowSchema = z
   .object({
     slug: z.string().min(1),
@@ -82,6 +126,8 @@ const projectedReferenceSchema = z
     pngSha256: z.string().regex(/^[a-f0-9]{64}$/),
     width: z.number().int().positive(),
     height: z.number().int().positive(),
+    candidateCaptureViewport: actualCaptureViewportSchema.optional(),
+    officialCaptureViewport: actualCaptureViewportSchema.optional(),
     graphicsElementCount: z.number().int().positive(),
     paintVisibilitySha256: z.string().regex(/^[a-f0-9]{64}$/),
   })
@@ -94,20 +140,7 @@ export const paintProjectedReferenceEvidenceSchema = z
     structuralPolicy: z.literal("ordered-svg-tree-and-nonpaint-plus-computed-paint-visibility-v2"),
     renderer: z.literal("pinned-playwright-chromium-svg-capture-v1"),
     host: z.object({ platform: z.string().min(1), arch: z.string().min(1) }).strict(),
-    browser: z
-      .object({
-        version: z.string().min(1),
-        executablePath: z.string().min(1),
-        executableSha256: z.string().regex(/^[a-f0-9]{64}$/),
-        viewport: z
-          .object({
-            width: z.literal(1520),
-            height: z.literal(845),
-            deviceScaleFactor: z.literal(1),
-          })
-          .strict(),
-      })
-      .strict(),
+    browser: projectedBrowserSchema,
     pairs: z
       .array(
         z
@@ -139,7 +172,46 @@ export const paintProjectedReferenceEvidenceSchema = z
       )
       .min(1),
   })
-  .strict();
+  .strict()
+  .superRefine((evidence, context) => {
+    if (evidence.browser.captureViewportPolicy === undefined) {
+      evidence.pairs.forEach((pair, index) => {
+        if (
+          pair.projectedReference.candidateCaptureViewport !== undefined ||
+          pair.projectedReference.officialCaptureViewport !== undefined
+        ) {
+          context.addIssue({
+            code: "custom",
+            path: ["pairs", index, "projectedReference"],
+            message: "Actual capture viewports require the current viewport policy",
+          });
+        }
+      });
+      return;
+    }
+    evidence.pairs.forEach((pair, index) => {
+      const candidate = pair.projectedReference.candidateCaptureViewport,
+        official = pair.projectedReference.officialCaptureViewport;
+      if (candidate === undefined || official === undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["pairs", index, "projectedReference"],
+          message: "Current projected raster requires actual candidate and official viewports",
+        });
+        return;
+      }
+      if (
+        official.width !== pair.projectedReference.width ||
+        official.height !== pair.projectedReference.height
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["pairs", index, "projectedReference", "officialCaptureViewport"],
+          message: "Official capture viewport differs from projected PNG dimensions",
+        });
+      }
+    });
+  });
 
 const inventorySchema = z
   .object({
@@ -286,7 +358,12 @@ export function validateLanguageScoreEvidence(
     geometrySlugs.length > 0
       ? parsePaintProjectedReferenceEvidence(paintProjectedReferenceEvidenceValue)
       : null;
-  if (projectedEvidence !== null) validateProjectedManifest(projectedEvidence, geometrySlugs);
+  if (projectedEvidence !== null) {
+    if (projectedEvidence.browser.captureViewportPolicy === undefined) {
+      throw new Error("Formal comparison requires current raw viewport projection evidence");
+    }
+    validateProjectedManifest(projectedEvidence, geometrySlugs);
+  }
   if (
     !isAcceptedScoreSet(
       scores,

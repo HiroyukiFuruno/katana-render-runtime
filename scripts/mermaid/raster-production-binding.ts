@@ -512,7 +512,9 @@ export function rasterCaptureContext(config: JsonValue, actual: RasterCaptureSta
   const expectedScale = number(viewport.deviceScaleFactor, Number.MIN_VALUE);
   if (
     config.referenceMode !== "strictVendorOriginal" ||
-    config.captureResize !== "capture-box-only-raw-svg-v1" ||
+    !["capture-box-only-raw-svg-v1", "raw-svg-viewbox-viewport-before-assignment-v1"].includes(
+      String(config.captureResize),
+    ) ||
     !isDeepStrictEqual(config.sourceFontUrls, []) ||
     config.externalImageWaitPolicy !== "svg-image-load-decode-positive-dimensions-and-frame-v2"
   ) {
@@ -523,6 +525,13 @@ export function rasterCaptureContext(config: JsonValue, actual: RasterCaptureSta
     [text(config.theme, "capture theme"), expectedViewport, expectedScale, false],
     "Actual raster capture context differs from manifest config",
   );
+  if (config.captureResize === "raw-svg-viewbox-viewport-before-assignment-v1") {
+    equal(
+      actual.viewport,
+      { width: actual.bounds.width, height: actual.bounds.height },
+      "Prepared viewport differs from raw SVG capture bounds",
+    );
+  }
   if (actual.fontsReady !== true || actual.imagesDecoded !== true) {
     throw new Error("Actual raster capture readiness differs from strict policy");
   }

@@ -10,7 +10,11 @@ import type {
   FontReadyDocument,
   PageHandle,
 } from "./official-renderer-types";
-import { assignStrictSvg, resizeSvgCapture } from "./raster-capture-observation";
+import {
+  assignStrictSvg,
+  prepareStrictSvgCapture,
+  resizeSvgCapture,
+} from "./raster-capture-observation";
 import { rasterCaptureHtml } from "./rasterize-svg-dir";
 import { waitForStrictSvgExternalImages } from "./strict-svg-external-images";
 
@@ -84,17 +88,19 @@ export interface PaintProjectedReferenceRecord {
   projectedReferencePngSha256: string;
   width: number;
   height: number;
+  candidateCaptureViewport: { width: number; height: number; deviceScaleFactor: 1 };
+  officialCaptureViewport: { width: number; height: number; deviceScaleFactor: 1 };
   graphicsElementCount: number;
   officialPaintVisibilitySha256: string;
   paintVisibilitySha256: string;
 }
 
 export interface PaintProjectedReferenceBatch {
-  policy: "browser-candidate-paint-projected-onto-official-geometry-v1";
+  policy: "browser-candidate-paint-projected-onto-official-geometry-raw-viewport-v2";
   browserVersion: string;
   browserExecutablePath: string;
   browserExecutableSha256: string;
-  viewport: { width: number; height: number; deviceScaleFactor: number };
+  initialViewport: { width: number; height: number; deviceScaleFactor: 1 };
   records: PaintProjectedReferenceRecord[];
 }
 
@@ -222,11 +228,11 @@ async function renderPaintProjectedBatch(
     records.push(await renderPaintProjectedOne(input, browser, themeName));
   }
   return {
-    policy: "browser-candidate-paint-projected-onto-official-geometry-v1",
+    policy: "browser-candidate-paint-projected-onto-official-geometry-raw-viewport-v2",
     browserVersion,
     browserExecutablePath,
     browserExecutableSha256: fileSha256(browserExecutablePath),
-    viewport: { width: 1520, height: 845, deviceScaleFactor: 1 },
+    initialViewport: { width: 1520, height: 845, deviceScaleFactor: 1 },
     records,
   };
 }
@@ -237,29 +243,72 @@ async function renderPaintProjectedOne(
   themeName: DiagramThemeName,
 ): Promise<PaintProjectedReferenceRecord> {
   assertPaintProjectedSourcePins(input);
+  const candidateCapture = await captureCandidatePaintOnPage(input, browser, themeName);
+  return await projectCandidatePaintOnOfficialPage(input, browser, themeName, candidateCapture);
+}
+
+interface CandidatePaintCapture {
+  paint: CandidatePaintSnapshot;
+  viewport: { width: number; height: number; deviceScaleFactor: 1 };
+}
+
+async function captureCandidatePaintOnPage(
+  input: PaintProjectedReferenceInput,
+  browser: BrowserHandle,
+  themeName: DiagramThemeName,
+): Promise<CandidatePaintCapture> {
   const page = await browser.newPage({
     viewport: { width: 1520, height: 845 },
     deviceScaleFactor: 1,
   });
   try {
     await page.setContent(rasterCaptureHtml(DiagramTheme.parse(themeName)), { waitUntil: "load" });
+    const viewport = await prepareStrictSvgCapture(page, input.candidateSvg);
     await assignStrictSvg(page, input.candidateSvg);
     await resizeSvgCapture(page, true, "strictViewBox");
     await waitForStrictSvgExternalImages(page);
     await page.evaluate(() => (document as FontReadyDocument).fonts.ready);
-    const candidatePaint = await captureComputedPaint(page);
+    return {
+      paint: await captureComputedPaint(page),
+      viewport: { ...viewport, deviceScaleFactor: 1 },
+    };
+  } finally {
+    await page.close();
+  }
+}
+
+async function projectCandidatePaintOnOfficialPage(
+  input: PaintProjectedReferenceInput,
+  browser: BrowserHandle,
+  themeName: DiagramThemeName,
+  candidateCapture: CandidatePaintCapture,
+): Promise<PaintProjectedReferenceRecord> {
+  const page = await browser.newPage({
+    viewport: { width: 1520, height: 845 },
+    deviceScaleFactor: 1,
+  });
+  try {
+    await page.setContent(rasterCaptureHtml(DiagramTheme.parse(themeName)), { waitUntil: "load" });
+    const viewport = await prepareStrictSvgCapture(page, input.officialSvg);
     await assignStrictSvg(page, input.officialSvg);
     await resizeSvgCapture(page, true, "strictViewBox");
     await waitForStrictSvgExternalImages(page);
     await page.evaluate(() => (document as FontReadyDocument).fonts.ready);
-    const officialPaintVisibility = (await captureComputedPaint(page)).visibility;
-    const projection = await applyComputedPaint(page, candidatePaint);
+    const officialPaintVisibility = (await captureComputedPaint(page)).visibility,
+      projection = await applyComputedPaint(page, candidateCapture.paint);
     writeNewFile(input.outputSvgPath, projection.svg);
     const png = await page.locator("#capture").screenshot({
       path: input.outputPngPath,
       omitBackground: false,
     });
-    return makePaintProjectedRecord(input, projection, officialPaintVisibility, png);
+    return makePaintProjectedRecord(
+      input,
+      projection,
+      officialPaintVisibility,
+      png,
+      candidateCapture.viewport,
+      { ...viewport, deviceScaleFactor: 1 },
+    );
   } finally {
     await page.close();
   }
@@ -520,10 +569,18 @@ function makePaintProjectedRecord(
   projection: { svg: string; graphicsElementCount: number; paintVisibility: string },
   officialPaintVisibility: string,
   png: Buffer,
+  candidateCaptureViewport: CandidatePaintCapture["viewport"],
+  officialCaptureViewport: CandidatePaintCapture["viewport"],
 ): PaintProjectedReferenceRecord {
   assertPaintProjectedSourcePins(input);
   assertDerivedPins(input, projection.svg, png);
   const size = pngDimensions(png);
+  if (
+    size.width !== officialCaptureViewport.width ||
+    size.height !== officialCaptureViewport.height
+  ) {
+    throw new Error(`Paint projected screenshot differs from official viewport: ${input.slug}`);
+  }
   return {
     slug: input.slug,
     officialSvgPath: path.resolve(input.officialSvgPath),
@@ -540,6 +597,8 @@ function makePaintProjectedRecord(
     projectedReferencePngSha256: digest(png),
     width: size.width,
     height: size.height,
+    candidateCaptureViewport,
+    officialCaptureViewport,
     graphicsElementCount: projection.graphicsElementCount,
     officialPaintVisibilitySha256: digest(Buffer.from(officialPaintVisibility)),
     paintVisibilitySha256: digest(Buffer.from(projection.paintVisibility)),

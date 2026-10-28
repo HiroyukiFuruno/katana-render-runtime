@@ -69,6 +69,9 @@ export const nativeFrameEvidenceSchema = z
   .strict();
 
 export type NativeFrameEvidence = z.infer<typeof nativeFrameEvidenceSchema>;
+export type NativeFrameScoreInput = Pick<NativeFrameEvidence, "language"> & {
+  rows: Array<Pick<NativeFrameEvidence["rows"][number], "slug" | "inputSvg" | "sourcePng" | "png">>;
+};
 
 export interface NativeFrameCaptureOptions {
   language: "en" | "ja";
@@ -273,7 +276,7 @@ function pin(filePath: string): { path: string; sha256: string } {
 
 export async function scoreNativeFramePaintProjection(
   pairs: readonly ReferencePair[],
-  evidence: NativeFrameEvidence,
+  evidence: NativeFrameScoreInput,
   comparisonDirectory: string,
   theme: "dark" | "light",
   magick: MagickOps,

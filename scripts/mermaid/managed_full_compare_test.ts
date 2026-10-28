@@ -23,6 +23,7 @@ import {
 } from "./managed-full-compare-process";
 import {
   type FullScoreAcceptance,
+  parsePaintProjectedReferenceEvidence,
   requireFullScoreAcceptance,
   validateLanguageScoreEvidence,
 } from "./managed-full-compare-results";
@@ -536,6 +537,71 @@ test("managed native semantics bind actual PNG edge support and projected metric
   expect(rejected.minimumScore).toBe(98.5);
 });
 
+test("projected raster evidence preserves fixed-viewport history and requires current raw viewport pins", () => {
+  const expected = slugs(59);
+  expected[0] = "08-04-c4-component";
+  const evidence = validGeometryEvidence(expected);
+  const legacy = {
+    ...evidence.geometry,
+    browser: {
+      version: "Chromium 156",
+      executablePath: "/repo/chromium",
+      executableSha256: "a".repeat(64),
+      viewport: { width: 1520, height: 845, deviceScaleFactor: 1 },
+    },
+    pairs: evidence.geometry.pairs.map((pair) => ({
+      ...pair,
+      projectedReference: {
+        svgPath: pair.projectedReference.svgPath,
+        svgSha256: pair.projectedReference.svgSha256,
+        pngPath: pair.projectedReference.pngPath,
+        pngSha256: pair.projectedReference.pngSha256,
+        width: pair.projectedReference.width,
+        height: pair.projectedReference.height,
+        graphicsElementCount: pair.projectedReference.graphicsElementCount,
+        paintVisibilitySha256: pair.projectedReference.paintVisibilitySha256,
+      },
+    })),
+  };
+  expect(() => parsePaintProjectedReferenceEvidence(legacy)).not.toThrow();
+  expect(() => validateNativeGeometryEvidence(expected, evidence, { geometry: legacy })).toThrow(
+    "Formal comparison requires current raw viewport projection evidence",
+  );
+  const current = {
+    ...legacy,
+    browser: {
+      version: "Chromium 156",
+      executablePath: "/repo/chromium",
+      executableSha256: "a".repeat(64),
+      captureViewportPolicy:
+        "browser-candidate-paint-projected-onto-official-geometry-raw-viewport-v2" as const,
+      initialViewport: { width: 1520, height: 845, deviceScaleFactor: 1 },
+    },
+    pairs: legacy.pairs.map((pair) => ({
+      ...pair,
+      projectedReference: {
+        ...pair.projectedReference,
+        candidateCaptureViewport: { width: 320, height: 220, deviceScaleFactor: 1 as const },
+        officialCaptureViewport: { width: 320, height: 220, deviceScaleFactor: 1 as const },
+      },
+    })),
+  };
+  expect(() => parsePaintProjectedReferenceEvidence(current)).not.toThrow();
+  const mismatchedOfficial = {
+    ...current,
+    pairs: current.pairs.map((pair) => ({
+      ...pair,
+      projectedReference: {
+        ...pair.projectedReference,
+        officialCaptureViewport: { width: 319, height: 220, deviceScaleFactor: 1 as const },
+      },
+    })),
+  };
+  expect(() => parsePaintProjectedReferenceEvidence(mismatchedOfficial)).toThrow(
+    "Official capture viewport differs from projected PNG dimensions",
+  );
+});
+
 test("managed geometry evidence keeps structural mismatches as failed scores", () => {
   const expected = slugs(59);
   expected[0] = "08-04-c4-component";
@@ -851,6 +917,8 @@ function validGeometryEvidence(expected: string[], accepted = true) {
     pngSha256: "c".repeat(64),
     width: 320,
     height: 220,
+    candidateCaptureViewport: { width: 320, height: 220, deviceScaleFactor: 1 as const },
+    officialCaptureViewport: { width: 320, height: 220, deviceScaleFactor: 1 as const },
     graphicsElementCount: 8,
     paintVisibilitySha256: "d".repeat(64),
   };
@@ -887,7 +955,9 @@ function validGeometryEvidence(expected: string[], accepted = true) {
         version: "Chromium 156",
         executablePath: "/repo/chromium",
         executableSha256: "a".repeat(64),
-        viewport: { width: 1520, height: 845, deviceScaleFactor: 1 },
+        captureViewportPolicy:
+          "browser-candidate-paint-projected-onto-official-geometry-raw-viewport-v2" as const,
+        initialViewport: { width: 1520, height: 845, deviceScaleFactor: 1 },
       },
       pairs: [
         {

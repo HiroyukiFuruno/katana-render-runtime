@@ -21,77 +21,124 @@ export interface LoadedSvgObservation {
 
 export type SvgCaptureSizingMode = "officialFallback" | "strictViewBox";
 
-export function resizeSvgCapture(
+export async function resizeSvgCapture(
   page: Pick<PageHandle, "evaluate">,
   strict: boolean,
   mode: SvgCaptureSizingMode,
 ): Promise<void> {
-  return page.evaluate(
-    ({ strict, mode }) => {
-      const svgElement = document.querySelector("#diagram svg") as SVGSVGElement;
-      const rawViewBox = svgElement.getAttribute("viewBox"),
-        viewBox = (
-          mode === "strictViewBox"
-            ? String(rawViewBox)
-                .trim()
-                .split(/[\s,]+/)
-            : String(rawViewBox ?? "").split(/\s+/)
-        ).map(Number),
-        strictViewBoxIsValid = () => {
-          if (rawViewBox === null || viewBox.length !== 4) return false;
-          const width = viewBox.at(2),
-            height = viewBox.at(3);
-          return (
-            viewBox.every(Number.isFinite) &&
-            width !== undefined &&
-            height !== undefined &&
-            width > 0 &&
-            height > 0
-          );
-        };
-      if (mode === "strictViewBox" && !strictViewBoxIsValid()) {
-        throw new Error("SVG viewBox is invalid");
-      }
-      const dimensionAt = (values: number[], index: number): number => {
-        const value = values.at(index);
-        return value === undefined || !Number.isFinite(value) ? 0 : value;
-      };
-      const attributeDimension = (name: string): number => {
-        const value = String(svgElement.getAttribute(name) ?? "").replace(/px$/, "");
-        const parsed = Number(value);
-        return Number.isFinite(parsed) ? parsed : 0;
-      };
-      const box = mode === "officialFallback" ? svgElement.getBoundingClientRect() : null;
-      const positiveDimension = (values: number[]): number =>
-        values.find((value) => value > 0) ?? 1;
-      const captureDimension = (index: number, name: string, fallback: number): number =>
-        Math.ceil(
-          mode === "strictViewBox"
-            ? dimensionAt(viewBox, index)
-            : positiveDimension([dimensionAt(viewBox, index), attributeDimension(name), fallback]),
-        );
-      const width = captureDimension(2, "width", box?.width ?? 0),
-        height = captureDimension(3, "height", box?.height ?? 0);
-      if (!strict) {
-        svgElement.setAttribute("width", String(width));
-        svgElement.setAttribute("height", String(height));
-        svgElement.style.maxWidth = `${width}px`;
-      }
-      const capture = document.getElementById("capture") as HTMLElement;
-      capture.style.width = `${width + 24}px`;
-      capture.style.height = `${height + 24}px`;
-      const naturalWidth = dimensionAt(viewBox, 2),
-        naturalHeight = dimensionAt(viewBox, 3);
-      const naturalizeDiagram = (diagram: HTMLElement) => {
-        if (strict && naturalWidth > 0 && naturalHeight > 0) {
-          diagram.style.width = `${naturalWidth}px`;
-          diagram.style.height = `${naturalHeight}px`;
-        }
-      };
-      naturalizeDiagram(document.getElementById("diagram") as HTMLElement);
-    },
-    { strict, mode },
-  );
+  await page.evaluate(sizeSvgCapture, { strict, mode, rawSvg: null });
+}
+
+export async function prepareStrictSvgCapture(
+  page: Pick<PageHandle, "evaluate" | "setViewportSize">,
+  rawSvg: string,
+): Promise<{ width: number; height: number }> {
+  if (page.setViewportSize === undefined) {
+    throw new Error("Strict capture requires viewport resizing support");
+  }
+  const viewport = await page.evaluate(sizeSvgCapture, {
+    strict: true,
+    mode: "strictViewBox",
+    rawSvg,
+  });
+  await page.setViewportSize(viewport);
+  return viewport;
+}
+
+function sizeSvgCapture({
+  strict,
+  mode,
+  rawSvg,
+}: {
+  strict: boolean;
+  mode: SvgCaptureSizingMode;
+  rawSvg: string | null;
+}): { width: number; height: number } {
+  let svgElement: SVGSVGElement;
+  if (rawSvg === null) {
+    svgElement = document.querySelector("#diagram svg") as SVGSVGElement;
+  } else {
+    const parsed = new DOMParser().parseFromString(
+      `<div id="expected-diagram">${rawSvg}</div>`,
+      "text/html",
+    );
+    const root = parsed.getElementById("expected-diagram");
+    const svg = root?.firstElementChild;
+    if (
+      parsed.body.children.length !== 1 ||
+      root?.parentElement !== parsed.body ||
+      parsed.head.children.length !== 0 ||
+      root.children.length !== 1 ||
+      Array.from(root.childNodes).some(
+        (child) => child.nodeType === Node.TEXT_NODE && (child.textContent ?? "").trim() !== "",
+      ) ||
+      svg?.namespaceURI !== "http://www.w3.org/2000/svg" ||
+      svg.localName !== "svg"
+    ) {
+      throw new Error("Strict SVG input must parse to exactly one SVG root");
+    }
+    svgElement = svg as SVGSVGElement;
+  }
+  const rawViewBox = svgElement.getAttribute("viewBox"),
+    viewBox = (
+      mode === "strictViewBox"
+        ? String(rawViewBox)
+            .trim()
+            .split(/[\s,]+/)
+        : String(rawViewBox ?? "").split(/\s+/)
+    ).map(Number),
+    strictViewBoxIsValid = () => {
+      if (rawViewBox === null || viewBox.length !== 4) return false;
+      const width = viewBox.at(2),
+        height = viewBox.at(3);
+      return (
+        viewBox.every(Number.isFinite) &&
+        width !== undefined &&
+        height !== undefined &&
+        width > 0 &&
+        height > 0
+      );
+    };
+  if (mode === "strictViewBox" && !strictViewBoxIsValid()) {
+    throw new Error("SVG viewBox is invalid");
+  }
+  const dimensionAt = (values: number[], index: number): number => {
+    const value = values.at(index);
+    return value === undefined || !Number.isFinite(value) ? 0 : value;
+  };
+  const attributeDimension = (name: string): number => {
+    const value = String(svgElement.getAttribute(name) ?? "").replace(/px$/, "");
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const box = mode === "officialFallback" ? svgElement.getBoundingClientRect() : null;
+  const positiveDimension = (values: number[]): number => values.find((value) => value > 0) ?? 1;
+  const captureDimension = (index: number, name: string, fallback: number): number =>
+    Math.ceil(
+      mode === "strictViewBox"
+        ? dimensionAt(viewBox, index)
+        : positiveDimension([dimensionAt(viewBox, index), attributeDimension(name), fallback]),
+    );
+  const width = captureDimension(2, "width", box?.width ?? 0),
+    height = captureDimension(3, "height", box?.height ?? 0);
+  if (!strict) {
+    svgElement.setAttribute("width", String(width));
+    svgElement.setAttribute("height", String(height));
+    svgElement.style.maxWidth = `${width}px`;
+  }
+  const capture = document.getElementById("capture") as HTMLElement;
+  capture.style.width = `${width + 24}px`;
+  capture.style.height = `${height + 24}px`;
+  const naturalWidth = dimensionAt(viewBox, 2),
+    naturalHeight = dimensionAt(viewBox, 3);
+  const naturalizeDiagram = (diagram: HTMLElement) => {
+    if (strict && naturalWidth > 0 && naturalHeight > 0) {
+      diagram.style.width = `${naturalWidth}px`;
+      diagram.style.height = `${naturalHeight}px`;
+    }
+  };
+  naturalizeDiagram(document.getElementById("diagram") as HTMLElement);
+  return { width: width + 24, height: height + 24 };
 }
 
 // 同じbrowser realmで期待rawを別documentへparseし、実代入DOMから独立した期待値を得る。

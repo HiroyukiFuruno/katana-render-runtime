@@ -220,6 +220,9 @@ describe("native frame evidence", () => {
         rows: [{ ...row, frame: { ...row.frame, scale: 2 } }, ...data.value.rows.slice(1)],
       };
       expect(() => verifyNativeFrameEvidence(changedRows, "en")).toThrow("pinned capture config");
+      fs.writeFileSync(data.value.config.path, "config");
+      data.value.config.sha256 = fileSha256(data.value.config.path);
+      expect(() => verifyNativeFrameEvidence(data.value, "en")).toThrow();
       rewritePin(data.value.config, { ...nativeFrameConfigDefaults(), theme: "light" });
       expect(() => verifyNativeFrameEvidence(data.value, "en")).toThrow();
       rewritePin(data.value.config, nativeFrameConfigDefaults());

@@ -28,6 +28,7 @@ export interface BrowserHandle {
 
 export interface PageHandle {
   setContent(html: string, options: { waitUntil: "load" }): Promise<void>;
+  setViewportSize?(viewport: { width: number; height: number }): Promise<void>;
   addScriptTag(options: { path: string }): Promise<undefined | object>;
   evaluate<Result>(callback: () => Result | Promise<Result>): Promise<Result>;
   evaluate<Result, Argument>(

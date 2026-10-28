@@ -9,10 +9,8 @@ import { parsePaintProjectedReferenceEvidence } from "./managed-full-compare-res
 import { fileSha256 } from "./mermaid-pair-manifest";
 import {
   NATIVE_FRAME_TARGETS,
-  type NativeFrameEvidence,
-  nativeFrameCaptureWrapper,
+  type NativeFrameScoreInput,
   scoreNativeFramePaintProjection,
-  verifyNativeFrameEvidence,
 } from "./native-frame-evidence";
 import { scoreNativeProductRows } from "./native-product-score";
 import {
@@ -23,7 +21,11 @@ import {
 } from "./neutral-svg-browser-rasterizer";
 import { PlaywrightLoader } from "./official-renderer";
 import type { FontReadyDocument, PageHandle } from "./official-renderer-types";
-import { assignStrictSvg, resizeSvgCapture } from "./raster-capture-observation";
+import {
+  assignStrictSvg,
+  prepareStrictSvgCapture,
+  resizeSvgCapture,
+} from "./raster-capture-observation";
 import { rasterCaptureHtml } from "./rasterize-svg-dir";
 import { MagickOps } from "./reference_image_ops";
 import type { ReferencePair } from "./reference_pair_repository";
@@ -41,21 +43,56 @@ const naturalViewBoxSizingCases = [
   },
 ] as const;
 
-test("low-contrast C4 color changes pass the paint-aligned actual PNG gate", async ({
-  browser,
-}) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "krr-c4-low-contrast-control-"));
-  const page = await browser.newPage({
-    viewport: { width: 1520, height: 845 },
-    deviceScaleFactor: 1,
+test.describe("low-contrast C4 color changes pass the paint-aligned actual PNG gate", () => {
+  let root: string | undefined;
+  let pair: ReferencePair | undefined;
+  let projected: Awaited<ReturnType<typeof scorePaintProjectedReferenceTargets>> | undefined;
+
+  test.beforeAll(async ({ browser }) => {
+    const fixtureRoot = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "krr-c4-low-contrast-control-")),
+    );
+    root = fixtureRoot;
+    const page = await browser.newPage({
+      viewport: { width: 1520, height: 845 },
+      deviceScaleFactor: 1,
+    });
+    let fixturePair: ReferencePair;
+    try {
+      fixturePair = await captureLowContrastC4Control(fixtureRoot, page);
+      pair = fixturePair;
+    } finally {
+      await page.close();
+    }
+    const projectionDirectory = path.join(fixtureRoot, "projection");
+    fs.mkdirSync(projectionDirectory);
+    const projectionMagick = new MagickOps(
+      path.join(fixtureRoot, "projection-metrics"),
+      null,
+      "dark",
+    );
+    projectionMagick.prepare();
+    projected = await scorePaintProjectedReferenceTargets(
+      [fixturePair],
+      projectionDirectory,
+      "dark",
+      projectionMagick,
+    );
   });
-  try {
-    const pair = await captureLowContrastC4Control(root, page);
-    await expectLowContrastC4ProductScore(root, pair);
-  } finally {
-    await page.close();
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+
+  test.afterAll(() => {
+    if (root !== undefined) fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  test("keeps RGB below 99 while actual PNG shape passes", () => {
+    const fixtureRoot = root,
+      fixturePair = pair,
+      projection = projected;
+    if (fixtureRoot === undefined || fixturePair === undefined || projection === undefined) {
+      throw new Error("Low-contrast C4 fixture was not initialized");
+    }
+    expectLowContrastC4ProductScore(fixtureRoot, fixturePair, projection);
+  });
 });
 
 async function captureLowContrastC4Control(root: string, page: PageHandle): Promise<ReferencePair> {
@@ -99,17 +136,11 @@ function readColorControlGeometry(page: PageHandle) {
   );
 }
 
-async function expectLowContrastC4ProductScore(root: string, pair: ReferencePair) {
-  const projectionDirectory = path.join(root, "projection");
-  fs.mkdirSync(projectionDirectory);
-  const projectionMagick = new MagickOps(path.join(root, "projection-metrics"), null, "dark");
-  projectionMagick.prepare();
-  const projected = await scorePaintProjectedReferenceTargets(
-    [pair],
-    projectionDirectory,
-    "dark",
-    projectionMagick,
-  );
+function expectLowContrastC4ProductScore(
+  root: string,
+  pair: ReferencePair,
+  projected: Awaited<ReturnType<typeof scorePaintProjectedReferenceTargets>>,
+) {
   const evidence = parsePaintProjectedReferenceEvidence(
     JSON.parse(fs.readFileSync(projected.evidencePath, "utf8")),
   );
@@ -164,6 +195,88 @@ test("strict raster sizing preserves SVG markup and resolves percentage width fr
   } finally {
     await page.close();
     await browser.close();
+  }
+});
+
+test("strict capture prepares raw dimensions before layout across initial viewports", async ({
+  browser,
+}) => {
+  const svg = fs.readFileSync(
+    "tests/fixtures/mermaid/en/official-dark/08-02-c4-context-full.svg",
+    "utf8",
+  );
+  const results = [];
+  for (const viewport of [
+    { width: 600, height: 300 },
+    { width: 3200, height: 3200 },
+  ]) {
+    const page = await browser.newPage({ viewport, deviceScaleFactor: 1 });
+    try {
+      await page.setContent(rasterCaptureHtml(DiagramTheme.parse("dark")), { waitUntil: "load" });
+      const preparedViewport = await prepareStrictSvgCapture(page, svg);
+      expect(preparedViewport).toEqual({ width: 1724, height: 1863 });
+      expect(page.viewportSize()).toEqual(preparedViewport);
+      const initial = await page.evaluate(() => {
+        const capture = document.getElementById("capture") as HTMLElement;
+        const diagram = document.getElementById("diagram") as HTMLElement;
+        return [
+          capture.style.width,
+          capture.style.height,
+          diagram.style.width,
+          diagram.style.height,
+        ];
+      });
+      expect(initial).toEqual(["1724px", "1863px", "1700px", "1839px"]);
+      await assignStrictSvg(page, svg);
+      const initialText = await page.evaluate(async () => {
+        await document.fonts.ready;
+        const leaf = document.querySelector<SVGGraphicsElement>(
+          "#diagram svg .c4-name text tspan.text-inner-tspan",
+        );
+        if (leaf === null) throw new Error("C4 text leaf is missing");
+        leaf.getBBox();
+        return leaf.textContent?.trim() ?? "";
+      });
+      expect(initialText.length).toBeGreaterThan(0);
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send("DOM.enable");
+      await cdp.send("CSS.enable");
+      const domDocument = await cdp.send("DOM.getDocument");
+      const node = await cdp.send("DOM.querySelector", {
+        nodeId: domDocument.root.nodeId,
+        selector: "#diagram svg .c4-name text tspan.text-inner-tspan",
+      });
+      expect(node.nodeId).not.toBe(0);
+      const first = await cdp.send("CSS.getPlatformFontsForNode", { nodeId: node.nodeId });
+      await resizeSvgCapture(page, true, "strictViewBox");
+      await page.evaluate(() => document.fonts.ready);
+      const final = await cdp.send("CSS.getPlatformFontsForNode", { nodeId: node.nodeId });
+      expect(final.fonts).toEqual(first.fonts);
+      expect(final.fonts.length).toBeGreaterThan(0);
+      const png = await page.locator("#capture").screenshot();
+      results.push({ fonts: final.fonts, sha256: createHash("sha256").update(png).digest("hex") });
+      await cdp.detach();
+    } finally {
+      await page.close();
+    }
+  }
+  expect(results[0]).toEqual(results[1]);
+});
+
+test("strict capture rejects invalid viewBox before changing the capture", async ({ browser }) => {
+  const page = await browser.newPage({
+    viewport: { width: 600, height: 300 },
+    deviceScaleFactor: 1,
+  });
+  try {
+    await page.setContent(rasterCaptureHtml(DiagramTheme.parse("dark")), { waitUntil: "load" });
+    const before = await page.evaluate(() => document.body.innerHTML);
+    await expect(
+      prepareStrictSvgCapture(page, '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 0 5"/>'),
+    ).rejects.toThrow("SVG viewBox is invalid");
+    expect(await page.evaluate(() => document.body.innerHTML)).toBe(before);
+  } finally {
+    await page.close();
   }
 });
 
@@ -355,7 +468,9 @@ test.describe("paint projection evaluates actual candidate pixels", () => {
   let fixturePage: PageHandle | undefined;
 
   test.beforeAll(async ({ browser }) => {
-    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "krr-paint-projection-"));
+    const fixtureRoot = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "krr-paint-projection-")),
+    );
     root = fixtureRoot;
     fixturePage = await browser.newPage({
       viewport: { width: 1520, height: 845 },
@@ -488,18 +603,13 @@ test.describe("paint projection evaluates actual candidate pixels", () => {
       passes: false,
     },
   ] as const) {
-    test(`native row.png forwarding preserves paint shape controls: ${variant.label}`, async () => {
+    test(`component scorer forwards frame PNG and preserves paint shape controls: ${variant.label}`, async () => {
       const currentObservation = requirePaintProjectionObservation(observation);
       const fixtureRoot = path.dirname(currentObservation.projectedDirectory);
       const bridgeRoot = path.join(fixtureRoot, variant.label);
       fs.mkdirSync(bridgeRoot, { recursive: true, mode: 0o700 });
-      const bridge = await createNativeShapeBridgeFixture(
-        currentObservation.fixture,
-        variant.path(),
-        bridgeRoot,
-      );
+      const bridge = createNativeShapeBridgeFixture(currentObservation.fixture, variant.path());
       try {
-        verifyNativeFrameEvidence(bridge.evidence, "en");
         const result = await scoreNativeFramePaintProjection(
           bridge.pairs,
           bridge.evidence,
@@ -519,82 +629,21 @@ test.describe("paint projection evaluates actual candidate pixels", () => {
   }
 });
 
-async function createNativeShapeBridgeFixture(
+function createNativeShapeBridgeFixture(
   fixture: PaintProjectionFixture,
   variantPngPath: string,
-  root: string,
-): Promise<{ root: string; evidence: NativeFrameEvidence; pairs: ReferencePair[] }> {
+): { evidence: NativeFrameScoreInput; pairs: ReferencePair[] } {
   const svgPath = fixture.input.candidateSvgPath;
-  const svg = fs.readFileSync(svgPath, "utf8");
   const sourcePngPath = fixture.input.candidatePngPath;
-  const size = fixture.input.candidatePngPath;
-  const magick = new MagickOps(path.join(root, "bridge-size-magick"), null, "dark");
-  const frameSize = magick.imageSize(size);
-  const frame = { width: frameSize.width, height: frameSize.height, scale: 1, scrollY: 0 };
-  const pin = (name: string, content: string | Buffer) => {
-    const filePath = path.join(root, name);
-    fs.writeFileSync(filePath, content, { flag: "wx", mode: 0o600 });
-    return { path: filePath, sha256: fileSha256(filePath) };
-  };
-  // このピン群はrow.png転送だけを検査するcomponent fixtureであり、native capture receiptではない。
-  const probeBinary = pin("probe", "probe"),
-    runtime = pin("runtime", "runtime"),
-    sourceManifest = pin("source-manifest", "manifest"),
-    config = pin("config", "config"),
-    fontContext = pin("font-context", "font");
-  const rows = NATIVE_FRAME_TARGETS.map((slug) => {
-    const outputDirectory = path.join(root, slug, "frames");
-    fs.mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
-    const wrapper = nativeFrameCaptureWrapper(svg, frame),
-      wrapperHtml = pin(`${slug}-wrapper.html`, wrapper),
-      outputPng = path.join(outputDirectory, `${frame.width}x${frame.height}-scale-1-scroll-0.png`);
-    fs.copyFileSync(variantPngPath, outputPng);
-    const png = { path: outputPng, sha256: fileSha256(outputPng) },
-      stdout = pin(
-        `${slug}-stdout`,
-        `source_sha256=${wrapperHtml.sha256}\nwidth=${frame.width} height=${frame.height} scale=1 scroll_y=0\n`,
-      ),
-      stderr = pin(`${slug}-stderr`, ""),
-      exitEvidence = pin(`${slug}-exit.json`, '{"exitCode":0,"signal":null,"error":null}\n');
-    return {
-      slug,
-      inputSvg: { path: svgPath, sha256: fileSha256(svgPath) },
-      sourcePng: { path: sourcePngPath, sha256: fileSha256(sourcePngPath) },
-      wrapperHtml,
-      png,
-      stdout,
-      stderr,
-      exitEvidence,
-      outputDirectory,
-      frame,
-      argv: [
-        probeBinary.path,
-        "--input",
-        wrapperHtml.path,
-        "--output",
-        outputDirectory,
-        "--width",
-        String(frame.width),
-        "--height",
-        String(frame.height),
-        "--scale",
-        "1",
-        "--scroll-y",
-        "0",
-      ],
-      exitCode: 0 as const,
-    };
-  });
+  const rows = NATIVE_FRAME_TARGETS.map((slug) => ({
+    slug,
+    inputSvg: { path: svgPath, sha256: fileSha256(svgPath) },
+    sourcePng: { path: sourcePngPath, sha256: fileSha256(sourcePngPath) },
+    png: { path: variantPngPath, sha256: fileSha256(variantPngPath) },
+  }));
   return {
-    root,
     evidence: {
-      schema: "krr-mermaid-native-frame-evidence-v1",
       language: "en",
-      probeBinary,
-      runtime,
-      sourceManifest,
-      config,
-      fontContext,
       rows,
     },
     pairs: NATIVE_FRAME_TARGETS.map((slug) => ({
@@ -861,4 +910,108 @@ function neutralFixture(
 
 function hashText(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+test("paint projection isolates candidate font context from official rasterization", async ({
+  browser,
+}) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "krr-paint-font-isolation-")),
+    candidatePage = await browser.newPage({
+      viewport: { width: 1520, height: 845 },
+      deviceScaleFactor: 1,
+    });
+  try {
+    const input = await createFontIsolationInput(root, candidatePage, browser),
+      projected = await rasterizePaintProjectedReferenceBatch(
+        [input],
+        input.outputDirectory,
+        "dark",
+      ),
+      record = projected.records[0];
+    if (record === undefined) throw new Error("Font isolation raster was not produced");
+    const projectedSvg = fs.readFileSync(record.projectedReferenceSvgPath, "utf8");
+    expect(input.candidateSvg).toContain('font-family="Courier New, monospace"');
+    expect(projectedSvg).toContain('font-family="Arial, sans-serif"');
+    expect(projectedSvg).not.toContain("Courier New, monospace");
+    expect(record.officialCaptureViewport).toEqual({
+      width: record.width,
+      height: record.height,
+      deviceScaleFactor: 1,
+    });
+    expect(record.candidateCaptureViewport.deviceScaleFactor).toBe(1);
+    expect(record.officialPaintVisibilitySha256).toBe(record.paintVisibilitySha256);
+    expect(record.projectedReferencePngSha256).toBe(input.officialPngSha256);
+    expect(fs.readFileSync(record.projectedReferencePngPath)).toEqual(
+      fs.readFileSync(input.officialPngPath),
+    );
+  } finally {
+    await candidatePage.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+interface FontIsolationInput extends PaintProjectedReferenceInput {
+  outputDirectory: string;
+}
+
+async function createFontIsolationInput(
+  root: string,
+  candidatePage: PageHandle,
+  browser: import("playwright").Browser,
+): Promise<FontIsolationInput> {
+  const slug = "paint-font-isolation",
+    officialSvg = paintProjectionSvg("#444444", "#222222").replace(
+      "DELETE LABEL TEXT",
+      "OFFICIAL FONT TEXT",
+    ),
+    candidateSvg = paintProjectionSvg("#444444", "#222222")
+      .replace("Arial, sans-serif", "Courier New, monospace")
+      .replace("DELETE LABEL TEXT", "CANDIDATE FONT TEXT"),
+    officialSvgPath = path.join(root, "official.svg"),
+    candidateSvgPath = path.join(root, "candidate.svg"),
+    officialPngPath = path.join(root, "official.png"),
+    candidatePngPath = path.join(root, "candidate.png"),
+    outputDirectory = path.join(root, "projected");
+  fs.writeFileSync(officialSvgPath, officialSvg, { flag: "wx" });
+  fs.writeFileSync(candidateSvgPath, candidateSvg, { flag: "wx" });
+  await renderProjectionPng(candidatePage, candidateSvg, candidatePngPath, null);
+  await renderFreshOfficialPng(browser, officialSvg, officialPngPath);
+  return {
+    slug,
+    officialSvgPath,
+    officialSvg,
+    officialSvgSha256: fileSha256(officialSvgPath),
+    officialPngPath,
+    officialPngSha256: fileSha256(officialPngPath),
+    candidateSvgPath,
+    candidateSvg,
+    candidateSvgSha256: fileSha256(candidateSvgPath),
+    candidatePngPath,
+    candidatePngSha256: fileSha256(candidatePngPath),
+    outputSvgPath: path.join(outputDirectory, `${slug}-reference.svg`),
+    outputPngPath: path.join(outputDirectory, `${slug}-reference.png`),
+    outputDirectory,
+  };
+}
+
+async function renderFreshOfficialPng(
+  browser: import("playwright").Browser,
+  officialSvg: string,
+  outputPath: string,
+) {
+  const page = await browser.newPage({
+    viewport: { width: 1520, height: 845 },
+    deviceScaleFactor: 1,
+  });
+  try {
+    await page.setContent(rasterCaptureHtml(DiagramTheme.parse("dark")), { waitUntil: "load" });
+    await prepareStrictSvgCapture(page, officialSvg);
+    await assignStrictSvg(page, officialSvg);
+    await resizeSvgCapture(page, true, "strictViewBox");
+    await waitForStrictSvgExternalImages(page);
+    await page.evaluate(() => (document as FontReadyDocument).fonts.ready);
+    await page.locator("#capture").screenshot({ path: outputPath, omitBackground: false });
+  } finally {
+    await page.close();
+  }
 }

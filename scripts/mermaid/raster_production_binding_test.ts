@@ -8,6 +8,7 @@ import {
   type RasterPairObservation,
   type RasterProductionReceipt,
   type RasterRole,
+  rasterCaptureContext,
   rasterSha256,
   type TrustedRasterInput,
   verifyRasterProductionBinding,
@@ -23,6 +24,34 @@ const WHITE_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVQIHWP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC",
   "base64",
 );
+
+test("prepared viewport policy binds actual viewport to raw capture bounds", () => {
+  const capture = rasterCaptureFixture(SVG, "capture DOM");
+  capture.viewport = { width: 1724, height: 1863 };
+  capture.bounds = { x: 0, y: 0, width: 1724, height: 1863 };
+  const config = {
+    viewport: { width: 1724, height: 1863, deviceScaleFactor: 1 },
+    initialViewport: { width: 1520, height: 845, deviceScaleFactor: 1 },
+    theme: "dark",
+    referenceMode: "strictVendorOriginal",
+    captureResize: "raw-svg-viewbox-viewport-before-assignment-v1",
+    sourceFontUrls: [],
+    externalImageWaitPolicy: "svg-image-load-decode-positive-dimensions-and-frame-v2",
+  };
+  expect(rasterCaptureContext(config, capture).viewport).toEqual(capture.viewport);
+  expect(() =>
+    rasterCaptureContext(config, { ...capture, viewport: { width: 1520, height: 845 } }),
+  ).toThrow("Actual raster capture context differs");
+  expect(() =>
+    rasterCaptureContext(config, {
+      ...capture,
+      bounds: { ...capture.bounds, width: 1520 },
+    }),
+  ).toThrow("Prepared viewport differs");
+  expect(() => rasterCaptureContext({ ...config, captureResize: "unknown" }, capture)).toThrow(
+    "Unsupported strict raster capture policy",
+  );
+});
 
 function sample(role: RasterRole = "official") {
   const config = {
