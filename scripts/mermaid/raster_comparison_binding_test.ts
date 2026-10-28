@@ -679,6 +679,91 @@ function repinSyntheticCapture(
   };
 }
 
+function rawViewportPair(
+  f: ReturnType<typeof fixture>,
+  role: RasterRole,
+  rawSvg: string,
+  viewport: { width: number; height: number },
+) {
+  const source = Buffer.from(rawSvg);
+  const actual = rasterCaptureFixture(source, "raw viewport DOM");
+  actual.viewport = viewport;
+  actual.bounds = { x: 0, y: 0, ...viewport };
+  const declared = {
+    ...f.config,
+    captureResize: "raw-svg-viewbox-viewport-before-assignment-v1",
+    viewport: { ...viewport, deviceScaleFactor: 1 },
+  };
+  const pair = f.pair(role);
+  const roleConfig = f.trustedConfig.roles[role];
+  const receipt = JSON.parse(
+    fs.readFileSync(roleConfig.receiptPath, "utf8"),
+  ) as RasterProductionReceipt;
+  const row = receipt.rows[0];
+  if (row === undefined) throw new Error("Missing raw viewport test row");
+  const sourceHash = rasterSha256(source);
+  row.capture = actual;
+  row.configSha256 = hash(JSON.stringify(declared));
+  row.sourceSvgSha256 = sourceHash;
+  row.renderedSvgSha256 = sourceHash;
+  row.loadedSvgSha256 = sourceHash;
+  row.stageSvgSha256 = sourceHash;
+  const observed = roleConfig.observedCaptures[0];
+  if (observed === undefined) throw new Error("Missing raw viewport test observation");
+  observed.capture = actual;
+  observed.loadedSvgSha256 = sourceHash;
+  const bytes = createRasterProductionReceipt(receipt);
+  fs.writeFileSync(roleConfig.receiptPath, bytes);
+  roleConfig.receiptSha256 = rasterSha256(bytes);
+  return {
+    ...pair,
+    config: declared,
+    capture: actual,
+    sourceSvg: source,
+    renderedSvg: source,
+    loadedSvgSha256: sourceHash,
+    stageSvgSha256: sourceHash,
+    manifest: {
+      ...pair.manifest,
+      sourceSvgSha256: sourceHash,
+      renderedSvgSha256: sourceHash,
+      configSha256: row.configSha256,
+    },
+  };
+}
+
+test("new viewport policy binds each verified raw SVG while allowing role dimensions to differ", () => {
+  const f = fixture();
+  const official = rawViewportPair(
+    f,
+    "official",
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100.2 80"/>',
+    { width: 125, height: 104 },
+  );
+  const candidate = rawViewportPair(
+    f,
+    "candidate",
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 90"/>',
+    { width: 144, height: 114 },
+  );
+  const binding = RasterComparisonBinding.read(f.configPath, f.save(), ["unit"]);
+  expect(() => binding.verifyRole("official", [official])).not.toThrow();
+  expect(() => binding.verifyRole("candidate", [candidate])).not.toThrow();
+});
+
+for (const [rawSvg, error] of [
+  ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 80"/>', "Raw SVG viewport differs"],
+  ['<svg xmlns="http://www.w3.org/2000/svg"/>', "Raw SVG viewBox missing"],
+  ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 0 80"/>', "invalid SVG viewBox"],
+] as const) {
+  test(`new viewport policy rejects inconsistent or absent raw geometry: ${rawSvg}`, () => {
+    const f = fixture();
+    const pair = rawViewportPair(f, "official", rawSvg, { width: 125, height: 104 });
+    const binding = RasterComparisonBinding.read(f.configPath, f.save(), ["unit"]);
+    expect(() => binding.verifyRole("official", [pair])).toThrow(error);
+  });
+}
+
 const contextMutations: Array<{
   name: string;
   change: (actual: RasterCaptureState) => RasterCaptureState;

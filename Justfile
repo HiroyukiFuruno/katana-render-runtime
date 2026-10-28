@@ -10,6 +10,7 @@ FIXTURE_JOBS := env_var_or_default("FIXTURE_JOBS", JOBS)
 TEST_THREADS := env_var_or_default("TEST_THREADS", "2")
 TEST_THREAD_ARGS := if TEST_THREADS == "" { "" } else { " -- --test-threads=" + TEST_THREADS }
 NEXTEST_THREAD_ARGS := if TEST_THREADS == "" { "" } else { " --test-threads=" + TEST_THREADS }
+MACOS_BROWSER_CONTRACT_RUN := if os() == "macos" { "node node_modules/playwright/cli.js test --config scripts/html/playwright.macos.config.ts" } else { "true" }
 COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX := "(^|[/\\\\])scripts[/\\\\]html[/\\\\]performance-harness[/\\\\]src[/\\\\]([^/\\\\]+[/\\\\])*[^/\\\\]+(_tests|_test_support)\\.rs$"
 RUNTIME_UPDATE_LOG_DIR := env_var_or_default("RUNTIME_UPDATE_LOG_DIR", "tmp/runtime-update-logs")
 export RUSTFLAGS := env_var_or_default("RUSTFLAGS", "-D warnings")
@@ -325,6 +326,7 @@ runtime-asset-script-other-run:
     bun test --path-ignore-patterns 'tmp/**' ./scripts/mermaid/native_cli_managed_build_reader_test.ts
     KRR_CLASSIC_GENERATION_EVIDENCE_PATH={{quote(REPO_ROOT + "/tmp/quality/classic-generation-evidence/current.json")}} bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-unused-classic-capture_test.ts ./scripts/runtime-bundles/runtime-unused-classic-binding_test.ts ./scripts/runtime-bundles/runtime-classic-generation_test.ts ./scripts/runtime-bundles/runtime-unused-semantic-adapter_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/parser-body-onload-generation.test.ts
+    just macos-browser-contract-test
     just browser-contract-test
     bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-source-inventory_test.ts ./scripts/quality/owned-validation-contract_test.ts
 
@@ -375,6 +377,10 @@ runtime-unused-rust-classic-run:
 # WHY: ブラウザ起動の管理は既存fixtureへ任せ、テスト本体の5秒制限を維持する。
 browser-contract-test:
     node node_modules/playwright/cli.js test --config scripts/html/playwright.config.ts
+
+# macOSだけが提供するプロセス識別情報を、専用のブラウザー設定で観測する。
+macos-browser-contract-test:
+    {{MACOS_BROWSER_CONTRACT_RUN}}
 
 # Verify the finite MathJax Rust consumer route with the pinned syn AST parser.
 mathjax-consumer-facts root=REPO_ROOT:

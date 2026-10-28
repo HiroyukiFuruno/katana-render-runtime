@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import type { JsonValue } from "./mermaid-pair-manifest";
-import { validateStrictOfficialSourceProvenance } from "./reference_pair_repository";
+import {
+  validateStrictCaptureContext,
+  validateStrictOfficialSourceProvenance,
+} from "./reference_pair_repository";
 
 const source = "flowchart LR\nA --> B\n";
 const sourceHash = "a".repeat(64);
@@ -13,6 +16,47 @@ const expected = {
   sourceMarkdownSha256: "d".repeat(64),
   referenceScope: "formal" as const,
 };
+
+test("formal strict context requires raw viewport policy and permits per-role dimensions", () => {
+  const current = {
+    theme: "dark",
+    captureResize: "raw-svg-viewbox-viewport-before-assignment-v1",
+    sourceFontUrls: [],
+    externalImageWaitPolicy: "svg-image-load-decode-positive-dimensions-and-frame-v2",
+    viewport: { width: 320, height: 220, deviceScaleFactor: 1 },
+  };
+  const differentSize = {
+    ...current,
+    viewport: { width: 340, height: 240, deviceScaleFactor: 1 },
+  };
+  expect(() =>
+    validateStrictCaptureContext("unit", current, differentSize, "formal"),
+  ).not.toThrow();
+  const legacy = { ...current, captureResize: "capture-box-only-raw-svg-v1" };
+  expect(() => validateStrictCaptureContext("unit", legacy, legacy, "formal")).toThrow(
+    "requires raw viewport policy",
+  );
+  expect(() => validateStrictCaptureContext("unit", legacy, legacy, "diagnostic")).not.toThrow();
+  expect(() =>
+    validateStrictCaptureContext(
+      "unit",
+      legacy,
+      { ...legacy, viewport: differentSize.viewport },
+      "diagnostic",
+    ),
+  ).toThrow("viewport");
+  expect(() =>
+    validateStrictCaptureContext("unit", current, { ...current, viewport: null }, "formal"),
+  ).toThrow("capture viewport");
+  expect(() =>
+    validateStrictCaptureContext(
+      "unit",
+      current,
+      { ...current, viewport: { ...current.viewport, deviceScaleFactor: 2 } },
+      "formal",
+    ),
+  ).toThrow("deviceScaleFactor");
+});
 
 test("strict reader accepts raw stage bytes bound to source SVG and strict source context", () => {
   expect(() =>

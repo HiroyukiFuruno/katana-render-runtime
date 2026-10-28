@@ -681,6 +681,22 @@ function playwrightTestRunnerInputs(words: string[]): string[] | undefined {
   return playwrightTestRunnerFiles(words)?.map((file) => `!execute-local:${file}`);
 }
 
+function macosBrowserRecipeInput(justfile: string, body: string): string | undefined {
+  const declaration =
+    'MACOS_BROWSER_CONTRACT_RUN := if os() == "macos" { "node node_modules/playwright/cli.js test --config scripts/html/playwright.macos.config.ts" } else { "true" }';
+  const assignments = justfile
+    .split("\n")
+    .filter((line) => /^\s*(?:export\s+)?MACOS_BROWSER_CONTRACT_RUN\s*:?=/.test(line));
+  if (
+    assignments.length !== 1 ||
+    assignments[0] !== declaration ||
+    body.trim() !== "{{MACOS_BROWSER_CONTRACT_RUN}}"
+  ) {
+    return undefined;
+  }
+  return "scripts/html/playwright.macos.config.ts";
+}
+
 function justCommandChildCode(
   elements: unknown[],
   words: string[],
@@ -4691,7 +4707,8 @@ export function executionGraph(
   resolveCode?: ManagedCodeResolver,
   resolveExternalTool?: ExternalToolResolver,
 ): ExecutionGraph {
-  const recipes = justRecipes(read("Justfile") ?? "");
+  const justfile = read("Justfile") ?? "";
+  const recipes = justRecipes(justfile);
   const errors: string[] = [];
   const roots = recipeRoots(policy, read, recipes, errors);
   const unitExecutableBindings: Array<UnitExecutableBinding & { lane: "local" | "ci" }> = [];
@@ -4756,6 +4773,11 @@ export function executionGraph(
       }
       if (name === "biome" && biomeBootstrapDispatchVerified(recipes))
         ["rust-facts-host-prebuild", "biome-run"].forEach(walkRecipe);
+      if (name === "macos-browser-contract-test") {
+        const input = macosBrowserRecipeInput(justfile, body);
+        if (input === undefined) errors.push("unverified macOS browser conditional recipe");
+        else walkSource(`!execute:${input}`);
+      }
       if (
         name === "runtime-asset-script-test" &&
         body.trim() === "bun run moon exec krr:runtime-asset-script-test"

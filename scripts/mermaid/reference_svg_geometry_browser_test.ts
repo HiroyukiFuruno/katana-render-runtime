@@ -43,6 +43,83 @@ const naturalViewBoxSizingCases = [
   },
 ] as const;
 
+test("SVG tspan boundaries preserve within-span kerning with a bundled font", async ({
+  browser,
+}) => {
+  const fontFamily = "KrrBundledNotoKerningRegression";
+  const fontBytes = fs.readFileSync(
+    path.resolve("crates/katana-render-runtime/assets/fonts/NotoSans-Regular.ttf"),
+  );
+  const page = await browser.newPage({
+    viewport: { width: 600, height: 200 },
+    deviceScaleFactor: 1,
+  });
+  try {
+    await page.setContent(`<!doctype html>
+      <style>
+        @font-face {
+          font-family: "${fontFamily}";
+          src: url(data:font/ttf;base64,${fontBytes.toString("base64")}) format("truetype");
+        }
+        svg text { font-family: "${fontFamily}"; font-size: 48px; font-kerning: normal; }
+      </style>
+      <svg xmlns="http://www.w3.org/2000/svg" width="600" height="200">
+        <text id="full" y="55">AV</text>
+        <text id="split" y="105"><tspan id="split-left">A</tspan><tspan id="split-right">V</tspan></text>
+        <text id="single-a" y="155">A</text>
+        <text id="single-v" y="155">V</text>
+        <text id="preserved-full" y="55" xml:space="preserve"> AV </text>
+        <text id="preserved-split" y="105" xml:space="preserve"><tspan id="preserved-left" xml:space="preserve"> A</tspan><tspan id="preserved-right" xml:space="preserve">V </tspan></text>
+        <text id="preserved-a" y="155" xml:space="preserve"> A</text>
+        <text id="preserved-v" y="155" xml:space="preserve">V </text>
+      </svg>`);
+
+    const measurements = await page.evaluate(async (family) => {
+      const loadedFaces = await document.fonts.load(`48px "${family}"`, "AV");
+      await document.fonts.ready;
+      const measure = (id: string) => {
+        const element = document.getElementById(id);
+        if (!(element instanceof SVGTextContentElement)) {
+          throw new Error(`Missing SVG text measurement element: ${id}`);
+        }
+        return element.getComputedTextLength();
+      };
+      return {
+        fontLoaded: loadedFaces.some((face) => face.family === family && face.status === "loaded"),
+        full: measure("full"),
+        split: measure("split"),
+        splitLeft: measure("split-left"),
+        splitRight: measure("split-right"),
+        singleA: measure("single-a"),
+        singleV: measure("single-v"),
+        preservedFull: measure("preserved-full"),
+        preservedSplit: measure("preserved-split"),
+        preservedLeft: measure("preserved-left"),
+        preservedRight: measure("preserved-right"),
+        preservedA: measure("preserved-a"),
+        preservedV: measure("preserved-v"),
+      };
+    }, fontFamily);
+
+    expect(measurements.fontLoaded).toBe(true);
+    expect(measurements.split).toBeGreaterThan(measurements.full);
+    expect(measurements.full).toBeLessThan(measurements.singleA + measurements.singleV);
+    expect(
+      Math.abs(measurements.split - measurements.splitLeft - measurements.splitRight),
+    ).toBeLessThanOrEqual(0.02);
+    expect(
+      Math.abs(
+        measurements.preservedSplit - measurements.preservedLeft - measurements.preservedRight,
+      ),
+    ).toBeLessThanOrEqual(0.02);
+    expect(measurements.preservedLeft).toBeGreaterThan(measurements.singleA);
+    expect(measurements.preservedRight).toBeGreaterThan(measurements.singleV);
+    expect(measurements.preservedFull).toBeGreaterThan(measurements.full);
+  } finally {
+    await page.close();
+  }
+});
+
 test.describe("low-contrast C4 color changes pass the paint-aligned actual PNG gate", () => {
   let root: string | undefined;
   let pair: ReferencePair | undefined;

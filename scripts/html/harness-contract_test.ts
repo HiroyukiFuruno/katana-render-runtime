@@ -4799,6 +4799,63 @@ test("root Just recipe registers the exact Playwright runner inputs", () => {
   expect(snapshot.graph.errors).not.toContain("unresolved/external code: !unresolved-executable");
 });
 
+const macosBrowserDefinition =
+  'MACOS_BROWSER_CONTRACT_RUN := if os() == "macos" { "node node_modules/playwright/cli.js test --config scripts/html/playwright.macos.config.ts" } else { "true" }';
+
+function macosBrowserGraph(definition: string, body: string) {
+  const snapshot = fixture();
+  const justfile = `${definition}\ncheck:\n    python3 scripts/hooks/run_parallel_checks.py\ncheck-assets:\n    just macos-browser-contract-test\nmacos-browser-contract-test:\n    ${body}\n`;
+  const prior = snapshot.read;
+  const read = (name: string) => {
+    if (name === "Justfile") return justfile;
+    if (name === ".github/workflows/test.yml") return "run: just macos-browser-contract-test";
+    if (name === "scripts/html/playwright.macos.config.ts") return "export default {};";
+    return prior(name);
+  };
+  return executionGraph(snapshot.policy, read, {}, new Set());
+}
+
+test("macOS conditional browser recipe registers its actual config in both lanes", () => {
+  const graph = macosBrowserGraph(macosBrowserDefinition, "{{MACOS_BROWSER_CONTRACT_RUN}}");
+  expect(graph.local.has("scripts/html/playwright.macos.config.ts")).toBe(true);
+  expect(graph.ci.has("scripts/html/playwright.macos.config.ts")).toBe(true);
+  expect(graph.errors).not.toContain("unverified macOS browser conditional recipe");
+});
+
+test.each([
+  [
+    "platform guard",
+    macosBrowserDefinition.replace('== "macos"', '!= "macos"'),
+    "{{MACOS_BROWSER_CONTRACT_RUN}}",
+  ],
+  [
+    "runner command",
+    macosBrowserDefinition.replace("playwright/cli.js test", "playwright/cli.js install"),
+    "{{MACOS_BROWSER_CONTRACT_RUN}}",
+  ],
+  [
+    "config path",
+    macosBrowserDefinition.replace("playwright.macos.config.ts", "other.config.ts"),
+    "{{MACOS_BROWSER_CONTRACT_RUN}}",
+  ],
+  [
+    "else branch",
+    macosBrowserDefinition.replace('else { "true" }', 'else { "false" }'),
+    "{{MACOS_BROWSER_CONTRACT_RUN}}",
+  ],
+  [
+    "duplicate assignment",
+    `${macosBrowserDefinition}\n${macosBrowserDefinition}`,
+    "{{MACOS_BROWSER_CONTRACT_RUN}}",
+  ],
+  ["recipe command", macosBrowserDefinition, "{{MACOS_BROWSER_CONTRACT_RUN}} --grep anything"],
+] as const)("macOS conditional browser recipe rejects %s drift", (_label, definition, body) => {
+  const graph = macosBrowserGraph(definition, body);
+  expect(graph.local.has("scripts/html/playwright.macos.config.ts")).toBe(false);
+  expect(graph.ci.has("scripts/html/playwright.macos.config.ts")).toBe(false);
+  expect(graph.errors).toContain("unverified macOS browser conditional recipe");
+});
+
 function observedUnitTool(request: ExternalToolRequest): ExternalToolBinding {
   return {
     ...request,

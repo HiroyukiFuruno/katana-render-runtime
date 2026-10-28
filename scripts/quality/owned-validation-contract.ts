@@ -152,6 +152,8 @@ const PARSER_TEST_RECIPE_SHA256 =
   "0e955697c278ac8c2a56c8347cd05c1488cfd50ecfcc21c3177d208d5e8457ed";
 const HTML_FEATURE_CATALOG_TEST = "scripts/html/feature-catalog_test.ts";
 const PLAYWRIGHT_GEOMETRY_TEST = "scripts/mermaid/reference_svg_geometry_browser_test.ts";
+const PLAYWRIGHT_MACOS_PRODUCER_TEST =
+  "scripts/mermaid/official_raw_producer_macos_browser_test.ts";
 const PLAYWRIGHT_TESTS = [
   HTML_FEATURE_CATALOG_TEST,
   "scripts/html/chrome_badge_metrics_test.ts",
@@ -159,9 +161,43 @@ const PLAYWRIGHT_TESTS = [
   PLAYWRIGHT_GEOMETRY_TEST,
 ];
 const PLAYWRIGHT_CONFIG = "scripts/html/playwright.config.ts";
+const PLAYWRIGHT_CONFIG_HELPER = "scripts/html/playwright-config-base.ts";
+const PLAYWRIGHT_MACOS_CONFIG = "scripts/html/playwright.macos.config.ts";
 const PLAYWRIGHT_RECIPE = "browser-contract-test";
 const PLAYWRIGHT_COMMAND = `node node_modules/playwright/cli.js test --config ${PLAYWRIGHT_CONFIG}`;
+const PLAYWRIGHT_MACOS_RECIPE = "macos-browser-contract-test";
+const PLAYWRIGHT_MACOS_COMMAND = `node node_modules/playwright/cli.js test --config ${PLAYWRIGHT_MACOS_CONFIG}`;
+const PLAYWRIGHT_MACOS_RUN_DEFINITION = `MACOS_BROWSER_CONTRACT_RUN := if os() == "macos" { "${PLAYWRIGHT_MACOS_COMMAND}" } else { "true" }`;
+const PLAYWRIGHT_CONFIG_HELPER_SOURCE = `export const browserContractDefaults = {
+  timeout: 5000,
+  retries: 0,
+  workers: 1,
+  fullyParallel: false,
+  forbidOnly: true,
+  use: {
+    channel: "chrome",
+    headless: true,
+    viewport: { width: 1280, height: 900 },
+  },
+} as const;`;
+const PLAYWRIGHT_CONFIG_HELPER_AST = strictInputAst(
+  parseSync(PLAYWRIGHT_CONFIG_HELPER_SOURCE, { syntax: "typescript" }),
+);
+const PLAYWRIGHT_MACOS_CONFIG_SOURCE = `import { defineConfig } from "playwright/test";
+import { browserContractDefaults } from "./playwright-config-base";
+
+// WHY: macOSの実プロセス識別情報を観測するproducer用の設定。
+export default defineConfig({
+  testDir: "..",
+  testMatch: ["mermaid/official_raw_producer_macos_browser_test.ts"],
+  ...browserContractDefaults,
+  outputDir: "../../tmp/quality/macos-browser-contract/artifacts",
+});`;
+const PLAYWRIGHT_MACOS_CONFIG_AST = strictInputAst(
+  parseSync(PLAYWRIGHT_MACOS_CONFIG_SOURCE, { syntax: "typescript" }),
+);
 const PLAYWRIGHT_CONFIG_SOURCE = `import { defineConfig } from "playwright/test";
+import { browserContractDefaults } from "./playwright-config-base";
 // WHY: ブラウザ起動の管理は既存fixtureへ任せ、テスト本体の5秒制限を維持する。
 export default defineConfig({
   testDir: "..",
@@ -171,13 +207,8 @@ export default defineConfig({
     "html/reference-capture_browser_test.ts",
     "mermaid/reference_svg_geometry_browser_test.ts",
   ],
-  timeout: 5000,
-  retries: 0,
-  workers: 1,
-  fullyParallel: false,
-  forbidOnly: true,
+  ...browserContractDefaults,
   outputDir: "../../tmp/quality/browser-contract/artifacts",
-  use: { channel: "chrome", headless: true, viewport: { width: 1280, height: 900 } },
 });`;
 const PLAYWRIGHT_CONFIG_AST = strictInputAst(
   parseSync(PLAYWRIGHT_CONFIG_SOURCE, { syntax: "typescript" }),
@@ -2109,7 +2140,10 @@ function playwrightConfigVerified(context: ContractContext): boolean {
   try {
     return (
       strictInputAst(parseSync(context.read(PLAYWRIGHT_CONFIG), { syntax: "typescript" })) ===
-      PLAYWRIGHT_CONFIG_AST
+        PLAYWRIGHT_CONFIG_AST &&
+      strictInputAst(
+        parseSync(context.read(PLAYWRIGHT_CONFIG_HELPER), { syntax: "typescript" }),
+      ) === PLAYWRIGHT_CONFIG_HELPER_AST
     );
   } catch {
     return false;
@@ -2118,6 +2152,8 @@ function playwrightConfigVerified(context: ContractContext): boolean {
 function playwrightTestSourceVerified(name: string, source: string): boolean {
   if (!hasPlaywrightTests(source)) return false;
   if (name === PLAYWRIGHT_GEOMETRY_TEST && !playwrightGeometryCasesVerified(source)) return false;
+  if (name === PLAYWRIGHT_MACOS_PRODUCER_TEST && !playwrightMacosProducerTestVerified(source))
+    return false;
   const calls = browserAstNodes(parseSync(source, { syntax: "typescript", tsx: true }))
     .map(({ node }) => node)
     .filter((node) => node.type === "CallExpression");
@@ -2142,11 +2178,17 @@ function playwrightTestSourceVerified(name: string, source: string): boolean {
     })
   );
 }
+function playwrightMacosProducerTestVerified(source: string): boolean {
+  return executablePlaywrightTitles(parseSync(source, { syntax: "typescript", tsx: true })).has(
+    "official raw producer captures on a freshly prepared viewport",
+  );
+}
 function playwrightGeometryCasesVerified(source: string): boolean {
   const module = parseSync(source, { syntax: "typescript", tsx: true });
   const direct = executablePlaywrightTitles(module);
   return (
     [
+      "SVG tspan boundaries preserve within-span kerning with a bundled font",
       "strict raster sizing preserves SVG markup and resolves percentage width from the viewBox",
       "paint projection evaluates actual candidate pixels",
       "keeps the neutral geometry raster exact",
@@ -2249,7 +2291,7 @@ function loopUsesTestField(body: unknown, itemName: string, fieldName: string): 
 function playwrightInputsVerified(context: ContractContext): boolean {
   try {
     return (
-      [PLAYWRIGHT_CONFIG, ...PLAYWRIGHT_TESTS].every(
+      [PLAYWRIGHT_CONFIG, PLAYWRIGHT_CONFIG_HELPER, ...PLAYWRIGHT_TESTS].every(
         (name) =>
           context.visible.has(name) &&
           context.tracked.has(name) &&
@@ -2257,6 +2299,81 @@ function playwrightInputsVerified(context: ContractContext): boolean {
       ) &&
       playwrightConfigVerified(context) &&
       PLAYWRIGHT_TESTS.every((name) => playwrightTestSourceVerified(name, context.read(name)))
+    );
+  } catch {
+    return false;
+  }
+}
+function playwrightMacosInputsVerified(context: ContractContext): boolean {
+  try {
+    return (
+      [PLAYWRIGHT_MACOS_CONFIG, PLAYWRIGHT_CONFIG_HELPER, PLAYWRIGHT_MACOS_PRODUCER_TEST].every(
+        (name) =>
+          context.visible.has(name) &&
+          context.tracked.has(name) &&
+          fs.existsSync(safeFile(context.root, name)),
+      ) &&
+      strictInputAst(parseSync(context.read(PLAYWRIGHT_MACOS_CONFIG), { syntax: "typescript" })) ===
+        PLAYWRIGHT_MACOS_CONFIG_AST &&
+      strictInputAst(
+        parseSync(context.read(PLAYWRIGHT_CONFIG_HELPER), { syntax: "typescript" }),
+      ) === PLAYWRIGHT_CONFIG_HELPER_AST &&
+      playwrightTestSourceVerified(
+        PLAYWRIGHT_MACOS_PRODUCER_TEST,
+        context.read(PLAYWRIGHT_MACOS_PRODUCER_TEST),
+      )
+    );
+  } catch {
+    return false;
+  }
+}
+function playwrightMacosWorkflowRegistered(context: ContractContext): boolean {
+  try {
+    const workflow = context.read(".github/workflows/test-and-build.yml"),
+      step = [
+        "      - name: Run macOS official producer browser test",
+        "        if: matrix.platform == 'mac-arm64'",
+        `        run: just ${PLAYWRIGHT_MACOS_RECIPE}`,
+      ].join("\n");
+    const producerIndex = workflow.indexOf(step);
+    const staticCheckIndexes = [
+      "      - name: Check formatting",
+      "      - name: Run linter",
+      "      - name: Run AST linter",
+      "      - name: Check dependency boundary",
+    ].map((name) => workflow.indexOf(name));
+    return (
+      workflow.split(step).length === 2 &&
+      staticCheckIndexes.every((index) => index >= 0 && index < producerIndex) &&
+      workflow.includes("      - name: Install Bun\n        if: matrix.os != 'windows-latest'") &&
+      workflow.includes(
+        "      - name: Install JavaScript dependencies\n        if: matrix.os != 'windows-latest'",
+      ) &&
+      workflow.includes(
+        "      - name: Install just\n        uses: taiki-e/install-action@53aaa72a1fed2d5b9189d6d54c38e29bf9be2ab9 # just\n\n      - name: Install Chrome for the macOS official producer browser test",
+      ) &&
+      workflow.includes(
+        "      - name: Install Chrome for the macOS official producer browser test\n        if: matrix.platform == 'mac-arm64'\n        run: bunx playwright install chrome",
+      )
+    );
+  } catch {
+    return false;
+  }
+}
+function playwrightMacosRegistered(context: ContractContext, lane: Set<string>): boolean {
+  try {
+    const recipe = context.recipes.get(PLAYWRIGHT_MACOS_RECIPE)?.trim();
+    const runtimeCommands = unconditionalRecipeCommands(runtimeAssetRecipeBody(context));
+    const localRegistered =
+      lane === context.local &&
+      lane.has(RUNTIME_ASSET_OTHER_RECIPE) &&
+      runtimeCommands.filter((line) => line === `just ${PLAYWRIGHT_MACOS_RECIPE}`).length === 1;
+    const ciRegistered = lane === context.ci && playwrightMacosWorkflowRegistered(context);
+    return (
+      playwrightMacosInputsVerified(context) &&
+      context.read("Justfile").includes(PLAYWRIGHT_MACOS_RUN_DEFINITION) &&
+      recipe === "{{MACOS_BROWSER_CONTRACT_RUN}}" &&
+      (localRegistered || ciRegistered)
     );
   } catch {
     return false;
@@ -2277,13 +2394,27 @@ function playwrightRegistered(context: ContractContext, lane: Set<string>): bool
 }
 function playwrightIssues(context: ContractContext): void {
   if (
-    ![PLAYWRIGHT_CONFIG, ...PLAYWRIGHT_TESTS].some((name) => context.visible.has(name)) &&
+    ![PLAYWRIGHT_CONFIG, PLAYWRIGHT_CONFIG_HELPER, ...PLAYWRIGHT_TESTS].some((name) =>
+      context.visible.has(name),
+    ) &&
     !context.recipes.has(PLAYWRIGHT_RECIPE) &&
     !runtimeAssetRecipeBody(context).includes(`just ${PLAYWRIGHT_RECIPE}`)
   )
     return;
   if (!playwrightInputsVerified(context))
     add(context, "playwright-inputs-unverified", PLAYWRIGHT_CONFIG);
+  if (
+    context.visible.has(PLAYWRIGHT_MACOS_CONFIG) ||
+    context.visible.has(PLAYWRIGHT_MACOS_PRODUCER_TEST)
+  ) {
+    if (!playwrightMacosInputsVerified(context))
+      add(context, "playwright-macos-inputs-unverified", PLAYWRIGHT_MACOS_CONFIG);
+    if (
+      !playwrightMacosRegistered(context, context.local) ||
+      !playwrightMacosRegistered(context, context.ci)
+    )
+      add(context, "playwright-macos-registration-unverified", PLAYWRIGHT_MACOS_RECIPE);
+  }
 }
 
 function unitRegistered(
@@ -2292,6 +2423,8 @@ function unitRegistered(
   language: "bun" | "python" | "playwright",
   lane: Set<string>,
 ): boolean {
+  if (language === "playwright" && name === PLAYWRIGHT_MACOS_PRODUCER_TEST)
+    return playwrightMacosRegistered(context, lane);
   if (language === "playwright")
     return PLAYWRIGHT_TESTS.includes(name) && playwrightRegistered(context, lane);
   if (language === "bun" && name === PARSER_BODY_TEST) {
@@ -3862,11 +3995,49 @@ function runtimeAssetTestCommands(context: ContractContext): string[] | undefine
   const provenanceCommands = commands.filter((line) => line === SVG_ENGINE_PROVENANCE_TEST_COMMAND);
   if (provenanceCommands.length !== 1) return undefined;
   const reviewedCommands = commands.filter((line) => line !== SVG_ENGINE_PROVENANCE_TEST_COMMAND);
+  const withoutMacos = removeVerifiedMacosBrowserCommand(context, reviewedCommands);
+  if (!withoutMacos) return undefined;
   const unused = unconditionalRecipeCommands(runtimeUnusedRecipeBody(context));
   if (!unusedRegressionRecipeVerified(context)) return undefined;
-  const reviewed = reviewedRuntimeAssetTestCommands(reviewedCommands);
+  const reviewed = reviewedRuntimeAssetTestCommands(withoutMacos);
   if (!reviewed) return undefined;
   return [SVG_ENGINE_PROVENANCE_TEST_COMMAND, ...reviewed, ...unused];
+}
+function removeVerifiedMacosBrowserCommand(
+  context: ContractContext,
+  lines: string[],
+): string[] | undefined {
+  const command = `just ${PLAYWRIGHT_MACOS_RECIPE}`;
+  const indexes = lines.flatMap((line, index) => (line === command ? [index] : []));
+  if (indexes.length === 0) {
+    return context.recipes.has(PLAYWRIGHT_MACOS_RECIPE) ||
+      context.visible.has(PLAYWRIGHT_MACOS_CONFIG) ||
+      context.visible.has(PLAYWRIGHT_MACOS_PRODUCER_TEST)
+      ? undefined
+      : lines;
+  }
+  const index = indexes[0];
+  if (
+    indexes.length !== 1 ||
+    index === undefined ||
+    lines[index + 1] !== `just ${PLAYWRIGHT_RECIPE}` ||
+    !macosBrowserCommandInputsVerified(context)
+  ) {
+    return undefined;
+  }
+  return lines.filter((_, position) => position !== index);
+}
+function macosBrowserCommandInputsVerified(context: ContractContext): boolean {
+  try {
+    return (
+      playwrightMacosInputsVerified(context) &&
+      context.read("Justfile").includes(PLAYWRIGHT_MACOS_RUN_DEFINITION) &&
+      context.recipes.get(PLAYWRIGHT_MACOS_RECIPE)?.trim() === "{{MACOS_BROWSER_CONTRACT_RUN}}" &&
+      playwrightMacosWorkflowRegistered(context)
+    );
+  } catch {
+    return false;
+  }
 }
 function reviewedRuntimeAssetTestCommands(
   lines: string[],
@@ -5101,10 +5272,12 @@ export function inspectPlaywrightRoute(directory: string): {
   units: string[];
   localRegistered: boolean;
   ciRegistered: boolean;
+  macosLocalRegistered: boolean;
+  macosCiRegistered: boolean;
   issues: OwnedValidationIssue[];
 } {
   const { context, verifyExternalTools } = routeMetadata(directory);
-  const units = PLAYWRIGHT_TESTS.filter(
+  const units = [...PLAYWRIGHT_TESTS, PLAYWRIGHT_MACOS_PRODUCER_TEST].filter(
     (name) =>
       context.visible.has(name) &&
       fs.existsSync(path.join(context.root, name)) &&
@@ -5114,11 +5287,15 @@ export function inspectPlaywrightRoute(directory: string): {
   unitIssues(context, { bun: [], python: [], playwright: units });
   const localRegistered = playwrightRegistered(context, context.local);
   const ciRegistered = playwrightRegistered(context, context.ci);
+  const macosLocalRegistered = playwrightMacosRegistered(context, context.local);
+  const macosCiRegistered = playwrightMacosRegistered(context, context.ci);
   verifyExternalTools();
   return {
     units,
     localRegistered,
     ciRegistered,
+    macosLocalRegistered,
+    macosCiRegistered,
     issues: context.issues,
   };
 }

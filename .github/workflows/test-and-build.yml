@@ -145,13 +145,13 @@ jobs:
           shared-key: ci-v2-${{ matrix.os }}-stable-default
 
       - name: Install Bun
-        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: matrix.os != 'windows-latest'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
 
       - name: Install JavaScript dependencies
-        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: matrix.os != 'windows-latest'
         run: bun install --frozen-lockfile
 
       - name: Install Python analysis tools
@@ -174,8 +174,11 @@ jobs:
           tool: cargo-nextest@0.9.148
 
       - name: Install just
-        if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         uses: taiki-e/install-action@53aaa72a1fed2d5b9189d6d54c38e29bf9be2ab9 # just
+
+      - name: Install Chrome for the macOS official producer browser test
+        if: matrix.platform == 'mac-arm64'
+        run: bunx playwright install chrome
 
       - name: Install capacity cleanup tool
         if: matrix.os == 'ubuntu-latest'
@@ -218,6 +221,10 @@ jobs:
       - name: Check dependency boundary
         if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: just dependency-leak
+
+      - name: Run macOS official producer browser test
+        if: matrix.platform == 'mac-arm64'
+        run: just macos-browser-contract-test
 
       # rust-cache は target を復元しても rusty_v8 の静的アーカイブを復元しない場合がある。
       # macOS のリンク実行前に v8 を再構築して、公式アーカイブの取得とリンクを保証する。

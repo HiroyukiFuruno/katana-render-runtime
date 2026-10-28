@@ -1,4 +1,5 @@
 import { defineConfig } from "playwright/test";
+import { browserContractDefaults } from "./playwright-config-base";
 
 // WHY: Playwright Test の外部APIが設定のdefault exportを要求する。
 export default defineConfig({
@@ -9,15 +10,6 @@ export default defineConfig({
     "html/reference-capture_browser_test.ts",
     "mermaid/reference_svg_geometry_browser_test.ts",
   ],
-  timeout: 5000,
-  retries: 0,
-  workers: 1,
-  fullyParallel: false,
-  forbidOnly: true,
+  ...browserContractDefaults,
   outputDir: "../../tmp/quality/browser-contract/artifacts",
-  use: {
-    channel: "chrome",
-    headless: true,
-    viewport: { width: 1280, height: 900 },
-  },
 });

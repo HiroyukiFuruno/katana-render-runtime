@@ -659,9 +659,12 @@ function captureCodePins(): FileRecord[] {
     "scripts/mermaid/official-renderer.ts",
     "scripts/mermaid/official-renderer-provenance.ts",
     "scripts/mermaid/rasterize-svg-dir.ts",
+    "scripts/mermaid/raster-comparison-binding.ts",
+    "scripts/mermaid/raster-production-binding.ts",
     "scripts/mermaid/reference-compare.ts",
     "scripts/mermaid/reference_pair_repository.ts",
     "scripts/mermaid/strict-svg-external-images.ts",
+    "scripts/mermaid/svg-viewbox-size.ts",
     "package.json",
     "bun.lock",
   ];

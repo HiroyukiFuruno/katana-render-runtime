@@ -259,7 +259,12 @@ export class ReferencePairRepository {
       requireStrictRenderedPair(official);
       requireStrictRenderedPair(candidate);
       this.validateCanonicalSourceBinding(pair.slug, official, candidate);
-      this.validateCaptureContext(pair.slug, official.config, candidate.config);
+      validateStrictCaptureContext(
+        pair.slug,
+        official.config,
+        candidate.config,
+        this.options.referenceScope,
+      );
     }
     const candidateSvgPath = pair.katanaSvgPath;
     if (!fs.existsSync(candidateSvgPath) || fs.lstatSync(candidateSvgPath).isSymbolicLink()) {
@@ -376,22 +381,61 @@ export class ReferencePairRepository {
       svgDirectory,
     );
   }
+}
 
-  private validateCaptureContext(slug: string, official: JsonValue, candidate: JsonValue) {
-    for (const key of [
-      "theme",
-      "viewport",
-      "captureResize",
-      "sourceFontUrls",
-      "externalImageWaitPolicy",
-    ] as const) {
-      if (
-        JSON.stringify(configValue(official, key)) !== JSON.stringify(configValue(candidate, key))
-      ) {
-        throw new Error(`Strict capture context mismatch for ${slug}: ${key}`);
-      }
+export function validateStrictCaptureContext(
+  slug: string,
+  official: JsonValue,
+  candidate: JsonValue,
+  scope: "formal" | "diagnostic" | undefined,
+) {
+  const current = "raw-svg-viewbox-viewport-before-assignment-v1";
+  const officialPolicy = configValue(official, "captureResize"),
+    candidatePolicy = configValue(candidate, "captureResize");
+  if (scope === "formal" && (officialPolicy !== current || candidatePolicy !== current)) {
+    throw new Error(`Strict formal capture requires raw viewport policy for ${slug}`);
+  }
+  for (const key of [
+    "theme",
+    "captureResize",
+    "sourceFontUrls",
+    "externalImageWaitPolicy",
+  ] as const) {
+    if (!isDeepStrictEqual(configValue(official, key), configValue(candidate, key))) {
+      throw new Error(`Strict capture context mismatch for ${slug}: ${key}`);
     }
   }
+  const officialViewport = configValue(official, "viewport"),
+    candidateViewport = configValue(candidate, "viewport");
+  if (officialPolicy !== current) {
+    if (!isDeepStrictEqual(officialViewport, candidateViewport)) {
+      throw new Error(`Strict capture context mismatch for ${slug}: viewport`);
+    }
+    return;
+  }
+  const officialScale = strictViewportScale(officialViewport),
+    candidateScale = strictViewportScale(candidateViewport);
+  if (officialScale !== candidateScale) {
+    throw new Error(`Strict capture context mismatch for ${slug}: deviceScaleFactor`);
+  }
+}
+
+function strictViewportScale(value: JsonValue | undefined): number {
+  const viewport = recordValue(value ?? null, "capture viewport");
+  if (
+    typeof viewport.width !== "number" ||
+    !Number.isSafeInteger(viewport.width) ||
+    viewport.width <= 0 ||
+    typeof viewport.height !== "number" ||
+    !Number.isSafeInteger(viewport.height) ||
+    viewport.height <= 0 ||
+    typeof viewport.deviceScaleFactor !== "number" ||
+    !Number.isFinite(viewport.deviceScaleFactor) ||
+    viewport.deviceScaleFactor <= 0
+  ) {
+    throw new Error("Invalid strict capture viewport");
+  }
+  return viewport.deviceScaleFactor;
 }
 
 function rawRasterSvgSha(manifest: ReturnType<typeof verifyMermaidPair>, role: RasterRole): string {

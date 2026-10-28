@@ -140,6 +140,8 @@ const recipeBodies: Record<string, string> = {
 };
 const fixtureCargoBuildDefinition =
   'CARGO_BUILD := "python3 " + quote(REPO_ROOT + "/scripts/build/cargo_capacity_guard.py") + " --retain-build-profile debug -- " + CARGO';
+const playwrightMacosRunDefinition =
+  'MACOS_BROWSER_CONTRACT_RUN := if os() == "macos" { "node node_modules/playwright/cli.js test --config scripts/html/playwright.macos.config.ts" } else { "true" }';
 const fixtureJustDefinitions = [
   'set shell := ["bash", "-uc"]',
   "REPO_ROOT := justfile_directory()",
@@ -151,6 +153,7 @@ const fixtureJustDefinitions = [
   'HTML_PERFORMANCE_TYPING_PATH := "scripts/release/typings"',
   'HTML_PERFORMANCE_PYTHON_REQUIREMENTS := REPO_ROOT + "/scripts/release/html-performance-requirements.lock"',
   'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
+  playwrightMacosRunDefinition,
   fixtureCargoBuildDefinition,
 ].join("\n");
 const cargoCapacityGuardPath = "scripts/build/cargo_capacity_guard.py";
@@ -164,6 +167,7 @@ const svgEngineProvenanceSources = [
   "scripts/runtime-assets/svg-engine-provenance-manifest.ts",
 ] as const;
 const playwrightGeometryTestPath = "scripts/mermaid/reference_svg_geometry_browser_test.ts";
+const playwrightMacosTestPath = "scripts/mermaid/official_raw_producer_macos_browser_test.ts";
 const playwrightUnitPaths = [
   "scripts/html/feature-catalog_test.ts",
   "scripts/html/chrome_badge_metrics_test.ts",
@@ -171,6 +175,10 @@ const playwrightUnitPaths = [
   playwrightGeometryTestPath,
 ] as const;
 const playwrightConfigPath = "scripts/html/playwright.config.ts";
+const playwrightConfigHelperPath = "scripts/html/playwright-config-base.ts";
+const playwrightMacosConfigPath = "scripts/html/playwright.macos.config.ts";
+const playwrightMacosRecipe = "macos-browser-contract-test";
+const playwrightMacosTitle = "official raw producer captures on a freshly prepared viewport";
 const playwrightFixtureSource =
   'import { test } from "playwright/test";\ntest("canonical browser fixture", () => {});\n';
 
@@ -348,6 +356,7 @@ function fixtureRecipeBodies(): Record<string, string> {
     "rust-facts-host-prebuild": actualRecipeBody("rust-facts-host-prebuild"),
     "mathjax-owned-evidence": actualRecipeBody("mathjax-owned-evidence"),
     "browser-contract-test": actualRecipeBody("browser-contract-test"),
+    [playwrightMacosRecipe]: actualRecipeBody(playwrightMacosRecipe),
   };
 }
 function writeRuntimeAssetUnitFixtures(root: string): void {
@@ -378,10 +387,22 @@ function writeRuntimeAssetUnitFixtures(root: string): void {
         ? fs.readFileSync(path.join(actualRoot, name), "utf8")
         : playwrightFixtureSource,
     );
+  for (const name of [playwrightMacosTestPath, playwrightMacosConfigPath])
+    write(root, name, fs.readFileSync(path.join(actualRoot, name), "utf8"));
+  write(
+    root,
+    ".github/workflows/test-and-build.yml",
+    fs.readFileSync(path.join(actualRoot, ".github/workflows/test-and-build.yml"), "utf8"),
+  );
   write(
     root,
     playwrightConfigPath,
     fs.readFileSync(path.join(actualRoot, playwrightConfigPath), "utf8"),
+  );
+  write(
+    root,
+    playwrightConfigHelperPath,
+    fs.readFileSync(path.join(actualRoot, playwrightConfigHelperPath), "utf8"),
   );
 }
 function writeCurrentMoonFixtureInputs(root: string): void {
@@ -993,44 +1014,58 @@ test.each(["current", "previous canonical"] as const)(
   },
 );
 
-test.each(["missing owned", "duplicate owned", "changed arguments", "browser moved"] as const)(
-  "owned validation rejects runtime asset order mutation: %s",
-  (mutation) => {
-    const commands = actualRecipeBody("runtime-asset-script-other-run").split("\n");
-    const ownedIndex = commands.findIndex((line) =>
-      line.includes("./scripts/quality/owned-source-inventory_test.ts"),
-    );
-    const browserIndex = commands.indexOf("just browser-contract-test");
-    if (ownedIndex < 0 || browserIndex < 0)
-      throw new Error("missing runtime asset mutation fixture");
-    if (mutation === "missing owned") commands.splice(ownedIndex, 1);
-    if (mutation === "duplicate owned") commands.push(commands[ownedIndex] ?? "");
-    if (mutation === "changed arguments")
-      commands[ownedIndex] = `${commands[ownedIndex]} --filter altered`;
-    if (mutation === "browser moved") {
-      const browser = commands.splice(browserIndex, 1)[0];
-      if (browser === undefined) throw new Error("missing browser command");
-      commands.splice(3, 0, browser);
-    }
-    const body = commands.join("\n");
-    expect(body).not.toBe(actualRecipeBody("runtime-asset-script-other-run"));
-    const root = strictUnusedRegistrationFixture();
-    recipes(root, { "runtime-asset-script-other-run": body });
-    track(root);
-    const report = inspectMathJaxUnusedAuditRoute(root);
-    expect(report.binding.standardCommandVerified).toBe(false);
-    expect(report.binding.standardLocalCheckRegistered).toBe(false);
-    expect(report.binding.standardCiCheckRegistered).toBe(false);
-    expect(report.issues.map((issue) => issue.code)).toContain(
-      "mathjax-host-evidence-registration-unverified",
-    );
-    if (mutation === "browser moved") {
-      const browserRoute = inspectPlaywrightRoute(root);
-      expect(browserRoute.localRegistered).toBe(false);
-      expect(browserRoute.ciRegistered).toBe(false);
-    }
-  },
-);
+test.each([
+  "missing owned",
+  "duplicate owned",
+  "changed arguments",
+  "browser moved",
+  "missing macOS browser",
+  "duplicate macOS browser",
+  "macOS browser moved",
+] as const)("owned validation rejects runtime asset order mutation: %s", (mutation) => {
+  const commands = actualRecipeBody("runtime-asset-script-other-run").split("\n");
+  const ownedIndex = commands.findIndex((line) =>
+    line.includes("./scripts/quality/owned-source-inventory_test.ts"),
+  );
+  const browserIndex = commands.indexOf("just browser-contract-test");
+  if (ownedIndex < 0 || browserIndex < 0) throw new Error("missing runtime asset mutation fixture");
+  if (mutation === "missing owned") commands.splice(ownedIndex, 1);
+  if (mutation === "duplicate owned") commands.push(commands[ownedIndex] ?? "");
+  if (mutation === "changed arguments")
+    commands[ownedIndex] = `${commands[ownedIndex]} --filter altered`;
+  if (mutation === "browser moved") {
+    const browser = commands.splice(browserIndex, 1)[0];
+    if (browser === undefined) throw new Error("missing browser command");
+    commands.splice(3, 0, browser);
+  }
+  const macosIndex = commands.indexOf(`just ${playwrightMacosRecipe}`);
+  if (macosIndex < 0) throw new Error("missing macOS browser command");
+  if (mutation === "missing macOS browser") commands.splice(macosIndex, 1);
+  if (mutation === "duplicate macOS browser")
+    commands.splice(macosIndex, 0, commands[macosIndex] ?? "");
+  if (mutation === "macOS browser moved") {
+    const macos = commands.splice(macosIndex, 1)[0];
+    if (macos === undefined) throw new Error("missing macOS browser command");
+    commands.splice(3, 0, macos);
+  }
+  const body = commands.join("\n");
+  expect(body).not.toBe(actualRecipeBody("runtime-asset-script-other-run"));
+  const root = strictUnusedRegistrationFixture();
+  recipes(root, { "runtime-asset-script-other-run": body });
+  track(root);
+  const report = inspectMathJaxUnusedAuditRoute(root);
+  expect(report.binding.standardCommandVerified).toBe(false);
+  expect(report.binding.standardLocalCheckRegistered).toBe(false);
+  expect(report.binding.standardCiCheckRegistered).toBe(false);
+  expect(report.issues.map((issue) => issue.code)).toContain(
+    "mathjax-host-evidence-registration-unverified",
+  );
+  if (mutation === "browser moved") {
+    const browserRoute = inspectPlaywrightRoute(root);
+    expect(browserRoute.localRegistered).toBe(false);
+    expect(browserRoute.ciRegistered).toBe(false);
+  }
+});
 
 test.each(["missing", "moved", "duplicate"] as const)(
   "runtime asset registration rejects a %s Playwright process",
@@ -1061,46 +1096,151 @@ test("Playwright owned units retain both standard lanes and the fixed Chrome con
   const root = fixture();
   const route = inspectPlaywrightRoute(root);
   expect(route.issues).toEqual([]);
-  expect(route.units).toEqual([...playwrightUnitPaths]);
+  expect(route.units).toEqual([...playwrightUnitPaths, playwrightMacosTestPath]);
   expect(route.localRegistered).toBe(true);
   expect(route.ciRegistered).toBe(true);
+  expect(route.macosLocalRegistered).toBe(true);
+  expect(route.macosCiRegistered).toBe(true);
 });
 
 test.each([
-  ["channel", 'channel: "chrome"', 'channel: "chromium"'],
-  ["timeout", "timeout: 5000", "timeout: 6000"],
-  ["retry", "retries: 0", "retries: 1"],
-  ["workers", "workers: 1", "workers: 2"],
-  ["parallel", "fullyParallel: false", "fullyParallel: true"],
-  ["only", "forbidOnly: true", "forbidOnly: false"],
-  ["headless", "headless: true", "headless: false"],
-  ["viewport", "width: 1280", "width: 1281"],
-  ["test directory", 'testDir: ".."', 'testDir: "."'],
+  ["channel", playwrightConfigHelperPath, 'channel: "chrome"', 'channel: "chromium"'],
+  ["timeout", playwrightConfigHelperPath, "timeout: 5000", "timeout: 6000"],
+  ["retry", playwrightConfigHelperPath, "retries: 0", "retries: 1"],
+  ["workers", playwrightConfigHelperPath, "workers: 1", "workers: 2"],
+  ["parallel", playwrightConfigHelperPath, "fullyParallel: false", "fullyParallel: true"],
+  ["only", playwrightConfigHelperPath, "forbidOnly: true", "forbidOnly: false"],
+  ["headless", playwrightConfigHelperPath, "headless: true", "headless: false"],
+  ["viewport", playwrightConfigHelperPath, "width: 1280", "width: 1281"],
+  ["test directory", playwrightConfigPath, 'testDir: ".."', 'testDir: "."'],
   [
     "geometry spec deletion",
+    playwrightConfigPath,
     '"mermaid/reference_svg_geometry_browser_test.ts"',
     '"mermaid/removed_test.ts"',
   ],
   [
     "extra entry",
+    playwrightConfigPath,
     '"mermaid/reference_svg_geometry_browser_test.ts",',
     '"mermaid/reference_svg_geometry_browser_test.ts", "mermaid/extra_test.ts",',
   ],
-  ["output", "../../tmp/quality/", "tmp/quality/"],
-  ["unknown setting", "retries: 0", "retries: 0, grep: /never/"],
-  ["config binding", 'from "playwright/test"', 'from "other-runner"'],
-] as const)("Playwright registration rejects %s config drift", (_label, before, after) => {
+  ["output", playwrightConfigPath, "../../tmp/quality/", "tmp/quality/"],
+  [
+    "unknown setting",
+    playwrightConfigPath,
+    '  ...browserContractDefaults,\n  outputDir: "../../tmp/quality/browser-contract/artifacts",',
+    '  ...browserContractDefaults,\n  grep: /never/,\n  outputDir: "../../tmp/quality/browser-contract/artifacts",',
+  ],
+  ["config binding", playwrightConfigPath, 'from "playwright/test"', 'from "other-runner"'],
+] as const)("Playwright registration rejects %s config drift", (_label, name, before, after) => {
   const root = fixture();
-  const source = fs.readFileSync(path.join(root, playwrightConfigPath), "utf8");
+  const source = fs.readFileSync(path.join(root, name), "utf8");
   expect(source).toContain(before);
-  write(root, playwrightConfigPath, source.replace(before, after));
+  write(root, name, source.replace(before, after));
   const route = inspectPlaywrightRoute(root);
   expect(route.localRegistered).toBe(false);
   expect(route.ciRegistered).toBe(false);
   expect(route.issues.map((issue) => issue.code)).toContain("playwright-inputs-unverified");
 });
 
+test("macOS producer registration rejects a removed executable browser case", () => {
+  const root = fixture(),
+    file = path.join(root, playwrightMacosTestPath),
+    source = fs.readFileSync(file, "utf8");
+  expect(source.split(playwrightMacosTitle)).toHaveLength(2);
+  write(
+    root,
+    playwrightMacosTestPath,
+    source.replace(playwrightMacosTitle, "removed browser case"),
+  );
+  const route = inspectPlaywrightRoute(root);
+  expect(route.macosLocalRegistered).toBe(false);
+  expect(route.macosCiRegistered).toBe(false);
+  expect(route.issues.map((issue) => issue.code)).toContain("playwright-macos-inputs-unverified");
+});
+
 test.each([
+  [
+    "config",
+    playwrightMacosConfigPath,
+    'testMatch: ["mermaid/official_raw_producer_macos_browser_test.ts"]',
+    'testMatch: ["mermaid/other_test.ts"]',
+  ],
+  ["test file", playwrightMacosTestPath, playwrightMacosTitle, "removed browser case"],
+  ["shared config defaults", playwrightConfigHelperPath, "timeout: 5000", "timeout: 6000"],
+] as const)(
+  "macOS producer registration rejects changed %s inputs",
+  (_label, name, before, after) => {
+    const root = fixture(),
+      file = path.join(root, name),
+      source = fs.readFileSync(file, "utf8");
+    expect(source).toContain(before);
+    write(root, name, source.replace(before, after));
+    const route = inspectPlaywrightRoute(root);
+    expect(route.macosLocalRegistered).toBe(false);
+    expect(route.macosCiRegistered).toBe(false);
+    expect(route.issues.map((issue) => issue.code)).toContain("playwright-macos-inputs-unverified");
+  },
+);
+
+test.each([
+  [
+    "workflow step",
+    "      - name: Run macOS official producer browser test",
+    "      - name: Removed macOS browser step",
+  ],
+  [
+    "platform guard",
+    "      - name: Run macOS official producer browser test\n        if: matrix.platform == 'mac-arm64'",
+    "      - name: Run macOS official producer browser test\n        if: matrix.os != 'windows-latest'",
+  ],
+  ["runner", `just ${playwrightMacosRecipe}`, "just browser-contract-test"],
+  [
+    "Windows just availability",
+    "      - name: Install just\n        uses: taiki-e/install-action@53aaa72a1fed2d5b9189d6d54c38e29bf9be2ab9 # just\n\n      - name: Install Chrome for the macOS official producer browser test",
+    "      - name: Install just\n        if: matrix.os != 'windows-latest'\n        uses: taiki-e/install-action@53aaa72a1fed2d5b9189d6d54c38e29bf9be2ab9 # just\n\n      - name: Install Chrome for the macOS official producer browser test",
+  ],
+] as const)("macOS producer registration rejects changed %s", (_label, before, after) => {
+  const root = fixture(),
+    workflowPath = path.join(root, ".github/workflows/test-and-build.yml"),
+    workflow = fs.readFileSync(workflowPath, "utf8");
+  expect(workflow).toContain(before);
+  write(root, ".github/workflows/test-and-build.yml", workflow.replace(before, after));
+  const route = inspectPlaywrightRoute(root);
+  expect(route.macosCiRegistered).toBe(false);
+  expect(route.issues.map((issue) => issue.code)).toContain(
+    "playwright-macos-registration-unverified",
+  );
+});
+
+test("macOS producer registration requires the static checks to run first", () => {
+  const root = fixture();
+  const workflowPath = path.join(root, ".github/workflows/test-and-build.yml");
+  const workflow = fs.readFileSync(workflowPath, "utf8");
+  const step = [
+    "      - name: Run macOS official producer browser test",
+    "        if: matrix.platform == 'mac-arm64'",
+    `        run: just ${playwrightMacosRecipe}`,
+  ].join("\n");
+  const withoutProducer = workflow.replace(`${step}\n\n`, "");
+  const formattingIndex = withoutProducer.indexOf("      - name: Check formatting");
+  expect(workflow.split(step)).toHaveLength(2);
+  expect(formattingIndex).toBeGreaterThanOrEqual(0);
+  write(
+    root,
+    ".github/workflows/test-and-build.yml",
+    `${withoutProducer.slice(0, formattingIndex)}${step}\n\n${withoutProducer.slice(formattingIndex)}`,
+  );
+  const route = inspectPlaywrightRoute(root);
+  expect(route.macosCiRegistered).toBe(false);
+  expect(route.issues.map((issue) => issue.code)).toContain(
+    "playwright-macos-registration-unverified",
+  );
+});
+
+test.each([
+  "SVG tspan boundaries preserve within-span kerning with a bundled font",
   "strict raster sizing preserves SVG markup and resolves percentage width from the viewBox",
   "paint projection evaluates actual candidate pixels",
   "keeps the color-only candidate exact while changing RGB and preserving SVG bytes",
@@ -1166,7 +1306,9 @@ test("Playwright imports classify owned units without admitting an unknown entry
   write(root, extra, playwrightFixtureSource);
   track(root);
   const report = inspectOwnedValidationContract(root);
-  expect(report.units.playwright).toEqual([...playwrightUnitPaths, extra].sort());
+  expect(report.units.playwright).toEqual(
+    [...playwrightUnitPaths, playwrightMacosTestPath, extra].sort(),
+  );
   expect(report.units.bun).not.toContain(extra);
   expect(report.issues.filter((issue) => issue.path === extra).map((issue) => issue.code)).toEqual([
     "unit-local-missing",
@@ -1174,7 +1316,7 @@ test("Playwright imports classify owned units without admitting an unknown entry
   ]);
 });
 
-test.each([playwrightConfigPath, ...playwrightUnitPaths])(
+test.each([playwrightConfigPath, playwrightConfigHelperPath, ...playwrightUnitPaths])(
   "Playwright registration rejects the missing physical input %s",
   (name) => {
     const root = fixture();
@@ -1187,7 +1329,7 @@ test.each([playwrightConfigPath, ...playwrightUnitPaths])(
 
 test("Playwright registration rejects all inputs disappearing from the owned inventory", () => {
   const root = fixture();
-  const inputs = [playwrightConfigPath, ...playwrightUnitPaths];
+  const inputs = [playwrightConfigPath, playwrightConfigHelperPath, ...playwrightUnitPaths];
   for (const name of inputs) execFileSync("git", ["rm", "--cached", "--", name], { cwd: root });
   for (const name of inputs) fs.unlinkSync(path.join(root, name));
   const route = inspectPlaywrightRoute(root);
@@ -1234,13 +1376,18 @@ test("fixture sources stay classified when its shell registration is unsupported
     "moon-cache-fixture-owner-unregistered:runtime-asset-script-test",
     "moon-cache-fixture-owner-unregistered:runtime-asset-script-test",
     "parser-body-onload-test-unregistered:runtime-asset-script-test",
+    "playwright-macos-registration-unverified:macos-browser-contract-test",
     "unit-local-missing:scripts/runtime-bundles/parser-body-onload-generation.test.ts",
     "unit-ci-missing:scripts/runtime-bundles/parser-body-onload-generation.test.ts",
     "unit-local-missing:tests/fixtures/quality-cache/moon-cache-subject.test.ts",
     "unit-ci-missing:tests/fixtures/quality-cache/moon-cache-subject.test.ts",
-    ...[...playwrightUnitPaths]
+    ...[...playwrightUnitPaths, playwrightMacosTestPath]
       .sort()
-      .flatMap((name) => [`unit-local-missing:${name}`, `unit-ci-missing:${name}`]),
+      .flatMap((name) =>
+        name === playwrightMacosTestPath
+          ? [`unit-local-missing:${name}`]
+          : [`unit-local-missing:${name}`, `unit-ci-missing:${name}`],
+      ),
   ]);
   const runtimeUnitPaths = actualRuntimeAssetUnitPaths();
   expect(report.languageCounts).toEqual({
@@ -1248,6 +1395,7 @@ test("fixture sources stay classified when its shell registration is unsupported
     typescript:
       14 +
       playwrightUnitPaths.length +
+      3 +
       runtimeUnitPaths.filter((name) => name.endsWith(".ts")).length +
       svgEngineProvenanceSources.length,
     javascript: 2 + runtimeUnitPaths.filter((name) => name.endsWith(".js")).length,
@@ -1260,7 +1408,7 @@ test("fixture sources stay classified when its shell registration is unsupported
       "tests/fixtures/quality-cache/moon-cache-subject.test.ts",
     ].sort(),
     python: ["scripts/tool_test.py"],
-    playwright: [...playwrightUnitPaths].sort(),
+    playwright: [...playwrightUnitPaths, playwrightMacosTestPath].sort(),
   });
   expect(report.moonCacheFixture).toEqual({
     path: "tests/fixtures/quality-cache/moon-cache-subject.test.ts",
@@ -3240,7 +3388,7 @@ test("new owned Bun 2 and Python 1 actual paths are registered in both standard 
     ].sort(),
   );
   expect(report.units.python).toEqual([newlyRegisteredUnits[2], "scripts/tool_test.py"]);
-  expect(report.units.playwright).toEqual([...playwrightUnitPaths].sort());
+  expect(report.units.playwright).toEqual([...playwrightUnitPaths, playwrightMacosTestPath].sort());
   expect(readOwnedRepositoryIndex(root).untracked).toEqual([]);
 });
 test.each([...newlyRegisteredUnits])(

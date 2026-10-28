@@ -17,6 +17,9 @@ import {
   type TrustedRasterInput,
   verifyRasterProductionBinding,
 } from "./raster-production-binding";
+import { svgViewBoxSize } from "./svg-viewbox-size";
+
+const RAW_VIEWPORT_POLICY = "raw-svg-viewbox-viewport-before-assignment-v1";
 
 type DirectoryStamp = {
   path: string;
@@ -135,17 +138,27 @@ export class RasterComparisonBinding {
     const contexts = pairs.map((pair) => rasterCaptureContext(pair.config, pair.capture));
     for (const [index, pair] of pairs.entries()) {
       const context = contexts[index];
-      const other = this.verifiedContexts.get(
-        `${role === "official" ? "candidate" : "official"}/${pair.slug}`,
-      );
-      if (other !== undefined && !isDeepStrictEqual(other, context)) {
-        throw new Error(`Actual role capture context mismatch: ${pair.slug}`);
-      }
+      if (context === undefined) throw new Error("Missing verified capture context");
+      validateRawViewport(pair, context);
+      this.validateOtherRoleContext(role, pair.slug, context);
     }
     for (const [index, pair] of pairs.entries()) {
       const context = contexts[index];
       if (context === undefined) throw new Error("Missing verified capture context");
       this.verifiedContexts.set(`${role}/${pair.slug}`, context);
+    }
+  }
+
+  private validateOtherRoleContext(
+    role: RasterRole,
+    slug: string,
+    context: ReturnType<typeof rasterCaptureContext>,
+  ): void {
+    const other = this.verifiedContexts.get(
+      `${role === "official" ? "candidate" : "official"}/${slug}`,
+    );
+    if (other !== undefined && !sameRoleCaptureContext(other, context)) {
+      throw new Error(`Actual role capture context mismatch: ${slug}`);
     }
   }
 
@@ -398,6 +411,29 @@ export class RasterComparisonBinding {
       throw new Error("Missing or inconsistent trusted browser process evidence");
     }
   }
+}
+
+function validateRawViewport(
+  pair: RasterPairObservation,
+  context: ReturnType<typeof rasterCaptureContext>,
+): void {
+  if (context.captureResize !== RAW_VIEWPORT_POLICY) return;
+  const size = svgViewBoxSize(pair.sourceSvg.toString("utf8"));
+  if (size === undefined) throw new Error(`Raw SVG viewBox missing: ${pair.slug}`);
+  const expected = { width: Math.ceil(size.width) + 24, height: Math.ceil(size.height) + 24 };
+  if (!isDeepStrictEqual(context.viewport, expected)) {
+    throw new Error(`Raw SVG viewport differs from capture: ${pair.slug}`);
+  }
+}
+
+function sameRoleCaptureContext(
+  left: ReturnType<typeof rasterCaptureContext>,
+  right: ReturnType<typeof rasterCaptureContext>,
+): boolean {
+  if (left.captureResize !== RAW_VIEWPORT_POLICY || right.captureResize !== RAW_VIEWPORT_POLICY) {
+    return isDeepStrictEqual(left, right);
+  }
+  return isDeepStrictEqual({ ...left, viewport: null }, { ...right, viewport: null });
 }
 
 export interface RasterRoleConfigInput {

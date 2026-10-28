@@ -36,6 +36,7 @@ import {
   closeCaptureObservation,
   type LoadedSvgObservation,
   observeCaptureSnapshot,
+  prepareStrictSvgCapture,
   resizeSvgCapture,
 } from "./raster-capture-observation";
 import type { RasterProductionSession } from "./raster-production-session";
@@ -206,21 +207,27 @@ export class OfficialMermaidRenderer {
         ? stages.rawSvg
         : primarySvgForStages(stages);
     const provenancePath = this.writeRenderProvenance(fixture, stages, strict);
-    let loadedSvg: LoadedSvgObservation | null;
     if (strict) {
-      loadedSvg = await assignStrictSvg(page, primarySvg);
-    } else {
-      await this.setPrimarySvg(page, primarySvg);
-      loadedSvg = null;
+      const capturePage = await this.newPage();
+      try {
+        await capturePage.setContent(this.baseHtml(), { waitUntil: "load" });
+        await prepareStrictSvgCapture(capturePage, primarySvg);
+        const loadedSvg = await assignStrictSvg(capturePage, primarySvg);
+        await this.capture(capturePage, fixture, primarySvg, true, provenancePath, true, loadedSvg);
+      } finally {
+        await capturePage.close();
+      }
+      return;
     }
+    await this.setPrimarySvg(page, primarySvg);
     await this.capture(
       page,
       fixture,
       primarySvg,
-      strict || this.isClassDiagram(stages.diagramType),
+      this.isClassDiagram(stages.diagramType),
       provenancePath,
-      strict,
-      loadedSvg,
+      false,
+      null,
     );
   }
 
@@ -296,6 +303,7 @@ export class OfficialMermaidRenderer {
       ? [
           ...shared,
           "scripts/mermaid/official-reference-mode.ts",
+          "scripts/mermaid/raster-capture-observation.ts",
           "scripts/mermaid/strict-svg-external-images.ts",
           "scripts/mermaid/diagram_theme.ts",
           "scripts/mermaid/diagram_update_fixtures.ts",
@@ -399,7 +407,7 @@ export class OfficialMermaidRenderer {
           sha256: sha256(Buffer.from(JSON.stringify(provenanceDocument))),
           document: provenanceDocument,
         },
-        config: this.captureConfig(fixture, preserveSvgBytes, strict),
+        config: this.captureConfig(fixture, preserveSvgBytes, strict, before?.viewport),
         runtimeAssets: officialRuntimeAssets(provenanceDocument),
       });
       if (strict) {
@@ -426,12 +434,21 @@ export class OfficialMermaidRenderer {
     }
   }
 
-  private captureConfig(fixture: RenderFixture, preserveSvgBytes: boolean, strict: boolean) {
+  private captureConfig(
+    fixture: RenderFixture,
+    preserveSvgBytes: boolean,
+    strict: boolean,
+    actualViewport: { width: number; height: number } | undefined,
+  ) {
+    if (strict && actualViewport === undefined) {
+      throw new Error("Official viewport observation missing");
+    }
     return {
       theme: this.theme.name,
-      viewport: { width: 1520, height: 845, deviceScaleFactor: 1 },
+      viewport: { ...(actualViewport ?? { width: 1520, height: 845 }), deviceScaleFactor: 1 },
+      ...(strict ? { initialViewport: { width: 1520, height: 845, deviceScaleFactor: 1 } } : {}),
       captureResize: strict
-        ? "capture-box-only-raw-svg-v1"
+        ? "raw-svg-viewbox-viewport-before-assignment-v1"
         : "svg-viewbox-or-dimensions-ceil-plus-24px-padding-v1",
       sourceFontUrls: strict ? [] : null,
       preserveSvgBytes,
