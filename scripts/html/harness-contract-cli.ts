@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { javaScriptTypeReader, typeScriptToolBinding } from "../quality/owned-type-projects";
+import {
+  javaScriptTypeReader,
+  typeScriptToolBinding,
+  typeScriptToolInspectionScope,
+} from "../quality/owned-type-projects";
 import { checkHarnessContract, declaredValidationCode } from "./harness-contract";
 import { executionGraph, moonStaticTaskProjection, policyContract } from "./harness-contract-graph";
 import moonAuthorityInputs from "./moon-authority-inputs.json";
@@ -779,8 +783,10 @@ export function repositorySnapshot(root: string, declaredCode: string[]) {
     );
   const tracked = new Set(git.stdout.toString().split("\0").filter(Boolean));
   const javaScriptTyped = javaScriptTypeReader(root, { scripts }, tracked);
+  const externalToolScope = typeScriptToolInspectionScope(root);
+  const scopedExternalToolResolver = externalToolScope.resolve;
   const externalToolResolver = typeScriptToolBinding(root);
-  return {
+  const snapshot = {
     root,
     policy,
     read,
@@ -791,7 +797,7 @@ export function repositorySnapshot(root: string, declaredCode: string[]) {
       new Set(Object.keys(record(pkg.devDependencies))),
       codeFiles,
       (reference, importer) => resolveRepositoryCode(root, policy.codeRoots, reference, importer),
-      externalToolResolver,
+      scopedExternalToolResolver,
     ),
     codeFiles,
     declaredCode,
@@ -817,6 +823,8 @@ export function repositorySnapshot(root: string, declaredCode: string[]) {
       ...(policy.rust ? [policy.rust.workspace] : []),
     ],
   };
+  externalToolScope.verify();
+  return snapshot;
 }
 
 if (import.meta.main) {

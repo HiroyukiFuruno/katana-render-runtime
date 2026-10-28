@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -7,6 +7,7 @@ import path from "node:path";
 import { runInNewContext } from "node:vm";
 import { parseSync, transformSync } from "@swc/core";
 import { z } from "zod";
+import { changedCompilerInputRead } from "../quality/compiler-input-test-helper";
 import {
   createContractRead,
   inspectNativeWidthHashRoute,
@@ -4855,6 +4856,34 @@ test("external tool binding is separate from owned sources and retains both lane
   ]);
   expect(snapshot.graph.local.has("node_modules/typescript/bin/tsc")).toBe(false);
   expect(snapshot.graph.ci.has("node_modules/typescript/bin/tsc")).toBe(false);
+});
+
+test("actual repository keeps the public compiler resolver fresh after graph inspection", () => {
+  const root = path.resolve(import.meta.dir, "../..");
+  const snapshot = repositorySnapshot(root, []);
+  const request = snapshot.graph.externalToolBindings?.[0];
+  if (!request) throw new Error("actual TypeScript bootstrap request missing");
+  const resolve = snapshot.externalToolResolver;
+  if (!resolve) throw new Error("actual TypeScript compiler resolver missing");
+  expect(resolve(request)).toBeDefined();
+  const read = changedCompilerInputRead(root, spyOn);
+  try {
+    expect(() => resolve(request)).toThrow(
+      "TypeScript compiler input changed: node_modules/typescript/lib/tsc.js",
+    );
+  } finally {
+    read.mockRestore();
+  }
+});
+
+test("external tool reports a post-graph resolver failure as unavailable", () => {
+  const snapshot = typeScriptGraphFixture();
+  snapshot.externalToolResolver = () => {
+    throw new Error("TypeScript compiler input changed: node_modules/typescript/lib/tsc.js");
+  };
+  expect(checkHarnessContract(snapshot)).toContain(
+    "external tool binding unavailable: node_modules/typescript/bin/tsc",
+  );
 });
 
 test("executionGraph keeps pure source analysis and resolver observations in both lanes", () => {

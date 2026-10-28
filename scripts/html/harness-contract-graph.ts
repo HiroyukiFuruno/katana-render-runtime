@@ -4540,7 +4540,7 @@ const MOON_TERMINAL_SOURCES = {
   "scripts/hooks/run_parallel_checks.py":
     "6590d3482195d88452d2592a2a690e114c7e060270e95908c735c695256ac180",
   "scripts/html/harness-contract-cli.ts":
-    "949d04ce668ffdbf98b5bca0aa66d201b450999c6edd8ad4747920b391e5d068",
+    "ef0907bc6771b3c0a9c0982392438e8521c7c46c22b35aae6a02ee13f66d517c",
 } as const;
 
 function moonTerminalSourcesRegistered(

@@ -57,7 +57,7 @@ import {
   safeRelative,
   type typeConfiguration,
   typeProjectNames,
-  typeScriptToolBinding,
+  typeScriptToolInspectionScope,
 } from "./owned-type-projects";
 
 const strings = z.array(z.string());
@@ -585,6 +585,7 @@ function metadata(
   context: ContractContext;
   pkg: z.infer<typeof packageContract>;
   biome: z.infer<typeof biomeContract>;
+  verifyExternalTools: () => void;
 } {
   const policy = policyContract.parse(json(root, "scripts/html/harness-contract-policy.json"));
   const pkg = packageContract.parse(json(root, "package.json"));
@@ -592,7 +593,7 @@ function metadata(
   const readOptional = (name: string) =>
     fs.existsSync(path.join(root, name)) ? readMemoized(name) : undefined;
   const recipes = justRecipes(readMemoized("Justfile"));
-  const externalToolResolver = typeScriptToolBinding(root);
+  const externalToolScope = typeScriptToolInspectionScope(root);
   const graph = executionGraph(
     policy,
     readOptional,
@@ -600,7 +601,7 @@ function metadata(
     new Set(Object.keys(pkg.devDependencies)),
     [],
     (reference, importer) => resolveRepositoryCode(root, policy.codeRoots, reference, importer),
-    externalToolResolver,
+    externalToolScope.resolve,
   );
   const context: ContractContext = {
     root,
@@ -645,7 +646,12 @@ function metadata(
       continue;
     add(context, "execution-graph-contract", "scripts/html/harness-contract-policy.json", detail);
   }
-  return { context, pkg, biome: biomeContract.parse(json(root, "biome.json")) };
+  return {
+    context,
+    pkg,
+    biome: biomeContract.parse(json(root, "biome.json")),
+    verifyExternalTools: externalToolScope.verify,
+  };
 }
 
 function sourceSafety(context: ContractContext, names: string[]): boolean {
@@ -4873,7 +4879,7 @@ export function inspectOwnedValidationContract(directory: string): OwnedValidati
   const index = readOwnedRepositoryIndex(root);
   const tracked = new Set(index.tracked);
   const visible = new Set([...index.tracked, ...index.untracked]);
-  const { context, pkg, biome } = metadata(root, index, tracked, visible);
+  const { context, pkg, biome, verifyExternalTools } = metadata(root, index, tracked, visible);
   const policy = policySchema.parse(json(root, "scripts/quality/duplication-policy.json"));
   const report: OwnedValidationReport = {
     schema: 1,
@@ -4998,7 +5004,10 @@ export function inspectOwnedValidationContract(directory: string): OwnedValidati
     ],
   };
   const sources = validateOwnedRepositorySources(context, root, policy, tracked, visible, report);
-  if (!sources) return report;
+  if (!sources) {
+    verifyExternalTools();
+    return report;
+  }
   const { files, generated } = sources;
   staleIncludes(context, "biome.json", biome.files.includes);
   const types = typeScopes(context, pkg);
@@ -5055,6 +5064,7 @@ export function inspectOwnedValidationContract(directory: string): OwnedValidati
   unitIssues(context, report.units);
   report.sourceCount = files.length;
   report.sourceDigest = sha(digest.join(""));
+  verifyExternalTools();
   return report;
 }
 
@@ -5070,8 +5080,9 @@ export function inspectNativeWidthHashRoute(directory: string): {
   facts: OwnedValidationReport["nativeWidthHashFacts"];
   issues: OwnedValidationIssue[];
 } {
-  const { context } = routeMetadata(directory);
+  const { context, verifyExternalTools } = routeMetadata(directory);
   const facts = nativeWidthHashFactsBinding(context);
+  verifyExternalTools();
   return { facts, issues: context.issues };
 }
 
@@ -5079,9 +5090,10 @@ export function inspectStandalonePerformanceRoute(directory: string): {
   binding: OwnedValidationReport["standalonePerformanceHarness"] | undefined;
   issues: OwnedValidationIssue[];
 } {
-  const { context } = routeMetadata(directory);
+  const { context, verifyExternalTools } = routeMetadata(directory);
   const report: Pick<OwnedValidationReport, "standalonePerformanceHarness"> = {};
   performanceHarnessContract(context, rustMembers(context), report);
+  verifyExternalTools();
   return { binding: report.standalonePerformanceHarness, issues: context.issues };
 }
 
@@ -5091,7 +5103,7 @@ export function inspectPlaywrightRoute(directory: string): {
   ciRegistered: boolean;
   issues: OwnedValidationIssue[];
 } {
-  const { context } = routeMetadata(directory);
+  const { context, verifyExternalTools } = routeMetadata(directory);
   const units = PLAYWRIGHT_TESTS.filter(
     (name) =>
       context.visible.has(name) &&
@@ -5100,10 +5112,13 @@ export function inspectPlaywrightRoute(directory: string): {
   );
   playwrightIssues(context);
   unitIssues(context, { bun: [], python: [], playwright: units });
+  const localRegistered = playwrightRegistered(context, context.local);
+  const ciRegistered = playwrightRegistered(context, context.ci);
+  verifyExternalTools();
   return {
     units,
-    localRegistered: playwrightRegistered(context, context.local),
-    ciRegistered: playwrightRegistered(context, context.ci),
+    localRegistered,
+    ciRegistered,
     issues: context.issues,
   };
 }
@@ -5113,8 +5128,9 @@ export function inspectGeneratedRustCheckRoute(directory: string): {
   ci: boolean;
   issues: OwnedValidationIssue[];
 } {
-  const { context } = routeMetadata(directory);
+  const { context, verifyExternalTools } = routeMetadata(directory);
   const route = generatedRustCheckRoute(context);
+  verifyExternalTools();
   return { ...route, issues: context.issues };
 }
 
@@ -5124,10 +5140,11 @@ export function inspectMathJaxUnusedAuditRoute(directory: string): {
   ciTestRegistered: boolean;
   issues: OwnedValidationIssue[];
 } {
-  const { context } = routeMetadata(directory);
+  const { context, verifyExternalTools } = routeMetadata(directory);
   const binding = mathJaxUnusedAuditBinding(context);
   const localTestRegistered = unitRegistered(context, binding.testPath, "bun", context.local);
   const ciTestRegistered = unitRegistered(context, binding.testPath, "bun", context.ci);
+  verifyExternalTools();
   return { binding, localTestRegistered, ciTestRegistered, issues: context.issues };
 }
 
@@ -5136,13 +5153,14 @@ export function inspectMoonCacheFixtureRoute(directory: string): {
   bunUnitRegistered: boolean;
   issues: OwnedValidationIssue[];
 } {
-  const { context } = routeMetadata(directory);
+  const { context, verifyExternalTools } = routeMetadata(directory);
   const binding = moonCacheFixtureBinding(context);
   context.moonCacheFixtureBinding = binding;
   const bunUnitRegistered =
     hasBunTests(context.read(binding.path)) &&
     unitRegistered(context, binding.path, "bun", context.local) &&
     unitRegistered(context, binding.path, "bun", context.ci);
+  verifyExternalTools();
   return { binding, bunUnitRegistered, issues: context.issues };
 }
 
@@ -5150,8 +5168,9 @@ export function inspectParserBodyOnloadRoute(directory: string): {
   binding: OwnedValidationReport["parserBodyOnload"];
   issues: OwnedValidationIssue[];
 } {
-  const { context, pkg, biome } = routeMetadata(directory);
+  const { context, pkg, biome, verifyExternalTools } = routeMetadata(directory);
   const binding = parserBodyOnloadBinding(context, biome, parserBodyOnloadTypeScopes(context, pkg));
+  verifyExternalTools();
   return { binding, issues: context.issues };
 }
 

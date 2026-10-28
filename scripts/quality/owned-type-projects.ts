@@ -168,6 +168,33 @@ function compilerToolSnapshot(root: string, request: ExternalToolRequest): Exter
   };
 }
 
+function verifiedCompilerCallerPath(
+  root: string,
+  snapshot: ExternalToolBinding,
+  request: ExternalToolRequest,
+): string | undefined {
+  if (
+    request.callerSourceSha256 !== snapshot.callerSourceSha256 ||
+    request.callerAstSha256 !== snapshot.callerAstSha256 ||
+    request.swcVersion !== snapshot.swcVersion
+  )
+    return undefined;
+  const physicalPath = safeFile(root, request.caller);
+  return fileSha256(physicalPath) === request.callerSourceSha256 ? physicalPath : undefined;
+}
+
+function copyCompilerBinding(
+  binding: ExternalToolBinding,
+  inputPins: readonly CompilerPin[] = binding.inputPins,
+): ExternalToolBinding {
+  return {
+    ...binding,
+    inputPins: inputPins.map((pin) => ({ ...pin })),
+    runtime: { ...binding.runtime },
+    lockIdentities: binding.lockIdentities.map((identity) => ({ ...identity })),
+  };
+}
+
 export function typeScriptToolBinding(root: string): ExternalToolResolver {
   let snapshot: ExternalToolBinding | undefined;
   return (request) => {
@@ -177,19 +204,55 @@ export function typeScriptToolBinding(root: string): ExternalToolResolver {
     const runtime = compilerRuntime();
     if (JSON.stringify(runtime) !== JSON.stringify(snapshot.runtime))
       throw new Error("TypeScript Bun runtime changed");
-    if (
-      request.callerSourceSha256 !== snapshot.callerSourceSha256 ||
-      request.callerAstSha256 !== snapshot.callerAstSha256 ||
-      request.swcVersion !== snapshot.swcVersion ||
-      fileSha256(safeFile(root, request.caller)) !== request.callerSourceSha256
-    )
-      return undefined;
-    return {
-      ...snapshot,
-      inputPins: snapshot.inputPins.map((pin) => ({ ...pin })),
-      runtime: { ...snapshot.runtime },
-      lockIdentities: snapshot.lockIdentities.map((identity) => ({ ...identity })),
-    };
+    return verifiedCompilerCallerPath(root, snapshot, request)
+      ? copyCompilerBinding(snapshot)
+      : undefined;
+  };
+}
+
+export interface TypeScriptToolInspectionScope {
+  resolve: ExternalToolResolver;
+  verify: () => void;
+}
+
+export function typeScriptToolInspectionScope(root: string): TypeScriptToolInspectionScope {
+  let snapshot: ExternalToolBinding | undefined;
+  const observedPins = new Map<string, CompilerPin>();
+  let startVerified = false;
+  let observedRuntime: ExternalToolBinding["runtime"] | undefined;
+
+  const resolve: ExternalToolResolver = (request) => {
+    if (!compilerRequestMatches(root, request)) return undefined;
+    snapshot ??= compilerToolSnapshot(root, request);
+    const current = snapshot;
+    if (!startVerified) {
+      // 初回取得と終端照合へ束縛し、同じinspection内の重複hashを避ける。
+      observedRuntime = current.runtime;
+      startVerified = true;
+    }
+    const physicalPath = verifiedCompilerCallerPath(root, current, request);
+    if (!physicalPath) return undefined;
+    observedPins.set(request.caller, {
+      name: request.caller,
+      physicalPath,
+      sha256: request.callerSourceSha256,
+    });
+    const inputPins = [...current.inputPins, ...observedPins.values()].filter(
+      (pin, index, pins) => pins.findIndex((candidate) => candidate.name === pin.name) === index,
+    );
+    // WHY: 呼出し側のbinding改変でinspection終端のpin検証状態を汚染させない。
+    return copyCompilerBinding(current, inputPins);
+  };
+
+  return {
+    resolve,
+    verify: () => {
+      if (!snapshot || !startVerified || !observedRuntime) return;
+      verifyCompilerInputs([...snapshot.inputPins, ...observedPins.values()]);
+      const runtime = compilerRuntime();
+      if (JSON.stringify(runtime) !== JSON.stringify(observedRuntime))
+        throw new Error("TypeScript Bun runtime changed during inspection");
+    },
   };
 }
 export const typeConfiguration = z.object({

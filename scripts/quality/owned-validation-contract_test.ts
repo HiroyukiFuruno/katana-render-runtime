@@ -26,6 +26,7 @@ import {
   generatedRuntimeRustAssetInputPaths,
   generatedRuntimeRustAssetPaths,
 } from "../runtime-assets/runtime-package-asset-compressor";
+import { changedCompilerInputRead } from "./compiler-input-test-helper";
 import {
   MATHJAX_ABI,
   MATHJAX_DECL_PROFILE,
@@ -40,6 +41,7 @@ import {
   strictJavaScriptProject,
   typeProjectNames,
   typeScriptToolBinding,
+  typeScriptToolInspectionScope,
 } from "./owned-type-projects";
 import {
   inspectGeneratedRustCheckRoute,
@@ -4490,6 +4492,28 @@ test("actual official compiler is separately bound as observed tool pins", () =>
   binding.inputPins.splice(0);
   expect(resolve(request)?.runtime.sha256).not.toBe(binding.runtime.sha256);
   expect(resolve(request)?.lockIdentities).toHaveLength(2);
+});
+
+test("inspection compiler scope rechecks pins after the graph closes", () => {
+  const { root, request } = actualCompilerToolRequest();
+  const scope = typeScriptToolInspectionScope(root);
+  const binding = scope.resolve(request);
+  if (!binding) throw new Error("inspection TypeScript tool binding missing");
+  const firstPin = binding.inputPins[0];
+  if (!firstPin) throw new Error("inspection TypeScript compiler pin missing");
+  const expectedSha = firstPin.sha256;
+  firstPin.sha256 = "0".repeat(64);
+  expect(scope.resolve(request)?.inputPins[0]?.sha256).toBe(expectedSha);
+  scope.verify();
+
+  const read = changedCompilerInputRead(root, spyOn);
+  try {
+    expect(() => scope.verify()).toThrow(
+      "TypeScript compiler input changed: node_modules/typescript/lib/tsc.js",
+    );
+  } finally {
+    read.mockRestore();
+  }
 });
 
 test.each(["caller", "target", "callerSourceSha256", "callerAstSha256", "swcVersion"])(
