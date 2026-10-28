@@ -138,9 +138,36 @@ test("neutral SVG geometry bounds transform tolerance and preserves viewport dim
   const scaled = prepareNeutralSvg(
     sourceSvg("candidate", "#444444", "0").replace('viewBox="0 0 120 80"', 'viewBox="0 0 121 80"'),
   );
+  const shiftedComparison = compareSvgGeometry(original, shifted);
   expect(compareSvgGeometry(original, tinyDelta).accepted).toBe(true);
-  expect(compareSvgGeometry(original, shifted).accepted).toBe(false);
+  expect(shiftedComparison.accepted).toBe(false);
+  expect(shiftedComparison.maxTransformDelta).toBe(0.00002);
   expect(compareSvgGeometry(original, scaled).accepted).toBe(false);
+});
+
+test("neutral SVG geometry reports the measured delta for a rejected transform", () => {
+  const original = prepareNeutralSvg(sourceSvg("official", "#444444", "0"));
+  const shifted = prepareNeutralSvg(sourceSvg("candidate", "#444444", "0.3203125"));
+  const comparison = compareSvgGeometry(original, shifted);
+
+  expect(comparison.accepted).toBe(false);
+  expect(comparison.reasons).toContain("$svg/1:transform");
+  expect(comparison.maxTransformDelta).toBe(0.3203125);
+});
+
+test("neutral SVG geometry leaves unmeasurable transform deltas at zero", () => {
+  const original = prepareNeutralSvg(sourceSvg("official", "#444444", "0"));
+  const malformed = prepareNeutralSvg(
+    sourceSvg("candidate", "#444444", "0").replace(
+      'transform="translate(0,0)"',
+      'transform="translate(1e999,0)"',
+    ),
+  );
+  const comparison = compareSvgGeometry(original, malformed);
+
+  expect(comparison.accepted).toBe(false);
+  expect(comparison.reasons).toContain("$svg/1:transform");
+  expect(comparison.maxTransformDelta).toBe(0);
 });
 
 test("neutral SVG geometry fails closed for malformed and unsupported SVG content", () => {

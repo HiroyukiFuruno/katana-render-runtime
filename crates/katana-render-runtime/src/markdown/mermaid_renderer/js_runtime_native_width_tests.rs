@@ -1,3 +1,5 @@
+#[path = "js_runtime_native_width_c4_description_tests.rs"]
+mod c4_description_tests;
 #[path = "js_runtime_native_width_c4_tests.rs"]
 mod c4_tests;
 #[path = "js_runtime_native_width_helpers.rs"]

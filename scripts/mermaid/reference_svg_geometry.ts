@@ -402,10 +402,11 @@ function compareAttribute(
   }
   if (name.toLowerCase() === "transform") {
     const delta = compareTransforms(left, right);
-    if (delta === null || delta > TRANSFORM_TOLERANCE) {
+    if (delta === null) {
       reasons.push(`${path}:transform`);
       return 0;
     }
+    if (delta > TRANSFORM_TOLERANCE) reasons.push(`${path}:transform`);
     return delta;
   }
   if (

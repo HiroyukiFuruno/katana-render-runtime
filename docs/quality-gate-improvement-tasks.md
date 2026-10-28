@@ -2,6 +2,12 @@
 
 ## 最新の再開地点（2026-10-28）
 
+- [/] R3576のfoundation/AST/限定release build/容量再検証は全actual0。新観測は既存の型付きbbox traceへ統合し、inline JS/runtime組立の重複を避けた。R3578は実catalog2,851件からC4観測1件とglyph116件を照合し、C4成功・glyph115成功/既存ignore1、source前後manifest SHA `749c139b2f857c21f39c0b976e8842462061d12ec65ff2c2eed243301d06e648` 一致。Unicode候補はbyte/scalar対応をspanごとに分離する限定対応で、実CJK描画改善はまだ未計測。現KRRの説明2行の個別合算144.890625/134.03125、全文shape144.217529/133.365356を実測した。同じHelveticaのChromeは倍率1でsplit144.25/133.390625、full144.21875/133.375となる。文字片境界のshape文脈と丸めを既存ライブラリで維持する最小adapterを検討し、paint側の微小CTM条件と混同しない。
+
+- [/] HEAD `90bc9125`の新policy正式一括R3560は117件を全取得・採点し、正式107合格/10未合格/未計測0（画像点だけなら109件99以上）。未合格はC4 EN full/container・JA08-02〜06の7件、Kanban日英2件、JA ZenUML1件。画像99以上のC4日英fullも構造差のため正式合格へ含めない。旧policyの106件と同条件の増減として比較しない。EN fullの局所transform実差0.3203125は親子で相殺されるが、現在の構造契約は不合格。診断maxTransformDeltaが拒否差を除外して過小表示する問題も見つかり、合否を変えず修正する。
+- [/] 同HEADのHTML R3563/R3564は全84条件のKRR/Chrome画像・実font観測を取得し、独立validator actual0、84/84が90以上・最低92.14438、fontIdentityEquivalence=established。measurement=not-performedであり、現行の表示時間/RSS非劣化の合格へ転用しない。画像と実font基準は暫定90の範囲であり、最終99は未完了。以後の修正sourceには改めて検証する。
+- [ ] R3562の既存raw metrics観測は参照のraw SVG SHAと実生成SHAが一致しusableForDiagnosis=true。C4説明2行のChrome bbox144.25/133.390625、先頭2区間の旧KRR観測との差合計0.640625がSVG幅差に対応。ただし実選択faceと現KRR生成時の一致は未証明のため、kerning原因と断定しない。実runtimeの同条件回帰、Unicode glyph補正の安全なbyte/scalar対応、診断差分値修正を非重複担当で進める。参照・合否基準・既存3配布単位は維持する。
+
 - [/] 反復した公開単位の誤判断を再発させない。SVG・HTML・Officeの内部責務分離を公開repo/crate分割へ読み替えず、既存のruntime/assets/CLIの3配布単位を維持する。新規公開SVG crateやtoken更新を要求しない。進捗の主指標は現sourceのMermaid全117件・HTML全84件とし、部分診断を正式合格へ加算しない。未計測と不合格を区別する。
 - [/] R3535で独立raw JSの新policy参照をEN59/JA58取得した。R3544の全117候補生成・raster・bindingは成功したが、正式採点はKanbanの未宣言xlinkをXMLとして解析した例外で結果生成前に停止した。全117の正式スコアは未計測であり、0/117不合格とは報告しない。raw側は実Chromeと同じDIV内HTML構文をparse5で解析し、native側の厳格XML検査を維持した。元SVG・参照PNGは変更していない。R3546型検査とbinding回帰、R3547実Chrome回帰、R3548必須登録回帰・117入力のviewport対照、R3549 foundation、R3550関連3ファイルのBun回帰は全actual0。依存lock変更後の現source参照・frame proof・全117正式採点を新runで取得する。HTML84現source/性能・coverage・公開は未完了。
 

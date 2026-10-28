@@ -8,6 +8,7 @@ use serde_json::Value;
 pub(super) struct MeasurementFixture {
     pub(super) calls: Vec<Value>,
     pub(super) boxes: Vec<Value>,
+    pub(super) c4_description_rows: Vec<Value>,
     pub(super) probes: Value,
 }
 
@@ -67,9 +68,15 @@ fn decode_fixture(output: &str) -> Result<MeasurementFixture, String> {
         .get("probes")
         .cloned()
         .ok_or("probe metadata missing")?;
+    let c4_description_rows = result
+        .get("c4DescriptionRows")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or("C4 description observations are missing")?;
     Ok(MeasurementFixture {
         calls,
         boxes,
+        c4_description_rows,
         probes,
     })
 }
@@ -106,5 +113,5 @@ fn insert_trace(scripts: &mut Vec<DiagramRuntimeScript<'_>>) -> Result<(), Strin
 }
 
 fn result_script() -> &'static str {
-    "if (globalThis.__krrActualBBoxTraceOverflow) throw new Error('native width getBBox trace overflow'); if (globalThis.__krrActualBBoxTraceFailure) throw new Error('native width getBBox snapshot failed: ' + globalThis.__krrActualBBoxTraceFailure); JSON.stringify({ calls: globalThis.__krrActualWidths, boxes: globalThis.__krrActualBBoxes, probes: nativeWidthProbeResult() })"
+    "if (globalThis.__krrActualBBoxTraceOverflow) throw new Error('native width getBBox trace overflow'); if (globalThis.__krrActualBBoxTraceFailure) throw new Error('native width getBBox snapshot failed: ' + globalThis.__krrActualBBoxTraceFailure); JSON.stringify({ calls: globalThis.__krrActualWidths, boxes: globalThis.__krrActualBBoxes, c4DescriptionRows: globalThis.__krrC4DescriptionRows, probes: nativeWidthProbeResult() })"
 }

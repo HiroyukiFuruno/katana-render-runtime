@@ -35,6 +35,38 @@ interface NativeWidthTraceBBoxObservation {
   parent: NativeWidthTraceNodeSnapshot | null;
   bbox: NativeWidthTraceBox;
 }
+interface NativeWidthTextRun {
+  text: string;
+  x: number;
+  width: number;
+  font: {
+    family: string;
+    size: number;
+    weight: number;
+    italic: boolean;
+    nativeAdvanceEligible: boolean;
+  };
+}
+interface NativeWidthTextLine {
+  text: string;
+  x: number;
+  anchor: string;
+  parts: NativeWidthTextRun[];
+}
+interface NativeWidthC4DescriptionRow {
+  text: string;
+  bbox: NativeWidthTraceBox;
+  wholeAdvance: number | null;
+  parts: Array<{
+    text: string;
+    x: number;
+    sourceWidth: number;
+    advance: number;
+    family: string;
+    fontSize: number;
+    weight: number;
+  }>;
+}
 interface NativeWidthTraceNode {
   namespaceURI: string | null;
   localName: string;
@@ -47,6 +79,7 @@ interface NativeWidthTraceNode {
     setProperty(name: unknown, value: unknown, priority?: unknown): undefined;
   };
   getAttribute(name: string): string | null;
+  querySelector(selector: string): NativeWidthTraceNode | null;
   appendChild(child: NativeWidthTraceNode): NativeWidthTraceNode;
   getBBox(...args: unknown[]): NativeWidthTraceBox;
 }
@@ -62,9 +95,18 @@ declare var __katanaMeasureSvgTextMetrics: (...args: unknown[]) => NativeWidthSv
 declare var __katanaMermaidDiagramType: string | undefined;
 declare var __krrActualWidths: NativeWidthTraceCall[];
 declare var __krrActualBBoxes: NativeWidthTraceBBoxObservation[];
+declare var __krrC4DescriptionRows: NativeWidthC4DescriptionRow[];
 declare var __krrActualBBoxTraceOverflow: boolean;
 declare var __krrActualBBoxTraceFailure: string | null;
 declare var __krrProbeWidths: NativeWidthTraceCall[];
 declare var __krrBridgeCalls: number;
 // traceが使う実KatanaNodeだけを投影し、標準Chrome DOMの契約は導入しない。
 declare const document: NativeWidthTraceDocument;
+declare function katanaOrderedTextLines(node: NativeWidthTraceNode): NativeWidthTextLine[];
+declare function katanaRunLayoutAdvance(run: NativeWidthTextRun): number;
+declare function katanaAnchoredTextLeft(anchor: string, x: number, width: number): number;
+declare function katanaNativeSvgRunMetrics(
+  node: NativeWidthTraceNode,
+  text: string,
+  font: NativeWidthTextRun["font"],
+): NativeWidthSvgMetrics | null;

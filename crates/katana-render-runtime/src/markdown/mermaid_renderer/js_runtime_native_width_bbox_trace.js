@@ -1,4 +1,5 @@
 globalThis.__krrActualBBoxes = [];
+globalThis.__krrC4DescriptionRows = [];
 globalThis.__krrActualBBoxTraceOverflow = false;
 globalThis.__krrActualBBoxTraceFailure = null;
 const nativeWidthBBoxTraceLimit = 64;
@@ -12,7 +13,10 @@ const originalGetBBox = svgPrototypeCandidate.getBBox;
 /** @this {NativeWidthTraceNode} @param {...unknown} args @returns {NativeWidthTraceBox} */
 svgPrototypeCandidate.getBBox = function (...args) {
   const box = originalGetBBox.apply(this, args);
-  if (actualPhase) recordActualBBox(this, box);
+  if (actualPhase) {
+    recordActualBBox(this, box);
+    recordC4DescriptionRows(this, box);
+  }
   return box;
 };
 
@@ -28,6 +32,48 @@ function nativeWidthNodeSnapshot(node) {
       .filter((child) => child.localName === "svg")
       .map((child) => child.getAttribute("width")),
   };
+}
+
+/** @param {NativeWidthTraceNode} node @param {NativeWidthTraceBox} box */
+function recordC4DescriptionRows(node, box) {
+  if (node.localName !== "g" || node.getAttribute("class") !== "c4-descr") return;
+  const text = node.querySelector("text");
+  if (!text) return;
+  const targets = ["A customer of the bank, with", "A system of the bank, with"];
+  if (!targets.some((target) => String(text.textContent ?? "").includes(target))) return;
+  actualPhase = false;
+  try {
+    for (const line of katanaOrderedTextLines(text)) {
+      if (
+        !targets.includes(line.text) ||
+        globalThis.__krrC4DescriptionRows.some((row) => row.text === line.text)
+      )
+        continue;
+      const end = line.parts.at(-1);
+      if (!end) throw new Error("C4 description line has no parts");
+      const first = line.parts[0];
+      if (!first) throw new Error("C4 description line has no first part");
+      const width = end.x + katanaRunLayoutAdvance(end) - line.x;
+      const left = katanaAnchoredTextLeft(line.anchor, line.x, width);
+      const whole = katanaNativeSvgRunMetrics(text, line.text, first.font);
+      globalThis.__krrC4DescriptionRows.push({
+        text: line.text,
+        bbox: { x: box.x, y: box.y, width: box.width, height: box.height },
+        wholeAdvance: whole?.advance ?? null,
+        parts: line.parts.map((part) => ({
+          text: part.text,
+          x: part.x + left - line.x,
+          sourceWidth: part.width,
+          advance: katanaRunLayoutAdvance(part),
+          family: part.font.family,
+          fontSize: part.font.size,
+          weight: part.font.weight,
+        })),
+      });
+    }
+  } finally {
+    actualPhase = true;
+  }
 }
 
 /** @param {unknown} value @returns {value is Pick<NativeWidthTraceNode, "getBBox">} */

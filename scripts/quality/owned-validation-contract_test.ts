@@ -2893,6 +2893,7 @@ function nativeWidthTraceFixture(): string {
     nativeWidthHostPath,
     `${nativeWidthTraceDirectory}/js_runtime.rs`,
     `${nativeWidthTraceDirectory}/js_runtime_native_width_tests.rs`,
+    `${nativeWidthTraceDirectory}/js_runtime_native_width_c4_description_tests.rs`,
     `${nativeWidthTraceDirectory}/js_runtime_native_width_c4_tests.rs`,
     `${nativeWidthTraceDirectory}/js_runtime_native_width_ishikawa_tests.rs`,
     `${nativeWidthTraceDirectory}/js_runtime_native_width_oracle_boundary_tests.rs`,
@@ -2971,7 +2972,11 @@ test("actual Rust native width test trace remains mandatory with isolated strict
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_tests.rs`,
-      sha256: "9eb7b0ea3f92aab02ffa0367b3c06ca4d9e36bb6ce406e8dcee2131914d73729",
+      sha256: "5b58a94792571378a1d04a0e1d3ba42279b6b2c7b103c3a41a1861e285a6b1fb",
+    },
+    {
+      path: `${nativeWidthTraceDirectory}/js_runtime_native_width_c4_description_tests.rs`,
+      sha256: "c4a278cb940d76229ee901ae1c123e980b32fd9dbf5e04ef6b06c200946777bd",
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_c4_tests.rs`,
@@ -2983,11 +2988,11 @@ test("actual Rust native width test trace remains mandatory with isolated strict
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_helpers.rs`,
-      sha256: "a21a8b260625067348d8531512c8a489d3c71ec651e3b6710c1c69c4bb4da45b",
+      sha256: "7b366d9a6ba873fc5393b01a2520d6b75b54f13ffd271148820f91009240e8ba",
     },
     {
       path: nativeWidthBBoxTracePath,
-      sha256: "36751923cccf5e76c16e4cdcbb48b9bed74354e5ea208c793c6415a85661b16b",
+      sha256: "12b040861be055ac70267ff4520db572dfef21ded952e98f5ee0a953c6559484",
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_oracle_boundary_tests.rs`,
@@ -3053,6 +3058,7 @@ test.each([
   nativeWidthTracePath,
   nativeWidthBBoxTracePath,
   `${nativeWidthTraceDirectory}/js_runtime_native_width_helpers.rs`,
+  `${nativeWidthTraceDirectory}/js_runtime_native_width_c4_description_tests.rs`,
   `${nativeWidthTraceDirectory}/js_runtime_native_width_ishikawa_tests.rs`,
   `${nativeWidthTraceDirectory}/js_runtime_native_width_oracle_boundary_tests.rs`,
 ])("Rust test trace rejects missing reviewed input: %s", (name) => {
