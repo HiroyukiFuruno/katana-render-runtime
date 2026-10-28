@@ -67,6 +67,52 @@ async function inspectTarget(page: Page, selector: string) {
       const point = element.getStartPositionOfChar(index);
       return { index, x: point.x, y: point.y };
     });
+    const canvasFontUnsupportedReason = () => {
+      if (
+        !["normal", "100%"].includes(style.fontStretch) ||
+        style.fontVariationSettings !== "normal"
+      )
+        return "unsupported font stretch or variation settings";
+      if (
+        !["normal", "italic"].includes(style.fontStyle) ||
+        style.fontVariantCaps !== "normal" ||
+        style.fontFeatureSettings !== "normal"
+      )
+        return "unsupported font style or feature settings";
+      return null;
+    };
+    const captureCanvasMetrics = () => {
+      const unsupported = canvasFontUnsupportedReason();
+      if (unsupported !== null) return { value: null, reason: unsupported };
+      const font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      if (!CSS.supports("font", font))
+        return { value: null, reason: "unsupported canvas font shorthand" };
+      const context = document.createElement("canvas").getContext("2d");
+      if (context === null) return { value: null, reason: "canvas 2d context unavailable" };
+      context.font = font;
+      const metrics = context.measureText(element.textContent ?? "");
+      if (
+        !Number.isFinite(metrics.fontBoundingBoxAscent) ||
+        !Number.isFinite(metrics.fontBoundingBoxDescent)
+      )
+        return { value: null, reason: "canvas font bounding box metrics unavailable" };
+      const finite = (value: number) => (Number.isFinite(value) ? value : null);
+      return {
+        reason: null,
+        value: {
+          font: context.font,
+          text: element.textContent ?? "",
+          fontBoundingBoxAscent: finite(metrics.fontBoundingBoxAscent),
+          fontBoundingBoxDescent: finite(metrics.fontBoundingBoxDescent),
+          actualBoundingBoxAscent: finite(metrics.actualBoundingBoxAscent),
+          actualBoundingBoxDescent: finite(metrics.actualBoundingBoxDescent),
+          actualBoundingBoxLeft: finite(metrics.actualBoundingBoxLeft),
+          actualBoundingBoxRight: finite(metrics.actualBoundingBoxRight),
+          width: finite(metrics.width),
+        },
+      };
+    };
+    const canvasMetrics = captureCanvasMetrics();
     return {
       text: element.textContent,
       computed: {
@@ -81,6 +127,7 @@ async function inspectTarget(page: Page, selector: string) {
         writingMode: style.writingMode,
       },
       bbox: { x: box.x, y: box.y, width: box.width, height: box.height },
+      canvasMetrics,
       ctm: matrixValues(matrix),
       screenCtm: matrixValues(screenMatrix),
       characterIndexConvention: "SVG getStartPositionOfChar indices; not glyph IDs",

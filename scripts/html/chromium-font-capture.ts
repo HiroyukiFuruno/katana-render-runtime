@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto";
 import type { ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
-import { chromium, type Browser, type BrowserServer } from "playwright";
+import { type Browser, type BrowserServer, chromium } from "playwright";
 import { type ChromiumFontTrace, readChromiumFontTrace } from "./chromium-font-trace";
 
 export type ObserverBrowserObservation = {
