@@ -36,10 +36,13 @@ function nativeWidthNodeSnapshot(node) {
 
 /** @param {NativeWidthTraceNode} node @param {NativeWidthTraceBox} box */
 function recordC4DescriptionRows(node, box) {
-  if (node.localName !== "g" || node.getAttribute("class") !== "c4-descr") return;
+  if (node.localName !== "g") return;
+  const targets = globalThis.__krrTraceTargets.length
+    ? globalThis.__krrTraceTargets.filter(([kind]) => kind === "row").map(([, text]) => text)
+    : ["A customer of the bank, with", "A system of the bank, with"];
+  if (!["c4-descr", "c4-name", "c4-type"].includes(node.getAttribute("class") ?? "")) return;
   const text = node.querySelector("text");
   if (!text) return;
-  const targets = ["A customer of the bank, with", "A system of the bank, with"];
   if (!targets.some((target) => String(text.textContent ?? "").includes(target))) return;
   actualPhase = false;
   try {
@@ -49,24 +52,34 @@ function recordC4DescriptionRows(node, box) {
         globalThis.__krrC4DescriptionRows.some((row) => row.text === line.text)
       )
         continue;
-      const end = line.parts.at(-1);
-      if (!end) throw new Error("C4 description line has no parts");
-      const first = line.parts[0];
-      if (!first) throw new Error("C4 description line has no first part");
-      const width = end.x + katanaRunLayoutAdvance(end) - line.x;
-      const left = katanaAnchoredTextLeft(line.anchor, line.x, width);
-      const whole = katanaNativeSvgRunMetrics(text, line.text, first.font);
-      globalThis.__krrC4DescriptionRows.push({
-        text: line.text,
-        bbox: { x: box.x, y: box.y, width: box.width, height: box.height },
-        wholeAdvance: whole?.advance ?? null,
-        grouped: line.parts.length === 1 && first.fragmentAdvances !== undefined,
-        parts: nativeWidthDescriptionParts(line, left),
-      });
+      if (!nativeWidthRecordDescriptionLine(line, text, box)) return;
     }
   } finally {
     actualPhase = true;
   }
+}
+
+/** @param {NativeWidthTextLine} line @param {NativeWidthTraceNode} text @param {NativeWidthTraceBox} box */
+function nativeWidthRecordDescriptionLine(line, text, box) {
+  const end = line.parts.at(-1);
+  if (!end) throw new Error("C4 description line has no parts");
+  const first = line.parts[0];
+  if (!first) throw new Error("C4 description line has no first part");
+  const width = end.x + katanaRunLayoutAdvance(end) - line.x;
+  const left = katanaAnchoredTextLeft(line.anchor, line.x, width);
+  const whole = katanaNativeSvgRunMetrics(text, line.text, first.font);
+  if (globalThis.__krrC4DescriptionRows.length >= nativeWidthBBoxTraceLimit) {
+    globalThis.__krrActualBBoxTraceOverflow = true;
+    return false;
+  }
+  globalThis.__krrC4DescriptionRows.push({
+    text: line.text,
+    bbox: { x: box.x, y: box.y, width: box.width, height: box.height },
+    wholeAdvance: whole?.advance ?? null,
+    grouped: line.parts.length === 1 && first.fragmentAdvances !== undefined,
+    parts: nativeWidthDescriptionParts(line, left),
+  });
+  return true;
 }
 
 /** @param {NativeWidthTextLine} line @param {number} left @returns {NativeWidthC4DescriptionRow["parts"]} */
@@ -109,19 +122,35 @@ function hasNativeWidthBBox(value) {
 
 /** @param {NativeWidthTraceNode} node @param {NativeWidthTraceBox} box */
 function recordActualBBox(node, box) {
-  if (!nativeWidthIsArchitectureBBoxTarget(node) && !nativeWidthIsC4DiagnosticTarget(node)) return;
+  const targeted = globalThis.__krrTraceTargets.some(
+    ([kind, text]) => kind === node.localName && String(node.textContent ?? "").includes(text),
+  );
+  if (
+    !nativeWidthIsArchitectureBBoxTarget(node) &&
+    !nativeWidthIsC4DiagnosticTarget(node) &&
+    !targeted
+  )
+    return;
   if (globalThis.__krrActualBBoxes.length >= nativeWidthBBoxTraceLimit) {
     globalThis.__krrActualBBoxTraceOverflow = true;
     return;
   }
   try {
+    actualPhase = false;
     globalThis.__krrActualBBoxes.push({
       node: nativeWidthNodeSnapshot(node),
       parent: node.parentNode ? nativeWidthNodeSnapshot(node.parentNode) : null,
       bbox: { x: box.x, y: box.y, width: box.width, height: box.height },
+      children: (targeted ? node.children : []).map((child) => ({
+        node: nativeWidthNodeSnapshot(child),
+        transform: child.getAttribute("transform"),
+        bbox: child.getBBox(),
+      })),
     });
   } catch (error) {
     globalThis.__krrActualBBoxTraceFailure = String(error);
+  } finally {
+    actualPhase = true;
   }
 }
 

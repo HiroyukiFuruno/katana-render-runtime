@@ -9,16 +9,25 @@ pub(super) struct MeasurementFixture {
     pub(super) calls: Vec<Value>,
     pub(super) boxes: Vec<Value>,
     pub(super) c4_description_rows: Vec<Value>,
+    pub(super) svg: String,
     pub(super) probes: Value,
 }
 
 pub(super) fn render_fixture(source: &str) -> Result<MeasurementFixture, String> {
+    render_fixture_with_targets(source, &[])
+}
+
+fn render_fixture_with_targets(
+    source: &str,
+    targets: &[(&str, &str)],
+) -> Result<MeasurementFixture, String> {
     let mermaid = RuntimeAsset::mermaid();
     let path = mermaid.materialize_at(mermaid.materialized_path())?;
     let bundle = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
     let diagram = MermaidDiagramType::from_source(source);
     let mut scripts = MermaidRuntimeScripts::build(&bundle, &request(source, diagram), diagram);
     insert_trace(&mut scripts)?;
+    install_targets_and_capture(&mut scripts, targets)?;
     scripts.push(DiagramRuntimeScript::owned(
         "native-width-result.js",
         result_script().into(),
@@ -27,14 +36,46 @@ pub(super) fn render_fixture(source: &str) -> Result<MeasurementFixture, String>
     decode_fixture(&output)
 }
 
+fn install_targets_and_capture(
+    scripts: &mut Vec<DiagramRuntimeScript<'_>>,
+    targets: &[(&str, &str)],
+) -> Result<(), String> {
+    let index = scripts
+        .iter()
+        .position(|script| script.name == "render-mermaid.js")
+        .ok_or("Mermaid render entrypoint missing")?;
+    let targets = serde_json::to_string(targets).map_err(|error| error.to_string())?;
+    scripts.insert(
+        index,
+        DiagramRuntimeScript::owned(
+            "native-width-targets.js",
+            format!("globalThis.__krrTraceTargets = {targets};"),
+        ),
+    );
+    let entry = &mut scripts[index + 1];
+    entry.code = format!(
+        "Promise.resolve({}).then(svg => {{ globalThis.__krrRenderedSvg = svg; return svg; }})",
+        entry.code.trim_end_matches(';')
+    )
+    .into();
+    Ok(())
+}
+
 pub(super) fn render_fixture_with_font_audit(
     source: &str,
+) -> Result<(MeasurementFixture, Value), String> {
+    render_fixture_targets_with_font_audit(source, &[])
+}
+
+pub(super) fn render_fixture_targets_with_font_audit(
+    source: &str,
+    targets: &[(&str, &str)],
 ) -> Result<(MeasurementFixture, Value), String> {
     #[cfg(target_os = "macos")]
     {
         let (result, audit) =
             crate::markdown::svg_rasterize::SvgRasterizeOps::with_actual_font_source_audit(|| {
-                render_fixture(source)
+                render_fixture_with_targets(source, targets)
             })
             .map_err(|error| error.to_string())?;
         Ok((result?, audit))
@@ -42,7 +83,7 @@ pub(super) fn render_fixture_with_font_audit(
     #[cfg(not(target_os = "macos"))]
     {
         Ok((
-            render_fixture(source)?,
+            render_fixture_with_targets(source, targets)?,
             serde_json::json!({
                 "available": false,
                 "faces": [],
@@ -54,31 +95,33 @@ pub(super) fn render_fixture_with_font_audit(
 
 fn decode_fixture(output: &str) -> Result<MeasurementFixture, String> {
     let result: Value = serde_json::from_str(output).map_err(|error| error.to_string())?;
-    let calls = result
-        .get("calls")
-        .and_then(Value::as_array)
-        .cloned()
-        .ok_or("actual native width calls are missing")?;
-    let boxes = result
-        .get("boxes")
-        .and_then(Value::as_array)
-        .cloned()
-        .ok_or("actual getBBox observations are missing")?;
     let probes = result
         .get("probes")
         .cloned()
         .ok_or("probe metadata missing")?;
-    let c4_description_rows = result
-        .get("c4DescriptionRows")
-        .and_then(Value::as_array)
-        .cloned()
-        .ok_or("C4 description observations are missing")?;
     Ok(MeasurementFixture {
-        calls,
-        boxes,
-        c4_description_rows,
+        calls: observation_array(&result, "calls", "actual native width calls are missing")?,
+        boxes: observation_array(&result, "boxes", "actual getBBox observations are missing")?,
+        c4_description_rows: observation_array(
+            &result,
+            "c4DescriptionRows",
+            "C4 description observations are missing",
+        )?,
+        svg: result
+            .get("svg")
+            .and_then(Value::as_str)
+            .ok_or("rendered SVG missing")?
+            .to_owned(),
         probes,
     })
+}
+
+fn observation_array(result: &Value, key: &str, error: &str) -> Result<Vec<Value>, String> {
+    result
+        .get(key)
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| error.to_owned())
 }
 
 fn request(source: &str, diagram: MermaidDiagramType) -> String {
@@ -113,5 +156,5 @@ fn insert_trace(scripts: &mut Vec<DiagramRuntimeScript<'_>>) -> Result<(), Strin
 }
 
 fn result_script() -> &'static str {
-    "if (globalThis.__krrActualBBoxTraceOverflow) throw new Error('native width getBBox trace overflow'); if (globalThis.__krrActualBBoxTraceFailure) throw new Error('native width getBBox snapshot failed: ' + globalThis.__krrActualBBoxTraceFailure); JSON.stringify({ calls: globalThis.__krrActualWidths, boxes: globalThis.__krrActualBBoxes, c4DescriptionRows: globalThis.__krrC4DescriptionRows, probes: nativeWidthProbeResult() })"
+    "if (globalThis.__krrActualBBoxTraceOverflow) throw new Error('native width getBBox trace overflow'); if (globalThis.__krrActualBBoxTraceFailure) throw new Error('native width getBBox snapshot failed: ' + globalThis.__krrActualBBoxTraceFailure); JSON.stringify({ calls: globalThis.__krrActualWidths, boxes: globalThis.__krrActualBBoxes, c4DescriptionRows: globalThis.__krrC4DescriptionRows, svg: globalThis.__krrRenderedSvg, probes: nativeWidthProbeResult() })"
 }

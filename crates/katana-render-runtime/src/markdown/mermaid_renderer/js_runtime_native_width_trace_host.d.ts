@@ -34,6 +34,7 @@ interface NativeWidthTraceBBoxObservation {
   node: NativeWidthTraceNodeSnapshot;
   parent: NativeWidthTraceNodeSnapshot | null;
   bbox: NativeWidthTraceBox;
+  children: Array<{ node: NativeWidthTraceNodeSnapshot; transform: string | null; bbox: NativeWidthTraceBox }>;
 }
 interface NativeWidthTextRun {
   text: string;
@@ -101,6 +102,8 @@ declare var __krrActualBBoxes: NativeWidthTraceBBoxObservation[];
 declare var __krrC4DescriptionRows: NativeWidthC4DescriptionRow[];
 declare var __krrActualBBoxTraceOverflow: boolean;
 declare var __krrActualBBoxTraceFailure: string | null;
+declare var __krrTraceTargets: Array<[string, string]>;
+declare var __krrRenderedSvg: string;
 declare var __krrProbeWidths: NativeWidthTraceCall[];
 declare var __krrBridgeCalls: number;
 // traceが使う実KatanaNodeだけを投影し、標準Chrome DOMの契約は導入しない。
