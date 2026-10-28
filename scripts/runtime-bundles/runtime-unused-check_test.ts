@@ -55,6 +55,7 @@ import { NATIVE_WIDTH_HASH_INPUT_PATHS } from "./runtime-unused-native-width-has
 import {
   BrowserUnusedOrigin,
   type BrowserUnusedProgram,
+  eraseCallbackTypes,
   inspectSharedSvgCaptureCallback,
   inspectSharedSvgCaptureCallers,
   inspectSharedSvgCaptureProgram,
@@ -993,7 +994,12 @@ describe("native width fixture", () => {
   const nativeScriptTests = `${nativeBase}js_runtime_scripts_tests.rs`;
   const nativeRoute = [
     nativeHelper,
+    `${nativeBase}js_runtime.rs`,
     `${nativeBase}js_runtime_native_width_tests.rs`,
+    `${nativeBase}js_runtime_native_width_c4_description_tests.rs`,
+    `${nativeBase}js_runtime_native_width_c4_tests.rs`,
+    `${nativeBase}js_runtime_native_width_ishikawa_tests.rs`,
+    `${nativeBase}js_runtime_native_width_oracle_boundary_tests.rs`,
     nativeTrace,
     nativeBBoxTrace,
     ...NATIVE_WIDTH_HASH_INPUT_PATHS,
@@ -1065,7 +1071,7 @@ describe("native width fixture", () => {
     const helper = nativeRaw.get(nativeHelper);
     if (!program || !helper) throw new Error("missing Rust result metadata");
     expect(helper.code.slice(program.start, program.end)).toBe(
-      "if (globalThis.__krrActualBBoxTraceOverflow) throw new Error('native width getBBox trace overflow'); if (globalThis.__krrActualBBoxTraceFailure) throw new Error('native width getBBox snapshot failed: ' + globalThis.__krrActualBBoxTraceFailure); JSON.stringify({ calls: globalThis.__krrActualWidths, boxes: globalThis.__krrActualBBoxes, probes: nativeWidthProbeResult() })",
+      "if (globalThis.__krrActualBBoxTraceOverflow) throw new Error('native width getBBox trace overflow'); if (globalThis.__krrActualBBoxTraceFailure) throw new Error('native width getBBox snapshot failed: ' + globalThis.__krrActualBBoxTraceFailure); JSON.stringify({ calls: globalThis.__krrActualWidths, boxes: globalThis.__krrActualBBoxes, c4DescriptionRows: globalThis.__krrC4DescriptionRows, svg: globalThis.__krrRenderedSvg, probes: nativeWidthProbeResult() })",
     );
     expect(program.consumerRoute?.map(({ sourcePath }) => sourcePath)).toEqual(nativeRoute);
     expect(
@@ -1826,7 +1832,7 @@ test("shared sizing binds one real exported callback to both actual mode callers
     "strict",
     'this.options.referenceMode === "strictVendorOriginal"',
   ]);
-  expect(sizingProgram.data).toBe("{ strict, mode }");
+  expect(sizingProgram.data).toBe("{ strict, mode, rawSvg: null }");
   expect(sizingProgram.mode).toBe("shared-svg-capture");
   const metadata = unusedProgramMetadata(sizingContext.name, sizingOrigin.programs);
   expect("executionVerified" in metadata && metadata.executionVerified).toBe(false);
@@ -1882,6 +1888,25 @@ test.each(["dimensionAt", "getBoundingClientRect", "strict", "mode"])(
   },
 );
 
+test("shared sizing callback erases nested parameter and return annotations", () => {
+  const inspected = inspectSharedSvgCaptureCallback(sizingHelper.code);
+  expect(inspected.data).toBe("{ strict, mode, rawSvg: null }");
+  for (const [index, range] of inspected.removals.entries()) {
+    const previous = inspected.removals[index - 1];
+    if (previous) expect(range.start).toBeGreaterThanOrEqual(previous.end);
+  }
+});
+
+test("callback type erasure still rejects partial overlap", () => {
+  const code = "function capture() { return 1; }";
+  expect(() =>
+    eraseCallbackTypes(code, 0, code.length, [
+      { start: 10, end: 18 },
+      { start: 15, end: 21 },
+    ]),
+  ).toThrow("overlapping/unknown callback type erasure");
+});
+
 test.each([
   "missing-export",
   "alias-receiver",
@@ -1893,25 +1918,31 @@ test.each([
   "computed",
   "closure",
   "data-order",
+  "unknown-callee",
+  "exported-callback",
+  "shadow-callback",
 ])(
   "actual sizing inspector rejects %s callback binding drift before physical admission",
   (kind) => {
     let code = sizingHelper.code;
     if (kind === "missing-export")
-      code = code.replace("export function resizeSvgCapture", "function resizeSvgCapture");
+      code = code.replace(
+        "export async function resizeSvgCapture",
+        "async function resizeSvgCapture",
+      );
     if (kind === "alias-receiver")
       code = code.replace(
-        "  return page.evaluate(",
-        "  const receiver = page; return receiver.evaluate(",
+        "  await page.evaluate(",
+        "  const receiver = page; await receiver.evaluate(",
       );
     if (kind === "shadow")
       code = code
-        .replace("  return page.evaluate(", "  { const page = null; return page.evaluate(")
-        .replace("    { strict, mode },\n  );", "    { strict, mode },\n  ); }");
+        .replace("  await page.evaluate(", "  { const page = null; await page.evaluate(")
+        .replace("rawSvg: null });", "rawSvg: null }); }");
     if (kind === "reassign")
-      code = code.replace("  return page.evaluate(", "  page = page; return page.evaluate(");
+      code = code.replace("  await page.evaluate(", "  page = page; await page.evaluate(");
     if (kind === "update")
-      code = code.replace("  return page.evaluate(", "  page++; return page.evaluate(");
+      code = code.replace("  await page.evaluate(", "  page++; await page.evaluate(");
     if (kind === "fake-Pick")
       code = code.replace(
         "export type SvgCaptureSizingMode",
@@ -1923,9 +1954,22 @@ test.each([
         "type PageHandle = unknown;",
       );
     if (kind === "computed")
-      code = code.replace("  return page.evaluate(", '  return page["evaluate"](');
-    if (kind === "closure") code = code.replace("Math.ceil(", "rasterSha256(");
-    if (kind === "data-order") code = code.replace("{ strict, mode },", "{ mode, strict },");
+      code = code.replace(
+        "  await page.evaluate(sizeSvgCapture,",
+        '  await page["evaluate"](sizeSvgCapture,',
+      );
+    if (kind === "closure") code = code.replace("Math.ceil(", "hostDocument.ceil(");
+    if (kind === "data-order")
+      code = code.replace("{ strict, mode, rawSvg: null }", "{ mode, strict, rawSvg: null }");
+    if (kind === "unknown-callee")
+      code = code.replace("page.evaluate(sizeSvgCapture,", "page.evaluate(otherCapture,");
+    if (kind === "exported-callback")
+      code = code.replace("function sizeSvgCapture(", "export function sizeSvgCapture(");
+    if (kind === "shadow-callback")
+      code = code.replace(
+        "  await page.evaluate(sizeSvgCapture,",
+        "  const sizeSvgCapture = () => 0; await page.evaluate(sizeSvgCapture,",
+      );
     expect(code).not.toBe(sizingHelper.code);
     expect(() => inspectSharedSvgCaptureCallback(code)).toThrow();
   },
@@ -2257,7 +2301,7 @@ test.each(["mermaidJs", "mermaidZenumlJs"] as const)(
   },
 );
 
-test("official strict physical producer binds five callbacks and external bytes without vendor ownership", () => {
+test("official strict physical producer binds browser callbacks and external bytes without vendor ownership", () => {
   const { raw, context, mermaid, zenuml } = strictPhysicalFixture();
   const programs = context.programs,
     inputs = context.externalInputs;
@@ -2355,6 +2399,25 @@ const strictBoundaryMutations = [
     error: "computed official strict page API",
   },
   {
+    kind: "strict viewport capability check removed",
+    pathIndex: 2,
+    change: (code: string) => code.replace("if (page.setViewportSize === undefined)", "if (false)"),
+    error: "changed/missing shared SVG consumer",
+  },
+  {
+    kind: "strict viewport resize removed",
+    pathIndex: 2,
+    change: (code: string) => code.replace("  await page.setViewportSize(viewport);\n", ""),
+    error: "changed/missing shared SVG consumer",
+  },
+  {
+    kind: "strict viewport callback changed",
+    pathIndex: 2,
+    change: (code: string) =>
+      code.replace("page.evaluate(sizeSvgCapture, {", "page.evaluate(otherCapture, {"),
+    error: "changed/missing shared SVG consumer",
+  },
+  {
     kind: "extra global callback",
     pathIndex: 4,
     change: (code: string) => `${code}\npage.evaluate(() => document.title);`,
@@ -2415,7 +2478,10 @@ const strictBoundaryMutations = [
     kind: "strict caller branch",
     pathIndex: 0,
     change: (code: string) =>
-      code.replace("if (strict) {\n      loadedSvg", "if (!strict) {\n      loadedSvg"),
+      code.replace(
+        "if (strict) {\n      const capturePage",
+        "if (!strict) {\n      const capturePage",
+      ),
     error: "caller call/branch changed",
   },
   {
@@ -2423,8 +2489,8 @@ const strictBoundaryMutations = [
     pathIndex: 0,
     change: (code: string) =>
       code.replace(
-        "loadedSvg = await assignStrictSvg(page, primarySvg)",
-        "loadedSvg = await observeCaptureSnapshot(page)",
+        "const loadedSvg = await assignStrictSvg(capturePage, primarySvg)",
+        "const loadedSvg = await observeCaptureSnapshot(capturePage)",
       ),
     error: "caller call/branch changed",
   },

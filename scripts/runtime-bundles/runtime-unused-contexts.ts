@@ -409,21 +409,22 @@ export const officialStrictProgramSchema = strictSourceBindingSchema
 // 全sourceの再構成ではなく、既存の正規caller/branchを有限のAST registryで照合する。
 const officialStrictCallerMethods = {
   [rendererSource]: {
-    renderPage: "28da7c4e7d4f0d06eb1a6aec989e50b122150b74ff1ea2e8d5123521733ecb48",
+    renderPage: "a79336ff2fa62ffdab55b35e3a05f3f76c0943a06cece2fb0243dbe259ef00c5",
     installModeRuntime: "6bc1b915ac208e68f94619c42daa935adb438d87187b51f8cc6f9abb330c5de8",
     isStrictMode: "e39e8e91a3f433430ed395504ed991cc8345e13722a8191002200cb105b8e89c",
-    capture: "df4b66224ec2eb411650a75a5a1a3f7e0683e2f869a52d5f473262388c66a07d",
+    capture: "b5f80f0c3517f7c57ba2e6ca6d5fb34da43e2f97066be15809a60c12ffab5bc9",
     renderSvg: "752c43d5ca595bb6659d0396b54691f7bd96b5beae145ae36ba490ccf669a176",
     renderVendorOriginalSvg: "92b9b0ee782111a5c2f84d27b3a950f8eeddaa288a66e3e6b023fab9e7916995",
     resizeCapture: "14e5a286e27378bd59229322c046e991c43ad1bb6050b18543f46e177ea8c694",
     waitForSvgImages: "612669970b33f1cb5fd8df340700576e328ab09c0bbcad7cff19da21f2505877",
   },
   "scripts/mermaid/rasterize-svg-dir.ts": {
-    capture: "69d159bfe466f6f325a3ed91aac281fc02f0246a91db938362c8df1bfbd415c4",
+    capture: "d3ef7901531d28f2af2701c142faf5641e38a44fbff6b0eb9b740975b772530f",
     waitUntilReady: "8471a9070aa4a4b931e36999cca0c5af88fe63c773fa78d236f2320269cd98c4",
   },
 } as const;
 const officialStrictHelperFunctions = {
+  prepareStrictSvgCapture: "653ba9e1a673dd741c035cfa3205da9b38120638f09dc21ba602ba5c2468b718",
   assignStrictSvg: "65d171841d33751fad405b751dc7e2591ed833a5dd9a76efd9d11f06333237a6",
   observeCaptureSnapshot: "bda9006f824aca086c5d461c3cc42bf9b6af4fe95e59c250c5e1949173f0fe8b",
   waitForStrictSvgExternalImages:
@@ -450,10 +451,22 @@ function strictHelperInventory(sourcePath: string, code: string) {
     throw new Error(`official strict parser source position changed: ${sourcePath}`);
   const expected =
     sourcePath === strictCaptureSource
-      ? ["resizeSvgCapture", "assignStrictSvg", "observeCaptureSnapshot"]
-      : ["waitForStrictSvgExternalImages", "waitForStrictSvgExternalImages"];
-  const found: { method: string; node: Record<string, unknown>; owner: Record<string, unknown> }[] =
-    [];
+      ? [
+          "resizeSvgCapture.evaluate",
+          "prepareStrictSvgCapture.setViewportSize.read",
+          "prepareStrictSvgCapture.evaluate",
+          "prepareStrictSvgCapture.setViewportSize.call",
+          "assignStrictSvg.evaluate",
+          "observeCaptureSnapshot.evaluate",
+        ]
+      : ["waitForStrictSvgExternalImages.evaluate", "waitForStrictSvgExternalImages.evaluate"];
+  const found: {
+    method: string;
+    api: string;
+    use: "call" | "read";
+    node: Record<string, unknown>;
+    owner: Record<string, unknown>;
+  }[] = [];
   for (const entry of module.body) {
     if (entry.type !== "ExportDeclaration" || entry.declaration.type !== "FunctionDeclaration")
       continue;
@@ -462,12 +475,19 @@ function strictHelperInventory(sourcePath: string, code: string) {
     for (const { node } of browserAstNodes(owner, method, owner).filter(strictPageMember)) {
       if (astObject.parse(node.property).type === "Computed")
         throw new Error("computed official strict page API");
-      found.push({ method, node, owner });
+      found.push({
+        method,
+        api: strictPageApi(node),
+        use: strictPageUse(owner, node),
+        node,
+        owner,
+      });
     }
   }
   const allMembers = browserAstNodes(module).filter(strictPageMember);
   if (
-    found.map(({ method }) => method).join("/") !== expected.join("/") ||
+    found.map(({ method, api, use }) => `${method}.${api}.${use}`).join("/") !==
+      expected.map((entry) => (entry.endsWith(".evaluate") ? `${entry}.call` : entry)).join("/") ||
     allMembers.length !== expected.length
   )
     throw new Error(`official strict callback inventory/order changed: ${sourcePath}`);
@@ -477,10 +497,32 @@ function strictHelperInventory(sourcePath: string, code: string) {
 function strictPageMember({ node }: { node: Record<string, unknown> }) {
   return (
     node.type === "MemberExpression" &&
-    astObject.parse(node.object).value === "page" &&
-    (astObject.parse(node.property).value === "evaluate" ||
-      astObject.parse(node.property).type === "Computed")
+    astObject.parse(node.object).type === "Identifier" &&
+    astObject.parse(node.object).value === "page"
   );
+}
+
+function strictPageApi(node: Record<string, unknown>): string {
+  const property = astObject.parse(node.property);
+  if (property.type === "Computed") throw new Error("computed official strict page API");
+  if (
+    property.type !== "Identifier" ||
+    !["evaluate", "setViewportSize"].includes(String(property.value))
+  )
+    throw new Error("unknown official strict page API");
+  return String(property.value);
+}
+
+function strictPageUse(
+  owner: Record<string, unknown>,
+  member: Record<string, unknown>,
+): "call" | "read" {
+  return browserAstNodes(owner).some(
+    ({ node }) =>
+      node.type === "CallExpression" && JSON.stringify(node.callee) === JSON.stringify(member),
+  )
+    ? "call"
+    : "read";
 }
 
 function strictHelperCallbacks(
@@ -489,50 +531,154 @@ function strictHelperCallbacks(
   consumerRoute: readonly { sourcePath: string; sourceSha256: string }[],
 ): BrowserUnusedProgram[] {
   const { module, found } = strictHelperInventory(sourcePath, source.code);
-  const bytes = Buffer.from(source.code);
-  const offset = (at: number) =>
-    new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, at - module.span.start))
-      .length;
   const imported = importedPageHandle(browserAstNodes(module));
+  const offset = strictSourceOffset(source.code, module.span.start);
   const programs: BrowserUnusedProgram[] = [];
-  for (const { method, node, owner } of found) {
-    validatePageReceiver(
-      imported,
-      node,
-      owner,
-      method === "resizeSvgCapture" || sourcePath === strictImageSource,
-    );
-    const call = browserAstNodes(owner).find(
-      ({ node: candidate }) =>
-        candidate.type === "CallExpression" &&
-        JSON.stringify(candidate.callee) === JSON.stringify(node),
-    )?.node;
-    if (!call) throw new Error("escaped official strict page.evaluate API");
-    const args = z
-      .array(z.object({ spread: z.null(), expression: astObject }))
-      .parse(call.arguments);
-    const callback = args[0]?.expression;
-    if (callback?.type !== "ArrowFunctionExpression" || args.length > 2)
-      throw new Error("unknown official strict callback arguments");
-    if (method === "resizeSvgCapture") continue;
-    const expectedHash = Object.entries(officialStrictHelperFunctions).find(
-      ([name]) => name === method,
-    )?.[1];
-    if (!expectedHash || strictSemanticSha256(owner) !== expectedHash)
-      throw new Error(`official strict helper call/branch changed: ${method}`);
+  for (const { method, api, use, node, owner } of found) {
+    validateStrictPageUse(sourcePath, imported, method, node, owner);
+    if (strictViewportCapabilityRead(method, api, use, owner)) continue;
+    const { call, args } = strictPageCallArguments(owner, node);
+    if (strictSizingPageAction(method, api, args, owner)) continue;
     programs.push(
-      strictCallbackProgram(
+      strictArrowCallbackProgram(
         sourcePath,
         source,
-        callback,
+        method,
+        owner,
         call,
-        args[1]?.expression,
+        args,
         offset,
         consumerRoute,
       ),
     );
   }
   return programs;
+}
+
+function strictSourceOffset(source: string, start: number): (at: number) => number {
+  const bytes = Buffer.from(source);
+  return (at) =>
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, at - start)).length;
+}
+
+function strictPagePickMode(sourcePath: string, method: string): boolean | "captureViewport" {
+  if (method === "prepareStrictSvgCapture") return "captureViewport";
+  return method === "resizeSvgCapture" || sourcePath === strictImageSource;
+}
+
+function validateStrictPageUse(
+  sourcePath: string,
+  imported: ReturnType<typeof importedPageHandle>,
+  method: string,
+  node: Record<string, unknown>,
+  owner: Record<string, unknown>,
+): void {
+  validatePageReceiver(imported, node, owner, strictPagePickMode(sourcePath, method));
+}
+
+function strictViewportCapabilityRead(
+  method: string,
+  api: string,
+  use: "call" | "read",
+  owner: Record<string, unknown>,
+): boolean {
+  if (use !== "read") return false;
+  if (
+    method !== "prepareStrictSvgCapture" ||
+    api !== "setViewportSize" ||
+    !strictHelperHashMatches(method, owner)
+  )
+    throw new Error("unknown official strict viewport capability check");
+  return true;
+}
+
+function strictPageCallArguments(owner: Record<string, unknown>, node: Record<string, unknown>) {
+  const call = browserAstNodes(owner).find(
+    ({ node: candidate }) =>
+      candidate.type === "CallExpression" &&
+      JSON.stringify(candidate.callee) === JSON.stringify(node),
+  )?.node;
+  if (!call) throw new Error("escaped official strict page.evaluate API");
+  return {
+    call,
+    args: z.array(z.object({ spread: z.null(), expression: astObject })).parse(call.arguments),
+  };
+}
+
+function strictSizingPageAction(
+  method: string,
+  api: string,
+  args: { expression: Record<string, unknown>; spread: null }[],
+  owner: Record<string, unknown>,
+): boolean {
+  if (method === "resizeSvgCapture") {
+    if (!strictCaptureCallArguments(method, api, args))
+      throw new Error("unknown official strict sizing/viewport action");
+    return true;
+  }
+  if (method !== "prepareStrictSvgCapture") return false;
+  if (!strictHelperHashMatches(method, owner))
+    throw new Error(`official strict helper call/branch changed: ${method}`);
+  const valid =
+    (api === "evaluate" && strictCaptureCallArguments(method, api, args)) ||
+    (api === "setViewportSize" && strictViewportCallArguments(args));
+  if (!valid) throw new Error("unknown official strict sizing/viewport action");
+  return true;
+}
+
+function strictArrowCallbackProgram(
+  sourcePath: string,
+  source: RawUnusedSource,
+  method: string,
+  owner: Record<string, unknown>,
+  call: Record<string, unknown>,
+  args: { expression: Record<string, unknown>; spread: null }[],
+  offset: (at: number) => number,
+  consumerRoute: readonly { sourcePath: string; sourceSha256: string }[],
+): BrowserUnusedProgram {
+  const callback = args[0]?.expression;
+  if (callback?.type !== "ArrowFunctionExpression" || args.length > 2)
+    throw new Error("unknown official strict callback arguments");
+  if (!strictHelperHashMatches(method, owner))
+    throw new Error(`official strict helper call/branch changed: ${method}`);
+  return strictCallbackProgram(
+    sourcePath,
+    source,
+    callback,
+    call,
+    args[1]?.expression,
+    offset,
+    consumerRoute,
+  );
+}
+
+function strictCaptureCallArguments(
+  method: string,
+  api: string,
+  args: { expression: Record<string, unknown>; spread: null }[],
+): boolean {
+  const callback = args[0]?.expression;
+  return (
+    api === "evaluate" &&
+    args.length === 2 &&
+    callback?.type === "Identifier" &&
+    callback.value === "sizeSvgCapture" &&
+    ["resizeSvgCapture", "prepareStrictSvgCapture"].includes(method)
+  );
+}
+
+function strictViewportCallArguments(
+  args: { expression: Record<string, unknown>; spread: null }[],
+): boolean {
+  const viewport = args[0]?.expression;
+  return args.length === 1 && viewport?.type === "Identifier" && viewport.value === "viewport";
+}
+
+function strictHelperHashMatches(method: string, owner: Record<string, unknown>): boolean {
+  const expected = Object.entries(officialStrictHelperFunctions).find(
+    ([name]) => name === method,
+  )?.[1];
+  return expected !== undefined && strictSemanticSha256(owner) === expected;
 }
 
 function strictCallbackProgram(
@@ -685,13 +831,21 @@ const nativeWidthV8Import = "use crate::v8_script::ScriptCompiler;";
 const nativeWidthV8CompileCall = "v8::Script::compile(scope, source, Some(&origin))";
 const nativeWidthV8CompilerCall = "ScriptCompiler::compile_with_origin(scope, source, origin_name)";
 const nativeWidthLegacyRoute = {
-  [nativeWidthHelper]: "a21a8b260625067348d8531512c8a489d3c71ec651e3b6710c1c69c4bb4da45b",
+  [nativeWidthHelper]: "6abdd41feed03bb662fd2505dcb263d777b29f8114c967b1e44913f6060bda61",
+  [`${nativeWidthBase}js_runtime.rs`]:
+    "184b6738bd8d38d9e8e02f64cc42aa561bc4349282caa341bc171431a234c265",
   [`${nativeWidthBase}js_runtime_native_width_tests.rs`]:
-    "9eb7b0ea3f92aab02ffa0367b3c06ca4d9e36bb6ce406e8dcee2131914d73729",
+    "5b58a94792571378a1d04a0e1d3ba42279b6b2c7b103c3a41a1861e285a6b1fb",
+  [`${nativeWidthBase}js_runtime_native_width_c4_description_tests.rs`]:
+    "c08a896a1cfac21b227c97623ec45fea1b5d48ec121be0f0849fd9ddc2c4134c",
   [`${nativeWidthBase}js_runtime_native_width_c4_tests.rs`]:
     "23f0a46c985e135c195b2826f06e7ab944565ba5041790df2832b711ad8af318",
+  [`${nativeWidthBase}js_runtime_native_width_ishikawa_tests.rs`]:
+    "8d818595edc6750bafbead131fef9beea1987a9995a0a2613cabf1b2de3d5a9f",
+  [`${nativeWidthBase}js_runtime_native_width_oracle_boundary_tests.rs`]:
+    "f4375e4ca17e4d1931efbf21020b7b48bf06079ed9ae00de3ea160d31683731f",
   [nativeWidthTrace]: "80953163facdebd8d765bb26923f838873043eb673eacf40963c64c0233ffd0e",
-  [nativeWidthBBoxTrace]: "36751923cccf5e76c16e4cdcbb48b9bed74354e5ea208c793c6415a85661b16b",
+  [nativeWidthBBoxTrace]: "e2aae9c8755431d6a5a0c92c7816b273fc204fb4f8f845cf1eae57574b929d4b",
 } as const;
 const nativeWidthRoute = [
   ...new Set([
@@ -762,7 +916,7 @@ export function inspectNativeWidthResultLiteral(sourcePath: string, code: string
     end < start ||
     /["\\\r\n]/u.test(literal) ||
     literal !==
-      "if (globalThis.__krrActualBBoxTraceOverflow) throw new Error('native width getBBox trace overflow'); if (globalThis.__krrActualBBoxTraceFailure) throw new Error('native width getBBox snapshot failed: ' + globalThis.__krrActualBBoxTraceFailure); JSON.stringify({ calls: globalThis.__krrActualWidths, boxes: globalThis.__krrActualBBoxes, probes: nativeWidthProbeResult() })"
+      "if (globalThis.__krrActualBBoxTraceOverflow) throw new Error('native width getBBox trace overflow'); if (globalThis.__krrActualBBoxTraceFailure) throw new Error('native width getBBox snapshot failed: ' + globalThis.__krrActualBBoxTraceFailure); JSON.stringify({ calls: globalThis.__krrActualWidths, boxes: globalThis.__krrActualBBoxes, c4DescriptionRows: globalThis.__krrC4DescriptionRows, svg: globalThis.__krrRenderedSvg, probes: nativeWidthProbeResult() })"
   )
     throw new Error("unknown native width result literal shape");
   parseSync(literal, { syntax: "ecmascript" });

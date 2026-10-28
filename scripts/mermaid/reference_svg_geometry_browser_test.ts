@@ -22,8 +22,8 @@ import {
 import { PlaywrightLoader } from "./official-renderer";
 import type { FontReadyDocument, PageHandle } from "./official-renderer-types";
 import {
-  assignStrictSvg,
   assertLoadedSvgObservation,
+  assignStrictSvg,
   prepareStrictSvgCapture,
   resizeSvgCapture,
 } from "./raster-capture-observation";
@@ -274,6 +274,46 @@ test("strict raster sizing preserves SVG markup and resolves percentage width fr
   } finally {
     await page.close();
     await browser.close();
+  }
+});
+
+test("official strict sizing keeps comma-separated raw viewBox dimensions after assignment", async ({
+  browser,
+}) => {
+  const page = await browser.newPage({
+    viewport: { width: 600, height: 300 },
+    deviceScaleFactor: 1,
+  });
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="700" height="600" viewBox="0, 0, 100.5, 50.25"><rect width="100" height="50"/></svg>';
+  try {
+    await page.setContent(rasterCaptureHtml(DiagramTheme.parse("dark")), { waitUntil: "load" });
+    const viewport = await prepareStrictSvgCapture(page, svg);
+    expect(viewport).toEqual({ width: 125, height: 75 });
+    const loaded = await assignStrictSvg(page, svg);
+    await resizeSvgCapture(page, true, "officialFallback");
+    const actual = await page.evaluate(() => {
+      const capture = document.getElementById("capture") as HTMLElement;
+      const diagram = document.getElementById("diagram") as HTMLElement;
+      const root = document.querySelector("#diagram svg") as SVGSVGElement;
+      return {
+        width: capture.style.width,
+        height: capture.style.height,
+        diagramWidth: diagram.style.width,
+        diagramHeight: diagram.style.height,
+        svg: root.outerHTML,
+      };
+    });
+    expect(page.viewportSize()).toEqual(viewport);
+    expect(actual).toEqual({
+      width: "125px",
+      height: "75px",
+      diagramWidth: "100.5px",
+      diagramHeight: "50.25px",
+      svg: loaded.expectedSvgSerialization,
+    });
+  } finally {
+    await page.close();
   }
 });
 

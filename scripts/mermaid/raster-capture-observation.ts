@@ -81,7 +81,7 @@ function sizeSvgCapture({
   }
   const rawViewBox = svgElement.getAttribute("viewBox"),
     viewBox = (
-      mode === "strictViewBox"
+      mode === "strictViewBox" || strict
         ? String(rawViewBox)
             .trim()
             .split(/[\s,]+/)

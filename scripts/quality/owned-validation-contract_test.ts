@@ -1019,15 +1019,7 @@ test.each(["current", "previous canonical"] as const)(
   },
 );
 
-test.each([
-  "missing owned",
-  "duplicate owned",
-  "changed arguments",
-  "browser moved",
-  "missing macOS browser",
-  "duplicate macOS browser",
-  "macOS browser moved",
-] as const)("owned validation rejects runtime asset order mutation: %s", (mutation) => {
+function mutateRuntimeAssetOrder(mutation: string): string {
   const commands = actualRecipeBody("runtime-asset-script-other-run").split("\n");
   const ownedIndex = commands.findIndex((line) =>
     line.includes("./scripts/quality/owned-source-inventory_test.ts"),
@@ -1043,6 +1035,11 @@ test.each([
     if (browser === undefined) throw new Error("missing browser command");
     commands.splice(3, 0, browser);
   }
+  mutateMacosBrowserOrder(commands, mutation);
+  return commands.join("\n");
+}
+
+function mutateMacosBrowserOrder(commands: string[], mutation: string): void {
   const macosIndex = commands.indexOf(`just ${playwrightMacosRecipe}`);
   if (macosIndex < 0) throw new Error("missing macOS browser command");
   if (mutation === "missing macOS browser") commands.splice(macosIndex, 1);
@@ -1053,7 +1050,18 @@ test.each([
     if (macos === undefined) throw new Error("missing macOS browser command");
     commands.splice(3, 0, macos);
   }
-  const body = commands.join("\n");
+}
+
+test.each([
+  "missing owned",
+  "duplicate owned",
+  "changed arguments",
+  "browser moved",
+  "missing macOS browser",
+  "duplicate macOS browser",
+  "macOS browser moved",
+] as const)("owned validation rejects runtime asset order mutation: %s", (mutation) => {
+  const body = mutateRuntimeAssetOrder(mutation);
   expect(body).not.toBe(actualRecipeBody("runtime-asset-script-other-run"));
   const root = strictUnusedRegistrationFixture();
   recipes(root, { "runtime-asset-script-other-run": body });

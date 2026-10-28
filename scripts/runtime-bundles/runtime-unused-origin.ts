@@ -836,7 +836,7 @@ export function callbackTypeRemovals(
   callback: Record<string, unknown>,
   offset: (at: number) => number,
 ) {
-  return browserAstNodes(callback)
+  const ranges = browserAstNodes(callback)
     .flatMap(({ node: type }) => {
       if (type.type === "TsTypeAnnotation" || type.type === "TsTypeParameterInstantiation") {
         const range = astSpan.parse(type.span);
@@ -853,7 +853,22 @@ export function callbackTypeRemovals(
       }
       return [];
     })
-    .sort((a, b) => a.start - b.start);
+    .sort((a, b) => a.start - b.start || b.end - a.end);
+  return removeNestedCallbackTypeRanges(ranges);
+}
+function removeNestedCallbackTypeRanges(
+  ranges: readonly { start: number; end: number }[],
+): { start: number; end: number }[] {
+  return ranges.filter(
+    (range, index) =>
+      !ranges.some(
+        (outer, outerIndex) =>
+          index !== outerIndex &&
+          outer.start <= range.start &&
+          outer.end >= range.end &&
+          (outer.start < range.start || outer.end > range.end),
+      ),
+  );
 }
 export function eraseCallbackTypes(
   code: string,
@@ -923,15 +938,18 @@ export function validatePageReceiver(
   imported: z.infer<typeof pageIdentifier>,
   member: Record<string, unknown>,
   owner: Record<string, unknown> | null,
-  pickEvaluate = false,
+  pickEvaluate: boolean | "captureViewport" = false,
 ) {
   const parameter = methodPageParameter(owner);
   const binding = pageIdentifier.parse(parameter),
     receiver = pageIdentifier.parse(member.object);
   const annotation = astObject.parse(astObject.parse(parameter.typeAnnotation).typeAnnotation);
-  const type = pickEvaluate
-    ? pagePickEvaluateType(annotation)
-    : pageIdentifier.parse(annotation.typeName);
+  const type =
+    pickEvaluate === true
+      ? pagePickEvaluateType(annotation)
+      : pickEvaluate === "captureViewport"
+        ? pagePickCaptureViewportType(annotation)
+        : pageIdentifier.parse(annotation.typeName);
   if (
     annotation.type !== "TsTypeReference" ||
     type.value !== imported.value ||
@@ -946,6 +964,12 @@ export function validatePageReceiver(
 }
 
 function pageBindingTargets(node: Record<string, unknown>): unknown[] {
+  if (node.type === "AssignmentExpression") return [node.left];
+  if (node.type === "UpdateExpression") return [node.argument];
+  return commonDeclarationTargets(node);
+}
+
+function commonDeclarationTargets(node: Record<string, unknown>): unknown[] {
   switch (node.type) {
     case "VariableDeclarator":
       return [node.id];
@@ -955,10 +979,6 @@ function pageBindingTargets(node: Record<string, unknown>): unknown[] {
       return [node.param];
     case "ArrowFunctionExpression":
       return z.array(z.unknown()).parse(node.params);
-    case "AssignmentExpression":
-      return [node.left];
-    case "UpdateExpression":
-      return [node.argument];
     default:
       return [];
   }
@@ -967,7 +987,7 @@ function pageBindingTargets(node: Record<string, unknown>): unknown[] {
 export const sharedSvgCaptureRoute = [
   {
     sourcePath: "scripts/mermaid/official-renderer.ts",
-    sourceSha256: "913e1b18087b394e3672c4180d463e02731b8ae51dadc75fe7d2d618f5cf51ef",
+    sourceSha256: "8501901466eb29ce55f25c5642714723e7390d139802bea1b9cb9c75f46b91fa",
   },
   {
     sourcePath: "scripts/mermaid/rasterize-svg-dir.ts",
@@ -975,7 +995,7 @@ export const sharedSvgCaptureRoute = [
   },
   {
     sourcePath: "scripts/mermaid/raster-capture-observation.ts",
-    sourceSha256: "29eaac2b5bc227fbaaa6504c076863a6989f88597c1a5ce994b43c12da09b6fb",
+    sourceSha256: "556e9b28c2afe6e440e00f64cc6b10f6959f1c7768e99d1a731a728d1001c723",
   },
   {
     sourcePath: "scripts/mermaid/official-renderer-types.ts",
@@ -992,7 +1012,7 @@ const sharedSvgTypeNodeSha256 = {
   PlaywrightModule: "1174ef035b916fd60bbb72203df912cdaf3b927bde8c25ee921794a4ee112897",
   BrowserIdentityCDPSession: "3775ad04597e9aeeb8ef951210ffa61f63c5b98be355b4d0de2b363eaaf6f401",
   BrowserHandle: "a14f95523dc02dfd153afb297a83d79a889dcc34c51a0fe896447ccbbf8ea67b",
-  PageHandle: "ce800e7d26d601cc4482ab04fbb68ed7c064ff082e98ad8d5beb73f2cebb77df",
+  PageHandle: "403345ef295e9a4869df2cafc3ed7061fe1951153ce5f9e14e29fdf259f1cf58",
   LocatorHandle: "4e643e91e1c0b876d67f12813c02dc1bd4f66cf810a2a3142309eca9edd6c756",
 } as const;
 
@@ -1079,6 +1099,29 @@ function pagePickEvaluateType(annotation: Record<string, unknown>) {
     astObject.parse(second.literal).value !== "evaluate"
   )
     throw new Error("unknown PageHandle Pick member");
+  return pageIdentifier.parse(first.typeName);
+}
+
+function pagePickCaptureViewportType(annotation: Record<string, unknown>) {
+  const name = pageIdentifier.parse(annotation.typeName),
+    args = z.array(astObject).parse(astObject.parse(annotation.typeParams).params),
+    first = args[0],
+    second = args[1];
+  const members = second?.type === "TsUnionType" ? z.array(astObject).parse(second.types) : [];
+  if (
+    name.value !== "Pick" ||
+    name.ctxt !== 1 ||
+    args.length !== 2 ||
+    first?.type !== "TsTypeReference" ||
+    members.length !== 2 ||
+    members.some(
+      (member) =>
+        member.type !== "TsLiteralType" || astObject.parse(member.literal).type !== "StringLiteral",
+    ) ||
+    members.map((member) => astObject.parse(member.literal).value).join("/") !==
+      "evaluate/setViewportSize"
+  )
+    throw new Error("unknown PageHandle capture viewport Pick members");
   return pageIdentifier.parse(first.typeName);
 }
 
@@ -1236,46 +1279,21 @@ function sharedSvgFunction(code: string) {
 export function inspectSharedSvgCaptureCallback(code: string) {
   const { module, owner, call } = sharedSvgFunction(code);
   const args = z.array(z.object({ spread: z.null(), expression: astObject })).parse(call.arguments);
-  const callback = args[0]?.expression,
-    data = args[1]?.expression;
-  if (
-    args.length !== 2 ||
-    callback?.type !== "ArrowFunctionExpression" ||
-    data?.type !== "ObjectExpression"
-  )
+  const callback = args[0]?.expression;
+  const data = args[1]?.expression;
+  if (args.length !== 2 || callback?.type !== "Identifier" || data?.type !== "ObjectExpression")
     throw new Error("unknown shared SVG callback/data");
-  const properties = z.array(pageIdentifier).parse(data.properties);
-  const parameters = z
-    .array(astObject)
-    .parse(owner.params)
-    .slice(1)
-    .map((parameter) => pageIdentifier.parse(parameter.pat));
-  if (
-    properties.map((property) => property.value).join("/") !== "strict/mode" ||
-    parameters.map((parameter) => parameter.value).join("/") !== "strict/mode" ||
-    properties.some((property, index) => property.ctxt !== parameters[index]?.ctxt)
-  )
-    throw new Error("changed shared SVG serialized parameter binding");
+  const selected = sharedSvgCaptureFunction(module, callback, owner);
+  sharedSvgCaptureDataBinding(owner, selected, data);
   const span = (value: unknown) => nodeFunctionSpan(code, module.span.start, value);
-  const range = span(callback.span),
+  const range = span(selected.span),
     dataRange = span(data.span);
-  const offset = (at: number) =>
-    nodeFunctionSpan(code, module.span.start, { start: at, end: at }).start;
-  const removals = callbackTypeRemovals(callback, offset);
+  const removals = callbackTypeRemovals(selected, (at) => span({ start: at, end: at }).start);
   const runtimeAst = eraseCallbackTypes(code, range.start, range.end, removals);
   const compiled = transformSync(`(${code.slice(range.start, range.end)});`, {
     jsc: { parser: { syntax: "typescript" }, target: "es2022" },
   }).code;
-  if (
-    browserAstNodes(parseSync(compiled, { syntax: "ecmascript" })).some(
-      ({ node }) =>
-        node.type === "Identifier" &&
-        node.ctxt === 1 &&
-        !["document", "String", "Number", "Math", "Error", "undefined"].includes(
-          String(node.value),
-        ),
-    )
-  )
+  if (!sharedSvgCallbackHasClosedGlobals(compiled))
     throw new Error("shared SVG callback has free host closure");
   return {
     ...range,
@@ -1284,6 +1302,140 @@ export function inspectSharedSvgCaptureCallback(code: string) {
     runtimeAstSha256: createHash("sha256").update(runtimeAst).digest("hex"),
     callAstSha256: createHash("sha256").update(JSON.stringify(call)).digest("hex"),
   };
+}
+
+function sharedSvgCaptureFunction(
+  module: unknown,
+  callback: Record<string, unknown>,
+  owner: Record<string, unknown>,
+) {
+  const reference = pageIdentifier.parse(callback),
+    declarations = sharedSvgFunctionDeclarations(module),
+    matches = declarations.filter(
+      ({ declaration }) => astObject.parse(declaration.identifier).value === "sizeSvgCapture",
+    ),
+    selected = matches[0];
+  if (
+    reference.value !== "sizeSvgCapture" ||
+    matches.length !== 1 ||
+    !selected ||
+    !selected.local ||
+    astObject.parse(selected.declaration.identifier).ctxt !== reference.ctxt ||
+    forbiddenPageBinding(owner, reference)
+  )
+    throw new Error("unknown/shared SVG callback binding");
+  return selected.declaration;
+}
+
+function sharedSvgFunctionDeclarations(module: unknown) {
+  return z
+    .array(astObject)
+    .parse(astObject.parse(module).body)
+    .flatMap((statement) => {
+      if (statement.type === "FunctionDeclaration")
+        return [{ declaration: statement, local: true }];
+      if (statement.type !== "ExportDeclaration") return [];
+      const declaration = astObject.parse(statement.declaration);
+      return declaration.type === "FunctionDeclaration" ? [{ declaration, local: false }] : [];
+    });
+}
+
+function sharedSvgCaptureDataBinding(
+  owner: Record<string, unknown>,
+  callback: Record<string, unknown>,
+  data: Record<string, unknown>,
+) {
+  const properties = z.array(astObject).parse(data.properties);
+  if (
+    !sharedSvgCaptureDataMatchesOwner(owner, properties) ||
+    !sharedSvgCapturePatternMatches(callback)
+  )
+    throw new Error("changed shared SVG serialized parameter binding");
+}
+
+function sharedSvgCaptureDataMatchesOwner(
+  owner: Record<string, unknown>,
+  properties: Record<string, unknown>[],
+) {
+  const outerNames = z
+    .array(astObject)
+    .parse(owner.params)
+    .slice(1)
+    .map((parameter) => pageIdentifier.parse(parameter.pat));
+  const identifiers = properties.slice(0, 2).map((property) => pageIdentifier.parse(property));
+  const rawSvg = properties[2] ? astObject.parse(properties[2]) : undefined;
+  if (
+    properties.length !== 3 ||
+    outerNames.map(({ value }) => value).join("/") !== "strict/mode" ||
+    identifiers.map(({ value }) => value).join("/") !== "strict/mode" ||
+    identifiers.some((property, index) => property.ctxt !== outerNames[index]?.ctxt) ||
+    !rawSvg ||
+    rawSvg.type !== "KeyValueProperty" ||
+    astObject.parse(rawSvg.key).type !== "Identifier" ||
+    astObject.parse(rawSvg.key).value !== "rawSvg" ||
+    astObject.parse(rawSvg.value).type !== "NullLiteral"
+  )
+    return false;
+  return true;
+}
+
+function sharedSvgCapturePatternMatches(callback: Record<string, unknown>): boolean {
+  const params = z.array(astObject).parse(callback.params);
+  if (params.length !== 1) return false;
+  const pattern = astObject.parse(params[0]?.pat),
+    properties = z.array(astObject).parse(pattern.properties);
+  return (
+    pattern.type === "ObjectPattern" &&
+    properties.length === 3 &&
+    properties.every(
+      (property) => property.type === "AssignmentPatternProperty" && property.value === null,
+    ) &&
+    properties.map((property) => pageIdentifier.parse(property.key).value).join("/") ===
+      "strict/mode/rawSvg"
+  );
+}
+
+function sharedSvgCallbackHasClosedGlobals(compiled: string): boolean {
+  const ast = parseSync(compiled, { syntax: "ecmascript" }),
+    nodes = browserAstNodes(ast),
+    bindings = sharedSvgCallbackBindingContexts(nodes);
+  return nodes.every(({ node }) => sharedSvgIdentifierIsBound(node, bindings));
+}
+
+function sharedSvgCallbackBindingContexts(nodes: ReturnType<typeof browserAstNodes>): Set<number> {
+  const bindings = new Set<number>();
+  for (const { node } of nodes) {
+    for (const target of sharedSvgDeclarationTargets(node))
+      for (const { node: identifier } of browserAstNodes(target))
+        if (identifier.type === "Identifier" && typeof identifier.ctxt === "number")
+          bindings.add(identifier.ctxt);
+  }
+  return bindings;
+}
+
+function sharedSvgDeclarationTargets(node: Record<string, unknown>): unknown[] {
+  if (node.type === "FunctionDeclaration" || node.type === "FunctionExpression")
+    return [node.identifier];
+  return commonDeclarationTargets(node);
+}
+
+function sharedSvgIdentifierIsBound(node: Record<string, unknown>, bindings: Set<number>): boolean {
+  if (node.type !== "Identifier" || typeof node.ctxt !== "number" || node.ctxt === 0) return true;
+  if (bindings.has(node.ctxt)) return true;
+  return (
+    node.ctxt === 1 &&
+    [
+      "Array",
+      "DOMParser",
+      "Error",
+      "Math",
+      "Node",
+      "Number",
+      "String",
+      "document",
+      "undefined",
+    ].includes(String(node.value))
+  );
 }
 
 export function inspectSharedSvgCaptureProgram(
