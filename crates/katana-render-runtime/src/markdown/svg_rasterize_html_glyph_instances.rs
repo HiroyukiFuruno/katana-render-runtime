@@ -68,7 +68,7 @@ impl HtmlGlyphRasterizer<'_> {
         if !matches!(self.backend, RasterBackend::Skia) || self.face_file(id)?.is_none() {
             return Ok(None);
         }
-        let (_, design, _) = html_glyph_variations::resolve(
+        let (_, design) = html_glyph_variations::resolve_design(
             self.database,
             id,
             &span.variations,

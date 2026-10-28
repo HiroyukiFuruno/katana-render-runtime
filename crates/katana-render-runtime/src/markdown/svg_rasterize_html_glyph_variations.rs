@@ -8,8 +8,11 @@ use skrifa::{FontRef, MetadataProvider, Tag};
 mod design;
 pub(super) use design::applied_design_coordinates;
 
+#[cfg(test)]
 pub(super) type ResolvedLocation = (Vec<FontVariation>, Vec<FontVariation>, Vec<f32>);
+pub(super) type ResolvedDesign = (Vec<FontVariation>, Vec<FontVariation>);
 
+#[cfg(test)]
 pub(super) fn resolve(
     fontdb: &Database,
     face_id: ID,
@@ -17,6 +20,19 @@ pub(super) fn resolve(
     optical_sizing: FontOpticalSizing,
     font_size: f32,
 ) -> Result<ResolvedLocation, String> {
+    let (effective, design) =
+        resolve_design(fontdb, face_id, requested, optical_sizing, font_size)?;
+    let normalized = normalized_coords(fontdb, face_id, &design)?;
+    Ok((effective, design, normalized))
+}
+
+pub(super) fn resolve_design(
+    fontdb: &Database,
+    face_id: ID,
+    requested: &[FontVariation],
+    optical_sizing: FontOpticalSizing,
+    font_size: f32,
+) -> Result<ResolvedDesign, String> {
     validate_variations(face_id, requested)?;
     if !font_size.is_finite() || font_size <= 0.0 {
         return Err(format!("invalid variation font size for face {face_id:?}"));
@@ -34,8 +50,7 @@ pub(super) fn resolve(
     let variations = add_auto_opsz(requested.to_vec(), optical_sizing, font_size, has_opsz);
     let effective = applied_variations(fontdb, face_id, &variations)?;
     let design = applied_design_coordinates(fontdb, face_id, &effective)?;
-    let normalized = normalized_coords(fontdb, face_id, &design)?;
-    Ok((effective, design, normalized))
+    Ok((effective, design))
 }
 
 pub(super) fn add_auto_opsz(
@@ -53,6 +68,7 @@ pub(super) fn add_auto_opsz(
     variations
 }
 
+#[cfg(test)]
 pub(super) fn normalized_coords(
     fontdb: &Database,
     face_id: ID,
