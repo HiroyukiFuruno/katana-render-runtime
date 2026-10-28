@@ -23,6 +23,7 @@ import { PlaywrightLoader } from "./official-renderer";
 import type { FontReadyDocument, PageHandle } from "./official-renderer-types";
 import {
   assignStrictSvg,
+  assertLoadedSvgObservation,
   prepareStrictSvgCapture,
   resizeSvgCapture,
 } from "./raster-capture-observation";
@@ -31,6 +32,7 @@ import { MagickOps } from "./reference_image_ops";
 import type { ReferencePair } from "./reference_pair_repository";
 import { scorePaintProjectedReferenceTargets } from "./reference_svg_geometry_scoring";
 import { waitForStrictSvgExternalImages } from "./strict-svg-external-images";
+import { rawHtmlSvgViewBoxSize } from "./svg-viewbox-size";
 
 const naturalViewBoxSizingCases = [
   {
@@ -352,6 +354,46 @@ test("strict capture rejects invalid viewBox before changing the capture", async
       prepareStrictSvgCapture(page, '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 0 5"/>'),
     ).rejects.toThrow("SVG viewBox is invalid");
     expect(await page.evaluate(() => document.body.innerHTML)).toBe(before);
+  } finally {
+    await page.close();
+  }
+});
+
+test("Chrome innerHTML parses unbound xlink before strict SVG capture sizing", async ({
+  browser,
+}) => {
+  const source = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 93.25 44.5"><defs><rect id="kanban-column" width="40" height="30"/></defs><a xlink:href="#kanban-column"><use xlink:href="#kanban-column"/></a></svg>`;
+  const sourceBytes = Buffer.from(source, "utf8");
+  const sourceSha = createHash("sha256").update(sourceBytes).digest("hex");
+  const page = await browser.newPage({
+    viewport: { width: 320, height: 180 },
+    deviceScaleFactor: 1,
+  });
+  try {
+    const parserSize = rawHtmlSvgViewBoxSize(source);
+    if (parserSize === undefined) throw new Error("Chrome regression SVG has no viewBox size");
+    expect(source).not.toContain("xmlns:xlink");
+    expect(parserSize).toEqual({ width: 93.25, height: 44.5 });
+    await page.setContent(rasterCaptureHtml(DiagramTheme.parse("dark")), { waitUntil: "load" });
+
+    const preparedViewport = await prepareStrictSvgCapture(page, source);
+    const expectedViewport = {
+      width: Math.ceil(parserSize.width) + 24,
+      height: Math.ceil(parserSize.height) + 24,
+    };
+    expect(preparedViewport).toEqual(expectedViewport);
+    expect(page.viewportSize()).toEqual(expectedViewport);
+
+    const loaded = await assignStrictSvg(page, source);
+    assertLoadedSvgObservation(sourceBytes, loaded);
+    expect(loaded.inputSha256).toBe(sourceSha);
+    expect(loaded.expectedSvgSerialization).toBe(loaded.assignedSvgSerialization);
+    expect(
+      await page.evaluate(() => {
+        const anchor = document.querySelector("#diagram svg a");
+        return anchor?.getAttributeNS("http://www.w3.org/1999/xlink", "href");
+      }),
+    ).toBe("#kanban-column");
   } finally {
     await page.close();
   }

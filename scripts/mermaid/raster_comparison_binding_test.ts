@@ -20,6 +20,7 @@ import {
   rasterSha256,
 } from "./raster-production-binding";
 import { CliOptions } from "./reference_compare_options";
+import { rawHtmlSvgViewBoxSize, svgViewBoxSize } from "./svg-viewbox-size";
 
 // この合成fixtureは外部信頼境界の拒否検査専用で、実producerの観測証拠には使わない。
 const configuredFixtureRoot = process.env.MERMAID_RASTER_BINDING_TEST_ROOT;
@@ -750,6 +751,29 @@ test("new viewport policy binds each verified raw SVG while allowing role dimens
   expect(() => binding.verifyRole("official", [official])).not.toThrow();
   expect(() => binding.verifyRole("candidate", [candidate])).not.toThrow();
 });
+
+test("raw HTML viewport accepts Kanban xlink while native XML stays strict", () => {
+  const raw =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 80"><a xlink:href="https://github.com/mermaid-js/mermaid/issues/2038"><text>issue</text></a></svg>';
+  const f = fixture();
+  const pair = rawViewportPair(f, "official", raw, { width: 124, height: 104 });
+  const binding = RasterComparisonBinding.read(f.configPath, f.save(), ["unit"]);
+  expect(() => binding.verifyRole("official", [pair])).not.toThrow();
+  expect(() => svgViewBoxSize(raw)).toThrow();
+  expect(rawHtmlSvgViewBoxSize(` \n<!-- comment -->${raw} `)).toEqual({ width: 100, height: 80 });
+});
+
+for (const [label, raw] of [
+  ["multiple roots", '<svg viewBox="0 0 1 1"></svg><svg viewBox="0 0 1 1"></svg>'],
+  ["text beside root", 'unexpected<svg viewBox="0 0 1 1"></svg>'],
+  ["non SVG root", '<div viewBox="0 0 1 1"></div>'],
+  ["foreign namespace", '<math><svg viewBox="0 0 1 1"></svg></math>'],
+  ["incorrect SVG declaration", '<svg xmlns="urn:wrong" viewBox="0 0 1 1"></svg>'],
+] as const) {
+  test(`raw HTML viewport rejects ${label}`, () => {
+    expect(() => rawHtmlSvgViewBoxSize(raw)).toThrow();
+  });
+}
 
 for (const [rawSvg, error] of [
   ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 80"/>', "Raw SVG viewport differs"],

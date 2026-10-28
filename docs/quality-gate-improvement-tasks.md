@@ -2,6 +2,9 @@
 
 ## 最新の再開地点（2026-10-28）
 
+- [/] 反復した公開単位の誤判断を再発させない。SVG・HTML・Officeの内部責務分離を公開repo/crate分割へ読み替えず、既存のruntime/assets/CLIの3配布単位を維持する。新規公開SVG crateやtoken更新を要求しない。進捗の主指標は現sourceのMermaid全117件・HTML全84件とし、部分診断を正式合格へ加算しない。未計測と不合格を区別する。
+- [/] R3535で独立raw JSの新policy参照をEN59/JA58取得した。R3544の全117候補生成・raster・bindingは成功したが、正式採点はKanbanの未宣言xlinkをXMLとして解析した例外で結果生成前に停止した。全117の正式スコアは未計測であり、0/117不合格とは報告しない。raw側は実Chromeと同じDIV内HTML構文をparse5で解析し、native側の厳格XML検査を維持した。元SVG・参照PNGは変更していない。R3546型検査とbinding回帰、R3547実Chrome回帰、R3548必須登録回帰・117入力のviewport対照、R3549 foundation、R3550関連3ファイルのBun回帰は全actual0。依存lock変更後の現source参照・frame proof・全117正式採点を新runで取得する。HTML84現source/性能・coverage・公開は未完了。
+
 - [ ] `18155b95`でrelease必須祖先に`9a50d116`/`2ae668e2`を追加、内容manifestを正規producerで同期し、祖先・旧snapshot拒否・内容改変拒否の22回帰はR3527で成功。R3529 foundationはactual0だが、続くrelease-target-checkがRust互換lockの更新を検出してactual1となったため、古いlockのまま正式画像取得へ進まず、既存locked `depends-update-mutations`を実行したR3530はactual0。unicode-width0.2.2→0.2.3、globset0.4.20→0.4.21、ignore0.4.33→0.4.34、xattr1.6.1→1.7.0。JS/runtime資産は差分なし。root/harness lockとharness LOCK_SHAを同期し、R3531 foundation、R3532 lock同期回帰とfreshness70回帰は全actual0。GitHub Actionsは4workflowのfull-SHA参照62箇所を上流release/tagと照合し更新不要。tool専用taiki-e参照は既存default toolを維持し、rust-toolchain stable HEAD一致もmainで再確認した。更新差分のcommitと新しい内容manifest同期・再検証を続行する。
 
 - [/] 参照生成の実経路・新policyの登録・platform別の実回帰を`9a50d116`へ、複数row/spanの文字間隔修正を`2ae668e2`へ、それぞれ通常hook actual0で保存した。R3502 foundation actual0、R3501 macOSの実producer browser1件成功、R3503共通browser17件成功。R3499関連Bunは256成功・新fixture4失敗を保持し、source/captureを一体更新するfixtureへ修正したR3500は当該ファイル全成功。R3519でAST成功後ClippyがRowInputの型複雑度を検出し、型alias抽出後の通常hookは成功。検査例外・閾値変更なし。

@@ -17,7 +17,7 @@ import {
   type TrustedRasterInput,
   verifyRasterProductionBinding,
 } from "./raster-production-binding";
-import { svgViewBoxSize } from "./svg-viewbox-size";
+import { rawHtmlSvgViewBoxSize } from "./svg-viewbox-size";
 
 const RAW_VIEWPORT_POLICY = "raw-svg-viewbox-viewport-before-assignment-v1";
 
@@ -418,7 +418,7 @@ function validateRawViewport(
   context: ReturnType<typeof rasterCaptureContext>,
 ): void {
   if (context.captureResize !== RAW_VIEWPORT_POLICY) return;
-  const size = svgViewBoxSize(pair.sourceSvg.toString("utf8"));
+  const size = rawHtmlSvgViewBoxSize(pair.sourceSvg.toString("utf8"));
   if (size === undefined) throw new Error(`Raw SVG viewBox missing: ${pair.slug}`);
   const expected = { width: Math.ceil(size.width) + 24, height: Math.ceil(size.height) + 24 };
   if (!isDeepStrictEqual(context.viewport, expected)) {

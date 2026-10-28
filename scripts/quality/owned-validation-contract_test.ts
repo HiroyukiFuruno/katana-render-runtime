@@ -1241,6 +1241,7 @@ test("macOS producer registration requires the static checks to run first", () =
 
 test.each([
   "SVG tspan boundaries preserve within-span kerning with a bundled font",
+  "Chrome innerHTML parses unbound xlink before strict SVG capture sizing",
   "strict raster sizing preserves SVG markup and resolves percentage width from the viewBox",
   "paint projection evaluates actual candidate pixels",
   "keeps the color-only candidate exact while changing RGB and preserving SVG bytes",

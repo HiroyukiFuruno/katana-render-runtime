@@ -2189,6 +2189,7 @@ function playwrightGeometryCasesVerified(source: string): boolean {
   return (
     [
       "SVG tspan boundaries preserve within-span kerning with a bundled font",
+      "Chrome innerHTML parses unbound xlink before strict SVG capture sizing",
       "strict raster sizing preserves SVG markup and resolves percentage width from the viewBox",
       "paint projection evaluates actual candidate pixels",
       "keeps the neutral geometry raster exact",
