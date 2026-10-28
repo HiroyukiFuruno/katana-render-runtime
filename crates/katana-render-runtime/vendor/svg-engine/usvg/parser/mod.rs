@@ -139,6 +139,11 @@ impl crate::svg_engine::usvg::Tree {
                 select_fallback: Box::new(|c, used_fonts, db| {
                     (opt.font_resolver.select_fallback)(c, used_fonts, db)
                 }),
+                select_styled_fallback: opt.font_resolver.select_styled_fallback.as_ref().map(|selector| {
+                    let forward: crate::svg_engine::usvg::StyledFallbackSelectionFn<'_> =
+                        Box::new(move |font, c, used_fonts, db| selector(font, c, used_fonts, db));
+                    forward
+                }),
             },
             ..Options::default()
         };

@@ -4,6 +4,14 @@ use resvg::usvg::{
 };
 use std::sync::Arc;
 
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_text_usvg_cmap_requested_weight_tests.rs"]
+mod requested_weight_tests;
+
+#[path = "svg_rasterize_text_usvg_cmap_selector_styled.rs"]
+mod styled;
+pub(in super::super) use styled::html_styled_selector;
+
 #[path = "svg_rasterize_text_usvg_cmap_selector_loaded.rs"]
 mod loaded;
 pub(in crate::markdown::svg_rasterize) use loaded::loaded_html_font;

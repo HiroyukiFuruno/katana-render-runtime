@@ -18,6 +18,7 @@ pub(in crate::markdown::svg_rasterize) use selector::loaded_html_font;
 pub(in super::super) fn install(options: &mut resvg::usvg::Options<'static>) {
     options.font_resolver.select_font = html_font_selector();
     options.font_resolver.select_fallback = html_selector();
+    options.font_resolver.select_styled_fallback = Some(selector::html_styled_selector());
     super::install_html_fallback_memo(options);
 }
 

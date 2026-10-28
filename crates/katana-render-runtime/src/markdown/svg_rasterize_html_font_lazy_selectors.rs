@@ -34,6 +34,17 @@ pub(super) fn install(
 }
 
 pub(super) fn install_fallback(options: &mut usvg::Options<'static>, valid: Arc<AtomicBool>) {
+    if let Some(styled) = options.font_resolver.select_styled_fallback.take() {
+        let styled_valid = Arc::clone(&valid);
+        options.font_resolver.select_styled_fallback =
+            Some(Box::new(move |font, character, excluded, database| {
+                styled_valid.store(false, Ordering::Relaxed);
+                let actual = styled(font, character, excluded, database);
+                #[cfg(test)]
+                raster_observer::known_fallback(character, excluded, database, actual);
+                actual
+            }));
+    }
     let fallback = std::mem::replace(
         &mut options.font_resolver.select_fallback,
         usvg::FontResolver::default_fallback_selector(),

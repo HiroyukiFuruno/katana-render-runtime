@@ -24,7 +24,7 @@
     "harfrustAlias": "usvg harfrust:: becomes svg_harfrust:: (original 0.12 dependency identity)",
     "enabledFeaturePredicates": "The original enabled feature counts are retained per file; constant evaluation removes 79 true cfg attributes and four false branches. OS and test conditions are retained; KRR has no optional public SVG-engine feature contract.",
     "allowAttributes": "The original 46 allow attributes are retained verbatim. Two scoped boundary attributes permit observed external Clippy lints (22 in usvg/lib.rs, 18 in resvg/lib.rs) plus dead_code and unused_imports. Four resvg lints already allowed upstream are omitted from the added list to avoid duplicate attributes. No blanket all, non_minimal_cfg, unsafe-code override, or additional exclusion is introduced.",
-    "sourceSemantics": "Initial mechanical transplant preserves upstream behavior; subsequent scoped fixes pass CSS font size to HarfRust tracking and use hard-edge clipping only for implicit marker viewports. Original SVG, glyph IDs, and variation coordinates are not manually rewritten. Clip bounds, transforms, user-clip antialiasing, and upstream test expectations are preserved."
+    "sourceSemantics": "Initial mechanical transplant preserves upstream behavior; subsequent scoped fixes pass CSS font size to HarfRust tracking and use hard-edge clipping only for implicit marker viewports. An optional internal fallback callback receives the original requested font attributes while the default legacy resolver remains unchanged; nested SVG forwards the callback. Original SVG, glyph IDs, and variation coordinates are not manually rewritten. Clip bounds, transforms, user-clip antialiasing, and upstream test expectations are preserved."
   },
   "files": [
     {
@@ -127,9 +127,9 @@
       "source": "crates/usvg/src/parser/mod.rs",
       "destination": "usvg/parser/mod.rs",
       "sourceSha256": "ebf56fe3aeddfda8b230d947c00d53e0a9d0b3d90b03cf5032456311ccf4bd7c",
-      "transplantedSha256": "4828c33d1fa2c2a80a676ea12445f3af46f6274f5bfe5d904bb658e1a91b2b58",
+      "transplantedSha256": "d056938f612e3c1fa2b605dd942531b8655741b400d4bfb8b61bbceebc8dd2e7",
       "sourceBytes": 6283,
-      "transplantedBytes": 6017,
+      "transplantedBytes": 6362,
       "adaptations": {
         "cratePaths": 2,
         "enabledFeaturePredicates": {
@@ -332,9 +332,9 @@
       "source": "crates/usvg/src/text/layout.rs",
       "destination": "usvg/text/layout.rs",
       "sourceSha256": "355f6c97d4abbe31d01d3e12498396ae04f738ed63587f95e9a98e3d306d36eb",
-      "transplantedSha256": "a3e73fd378dbbe1807470505f8099bdf8bb71484418cca011b283feb94c59ce5",
+      "transplantedSha256": "57fa58e21993507d2947f3dbfaa85bd26351467a1d57fc320902c0ce8aa857b8",
       "sourceBytes": 68205,
-      "transplantedBytes": 68576,
+      "transplantedBytes": 68809,
       "adaptations": {
         "cratePaths": 13,
         "enabledFeaturePredicates": {},
@@ -345,9 +345,9 @@
       "source": "crates/usvg/src/text/mod.rs",
       "destination": "usvg/text/mod.rs",
       "sourceSha256": "4fe878e63464b869202c0e85c574fc5e12211b659b4a030fabaa4e28a975b88f",
-      "transplantedSha256": "260703bc3ad5bca2527c72311dbf79ae68b0277c65e403fe7c071ee988ced7a8",
+      "transplantedSha256": "7e2cf19e60f119f7f3dc483289f6bac9736e71f55a9dba09db9faa770f14d53a",
       "sourceBytes": 9109,
-      "transplantedBytes": 9163,
+      "transplantedBytes": 9575,
       "adaptations": {
         "cratePaths": 3,
         "enabledFeaturePredicates": {},

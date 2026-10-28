@@ -94,7 +94,11 @@ fn validate_file_generation(
     Ok(())
 }
 
-fn stock_probe(database: &Arc<Database>, face_id: ID, character: char) -> Result<bool, ()> {
+pub(super) fn stock_probe(
+    database: &Arc<Database>,
+    face_id: ID,
+    character: char,
+) -> Result<bool, ()> {
     Ok(database
         .with_face_data(face_id, |data, index| {
             let font = skrifa::FontRef::from_index(data, index).ok()?;

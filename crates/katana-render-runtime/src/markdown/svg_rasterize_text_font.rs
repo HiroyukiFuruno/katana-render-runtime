@@ -27,6 +27,9 @@ pub(super) fn with_render_scoped_stamp_batch<T>(operation: impl FnMut() -> T) ->
 pub(super) fn file_stamp_durable_reusable(path: &std::path::Path) -> bool {
     file_generation::stamp_path_uncached(path).is_ok_and(|stamp| stamp.durable_reusable())
 }
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_text_font_platform_fallback.rs"]
+mod platform_fallback;
 #[path = "svg_rasterize_text_font_score.rs"]
 mod score;
 use resvg::usvg;
@@ -34,6 +37,20 @@ use score::fallback_face_attribute_score;
 #[cfg(test)]
 use score::{css_stretch_match_rank, css_style_match_rank, fallback_attribute_score};
 const INTERFACE_BOLD_WEIGHT: u16 = 700;
+#[derive(Clone, Copy)]
+struct FallbackAttributes {
+    weight: u16,
+    style: usvg::fontdb::Style,
+    stretch: usvg::fontdb::Stretch,
+}
+
+fn fallback_attributes(weight: u16, italic: bool) -> FallbackAttributes {
+    FallbackAttributes {
+        weight,
+        style: requested_font_style(italic),
+        stretch: usvg::fontdb::Stretch::Normal,
+    }
+}
 pub(super) fn matching_font_face(
     database: &usvg::fontdb::Database,
     font_family: &str,
@@ -196,6 +213,140 @@ pub(super) fn matching_fallback_with_probe(
     )
 }
 
+pub(super) fn matching_fallback_with_request(
+    database: &usvg::fontdb::Database,
+    base_face_id: usvg::fontdb::ID,
+    character: char,
+    requested: &usvg::Font,
+    mut probe: impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
+) -> (Option<usvg::fontdb::ID>, bool) {
+    let attributes = requested_fallback_attributes(requested);
+    let require_non_interface =
+        match requested_preflight(database, base_face_id, character, attributes, &mut probe) {
+            Ok(value) => value,
+            Err(result) => return result,
+        };
+    matching_requested_regular(
+        database,
+        base_face_id,
+        character,
+        attributes,
+        require_non_interface,
+        |id, glyph| probe_requested_face(database, id, glyph, &mut probe),
+    )
+}
+
+fn matching_requested_regular(
+    database: &usvg::fontdb::Database,
+    base_face_id: usvg::fontdb::ID,
+    character: char,
+    attributes: FallbackAttributes,
+    require_non_interface: bool,
+    mut probe: impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
+) -> (Option<usvg::fontdb::ID>, bool) {
+    #[cfg(target_os = "macos")]
+    let cacheable = {
+        let (preferred, cacheable) =
+            platform_fallback::select(database, base_face_id, character, attributes, &mut probe);
+        if preferred.is_some() {
+            return (preferred, cacheable);
+        }
+        cacheable
+    };
+    #[cfg(not(target_os = "macos"))]
+    let cacheable = true;
+    let (selected, regular_cacheable) = matching_fallback_regular(
+        database,
+        base_face_id,
+        character,
+        attributes,
+        require_non_interface,
+        &mut probe,
+    );
+    (selected, cacheable && regular_cacheable)
+}
+
+fn probe_requested_face(
+    database: &usvg::fontdb::Database,
+    id: usvg::fontdb::ID,
+    glyph: char,
+    probe: &mut impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
+) -> Option<bool> {
+    #[cfg(target_os = "macos")]
+    if database.face(id).is_some_and(|face| {
+        face.families
+            .iter()
+            .any(|(family, _)| super::super::font::is_internal_family(family))
+    }) {
+        return Some(false);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = database;
+    probe(id, glyph)
+}
+
+fn requested_preflight(
+    database: &usvg::fontdb::Database,
+    base_face_id: usvg::fontdb::ID,
+    character: char,
+    attributes: FallbackAttributes,
+    probe: &mut impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
+) -> Result<bool, (Option<usvg::fontdb::ID>, bool)> {
+    let Some(base_face) = database.face(base_face_id) else {
+        return Err((None, false));
+    };
+    #[cfg(target_os = "macos")]
+    return requested_alias_outcome(database, base_face, character, attributes, probe);
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (base_face, character, attributes, probe);
+        Ok(false)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn requested_alias_outcome(
+    database: &usvg::fontdb::Database,
+    base_face: &usvg::fontdb::FaceInfo,
+    character: char,
+    attributes: FallbackAttributes,
+    probe: &mut impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
+) -> Result<bool, (Option<usvg::fontdb::ID>, bool)> {
+    match requested_alias(database, base_face, character, attributes, probe) {
+        AliasProbe::Selected(id) => Err((Some(id), true)),
+        AliasProbe::Unavailable => Err((None, false)),
+        AliasProbe::NoGlyph => Ok(true),
+        AliasProbe::NotNeeded => Ok(false),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn requested_alias(
+    database: &usvg::fontdb::Database,
+    base_face: &usvg::fontdb::FaceInfo,
+    character: char,
+    attributes: FallbackAttributes,
+    probe: &mut impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
+) -> AliasProbe {
+    system_ui_bold_alias(
+        database,
+        base_face,
+        character,
+        attributes.weight,
+        attributes.style != usvg::fontdb::Style::Normal
+            || attributes.stretch != usvg::fontdb::Stretch::Normal,
+        probe,
+    )
+}
+
+fn requested_fallback_attributes(requested: &usvg::Font) -> FallbackAttributes {
+    FallbackAttributes {
+        weight: requested.weight(),
+        style: usvg::fontdb::Style::from(requested.style()),
+        stretch: usvg::fontdb::Stretch::from(requested.stretch()),
+    }
+}
+
 #[cfg(not(target_os = "macos"))]
 fn matching_fallback_nonmacos(
     database: &usvg::fontdb::Database,
@@ -212,8 +363,7 @@ fn matching_fallback_nonmacos(
         database,
         base_face_id,
         character,
-        requested_weight,
-        requested_italic,
+        fallback_attributes(requested_weight, requested_italic),
         false,
         probe,
     )
@@ -270,8 +420,7 @@ fn finish_macos_fallback(
         database,
         base_face_id,
         character,
-        requested_weight,
-        requested_italic,
+        fallback_attributes(requested_weight, requested_italic),
         interface_face_is_required,
         probe,
     )
@@ -281,8 +430,7 @@ fn matching_fallback_regular(
     database: &usvg::fontdb::Database,
     base_face_id: usvg::fontdb::ID,
     character: char,
-    requested_weight: u16,
-    requested_italic: bool,
+    attributes: FallbackAttributes,
     interface_face_is_required: bool,
     mut probe: impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
 ) -> (Option<usvg::fontdb::ID>, bool) {
@@ -292,8 +440,7 @@ fn matching_fallback_regular(
         database,
         base_face_id,
         character,
-        requested_font_style(requested_italic),
-        usvg::fontdb::Weight(requested_weight),
+        attributes,
         |id, glyph| {
             #[cfg(target_os = "macos")]
             if interface_face_is_required
@@ -355,14 +502,13 @@ fn scan_fallback_faces(
     database: &usvg::fontdb::Database,
     base_face_id: usvg::fontdb::ID,
     character: char,
-    requested_style: usvg::fontdb::Style,
-    requested_weight: usvg::fontdb::Weight,
+    attributes: FallbackAttributes,
     mut probe: impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
 ) -> (Option<usvg::fontdb::ID>, bool) {
     let mut best = None;
     let mut cacheable = true;
     for face in database.faces().filter(|face| face.id != base_face_id) {
-        let score = fallback_face_attribute_score(face, requested_style, requested_weight);
+        let score = score_face(face, attributes);
         /* WHY: 同点では先のfaceを保ち、選択結果を改善しないfontのfile解析を省く。 */
         if best.is_some_and(|(best_score, _)| score >= best_score) {
             continue;
@@ -378,6 +524,15 @@ fn scan_fallback_faces(
         }
     }
     (best.map(|(_, face_id)| face_id), cacheable)
+}
+
+fn score_face(face: &usvg::fontdb::FaceInfo, attributes: FallbackAttributes) -> (u8, u8, u8, u16) {
+    fallback_face_attribute_score(
+        face,
+        attributes.style,
+        usvg::fontdb::Weight(attributes.weight),
+        attributes.stretch,
+    )
 }
 fn requested_font_style(italic: bool) -> usvg::fontdb::Style {
     if italic {

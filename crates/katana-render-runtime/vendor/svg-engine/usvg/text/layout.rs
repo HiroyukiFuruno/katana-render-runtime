@@ -948,7 +948,7 @@ fn process_chunk(
             font,
             span.small_caps,
             span.apply_kerning,
-            &span.font.variations,
+            &span.font,
             span.font_size.get(),
             span.font_optical_sizing,
             resolver,
@@ -1394,12 +1394,13 @@ pub(crate) fn shape_text(
     font: Arc<ResolvedFont>,
     small_caps: bool,
     apply_kerning: bool,
-    variations: &[crate::svg_engine::usvg::FontVariation],
+    requested_font: &crate::svg_engine::usvg::Font,
     font_size: f32,
     font_optical_sizing: crate::svg_engine::usvg::FontOpticalSizing,
     resolver: &FontResolver,
     fontdb: &mut Arc<fontdb::Database>,
 ) -> Vec<Glyph> {
+    let variations = requested_font.variations();
     let mut glyphs = shape_text_with_font(
         text,
         font.clone(),
@@ -1426,7 +1427,11 @@ pub(crate) fn shape_text(
         }
 
         if let Some(c) = missing {
-            let fallback_font = match (resolver.select_fallback)(c, &used_fonts, fontdb)
+            let selected = match &resolver.select_styled_fallback {
+                Some(selector) => selector(requested_font, c, &used_fonts, fontdb),
+                None => (resolver.select_fallback)(c, &used_fonts, fontdb),
+            };
+            let fallback_font = match selected
                 .and_then(|id| fontdb.load_font(id, variations))
             {
                 Some(v) => Arc::new(v),

@@ -2,6 +2,9 @@ use super::{Metric, TreeParseTiming, count, record};
 use resvg::usvg::fontdb::{Database, ID, Source};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[path = "svg_rasterize_html_font_raster_observer_styled.rs"]
+mod styled;
+
 fn face(database: &Database, id: Option<ID>) -> serde_json::Value {
     let Some(face) = id.and_then(|id| database.face(id)) else {
         return serde_json::Value::Null;
@@ -48,6 +51,7 @@ fn install_eager_selector(options: &mut resvg::usvg::Options<'static>) {
 }
 
 fn install_eager_fallback(options: &mut resvg::usvg::Options<'static>) {
+    styled::install_eager_styled_fallback(options);
     let fallback = std::mem::replace(
         &mut options.font_resolver.select_fallback,
         resvg::usvg::FontResolver::default_fallback_selector(),

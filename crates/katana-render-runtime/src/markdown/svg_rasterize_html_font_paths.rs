@@ -1,5 +1,6 @@
 pub(super) const CJK_FONT_PATHS: &[&str] = &[
     "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+    "/System/Library/Fonts/ヒラギノ角ゴシック W4.ttc",
     "/System/Library/Fonts/ヒラギノ角ゴシック W5.ttc",
     "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
     "/System/Library/Fonts/Hiragino Sans GB.ttc",

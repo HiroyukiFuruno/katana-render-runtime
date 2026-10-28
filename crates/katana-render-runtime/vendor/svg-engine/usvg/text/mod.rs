@@ -64,6 +64,10 @@ pub type FontSelectionFn<'a> =
 pub type FallbackSelectionFn<'a> =
     Box<dyn Fn(char, &[ID], &mut Arc<Database>) -> Option<ID> + Send + Sync + 'a>;
 
+/// 要求されたfont属性を保持してfallbackを選択する内部用resolver。
+pub type StyledFallbackSelectionFn<'a> =
+    Box<dyn Fn(&Font, char, &[ID], &mut Arc<Database>) -> Option<ID> + Send + Sync + 'a>;
+
 /// A font resolver for `<text>` elements.
 ///
 /// This type can be useful if you want to have an alternative font handling to
@@ -79,6 +83,8 @@ pub struct FontResolver<'a> {
     /// Resolver function that will be used when selecting a fallback font for a
     /// character.
     pub select_fallback: FallbackSelectionFn<'a>,
+    /// 設定時のみ既存fallbackより優先する属性付きresolver。
+    pub select_styled_fallback: Option<StyledFallbackSelectionFn<'a>>,
 }
 
 impl Default for FontResolver<'_> {
@@ -86,6 +92,7 @@ impl Default for FontResolver<'_> {
         FontResolver {
             select_font: FontResolver::default_font_selector(),
             select_fallback: FontResolver::default_fallback_selector(),
+            select_styled_fallback: None,
         }
     }
 }

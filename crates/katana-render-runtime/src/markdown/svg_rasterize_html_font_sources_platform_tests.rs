@@ -14,6 +14,31 @@ use interface_bold_support::{assert_coretext_interface_face, japanese_ui_font_pa
 
 #[cfg(target_os = "macos")]
 #[test]
+fn cjk_fallback_registers_w4_in_eager_and_known_databases() -> Result<(), String> {
+    use crate::markdown::svg_rasterize::font::HtmlFontRequest;
+
+    let request = HtmlFontRequest::from_text("Helvetica", "注文サービス");
+    let eager = super::build_html_font_db(&request);
+    let (known, proof) = super::build_known_html_font_db(&request);
+    assert!(proof.current(&known));
+    for database in [&eager, &known] {
+        let face = database
+            .faces()
+            .find(|face| face.post_script_name == "HiraginoSans-W4")
+            .ok_or("CJK fallback W4 missing")?;
+        assert_eq!(face.weight.0, 500);
+    }
+    let latin = super::build_html_font_db(&HtmlFontRequest::from_text("Helvetica", "Order"));
+    assert!(
+        !latin
+            .faces()
+            .any(|face| face.post_script_name == "HiraginoSans-W4")
+    );
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn embedded_hiragino_named_fonts_keep_their_declared_weight() -> Result<(), String> {
     let mut database = resvg::usvg::fontdb::Database::new();
     database.load_font_data(BUNDLED_SANS_SERIF_FONT.to_vec());

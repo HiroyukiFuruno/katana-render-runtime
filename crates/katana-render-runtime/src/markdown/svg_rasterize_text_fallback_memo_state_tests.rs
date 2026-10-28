@@ -104,3 +104,79 @@ fn full_entry_budget_rejects_new_keys() {
         ));
     });
 }
+
+#[test]
+fn styled_keys_distinguish_requested_weight_style_and_stretch() -> Result<(), String> {
+    let database = database();
+    let tree = styled_fixture(&database)?;
+    let fonts = requested_fonts(&tree)?;
+    assert_eq!(fonts.len(), 5);
+    let keys: Vec<_> = fonts
+        .iter()
+        .map(|font| entries::styled_selector_key(font, 'x', &[]))
+        .collect();
+    for (index, key) in keys.iter().enumerate() {
+        assert!(keys.iter().skip(index + 1).all(|other| key != other));
+    }
+    Ok(())
+}
+
+#[test]
+fn styled_keys_remain_bound_to_database_generation() -> Result<(), String> {
+    let mut database = database();
+    let tree = styled_fixture(&database)?;
+    let fonts = requested_fonts(&tree)?;
+    with_memo(|| {
+        let key = entries::styled_selector_key(fonts[0], 'x', &[]);
+        entries::add_database(&database);
+        entries::store(&database, key, None);
+        Arc::make_mut(&mut database).load_font_source(Source::Binary(Arc::new(FONT.to_vec())));
+        let changed = entries::styled_selector_key(fonts[0], 'x', &[]);
+        assert!(matches!(
+            entries::cached_lookup(&database, &changed, entries::key_bytes(&changed)),
+            entries::CachedLookup::ObserveDatabase
+        ));
+    });
+    Ok(())
+}
+
+#[test]
+fn styled_selector_rejects_missing_base_identity() -> Result<(), String> {
+    let database = database();
+    let tree = styled_fixture(&database)?;
+    let fonts = requested_fonts(&tree)?;
+    let mut options = resvg::usvg::Options {
+        fontdb: Arc::clone(&database),
+        ..resvg::usvg::Options::default()
+    };
+    super::super::install_html_font_resolver(&mut options);
+    let selector = options
+        .font_resolver
+        .select_styled_fallback
+        .as_ref()
+        .ok_or("styled selector missing")?;
+    let mut requested_database = Arc::clone(&database);
+    assert!(selector(fonts[0], 'x', &[], &mut requested_database).is_none());
+    Ok(())
+}
+
+fn styled_fixture(database: &Arc<Database>) -> Result<resvg::usvg::Tree, String> {
+    let svg = "<svg xmlns='http://www.w3.org/2000/svg'><text id='x' font-family='Noto Sans'><tspan font-weight='400'>A</tspan><tspan font-weight='600'>A</tspan><tspan font-weight='700'>A</tspan><tspan font-style='italic'>A</tspan><tspan font-stretch='condensed'>A</tspan></text></svg>";
+    let options = resvg::usvg::Options {
+        fontdb: Arc::clone(database),
+        ..resvg::usvg::Options::default()
+    };
+    resvg::usvg::Tree::from_str(svg, &options).map_err(|error| error.to_string())
+}
+
+fn requested_fonts(tree: &resvg::usvg::Tree) -> Result<Vec<&resvg::usvg::Font>, String> {
+    let Some(resvg::usvg::Node::Text(text)) = tree.node_by_id("x") else {
+        return Err("fixture text missing".into());
+    };
+    Ok(text
+        .chunks()
+        .iter()
+        .flat_map(|chunk| chunk.spans())
+        .map(|span| span.font())
+        .collect())
+}
