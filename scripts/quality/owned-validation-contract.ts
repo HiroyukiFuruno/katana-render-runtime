@@ -96,14 +96,14 @@ const NATIVE_WIDTH_TEST_CONSUMERS = {
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_tests.rs`]:
     "5b58a94792571378a1d04a0e1d3ba42279b6b2c7b103c3a41a1861e285a6b1fb",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_c4_description_tests.rs`]:
-    "e6b128ef8dc4aa6334b7ce3e4e19e3a13ce7c5c6f80782ddae80e352ae88495b",
+    "c08a896a1cfac21b227c97623ec45fea1b5d48ec121be0f0849fd9ddc2c4134c",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_c4_tests.rs`]:
     "23f0a46c985e135c195b2826f06e7ab944565ba5041790df2832b711ad8af318",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_ishikawa_tests.rs`]:
     "8d818595edc6750bafbead131fef9beea1987a9995a0a2613cabf1b2de3d5a9f",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_helpers.rs`]:
-    "7b366d9a6ba873fc5393b01a2520d6b75b54f13ffd271148820f91009240e8ba",
-  [NATIVE_WIDTH_BBOX_TRACE]: "e5360e4fcffa0ca4f44cb98492e0681708aa7553fcac67ff57dafcb912081a8a",
+    "6abdd41feed03bb662fd2505dcb263d777b29f8114c967b1e44913f6060bda61",
+  [NATIVE_WIDTH_BBOX_TRACE]: "e2aae9c8755431d6a5a0c92c7816b273fc204fb4f8f845cf1eae57574b929d4b",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_oracle_boundary_tests.rs`]:
     "f4375e4ca17e4d1931efbf21020b7b48bf06079ed9ae00de3ea160d31683731f",
 };
@@ -4292,7 +4292,14 @@ function removeReviewedRuntimeAssetTests(lines: string[]): string[] | undefined 
     "./scripts/mermaid/split_markdown_fixtures_test.ts",
   );
   if (!withoutGeometry) return undefined;
-  const restoredBrowserInvocation = restoreReviewedFeatureCatalogTestProcess(withoutGeometry);
+  const withoutSvgFontRequest = removeReviewedTestToken(
+    withoutGeometry,
+    "./scripts/html/actual-svg-font-request_test.ts",
+    "./scripts/html/anonymized-fixture_test.ts",
+    "./scripts/html/compare-toc-evidence_test.ts",
+  );
+  if (!withoutSvgFontRequest) return undefined;
+  const restoredBrowserInvocation = restoreReviewedFeatureCatalogTestProcess(withoutSvgFontRequest);
   if (!restoredBrowserInvocation) return undefined;
   const withoutChromiumFontTrace = removeReviewedTestToken(
     restoredBrowserInvocation,

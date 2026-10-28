@@ -835,6 +835,7 @@ test("runtime asset registration uses Playwright without dropping sibling Bun te
     "scripts/html/chromium-font-trace_test.ts",
     "scripts/html/catalog-capture-producer-context_test.ts",
     "scripts/html/anonymized-fixture_test.ts",
+    "scripts/html/actual-svg-font-request_test.ts",
     "scripts/html/compare-toc-evidence_test.ts",
   ]);
   expect(invocations.find((paths) => paths.includes(pureHtmlTests[0] ?? ""))).toEqual(
@@ -853,7 +854,11 @@ test("runtime asset registration uses Playwright without dropping sibling Bun te
   expect(actualRuntimeAssetUnitPaths()).toEqual(expect.arrayContaining(pureHtmlTests));
 });
 
-for (const requiredTest of ["catalog-font-equivalence", "chromium-font-trace"]) {
+for (const requiredTest of [
+  "catalog-font-equivalence",
+  "chromium-font-trace",
+  "actual-svg-font-request",
+]) {
   test(`runtime asset registration rejects a missing ${requiredTest} test`, () => {
     const recipe = actualRecipeBody("runtime-asset-script-other-run");
     const token = ` ./scripts/html/${requiredTest}_test.ts`;
@@ -2976,7 +2981,7 @@ test("actual Rust native width test trace remains mandatory with isolated strict
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_c4_description_tests.rs`,
-      sha256: "e6b128ef8dc4aa6334b7ce3e4e19e3a13ce7c5c6f80782ddae80e352ae88495b",
+      sha256: "c08a896a1cfac21b227c97623ec45fea1b5d48ec121be0f0849fd9ddc2c4134c",
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_c4_tests.rs`,
@@ -2988,11 +2993,11 @@ test("actual Rust native width test trace remains mandatory with isolated strict
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_helpers.rs`,
-      sha256: "7b366d9a6ba873fc5393b01a2520d6b75b54f13ffd271148820f91009240e8ba",
+      sha256: "6abdd41feed03bb662fd2505dcb263d777b29f8114c967b1e44913f6060bda61",
     },
     {
       path: nativeWidthBBoxTracePath,
-      sha256: "e5360e4fcffa0ca4f44cb98492e0681708aa7553fcac67ff57dafcb912081a8a",
+      sha256: "e2aae9c8755431d6a5a0c92c7816b273fc204fb4f8f845cf1eae57574b929d4b",
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_oracle_boundary_tests.rs`,
