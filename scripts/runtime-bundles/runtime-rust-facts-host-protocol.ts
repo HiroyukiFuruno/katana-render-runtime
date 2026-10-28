@@ -335,7 +335,7 @@ function selectedHostEnvironment(
     throw new Error("Rust facts host tool override is unsupported");
   const rtk =
     environment.RTK ?? Bun.which("rtk", { cwd: root, PATH: environment.PATH ?? "" }) ?? "";
-  const cargo = rtk === "" ? "cargo" : `${rtk} cargo`;
+  const cargo = rtk === "" ? "cargo" : `${rtk} proxy cargo`;
   if (environment.CARGO && environment.CARGO !== cargo)
     throw new Error("Rust facts host Cargo override is unsupported");
   if (

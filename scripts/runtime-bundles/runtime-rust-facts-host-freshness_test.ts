@@ -145,8 +145,12 @@ test.each(["", ...(selectedRtk ? [selectedRtk] : [])])(
       process.env.RTK = rtk;
       delete process.env.CARGO;
       const implicit = hostEnvironmentDigest(path.dirname(import.meta.dir));
-      process.env.CARGO = rtk === "" ? "cargo" : `${rtk} cargo`;
+      process.env.CARGO = rtk === "" ? "cargo" : `${rtk} proxy cargo`;
       expect(hostEnvironmentDigest(path.dirname(import.meta.dir))).toBe(implicit);
+      if (rtk !== "") {
+        process.env.CARGO = `${rtk} cargo`;
+        expect(() => hostEnvironmentDigest(path.dirname(import.meta.dir))).toThrow("override");
+      }
       process.env.CARGO = "cargo --config other.toml";
       expect(() => hostEnvironmentDigest(path.dirname(import.meta.dir))).toThrow("override");
     } finally {

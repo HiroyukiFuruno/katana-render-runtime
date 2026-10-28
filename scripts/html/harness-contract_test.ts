@@ -827,6 +827,9 @@ describe("fixed native artifact and Python collector bindings", () => {
         "scripts/build/cargo_capacity_guard.py",
         classicFactsCaller,
         "scripts/runtime-bundles/runtime-unused-rust-classic_test.ts",
+        "scripts/html/playwright.macos.config.ts",
+        "scripts/html/playwright-config-base.ts",
+        "scripts/mermaid/official_raw_producer_macos_browser_test.ts",
       ];
       for (const name of new Set([...NATIVE_WIDTH_HASH_INPUTS, ...authorityPaths])) {
         const destination = path.join(root, name);

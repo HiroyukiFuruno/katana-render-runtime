@@ -3615,7 +3615,7 @@ const HOST_EVIDENCE_SOURCE_AST_SHA256: Record<string, string> = {
   "scripts/runtime-bundles/runtime-rust-facts-host-inputs.ts":
     "40df14dfcb4405647185a8816425a6fbd1eb7898d6729e28cc2af72e4ebb85ad",
   "scripts/runtime-bundles/runtime-rust-facts-host-protocol.ts":
-    "4f141845a1c95e429678baaa9cfb0d9920ee99c51066ec7d215f94d71e2c61b5",
+    "344dcff1107ae20df8a5a7aa75403b76980b2975e55eb22d26150ad44a87d238",
   "scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts":
     "4484139b289df41f69436936caa5a09477a132822f25b9c35dd68282332dadca",
   "scripts/runtime-bundles/runtime-mathjax-audit-evidence-inputs.ts":
@@ -4763,14 +4763,7 @@ export function executionGraph(
         );
       });
     };
-    const walkRecipe = (name: string): void => {
-      if (seen.has(name)) return;
-      seen.add(name);
-      const body = recipes.get(name);
-      if (body === undefined) {
-        errors.push(`missing recipe: ${name}`);
-        return;
-      }
+    const walkSpecialRecipeDependencies = (name: string, body: string): void => {
       if (name === "biome" && biomeBootstrapDispatchVerified(recipes))
         ["rust-facts-host-prebuild", "biome-run"].forEach(walkRecipe);
       if (name === "macos-browser-contract-test") {
@@ -4790,6 +4783,16 @@ export function executionGraph(
           "runtime-unused-script-producer-run",
         ].forEach(walkRecipe);
       }
+    };
+    const walkRecipe = (name: string): void => {
+      if (seen.has(name)) return;
+      seen.add(name);
+      const body = recipes.get(name);
+      if (body === undefined) {
+        errors.push(`missing recipe: ${name}`);
+        return;
+      }
+      walkSpecialRecipeDependencies(name, body);
       const words = shellWords(body);
       words.forEach((word, index) => {
         if (word === "just" && recipes.has(words[index + 1] ?? ""))
