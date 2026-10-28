@@ -3,6 +3,8 @@ use super::super::{AuthoredClipInfo, SvgCompositeRenderer};
 use resvg::usvg;
 use tiny_skia::{Pixmap, Transform};
 
+#[path = "svg_rasterize_composite_path_dash_tests.rs"]
+mod dash;
 #[path = "svg_rasterize_composite_fill_only_tests.rs"]
 mod fill_only;
 #[path = "svg_rasterize_composite_path_opacity_tests.rs"]
@@ -131,7 +133,6 @@ fn stroke_joins_and_miter_limit_keep_their_distinct_geometry() -> Result<(), Str
 #[test]
 fn unsupported_styles_keep_the_existing_resvg_pixels() -> Result<(), String> {
     for attributes in [
-        "fill=\"none\" stroke=\"#ff0000\" stroke-width=\"4\" stroke-dasharray=\"7 3\" stroke-dashoffset=\"2\"",
         "fill=\"url(#g)\"",
         "fill=\"none\" stroke=\"#00ff00\" stroke-width=\"12\" stroke-linejoin=\"miter-clip\"",
         "fill=\"#ff0000\" fill-opacity=\"0.5\" stroke=\"url(#g)\" stroke-width=\"4\"",

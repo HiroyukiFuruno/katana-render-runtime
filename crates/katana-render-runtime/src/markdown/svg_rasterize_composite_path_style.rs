@@ -1,5 +1,5 @@
 use resvg::usvg;
-use skia_safe::{Paint, PaintStyle};
+use skia_safe::{Paint, PaintStyle, PathEffect};
 
 use super::solid_color;
 
@@ -39,17 +39,21 @@ pub(super) fn stroke(
     let usvg::Paint::Color(color) = stroke.paint() else {
         return None;
     };
-    if stroke.dasharray().is_some() || stroke.linejoin() == usvg::LineJoin::MiterClip {
-        return None;
+    match stroke.opacity().get() {
+        TRANSPARENT_OPACITY => Some(None),
+        OPAQUE_OPACITY => stroke_paint(stroke, *color, rendering).map(Some),
+        _ => None,
     }
-    if stroke.opacity().get() == TRANSPARENT_OPACITY {
-        return Some(None);
-    }
-    if stroke.opacity().get() != OPAQUE_OPACITY {
-        return None;
-    }
+}
+
+fn stroke_paint(
+    stroke: &usvg::Stroke,
+    color: usvg::Color,
+    rendering: usvg::ShapeRendering,
+) -> Option<Paint> {
+    let dash = dash_effect(stroke)?;
     let join = line_join(stroke.linejoin())?;
-    let mut paint = solid_color(*color);
+    let mut paint = solid_color(color);
     paint
         .set_style(PaintStyle::Stroke)
         .set_anti_alias(rendering.use_shape_antialiasing())
@@ -57,7 +61,17 @@ pub(super) fn stroke(
         .set_stroke_miter(stroke.miterlimit().get())
         .set_stroke_cap(line_cap(stroke.linecap()))
         .set_stroke_join(join);
-    Some(Some(paint))
+    if let Some(effect) = dash {
+        paint.set_path_effect(effect);
+    }
+    Some(paint)
+}
+
+fn dash_effect(stroke: &usvg::Stroke) -> Option<Option<PathEffect>> {
+    let Some(intervals) = stroke.dasharray() else {
+        return Some(None);
+    };
+    PathEffect::dash(intervals, stroke.dashoffset()).map(Some)
 }
 
 fn line_cap(cap: usvg::LineCap) -> skia_safe::PaintCap {
