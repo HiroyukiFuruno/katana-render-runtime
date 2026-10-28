@@ -2,6 +2,12 @@
 
 ## 最新の再開地点（2026-10-28）
 
+- [/] 描画候補を通常hook actual0後に正式履歴へ保存した。透明paintは`97cf1a36`、直接glyph描画は`84628d5a`、未使用variation正規化の省略は`aae584b2`。R3403 foundationは新規test2ファイル未追跡で失敗し、追跡登録後R3404はactual0。R3404 Clippyはtest関数の複雑度13/10で失敗し、入力・全比較条件を保ったhelper分離後R3405はroot/harnessともactual0。R3406 fmt/AST/容量/build成功、最新binaryのR3407はglyph102成功・既存ignore1、path11成功。候補診断の画像改善は上記R3400を参照し、正式全117/HTML84/性能/coverage100/0は未完了。次はrelease内容pin同期とclean HEADでの正式producer。
+
+- [ ] R3397最新製品候補は通常fmt・AST・容量admission・release test buildが全actual0。透明RGBA8中間面への文字描画を既存Skiaによる保存先への直接描画へ変え、旧crop境界・親clip/mask/opacity・失敗伝播を維持した。修正前に失敗した文字2回帰と透明paint2回帰はR3398で4/4成功、R3401のglyph/path群もactual0（catalog103/11、既存ignoreはraw参照）。R3400の代表C4は同一Chrome入力・同一edge政策で98.80211→99.142173へ改善し、Wardley4図も99以上維持。Kanban2図は98.71247/98.76399で未達。全117正式合格ではなく候補診断。R3395では透明paint除去によりKanbanのpath fallback10→0、解決SVGとglyph数は不変。次は通常静的検査の回収・候補の関心分離commit・現sourceの正式117/HTML84/性能・coverage・公開工程。
+
+- [/] 技術判断の人間への転嫁を是正する（2026-10-28）。承認済み範囲の原因調査・既存APIの適用・回帰検証・候補の採否は担当が証拠で判断し、通常の実装判断を再確認待ちにしない。性能差は測定環境・処理の再利用・揺れの抑制を先に調査し、残る測定変動と再現する劣化を区別する。受入条件の変更、新規公開・権限など未承認の不可逆操作だけを相談する。アンチパターンは同一実行物の微小差だけを示して判断を求めること。実測・原因・対策・残リスクを担当が整理し、既定条件で継続する。検索語: `通常技術判断は自律実行`, `測定変動と性能劣化`, `routine decision autonomy`。
+
 - [ ] 描画`5c4d20db`、検証効率`1b8236d0`、release必須pin`21885380`を通常hook後に保存し、#108/#109を実測へ同期。R3382全Bunは1344件中1343成功・MathJax実repo検査1件が5005.69msでtimeout。失敗を合格扱いしない。既存Bun CPU profiler R3385で不要なRTK引数探索を特定し、同条件を先行拒否する同義修正後R3386の関連5件が成功、MathJaxは3511ms。全体の手動反復は続けず、標準full gateで最終確認する。現行正式117/HTML84/性能・coverage100/0・公開工程は未完了。次は静的確認・同義修正のcommit/source固定後、既存正規producerで新しいcandidate build proofを作り全117を取得する。
 - [ ] R3364で文字サイズtrackingとmarker clipの失敗2件・対照成功2件を実再現し、製品2修正後R3368は4/4成功。R3370は既存RGB採点でWardley4図すべて99以上（JA full99.206372/simple99.545229、EN full99.855975/simple99.88195）。同条件Chromeに対する代表C4形状は98.65729→98.80211で未達、Kanban日英2図は旧製品とRGBA完全一致。これは診断7図であり全117正式合格へ転用しない。source・README・vendor来歴pinを同期。R3375通常foundation actual0（型・重複・登録・Python・資源等）、fresh/終端拒否と既存timeoutの5回帰もactual0。次は残Rust/Biomeの結果回収、関心分離commitと現sourceの正式117/HTML84/性能・coverage・公開工程。新fullBunはまだ未実行。
 - [ ] 可変font対応はClippyのnested ifをlet-chainへ修正し、通常commit hook actual0で`189f16ed`へ保存。次の非重複担当は、(1)Harfrust point_sizeへCSS pxを渡す回帰→修正、(2)marker暗黙viewport clipだけ既存CrispEdgesでhard-edge化する回帰→修正、(3)検証inspection内のcompiler/Bun pin照合共有と終端再照合。いずれも製品画像・正式gateは未合格。公開fresh resolverの途中差替え拒否は維持し、mtime cache・全root cache・timeout延長・clip省略・正解改変は禁止する。
