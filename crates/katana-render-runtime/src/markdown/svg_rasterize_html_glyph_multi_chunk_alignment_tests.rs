@@ -8,6 +8,8 @@ use std::sync::Arc;
 mod nested_rows;
 #[path = "svg_rasterize_html_glyph_single_row_spans_tests.rs"]
 mod single_row_spans;
+#[path = "svg_rasterize_html_glyph_unicode_spans_tests.rs"]
+mod unicode_spans;
 
 const CHUNK_COUNT: usize = 2;
 const COORDINATE_COUNT: usize = 2;

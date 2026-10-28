@@ -9,6 +9,9 @@ use resvg::usvg;
 mod diagnostic;
 #[cfg(test)]
 pub(in crate::markdown::svg_rasterize) use diagnostic::row_diagnostic;
+#[cfg(test)]
+#[path = "svg_rasterize_html_glyph_chunk_unicode_boundary_tests.rs"]
+mod unicode_boundary_tests;
 
 pub(super) struct Input<'a> {
     pub(super) chunk: &'a usvg::TextChunk,
@@ -196,7 +199,7 @@ fn chunk_supported(chunk: &usvg::TextChunk, prepared: &[PreparedSpan]) -> bool {
         && prepared.len() == chunk.spans().len()
         && chunk.anchor() == usvg::TextAnchor::Middle
         && matches!(chunk.text_flow(), usvg::TextFlow::Linear)
-        && printable_ascii(chunk.text())
+        && supported_ltr_text(chunk.text())
         && ranges_cover_chunk(chunk)
 }
 
@@ -205,15 +208,25 @@ fn printable_ascii(text: &str) -> bool {
         .all(|value| value.is_ascii() && !value.is_ascii_control())
 }
 
+fn supported_ltr_text(text: &str) -> bool {
+    text.chars().all(|character| {
+        matches!(character, '\u{20}'..='\u{7e}' | '\u{c0}'..='\u{d6}' | '\u{d8}'..='\u{f6}' | '\u{f8}'..='\u{ff}' | '\u{3041}'..='\u{3096}' | '\u{30a1}'..='\u{30fa}' | '\u{4e00}'..='\u{9fff}')
+    })
+}
+
 fn ranges_cover_chunk(chunk: &usvg::TextChunk) -> bool {
     let mut end = 0;
     for span in chunk.spans() {
-        if span.start() != end || span.end() <= span.start() {
+        if span.start() != end || !valid_span_range(chunk.text(), span.start(), span.end()) {
             return false;
         }
         end = span.end();
     }
     end == chunk.text().len()
+}
+
+fn valid_span_range(text: &str, start: usize, end: usize) -> bool {
+    start < end && text.get(start..end).is_some()
 }
 
 fn spans_supported(chunk: &usvg::TextChunk, prepared: &[PreparedSpan]) -> bool {
@@ -262,6 +275,6 @@ fn glyphs_supported(chunk: &usvg::TextChunk, source: &usvg::TextSpan, span: &Pre
         && span.x_alignment.is_none()
         && span.glyphs.iter().all(|glyph| {
             let transform = glyph.transform();
-            transform.tx.is_finite() && transform.ty.is_finite()
+            glyph.id.0 != 0 && transform.tx.is_finite() && transform.ty.is_finite()
         })
 }

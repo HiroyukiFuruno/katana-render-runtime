@@ -14,6 +14,8 @@ mod single_middle_tests;
 mod tests;
 
 const LAYOUT_UNIT_SCALE: f64 = 64.0;
+type CharacterMetric = (f32, f32);
+type SpanMetrics = Vec<CharacterMetric>;
 
 #[derive(Clone, Copy)]
 pub(super) struct SpanAlignment {
@@ -78,11 +80,8 @@ fn append_row_alignments(
     let metrics = character_metrics(database, input)?;
     let widths = span_widths(input.chunk, &metrics)?;
     let mut cursor = f64::from(input.anchor_x * input.css_scale) - widths.iter().sum::<f64>() / 2.0;
-    for ((source, span), width) in input.chunk.spans().iter().zip(spans).zip(widths) {
-        let offset = metrics
-            .get(source.start())
-            .ok_or("chunk span offset is missing")?
-            .1;
+    for ((metrics, span), width) in metrics.iter().zip(spans).zip(widths) {
+        let offset = metrics.first().ok_or("chunk span offset is missing")?.1;
         alignments.push(span_alignment(span, input, cursor + f64::from(offset))?);
         cursor += width;
     }
@@ -92,13 +91,13 @@ fn append_row_alignments(
 fn character_metrics(
     database: &usvg::fontdb::Database,
     input: &eligibility::Input<'_>,
-) -> Result<Vec<(f32, f32)>, String> {
+) -> Result<Vec<SpanMetrics>, String> {
     let font = super::super::text_shaping::FontShape::new(
         input.paint_css_size,
         input.source_font.weight(),
         input.source_font.style() != usvg::FontStyle::Normal,
     );
-    let mut metrics = Vec::with_capacity(input.chunk.text().len());
+    let mut metrics = Vec::with_capacity(input.chunk.spans().len());
     for span in input.chunk.spans() {
         let text = input
             .chunk
@@ -110,26 +109,33 @@ fn character_metrics(
             database, input.face, text, font, None,
         )
         .ok_or_else(|| "eligible SVG chunk character metrics could not be shaped".to_owned())?;
-        metrics.extend(shaped);
+        metrics.push(shaped);
     }
     Ok(metrics)
 }
 
-fn span_widths(chunk: &usvg::TextChunk, metrics: &[(f32, f32)]) -> Result<Vec<f64>, String> {
-    if metrics.len() != chunk.text().len() {
+fn span_widths(chunk: &usvg::TextChunk, metrics: &[SpanMetrics]) -> Result<Vec<f64>, String> {
+    if metrics.len() != chunk.spans().len() {
         return Err("eligible SVG chunk character metrics count mismatch".to_owned());
     }
     chunk
         .spans()
         .iter()
-        .map(|span| span_width(span, metrics))
+        .zip(metrics)
+        .map(|(span, values)| {
+            let text = chunk
+                .text()
+                .get(span.start()..span.end())
+                .ok_or("chunk span text is missing")?;
+            if values.len() != text.chars().count() {
+                return Err("eligible SVG chunk character metrics count mismatch".to_owned());
+            }
+            span_width(values)
+        })
         .collect()
 }
 
-fn span_width(span: &usvg::TextSpan, metrics: &[(f32, f32)]) -> Result<f64, String> {
-    let values = metrics
-        .get(span.start()..span.end())
-        .ok_or("chunk span metrics are missing")?;
+fn span_width(values: &[CharacterMetric]) -> Result<f64, String> {
     if values
         .iter()
         .any(|(advance, offset)| !advance.is_finite() || !offset.is_finite())
