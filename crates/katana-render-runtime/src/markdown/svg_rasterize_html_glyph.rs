@@ -27,6 +27,8 @@ mod anchor;
 mod baseline;
 #[path = "svg_rasterize_html_glyph_chunk.rs"]
 mod chunk;
+#[path = "svg_rasterize_html_glyph_multi_chunk_alignment.rs"]
+mod multi_chunk_alignment;
 #[path = "svg_rasterize_html_glyph_paint.rs"]
 mod paint;
 #[path = "svg_rasterize_html_glyph_runs.rs"]
@@ -45,6 +47,10 @@ pub(super) use paint::PaintCaptureScope;
 #[cfg(test)]
 #[path = "svg_rasterize_html_glyph_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "svg_rasterize_html_glyph_multi_chunk_alignment_tests.rs"]
+mod multi_chunk_alignment_tests;
 
 #[cfg(test)]
 #[path = "svg_rasterize_html_glyph_ttc_integration_tests.rs"]
@@ -191,6 +197,9 @@ impl<'a> HtmlGlyphRasterizer<'a> {
             if let Some(span) = prepared.first_mut() {
                 span.x_alignment = Some(alignment);
             }
+            return Ok(());
+        }
+        if multi_chunk_alignment::apply(text, prepared) {
             return Ok(());
         }
         chunk::apply(self.database, text, prepared)
