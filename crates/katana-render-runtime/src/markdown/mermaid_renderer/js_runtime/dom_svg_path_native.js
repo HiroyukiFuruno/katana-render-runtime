@@ -20,8 +20,12 @@ function katanaNativeSvgPathBox(pathData) {
   if (cached !== undefined) return cached;
   const bounds = measure(pathData);
   if (bounds === null) return null;
-  if (!bounds || ![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) ||
-      bounds.width < 0 || bounds.height < 0)
+  if (
+    !bounds ||
+    ![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) ||
+    bounds.width < 0 ||
+    bounds.height < 0
+  )
     throw new Error("native SVG path bounds are invalid");
   const box = katanaBox(bounds.x, bounds.y, bounds.width, bounds.height);
   katanaRememberSvgPathBox(pathData, box);
@@ -32,8 +36,10 @@ function katanaRememberSvgPathBox(pathData, box) {
   // UTF-16上限で数え、内部表現に依存せず保持量を抑える。
   const keyBytes = pathData.length * 2;
   if (keyBytes > KATANA_PATH_BOUNDS_KEY_BYTES) return;
-  while (katanaPathBoundsCache.size >= KATANA_PATH_BOUNDS_CACHE_LIMIT ||
-      katanaPathBoundsCacheBytes + keyBytes > KATANA_PATH_BOUNDS_CACHE_BYTES) {
+  while (
+    katanaPathBoundsCache.size >= KATANA_PATH_BOUNDS_CACHE_LIMIT ||
+    katanaPathBoundsCacheBytes + keyBytes > KATANA_PATH_BOUNDS_CACHE_BYTES
+  ) {
     const oldest = katanaPathBoundsCache.keys().next().value;
     katanaPathBoundsCache.delete(oldest);
     katanaPathBoundsCacheBytes -= oldest.length * 2;

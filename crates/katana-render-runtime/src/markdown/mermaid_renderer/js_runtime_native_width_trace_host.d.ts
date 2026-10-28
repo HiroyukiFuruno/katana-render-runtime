@@ -34,7 +34,11 @@ interface NativeWidthTraceBBoxObservation {
   node: NativeWidthTraceNodeSnapshot;
   parent: NativeWidthTraceNodeSnapshot | null;
   bbox: NativeWidthTraceBox;
-  children: Array<{ node: NativeWidthTraceNodeSnapshot; transform: string | null; bbox: NativeWidthTraceBox }>;
+  children: Array<{
+    node: NativeWidthTraceNodeSnapshot;
+    transform: string | null;
+    bbox: NativeWidthTraceBox;
+  }>;
 }
 interface NativeWidthTextRun {
   text: string;
