@@ -26,7 +26,8 @@ fn mixed_fallback_runs_preserve_start_middle_and_end_anchor_positions() -> Resul
     let start_only =
         std::env::var("KRR_HTML_FEATURE_START_ONLY_FALLBACK_RUNS").as_deref() == Ok("1");
     let mut start_case = None;
-    for (anchor, factor) in [("start", 0.0_f64), ("middle", -0.5), ("end", -1.0)] {
+    let mut middle_case = None;
+    for anchor in ["start", "middle", "end"] {
         let (faces, positions, advance) = anchor_layout_snapshot(anchor)?;
         if anchor == "start" {
             start_case = Some((faces, positions, advance.ok_or("start metrics missing")?));
@@ -37,11 +38,54 @@ fn mixed_fallback_runs_preserve_start_middle_and_end_anchor_positions() -> Resul
         assert_eq!(&faces, start_faces);
         if start_only {
             assert!(positions.is_empty(), "{anchor} anchor should stay disabled");
+            continue;
+        }
+        assert_eq!(start_positions.len(), faces.len());
+        if anchor == "middle" {
+            assert_middle_absolute(&positions, *advance)?;
+            middle_case = Some(positions);
         } else {
-            let shift = (super::super::super::chunk::ceil_layout_unit(*advance) * factor) as f32;
-            assert_anchored_positions(anchor, &positions, start_positions, shift);
+            assert_end_positions(&positions, &middle_case, *advance)?;
         }
     }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn assert_end_positions(
+    positions: &[Vec<tiny_skia::Point>],
+    middle: &Option<Vec<Vec<tiny_skia::Point>>>,
+    advance: f64,
+) -> Result<(), String> {
+    let middle = middle.as_deref().ok_or("middle anchor case is missing")?;
+    let shift = (super::super::super::chunk::ceil_layout_unit(advance)
+        * super::super::super::anchor::MIDDLE_ANCHOR_FACTOR) as f32;
+    assert_anchored_positions("end", positions, middle, shift);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn assert_middle_absolute(positions: &[Vec<tiny_skia::Point>], advance: f64) -> Result<(), String> {
+    let tree = tree(TITLE, "text-anchor='middle'")?;
+    let text = text(&tree)?;
+    let spans = prepare_anchor_title(tree.fontdb(), text)?;
+    let span = spans.first().ok_or("middle span missing")?;
+    let glyph = span.glyphs.first().ok_or("middle glyph missing")?;
+    let scale = super::super::super::anchor::uniform_css_scale(text.abs_transform())
+        .ok_or("middle scale missing")?;
+    let chunk = text.chunks().first().ok_or("middle chunk missing")?;
+    assert_eq!(chunk.x(), Some(216.0));
+    let shift = (super::super::super::chunk::ceil_layout_unit(advance)
+        * super::super::super::anchor::MIDDLE_ANCHOR_FACTOR) as f32;
+    let first = positions
+        .first()
+        .and_then(|run| run.first())
+        .ok_or("middle position missing")?;
+    assert_eq!(first.x, 216.0 * scale + shift);
+    assert_eq!(
+        first.y,
+        (glyph.transform().ty + span.baseline_shift) * scale
+    );
     Ok(())
 }
 

@@ -4,6 +4,10 @@ use crate::markdown::svg_rasterize::text_shaping::{
 };
 
 #[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_glyph_fallback_expected_position_tests.rs"]
+mod expected_position;
+
+#[cfg(target_os = "macos")]
 pub(super) fn assert_run_layout_metrics(
     database: &resvg::usvg::fontdb::Database,
     text: &resvg::usvg::Text,
@@ -15,7 +19,7 @@ pub(super) fn assert_run_layout_metrics(
         .first()
         .and_then(|chunk| chunk.spans().first())
         .ok_or("source span is missing")?;
-    let mut context = metrics_context(database, text)?;
+    let mut context = metrics_context(database, text, prepared)?;
     for (span, layout) in prepared.iter().zip(layouts) {
         assert_span_layout_metrics(span, layout, source, &mut context)?;
     }
@@ -31,12 +35,14 @@ struct MetricsContext<'a> {
     origin_x: f32,
     cursor: f64,
     glyph_offset: usize,
+    start_paint: bool,
 }
 
 #[cfg(target_os = "macos")]
 fn metrics_context<'a>(
     database: &'a resvg::usvg::fontdb::Database,
     text: &'a resvg::usvg::Text,
+    prepared: &[PreparedSpan],
 ) -> Result<MetricsContext<'a>, String> {
     let chunk = text.chunks().first().ok_or("text chunk is missing")?;
     let css_scale = super::super::super::anchor::uniform_css_scale(text.abs_transform())
@@ -56,6 +62,11 @@ fn metrics_context<'a>(
         origin_x: chunk.x().unwrap_or(0.0) * css_scale,
         cursor: 0.0,
         glyph_offset: 0,
+        start_paint: text.chunks().len() == 1
+            && chunk.anchor() == resvg::usvg::TextAnchor::Start
+            && chunk.spans().len() == 1
+            && text.dy().iter().all(|value| *value == 0.0)
+            && prepared.iter().all(|span| span.baseline_shift == 0.0),
     })
 }
 
@@ -155,12 +166,7 @@ fn assert_glyph_position(
     offset: f32,
     context: &mut MetricsContext<'_>,
 ) -> Result<(), String> {
-    let expected_x = context.origin_x
-        + super::super::super::anchor::trunc_layout_unit(
-            (context.cursor + f64::from(offset)) as f32,
-        )
-        .ok_or("expected glyph x is outside LayoutUnit range")?;
-    let expected_y = (glyph.transform().ty + span.baseline_shift) * context.css_scale;
+    let (expected_x, expected_y) = expected_position::calculate(span, glyph, offset, context)?;
     assert_eq!(position.x, expected_x);
     assert_eq!(position.y, expected_y);
     let painted = super::super::super::paint::normalized_transform(span, glyph, context.css_scale);

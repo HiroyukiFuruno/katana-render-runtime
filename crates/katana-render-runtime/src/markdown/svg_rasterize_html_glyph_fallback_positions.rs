@@ -17,6 +17,13 @@ struct SourceRunContext<'a> {
     layout_context: &'a mut LayoutContext,
     layouts: &'a mut Vec<RunLayout>,
 }
+
+struct ChunkOffsets {
+    prepared: usize,
+    glyph: usize,
+    single_chunk: bool,
+}
+
 pub(super) fn layout(
     database: &usvg::fontdb::Database,
     text: &usvg::Text,
@@ -24,8 +31,11 @@ pub(super) fn layout(
     source: eligibility::Source<'_>,
 ) -> Option<Vec<RunLayout>> {
     let scripts = super::scripts::resolved_layout_scripts(text.layouted())?;
-    let mut prepared_offset = 0;
-    let mut glyph_offset = 0;
+    let mut offsets = ChunkOffsets {
+        prepared: 0,
+        glyph: 0,
+        single_chunk: source.chunks.len() == 1,
+    };
     let mut layouts = Vec::with_capacity(prepared.len());
     for chunk in &source.chunks {
         layouts.extend(layout_chunk(
@@ -34,11 +44,10 @@ pub(super) fn layout(
             prepared,
             chunk,
             &scripts,
-            &mut prepared_offset,
-            &mut glyph_offset,
+            &mut offsets,
         )?);
     }
-    if prepared_offset != prepared.len() || glyph_offset != scripts.len() {
+    if offsets.prepared != prepared.len() || offsets.glyph != scripts.len() {
         return None;
     }
     Some(layouts)
@@ -50,26 +59,26 @@ fn layout_chunk(
     prepared: &[PreparedSpan],
     source: &super::sources::Chunk<'_>,
     scripts: &[Script],
-    prepared_offset: &mut usize,
-    glyph_offset: &mut usize,
+    offsets: &mut ChunkOffsets,
 ) -> Option<Vec<RunLayout>> {
-    let mut context = LayoutContext::new(text, source.chunk, prepared.first()?.font_size)?;
+    let mut context =
+        super::layout_context::chunk_context(text, source, prepared, offsets.single_chunk)?;
     let mut layouts = Vec::new();
     for (source_span, layout_span) in source.source_spans.iter().zip(source.layout_spans) {
-        let glyph_end = (*glyph_offset).checked_add(layout_span.positioned_glyphs.len())?;
-        let source_scripts = scripts.get(*glyph_offset..glyph_end)?;
-        let mut source_run = SourceRunContext {
+        let glyph_end = offsets
+            .glyph
+            .checked_add(layout_span.positioned_glyphs.len())?;
+        layout_source_runs(&mut SourceRunContext {
             database,
             source_span,
             source_glyphs: &layout_span.positioned_glyphs,
             prepared,
-            prepared_offset,
-            scripts: source_scripts,
+            prepared_offset: &mut offsets.prepared,
+            scripts: scripts.get(offsets.glyph..glyph_end)?,
             layout_context: &mut context,
             layouts: &mut layouts,
-        };
-        layout_source_runs(&mut source_run)?;
-        *glyph_offset = glyph_end;
+        })?;
+        offsets.glyph = glyph_end;
     }
     anchors::apply(source.chunk.anchor(), context.cursor, &mut layouts)?;
     Some(layouts)
@@ -152,14 +161,11 @@ fn positioned_glyph_point(
     if !advance.is_finite() || !offset.is_finite() || advance <= 0.0 {
         return None;
     }
-    /* WHY: source spanでshapingを切り、chunk全体のpen位置を累積して量子化する。 */
-    let x = context.origin_x + advance_position((context.cursor + f64::from(offset)) as f32)?;
+    /* WHY: source spanごとのshaping結果をchunk全体のpen位置へ連続して累積する。 */
     let y = (glyph.transform().ty + span.baseline_shift) * context.css_scale;
-    if !x.is_finite() || !y.is_finite() {
-        return None;
-    }
+    let point = context.position(offset, y)?;
     context.cursor += f64::from(advance);
-    Some(Point::from_xy(x, y))
+    Some(point)
 }
 
 pub(super) fn advance_position(value: f32) -> Option<f32> {
