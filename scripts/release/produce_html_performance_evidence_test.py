@@ -31,6 +31,30 @@ producer = typed_producer
 
 
 class CatalogProducerOperationTest(unittest.TestCase):
+    def test_catalog_pair_manifest_keeps_capture_binary_separate_from_measurement_arm(self) -> None:
+        condition = "async/expected-state/1280x900@1"
+        capture_sha = "a" * 64
+        candidate_sha = "b" * 64
+        evidence: gate.JsonObject = {"path": "/capture/async-krr.json", "sha256": "c" * 64}
+        plan: gate.JsonObject = {"conditionId": condition,
+                                 "evidenceBinarySha256": capture_sha,
+                                 "operationStream": []}
+        raw_report: gate.JsonObject = {"binarySha256": capture_sha}
+        old_manifest: gate.JsonObject = {"condition_id": condition,
+                                         "operation_evidence_ref": evidence}
+        self.assertNotEqual(old_manifest.get("binarySha256"), raw_report["binarySha256"])
+        manifest = producer._catalog_pair_manifest_fields(plan, condition, evidence)
+        self.assertEqual(manifest["binarySha256"], raw_report["binarySha256"])
+        self.assertNotEqual(manifest["binarySha256"], candidate_sha)
+        self.assertEqual(manifest["operation_evidence_ref"], evidence)
+        with self.assertRaisesRegex(ValueError, "condition differs"):
+            producer._catalog_pair_manifest_fields(plan, "other", evidence)
+        with self.assertRaises(ValueError):
+            producer._catalog_pair_manifest_fields({"conditionId": condition}, condition, evidence)
+        with self.assertRaises(ValueError):
+            producer._catalog_pair_manifest_fields({**plan, "evidenceBinarySha256": "invalid"},
+                                                   condition, evidence)
+
     def _catalog_cli_fixture(
         self, temporary: str,
     ) -> tuple[Path, Path, Path, Path]:

@@ -219,6 +219,16 @@ class CapacityBinding(NamedTuple):
     references: tuple[str, ...]
 
 
+def _catalog_pair_manifest_fields(plan: Mapping[str, object], condition_id: object,
+                                  evidence: object) -> gate.JsonObject:
+    condition = gate._text(condition_id, "catalog condition id")
+    gate.require(plan.get("conditionId") == condition, "catalog pair condition differs from plan")
+    binary_sha = gate._text(plan.get("evidenceBinarySha256"), "catalog evidence binary SHA")
+    gate.digest(binary_sha)
+    return {"condition_id": condition, "operation_evidence_ref": evidence,
+            "binarySha256": binary_sha}
+
+
 def capacity_transport_refs(binding: CapacityBinding) -> list[FilePin]:
     return [
         {"path": str(binding.document), "sha256": binding.document_sha256},
@@ -2439,7 +2449,8 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         actual_phase_records = collection.actual_phase_records
         manifest_data: gate.JsonObject = {"measurement_executed": True, "input_sha256": expected["fixture_sha256"], "environment_sha256": environment_sha, "platform": platform.platform(), "order": order}
         if row["catalog"]:
-            manifest_data.update({"condition_id": row["condition_id"], "operation_evidence_ref": row["operation_evidence"]})
+            manifest_data.update(_catalog_pair_manifest_fields(
+                plan_data, row["condition_id"], row["operation_evidence"]))
         if condition_failures:
             manifest_data.update({"measurement_status": "incomplete", "failures": condition_failures})
         manifest_pin = write(folder / "reports/pair-manifest.json", manifest_data)
