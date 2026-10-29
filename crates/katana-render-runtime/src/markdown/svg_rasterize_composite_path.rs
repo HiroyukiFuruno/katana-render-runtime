@@ -11,6 +11,10 @@ pub(in crate::markdown::svg_rasterize) mod style;
 #[path = "svg_rasterize_composite_path_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "svg_rasterize_composite_path_arc_probe_tests.rs"]
+mod arc_probe_tests;
+
 pub(super) fn render_if_supported(
     node: &usvg::Path,
     transform: Transform,
