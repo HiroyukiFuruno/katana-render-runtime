@@ -1376,7 +1376,7 @@ class CapacityBindingUnitTests(unittest.TestCase):
                guard_exit: int = 0) -> None:
         binding = self.binding()
         def execute(argv: list[str], *, cwd: Path, env: dict[str, str], role: typed_producer.MeasurementRole, log_directory: Path,
-                    check: bool = True) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+                    check: bool = True, lifecycle_sink: Callable[[Path], None] | None = None) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
             self.commands.append(argv)
             self.environments.append(env)
             if argv[1] == "metadata":
@@ -1386,6 +1386,11 @@ class CapacityBindingUnitTests(unittest.TestCase):
             if argv[-1] == "-vV":
                 tool = "cargo" if Path(argv[0]) == self.cargo else "rustc"
                 return subprocess.CompletedProcess(argv, 0, stdout=f"{tool} 1.90.0\n".encode(), stderr=b"")
+            if lifecycle_sink is not None:
+                log_directory.mkdir(parents=True, exist_ok=True)
+                lifecycle = log_directory / "build-lifecycle.json"
+                lifecycle.write_text("{}")
+                lifecycle_sink(lifecycle)
             stdout = b"macro output preserved\n" + b"\n".join(json.dumps(event).encode() for event in self.arm_events(arm))
             return subprocess.CompletedProcess(argv, guard_exit, stdout=stdout, stderr=b'{"guard":"report"}\nCargo stderr\n')
         # fake Cargo単体では出力fixtureだけを置き、実FD安全性は別classで検証する。

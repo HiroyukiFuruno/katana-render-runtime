@@ -343,6 +343,16 @@ def _file_identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
     return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns
 
 
+def _guard_python_pin() -> gate.JsonObject:
+    launcher = Path(sys.executable)
+    gate.require(launcher.is_absolute() and str(launcher) == sys.executable and launcher.is_file()
+                 and os.access(launcher, os.X_OK), "guard Python launcher is invalid")
+    executable = launcher.resolve(strict=True)
+    gate.require(executable.is_file() and not executable.is_symlink() and os.access(executable, os.X_OK),
+                 "guard Python executable is invalid")
+    return {"launcher": str(launcher), "executable": {"path": str(executable), "sha256": gate.sha256(executable)}}
+
+
 def freeze_binary(source: Path, destination: Path) -> str:
     _canonical_file(str(source), "selected binary")
     gate.require(destination.is_absolute() and destination.parent.resolve() == destination.parent, "frozen destination must be canonical")
@@ -460,11 +470,17 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
     rustc_version = command([str(rustc_tool.launcher), "-vV"], text=True,
         cwd=root, env=environment, role="tool-query", log_directory=lifecycle_logs)
     load_capacity_binding(root, binding.document, binding.document_sha256)
+    guard_python = _guard_python_pin()
     argv = gate.guarded_build_argv(root, harness, cargo_tool.launcher, arm, binding.state, binding.state_sha256,
                                    references, [str(profile) for profile in retained])
     output.mkdir(parents=True, exist_ok=False)
+    build_lifecycle: list[Path] = []
     result = _measurement_command(argv, cwd=root, env=environment, check=False, role="build",
-                                  log_directory=lifecycle_logs)
+                                  log_directory=lifecycle_logs, lifecycle_sink=build_lifecycle.append)
+    gate.require(len(build_lifecycle) == 1 and _guard_python_pin() == guard_python,
+                 "guard Python or build lifecycle changed")
+    lifecycle_path = build_lifecycle[0]
+    lifecycle_pin: FilePin = {"path": str(lifecycle_path), "sha256": gate.sha256(lifecycle_path)}
     raw_stdout = _bytes(result.stdout, "guard stdout")
     raw_stderr = _bytes(result.stderr, "guard stderr")
     stdout_path, stderr_path, metadata_path = output / "cargo.jsonl", output / "guard-cargo.stderr", output / "metadata.json"
@@ -504,8 +520,9 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
                  "Cargo/Rustc executable changed during build")
     frozen = output / "binary" / "krr-html-performance-harness"
     checksum = freeze_binary(binary, frozen)
-    proof: gate.JsonObject = {"schema": "krr-html-performance-build-artifact-v2", "arm": arm,
+    proof: gate.JsonObject = {"schema": "krr-html-performance-build-artifact-v3", "arm": arm,
         "argv": argv, "buildExit": build_exit, "expectedHarness": expected.harness,
+        "guardPython": guard_python, "guardLifecycleRef": lifecycle_pin,
         "expectedRuntime": expected.runtime, "artifacts": artifacts, "rawPins": pins,
         "lockSha256": gate.LOCK_SHA, "selectedBinary": {"path": str(binary), "sha256": checksum},
         "frozenBinary": {"path": str(frozen), "sha256": checksum},
@@ -515,7 +532,8 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
         "buildEnvironmentSha256": _environment_sha256(environment),
         "toolVersions": {"cargo": cargo_version, "rustc": rustc_version}}
     config_file_pins: list[FilePin] = [{"path": str(path), "sha256": pin} for path, pin in config_pins]
-    return ArmBuildResult(configs, frozen, checksum, proof, [*pins, *config_file_pins])
+    python_ref = cast(FilePin, guard_python["executable"])
+    return ArmBuildResult(configs, frozen, checksum, proof, [*pins, *config_file_pins, lifecycle_pin, python_ref])
 
 
 def require_frozen_binary(build: ArmBuildResult) -> None:

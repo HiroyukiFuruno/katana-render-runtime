@@ -2,6 +2,7 @@
 
 ## 最新の再開地点（2026-10-30）
 
+- [/] `226d73dc`（COW輸送）と`288b185e`（Start描画原点）を通常commit。R4423は新しい大型candidate build bundleをCOWで完成しactual0。ただし別uv processの独立reader R4426は、既存v2 readerが自身の一時Python pathを期待して拒否（actual1）。全117のR4427は未開始として保持。v3 artifactでは実producerのlauncher・解決済みPython実体SHAと既存の安全な実build lifecycleを結合し、独立readerが実argvと照合する修正を追加した。旧v2をrepinせず、source/capacity/Rustupの検査は維持。R4430全source-static actual0、R4431固定環境245テストactual0。新v3実bundleの別process検証と正式全117は未完。
 - [/] R4401は実release catalogに存在する独立SKP37位置のignored診断を一件だけ実行し、font SHA/face/index・glyph ID/run分割の一致後、位置不一致でactual101。既存freeze CLIで同binaryをR4402へ保持した。Start・single chunk等の既存安全条件に限定した原点一回量子化と連続advanceの修正後、R4411実Rust AST/R4412既存全lint/R4413release catalogはactual0。R4415通常fallback familyは実選択12件すべて成功。R4414厳密診断は37中6 glyphの1 ULP差でactual101のまま保持し、許容差・期待値を変えて合格にしていない。
 - [/] R4417/R4418の限定9図は全件取得・採点actual0。JA08-04 C4のみ98.93402→99.255058へ改善、他8図は不変、既存合格の脱落0。ただし正式全117の再取得前なので、正式合格数はR4263の114/117から更新しない。新規sourceの正式全117で残二件と旧合格の維持を確認する。
 - [/] R4388のENOSPC再発調査で、batch resumeが旧参照を新bundleへ再copyし、context・固定binaryを累積複製することを確認。新しい輸送先だけ既存`reflink-copy==0.3.3`のfallback無しAPIで独立inode COW cloneとする最小修正を実装。元stamp/SHA、先の別inode/bytes、双方向変更独立、unsupportedの明示失敗を回帰し、Python実行identityへ固定依存の実file digestも含めた。既存原本を差し替えず、非Darwinのcopy契約とreader・閾値は維持。R4403標準uv lock生成actual0、R4404全source-static actual0、R4407固定環境の性能関連244テストactual0。正式性能全84・clone導入後の閉じた実batchは未取得。

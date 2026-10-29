@@ -124,8 +124,9 @@ def _cargo_capacity_guard() -> CargoCapacityGuard:
 
 
 def guarded_build_argv(root: Path, harness: Path, cargo: Path, arm: str, state: Path,
-                       state_sha256: str, references: Sequence[str], profiles: Sequence[str]) -> list[str]:
-    argv = [sys.executable, str(root / "scripts/build/cargo_capacity_guard.py"), "--root", str(root),
+                       state_sha256: str, references: Sequence[str], profiles: Sequence[str], *,
+                       guard_python: Path | None = None) -> list[str]:
+    argv = [str(guard_python) if guard_python is not None else sys.executable, str(root / "scripts/build/cargo_capacity_guard.py"), "--root", str(root),
             "--target-dir", str(root / "target"), "--state", str(state), "--factor", "2",
             "--expected-state-sha256", state_sha256]
     for reference in references:
@@ -140,8 +141,9 @@ def guarded_build_argv(root: Path, harness: Path, cargo: Path, arm: str, state: 
 
 def validate_guarded_build_argv(argv: Sequence[str], root: Path, harness: Path, cargo: Path, arm: str,
                                state_path: Path, state_sha256: str,
-                               expected_references: Sequence[str]) -> None:
-    fixed_prefix = [sys.executable, str(root / "scripts/build/cargo_capacity_guard.py"), "--root", str(root),
+                               expected_references: Sequence[str], *, guard_python: Path | None = None) -> None:
+    selected_python = guard_python if guard_python is not None else Path(sys.executable)
+    fixed_prefix = [str(selected_python), str(root / "scripts/build/cargo_capacity_guard.py"), "--root", str(root),
                     "--target-dir", str(root / "target"), "--state"]
     require(list(argv[:7]) == fixed_prefix and len(argv) > 12, "build argv guard prefix differs")
     argv_state_path = Path(argv[7])
@@ -170,7 +172,8 @@ def validate_guarded_build_argv(argv: Sequence[str], root: Path, harness: Path, 
         path = Path(value)
         require(path.is_absolute() and str(path) == value,
                 "build argv contains a noncanonical retained profile")
-    expected = guarded_build_argv(root, harness, cargo, arm, state_path, state_sha256, references, profiles)
+    expected = guarded_build_argv(root, harness, cargo, arm, state_path, state_sha256, references, profiles,
+                                  guard_python=selected_python)
     require(list(argv) == expected, "build argv differs from canonical guarded Cargo command")
 
 
@@ -1077,11 +1080,38 @@ def _recorded_capacity_state(bundle: Bundle, capacity_input: JsonObject) -> tupl
     return state_path, state_sha
 
 
+def _guard_python_from_proof(bundle: Bundle, proof: JsonObject, root: Path, argv: list[str],
+                             raw_by_name: Mapping[str, Path]) -> Path:
+    python = _object(proof.get("guardPython"), "guard Python pin")
+    require(set(python) == {"launcher", "executable"}, "guard Python pin fields differ")
+    launcher = _canonical_build_path(python.get("launcher"), "guard Python launcher")
+    executable = _object(python.get("executable"), "guard Python executable pin")
+    _canonical_build_path(executable.get("path"), "guard Python executable")
+    payload = bundle.file(executable)
+    require(os.access(payload, os.X_OK), "guard Python executable is not executable")
+    lifecycle = bundle.json(proof.get("guardLifecycleRef"))
+    identity = _object(lifecycle.get("identity"), "guard process identity")
+    pid = _integer(identity.get("pid"), "guard process pid")
+    require(pid > 0 and identity.get("sessionId") == pid and identity.get("processGroupId") == pid
+            and lifecycle.get("schema") == "krr-performance-command-lifecycle-v1"
+            and lifecycle.get("role") == "build" and lifecycle.get("cwd") == str(root)
+            and lifecycle.get("argv") == argv and lifecycle.get("exitCode") == 0
+            and lifecycle.get("groupClosed") is True and lifecycle.get("rawFdsClosed") is True
+            and lifecycle.get("failure") is None and lifecycle.get("cleanupFailure") is None,
+            "guard process lifecycle differs")
+    require(bool(argv) and argv[0] == str(launcher), "guard Python launcher differs from process argv")
+    raw = _objects(lifecycle.get("raw"), "guard lifecycle raw files")
+    require(len(raw) == 2 and all(sha256(bundle.file(pin)) == sha256(raw_by_name[name])
+            for pin, name in zip(raw, ("cargo.jsonl", "guard-cargo.stderr"), strict=True)),
+            "guard process raw output differs")
+    return launcher
+
+
 def _validate_build_proof(bundle: Bundle, root: Path, reference: object, arm: str, *,
                            git_query: GitQuery | None = None) -> JsonObject:
     proof_path = bundle.file(reference)
     proof = read_json(proof_path)
-    require(proof.get("schema") == "krr-html-performance-build-artifact-v2", "unsupported build artifact schema")
+    require(proof.get("schema") == "krr-html-performance-build-artifact-v3", "unsupported build artifact schema")
     require(proof.get("arm") == arm and proof.get("buildExit") == 0, "build artifact arm/exit differs")
     harness = root / HARNESS_ROOT.rstrip("/")
     require(proof.get("lockSha256") == LOCK_SHA and sha256(harness / "Cargo.lock") == LOCK_SHA,
@@ -1124,7 +1154,7 @@ def _validate_build_proof(bundle: Bundle, root: Path, reference: object, arm: st
                 "Cargo configuration differs from build receipt")
     raw_pins = _objects(proof.get("rawPins"), "build raw pins")
     raw_by_name = {Path(_text(pin["path"], "raw build path")).name: bundle.file(pin) for pin in raw_pins}
-    require(len(raw_by_name) == len(raw_pins) and {"metadata.json", "cargo.jsonl"} <= set(raw_by_name),
+    require(len(raw_by_name) == len(raw_pins) and {"metadata.json", "cargo.jsonl", "guard-cargo.stderr"} <= set(raw_by_name),
             "build raw metadata/Cargo JSON pins absent")
     metadata = _object(json.loads(raw_by_name["metadata.json"].read_text(encoding="utf8"), object_pairs_hook=unique_object),
                        "Cargo metadata")
@@ -1153,7 +1183,9 @@ def _validate_build_proof(bundle: Bundle, root: Path, reference: object, arm: st
             and bool(protected_paths) and len(set(protected_paths)) == len(protected_paths),
             "recorded protected registry differs")
     argv = [_text(value, "build argv item") for value in _array(proof.get("argv"), "build argv")]
-    validate_guarded_build_argv(argv, root, harness, cargo_launcher, arm, state_path, state_sha, protected_paths)
+    guard_python = _guard_python_from_proof(bundle, proof, root, argv, raw_by_name)
+    validate_guarded_build_argv(argv, root, harness, cargo_launcher, arm, state_path, state_sha, protected_paths,
+                                guard_python=guard_python)
     require(selected_path == selected_binary
             and sha256(frozen_path) == binary_sha and frozen.get("sha256") == binary_sha,
             "selected/frozen binary differs from Cargo artifact")

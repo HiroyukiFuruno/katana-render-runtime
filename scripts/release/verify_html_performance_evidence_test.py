@@ -14,8 +14,11 @@ import warnings
 import zipfile
 from collections.abc import Callable
 from pathlib import Path, PureWindowsPath
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from unittest.mock import patch
+
+if TYPE_CHECKING:
+    from verify_html_performance_evidence import Bundle
 
 spec = importlib.util.spec_from_file_location("performance_gate", Path(__file__).with_name("verify_html_performance_evidence.py"))
 if spec is None or spec.loader is None:
@@ -540,6 +543,47 @@ def violate_quiet_load(manifest: JsonObject) -> None:
 
 
 class BuildArtifactArgvTest(unittest.TestCase):
+    def guard_fixture(self, root: Path) -> tuple[Bundle, JsonObject, list[str], dict[str, Path]]:
+        launcher = str(root / "deleted-uv" / "python")
+        argv = [launcher, "guard.py"]
+        binary = root / "python-executable"
+        stdout = root / "stdout.raw"
+        stderr = root / "stderr.raw"
+        for path, content in ((binary, b"python"), (stdout, b"stdout"), (stderr, b"stderr")):
+            path.write_bytes(content)
+        binary.chmod(0o755)
+        def pin(path: Path) -> JsonObject:
+            return {"path": str(path), "sha256": gate.sha256(path)}
+        lifecycle = root / "lifecycle.json"
+        lifecycle.write_text(json.dumps({"schema": "krr-performance-command-lifecycle-v1",
+            "argv": argv, "role": "build", "cwd": str(root), "exitCode": 0,
+            "identity": {"pid": 11, "sessionId": 11, "processGroupId": 11},
+            "groupClosed": True, "rawFdsClosed": True, "failure": None, "cleanupFailure": None,
+            "raw": [pin(stdout), pin(stderr)]}))
+        files = [{"originalPath": str(path), "relativePath": path.name, "sha256": gate.sha256(path)}
+                 for path in (binary, stdout, stderr, lifecycle)]
+        (root / "bundle.json").write_text(json.dumps({"schema": "krr-html-performance-release-bundle-v1", "files": files}))
+        proof: JsonObject = {"guardPython": {"launcher": launcher, "executable": pin(binary)},
+                             "guardLifecycleRef": pin(lifecycle)}
+        return gate.Bundle(root), proof, argv, {"cargo.jsonl": stdout, "guard-cargo.stderr": stderr}
+
+    def test_guard_python_binds_producer_argv_and_transported_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            bundle, proof, argv, raw = self.guard_fixture(root)
+            with patch.object(gate.sys, "executable", str(root / "different-reader-python")):
+                self.assertEqual(gate._guard_python_from_proof(bundle, proof, root, argv, raw), Path(argv[0]))
+            with self.assertRaisesRegex(ValueError, "lifecycle differs"):
+                gate._guard_python_from_proof(bundle, proof, root, [str(root / "different"), *argv[1:]], raw)
+            python = json_object(proof["guardPython"])
+            python["launcher"] = str(root / "other-launcher")
+            with self.assertRaisesRegex(ValueError, "launcher differs"):
+                gate._guard_python_from_proof(bundle, proof, root, argv, raw)
+            python["launcher"] = argv[0]
+            (root / "python-executable").write_bytes(b"modified")
+            with self.assertRaises(ValueError):
+                gate._guard_python_from_proof(bundle, proof, root, argv, raw)
+
     def test_rustup_launcher_and_selected_toolchain_are_pinned_separately(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -695,6 +739,15 @@ class BuildArtifactArgvTest(unittest.TestCase):
             argv = gate.guarded_build_argv(root, harness, cargo, "candidate", state,
                 gate.sha256(state), refs, [str(profile)])
             recorded_state_sha = gate.sha256(state)
+            old_python = root / "old-uv" / "python"
+            recorded = gate.guarded_build_argv(root, harness, cargo, "candidate", state,
+                recorded_state_sha, refs, [str(profile)], guard_python=old_python)
+            gate.validate_guarded_build_argv(recorded, root, harness, cargo, "candidate", state,
+                recorded_state_sha, refs, guard_python=old_python)
+            changed_python = [str(root / "unbound-python"), *recorded[1:]]
+            with self.assertRaisesRegex(ValueError, "guard prefix differs"):
+                gate.validate_guarded_build_argv(changed_python, root, harness, cargo, "candidate", state,
+                    recorded_state_sha, refs, guard_python=old_python)
             gate.validate_guarded_build_argv(argv, root, harness, cargo, "candidate", state,
                 recorded_state_sha, refs)
             changed_state_path = list(argv)
