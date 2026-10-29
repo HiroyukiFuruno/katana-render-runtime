@@ -91,7 +91,7 @@ jobs:
 
       - name: Install Java runtime
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v5.1.0
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v5.1.0
         with:
           distribution: temurin
           java-version: "21"
@@ -104,14 +104,14 @@ jobs:
 
       - name: Install Rust
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
           components: clippy, rustfmt, llvm-tools-preview
 
       - name: Cache cargo
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
-        uses: Swatinem/rust-cache@v2.9.2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           shared-key: release-preflight-ubuntu-stable-all-features
 
