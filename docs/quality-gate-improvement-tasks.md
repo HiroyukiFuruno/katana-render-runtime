@@ -1,6 +1,9 @@
 # 品質ゲート改善の作業台帳
 
-## 最新の再開地点（2026-10-29）
+## 最新の再開地点（2026-10-30）
+
+- [/] C4-SRGB-SURFACE-ABを不採用で終了。同じrelease profile・入力9図でSome(sRGB)の再取得R4245/R4247はPNG SHAが全件一致し、Noneへ戻したR4248–R4250との比較も全9件完全一致した。描画改善を確認できない1引数変更を撤去し、元のNoneを維持する。両binaryは既存freeze_binaryでtarget外へ固定、実catalogのignored case一件を各図で実行した。診断結果は `tmp/quality/resumed-owner-r3509/srgb-surface-ab-decision-r4251/result.json`。正式117の合格数へ加算しない。次は候補を除いたsourceを通常commitし、新しい正式117・HTML84/性能証跡を取得する。
+- [/] `61f0b7a0`は通常commit済み。NativeCLIのRustup launcher修正・公開consumer回帰を保存したが、現sourceの完全gate/observer全22/新v3正式build receiptは未取得。正式Mermaidは旧R3859の112/117、HTMLは旧094f833fの84/84・最低92.14438のまま。性能・coverage100/未計測0・review/3OS CI/公開は未完了。
 
 - [/] R4233静的foundation・R4234のproxy spawn/Cargo child exec/metric/capacity回帰はactual0。R4235実catalogで公開consumer新integrationが独立した一件だけであることを確認し、R4236はその一件を実行してactual0。DPR1/2・frame/metrics generation・XY scroll・物理pointerのJS更新・resize clamp/状態画素保持を観測した。**dev profile/当該integration targetに限る診断**として保存し、全workspace/coverage/性能の正式合格へ代用しない。
 - [/] NativeCLIのreader側Bun全113件はR4210でactual0、producer Python全27件はR4228でactual0。observer全体R4227は22件中21成功/1失敗（173.681秒）を保持し、最後の旧direct-Cargo前提の失敗はproxy自体のspawnとCargo子のexecに分け、隔離RTKコピーだけを使用する実OS回帰へ修正してR4234で成功した。関連する子process/argv/env、group閉鎖非認定の条件は維持する。**現sourceのobserver全22一括は未再取得**であり、旧成功との合算を完全gateへ転用しない。後続の正式ゲートで確認する。
