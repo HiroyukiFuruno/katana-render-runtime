@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { assertCatalogManifestBinaryProof } from "./catalog-capture-binary";
 import {
   assertCatalogProducerContext,
   type CatalogCaptureProducerContext,
@@ -251,6 +252,7 @@ function assertRawCaptureManifest(
 ): void {
   const planPath = fs.realpathSync(planPathValue);
   const binaryPath = path.resolve(text(manifest.binaryPath, "capture binary path"));
+  assertCatalogManifestBinaryProof(manifest);
   if (
     manifest.profile !== "catalog-stage90-captures" ||
     manifest.threshold !== STAGE90_THRESHOLD ||

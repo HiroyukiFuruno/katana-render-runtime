@@ -449,6 +449,28 @@ function rawCaptureFixture(): {
   if (!firstCondition) throw new Error("missing suite binary fixture");
   const binaryPath = requiredString(firstCondition.binaryPath, "suite binary path");
   const binarySha256 = requiredString(firstCondition.binarySha256, "suite binary SHA");
+  const buildReport = path.join(path.dirname(planPath), "capture-build.jsonl");
+  fs.writeFileSync(
+    buildReport,
+    `${JSON.stringify({
+      reason: "compiler-artifact",
+      executable: binaryPath,
+      target: { name: "katana_render_runtime", kind: ["lib"] },
+      profile: { test: true },
+    })}\n`,
+  );
+  const binaryProofPath = path.join(path.dirname(planPath), "capture-binary-proof.json");
+  fs.writeFileSync(
+    binaryProofPath,
+    JSON.stringify({
+      schema: "krr-html84-capture-binary-v1",
+      buildReport,
+      buildReportSha256: sha256File(buildReport),
+      source: binaryPath,
+      path: binaryPath,
+      sha256: binarySha256,
+    }),
+  );
   const sourceFile: FileRecord = {
     path: process.execPath,
     sha256: sha256File(process.execPath),
@@ -497,6 +519,7 @@ function rawCaptureFixture(): {
   const catalogPath = path.resolve("tests/fixtures/html/feature-catalog.json");
   return {
     manifest: {
+      schema: "krr-html84-catalog-captures-v2",
       profile: "catalog-stage90-captures",
       threshold: 90,
       acceptance: false,
@@ -506,6 +529,13 @@ function rawCaptureFixture(): {
       planSha256: sha256File(planPath),
       binaryPath,
       binarySha256,
+      binaryProof: { path: binaryProofPath, sha256: sha256File(binaryProofPath) },
+      currentBuild: {
+        path: buildReport,
+        sha256: sha256File(buildReport),
+        source: binaryPath,
+        binarySha256,
+      },
       chromeRuntimeVersion: "chrome-test-runtime/1",
       producerContext: producerContext as unknown as JsonValue,
       conditions,
@@ -590,6 +620,32 @@ test("validates 84 real receipt pairs and scores every independent raw image", (
     );
     expect(results).toHaveLength(84);
     expect(results.every((result) => result.score === 100)).toBe(true);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test.each([
+  "missing schema",
+  "wrong schema",
+  "missing proof",
+  "changed proof",
+  "missing current build",
+] as const)("rejects catalog capture v2 with %s", (change) => {
+  const fixture = rawCaptureFixture();
+  try {
+    const manifest = { ...fixture.manifest };
+    if (change === "missing schema") delete manifest.schema;
+    if (change === "wrong schema") manifest.schema = "krr-html84-catalog-captures-v1";
+    if (change === "missing proof") delete manifest.binaryProof;
+    if (change === "missing current build") delete manifest.currentBuild;
+    if (change === "changed proof") {
+      const proof = manifest.binaryProof as JsonObject;
+      manifest.binaryProof = { ...proof, sha256: "0".repeat(64) };
+    }
+    expect(() =>
+      validateCatalogRawStage90Captures(manifest, fixture.plan, fixture.planPath),
+    ).toThrow();
   } finally {
     fixture.cleanup();
   }

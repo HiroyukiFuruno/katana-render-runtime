@@ -1998,9 +1998,34 @@ describe("fixed fidelity acceptance CLI routes", () => {
         catalogSha256: string;
         conditions: Array<Record<string, unknown>>;
       };
+      const binaryPath = fs.realpathSync(process.execPath);
+      const binarySha256 = sha256File(binaryPath);
+      const buildReport = path.join(directory, "capture-build.jsonl");
+      fs.writeFileSync(
+        buildReport,
+        JSON.stringify({
+          reason: "compiler-artifact",
+          executable: binaryPath,
+          target: { name: "katana_render_runtime", kind: ["lib"] },
+          profile: { test: true },
+        }),
+      );
+      const proofPath = path.join(directory, "capture-binary-proof.json");
+      fs.writeFileSync(
+        proofPath,
+        JSON.stringify({
+          schema: "krr-html84-capture-binary-v1",
+          buildReport,
+          buildReportSha256: sha256File(buildReport),
+          source: binaryPath,
+          path: binaryPath,
+          sha256: binarySha256,
+        }),
+      );
       fs.writeFileSync(
         manifestPath,
         JSON.stringify({
+          schema: "krr-html84-catalog-captures-v2",
           profile: "catalog-stage90-captures",
           threshold: 90,
           acceptance: false,
@@ -2010,6 +2035,13 @@ describe("fixed fidelity acceptance CLI routes", () => {
           planSha256: sha256File(planPath),
           binaryPath: fs.realpathSync(process.execPath),
           binarySha256: sha256File(process.execPath),
+          binaryProof: { path: proofPath, sha256: sha256File(proofPath) },
+          currentBuild: {
+            path: buildReport,
+            sha256: sha256File(buildReport),
+            source: binaryPath,
+            binarySha256,
+          },
           fontIdentityProbe: {
             request: { path: fontRequestPath, sha256: fontRequestSha256, sizeBytes: 2 },
             response: {

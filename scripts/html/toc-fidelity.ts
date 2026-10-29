@@ -172,19 +172,35 @@ function runtimeTestExecutable(value: JsonValue): string | undefined {
   const profile = report.profile as Record<string, JsonValue>;
   if (target.name !== "katana_render_runtime" || profile.test !== true) return undefined;
   if (!Array.isArray(target.kind) || !target.kind.includes("lib")) return undefined;
-  const executable = path.resolve(report.executable);
-  if (!fs.existsSync(executable) || !fs.statSync(executable).isFile()) return undefined;
-  return executable;
+  return report.executable;
 }
 
-export function tocBinaryFromBuildReport(reportPath: string): string {
-  const candidates = fs
+function buildReportExecutables(reportPath: string): string[] {
+  return fs
     .readFileSync(reportPath, "utf8")
     .split(/\r?\n/)
     .filter(Boolean)
     .map((line) => runtimeTestExecutable(JSON.parse(line) as JsonValue))
     .filter((candidate): candidate is string => candidate !== undefined);
+}
+
+function onlyBuildExecutable(candidates: string[]): string {
   if (candidates.length !== 1 || !candidates[0])
     throw new Error("Expected one KRR runtime test executable");
   return candidates[0];
+}
+
+export function tocBinaryPathFromBuildReport(reportPath: string): string {
+  const executable = onlyBuildExecutable(buildReportExecutables(reportPath));
+  if (!path.posix.isAbsolute(executable) && !path.win32.isAbsolute(executable))
+    throw new Error("Expected an absolute KRR runtime test executable");
+  return executable;
+}
+
+export function tocBinaryFromBuildReport(reportPath: string): string {
+  return onlyBuildExecutable(
+    buildReportExecutables(reportPath)
+      .map((candidate) => path.resolve(candidate))
+      .filter((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile()),
+  );
 }

@@ -12,15 +12,17 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from datetime import datetime
 from typing import NamedTuple, Protocol, TypedDict, cast
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from html_performance_paired_stats import evaluate_paired_regression
 
 JsonObject = dict[str, object]
 SourceRecords = dict[str, tuple[str, int]]
+CATALOG_SOURCE_SUFFIX = ("tests", "fixtures", "html", "feature-catalog.json")
 
 class GitQuery(Protocol):
     def __call__(self, root: Path, args: Sequence[str], input_bytes: bytes | None,
@@ -725,7 +727,11 @@ class Bundle:
             original = _text(row["originalPath"], "original path")
             relative = Path(_text(row["relativePath"], "transport path"))
             path = (self.directory / relative).resolve()
-            require(Path(original).is_absolute() and original not in self.files, "duplicate/nonabsolute original path")
+            try:
+                _logical_absolute_path(original, "original path")
+            except ValueError as error:
+                raise ValueError("duplicate/nonabsolute original path") from error
+            require(original not in self.files, "duplicate/nonabsolute original path")
             require(not relative.is_absolute() and path.is_relative_to(self.directory) and path not in used, "invalid transport path")
             checksum = _text(row["sha256"], "transport SHA256")
             digest(checksum)
@@ -752,6 +758,150 @@ class Bundle:
         require(row[1] == checksum and sha256(row[0]) == checksum,
                 "bundle-relative file pin mismatch")
         return {"path": row[2], "sha256": checksum}
+
+
+class FilePin(TypedDict):
+    path: str
+    sha256: str
+
+
+class CatalogBinaryRefs(NamedTuple):
+    proof_ref: FilePin
+    build_report_ref: FilePin
+    binary_ref: FilePin
+    current_build_report_ref: FilePin
+
+
+def _logical_absolute_path(value: object, label: str) -> tuple[str, PurePath]:
+    text = _text(value, label)
+    windows = PureWindowsPath(text)
+    if windows.is_absolute():
+        require(str(windows) == text and ".." not in windows.parts,
+                label + " must be a canonical absolute path")
+        return text, windows
+    posix = PurePosixPath(text)
+    require(posix.is_absolute() and not text.startswith("//")
+            and posix.as_posix() == text and ".." not in posix.parts,
+            label + " must be a canonical absolute path")
+    return text, posix
+
+
+def _catalog_source_target(catalog_path: str, windows: bool) -> PurePath:
+    catalog: PurePath = PureWindowsPath(catalog_path) if windows else PurePosixPath(catalog_path)
+    parts = catalog.parts
+    expected = (tuple(part.casefold() for part in CATALOG_SOURCE_SUFFIX)
+                if windows else CATALOG_SOURCE_SUFFIX)
+    actual = (tuple(part.casefold() for part in parts[-len(CATALOG_SOURCE_SUFFIX):])
+              if windows else parts[-len(CATALOG_SOURCE_SUFFIX):])
+    require(actual == expected, "catalog path cannot identify its source repository root")
+    prefix = parts[:-len(CATALOG_SOURCE_SUFFIX)]
+    target = PureWindowsPath(*prefix, "target") if windows else PurePosixPath(*prefix, "target")
+    return target
+
+
+def validate_catalog_binary_proof(
+    manifest: Mapping[str, object], read_file: Callable[[FilePin], Path],
+) -> CatalogBinaryRefs:
+    require(manifest.get("schema") == "krr-html84-catalog-captures-v2",
+            "catalog capture manifest schema differs")
+    binary_path, binary = _logical_absolute_path(
+        manifest.get("binaryPath"), "catalog frozen binary path",
+    )
+    binary_sha = _text(manifest.get("binarySha256"), "catalog frozen binary SHA")
+    digest(binary_sha)
+    catalog_path, catalog = _logical_absolute_path(
+        manifest.get("catalogPath"), "catalog feature catalog path",
+    )
+    require(isinstance(binary, PureWindowsPath) == isinstance(catalog, PureWindowsPath),
+            "catalog binary and feature catalog path platforms differ")
+    source_target = _catalog_source_target(catalog_path, isinstance(catalog, PureWindowsPath))
+    require(not binary.is_relative_to(source_target),
+            "catalog frozen binary must be canonical and outside target")
+    proof_ref = _object(manifest.get("binaryProof"), "catalog binary proof reference")
+    require(set(proof_ref) == {"path", "sha256"}, "catalog binary proof reference fields differ")
+    proof_path, _ = _logical_absolute_path(proof_ref["path"], "catalog binary proof path")
+    proof_sha = _text(proof_ref["sha256"], "catalog binary proof SHA")
+    digest(proof_sha)
+    normalized_proof_ref: FilePin = {"path": proof_path, "sha256": proof_sha}
+    proof = read_json(read_file(normalized_proof_ref))
+    require(set(proof) == {"schema", "buildReport", "buildReportSha256", "source", "path", "sha256"}
+            and proof.get("schema") == "krr-html84-capture-binary-v1",
+            "catalog binary proof schema/fields differ")
+    report_path, _ = _logical_absolute_path(proof["buildReport"], "catalog Cargo build report path")
+    report_sha = _text(proof["buildReportSha256"], "catalog Cargo build report SHA")
+    _logical_absolute_path(proof["source"], "catalog Cargo selected executable")
+    proven_path, _ = _logical_absolute_path(proof["path"], "catalog frozen binary proof path")
+    proven_sha = _text(proof["sha256"], "catalog frozen binary proof SHA")
+    digest(report_sha)
+    digest(proven_sha)
+    require(proven_path == binary_path and proven_sha == binary_sha,
+            "catalog binary proof does not bind the manifest binary")
+    report_ref: FilePin = {"path": report_path, "sha256": report_sha}
+    binary_ref: FilePin = {"path": binary_path, "sha256": binary_sha}
+    read_file(report_ref)
+    read_file(binary_ref)
+    current = _object(manifest.get("currentBuild"), "catalog current build proof")
+    require(set(current) == {"path", "sha256", "source", "binarySha256"},
+            "catalog current build proof fields differ")
+    current_path, _ = _logical_absolute_path(current["path"], "catalog current build report path")
+    current_sha = _text(current["sha256"], "catalog current build report SHA")
+    _logical_absolute_path(current["source"], "catalog current selected executable")
+    current_binary_sha = _text(current["binarySha256"], "catalog current binary SHA")
+    digest(current_sha)
+    digest(current_binary_sha)
+    require(current_binary_sha == binary_sha,
+            "catalog current build proof does not bind the captured binary")
+    current_build_report_ref: FilePin = {"path": current_path, "sha256": current_sha}
+    read_file(current_build_report_ref)
+    return CatalogBinaryRefs(normalized_proof_ref, report_ref, binary_ref,
+                             current_build_report_ref)
+
+
+def validate_catalog_binary_closure(
+    root: Path, bundle: Bundle, manifest_ref: JsonObject, refs: CatalogBinaryRefs,
+) -> JsonObject:
+    closure = [manifest_ref, refs.proof_ref, refs.build_report_ref,
+               refs.binary_ref, refs.current_build_report_ref]
+    transported: dict[str, JsonObject] = {}
+    for value in closure:
+        pin = _object(value, "catalog binary closure file reference")
+        logical_path = _text(pin.get("path"), "catalog binary logical path")
+        checksum = _text(pin.get("sha256"), "catalog binary logical SHA")
+        digest(checksum)
+        payload = bundle.file(pin)
+        require(payload.is_file() and payload.resolve() == payload and not payload.is_symlink(),
+                "catalog binary closure payload is not a canonical regular file")
+        row: JsonObject = {"path": logical_path, "sha256": checksum, "payloadPath": str(payload)}
+        prior = transported.get(logical_path)
+        require(prior is None or prior == row,
+                "catalog binary closure logical path has conflicting payloads")
+        transported[logical_path] = row
+    require(4 <= len(transported) <= 5,
+            "catalog binary closure must contain four or five unique files")
+    request: JsonObject = {
+        "schema": "krr-html84-binary-closure-request-v1",
+        "manifest": {"path": manifest_ref["path"], "sha256": manifest_ref["sha256"]},
+        "files": list(transported.values()),
+    }
+    encoded_request = json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
+    request_sha = hashlib.sha256(encoded_request).hexdigest()
+    with tempfile.TemporaryDirectory(prefix="krr-html-binary-closure-") as directory:
+        request_path = Path(directory) / "request.json"
+        with request_path.open("xb") as stream:
+            stream.write(encoded_request)
+        argv = ["bun", "run", "scripts/html/fidelity-acceptance-cli.ts",
+                "catalog-stage90-validate-binary-closure", str(request_path)]
+        completed = subprocess.run(argv, cwd=root, check=False, capture_output=True)
+    require(completed.returncode == 0,
+            "strict TypeScript catalog binary closure validation failed")
+    result = _object(json.loads(completed.stdout, object_pairs_hook=unique_object),
+                     "strict TypeScript catalog binary closure result")
+    require(set(result) == {"schema", "requestSha256", "manifest"}
+            and result.get("schema") == "krr-html84-binary-closure-result-v1"
+            and result.get("requestSha256") == request_sha
+            and result.get("manifest") == request["manifest"],
+            "strict TypeScript catalog binary closure binding differs")
+    return result
 
 
 def _canonical_build_file(value: object, label: str) -> Path:
@@ -1636,6 +1786,10 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
             _object(expected["catalogManifestRef"], "catalog manifest reference"),
             _object(expected["catalogPlanRef"], "catalog plan reference"),
             _object(expected["catalogCaptureValidationRef"], "Chrome validation reference"),
+            _object(expected["catalogBinaryProofRef"], "catalog binary proof reference"),
+            _object(expected["catalogBuildReportRef"], "catalog build report reference"),
+            _object(expected["catalogCaptureBinaryRef"], "catalog frozen binary reference"),
+            _object(expected["catalogCurrentBuildReportRef"], "catalog current build report reference"),
             _object(expected["chromeCaptureRef"], "Chrome capture reference"),
             _object(expected["chromeReceiptRef"], "Chrome receipt reference"),
             capture_ref,
@@ -1754,6 +1908,10 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
         result["catalogPlanRef"] = expected["catalogPlanRef"]
         result["operationEvidenceRef"] = expected["operationEvidenceRef"]
         result["catalogCaptureValidationRef"] = expected["catalogCaptureValidationRef"]
+        result["catalogBinaryProofRef"] = expected["catalogBinaryProofRef"]
+        result["catalogBuildReportRef"] = expected["catalogBuildReportRef"]
+        result["catalogCaptureBinaryRef"] = expected["catalogCaptureBinaryRef"]
+        result["catalogCurrentBuildReportRef"] = expected["catalogCurrentBuildReportRef"]
         result["chromeCaptureRef"] = expected["chromeCaptureRef"]
         result["chromeReceiptRef"] = expected["chromeReceiptRef"]
         result["fontIdentityRequestRef"] = expected["fontIdentityRequestRef"]
@@ -1827,13 +1985,26 @@ def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
         font_request_refs = {json.dumps(value["fontIdentityRequestRef"], sort_keys=True) for value in values}
         font_response_refs = {json.dumps(value["fontIdentityResponseRef"], sort_keys=True) for value in values}
         font_probe_binaries = {json.dumps(value["fontIdentityProbeBinary"], sort_keys=True) for value in values}
+        binary_proof_refs = {json.dumps(value["catalogBinaryProofRef"], sort_keys=True) for value in values}
+        build_report_refs = {json.dumps(value["catalogBuildReportRef"], sort_keys=True) for value in values}
+        capture_binary_refs = {json.dumps(value["catalogCaptureBinaryRef"], sort_keys=True) for value in values}
+        current_build_refs = {json.dumps(value["catalogCurrentBuildReportRef"], sort_keys=True) for value in values}
         require(len(manifest_refs) == len(plan_refs) == len(validation_refs) ==
-                len(font_request_refs) == len(font_response_refs) == len(font_probe_binaries) == 1,
-                "catalog attempts do not share one manifest, plan and Chrome validation")
+                len(font_request_refs) == len(font_response_refs) == len(font_probe_binaries) ==
+                len(binary_proof_refs) == len(build_report_refs) == len(capture_binary_refs) ==
+                len(current_build_refs) == 1,
+                "catalog attempts do not share manifest, build proof and Chrome validation")
         catalog_manifest_ref = _object(values[0]["catalogManifestRef"], "catalog manifest reference")
         catalog_plan_ref = _object(values[0]["catalogPlanRef"], "catalog plan reference")
         validation_ref = _object(values[0]["catalogCaptureValidationRef"], "Chrome validation reference")
         manifest = bundle.json(catalog_manifest_ref)
+        binary_refs = validate_catalog_binary_proof(manifest, bundle.file)
+        require(binary_refs.proof_ref == values[0]["catalogBinaryProofRef"]
+                and binary_refs.build_report_ref == values[0]["catalogBuildReportRef"]
+                and binary_refs.binary_ref == values[0]["catalogCaptureBinaryRef"]
+                and binary_refs.current_build_report_ref == values[0]["catalogCurrentBuildReportRef"],
+                "transported catalog binary proof refs differ from manifest")
+        validate_catalog_binary_closure(root, bundle, catalog_manifest_ref, binary_refs)
         catalog_plan = bundle.json(catalog_plan_ref)
         validation = bundle.json(validation_ref)
         request_ref = _object(values[0]["fontIdentityRequestRef"], "font identity request reference")

@@ -2,6 +2,10 @@
 
 ## 最新の再開地点（2026-10-30）
 
+- [ ] R4346の旧HTML84証跡再確認は、capacity整理後のtarget内test binary消失でactual1。旧84/84・最低92.14438は取得時の結果として保持し、現在の正式合格へ再認定しない。旧binaryの復元・旧manifestのrepinはせずfresh84を取得する。再発防止は既存freeze_binaryを再利用する薄いCLIとcatalog v2への結合で実装中。実行はtarget外の不変copy、実Cargo JSONは無改変、元/current build・proof・実binaryをtransportし、独立readerでも同じTS selectorで照合する。resumeは元proof/同じ実行pathを維持しcurrent buildの同一SHAを別に証明する。旧schemaやproof欠落は拒否。
+- [/] 上記の関連検証はR4355 Python3、R4365 producer102、R4375固定SciPy環境のverifier99、R4376 TS86がactual0。R4368全source-staticとR4371後続Python型検査もactual0。ただし追加の変更後の最終全source-static・fresh84・性能全84は未完。裸PythonでSciPyを見失ったR4373は実行条件の失敗として保持し、標準の隔離uv/run_html_performance.py導線でR4375を新規実行した。古い失敗やログは上書きしていない。
+- [/] R4367ではJA04の既承認paint投影rawJS参照とstock Chrome156で同一KRR入力を描いた画像の差分RGB pixelが0。Nativeとの差分supportはR4361で546 pixel。R4357 observer155はstock156とPNG bytesが一致し、対象二fontの物理file/indexもNativeと一致した。R4380は既存gpuBenchmarking方式で現入力のSKPを取得し、取得前後のPNGがstock156とSHA一致、R4381既存consumer actual0。glyph ID/run/font設定は一致するが、実paint相対Xには最大約0.01488pxの差がある。caret位置の一致をpaint位置の一致へ転用せず、既存fallback_positionsの個々glyphへの1/64量子化を調査している。画像改善は未確認。
+- [/] 既存のfractional SVG origin診断flagを同じ固定binary・入力9図でR4377/R4378に再確認したが、C4三件と旧合格Kanban二件が悪化したため不採用。Wardley四件は不変。flagは元の未設定へ復元し、製品source・参照・scorerは変更していない。DOMのscreen CTM差だけでpaint原点の変更を正当化しない。この案を新しい根拠なしに再試行しない。
 - [/] 性能生成物の第二の不備（pair-manifestの実capture binary SHA欠落）を`70063b26`で修正、R4315通常commit actual0。R4276 producer101 unit actual0。validator・閾値・古い証跡は変更していない。修正後の正式84条件は未測定であり、先頭四条件のpolicyPassを全体合格へ転用しない。
 - [/] 円・Arc候補は不採用。R4292の円は既に99以上のWardley四図だけを約0.10改善し、R4303のArc追加も含めC4残三件の最終scoreは不変。追加保守負担に対する公開条件上の便益がないため、性能未測定の候補を製品へ残さない。通常hook付きcheckpoint `32c16fc7`・`535445cd`へ比較候補を保全し、R4342で両候補を戻した。全tracked sourceが`70063b26`と一致することを確認し、R4344通常commit `93e6d33c` actual0。独立raw JS・配色方針・閾値は不変。採点の合格数へ加算しない。
 - [/] 既存の`capturePage`を再利用したR4337はstock Chrome156の同一JA04入力から実font family/countを取得した（HiraginoSans-W3 33、TrebuchetMS 4）。相対文字配置はnative37 glyphとの最大差約0.0000293pxだが、共通global origin・物理face bytes・glyph mask一致は未証明。取得できなかったSKP診断は正式根拠へ転用せず上記候補と共に撤去。`tmp/quality/current-ja04-platform-stock-r4337/capture/report.json`。R4312の636単体成功も描画・性能の全体合格ではない。

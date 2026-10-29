@@ -4,6 +4,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { chromium, type Page, type Request, type Response } from "playwright";
 import {
+  assertCatalogManifestBinaryProof,
+  CATALOG_CAPTURE_SCHEMA,
+  type CatalogBinaryProofRef,
+  type CatalogCurrentBuild,
+} from "./catalog-capture-binary";
+import {
   type CatalogCaptureProducerContext,
   captureCatalogProducerContext,
   sameCatalogProducerContext,
@@ -646,10 +652,19 @@ export async function runCatalogStage90Captures(
   binary: string,
   planPath: string,
   outputDirectory: string,
-  resume?: CatalogStage90ResumeOptions,
-  chromeExecutable?: CatalogStage90ChromeExecutablePin,
+  resume: CatalogStage90ResumeOptions | undefined,
+  chromeExecutable: CatalogStage90ChromeExecutablePin | undefined,
+  binaryProof: CatalogBinaryProofRef,
+  currentBuild: CatalogCurrentBuild,
 ): Promise<JsonValue> {
   outputDirectory = path.resolve(outputDirectory);
+  assertCatalogManifestBinaryProof({
+    schema: CATALOG_CAPTURE_SCHEMA,
+    binaryProof,
+    currentBuild,
+    binaryPath: path.resolve(binary),
+    binarySha256: sha256File(binary),
+  });
   const capture = await captureCatalogStage90(
     binary,
     planPath,
@@ -692,6 +707,7 @@ export async function runCatalogStage90Captures(
     } as unknown as JsonValue;
   });
   const manifest = {
+    schema: CATALOG_CAPTURE_SCHEMA,
     profile: "catalog-stage90-captures" as const,
     threshold: 90 as const,
     acceptance: false as const,
@@ -701,6 +717,8 @@ export async function runCatalogStage90Captures(
     planSha256: sha256File(planPath),
     binaryPath: path.resolve(binary),
     binarySha256,
+    binaryProof,
+    currentBuild,
     producerContext,
     producerContextAfter,
     chromeRuntimeVersion,
@@ -1260,6 +1278,8 @@ function assertObservationManifest(
   plan: CatalogStage90ConditionPlan,
   planPath: string,
 ): void {
+  assertCatalogManifestBinaryProof(observation);
+  assertCatalogManifestBinaryProof(finalized);
   if (
     observation.profile !== "catalog-stage90-captures" ||
     observation.threshold !== 90 ||
@@ -1271,6 +1291,8 @@ function assertObservationManifest(
     observation.planSha256 !== sha256File(planPath) ||
     observation.binaryPath !== finalized.binaryPath ||
     observation.binarySha256 !== finalized.binarySha256 ||
+    stableJson(observation.binaryProof ?? null) !== stableJson(finalized.binaryProof ?? null) ||
+    stableJson(observation.currentBuild ?? null) !== stableJson(finalized.currentBuild ?? null) ||
     observation.chromeRuntimeVersion !== finalized.chromeRuntimeVersion
   )
     throw new Error("prior catalog observation identity differs");
@@ -1364,6 +1386,7 @@ export function finalizeCatalogStage90FontIdentity(
     JSON.parse(fs.readFileSync(captureManifestPath, "utf8")) as JsonValue,
     "catalog capture manifest",
   );
+  assertCatalogManifestBinaryProof(captureManifest);
   const plan = assertCatalogStage90ConditionPlan(
     JSON.parse(fs.readFileSync(conditionPlanPath, "utf8")) as JsonValue,
   );

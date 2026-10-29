@@ -55,6 +55,18 @@ class CatalogProducerOperationTest(unittest.TestCase):
             producer._catalog_pair_manifest_fields({**plan, "evidenceBinarySha256": "invalid"},
                                                    condition, evidence)
 
+    def test_catalog_loader_rejects_previous_capture_manifest_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            manifest = root / "catalog-stage90-captures.json"
+            manifest.write_text(json.dumps({
+                "schema": "krr-html84-catalog-captures-v1",
+                "profile": "catalog-stage90-captures",
+                "acceptance": False,
+            }))
+            with self.assertRaisesRegex(ValueError, "catalog capture manifest schema differs"):
+                producer.load_catalog_conditions(root, manifest)
+
     def _catalog_cli_fixture(
         self, temporary: str,
     ) -> tuple[Path, Path, Path, Path]:
@@ -183,7 +195,7 @@ class CatalogProducerOperationTest(unittest.TestCase):
                  patch.object(producer, "_make_git_query", return_value=lambda *_args: ""), \
                  patch.object(producer, "source", return_value=initial), \
                  patch.object(producer, "load_catalog_conditions",
-                              return_value=(None, None, None)), \
+                              return_value=(None, None, None, None)), \
                  patch.object(producer, "load_reference_parent",
                               side_effect=ValueError("reference parent rejected")), \
                  patch.object(producer, "_measurement_command") as command:
@@ -578,15 +590,19 @@ class RuntimeSyncPreflightTest(unittest.TestCase):
 
     def test_public_producer_rejects_unaccepted_html84_before_build(self) -> None:
         manifest = self.root / "catalog-stage90-captures.json"
-        pins = ({"path": str(manifest), "sha256": "a" * 64},
-                {"path": str(self.root / "plan.json"), "sha256": "b" * 64})
+        pins: tuple[producer.FilePin, producer.FilePin] = (
+            {"path": str(manifest), "sha256": "a" * 64},
+            {"path": str(self.root / "plan.json"), "sha256": "b" * 64},
+        )
+        binary_refs = gate.CatalogBinaryRefs(pins[0], pins[1], pins[0], pins[1])
         validation = {"acceptance": False, "fontIdentityEquivalence": "not-established"}
         validator = ["bun", "run", "scripts/html/fidelity-acceptance-cli.ts",
                      "catalog-stage90-validate-captures", pins[0]["path"], pins[1]["path"]]
         completed = subprocess.CompletedProcess(validator, 0, stdout=b"{}", stderr=b"")
         with patch.object(platform, "system", return_value="Darwin"), \
              patch.object(platform, "machine", return_value="arm64"), \
-             patch.object(producer, "load_catalog_conditions", return_value=([], *pins)), \
+             patch.object(producer, "load_catalog_conditions",
+                          return_value=([], *pins, binary_refs)), \
              patch.object(producer, "source", return_value={"head": "initial"}), \
              patch.object(producer, "_measurement_command", return_value=completed) as run, \
              patch.object(producer, "_validate_catalog_capture_envelope", return_value=validation), \

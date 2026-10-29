@@ -197,6 +197,10 @@ class ExpectedPerformance(_ExpectedFields, total=False):
     fontIdentityRequestRef: SizedFilePin
     fontIdentityResponseRef: SizedFilePin
     fontIdentityProbeBinary: FilePin
+    catalogBinaryProofRef: FilePin
+    catalogBuildReportRef: FilePin
+    catalogCaptureBinaryRef: FilePin
+    catalogCurrentBuildReportRef: FilePin
     referenceParent: gate.JsonObject
 
 
@@ -1773,12 +1777,22 @@ def _validate_catalog_capture_envelope(stdout: bytes, manifest_pin: FilePin,
     return envelope
 
 
-def load_catalog_conditions(root: Path, manifest_path: Path) -> tuple[list[CatalogCondition], FilePin, FilePin]:
+def load_catalog_conditions(
+    root: Path, manifest_path: Path,
+) -> tuple[list[CatalogCondition], FilePin, FilePin, gate.CatalogBinaryRefs]:
     _pinned_file(manifest_path, gate.sha256(manifest_path))
     manifest = gate.read_json(manifest_path)
     gate.require(manifest.get("profile") == "catalog-stage90-captures"
                  and manifest.get("acceptance") is False,
                  "catalog performance input must be the non-accepted stage90 capture manifest")
+
+    def read_catalog_file(pin: gate.FilePin) -> Path:
+        path = Path(gate._text(pin.get("path"), "catalog binary proof file path"))
+        checksum = gate._text(pin.get("sha256"), "catalog binary proof file SHA")
+        _pinned_file(path, checksum)
+        return path
+
+    binary_refs = gate.validate_catalog_binary_proof(manifest, read_catalog_file)
     plan_path = Path(gate._text(manifest.get("planPath"), "catalog plan path"))
     plan_sha = gate._text(manifest.get("planSha256"), "catalog plan SHA")
     _pinned_file(plan_path, plan_sha)
@@ -1965,7 +1979,8 @@ def load_catalog_conditions(root: Path, manifest_path: Path) -> tuple[list[Catal
         })
     return (conditions,
             {"path": str(manifest_path), "sha256": gate.sha256(manifest_path)},
-            {"path": str(plan_path), "sha256": plan_sha})
+            {"path": str(plan_path), "sha256": plan_sha},
+            binary_refs)
 
 
 def _build_worker_report(
@@ -2147,8 +2162,10 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     catalog_conditions: list[CatalogCondition] | None = None
     catalog_manifest_pin: FilePin | None = None
     catalog_plan_pin: FilePin | None = None
+    catalog_binary_refs: gate.CatalogBinaryRefs | None = None
     if catalog_manifest_path is not None:
-        catalog_conditions, catalog_manifest_pin, catalog_plan_pin = load_catalog_conditions(root, catalog_manifest_path)
+        (catalog_conditions, catalog_manifest_pin, catalog_plan_pin,
+         catalog_binary_refs) = load_catalog_conditions(root, catalog_manifest_path)
     os.environ["GIT_OPTIONAL_LOCKS"] = "0"
     # 生成済みJSとsourceの同期が未確認のcandidateをビルド・計測しない。
     lifecycle = output.parent / f"{output.name}.lifecycle"
@@ -2167,7 +2184,8 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         )
     catalog_capture_validation: gate.JsonObject | None = None
     if catalog_conditions is not None:
-        if catalog_manifest_pin is None or catalog_plan_pin is None:
+        if (catalog_manifest_pin is None or catalog_plan_pin is None
+                or catalog_binary_refs is None):
             raise ValueError("catalog capture validation pins are missing")
         validation = _measurement_command(
             ["bun", "run", "scripts/html/fidelity-acceptance-cli.ts",
@@ -2347,6 +2365,12 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                    *([catalog_manifest_path] if catalog_manifest_path is not None else []),
                    *([Path(catalog_plan_pin["path"])] if catalog_plan_pin is not None else []),
                    *([Path(catalog_capture_validation_pin["path"])] if catalog_capture_validation_pin is not None else []),
+                   *([Path(pin["path"]) for pin in (
+                       catalog_binary_refs.proof_ref,
+                       catalog_binary_refs.build_report_ref,
+                       catalog_binary_refs.binary_ref,
+                       catalog_binary_refs.current_build_report_ref,
+                   )] if catalog_binary_refs is not None else []),
                    lock, output / "shared-source-snapshot.json", *binaries.values(),
                    *[Path(pin["path"]) for pin in reference_transport_refs],
                    binding.document, binding.state, binding.registry, *capacity_configs,
@@ -2423,6 +2447,12 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 "path": cast(str, row["font_identity_binary_path"]),
                 "sha256": cast(str, row["font_identity_binary_sha256"]),
             }
+            if catalog_binary_refs is None:
+                raise ValueError("catalog binary proof refs are missing")
+            expected["catalogBinaryProofRef"] = catalog_binary_refs.proof_ref
+            expected["catalogBuildReportRef"] = catalog_binary_refs.build_report_ref
+            expected["catalogCaptureBinaryRef"] = catalog_binary_refs.binary_ref
+            expected["catalogCurrentBuildReportRef"] = catalog_binary_refs.current_build_report_ref
         try:
             collection = _collect_condition_worker_pairs(
                 folder=folder, row=row, expected=expected, fixture=fixture,
@@ -2505,6 +2535,11 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         refs.append(catalog_plan_pin)
     if catalog_capture_validation_pin is not None:
         refs.append(catalog_capture_validation_pin)
+    if catalog_binary_refs is not None:
+        refs.extend((catalog_binary_refs.proof_ref,
+                     catalog_binary_refs.build_report_ref,
+                     catalog_binary_refs.binary_ref,
+                     catalog_binary_refs.current_build_report_ref))
     for folder, expected, result, manifest_pin in expected_all:
         expected["sourcePair"] = {"before": build_inputs.source_before, "end": source_end,
             "approvedSourceRef": approved, "inputPins": [approved, build_inputs.capacity_input],

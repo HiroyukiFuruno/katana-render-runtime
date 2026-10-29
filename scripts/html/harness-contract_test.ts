@@ -3181,7 +3181,7 @@ describe("reviewed Chrome font identity probe process route", () => {
   test("accepts only the actual synchronous probe in its production caller context", () => {
     const importerSource = importerSources.get(importerPaths[0] ?? "");
     expect(importerSource).toMatch(
-      /await runCatalogStage90Captures\(\s*binary,\s*plan\.conditionPlan,\s*plan\.output,\s*plan\.resume,\s*plan\.chromeExecutable,\s*\);/,
+      /await runCatalogStage90Captures\(\s*binary,\s*plan\.conditionPlan,\s*plan\.output,\s*plan\.resume,\s*plan\.chromeExecutable,\s*binaryProof,\s*currentBuild,\s*\);/,
     );
     for (const importer of importerPaths) {
       const importerSourceForRoute = importerSources.get(importer);

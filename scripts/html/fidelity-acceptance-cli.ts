@@ -2,6 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import {
+  assertCatalogManifestBinaryProof,
+  currentCatalogBuild,
+  freezeCatalogBinary,
+  resumeCatalogBinary,
+  validateCatalogBinaryClosure,
+} from "./catalog-capture-binary";
+import {
   catalogFontAcceptance,
   compareCatalogFontFaces,
   compareChromiumFontInstancesToLayoutRuns,
@@ -40,6 +47,7 @@ const modeSchema = z.enum([
   "catalog-stage90-capture",
   "catalog-stage90-validate",
   "catalog-stage90-validate-captures",
+  "catalog-stage90-validate-binary-closure",
 ]);
 
 type LegacyCaptureMode = Exclude<
@@ -50,6 +58,7 @@ type LegacyCaptureMode = Exclude<
   | "catalog-stage90-capture"
   | "catalog-stage90-validate"
   | "catalog-stage90-validate-captures"
+  | "catalog-stage90-validate-binary-closure"
 >;
 
 interface CapturePlan {
@@ -96,6 +105,11 @@ interface CatalogValidateCapturesPlan {
   conditionPlan: string;
 }
 
+interface CatalogValidateBinaryClosurePlan {
+  kind: "catalog-stage90-validate-binary-closure";
+  request: string;
+}
+
 interface CatalogFontProbeValidation {
   report: JsonValue;
   request: PinnedProbeFile;
@@ -116,7 +130,8 @@ export type FidelityAcceptancePlan =
   | CatalogPlanWrite
   | CatalogCapturePlan
   | CatalogValidatePlan
-  | CatalogValidateCapturesPlan;
+  | CatalogValidateCapturesPlan
+  | CatalogValidateBinaryClosurePlan;
 
 const capturePlans: Record<LegacyCaptureMode, CapturePlan> = {
   "input-state-final": {
@@ -163,6 +178,11 @@ function catalogModePlan(
   mode: z.infer<typeof modeSchema>,
   argv: readonly string[],
 ): FidelityAcceptancePlan | undefined {
+  if (mode === "catalog-stage90-validate-binary-closure") {
+    if (argv.length !== 2 || !argv[1])
+      throw new Error("catalog binary closure requires one request");
+    return { kind: mode, request: argv[1] };
+  }
   if (mode === "catalog-stage90-plan") {
     const output = argv[1];
     if (argv.length !== 2 || !output)
@@ -297,6 +317,10 @@ export async function runFidelityAcceptance(argv: readonly string[]): Promise<vo
     assertStageScoreSuite(candidate, trusted);
     return;
   }
+  if (plan.kind === "catalog-stage90-validate-binary-closure") {
+    process.stdout.write(`${JSON.stringify(validateCatalogBinaryClosure(plan.request))}\n`);
+    return;
+  }
   if (plan.kind === "catalog-stage90-validate-captures") {
     const envelope = validateCatalogChromeCaptures(plan.captureManifest, plan.conditionPlan);
     process.stdout.write(`${JSON.stringify(envelope)}\n`);
@@ -307,20 +331,37 @@ export async function runFidelityAcceptance(argv: readonly string[]): Promise<vo
     return;
   }
   if (plan.kind === "catalog-stage90-capture") {
-    const binary = tocBinaryFromBuildReport(plan.buildReport);
-    await runCatalogStage90Captures(
-      binary,
-      plan.conditionPlan,
-      plan.output,
-      plan.resume,
-      plan.chromeExecutable,
-    );
+    await runCatalogCapture(plan);
     return;
   }
   const binary = tocBinaryFromBuildReport(plan.buildReport);
   const capture = plan.kind === "input-state" ? runInputStateFidelity : runDynamicFidelity;
   if (plan.options) await capture(binary, plan.output, plan.threshold, plan.options);
   else await capture(binary, plan.output, plan.threshold);
+}
+
+async function runCatalogCapture(plan: CatalogCapturePlan): Promise<void> {
+  const prior =
+    plan.resume &&
+    resumeCatalogBinary(
+      plan.buildReport,
+      plan.resume.observationManifestPath,
+      plan.resume.finalizedManifestPath,
+    );
+  const binaryProof = prior
+    ? prior.proof
+    : freezeCatalogBinary(plan.buildReport, path.resolve(plan.output));
+  const binary = prior ? prior.binary : path.join(path.dirname(binaryProof.path), "runtime-tests");
+  const currentBuild = prior ? prior.currentBuild : currentCatalogBuild(plan.buildReport);
+  await runCatalogStage90Captures(
+    binary,
+    plan.conditionPlan,
+    plan.output,
+    plan.resume,
+    plan.chromeExecutable,
+    binaryProof,
+    currentBuild,
+  );
 }
 
 function parseCatalogChromeExecutable(
@@ -705,6 +746,7 @@ function readCatalogChromeInputs(captureManifestPath: string, conditionPlanPath:
     JSON.parse(fs.readFileSync(manifestPath, "utf8")) as JsonValue,
     "capture manifest",
   );
+  assertCatalogManifestBinaryProof(manifest);
   if (
     manifest.profile !== "catalog-stage90-captures" ||
     manifest.acceptance !== false ||

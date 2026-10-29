@@ -13,7 +13,7 @@ import unittest
 import warnings
 import zipfile
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import cast
 from unittest.mock import patch
 
@@ -37,6 +37,12 @@ def json_array(value: object) -> list[object]:
     if not isinstance(value, list):
         raise TypeError("fixture value must be a JSON array")
     return cast(list[object], value)
+
+
+def json_text(value: object) -> str:
+    if not isinstance(value, str):
+        raise TypeError("fixture value must be text")
+    return value
 
 
 def json_path_name(value: object) -> str:
@@ -833,6 +839,160 @@ class PerformanceEvidenceTest(unittest.TestCase):
                          (self.bundle / str(row["relativePath"])).read_bytes())
         with self.assertRaisesRegex(ValueError, "bundle-relative file pin mismatch"):
             bundle.relative_reference(row["relativePath"], "0" * 64)
+
+    def test_bundle_original_path_rejects_relative_and_duplicate_logical_paths(self) -> None:
+        def invalid_bundle(original_paths: list[str]) -> Path:
+            directory = self.root / "invalid-original-paths"
+            rows = []
+            for index, original in enumerate(original_paths):
+                relative = f"payload/{index}.bin"
+                payload = directory / relative
+                payload.parent.mkdir(parents=True, exist_ok=True)
+                payload.write_bytes(f"payload-{index}".encode())
+                rows.append({"originalPath": original, "relativePath": relative,
+                             "sha256": gate.sha256(payload)})
+            (directory / "bundle.json").write_text(json.dumps({
+                "schema": "krr-html-performance-release-bundle-v1", "files": rows,
+            }))
+            return directory
+
+        with self.assertRaisesRegex(ValueError, "duplicate/nonabsolute original path"):
+            gate.Bundle(invalid_bundle(["relative/source.json"]))
+        with self.assertRaisesRegex(ValueError, "duplicate/nonabsolute original path"):
+            gate.Bundle(invalid_bundle(["/captured/duplicate.json", "/captured/duplicate.json"]))
+
+    def _catalog_capture_proof_fixture(
+        self, *, windows: bool = False,
+    ) -> tuple[JsonObject, JsonObject, JsonObject, JsonObject, JsonObject, JsonObject]:
+        def logical_path(suffix: str) -> str:
+            if windows:
+                return str(PureWindowsPath("Z:/source", *suffix.split("/")))
+            return str(self.root / suffix)
+
+        binary_path = logical_path("tmp/frozen/capture-test")
+        binary_ref = self.add_file(binary_path, "catalog/capture-test", b"frozen capture binary")
+        original_report = self.add_file(
+            logical_path("tmp/original-cargo.jsonl"), "catalog/original-cargo.jsonl", b"original cargo report\n"
+        )
+        current_report = self.add_file(
+            logical_path("tmp/current-cargo.jsonl"), "catalog/current-cargo.jsonl", b"current cargo report\n"
+        )
+        source = logical_path("target/debug/deps/capture-test-unique")
+        proof_value = {
+            "schema": "krr-html84-capture-binary-v1",
+            "buildReport": original_report["path"],
+            "buildReportSha256": original_report["sha256"],
+            "source": source,
+            "path": binary_path,
+            "sha256": binary_ref["sha256"],
+        }
+        proof_ref = self.add_file(
+            logical_path("tmp/capture-binary-proof.json"), "catalog/capture-binary-proof.json", proof_value
+        )
+        manifest = {
+            "schema": "krr-html84-catalog-captures-v2",
+            "catalogPath": logical_path("tests/fixtures/html/feature-catalog.json"),
+            "binaryPath": binary_path,
+            "binarySha256": binary_ref["sha256"],
+            "binaryProof": proof_ref,
+            "currentBuild": {
+                "path": current_report["path"],
+                "sha256": current_report["sha256"],
+                "source": source,
+                "binarySha256": binary_ref["sha256"],
+            },
+        }
+        manifest_ref = self.add_file(
+            logical_path("tmp/catalog-stage90-captures.json"),
+            "catalog/catalog-stage90-captures.json", manifest,
+        )
+        self.save_transport()
+        return manifest, manifest_ref, proof_ref, original_report, binary_ref, current_report
+
+    def test_catalog_capture_binary_proof_transports_one_bound_closure(self) -> None:
+        manifest, _, proof_ref, original_report, binary_ref, current_report = (
+            self._catalog_capture_proof_fixture()
+        )
+        refs = gate.validate_catalog_binary_proof(
+            manifest, gate.Bundle(self.bundle).file,
+        )
+        self.assertEqual(refs.proof_ref, proof_ref)
+        self.assertEqual(refs.build_report_ref, original_report)
+        self.assertEqual(refs.binary_ref, binary_ref)
+        self.assertEqual(refs.current_build_report_ref, current_report)
+
+    def test_catalog_capture_binary_proof_rejects_manifest_drift_and_missing_refs(self) -> None:
+        manifest, _, _, _, _, _ = self._catalog_capture_proof_fixture()
+        bundle = gate.Bundle(self.bundle)
+        current_build = json_object(manifest["currentBuild"])
+        with self.assertRaisesRegex(ValueError, "does not bind the manifest binary"):
+            gate.validate_catalog_binary_proof(
+                {**manifest, "binaryPath": str(self.root / "tmp/frozen/other")}, bundle.file,
+            )
+        with self.assertRaisesRegex(ValueError, "canonical absolute path"):
+            gate.validate_catalog_binary_proof(
+                {**manifest, "binaryPath": "/captured/source/tmp/../target/capture-test"}, bundle.file,
+            )
+        with self.assertRaisesRegex(ValueError, "outside target"):
+            gate.validate_catalog_binary_proof(
+                {**manifest, "binaryPath": str(self.root / "target/debug/capture-test")}, bundle.file,
+            )
+        bad_current = {**manifest, "currentBuild": {**current_build, "sha256": "0" * 64}}
+        with self.assertRaisesRegex(ValueError, "original pin mismatch"):
+            gate.validate_catalog_binary_proof(bad_current, bundle.file)
+        missing_current = {
+            **manifest,
+            "currentBuild": {
+                **current_build,
+                "path": "/captured/missing-current.jsonl",
+            },
+        }
+        with self.assertRaises(KeyError):
+            gate.validate_catalog_binary_proof(missing_current, bundle.file)
+
+    def test_catalog_capture_binary_closure_uses_strict_typescript_reader_once(self) -> None:
+        manifest, manifest_ref, proof_ref, original_report, binary_ref, current_report = (
+            self._catalog_capture_proof_fixture(windows=True)
+        )
+        bundle = gate.Bundle(self.bundle)
+        refs = gate.validate_catalog_binary_proof(manifest, bundle.file)
+        self.assertEqual(refs.proof_ref, proof_ref)
+        self.assertEqual(refs.build_report_ref, original_report)
+        self.assertEqual(refs.binary_ref, binary_ref)
+        self.assertEqual(refs.current_build_report_ref, current_report)
+        self.assertFalse(Path(json_text(original_report["path"])).exists())
+        observed: dict[str, object] = {}
+
+        def validate_request(
+            argv: list[str], *, cwd: Path, check: bool, capture_output: bool,
+        ) -> subprocess.CompletedProcess[bytes]:
+            request_path = Path(argv[-1])
+            request_bytes = request_path.read_bytes()
+            request = json.loads(request_bytes)
+            observed["argv"] = argv
+            observed["cwd"] = cwd
+            observed["check"] = check
+            observed["capture_output"] = capture_output
+            observed["request"] = request
+            result = {
+                "schema": "krr-html84-binary-closure-result-v1",
+                "requestSha256": hashlib.sha256(request_bytes).hexdigest(),
+                "manifest": request["manifest"],
+            }
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(result).encode(), stderr=b"")
+
+        with patch.object(gate.subprocess, "run", side_effect=validate_request) as run:
+            result = gate.validate_catalog_binary_closure(self.root, bundle, manifest_ref, refs)
+
+        request = json_object(observed["request"])
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(result["schema"], "krr-html84-binary-closure-result-v1")
+        self.assertEqual(request["schema"], "krr-html84-binary-closure-request-v1")
+        self.assertEqual(request["manifest"], manifest_ref)
+        files = [json_object(file) for file in json_array(request["files"])]
+        self.assertEqual(len(files), 5)
+        self.assertEqual(len({json_text(file["path"]) for file in files}), 5)
+        self.assertTrue(all(Path(json_text(file["payloadPath"])).is_file() for file in files))
 
     def test_frozen_binary_transport_survives_removed_target_and_rejects_tampering(self) -> None:
         selected_path = self.root / "target/release/krr-html-performance-harness"
