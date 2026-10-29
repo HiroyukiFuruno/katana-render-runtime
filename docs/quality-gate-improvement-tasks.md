@@ -2,6 +2,8 @@
 
 ## 最新の再開地点（2026-10-29）
 
+- [/] 累計15日5時間。R3836標準Lint・R3837標準AST・R3838実release unit build・R3840実catalog選択6回帰・R3842実frame取得はactual0。複数source spanから複数font runへの対応を、UTF-8境界・実face・sourceごとのshaping境界・既存spacing等の拒否条件を維持して修正。独立HighレビューでP0/P1指摘なし。通常hookを通し、読取拒否診断86283c6e、managed排他/円楕円f32回帰98c7dff9、混在font配置e0e0ec50へ保存した。C4 JA04の同正式policyによる診断は96.47579→98.57354→98.64968で99未達。正式role証跡の付替えや合格数への加算はしない。最新完全正式値は旧R3617の108/117で、現ソース全117・HTML84/font/時間RSS・完全gate/coverage/cache実効性・PR/CI/公開は未完。次は必須祖先/content manifest同期後の新候補proofと正式再検証。詳細と原失敗は `tmp/quality/resumed-owner-r3509/current-handoff-r3846.md` に保存。
+
 - [/] R3726はChrome常時CIの実条件/commandを既存parserで直接検査し、reuse guard混入を拒否する負例も含めmacOS証跡65件成功。標準biome15項目とstatic foundationもactual0。R3723の実Moon全契約が成功し、レビュー済みowner AST固定を現行へ同期。R3725はowner負例23件、登録/依存/異常変異59件が成功。通常hookを維持したR3727で、host整合9d98d8c1、raw SVG/viewport検証a61a5cce、現CI/tool契約de78de07、Canvas診断775328fc、runtime整形d1e1cf6d、Node型26.6.6 c24ee95bを関心別に保存。製品PNGの新正式117、現HTML84/性能、完全gate/coverageとcache実効性、PR/CI/公開は依然未完。以降の実行中情報は終了hook台帳と`tmp/quality/resumed-owner-r3509/`の新規run/handoffでも保持し、古い成功を現HEADへ転用しない。
 
 - [/] R3718標準完全checkは8分31秒でactual1（26完了/4失敗/14skip）。Rust静的検査を通過し、runtime-unused全310件が実producerで310/310成功。失敗はcapacity fixture2系統、Moon契約の旧task/recipe固定、macOSローカル証跡の旧workflow/Bun固定、fingerprint testの旧Moon版固定で、capacity不足ではない。実装の拒否を外さずfixture/現在の公開tool契約へ同期中。R3719実Moon packageとの完全version照合6/6、R3720 alias34/34・macOS証跡65/65、R3721 state21/21はactual0。macOS証跡で新Chrome CI laneを省略せず、旧workflow/Bun証跡拒否を追加。R3722のMoon契約は実2.6.4が追加するglobal-config inputの旧期待で失敗し、実観測JSONと全taskを照合中。完全gate/coverage/最新画像/性能/公開は未合格。
