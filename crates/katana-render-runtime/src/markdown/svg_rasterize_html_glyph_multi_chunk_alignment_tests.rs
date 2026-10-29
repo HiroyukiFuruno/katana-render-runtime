@@ -6,10 +6,14 @@ use std::sync::Arc;
 
 #[path = "svg_rasterize_html_glyph_multi_chunk_nested_rows_tests.rs"]
 pub(super) mod nested_rows;
+#[path = "svg_rasterize_html_glyph_nested_rows_fixture_tests.rs"]
+pub(super) mod nested_rows_fixture;
 #[path = "svg_rasterize_html_glyph_single_row_spans_tests.rs"]
 mod single_row_spans;
 #[path = "svg_rasterize_html_glyph_multi_chunk_single_scalar_tests.rs"]
 mod single_scalar;
+#[path = "svg_rasterize_html_glyph_chunk_start_anchor_tests.rs"]
+mod start_anchor;
 #[path = "svg_rasterize_html_glyph_unicode_spans_tests.rs"]
 mod unicode_spans;
 

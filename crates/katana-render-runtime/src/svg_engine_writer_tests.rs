@@ -75,7 +75,7 @@ fn parse_upstream_writer_fixture(input_path: &Path, case_name: &str) -> Result<u
 
 fn parse_writer_svg(input: &str, case_name: &str) -> Result<usvg::Tree, String> {
     let options = usvg::Options {
-        fontdb: upstream_writer_font_database(),
+        fontdb: upstream_writer_font_database()?,
         ..usvg::Options::default()
     };
     usvg::Tree::from_str(input, &options)
@@ -132,20 +132,37 @@ fn render_tree(tree: &usvg::Tree) -> Result<Pixmap, String> {
     Ok(pixmap)
 }
 
-fn upstream_writer_font_database() -> Arc<usvg::fontdb::Database> {
-    static DATABASE: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
-    DATABASE
-        .get_or_init(|| {
-            let mut database = usvg::fontdb::Database::new();
-            database.load_fonts_dir(WRITER_FONT_DIRECTORY);
-            database.set_serif_family("Noto Serif");
-            database.set_sans_serif_family("Noto Sans");
-            database.set_cursive_family("Yellowtail");
-            database.set_fantasy_family("Sedgwick Ave Display");
-            database.set_monospace_family("Noto Mono");
-            Arc::new(database)
+pub(super) fn upstream_writer_font_database() -> Result<Arc<usvg::fontdb::Database>, String> {
+    static DATABASE: OnceLock<Result<Arc<usvg::fontdb::Database>, String>> = OnceLock::new();
+    DATABASE.get_or_init(load_upstream_fonts).clone()
+}
+
+fn load_upstream_fonts() -> Result<Arc<usvg::fontdb::Database>, String> {
+    let entries = std::fs::read_dir(WRITER_FONT_DIRECTORY).map_err(|error| error.to_string())?;
+    let mut paths = entries
+        .map(|entry| {
+            entry
+                .map(|entry| entry.path())
+                .map_err(|error| error.to_string())
         })
-        .clone()
+        .collect::<Result<Vec<_>, _>>()?;
+    paths.sort();
+    let mut database = usvg::fontdb::Database::new();
+    for path in paths {
+        if matches!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("ttf" | "ttc" | "otf" | "otc" | "TTF" | "TTC" | "OTF" | "OTC")
+        ) && let Err(error) = database.load_font_file(&path)
+        {
+            log::warn!("Failed to load '{}' cause {}.", path.display(), error);
+        }
+    }
+    database.set_serif_family("Noto Serif");
+    database.set_sans_serif_family("Noto Sans");
+    database.set_cursive_family("Yellowtail");
+    database.set_fantasy_family("Sedgwick Ave Display");
+    database.set_monospace_family("Noto Mono");
+    Ok(Arc::new(database))
 }
 
 fn writer_options(case_name: &str) -> usvg::WriteOptions {

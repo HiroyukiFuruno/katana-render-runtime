@@ -80,7 +80,11 @@ fn append_row_alignments(
 ) -> Result<(), String> {
     let metrics = character_metrics(database, input)?;
     let widths = span_widths(input.chunk, &metrics)?;
-    let mut cursor = f64::from(input.anchor_x * input.css_scale) - widths.iter().sum::<f64>() / 2.0;
+    let mut cursor = f64::from(input.anchor_x * input.css_scale);
+    /* WHY: Startは指定xから始め、Middleだけ実span幅の半分を戻す。 */
+    if input.chunk.anchor() == usvg::TextAnchor::Middle {
+        cursor += widths.iter().sum::<f64>() * anchor::MIDDLE_ANCHOR_FACTOR;
+    }
     for ((metrics, span), width) in metrics.iter().zip(spans).zip(widths) {
         let offset = metrics.first().ok_or("chunk span offset is missing")?.1;
         alignments.push(span_alignment(span, input, cursor + f64::from(offset))?);

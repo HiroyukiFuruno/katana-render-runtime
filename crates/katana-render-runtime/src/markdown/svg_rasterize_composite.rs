@@ -1,10 +1,6 @@
 use super::provenance::AuthoredClipInfo;
 use resvg::usvg;
 use tiny_skia::Transform;
-#[path = "svg_rasterize_composite_arc_plan.rs"]
-mod arc_plan;
-#[path = "svg_rasterize_composite_context.rs"]
-mod context;
 #[path = "svg_rasterize_composite_groups.rs"]
 mod groups;
 #[path = "svg_rasterize_composite_layers.rs"]
@@ -20,25 +16,59 @@ mod nodes;
 pub(super) mod path;
 #[path = "svg_rasterize_composite_text.rs"]
 mod text;
-use context::RenderContext;
-pub(crate) use context::SvgCompositeRenderer;
 pub(crate) use text::TextRasterizer;
+pub(crate) struct SvgCompositeRenderer;
+impl SvgCompositeRenderer {
+    #[cfg(test)]
+    pub(crate) fn render(
+        tree: &usvg::Tree,
+        transform: Transform,
+        pixmap: &mut tiny_skia::PixmapMut<'_>,
+        authored_clip_info: &AuthoredClipInfo,
+    ) -> Result<(), String> {
+        Self::render_with_text(tree, transform, pixmap, authored_clip_info, None)
+    }
+    pub(crate) fn render_with_text(
+        tree: &usvg::Tree,
+        transform: Transform,
+        pixmap: &mut tiny_skia::PixmapMut<'_>,
+        authored_clip_info: &AuthoredClipInfo,
+        text_rasterizer: Option<&dyn TextRasterizer>,
+    ) -> Result<(), String> {
+        #[cfg(all(test, target_os = "macos"))]
+        super::SvgRasterizeOps::record_render_dispatch(
+            text_rasterizer.is_some(),
+            authored_clip_info.has_object_bounding_box,
+        );
+        if authored_clip_info.has_object_bounding_box {
+            resvg::render(tree, transform, pixmap);
+            return Ok(());
+        }
+        render_root_children(tree, transform, pixmap, authored_clip_info, text_rasterizer)
+    }
+    pub(crate) fn needs_authored_clip_ids(tree: &usvg::Tree) -> bool {
+        contains_clip_ancestor_blend(tree.root(), false, &AuthoredClipInfo::default())
+    }
+}
+
 fn render_root_children(
     tree: &usvg::Tree,
     transform: Transform,
     pixmap: &mut tiny_skia::PixmapMut<'_>,
-    context: &RenderContext<'_, '_>,
+    authored_clip_info: &AuthoredClipInfo,
+    text_rasterizer: Option<&dyn TextRasterizer>,
 ) -> Result<(), String> {
     let needs_authored_clip_ids = SvgCompositeRenderer::needs_authored_clip_ids(tree);
-    match context.text {
-        Some(_) => render_children_with_context(
+    match text_rasterizer {
+        Some(text_rasterizer) => render_children_with_text(
             tree.root(),
             transform.pre_concat(tree.root().transform()),
             pixmap,
-            context,
+            authored_clip_info,
+            Some(text_rasterizer),
         ),
         None if needs_authored_clip_ids => {
-            render_children_with_context(tree.root(), transform, pixmap, context)
+            render_children_with_text(tree.root(), transform, pixmap, authored_clip_info, None)
         }
         None => {
             resvg::render(tree, transform, pixmap);
@@ -101,22 +131,14 @@ fn render_children_with_text(
     authored_clip_info: &AuthoredClipInfo,
     text_rasterizer: Option<&dyn TextRasterizer>,
 ) -> Result<(), String> {
-    let context = RenderContext {
-        provenance: authored_clip_info,
-        text: text_rasterizer,
-        plan: None,
-    };
-    render_children_with_context(group, transform, pixmap, &context)
-}
-
-fn render_children_with_context(
-    group: &usvg::Group,
-    transform: Transform,
-    pixmap: &mut tiny_skia::PixmapMut<'_>,
-    context: &RenderContext<'_, '_>,
-) -> Result<(), String> {
     for child in group.children() {
-        nodes::render_node(child, transform, pixmap, context)?;
+        nodes::render_node(
+            child,
+            transform,
+            pixmap,
+            authored_clip_info,
+            text_rasterizer,
+        )?;
     }
     Ok(())
 }
@@ -126,14 +148,27 @@ fn render_traversable_group(
     group: &usvg::Group,
     transform: Transform,
     pixmap: &mut tiny_skia::PixmapMut<'_>,
-    context: &RenderContext<'_, '_>,
+    authored_clip_info: &AuthoredClipInfo,
+    text_rasterizer: Option<&dyn TextRasterizer>,
 ) -> Result<(), String> {
     let child_transform = transform.pre_concat(group.transform());
-    if generated_viewport_clip(group, context.provenance) {
-        return layers::render_clipped_group_with_context(group, child_transform, pixmap, context);
+    if generated_viewport_clip(group, authored_clip_info) {
+        return layers::render_clipped_group(
+            group,
+            child_transform,
+            pixmap,
+            authored_clip_info,
+            text_rasterizer,
+        );
     }
     if group.clip_path().is_none() {
-        return render_children_with_context(group, child_transform, pixmap, context);
+        return render_children_with_text(
+            group,
+            child_transform,
+            pixmap,
+            authored_clip_info,
+            text_rasterizer,
+        );
     }
     layers::render_existing_node(node, transform, pixmap);
     Ok(())
@@ -150,10 +185,6 @@ fn is_generated_viewport_clip(
 #[cfg(test)]
 #[path = "svg_rasterize_composite_stroke_bounds_tests.rs"]
 mod stroke_bounds_tests;
-
-#[cfg(test)]
-#[path = "svg_rasterize_composite_arc_integration_tests.rs"]
-mod arc_integration_tests;
 
 #[cfg(test)]
 #[path = "svg_rasterize_composite_mask_tests.rs"]

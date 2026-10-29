@@ -29,7 +29,7 @@ pub(super) fn render_if_supported(
     Ok(true)
 }
 
-pub(super) fn render_prepared_path(
+fn render_prepared_path(
     pixmap: &mut PixmapMut<'_>,
     prepared: &PreparedPath,
     transform: Transform,
@@ -46,7 +46,7 @@ pub(super) fn render_prepared_path(
     Ok(())
 }
 
-pub(super) fn transform_is_finite(transform: Transform) -> bool {
+fn transform_is_finite(transform: Transform) -> bool {
     [
         transform.sx,
         transform.kx,
@@ -60,23 +60,9 @@ pub(super) fn transform_is_finite(transform: Transform) -> bool {
 }
 
 pub(in crate::markdown::svg_rasterize) struct PreparedPath {
-    pub(super) path: Path,
-    pub(super) fill: Option<Paint>,
-    pub(super) stroke: Option<Paint>,
-}
-
-pub(super) fn prepare_native_arc(node: &usvg::Path) -> Option<PreparedPath> {
-    let original = node.original_arc()?;
-    if !node.is_visible() || node.stroke().is_some_and(|s| s.dasharray().is_some()) {
-        return None;
-    }
-    let fill = style::fill(node.fill(), node.rendering_mode())?;
-    let stroke = style::stroke(node.stroke(), node.rendering_mode())?;
-    if fill.is_none() && stroke.is_none() {
-        return None;
-    }
-    let path = geometry::parse_original(original, node.fill().map(|f| f.rule()))?;
-    Some(PreparedPath { path, fill, stroke })
+    path: Path,
+    fill: Option<Paint>,
+    stroke: Option<Paint>,
 }
 
 pub(in crate::markdown::svg_rasterize) fn prepare_path(
@@ -91,7 +77,7 @@ pub(in crate::markdown::svg_rasterize) fn prepare_path(
     if fill.is_none() && stroke.is_none() {
         return Ok(None);
     }
-    let path = geometry::convert_node(node)?;
+    let path = geometry::convert(node.data(), node.fill().map(|value| value.rule()))?;
     Ok(Some(PreparedPath { path, fill, stroke }))
 }
 

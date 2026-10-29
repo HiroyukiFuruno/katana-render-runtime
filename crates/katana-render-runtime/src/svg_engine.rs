@@ -13,5 +13,9 @@ pub(crate) mod usvg;
 mod writer_tests;
 
 #[cfg(test)]
+#[path = "svg_engine_render_tests.rs"]
+mod render_tests;
+
+#[cfg(test)]
 #[path = "svg_engine_viewbox_tests.rs"]
 mod viewbox_tests;

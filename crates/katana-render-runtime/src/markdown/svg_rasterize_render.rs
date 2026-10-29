@@ -68,7 +68,7 @@ impl RasterTarget {
         };
         let transform =
             tiny_skia::Transform::from_scale(self.effective_scale, self.effective_scale);
-        composite::SvgCompositeRenderer::render_full_with_text(
+        composite::SvgCompositeRenderer::render_with_text(
             tree,
             transform,
             &mut pixmap.as_mut(),

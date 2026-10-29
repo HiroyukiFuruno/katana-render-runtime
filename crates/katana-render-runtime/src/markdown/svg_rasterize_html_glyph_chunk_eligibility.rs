@@ -197,7 +197,10 @@ fn chunk_input<'a>(
 fn chunk_supported(chunk: &usvg::TextChunk, prepared: &[PreparedSpan]) -> bool {
     !prepared.is_empty()
         && prepared.len() == chunk.spans().len()
-        && chunk.anchor() == usvg::TextAnchor::Middle
+        && matches!(
+            chunk.anchor(),
+            usvg::TextAnchor::Start | usvg::TextAnchor::Middle
+        )
         && matches!(chunk.text_flow(), usvg::TextFlow::Linear)
         && supported_ltr_text(chunk.text())
         && ranges_cover_chunk(chunk)

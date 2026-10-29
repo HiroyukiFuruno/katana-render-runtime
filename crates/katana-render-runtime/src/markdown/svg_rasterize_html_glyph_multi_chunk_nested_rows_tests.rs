@@ -1,9 +1,9 @@
+use super::nested_rows_fixture::{NestedRowsSpec, nested_rows_tree_with_anchor};
 use super::{
     HtmlGlyphRasterizer, LAYOUT_UNITS, Prepared, PreparedSpan, anchor, assert_close, fixture_text,
     font_file_fixture, font_fixture, paint,
 };
-use resvg::usvg::{Options, Tree};
-use std::sync::Arc;
+use resvg::usvg::Tree;
 
 #[test]
 fn nested_multi_span_rows_use_paint_size_for_each_relative_advance() -> Result<(), String> {
@@ -75,17 +75,18 @@ pub(in crate::markdown::svg_rasterize::html_glyph) fn nested_rows_tree(
     attributes: &str,
     row_attributes: &str,
 ) -> Result<Tree, String> {
-    let svg = format!(
-        "<svg xmlns='http://www.w3.org/2000/svg'><text id='run' font-family='Noto Sans' font-size='11.48' transform='scale(0.99999434)' {attributes}><tspan x='0' y='0' dy='1.1em' text-anchor='middle'><tspan>A</tspan><tspan xml:space='preserve'>V customers </tspan></tspan><tspan x='0' y='1em' dy='1.1em' text-anchor='middle' {row_attributes}><tspan>information</tspan><tspan> about</tspan></tspan></text></svg>"
-    );
-    Tree::from_str(
-        &svg,
-        &Options {
-            fontdb: Arc::new(fixture.database.clone()),
-            ..Options::default()
+    nested_rows_tree_with_anchor(
+        fixture,
+        attributes,
+        row_attributes,
+        NestedRowsSpec {
+            anchor: "middle",
+            font_size: "11.48",
+            transform: "scale(0.99999434)",
+            anchor_x: "0",
+            second_row: true,
         },
     )
-    .map_err(|error| error.to_string())
 }
 
 #[test]
@@ -161,7 +162,7 @@ pub(super) fn assert_row_metrics(
     Ok(())
 }
 
-fn row_metrics(
+pub(super) fn row_metrics(
     tree: &Tree,
     chunk: &resvg::usvg::TextChunk,
     row: &[PreparedSpan],

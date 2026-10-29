@@ -1290,18 +1290,11 @@ pub struct Path {
     pub(crate) paint_order: PaintOrder,
     pub(crate) rendering_mode: ShapeRendering,
     pub(crate) data: Arc<tiny_skia_path::Path>,
-    original_arc: Option<Arc<OriginalArcPath>>,
     pub(crate) abs_transform: Transform,
     pub(crate) bounding_box: Rect,
     pub(crate) abs_bounding_box: Rect,
     pub(crate) stroke_bounding_box: Rect,
     pub(crate) abs_stroke_bounding_box: Rect,
-}
-
-#[derive(Debug)]
-struct OriginalArcPath {
-    data: std::sync::Weak<tiny_skia_path::Path>,
-    svg: Box<str>,
 }
 
 impl Path {
@@ -1355,7 +1348,6 @@ impl Path {
             paint_order,
             rendering_mode,
             data,
-            original_arc: None,
             abs_transform,
             bounding_box,
             abs_bounding_box,
@@ -1411,19 +1403,6 @@ impl Path {
     /// All segments are in absolute coordinates.
     pub fn data(&self) -> &tiny_skia_path::Path {
         self.data.as_ref()
-    }
-
-    pub(crate) fn set_original_arc(&mut self, svg: &str) {
-        self.original_arc = Some(Arc::new(OriginalArcPath {
-            data: Arc::downgrade(&self.data),
-            svg: svg.into(),
-        }));
-    }
-
-    pub(crate) fn original_arc(&self) -> Option<&str> {
-        let original = self.original_arc.as_ref()?;
-        let data = original.data.upgrade()?;
-        Arc::ptr_eq(&data, &self.data).then_some(original.svg.as_ref())
     }
 
     /// Element's absolute transform.

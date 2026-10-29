@@ -1057,14 +1057,10 @@ fn convert_path(
         path_transform,
     );
 
-    let mut path = match path {
+    let path = match path {
         Some(v) => v,
         None => return,
     };
-
-    if let Some(svg) = valid_arc_source(node) {
-        path.set_original_arc(svg);
-    }
 
     match (raw_paint_order.order, marker) {
         ([PaintOrderKind::Markers, _, _], Some(markers_node)) => {
@@ -1082,24 +1078,6 @@ fn convert_path(
         }
         _ => parent.children.push(Node::Path(Box::new(path.clone()))),
     }
-}
-
-fn valid_arc_source<'a, 'input: 'a>(node: SvgNode<'a, 'input>) -> Option<&'a str> {
-    if node.tag_name()? != EId::Path {
-        return None;
-    }
-    let svg: &str = node.attribute(AId::D)?;
-    if svg.contains('\0') || !svg.contains(['a', 'A']) {
-        return None;
-    }
-    let mut has_arc = false;
-    for segment in svgtypes::PathParser::from(svg) {
-        has_arc |= matches!(segment.ok()?, svgtypes::PathSegment::EllipticalArc { .. });
-    }
-    if !has_arc {
-        return None;
-    }
-    Some(svg)
 }
 
 fn append_single_paint_path(paint_order_kind: PaintOrderKind, path: &Path, parent: &mut Group) {
