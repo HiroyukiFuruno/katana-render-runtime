@@ -24,7 +24,7 @@ include = [
     "vendor/mermaid/12.2.0-krr.pr6823.1/LICENSE",
     "vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js.sha256",
     "vendor/plantuml/1.2026.9/plantuml.jar.sha256",
-    "vendor/zenuml-core/4.11.0/zenuml.js.sha256",
+    "vendor/zenuml-core/4.12.1/zenuml.js.sha256",
     "src/markdown/generated/zenuml-runtime-assets.bin.br",
     "src/markdown/drawio_renderer/generated/drawio-resources.bin.br",
 ]
@@ -62,7 +62,7 @@ unicode-script = "0.5"
 unicode-vo = "0.1"
 xmlwriter = "0.1"
 zune-jpeg = "0.5.15"
-skrifa = "^0.44"
+skrifa = "^0.49"
 log = "0.4"
 rustybuzz = { workspace = true }
 harfrust = { workspace = true }

@@ -4555,7 +4555,7 @@ const MOON_TERMINAL_SOURCES = {
   "scripts/hooks/run_parallel_checks.py":
     "6590d3482195d88452d2592a2a690e114c7e060270e95908c735c695256ac180",
   "scripts/html/harness-contract-cli.ts":
-    "ef0907bc6771b3c0a9c0982392438e8521c7c46c22b35aae6a02ee13f66d517c",
+    "c975b178f91f55874d71b6a90118be2d61bc5c776e7a277a3cb571ad372fd558",
 } as const;
 
 function moonTerminalSourcesRegistered(
@@ -4625,6 +4625,8 @@ function moonBootstrapLeaves(
   return [];
 }
 
+export const REVIEWED_MOON_VERSION = "2.6.5";
+
 function moonRoots(
   policy: ContractPolicy,
   read: (name: string) => string | undefined,
@@ -4639,7 +4641,7 @@ function moonRoots(
   const experiments = object(workspace.experiments);
   if (
     object(workspace.projects)?.[moon.project] !== "." ||
-    workspace.versionConstraint !== "=2.6.4" ||
+    workspace.versionConstraint !== `=${REVIEWED_MOON_VERSION}` ||
     cas?.verifyIntegrity !== true ||
     experiments?.casOutputsCache !== true
   )

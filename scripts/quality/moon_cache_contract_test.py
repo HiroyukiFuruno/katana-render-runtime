@@ -920,6 +920,9 @@ def main() -> int:
         production_binding = production_task_input_binding(
             bun, moon_command, direct_run_dir
         )
+        moon_version = json.loads((ROOT / "package.json").read_text())["devDependencies"]["@moonrepo/cli"]
+        if not isinstance(moon_version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", moon_version):
+            raise ValueError("Moon CLI must have an exact version")
         workspace_dir = direct_run_dir / "workspace"
         (workspace_dir / ".moon").mkdir(parents=True)
         (workspace_dir / "tmp").mkdir()
@@ -930,7 +933,7 @@ def main() -> int:
             json.dumps(
                 {
                     "projects": {"probe": "."},
-                    "versionConstraint": "=2.6.4",
+                    "versionConstraint": f"={moon_version}",
                     "telemetry": False,
                     "hasher": {"ignorePatterns": ["!/.moon/cache/**"]},
                     "pipeline": {

@@ -2216,10 +2216,13 @@ test.each([
   ],
   ['"env": {**common_env, "CONTRACT_PHASE": "unit"}', '"env": common_env'],
   ["moon_command: list[str] = args.moon", 'moon_command: list[str] = ["moon"]'],
+  ['["devDependencies"]["@moonrepo/cli"]', '["devDependencies"]["other-moon"]'],
+  ['re.fullmatch(r"\\d+\\.\\d+\\.\\d+", moon_version)', "True"],
 ])("Moon fixture owner binding rejects changed source contract %s", (before, after) => {
   const root = fixture();
   const owner = "scripts/quality/moon_cache_contract_test.py";
   const source = fs.readFileSync(path.join(root, owner), "utf8");
+  expect(source).toContain(before);
   write(root, owner, source.replace(before, after));
   expect(codes(root)).toContain(
     `moon-cache-fixture-owner-unverified:tests/fixtures/quality-cache/moon-cache-subject.test.ts`,

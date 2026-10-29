@@ -15,11 +15,11 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p scripts/quality/tsconfig-owned-node-test.json && tsc --noEmit -p scripts/quality/tsconfig-owned-module-tool.json && tsc --noEmit -p scripts/quality/tsconfig-owned-browser-fixture.json && tsc --noEmit -p scripts/quality/tsconfig-owned-native-html-parser.json && tsc --noEmit -p scripts/quality/tsconfig-owned-native-html-parser-tool.json && tsc --noEmit -p scripts/quality/tsconfig-owned-native-pure-utilities.json && tsc --noEmit -p scripts/quality/tsconfig-owned-native-mathjax.json && tsc --noEmit -p scripts/quality/tsconfig-owned-native-mathjax-decls.json && tsc --noEmit -p scripts/quality/tsconfig-owned-native-width-trace.json && tsc --noEmit -p scripts/quality/tsconfig-owned-browser-reference.json"
   },
   "devDependencies": {
-    "@babel/parser": "^8.0.8",
-    "@babel/types": "^8.0.8",
-    "@biomejs/biome": "2.6.3",
+    "@babel/parser": "^8.0.10",
+    "@babel/types": "^8.0.10",
+    "@biomejs/biome": "2.6.4",
     "@mathjax/src": "4.1.3",
-    "@moonrepo/cli": "2.6.4",
+    "@moonrepo/cli": "2.6.5",
     "@rollup/plugin-commonjs": "29.0.3",
     "@rollup/plugin-node-resolve": "^16.0.3",
     "@rollup/plugin-swc": "^0.4.1",

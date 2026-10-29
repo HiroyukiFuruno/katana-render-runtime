@@ -363,7 +363,7 @@ class DependencyFreshnessTest(unittest.TestCase):
     ) -> CargoMetadata:
         registry = "registry+https://github.com/rust-lang/crates.io-index"
         runtime_id = "path+file:///workspace/crates/katana-render-runtime#katana-render-runtime@0.1.0"
-        skrifa_id = f"{registry}#skrifa@0.44.0"
+        skrifa_id = f"{registry}#skrifa@0.49.0"
         harfrust_id = f"{registry}#harfrust@0.12.0"
         return {
             "workspace_members": [runtime_id],
@@ -375,7 +375,7 @@ class DependencyFreshnessTest(unittest.TestCase):
                     "source": None,
                     "manifest_path": str(root / "crates/katana-render-runtime/Cargo.toml"),
                     "dependencies": [
-                        {"name": "skrifa", "source": registry, "req": "^0.44", "kind": None},
+                        {"name": "skrifa", "source": registry, "req": "^0.49", "kind": None},
                         {
                             "name": "harfrust",
                             "rename": "svg_harfrust",
@@ -388,7 +388,7 @@ class DependencyFreshnessTest(unittest.TestCase):
                 {
                     "id": skrifa_id,
                     "name": "skrifa",
-                    "version": "0.44.0",
+                    "version": "0.49.0",
                     "source": registry,
                     "manifest_path": "/registry/skrifa/Cargo.toml",
                     "dependencies": [],
@@ -421,7 +421,7 @@ class DependencyFreshnessTest(unittest.TestCase):
         }
 
     def test_verified_krr_pair_skips_only_its_direct_skrifa_requirement(self) -> None:
-        krr_manifest = self.write_krr_skrifa_manifest("0.44")
+        krr_manifest = self.write_krr_skrifa_manifest("0.49")
         other_manifest = self.root / "crates/other/Cargo.toml"
         other_manifest.parent.mkdir(parents=True)
         other_manifest.write_text(
@@ -477,7 +477,7 @@ class DependencyFreshnessTest(unittest.TestCase):
         self.assertIsNone(freshness.verified_krr_usvg_skrifa_manifest(self.root, self.metadata_for_direct_serde()))
 
     def test_embedded_skrifa_resolution_mismatch_fails_closed(self) -> None:
-        self.write_krr_skrifa_manifest("0.44")
+        self.write_krr_skrifa_manifest("0.49")
         metadata = self.metadata_for_krr_usvg_skrifa(self.root)
         old_id = "registry+https://github.com/rust-lang/crates.io-index#skrifa@0.48.0"
         metadata["packages"].append(
@@ -489,14 +489,14 @@ class DependencyFreshnessTest(unittest.TestCase):
             freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
 
     def test_embedded_source_missing_fails_closed(self) -> None:
-        self.write_krr_skrifa_manifest("0.44")
+        self.write_krr_skrifa_manifest("0.49")
         metadata = self.metadata_for_krr_usvg_skrifa(self.root)
         (self.root / "crates/katana-render-runtime/vendor/svg-engine/usvg/lib.rs").unlink()
         with self.assertRaisesRegex(ValueError, "source is missing"):
             freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
 
     def test_embedded_provenance_corruption_fails_closed(self) -> None:
-        self.write_krr_skrifa_manifest("0.44")
+        self.write_krr_skrifa_manifest("0.49")
         provenance = self.root / "crates/katana-render-runtime/vendor/svg-engine/PROVENANCE.json"
         provenance.write_text(
             json.dumps(
@@ -515,15 +515,15 @@ class DependencyFreshnessTest(unittest.TestCase):
             )
 
     def test_embedded_skrifa_requirement_and_old_dependency_fail_closed(self) -> None:
-        self.write_krr_skrifa_manifest("0.44")
+        self.write_krr_skrifa_manifest("0.49")
         metadata = self.metadata_for_krr_usvg_skrifa(self.root)
         metadata["packages"][0]["dependencies"][0]["req"] = "^0.48"
         with self.assertRaisesRegex(ValueError, "KRR direct skrifa requirement"):
             freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
-        self.write_krr_skrifa_manifest("0.44")
+        self.write_krr_skrifa_manifest("0.49")
         (self.root / "crates/katana-render-runtime/Cargo.toml").write_text(
             '[package]\nname = "katana-render-runtime"\nversion = "0.1.0"\n'
-            '[dependencies]\nskrifa = "^0.44"\nusvg = { path = "../usvg" }\n',
+            '[dependencies]\nskrifa = "^0.49"\nusvg = { path = "../usvg" }\n',
             encoding="utf-8",
         )
         with self.assertRaisesRegex(ValueError, "external resvg/usvg"):
@@ -563,25 +563,25 @@ class DependencyFreshnessTest(unittest.TestCase):
         )
         for _, mutate, message in cases:
             with self.subTest(message=message):
-                self.write_krr_skrifa_manifest("0.44")
+                self.write_krr_skrifa_manifest("0.49")
                 metadata = self.metadata_for_krr_usvg_skrifa(self.root)
                 mutate(metadata)
                 with self.assertRaisesRegex(ValueError, message):
                     freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
 
-        self.write_krr_skrifa_manifest("0.44", harfrust_requirement="^0.13")
+        self.write_krr_skrifa_manifest("0.49", harfrust_requirement="^0.13")
         with self.assertRaisesRegex(ValueError, "alias requirement"):
             freshness.verified_krr_usvg_skrifa_manifest(
                 self.root, self.metadata_for_krr_usvg_skrifa(self.root)
             )
 
-        self.write_krr_skrifa_manifest("0.44", harfrust_requirement="^0.12.99")
+        self.write_krr_skrifa_manifest("0.49", harfrust_requirement="^0.12.99")
         with self.assertRaisesRegex(ValueError, "does not match"):
             freshness.verified_krr_usvg_skrifa_manifest(
                 self.root, self.metadata_for_krr_usvg_skrifa(self.root)
             )
 
-        self.write_krr_skrifa_manifest("0.44", harfrust_requirement="^0.12.99")
+        self.write_krr_skrifa_manifest("0.49", harfrust_requirement="^0.12.99")
         metadata = self.metadata_for_krr_usvg_skrifa(self.root)
         metadata["packages"][0]["dependencies"][1]["req"] = "^0.12.99"
         with self.assertRaisesRegex(ValueError, "0.12 API"):

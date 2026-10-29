@@ -526,8 +526,8 @@ def verified_krr_usvg_skrifa_manifest(root: Path, metadata: dict[str, object]) -
     if len(direct_skrifa) != 1:
         raise ValueError("expected one direct normal skrifa dependency in KRR")
     requirement = direct_skrifa[0].get("req")
-    if not isinstance(requirement, str) or not re.fullmatch(r"\^?0\.44(?:\.\d+)?", requirement.strip()):
-        raise ValueError("KRR direct skrifa requirement is not compatible with the embedded 0.44 API")
+    if not isinstance(requirement, str) or not re.fullmatch(r"\^?0\.49(?:\.\d+)?", requirement.strip()):
+        raise ValueError("KRR direct skrifa requirement is not compatible with the embedded 0.49 API")
     resolved_skrifa = [
         dependency
         for dependency in runtime_edges
@@ -570,8 +570,8 @@ def verified_krr_usvg_skrifa_manifest(root: Path, metadata: dict[str, object]) -
     declared_source = direct_skrifa[0].get("source")
     if declared_source != resolved_package["source"]:
         raise ValueError("KRR direct skrifa dependency source does not match registry resolution")
-    if not re.fullmatch(r"0\.44(?:\.\d+)?", str(resolved_package.get("version", ""))):
-        raise ValueError("resolved KRR skrifa dependency is not compatible with the embedded 0.44 API")
+    if not re.fullmatch(r"0\.49(?:\.\d+)?", str(resolved_package.get("version", ""))):
+        raise ValueError("resolved KRR skrifa dependency is not compatible with the embedded 0.49 API")
     return manifest.resolve()
 
 

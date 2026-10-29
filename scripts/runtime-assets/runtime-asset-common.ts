@@ -89,8 +89,8 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
   {
     kind: "zenuml-core",
     displayName: "ZenUML Core",
-    version: "4.11.0",
-    checksum: "5660006a3d202a5ae85c1b90db18af679d87be9f11158250c17dc0fe089d3a08",
+    version: "4.12.1",
+    checksum: "84af1daef92c842073c204cfdf616acf99652e90aca4b1fe78a99f858c1cf5a1",
     fileName: "zenuml.js",
     rustVersionConst: "ZENUML_CORE_JS_VERSION",
     rustChecksumConst: "ZENUML_CORE_JS_CHECKSUM",

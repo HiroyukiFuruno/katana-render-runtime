@@ -24,7 +24,7 @@
     "harfrustAlias": "usvg harfrust:: becomes svg_harfrust:: (original 0.12 dependency identity)",
     "enabledFeaturePredicates": "The original enabled feature counts are retained per file; constant evaluation removes 79 true cfg attributes and four false branches. OS and test conditions are retained; KRR has no optional public SVG-engine feature contract.",
     "allowAttributes": "The original 46 allow attributes are retained verbatim. Two scoped boundary attributes permit observed external Clippy lints (22 in usvg/lib.rs, 18 in resvg/lib.rs) plus dead_code and unused_imports. Four resvg lints already allowed upstream are omitted from the added list to avoid duplicate attributes. No blanket all, non_minimal_cfg, unsafe-code override, or additional exclusion is introduced.",
-    "sourceSemantics": "Initial mechanical transplant preserves upstream behavior; subsequent scoped fixes pass CSS font size to HarfRust tracking and use hard-edge clipping only for implicit marker viewports. An optional internal fallback callback receives the original requested font attributes while the default legacy resolver remains unchanged; nested SVG forwards the callback. Original SVG, glyph IDs, and variation coordinates are not manually rewritten. Clip bounds, user-clip antialiasing, and upstream test expectations are preserved. ViewBox scale and alignment use f64 intermediate arithmetic before conversion to the existing f32 transform. Linked feImage parsing transfers a child ID only to an unnamed parent and preserves existing referenced IDs across serialization. Upstream source hashes and licenses remain unchanged."
+    "sourceSemantics": "Initial mechanical transplant preserves upstream behavior; subsequent scoped fixes pass CSS font size to HarfRust tracking and use hard-edge clipping only for implicit marker viewports. An optional internal fallback callback receives the original requested font attributes while the default legacy resolver remains unchanged; nested SVG forwards the callback. Original SVG, glyph IDs, and variation coordinates are not manually rewritten. Clip bounds, user-clip antialiasing, and upstream test expectations are preserved. ViewBox scale and alignment use f64 intermediate arithmetic before conversion to the existing f32 transform. Linked feImage parsing transfers a child ID only to an unnamed parent and preserves existing referenced IDs across serialization. Skrifa 0.49 compatibility uses the optional SVG glyph-data accessor and reads opsz axis presence from the same face metadata. Upstream source hashes and licenses remain unchanged."
   },
   "files": [
     {
@@ -319,9 +319,9 @@
       "source": "crates/usvg/src/text/flatten.rs",
       "destination": "usvg/text/flatten.rs",
       "sourceSha256": "b27b10e17bcf35fbbae67198451cbc40406276ed916e2e66d45a561a253f7c3b",
-      "transplantedSha256": "cf220a8b466ec5deb2195783e345bdf05638d8ede3ba14e0e9af83434dffa6ac",
+      "transplantedSha256": "c8b2b4b25fd2aa9d40616db1ec2f3bcbcb814c9055a6d6a4eafeeb75dfb230b9",
       "sourceBytes": 16066,
-      "transplantedBytes": 16228,
+      "transplantedBytes": 16222,
       "adaptations": {
         "cratePaths": 9,
         "enabledFeaturePredicates": {},
@@ -332,9 +332,9 @@
       "source": "crates/usvg/src/text/layout.rs",
       "destination": "usvg/text/layout.rs",
       "sourceSha256": "355f6c97d4abbe31d01d3e12498396ae04f738ed63587f95e9a98e3d306d36eb",
-      "transplantedSha256": "57fa58e21993507d2947f3dbfaa85bd26351467a1d57fc320902c0ce8aa857b8",
+      "transplantedSha256": "30b8303b639d4d7902fdad948295002ef1132c516c52f29f08105d0a740bdfdc",
       "sourceBytes": 68205,
-      "transplantedBytes": 68809,
+      "transplantedBytes": 69143,
       "adaptations": {
         "cratePaths": 13,
         "enabledFeaturePredicates": {},

@@ -62,7 +62,7 @@ jobs:
       - name: Install JavaScript dependencies
         run: bun install --frozen-lockfile
       - name: Install Python analysis tools
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.13.0"
           enable-cache: true
@@ -156,20 +156,20 @@ jobs:
 
       - name: Install Python analysis tools
         if: matrix.os == 'ubuntu-latest'
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.13.0"
           enable-cache: true
 
       - name: Install cargo-llvm-cov
         if: matrix.os == 'ubuntu-latest'
-        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
           tool: cargo-llvm-cov@0.9.1
 
       - name: Install cargo-nextest
         if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
-        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
           tool: cargo-nextest@0.9.148
 
@@ -679,7 +679,7 @@ jobs:
           python-version: '3.13'
 
       - name: Install Python analysis tools
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.13.0"
           enable-cache: true
@@ -768,7 +768,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Install Python analysis tools
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.13.0"
           enable-cache: true
@@ -780,7 +780,7 @@ jobs:
         run: cargo install cargo-sweep --version 0.8.0 --locked
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
           tool: cargo-llvm-cov@0.9.1
 

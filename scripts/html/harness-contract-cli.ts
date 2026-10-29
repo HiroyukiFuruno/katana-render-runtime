@@ -8,7 +8,12 @@ import {
   typeScriptToolInspectionScope,
 } from "../quality/owned-type-projects";
 import { checkHarnessContract, declaredValidationCode } from "./harness-contract";
-import { executionGraph, moonStaticTaskProjection, policyContract } from "./harness-contract-graph";
+import {
+  executionGraph,
+  moonStaticTaskProjection,
+  policyContract,
+  REVIEWED_MOON_VERSION,
+} from "./harness-contract-graph";
 import moonAuthorityInputs from "./moon-authority-inputs.json";
 import { nativeCoverageCacheTask } from "./native-coverage-cache-contract";
 
@@ -70,7 +75,7 @@ const runContract = z.strictObject({
   schema: z.literal(1),
   project: z.literal("krr"),
   entry: moonEntry,
-  version: z.literal("2.6.4"),
+  version: z.literal(REVIEWED_MOON_VERSION),
   inputSha256,
   tasks: z.record(z.string().min(1), moonTask),
 });
@@ -224,6 +229,53 @@ function repositoryIdentity(root: string): { root: string; head: string } {
   return { root: physicalRoot, head: head.parse(currentHead) };
 }
 
+function assertMoonLock(source: string): void {
+  const lock = z
+    .object({
+      workspaces: z.object({
+        "": z.object({
+          devDependencies: z.object({ "@moonrepo/cli": z.literal(REVIEWED_MOON_VERSION) }),
+        }),
+      }),
+      packages: z.record(z.string(), z.unknown()),
+    })
+    .parse(Bun.JSONC.parse(source));
+  const entry = z
+    .tuple([
+      z.string(),
+      z.string(),
+      z.object({ optionalDependencies: z.record(z.string(), z.string()) }),
+      z.string(),
+    ])
+    .parse(lock.packages["@moonrepo/cli"]);
+  const platforms = [
+    "linux-arm64-gnu",
+    "linux-arm64-musl",
+    "linux-x64-gnu",
+    "linux-x64-musl",
+    "macos-arm64",
+    "macos-x64",
+    "windows-x64-msvc",
+  ];
+  if (
+    entry[0] !== `@moonrepo/cli@${REVIEWED_MOON_VERSION}` ||
+    platforms.some(
+      (platform) =>
+        entry[2].optionalDependencies[`@moonrepo/core-${platform}`] !== REVIEWED_MOON_VERSION,
+    )
+  )
+    throw new Error("Moon lock version or platform dependencies differ");
+  for (const [name, version] of Object.entries(entry[2].optionalDependencies)) {
+    const row = z.array(z.unknown()).min(1).parse(lock.packages[name]);
+    if (
+      !name.startsWith("@moonrepo/core-") ||
+      version !== REVIEWED_MOON_VERSION ||
+      row[0] !== `${name}@${REVIEWED_MOON_VERSION}`
+    )
+      throw new Error("Moon lock platform version differs");
+  }
+}
+
 export function moonRunContract(
   root: string,
   entry: z.infer<typeof moonEntry> = "coverage",
@@ -239,7 +291,7 @@ export function moonRunContract(
   const workspace = z
     .looseObject({
       projects: z.looseObject({ krr: z.literal(".") }),
-      versionConstraint: z.literal("=2.6.4"),
+      versionConstraint: z.literal(`=${REVIEWED_MOON_VERSION}`),
       cache: z.strictObject({
         cas: z.strictObject({ verifyIntegrity: z.literal(true) }),
       }),
@@ -249,9 +301,10 @@ export function moonRunContract(
       }),
     })
     .parse(Bun.YAML.parse(text(".moon/workspace.yml")));
-  z.looseObject({ devDependencies: z.looseObject({ "@moonrepo/cli": z.literal("2.6.4") }) }).parse(
-    JSON.parse(text("package.json")),
-  );
+  z.looseObject({
+    devDependencies: z.looseObject({ "@moonrepo/cli": z.literal(REVIEWED_MOON_VERSION) }),
+  }).parse(JSON.parse(text("package.json")));
+  assertMoonLock(text("bun.lock"));
   const policy = policyContract.parse(
     JSON.parse(text("scripts/html/harness-contract-policy.json")),
   );

@@ -1,7 +1,7 @@
 projects:
   krr: '.'
 
-versionConstraint: '=2.6.4'
+versionConstraint: '=2.6.5'
 telemetry: false
 
 cache:

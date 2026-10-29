@@ -8,7 +8,7 @@
 | Mermaid ZenUML | 1.0.1 | `crates/katana-render-runtime/vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js` | `f75662869d22aac58870e52370fe4c46b89b9710bf4b03df93b3227b5e18e730` |
 | Draw.io | 32.6.1 | `crates/katana-render-runtime/vendor/drawio/32.6.1/drawio.min.js` | `9dafdfb2b62172aa78f91feae0b25af71c5a1d322764ce3794dd2899e8ea0f2e` |
 | MathJax | 4.1.3 | `crates/katana-render-runtime/vendor/mathjax/4.1.3/tex-svg.js` | `23c036deccc0f2374834a47e4032e452419f3ac027bf17e17c104e2746b19f4c` |
-| ZenUML Core | 4.11.0 | `crates/katana-render-runtime/vendor/zenuml-core/4.11.0/zenuml.js` | `5660006a3d202a5ae85c1b90db18af679d87be9f11158250c17dc0fe089d3a08` |
+| ZenUML Core | 4.12.1 | `crates/katana-render-runtime/vendor/zenuml-core/4.12.1/zenuml.js` | `84af1daef92c842073c204cfdf616acf99652e90aca4b1fe78a99f858c1cf5a1` |
 | PlantUML | 1.2026.9 | `crates/katana-render-runtime/vendor/plantuml/1.2026.9/plantuml.jar.sha256` | `1dbb847646f0f440595fecd5f991e902aae47dc3391a01f64bab548089241a46` |
 
 MathJax は公式配布の JavaScript asset を repository 上で checksum 管理し、実行に使う自己完結 bundle は
@@ -37,7 +37,7 @@ just depends-update-all
 
 Mermaid.js `12.2.0-krr.pr6823.1` は Mermaid `12.2.0` に PR6823 の Sankey lexer patch を適用した KRR 管理 asset であり、公式 npm/CDN `12.2.0` の bytes ではない。取得 URL は tag 上の raw GitHub path に固定し、tag 公開時に取得 bytes と上記 SHA の一致を検証する。再現情報は `scripts/runtime-assets/mermaid-12.2.0-krr.pr6823.1.provenance.json`、patch は同名 `.patch`、recipe は同名 `.build.sh` に固定する。
 
-TypeScript を含む JavaScript 依存は、`bun update --latest '!@moonrepo/*'` が解決する最新互換版を維持する。Moon CLI と platform package は `package.json`、`bun.lock`、`.moon/workspace.yml` の2.6.2固定を保ち、型検査で他依存の互換性を確認する。
+TypeScript を含む JavaScript 依存は、`bun update --latest '!@moonrepo/*'` が解決する最新互換版を維持する。Moon CLI と platform package は `package.json` の固定版に `bun.lock` と `.moon/workspace.yml` を合わせ、型検査で他依存の互換性を確認する。
 
 ## Mermaid version 更新時の score 回復 tips
 

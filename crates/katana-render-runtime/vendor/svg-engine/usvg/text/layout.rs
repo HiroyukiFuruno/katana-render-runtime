@@ -1300,6 +1300,11 @@ impl DatabaseExt for Database {
                 return None;
             }
             let units_per_em = NonZeroU16::new(metrics.units_per_em)?;
+            /* WHY: opszの有無は同じfaceで既に取得したSkrifa metadataから保持する。 */
+            let has_optical_sizing_axis = font
+                .axes()
+                .get_by_tag(crate::svg_engine::usvg::text::OPSZ)
+                .is_some();
 
             let ascent = metrics.ascent;
             let descent = metrics.descent;
@@ -1363,6 +1368,7 @@ impl DatabaseExt for Database {
             Some(ResolvedFont {
                 id,
                 units_per_em,
+                has_optical_sizing_axis,
                 ascent: ascent.round() as i16,
                 descent: descent.round() as i16,
                 x_height,
@@ -1552,7 +1558,7 @@ fn shape_text_with_font(
         // This matches browser behavior (CSS font-optical-sizing: auto).
         if font_optical_sizing == crate::svg_engine::usvg::FontOpticalSizing::Auto {
             let has_explicit_opsz = variations.iter().any(|v| v.tag == *b"opsz");
-            if !has_explicit_opsz && hr_font.axes().get_by_tag(OPSZ).is_some() {
+            if !has_explicit_opsz && font.has_optical_sizing_axis {
                 variations.push(Variation {
                     tag: OPSZ,
                     value: font_size,
@@ -1757,6 +1763,7 @@ pub(crate) struct ResolvedFont {
     pub(crate) id: ID,
 
     units_per_em: NonZeroU16,
+    has_optical_sizing_axis: bool,
 
     // All values below are in font units.
     ascent: i16,

@@ -232,7 +232,7 @@ function moonFixture(): HarnessSnapshot {
   snapshot.policy.codeRoots.push("crates/");
   replaceSources(snapshot, {
     ".moon/workspace.yml":
-      "projects:\n  krr: '.'\nversionConstraint: '=2.6.4'\ncache:\n  cas:\n    verifyIntegrity: true\nexperiments:\n  casOutputsCache: true\n",
+      "projects:\n  krr: '.'\nversionConstraint: '=2.6.5'\ncache:\n  cas:\n    verifyIntegrity: true\nexperiments:\n  casOutputsCache: true\n",
     "moon.yml": JSON.stringify({
       taskOptions: { cache: false, runInCI: "always", shell: false },
       tasks,
@@ -3956,6 +3956,11 @@ const terminalSourceMutations: Array<[string, string, (source: string) => string
     (source) => source.replace("                report_text,", "                preflight.stdout,"),
   ],
   [
+    "Moon lock check removed",
+    "cli",
+    (source) => source.replace('  assertMoonLock(text("bun.lock"));', ""),
+  ],
+  [
     "fake report validator",
     "cli",
     (source) =>
@@ -4492,7 +4497,7 @@ test("runtime bundle named entry binds the one cache-enabled fingerprint leaf", 
   ).toThrow("unsafe moon task options lint");
 });
 
-test("Moon v2.6.4 cache manifest binds the observed string version", () => {
+test("Moon cache manifest binds the observed string version", () => {
   const fingerprint = {
     schema: "krr-runtime-bundle-tool-fingerprint-v1",
     platform: "darwin",
@@ -4503,7 +4508,7 @@ test("Moon v2.6.4 cache manifest binds the observed string version", () => {
       node: { version: "v24.0.0", executableSha256: "3".repeat(64) },
       bash: { version: "5.2", executableSha256: "4".repeat(64) },
       moon: {
-        version: "2.6.4",
+        version: "2.6.5",
         executableSha256: "5".repeat(64),
         wrapperSha256: "6".repeat(64),
         utilsSha256: "7".repeat(64),
@@ -4620,6 +4625,28 @@ test("runtime bundle cache leaf is authorized in the coverage closure but synthe
     expect(() => verifyMoonRun(fixture.root, request)).toThrow(
       "cached Moon report is not the current on-disk run report",
     );
+  });
+});
+
+test.each([
+  ["workspace version", ".moon/workspace.yml", "=2.6.5", "=2.6.4"],
+  ["manifest version", "package.json", '"@moonrepo/cli": "2.6.5"', '"@moonrepo/cli": "2.6.4"'],
+  ["lock workspace version", "bun.lock", '"@moonrepo/cli": "2.6.5"', '"@moonrepo/cli": "2.6.4"'],
+  ["lock executable version", "bun.lock", "@moonrepo/cli@2.6.5", "@moonrepo/cli@2.6.4"],
+  [
+    "lock platform version",
+    "bun.lock",
+    "@moonrepo/core-macos-arm64@2.6.5",
+    "@moonrepo/core-macos-arm64@2.6.4",
+  ],
+] as const)("Moon run contract rejects mismatched %s", (_label, name, original, replacement) => {
+  withTerminalFixture((fixture) => {
+    const file = path.join(fixture.root, name);
+    const source = fs.readFileSync(file, "utf8");
+    const changed = source.replace(original, replacement);
+    expect(changed).not.toBe(source);
+    fs.writeFileSync(file, changed);
+    expect(() => moonRunContract(fixture.root)).toThrow();
   });
 });
 
