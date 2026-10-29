@@ -2,6 +2,10 @@
 
 ## 最新の再開地点（2026-10-30）
 
+- [/] 性能生成物の第二の不備（pair-manifestの実capture binary SHA欠落）を`70063b26`で修正、R4315通常commit actual0。R4276 producer101 unit actual0。validator・閾値・古い証跡は変更していない。修正後の正式84条件は未測定であり、先頭四条件のpolicyPassを全体合格へ転用しない。
+- [/] 円・Arc候補は不採用。R4292の円は既に99以上のWardley四図だけを約0.10改善し、R4303のArc追加も含めC4残三件の最終scoreは不変。追加保守負担に対する公開条件上の便益がないため、性能未測定の候補を製品へ残さない。通常hook付きcheckpoint `32c16fc7`・`535445cd`へ比較候補を保全し、R4342で両候補を戻した。全tracked sourceが`70063b26`と一致することを確認し、R4344通常commit `93e6d33c` actual0。独立raw JS・配色方針・閾値は不変。採点の合格数へ加算しない。
+- [/] 既存の`capturePage`を再利用したR4337はstock Chrome156の同一JA04入力から実font family/countを取得した（HiraginoSans-W3 33、TrebuchetMS 4）。相対文字配置はnative37 glyphとの最大差約0.0000293pxだが、共通global origin・物理face bytes・glyph mask一致は未証明。取得できなかったSKP診断は正式根拠へ転用せず上記候補と共に撤去。`tmp/quality/current-ja04-platform-stock-r4337/capture/report.json`。R4312の636単体成功も描画・性能の全体合格ではない。
+- [ ] 現行ソースのcoverage100%・未計測0は未達。最後の完全結果R4039は93.1785693%（78,871/84,645、未到達5,774）であり、その後の回帰追加を現行coverage実測の代わりにしない。Cargo検証を許可するRust候補は、foundationだけで済ませず実AST/lintを長い画像・単体検証より先に通す。
 - [/] R4263はsource `8fe8d58c` の正式全117を採点完走し、EN58/59＋JA56/58＝114/117合格。未合格はC4 EN08-03=98.76257、JA08-03=98.75766、JA08-04=98.93402の三件。R4264の全117新旧照合で日英Kanban二件が新合格、旧合格の脱落0。独立raw JS・参照・閾値は不変。`tmp/quality/current-managed-mermaid-r4263/run/receipt.json` と `tmp/quality/resumed-owner-r3509/formal117-cohort-regression-r4264/result.json`。全体は未合格のまま。
 - [/] 同sourceのHTML R4265取得/R4266厳格検証はactual0。84/84が90以上、最低92.14438、出力fontIdentityEquivalence=established、measurement=not-performed。`tmp/html-performance-stage90/current-source-r4265/captures/catalog-stage90-captures.json`。全scroll/TOC・性能の合格に代用しない。
 - [ ] R4267正式性能batchの先頭四条件は各25 paired sample/両arm六phaseを収集し、各condition policyPass=true。candidate初回表示中央値は約0.00658～0.07583秒。ただし最終bundleのcapacity state参照が欠落しstrict validatorでKeyError、actual1。**正式性能合格・再利用可能batchとは扱わず原本保持**。capacity binding/state/registryの三pinを共通collectorへ含め忘れた原因を修正し、通常・batch共通経路とcandidate-build専用経路で既存helperを共有した。旧欠落拒否→三pin解決→改変拒否の回帰を追加、R4269標準foundation actual0/R4270 producer全100 unit actual0。validator・閾値・過去pinは不変。新sourceの正式性能は未取得。
