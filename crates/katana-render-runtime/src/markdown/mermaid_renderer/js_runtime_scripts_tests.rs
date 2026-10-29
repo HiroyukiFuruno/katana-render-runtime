@@ -106,14 +106,23 @@ fn must_utf8_reports_unexpected_test_errors() {
 }
 
 #[test]
-fn runtime_measures_horizontal_svg_arcs_like_a_browser() {
+fn runtime_measures_horizontal_svg_arcs_like_a_browser() -> Result<(), String> {
+    /* WHY: Chrome 156 の独立 getBBox 観測と全境界値を照合し、微小な負値を丸めない。 */
+    const EXPECTED: [f64; 4] = [0.0, -1.1252009388248649e-13, 216.0, 121.67350769042969];
     let rendered = render_mermaid_request(
         fake_mermaid_measuring_horizontal_svg_arcs(),
         "",
         r##"{"source":"C4Container\nContainerDb(db, \"DB\", \"SQL\")","svgId":"id","theme":"dark","background":"#000","fill":"#111","text":"#fff","stroke":"#fff","arrow":"#fff","diagramType":"c4"}"##,
-    );
-
-    assert_rendered_contains(&rendered, "0:0:216:121.673");
+    )?;
+    let values = rendered
+        .strip_prefix("<svg id=\"id\"><text>")
+        .and_then(|svg| svg.strip_suffix("</text></svg>"))
+        .ok_or("unexpected horizontal arc result")?
+        .split(':')
+        .map(|value| value.parse::<f64>().map_err(|error| error.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(values.as_slice(), EXPECTED);
+    Ok(())
 }
 
 #[test]

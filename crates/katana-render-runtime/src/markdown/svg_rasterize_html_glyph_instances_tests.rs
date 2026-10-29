@@ -219,3 +219,59 @@ fn variable_instance_keys_reject_invalid_axes() {
     assert!(InstanceKey::new(id, &[FontVariation::new(*b"wght", f32::NAN)]).is_err());
     assert!(InstanceKey::new(id, &[FontVariation::new(*b"wght", REGULAR_WEIGHT); 2]).is_err());
 }
+
+#[test]
+fn primary_variable_face_requires_one_applied_instance_across_runs() -> Result<(), String> {
+    let tree = variable_tree(
+        r#"<text id="regular" x="10" y="30">Tea Shop</text><text id="mixed" x="10" y="60"><tspan font-weight="400">Tea</tspan><tspan font-weight="700"> Shop</tspan></text>"#,
+    )?;
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    let regular = text(&tree, "regular")?;
+    let id = regular.layouted()[0].positioned_glyphs[0].font;
+    assert!(rasterizer.primary_variable_face(regular, id)?.is_some());
+    let mixed = text(&tree, "mixed")?;
+    assert!(mixed.layouted().len() > 1);
+    assert!(rasterizer.primary_variable_face(mixed, id)?.is_none());
+    Ok(())
+}
+
+#[test]
+fn variable_base_is_unavailable_for_binary_only_face_data() -> Result<(), String> {
+    let (tree, id) = binary_variable_tree()?;
+    let text = text(&tree, "binary")?;
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    let span = text
+        .layouted()
+        .first()
+        .ok_or("binary variable span missing")?;
+    assert_eq!(span.positioned_glyphs[0].font, id);
+    assert!(rasterizer.face_file(id)?.is_none());
+    assert!(rasterizer.variable_instance(span, id, FONT_SIZE)?.is_none());
+    assert!(rasterizer.variable_base(id)?.is_none());
+    Ok(())
+}
+
+fn binary_variable_tree() -> Result<(Tree, ID), String> {
+    let bytes = std::fs::read("/System/Library/Fonts/SFNS.ttf")
+        .map_err(|error| format!("SFNS variable fixture could not be read: {error}"))?;
+    let mut database = Database::new();
+    let ids = database.load_font_source(Source::Binary(Arc::new(bytes)));
+    let id = *ids.first().ok_or("SFNS binary variable face unavailable")?;
+    let family = &database
+        .face(id)
+        .and_then(|face| face.families.first())
+        .ok_or("SFNS binary family unavailable")?
+        .0;
+    let svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg"><text id="binary" font-family="{family}" font-size="{FONT_SIZE}">Tea</text></svg>"#
+    );
+    let tree = Tree::from_str(
+        &svg,
+        &Options {
+            fontdb: Arc::new(database),
+            ..Options::default()
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    Ok((tree, id))
+}

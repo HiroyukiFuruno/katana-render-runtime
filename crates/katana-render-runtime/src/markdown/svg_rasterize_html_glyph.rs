@@ -27,6 +27,8 @@ mod anchor;
 mod baseline;
 #[path = "svg_rasterize_html_glyph_chunk.rs"]
 mod chunk;
+#[path = "svg_rasterize_html_glyph_decorations.rs"]
+mod decorations;
 #[path = "svg_rasterize_html_glyph_fallback_runs.rs"]
 mod fallback_runs;
 #[path = "svg_rasterize_html_glyph_multi_chunk_alignment.rs"]
@@ -49,6 +51,10 @@ pub(super) use paint::PaintCaptureScope;
 #[cfg(test)]
 #[path = "svg_rasterize_html_glyph_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "svg_rasterize_html_glyph_decorations_tests.rs"]
+mod decorations_tests;
 
 #[cfg(test)]
 #[path = "svg_rasterize_html_glyph_multi_chunk_alignment_tests.rs"]
@@ -168,6 +174,10 @@ impl<'a> HtmlGlyphRasterizer<'a> {
 
     fn prepare(&self, text: &usvg::Text) -> Result<Prepared, String> {
         let policy = baseline::resolved_policy(self, text)?;
+        let has_effects = text.layouted().iter().any(decorations::has_effects);
+        if has_effects && text.layouted().len() != 1 {
+            return Ok(Prepared::Unsupported);
+        }
         let mut prepared = Vec::new();
         for span in text
             .layouted()
@@ -178,7 +188,12 @@ impl<'a> HtmlGlyphRasterizer<'a> {
                 return Ok(Prepared::Unsupported);
             }
         }
-        self.apply_horizontal_alignment(text, &mut prepared)?;
+        if has_effects && (prepared.len() != 1 || prepared[0].baseline_shift != 0.0) {
+            return Ok(Prepared::Unsupported);
+        }
+        if !has_effects || !text.layouted().iter().any(decorations::has_decorations) {
+            self.apply_horizontal_alignment(text, &mut prepared)?;
+        }
         Ok(Prepared::Ready(prepared))
     }
 
@@ -234,14 +249,22 @@ impl<'a> HtmlGlyphRasterizer<'a> {
         if !span_supported(span) {
             return Ok(false);
         }
+        let Some(mut effects) = prepare_effects(span)? else {
+            return Ok(false);
+        };
         let Some((color, opacity)) = solid_fill(span) else {
             return Ok(false);
         };
+        if !effects_runs_supported(span, effects.is_some()) {
+            return Ok(false);
+        }
         for run in runs::consecutive_runs(&span.positioned_glyphs) {
             let Some(input) = self.prepare_run_inputs(span, color, opacity, &run)? else {
                 return Ok(false);
             };
-            prepared.push(self.prepared_run(span, &run, input, policy));
+            let mut prepared_span = self.prepared_run(span, &run, input, policy);
+            prepared_span.effects = effects.take();
+            prepared.push(prepared_span);
         }
         Ok(true)
     }
@@ -302,6 +325,7 @@ impl<'a> HtmlGlyphRasterizer<'a> {
             x_alignment: None,
             chunk_alignment: None,
             fallback_alignment: None,
+            effects: None,
             variable_instance: input.variable_instance,
         }
     }
@@ -408,6 +432,19 @@ impl<'a> HtmlGlyphRasterizer<'a> {
     }
 }
 
+fn effects_runs_supported(span: &usvg::layout::Span, has_effects: bool) -> bool {
+    !has_effects || runs::consecutive_runs(&span.positioned_glyphs).count() == 1
+}
+
+fn prepare_effects(
+    span: &usvg::layout::Span,
+) -> Result<Option<Option<Box<decorations::Effects>>>, String> {
+    if !decorations::has_effects(span) {
+        return Ok(Some(None));
+    }
+    Ok(decorations::prepare(span)?.map(|effects| Some(Box::new(effects))))
+}
+
 fn parsed_face_metadata(
     bytes: &[u8],
     index: u32,
@@ -450,11 +487,7 @@ fn glyph_ids(glyphs: &[usvg::layout::PositionedGlyph]) -> Option<Vec<u16>> {
 
 fn span_supported(span: &usvg::layout::Span) -> bool {
     span.visible
-        && span.stroke.is_none()
-        && span.underline.is_none()
-        && span.overline.is_none()
-        && span.line_through.is_none()
-        && span.paint_order == usvg::PaintOrder::FillAndStroke
+        && (decorations::has_effects(span) || span.paint_order == usvg::PaintOrder::FillAndStroke)
 }
 
 fn solid_fill(span: &usvg::layout::Span) -> Option<(usvg::Color, u8)> {
@@ -585,6 +618,7 @@ impl HtmlGlyphRasterizer<'_> {
             pixmap.width(),
             pixmap.height(),
             shifts,
+            prepared.iter().any(|span| span.effects.is_some()),
         ) else {
             return Ok(true);
         };
@@ -710,5 +744,6 @@ struct PreparedSpan {
     x_alignment: Option<XAlignment>,
     chunk_alignment: Option<chunk::SpanAlignment>,
     fallback_alignment: Option<fallback_runs::RunLayout>,
+    effects: Option<Box<decorations::Effects>>,
     variable_instance: Option<std::rc::Rc<instances::VariableInstance>>,
 }

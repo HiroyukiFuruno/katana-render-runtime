@@ -34,9 +34,9 @@ fn rotated_crop_union_has_exact_shifted_endpoints() -> Result<(), String> {
         return Err("text node missing".to_owned());
     };
     let transform = Transform::from_row(0.96, 0.29, -0.29, 0.96, 4.0, 8.0);
-    let base = transformed_text_bounds(text, transform, (0.0, 0.0)).ok_or("empty bounds")?;
-    let shifted =
-        transformed_text_bounds(text, transform, (-1.0, 1.0)).ok_or("empty shifted bounds")?;
+    let base = transformed_text_bounds(text, transform, (0.0, 0.0), false).ok_or("empty bounds")?;
+    let shifted = transformed_text_bounds(text, transform, (-1.0, 1.0), false)
+        .ok_or("empty shifted bounds")?;
     let expected_dx = 0.29;
     let expected_dy = 0.96;
     assert!((shifted.0 - (base.0 - expected_dx)).abs() < 0.0001);

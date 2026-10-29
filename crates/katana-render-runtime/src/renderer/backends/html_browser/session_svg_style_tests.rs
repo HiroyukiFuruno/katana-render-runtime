@@ -4,7 +4,8 @@ use crate::{HtmlBrowserSession, HtmlBrowserSource, HtmlBrowserViewport, HtmlRunt
 const WIDTH: u32 = 100;
 const HEIGHT: u32 = 80;
 const RGBA_CHANNELS: usize = 4;
-const TRIANGLE_INTERIOR_X: usize = 75;
+/* WHY: ストロークのアンチエイリアス領域を避け、透明な内部を検査する。 */
+const TRIANGLE_INTERIOR_X: usize = 73;
 const TRIANGLE_INTERIOR_Y: usize = 40;
 const SHADOW_X: usize = 42;
 const SHADOW_Y: usize = 42;
@@ -48,6 +49,18 @@ fn inline_svg_quoted_marker_selector_keeps_triangle_interior_empty() {
                 );
             });
         });
+    });
+}
+
+#[test]
+fn inline_svg_filled_marker_changes_interior_pixel() {
+    let filled = MARKER_TEMPLATE
+        .replace("__SELECTOR__", MARKER_SUFFIX_SELECTOR)
+        .replace("fill:transparent!important", "fill:#aaa!important");
+    with_html_raster_pixels(&filled, |pixels| {
+        let interior = pixel_at(&pixels, TRIANGLE_INTERIOR_X, TRIANGLE_INTERIOR_Y);
+        assert!(interior.is_some());
+        assert_ne!(interior, Some(WHITE.as_slice()));
     });
 }
 

@@ -20,8 +20,9 @@ pub(super) fn text_crop(
     width: u32,
     height: u32,
     baseline_shifts: (f32, f32),
+    include_stroke: bool,
 ) -> Option<Crop> {
-    let bounds = transformed_text_bounds(text, transform, baseline_shifts)?;
+    let bounds = transformed_text_bounds(text, transform, baseline_shifts, include_stroke)?;
     crop_from_bounds(bounds, width, height)
 }
 
@@ -29,8 +30,13 @@ fn transformed_text_bounds(
     text: &usvg::Text,
     transform: Transform,
     baseline_shifts: (f32, f32),
+    include_stroke: bool,
 ) -> Option<(f32, f32, f32, f32)> {
-    let bounds = text.flattened().bounding_box();
+    let bounds = if include_stroke {
+        text.flattened().stroke_bounding_box()
+    } else {
+        text.flattened().bounding_box()
+    };
     if bounds.is_empty() {
         return None;
     }

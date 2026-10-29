@@ -29,7 +29,7 @@ pub(super) fn fill(
     Some(Some(paint))
 }
 
-pub(super) fn stroke(
+pub(in crate::markdown::svg_rasterize) fn stroke(
     stroke: Option<&usvg::Stroke>,
     rendering: usvg::ShapeRendering,
 ) -> Option<Option<Paint>> {

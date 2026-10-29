@@ -70,7 +70,7 @@ fn nested_rows_with_letter_spacing_do_not_enter_alignment() -> Result<(), String
     Ok(())
 }
 
-fn nested_rows_tree(
+pub(in crate::markdown::svg_rasterize::html_glyph) fn nested_rows_tree(
     fixture: &font_file_fixture::FontFileFixture,
     attributes: &str,
     row_attributes: &str,

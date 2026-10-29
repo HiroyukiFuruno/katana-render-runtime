@@ -532,13 +532,15 @@ fn local_quality_gate_runs_repository_automation_contract_tests()
     let justfile = std::fs::read_to_string(root.join("Justfile"))?;
     let check = recipe_body(&justfile, "check")?;
     let automation = recipe_body(&justfile, "automation-contract-test")?;
+    let release_test_runner =
+        std::fs::read_to_string(root.join("scripts/release/run_html_performance.py"))?;
     let scheduler = std::fs::read_to_string(root.join("scripts/hooks/run_parallel_checks.py"))?;
     let moon = std::fs::read_to_string(root.join("moon.yml"))?;
     let moon_workspace = std::fs::read_to_string(root.join(".moon/workspace.yml"))?;
 
     assert!(check.contains("run_parallel_checks.py"));
     assert_moon_quality_dag(&moon, &scheduler, &moon_workspace);
-    assert_python_automation_discovery(automation);
+    assert_python_automation_discovery(automation, &release_test_runner);
     Ok(())
 }
 
@@ -588,7 +590,7 @@ fn assert_dependency_update_command_order(
     let (broad_upgrade, html_pair_update, lockfile_update) = positions;
     assert_eq!(
         commands[broad_upgrade],
-        "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa"
+        "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa --exclude harfrust"
     );
     assert_eq!(
         commands[html_pair_update],
@@ -877,13 +879,21 @@ fn assert_moon_quality_dag(moon: &str, scheduler: &str, moon_workspace: &str) {
     }
 }
 
-fn assert_python_automation_discovery(automation: &str) {
-    for script_dir in ["scripts/hooks", "scripts/release"] {
-        assert!(
-            automation.contains(&format!("unittest discover -s {script_dir} -p '*_test.py'")),
-            "automation contract gate must discover tests under {script_dir}"
-        );
-    }
+fn assert_python_automation_discovery(automation: &str, release_test_runner: &str) {
+    assert!(
+        automation.contains("unittest discover -s scripts/hooks -p '*_test.py'"),
+        "automation contract gate must discover tests under scripts/hooks"
+    );
+    assert!(
+        automation.contains("python scripts/release/run_html_performance.py test"),
+        "automation contract gate must invoke the release test runner"
+    );
+    assert!(
+        release_test_runner.contains(
+            "elif mode == \"test\":\n        return [sys.executable, \"-m\", \"unittest\", \"discover\", \"-s\", \"scripts/release\", \"-p\", \"*_test.py\", \"--failfast\", *arguments]"
+        ),
+        "release test runner must discover scripts/release *_test.py with failfast"
+    );
 }
 
 fn release_target_check(

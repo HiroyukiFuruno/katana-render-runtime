@@ -26,6 +26,16 @@ struct CaptureAssets {
 #[test]
 #[ignore = "diagnostic only; requires a fresh request and output directory"]
 fn ignored_html_frame_and_font_audit_are_saved_together() -> Result<(), String> {
+    capture_frame(true)
+}
+
+#[test]
+#[ignore = "diagnostic only; requires a fresh request and output directory"]
+fn ignored_html_frame_is_saved_without_glyph_requirement() -> Result<(), String> {
+    capture_frame(false)
+}
+
+fn capture_frame(require_glyphs: bool) -> Result<(), String> {
     let (request, html, source_sha, origin) = read_request()?;
     let glyph_paint_capture =
         crate::markdown::svg_rasterize::html_glyph::PaintCaptureScope::enter();
@@ -34,7 +44,11 @@ fn ignored_html_frame_and_font_audit_are_saved_together() -> Result<(), String> 
     let frame = session
         .latest_frame()
         .ok_or("HTML session produced no frame")?;
-    super::assert_valid_paint_evidence(&audit)?;
+    if require_glyphs {
+        super::assert_valid_paint_evidence(&audit)?;
+    } else {
+        assert_frame_paint_evidence(&audit)?;
+    }
     if (frame.viewport.width, frame.viewport.height) != (request.width, request.height)
         || frame.viewport.device_scale_factor != 1.0
     {
@@ -49,6 +63,27 @@ fn ignored_html_frame_and_font_audit_are_saved_together() -> Result<(), String> 
         audit,
         glyph_paint_capture,
     )
+}
+
+pub(super) fn assert_frame_paint_evidence(
+    audit: &serde_json::Value,
+) -> Result<&[serde_json::Value], String> {
+    let calls = audit["finalGlyphPaintCalls"]
+        .as_u64()
+        .filter(|calls| *calls > 0)
+        .ok_or("HTML session produced no observed SVG paint calls")?;
+    let trees = audit["finalGlyphTrees"]
+        .as_array()
+        .filter(|trees| !trees.is_empty())
+        .ok_or("HTML session produced no final glyph tree records")?;
+    if !trees.iter().all(|tree| {
+        tree["paintCall"]
+            .as_u64()
+            .is_some_and(|call| (1..=calls).contains(&call))
+    }) {
+        return Err("glyph tree paint call is outside the observed range".to_owned());
+    }
+    Ok(trees)
 }
 
 fn read_request() -> Result<(Request, String, String, String), String> {

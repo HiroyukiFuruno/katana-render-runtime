@@ -5,7 +5,7 @@ use tiny_skia::{PixmapMut, Transform};
 #[path = "svg_rasterize_composite_path_geometry.rs"]
 mod geometry;
 #[path = "svg_rasterize_composite_path_style.rs"]
-mod style;
+pub(in crate::markdown::svg_rasterize) mod style;
 
 #[cfg(all(test, target_os = "macos"))]
 #[path = "svg_rasterize_composite_path_tests.rs"]
@@ -29,7 +29,7 @@ pub(super) fn render_if_supported(
     Ok(true)
 }
 
-fn render_prepared_path(
+pub(super) fn render_prepared_path(
     pixmap: &mut PixmapMut<'_>,
     prepared: &PreparedPath,
     transform: Transform,
@@ -46,7 +46,7 @@ fn render_prepared_path(
     Ok(())
 }
 
-fn transform_is_finite(transform: Transform) -> bool {
+pub(super) fn transform_is_finite(transform: Transform) -> bool {
     [
         transform.sx,
         transform.kx,
@@ -59,13 +59,29 @@ fn transform_is_finite(transform: Transform) -> bool {
     .all(f32::is_finite)
 }
 
-struct PreparedPath {
-    path: Path,
-    fill: Option<Paint>,
-    stroke: Option<Paint>,
+pub(in crate::markdown::svg_rasterize) struct PreparedPath {
+    pub(super) path: Path,
+    pub(super) fill: Option<Paint>,
+    pub(super) stroke: Option<Paint>,
 }
 
-fn prepare_path(node: &usvg::Path) -> Result<Option<PreparedPath>, String> {
+pub(super) fn prepare_native_arc(node: &usvg::Path) -> Option<PreparedPath> {
+    let original = node.original_arc()?;
+    if !node.is_visible() || node.stroke().is_some_and(|s| s.dasharray().is_some()) {
+        return None;
+    }
+    let fill = style::fill(node.fill(), node.rendering_mode())?;
+    let stroke = style::stroke(node.stroke(), node.rendering_mode())?;
+    if fill.is_none() && stroke.is_none() {
+        return None;
+    }
+    let path = geometry::parse_original(original, node.fill().map(|f| f.rule()))?;
+    Some(PreparedPath { path, fill, stroke })
+}
+
+pub(in crate::markdown::svg_rasterize) fn prepare_path(
+    node: &usvg::Path,
+) -> Result<Option<PreparedPath>, String> {
     let Some(fill) = style::fill(node.fill(), node.rendering_mode()) else {
         return Ok(None);
     };
@@ -75,11 +91,15 @@ fn prepare_path(node: &usvg::Path) -> Result<Option<PreparedPath>, String> {
     if fill.is_none() && stroke.is_none() {
         return Ok(None);
     }
-    let path = geometry::convert(node.data(), node.fill().map(|value| value.rule()))?;
+    let path = geometry::convert_node(node)?;
     Ok(Some(PreparedPath { path, fill, stroke }))
 }
 
-fn draw_path(canvas: &skia_safe::Canvas, prepared: &PreparedPath, order: usvg::PaintOrder) {
+pub(in crate::markdown::svg_rasterize) fn draw_path(
+    canvas: &skia_safe::Canvas,
+    prepared: &PreparedPath,
+    order: usvg::PaintOrder,
+) {
     let (first, second) = match order {
         usvg::PaintOrder::FillAndStroke => (prepared.fill.as_ref(), prepared.stroke.as_ref()),
         usvg::PaintOrder::StrokeAndFill => (prepared.stroke.as_ref(), prepared.fill.as_ref()),

@@ -9,7 +9,8 @@ use std::{
 
 use rstest::rstest;
 
-use super::usvg;
+use super::{resvg, usvg};
+use tiny_skia::{Pixmap, Transform};
 
 #[path = "svg_engine_writer_fixture_inventory_tests.rs"]
 mod fixture_inventory_tests;
@@ -18,6 +19,8 @@ const WRITER_FONT_DIRECTORY: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../tests/fixtures/svg-engine/upstream/resvg/tests/fonts"
 );
+const RGBA_CHANNELS: usize = 4;
+const ALPHA_CHANNEL: usize = 3;
 const PRESERVE_TEXT_CASES: [&str; 9] = [
     "preserve-text-multiple-font-families",
     "preserve-text-on-path",
@@ -46,7 +49,8 @@ fn upstream_usvg_writer_matches_reference(
             )
         })?;
     let expected_path = input_path.with_file_name(format!("{case_name}-expected.svg"));
-    let actual = serialize_upstream_writer_fixture(&input_path, case_name)?;
+    let tree = parse_upstream_writer_fixture(&input_path, case_name)?;
+    let actual = tree.to_string(&writer_options(case_name));
     let expected = std::fs::read_to_string(&expected_path).map_err(|error| {
         format!(
             "failed reading upstream writer expectation {}: {error}",
@@ -55,23 +59,77 @@ fn upstream_usvg_writer_matches_reference(
     })?;
 
     assert_eq!(actual, expected, "upstream writer case {case_name}");
+    assert_render_determinism(&tree, &actual, &expected, case_name)?;
     Ok(())
 }
 
-fn serialize_upstream_writer_fixture(input_path: &Path, case_name: &str) -> Result<String, String> {
+fn parse_upstream_writer_fixture(input_path: &Path, case_name: &str) -> Result<usvg::Tree, String> {
     let input = std::fs::read_to_string(input_path).map_err(|error| {
         format!(
             "failed reading upstream writer input {}: {error}",
             input_path.display()
         )
     })?;
+    parse_writer_svg(&input, case_name)
+}
+
+fn parse_writer_svg(input: &str, case_name: &str) -> Result<usvg::Tree, String> {
     let options = usvg::Options {
         fontdb: upstream_writer_font_database(),
         ..usvg::Options::default()
     };
-    let tree = usvg::Tree::from_str(&input, &options)
-        .map_err(|error| format!("failed parsing upstream writer fixture {case_name}: {error}"))?;
-    Ok(tree.to_string(&writer_options(case_name)))
+    usvg::Tree::from_str(input, &options)
+        .map_err(|error| format!("failed parsing upstream writer fixture {case_name}: {error}"))
+}
+
+fn assert_render_determinism(
+    tree: &usvg::Tree,
+    actual: &str,
+    expected: &str,
+    case_name: &str,
+) -> Result<(), String> {
+    let parsed_actual = parse_writer_svg(actual, case_name)?;
+    let parsed_expected = parse_writer_svg(expected, case_name)?;
+    assert_eq!(
+        tree.size(),
+        parsed_actual.size(),
+        "viewport for {case_name}"
+    );
+    assert_eq!(
+        parsed_actual.size(),
+        parsed_expected.size(),
+        "reference viewport for {case_name}"
+    );
+    let original = render_tree(tree)?;
+    let actual_image = render_tree(&parsed_actual)?;
+    let expected_image = render_tree(&parsed_expected)?;
+    assert_filter_visible(case_name, &original);
+    assert_filter_visible(case_name, &actual_image);
+    assert!(
+        actual_image.data() == expected_image.data(),
+        "pixels for {case_name}"
+    );
+    Ok(())
+}
+
+fn assert_filter_visible(case_name: &str, original: &Pixmap) {
+    if case_name == "filter-with-object-units-multi-use" {
+        assert!(
+            original
+                .data()
+                .chunks_exact(RGBA_CHANNELS)
+                .any(|pixel| pixel[ALPHA_CHANNEL] != 0),
+            "filter control is transparent"
+        );
+    }
+}
+
+fn render_tree(tree: &usvg::Tree) -> Result<Pixmap, String> {
+    let size = tree.size().to_int_size();
+    let mut pixmap = Pixmap::new(size.width(), size.height())
+        .ok_or("writer fixture pixmap allocation failed")?;
+    resvg::render(tree, Transform::identity(), &mut pixmap.as_mut());
+    Ok(pixmap)
 }
 
 fn upstream_writer_font_database() -> Arc<usvg::fontdb::Database> {

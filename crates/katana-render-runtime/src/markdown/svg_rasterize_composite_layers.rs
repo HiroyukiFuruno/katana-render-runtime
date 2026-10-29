@@ -1,6 +1,11 @@
-use super::{AuthoredClipInfo, TextRasterizer, mask, render_children_with_text};
+#[cfg(test)]
+use super::{AuthoredClipInfo, TextRasterizer};
+use super::{RenderContext, groups, mask, render_children_with_context};
 use resvg::{render_node, usvg};
 use tiny_skia::{BlendMode, IntRect, Mask, MaskType, Pixmap, PixmapPaint, Transform};
+
+#[path = "svg_rasterize_composite_full_canvas_clip.rs"]
+mod full_canvas_clip;
 
 const LAYER_EDGE_PADDING: i32 = 2;
 const LAYER_SIZE_PADDING: u32 = 4;
@@ -9,6 +14,7 @@ const LAYER_SIZE_PADDING: u32 = 4;
 #[path = "svg_rasterize_composite_layers_boundary_tests.rs"]
 mod boundary_tests;
 
+#[cfg(test)]
 pub(super) fn render_clipped_group(
     group: &usvg::Group,
     transform: Transform,
@@ -16,17 +22,25 @@ pub(super) fn render_clipped_group(
     authored_clip_info: &AuthoredClipInfo,
     text_rasterizer: Option<&dyn TextRasterizer>,
 ) -> Result<(), String> {
-    let Some((crop, crop_transform)) = crop_context(group, transform, pixmap)? else {
-        return Ok(());
+    let context = RenderContext {
+        provenance: authored_clip_info,
+        text: text_rasterizer,
+        plan: None,
     };
-    render_cropped_group(
-        group,
-        crop,
-        crop_transform,
-        pixmap,
-        authored_clip_info,
-        text_rasterizer,
-    )
+    render_clipped_group_with_context(group, transform, pixmap, &context)
+}
+
+pub(super) fn render_clipped_group_with_context(
+    group: &usvg::Group,
+    transform: Transform,
+    pixmap: &mut tiny_skia::PixmapMut<'_>,
+    context: &RenderContext<'_, '_>,
+) -> Result<(), String> {
+    if full_canvas_clip::render_if_covered(group, transform, pixmap, context)? {
+        return Ok(());
+    }
+    let extra = context.plan.and_then(|plan| plan.group_bounds(group));
+    groups::render_clipped_with_extra(group, transform, pixmap, context, extra)
 }
 
 pub(super) fn crop_context(
@@ -34,7 +48,7 @@ pub(super) fn crop_context(
     transform: Transform,
     pixmap: &tiny_skia::PixmapMut<'_>,
 ) -> Result<Option<(IntRect, Transform)>, String> {
-    let Some(crop) = clipped_group_rect(group, transform, pixmap)? else {
+    let Some(crop) = legacy_group_rect(group, transform, pixmap)? else {
         return Ok(None);
     };
     let crop_transform =
@@ -42,25 +56,18 @@ pub(super) fn crop_context(
     Ok(Some((crop, crop_transform)))
 }
 
-fn render_cropped_group(
+pub(super) fn render_cropped_group(
     group: &usvg::Group,
     crop: IntRect,
     crop_transform: Transform,
     pixmap: &mut tiny_skia::PixmapMut<'_>,
-    authored_clip_info: &AuthoredClipInfo,
-    text_rasterizer: Option<&dyn TextRasterizer>,
+    context: &RenderContext<'_, '_>,
 ) -> Result<(), String> {
     let mut composited = crop_pixmap(pixmap, crop)?;
     let Some(clip) = group.clip_path() else {
         return Ok(());
     };
-    render_children_with_text(
-        group,
-        crop_transform,
-        &mut composited.as_mut(),
-        authored_clip_info,
-        text_rasterizer,
-    )?;
+    render_children_with_context(group, crop_transform, &mut composited.as_mut(), context)?;
     let mask = clip_mask(
         clip,
         crop_transform,
@@ -83,7 +90,16 @@ fn clip_mask(
     Ok(Mask::from_pixmap(clip_pixels.as_ref(), MaskType::Alpha))
 }
 
+#[cfg(test)]
 pub(super) fn clipped_group_rect(
+    group: &usvg::Group,
+    transform: Transform,
+    pixmap: &tiny_skia::PixmapMut<'_>,
+) -> Result<Option<IntRect>, String> {
+    legacy_group_rect(group, transform, pixmap)
+}
+
+fn legacy_group_rect(
     group: &usvg::Group,
     transform: Transform,
     pixmap: &tiny_skia::PixmapMut<'_>,
@@ -91,6 +107,13 @@ pub(super) fn clipped_group_rect(
     let Some(bbox) = group.layer_bounding_box().transform(transform) else {
         return Ok(None);
     };
+    device_crop(bbox.to_rect(), pixmap)
+}
+
+pub(super) fn device_crop(
+    bbox: usvg::Rect,
+    pixmap: &tiny_skia::PixmapMut<'_>,
+) -> Result<Option<IntRect>, String> {
     let x = (bbox.x().floor() as i32)
         .checked_sub(LAYER_EDGE_PADDING)
         .ok_or_else(|| "SVG clip layer x coordinate overflow".to_string())?;

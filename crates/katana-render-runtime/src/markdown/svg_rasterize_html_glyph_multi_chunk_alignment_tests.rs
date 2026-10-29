@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 #[path = "svg_rasterize_html_glyph_multi_chunk_nested_rows_tests.rs"]
-mod nested_rows;
+pub(super) mod nested_rows;
 #[path = "svg_rasterize_html_glyph_single_row_spans_tests.rs"]
 mod single_row_spans;
 #[path = "svg_rasterize_html_glyph_multi_chunk_single_scalar_tests.rs"]
@@ -66,7 +66,10 @@ fn multiple_chunk_origin_snap_rejects_non_simple_positioning_and_decoration() ->
     Ok(())
 }
 
-fn font_fixture(name: &str) -> Result<font_file_fixture::FontFileFixture, String> {
+/* WHY: nested-row診断回帰から既存fixture組立helperを共有し、入力条件の複製を避ける。 */
+pub(in crate::markdown::svg_rasterize::html_glyph) fn font_fixture(
+    name: &str,
+) -> Result<font_file_fixture::FontFileFixture, String> {
     let path =
         std::env::temp_dir().join(format!("krr-multi-chunk-{name}-{}.ttf", std::process::id()));
     font_file_fixture::create(path, font_file_fixture::FONT_BYTES)
@@ -98,7 +101,9 @@ fn fixture_tree_with_content(
     .map_err(|error| error.to_string())
 }
 
-fn fixture_text(tree: &Tree) -> Result<&resvg::usvg::Text, String> {
+pub(in crate::markdown::svg_rasterize::html_glyph) fn fixture_text(
+    tree: &Tree,
+) -> Result<&resvg::usvg::Text, String> {
     let Some(Node::Text(text)) = tree.node_by_id("run") else {
         return Err("multiple-chunk text node is missing".into());
     };

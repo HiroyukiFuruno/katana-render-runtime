@@ -58,8 +58,9 @@ impl ViewBox {
     pub fn to_transform(&self, img_size: Size) -> Transform {
         let vr = self.rect;
 
-        let sx = img_size.width() / vr.width();
-        let sy = img_size.height() / vr.height();
+        /* WHY: viewBoxの位置合わせは最終変換まで丸めを遅らせる。 */
+        let sx = f64::from(img_size.width()) / f64::from(vr.width());
+        let sy = f64::from(img_size.height()) / f64::from(vr.height());
 
         let (sx, sy) = if self.aspect.align == Align::None {
             (sx, sy)
@@ -73,13 +74,13 @@ impl ViewBox {
             (s, s)
         };
 
-        let x = -vr.x() * sx;
-        let y = -vr.y() * sy;
-        let w = img_size.width() - vr.width() * sx;
-        let h = img_size.height() - vr.height() * sy;
+        let x = -f64::from(vr.x()) * sx;
+        let y = -f64::from(vr.y()) * sy;
+        let w = f64::from(img_size.width()) - f64::from(vr.width()) * sx;
+        let h = f64::from(img_size.height()) - f64::from(vr.height()) * sy;
 
         let (tx, ty) = aligned_pos(self.aspect.align, x, y, w, h);
-        Transform::from_row(sx, 0.0, 0.0, sy, tx, ty)
+        Transform::from_row(sx as f32, 0.0, 0.0, sy as f32, tx as f32, ty as f32)
     }
 }
 
@@ -169,17 +170,21 @@ impl BBox {
 }
 
 /// Returns object aligned position.
-pub(crate) fn aligned_pos(align: Align, x: f32, y: f32, w: f32, h: f32) -> (f32, f32) {
+pub(crate) fn aligned_pos<T>(align: Align, x: T, y: T, w: T, h: T) -> (T, T)
+where
+    T: Copy + From<f32> + std::ops::Add<Output = T> + std::ops::Div<Output = T>,
+{
+    let two = T::from(2.0);
     match align {
         Align::None => (x, y),
         Align::XMinYMin => (x, y),
-        Align::XMidYMin => (x + w / 2.0, y),
+        Align::XMidYMin => (x + w / two, y),
         Align::XMaxYMin => (x + w, y),
-        Align::XMinYMid => (x, y + h / 2.0),
-        Align::XMidYMid => (x + w / 2.0, y + h / 2.0),
-        Align::XMaxYMid => (x + w, y + h / 2.0),
+        Align::XMinYMid => (x, y + h / two),
+        Align::XMidYMid => (x + w / two, y + h / two),
+        Align::XMaxYMid => (x + w, y + h / two),
         Align::XMinYMax => (x, y + h),
-        Align::XMidYMax => (x + w / 2.0, y + h),
+        Align::XMidYMax => (x + w / two, y + h),
         Align::XMaxYMax => (x + w, y + h),
     }
 }

@@ -190,7 +190,7 @@ fn assert_text_route(
 }
 
 #[test]
-fn unsupported_binary_face_and_stroke_leave_pixmap_unchanged() -> Result<(), String> {
+fn binary_face_is_unsupported_and_file_face_with_stroke_is_rendered() -> Result<(), String> {
     let mut database = usvg::fontdb::Database::new();
     database.load_font_data(font_file_fixture::FONT_BYTES.to_vec());
     let (tree, _) = parse_text(database, "Noto Sans", 400, false)?;
@@ -212,7 +212,8 @@ fn unsupported_binary_face_and_stroke_leave_pixmap_unchanged() -> Result<(), Str
         return Err("stroke fixture text node missing".to_string());
     };
     let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
-    assert_unsupported(&rasterizer, text, &mut pixmap)?;
+    assert!(rasterizer.render(text, Transform::identity(), &mut pixmap.as_mut())?);
+    assert!(alpha_bounds(&pixmap).is_some());
     Ok(())
 }
 

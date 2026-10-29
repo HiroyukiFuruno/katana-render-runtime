@@ -70,3 +70,7 @@ fn diagnostic_spans(
         })
     }).collect::<Vec<_>>())
 }
+
+#[cfg(test)]
+#[path = "svg_rasterize_html_glyph_chunk_row_diagnostic_tests.rs"]
+mod tests;

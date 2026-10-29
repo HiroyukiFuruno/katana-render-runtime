@@ -204,6 +204,7 @@ pub(super) fn prepare_pixel_span(
         x_alignment: None,
         chunk_alignment: None,
         fallback_alignment: None,
+        effects: None,
         variable_instance: None,
     })
 }

@@ -191,14 +191,7 @@ fn assert_html_frame(session: &crate::HtmlBrowserSession) -> Result<(), String> 
     Ok(())
 }
 fn assert_valid_paint_evidence(audit: &serde_json::Value) -> Result<(), String> {
-    let calls = audit["finalGlyphPaintCalls"]
-        .as_u64()
-        .filter(|calls| *calls > 0)
-        .ok_or_else(|| "HTML session produced no observed SVG paint calls".to_owned())?;
-    let trees = audit["finalGlyphTrees"]
-        .as_array()
-        .filter(|trees| !trees.is_empty())
-        .ok_or_else(|| "HTML session produced no final glyph tree records".to_owned())?;
+    let trees = frame_diagnostic::assert_frame_paint_evidence(audit)?;
     let has_glyphs = trees.iter().any(|tree| {
         tree["faces"].as_array().is_some_and(|faces| {
             faces
@@ -210,10 +203,5 @@ fn assert_valid_paint_evidence(audit: &serde_json::Value) -> Result<(), String> 
         has_glyphs,
         "HTML session glyph trees contain no observed glyphs"
     );
-    assert!(trees.iter().all(|tree| {
-        tree["paintCall"]
-            .as_u64()
-            .is_some_and(|call| (1..=calls).contains(&call))
-    }));
     Ok(())
 }

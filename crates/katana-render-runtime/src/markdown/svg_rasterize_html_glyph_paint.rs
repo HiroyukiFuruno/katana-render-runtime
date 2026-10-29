@@ -37,14 +37,51 @@ pub(super) fn draw_span(
         }
         capture::record_instance(typeface, &instance.applied_axes);
     }
-    let paint = text_paint(span);
     let font = text_font(span, typeface, raster_scale);
+    let fill = text_paint(span);
+    let Some(effects) = &span.effects else {
+        return draw_with_paint(canvas, span, &font, &fill, raster_scale);
+    };
+    draw_effects(canvas, span, &font, &fill, effects, raster_scale)
+}
+
+fn draw_effects(
+    canvas: &Canvas,
+    span: &PreparedSpan,
+    font: &Font,
+    fill: &Paint,
+    effects: &super::decorations::Effects,
+    raster_scale: f32,
+) -> Result<(), String> {
+    super::decorations::draw_before(canvas, effects, raster_scale);
+    let mut stroke = effects.stroke.clone();
+    if let Some(paint) = &mut stroke {
+        paint.set_stroke_width(paint.stroke_width() * raster_scale);
+    }
+    let paints = match effects.order {
+        resvg::usvg::PaintOrder::FillAndStroke => [Some(fill), stroke.as_ref()],
+        resvg::usvg::PaintOrder::StrokeAndFill => [stroke.as_ref(), Some(fill)],
+    };
+    for paint in paints.into_iter().flatten() {
+        draw_with_paint(canvas, span, font, paint, raster_scale)?;
+    }
+    super::decorations::draw_after(canvas, effects, raster_scale);
+    Ok(())
+}
+
+fn draw_with_paint(
+    canvas: &Canvas,
+    span: &PreparedSpan,
+    font: &Font,
+    paint: &Paint,
+    raster_scale: f32,
+) -> Result<(), String> {
     if span.glyphs.iter().enumerate().all(|(index, glyph)| {
         is_identity_linear(normalized_transform_at(span, glyph, index, raster_scale))
     }) {
-        return draw_identity_glyphs(canvas, span, &font, &paint, raster_scale);
+        return draw_identity_glyphs(canvas, span, font, paint, raster_scale);
     }
-    draw_transformed_glyphs(canvas, span, &font, &paint, raster_scale)
+    draw_transformed_glyphs(canvas, span, font, paint, raster_scale)
 }
 
 fn draw_identity_glyphs(
