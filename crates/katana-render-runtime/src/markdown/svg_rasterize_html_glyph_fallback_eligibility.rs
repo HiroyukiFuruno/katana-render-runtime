@@ -1,59 +1,40 @@
 use super::PreparedSpan;
 use resvg::usvg;
 
-pub(super) struct Source<'a> {
-    pub(super) chunk: &'a usvg::TextChunk,
-    pub(super) source_spans: &'a [usvg::TextSpan],
-    pub(super) layout_spans: &'a [usvg::layout::Span],
-}
+pub(super) use super::sources::Source;
 
 pub(super) fn eligible_source<'a>(
     text: &'a usvg::Text,
     prepared: &[PreparedSpan],
 ) -> Option<Source<'a>> {
-    let [chunk] = text.chunks() else { return None };
-    let source_spans = chunk.spans();
-    let layout_spans = text.layouted();
-    if !source_supported(text, chunk, source_spans, layout_spans, prepared) {
+    let source = super::sources::collect(text)?;
+    if !source_supported(text, &source.chunks, prepared) {
         return None;
     }
-    Some(Source {
-        chunk,
-        source_spans,
-        layout_spans,
-    })
+    Some(source)
 }
 
 fn source_supported(
     text: &usvg::Text,
-    chunk: &usvg::TextChunk,
-    source_spans: &[usvg::TextSpan],
-    layout_spans: &[usvg::layout::Span],
+    chunks: &[super::sources::Chunk<'_>],
     prepared: &[PreparedSpan],
 ) -> bool {
     let Some(first) = prepared.first() else {
         return false;
     };
-    chunk_supported(text, chunk, source_spans, layout_spans)
-        && super::source_spans::supported(chunk, source_spans, layout_spans)
-        && prepared_runs_supported(source_spans, layout_spans, prepared, first.font_size)
+    chunks.iter().all(|source| chunk_supported(text, source))
+        && prepared_runs_supported(chunks, prepared, first.font_size)
 }
 
-fn chunk_supported(
-    text: &usvg::Text,
-    chunk: &usvg::TextChunk,
-    source_spans: &[usvg::TextSpan],
-    layout_spans: &[usvg::layout::Span],
-) -> bool {
-    !source_spans.is_empty()
-        && source_spans.len() == layout_spans.len()
-        && anchor_supported(chunk.anchor())
-        && super::super::alignment_positioning_supported(text, chunk)
+fn chunk_supported(text: &usvg::Text, source: &super::sources::Chunk<'_>) -> bool {
+    source.source_spans.len() == source.layout_spans.len()
+        && anchor_supported(source.chunk.anchor())
+        && super::super::alignment_positioning_supported_with_dy(text, source.chunk, source.dy)
+        && super::source_spans::supported(source.chunk, source.source_spans, source.layout_spans)
 }
 
 fn prepared_runs_supported(
-    source_spans: &[usvg::TextSpan],
-    layout_spans: &[usvg::layout::Span],
+    chunks: &[super::sources::Chunk<'_>],
     prepared: &[PreparedSpan],
     font_size: f32,
 ) -> bool {
@@ -62,14 +43,16 @@ fn prepared_runs_supported(
     }
     let mut run_index = 0;
     let mut has_fallback_split = false;
-    source_spans.iter().zip(layout_spans).all(|(_, layout)| {
-        runs_cover_source_layout(
-            layout,
-            prepared,
-            font_size,
-            &mut run_index,
-            &mut has_fallback_split,
-        )
+    chunks.iter().all(|chunk| {
+        chunk.layout_spans.iter().all(|layout| {
+            runs_cover_source_layout(
+                layout,
+                prepared,
+                font_size,
+                &mut run_index,
+                &mut has_fallback_split,
+            )
+        })
     }) && has_fallback_split
         && run_index == prepared.len()
 }

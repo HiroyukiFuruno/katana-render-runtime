@@ -1,6 +1,6 @@
-use super::super::super::{HtmlGlyphRasterizer, Prepared, PreparedSpan, anchor};
+use super::super::super::{PreparedSpan, anchor};
 use super::super::{RunLayout, layout};
-use super::{text, tree};
+use super::{prepare, text, tree};
 use crate::markdown::svg_rasterize::text_shaping::{
     FontShape, shape_run_character_metrics_with_trim,
 };
@@ -47,13 +47,6 @@ fn fixture(second_attributes: &str) -> Result<Tree, String> {
         "<tspan>A</tspan><tspan {second_attributes}>V日本</tspan><tspan>API</tspan><tspan>日本</tspan>"
     );
     tree(&content, "")
-}
-
-fn prepare(tree: &Tree, text: &Text) -> Result<Vec<PreparedSpan>, String> {
-    let Prepared::Ready(prepared) = HtmlGlyphRasterizer::new(tree.fontdb()).prepare(text)? else {
-        return Err("multi-span fixture was not prepared".to_owned());
-    };
-    Ok(prepared)
 }
 
 fn assert_source_boundaries(text: &Text, prepared: &[PreparedSpan]) -> Result<(), String> {

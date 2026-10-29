@@ -68,7 +68,8 @@ fn run_supported(
     matches!(chunk.text_flow(), usvg::TextFlow::Linear)
         && source_supported(source, chunk.text())
         && super::horizontal_glyphs(&span.glyphs)
-        && anchor::one_ordered_scalar_per_glyph(chunk.text(), &span.glyphs)
+        /* WHY: run_alignmentは原点だけを補正するため、1 glyphの短いrunも扱える。 */
+        && anchor::nonempty_ordered_scalar_per_glyph(chunk.text(), &span.glyphs)
         && constant_baseline(span)
         && layout_matches(layout, span)
         && span.x_alignment.is_none()

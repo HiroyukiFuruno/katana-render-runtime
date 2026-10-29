@@ -16,6 +16,8 @@ mod positions;
 mod scripts;
 #[path = "svg_rasterize_html_glyph_fallback_source_spans.rs"]
 mod source_spans;
+#[path = "svg_rasterize_html_glyph_fallback_sources.rs"]
+mod sources;
 
 #[cfg(test)]
 #[path = "svg_rasterize_html_glyph_fallback_runs_tests.rs"]

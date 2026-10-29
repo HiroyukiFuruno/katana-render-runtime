@@ -1,4 +1,6 @@
 #[cfg(target_os = "macos")]
+use super::super::{HtmlGlyphRasterizer, Prepared, PreparedSpan};
+#[cfg(target_os = "macos")]
 use crate::markdown::svg_rasterize::font::html_font_db_for_text;
 #[cfg(target_os = "macos")]
 use resvg::usvg::{Node, Options, Tree, fontdb::Source};
@@ -32,6 +34,18 @@ mod rejection_tests;
 #[cfg(target_os = "macos")]
 #[path = "svg_rasterize_html_glyph_fallback_multi_span_tests.rs"]
 mod multi_span_tests;
+
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_glyph_fallback_multi_chunk_tests.rs"]
+mod multi_chunk_tests;
+
+#[cfg(target_os = "macos")]
+fn prepare(tree: &Tree, text: &resvg::usvg::Text) -> Result<Vec<PreparedSpan>, String> {
+    let Prepared::Ready(prepared) = HtmlGlyphRasterizer::new(tree.fontdb()).prepare(text)? else {
+        return Err("fallback fixture was not prepared".to_owned());
+    };
+    Ok(prepared)
+}
 
 #[cfg(target_os = "macos")]
 fn tree(content: &str, attributes: &str) -> Result<Tree, String> {

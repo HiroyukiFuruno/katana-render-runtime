@@ -8,6 +8,8 @@ use std::sync::Arc;
 mod nested_rows;
 #[path = "svg_rasterize_html_glyph_single_row_spans_tests.rs"]
 mod single_row_spans;
+#[path = "svg_rasterize_html_glyph_multi_chunk_single_scalar_tests.rs"]
+mod single_scalar;
 #[path = "svg_rasterize_html_glyph_unicode_spans_tests.rs"]
 mod unicode_spans;
 
@@ -75,8 +77,16 @@ fn fixture_tree(
     fixture: &font_file_fixture::FontFileFixture,
     attributes: &str,
 ) -> Result<Tree, String> {
+    fixture_tree_with_content(fixture, attributes, CONTENT)
+}
+
+fn fixture_tree_with_content(
+    fixture: &font_file_fixture::FontFileFixture,
+    attributes: &str,
+    content: &str,
+) -> Result<Tree, String> {
     let svg = format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="160" height="80"><text id="run" font-family="Noto Sans" font-size="16" text-anchor="end" {attributes}>{CONTENT}</text></svg>"#
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="160" height="80"><text id="run" font-family="Noto Sans" font-size="16" text-anchor="end" {attributes}>{content}</text></svg>"#
     );
     Tree::from_str(
         &svg,

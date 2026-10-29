@@ -501,8 +501,16 @@ fn alignment_text_supported(
 }
 
 fn alignment_positioning_supported(text: &usvg::Text, chunk: &usvg::TextChunk) -> bool {
+    alignment_positioning_supported_with_dy(text, chunk, text.dy())
+}
+
+pub(super) fn alignment_positioning_supported_with_dy(
+    text: &usvg::Text,
+    chunk: &usvg::TextChunk,
+    dy: &[f32],
+) -> bool {
     all_zero(text.dx())
-        && alignment_dy_supported(text.dy())
+        && alignment_dy_supported(dy)
         && all_zero(text.rotate())
         && text.writing_mode() == usvg::WritingMode::LeftToRight
         && matches!(chunk.text_flow(), usvg::TextFlow::Linear)

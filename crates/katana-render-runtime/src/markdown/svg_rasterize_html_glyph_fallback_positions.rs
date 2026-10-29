@@ -23,40 +23,56 @@ pub(super) fn layout(
     prepared: &[PreparedSpan],
     source: eligibility::Source<'_>,
 ) -> Option<Vec<RunLayout>> {
-    let scripts = super::scripts::resolved_layout_scripts(source.layout_spans)?;
-    let mut context = LayoutContext::new(text, source.chunk, prepared[0].font_size)?;
-    let mut layouts = layout_prepared_spans(database, prepared, &source, &scripts, &mut context)?;
-    anchors::apply(source.chunk.anchor(), context.cursor, &mut layouts)?;
+    let scripts = super::scripts::resolved_layout_scripts(text.layouted())?;
+    let mut prepared_offset = 0;
+    let mut glyph_offset = 0;
+    let mut layouts = Vec::with_capacity(prepared.len());
+    for chunk in &source.chunks {
+        layouts.extend(layout_chunk(
+            database,
+            text,
+            prepared,
+            chunk,
+            &scripts,
+            &mut prepared_offset,
+            &mut glyph_offset,
+        )?);
+    }
+    if prepared_offset != prepared.len() || glyph_offset != scripts.len() {
+        return None;
+    }
     Some(layouts)
 }
 
-fn layout_prepared_spans(
+fn layout_chunk(
     database: &usvg::fontdb::Database,
+    text: &usvg::Text,
     prepared: &[PreparedSpan],
-    source: &eligibility::Source<'_>,
+    source: &super::sources::Chunk<'_>,
     scripts: &[Script],
-    context: &mut LayoutContext,
+    prepared_offset: &mut usize,
+    glyph_offset: &mut usize,
 ) -> Option<Vec<RunLayout>> {
-    let mut layouts = Vec::with_capacity(prepared.len());
-    let mut prepared_offset = 0_usize;
-    let mut glyph_offset = 0_usize;
+    let mut context = LayoutContext::new(text, source.chunk, prepared.first()?.font_size)?;
+    let mut layouts = Vec::new();
     for (source_span, layout_span) in source.source_spans.iter().zip(source.layout_spans) {
-        let glyph_end = glyph_offset.checked_add(layout_span.positioned_glyphs.len())?;
-        let source_scripts = scripts.get(glyph_offset..glyph_end)?;
+        let glyph_end = (*glyph_offset).checked_add(layout_span.positioned_glyphs.len())?;
+        let source_scripts = scripts.get(*glyph_offset..glyph_end)?;
         let mut source_run = SourceRunContext {
             database,
             source_span,
             source_glyphs: &layout_span.positioned_glyphs,
             prepared,
-            prepared_offset: &mut prepared_offset,
+            prepared_offset,
             scripts: source_scripts,
-            layout_context: &mut *context,
+            layout_context: &mut context,
             layouts: &mut layouts,
         };
         layout_source_runs(&mut source_run)?;
-        glyph_offset = glyph_end;
+        *glyph_offset = glyph_end;
     }
-    (prepared_offset == prepared.len() && glyph_offset == scripts.len()).then_some(layouts)
+    anchors::apply(source.chunk.anchor(), context.cursor, &mut layouts)?;
+    Some(layouts)
 }
 
 fn layout_source_runs(context: &mut SourceRunContext<'_>) -> Option<()> {
