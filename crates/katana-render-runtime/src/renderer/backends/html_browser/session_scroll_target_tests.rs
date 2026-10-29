@@ -1,7 +1,8 @@
 use super::*;
 
 #[test]
-fn scrolled_absolute_target_accepts_css_coordinate_and_resize_preserves_dom_state() -> TestResult {
+fn scrolled_absolute_target_accepts_physical_coordinate_and_resize_preserves_dom_state()
+-> TestResult {
     let mut session = open_scroll_session(DEVICE_SCALE_FACTOR)?;
     scroll_to_target(&mut session)?;
     click_target(&mut session)?;

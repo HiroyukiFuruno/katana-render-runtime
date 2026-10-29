@@ -119,6 +119,8 @@ impl HtmlBrowserViewport {
     }
 }
 
+/// ポインターのviewport座標とスクロール差分は物理pixelで渡す。
+/// 内部でdevice scale factorで割り、返却されるスクロールmetricsはCSS pixel単位となる。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HtmlBrowserInput {

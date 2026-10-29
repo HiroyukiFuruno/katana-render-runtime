@@ -9,6 +9,20 @@ export const environment = z.record(z.string(), z.string());
 export const managedFileSchema = z
   .object({ path: z.string(), sha256: digest, size: natural })
   .strict();
+export const rustToolLauncherSchema = z
+  .object({ path: z.string(), resolvedPath: z.string(), sha256: digest, resolutionArgv: strings })
+  .strict()
+  .superRefine((launcher, context) => {
+    if (launcher.resolutionArgv.length === 0) return;
+    const name = launcher.path.slice(launcher.path.lastIndexOf("/") + 1);
+    if ((name !== "cargo" && name !== "rustc") ||
+        launcher.resolutionArgv.length !== 3 ||
+        launcher.resolutionArgv[0] !== launcher.resolvedPath ||
+        launcher.resolutionArgv[1] !== "which" ||
+        launcher.resolutionArgv[2] !== name) {
+      context.addIssue({ code: "custom", message: "Rustup resolution argv differs", path: ["resolutionArgv"] });
+    }
+  });
 export const files = z.array(managedFileSchema);
 export const managedIdentitySchema = managedFileSchema
   .extend({
@@ -73,6 +87,9 @@ export const managedSnapshotSchema = z
         bun: managedFileSchema,
         lsof: managedFileSchema,
       })
+      .strict(),
+    toolLaunchers: z
+      .object({ cargo: rustToolLauncherSchema, rustc: rustToolLauncherSchema })
       .strict(),
     control: files,
     environment,

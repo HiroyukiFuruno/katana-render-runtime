@@ -33,6 +33,16 @@ class InputAdmissionTests(unittest.TestCase):
         self.expected: JsonObject = {"schema": "krr-native-build-source-manifest-v1",
             "files": self.records, "digest": guard.source_digest(self.records)}
 
+    def test_build_admission_binds_proxy_and_exact_build_flags(self) -> None:
+        environment = {"PATH": os.environ["PATH"]}
+        with patch.object(guard, "validate_request", return_value=None) as validate:
+            producer.validate_build_admission(self.root, environment)
+        validate.assert_called_once_with(
+            self.root,
+            [*guard.cargo_proxy_command(environment), *guard.BUILD_FLAGS],
+            environment,
+        )
+
     def test_control_is_loaded_from_the_repository_inventory(self) -> None:
         manifest_path = Path(bindings.__file__).with_name("native-cli-managed-control-inputs.json")
         manifest = json.loads(manifest_path.read_text())
@@ -434,21 +444,32 @@ class InputAdmissionTests(unittest.TestCase):
             bindings.construct_bindings(self.root, attempt, source, str(source_sha), registry,
                                         "0" * 64, self.root / "cargo", self.root / "rustc")
 
-    def test_constructor_binds_direct_toolchain_path_without_mutating_proxy_parent(self) -> None:
+    def test_constructor_binds_rustup_toolchain_without_mutating_proxy_parent(self) -> None:
         attempt = self.root / "tmp" / ("c" * 64)
         attempt.mkdir(parents=True)
         toolchain = self.root / "toolchain"
         proxy = self.root / "proxy"
         toolchain.mkdir()
         proxy.mkdir()
+        cargo_path = toolchain / "cargo"
+        rustc_path = toolchain / "rustc"
         for name in ("cargo", "rustc"):
             path = toolchain / name
             path.write_text("controlled unit data; never executed\n")
             path.chmod(0o700)
         rustup = proxy / "rustup"
-        rustup.write_text("controlled proxy unit data; never executed\n")
+        rustup.write_text(
+            "#!/bin/sh\n"
+            'test "$1" = which || exit 9\n'
+            'case "$2" in\n'
+            f'  cargo) printf "%s\\n" "{cargo_path}" ;;\n'
+            f'  rustc) printf "%s\\n" "{rustc_path}" ;;\n'
+            '  *) exit 10 ;;\n'
+            'esac\n'
+        )
         rustup.chmod(0o700)
         (proxy / "cargo").symlink_to(rustup)
+        (proxy / "rustc").symlink_to(rustup)
         (self.root / "Justfile").write_bytes((Path(__file__).resolve().parents[2] / "Justfile").read_bytes())
         expected = self.root / "tmp/expected.json"
         expected.write_text(json.dumps(self.expected))
@@ -462,15 +483,23 @@ class InputAdmissionTests(unittest.TestCase):
             result = bindings.construct_bindings(self.root, attempt, expected, str(guard.file_record(expected)["sha256"]),
                 registry, str(guard.file_record(registry)["sha256"]), toolchain / "cargo", toolchain / "rustc")
             self.assertEqual(os.environ["PATH"], parent_path)
-            self.assertEqual(result.child_environment["PATH"], str(toolchain) + os.pathsep + parent_path)
+            self.assertEqual(result.child_environment["PATH"], parent_path)
             self.assertEqual(result.tools["cargo"], guard.file_record(toolchain / "cargo"))
             self.assertEqual(result.tools["rustc"], guard.file_record(toolchain / "rustc"))
-            command = [str(toolchain / "cargo"), *guard.BUILD_FLAGS]
-            with self.assertRaisesRegex(RuntimeError, "executable differs"):
-                validate_build_executable(self.root, command)
+            self.assertEqual(result.tool_launchers["cargo"]["path"], str(proxy / "cargo"))
+            self.assertEqual(result.tool_launchers["cargo"]["resolvedPath"], str(rustup))
+            self.assertEqual(result.tool_launchers["rustc"]["path"], str(proxy / "rustc"))
+            self.assertEqual(result.resolve_tool_launchers(), result.tool_launchers)
+            dispatcher = rustup.read_bytes()
+            rustup.write_bytes(dispatcher + b"# identity mutation\n")
+            with self.assertRaisesRegex(RuntimeError, "identity changed"):
+                result.resolve_tool_launchers()
+            rustup.write_bytes(dispatcher)
+            command = [*guard.cargo_proxy_command(result.child_environment), *guard.BUILD_FLAGS]
             validate_build_executable(self.root, command, result.child_environment)
             with self.assertRaisesRegex(RuntimeError, "executable differs"):
-                validate_build_executable(self.root, command, {**result.child_environment, "PATH": parent_path})
+                validate_build_executable(
+                    self.root, [str(toolchain / "cargo"), *guard.BUILD_FLAGS], result.child_environment)
             state_path = self.root / "tmp/.cargo-capacity-guard.json"
             for key, invalid in (("metric", "wrong"), ("metric_version", True),
                                  ("baseline_bytes", 2363047937), ("factor", 3), ("target", str(self.root))):

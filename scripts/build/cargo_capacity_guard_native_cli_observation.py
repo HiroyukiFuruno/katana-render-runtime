@@ -12,12 +12,15 @@ import stat
 import sys
 import subprocess
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
 from typing import BinaryIO
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "release"))
+import produce_html_performance_evidence as native_owner
+import verify_html_performance_evidence as rust_tools
 from cargo_capacity_guard import (
     JsonObject, _array, _integer, _number, _object, _text,
     _cargo_configuration, cargo_configuration_paths, collect_protected_references, load_state,
@@ -26,11 +29,13 @@ from cargo_capacity_guard import (
 
 REQUEST_ENV = "KRR_NATIVE_CLI_GUARD_REQUEST"
 REQUEST_SHA_ENV = "KRR_NATIVE_CLI_GUARD_REQUEST_SHA256"
-REQUEST_SCHEMA = "krr-native-cli-guard-request-v1"
-OBSERVATION_SCHEMA = "krr-native-cli-guard-observation-v1"
+# WHY: 旧requestは実体cargo直呼びを許し、Rustup解決とJustfile経路を証明できない。
+REQUEST_SCHEMA = "krr-native-cli-guard-request-v2"
+OBSERVATION_SCHEMA = "krr-native-cli-guard-observation-v2"
 REQUEST_FIELDS = frozenset((
     "schema", "attemptToken", "cwd", "target", "binaryPath", "issuedMonotonicNs",
-    "expiresMonotonicNs", "cargo", "sourceManifest", "sourceDigest", "metadata",
+    "expiresMonotonicNs", "cargo", "rustc", "cargoLauncher", "rustcLauncher",
+    "sourceManifest", "sourceDigest", "metadata",
     "metadataObservation", "expectedPackage", "expectedTarget", "environment",
     "environmentSha256", "guardCodePins", "capacityAdmission",
 ))
@@ -51,6 +56,8 @@ ENVIRONMENT_KEYS = frozenset((
     "TMPDIR", "SHELL", "RUSTFLAGS", "CARGO_CAPACITY_PROTECTED_REFS", "CARGO_TARGET_DIR",
     "PWD", "SHLVL", "_", "__CF_USER_TEXT_ENCODING",
 )) | EMPTY_JUST_ENVIRONMENT_KEYS
+RUSTUP_QUERY_EVIDENCE: list[JsonObject] = []
+RUSTUP_QUERY_ATTEMPT: Path | None = None
 
 
 def require(ok: bool, label: str) -> None:
@@ -83,6 +90,44 @@ def digest(value: object) -> str:
     text = _text(value, "SHA256")
     require(re.fullmatch(r"[0-9a-f]{64}", text) is not None, "invalid SHA256")
     return text
+
+
+def cargo_proxy_command(environment: Mapping[str, str]) -> list[str]:
+    rtk = shutil.which("rtk", path=environment.get("PATH"))
+    if rtk is None or not Path(rtk).is_absolute():
+        raise RuntimeError("Justfile RTK proxy is unavailable")
+    return [rtk, "proxy", "cargo"]
+
+
+def validate_rust_tool_launcher(request: JsonObject, name: str, attempt: Path) -> None:
+    global RUSTUP_QUERY_ATTEMPT
+    environment = environment_record(request["environment"])
+    executable_pin = validate_record(request[name])
+    launcher = exact(request[name + "Launcher"],
+                     {"path", "resolvedPath", "sha256", "resolutionArgv"}, name + " launcher")
+    root = canonical(request["cwd"])
+    if RUSTUP_QUERY_ATTEMPT != attempt:
+        RUSTUP_QUERY_EVIDENCE.clear()
+        RUSTUP_QUERY_ATTEMPT = attempt
+
+    def query(argv: Sequence[str], cwd: Path, environment: Mapping[str, str]) -> str:
+        evidence = native_owner.observe_native_cli_command(
+            argv, role="tool-query", log_directory=attempt / "lifecycle", cwd=cwd,
+            env=environment, attempt_token=attempt.name, label="probe-rustup-" + name)
+        RUSTUP_QUERY_EVIDENCE.append({"observation": evidence.observation, "lifecycle": evidence.lifecycle})
+        stdout = _object(evidence.observation["stdout"], name + " Rustup stdout")
+        return Path(_text(stdout["path"], name + " Rustup stdout path")).read_text(encoding="utf-8")
+
+    try:
+        tool = rust_tools.resolve_rust_tool(root, name, environment, cwd=root, query=query)
+    except (OSError, RuntimeError, ValueError) as error:
+        raise RuntimeError(name + " Rustup resolution failed") from error
+    proof: JsonObject = {name + "Launcher": launcher, name + "Executable": executable_pin}
+    try:
+        rust_tools.validate_rust_tool_pin(proof, name, tool)
+    except (OSError, ValueError) as error:
+        raise RuntimeError(name + " Rustup tool pin differs") from error
+    require(tool.dispatcher.name == "rustup", name + " Rustup launcher is required")
 
 
 def canonical(value: object, *, regular: bool = False) -> Path:
@@ -235,9 +280,11 @@ def validate_metadata(request: JsonObject, root: Path, attempt: Path) -> tuple[s
                         "environmentSha256", "pid", "actualExit", "startedNs", "endedNs", "reaped", "errors"},
           "metadata observation")
     argv = [_text(item, "metadata argv") for item in _array(observation["argv"], "metadata argv")]
-    cargo = _object(request["cargo"], "Cargo")
-    require(len(argv) == 10 and Path(argv[0]).name == "rtk"
-            and argv[1:] == ["proxy", cargo["path"], "metadata", "--frozen", "--format-version", "1",
+    environment = environment_record(request["environment"])
+    rtk = shutil.which("rtk", path=environment.get("PATH"))
+    require(rtk is not None and len(argv) == 10 and Path(argv[0]).resolve() == Path(rtk).resolve()
+            and argv[1:] == ["proxy", _object(request["cargoLauncher"], "Cargo launcher")["path"],
+                             "metadata", "--frozen", "--format-version", "1",
                              "--no-deps", "--manifest-path", str(root / "Cargo.toml")], "metadata argv differs")
     require(canonical(argv[0], regular=True).stat().st_mode & 0o111 != 0, "metadata RTK is not executable")
     require(re.fullmatch(r"probe-[1-9][0-9]*-cargo-metadata", _text(observation["label"], "probe label"))
@@ -266,7 +313,15 @@ def request_shapes(request: JsonObject) -> None:
     admission = exact(request["capacityAdmission"], {"state", "protectedRegistry", "refs", "capacityPolicy",
                       "environmentValue", "environmentSha256"}, "capacity admission")
     exact(admission["capacityPolicy"], set(policy(Path(_text(request["target"], "target")))), "capacity policy")
-    pins = [request[key] for key in ("cargo", "sourceManifest", "metadata", "metadataObservation")]
+    for name in ("cargo", "rustc"):
+        launcher = exact(request[name + "Launcher"],
+                         {"path", "resolvedPath", "sha256", "resolutionArgv"}, name + " launcher")
+        _text(launcher["path"], name + " launcher path")
+        _text(launcher["resolvedPath"], name + " launcher target")
+        digest(launcher["sha256"])
+        require(_array(launcher["resolutionArgv"], name + " launcher resolution")
+                == [launcher["resolvedPath"], "which", name], name + " Rustup resolver argv differs")
+    pins = [request[key] for key in ("cargo", "rustc", "sourceManifest", "metadata", "metadataObservation")]
     pins += _array(request["guardCodePins"], "guard code pins")
     pins += [admission[key] for key in ("state", "protectedRegistry")]
     for value in pins:
@@ -310,9 +365,11 @@ def validate_request(root: Path, command: list[str], environment: Mapping[str, s
         require(request[key] == str(expected), key + " differs")
         canonical(request[key])
     cargo = validate_record(request["cargo"])
-    cargo_path = Path(_text(cargo["path"], "Cargo path"))
-    require(cargo_path.name == "cargo" and cargo_path.stat().st_mode & 0o111 != 0, "Cargo must be actual executable")
-    require(command == [str(cargo_path), *BUILD_FLAGS], "only exact direct CLI Cargo build is admitted")
+    validate_record(request["rustc"])
+    validate_rust_tool_launcher(request, "cargo", attempt)
+    validate_rust_tool_launcher(request, "rustc", attempt)
+    require(command == [*cargo_proxy_command(environment), *BUILD_FLAGS],
+            "only exact Justfile RTK-proxy Cargo build is admitted")
     validate_build_profile("debug", command)
     validate_build_selection(root, environment)
     validate_build_executable(root, command, environment)
@@ -475,18 +532,19 @@ def raw_output(path: Path) -> BinaryIO:
 
 
 def observation_pins(admission: Admission, root: Path) -> JsonObject:
-    rustc = shutil.which("rustc", path=admission.environment["PATH"])
-    require(rustc is not None, "PATH rustc resolution unavailable")
-    rustc_path = Path(_text(rustc, "rustc path")).resolve(strict=True)
-    require(rustc_path.stat().st_mode & 0o111 != 0, "PATH rustc is not executable")
+    validate_rust_tool_launcher(admission.request, "cargo", admission.attempt)
+    validate_rust_tool_launcher(admission.request, "rustc", admission.attempt)
     config_paths = [base / name for base in (root, *root.parents)
                     for name in (".cargo/config", ".cargo/config.toml")]
     config_paths += [Path(admission.environment["HOME"]) / ".cargo" / name for name in ("config", "config.toml")]
     require(all(not os.path.lexists(path) for path in config_paths), "Cargo config appeared")
     return {"source": admission.source, "cargo": admission.request["cargo"],
+            "rustc": admission.request["rustc"],
+            "cargoLauncher": admission.request["cargoLauncher"],
+            "rustcLauncher": admission.request["rustcLauncher"],
             "guardCodePins": admission.request["guardCodePins"],
             "capacityAdmission": admission.request["capacityAdmission"],
-            "observedPathRustc": file_record(rustc_path),
+            "rustupSelectedRustc": admission.request["rustc"],
             "unsupportedCargoConfigsAbsent": [str(path) for path in dict.fromkeys(config_paths)]}
 
 
@@ -507,11 +565,14 @@ def observe(admission: Admission, command: list[str], root: Path, report: JsonOb
         "sourceManifest": request["sourceManifest"], "sourceDigest": request["sourceDigest"],
         "metadata": request["metadata"], "metadataObservation": request["metadataObservation"],
         "expectedPackage": request["expectedPackage"], "expectedTarget": request["expectedTarget"],
-        "cargo": request["cargo"], "guardCodePins": request["guardCodePins"], "pinsBefore": None, "pinsAfter": None,
+        "cargo": request["cargo"], "rustc": request["rustc"],
+        "cargoLauncher": request["cargoLauncher"], "rustcLauncher": request["rustcLauncher"],
+        "rustupResolutionQueries": [],
+        "guardCodePins": request["guardCodePins"], "pinsBefore": None, "pinsAfter": None,
         "capacityBefore": None, "capacityAfter": None, "capacityProtection": request["capacityAdmission"],
         "ownedCargo": owned, "binaryBefore": None, "binaryAfter": None, "artifact": None, "buildFinished": None,
         "errors": errors, "externalGroupClosureRequired": True,
-        "scope": "PATH rustc file is observed, not independently admitted; effective rustup compiler/version is unverified. POSIX leader observation; spawn/PID sampling is non-atomic; pinsAfter precedes external group closure; source endpoints do not prove atomic freeze or registry content attestation."}
+        "scope": "Rustup-selected toolchain endpoints are pinned; effective compiler reads remain unverified. POSIX leader observation; spawn/PID sampling is non-atomic; pinsAfter precedes external group closure; source endpoints do not prove atomic freeze or registry content attestation."}
     process: subprocess.Popen[bytes] | None = None
     handles: list[BinaryIO] = []
     raw_identities: list[tuple[int, int]] = []
@@ -611,6 +672,11 @@ def observe(admission: Admission, command: list[str], root: Path, report: JsonOb
     except BaseException as error:
         errors.append(type(error).__name__ + ": " + str(error))
     try:
+        output["rustupResolutionQueries"] = [
+            evidence for evidence in RUSTUP_QUERY_EVIDENCE
+            if Path(_text(_object(evidence["lifecycle"], "Rustup lifecycle")["path"], "lifecycle path"))
+            .is_relative_to(attempt / "lifecycle")
+        ]
         exclusive_json(attempt / "observation.json", output)
     except BaseException as error:
         raise RuntimeError("observation save failed; prior errors: " + repr(errors) + "; save: " + str(error)) from error

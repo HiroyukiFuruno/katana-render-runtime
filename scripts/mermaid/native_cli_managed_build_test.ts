@@ -28,8 +28,14 @@ const capacity = {
   environmentValue: '["/unit/file"]',
   environmentSha256: "b".repeat(64),
 };
+const rustToolLauncher = (name: string) => ({
+  path: `/unit/${name}`,
+  resolvedPath: "/unit/rustup",
+  sha256: "c".repeat(64),
+  resolutionArgv: ["/unit/rustup", "which", name],
+});
 const request = {
-  schema: "krr-native-cli-guard-request-v1",
+  schema: "krr-native-cli-guard-request-v2",
   attemptToken: "a".repeat(64),
   cwd: "/unit",
   target: "/unit/target",
@@ -37,6 +43,9 @@ const request = {
   issuedMonotonicNs: "1",
   expiresMonotonicNs: "120000000001",
   cargo: pin,
+  rustc: pin,
+  cargoLauncher: rustToolLauncher("cargo"),
+  rustcLauncher: rustToolLauncher("rustc"),
   sourceManifest: pin,
   sourceDigest: "a".repeat(64),
   metadata: pin,
@@ -76,11 +85,12 @@ const artifact = {
 };
 
 describe("managed CLI strict unit boundaries; no actual build evidence", () => {
-  test("request keeps exact eighteen fields and nested boundaries", () => {
-    expect(Object.keys(managedRequestSchema.parse(request))).toHaveLength(18);
+  test("request keeps exact launcher and nested boundaries", () => {
+    expect(Object.keys(managedRequestSchema.parse(request))).toHaveLength(21);
     for (const value of [
       { ...request, extra: true },
       { ...request, cargo: { ...pin, extra: true } },
+      { ...request, cargoLauncher: { ...request.cargoLauncher, resolutionArgv: ["/other", "which", "cargo"] } },
       { ...request, expectedTarget: { ...request.expectedTarget, kind: ["lib"] } },
       { ...request, capacityAdmission: { ...capacity, extra: true } },
     ]) {
@@ -90,6 +100,9 @@ describe("managed CLI strict unit boundaries; no actual build evidence", () => {
   test("required request bindings cannot be omitted", () => {
     for (const key of [
       "sourceManifest",
+      "rustc",
+      "cargoLauncher",
+      "rustcLauncher",
       "guardCodePins",
       "metadataObservation",
       "capacityAdmission",

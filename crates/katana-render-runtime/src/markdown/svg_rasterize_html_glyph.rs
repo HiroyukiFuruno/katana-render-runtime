@@ -638,7 +638,7 @@ fn wrap_pixmap<'a>(pixmap: &'a mut PixmapMut<'_>) -> Result<Borrows<'a, Surface>
         (pixmap.width() as i32, pixmap.height() as i32),
         ColorType::RGBA8888,
         AlphaType::Premul,
-        None,
+        Some(skia_safe::ColorSpace::new_srgb()),
     );
     surfaces::wrap_pixels(&info, pixmap.data_mut(), info.min_row_bytes(), None)
         .ok_or_else(|| "Skia text surface allocation failed".to_string())

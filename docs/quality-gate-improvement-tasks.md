@@ -2,6 +2,18 @@
 
 ## 最新の再開地点（2026-10-29）
 
+- [/] R4233静的foundation・R4234のproxy spawn/Cargo child exec/metric/capacity回帰はactual0。R4235実catalogで公開consumer新integrationが独立した一件だけであることを確認し、R4236はその一件を実行してactual0。DPR1/2・frame/metrics generation・XY scroll・物理pointerのJS更新・resize clamp/状態画素保持を観測した。**dev profile/当該integration targetに限る診断**として保存し、全workspace/coverage/性能の正式合格へ代用しない。
+- [/] NativeCLIのreader側Bun全113件はR4210でactual0、producer Python全27件はR4228でactual0。observer全体R4227は22件中21成功/1失敗（173.681秒）を保持し、最後の旧direct-Cargo前提の失敗はproxy自体のspawnとCargo子のexecに分け、隔離RTKコピーだけを使用する実OS回帰へ修正してR4234で成功した。関連する子process/argv/env、group閉鎖非認定の条件は維持する。**現sourceのobserver全22一括は未再取得**であり、旧成功との合算を完全gateへ転用しない。後続の正式ゲートで確認する。
+
+- [ ] C4-SRGB-SURFACE-AB: glyph `wrap_pixmap`のImageInfo色空間引数だけをNoneから明示sRGBへ変えた未採用候補を作成中。配置・scale・alpha・入力色・テーマ・APIは変更せず、新backend/環境flagも追加しない。対照は28a7c491のtarget外frozen frame bundle R4181（clean後strict reader R4188成功）。同条件の実PNG比較は未実施であり、改善済みとしない。不変・劣化ならこの1引数だけをNoneへ戻す。正式117の99条件は不変、全体再検証前に採用・公開しない。
+- [/] NativeCLI launcher修正のdraftはrequest/observation v2・managed build receipt v3へ明示変更し、launcher/実体とRustup解決観測を必須化する方針。R4192静的検査がTS fixtureの必須key型4件、R4194がPython JSON境界等の型13件を検出して後段を停止。型の無効化はせず既存helperによるnarrowと明示importへ修正中。R4195–4197の予定した限定回帰はまだ起動していない。公開consumerの新独立testも未実行、pointer/scrollの物理pixelとmetricsのCSS単位を文書化し、誤解を招く旧unit名だけを実契約に合わせた（製品動作不変）。
+
+- [ ] PUBLIC-HTML-CONSUMER-INTEGRATION: 公開HtmlRuntimeからDPR1/2のframe/XY metrics/generation、両軸scroll、物理座標pointerによるJavaScript状態変化、同session resize後のclampと画素保持を観測する独立integration testを追加中。Mock・固定待機・製品変更なし。tests直下ファイルのCargo自動検出とchild moduleの二重登録を主担当レビューで発見して後者を撤去し、既存html_public_layout.rsは差分0を維持した。実catalogで一件だけ選択されることと実回帰成功は未確認。nativeCLI launcher修正終了後に同sourceで検証する。
+
+- [/] R4179通常commit hook actual0で`28a7c491`へ保存、working tree0。R4180保護validator・R4181候補frame build proof・R4182 source manifest・R4183 font contextはactual0。正式117の初回R4184はbundle内artifactPathを誤って絶対pathで指定しschemaが拒否、原requestを保持した。正しいrelativePathを用いる新R4185はnative CLI buildが23.92秒で成功したが生成物6,186,643,456 bytesが固定4,726,095,872 bytesを超えてafter容量判定で失敗。図の採点は未開始であり最新正式112/117を更新しない。
+- [/] R4186保護再検証0、未使用release profileだけを既存Cargo cleanで整理したR4187は0。target外に固定したframe bundleは変更せず、既存strict readerで再検証したR4188も0。R4189はidleの主担当REPLとは別processで両排他lockの取得・解放に成功し、idle中にlockを保持していないことを確認した。
+- [ ] NATIVE-CLI-RUSTUP-LAUNCHER: 正式再実行前のコード照合で、native CLI producerが同定用Cargo実体pathをJustfile CARGOへ差し込んでいることを確認。version/metadataも同じ問題を持ち、Rustup launcher使用規則に適合していない。既存Rust tool helperでlauncher/実体を分離し、producer・observer・readerと回帰を一担当へ委譲して整合させる。旧直接argv固定の契約は現source用として再利用せず、新frameworkや判定緩和を追加しない。修正後は新sourceのframe proof/source manifestで全117を取り直す。HTML正式性能・coverage100/0・完全gate・公開は未完了。
+
 - [/] R4174静的foundation・R4175全writer44件はactual0。追加filter11件＋親子ID1件を含む44件が成功し、元31参照SVGは変更なし。埋込画像の元対再parse RGBA完全一致・3段階の有効参照、親子双方IDと実画素を検査した。仮の文字列固定点要求は採用せず、過去の失敗・診断は保持。HTML84/正式性能・現行coverage100/0・全117正式再取得・完全gate・公開は引き続き未完了。
 
 - [/] R4157の性能producer全99unitはactual0、比較元・候補で異なるsource/lockを正しく記録し改変を拒否する回帰を追加した。worker raw stdoutはprovenanceを持たないsampleであることも実コード経路を独立確認した。修正後の正式性能は未実行。R4160のglyph143回帰はactual0。不採用CoreText raster接続はtest+macOS専用と同入力0/12の不採用判断を根拠に撤去し、製品Skia・物理font同定/OS fallback/別比較診断を維持した。

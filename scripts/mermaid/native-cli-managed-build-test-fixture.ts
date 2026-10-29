@@ -79,7 +79,7 @@ export function createManagedReaderFixture(withCapacityCleanup = false) {
     [
       tool("rtk").path,
       "proxy",
-      tool("cargo").path,
+      snapshot.toolLaunchers.cargo.path,
       "metadata",
       "--frozen",
       "--format-version",
@@ -108,7 +108,7 @@ export function createManagedReaderFixture(withCapacityCleanup = false) {
     return pin;
   });
   const request = managedRequestSchema.parse({
-    schema: "krr-native-cli-guard-request-v1",
+    schema: "krr-native-cli-guard-request-v2",
     attemptToken: token,
     cwd: root,
     target: policy.target,
@@ -116,6 +116,9 @@ export function createManagedReaderFixture(withCapacityCleanup = false) {
     issuedMonotonicNs: "1",
     expiresMonotonicNs: "120000000001",
     cargo: tool("cargo"),
+    rustc: tool("rustc"),
+    cargoLauncher: snapshot.toolLaunchers.cargo,
+    rustcLauncher: snapshot.toolLaunchers.rustc,
     sourceManifest: sourcePin,
     sourceDigest: source.digest,
     metadata: metadataPin,
@@ -142,9 +145,6 @@ export function createManagedReaderFixture(withCapacityCleanup = false) {
       tool("rtk").path,
       "proxy",
       tool("just").path,
-      "--set",
-      "CARGO",
-      tool("cargo").path,
       "krr-build",
     ],
     102,
@@ -172,7 +172,9 @@ export function createManagedReaderFixture(withCapacityCleanup = false) {
   const finished = { reason: "build-finished", success: true };
   const cargo = {
     argv: [
-      tool("cargo").path,
+      tool("rtk").path,
+      "proxy",
+      "cargo",
       "build",
       "-p",
       "katana-render-runtime-cli",
@@ -200,12 +202,35 @@ export function createManagedReaderFixture(withCapacityCleanup = false) {
     rawFdsClosed: true,
     errors: [],
   };
+  const rustupResolutionQueries = (["cargo", "rustc"] as const).flatMap((name, index) => [
+    owned(
+      "tool-query",
+      `rustup-${name}`,
+      [snapshot.toolLaunchers[name].resolvedPath, "which", name],
+      108 + index,
+      `probe-rustup-${name}`,
+      `${tool(name).path}\n`,
+    ),
+    owned(
+      "tool-query",
+      `rustup-${name}-after`,
+      [snapshot.toolLaunchers[name].resolvedPath, "which", name],
+      110 + index,
+      `probe-rustup-${name}`,
+      `${tool(name).path}\n`,
+      environment,
+      { startedNs: "46", endedNs: "48" },
+    ),
+  ]);
   const pins = {
     source: source.files,
     cargo: tool("cargo"),
+    rustc: tool("rustc"),
+    cargoLauncher: snapshot.toolLaunchers.cargo,
+    rustcLauncher: snapshot.toolLaunchers.rustc,
     guardCodePins,
     capacityAdmission: capacity,
-    observedPathRustc: tool("rustc"),
+    rustupSelectedRustc: tool("rustc"),
     unsupportedCargoConfigsAbsent: absentConfigs,
   };
   const measurement = {
@@ -226,7 +251,7 @@ export function createManagedReaderFixture(withCapacityCleanup = false) {
     baseline_eligible: false,
   };
   const observation = managedObservationSchema.parse({
-    schema: "krr-native-cli-guard-observation-v1",
+    schema: "krr-native-cli-guard-observation-v2",
     status: "cargo-completed",
     diagnosticOnly: true,
     accepted: false,
@@ -239,6 +264,10 @@ export function createManagedReaderFixture(withCapacityCleanup = false) {
     expectedPackage,
     expectedTarget,
     cargo: tool("cargo"),
+    rustc: tool("rustc"),
+    cargoLauncher: snapshot.toolLaunchers.cargo,
+    rustcLauncher: snapshot.toolLaunchers.rustc,
+    rustupResolutionQueries,
     guardCodePins,
     pinsBefore: pins,
     pinsAfter: pins,
@@ -345,11 +374,12 @@ export function createManagedReaderFixture(withCapacityCleanup = false) {
     refreshObservation,
   });
   const capacityPreflight = json(`tmp/${token}/capacity-preflight.json`, preflightEvidence);
-  const toolProbes = ["cargo", "rustc"].map((name, index) =>
+  const toolProbes = (["cargo", "rustc"] as const).map((name, index) =>
     owned(
       "tool-query",
       name,
-      [tool("rtk").path, "proxy", tool(name).path, name === "cargo" ? "--version" : "-Vv"],
+      [tool("rtk").path, "proxy", snapshot.toolLaunchers[name].path,
+        name === "cargo" ? "--version" : "-Vv"],
       105 + index,
       `probe-${3 + index}-${name}`,
       "unit version output",
@@ -429,7 +459,7 @@ export function createManagedReaderFixture(withCapacityCleanup = false) {
     receipt: hostReceipt,
   };
   const receipt = managedReceiptSchema.parse({
-    schema: "krr-native-cli-managed-build-v2",
+    schema: "krr-native-cli-managed-build-v3",
     status: "completed",
     accepted: true,
     attemptToken: token,

@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "build"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "release"))
 import cargo_capacity_guard_native_cli_observation as guard
 import produce_html_performance_evidence as owner
+import verify_html_performance_evidence as gate
 from cargo_capacity_guard import (
     JsonObject,
     _array,
@@ -25,7 +26,7 @@ from cargo_capacity_guard import (
     load_state,
 )
 
-SCHEMA = "krr-native-cli-managed-build-v2"
+SCHEMA = "krr-native-cli-managed-build-v3"
 CONTROL_MANIFEST_SCHEMA = "krr-native-cli-managed-control-inputs-v1"
 CONTROL_MANIFEST_NAME = "scripts/mermaid/native-cli-managed-control-inputs.json"
 CONTROL_MANIFEST = Path(__file__).with_name("native-cli-managed-control-inputs.json")
@@ -129,6 +130,7 @@ class Bindings:
     root: Path
     attempt: Path
     tools: dict[str, JsonObject]
+    tool_launchers: dict[str, JsonObject]
     environment: dict[str, str]
     child_environment: dict[str, str]
     capacity: JsonObject
@@ -150,6 +152,7 @@ class Bindings:
     def snapshot(self) -> JsonObject:
         source = self.source()
         admit_source(self.expected, source)
+        tool_launchers = self.resolve_tool_launchers()
         source_paths = {_text(row["path"], "source path") for row in source}
         guard.require(all(str(self.root / name) in source_paths for name in CONTROL), "managed code absent from source")
         configs = cargo_configuration_paths(self.root, self.child_environment)
@@ -158,6 +161,7 @@ class Bindings:
                       for name in ("rust-toolchain", "rust-toolchain.toml")]
         return {"source": source, "tools": {key: guard.file_record(Path(_text(pin["path"], key)))
                                             for key, pin in self.tools.items()},
+                "toolLaunchers": tool_launchers,
                 "control": [guard.file_record(self.root / name) for name in CONTROL],
                 "environment": self.child_environment,
                 "environmentSha256": guard.environment_digest(self.child_environment),
@@ -165,6 +169,18 @@ class Bindings:
                     _object(self.capacity["protectedRegistry"], "registry")["path"], "registry path"))),
                 "toolchainFiles": [guard.file_record(path) for path in toolchains if path.exists()],
                 "toolchainAbsent": [str(path) for path in toolchains if not path.exists()]}
+
+    def resolve_tool_launchers(self) -> dict[str, JsonObject]:
+        resolved: dict[str, JsonObject] = {}
+        for name in ("cargo", "rustc"):
+            tool = gate.resolve_rust_tool(
+                self.root, name, self.child_environment, cwd=self.root)
+            executable = Path(_text(self.tools[name]["path"], name))
+            guard.require(tool.executable == executable, name + " Rustup resolution changed")
+            guard.require(tool.dispatcher.name == "rustup", name + " Rustup launcher is required")
+            resolved[name] = gate.rust_tool_launcher_pin(tool)
+        guard.require(resolved == self.tool_launchers, "Rustup launcher identity changed")
+        return resolved
 
 
 def capacity_admission(root: Path, registry_path: Path) -> JsonObject:
@@ -224,8 +240,14 @@ def construct_bindings(root: Path, attempt: Path, expected_path: Path, expected_
     protected = [_text(row["path"], "protected path") for row in _array(capacity["refs"], "refs")
                  if isinstance(row, dict)]
     environment = base_environment(protected)
-    guard.require(cargo.parent == rustc.parent, "Cargo/rustc must be one selected toolchain directory")
-    environment["PATH"] = str(cargo.parent) + os.pathsep + environment["PATH"]
+    cargo_tool = gate.resolve_rust_tool(root, "cargo", environment, cwd=root)
+    rustc_tool = gate.resolve_rust_tool(root, "rustc", environment, cwd=root)
+    guard.require(cargo_tool.executable == cargo and rustc_tool.executable == rustc,
+                  "selected Cargo/Rustc executable differs from Rustup resolution")
+    guard.require(cargo_tool.dispatcher.name == rustc_tool.dispatcher.name == "rustup",
+                  "Rustup launchers are required")
+    guard.require(cargo_tool.executable.parent == rustc_tool.executable.parent,
+                  "Cargo/rustc must be one selected toolchain directory")
     paths = {"cargo": cargo, "rustc": rustc}
     paths["lsof"] = owner.native_raw_fd_observer_path()
     for name in ("rtk", "just", "python3", "git", "bash", "bun"):
@@ -236,4 +258,7 @@ def construct_bindings(root: Path, attempt: Path, expected_path: Path, expected_
     guard.require(all(path.stat().st_mode & 0o111 for path in paths.values())
                   and cargo.name == "cargo" and rustc.name == "rustc", "tool executable/name differs")
     validate_just(root)
-    return Bindings(root, attempt, tools, environment, guard_environment(environment, root), capacity, expected)
+    tool_launchers = {name: gate.rust_tool_launcher_pin(tool)
+                      for name, tool in (("cargo", cargo_tool), ("rustc", rustc_tool))}
+    return Bindings(root, attempt, tools, tool_launchers, environment,
+                    guard_environment(environment, root), capacity, expected)

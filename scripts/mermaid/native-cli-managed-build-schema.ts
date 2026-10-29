@@ -10,6 +10,7 @@ import {
   ns,
   packageSchema,
   positive,
+  rustToolLauncherSchema,
   strings,
   targetSchema,
 } from "./native-cli-managed-input-schema";
@@ -22,7 +23,7 @@ export {
   managedSnapshotSchema,
   managedSourceSchema,
 } from "./native-cli-managed-input-schema";
-export const managedBuildSchemaName = "krr-native-cli-managed-build-v2";
+export const managedBuildSchemaName = "krr-native-cli-managed-build-v3";
 export const managedOwnedSchema = z
   .object({
     argv: strings,
@@ -76,7 +77,7 @@ export const managedLifecycleSchema = z
   .strict();
 export const managedRequestSchema = z
   .object({
-    schema: z.literal("krr-native-cli-guard-request-v1"),
+    schema: z.literal("krr-native-cli-guard-request-v2"),
     attemptToken: digest,
     cwd: z.string(),
     target: z.string(),
@@ -84,6 +85,9 @@ export const managedRequestSchema = z
     issuedMonotonicNs: ns,
     expiresMonotonicNs: ns,
     cargo: managedFileSchema,
+    rustc: managedFileSchema,
+    cargoLauncher: rustToolLauncherSchema,
+    rustcLauncher: rustToolLauncherSchema,
     sourceManifest: managedFileSchema,
     sourceDigest: digest,
     metadata: managedFileSchema,
@@ -100,9 +104,12 @@ const guardPins = z
   .object({
     source: files,
     cargo: managedFileSchema,
+    rustc: managedFileSchema,
+    cargoLauncher: rustToolLauncherSchema,
+    rustcLauncher: rustToolLauncherSchema,
     guardCodePins: files,
     capacityAdmission: managedCapacitySchema,
-    observedPathRustc: managedFileSchema,
+    rustupSelectedRustc: managedFileSchema,
     unsupportedCargoConfigsAbsent: strings,
   })
   .strict();
@@ -150,7 +157,7 @@ export const managedCapacityPreflightSchema = capacityEvidence
   .strict();
 export const managedObservationSchema = z
   .object({
-    schema: z.literal("krr-native-cli-guard-observation-v1"),
+    schema: z.literal("krr-native-cli-guard-observation-v2"),
     status: z.literal("cargo-completed"),
     diagnosticOnly: z.literal(true),
     accepted: z.literal(false),
@@ -163,6 +170,16 @@ export const managedObservationSchema = z
     expectedPackage: packageSchema,
     expectedTarget: targetSchema,
     cargo: managedFileSchema,
+    rustc: managedFileSchema,
+    cargoLauncher: rustToolLauncherSchema,
+    rustcLauncher: rustToolLauncherSchema,
+    rustupResolutionQueries: z
+      .array(
+        z
+          .object({ observation: managedOwnedSchema, lifecycle: managedFileSchema })
+          .strict(),
+      )
+      .min(1),
     guardCodePins: files,
     pinsBefore: guardPins,
     pinsAfter: guardPins,

@@ -132,7 +132,9 @@ def completed_observation(value: JsonObject, request: JsonObject, build: JsonObj
                           lifecycle: JsonObject, admission: guard.Admission) -> None:
     guard.exact(value, {"schema", "status", "diagnosticOnly", "accepted", "attemptToken", "request",
         "sourceManifest", "sourceDigest", "metadata", "metadataObservation", "expectedPackage", "expectedTarget",
-        "cargo", "guardCodePins", "pinsBefore", "pinsAfter", "capacityBefore", "capacityAfter", "capacityProtection",
+        "cargo", "rustc", "cargoLauncher", "rustcLauncher", "rustupResolutionQueries",
+        "guardCodePins", "pinsBefore", "pinsAfter",
+        "capacityBefore", "capacityAfter", "capacityProtection",
         "ownedCargo", "binaryBefore", "binaryAfter", "artifact", "buildFinished", "errors",
         "externalGroupClosureRequired", "scope"}, "guard observation")
     guard.require(value.get("schema") == guard.OBSERVATION_SCHEMA
@@ -142,13 +144,13 @@ def completed_observation(value: JsonObject, request: JsonObject, build: JsonObj
     guard.require(value["attemptToken"] == request["attemptToken"]
                   and value["request"] == request["requestPin"], "guard request binding differs")
     for key in ("sourceManifest", "sourceDigest", "metadata", "metadataObservation", "expectedPackage",
-                "expectedTarget", "cargo", "guardCodePins"):
+                "expectedTarget", "cargo", "rustc", "cargoLauncher", "rustcLauncher", "guardCodePins"):
         guard.require(value[key] == request[key], "guard observation binding differs: " + key)
     cargo = _object(value["ownedCargo"], "owned Cargo")
     identity = _object(lifecycle["identity"], "outer identity")
     guard.require(cargo.get("actualExit") == 0 and cargo.get("reaped") is True
                   and cargo.get("rawFdsClosed") is True and cargo.get("errors") == []
-                  and cargo["argv"] == [_object(request["cargo"], "cargo")["path"],
+                  and cargo["argv"] == [*guard.cargo_proxy_command(guard.environment_record(request["environment"])),
                                          *guard.BUILD_FLAGS, guard.JSON_FLAG]
                   and cargo["attemptToken"] == request["attemptToken"]
                   and cargo["environment"] == request["environment"]
@@ -171,6 +173,11 @@ def completed_observation(value: JsonObject, request: JsonObject, build: JsonObj
                                        Path(_text(request["target"], "target")))
 
 
+def validate_build_admission(root: Path, environment: dict[str, str]) -> guard.Admission:
+    command = [*guard.cargo_proxy_command(environment), *guard.BUILD_FLAGS]
+    return guard.validate_request(root, command, environment)
+
+
 def produce(root: Path, expected_source: Path, expected_sha: str, registry: Path,
             registry_sha: str, cargo: Path, rustc: Path, runtime: Path) -> Path:
     nonce = secrets.token_hex(32)
@@ -183,7 +190,8 @@ def produce(root: Path, expected_source: Path, expected_sha: str, registry: Path
     host_receipt = guard.file_record(root / "tmp/quality/rust-facts-host/current/receipt.json")
     bindings = construct_bindings(root, attempt, expected_source, expected_sha, registry, registry_sha, cargo, rustc)
     after_preflight = bindings.snapshot()
-    for key in ("source", "tools", "control", "environment", "environmentSha256", "toolchainFiles", "toolchainAbsent"):
+    for key in ("source", "tools", "toolLaunchers", "control", "environment", "environmentSha256",
+                "toolchainFiles", "toolchainAbsent"):
         guard.require(after_preflight[key] == initial[key], "inputs changed during capacity preflight: " + key)
     before = after_preflight
     source_files = [_object(row, "source pin") for row in _array(before["source"], "source pins")]
@@ -194,10 +202,12 @@ def produce(root: Path, expected_source: Path, expected_sha: str, registry: Path
     just = _text(bindings.tools["just"]["path"], "Just path")
     probes: list[JsonObject] = []
     for number, (name, flags) in enumerate((("cargo", ["--version"]), ("rustc", ["-Vv"])), 3):
-        probe = bindings.run([rtk, "proxy", _text(bindings.tools[name]["path"], name), *flags],
+        probe = bindings.run([rtk, "proxy", _text(bindings.tool_launchers[name]["path"], name), *flags],
                              "tool-query", f"probe-{number}-{name}")
         probes.append({"observation": probe.observation, "lifecycle": probe.lifecycle})
-    metadata_run = bindings.run([rtk, "proxy", str(cargo), "metadata", "--frozen", "--format-version", "1",
+    cargo_launcher = _text(bindings.tool_launchers["cargo"]["path"], "Cargo launcher path")
+    metadata_run = bindings.run([rtk, "proxy", cargo_launcher,
+                                 "metadata", "--frozen", "--format-version", "1",
                                  "--no-deps", "--manifest-path", str(root / "Cargo.toml")],
                                 "metadata", "probe-5-cargo-metadata")
     metadata_record = dict(metadata_run.observation)
@@ -218,7 +228,9 @@ def produce(root: Path, expected_source: Path, expected_sha: str, registry: Path
     request: JsonObject = {"schema": guard.REQUEST_SCHEMA, "attemptToken": nonce, "cwd": str(root),
         "target": str(root / "target"), "binaryPath": str(root / "target/debug/krr"),
         "issuedMonotonicNs": str(issued), "expiresMonotonicNs": str(issued + guard.REQUEST_TTL_NS),
-        "cargo": bindings.tools["cargo"], "sourceManifest": source_manifest,
+        "cargo": bindings.tools["cargo"], "rustc": bindings.tools["rustc"],
+        "cargoLauncher": bindings.tool_launchers["cargo"],
+        "rustcLauncher": bindings.tool_launchers["rustc"], "sourceManifest": source_manifest,
         "sourceDigest": bindings.expected["digest"], "metadata": metadata_pin,
         "metadataObservation": metadata_observation,
         "expectedPackage": {"id": package["id"], "name": package["name"], "manifestPath": package["manifest_path"]},
@@ -233,11 +245,11 @@ def produce(root: Path, expected_source: Path, expected_sha: str, registry: Path
     request_pin = guard.exclusive_json(attempt / "request.json", request)
     child = {**bindings.child_environment, guard.REQUEST_ENV: str(attempt / "request.json"),
              guard.REQUEST_SHA_ENV: _text(request_pin["sha256"], "request SHA")}
-    admission = guard.validate_request(root, [str(cargo), *guard.BUILD_FLAGS], child)
+    admission = validate_build_admission(root, child)
     guard.require(bindings.snapshot() == before, "inputs changed before sole build")
     outer_environment = {**bindings.environment, guard.REQUEST_ENV: str(attempt / "request.json"),
                          guard.REQUEST_SHA_ENV: _text(request_pin["sha256"], "request SHA")}
-    build = bindings.run([rtk, "proxy", just, "--set", "CARGO", str(cargo), "krr-build"],
+    build = bindings.run([rtk, "proxy", just, "krr-build"],
                          "build", "probe-6-native-cli-build", environment=outer_environment)
     observation_pin = guard.file_record(attempt / "observation.json")
     observation = guard.parse_json((attempt / "observation.json").read_bytes())

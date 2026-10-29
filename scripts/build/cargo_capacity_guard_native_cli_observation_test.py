@@ -36,8 +36,10 @@ class Fixture:
         self.binary.parent.mkdir(parents=True)
         self.binary.write_bytes(b"before")
         self.request_path = self.attempt / "request.json"
-        self.cargo = self.tools / "cargo"
-        rustc = self.tools / "rustc"
+        toolchain = directory / "toolchain"
+        toolchain.mkdir()
+        self.cargo = toolchain / "cargo"
+        rustc = toolchain / "rustc"
         rustc.write_text("#!/usr/bin/false\n")
         rustc.chmod(0o700)
         child = (
@@ -55,11 +57,31 @@ class Fixture:
         )
         self.cargo.write_text("#!" + str(Path(sys.executable).resolve()) + "\n" + child)
         self.cargo.chmod(0o700)
-        self.command = [str(self.cargo), *observation.BUILD_FLAGS]
+        rustup = self.tools / "rustup"
+        rustup.write_text(
+            "#!" + str(Path(sys.executable).resolve()) + "\n"
+            "import os,sys\n"
+            f"tools = {{'cargo': {str(self.cargo)!r}, 'rustc': {str(rustc)!r}}}\n"
+            "if sys.argv[1] == 'which':\n"
+            "    sys.stdout.write(tools[sys.argv[2]] + '\\n')\n"
+            "else:\n"
+            "    cargo = tools['cargo']\n"
+            "    os.execv(cargo, [cargo, *sys.argv[1:]])\n"
+        )
+        rustup.chmod(0o700)
+        cargo_launcher = self.tools / "cargo"
+        rustc_launcher = self.tools / "rustc"
+        cargo_launcher.symlink_to(rustup)
+        rustc_launcher.symlink_to(rustup)
+        rtk = shutil.which("rtk")
+        if rtk is None:
+            raise AssertionError("RTK fixture provenance unavailable")
+        self.command = [str(Path(rtk).resolve()), "proxy", "cargo", *observation.BUILD_FLAGS]
         self.protected = self.root / "tmp/protected.bin"
         self.protected.write_bytes(b"protected")
         self.environment = {
-            "PATH": str(self.tools) + os.pathsep + os.defpath, "HOME": str(self.home),
+            "PATH": str(self.tools) + os.pathsep + str(Path(rtk).resolve().parent) + os.pathsep + os.defpath,
+            "HOME": str(self.home),
             "RUSTFLAGS": "-D warnings", "LC_CTYPE": "UTF-8", "CARGO_TARGET_DIR": str(self.target),
             "CARGO_CAPACITY_PROTECTED_REFS": json.dumps([str(self.protected)]),
         }
@@ -104,7 +126,7 @@ class Fixture:
         rtk = shutil.which("rtk")
         if rtk is None:
             raise AssertionError("RTK fixture provenance unavailable")
-        self.write_json(probe, {"argv": [str(Path(rtk).resolve()), "proxy", str(self.cargo), "metadata", "--frozen",
+        self.write_json(probe, {"argv": [str(Path(rtk).resolve()), "proxy", str(cargo_launcher), "metadata", "--frozen",
                                        "--format-version", "1", "--no-deps", "--manifest-path", str(self.root / "Cargo.toml")],
             "stdout": observation.file_record(metadata), "stderr": observation.file_record(stderr),
             "label": "probe-1-cargo-metadata", "cwd": str(self.root), "attemptToken": self.nonce,
@@ -121,7 +143,14 @@ class Fixture:
             "schema": observation.REQUEST_SCHEMA, "attemptToken": self.nonce, "cwd": str(self.root),
             "target": str(self.target), "binaryPath": str(self.binary),
             "issuedMonotonicNs": str(issued), "expiresMonotonicNs": str(issued + observation.REQUEST_TTL_NS),
-            "cargo": observation.file_record(self.cargo), "sourceManifest": observation.file_record(self.source),
+            "cargo": observation.file_record(self.cargo), "rustc": observation.file_record(rustc),
+            "cargoLauncher": {"path": str(cargo_launcher), "resolvedPath": str(rustup),
+                              "sha256": observation.file_record(rustup)["sha256"],
+                              "resolutionArgv": [str(rustup), "which", "cargo"]},
+            "rustcLauncher": {"path": str(rustc_launcher), "resolvedPath": str(rustup),
+                              "sha256": observation.file_record(rustup)["sha256"],
+                              "resolutionArgv": [str(rustup), "which", "rustc"]},
+            "sourceManifest": observation.file_record(self.source),
             "sourceDigest": observation.source_digest(rows), "metadata": observation.file_record(metadata),
             "metadataObservation": observation.file_record(probe),
             "expectedPackage": {"id": "cli-id", "name": "katana-render-runtime-cli",
@@ -147,6 +176,27 @@ class Fixture:
         self.write_json(self.request_path, self.request)
         self.full_environment = {**self.environment, observation.REQUEST_ENV: str(self.request_path),
                                  observation.REQUEST_SHA_ENV: hashlib.sha256(self.request_path.read_bytes()).hexdigest()}
+
+    def isolate_rtk(self) -> Path:
+        source = shutil.which("rtk", path=self.environment["PATH"])
+        if source is None:
+            raise AssertionError("RTK fixture provenance unavailable")
+        source_path = Path(source).resolve(strict=True)
+        isolated = self.tools / "rtk"
+        shutil.copyfile(source_path, isolated)
+        isolated.chmod(0o700)
+        if isolated.read_bytes() != source_path.read_bytes():
+            raise AssertionError("isolated RTK copy differs")
+        self.command = [str(isolated), "proxy", "cargo", *observation.BUILD_FLAGS]
+        probe_path = Path(_text(_object(self.request["metadataObservation"], "metadata probe")["path"],
+                                "metadata probe path"))
+        probe = observation.parse_json(probe_path.read_bytes())
+        argv = _array(probe["argv"], "metadata argv")
+        argv[0] = str(isolated)
+        self.write_json(probe_path, probe)
+        self.request["metadataObservation"] = observation.file_record(probe_path)
+        self.save_request()
+        return isolated
 
     def save_environment_proof(self) -> None:
         self.request["environmentSha256"] = observation.environment_digest(self.environment)
@@ -196,13 +246,19 @@ class NativeObservationTests(unittest.TestCase):
                 self.assertNotIn("groupClosed", output)
                 owned = _object(output["ownedCargo"], "owned")
                 child = observation.parse_json((fixture.attempt / "child.json").read_bytes())
-                self.assertEqual(owned["pid"], child["pid"])
-                self.assertEqual(owned["parentPid"], child["parent"])
-                self.assertEqual(owned["sessionId"], child["sid"])
-                self.assertEqual(owned["processGroupId"], child["pgid"])
+                # WHY: guardはRTK proxyを所有し、実Cargoはその子として別に確認する。
+                self.assertNotEqual(owned["pid"], child["pid"])
+                self.assertEqual(owned["parentPid"], os.getpid())
+                self.assertEqual(child["parent"], owned["pid"])
+                self.assertEqual(child["sid"], owned["sessionId"])
+                self.assertEqual(child["pgid"], owned["processGroupId"])
+                self.assertEqual(child["sid"], os.getsid(0))
+                self.assertEqual(child["pgid"], os.getpgrp())
                 self.assertEqual(owned["argv"], [*fixture.command, observation.JSON_FLAG])
+                self.assertEqual(child["argv"], [str(fixture.cargo), *observation.BUILD_FLAGS,
+                                                  observation.JSON_FLAG])
                 child_environment = _object(child["environment"], "child environment")
-                # macOSのPython fixture自身が追加するCoreFoundation値だけはCargoへの渡し値と区別する。
+                # macOSのPython fixture自身が追加する値は親から渡した環境と区別する。
                 extras = set(child_environment) - set(fixture.environment)
                 self.assertEqual(extras, set())
                 self.assertEqual(owned["environment"], {key: child_environment[key] for key in fixture.environment})
@@ -213,6 +269,25 @@ class NativeObservationTests(unittest.TestCase):
                 for key, filename in (("stdout", "cargo.stdout.raw"), ("stderr", "cargo.stderr.raw")):
                     self.assertEqual(owned[key], observation.file_record(fixture.attempt / filename))
                 self.assertEqual(output["pinsBefore"], output["pinsAfter"])
+                resolution_names = set()
+                for query in _array(output["rustupResolutionQueries"], "Rustup resolution queries"):
+                    evidence = _object(query, "Rustup resolution evidence")
+                    record = _object(evidence["observation"], "Rustup resolution observation")
+                    argv = [_text(item, "Rustup query argv") for item in _array(record["argv"], "query argv")]
+                    name = argv[-1]
+                    self.assertIn(name, {"cargo", "rustc"})
+                    launcher = _object(fixture.request[name + "Launcher"], "Rustup launcher")
+                    self.assertEqual(
+                        argv,
+                        [_text(launcher["resolvedPath"], "Rustup path"), "which", name],
+                    )
+                    stdout = _object(record["stdout"], "Rustup raw stdout")
+                    self.assertEqual(
+                        Path(_text(stdout["path"], "Rustup stdout path")).read_text(),
+                        _text(_object(fixture.request[name], name)["path"], name + " path") + "\n",
+                    )
+                    resolution_names.add(name)
+                self.assertEqual(resolution_names, {"cargo", "rustc"})
                 with self.assertRaisesRegex(RuntimeError, "already consumed"):
                     fixture.admission()
 
@@ -224,6 +299,7 @@ class NativeObservationTests(unittest.TestCase):
             ("issuedMonotonicNs", "0"), ("issuedMonotonicNs", True),
             ("expectedPackage", {"id": "other", "name": "katana-render-runtime-cli", "manifestPath": "/outside"}),
             ("expectedTarget", {"name": "krr", "kind": ["lib"], "srcPath": "/outside"}),
+            ("cargoLauncher", {"path": "/outside/cargo"}),
             ("unknown", 1),
         ]
         for key, value in variants:
@@ -235,7 +311,7 @@ class NativeObservationTests(unittest.TestCase):
                     fixture.admission()
                 self.assertFalse((fixture.attempt / "child.json").exists())
 
-    def test_native_admission_uses_explicit_child_path_and_keeps_direct_cargo_binding(self) -> None:
+    def test_native_admission_uses_the_pinned_rustup_launcher(self) -> None:
         for variation in ("parent-proxy-child-canonical", "wrong-child-path", "different-cargo", "bare-name", "wrapper"):
             with self.subTest(variation=variation), tempfile.TemporaryDirectory() as directory:
                 fixture = Fixture(Path(directory))
@@ -266,7 +342,8 @@ class NativeObservationTests(unittest.TestCase):
                 self.assertFalse((fixture.attempt / "child.json").exists())
 
     def test_request_ttl_pair_unknown_environment_and_wrapper_rejections(self) -> None:
-        for variation in ("expired", "future", "missing-sha", "missing-path", "wrapper", "extra-flag", "rustc", "config"):
+        for variation in ("expired", "future", "missing-sha", "missing-path", "wrapper", "extra-flag",
+                          "rustc", "launcher-resolution", "config"):
             with self.subTest(variation=variation), tempfile.TemporaryDirectory() as directory:
                 fixture = Fixture(Path(directory))
                 if variation in ("expired", "future"):
@@ -284,6 +361,12 @@ class NativeObservationTests(unittest.TestCase):
                     fixture.command.append("--release")
                 elif variation == "rustc":
                     fixture.full_environment["RUSTC_WRAPPER"] = "/arbitrary"
+                elif variation == "launcher-resolution":
+                    launcher = _object(fixture.request["cargoLauncher"], "Cargo launcher").copy()
+                    launcher["resolutionArgv"] = [
+                        _text(launcher["resolvedPath"], "Rustup path"), "which", "rustc"]
+                    fixture.request["cargoLauncher"] = launcher
+                    fixture.save_request()
                 else:
                     config = fixture.home / ".cargo/config.toml"
                     config.parent.mkdir(parents=True)
@@ -568,13 +651,9 @@ class NativeObservationTests(unittest.TestCase):
             self.assertEqual((fixture.attempt / "observation.json").read_text(), "occupied")
 
     def test_real_spawn_failure_and_pre_capacity_failure_keep_cargo_zero(self) -> None:
-        for variation in ("spawn", "metric", "capacity"):
+        for variation in ("metric", "capacity"):
             with self.subTest(variation=variation), tempfile.TemporaryDirectory() as directory:
                 fixture = Fixture(Path(directory))
-                if variation == "spawn":
-                    fixture.cargo.write_text("this is not an executable image")
-                    fixture.request["cargo"] = observation.file_record(fixture.cargo)
-                    fixture.save_request()
                 with patch.dict(os.environ, fixture.full_environment, clear=True):
                     admission = observation.validate_request(fixture.root, fixture.command, os.environ)
                     report = inspect(fixture.root, fixture.target, fixture.state, 2, admission.state_sha256)
@@ -589,6 +668,34 @@ class NativeObservationTests(unittest.TestCase):
                 self.assertIsNone(_object(output["ownedCargo"], "owned")["pid"])
                 self.assertFalse((fixture.attempt / "child.json").exists())
                 self.assertTrue(output["errors"])
+
+        with self.subTest(variation="proxy-spawn"), tempfile.TemporaryDirectory() as directory:
+            fixture = Fixture(Path(directory))
+            proxy = fixture.isolate_rtk()
+            fixture.admission()
+            proxy.write_text("this is not an executable image")
+            code, output = fixture.run()
+            owned = _object(output["ownedCargo"], "owned")
+            self.assertEqual(code, 1)
+            self.assertIsNone(owned["pid"])
+            self.assertIsNone(owned["actualExit"])
+            self.assertFalse((fixture.attempt / "child.json").exists())
+            self.assertTrue(output["errors"])
+
+        with self.subTest(variation="cargo-exec"), tempfile.TemporaryDirectory() as directory:
+            fixture = Fixture(Path(directory))
+            fixture.cargo.write_text("this is not an executable image")
+            fixture.request["cargo"] = observation.file_record(fixture.cargo)
+            fixture.save_request()
+            code, output = fixture.run()
+            owned = _object(output["ownedCargo"], "owned")
+            self.assertEqual(code, 1)
+            self.assertIsInstance(owned["pid"], int)
+            self.assertNotEqual(owned["actualExit"], 0)
+            self.assertIsNone(output["artifact"])
+            self.assertFalse((fixture.attempt / "child.json").exists())
+            self.assertEqual(fixture.binary.read_bytes(), b"before")
+            self.assertTrue(output["errors"])
 
     def test_post_rustc_config_and_raw_inode_replacement_fail(self) -> None:
         for variation in ("rustc", "config", "raw"):
@@ -627,7 +734,13 @@ class NativeObservationTests(unittest.TestCase):
 
     def test_descendant_does_not_claim_group_closure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            fixture = Fixture(Path(directory), "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']); (attempt/'descendant.pid').write_text(str(child.pid))")
+            # WHY: 継承FDを閉じ、RTK終了後も残るdescendantを観測する。
+            fixture = Fixture(
+                Path(directory),
+                "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'], "
+                "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); "
+                "(attempt/'descendant.pid').write_text(str(child.pid))",
+            )
             descendant: int | None = None
             try:
                 code, output = fixture.run()
@@ -639,7 +752,10 @@ class NativeObservationTests(unittest.TestCase):
                 self.assertNotIn("groupClosed", _object(output["ownedCargo"], "owned"))
             finally:
                 if descendant is not None:
-                    os.kill(descendant, signal.SIGKILL)
+                    try:
+                        os.kill(descendant, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
 
     def test_capacity_policy_never_accepts_bool_or_unavailable_or_excess(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

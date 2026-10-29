@@ -126,6 +126,20 @@ export function createManagedReaderInputs() {
     if (pin === undefined) throw new Error("unit tool missing");
     return pin;
   };
+  const rustup = save("tmp/toolchain/bin/rustup", "unexecuted unit Rustup dispatcher");
+  fs.chmodSync(rustup.path, 0o700);
+  const launcherDirectory = path.dirname(rustup.path);
+  const toolLauncher = (name: "cargo" | "rustc") => {
+    const launcher = path.join(launcherDirectory, name);
+    fs.symlinkSync(rustup.path, launcher);
+    return {
+      path: launcher,
+      resolvedPath: rustup.path,
+      sha256: sha256(fs.readFileSync(rustup.path)),
+      resolutionArgv: [rustup.path, "which", name],
+    };
+  };
+  const toolLaunchers = { cargo: toolLauncher("cargo"), rustc: toolLauncher("rustc") };
   const protectedPin = save("tmp/protected", "unit protected bytes"),
     protectedStat = fs.statSync(protectedPin.path);
   const refs = [
@@ -155,7 +169,7 @@ export function createManagedReaderInputs() {
     environmentSha256: sha256(Buffer.from(protectedEnv)),
   };
   const environment = {
-    PATH: path.dirname(tool("cargo").path) + path.delimiter + process.env.PATH,
+    PATH: launcherDirectory + path.delimiter + process.env.PATH,
     HOME: path.join(root, "tmp/home"),
     PWD: root,
     _: python,
@@ -186,6 +200,7 @@ export function createManagedReaderInputs() {
   const snapshot = {
     source: files,
     tools,
+    toolLaunchers,
     control,
     environment,
     environmentSha256: digestStringRecord(environment),

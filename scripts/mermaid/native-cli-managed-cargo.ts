@@ -321,9 +321,10 @@ export function verifyManagedCargo(
   owned(metadata, receipt.metadataLifecycle, "metadata");
   owned(receipt.buildObservation, receipt.buildLifecycle, "build");
   const tools = receipt.snapshotAfter.tools;
+  const launchers = receipt.snapshotAfter.toolLaunchers;
   same(
     receipt.buildObservation.argv,
-    [tools.rtk.path, "proxy", tools.just.path, "--set", "CARGO", tools.cargo.path, "krr-build"],
+    [tools.rtk.path, "proxy", tools.just.path, "krr-build"],
     "sole build argv",
   );
   same(
@@ -331,7 +332,7 @@ export function verifyManagedCargo(
     [
       tools.rtk.path,
       "proxy",
-      tools.cargo.path,
+      launchers.cargo.path,
       "metadata",
       "--frozen",
       "--format-version",
@@ -391,10 +392,16 @@ export function verifyManagedCargo(
   );
   const cargo = observation.ownedCargo;
   const lifecycle = managedLifecycleSchema.parse(read(receipt.buildLifecycle));
+  const cargoRtk = cargo.argv[0];
+  requireBound(
+    cargoRtk !== undefined && fs.realpathSync(cargoRtk) === tools.rtk.path,
+    "guard RTK proxy identity differs",
+  );
   same(
-    cargo.argv,
+    cargo.argv.slice(1),
     [
-      tools.cargo.path,
+      "proxy",
+      "cargo",
       "build",
       "-p",
       "katana-render-runtime-cli",
@@ -423,11 +430,15 @@ export function verifyManagedCargo(
   same(observation.pinsBefore, observation.pinsAfter, "guard input endpoints");
   same(observation.pinsAfter.source, receipt.snapshotAfter.source, "guard source pins");
   same(observation.pinsAfter.cargo, tools.cargo, "guard Cargo pin");
+  same(observation.pinsAfter.rustc, tools.rustc, "guard Rustc pin");
+  same(observation.pinsAfter.cargoLauncher, launchers.cargo, "guard Cargo launcher");
+  same(observation.pinsAfter.rustcLauncher, launchers.rustc, "guard Rustc launcher");
   same(observation.pinsAfter.guardCodePins, request.guardCodePins, "guard code pins");
   same(observation.pinsAfter.capacityAdmission, request.capacityAdmission, "guard capacity pins");
   for (const name of observation.pinsAfter.unsupportedCargoConfigsAbsent)
     requireBound(!fs.existsSync(name), "Cargo config appeared");
-  verifyFileRecord(observation.pinsAfter.observedPathRustc, "observed PATH rustc");
+  same(observation.pinsAfter.rustupSelectedRustc, tools.rustc, "Rustup-selected Rustc pin");
+  verifyRustupResolutionQueries(receipt, request, observation.ownedCargo, observation.rustupResolutionQueries);
   verifyManagedCapacity(receipt.cwd, observation.capacityBefore, observation.capacityAfter);
   const raw = fs.readFileSync(canonicalRegularFile(cargo.stdout.path, "Cargo raw"), "utf8");
   verifyFileRecord(cargo.stdout, "Cargo raw");
@@ -460,4 +471,42 @@ export function verifyManagedCargo(
       artifact.target.src_path === request.expectedTarget.srcPath,
     "Cargo binary/target differs",
   );
+}
+
+function verifyRustupResolutionQueries(
+  receipt: ManagedReceipt,
+  request: ManagedRequest,
+  cargo: ManagedObservation["ownedCargo"],
+  queries: ManagedObservation["rustupResolutionQueries"],
+): void {
+  const tools = receipt.snapshotAfter.tools;
+  const seen = new Set(queries.map((query) => verifyRustupResolutionQuery(receipt, request, tools, query)));
+  requireBound(
+    seen.has("cargo") && seen.has("rustc") &&
+      queries.some((query) => BigInt(query.observation.endedNs) <= BigInt(cargo.startedNs)) &&
+      queries.some((query) => BigInt(query.observation.startedNs) >= BigInt(cargo.endedNs)),
+    "Rustup query pair/endpoints are incomplete",
+  );
+}
+
+function verifyRustupResolutionQuery(
+  receipt: ManagedReceipt,
+  request: ManagedRequest,
+  tools: ManagedReceipt["snapshotAfter"]["tools"],
+  query: ManagedObservation["rustupResolutionQueries"][number],
+): "cargo" | "rustc" {
+  const name = query.observation.argv[2];
+  if (name !== "cargo" && name !== "rustc") throw new Error("Managed Rustup query tool differs");
+  owned(query.observation, query.lifecycle, "tool-query");
+  same(query.observation.argv, [receipt.snapshotAfter.toolLaunchers[name].resolvedPath, "which", name],
+    "Rustup query argv");
+  same(query.observation.environment, request.environment, "Rustup query environment");
+  requireBound(query.observation.cwd === receipt.cwd &&
+    query.observation.attemptToken === receipt.attemptToken &&
+    query.observation.label === `probe-rustup-${name}` &&
+    query.lifecycle.path.startsWith(path.join(path.dirname(receipt.request.path), "lifecycle")),
+  "Rustup query attempt binding differs");
+  requireBound(fs.readFileSync(query.observation.stdout.path, "utf8") === `${tools[name].path}\n` &&
+    fs.statSync(query.observation.stderr.path).size === 0, "Rustup resolved executable output differs");
+  return name;
 }

@@ -328,14 +328,34 @@ test("managed phase pair accepts execution before and plain measurement after in
   }
 });
 
-test("managed v2 receipt binds the no-clean preflight FileRecord", () => {
+test("managed v3 receipt binds the Rustup launchers and no-clean preflight FileRecord", () => {
   const f = createManagedReaderFixture();
   try {
-    expect(f.receipt.schema).toBe("krr-native-cli-managed-build-v2");
+    expect(f.receipt.schema).toBe("krr-native-cli-managed-build-v3");
     expect(f.receipt.capacityPreflight.path).toBe(
       path.join(path.dirname(f.receiptPath), "capacity-preflight.json"),
     );
     verify(f);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("managed observer rejects a Rustup query rewritten as a direct executable call", () => {
+  const f = createManagedReaderFixture();
+  try {
+    verify(f);
+    const query = f.observation.rustupResolutionQueries[0];
+    if (query === undefined) throw new Error("Rustup query fixture missing");
+    const directArgv = [f.receipt.snapshotAfter.tools.cargo.path, "which", "cargo"];
+    query.observation.argv = directArgv;
+    const lifecycle = JSON.parse(fs.readFileSync(query.lifecycle.path, "utf8")) as {
+      argv: string[];
+    };
+    lifecycle.argv = directArgv;
+    query.lifecycle = writeFile(query.lifecycle.path, JSON.stringify(lifecycle));
+    observation(f);
+    expect(() => verify(f)).toThrow(/Rustup query argv/);
   } finally {
     fs.rmSync(f.root, { recursive: true, force: true });
   }

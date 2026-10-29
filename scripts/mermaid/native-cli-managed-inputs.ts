@@ -102,10 +102,27 @@ export function verifyManagedInputs(receipt: ManagedReceipt): void {
   );
   requireBound(
     path.dirname(snapshot.tools.cargo.path) === path.dirname(snapshot.tools.rustc.path) &&
-      snapshot.environment.PATH?.split(path.delimiter)[0] ===
-        path.dirname(snapshot.tools.cargo.path),
-    "selected toolchain PATH binding differs",
+      path.dirname(snapshot.toolLaunchers.cargo.path) ===
+        path.dirname(snapshot.toolLaunchers.rustc.path),
+    "Rustup launcher directories differ",
   );
+  for (const name of ["cargo", "rustc"] as const) {
+    const launcher = snapshot.toolLaunchers[name];
+    const selected = snapshot.environment.PATH?.split(path.delimiter)
+      .map((directory) => path.resolve(root, directory, name))
+      .find((candidate) =>
+        fs.existsSync(candidate) && (fs.statSync(candidate).mode & 0o111) !== 0,
+      );
+    requireBound(
+      selected === launcher.path &&
+        launcher.path === path.join(path.dirname(launcher.path), name) &&
+        path.basename(launcher.resolvedPath) === "rustup" &&
+        fs.realpathSync(launcher.path) === launcher.resolvedPath &&
+        sha256(fs.readFileSync(launcher.resolvedPath)) === launcher.sha256 &&
+        isDeepStrictEqual(launcher.resolutionArgv, [launcher.resolvedPath, "which", name]),
+      `${name} Rustup launcher identity differs`,
+    );
+  }
   for (const name of snapshot.toolchainAbsent)
     requireBound(!fs.existsSync(name), "toolchain config appeared");
   same(

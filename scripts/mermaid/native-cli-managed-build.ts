@@ -77,6 +77,9 @@ export function verifyManagedNativeBuildReceipt(
     "expectedPackage",
     "expectedTarget",
     "cargo",
+    "rustc",
+    "cargoLauncher",
+    "rustcLauncher",
     "guardCodePins",
   ] as const)
     same(observation[key], request[key], key);
@@ -117,6 +120,9 @@ export function verifyManagedNativeBuildReceipt(
   );
   verifyHostPrebuild(receipt, request);
   same(request.cargo, receipt.snapshotAfter.tools.cargo, "request Cargo tool");
+  same(request.rustc, receipt.snapshotAfter.tools.rustc, "request Rustc tool");
+  same(request.cargoLauncher, receipt.snapshotAfter.toolLaunchers.cargo, "request Cargo launcher");
+  same(request.rustcLauncher, receipt.snapshotAfter.toolLaunchers.rustc, "request Rustc launcher");
   requireBound(/^\/[a-z0-9_@%+=:,./-]+$/i.test(request.cargo.path), "Cargo shell path differs");
   same(request.capacityAdmission, receipt.snapshotAfter.capacityAdmission, "request capacity");
   same(observation.capacityProtection, request.capacityAdmission, "observed capacity");
@@ -166,7 +172,7 @@ export function verifyManagedNativeBuildReceipt(
       [
         receipt.snapshotAfter.tools.rtk.path,
         "proxy",
-        receipt.snapshotAfter.tools[name].path,
+        receipt.snapshotAfter.toolLaunchers[name].path,
         name === "cargo" ? "--version" : "-Vv",
       ],
       "tool probe argv",
