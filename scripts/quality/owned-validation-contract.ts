@@ -4281,16 +4281,6 @@ function restoreReviewedFeatureCatalogTestProcess(lines: string[]): string[] | u
   return restored;
 }
 function removeReviewedRuntimeAssetTests(lines: string[]): string[] | undefined {
-  const withoutPictureDiagnostic = removeReviewedTestToken(
-    lines,
-    "./scripts/mermaid/ja04-picture-diagnostic_test.ts",
-    "./scripts/mermaid/raster_producer_observation_test.ts",
-    "./scripts/mermaid/raster_production_binding_test.ts",
-  );
-  if (!withoutPictureDiagnostic) return undefined;
-  return removeExistingReviewedRuntimeAssetTests(withoutPictureDiagnostic);
-}
-function removeExistingReviewedRuntimeAssetTests(lines: string[]): string[] | undefined {
   const withoutFrameContext = removeReviewedTestToken(
     lines,
     "./scripts/mermaid/native_frame_capture_context_test.ts",

@@ -8,26 +8,17 @@ use tiny_skia_path::Path;
 
 use super::svgtree::{AId, EId, SvgNode};
 use super::{converter, units};
-use crate::svg_engine::usvg::{ApproxEqUlps, IsValidLength, Rect, SourceEllipse};
-
-type ConvertedShape = (Arc<Path>, Option<SourceEllipse>);
+use crate::svg_engine::usvg::{ApproxEqUlps, IsValidLength, Rect};
 
 pub(crate) fn convert(node: SvgNode, state: &converter::State) -> Option<Arc<Path>> {
-    convert_with_ellipse(node, state).map(|(path, _)| path)
-}
-
-pub(crate) fn convert_with_ellipse(
-    node: SvgNode,
-    state: &converter::State,
-) -> Option<ConvertedShape> {
     match node.tag_name()? {
-        EId::Rect => convert_rect(node, state).map(|path| (path, None)),
+        EId::Rect => convert_rect(node, state),
         EId::Circle => convert_circle(node, state),
         EId::Ellipse => convert_ellipse(node, state),
-        EId::Line => convert_line(node, state).map(|path| (path, None)),
-        EId::Polyline => convert_polyline(node).map(|path| (path, None)),
-        EId::Polygon => convert_polygon(node).map(|path| (path, None)),
-        EId::Path => convert_path(node).map(|path| (path, None)),
+        EId::Line => convert_line(node, state),
+        EId::Polyline => convert_polyline(node),
+        EId::Polygon => convert_polygon(node),
+        EId::Path => convert_path(node),
         _ => None,
     }
 }
@@ -73,40 +64,6 @@ pub(crate) fn convert_path(node: SvgNode) -> Option<Arc<Path>> {
     }
 
     builder.finish().map(Arc::new)
-}
-
-pub(crate) fn valid_arc_source(data: &str) -> bool {
-    if !data.contains(['A', 'a']) || data.contains('\0') {
-        return false;
-    }
-    let mut has_arc = false;
-    for segment in svgtypes::PathParser::from(data) {
-        let Ok(segment) = segment else { return false };
-        if !finite_segment(segment) {
-            return false;
-        }
-        has_arc |= matches!(segment, svgtypes::PathSegment::EllipticalArc { .. });
-    }
-    has_arc
-}
-
-fn finite_segment(segment: svgtypes::PathSegment) -> bool {
-    use svgtypes::PathSegment as S;
-    match segment {
-        S::MoveTo { x, y, .. } | S::LineTo { x, y, .. } | S::SmoothQuadratic { x, y, .. } => finite(&[x, y]),
-        S::HorizontalLineTo { x, .. } | S::VerticalLineTo { y: x, .. } => finite(&[x]),
-        S::CurveTo { x1, y1, x2, y2, x, y, .. } => finite(&[x1, y1, x2, y2, x, y]),
-        S::SmoothCurveTo { x2, y2, x, y, .. } => finite(&[x2, y2, x, y]),
-        S::Quadratic { x1, y1, x, y, .. } => finite(&[x1, y1, x, y]),
-        S::EllipticalArc { rx, ry, x_axis_rotation, x, y, .. } => {
-            rx >= 0.0 && ry >= 0.0 && finite(&[rx, ry, x_axis_rotation, x, y])
-        }
-        S::ClosePath { .. } => true,
-    }
-}
-
-fn finite(values: &[f64]) -> bool {
-    values.iter().all(|value| (*value as f32).is_finite())
 }
 
 fn convert_rect(node: SvgNode, state: &converter::State) -> Option<Arc<Path>> {
@@ -265,7 +222,7 @@ fn points_to_path(node: SvgNode, eid: &str) -> Option<tiny_skia_path::PathBuilde
     Some(builder)
 }
 
-fn convert_circle(node: SvgNode, state: &converter::State) -> Option<ConvertedShape> {
+fn convert_circle(node: SvgNode, state: &converter::State) -> Option<Arc<Path>> {
     let cx = node.convert_user_length(AId::Cx, state, Length::zero());
     let cy = node.convert_user_length(AId::Cy, state, Length::zero());
     let r = node.convert_user_length(AId::R, state, Length::zero());
@@ -278,10 +235,10 @@ fn convert_circle(node: SvgNode, state: &converter::State) -> Option<ConvertedSh
         return None;
     }
 
-    ellipse_to_path(cx, cy, r, r).map(|path| (path, Some((cx, cy, r, r))))
+    ellipse_to_path(cx, cy, r, r)
 }
 
-fn convert_ellipse(node: SvgNode, state: &converter::State) -> Option<ConvertedShape> {
+fn convert_ellipse(node: SvgNode, state: &converter::State) -> Option<Arc<Path>> {
     let cx = node.convert_user_length(AId::Cx, state, Length::zero());
     let cy = node.convert_user_length(AId::Cy, state, Length::zero());
     let (rx, ry) = resolve_rx_ry(node, state);
@@ -302,7 +259,7 @@ fn convert_ellipse(node: SvgNode, state: &converter::State) -> Option<ConvertedS
         return None;
     }
 
-    ellipse_to_path(cx, cy, rx, ry).map(|path| (path, Some((cx, cy, rx, ry))))
+    ellipse_to_path(cx, cy, rx, ry)
 }
 
 fn ellipse_to_path(cx: f32, cy: f32, rx: f32, ry: f32) -> Option<Arc<Path>> {

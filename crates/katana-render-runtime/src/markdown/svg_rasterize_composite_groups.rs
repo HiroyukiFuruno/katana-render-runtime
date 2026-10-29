@@ -1,4 +1,4 @@
-use super::{AuthoredClipInfo, RenderContext, TextRasterizer, layers};
+use super::{AuthoredClipInfo, TextRasterizer, layers};
 use resvg::usvg;
 use tiny_skia::{PixmapMut, Transform};
 
@@ -14,12 +14,13 @@ pub(super) fn render_group_node(
     group: &usvg::Group,
     transform: Transform,
     pixmap: &mut PixmapMut<'_>,
-    context: RenderContext<'_>,
+    provenance: &AuthoredClipInfo,
+    text: Option<&dyn TextRasterizer>,
 ) -> Result<(), String> {
     if super::is_traversable_group(group) {
-        super::render_traversable_group(node, group, transform, pixmap, context)
+        super::render_traversable_group(node, group, transform, pixmap, provenance, text)
     } else {
-        render_effect_group(node, group, transform, pixmap, context)
+        render_effect_group(node, group, transform, pixmap, provenance, text)
     }
 }
 
@@ -28,10 +29,9 @@ fn render_effect_group(
     group: &usvg::Group,
     transform: Transform,
     pixmap: &mut PixmapMut<'_>,
-    context: RenderContext<'_>,
+    provenance: &AuthoredClipInfo,
+    text: Option<&dyn TextRasterizer>,
 ) -> Result<(), String> {
-    let provenance = context.authored_clip_info;
-    let text = context.text_rasterizer;
     #[cfg(target_os = "macos")]
     if render_linear_component_transfer(group, transform, pixmap, provenance, text)? {
         return Ok(());
