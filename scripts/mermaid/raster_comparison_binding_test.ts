@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect, spyOn, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -624,6 +624,56 @@ test("symlink and directory inputs cannot stand in for pinned regular files", ()
   expect(() => physicalFileIdentity(symlink)).toThrow("regular file");
   expect(() => physicalFileIdentity(f.directory)).toThrow("regular file");
 });
+
+function physicalReadDiagnostic(filePath: string): Record<string, unknown> {
+  try {
+    physicalFileIdentity(filePath);
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    const prefix = `Raster comparison input changed while reading: ${filePath} `;
+    if (!error.message.startsWith(prefix)) throw error;
+    return JSON.parse(error.message.slice(prefix.length)) as Record<string, unknown>;
+  }
+  throw new Error("expected physical read rejection");
+}
+
+test("physical read rejection reports short bytes and evaluated stamps", () => {
+  const f = fixture();
+  const filePath = path.join(f.directory, "short-read");
+  fs.writeFileSync(filePath, "abcd");
+  const read = spyOn(fs, "readFileSync").mockReturnValueOnce(Buffer.from("ab"));
+  try {
+    const details = physicalReadDiagnostic(filePath);
+    expect(details.bytesLength).toBe(2);
+    expect(details.expectedSize).toBe("4");
+    expect(details.canonicalBefore).toBe(fs.realpathSync(filePath));
+    expect(details.canonicalAfter).toBe(details.canonicalBefore);
+    expect(details.fdAfter).toEqual(details.before);
+    expect(details.after).toEqual(details.before);
+  } finally {
+    read.mockRestore();
+  }
+});
+
+test("physical read rejection keeps skipped canonical observation null", () => {
+  const f = fixture();
+  const filePath = path.join(f.directory, "changed-fd");
+  fs.writeFileSync(filePath, "abcd");
+  const original = fs.statSync(filePath, { bigint: true });
+  const changed = Object.create(original) as fs.BigIntStats;
+  Object.defineProperty(changed, "size", { value: original.size + 1n });
+  const stat = spyOn(fs, "fstatSync").mockReturnValueOnce(original).mockReturnValueOnce(changed);
+  try {
+    const details = physicalReadDiagnostic(filePath);
+    expect(details.canonicalAfter).toBeNull();
+    expect(details.fdAfter).toMatchObject({ size: 5 });
+    expect(details.bytesLength).toBe(4);
+    expect(details.expectedSize).toBe("4");
+  } finally {
+    stat.mockRestore();
+  }
+});
+
 test("strict CLI requires a caller-supplied path and SHA together", () => {
   expect(() => CliOptions.parse([])).toThrow("externally pinned");
   expect(() => CliOptions.parse(["--raster-binding-config", "/trusted/config.json"])).toThrow(

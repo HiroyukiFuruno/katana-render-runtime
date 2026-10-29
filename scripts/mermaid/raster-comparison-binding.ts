@@ -696,14 +696,35 @@ function readPhysicalFile(filePath: string): { identity: RasterFileIdentity; byt
       throw new Error(`Raster comparison input changed while opening: ${filePath}`);
     const bytes = fs.readFileSync(fd),
       after = fs.lstatSync(filePath, { bigint: true });
+    let fdAfter: fs.BigIntStats | null = null;
+    let canonicalAfter: string | null = null;
+    const fdChanged = () => {
+      fdAfter = fs.fstatSync(fd, { bigint: true });
+      return !sameStamp(fdAfter);
+    };
+    const canonicalChanged = () => {
+      canonicalAfter = fs.realpathSync(filePath);
+      return canonicalAfter !== canonical;
+    };
     if (
       after.isSymbolicLink() ||
       !sameStamp(after) ||
-      !sameStamp(fs.fstatSync(fd, { bigint: true })) ||
-      fs.realpathSync(filePath) !== canonical ||
+      fdChanged() ||
+      canonicalChanged() ||
       BigInt(bytes.length) !== before.size
     ) {
-      throw new Error(`Raster comparison input changed while reading: ${filePath}`);
+      const diagnostic = {
+        before: directoryStamp(before),
+        after: directoryStamp(after),
+        fdAfter: fdAfter === null ? null : directoryStamp(fdAfter),
+        canonicalBefore: canonical,
+        canonicalAfter,
+        bytesLength: bytes.length,
+        expectedSize: before.size.toString(),
+      };
+      throw new Error(
+        `Raster comparison input changed while reading: ${filePath} ${JSON.stringify(diagnostic)}`,
+      );
     }
     return {
       bytes,
