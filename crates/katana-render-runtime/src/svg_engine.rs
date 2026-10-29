@@ -19,3 +19,11 @@ mod render_tests;
 #[cfg(test)]
 #[path = "svg_engine_viewbox_tests.rs"]
 mod viewbox_tests;
+
+#[cfg(test)]
+#[path = "svg_engine_source_ellipse_tests.rs"]
+mod source_ellipse_tests;
+
+#[cfg(test)]
+#[path = "svg_engine_source_arc_tests.rs"]
+mod source_arc_tests;

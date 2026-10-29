@@ -46,6 +46,7 @@ pub struct Cache {
     /// over the course of conversion.
     pub fontdb: Arc<Database>,
     pub(crate) shared_fontdb: Rc<RefCell<Arc<Database>>>,
+    source_shapes: Option<Box<SourceShapes>>,
 
     cache_outline: HashMap<(ID, GlyphId, Vec<FontVariation>), Option<tiny_skia_path::Path>>,
     cache_colr: HashMap<(ID, GlyphId, Vec<FontVariation>), Option<Tree>>,
@@ -93,6 +94,7 @@ impl Cache {
         Self {
             fontdb,
             shared_fontdb,
+            source_shapes: None,
 
             cache_outline: HashMap::new(),
             cache_colr: HashMap::new(),
@@ -408,6 +410,7 @@ pub(crate) fn convert_doc(svg_doc: &svgtree::Document, opt: &Options) -> Result<
         masks: Vec::new(),
         filters: Vec::new(),
         fontdb: opt.fontdb.clone(),
+        source_shapes: None,
     };
 
     if !svg.is_visible_element(opt) {
@@ -494,6 +497,13 @@ pub(crate) fn convert_doc(svg_doc: &svgtree::Document, opt: &Options) -> Result<
     tree.root.collect_masks(&mut tree.masks);
     tree.root.collect_filters(&mut tree.filters);
     tree.root.calculate_bounding_boxes();
+    if let Some(shapes) = &mut cache.source_shapes {
+        shapes.retain(|_, (path, _)| path.strong_count() > 0);
+        if shapes.is_empty() {
+            cache.source_shapes = None;
+        }
+    }
+    tree.source_shapes = cache.source_shapes.take().map(|shapes| Arc::new(*shapes));
 
     // The fontdb might have been mutated and we want to apply these changes to
     // the tree's fontdb.
@@ -688,7 +698,9 @@ fn convert_element_impl(
         | EId::Polyline
         | EId::Polygon
         | EId::Path => {
-            if let Some(path) = super::shapes::convert(node, state) {
+            if let Some((path, ellipse)) = super::shapes::convert_with_ellipse(node, state) {
+                register_source_ellipse(cache, &path, ellipse);
+                register_source_path(cache, &path, node);
                 convert_path(node, path, state, cache, parent);
             }
         }
@@ -761,7 +773,9 @@ fn convert_clip_path_elements_impl(
 ) {
     match tag_name {
         EId::Rect | EId::Circle | EId::Ellipse | EId::Polyline | EId::Polygon | EId::Path => {
-            if let Some(path) = super::shapes::convert(node, state) {
+            if let Some((path, ellipse)) = super::shapes::convert_with_ellipse(node, state) {
+                register_source_ellipse(cache, &path, ellipse);
+                register_source_path(cache, &path, node);
                 convert_path(node, path, state, cache, parent);
             }
         }
@@ -934,6 +948,34 @@ pub(crate) fn convert_group(
     g.calculate_bounding_boxes();
 
     Some(g)
+}
+
+fn register_source_ellipse(
+    cache: &mut Cache,
+    path: &Arc<tiny_skia_path::Path>,
+    ellipse: Option<SourceEllipse>,
+) {
+    if let Some(ellipse) = ellipse
+        && [ellipse.0, ellipse.1, ellipse.2, ellipse.3].into_iter().all(f32::is_finite)
+    {
+        register_source_shape(cache, path, SourceShape::Ellipse(ellipse));
+    }
+}
+
+fn register_source_shape(cache: &mut Cache, path: &Arc<tiny_skia_path::Path>, shape: SourceShape) {
+    cache.source_shapes.get_or_insert_with(Default::default).insert(
+        Arc::as_ptr(path) as usize,
+        (Arc::downgrade(path), shape),
+    );
+}
+
+fn register_source_path(cache: &mut Cache, path: &Arc<tiny_skia_path::Path>, node: SvgNode) {
+    if node.tag_name() == Some(EId::Path)
+        && let Some(data) = node.attribute::<&str>(AId::D)
+        && super::shapes::valid_arc_source(data)
+    {
+        register_source_shape(cache, path, SourceShape::SvgPath(data.to_owned()));
+    }
 }
 
 fn convert_path(

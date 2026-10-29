@@ -24,7 +24,7 @@
     "harfrustAlias": "usvg harfrust:: becomes svg_harfrust:: (original 0.12 dependency identity)",
     "enabledFeaturePredicates": "The original enabled feature counts are retained per file; constant evaluation removes 79 true cfg attributes and four false branches. OS and test conditions are retained; KRR has no optional public SVG-engine feature contract.",
     "allowAttributes": "The original 46 allow attributes are retained verbatim. Two scoped boundary attributes permit observed external Clippy lints (22 in usvg/lib.rs, 18 in resvg/lib.rs) plus dead_code and unused_imports. Four resvg lints already allowed upstream are omitted from the added list to avoid duplicate attributes. No blanket all, non_minimal_cfg, unsafe-code override, or additional exclusion is introduced.",
-    "sourceSemantics": "Initial mechanical transplant preserves upstream behavior; subsequent scoped fixes pass CSS font size to HarfRust tracking and use hard-edge clipping only for implicit marker viewports. An optional internal fallback callback receives the original requested font attributes while the default legacy resolver remains unchanged; nested SVG forwards the callback. Original SVG, glyph IDs, and variation coordinates are not manually rewritten. Clip bounds, user-clip antialiasing, and upstream test expectations are preserved. ViewBox scale and alignment use f64 intermediate arithmetic before conversion to the existing f32 transform. Linked feImage parsing transfers a child ID only to an unnamed parent and preserves existing referenced IDs across serialization. Upstream source hashes and licenses remain unchanged."
+    "sourceSemantics": "Initial mechanical transplant preserves upstream behavior; subsequent scoped fixes pass CSS font size to HarfRust tracking and use hard-edge clipping only for implicit marker viewports. An optional internal fallback callback receives the original requested font attributes while the default legacy resolver remains unchanged; nested SVG forwards the callback. Original SVG, glyph IDs, and variation coordinates are not manually rewritten. Clip bounds, user-clip antialiasing, and upstream test expectations are preserved. ViewBox scale and alignment use f64 intermediate arithmetic before conversion to the existing f32 transform. Linked feImage parsing transfers a child ID only to an unnamed parent and preserves existing referenced IDs across serialization. Circle and ellipse source parameters and validated finite Arc path data are retained in a Tree-scoped weak-identity lookup without changing normalized path data or writer output. Upstream source hashes and licenses remain unchanged."
   },
   "files": [
     {
@@ -60,9 +60,9 @@
       "source": "crates/usvg/src/parser/converter.rs",
       "destination": "usvg/parser/converter.rs",
       "sourceSha256": "e658958b50f48996944cc8cb2025cd2c40cd9acadcd00d993e733806758f0a50",
-      "transplantedSha256": "ba60db5f46ad04f9b20ca4f50c8ef59c2eab7f22fd1ff7b13b7e189a14f8ecca",
+      "transplantedSha256": "9e4fb2c4e86891f09bf9bd762219b4728ce9cd8b940a69b4474b92ccd4f424de",
       "sourceBytes": 37306,
-      "transplantedBytes": 36136,
+      "transplantedBytes": 37762,
       "adaptations": {
         "cratePaths": 6,
         "enabledFeaturePredicates": {
@@ -174,9 +174,9 @@
       "source": "crates/usvg/src/parser/shapes.rs",
       "destination": "usvg/parser/shapes.rs",
       "sourceSha256": "6c441d77c6ca2a9e574a24c2d79edcf8ab4f88de012e3b9e425ec4c4b8dc6928",
-      "transplantedSha256": "a08d4dc2850cbc86da318c8539e94d5a4cee49090784f1d2b0d1bfe91f72d382",
+      "transplantedSha256": "2d09e58d7c53f6df80877d17ab1f4fd5569b5a3007f4558963080fe831e37585",
       "sourceBytes": 10085,
-      "transplantedBytes": 10103,
+      "transplantedBytes": 11875,
       "adaptations": {
         "cratePaths": 1,
         "enabledFeaturePredicates": {},
@@ -397,9 +397,9 @@
       "source": "crates/usvg/src/tree/mod.rs",
       "destination": "usvg/tree/mod.rs",
       "sourceSha256": "b1754318ff918ecc347657bedcc9414e60a8864334b430ee9bd4a6ab566760e7",
-      "transplantedSha256": "c8239b74778cdf1e0e50a5809d07c11d771a5826f0c07d287a9eefd775694140",
+      "transplantedSha256": "82d781128caf858a2e41b802eeff9756ef76952811395649ed2762564c70a862",
       "sourceBytes": 53256,
-      "transplantedBytes": 53216,
+      "transplantedBytes": 54281,
       "adaptations": {
         "cratePaths": 1,
         "enabledFeaturePredicates": {

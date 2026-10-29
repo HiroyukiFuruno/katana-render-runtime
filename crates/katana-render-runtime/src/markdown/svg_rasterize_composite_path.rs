@@ -7,14 +7,30 @@ mod geometry;
 #[path = "svg_rasterize_composite_path_style.rs"]
 pub(in crate::markdown::svg_rasterize) mod style;
 
+#[cfg(test)]
+#[path = "svg_rasterize_composite_path_arc_tests.rs"]
+mod arc_tests;
+#[cfg(test)]
+#[path = "svg_rasterize_composite_path_oval_tests.rs"]
+mod oval_tests;
 #[cfg(all(test, target_os = "macos"))]
 #[path = "svg_rasterize_composite_path_tests.rs"]
 mod tests;
 
+#[cfg(test)]
 pub(super) fn render_if_supported(
     node: &usvg::Path,
     transform: Transform,
     pixmap: &mut PixmapMut<'_>,
+) -> Result<bool, String> {
+    render_if_supported_with_tree(node, transform, pixmap, None)
+}
+
+pub(super) fn render_if_supported_with_tree(
+    node: &usvg::Path,
+    transform: Transform,
+    pixmap: &mut PixmapMut<'_>,
+    tree: Option<&usvg::Tree>,
 ) -> Result<bool, String> {
     if !node.is_visible() {
         return Ok(true);
@@ -25,8 +41,48 @@ pub(super) fn render_if_supported(
     let Some(prepared) = prepare_path(node)? else {
         return Ok(false);
     };
+    let prepared = prepare_source_oval(node, tree, transform, pixmap, prepared);
+    let prepared = prepare_source_svg_arc(node, tree, transform, pixmap, prepared);
     render_prepared_path(pixmap, &prepared, transform, node.paint_order())?;
     Ok(true)
+}
+
+fn prepare_source_oval(
+    node: &usvg::Path,
+    tree: Option<&usvg::Tree>,
+    transform: Transform,
+    pixmap: &PixmapMut<'_>,
+    mut prepared: PreparedPath,
+) -> PreparedPath {
+    let Some(ellipse) = tree.and_then(|tree| tree.source_ellipse(node)) else {
+        return prepared;
+    };
+    let Some(oval) = geometry::source_oval(ellipse, prepared.path.fill_type()) else {
+        return prepared;
+    };
+    if geometry::path_bounds_fit_target(&oval, &prepared, transform, pixmap) {
+        prepared.path = oval;
+    }
+    prepared
+}
+
+fn prepare_source_svg_arc(
+    node: &usvg::Path,
+    tree: Option<&usvg::Tree>,
+    transform: Transform,
+    pixmap: &PixmapMut<'_>,
+    mut prepared: PreparedPath,
+) -> PreparedPath {
+    let Some(source) = tree.and_then(|tree| tree.source_svg_path(node)) else {
+        return prepared;
+    };
+    let Some(path) = geometry::source_svg_arc(source, prepared.path.fill_type()) else {
+        return prepared;
+    };
+    if geometry::path_bounds_fit_target(&path, &prepared, transform, pixmap) {
+        prepared.path = path;
+    }
+    prepared
 }
 
 fn render_prepared_path(

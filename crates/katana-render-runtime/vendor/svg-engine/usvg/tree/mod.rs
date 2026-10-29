@@ -6,7 +6,8 @@ mod geom;
 mod text;
 
 use std::fmt::Display;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Weak};
 
 pub use strict_num::{self, ApproxEqUlps, NonZeroPositiveF32, NormalizedF32, PositiveF32};
 
@@ -1603,9 +1604,36 @@ pub struct Tree {
     pub(crate) masks: Vec<Arc<Mask>>,
     pub(crate) filters: Vec<Arc<filter::Filter>>,
     pub(crate) fontdb: Arc<fontdb::Database>,
+    pub(crate) source_shapes: Option<Arc<SourceShapes>>,
 }
 
+pub(crate) type SourceEllipse = (f32, f32, f32, f32);
+#[derive(Clone, Debug)]
+pub(crate) enum SourceShape {
+    Ellipse(SourceEllipse),
+    SvgPath(String),
+}
+pub(crate) type SourceShapes = HashMap<usize, (Weak<tiny_skia_path::Path>, SourceShape)>;
+
 impl Tree {
+    pub(crate) fn source_ellipse(&self, path: &Path) -> Option<SourceEllipse> {
+        match self.source_shape(path)? {
+            SourceShape::Ellipse(ellipse) => Some(*ellipse),
+            SourceShape::SvgPath(_) => None,
+        }
+    }
+
+    pub(crate) fn source_svg_path(&self, path: &Path) -> Option<&str> {
+        match self.source_shape(path)? {
+            SourceShape::SvgPath(data) => Some(data),
+            SourceShape::Ellipse(_) => None,
+        }
+    }
+
+    fn source_shape(&self, path: &Path) -> Option<&SourceShape> {
+        let (original, shape) = self.source_shapes.as_ref()?.get(&(Arc::as_ptr(&path.data) as usize))?;
+        original.ptr_eq(&Arc::downgrade(&path.data)).then_some(shape)
+    }
     /// Image size.
     ///
     /// Size of an image that should be created to fit the SVG.
