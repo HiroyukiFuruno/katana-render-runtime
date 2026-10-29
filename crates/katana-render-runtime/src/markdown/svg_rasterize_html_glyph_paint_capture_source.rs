@@ -38,6 +38,11 @@ fn source_value(
             "drawGlyphIndex": glyph_index,
             "xAlignment": alignment_value(span),
             "chunkAlignment": chunk,
+            "fallbackAlignment": span.fallback_alignment.as_ref().map(|alignment| serde_json::json!({
+                "cssScale": alignment.css_scale,
+                "paintCssSize": alignment.paint_css_size,
+                "positionCount": alignment.css_positions.len(),
+            })),
             "glyphs": glyph_values(span),
     })
 }

@@ -27,6 +27,8 @@ mod anchor;
 mod baseline;
 #[path = "svg_rasterize_html_glyph_chunk.rs"]
 mod chunk;
+#[path = "svg_rasterize_html_glyph_fallback_runs.rs"]
+mod fallback_runs;
 #[path = "svg_rasterize_html_glyph_multi_chunk_alignment.rs"]
 mod multi_chunk_alignment;
 #[path = "svg_rasterize_html_glyph_paint.rs"]
@@ -185,6 +187,9 @@ impl<'a> HtmlGlyphRasterizer<'a> {
         text: &usvg::Text,
         prepared: &mut [PreparedSpan],
     ) -> Result<(), String> {
+        if self.apply_fallback_alignment(text, prepared)? {
+            return Ok(());
+        }
         if chunk::apply_single_middle(text, prepared)? {
             return Ok(());
         }
@@ -203,6 +208,21 @@ impl<'a> HtmlGlyphRasterizer<'a> {
             return Ok(());
         }
         chunk::apply(self.database, text, prepared)
+    }
+
+    fn apply_fallback_alignment(
+        &self,
+        text: &usvg::Text,
+        prepared: &mut [PreparedSpan],
+    ) -> Result<bool, String> {
+        /* WHY: fallback runも実faceのCSSサイズで測り、名目SVGサイズの文字間隔を残さない。 */
+        let Some(layouts) = fallback_runs::layout(self.database, text, prepared)? else {
+            return Ok(false);
+        };
+        for (span, layout) in prepared.iter_mut().zip(layouts) {
+            span.fallback_alignment = Some(layout);
+        }
+        Ok(true)
     }
 
     fn prepare_span(
@@ -281,6 +301,7 @@ impl<'a> HtmlGlyphRasterizer<'a> {
             baseline_shift,
             x_alignment: None,
             chunk_alignment: None,
+            fallback_alignment: None,
             variable_instance: input.variable_instance,
         }
     }
@@ -680,5 +701,6 @@ struct PreparedSpan {
     baseline_shift: f32,
     x_alignment: Option<XAlignment>,
     chunk_alignment: Option<chunk::SpanAlignment>,
+    fallback_alignment: Option<fallback_runs::RunLayout>,
     variable_instance: Option<std::rc::Rc<instances::VariableInstance>>,
 }

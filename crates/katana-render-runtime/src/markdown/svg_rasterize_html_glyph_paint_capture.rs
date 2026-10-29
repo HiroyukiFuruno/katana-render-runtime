@@ -5,7 +5,7 @@ mod source;
 pub(super) use source::record_source;
 
 use resvg::usvg::FontVariation;
-use skia_safe::{Font, M44, Point};
+use skia_safe::{Font, M44, Point, SurfaceProps};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -19,6 +19,7 @@ pub(in crate::markdown::svg_rasterize) struct Snapshot {
     instances: HashMap<u32, Vec<serde_json::Value>>,
     pending_source: Option<serde_json::Value>,
     pending_source_oversized: bool,
+    pending_surface_props: Option<serde_json::Value>,
 }
 
 impl Snapshot {
@@ -101,6 +102,14 @@ pub(super) fn record_draw(
     });
 }
 
+pub(super) fn record_surface_props(props: SurfaceProps) {
+    ACTIVE.with(|active| {
+        if let Some(snapshot) = active.borrow_mut().as_mut() {
+            snapshot.pending_surface_props = Some(draw::surface_props_value(props));
+        }
+    });
+}
+
 fn append_draw(
     snapshot: &mut Snapshot,
     font: &Font,
@@ -110,15 +119,14 @@ fn append_draw(
     local_to_device: M44,
 ) {
     let source = snapshot.pending_source.take();
+    let surface_props = snapshot.pending_surface_props.take();
     let oversized = std::mem::take(&mut snapshot.pending_source_oversized);
     if snapshot.events.len() >= MAX_EVENTS || glyph_ids.len() > MAX_GLYPHS_PER_EVENT || oversized {
         snapshot.dropped = snapshot.dropped.saturating_add(1);
         return;
     }
-    let coordinates = snapshot
-        .instances
-        .get(&font.typeface().unique_id())
-        .map(Vec::as_slice);
+    let typeface_id = font.typeface().unique_id();
+    let coordinates = snapshot.instances.get(&typeface_id).map(Vec::as_slice);
     let mut event = draw::draw_event_value(
         font,
         glyph_ids,
@@ -128,6 +136,7 @@ fn append_draw(
         coordinates,
     );
     event["sourceSpan"] = source.unwrap_or(serde_json::Value::Null);
+    event["surfaceProps"] = surface_props.unwrap_or(serde_json::Value::Null);
     snapshot.events.push(event);
 }
 

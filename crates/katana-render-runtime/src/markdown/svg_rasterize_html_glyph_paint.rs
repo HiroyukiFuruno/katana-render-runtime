@@ -39,11 +39,9 @@ pub(super) fn draw_span(
     }
     let paint = text_paint(span);
     let font = text_font(span, typeface, raster_scale);
-    if span
-        .glyphs
-        .iter()
-        .all(|glyph| is_identity_linear(normalized_transform(span, glyph, raster_scale)))
-    {
+    if span.glyphs.iter().enumerate().all(|(index, glyph)| {
+        is_identity_linear(normalized_transform_at(span, glyph, index, raster_scale))
+    }) {
         return draw_identity_glyphs(canvas, span, &font, &paint, raster_scale);
     }
     draw_transformed_glyphs(canvas, span, &font, &paint, raster_scale)
@@ -59,8 +57,9 @@ fn draw_identity_glyphs(
     let mut positions = span
         .glyphs
         .iter()
-        .map(|glyph| {
-            let transform = normalized_transform(span, glyph, raster_scale);
+        .enumerate()
+        .map(|(index, glyph)| {
+            let transform = normalized_transform_at(span, glyph, index, raster_scale);
             SkiaPoint::new(transform.tx, transform.ty)
         })
         .collect::<Vec<_>>();
@@ -122,17 +121,16 @@ fn draw_transformed_glyphs(
     paint: &Paint,
     raster_scale: f32,
 ) -> Result<(), String> {
-    #[cfg(test)]
-    let mut glyph_indices = 0..;
-    for (glyph, glyph_id) in span.glyphs.iter().zip(&span.glyph_ids) {
+    for (index, (glyph, glyph_id)) in span.glyphs.iter().zip(&span.glyph_ids).enumerate() {
         let save = canvas.save();
-        let matrix =
-            super::surface::skia_matrix(normalized_transform(span, glyph, raster_scale), 0.0, 0.0);
+        let matrix = super::surface::skia_matrix(
+            normalized_transform_at(span, glyph, index, raster_scale),
+            0.0,
+            0.0,
+        );
         canvas.concat(&matrix);
         #[cfg(test)]
-        {
-            capture::record_source(span, raster_scale, glyph_indices.next());
-        }
+        capture::record_source(span, raster_scale, Some(index));
         draw_glyphs_at(
             canvas,
             std::slice::from_ref(glyph_id),
@@ -155,18 +153,42 @@ fn draw_glyphs_at(
     paint: &Paint,
 ) {
     #[cfg(test)]
+    capture::record_surface_props(canvas.top_props());
+    #[cfg(test)]
     capture::record_draw(font, glyph_ids, positions, origin, canvas.local_to_device());
     canvas.draw_glyphs_at(glyph_ids, positions, origin, font, paint);
 }
 
+#[cfg(test)]
 pub(super) fn normalized_transform(
     span: &PreparedSpan,
     glyph: &resvg::usvg::layout::PositionedGlyph,
     raster_scale: f32,
 ) -> Transform {
+    let index = span
+        .glyphs
+        .iter()
+        .position(|candidate| std::ptr::eq(candidate, glyph))
+        .unwrap_or(0);
+    normalized_transform_at(span, glyph, index, raster_scale)
+}
+
+fn normalized_transform_at(
+    span: &PreparedSpan,
+    glyph: &resvg::usvg::layout::PositionedGlyph,
+    index: usize,
+    raster_scale: f32,
+) -> Transform {
     let transform = normalize_font_linear(glyph.transform(), span.font_size, span.upem)
         .post_translate(0.0, span.baseline_shift);
     let mut transform = scale_translation(transform, raster_scale);
+    if let Some(alignment) = &span.fallback_alignment {
+        let position = alignment.css_positions[index];
+        let device_scale = raster_scale / alignment.css_scale;
+        transform.tx = position.x * device_scale;
+        transform.ty = position.y * device_scale;
+        return transform;
+    }
     if let Some(alignment) = span.chunk_alignment {
         return super::chunk::position(alignment, transform, raster_scale);
     }
@@ -269,8 +291,13 @@ fn text_paint(span: &PreparedSpan) -> Paint {
 
 fn text_font(span: &PreparedSpan, typeface: &Typeface, raster_scale: f32) -> Font {
     let size = span
-        .chunk_alignment
+        .fallback_alignment
+        .as_ref()
         .map(|alignment| alignment.paint_css_size * raster_scale / alignment.css_scale)
+        .or_else(|| {
+            span.chunk_alignment
+                .map(|alignment| alignment.paint_css_size * raster_scale / alignment.css_scale)
+        })
         .or_else(|| single_span_font_size(span, raster_scale));
     let size = match size {
         Some(size) => size,

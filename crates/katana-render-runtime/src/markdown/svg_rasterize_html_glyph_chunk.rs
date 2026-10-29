@@ -4,6 +4,7 @@ use tiny_skia::{Point, Transform};
 
 #[path = "svg_rasterize_html_glyph_chunk_eligibility.rs"]
 mod eligibility;
+pub(super) use eligibility::ranges_cover_chunk;
 #[cfg(test)]
 pub(super) use eligibility::row_diagnostic;
 #[cfg(all(test, target_os = "macos"))]
@@ -152,7 +153,7 @@ fn span_width(values: &[CharacterMetric]) -> Result<f64, String> {
     Ok(ceil_layout_unit(width))
 }
 
-fn ceil_layout_unit(width: f64) -> f64 {
+pub(super) fn ceil_layout_unit(width: f64) -> f64 {
     (width * LAYOUT_UNIT_SCALE).ceil() / LAYOUT_UNIT_SCALE
 }
 

@@ -256,6 +256,7 @@ fn trial_span(alignment: Option<XAlignment>) -> PreparedSpan {
         baseline_shift: 0.0,
         x_alignment: alignment,
         chunk_alignment: None,
+        fallback_alignment: None,
         variable_instance: None,
     }
 }

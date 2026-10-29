@@ -3,7 +3,7 @@ use resvg::usvg::{self, Transform};
 
 const LAYOUT_UNIT_SCALE: f64 = 64.0;
 const START_ANCHOR_FACTOR: f64 = 0.0;
-const MIDDLE_ANCHOR_FACTOR: f64 = -0.5;
+pub(super) const MIDDLE_ANCHOR_FACTOR: f64 = -0.5;
 const END_ANCHOR_FACTOR: f64 = -1.0;
 
 #[derive(Clone, Copy)]

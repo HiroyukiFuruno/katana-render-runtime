@@ -244,7 +244,9 @@ fn prepare_first_span(tree: &Tree) -> Result<(PreparedSpan, Typeface), String> {
     Ok((span, typeface))
 }
 
-fn capture_fixture_draw(transformed: bool) -> Result<(PreparedSpan, capture::Snapshot), String> {
+pub(super) fn capture_fixture_draw(
+    transformed: bool,
+) -> Result<(PreparedSpan, capture::Snapshot), String> {
     let (span, typeface, _fixture) = prepared_fixture(transformed)?;
     let mut surface =
         surfaces::raster_n32_premul((128, 64)).ok_or("capture test surface unavailable")?;
@@ -259,7 +261,7 @@ fn capture_fixture_draw(transformed: bool) -> Result<(PreparedSpan, capture::Sna
     Ok((span, scope.snapshot()))
 }
 
-fn bundled_typeface() -> Result<Typeface, String> {
+pub(super) fn bundled_typeface() -> Result<Typeface, String> {
     FontMgr::default()
         .new_from_data(
             Data::new_copy(crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES),
@@ -268,7 +270,7 @@ fn bundled_typeface() -> Result<Typeface, String> {
         .ok_or_else(|| "bundled capture test typeface unavailable".to_owned())
 }
 
-fn record_test_event(font: &Font, coordinate: f32) {
+pub(super) fn record_test_event(font: &Font, coordinate: f32) {
     let glyph_ids = [1_u16];
     let positions = [Point::new(coordinate, coordinate + 1.0)];
     capture::record_draw(

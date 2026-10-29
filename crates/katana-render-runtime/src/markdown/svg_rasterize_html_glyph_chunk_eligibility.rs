@@ -214,7 +214,7 @@ fn supported_ltr_text(text: &str) -> bool {
     })
 }
 
-fn ranges_cover_chunk(chunk: &usvg::TextChunk) -> bool {
+pub(in super::super) fn ranges_cover_chunk(chunk: &usvg::TextChunk) -> bool {
     let mut end = 0;
     for span in chunk.spans() {
         if span.start() != end || !valid_span_range(chunk.text(), span.start(), span.end()) {
