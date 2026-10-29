@@ -1944,6 +1944,7 @@ test.each([
 test.each([
   "./scripts/mermaid/native-source-manifest_test.ts",
   "./scripts/mermaid/reference_svg_geometry_test.ts",
+  "./scripts/mermaid/ja04-picture-diagnostic_test.ts",
 ])("the required runtime asset regression cannot be omitted: %s", (sourceManifestTest) => {
   const root = parserFixture();
   const recipe = actualRecipeBody("runtime-asset-script-test");
@@ -1993,6 +1994,12 @@ test.each(
         "./scripts/mermaid/native_frame_capture_context_test.ts",
         "./scripts/mermaid/native_frame_evidence_test.ts",
         "./scripts/mermaid/native-render-batch_test.ts",
+      ],
+      [
+        "picture diagnostic",
+        "./scripts/mermaid/ja04-picture-diagnostic_test.ts",
+        "./scripts/mermaid/raster_producer_observation_test.ts",
+        "./scripts/mermaid/raster_production_binding_test.ts",
       ],
     ] as const
   ).flatMap(([label, token, previous, next]) =>
