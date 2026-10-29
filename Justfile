@@ -854,7 +854,7 @@ mermaid-compare-ci min_score='99': mermaid-build-receipt-required
 
 # Run the managed current-source EN/JA full comparison and aggregate exact 117 score evidence.
 mermaid-compare-full-managed request request_sha256:
-    bun run scripts/mermaid/managed-full-compare.ts --request "{{request}}" --request-sha256 "{{request_sha256}}"
+    python3 scripts/hooks/run_locked_command.py --protect-root-producer -- bun run scripts/mermaid/managed-full-compare.ts --request "{{request}}" --request-sha256 "{{request_sha256}}"
 
 # Compare full Mermaid fixture sets for local release validation
 mermaid-compare-full min_score='99' output='tmp/krr-mermaid-full' official='tmp/krr-mermaid-strict-official': mermaid-build-receipt-required

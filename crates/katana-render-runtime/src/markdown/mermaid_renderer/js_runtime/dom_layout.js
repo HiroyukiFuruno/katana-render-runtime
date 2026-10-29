@@ -237,7 +237,24 @@ function katanaRoundShapeBox(node) {
   const cy = katanaNumberAttrOrDefault(node, "cy", 0);
   const rx = katanaRoundRadius(node, "rx");
   const ry = katanaRoundRadius(node, "ry");
-  return katanaBox(cx - rx, cy - ry, rx * 2, ry * 2);
+  // ブラウザのSVGLength/RectFは演算前からfloat32なので、最後だけの丸めでは辺がずれる。
+  const fx = Math.fround(cx),
+    fy = Math.fround(cy),
+    frx = Math.fround(rx),
+    fry = Math.fround(ry);
+  if (
+    node.namespaceURI !== "http://www.w3.org/2000/svg" ||
+    rx < 0 ||
+    ry < 0 ||
+    ![fx, fy, frx, fry].every(Number.isFinite)
+  )
+    return katanaBox(cx - rx, cy - ry, rx * 2, ry * 2);
+  return katanaBox(
+    Math.fround(fx - frx),
+    Math.fround(fy - fry),
+    Math.fround(frx * 2),
+    Math.fround(fry * 2),
+  );
 }
 
 function katanaRoundRadius(node, name) {

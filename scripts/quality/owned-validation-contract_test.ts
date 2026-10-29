@@ -95,6 +95,8 @@ const rootLintRecipe = [
 ].join("\n");
 const recipeBodies: Record<string, string> = {
   check: "python3 scripts/local.py",
+  "mermaid-compare-full-managed":
+    'python3 scripts/hooks/run_locked_command.py --protect-root-producer -- bun run scripts/mermaid/managed-full-compare.ts --request "{{request}}" --request-sha256 "{{request_sha256}}"',
   "check-standard":
     "just biome\njust typecheck\njust python-lint\njust python-typecheck\njust lint\njust unit\njust runtime-package-asset-check\njust runtime-asset-script-test",
   biome: "bun run biome",
@@ -1256,6 +1258,7 @@ test.each([
   "SVG tspan boundaries preserve within-span kerning with a bundled font",
   "Chrome innerHTML parses unbound xlink before strict SVG capture sizing",
   "strict raster sizing preserves SVG markup and resolves percentage width from the viewBox",
+  "SVG circle and ellipse bounds use browser float32 geometry",
   "paint projection evaluates actual candidate pixels",
   "keeps the color-only candidate exact while changing RGB and preserving SVG bytes",
   "rejects a candidate with a missing label",
@@ -1562,6 +1565,34 @@ test("clean and sweep take the root producer lock without dependencies or ignore
   );
   expect(actualRecipeBody("sweep")).not.toMatch(/\|\|\s*true/);
   expect(actualRecipeBody("clean")).not.toMatch(/\|\|\s*true/);
+});
+const managedFullCompareRecipe = "mermaid-compare-full-managed";
+const managedFullCompareCommand =
+  'python3 scripts/hooks/run_locked_command.py --protect-root-producer -- bun run scripts/mermaid/managed-full-compare.ts --request "{{request}}" --request-sha256 "{{request_sha256}}"';
+function expectManagedFullCompareRouteRejected(mutate: (body: string) => string): void {
+  const root = fixture();
+  const current = actualRecipeBody(managedFullCompareRecipe);
+  recipes(root, { [managedFullCompareRecipe]: mutate(current) });
+  track(root);
+  expect(inspectOwnedValidationContract(root).issues.map((issue) => issue.code)).toContain(
+    "managed-full-compare-lock-unverified",
+  );
+}
+test("managed full compare uses the root producer lock wrapper exactly once", () => {
+  expect(actualRecipeBody(managedFullCompareRecipe)).toBe(managedFullCompareCommand);
+});
+test.each([
+  [
+    "direct Bun invocation",
+    (body: string) =>
+      body.replace("python3 scripts/hooks/run_locked_command.py --protect-root-producer -- ", ""),
+  ],
+  [
+    "a different lock mode",
+    (body: string) => body.replace("--protect-root-producer", "--performance-coverage"),
+  ],
+] as const)("managed full compare rejects %s", (_name, mutate) => {
+  expectManagedFullCompareRouteRejected(mutate);
 });
 const nativeWidthJustMutations = [
   ["shell mode", fixtureJustDefinitions.split("\n")[0] ?? "", 'set shell := ["sh", "-c"]'],

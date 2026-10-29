@@ -277,6 +277,53 @@ test("strict raster sizing preserves SVG markup and resolves percentage width fr
   }
 });
 
+test("SVG circle and ellipse bounds use browser float32 geometry", async ({ browser }) => {
+  const page = await browser.newPage();
+  try {
+    await page.setContent('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+    await page.addScriptTag({
+      content: fs.readFileSync(
+        "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/dom_layout.js",
+        "utf8",
+      ),
+    });
+    const observations = await page.evaluate(() => {
+      const host = window as unknown as {
+        katanaRoundShapeBox: (element: SVGElement) => {
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+        };
+      };
+      const svg = document.querySelector("svg");
+      if (svg === null) throw new Error("SVG root missing");
+      const cases: Array<{ tag: string; attrs: Record<string, string> }> = [
+        { tag: "circle", attrs: { cx: "0", cy: "-37.326281054687506", r: "49.68" } },
+        { tag: "circle", attrs: { cx: "3.2", cy: "-1.7", r: "12.25" } },
+        { tag: "ellipse", attrs: { cx: "-4.3", cy: "7.4", rx: "9.35", ry: "5.15" } },
+        { tag: "circle", attrs: { cx: "0", cy: "0", r: "0" } },
+        { tag: "ellipse", attrs: { cx: "0", cy: "0", rx: "0", ry: "0" } },
+      ];
+      return cases.map(({ tag, attrs }) => {
+        const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
+        for (const [name, value] of Object.entries(attrs)) element.setAttribute(name, value);
+        svg.appendChild(element);
+        const browserBox = (element as SVGGraphicsElement).getBBox();
+        const runtimeBox = host.katanaRoundShapeBox(element);
+        return {
+          browser: [browserBox.x, browserBox.y, browserBox.width, browserBox.height],
+          runtime: [runtimeBox.x, runtimeBox.y, runtimeBox.width, runtimeBox.height],
+        };
+      });
+    });
+    for (const observation of observations)
+      expect(observation.runtime).toEqual(observation.browser);
+  } finally {
+    await page.close();
+  }
+});
+
 test("official strict sizing keeps comma-separated raw viewBox dimensions after assignment", async ({
   browser,
 }) => {

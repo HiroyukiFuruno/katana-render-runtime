@@ -301,6 +301,9 @@ function runtimeUnusedVerifyRecipeBody(context: ContractContext): string {
 const NATIVE_WIDTH_HASH_SOURCE = "scripts/runtime-bundles/runtime-unused-native-width-hash.ts";
 const NATIVE_WIDTH_HASH_TEST = "scripts/runtime-bundles/runtime-unused-native-width-hash_test.ts";
 const NATIVE_WIDTH_HASH_RECIPE = "native-width-hash-facts";
+const MANAGED_FULL_COMPARE_RECIPE = "mermaid-compare-full-managed";
+const MANAGED_FULL_COMPARE_COMMAND =
+  'python3 scripts/hooks/run_locked_command.py --protect-root-producer -- bun run scripts/mermaid/managed-full-compare.ts --request "{{request}}" --request-sha256 "{{request_sha256}}"';
 export const NATIVE_WIDTH_HASH_INPUTS = Object.freeze([
   MATHJAX_UNUSED_AUDIT_SOURCE,
   "scripts/runtime-bundles/runtime-unused-check_test.ts",
@@ -609,6 +612,14 @@ function registered(context: ContractContext, recipe: string): boolean {
   return context.local.has(recipe) && context.ci.has(recipe);
 }
 
+function verifyManagedFullCompareLockRoute(context: ContractContext): boolean {
+  if (context.recipes.get(MANAGED_FULL_COMPARE_RECIPE)?.trim() !== MANAGED_FULL_COMPARE_COMMAND) {
+    add(context, "managed-full-compare-lock-unverified", "Justfile", MANAGED_FULL_COMPARE_RECIPE);
+    return false;
+  }
+  return true;
+}
+
 function metadata(
   root: string,
   index: { tracked: string[]; untracked: string[] },
@@ -651,6 +662,7 @@ function metadata(
     issues: [],
     read: readMemoized,
   };
+  verifyManagedFullCompareLockRoute(context);
   const authorities = [
     "scripts/quality/duplication-policy.json",
     "scripts/html/harness-contract-policy.json",
@@ -2193,6 +2205,7 @@ function playwrightGeometryCasesVerified(source: string): boolean {
       "SVG tspan boundaries preserve within-span kerning with a bundled font",
       "Chrome innerHTML parses unbound xlink before strict SVG capture sizing",
       "strict raster sizing preserves SVG markup and resolves percentage width from the viewBox",
+      "SVG circle and ellipse bounds use browser float32 geometry",
       "paint projection evaluates actual candidate pixels",
       "keeps the neutral geometry raster exact",
     ].every((title) => direct.has(title)) &&
