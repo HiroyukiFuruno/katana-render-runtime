@@ -1,4 +1,4 @@
-use super::{CachedFace, CachedTypeface, HtmlGlyphRasterizer, RasterBackend};
+use super::{CachedFace, CachedTypeface, HtmlGlyphRasterizer};
 use crate::markdown::svg_rasterize::html_glyph_variations;
 use resvg::usvg::{self, FontVariation, fontdb::ID};
 use skia_safe::Typeface;
@@ -65,7 +65,7 @@ impl HtmlGlyphRasterizer<'_> {
         id: ID,
         font_size: f32,
     ) -> Result<Option<Rc<VariableInstance>>, String> {
-        if !matches!(self.backend, RasterBackend::Skia) || self.face_file(id)?.is_none() {
+        if self.face_file(id)?.is_none() {
             return Ok(None);
         }
         let (_, design) = html_glyph_variations::resolve_design(

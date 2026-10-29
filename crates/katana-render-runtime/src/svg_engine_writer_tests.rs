@@ -12,6 +12,8 @@ use rstest::rstest;
 use super::{resvg, usvg};
 use tiny_skia::{Pixmap, Transform};
 
+#[path = "svg_engine_writer_filter_regression_tests.rs"]
+mod filter_regression_tests;
 #[path = "svg_engine_writer_fixture_inventory_tests.rs"]
 mod fixture_inventory_tests;
 

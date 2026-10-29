@@ -1,6 +1,4 @@
-use super::{
-    HtmlGlyphRasterizer, Prepared, PreparedSpan, RGBA_CHANNELS, RasterBackend, paint, surface,
-};
+use super::{HtmlGlyphRasterizer, Prepared, PreparedSpan, RGBA_CHANNELS, paint, surface};
 use resvg::usvg::{Node, Options, Tree, fontdb::Weight};
 use skia_safe::{AlphaType, BlendMode, ColorType, Data, ImageInfo, Paint};
 use tiny_skia::{Pixmap, Transform};
@@ -51,8 +49,7 @@ fn compare_compositing(fixture: &Fixture) -> Result<(), String> {
     let Some(Node::Text(text)) = tree.node_by_id("run") else {
         return Err("composite fixture text missing".into());
     };
-    let mut rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
-    rasterizer.backend = RasterBackend::Skia;
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
     let prepared = prepared_fixture(&rasterizer, text)?;
     let mut direct = backdrop(fixture.backdrop)?;
     draw_on(&rasterizer, &prepared, &mut direct)?;

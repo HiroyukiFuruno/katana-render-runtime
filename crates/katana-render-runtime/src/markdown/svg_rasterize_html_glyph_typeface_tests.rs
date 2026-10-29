@@ -7,8 +7,6 @@ use resvg::usvg::{
 use skia_safe::{AlphaType, ColorType, Font, FontMgr, ImageInfo, surfaces};
 use std::sync::Arc;
 
-#[path = "svg_rasterize_html_glyph_coretext_backend_tests.rs"]
-mod coretext_backend_tests;
 #[path = "svg_rasterize_coretext_raster_candidate_tests.rs"]
 mod coretext_raster_candidate_tests;
 #[path = "svg_rasterize_html_glyph_file_cache_probe_tests.rs"]

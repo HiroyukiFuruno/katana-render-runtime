@@ -2,6 +2,16 @@
 
 ## 最新の再開地点（2026-10-29）
 
+- [/] R4174静的foundation・R4175全writer44件はactual0。追加filter11件＋親子ID1件を含む44件が成功し、元31参照SVGは変更なし。埋込画像の元対再parse RGBA完全一致・3段階の有効参照、親子双方IDと実画素を検査した。仮の文字列固定点要求は採用せず、過去の失敗・診断は保持。HTML84/正式性能・現行coverage100/0・全117正式再取得・完全gate・公開は引き続き未完了。
+
+- [/] R4157の性能producer全99unitはactual0、比較元・候補で異なるsource/lockを正しく記録し改変を拒否する回帰を追加した。worker raw stdoutはprovenanceを持たないsampleであることも実コード経路を独立確認した。修正後の正式性能は未実行。R4160のglyph143回帰はactual0。不採用CoreText raster接続はtest+macOS専用と同入力0/12の不採用判断を根拠に撤去し、製品Skia・物理font同定/OS fallback/別比較診断を維持した。
+- [/] 新filter writer回帰の実行R4159は10成功/1失敗。R4163の実診断で元feImage ID=image1→再parseで空→次parseでFloodを確認し、既存親IDを空の子IDで上書きするparser欠陥を特定。必要な場合だけ子IDを転送する修正と親子双方ID保持の回帰を追加し、上流source hash/license・元golden不変のままlocal transplanted hash/bytesと意味の説明を更新した。R4168の全writer44は43成功/1失敗で、既存参照SVG31件と親子ID回帰は成功、未採用の任意文字列固定点assertだけが残った。
+- [/] R4171では元・1回目・2回目の全RGBAが相互に完全一致、有効参照も全段階成功を実観測した。文字列差は4733字/group3→4778字/group4の無名group追加であり、Tree::to_stringの文書契約はSVG出力のみで任意入力の文字列固定点を保証していない。テスト都合の製品flatten変更はせず、新設テストを3段階のprimitive/属性/参照/構造・画素の意味契約へ整理し、埋込画像の元対往復RGBA完全一致も恒久検査へ追加する。元31golden、全117の99・HTML90・coverage100/0は不変。R4171の原失敗と診断は保持し、整理後の新実行を回収するまで全writer成功とは扱わない。
+
+- [/] 通常hook actual0後、SVG複数span配置・未採用trial撤去・機能別586回帰を`094f833f`へコミット。stash0・working tree0を確認し、同HEADのR4142 capture/R4143厳格検証はactual0、HTML84/84が90以上・最低92.14438・出力font identity established。measurement=not-performedであり、全scroll/TOC/consumer・速度/RSSまで合格としない。
+- [/] 正式性能R4144は候補build前の固定容量超過でactual1。既存validator R4145 actual0で保護を再確認し、既存Cargo cleanのdev profile限定R4146 actual0で不要生成物を整理した（OS duで約2.43GiB、正式unique-inode容量測定とは区別）。固定4,726,095,872 bytes・元binding・旧証跡は維持。新run R4147はbuildへ進んだが、worker reportが比較元にも候補source snapshot/lockを記入する実装不具合をstrict validatorが検出しactual1。生記録は保持し、性能合格へ転用しない。`expected_arm_pins`の正しい各arm pinとreport生成を対応させる修正・異なるreference/candidateの回帰を担当分離して進める。validatorを緩和しない。
+- [ ] R4147終了後の並列作業は、性能reportのarm provenance修正、既存fixtureを利用するfilter writer意味的往復回帰、不採用test-only CoreText raster接続の撤去。製品Skia・物理font同定・OS fallback・別比較診断は維持し、coverage率を理由とした削除や除外をしない。次は差分統合・標準静的検査・関連実回帰・通常commitを経て、同一現sourceのHTML84/正式性能・coverage・全117を再取得する。
+
 - [/] R4133 foundation・R4134標準Lint・R4135標準ASTはactual0。R4136同条件release profileの全workspaceテストは3772/3772成功・27skip、実テスト113.412秒。coverage測定・完全品質ゲートではない。R4137実catalogで追加の通常571件+extra15件=586件を確認。R4138は全1757図の明示診断をactual0で完走し、差48件を保持（diagnosticOnly=true/formalAcceptance=false）。製品の正式117合格数へ加算しない。
 - [/] 公開までの暫定見積もりを残作業から再計算し3〜7日、中心5日（10月29日起点で11月1〜5日）とした。Mermaid修正・全件1〜3日、HTML正式性能・残受入1〜2日、完全gate・review・3OS CI・公開1〜2日を一部並行する仮見積もり。coverageと未解決描画の修正量は未確定であり、確約・公開済みの報告ではない。
 

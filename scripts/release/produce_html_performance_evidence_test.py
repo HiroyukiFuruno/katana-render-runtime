@@ -843,6 +843,64 @@ class WorkerAttemptContractTest(unittest.TestCase):
         return (candidate_build, candidate_binary, snapshot, arms, expected,
                 {"catalog": False})
 
+    def _worker_report_sample(
+        self, expected: typed_producer.ExpectedPerformance,
+    ) -> gate.JsonObject:
+        phases: gate.JsonObject = {}
+        frame = {"viewport": self.viewport, "pixel_bytes": 800 * 600 * 4,
+                 "scroll_y": 100.0}
+        for phase in gate.PHASES:
+            measurement = {"elapsed_ms": 1.0, "peak_rss_bytes": 100, "frame": frame.copy()}
+            phases[phase] = ({"measurement": measurement}
+                             if phase in ("post_operation", "same_session_resize")
+                             else measurement)
+        full_y = gate._object(phases["full_y"], "full-Y sample")
+        full_y.update({"max_frame_elapsed_ms": 1.0, "scroll_steps": 1,
+                       "max_scroll": 100.0, "final_scroll_y": 100.0,
+                       "actual_bottom": True})
+        post = gate._object(phases["post_operation"], "post-operation sample")
+        post.update({"operation": expected["operation"],
+                     "expected_dom_state_sha256": expected["expected_dom_state_sha256"]})
+        resize = gate._object(phases["same_session_resize"], "resize sample")
+        resize["resize_evidence"] = {
+            "from_viewport": self.viewport,
+            "to_viewport": {"width": 600, "height": 600, "scale": 1},
+            "generation_before": 0, "generation_after": 1, "real_raster_frame": True,
+        }
+        return {"phases": phases}
+
+    def test_worker_report_uses_each_arm_source_and_lock_pins(self) -> None:
+        candidate_build, _, _, _, expected, row = self._condition_case()
+        parent = reference.ReferenceParentProof(
+            reference.REFERENCE_ROLE, "candidate", "3" * 40, "a" * 64,
+            self.build.binary_sha256, reference.PARENT_LOCK_SHA256,
+            "d" * 64, "e" * 64, "f" * 64, (), self.root / "parent-build.json", self.binary,
+        )
+        artifact: typed_producer.FilePin = {
+            "path": str(self.plan), "sha256": gate.sha256(self.plan)}
+        arms = producer.expected_arm_pins(
+            {"baseline": self.build, "candidate": candidate_build}, "c" * 64,
+            {"baseline": artifact, "candidate": artifact}, reference_parent=parent,
+            reference_contract=reference.reference_parent_contract(parent),
+        )
+        expected["arms"] = arms
+        samples = [self._worker_report_sample(expected)]
+        for arm, pins in arms.items():
+            report = producer._build_worker_report(
+                expected, row, arms, arm, 0, self.viewport, samples, None,
+            )
+            provenance = gate._object(report["provenance"], "worker provenance")
+            self.assertEqual(provenance["source_snapshot_sha256"], pins["source_snapshot_sha256"])
+            self.assertEqual(provenance["deps_lock_sha256"], pins["lock_sha256"])
+            gate._validate_report(report, dict(expected))
+            for key in ("source_snapshot_sha256", "deps_lock_sha256"):
+                mutated = copy.deepcopy(report)
+                gate._object(mutated["provenance"], "worker provenance")[key] = "0" * 64
+                with self.subTest(arm=arm, key=key), self.assertRaisesRegex(
+                    ValueError, f"{arm} provenance mismatch for {key}"
+                ):
+                    gate._validate_report(mutated, dict(expected))
+
     def test_condition_collection_keeps_candidates_after_baseline_failure(self) -> None:
         candidate_build, candidate_binary, snapshot, arms, expected, row = self._condition_case()
         baseline_calls = 0

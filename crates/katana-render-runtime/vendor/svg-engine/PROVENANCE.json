@@ -24,7 +24,7 @@
     "harfrustAlias": "usvg harfrust:: becomes svg_harfrust:: (original 0.12 dependency identity)",
     "enabledFeaturePredicates": "The original enabled feature counts are retained per file; constant evaluation removes 79 true cfg attributes and four false branches. OS and test conditions are retained; KRR has no optional public SVG-engine feature contract.",
     "allowAttributes": "The original 46 allow attributes are retained verbatim. Two scoped boundary attributes permit observed external Clippy lints (22 in usvg/lib.rs, 18 in resvg/lib.rs) plus dead_code and unused_imports. Four resvg lints already allowed upstream are omitted from the added list to avoid duplicate attributes. No blanket all, non_minimal_cfg, unsafe-code override, or additional exclusion is introduced.",
-    "sourceSemantics": "Initial mechanical transplant preserves upstream behavior; subsequent scoped fixes pass CSS font size to HarfRust tracking and use hard-edge clipping only for implicit marker viewports. An optional internal fallback callback receives the original requested font attributes while the default legacy resolver remains unchanged; nested SVG forwards the callback. Original SVG, glyph IDs, and variation coordinates are not manually rewritten. Clip bounds, user-clip antialiasing, and upstream test expectations are preserved. ViewBox scale and alignment use f64 intermediate arithmetic before conversion to the existing f32 transform. Upstream source hashes and licenses remain unchanged."
+    "sourceSemantics": "Initial mechanical transplant preserves upstream behavior; subsequent scoped fixes pass CSS font size to HarfRust tracking and use hard-edge clipping only for implicit marker viewports. An optional internal fallback callback receives the original requested font attributes while the default legacy resolver remains unchanged; nested SVG forwards the callback. Original SVG, glyph IDs, and variation coordinates are not manually rewritten. Clip bounds, user-clip antialiasing, and upstream test expectations are preserved. ViewBox scale and alignment use f64 intermediate arithmetic before conversion to the existing f32 transform. Linked feImage parsing transfers a child ID only to an unnamed parent and preserves existing referenced IDs across serialization. Upstream source hashes and licenses remain unchanged."
   },
   "files": [
     {
@@ -75,9 +75,9 @@
       "source": "crates/usvg/src/parser/filter.rs",
       "destination": "usvg/parser/filter.rs",
       "sourceSha256": "b3c9485b5abf41ce9d7a7a711cff27a307260b4496bc0518ef43d37f9d73a74b",
-      "transplantedSha256": "c2a187122f9364716d0a162e46909f179836d959fb67699357c8f981dced4fba",
+      "transplantedSha256": "865c750f0b21796ba3b07811af45316fde433cdcc202e16a3995eb1d96bf51ee",
       "sourceBytes": 42587,
-      "transplantedBytes": 42641,
+      "transplantedBytes": 42759,
       "adaptations": {
         "cratePaths": 3,
         "enabledFeaturePredicates": {},

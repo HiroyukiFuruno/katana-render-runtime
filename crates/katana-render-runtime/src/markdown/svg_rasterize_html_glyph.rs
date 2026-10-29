@@ -72,35 +72,11 @@ mod typeface_tests;
 #[path = "svg_rasterize_html_glyph_composite_tests.rs"]
 mod composite_tests;
 
-#[cfg(all(test, target_os = "macos"))]
-#[path = "svg_rasterize_html_glyph_coretext.rs"]
-mod coretext;
-
-#[cfg(all(test, target_os = "macos"))]
-#[path = "svg_rasterize_html_glyph_coretext_font.rs"]
-mod coretext_font;
-
-#[derive(Clone, Copy)]
-enum RasterBackend {
-    Skia,
-    #[cfg(all(test, target_os = "macos"))]
-    CoreText,
-}
-
-fn default_backend() -> RasterBackend {
-    #[cfg(all(test, target_os = "macos"))]
-    if std::env::var("KRR_HTML_FEATURE_CORETEXT_RASTER").as_deref() == Ok("1") {
-        return RasterBackend::CoreText;
-    }
-    RasterBackend::Skia
-}
-
 pub(crate) struct HtmlGlyphRasterizer<'a> {
     database: &'a usvg::fontdb::Database,
     faces: RefCell<HashMap<usvg::fontdb::ID, Option<CachedFace>>>,
     variable_faces: RefCell<instances::Cache>,
     font_mgr: OnceCell<FontMgr>,
-    backend: RasterBackend,
     resvg_text_ids: HashSet<String>,
     authored_text_context: Option<&'a super::provenance::AuthoredTextContext>,
 }
@@ -121,7 +97,6 @@ impl<'a> HtmlGlyphRasterizer<'a> {
             faces: RefCell::new(HashMap::new()),
             variable_faces: RefCell::new(instances::Cache::default()),
             font_mgr: OnceCell::new(),
-            backend: default_backend(),
             resvg_text_ids: HashSet::new(),
             authored_text_context: None,
         }
@@ -157,19 +132,6 @@ impl<'a> HtmlGlyphRasterizer<'a> {
     pub(super) fn has_authored_additional_text_context(&self, text: &usvg::Text) -> bool {
         self.authored_text_context
             .is_some_and(|context| context.matches_additional(text))
-    }
-
-    #[cfg(all(test, target_os = "macos"))]
-    pub(super) fn new_coretext(database: &'a usvg::fontdb::Database) -> Self {
-        Self {
-            database,
-            faces: RefCell::new(HashMap::new()),
-            variable_faces: RefCell::new(instances::Cache::default()),
-            font_mgr: OnceCell::new(),
-            backend: RasterBackend::CoreText,
-            resvg_text_ids: HashSet::new(),
-            authored_text_context: None,
-        }
     }
 
     fn prepare(&self, text: &usvg::Text) -> Result<Prepared, String> {
@@ -364,23 +326,13 @@ impl<'a> HtmlGlyphRasterizer<'a> {
         data: &Data,
         index: u32,
     ) -> Result<Option<CachedTypeface>, String> {
-        let typeface = match self.backend {
-            RasterBackend::Skia => {
-                let font_mgr = self
-                    .font_mgr
-                    .get_or_init(|| HTML_FONT_MANAGER.with(Clone::clone));
-                let Some(typeface) = ttc::create_physical_typeface(data, index, font_mgr)? else {
-                    return Ok(None);
-                };
-                CachedTypeface::Skia(typeface)
-            }
-            #[cfg(all(test, target_os = "macos"))]
-            RasterBackend::CoreText => CachedTypeface::CoreText(
-                coretext_font::create_typeface(data.as_bytes(), index)?
-                    .ok_or_else(|| "CoreText physical font creation failed".to_string())?,
-            ),
+        let font_mgr = self
+            .font_mgr
+            .get_or_init(|| HTML_FONT_MANAGER.with(Clone::clone));
+        let Some(typeface) = ttc::create_physical_typeface(data, index, font_mgr)? else {
+            return Ok(None);
         };
-        Ok(Some(typeface))
+        Ok(Some(CachedTypeface::Skia(typeface)))
     }
 
     fn face_file(&self, id: usvg::fontdb::ID) -> Result<Option<(std::path::PathBuf, u32)>, String> {
@@ -633,11 +585,6 @@ impl HtmlGlyphRasterizer<'_> {
         crop: surface::Crop,
         pixmap: &mut PixmapMut<'_>,
     ) -> Result<(), String> {
-        #[cfg(all(test, target_os = "macos"))]
-        if matches!(self.backend, RasterBackend::CoreText) {
-            let pixels = coretext::draw_prepared(self, prepared, full_transform, &crop)?;
-            return surface::composite_rgba(pixmap, &pixels, crop);
-        }
         self.draw_skia_prepared(prepared, full_transform, &crop, pixmap)
     }
 

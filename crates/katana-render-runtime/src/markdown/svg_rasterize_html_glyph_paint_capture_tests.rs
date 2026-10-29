@@ -228,8 +228,7 @@ fn prepare_first_span(tree: &Tree) -> Result<(PreparedSpan, Typeface), String> {
     let Some(Node::Text(text)) = tree.node_by_id("capture") else {
         return Err("capture fixture text missing".into());
     };
-    let mut rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
-    rasterizer.backend = super::super::RasterBackend::Skia;
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
     let Prepared::Ready(spans) = rasterizer.prepare(text)? else {
         return Err("capture fixture text was not prepared".into());
     };

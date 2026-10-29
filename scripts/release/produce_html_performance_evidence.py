@@ -1954,7 +1954,7 @@ def load_catalog_conditions(root: Path, manifest_path: Path) -> tuple[list[Catal
 
 def _build_worker_report(
     expected: Mapping[str, object], row: Mapping[str, object], arms: Mapping[str, ArmPin],
-    raw_arm: str, pair: int, viewport: Viewport, snapshot_sha256: str,
+    raw_arm: str, pair: int, viewport: Viewport,
     samples: Sequence[gate.JsonObject], failure: gate.JsonObject | None,
 ) -> gate.JsonObject:
     provenance = cast(Provenance, expected["provenance"])
@@ -1967,7 +1967,8 @@ def _build_worker_report(
         "viewport": viewport,
         "provenance": {**provenance,
             "binary_sha256": arms[raw_arm]["binary_sha256"],
-            "source_snapshot_sha256": snapshot_sha256, "deps_lock_sha256": gate.LOCK_SHA},
+            "source_snapshot_sha256": arms[raw_arm]["source_snapshot_sha256"],
+            "deps_lock_sha256": arms[raw_arm]["lock_sha256"]},
         "samples": list(samples),
     }
     if failure is not None:
@@ -2007,7 +2008,7 @@ def _collect_condition_worker_pairs(
                     "afterFailure": baseline_failure}
                 failures.append(missing_failure)
                 report = _build_worker_report(expected, row, arms, raw_arm, pair, viewport,
-                                              snapshot["sha256"], [], missing_failure)
+                                              [], missing_failure)
                 report_pin = write(report_path, report)
                 report_pins.append(report_pin)
                 reports.append(report_path)
@@ -2053,7 +2054,7 @@ def _collect_condition_worker_pairs(
                 baseline_failure = failure
                 actual_phase_records += len(gate.PHASES) * len(samples)
                 report = _build_worker_report(expected, row, arms, raw_arm, pair, viewport,
-                                              snapshot["sha256"], samples, failure)
+                                              samples, failure)
                 report_pin = write(report_path, report)
                 report_pins.append(report_pin)
                 reports.append(report_path)
@@ -2067,7 +2068,7 @@ def _collect_condition_worker_pairs(
                     "status": "incomplete", "failure": failure})
                 continue
             report = _build_worker_report(expected, row, arms, raw_arm, pair, viewport,
-                                          snapshot["sha256"], samples, None)
+                                          samples, None)
             report_pin = write(report_path, report)
             report_pins.append(report_pin)
             reports.append(report_path)

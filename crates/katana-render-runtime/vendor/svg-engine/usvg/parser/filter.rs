@@ -846,12 +846,14 @@ fn convert_image_inner(
             // Transfer node id from group's child to the group itself if needed.
             if let Some(Node::Group(g)) = root.children.first_mut() {
                 if let Some(child2) = g.children.first_mut() {
-                    g.id = child2.id().to_string();
-                    match child2 {
-                        Node::Group(g2) => g2.id.clear(),
-                        Node::Path(path) => path.id.clear(),
-                        Node::Image(image) => image.id.clear(),
-                        Node::Text(text) => text.id.clear(),
+                    if g.id.is_empty() && !child2.id().is_empty() {
+                        g.id = child2.id().to_string();
+                        match child2 {
+                            Node::Group(g2) => g2.id.clear(),
+                            Node::Path(path) => path.id.clear(),
+                            Node::Image(image) => image.id.clear(),
+                            Node::Text(text) => text.id.clear(),
+                        }
                     }
                 }
             }
