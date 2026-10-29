@@ -1,7 +1,107 @@
 use super::materialize_geometry_properties;
 
+type Rgb = (u8, u8, u8);
+type InlinePriorityCase = (bool, bool, Rgb);
+type ParsedPaints = (Option<Rgb>, Option<Rgb>);
+type StylesheetCascadeCase = (&'static str, Rgb);
+
+const FIRST_STROKE: Rgb = (0x11, 0x22, 0x33);
+const LAST_STROKE: Rgb = (0x33, 0x44, 0x55);
+const INLINE_CASCADE_STROKE: Rgb = (0x99, 0xaa, 0xbb);
+const UNRELATED_FILL: Rgb = (0x66, 0x77, 0x88);
+const INLINE_PRIORITY_CASES: [InlinePriorityCase; 4] = [
+    (false, false, LAST_STROKE),
+    (false, true, LAST_STROKE),
+    (true, false, FIRST_STROKE),
+    (true, true, LAST_STROKE),
+];
+const STYLESHEET_CASCADE_CASES: [StylesheetCascadeCase; 4] = [
+    (
+        "<style>.shape{stroke:#334455}</style><path class='shape' d='M1 1 H11 V11 Z' stroke='#112233'/>",
+        LAST_STROKE,
+    ),
+    (
+        "<style>.shape{stroke:#112233}.shape{stroke:#334455}</style><path class='shape' d='M1 1 H11 V11 Z' stroke='#667788' style='stroke:#99aabb'/>",
+        INLINE_CASCADE_STROKE,
+    ),
+    (
+        "<style>.shape{stroke:#112233!important}.shape{stroke:#334455!important}</style><path class='shape' d='M1 1 H11 V11 Z' style='stroke:#667788'/>",
+        LAST_STROKE,
+    ),
+    (
+        "<style>.shape{stroke:#112233!important}.shape{stroke:#334455!important}</style><path class='shape' d='M1 1 H11 V11 Z' style='stroke:#99aabb!important'/>",
+        INLINE_CASCADE_STROKE,
+    ),
+];
+
 fn preprocess(source: &str) -> String {
     materialize_geometry_properties(source.to_owned())
+}
+
+#[test]
+fn usvg_inline_duplicate_declarations_respect_priority_then_source_order() -> Result<(), String> {
+    for (first_important, second_important, expected_stroke) in INLINE_PRIORITY_CASES {
+        let (fill, stroke) = parse_inline_paints(first_important, second_important)?;
+        assert_eq!(
+            fill,
+            Some(UNRELATED_FILL),
+            "unrelated fill property must remain intact"
+        );
+        assert_eq!(
+            stroke,
+            Some(expected_stroke),
+            "first important={first_important}, second important={second_important}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn usvg_stylesheet_inline_and_presentation_cascade_order_is_preserved() -> Result<(), String> {
+    for (content, expected_stroke) in STYLESHEET_CASCADE_CASES {
+        let svg = format!(
+            "<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12'>{content}</svg>"
+        );
+        assert_eq!(
+            parse_usvg_paints(&svg)?.1,
+            Some(expected_stroke),
+            "{content}"
+        );
+    }
+    Ok(())
+}
+
+fn parse_inline_paints(
+    first_important: bool,
+    second_important: bool,
+) -> Result<ParsedPaints, String> {
+    let first_priority = if first_important { " !important" } else { "" };
+    let second_priority = if second_important { " !important" } else { "" };
+    let svg = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"><path d="M1 1 H11 V11 Z" style="fill:#667788;stroke:#112233{first_priority};stroke:#334455{second_priority}"/></svg>"##
+    );
+    parse_usvg_paints(&svg)
+}
+
+fn parse_usvg_paints(svg: &str) -> Result<ParsedPaints, String> {
+    use crate::svg_engine::usvg::{Node, Options, Tree};
+
+    let tree = Tree::from_str(svg, &Options::default()).map_err(|error| error.to_string())?;
+    let path = match tree.root().children().first() {
+        Some(Node::Path(path)) => path,
+        _ => return Err("inline cascade fixture path missing".to_owned()),
+    };
+    Ok((
+        path.fill().and_then(|fill| paint_rgb(fill.paint())),
+        path.stroke().and_then(|stroke| paint_rgb(stroke.paint())),
+    ))
+}
+
+fn paint_rgb(paint: &crate::svg_engine::usvg::Paint) -> Option<Rgb> {
+    match paint {
+        crate::svg_engine::usvg::Paint::Color(color) => Some((color.red, color.green, color.blue)),
+        _ => None,
+    }
 }
 
 #[test]

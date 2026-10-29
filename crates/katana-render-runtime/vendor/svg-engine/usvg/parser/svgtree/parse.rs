@@ -316,22 +316,8 @@ pub(crate) fn parse_svg_element<'input>(
                 let last_idx = doc.attrs.len() - 1;
                 let existing_idx = attrs_start_idx + idx;
 
-                // See https://developer.mozilla.org/en-US/docs/Web/CSS/important
-                // When a declaration is important, the order of precedence is reversed.
-                // Declarations marked as important in the user-agent style sheets override
-                // all important declarations in the user style sheets. Similarly, all important
-                // declarations in the user style sheets override all important declarations in the
-                // author's style sheets. Finally, all important declarations take precedence over
-                // all animations.
-                //
-                // Which means:
-                // 1) Existing is not important, new is not important -> swap
-                // 2) Existing is important, new is not important -> don't swap
-                // 3) Existing is not important, new is important -> swap
-                // 4) Existing is important, new is important -> don't swap (since the order
-                // is reversed, so existing important attributes take precedence over new
-                // important attributes)
-                let has_precedence = !doc.attrs[existing_idx].important;
+                // WHY: 同じCSS優先度では後の宣言を採用し、importantだけはnormalより優先する。
+                let has_precedence = !doc.attrs[existing_idx].important || important;
 
                 if has_precedence {
                     doc.attrs.swap(existing_idx, last_idx);
