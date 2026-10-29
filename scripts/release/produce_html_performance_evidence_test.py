@@ -305,6 +305,42 @@ class CatalogProducerOperationTest(unittest.TestCase):
 
 
 class TransportBundleUnitTests(unittest.TestCase):
+    def capacity_binding(self, root: Path) -> typed_producer.CapacityBinding:
+        document, state, registry = (root / name for name in
+                                     ("binding.json", "state.json", "registry.json"))
+        for path in (document, state, registry):
+            path.write_text(path.name)
+        return producer.CapacityBinding(
+            document, gate.sha256(document), state, gate.sha256(state),
+            registry, gate.sha256(registry), (),
+        )
+
+    def test_capacity_inputs_are_transported_with_recorded_pins(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            binding = self.capacity_binding(root)
+            capacity_input = producer.write(root / "capacity-inputs.json", {
+                "stateRef": {"path": str(binding.state), "sha256": binding.state_sha256},
+                "protectedRegistryRef": {"path": str(binding.registry), "sha256": binding.registry_sha256},
+            })
+            incomplete = root / "incomplete"
+            producer.write_transport_bundle(incomplete, "a" * 40, [capacity_input], [])
+            missing = gate.Bundle(incomplete)
+            with self.assertRaises(KeyError):
+                gate._recorded_capacity_state(missing, missing.json(capacity_input))
+            refs = [capacity_input, *producer.capacity_transport_refs(binding)]
+            directory = root / "complete"
+            producer.write_transport_bundle(directory, "a" * 40, refs, [])
+            bundle = gate.Bundle(directory)
+            value = bundle.json(capacity_input)
+            self.assertEqual(gate._recorded_capacity_state(bundle, value),
+                             (binding.state, binding.state_sha256))
+            self.assertEqual(bundle.file(value["protectedRegistryRef"]).read_text(), binding.registry.name)
+            self.assertEqual(bundle.file(refs[1]).read_text(), binding.document.name)
+            bundle.file(value["stateRef"]).write_text("changed")
+            with self.assertRaisesRegex(ValueError, "original pin mismatch"):
+                gate._recorded_capacity_state(bundle, value)
+
     def test_shared_bundle_writer_keeps_release_bundle_schema(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

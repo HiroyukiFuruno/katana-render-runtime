@@ -2,6 +2,11 @@
 
 ## 最新の再開地点（2026-10-30）
 
+- [/] R4263はsource `8fe8d58c` の正式全117を採点完走し、EN58/59＋JA56/58＝114/117合格。未合格はC4 EN08-03=98.76257、JA08-03=98.75766、JA08-04=98.93402の三件。R4264の全117新旧照合で日英Kanban二件が新合格、旧合格の脱落0。独立raw JS・参照・閾値は不変。`tmp/quality/current-managed-mermaid-r4263/run/receipt.json` と `tmp/quality/resumed-owner-r3509/formal117-cohort-regression-r4264/result.json`。全体は未合格のまま。
+- [/] 同sourceのHTML R4265取得/R4266厳格検証はactual0。84/84が90以上、最低92.14438、出力fontIdentityEquivalence=established、measurement=not-performed。`tmp/html-performance-stage90/current-source-r4265/captures/catalog-stage90-captures.json`。全scroll/TOC・性能の合格に代用しない。
+- [ ] R4267正式性能batchの先頭四条件は各25 paired sample/両arm六phaseを収集し、各condition policyPass=true。candidate初回表示中央値は約0.00658～0.07583秒。ただし最終bundleのcapacity state参照が欠落しstrict validatorでKeyError、actual1。**正式性能合格・再利用可能batchとは扱わず原本保持**。capacity binding/state/registryの三pinを共通collectorへ含め忘れた原因を修正し、通常・batch共通経路とcandidate-build専用経路で既存helperを共有した。旧欠落拒否→三pin解決→改変拒否の回帰を追加、R4269標準foundation actual0/R4270 producer全100 unit actual0。validator・閾値・過去pinは不変。新sourceの正式性能は未取得。
+- [ ] 公開仮目安は11月2～5日(JST)、確度は低く確約ではない。C4三件の根本原因と現coverage不足が未確定。正式全117各99、HTML全90/全領域・目次・動的84/出力font一致、表示3秒未満と速度RSS非劣化、coverage100/未計測0、Q19–21、最終依存更新、完全gate、Draft最新HEAD review/個別reply-resolve、Ready、三OS CI、保護merge、ReleaseとKRR三crate、108/109 close、安全cleanupを継続する。
+
 - [/] C4-SRGB-SURFACE-ABを不採用で終了。同じrelease profile・入力9図でSome(sRGB)の再取得R4245/R4247はPNG SHAが全件一致し、Noneへ戻したR4248–R4250との比較も全9件完全一致した。描画改善を確認できない1引数変更を撤去し、元のNoneを維持する。両binaryは既存freeze_binaryでtarget外へ固定、実catalogのignored case一件を各図で実行した。診断結果は `tmp/quality/resumed-owner-r3509/srgb-surface-ab-decision-r4251/result.json`。正式117の合格数へ加算しない。次は候補を除いたsourceを通常commitし、新しい正式117・HTML84/性能証跡を取得する。
 - [/] `61f0b7a0`は通常commit済み。NativeCLIのRustup launcher修正・公開consumer回帰を保存したが、現sourceの完全gate/observer全22/新v3正式build receiptは未取得。正式Mermaidは旧R3859の112/117、HTMLは旧094f833fの84/84・最低92.14438のまま。性能・coverage100/未計測0・review/3OS CI/公開は未完了。
 

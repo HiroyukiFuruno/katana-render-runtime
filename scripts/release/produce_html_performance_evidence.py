@@ -219,6 +219,14 @@ class CapacityBinding(NamedTuple):
     references: tuple[str, ...]
 
 
+def capacity_transport_refs(binding: CapacityBinding) -> list[FilePin]:
+    return [
+        {"path": str(binding.document), "sha256": binding.document_sha256},
+        {"path": str(binding.state), "sha256": binding.state_sha256},
+        {"path": str(binding.registry), "sha256": binding.registry_sha256},
+    ]
+
+
 def _pinned_file(path: Path, checksum: str) -> None:
     gate.require(path.is_absolute() and path.resolve() == path and path.is_file()
                  and not path.is_symlink(), "capacity input must be a canonical regular file")
@@ -1362,9 +1370,7 @@ def produce_candidate_build_proof(root: Path, output: Path, capacity_document: P
     refs: list[FilePin] = [build_inputs.source_before, source_end, build_inputs.snapshot,
                            build_inputs.capacity_input, artifact_pin, *build.pins,
                            {"path": str(build.binary), "sha256": build.binary_sha256},
-                           {"path": str(binding.document), "sha256": binding.document_sha256},
-                           {"path": str(binding.state), "sha256": binding.state_sha256},
-                           {"path": str(binding.registry), "sha256": binding.registry_sha256}]
+                           *capacity_transport_refs(binding)]
     for log_directory in (lifecycle, *(output / "builds").glob("*.lifecycle")):
         for path in sorted(log_directory.rglob("*")):
             if path.is_file():
@@ -2461,7 +2467,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     refs: list[FilePin] = [build_inputs.source_before, source_end, approved, build_inputs.snapshot,
                            before_pin, end_pin, build_inputs.capacity_input, *build_pins,
                            *[FilePin(path=str(p), sha256=gate.sha256(p)) for p in binaries.values()],
-                           *checkpoint_pins, *worker_attempt_pins]
+                           *checkpoint_pins, *worker_attempt_pins, *capacity_transport_refs(binding)]
     refs.extend(reference_transport_refs)
     if resumed_bundle is not None:
         refs.extend(
