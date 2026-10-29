@@ -110,9 +110,7 @@ export function verifyManagedInputs(receipt: ManagedReceipt): void {
     const launcher = snapshot.toolLaunchers[name];
     const selected = snapshot.environment.PATH?.split(path.delimiter)
       .map((directory) => path.resolve(root, directory, name))
-      .find((candidate) =>
-        fs.existsSync(candidate) && (fs.statSync(candidate).mode & 0o111) !== 0,
-      );
+      .find((candidate) => fs.existsSync(candidate) && (fs.statSync(candidate).mode & 0o111) !== 0);
     requireBound(
       selected === launcher.path &&
         launcher.path === path.join(path.dirname(launcher.path), name) &&

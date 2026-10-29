@@ -15,12 +15,18 @@ export const rustToolLauncherSchema = z
   .superRefine((launcher, context) => {
     if (launcher.resolutionArgv.length === 0) return;
     const name = launcher.path.slice(launcher.path.lastIndexOf("/") + 1);
-    if ((name !== "cargo" && name !== "rustc") ||
-        launcher.resolutionArgv.length !== 3 ||
-        launcher.resolutionArgv[0] !== launcher.resolvedPath ||
-        launcher.resolutionArgv[1] !== "which" ||
-        launcher.resolutionArgv[2] !== name) {
-      context.addIssue({ code: "custom", message: "Rustup resolution argv differs", path: ["resolutionArgv"] });
+    if (
+      (name !== "cargo" && name !== "rustc") ||
+      launcher.resolutionArgv.length !== 3 ||
+      launcher.resolutionArgv[0] !== launcher.resolvedPath ||
+      launcher.resolutionArgv[1] !== "which" ||
+      launcher.resolutionArgv[2] !== name
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Rustup resolution argv differs",
+        path: ["resolutionArgv"],
+      });
     }
   });
 export const files = z.array(managedFileSchema);

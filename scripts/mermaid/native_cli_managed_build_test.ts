@@ -90,7 +90,10 @@ describe("managed CLI strict unit boundaries; no actual build evidence", () => {
     for (const value of [
       { ...request, extra: true },
       { ...request, cargo: { ...pin, extra: true } },
-      { ...request, cargoLauncher: { ...request.cargoLauncher, resolutionArgv: ["/other", "which", "cargo"] } },
+      {
+        ...request,
+        cargoLauncher: { ...request.cargoLauncher, resolutionArgv: ["/other", "which", "cargo"] },
+      },
       { ...request, expectedTarget: { ...request.expectedTarget, kind: ["lib"] } },
       { ...request, capacityAdmission: { ...capacity, extra: true } },
     ]) {

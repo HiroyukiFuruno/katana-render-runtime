@@ -174,11 +174,7 @@ export const managedObservationSchema = z
     cargoLauncher: rustToolLauncherSchema,
     rustcLauncher: rustToolLauncherSchema,
     rustupResolutionQueries: z
-      .array(
-        z
-          .object({ observation: managedOwnedSchema, lifecycle: managedFileSchema })
-          .strict(),
-      )
+      .array(z.object({ observation: managedOwnedSchema, lifecycle: managedFileSchema }).strict())
       .min(1),
     guardCodePins: files,
     pinsBefore: guardPins,

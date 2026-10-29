@@ -141,12 +141,7 @@ export function createManagedReaderFixture(withCapacityCleanup = false) {
   const build = owned(
     "build",
     "build",
-    [
-      tool("rtk").path,
-      "proxy",
-      tool("just").path,
-      "krr-build",
-    ],
+    [tool("rtk").path, "proxy", tool("just").path, "krr-build"],
     102,
     "probe-6-native-cli-build",
     "unit outer output",
@@ -378,8 +373,12 @@ export function createManagedReaderFixture(withCapacityCleanup = false) {
     owned(
       "tool-query",
       name,
-      [tool("rtk").path, "proxy", snapshot.toolLaunchers[name].path,
-        name === "cargo" ? "--version" : "-Vv"],
+      [
+        tool("rtk").path,
+        "proxy",
+        snapshot.toolLaunchers[name].path,
+        name === "cargo" ? "--version" : "-Vv",
+      ],
       105 + index,
       `probe-${3 + index}-${name}`,
       "unit version output",
