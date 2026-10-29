@@ -42,12 +42,13 @@ class HtmlPerformanceRunnerTest(unittest.TestCase):
             for name, content in (("a.py", b"a"), ("b.py", b"b")):
                 (root / name).write_bytes(content)
             numpy = DistributionStub(root, "2.5.4", ("a.py", "b.py"))
+            reflink = DistributionStub(root, "0.3.3", ("a.py", "b.py"))
             scipy = DistributionStub(root, "1.18.1", ("b.py", "a.py"))
-            with patch.object(metadata, "distribution", side_effect=(numpy, scipy)):
+            with patch.object(metadata, "distribution", side_effect=(numpy, reflink, scipy)):
                 first = identity.installed_identity("1.18.1", "2.5.4")
             numpy.files = ("b.py", "a.py")
             scipy.files = ("a.py", "b.py")
-            with patch.object(metadata, "distribution", side_effect=(numpy, scipy)):
+            with patch.object(metadata, "distribution", side_effect=(numpy, reflink, scipy)):
                 second = identity.installed_identity("1.18.1", "2.5.4")
             self.assertEqual(first, second)
 
@@ -56,14 +57,20 @@ class HtmlPerformanceRunnerTest(unittest.TestCase):
             root = Path(directory)
             (root / "numpy.bin").write_bytes(b"before")
             (root / "scipy.bin").write_bytes(b"stable")
+            (root / "reflink.bin").write_bytes(b"stable")
             numpy = DistributionStub(root, "2.5.4", ("numpy.bin",))
+            reflink = DistributionStub(root, "0.3.3", ("reflink.bin",))
             scipy = DistributionStub(root, "1.18.1", ("scipy.bin",))
-            with patch.object(metadata, "distribution", side_effect=(numpy, scipy)):
+            with patch.object(metadata, "distribution", side_effect=(numpy, reflink, scipy)):
                 before = identity.installed_identity("1.18.1", "2.5.4")
             (root / "numpy.bin").write_bytes(b"after")
-            with patch.object(metadata, "distribution", side_effect=(numpy, scipy)):
+            with patch.object(metadata, "distribution", side_effect=(numpy, reflink, scipy)):
                 after = identity.installed_identity("1.18.1", "2.5.4")
             self.assertNotEqual(before, after)
+            (root / "reflink.bin").write_bytes(b"changed")
+            with patch.object(metadata, "distribution", side_effect=(numpy, reflink, scipy)):
+                changed = identity.installed_identity("1.18.1", "2.5.4")
+            self.assertNotEqual(after, changed)
 
     def test_identity_rejects_missing_inventory_file_and_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -90,3 +97,5 @@ class HtmlPerformanceRunnerTest(unittest.TestCase):
         with patch.object(metadata, "distribution", return_value=distribution):
             with self.assertRaisesRegex(RuntimeError, "version differs"):
                 identity._distribution_identity("scipy", "1.18.1")
+            with self.assertRaisesRegex(RuntimeError, "version differs"):
+                identity._distribution_identity("reflink-copy", "0.3.3")

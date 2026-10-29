@@ -1,0 +1,3 @@
+from os import PathLike
+
+def reflink(src: str | PathLike[str], dst: str | PathLike[str]) -> None: ...

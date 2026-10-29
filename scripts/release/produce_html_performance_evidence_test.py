@@ -420,6 +420,40 @@ class TransportBundleUnitTests(unittest.TestCase):
             self.assertEqual(gate.sha256(transported_executable), pins[0]["sha256"])
             self.assertEqual(gate.sha256(transported_private), pins[1]["sha256"])
 
+    @unittest.skipUnless(platform.system() == "Darwin", "macOS clone contract")
+    def test_transport_clone_is_independent_and_keeps_source_stamp(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = root / "source"
+            target = root / "target"
+            source.write_bytes(b"original")
+            before = source.lstat()
+            producer._clone_transport_file(source, target, gate.sha256(source))
+            after = source.lstat()
+            self.assertEqual(producer._file_identity(before), producer._file_identity(after))
+            self.assertEqual(before.st_mode, after.st_mode)
+            self.assertNotEqual((before.st_dev, before.st_ino), (target.stat().st_dev, target.stat().st_ino))
+            target.write_bytes(b"clone changed")
+            self.assertEqual(source.read_bytes(), b"original")
+            source.write_bytes(b"source changed")
+            self.assertEqual(target.read_bytes(), b"clone changed")
+            with self.assertRaises(ValueError):
+                producer._clone_transport_file(source, target, gate.sha256(source))
+            with self.assertRaises(ValueError):
+                producer._clone_transport_file(source, source, gate.sha256(source))
+
+    @unittest.skipUnless(platform.system() == "Darwin", "macOS clone contract")
+    def test_transport_clone_failure_does_not_fall_back_to_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = root / "source"
+            target = root / "target"
+            source.write_bytes(b"original")
+            with patch("reflink_copy.reflink", side_effect=OSError(errno.ENOTSUP, "clone unsupported")):
+                with self.assertRaises(OSError):
+                    producer._clone_transport_file(source, target, gate.sha256(source))
+            self.assertFalse(target.exists())
+
 
 class HtmlPerformanceBatchUnitTests(unittest.TestCase):
     def setUp(self) -> None:

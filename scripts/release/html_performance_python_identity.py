@@ -31,6 +31,7 @@ def _distribution_identity(name: str, expected_version: str) -> dict[str, str]:
 def installed_identity(scipy_version: str, numpy_version: str) -> str:
     identity = {
         "numpy": _distribution_identity("numpy", numpy_version),
+        "reflink-copy": _distribution_identity("reflink-copy", "0.3.3"),
         "scipy": _distribution_identity("scipy", scipy_version),
     }
     payload = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()

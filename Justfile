@@ -689,7 +689,7 @@ html-performance-evidence-produce catalog_manifest:
 
 # HTML受入れとは独立にcandidate build proofだけを生成・検証する。
 html-performance-candidate-build-proof output capacity_binding capacity_binding_sha256:
-    python3 scripts/release/produce_html_performance_evidence.py --repo {{quote(REPO_ROOT)}} --output {{quote(output)}} --capacity-binding {{quote(capacity_binding)}} --capacity-binding-sha256 {{quote(capacity_binding_sha256)}} --candidate-build-only
+    {{HTML_PERFORMANCE_SCIPY_ENV}} uv run --isolated --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} python scripts/release/run_html_performance.py produce --repo {{quote(REPO_ROOT)}} --output {{quote(output)}} --capacity-binding {{quote(capacity_binding)}} --capacity-binding-sha256 {{quote(capacity_binding_sha256)}} --candidate-build-only
 
 # Run the complete quality gate before release-specific verification.
 release-quality: check html-performance-nonregression-check

@@ -827,6 +827,11 @@ class VerifyCiQualityEvidenceTest(unittest.TestCase):
 class WorkflowAndJustfileContractTest(unittest.TestCase):
     ROOT = MODULE_PATH.parents[2]
 
+    def test_candidate_build_proof_uses_pinned_performance_runtime(self) -> None:
+        justfile = (self.ROOT / "Justfile").read_text(encoding="utf-8")
+        recipe = justfile.split("html-performance-candidate-build-proof output capacity_binding capacity_binding_sha256:\n", 1)[1].split("\n\n", 1)[0].strip()
+        self.assertEqual(recipe, "{{HTML_PERFORMANCE_SCIPY_ENV}} uv run --isolated --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} python scripts/release/run_html_performance.py produce --repo {{quote(REPO_ROOT)}} --output {{quote(output)}} --capacity-binding {{quote(capacity_binding)}} --capacity-binding-sha256 {{quote(capacity_binding_sha256)}} --candidate-build-only")
+
     @staticmethod
     def workflow_step(workflow: str, name: str) -> str:
         start = workflow.index(f"      - name: {name}\n")

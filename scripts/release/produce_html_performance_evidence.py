@@ -576,6 +576,26 @@ def write(path: Path, value: object) -> FilePin:
     return {"path": str(path.resolve()), "sha256": gate.sha256(path)}
 
 
+def _clone_transport_file(source: Path, destination: Path, checksum: str) -> None:
+    from reflink_copy import reflink
+
+    gate.require(source != destination and not destination.exists() and not destination.is_symlink(),
+                 "transport destination already exists or is source")
+    before = source.lstat()
+    _pinned_file(source, checksum)
+    reflink(source, destination)
+    after = source.lstat()
+    target = destination.lstat()
+    gate.require(_file_identity(before) == _file_identity(after) and before.st_mode == after.st_mode,
+                 "transport source identity changed")
+    gate.require(stat.S_ISREG(target.st_mode) and (target.st_dev, target.st_ino) != (before.st_dev, before.st_ino)
+                 and target.st_size == before.st_size and gate.sha256(destination) == checksum,
+                 "transport clone identity differs")
+    final = source.lstat()
+    gate.require(_file_identity(before) == _file_identity(final) and before.st_mode == final.st_mode,
+                 "transport source changed during validation")
+
+
 def write_transport_bundle(bundle: Path, head: str, refs: Sequence[FilePin],
                            attempts: list[dict[str, FilePin]]) -> dict[str, str]:
     transport_files: list[gate.JsonObject] = []
@@ -589,7 +609,10 @@ def write_transport_bundle(bundle: Path, head: str, refs: Sequence[FilePin],
         relative = f"payload/{index}/{original.name}"
         destination = bundle / relative
         destination.parent.mkdir(parents=True)
-        shutil.copyfile(original, destination)
+        if platform.system() == "Darwin":
+            _clone_transport_file(original, destination, ref["sha256"])
+        else:
+            shutil.copyfile(original, destination)
         os.chmod(destination, stat.S_IMODE(original.stat().st_mode))
         transport_files.append({"originalPath": ref["path"], "relativePath": relative,
                                 "sha256": ref["sha256"]})
