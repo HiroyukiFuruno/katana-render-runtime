@@ -2,6 +2,14 @@
 
 ## 最新の再開地点（2026-10-30）
 
+- [/] 通常hook付きcommit `4d339007`へカバレッジ収集の順序/共通環境/保護された容量整理、`8726e573`へinline CSS回復修正を保存し、各actualExit0を回収した。追加のfilter7fixtureとmarker12回帰はR4602の関連34件に含めて成功し、別の履歴へ保存する。未適用paint-server追加案は次のcoverage結果を見るまで採用せず、修正範囲を増やさない。
+- [/] R4587 stock Chrome156.0.8078.79は不正宣言後のfillをrgb(51,68,85)として採用し、R4577のnative旧動作との差を確認。既存cssparserで宣言境界を扱い、値/importantは従来simplecssへ渡す修正を適用した。R4598実AST、R4601実catalog、R4602関連34件、R4607全source-static-foundationはactual0。全117/84・速度/RSS・coverageの代用ではない。
+- [/] R4599契約Bunは1375件中1336成功/39失敗、578.65秒。共有fixtureがexport CARGOを認識せず、修正後R4604は39件中22成功/17失敗・11.11秒となった。残りは旧fixture heavy-native→unit-test依存が新DAGと循環する不整合。正規構成へ同期しR4606の17件、R4608の関連39件は全成功（後者79.40秒）。不正変更を拒否するassertは維持し、成功済み1336件の即時二重実行は避けた。現sourceの最終完全gateは別途必須。R4586リリース手順契約29件も全成功。
+- [/] ROI候補はR4577実回帰46件中45成功（ROI12/marker12/writer19は成功、parser1失敗）。R4579同入力9図を製品経路で描画し、R4581既存採点で残二図98.76257→96.54849、98.75766→96.59661、既存合格JA08-04も99.255058→96.18071へ悪化したため不採用。R4582へ候補差分を保全し、接続・新候補module/testを撤去してR4583 index整合を完了した。参照画像・合格閾値・採点方法は不変。局所診断だけで採用せず、正式合格115/117は未更新。
+- [/] 新public parser回帰の`fill:#112233; malformed; fill:#334455`で、有効な後続fillが失われる。simplecss0.2.2の宣言エラー時jump_to_endが原因。失敗ログR4577を保持し、既存cssparserの構文境界処理でsimplecssの値解釈を維持する修正と回帰がR4602で成功。期待値を弱めず、不正宣言からの回復と既存優先順位を検証した。
+- [/] 公開見込み11/2〜5は未解決修正量を測れていない推定であり、確定日や最低5日間ではない。最新の正式MermaidはR4439の115/117、HTMLはR4386/87の84/84画像90以上・性能未実施で、現sourceの合格へ読み替えない。
+- [/] R4526/R4530のroot実テストは各3788件成功したが、coverageは81,099/84,137行・未到達3038行、96.38922233975539%で100%未達。report前の固定容量超過と、後続performance producerによるroot計測profile整理、producer間のCARGO/TEST_THREADS/CARGO_BUILD_JOBS不一致を特定した。performance→root→集計の順と共通export、root profile全体の明示保持時だけ既存cleanupを許す修正を検証中。閾値・署名・環境fingerprintを緩和せず、旧receiptを再認定しない。
+- [/] ROI2x描画候補は既存Skiaのみでopaque fill+stroke曲線へ限定し、最大面積と極細線除外を設けた。R4569実AST、R4575全Rust lintはactual0。画像・速度・メモリの改善は未測定なので製品採用や正式合格件数に加算しない。R4574静的foundationはowned-validationのDAG契約不整合でactual1を保持し、残契約を修正中。
 - [/] CSS重要度修正をR4523通常hook付きcommit `66e01210`へ保存。新回帰は同!important後勝ちの実Redと修正後17件Green、実画像の正しい一意宣言入力との一致まで確認した。最終全画像・性能・coverageの代用ではない。通常commit hookでfmt/実AST/lintが必須実行されるため、同一sourceのcheckpointで手動の全lintを重ねる運用を避け、関連回帰と自己レビュー後に通常hookの実結果を回収する。検査自体の省略・回避はしない。
 - [/] R4515のCSS通常commitはhookの実ASTで31行の新回帰関数を拒否しactual1。事前のsource-staticは実Rust ASTを含まず、主担当の検査選択が不足していた。caseを型付きconstへ分離し、R4517既存`just ast-lint`、R4518全Rust lint、R4519実catalogに束縛したR4520関連17件が全成功。hook失敗は保存し通常commitを再試行する。部分検証を完全gate合格へ読み替えない。
 - [/] CSS重要度修正はR4503全source-static actual0、R4504のtest型複雑度二件は共有aliasで解消しR4508全Rust lint actual0。R4509実catalogに束縛したR4510は関連17件全成功。R4513の同じ重複!important入力の実frameは、重複のない正しい後勝ち入力R4497とPNG SHA一致。Red→Greenと実描画を確認し、参照画像・閾値は変更していない。全117/84の再検証は別途必要。

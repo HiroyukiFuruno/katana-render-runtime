@@ -1,0 +1,139 @@
+use super::{Mode, render, upstream_writer_font_database, usvg};
+use rstest::rstest;
+use std::path::PathBuf;
+use tiny_skia::Pixmap;
+
+const FIXTURE_DIR: &str =
+    "../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/painting/marker";
+const SCALE: f32 = 1.0;
+const LEFT_END: u32 = 60;
+const RIGHT_START: u32 = 140;
+const START_SAMPLE_X: u32 = 100;
+const START_SAMPLE_Y: u32 = 10;
+
+#[rstest]
+#[case("only-marker-start", 1)]
+#[case("only-marker-mid", 3)]
+#[case("only-marker-end", 1)]
+#[case("zero-sized", 0)]
+#[case("zero-sized-stroke", 0)]
+#[case("marker-with-a-negative-size", 0)]
+#[case("recursive-1", 5)]
+#[case("with-viewBox-1", 1)]
+fn marker_expansion_respects_position_and_invalid_size(
+    #[case] name: &str,
+    #[case] expected: usize,
+) -> Result<(), String> {
+    let tree = parse_fixture(name)?;
+    assert_eq!(marker_path_count(tree.root()), expected, "{name}");
+    let image = render(&tree, Mode::Extra(SCALE))?;
+    assert!(image.pixels().iter().any(|pixel| pixel.alpha() > 0));
+    Ok(())
+}
+
+fn marker_path_count(group: &usvg::Group) -> usize {
+    group
+        .children()
+        .iter()
+        .map(|node| match node {
+            usvg::Node::Group(group) => marker_path_count(group),
+            usvg::Node::Path(path) if path.id().is_empty() => 1,
+            _ => 0,
+        })
+        .sum()
+}
+
+#[test]
+fn invalid_marker_units_fall_back_to_stroke_width() -> Result<(), String> {
+    let source = fixture("with-invalid-markerUnits")?;
+    let explicit = source.replace("markerUnits=\"qwe\"", "markerUnits=\"strokeWidth\"");
+    assert_ne!(source, explicit);
+    let actual = render_source(&source)?;
+    let expected = render_source(&explicit)?;
+    assert_eq!(actual.data(), expected.data());
+    Ok(())
+}
+
+#[test]
+fn user_space_marker_does_not_scale_with_stroke_width() -> Result<(), String> {
+    let source = fixture("with-markerUnits=userSpaceOnUse")?;
+    let stroke_scaled = source.replace(
+        "markerUnits=\"userSpaceOnUse\"",
+        "markerUnits=\"strokeWidth\"",
+    );
+    assert_ne!(source, stroke_scaled);
+    let user = render_source(&source)?;
+    let stroke = render_source(&stroke_scaled)?;
+    assert!(blue_pixels(&stroke) > blue_pixels(&user));
+    assert!(blue_pixels(&user) > 0);
+    Ok(())
+}
+
+fn blue_pixels(image: &Pixmap) -> usize {
+    image
+        .pixels()
+        .iter()
+        .filter(|pixel| pixel.blue() > pixel.red() && pixel.blue() > pixel.green())
+        .count()
+}
+
+#[test]
+fn auto_start_reverse_changes_start_and_preserves_end() -> Result<(), String> {
+    let source = fixture("orient=auto-start-reverse")?;
+    let normal = source.replace("orient=\"auto-start-reverse\"", "orient=\"auto\"");
+    assert_ne!(source, normal);
+    let reverse = render_source(&source)?;
+    let forward = render_source(&normal)?;
+    assert!(regions_differ(&reverse, &forward, 0, LEFT_END));
+    assert!(!regions_differ(
+        &reverse,
+        &forward,
+        RIGHT_START,
+        reverse.width()
+    ));
+    Ok(())
+}
+
+fn regions_differ(left: &Pixmap, right: &Pixmap, start: u32, end: u32) -> bool {
+    (0..left.height()).any(|y| (start..end).any(|x| left.pixel(x, y) != right.pixel(x, y)))
+}
+
+#[test]
+fn start_marker_renders_at_its_first_vertex() -> Result<(), String> {
+    let source = fixture("only-marker-start")?;
+    let no_marker = source.replace("marker-start=\"url(#marker1)\"", "");
+    assert_ne!(source, no_marker);
+    let with = render_source(&source)?;
+    let without = render_source(&no_marker)?;
+    let marker = with
+        .pixel(START_SAMPLE_X, START_SAMPLE_Y)
+        .ok_or("marker sample missing")?;
+    let bare = without
+        .pixel(START_SAMPLE_X, START_SAMPLE_Y)
+        .ok_or("bare sample missing")?;
+    assert!(marker.blue() > marker.red() && marker.blue() > marker.green());
+    assert_eq!(bare.alpha(), 0);
+    Ok(())
+}
+
+fn render_source(source: &str) -> Result<Pixmap, String> {
+    let tree = parse(source)?;
+    render(&tree, Mode::Extra(SCALE))
+}
+
+fn parse_fixture(name: &str) -> Result<usvg::Tree, String> {
+    parse(&fixture(name)?)
+}
+
+fn parse(source: &str) -> Result<usvg::Tree, String> {
+    let options = usvg::Options {
+        fontdb: upstream_writer_font_database()?,
+        ..usvg::Options::default()
+    };
+    usvg::Tree::from_str(source, &options).map_err(|error| error.to_string())
+}
+
+fn fixture(name: &str) -> Result<String, String> {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(FIXTURE_DIR);
+    std::fs::read_to_string(dir.join(format!("{name}.svg"))).map_err(|error| error.to_string())
+}

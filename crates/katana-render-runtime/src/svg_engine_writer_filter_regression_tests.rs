@@ -27,6 +27,17 @@ const OPAQUE_CHANNEL: u8 = 255;
     "feComposite",
     "operator=\"arithmetic\""
 )]
+#[case("feDropShadow/with-offset", "feDropShadow", "stdDeviation=")]
+#[case("feGaussianBlur/simple-case", "feGaussianBlur", "stdDeviation=")]
+#[case("feOffset/simple-case", "feOffset", "dx=\"20\"")]
+#[case("feBlend/mode=multiply", "feBlend", "mode=\"multiply\"")]
+#[case("feFlood/seagreen", "feFlood", "flood-color=")]
+#[case("feMerge/color-interpolation-filters=sRGB", "feMerge", "feMergeNode")]
+#[case(
+    "feDiffuseLighting/multiple-light-sources",
+    "feDiffuseLighting",
+    "feDistantLight"
+)]
 #[case("feConvolveMatrix/bias=-0.5", "feConvolveMatrix", "bias=\"-0.5\"")]
 #[case("feMorphology/operator=dilate", "feMorphology", "operator=\"dilate\"")]
 #[case(

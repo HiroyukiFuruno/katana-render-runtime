@@ -11,6 +11,8 @@ mod diagnostic;
 mod failure_artifact;
 #[path = "svg_engine_render_inventory_tests.rs"]
 mod inventory;
+#[path = "svg_engine_render_marker_tests.rs"]
+mod marker;
 
 const NORMAL_WIDTH: u32 = 300;
 const EXTRA_FILTER_SCALE: f32 = 10.0;
