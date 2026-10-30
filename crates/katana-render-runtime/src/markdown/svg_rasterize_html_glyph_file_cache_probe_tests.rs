@@ -6,6 +6,9 @@ use skia_safe::{Data, FontMgr, Typeface};
 use std::collections::BTreeSet;
 use std::time::Instant;
 
+#[path = "svg_rasterize_html_glyph_file_mapping_tests.rs"]
+mod mapping_tests;
+
 const ITERATIONS: usize = 30;
 const SAMPLE: &str = "AV";
 

@@ -3,6 +3,9 @@ use rstest::rstest;
 use std::path::PathBuf;
 use tiny_skia::Pixmap;
 
+#[path = "svg_engine_render_marker_geometry_tests.rs"]
+mod geometry;
+
 const FIXTURE_DIR: &str =
     "../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/painting/marker";
 const SCALE: f32 = 1.0;

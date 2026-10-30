@@ -1,7 +1,13 @@
+use super::super::super::composite::TextRasterizer;
 use super::{skia_matrix, transformed_text_bounds};
 use resvg::usvg::{Node, Options, Tree};
 use skia_safe::Point as SkiaPoint;
-use tiny_skia::Transform;
+use std::sync::Arc;
+use tiny_skia::{Color, Pixmap, Transform};
+
+const OFFSCREEN_WIDTH: u32 = 80;
+const OFFSCREEN_HEIGHT: u32 = 40;
+const OFFSCREEN_TRANSLATION: f32 = 4096.0;
 
 #[test]
 fn skia_matrix_maps_axes_and_crop_origin() {
@@ -43,5 +49,62 @@ fn rotated_crop_union_has_exact_shifted_endpoints() -> Result<(), String> {
     assert!((shifted.1 - (base.1 - expected_dy)).abs() < 0.0001);
     assert!((shifted.2 - (base.2 + expected_dx)).abs() < 0.0001);
     assert!((shifted.3 - (base.3 + expected_dy)).abs() < 0.0001);
+    Ok(())
+}
+
+#[test]
+fn fully_offscreen_glyph_is_handled_as_noop_with_visible_control() -> Result<(), String> {
+    let font_path = std::env::temp_dir().join(format!("krr-offscreen-{}.ttf", std::process::id()));
+    let fixture = super::super::super::font_file_fixture::create(
+        font_path,
+        super::super::super::font_file_fixture::FONT_BYTES,
+    )
+    .map_err(|error| error.to_string())?;
+    let svg = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='{OFFSCREEN_WIDTH}' height='{OFFSCREEN_HEIGHT}'><text id='run' x='8' y='24' font-family='Noto Sans' font-size='18'>Ag</text></svg>"
+    );
+    let tree = Tree::from_str(
+        &svg,
+        &Options {
+            fontdb: Arc::new(fixture.database.clone()),
+            ..Options::default()
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    let Some(Node::Text(text)) = tree.node_by_id("run") else {
+        return Err("offscreen text missing".to_owned());
+    };
+    let rasterizer = super::super::HtmlGlyphRasterizer::new(tree.fontdb());
+    assert_visible_control(&rasterizer, text)?;
+    assert_offscreen_noop(&rasterizer, text)
+}
+
+fn assert_visible_control(
+    rasterizer: &super::super::HtmlGlyphRasterizer<'_>,
+    text: &resvg::usvg::Text,
+) -> Result<(), String> {
+    let mut visible =
+        Pixmap::new(OFFSCREEN_WIDTH, OFFSCREEN_HEIGHT).ok_or("visible pixmap unavailable")?;
+    assert!(rasterizer.render(text, Transform::identity(), &mut visible.as_mut())?);
+    assert!(
+        visible
+            .data()
+            .chunks_exact(super::super::RGBA_CHANNELS)
+            .any(|pixel| pixel[super::super::ALPHA_CHANNEL] != 0)
+    );
+    Ok(())
+}
+
+fn assert_offscreen_noop(
+    rasterizer: &super::super::HtmlGlyphRasterizer<'_>,
+    text: &resvg::usvg::Text,
+) -> Result<(), String> {
+    let mut offscreen =
+        Pixmap::new(OFFSCREEN_WIDTH, OFFSCREEN_HEIGHT).ok_or("offscreen pixmap unavailable")?;
+    offscreen.fill(Color::WHITE);
+    let before = offscreen.data().to_vec();
+    let translated = Transform::from_translate(OFFSCREEN_TRANSLATION, 0.0);
+    assert!(rasterizer.render(text, translated, &mut offscreen.as_mut())?);
+    assert_eq!(offscreen.data(), before);
     Ok(())
 }

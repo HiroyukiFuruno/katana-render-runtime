@@ -17,6 +17,8 @@ mod input_contract;
 mod inventory;
 #[path = "svg_engine_render_marker_tests.rs"]
 mod marker;
+#[path = "svg_engine_public_getter_tests.rs"]
+mod public_getters;
 const NORMAL_WIDTH: u32 = 300;
 const EXTRA_FILTER_SCALE: f32 = 10.0;
 
