@@ -462,9 +462,16 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         self.root = Path(temporary.name).resolve()
         self._batch_counter = 0
 
-    def test_catalog_run_uses_batch_failure_sealing_without_forcing_a_partial_deadline(self) -> None:
-        self.assertTrue(producer._batch_mode(self.root / "catalog.json", None, None))
-        self.assertFalse(producer._batch_mode(None, None, None))
+    def test_catalog_default_batch_has_the_existing_budget_and_legacy_does_not(self) -> None:
+        catalog_mode = producer._batch_mode(self.root / "catalog.json", None, None)
+        legacy_mode = producer._batch_mode(None, None, None)
+        self.assertTrue(catalog_mode)
+        self.assertFalse(legacy_mode)
+        self.assertEqual(
+            producer._batch_deadline(100.0, catalog_mode),
+            100.0 + producer.BATCH_WORK_BUDGET_SECONDS,
+        )
+        self.assertIsNone(producer._batch_deadline(100.0, legacy_mode))
         self.assertTrue(producer._batch_mode(None, 1, None))
         self.assertTrue(producer._batch_mode(None, None, self.root / "resume"))
 
@@ -481,6 +488,21 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
                          ["case-a"])
         with self.assertRaisesRegex(ValueError, "planned prefix"):
             producer._completed_batch_ids([], planned, planned[1:], measured)
+
+    def test_summary_counts_actual_phase_records_and_rejects_invalid_values(self) -> None:
+        def result(records: object) -> tuple[Path, typed_producer.ExpectedPerformance,
+                                             gate.JsonObject, typed_producer.FilePin]:
+            return (self.root, cast(typed_producer.ExpectedPerformance, {}),
+                    {"policy": {"phaseRecords": records}},
+                    cast(typed_producer.FilePin, {}))
+
+        self.assertEqual(producer._measured_phase_record_count([
+            result(300), result(150),
+        ]), 450)
+        for invalid in (None, -1, True):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    producer._measured_phase_record_count([result(invalid)])
 
     def create_batch(
         self,

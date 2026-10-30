@@ -797,6 +797,10 @@ def _batch_mode(
     return catalog_manifest_path is not None or max_conditions is not None or resume_batch is not None
 
 
+def _batch_deadline(started_at: float, enabled: bool) -> float | None:
+    return started_at + BATCH_WORK_BUDGET_SECONDS if enabled else None
+
+
 def _batch_formal_acceptance(
     condition_ids: Sequence[str], complete_ids: Sequence[str], policy_accepted: bool,
 ) -> bool:
@@ -826,6 +830,18 @@ def _completed_batch_ids(
     ) if gate._object(result.get("policy"), "condition policy").get("status") != "incomplete")
     gate.require(len(ids) == len(set(ids)), "batch complete conditions are duplicated")
     return ids
+
+
+def _measured_phase_record_count(
+    results: Sequence[tuple[Path, ExpectedPerformance, gate.JsonObject, FilePin]],
+) -> int:
+    count = 0
+    for _, _, result, _ in results:
+        policy = gate._object(result.get("policy"), "condition policy")
+        measured = gate._integer(policy.get("phaseRecords"), "measured phase records")
+        gate.require(measured >= 0, "measured phase records must be non-negative")
+        count += measured
+    return count
 
 
 def _resume_condition_plan(
@@ -2221,8 +2237,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     gate.require(reference_parent_wrapper is None or catalog_manifest_path is not None,
                  "reference parent wrapper requires a catalog")
     batch_mode = _batch_mode(catalog_manifest_path, max_conditions, resume_batch)
-    batch_deadline = (time.monotonic() + BATCH_WORK_BUDGET_SECONDS
-                      if max_conditions is not None or resume_batch is not None else None)
+    batch_deadline = _batch_deadline(time.monotonic(), batch_mode)
     batch_failure: BaseException | None = None
     resumed_receipt: gate.JsonObject | None = None
     resumed_bundle: gate.Bundle | None = None
@@ -2651,7 +2666,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         "formalAccepted": _batch_formal_acceptance(
             attempt_ids, complete_ids, policy_accepted,
         ),
-        "phaseRecords": len(expected_all) * len(gate.PHASES) * 50,
+        "phaseRecords": _measured_phase_record_count(expected_all),
         "batchFailure": type(batch_failure).__name__ if batch_failure else None,
     }
     if catalog_manifest_path is not None:

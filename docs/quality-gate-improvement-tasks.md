@@ -2,6 +2,13 @@
 
 ## 最新の再開地点（2026-10-30）
 
+- [/] c1733928のR4695 capture/R4696 strictは84/84が90以上、最低92.14438、出力font一致established。R4693通常hook0で同一文書fragment修正、R4694で途中batch保存修正を保存した。全体リリースの合格ではない。
+- [ ] R4700は外側observerの1800秒上限で83/84条件時に終了。lifecycle実exit -15、groupClosed/rawFdsClosed true、元process残存なし。通常のowned戻りobservationはTimeoutExpiredにより未生成であり補完しない。83checkpointの内訳は71 policy pass、12は旧parent371274edの#a拒否によるbaseline failure/incomplete。旧R4675のRSS暫定不合格をこの未完runで正式解消扱いにしない。
+- [/] R4701/R4702は既存readerのaggregate_reportsとphase validatorを使った限定診断actual0。上記12条件のcandidateは各25sampleがあり、全phaseの実最大表示時間0.135080959秒。旧新版の比較非劣化・正式全84合格ではない。既存summaryの期待phase数ではなく実rawを基準に集計する。
+- [ ] 旧版が動かない12条件の受入方法を質問中。候補は比較不能を明記したcandidate判定（比較可能72条件はpaired非劣化維持）、またはfragmentだけ修正した新しい旧source referenceを別identityで構築する方法。過去参照・元入力を変更せず、回答前に受入条件を変更しない。coverage等の独立作業を継続する。
+- [/] R4700の実行設定はcatalog既定が1200秒の内部batch予算を使わず、外側1800秒に衝突する誤りだった。catalog既定も既存予算で閉じて同一sourceの安全なresumeへ進めるよう修正中。全84対象・25sample・timeout・閾値は維持し、上限延長で回避しない。
+- [/] 上記内部予算を既定catalogにも適用し、summary.phaseRecordsも各policyの実測数合算へ変更。欠落・負数・boolを拒否する。R4707 Python lint/厳格型0、R4708固定依存producer108テスト成功。以前の期待数表示や83checkpointを正式成功へ読み替えず、次のbounded runで閉じた証跡を取得する。
+
 - [/] b450のR4669 capture/R4670 strictはHTML84/84が90以上、最低92.14438、出力font一致established。R4675全84性能は45条件checkpoint計算後（44 policy pass/1 RSS fail）、46条件目の同一文書リンク#a拒否でactual1。catalog既定が旧非batch経路へ入り正式封印に未到達だったため、45件を正式性能成功へ数えない。未実施39条件を含む新規全84測定が必要。
 - [/] 存在しないfile originでも、相対fragmentかつ同一文書URLだけを許可する修正。別ファイル・外部・symlink escape拒否を維持し、R4682 AST0/R4683実catalog0/R4684選択7回帰すべて成功。producer既定batch化と途中失敗時の完了集合処理は修正・回帰検証中。
 - [/] producerの既定catalogを安全なbatch経路へ通し、途中失敗後の完了集合を実測prefixから構築。再開IDはreceipt順を維持し、context-endとclosed receipt保存後も元失敗を非0で返す。R4687 Python lint/厳格型0、R4689固定依存環境のproducer107テスト成功、R4691全source-static-foundation0。R4685型エラーとR4688の非隔離Pythonによるreflink依存不足は失敗原本を保持し、成功へ読み替えない。正式全84性能・coverageの代用ではない。
