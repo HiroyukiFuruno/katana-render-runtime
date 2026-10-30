@@ -25,9 +25,7 @@ fn styled_paths_and_gradient_spread_survive_writer_roundtrip() -> Result<(), Str
     assert_style_attributes(&serialized)?;
     let parsed = parse_writer_svg(&serialized, "writer-style-coverage")?;
     assert_style_attributes(&parsed.to_string(&options))?;
-    let first = render_tree(&original)?;
-    let second = render_tree(&parsed)?;
-    assert_eq!(first.data(), second.data());
+    let first = assert_pixels_equal(&original, &parsed, "writer-style-coverage")?;
     assert!(
         first
             .data()
@@ -155,11 +153,43 @@ fn upstream_filter_variants_preserve_attributes_and_pixels(
     Ok(())
 }
 
-fn assert_pixels_equal(first: &usvg::Tree, second: &usvg::Tree, case: &str) -> Result<(), String> {
-    let before = render_tree(first)?;
-    let after = render_tree(second)?;
-    assert_eq!(before.data(), after.data(), "{case}: roundtrip pixels");
-    Ok(())
+pub(super) fn assert_pixels_equal(
+    first: &usvg::Tree,
+    second: &usvg::Tree,
+    case: &str,
+) -> Result<tiny_skia::Pixmap, String> {
+    let (before, after) = render_pair(first, second)?;
+    assert_pixmaps_equal(&before, &after, case);
+    Ok(before)
+}
+
+pub(super) fn render_pair(
+    first: &usvg::Tree,
+    second: &usvg::Tree,
+) -> Result<(tiny_skia::Pixmap, tiny_skia::Pixmap), String> {
+    Ok((render_tree(first)?, render_tree(second)?))
+}
+
+pub(super) fn assert_pixmaps_equal(
+    before: &tiny_skia::Pixmap,
+    after: &tiny_skia::Pixmap,
+    case: &str,
+) {
+    let first_difference = before
+        .data()
+        .chunks_exact(RGBA_CHANNELS)
+        .zip(after.data().chunks_exact(RGBA_CHANNELS))
+        .position(|(left, right)| left != right);
+    assert!(
+        before.width() == after.width()
+            && before.height() == after.height()
+            && before.data() == after.data(),
+        "{case}: roundtrip {}x{} vs {}x{}; first differing pixel index {first_difference:?}",
+        before.width(),
+        before.height(),
+        after.width(),
+        after.height()
+    );
 }
 
 fn assert_attribute(svg: &str, element: &str, attribute: &str, value: &str) -> Result<(), String> {

@@ -10,6 +10,12 @@ const LEFT_END: u32 = 60;
 const RIGHT_START: u32 = 140;
 const START_SAMPLE_X: u32 = 100;
 const START_SAMPLE_Y: u32 = 10;
+const CSS_MARKER_COUNT: usize = 5;
+const CSS_MARKER_SCALE: f32 = 1.5;
+const RGBA_CHANNELS: usize = 4;
+const CSS_MARKER_BOUNDARY_PIXELS: [(u32, u32); CSS_MARKER_COUNT] =
+    [(141, 37), (216, 277), (21, 127), (261, 127), (66, 277)];
+const CSS_MARKER_BOUNDARY_RGBA: [u8; RGBA_CHANNELS] = [0, 0, 96, 96];
 
 #[rstest]
 #[case("only-marker-start", 1)]
@@ -41,6 +47,53 @@ fn marker_path_count(group: &usvg::Group) -> usize {
             _ => 0,
         })
         .sum()
+}
+
+#[test]
+fn css_marker_shorthand_matches_explicit_start_mid_and_end() -> Result<(), String> {
+    let source = fixture("the-marker-property-in-CSS")?;
+    let explicit = source.replace(
+        "marker:url(#marker1)",
+        "marker-start:url(#marker1);marker-mid:url(#marker1);marker-end:url(#marker1)",
+    );
+    assert_ne!(source, explicit);
+    let shorthand_tree = parse(&source)?;
+    let explicit_tree = parse(&explicit)?;
+    assert_eq!(marker_path_count(shorthand_tree.root()), CSS_MARKER_COUNT);
+    assert_eq!(marker_path_count(explicit_tree.root()), CSS_MARKER_COUNT);
+    let shorthand = render(&shorthand_tree, Mode::Extra(SCALE))?;
+    let longhand = render(&explicit_tree, Mode::Extra(SCALE))?;
+    assert!(
+        shorthand.data() == longhand.data(),
+        "marker shorthand pixels differ"
+    );
+    assert!(blue_pixels(&shorthand) > 0);
+    Ok(())
+}
+
+#[test]
+fn css_marker_lower_boundaries_preserve_single_antialias_coverage() -> Result<(), String> {
+    let tree = parse_fixture("the-marker-property-in-CSS")?;
+    let image = render(&tree, Mode::Extra(CSS_MARKER_SCALE))?;
+    /* WHY: 不透明度0.75と半被覆0.5でalpha96となり、clipで二重に半被覆しない。 */
+    for point in CSS_MARKER_BOUNDARY_PIXELS {
+        assert_premultiplied_pixel(&image, point, CSS_MARKER_BOUNDARY_RGBA)?;
+    }
+    Ok(())
+}
+
+fn assert_premultiplied_pixel(
+    image: &Pixmap,
+    (x, y): (u32, u32),
+    expected: [u8; RGBA_CHANNELS],
+) -> Result<(), String> {
+    let pixel = image.pixel(x, y).ok_or("marker boundary pixel missing")?;
+    assert_eq!(
+        [pixel.red(), pixel.green(), pixel.blue(), pixel.alpha()],
+        expected,
+        "marker boundary ({x}, {y})"
+    );
+    Ok(())
 }
 
 #[test]

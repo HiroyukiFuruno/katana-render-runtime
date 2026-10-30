@@ -1,9 +1,24 @@
 use super::usvg;
+use rstest::rstest;
 use tiny_skia::{Pixmap, Transform};
 
 const VIEWPORT: u32 = 8;
 const CENTER: u32 = VIEWPORT / 2;
 const CHANNEL_COUNT: usize = 4;
+
+#[derive(Clone, Copy)]
+enum PublicInput {
+    Bytes(&'static [u8]),
+    Text(&'static str),
+}
+
+#[derive(Clone, Copy)]
+enum PublicErrorKind {
+    InvalidUtf8,
+    MalformedGzip,
+    ParsingFailed,
+    InvalidSize,
+}
 
 fn parse_with_languages(source: &str, languages: &[&str]) -> Result<usvg::Tree, String> {
     let options = usvg::Options {
@@ -141,6 +156,70 @@ fn linked_pattern_keeps_referenced_children_through_public_tree_parse() -> Resul
     match fill.paint() {
         usvg::Paint::Pattern(pattern) => assert!(pattern.root().has_children()),
         _ => return Err("linked fill is not a pattern".to_owned()),
+    }
+    Ok(())
+}
+
+#[rstest]
+#[case::invalid_utf8(
+    "invalid UTF-8 bytes",
+    PublicInput::Bytes(&[0xff]),
+    PublicErrorKind::InvalidUtf8
+)]
+#[case::malformed_gzip(
+    "truncated gzip header",
+    PublicInput::Bytes(&[0x1f, 0x8b, 0x08, 0x00]),
+    PublicErrorKind::MalformedGzip
+)]
+#[case::malformed_xml(
+    "mismatched XML tags",
+    PublicInput::Text("<svg><g></svg>"),
+    PublicErrorKind::ParsingFailed
+)]
+#[case::non_svg_root(
+    "well-formed non-SVG root",
+    PublicInput::Text("<g xmlns=\"http://www.w3.org/2000/svg\" width=\"8\" height=\"8\"/>"),
+    PublicErrorKind::ParsingFailed
+)]
+#[case::foreign_namespace_root(
+    "foreign namespace SVG root",
+    PublicInput::Text("<svg xmlns=\"urn:foreign\" width=\"8\" height=\"8\"/>"),
+    PublicErrorKind::ParsingFailed
+)]
+#[case::zero_width(
+    "zero SVG width",
+    PublicInput::Text("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"0\" height=\"8\"/>"),
+    PublicErrorKind::InvalidSize
+)]
+fn public_parser_returns_expected_error_for_invalid_inputs(
+    #[case] label: &str,
+    #[case] input: PublicInput,
+    #[case] expected: PublicErrorKind,
+) -> Result<(), String> {
+    let result = match input {
+        PublicInput::Bytes(bytes) => usvg::Tree::from_data(bytes, &usvg::Options::default()),
+        PublicInput::Text(text) => usvg::Tree::from_str(text, &usvg::Options::default()),
+    };
+    let error = match result {
+        Ok(_) => return Err(format!("{label}: invalid input was accepted")),
+        Err(error) => error,
+    };
+    assert_error_kind(label, expected, &error)
+}
+
+fn assert_error_kind(
+    label: &str,
+    expected: PublicErrorKind,
+    error: &usvg::Error,
+) -> Result<(), String> {
+    let matches = match expected {
+        PublicErrorKind::InvalidUtf8 => matches!(error, usvg::Error::NotAnUtf8Str),
+        PublicErrorKind::MalformedGzip => matches!(error, usvg::Error::MalformedGZip),
+        PublicErrorKind::ParsingFailed => matches!(error, usvg::Error::ParsingFailed(_)),
+        PublicErrorKind::InvalidSize => matches!(error, usvg::Error::InvalidSize),
+    };
+    if !matches {
+        return Err(format!("{label}: unexpected parser error: {error}"));
     }
     Ok(())
 }

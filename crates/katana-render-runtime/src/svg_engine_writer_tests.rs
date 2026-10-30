@@ -18,6 +18,9 @@ mod writer_property_tests;
 #[path = "svg_engine_writer_coverage_tests.rs"]
 mod writer_coverage_tests;
 
+#[path = "svg_engine_writer_corpus_tests.rs"]
+mod writer_corpus_tests;
+
 #[path = "svg_engine_writer_radial_tests.rs"]
 mod radial_tests;
 

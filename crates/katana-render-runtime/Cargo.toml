@@ -102,6 +102,7 @@ write-fonts = { version = "0.55", default-features = false, features = ["read"] 
 brotli-decompressor = { workspace = true }
 
 [dev-dependencies]
+imageproc = { version = "0.27.0", default-features = false }
 rstest = { version = "0.28.0", default-features = false }
 tempfile = { workspace = true }
 xml = "=1.4.0"
