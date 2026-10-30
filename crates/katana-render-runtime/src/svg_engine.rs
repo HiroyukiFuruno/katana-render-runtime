@@ -13,6 +13,10 @@ pub(crate) mod usvg;
 mod writer_tests;
 
 #[cfg(test)]
+#[path = "svg_engine_parser_boundary_tests.rs"]
+mod parser_boundary_tests;
+
+#[cfg(test)]
 #[path = "svg_engine_render_tests.rs"]
 mod render_tests;
 

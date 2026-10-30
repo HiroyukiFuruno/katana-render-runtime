@@ -2,6 +2,11 @@
 
 ## 最新の再開地点（2026-10-30）
 
+- [/] HEAD95b90c43のroot再取得R4768は実3812/3812成功（29skip）、producer0。R4769既存aggregateはcoverage-policyで実1、rootは81236/84184行=96.49814691627863%、未到達2948行、100%未達。R4770に現report SHA5af462fccb3bb990ffd30f3e5d6bac8df867eb444c36da5371d0451e505a821aと未到達file inventoryを保存した。後から追加した回帰の効果へ読み替えない。
+- [/] R4762はroot rlib生成時の実ENOSPCで101、テスト未到達。R4763 private標準clean-allはKRR約4.2GiB整理、他2repoのCACHEDIR拒否を含み全体1。R4764/65の再生成可能package cache整理は各0、R4766元protected registry検証0、OS空き約4.6GiBへ回復した。R4767性能coverage証跡の再認証0を確認して成功済み工程を再実行せず、rootだけをR4768で再開した。固定容量上限は不変。
+- [/] 最新未到達に対するSVG parse/writerの意味的回帰9件と、test-only path paint/crop監査2件を追加。R4773静的foundation0、R4778修正後AST0、現binary catalog R4782で名前を照合しR4783実11/11成功。監査の対象識別追加後はR4786 AST0、R4788現catalog/SHA照合、R4789実2/2成功。R4781/87のnoneフィルタはcatalog用コンパイルのみ・実4・0testであり検査成功に数えない。例外追加・除外・分母変更はしていない。
+- [/] R4791/92は同じ既存C4 HTML入力とviewportで英日実frame/auditを新規取得し各0。path paint各18記録・drop0、PNG SHAはR4417と完全一致（EN e8d922de501545beed406f5e9e2e60b22fb48baf748e866d8d8bbf4257707304、JA 28aa60d8382b40511721c600a71cbf71eea2390286cfc6938d12b962c0b4de04）。観測による画素変化はなく、正式スコア改善もない。実crop/matrix/2px stroke/AA/cap/joinは `tmp/quality/resumed-owner-r3509/current-c4-path-paint-inputs-r4790` に保存、Chrome側の既存値との限定照合中。
+- [/] 実cropを戻した円柱の行列はR4481 Chrome getScreenCTMのf32値へ英日とも全成分一致、色と線幅も一致。Chromeの実SkPaint AA/cap/join/orderは未取得なので一致を推定しない。監査の512記録上限・欠落数・paintの有無・513crop overflow/復元の回帰を追加し、R4796重複検査が検出した新test間の12行/106token重複は共通rendererへ抽象化した。R4799 AST0/R4800 foundation0、R4802現binary catalog照合後R4803実4/4成功。現行全体coverageの再取得はまだ必要。
 - [/] `9e37b541`でcoverage順序の旧期待3件を実DAGへ同期し、`179acf37`で同じ19契約をSDK非依存の既存kdr-linter/AST laneへ移動した。assertと検査観点を維持し、R4727/R4738の実19件成功、R4739静的foundation成功、通常commit hook成功を確認。全workspace・coverage100%の代用ではなく、次の正式coverageは旧失敗profileを整理したcold条件で取得する。
 - [/] pixelmatch8.0.0のAA推定を診断候補として試したが、R4753の1px移動した曲線を非AA差0と判定し負例に失敗したため不採用。646件中645成功/1失敗・554.20秒・実exit1を保持し、閾値や負例を緩和しない。候補8ファイルはR4754のraw diffへ保存（SHA a306b3a41fedc0068b1e5c448439236070e1886caf505ae831b90bcbb799a4cf）、R4755逆適用事前確認/R4756撤去/R4757 index整合を各実exit0で完了。正式scorer・oracle・99条件は不変、正式Mermaidは115/117・残2のまま。
 - [/] c1733928のR4695 capture/R4696 strictは84/84が90以上、最低92.14438、出力font一致established。R4693通常hook0で同一文書fragment修正、R4694で途中batch保存修正を保存した。全体リリースの合格ではない。

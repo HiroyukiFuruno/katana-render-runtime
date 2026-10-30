@@ -1,6 +1,9 @@
 #[cfg(test)]
 #[path = "svg_rasterize_html_font_lazy_final_glyphs.rs"]
 mod final_glyphs;
+#[cfg(all(test, target_os = "macos"))]
+#[path = "svg_rasterize_html_font_path_paint_diagnostic.rs"]
+mod path_paint;
 #[path = "svg_rasterize_html_font_lazy_diagnostic_routes.rs"]
 mod routes;
 #[path = "svg_rasterize_html_font_lazy_diagnostic_sources.rs"]
@@ -20,6 +23,7 @@ type TestRasterResult = Result<crate::markdown::svg_rasterize::RasterizedSvg, St
 type TestAuditedRasterResult = Result<(TestRasterResult, serde_json::Value), String>;
 
 const MAX_CAPTURED_RECORDS: usize = 512;
+const CROP_RECT_COMPONENTS: usize = 4;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SourceRoute {
     File,
@@ -61,6 +65,14 @@ pub(super) struct Capture {
     path_custom_hits: u64,
     #[cfg(test)]
     path_fallback_hits: u64,
+    #[cfg(all(test, target_os = "macos"))]
+    path_paints: Vec<serde_json::Value>,
+    #[cfg(all(test, target_os = "macos"))]
+    path_paints_dropped: usize,
+    #[cfg(all(test, target_os = "macos"))]
+    crop_stack: Vec<[i64; CROP_RECT_COMPONENTS]>,
+    #[cfg(all(test, target_os = "macos"))]
+    crop_overflow: usize,
 }
 #[cfg(test)]
 #[derive(Clone, Copy, serde::Serialize)]
@@ -143,35 +155,36 @@ pub(super) fn with_actual_route<T>(operation: impl FnOnce() -> T) -> (T, Capture
     (result, capture)
 }
 
+fn actual_audit_json(capture: &Capture) -> Result<serde_json::Value, serde_json::Error> {
+    let faces = serde_json::to_value(&capture.faces)?;
+    let errors = serde_json::to_value(&capture.errors)?;
+    let final_glyph_trees = serde_json::to_value(&capture.final_glyph_trees)?;
+    let final_glyph_errors = serde_json::to_value(&capture.final_glyph_errors)?;
+    Ok(serde_json::json!({
+        "faces": faces,
+        "errors": errors,
+        "dropped": capture.dropped,
+        "route": "actual-current-route",
+        "finalGlyphTrees": final_glyph_trees,
+        "finalGlyphErrors": final_glyph_errors,
+        "finalGlyphDropped": capture.final_glyph_dropped,
+        "finalGlyphPaintCalls": capture.final_glyph_paint_calls,
+        "htmlFontMarkups": capture.html_font_markups,
+        "htmlFontMarkupsDropped": capture.html_font_markups_dropped,
+        "renderDispatches": capture.render_dispatches,
+        "pathCustomHits": capture.path_custom_hits,
+        "pathFallbackHits": capture.path_fallback_hits,
+        "pathPaints": capture.path_paints,
+        "pathPaintsDropped": capture.path_paints_dropped,
+    }))
+}
+
 impl crate::markdown::svg_rasterize::SvgRasterizeOps {
     pub(crate) fn with_actual_font_source_audit<T>(
         operation: impl FnOnce() -> T,
     ) -> Result<(T, serde_json::Value), serde_json::Error> {
         let (result, capture) = with_actual_route(operation);
-        let faces = serde_json::to_value(&capture.faces)?;
-        let errors = serde_json::to_value(&capture.errors)?;
-        #[cfg(test)]
-        let final_glyph_trees = serde_json::to_value(&capture.final_glyph_trees)?;
-        #[cfg(test)]
-        let final_glyph_errors = serde_json::to_value(&capture.final_glyph_errors)?;
-        Ok((
-            result,
-            serde_json::json!({
-                "faces": faces,
-                "errors": errors,
-                "dropped": capture.dropped,
-                "route": "actual-current-route",
-                "finalGlyphTrees": final_glyph_trees,
-                "finalGlyphErrors": final_glyph_errors,
-                "finalGlyphDropped": capture.final_glyph_dropped,
-                "finalGlyphPaintCalls": capture.final_glyph_paint_calls,
-                "htmlFontMarkups": capture.html_font_markups,
-                "htmlFontMarkupsDropped": capture.html_font_markups_dropped,
-                "renderDispatches": capture.render_dispatches,
-                "pathCustomHits": capture.path_custom_hits,
-                "pathFallbackHits": capture.path_fallback_hits,
-            }),
-        ))
+        Ok((result, actual_audit_json(&capture)?))
     }
 
     #[cfg(test)]

@@ -29,6 +29,15 @@ pub(super) fn render_if_supported(
     let Some(prepared) = prepare_path(node)? else {
         return Ok(false);
     };
+    #[cfg(all(test, target_os = "macos"))]
+    super::super::SvgRasterizeOps::record_path_paint(
+        node,
+        transform,
+        (pixmap.width(), pixmap.height()),
+        node.paint_order(),
+        prepared.fill.as_ref(),
+        prepared.stroke.as_ref(),
+    );
     render_prepared_path(pixmap, &prepared, transform, node.paint_order())?;
     Ok(true)
 }

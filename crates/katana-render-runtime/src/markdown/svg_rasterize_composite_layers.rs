@@ -54,6 +54,8 @@ fn render_cropped_group(
     let Some(clip) = group.clip_path() else {
         return Ok(());
     };
+    #[cfg(all(test, target_os = "macos"))]
+    let _crop_scope = super::super::SvgRasterizeOps::enter_path_crop(crop);
     render_children_with_text(
         group,
         crop_transform,
