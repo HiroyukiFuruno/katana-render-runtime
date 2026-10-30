@@ -1181,6 +1181,57 @@ class WorkerAttemptContractTest(unittest.TestCase):
         }
         return {"phases": phases}
 
+    def _known_navigation_collection_case(self) -> tuple[
+        typed_producer.ArmBuildResult, Path, typed_producer.FilePin,
+        dict[str, typed_producer.ArmPin], typed_producer.ExpectedPerformance,
+        gate.JsonObject, list[gate.JsonObject], subprocess.CalledProcessError,
+    ]:
+        candidate, binary, snapshot, arms, expected, row = self._condition_case()
+        failures, error, known = self._known_navigation_failure()
+        expected["referenceParent"] = known["referenceParent"]
+        expected["catalogCondition"] = {
+            **gate._object(known["catalogCondition"], "known catalog condition"),
+            "case_id": "navigation", "state": "top",
+        }
+        expected["operationEvidenceRef"] = snapshot
+        row.update({"catalog": True, "condition_id": "navigation/top/1280x900@1",
+                    "case_id": "navigation", "state": "top", "operation_kind": "navigation",
+                    "operation_evidence": snapshot})
+        baseline_id = gate.baseline_arm_id(expected)
+        arms[baseline_id] = arms.pop("baseline-0.4.23")
+        expected["arms"] = arms
+        return candidate, binary, snapshot, arms, expected, row, failures, error
+
+    def _collect_condition(
+        self, *, folder: Path, candidate: typed_producer.ArmBuildResult,
+        candidate_binary: Path, snapshot: typed_producer.FilePin,
+        arms: dict[str, typed_producer.ArmPin],
+        expected: typed_producer.ExpectedPerformance, row: gate.JsonObject,
+        batch_deadline: float | None = None,
+    ) -> typed_producer.ConditionWorkerCollection:
+        return producer._collect_condition_worker_pairs(
+            folder=folder, row=row, expected=expected, fixture=self.fixture,
+            plan_path=self.plan, width=800, height=600, viewport=self.viewport,
+            builds={"baseline": self.build, "candidate": candidate},
+            binaries={"baseline": self.binary, "candidate": candidate_binary},
+            arms=arms, root=self.root, lifecycle=self.logs, lock=self.plan,
+            snapshot=snapshot, environment_sha="e" * 64, batch_deadline=batch_deadline,
+        )
+
+    def _assert_collection_raises(
+        self, error_type: type[BaseException], *, folder: Path,
+        candidate: typed_producer.ArmBuildResult, candidate_binary: Path,
+        snapshot: typed_producer.FilePin, arms: dict[str, typed_producer.ArmPin],
+        expected: typed_producer.ExpectedPerformance, row: gate.JsonObject,
+        batch_deadline: float | None = None,
+    ) -> None:
+        with self.assertRaises(error_type):
+            self._collect_condition(
+                folder=folder, candidate=candidate, candidate_binary=candidate_binary,
+                snapshot=snapshot, arms=arms, expected=expected, row=row,
+                batch_deadline=batch_deadline,
+            )
+
     def test_worker_report_uses_each_arm_source_and_lock_pins(self) -> None:
         candidate_build, _, _, _, expected, row = self._condition_case()
         parent = reference.ReferenceParentProof(
@@ -1215,77 +1266,30 @@ class WorkerAttemptContractTest(unittest.TestCase):
 
     def test_condition_collection_rejects_unknown_baseline_failure_before_candidates(self) -> None:
         candidate_build, candidate_binary, snapshot, arms, expected, row = self._condition_case()
-        baseline_calls = 0
-        candidate_calls = 0
+        calls = {"baseline": 0, "candidate": 0}
 
         def collect_sample(
-            build: typed_producer.ArmBuildResult, sample: int, _fixture: Path,
-            _report_path: Path, _plan_path: Path, _width: int, _height: int,
-            _scale: int, _root: Path, _environment: Mapping[str, str],
-            _lifecycle: Path, attempts_directory: Path,
-            failure_sink: Callable[[list[gate.JsonObject]], None] | None = None,
-            *, batch_deadline: float | None = None,
+            build: typed_producer.ArmBuildResult, *_args: object,
+            **_kwargs: object,
         ) -> tuple[gate.JsonObject, dict[str, float], list[gate.JsonObject]]:
-            nonlocal baseline_calls, candidate_calls
             if build is self.build:
-                baseline_calls += 1
+                calls["baseline"] += 1
             else:
-                candidate_calls += 1
-            attempts_directory.mkdir(parents=True, exist_ok=True)
-            if build is self.build and baseline_calls == 1:
-                lifecycle_path = self.logs / "baseline-failure.json"
-                lifecycle_path.parent.mkdir(parents=True, exist_ok=True)
-                lifecycle_path.write_text(json.dumps({"identity": {"pid": 4242},
-                    "groupClosed": True, "rawFdsClosed": True, "failure": None,
-                    "cleanupFailure": None, "exitCode": 7}))
-                lifecycle_pin: typed_producer.FilePin = {
-                    "path": str(lifecycle_path), "sha256": gate.sha256(lifecycle_path)}
-                record: gate.JsonObject = {"sample": sample, "attempt": 1, "actualExit": 7,
-                    "workerStarted": True, "accepted": False,
-                    "loadRatioBefore": 0.1, "loadRatioAfter": 0.1,
-                    "lifecycle": lifecycle_pin,
-                    "attemptRecord": producer.write(attempts_directory / "attempt.json", {
-                        "sample": sample, "actualExit": 7})}
-                if failure_sink is not None:
-                    failure_sink([record])
-                raise subprocess.CalledProcessError(7, ["worker"])
-            success_record: gate.JsonObject = {"sample": sample, "attempt": 1, "actualExit": 0,
-                "workerStarted": True, "accepted": True,
-                "loadRatioBefore": 0.1, "loadRatioAfter": 0.1,
-                "attemptRecord": producer.write(attempts_directory / f"attempt-{sample}.json", {
-                    "sample": sample, "actualExit": 0})}
-            return ({"sample": sample, "viewport": self.viewport, "elapsed_ms": 1.0},
-                    {"before": 0.1, "after": 0.1}, [success_record])
+                calls["candidate"] += 1
+            raise subprocess.CalledProcessError(7, ["worker"])
 
         with patch.object(producer, "collect_worker_sample", side_effect=collect_sample):
-            with self.assertRaises(subprocess.CalledProcessError):
-                producer._collect_condition_worker_pairs(
-                    folder=self.root / "condition", row=row, expected=expected,
-                    fixture=self.fixture, plan_path=self.plan, width=800, height=600,
-                    viewport=self.viewport,
-                    builds={"baseline": self.build, "candidate": candidate_build},
-                    binaries={"baseline": self.binary, "candidate": candidate_binary}, arms=arms,
-                    root=self.root, lifecycle=self.logs, lock=self.plan, snapshot=snapshot,
-                    environment_sha="e" * 64,
-                )
-        self.assertEqual(baseline_calls, 1)
-        self.assertEqual(candidate_calls, 0)
+            self._assert_collection_raises(
+                subprocess.CalledProcessError, folder=self.root / "condition",
+                candidate=candidate_build, candidate_binary=candidate_binary,
+                snapshot=snapshot, arms=arms, expected=expected, row=row,
+            )
+        self.assertEqual(calls, {"baseline": 1, "candidate": 0})
 
     def test_known_baseline_refusal_collects_and_requires_all_candidate_samples(self) -> None:
-        candidate_build, candidate_binary, snapshot, arms, expected, row = self._condition_case()
-        failed_attempts, failure, known = self._known_navigation_failure()
-        expected["referenceParent"] = known["referenceParent"]
-        expected["catalogCondition"] = known["catalogCondition"]
-        expected["catalogCondition"].update({"case_id": "navigation", "state": "top"})
-        expected["operationEvidenceRef"] = snapshot
-        row.update({"catalog": True, "condition_id": "navigation/top/1280x900@1",
-                    "case_id": "navigation", "state": "top", "operation_kind": "navigation",
-                    "operation_evidence": snapshot})
-        baseline_id = gate.baseline_arm_id(expected)
-        arms[baseline_id] = arms.pop("baseline-0.4.23")
-        expected["arms"] = arms
-        baseline_calls = 0
-        candidate_calls = 0
+        (candidate_build, candidate_binary, snapshot, arms, expected, row,
+         failed_attempts, failure) = self._known_navigation_collection_case()
+        calls = {"baseline": 0, "candidate": 0}
 
         def collect_sample(
             build: typed_producer.ArmBuildResult, sample: int, _fixture: Path,
@@ -1295,14 +1299,13 @@ class WorkerAttemptContractTest(unittest.TestCase):
             failure_sink: Callable[[list[gate.JsonObject]], None] | None = None,
             *, batch_deadline: float | None = None,
         ) -> tuple[gate.JsonObject, dict[str, float], list[gate.JsonObject]]:
-            nonlocal baseline_calls, candidate_calls
             if build is self.build:
-                baseline_calls += 1
+                calls["baseline"] += 1
                 if failure_sink is None:
                     raise AssertionError("baseline failure sink missing")
                 failure_sink(failed_attempts)
                 raise failure
-            candidate_calls += 1
+            calls["candidate"] += 1
             attempts_directory.mkdir(parents=True, exist_ok=True)
             pin = producer.write(attempts_directory / f"attempt-{sample}.json", {
                 "sample": sample, "actualExit": 0,
@@ -1319,16 +1322,12 @@ class WorkerAttemptContractTest(unittest.TestCase):
             ]
 
         with patch.object(producer, "collect_worker_sample", side_effect=collect_sample):
-            collection = producer._collect_condition_worker_pairs(
-                folder=self.root / "known-condition", row=row, expected=expected,
-                fixture=self.fixture, plan_path=self.plan, width=800, height=600,
-                viewport=self.viewport,
-                builds={"baseline": self.build, "candidate": candidate_build},
-                binaries={"baseline": self.binary, "candidate": candidate_binary}, arms=arms,
-                root=self.root, lifecycle=self.logs, lock=self.plan, snapshot=snapshot,
-                environment_sha="e" * 64,
+            collection = self._collect_condition(
+                folder=self.root / "known-condition", candidate=candidate_build,
+                candidate_binary=candidate_binary, snapshot=snapshot, arms=arms,
+                expected=expected, row=row,
             )
-        self.assertEqual((baseline_calls, candidate_calls), (1, 25))
+        self.assertEqual(calls, {"baseline": 1, "candidate": 25})
         self.assertEqual([failure["status"] for failure in collection.failures],
                          ["nonComparable", "missing", "missing", "missing", "missing"])
         self.assertEqual(collection.actual_phase_records, len(gate.PHASES) * 25)
@@ -1355,16 +1354,12 @@ class WorkerAttemptContractTest(unittest.TestCase):
 
         with patch.object(producer, "_require_batch_budget", return_value=None), \
              patch.object(producer, "collect_worker_sample", side_effect=collect_sample):
-            with self.assertRaises(producer.BatchBudgetExhausted):
-                producer._collect_condition_worker_pairs(
-                    folder=self.root / "condition", row=row, expected=expected,
-                    fixture=self.fixture, plan_path=self.plan, width=800, height=600,
-                    viewport=self.viewport,
-                    builds={"baseline": self.build, "candidate": candidate_build},
-                    binaries={"baseline": self.binary, "candidate": candidate_binary},
-                    arms=arms, root=self.root, lifecycle=self.logs, lock=self.plan,
-                    snapshot=snapshot, environment_sha="e" * 64, batch_deadline=1.0,
-                )
+            self._assert_collection_raises(
+                producer.BatchBudgetExhausted, folder=self.root / "condition",
+                candidate=candidate_build, candidate_binary=candidate_binary,
+                snapshot=snapshot, arms=arms, expected=expected, row=row,
+                batch_deadline=1.0,
+            )
         self.assertEqual(calls, 1)
 
     def test_partial_baseline_failure_keeps_successful_samples_and_attempts(self) -> None:
