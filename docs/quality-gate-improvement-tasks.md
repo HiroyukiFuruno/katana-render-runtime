@@ -2,6 +2,7 @@
 
 ## 最新の再開地点（2026-10-30）
 
+- [/] 現HEAD f47ee9d6でR5081完全ゲートは実1、32完了（1cached）/2失敗/10skip、9分29秒。スクリプト2testの旧private関数参照とmacOS証跡1testの許可workflow SHA不一致で失敗し、coverageへ未到達。現utility契約の型・無効値・複合transform・boundsを維持して更新し、R5082限定12/12成功。macOSは旧許可workflowの実SHAを履歴と照合し、変更14行がsetup-uv/install-actionの版pin7箇所だけとR5089で実証。再利用時もbrowser laneを必ず動かす現CI条件をtruth tableへ反映し、R5086関連96/96成功、R5087foundation/R5088ASTは0。条件緩和や失敗runの成功化はしていない。修正後の完全ゲートは別途必要。
 - [/] C4の製品描画を、準備済みの非線形solid pathだけ元frameの256pxタイル格子へ描く経路で修正した。crop原点を累積し、背景・描画順・効果群の既存経路を維持する。R5056で製品frame9図を取得し、既存scorer不変のR5057でEN C4 98.762570→99.628772、JA C4 98.757660→99.653768、9図すべて99以上を確認。これは限定診断であり、正式117件・性能・coverageの成功へ代用しない。結果は`tmp/quality/current-tile-product-scores-r5057/result.json`。
 - [/] R5041の3コンパイル失敗を保持して署名・borrow・既存test引数を修正。R5051現catalogと実binary SHAをR5052へ束縛し、R5053 displacement12/12、R5054 image2/2、R5055 composite66/66（新tile6を含む、別ignored2）が成功。負scaleの末尾期待誤りはSVGの座標式に沿って新規testだけ訂正し、source SVGと中心pixel期待は維持した。R5058標準Lintはtestのtuple型複雑度1件で失敗し、型aliasへ修正。current coverageの再取得は未完了。
 - [/] 現Moon2.6.5のdirect-input契約をR4970で実成功。旧2.6.1のignorePatterns不具合に対応する上流2.6.4修正が入り、無変更・生成cacheだけの変更を現版で確認できた。receiptは`tmp/html-fidelity/test-cache-library-assessment-20261012-r1/moon-contract-1793360071593710000/receipt.json`、fixture_only=true/requested_scope=direct-inputs。root/performance coverage実cache全体の成立やcoverage100%の証拠にはしない。旧期待のDAG/Just coverage順序を現performance→root→aggregateへ同期し、旧順序・欠落・集計迂回の負例とowner AST完全一致を維持。R4969 unit24/24成功、R4979静的/R4980AST成功。

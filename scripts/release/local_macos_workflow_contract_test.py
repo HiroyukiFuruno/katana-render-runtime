@@ -18,6 +18,15 @@ assert EVIDENCE_SPEC and EVIDENCE_SPEC.loader
 EVIDENCE = importlib.util.module_from_spec(EVIDENCE_SPEC)
 EVIDENCE_SPEC.loader.exec_module(EVIDENCE)
 
+# WHY: 証拠再利用時もmacOS browser契約検査に必要な実行環境を準備する。
+MACOS_REUSE_REQUIRED_STEPS = {
+    "Install Bun",
+    "Install JavaScript dependencies",
+    "Install just",
+    "Install Chrome for the macOS official producer browser test",
+    "Run macOS official producer browser test",
+}
+
 def workflow_job(workflow: str, job_name: str) -> str:
     jobs = workflow.split("jobs:\n", 1)[1]
     marker = f"  {job_name}:\n"
@@ -176,7 +185,9 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
                             expression, platform, os_name, "failure", "false"
                         )
                         expected = original_run and not (
-                            platform == "mac-arm64" and should_run
+                            platform == "mac-arm64"
+                            and should_run
+                            and name not in MACOS_REUSE_REQUIRED_STEPS
                         )
                         self.assertEqual(
                             eval_step_if(expression, platform, os_name, outcome, reuse),
