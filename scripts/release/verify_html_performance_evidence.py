@@ -254,10 +254,17 @@ def non_comparable_baseline_fragment(expected: Mapping[str, object]) -> str | No
     if baseline_arm_id(expected) != REFERENCE_PARENT_ARM_ID:
         return None
     catalog = expected.get("catalogCondition")
-    if not isinstance(catalog, dict) or catalog.get("operation_kind") != "navigation":
+    if not isinstance(catalog, dict):
         return None
     condition_id = catalog.get("condition_id")
     if not isinstance(condition_id, str):
+        return None
+    expected_operation_kind = (
+        "navigation-all-pointer-clicks"
+        if condition_id.startswith("navigation/all-toc-links/")
+        else "navigation-pointer-click"
+    )
+    if catalog.get("operation_kind") != expected_operation_kind:
         return None
     return NON_COMPARABLE_BASELINE_FRAGMENT_FAILURES.get(condition_id)
 

@@ -66,6 +66,23 @@ def json_object_at(value: object, *path: str | int) -> JsonObject:
     return json_object(current)
 
 
+def actual_catalog_operation_kinds() -> dict[str, str]:
+    repository = Path(__file__).resolve().parents[2]
+    with tempfile.TemporaryDirectory() as temporary:
+        plan_path = Path(temporary) / "catalog-plan.json"
+        subprocess.run(
+            ["bun", "scripts/html/fidelity-acceptance-cli.ts",
+             "catalog-stage90-plan", str(plan_path)],
+            cwd=repository, check=True, capture_output=True, text=True,
+        )
+        plan = json_object(json.loads(plan_path.read_text()))
+    conditions = json_array(plan.get("conditions"))
+    return {
+        json_text(condition.get("conditionId")): json_text(condition.get("operationKind"))
+        for condition in map(json_object, conditions)
+    }
+
+
 def json_array_at(value: object, *path: str | int) -> list[object]:
     current = value
     for part in path:
@@ -1344,11 +1361,20 @@ class PerformanceEvidenceTest(unittest.TestCase):
         parent = "reference-parent-371274ed"
         reference_parent = {"role": parent, "referenceKind": "correct-parent-source",
                             "publishedSdk": False, "armId": parent}
+        operation_kinds = actual_catalog_operation_kinds()
+        self.assertEqual(len(operation_kinds), 84)
         for condition_id, fragment in gate.NON_COMPARABLE_BASELINE_FRAGMENT_FAILURES.items():
+            operation_kind = operation_kinds[condition_id]
+            expected_operation_kind = (
+                "navigation-all-pointer-clicks"
+                if condition_id.startswith("navigation/all-toc-links/")
+                else "navigation-pointer-click"
+            )
             expected = {"referenceParent": reference_parent,
                         "catalogCondition": {"condition_id": condition_id,
-                                             "operation_kind": "navigation"}}
+                                             "operation_kind": operation_kind}}
             with self.subTest(condition_id=condition_id):
+                self.assertEqual(operation_kind, expected_operation_kind)
                 self.assertEqual(gate.non_comparable_baseline_fragment(expected), fragment)
         condition_id = next(iter(gate.NON_COMPARABLE_BASELINE_FRAGMENT_FAILURES))
         expected = {"referenceParent": reference_parent,
@@ -1362,6 +1388,17 @@ class PerformanceEvidenceTest(unittest.TestCase):
             **expected, "catalogCondition": {**expected["catalogCondition"],
                                              "operation_kind": "static"},
         }))
+
+    def test_noncomparable_fragment_rejects_generic_navigation_kind(self) -> None:
+        parent = "reference-parent-371274ed"
+        condition_id = next(iter(gate.NON_COMPARABLE_BASELINE_FRAGMENT_FAILURES))
+        expected = {
+            "referenceParent": {"role": parent, "referenceKind": "correct-parent-source",
+                                "publishedSdk": False, "armId": parent},
+            "catalogCondition": {"condition_id": condition_id,
+                                 "operation_kind": "navigation"},
+        }
+        self.assertIsNone(gate.non_comparable_baseline_fragment(expected))
 
     def _noncomparable_baseline_fixture(
         self, label: str, *, stderr: bytes | None = None,

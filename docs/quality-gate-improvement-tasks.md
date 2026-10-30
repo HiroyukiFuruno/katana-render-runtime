@@ -2,6 +2,8 @@
 
 ## 最新の再開地点（2026-10-30）
 
+- [/] R4936性能測定はactual1。45条件のcheckpointは未封印で正式成功へ数えず保持する。46番目の旧版fragment拒否を既知失敗へ分類できなかった原因は、synthetic fixtureのgeneric `navigation`とcanonical planの実operation kindの不一致。実plan生成により対象12条件すべてのkindを照合する回帰へ改めた。最終transportのEXDEVは既存reflink-copyの`reflink_or_copy`を使い、source物理identity・fresh destination・独立inode・SHA検査を維持して解消する。R4939実EXDEV再現/R4940実コピー成功、R4944静的0/R4945 producer unit0/R4946 verifier unit0/R4947 foundation0。旧45件を再封印する経路はなく、新source確定後にfresh測定する。
+- [/] 前回v0.4.23のUbuntu CI job111678139519は28791/28791行100%・未計測0。tag8654789fとPR105 headのtree一致を確認した。直近旧95b90c43 macOSの96.49814691627863%・missing2948の内訳はvendor1850、新規・分割source1008、変更された既存source90。OSと対象範囲が異なるため同条件の下落率とは報告しない。追加回帰の効果はcurrent coverage取得まで未検証とする。
 - [/] R4814は通常commit hookを含めactual0、SVG parse/writer回帰とtest-only実paint/crop監査を`081f1728`へ保存。R4804の実13件成功は保存済みだが、その後のassert helper分離を含む最終全体検証は別途必要。R4808で完了済み計測profileを標準のlocked Cargo cleanにより整理し、R4809で元protected registryを再検証した。削除されたbinaryの過去結果を現物の成功へ再認定しない。
 - [/] 公開COLRv1フォント2種・Apache-2.0ライセンス・取得元commit/SHAを保持したfixtureを追加し、static/variable各2glyphの4回帰を準備中。R4834/R4840のfile-length違反は原ログを保持し、metadata検証責務の冗長性を整理した後R4845 AST0/R4846 foundation0。実nativeは現catalog取得後に実行し、未実行を成功へ数えない。
 - [/] R4824は固定Chrome実体・既存孤立SVGからdark背景の英日画像を取得。R4831はalphaを正規化して既存scorerで診断し、cubic/conicの輪郭mask差0・改善0・悪化0を確認した。Conicへ置換する案は採用せず、正式Mermaid115/117と独立oracle・99条件は不変。R4830のraw mask buffer不足は失敗原本を保持し、必要画像byte数を確保したfresh R4831で再取得した。

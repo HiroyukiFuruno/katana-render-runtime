@@ -595,13 +595,13 @@ def write(path: Path, value: object) -> FilePin:
 
 
 def _clone_transport_file(source: Path, destination: Path, checksum: str) -> None:
-    from reflink_copy import reflink
+    from reflink_copy import reflink_or_copy
 
     gate.require(source != destination and not destination.exists() and not destination.is_symlink(),
                  "transport destination already exists or is source")
     before = source.lstat()
     _pinned_file(source, checksum)
-    reflink(source, destination)
+    reflink_or_copy(source, destination)
     after = source.lstat()
     target = destination.lstat()
     gate.require(_file_identity(before) == _file_identity(after) and before.st_mode == after.st_mode,

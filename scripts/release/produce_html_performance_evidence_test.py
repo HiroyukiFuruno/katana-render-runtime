@@ -443,16 +443,35 @@ class TransportBundleUnitTests(unittest.TestCase):
                 producer._clone_transport_file(source, source, gate.sha256(source))
 
     @unittest.skipUnless(platform.system() == "Darwin", "macOS clone contract")
-    def test_transport_clone_failure_does_not_fall_back_to_copy(self) -> None:
+    def test_transport_copy_failure_is_not_suppressed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             source = root / "source"
             target = root / "target"
             source.write_bytes(b"original")
-            with patch("reflink_copy.reflink", side_effect=OSError(errno.ENOTSUP, "clone unsupported")):
+            with patch("reflink_copy.reflink_or_copy",
+                       side_effect=OSError(errno.ENOTSUP, "copy unsupported")):
                 with self.assertRaises(OSError):
                     producer._clone_transport_file(source, target, gate.sha256(source))
             self.assertFalse(target.exists())
+
+    @unittest.skipUnless(platform.system() == "Darwin", "macOS system-volume transport")
+    def test_transport_copies_readonly_system_volume_file_without_changing_source(self) -> None:
+        source = Path("/System/Library/CoreServices/SystemVersion.plist").resolve()
+        before = source.lstat()
+        checksum = gate.sha256(source)
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary).resolve() / "system-version-copy.plist"
+            producer._clone_transport_file(source, target, checksum)
+            after = source.lstat()
+            self.assertEqual(producer._file_identity(before), producer._file_identity(after))
+            self.assertEqual(before.st_mode, after.st_mode)
+            self.assertNotEqual((before.st_dev, before.st_ino),
+                                (target.stat().st_dev, target.stat().st_ino))
+            self.assertEqual(gate.sha256(target), checksum)
+            self.assertEqual(gate.sha256(source), checksum)
+            with self.assertRaises(ValueError):
+                producer._clone_transport_file(source, target, checksum)
 
 
 class HtmlPerformanceBatchUnitTests(unittest.TestCase):
@@ -1045,7 +1064,7 @@ class WorkerAttemptContractTest(unittest.TestCase):
             "referenceParent": {"role": baseline, "referenceKind": "correct-parent-source",
                                 "publishedSdk": False, "armId": baseline},
             "catalogCondition": {"condition_id": "navigation/top/1280x900@1",
-                                 "operation_kind": "navigation"},
+                                 "operation_kind": "navigation-pointer-click"},
             "arms": {baseline: {"binary_sha256": self.build.binary_sha256}},
         })
 
@@ -1195,7 +1214,8 @@ class WorkerAttemptContractTest(unittest.TestCase):
         }
         expected["operationEvidenceRef"] = snapshot
         row.update({"catalog": True, "condition_id": "navigation/top/1280x900@1",
-                    "case_id": "navigation", "state": "top", "operation_kind": "navigation",
+                    "case_id": "navigation", "state": "top",
+                    "operation_kind": "navigation-pointer-click",
                     "operation_evidence": snapshot})
         baseline_id = gate.baseline_arm_id(expected)
         arms[baseline_id] = arms.pop("baseline-0.4.23")
