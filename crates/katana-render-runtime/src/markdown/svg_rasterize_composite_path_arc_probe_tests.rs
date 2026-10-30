@@ -39,7 +39,8 @@ fn isolated_cubic_and_conic_paint_probe() -> Result<(), String> {
     let (cubic, arc) = paint_pair(&tree, node, &mut prepared, conic.clone(), false)?;
     prepared.path = cubic_path.clone();
     let white = paint_pair(&tree, node, &mut prepared, conic, true)?;
-    save_result(&request, node, &prepared, &cubic_path, &cubic, &arc, &white)
+    save_result(&request, node, &prepared, &cubic_path, &cubic, &arc, &white)?;
+    save_resvg(&request, &tree)
 }
 
 fn read_request() -> Result<Request, String> {
@@ -152,6 +153,26 @@ fn save_result(
     report["whiteConicPngSha256"] = sha256(&white_arc_png).into();
     let bytes = serde_json::to_vec_pretty(&report).map_err(|error| error.to_string())?;
     std::fs::write(request.output.join("report.json"), bytes).map_err(|error| error.to_string())
+}
+
+fn save_resvg(request: &Request, tree: &usvg::Tree) -> Result<(), String> {
+    let size = tree.size().to_int_size();
+    let mut pixmap = Pixmap::new(size.width(), size.height()).ok_or("resvg allocation failed")?;
+    resvg::render(tree, tiny_skia::Transform::identity(), &mut pixmap.as_mut());
+    let png = save_png(&request.output, "resvg.png", &pixmap)?;
+    let report = serde_json::json!({
+        "diagnosticOnly": true,
+        "route": "resvg-tree",
+        "treeClipApplied": true,
+        "svgSha256": request.expected_svg_sha256,
+        "pathSha256": request.expected_path_sha256,
+        "width": pixmap.width(),
+        "height": pixmap.height(),
+        "pngSha256": sha256(&png),
+    });
+    let json = serde_json::to_vec_pretty(&report).map_err(|error| error.to_string())?;
+    std::fs::write(request.output.join("resvg-report.json"), json)
+        .map_err(|error| error.to_string())
 }
 
 fn save_png(output: &std::path::Path, name: &str, pixmap: &Pixmap) -> Result<Vec<u8>, String> {

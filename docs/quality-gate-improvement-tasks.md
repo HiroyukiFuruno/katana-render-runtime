@@ -2,6 +2,8 @@
 
 ## 最新の再開地点（2026-10-30）
 
+- [/] 依存保持は通常hook actual0の`6c2d4ff4`へ保存。R4652同じ孤立SVGをSkia/TinySkiaで描きR4653既存採点0、EN輪郭88.9558→94.81565、JA89.7773→95.08367を観測した。これは円柱単体の診断で正式合格件数ではない。比較probeだけを既存testへ残し、元データ・oracle・閾値は不変。
+- [/] 曲線path全体を既存resvgへ委譲する汎用trialはR4658実AST0/R4659実catalog0/R4660関連14件成功。R4661製品経路9図を取得しR4662既存採点0でEN C4が98.76257→97.35468、JA C4が98.75766→97.3575、JA04が99.255058→97.22218へ悪化したため不採用。R4663へtrial差分を保全し商用変更・追加2testを撤去、R4664 index整合0。Wardley微改善だけを成果に数えず、正式115/117を維持する。非凸性だけの再分類は値未観測かつGPU stroke経路の根拠不足のため採用せず、先にHTML全84性能を取得する。
 - [/] 811a8b85のR4618 capture/R4619 strict validationはactual0、HTML84/84が90以上・最低92.14438・出力font一致established。R4620全84性能は測定開始前に非SDK依存closure差でactual1、出力dirも未生成。性能不合格ではない。最新化でutf8_iter1.0.4→1.1.0とutf_types1.0.0追加が入り、固定親371274edの共通依存と不一致になった。元画像・ログを保持し、この結果を変更後sourceへ再認定しない。
 - [/] gateを満たさない更新は採用しない既存方針に従い、root/harness両lockのutf8_iterを1.0.4へ保持。親HEAD/lock/wrapperのpinは変更せず、R4623既存closure validator actual0、R4624現lock明示pin test0。既存updaterと鮮度判定へ、親closure・version/checksum・両lock一致を要する狭い保持契約を追加。dry-run例外は確認した2変更だけで、他更新/未知形式/任意downgradeは拒否し、CLIに版と理由を明示する。
 - [/] R4635 Python lint/厳格型を並列実行してactual0、R4636鮮度71件・R4637 updater11件・R4638 closure11件の計93件成功、R4639全静的foundation0。R4640実依存鮮度0、R4642実updater0で両lock/現lock pinの内容不変も確認。R4626/28の旧出力期待・test import不備、R4629 Ruff1件、R4632型2件の原失敗を保持し修正済み。次は通常commit後にfresh84 captureと正式性能を再取得する。未適用TinySkia比較probeは既存lib経路の追加観測案に限り、採用・正式合格数へ加算しない。
