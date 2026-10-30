@@ -12,12 +12,38 @@ mod linear_component_transfer;
 mod mask;
 #[path = "svg_rasterize_composite_nodes.rs"]
 mod nodes;
+use nodes::{render_children_at_origin, render_children_with_text};
 #[path = "svg_rasterize_composite_path.rs"]
 pub(super) mod path;
 #[path = "svg_rasterize_composite_text.rs"]
 mod text;
 pub(crate) use text::TextRasterizer;
 pub(crate) struct SvgCompositeRenderer;
+
+#[derive(Clone, Copy)]
+struct TileContext {
+    origin: (i32, i32),
+    frame: (u32, u32),
+}
+
+impl TileContext {
+    fn cropped(self, crop: tiny_skia::IntRect) -> Result<Self, String> {
+        let x = self
+            .origin
+            .0
+            .checked_add(crop.x())
+            .ok_or("SVG crop origin overflow")?;
+        let y = self
+            .origin
+            .1
+            .checked_add(crop.y())
+            .ok_or("SVG crop origin overflow")?;
+        Ok(Self {
+            origin: (x, y),
+            ..self
+        })
+    }
+}
 impl SvgCompositeRenderer {
     #[cfg(test)]
     pub(crate) fn render(
@@ -59,13 +85,18 @@ fn render_root_children(
     text_rasterizer: Option<&dyn TextRasterizer>,
 ) -> Result<(), String> {
     let needs_authored_clip_ids = SvgCompositeRenderer::needs_authored_clip_ids(tree);
+    let origin = Some(TileContext {
+        origin: (0, 0),
+        frame: (pixmap.width(), pixmap.height()),
+    });
     match text_rasterizer {
-        Some(text_rasterizer) => render_children_with_text(
+        Some(text_rasterizer) => render_children_at_origin(
             tree.root(),
             transform.pre_concat(tree.root().transform()),
             pixmap,
             authored_clip_info,
             Some(text_rasterizer),
+            origin,
         ),
         None if needs_authored_clip_ids => {
             render_children_with_text(tree.root(), transform, pixmap, authored_clip_info, None)
@@ -124,25 +155,6 @@ fn generated_viewport_clip(group: &usvg::Group, authored_clip_info: &AuthoredCli
         .is_some_and(|clip| is_generated_viewport_clip(clip, authored_clip_info))
 }
 
-fn render_children_with_text(
-    group: &usvg::Group,
-    transform: Transform,
-    pixmap: &mut tiny_skia::PixmapMut<'_>,
-    authored_clip_info: &AuthoredClipInfo,
-    text_rasterizer: Option<&dyn TextRasterizer>,
-) -> Result<(), String> {
-    for child in group.children() {
-        nodes::render_node(
-            child,
-            transform,
-            pixmap,
-            authored_clip_info,
-            text_rasterizer,
-        )?;
-    }
-    Ok(())
-}
-
 fn render_traversable_group(
     node: &usvg::Node,
     group: &usvg::Group,
@@ -150,28 +162,25 @@ fn render_traversable_group(
     pixmap: &mut tiny_skia::PixmapMut<'_>,
     authored_clip_info: &AuthoredClipInfo,
     text_rasterizer: Option<&dyn TextRasterizer>,
+    origin: Option<TileContext>,
 ) -> Result<(), String> {
     let child_transform = transform.pre_concat(group.transform());
-    if generated_viewport_clip(group, authored_clip_info) {
-        return layers::render_clipped_group(
-            group,
-            child_transform,
-            pixmap,
-            authored_clip_info,
-            text_rasterizer,
-        );
-    }
-    if group.clip_path().is_none() {
-        return render_children_with_text(
-            group,
-            child_transform,
-            pixmap,
-            authored_clip_info,
-            text_rasterizer,
-        );
-    }
-    layers::render_existing_node(node, transform, pixmap);
-    Ok(())
+    let render_children = if generated_viewport_clip(group, authored_clip_info) {
+        layers::render_clipped_group_at_origin
+    } else if group.clip_path().is_none() {
+        render_children_at_origin
+    } else {
+        layers::render_existing_node(node, transform, pixmap);
+        return Ok(());
+    };
+    render_children(
+        group,
+        child_transform,
+        pixmap,
+        authored_clip_info,
+        text_rasterizer,
+        origin,
+    )
 }
 
 fn is_generated_viewport_clip(

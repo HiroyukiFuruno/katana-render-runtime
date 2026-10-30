@@ -86,6 +86,7 @@ fn cropped_group_without_a_clip_leaves_the_target_unchanged() -> Result<(), Stri
         &mut pixmap.as_mut(),
         &AuthoredClipInfo::default(),
         None,
+        None,
     )?;
     assert!(pixmap.data().iter().all(|byte| *byte == 0));
     Ok(())

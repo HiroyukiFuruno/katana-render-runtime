@@ -16,9 +16,10 @@ pub(super) fn render_group_node(
     pixmap: &mut PixmapMut<'_>,
     provenance: &AuthoredClipInfo,
     text: Option<&dyn TextRasterizer>,
+    origin: Option<super::TileContext>,
 ) -> Result<(), String> {
     if super::is_traversable_group(group) {
-        super::render_traversable_group(node, group, transform, pixmap, provenance, text)
+        super::render_traversable_group(node, group, transform, pixmap, provenance, text, origin)
     } else {
         render_effect_group(node, group, transform, pixmap, provenance, text)
     }

@@ -6,6 +6,8 @@ use tiny_skia::{PixmapMut, Transform};
 mod geometry;
 #[path = "svg_rasterize_composite_path_style.rs"]
 pub(in crate::markdown::svg_rasterize) mod style;
+#[path = "svg_rasterize_composite_path_tile.rs"]
+mod tile;
 
 #[cfg(all(test, target_os = "macos"))]
 #[path = "svg_rasterize_composite_path_tests.rs"]
@@ -15,10 +17,20 @@ mod tests;
 #[path = "svg_rasterize_composite_path_arc_probe_tests.rs"]
 mod arc_probe_tests;
 
+#[cfg(test)]
 pub(super) fn render_if_supported(
     node: &usvg::Path,
     transform: Transform,
     pixmap: &mut PixmapMut<'_>,
+) -> Result<bool, String> {
+    render_if_supported_at_origin(node, transform, pixmap, None)
+}
+
+pub(super) fn render_if_supported_at_origin(
+    node: &usvg::Path,
+    transform: Transform,
+    pixmap: &mut PixmapMut<'_>,
+    origin: Option<super::TileContext>,
 ) -> Result<bool, String> {
     if !node.is_visible() {
         return Ok(true);
@@ -38,8 +50,22 @@ pub(super) fn render_if_supported(
         prepared.fill.as_ref(),
         prepared.stroke.as_ref(),
     );
-    render_prepared_path(pixmap, &prepared, transform, node.paint_order())?;
+    render_selected(node, pixmap, &prepared, transform, origin)?;
     Ok(true)
+}
+
+fn render_selected(
+    node: &usvg::Path,
+    pixmap: &mut PixmapMut<'_>,
+    prepared: &PreparedPath,
+    transform: Transform,
+    origin: Option<super::TileContext>,
+) -> Result<(), String> {
+    if let Some(origin) = origin.filter(|_| tile::has_curve(node)) {
+        tile::render(pixmap, node, prepared, transform, origin)
+    } else {
+        render_prepared_path(pixmap, prepared, transform, node.paint_order())
+    }
 }
 
 fn render_prepared_path(

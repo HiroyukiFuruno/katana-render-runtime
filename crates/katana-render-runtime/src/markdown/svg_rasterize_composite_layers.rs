@@ -1,4 +1,4 @@
-use super::{AuthoredClipInfo, TextRasterizer, mask, render_children_with_text};
+use super::{AuthoredClipInfo, TextRasterizer, mask, render_children_at_origin};
 use resvg::{render_node, usvg};
 use tiny_skia::{BlendMode, IntRect, Mask, MaskType, Pixmap, PixmapPaint, Transform};
 
@@ -9,12 +9,31 @@ const LAYER_SIZE_PADDING: u32 = 4;
 #[path = "svg_rasterize_composite_layers_boundary_tests.rs"]
 mod boundary_tests;
 
+#[cfg(test)]
 pub(super) fn render_clipped_group(
     group: &usvg::Group,
     transform: Transform,
     pixmap: &mut tiny_skia::PixmapMut<'_>,
     authored_clip_info: &AuthoredClipInfo,
     text_rasterizer: Option<&dyn TextRasterizer>,
+) -> Result<(), String> {
+    render_clipped_group_at_origin(
+        group,
+        transform,
+        pixmap,
+        authored_clip_info,
+        text_rasterizer,
+        None,
+    )
+}
+
+pub(super) fn render_clipped_group_at_origin(
+    group: &usvg::Group,
+    transform: Transform,
+    pixmap: &mut tiny_skia::PixmapMut<'_>,
+    authored_clip_info: &AuthoredClipInfo,
+    text_rasterizer: Option<&dyn TextRasterizer>,
+    origin: Option<super::TileContext>,
 ) -> Result<(), String> {
     let Some((crop, crop_transform)) = crop_context(group, transform, pixmap)? else {
         return Ok(());
@@ -26,6 +45,7 @@ pub(super) fn render_clipped_group(
         pixmap,
         authored_clip_info,
         text_rasterizer,
+        origin,
     )
 }
 
@@ -49,6 +69,7 @@ fn render_cropped_group(
     pixmap: &mut tiny_skia::PixmapMut<'_>,
     authored_clip_info: &AuthoredClipInfo,
     text_rasterizer: Option<&dyn TextRasterizer>,
+    origin: Option<super::TileContext>,
 ) -> Result<(), String> {
     let mut composited = crop_pixmap(pixmap, crop)?;
     let Some(clip) = group.clip_path() else {
@@ -56,21 +77,27 @@ fn render_cropped_group(
     };
     #[cfg(all(test, target_os = "macos"))]
     let _crop_scope = super::super::SvgRasterizeOps::enter_path_crop(crop);
-    render_children_with_text(
+    let child_origin = origin.map(|context| context.cropped(crop)).transpose()?;
+    render_children_at_origin(
         group,
         crop_transform,
         &mut composited.as_mut(),
         authored_clip_info,
         text_rasterizer,
+        child_origin,
     )?;
-    let mask = clip_mask(
-        clip,
-        crop_transform,
-        composited.width(),
-        composited.height(),
-    )?;
-    mask::composite_crop_with_mask(pixmap, crop, &composited, &mask)?;
-    Ok(())
+    composite_clipped_crop(pixmap, crop, &composited, clip, crop_transform)
+}
+
+fn composite_clipped_crop(
+    pixmap: &mut tiny_skia::PixmapMut<'_>,
+    crop: IntRect,
+    composited: &Pixmap,
+    clip: &usvg::ClipPath,
+    transform: Transform,
+) -> Result<(), String> {
+    let mask = clip_mask(clip, transform, composited.width(), composited.height())?;
+    mask::composite_crop_with_mask(pixmap, crop, composited, &mask)
 }
 
 fn clip_mask(

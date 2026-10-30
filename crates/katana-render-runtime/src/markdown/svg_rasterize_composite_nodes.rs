@@ -3,12 +3,51 @@ use super::{AuthoredClipInfo, TextRasterizer, groups, layers, text};
 use resvg::usvg;
 use tiny_skia::Transform;
 
-pub(super) fn render_node(
+pub(super) fn render_children_with_text(
+    group: &usvg::Group,
+    transform: Transform,
+    pixmap: &mut tiny_skia::PixmapMut<'_>,
+    authored_clip_info: &AuthoredClipInfo,
+    text_rasterizer: Option<&dyn TextRasterizer>,
+) -> Result<(), String> {
+    render_children_at_origin(
+        group,
+        transform,
+        pixmap,
+        authored_clip_info,
+        text_rasterizer,
+        None,
+    )
+}
+
+pub(super) fn render_children_at_origin(
+    group: &usvg::Group,
+    transform: Transform,
+    pixmap: &mut tiny_skia::PixmapMut<'_>,
+    authored_clip_info: &AuthoredClipInfo,
+    text_rasterizer: Option<&dyn TextRasterizer>,
+    origin: Option<super::TileContext>,
+) -> Result<(), String> {
+    for child in group.children() {
+        render_node(
+            child,
+            transform,
+            pixmap,
+            authored_clip_info,
+            text_rasterizer,
+            origin,
+        )?;
+    }
+    Ok(())
+}
+
+fn render_node(
     node: &usvg::Node,
     transform: Transform,
     pixmap: &mut tiny_skia::PixmapMut<'_>,
     authored_clip_info: &AuthoredClipInfo,
     text_rasterizer: Option<&dyn TextRasterizer>,
+    origin: Option<super::TileContext>,
 ) -> Result<(), String> {
     match node {
         usvg::Node::Text(text) => {
@@ -21,9 +60,10 @@ pub(super) fn render_node(
             pixmap,
             authored_clip_info,
             text_rasterizer,
+            origin,
         ),
         usvg::Node::Path(path_node) if text_rasterizer.is_some() => {
-            render_path_node(node, path_node, transform, pixmap)
+            render_path_node(node, path_node, transform, pixmap, origin)
         }
         _ => render_existing_path_node(node, transform, pixmap),
     }
@@ -34,8 +74,9 @@ fn render_path_node(
     path_node: &usvg::Path,
     transform: Transform,
     pixmap: &mut tiny_skia::PixmapMut<'_>,
+    origin: Option<super::TileContext>,
 ) -> Result<(), String> {
-    if path::render_if_supported(path_node, transform, pixmap)? {
+    if path::render_if_supported_at_origin(path_node, transform, pixmap, origin)? {
         #[cfg(all(test, target_os = "macos"))]
         super::super::SvgRasterizeOps::record_path_route(true);
         Ok(())
