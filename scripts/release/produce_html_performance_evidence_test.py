@@ -462,11 +462,32 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         self.root = Path(temporary.name).resolve()
         self._batch_counter = 0
 
+    def test_catalog_run_uses_batch_failure_sealing_without_forcing_a_partial_deadline(self) -> None:
+        self.assertTrue(producer._batch_mode(self.root / "catalog.json", None, None))
+        self.assertFalse(producer._batch_mode(None, None, None))
+        self.assertTrue(producer._batch_mode(None, 1, None))
+        self.assertTrue(producer._batch_mode(None, None, self.root / "resume"))
+
+    def test_completed_condition_ids_use_only_the_measured_planned_prefix(self) -> None:
+        planned: list[gate.JsonObject] = [
+            {"condition_id": "case-a"}, {"condition_id": "case-b"},
+        ]
+        measured: list[tuple[Path, typed_producer.ExpectedPerformance,
+                             gate.JsonObject, typed_producer.FilePin]] = [
+            (self.root, cast(typed_producer.ExpectedPerformance, {}),
+             {"policy": {"status": "complete"}}, cast(typed_producer.FilePin, {})),
+        ]
+        self.assertEqual(producer._completed_batch_ids([], planned, planned[:1], measured),
+                         ["case-a"])
+        with self.assertRaisesRegex(ValueError, "planned prefix"):
+            producer._completed_batch_ids([], planned, planned[1:], measured)
+
     def create_batch(
         self,
         condition_ids: Sequence[str] = ("case-a", "case-b"),
         complete_ids: Sequence[str] | None = None,
         policy_accepted: bool = True,
+        seal_receipt: bool = True,
     ) -> tuple[Path, Path]:
         self._batch_counter += 1
         batch = self.root / f"batch-{self._batch_counter}"
@@ -487,14 +508,64 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
             files.extend([expected, result, manifest])
         bundle = batch / "bundle"
         producer.write_transport_bundle(bundle, "a" * 40, files, attempts)
-        producer.write_batch_receipt(
-            batch, head="a" * 40, source_before=source_before, source_end=source_end,
-            context_before=context_before, context_end=context_end, build_artifacts={},
-            build_pins=[], condition_ids=condition_ids,
-            complete_condition_ids=condition_ids if complete_ids is None else complete_ids,
-            policy_accepted=policy_accepted, attempts=attempts, bundle=bundle,
-        )
+        if seal_receipt:
+            producer.write_batch_receipt(
+                batch, head="a" * 40, source_before=source_before, source_end=source_end,
+                context_before=context_before, context_end=context_end, build_artifacts={},
+                build_pins=[], condition_ids=condition_ids,
+                complete_condition_ids=condition_ids if complete_ids is None else complete_ids,
+                policy_accepted=policy_accepted, attempts=attempts, bundle=bundle,
+            )
         return batch, bundle
+
+    def failed_batch_fixture(
+        self,
+    ) -> tuple[Path, Callable[[], typed_producer.FilePin], typed_producer.FilePin]:
+        batch, bundle_path = self.create_batch(
+            condition_ids=("case-a",), complete_ids=(), policy_accepted=False,
+            seal_receipt=False,
+        )
+        bundle = gate.Bundle(bundle_path)
+        attempts = cast(list[dict[str, typed_producer.FilePin]],
+                        gate._objects(bundle.manifest.get("attempts"), "fixture attempts"))
+        pins: dict[str, typed_producer.FilePin] = {name: {
+            "path": str((batch / name).resolve()), "sha256": gate.sha256(batch / name),
+        } for name in (
+                           "source-before.json", "source-end.json",
+                           "context-before.json", "context-end.json",
+                       )}
+
+        def seal() -> typed_producer.FilePin:
+            return producer.write_batch_receipt(
+                batch, head="a" * 40, source_before=pins["source-before.json"],
+                source_end=pins["source-end.json"],
+                context_before=pins["context-before.json"],
+                context_end=pins["context-end.json"], build_artifacts={}, build_pins=[],
+                condition_ids=("case-a",), complete_condition_ids=(),
+                policy_accepted=False, attempts=attempts, bundle=bundle_path,
+            )
+        return batch, seal, pins["context-end.json"]
+
+    def test_failed_batch_seals_attempt_prefix_and_context_before_raising(self) -> None:
+        batch, seal, context_end = self.failed_batch_fixture()
+        failure = RuntimeError("worker failed after one completed attempt")
+        summary: gate.JsonObject = {"conditions": 1, "completeConditions": 0,
+                                    "formalAccepted": False}
+        with patch("builtins.print") as report:
+            with self.assertRaises(RuntimeError) as raised:
+                producer._seal_failed_batch(failure, seal, summary)
+        self.assertIs(raised.exception, failure)
+        report.assert_called_once_with(json.dumps(summary))
+        receipt = gate.read_json(batch / "batch-receipt.json")
+        self.assertEqual(receipt["status"], "closed")
+        self.assertIs(receipt["formalAccepted"], False)
+        self.assertEqual(receipt["completeConditionIds"], [])
+        contexts = gate._object(receipt.get("contexts"), "receipt contexts")
+        self.assertEqual(gate._object(contexts.get("end"), "receipt context end"), context_end)
+        with patch.object(gate, "validate_attempt"):
+            loaded, _, completed = producer.load_closed_batch(batch, self.root)
+        self.assertEqual(loaded["conditionIds"], ["case-a"])
+        self.assertEqual(completed, [])
 
     def test_closed_batch_reader_reuses_only_complete_attempts(self) -> None:
         batch, _ = self.create_batch(complete_ids=("case-a",))

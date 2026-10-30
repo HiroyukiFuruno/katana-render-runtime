@@ -2,6 +2,12 @@
 
 ## 最新の再開地点（2026-10-30）
 
+- [/] b450のR4669 capture/R4670 strictはHTML84/84が90以上、最低92.14438、出力font一致established。R4675全84性能は45条件checkpoint計算後（44 policy pass/1 RSS fail）、46条件目の同一文書リンク#a拒否でactual1。catalog既定が旧非batch経路へ入り正式封印に未到達だったため、45件を正式性能成功へ数えない。未実施39条件を含む新規全84測定が必要。
+- [/] 存在しないfile originでも、相対fragmentかつ同一文書URLだけを許可する修正。別ファイル・外部・symlink escape拒否を維持し、R4682 AST0/R4683実catalog0/R4684選択7回帰すべて成功。producer既定batch化と途中失敗時の完了集合処理は修正・回帰検証中。
+- [/] producerの既定catalogを安全なbatch経路へ通し、途中失敗後の完了集合を実測prefixから構築。再開IDはreceipt順を維持し、context-endとclosed receipt保存後も元失敗を非0で返す。R4687 Python lint/厳格型0、R4689固定依存環境のproducer107テスト成功、R4691全source-static-foundation0。R4685型エラーとR4688の非隔離Pythonによるreflink依存不足は失敗原本を保持し、成功へ読み替えない。正式全84性能・coverageの代用ではない。
+- [/] 独立reviewでworker失敗batchのfalseがresume後も残る点を確認。これは既存の失敗を後続成功で消さない契約であり、今回緩和しない。closedは証跡の終了を示し合格や再開後の合格可能性を保証しない。予算終了は既存契約で再開可能だがworker例外・実性能不合格のあるrunは正式合格へ昇格せず、修正後fresh runを行う。R4675も新規取得する。
+- [ ] R4675のdecoration_translucent_620x900_1は25組中23〜24組で候補側RSSが高く暫定不合格。時間の劣化flagはなし。RSSは累積最大値で再表示/全縦スクロールの値が全組同一のため、独立した二増加とは扱わない。一時peakと残存メモリを切り分ける追加観測が必要で、原因未確定・非劣化未達のまま追跡する。
+
 - [/] 依存保持は通常hook actual0の`6c2d4ff4`へ保存。R4652同じ孤立SVGをSkia/TinySkiaで描きR4653既存採点0、EN輪郭88.9558→94.81565、JA89.7773→95.08367を観測した。これは円柱単体の診断で正式合格件数ではない。比較probeだけを既存testへ残し、元データ・oracle・閾値は不変。
 - [/] 曲線path全体を既存resvgへ委譲する汎用trialはR4658実AST0/R4659実catalog0/R4660関連14件成功。R4661製品経路9図を取得しR4662既存採点0でEN C4が98.76257→97.35468、JA C4が98.75766→97.3575、JA04が99.255058→97.22218へ悪化したため不採用。R4663へtrial差分を保全し商用変更・追加2testを撤去、R4664 index整合0。Wardley微改善だけを成果に数えず、正式115/117を維持する。非凸性だけの再分類は値未観測かつGPU stroke経路の根拠不足のため採用せず、先にHTML全84性能を取得する。
 - [/] 811a8b85のR4618 capture/R4619 strict validationはactual0、HTML84/84が90以上・最低92.14438・出力font一致established。R4620全84性能は測定開始前に非SDK依存closure差でactual1、出力dirも未生成。性能不合格ではない。最新化でutf8_iter1.0.4→1.1.0とutf_types1.0.0追加が入り、固定親371274edの共通依存と不一致になった。元画像・ログを保持し、この結果を変更後sourceへ再認定しない。

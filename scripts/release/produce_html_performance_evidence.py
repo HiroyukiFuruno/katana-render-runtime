@@ -22,7 +22,7 @@ from contextlib import ExitStack, contextmanager
 from functools import lru_cache
 from pathlib import Path
 from types import FrameType
-from typing import BinaryIO, Literal, NamedTuple, TypedDict, cast, overload
+from typing import BinaryIO, Literal, NamedTuple, NoReturn, TypedDict, cast, overload
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 
 import verify_html_performance_evidence as gate
@@ -791,10 +791,41 @@ def _select_batch_rows(
     return remaining if limit is None else remaining[:limit]
 
 
+def _batch_mode(
+    catalog_manifest_path: Path | None, max_conditions: int | None, resume_batch: Path | None,
+) -> bool:
+    return catalog_manifest_path is not None or max_conditions is not None or resume_batch is not None
+
+
 def _batch_formal_acceptance(
     condition_ids: Sequence[str], complete_ids: Sequence[str], policy_accepted: bool,
 ) -> bool:
     return policy_accepted and len(condition_ids) == 84 and len(complete_ids) == 84
+
+
+def _seal_failed_batch(
+    failure: BaseException, seal: Callable[[], FilePin], summary: gate.JsonObject,
+) -> NoReturn:
+    seal()
+    print(json.dumps(summary))
+    raise failure
+
+
+def _completed_batch_ids(
+    resumed_ids: Iterable[str], planned_rows: Sequence[gate.JsonObject],
+    completed_rows: Sequence[gate.JsonObject],
+    results: Sequence[tuple[Path, ExpectedPerformance, gate.JsonObject, FilePin]],
+) -> list[str]:
+    gate.require(list(completed_rows) == list(planned_rows[:len(completed_rows)]),
+                 "batch completed rows are not a planned prefix")
+    gate.require(len(completed_rows) == len(results),
+                 "batch completed rows differ from measured results")
+    ids = list(resumed_ids)
+    ids.extend(_row_condition_id(row) for row, (_, _, result, _) in zip(
+        completed_rows, results, strict=True,
+    ) if gate._object(result.get("policy"), "condition policy").get("status") != "incomplete")
+    gate.require(len(ids) == len(set(ids)), "batch complete conditions are duplicated")
+    return ids
 
 
 def _resume_condition_plan(
@@ -2189,9 +2220,9 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                  "reference parent wrapper requires its SHA256")
     gate.require(reference_parent_wrapper is None or catalog_manifest_path is not None,
                  "reference parent wrapper requires a catalog")
-    batch_mode = max_conditions is not None or resume_batch is not None
+    batch_mode = _batch_mode(catalog_manifest_path, max_conditions, resume_batch)
     batch_deadline = (time.monotonic() + BATCH_WORK_BUDGET_SECONDS
-                      if batch_mode else None)
+                      if max_conditions is not None or resume_batch is not None else None)
     batch_failure: BaseException | None = None
     resumed_receipt: gate.JsonObject | None = None
     resumed_bundle: gate.Bundle | None = None
@@ -2319,13 +2350,14 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         binaries[arm] = build.binary
         builds[arm] = build
         gate.require(source(root, git_query=git_query) == initial, "source changed during build")
-    resumed_ids: set[str] = set()
+    resumed_ids: list[str] = []
     if resumed_receipt is not None and resumed_bundle is not None:
-        resumed_ids = {
+        resumed_ids = [
             gate._text(value, "resumed condition id")
             for value in gate._array(resumed_receipt.get("completeConditionIds"),
                                      "resumed complete condition ids")
-        }
+        ]
+    resumed_id_set = set(resumed_ids)
     measurement_rows: list[gate.JsonObject] = []
     if catalog_conditions is None:
         assert fixture is not None and plan_path is not None and dom is not None and plan is not None and plan_pin is not None
@@ -2371,10 +2403,10 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     gate.require(len(all_condition_ids) == len(set(all_condition_ids)),
                  "measurement condition ids are duplicated")
     if resumed_receipt is not None:
-        gate.require(resumed_ids <= set(all_condition_ids),
+        gate.require(resumed_id_set <= set(all_condition_ids),
                      "resume batch contains an unknown condition")
         measurement_rows = [row for row in all_measurement_rows
-                            if _row_condition_id(row) not in resumed_ids]
+                            if _row_condition_id(row) not in resumed_id_set]
     if max_conditions is not None:
         measurement_rows = measurement_rows[:max_conditions]
     font_probe_input_paths: list[Path] = []
@@ -2443,6 +2475,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                          "resume build pins differ from current build")
     transport_attempts: list[dict[str, FilePin]] = list(resumed_attempts)
     expected_all: list[tuple[Path, ExpectedPerformance, gate.JsonObject, FilePin]] = []
+    completed_rows: list[gate.JsonObject] = []
     checkpoint_pins: list[FilePin] = []
     worker_attempt_pins: list[FilePin] = []
     for row in measurement_rows:
@@ -2534,6 +2567,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             result["catalogCondition"] = expected["catalogCondition"]
         checkpoint_pins.append(write_condition_checkpoint(folder, expected, result, manifest_data))
         expected_all.append((folder, expected, result, manifest_pin))
+        completed_rows.append(row)
     after_context = context(root, target, input_paths, lifecycle, git_query=git_query)
     if resumed_receipt is not None and resumed_bundle is not None:
         _validate_resume_batch(
@@ -2604,18 +2638,22 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                    for attempt in transport_attempts]
     gate.require(len(attempt_ids) == len(set(attempt_ids)),
                  "batch attempts contain duplicate conditions")
-    complete_ids = list(resumed_ids)
-    complete_ids.extend(
-        _row_condition_id(row)
-        for row, (_, _, result, _) in zip(measurement_rows, expected_all, strict=True)
-        if gate._object(result.get("policy"), "condition policy").get("status") != "incomplete"
+    complete_ids = _completed_batch_ids(
+        resumed_ids, measurement_rows, completed_rows, expected_all,
     )
-    gate.require(len(complete_ids) == len(set(complete_ids)),
-                 "batch complete conditions are duplicated")
     policy_accepted = _batch_policy_accepted(
         batch_failure, [result for _, _, result, _ in expected_all],
         resumed_receipt is None or resumed_receipt.get("policyAccepted") is True,
     )
+    summary: gate.JsonObject = {
+        "head": head, "bundle": str(bundle), "checks": len(transport_attempts) * 20,
+        "completeConditions": len(complete_ids), "conditions": len(attempt_ids),
+        "formalAccepted": _batch_formal_acceptance(
+            attempt_ids, complete_ids, policy_accepted,
+        ),
+        "phaseRecords": len(expected_all) * len(gate.PHASES) * 50,
+        "batchFailure": type(batch_failure).__name__ if batch_failure else None,
+    }
     if catalog_manifest_path is not None:
         validated_builds: Mapping[str, gate.JsonObject] | None = None
         if transport_attempts and not _allow_catalog_diagnostic:
@@ -2630,28 +2668,25 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                     {key: value for key, value in attempt.items()}, git_query=git_query,
                     validated_builds=validated_builds,
                 )
-        write_batch_receipt(
-            output, head=head, source_before=build_inputs.source_before,
-            source_end=source_end, context_before=before_pin, context_end=end_pin,
-            build_artifacts=build_artifact_refs, build_pins=build_pins,
-            condition_ids=attempt_ids, complete_condition_ids=complete_ids,
-            policy_accepted=policy_accepted,
-            attempts=transport_attempts, bundle=bundle,
-        )
+        def seal_batch_receipt() -> FilePin:
+            return write_batch_receipt(
+                output, head=head, source_before=build_inputs.source_before,
+                source_end=source_end, context_before=before_pin, context_end=end_pin,
+                build_artifacts=build_artifact_refs, build_pins=build_pins,
+                condition_ids=attempt_ids, complete_condition_ids=complete_ids,
+                policy_accepted=policy_accepted,
+                attempts=transport_attempts, bundle=bundle,
+            )
+        if batch_failure is not None:
+            _seal_failed_batch(batch_failure, seal_batch_receipt, summary)
+        seal_batch_receipt()
     if catalog_manifest_path is None:
         gate._verify_legacy_diagnostic(bundle, root, git_query=git_query)
     elif _batch_formal_acceptance(attempt_ids, complete_ids, policy_accepted) and _allow_catalog_diagnostic:
         gate._verify_catalog_diagnostic(bundle, root, git_query=git_query)
     elif _batch_formal_acceptance(attempt_ids, complete_ids, policy_accepted):
         gate.verify(bundle, root, git_query=git_query)
-    print(json.dumps({"head": head, "bundle": str(bundle), "checks": len(transport_attempts) * 20,
-                      "completeConditions": len(complete_ids),
-                      "conditions": len(attempt_ids),
-                      "formalAccepted": _batch_formal_acceptance(
-                          attempt_ids, complete_ids, policy_accepted,
-                      ),
-                      "phaseRecords": len(expected_all) * len(gate.PHASES) * 50,
-                      "batchFailure": type(batch_failure).__name__ if batch_failure else None}))
+    print(json.dumps(summary))
     if batch_failure is not None:
         raise batch_failure
 
