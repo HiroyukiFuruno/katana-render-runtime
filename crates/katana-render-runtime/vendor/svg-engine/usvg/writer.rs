@@ -508,6 +508,9 @@ fn write_defs(tree: &Tree, opt: &WriteOptions, xml: &mut XmlWriter, write_text_p
         xml.write_svg_attribute(AId::Cx, &rg.cx);
         xml.write_svg_attribute(AId::Cy, &rg.cy);
         xml.write_svg_attribute(AId::R, &rg.r.get());
+        if rg.fr.get() != 0.0 {
+            xml.write_svg_attribute(AId::Fr, &rg.fr.get());
+        }
         xml.write_svg_attribute(AId::Fx, &rg.fx);
         xml.write_svg_attribute(AId::Fy, &rg.fy);
         write_base_grad(&rg.base, opt, xml);

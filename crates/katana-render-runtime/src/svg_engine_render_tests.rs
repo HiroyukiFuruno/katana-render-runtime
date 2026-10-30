@@ -5,6 +5,8 @@ use tiny_skia::{Pixmap, Transform};
 
 #[path = "svg_engine_render_compare_tests.rs"]
 mod compare;
+#[path = "svg_engine_render_context_tests.rs"]
+mod context_paint_tests;
 #[path = "svg_engine_render_diagnostic_tests.rs"]
 mod diagnostic;
 #[path = "svg_engine_render_failure_artifact_tests.rs"]

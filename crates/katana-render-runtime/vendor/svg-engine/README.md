@@ -41,6 +41,9 @@ resvgの `identity_op` / `too_many_arguments` / `upper_case_acronyms` / `wrong_s
 
 - usvgの文字整形では、HarfRustへCSS文字サイズを渡し、サイズ依存のtrackingを適用する。
   字形ID・variation座標・原SVGを手作業で加工しない。
+- radial gradientの書き出しでは、非ゼロの焦点半径 `fr` を保持する。
+  再parseで焦点半径がゼロへ変わり色分布が失われる問題を、公開COLRv1フォントと
+  正・ゼロ半径のSVG回帰で確認する。既定のゼロは省略し、既存の期待SVGは変更しない。
 - feDisplacementMapでは、callerがfilter scaleとcanvas transformを適用した倍率を渡す。
   sampler内でscaleを重ねて掛けず、premultiplied mapのRGBだけstraight化してから変位量を評価する。
   これは本家 [Issue 1160](https://github.com/linebender/resvg/issues/1160) の修正に基づき、

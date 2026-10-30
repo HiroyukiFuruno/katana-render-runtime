@@ -224,15 +224,19 @@ KRR の runtime path では、CLI の `--runtime` は未指定時に同梱 runti
 ## 6. コメント規約
 
 **コメントは「なぜ（WHY）」のみ。何をしているか（WHAT）はコードで表現する。**
-コメントは **英語** で記載する（English First Policy に従う）。
+ロジック注釈は日本語の `/* WHY: ... */` 形式で記載する。通常の `//` 注釈はAST検査で拒否される。
+
+良い例:
 
 ```rust
-// ✅ Good — WHY のみ、英語
-// comrak disables GFM by default, so we explicitly enable the extension here.
+/* WHY: comrakではGFMが既定で無効なので、必要な拡張を明示する。 */
 opts.extension.table = true;
+```
 
-// ❌ Bad — WHAT をコメントしている（コードを読めばわかる）
-// Enable the table extension
+避ける例（WHATのみ）:
+
+```rust
+/* WHY: table拡張を有効にする。 */
 opts.extension.table = true;
 ```
 

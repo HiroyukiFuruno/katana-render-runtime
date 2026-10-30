@@ -1,12 +1,21 @@
-use super::{assert_rgba_pixel, parse_writer_svg, render_tree, usvg, writer_options};
+use super::{
+    ALPHA_CHANNEL, RGBA_CHANNELS, assert_rgba_pixel, parse_writer_svg, render_tree, usvg,
+    writer_options,
+};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use image::ImageEncoder;
+use rstest::rstest;
+#[path = "svg_engine_writer_image_roundtrip_test_support.rs"]
+mod image_roundtrip_test_support;
+use image_roundtrip_test_support::{
+    RasterFormat, assert_embedded_raster_roundtrip, raster_mode_outputs,
+};
 
 const IMAGE_FIXTURE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/structure/image/embedded-svg.svg"
 );
-const RGBA_PNG: [u8; 16] = [
+const RGBA_PNG: [u8; 2 * 2 * RGBA_CHANNELS] = [
     255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
 ];
 type PngPixelSample = ((u32, u32), (u8, u8, u8, u8));
@@ -48,6 +57,59 @@ fn inline_rgba_png_decodes_places_and_roundtrips() -> Result<(), String> {
         }
         assert_rgba_pixel(pixmap, (0, 0), (0, 0, 0, 0))?;
     }
+    Ok(())
+}
+
+#[rstest]
+#[case("embedded-jpeg-as-image-jpg.svg", RasterFormat::Jpeg)]
+#[case("embedded-gif.svg", RasterFormat::Gif)]
+#[case("embedded-webp.svg", RasterFormat::Webp)]
+fn embedded_raster_decodes_and_roundtrips_through_writer(
+    #[case] fixture_name: &str,
+    #[case] format: RasterFormat,
+) -> Result<(), String> {
+    assert_embedded_raster_roundtrip(fixture_name, format)
+}
+
+#[test]
+fn hidden_embedded_image_does_not_paint() -> Result<(), String> {
+    let input = inline_png_svg()?.replace(
+        "<image id=\"rgba\"",
+        "<image id=\"rgba\" visibility=\"hidden\"",
+    );
+    let tree = parse_writer_svg(&input, "hidden-inline-image")?;
+    assert!(!image_node(&tree, "rgba")?.is_visible());
+
+    let rendered = render_tree(&tree)?;
+    assert!(
+        rendered
+            .data()
+            .chunks_exact(RGBA_CHANNELS)
+            .all(|pixel| pixel[ALPHA_CHANNEL] == 0),
+        "hidden image must leave the target transparent"
+    );
+    Ok(())
+}
+
+#[test]
+fn raster_image_rendering_modes_select_the_expected_filter_groups() -> Result<(), String> {
+    let output = raster_mode_outputs()?;
+    assert!(
+        output[0] == output[3],
+        "quality modes use bicubic filtering"
+    );
+    assert!(
+        output[1] == output[4],
+        "speed and crisp-edge modes use nearest filtering"
+    );
+    assert!(
+        output[1] == output[5],
+        "pixelated mode uses nearest filtering"
+    );
+    assert!(
+        output[1] != output[2],
+        "nearest and smooth filtering differ when enlarged"
+    );
     Ok(())
 }
 

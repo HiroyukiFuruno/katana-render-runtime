@@ -6,6 +6,9 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use skrifa::{FontRef, MetadataProvider};
 
+#[path = "svg_engine_colr_fixture_cases.rs"]
+mod svg_engine_colr_fixture_cases;
+
 const FIXTURE_DIRECTORY: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../tests/fixtures/svg-engine/colr-public-fonts"
@@ -277,7 +280,10 @@ fn assert_render_roundtrip(
         has_opaque_pixels(before.data()),
         "empty COLR render for {case}"
     );
-    assert_eq!(before.data(), after.data(), "COLR writer pixels for {case}");
+    assert!(
+        before.data() == after.data(),
+        "COLR writer pixels differ for {case}"
+    );
     Ok(())
 }
 
