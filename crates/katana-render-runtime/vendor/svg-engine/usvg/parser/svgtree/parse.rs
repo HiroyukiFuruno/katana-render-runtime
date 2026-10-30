@@ -395,9 +395,7 @@ pub(crate) fn parse_svg_element<'input>(
 
     // Split a `style` attribute.
     if let Some(value) = xml_node.attribute("style") {
-        for declaration in simplecss::DeclarationTokenizer::from(value) {
-            write_declaration(&declaration);
-        }
+        for_each_inline_declaration(value, &mut write_declaration);
     }
 
     if doc.nodes.len() > 1_000_000 {
@@ -413,6 +411,25 @@ pub(crate) fn parse_svg_element<'input>(
     );
 
     Ok(node_id)
+}
+
+fn for_each_inline_declaration(style: &str, mut write: impl FnMut(&Declaration<'_>)) {
+    let mut parser = cssparser::Parser::new(style);
+    while !parser.is_exhausted() {
+        let segment = parser.parse_until_before(cssparser::Delimiter::Semicolon, |input| {
+            let start = input.position();
+            crate::css_parser_shared::CssParserShared::consume_nested(input)?;
+            Ok::<_, cssparser::ParseError<()>>(input.slice_from(start))
+        });
+        if let Ok(segment) = segment {
+            for declaration in simplecss::DeclarationTokenizer::from(segment) {
+                write(&declaration);
+            }
+        }
+        if parser.next_including_whitespace_and_comments().is_err() {
+            break;
+        }
+    }
 }
 
 fn append_attribute<'input>(

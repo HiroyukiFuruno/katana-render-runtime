@@ -24,7 +24,7 @@
     "harfrustAlias": "usvg harfrust:: becomes svg_harfrust:: (original 0.12 dependency identity)",
     "enabledFeaturePredicates": "The original enabled feature counts are retained per file; constant evaluation removes 79 true cfg attributes and four false branches. OS and test conditions are retained; KRR has no optional public SVG-engine feature contract.",
     "allowAttributes": "The original 46 allow attributes are retained verbatim. Two scoped boundary attributes permit observed external Clippy lints (22 in usvg/lib.rs, 18 in resvg/lib.rs) plus dead_code and unused_imports. Four resvg lints already allowed upstream are omitted from the added list to avoid duplicate attributes. No blanket all, non_minimal_cfg, unsafe-code override, or additional exclusion is introduced.",
-    "sourceSemantics": "Initial mechanical transplant preserves upstream behavior; subsequent scoped fixes pass CSS font size to HarfRust tracking and use hard-edge clipping only for implicit marker viewports. An optional internal fallback callback receives the original requested font attributes while the default legacy resolver remains unchanged; nested SVG forwards the callback. Original SVG, glyph IDs, and variation coordinates are not manually rewritten. Clip bounds, user-clip antialiasing, and upstream test expectations are preserved. ViewBox scale and alignment use f64 intermediate arithmetic before conversion to the existing f32 transform. Linked feImage parsing transfers a child ID only to an unnamed parent and preserves existing referenced IDs across serialization. Skrifa 0.49 compatibility uses the optional SVG glyph-data accessor and reads opsz axis presence from the same face metadata. CSS declarations retain source order among equal-priority values, with important declarations taking precedence over normal values. Upstream source hashes and licenses remain unchanged."
+    "sourceSemantics": "Initial mechanical transplant preserves upstream behavior; subsequent scoped fixes pass CSS font size to HarfRust tracking and use hard-edge clipping only for implicit marker viewports. An optional internal fallback callback receives the original requested font attributes while the default legacy resolver remains unchanged; nested SVG forwards the callback. Original SVG, glyph IDs, and variation coordinates are not manually rewritten. Clip bounds, user-clip antialiasing, and upstream test expectations are preserved. ViewBox scale and alignment use f64 intermediate arithmetic before conversion to the existing f32 transform. Linked feImage parsing transfers a child ID only to an unnamed parent and preserves existing referenced IDs across serialization. Skrifa 0.49 compatibility uses the optional SVG glyph-data accessor and reads opsz axis presence from the same face metadata. CSS declarations retain source order among equal-priority values, with important declarations taking precedence over normal values. Inline style parsing recovers after malformed declarations at CSS-aware semicolon boundaries. Upstream source hashes and licenses remain unchanged."
   },
   "files": [
     {
@@ -226,9 +226,9 @@
       "source": "crates/usvg/src/parser/svgtree/parse.rs",
       "destination": "usvg/parser/svgtree/parse.rs",
       "sourceSha256": "b0855f6fa14823201addb09252ac6112b186b0f2af568052dfd6ee55dc56acf6",
-      "transplantedSha256": "ceee3b9fdf8cad5ce3611cc30b6763536792cf4cdf9c9ec6190af41e41f135fd",
+      "transplantedSha256": "899606496444bc3e4b4ae972d005cb08da671c3984a8c9caf15112b287e0d75b",
       "sourceBytes": 26763,
-      "transplantedBytes": 25796,
+      "transplantedBytes": 26493,
       "adaptations": {
         "cratePaths": 0,
         "enabledFeaturePredicates": {},

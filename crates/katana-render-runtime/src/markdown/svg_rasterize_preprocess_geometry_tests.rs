@@ -1,5 +1,8 @@
 use super::materialize_geometry_properties;
 
+#[path = "svg_rasterize_preprocess_geometry_parser_tests.rs"]
+mod parser_tests;
+
 type Rgb = (u8, u8, u8);
 type InlinePriorityCase = (bool, bool, Rgb);
 type ParsedPaints = (Option<Rgb>, Option<Rgb>);
