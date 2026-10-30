@@ -25,6 +25,7 @@ BASE = "b" * 40
 HEAD = "a" * 40
 HEAD_REF = "release/v0.4.22"
 RUN_ID = 123
+PINNED_SETUP_UV_STEP = "uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2"
 
 
 WORKFLOW_RUNS_PATH = (
@@ -866,10 +867,7 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
         workflow = (self.ROOT / ".github/workflows/test-and-build.yml").read_text(encoding="utf-8")
         justfile = (self.ROOT / "Justfile").read_text(encoding="utf-8")
         paired_performance = workflow[workflow.index("  paired-performance:\n") :]
-        self.assertIn(
-            "uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e",
-            paired_performance,
-        )
+        self.assertIn(PINNED_SETUP_UV_STEP, paired_performance)
         self.assertIn('version: "0.13.0"', paired_performance)
         capture_step = self.workflow_step(workflow, "Capture all 84 HTML catalog conditions")
         measure_step = self.workflow_step(workflow, "Measure all 84 catalog conditions against baseline")
@@ -940,7 +938,7 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
         self.assertIn(
             "- name: Install Python analysis tools\n"
             "        if: matrix.os == 'ubuntu-latest'\n"
-            "        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e",
+            f"        {PINNED_SETUP_UV_STEP}",
             test_job,
         )
         self.assertLess(
@@ -1044,10 +1042,7 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
         self.assertIn("needs.test.result == 'success'", ci_preflight)
         self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", ci_preflight)
         self.assertIn("startsWith(github.head_ref, 'release/v')", ci_preflight)
-        self.assertIn(
-            "uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e",
-            ci_preflight,
-        )
+        self.assertIn(PINNED_SETUP_UV_STEP, ci_preflight)
         self.assertIn('version: "0.13.0"', ci_preflight)
         self.assertIn("run_html_performance.py verify --acquire-current-producer", ci_preflight)
         self.assertIn("release-preflight-check", ci_preflight)
