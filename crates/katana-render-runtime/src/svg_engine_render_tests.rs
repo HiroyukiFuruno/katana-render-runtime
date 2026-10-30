@@ -11,27 +11,39 @@ mod context_paint_tests;
 mod diagnostic;
 #[path = "svg_engine_render_failure_artifact_tests.rs"]
 mod failure_artifact;
+#[path = "svg_engine_render_input_contract_tests.rs"]
+mod input_contract;
 #[path = "svg_engine_render_inventory_tests.rs"]
 mod inventory;
 #[path = "svg_engine_render_marker_tests.rs"]
 mod marker;
-#[path = "svg_engine_render_text_path_tests.rs"]
-mod text_path_tests;
-
 const NORMAL_WIDTH: u32 = 300;
 const EXTRA_FILTER_SCALE: f32 = 10.0;
 
 #[rstest]
 fn upstream_normal_render_matches_reference(
     #[files("../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/filters/**/*.svg")]
+    #[files("../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/masking/**/*.svg")]
     #[files("../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/paint-servers/**/*.svg")]
-    #[files("../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/text/color-font/*.svg")]
+    #[files("../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/shapes/**/*.svg")]
+    #[files("../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/structure/**/*.svg")]
+    #[files("../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/text/**/*.svg")]
     #[exclude(
         r"[/\\](?:feMorphology[/\\]huge-radius|radialGradient[/\\]focal-point-correction)\.svg$"
     )]
     input: PathBuf,
 ) -> Result<(), String> {
-    assert_reference(&input, Mode::Normal)
+    if input.ends_with(Path::new("structure/svg/negative-size.svg"))
+        || input.ends_with(Path::new("structure/svg/zero-size.svg"))
+    {
+        input_contract::assert_invalid_size(&input)
+    } else if input.ends_with(Path::new("structure/svg/not-UTF-8-encoding.svg")) {
+        input_contract::assert_not_utf8(&input)
+    } else if input.ends_with(Path::new("structure/svg/no-size.svg")) {
+        input_contract::assert_no_size_contract(&input)
+    } else {
+        assert_reference(&input, Mode::Normal)
+    }
 }
 
 #[rstest]
