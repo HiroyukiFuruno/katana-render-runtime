@@ -235,8 +235,9 @@ def validate_root_test_coverage_contract(declared: dict[str, object]) -> None:
     unit = moon_json_object(declared.get("unit-test"))
     coverage = moon_json_object(declared.get("coverage"))
     performance_task = moon_json_object(declared.get("performance-coverage"))
+    check = moon_json_object(declared.get("check"))
     assert unit.get("command") == ["just", "root-test-and-coverage"]
-    assert unit.get("deps") == ["runtime-asset-script-test"]
+    assert unit.get("deps") == ["performance-coverage"]
     assert unit.get("outputs") == [
         "tmp/quality/standalone-performance-coverage/root.json",
         "tmp/quality/standalone-performance-coverage/root-local-result.json",
@@ -249,9 +250,15 @@ def validate_root_test_coverage_contract(declared: dict[str, object]) -> None:
         }
     ]
     assert coverage.get("command") == ["just", "coverage-result-check"]
-    assert coverage.get("deps") == ["performance-coverage"]
+    assert coverage.get("deps") == ["unit-test"]
     assert performance_task.get("command") == ["just", "performance-harness-coverage"]
     assert performance_task.get("deps") == ["heavy-native", "check"]
+    assert check.get("deps") == [
+        "heavy-native",
+        "runtime-asset-script-test",
+        "automation-contract-test",
+        "build-capacity-check",
+    ]
     assert performance_task.get("outputs") == [
         "tmp/quality/standalone-performance-coverage/baseline.json",
         "tmp/quality/standalone-performance-coverage/candidate.json",
@@ -285,9 +292,13 @@ def validate_root_test_coverage_contract(declared: dict[str, object]) -> None:
     coverage_recipe = justfile.split("\ncoverage:", 1)[1].split("\n\n", 1)[0]
     coverage_commands = [line for line in coverage_recipe.splitlines() if line]
     assert coverage_commands == [
-        "    just root-test-and-coverage",
         "    just performance-harness-coverage",
+        "    just root-test-and-coverage",
         "    just coverage-result-check",
+    ]
+    aggregate = justfile.split("\ncoverage-result-check:\n", 1)[1].split("\n\n", 1)[0]
+    assert aggregate.splitlines() == [
+        '    python3 scripts/release/native_coverage_local_aggregate.py --repo "{{REPO_ROOT}}"',
     ]
     performance = justfile.split("\nperformance-harness-coverage:\n", 1)[1].split(
         "\n\n", 1

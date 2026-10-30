@@ -61,6 +61,12 @@ class MoonOwnerAstContractTests(unittest.TestCase):
         self.assertIs(result["valid"], True)
         self.assertEqual(result["contract"], "moon-owner-host-evidence-barrier-v3")
 
+    def test_owner_rejects_obsolete_coverage_dependency_order(self) -> None:
+        current = 'assert coverage.get("deps") == ["unit-test"]'
+        obsolete = 'assert coverage.get("deps") == ["performance-coverage"]'
+        self.assertEqual(self.source.count(current), 1)
+        self.assertIs(self.inspect(self.source.replace(current, obsolete, 1))["valid"], False)
+
     def test_receipt_scope_distinguishes_fixture_subsets_from_full_run(self) -> None:
         owner, _ = self.scheduler_owner_phases()
         cases = (
@@ -260,7 +266,7 @@ class MoonOwnerAstContractTests(unittest.TestCase):
         valid = {
             "unit-test": {
                 "command": ["just", "root-test-and-coverage"],
-                "deps": ["runtime-asset-script-test"],
+                "deps": ["performance-coverage"],
                 "outputs": [
                     "tmp/quality/standalone-performance-coverage/root.json",
                     "tmp/quality/standalone-performance-coverage/root-local-result.json",
@@ -271,7 +277,9 @@ class MoonOwnerAstContractTests(unittest.TestCase):
                 }],
             },
             "coverage": {"command": ["just", "coverage-result-check"],
-                         "deps": ["performance-coverage"]},
+                         "deps": ["unit-test"]},
+            "check": {"deps": ["heavy-native", "runtime-asset-script-test",
+                               "automation-contract-test", "build-capacity-check"]},
             "performance-coverage": {
                 "command": ["just", "performance-harness-coverage"],
                 "deps": ["heavy-native", "check"],
@@ -293,6 +301,22 @@ class MoonOwnerAstContractTests(unittest.TestCase):
         private_marker = "\n[private]\nperformance-harness-coverage-run:\n"
         public_prefix, private_body = justfile.split(private_marker, 1)
         mutations = [
+            (
+                "coverage producer order reversed",
+                justfile.replace(
+                    "    just performance-harness-coverage\n    just root-test-and-coverage\n",
+                    "    just root-test-and-coverage\n    just performance-harness-coverage\n",
+                    1,
+                ),
+            ),
+            (
+                "coverage aggregation bypassed",
+                justfile.replace(
+                    'python3 scripts/release/native_coverage_local_aggregate.py --repo "{{REPO_ROOT}}"',
+                    "true",
+                    1,
+                ),
+            ),
             (
                 "public recipe bypasses lock wrapper",
                 justfile.replace(
@@ -359,6 +383,14 @@ class MoonOwnerAstContractTests(unittest.TestCase):
                         with self.assertRaises(AssertionError):
                             module.validate_root_test_coverage_contract(valid)
         for task, field, replacement in [
+            ("unit-test", "deps", ["runtime-asset-script-test"]),
+            ("unit-test", "deps", ["coverage"]),
+            ("coverage", "deps", ["performance-coverage"]),
+            ("coverage", "deps", []),
+            ("performance-coverage", "deps", ["unit-test"]),
+            ("performance-coverage", "deps", ["heavy-native"]),
+            ("check", "deps", ["heavy-native", "automation-contract-test",
+                               "build-capacity-check"]),
             ("unit-test", "outputs", ["tmp/quality/standalone-performance-coverage/root.json"]),
             ("performance-coverage", "outputs", ["tmp/quality/standalone-performance-coverage/baseline.json"]),
             ("unit-test", "checks", [{"check": "fingerprint", "script": "true", "hash": "stdout"}]),
