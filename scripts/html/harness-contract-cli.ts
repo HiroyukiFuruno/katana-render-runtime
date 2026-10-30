@@ -356,11 +356,13 @@ function nativeCoverageProducerForTarget(
   if (!task || task.leaf !== expected || task.options.cache !== "local") return undefined;
   if (!nativeCoverageCacheTask(name, { command: ["just", expected] })) return undefined;
   const aggregate = contract.tasks.coverage;
+  const root = contract.tasks["unit-test"];
   if (
     contract.entry !== "coverage" ||
     aggregate?.leaf !== "coverage-result-check" ||
     aggregate.options.cache !== false ||
-    !aggregate.deps.includes("performance-coverage")
+    aggregate.deps.join("\0") !== "unit-test" ||
+    root?.deps.join("\0") !== "performance-coverage"
   )
     return undefined;
   return name === "unit-test" ? "root" : "performance";

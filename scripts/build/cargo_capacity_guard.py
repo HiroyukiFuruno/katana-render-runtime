@@ -2020,8 +2020,12 @@ def run(args: argparse.Namespace) -> int:
             coverage is not None and coverage[0] == "report"
             or coverage_diagnostic_inputs is not None and coverage_diagnostic_inputs[0] == "report"
         )
-        if report["over_capacity"] and coverage_report:
-            # producer receiptなしでは計測対象objectの完全な閉包を証明できず、部分reportを防ぐ。
+        retained_root_report = (
+            coverage is not None and coverage_collection and coverage_value == "root"
+            and coverage[0] == "report" and coverage[1] / "krr-coverage" in retained_profiles
+        )
+        if report["over_capacity"] and coverage_report and not retained_root_report:
+            # WHY: rootの計測profile全体を保持できないreportは閉包を保てないため、cleanupせず拒否する。
             report["clean_skipped"] = "coverage-artifacts-retained"
         elif report["over_capacity"]:
             cleanup_goal = int(_number(report["baseline_bytes"], "baseline bytes"))

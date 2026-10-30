@@ -571,6 +571,19 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
                 with self.assertRaises(local_result.LocalCoverageError):
                     local_result.local_finish(self.root, "root", 0)
 
+    def test_build_jobs_environment_change_rejects_collection_finish(self) -> None:
+        self.prepare_reports()
+        with (
+            patch.object(local_result, "_source_state", return_value=self.source_state),
+            patch.object(local_result, "_local_context", return_value=self.context),
+        ):
+            self.begin_producer("root")
+            recorded_jobs = os.environ.get("CARGO_BUILD_JOBS", "")
+            changed_jobs = "1" if recorded_jobs != "1" else "2"
+            with patch.dict(os.environ, {"CARGO_BUILD_JOBS": changed_jobs}):
+                with self.assertRaises(local_result.LocalCoverageError):
+                    local_result.local_finish(self.root, "root", 0)
+
     def test_malformed_report_and_tampered_receipt_reject_validation(self) -> None:
         self.prepare_reports()
         with (

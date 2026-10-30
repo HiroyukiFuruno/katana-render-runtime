@@ -453,6 +453,25 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                     )
                     self.assertEqual(calls, expected_calls)
 
+    def test_coverage_identity_environment_is_exported_from_shared_justfile(self) -> None:
+        definitions = [
+            line.strip()
+            for line in self.justfile.splitlines()
+            if line.strip().startswith((
+                "export TEST_THREADS :=",
+                "export CARGO_BUILD_JOBS :=",
+                "export CARGO :=",
+            ))
+        ]
+        self.assertEqual(
+            definitions,
+            [
+                'export TEST_THREADS := env_var_or_default("TEST_THREADS", "2")',
+                "export CARGO_BUILD_JOBS := JOBS",
+                'export CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
+            ],
+        )
+
     def test_coverage_delegates_root_collection_without_wiping_build_cache(
         self,
     ) -> None:
@@ -473,8 +492,8 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertEqual(
             wrapper.get("body"),
             [
-                ["just root-test-and-coverage"],
                 ["just performance-harness-coverage"],
+                ["just root-test-and-coverage"],
                 ["just coverage-result-check"],
             ],
         )
@@ -725,7 +744,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
     def test_performance_retry_uses_pinned_uv_in_release_source(self) -> None:
         self.assertIn(
-            "uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e",
+            "uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2",
             self.retry,
         )
         self.assertIn('version: "0.13.0"', self.retry)
@@ -750,7 +769,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         for label, workflow in (("release", release_job), ("preflight", self.preflight)):
             with self.subTest(workflow=label):
                 self.assertIn(
-                    "uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e",
+                    "uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2",
                     workflow,
                 )
                 self.assertIn('version: "0.13.0"', workflow)

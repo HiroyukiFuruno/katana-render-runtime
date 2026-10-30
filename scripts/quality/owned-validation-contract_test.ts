@@ -154,7 +154,7 @@ const fixtureJustDefinitions = [
   'HTML_PERFORMANCE_SCIPY_ENV := "KRR_HTML_PERFORMANCE_SCIPY_VERSION=" + HTML_PERFORMANCE_SCIPY_VERSION',
   'HTML_PERFORMANCE_TYPING_PATH := "scripts/release/typings"',
   'HTML_PERFORMANCE_PYTHON_REQUIREMENTS := REPO_ROOT + "/scripts/release/html-performance-requirements.lock"',
-  'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
+  'export CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
   playwrightMacosRunDefinition,
   fixtureCargoBuildDefinition,
 ].join("\n");
@@ -1609,8 +1609,13 @@ const nativeWidthJustMutations = [
   ],
   [
     "CARGO environment chain",
+    'export CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
+    'export CARGO := env_var_or_default("CARGO", "cargo")',
+  ],
+  [
+    "CARGO export removed",
+    'export CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
     'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
-    'CARGO := env_var_or_default("CARGO", "cargo")',
   ],
   ["guard command replaced with cargo", fixtureCargoBuildDefinition, 'CARGO_BUILD := "cargo"'],
   [
@@ -1790,17 +1795,21 @@ test.each([
     },
   ],
   [
+    "root collection no longer follows performance collection",
+    (config: MoonRootFixtureConfig) => {
+      moonRootFixtureTask(config, "unit-test").deps = ["runtime-asset-script-test"];
+    },
+  ],
+  [
     "coverage leaf does not invoke independent performance producer",
     (config: MoonRootFixtureConfig) => {
       moonRootFixtureTask(config, "coverage").command = ["just", "coverage"];
     },
   ],
   [
-    "package check chain bypasses the shared root test task",
+    "package checks must precede final root coverage without a cycle",
     (config: MoonRootFixtureConfig) => {
-      moonRootFixtureTask(config, "runtime-package-asset-check").deps = [
-        "runtime-asset-script-test",
-      ];
+      moonRootFixtureTask(config, "runtime-package-asset-check").deps = ["unit-test"];
     },
   ],
   [
@@ -3940,6 +3949,22 @@ test("root Clippy route retains only the canonical coverage profile", () => {
   );
   expect(issues).not.toContainEqual(
     expect.objectContaining({ code: "capacity-admission-unverified", path: "capacity-admission" }),
+  );
+});
+test("coverage parent collects performance before the final root report", () => {
+  const root = performanceHarnessFixture();
+  const original = actualRecipeBody("coverage");
+  const ordered =
+    "just performance-harness-coverage\njust root-test-and-coverage\njust coverage-result-check";
+  expect(original).toContain(ordered);
+  const reversed = original.replace(
+    ordered,
+    "just root-test-and-coverage\njust performance-harness-coverage\njust coverage-result-check",
+  );
+  expect(reversed).not.toBe(original);
+  performanceHarnessRecipes(root, { coverage: reversed });
+  expect(inspectStandalonePerformanceRoute(root).issues).toContainEqual(
+    expect.objectContaining({ code: "performance-harness-parent-unverified", path: "coverage" }),
   );
 });
 test.each([

@@ -37,6 +37,7 @@ import {
   guardedFactsRecipeVerified,
   hostEvidenceSourceVerified,
   justRecipes,
+  moonProjectionClosure,
   moonStaticTaskProjection,
   type NativeConsumerBinding,
   normalizeClassicFactsTestCommands,
@@ -80,15 +81,22 @@ function currentMoonConfig(): Record<string, unknown> {
 }
 
 test.each([
-  ["coverage", "coverage-result-check"],
-  ["performance-coverage-acceptance", "performance-coverage-result-check"],
-])("native coverage caches keep %s validator uncached", (entry, leaf) => {
+  ["coverage", "coverage-result-check", ["unit-test"]],
+  [
+    "performance-coverage-acceptance",
+    "performance-coverage-result-check",
+    ["performance-coverage"],
+  ],
+])("native coverage caches keep %s validator uncached", (entry, leaf, dependencies) => {
   const tasks = moonStaticTaskProjection(JSON.stringify(currentMoonConfig()), "krr", entry);
-  expect(tasks["unit-test"]?.options.cache).toBe("local");
   expect(tasks["performance-coverage"]?.options.cache).toBe("local");
   expect(tasks[entry]?.options.cache).toBe(false);
   expect(tasks[entry]?.leaf).toBe(leaf);
-  expect(tasks[entry]?.deps).toEqual(["performance-coverage"]);
+  expect(tasks[entry]?.deps).toEqual(dependencies);
+  if (entry === "coverage") {
+    expect(tasks["unit-test"]?.options.cache).toBe("local");
+    expect(tasks["unit-test"]?.deps).toEqual(["performance-coverage"]);
+  }
 });
 
 test.each([
@@ -464,11 +472,17 @@ describe("finite Rust host and MathJax evidence registration", () => {
     expect(justRecipes(justfile).get("root-test-and-coverage")).toContain("CARGO={{quote(CARGO)}}");
     expect(guardedFactsRecipeVerified(justfile, "mathjax-consumer-facts")).toBe(true);
     const globalShadow = justfile.replace(
-      'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
-      'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")\nCARGO := "cargo"',
+      'export CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
+      'export CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")\nCARGO := "cargo"',
     );
     expect(globalShadow).not.toBe(justfile);
     expect(guardedFactsRecipeVerified(globalShadow, "mathjax-consumer-facts")).toBe(false);
+    const cargoNotExported = justfile.replace(
+      'export CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
+      'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
+    );
+    expect(cargoNotExported).not.toBe(justfile);
+    expect(guardedFactsRecipeVerified(cargoNotExported, "mathjax-consumer-facts")).toBe(false);
     const duplicateProxy = justfile.replace(
       'RTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }',
       'RTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }\nRTK_PROXY_CMD := ""',
@@ -482,8 +496,8 @@ describe("finite Rust host and MathJax evidence registration", () => {
     expect(proxyBypassesRtk).not.toBe(justfile);
     expect(guardedFactsRecipeVerified(proxyBypassesRtk, "mathjax-consumer-facts")).toBe(false);
     const cargoBypassesProxy = justfile.replace(
-      'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
-      'CARGO := env_var_or_default("CARGO", "cargo")',
+      'export CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
+      'export CARGO := env_var_or_default("CARGO", "cargo")',
     );
     expect(cargoBypassesProxy).not.toBe(justfile);
     expect(guardedFactsRecipeVerified(cargoBypassesProxy, "mathjax-consumer-facts")).toBe(false);
@@ -3306,20 +3320,25 @@ function coverageFixtureJustfile(base: string): string {
     "CARGO",
     "CARGO_BUILD",
   ] as const;
+  const isDefinition = (line: string, key: (typeof factsDefinitionKeys)[number]): boolean => {
+    if (key === "set shell") return line.startsWith("set shell :=");
+    if (key === "CARGO") return line.startsWith("CARGO :=") || line.startsWith("export CARGO :=");
+    return line.startsWith(`${key} :=`);
+  };
   const factsDefinitions = factsDefinitionKeys.map((key) => {
-    const matching = actualLines.filter((line) =>
-      key === "set shell" ? line.startsWith("set shell :=") : line.startsWith(`${key} :=`),
-    );
+    const matching = actualLines.filter((line) => isDefinition(line, key));
     const [line] = matching;
-    if (matching.length !== 1 || line === undefined)
+    if (
+      matching.length !== 1 ||
+      line === undefined ||
+      (key === "CARGO" && !line.startsWith("export CARGO :="))
+    )
       throw new Error(`current facts definition missing: ${key}`);
     return line;
   });
   const baseLines = base.split(/\r?\n/u);
   for (const [index, key] of factsDefinitionKeys.entries()) {
-    const matching = baseLines.filter((line) =>
-      key === "set shell" ? line.startsWith("set shell :=") : line.startsWith(`${key} :=`),
-    );
+    const matching = baseLines.filter((line) => isDefinition(line, key));
     if (matching.length > 1 || (matching.length === 1 && matching[0] !== factsDefinitions[index]))
       throw new Error(`coverage fixture facts definition mismatch: ${key}`);
   }
@@ -3516,7 +3535,7 @@ function localCoverageMoonFixture(): HarnessSnapshot {
     tasks["fmt-check"] = JSON.parse(JSON.stringify(format)) as TestMoonTask;
     tasks["heavy-native"] = {
       command: "noop",
-      deps: ["unit-test"],
+      deps: ["runtime-asset-script-test"],
       inputs: [...qualityInputs],
     };
     tasks["html-test"] = {
@@ -3799,6 +3818,9 @@ test.each([
 test("local coverage entry preserves static barrier and required heavy closure", () => {
   const snapshot = localCoverageMoonFixture();
   expect(checkHarnessContract(snapshot)).toEqual([]);
+  const projection = moonStaticTaskProjection(snapshot.read("moon.yml") ?? "", "krr", "coverage");
+  expect(moonProjectionClosure("performance-coverage", projection).has("unit-test")).toBe(false);
+  expect(moonProjectionClosure("coverage", projection).has("performance-coverage")).toBe(true);
   expect(snapshot.graph.localRecipes?.has("performance-harness-coverage")).toBe(true);
   expect(snapshot.graph.localRecipes?.has("html-test")).toBe(true);
   expect(snapshot.graph.local.has("scripts/html/main.ts")).toBe(true);
@@ -3824,6 +3846,33 @@ test.each(["missing", "ignored"])(
     expect(checkHarnessContract(snapshot)).toContain(
       "performance collection authentication differs",
     );
+  },
+);
+
+test.each(["root before performance", "artifact producer after root"])(
+  "local coverage route rejects %s ordering",
+  (mutation) => {
+    const snapshot = localCoverageMoonFixture();
+    changeMoon(snapshot, (tasks) => {
+      if (mutation === "root before performance") {
+        const root = tasks["unit-test"];
+        if (!root) throw new Error("fixture root coverage task missing");
+        root.deps = ["runtime-asset-script-test"];
+        return;
+      }
+      const coverage = tasks.coverage;
+      if (!coverage) throw new Error("fixture coverage task missing");
+      tasks["late-artifact-cleanup"] = { command: ["just", "capacity-clean"], deps: ["unit-test"] };
+      coverage.deps = ["unit-test", "late-artifact-cleanup"];
+    });
+    if (mutation === "root before performance") {
+      expect(() =>
+        moonStaticTaskProjection(snapshot.read("moon.yml") ?? "", "krr", "coverage"),
+      ).toThrow();
+      return;
+    }
+    const errors = checkHarnessContract(snapshot);
+    expect(errors).toContain("moon coverage aggregation must follow root coverage directly");
   },
 );
 
@@ -3868,8 +3917,9 @@ test("actual local bridge and policy select coverage after all shared Cargo cons
       tasks: z.object({
         coverage: z.object({
           command: z.tuple([z.literal("just"), z.literal("coverage-result-check")]),
-          deps: z.tuple([z.literal("performance-coverage")]),
+          deps: z.tuple([z.literal("unit-test")]),
         }),
+        "unit-test": z.object({ deps: z.tuple([z.literal("performance-coverage")]) }),
         check: z.object({ deps: z.array(z.string()) }),
       }),
     })
@@ -3877,8 +3927,9 @@ test("actual local bridge and policy select coverage after all shared Cargo cons
   expect(policy.moon.requiredHeavy).toContain("coverage");
   expect(config.tasks.coverage).toEqual({
     command: ["just", "coverage-result-check"],
-    deps: ["performance-coverage"],
+    deps: ["unit-test"],
   });
+  expect(config.tasks["unit-test"]?.deps).toEqual(["performance-coverage"]);
   expect(config.tasks.check?.deps).toContain("heavy-native");
   const bridge = fs.readFileSync(path.join(root, "scripts/hooks/run_parallel_checks.py"), "utf8");
   expect(bridge).toContain('"krr:coverage"');

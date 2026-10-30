@@ -116,7 +116,7 @@ tasks:
 
   unit-test:
     command: ['just', 'root-test-and-coverage']
-    deps: ['runtime-asset-script-test']
+    deps: ['performance-coverage']
     inputs: *quality-inputs
     outputs:
       - 'tmp/quality/standalone-performance-coverage/root.json'
@@ -136,7 +136,7 @@ tasks:
 
   runtime-package-asset-check:
     command: ['just', 'runtime-package-asset-check']
-    deps: ['unit-test']
+    deps: ['runtime-asset-script-test']
     inputs: *quality-inputs
 
   runtime-bundle-package-check:
@@ -355,5 +355,5 @@ tasks:
 
   coverage:
     command: ['just', 'coverage-result-check']
-    deps: ['performance-coverage']
+    deps: ['unit-test']
     inputs: *quality-inputs

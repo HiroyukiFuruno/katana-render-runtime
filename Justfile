@@ -7,14 +7,15 @@ RTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }
 JOBS := env_var_or_default("JOBS", "2")
 CHECK_JOBS := env_var_or_default("CHECK_JOBS", "3")
 FIXTURE_JOBS := env_var_or_default("FIXTURE_JOBS", JOBS)
-TEST_THREADS := env_var_or_default("TEST_THREADS", "2")
+export TEST_THREADS := env_var_or_default("TEST_THREADS", "2")
+export CARGO_BUILD_JOBS := JOBS
 TEST_THREAD_ARGS := if TEST_THREADS == "" { "" } else { " -- --test-threads=" + TEST_THREADS }
 NEXTEST_THREAD_ARGS := if TEST_THREADS == "" { "" } else { " --test-threads=" + TEST_THREADS }
 MACOS_BROWSER_CONTRACT_RUN := if os() == "macos" { "node node_modules/playwright/cli.js test --config scripts/html/playwright.macos.config.ts" } else { "true" }
 COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX := "(^|[/\\\\])scripts[/\\\\]html[/\\\\]performance-harness[/\\\\]src[/\\\\]([^/\\\\]+[/\\\\])*[^/\\\\]+(_tests|_test_support)\\.rs$"
 RUNTIME_UPDATE_LOG_DIR := env_var_or_default("RUNTIME_UPDATE_LOG_DIR", "tmp/runtime-update-logs")
 export RUSTFLAGS := env_var_or_default("RUSTFLAGS", "-D warnings")
-CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")
+export CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")
 HTML84_CARGO := if RTK == "" { "cargo" } else { RTK + " proxy cargo" }
 CARGO_BUILD := "python3 " + quote(REPO_ROOT + "/scripts/build/cargo_capacity_guard.py") + " --retain-build-profile debug -- " + CARGO
 KRR_BIN := env_var_or_default("KRR_BIN", REPO_ROOT + "/target/debug/krr")
@@ -168,8 +169,8 @@ owned-validation-contract-check:
 
 # Run coverage as a required full-check gate
 coverage:
-    just root-test-and-coverage
     just performance-harness-coverage
+    just root-test-and-coverage
     just coverage-result-check
 
 # WHY: cacheから復元された結果も毎回検証し、不正な結果は実検査で置き換える。

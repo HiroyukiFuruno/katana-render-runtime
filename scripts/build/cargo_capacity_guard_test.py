@@ -4307,6 +4307,24 @@ class CoverageDomainUnitTests(unittest.TestCase):
                                 "--locked", "--json", "--show-missing-lines", "--output-path", str(output)]
                 self.assert_overcapacity_report_retains_artifacts(root, args, environment)
 
+    def test_retained_root_profile_allows_guarded_report_eviction(self) -> None:
+        with self.fixture("root", "test", collection=True) as (root, args, environment):
+            profile = root / "target/llvm-cov-target/krr-coverage"
+            profile.mkdir(parents=True)
+            args.retain_profile = [str(profile)]
+            output = root / "tmp/quality/standalone-performance-coverage/root.json"
+            output.parent.mkdir(parents=True)
+            args.command = ["cargo", "llvm-cov", "report", "--workspace", "--profile", "krr-coverage",
+                            "--locked", "--json", "--show-missing-lines", "--output-path", str(output)]
+            measured = {"metric_available": True, "baseline_bytes": 100, "current_bytes": 300,
+                        "threshold_bytes": 200, "over_capacity": True}
+            with patch("cargo_capacity_guard.inspect", return_value=measured), \
+                    patch("cargo_capacity_guard.evict_artifacts", return_value=(0, {})) as evict, \
+                    patch("cargo_capacity_guard.size_bytes", return_value=100):
+                self.assertEqual(self.execute(root, args, environment), 0)
+            self.assertEqual(evict.call_args.kwargs["retained_profiles"], (profile,))
+            self.assertEqual(evict.call_args.args[4], [str(root / "consumer")])
+
     def test_coverage_domains_clean_and_default_test_preserve_exit_and_state(self) -> None:
         for domain in ("root", "performance-baseline", "performance-candidate"):
             for action in ("clean", "test"):

@@ -1898,7 +1898,7 @@ const FACTS_JUST_DEFINITIONS = [
   "REPO_ROOT := justfile_directory()",
   'RTK := env_var_or_default("RTK", `command -v rtk 2> /dev/null || true`)',
   'RTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }',
-  'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
+  'export CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
   'CARGO_BUILD := "python3 " + quote(REPO_ROOT + "/scripts/build/cargo_capacity_guard.py") + " --retain-build-profile debug -- " + CARGO',
 ] as const;
 const FACTS_BUILD_COMMAND =
@@ -4098,18 +4098,35 @@ function validateRuntimeBundleFingerprint(task: Record<string, unknown>): void {
     throw new Error("runtime bundle cache fingerprint check changed");
 }
 
+function moonClosureFromDependencies(
+  name: string,
+  dependencies: (name: string) => string[] | undefined,
+  stack: string[] = [],
+): Set<string> {
+  if (stack.includes(name)) throw new Error(`moon dependency cycle ${name}`);
+  const taskDependencies = dependencies(name);
+  if (!taskDependencies) throw new Error(`missing moon task ${name}`);
+  return new Set([
+    name,
+    ...taskDependencies.flatMap((dep) => [
+      ...moonClosureFromDependencies(dep, dependencies, [...stack, name]),
+    ]),
+  ]);
+}
+
 function moonClosure(
   name: string,
   tasks: Map<string, MoonTask>,
   stack: string[] = [],
 ): Set<string> {
-  if (stack.includes(name)) throw new Error(`moon dependency cycle ${name}`);
-  const task = tasks.get(name);
-  if (!task) throw new Error(`missing moon task ${name}`);
-  return new Set([
-    name,
-    ...task.deps.flatMap((dep) => [...moonClosure(dep, tasks, [...stack, name])]),
-  ]);
+  return moonClosureFromDependencies(name, (taskName) => tasks.get(taskName)?.deps, stack);
+}
+
+export function moonProjectionClosure(
+  name: string,
+  tasks: Record<string, MoonSchedulerTask>,
+): Set<string> {
+  return moonClosureFromDependencies(name, (taskName) => tasks[taskName]?.deps);
 }
 
 // 実rootとreview済みownerの一致に、既存Moon parserの同じ解釈を使う。
@@ -4299,12 +4316,16 @@ function moonCoverageGraphVerified(
     'python3 scripts/release/native_coverage_local_aggregate.py --repo "{{REPO_ROOT}}"'
   )
     errors.push("moon coverage aggregate validation differs");
-  if (tasks.get("coverage")?.deps.join("\0") !== "performance-coverage")
-    errors.push("moon coverage producer dependency differs");
-  if (!moonClosure("coverage", tasks).has("unit-test"))
-    errors.push("moon coverage unit-test dependency missing");
+  if (tasks.get("coverage")?.deps.join("\0") !== "unit-test")
+    errors.push("moon coverage aggregation must follow root coverage directly");
+  if (tasks.get("unit-test")?.deps.join("\0") !== "performance-coverage")
+    errors.push("moon root coverage must follow performance collection");
+  if (moonClosure("performance-coverage", tasks).has("unit-test"))
+    errors.push("moon performance collection runs after root coverage");
+  if (!moonClosure("coverage", tasks).has("performance-coverage"))
+    errors.push("moon coverage performance dependency missing");
   if (!moonClosure("unit-test", tasks).has("runtime-asset-script-test"))
-    errors.push("moon unit-test asset script dependency missing");
+    errors.push("moon root coverage prerequisites missing");
   moonRuntimeUnusedGraphVerified(tasks, recipes, errors);
   const assetAggregate = tasks.get("runtime-asset-script-test");
   if (
@@ -4555,7 +4576,7 @@ const MOON_TERMINAL_SOURCES = {
   "scripts/hooks/run_parallel_checks.py":
     "6590d3482195d88452d2592a2a690e114c7e060270e95908c735c695256ac180",
   "scripts/html/harness-contract-cli.ts":
-    "c975b178f91f55874d71b6a90118be2d61bc5c776e7a277a3cb571ad372fd558",
+    "4936fe8b6c50636ffada2938130fddea2bc8e4b68d1d9758a5ba4e87bb33aaf5",
 } as const;
 
 function moonTerminalSourcesRegistered(

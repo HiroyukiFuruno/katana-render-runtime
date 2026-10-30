@@ -14,6 +14,7 @@ import {
   guardedFactsRecipeVerified,
   hostEvidenceSourceVerified,
   justRecipes,
+  moonProjectionClosure,
   moonStaticTaskProjection,
   FACTS_CARGO_GUARD_SOURCE as NATIVE_WIDTH_CARGO_GUARD_SOURCE,
   normalizeClassicFactsTestCommands,
@@ -399,6 +400,8 @@ const moonOwnerAstResult = z.strictObject({
     )
     .nullable(),
 });
+type MoonOwnerSchedulerTasks = NonNullable<z.infer<typeof moonOwnerAstResult>["schedulerTasks"]>;
+type MoonOwnerSchedulerTask = MoonOwnerSchedulerTasks[string];
 const packageContract = z.object({
   scripts: z.record(z.string(), z.string()),
   devDependencies: z.record(z.string(), z.string()).default({}),
@@ -1619,8 +1622,8 @@ function performanceRecipeCommands(): Record<string, string[]> {
     ],
     "fmt-check": ["{{CARGO}} fmt --all -- --check", `just ${PERFORMANCE_RECIPES.format}`],
     coverage: [
-      "just root-test-and-coverage",
       `just ${PERFORMANCE_RECIPES.coverage}`,
+      "just root-test-and-coverage",
       "just coverage-result-check",
     ],
     "coverage-result-check": [
@@ -1843,7 +1846,8 @@ function checkPerformanceRecipeCommands(context: ContractContext): void {
   }
 }
 function performanceParentSuffix(lane: string, recipe: string): string[] {
-  if (lane === "coverage") return [`just ${recipe}`, "just coverage-result-check"];
+  if (lane === "coverage")
+    return [`just ${recipe}`, "just root-test-and-coverage", "just coverage-result-check"];
   if (lane === "lint") return [`just ${recipe} "$retained_profile_arg"`];
   return [`just ${recipe}`];
 }
@@ -4617,43 +4621,49 @@ function moonRootDagVerified(
   if (!expected) return false;
   try {
     const moon = context.policy.moon;
-    const actual = moonStaticTaskProjection(rootSource, moon?.project ?? "krr", "unit-test");
-    const names = Object.keys(expected).sort();
+    const project = moon?.project ?? "krr";
+    const actual = moonStaticTaskProjection(rootSource, project, "runtime-asset-script-test");
+    const names = Object.keys(expected)
+      .filter((name) => name !== "unit-test")
+      .sort();
     if (Object.keys(actual).sort().join("\0") !== names.join("\0")) return false;
     return (
-      names.every((name) => {
-        const left = actual[name];
-        const right = expected[name];
-        const expectedOptions = right ? Object.entries(right.options).sort() : [];
-        const actualOptions = left ? Object.entries(left.options).sort() : [];
-        const cacheLeafException =
-          right?.options.cache === false &&
-          ((name === "runtime-bundle-check" && left?.options.cache === true) ||
-            (name === "unit-test" && left?.options.cache === "local") ||
-            (name.endsWith("-producer") &&
-              RUNTIME_UNUSED_LEAF_IDS.includes(
-                name.slice(0, -"-producer".length) as (typeof RUNTIME_UNUSED_LEAF_IDS)[number],
-              ) &&
-              left?.options.cache === "local")) &&
-          JSON.stringify(expectedOptions.filter(([key]) => key !== "cache")) ===
-            JSON.stringify(actualOptions.filter(([key]) => key !== "cache"));
-        // WHY: Moonは従来のunit-test DAG leafでroot coverageの共有recipeを実行する。
-        const sharedRootCoverageLeaf =
-          name === "unit-test" &&
-          right?.leaf === "unit-test" &&
-          left?.leaf === "root-test-and-coverage";
-        return (
-          left !== undefined &&
-          right !== undefined &&
-          (left.leaf === right.leaf || sharedRootCoverageLeaf) &&
-          left.deps.join("\0") === right.deps.join("\0") &&
-          (cacheLeafException || JSON.stringify(actualOptions) === JSON.stringify(expectedOptions))
-        );
-      }) && moonCoverageSharesRootRun(rootSource, moon?.project ?? "krr", actual)
+      expected["unit-test"] !== undefined &&
+      names.every((name) => moonOwnerTaskMatches(name, actual[name], expected[name])) &&
+      moonCoverageSharesRootRun(
+        rootSource,
+        project,
+        moonStaticTaskProjection(rootSource, project, "unit-test"),
+      )
     );
   } catch {
     return false;
   }
+}
+
+function moonOwnerTaskMatches(
+  name: string,
+  actual: ReturnType<typeof moonStaticTaskProjection>[string] | undefined,
+  expected: MoonOwnerSchedulerTask | undefined,
+): boolean {
+  if (!actual || !expected) return false;
+  const expectedOptions = Object.entries(expected.options).sort();
+  const actualOptions = Object.entries(actual.options).sort();
+  const cacheLeafException =
+    expected.options.cache === false &&
+    ((name === "runtime-bundle-check" && actual.options.cache === true) ||
+      (name.endsWith("-producer") &&
+        RUNTIME_UNUSED_LEAF_IDS.includes(
+          name.slice(0, -"-producer".length) as (typeof RUNTIME_UNUSED_LEAF_IDS)[number],
+        ) &&
+        actual.options.cache === "local")) &&
+    JSON.stringify(expectedOptions.filter(([key]) => key !== "cache")) ===
+      JSON.stringify(actualOptions.filter(([key]) => key !== "cache"));
+  return (
+    actual.leaf === expected.leaf &&
+    actual.deps.join("\0") === expected.deps.join("\0") &&
+    (cacheLeafException || JSON.stringify(actualOptions) === JSON.stringify(expectedOptions))
+  );
 }
 
 function moonCoverageSharesRootRun(
@@ -4668,15 +4678,19 @@ function moonCoverageSharesRootRun(
     const performanceTask = coverage["performance-coverage"];
     if (
       rootTask?.leaf !== "root-test-and-coverage" ||
+      rootTask.deps.join("\0") !== "performance-coverage" ||
+      rootTask.options.cache !== "local" ||
+      !moonProjectionClosure("unit-test", unitTasks).has("runtime-asset-script-test") ||
       coverageTask?.leaf !== "coverage-result-check" ||
-      coverageTask.deps.join("\0") !== "performance-coverage" ||
+      coverageTask.deps.join("\0") !== "unit-test" ||
       coverageTask.options.cache !== false ||
       performanceTask?.leaf !== "performance-harness-coverage" ||
-      performanceTask.deps.join("\0") !== "check\0heavy-native"
+      performanceTask.deps.join("\0") !== "check\0heavy-native" ||
+      moonProjectionClosure("performance-coverage", coverage).has("unit-test")
     )
       return false;
     const chain: Record<string, string> = {
-      "runtime-package-asset-check": "unit-test",
+      "runtime-package-asset-check": "runtime-asset-script-test",
       "runtime-bundle-package-check": "runtime-package-asset-check",
       "html-runtime-package-check": "runtime-bundle-package-check",
       "plantuml-runtime-package-check": "html-runtime-package-check",

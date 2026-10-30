@@ -6,7 +6,7 @@ const PRODUCERS = {
   "unit-test": {
     producer: "root",
     recipe: "root-test-and-coverage",
-    deps: ["runtime-asset-script-test"],
+    deps: ["performance-coverage"],
     files: ["root.json", "root-local-result.json"],
   },
   "performance-coverage": {
