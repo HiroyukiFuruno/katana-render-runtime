@@ -2,6 +2,9 @@
 
 ## 最新の再開地点（2026-10-30）
 
+- [/] 811a8b85のR4618 capture/R4619 strict validationはactual0、HTML84/84が90以上・最低92.14438・出力font一致established。R4620全84性能は測定開始前に非SDK依存closure差でactual1、出力dirも未生成。性能不合格ではない。最新化でutf8_iter1.0.4→1.1.0とutf_types1.0.0追加が入り、固定親371274edの共通依存と不一致になった。元画像・ログを保持し、この結果を変更後sourceへ再認定しない。
+- [/] gateを満たさない更新は採用しない既存方針に従い、root/harness両lockのutf8_iterを1.0.4へ保持。親HEAD/lock/wrapperのpinは変更せず、R4623既存closure validator actual0、R4624現lock明示pin test0。既存updaterと鮮度判定へ、親closure・version/checksum・両lock一致を要する狭い保持契約を追加。dry-run例外は確認した2変更だけで、他更新/未知形式/任意downgradeは拒否し、CLIに版と理由を明示する。
+- [/] R4635 Python lint/厳格型を並列実行してactual0、R4636鮮度71件・R4637 updater11件・R4638 closure11件の計93件成功、R4639全静的foundation0。R4640実依存鮮度0、R4642実updater0で両lock/現lock pinの内容不変も確認。R4626/28の旧出力期待・test import不備、R4629 Ruff1件、R4632型2件の原失敗を保持し修正済み。次は通常commit後にfresh84 captureと正式性能を再取得する。未適用TinySkia比較probeは既存lib経路の追加観測案に限り、採用・正式合格数へ加算しない。
 - [/] 通常hook付きcommit `4d339007`へカバレッジ収集の順序/共通環境/保護された容量整理、`8726e573`へinline CSS回復修正を保存し、各actualExit0を回収した。追加のfilter7fixtureとmarker12回帰はR4602の関連34件に含めて成功し、別の履歴へ保存する。未適用paint-server追加案は次のcoverage結果を見るまで採用せず、修正範囲を増やさない。
 - [/] R4587 stock Chrome156.0.8078.79は不正宣言後のfillをrgb(51,68,85)として採用し、R4577のnative旧動作との差を確認。既存cssparserで宣言境界を扱い、値/importantは従来simplecssへ渡す修正を適用した。R4598実AST、R4601実catalog、R4602関連34件、R4607全source-static-foundationはactual0。全117/84・速度/RSS・coverageの代用ではない。
 - [/] R4599契約Bunは1375件中1336成功/39失敗、578.65秒。共有fixtureがexport CARGOを認識せず、修正後R4604は39件中22成功/17失敗・11.11秒となった。残りは旧fixture heavy-native→unit-test依存が新DAGと循環する不整合。正規構成へ同期しR4606の17件、R4608の関連39件は全成功（後者79.40秒）。不正変更を拒否するassertは維持し、成功済み1336件の即時二重実行は避けた。現sourceの最終完全gateは別途必須。R4586リリース手順契約29件も全成功。

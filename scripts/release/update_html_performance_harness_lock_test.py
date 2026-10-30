@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +25,7 @@ class UpdateHtmlPerformanceHarnessLockTest(unittest.TestCase):
         harness = root / MODULE.HARNESS_MANIFEST.parent
         harness.mkdir(parents=True)
         (harness / "Cargo.lock").write_bytes(b"lock\n")
+        (root / "Cargo.lock").write_bytes(b"root lock\n")
         gate = root / MODULE.GATE
         gate.parent.mkdir(parents=True)
         gate.write_text('LOCK_SHA = "' + "0" * 64 + '"\n', encoding="utf-8")
@@ -40,6 +41,31 @@ class UpdateHtmlPerformanceHarnessLockTest(unittest.TestCase):
             MODULE.update_command(["rtk", "cargo"]),
             ["rtk", "cargo", "update", "--manifest-path", str(MODULE.HARNESS_MANIFEST)],
         )
+
+    def test_retention_command_targets_the_requested_manifest_and_exact_version(self) -> None:
+        self.assertEqual(
+            MODULE.retention_command(["rtk", "cargo"], MODULE.ROOT_MANIFEST),
+            ["rtk", "cargo", "update", "--package", "utf8_iter", "--precise",
+             MODULE.RETAINED_UTF8_ITER_VERSION,
+             "--manifest-path", "Cargo.toml"],
+        )
+        self.assertEqual(
+            MODULE.retention_command(["rtk", "cargo"], MODULE.HARNESS_MANIFEST),
+            ["rtk", "cargo", "update", "--package", "utf8_iter", "--precise",
+             MODULE.RETAINED_UTF8_ITER_VERSION,
+             "--manifest-path", str(MODULE.HARNESS_MANIFEST)],
+        )
+
+    def test_depends_update_runs_retention_updater_after_both_generic_lock_updates(self) -> None:
+        justfile = (ROOT / "Justfile").read_text(encoding="utf-8")
+        recipe = justfile.split("depends-update-mutations:\n", maxsplit=1)[1].split("\n\n", maxsplit=1)[0]
+        lines = [line.strip() for line in recipe.splitlines() if line.strip()]
+        root_update = lines.index("{{CARGO}} update")
+        harness_update = lines.index(
+            "python3 scripts/release/update_html_performance_harness_lock.py --cargo \"{{CARGO}}\""
+        )
+        self.assertLess(root_update, harness_update)
+        self.assertEqual(sum("update_html_performance_harness_lock.py" in line for line in lines), 1)
 
     def test_sync_lock_pin_updates_the_single_explicit_pin(self) -> None:
         root, gate = self.keep_fixture()
@@ -64,14 +90,36 @@ class UpdateHtmlPerformanceHarnessLockTest(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 MODULE.parse_cargo_command(value)
 
-    def test_run_update_passes_existing_cargo_wrapper_and_returns_lock_sha(self) -> None:
+    def test_run_update_retains_both_locks_before_syncing_the_harness_pin(self) -> None:
         root, gate = self.keep_fixture()
         runner = Mock(return_value=subprocess.CompletedProcess([], 0))
-        digest = MODULE.run_update(["rtk", "cargo"], root, runner)
+        with patch.object(MODULE, "load_pinned_parent_lock", return_value=b"parent lock"):
+            with patch.object(MODULE, "verify_utf8_iter_retention") as verify:
+                digest = MODULE.run_update(["rtk", "cargo"], root, runner)
+        commands = [call.args[0] for call in runner.call_args_list]
+        self.assertEqual(commands, [
+            MODULE.retention_command(["rtk", "cargo"], MODULE.ROOT_MANIFEST),
+            MODULE.update_command(["rtk", "cargo"]),
+            MODULE.retention_command(["rtk", "cargo"], MODULE.HARNESS_MANIFEST),
+        ])
         self.assertEqual(runner.call_args.kwargs, {"cwd": root, "check": True})
-        self.assertEqual(runner.call_args.args[0], MODULE.update_command(["rtk", "cargo"]))
+        verify.assert_called_once_with(
+            (root / "Cargo.lock").read_bytes(),
+            (root / MODULE.HARNESS_MANIFEST.with_name("Cargo.lock")).read_bytes(),
+            b"parent lock",
+        )
         self.assertEqual(digest, MODULE.lock_sha(root))
         self.assertIn(digest, gate.read_text(encoding="utf-8"))
+
+    def test_run_update_does_not_sync_pin_when_retention_validation_fails(self) -> None:
+        root, gate = self.keep_fixture()
+        before = gate.read_text(encoding="utf-8")
+        runner = Mock(return_value=subprocess.CompletedProcess([], 0))
+        with patch.object(MODULE, "load_pinned_parent_lock", return_value=b"parent lock"):
+            with patch.object(MODULE, "verify_utf8_iter_retention", side_effect=ValueError("closure differs")):
+                with self.assertRaisesRegex(ValueError, "closure differs"):
+                    MODULE.run_update(["rtk", "cargo"], root, runner)
+        self.assertEqual(gate.read_text(encoding="utf-8"), before)
 
     def test_run_update_preserves_pin_when_cargo_fails(self) -> None:
         root, gate = self.keep_fixture()

@@ -12,9 +12,15 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from html_performance_harness_dependency_closure import (
+    RETAINED_UTF8_ITER_VERSION,
+    load_pinned_parent_lock,
+    verify_utf8_iter_retention,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 HARNESS_MANIFEST = Path("scripts/html/performance-harness/Cargo.toml")
+ROOT_MANIFEST = Path("Cargo.toml")
 GATE = Path("scripts/release/verify_html_performance_evidence.py")
 LOCK_PIN = re.compile(r'(?m)^(LOCK_SHA\s*=\s*)"([0-9a-f]{64})"$')
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -36,6 +42,11 @@ def parse_cargo_command(value: str) -> list[str]:
 
 def update_command(cargo: Sequence[str]) -> list[str]:
     return [*cargo, "update", "--manifest-path", str(HARNESS_MANIFEST)]
+
+
+def retention_command(cargo: Sequence[str], manifest: Path) -> list[str]:
+    return [*cargo, "update", "--package", "utf8_iter", "--precise",
+            RETAINED_UTF8_ITER_VERSION, "--manifest-path", str(manifest)]
 
 
 def lock_sha(root: Path) -> str:
@@ -65,7 +76,15 @@ def sync_lock_pin(root: Path, digest: str) -> None:
 
 
 def run_update(cargo: Sequence[str], root: Path = ROOT, runner: CommandRunner = subprocess.run) -> str:
+    runner(retention_command(cargo, ROOT_MANIFEST), cwd=root, check=True)
     runner(update_command(cargo), cwd=root, check=True)
+    runner(retention_command(cargo, HARNESS_MANIFEST), cwd=root, check=True)
+    parent_lock = load_pinned_parent_lock(root)
+    root_lock_path = root / ROOT_MANIFEST.with_name("Cargo.lock")
+    harness_lock_path = root / HARNESS_MANIFEST.with_name("Cargo.lock")
+    _require_regular(root_lock_path, "root lock")
+    _require_regular(harness_lock_path, "harness lock")
+    verify_utf8_iter_retention(root_lock_path.read_bytes(), harness_lock_path.read_bytes(), parent_lock)
     digest = lock_sha(root)
     sync_lock_pin(root, digest)
     return digest

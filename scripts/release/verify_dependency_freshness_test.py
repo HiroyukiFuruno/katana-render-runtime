@@ -336,6 +336,7 @@ class DependencyFreshnessTest(unittest.TestCase):
         with (
             patch.object(freshness, "fetch", fake_fetch),
             patch.object(freshness, "cargo_metadata", return_value=metadata or self.metadata_for_direct_serde()),
+            patch.object(freshness, "verify_current_utf8_iter_retention"),
             patch.object(freshness, "rust_lock_is_latest_compatible", return_value=rust_fresh),
             patch.object(freshness, "js_lock_is_latest_compatible", return_value=javascript_fresh),
             contextlib.redirect_stdout(stdout),
@@ -355,7 +356,10 @@ class DependencyFreshnessTest(unittest.TestCase):
     def test_clean_resolved_dependencies_and_runtime_assets_pass(self) -> None:
         result, stdout, stderr = self.run_check(self.clean_responses())
         self.assertEqual(result, 0, stderr)
-        self.assertIn("passed (3 resolved dependencies and pinned runtime assets)", stdout)
+        self.assertIn(
+            "utf8_iter 1.0.4 is retained to preserve the immutable HTML performance parent closure",
+            stdout,
+        )
 
     @staticmethod
     def metadata_for_krr_usvg_skrifa(
@@ -1061,6 +1065,33 @@ target-build = "=3.0.0"
             "Locking 1 package to latest compatible version": False,
             "Locking 2 packages to latest compatible versions": False,
             "Locking 0 packages (Rust 1.95.0) to latest compatible version": True,
+            (
+                "Locking 2 packages to latest compatible versions\n"
+                "    Adding utf_types v1.0.0\n"
+                "    Updating utf8_iter v1.0.4 -> v1.1.0"
+            ): True,
+            (
+                "    Updating crates.io index\n"
+                "Locking 2 packages to latest compatible versions\n"
+                "    Updating utf8_iter v1.0.4 -> v1.1.0\n"
+                "    Adding utf_types v1.0.0"
+            ): True,
+            (
+                "Locking 2 packages to latest compatible versions\n"
+                "    Adding utf_types v1.0.0\n"
+                "    Updating serde v1.0.0 -> v1.0.1"
+            ): False,
+            (
+                "Locking 2 packages to latest compatible versions\n"
+                "    Adding utf_types v1.0.0\n"
+                "    Updating utf8_iter v1.0.4 -> v1.1.0\n"
+                "    Updating serde v1.0.0 -> v1.0.1"
+            ): False,
+            (
+                "Locking 2 packages to latest compatible versions\n"
+                "    Adding utf_types v1.0.0 (unknown output format)\n"
+                "    Updating utf8_iter v1.0.4 -> v1.1.0"
+            ): False,
         }
         for cargo_output, expected in cases.items():
             with self.subTest(cargo_output=cargo_output), patch.object(
@@ -1069,6 +1100,18 @@ target-build = "=3.0.0"
                 return_value=SimpleNamespace(returncode=0, stdout=cargo_output, stderr=""),
             ):
                 self.assertEqual(freshness.rust_lock_is_latest_compatible(self.root), expected)
+
+    def test_dependency_freshness_reports_invalid_utf8_iter_retention(self) -> None:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.object(freshness, "verify_current_utf8_iter_retention",
+                         side_effect=ValueError("root Cargo.lock does not retain the immutable utf8_iter package")),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            result = freshness.main([str(self.root)])
+        self.assertEqual(result, 1)
+        self.assertIn("utf8_iter package", stderr.getvalue())
 
     def test_cargo_update_dry_run_forces_plain_output_when_workflow_enables_color(self) -> None:
         completed = SimpleNamespace(

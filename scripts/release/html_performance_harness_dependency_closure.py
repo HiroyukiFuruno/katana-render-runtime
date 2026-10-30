@@ -3,13 +3,20 @@ from __future__ import annotations
 
 import hashlib
 import re
+import subprocess
+import sys
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from pathlib import Path
 
 PackageId = tuple[str, str, str | None]
 PackageRecord = tuple[str | None, tuple[PackageId, ...]]
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _SDK_PACKAGE = "katana-render-runtime"
+RETAINED_UTF8_ITER_VERSION = "1.0.4"
+_RETAINED_PACKAGE = "utf8_iter"
+_CARGO_LOCK_PATH = "scripts/html/performance-harness/Cargo.lock"
+CommandRunner = Callable[..., subprocess.CompletedProcess[bytes]]
 
 
 def _package_id(record: Mapping[str, object]) -> PackageId:
@@ -143,3 +150,52 @@ def verify_harness_closure(parent_lock: bytes, current_lock: bytes, expected_par
         raise ValueError("parent Cargo.lock bytes differ from immutable pin")
     if _harness_closure(parent_lock) != _harness_closure(current_lock):
         raise ValueError("HTML harness non-SDK Cargo dependency closure differs")
+
+
+def load_pinned_parent_lock(root: Path, runner: CommandRunner | None = None) -> bytes:
+    parent_head, parent_lock_sha256 = _reference_parent_pins()
+
+    command = ["git", "show", f"{parent_head}:{_CARGO_LOCK_PATH}"]
+    active_runner = subprocess.run if runner is None else runner
+    completed = active_runner(command, cwd=root, check=False, capture_output=True)
+    if completed.returncode != 0 or not isinstance(completed.stdout, bytes):
+        raise ValueError("immutable HTML performance parent lock is unavailable")
+    if hashlib.sha256(completed.stdout).hexdigest() != parent_lock_sha256:
+        raise ValueError("immutable HTML performance parent lock differs from its pin")
+    return completed.stdout
+
+
+def verify_utf8_iter_retention(root_lock: bytes, harness_lock: bytes, parent_lock: bytes) -> None:
+    _parent_head, parent_lock_sha256 = _reference_parent_pins()
+
+    verify_harness_closure(parent_lock, harness_lock, parent_lock_sha256)
+    parent_packages = _raw_packages(parent_lock)
+    expected_rows = [
+        (identity, record)
+        for identity, record in parent_packages.items()
+        if identity[0] == _RETAINED_PACKAGE
+    ]
+    if len(expected_rows) != 1:
+        raise ValueError("immutable HTML parent does not contain one retained utf8_iter package")
+    expected_identity, expected_record = expected_rows[0]
+    if (expected_identity[1] != RETAINED_UTF8_ITER_VERSION
+            or expected_identity[2] != "registry+https://github.com/rust-lang/crates.io-index"):
+        raise ValueError("immutable HTML parent utf8_iter identity differs from retention contract")
+    for label, lock_bytes in (("root", root_lock), ("harness", harness_lock)):
+        rows = [
+            (identity, record)
+            for identity, record in _raw_packages(lock_bytes).items()
+            if identity[0] == _RETAINED_PACKAGE
+        ]
+        if rows != [(expected_identity, expected_record)]:
+            raise ValueError(f"{label} Cargo.lock does not retain the immutable utf8_iter package")
+
+
+def _reference_parent_pins() -> tuple[str, str]:
+    release_dir = str(Path(__file__).resolve().parent)
+    sys.path.insert(0, release_dir)
+    try:
+        from html_performance_reference import PARENT_HEAD, PARENT_LOCK_SHA256
+    finally:
+        sys.path.remove(release_dir)
+    return PARENT_HEAD, PARENT_LOCK_SHA256

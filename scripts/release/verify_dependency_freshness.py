@@ -31,6 +31,16 @@ if any(Path(origin).resolve() != _expected_loader for origin in (sys.modules["to
     raise ImportError("loaded TOML helper is outside the owned release directory")
 tomllib = load_toml_parser()
 
+sys.path.insert(0, _loader_root)
+try:
+    from html_performance_harness_dependency_closure import (
+        RETAINED_UTF8_ITER_VERSION,
+        load_pinned_parent_lock,
+        verify_utf8_iter_retention,
+    )
+finally:
+    sys.path.remove(_loader_root)
+
 TIMEOUT_SECONDS = 15
 MAX_RESPONSE_BYTES = 1_000_000
 RUNTIME_CATALOG = Path("scripts/runtime-assets/runtime-asset-common.ts")
@@ -43,6 +53,18 @@ KRR_SVG_ENGINE_COMMIT = "c01f0165059e472f45472cccddc573d32c13548a"
 KRR_SVG_ENGINE_SOURCE_FILE_COUNT = 48
 KRR_SVG_HARFRUST_ALIAS = "svg_harfrust"
 KRR_SVG_HARFRUST_PACKAGE = "harfrust"
+UTF8_ITER_LATEST_COMPATIBLE_VERSION = "1.1.0"
+UTF_TYPES_LATEST_COMPATIBLE_VERSION = "1.0.0"
+UTF8_ITER_RETENTION_CHANGES = {
+    ("Adding", "utf_types", UTF_TYPES_LATEST_COMPATIBLE_VERSION, None),
+    ("Updating", "utf8_iter", RETAINED_UTF8_ITER_VERSION,
+     UTF8_ITER_LATEST_COMPATIBLE_VERSION),
+}
+LOCK_CHANGE_RE = re.compile(
+    r"^\s+(Adding|Updating|Removing|Downgrading) ([A-Za-z0-9_-]+) v([^\s]+)"
+    r"(?: -> v([^\s]+))?$"
+)
+LOCKING_RE = re.compile(r"\bLocking\s+([0-9]+)\s+packages?\b")
 
 
 class _StripAuthorizationRedirectHandler(request.HTTPRedirectHandler):
@@ -799,11 +821,12 @@ def rust_alternate_registries_are_fresh(root: Path, dependencies: list[Alternate
 
 
 def rust_lock_is_latest_compatible(root: Path) -> bool:
-    """Use Cargo's resolver to validate direct and transitive lock freshness.
+    """Use Cargo's resolver, with one exact immutable-parent retention.
 
     Registry ``newest_version`` can be a prerelease or a major version outside
     the workspace's semver requirements.  Cargo is the authority for the
-    highest compatible resolution, including transitive dependencies.
+    highest compatible resolution, including transitive dependencies. The
+    pinned utf8_iter transition is accepted only as its exact known diff.
     """
     completed = subprocess.run(
         # リリース workflow は CARGO_TERM_COLOR=always を設定するため、Locking 件数を
@@ -817,14 +840,36 @@ def rust_lock_is_latest_compatible(root: Path) -> bool:
     if completed.returncode != 0:
         raise ValueError(f"cargo update dry-run failed: {completed.stderr.strip()}")
     output = f"{completed.stdout}\n{completed.stderr}"
-    # Cargo has changed the human-readable suffix over time (for example,
-    # ``version`` versus ``versions`` and an optional Rust version).  The
-    # resolver's only stable signal here is the number after ``Locking``;
-    # keep the rest of the line out of the freshness contract.
-    match = re.search(r"\bLocking\s+([0-9]+)\s+packages?\b", output)
-    # Cargo omits the Locking line when the existing lockfile already resolves
-    # every compatible dependency; a successful dry-run is then the no-update result.
-    return match is None or match.group(1) == "0"
+    # WHY: Cargoの要約文言変更に依存せず、件数と実際の変更packageを照合する。
+    changes = _cargo_lock_changes(output)
+    return changes == set() or changes == UTF8_ITER_RETENTION_CHANGES
+
+
+def _cargo_lock_changes(output: str) -> set[tuple[str, str, str, str | None]] | None:
+    match = LOCKING_RE.search(output)
+    changes: set[tuple[str, str, str, str | None]] = set()
+    for line in output.splitlines():
+        if line.strip() == "Updating crates.io index":
+            continue
+        change = LOCK_CHANGE_RE.match(line)
+        if change is not None:
+            action, package, current, target = change.groups()
+            changes.add((action, package, current, target))
+        elif re.match(r"^\s+(Adding|Updating|Removing|Downgrading)\b", line):
+            return None
+    if match is None:
+        return changes if not changes else None
+    if int(match.group(1)) != len(changes):
+        return None
+    return changes
+
+
+def verify_current_utf8_iter_retention(root: Path) -> None:
+    paths = (root / "Cargo.lock", root / "scripts/html/performance-harness/Cargo.lock")
+    if any(path.is_symlink() or not path.is_file() for path in paths):
+        raise ValueError("root or HTML harness Cargo.lock is unavailable")
+    parent_lock = load_pinned_parent_lock(root)
+    verify_utf8_iter_retention(paths[0].read_bytes(), paths[1].read_bytes(), parent_lock)
 
 
 def release_cargo_manifests(root: Path) -> list[Path]:
@@ -1013,6 +1058,7 @@ def is_stale(package: Package, resolved_version: str) -> bool:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args() if argv is None else argparse.Namespace(root=Path(argv[0]))
     try:
+        verify_current_utf8_iter_retention(args.root)
         metadata = cargo_metadata(args.root)
         rust = rust_packages(args.root, metadata)
         coupled_skrifa_manifest = verified_krr_usvg_skrifa_manifest(args.root, metadata)
@@ -1054,7 +1100,11 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(stale), file=sys.stderr)
         print("Run `just depends-update-all`, review its generated changes, then rerun `just release-check`.", file=sys.stderr)
         return 1
-    print(f"Dependency freshness check passed ({len(rust) + len(javascript) + len(packages)} resolved dependencies and pinned runtime assets).")
+    print(
+        f"Dependency freshness check passed ({len(rust) + len(javascript) + len(packages)} "
+        "resolved dependencies and pinned runtime assets; utf8_iter 1.0.4 is retained to "
+        "preserve the immutable HTML performance parent closure)."
+    )
     return 0
 
 

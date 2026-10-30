@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import hashlib
+import subprocess
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
+import html_performance_harness_dependency_closure as closure
 from html_performance_harness_dependency_closure import verify_harness_closure
 
 
@@ -18,6 +22,19 @@ def _lock(shared_version: str = "1.0.0", sdk_version: str = "0.4.23",
         f'''[[package]]\nname = "sdk-child"\nversion = "{sdk_child_version}"\nsource = "registry+https://example.invalid/index"\nchecksum = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"''',
     ]
     return ("version = 3\n\n" + "\n\n".join(packages) + "\n").encode()
+
+
+def _utf8_iter_lock(version: str = "1.0.4") -> bytes:
+    return (
+        'version = 4\n\n'
+        '[[package]]\nname = "krr-html-performance-harness"\nversion = "0.1.0"\n'
+        f'dependencies = ["katana-render-runtime 0.4.23", "utf8_iter {version}"]\n\n'
+        '[[package]]\nname = "katana-render-runtime"\nversion = "0.4.23"\n\n'
+        '[[package]]\nname = "utf8_iter"\n'
+        f'version = "{version}"\n'
+        'source = "registry+https://github.com/rust-lang/crates.io-index"\n'
+        'checksum = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"\n'
+    ).encode()
 
 
 class HarnessDependencyClosureTest(unittest.TestCase):
@@ -70,6 +87,45 @@ class HarnessDependencyClosureTest(unittest.TestCase):
         duplicate = _lock() + b'''\n[[package]]\nname = "serde"\nversion = "1.0.0"\nsource = "registry+https://other.invalid/index"\nchecksum = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"\n'''
         with self.assertRaisesRegex(ValueError, "multiple identities"):
             verify_harness_closure(duplicate, duplicate, hashlib.sha256(duplicate).hexdigest())
+
+    def test_utf8_iter_retention_requires_exact_parent_closure_in_both_locks(self) -> None:
+        parent = _utf8_iter_lock()
+        expected_sha = hashlib.sha256(parent).hexdigest()
+        root_lock = (
+            b'version = 4\n\n[[package]]\nname = "utf8_iter"\nversion = "1.0.4"\n'
+            b'source = "registry+https://github.com/rust-lang/crates.io-index"\n'
+            b'checksum = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"\n'
+        )
+        with patch.object(closure, "_reference_parent_pins", return_value=("parent", expected_sha)):
+            closure.verify_utf8_iter_retention(root_lock, parent, parent)
+
+    def test_utf8_iter_retention_rejects_root_version_and_harness_closure_drift(self) -> None:
+        parent = _utf8_iter_lock()
+        expected_sha = hashlib.sha256(parent).hexdigest()
+        root_lock = _utf8_iter_lock()
+        wrong_root = root_lock.replace(b'version = "1.0.4"', b'version = "1.1.0"', 1)
+        wrong_harness = _utf8_iter_lock("1.1.0")
+        with patch.object(closure, "_reference_parent_pins", return_value=("parent", expected_sha)):
+            with self.assertRaisesRegex(ValueError, "root Cargo.lock"):
+                closure.verify_utf8_iter_retention(wrong_root, parent, parent)
+            with self.assertRaisesRegex(ValueError, "closure differs"):
+                closure.verify_utf8_iter_retention(root_lock, wrong_harness, parent)
+
+    def test_parent_lock_loader_checks_immutable_commit_and_sha(self) -> None:
+        parent = _utf8_iter_lock()
+        expected_sha = hashlib.sha256(parent).hexdigest()
+        completed = subprocess.CompletedProcess([], 0, stdout=parent, stderr=b"")
+        with patch.object(closure, "_reference_parent_pins", return_value=("parent", expected_sha)):
+            with patch.object(subprocess, "run", return_value=completed) as run:
+                self.assertEqual(closure.load_pinned_parent_lock(Path("/repo")), parent)
+        self.assertEqual(
+            run.call_args.args[0],
+            ["git", "show", "parent:scripts/html/performance-harness/Cargo.lock"],
+        )
+        with patch.object(closure, "_reference_parent_pins", return_value=("parent", "0" * 64)):
+            with patch.object(subprocess, "run", return_value=completed):
+                with self.assertRaisesRegex(ValueError, "differs from its pin"):
+                    closure.load_pinned_parent_lock(Path("/repo"))
 
 
 if __name__ == "__main__":
