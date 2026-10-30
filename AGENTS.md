@@ -1,5 +1,11 @@
 # katana-diagram-renderer Agent Rules
 
+## 共有セッション作業台帳の所有者
+
+- subagentは独立したmain sessionではない。`CODEX_THREAD_ID`をmainと共有する場合、`~/.codex/hooks/task-state/<CODEX_THREAD_ID>.json`を作成・上書きしない。workerの完了証跡は本文でmainへ返し、全体台帳はmainだけが更新する。
+- mainは委譲時に共有台帳の変更禁止を担当scopeへ含め、subagent完了回収後と終了前に全体タスクID・未完状態の保持を確認する。小taskの完了でリリース全体の未完項目を消してはならない。
+- 競合を検知したら、元の観測を保持し、物理タスク台帳から全体を復元する。全項目がdoneのworker台帳を全体完了へ転用しない。検索語: `shared CODEX_THREAD_ID`, `main-owned task ledger`, `worker ledger overwrite`。
+
 ## 調査専任エージェントの報告保存
 
 - 読み取り専任のsubagentは調査結果をメッセージ本文だけで返す。報告ファイルの生成を担当に含めず、主担当が必要な記録を`apply_patch`で保存する。実装担当も、報告文をシェル引数へ埋め込んで保存しない。
