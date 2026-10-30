@@ -844,6 +844,16 @@ def _measured_phase_record_count(
     return count
 
 
+def _saved_phase_record_count(results: Sequence[gate.JsonObject]) -> int:
+    count = 0
+    for result in results:
+        policy = gate._object(result.get("policy"), "condition policy")
+        measured = gate._integer(policy.get("phaseRecords"), "measured phase records")
+        gate.require(measured >= 0, "measured phase records must be non-negative")
+        count += measured
+    return count
+
+
 def _resume_condition_plan(
     batch: Path, bundle: gate.Bundle, condition_id: str,
 ) -> tuple[Path, gate.JsonObject, FilePin]:
@@ -908,10 +918,35 @@ def _batch_policy_accepted(
 ) -> bool:
     if batch_failure is not None and not isinstance(batch_failure, BatchBudgetExhausted):
         return False
-    return resumed_policy_accepted and all(
-        gate._object(result.get("policy"), "condition policy").get("policyPass") is True
-        for result in results
-    )
+    if not resumed_policy_accepted:
+        return False
+    non_comparable_ids: set[str] = set()
+    for result in results:
+        policy = gate._object(result.get("policy"), "condition policy")
+        if result.get("comparisonStatus") == "nonComparable":
+            condition_id = gate._text(policy.get("conditionId"),
+                                      "non-comparable condition id")
+            fragment = gate.NON_COMPARABLE_BASELINE_FRAGMENT_FAILURES.get(condition_id)
+            if (fragment is None or policy.get("fragment") != fragment
+                    or policy.get("status") != "nonComparable"
+                    or policy.get("policyPass") is not False
+                    or policy.get("reason") != "known baseline fragment navigation refusal"
+                    or policy.get("candidateOperationalPass") is not True
+                    or type(policy.get("candidateSamples")) is not int
+                    or policy.get("candidateSamples") != 25
+                    or type(policy.get("phaseRecords")) is not int
+                    or policy.get("phaseRecords") != len(gate.PHASES) * 25
+                    or condition_id in non_comparable_ids):
+                return False
+            non_comparable_ids.add(condition_id)
+            continue
+        if (result.get("comparisonStatus") != "paired"
+                or policy.get("policyPass") is not True):
+            return False
+    if len(results) == 84:
+        return (not non_comparable_ids
+                or non_comparable_ids == set(gate.NON_COMPARABLE_BASELINE_FRAGMENT_FAILURES))
+    return len(non_comparable_ids) <= len(gate.NON_COMPARABLE_BASELINE_FRAGMENT_FAILURES)
 
 
 def _require_batch_budget(deadline: float | None) -> None:
@@ -1592,16 +1627,32 @@ def worker_started_from_lifecycle(path: Path) -> bool | None:
 
 def _closed_nonzero_baseline_failure(
     attempts: Sequence[gate.JsonObject], error: BaseException,
+    expected: ExpectedPerformance,
 ) -> bool:
-    if not isinstance(error, subprocess.CalledProcessError) or not attempts:
+    fragment = gate.non_comparable_baseline_fragment(expected)
+    if (fragment is None or not isinstance(error, subprocess.CalledProcessError)
+            or type(error.returncode) is not int or error.returncode != 1 or not attempts):
         return False
     record = attempts[-1]
     actual_exit = record.get("actualExit")
     lifecycle_value = record.get("lifecycle")
-    if (type(actual_exit) is not int or actual_exit <= 0
+    expected_baseline = gate.baseline_arm_id(expected)
+    expected_arms = gate._object(expected.get("arms"), "expected arms")
+    expected_arm = gate._object(expected_arms.get(expected_baseline), "expected baseline arm")
+    expected_binary = expected_arm.get("binary_sha256")
+    if (type(actual_exit) is not int or actual_exit != 1
             or actual_exit != error.returncode or record.get("workerStarted") is not True
+            or record.get("sample") != 0 or record.get("attempt") != 1
+            or record.get("reason") != "worker command exited nonzero"
+            or record.get("binarySha256Before") != expected_binary
+            or record.get("binarySha256After") != expected_binary
             or not isinstance(lifecycle_value, dict)):
         return False
+    for key in ("loadRatioBefore", "loadRatioAfter"):
+        value = record.get(key)
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or not 0 <= value <= MAX_WORKER_LOAD):
+            return False
     lifecycle_pin = cast(FilePin, lifecycle_value)
     try:
         lifecycle_path = Path(lifecycle_pin["path"])
@@ -1610,19 +1661,48 @@ def _closed_nonzero_baseline_failure(
         lifecycle = gate._object(gate.read_json(lifecycle_path), "worker lifecycle")
         identity = gate._object(lifecycle.get("identity"), "worker identity")
         pid = identity.get("pid")
+        streams = _lifecycle_worker_streams(lifecycle)
     except (KeyError, OSError, TypeError, ValueError):
         return False
-    return (type(pid) is int and pid > 0 and lifecycle.get("groupClosed") is True
+    stdout, stderr = streams
+    expected_error = (
+        f'Error: RuntimeFailure {{ error: "navigation is not allowed: {fragment}" }}'
+    ).encode()
+    return (type(pid) is int and pid > 0 and lifecycle.get("role") == "worker"
+            and lifecycle.get("groupClosed") is True
             and lifecycle.get("rawFdsClosed") is True
             and lifecycle.get("failure") is None
             and lifecycle.get("cleanupFailure") is None
-            and lifecycle.get("exitCode") == actual_exit)
+            and lifecycle.get("exitCode") == actual_exit
+            and error.output == stdout and error.stderr == stderr
+            and stderr.splitlines() == [expected_error])
+
+
+def _lifecycle_worker_streams(lifecycle: Mapping[str, object]) -> tuple[bytes, bytes]:
+    raw = gate._objects(lifecycle.get("raw"), "worker lifecycle raw files")
+    if len(raw) != 2:
+        raise ValueError("worker lifecycle raw file count differs")
+    streams: dict[str, bytes] = {}
+    for item in raw:
+        path = Path(gate._text(item.get("path"), "worker lifecycle raw path"))
+        checksum = gate._text(item.get("sha256"), "worker lifecycle raw SHA")
+        if (not path.is_absolute() or path.resolve() != path or path.is_symlink()
+                or not path.is_file() or gate.sha256(path) != checksum):
+            raise ValueError("worker lifecycle raw file differs")
+        if path.name == "stdout.raw":
+            streams["stdout"] = path.read_bytes()
+        elif path.name == "stderr.raw":
+            streams["stderr"] = path.read_bytes()
+    if set(streams) != {"stdout", "stderr"}:
+        raise ValueError("worker lifecycle stream names differ")
+    return streams["stdout"], streams["stderr"]
 
 
 def _worker_failure_can_continue(
     arm: str, attempts: Sequence[gate.JsonObject], error: BaseException,
+    expected: ExpectedPerformance,
 ) -> bool:
-    return arm == "baseline" and _closed_nonzero_baseline_failure(attempts, error)
+    return arm == "baseline" and _closed_nonzero_baseline_failure(attempts, error, expected)
 
 
 def _baseline_slot_is_missing(
@@ -2123,7 +2203,7 @@ def _collect_condition_worker_pairs(
             raw_arm = gate.baseline_arm_id(expected) if arm == "baseline" else arm
             if _baseline_slot_is_missing(arm, baseline_failure):
                 missing_failure: gate.JsonObject = {"status": "missing",
-                    "reason": "baseline skipped after prior worker failure",
+                    "reason": "baseline skipped after known fragment refusal",
                     "afterFailure": baseline_failure}
                 failures.append(missing_failure)
                 report = _build_worker_report(expected, row, arms, raw_arm, pair, viewport,
@@ -2158,14 +2238,23 @@ def _collect_condition_worker_pairs(
                     worker_attempt_pins.extend(
                         cast(FilePin, attempt["attemptRecord"]) for attempt in sample_attempts)
             except BaseException as error:
-                if not _worker_failure_can_continue(arm, failed_attempts, error):
+                if not _worker_failure_can_continue(arm, failed_attempts, error, expected):
                     raise
                 _append_worker_attempt_pins(worker_attempt_pins, failed_attempts)
                 failed_record = failed_attempts[-1]
+                condition = gate._object(expected.get("catalogCondition"),
+                                         "non-comparable catalog condition")
+                condition_id = gate._text(condition.get("condition_id"),
+                                          "non-comparable condition id")
+                fragment = gate.non_comparable_baseline_fragment(expected)
+                gate.require(fragment is not None,
+                             "known baseline fragment refusal lost its condition binding")
                 worker_attempts.extend(failed_attempts)
                 failure_load = {"before": failed_record["loadRatioBefore"],
                                 "after": failed_record["loadRatioAfter"]}
-                failure: gate.JsonObject = {"status": "incomplete", "reason": "baseline worker exited nonzero",
+                failure: gate.JsonObject = {"status": "nonComparable",
+                    "reason": "known baseline fragment navigation refusal",
+                    "conditionId": condition_id, "fragment": fragment,
                     "sample": failed_record["sample"], "attempt": failed_record["attempt"],
                     "actualExit": failed_record["actualExit"],
                     "errorType": type(error).__name__}
@@ -2184,7 +2273,7 @@ def _collect_condition_worker_pairs(
                     "load_ratio_after": failed_record["loadRatioAfter"],
                     "workerLoads": loads, "failedWorkerLoads": [failure_load],
                     "workerAttempts": worker_attempts,
-                    "status": "incomplete", "failure": failure})
+                    "status": "nonComparable", "failure": failure})
                 continue
             report = _build_worker_report(expected, row, arms, raw_arm, pair, viewport,
                                           samples, None)
@@ -2206,12 +2295,59 @@ def _condition_measurement_policy(
     failures: Sequence[gate.JsonObject], actual_phase_records: int,
 ) -> gate.JsonObject:
     if failures:
+        fragment = gate.non_comparable_baseline_fragment(expected)
+        condition = expected.get("catalogCondition")
+        condition_id = condition.get("condition_id") if isinstance(condition, dict) else None
+        if (fragment is not None and isinstance(condition_id, str)
+                and _known_fragment_failure_sequence(failures, condition_id, fragment)):
+            candidate_paths = [path for path in reports if path.name.startswith("candidate-")]
+            gate.require(len(candidate_paths) == 5,
+                         "known non-comparable condition requires five candidate reports")
+            candidate_samples = 0
+            for path in candidate_paths:
+                arm, samples = gate._validate_report(
+                    gate.read_json(path), cast(gate.JsonObject, expected),
+                )
+                gate.require(arm == "candidate" and len(samples) == 5,
+                             "known non-comparable candidate samples differ")
+                candidate_samples += len(samples)
+            gate.require(candidate_samples == 25
+                         and actual_phase_records == len(gate.PHASES) * candidate_samples,
+                         "known non-comparable candidate requires 25 complete samples")
+            return {"status": "nonComparable", "policyPass": False,
+                    "reason": "known baseline fragment navigation refusal",
+                    "conditionId": condition_id, "fragment": fragment,
+                    "candidateOperationalPass": True,
+                    "candidateSamples": candidate_samples,
+                    "phaseRecords": actual_phase_records}
         return {"policyPass": False, "status": "incomplete",
                 "reason": "baseline worker failure", "policy": {},
                 "nullDifference": 0, "quietLoadLimit": 0.25,
                 "expectedPhaseRecords": len(gate.PHASES) * 50,
                 "phaseRecords": actual_phase_records, "aggregate": None}
     return gate.evaluate_measurement_policy(reports, {**expected})
+
+
+def _known_fragment_failure_sequence(
+    failures: Sequence[gate.JsonObject], condition_id: str, fragment: str,
+) -> bool:
+    if len(failures) != 5:
+        return False
+    first = failures[0]
+    if (first.get("status") != "nonComparable"
+            or first.get("reason") != "known baseline fragment navigation refusal"
+            or first.get("conditionId") != condition_id
+            or first.get("fragment") != fragment
+            or first.get("actualExit") != 1 or first.get("sample") != 0
+            or first.get("attempt") != 1
+            or first.get("errorType") != "CalledProcessError"):
+        return False
+    return all(
+        item.get("status") == "missing"
+        and item.get("reason") == "baseline skipped after known fragment refusal"
+        and item.get("afterFailure") == first
+        for item in failures[1:]
+    )
 
 
 def produce(root: Path, output: Path, capacity_document: Path | None = None,
@@ -2566,18 +2702,23 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         worker_attempt_pins.extend(collection.worker_attempt_pins)
         expected["reportPins"].extend(collection.report_pins)
         actual_phase_records = collection.actual_phase_records
+        measurement_policy = _condition_measurement_policy(
+            reports, expected, condition_failures, actual_phase_records,
+        )
         manifest_data: gate.JsonObject = {"measurement_executed": True, "input_sha256": expected["fixture_sha256"], "environment_sha256": environment_sha, "platform": platform.platform(), "order": order}
         if row["catalog"]:
             manifest_data.update(_catalog_pair_manifest_fields(
                 plan_data, row["condition_id"], row["operation_evidence"]))
         if condition_failures:
-            manifest_data.update({"measurement_status": "incomplete", "failures": condition_failures})
+            manifest_data.update({"measurement_status": measurement_policy["status"],
+                                  "failures": condition_failures})
         manifest_pin = write(folder / "reports/pair-manifest.json", manifest_data)
-        measurement_policy = _condition_measurement_policy(
-            reports, expected, condition_failures, actual_phase_records,
-        )
         result: gate.JsonObject = {"formalAccepted": False, "performanceAccepted": False,
-            "measurementExecuted": True, "policy": measurement_policy}
+            "measurementExecuted": True,
+            "comparisonStatus": (measurement_policy.get("status")
+                                 or ("paired" if measurement_policy.get("policyPass") is True
+                                     else "incomplete")),
+            "policy": measurement_policy}
         if row["catalog"]:
             result["catalogCondition"] = expected["catalogCondition"]
         checkpoint_pins.append(write_condition_checkpoint(folder, expected, result, manifest_data))
@@ -2660,13 +2801,26 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         batch_failure, [result for _, _, result, _ in expected_all],
         resumed_receipt is None or resumed_receipt.get("policyAccepted") is True,
     )
+    comparison_results = [
+        current_bundle.json(gate._object(attempt["result"], "attempt result reference"))
+        for attempt in transport_attempts
+    ]
+    paired_conditions = sum(
+        result.get("comparisonStatus") == "paired" for result in comparison_results
+    )
+    non_comparable_conditions = sum(
+        result.get("comparisonStatus") == "nonComparable" for result in comparison_results
+    )
     summary: gate.JsonObject = {
         "head": head, "bundle": str(bundle), "checks": len(transport_attempts) * 20,
         "completeConditions": len(complete_ids), "conditions": len(attempt_ids),
+        "candidateConditions": paired_conditions + non_comparable_conditions,
+        "pairedConditions": paired_conditions,
+        "nonComparableConditions": non_comparable_conditions,
         "formalAccepted": _batch_formal_acceptance(
             attempt_ids, complete_ids, policy_accepted,
         ),
-        "phaseRecords": _measured_phase_record_count(expected_all),
+        "phaseRecords": _saved_phase_record_count(comparison_results),
         "batchFailure": type(batch_failure).__name__ if batch_failure else None,
     }
     if catalog_manifest_path is not None:

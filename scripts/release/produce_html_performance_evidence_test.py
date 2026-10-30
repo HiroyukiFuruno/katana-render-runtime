@@ -499,6 +499,11 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         self.assertEqual(producer._measured_phase_record_count([
             result(300), result(150),
         ]), 450)
+        saved: list[gate.JsonObject] = [
+            {"policy": {"phaseRecords": 300}} for _ in range(72)
+        ]
+        saved.extend({"policy": {"phaseRecords": 150}} for _ in range(12))
+        self.assertEqual(producer._saved_phase_record_count(saved), 23_400)
         for invalid in (None, -1, True):
             with self.subTest(invalid=invalid):
                 with self.assertRaises(ValueError):
@@ -668,18 +673,72 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         self.assertNotIn("statistics", result)
         evaluate.assert_not_called()
 
+    def test_known_fragment_failure_requires_exact_skipped_baseline_sequence(self) -> None:
+        condition_id, fragment = next(iter(gate.NON_COMPARABLE_BASELINE_FRAGMENT_FAILURES.items()))
+        first: gate.JsonObject = {
+            "status": "nonComparable",
+            "reason": "known baseline fragment navigation refusal",
+            "conditionId": condition_id, "fragment": fragment,
+            "sample": 0, "attempt": 1, "actualExit": 1,
+            "errorType": "CalledProcessError",
+        }
+        failures: list[gate.JsonObject] = [first]
+        failures.extend({
+            "status": "missing",
+            "reason": "baseline skipped after known fragment refusal",
+            "afterFailure": first,
+        } for _ in range(4))
+        self.assertTrue(producer._known_fragment_failure_sequence(
+            failures, condition_id, fragment,
+        ))
+        self.assertFalse(producer._known_fragment_failure_sequence(
+            failures[:-1], condition_id, fragment,
+        ))
+        self.assertFalse(producer._known_fragment_failure_sequence(
+            failures, condition_id, "#other",
+        ))
+
     def test_budgeted_batch_can_resume_full_acceptance_but_policy_failure_cannot_clear(self) -> None:
-        accepted: gate.JsonObject = {"policy": {"policyPass": True}}
-        failed: gate.JsonObject = {"policy": {"policyPass": False}}
+        accepted: gate.JsonObject = {"comparisonStatus": "paired",
+                                     "policy": {"policyPass": True}}
+        failed: gate.JsonObject = {"comparisonStatus": "paired",
+                                   "policy": {"policyPass": False}}
         self.assertTrue(producer._batch_policy_accepted(
             producer.BatchBudgetExhausted("bounded"), [accepted], True))
         self.assertFalse(producer._batch_formal_acceptance(["case-a"], ["case-a"], True))
         self.assertTrue(producer._batch_policy_accepted(None, [accepted] * 84, True))
+        self.assertTrue(producer._batch_policy_accepted(
+            None, [accepted] * 72 + self._non_comparable_results(), True))
         self.assertFalse(producer._batch_formal_acceptance(["case-a"] * 84,
                                                            ["case-a"] * 84, False))
         self.assertFalse(producer._batch_policy_accepted(None, [failed], True))
         self.assertFalse(producer._batch_policy_accepted(
             producer.BatchBudgetExhausted("bounded"), [accepted], False))
+
+    @staticmethod
+    def _non_comparable_results() -> list[gate.JsonObject]:
+        return [
+            {"comparisonStatus": "nonComparable", "policy": {
+                "status": "nonComparable", "policyPass": False,
+                "reason": "known baseline fragment navigation refusal",
+                "conditionId": condition_id, "fragment": fragment,
+                "candidateOperationalPass": True, "candidateSamples": 25,
+                "phaseRecords": len(gate.PHASES) * 25,
+            }}
+            for condition_id, fragment in gate.NON_COMPARABLE_BASELINE_FRAGMENT_FAILURES.items()
+        ]
+
+    def test_exact_known_noncomparable_set_keeps_candidate_operations_accepted(self) -> None:
+        paired: list[gate.JsonObject] = [
+            {"comparisonStatus": "paired", "policy": {"policyPass": True}}
+            for _ in range(72)
+        ]
+        non_comparable = self._non_comparable_results()
+        self.assertTrue(producer._batch_policy_accepted(None, paired + non_comparable, True))
+        self.assertTrue(producer._batch_policy_accepted(None, paired + non_comparable[:-1], True))
+        complete_ids = [f"condition-{index}" for index in range(84)]
+        self.assertFalse(producer._batch_formal_acceptance(
+            complete_ids[:-1], complete_ids, True))
 
     def test_old_run_without_new_receipt_is_not_a_resumable_batch(self) -> None:
         with patch.object(gate, "validate_attempt"):
@@ -856,6 +915,7 @@ class WorkerAttemptContractTest(unittest.TestCase):
     def command_result(
         self, *, returncode: int = 0, mutate_binary: bool = False,
         elapsed_ms: float = 1.0, closed: bool = False,
+        stderr: bytes = b"worker stderr",
     ) -> Callable[..., subprocess.CompletedProcess[bytes]]:
         def execute(
             args: Sequence[str], *, role: str,
@@ -869,16 +929,21 @@ class WorkerAttemptContractTest(unittest.TestCase):
                 self.binary.write_bytes(b"changed worker")
             log_directory.mkdir(parents=True, exist_ok=True)
             lifecycle = log_directory / f"worker-{len(list(log_directory.glob('worker-*.json')))}.json"
-            lifecycle_value = {"argv": list(args), "exitCode": returncode, "raw": []}
+            payload = json.dumps({"sample": int(args[2]), "viewport": self.viewport,
+                                  "elapsed_ms": elapsed_ms}).encode()
+            stdout_path, stderr_path = log_directory / "stdout.raw", log_directory / "stderr.raw"
+            stdout_path.write_bytes(payload)
+            stderr_path.write_bytes(stderr)
+            lifecycle_value = {"role": "worker", "argv": list(args), "exitCode": returncode,
+                "raw": [{"path": str(stdout_path), "sha256": gate.sha256(stdout_path)},
+                        {"path": str(stderr_path), "sha256": gate.sha256(stderr_path)}]}
             if closed:
                 lifecycle_value.update({"identity": {"pid": 4242}, "groupClosed": True,
                     "rawFdsClosed": True, "failure": None, "cleanupFailure": None})
             lifecycle.write_text(json.dumps(lifecycle_value))
             if lifecycle_sink is not None:
                 lifecycle_sink(lifecycle)
-            payload = json.dumps({"sample": int(args[2]), "viewport": self.viewport,
-                                  "elapsed_ms": elapsed_ms}).encode()
-            return subprocess.CompletedProcess(args, returncode, payload, b"worker stderr")
+            return subprocess.CompletedProcess(args, returncode, payload, stderr)
         return execute
 
     def test_retries_only_host_load_and_records_both_attempts(self) -> None:
@@ -958,12 +1023,14 @@ class WorkerAttemptContractTest(unittest.TestCase):
 
     def _collect_failed_worker_sample(
         self, *, returncode: int, closed: bool,
+        stderr: bytes = b"worker stderr",
     ) -> tuple[list[gate.JsonObject], subprocess.CalledProcessError]:
         failures: list[gate.JsonObject] = []
         with patch.object(producer, "await_quiet", return_value=0.1), \
              patch.object(producer, "quiet", return_value=0.1), \
              patch.object(producer, "_measurement_command",
-                          side_effect=self.command_result(returncode=returncode, closed=closed)):
+                          side_effect=self.command_result(returncode=returncode, closed=closed,
+                                                          stderr=stderr)):
             with self.assertRaises(subprocess.CalledProcessError) as caught:
                 producer.collect_worker_sample(
                     self.build, 0, self.fixture, self.root / "reports.json", self.plan, 800, 600, 1,
@@ -972,16 +1039,56 @@ class WorkerAttemptContractTest(unittest.TestCase):
                 )
         return failures, caught.exception
 
+    def _known_navigation_expected(self) -> typed_producer.ExpectedPerformance:
+        baseline = "reference-parent-371274ed"
+        return cast(typed_producer.ExpectedPerformance, {
+            "referenceParent": {"role": baseline, "referenceKind": "correct-parent-source",
+                                "publishedSdk": False, "armId": baseline},
+            "catalogCondition": {"condition_id": "navigation/top/1280x900@1",
+                                 "operation_kind": "navigation"},
+            "arms": {baseline: {"binary_sha256": self.build.binary_sha256}},
+        })
+
+    def _known_navigation_failure(self, *, closed: bool = True) -> tuple[
+        list[gate.JsonObject], subprocess.CalledProcessError,
+        typed_producer.ExpectedPerformance,
+    ]:
+        expected = self._known_navigation_expected()
+        fragment = "#a"
+        stderr = (f'Error: RuntimeFailure {{ error: "navigation is not allowed: {fragment}" }}'
+                  ).encode()
+        failures, error = self._collect_failed_worker_sample(
+            returncode=1, closed=closed, stderr=stderr,
+        )
+        return failures, error, expected
+
     def test_closed_baseline_failure_can_continue_without_a_sample(self) -> None:
-        failures, error = self._collect_failed_worker_sample(returncode=7, closed=True)
-        self.assertTrue(producer._worker_failure_can_continue("baseline", failures, error))
+        failures, error, expected = self._known_navigation_failure()
+        self.assertTrue(producer._worker_failure_can_continue("baseline", failures, error,
+                                                              expected))
         self.assertEqual(len(failures), 1)
         self.assertIs(failures[0]["accepted"], False)
-        self.assertEqual(failures[0]["actualExit"], 7)
+        self.assertEqual(failures[0]["actualExit"], 1)
 
     def test_incomplete_baseline_failure_is_not_treated_as_candidate_success(self) -> None:
-        failures, error = self._collect_failed_worker_sample(returncode=7, closed=True)
-        self.assertFalse(producer._worker_failure_can_continue("candidate", failures, error))
+        failures, error, expected = self._known_navigation_failure()
+        self.assertFalse(producer._worker_failure_can_continue("candidate", failures, error,
+                                                               expected))
+
+    def test_only_exact_fragment_refusal_is_noncomparable(self) -> None:
+        failures, error, expected = self._known_navigation_failure()
+        wrong_fragment = copy.copy(error)
+        wrong_fragment.stderr = b'navigation is not allowed: #other\n'
+        self.assertFalse(producer._worker_failure_can_continue(
+            "baseline", failures, wrong_fragment, expected,
+        ))
+        wrong_condition = copy.deepcopy(expected)
+        wrong_condition["catalogCondition"]["condition_id"] = (
+            "navigation/top/other@1"
+        )
+        self.assertFalse(producer._worker_failure_can_continue(
+            "baseline", failures, error, wrong_condition,
+        ))
 
     def test_closed_baseline_failure_keeps_attempt_pin_for_transport(self) -> None:
         failures: list[gate.JsonObject] = []
@@ -1001,12 +1108,14 @@ class WorkerAttemptContractTest(unittest.TestCase):
         self.assertTrue(Path(pins[0]["path"]).is_file())
 
     def test_baseline_failure_with_unknown_closure_fails_closed(self) -> None:
-        failures, error = self._collect_failed_worker_sample(returncode=7, closed=False)
-        self.assertFalse(producer._worker_failure_can_continue("baseline", failures, error))
+        failures, error, expected = self._known_navigation_failure(closed=False)
+        self.assertFalse(producer._worker_failure_can_continue("baseline", failures, error,
+                                                               expected))
 
     def test_signal_terminated_baseline_failure_fails_closed(self) -> None:
         failures, error = self._collect_failed_worker_sample(returncode=-15, closed=True)
-        self.assertFalse(producer._worker_failure_can_continue("baseline", failures, error))
+        self.assertFalse(producer._worker_failure_can_continue("baseline", failures, error,
+                                                               self._known_navigation_expected()))
 
     def _condition_case(
         self,
@@ -1104,7 +1213,7 @@ class WorkerAttemptContractTest(unittest.TestCase):
                 ):
                     gate._validate_report(mutated, dict(expected))
 
-    def test_condition_collection_keeps_candidates_after_baseline_failure(self) -> None:
+    def test_condition_collection_rejects_unknown_baseline_failure_before_candidates(self) -> None:
         candidate_build, candidate_binary, snapshot, arms, expected, row = self._condition_case()
         baseline_calls = 0
         candidate_calls = 0
@@ -1149,26 +1258,89 @@ class WorkerAttemptContractTest(unittest.TestCase):
                     {"before": 0.1, "after": 0.1}, [success_record])
 
         with patch.object(producer, "collect_worker_sample", side_effect=collect_sample):
+            with self.assertRaises(subprocess.CalledProcessError):
+                producer._collect_condition_worker_pairs(
+                    folder=self.root / "condition", row=row, expected=expected,
+                    fixture=self.fixture, plan_path=self.plan, width=800, height=600,
+                    viewport=self.viewport,
+                    builds={"baseline": self.build, "candidate": candidate_build},
+                    binaries={"baseline": self.binary, "candidate": candidate_binary}, arms=arms,
+                    root=self.root, lifecycle=self.logs, lock=self.plan, snapshot=snapshot,
+                    environment_sha="e" * 64,
+                )
+        self.assertEqual(baseline_calls, 1)
+        self.assertEqual(candidate_calls, 0)
+
+    def test_known_baseline_refusal_collects_and_requires_all_candidate_samples(self) -> None:
+        candidate_build, candidate_binary, snapshot, arms, expected, row = self._condition_case()
+        failed_attempts, failure, known = self._known_navigation_failure()
+        expected["referenceParent"] = known["referenceParent"]
+        expected["catalogCondition"] = known["catalogCondition"]
+        expected["catalogCondition"].update({"case_id": "navigation", "state": "top"})
+        expected["operationEvidenceRef"] = snapshot
+        row.update({"catalog": True, "condition_id": "navigation/top/1280x900@1",
+                    "case_id": "navigation", "state": "top", "operation_kind": "navigation",
+                    "operation_evidence": snapshot})
+        baseline_id = gate.baseline_arm_id(expected)
+        arms[baseline_id] = arms.pop("baseline-0.4.23")
+        expected["arms"] = arms
+        baseline_calls = 0
+        candidate_calls = 0
+
+        def collect_sample(
+            build: typed_producer.ArmBuildResult, sample: int, _fixture: Path,
+            _report_path: Path, _plan_path: Path, _width: int, _height: int,
+            _scale: int, _root: Path, _environment: Mapping[str, str],
+            _lifecycle: Path, attempts_directory: Path,
+            failure_sink: Callable[[list[gate.JsonObject]], None] | None = None,
+            *, batch_deadline: float | None = None,
+        ) -> tuple[gate.JsonObject, dict[str, float], list[gate.JsonObject]]:
+            nonlocal baseline_calls, candidate_calls
+            if build is self.build:
+                baseline_calls += 1
+                if failure_sink is None:
+                    raise AssertionError("baseline failure sink missing")
+                failure_sink(failed_attempts)
+                raise failure
+            candidate_calls += 1
+            attempts_directory.mkdir(parents=True, exist_ok=True)
+            pin = producer.write(attempts_directory / f"attempt-{sample}.json", {
+                "sample": sample, "actualExit": 0,
+            })
+            payload = self._worker_report_sample(expected)
+            payload["catalog_condition"] = {
+                "profile": "catalog-plan84", "condition_id": row["condition_id"],
+                "case_id": row["case_id"], "state": row["state"],
+                "operation_kind": row["operation_kind"],
+                "operation_evidence_sha256": snapshot["sha256"],
+            }
+            return payload, {"before": 0.1, "after": 0.1}, [
+                {"sample": sample, "attemptRecord": pin},
+            ]
+
+        with patch.object(producer, "collect_worker_sample", side_effect=collect_sample):
             collection = producer._collect_condition_worker_pairs(
-                folder=self.root / "condition", row=row, expected=expected,
+                folder=self.root / "known-condition", row=row, expected=expected,
                 fixture=self.fixture, plan_path=self.plan, width=800, height=600,
-                viewport=self.viewport, builds={"baseline": self.build, "candidate": candidate_build},
+                viewport=self.viewport,
+                builds={"baseline": self.build, "candidate": candidate_build},
                 binaries={"baseline": self.binary, "candidate": candidate_binary}, arms=arms,
                 root=self.root, lifecycle=self.logs, lock=self.plan, snapshot=snapshot,
                 environment_sha="e" * 64,
             )
-        self.assertEqual(baseline_calls, 1)
-        self.assertEqual(candidate_calls, 25)
-        self.assertEqual(sum(item.get("status") == "missing" for item in collection.order), 4)
-        self.assertEqual(sum(item.get("status") == "incomplete" for item in collection.order), 1)
-        incomplete = next(item for item in collection.order
-                          if item.get("status") == "incomplete")
-        self.assertEqual(incomplete["workerLoads"], [])
-        failed_loads = gate._array(incomplete["failedWorkerLoads"], "failed worker loads")
-        self.assertEqual(failed_loads, [{"before": 0.1, "after": 0.1}])
-        self.assertNotIn("status", gate._object(failed_loads[0], "failed worker load"))
-        self.assertEqual(len(collection.reports), 10)
+        self.assertEqual((baseline_calls, candidate_calls), (1, 25))
+        self.assertEqual([failure["status"] for failure in collection.failures],
+                         ["nonComparable", "missing", "missing", "missing", "missing"])
         self.assertEqual(collection.actual_phase_records, len(gate.PHASES) * 25)
+        self.assertEqual(len(collection.reports), 10)
+        policy = producer._condition_measurement_policy(
+            collection.reports, expected, collection.failures, collection.actual_phase_records)
+        self.assertIs(policy["candidateOperationalPass"], True)
+        self.assertEqual(policy["candidateSamples"], 25)
+        candidate_missing = [p for p in collection.reports if p.name != "candidate-0.json"]
+        with self.assertRaisesRegex(ValueError, "five candidate reports"):
+            producer._condition_measurement_policy(
+                candidate_missing, expected, collection.failures, collection.actual_phase_records)
 
     def test_condition_collection_budget_stops_before_next_worker(self) -> None:
         candidate_build, candidate_binary, snapshot, arms, expected, row = self._condition_case()
@@ -1217,7 +1389,8 @@ class WorkerAttemptContractTest(unittest.TestCase):
                         self.logs, self.attempts, failures.extend,
                     )
                 except subprocess.CalledProcessError as error:
-                    self.assertTrue(producer._worker_failure_can_continue("baseline", failures, error))
+                    self.assertFalse(producer._worker_failure_can_continue(
+                        "baseline", failures, error, self._known_navigation_expected()))
                     attempts.extend(failures)
                     break
                 samples.append(payload)

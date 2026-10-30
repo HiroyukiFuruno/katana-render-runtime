@@ -1277,7 +1277,9 @@ class PerformanceEvidenceTest(unittest.TestCase):
                 )
                 reports.append(self.bundle / f"{index}/reports/{arm}-{pair}.json")
         policy = gate.evaluate_measurement_policy(reports, expected)
-        result = {"measurementExecuted": True, "performanceAccepted": False, "formalAccepted": False, **{k: True for k in gate.ENDPOINT_FLAGS}, "policy": policy}
+        result = {"measurementExecuted": True, "performanceAccepted": False,
+                  "formalAccepted": False, **{k: True for k in gate.ENDPOINT_FLAGS},
+                  "comparisonStatus": "paired", "policy": policy}
         expected_pin = self.add_file(attempt + "/expected-enriched.json", f"{index}/expected-enriched.json", expected)
         result_pin = self.add_file(attempt + "/result.json", f"{index}/result.json", result)
         manifest_pin = self.add_file(attempt + "/pair-manifest.json", f"{index}/pair-manifest.json", manifest)
@@ -1337,6 +1339,253 @@ class PerformanceEvidenceTest(unittest.TestCase):
     def reject(self) -> None:
         with self.assertRaises((ValueError, KeyError)):
             gate._verify_legacy_diagnostic(self.bundle, self.root)
+
+    def test_noncomparable_fragment_allowlist_is_exact_and_parent_bound(self) -> None:
+        parent = "reference-parent-371274ed"
+        reference_parent = {"role": parent, "referenceKind": "correct-parent-source",
+                            "publishedSdk": False, "armId": parent}
+        for condition_id, fragment in gate.NON_COMPARABLE_BASELINE_FRAGMENT_FAILURES.items():
+            expected = {"referenceParent": reference_parent,
+                        "catalogCondition": {"condition_id": condition_id,
+                                             "operation_kind": "navigation"}}
+            with self.subTest(condition_id=condition_id):
+                self.assertEqual(gate.non_comparable_baseline_fragment(expected), fragment)
+        condition_id = next(iter(gate.NON_COMPARABLE_BASELINE_FRAGMENT_FAILURES))
+        expected = {"referenceParent": reference_parent,
+                    "catalogCondition": {"condition_id": condition_id,
+                                         "operation_kind": "navigation"}}
+        with self.assertRaisesRegex(ValueError, "reference parent contract identity differs"):
+            gate.non_comparable_baseline_fragment({
+                **expected, "referenceParent": {**reference_parent, "publishedSdk": True},
+            })
+        self.assertIsNone(gate.non_comparable_baseline_fragment({
+            **expected, "catalogCondition": {**expected["catalogCondition"],
+                                             "operation_kind": "static"},
+        }))
+
+    def _noncomparable_baseline_fixture(
+        self, label: str, *, stderr: bytes | None = None,
+        group_closed: bool = True, actual_exit: int = 1,
+    ) -> tuple[Bundle, JsonObject, JsonObject, JsonObject, JsonObject]:
+        parent = "reference-parent-371274ed"
+        expected = json.loads(self.expected_paths[0].read_text())
+        arms = json_object(expected["arms"])
+        arms[parent] = arms.pop("baseline-0.4.23")
+        expected["referenceParent"] = {
+            "role": parent, "referenceKind": "correct-parent-source",
+            "publishedSdk": False, "armId": parent,
+        }
+        expected["catalogCondition"] = {
+            "condition_id": "navigation/top/1280x900@1",
+            "case_id": "navigation-top", "state": "top",
+            "operation_kind": "navigation",
+            "fixture_path": str(self.root / "tests/fixtures/html/interaction-fidelity.html"),
+        }
+        expected["operationPlanRef"] = self.plan_pin
+        expected["operationEvidenceRef"] = self.dom_pin
+        report = json.loads(self.report_paths[0][0].read_text())
+        failure: JsonObject = {
+            "status": "nonComparable",
+            "reason": "known baseline fragment navigation refusal",
+            "conditionId": "navigation/top/1280x900@1", "fragment": "#a",
+            "sample": 0, "attempt": 1, "actualExit": 1,
+            "errorType": "CalledProcessError",
+        }
+        report.update(
+            arm=parent, measurement_executed=False, sample_count=0, samples=[],
+            operation_evidence_ref=self.dom_pin,
+            condition_id="navigation/top/1280x900@1", case_id="navigation-top",
+            state="top", operation_kind="navigation",
+            catalog_condition=expected["catalogCondition"], failure=failure,
+        )
+        report_ref = self.add_file(
+            f"/captured/{label}/baseline-0.json", f"noncomparable/{label}/baseline-0.json",
+            report,
+        )
+        executable = self.binary_refs["baseline"]["path"]
+        output = report_ref["path"]
+        row: JsonObject = {
+            "arm": "baseline", "pair_index": 0, "executable": executable,
+            "output": output, "workerLoads": [], "load_ratio_before": 0.1,
+            "load_ratio_after": 0.1, "failedWorkerLoads": [{"before": 0.1, "after": 0.1}],
+            "status": "nonComparable", "failure": failure,
+        }
+        attempt = self._noncomparable_worker_attempt(
+            label, row, expected, actual_exit=actual_exit,
+            stderr=stderr, group_closed=group_closed,
+        )
+        row["workerAttempts"] = [attempt]
+        self.save_transport()
+        return gate.Bundle(self.bundle), expected, row, report, failure
+
+    def _noncomparable_worker_attempt(
+        self, label: str, row: JsonObject, expected: JsonObject, *,
+        actual_exit: int, stderr: bytes | None, group_closed: bool,
+    ) -> JsonObject:
+        stdout = self.add_file(f"/captured/{label}/stdout.raw",
+                               f"noncomparable/{label}/stdout.raw", b"")
+        diagnostic = (stderr if stderr is not None else
+                      b'Error: RuntimeFailure { error: "navigation is not allowed: #a" }\n')
+        stderr_ref = self.add_file(f"/captured/{label}/stderr.raw",
+                                   f"noncomparable/{label}/stderr.raw", diagnostic)
+        viewport = json_object(expected["viewport"])
+        lifecycle = {
+            "role": "worker", "identity": {"pid": 4242}, "exitCode": actual_exit,
+            "groupClosed": group_closed, "rawFdsClosed": True,
+            "failure": None, "cleanupFailure": None,
+            "argv": [row["executable"], "--worker", "0",
+                     json_object(expected["catalogCondition"])["fixture_path"],
+                     row["output"], json_object(expected["operationPlanRef"])["path"],
+                     str(viewport["width"]), str(viewport["height"]), str(viewport["scale"])],
+            "raw": [stdout, stderr_ref],
+        }
+        lifecycle_ref = self.add_file(f"/captured/{label}/lifecycle.json",
+                                      f"noncomparable/{label}/lifecycle.json", lifecycle)
+        expected_arms = json_object(expected["arms"])
+        binary_sha = json_object(expected_arms["reference-parent-371274ed"])["binary_sha256"]
+        attempt: JsonObject = {
+            "sample": 0, "attempt": 1, "actualExit": actual_exit,
+            "workerStarted": True, "accepted": False,
+            "reason": "worker command exited nonzero",
+            "binarySha256Before": binary_sha, "binarySha256After": binary_sha,
+            "loadRatioBefore": 0.1, "loadRatioAfter": 0.1,
+            "lifecycle": lifecycle_ref,
+        }
+        record = self.add_file(f"/captured/{label}/attempt.json",
+                               f"noncomparable/{label}/attempt.json", attempt)
+        return {**attempt, "attemptRecord": record}
+
+    def test_noncomparable_baseline_attempt_requires_exact_closed_fragment_refusal(self) -> None:
+        bundle, expected, row, report, failure = self._noncomparable_baseline_fixture("valid")
+        gate._validate_noncomparable_baseline_order(
+            bundle, expected, row, report, 0, "#a", failure,
+        )
+        invalid_cases = (
+            ("stderr", {"stderr": b'navigation is not allowed: #other\n'}),
+            ("lifecycle", {"group_closed": False}),
+            ("exit", {"actual_exit": 7}),
+        )
+        for label, options in invalid_cases:
+            with self.subTest(label=label), self.assertRaises(ValueError):
+                bundle, expected, row, report, failure = self._noncomparable_baseline_fixture(
+                    label, **options,
+                )
+                gate._validate_noncomparable_baseline_order(
+                    bundle, expected, row, report, 0, "#a", failure,
+                )
+
+    def test_noncomparable_candidate_report_keeps_all_samples_under_three_seconds(self) -> None:
+        expected = json.loads(self.expected_paths[0].read_text())
+        identity = {
+            "condition_id": "navigation/top/1280x900@1", "case_id": "navigation-top",
+            "state": "top", "operation_kind": "navigation",
+        }
+        evidence_ref = {"path": "/captured/operation.json", "sha256": "d" * 64}
+        expected["catalogCondition"] = identity
+        expected["operationEvidenceRef"] = evidence_ref
+        report = json.loads(next(
+            path for path in self.report_paths[0] if path.name.startswith("candidate")
+        ).read_text())
+        report.update(
+            condition_id=identity["condition_id"], case_id=identity["case_id"],
+            state=identity["state"], operation_kind=identity["operation_kind"],
+            operation_evidence_ref=evidence_ref, catalog_condition=identity,
+        )
+        for sample in json_array(report["samples"]):
+            json_object(sample)["catalog_condition"] = {
+                "profile": "catalog-plan84", **identity,
+                "operation_evidence_sha256": evidence_ref["sha256"],
+            }
+        arm, samples = gate._validate_report(report, expected)
+        self.assertEqual((arm, len(samples)), ("candidate", 5))
+        invalid = json.loads(json.dumps(report))
+        json_object_at(invalid, "samples", 0, "phases", "warm_open")["elapsed_ms"] = 3000
+        with self.assertRaisesRegex(ValueError, "under 3000 ms"):
+            gate._validate_report(invalid, expected)
+        invalid = json.loads(json.dumps(report))
+        invalid["sample_count"] = 4
+        with self.assertRaisesRegex(ValueError, "sample_count does not match samples"):
+            gate._validate_report(invalid, expected)
+
+    def test_attempt_validation_rejects_noncomparable_endpoint_and_candidate_count_mutations(self) -> None:
+        self.mutate_json(
+            self.result_paths[0], lambda result: result.update(
+                sourceBeforeEqualsEnd=False, comparisonStatus="nonComparable",
+            ),
+        )
+        endpoint_attempt = json_object(json_array(self.transport["attempts"])[0])
+        with self.assertRaisesRegex(ValueError, "measurement/endpoint proof absent or false"):
+            gate.validate_attempt(gate.Bundle(self.bundle), self.root, endpoint_attempt)
+        self.mutate_json(
+            self.result_paths[0], lambda result: result.update(
+                sourceBeforeEqualsEnd=True, comparisonStatus="paired",
+            ),
+        )
+
+        candidate = next(
+            path for path in self.report_paths[0] if path.name.startswith("candidate")
+        )
+
+        def remove_candidate_sample(report: JsonObject) -> None:
+            json_array(report["samples"]).pop()
+            report["sample_count"] = 4
+
+        self.mutate_report(candidate, remove_candidate_sample)
+        attempt = json_object(json_array(self.transport["attempts"])[0])
+        with self.assertRaisesRegex(ValueError, "actual five samples required"):
+            gate.validate_attempt(gate.Bundle(self.bundle), self.root, attempt)
+
+    def _summary_validation_fixture(
+        self, *, field: str, value: int,
+    ) -> tuple[Bundle, list[JsonObject]]:
+        self.transport["attempts"] = []
+        for index in range(84):
+            condition_id = f"paired-condition-{index}"
+            expected = {"catalogCondition": {"condition_id": condition_id}}
+            refs = [
+                self.add_file(
+                    f"/captured/summary/{field}/{index}/{name}.json",
+                    f"summary/{field}/{index}/{name}.json", payload,
+                )
+                for name, payload in (("expected", expected), ("result", {}), ("manifest", {}))
+            ]
+            json_array(self.transport["attempts"]).append(
+                {"expected": refs[0], "result": refs[1], "pairManifest": refs[2]}
+            )
+        summaries: list[JsonObject] = []
+        for index in range(72):
+            summaries.append({
+                "catalogCondition": {"condition_id": f"paired-condition-{index}"},
+                "comparisonStatus": "paired", "candidateSamples": 25,
+                "sampleRecords": 50, "phaseRecords": len(gate.PHASES) * 50,
+            })
+        for condition_id in gate.NON_COMPARABLE_BASELINE_FRAGMENT_FAILURES:
+            summaries.append({
+                "catalogCondition": {"condition_id": condition_id},
+                "comparisonStatus": "nonComparable", "candidateSamples": 25,
+                "sampleRecords": 25, "phaseRecords": len(gate.PHASES) * 25,
+            })
+        summaries[0][field] = value
+        self.save_transport()
+        return gate.Bundle(self.bundle), summaries
+
+    def test_catalog_summary_rejects_mutated_72_12_sample_and_phase_totals(self) -> None:
+        mutations = (
+            ("candidateSamples", 2_099),
+            ("sampleRecords", 3_899),
+            ("phaseRecords", 23_399),
+        )
+        for field, value in mutations:
+            with self.subTest(field=field):
+                bundle, summaries = self._summary_validation_fixture(field=field, value=value)
+                with patch.object(gate, "validate_attempt", side_effect=summaries):
+                    with self.assertRaisesRegex(
+                        ValueError, "catalog candidate/sample/phase totals differ",
+                    ):
+                        gate._verify(
+                            self.bundle, self.root, require_catalog=False,
+                            diagnostic_catalog=True,
+                        )
 
     def change_candidate_metric(self, path: Path, phase: str, metric: str, value: int) -> None:
         self.mutate_report(

@@ -214,6 +214,20 @@ ENDPOINT_FLAGS = ("sourceBeforeEqualsEnd", "inputsBeforeEqualsEnd", "registryBef
 HARNESS_ROOT = "scripts/html/performance-harness/"
 DEFAULT_BASELINE_ARM_ID = "baseline-0.4.23"
 REFERENCE_PARENT_ARM_ID = "reference-parent-371274ed"
+NON_COMPARABLE_BASELINE_FRAGMENT_FAILURES = {
+    "navigation/top/1280x900@1": "#a",
+    "navigation/top/960x720@1": "#a",
+    "navigation/top/620x900@1": "#a",
+    "navigation/middle/1280x900@1": "#b",
+    "navigation/middle/960x720@1": "#b",
+    "navigation/middle/620x900@1": "#b",
+    "navigation/bottom/1280x900@1": "#c",
+    "navigation/bottom/960x720@1": "#c",
+    "navigation/bottom/620x900@1": "#c",
+    "navigation/all-toc-links/1280x900@1": "#a",
+    "navigation/all-toc-links/960x720@1": "#a",
+    "navigation/all-toc-links/620x900@1": "#a",
+}
 
 
 class PendingEvidence(ValueError):
@@ -233,6 +247,19 @@ def baseline_arm_id(expected: Mapping[str, object]) -> str:
     arm_id = _text(value.get("armId"), "reference parent arm id")
     require(arm_id == REFERENCE_PARENT_ARM_ID, "reference parent arm id differs")
     return arm_id
+
+
+def non_comparable_baseline_fragment(expected: Mapping[str, object]) -> str | None:
+    """既知の旧parent fragment拒否だけを比較不能候補として識別する。"""
+    if baseline_arm_id(expected) != REFERENCE_PARENT_ARM_ID:
+        return None
+    catalog = expected.get("catalogCondition")
+    if not isinstance(catalog, dict) or catalog.get("operation_kind") != "navigation":
+        return None
+    condition_id = catalog.get("condition_id")
+    if not isinstance(condition_id, str):
+        return None
+    return NON_COMPARABLE_BASELINE_FRAGMENT_FAILURES.get(condition_id)
 
 
 def require(ok: bool, message: str) -> None:
@@ -1437,7 +1464,9 @@ def _phase_sample(sample: JsonObject, phase: str) -> tuple[float, float]:
     return elapsed, rss
 
 
-def _validate_report(report: JsonObject, expected: JsonObject) -> tuple[str, list[JsonObject]]:
+def _validate_report(
+    report: JsonObject, expected: JsonObject, *, allow_empty_samples: bool = False,
+) -> tuple[str, list[JsonObject]]:
     arm = report.get("arm")
     expected_arms = _object(expected["arms"], "expected arms")
     if not isinstance(arm, str) or arm not in expected_arms:
@@ -1478,7 +1507,7 @@ def _validate_report(report: JsonObject, expected: JsonObject) -> tuple[str, lis
         ):
             raise ValueError("report catalog condition identity differs")
     samples = report.get("samples")
-    if not isinstance(samples, list) or not samples:
+    if not isinstance(samples, list) or (not samples and not allow_empty_samples):
         raise ValueError("report has no samples")
     if report.get("sample_count") != len(samples):
         raise ValueError("sample_count does not match samples")
@@ -1552,6 +1581,172 @@ def _validate_report(report: JsonObject, expected: JsonObject) -> tuple[str, lis
             }:
                 raise ValueError("sample catalog condition identity differs")
     return arm, sample_objects
+
+
+def _validate_noncomparable_baseline_order(
+    bundle: Bundle, expected: JsonObject, row: JsonObject, report: JsonObject,
+    pair: int, fragment: str, failure: JsonObject,
+) -> None:
+    condition = _object(expected.get("catalogCondition"), "non-comparable catalog condition")
+    condition_id = _text(condition.get("condition_id"), "non-comparable condition id")
+    baseline_id = baseline_arm_id(expected)
+    arm, samples = _validate_report(report, expected, allow_empty_samples=True)
+    require(arm == baseline_id and samples == [] and report.get("sample_count") == 0
+            and report.get("measurement_executed") is False,
+            "non-comparable baseline report must contain no measured samples")
+    require(row.get("arm") == "baseline" and row.get("pair_index") == pair
+            and row.get("workerLoads") == [],
+            "non-comparable baseline order contains measured worker loads")
+    if pair > 0:
+        missing: JsonObject = {
+            "status": "missing",
+            "reason": "baseline skipped after known fragment refusal",
+            "afterFailure": failure,
+        }
+        require(row.get("load_ratio_before") is None and row.get("load_ratio_after") is None
+                and row.get("status") == "missing" and row.get("failure") == missing
+                and report.get("failure") == missing and row.get("workerAttempts") == [],
+                "non-comparable skipped baseline row differs")
+        return
+    expected_failure: JsonObject = {
+        "status": "nonComparable",
+        "reason": "known baseline fragment navigation refusal",
+        "conditionId": condition_id,
+        "fragment": fragment,
+        "sample": 0,
+        "attempt": 1,
+        "actualExit": 1,
+        "errorType": "CalledProcessError",
+    }
+    require(failure == expected_failure and row.get("failure") == failure
+            and report.get("failure") == failure and row.get("status") == "nonComparable",
+            "non-comparable baseline failure classification differs")
+    attempts = _objects(row.get("workerAttempts"), "non-comparable worker attempts")
+    require(len(attempts) == 1, "known fragment refusal requires one failed worker attempt")
+    _validate_noncomparable_worker_attempt(bundle, expected, row, attempts[0], fragment)
+
+
+def _validate_noncomparable_worker_attempt(
+    bundle: Bundle, expected: JsonObject, row: JsonObject,
+    attempt: JsonObject, fragment: str,
+) -> None:
+    require(attempt.get("sample") == 0 and attempt.get("attempt") == 1
+            and attempt.get("actualExit") == 1 and attempt.get("workerStarted") is True
+            and attempt.get("accepted") is False
+            and attempt.get("reason") == "worker command exited nonzero",
+            "known baseline worker attempt identity differs")
+    expected_arms = _object(expected.get("arms"), "expected arms")
+    expected_arm = _object(expected_arms.get(baseline_arm_id(expected)),
+                           "expected baseline arm")
+    binary_sha = expected_arm.get("binary_sha256")
+    require(attempt.get("binarySha256Before") == binary_sha
+            and attempt.get("binarySha256After") == binary_sha,
+            "known baseline worker binary differs")
+    before = _number(attempt.get("loadRatioBefore"), "baseline worker load before")
+    after = _number(attempt.get("loadRatioAfter"), "baseline worker load after")
+    require(0 <= before <= 0.25 and 0 <= after <= 0.25,
+            "known baseline worker load exceeded the quiet limit")
+    lifecycle = _validated_noncomparable_attempt_lifecycle(bundle, attempt)
+    _validate_noncomparable_lifecycle(bundle, expected, row, lifecycle, fragment)
+    failed_loads = _objects(row.get("failedWorkerLoads"), "failed baseline worker loads")
+    require(len(failed_loads) == 1
+            and failed_loads[0] == {"before": before, "after": after}
+            and row.get("load_ratio_before") == before
+            and row.get("load_ratio_after") == after,
+            "known baseline worker load observation differs")
+
+
+def _validated_noncomparable_attempt_lifecycle(
+    bundle: Bundle, attempt: JsonObject,
+) -> JsonObject:
+    record_ref = _object(attempt.get("attemptRecord"), "worker attempt record reference")
+    record = read_json(bundle.file(record_ref))
+    require(record == {key: value for key, value in attempt.items() if key != "attemptRecord"},
+            "known baseline worker attempt record differs")
+    lifecycle_ref = _object(attempt.get("lifecycle"), "worker lifecycle reference")
+    require(record.get("lifecycle") == lifecycle_ref,
+            "worker attempt lifecycle reference differs")
+    return read_json(bundle.file(lifecycle_ref))
+
+
+def _validate_noncomparable_lifecycle(
+    bundle: Bundle, expected: JsonObject, row: JsonObject,
+    lifecycle: JsonObject, fragment: str,
+) -> None:
+    identity = _object(lifecycle.get("identity"), "worker lifecycle identity")
+    pid = identity.get("pid")
+    argv = _array(lifecycle.get("argv"), "worker lifecycle argv")
+    catalog = _object(expected.get("catalogCondition"), "catalog condition")
+    viewport = _object(expected.get("viewport"), "worker viewport")
+    operation_plan = _object(expected.get("operationPlanRef"), "operation plan reference")
+    require(
+        lifecycle.get("role") == "worker" and lifecycle.get("exitCode") == 1
+        and type(pid) is int and pid > 0
+        and lifecycle.get("groupClosed") is True and lifecycle.get("rawFdsClosed") is True
+        and lifecycle.get("failure") is None and lifecycle.get("cleanupFailure") is None
+        and len(argv) == 9 and argv[0] == row.get("executable")
+        and argv[1:3] == ["--worker", "0"]
+        and argv[3] == catalog.get("fixture_path") and argv[4] == row.get("output")
+        and argv[5] == operation_plan.get("path")
+        and argv[6:] == [str(viewport["width"]), str(viewport["height"]),
+                         str(viewport["scale"])],
+        "known baseline worker lifecycle/argv differs",
+    )
+    _validate_noncomparable_raw_streams(bundle, lifecycle, fragment)
+
+
+def _validate_noncomparable_raw_streams(
+    bundle: Bundle, lifecycle: JsonObject, fragment: str,
+) -> None:
+    raw = _objects(lifecycle.get("raw"), "worker lifecycle raw streams")
+    require(len(raw) == 2, "known baseline worker raw stream count differs")
+    stream_data: dict[str, bytes] = {}
+    for item in raw:
+        pin = {"path": item.get("path"), "sha256": item.get("sha256")}
+        path = bundle.file(pin)
+        if path.name == "stdout.raw":
+            stream_data["stdout"] = path.read_bytes()
+        elif path.name == "stderr.raw":
+            stream_data["stderr"] = path.read_bytes()
+    expected_error = (
+        f'Error: RuntimeFailure {{ error: "navigation is not allowed: {fragment}" }}'
+    ).encode()
+    require(set(stream_data) == {"stdout", "stderr"}
+            and stream_data["stderr"].splitlines() == [expected_error],
+            "known baseline fragment refusal diagnostic differs")
+
+
+def _validated_attempt_summary(
+    expected: JsonObject, source: SourceContract, comparison_status: str,
+    candidate_samples: int | None = None,
+    sample_records: int | None = None,
+    phase_records: int | None = None,
+) -> JsonObject:
+    summary: JsonObject = {
+        "viewport": expected["viewport"], "source": source,
+        "fixture": expected["fixture_sha256"], "operation": expected["operation"],
+        "plan": expected["operation_plan_sha256"],
+        "dom": expected["expected_dom_state_sha256"],
+        "provenance": expected["provenance"], "arms": expected["arms"],
+        "comparisonStatus": comparison_status,
+    }
+    if candidate_samples is not None:
+        summary["candidateSamples"] = candidate_samples
+    if sample_records is not None:
+        summary["sampleRecords"] = sample_records
+    if phase_records is not None:
+        summary["phaseRecords"] = phase_records
+    catalog_keys = (
+        "catalogCondition", "catalogManifestRef", "catalogPlanRef",
+        "operationEvidenceRef", "catalogCaptureValidationRef",
+        "catalogBinaryProofRef", "catalogBuildReportRef", "catalogCaptureBinaryRef",
+        "catalogCurrentBuildReportRef", "chromeCaptureRef", "chromeReceiptRef",
+        "fontIdentityRequestRef", "fontIdentityResponseRef", "fontIdentityProbeBinary",
+    )
+    for key in catalog_keys:
+        if key in expected:
+            summary[key] = expected[key]
+    return summary
 
 
 def aggregate_reports(reports: list[JsonObject], expected: JsonObject) -> ArmAggregate:
@@ -1839,7 +2034,26 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
                 "catalog pair manifest condition/evidence differs")
     order, pins = _objects(manifest["order"], "pair order"), _objects(expected["reportPins"], "report pins")
     require(len(order) == len(pins) == 10, "five paired runs required")
+    non_comparable_fragment = non_comparable_baseline_fragment(expected)
+    is_non_comparable = manifest.get("measurement_status") == "nonComparable"
+    non_comparable_failure: JsonObject | None = None
+    if is_non_comparable:
+        non_comparable_condition = _object(catalog_expected, "non-comparable catalog condition")
+        require(non_comparable_fragment is not None
+                and result.get("comparisonStatus") == "nonComparable",
+                "non-comparable measurement is not an approved baseline condition")
+        failures = _objects(manifest.get("failures"), "non-comparable failures")
+        require(len(failures) == 5, "non-comparable condition must retain five baseline slots")
+        non_comparable_failure = failures[0]
+        require(non_comparable_failure.get("status") == "nonComparable"
+                and non_comparable_failure.get("conditionId") == non_comparable_condition["condition_id"]
+                and non_comparable_failure.get("fragment") == non_comparable_fragment,
+                "non-comparable failure does not match its catalog condition")
+    else:
+        require(result.get("comparisonStatus") == "paired",
+                "paired comparison status is missing")
     paths = []
+    candidate_reports: list[JsonObject] = []
     for index in range(len(order)):
         row, pin = order[index], pins[index]
         pair = index // 2
@@ -1854,7 +2068,21 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
         path = bundle.file(pin)
         require(path.name == f"{arm}-{pair}.json", "transport must retain report basename")
         report = read_json(path)
+        if is_non_comparable and arm == "baseline":
+            require(non_comparable_failure is not None,
+                    "non-comparable baseline failure is missing")
+            _validate_noncomparable_baseline_order(
+                bundle, expected, row, report, pair,
+                cast(str, non_comparable_fragment), cast(JsonObject, non_comparable_failure),
+            )
+            continue
         require(report["measurement_executed"] is True and type(report["pair_index"]) is int and type(report["sample_count"]) is int and report["sample_count"] == 5, "actual five samples required")
+        if is_non_comparable:
+            arm_from_report, samples_from_report = _validate_report(report, expected)
+            require(arm_from_report == "candidate" and len(samples_from_report) == 5
+                    and not report.get("failure"),
+                    "non-comparable candidate report must contain five samples")
+            candidate_reports.append(report)
         if catalog_expected is not None:
             catalog = _object(catalog_expected, "catalog condition")
             require(report.get("condition_id") == catalog["condition_id"]
@@ -1916,13 +2144,49 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
         for key in ("load_ratio_before", "load_ratio_after"):
             value = _numeric(row[key], "quiet load")
             require(type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 0.25, "quiet load limit exceeded")
-        paths.append(path)
+        if not is_non_comparable or arm == "candidate":
+            paths.append(path)
+    if is_non_comparable:
+        condition = _object(catalog_expected, "non-comparable catalog condition")
+        condition_id = _text(condition.get("condition_id"), "non-comparable condition id")
+        first_failure = cast(JsonObject, non_comparable_failure)
+        expected_failures: list[JsonObject] = [first_failure]
+        expected_failures.extend({
+            "status": "missing",
+            "reason": "baseline skipped after known fragment refusal",
+            "afterFailure": first_failure,
+        } for _ in range(4))
+        require(manifest.get("failures") == expected_failures,
+                "non-comparable skipped baseline slots differ")
+        require(len(candidate_reports) == 5
+                and sum(len(_objects(row["samples"], "candidate samples"))
+                        for row in candidate_reports) == 25,
+                "non-comparable candidate requires all 25 samples")
+        expected_policy: JsonObject = {
+            "status": "nonComparable",
+            "policyPass": False,
+            "reason": "known baseline fragment navigation refusal",
+            "conditionId": condition_id,
+            "fragment": non_comparable_fragment,
+            "candidateOperationalPass": True,
+            "candidateSamples": 25,
+            "phaseRecords": len(PHASES) * 25,
+        }
+        require(result.get("policy") == expected_policy,
+                "saved non-comparable candidate policy differs")
+        return _validated_attempt_summary(
+            expected, source, "nonComparable", candidate_samples=25,
+            sample_records=25,
+            phase_records=len(PHASES) * 25,
+        )
     canonical_policy = evaluate_measurement_policy(paths, expected)
     aggregate = _object(canonical_policy["aggregate"], "canonical aggregate")
     require(aggregate["measurement_executed"] is True, "actual measurements absent")
     saved = _object(result["policy"], "measurement policy")
     require(saved == canonical_policy, "saved paired policy differs from raw reports")
     require(canonical_policy["policyPass"] is True, "paired time/RSS regression")
+    require(result.get("comparisonStatus") == "paired",
+            "paired condition comparison status differs")
     arms = _object(aggregate["arms"], "aggregate arms")
     arm_values = [_object(value, "aggregate arm") for value in arms.values()]
     require(all(a["sample_count"] == 25 and all(
@@ -1933,23 +2197,11 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
         for phase in PHASES
     ) for a in arm_values), f"{len(PHASES) * 50} phase records required")
     # 診断用acceptance:falseは許可し、生データの20条件だけで受理する。
-    result = {"viewport": expected["viewport"], "source": source, "fixture": expected["fixture_sha256"], "operation": expected["operation"], "plan": expected["operation_plan_sha256"], "dom": expected["expected_dom_state_sha256"], "provenance": expected["provenance"], "arms": expected["arms"]}
-    if catalog_expected is not None:
-        result["catalogCondition"] = catalog_expected
-        result["catalogManifestRef"] = expected["catalogManifestRef"]
-        result["catalogPlanRef"] = expected["catalogPlanRef"]
-        result["operationEvidenceRef"] = expected["operationEvidenceRef"]
-        result["catalogCaptureValidationRef"] = expected["catalogCaptureValidationRef"]
-        result["catalogBinaryProofRef"] = expected["catalogBinaryProofRef"]
-        result["catalogBuildReportRef"] = expected["catalogBuildReportRef"]
-        result["catalogCaptureBinaryRef"] = expected["catalogCaptureBinaryRef"]
-        result["catalogCurrentBuildReportRef"] = expected["catalogCurrentBuildReportRef"]
-        result["chromeCaptureRef"] = expected["chromeCaptureRef"]
-        result["chromeReceiptRef"] = expected["chromeReceiptRef"]
-        result["fontIdentityRequestRef"] = expected["fontIdentityRequestRef"]
-        result["fontIdentityResponseRef"] = expected["fontIdentityResponseRef"]
-        result["fontIdentityProbeBinary"] = expected["fontIdentityProbeBinary"]
-    return result
+    return _validated_attempt_summary(
+        expected, source, "paired", candidate_samples=25, sample_records=50,
+        phase_records=_integer(canonical_policy.get("phaseRecords"),
+                               "paired phase record count"),
+    )
 
 
 def _require_catalog_attempt_set(attempts: list[JsonObject], first_expected: JsonObject) -> None:
@@ -2011,6 +2263,29 @@ def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
                 bundle, root, first_expected, git_query=git_query)
         values = [validate_attempt(bundle, root, attempt, git_query=git_query,
                                    validated_builds=validated_builds) for attempt in attempts]
+        non_comparable_ids = {
+            _text(_object(value["catalogCondition"], "catalog condition")["condition_id"],
+                  "non-comparable condition id")
+            for value in values if value.get("comparisonStatus") == "nonComparable"
+        }
+        paired_conditions = sum(value.get("comparisonStatus") == "paired" for value in values)
+        non_comparable_conditions = len(non_comparable_ids)
+        require(
+            (paired_conditions == 84 and non_comparable_conditions == 0)
+            or (paired_conditions == 72
+                and non_comparable_ids == set(NON_COMPARABLE_BASELINE_FRAGMENT_FAILURES)),
+            "catalog performance requires 84 paired conditions or the exact 72/12 comparison set",
+        )
+        candidate_samples = sum(_integer(value.get("candidateSamples"),
+                                          "candidate sample count") for value in values)
+        sample_records = sum(_integer(value.get("sampleRecords"),
+                                       "sample record count") for value in values)
+        phase_records = sum(_integer(value.get("phaseRecords"),
+                                     "condition phase record count") for value in values)
+        expected_samples = 84 * 25 + paired_conditions * 25
+        require(candidate_samples == 84 * 25 and sample_records == expected_samples
+                and phase_records == sample_records * len(PHASES),
+                "catalog candidate/sample/phase totals differ")
         manifest_refs = {json.dumps(value["catalogManifestRef"], sort_keys=True) for value in values}
         plan_refs = {json.dumps(value["catalogPlanRef"], sort_keys=True) for value in values}
         validation_refs = {json.dumps(value["catalogCaptureValidationRef"], sort_keys=True) for value in values}
@@ -2161,7 +2436,12 @@ def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
                     f"independent stage90 score is below 90: {condition_id}")
         minimum_score = min(_numeric(row.get("score"), "independent stage90 score")
                             for row in validated_chrome)
-        return {"head": head, "checks": 1680, "phaseRecords": 84 * len(PHASES) * 50, "conditions": 84,
+        return {"head": head, "checks": 1680,
+                "phaseRecords": phase_records, "sampleRecords": sample_records,
+                "candidateSamples": candidate_samples,
+                "conditions": 84, "candidateConditions": 84,
+                "pairedConditions": paired_conditions,
+                "nonComparableConditions": non_comparable_conditions,
                 "htmlStage90": {"threshold": 90, "minimumScore": minimum_score,
                                 "acceptance": validation["acceptance"],
                                 "fontIdentityEquivalence": validation["fontIdentityEquivalence"]},
