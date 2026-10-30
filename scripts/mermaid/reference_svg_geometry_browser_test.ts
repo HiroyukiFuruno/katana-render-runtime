@@ -672,6 +672,8 @@ test.describe("paint projection evaluates actual candidate pixels", () => {
   let root: string | undefined;
   let observation: PaintProjectionObservation | undefined;
   let fixturePage: PageHandle | undefined;
+  let pendingScore: ReturnType<typeof scoreNativeFramePaintProjection> | undefined;
+  let pendingProjection: ReturnType<typeof rasterizePaintProjectedReferenceBatch> | undefined;
 
   test.beforeAll(async ({ browser }) => {
     const fixtureRoot = fs.realpathSync(
@@ -743,6 +745,8 @@ test.describe("paint projection evaluates actual candidate pixels", () => {
 
   test.afterAll(async () => {
     try {
+      await pendingScore;
+      await Promise.allSettled(pendingProjection === undefined ? [] : [pendingProjection]);
       if (observation !== undefined) {
         expect(observation.fixture.input.candidateSvgSha256).toBe(
           fileSha256(observation.fixture.input.candidateSvgPath),
@@ -792,6 +796,49 @@ test.describe("paint projection evaluates actual candidate pixels", () => {
       ).fullCanvasScore,
     ).toBe(100);
   });
+
+  test("parallel paint projection preserves input order and singleton PNG bytes", async () => {
+    const current = requirePaintProjectionObservation(observation);
+    const output = path.join(path.dirname(current.projectedDirectory), "parallel-order");
+    const inputs = ["parallel-first", "parallel-second"].map((slug) =>
+      projectionOutput(current.fixture.input, output, slug),
+    );
+    pendingProjection = rasterizePaintProjectedReferenceBatch(inputs, output, "dark");
+    const result = await pendingProjection;
+    expect(result.records.map((record) => record.slug)).toEqual(inputs.map((input) => input.slug));
+    const singleton = fs.readFileSync(current.projectedReferencePngPath);
+    for (const record of result.records) {
+      expect(fs.readFileSync(record.projectedReferencePngPath)).toEqual(singleton);
+    }
+  });
+
+  test("parallel paint projection drains the successful input before rejecting", async () => {
+    const current = requirePaintProjectionObservation(observation);
+    const root = path.dirname(current.projectedDirectory);
+    const output = path.join(root, "parallel-drain");
+    const invalid = invalidProjectionInput(root, output, "invalid-drain");
+    const valid = projectionOutput(current.fixture.input, output, "valid-drain");
+    pendingProjection = rasterizePaintProjectedReferenceBatch([invalid, valid], output, "dark");
+    await expect(pendingProjection).rejects.toThrow("Paint projection cannot map an SVG reference ID");
+    expect(fs.readFileSync(valid.outputPngPath)).toEqual(fs.readFileSync(current.projectedReferencePngPath));
+  });
+
+  test("parallel paint projection preserves both input failures", async () => {
+    const current = requirePaintProjectionObservation(observation);
+    const root = path.dirname(current.projectedDirectory);
+    const output = path.join(root, "parallel-errors");
+    const inputs = ["invalid-first", "invalid-second"].map((slug) =>
+      invalidProjectionInput(root, output, slug),
+    );
+    pendingProjection = rasterizePaintProjectedReferenceBatch(inputs, output, "dark");
+    const error: unknown = await pendingProjection.catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(AggregateError);
+    if (!(error instanceof AggregateError)) throw new Error("Expected both projection errors");
+    expect(error.errors).toHaveLength(inputs.length);
+    for (const reason of error.errors) {
+      expect(String(reason)).toContain("Paint projection cannot map an SVG reference ID");
+    }
+  });
   for (const variant of [
     {
       label: "candidate",
@@ -815,21 +862,18 @@ test.describe("paint projection evaluates actual candidate pixels", () => {
       const bridgeRoot = path.join(fixtureRoot, variant.label);
       fs.mkdirSync(bridgeRoot, { recursive: true, mode: 0o700 });
       const bridge = createNativeShapeBridgeFixture(currentObservation.fixture, variant.path());
-      try {
-        const result = await scoreNativeFramePaintProjection(
-          bridge.pairs,
-          bridge.evidence,
-          bridgeRoot,
-          "dark",
-          new MagickOps(path.join(fixtureRoot, "bridge-magick"), null, "dark"),
-        );
-        expect(result.scores.size).toBe(NATIVE_FRAME_TARGETS.length);
-        for (const score of result.scores.values()) {
-          if (variant.passes) expect(score.score).toBe(100);
-          else expect(score.score).toBeLessThan(99);
-        }
-      } finally {
-        fs.rmSync(bridgeRoot, { recursive: true, force: true });
+      pendingScore = scoreNativeFramePaintProjection(
+        bridge.pairs,
+        bridge.evidence,
+        bridgeRoot,
+        "dark",
+        new MagickOps(path.join(fixtureRoot, "bridge-magick"), null, "dark"),
+      );
+      const result = await pendingScore;
+      expect(result.scores.size).toBe(NATIVE_FRAME_TARGETS.length);
+      for (const score of result.scores.values()) {
+        if (variant.passes) expect(score.score).toBe(100);
+        else expect(score.score).toBeLessThan(99);
       }
     });
   }
@@ -877,6 +921,30 @@ function requirePaintProjectionObservation(
 ): PaintProjectionObservation {
   if (observation === undefined) throw new Error("Paint projection fixture was not initialized");
   return observation;
+}
+
+function projectionOutput(
+  input: PaintProjectedReferenceInput,
+  output: string,
+  slug: string,
+): PaintProjectedReferenceInput {
+  return {
+    ...input,
+    slug,
+    outputSvgPath: path.join(output, `${slug}-reference.svg`),
+    outputPngPath: path.join(output, `${slug}-reference.png`),
+  };
+}
+
+function invalidProjectionInput(root: string, output: string, slug: string) {
+  const source = path.join(root, `${slug}-source`);
+  fs.mkdirSync(source, { mode: 0o700 });
+  const input = createPaintProjectionInput(
+    source,
+    paintProjectionSvgWithIds(["official-root", "target-a", "target-b"], "#444444"),
+    paintProjectionSvgWithIds(["candidate-root", "shared", "shared"], "#4682d8"),
+  );
+  return projectionOutput(input, output, slug);
 }
 
 const paintProjectionIdMapCases = [

@@ -224,8 +224,21 @@ async function renderPaintProjectedBatch(
     throw new Error("Paint projected reference browser version is unavailable");
   }
   const records: PaintProjectedReferenceRecord[] = [];
-  for (const input of inputs) {
-    records.push(await renderPaintProjectedOne(input, browser, themeName));
+  const MAX_PARALLEL_INPUTS = 2;
+  for (let index = 0; index < inputs.length; index += MAX_PARALLEL_INPUTS) {
+    const results = await Promise.allSettled(
+      inputs.slice(index, index + MAX_PARALLEL_INPUTS).map((input) =>
+        renderPaintProjectedOne(input, browser, themeName),
+      ),
+    );
+    const failures = results.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (failures.length > 1) throw new AggregateError(failures, "Paint projection batch failed");
+    if (failures.length === 1) throw failures[0];
+    for (const result of results) {
+      if (result.status === "fulfilled") records.push(result.value);
+    }
   }
   return {
     policy: "browser-candidate-paint-projected-onto-official-geometry-raw-viewport-v2",

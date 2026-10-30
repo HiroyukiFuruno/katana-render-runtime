@@ -2,6 +2,7 @@
 
 ## 最新の再開地点（2026-10-30）
 
+- [/] R5095完全ゲートは実1、32完了/2失敗/10skip、10分47秒。Bun638件は成功し、後続Playwrightの8-target採点controlで5秒timeoutを検知した。24組を保持し、進行中処理を回収してからfixtureを破棄する寿命修正と、検証rendererの独立pageを最大2inputずつallSettledで処理する改善を実施。入力・viewport・font・採点式・provenanceは維持し、R5099foundation/R5100AST0、R5101全browser36/36成功（singletonとのPNG bytes完全一致・片失敗時drain・両失敗原因保持を含む）。R5102同9反復は9/9成功、約65→59秒は参考の検証処理時間であり製品の性能合格ではない。もう一方の失敗はverify CI契約の旧setup-uv pin3箇所で、現行の完全40桁SHAへ共通化して同期。R5097のverify系270件目でrelease内容manifestが古いことも確認し、最終source commit後に既存producerで更新して再検証する。coverageは未到達のまま。
 - [/] 現HEAD f47ee9d6でR5081完全ゲートは実1、32完了（1cached）/2失敗/10skip、9分29秒。スクリプト2testの旧private関数参照とmacOS証跡1testの許可workflow SHA不一致で失敗し、coverageへ未到達。現utility契約の型・無効値・複合transform・boundsを維持して更新し、R5082限定12/12成功。macOSは旧許可workflowの実SHAを履歴と照合し、変更14行がsetup-uv/install-actionの版pin7箇所だけとR5089で実証。再利用時もbrowser laneを必ず動かす現CI条件をtruth tableへ反映し、R5086関連96/96成功、R5087foundation/R5088ASTは0。条件緩和や失敗runの成功化はしていない。修正後の完全ゲートは別途必要。
 - [/] C4の製品描画を、準備済みの非線形solid pathだけ元frameの256pxタイル格子へ描く経路で修正した。crop原点を累積し、背景・描画順・効果群の既存経路を維持する。R5056で製品frame9図を取得し、既存scorer不変のR5057でEN C4 98.762570→99.628772、JA C4 98.757660→99.653768、9図すべて99以上を確認。これは限定診断であり、正式117件・性能・coverageの成功へ代用しない。結果は`tmp/quality/current-tile-product-scores-r5057/result.json`。
 - [/] R5041の3コンパイル失敗を保持して署名・borrow・既存test引数を修正。R5051現catalogと実binary SHAをR5052へ束縛し、R5053 displacement12/12、R5054 image2/2、R5055 composite66/66（新tile6を含む、別ignored2）が成功。負scaleの末尾期待誤りはSVGの座標式に沿って新規testだけ訂正し、source SVGと中心pixel期待は維持した。R5058標準Lintはtestのtuple型複雑度1件で失敗し、型aliasへ修正。current coverageの再取得は未完了。
