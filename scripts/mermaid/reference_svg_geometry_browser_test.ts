@@ -819,8 +819,12 @@ test.describe("paint projection evaluates actual candidate pixels", () => {
     const invalid = invalidProjectionInput(root, output, "invalid-drain");
     const valid = projectionOutput(current.fixture.input, output, "valid-drain");
     pendingProjection = rasterizePaintProjectedReferenceBatch([invalid, valid], output, "dark");
-    await expect(pendingProjection).rejects.toThrow("Paint projection cannot map an SVG reference ID");
-    expect(fs.readFileSync(valid.outputPngPath)).toEqual(fs.readFileSync(current.projectedReferencePngPath));
+    await expect(pendingProjection).rejects.toThrow(
+      "Paint projection cannot map an SVG reference ID",
+    );
+    expect(fs.readFileSync(valid.outputPngPath)).toEqual(
+      fs.readFileSync(current.projectedReferencePngPath),
+    );
   });
 
   test("parallel paint projection preserves both input failures", async () => {
