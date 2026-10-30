@@ -476,6 +476,11 @@ fn pre_push_uses_the_ordered_issue_contract_dispatcher() -> Result<(), Box<dyn s
         first_head_guard < repository_check && repository_check < second_head_guard,
         "the repository check must run between the reviewed-HEAD guards"
     );
+    assert_pre_push_head_guard_count(&dispatcher);
+    Ok(())
+}
+
+fn assert_pre_push_head_guard_count(dispatcher: &str) {
     assert_eq!(
         dispatcher
             .matches("python3 scripts/hooks/pre_push_head_guard.py")
@@ -483,7 +488,6 @@ fn pre_push_uses_the_ordered_issue_contract_dispatcher() -> Result<(), Box<dyn s
         2,
         "pre-push must guard the reviewed HEAD both before and after repository checks"
     );
-    Ok(())
 }
 
 #[test]
