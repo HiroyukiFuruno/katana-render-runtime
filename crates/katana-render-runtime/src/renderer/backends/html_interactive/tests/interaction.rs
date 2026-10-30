@@ -12,6 +12,11 @@ mod svg_current_color;
 
 const NO_HORIZONTAL_SCROLL: f32 = 0.0;
 const UNIT_SCROLL_DELTA: f32 = 1.0;
+const TOC_VIEWPORT_WIDTH: u32 = 1280;
+const TOC_VIEWPORT_HEIGHT: u32 = 900;
+const TOC_FIRST_Y: f32 = 34.0;
+const TOC_SECOND_Y: f32 = 70.0;
+const TOC_THIRD_Y: f32 = 106.0;
 const STICKY_FRAGMENT_DOCUMENT: &str = r#"<style>
 html, body { margin: 0; }
 .app { display: flex; align-items: flex-start; }
@@ -654,6 +659,84 @@ fn navigation_all_toc_links_composes_anchor_hash_and_target_lookup() -> TestResu
             ]
         })
     );
+    Ok(())
+}
+
+#[test]
+fn nonexistent_file_origin_navigates_all_toc_fragments_without_host_navigation() -> TestResult {
+    let origin = "file:///__krr_missing_fragment_origin__/index.html";
+    assert!(!std::path::Path::new("/__krr_missing_fragment_origin__").exists());
+    let source = HtmlBrowserSource::new(NAVIGATION_DOCUMENT, origin).map_err(to_string)?;
+    let viewport = HtmlBrowserViewport::new(TOC_VIEWPORT_WIDTH, TOC_VIEWPORT_HEIGHT, 1.0)
+        .map_err(to_string)?;
+    let mut session =
+        super::super::HtmlInteractiveSession::start(source, viewport).map_err(to_string)?;
+    for (y, fragment) in [
+        (TOC_FIRST_Y, "#a"),
+        (TOC_SECOND_Y, "#b"),
+        (TOC_THIRD_Y, "#c"),
+    ] {
+        assert_toc_fragment(&mut session, origin, y, fragment)?;
+    }
+    Ok(())
+}
+
+fn assert_toc_fragment(
+    session: &mut super::super::HtmlInteractiveSession,
+    origin: &str,
+    y: f32,
+    fragment: &str,
+) -> TestResult {
+    let expected_scroll = toc_expected_scroll(session, fragment)?;
+    dispatch_toc_click(session, y)?;
+    let hash = session
+        .runtime
+        .observe_feature_state("location.hash")
+        .map_err(to_string)?;
+    assert_eq!(hash, serde_json::json!(fragment));
+    assert_eq!(
+        session.source.origin.as_str(),
+        format!("{origin}{fragment}")
+    );
+    assert!(session.take_navigation().is_none());
+    assert_eq!(session.scroll_geometry.scroll_y, expected_scroll);
+    if fragment != "#a" {
+        assert!(expected_scroll > 0.0, "{fragment} must scroll");
+    }
+    Ok(())
+}
+
+fn toc_expected_scroll(
+    session: &mut super::super::HtmlInteractiveSession,
+    fragment: &str,
+) -> TestResult<f32> {
+    let position = session
+        .layout()
+        .map_err(to_string)?
+        .anchor_positions
+        .get(&fragment[1..])
+        .copied()
+        .ok_or_else(|| format!("missing anchor {fragment}"))?;
+    Ok(position.round().clamp(0.0, session.max_scroll()))
+}
+
+fn dispatch_toc_click(session: &mut super::super::HtmlInteractiveSession, y: f32) -> TestResult {
+    const TOC_X: f32 = 106.0;
+    for input in [
+        HtmlBrowserInput::PointerMove { x: TOC_X, y },
+        HtmlBrowserInput::PointerDown {
+            x: TOC_X,
+            y,
+            button: 0,
+        },
+        HtmlBrowserInput::PointerUp {
+            x: TOC_X,
+            y,
+            button: 0,
+        },
+    ] {
+        session.dispatch_input(input).map_err(to_string)?;
+    }
     Ok(())
 }
 
