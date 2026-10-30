@@ -107,6 +107,9 @@ export function verifyManagedProcessEnvironment(receipt: ManagedReceipt): string
     "TMPDIR",
     "SHELL",
     "RUSTFLAGS",
+    "CARGO",
+    "CARGO_BUILD_JOBS",
+    "TEST_THREADS",
     "CARGO_CAPACITY_PROTECTED_REFS",
     "CARGO_TARGET_DIR",
     "PWD",
@@ -115,10 +118,27 @@ export function verifyManagedProcessEnvironment(receipt: ManagedReceipt): string
     "__CF_USER_TEXT_ENCODING",
     ...empty,
   ]);
+  const unknown = Object.keys(env)
+    .filter((name) => !allowed.has(name))
+    .sort();
+  requireBound(unknown.length === 0, `unsupported Cargo environment keys: ${unknown.join(", ")}`);
+  requireBound(!env.CARGO_TARGET_DIR, "unsupported Cargo environment: CARGO_TARGET_DIR");
+  const rtk = env.PATH?.split(path.delimiter)
+    .map((base) => path.join(base, "rtk"))
+    .find(
+      (name) =>
+        fs.existsSync(name) && fs.statSync(name).isFile() && (fs.statSync(name).mode & 0o111) !== 0,
+    );
   requireBound(
-    Object.keys(env).every((name) => allowed.has(name)) && !env.CARGO_TARGET_DIR,
-    "unsupported Cargo environment",
+    rtk !== undefined &&
+      path.isAbsolute(rtk) &&
+      fs.realpathSync(rtk) === receipt.snapshotAfter.tools.rtk.path &&
+      env.CARGO === `${rtk} proxy cargo`,
+    "Just Cargo export differs from the admitted proxy",
   );
+  for (const key of ["CARGO_BUILD_JOBS", "TEST_THREADS"] as const) {
+    requireBound(env[key] === "2", `Just concurrency export differs: ${key}`);
+  }
   const python = env.PATH?.split(path.delimiter)
     .map((base) => path.join(base, "python3"))
     .find((name) => fs.existsSync(name) && (fs.statSync(name).mode & 0o111) !== 0);

@@ -85,6 +85,9 @@ class Fixture:
             "RUSTFLAGS": "-D warnings", "LC_CTYPE": "UTF-8", "CARGO_TARGET_DIR": str(self.target),
             "CARGO_CAPACITY_PROTECTED_REFS": json.dumps([str(self.protected)]),
         }
+        self.environment.update({"CARGO": " ".join(observation.cargo_proxy_command(self.environment)),
+                                 "CARGO_BUILD_JOBS": observation.JUST_DEFAULT_CONCURRENCY,
+                                 "TEST_THREADS": observation.JUST_DEFAULT_CONCURRENCY})
         self.environment.update({key: "" for key in observation.EMPTY_JUST_ENVIRONMENT_KEYS})
         self.environment.update(PWD=str(self.root), SHLVL="0", _=shutil.which("python3", path=self.environment["PATH"]) or "")
         if sys.platform == "darwin":
@@ -188,6 +191,7 @@ class Fixture:
         if isolated.read_bytes() != source_path.read_bytes():
             raise AssertionError("isolated RTK copy differs")
         self.command = [str(isolated), "proxy", "cargo", *observation.BUILD_FLAGS]
+        self.environment["CARGO"] = " ".join(observation.cargo_proxy_command(self.environment))
         probe_path = Path(_text(_object(self.request["metadataObservation"], "metadata probe")["path"],
                                 "metadata probe path"))
         probe = observation.parse_json(probe_path.read_bytes())
@@ -195,7 +199,7 @@ class Fixture:
         argv[0] = str(isolated)
         self.write_json(probe_path, probe)
         self.request["metadataObservation"] = observation.file_record(probe_path)
-        self.save_request()
+        self.save_environment_proof()
         return isolated
 
     def save_environment_proof(self) -> None:
@@ -403,6 +407,17 @@ class NativeObservationTests(unittest.TestCase):
                 fixture.admission()
                 fixture.full_environment[key] = "selected"
                 with self.assertRaisesRegex(RuntimeError, "selectors must be empty"):
+                    fixture.admission()
+                self.assertFalse((fixture.attempt / "child.json").exists())
+
+    def test_just_cargo_and_concurrency_exports_reject_drift(self) -> None:
+        for key, value in (("CARGO", "cargo"), ("CARGO_BUILD_JOBS", "3"), ("TEST_THREADS", "0")):
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as directory:
+                fixture = Fixture(Path(directory))
+                fixture.admission()
+                fixture.environment[key] = value
+                fixture.save_environment_proof()
+                with self.assertRaisesRegex(RuntimeError, "Just (Cargo|concurrency) export"):
                     fixture.admission()
                 self.assertFalse((fixture.attempt / "child.json").exists())
 

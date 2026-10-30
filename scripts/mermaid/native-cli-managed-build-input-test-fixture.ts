@@ -129,6 +129,8 @@ export function createManagedReaderInputs() {
   const rustup = save("tmp/toolchain/bin/rustup", "unexecuted unit Rustup dispatcher");
   fs.chmodSync(rustup.path, 0o700);
   const launcherDirectory = path.dirname(rustup.path);
+  fs.chmodSync(tool("rtk").path, 0o700);
+  fs.symlinkSync(tool("rtk").path, path.join(launcherDirectory, "rtk"));
   const toolLauncher = (name: "cargo" | "rustc") => {
     const launcher = path.join(launcherDirectory, name);
     fs.symlinkSync(rustup.path, launcher);
@@ -175,6 +177,9 @@ export function createManagedReaderInputs() {
     _: python,
     SHLVL: "0",
     RUSTFLAGS: "-D warnings",
+    CARGO: `${path.join(launcherDirectory, "rtk")} proxy cargo`,
+    CARGO_BUILD_JOBS: "2",
+    TEST_THREADS: "2",
     CARGO_CAPACITY_PROTECTED_REFS: protectedEnv,
     ...Object.fromEntries(inventory(literalSource, "emptySelectors").map((name) => [name, ""])),
   };

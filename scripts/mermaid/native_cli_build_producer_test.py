@@ -555,10 +555,38 @@ class JustEnvironmentTests(unittest.TestCase):
 
     def test_environment_pins_only_passed_values_and_fixed_capacity_paths(self) -> None:
         environment = bindings.base_environment(["/unit/protected"])
-        self.assertNotIn("CARGO", environment)
+        self.assertEqual(environment["CARGO"], " ".join(guard.cargo_proxy_command(environment)))
+        self.assertEqual(environment["CARGO_BUILD_JOBS"], guard.JUST_DEFAULT_CONCURRENCY)
+        self.assertEqual(environment["TEST_THREADS"], guard.JUST_DEFAULT_CONCURRENCY)
         self.assertEqual(environment["RUSTFLAGS"], "-D warnings")
         self.assertEqual(json.loads(environment["CARGO_CAPACITY_PROTECTED_REFS"]), ["/unit/protected"])
         self.assertTrue(all(environment[key] == "" for key in guard.EMPTY_JUST_ENVIRONMENT_KEYS))
+
+    def test_ambient_just_job_and_cargo_overrides_do_not_change_managed_values(self) -> None:
+        with patch.dict(os.environ, {"CARGO": "untrusted", "JOBS": "9", "TEST_THREADS": "7",
+                                     "CARGO_BUILD_JOBS": "8"}):
+            environment = bindings.base_environment([])
+        self.assertEqual(environment["CARGO"], " ".join(guard.cargo_proxy_command(environment)))
+        self.assertEqual(environment["CARGO_BUILD_JOBS"], guard.JUST_DEFAULT_CONCURRENCY)
+        self.assertEqual(environment["TEST_THREADS"], guard.JUST_DEFAULT_CONCURRENCY)
+        self.assertNotIn("JOBS", environment)
+
+    def test_changed_just_export_defaults_are_rejected(self) -> None:
+        text = (Path(__file__).resolve().parents[2] / "Justfile").read_text()
+        changes = (
+            ('JOBS := env_var_or_default("JOBS", "2")', 'JOBS := env_var_or_default("JOBS", "3")'),
+            ('export CARGO_BUILD_JOBS := JOBS', 'export CARGO_BUILD_JOBS := "3"'),
+            ('export TEST_THREADS := env_var_or_default("TEST_THREADS", "2")',
+             'export TEST_THREADS := env_var_or_default("TEST_THREADS", "3")'),
+            ('export CARGO := env_var_or_default', 'CARGO := env_var_or_default'),
+        )
+        for original, replacement in changes:
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                self.assertIn(original, text)
+                (root / "Justfile").write_text(text.replace(original, replacement))
+                with self.assertRaisesRegex(RuntimeError, "fixed Just route differs"):
+                    bindings.validate_just(root)
 
     def test_extra_build_recipe_command_rejects_before_execution(self) -> None:
         source = Path(__file__).resolve().parents[2] / "Justfile"

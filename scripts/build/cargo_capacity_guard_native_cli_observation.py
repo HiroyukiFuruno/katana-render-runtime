@@ -54,8 +54,9 @@ EMPTY_JUST_ENVIRONMENT_KEYS = frozenset((
 ENVIRONMENT_KEYS = frozenset((
     "PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TERM",
     "TMPDIR", "SHELL", "RUSTFLAGS", "CARGO_CAPACITY_PROTECTED_REFS", "CARGO_TARGET_DIR",
-    "PWD", "SHLVL", "_", "__CF_USER_TEXT_ENCODING",
+    "PWD", "SHLVL", "_", "__CF_USER_TEXT_ENCODING", "CARGO", "CARGO_BUILD_JOBS", "TEST_THREADS",
 )) | EMPTY_JUST_ENVIRONMENT_KEYS
+JUST_DEFAULT_CONCURRENCY = "2"
 RUSTUP_QUERY_EVIDENCE: list[JsonObject] = []
 RUSTUP_QUERY_ATTEMPT: Path | None = None
 
@@ -377,9 +378,15 @@ def validate_request(root: Path, command: list[str], environment: Mapping[str, s
     child_environment = {key: value for key, value in environment.items() if key not in (REQUEST_ENV, REQUEST_SHA_ENV)}
     require(all(child_environment.get(key, "") == "" for key in EMPTY_JUST_ENVIRONMENT_KEYS),
             "Just receipt/raster selectors must be empty for native build")
-    require(set(child_environment).issubset(ENVIRONMENT_KEYS)
-            and bool(child_environment.get("PATH")) and bool(child_environment.get("HOME"))
+    unknown = sorted(set(child_environment) - ENVIRONMENT_KEYS)
+    require(not unknown, "unsupported Cargo environment keys: " + ", ".join(unknown))
+    require(bool(child_environment.get("PATH")) and bool(child_environment.get("HOME"))
             and child_environment.get("RUSTFLAGS") == "-D warnings", "unsupported Cargo environment")
+    require(child_environment.get("CARGO") == " ".join(cargo_proxy_command(child_environment)),
+            "Just Cargo export differs from the admitted proxy")
+    for key in ("CARGO_BUILD_JOBS", "TEST_THREADS"):
+        require(child_environment.get(key) == JUST_DEFAULT_CONCURRENCY,
+                "Just concurrency export differs: " + key)
     if "PWD" in child_environment:
         require(child_environment["PWD"] == str(root), "Just PWD differs from repository")
     if "SHLVL" in child_environment:

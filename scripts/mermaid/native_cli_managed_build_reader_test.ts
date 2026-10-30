@@ -695,6 +695,22 @@ const negatives: Array<[string, (fixture: Fixture) => void, RegExp]> = [
     },
     /unsupported Cargo environment/,
   ],
+  ...(
+    [
+      ["CARGO", "cargo"],
+      ["CARGO_BUILD_JOBS", "3"],
+      ["TEST_THREADS", "0"],
+    ] as const
+  ).map(([key, value]): [string, (fixture: Fixture) => void, RegExp] => [
+    `incorrect ${key} with matching endpoint digest`,
+    (f) => {
+      for (const snapshot of [f.receipt.snapshotBefore, f.receipt.snapshotAfter]) {
+        snapshot.environment[key] = value;
+        snapshot.environmentSha256 = digestStringRecord(snapshot.environment);
+      }
+    },
+    /Just (Cargo|concurrency) export/,
+  ]),
   [
     "capacity crosses fixed threshold with current raw pin",
     (f) => {

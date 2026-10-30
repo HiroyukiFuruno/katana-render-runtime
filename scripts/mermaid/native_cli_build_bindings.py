@@ -75,7 +75,7 @@ def admit_source(expected: JsonObject, records: list[JsonObject]) -> None:
 
 
 def base_environment(protected: list[str]) -> dict[str, str]:
-    allowed = guard.ENVIRONMENT_KEYS - {"PWD", "SHLVL", "_"} - guard.EMPTY_JUST_ENVIRONMENT_KEYS
+    allowed = guard.ENVIRONMENT_KEYS - {"PWD", "SHLVL", "_", "CARGO", "CARGO_BUILD_JOBS", "TEST_THREADS"} - guard.EMPTY_JUST_ENVIRONMENT_KEYS
     environment = {key: value for key, value in os.environ.items() if key in allowed}
     guard.require(not any(os.environ.get(key) for key in guard.EMPTY_JUST_ENVIRONMENT_KEYS)
                   and os.environ.get("RUSTFLAGS", "-D warnings") == "-D warnings",
@@ -85,6 +85,9 @@ def base_environment(protected: list[str]) -> dict[str, str]:
     environment.update({"RUSTFLAGS": "-D warnings", "SHLVL": "0", "LC_ALL": "C.UTF-8",
                         "LC_CTYPE": "C.UTF-8",
                         "CARGO_CAPACITY_PROTECTED_REFS": json.dumps(protected, separators=(",", ":"))})
+    environment.update({"CARGO": " ".join(guard.cargo_proxy_command(environment)),
+                        "CARGO_BUILD_JOBS": guard.JUST_DEFAULT_CONCURRENCY,
+                        "TEST_THREADS": guard.JUST_DEFAULT_CONCURRENCY})
     guard.require(not environment.get("CARGO_TARGET_DIR"), "alternate Cargo target is unsupported")
     return environment
 
@@ -98,7 +101,10 @@ def guard_environment(base: dict[str, str], root: Path) -> dict[str, str]:
 def validate_just(root: Path) -> None:
     text = (root / "Justfile").read_text()
     required = ['set shell := ["bash", "-uc"]',
-                'CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
+                'export CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
+                'JOBS := env_var_or_default("JOBS", "2")',
+                'export CARGO_BUILD_JOBS := JOBS',
+                'export TEST_THREADS := env_var_or_default("TEST_THREADS", "2")',
                 'CARGO_BUILD := "python3 " + quote(REPO_ROOT + "/scripts/build/cargo_capacity_guard.py") + " --retain-build-profile debug -- " + CARGO',
                 'export RUSTFLAGS := env_var_or_default("RUSTFLAGS", "-D warnings")',
                 'rust-facts-host-prebuild:\n    bun scripts/runtime-bundles/runtime-rust-facts-host.ts prepare {{quote(REPO_ROOT)}} {{quote(REPO_ROOT + "/tmp/quality/rust-facts-host/current/receipt.json")}}\n',
