@@ -262,8 +262,8 @@ fn assert_coverage_recipe_arms(coverage: &str) {
             .filter(|line| !line.is_empty())
             .collect::<Vec<_>>(),
         [
-            "just root-test-and-coverage",
             "just performance-harness-coverage",
+            "just root-test-and-coverage",
             "just coverage-result-check",
         ]
     );
@@ -867,8 +867,8 @@ fn assert_moon_quality_dag(moon: &str, scheduler: &str, moon_workspace: &str) {
         moon,
         &[
             "  performance-coverage:\n    command: ['just', 'performance-harness-coverage']\n    deps: ['heavy-native', 'check']",
-            "  coverage:\n    command: ['just', 'coverage-result-check']\n    deps: ['performance-coverage']",
-            "  unit-test:\n    command: ['just', 'root-test-and-coverage']\n    deps: ['runtime-asset-script-test']",
+            "  coverage:\n    command: ['just', 'coverage-result-check']\n    deps: ['unit-test']",
+            "  unit-test:\n    command: ['just', 'root-test-and-coverage']\n    deps: ['performance-coverage']",
             "  check:\n    command: noop\n    inputs: *quality-inputs\n    deps:\n      - heavy-native\n      - runtime-asset-script-test\n      - automation-contract-test\n      - build-capacity-check",
         ],
     );
