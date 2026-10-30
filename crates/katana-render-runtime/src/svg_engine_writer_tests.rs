@@ -35,6 +35,8 @@ mod filter_regression_tests;
 mod fixture_inventory_tests;
 #[path = "svg_engine_writer_image_roundtrip_tests.rs"]
 mod image_roundtrip_tests;
+#[path = "svg_engine_writer_text_style_coverage_tests.rs"]
+mod text_style_coverage_tests;
 
 const WRITER_FONT_DIRECTORY: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),

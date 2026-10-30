@@ -1,25 +1,18 @@
 use super::{Mode, assert_reference};
 use rstest::rstest;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-const TEXT_PATH_FIXTURES: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/text/textPath"
-);
 const UPSTREAM_TEST_FIXTURES: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../tests/fixtures/svg-engine/upstream/resvg/tests/tests"
 );
 
 #[rstest]
-#[case::simple_case("simple-case.svg")]
-#[case::relative_tspan_position("tspan-with-relative-position.svg")]
-#[case::absolute_tspan_position("tspan-with-absolute-position.svg")]
-#[case::baseline_shift("with-baseline-shift.svg")]
-#[case::baseline_shift_and_rotate("with-baseline-shift-and-rotate.svg")]
-#[case::arabic_with_dy("arabic-with-dy.svg")]
-fn upstream_text_path_cases_match_reference(#[case] fixture: &str) -> Result<(), String> {
-    assert_reference(&Path::new(TEXT_PATH_FIXTURES).join(fixture), Mode::Normal)
+fn upstream_text_path_cases_match_reference(
+    #[files("../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/text/textPath/*.svg")]
+    fixture: PathBuf,
+) -> Result<(), String> {
+    assert_reference(&fixture, Mode::Normal)
 }
 
 #[rstest]

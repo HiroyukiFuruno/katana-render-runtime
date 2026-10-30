@@ -8,6 +8,10 @@ const IMAGE_FIXTURE_DIRECTORY: &str = concat!(
     "/../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/structure/image"
 );
 const UPSTREAM_IMAGE_DIMENSION: f32 = 64.0;
+const RASTER_MODE_SOURCE_DIMENSION: f32 = 2.0;
+const RASTER_MODE_IMAGE_DIMENSION: f32 = 4.0;
+const RASTER_MODE_VIEWPORT_DIMENSION: f32 = 6.0;
+const RASTER_MODE_IMAGE_ORIGIN: f32 = 1.0;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum RasterFormat {
@@ -93,14 +97,63 @@ fn render_raster_mode(mode: &str, expected_mode: usvg::ImageRendering) -> Result
             &format!("<image id=\"rgba\" style=\"image-rendering: {mode}\""),
         );
     let tree = parse_writer_svg(&input, mode)?;
-    assert_eq!(image_node(&tree, "rgba")?.rendering_mode(), expected_mode);
-    let rendered = render_tree(&tree)?;
+    assert_raster_mode_image(&tree, mode, expected_mode)?;
+    let before = render_tree(&tree)?;
     assert!(
-        rendered
+        before
             .data()
             .chunks_exact(RGBA_CHANNELS)
             .any(|pixel| pixel[ALPHA_CHANNEL] != 0),
         "image-rendering={mode} must paint pixels"
     );
-    Ok(rendered.data().to_vec())
+    let serialized = tree.to_string(&writer_options(mode));
+    let reparsed = parse_writer_svg(&serialized, mode)?;
+    assert_raster_mode_image(&reparsed, mode, expected_mode)?;
+    let after = render_tree(&reparsed)?;
+    super::super::writer_coverage_tests::assert_pixmaps_equal(&before, &after, mode);
+    Ok(before.data().to_vec())
+}
+
+fn assert_raster_mode_image(
+    tree: &usvg::Tree,
+    mode: &str,
+    expected_mode: usvg::ImageRendering,
+) -> Result<(), String> {
+    let image = image_node(tree, "rgba")?;
+    assert_eq!(image.rendering_mode(), expected_mode);
+    assert!(matches!(image.kind(), usvg::ImageKind::PNG(_)));
+    assert_image_size(
+        image,
+        (RASTER_MODE_SOURCE_DIMENSION, RASTER_MODE_SOURCE_DIMENSION),
+    );
+    assert_raster_mode_geometry(tree, image, mode);
+    Ok(())
+}
+
+fn assert_raster_mode_geometry(tree: &usvg::Tree, image: &usvg::Image, mode: &str) {
+    let bounds = image.abs_bounding_box();
+    assert_eq!(
+        (bounds.left(), bounds.top(), bounds.right(), bounds.bottom()),
+        (
+            RASTER_MODE_IMAGE_ORIGIN,
+            RASTER_MODE_IMAGE_ORIGIN,
+            RASTER_MODE_IMAGE_ORIGIN + RASTER_MODE_IMAGE_DIMENSION,
+            RASTER_MODE_IMAGE_ORIGIN + RASTER_MODE_IMAGE_DIMENSION
+        ),
+        "display bounds for image-rendering={mode}"
+    );
+    assert_raster_mode_viewport(tree, mode);
+}
+
+fn assert_raster_mode_viewport(tree: &usvg::Tree, mode: &str) {
+    assert_eq!(
+        tree.size().width(),
+        RASTER_MODE_VIEWPORT_DIMENSION,
+        "viewport width for image-rendering={mode}"
+    );
+    assert_eq!(
+        tree.size().height(),
+        RASTER_MODE_VIEWPORT_DIMENSION,
+        "viewport height for image-rendering={mode}"
+    );
 }
