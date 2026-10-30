@@ -41,6 +41,11 @@ resvgの `identity_op` / `too_many_arguments` / `upper_case_acronyms` / `wrong_s
 
 - usvgの文字整形では、HarfRustへCSS文字サイズを渡し、サイズ依存のtrackingを適用する。
   字形ID・variation座標・原SVGを手作業で加工しない。
+- feDisplacementMapでは、callerがfilter scaleとcanvas transformを適用した倍率を渡す。
+  sampler内でscaleを重ねて掛けず、premultiplied mapのRGBだけstraight化してから変位量を評価する。
+  これは本家 [Issue 1160](https://github.com/linebender/resvg/issues/1160) の修正に基づき、
+  samplerの照合元は [このcommitのraw source](https://raw.githubusercontent.com/linebender/resvg/e1a4c92da6d354a41c402f57d65705ad632eba25/crates/resvg/src/filter/displacement_map.rs)
+  である（commit `e1a4c92da6d354a41c402f57d65705ad632eba25`）。
 - markerの暗黙viewport clipだけをhard-edgeにする。clip範囲とtransformを維持し、
   markerの子図形と通常のuser clipのアンチエイリアスは変更しない。
 - HTML用の任意のfallback resolverへ、元の要求font属性を渡す。

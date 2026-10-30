@@ -18,10 +18,14 @@ mod writer_property_tests;
 #[path = "svg_engine_colr_fixture_tests.rs"]
 mod colr_fixture_tests;
 
+#[path = "svg_engine_writer_displacement_tests.rs"]
+mod displacement_tests;
 #[path = "svg_engine_writer_filter_regression_tests.rs"]
 mod filter_regression_tests;
 #[path = "svg_engine_writer_fixture_inventory_tests.rs"]
 mod fixture_inventory_tests;
+#[path = "svg_engine_writer_image_roundtrip_tests.rs"]
+mod image_roundtrip_tests;
 
 const WRITER_FONT_DIRECTORY: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -29,6 +33,7 @@ const WRITER_FONT_DIRECTORY: &str = concat!(
 );
 const RGBA_CHANNELS: usize = 4;
 const ALPHA_CHANNEL: usize = 3;
+const PIXEL_DIAGNOSTIC_PREVIEW_LIMIT: usize = 16;
 const PRESERVE_TEXT_CASES: [&str; 9] = [
     "preserve-text-multiple-font-families",
     "preserve-text-on-path",
@@ -138,6 +143,45 @@ fn render_tree(tree: &usvg::Tree) -> Result<Pixmap, String> {
         .ok_or("writer fixture pixmap allocation failed")?;
     resvg::render(tree, Transform::identity(), &mut pixmap.as_mut());
     Ok(pixmap)
+}
+
+fn assert_rgba_pixel(
+    pixmap: &Pixmap,
+    point: (u32, u32),
+    expected: (u8, u8, u8, u8),
+) -> Result<(), String> {
+    let actual = pixmap
+        .pixel(point.0, point.1)
+        .map(|pixel| (pixel.red(), pixel.green(), pixel.blue(), pixel.alpha()));
+    if actual != Some(expected) {
+        assert_eq!(
+            actual,
+            Some(expected),
+            "pixel ({},{}) in {}x{} RGBA image; first {} pixels: [{}]",
+            point.0,
+            point.1,
+            pixmap.width(),
+            pixmap.height(),
+            PIXEL_DIAGNOSTIC_PREVIEW_LIMIT,
+            pixel_preview(pixmap)
+        );
+    }
+    Ok(())
+}
+
+fn pixel_preview(pixmap: &Pixmap) -> String {
+    pixmap
+        .data()
+        .chunks_exact(RGBA_CHANNELS)
+        .take(PIXEL_DIAGNOSTIC_PREVIEW_LIMIT)
+        .enumerate()
+        .map(|(index, rgba)| {
+            let x = index as u32 % pixmap.width();
+            let y = index as u32 / pixmap.width();
+            format!("({x},{y})={:?}", [rgba[0], rgba[1], rgba[2], rgba[3]])
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub(super) fn upstream_writer_font_database() -> Result<Arc<usvg::fontdb::Database>, String> {

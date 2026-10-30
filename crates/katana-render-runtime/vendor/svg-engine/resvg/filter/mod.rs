@@ -976,7 +976,9 @@ fn apply_displacement_map(
     input2: Image,
 ) -> Result<Image, Error> {
     let pixmap1 = input1.into_color_space(cs)?.take()?;
-    let pixmap2 = input2.into_color_space(cs)?.take()?;
+    let mut pixmap2 = input2.into_color_space(cs)?.take()?;
+    /* WHY: channel selectorはstraight RGBで評価し、alpha値はそのまま使う。 */
+    demultiply_alpha(pixmap2.data_mut().as_rgba_mut());
 
     let mut pixmap = tiny_skia::Pixmap::try_create(region.width(), region.height())?;
 

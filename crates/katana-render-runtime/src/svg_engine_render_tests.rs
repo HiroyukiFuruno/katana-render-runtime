@@ -13,6 +13,8 @@ mod failure_artifact;
 mod inventory;
 #[path = "svg_engine_render_marker_tests.rs"]
 mod marker;
+#[path = "svg_engine_render_text_path_tests.rs"]
+mod text_path_tests;
 
 const NORMAL_WIDTH: u32 = 300;
 const EXTRA_FILTER_SCALE: f32 = 10.0;

@@ -24,7 +24,7 @@
     "harfrustAlias": "usvg harfrust:: becomes svg_harfrust:: (original 0.12 dependency identity)",
     "enabledFeaturePredicates": "The original enabled feature counts are retained per file; constant evaluation removes 79 true cfg attributes and four false branches. OS and test conditions are retained; KRR has no optional public SVG-engine feature contract.",
     "allowAttributes": "The original 46 allow attributes are retained verbatim. Two scoped boundary attributes permit observed external Clippy lints (22 in usvg/lib.rs, 18 in resvg/lib.rs) plus dead_code and unused_imports. Four resvg lints already allowed upstream are omitted from the added list to avoid duplicate attributes. No blanket all, non_minimal_cfg, unsafe-code override, or additional exclusion is introduced.",
-    "sourceSemantics": "Initial mechanical transplant preserves upstream behavior; subsequent scoped fixes pass CSS font size to HarfRust tracking and use hard-edge clipping only for implicit marker viewports. An optional internal fallback callback receives the original requested font attributes while the default legacy resolver remains unchanged; nested SVG forwards the callback. Original SVG, glyph IDs, and variation coordinates are not manually rewritten. Clip bounds, user-clip antialiasing, and upstream test expectations are preserved. ViewBox scale and alignment use f64 intermediate arithmetic before conversion to the existing f32 transform. Linked feImage parsing transfers a child ID only to an unnamed parent and preserves existing referenced IDs across serialization. Skrifa 0.49 compatibility uses the optional SVG glyph-data accessor and reads opsz axis presence from the same face metadata. CSS declarations retain source order among equal-priority values, with important declarations taking precedence over normal values. Inline style parsing recovers after malformed declarations at CSS-aware semicolon boundaries. Upstream source hashes and licenses remain unchanged."
+    "sourceSemantics": "Initial mechanical transplant preserves upstream behavior; subsequent scoped fixes pass CSS font size to HarfRust tracking and use hard-edge clipping only for implicit marker viewports. An optional internal fallback callback receives the original requested font attributes while the default legacy resolver remains unchanged; nested SVG forwards the callback. Original SVG, glyph IDs, and variation coordinates are not manually rewritten. Clip bounds, user-clip antialiasing, and upstream test expectations are preserved. ViewBox scale and alignment use f64 intermediate arithmetic before conversion to the existing f32 transform. Linked feImage parsing transfers a child ID only to an unnamed parent and preserves existing referenced IDs across serialization. Skrifa 0.49 compatibility uses the optional SVG glyph-data accessor and reads opsz axis presence from the same face metadata. CSS declarations retain source order among equal-priority values, with important declarations taking precedence over normal values. Inline style parsing recovers after malformed declarations at CSS-aware semicolon boundaries. Displacement-map sampling applies transform-scaled filter scale once and unpremultiplies the map's RGB channels while preserving its alpha. This matches upstream issue 1160 at commit e1a4c92da6d354a41c402f57d65705ad632eba25. Upstream source hashes and licenses remain unchanged."
   },
   "files": [
     {
@@ -518,9 +518,9 @@
       "source": "crates/resvg/src/filter/displacement_map.rs",
       "destination": "resvg/filter/displacement_map.rs",
       "sourceSha256": "e54274bb502bd7d262c6daa98b447ef2c90ee49a084e32f6892782bd9d678687",
-      "transplantedSha256": "89a38471131da53b32c9b1cff96f2678379b25301b38ce5f498c61aba99fa0f7",
+      "transplantedSha256": "5aaca3f286a2dfc299ee5a446daa3ff873ae52985378bd7423686aef5023a89d",
       "sourceBytes": 1823,
-      "transplantedBytes": 1842,
+      "transplantedBytes": 1870,
       "adaptations": {
         "cratePaths": 0,
         "enabledFeaturePredicates": {},
@@ -557,9 +557,9 @@
       "source": "crates/resvg/src/filter/mod.rs",
       "destination": "resvg/filter/mod.rs",
       "sourceSha256": "478810f477d240503d51881920dba43958d32aab69a8b293b074f132cecd8bf9",
-      "transplantedSha256": "feeb7e79614d3ba10125a97ec7d3110b034d41292739fd309eb95bfefdec2387",
+      "transplantedSha256": "d1537fde094a17ccae97c59ee22716c505f8e66939b4f980a9d1a789a837bb8f",
       "sourceBytes": 36494,
-      "transplantedBytes": 38242,
+      "transplantedBytes": 38396,
       "adaptations": {
         "cratePaths": 4,
         "enabledFeaturePredicates": {},
