@@ -2,6 +2,8 @@
 
 ## 最新の再開地点（2026-10-30）
 
+- [/] `9e37b541`でcoverage順序の旧期待3件を実DAGへ同期し、`179acf37`で同じ19契約をSDK非依存の既存kdr-linter/AST laneへ移動した。assertと検査観点を維持し、R4727/R4738の実19件成功、R4739静的foundation成功、通常commit hook成功を確認。全workspace・coverage100%の代用ではなく、次の正式coverageは旧失敗profileを整理したcold条件で取得する。
+- [/] pixelmatch8.0.0のAA推定を診断候補として試したが、R4753の1px移動した曲線を非AA差0と判定し負例に失敗したため不採用。646件中645成功/1失敗・554.20秒・実exit1を保持し、閾値や負例を緩和しない。候補8ファイルはR4754のraw diffへ保存（SHA a306b3a41fedc0068b1e5c448439236070e1886caf505ae831b90bcbb799a4cf）、R4755逆適用事前確認/R4756撤去/R4757 index整合を各実exit0で完了。正式scorer・oracle・99条件は不変、正式Mermaidは115/117・残2のまま。
 - [/] c1733928のR4695 capture/R4696 strictは84/84が90以上、最低92.14438、出力font一致established。R4693通常hook0で同一文書fragment修正、R4694で途中batch保存修正を保存した。全体リリースの合格ではない。
 - [ ] R4700は外側observerの1800秒上限で83/84条件時に終了。lifecycle実exit -15、groupClosed/rawFdsClosed true、元process残存なし。通常のowned戻りobservationはTimeoutExpiredにより未生成であり補完しない。83checkpointの内訳は71 policy pass、12は旧parent371274edの#a拒否によるbaseline failure/incomplete。旧R4675のRSS暫定不合格をこの未完runで正式解消扱いにしない。
 - [/] R4701/R4702は既存readerのaggregate_reportsとphase validatorを使った限定診断actual0。上記12条件のcandidateは各25sampleがあり、全phaseの実最大表示時間0.135080959秒。旧新版の比較非劣化・正式全84合格ではない。既存summaryの期待phase数ではなく実rawを基準に集計する。
