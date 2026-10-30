@@ -1941,3 +1941,6 @@ impl Group {
         Some(())
     }
 }
+
+#[cfg(test)]
+crate::svg_engine::owned_svg_model_tests!("../../../../src/svg_engine_tree_model_tests.rs");

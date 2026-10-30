@@ -1081,3 +1081,6 @@ impl<'a, 'input: 'a> FromValue<'a, 'input> for SvgNode<'a, 'input> {
         node.document().element_by_id(id)
     }
 }
+
+#[cfg(test)]
+crate::svg_engine::owned_svg_model_tests!("../../../../../src/svg_engine_svgtree_model_tests.rs");

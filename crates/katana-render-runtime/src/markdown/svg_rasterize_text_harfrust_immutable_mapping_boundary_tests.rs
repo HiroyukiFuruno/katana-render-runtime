@@ -132,6 +132,21 @@ fn immutable_mapping_rejects_oversize_alias_and_absent_system_paths() -> Result<
     Ok(())
 }
 
+#[test]
+fn filesystem_error_conversion_preserves_io_and_nix_display_messages() {
+    let io_error = std::io::Error::new(std::io::ErrorKind::InvalidInput, "fixture I/O failure");
+    assert_eq!(
+        mapping::filesystem_error_to_string(io_error),
+        "fixture I/O failure"
+    );
+
+    let nix_error = nix::errno::Errno::EINVAL;
+    assert_eq!(
+        mapping::filesystem_error_to_string(nix_error),
+        "EINVAL: Invalid argument"
+    );
+}
+
 fn system_font() -> Result<SystemFont, String> {
     let path = Path::new(SYSTEM_FONT)
         .canonicalize()
