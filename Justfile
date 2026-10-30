@@ -104,6 +104,10 @@ lint:
 ast-lint:
     {{CARGO}} test -j {{JOBS}} -p kdr-linter ast_linter -- --nocapture
 
+# WHY: 生の実行観測には環境の認証情報があるため、固定projectionだけを表示する。
+native-cli-observation-summary observation:
+    python3 scripts/release/native_cli_observation_view.py {{quote(observation)}}
+
 # Check that katana-render-runtime does not depend on KatanA UI crates
 dependency-leak:
     @dependencies="$({{CARGO}} tree --workspace -e normal)"; \

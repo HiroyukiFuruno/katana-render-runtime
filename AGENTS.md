@@ -12,6 +12,13 @@
 - アンチパターンは、コマンド例のバッククォートを含む文章をシェルの二重引用符へ入れ、説明中の検査を意図せず実行すること。報告内容と実行するargvを分離し、調査・文書作成から検査を起動しない。
 - 誤起動した場合は追加検査を止め、元のtool呼出しと観測出力を保存する。PID・実終了コード・開始時刻・target差分を取得できなかった範囲は未取得と記録し、再実行による置き換えや品質合格への転用をしない。検索語: `report command substitution`, `read-only report text only`, `backtick accidental execution`。
 
+## 非公開の実行観測の表示
+
+- Native CLIの生の`observation.json`は再現用の環境値を含む非公開データである。`cat`、`rg`、辞書全体の`print`やJSON再出力で表示せず、必ず`rtk proxy just native-cli-observation-summary <observation.jsonの絶対パス>`を使う。既存`native_cli_observation_view.py`の固定projectionだけを表示し、schema拒否時に生データ表示へfallbackしない。
+- mainは読取り担当へ、必要なreportの正確なパスと許可するフィールドを渡す。集計だけに必要な担当へ生の観測・環境値・credentialsを調べさせず、ログ探索を担当範囲へ暗黙に含めない。環境の復元が必要な主担当も値を内部で使うに留め、ツール出力・Git・公開添付へ出さない。
+- 安全な表示要約は表示用のprojectionであり、描画・性能・source一致の受入証明ではない。正式判定は既存producer/validatorで行う。非公開の原本を公開用に書き換え・repinせず、公開添付は別の許可済みpayloadを使う。
+- アンチパターンは、入力reportの場所を調べるために観測全体を表示すること。正しくは、既知reportへ直接アクセスし、実行情報が必要な場合だけ安全表示コマンドから参照先を得る。検索語: `private observation environment`, `native-cli-observation-summary`, `safe_summary`, `explicit read scope`。
+
 ## 外部依存のfork採用判断
 
 - forkの作成・公開許可と、製品依存への採用判断を分ける。修正パッチの成功だけでforkを既定路線にしない。保守性・要件・性能を満たす既存の代替があれば優先する。
