@@ -105,9 +105,14 @@ test("実utility sourceとstrict設定に束縛したcompilerが誤入力とDOM�
       valid: true,
       diagnostic: "",
       source:
-        'katanaAttrNumber("", "x"); katanaTranslate("")[0].toFixed(); katanaRewriteBalancedGroups("<g></g>", /<g>/g, group => group); KATANA_DRAWIO_SHAPE_COLOR_MAPS[1].set("fill|#000000", "#ededed");',
+        'katanaAttrNumber("", "x"); (katanaSimpleSvgTranslation("translate(2)")?.[0] ?? 0).toFixed(); katanaRewriteBalancedGroups("<g></g>", /<g>/g, group => group); KATANA_DRAWIO_SHAPE_COLOR_MAPS[1].set("fill|#000000", "#ededed");',
     },
-    { valid: false, diagnostic: "TS2345", source: "katanaTranslate(17);" },
+    { valid: false, diagnostic: "TS2345", source: "katanaSimpleSvgTranslation(17);" },
+    {
+      valid: false,
+      diagnostic: "TS2322",
+      source: 'const translation: [number, number] = katanaSimpleSvgTranslation("");',
+    },
     {
       valid: false,
       diagnostic: "TS2322",
@@ -184,9 +189,13 @@ test("実classicScript utilityの属性・入れ子group・paletteを純粋VMで
     const rewritten = katanaRewriteBalancedGroups("a<g><g>x</g></g>b<g>y</g>c", pattern,
       group => { calls.push(group); return "[" + group + "]"; });
     ({
-      translated: katanaTranslate('transform="translate(2, -3.5)"'),
-      untranslated: katanaTranslate(""),
-      nonFinite: Number.isNaN(katanaTranslate('transform="translate(--, 3)"')[0]),
+      translated: katanaSimpleSvgTranslation("translate(2, -3.5)"),
+      translatedX: katanaSimpleSvgTranslation("translate(2)"),
+      untranslated: katanaSimpleSvgTranslation(""),
+      nonFinite: katanaSimpleSvgTranslation("translate(1e999, 3)"),
+      invalidTranslation: katanaSimpleSvgTranslation("translate(--, 3)"),
+      compositeTransform: katanaSimpleSvgTranslation("translate(2) scale(2)"),
+      translatedBounds: katanaTransformSvgBounds([1, 2, 3, 4], "translate(2, -3.5)"),
       number: katanaAttrNumber('<rect x="2.5" missing="no">', "x"),
       invalidNumber: katanaAttrNumber('<rect x="no">', "x"),
       missingNumber: katanaAttrNumber("", "x"),
@@ -205,8 +214,12 @@ test("実classicScript utilityの属性・入れ子group・paletteを純粋VMで
   );
   expect(result).toEqual({
     translated: [2, -3.5],
-    untranslated: [0, 0],
-    nonFinite: true,
+    translatedX: [2, 0],
+    untranslated: null,
+    nonFinite: null,
+    invalidTranslation: null,
+    compositeTransform: null,
+    translatedBounds: [3, -1.5, 5, 0.5],
     number: 2.5,
     invalidNumber: null,
     missingNumber: null,
