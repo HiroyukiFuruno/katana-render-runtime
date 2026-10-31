@@ -32,10 +32,10 @@ pub const ZENUML_CORE_JS_CHECKSUM: &str =
 pub const ZENUML_CORE_DOWNLOAD_URL: &str =
     "https://cdn.jsdelivr.net/npm/@zenuml/core@4.12.1/dist/zenuml.js";
 
-pub const DRAWIO_JS_VERSION: &str = "32.6.1";
+pub const DRAWIO_JS_VERSION: &str = "32.6.9";
 pub const DRAWIO_JS_CHECKSUM: &str =
-    "9dafdfb2b62172aa78f91feae0b25af71c5a1d322764ce3794dd2899e8ea0f2e";
-pub const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases/tag/v32.6.1";
+    "d0d0ee121adcf6994612e4943f81fb17f66c463fcba017dca310731e18f88775";
+pub const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases/tag/v32.6.9";
 
 pub const MATHJAX_JS_VERSION: &str = "4.1.3";
 pub const MATHJAX_JS_CHECKSUM: &str =
