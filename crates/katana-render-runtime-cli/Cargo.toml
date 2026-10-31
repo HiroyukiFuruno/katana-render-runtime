@@ -7,6 +7,11 @@ repository.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 description = "CLI front-end for katana-render-runtime: render, reference-update, compare, bench."
+autotests = false
+
+[[test]]
+name = "cli_integration"
+path = "tests/cli_integration.rs"
 
 [[bin]]
 name = "krr"

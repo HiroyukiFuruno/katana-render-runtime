@@ -1,5 +1,6 @@
 [package]
 name = "katana-render-runtime"
+autotests = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -31,6 +32,26 @@ include = [
 
 [lib]
 path = "src/lib.rs"
+
+[[test]]
+name = "drawio_katana_transfer"
+path = "tests/drawio_katana_transfer.rs"
+
+[[test]]
+name = "drawio_official_transfer"
+path = "tests/drawio_official_transfer.rs"
+
+[[test]]
+name = "mermaid_katana_transfer"
+path = "tests/mermaid_katana_transfer.rs"
+
+[[test]]
+name = "plantuml_renderer"
+path = "tests/plantuml_renderer.rs"
+
+[[test]]
+name = "non_env_integration"
+path = "tests/non_env_integration.rs"
 
 [dependencies]
 katana-render-runtime-assets = { workspace = true }
