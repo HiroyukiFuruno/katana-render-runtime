@@ -38,6 +38,10 @@ mod writer_tests;
 mod parser_boundary_tests;
 
 #[cfg(test)]
+#[path = "svg_engine_parser_style_boundary_tests.rs"]
+mod parser_style_boundary_tests;
+
+#[cfg(test)]
 #[path = "svg_engine_use_boundary_coverage_tests.rs"]
 mod use_boundary_coverage_tests;
 

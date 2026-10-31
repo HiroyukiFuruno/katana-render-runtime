@@ -85,6 +85,23 @@ fn css_cascade_inline_style_first_child_and_unsupported_pseudo_are_distinguished
 }
 
 #[test]
+fn explicit_inherit_resolves_ancestor_direct_parent_and_attribute_defaults() -> Result<(), String> {
+    let source = r#"<svg xmlns="http://www.w3.org/2000/svg">
+      <g opacity="0.25" fill="red"><g><rect id="descendant" fill="inherit" opacity="inherit" stroke="inherit"/></g>
+      <rect id="direct" opacity="inherit"/></g></svg>"#;
+    let document = parse_document(source, None)?;
+    for (id, aid, expected) in [
+        ("descendant", AId::Fill, "red"),
+        ("descendant", AId::Opacity, "1"),
+        ("descendant", AId::Stroke, "none"),
+        ("direct", AId::Opacity, "0.25"),
+    ] {
+        assert_eq!(raw_attribute(&document, id, aid)?, expected);
+    }
+    Ok(())
+}
+
+#[test]
 fn recursive_pattern_child_fill_is_neutralized() -> Result<(), String> {
     assert_attribute_value(
         include_str!(
@@ -94,6 +111,17 @@ fn recursive_pattern_child_fill_is_neutralized() -> Result<(), String> {
         AId::Fill,
         "none",
     )?;
+    Ok(())
+}
+
+#[test]
+fn mutually_recursive_pattern_strokes_are_broken_at_one_edge() -> Result<(), String> {
+    let source = r##"<svg xmlns="http://www.w3.org/2000/svg">
+      <pattern id="first-pattern"><rect id="first-child" stroke="url(#second-pattern)"/></pattern>
+      <pattern id="second-pattern"><rect id="second-child" stroke="url(#first-pattern)"/></pattern>
+    </svg>"##;
+    let document = parse_document(source, None)?;
+    assert_one_neutralized_link(&document, ["first-child", "second-child"], AId::Stroke)?;
     Ok(())
 }
 
