@@ -16,6 +16,7 @@
 
 - Native CLIの生の`observation.json`は再現用の環境値を含む非公開データである。`cat`、`rg`、辞書全体の`print`やJSON再出力で表示せず、必ず`rtk proxy just native-cli-observation-summary <observation.jsonの絶対パス>`を使う。既存`native_cli_observation_view.py`の固定projectionだけを表示し、schema拒否時に生データ表示へfallbackしない。
 - `request.json`やbuild receiptもファイル名・外側の型だけで表示可能と判断しない。許可projection外は表示せず、schema不一致は拒否し、生JSONや部分フィールドへのfallbackをしない。
+- 非公開観測を含む`tmp/quality`やownerディレクトリ全体へ内容検索しない。report探索はファイル名の一覧だけで行い、確定した単一reportを許可projectionで読む。複数の`rg --glob`はANDの絞り込みではないため、特定runのglobと`*.json`を併記して探索範囲を広げない。`lifecycle.json`も生環境を含み得るものとして扱う。
 - mainは読取り担当へ、必要なreportの正確なパスと許可するフィールドを渡す。集計だけに必要な担当へ生の観測・環境値・credentialsを調べさせず、ログ探索を担当範囲へ暗黙に含めない。環境の復元が必要な主担当も値を内部で使うに留め、ツール出力・Git・公開添付へ出さない。
 - 安全な表示要約は表示用のprojectionであり、描画・性能・source一致の受入証明ではない。正式判定は既存producer/validatorで行う。非公開の原本を公開用に書き換え・repinせず、公開添付は別の許可済みpayloadを使う。
 - アンチパターンは、入力reportの場所を調べるために観測全体を表示すること。正しくは、既知reportへ直接アクセスし、実行情報が必要な場合だけ安全表示コマンドから参照先を得る。検索語: `private observation environment`, `native-cli-observation-summary`, `safe_summary`, `explicit read scope`。
