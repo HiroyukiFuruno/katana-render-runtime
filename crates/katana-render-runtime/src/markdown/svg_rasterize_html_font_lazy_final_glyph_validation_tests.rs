@@ -2,11 +2,15 @@ use super::super as audit;
 use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
 use audit::test_support::{font_tree, text_span};
 use resvg::usvg::{
-    Tree,
+    Group, Node, Transform, Tree,
     fontdb::{Database, Source},
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
+
+const NON_FINITE_SCALE: f32 = f32::NAN;
+const ZERO_TRANSFORM_COMPONENT: f32 = 0.0;
+const IDENTITY_TRANSFORM_COMPONENT: f32 = 1.0;
 
 #[test]
 fn final_glyph_recording_rejects_a_removed_real_font_source() -> Result<(), String> {
@@ -26,6 +30,36 @@ fn final_glyph_recording_rejects_a_removed_real_font_source() -> Result<(), Stri
     assert!(evidence.glyph_layout_errors[0].contains("font face data unavailable"));
     assert_eq!(evidence.glyph_layout_dropped, span.positioned_glyphs.len());
     assert!(evidence.glyph_layout_dropped > 0);
+    Ok(())
+}
+
+#[test]
+fn final_glyph_recording_rejects_a_non_finite_text_transform() -> Result<(), String> {
+    let mut tree = bundled_tree()?;
+    let (_, span) = text_span(&tree)?;
+    let expected_dropped = span.positioned_glyphs.len();
+    assert!(expected_dropped > 0);
+    let transform = Transform::from_row(
+        NON_FINITE_SCALE,
+        ZERO_TRANSFORM_COMPONENT,
+        ZERO_TRANSFORM_COMPONENT,
+        IDENTITY_TRANSFORM_COMPONENT,
+        ZERO_TRANSFORM_COMPONENT,
+        ZERO_TRANSFORM_COMPONENT,
+    );
+    if !replace_audit_text_transform(&mut tree.root, transform) {
+        return Err("audit text transform could not be replaced".to_owned());
+    }
+
+    let mut evidence = audit::TreeEvidence::default();
+    record_first_span(&tree, tree.fontdb(), &mut evidence)?;
+    assert!(evidence.text_spans.is_empty());
+    assert_eq!(evidence.glyph_layout_errors.len(), 1);
+    assert_eq!(
+        evidence.glyph_layout_errors[0],
+        "non-finite text transform at root/audit-run"
+    );
+    assert_eq!(evidence.glyph_layout_dropped, expected_dropped);
     Ok(())
 }
 
@@ -90,4 +124,22 @@ fn record_first_span(
         evidence,
     });
     Ok(())
+}
+
+fn replace_audit_text_transform(group: &mut Group, transform: Transform) -> bool {
+    for node in &mut group.children {
+        match node {
+            Node::Text(text) if text.id() == "audit-run" => {
+                text.abs_transform = transform;
+                return true;
+            }
+            Node::Group(child) => {
+                if replace_audit_text_transform(child, transform) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }

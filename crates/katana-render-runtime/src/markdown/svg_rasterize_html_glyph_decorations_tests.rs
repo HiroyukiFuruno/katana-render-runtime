@@ -1,6 +1,6 @@
 use super::super::{composite::TextRasterizer, font_file_fixture};
 use super::{ALPHA_CHANNEL, HtmlGlyphRasterizer, Prepared, PreparedSpan, RGBA_CHANNELS};
-use resvg::usvg::{Node, Options, Tree};
+use resvg::usvg::{Node, Options, PaintOrder, Tree};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tiny_skia::{Color, Pixmap, Transform};
@@ -161,6 +161,58 @@ fn underline_with_multiple_layout_spans_is_rejected_without_painting() -> Result
     let text = text(&tree)?;
     assert_eq!(text.layouted().len(), 2);
     assert!(text.layouted().iter().any(super::decorations::has_effects));
+    assert_tree_rejected(&tree)
+}
+
+#[test]
+fn decorated_nonzero_baseline_is_rejected_without_painting() -> Result<(), String> {
+    let style = "text-decoration='underline' dominant-baseline='central'";
+    let (tree, _fixture) = fixture(style, CONTENT)?;
+    let text = text(&tree)?;
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    assert_nonzero_effect_span_prepares(&rasterizer, text)?;
+    assert!(matches!(
+        rasterizer.prepare(text)?,
+        super::Prepared::Unsupported
+    ));
+    assert_tree_rejected(&tree)
+}
+
+fn assert_nonzero_effect_span_prepares(
+    rasterizer: &HtmlGlyphRasterizer<'_>,
+    text: &resvg::usvg::Text,
+) -> Result<(), String> {
+    let [span] = text.layouted() else {
+        return Err("baseline guard requires one layout span".to_owned());
+    };
+    if !super::decorations::has_effects(span) || span.positioned_glyphs.is_empty() {
+        return Err("baseline guard requires an effected glyph span".to_owned());
+    }
+    let policy = super::baseline::resolved_policy(rasterizer, text)?
+        .ok_or("central baseline policy missing")?;
+    let mut prepared = Vec::new();
+    if !rasterizer.prepare_span(span, Some(policy), &mut prepared)? {
+        return Err("baseline guard span was rejected before preparation".to_owned());
+    }
+    if prepared.len() != 1 || prepared[0].baseline_shift == 0.0 {
+        return Err("baseline guard requires one shifted prepared span".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn nondefault_paint_order_without_stroke_is_rejected_without_painting() -> Result<(), String> {
+    let (tree, _fixture) = fixture("paint-order='stroke fill'", CONTENT)?;
+    let text = text(&tree)?;
+    let [span] = text.layouted() else {
+        return Err("paint-order fixture must produce one layout span".to_owned());
+    };
+    assert!(span.visible);
+    assert!(!span.positioned_glyphs.is_empty());
+    assert!(span.fill.is_some());
+    assert!(span.stroke.is_none());
+    assert_eq!(span.paint_order, PaintOrder::StrokeAndFill);
+    assert!(!super::decorations::has_effects(span));
     assert_tree_rejected(&tree)
 }
 

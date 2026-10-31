@@ -273,6 +273,8 @@ fn mermaid_classic_cli_reports_verified_and_rejected_sources()
     Ok(())
 }
 
+#[path = "mermaid_classic_scripts_ast_linter_tests.rs"]
+mod ast_linter;
 #[path = "mermaid_classic_capture_tests.rs"]
 mod capture;
 #[path = "mermaid_classic_geometry_bridge_tests.rs"]
