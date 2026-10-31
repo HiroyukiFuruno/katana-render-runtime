@@ -1621,7 +1621,11 @@ function performanceRecipeCommands(): Record<string, string[]> {
       localCoverageCommand("performance", "finish"),
       localCoverageCommand("performance", "validate"),
     ],
-    "fmt-check": ["{{CARGO}} fmt --all -- --check", `just ${PERFORMANCE_RECIPES.format}`],
+    "fmt-check": [
+      "{{CARGO}} fmt --all -- --check",
+      "rustfmt --edition 2024 --check crates/katana-render-runtime/src/svg_engine_*_model_tests.rs",
+      `just ${PERFORMANCE_RECIPES.format}`,
+    ],
     coverage: [
       `just ${PERFORMANCE_RECIPES.coverage}`,
       "just root-test-and-coverage",

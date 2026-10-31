@@ -73,10 +73,12 @@ help:
 fmt:
     {{CARGO}} fmt --all
     {{CARGO}} fmt --manifest-path scripts/html/performance-harness/Cargo.toml --all
+    rustfmt --edition 2024 crates/katana-render-runtime/src/svg_engine_*_model_tests.rs
 
 # Check Rust formatting
 fmt-check:
     {{CARGO}} fmt --all -- --check
+    rustfmt --edition 2024 --check crates/katana-render-runtime/src/svg_engine_*_model_tests.rs
     just performance-harness-fmt-check
 
 # 配布と同じ最適化ビルドで初期描画は3秒未満、closeとプロセス全体は60秒上限で検証する。

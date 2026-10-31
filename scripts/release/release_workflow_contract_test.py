@@ -4,6 +4,7 @@ import unittest
 import hashlib
 import os
 import json
+import re
 import shlex
 import subprocess
 import tempfile
@@ -32,6 +33,32 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.ci = (root / ".github/workflows/test-and-build.yml").read_text(
             encoding="utf-8"
         )
+
+    def test_owned_svg_model_tests_are_in_both_rustfmt_recipes(self) -> None:
+        root = Path(__file__).parents[2]
+        pattern = "crates/katana-render-runtime/src/svg_engine_*_model_tests.rs"
+        targets = {path.resolve() for path in root.glob(pattern)}
+        self.assertTrue(targets)
+        vendor = root / "crates/katana-render-runtime/vendor/svg-engine"
+        macro = re.compile(r'owned_svg_model_tests!\s*\(\s*"([^"\n]+)"\s*\)')
+        referenced = {
+            (path.parent / match).resolve()
+            for path in vendor.rglob("*.rs")
+            for match in macro.findall(path.read_text(encoding="utf-8"))
+        }
+        self.assertTrue(referenced)
+        self.assertTrue(referenced <= targets, referenced - targets)
+        child = re.compile(r'#\[path\s*=\s*"([^"\n]*_model_tests\.rs)"\]')
+        children = {
+            (path.parent / match).resolve()
+            for path in targets
+            for match in child.findall(path.read_text(encoding="utf-8"))
+        }
+        self.assertTrue(children <= targets, children - targets)
+        for recipe, extra in (("fmt", []), ("fmt-check", ["--check"])):
+            with self.subTest(recipe=recipe):
+                commands = [shlex.split(line) for line in self.just_dry_run(recipe).splitlines()]
+                self.assertIn(["rustfmt", "--edition", "2024", *extra, pattern], commands)
 
     def test_ubuntu_capacity_reference_precedes_cached_target_checks_and_coverage(
         self,

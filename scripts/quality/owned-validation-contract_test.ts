@@ -4384,6 +4384,19 @@ test.each([
     "masked root producer",
   ],
   ["fmt-check", "{{CARGO}} fmt --all -- --check", "echo formatting", "root format"],
+  [
+    "fmt-check",
+    "rustfmt --edition 2024 --check crates/katana-render-runtime/src/svg_engine_*_model_tests.rs",
+    "",
+    "owned SVG format omitted",
+  ],
+  ["fmt-check", "rustfmt --edition 2024 --check", "rustfmt --edition 2021 --check", "SVG edition"],
+  [
+    "fmt-check",
+    "rustfmt --edition 2024 --check crates/katana-render-runtime/src/svg_engine_*_model_tests.rs",
+    "rustfmt --edition 2024 --check crates/katana-render-runtime/src/svg_engine_*_model_tests.rs\necho extra",
+    "unowned format command",
+  ],
   ["lint", "--all-features", "--no-default-features", "root lint"],
   ["lint", "--check-domain root", "--check-domain performance-baseline", "root lint domain"],
 ])("standalone performance recipe %s rejects %s → %s (%s)", (recipe, before, after) => {
