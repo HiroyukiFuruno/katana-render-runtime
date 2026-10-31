@@ -1,6 +1,13 @@
-use super::{parse_writer_svg, render_tree, writer_options};
+use super::{
+    parse_writer_svg, render_tree,
+    writer_coverage_tests::{assert_attribute, assert_pixels_equal},
+    writer_options,
+};
 use rstest::rstest;
 use std::path::Path;
+
+#[path = "svg_engine_writer_lighting_input_tests.rs"]
+mod lighting_input_tests;
 
 const FILTER_FIXTURES: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -40,6 +47,27 @@ const OPAQUE_CHANNEL: u8 = 255;
 )]
 #[case("feConvolveMatrix/bias=-0.5", "feConvolveMatrix", "bias=\"-0.5\"")]
 #[case("feMorphology/operator=dilate", "feMorphology", "operator=\"dilate\"")]
+#[case("feMorphology/fractional-radius", "feMorphology", "operator=\"erode\"")]
+#[case(
+    "feComponentTransfer/type=identity-on-all",
+    "feComponentTransfer",
+    "type=\"identity\""
+)]
+#[case(
+    "feMerge/color-interpolation-filters=linearRGB",
+    "feMerge",
+    "color-interpolation-filters=\"linearRGB\""
+)]
+#[case(
+    "feSpecularLighting/with-feSpotLight",
+    "feSpecularLighting",
+    "in=\"SourceAlpha\""
+)]
+#[case(
+    "feSpotLight/limitingConeAngle=30",
+    "feSpotLight",
+    "limitingConeAngle=\"30\""
+)]
 #[case(
     "feTurbulence/baseFrequency=0.01",
     "feTurbulence",
@@ -70,7 +98,7 @@ fn filter_writer_preserves_renderable_semantics(
     let input = std::fs::read_to_string(Path::new(FILTER_FIXTURES).join(format!("{fixture}.svg")))
         .map_err(|error| error.to_string())?;
     let original = parse_writer_svg(&input, fixture)?;
-    assert!(!original.filters().is_empty(), "{fixture}: no input filter");
+    assert_fixture_filter_input(&original, fixture)?;
     let options = writer_options(fixture);
     let serialized = original.to_string(&options);
     assert_serialized_filter(&serialized, primitive, attribute, fixture);
@@ -91,6 +119,30 @@ fn filter_writer_preserves_renderable_semantics(
         assert_rendered_pixels(&original, &reparsed, fixture)?;
     }
     assert_rendered_pixels(&parsed, &reparsed, fixture)
+}
+
+fn assert_fixture_filter_input(tree: &super::usvg::Tree, fixture: &str) -> Result<(), String> {
+    assert!(!tree.filters().is_empty(), "{fixture}: no input filter");
+    if fixture == "feSpecularLighting/with-feSpotLight" {
+        assert_filter_has_input(tree, &super::usvg::filter::Input::SourceAlpha, fixture)?;
+    }
+    Ok(())
+}
+
+fn assert_filter_has_input(
+    tree: &super::usvg::Tree,
+    input: &super::usvg::filter::Input,
+    fixture: &str,
+) -> Result<(), String> {
+    if tree
+        .filters()
+        .iter()
+        .flat_map(|filter| filter.primitives())
+        .any(|primitive| primitive.kind().has_input(input))
+    {
+        return Ok(());
+    }
+    Err(format!("{fixture}: parsed filter input missing"))
 }
 
 fn assert_serialized_filter(svg: &str, primitive: &str, attribute: &str, fixture: &str) {
@@ -126,6 +178,53 @@ fn linked_image_preserves_group_and_child_ids() -> Result<(), String> {
         (pixel.red(), pixel.green(), pixel.blue(), pixel.alpha()),
         (0, OPAQUE_CHANNEL, 0, OPAQUE_CHANNEL)
     );
+    Ok(())
+}
+
+#[test]
+fn repeated_fe_image_target_is_defined_once_and_keeps_both_references() -> Result<(), String> {
+    let input = r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+      <defs><g id="target"><rect width="100" height="100" fill="lime"/></g>
+        <filter id="twice"><feImage href="#target"/><feImage href="#target"/></filter>
+      </defs><rect width="140" height="140" filter="url(#twice)"/></svg>"##;
+    let original = parse_writer_svg(input, "repeated-fe-image-target")?;
+    let options = writer_options("repeated-fe-image-target");
+    let serialized = original.to_string(&options);
+    assert_eq!(serialized.matches("id=\"target\"").count(), 1);
+    assert_eq!(serialized.matches("xlink:href=\"#target\"").count(), 2);
+    let reparsed = parse_writer_svg(&serialized, "repeated-fe-image-target")?;
+    assert_eq!(reparsed.filters().len(), original.filters().len());
+    assert_rendered_pixels(&original, &reparsed, "repeated-fe-image-target")
+}
+
+#[test]
+fn primitive_subregion_and_source_alpha_survive_writer_roundtrip() -> Result<(), String> {
+    let input = r##"<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40">
+      <defs><filter id="subregion" x="0" y="0" width="80" height="40">
+        <feOffset in="SourceAlpha" dx="3" dy="4" x="11" y="12" width="13" height="14"/>
+      </filter></defs>
+      <rect width="30" height="30" fill="red" filter="url(#subregion)"/>
+    </svg>"##;
+    let original = parse_writer_svg(input, "filter-primitive-subregion")?;
+    let options = writer_options("filter-primitive-subregion");
+    let serialized = original.to_string(&options);
+    assert_filter_subregion(&serialized)?;
+    let reparsed = parse_writer_svg(&serialized, "filter-primitive-subregion")?;
+    assert_filter_subregion(&reparsed.to_string(&options))?;
+    assert_pixels_equal(&original, &reparsed, "filter-primitive-subregion")?;
+    Ok(())
+}
+
+fn assert_filter_subregion(svg: &str) -> Result<(), String> {
+    for (attribute, value) in [
+        ("in", "SourceAlpha"),
+        ("x", "11"),
+        ("y", "12"),
+        ("width", "13"),
+        ("height", "14"),
+    ] {
+        assert_attribute(svg, "feOffset", attribute, value)?;
+    }
     Ok(())
 }
 

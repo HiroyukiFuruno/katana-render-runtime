@@ -36,6 +36,7 @@ test("未知・欠落・改変・外部symlinkを拒否する", () => {
     (root) => fs.rmSync(sourceFile(root)),
     (root) => fs.appendFileSync(sourceFile(root), "\nchanged"),
     (root) => fs.appendFileSync(path.join(root, vendorRelative, "PROVENANCE.json"), "\nchanged"),
+    (root) => fs.appendFileSync(path.join(root, vendorRelative, "README.md"), "\nchanged"),
     (root) => {
       const outside = path.join(root, "outside.rs");
       fs.writeFileSync(outside, "outside");

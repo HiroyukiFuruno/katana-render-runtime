@@ -35,6 +35,46 @@ fn styled_paths_and_gradient_spread_survive_writer_roundtrip() -> Result<(), Str
     Ok(())
 }
 
+#[test]
+fn clip_fill_mask_and_stroke_boundaries_survive_writer_roundtrip() -> Result<(), String> {
+    let input = r##"<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40">
+      <defs>
+        <clipPath id="inner"><path d="M2 2 H30 V30 H2 Z" clip-rule="evenodd"/></clipPath>
+        <mask id="alpha" mask-type="alpha" maskUnits="userSpaceOnUse" x="0" y="0" width="40" height="40">
+          <rect width="40" height="40" fill="white"/>
+        </mask>
+        <mask id="outer" mask="url(#alpha)" maskUnits="userSpaceOnUse" x="0" y="0" width="40" height="40">
+          <rect width="40" height="40" fill="white"/>
+        </mask>
+      </defs>
+      <path d="M2 2 H30 V30 H2 Z M8 8 V24 H24 V8 Z" fill-rule="evenodd"
+        clip-path="url(#inner)" mask="url(#outer)" stroke="black"
+        stroke-miterlimit="7" stroke-linejoin="miter-clip"/>
+    </svg>"##;
+    let original = parse_writer_svg(input, "writer-clip-mask-stroke-boundaries")?;
+    let options = usvg::WriteOptions::default();
+    let serialized = original.to_string(&options);
+    assert_boundary_attributes(&serialized)?;
+    let parsed = parse_writer_svg(&serialized, "writer-clip-mask-stroke-boundaries")?;
+    assert_boundary_attributes(&parsed.to_string(&options))?;
+    assert_pixels_equal(&original, &parsed, "clip-mask-stroke boundaries")?;
+    Ok(())
+}
+
+fn assert_boundary_attributes(svg: &str) -> Result<(), String> {
+    for (element, name, value) in [
+        ("path", "fill-rule", "evenodd"),
+        ("path", "clip-rule", "evenodd"),
+        ("mask", "mask-type", "alpha"),
+        ("mask", "mask", "url(#alpha)"),
+        ("path", "stroke-miterlimit", "7"),
+        ("path", "stroke-linejoin", "miter-clip"),
+    ] {
+        assert_attribute(svg, element, name, value)?;
+    }
+    Ok(())
+}
+
 fn assert_style_attributes(svg: &str) -> Result<(), String> {
     for (element, name, value) in [
         ("linearGradient", "spreadMethod", "reflect"),

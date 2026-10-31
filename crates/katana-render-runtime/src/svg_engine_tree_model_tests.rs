@@ -272,5 +272,7 @@ fn text_node(id: &str, abs_transform: Transform) -> Result<Node, String> {
     Ok(Node::Text(Box::new(text)))
 }
 
+#[path = "svg_engine_tree_filter_model_tests.rs"]
+mod filter_model_tests;
 #[path = "svg_engine_tree_image_model_tests.rs"]
 mod image_model_tests;

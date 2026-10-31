@@ -59,6 +59,9 @@ resvgの `identity_op` / `too_many_arguments` / `upper_case_acronyms` / `wrong_s
 `PROVENANCE.json` に、元commit、全ファイルの元パス・移植先・両SHA256・変更件数と、
 ライセンスのSHA256を記録している。SHA256は各ファイルの全バイトから算出する。
 
+Diffuse/Specular lighting primitiveの入力参照もwriterで保持し、`SourceAlpha`と名前付き参照の
+parse-write-parse後のモデル・描画が同じであることをKRR側回帰で確認する。
+
 ## 更新方法
 
 1. 更新対象の元commitと、KRRで使うfeature集合・依存版を先に確定する。

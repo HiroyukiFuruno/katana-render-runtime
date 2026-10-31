@@ -460,6 +460,7 @@ fn write_filters(tree: &Tree, opt: &WriteOptions, xml: &mut XmlWriter) {
                 filter::Kind::DiffuseLighting(ref light) => {
                     xml.start_svg_element(EId::FeDiffuseLighting);
                     xml.write_filter_primitive_attrs(filter.rect(), fe);
+                    xml.write_filter_input(AId::In, &light.input);
                     xml.write_svg_attribute(AId::Result, &fe.result);
 
                     xml.write_svg_attribute(AId::SurfaceScale, &light.surface_scale);
@@ -472,6 +473,7 @@ fn write_filters(tree: &Tree, opt: &WriteOptions, xml: &mut XmlWriter) {
                 filter::Kind::SpecularLighting(ref light) => {
                     xml.start_svg_element(EId::FeSpecularLighting);
                     xml.write_filter_primitive_attrs(filter.rect(), fe);
+                    xml.write_filter_input(AId::In, &light.input);
                     xml.write_svg_attribute(AId::Result, &fe.result);
 
                     xml.write_svg_attribute(AId::SurfaceScale, &light.surface_scale);

@@ -79,8 +79,12 @@ fn hidden_embedded_image_does_not_paint() -> Result<(), String> {
     );
     let tree = parse_writer_svg(&input, "hidden-inline-image")?;
     assert!(!image_node(&tree, "rgba")?.is_visible());
+    let serialized = tree.to_string(&writer_options("hidden-inline-image"));
+    assert!(serialized.contains("visibility=\"hidden\""));
+    let reparsed = parse_writer_svg(&serialized, "hidden-inline-image-roundtrip")?;
+    assert!(!image_node(&reparsed, "rgba")?.is_visible());
 
-    let rendered = render_tree(&tree)?;
+    let rendered = render_tree(&reparsed)?;
     assert!(
         rendered
             .data()
