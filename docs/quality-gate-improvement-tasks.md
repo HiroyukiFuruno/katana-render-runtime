@@ -1,6 +1,9 @@
 # 品質ゲート改善の作業台帳
 
-## 最新の再開地点（2026-10-31）
+## 最新の再開地点（2026-11-01）
+
+- [/] R6067の全staticは実終了0。R6071の全5,126件はすべて成功・29skip（302.444秒）、collection/reportとも0、R6070/R6072 source一致。R6073 coverage policyは83,180/84,507=98.42971588152461%・未到達1,327で実1。R6006から分母不変・未到達63行減、100%は未達。R6074で公式詳細JSONの取得にも成功し、原reportと詳細の排他copyを `tmp/quality/resumed-owner-r3509/current-root-coverage-report-r6075/` へ保持した。関連34件の限定成功R6063を全体合格に代用していない。
+- [/] validator境界8fileを9c24542、SVG修正・独立参照33fileを0583e4aへ通常hook付きでcommit済み。追加の画像入力・paint・初期継承値・textPath/tref・Rust AST/実path回帰はR6071の全体測定に含まれる。描画117/HTML84・性能・安全cache実chain・最終review/3OS CI/公開は引き続き未完了。
 
 - [/] R6000の現行全staticは実終了0。続くR6004は全5,096件成功・29skip（311.886秒）、collection/reportとも0、source前後一致。R6006 coverage policyは83,117/84,507=98.3551658442496%・未到達1,390で実1、100%未達を維持する。R5904より未到達37減だが分母も17行減っており、すべてを追加検証の効果と数えない。原report bytesの分析copyは `tmp/quality/resumed-owner-r3509/current-root-coverage-report-r6007/`、公式位置一覧は `official-missing-index-r6008.json`（1,005位置でsummary1,390と差があり、補完しない）。
 - [/] R5993で5件の独立Chromium画像照合・1件の片軸RGBA契約とinventory/負例を含む15件すべて成功。R5997で独自・外部AST両規則の予備2件成功後、R6000で元の全staticを完走した。現行のMermaid117画像・HTML84画像/性能・安全cache実chain・完全公開gate・レビュー/3OS CI/公開は別途未完了であり、今回のunit/static成功へ置き換えない。

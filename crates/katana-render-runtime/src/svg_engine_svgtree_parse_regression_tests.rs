@@ -6,7 +6,7 @@ const DPI: f32 = 96.0;
 const PARENT_FONT_SIZE: f32 = 16.0;
 const FLOAT_TOLERANCE: f32 = 0.0001;
 
-const INITIAL_VALUES: [(AId, &str); 9] = [
+const INITIAL_VALUES: [(AId, &str); 16] = [
     (AId::Fill, "black"),
     (AId::FillOpacity, "1"),
     (AId::FillRule, "nonzero"),
@@ -16,6 +16,13 @@ const INITIAL_VALUES: [(AId, &str); 9] = [
     (AId::StrokeLinejoin, "miter"),
     (AId::StrokeMiterlimit, "4"),
     (AId::Visibility, "visible"),
+    (AId::BaselineShift, "baseline"),
+    (AId::ColorInterpolationFilters, "linearRGB"),
+    (AId::Direction, "ltr"),
+    (AId::Display, "inline"),
+    (AId::Overflow, "visible"),
+    (AId::TextAnchor, "start"),
+    (AId::WritingMode, "lr-tb"),
 ];
 
 const IMAGE_RENDERING_VALUES: [(&str, Option<ImageRendering>); 8] = [
@@ -31,9 +38,12 @@ const IMAGE_RENDERING_VALUES: [(&str, Option<ImageRendering>); 8] = [
 
 #[test]
 fn explicit_inherit_without_authored_ancestor_uses_svg_initial_values() -> Result<(), String> {
-    let source = format!(
-        "<svg xmlns=\"{SVG_NS}\"><g><rect id=\"target\" fill=\"inherit\" fill-opacity=\"inherit\" fill-rule=\"inherit\" stroke=\"inherit\" stroke-width=\"inherit\" stroke-linecap=\"inherit\" stroke-linejoin=\"inherit\" stroke-miterlimit=\"inherit\" visibility=\"inherit\"/></g></svg>"
-    );
+    let inherit_attributes = INITIAL_VALUES
+        .iter()
+        .map(|(aid, _)| format!(" {}=\"inherit\"", aid.to_str()))
+        .collect::<String>();
+    let source =
+        format!("<svg xmlns=\"{SVG_NS}\"><g><rect id=\"target\"{inherit_attributes}/></g></svg>");
     let document = parse_document(&source, None)?;
     for (aid, expected) in INITIAL_VALUES {
         assert_eq!(raw_attribute(&document, "target", aid)?, expected);

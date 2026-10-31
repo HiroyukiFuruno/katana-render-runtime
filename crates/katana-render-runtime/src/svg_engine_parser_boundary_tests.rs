@@ -6,6 +6,9 @@ const VIEWPORT: u32 = 8;
 const CENTER: u32 = VIEWPORT / 2;
 const CHANNEL_COUNT: usize = 4;
 
+#[path = "svg_engine_parser_paint_boundary_tests.rs"]
+mod paint_boundary_tests;
+
 #[derive(Clone, Copy)]
 enum PublicInput {
     Bytes(&'static [u8]),

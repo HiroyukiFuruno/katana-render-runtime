@@ -1,6 +1,9 @@
 use super::{upstream_writer_font_database, usvg};
 use std::path::{Path, PathBuf};
 
+#[path = "svg_engine_public_getter_text_parser_tests.rs"]
+mod text_parser_tests;
+
 #[test]
 fn text_path_getters_match_authored_offset_and_path() -> Result<(), String> {
     let tree = parse_fixture("text/textPath/startOffset=30.svg")?;
