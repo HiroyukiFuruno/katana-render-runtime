@@ -239,7 +239,7 @@ tasks:
         hash: stdout
 
   runtime-unused-tool-fingerprint-producer:
-    command: ['just', 'runtime-unused-script-producer-run', 'runtime-unused-tool-fingerprint']
+    command: ['just', 'runtime-unused-script-verify-run', 'runtime-unused-tool-fingerprint']
     deps: ['runtime-unused-check-producer']
     inputs: *quality-inputs
     outputs:

@@ -16,6 +16,7 @@ import native_coverage_local_result as coverage_context
 import runtime_script_profiles as profiles
 import runtime_script_recipe as recipe_reader
 import runtime_script_result as result
+import runtime_script_tool_fingerprint_inputs as pilot
 
 
 SCHEMA = "krr-runtime-script-identity-v2"
@@ -35,11 +36,13 @@ class IdentityReport(TypedDict):
     missReasons: list[str]
     sourceManifestSha256: str | None
     sourceInputsSha256: str | None
+    sourceInputScope: str | None
     recipeSha256: str | None
     toolEnvironmentSha256: str | None
     inputSha256: str | None
     identitySha256: str | None
     moonTaskHash: str | None
+    diagnostic: dict[str, object] | None
 
 
 class _CollectionFailure(ValueError):
@@ -65,11 +68,13 @@ def _miss(producer: str, reason: str, moon_task_hash: str | None = None) -> Iden
         "missReasons": [reason],
         "sourceManifestSha256": None,
         "sourceInputsSha256": None,
+        "sourceInputScope": None,
         "recipeSha256": None,
         "toolEnvironmentSha256": None,
         "inputSha256": None,
         "identitySha256": None,
         "moonTaskHash": moon_task_hash,
+        "diagnostic": None,
     }
 
 
@@ -79,13 +84,17 @@ def _run_json(
     failure_reason: str,
     env_updates: dict[str, str] | None = None,
 ) -> object:
+    environment = {**os.environ, **(env_updates or {})}
+    if any(value and (name.startswith("LD_") or name.startswith("DYLD_"))
+           for name, value in environment.items()):
+        raise _CollectionFailure("unsupported_loader_override")
     try:
         process = subprocess.run(
             argv,
             cwd=repo,
             capture_output=True,
             check=False,
-            env={**os.environ, **(env_updates or {})},
+            env=environment,
         )
     except OSError as error:
         raise _CollectionFailure(failure_reason) from error
@@ -158,12 +167,24 @@ def _mathjax_evidence_fingerprint(repo: Path) -> str:
     )
 
 
+def _python_context() -> dict[str, object]:
+    try:
+        python_digest = _digest_bytes(Path(sys.executable).resolve(strict=True).read_bytes())
+    except OSError as error:
+        raise _CollectionFailure("producer_context_unavailable") from error
+    return {
+        "pythonVersion": sys.version,
+        "pythonExecutableSha256": python_digest,
+        "pythonEnvironmentSha256": _canonical_digest(
+            {name: value for name, value in sorted(os.environ.items()) if name.startswith("PYTHON")}
+        ),
+        "pythonFlagsSha256": _digest_bytes(repr(sys.flags).encode()),
+        "pythonSearchPathSha256": _canonical_digest(sys.path),
+    }
+
+
 def _tool_fingerprint(repo: Path) -> dict[str, object]:
-    fingerprint = _run_json(
-        repo,
-        ["bun", TOOL_FINGERPRINT],
-        "tool_fingerprint_unavailable",
-    )
+    fingerprint = _run_json(repo, ["bun", TOOL_FINGERPRINT], "tool_fingerprint_unavailable")
     if (
         not isinstance(fingerprint, dict)
         or fingerprint.get("schema") != "krr-runtime-bundle-tool-fingerprint-v1"
@@ -172,7 +193,6 @@ def _tool_fingerprint(repo: Path) -> dict[str, object]:
     ):
         raise _CollectionFailure("tool_fingerprint_shape_unsupported")
     try:
-        python_digest = _digest_bytes(Path(sys.executable).resolve(strict=True).read_bytes())
         prepared_digest = _digest_bytes((repo / PREPARED_RUNTIME).read_bytes())
     except OSError as error:
         raise _CollectionFailure("producer_context_unavailable") from error
@@ -180,13 +200,7 @@ def _tool_fingerprint(repo: Path) -> dict[str, object]:
         "runtimeBundle": cast(dict[str, object], fingerprint),
         "rustFactsHostFingerprint": _rust_host_fingerprint(repo),
         "mathjaxEvidenceFingerprint": _mathjax_evidence_fingerprint(repo),
-        "pythonVersion": sys.version,
-        "pythonExecutableSha256": python_digest,
-        "pythonEnvironmentSha256": _canonical_digest(
-            {name: value for name, value in sorted(os.environ.items()) if name.startswith("PYTHON")}
-        ),
-        "pythonFlagsSha256": _digest_bytes(repr(sys.flags).encode()),
-        "pythonSearchPathSha256": _canonical_digest(sys.path),
+        **_python_context(),
         "preparedRuntimeSha256": prepared_digest,
     }
 
@@ -199,6 +213,32 @@ def _moon_context() -> tuple[str | None, str | None]:
     return safe_task_id, safe_hash
 
 
+def _pilot_facts(repo: Path) -> tuple[str, dict[str, object]]:
+    report = pilot.collect(repo, os.environ)
+    digest = report.get("inventorySha256")
+    if (report.get("schema") != pilot.SCHEMA or report.get("profile") != pilot.PROFILE
+            or report.get("admission") != "candidate-only" or report.get("cacheable") is not False
+            or report.get("inputsCollected") is not True or not isinstance(digest, str)
+            or not SHA256_RE.fullmatch(digest)):
+        raise _CollectionFailure("tool_profile_inputs_unavailable")
+    tool = _run_json(repo, ["bun", TOOL_FINGERPRINT], "tool_fingerprint_unavailable")
+    if (not isinstance(tool, dict) or tool.get("schema") != "krr-runtime-bundle-tool-fingerprint-v1"
+            or not isinstance(tool.get("tools"), dict) or not isinstance(tool.get("environment"), list)):
+        raise _CollectionFailure("tool_fingerprint_shape_unsupported")
+    components = report.get("componentDigests")
+    names = report.get("semanticEnvironmentNames")
+    if (not isinstance(components, dict) or not isinstance(names, list)
+            or any(not isinstance(name, str) for name in names)
+            or any(not isinstance(value, str) or not SHA256_RE.fullmatch(value)
+                   for value in components.values())):
+        raise _CollectionFailure("tool_profile_diagnostics_unavailable")
+    python_context = _python_context()
+    return digest, {"scope": pilot.SEMANTIC_SCOPE, "runtimeBundle": tool, **python_context,
+                    "diagnostic": {"inputComponents": components, "environmentNames": names,
+                                   "runtimeTool": _canonical_digest(tool),
+                                   "pythonContext": _canonical_digest(python_context)}}
+
+
 def _identity_from_facts(
     producer: str,
     source_digest: str,
@@ -207,10 +247,11 @@ def _identity_from_facts(
     fingerprint: dict[str, object],
     moon_task_hash: str | None,
 ) -> IdentityReport:
-    tool_digest = _canonical_digest(fingerprint)
+    tool_digest = _canonical_digest({key: value for key, value in fingerprint.items() if key != "diagnostic"})
     input_digest = _canonical_digest(
         {
-            "schema": "krr-runtime-script-producer-input-v2",
+            "schema": (pilot.SEMANTIC_SCOPE if producer == pilot.PROFILE
+                       else "krr-runtime-script-producer-input-v2"),
             "producer": producer,
             "sourceInputsSha256": source_inputs_digest,
             "recipeSha256": recipe.recipe_sha256,
@@ -228,11 +269,14 @@ def _identity_from_facts(
         "missReasons": [],
         "sourceManifestSha256": source_digest,
         "sourceInputsSha256": source_inputs_digest,
+        "sourceInputScope": (pilot.SEMANTIC_SCOPE if producer == pilot.PROFILE
+                             else "krr-native-coverage-source-inputs-v1"),
         "recipeSha256": recipe.recipe_sha256,
         "toolEnvironmentSha256": tool_digest,
         "inputSha256": input_digest,
         "identitySha256": identity_digest,
         "moonTaskHash": moon_task_hash,
+        "diagnostic": cast(dict[str, object] | None, fingerprint.get("diagnostic")),
     }
 
 
@@ -243,12 +287,15 @@ def _collect_facts(
     str,
     dict[str, recipe_reader.RuntimeScriptRecipe],
     dict[str, object],
+    tuple[str, dict[str, object]] | None,
     str | None,
 ]:
     if not repo.is_absolute() or repo.resolve(strict=True) != repo:
         raise _CollectionFailure("repository_root_not_canonical")
     source_before, inputs_before = _source_state(repo)
-    tool_before = _tool_fingerprint(repo)
+    has_broad_profile = any(producer != pilot.PROFILE for producer in producers)
+    tool_before = _tool_fingerprint(repo) if has_broad_profile else {}
+    pilot_before = _pilot_facts(repo) if pilot.PROFILE in producers else None
     recipes = {
         producer: recipe_reader.read_runtime_script_recipe(repo, producer)
         for producer in producers
@@ -256,16 +303,18 @@ def _collect_facts(
     for producer, recipe in recipes.items():
         if recipe.recipe_name != profiles.producer_recipe(producer):
             raise _CollectionFailure("recipe_profile_mismatch")
+    tool_after = _tool_fingerprint(repo) if has_broad_profile else {}
+    pilot_after = _pilot_facts(repo) if pilot.PROFILE in producers else None
     source_after, inputs_after = _source_state(repo)
-    tool_after = _tool_fingerprint(repo)
     if (
         source_before != source_after
         or inputs_before != inputs_after
         or tool_before != tool_after
+        or pilot_before != pilot_after
     ):
         raise _CollectionFailure("source_changed_during_collection")
     _, moon_task_hash = _moon_context()
-    return source_before, inputs_before, recipes, tool_before, moon_task_hash
+    return source_before, inputs_before, recipes, tool_before, pilot_before, moon_task_hash
 
 
 def _read_execution_facts(
@@ -277,7 +326,11 @@ def _read_execution_facts(
     recipe = recipe_reader.read_runtime_script_recipe(repo, producer)
     if recipe.recipe_name != profiles.producer_recipe(producer):
         raise _CollectionFailure("recipe_profile_mismatch")
-    return source_digest, source_inputs_digest, recipe, _tool_fingerprint(repo)
+    if producer == pilot.PROFILE:
+        source_inputs_digest, tool = _pilot_facts(repo)
+    else:
+        tool = _tool_fingerprint(repo)
+    return source_digest, source_inputs_digest, recipe, tool
 
 
 def collect_execution_snapshot(repo: Path, producer: str) -> IdentityReport:
@@ -305,6 +358,7 @@ def collect_fixed_leaf_identity_reports(repo: Path) -> dict[str, IdentityReport]
             source_inputs_digest,
             recipes,
             fingerprint,
+            pilot_facts,
             moon_task_hash,
         ) = _collect_facts(repo, producers)
     except (OSError, _CollectionFailure, recipe_reader.RuntimeScriptRecipeError) as error:
@@ -314,9 +368,9 @@ def collect_fixed_leaf_identity_reports(repo: Path) -> dict[str, IdentityReport]
         producer: _identity_from_facts(
             producer,
             source_digest,
-            source_inputs_digest,
+            pilot_facts[0] if producer == pilot.PROFILE and pilot_facts is not None else source_inputs_digest,
             recipes[producer],
-            fingerprint,
+            pilot_facts[1] if producer == pilot.PROFILE and pilot_facts is not None else fingerprint,
             moon_task_hash,
         )
         for producer in producers
@@ -345,12 +399,15 @@ def collect_identity_report(repo: Path, producer: str) -> IdentityReport:
             source_inputs_digest,
             recipes,
             fingerprint,
+            pilot_facts,
             moon_task_hash,
         ) = _collect_facts(repo, (producer,))
     except (OSError, _CollectionFailure, recipe_reader.RuntimeScriptRecipeError) as error:
         return _miss(producer, _collection_miss_reason(error), moon_task_hash)
     return _identity_from_facts(
-        producer, before, source_inputs_digest, recipes[producer], fingerprint, moon_task_hash
+        producer, before,
+        pilot_facts[0] if pilot_facts is not None else source_inputs_digest,
+        recipes[producer], pilot_facts[1] if pilot_facts is not None else fingerprint, moon_task_hash
     )
 
 

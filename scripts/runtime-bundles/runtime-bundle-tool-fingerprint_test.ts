@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import {
+  collectRuntimeBundleToolFingerprint,
   FINGERPRINT_SCHEMA,
   type RuntimeBundleToolFingerprint,
 } from "./runtime-bundle-tool-fingerprint";
@@ -197,6 +198,23 @@ describe("runtime bundle tool fingerprint CLI", () => {
     expect(unsupportedOverride.stdout).toBe("");
     expect(unsupportedOverride.stderr).toContain("fingerprint resolution failed");
   });
+
+  test.each(["LD_PRELOAD", "LD_AUDIT", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES"])(
+    "rejects dynamic loader override %s without exposing its value",
+    (name) => {
+      const previous = process.env[name];
+      const value = "fixture-loader-override";
+      process.env[name] = value;
+      try {
+        expect(() => collectRuntimeBundleToolFingerprint()).toThrow(
+          "unsupported dynamic loader override",
+        );
+      } finally {
+        if (previous === undefined) delete process.env[name];
+        else process.env[name] = previous;
+      }
+    },
+  );
 });
 
 function requireRuns(runs: FingerprintRuns | undefined): FingerprintRuns {

@@ -5036,9 +5036,20 @@ test.each([
   [
     "producer command bypass",
     (task: z.infer<typeof moonRootFixtureConfig>["tasks"][string]) => {
-      task.command = ["just", "runtime-unused-script-verify-run", "other"];
+      task.command = ["just", "runtime-unused-script-verify-run", "runtime-unused-fragment-loader"];
     },
     "runtime unused producer command differs: runtime-unused-fragment-loader",
+  ],
+  [
+    "verify leaf using producer command",
+    (task: z.infer<typeof moonRootFixtureConfig>["tasks"][string]) => {
+      task.command = [
+        "just",
+        "runtime-unused-script-producer-run",
+        "runtime-unused-tool-fingerprint",
+      ];
+    },
+    "runtime unused producer command differs: runtime-unused-tool-fingerprint",
   ],
   [
     "producer shared predecessor bypass",

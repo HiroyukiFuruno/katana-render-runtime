@@ -33,6 +33,12 @@
 - 例：外部APIがdefault exportを要求する場合、そのAPIを表す型宣言の該当ルールだけを例外にする。外部の制約を理由に内部実装・テスト全体をLintや厳格な型検査から除外しない。
 - 既存の正確な宣言形式で検査が通る場合は、その形式を維持する。外部例外によって描画スコア、カバレッジ、性能の受入基準を下げない。
 
+## Python unitの依存参照
+
+- 厳格な型と公開APIの境界を維持するため、テストのpatch先や依存定数は依存モジュールを直接importして参照する。実装が内部でimportした`subprocess`や別名moduleを、暗黙の公開APIとして経由しない。
+- strict mypyのimplicit reexport指摘はテスト側の参照で直し、テスト都合の実装側再export・ignore・型検査緩和で解消しない。仕様として公開した再export自体を検証するケースは区別する。
+- この型エラーの修正後は既存`python-typecheck`で先に回収し、既知の失敗を残して重い標準chainを反復しない。機械的検出は既存の必須mypyゲートを維持する。
+
 ## Bun Test Scope Gate
 
 - 特定ファイル・ディレクトリの Bun テストは `./` または絶対パスで指定する。裸の相対パスは探索フィルタとなるため使用しない。意図的な負例は隔離した自作fixture内だけで実行する。
@@ -57,6 +63,8 @@
 - 取得済みの結果が要約だけなら、観測したtool出力と終了コードを保全し、未取得の範囲を明記する。欠けた個別結果を再構成しない。ソースが変わった場合は、再検証した範囲と変更前の成功を区別する。
 
 ## 限定Rust検証の実行条件
+
+- Rust実装・テストを追加または分割した後は、既存`ast-lint`の成功を、限定catalog取得やruntimeの再コンパイルより先に回収する。`source-static-foundation`やClippyの成功だけでは、AST側のファイル行数・責務境界検査を通したことにならない。新test helperで既存fileの300行境界を超え、実テスト成功後のcommitで初めて拒否される反復を避ける。閾値を緩めず、観点単位で分離して同じ検査を再実行する。
 
 - Rustup管理下のCargoは既存Justfileのlauncher経由で起動する。証跡の実体SHA取得に解決した`cargo.executable`を実行argvへ置き換えない。実体を直呼びすると子rustcのRustup選択が依存crate内のtoolchain指定へ変わり、同一targetで異なるcompilerが混在する。E0514時は実argv・依存側toolchain指定を照合し、標準launcherで再実行する。容量やcache破損と断定して不要なcleanをしない。
 - Cargoを伴わない予備の直接rustfmt検査も、対象manifestのeditionを明示する（現workspaceは`--edition 2024`）。既定editionによる整形成功を`cargo fmt`と同条件の成功に扱わず、不要な既存整形差分を混入させない。正式判定では既存`fmt-check`を維持する。
@@ -119,6 +127,8 @@
 - 最新 HEAD のレビュー結果、未解決thread 0、Issue/DoDを確認してからReady化し、Readyで起動したrequired CI checksの成功を確認する。その後は保護されたPR mergeを、merge直前に再取得したexpected HEAD SHAで実行し、人間による直接master更新やadmin bypassを使わない。
 
 ## Orchestration Gate
+
+- 再利用keyと本体のidentityは、使用版ライブラリの実注入環境で照合する。採取側にはないretry等の実行管理metadataは、公式実装と固定検査の消費経路を確認して限定除外し、未知名はbindする。根拠は値や単変数hashではなく、キー名と集合digestの同一性で保存する。
 
 - 同じrepo・検査範囲の実行所有者は1名に固定する。toolが`session_id`または実行中cellを返したら、そのIDで終了コードを回収する。終了ファイルがまだ無いことを再起動理由にしない。再試行は旧プロセスの終了・実終了コード・ログ保全を確認してから新runへ進む。
 - 標準品質ゲートは既存のterminal-report排他lockを使う。限定検証も同じ既存`local_review_lock.review_lock`で所有権を確保し、取得できなければ既存ownerの結果を回収する。独立して並列化できる検査は、所有者が既存DAG内で並列実行する。重複起動時は各runの実PID・argv・中断結果を保持し、current sourceの成功へ転用しない。

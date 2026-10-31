@@ -21,7 +21,10 @@ import {
   policyContract,
   RUNTIME_UNUSED_FINAL_VERIFY_COMMAND,
   RUNTIME_UNUSED_LEAF_IDS,
+  RUNTIME_UNUSED_PRODUCER_RUN_RECIPE,
   RUNTIME_UNUSED_REGRESSION_TESTS,
+  RUNTIME_UNUSED_VERIFY_RUN_RECIPE,
+  runtimeUnusedLeafRunRecipe,
   shellWords,
   sourceCode,
 } from "../html/harness-contract-graph";
@@ -238,8 +241,6 @@ const SVG_ENGINE_VENDOR_ROOT = "crates/katana-render-runtime/vendor/svg-engine";
 const RUNTIME_ASSET_AGGREGATE_RECIPE = "runtime-asset-script-aggregate-run";
 const RUNTIME_UNUSED_REGRESSION = "runtime-unused-script-regression";
 const RUNTIME_UNUSED_REGRESSION_RECIPE = "runtime-unused-script-regression-run";
-const RUNTIME_UNUSED_PRODUCER_RECIPE = "runtime-unused-script-producer-run";
-const RUNTIME_UNUSED_VERIFY_RECIPE = "runtime-unused-script-verify-run";
 const RUNTIME_UNUSED_CACHE_KEY_RECIPE = "runtime-unused-script-cache-key";
 const RUNTIME_UNUSED_FINAL_VERIFY_RECIPE = "runtime-unused-script-final-verify-run";
 const CLASSIC_GENERATION_EVIDENCE_TEST_COMMAND =
@@ -294,10 +295,10 @@ function runtimePreflightRecipeBody(context: ContractContext): string {
   return context.recipes.get(RUNTIME_ASSET_PREFLIGHT_RECIPE) ?? "";
 }
 function runtimeUnusedProducerRecipeBody(context: ContractContext): string {
-  return context.recipes.get(RUNTIME_UNUSED_PRODUCER_RECIPE) ?? "";
+  return context.recipes.get(RUNTIME_UNUSED_PRODUCER_RUN_RECIPE) ?? "";
 }
 function runtimeUnusedVerifyRecipeBody(context: ContractContext): string {
-  return context.recipes.get(RUNTIME_UNUSED_VERIFY_RECIPE) ?? "";
+  return context.recipes.get(RUNTIME_UNUSED_VERIFY_RUN_RECIPE) ?? "";
 }
 const NATIVE_WIDTH_HASH_SOURCE = "scripts/runtime-bundles/runtime-unused-native-width-hash.ts";
 const NATIVE_WIDTH_HASH_TEST = "scripts/runtime-bundles/runtime-unused-native-width-hash_test.ts";
@@ -4659,11 +4660,24 @@ function moonOwnerTaskMatches(
         actual.options.cache === "local")) &&
     JSON.stringify(expectedOptions.filter(([key]) => key !== "cache")) ===
       JSON.stringify(actualOptions.filter(([key]) => key !== "cache"));
+  const leafMatches = moonOwnerLeafMatches(name, actual.leaf, expected.leaf);
   return (
-    actual.leaf === expected.leaf &&
+    leafMatches &&
     actual.deps.join("\0") === expected.deps.join("\0") &&
     (cacheLeafException || JSON.stringify(actualOptions) === JSON.stringify(expectedOptions))
   );
+}
+
+function moonOwnerLeafMatches(
+  name: string,
+  actual: string | null,
+  expected: string | null,
+): boolean {
+  if (!name.endsWith("-producer")) return actual === expected;
+  const id = name.slice(0, -"-producer".length);
+  if (!(RUNTIME_UNUSED_LEAF_IDS as readonly string[]).includes(id)) return actual === expected;
+  const selected = runtimeUnusedLeafRunRecipe(id);
+  return actual === selected && expected === selected;
 }
 
 function moonCoverageSharesRootRun(

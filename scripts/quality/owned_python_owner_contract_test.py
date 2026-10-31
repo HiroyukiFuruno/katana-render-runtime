@@ -217,6 +217,23 @@ class MoonOwnerAstContractTests(unittest.TestCase):
             ["runtime-classic-generation-evidence"],
         )
         self.assertEqual(
+            tasks["runtime-unused-tool-fingerprint-producer"]["leaf"],
+            "runtime-unused-script-verify-run",
+        )
+        for leaf in (
+            "runtime-unused-fragment-loader",
+            "runtime-unused-bundle-definitions",
+            "runtime-unused-check",
+            "runtime-unused-mathjax",
+            "runtime-unused-native-width",
+            "runtime-unused-rust-classic",
+        ):
+            with self.subTest(leaf=leaf):
+                self.assertEqual(
+                    tasks[f"{leaf}-producer"]["leaf"],
+                    "runtime-unused-script-producer-run",
+                )
+        self.assertEqual(
             tasks["runtime-asset-script-other"]["deps"],
             ["runtime-classic-generation-evidence"],
         )
@@ -232,6 +249,20 @@ class MoonOwnerAstContractTests(unittest.TestCase):
         self.assertEqual(tasks["rust-facts-host-prebuild"]["deps"], ["capacity-admission"])
         self.assertEqual(tasks["capacity-admission"]["deps"], ["source-static-foundation"])
         self.assertEqual(tasks["unit-test"]["leaf"], "unit-test")
+
+    def test_verify_runner_is_pinned_to_its_leaf(self) -> None:
+        original = (
+            '"runtime-unused-script-verify-run" if leaf == '
+            '"runtime-unused-tool-fingerprint"'
+        )
+        self.assertEqual(self.source.count(original), 1)
+        changed = self.source.replace(
+            original,
+            '"runtime-unused-script-producer-run" if leaf == '
+            '"runtime-unused-tool-fingerprint"',
+            1,
+        )
+        self.assertIs(self.inspect(changed)["valid"], False)
 
     def test_scheduler_host_and_evidence_order_rejects_missing_duplicate_and_parallel_events(self) -> None:
         module, phases = self.scheduler_owner_phases()

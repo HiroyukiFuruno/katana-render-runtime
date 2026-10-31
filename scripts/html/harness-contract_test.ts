@@ -3832,6 +3832,23 @@ test("local coverage entry preserves static barrier and required heavy closure",
   expect(justfile).toMatch(/\[private\]\s*\nperformance-harness-coverage-run:/);
 });
 
+test.each(RUNTIME_UNUSED_LEAF_IDS)(
+  "runtime unused leaf rejects incorrect runner selection: %s",
+  (id) => {
+    const snapshot = localCoverageMoonFixture();
+    changeMoon(snapshot, (tasks) => {
+      const task = tasks[`${id}-producer`];
+      if (!task) throw new Error(`runtime unused task missing: ${id}`);
+      const wrongRecipe =
+        id === "runtime-unused-tool-fingerprint"
+          ? "runtime-unused-script-producer-run"
+          : "runtime-unused-script-verify-run";
+      task.command = ["just", wrongRecipe, id];
+    });
+    expect(checkHarnessContract(snapshot).length).toBeGreaterThan(0);
+  },
+);
+
 test.each(["missing", "ignored"])(
   "local coverage route rejects %s collection authentication",
   (kind) => {

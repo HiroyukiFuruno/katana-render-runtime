@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,7 @@ import runtime_script_identity as identity
 import runtime_script_profiles as profiles
 import runtime_script_recipe as recipe_reader
 import runtime_script_result as result
+import runtime_script_tool_fingerprint_inputs as pilot
 
 
 PRODUCER = "runtime-unused-script-regression"
@@ -22,9 +24,73 @@ OTHER_INPUTS = "9" * 64
 RECIPE = "b" * 64
 TOOLS = "c" * 64
 INPUT = "d" * 64
+REAL_PILOT_FACTS = identity._pilot_facts
 
 
 class RuntimeScriptIdentityTests(unittest.TestCase):
+    def setUp(self) -> None:
+        pilot_patch = patch.object(identity, "_pilot_facts", return_value=("8" * 64, {"scope": "pilot"}))
+        pilot_patch.start()
+        self.addCleanup(pilot_patch.stop)
+
+    def test_pilot_identity_ignores_unrelated_source_digest_but_keeps_provenance(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        recipe = recipe_reader.RuntimeScriptRecipe(profiles.producer_recipe(producer), RECIPE, ())
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory).resolve()
+            with (
+                patch.object(identity, "_source_state", side_effect=[(SOURCE, SOURCE_INPUTS)] * 2
+                             + [(OTHER_SOURCE, OTHER_INPUTS)] * 2),
+                patch.object(recipe_reader, "read_runtime_script_recipe", return_value=recipe),
+            ):
+                first = identity.collect_identity_report(repo, producer)
+                second = identity.collect_identity_report(repo, producer)
+        self.assertTrue(first["cacheable"])
+        self.assertEqual(first["sourceInputScope"], pilot.SEMANTIC_SCOPE)
+        self.assertEqual(first["identitySha256"], second["identitySha256"])
+        self.assertNotEqual(first["sourceManifestSha256"], second["sourceManifestSha256"])
+
+    def test_pilot_missing_inputs_fail_closed(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.object(identity, "_source_state", return_value=(SOURCE, SOURCE_INPUTS)),
+                patch.object(identity, "_pilot_facts", side_effect=identity._CollectionFailure("tool_profile_inputs_unavailable")),
+            ):
+                report = identity.collect_identity_report(Path(directory).resolve(), producer)
+        self.assertFalse(report["cacheable"])
+        self.assertEqual(report["missReasons"], ["tool_profile_inputs_unavailable"])
+
+    def test_pilot_facts_bind_python_context_and_reject_unadmitted_inventory(self) -> None:
+        candidate = {"schema": pilot.SCHEMA, "profile": pilot.PROFILE,
+                     "admission": "candidate-only", "cacheable": False,
+                     "inputsCollected": True, "inventorySha256": "8" * 64,
+                     "componentDigests": {"semanticEnvironment": "7" * 64},
+                     "semanticEnvironmentNames": ["PATH"]}
+        tool = {"schema": "krr-runtime-bundle-tool-fingerprint-v1", "tools": {}, "environment": []}
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory).resolve()
+            with (
+                patch.object(pilot, "collect", return_value=candidate),
+                patch.object(identity, "_run_json", return_value=tool),
+                patch.object(identity, "_python_context", side_effect=[{"pythonVersion": "one"}, {"pythonVersion": "two"}]),
+            ):
+                first = REAL_PILOT_FACTS(repo)
+                second = REAL_PILOT_FACTS(repo)
+            self.assertNotEqual(first[1], second[1])
+            with patch.object(pilot, "collect", return_value={**candidate, "admission": "unknown"}):
+                with self.assertRaises(identity._CollectionFailure):
+                    REAL_PILOT_FACTS(repo)
+
+    def test_loader_override_is_rejected_before_spawning_tool(self) -> None:
+        with (
+            patch.dict(os.environ, {"LD_PRELOAD": "private-fixture"}),
+            patch.object(subprocess, "run") as run,
+        ):
+            with self.assertRaises(identity._CollectionFailure) as error:
+                identity._run_json(Path("/fixture"), ["bun"], "tool_unavailable")
+        self.assertEqual(error.exception.reason, "unsupported_loader_override")
+        run.assert_not_called()
     def test_execution_snapshot_reads_each_fact_once_and_matches_single_identity(self) -> None:
         producer = "runtime-unused-fragment-loader"
         recipe = recipe_reader.RuntimeScriptRecipe(profiles.producer_recipe(producer), RECIPE, ())

@@ -401,7 +401,8 @@ def production_task_input_binding(
         assert producer.get("deps") == [previous]
         assert producer.get("command") == [
             "just",
-            "runtime-unused-script-producer-run",
+            "runtime-unused-script-verify-run" if leaf == "runtime-unused-tool-fingerprint"
+            else "runtime-unused-script-producer-run",
             leaf,
         ]
         assert producer.get("outputs") == [

@@ -139,6 +139,12 @@ function verifySupportedEnvironment(): void {
   );
   if (unsupported.length > 0)
     throw new Error(`unsupported external override: ${unsupported.join(",")}`);
+  if (
+    Object.entries(process.env).some(
+      ([name, value]) => (name.startsWith("LD_") || name.startsWith("DYLD_")) && Boolean(value),
+    )
+  )
+    throw new Error("unsupported dynamic loader override");
 }
 
 export function collectRuntimeBundleToolFingerprint(): RuntimeBundleToolFingerprint {

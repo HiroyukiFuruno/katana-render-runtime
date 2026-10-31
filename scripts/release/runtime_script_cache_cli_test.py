@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+import io
+import json
+import os
+import secrets
 import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 import native_coverage_local_anchor as local_anchor
@@ -43,11 +50,18 @@ def identity_report(
         "missReasons": [] if cacheable else ["collector_unavailable"],
         "sourceManifestSha256": source_manifest,
         "sourceInputsSha256": source_inputs,
+        "sourceInputScope": ("krr-tool-fingerprint-profile-inputs-v1"
+                             if producer == "runtime-unused-tool-fingerprint"
+                             else "krr-native-coverage-source-inputs-v1"),
         "recipeSha256": recipe,
         "toolEnvironmentSha256": tools,
         "inputSha256": input_digest,
         "identitySha256": identity if cacheable else None,
         "moonTaskHash": None,
+        "diagnostic": ({"inputComponents": {name: "a" * 64 for name in cache_cli.PILOT_COMPONENTS},
+                        "environmentNames": ["PATH"], "runtimeTool": "b" * 64,
+                        "pythonContext": "c" * 64}
+                       if producer == "runtime-unused-tool-fingerprint" else None),
     }
 
 
@@ -57,6 +71,217 @@ class RuntimeScriptCacheCliTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
         fixture_helpers.initialize_fixture_repository(self.root)
+
+    def test_pilot_reuse_holds_lease_and_executes_no_groups(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        identity = identity_report(producer=producer)
+        lease = self.root / "lease"
+        with (
+            patch.object(producer_runner, "_lease", return_value=(lease, 1, 2)),
+            patch.object(producer_runner, "_release_lease") as release,
+            patch.object(identity_collector, "collect_identity_report", return_value=identity),
+            patch.object(cache_cli, "_validate_report", return_value={"valid": True}),
+            patch.object(cache_cli, "run_current") as run,
+        ):
+            report = cache_cli.ensure_current(self.root, producer)
+        self.assertEqual(report["executedGroups"], 0)
+        self.assertFalse(report["recovered"])
+        self.assertEqual(report["diagnostic"], identity["diagnostic"])
+        release.assert_called_once_with(lease, 1, 2)
+        run.assert_not_called()
+
+    def test_pilot_diagnostic_rejects_unexpected_fields(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        snapshot = identity_report(producer=producer)
+        snapshot["diagnostic"] = {"secret": "private-fixture"}
+        with self.assertRaisesRegex(result.RuntimeScriptResultError, "diagnostic shape"):
+            cache_cli._pilot_diagnostic(snapshot)
+
+    def test_pilot_diagnostic_accepts_printable_environment_names_without_values(self) -> None:
+        snapshot = identity_report(producer="runtime-unused-tool-fingerprint")
+        diagnostic = cast(dict[str, object], snapshot["diagnostic"])
+        diagnostic["environmentNames"] = ["PATH", "fixture-name"]
+        self.assertEqual(cache_cli._pilot_diagnostic(snapshot)["environmentNames"],
+                         ["PATH", "fixture-name"])
+
+    def test_pilot_diagnostic_rejects_unsafe_environment_names(self) -> None:
+        for name in ("", "bad\nname", "bad\x00name", "name=value"):
+            with self.subTest(name=name):
+                snapshot = identity_report(producer="runtime-unused-tool-fingerprint")
+                diagnostic = cast(dict[str, object], snapshot["diagnostic"])
+                diagnostic["environmentNames"] = [name]
+                with self.assertRaisesRegex(result.RuntimeScriptResultError, "diagnostic fields"):
+                    cache_cli._pilot_diagnostic(snapshot)
+
+    def test_pilot_key_preserves_stdout_and_projects_only_safe_fields(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        snapshot = identity_report(producer=producer)
+        snapshot["privateField"] = "private-fixture"
+        epoch = "9" * 64
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.dict(os.environ, {"KRR_RUNTIME_SCRIPT_KEY_DIAGNOSTICS": "1"}),
+            patch.object(identity_collector, "collect_identity_report", return_value=snapshot) as collect,
+            patch.object(local_anchor, "prepare", return_value=epoch),
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
+            exit_code = cache_cli.main(["key", "--repo", str(self.root), "--producer", producer])
+        fingerprint = hashlib.sha256(
+            f"krr-runtime-script-key-v1\0{IDENTITY}\0{epoch}".encode()
+        ).hexdigest()
+        self.assertEqual(exit_code, 0)
+        expected = {
+            "schema": "krr-runtime-script-key-v1", "producer": producer,
+            "fingerprint": fingerprint,
+        }
+        self.assertEqual(stdout.getvalue(), json.dumps(expected, sort_keys=True, separators=(",", ":")) + "\n")
+        self.assertEqual(stderr.getvalue(), "")
+        directory = self.root / result.RECEIPT_DIRECTORY / "key-diagnostics"
+        files = list(directory.glob("*.json"))
+        self.assertEqual(len(files), 1)
+        self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(files[0].stat().st_mode & 0o777, 0o600)
+        contents = files[0].read_text()
+        projection = json.loads(contents)
+        self.assertEqual(set(projection), {"schema", "identity", "diagnostic"})
+        self.assertEqual(projection["identity"], cache_cli._pilot_identity_digests(snapshot))
+        self.assertEqual(projection["diagnostic"], snapshot["diagnostic"])
+        self.assertNotIn("private-fixture", contents)
+        self.assertNotIn(epoch, contents)
+        collect.assert_called_once_with(self.root, producer)
+
+    def test_pilot_key_diagnostics_are_exclusive_and_opt_in(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        snapshot = identity_report(producer=producer)
+        flag = "KRR_RUNTIME_SCRIPT_KEY_DIAGNOSTICS"
+        directory = self.root / result.RECEIPT_DIRECTORY / "key-diagnostics"
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(identity_collector, "collect_identity_report", return_value=snapshot),
+            patch.object(local_anchor, "prepare", return_value="9" * 64),
+            patch.object(secrets, "token_hex", return_value="fixed"),
+        ):
+            cache_cli.current_key(self.root, producer)
+            self.assertFalse(directory.exists())
+            os.environ[flag] = "0"
+            with self.assertRaisesRegex(result.RuntimeScriptResultError, "flag is invalid"):
+                cache_cli.current_key(self.root, producer)
+            os.environ[flag] = "1"
+            cache_cli.current_key(self.root, producer)
+            files = list(directory.glob("*.json"))
+            self.assertEqual(len(files), 1)
+            original = files[0].read_bytes()
+            with self.assertRaises(FileExistsError):
+                cache_cli.current_key(self.root, producer)
+            self.assertEqual(files[0].read_bytes(), original)
+
+    def test_pilot_key_diagnostics_reject_symlink_directory(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        directory = self.root / result.RECEIPT_DIRECTORY
+        directory.mkdir(parents=True)
+        (directory / "key-diagnostics").symlink_to(self.root, target_is_directory=True)
+        with (
+            patch.dict(os.environ, {"KRR_RUNTIME_SCRIPT_KEY_DIAGNOSTICS": "1"}),
+            patch.object(identity_collector, "collect_identity_report", return_value=identity_report(producer=producer)),
+            patch.object(local_anchor, "prepare", return_value="9" * 64),
+            self.assertRaises(producer_runner.RuntimeScriptProducerError),
+        ):
+            cache_cli.current_key(self.root, producer)
+
+    def test_pilot_execution_returns_verified_snapshot_diagnostic(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        snapshot = identity_report(producer=producer)
+        run = producer_runner.RuntimeScriptRun(
+            producer, IDENTITY, "epoch", 0, "raw", "receipt.json", (("result.xml", b"result"),)
+        )
+        with (
+            patch.object(identity_collector, "collect_execution_snapshot", return_value=snapshot),
+            patch.object(recipe_reader, "read_runtime_script_recipe", return_value=self.recipe()),
+            patch.object(producer_runner, "run_runtime_script", return_value=run),
+            patch.object(result_verify, "verify_receipt", return_value={}),
+        ):
+            report = cache_cli.run_current(self.root, producer)
+        self.assertEqual(report["diagnostic"], snapshot["diagnostic"])
+        self.assertEqual(report["executedGroups"], 1)
+
+    def test_pilot_changed_source_releases_lease_before_fallback(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        before = identity_report(producer=producer)
+        after = identity_report(producer=producer, source_manifest="9" * 64)
+        lease = self.root / "lease"
+        with (
+            patch.object(producer_runner, "_lease", return_value=(lease, 1, 2)),
+            patch.object(producer_runner, "_release_lease") as release,
+            patch.object(identity_collector, "collect_identity_report", side_effect=[before, after]),
+            patch.object(cache_cli, "_validate_report", return_value={"valid": True}),
+            patch.object(cache_cli, "run_current", return_value={"valid": True, "executedGroups": 1}) as run,
+        ):
+            report = cache_cli.ensure_current(self.root, producer)
+        self.assertTrue(report["recovered"])
+        self.assertEqual(report["executedGroups"], 1)
+        attempt = cast(dict[str, object], report["reuseAttempt"])
+        self.assertEqual(cast(dict[str, object], attempt["identity"])["sourceManifestSha256"], SOURCE_MANIFEST)
+        release.assert_called_once_with(lease, 1, 2)
+        run.assert_called_once_with(self.root, producer)
+
+    def test_pilot_fallback_projects_prevalidation_state_under_lease(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        before = identity_report(producer=producer)
+        before["privateField"] = "private-fixture"
+        directory = self.root / result.RECEIPT_DIRECTORY
+        directory.mkdir(parents=True)
+        (directory / f"{producer}.json").write_text("unverified")
+        (directory / f"{producer}-current-group-001.xml").write_text("unverified")
+        lease = self.root / "lease"
+        with (
+            patch.object(producer_runner, "_lease", return_value=(lease, 1, 2)),
+            patch.object(producer_runner, "_release_lease") as release,
+            patch.object(identity_collector, "collect_identity_report", return_value=before),
+            patch.object(cache_cli, "_validate_report", side_effect=result.RuntimeScriptResultError("rejected")),
+            patch.object(cache_cli, "run_current", return_value={}) as run,
+        ):
+            def run_after_release(_repo: Path, _producer: str) -> dict[str, object]:
+                release.assert_called_once_with(lease, 1, 2)
+                return {}
+
+            run.side_effect = run_after_release
+            report = cache_cli.ensure_current(self.root, producer)
+        attempt = report["reuseAttempt"]
+        self.assertEqual(attempt, {
+            "receiptExists": True,
+            "currentJunitExists": True,
+            "receiptIdentityMatches": None,
+            "cacheable": True,
+            "identity": {key: before[key] for key in (
+                "sourceManifestSha256", "sourceInputsSha256", "recipeSha256",
+                "toolEnvironmentSha256", "inputSha256", "identitySha256",
+            )},
+        })
+        self.assertNotIn("private-fixture", str(report))
+        self.assertTrue(report["recovered"])
+
+    def test_pilot_reuse_attempt_rejects_non_digest_values(self) -> None:
+        before = identity_report(producer="runtime-unused-tool-fingerprint")
+        before["recipeSha256"] = "private-fixture"
+        attempt = cache_cli._pilot_reuse_attempt(self.root, before)
+        self.assertIsNone(cast(dict[str, object], attempt["identity"])["recipeSha256"])
+        self.assertFalse(attempt["receiptExists"])
+        self.assertFalse(attempt["currentJunitExists"])
+
+    def test_pilot_receipt_identity_comparison_is_diagnostic_only(self) -> None:
+        producer = "runtime-unused-tool-fingerprint"
+        directory = self.root / result.RECEIPT_DIRECTORY
+        directory.mkdir(parents=True)
+        receipt_path = directory / f"{producer}.json"
+        receipt = {"schema": result.SCHEMA, "producer": producer, "identitySha256": IDENTITY,
+                   "epoch": "e" * 64, "junitReports": []}
+        receipt_path.write_text(json.dumps(receipt))
+        self.assertTrue(cache_cli._pilot_receipt_identity_matches(self.root, IDENTITY))
+        self.assertFalse(cache_cli._pilot_receipt_identity_matches(self.root, "f" * 64))
+        receipt["identitySha256"] = "private-fixture"
+        receipt_path.write_text(json.dumps(receipt))
+        self.assertIsNone(cache_cli._pilot_receipt_identity_matches(self.root, IDENTITY))
 
     def git_directory(self) -> Path:
         result = subprocess.run(

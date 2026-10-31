@@ -3898,6 +3898,17 @@ export const RUNTIME_UNUSED_LEAF_IDS = [
   "runtime-unused-native-width",
   "runtime-unused-rust-classic",
 ] as const;
+const RUNTIME_UNUSED_VERIFY_LEAF_ID: (typeof RUNTIME_UNUSED_LEAF_IDS)[number] =
+  "runtime-unused-tool-fingerprint";
+export const RUNTIME_UNUSED_PRODUCER_RUN_RECIPE = "runtime-unused-script-producer-run";
+export const RUNTIME_UNUSED_VERIFY_RUN_RECIPE = "runtime-unused-script-verify-run";
+
+export function runtimeUnusedLeafRunRecipe(id: string): string {
+  return id === RUNTIME_UNUSED_VERIFY_LEAF_ID
+    ? RUNTIME_UNUSED_VERIFY_RUN_RECIPE
+    : RUNTIME_UNUSED_PRODUCER_RUN_RECIPE;
+}
+
 export const RUNTIME_UNUSED_FINAL_VERIFY_COMMAND =
   "python3 scripts/release/runtime_script_cache_cli.py ensure-all --repo {{ quote(REPO_ROOT) }}";
 
@@ -3954,7 +3965,7 @@ function validateRuntimeUnusedScriptProducerTask(
     !Array.isArray(task.command) ||
     task.command.length !== 3 ||
     task.command[0] !== "just" ||
-    task.command[1] !== "runtime-unused-script-producer-run" ||
+    task.command[1] !== runtimeUnusedLeafRunRecipe(id) ||
     task.command[2] !== id
   )
     throw new Error(`runtime unused producer command differs: ${id}`);
@@ -4393,7 +4404,7 @@ function moonRuntimeUnusedProfileVerified(
   }
   if (producer.deps.join("\0") !== previous)
     errors.push(`runtime unused producer dependency differs: ${id}`);
-  if (producer.command.join("\0") !== `just\0runtime-unused-script-producer-run\0${id}`)
+  if (producer.command.join("\0") !== `just\0${runtimeUnusedLeafRunRecipe(id)}\0${id}`)
     errors.push(`runtime unused producer command differs: ${id}`);
   if (recipes.get(`${id}-run`)?.trim() !== `bun test --path-ignore-patterns 'tmp/**' ./${test}`)
     errors.push(`runtime unused leaf recipe differs: ${id}`);
@@ -4802,8 +4813,7 @@ export function executionGraph(
           "runtime-asset-script-preflight-run",
           "runtime-classic-generation-evidence",
           "runtime-asset-script-other-run",
-          "runtime-unused-script-verify-run",
-          "runtime-unused-script-producer-run",
+          ...new Set(RUNTIME_UNUSED_LEAF_IDS.map(runtimeUnusedLeafRunRecipe)),
         ].forEach(walkRecipe);
       }
     };
