@@ -20,6 +20,10 @@ const DIAGRAM_JS_RUNTIME_INPUT_INDEX: usize = 5;
 const V8_SCRIPT_INPUT_INDEX: usize = 6;
 const LIBRARY_MODULE_INPUT_INDEX: usize = 7;
 
+#[cfg(test)]
+#[path = "v8_compile_tests.rs"]
+mod tests;
+
 pub(super) fn require_error_constants(
     file: &syn::File,
     expected: &[(&str, &str)],
@@ -116,7 +120,6 @@ fn require_origin_constructor(expression: &syn::Expr) -> Result<(), String> {
         return Err("v8-script-origin-helper:origin".into());
     };
     if super::source::path_name_from_expr(&constructor.func) != "v8::ScriptOrigin::new"
-        || !ident(&constructor.args[0], "scope")
         || constructor.args.len() != V8_SCRIPT_ORIGIN_ARG_COUNT
         || !ident(&constructor.args[ORIGIN_SCOPE_INDEX], "scope")
         || !is_into(&constructor.args[ORIGIN_NAME_INDEX], "origin_name")

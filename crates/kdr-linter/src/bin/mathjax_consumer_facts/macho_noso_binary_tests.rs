@@ -18,6 +18,9 @@ const DUPLICATE_SYMTAB_COUNT: u32 = 2;
 const DUPLICATE_COMMAND_BYTES: u32 =
     (SYMTAB_COMMAND_BYTES * DUPLICATE_SYMTAB_COUNT as usize) as u32;
 
+#[path = "macho_noso_binary_boundary_tests.rs"]
+mod boundary_tests;
+
 #[test]
 fn accepts_non_noso_symbols_and_reports_missing_or_duplicate_symtabs() {
     for (is_64, expected_format) in [(false, "MachO32"), (true, "MachO64")] {
