@@ -59,3 +59,50 @@ pub(in crate::markdown::svg_rasterize) fn write_fresh_file(
     file.write_all(bytes)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod io_contract_tests {
+    use super::{TempProbeDirectory, write_fresh_file};
+    use std::{error::Error, io::ErrorKind};
+
+    type ProbeResult<T> = Result<T, Box<dyn Error>>;
+
+    #[test]
+    fn existing_file_collision_preserves_original_bytes() -> ProbeResult<()> {
+        let directory = TempProbeDirectory::create()?;
+        let path = directory.file("occupied-output.bin");
+        let original = b"original bytes";
+        std::fs::write(&path, original)?;
+
+        let error = write_fresh_file(&path, b"replacement bytes")
+            .err()
+            .ok_or("existing output was replaced")?;
+        assert_io_error_kind(error, ErrorKind::AlreadyExists)?;
+        assert_eq!(std::fs::read(path)?, original);
+        Ok(())
+    }
+
+    #[test]
+    fn missing_parent_is_not_created() -> ProbeResult<()> {
+        let directory = TempProbeDirectory::create()?;
+        let parent = directory.file("missing-parent");
+        let path = parent.join("output.bin");
+        assert!(!parent.exists());
+
+        let error = write_fresh_file(&path, b"output bytes")
+            .err()
+            .ok_or("output was created without its parent")?;
+        assert_io_error_kind(error, ErrorKind::NotFound)?;
+        assert!(!parent.exists());
+        assert!(!path.exists());
+        Ok(())
+    }
+
+    fn assert_io_error_kind(error: Box<dyn Error>, expected: ErrorKind) -> ProbeResult<()> {
+        let actual = error
+            .downcast_ref::<std::io::Error>()
+            .ok_or("output failure was not an I/O error")?;
+        assert_eq!(actual.kind(), expected);
+        Ok(())
+    }
+}

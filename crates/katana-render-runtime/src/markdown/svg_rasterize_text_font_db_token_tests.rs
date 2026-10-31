@@ -14,6 +14,25 @@ const TEST_ITALIC: bool = false;
 const TEST_LETTER_SPACING: f32 = 0.0;
 const REPETITIONS: usize = 5;
 
+#[test]
+fn requested_preflight_rejects_removed_real_font_face() -> Result<(), Box<dyn std::error::Error>> {
+    let file = tempfile::NamedTempFile::new()?;
+    std::fs::write(file.path(), FONT_BYTES)?;
+    let (mut database, face) = file_database(file.path())?;
+    assert_eq!(super::probe_font_has_char(&database, face, 'A'), Some(true));
+    assert_eq!(noto_preflight(&database, face), Ok(false));
+    Arc::make_mut(&mut database).remove_face(face);
+    assert!(database.face(face).is_none());
+    assert_eq!(noto_preflight(&database, face), Err((None, false)));
+    Ok(())
+}
+
+fn noto_preflight(database: &Database, face: ID) -> Result<bool, (Option<ID>, bool)> {
+    let attributes = super::fallback_attributes(TEST_WEIGHT, TEST_ITALIC);
+    let mut probe = |id, character| super::probe_font_has_char(database, id, character);
+    super::requested_preflight(database, face, 'A', attributes, &mut probe)
+}
+
 fn temp_font_path() -> PathBuf {
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)

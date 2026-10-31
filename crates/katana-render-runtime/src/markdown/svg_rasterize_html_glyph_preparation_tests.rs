@@ -5,6 +5,28 @@ use std::sync::Arc;
 use tiny_skia::Pixmap;
 
 #[test]
+fn removed_real_font_face_is_reported_unavailable() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("font.ttf");
+    let fixture = font_file_fixture::create(path, font_file_fixture::FONT_BYTES)?;
+    let mut database = fixture.database.clone();
+    let face = fixture.face_id;
+    let source = HtmlGlyphRasterizer::new(&database)
+        .face_file(face)?
+        .ok_or("file face missing")?;
+    assert_eq!(source.0, fixture.path);
+    assert!(fixture.path.is_file());
+    database.remove_face(face);
+    assert!(database.face(face).is_none());
+    let error = HtmlGlyphRasterizer::new(&database)
+        .face_file(face)
+        .err()
+        .ok_or("removed face was accepted")?;
+    assert!(error.contains("SVG font face") && error.contains("is unavailable"));
+    Ok(())
+}
+
+#[test]
 fn unsupported_non_solid_fill_leaves_pixmap_unchanged() -> Result<(), String> {
     let path = std::env::temp_dir().join(format!("krr-html-glyph-fill-{}.ttf", std::process::id()));
     let fixture = font_file_fixture::create(path, font_file_fixture::FONT_BYTES)

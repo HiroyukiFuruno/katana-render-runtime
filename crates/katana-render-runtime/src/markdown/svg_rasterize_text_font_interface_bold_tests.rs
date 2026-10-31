@@ -60,6 +60,108 @@ fn system_ui_bold_fallback_keeps_registered_alias_after_shared_file_conversion()
     Ok(())
 }
 
+#[test]
+fn missing_alias_glyph_requires_non_interface_fallback() -> Result<(), String> {
+    let (database, base, alias) = test_support::shared_file_alias_fixture()?;
+    let face = database
+        .face(base)
+        .ok_or("system-ui primary face missing")?;
+    assert!(super::super::super::font::is_system_ui_primary(face));
+    assert_eq!(
+        super::super::super::font::bold_alias_id(&database),
+        Some(alias)
+    );
+    let character = alias_character(&database, alias, false)?;
+    let attributes = super::fallback_attributes(super::INTERFACE_BOLD_WEIGHT, false);
+    let mut probe = |id, glyph| super::probe_font_has_char(&database, id, glyph);
+    assert_eq!(
+        super::requested_preflight(&database, base, character, attributes, &mut probe),
+        Ok(true)
+    );
+    assert_real_non_interface_fallback(&database, base, character);
+    Ok(())
+}
+
+fn assert_real_non_interface_fallback(
+    database: &resvg::usvg::fontdb::Database,
+    base: resvg::usvg::fontdb::ID,
+    character: char,
+) {
+    let (selected, _) = super::matching_fallback_with_probe(
+        database,
+        base,
+        character,
+        super::INTERFACE_BOLD_WEIGHT,
+        false,
+        |id, glyph| super::probe_font_has_char(database, id, glyph),
+    );
+    if let Some(id) = selected {
+        assert!(
+            !database
+                .face(id)
+                .is_some_and(super::super::super::font::is_interface_face)
+        );
+        assert_eq!(
+            super::probe_font_has_char(database, id, character),
+            Some(true)
+        );
+    }
+}
+
+#[test]
+fn interface_fallback_is_excluded_only_when_required() -> Result<(), String> {
+    let (mut database, base, alias) = test_support::shared_file_alias_fixture()?;
+    assert!(
+        database
+            .face(alias)
+            .is_some_and(super::super::super::font::is_interface_face)
+    );
+    let character = alias_character(&database, alias, true)?;
+    retain_primary_and_alias(&mut database, base, alias);
+    let attributes = super::fallback_attributes(super::INTERFACE_BOLD_WEIGHT, false);
+    let selected = |required| {
+        super::matching_fallback_regular(
+            &database,
+            base,
+            character,
+            attributes,
+            required,
+            |id, glyph| super::probe_font_has_char(&database, id, glyph),
+        )
+    };
+    assert_eq!(selected(false), (Some(alias), true));
+    assert_eq!(selected(true), (None, true));
+    Ok(())
+}
+
+fn retain_primary_and_alias(
+    database: &mut resvg::usvg::fontdb::Database,
+    base: resvg::usvg::fontdb::ID,
+    alias: resvg::usvg::fontdb::ID,
+) {
+    let others: Vec<_> = database
+        .faces()
+        .map(|face| face.id)
+        .filter(|id| *id != base && *id != alias)
+        .collect();
+    for id in others {
+        database.remove_face(id);
+    }
+}
+
+fn alias_character(
+    database: &resvg::usvg::fontdb::Database,
+    alias: resvg::usvg::fontdb::ID,
+    supported: bool,
+) -> Result<char, String> {
+    ['A', 'B', '日', '本', '\u{10ffff}', '\u{10fffe}']
+        .into_iter()
+        .find(|character| {
+            super::probe_font_has_char(database, alias, *character) == Some(supported)
+        })
+        .ok_or_else(|| format!("real interface face has no character with support={supported}"))
+}
+
 fn assert_selected_alias(
     database: &resvg::usvg::fontdb::Database,
     base: resvg::usvg::fontdb::ID,
