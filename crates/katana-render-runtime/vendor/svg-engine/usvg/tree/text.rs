@@ -712,3 +712,6 @@ impl Text {
         f(&self.flattened);
     }
 }
+
+#[cfg(test)]
+crate::svg_engine::owned_svg_model_tests!("../../../../src/svg_engine_text_model_tests.rs");

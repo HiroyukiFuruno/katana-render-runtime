@@ -412,9 +412,9 @@
       "source": "crates/usvg/src/tree/text.rs",
       "destination": "usvg/tree/text.rs",
       "sourceSha256": "0bca06ea94d0a4a78809c32d75c448317ad3c7d413253f99cad5a55d820802f5",
-      "transplantedSha256": "5b214200ec090abd2c8ef92029e7050ee2856fde514981af0a702e08c3ee5fa7",
+      "transplantedSha256": "7b48f425e37fd5fa71d336f85ee0be6df0b1222143f08b18c57c10a3f2b5f307",
       "sourceBytes": 18978,
-      "transplantedBytes": 18831,
+      "transplantedBytes": 18938,
       "adaptations": {
         "cratePaths": 2,
         "enabledFeaturePredicates": {
