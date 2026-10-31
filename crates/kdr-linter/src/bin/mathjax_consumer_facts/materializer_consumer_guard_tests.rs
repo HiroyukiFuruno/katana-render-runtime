@@ -1,5 +1,8 @@
 use super::{RUST_INPUTS, fixture, inspect_root, legacy_readback, reject_mutations};
 
+#[path = "materializer_owner_shape_tests.rs"]
+mod owner_shape_tests;
+
 const OWNER_DECLARATION_MUTATIONS: &[(&str, &str, &str)] = &[
     (
         "struct MathJaxGeneratedRuntimeAsset;",

@@ -13,9 +13,26 @@ pub(super) fn assert_rejected<T>(
     Ok(())
 }
 
+pub(super) fn assert_unique_anchor(source: &str, anchor: &str) -> Result<(), String> {
+    let count = source.matches(anchor).count();
+    if count != 1 {
+        return Err(format!(
+            "mutation anchor expected one match, found {count}: {anchor}"
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::assert_rejected;
+    use super::{assert_rejected, assert_unique_anchor};
+
+    #[test]
+    fn requires_exactly_one_mutation_anchor() {
+        assert!(assert_unique_anchor("anchor", "anchor").is_ok());
+        assert!(assert_unique_anchor("", "anchor").is_err());
+        assert!(assert_unique_anchor("anchor anchor", "anchor").is_err());
+    }
 
     #[test]
     fn accepts_expected_rejection() {

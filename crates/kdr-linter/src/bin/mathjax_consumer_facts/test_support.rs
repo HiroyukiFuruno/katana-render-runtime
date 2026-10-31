@@ -1,3 +1,4 @@
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -95,6 +96,23 @@ impl Fixture {
         &self.root
     }
 
+    pub(super) fn reject_unique_mutations(
+        &self,
+        relative: &str,
+        cases: &[(&str, &str, &str)],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.inspect()?;
+        for (before, after, expected) in cases {
+            let source = fs::read_to_string(self.root.join(relative))?;
+            super::test_support_verdict_tests::assert_unique_anchor(&source, before)?;
+            self.replace(relative, before, after)?;
+            self.reject(expected)?;
+            self.restore(relative)?;
+            self.inspect()?;
+        }
+        Ok(())
+    }
+
     pub(super) fn replace(
         &self,
         relative: &str,
@@ -120,17 +138,21 @@ impl Fixture {
     }
 
     pub(super) fn reject(&self, expected: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let result = match self.inspector {
-            Inspector::MathJax => super::inspect_root(&self.root),
-            Inspector::NativeWidth => super::native_width_hash::inspect_root(&self.root),
-            Inspector::MermaidClassic => super::mermaid_classic_scripts::inspect_root(&self.root),
-        };
+        let result = self.inspect();
         let accepted_message = match self.inspector {
             Inspector::MathJax => "mutated route was accepted",
             Inspector::NativeWidth => "mutated NativeWidth hash route was accepted",
             Inspector::MermaidClassic => "mutated Mermaid classic route was accepted",
         };
         super::test_support_verdict_tests::assert_rejected(result, expected, accepted_message)
+    }
+
+    fn inspect(&self) -> Result<Value, String> {
+        match self.inspector {
+            Inspector::MathJax => super::inspect_root(&self.root),
+            Inspector::NativeWidth => super::native_width_hash::inspect_root(&self.root),
+            Inspector::MermaidClassic => super::mermaid_classic_scripts::inspect_root(&self.root),
+        }
     }
 }
 

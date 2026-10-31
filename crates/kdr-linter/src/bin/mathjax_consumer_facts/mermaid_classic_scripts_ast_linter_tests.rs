@@ -3,6 +3,9 @@ use super::{Fixture, INPUTS, mermaid_classic_scripts, reject_mutations};
 const SCRIPT_SOURCE_INDEX: usize = 0;
 const REALM_SOURCE_INDEX: usize = 2;
 
+#[path = "mermaid_classic_scripts_realm_boundary_tests.rs"]
+mod realm_boundary_tests;
+
 const SCRIPT_STATEMENT_MUTATIONS: &[(&str, &str, &str)] = &[
     (
         "scripts.push(DiagramRuntimeScript::owned(",

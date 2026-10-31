@@ -1,5 +1,8 @@
 use super::super::consumer;
 
+#[path = "consumer_binding_contract_tests.rs"]
+mod binding_contract_tests;
+
 #[test]
 fn consumer_local_guard_reports_missing_statement_and_initializer()
 -> Result<(), Box<dyn std::error::Error>> {
