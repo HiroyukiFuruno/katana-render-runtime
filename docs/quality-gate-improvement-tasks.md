@@ -2,6 +2,10 @@
 
 ## 最新の再開地点（2026-11-01）
 
+- [/] R6299の全静的20項目は実0。R6320の本体全5,188件はすべて成功・29skip（310.910秒）、collection/reportも0、R6319/R6321 source一致。R6322のcoverage policyは83,227/84,498=98.49582238632867%・未到達1,271で実1。前回より未到達19行減・分母109行増であり、新規テスト件数や割合だけを改善量にしない。排他copyは `tmp/quality/resumed-owner-r3509/current-root-coverage-report-r6324/`、公式位置indexは `official-missing-index-r6325.json`（889位置、summaryとの差382は補完しない）。100%・未計測0を含む完全公開ゲートは未達。
+- [/] 第2制御点が終点に重なる閉じたcubicのmarker-midは、R6289で正しいanchorのままbasis不一致を実再現。独立Chromium R6246ではautoと仕様由来の別々のmid/end角がPNG完全一致し、誤ったmid方向は1,464画素差。最小修正後のR6308で同case成功、R6309の通常曲線も成功、R6320で既存画像を含む全体成功。原SVG/PNG・117のoracle・比較閾値は不変。実フォントの失効/fallbackと実FSの排他的作成を含むR6308–R6315は全8件成功。限定LLVM診断R6317の旧未到達への確実な対応は変更のないfont実装6行で、IO追加を旧未到達解消として数えない。
+- [/] HTML性能検証のR6235は41条件の途中記録後、再開元との環境不一致で実1となり、正式なclosed receiptはない。uv一時環境のPATH/VIRTUAL_ENVが起動ごとに変わることを実再現し、固定uv環境・hash付きlock・全環境/ツール/導入ライブラリの照合を維持する修正を `365984e0` に通常commitした。再開元の不一致は測定前にも拒否し、測定後検査も維持する。実別processの環境構築helperはR6251/R6252で一致、関連Python218件・Bun638件は成功したが、正式producerの別process「1条件→1条件再開」と最新全84条件の受入れは未完。KDRの実AST境界回帰は `32ec3b55` に通常commit済み。最新117/HTML84/性能/cache実chain/レビュー/3OS CI/公開は引き続き未完。
+
 - [/] R6191全static実0、R6195は全5,170件成功・29skip（317.847秒）、collection/report0、R6194/R6196 source一致。R6197 policyは83,099/84,389=98.47136475133014%・未到達1,290で実1。前回比分母23行増・未到達23行減、coverage100%は未達。排他copyは `tmp/quality/resumed-owner-r3509/current-root-coverage-report-r6199/`、公式位置indexは `official-missing-index-r6200.json`（911位置、summaryとの差379を補完しない）。realm7・marker5・text5・filter4・consumer2行の未到達減を実測した。materializerの追加matrixは未到達削減として数えない。
 - [/] 閉じたcubicのmarker-mid接線を修正。最初の新fixtureには参照点不整合があり、R6148/R6157を方向不正の赤証拠には使わない。参照点を共通化したR6177でanchor確認後のbasis不一致を実再現し、修正後R6187で同case成功。独立Chromium R6151はautoと仕様由来固定角のPNG完全一致、R6195で既存画像も含む全体成功。原PNG/原SVGの上書き・比較許容値変更なし。制御点が終点へ一致する追加P2は読み取り設計段階で、未修正・未検証として残す。
 - [/] 限定runの固有profrawだけをLLVM標準profdata/covへ渡す診断をR6179/R6181で実施し、公式未到達8行の実到達を確認。全体coverage・cache再利用・リリース合格へ格上げしない。Darwinのraw profileにbinaryIDはなく、binaryはpost-run観測という制限も記録する。小さなtest-only試行で全rootを反復する代わりに到達診断を使い、最終正式fullを維持する。`--no-report`は既にcleanを抑制するため、不要な`--no-clean`追加はしない。
