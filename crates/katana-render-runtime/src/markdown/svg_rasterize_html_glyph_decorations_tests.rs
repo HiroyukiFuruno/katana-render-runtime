@@ -154,6 +154,16 @@ fn unsupported_effects_leave_existing_pixels_unchanged() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn underline_with_multiple_layout_spans_is_rejected_without_painting() -> Result<(), String> {
+    let content = "<tspan font-size='20'>Li</tspan><tspan font-size='28'>nks</tspan>";
+    let (tree, _fixture) = fixture(UNDERLINE, content)?;
+    let text = text(&tree)?;
+    assert_eq!(text.layouted().len(), 2);
+    assert!(text.layouted().iter().any(super::decorations::has_effects));
+    assert_tree_rejected(&tree)
+}
+
 fn assert_rejected(style: &str, content: &str) -> Result<(), String> {
     let (tree, _fixture) = fixture(style, content)?;
     assert_tree_rejected(&tree)

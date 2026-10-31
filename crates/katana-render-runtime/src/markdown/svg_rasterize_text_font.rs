@@ -647,6 +647,32 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn family_list_skips_empty_and_unavailable_names() -> Result<(), String> {
+        let database = bundled_font_db();
+        let names = "'', 'Unavailable Family', 'Noto Sans'";
+        assert_eq!(
+            super::css_font_family_names(names),
+            vec!["Unavailable Family", "Noto Sans"]
+        );
+        let expected = database
+            .faces()
+            .find(|face| {
+                face.weight == Weight::NORMAL
+                    && face.style == Style::Normal
+                    && face
+                        .families
+                        .iter()
+                        .any(|(family, _)| family == "Noto Sans")
+            })
+            .ok_or("bundled regular Noto Sans face must exist")?;
+        assert_eq!(
+            matching_font_face(&database, names, 400, false),
+            Some(expected.id)
+        );
+        Ok(())
+    }
+
     fn full_scan_shaping_fallback(
         database: &Database,
         base_face_id: ID,

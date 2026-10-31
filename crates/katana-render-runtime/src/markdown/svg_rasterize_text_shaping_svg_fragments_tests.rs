@@ -1,14 +1,18 @@
 use super::{
-    FontShape, SvgTextFragmentLayout, fragment_advances, layout_for_face, layout_in_database,
-    matching_font_face, resolved_font_runs, rounded_advances_cover_full,
-    shaped_svg_fragment_layout,
+    FontShape, SvgTextFragmentLayout, fragment_advances, html_font_db_for_measured_text,
+    layout_for_face, layout_in_database, matching_font_face, resolved_font_runs,
+    rounded_advances_cover_full, shaped_svg_fragment_layout,
 };
+use crate::markdown::svg_rasterize::SvgRasterizeError;
 use resvg::usvg::fontdb::Database;
 use std::sync::Arc;
 
 const FONT: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
+const FRAGMENT_FAMILY: &str = "Noto Sans";
+const SVG_TEXT_FRAGMENTS: [&str; 2] = ["A ", "12-3,$%()"];
 const TEST_FONT_SIZE: f32 = 16.0;
 const TEST_FONT_WEIGHT: u16 = 400;
+const FRAGMENT_ADVANCE_TOLERANCE: f32 = 0.0001;
 const JAPANESE_FONT: &[u8] = include_bytes!(
     "../../../../tests/fixtures/svg-engine/upstream/resvg/tests/fonts/MPLUS1p-Regular.ttf"
 );
@@ -45,11 +49,117 @@ fn fragment_advances_keep_full_run_kerning_and_scalar_counts() -> Result<(), Str
 }
 
 #[test]
+fn high_level_fragment_layout_preserves_selected_face_and_total_advance() -> Result<(), String> {
+    let fragments = svg_text_fragments();
+    let text = fragments.concat();
+    assert_selected_face_for_fragments(&fragments, &text)?;
+    assert_high_level_fragment_contract(&fragments)
+}
+
+fn svg_text_fragments() -> Vec<String> {
+    SVG_TEXT_FRAGMENTS
+        .iter()
+        .map(|fragment| (*fragment).to_owned())
+        .collect()
+}
+
+fn assert_selected_face_for_fragments(fragments: &[String], text: &str) -> Result<(), String> {
+    let font = svg_font_shape();
+    let database = html_font_db_for_measured_text(FRAGMENT_FAMILY, text, font.weight, font.italic);
+    let base = matching_font_face(&database, FRAGMENT_FAMILY, font.weight, font.italic)
+        .ok_or("Noto Sans face missing")?;
+    assert_face_metadata(&database, base)?;
+    assert_fragment_runs(&database, base, fragments, text, font);
+    Ok(())
+}
+
+fn assert_face_metadata(
+    database: &Database,
+    face_id: resvg::usvg::fontdb::ID,
+) -> Result<(), String> {
+    let face = database
+        .face(face_id)
+        .ok_or("selected Noto Sans face disappeared")?;
+    assert!(
+        face.families
+            .iter()
+            .any(|(family, _)| family.eq_ignore_ascii_case(FRAGMENT_FAMILY))
+    );
+    assert_eq!(face.weight.0, TEST_FONT_WEIGHT);
+    assert_eq!(face.style, resvg::usvg::fontdb::Style::Normal);
+    Ok(())
+}
+
+fn assert_fragment_runs(
+    database: &Arc<Database>,
+    face_id: resvg::usvg::fontdb::ID,
+    fragments: &[String],
+    text: &str,
+    font: FontShape,
+) {
+    for input in std::iter::once(text).chain(fragments.iter().map(String::as_str)) {
+        let runs = resolved_font_runs(
+            database,
+            face_id,
+            FRAGMENT_FAMILY,
+            input,
+            font.weight,
+            font.italic,
+        );
+        assert_eq!(runs.as_slice(), &[(face_id, input.to_owned())]);
+    }
+}
+
+fn assert_high_level_fragment_contract(fragments: &[String]) -> Result<(), String> {
+    let font = svg_font_shape();
+    let layout = shaped_svg_fragment_layout(
+        fragments,
+        FRAGMENT_FAMILY,
+        font.size,
+        font.weight,
+        font.italic,
+    )
+    .map_err(|error| format!("{error:?}"))?
+    .ok_or("high-level Noto Sans fragment layout rejected")?;
+    assert_eq!(layout.advances.len(), fragments.len());
+    assert!(layout.metrics.advance.is_finite() && layout.metrics.advance > 0.0);
+    assert!(
+        layout
+            .advances
+            .iter()
+            .all(|advance| advance.is_finite() && *advance > 0.0)
+    );
+    assert!(
+        (layout.advances.iter().sum::<f32>() - layout.metrics.advance).abs()
+            <= FRAGMENT_ADVANCE_TOLERANCE
+    );
+    Ok(())
+}
+
+fn svg_font_shape() -> FontShape {
+    FontShape::new(TEST_FONT_SIZE, TEST_FONT_WEIGHT, false)
+}
+
+#[test]
+fn missing_font_face_is_a_rasterization_error() {
+    let database = Arc::new(Database::new());
+    let font = FontShape::new(TEST_FONT_SIZE, TEST_FONT_WEIGHT, false);
+    let fragments = vec!["A".to_owned()];
+    let result = layout_in_database(&database, "A", &fragments, FRAGMENT_FAMILY, font);
+    assert!(matches!(
+        result,
+        Err(SvgRasterizeError::RasterizeFailed(message))
+            if message == "SVG font face unavailable"
+    ));
+}
+
+#[test]
 fn invalid_fragments_rtl_and_ligatures_are_rejected() -> Result<(), String> {
     for fragments in [
         vec![],
         vec!["".to_owned()],
         vec!["A\0".to_owned()],
+        vec!["A\u{0001}".to_owned()],
         vec!["A".to_owned(), "אב".to_owned()],
         vec!["A\u{200b}".to_owned()],
         vec!["A\u{2066}B\u{2069}".to_owned()],

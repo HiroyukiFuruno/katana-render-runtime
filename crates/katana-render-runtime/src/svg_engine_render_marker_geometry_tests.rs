@@ -12,6 +12,25 @@ const CUBIC_TO_LINE_INCOMING: (f32, f32) = (0.0, -50.0);
 const CUBIC_TO_LINE_OUTGOING: (f32, f32) = (70.0, 80.0);
 const LINE_TO_CUBIC_INCOMING: (f32, f32) = (70.0, -80.0);
 const LINE_TO_CUBIC_OUTGOING: (f32, f32) = (0.0, 50.0);
+const SUBPATH_MARKER_COUNT: usize = 4;
+const CURVE_START_MARKER_INDEX: usize = 0;
+const CURVE_MID_MARKER_INDEX: usize = 1;
+const CURVE_END_MARKER_INDEX: usize = 2;
+const FIRST_SUBPATH_MID_INDEX: usize = 1;
+const SECOND_SUBPATH_MID_INDEX: usize = 2;
+const FIRST_SUBPATH_MID_ANCHOR: (f32, f32) = (80.0, 100.0);
+const SECOND_SUBPATH_MID_ANCHOR: (f32, f32) = (120.0, 100.0);
+const LINE_TO_MOVE_BASIS: (f32, f32) = (1.0, 0.0);
+const DIAGONAL_UP_BASIS: (f32, f32) = (0.70710677, -0.70710677);
+const DEGENERATE_CURVE_START: (f32, f32) = (40.0, 155.0);
+const DEGENERATE_CURVE_START_VECTOR: (f32, f32) = (60.0, -115.0);
+const DEGENERATE_CURVE_END: (f32, f32) = (160.0, 160.0);
+const DEGENERATE_CURVE_END_VECTOR: (f32, f32) = (60.0, 120.0);
+const DEGENERATE_CURVE_MID: (f32, f32) = (100.0, 40.0);
+const DEGENERATE_INCOMING_VECTOR: (f32, f32) = (60.0, -115.0);
+const DEGENERATE_INCOMING_NEXT_VECTOR: (f32, f32) = (60.0, 0.0);
+const DEGENERATE_OUTGOING_PREVIOUS_VECTOR: (f32, f32) = (60.0, 0.0);
+const DEGENERATE_OUTGOING_VECTOR: (f32, f32) = (60.0, 120.0);
 
 #[test]
 fn cubic_auto_markers_follow_independent_tangents() -> Result<(), String> {
@@ -40,6 +59,103 @@ fn line_to_cubic_marker_uses_the_incoming_and_outgoing_tangent_bisector() -> Res
         point_from_xy(LINE_TO_CUBIC_INCOMING),
         point_from_xy(LINE_TO_CUBIC_OUTGOING),
     )
+}
+
+#[test]
+fn line_to_move_and_move_to_cubic_markers_use_the_adjacent_subpath_tangents() -> Result<(), String>
+{
+    assert_subpath_mid_tangents(
+        "orient=auto-on-M-L-M-C",
+        LINE_TO_MOVE_BASIS,
+        DIAGONAL_UP_BASIS,
+    )
+}
+
+#[test]
+fn cubic_to_move_and_move_to_line_markers_use_the_adjacent_subpath_tangents() -> Result<(), String>
+{
+    assert_subpath_mid_tangents(
+        "orient=auto-on-M-C-M-L",
+        DIAGONAL_UP_BASIS,
+        LINE_TO_MOVE_BASIS,
+    )
+}
+
+fn assert_subpath_mid_tangents(
+    fixture_name: &str,
+    first_mid_basis: (f32, f32),
+    second_mid_basis: (f32, f32),
+) -> Result<(), String> {
+    let tree = parse_fixture_at_viewbox_size(fixture_name)?;
+    let transforms = marker_path_transforms(&tree);
+    assert_eq!(transforms.len(), SUBPATH_MARKER_COUNT, "{fixture_name}");
+    assert_marker_basis(
+        transforms[FIRST_SUBPATH_MID_INDEX],
+        FIRST_SUBPATH_MID_ANCHOR,
+        first_mid_basis,
+    );
+    assert_marker_basis(
+        transforms[SECOND_SUBPATH_MID_INDEX],
+        SECOND_SUBPATH_MID_ANCHOR,
+        second_mid_basis,
+    );
+    Ok(())
+}
+
+#[test]
+fn degenerate_cubic_start_and_incoming_midpoint_use_fallback_tangents() -> Result<(), String> {
+    let tree = parse_fixture_at_viewbox_size("orient=auto-on-M-C-C-6")?;
+    let transforms = marker_path_transforms(&tree);
+    assert_eq!(transforms.len(), CURVE_LINE_MARKER_COUNT);
+    assert_marker_basis(
+        transforms[CURVE_START_MARKER_INDEX],
+        DEGENERATE_CURVE_START,
+        unit_direction(DEGENERATE_CURVE_START_VECTOR),
+    );
+    assert_degenerate_midpoint(
+        transforms[CURVE_MID_MARKER_INDEX],
+        DEGENERATE_CURVE_MID,
+        DEGENERATE_INCOMING_VECTOR,
+        DEGENERATE_INCOMING_NEXT_VECTOR,
+    );
+    Ok(())
+}
+
+#[test]
+fn degenerate_cubic_end_and_outgoing_midpoint_use_fallback_tangents() -> Result<(), String> {
+    let tree = parse_fixture_at_viewbox_size("orient=auto-on-M-C-C-7")?;
+    let transforms = marker_path_transforms(&tree);
+    assert_eq!(transforms.len(), CURVE_LINE_MARKER_COUNT);
+    assert_marker_basis(
+        transforms[CURVE_END_MARKER_INDEX],
+        DEGENERATE_CURVE_END,
+        unit_direction(DEGENERATE_CURVE_END_VECTOR),
+    );
+    assert_degenerate_midpoint(
+        transforms[CURVE_MID_MARKER_INDEX],
+        DEGENERATE_CURVE_MID,
+        DEGENERATE_OUTGOING_PREVIOUS_VECTOR,
+        DEGENERATE_OUTGOING_VECTOR,
+    );
+    Ok(())
+}
+
+fn assert_degenerate_midpoint(
+    transform: Transform,
+    anchor: (f32, f32),
+    incoming: (f32, f32),
+    outgoing: (f32, f32),
+) {
+    assert_marker_basis(
+        transform,
+        anchor,
+        unit_vector_bisector(point_from_xy(incoming), point_from_xy(outgoing)),
+    );
+}
+
+fn unit_direction(vector: (f32, f32)) -> (f32, f32) {
+    let vector = unit_vector(point_from_xy(vector));
+    (vector.x, vector.y)
 }
 
 fn assert_curve_line_mid_tangent(
