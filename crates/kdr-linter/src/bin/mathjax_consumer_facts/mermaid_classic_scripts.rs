@@ -13,6 +13,9 @@ mod realm;
 mod route;
 #[path = "mermaid_classic_scripts_ast.rs"]
 mod scripts;
+#[cfg(test)]
+#[path = "mermaid_classic_scripts_unit_tests.rs"]
+mod unit_tests;
 
 pub(super) const INPUTS: &[&str] = &[
     "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime_scripts.rs",
@@ -67,12 +70,24 @@ pub(super) fn inspect_root(root: &Path) -> Result<Value, String> {
         .iter()
         .map(|path| Ok((*path, source::opaque_sha256(&root, path)?)))
         .collect::<Result<BTreeMap<_, _>, String>>()?;
-    for (path, source) in &sources {
-        if hashes.get(path) != Some(&source.sha256) {
+    let before = sources
+        .iter()
+        .map(|(path, source)| (*path, source.sha256.clone()))
+        .collect();
+    verify_source_snapshots(&before, &hashes)?;
+    Ok(static_report(parser, facts, hashes, manifest))
+}
+
+fn verify_source_snapshots(
+    before: &BTreeMap<&str, String>,
+    after: &BTreeMap<&str, String>,
+) -> Result<(), String> {
+    for (path, sha256) in before {
+        if after.get(path) != Some(sha256) {
             return Err(format!("mermaid-classic:source-drift:{path}"));
         }
     }
-    Ok(static_report(parser, facts, hashes, manifest))
+    Ok(())
 }
 
 fn static_report(
@@ -101,12 +116,10 @@ fn arguments(tokens: &proc_macro2::TokenStream) -> Result<Vec<Expr>, String> {
 
 fn literal(expression: &Expr) -> Result<String, String> {
     match expression {
-        Expr::Lit(value) if matches!(value.lit, syn::Lit::Str(_)) => {
-            let syn::Lit::Str(text) = &value.lit else {
-                return Err("mermaid-scripts:literal".into());
-            };
-            Ok(text.value())
-        }
+        Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(text),
+            ..
+        }) => Ok(text.value()),
         _ => Err("mermaid-scripts:literal".into()),
     }
 }

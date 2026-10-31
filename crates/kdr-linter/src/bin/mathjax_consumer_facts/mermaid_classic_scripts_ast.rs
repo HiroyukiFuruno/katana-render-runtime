@@ -12,6 +12,10 @@ const BUILD_FORWARD_BASE_ARGUMENTS: usize = 3;
 const BUILD_SCRIPTS_STATEMENTS: usize = 4;
 const BASE_SCRIPT_ENTRIES: usize = 3;
 const SCRIPT_PUSH_STATEMENT_INDEX: usize = 2;
+#[cfg(test)]
+#[path = "mermaid_classic_scripts_ast_unit_tests.rs"]
+mod unit_tests;
+
 pub(super) fn inspect_scripts(source: &Source, facts: &mut Vec<Value>) -> Result<Value, String> {
     let path = INPUTS[SCRIPT_INPUT_INDEX];
     let (build, scripts) = builders(source)?;

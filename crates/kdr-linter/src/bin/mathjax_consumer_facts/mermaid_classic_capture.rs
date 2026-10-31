@@ -1,6 +1,10 @@
 use super::super::consumer::require_direct_call;
 use syn::{Block, Expr, Pat, Stmt};
 
+#[cfg(test)]
+#[path = "mermaid_classic_capture_unit_tests.rs"]
+mod unit_tests;
+
 const REQUEST_CAPTURE_STATEMENTS: usize = 7;
 const REQUEST_CAPTURE_EVENT_INDEX: usize = 4;
 const LEGACY_REQUEST_STATEMENT_COUNT: usize = 6;

@@ -1,6 +1,10 @@
 use super::materializer_body::call_expr;
 use super::source::{call, ident, path_name, path_name_from_expr};
 
+#[cfg(test)]
+#[path = "materializer_readback_unit_tests.rs"]
+mod unit_tests;
+
 #[path = "materializer_shared_readback.rs"]
 mod shared;
 
