@@ -105,7 +105,7 @@ const recipeBodies: Record<string, string> = {
   "python-typecheck":
     "MYPYPATH={{HTML_PERFORMANCE_TYPING_PATH}} {{HTML_PERFORMANCE_SCIPY_ENV}} uvx --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} --from mypy==2.4.0 mypy --strict scripts",
   "automation-contract-test":
-    "{{HTML_PERFORMANCE_SCIPY_ENV}} uv run --isolated --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} python scripts/release/run_html_performance.py test",
+    "{{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap test",
   lint: rootLintRecipe,
   unit: "bun test --path-ignore-patterns 'tmp/**' ./scripts\npython3 -m unittest discover -s scripts -p '*_test.py'",
   "runtime-asset-script-test":

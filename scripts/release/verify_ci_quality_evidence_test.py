@@ -831,7 +831,7 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
     def test_candidate_build_proof_uses_pinned_performance_runtime(self) -> None:
         justfile = (self.ROOT / "Justfile").read_text(encoding="utf-8")
         recipe = justfile.split("html-performance-candidate-build-proof output capacity_binding capacity_binding_sha256:\n", 1)[1].split("\n\n", 1)[0].strip()
-        self.assertEqual(recipe, "{{HTML_PERFORMANCE_SCIPY_ENV}} uv run --isolated --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} python scripts/release/run_html_performance.py produce --repo {{quote(REPO_ROOT)}} --output {{quote(output)}} --capacity-binding {{quote(capacity_binding)}} --capacity-binding-sha256 {{quote(capacity_binding_sha256)}} --candidate-build-only")
+        self.assertEqual(recipe, "{{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap produce --repo {{quote(REPO_ROOT)}} --output {{quote(output)}} --capacity-binding {{quote(capacity_binding)}} --capacity-binding-sha256 {{quote(capacity_binding_sha256)}} --candidate-build-only")
 
     @staticmethod
     def workflow_step(workflow: str, name: str) -> str:
@@ -1044,7 +1044,7 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
         self.assertIn("startsWith(github.head_ref, 'release/v')", ci_preflight)
         self.assertIn(PINNED_SETUP_UV_STEP, ci_preflight)
         self.assertIn('version: "0.13.0"', ci_preflight)
-        self.assertIn("run_html_performance.py verify --acquire-current-producer", ci_preflight)
+        self.assertIn("run_html_performance.py --bootstrap verify --acquire-current-producer", ci_preflight)
         self.assertIn("release-preflight-check", ci_preflight)
 
         workflow = (self.ROOT / ".github/workflows/release-preflight.yml").read_text(encoding="utf-8")

@@ -1255,7 +1255,7 @@ function pythonStatic(context: ContractContext, name: string): void {
 }
 const HTML_PERFORMANCE_TEST_WRAPPER = "scripts/release/run_html_performance.py";
 const HTML_PERFORMANCE_TEST_WRAPPER_SHA256 =
-  "37e5ec612ef7ca1899c5cd69346ecea4da6de2a8220bfc2bc96ef838566f12dc";
+  "1a1f2f62ef680e915389459ca27ff3be5461ce43d09a8371079303ef2ae29876";
 function pythonPerformanceTestSelection(
   context: ContractContext,
   words: string[],
@@ -1268,13 +1268,9 @@ function pythonPerformanceTestSelection(
     return false;
   const expected = [
     "{{HTML_PERFORMANCE_SCIPY_ENV}}",
-    "uv",
-    "run",
-    "--isolated",
-    "--with-requirements",
-    "{{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}}",
-    "python",
+    "python3",
     HTML_PERFORMANCE_TEST_WRAPPER,
+    "--bootstrap",
     "test",
   ];
   return words.join("\0") === expected.join("\0");

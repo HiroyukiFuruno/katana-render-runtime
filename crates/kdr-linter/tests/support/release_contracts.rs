@@ -889,7 +889,7 @@ fn assert_python_automation_discovery(automation: &str, release_test_runner: &st
         "automation contract gate must discover tests under scripts/hooks"
     );
     assert!(
-        automation.contains("python scripts/release/run_html_performance.py test"),
+        automation.contains("python3 scripts/release/run_html_performance.py --bootstrap test"),
         "automation contract gate must invoke the release test runner"
     );
     assert!(

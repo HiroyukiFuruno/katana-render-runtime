@@ -1,10 +1,14 @@
+import os
+import shutil
 import subprocess
 import tempfile
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from importlib import metadata
 from types import SimpleNamespace
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import html_performance_python_identity as identity
 import run_html_performance as runner
@@ -20,7 +24,97 @@ class DistributionStub:
         return self.root / relative
 
 
+@contextmanager
+def bootstrap_fixture(
+    state: str = "existing",
+    environment: dict[str, str] | None = None,
+    failure: Exception | None = None,
+) -> Iterator[tuple[Path, MagicMock]]:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory).resolve()
+        uv = root / "uv"
+        uv.write_bytes(b"uv")
+        venv = root / "stable-venv"
+        if state == "existing":
+            venv.mkdir()
+            (venv / "pyvenv.cfg").write_text("existing", encoding="utf-8")
+        elif state == "symlink":
+            target = root / "target"
+            target.mkdir()
+            try:
+                venv.symlink_to(target, target_is_directory=True)
+            except OSError as error:
+                raise unittest.SkipTest(f"directory symlinks unavailable: {error}") from error
+        completed: subprocess.CompletedProcess[list[str]] = subprocess.CompletedProcess([], 0)
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(runner, "ROOT", root))
+            stack.enter_context(patch.object(runner, "VENV", venv))
+            stack.enter_context(patch.object(shutil, "which", return_value=str(uv)))
+            if environment is not None:
+                stack.enter_context(patch.dict(os.environ, environment, clear=True))
+            run = stack.enter_context(patch.object(subprocess, "run", return_value=completed, side_effect=failure))
+            yield venv, run
+
+
 class HtmlPerformanceRunnerTest(unittest.TestCase):
+    def test_child_environment_binds_all_parent_values(self) -> None:
+        original = {"PATH": "path", "VIRTUAL_ENV": "env", "EXTRA": "first"}
+        with patch.dict(os.environ, original, clear=True):
+            first = runner._child_environment("identity")
+            os.environ["EXTRA"] = "second"
+            second = runner._child_environment("identity")
+        self.assertTrue(all(first[key] == value for key, value in original.items()))
+        self.assertEqual(first[runner.IDENTITY_ENV], "identity")
+        self.assertEqual(first[runner.VERSION_ENV], runner.SCIPY_VERSION)
+        self.assertNotEqual(first[runner.ENVIRONMENT_ENV], second[runner.ENVIRONMENT_ENV])
+
+    def test_bootstrap_reuses_venv_and_preserves_full_parent_environment(self) -> None:
+        original = {"PATH": "original-path", "VIRTUAL_ENV": "original-env", "EXTRA": "bound"}
+        with bootstrap_fixture(environment=original) as (venv, run):
+            self.assertEqual(runner.bootstrap(("verify", "--acquire")), 0)
+            self.assertEqual(run.call_count, 3)
+            self.assertEqual(run.call_args_list[0].args[0][-1], "--check-base")
+            sync = run.call_args_list[1].args[0]
+            interpreter = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            self.assertEqual(sync[1:5], ["pip", "sync", "--python", str(interpreter)])
+            self.assertIn("--require-hashes", sync)
+            self.assertIn(str(runner.REQUIREMENTS), sync)
+            child = run.call_args_list[2]
+            self.assertEqual(child.args[0][-3:], ["--prepared", "verify", "--acquire"])
+            environment = child.kwargs["env"]
+            self.assertTrue(all(environment[key] == value for key, value in original.items()))
+            self.assertIn(runner.BASE_PYTHON_ENV, environment)
+            self.assertIn(runner.BASE_PYTHON_PATH_ENV, environment)
+            self.assertIn(runner.UV_ENV, environment)
+            self.assertIn(runner.UV_PATH_ENV, environment)
+
+    def test_bootstrap_creates_missing_environment_once(self) -> None:
+        with bootstrap_fixture(state="missing") as (_, run):
+            self.assertEqual(runner.bootstrap(("test",)), 0)
+            self.assertEqual(run.call_count, 4)
+            self.assertEqual(run.call_args_list[0].args[0][1], "venv")
+            self.assertEqual(run.call_args_list[1].args[0][-1], "--check-base")
+            self.assertEqual(run.call_args_list[2].args[0][1:3], ["pip", "sync"])
+
+    def test_bootstrap_rejects_symlink_environment(self) -> None:
+        with bootstrap_fixture(state="symlink") as (_, run):
+            with self.assertRaisesRegex(RuntimeError, "virtual environment path is invalid"):
+                runner.bootstrap(("test",))
+            run.assert_not_called()
+
+    def test_prepared_python_rejects_wrong_base_identity(self) -> None:
+        with patch.dict(os.environ, {runner.BASE_PYTHON_PATH_ENV: "/not-the-base"}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "base Python identity differs"):
+                runner._verify_prepared_python()
+
+    def test_base_check_failure_prevents_package_sync(self) -> None:
+        failure = subprocess.CalledProcessError(1, "base-check")
+        with bootstrap_fixture(failure=failure) as (_, run):
+            with self.assertRaises(subprocess.CalledProcessError):
+                runner.bootstrap(("verify",))
+            run.assert_called_once()
+            self.assertEqual(run.call_args.args[0][-1], "--check-base")
+
     def test_changed_library_identity_fails_after_child(self) -> None:
         completed: subprocess.CompletedProcess[list[str]] = subprocess.CompletedProcess([], 0)
         with patch.object(runner, "installed_identity", side_effect=("before", "after")), patch.object(subprocess, "run", return_value=completed):

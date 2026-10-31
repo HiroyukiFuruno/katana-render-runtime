@@ -789,9 +789,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >-
           KRR_HTML_PERFORMANCE_SCIPY_VERSION=1.18.1
-          uv run --isolated
-          --with-requirements scripts/release/html-performance-requirements.lock
-          python scripts/release/run_html_performance.py verify --acquire-current-producer
+          python3 scripts/release/run_html_performance.py --bootstrap verify --acquire-current-producer
 
       - name: Resolve version
         id: version

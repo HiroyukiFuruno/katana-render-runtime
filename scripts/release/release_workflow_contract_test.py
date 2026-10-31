@@ -690,13 +690,9 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             ],
             [
                 "{{HTML_PERFORMANCE_SCIPY_ENV}}",
-                "uv",
-                "run",
-                "--isolated",
-                "--with-requirements",
-                "{{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}}",
-                "python",
+                "python3",
                 "scripts/release/run_html_performance.py",
+                "--bootstrap",
                 "test",
             ],
             [
@@ -776,11 +772,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         )
         self.assertIn('version: "0.13.0"', self.retry)
         self.assertIn(
-            "--with-requirements release-tools/scripts/release/html-performance-requirements.lock",
-            self.retry,
-        )
-        self.assertIn(
-            "python release-tools/scripts/release/run_html_performance.py verify",
+            "python3 release-tools/scripts/release/run_html_performance.py --bootstrap verify",
             self.retry,
         )
         self.assertIn('--repo "$GITHUB_WORKSPACE/release-source"', self.retry)

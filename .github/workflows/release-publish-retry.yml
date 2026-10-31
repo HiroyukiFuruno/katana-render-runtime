@@ -70,9 +70,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >-
           KRR_HTML_PERFORMANCE_SCIPY_VERSION=1.18.1
-          uv run --isolated
-          --with-requirements release-tools/scripts/release/html-performance-requirements.lock
-          python release-tools/scripts/release/run_html_performance.py verify
+          python3 release-tools/scripts/release/run_html_performance.py --bootstrap verify
           --repo "$GITHUB_WORKSPACE/release-source"
           --evidence-dir "$GITHUB_WORKSPACE/release-source/tmp/html-performance-release-evidence"
           --acquire

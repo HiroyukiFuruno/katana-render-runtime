@@ -2615,15 +2615,11 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     before_pin = write(output / "context-before.json", before_context)
     environment_sha = before_pin["sha256"]
     if resumed_receipt is not None and resumed_bundle is not None:
-        for attempt in resumed_attempts:
-            expected_value = resumed_bundle.json(attempt["expected"])
-            old_arms = gate._object(expected_value.get("arms"), "resume expected arms")
-            baseline_id = gate.baseline_arm_id(expected_value)
-            gate.require(all(_same_arm_identity(
-                gate._object(old_arms.get(raw_arm), "resume arm"),
-                gate._object(arms.get(raw_arm), "current arm"),
-            ) for raw_arm in (baseline_id, "candidate")),
-                         "resume build pins differ from current build")
+        # 前回の終端と今回の開始が違う場合は、重い測定より先に拒否する。
+        _validate_resume_batch(
+            resumed_receipt, resumed_bundle, resumed_attempts, head=head, source=initial,
+            before_context=before_context, after_context=before_context, arms=arms,
+        )
     transport_attempts: list[dict[str, FilePin]] = list(resumed_attempts)
     expected_all: list[tuple[Path, ExpectedPerformance, gate.JsonObject, FilePin]] = []
     completed_rows: list[gate.JsonObject] = []

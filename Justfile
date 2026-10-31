@@ -533,7 +533,7 @@ runtime-package-asset-check:
 # Verify repository hook and release cleanup contracts
 automation-contract-test:
     python3 -m unittest discover -s scripts/hooks -p '*_test.py' --failfast
-    {{HTML_PERFORMANCE_SCIPY_ENV}} uv run --isolated --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} python scripts/release/run_html_performance.py test
+    {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap test
     python3 -m unittest discover -s scripts/quality -p '*_test.py' --failfast
     python3 -m unittest discover -s scripts/mermaid -p '*_test.py' --failfast
     python3 -m unittest discover -s scripts/validation-timing -p test_measure.py --failfast
@@ -641,11 +641,11 @@ release-openspec-archive:
 
 # 同一committed sourceの3幅・実測時間/RSSを再集計し、劣化時は公開を止める。
 html-performance-nonregression-check:
-    {{HTML_PERFORMANCE_SCIPY_ENV}} uv run --isolated --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} python scripts/release/run_html_performance.py verify
+    {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap verify
 
 # 同一SHAの完了した実測CIからimmutableな生計測証跡を取得する。
 html-performance-evidence-acquire:
-    {{HTML_PERFORMANCE_SCIPY_ENV}} uv run --isolated --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} python scripts/release/run_html_performance.py verify --acquire
+    {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap verify --acquire
 
 # 既存catalog CLIで84条件のstage90 raw capture manifestを作る。
 html-performance-catalog-captures output_root prior_observation='' prior_finalized='' chrome_executable='' chrome_sha256='' font_observer='false':
@@ -692,11 +692,11 @@ html-performance-evidence-produce catalog_manifest:
       if [[ ! -f "$manifest" || -L "$manifest" ]]; then echo "catalog stage90 capture manifest is missing or not a regular file: $manifest" >&2; exit 2; fi; \
       binding_path="{{REPO_ROOT}}/tmp/html-performance-capacity/binding.json"; \
       binding_sha256="$(python3 scripts/build/initialize_ci_capacity_state.py --root "{{REPO_ROOT}}" --interaction-report "{{REPO_ROOT}}/tmp/html-interaction-suite/krr.json")"; \
-      {{HTML_PERFORMANCE_SCIPY_ENV}} uv run --isolated --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} python scripts/release/run_html_performance.py produce --repo "{{REPO_ROOT}}" --capacity-binding "$binding_path" --capacity-binding-sha256 "$binding_sha256" --catalog-plan "$manifest"
+      {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap produce --repo "{{REPO_ROOT}}" --capacity-binding "$binding_path" --capacity-binding-sha256 "$binding_sha256" --catalog-plan "$manifest"
 
 # HTML受入れとは独立にcandidate build proofだけを生成・検証する。
 html-performance-candidate-build-proof output capacity_binding capacity_binding_sha256:
-    {{HTML_PERFORMANCE_SCIPY_ENV}} uv run --isolated --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} python scripts/release/run_html_performance.py produce --repo {{quote(REPO_ROOT)}} --output {{quote(output)}} --capacity-binding {{quote(capacity_binding)}} --capacity-binding-sha256 {{quote(capacity_binding_sha256)}} --candidate-build-only
+    {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap produce --repo {{quote(REPO_ROOT)}} --output {{quote(output)}} --capacity-binding {{quote(capacity_binding)}} --capacity-binding-sha256 {{quote(capacity_binding_sha256)}} --candidate-build-only
 
 # Run the complete quality gate before release-specific verification.
 release-quality: check html-performance-nonregression-check

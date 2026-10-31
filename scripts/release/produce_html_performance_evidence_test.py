@@ -15,6 +15,7 @@ import signal
 import socket
 import time
 import threading
+from contextlib import nullcontext
 from typing import BinaryIO, cast
 import tempfile
 import unittest
@@ -563,6 +564,25 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
                 policy_accepted=policy_accepted, attempts=attempts, bundle=bundle,
             )
         return batch, bundle
+
+    def test_resume_requires_original_context_at_both_boundaries(self) -> None:
+        batch, bundle_path = self.create_batch(condition_ids=())
+        receipt = gate.read_json(batch / "batch-receipt.json")
+        stable = cast(typed_producer.ContextSnapshot, {"stable": True})
+        changed = cast(typed_producer.ContextSnapshot, {"stable": False})
+        for before, after, error in (
+            (stable, stable, None),
+            (changed, stable, "resume context-before differs"),
+            (stable, changed, "resume context-end differs"),
+        ):
+            with self.subTest(error=error):
+                expectation = self.assertRaisesRegex(ValueError, error) if error else nullcontext()
+                with expectation:
+                    producer._validate_resume_batch(
+                        receipt, gate.Bundle(bundle_path), [], head="a" * 40,
+                        source={"head": "a"}, before_context=before,
+                        after_context=after, arms={},
+                    )
 
     def failed_batch_fixture(
         self,
