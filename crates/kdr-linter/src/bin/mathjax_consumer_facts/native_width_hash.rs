@@ -6,6 +6,9 @@ use syn::ItemFn;
 
 #[path = "native_width_hash_ast.rs"]
 pub(super) mod ast;
+#[cfg(test)]
+#[path = "native_width_hash_import_tests.rs"]
+mod import_tests;
 #[path = "native_width_hash_routes.rs"]
 mod routes;
 

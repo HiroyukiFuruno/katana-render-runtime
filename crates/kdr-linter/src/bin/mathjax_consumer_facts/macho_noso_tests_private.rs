@@ -5,6 +5,9 @@ use std::fs;
 use std::path::Path;
 use tempfile::tempdir;
 
+#[path = "macho_noso_input_path_tests.rs"]
+mod input_path_tests;
+
 const EXPECTED_NOSO_RECORDS: usize = 1;
 const SIZE_DRIFT_BYTES: usize = 1;
 

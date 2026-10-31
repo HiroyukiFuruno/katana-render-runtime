@@ -195,3 +195,7 @@ fn local_initializer<'a>(statement: &'a Stmt, name: &str, error: &str) -> Result
         .map(|init| init.expr.as_ref())
         .ok_or_else(|| error.into())
 }
+
+#[cfg(test)]
+#[path = "native_width_hash_routes_tests.rs"]
+mod tests;
