@@ -44,6 +44,20 @@ pub(super) fn source(root: &Path, relative: &str) -> Result<Source, String> {
     Ok(Source { sha256, ast })
 }
 
+#[cfg(test)]
+pub(super) fn parsed_source(text: &str) -> Result<Source, String> {
+    let bytes = text.as_bytes();
+    let sha256 = sha256(bytes);
+    let ast = syn::parse_file(text).map_err(|error| format!("parse-source:{error}"))?;
+    Ok(Source { sha256, ast })
+}
+
+#[cfg(test)]
+pub(super) fn parsed_block(text: &str, function: &str) -> Result<syn::Block, String> {
+    let source = parsed_source(text)?;
+    Ok(free_function(&source.ast, function)?.block.as_ref().clone())
+}
+
 pub(super) fn opaque_sha256(root: &Path, relative: &str) -> Result<String, String> {
     Ok(sha256(&opaque_bytes(root, relative)?))
 }

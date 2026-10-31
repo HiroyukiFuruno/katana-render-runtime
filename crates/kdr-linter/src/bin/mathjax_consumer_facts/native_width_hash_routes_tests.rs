@@ -93,6 +93,44 @@ fn shared_hash_call_requires_the_named_function_and_three_inputs() -> Result<(),
     Ok(())
 }
 
+#[test]
+fn hash_literal_rejects_non_expression_statements() -> Result<(), String> {
+    let statement = parse_statement("let value = 1;")?;
+    assert_rejected(
+        require_hash_literal(&statement, "mermaid-svg-id-v1", DOMAIN_ERROR),
+        DOMAIN_ERROR,
+    );
+    Ok(())
+}
+
+#[test]
+fn shared_hash_call_rejects_non_expression_statements() -> Result<(), String> {
+    let statement = parse_statement("let value = 1;")?;
+    assert_rejected(
+        require_shared_hash_call(&statement, SHARED_ERROR, &["hasher", "source", "preset"]),
+        SHARED_ERROR,
+    );
+    Ok(())
+}
+
+#[test]
+fn hasher_binding_rejects_nonlocal_statements() -> Result<(), String> {
+    let statement = parse_statement("return DefaultHasher::new();")?;
+    assert_rejected(require_hasher_binding(&statement, HASH_ERROR), HASH_ERROR);
+    Ok(())
+}
+
+#[test]
+fn hasher_binding_requires_the_expected_local_name() -> Result<(), String> {
+    let statement = parse_statement("let other = DefaultHasher::new();")?;
+    assert_rejected(require_hasher_binding(&statement, HASH_ERROR), HASH_ERROR);
+    Ok(())
+}
+
+fn assert_rejected(result: Result<(), String>, expected: &str) {
+    assert_eq!(result.err().as_deref(), Some(expected));
+}
+
 fn parse_statement(source: &str) -> Result<Stmt, String> {
     syn::parse_str(source).map_err(|error| error.to_string())
 }
