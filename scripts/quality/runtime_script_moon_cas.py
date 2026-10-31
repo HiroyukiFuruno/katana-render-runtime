@@ -41,6 +41,11 @@ RUNTIME_CAS_OTHER_RECEIPTS = tuple(
     for producer in RUNTIME_UNUSED_LEAF_IDS
     if producer != RUNTIME_CAS_PRODUCER
 )
+RUNTIME_CAS_OTHER_JUNIT = tuple(
+    f"tmp/quality/runtime-script-results/{producer}-current-group-001.xml"
+    for producer in RUNTIME_UNUSED_LEAF_IDS
+    if producer != RUNTIME_CAS_PRODUCER
+)
 
 def _runtime_cas_real_parent(path: Path) -> None:
     relative = path.parent.relative_to(ROOT)
@@ -663,7 +668,7 @@ class RuntimeScriptCasDiagnostic:
         if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
             raise RuntimeError("runtime CAS diagnostic requires the canonical Git directory")
         anchor_dir = git_dir / "krr-native-coverage-v1"
-        for relative in (*RUNTIME_CAS_OTHER_RECEIPTS, RUNTIME_CAS_RECEIPT):
+        for relative in (*RUNTIME_CAS_OTHER_RECEIPTS, *RUNTIME_CAS_OTHER_JUNIT, RUNTIME_CAS_RECEIPT):
             path = ROOT / relative
             info = path.lstat()
             self.saved_files[path] = (_runtime_cas_safe_file(path), stat.S_IMODE(info.st_mode))
@@ -805,19 +810,6 @@ class RuntimeScriptCasDiagnostic:
                 raise RuntimeError("selected producer output changed before removal")
             path.unlink()
 
-    def _remove_present_outputs(self) -> None:
-        for path in self.outputs:
-            if path.is_symlink() or (path.exists() and not path.is_file()):
-                raise RuntimeError("selected producer output changed before removal")
-            if path.exists():
-                path.unlink()
-
-    def _restore_snapshot(self, snapshot: dict[Path, tuple[bytes, int]]) -> None:
-        for path, (content, mode) in snapshot.items():
-            _runtime_cas_restore_file(path, content, mode)
-            if _runtime_cas_safe_file(path) != content or stat.S_IMODE(path.lstat().st_mode) != mode:
-                raise RuntimeError("runtime-script output snapshot was not restored exactly")
-
     def _capture_repaired_outputs(self) -> None:
         self.repaired_files = {
             path: (_runtime_cas_safe_file(path), stat.S_IMODE(path.lstat().st_mode))
@@ -936,6 +928,55 @@ class RuntimeScriptCasDiagnostic:
             "blobOwnerCount": owners,
         }
 
+    def _seed_repaired_epoch(
+        self, raw_root: Path
+    ) -> tuple[str, set[str], dict[Path, tuple[bytes, int]], dict[str, object] | None]:
+        repaired = moon_json_object(json.loads(self.repaired_files[self.receipt][0]))
+        raw_before = _runtime_cas_raw_directories(raw_root)
+        seed = self._moon_run("moon-repaired-epoch-seed")
+        new_hash = seed.get("actionHash")
+        if not isinstance(new_hash, str) or new_hash == self.action_hash:
+            raise RuntimeError("repaired epoch did not use a new Moon action")
+        raw_after = _runtime_cas_raw_directories(raw_root)
+        if not raw_before.issubset(raw_after):
+            raise RuntimeError("producer logs disappeared during repaired epoch seed")
+        added = raw_after - raw_before
+        seed_log = None
+        if added:
+            seed_log = _runtime_cas_new_producer_log(
+                raw_root, raw_before, _runtime_cas_expected_command()
+            )
+        else:
+            self._assert_hydrated(seed, "repaired-epoch-seed")
+        self._validate_all("validate-repaired-epoch-seed")
+        seeded = _runtime_cas_snapshot_files(self.outputs)
+        seeded_receipt = moon_json_object(json.loads(seeded[self.receipt][0]))
+        if any(seeded_receipt.get(key) != repaired.get(key) for key in ("identitySha256", "epoch")):
+            raise RuntimeError("repaired epoch seed changed the validated identity or epoch")
+        return new_hash, raw_after, seeded, seed_log
+
+    def _verify_repaired_epoch_cache(self, raw_root: Path) -> dict[str, object]:
+        new_hash, raw_after, seeded, seed_log = self._seed_repaired_epoch(raw_root)
+        for label in ("moon-repaired-epoch-hit", "moon-repaired-epoch-restore"):
+            if label.endswith("restore"):
+                self._remove_outputs()
+            action = self._moon_run(label)
+            if action.get("actionHash") != new_hash:
+                raise RuntimeError("repaired epoch cache action changed")
+            self._assert_hydrated(action, label)
+            if not _runtime_cas_files_match_snapshot(seeded):
+                raise RuntimeError("repaired epoch cache output differs from its seed")
+            if _runtime_cas_raw_directories(raw_root) != raw_after:
+                raise RuntimeError("repaired epoch cache hit created a producer log")
+            self._validate_all(f"validate-{label}")
+        return {
+            "actionHash": new_hash,
+            "seedProducerLog": seed_log,
+            "receiptSha256": hashlib.sha256(seeded[self.receipt][0]).hexdigest(),
+            "junitSha256": hashlib.sha256(seeded[self.junit][0]).hexdigest(),
+            "hitAndRestoreValidated": True,
+        }
+
     def _corrupt_and_recover(self) -> dict[str, object]:
         if self.blob_fd is None or self.blob_bytes is None:
             raise RuntimeError("selected CAS blob was not pinned")
@@ -980,18 +1021,8 @@ class RuntimeScriptCasDiagnostic:
         self._capture_repaired_outputs()
         if not self._restore_blob():
             raise RuntimeError("original Moon CAS blob was not restored before control")
-        self._validate_all("validate-original-cas-before-control")
-        control_raw_directories = _runtime_cas_raw_directories(raw_root)
-        self._remove_present_outputs()
-        control = self._moon_run("moon-post-repair-cache-control")
-        if control.get("actionHash") != self.action_hash:
-            raise RuntimeError("post-repair cache control used another Moon action")
-        self._assert_hydrated(control, "post-repair-cache-control")
-        if not _runtime_cas_files_match_snapshot(self.seed_files):
-            raise RuntimeError("original CAS control did not restore seeded output bytes")
-        if _runtime_cas_raw_directories(raw_root) != control_raw_directories:
-            raise RuntimeError("post-repair cache control created a producer log")
-        self._restore_snapshot(self.repaired_files)
+        self._validate_all("validate-repaired-before-new-seed")
+        control = self._verify_repaired_epoch_cache(raw_root)
         self._assert_manifest_unchanged()
         if probe_acceptance is None:
             raise RuntimeError("corrupted Moon CAS probe was not an accepted classification")
@@ -1001,8 +1032,7 @@ class RuntimeScriptCasDiagnostic:
             "moonAttempt": moon_attempt,
             "recoveryResult": repaired,
             "producerLog": producer_log,
-            "postRepairCacheControl": control,
-            "repairedOutputsRestored": True,
+            "repairedEpochCache": control,
             "probeAcceptance": probe_acceptance,
         }
 
@@ -1017,10 +1047,11 @@ class RuntimeScriptCasDiagnostic:
             or final.get("epoch") == repair_baseline.get("epoch")
         ):
             raise RuntimeError("repaired receipt did not use a fresh epoch for same inputs")
-        for relative in RUNTIME_CAS_OTHER_RECEIPTS:
+        for relative in (*RUNTIME_CAS_OTHER_RECEIPTS, *RUNTIME_CAS_OTHER_JUNIT):
             path = ROOT / relative
-            if _runtime_cas_safe_file(path) != self.saved_files[path][0]:
-                raise RuntimeError("ensure-all modified an unrelated producer receipt")
+            if (_runtime_cas_safe_file(path) != self.saved_files[path][0]
+                    or stat.S_IMODE(path.lstat().st_mode) != self.saved_files[path][1]):
+                raise RuntimeError("ensure-all modified an unrelated producer output")
         for path, (content, _) in self.saved_files.items():
             if (
                 path.parent.name == "krr-native-coverage-v1"

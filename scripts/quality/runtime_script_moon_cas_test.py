@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 import unittest
+from contextlib import contextmanager
+from collections.abc import Iterator
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import NamedTuple
+from unittest.mock import MagicMock, patch
 
 from moon_cache_contract_test import MOON_TASK_CONTEXT_VARIABLES, ROOT
 from runtime_script_moon_cas import (
@@ -24,6 +29,48 @@ from runtime_script_moon_cas import (
     _runtime_cas_snapshot_files,
     _runtime_cas_child_environment,
 )
+
+
+class EpochMocks(NamedTuple):
+    moon: MagicMock
+    hydrated: MagicMock
+    validate: MagicMock
+    remove: MagicMock
+    log: MagicMock
+
+
+def epoch_fixture() -> tuple[RuntimeScriptCasDiagnostic, dict[Path, tuple[bytes, int]]]:
+    diagnostic = RuntimeScriptCasDiagnostic.__new__(RuntimeScriptCasDiagnostic)
+    diagnostic.receipt = Path("/fixture/receipt.json")
+    diagnostic.junit = Path("/fixture/result.xml")
+    diagnostic.outputs = (diagnostic.receipt, diagnostic.junit)
+    receipt = json.dumps({"identitySha256": "identity", "epoch": "new"}).encode()
+    snapshot = {diagnostic.receipt: (receipt, 0o600), diagnostic.junit: (b"junit", 0o600)}
+    diagnostic.repaired_files = dict(snapshot)
+    diagnostic.action_hash = "old-action"
+    return diagnostic, snapshot
+
+
+@contextmanager
+def epoch_patches(
+    diagnostic: RuntimeScriptCasDiagnostic,
+    snapshot: dict[Path, tuple[bytes, int]],
+    actions: list[dict[str, str]],
+    inventories: list[set[str]],
+) -> Iterator[EpochMocks]:
+    # 状態遷移の単体検証であり、実Moon/CASの動作証跡には使わない。
+    with (
+        patch.object(diagnostic, "_moon_run", side_effect=actions) as moon,
+        patch.object(diagnostic, "_assert_hydrated") as hydrated,
+        patch.object(diagnostic, "_validate_all") as validate,
+        patch.object(diagnostic, "_remove_outputs") as remove,
+        patch("runtime_script_moon_cas._runtime_cas_raw_directories", side_effect=inventories),
+        patch("runtime_script_moon_cas._runtime_cas_snapshot_files", return_value=snapshot),
+        patch("runtime_script_moon_cas._runtime_cas_files_match_snapshot", return_value=True),
+        patch("runtime_script_moon_cas._runtime_cas_expected_command", return_value=["bun"]),
+        patch("runtime_script_moon_cas._runtime_cas_new_producer_log", return_value={"pin": "seed"}) as log,
+    ):
+        yield EpochMocks(moon, hydrated, validate, remove, log)
 
 
 class RuntimeScriptMoonCasEnvironmentTest(unittest.TestCase):
@@ -273,6 +320,51 @@ class RuntimeScriptMoonCasEnvironmentTest(unittest.TestCase):
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
             finally:
                 os.close(descriptor)
+
+    def test_repaired_epoch_seeds_new_action_and_validates_hit_and_restore(self) -> None:
+        diagnostic, snapshot = epoch_fixture()
+        actions = [{"actionHash": "new-action"}] * 3
+        with epoch_patches(diagnostic, snapshot, actions, [{"prior"}] * 4) as mocks:
+            result = diagnostic._verify_repaired_epoch_cache(Path("/fixture/raw"))
+        self.assertEqual(result["actionHash"], "new-action")
+        self.assertTrue(result["hitAndRestoreValidated"])
+        self.assertEqual(mocks.moon.call_count, 3)
+        self.assertEqual(mocks.hydrated.call_count, 3)
+        self.assertEqual(mocks.validate.call_count, 3)
+        mocks.remove.assert_called_once()
+
+    def test_repaired_epoch_rejects_old_action_and_changed_epoch(self) -> None:
+        diagnostic, snapshot = epoch_fixture()
+        with epoch_patches(diagnostic, snapshot, [{"actionHash": "old-action"}], [set()]):
+            with self.assertRaisesRegex(RuntimeError, "new Moon action"):
+                diagnostic._verify_repaired_epoch_cache(Path("/fixture/raw"))
+        changed = json.dumps({"identitySha256": "identity", "epoch": "old"}).encode()
+        snapshot[diagnostic.receipt] = (changed, 0o600)
+        with epoch_patches(diagnostic, snapshot, [{"actionHash": "new-action"}], [set()] * 2):
+            with self.assertRaisesRegex(RuntimeError, "identity or epoch"):
+                diagnostic._verify_repaired_epoch_cache(Path("/fixture/raw"))
+
+    def test_repaired_epoch_records_fresh_seed_producer_log(self) -> None:
+        diagnostic, snapshot = epoch_fixture()
+        inventories = [{"prior"}, {"prior", "seed"}, {"prior", "seed"}, {"prior", "seed"}]
+        with epoch_patches(diagnostic, snapshot, [{"actionHash": "new-action"}] * 3, inventories) as mocks:
+            result = diagnostic._verify_repaired_epoch_cache(Path("/fixture/raw"))
+        self.assertEqual(result["seedProducerLog"], {"pin": "seed"})
+        mocks.log.assert_called_once_with(Path("/fixture/raw"), {"prior"}, ["bun"])
+
+    def test_repaired_epoch_rejects_changed_action_or_new_hit_log(self) -> None:
+        diagnostic, snapshot = epoch_fixture()
+        cases = (
+            ([{"actionHash": "new-action"}, {"actionHash": "different"}],
+             [{"prior"}, {"prior"}], "action changed"),
+            ([{"actionHash": "new-action"}, {"actionHash": "new-action"}],
+             [{"prior"}, {"prior"}, {"prior", "unexpected"}], "created a producer log"),
+        )
+        for actions, inventories, expected in cases:
+            with self.subTest(expected=expected):
+                with epoch_patches(diagnostic, snapshot, actions, inventories):
+                    with self.assertRaisesRegex(RuntimeError, expected):
+                        diagnostic._verify_repaired_epoch_cache(Path("/fixture/raw"))
 
 
 if __name__ == "__main__":
