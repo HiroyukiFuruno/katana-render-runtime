@@ -55,11 +55,38 @@ class NativeCliObservationViewTests(unittest.TestCase):
             "size": 12,
             "unexpected": {"secret": secret},
         }
-        result, stdout, stderr = run_view_text(json.dumps(payload))
+        self.assert_cli_rejects_payload(payload, secret)
 
-        self.assertEqual(result, 2)
+    def test_request_and_build_receipt_payloads_are_not_echoed(self) -> None:
+        secret = "SYNTHETIC_PRIVATE_PAYLOAD_SENTINEL"
+        payloads: tuple[tuple[str, dict[str, object]], ...] = (
+            (
+                "request",
+                {
+                    "schema": "krr-native-cli-guard-request-v2",
+                    "environment": {"SYNTHETIC_AUTH": secret},
+                },
+            ),
+            (
+                "build receipt",
+                {
+                    "schema": "krr-native-cli-managed-build-v3",
+                    "snapshotBefore": {
+                        "environment": {"SYNTHETIC_AUTH": secret},
+                    },
+                },
+            ),
+        )
+        for payload_type, payload in payloads:
+            with self.subTest(payload_type=payload_type):
+                self.assert_cli_rejects_payload(payload, secret)
+
+    def assert_cli_rejects_payload(
+        self, payload: dict[str, object], secret: str
+    ) -> None:
+        result, stdout, stderr = run_view_text(json.dumps(payload))
+        self.assertEqual((result, stdout), (2, ""))
         self.assertNotIn(secret, stdout + stderr)
-        self.assertEqual(stdout, "")
         self.assertEqual(stderr, "invalid native CLI observation\n")
 
     def test_duplicate_json_keys_fail_without_echoing_input(self) -> None:
