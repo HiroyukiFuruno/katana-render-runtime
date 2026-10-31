@@ -52,6 +52,7 @@ resvgの `identity_op` / `too_many_arguments` / `upper_case_acronyms` / `wrong_s
 - markerの暗黙viewport clipだけをhard-edgeにする。clip範囲とtransformを維持し、
   markerの子図形と通常のuser clipのアンチエイリアスは変更しない。
 - 閉じたサブパスのCubicTo直後に置くmarker-midは、曲線終端接線と閉じ辺の接線の二等分方向へ向ける。
+  退化曲線で第2制御点が終点と重なる場合は、第1制御点から終点への入射接線を使い、両制御点が重なる場合だけ従来の開始点fallbackを使う。
   SVG 2の規則から算出した期待角度を独立Chrome画像でも確認し、marker-endの既存経路は変更しない。
 - HTML用の任意のfallback resolverへ、元の要求font属性を渡す。
   primary faceの物理weightで要求CSS weightを置き換えず、nested SVGにも同じresolverを渡す。

@@ -375,12 +375,20 @@ fn calc_vertex_angle(path: &[Segment], idx: usize) -> f32 {
                 let next = get_subpath_start(path, idx);
                 calc_angle(prev.x, prev.y, p.x, p.y, p.x, p.y, next.x, next.y)
             }
-            /* WHY: 閉じた曲線頂点のmarker-midは曲線終端と閉じ辺の接線を二等分する。 */
-            (Segment::CubicTo(_, p2, p), Segment::Close) => {
+            /* WHY: 第2制御点が終点と重なる場合は、第1制御点が入射接線を決める。 */
+            (Segment::CubicTo(p1, p2, p), Segment::Close) => {
                 let prev = get_prev_vertex(path, idx);
                 let next = get_subpath_start(path, idx);
+                let incoming = if p2.x.approx_eq_ulps(&p.x, 4)
+                    && p2.y.approx_eq_ulps(&p.y, 4)
+                    && !(p1.x.approx_eq_ulps(&p.x, 4) && p1.y.approx_eq_ulps(&p.y, 4))
+                {
+                    p1
+                } else {
+                    prev
+                };
                 calc_curves_angle(
-                    prev.x, prev.y, p2.x, p2.y, p.x, p.y, next.x, next.y, next.x, next.y,
+                    incoming.x, incoming.y, p2.x, p2.y, p.x, p.y, next.x, next.y, next.x, next.y,
                 )
             }
             (_, Segment::Close) => {
