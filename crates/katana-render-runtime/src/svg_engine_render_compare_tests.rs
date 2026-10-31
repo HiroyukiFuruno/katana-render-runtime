@@ -5,6 +5,7 @@ const ALPHA: usize = 3;
 const MAX_ALPHA: f64 = 255.0;
 const ROUNDING_OFFSET: f64 = 0.5;
 const CHANNEL_THRESHOLD: u8 = 1;
+const DIAGNOSTIC_PIXEL_LIMIT: usize = 8;
 
 pub(super) fn pixel_differences(actual: &Pixmap, png: &[u8]) -> Result<usize, String> {
     let expected = image::load_from_memory(png)
@@ -19,11 +20,24 @@ pub(super) fn pixel_differences(actual: &Pixmap, png: &[u8]) -> Result<usize, St
             let expected_pixel =
                 (x < expected.width() && y < expected.height()).then(|| expected.get_pixel(x, y).0);
             if differs(actual_pixel, expected_pixel) {
+                report_difference(x, y, actual_pixel, expected_pixel, differences);
                 differences += 1;
             }
         }
     }
     Ok(differences)
+}
+
+fn report_difference(
+    x: u32,
+    y: u32,
+    actual: Option<[u8; CHANNELS]>,
+    expected: Option<[u8; CHANNELS]>,
+    index: usize,
+) {
+    if index < DIAGNOSTIC_PIXEL_LIMIT {
+        eprintln!("pixel ({x},{y}) differs: actual={actual:?} expected={expected:?}");
+    }
 }
 
 fn unpremultiply(pixel: tiny_skia::PremultipliedColorU8) -> [u8; CHANNELS] {
@@ -59,4 +73,20 @@ fn comparison_preserves_upstream_threshold_and_transparent_rule() {
     assert!(differs(Some(OPAQUE), Some(TWO_STEPS)));
     assert!(!differs(Some([0, 0, 0, 0]), Some([255, 255, 255, 0])));
     assert!(differs(Some(OPAQUE), None));
+}
+
+#[test]
+fn pixmap_comparison_counts_each_differing_pixel() -> Result<(), String> {
+    const WIDTH: u32 = 10;
+    let mut actual = Pixmap::new(WIDTH, 1).ok_or("actual pixmap unavailable")?;
+    actual.fill(tiny_skia::Color::from_rgba8(2, 0, 0, 255));
+    let mut expected = Pixmap::new(WIDTH, 1).ok_or("expected pixmap unavailable")?;
+    expected.fill(tiny_skia::Color::from_rgba8(0, 0, 0, 255));
+    let expected_png = expected.encode_png().map_err(|error| error.to_string())?;
+    let expected_differences = usize::try_from(WIDTH).map_err(|error| error.to_string())?;
+    assert_eq!(
+        pixel_differences(&actual, &expected_png)?,
+        expected_differences
+    );
+    Ok(())
 }

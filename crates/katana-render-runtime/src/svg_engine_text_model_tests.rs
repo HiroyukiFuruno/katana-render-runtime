@@ -7,6 +7,9 @@ use crate::svg_engine::usvg::{
     StrokeWidth,
 };
 
+#[path = "svg_engine_text_writer_model_tests.rs"]
+mod writer_model_tests;
+
 const EXPECTED_STROKE_WIDTH: f32 = 2.5;
 const EXPECTED_STROKE_RGB: [u8; 3] = [17, 34, 51];
 const EXPECTED_STROKE_MITER_LIMIT: f32 = 3.0;

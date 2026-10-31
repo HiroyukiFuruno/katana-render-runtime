@@ -1,7 +1,7 @@
 // Copyright 2021 the Resvg Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
 use std::str::FromStr;
 
@@ -149,7 +149,7 @@ impl ShortRange {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct NodeId(NonZeroU32);
 
 impl NodeId {
@@ -489,6 +489,9 @@ impl<'a, 'input: 'a> SvgNode<'a, 'input> {
             curr: self.id(),
             is_first: true,
             is_finished: false,
+            visited_inline: [None; INLINE_HREF_VISITED_COUNT],
+            visited_inline_len: 0,
+            visited_overflow: None,
         }
     }
 }
@@ -614,6 +617,35 @@ pub struct HrefIter<'a, 'input: 'a> {
     curr: NodeId,
     is_first: bool,
     is_finished: bool,
+    visited_inline: [Option<NodeId>; INLINE_HREF_VISITED_COUNT],
+    visited_inline_len: usize,
+    visited_overflow: Option<HashSet<NodeId>>,
+}
+
+/* WHY: 普通の短い参照で確保せず、長い参照だけ標準集合へ移す。 */
+const INLINE_HREF_VISITED_COUNT: usize = 4;
+
+impl HrefIter<'_, '_> {
+    fn has_visited(&self, id: NodeId) -> bool {
+        if let Some(visited) = &self.visited_overflow {
+            return visited.contains(&id);
+        }
+        self.visited_inline[..self.visited_inline_len].contains(&Some(id))
+    }
+
+    fn remember(&mut self, id: NodeId) {
+        if let Some(visited) = &mut self.visited_overflow {
+            visited.insert(id);
+        } else if self.visited_inline_len < INLINE_HREF_VISITED_COUNT {
+            self.visited_inline[self.visited_inline_len] = Some(id);
+            self.visited_inline_len += 1;
+        } else {
+            let mut visited = HashSet::with_capacity(INLINE_HREF_VISITED_COUNT + 1);
+            visited.extend(self.visited_inline.iter().flatten().copied());
+            visited.insert(id);
+            self.visited_overflow = Some(visited);
+        }
+    }
 }
 
 impl<'a, 'input: 'a> Iterator for HrefIter<'a, 'input> {
@@ -630,16 +662,18 @@ impl<'a, 'input: 'a> Iterator for HrefIter<'a, 'input> {
         }
 
         if let Some(link) = self.doc.get(self.curr).node_attribute(AId::Href) {
-            if link.id() == self.curr || link.id() == self.origin {
+            let id = link.id();
+            if id == self.curr || id == self.origin || self.has_visited(id) {
                 log::warn!(
-                    "Element '#{}' cannot reference itself via 'xlink:href'.",
+                    "Element '#{}' cannot reference itself or form a cycle via 'xlink:href'.",
                     self.doc.get(self.origin).element_id()
                 );
                 self.is_finished = true;
                 return None;
             }
 
-            self.curr = link.id();
+            self.remember(id);
+            self.curr = id;
             Some(self.doc.get(self.curr))
         } else {
             None

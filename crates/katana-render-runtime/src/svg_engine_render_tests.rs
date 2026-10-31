@@ -3,6 +3,8 @@ use rstest::rstest;
 use std::path::{Path, PathBuf};
 use tiny_skia::{Pixmap, Transform};
 
+#[path = "svg_engine_render_browser_reference_tests.rs"]
+mod browser_reference_tests;
 #[path = "svg_engine_render_compare_tests.rs"]
 mod compare;
 #[path = "svg_engine_render_context_tests.rs"]
@@ -17,6 +19,10 @@ mod input_contract;
 mod inventory;
 #[path = "svg_engine_render_marker_tests.rs"]
 mod marker;
+#[path = "svg_engine_render_morphology_color_tests.rs"]
+mod morphology_color_tests;
+#[path = "svg_engine_render_morphology_contract_tests.rs"]
+mod morphology_contract;
 #[path = "svg_engine_public_getter_tests.rs"]
 mod public_getters;
 const NORMAL_WIDTH: u32 = 300;
@@ -38,14 +44,18 @@ fn upstream_normal_render_matches_reference(
     if input.ends_with(Path::new("structure/svg/negative-size.svg"))
         || input.ends_with(Path::new("structure/svg/zero-size.svg"))
     {
-        input_contract::assert_invalid_size(&input)
-    } else if input.ends_with(Path::new("structure/svg/not-UTF-8-encoding.svg")) {
-        input_contract::assert_not_utf8(&input)
-    } else if input.ends_with(Path::new("structure/svg/no-size.svg")) {
-        input_contract::assert_no_size_contract(&input)
-    } else {
-        assert_reference(&input, Mode::Normal)
+        return input_contract::assert_invalid_size(&input);
     }
+    if input.ends_with(Path::new("structure/svg/not-UTF-8-encoding.svg")) {
+        return input_contract::assert_not_utf8(&input);
+    }
+    if input.ends_with(Path::new("structure/svg/no-size.svg")) {
+        return input_contract::assert_no_size_contract(&input);
+    }
+    if browser_reference_tests::is_one_axis_contract(&input)? {
+        return morphology_contract::assert_one_axis_contract(&input);
+    }
+    assert_reference(&input, Mode::Normal)
 }
 
 #[rstest]
@@ -77,7 +87,7 @@ enum Mode<'a> {
 
 fn assert_reference(input: &Path, mode: Mode<'_>) -> Result<(), String> {
     let (pixmap, differences) = compare_reference(input, mode)?;
-    let reference_path = input.with_extension("png");
+    let reference_path = browser_reference_tests::reference_png_path(input)?;
     if differences > 0 {
         failure_artifact::save_if_requested(input, &reference_path, &pixmap, differences).map_err(
             |error| {
@@ -95,19 +105,24 @@ fn assert_reference(input: &Path, mode: Mode<'_>) -> Result<(), String> {
 fn compare_reference(input: &Path, mode: Mode<'_>) -> Result<(Pixmap, usize), String> {
     let bytes =
         std::fs::read(input).map_err(|error| format!("read {}: {error}", input.display()))?;
+    let tree = parse_source(input, &bytes)?;
+    let pixmap = render(&tree, mode)?;
+    let reference_path = browser_reference_tests::reference_png_path(input)?;
+    let reference = std::fs::read(&reference_path)
+        .map_err(|error| format!("read {}: {error}", reference_path.display()))?;
+    let differences = compare::pixel_differences(&pixmap, &reference)?;
+    Ok((pixmap, differences))
+}
+
+fn parse_source(input: &Path, bytes: &[u8]) -> Result<usvg::Tree, String> {
     let options = usvg::Options {
         fontdb: upstream_writer_font_database()?,
         resources_dir: input.parent().map(Path::to_path_buf),
         ..usvg::Options::default()
     };
-    let tree = usvg::Tree::from_data(&bytes, &options)
+    let tree = usvg::Tree::from_data(bytes, &options)
         .map_err(|error| format!("parse {}: {error}", input.display()))?;
-    let pixmap = render(&tree, mode)?;
-    let reference_path = input.with_extension("png");
-    let reference = std::fs::read(&reference_path)
-        .map_err(|error| format!("read {}: {error}", reference_path.display()))?;
-    let differences = compare::pixel_differences(&pixmap, &reference)?;
-    Ok((pixmap, differences))
+    Ok(tree)
 }
 
 fn render(tree: &usvg::Tree, mode: Mode<'_>) -> Result<Pixmap, String> {

@@ -24,7 +24,7 @@
     "harfrustAlias": "usvg harfrust:: becomes svg_harfrust:: (original 0.12 dependency identity)",
     "enabledFeaturePredicates": "The original enabled feature counts are retained per file; constant evaluation removes 79 true cfg attributes and four false branches. OS and test conditions are retained; KRR has no optional public SVG-engine feature contract.",
     "allowAttributes": "The original 46 allow attributes are retained verbatim. Two scoped boundary attributes permit observed external Clippy lints (22 in usvg/lib.rs, 18 in resvg/lib.rs) plus dead_code and unused_imports. Four resvg lints already allowed upstream are omitted from the added list to avoid duplicate attributes. No blanket all, non_minimal_cfg, unsafe-code override, or additional exclusion is introduced.",
-    "sourceSemantics": "Initial mechanical transplant preserves upstream behavior; subsequent scoped fixes pass CSS font size to HarfRust tracking and use hard-edge clipping only for implicit marker viewports. An optional internal fallback callback receives the original requested font attributes while the default legacy resolver remains unchanged; nested SVG forwards the callback. Original SVG, glyph IDs, and variation coordinates are not manually rewritten. Clip bounds, user-clip antialiasing, and upstream test expectations are preserved. ViewBox scale and alignment use f64 intermediate arithmetic before conversion to the existing f32 transform. Linked feImage parsing transfers a child ID only to an unnamed parent and preserves existing referenced IDs across serialization. Skrifa 0.49 compatibility uses the optional SVG glyph-data accessor and reads opsz axis presence from the same face metadata. CSS declarations retain source order among equal-priority values, with important declarations taking precedence over normal values. Inline style parsing recovers after malformed declarations at CSS-aware semicolon boundaries. Displacement-map sampling applies transform-scaled filter scale once and unpremultiplies the map's RGB channels while preserving its alpha. This matches upstream issue 1160 at commit e1a4c92da6d354a41c402f57d65705ad632eba25. Radial-gradient serialization preserves nonzero focal radius fr so parse-write-parse does not reset it to zero; the default zero remains omitted. Diffuse and specular lighting serialize their modeled filter input so SourceAlpha and named references survive parse-write-parse. Upstream source hashes and licenses remain unchanged. Test-only cfg module declarations connect KRR-owned model-contract regressions; normal builds retain the same production function definitions and public visibility."
+    "sourceSemantics": "Initial mechanical transplant preserves upstream behavior; subsequent scoped fixes pass CSS font size to HarfRust tracking and use hard-edge clipping only for implicit marker viewports. An optional internal fallback callback receives the original requested font attributes while the default legacy resolver remains unchanged; nested SVG forwards the callback. Original SVG, glyph IDs, and variation coordinates are not manually rewritten. Clip bounds, user-clip antialiasing, and upstream test expectations are preserved. ViewBox scale and alignment use f64 intermediate arithmetic before conversion to the existing f32 transform. Linked feImage parsing transfers a child ID only to an unnamed parent and preserves existing referenced IDs across serialization. Skrifa 0.49 compatibility uses the optional SVG glyph-data accessor and reads opsz axis presence from the same face metadata. CSS declarations retain source order among equal-priority values, with important declarations taking precedence over normal values. Inline style parsing recovers after malformed declarations at CSS-aware semicolon boundaries. Displacement-map sampling applies transform-scaled filter scale once and unpremultiplies the map's RGB channels while preserving its alpha. This matches upstream issue 1160 at commit e1a4c92da6d354a41c402f57d65705ad632eba25. Radial-gradient serialization preserves nonzero focal radius fr so parse-write-parse does not reset it to zero; the default zero remains omitted. Diffuse and specular lighting serialize their modeled filter input so SourceAlpha and named references survive parse-write-parse. HrefIter detects previously visited xlink:href nodes, retaining short-chain storage inline and allocating a standard HashSet only when that history overflows. Upstream source hashes and licenses remain unchanged. Test-only cfg module declarations connect KRR-owned model-contract regressions; normal builds retain the same production function definitions and public visibility. Image-rendering presentation attributes accept the same supported values as the CSS path. Morphology preserves the input for missing, both-zero, negative, or invalid radii and retains one-axis filtering when only the other radius is zero; transformed nonfinite radii are rejected."
   },
   "files": [
     {
@@ -75,9 +75,9 @@
       "source": "crates/usvg/src/parser/filter.rs",
       "destination": "usvg/parser/filter.rs",
       "sourceSha256": "b3c9485b5abf41ce9d7a7a711cff27a307260b4496bc0518ef43d37f9d73a74b",
-      "transplantedSha256": "865c750f0b21796ba3b07811af45316fde433cdcc202e16a3995eb1d96bf51ee",
+      "transplantedSha256": "57d1c15e3421d3025d11d492d96184d0ea909d3371f3a64bd63b8efbec4e3a36",
       "sourceBytes": 42587,
-      "transplantedBytes": 42759,
+      "transplantedBytes": 42115,
       "adaptations": {
         "cratePaths": 3,
         "enabledFeaturePredicates": {},
@@ -200,9 +200,9 @@
       "source": "crates/usvg/src/parser/svgtree/mod.rs",
       "destination": "usvg/parser/svgtree/mod.rs",
       "sourceSha256": "2e0c2d815903e2a2310229cb18796b294a5ee139c474d041c4e07dacf20ecf70",
-      "transplantedSha256": "43498c4b4ce86c2c31cf28f7a502d9afc0a885903ee111fe646a3409eebe6cd3",
+      "transplantedSha256": "ac77e3285bf5307587985d614325c81900025a5e36231843ceb3ca3fd87bc2b3",
       "sourceBytes": 32110,
-      "transplantedBytes": 32241,
+      "transplantedBytes": 33616,
       "adaptations": {
         "cratePaths": 1,
         "enabledFeaturePredicates": {},
@@ -226,9 +226,9 @@
       "source": "crates/usvg/src/parser/svgtree/parse.rs",
       "destination": "usvg/parser/svgtree/parse.rs",
       "sourceSha256": "b0855f6fa14823201addb09252ac6112b186b0f2af568052dfd6ee55dc56acf6",
-      "transplantedSha256": "2eabf66bea3aea0e6139af8e7d0af6d8601087cd129fc5605049f6cc7e5ab1c9",
+      "transplantedSha256": "a8f164de4ec26d4ddc5a36945eb3fe9b9c7f3bb4fb75edea2e882adc3c058b1c",
       "sourceBytes": 26763,
-      "transplantedBytes": 26612,
+      "transplantedBytes": 26394,
       "adaptations": {
         "cratePaths": 0,
         "enabledFeaturePredicates": {},
@@ -371,9 +371,9 @@
       "source": "crates/usvg/src/tree/filter.rs",
       "destination": "usvg/tree/filter.rs",
       "sourceSha256": "99ae02862d62de80d800c5bed3b6d2cc5207f32c4bee61237482e87a1c3fe41b",
-      "transplantedSha256": "f80120f60dbf84cb1f494d83ab1a1b2956313719ed7fd2fef3e0e5e37f3cbb4d",
+      "transplantedSha256": "e7f84e2fe10bc0ec816c40d9b1fc74c210baaf6967d9323fac6a38b302532afa",
       "sourceBytes": 24297,
-      "transplantedBytes": 24315,
+      "transplantedBytes": 24339,
       "adaptations": {
         "cratePaths": 1,
         "enabledFeaturePredicates": {},
@@ -557,9 +557,9 @@
       "source": "crates/resvg/src/filter/mod.rs",
       "destination": "resvg/filter/mod.rs",
       "sourceSha256": "478810f477d240503d51881920dba43958d32aab69a8b293b074f132cecd8bf9",
-      "transplantedSha256": "d1537fde094a17ccae97c59ee22716c505f8e66939b4f980a9d1a789a837bb8f",
+      "transplantedSha256": "6b2bf18f59b93aa5b2acf46438f6dd30391cbf97ca97b5b238f29eba293540b8",
       "sourceBytes": 36494,
-      "transplantedBytes": 38396,
+      "transplantedBytes": 38412,
       "adaptations": {
         "cratePaths": 4,
         "enabledFeaturePredicates": {},

@@ -925,7 +925,7 @@ impl Morphology {
 
     /// A filter radius along the X-axis.
     ///
-    /// A value of zero disables the effect of the given filter primitive.
+    /// Zero leaves this axis unchanged; zero on both axes leaves the input unchanged.
     ///
     /// `radius` in the SVG.
     pub fn radius_x(&self) -> PositiveF32 {
@@ -934,7 +934,7 @@ impl Morphology {
 
     /// A filter radius along the Y-axis.
     ///
-    /// A value of zero disables the effect of the given filter primitive.
+    /// Zero leaves this axis unchanged; zero on both axes leaves the input unchanged.
     ///
     /// `radius` in the SVG.
     pub fn radius_y(&self) -> PositiveF32 {

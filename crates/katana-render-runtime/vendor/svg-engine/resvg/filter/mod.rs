@@ -950,18 +950,17 @@ fn apply_morphology(
     ts: crate::svg_engine::usvg::Transform,
     input: Image,
 ) -> Result<Image, Error> {
-    let mut pixmap = input.into_color_space(cs)?.take()?;
-
     let (rx, ry) = match scale_coordinates(fe.radius_x().get(), fe.radius_y().get(), ts) {
         Some(v) => v,
-        None => return Ok(Image::from_image(pixmap, cs)),
+        None => return Ok(input),
     };
-
-    if !(rx > 0.0 && ry > 0.0) {
-        pixmap.clear();
-        return Ok(Image::from_image(pixmap, cs));
+    if !rx.is_finite() || !ry.is_finite() {
+        return Err(Error::InvalidRegion);
     }
-
+    if rx == 0.0 && ry == 0.0 {
+        return Ok(input);
+    }
+    let mut pixmap = input.into_color_space(cs)?.take()?;
     morphology::apply(fe.operator(), rx, ry, pixmap.as_image_ref_mut());
 
     Ok(Image::from_image(pixmap, cs))

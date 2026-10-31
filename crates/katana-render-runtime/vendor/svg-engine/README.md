@@ -62,6 +62,13 @@ resvgの `identity_op` / `too_many_arguments` / `upper_case_acronyms` / `wrong_s
 Diffuse/Specular lighting primitiveの入力参照もwriterで保持し、`SourceAlpha`と名前付き参照の
 parse-write-parse後のモデル・描画が同じであることをKRR側回帰で確認する。
 
+`xlink:href` の参照反復は、起点・直前ノードだけでなく既訪問ノードへの循環で停止する。
+短い参照はインライン履歴で追跡し、履歴容量を超える場合だけ標準 `HashSet` へ移行する。
+
+`image-rendering` は、既存CSS経路で扱う値をpresentation属性でも同じように受理する。
+`feMorphology` は未指定・両軸ゼロ・負の半径で入力を維持し、片軸ゼロでは他方の軸だけを処理する。
+独立Chromiumの属性/CSS計算値とフィルター画素比較に基づく修正で、参照画像は変更しない。
+
 ## 更新方法
 
 1. 更新対象の元commitと、KRRで使うfeature集合・依存版を先に確定する。

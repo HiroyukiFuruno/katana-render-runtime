@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const FIXTURE_ROOT: &str = concat!(
+pub(super) const FIXTURE_ROOT: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../tests/fixtures/svg-engine/upstream/resvg/tests"
 );
@@ -64,7 +64,8 @@ fn render_fixture_inventory_matches_upstream_pins() -> Result<(), String> {
     );
     let files = verify_files(&inventory.files)?;
     verify_cases(&inventory.normal_cases, &files)?;
-    verify_cases(&inventory.extra_cases, &files)
+    verify_cases(&inventory.extra_cases, &files)?;
+    super::browser_reference_tests::verify_manifest()
 }
 
 fn read_inventory() -> Result<Inventory, String> {
@@ -148,7 +149,7 @@ fn verify_files(records: &[FileRecord]) -> Result<BTreeSet<String>, String> {
     Ok(files)
 }
 
-fn hex_digest(bytes: &[u8]) -> String {
+pub(super) fn hex_digest(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))

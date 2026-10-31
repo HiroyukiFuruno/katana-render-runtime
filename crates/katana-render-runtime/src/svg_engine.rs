@@ -46,6 +46,10 @@ mod parser_converter_tests;
 mod parser_style_boundary_tests;
 
 #[cfg(test)]
+#[path = "svg_engine_filter_parser_model_tests.rs"]
+mod filter_parser_model_tests;
+
+#[cfg(test)]
 #[path = "svg_engine_use_boundary_coverage_tests.rs"]
 mod use_boundary_coverage_tests;
 

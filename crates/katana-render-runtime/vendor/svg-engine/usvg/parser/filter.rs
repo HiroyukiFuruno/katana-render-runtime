@@ -998,39 +998,21 @@ fn convert_morphology(fe: SvgNode, scale: Size, primitives: &[Primitive]) -> Kin
         _ => MorphologyOperator::Erode,
     };
 
-    let mut radius_x = PositiveF32::new(scale.width()).unwrap();
-    let mut radius_y = PositiveF32::new(scale.height()).unwrap();
-    if let Some(list) = fe.attribute::<Vec<f32>>(AId::Radius) {
-        let mut rx = 0.0;
-        let mut ry = 0.0;
-        if list.len() == 2 {
-            rx = list[0];
-            ry = list[1];
-        } else if list.len() == 1 {
-            rx = list[0];
-            ry = list[0]; // The same as `rx`.
+    let radii = fe.attribute::<Vec<f32>>(AId::Radius).and_then(|list| {
+        let (x, y) = match list.as_slice() {
+            [both] => (*both, *both),
+            [x, y] => (*x, *y),
+            _ => return None,
+        };
+        if x < 0.0 || y < 0.0 {
+            return None;
         }
-
-        if rx.approx_zero_ulps(4) && ry.approx_zero_ulps(4) {
-            rx = 1.0;
-            ry = 1.0;
-        }
-
-        // If only one of the values is zero, reset it to 1.0
-        // This is not specified in the spec, but this is how Chrome and Safari work.
-        if rx.approx_zero_ulps(4) && !ry.approx_zero_ulps(4) {
-            rx = 1.0;
-        }
-        if !rx.approx_zero_ulps(4) && ry.approx_zero_ulps(4) {
-            ry = 1.0;
-        }
-
-        // Both values must be positive.
-        if rx.is_sign_positive() && ry.is_sign_positive() {
-            radius_x = PositiveF32::new(rx * scale.width()).unwrap();
-            radius_y = PositiveF32::new(ry * scale.height()).unwrap();
-        }
-    }
+        Some((
+            PositiveF32::new(x * scale.width())?,
+            PositiveF32::new(y * scale.height())?,
+        ))
+    });
+    let (radius_x, radius_y) = radii.unwrap_or((PositiveF32::ZERO, PositiveF32::ZERO));
 
     Kind::Morphology(Morphology {
         input: resolve_input(fe, AId::In, primitives),
