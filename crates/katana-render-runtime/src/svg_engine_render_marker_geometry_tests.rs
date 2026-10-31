@@ -6,6 +6,12 @@ const MARKER_REFERENCE_Y: f32 = 10.0;
 const MARKER_X_BASIS_STEP: f32 = 1.0;
 const MARKER_FIXTURE_VIEWBOX_WIDTH: f32 = 200.0;
 const MARKER_FIXTURE_VIEWBOX_HEIGHT: f32 = 200.0;
+const CURVE_LINE_MARKER_COUNT: usize = 3;
+const CURVE_LINE_MID_ANCHOR: (f32, f32) = (100.0, 60.0);
+const CUBIC_TO_LINE_INCOMING: (f32, f32) = (0.0, -50.0);
+const CUBIC_TO_LINE_OUTGOING: (f32, f32) = (70.0, 80.0);
+const LINE_TO_CUBIC_INCOMING: (f32, f32) = (70.0, -80.0);
+const LINE_TO_CUBIC_OUTGOING: (f32, f32) = (0.0, 50.0);
 
 #[test]
 fn cubic_auto_markers_follow_independent_tangents() -> Result<(), String> {
@@ -16,6 +22,57 @@ fn cubic_auto_markers_follow_independent_tangents() -> Result<(), String> {
     assert_marker_basis(transforms[1], (100.0, 40.0), (1.0, 0.0));
     assert_marker_basis(transforms[2], (160.0, 160.0), (0.0, 1.0));
     Ok(())
+}
+
+#[test]
+fn cubic_to_line_marker_uses_the_incoming_and_outgoing_tangent_bisector() -> Result<(), String> {
+    assert_curve_line_mid_tangent(
+        "orient=auto-on-M-C-L",
+        point_from_xy(CUBIC_TO_LINE_INCOMING),
+        point_from_xy(CUBIC_TO_LINE_OUTGOING),
+    )
+}
+
+#[test]
+fn line_to_cubic_marker_uses_the_incoming_and_outgoing_tangent_bisector() -> Result<(), String> {
+    assert_curve_line_mid_tangent(
+        "orient=auto-on-M-L-C",
+        point_from_xy(LINE_TO_CUBIC_INCOMING),
+        point_from_xy(LINE_TO_CUBIC_OUTGOING),
+    )
+}
+
+fn assert_curve_line_mid_tangent(
+    fixture_name: &str,
+    incoming: Point,
+    outgoing: Point,
+) -> Result<(), String> {
+    let tree = parse_fixture_at_viewbox_size(fixture_name)?;
+    let transforms = marker_path_transforms(&tree);
+    assert_eq!(transforms.len(), CURVE_LINE_MARKER_COUNT, "{fixture_name}");
+    assert_marker_basis(
+        transforms[1],
+        CURVE_LINE_MID_ANCHOR,
+        unit_vector_bisector(incoming, outgoing),
+    );
+    Ok(())
+}
+
+fn point_from_xy(coordinates: (f32, f32)) -> Point {
+    Point::from_xy(coordinates.0, coordinates.1)
+}
+
+fn unit_vector_bisector(incoming: Point, outgoing: Point) -> (f32, f32) {
+    let incoming = unit_vector(incoming);
+    let outgoing = unit_vector(outgoing);
+    let bisector = Point::from_xy(incoming.x + outgoing.x, incoming.y + outgoing.y);
+    let bisector = unit_vector(bisector);
+    (bisector.x, bisector.y)
+}
+
+fn unit_vector(vector: Point) -> Point {
+    let length = vector.x.hypot(vector.y);
+    Point::from_xy(vector.x / length, vector.y / length)
 }
 
 #[test]
