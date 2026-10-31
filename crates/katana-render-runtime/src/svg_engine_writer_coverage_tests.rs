@@ -192,7 +192,12 @@ pub(super) fn assert_pixmaps_equal(
     );
 }
 
-fn assert_attribute(svg: &str, element: &str, attribute: &str, value: &str) -> Result<(), String> {
+pub(super) fn assert_attribute(
+    svg: &str,
+    element: &str,
+    attribute: &str,
+    value: &str,
+) -> Result<(), String> {
     let document = usvg::roxmltree::Document::parse(svg).map_err(|error| error.to_string())?;
     assert!(
         document

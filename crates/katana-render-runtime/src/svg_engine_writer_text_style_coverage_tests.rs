@@ -1,7 +1,7 @@
 use rstest::rstest;
 
 use super::{
-    ALPHA_CHANNEL, RGBA_CHANNELS, parse_writer_svg, usvg,
+    ALPHA_CHANNEL, RGBA_CHANNELS, first_text, parse_writer_svg, usvg,
     writer_coverage_tests::assert_pixels_equal,
 };
 
@@ -112,14 +112,6 @@ fn assert_serialized_attribute(svg: &str, name: &str, expected: &str) -> Result<
         "writer omitted {name}={expected}"
     );
     Ok(())
-}
-
-fn first_text(group: &usvg::Group) -> Option<&usvg::Text> {
-    group.children().iter().find_map(|node| match node {
-        usvg::Node::Text(text) => Some(text.as_ref()),
-        usvg::Node::Group(group) => first_text(group),
-        _ => None,
-    })
 }
 
 fn assert_text_model(original: &usvg::Tree, parsed: &usvg::Tree) -> Result<(), String> {

@@ -18,6 +18,9 @@ mod writer_property_tests;
 #[path = "svg_engine_writer_coverage_tests.rs"]
 mod writer_coverage_tests;
 
+#[path = "svg_engine_writer_font_metrics_tests.rs"]
+mod writer_font_metrics_tests;
+
 #[path = "svg_engine_writer_corpus_tests.rs"]
 mod writer_corpus_tests;
 
@@ -37,6 +40,14 @@ mod fixture_inventory_tests;
 mod image_roundtrip_tests;
 #[path = "svg_engine_writer_text_style_coverage_tests.rs"]
 mod text_style_coverage_tests;
+
+fn first_text(group: &usvg::Group) -> Option<&usvg::Text> {
+    group.children().iter().find_map(|node| match node {
+        usvg::Node::Text(text) => Some(text.as_ref()),
+        usvg::Node::Group(group) => first_text(group),
+        _ => None,
+    })
+}
 
 const WRITER_FONT_DIRECTORY: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
