@@ -576,3 +576,6 @@ impl<'a> skrifa::color::ColorPainter for GlyphPainter<'a> {
         self.svg.end_element();
     }
 }
+
+#[cfg(test)]
+crate::svg_engine::owned_svg_model_tests!("../../../../src/svg_engine_colr_model_tests.rs");

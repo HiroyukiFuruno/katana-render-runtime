@@ -159,9 +159,9 @@
       "source": "crates/usvg/src/parser/paint_server.rs",
       "destination": "usvg/parser/paint_server.rs",
       "sourceSha256": "d9ff7a1ad27634194bb4e26580f0ba4a59d215c605e0164bf79f6cc5ecd2f602",
-      "transplantedSha256": "dd7b37871dfadfce25a296711226c65347ddf5f5595624a42a5cbc500748d90d",
+      "transplantedSha256": "0f28f21fdb2c8badf975f9d9139c27487bf8daa31115d40dbaf970b3013b4009",
       "sourceBytes": 33432,
-      "transplantedBytes": 33431,
+      "transplantedBytes": 33546,
       "adaptations": {
         "cratePaths": 2,
         "enabledFeaturePredicates": {
@@ -226,9 +226,9 @@
       "source": "crates/usvg/src/parser/svgtree/parse.rs",
       "destination": "usvg/parser/svgtree/parse.rs",
       "sourceSha256": "b0855f6fa14823201addb09252ac6112b186b0f2af568052dfd6ee55dc56acf6",
-      "transplantedSha256": "899606496444bc3e4b4ae972d005cb08da671c3984a8c9caf15112b287e0d75b",
+      "transplantedSha256": "2eabf66bea3aea0e6139af8e7d0af6d8601087cd129fc5605049f6cc7e5ab1c9",
       "sourceBytes": 26763,
-      "transplantedBytes": 26493,
+      "transplantedBytes": 26612,
       "adaptations": {
         "cratePaths": 0,
         "enabledFeaturePredicates": {},
@@ -306,9 +306,9 @@
       "source": "crates/usvg/src/text/colr.rs",
       "destination": "usvg/text/colr.rs",
       "sourceSha256": "51ce8d6ec262cde94276f9748ab256217dfd14d10ec0b4b8447bcf18548beb42",
-      "transplantedSha256": "89ed261b0c59ea137a06dbeadad90893069993064418f00bce7ebc36bb1e96b8",
+      "transplantedSha256": "0cd6e773c5109a2b772b89a2f6e8fab5c1b934a82ee323eb2691c4ba990bee63",
       "sourceBytes": 19989,
-      "transplantedBytes": 20007,
+      "transplantedBytes": 20114,
       "adaptations": {
         "cratePaths": 1,
         "enabledFeaturePredicates": {},

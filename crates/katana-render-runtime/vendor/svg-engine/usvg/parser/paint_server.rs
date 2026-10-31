@@ -1017,6 +1017,9 @@ impl Paint {
     }
 }
 
+#[cfg(test)]
+crate::svg_engine::owned_svg_model_tests!("../../../../src/svg_engine_paint_server_model_tests.rs");
+
 fn push_pattern_transform(root: &mut Group, transform: Transform) {
     // TODO: we should update abs_transform in all descendants as well
     let mut g = std::mem::replace(root, Group::empty());

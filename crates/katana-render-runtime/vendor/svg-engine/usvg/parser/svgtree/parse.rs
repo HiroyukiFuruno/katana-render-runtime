@@ -847,3 +847,6 @@ fn fix_recursive_fe_image(doc: &mut Document) {
         doc.attrs[idx].value = roxmltree::StringStorage::Borrowed("none");
     }
 }
+
+#[cfg(test)]
+crate::svg_engine::owned_svg_model_tests!("../../../../../src/svg_engine_svgtree_parse_model_tests.rs");
