@@ -375,6 +375,14 @@ fn calc_vertex_angle(path: &[Segment], idx: usize) -> f32 {
                 let next = get_subpath_start(path, idx);
                 calc_angle(prev.x, prev.y, p.x, p.y, p.x, p.y, next.x, next.y)
             }
+            /* WHY: 閉じた曲線頂点のmarker-midは曲線終端と閉じ辺の接線を二等分する。 */
+            (Segment::CubicTo(_, p2, p), Segment::Close) => {
+                let prev = get_prev_vertex(path, idx);
+                let next = get_subpath_start(path, idx);
+                calc_curves_angle(
+                    prev.x, prev.y, p2.x, p2.y, p.x, p.y, next.x, next.y, next.x, next.y,
+                )
+            }
             (_, Segment::Close) => {
                 let prev = get_prev_vertex(path, idx);
                 let next = get_subpath_start(path, idx);

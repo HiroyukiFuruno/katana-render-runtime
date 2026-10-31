@@ -1,6 +1,17 @@
 use super::{fixture, upstream_writer_font_database, usvg};
 use tiny_skia::{Point, Transform};
 
+#[path = "svg_engine_render_marker_quadratic_tests.rs"]
+mod quadratic_tests;
+
+#[path = "svg_engine_render_marker_closed_cubic_tests.rs"]
+mod closed_cubic_tests;
+
+#[path = "svg_engine_render_marker_assertions_tests.rs"]
+mod assertions_tests;
+
+const MARKER_DEFINITION: &str = "<defs><marker id='m' refX='10' refY='10' markerWidth='20' markerHeight='20' orient='auto'><path d='M20 10L10 20L0 10Z'/></marker></defs>";
+
 const MARKER_REFERENCE_X: f32 = 10.0;
 const MARKER_REFERENCE_Y: f32 = 10.0;
 const MARKER_X_BASIS_STEP: f32 = 1.0;
@@ -223,15 +234,11 @@ fn closed_marker_end_returns_to_its_subpath_start() -> Result<(), String> {
 }
 
 fn assert_anchor_points(transforms: Vec<Transform>, expected: &[(f32, f32)]) {
-    let mut anchors: Vec<_> = transforms
+    let anchors: Vec<_> = transforms
         .into_iter()
         .map(|transform| map_point(transform, MARKER_REFERENCE_X, MARKER_REFERENCE_Y))
         .collect();
-    assert_eq!(anchors.len(), expected.len());
-    anchors.sort_by(|left, right| left.x.total_cmp(&right.x).then(left.y.total_cmp(&right.y)));
-    for (actual, expected) in anchors.iter().zip(expected) {
-        assert_point_near(*actual, Point::from_xy(expected.0, expected.1));
-    }
+    assertions_tests::assert_anchor_points(anchors, expected);
 }
 
 fn marker_path_transforms(tree: &usvg::Tree) -> Vec<Transform> {
@@ -259,23 +266,14 @@ fn assert_marker_basis(transform: Transform, anchor: (f32, f32), direction: (f32
         MARKER_REFERENCE_X + MARKER_X_BASIS_STEP,
         MARKER_REFERENCE_Y,
     );
-    assert_point_near(mapped_anchor, Point::from_xy(anchor.0, anchor.1));
-    assert_point_near(
-        Point::from_xy(mapped_x.x - mapped_anchor.x, mapped_x.y - mapped_anchor.y),
-        Point::from_xy(direction.0, direction.1),
-    );
+    let mapped_basis = Point::from_xy(mapped_x.x - mapped_anchor.x, mapped_x.y - mapped_anchor.y);
+    assertions_tests::assert_marker_basis(mapped_anchor, mapped_basis, anchor, direction);
 }
 
 fn map_point(transform: Transform, x: f32, y: f32) -> Point {
     let mut point = Point::from_xy(x, y);
     transform.map_point(&mut point);
     point
-}
-
-fn assert_point_near(actual: Point, expected: Point) {
-    const COORDINATE_EPSILON: f32 = 0.001;
-    assert!((actual.x - expected.x).abs() <= COORDINATE_EPSILON);
-    assert!((actual.y - expected.y).abs() <= COORDINATE_EPSILON);
 }
 
 fn parse_fixture_at_viewbox_size(name: &str) -> Result<usvg::Tree, String> {

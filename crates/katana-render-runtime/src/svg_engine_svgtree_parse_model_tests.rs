@@ -3,6 +3,9 @@ use super::{AId, Document};
 #[path = "svg_engine_svgtree_parse_regression_tests.rs"]
 mod regression_tests;
 
+#[path = "svg_engine_svgtree_text_attribute_tests.rs"]
+mod text_attribute_tests;
+
 fn parse_document<'a>(source: &'a str, injected: Option<&'a str>) -> Result<Document<'a>, String> {
     let xml = roxmltree::Document::parse(source).map_err(|error| error.to_string())?;
     Document::parse_tree(&xml, injected).map_err(|error| error.to_string())

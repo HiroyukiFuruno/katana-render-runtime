@@ -2,6 +2,15 @@ use super::{resvg, usvg};
 use rstest::rstest;
 use tiny_skia::{Pixmap, Transform};
 
+#[path = "svg_engine_filter_input_model_tests.rs"]
+mod input_model_tests;
+
+#[path = "svg_engine_filter_convolve_model_tests.rs"]
+mod convolve_model_tests;
+
+#[path = "svg_engine_filter_parser_boundary_tests.rs"]
+mod parser_boundary_tests;
+
 const SIDE: u32 = 16;
 const IDENTITY: &str = "<feComponentTransfer/>";
 const OVERFLOW_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">

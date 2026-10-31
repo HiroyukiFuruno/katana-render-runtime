@@ -2,6 +2,13 @@
 
 ## 最新の再開地点（2026-11-01）
 
+- [/] R6191全static実0、R6195は全5,170件成功・29skip（317.847秒）、collection/report0、R6194/R6196 source一致。R6197 policyは83,099/84,389=98.47136475133014%・未到達1,290で実1。前回比分母23行増・未到達23行減、coverage100%は未達。排他copyは `tmp/quality/resumed-owner-r3509/current-root-coverage-report-r6199/`、公式位置indexは `official-missing-index-r6200.json`（911位置、summaryとの差379を補完しない）。realm7・marker5・text5・filter4・consumer2行の未到達減を実測した。materializerの追加matrixは未到達削減として数えない。
+- [/] 閉じたcubicのmarker-mid接線を修正。最初の新fixtureには参照点不整合があり、R6148/R6157を方向不正の赤証拠には使わない。参照点を共通化したR6177でanchor確認後のbasis不一致を実再現し、修正後R6187で同case成功。独立Chromium R6151はautoと仕様由来固定角のPNG完全一致、R6195で既存画像も含む全体成功。原PNG/原SVGの上書き・比較許容値変更なし。制御点が終点へ一致する追加P2は読み取り設計段階で、未修正・未検証として残す。
+- [/] 限定runの固有profrawだけをLLVM標準profdata/covへ渡す診断をR6179/R6181で実施し、公式未到達8行の実到達を確認。全体coverage・cache再利用・リリース合格へ格上げしない。Darwinのraw profileにbinaryIDはなく、binaryはpost-run観測という制限も記録する。小さなtest-only試行で全rootを反復する代わりに到達診断を使い、最終正式fullを維持する。`--no-report`は既にcleanを抑制するため、不要な`--no-clean`追加はしない。
+
+- [/] R6126全static実0、R6130は全5,156件成功・29skip（302.178秒）、collection/report0、R6129/R6131 source一致。R6132 policyは83,053/84,366=98.44368584500866%・未到達1,313で実1。前回比未到達14行減だが、承認済みの純粋テスト判定分離により分母も141行減っている。割合上昇を実装の到達改善だけと報告しない。原report/詳細/公式未到達一覧は `tmp/quality/resumed-owner-r3509/current-root-coverage-report-r6134/`、位置indexは `official-missing-index-r6135.json`（934位置、summaryとの差379は補完しない）。
+- [/] 不正な0引数のScriptOriginを静的解析する際の範囲外アクセスをR6095で実再現し、引数数の確認を先へ移す最小修正後に成功。新matrixと移動ケースを含む関連40件はR6113で全成功、R6130全体にも含む。追加SVG matrixの多くは既存到達分岐の再検証となっており、次はzero-count segmentではなく公式未到達行との実対応を確認して入力を選ぶ。除外regex・coverage100%・描画/性能/公開条件は変更しない。
+
 - [/] R6067の全staticは実終了0。R6071の全5,126件はすべて成功・29skip（302.444秒）、collection/reportとも0、R6070/R6072 source一致。R6073 coverage policyは83,180/84,507=98.42971588152461%・未到達1,327で実1。R6006から分母不変・未到達63行減、100%は未達。R6074で公式詳細JSONの取得にも成功し、原reportと詳細の排他copyを `tmp/quality/resumed-owner-r3509/current-root-coverage-report-r6075/` へ保持した。関連34件の限定成功R6063を全体合格に代用していない。
 - [/] validator境界8fileを9c24542、SVG修正・独立参照33fileを0583e4aへ通常hook付きでcommit済み。追加の画像入力・paint・初期継承値・textPath/tref・Rust AST/実path回帰はR6071の全体測定に含まれる。描画117/HTML84・性能・安全cache実chain・最終review/3OS CI/公開は引き続き未完了。
 
