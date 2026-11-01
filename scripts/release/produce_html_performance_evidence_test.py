@@ -22,7 +22,7 @@ from typing import BinaryIO, cast
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from collections.abc import Callable, Mapping, Sequence
 from types import FrameType
 
@@ -937,6 +937,130 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
             loaded, _, completed = producer.load_closed_batch(batch, self.root)
         self.assertEqual(loaded["conditionIds"], ["case-a"])
         self.assertEqual(completed, [])
+
+    def test_full_catalog_verifies_once_before_sealing(self) -> None:
+        events: list[str] = []
+
+        def seal() -> typed_producer.FilePin:
+            events.append("seal")
+            return producer.write_exclusive(
+                self.root / "formal-seal-fixture-marker.json", {"fixtureOnly": True},
+            )
+
+        with patch.object(gate, "verify", side_effect=lambda *_args, **_kwargs: events.append("verify")) as verify, \
+             patch.object(gate, "validate_attempt") as validate:
+            producer._verify_and_seal_catalog_batch(
+                self.root / "bundle", self.root, (), ("case-a",),
+                formal_ready=True, diagnostic=False, batch_failure=None,
+                seal=seal, summary={}, git_query=None,
+            )
+
+        self.assertEqual(events, ["verify", "seal"])
+        verify.assert_called_once_with(self.root / "bundle", self.root, git_query=None)
+        validate.assert_not_called()
+
+    def test_formal_verifier_failure_does_not_seal(self) -> None:
+        failure = ValueError("formal verification failed")
+        seal = Mock()
+        with patch.object(gate, "verify", side_effect=failure) as verify, \
+             patch.object(gate, "validate_attempt") as validate:
+            with self.assertRaises(ValueError) as raised:
+                producer._verify_and_seal_catalog_batch(
+                    self.root / "bundle", self.root, (), ("case-a",),
+                    formal_ready=True, diagnostic=False, batch_failure=None,
+                    seal=seal, summary={}, git_query=None,
+                )
+        self.assertIs(raised.exception, failure)
+        verify.assert_called_once()
+        validate.assert_not_called()
+        seal.assert_not_called()
+
+    def test_catalog_diagnostic_verifies_unaccepted_result_before_sealing(self) -> None:
+        events: list[str] = []
+        unaccepted: gate.JsonObject = {"htmlStage90": {"acceptance": False}}
+
+        def verify(*_args: object, **_kwargs: object) -> gate.JsonObject:
+            events.append("diagnostic")
+            return unaccepted
+
+        def seal() -> typed_producer.FilePin:
+            events.append("seal")
+            html_stage90 = gate._object(unaccepted["htmlStage90"], "HTML84 diagnostic result")
+            self.assertIs(html_stage90["acceptance"], False)
+            return producer.write_exclusive(
+                self.root / "diagnostic-seal-fixture-marker.json", {"fixtureOnly": True},
+            )
+
+        with patch.object(gate, "_verify_catalog_diagnostic", side_effect=verify) as diagnostic_verify, \
+             patch.object(gate, "verify") as formal_verify, \
+             patch.object(gate, "validate_attempt") as validate:
+            producer._verify_and_seal_catalog_batch(
+                self.root / "bundle", self.root, (), ("case-a",),
+                formal_ready=True, diagnostic=True, batch_failure=None,
+                seal=seal, summary={"formalAccepted": False}, git_query=None,
+            )
+
+        self.assertEqual(events, ["diagnostic", "seal"])
+        diagnostic_verify.assert_called_once_with(
+            self.root / "bundle", self.root, git_query=None,
+        )
+        formal_verify.assert_not_called()
+        validate.assert_not_called()
+
+    def test_partial_catalog_failure_validates_complete_prefix_then_seals_and_raises(self) -> None:
+        batch, bundle_path = self.create_batch(
+            condition_ids=("case-a", "case-b"), complete_ids=(),
+            policy_accepted=False, seal_receipt=False,
+        )
+        bundle = gate.Bundle(bundle_path)
+        attempts = cast(list[dict[str, typed_producer.FilePin]],
+                        gate._objects(bundle.manifest.get("attempts"), "fixture attempts"))
+        pins: dict[str, typed_producer.FilePin] = {
+            name: {"path": str((batch / name).resolve()), "sha256": gate.sha256(batch / name)}
+            for name in ("source-before.json", "source-end.json",
+                         "context-before.json", "context-end.json")
+        }
+        events: list[str] = []
+
+        def seal() -> typed_producer.FilePin:
+            events.append("seal")
+            return producer.write_batch_receipt(
+                batch, head="a" * 40, source_before=pins["source-before.json"],
+                source_end=pins["source-end.json"], context_before=pins["context-before.json"],
+                context_end=pins["context-end.json"], build_artifacts={}, build_pins=[],
+                condition_ids=("case-a", "case-b"), complete_condition_ids=("case-a",),
+                policy_accepted=False, attempts=attempts, bundle=bundle_path,
+            )
+
+        failure = RuntimeError("worker failed after a completed prefix")
+
+        def validate_builds(*_args: object, **_kwargs: object) -> Mapping[str, gate.JsonObject]:
+            events.append("build")
+            return {}
+
+        def validate_attempt(*_args: object, **_kwargs: object) -> None:
+            events.append("attempt")
+
+        with patch.object(gate, "validate_expected_builds",
+                          side_effect=validate_builds) as builds, \
+             patch.object(gate, "validate_attempt",
+                          side_effect=validate_attempt) as validate, \
+             patch("builtins.print"):
+            with self.assertRaises(RuntimeError) as raised:
+                producer._verify_and_seal_catalog_batch(
+                    bundle_path, self.root, attempts, ("case-a",),
+                    formal_ready=False, diagnostic=False, batch_failure=failure,
+                    seal=seal, summary={"formalAccepted": False}, git_query=None,
+                )
+
+        self.assertIs(raised.exception, failure)
+        self.assertEqual(events, ["build", "attempt", "seal"])
+        builds.assert_called_once()
+        validate.assert_called_once()
+        receipt = gate.read_json(batch / "batch-receipt.json")
+        self.assertEqual(receipt["conditionIds"], ["case-a", "case-b"])
+        self.assertEqual(receipt["completeConditionIds"], ["case-a"])
+        self.assertIs(receipt["formalAccepted"], False)
 
     def test_closed_batch_reader_reuses_only_complete_attempts(self) -> None:
         batch, _ = self.create_batch(complete_ids=("case-a",))

@@ -815,6 +815,44 @@ def _seal_failed_batch(
     raise failure
 
 
+def _verify_and_seal_catalog_batch(
+    bundle: Path,
+    root: Path,
+    attempts: Sequence[Mapping[str, FilePin]],
+    complete_ids: Sequence[str],
+    *,
+    formal_ready: bool,
+    diagnostic: bool,
+    batch_failure: BaseException | None,
+    seal: Callable[[], FilePin],
+    summary: gate.JsonObject,
+    git_query: gate.GitQuery | None,
+) -> None:
+    if batch_failure is None and formal_ready:
+        verifier = gate._verify_catalog_diagnostic if diagnostic else gate.verify
+        verifier(bundle, root, git_query=git_query)
+        seal()
+        return
+
+    current_bundle = gate.Bundle(bundle)
+    validated_builds: Mapping[str, gate.JsonObject] | None = None
+    if attempts and not diagnostic:
+        first_expected = current_bundle.json(attempts[0]["expected"])
+        validated_builds = gate.validate_expected_builds(
+            current_bundle, root, first_expected, git_query=git_query,
+        )
+    complete = set(complete_ids)
+    for attempt in attempts:
+        if _attempt_condition_id(current_bundle, attempt) in complete:
+            gate.validate_attempt(
+                current_bundle, root, dict(attempt), git_query=git_query,
+                validated_builds=validated_builds,
+            )
+    if batch_failure is not None:
+        _seal_failed_batch(batch_failure, seal, summary)
+    seal()
+
+
 def _completed_batch_ids(
     resumed_ids: Iterable[str], planned_rows: Sequence[gate.JsonObject],
     completed_rows: Sequence[gate.JsonObject],
@@ -2965,19 +3003,6 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         "batchFailure": type(batch_failure).__name__ if batch_failure else None,
     }
     if catalog_manifest_path is not None:
-        validated_builds: Mapping[str, gate.JsonObject] | None = None
-        if transport_attempts and not _allow_catalog_diagnostic:
-            first_expected = current_bundle.json(transport_attempts[0]["expected"])
-            validated_builds = gate.validate_expected_builds(
-                current_bundle, root, first_expected, git_query=git_query,
-            )
-        for attempt in transport_attempts:
-            if _attempt_condition_id(current_bundle, attempt) in set(complete_ids):
-                gate.validate_attempt(
-                    current_bundle, root,
-                    {key: value for key, value in attempt.items()}, git_query=git_query,
-                    validated_builds=validated_builds,
-                )
         def seal_batch_receipt() -> FilePin:
             return write_batch_receipt(
                 output, head=head, source_before=build_inputs.source_before,
@@ -2987,15 +3012,19 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 policy_accepted=policy_accepted,
                 attempts=transport_attempts, bundle=bundle,
             )
-        if batch_failure is not None:
-            _seal_failed_batch(batch_failure, seal_batch_receipt, summary)
-        seal_batch_receipt()
+        _verify_and_seal_catalog_batch(
+            bundle, root, transport_attempts, complete_ids,
+            formal_ready=_batch_formal_acceptance(
+                attempt_ids, complete_ids, policy_accepted,
+            ),
+            diagnostic=_allow_catalog_diagnostic,
+            batch_failure=batch_failure,
+            seal=seal_batch_receipt,
+            summary=summary,
+            git_query=git_query,
+        )
     if catalog_manifest_path is None:
         gate._verify_legacy_diagnostic(bundle, root, git_query=git_query)
-    elif _batch_formal_acceptance(attempt_ids, complete_ids, policy_accepted) and _allow_catalog_diagnostic:
-        gate._verify_catalog_diagnostic(bundle, root, git_query=git_query)
-    elif _batch_formal_acceptance(attempt_ids, complete_ids, policy_accepted):
-        gate.verify(bundle, root, git_query=git_query)
     print(json.dumps(summary))
     if batch_failure is not None:
         raise batch_failure
