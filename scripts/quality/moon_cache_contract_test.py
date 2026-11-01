@@ -391,6 +391,8 @@ def production_task_input_binding(
     assert isinstance(foundation_deps, list)
     assert "mathjax-import-pin-preflight" in foundation_deps
     assert "html-performance-lock-pin-check" in foundation_deps
+    verify_run_count = 0
+    legacy_run_count = 0
     for index, leaf in enumerate(RUNTIME_UNUSED_LEAF_IDS):
         producer = moon_json_object(declared.get(f"{leaf}-producer"))
         previous = (
@@ -399,12 +401,10 @@ def production_task_input_binding(
             else f"{RUNTIME_UNUSED_LEAF_IDS[index - 1]}-producer"
         )
         assert producer.get("deps") == [previous]
-        assert producer.get("command") == [
-            "just",
-            "runtime-unused-script-verify-run" if leaf == "runtime-unused-tool-fingerprint"
-            else "runtime-unused-script-producer-run",
-            leaf,
-        ]
+        command = producer.get("command")
+        assert command == ["just", "runtime-unused-script-verify-run", leaf]
+        verify_run_count += int(command == ["just", "runtime-unused-script-verify-run", leaf])
+        legacy_run_count += int(command == ["just", "runtime-unused-script-producer-run", leaf])
         assert producer.get("outputs") == [
             f"tmp/quality/runtime-script-results/{leaf}.json",
             f"tmp/quality/runtime-script-results/{leaf}-current-group-001.xml",
@@ -417,6 +417,8 @@ def production_task_input_binding(
                 "hash": "stdout",
             }
         ]
+    assert verify_run_count == len(RUNTIME_UNUSED_LEAF_IDS) == 7
+    assert legacy_run_count == 0
     assert runtime_aggregate.get("deps") == [
         "runtime-asset-script-other",
         "runtime-unused-script-regression",

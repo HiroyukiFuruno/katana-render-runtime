@@ -16,19 +16,19 @@ LIMITATIONS = [
 
 
 # 実 owner のレビュー済み AST。更新には owner のレビューと実回帰が必要。
-OWNER_AST_SHA256 = "ae85645fbca847bdfd35a57dc7f8e20b6b98a5f4e57c5195338cbe583ddf2451"
+OWNER_AST_SHA256 = "c047d6b9c8454566d88c1deb51fbaee1179fcdcc76fcf57a87c600fbbc0d3e18"
 SCHEDULER_LEAVES = {
     "biome": "biome-run",
     "runtime-asset-script-test": "runtime-asset-script-aggregate-run",
     "runtime-asset-script-other": "runtime-asset-script-other-run",
     "runtime-asset-script-preflight": "runtime-asset-script-preflight-run",
-    "runtime-unused-fragment-loader-producer": "runtime-unused-script-producer-run",
-    "runtime-unused-bundle-definitions-producer": "runtime-unused-script-producer-run",
-    "runtime-unused-check-producer": "runtime-unused-script-producer-run",
+    "runtime-unused-fragment-loader-producer": "runtime-unused-script-verify-run",
+    "runtime-unused-bundle-definitions-producer": "runtime-unused-script-verify-run",
+    "runtime-unused-check-producer": "runtime-unused-script-verify-run",
     "runtime-unused-tool-fingerprint-producer": "runtime-unused-script-verify-run",
-    "runtime-unused-mathjax-producer": "runtime-unused-script-producer-run",
-    "runtime-unused-native-width-producer": "runtime-unused-script-producer-run",
-    "runtime-unused-rust-classic-producer": "runtime-unused-script-producer-run",
+    "runtime-unused-mathjax-producer": "runtime-unused-script-verify-run",
+    "runtime-unused-native-width-producer": "runtime-unused-script-verify-run",
+    "runtime-unused-rust-classic-producer": "runtime-unused-script-verify-run",
     "runtime-unused-script-regression": "runtime-unused-script-final-verify-run",
 }
 

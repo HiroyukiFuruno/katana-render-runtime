@@ -197,7 +197,7 @@ tasks:
       cache: false
 
   runtime-unused-fragment-loader-producer:
-    command: ['just', 'runtime-unused-script-producer-run', 'runtime-unused-fragment-loader']
+    command: ['just', 'runtime-unused-script-verify-run', 'runtime-unused-fragment-loader']
     deps: ['runtime-classic-generation-evidence']
     inputs: *quality-inputs
     outputs:
@@ -211,7 +211,7 @@ tasks:
         hash: stdout
 
   runtime-unused-bundle-definitions-producer:
-    command: ['just', 'runtime-unused-script-producer-run', 'runtime-unused-bundle-definitions']
+    command: ['just', 'runtime-unused-script-verify-run', 'runtime-unused-bundle-definitions']
     deps: ['runtime-unused-fragment-loader-producer']
     inputs: *quality-inputs
     outputs:
@@ -225,7 +225,7 @@ tasks:
         hash: stdout
 
   runtime-unused-check-producer:
-    command: ['just', 'runtime-unused-script-producer-run', 'runtime-unused-check']
+    command: ['just', 'runtime-unused-script-verify-run', 'runtime-unused-check']
     deps: ['runtime-unused-bundle-definitions-producer']
     inputs: *quality-inputs
     outputs:
@@ -253,7 +253,7 @@ tasks:
         hash: stdout
 
   runtime-unused-mathjax-producer:
-    command: ['just', 'runtime-unused-script-producer-run', 'runtime-unused-mathjax']
+    command: ['just', 'runtime-unused-script-verify-run', 'runtime-unused-mathjax']
     deps: ['runtime-unused-tool-fingerprint-producer']
     inputs: *quality-inputs
     outputs:
@@ -267,7 +267,7 @@ tasks:
         hash: stdout
 
   runtime-unused-native-width-producer:
-    command: ['just', 'runtime-unused-script-producer-run', 'runtime-unused-native-width']
+    command: ['just', 'runtime-unused-script-verify-run', 'runtime-unused-native-width']
     deps: ['runtime-unused-mathjax-producer']
     inputs: *quality-inputs
     outputs:
@@ -281,7 +281,7 @@ tasks:
         hash: stdout
 
   runtime-unused-rust-classic-producer:
-    command: ['just', 'runtime-unused-script-producer-run', 'runtime-unused-rust-classic']
+    command: ['just', 'runtime-unused-script-verify-run', 'runtime-unused-rust-classic']
     deps: ['runtime-unused-native-width-producer']
     inputs: *quality-inputs
     outputs:

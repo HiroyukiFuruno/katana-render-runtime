@@ -216,14 +216,11 @@ class MoonOwnerAstContractTests(unittest.TestCase):
             tasks["runtime-unused-fragment-loader-producer"]["deps"],
             ["runtime-classic-generation-evidence"],
         )
-        self.assertEqual(
-            tasks["runtime-unused-tool-fingerprint-producer"]["leaf"],
-            "runtime-unused-script-verify-run",
-        )
         for leaf in (
             "runtime-unused-fragment-loader",
             "runtime-unused-bundle-definitions",
             "runtime-unused-check",
+            "runtime-unused-tool-fingerprint",
             "runtime-unused-mathjax",
             "runtime-unused-native-width",
             "runtime-unused-rust-classic",
@@ -231,7 +228,7 @@ class MoonOwnerAstContractTests(unittest.TestCase):
             with self.subTest(leaf=leaf):
                 self.assertEqual(
                     tasks[f"{leaf}-producer"]["leaf"],
-                    "runtime-unused-script-producer-run",
+                    "runtime-unused-script-verify-run",
                 )
         self.assertEqual(
             tasks["runtime-asset-script-other"]["deps"],
@@ -250,16 +247,12 @@ class MoonOwnerAstContractTests(unittest.TestCase):
         self.assertEqual(tasks["capacity-admission"]["deps"], ["source-static-foundation"])
         self.assertEqual(tasks["unit-test"]["leaf"], "unit-test")
 
-    def test_verify_runner_is_pinned_to_its_leaf(self) -> None:
-        original = (
-            '"runtime-unused-script-verify-run" if leaf == '
-            '"runtime-unused-tool-fingerprint"'
-        )
+    def test_verify_runner_is_pinned_to_all_leaves(self) -> None:
+        original = 'assert command == ["just", "runtime-unused-script-verify-run", leaf]'
         self.assertEqual(self.source.count(original), 1)
         changed = self.source.replace(
             original,
-            '"runtime-unused-script-producer-run" if leaf == '
-            '"runtime-unused-tool-fingerprint"',
+            'assert command == ["just", "runtime-unused-script-producer-run", leaf]',
             1,
         )
         self.assertIs(self.inspect(changed)["valid"], False)

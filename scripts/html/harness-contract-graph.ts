@@ -3900,15 +3900,13 @@ export const RUNTIME_UNUSED_LEAF_IDS = [
   "runtime-unused-native-width",
   "runtime-unused-rust-classic",
 ] as const;
-const RUNTIME_UNUSED_VERIFY_LEAF_ID: (typeof RUNTIME_UNUSED_LEAF_IDS)[number] =
-  "runtime-unused-tool-fingerprint";
-export const RUNTIME_UNUSED_PRODUCER_RUN_RECIPE = "runtime-unused-script-producer-run";
 export const RUNTIME_UNUSED_VERIFY_RUN_RECIPE = "runtime-unused-script-verify-run";
+export const RUNTIME_UNUSED_PRODUCER_RUN_RECIPE = "runtime-unused-script-producer-run";
 
 export function runtimeUnusedLeafRunRecipe(id: string): string {
-  return id === RUNTIME_UNUSED_VERIFY_LEAF_ID
-    ? RUNTIME_UNUSED_VERIFY_RUN_RECIPE
-    : RUNTIME_UNUSED_PRODUCER_RUN_RECIPE;
+  if (!(RUNTIME_UNUSED_LEAF_IDS as readonly string[]).includes(id))
+    throw new Error(`unknown runtime unused producer profile ${id}`);
+  return RUNTIME_UNUSED_VERIFY_RUN_RECIPE;
 }
 
 export const RUNTIME_UNUSED_FINAL_VERIFY_COMMAND =

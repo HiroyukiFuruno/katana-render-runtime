@@ -3839,11 +3839,7 @@ test.each(RUNTIME_UNUSED_LEAF_IDS)(
     changeMoon(snapshot, (tasks) => {
       const task = tasks[`${id}-producer`];
       if (!task) throw new Error(`runtime unused task missing: ${id}`);
-      const wrongRecipe =
-        id === "runtime-unused-tool-fingerprint"
-          ? "runtime-unused-script-producer-run"
-          : "runtime-unused-script-verify-run";
-      task.command = ["just", wrongRecipe, id];
+      task.command = ["just", "runtime-unused-script-producer-run", id];
     });
     expect(checkHarnessContract(snapshot).length).toBeGreaterThan(0);
   },
