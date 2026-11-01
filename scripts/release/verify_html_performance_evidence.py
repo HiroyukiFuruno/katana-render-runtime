@@ -341,6 +341,31 @@ def _add_provenance_ref(refs: dict[str, JsonObject], path: str, checksum: str) -
     refs[path] = {"path": path, "sha256": checksum}
 
 
+def validate_context_input_refs(
+    before_context: JsonObject, expected: JsonObject, snapshot: JsonObject,
+    capture: JsonObject | None, links: list[JsonObject], provenance: list[JsonObject],
+) -> dict[str, JsonObject]:
+    context_rows = _objects(before_context["inputs"], "context inputs")
+    context_inputs = {_text(row["path"], "context input path"): row for row in context_rows}
+    require(len(context_inputs) == len(context_rows), "duplicate context input")
+    refs = [_object(expected["operationPlanRef"], "operation reference"),
+            _object(expected["domStateRef"], "DOM reference"), snapshot]
+    if capture is not None:
+        for key in ("operationEvidenceRef", "catalogManifestRef", "catalogPlanRef",
+                    "catalogCaptureValidationRef", "catalogBinaryProofRef", "catalogBuildReportRef",
+                    "catalogCaptureBinaryRef", "catalogCurrentBuildReportRef", "chromeCaptureRef",
+                    "chromeReceiptRef"):
+            refs.append(_object(expected[key], key))
+        refs.extend([capture, *links, *provenance])
+    for ref in refs:
+        path = _text(ref["path"], "input reference path")
+        require(path in context_inputs, "measurement input context is missing")
+        item = context_inputs[path]
+        require(item["exists"] is True and item["sha256"] == ref["sha256"],
+                "measurement input context differs")
+    return context_inputs
+
+
 def _integer(value: object, label: str) -> int:
     if type(value) is not int:
         raise ValueError(f"{label} must be an integer")
@@ -1939,6 +1964,7 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
     dom = bundle.json(expected["domStateRef"])
     operation_ref = _object(expected["operationPlanRef"], "operation reference")
     dom_ref = _object(expected["domStateRef"], "DOM reference")
+    link_capture_refs: list[JsonObject] = []
     require(operation_ref["sha256"] == expected["operation_plan_sha256"], "operation plan pin differs")
     if catalog_expected is None:
         require(dom_ref["sha256"] == expected["expected_dom_state_sha256"], "DOM pin differs")
@@ -1992,7 +2018,6 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
         digest(capture_sha)
         capture_ref: JsonObject = {"path": capture_path, "sha256": capture_sha}
         bundle.file(capture_ref)
-        link_capture_refs: list[JsonObject] = []
         if catalog.get("operation_kind") == "navigation-all-pointer-clicks":
             links = _objects(operation_evidence.get("links"), "raw TOC links")
             for link in links:
@@ -2010,29 +2035,10 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
                      or target.get("selector") == catalog.get("target_selector")),
                 "catalog raw operation target differs")
     provenance_refs = provenance_file_refs(dom) if catalog_expected is not None else []
-    context_rows = _objects(before_context["inputs"], "context inputs")
-    context_inputs = {_text(row["path"], "context input path"): row for row in context_rows}
-    require(len(context_inputs) == len(context_rows), "duplicate context input")
-    input_refs = [operation_ref, dom_ref, _object(source_pair["snapshot"], "snapshot reference")]
-    if catalog_expected is not None:
-        input_refs.extend([
-            _object(expected["operationEvidenceRef"], "operation evidence reference"),
-            _object(expected["catalogManifestRef"], "catalog manifest reference"),
-            _object(expected["catalogPlanRef"], "catalog plan reference"),
-            _object(expected["catalogCaptureValidationRef"], "Chrome validation reference"),
-            _object(expected["catalogBinaryProofRef"], "catalog binary proof reference"),
-            _object(expected["catalogBuildReportRef"], "catalog build report reference"),
-            _object(expected["catalogCaptureBinaryRef"], "catalog frozen binary reference"),
-            _object(expected["catalogCurrentBuildReportRef"], "catalog current build report reference"),
-            _object(expected["chromeCaptureRef"], "Chrome capture reference"),
-            _object(expected["chromeReceiptRef"], "Chrome receipt reference"),
-            capture_ref,
-            *link_capture_refs,
-            *provenance_refs,
-        ])
-    for ref in input_refs:
-        context_input = context_inputs[_text(ref["path"], "input reference path")]
-        require(context_input["exists"] is True and context_input["sha256"] == ref["sha256"], "measurement input context differs")
+    context_inputs = validate_context_input_refs(
+        before_context, expected, _object(source_pair["snapshot"], "snapshot reference"),
+        capture_ref if catalog_expected is not None else None, link_capture_refs, provenance_refs,
+    )
     require(manifest["measurement_executed"] is True and manifest["input_sha256"] == expected["fixture_sha256"] and manifest["environment_sha256"] == provenance["environment_sha256"], "runner context differs")
     if catalog_expected is not None:
         catalog = _object(catalog_expected, "catalog condition")

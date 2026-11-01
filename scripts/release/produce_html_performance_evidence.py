@@ -865,6 +865,27 @@ def _resume_condition_plan(
     return path, bundle.json(pin), pin
 
 
+def _resume_context_pin(
+    bundle: gate.Bundle, receipt: Mapping[str, object], current: FilePin,
+) -> FilePin:
+    contexts = gate._object(receipt.get("contexts"), "resume context refs")
+    previous = bundle.json(contexts["before"])
+    rows = gate._objects(previous.get("inputs"), "resumed context inputs")
+    name = Path(current["path"]).name
+    matches = [row for row in rows if Path(gate._text(row.get("path"),
+               "resumed context input path")).name == name]
+    gate.require(len(matches) == 1, "resume context input is ambiguous or missing")
+    row = matches[0]
+    pin: FilePin = {"path": gate._text(row.get("path"), "resume snapshot path"),
+                    "sha256": gate._text(row.get("sha256"), "resume snapshot SHA")}
+    gate.require(row.get("exists") is True and pin["sha256"] == current["sha256"],
+                 "resume context input differs")
+    _pinned_file(Path(current["path"]), current["sha256"])
+    _pinned_file(Path(pin["path"]), pin["sha256"])
+    bundle.file(pin)
+    return pin
+
+
 def _validate_resume_batch(
     receipt: Mapping[str, object],
     bundle: gate.Bundle,
@@ -2435,6 +2456,10 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         catalog_capture_validation_pin = write(
             output / "catalog-chrome-capture-validation.json", catalog_capture_validation,
         )
+        if resumed_receipt is not None and resumed_bundle is not None:
+            catalog_capture_validation_pin = _resume_context_pin(
+                resumed_bundle, resumed_receipt, catalog_capture_validation_pin,
+            )
     harness = root / gate.HARNESS_ROOT
     lock = harness / "Cargo.lock"
     gate.require(gate.sha256(lock) == gate.LOCK_SHA, "common lock pin differs")
@@ -2458,6 +2483,10 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         extra_capacity_inputs["catalogPlanRef"] = catalog_plan_pin
     build_inputs = write_build_source_inputs(root, output, initial, binding,
         git_query=git_query, extra_capacity_inputs=extra_capacity_inputs)
+    if resumed_receipt is not None and resumed_bundle is not None:
+        build_inputs = build_inputs._replace(snapshot=_resume_context_pin(
+            resumed_bundle, resumed_receipt, build_inputs.snapshot,
+        ))
     approved = write(output / "approved-source.json", initial)
     head = gate._text(initial["head"], "source HEAD")
     inventory_digest = gate._text(initial["inventoryDigest"], "source inventory digest")
@@ -2674,6 +2703,14 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             expected["catalogBuildReportRef"] = catalog_binary_refs.build_report_ref
             expected["catalogCaptureBinaryRef"] = catalog_binary_refs.binary_ref
             expected["catalogCurrentBuildReportRef"] = catalog_binary_refs.current_build_report_ref
+            preflight_evidence = gate.read_json(Path(dom_ref["path"]))
+            gate.validate_context_input_refs(
+                cast(gate.JsonObject, before_context), cast(gate.JsonObject, expected),
+                cast(gate.JsonObject, build_inputs.snapshot),
+                cast(gate.JsonObject, row["capture"]),
+                cast(list[gate.JsonObject], row["link_captures"]),
+                gate.provenance_file_refs(preflight_evidence),
+            )
         try:
             collection = _collect_condition_worker_pairs(
                 folder=folder, row=row, expected=expected, fixture=fixture,

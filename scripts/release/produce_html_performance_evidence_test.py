@@ -584,6 +584,66 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
                         after_context=after, arms={},
                     )
 
+    def test_resume_reuses_context_snapshot_across_output_directories(self) -> None:
+        old = producer.write(self.root / "old/shared-source-snapshot.json", {"records": []})
+        new = producer.write(self.root / "new/shared-source-snapshot.json", {"records": []})
+        context = producer.write(self.root / "old/context-before.json", {
+            "inputs": [{**old, "exists": True}],
+        })
+        bundle_path = self.root / "old/bundle"
+        producer.write_transport_bundle(bundle_path, "a" * 40, [old, context], [])
+        bundle = gate.Bundle(bundle_path)
+        receipt: gate.JsonObject = {"contexts": {"before": context}}
+        selected = producer._resume_context_pin(bundle, receipt, new)
+        self.assertEqual(selected, old)
+        self.assertNotEqual(selected["path"], new["path"])
+        current = producer.write(self.root / "new/shared-source-snapshot.json", {"records": [1]})
+        with self.assertRaisesRegex(ValueError, "resume context input differs"):
+            producer._resume_context_pin(bundle, receipt, current)
+        producer.write(self.root / "new/shared-source-snapshot.json", {"records": []})
+        Path(old["path"]).write_text("tampered")
+        with self.assertRaisesRegex(ValueError, "SHA256 differs"):
+            producer._resume_context_pin(bundle, receipt, new)
+
+    def test_resume_reuses_context_capture_validation_across_output_directories(self) -> None:
+        name = "catalog-chrome-capture-validation.json"
+        old = producer.write(self.root / "old" / name, {"status": "passed"})
+        new = producer.write(self.root / "new" / name, {"status": "passed"})
+        context = producer.write(self.root / "old/context-before.json", {
+            "inputs": [{**old, "exists": True}],
+        })
+        bundle_path = self.root / "old/bundle"
+        producer.write_transport_bundle(bundle_path, "a" * 40, [old, context], [])
+        receipt: gate.JsonObject = {"contexts": {"before": context}}
+        self.assertEqual(producer._resume_context_pin(gate.Bundle(bundle_path), receipt, new), old)
+
+    def test_context_preflight_checks_every_catalog_input_reference(self) -> None:
+        keys = ("operationPlanRef", "domStateRef", "operationEvidenceRef", "catalogManifestRef",
+                "catalogPlanRef", "catalogCaptureValidationRef", "catalogBinaryProofRef",
+                "catalogBuildReportRef", "catalogCaptureBinaryRef", "catalogCurrentBuildReportRef",
+                "chromeCaptureRef", "chromeReceiptRef")
+        expected: gate.JsonObject = {key: {"path": key, "sha256": key} for key in keys}
+        extra: list[gate.JsonObject] = [
+            {"path": key, "sha256": key} for key in ("snapshot", "capture", "link", "font")
+        ]
+        refs = [cast(gate.JsonObject, expected[key]) for key in keys] + extra
+        binary: gate.JsonObject = {"path": "binary", "sha256": "binary", "exists": True}
+        context: gate.JsonObject = {"inputs": [{**ref, "exists": True} for ref in refs] + [binary]}
+        def validate(value: gate.JsonObject) -> None:
+            gate.validate_context_input_refs(value, expected, extra[0], extra[1], [extra[2]], [extra[3]])
+        validate(context)
+        checked = gate.validate_context_input_refs(context, expected, extra[0], extra[1], [extra[2]], [extra[3]])
+        self.assertEqual(checked["binary"], binary)
+        for ref in refs:
+            rows = [{**item, "exists": True} for item in refs if item != ref]
+            with self.subTest(path=ref["path"]), self.assertRaisesRegex(ValueError, "context is missing"):
+                validate({"inputs": rows})
+        for change in ({"exists": False}, {"sha256": "different"}):
+            rows = [{**ref, "exists": True} for ref in refs]
+            rows[0].update(change)
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, "context differs"):
+                validate({"inputs": rows})
+
     def failed_batch_fixture(
         self,
     ) -> tuple[Path, Callable[[], typed_producer.FilePin], typed_producer.FilePin]:
