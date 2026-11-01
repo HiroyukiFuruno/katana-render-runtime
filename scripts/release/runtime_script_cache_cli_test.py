@@ -21,7 +21,9 @@ import runtime_script_producer as producer_runner
 import runtime_script_profiles as profiles
 import runtime_script_recipe as recipe_reader
 import runtime_script_result as result
+from runtime_script_result_test import JUNIT
 import runtime_script_result_verify as result_verify
+import runtime_script_tool_fingerprint_inputs as pilot
 
 PRODUCER = cache_cli.PRODUCER
 IDENTITY = "a" * 64
@@ -89,6 +91,65 @@ class RuntimeScriptCacheCliTests(unittest.TestCase):
         self.assertEqual(report["diagnostic"], identity["diagnostic"])
         release.assert_called_once_with(lease, 1, 2)
         run.assert_not_called()
+
+    def prepare_profile_receipt(self, producer: str) -> Path:
+        epoch = local_anchor.prepare(self.root, producer, IDENTITY)
+        if epoch is None:
+            raise AssertionError("profile anchor is unavailable")
+        directory = self.root / result.RECEIPT_DIRECTORY
+        producer_runner._ensure_directory(directory)
+        relative = f"{result.RECEIPT_DIRECTORY}/{producer}-current-group-001.xml"
+        (self.root / relative).write_bytes(JUNIT)
+        receipt_path = directory / f"{producer}.json"
+        receipt = result.make_receipt(producer, IDENTITY, epoch, [(relative, JUNIT)], 0)
+        result.commit_receipt(self.root, producer, IDENTITY, epoch, receipt_path, receipt)
+        return receipt_path
+
+    def test_all_fixed_profiles_reuse_only_verified_stable_receipts(self) -> None:
+        for producer in profiles.RUNTIME_SCRIPT_PROFILES:
+            with self.subTest(producer=producer):
+                self.prepare_profile_receipt(producer)
+                snapshot = identity_report(producer=producer)
+                with (
+                    patch.object(identity_collector, "collect_identity_report", return_value=snapshot) as collect,
+                    patch.object(result_verify, "verify_receipt", wraps=result_verify.verify_receipt) as verify,
+                    patch.object(cache_cli, "run_current") as run,
+                ):
+                    report = cache_cli.ensure_current(self.root, producer)
+                self.assertEqual(collect.call_count, 2)
+                self.assertEqual(verify.call_count, 2)
+                self.assertEqual(report["executedGroups"], 0)
+                self.assertFalse(report["recovered"])
+                self.assertEqual("diagnostic" in report, producer == pilot.PROFILE)
+                self.assertFalse((self.root / result.RECEIPT_DIRECTORY / f".{producer}.lease").exists())
+                run.assert_not_called()
+
+    def test_all_fixed_profiles_release_lease_before_recovery(self) -> None:
+        for producer in profiles.RUNTIME_SCRIPT_PROFILES:
+            for case in ("missing", "tampered", "changed"):
+                with self.subTest(producer=producer, case=case):
+                    receipt = self.prepare_profile_receipt(producer)
+                    before = identity_report(producer=producer)
+                    after = identity_report(producer=producer, source_manifest="9" * 64)
+                    if case == "missing":
+                        receipt.unlink()
+                    elif case == "tampered":
+                        receipt.write_bytes(receipt.read_bytes() + b" ")
+
+                    def rerun(repo: Path, profile: str) -> dict[str, object]:
+                        self.assertFalse((repo / result.RECEIPT_DIRECTORY / f".{profile}.lease").exists())
+                        return {"producer": profile, "valid": True, "executedGroups": 1}
+
+                    reports = [before, after] if case == "changed" else [before]
+                    with (
+                        patch.object(identity_collector, "collect_identity_report", side_effect=reports),
+                        patch.object(cache_cli, "run_current", side_effect=rerun) as run,
+                    ):
+                        report = cache_cli.ensure_current(self.root, producer)
+                    self.assertTrue(report["recovered"])
+                    self.assertEqual(report["executedGroups"], 1)
+                    self.assertEqual("reuseAttempt" in report, producer == pilot.PROFILE)
+                    run.assert_called_once_with(self.root, producer)
 
     def test_pilot_diagnostic_rejects_unexpected_fields(self) -> None:
         producer = "runtime-unused-tool-fingerprint"

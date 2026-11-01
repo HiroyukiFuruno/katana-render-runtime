@@ -287,22 +287,21 @@ def run_current(repo: Path, producer: str = PRODUCER) -> dict[str, object]:
 def ensure_current(repo: Path, producer: str = PRODUCER) -> dict[str, object]:
     reuse_attempt: dict[str, object] | None = None
     try:
-        if producer == pilot.PROFILE:
-            lease, device, inode = producer_runner._lease(repo, producer)
-            try:
-                before = identity_collector.collect_identity_report(repo, producer)
+        lease, device, inode = producer_runner._lease(repo, producer)
+        try:
+            before = identity_collector.collect_identity_report(repo, producer)
+            if producer == pilot.PROFILE:
                 reuse_attempt = _pilot_reuse_attempt(repo, before)
-                report: dict[str, object] = dict(_validate_report(repo, producer, before))
-                after = identity_collector.collect_identity_report(repo, producer)
-                if before != after:
-                    raise result.RuntimeScriptResultError("reuse inputs changed during validation")
-                _validate_report(repo, producer, after)
-                report["executedGroups"] = 0
+            report: dict[str, object] = dict(_validate_report(repo, producer, before))
+            after = identity_collector.collect_identity_report(repo, producer)
+            if before != after:
+                raise result.RuntimeScriptResultError("reuse inputs changed during validation")
+            _validate_report(repo, producer, after)
+            report["executedGroups"] = 0
+            if producer == pilot.PROFILE:
                 report["diagnostic"] = _pilot_diagnostic(after)
-            finally:
-                producer_runner._release_lease(lease, device, inode)
-        else:
-            report = dict(validate_current(repo, producer))
+        finally:
+            producer_runner._release_lease(lease, device, inode)
     except result.RuntimeScriptResultError:
         report = run_current(repo, producer)
         report["recovered"] = True
