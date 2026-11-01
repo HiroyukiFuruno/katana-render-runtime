@@ -10,6 +10,9 @@ use std::{
     },
 };
 
+#[path = "svg_rasterize_text_shaping_cache_unavailable_generation_tests.rs"]
+mod unavailable_generation_tests;
+
 const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 const FONT_SIZE: f32 = 16.0;
 const FIRST_TEXT: &str = "AV";

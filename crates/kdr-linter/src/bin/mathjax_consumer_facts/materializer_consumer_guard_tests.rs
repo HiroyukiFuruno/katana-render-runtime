@@ -86,6 +86,36 @@ const SIGNATURE_MUTATIONS: &[(&str, &str, &str)] = &[
         "default-materializer:materialize-signature",
     ),
     (
+        "fn materialize_at(path: PathBuf) -> Result<PathBuf, String>",
+        "fn materialize_at(&self) -> Result<PathBuf, String>",
+        "default-materializer:materialize-signature",
+    ),
+    (
+        "fn materialize_at(path: PathBuf) -> Result<PathBuf, String>",
+        "fn materialize_at(path: PathBuf)",
+        "default-materializer:materialize-signature",
+    ),
+    (
+        "fn materialize_at(path: PathBuf) -> Result<PathBuf, String>",
+        "fn materialize_at(path: PathBuf) -> (Result<PathBuf, String>)",
+        "default-materializer:materialize-signature",
+    ),
+    (
+        "fn materialize_at(path: PathBuf) -> Result<PathBuf, String>",
+        "fn materialize_at(path: PathBuf) -> Result",
+        "default-materializer:materialize-signature",
+    ),
+    (
+        "fn materialize_at(path: PathBuf) -> Result<PathBuf, String>",
+        "fn materialize_at(path: PathBuf) -> Result<{ 1 }, String>",
+        "default-materializer:materialize-signature",
+    ),
+    (
+        "fn materialize_at(path: PathBuf) -> Result<PathBuf, String>",
+        "fn materialize_at(path: &mut PathBuf) -> Result<PathBuf, String>",
+        "default-materializer:materialize-signature",
+    ),
+    (
         "fn exists_with_same_bytes(path: &Path) -> Result<bool, String>",
         "fn exists_with_same_bytes(other: &Path) -> Result<bool, String>",
         "default-materializer:same-bytes-signature",
@@ -98,6 +128,11 @@ const SIGNATURE_MUTATIONS: &[(&str, &str, &str)] = &[
     (
         "fn exists_with_same_bytes(path: &Path) -> Result<bool, String>",
         "fn exists_with_same_bytes(path: String) -> Result<bool, String>",
+        "default-materializer:same-bytes-signature",
+    ),
+    (
+        "fn exists_with_same_bytes(path: &Path) -> Result<bool, String>",
+        "fn exists_with_same_bytes(path: &mut Path) -> Result<bool, String>",
         "default-materializer:same-bytes-signature",
     ),
     (

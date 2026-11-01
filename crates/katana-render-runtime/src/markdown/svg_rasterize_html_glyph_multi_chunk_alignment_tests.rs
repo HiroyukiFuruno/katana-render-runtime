@@ -4,6 +4,8 @@ use resvg::usvg::{Node, Options, Tree};
 use serde_json::Value;
 use std::sync::Arc;
 
+#[path = "svg_rasterize_html_glyph_anchor_boundary_tests.rs"]
+mod anchor_boundary;
 #[path = "svg_rasterize_html_glyph_multi_chunk_nested_rows_tests.rs"]
 pub(super) mod nested_rows;
 #[path = "svg_rasterize_html_glyph_nested_rows_fixture_tests.rs"]

@@ -132,6 +132,21 @@ const SOURCE_READER_MUTATIONS: &[(&str, &str, &str)] = &[
         "MathJax runtime asset read failed: {}: {error}",
         "read-render-route:source-reader-other-error",
     ),
+    (
+        SOURCE_READER_OTHER_ARM,
+        SOURCE_READER_OTHER_ARM_NON_MACRO,
+        "read-render-route:source-reader-other-error",
+    ),
+    (
+        SOURCE_READER_OTHER_ARM,
+        SOURCE_READER_OTHER_ARM_BAD_TOKENS,
+        "read-render-route:source-reader-other-error",
+    ),
+    (
+        SOURCE_READER_OTHER_ARM,
+        SOURCE_READER_OTHER_ARM_WRONG_ARGUMENT,
+        "read-render-route:source-reader-other-error",
+    ),
 ];
 
 const SOURCE_READER_SUCCESS_ARM: &str = "        Ok(source) => Ok(source),\n";
@@ -145,6 +160,19 @@ const SOURCE_READER_OTHER_ARM: &str = concat!(
     "        Err(error) => Err(format!(\n",
     "            \"MathJax runtime asset could not be read: {}: {error}\",\n",
     "            mathjax_js.display()\n",
+    "        )),\n",
+);
+const SOURCE_READER_OTHER_ARM_NON_MACRO: &str = "        Err(error) => Err(error.to_string()),\n";
+const SOURCE_READER_OTHER_ARM_BAD_TOKENS: &str = concat!(
+    "        Err(error) => Err(format!(\n",
+    "            \"MathJax runtime asset could not be read: {}: {error}\",\n",
+    "            =>\n",
+    "        )),\n",
+);
+const SOURCE_READER_OTHER_ARM_WRONG_ARGUMENT: &str = concat!(
+    "        Err(error) => Err(format!(\n",
+    "            \"MathJax runtime asset could not be read: {}: {error}\",\n",
+    "            other.display()\n",
     "        )),\n",
 );
 const SOURCE_READER_PERMISSION_ARM: &str = concat!(
