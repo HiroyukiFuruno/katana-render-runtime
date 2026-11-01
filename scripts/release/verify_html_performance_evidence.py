@@ -976,7 +976,7 @@ def validate_catalog_binary_closure(
     encoded_request = json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
     request_sha = hashlib.sha256(encoded_request).hexdigest()
     with tempfile.TemporaryDirectory(prefix="krr-html-binary-closure-") as directory:
-        request_path = Path(directory) / "request.json"
+        request_path = Path(directory).resolve(strict=True) / "request.json"
         with request_path.open("xb") as stream:
             stream.write(encoded_request)
         argv = ["bun", "run", "scripts/html/fidelity-acceptance-cli.ts",

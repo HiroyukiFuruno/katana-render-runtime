@@ -12,6 +12,7 @@ import tempfile
 import unittest
 import warnings
 import zipfile
+from contextlib import nullcontext
 from collections.abc import Callable
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, cast
@@ -1068,6 +1069,37 @@ class PerformanceEvidenceTest(unittest.TestCase):
         self.assertEqual(len(files), 5)
         self.assertEqual(len({json_text(file["path"]) for file in files}), 5)
         self.assertTrue(all(Path(json_text(file["payloadPath"])).is_file() for file in files))
+
+    def test_catalog_binary_closure_canonicalizes_aliased_temporary_directory(self) -> None:
+        manifest, manifest_ref, _, _, _, _ = self._catalog_capture_proof_fixture(windows=True)
+        bundle = gate.Bundle(self.bundle)
+        refs = gate.validate_catalog_binary_proof(manifest, bundle.file)
+        directory = self.root / "physical-temp"
+        directory.mkdir()
+        alias = self.root / "temporary-alias"
+        try:
+            alias.symlink_to(directory, target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f"directory symlinks unavailable: {error}")
+
+        def validate_request(
+            argv: list[str], *, cwd: Path, check: bool, capture_output: bool,
+        ) -> subprocess.CompletedProcess[bytes]:
+            request_path = Path(argv[-1])
+            self.assertEqual(request_path, directory.resolve() / "request.json")
+            self.assertEqual(request_path.resolve(strict=True), request_path)
+            request_bytes = request_path.read_bytes()
+            request = json.loads(request_bytes)
+            result = {"schema": "krr-html84-binary-closure-result-v1",
+                      "requestSha256": hashlib.sha256(request_bytes).hexdigest(),
+                      "manifest": request["manifest"]}
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(result).encode(), stderr=b"")
+
+        with patch.object(gate.tempfile, "TemporaryDirectory", return_value=nullcontext(str(alias))), \
+             patch.object(gate.subprocess, "run", side_effect=validate_request) as run:
+            result = gate.validate_catalog_binary_closure(self.root, bundle, manifest_ref, refs)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(result["manifest"], manifest_ref)
 
     def test_frozen_binary_transport_survives_removed_target_and_rejects_tampering(self) -> None:
         selected_path = self.root / "target/release/krr-html-performance-harness"
