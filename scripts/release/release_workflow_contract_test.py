@@ -91,7 +91,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                 command = next(
                     line.strip()
                     for line in self.just_dry_run(recipe).splitlines()
-                    if line.strip().startswith("status=0;")
+                    if "status=0;" in line
                 )
                 terminal = command.rsplit(";", 1)[-1].strip()
                 self.assertEqual(terminal, 'exit "$status"')
@@ -105,6 +105,25 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                         )
                         self.assertEqual(completed.returncode, expected_status)
 
+    def test_html_fidelity_fresh_root_rejects_reuse_and_invalid_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            command = self.just_dry_run(
+                "html-fidelity-fresh-root", "tmp/html-fidelity-runs/example"
+            ).strip()
+            first = subprocess.run(["bash", "-c", command], cwd=root, capture_output=True)
+            self.assertEqual(first.returncode, 0)
+            marker = root / "tmp/html-fidelity-runs/example/marker"
+            marker.write_text("preserved", encoding="utf-8")
+            second = subprocess.run(["bash", "-c", command], cwd=root, capture_output=True)
+            self.assertNotEqual(second.returncode, 0)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "preserved")
+            invalid = self.just_dry_run(
+                "html-fidelity-fresh-root", "tmp/html-fidelity-runs/../other"
+            ).strip()
+            rejected = subprocess.run(["bash", "-c", invalid], cwd=root, capture_output=True)
+            self.assertNotEqual(rejected.returncode, 0)
+
     def test_html_fidelity_recipes_skip_heavy_followups_after_failure(self) -> None:
         root = Path(__file__).parents[2]
         for recipe in ("html-fidelity-check", "html-fidelity-interim-check"):
@@ -112,8 +131,9 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                 command = next(
                     line.strip()
                     for line in self.just_dry_run(recipe).splitlines()
-                    if line.strip().startswith("status=0;")
+                    if "status=0;" in line
                 )
+                command = 'root=""; base="tmp/html-fidelity"; status=0;' + command.split("status=0;", 1)[1]
                 with tempfile.TemporaryDirectory() as temporary_directory:
                     calls = Path(temporary_directory) / "calls"
                     stub = textwrap.dedent(
@@ -196,27 +216,27 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             ),
             (
                 "html-dynamic-fidelity-check",
-                ("cargo test --release -p katana-render-runtime", "dynamic/test-build.jsonl"),
+                ("cargo test --release -p katana-render-runtime", 'output="$base/dynamic"'),
             ),
             (
                 "html-dynamic-fidelity-interim-check",
                 (
                     "cargo test --release -p katana-render-runtime",
-                    "dynamic-interim/test-build.jsonl",
+                    'output="$base/dynamic-interim"',
                 ),
             ),
             (
                 "html-input-state-fidelity-check",
                 (
                     "cargo test --release -p katana-render-runtime",
-                    "input-state/test-build.jsonl",
+                    'output="$base/input-state"',
                 ),
             ),
             (
                 "html-input-state-fidelity-interim-check",
                 (
                     "cargo test --release -p katana-render-runtime",
-                    "input-state-interim/test-build.jsonl",
+                    'output="$base/input-state-interim"',
                 ),
             ),
             (
@@ -244,7 +264,8 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertEqual(
             recipe_command,
             'recipe="$(python3 scripts/release/html_fidelity_policy.py --format recipe)" '
-            '&& just "$recipe"',
+            '&& root=\'\' && if [ -n "$root" ]; then just "$recipe" "$root"; '
+            'else just "$recipe"; fi',
         )
 
         selection = subprocess.run(
@@ -303,7 +324,10 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             if selection == "html-fidelity-interim-check"
             else ("final", "99")
         )
-        self.assertIn(f"--phase {phase} --min-score {threshold}", target)
+        if phase == "interim":
+            self.assertIn(f"--phase {phase} --min-score {threshold}", target)
+        else:
+            self.assertIn(f"--min-score {threshold}", target)
         self.assertEqual(target.count("--min-score"), 1)
 
     @staticmethod
@@ -335,9 +359,12 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             ),
         ):
             with self.subTest(phase=phase):
+                parent_command = self.just_dry_run(parent)
+                self.assertIn('base="${root:-tmp/html-fidelity}"', parent_command)
+                suffix = "diagram-consumer" if phase == "final" else "interim/diagram-consumer"
                 self.assertIn(
-                    f"just html-diagram-consumer-check {phase} {output}",
-                    self.just_dry_run(parent),
+                    f'just html-diagram-consumer-check {phase} "$base/{suffix}"',
+                    parent_command,
                 )
                 lexer = shlex.shlex(
                     self.just_dry_run("html-diagram-consumer-check", phase, output),

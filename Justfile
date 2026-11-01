@@ -428,28 +428,28 @@ rust-facts-host-metadata root=REPO_ROOT:
     @CARGO_TARGET_DIR={{quote(root + "/target")}} {{CARGO}} metadata --locked --format-version 1
 
 # Compare every input-state boundary operation against Chrome at the immutable 99 threshold.
-html-input-state-fidelity-check:
-    mkdir -p tmp/html-fidelity/input-state
-    {{RTK_PROXY_CMD}}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/input-state/test-build.jsonl
-    bun scripts/html/fidelity-acceptance-cli.ts input-state-final tmp/html-fidelity/input-state/test-build.jsonl
+html-input-state-fidelity-check run_root='':
+    @set -euo pipefail; root={{quote(run_root)}}; base="${root:-tmp/html-fidelity}"; output="$base/input-state"; if [[ -n "$root" ]]; then [[ "$root" =~ ^tmp/html-fidelity-runs/[A-Za-z0-9][A-Za-z0-9._-]*$ && ! -L tmp && ! -L tmp/html-fidelity-runs && ! -L "$root" && -d "$root" ]]; mkdir "$output"; else mkdir -p "$output"; fi; \
+      {{RTK_PROXY_CMD}}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > "$output/test-build.jsonl"; \
+      args=(input-state-final "$output/test-build.jsonl"); if [[ -n "$root" ]]; then args+=(--run-root "$root"); fi; bun scripts/html/fidelity-acceptance-cli.ts "${args[@]}"
 
 # Interim input-state release gate; final fidelity remains fixed at 99.
-html-input-state-fidelity-interim-check:
-    mkdir -p tmp/html-fidelity/input-state-interim
-    {{RTK_PROXY_CMD}}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/input-state-interim/test-build.jsonl
-    bun scripts/html/fidelity-acceptance-cli.ts input-state-interim tmp/html-fidelity/input-state-interim/test-build.jsonl
+html-input-state-fidelity-interim-check run_root='':
+    @set -euo pipefail; root={{quote(run_root)}}; base="${root:-tmp/html-fidelity}"; output="$base/input-state-interim"; if [[ -n "$root" ]]; then [[ "$root" =~ ^tmp/html-fidelity-runs/[A-Za-z0-9][A-Za-z0-9._-]*$ && ! -L tmp && ! -L tmp/html-fidelity-runs && ! -L "$root" && -d "$root" ]]; mkdir "$output"; else mkdir -p "$output"; fi; \
+      {{RTK_PROXY_CMD}}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > "$output/test-build.jsonl"; \
+      args=(input-state-interim "$output/test-build.jsonl"); if [[ -n "$root" ]]; then args+=(--run-root "$root"); fi; bun scripts/html/fidelity-acceptance-cli.ts "${args[@]}"
 
 # Compare every script-state case against Chrome at the immutable 99 threshold.
-html-dynamic-fidelity-check:
-    mkdir -p tmp/html-fidelity/dynamic
-    {{RTK_PROXY_CMD}}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/dynamic/test-build.jsonl
-    bun scripts/html/fidelity-acceptance-cli.ts dynamic-final tmp/html-fidelity/dynamic/test-build.jsonl
+html-dynamic-fidelity-check run_root='':
+    @set -euo pipefail; root={{quote(run_root)}}; base="${root:-tmp/html-fidelity}"; output="$base/dynamic"; if [[ -n "$root" ]]; then [[ "$root" =~ ^tmp/html-fidelity-runs/[A-Za-z0-9][A-Za-z0-9._-]*$ && ! -L tmp && ! -L tmp/html-fidelity-runs && ! -L "$root" && -d "$root" ]]; mkdir "$output"; else mkdir -p "$output"; fi; \
+      {{RTK_PROXY_CMD}}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > "$output/test-build.jsonl"; \
+      args=(dynamic-final "$output/test-build.jsonl"); if [[ -n "$root" ]]; then args+=(--run-root "$root"); fi; bun scripts/html/fidelity-acceptance-cli.ts "${args[@]}"
 
 # Interim dynamic-state release gate; final script-feature results remain fixed at 99.
-html-dynamic-fidelity-interim-check:
-    mkdir -p tmp/html-fidelity/dynamic-interim
-    {{RTK_PROXY_CMD}}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/dynamic-interim/test-build.jsonl
-    bun scripts/html/fidelity-acceptance-cli.ts dynamic-interim tmp/html-fidelity/dynamic-interim/test-build.jsonl
+html-dynamic-fidelity-interim-check run_root='':
+    @set -euo pipefail; root={{quote(run_root)}}; base="${root:-tmp/html-fidelity}"; output="$base/dynamic-interim"; if [[ -n "$root" ]]; then [[ "$root" =~ ^tmp/html-fidelity-runs/[A-Za-z0-9][A-Za-z0-9._-]*$ && ! -L tmp && ! -L tmp/html-fidelity-runs && ! -L "$root" && -d "$root" ]]; mkdir "$output"; else mkdir -p "$output"; fi; \
+      {{RTK_PROXY_CMD}}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > "$output/test-build.jsonl"; \
+      args=(dynamic-interim "$output/test-build.jsonl"); if [[ -n "$root" ]]; then args+=(--run-root "$root"); fi; bun scripts/html/fidelity-acceptance-cli.ts "${args[@]}"
 
 html-fidelity-probe-build:
     python3 {{quote(REPO_ROOT + "/scripts/build/cargo_capacity_guard.py")}} --retain-build-profile release -- {{CARGO}} build --release --locked -p katana-render-runtime --example html_fidelity_probe
@@ -461,36 +461,49 @@ html-diagram-consumer-check phase output:
         bun scripts/html/fidelity-suite.ts --binary {{quote(HTML_PROBE_BIN)}} --input "tests/fixtures/html-diagram-consumer/$fixture.html" --output "$run_dir/$fixture" --phase {{quote(phase)}} --min-score {{if phase == "interim" { "90" } else { "99" }}} || exit "$?"; \
       done
 
-html-fidelity-check: html-fidelity-probe-build
-    mkdir -p tmp/html-fidelity
-    {{RTK_PROXY_CMD}}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/toc-test-build.jsonl
-    @status=0; \
+html-fidelity-fresh-root run_root:
+    @set -euo pipefail; root={{quote(run_root)}}; \
+      [[ "$root" =~ ^tmp/html-fidelity-runs/[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || exit 2; \
+      [[ ! -L tmp && ! -L tmp/html-fidelity-runs ]] || exit 1; \
+      mkdir -p tmp/html-fidelity-runs; mkdir "$root"
+
+html-fidelity-check run_root='':
+    @set -euo pipefail; root={{quote(run_root)}}; base="${root:-tmp/html-fidelity}"; \
+      if [[ -n "$root" ]]; then just html-fidelity-fresh-root "$root"; else mkdir -p "$base"; fi; \
+      just html-fidelity-probe-build; \
+      {{RTK_PROXY_CMD}}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > "$base/toc-test-build.jsonl"; \
+      status=0; \
       just browser-contract-test || status=1; \
       bun test --path-ignore-patterns 'tmp/**' ./scripts/html/visual-state-fidelity_test.ts || status=1; \
-      bun scripts/html/fidelity-suite.ts --binary {{quote(HTML_PROBE_BIN)}} --toc-build-report tmp/html-fidelity/toc-test-build.jsonl --min-score 99 || status=1; \
-      just html-diagram-consumer-check final tmp/html-fidelity/diagram-consumer || status=1; \
-      if [[ "$status" -eq 0 ]]; then just html-dynamic-fidelity-check || status=1; fi; \
-      if [[ "$status" -eq 0 ]]; then just html-input-state-fidelity-check || status=1; fi; \
-      if [[ "$status" -eq 0 ]]; then bun scripts/html/fidelity-acceptance-cli.ts reports-final || status=1; fi; \
+      suite_args=(--min-score 99); if [[ -n "$root" ]]; then suite_args+=(--output "$base"); fi; \
+      bun scripts/html/fidelity-suite.ts --binary {{quote(HTML_PROBE_BIN)}} --toc-build-report "$base/toc-test-build.jsonl" "${suite_args[@]}" || status=1; \
+      just html-diagram-consumer-check final "$base/diagram-consumer" || status=1; \
+      if [[ "$status" -eq 0 ]]; then just html-dynamic-fidelity-check "$root" || status=1; fi; \
+      if [[ "$status" -eq 0 ]]; then just html-input-state-fidelity-check "$root" || status=1; fi; \
+      args=(reports-final); if [[ -n "$root" ]]; then args+=(--run-root "$root"); fi; \
+      if [[ "$status" -eq 0 ]]; then bun scripts/html/fidelity-acceptance-cli.ts "${args[@]}" || status=1; fi; \
       exit "$status"
 
 # Explicit v0.4.24 interim release; the final recipe above retains its 99 gate.
-html-fidelity-interim-check: html-fidelity-probe-build
-    mkdir -p tmp/html-fidelity/interim
-    {{RTK_PROXY_CMD}}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > tmp/html-fidelity/interim/toc-test-build.jsonl
-    @status=0; \
+html-fidelity-interim-check run_root='':
+    @set -euo pipefail; root={{quote(run_root)}}; base="${root:-tmp/html-fidelity}"; \
+      if [[ -n "$root" ]]; then just html-fidelity-fresh-root "$root"; fi; \
+      mkdir -p "$base/interim"; just html-fidelity-probe-build; \
+      {{RTK_PROXY_CMD}}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > "$base/interim/toc-test-build.jsonl"; \
+      status=0; \
       just browser-contract-test || status=1; \
       bun test --path-ignore-patterns 'tmp/**' ./scripts/html/interim-feature-results_test.ts || status=1; \
-      bun scripts/html/fidelity-suite.ts --binary {{quote(HTML_PROBE_BIN)}} --toc-build-report tmp/html-fidelity/interim/toc-test-build.jsonl --output tmp/html-fidelity/interim --phase interim --min-score 90 || status=1; \
-      just html-diagram-consumer-check interim tmp/html-fidelity/interim/diagram-consumer || status=1; \
-      if [[ "$status" -eq 0 ]]; then just html-dynamic-fidelity-interim-check || status=1; fi; \
-      if [[ "$status" -eq 0 ]]; then just html-input-state-fidelity-interim-check || status=1; fi; \
-      if [[ "$status" -eq 0 ]]; then bun scripts/html/fidelity-acceptance-cli.ts reports-interim || status=1; fi; \
+      bun scripts/html/fidelity-suite.ts --binary {{quote(HTML_PROBE_BIN)}} --toc-build-report "$base/interim/toc-test-build.jsonl" --output "$base/interim" --phase interim --min-score 90 || status=1; \
+      just html-diagram-consumer-check interim "$base/interim/diagram-consumer" || status=1; \
+      if [[ "$status" -eq 0 ]]; then just html-dynamic-fidelity-interim-check "$root" || status=1; fi; \
+      if [[ "$status" -eq 0 ]]; then just html-input-state-fidelity-interim-check "$root" || status=1; fi; \
+      args=(reports-interim); if [[ -n "$root" ]]; then args+=(--run-root "$root"); fi; \
+      if [[ "$status" -eq 0 ]]; then bun scripts/html/fidelity-acceptance-cli.ts "${args[@]}" || status=1; fi; \
       exit "$status"
 
 # Select from the committed release authorization and package version; no threshold override.
-html-release-fidelity-check:
-    @recipe="$(python3 scripts/release/html_fidelity_policy.py --format recipe)" && just "$recipe"
+html-release-fidelity-check run_root='':
+    @recipe="$(python3 scripts/release/html_fidelity_policy.py --format recipe)" && root={{quote(run_root)}} && if [ -n "$root" ]; then just "$recipe" "$root"; else just "$recipe"; fi
 
 # Run the independent KRR snapshot interaction probe and compare it with real Google Chrome.
 # Interaction evidence supplements the final 99-point visual and performance contract.

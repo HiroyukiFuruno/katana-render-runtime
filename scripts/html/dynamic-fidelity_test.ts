@@ -1610,6 +1610,36 @@ describe("dynamic HTML fidelity phases", () => {
 });
 
 describe("fixed fidelity acceptance CLI routes", () => {
+  test("binds fresh capture and report paths to one validated root", () => {
+    const root = "tmp/html-fidelity-runs/example";
+    const output = `${root}/dynamic-interim`;
+    expect(
+      fidelityAcceptancePlan(["dynamic-interim", `${output}/test-build.jsonl`, "--run-root", root]),
+    ).toEqual({
+      kind: "dynamic",
+      output,
+      buildReport: `${output}/test-build.jsonl`,
+      threshold: 90,
+      options: { phase: "interim" },
+    });
+    expect(fidelityAcceptancePlan(["reports-interim", "--run-root", root])).toEqual({
+      kind: "reports",
+      phase: "interim",
+      visualReport: `${root}/interim/interim-visual-feature-results.json`,
+      scriptReport: `${output}/interim-script-feature-results.json`,
+    });
+    expect(() =>
+      fidelityAcceptancePlan([
+        "dynamic-interim",
+        "tmp/html-fidelity/dynamic-interim/test-build.jsonl",
+        "--run-root",
+        root,
+      ]),
+    ).toThrow();
+    expect(() =>
+      fidelityAcceptancePlan(["reports-interim", "--run-root", "tmp/html-fidelity-runs/../other"]),
+    ).toThrow();
+  });
   test.each([
     ["input-state-final", "input-state", "tmp/html-fidelity/input-state", 99, undefined],
     [

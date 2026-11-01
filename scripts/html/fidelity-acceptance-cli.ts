@@ -169,9 +169,31 @@ export function fidelityAcceptancePlan(argv: readonly string[]): FidelityAccepta
   const reportPlan = reportsModePlan(mode, argv);
   if (reportPlan) return reportPlan;
   const plan = capturePlans[mode as LegacyCaptureMode];
-  if (!plan || argv.length !== 2 || argv[1] !== plan.buildReport)
+  if (!plan) throw new Error("capture acceptance mode is invalid");
+  const root = acceptanceRunRoot(argv, 2);
+  const output = root ? plan.output.replace("tmp/html-fidelity/", `${root}/`) : plan.output;
+  const buildReport = `${output}/test-build.jsonl`;
+  if (argv[1] !== buildReport)
     throw new Error("capture acceptance mode requires its fixed build report argument");
-  return plan.options ? { ...plan, options: { ...plan.options } } : { ...plan };
+  return {
+    ...plan,
+    output,
+    buildReport,
+    ...(plan.options ? { options: { ...plan.options } } : {}),
+  };
+}
+
+function acceptanceRunRoot(argv: readonly string[], offset: number): string | undefined {
+  if (argv.length === offset) return undefined;
+  const root = argv[offset + 1];
+  if (
+    argv.length !== offset + 2 ||
+    argv[offset] !== "--run-root" ||
+    !root ||
+    !/^tmp\/html-fidelity-runs\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(root)
+  )
+    throw new Error("invalid fidelity run root");
+  return root;
 }
 
 function catalogModePlan(
@@ -208,8 +230,8 @@ function reportsModePlan(
   argv: readonly string[],
 ): ReportsPlan | undefined {
   if (mode !== "reports-final" && mode !== "reports-interim") return undefined;
-  if (argv.length !== 1) throw new Error("report acceptance mode takes no additional arguments");
-  return mode === "reports-final"
+  const root = acceptanceRunRoot(argv, 1);
+  const plan: ReportsPlan = mode === "reports-final"
     ? {
         kind: "reports",
         phase: "final",
@@ -222,6 +244,13 @@ function reportsModePlan(
         visualReport: "tmp/html-fidelity/interim/interim-visual-feature-results.json",
         scriptReport: "tmp/html-fidelity/dynamic-interim/interim-script-feature-results.json",
       };
+  return root
+    ? {
+        ...plan,
+        visualReport: plan.visualReport.replace("tmp/html-fidelity/", `${root}/`),
+        scriptReport: plan.scriptReport.replace("tmp/html-fidelity/", `${root}/`),
+      }
+    : plan;
 }
 
 function catalogAcceptancePlan(
