@@ -2,7 +2,7 @@
 
 ## 最新の再開地点（2026-11-01）
 
-- [/] HTML性能再開の進捗: R6576は正式条件のpartial 1件を成功。R6578の最終検証は旧binaryを新pathへ結び付けたため失敗し、その元payloadをR6587で診断した。続く4ファイル修正後、R6585 foundation 12項目、R6586 producer、R6583 verifier 107項目が成功。実1→1の別process再開と全84条件は未完であり、coverage作業は最新指示どおり最後に行う。
+- [/] HTML性能再開: source `ac5739aa` でR6598 fresh 1件→R6600別process再開1件がともにactual 0、計2条件・600 phase records・40 checks・policyAccepted=true、source一致。R6602の残り82件への2段目再開は、直前batchの操作計画の保存先を推測して測定前actual 1となり、全84は未合格。正式old context/Bundle/conditionIdから祖先planを一意継承する修正と3段実bundle回帰後、R6604 foundation 12項目、R6605 producer 126件、R6606実失敗84 plan診断が実0。修正は `e5c00e7d` へ通常commit済み。実全84・性能・coverage 100%（coverage作業は最後）・review/CI/publicationは未完。
 - [/] 固定ソース `539e06a1` のR6547は独立raw JSと製品PNGを含むMermaid117/117が99以上（EN59最低99.085711、JA58最低99.108010）。R6536はHTML84/84が90以上・最低92.14438・出力font一致、R6538は全Y/実末尾を含む長文画像286/286・最低91.98562、匿名資料の目次16項目×3幅の48クリックすべて合格。R6540の補助consumerはnative1件・Chrome操作4/4一致、first frame4.598458ms。正式84条件の性能合格や公開完了とは区別し、変更後の最終ソースへ無断転用しない。
 - [ ] R6550は同じソースで性能1条件・300phase records・20checksを正常閉鎖し、policyAccepted=true。ただし別processのR6552再開は、旧contextに同名snapshotが2件あるため測定前に拒否された。R6554/55の既存reader診断でcandidate役割の正式参照だけが新snapshotと一致することを実証した。名前による推測をやめ、candidate build artifactと各attemptのexpectedに宣言された参照を辿る修正・同名別role/重複/欠落/不一致の回帰を実装し、R6559の静的12項目（重複・厳格型を含む）とR6560のproducer全121件が成功。修正を通常commitし、新規の閉じた1条件→別process1条件再開→全84で実経路を再検証する。旧proofの書換えや入力一覧の縮小は行わない。
 - [ ] 最新ユーザー指示による実行順：Mermaid最新117図、HTML最新84条件・画像・フォント・性能・実再開、安全なcache再利用、依存関係更新など、カバレッジ以外の実装・検証を先に完了する。追加のcoverage改善と全体coverage再測定はその後に行い、100%・未計測0を維持してレビュー・必須CI・公開へ進む。coverageの閾値や既存の公開条件は変更しない。
