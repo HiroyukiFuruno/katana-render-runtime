@@ -34,14 +34,14 @@ fn library_table_line_metrics_match_full_parser_for_real_static_face() -> Result
     })
 }
 
-fn legacy_metrics(data: &[u8], index: u32, size: f32) -> Option<(f32, f32)> {
+pub(super) fn legacy_metrics(data: &[u8], index: u32, size: f32) -> Option<(f32, f32)> {
     let face = rustybuzz::ttf_parser::Face::parse(data, index).ok()?;
     let scale = size / face.units_per_em() as f32;
     let leading = (face.line_gap() as f32 * scale).round();
     let before = (leading / 2.0).floor();
     Some((
         (face.ascender() as f32 * scale).round() + before,
-        (-face.descender() as f32 * scale).round() + leading - before,
+        (-f32::from(face.descender()) * scale).round() + leading - before,
     ))
 }
 

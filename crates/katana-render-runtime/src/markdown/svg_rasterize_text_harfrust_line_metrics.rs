@@ -122,7 +122,7 @@ pub(in super::super) fn parsed_face_line_metrics(face: &Face<'_>, size: f32) -> 
     let before = (leading / 2.0).floor();
     (
         (face.ascender() as f32 * scale).round() + before,
-        (-face.descender() as f32 * scale).round() + leading - before,
+        (-f32::from(face.descender()) * scale).round() + leading - before,
     )
 }
 
