@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { runInNewContext } from "node:vm";
-import { parseSync, transformSync } from "@swc/core";
+import { parseSync, transformSync, version as swcVersion } from "@swc/core";
 import { z } from "zod";
 import { changedCompilerInputRead } from "../quality/compiler-input-test-helper";
 import {
@@ -3079,7 +3079,7 @@ describe("reviewed Mermaid CLI source route and runtime compressor unit", () => 
       artifactVerified: false,
       caller: compressorCaller,
       wrapper: compressorScript,
-      swcVersion: "1.16.20",
+      swcVersion,
       executions: [
         {
           kind: "unit-runtime-asset-compressor-cli",
