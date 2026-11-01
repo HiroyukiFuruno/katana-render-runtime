@@ -866,24 +866,44 @@ def _resume_condition_plan(
 
 
 def _resume_context_pin(
-    bundle: gate.Bundle, receipt: Mapping[str, object], current: FilePin,
+    bundle: gate.Bundle, receipt: Mapping[str, object], current: FilePin, previous_pin: FilePin,
 ) -> FilePin:
     contexts = gate._object(receipt.get("contexts"), "resume context refs")
     previous = bundle.json(contexts["before"])
     rows = gate._objects(previous.get("inputs"), "resumed context inputs")
-    name = Path(current["path"]).name
-    matches = [row for row in rows if Path(gate._text(row.get("path"),
-               "resumed context input path")).name == name]
+    matches = [row for row in rows if gate._text(row.get("path"),
+               "resumed context input path") == previous_pin["path"]]
     gate.require(len(matches) == 1, "resume context input is ambiguous or missing")
     row = matches[0]
     pin: FilePin = {"path": gate._text(row.get("path"), "resume snapshot path"),
                     "sha256": gate._text(row.get("sha256"), "resume snapshot SHA")}
-    gate.require(row.get("exists") is True and pin["sha256"] == current["sha256"],
+    gate.require(row.get("exists") is True and pin == previous_pin
+                 and pin["sha256"] == current["sha256"],
                  "resume context input differs")
     _pinned_file(Path(current["path"]), current["sha256"])
     _pinned_file(Path(pin["path"]), pin["sha256"])
     bundle.file(pin)
     return pin
+
+
+def _resume_candidate_snapshot_pin(bundle: gate.Bundle, receipt: Mapping[str, object]) -> FilePin:
+    artifacts = gate._object(receipt.get("buildArtifacts"), "resume build artifacts")
+    artifact = _receipt_file_pin(artifacts.get("candidate"), "resume candidate build artifact")
+    proof = bundle.json(artifact)
+    return _receipt_file_pin(proof.get("sourceSnapshotRef"), "resume candidate source snapshot")
+
+
+def _resume_catalog_validation_pin(bundle: gate.Bundle, receipt: Mapping[str, object]) -> FilePin:
+    attempts = gate._objects(receipt.get("attempts"), "resume attempts")
+    gate.require(bool(attempts), "resume catalog validation declaration is missing")
+    pins = [
+        _receipt_file_pin(bundle.json(attempt["expected"]).get("catalogCaptureValidationRef"),
+                          "resume catalog validation")
+        for attempt in attempts
+    ]
+    gate.require(all(pin == pins[0] for pin in pins),
+                 "resume catalog validation declarations differ")
+    return pins[0]
 
 
 def _validate_resume_batch(
@@ -2459,6 +2479,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         if resumed_receipt is not None and resumed_bundle is not None:
             catalog_capture_validation_pin = _resume_context_pin(
                 resumed_bundle, resumed_receipt, catalog_capture_validation_pin,
+                _resume_catalog_validation_pin(resumed_bundle, resumed_receipt),
             )
     harness = root / gate.HARNESS_ROOT
     lock = harness / "Cargo.lock"
@@ -2486,6 +2507,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     if resumed_receipt is not None and resumed_bundle is not None:
         build_inputs = build_inputs._replace(snapshot=_resume_context_pin(
             resumed_bundle, resumed_receipt, build_inputs.snapshot,
+            _resume_candidate_snapshot_pin(resumed_bundle, resumed_receipt),
         ))
     approved = write(output / "approved-source.json", initial)
     head = gate._text(initial["head"], "source HEAD")

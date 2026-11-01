@@ -584,38 +584,111 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
                         after_context=after, arms={},
                     )
 
+    def resume_context_fixture(
+        self, directory: Path, rows: list[gate.JsonObject],
+        pins: Sequence[typed_producer.FilePin],
+    ) -> tuple[gate.Bundle, gate.JsonObject]:
+        context = producer.write(directory / "context-before.json", {"inputs": rows})
+        bundle_path = directory / "bundle"
+        producer.write_transport_bundle(bundle_path, "a" * 40, [*pins, context], [])
+        return gate.Bundle(bundle_path), {"contexts": {"before": context}}
+
     def test_resume_reuses_context_snapshot_across_output_directories(self) -> None:
         old = producer.write(self.root / "old/shared-source-snapshot.json", {"records": []})
         new = producer.write(self.root / "new/shared-source-snapshot.json", {"records": []})
-        context = producer.write(self.root / "old/context-before.json", {
-            "inputs": [{**old, "exists": True}],
-        })
-        bundle_path = self.root / "old/bundle"
-        producer.write_transport_bundle(bundle_path, "a" * 40, [old, context], [])
-        bundle = gate.Bundle(bundle_path)
-        receipt: gate.JsonObject = {"contexts": {"before": context}}
-        selected = producer._resume_context_pin(bundle, receipt, new)
+        artifact = producer.write(self.root / "old/build-artifact.json", {"sourceSnapshotRef": old})
+        bundle, receipt = self.resume_context_fixture(
+            self.root / "old", [{**old, "exists": True}], [old, artifact],
+        )
+        receipt["buildArtifacts"] = {"candidate": artifact}
+        role = producer._resume_candidate_snapshot_pin(bundle, receipt)
+        selected = producer._resume_context_pin(bundle, receipt, new, role)
         self.assertEqual(selected, old)
         self.assertNotEqual(selected["path"], new["path"])
         current = producer.write(self.root / "new/shared-source-snapshot.json", {"records": [1]})
         with self.assertRaisesRegex(ValueError, "resume context input differs"):
-            producer._resume_context_pin(bundle, receipt, current)
+            producer._resume_context_pin(bundle, receipt, current, role)
         producer.write(self.root / "new/shared-source-snapshot.json", {"records": []})
         Path(old["path"]).write_text("tampered")
         with self.assertRaisesRegex(ValueError, "SHA256 differs"):
-            producer._resume_context_pin(bundle, receipt, new)
+            producer._resume_context_pin(bundle, receipt, new, role)
 
     def test_resume_reuses_context_capture_validation_across_output_directories(self) -> None:
         name = "catalog-chrome-capture-validation.json"
         old = producer.write(self.root / "old" / name, {"status": "passed"})
         new = producer.write(self.root / "new" / name, {"status": "passed"})
-        context = producer.write(self.root / "old/context-before.json", {
-            "inputs": [{**old, "exists": True}],
+        expected = producer.write(self.root / "old/expected.json", {
+            "catalogCaptureValidationRef": old,
         })
-        bundle_path = self.root / "old/bundle"
-        producer.write_transport_bundle(bundle_path, "a" * 40, [old, context], [])
-        receipt: gate.JsonObject = {"contexts": {"before": context}}
-        self.assertEqual(producer._resume_context_pin(gate.Bundle(bundle_path), receipt, new), old)
+        bundle, receipt = self.resume_context_fixture(
+            self.root / "old", [{**old, "exists": True}], [old, expected],
+        )
+        receipt["attempts"] = [{"expected": expected}]
+        role = producer._resume_catalog_validation_pin(bundle, receipt)
+        self.assertEqual(producer._resume_context_pin(bundle, receipt, new, role), old)
+
+    def test_resume_snapshot_uses_declared_role_with_same_basename(self) -> None:
+        for same_digest in (False, True):
+            with self.subTest(same_digest=same_digest):
+                directory = self.root / str(same_digest)
+                old = producer.write(directory / "candidate/shared-source-snapshot.json", {"records": []})
+                other = producer.write(directory / "parent/shared-source-snapshot.json",
+                                       {"records": [] if same_digest else [1]})
+                current = producer.write(directory / "new/shared-source-snapshot.json", {"records": []})
+                artifact = producer.write(directory / "candidate/build-artifact.json",
+                                          {"sourceSnapshotRef": old})
+                bundle, receipt = self.resume_context_fixture(
+                    directory, [{**other, "exists": True}, {**old, "exists": True}],
+                    [old, other, artifact],
+                )
+                receipt["buildArtifacts"] = {"candidate": artifact}
+                role = producer._resume_candidate_snapshot_pin(bundle, receipt)
+                self.assertEqual(producer._resume_context_pin(bundle, receipt, current, role), old)
+
+    def test_resume_context_rejects_missing_or_duplicate_declared_row(self) -> None:
+        for rows in (0, 2):
+            with self.subTest(rows=rows):
+                directory = self.root / str(rows)
+                old = producer.write(directory / "old/shared-source-snapshot.json", {"records": []})
+                current = producer.write(directory / "new/shared-source-snapshot.json", {"records": []})
+                bundle, receipt = self.resume_context_fixture(
+                    directory, [{**old, "exists": True}] * rows, [old],
+                )
+                with self.assertRaisesRegex(ValueError, "ambiguous or missing"):
+                    producer._resume_context_pin(bundle, receipt, current, old)
+
+    def test_resume_context_rejects_missing_or_mismatched_row_identity(self) -> None:
+        for case in ("missing", "sha"):
+            with self.subTest(case=case):
+                directory = self.root / case
+                old = producer.write(directory / "old/shared-source-snapshot.json", {"records": []})
+                current = producer.write(directory / "new/shared-source-snapshot.json", {"records": []})
+                row = {**old, "exists": True}
+                if case == "missing":
+                    row["exists"] = False
+                else:
+                    row["sha256"] = "0" * 64
+                bundle, receipt = self.resume_context_fixture(directory, [row], [old])
+                with self.assertRaisesRegex(ValueError, "resume context input differs"):
+                    producer._resume_context_pin(bundle, receipt, current, old)
+
+    def test_resume_rejects_missing_role_declarations_and_conflicting_catalog_pins(self) -> None:
+        directory = self.root / "roles"
+        first = producer.write(directory / "first.json", {"value": 1})
+        second = producer.write(directory / "second.json", {"value": 2})
+        missing = producer.write(directory / "missing.json", {})
+        expected_a = producer.write(directory / "expected-a.json", {"catalogCaptureValidationRef": first})
+        expected_b = producer.write(directory / "expected-b.json", {"catalogCaptureValidationRef": second})
+        bundle_path = directory / "bundle"
+        producer.write_transport_bundle(bundle_path, "a" * 40,
+                                        [first, second, missing, expected_a, expected_b], [])
+        bundle = gate.Bundle(bundle_path)
+        with self.assertRaises((ValueError, TypeError)):
+            producer._resume_candidate_snapshot_pin(bundle, {"buildArtifacts": {"candidate": missing}})
+        for attempts in ([], [{"expected": missing}],
+                         [{"expected": expected_a}, {"expected": expected_b}]):
+            with self.subTest(attempts=len(attempts)), self.assertRaises((ValueError, TypeError)):
+                producer._resume_catalog_validation_pin(bundle, {"attempts": attempts})
 
     def test_context_preflight_checks_every_catalog_input_reference(self) -> None:
         keys = ("operationPlanRef", "domStateRef", "operationEvidenceRef", "catalogManifestRef",
