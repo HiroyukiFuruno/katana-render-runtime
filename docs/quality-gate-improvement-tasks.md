@@ -2,6 +2,7 @@
 
 ## 最新の再開地点（2026-11-02）
 
+- [ ] 最新ユーザー指示：性能指標として比較に使う基準データは、改善を正式条件で確認した時点で上書き更新する。Gitの履歴記録と現行比較基準を分け、`activeReferenceRecordId`で現在の基準を明示した。初期選択は既存の合格測定であり改善昇格を捏造しない。同等/ばらつき/一部改善と引換の時間・メモリ悪化では更新しない。基準自動昇格と正式gate接続の実装・回帰・検証は未完。
 - [/] 最新ユーザー指示のGit管理：正式R6628とsanitized R6630から`docs/performance/html-performance-history.json`へ全6段階の時間/RSS・84条件×25試行・測定元commit・正式判定・元データdigestを保存した。元の数値・件数・受入値・digestと全項目が一致。手順とAGENTSへ履歴参照を追加し、JSONはBiomeの必須対象へ追加、R6789は実1fileを検査して実0。原receipt/私有原本/環境値は不変・Git対象外。
 - [ ] 性能再利用の未完部分：文書/testだけの変更で全84条件を取り直す過剰なHEAD結合を解く。元の測定と現行sourceへの再利用適格性を分け、元receiptは変更しない。同binary・計測プログラム/条件/入力/資源/フォント/ツール環境/判定の等価性を既存Bundle/parent proof検証へ追加し、実装・異常系回帰・正式検証を完了する。履歴保存だけを再利用gate完成としない。
 - [/] ユーザーの依存更新はparse5 8.0.1→8.1.0 / entities 8.1.0→9.0.0の2files。R6784通常回帰53/53、R6785正規Playwright回帰23/23が成功し、R6788標準pre-commit実0で取り込んだ。R6783はPlaywright用testをBunへ渡した実行入口の誤りで実1、結果を保持して正しいrunnerへ分離した。ユーザー実行のjust checkは終了し、Moon reportではautomation-contract-test / build-capacity-check / runtime-asset-script-otherの3taskが実1。個別rawは未取得であり依存更新が原因と断定しない。snapshotは`tmp/quality/resumed-owner-r3509/user-dependency-check-r6786/`、全体合格ではない。
