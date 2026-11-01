@@ -25,7 +25,7 @@ REQUIRED_CANDIDATE_ANCESTORS = (
     VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_CANDIDATE_ANCESTORS
 )
 # Git履歴fixtureは祖先・version・内容契約を検証し、完全品質の証跡には使わない。
-CURRENT_RELEASE_VALIDATION_SNAPSHOT = "ac91d63fc7d584ac4e5a72a6160555d2ea290b1c"
+CURRENT_RELEASE_VALIDATION_SNAPSHOT = "7f60e6a70d2e019d6ecbf702851a95332ff48bd6"
 REJECTED_STALE_V0424_VALIDATION_SNAPSHOT = "536658729364519837b50b10e1fb2ad8139ced1e"
 REJECTED_V0424_VALIDATION_SNAPSHOT = "db20e187c39e56589dadb2356da150bd3e820987"
 PUBLISHED_V0423_SNAPSHOT = "8654789f69d24401b8ae67036db1cdb3e7f4294e"
@@ -219,6 +219,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
             "dfcc0fd51722c06fcb0cac8fe3b632d20ded3e02",
             "37290cca510ab77b4e109bbfe1575aefa4bfdabd",
             "4176c91217e17aba3122c7fa93b2788cc445f519",
+            "ac91d63fc7d584ac4e5a72a6160555d2ea290b1c",
         ):
             with self.subTest(snapshot=snapshot):
                 result = self.run_check("v0.4.24", "v0.4.23", snapshot)
