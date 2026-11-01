@@ -2,6 +2,9 @@
 
 ## 最新の再開地点（2026-11-02）
 
+- [/] 最新全体R6770は5,215/5,215成功・29skip（実テスト347.542秒）、report/collection実0。R6771正式policyは83,277/84,498=98.55499538450614%・未到達1,221で実1。前回R6701より40行減・分母不変であり、共通化による行数削減とは報告しない。R6769/R6772 source stdout SHA `65b0592b47164324c290e80cf7c8d959e12af8cf1d2ad761186cf2f1d36a77bd` 一致。排他的分析copyは `tmp/quality/resumed-owner-r3509/current-root-coverage-report-r6773/`（公式位置839、summary差382は補完しない）。100%・未計測0は未達。
+- [ ] 共通化前の最小契約として、実DOMの対象と祖先それぞれにnth-childとlast-of-typeを指定し、実DOM→位置3値→selector評価の接続を固定する。既存の位置tuple単体・selector単体の成功だけで接続を保証したとしない。最新位置からは、入れ子middle文字の元contextを必要とする実SVG描画、実フォントの装飾table欠落、極小textLengthが複数分岐へ届く次候補。いずれも未実測で、入力を捏造して到達を作らない。
+- [/] R6774既存CAS診断はunit15成功後、現行Rust facts host不在のため全receiptが未検証として実1。改変試験へは進まず拒否しており成功扱いしない。直接run recipeでは前提DAGを満たさないため、次は既存Moonのruntime-script-cas-diagnostic taskから前提生成・全7系統検証を含めて実行する。元ログは保持し、cacheの正常hitだけでrestore/tamper条件を代用しない。
 - [/] 追加cohortはR6764（フォントdescenderの整数符号反転overflow修正）とR6766（glyph位置・font generation・consumer AST境界回帰）の通常commitで取込み、どちらも標準pre-commit実0。R6746で実fontのi16::MIN descender入力によるpanicを再現し、floatへ変換してから符号反転する最小修正後R6750成功、R6759関連15/15成功。通常/診断のscope外挙動と固定数値32768の独立期待も保持。全体coverageの最新値は依然R6701の未到達1,261で、追加分の効果は再計測待ち。
 - [/] logger共通原因は55e5485に取込み済み。R6725 Warn有効化契約のRED実100→既存env_loggerのtest mode初期化→R6729同case GREEN実0、R6735関連59/59成功。製品の通常依存へloggerを追加していない。以下の旧「次対応」は経緯として保持する。
 - [ ] 最新の共通化指摘を継続追跡する。行高計算は通常/診断が既存checked_metricsを共有できるが、診断の時計取得を通常描画へ持ち込まない。HTMLは兄弟要素のカウント（html_document_sibling_position / html_document_projection_siblings）、CSS収集（html_css_sources）が候補。selectorの同一nodeに対する位置tupleの3重取得も一度にまとめる余地がある。map事前構築と逐次探索、外部CSS・UA CSS・収集順序の差は契約で固定してから整理する。調査範囲は数十行規模で、約3,000行削減の根拠とは扱わない。動作テストを維持した共通化→到達行と分母を別記した再計測→性能非劣化確認を完了条件にする。
