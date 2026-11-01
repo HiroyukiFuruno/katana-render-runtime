@@ -5,6 +5,10 @@ use crate::markdown::svg_rasterize::{
 use resvg::usvg::{Node, Options, Tree};
 
 const OBSERVED_FONT_SIZE: f32 = 16.0;
+const FIXTURE_FONT_SIZE: f32 = 10.0;
+const FIXTURE_UNITS_PER_EM: f32 = 1000.0;
+const FIXTURE_ASCENT: f32 = 800.0;
+const FIXTURE_DESCENT: f32 = -200.0;
 #[cfg(target_os = "macos")]
 const PAINT_ORIGIN_TOLERANCE: f32 = 0.0001;
 
@@ -19,6 +23,12 @@ fn helvetica_math_and_central_use_blink_postprocessed_metrics() -> Result<(), St
         .ok_or("Helvetica face unavailable")?;
     assert_shift(&database, id, &face, PolicyKind::Mathematical, 0.83984375);
     assert_shift(&database, id, &face, PolicyKind::Central, 0.6796875);
+    for kind in [PolicyKind::Middle, PolicyKind::AlignmentMiddle] {
+        let mut policy = test_policy(kind);
+        assert_eq!(glyph_shift(&database, id, &face, policy), 0.0);
+        policy.primary_shift = Some(2.5);
+        assert_eq!(glyph_shift(&database, id, &face, policy), 2.5);
+    }
     Ok(())
 }
 
@@ -127,6 +137,90 @@ fn baseline_policy_uses_legacy_metrics_for_nonuniform_or_invalid_scale() -> Resu
         None
     );
     Ok(())
+}
+
+#[test]
+fn middle_metrics_helpers_reject_unresolved_middle_policies() -> Result<(), String> {
+    let (database, id) = fixture_database()?;
+    let face = test_metadata();
+    for kind in [PolicyKind::Middle, PolicyKind::AlignmentMiddle] {
+        let policy = test_policy(kind);
+        assert_eq!(super::metrics_shift(&database, id, &face, policy), 0.0);
+        assert_eq!(
+            super::css_baseline_shift(&database, id, &face, policy, 1.0),
+            None
+        );
+        assert_eq!(
+            super::legacy_glyph_shift(&database, id, policy, 8.0, -2.0, 4.0),
+            0.0
+        );
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn baseline_targets_keep_hanging_and_middle_contracts() -> Result<(), String> {
+    let (database, id) = fixture_database()?;
+    let face = test_metadata();
+    let hanging = test_policy(PolicyKind::Hanging);
+    assert_eq!(
+        super::css_baseline_target(&database, id, &face, hanging, 10.0),
+        Some(6.4)
+    );
+    assert_eq!(
+        super::legacy_glyph_shift(&database, id, hanging, 8.0, -2.0, 6.4),
+        0.0
+    );
+    for kind in [PolicyKind::Middle, PolicyKind::AlignmentMiddle] {
+        assert_eq!(
+            super::css_baseline_target(&database, id, &face, test_policy(kind), 10.0),
+            None
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn unavailable_layout_metrics_leave_baseline_unshifted() -> Result<(), String> {
+    let (database, id) = fixture_database()?;
+    let policy = test_policy(PolicyKind::Mathematical);
+    assert_eq!(
+        super::css_baseline_target(&database, id, &test_metadata(), policy, 10.0),
+        None
+    );
+    assert_eq!(
+        super::legacy_glyph_shift(&database, id, policy, 8.0, -2.0, 4.0),
+        0.0
+    );
+    Ok(())
+}
+
+fn fixture_database() -> Result<(resvg::usvg::fontdb::Database, resvg::usvg::fontdb::ID), String> {
+    let mut database = resvg::usvg::fontdb::Database::new();
+    database.load_font_data(crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES.to_vec());
+    let id = database.faces().next().ok_or("fixture font missing")?.id;
+    Ok((database, id))
+}
+
+fn test_policy(kind: PolicyKind) -> Policy {
+    Policy {
+        kind,
+        font_size: FIXTURE_FONT_SIZE,
+        css_scale: Some(1.0),
+        primary_shift: None,
+    }
+}
+
+fn test_metadata() -> super::FaceMetadata {
+    super::FaceMetadata {
+        upem: FIXTURE_UNITS_PER_EM,
+        unsupported: false,
+        ascent: FIXTURE_ASCENT,
+        descent: FIXTURE_DESCENT,
+        x_height: None,
+    }
 }
 
 fn parse_policy(body: &str) -> Result<Option<Policy>, String> {

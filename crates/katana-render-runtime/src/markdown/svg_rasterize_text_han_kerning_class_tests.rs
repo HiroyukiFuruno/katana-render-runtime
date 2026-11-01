@@ -115,3 +115,71 @@ fn punctuation_middle_missing_glyph_and_invalid_advance_follow_fallbacks() -> Re
     assert_invalid_advance_is_other(bounds, category);
     Ok(())
 }
+
+fn bounds(x_min: f32, x_max: f32) -> skrifa::metrics::BoundingBox {
+    skrifa::metrics::BoundingBox {
+        x_min,
+        y_min: 0.0,
+        x_max,
+        y_max: 1.0,
+    }
+}
+
+#[test]
+fn metric_class_handles_half_advance_boundaries_and_invalid_advances() {
+    let cases = [
+        (10.0, bounds(1.0, 5.0), Some(HanClass::Close)),
+        (10.0, bounds(5.0, 9.0), Some(HanClass::Open)),
+        (10.0, bounds(4.0, 6.0), None),
+        (0.0, bounds(1.0, 2.0), None),
+        (f32::NAN, bounds(1.0, 2.0), None),
+        (f32::INFINITY, bounds(1.0, 2.0), None),
+    ];
+    for (advance, glyph_bounds, expected) in cases {
+        assert_eq!(super::metric_class(advance, glyph_bounds), expected);
+    }
+}
+
+#[test]
+fn centered_punctuation_uses_middle_only_within_width_and_position_limits() {
+    let category = GeneralCategory::OtherPunctuation;
+    let cases = [
+        (bounds(2.5, 7.5), HanClass::Middle),
+        (bounds(2.4, 7.4), HanClass::Other),
+        (bounds(2.5, 7.6), HanClass::Other),
+    ];
+    for (glyph_bounds, expected) in cases {
+        assert_eq!(
+            classify_bounds('、', category, 10.0, glyph_bounds, false),
+            expected
+        );
+    }
+}
+
+#[test]
+fn quote_pair_rejects_missing_glyph_and_mismatched_roles() -> Result<(), String> {
+    let (font, metrics) = font_metrics()?;
+    assert!(!super::quote_pair(
+        &font,
+        &metrics,
+        ['(', '\u{10ffff}'],
+        HanClass::Open
+    ));
+    for character in ['(', ')', '[', ']'] {
+        let glyph = font
+            .charmap()
+            .map(character)
+            .ok_or("bracket glyph unavailable")?;
+        let advance = metrics
+            .advance_width(glyph)
+            .ok_or("bracket advance unavailable")?;
+        let glyph_bounds = metrics.bounds(glyph).ok_or("bracket bounds unavailable")?;
+        for expected in [HanClass::Open, HanClass::Close] {
+            assert_eq!(
+                super::quote_pair(&font, &metrics, [character, character], expected),
+                super::metric_class(advance, glyph_bounds) == Some(expected)
+            );
+        }
+    }
+    Ok(())
+}

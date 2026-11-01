@@ -4,6 +4,8 @@ use serde_json::json;
 use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 
+#[path = "render_attestation_classic_manifest_write_tests.rs"]
+mod manifest_write;
 #[path = "render_attestation_classic_typed_fields_tests.rs"]
 mod typed_fields;
 
@@ -14,6 +16,14 @@ fn request_json(zenuml: bool) -> String {
         "background":"white","fill":"white","text":"black","stroke":"black",
         "arrow":"black","diagramType":if zenuml {"zenuml"} else {"flowchart"}})
     .to_string()
+}
+
+fn unit_tempdir() -> anyhow::Result<TempDir> {
+    let parent = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+        "../../tmp/quality/mermaid-attestation-classic-capture-implementation-r1/unit-artifacts",
+    );
+    std::fs::create_dir_all(&parent)?;
+    Ok(TempDir::new_in(std::fs::canonicalize(parent)?)?)
 }
 
 fn request(value: &str, count: u64) {
@@ -252,12 +262,7 @@ fn verify_artifact_bytes_and_reject_existing_destination(
     value: &str,
     state: CaptureState,
 ) -> anyhow::Result<()> {
-    let parent = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
-        "../../tmp/quality/mermaid-attestation-classic-capture-implementation-r1/unit-artifacts",
-    );
-    std::fs::create_dir_all(&parent)?;
-    let parent = std::fs::canonicalize(parent)?;
-    let tempdir = TempDir::new_in(parent)?;
+    let tempdir = unit_tempdir()?;
     let root = tempdir.path();
     let capture = write_capture(root, state)?;
     capture.verify()?;
