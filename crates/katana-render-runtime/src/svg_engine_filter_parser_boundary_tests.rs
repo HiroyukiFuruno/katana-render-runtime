@@ -25,6 +25,7 @@ fn invalid_filter_definition_drops_only_its_filtered_shape(
 #[test]
 fn filter_functions_without_object_bounds_skip_only_the_empty_group_filter() -> Result<(), String> {
     let tree = parse_svg(EMPTY_GROUP_FILTER_SVG)?;
+    assert!(log::log_enabled!(log::Level::Warn));
     assert!(group_by_id(&tree, "empty")?.filters().is_empty());
     assert_eq!(group_by_id(&tree, "bounded")?.filters().len(), 1);
     Ok(())
@@ -132,6 +133,16 @@ fn parse_filter(primitive: &str) -> Result<usvg::Tree, String> {
 }
 
 fn parse_svg(source: &str) -> Result<usvg::Tree, String> {
+    static LOGGER: std::sync::Once = std::sync::Once::new();
+    LOGGER.call_once(|| {
+        if let Err(error) = env_logger::Builder::new()
+            .is_test(true)
+            .filter_level(log::LevelFilter::Warn)
+            .try_init()
+        {
+            assert!(log::log_enabled!(log::Level::Warn), "{error}");
+        }
+    });
     usvg::Tree::from_str(source, &usvg::Options::default()).map_err(|error| error.to_string())
 }
 
