@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { runInNewContext } from "node:vm";
-import { parseSync, transformSync, version as swcVersion } from "@swc/core";
+import { parseSync, version as swcVersion, transformSync } from "@swc/core";
 import { z } from "zod";
 import { changedCompilerInputRead } from "../quality/compiler-input-test-helper";
 import {

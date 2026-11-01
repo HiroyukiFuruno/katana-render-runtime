@@ -231,19 +231,20 @@ function reportsModePlan(
 ): ReportsPlan | undefined {
   if (mode !== "reports-final" && mode !== "reports-interim") return undefined;
   const root = acceptanceRunRoot(argv, 1);
-  const plan: ReportsPlan = mode === "reports-final"
-    ? {
-        kind: "reports",
-        phase: "final",
-        visualReport: "tmp/html-fidelity/visual-feature-results.json",
-        scriptReport: "tmp/html-fidelity/dynamic/script-feature-results.json",
-      }
-    : {
-        kind: "reports",
-        phase: "interim",
-        visualReport: "tmp/html-fidelity/interim/interim-visual-feature-results.json",
-        scriptReport: "tmp/html-fidelity/dynamic-interim/interim-script-feature-results.json",
-      };
+  const plan: ReportsPlan =
+    mode === "reports-final"
+      ? {
+          kind: "reports",
+          phase: "final",
+          visualReport: "tmp/html-fidelity/visual-feature-results.json",
+          scriptReport: "tmp/html-fidelity/dynamic/script-feature-results.json",
+        }
+      : {
+          kind: "reports",
+          phase: "interim",
+          visualReport: "tmp/html-fidelity/interim/interim-visual-feature-results.json",
+          scriptReport: "tmp/html-fidelity/dynamic-interim/interim-script-feature-results.json",
+        };
   return root
     ? {
         ...plan,
