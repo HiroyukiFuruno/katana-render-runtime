@@ -344,17 +344,19 @@ def _add_provenance_ref(refs: dict[str, JsonObject], path: str, checksum: str) -
 def validate_context_input_refs(
     before_context: JsonObject, expected: JsonObject, snapshot: JsonObject,
     capture: JsonObject | None, links: list[JsonObject], provenance: list[JsonObject],
+    execution_inputs: list[JsonObject],
 ) -> dict[str, JsonObject]:
     context_rows = _objects(before_context["inputs"], "context inputs")
     context_inputs = {_text(row["path"], "context input path"): row for row in context_rows}
     require(len(context_inputs) == len(context_rows), "duplicate context input")
     refs = [_object(expected["operationPlanRef"], "operation reference"),
-            _object(expected["domStateRef"], "DOM reference"), snapshot]
+            _object(expected["domStateRef"], "DOM reference"), snapshot, *execution_inputs]
     if capture is not None:
         for key in ("operationEvidenceRef", "catalogManifestRef", "catalogPlanRef",
                     "catalogCaptureValidationRef", "catalogBinaryProofRef", "catalogBuildReportRef",
                     "catalogCaptureBinaryRef", "catalogCurrentBuildReportRef", "chromeCaptureRef",
-                    "chromeReceiptRef"):
+                    "chromeReceiptRef", "fontIdentityRequestRef", "fontIdentityResponseRef",
+                    "fontIdentityProbeBinary"):
             refs.append(_object(expected[key], key))
         refs.extend([capture, *links, *provenance])
     for ref in refs:
@@ -364,6 +366,32 @@ def validate_context_input_refs(
         require(item["exists"] is True and item["sha256"] == ref["sha256"],
                 "measurement input context differs")
     return context_inputs
+
+
+def planned_execution_inputs(root: Path, expected: JsonObject,
+                             binaries: Mapping[str, JsonObject]) -> list[JsonObject]:
+    arms = _object(expected["arms"], "expected arms")
+    baseline = baseline_arm_id(expected)
+    require(set(binaries) == {"baseline", "candidate"}, "execution binary roles differ")
+    refs: list[JsonObject] = []
+    for role, raw_arm in (("baseline", baseline), ("candidate", "candidate")):
+        binary = binaries[role]
+        arm = _object(arms[raw_arm], "expected arm")
+        require(binary.get("sha256") == arm.get("binary_sha256"), "execution binary role differs")
+        refs.append(binary)
+        refs.append(_object(arm.get("build_artifact_ref"), "execution build artifact"))
+    catalog = expected.get("catalogCondition")
+    fixture = (_text(_object(catalog, "catalog condition")["fixture_path"], "fixture path")
+               if catalog is not None else str(root / "tests/fixtures/html/interaction-fidelity.html"))
+    refs.extend([{"path": fixture, "sha256": expected["fixture_sha256"]},
+                 {"path": str(root / HARNESS_ROOT / "Cargo.lock"), "sha256": LOCK_SHA}])
+    return refs
+
+
+def require_execution_binary_role(row: JsonObject, binary: JsonObject) -> None:
+    require(row.get("executable") == binary.get("path")
+            and row.get("executable_sha256") == binary.get("sha256"),
+            "execution binary differs from role proof")
 
 
 def _integer(value: object, label: str) -> int:
@@ -2035,9 +2063,16 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
                      or target.get("selector") == catalog.get("target_selector")),
                 "catalog raw operation target differs")
     provenance_refs = provenance_file_refs(dom) if catalog_expected is not None else []
+    binary_refs = {
+        role: _object(bundle.json(_object(expected_arms[raw_arm], "expected arm")
+                                  ["build_artifact_ref"]).get("frozenBinary"),
+                      "execution frozen binary")
+        for role, raw_arm in (("baseline", expected_baseline), ("candidate", "candidate"))
+    }
     context_inputs = validate_context_input_refs(
         before_context, expected, _object(source_pair["snapshot"], "snapshot reference"),
         capture_ref if catalog_expected is not None else None, link_capture_refs, provenance_refs,
+        planned_execution_inputs(root, expected, binary_refs),
     )
     require(manifest["measurement_executed"] is True and manifest["input_sha256"] == expected["fixture_sha256"] and manifest["environment_sha256"] == provenance["environment_sha256"], "runner context differs")
     if catalog_expected is not None:
@@ -2074,6 +2109,7 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
         raw_arm = expected_baseline if arm == "baseline" else arm
         binary_sha = _object(expected_arms[raw_arm], "expected arm")["binary_sha256"]
         require(row["arm"] == arm and type(row["pair_index"]) is int and row["pair_index"] == pair and row["executable_sha256"] == binary_sha, "pair order/binary differs")
+        require_execution_binary_role(row, binary_refs[arm])
         bundle.file({"path": row["executable"], "sha256": binary_sha})
         binary_context = context_inputs[_text(row["executable"], "executable path")]
         require(binary_context["exists"] is True and binary_context["sha256"] == binary_sha, "binary context proof differs")

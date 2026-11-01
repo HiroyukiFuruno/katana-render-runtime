@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import copy
+import ast
+import inspect
 import json
 import errno
 import io
@@ -690,23 +692,69 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
             with self.subTest(attempts=len(attempts)), self.assertRaises((ValueError, TypeError)):
                 producer._resume_catalog_validation_pin(bundle, {"attempts": attempts})
 
+    def test_resume_builds_reuse_only_the_declared_frozen_binary(self) -> None:
+        directory = self.root / "resume-builds"
+        pins: dict[str, typed_producer.FilePin] = {}
+        artifacts: dict[str, typed_producer.FilePin] = {}
+        for role in ("baseline", "candidate"):
+            binary = directory / role / "binary"
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b"same executable")
+            binary.chmod(0o755)
+            pins[role] = {"path": str(binary), "sha256": gate.sha256(binary)}
+            artifacts[role] = producer.write(directory / role / "artifact.json",
+                                             {"frozenBinary": pins[role]})
+        arms: gate.JsonObject = {
+            gate.DEFAULT_BASELINE_ARM_ID: {"build_artifact_ref": artifacts["baseline"],
+                                          "binary_sha256": pins["baseline"]["sha256"]},
+            "candidate": {"build_artifact_ref": artifacts["candidate"],
+                          "binary_sha256": pins["candidate"]["sha256"]},
+        }
+        expected = producer.write(directory / "expected.json", {"arms": arms})
+        bundle_path = directory / "bundle"
+        producer.write_transport_bundle(bundle_path, "a" * 40,
+                                        [*pins.values(), *artifacts.values(), expected], [])
+        bundle = gate.Bundle(bundle_path)
+        receipt: gate.JsonObject = {"buildArtifacts": artifacts, "buildPins": []}
+        attempts = [{"expected": expected}]
+        builds, _, _ = producer._resume_builds(bundle, receipt, attempts)
+        self.assertEqual(str(builds["candidate"].binary), pins["candidate"]["path"])
+        bad_receipt: gate.JsonObject = {"buildArtifacts": {"baseline": artifacts["baseline"],
+                                                          "candidate": artifacts["baseline"]},
+                                       "buildPins": []}
+        with self.assertRaisesRegex(ValueError, "role proof differs"):
+            producer._resume_builds(bundle, bad_receipt, attempts)
+        candidate = Path(pins["candidate"]["path"])
+        candidate.write_bytes(b"changed")
+        with self.assertRaisesRegex(ValueError, "SHA256 differs"):
+            producer._resume_builds(bundle, receipt, attempts)
+        candidate.unlink()
+        with self.assertRaises(ValueError):
+            producer._resume_builds(bundle, receipt, attempts)
+        candidate.symlink_to(Path(pins["baseline"]["path"]))
+        with self.assertRaisesRegex(ValueError, "canonical regular file"):
+            producer._resume_builds(bundle, receipt, attempts)
+
     def test_context_preflight_checks_every_catalog_input_reference(self) -> None:
         keys = ("operationPlanRef", "domStateRef", "operationEvidenceRef", "catalogManifestRef",
                 "catalogPlanRef", "catalogCaptureValidationRef", "catalogBinaryProofRef",
                 "catalogBuildReportRef", "catalogCaptureBinaryRef", "catalogCurrentBuildReportRef",
-                "chromeCaptureRef", "chromeReceiptRef")
+                "chromeCaptureRef", "chromeReceiptRef", "fontIdentityRequestRef",
+                "fontIdentityResponseRef", "fontIdentityProbeBinary")
         expected: gate.JsonObject = {key: {"path": key, "sha256": key} for key in keys}
         extra: list[gate.JsonObject] = [
             {"path": key, "sha256": key} for key in ("snapshot", "capture", "link", "font")
         ]
         refs = [cast(gate.JsonObject, expected[key]) for key in keys] + extra
-        binary: gate.JsonObject = {"path": "binary", "sha256": "binary", "exists": True}
-        context: gate.JsonObject = {"inputs": [{**ref, "exists": True} for ref in refs] + [binary]}
+        execution: list[gate.JsonObject] = [{"path": name, "sha256": name}
+                                            for name in ("binary", "fixture", "lock")]
+        refs.extend(execution)
+        context: gate.JsonObject = {"inputs": [{**ref, "exists": True} for ref in refs]}
         def validate(value: gate.JsonObject) -> None:
-            gate.validate_context_input_refs(value, expected, extra[0], extra[1], [extra[2]], [extra[3]])
+            gate.validate_context_input_refs(value, expected, extra[0], extra[1], [extra[2]], [extra[3]], execution)
         validate(context)
-        checked = gate.validate_context_input_refs(context, expected, extra[0], extra[1], [extra[2]], [extra[3]])
-        self.assertEqual(checked["binary"], binary)
+        checked = gate.validate_context_input_refs(context, expected, extra[0], extra[1], [extra[2]], [extra[3]], execution)
+        self.assertEqual(checked["binary"]["sha256"], "binary")
         for ref in refs:
             rows = [{**item, "exists": True} for item in refs if item != ref]
             with self.subTest(path=ref["path"]), self.assertRaisesRegex(ValueError, "context is missing"):
@@ -716,6 +764,73 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
             rows[0].update(change)
             with self.subTest(change=change), self.assertRaisesRegex(ValueError, "context differs"):
                 validate({"inputs": rows})
+
+    def test_planned_input_validation_rejects_later_missing_references(self) -> None:
+        snapshot: gate.JsonObject = {"path": "snapshot", "sha256": "snapshot"}
+        first: gate.JsonObject = {"operationPlanRef": {"path": "first", "sha256": "first"},
+                                  "domStateRef": {"path": "dom", "sha256": "dom"}}
+        later: gate.JsonObject = {"operationPlanRef": {"path": "later", "sha256": "later"},
+                                  "domStateRef": {"path": "dom", "sha256": "dom"}}
+        execution: list[gate.JsonObject] = [{"path": name, "sha256": name}
+                                            for name in ("binary", "fixture", "lock")]
+        refs = [snapshot, cast(gate.JsonObject, first["operationPlanRef"]),
+                cast(gate.JsonObject, first["domStateRef"]),
+                cast(gate.JsonObject, later["operationPlanRef"]), *execution]
+        plans: list[tuple[gate.JsonObject, gate.JsonObject, gate.JsonObject | None,
+                          list[gate.JsonObject], list[gate.JsonObject], list[gate.JsonObject]]] = [
+            (expected, snapshot, None, [], [], execution) for expected in (first, later)
+        ]
+        producer._validate_planned_inputs({"inputs": [{**ref, "exists": True} for ref in refs]}, plans)
+        for absent in ("later", "binary", "fixture", "lock"):
+            context: gate.JsonObject = {"inputs": [{**ref, "exists": True} for ref in refs
+                                                   if ref["path"] != absent]}
+            with self.subTest(absent=absent):
+                with self.assertRaisesRegex(ValueError, "context is missing"):
+                    producer._validate_planned_inputs(context, plans)
+
+    def test_producer_unconditionally_validates_all_planned_rows_before_worker_loop(self) -> None:
+        parsed = ast.parse(inspect.getsource(producer.produce))
+        function = parsed.body[0]
+        self.assertIsInstance(function, ast.FunctionDef)
+        if not isinstance(function, ast.FunctionDef):
+            raise AssertionError("expected producer function")
+
+        def calls(node: ast.AST, name: str) -> bool:
+            return any(isinstance(item, ast.Call) and isinstance(item.func, ast.Name)
+                       and item.func.id == name for item in ast.walk(node))
+
+        assembly = [index for index, node in enumerate(function.body)
+                    if isinstance(node, ast.For) and isinstance(node.iter, ast.Name)
+                    and node.iter.id == "all_measurement_rows"
+                    and calls(node, "planned_expected")]
+        validation = [index for index, node in enumerate(function.body)
+                      if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+                      and isinstance(node.value.func, ast.Name)
+                      and node.value.func.id == "_validate_planned_inputs"
+                      and any(isinstance(arg, ast.Name) and arg.id == "planned_inputs"
+                              for arg in node.value.args)]
+        worker = [index for index, node in enumerate(function.body)
+                  if isinstance(node, ast.For) and isinstance(node.iter, ast.Name)
+                  and node.iter.id == "measurement_rows"
+                  and calls(node, "_collect_condition_worker_pairs")]
+        self.assertEqual(len(assembly), 1)
+        self.assertEqual(len(validation), 1)
+        self.assertEqual(len(worker), 1)
+        self.assertLess(assembly[0], validation[0])
+        self.assertLess(validation[0], worker[0])
+        self.assertTrue(all(not calls(node, "_collect_condition_worker_pairs")
+                            for node in function.body[:validation[0]]))
+        row_loop = function.body[assembly[0]]
+        self.assertIsInstance(row_loop, ast.For)
+        if not isinstance(row_loop, ast.For):
+            raise AssertionError("expected planned row loop")
+        self.assertFalse(any(isinstance(node, (ast.Break, ast.Continue, ast.Return))
+                             for node in ast.walk(row_loop)))
+        self.assertTrue(any(isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+                            and isinstance(node.value.func, ast.Attribute)
+                            and isinstance(node.value.func.value, ast.Name)
+                            and node.value.func.value.id == "planned_inputs"
+                            and node.value.func.attr == "append" for node in row_loop.body))
 
     def failed_batch_fixture(
         self,

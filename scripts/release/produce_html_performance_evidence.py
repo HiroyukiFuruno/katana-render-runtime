@@ -906,6 +906,44 @@ def _resume_catalog_validation_pin(bundle: gate.Bundle, receipt: Mapping[str, ob
     return pins[0]
 
 
+def _resume_builds(
+    bundle: gate.Bundle, receipt: Mapping[str, object], attempts: Sequence[Mapping[str, FilePin]],
+) -> tuple[dict[str, ArmBuildResult], dict[str, FilePin], list[FilePin]]:
+    gate.require(bool(attempts), "resume requires a completed build-bound attempt")
+    expected = bundle.json(attempts[0]["expected"])
+    arms = gate._object(expected.get("arms"), "resume expected arms")
+    baseline = gate.baseline_arm_id(expected)
+    artifacts = gate._object(receipt.get("buildArtifacts"), "resume build artifacts")
+    builds: dict[str, ArmBuildResult] = {}
+    artifact_pins: dict[str, FilePin] = {}
+    for role, raw_arm in (("baseline", baseline), ("candidate", "candidate")):
+        artifact = _receipt_file_pin(artifacts.get(role), "resume build artifact")
+        arm = gate._object(arms.get(raw_arm), "resume expected arm")
+        gate.require(arm.get("build_artifact_ref") == artifact, "resume build role proof differs")
+        proof = bundle.json(artifact)
+        binary = _receipt_file_pin(proof.get("frozenBinary"), "resume frozen binary")
+        bundle.file(binary)
+        gate.require(binary["sha256"] == arm.get("binary_sha256")
+                     and os.access(binary["path"], os.X_OK), "resume frozen binary differs")
+        builds[role] = ArmBuildResult([], Path(binary["path"]), binary["sha256"], proof, [])
+        artifact_pins[role] = artifact
+    pins = [_receipt_file_pin(item, "resume build pin")
+            for item in gate._array(receipt.get("buildPins"), "resume build pins")]
+    for pin in pins:
+        bundle.file(pin)
+    return builds, artifact_pins, pins
+
+
+def _validate_planned_inputs(
+    context_value: gate.JsonObject,
+    plans: Sequence[tuple[gate.JsonObject, gate.JsonObject, gate.JsonObject | None,
+                          list[gate.JsonObject], list[gate.JsonObject], list[gate.JsonObject]]],
+) -> None:
+    for expected, snapshot, capture, links, provenance, execution in plans:
+        gate.validate_context_input_refs(context_value, expected, snapshot, capture,
+                                         links, provenance, execution)
+
+
 def _validate_resume_batch(
     receipt: Mapping[str, object],
     bundle: gate.Bundle,
@@ -2530,7 +2568,15 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     builds: dict[str, ArmBuildResult] = {}
     build_artifact_refs: dict[str, FilePin] = {}
     build_pins: list[FilePin] = []
-    for arm in ("baseline", "candidate"):
+    if resumed_bundle is not None and resumed_receipt is not None:
+        builds, build_artifact_refs, build_pins = _resume_builds(
+            resumed_bundle, resumed_receipt, resumed_attempts,
+        )
+        binaries = {arm: build.binary for arm, build in builds.items()}
+        if reference_wrapper_pin is not None:
+            gate.require(build_artifact_refs["baseline"] == reference_wrapper_pin,
+                         "resume baseline reference proof differs")
+    for arm in (() if resumed_receipt is not None else ("baseline", "candidate")):
         if arm == "baseline" and reference_proof is not None and reference_wrapper_pin is not None:
             build = ArmBuildResult([], reference_proof.frozen_binary_path,
                                    reference_proof.binary_sha256, {}, [])
@@ -2671,19 +2717,8 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             resumed_receipt, resumed_bundle, resumed_attempts, head=head, source=initial,
             before_context=before_context, after_context=before_context, arms=arms,
         )
-    transport_attempts: list[dict[str, FilePin]] = list(resumed_attempts)
-    expected_all: list[tuple[Path, ExpectedPerformance, gate.JsonObject, FilePin]] = []
-    completed_rows: list[gate.JsonObject] = []
-    checkpoint_pins: list[FilePin] = []
-    worker_attempt_pins: list[FilePin] = []
-    for row in measurement_rows:
-        try:
-            _require_batch_budget(batch_deadline)
-        except BatchBudgetExhausted as error:
-            batch_failure = error
-            break
+    def planned_expected(row: gate.JsonObject) -> ExpectedPerformance:
         fixture = cast(Path, row["fixture"])
-        plan_path = cast(Path, row["plan_path"])
         plan_pin = cast(FilePin, gate._object(row["plan_pin"], "operation plan pin"))
         plan_data = gate._object(row["plan"], "operation plan")
         row_dom = row["dom"]
@@ -2691,8 +2726,6 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         row_viewport = gate._object(row["viewport"], "measurement viewport")
         width = gate._integer(row_viewport.get("width"), "viewport width")
         height = gate._integer(row_viewport.get("height"), "viewport height")
-        folder = output / gate._text(row["folder_name"], "measurement folder")
-        folder.mkdir()
         operation_name = gate._text(plan_data.get("operation") if not row["catalog"]
                                     else plan_data.get("operationKind"), "operation name")
         fixture_sha256 = gate._text(row["fixture_sha256"], "fixture SHA")
@@ -2725,14 +2758,55 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             expected["catalogBuildReportRef"] = catalog_binary_refs.build_report_ref
             expected["catalogCaptureBinaryRef"] = catalog_binary_refs.binary_ref
             expected["catalogCurrentBuildReportRef"] = catalog_binary_refs.current_build_report_ref
-            preflight_evidence = gate.read_json(Path(dom_ref["path"]))
-            gate.validate_context_input_refs(
-                cast(gate.JsonObject, before_context), cast(gate.JsonObject, expected),
-                cast(gate.JsonObject, build_inputs.snapshot),
-                cast(gate.JsonObject, row["capture"]),
-                cast(list[gate.JsonObject], row["link_captures"]),
-                gate.provenance_file_refs(preflight_evidence),
-            )
+        return expected
+
+    binary_refs: dict[str, gate.JsonObject] = {
+        role: {"path": str(build.binary), "sha256": build.binary_sha256}
+        for role, build in builds.items()
+    }
+    for role, artifact in build_artifact_refs.items():
+        proof = _pinned_json(Path(artifact["path"]), artifact["sha256"])
+        gate.require(proof.get("frozenBinary") == binary_refs[role],
+                     "planned executable differs from its role proof")
+    planned: dict[str, ExpectedPerformance] = {}
+    planned_inputs: list[tuple[gate.JsonObject, gate.JsonObject, gate.JsonObject | None,
+                               list[gate.JsonObject], list[gate.JsonObject], list[gate.JsonObject]]] = []
+    for row in all_measurement_rows:
+        expected = planned_expected(row)
+        name = gate._text(row["folder_name"], "measurement folder")
+        gate.require(name not in planned, "measurement folders are duplicated")
+        planned[name] = expected
+        evidence = gate.read_json(Path(expected["domStateRef"]["path"])) if row["catalog"] else None
+        planned_inputs.append((
+            cast(gate.JsonObject, expected),
+            cast(gate.JsonObject, build_inputs.snapshot),
+            cast(gate.JsonObject, row["capture"]) if row["catalog"] else None,
+            cast(list[gate.JsonObject], row["link_captures"]) if row["catalog"] else [],
+            gate.provenance_file_refs(evidence) if evidence is not None else [],
+            gate.planned_execution_inputs(root, cast(gate.JsonObject, expected), binary_refs),
+        ))
+    _validate_planned_inputs(cast(gate.JsonObject, before_context), planned_inputs)
+    transport_attempts: list[dict[str, FilePin]] = list(resumed_attempts)
+    expected_all: list[tuple[Path, ExpectedPerformance, gate.JsonObject, FilePin]] = []
+    completed_rows: list[gate.JsonObject] = []
+    checkpoint_pins: list[FilePin] = []
+    worker_attempt_pins: list[FilePin] = []
+    for row in measurement_rows:
+        try:
+            _require_batch_budget(batch_deadline)
+        except BatchBudgetExhausted as error:
+            batch_failure = error
+            break
+        fixture = cast(Path, row["fixture"])
+        plan_path = cast(Path, row["plan_path"])
+        plan_data = gate._object(row["plan"], "operation plan")
+        row_viewport = gate._object(row["viewport"], "measurement viewport")
+        width = gate._integer(row_viewport.get("width"), "viewport width")
+        height = gate._integer(row_viewport.get("height"), "viewport height")
+        folder = output / gate._text(row["folder_name"], "measurement folder")
+        folder.mkdir()
+        expected = planned[gate._text(row["folder_name"], "measurement folder")]
+        viewport_value = expected["viewport"]
         try:
             collection = _collect_condition_worker_pairs(
                 folder=folder, row=row, expected=expected, fixture=fixture,
@@ -2807,9 +2881,9 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         if row["dom"] is not None:
             refs.append(FilePin(path=str(row["dom"]), sha256=gate.sha256(cast(Path, row["dom"]))))
         if row["catalog"]:
-            evidence = cast(FilePin, row["operation_evidence"])
+            operation_evidence_pin = cast(FilePin, row["operation_evidence"])
             capture = cast(FilePin, row["capture"])
-            refs.extend([evidence, capture,
+            refs.extend([operation_evidence_pin, capture,
                          cast(SizedFilePin, row["chrome_capture"]),
                          cast(SizedFilePin, row["chrome_receipt"]),
                          cast(SizedFilePin, row["font_identity_request"]),

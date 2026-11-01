@@ -881,6 +881,11 @@ class PerformanceEvidenceTest(unittest.TestCase):
             arm: self.add_file(f"/captured/{arm}-binary", f"common/{arm}-binary", arm.encode())
             for arm in ("baseline", "candidate")
         }
+        self.artifact_refs: dict[str, JsonObject] = {
+            arm: self.add_file(f"/captured/{arm}-build.json", f"common/{arm}-build.json",
+                               {"frozenBinary": binary})
+            for arm, binary in self.binary_refs.items()
+        }
         self.snapshot_pin: JsonObject | None = None
         self.context_pins: dict[str, JsonObject] | None = None
         self.report_paths: list[list[Path]] = []
@@ -1158,7 +1163,15 @@ class PerformanceEvidenceTest(unittest.TestCase):
         binary_refs = self.binary_refs
         context_pins = self.context_pins
         if context_pins is None:
-            inputs = [{"path": ref["path"], "exists": True, "sha256": ref["sha256"]} for ref in (self.plan_pin, self.dom_pin, snapshot_pin, *binary_refs.values())]
+            fixture_ref: JsonObject = {"path": str(self.root / "tests/fixtures/html/interaction-fidelity.html"),
+                                       "sha256": self.fixture_sha}
+            lock_ref: JsonObject = {"path": str(self.root / gate.HARNESS_ROOT / "Cargo.lock"),
+                                    "sha256": gate.LOCK_SHA}
+            context_refs: list[JsonObject] = [self.plan_pin, self.dom_pin, snapshot_pin,
+                                              *binary_refs.values(), *self.artifact_refs.values(),
+                                              fixture_ref, lock_ref]
+            inputs = [{"path": ref["path"], "exists": True, "sha256": ref["sha256"]}
+                      for ref in context_refs]
             context = {"source": source, "inputs": inputs, "registry": {}, "cache": {}, "cacheUnion": {"registry": {}, "target": {}}, "scope": {}, "config": [], "preference": {}, "toolContext": {"rustc": "rustc 1.97\nrelease", "cargo": "cargo 1.97\nrelease"}}
             context_pins = {
                 name: self.add_file(
@@ -1198,6 +1211,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
                 "binary_sha256": ref["sha256"],
                 "source_snapshot_sha256": snapshot_pin["sha256"],
                 "lock_sha256": gate.LOCK_SHA,
+                "build_artifact_ref": self.artifact_refs[arm],
             }
         manifest: JsonObject = {
             "measurement_executed": True,
@@ -2115,6 +2129,14 @@ class PerformanceEvidenceTest(unittest.TestCase):
 
 
 class BaselineArmContractTest(unittest.TestCase):
+    def test_execution_binary_role_rejects_same_hash_at_another_path(self) -> None:
+        proof: JsonObject = {"path": "/old/binary", "sha256": "a" * 64}
+        row: JsonObject = {"executable": "/old/binary", "executable_sha256": "a" * 64}
+        gate.require_execution_binary_role(row, proof)
+        row["executable"] = "/new/binary"
+        with self.assertRaisesRegex(ValueError, "execution binary differs"):
+            gate.require_execution_binary_role(row, proof)
+
     def test_default_keeps_legacy_public_sdk_arm(self) -> None:
         self.assertEqual(gate.baseline_arm_id({}), "baseline-0.4.23")
 
