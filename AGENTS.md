@@ -95,6 +95,14 @@
 - resize・スクロール・動的更新では、DOM・JavaScript状態・読み込み済み資源・フォント等の再利用と無効化条件を実装で追う。セッションを保持しているだけでキャッシュが十分と判断しない。不要な再parse、資源取得、フォント構築、重複layoutを確認する。
 - アンチパターンは「画像スコアが合格なので利用側も表示可能」「resize関数があるので高速」。正しくは、利用側との契約回帰、状態維持・無効化の回帰、実フレームが得られるまでの時間を対応付けて確認する。検索語: `consumer acceptance`, `scroll extent`, `resize cache`, `time to frame`。
 
+## 性能履歴と測定結果の再利用
+
+- 性能の過去結果は`docs/performance/html-performance-history.json`でGit管理する。回答・再計測の前に履歴を確認し、測定元commit、入力条件、試行数、時間・RSS、判定と証跡digestを更新する。会話やtmpだけを性能結果の保存先にしない。
+- 元の測定結果と現行版への再利用適格性を分ける。同じ実行ファイル・入力/資源/フォント/操作・計測プログラム/ツール/環境・判定条件なら、既存の厳格なvalidatorで原結果を再検証し、測定を重複実行しない。文書やtestだけの変更、Git HEADの変化だけを全再計測の理由にしない。
+- HEAD結合などで有効な結果を再利用できない場合は、既存検証の等価性契約を直す対象として追跡する。元receiptのhead/pinを書換えたり、Gitの集計値だけで現行版を合格にしたりしない。製品や測定条件が変わった場合は影響範囲を確認して再計測する。
+- 再利用を予約したbinary・closed原結果は既存の保護対象へ含める。cleanで失効した証跡を新binaryへ付け替えない。私有資料・生環境・認証情報はGitへ入れず、公開用の固定projectionだけを履歴へ保存する。
+- アンチパターン: 過去測定を探さず毎回全84条件を測り直す。正: Git履歴を確認→既存原結果の適格性を検証→変更が影響する条件だけを必要な範囲で再計測。検索語: `performance history`, `reuse before remeasure`, `same binary`, `historical evidence`。
+
 ## Branch Policy
 
 - 公開配布（crates.io）、release tag、公開CLI、公開API、package metadata に影響しない変更は `master` 直接作業でよい。

@@ -1,0 +1,75 @@
+{
+  "schema": "krr-html-performance-history-v1",
+  "records": [
+    {
+      "id": "html84-ea855b56-r6628",
+      "sourceCommit": "ea855b56b4c6733d3617e74da58133f4a10e68a8",
+      "verificationCompletedAtUtc": "2026-11-01T14:25:52.356452Z",
+      "bundleManifestSha256": "a824b5e21d2529c5d4926825aa8c99c2417323b5ae45286132d3e5f686ec3e71",
+      "scope": {
+        "catalog": "catalog-stage90",
+        "candidateConditions": 84,
+        "pairedConditions": 72,
+        "candidateOnlyConditions": 12,
+        "trialsPerConditionPerPhase": 25,
+        "candidateSamplesPerPhase": 2100,
+        "candidateAndBaselineSamplesPerPhase": 3900,
+        "phaseRecords": 23400,
+        "checks": 1680,
+        "aggregation": "candidate samples pooled across all 84 conditions; no-op phases included"
+      },
+      "measuredAcceptance": {
+        "verifierRun": "R6628",
+        "verifierExitCode": 0,
+        "performanceNonregression": true,
+        "htmlMinimumScore": 92.14438,
+        "htmlScoreThreshold": 90,
+        "outputFontIdentityEquivalence": "established"
+      },
+      "candidatePhaseStatistics": {
+        "cold_open": {
+          "maxSampleSeconds": 0.104136167,
+          "medianSeconds": 0.0699949585,
+          "p95Seconds": 0.08889632019999999,
+          "maxPeakRssBytes": 43384832
+        },
+        "full_y": {
+          "maxSampleSeconds": 0.026736,
+          "medianSeconds": 0.0000005,
+          "p95Seconds": 0.017747746149999983,
+          "maxPeakRssBytes": 55558144
+        },
+        "post_operation": {
+          "maxSampleSeconds": 0.0950575,
+          "medianSeconds": 0.0174421665,
+          "p95Seconds": 0.04570622885,
+          "maxPeakRssBytes": 57720832
+        },
+        "re_display": {
+          "maxSampleSeconds": 0.043863833,
+          "medianSeconds": 0.012756416500000001,
+          "p95Seconds": 0.02438474795,
+          "maxPeakRssBytes": 55558144
+        },
+        "same_session_resize": {
+          "maxSampleSeconds": 0.036037041,
+          "medianSeconds": 0.0127871455,
+          "p95Seconds": 0.024399262799999998,
+          "maxPeakRssBytes": 57982976
+        },
+        "warm_open": {
+          "maxSampleSeconds": 0.039832667,
+          "medianSeconds": 0.0157700835,
+          "p95Seconds": 0.02740534555,
+          "maxPeakRssBytes": 53788672
+        }
+      },
+      "evidence": {
+        "summaryRun": "R6630",
+        "summarySha256": "7ffbae0c2c4ad42db42a3d13413ca2863a7d7d041e9505bd6387af132f9c67d2",
+        "verifierStdoutSha256": "f489490e9533fa6838028003a89ed9755fe3eb7be72c531a2fe8e652e742b177"
+      },
+      "reuseStatus": "historical-result; current-source eligibility must be verified separately"
+    }
+  ]
+}

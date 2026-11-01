@@ -2,6 +2,9 @@
 
 ## 最新の再開地点（2026-11-02）
 
+- [/] 最新ユーザー指示のGit管理：正式R6628とsanitized R6630から`docs/performance/html-performance-history.json`へ全6段階の時間/RSS・84条件×25試行・測定元commit・正式判定・元データdigestを保存した。元の数値・件数・受入値・digestと全項目が一致。手順とAGENTSへ履歴参照を追加し、JSONはBiomeの必須対象へ追加、R6789は実1fileを検査して実0。原receipt/私有原本/環境値は不変・Git対象外。
+- [ ] 性能再利用の未完部分：文書/testだけの変更で全84条件を取り直す過剰なHEAD結合を解く。元の測定と現行sourceへの再利用適格性を分け、元receiptは変更しない。同binary・計測プログラム/条件/入力/資源/フォント/ツール環境/判定の等価性を既存Bundle/parent proof検証へ追加し、実装・異常系回帰・正式検証を完了する。履歴保存だけを再利用gate完成としない。
+- [/] ユーザーの依存更新はparse5 8.0.1→8.1.0 / entities 8.1.0→9.0.0の2files。R6784通常回帰53/53、R6785正規Playwright回帰23/23が成功し、R6788標準pre-commit実0で取り込んだ。R6783はPlaywright用testをBunへ渡した実行入口の誤りで実1、結果を保持して正しいrunnerへ分離した。ユーザー実行のjust checkは終了し、Moon reportではautomation-contract-test / build-capacity-check / runtime-asset-script-otherの3taskが実1。個別rawは未取得であり依存更新が原因と断定しない。snapshotは`tmp/quality/resumed-owner-r3509/user-dependency-check-r6786/`、全体合格ではない。
 - [/] 最新全体R6770は5,215/5,215成功・29skip（実テスト347.542秒）、report/collection実0。R6771正式policyは83,277/84,498=98.55499538450614%・未到達1,221で実1。前回R6701より40行減・分母不変であり、共通化による行数削減とは報告しない。R6769/R6772 source stdout SHA `65b0592b47164324c290e80cf7c8d959e12af8cf1d2ad761186cf2f1d36a77bd` 一致。排他的分析copyは `tmp/quality/resumed-owner-r3509/current-root-coverage-report-r6773/`（公式位置839、summary差382は補完しない）。100%・未計測0は未達。
 - [ ] 共通化前の最小契約として、実DOMの対象と祖先それぞれにnth-childとlast-of-typeを指定し、実DOM→位置3値→selector評価の接続を固定する。既存の位置tuple単体・selector単体の成功だけで接続を保証したとしない。最新位置からは、入れ子middle文字の元contextを必要とする実SVG描画、実フォントの装飾table欠落、極小textLengthが複数分岐へ届く次候補。いずれも未実測で、入力を捏造して到達を作らない。
 - [/] R6774既存CAS診断はunit15成功後、現行Rust facts host不在のため全receiptが未検証として実1。改変試験へは進まず拒否しており成功扱いしない。直接run recipeでは前提DAGを満たさないため、次は既存Moonのruntime-script-cas-diagnostic taskから前提生成・全7系統検証を含めて実行する。元ログは保持し、cacheの正常hitだけでrestore/tamper条件を代用しない。

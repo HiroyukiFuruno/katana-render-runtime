@@ -10,6 +10,7 @@
       "crates/katana-render-runtime/src/renderer/backends/html_runtime/parser_body_onload.ts",
       "crates/katana-render-runtime/src/renderer/backends/html_runtime/host_parser_onload.d.ts",
       "scripts/quality/tsconfig-owned-*.json",
+      "docs/performance/*.json",
       "crates/katana-render-runtime/tests/fixtures/html_browser/resources/action.js",
       "scripts/runtime-bundles/runtime-css-variables.js",
       "tests/fixtures/quality-cache/*.ts",
