@@ -855,14 +855,25 @@ def _saved_phase_record_count(results: Sequence[gate.JsonObject]) -> int:
 
 
 def _resume_condition_plan(
-    batch: Path, bundle: gate.Bundle, condition_id: str,
+    bundle: gate.Bundle, receipt: Mapping[str, object], condition_id: str,
+    expected_plan: gate.JsonObject,
 ) -> tuple[Path, gate.JsonObject, FilePin]:
     label = re.sub(r"[^a-zA-Z0-9.-]+", "_", condition_id)
-    path = batch / "conditions" / label / "operation-plan.json"
-    pin: FilePin = {"path": str(path.resolve()), "sha256": gate.sha256(path)}
-    _pinned_file(path, pin["sha256"])
-    bundle.file(pin)
-    return path, bundle.json(pin), pin
+    contexts = gate._object(receipt.get("contexts"), "resume context refs")
+    context_before = bundle.json(contexts["before"])
+    inputs = gate._objects(context_before.get("inputs"), "resume context inputs")
+    matches = [row for row in inputs
+               if Path(gate._text(row.get("path"), "resume plan path")).parts[-3:]
+               == ("conditions", label, "operation-plan.json")]
+    gate.require(len(matches) == 1, "resume condition plan is ambiguous or missing")
+    row = matches[0]
+    gate.require(row.get("exists") is True, "resume condition plan is unavailable")
+    pin = _receipt_file_pin(row, "resume condition plan")
+    gate.require(pin["path"] in bundle.files, "resume condition plan is absent from bundle")
+    plan = bundle.json(pin)
+    gate.require(plan.get("conditionId") == condition_id and plan == expected_plan,
+                 "resume condition plan differs from current declared plan")
+    return Path(pin["path"]), plan, pin
 
 
 def _resume_context_pin(
@@ -2638,11 +2649,12 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 "font_identity_response": condition["font_identity_response"],
                 "font_identity_binary_path": condition["font_identity_binary_path"],
                 "font_identity_binary_sha256": condition["font_identity_binary_sha256"]})
-    if resume_batch is not None and resumed_bundle is not None:
+    if resumed_receipt is not None and resumed_bundle is not None:
         for row in measurement_rows:
             condition_id = _row_condition_id(row)
             old_path, old_plan, old_pin = _resume_condition_plan(
-                resume_batch.resolve(), resumed_bundle, condition_id,
+                resumed_bundle, resumed_receipt, condition_id,
+                gate._object(row["plan"], "current condition plan"),
             )
             row["plan_path"], row["plan"], row["plan_pin"] = old_path, old_plan, old_pin
     all_measurement_rows = measurement_rows

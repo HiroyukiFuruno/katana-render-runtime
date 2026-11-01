@@ -595,6 +595,63 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         producer.write_transport_bundle(bundle_path, "a" * 40, [*pins, context], [])
         return gate.Bundle(bundle_path), {"contexts": {"before": context}}
 
+    def closed_plan_batch(
+        self, directory: Path, rows: list[gate.JsonObject],
+        pins: Sequence[typed_producer.FilePin],
+    ) -> tuple[gate.Bundle, gate.JsonObject]:
+        source = producer.write(directory / "source.json", {"head": "a" * 40})
+        context = producer.write(directory / "context.json", {"inputs": rows})
+        bundle_path = directory / "bundle"
+        producer.write_transport_bundle(bundle_path, "a" * 40, [source, context, *pins], [])
+        producer.write_batch_receipt(
+            directory, head="a" * 40, source_before=source, source_end=source,
+            context_before=context, context_end=context, build_artifacts={}, build_pins=[],
+            condition_ids=[], complete_condition_ids=[], policy_accepted=True,
+            attempts=[], bundle=bundle_path,
+        )
+        receipt, bundle, _ = producer.load_closed_batch(directory, self.root)
+        return bundle, receipt
+
+    def test_resume_plan_survives_multiple_closed_batches_without_repinning(self) -> None:
+        condition = "async/expected-state/1280x900@1"
+        label = "async_expected-state_1280x900_1"
+        plan: gate.JsonObject = {"conditionId": condition, "operationStream": []}
+        original = producer.write(self.root / "fresh/conditions" / label / "operation-plan.json", plan)
+        rows: list[gate.JsonObject] = [{**original, "exists": True}]
+        bundle, receipt = self.closed_plan_batch(self.root / "fresh", rows, [original])
+        for batch in ("resume-one", "resume-two"):
+            old_path, old_plan, pin = producer._resume_condition_plan(bundle, receipt, condition, plan)
+            self.assertEqual(pin, original)
+            self.assertEqual(old_path, Path(original["path"]))
+            self.assertEqual(old_plan, plan)
+            bundle, receipt = self.closed_plan_batch(self.root / batch, rows, [original])
+        old_path, _, pin = producer._resume_condition_plan(bundle, receipt, condition, plan)
+        self.assertEqual((old_path, pin), (Path(original["path"]), original))
+
+    def test_resume_plan_rejects_missing_duplicate_and_changed_inputs(self) -> None:
+        condition = "case/state/1280x900@1"
+        label = "case_state_1280x900_1"
+        plan: gate.JsonObject = {"conditionId": condition, "operationStream": []}
+        for case in ("missing", "duplicate", "unavailable", "content", "tampered",
+                     "sha", "bundle-missing", "wrong-condition"):
+            with self.subTest(case=case):
+                directory = self.root / case
+                stored: gate.JsonObject = ({**plan, "conditionId": "another"}
+                                           if case == "wrong-condition" else plan)
+                original = producer.write(directory / "origin/conditions" / label / "operation-plan.json", stored)
+                row: gate.JsonObject = {**original, "exists": case != "unavailable"}
+                if case == "sha":
+                    row["sha256"] = "0" * 64
+                rows = [] if case == "missing" else [row, row] if case == "duplicate" else [row]
+                pins = [] if case == "bundle-missing" else [original]
+                bundle, receipt = self.closed_plan_batch(directory / "batch", rows, pins)
+                if case == "tampered":
+                    Path(original["path"]).write_text("changed", encoding="utf-8")
+                current: gate.JsonObject = ({**plan, "operationStream": ["changed"]}
+                                            if case == "content" else plan)
+                with self.assertRaises(ValueError):
+                    producer._resume_condition_plan(bundle, receipt, condition, current)
+
     def test_resume_reuses_context_snapshot_across_output_directories(self) -> None:
         old = producer.write(self.root / "old/shared-source-snapshot.json", {"records": []})
         new = producer.write(self.root / "new/shared-source-snapshot.json", {"records": []})
