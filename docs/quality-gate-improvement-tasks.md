@@ -2,6 +2,11 @@
 
 ## 最新の再開地点（2026-11-03）
 
+- [x] R7217で製品PNGのMermaid全117図を正式に検証し、EN59/59・最低99.085711、JA58/58・最低99.10801000000001、描画失敗0、managed全体実0/accepted=trueを確認した。対象ソースは`75f49866`。各言語の`comparison/native-product-comparison/{scores,failures}.json`を製品側の集計とし、`comparison/scores.json`の中間SVG側を混同しない。原本・基準・閾値は変更していない。
+- [x] R7220の現行HTML84条件の取得が実0、R7221の独立検証も実0。全84画像90以上・最低92.14438、出力font完全一致established、診断0。性能は`measurement=not-performed`であり、画像合格を性能合格に代用しない。Mermaidの再検証に必要な`target/debug/krr`を後継の保護registryへ追加し、R7224で固定閾値内と保持を確認した。
+- [/] 性能開始前のR7226は、履歴lockを現行lockとして判定する不整合で実1・測定0。履歴Git commit/pin・元proofへ束縛してlocal/remote/fresh経路を分ける修正を実装し、型・Lint・元retained wrapperの実reader受理、R7238のproducer/verifier全291/291、独立reviewの具体P0/P1なしを確認した。古い原本・履歴・lock・受入条件は変更していない。修正を固定し、基準binaryを再利用する正式84性能へ戻る。
+- [ ] 正式性能84の各表示3秒未満・時間/RSS非劣化、長文全scroll/全TOC/実末尾/consumer契約の現行受入、coverage100%/未計測0、最新source完全gate、Draft review/個別reply/resolve、Ready後3OS CI、expected HEAD付き保護merge、公開3crate/Release、Issue close・cleanupを完了する。Rust coverageの最新正式値はR7193の98.60958133475457%・未到達1174のまま。
+
 - [/] 検証済み変更を通常commitへ固定した。`a1fcbc40`=公式rawの観測付き生成導線、`17b7b502`=全5,550件で確認したRust境界回帰、`6a790897`=既知の依存保持とfreshness gateの整合。追加のprivate test案は未適用のまま止め、candidate build proof→現行KRR製品PNG117図の99点判定→HTML84条件の実測へ進む。ソース固定後は採点と関係のない変更を増やさない。
 
 - [/] R7191は現行Rust cohortの5,550/5,550成功・既存29skip、実test323.852秒。R7192の正式coverage policyは83,261/84,435=98.60958133475457%・未到達1,174で不合格（前1,199から25減）。原copyを`tmp/quality/resumed-owner-r3509/current-root-coverage-report-r7193/`に保持。Root coverageの100%・未計測0は未達のまま。
