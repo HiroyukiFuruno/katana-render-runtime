@@ -1241,6 +1241,53 @@ class PerformanceEvidenceTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     remote_evidence.validate_remote_candidate_build(gate.Bundle(self.bundle), self.root, ref, self.head)
 
+    def test_historical_execution_binary_uses_authenticated_original_transport(self) -> None:
+        logical = "/captured/original-binary"
+        transported = "/captured/old-bundle/payload/binary"
+        original = self.add_file(logical, "history/original", b"binary")
+        self.add_file(transported, "history/transported", b"binary")
+        candidate = self.add_file("/captured/candidate", "history/candidate", b"candidate")
+        manifest = self.add_file("/captured/old-bundle/bundle.json", "history/bundle.json", {
+            "schema": "krr-html-performance-release-bundle-v1", "head": self.head,
+            "files": [{"originalPath": logical, "relativePath": "payload/binary", "sha256": original["sha256"]}],
+        })
+        wrapper = self.add_file("/captured/wrapper", "history/wrapper", {
+            "frozenBinary": original, "sourceBundleManifest": manifest})
+        candidate_build = self.add_file("/captured/candidate-build", "history/candidate-build",
+                                        {"frozenBinary": candidate})
+        self.save_transport()
+        role = "reference-history-record"
+        expected: JsonObject = {"referenceParent": {"role": role, "armId": role, "recordId": "record",
+            "referenceKind": "accepted-history-candidate", "originalArm": "candidate", "publishedSdk": False,
+            "wrapperRef": wrapper}, "arms": {role: {"build_artifact_ref": wrapper, "binary_sha256": original["sha256"]},
+                "candidate": {"build_artifact_ref": candidate_build}}}
+        validated: dict[str, JsonObject] = {"baseline": {"head": self.head, "binarySha256": original["sha256"],
+                                                        "buildArtifactSha256": wrapper["sha256"]}}
+        bundle = gate.Bundle(self.bundle)
+        binaries = gate.execution_binary_refs(bundle, expected, validated)
+        self.assertEqual(binaries, {"baseline": {"path": transported, "sha256": original["sha256"]},
+                                    "candidate": candidate})
+        gate.require_execution_binary_role({"executable": transported, "executable_sha256": original["sha256"]},
+                                           binaries["baseline"])
+        for role_name, path, sha in (("baseline", logical, original["sha256"]),
+                                      ("candidate", transported, candidate["sha256"])):
+            with self.subTest(role=role_name), self.assertRaisesRegex(ValueError, "execution binary differs"):
+                gate.require_execution_binary_role({"executable": path, "executable_sha256": sha}, binaries[role_name])
+        for changed in ({}, {"baseline": {**validated["baseline"], "buildArtifactSha256": "0" * 64}},
+                        {"baseline": {**validated["baseline"], "binarySha256": "0" * 64}}):
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                gate.execution_binary_refs(bundle, expected, changed)
+        original_json = bundle.json
+        def invalid_mapping(ref: object) -> JsonObject:
+            value = json_object(original_json(ref))
+            if ref == manifest:
+                return {**value, "files": [{"originalPath": logical, "relativePath": "../binary",
+                                            "sha256": original["sha256"]}]}
+            return value
+        with patch.object(bundle, "json", side_effect=invalid_mapping):
+            with self.assertRaisesRegex(ValueError, "historical binary transport path differs"):
+                gate.execution_binary_refs(bundle, expected, validated)
+
     def test_remote_candidate_binds_historical_lock_to_selected_git_and_snapshot(self) -> None:
         current_lock = self.root / gate.HARNESS_ROOT / "Cargo.lock"
         old = current_lock.read_bytes() + b"\n# historical fixture\n"

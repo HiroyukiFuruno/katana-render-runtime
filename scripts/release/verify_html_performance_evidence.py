@@ -426,6 +426,49 @@ def require_execution_binary_role(row: JsonObject, binary: JsonObject) -> None:
             "execution binary differs from role proof")
 
 
+def execution_binary_refs(bundle: Bundle, expected: JsonObject,
+                          validated_builds: Mapping[str, JsonObject] | None) -> dict[str, JsonObject]:
+    arms = _object(expected["arms"], "expected arms")
+    baseline = baseline_arm_id(expected)
+    binaries = {role: _object(bundle.json(_object(arms[arm], "expected arm")
+                                         ["build_artifact_ref"]).get("frozenBinary"), "execution frozen binary")
+                for role, arm in (("baseline", baseline), ("candidate", "candidate"))}
+    contract = expected.get("referenceParent")
+    if not isinstance(contract, dict) or contract.get("referenceKind") != "accepted-history-candidate":
+        return binaries
+    if validated_builds is None or "baseline" not in validated_builds:
+        raise ValueError("verified reference parent build is missing")
+    build = validated_builds["baseline"]
+    arm = _object(arms[baseline], "expected baseline")
+    wrapper_ref = _object(arm.get("build_artifact_ref"), "reference wrapper")
+    require(wrapper_ref == contract.get("wrapperRef")
+            and wrapper_ref.get("sha256") == build.get("buildArtifactSha256"),
+            "reference wrapper validation differs")
+    wrapper = bundle.json(wrapper_ref)
+    manifest_ref = _object(wrapper.get("sourceBundleManifest"), "historical manifest")
+    manifest = bundle.json(manifest_ref)
+    require(manifest.get("schema") == "krr-html-performance-release-bundle-v1"
+            and manifest.get("head") == build.get("head"), "historical manifest identity differs")
+    frozen = binaries["baseline"]
+    require(frozen.get("sha256") == build.get("binarySha256") == arm.get("binary_sha256"),
+            "reference binary identity differs")
+    rows = [row for row in _objects(manifest.get("files"), "historical manifest files")
+            if row.get("originalPath") == frozen.get("path") and row.get("sha256") == frozen.get("sha256")]
+    require(len(rows) == 1, "historical binary transport differs")
+    relative = _text(rows[0].get("relativePath"), "historical binary transport path")
+    relative_path = PurePosixPath(relative)
+    require(bool(relative_path.parts) and not relative_path.is_absolute() and relative_path.as_posix() == relative
+            and all(part not in {".", ".."} for part in relative_path.parts),
+            "historical binary transport path differs")
+    _, manifest_path = _logical_absolute_path(manifest_ref.get("path"), "historical manifest path")
+    require(manifest_path.name == "bundle.json", "historical manifest path differs")
+    recorded = {"path": str(manifest_path.parent.joinpath(*relative_path.parts)), "sha256": frozen["sha256"]}
+    bundle.file(frozen)
+    bundle.file(recorded)
+    binaries["baseline"] = recorded
+    return binaries
+
+
 def _integer(value: object, label: str) -> int:
     if type(value) is not int:
         raise ValueError(f"{label} must be an integer")
@@ -2329,12 +2372,7 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
                 "catalog raw operation target differs")
     provenance_refs = (provenance_file_refs(dom, file_resolver=bundle.file if remote_context is not None else None)
                        if catalog_expected is not None else [])
-    binary_refs = {
-        role: _object(bundle.json(_object(expected_arms[raw_arm], "expected arm")
-                                  ["build_artifact_ref"]).get("frozenBinary"),
-                      "execution frozen binary")
-        for role, raw_arm in (("baseline", expected_baseline), ("candidate", "candidate"))
-    }
+    binary_refs = execution_binary_refs(bundle, expected, validated_builds)
     context_inputs = validate_context_input_refs(
         before_context, expected, _object(source_pair["snapshot"], "snapshot reference"),
         capture_ref if catalog_expected is not None else None, link_capture_refs, provenance_refs,
