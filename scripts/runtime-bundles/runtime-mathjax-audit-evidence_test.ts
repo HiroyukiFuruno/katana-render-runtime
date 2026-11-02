@@ -16,6 +16,7 @@ import {
   verifyRuntimeUnusedImportPins,
 } from "./runtime-mathjax-audit-evidence-inputs";
 import { inspectUnusedBiomeReport } from "./runtime-unused-biome";
+import { runtimeUnusedImportScan } from "./runtime-unused-import-scan";
 import { readMathJaxOwnedAuditEvidence } from "./runtime-unused-mathjax";
 
 const root = fs.realpathSync(path.resolve(import.meta.dir, "../.."));
@@ -23,6 +24,29 @@ const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mathjax-evidence-contra
 const objectSchema = z.record(z.string(), z.unknown());
 const objectsSchema = z.array(objectSchema);
 afterAll(() => fs.rmSync(directory, { recursive: true, force: true }));
+
+test("definitions import scan resolves the real aliases without external packages", () => {
+  const inputs = runtimeUnusedImportScan(
+    root,
+    ["scripts/runtime-bundles/runtime-bundle-definitions_test.ts"],
+    (file) => fs.realpathSync(file),
+  );
+  expect(inputs.tools).toEqual([]);
+  expect(inputs.dedicatedTools).toEqual([]);
+  expect(inputs.sources).toHaveLength(9);
+  expect(inputs.sources).toContain(
+    path.join(
+      root,
+      "crates/katana-render-runtime/src/markdown/diagram_runtime/source/shared/runtime_bundle.ts",
+    ),
+  );
+  expect(inputs.sources).toContain(
+    path.join(
+      root,
+      "crates/katana-render-runtime/src/markdown/diagram_runtime/source/mermaid/runtime_entrypoint.ts",
+    ),
+  );
+});
 
 function currentReceipt() {
   const pointer = objectSchema.parse(

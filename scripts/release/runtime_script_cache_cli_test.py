@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import native_coverage_local_anchor as local_anchor
 import native_coverage_result_test as fixture_helpers
+import runtime_script_definitions_inputs as definitions
 import runtime_script_cache_cli as cache_cli
 import runtime_script_identity as identity_collector
 import runtime_script_producer as producer_runner
@@ -92,8 +93,8 @@ class RuntimeScriptCacheCliTests(unittest.TestCase):
         release.assert_called_once_with(lease, 1, 2)
         run.assert_not_called()
 
-    def prepare_profile_receipt(self, producer: str) -> Path:
-        epoch = local_anchor.prepare(self.root, producer, IDENTITY)
+    def prepare_profile_receipt(self, producer: str, identity: str = IDENTITY) -> Path:
+        epoch = local_anchor.prepare(self.root, producer, identity)
         if epoch is None:
             raise AssertionError("profile anchor is unavailable")
         directory = self.root / result.RECEIPT_DIRECTORY
@@ -101,9 +102,49 @@ class RuntimeScriptCacheCliTests(unittest.TestCase):
         relative = f"{result.RECEIPT_DIRECTORY}/{producer}-current-group-001.xml"
         (self.root / relative).write_bytes(JUNIT)
         receipt_path = directory / f"{producer}.json"
-        receipt = result.make_receipt(producer, IDENTITY, epoch, [(relative, JUNIT)], 0)
-        result.commit_receipt(self.root, producer, IDENTITY, epoch, receipt_path, receipt)
+        receipt = result.make_receipt(producer, identity, epoch, [(relative, JUNIT)], 0)
+        result.commit_receipt(self.root, producer, identity, epoch, receipt_path, receipt)
         return receipt_path
+
+    def test_definitions_collected_identity_reuses_real_receipt(self) -> None:
+        producer = definitions.PROFILE
+        recipe = recipe_reader.RuntimeScriptRecipe(profiles.producer_recipe(producer), RECIPE, ())
+        with (patch.object(identity_collector, "_source_state", return_value=(SOURCE_MANIFEST, SOURCE_INPUTS)),
+              patch.object(identity_collector, "_pilot_facts", return_value=("8" * 64, {"scope": "pilot"})),
+              patch.object(identity_collector, "_tool_fingerprint",
+                           side_effect=identity_collector._CollectionFailure("unavailable")),
+              patch.object(definitions, "collect", return_value="7" * 64),
+              patch.object(recipe_reader, "read_runtime_script_recipe", return_value=recipe),
+              patch.object(cache_cli, "run_current") as run):
+            collected = identity_collector.collect_identity_report(self.root, producer)
+            identity = collected["identitySha256"]
+            self.assertIsInstance(identity, str)
+            if not isinstance(identity, str):
+                raise AssertionError("identity unavailable")
+            self.prepare_profile_receipt(producer, identity)
+            report = cache_cli.ensure_current(self.root, producer)
+        self.assertEqual(collected["sourceInputScope"], definitions.SEMANTIC_SCOPE)
+        self.assertEqual(report["executedGroups"], 0)
+        self.assertFalse(report["recovered"])
+        run.assert_not_called()
+        self.assert_no_profile_leases()
+
+    def test_semantic_scope_is_restricted_to_definitions_profile(self) -> None:
+        for producer in profiles.RUNTIME_SCRIPT_PROFILES:
+            if producer == definitions.PROFILE:
+                continue
+            with self.subTest(producer=producer):
+                report = identity_report(producer=producer)
+                report["sourceInputScope"] = definitions.SEMANTIC_SCOPE
+                with self.assertRaisesRegex(result.RuntimeScriptResultError, "identity is unavailable"):
+                    cache_cli._validate_report(self.root, producer, report)
+        invalid_scopes: tuple[object, ...] = ("unknown-scope", [], None)
+        for scope in invalid_scopes:
+            with self.subTest(scope=scope):
+                report = identity_report(producer=definitions.PROFILE)
+                report["sourceInputScope"] = scope
+                with self.assertRaisesRegex(result.RuntimeScriptResultError, "identity is unavailable"):
+                    cache_cli._validate_report(self.root, definitions.PROFILE, report)
 
     def prepare_all_profile_receipts(self) -> dict[str, dict[str, object]]:
         reports = {}

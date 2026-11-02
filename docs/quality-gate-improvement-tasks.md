@@ -2,10 +2,11 @@
 
 ## 最新の再開地点（2026-11-02）
 
-- [/] `release/v0.4.24`で検証基盤/描画回帰/性能履歴を統合中、未リリース。検証開始時HEADは`d75cb28d`、stash0・worktree1。現在のGit参照は実Gitで確認し、以下の検証履歴の途中状態を現行ソースの全体合格へ転用しない。
+- [/] `release/v0.4.24`で検証基盤/描画回帰/性能履歴を統合中、未リリース。統合差分を`05177e8d`、必須release内容への固定を`fc3b9e21`に通常commit済み。stash0・worktree1。現在のGit参照は実Gitで確認し、以下の検証履歴の途中状態を現行ソースの全体合格へ転用しない。
 - [/] 現行Rust全体R6972は5,525/5,525成功・29skip（実テスト336.041秒、collectionまで実0）。R6974正式root policyは83,290/84,498＝98.57038036403229%、未到達1,208行で実1。前回から13行減、100%未達。R6976診断copyは`tmp/quality/resumed-owner-r3509/current-root-coverage-report-r6976/`、official listing827位置と全体未到達1,208は別値であり残381位置を捏造しない。
 - [/] SVGは従来1,438＋追加painting308＋集合1＝1,747全件成功、R6972全体でも再実行した。追加48の旧PNGとの差はAA変更に由来し、旧AA対照・元tree不変・本番rendererと独立geometry全画素maskで検証する。原SVG/PNG・閾値・vendorソース/manifestは不変。source foundation R6963、AST R6970、性能Python344/344 R6965、macOS証跡65/65 R6946は各実0。
-- [ ] Mermaid117/117・HTML84と長文画像の過去正式成功は、現sourceの最終合格ではない。現sourceの正式再検証または厳格な再利用適格判定が必要。性能履歴のGit管理・現行基準選択・fresh履歴source build・doc-only reuse・CI署名検証・改善時の基準昇格を実装済みだが、実Bundle/fresh84/実CIでの統合確認は未完。CI可変font observerの取得/指定も未整備。
+- [/] `fc3b9e21`でR6990 HTML全84条件の画像を取得し、R6991正式画像/font検証は84/84成功・最低92.14438・font identity一致・diagnostics0。ただし時間/RSSは未測定。Mermaid117/117と長文画像の過去正式成功は現sourceの最終合格ではなく、正式再検証または厳格な再利用適格判定が必要。性能履歴のGit管理・現行基準選択・fresh履歴source build・doc-only reuse・CI署名検証・改善時の基準昇格を実装済みだが、実Bundle/fresh84/実CIでの統合確認は未完。CI可変font observerの取得/指定も未整備。
+- [/] 再利用入力の狭域化はdefinitions1系統だけを対象に追加。既存Bun scannerを共通化し、旧host検査も抽出先を独立固定して検知範囲を維持。R7005 Python104/104、最終scannerのR7012 Biome・R7014 pin正負回帰・R7015 foundationは実0。最終R7017は実Rustテストsourceの一時変更に対し、全source digestの変化とsemantic key不変を確認し、実receipt検証がvalid=true/recovered=false/executedGroups=0。変更は元bytesへ復元済み。R7001/R7004は検証接続の不足で再実行になった失敗診断として保持し、成功へ読み替えない。他6系統の狭域化や全gate高速化を証明した結果ではない。
 - [/] R6978で終了したCOVのみ2.8GiB整理、R6979固定容量判定実0。R6980は標準static/Clippyを含む24taskと実CAS診断が実0。7系統の通常検査に加え、fragment-loader1系統の同入力hit/削除後restore/破損CAS復元を検証。Moonが破損bytesを展開してもKRRが受理せず再検証して修復し、他6系統のreceiptと全source identityは不変、元blob/outputsも復元済み。R6981は同じ7系統すべてvalid/recovered=false、検証区間296.143秒→35.828秒（各1実測、全ゲート時間や製品の表示速度と混同しない）。上限4,726,095,872Bは不変。
 - [/] 公開ルールのIssue参照不足52commit（必須祖先17）について、本人が固定52SHAの対応表追加を承認。global mapを追加し、PR/HEAD未確定の現在は無効。既存PR77 mapping・必須CI/reviews/App保護を維持した。独立HighでPR本文と全commit Issue集合の既存照合漏れを補い、global171unit実0・再レビューP0/P1なし。実PR/最終HEADへの固定と運用でのadmissionは未完。元Git履歴は不変。
 - [ ] 次は容量整理→Clippy/CAS実検証→差分統合と正式描画/性能受入→coverage100%/未計測0・完全gate→依存最終確認、Draft review/個別reply・resolve、Ready後3OS CI、expected SHAのApp保護merge、GitHub Release/3crate確認、#108/#109/#114 close、cleanup。HTML最終99は後続#106のまま。

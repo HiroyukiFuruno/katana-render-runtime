@@ -13,6 +13,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 import native_coverage_local_anchor as anchor
+import runtime_script_definitions_inputs as definitions
 import runtime_script_identity as identity_collector
 import runtime_script_junit_outputs as junit_outputs
 import runtime_script_producer as producer_runner
@@ -168,9 +169,11 @@ def _validate_report(
         or identity_collector.SHA256_RE.fullmatch(report["sourceManifestSha256"]) is None
         or not isinstance(report.get("sourceInputsSha256"), str)
         or identity_collector.SHA256_RE.fullmatch(report["sourceInputsSha256"]) is None
-        or report.get("sourceInputScope") != (
-            pilot.SEMANTIC_SCOPE if producer == pilot.PROFILE
-            else "krr-native-coverage-source-inputs-v1"
+        or not isinstance(report.get("sourceInputScope"), str)
+        or report.get("sourceInputScope") not in (
+            {pilot.SEMANTIC_SCOPE} if producer == pilot.PROFILE
+            else {definitions.SEMANTIC_SCOPE, "krr-native-coverage-source-inputs-v1"}
+            if producer == definitions.PROFILE else {"krr-native-coverage-source-inputs-v1"}
         )
     ):
         raise result.RuntimeScriptResultError("fixed producer identity is unavailable")

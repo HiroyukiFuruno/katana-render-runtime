@@ -75,6 +75,19 @@ test.each([
   },
 );
 
+test("MathJax import scanner source pin rejects resolver drift", () => {
+  const name = "scripts/runtime-bundles/runtime-unused-import-scan.ts";
+  const source = fs.readFileSync(
+    path.resolve(import.meta.dir, "../runtime-bundles/runtime-unused-import-scan.ts"),
+    "utf8",
+  );
+  const changed = source.replace("path.dirname(checked)", "root");
+  expect(changed).not.toBe(source);
+  expect(hostEvidenceSourceVerified(name, source)).toBe(true);
+  expect(hostEvidenceSourceVerified(name, changed)).toBe(false);
+  expect(sourceCode(changed, { name, read: () => undefined })).toContain("!unresolved-executable");
+});
+
 function currentMoonConfig(): Record<string, unknown> {
   const source = fs.readFileSync(path.resolve(import.meta.dir, "../../moon.yml"), "utf8");
   return z.record(z.string(), z.unknown()).parse(Bun.YAML.parse(source));

@@ -14,6 +14,7 @@ from typing import TypedDict, cast
 
 import native_coverage_local_result as coverage_context
 import runtime_script_profiles as profiles
+import runtime_script_definitions_inputs as definitions
 import runtime_script_recipe as recipe_reader
 import runtime_script_result as result
 import runtime_script_tool_fingerprint_inputs as pilot
@@ -254,10 +255,14 @@ def _identity_from_facts(
     moon_task_hash: str | None,
 ) -> IdentityReport:
     tool_digest = _canonical_digest({key: value for key, value in fingerprint.items() if key != "diagnostic"})
+    scope = (definitions.SEMANTIC_SCOPE if producer == definitions.PROFILE
+             and fingerprint.get("scope") == definitions.SEMANTIC_SCOPE
+             else pilot.SEMANTIC_SCOPE if producer == pilot.PROFILE
+             else "krr-native-coverage-source-inputs-v1")
     input_digest = _canonical_digest(
         {
-            "schema": (pilot.SEMANTIC_SCOPE if producer == pilot.PROFILE
-                       else "krr-runtime-script-producer-input-v2"),
+            "schema": scope if scope != "krr-native-coverage-source-inputs-v1"
+                      else "krr-runtime-script-producer-input-v2",
             "producer": producer,
             "sourceInputsSha256": source_inputs_digest,
             "recipeSha256": recipe.recipe_sha256,
@@ -275,8 +280,7 @@ def _identity_from_facts(
         "missReasons": [],
         "sourceManifestSha256": source_digest,
         "sourceInputsSha256": source_inputs_digest,
-        "sourceInputScope": (pilot.SEMANTIC_SCOPE if producer == pilot.PROFILE
-                             else "krr-native-coverage-source-inputs-v1"),
+        "sourceInputScope": scope,
         "recipeSha256": recipe.recipe_sha256,
         "toolEnvironmentSha256": tool_digest,
         "inputSha256": input_digest,
@@ -294,14 +298,17 @@ def _collect_facts(
     dict[str, recipe_reader.RuntimeScriptRecipe],
     dict[str, object],
     tuple[str, dict[str, object]] | None,
+    tuple[str, dict[str, object]] | None,
     str | None,
 ]:
     if not repo.is_absolute() or repo.resolve(strict=True) != repo:
         raise _CollectionFailure("repository_root_not_canonical")
     source_before, inputs_before = _source_state(repo)
-    has_broad_profile = any(producer != pilot.PROFILE for producer in producers)
+    pilot_before = _shared_pilot_facts(repo, producers)
+    definitions_before = _definitions_facts(repo, pilot_before) if definitions.PROFILE in producers else None
+    has_broad_profile = (any(producer not in {pilot.PROFILE, definitions.PROFILE} for producer in producers)
+                         or (definitions.PROFILE in producers and definitions_before is None))
     tool_before = _tool_fingerprint(repo) if has_broad_profile else {}
-    pilot_before = _pilot_facts(repo) if pilot.PROFILE in producers else None
     recipes = {
         producer: recipe_reader.read_runtime_script_recipe(repo, producer)
         for producer in producers
@@ -310,17 +317,42 @@ def _collect_facts(
         if recipe.recipe_name != profiles.producer_recipe(producer):
             raise _CollectionFailure("recipe_profile_mismatch")
     tool_after = _tool_fingerprint(repo) if has_broad_profile else {}
-    pilot_after = _pilot_facts(repo) if pilot.PROFILE in producers else None
+    pilot_after = _shared_pilot_facts(repo, producers)
+    definitions_after = _definitions_facts(repo, pilot_after) if definitions.PROFILE in producers else None
     source_after, inputs_after = _source_state(repo)
     if (
         source_before != source_after
         or inputs_before != inputs_after
         or tool_before != tool_after
         or pilot_before != pilot_after
+        or definitions_before != definitions_after
     ):
         raise _CollectionFailure("source_changed_during_collection")
     _, moon_task_hash = _moon_context()
-    return source_before, inputs_before, recipes, tool_before, pilot_before, moon_task_hash
+    return source_before, inputs_before, recipes, tool_before, pilot_before, definitions_before, moon_task_hash
+
+
+def _shared_pilot_facts(repo: Path, producers: tuple[str, ...]) -> tuple[str, dict[str, object]] | None:
+    if pilot.PROFILE not in producers and definitions.PROFILE not in producers:
+        return None
+    try:
+        return _pilot_facts(repo)
+    except _CollectionFailure:
+        if pilot.PROFILE in producers:
+            raise
+        return None
+
+
+def _definitions_facts(repo: Path, shared: tuple[str, dict[str, object]] | None) -> tuple[str, dict[str, object]] | None:
+    if shared is None:
+        return None
+    try:
+        digest = definitions.collect(repo)
+    except (OSError, ValueError, TypeError):
+        return None
+    return _canonical_digest({"reviewed": digest, "runtime": shared[0]}), {
+        "scope": definitions.SEMANTIC_SCOPE, "runtime": shared[1],
+    }
 
 
 def _read_execution_facts(
@@ -334,6 +366,12 @@ def _read_execution_facts(
         raise _CollectionFailure("recipe_profile_mismatch")
     if producer == pilot.PROFILE:
         source_inputs_digest, tool = _pilot_facts(repo)
+    elif producer == definitions.PROFILE:
+        facts = _definitions_facts(repo, _shared_pilot_facts(repo, (producer,)))
+        if facts is not None:
+            source_inputs_digest, tool = facts
+        else:
+            tool = _tool_fingerprint(repo)
     else:
         tool = _tool_fingerprint(repo)
     return source_digest, source_inputs_digest, recipe, tool
@@ -365,6 +403,7 @@ def collect_fixed_leaf_identity_reports(repo: Path) -> dict[str, IdentityReport]
             recipes,
             fingerprint,
             pilot_facts,
+            definitions_facts,
             moon_task_hash,
         ) = _collect_facts(repo, producers)
     except (OSError, _CollectionFailure, recipe_reader.RuntimeScriptRecipeError) as error:
@@ -374,9 +413,11 @@ def collect_fixed_leaf_identity_reports(repo: Path) -> dict[str, IdentityReport]
         producer: _identity_from_facts(
             producer,
             source_digest,
-            pilot_facts[0] if producer == pilot.PROFILE and pilot_facts is not None else source_inputs_digest,
+            definitions_facts[0] if producer == definitions.PROFILE and definitions_facts is not None
+            else pilot_facts[0] if producer == pilot.PROFILE and pilot_facts is not None else source_inputs_digest,
             recipes[producer],
-            pilot_facts[1] if producer == pilot.PROFILE and pilot_facts is not None else fingerprint,
+            definitions_facts[1] if producer == definitions.PROFILE and definitions_facts is not None
+            else pilot_facts[1] if producer == pilot.PROFILE and pilot_facts is not None else fingerprint,
             moon_task_hash,
         )
         for producer in producers
@@ -428,14 +469,17 @@ def collect_identity_report(repo: Path, producer: str) -> IdentityReport:
             recipes,
             fingerprint,
             pilot_facts,
+            definitions_facts,
             moon_task_hash,
         ) = _collect_facts(repo, (producer,))
     except (OSError, _CollectionFailure, recipe_reader.RuntimeScriptRecipeError) as error:
         return _miss(producer, _collection_miss_reason(error), moon_task_hash)
     return _identity_from_facts(
         producer, before,
-        pilot_facts[0] if pilot_facts is not None else source_inputs_digest,
-        recipes[producer], pilot_facts[1] if pilot_facts is not None else fingerprint, moon_task_hash
+        definitions_facts[0] if definitions_facts is not None else pilot_facts[0]
+        if producer == pilot.PROFILE and pilot_facts is not None else source_inputs_digest,
+        recipes[producer], definitions_facts[1] if definitions_facts is not None else pilot_facts[1]
+        if producer == pilot.PROFILE and pilot_facts is not None else fingerprint, moon_task_hash
     )
 
 

@@ -1,10 +1,11 @@
 import fs from "node:fs";
-import { createRequire, isBuiltin } from "node:module";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { z } from "zod";
 import { RUNTIME_UNUSED_REGRESSION_TESTS } from "../html/harness-contract-graph";
 import { fileSha256 } from "../mermaid/mermaid-pair-manifest";
 import { canonicalRegularFile, type FileRecord } from "../mermaid/native-build-receipt";
+import { runtimeUnusedImportScan } from "./runtime-unused-import-scan";
 import { MATHJAX_SOURCE_PATH } from "./runtime-unused-mathjax";
 export const source = "scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts";
 export const owned = "mathjax-owned-raw";
@@ -45,76 +46,8 @@ function mathJaxInputTree(root: string, tree: string) {
   return files;
 }
 
-interface RuntimeUnusedImportState {
-  pending: string[];
-  sources: Set<string>;
-  tools: Set<string>;
-  dedicatedTools: Set<string>;
-}
-
 export function runtimeUnusedImportInputs(root: string) {
-  const state: RuntimeUnusedImportState = {
-    pending: RUNTIME_UNUSED_REGRESSION_TESTS.map((name) => path.join(root, name)),
-    sources: new Set(),
-    tools: new Set(),
-    dedicatedTools: new Set(),
-  };
-  while (state.pending.length > 0) {
-    const file = state.pending.pop();
-    if (!file || state.sources.has(file)) continue;
-    const canonical = canonicalRegularFile(file, "runtime unused source");
-    state.sources.add(canonical);
-    collectRuntimeUnusedImports(root, canonical, state);
-  }
-  return {
-    sources: [...state.sources].sort(),
-    tools: [...state.tools].sort(),
-    dedicatedTools: [...state.dedicatedTools].sort(),
-  };
-}
-
-function collectRuntimeUnusedImports(root: string, file: string, state: RuntimeUnusedImportState) {
-  const scanner = new Bun.Transpiler({ loader: runtimeUnusedSourceLoader(file) });
-  for (const imported of scanner.scanImports(fs.readFileSync(file, "utf8"))) {
-    if (isBuiltin(imported.path) || imported.path.startsWith("bun:")) continue;
-    const resolved = canonicalRegularFile(
-      Bun.resolveSync(imported.path, path.dirname(file)),
-      "runtime unused import",
-    );
-    registerRuntimeUnusedImport(root, file, imported.path, resolved, state);
-  }
-}
-
-function runtimeUnusedSourceLoader(file: string): "tsx" | "jsx" | "ts" | "js" {
-  if (file.endsWith(".tsx")) return "tsx";
-  if (file.endsWith(".jsx")) return "jsx";
-  return /\.[cm]?ts$/.test(file) ? "ts" : "js";
-}
-
-function registerRuntimeUnusedImport(
-  root: string,
-  file: string,
-  specifier: string,
-  resolved: string,
-  state: RuntimeUnusedImportState,
-): void {
-  if (resolved.startsWith(path.join(root, "node_modules") + path.sep)) {
-    state.tools.add(resolved);
-    if (dedicatedMoonImport(root, file, specifier)) state.dedicatedTools.add(resolved);
-    return;
-  }
-  if (!resolved.startsWith(root + path.sep))
-    throw new Error("Runtime unused import is outside the pinned repository");
-  if (/\.[cm]?[jt]sx?$/.test(resolved)) state.pending.push(resolved);
-  else state.sources.add(resolved);
-}
-
-function dedicatedMoonImport(root: string, file: string, specifier: string): boolean {
-  // Moonのnative実行体・resolver・manifestは専用tool fingerprintでも束縛する。
-  return (
-    file === path.join(root, "scripts/runtime-bundles/runtime-bundle-tool-fingerprint.ts") &&
-    ["@moonrepo/cli/utils", "@moonrepo/cli/package.json"].includes(specifier)
-  );
+  return runtimeUnusedImportScan(root, RUNTIME_UNUSED_REGRESSION_TESTS, canonicalRegularFile);
 }
 
 export function verifyRuntimeUnusedImportPins(

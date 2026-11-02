@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import runtime_script_identity as identity
+import runtime_script_definitions_inputs as definitions
 import runtime_script_profiles as profiles
 import runtime_script_recipe as recipe_reader
 import runtime_script_result as result
@@ -35,6 +36,9 @@ class RuntimeScriptIdentityTests(unittest.TestCase):
         pilot_patch = patch.object(identity, "_pilot_facts", return_value=("8" * 64, {"scope": "pilot"}))
         pilot_patch.start()
         self.addCleanup(pilot_patch.stop)
+        definitions_patch = patch.object(definitions, "collect", return_value="7" * 64)
+        definitions_patch.start()
+        self.addCleanup(definitions_patch.stop)
 
     def _fixed_reports(self) -> dict[str, identity.IdentityReport]:
         reports: dict[str, identity.IdentityReport] = {}
@@ -147,6 +151,56 @@ class RuntimeScriptIdentityTests(unittest.TestCase):
         self.assertEqual(first["sourceInputScope"], pilot.SEMANTIC_SCOPE)
         self.assertEqual(first["identitySha256"], second["identitySha256"])
         self.assertNotEqual(first["sourceManifestSha256"], second["sourceManifestSha256"])
+
+    def test_definitions_identity_excludes_unrelated_source_but_binds_reviewed_inputs(self) -> None:
+        producer = definitions.PROFILE
+        recipe = recipe_reader.RuntimeScriptRecipe(profiles.producer_recipe(producer), RECIPE, ())
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory).resolve()
+            with (patch.object(identity, "_source_state", side_effect=[(SOURCE, SOURCE_INPUTS)] * 2
+                               + [(OTHER_SOURCE, OTHER_INPUTS)] * 4),
+                  patch.object(identity, "_tool_fingerprint", return_value={}),
+                  patch.object(recipe_reader, "read_runtime_script_recipe", return_value=recipe),
+                  patch.object(definitions, "collect", side_effect=["7" * 64] * 4 + ["6" * 64] * 2)):
+                first = identity.collect_identity_report(repo, producer)
+                unrelated = identity.collect_identity_report(repo, producer)
+                relevant = identity.collect_identity_report(repo, producer)
+        self.assertEqual(first["sourceInputScope"], definitions.SEMANTIC_SCOPE)
+        self.assertEqual(first["identitySha256"], unrelated["identitySha256"])
+        self.assertNotEqual(first["sourceManifestSha256"], unrelated["sourceManifestSha256"])
+        self.assertNotEqual(unrelated["identitySha256"], relevant["identitySha256"])
+
+    def test_definitions_execution_and_reuse_use_the_same_reviewed_inputs_without_broad_tools(self) -> None:
+        producer = definitions.PROFILE
+        recipe = recipe_reader.RuntimeScriptRecipe(profiles.producer_recipe(producer), RECIPE, ())
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory).resolve()
+            with (patch.object(identity, "_source_state", return_value=(SOURCE, SOURCE_INPUTS)),
+                  patch.object(recipe_reader, "read_runtime_script_recipe", return_value=recipe),
+                  patch.object(identity, "_tool_fingerprint",
+                               side_effect=identity._CollectionFailure("rust_facts_host_unavailable")) as broad):
+                execution = identity.collect_execution_snapshot(repo, producer)
+                reuse = identity.collect_identity_report(repo, producer)
+        self.assertTrue(execution["cacheable"])
+        self.assertEqual(execution, reuse)
+        self.assertEqual(reuse["sourceInputScope"], definitions.SEMANTIC_SCOPE)
+        broad.assert_not_called()
+
+    def test_definitions_unreviewed_input_uses_full_source_identity(self) -> None:
+        producer = definitions.PROFILE
+        recipe = recipe_reader.RuntimeScriptRecipe(profiles.producer_recipe(producer), RECIPE, ())
+        with tempfile.TemporaryDirectory() as directory:
+            with (patch.object(identity, "_source_state", return_value=(SOURCE, SOURCE_INPUTS)),
+                  patch.object(identity, "_tool_fingerprint", return_value={}),
+                  patch.object(recipe_reader, "read_runtime_script_recipe", return_value=recipe),
+                  patch.object(definitions, "collect", side_effect=["7" * 64, "7" * 64,
+                                                                    ValueError("changed"), ValueError("changed")])):
+                reviewed = identity.collect_identity_report(Path(directory).resolve(), producer)
+                report = identity.collect_identity_report(Path(directory).resolve(), producer)
+        self.assertTrue(report["cacheable"])
+        self.assertEqual(report["sourceInputScope"], "krr-native-coverage-source-inputs-v1")
+        self.assertEqual(report["sourceInputsSha256"], SOURCE_INPUTS)
+        self.assertNotEqual(report["identitySha256"], reviewed["identitySha256"])
 
     def test_pilot_missing_inputs_fail_closed(self) -> None:
         producer = "runtime-unused-tool-fingerprint"
