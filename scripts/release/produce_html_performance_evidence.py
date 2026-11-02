@@ -1123,6 +1123,7 @@ def _resume_catalog_validation_pin(bundle: gate.Bundle, receipt: Mapping[str, ob
 
 def _resume_builds(
     bundle: gate.Bundle, receipt: Mapping[str, object], attempts: Sequence[Mapping[str, FilePin]],
+    *, reference_proof: reference.ReferenceParentProof | None = None,
 ) -> tuple[dict[str, ArmBuildResult], dict[str, FilePin], list[FilePin]]:
     expected = bundle.json(attempts[0]["expected"]) if attempts else None
     arms = gate._object(expected.get("arms"), "resume expected arms") if expected else None
@@ -1136,8 +1137,15 @@ def _resume_builds(
         if arm is not None:
             gate.require(arm.get("build_artifact_ref") == artifact, "resume build role proof differs")
         proof = bundle.json(artifact)
-        binary = _receipt_file_pin(proof.get("frozenBinary"), "resume frozen binary")
-        bundle.file(binary)
+        binary: FilePin
+        if role == "baseline" and reference_proof is not None and reference_proof.transport_sources:
+            binary = {"path": str(reference_proof.frozen_binary_path), "sha256": reference_proof.binary_sha256}
+            _validate_planned_executable(proof, dict(binary), reference_proof=reference_proof)
+            bundle.file(proof.get("frozenBinary"))
+            bundle.file(binary)
+        else:
+            binary = _receipt_file_pin(proof.get("frozenBinary"), "resume frozen binary")
+            bundle.file(binary)
         gate.require((arm is None or binary["sha256"] == arm.get("binary_sha256"))
                      and os.access(binary["path"], os.X_OK), "resume frozen binary differs")
         builds[role] = ArmBuildResult([], Path(binary["path"]), binary["sha256"], proof, [])
@@ -2961,7 +2969,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     build_pins: list[FilePin] = []
     if resumed_bundle is not None and resumed_receipt is not None:
         builds, build_artifact_refs, build_pins = _resume_builds(
-            resumed_bundle, resumed_receipt, resumed_attempts,
+            resumed_bundle, resumed_receipt, resumed_attempts, reference_proof=reference_proof,
         )
         binaries = {arm: build.binary for arm, build in builds.items()}
         if reference_wrapper_pin is not None:

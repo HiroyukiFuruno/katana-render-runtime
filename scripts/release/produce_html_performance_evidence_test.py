@@ -985,6 +985,70 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "canonical regular file"):
             producer._resume_builds(bundle, receipt, attempts)
 
+    def test_resume_history_uses_authenticated_transport_and_original_candidate(self) -> None:
+        directory = self.root / "resume-history-transport"
+        logical = directory / "original-binary"
+        mapped = directory / "old-bundle/payload/binary"
+        candidate = directory / "candidate"
+        for path, data in ((logical, b"baseline"), (mapped, b"baseline"), (candidate, b"candidate")):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            path.chmod(0o755)
+        logical_pin: typed_producer.FilePin = {"path": str(logical), "sha256": gate.sha256(logical)}
+        mapped_pin: typed_producer.FilePin = {"path": str(mapped), "sha256": gate.sha256(mapped)}
+        candidate_pin: typed_producer.FilePin = {"path": str(candidate), "sha256": gate.sha256(candidate)}
+        original_manifest = producer.write(directory / "old-bundle/bundle.json", {
+            "schema": "krr-html-performance-release-bundle-v1", "head": "a" * 40,
+            "files": [{"originalPath": str(logical), "relativePath": "payload/binary",
+                       "sha256": logical_pin["sha256"]}],
+        })
+        wrapper = producer.write(directory / "wrapper.json", {
+            "frozenBinary": logical_pin, "sourceBundleManifest": original_manifest})
+        current = producer.write(directory / "candidate.json", {"frozenBinary": candidate_pin})
+        role = "reference-history-record"
+        contract: gate.JsonObject = {"role": role, "armId": role, "recordId": "record",
+            "referenceKind": "accepted-history-candidate", "originalArm": "candidate", "publishedSdk": False,
+            "wrapperRef": wrapper}
+        arms: gate.JsonObject = {role: {"build_artifact_ref": wrapper, "binary_sha256": logical_pin["sha256"]},
+                                 "candidate": {"build_artifact_ref": current, "binary_sha256": candidate_pin["sha256"]}}
+        plan = producer.write(directory / "plan.json", {})
+        dom = producer.write(directory / "dom.json", {})
+        snapshot = producer.write(directory / "snapshot.json", {})
+        expected = producer.write(directory / "expected.json", {"arms": arms, "referenceParent": contract,
+            "operationPlanRef": plan, "domStateRef": dom, "fixture_sha256": "c" * 64})
+        bundle_path = directory / "bundle"
+        producer.write_transport_bundle(bundle_path, "a" * 40,
+            [logical_pin, mapped_pin, candidate_pin, original_manifest, wrapper, current, plan, dom, snapshot, expected], [])
+        bundle = gate.Bundle(bundle_path)
+        parent = reference.ReferenceParentProof(role, "candidate", "a" * 40, "b" * 64,
+            logical_pin["sha256"], gate.LOCK_SHA, "d" * 64, "e" * 64, wrapper["sha256"],
+            (reference.FilePin(str(logical), logical_pin["sha256"]),), directory / "old-build", mapped,
+            "accepted-history-candidate", "record", ((str(logical), mapped),))
+        receipt: gate.JsonObject = {"buildArtifacts": {"baseline": wrapper, "candidate": current}, "buildPins": []}
+        builds, _, _ = producer._resume_builds(bundle, receipt, [{"expected": expected}], reference_proof=parent)
+        binaries: dict[str, gate.JsonObject] = {role_name: {"path": str(build.binary), "sha256": build.binary_sha256}
+                    for role_name, build in builds.items()}
+        self.assertEqual(binaries, {"baseline": mapped_pin, "candidate": candidate_pin})
+        expected_value = bundle.json(expected)
+        validated: dict[str, gate.JsonObject] = {"baseline": {"head": "a" * 40,
+            "binarySha256": logical_pin["sha256"], "buildArtifactSha256": wrapper["sha256"]}}
+        self.assertEqual(gate.execution_binary_refs(bundle, expected_value, validated), binaries)
+        for role_name in ("baseline", "candidate"):
+            gate.require_execution_binary_role({"executable": binaries[role_name]["path"],
+                "executable_sha256": binaries[role_name]["sha256"]}, binaries[role_name])
+        execution = gate.planned_execution_inputs(self.root, expected_value, binaries)
+        context: gate.JsonObject = {"inputs": [{**pin, "exists": True} for pin in (plan, dom, snapshot, *execution)]}
+        gate.validate_context_input_refs(context, expected_value, dict(snapshot), None, [], [], execution)
+        with self.assertRaises(ValueError):
+            producer._resume_builds(bundle, receipt, [{"expected": expected}],
+                reference_proof=parent._replace(transport_sources=((str(logical), candidate),)))
+        candidate.write_bytes(b"tampered")
+        with self.assertRaises(ValueError):
+            producer._resume_builds(bundle, receipt, [{"expected": expected}], reference_proof=parent)
+        candidate.unlink()
+        with self.assertRaises(ValueError):
+            producer._resume_builds(bundle, receipt, [{"expected": expected}], reference_proof=parent)
+
     def test_empty_resume_build_validation_checks_arm_roles_and_identity(self) -> None:
         directory = self.root / "empty-build-validation"
         source = producer.write(directory / "source.json", {"head": "a" * 40})
