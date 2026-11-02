@@ -1065,6 +1065,20 @@ target-build = "=3.0.0"
             "Locking 1 package to latest compatible version": False,
             "Locking 2 packages to latest compatible versions": False,
             "Locking 0 packages (Rust 1.95.0) to latest compatible version": True,
+            "Locking 1 package to latest compatible version\n"
+            "    Updating crc32fast v1.5.3 -> v1.5.4": True,
+            ("Locking 3 packages to latest compatible versions\n"
+             "    Adding utf_types v1.0.0\n"
+             "    Updating utf8_iter v1.0.4 -> v1.1.0\n"
+             "    Updating crc32fast v1.5.3 -> v1.5.4"): True,
+            "Locking 1 package to latest compatible version\n"
+            "    Updating crc32fast v1.5.3 -> v1.5.5": False,
+            ("Locking 2 packages to latest compatible versions\n"
+             "    Updating crc32fast v1.5.3 -> v1.5.4\n"
+             "    Updating serde v1.0.0 -> v1.0.1"): False,
+            ("Locking 2 packages to latest compatible versions\n"
+             "    Updating crc32fast v1.5.3 -> v1.5.4\n"
+             "    Updating utf8_iter v1.0.4 -> v1.1.0"): False,
             (
                 "Locking 2 packages to latest compatible versions\n"
                 "    Adding utf_types v1.0.0\n"
@@ -1100,6 +1114,34 @@ target-build = "=3.0.0"
                 return_value=SimpleNamespace(returncode=0, stdout=cargo_output, stderr=""),
             ):
                 self.assertEqual(freshness.rust_lock_is_latest_compatible(self.root), expected)
+
+    def test_crc_retention_rejects_changed_root_or_harness_record(self) -> None:
+        registry = "registry+https://github.com/rust-lang/crates.io-index"
+        parent = (
+            'version = 4\n[[package]]\nname = "krr-html-performance-harness"\n'
+            'version = "0.1.0"\ndependencies = ["utf8_iter", "crc32fast"]\n'
+            f'[[package]]\nname = "utf8_iter"\nversion = "1.0.4"\nsource = "{registry}"\n'
+            f'checksum = "{"a" * 64}"\n'
+            f'[[package]]\nname = "crc32fast"\nversion = "1.5.3"\nsource = "{registry}"\n'
+            f'checksum = "{"b" * 64}"\n'
+        ).encode()
+        root_lock = self.root / "Cargo.lock"
+        harness_lock = self.root / "scripts/html/performance-harness/Cargo.lock"
+        harness_lock.parent.mkdir(parents=True)
+        changed = parent.replace(b'b' * 64, b'c' * 64)
+        with (patch.object(freshness, "load_pinned_parent_lock", return_value=parent),
+              patch.object(freshness, "verify_utf8_iter_retention")):
+            for root_data, harness_data, accepted in (
+                (parent, parent, True), (changed, parent, False), (parent, changed, False),
+            ):
+                with self.subTest(accepted=accepted, root_changed=root_data == changed):
+                    root_lock.write_bytes(root_data)
+                    harness_lock.write_bytes(harness_data)
+                    if accepted:
+                        freshness.verify_current_utf8_iter_retention(self.root)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "retain immutable crc32fast"):
+                            freshness.verify_current_utf8_iter_retention(self.root)
 
     def test_dependency_freshness_reports_invalid_utf8_iter_retention(self) -> None:
         stdout, stderr = io.StringIO(), io.StringIO()

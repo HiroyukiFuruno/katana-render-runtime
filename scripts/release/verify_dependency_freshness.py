@@ -38,6 +38,7 @@ try:
         load_pinned_parent_lock,
         verify_utf8_iter_retention,
     )
+    from update_html_performance_harness_lock import retention_plan, verify_retained_packages
 finally:
     sys.path.remove(_loader_root)
 
@@ -59,6 +60,9 @@ UTF8_ITER_RETENTION_CHANGES = {
     ("Adding", "utf_types", UTF_TYPES_LATEST_COMPATIBLE_VERSION, None),
     ("Updating", "utf8_iter", RETAINED_UTF8_ITER_VERSION,
      UTF8_ITER_LATEST_COMPATIBLE_VERSION),
+}
+CRC32FAST_RETENTION_CHANGES = {
+    ("Updating", "crc32fast", "1.5.3", "1.5.4"),
 }
 LOCK_CHANGE_RE = re.compile(
     r"^\s+(Adding|Updating|Removing|Downgrading) ([A-Za-z0-9_-]+) v([^\s]+)"
@@ -821,12 +825,12 @@ def rust_alternate_registries_are_fresh(root: Path, dependencies: list[Alternate
 
 
 def rust_lock_is_latest_compatible(root: Path) -> bool:
-    """Use Cargo's resolver, with one exact immutable-parent retention.
+    """Use Cargo's resolver, with exact immutable-parent retentions.
 
     Registry ``newest_version`` can be a prerelease or a major version outside
     the workspace's semver requirements.  Cargo is the authority for the
     highest compatible resolution, including transitive dependencies. The
-    pinned utf8_iter transition is accepted only as its exact known diff.
+    pinned utf8_iter and crc32fast transitions are accepted only as known diffs.
     """
     completed = subprocess.run(
         # リリース workflow は CARGO_TERM_COLOR=always を設定するため、Locking 件数を
@@ -842,7 +846,10 @@ def rust_lock_is_latest_compatible(root: Path) -> bool:
     output = f"{completed.stdout}\n{completed.stderr}"
     # WHY: Cargoの要約文言変更に依存せず、件数と実際の変更packageを照合する。
     changes = _cargo_lock_changes(output)
-    return changes == set() or changes == UTF8_ITER_RETENTION_CHANGES
+    return changes in (
+        set(), UTF8_ITER_RETENTION_CHANGES, CRC32FAST_RETENTION_CHANGES,
+        UTF8_ITER_RETENTION_CHANGES | CRC32FAST_RETENTION_CHANGES,
+    )
 
 
 def _cargo_lock_changes(output: str) -> set[tuple[str, str, str, str | None]] | None:
@@ -869,7 +876,9 @@ def verify_current_utf8_iter_retention(root: Path) -> None:
     if any(path.is_symlink() or not path.is_file() for path in paths):
         raise ValueError("root or HTML harness Cargo.lock is unavailable")
     parent_lock = load_pinned_parent_lock(root)
-    verify_utf8_iter_retention(paths[0].read_bytes(), paths[1].read_bytes(), parent_lock)
+    root_lock, harness_lock = paths[0].read_bytes(), paths[1].read_bytes()
+    verify_retained_packages(parent_lock, (root_lock, harness_lock), retention_plan(parent_lock))
+    verify_utf8_iter_retention(root_lock, harness_lock, parent_lock)
 
 
 def release_cargo_manifests(root: Path) -> list[Path]:
