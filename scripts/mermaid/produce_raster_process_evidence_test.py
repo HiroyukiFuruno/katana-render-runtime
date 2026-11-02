@@ -141,6 +141,28 @@ class RasterProcessEvidenceTests(unittest.TestCase):
         )
         self.assertNotIn("--markdown-output", command)
 
+    def test_strict_reference_recipe_uses_formal_evidence_producer(self) -> None:
+        justfile = (self.repo_root / "Justfile").read_text()
+        recipe = justfile.split(
+            "mermaid-reference-strict fixtures output=", maxsplit=1
+        )[1].split("\n\n", maxsplit=1)[0]
+        for required in (
+            "scripts/mermaid/produce_raster_process_evidence.py",
+            "--config {{quote(MERMAID_RASTER_SESSION_CONFIG)}}",
+            "--config-sha256 {{quote(MERMAID_RASTER_SESSION_CONFIG_SHA)}}",
+            "--role official",
+            '--bun "$(command -v bun)"',
+            "--fixtures {{quote(fixtures)}}",
+            "--input {{quote(fixtures)}}",
+            "--output {{quote(output)}}",
+            "--fixture-glob '*.md'",
+            "--mermaid-js {{quote(MERMAID_JS)}}",
+            "--mermaid-zenuml-js {{quote(MERMAID_ZENUML_JS)}}",
+        ):
+            with self.subTest(argument=required):
+                self.assertIn(required, recipe)
+        self.assertNotIn("diagram-update.ts", recipe)
+
     def test_raster_child_environment_keeps_render_inputs_and_drops_credentials(self) -> None:
         supplied = {
             "PATH": "/usr/bin", "HOME": str(self.root), "USER": "renderer",

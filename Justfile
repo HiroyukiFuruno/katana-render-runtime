@@ -849,9 +849,9 @@ mermaid-render-strict fixtures output='tmp/krr-mermaid-rendered' fixture_glob='*
 mermaid-reference fixtures output='tmp/krr-mermaid-official':
     bun run scripts/mermaid/diagram-update.ts --fixtures "{{fixtures}}" --output "{{output}}" --markdown-output "{{fixtures}}/official-dark" --theme dark --reference-mode legacyNormalized --reference-scope diagnostic --mermaid-js "{{MERMAID_JS}}" --mermaid-zenuml-js "{{MERMAID_ZENUML_JS}}" --skip-errors
 
-# Generate a strict vendor-original diagnostic reference without rewriting fixture markdown
+# Generate observed formal strict vendor-original references without rewriting fixture markdown
 mermaid-reference-strict fixtures output=('tmp/krr-mermaid-strict-official/' + file_name(fixtures)):
-    bun run scripts/mermaid/diagram-update.ts --fixtures "{{fixtures}}" --output "{{output}}" --theme dark --reference-mode strictVendorOriginal --reference-scope formal --mermaid-js "{{MERMAID_JS}}" --mermaid-zenuml-js "{{MERMAID_ZENUML_JS}}" --raster-session-config {{quote(MERMAID_RASTER_SESSION_CONFIG)}} --raster-session-config-sha {{quote(MERMAID_RASTER_SESSION_CONFIG_SHA)}}
+    python3 scripts/mermaid/produce_raster_process_evidence.py --config {{quote(MERMAID_RASTER_SESSION_CONFIG)}} --config-sha256 {{quote(MERMAID_RASTER_SESSION_CONFIG_SHA)}} --role official --bun "$(command -v bun)" --fixtures {{quote(fixtures)}} --input {{quote(fixtures)}} --output {{quote(output)}} --fixture-glob '*.md' --mermaid-js {{quote(MERMAID_JS)}} --mermaid-zenuml-js {{quote(MERMAID_ZENUML_JS)}}
 
 # Update all committed Mermaid reference SVG / PNG fixtures
 mermaid-reference-all:
