@@ -1924,6 +1924,13 @@ def _validate_noncomparable_lifecycle(
     bundle: Bundle, expected: JsonObject, row: JsonObject,
     lifecycle: JsonObject, fragment: str,
 ) -> None:
+    _validate_worker_lifecycle_identity(expected, row, lifecycle, sample=0, exit_code=1)
+    _validate_noncomparable_raw_streams(bundle, lifecycle, fragment)
+
+
+def _validate_worker_lifecycle_identity(
+    expected: JsonObject, row: JsonObject, lifecycle: JsonObject, *, sample: int, exit_code: int,
+) -> None:
     identity = _object(lifecycle.get("identity"), "worker lifecycle identity")
     pid = identity.get("pid")
     argv = _array(lifecycle.get("argv"), "worker lifecycle argv")
@@ -1931,19 +1938,18 @@ def _validate_noncomparable_lifecycle(
     viewport = _object(expected.get("viewport"), "worker viewport")
     operation_plan = _object(expected.get("operationPlanRef"), "operation plan reference")
     require(
-        lifecycle.get("role") == "worker" and lifecycle.get("exitCode") == 1
+        lifecycle.get("role") == "worker" and lifecycle.get("exitCode") == exit_code
         and type(pid) is int and pid > 0
         and lifecycle.get("groupClosed") is True and lifecycle.get("rawFdsClosed") is True
         and lifecycle.get("failure") is None and lifecycle.get("cleanupFailure") is None
         and len(argv) == 9 and argv[0] == row.get("executable")
-        and argv[1:3] == ["--worker", "0"]
+        and argv[1:3] == ["--worker", str(sample)]
         and argv[3] == catalog.get("fixture_path") and argv[4] == row.get("output")
         and argv[5] == operation_plan.get("path")
         and argv[6:] == [str(viewport["width"]), str(viewport["height"]),
                          str(viewport["scale"])],
-        "known baseline worker lifecycle/argv differs",
+        "worker lifecycle/argv differs",
     )
-    _validate_noncomparable_raw_streams(bundle, lifecycle, fragment)
 
 
 def _validate_noncomparable_raw_streams(
@@ -2561,6 +2567,8 @@ def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
             values = [validate_attempt(bundle, root, attempt, git_query=git_query,
                                        validated_builds=validated_builds, reuse_context=reuse_context,
                                        remote_context=remote_context) for attempt in attempts]
+        from html_performance_host_load_validation import verify_catalog_host_load
+        verify_catalog_host_load(bundle, attempts, committed_records(root, head, git_query=git_query))
         non_comparable_ids = {
             _text(_object(value["catalogCondition"], "catalog condition")["condition_id"],
                   "non-comparable condition id")

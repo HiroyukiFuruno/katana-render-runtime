@@ -27,6 +27,8 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 
 import verify_html_performance_evidence as gate
 import html_performance_inventory as inventory_ops
+import html_performance_host_load as host_load
+import html_performance_host_load_validation as load_validation
 import html_performance_reference as reference
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "build"))
@@ -834,6 +836,7 @@ def load_closed_batch(
         }
         gate.validate_attempt(bundle, root, attempt_object, git_query=git_query,
                              validated_builds=validated_builds)
+    _verify_completed_host_load(bundle, root, attempts, git_query=git_query)
     return receipt, bundle, attempts
 
 
@@ -877,6 +880,18 @@ def _seal_failed_batch(
     raise failure
 
 
+def _verify_completed_host_load(
+    bundle: gate.Bundle, root: Path, attempts: Sequence[Mapping[str, FilePin]], *,
+    git_query: gate.GitQuery | None,
+) -> None:
+    if attempts:
+        head = gate._text(bundle.manifest.get("head"), "bundle head")
+        records = gate.committed_records(root, head, git_query=git_query)
+        rows: list[gate.JsonObject] = [{key: value for key, value in attempt.items()}
+                                       for attempt in attempts]
+        load_validation.verify_catalog_host_load(bundle, rows, records)
+
+
 def _verify_and_seal_catalog_batch(
     bundle: Path,
     root: Path,
@@ -904,12 +919,15 @@ def _verify_and_seal_catalog_batch(
             current_bundle, root, first_expected, git_query=git_query,
         )
     complete = set(complete_ids)
+    completed_attempts = []
     for attempt in attempts:
         if _attempt_condition_id(current_bundle, attempt) in complete:
             gate.validate_attempt(
                 current_bundle, root, dict(attempt), git_query=git_query,
                 validated_builds=validated_builds,
             )
+            completed_attempts.append(attempt)
+    _verify_completed_host_load(current_bundle, root, completed_attempts, git_query=git_query)
     if batch_failure is not None:
         _seal_failed_batch(batch_failure, seal, summary)
     seal()
@@ -1096,6 +1114,53 @@ def _validate_resume_batch(
                                             gate._object(arms.get(raw_arm), "current arm"))
                          for raw_arm in (baseline_id, "candidate")),
                      "resume build pins differ")
+
+
+def _require_cpu_busy_resume(bundle: gate.Bundle, attempts: Sequence[Mapping[str, FilePin]]) -> None:
+    for attempt in attempts:
+        manifest = bundle.json(attempt["pairManifest"])
+        seen = 0
+        for row in gate._objects(manifest.get("order"), "resume pair order"):
+            for worker in gate._objects(row.get("workerAttempts"), "resume worker attempts"):
+                record = bundle.json(worker["attemptRecord"])
+                gate.require(record == {key: value for key, value in worker.items() if key != "attemptRecord"},
+                             "resume worker attempt differs")
+                tag = gate._object(record.get("hostLoad"), "resume host CPU load")
+                gate.require(set(tag) == {"schema", "method", "version", "sampleIntervalSeconds",
+                                          "intervalBeforeSeconds", "intervalDuringSeconds",
+                                          "cpuTimesBefore", "cpuTimesDuring"}
+                             and tag.get("schema") == "krr-host-cpu-busy-v1"
+                             and tag.get("method") == "psutil.cpu_times_percent"
+                             and tag.get("version") == host_load.VERSION
+                             and tag.get("sampleIntervalSeconds") == host_load.INTERVAL_SECONDS,
+                             "resume host CPU observation differs")
+                before = tag.get("intervalBeforeSeconds")
+                gate.require(not isinstance(before, bool) and isinstance(before, (int, float))
+                             and math.isfinite(before) and before > 0,
+                             "resume host CPU interval is invalid")
+                gate.require(host_load.ratio_from_times(tag.get("cpuTimesBefore")) == record.get("loadRatioBefore"),
+                             "resume host CPU ratio differs")
+                during = tag.get("intervalDuringSeconds")
+                if record.get("reason") == "host load observation unavailable":
+                    gate.require(record.get("accepted") is False
+                                 and record.get("loadRatioAfter") is None
+                                 and not isinstance(during, bool) and isinstance(during, (int, float))
+                                 and math.isfinite(during) and during >= host_load.INTERVAL_SECONDS,
+                                 "resume unavailable host CPU observation differs")
+                    try:
+                        host_load.ratio_from_times(tag.get("cpuTimesDuring"))
+                    except host_load.NoObservation:
+                        pass
+                    else:
+                        raise ValueError("resume host CPU observation was available")
+                else:
+                    gate.require(not isinstance(during, bool) and isinstance(during, (int, float))
+                                 and math.isfinite(during) and during >= host_load.INTERVAL_SECONDS,
+                                 "resume host CPU interval is invalid")
+                    gate.require(host_load.ratio_from_times(tag.get("cpuTimesDuring")) == record.get("loadRatioAfter"),
+                                 "resume host CPU ratio differs")
+                seen += 1
+        gate.require(seen > 0, "resume worker CPU observations are absent")
 
 MeasurementRole = Literal["tool-query", "metadata", "preflight", "build", "worker"]
 # 軽いquery、graph解決、同期検査、release build、単一workerに別の停止上限を置く。
@@ -1811,22 +1876,19 @@ def context(root: Path, target: Path, input_paths: Sequence[Path], log_directory
     return {"source": source(root, git_query=git_query), "inputs": [file_state(p) for p in input_paths], "registry": registry, "cache": cache, "cacheUnion": {"registry": registry, "target": cache}, "scope": scope, "config": [file_state(p) for p in (root / ".cargo/config.toml", root / ".cargo/config", cargo_home / "config.toml", cargo_home / "config")], "preference": file_state(Path.home() / ".CFUserTextEncoding"), "toolContext": {"rustc": command(["rustc", "-vV"], text=True, role="tool-query", log_directory=log_directory), "cargo": command(["cargo", "-vV"], text=True, role="tool-query", log_directory=log_directory), "platform": platform.platform(), "cpuCount": os.cpu_count(), "environmentSha256": _environment_sha256(os.environ)}}
 
 
-def quiet() -> float:
-    ratio = os.getloadavg()[0] / (os.cpu_count() or 1)
-    return ratio
-
-
-def await_quiet(batch_deadline: float | None = None) -> float:
+def await_quiet(batch_deadline: float | None = None) -> host_load.Probe:
     quiet_deadline = time.monotonic() + 900
-    while quiet() > MAX_WORKER_LOAD:
+    while True:
         _require_batch_budget(batch_deadline)
+        probe = host_load.start()
+        _require_batch_budget(batch_deadline)
+        if probe.before <= MAX_WORKER_LOAD:
+            return probe
         gate.require(time.monotonic() < quiet_deadline, "quiet load0.25 was not reached")
         sleep_seconds = 5.0
         if batch_deadline is not None:
             sleep_seconds = min(sleep_seconds, max(0.0, batch_deadline - time.monotonic()))
         time.sleep(sleep_seconds)
-    _require_batch_budget(batch_deadline)
-    return quiet()
 
 
 def worker_attempts_directory(folder: Path, arm: str, pair: int) -> Path:
@@ -1998,7 +2060,8 @@ def observe_worker_attempt(
     *,
     batch_deadline: float | None = None,
 ) -> WorkerAttemptObservation:
-    load_before = await_quiet(batch_deadline)
+    probe = await_quiet(batch_deadline)
+    load_before = probe.before
     gate.require(math.isfinite(load_before) and 0 <= load_before <= MAX_WORKER_LOAD,
                  "worker pre-load did not reach quiet limit")
     binary_before = binary_sha_or_none(build.binary)
@@ -2006,6 +2069,7 @@ def observe_worker_attempt(
         return WorkerAttemptObservation({
             "sample": sample, "attempt": attempt, "loadRatioBefore": load_before,
             "loadRatioAfter": None, "binarySha256Before": binary_before,
+            "hostLoad": host_load.metadata(probe, None, None),
             "binarySha256After": None, "actualExit": None,
             "workerStarted": False, "accepted": False,
             "reason": "worker binary changed before measurement",
@@ -2021,8 +2085,6 @@ def observe_worker_attempt(
             log_directory=log_directory, check=False, lifecycle_sink=lifecycle_paths.append)
     except BaseException as caught:
         error = caught
-    load_after = quiet()
-    binary_after = binary_sha_or_none(build.binary)
     lifecycle: FilePin | None = None
     if len(lifecycle_paths) == 1:
         lifecycle_path = lifecycle_paths[0]
@@ -2031,21 +2093,42 @@ def observe_worker_attempt(
     worker_started: bool | None = True if result is not None else None
     if result is None and len(lifecycle_paths) == 1:
         worker_started = worker_started_from_lifecycle(lifecycle_paths[0])
+    load_after: float | None = None
+    during_seconds: float | None = None
+    during_times: dict[str, float] | None = None
+    load_error: BaseException | None = None
+    if worker_started is True:
+        try:
+            load_after, during_seconds, during_times = host_load.finish(probe)
+        except BaseException as caught:
+            load_error = caught
+            if isinstance(caught, host_load.NoObservation):
+                during_seconds, during_times = caught.interval_seconds, caught.times
+            if error is None and not isinstance(caught, host_load.NoObservation):
+                error = caught
+    binary_after = binary_sha_or_none(build.binary)
     record: gate.JsonObject = {
         "sample": sample, "attempt": attempt, "loadRatioBefore": load_before,
-        "loadRatioAfter": load_after if math.isfinite(load_after) else None,
+        "loadRatioAfter": load_after,
+        "hostLoad": host_load.metadata(probe, during_seconds, during_times),
         "binarySha256Before": binary_before, "binarySha256After": binary_after,
         "actualExit": actual_exit, "lifecycle": lifecycle,
         "workerStarted": worker_started, "accepted": False,
     }
     if error is not None:
-        record["reason"] = "worker command raised"
+        record["reason"] = ("host load observation failed" if load_error is error
+                            else "worker command raised")
         record["errorType"] = type(error).__name__
+        if load_error is not None:
+            record["hostLoadErrorType"] = type(load_error).__name__
     elif result is not None and result.returncode != 0:
         record["reason"] = "worker command exited nonzero"
     elif binary_after != build.binary_sha256:
         record["reason"] = "worker binary changed during measurement"
-    elif not math.isfinite(load_after) or not 0 <= load_after <= MAX_WORKER_LOAD:
+    elif isinstance(load_error, host_load.NoObservation):
+        record["reason"] = "host load observation unavailable"
+        record["hostLoadErrorType"] = type(load_error).__name__
+    elif load_after is None or not math.isfinite(load_after) or not 0 <= load_after <= MAX_WORKER_LOAD:
         record["reason"] = "host load exceeded limit"
     return WorkerAttemptObservation(record, result, error)
 
@@ -2115,11 +2198,13 @@ def collect_worker_sample(
         if record.get("reason") == "worker binary changed before measurement":
             preserve_failure()
             raise ValueError("frozen build binary changed before measurement")
-        if record.get("reason") != "host load exceeded limit":
+        if record.get("reason") not in {"host load exceeded limit", "host load observation unavailable"}:
             preserve_failure()
             raise ValueError("worker sample invalid")
         if attempt == MAX_WORKER_ATTEMPTS:
             preserve_failure()
+            if record.get("reason") == "host load observation unavailable":
+                raise ValueError("host CPU observation remained unavailable after three attempts")
             raise ValueError("host load remained above limit after three attempts")
     preserve_failure()
     raise ValueError("worker attempt loop ended without a sample")
@@ -2621,6 +2706,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         raise ValueError("catalog capture manifest required for formal performance production")
     gate.require(platform.system() == "Darwin" and platform.machine() == "arm64", "measurement lane requires macOS Apple Silicon")
     gate.require(not output.exists() and output.is_relative_to(root / "tmp"), "fresh ignored owned output required")
+    load_validation.require_current_cpu_observer_sources(root)
     if max_conditions is not None:
         gate.require(catalog_manifest_path is not None and 0 < max_conditions <= 84,
                      "batch max conditions requires a catalog and is between 1 and 84")
@@ -2640,6 +2726,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         resumed_receipt, resumed_bundle, resumed_attempts = load_closed_batch(
             resume_batch.resolve(), root,
         )
+        _require_cpu_busy_resume(resumed_bundle, resumed_attempts)
     catalog_conditions: list[CatalogCondition] | None = None
     catalog_manifest_pin: FilePin | None = None
     catalog_plan_pin: FilePin | None = None

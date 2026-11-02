@@ -1745,7 +1745,8 @@ class PerformanceEvidenceTest(unittest.TestCase):
         for field, value in mutations:
             with self.subTest(field=field):
                 bundle, summaries = self._summary_validation_fixture(field=field, value=value)
-                with patch.object(gate, "validate_attempt", side_effect=summaries):
+                with (patch.object(gate, "validate_attempt", side_effect=summaries),
+                      patch("html_performance_host_load_validation.verify_catalog_host_load")):
                     with self.assertRaisesRegex(
                         ValueError, "catalog candidate/sample/phase totals differ",
                     ):

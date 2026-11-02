@@ -18,7 +18,7 @@ import socket
 import time
 import threading
 from contextlib import nullcontext
-from typing import BinaryIO, cast
+from typing import BinaryIO, NamedTuple, cast
 import tempfile
 import unittest
 from pathlib import Path
@@ -26,12 +26,22 @@ from unittest.mock import Mock, patch
 from collections.abc import Callable, Mapping, Sequence
 from types import FrameType
 
+import psutil
+from html_performance_host_load_test_support import cpu_times
 import produce_html_performance_evidence as typed_producer
+import html_performance_host_load as host_load
+import html_performance_host_load_validation as load_validation
 import html_performance_reference as reference
 import html_performance_source_materialization as source_materialization
 import verify_html_performance_evidence as gate
 
 producer = typed_producer
+
+
+class CpuTimes(NamedTuple):
+    user: float
+    idle: float
+    system: float = 0.0
 
 
 class CatalogProducerOperationTest(unittest.TestCase):
@@ -115,6 +125,20 @@ class CatalogProducerOperationTest(unittest.TestCase):
             run.assert_not_called()
             self.assertFalse(output.exists())
 
+    def test_cpu_observer_source_preflight_precedes_catalog_and_build(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            with (patch.object(platform, "system", return_value="Darwin"),
+                  patch.object(platform, "machine", return_value="arm64"),
+                  patch.object(load_validation, "require_current_cpu_observer_sources",
+                               side_effect=ValueError("CPU observer source differs")),
+                  patch.object(producer, "load_catalog_conditions") as catalog,
+                  patch.object(producer, "_measurement_command") as command):
+                with self.assertRaisesRegex(ValueError, "CPU observer source differs"):
+                    producer.produce(root, root / "tmp/evidence", catalog_manifest_path=root / "catalog.json")
+            catalog.assert_not_called()
+            command.assert_not_called()
+
     def test_formal_cli_forwards_catalog_manifest_to_producer(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root, output, capacity, manifest = self._catalog_cli_fixture(temporary)
@@ -196,6 +220,7 @@ class CatalogProducerOperationTest(unittest.TestCase):
             wrapper = root / "reference-parent-wrapper.json"
             with patch.object(platform, "system", return_value="Darwin"), \
                  patch.object(platform, "machine", return_value="arm64"), \
+                 patch.object(load_validation, "require_current_cpu_observer_sources"), \
                  patch.object(producer, "_make_git_query", return_value=lambda *_args: ""), \
                  patch.object(producer, "source", return_value=initial), \
                  patch.object(producer, "load_catalog_conditions",
@@ -630,6 +655,54 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
                         source={"head": "a"}, before_context=before,
                         after_context=after, arms={},
                     )
+
+    def test_resume_rejects_old_or_modified_worker_load_before_measurement(self) -> None:
+        valid = {"schema": "krr-host-cpu-busy-v1", "method": "psutil.cpu_times_percent",
+                 "version": "7.2.2", "sampleIntervalSeconds": host_load.INTERVAL_SECONDS,
+                 "intervalBeforeSeconds": host_load.INTERVAL_SECONDS, "intervalDuringSeconds": 1.0,
+                 "cpuTimesBefore": cpu_times(10.0, 90.0),
+                 "cpuTimesDuring": cpu_times(10.0, 90.0)}
+        for index, tag in enumerate((valid, None, {**valid, "method": "loadavg"},
+                                     {**valid, "intervalDuringSeconds": 0.0})):
+            with self.subTest(index=index):
+                root = self.root / f"cpu-resume-{index}"
+                worker: gate.JsonObject = {"accepted": True, "loadRatioBefore": 0.1, "loadRatioAfter": 0.1}
+                if tag is not None:
+                    worker["hostLoad"] = tag
+                pin = producer.write(root / "attempt.json", worker)
+                manifest = producer.write(root / "manifest.json", {
+                    "order": [{"workerAttempts": [{**worker, "attemptRecord": pin}]}],
+                })
+                bundle_path = root / "bundle"
+                producer.write_transport_bundle(bundle_path, "a" * 40, [pin, manifest], [])
+                bundle = gate.Bundle(bundle_path)
+                attempt = {"pairManifest": manifest}
+                expectation = nullcontext() if index == 0 else self.assertRaises(ValueError)
+                with expectation:
+                    producer._require_cpu_busy_resume(bundle, [attempt])
+
+    def test_resume_retains_unobserved_retry_and_later_valid_worker(self) -> None:
+        root = self.root / "cpu-resume-retry"
+        tag: gate.JsonObject = {"schema": "krr-host-cpu-busy-v1", "method": "psutil.cpu_times_percent",
+            "version": "7.2.2", "sampleIntervalSeconds": host_load.INTERVAL_SECONDS,
+            "intervalBeforeSeconds": host_load.INTERVAL_SECONDS,
+            "cpuTimesBefore": cpu_times(10.0, 90.0)}
+        rows: list[gate.JsonObject] = [
+            {"accepted": False, "reason": "host load observation unavailable", "loadRatioBefore": 0.1,
+             "loadRatioAfter": None, "hostLoad": {**tag, "intervalDuringSeconds": 1.0,
+                                                     "cpuTimesDuring": cpu_times(0.0, 0.0)}},
+            {"accepted": True, "loadRatioBefore": 0.1, "loadRatioAfter": 0.1,
+             "hostLoad": {**tag, "intervalDuringSeconds": 1.0,
+                          "cpuTimesDuring": cpu_times(10.0, 90.0)}},
+        ]
+        pins = [producer.write(root / f"attempt-{index}.json", row) for index, row in enumerate(rows)]
+        manifest = producer.write(root / "manifest.json", {
+            "order": [{"workerAttempts": [{**row, "attemptRecord": pin}
+                                          for row, pin in zip(rows, pins, strict=True)]}],
+        })
+        bundle_path = root / "bundle"
+        producer.write_transport_bundle(bundle_path, "a" * 40, [*pins, manifest], [])
+        producer._require_cpu_busy_resume(gate.Bundle(bundle_path), [{"pairManifest": manifest}])
 
     def resume_context_fixture(
         self, directory: Path, rows: list[gate.JsonObject],
@@ -1090,6 +1163,9 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
                           side_effect=validate_builds) as builds, \
              patch.object(gate, "validate_attempt",
                           side_effect=validate_attempt) as validate, \
+             patch.object(gate, "committed_records", return_value={}) as records, \
+             patch.object(load_validation, "verify_catalog_host_load",
+                          side_effect=lambda *_args: events.append("host-load")) as host_load_check, \
              patch("builtins.print"):
             with self.assertRaises(RuntimeError) as raised:
                 producer._verify_and_seal_catalog_batch(
@@ -1099,9 +1175,11 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
                 )
 
         self.assertIs(raised.exception, failure)
-        self.assertEqual(events, ["build", "attempt", "seal"])
+        self.assertEqual(events, ["build", "attempt", "host-load", "seal"])
         builds.assert_called_once()
         validate.assert_called_once()
+        records.assert_called_once_with(self.root, "a" * 40, git_query=None)
+        self.assertEqual(host_load_check.call_args.args[1], [attempts[0]])
         receipt = gate.read_json(batch / "batch-receipt.json")
         self.assertEqual(receipt["conditionIds"], ["case-a", "case-b"])
         self.assertEqual(receipt["completeConditionIds"], ["case-a"])
@@ -1111,13 +1189,37 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         batch, _ = self.create_batch(complete_ids=("case-a",))
         build_facts = {"baseline": {"proof": "validated"}, "candidate": {"proof": "validated"}}
         with patch.object(gate, "validate_expected_builds", return_value=build_facts) as builds, \
-             patch.object(gate, "validate_attempt") as validate:
+             patch.object(gate, "validate_attempt") as validate, \
+             patch.object(gate, "committed_records", return_value={}) as records, \
+             patch.object(load_validation, "verify_catalog_host_load") as host_load_check:
             receipt, _, attempts = producer.load_closed_batch(batch, self.root)
         self.assertEqual(receipt["completeConditionIds"], ["case-a"])
         self.assertEqual(len(attempts), 1)
         builds.assert_called_once()
         validate.assert_called_once()
         self.assertIs(validate.call_args.kwargs["validated_builds"], build_facts)
+        records.assert_called_once_with(self.root, "a" * 40, git_query=None)
+        self.assertEqual(host_load_check.call_args.args[1], attempts)
+
+    def test_invalid_host_load_rejects_closed_and_partial_batch(self) -> None:
+        batch, bundle_path = self.create_batch(complete_ids=("case-a",))
+        bundle = gate.Bundle(bundle_path)
+        attempts = cast(list[dict[str, typed_producer.FilePin]],
+                        gate._objects(bundle.manifest.get("attempts"), "fixture attempts"))
+        seal = Mock()
+        with patch.object(gate, "validate_expected_builds", return_value={}), \
+             patch.object(gate, "validate_attempt"), \
+             patch.object(gate, "committed_records", return_value={}), \
+             patch.object(load_validation, "verify_catalog_host_load",
+                          side_effect=ValueError("invalid host load")):
+            with self.assertRaisesRegex(ValueError, "invalid host load"):
+                producer.load_closed_batch(batch, self.root)
+            with self.assertRaisesRegex(ValueError, "invalid host load"):
+                producer._verify_and_seal_catalog_batch(
+                    bundle_path, self.root, attempts, ("case-a",), formal_ready=False,
+                    diagnostic=False, batch_failure=None, seal=seal, summary={}, git_query=None,
+                )
+        seal.assert_not_called()
 
     def test_batch_reader_rejects_source_drift_and_edited_pin(self) -> None:
         batch, _ = self.create_batch()
@@ -1268,7 +1370,7 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         binary.write_bytes(b"worker")
         build = producer.ArmBuildResult([], binary, gate.sha256(binary), {}, [])
         with patch.object(time, "monotonic", return_value=2.0), \
-             patch.object(producer, "quiet", return_value=0.1), \
+             patch.object(host_load, "finish", return_value=(0.1, 1.0, cpu_times(10.0, 90.0))), \
              patch.object(producer, "_measurement_command") as command:
             with self.assertRaises(producer.BatchBudgetExhausted):
                 producer.observe_worker_attempt(
@@ -1281,6 +1383,9 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
 
 class RuntimeSyncPreflightTest(unittest.TestCase):
     def setUp(self) -> None:
+        guard = patch.object(load_validation, "require_current_cpu_observer_sources")
+        guard.start()
+        self.addCleanup(guard.stop)
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name) / "repo"
@@ -1470,8 +1575,8 @@ class WorkerAttemptContractTest(unittest.TestCase):
         return execute
 
     def test_retries_only_host_load_and_records_both_attempts(self) -> None:
-        with patch.object(producer, "await_quiet", return_value=0.1), \
-             patch.object(producer, "quiet", side_effect=[0.31, 0.1]), \
+        with patch.object(producer, "await_quiet", return_value=host_load.Probe(0.1, 1.0, 1.0, 0, cpu_times(10.0, 90.0))), \
+             patch.object(host_load, "finish", side_effect=[(0.31, 1.0, cpu_times(31.0, 69.0)), (0.1, 1.0, cpu_times(10.0, 90.0))]), \
              patch.object(producer, "_measurement_command",
                           side_effect=self.command_result()) as run:
             sample, loads, attempts = producer.collect_worker_sample(
@@ -1497,9 +1602,71 @@ class WorkerAttemptContractTest(unittest.TestCase):
         self.assertEqual(len(run.call_args_list), 2)
         self.assertEqual(len(list(self.attempts.glob("*.json"))), 2)
 
+    def test_worker_is_between_blocking_prime_and_cpu_interval_sample(self) -> None:
+        steps: list[float | None | str] = []
+
+        def cpu(*, interval: float | None, percpu: bool) -> CpuTimes:
+            self.assertFalse(percpu)
+            steps.append(interval)
+            return CpuTimes(10.0, 90.0)
+
+        def worker(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+            steps.append("worker")
+            return self.command_result()(*args, **kwargs)
+
+        with (patch.object(psutil, "__version__", host_load.VERSION),
+              patch.object(psutil, "cpu_times_percent", side_effect=cpu),
+              patch.object(time, "monotonic", side_effect=[1.0, 1.0, 1.0, 2.0, 3.0, 3.0]),
+              patch.object(producer, "_measurement_command", side_effect=worker)):
+            _, _, attempts = producer.collect_worker_sample(
+                self.build, 0, self.fixture, self.root / "reports.json", self.plan, 800, 600, 1,
+                self.root, {"PATH": os.environ.get("PATH", "")}, self.logs, self.attempts,
+            )
+        self.assertEqual(steps, [host_load.INTERVAL_SECONDS, "worker", None])
+        tag = gate._object(attempts[0]["hostLoad"], "host load")
+        self.assertAlmostEqual(cast(float, tag["intervalBeforeSeconds"]), host_load.INTERVAL_SECONDS)
+        self.assertAlmostEqual(cast(float, tag["intervalDuringSeconds"]), 1.0)
+        self.assertEqual(tag["method"], "psutil.cpu_times_percent")
+
+    def test_worker_cpu_sampling_failure_is_saved_and_rejected(self) -> None:
+        with (patch.object(producer, "await_quiet", return_value=host_load.Probe(0.1, 1.0, 1.0, 0, cpu_times(10.0, 90.0))),
+              patch.object(host_load, "finish", side_effect=OSError("unavailable")),
+              patch.object(producer, "_measurement_command", side_effect=self.command_result())):
+            with self.assertRaises(OSError):
+                producer.collect_worker_sample(
+                    self.build, 0, self.fixture, self.root / "reports.json", self.plan, 800, 600, 1,
+                    self.root, {}, self.logs, self.attempts,
+                )
+        attempt = json.loads(next(self.attempts.glob("attempt-0-1.json")).read_text())
+        self.assertFalse(attempt["accepted"])
+        self.assertIsNone(attempt["loadRatioAfter"])
+        self.assertIsNone(attempt["hostLoad"]["intervalDuringSeconds"])
+        self.assertEqual(attempt["hostLoadErrorType"], "OSError")
+        self.assertEqual(attempt["reason"], "host load observation failed")
+
+    def test_unobserved_cpu_retries_the_worker_not_only_the_sampler(self) -> None:
+        probe = host_load.Probe(0.1, 1.0, 1.0, 0, cpu_times(10.0, 90.0))
+        with (patch.object(producer, "await_quiet", return_value=probe) as prime,
+              patch.object(host_load, "finish", side_effect=[host_load.NoObservation(
+                  "zero", cpu_times(0.0, 0.0), 1.0),
+                  (0.1, 1.0, cpu_times(10.0, 90.0))]),
+              patch.object(producer, "_measurement_command", side_effect=self.command_result()) as worker):
+            _, _, attempts = producer.collect_worker_sample(
+                self.build, 0, self.fixture, self.root / "reports.json", self.plan, 800, 600, 1,
+                self.root, {}, self.logs, self.attempts,
+            )
+        self.assertEqual(prime.call_count, 2)
+        self.assertEqual(worker.call_count, 2)
+        self.assertEqual(attempts[0]["reason"], "host load observation unavailable")
+        self.assertIsNone(attempts[0]["loadRatioAfter"])
+        first_tag = gate._object(attempts[0]["hostLoad"], "host load")
+        self.assertEqual(first_tag["cpuTimesDuring"], cpu_times(0.0, 0.0))
+        self.assertEqual(first_tag["intervalDuringSeconds"], host_load.INTERVAL_SECONDS)
+        self.assertTrue(attempts[1]["accepted"])
+
     def test_persistent_host_load_stops_after_three_recorded_attempts(self) -> None:
-        with patch.object(producer, "await_quiet", return_value=0.1), \
-             patch.object(producer, "quiet", return_value=0.3), \
+        with patch.object(producer, "await_quiet", return_value=host_load.Probe(0.1, 1.0, 1.0, 0, cpu_times(10.0, 90.0))), \
+             patch.object(host_load, "finish", return_value=(0.3, 1.0, cpu_times(30.0, 70.0))), \
              patch.object(producer, "_measurement_command",
                           side_effect=self.command_result()) as run:
             with self.assertRaisesRegex(ValueError, "host load remained above limit"):
@@ -1511,8 +1678,8 @@ class WorkerAttemptContractTest(unittest.TestCase):
         self.assertEqual(len(list(self.attempts.glob("*.json"))), 3)
 
     def test_worker_binary_change_is_distinct_and_immediate(self) -> None:
-        with patch.object(producer, "await_quiet", return_value=0.1), \
-             patch.object(producer, "quiet", return_value=0.1), \
+        with patch.object(producer, "await_quiet", return_value=host_load.Probe(0.1, 1.0, 1.0, 0, cpu_times(10.0, 90.0))), \
+             patch.object(host_load, "finish", return_value=(0.1, 1.0, cpu_times(10.0, 90.0))), \
              patch.object(producer, "_measurement_command",
                           side_effect=self.command_result(mutate_binary=True)) as run:
             with self.assertRaisesRegex(ValueError, "worker binary changed during measurement"):
@@ -1525,8 +1692,8 @@ class WorkerAttemptContractTest(unittest.TestCase):
         self.assertNotEqual(attempt["binarySha256Before"], attempt["binarySha256After"])
 
     def test_worker_failure_preserves_exit_and_is_not_retried(self) -> None:
-        with patch.object(producer, "await_quiet", return_value=0.1), \
-             patch.object(producer, "quiet", return_value=0.1), \
+        with patch.object(producer, "await_quiet", return_value=host_load.Probe(0.1, 1.0, 1.0, 0, cpu_times(10.0, 90.0))), \
+             patch.object(host_load, "finish", return_value=(0.1, 1.0, cpu_times(10.0, 90.0))), \
              patch.object(producer, "_measurement_command",
                           side_effect=self.command_result(returncode=7)) as run:
             with self.assertRaises(subprocess.CalledProcessError) as caught:
@@ -1549,8 +1716,8 @@ class WorkerAttemptContractTest(unittest.TestCase):
         stderr: bytes = b"worker stderr",
     ) -> tuple[list[gate.JsonObject], subprocess.CalledProcessError]:
         failures: list[gate.JsonObject] = []
-        with patch.object(producer, "await_quiet", return_value=0.1), \
-             patch.object(producer, "quiet", return_value=0.1), \
+        with patch.object(producer, "await_quiet", return_value=host_load.Probe(0.1, 1.0, 1.0, 0, cpu_times(10.0, 90.0))), \
+             patch.object(host_load, "finish", return_value=(0.1, 1.0, cpu_times(10.0, 90.0))), \
              patch.object(producer, "_measurement_command",
                           side_effect=self.command_result(returncode=returncode, closed=closed,
                                                           stderr=stderr)):
@@ -1615,8 +1782,8 @@ class WorkerAttemptContractTest(unittest.TestCase):
 
     def test_closed_baseline_failure_keeps_attempt_pin_for_transport(self) -> None:
         failures: list[gate.JsonObject] = []
-        with patch.object(producer, "await_quiet", return_value=0.1), \
-             patch.object(producer, "quiet", return_value=0.1), \
+        with patch.object(producer, "await_quiet", return_value=host_load.Probe(0.1, 1.0, 1.0, 0, cpu_times(10.0, 90.0))), \
+             patch.object(host_load, "finish", return_value=(0.1, 1.0, cpu_times(10.0, 90.0))), \
              patch.object(producer, "_measurement_command",
                           side_effect=self.command_result(returncode=7, closed=True)):
             with self.assertRaises(subprocess.CalledProcessError):
@@ -1897,8 +2064,8 @@ class WorkerAttemptContractTest(unittest.TestCase):
         def run_command(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
             return next(commands)(*args, **kwargs)
 
-        with patch.object(producer, "await_quiet", return_value=0.1), \
-             patch.object(producer, "quiet", return_value=0.1), \
+        with patch.object(producer, "await_quiet", return_value=host_load.Probe(0.1, 1.0, 1.0, 0, cpu_times(10.0, 90.0))), \
+             patch.object(host_load, "finish", return_value=(0.1, 1.0, cpu_times(10.0, 90.0))), \
              patch.object(producer, "_measurement_command", side_effect=run_command):
             for sample in range(3):
                 try:
@@ -1921,8 +2088,8 @@ class WorkerAttemptContractTest(unittest.TestCase):
         self.assertEqual(attempts[-1]["actualExit"], 7)
 
     def test_elapsed_time_does_not_trigger_host_load_retry(self) -> None:
-        with patch.object(producer, "await_quiet", return_value=0.1), \
-             patch.object(producer, "quiet", return_value=0.1), \
+        with patch.object(producer, "await_quiet", return_value=host_load.Probe(0.1, 1.0, 1.0, 0, cpu_times(10.0, 90.0))), \
+             patch.object(host_load, "finish", return_value=(0.1, 1.0, cpu_times(10.0, 90.0))), \
              patch.object(producer, "_measurement_command",
                           side_effect=self.command_result(elapsed_ms=90_000.0)) as run:
             sample, _loads, attempts = producer.collect_worker_sample(
@@ -1934,8 +2101,8 @@ class WorkerAttemptContractTest(unittest.TestCase):
         self.assertIs(attempts[0]["accepted"], True)
 
     def test_worker_attempt_records_are_unique_across_arms_and_pairs(self) -> None:
-        with patch.object(producer, "await_quiet", return_value=0.1), \
-             patch.object(producer, "quiet", return_value=0.1), \
+        with patch.object(producer, "await_quiet", return_value=host_load.Probe(0.1, 1.0, 1.0, 0, cpu_times(10.0, 90.0))), \
+             patch.object(host_load, "finish", return_value=(0.1, 1.0, cpu_times(10.0, 90.0))), \
              patch.object(producer, "_measurement_command",
                           side_effect=self.command_result()) as run:
             for arm in ("baseline", "candidate"):
@@ -1955,7 +2122,7 @@ class WorkerAttemptContractTest(unittest.TestCase):
 
     def test_pre_worker_binary_mismatch_is_recorded_without_launch(self) -> None:
         self.binary.write_bytes(b"changed before worker")
-        with patch.object(producer, "await_quiet", return_value=0.1), \
+        with patch.object(producer, "await_quiet", return_value=host_load.Probe(0.1, 1.0, 1.0, 0, cpu_times(10.0, 90.0))), \
              patch.object(producer, "_measurement_command") as run:
             with self.assertRaisesRegex(ValueError, "binary changed before measurement"):
                 producer.collect_worker_sample(
@@ -1971,13 +2138,14 @@ class WorkerAttemptContractTest(unittest.TestCase):
         self.assertEqual(attempt["reason"], "worker binary changed before measurement")
         self.assertIs(attempt["workerStarted"], False)
         self.assertIsNone(attempt["actualExit"])
+        self.assertIsNone(attempt["hostLoad"]["intervalDuringSeconds"])
 
     def test_worker_start_is_unknown_when_launch_has_no_pid_record(self) -> None:
         def fail_before_spawn(*_args: object, **_kwargs: object) -> None:
             raise FileNotFoundError("worker executable unavailable")
 
-        with patch.object(producer, "await_quiet", return_value=0.1), \
-             patch.object(producer, "quiet", return_value=0.1), \
+        with patch.object(producer, "await_quiet", return_value=host_load.Probe(0.1, 1.0, 1.0, 0, cpu_times(10.0, 90.0))), \
+             patch.object(host_load, "finish", return_value=(0.1, 1.0, cpu_times(10.0, 90.0))), \
              patch.object(producer, "_measurement_command", side_effect=fail_before_spawn):
             with self.assertRaisesRegex(FileNotFoundError, "worker executable unavailable"):
                 producer.collect_worker_sample(
@@ -1989,7 +2157,8 @@ class WorkerAttemptContractTest(unittest.TestCase):
         self.assertIsNone(attempt["workerStarted"])
         self.assertIsNone(attempt["actualExit"])
         self.assertIsNone(attempt["lifecycle"])
-        self.assertEqual(attempt["loadRatioAfter"], 0.1)
+        self.assertIsNone(attempt["loadRatioAfter"])
+        self.assertIsNone(attempt["hostLoad"]["intervalDuringSeconds"])
 
     def test_worker_start_is_true_when_timeout_lifecycle_records_pid(self) -> None:
         def timeout_after_spawn(
@@ -2003,8 +2172,8 @@ class WorkerAttemptContractTest(unittest.TestCase):
                 lifecycle_sink(lifecycle)
             raise subprocess.TimeoutExpired(args, 60)
 
-        with patch.object(producer, "await_quiet", return_value=0.1), \
-             patch.object(producer, "quiet", return_value=0.1), \
+        with patch.object(producer, "await_quiet", return_value=host_load.Probe(0.1, 1.0, 1.0, 0, cpu_times(10.0, 90.0))), \
+             patch.object(host_load, "finish", return_value=(0.1, 1.0, cpu_times(10.0, 90.0))), \
              patch.object(producer, "_measurement_command", side_effect=timeout_after_spawn):
             with self.assertRaises(subprocess.TimeoutExpired):
                 producer.collect_worker_sample(
@@ -2018,9 +2187,10 @@ class WorkerAttemptContractTest(unittest.TestCase):
         self.assertEqual(attempt["loadRatioAfter"], 0.1)
 
     def test_quiet_wait_uses_the_worker_load_limit(self) -> None:
-        with patch.object(producer, "quiet", side_effect=[0.3, 0.25, 0.25]), \
+        with patch.object(host_load, "start", side_effect=[host_load.Probe(0.3, 1.0, 1.0, 0, cpu_times(30.0, 70.0)),
+                                                            host_load.Probe(0.25, 1.0, 2.0, 0, cpu_times(25.0, 75.0))]), \
              patch.object(time, "sleep") as sleep:
-            self.assertEqual(producer.await_quiet(), producer.MAX_WORKER_LOAD)
+            self.assertEqual(producer.await_quiet().before, producer.MAX_WORKER_LOAD)
         sleep.assert_called_once_with(5)
         self.assertEqual(producer.MAX_WORKER_LOAD, 0.25)
 
@@ -2044,6 +2214,9 @@ class WorkerAttemptContractTest(unittest.TestCase):
 
 class CapacityBindingUnitTests(unittest.TestCase):
     def setUp(self) -> None:
+        guard = patch.object(load_validation, "require_current_cpu_observer_sources")
+        guard.start()
+        self.addCleanup(guard.stop)
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()

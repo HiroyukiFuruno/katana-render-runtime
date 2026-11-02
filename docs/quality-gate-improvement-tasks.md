@@ -2,6 +2,8 @@
 
 ## 最新の再開地点（2026-11-02）
 
+- [/] CPU観測方式の最終関連回帰R7047は375/375・実0、静的/厳格型/重複検査を含むR7046 foundationは実0。R7049は実Lefthookの入力選択10ケースを隔離fixtureで確認し、Rust入力の選択とPython/Bun lock等の非選択を確認（Rust検査本体の合格ではない）。R7050でhook対象の限定を通常commitした。新方式の正式性能84条件は引き続き未測定であり、これらの成功を描画性能合格へ転用しない。
+- [/] 性能計測の現在負荷判定を修正。R7027は同hostで履歴source/現行SDKをbuildして旧方式1条件を閉鎖できたが、R7028はload average/coreの過去平均でworker前待機が続き、PG47051を終了して実143・残process0を回収した。新方式の全84性能合格は0件（未測定）として扱う。psutil固定依存・source/worker binding・旧新混在拒否を追加。実機でcpu_percent(.1)10回中6回がcounter全差分0だったため、全ゼロをquietと認定しないcpu_times_percent内訳方式へ修正した。0.1秒窓はR7038の5試行で2無観測、1秒窓はR7039の5/5で有効だった（描画合格ではない）。新案R7044の関連375/375実0、R7045が拒否した新test clone1組を共通化してR7046 foundation実0。workerを含む区間、NoObservation限定retry、25%/3秒/統計非劣化・メモリ条件を維持する。旧方式や旧案の成功を新方式の正式合格へ転用しない。
 - [/] `release/v0.4.24`で検証基盤/描画回帰/性能履歴を統合中、未リリース。統合差分を`05177e8d`、必須release内容への固定を`fc3b9e21`に通常commit済み。stash0・worktree1。現在のGit参照は実Gitで確認し、以下の検証履歴の途中状態を現行ソースの全体合格へ転用しない。
 - [/] 現行Rust全体R6972は5,525/5,525成功・29skip（実テスト336.041秒、collectionまで実0）。R6974正式root policyは83,290/84,498＝98.57038036403229%、未到達1,208行で実1。前回から13行減、100%未達。R6976診断copyは`tmp/quality/resumed-owner-r3509/current-root-coverage-report-r6976/`、official listing827位置と全体未到達1,208は別値であり残381位置を捏造しない。
 - [/] SVGは従来1,438＋追加painting308＋集合1＝1,747全件成功、R6972全体でも再実行した。追加48の旧PNGとの差はAA変更に由来し、旧AA対照・元tree不変・本番rendererと独立geometry全画素maskで検証する。原SVG/PNG・閾値・vendorソース/manifestは不変。source foundation R6963、AST R6970、性能Python344/344 R6965、macOS証跡65/65 R6946は各実0。
