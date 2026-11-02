@@ -90,3 +90,15 @@ fn gradient_tree(database: &resvg::usvg::fontdb::Database) -> Result<Tree, Strin
     )
     .map_err(|error| error.to_string())
 }
+
+#[test]
+fn malformed_typeface_is_rejected_without_poisoning_font_manager() -> Result<(), String> {
+    let database = resvg::usvg::fontdb::Database::new();
+    let rasterizer = HtmlGlyphRasterizer::new(&database);
+    let malformed = skia_safe::Data::new_copy(b"not a font");
+    assert!(rasterizer.create_backend_face(&malformed, 0)?.is_none());
+
+    let valid = skia_safe::Data::new_copy(font_file_fixture::FONT_BYTES);
+    assert!(rasterizer.create_backend_face(&valid, 0)?.is_some());
+    Ok(())
+}

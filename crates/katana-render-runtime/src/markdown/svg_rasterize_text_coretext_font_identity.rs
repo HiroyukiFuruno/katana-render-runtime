@@ -104,21 +104,8 @@ fn postscript_name(item: ttf_parser::name::Name<'_>) -> Option<String> {
 }
 
 #[cfg(test)]
-#[test]
-fn mac_roman_postscript_names_require_ascii() {
-    let record = mac_roman_name(b"Helvetica-Bold");
-    assert_eq!(postscript_name(record).as_deref(), Some("Helvetica-Bold"));
-    for invalid in [
-        mac_roman_name(b"\xff"),
-        ttf_parser::name::Name {
-            encoding_id: 1,
-            ..record
-        },
-        mac_roman_name(b"bad name"),
-    ] {
-        assert_eq!(postscript_name(invalid), None);
-    }
-}
+#[path = "svg_rasterize_text_coretext_font_identity_tests.rs"]
+mod tests;
 
 #[cfg(test)]
 fn mac_roman_name(name: &[u8]) -> ttf_parser::name::Name<'_> {

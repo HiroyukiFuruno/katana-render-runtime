@@ -5,6 +5,7 @@ use rstest::rstest;
 use skrifa::MetadataProvider;
 use std::error::Error;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[path = "svg_engine_text_layout_position_tests.rs"]
 mod position_tests;
@@ -21,6 +22,8 @@ const FONT_FACE_INDEX: u32 = 0;
 const UPM_ZERO: u16 = 0;
 const UPM_BELOW_MINIMUM: u16 = 15;
 const UPM_ABOVE_MAXIMUM: u16 = 16_385;
+const MISSING: char = '\u{10fffd}';
+const INPUT: &str = "A\u{10fffd}B";
 type TestResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
 fn parse(attributes: &str, content: &str) -> Result<Tree, String> {
@@ -171,4 +174,92 @@ fn assert_only_upm_field_changed(bytes: &[u8], field: std::ops::Range<usize>) {
         changed_positions,
         (field.start..field.end).collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn missing_glyph_without_fallback_keeps_cluster_text_and_position() -> TestResult<()> {
+    crate::svg_engine::init_test_logger();
+    assert_missing_from_font()?;
+    let requested = requested_font()?;
+    let (mut database, id) = database_with_font(FONT.to_vec())?;
+    let resolved = database
+        .load_font(id, &[])
+        .ok_or(std::io::Error::other("font missing"))?;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let resolver = no_fallback_resolver(id, Arc::clone(&calls));
+    let glyphs = usvg::layout::shape_text(
+        INPUT,
+        Arc::new(resolved),
+        false,
+        false,
+        &requested,
+        20.0,
+        usvg::FontOpticalSizing::Auto,
+        &resolver,
+        &mut database,
+    );
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_missing_glyphs(&glyphs)
+}
+
+fn assert_missing_from_font() -> TestResult<()> {
+    let face = skrifa::FontRef::from_index(FONT, FONT_FACE_INDEX)?;
+    assert!(
+        !face
+            .charmap()
+            .mappings()
+            .any(|(codepoint, _)| codepoint == MISSING as u32)
+    );
+    Ok(())
+}
+
+fn no_fallback_resolver(
+    id: usvg::fontdb::ID,
+    count: Arc<AtomicUsize>,
+) -> usvg::FontResolver<'static> {
+    usvg::FontResolver {
+        select_fallback: Box::new(move |character, used, _| {
+            assert_eq!(character, MISSING);
+            assert_eq!(used, &[id]);
+            count.fetch_add(1, Ordering::Relaxed);
+            None
+        }),
+        ..usvg::FontResolver::default()
+    }
+}
+
+fn assert_missing_glyphs(glyphs: &[usvg::layout::Glyph]) -> TestResult<()> {
+    let [first, missing, last] = glyphs else {
+        return Err(std::io::Error::other("expected three glyph clusters").into());
+    };
+    assert_ne!(first.id.0, 0);
+    assert_eq!(missing.id.0, 0);
+    assert_ne!(last.id.0, 0);
+    assert_glyph_text_and_positions(first, missing, last);
+    Ok(())
+}
+
+fn assert_glyph_text_and_positions(
+    first: &usvg::layout::Glyph,
+    missing: &usvg::layout::Glyph,
+    last: &usvg::layout::Glyph,
+) {
+    assert_eq!(
+        (
+            first.text.as_str(),
+            missing.text.as_str(),
+            last.text.as_str()
+        ),
+        ("A", "\u{10fffd}", "B")
+    );
+    assert_eq!(
+        (
+            first.byte_idx.value(),
+            missing.byte_idx.value(),
+            last.byte_idx.value()
+        ),
+        (0, 1, 1 + MISSING.len_utf8())
+    );
+    assert!(first.width > 0 && missing.width > 0 && last.width > 0);
+    assert_eq!((missing.dx, missing.dy), (0, 0));
 }

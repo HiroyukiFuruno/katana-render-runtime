@@ -24,6 +24,7 @@ enum PublicErrorKind {
 }
 
 fn parse_with_languages(source: &str, languages: &[&str]) -> Result<usvg::Tree, String> {
+    super::init_test_logger();
     let options = usvg::Options {
         languages: languages
             .iter()

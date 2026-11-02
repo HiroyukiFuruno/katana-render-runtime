@@ -98,3 +98,64 @@ fn assert_kerning_disabled(tree: &usvg::Tree) -> Result<(), String> {
     assert!(!span.apply_kerning());
     Ok(())
 }
+
+#[test]
+fn tiny_glyph_length_skips_scaling_but_larger_length_scales() -> Result<(), String> {
+    let natural = parse("style='font-kerning:none'", "HH")?;
+    let tiny = parse(
+        "style='font-kerning:none' textLength='0.00001px' lengthAdjust='spacingAndGlyphs'",
+        "HH",
+    )?;
+    let scaled = parse(
+        "style='font-kerning:none' textLength='1px' lengthAdjust='spacingAndGlyphs'",
+        "HH",
+    )?;
+    assert_tiny_text_length(&tiny)?;
+    let (first, second) = pair(&natural)?;
+    let (tiny_first, tiny_second) = pair(&tiny)?;
+    let (scaled_first, _) = pair(&scaled)?;
+    let (advance, natural_scale) = natural_metrics(first, second);
+    let width = advance * 2.0;
+    assert!(0.00001 / width < 0.001 && 1.0 / width >= 0.001);
+    for (original, adjusted) in [(first, tiny_first), (second, tiny_second)] {
+        assert_eq!(original.id, adjusted.id);
+        near(original.transform().sx, adjusted.transform().sx);
+        near(original.transform().tx, adjusted.transform().tx);
+    }
+    assert!(scaled_first.transform().sx < natural_scale);
+    Ok(())
+}
+
+fn assert_tiny_text_length(tree: &usvg::Tree) -> Result<(), String> {
+    let span = text(tree)?
+        .chunks()
+        .first()
+        .and_then(|chunk| chunk.spans().first())
+        .ok_or("text span missing")?;
+    assert_eq!(span.text_length(), Some(0.00001));
+    assert_eq!(span.length_adjust(), usvg::LengthAdjust::SpacingAndGlyphs);
+    Ok(())
+}
+
+#[test]
+fn negative_spacing_removes_only_the_first_glyph() -> Result<(), String> {
+    let natural = parse("style='font-kerning:none'", "Hi")?;
+    let (first, second) = pair(&natural)?;
+    assert_eq!((first.text.as_str(), second.text.as_str()), ("H", "i"));
+    assert_ne!(first.id, second.id);
+    let advance = second.transform().tx - first.transform().tx;
+    assert!(advance > 0.0 && advance < 100.0);
+    let spaced = parse("style='font-kerning:none' letter-spacing='-100'", "Hi")?;
+    let glyphs = &text(&spaced)?
+        .layouted()
+        .first()
+        .ok_or("span missing")?
+        .positioned_glyphs;
+    let [remaining] = glyphs.as_slice() else {
+        return Err("expected one surviving glyph".to_owned());
+    };
+    assert_eq!(remaining.text, "i");
+    assert_eq!(remaining.id, second.id);
+    near(remaining.transform().tx, first.transform().tx);
+    Ok(())
+}

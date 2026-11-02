@@ -21,6 +21,20 @@ macro_rules! owned_svg_model_tests {
 #[cfg(test)]
 pub(crate) use owned_svg_model_tests;
 
+#[cfg(test)]
+fn init_test_logger() {
+    static LOGGER: std::sync::Once = std::sync::Once::new();
+    LOGGER.call_once(|| {
+        if let Err(error) = env_logger::Builder::new()
+            .is_test(true)
+            .filter_level(log::LevelFilter::Warn)
+            .try_init()
+        {
+            assert!(log::log_enabled!(log::Level::Warn), "{error}");
+        }
+    });
+}
+
 #[rustfmt::skip]
 #[path = "../vendor/svg-engine/resvg/lib.rs"]
 pub(crate) mod resvg;

@@ -133,16 +133,7 @@ fn parse_filter(primitive: &str) -> Result<usvg::Tree, String> {
 }
 
 fn parse_svg(source: &str) -> Result<usvg::Tree, String> {
-    static LOGGER: std::sync::Once = std::sync::Once::new();
-    LOGGER.call_once(|| {
-        if let Err(error) = env_logger::Builder::new()
-            .is_test(true)
-            .filter_level(log::LevelFilter::Warn)
-            .try_init()
-        {
-            assert!(log::log_enabled!(log::Level::Warn), "{error}");
-        }
-    });
+    crate::svg_engine::init_test_logger();
     usvg::Tree::from_str(source, &usvg::Options::default()).map_err(|error| error.to_string())
 }
 
