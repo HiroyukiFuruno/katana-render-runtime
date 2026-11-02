@@ -9,15 +9,15 @@ pre-commit:
   commands:
     fmt-check:
       priority: 1
-      glob: "{*.rs,*.toml,*.lock,Justfile}"
+      glob: "{*.rs,*.toml,Cargo.lock,**/Cargo.lock,Justfile,**/Justfile}"
       run: just fmt-check
     lint:
       priority: 3
-      glob: "{*.rs,*.toml,*.lock,Justfile}"
+      glob: "{*.rs,*.toml,Cargo.lock,**/Cargo.lock,Justfile,**/Justfile}"
       run: just lint
     ast-lint:
       priority: 2
-      glob: "{*.rs,*.toml,*.lock,Justfile}"
+      glob: "{*.rs,*.toml,Cargo.lock,**/Cargo.lock,Justfile,**/Justfile}"
       run: just ast-lint
 
 pre-push:
