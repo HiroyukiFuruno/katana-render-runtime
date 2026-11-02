@@ -3,7 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileSha256, type JsonValue, parseJsonValue, sha256 } from "./mermaid-pair-manifest";
 import { verifyManagedNativeBuildReceipt } from "./native-cli-managed-build";
-import { managedBuildSchemaName } from "./native-cli-managed-build-schema";
+import {
+  frozenManagedBuildSchemaName,
+  managedBuildSchemaName,
+} from "./native-cli-managed-build-schema";
 import { declaresManagedReceipt, parseManagedJson } from "./native-cli-managed-json";
 
 export interface NativeBuildReceiptSummary {
@@ -73,7 +76,9 @@ export function verifyNativeBuildReceipt(
   );
   if (
     root.schema === managedBuildSchemaName ||
-    declaresManagedReceipt(serialized, managedBuildSchemaName)
+    root.schema === frozenManagedBuildSchemaName ||
+    declaresManagedReceipt(serialized, managedBuildSchemaName) ||
+    declaresManagedReceipt(serialized, frozenManagedBuildSchemaName)
   ) {
     const summary = verifyManagedNativeBuildReceipt(
       parseManagedJson(serialized, "managed native build receipt"),

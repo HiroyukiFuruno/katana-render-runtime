@@ -2101,6 +2101,15 @@ describe("static Node eval child dependencies", () => {
   );
 });
 
+test("unresolved executable retains its source while remaining rejected", () => {
+  const snapshot = fixture();
+  const source = 'import { spawnSync } from "node:child_process"; spawnSync(variableCommand, []);';
+  replaceSources(snapshot, { "scripts/html/main.ts": source });
+  expect(sourceCode(source)).toContain("!unresolved-executable");
+  expect(snapshot.graph.errors).toContain("unresolved/external code: !unresolved-executable");
+  expect(snapshot.graph.errors).toContain("unresolved executable source: scripts/html/main.ts");
+});
+
 describe("Moon cheap static prerequisite for Cargo analysis", () => {
   test.each([
     ["missing ancestor", "moon cheap static barrier bypass: lint"],
@@ -6151,10 +6160,12 @@ describe("finite standard gate process and scratch import bindings", () => {
     const name = "scripts/mermaid/native-build-receipt.ts",
       source = read(name);
     expect(references(name)).not.toContain("!unresolved-executable");
+    expect(references(name, `\n\n${source}`)).not.toContain("!unresolved-executable");
     for (const [before, after] of [
       ['executable = "git"', 'executable = "node"'],
       ['["ls-files", "-z"]', '["ls-files", "--recurse-submodules", "-z"]'],
       ['["ls-files", "--others", "--exclude-standard", "-z"]', '["ls-files", "--others", "-z"]'],
+      ["[...currentPaths]", "[currentPaths]"],
     ] as const) {
       expect(source.replace(before, after)).not.toBe(source);
       expect(references(name, source.replace(before, after))).toContain("!unresolved-executable");

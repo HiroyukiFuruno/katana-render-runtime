@@ -55,6 +55,8 @@ export function verifyManagedNativeBuildReceipt(
   verifyManagedInputs(receipt);
   const request = managedRequestSchema.parse(read(receipt.request));
   const observation = managedObservationSchema.parse(read(receipt.observation));
+  const execution =
+    receipt.schema === "krr-native-cli-managed-build-v4" ? receipt.frozenBinary : receipt.binary;
   verifyManagedRoles(receipt, request, observation, receiptPath);
   same(
     observation.pinsAfter.unsupportedCargoConfigsAbsent,
@@ -86,7 +88,9 @@ export function verifyManagedNativeBuildReceipt(
   requireBound(
     request.cwd === receipt.cwd &&
       request.target === path.join(receipt.cwd, "target") &&
-      request.binaryPath === canonicalRegularFile(expectedBinary, "managed CLI binary") &&
+      (receipt.schema === "krr-native-cli-managed-build-v4"
+        ? expectedBinary === execution.path
+        : request.binaryPath === canonicalRegularFile(expectedBinary, "managed CLI binary")) &&
       request.binaryPath === path.join(receipt.cwd, "target/debug/krr") &&
       request.expectedPackage.manifestPath ===
         path.join(receipt.cwd, "crates/katana-render-runtime-cli/Cargo.toml") &&
@@ -148,8 +152,19 @@ export function verifyManagedNativeBuildReceipt(
   );
   verifyManagedCargo(receipt, request, observation);
   same(receipt.binary, observation.binaryAfter, "observed binary identity");
-  verifyFileRecord(receipt.binary, "managed binary");
-  verifyCurrentBinaryIdentity(receipt.binary);
+  if (receipt.schema === "krr-native-cli-managed-build-v4") {
+    same(receipt.frozenFrom, receipt.binary, "frozen binary origin");
+    requireBound(
+      execution.path === path.join(attempt, "frozen/krr") &&
+        execution.sha256 === receipt.binary.sha256 &&
+        execution.size === receipt.binary.size &&
+        (execution.device !== receipt.binary.device || execution.inode !== receipt.binary.inode),
+      "frozen binary identity differs",
+    );
+    fs.accessSync(execution.path, fs.constants.X_OK);
+  }
+  verifyFileRecord(execution, "managed execution binary");
+  verifyCurrentBinaryIdentity(execution);
   requireBound(
     receipt.runtimeAssetPins.some(
       (pin) =>
@@ -190,8 +205,8 @@ export function verifyManagedNativeBuildReceipt(
     sourceDigest: source.digest,
     sourceFileCount: source.files.length,
     sourceFiles: source.files,
-    binaryPath: receipt.binary.path,
-    binarySha256: receipt.binary.sha256,
+    binaryPath: execution.path,
+    binarySha256: execution.sha256,
     cargoLockPath: cargoLock.path,
     cargoLockSha256: cargoLock.sha256,
     runtimeAssetPins: receipt.runtimeAssetPins,

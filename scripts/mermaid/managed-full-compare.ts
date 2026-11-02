@@ -80,12 +80,8 @@ export async function runManagedFullComparison(
   );
   try {
     validateOfficialBaselines(request, pins);
-    const buildReceiptPath = buildNativeCli(
-      request,
-      expectedSource.digest,
-      expectedSource.files,
-      steps,
-    );
+    const build = buildNativeCli(request, expectedSource.digest, expectedSource.files, steps);
+    const buildReceiptPath = build.receiptPath;
     receipt.buildReceipt = { path: buildReceiptPath, sha256: fileSha256(buildReceiptPath) };
     await runLanguageComparisons(
       async (language) =>
@@ -93,6 +89,7 @@ export async function runManagedFullComparison(
           request,
           language,
           buildReceiptPath,
+          build.binaryPath,
           request.outputRoot,
           steps,
           pins.fixtureSources[language],
@@ -107,6 +104,7 @@ export async function runManagedFullComparison(
           expectedSource.digest,
           expectedSource.files,
           buildReceiptPath,
+          build.binaryPath,
         ),
       (result) => languages.push(result),
     );
@@ -119,6 +117,7 @@ export async function runManagedFullComparison(
       expectedSource.digest,
       expectedSource.files,
       buildReceiptPath,
+      build.binaryPath,
     );
     requireFullScoreAcceptance(languages);
     receipt.status = "completed";
@@ -181,7 +180,7 @@ function buildNativeCli(
   sourceDigest: string,
   sourceFiles: ReturnType<typeof parseSourceManifest>["files"],
   steps: ManagedStep[],
-): string {
+): { receiptPath: string; binaryPath: string } {
   const argv = [
     request.tools.python.path,
     "scripts/mermaid/produce_native_cli_build_receipt.py",
@@ -214,12 +213,12 @@ function buildNativeCli(
   const response = parseChildJson<BuildResponse>(result, "managed native build producer");
   const summary = verifyNativeBuildReceipt(
     response.receipt,
-    request.binary,
+    path.join(path.dirname(response.receipt), "frozen/krr"),
     request.runtime.path,
     request.repositoryRoot,
   );
   assertCallerSourceBinding(summary, sourceDigest, sourceFiles);
-  return response.receipt;
+  return { receiptPath: response.receipt, binaryPath: summary.binaryPath };
 }
 
 export function assertCallerSourceBinding(
@@ -244,6 +243,7 @@ function verifyFinalState(
   sourceDigest: string,
   sourceFiles: ReturnType<typeof parseSourceManifest>["files"],
   buildReceiptPath: string,
+  binaryPath: string,
 ): void {
   validateFreshInputState(request, pins);
   if (
@@ -254,7 +254,7 @@ function verifyFinalState(
   const currentSource = captureNativeSourceManifest(request.repositoryRoot);
   const build = verifyNativeBuildReceipt(
     buildReceiptPath,
-    request.binary,
+    binaryPath,
     request.runtime.path,
     request.repositoryRoot,
   );

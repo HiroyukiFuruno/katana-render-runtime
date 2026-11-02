@@ -4228,11 +4228,35 @@ function reviewedRuntimeAssetTestCommandsWithoutClassic(lines: string[]): string
     : withoutAudit;
   if (!withoutStandardGate) return undefined;
 
-  const withoutReviewedTests = removeReviewedRuntimeAssetTests(withoutStandardGate);
+  const withoutFrozenNativeTest = removeRequiredFrozenNativeTest(withoutStandardGate);
+  if (!withoutFrozenNativeTest) return undefined;
+  const withoutReviewedTests = removeReviewedRuntimeAssetTests(withoutFrozenNativeTest);
   const digest = withoutReviewedTests ? sha(withoutReviewedTests.join("\n")) : "none";
   return withoutReviewedTests && digest === PARSER_TEST_RECIPE_SHA256
     ? withoutReviewedTests
     : undefined;
+}
+function removeRequiredFrozenNativeTest(lines: string[]): string[] | undefined {
+  const previous =
+    "bun test --path-ignore-patterns 'tmp/**' ./scripts/mermaid/native_cli_managed_build_test.ts";
+  const command =
+    "bun test --path-ignore-patterns 'tmp/**' ./scripts/mermaid/native_cli_managed_frozen_build_test.ts";
+  const token = "./scripts/mermaid/native_cli_managed_frozen_build_test.ts";
+  const occurrences = lines.flatMap((line, index) =>
+    unitCommand(line)
+      .filter((word) => word === token)
+      .map(() => index),
+  );
+  const index = occurrences[0];
+  if (
+    occurrences.length !== 1 ||
+    index === undefined ||
+    lines[index] !== command ||
+    index === 0 ||
+    lines[index - 1] !== previous
+  )
+    return undefined;
+  return lines.filter((_, position) => position !== index);
 }
 function removeTerminalRecipeCommand(lines: string[], command: string): string[] | undefined {
   const indexes = lines.flatMap((line, index) => (line === command ? [index] : []));

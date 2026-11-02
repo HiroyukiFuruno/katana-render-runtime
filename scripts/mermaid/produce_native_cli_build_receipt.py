@@ -9,7 +9,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from native_cli_build_bindings import Bindings, SCHEMA, construct_bindings
+from native_cli_build_bindings import Bindings, construct_bindings
 import cargo_capacity_guard_native_cli_observation as guard
 from cargo_capacity_guard_lock import retained_profile_paths
 from cargo_capacity_guard import JsonObject, _array, _object, _text
@@ -262,7 +262,14 @@ def produce(root: Path, expected_source: Path, expected_sha: str, registry: Path
     guard.require(before == after, "inputs changed after outer group closure")
     binary = guard.identity(root / "target/debug/krr")
     guard.require(binary == observation["binaryAfter"], "binary changed after guard observation")
-    receipt = {"schema": SCHEMA, "status": "completed", "accepted": True, "attemptToken": nonce,
+    frozen_path = attempt / "frozen" / "krr"
+    frozen_sha = owner.freeze_binary(root / "target/debug/krr", frozen_path)
+    guard.require(guard.identity(root / "target/debug/krr") == binary,
+                  "binary changed during freeze")
+    frozen = guard.identity(frozen_path)
+    guard.require(frozen_sha == binary["sha256"] == frozen["sha256"]
+                  and binary["size"] == frozen["size"], "frozen binary differs")
+    receipt = {"schema": "krr-native-cli-managed-build-v4", "status": "completed", "accepted": True, "attemptToken": nonce,
         "cwd": str(root), "expectedSource": guard.file_record(expected_source),
         "expectedProtectedRegistry": guard.file_record(registry), "request": request_pin,
         "capacityPreflight": guard.file_record(attempt / "capacity-preflight.json"),
@@ -271,6 +278,7 @@ def produce(root: Path, expected_source: Path, expected_sha: str, registry: Path
                          "receipt": host_receipt},
         "buildLifecycle": build.lifecycle, "buildObservation": build.observation,
         "snapshotBefore": before, "snapshotAfter": after, "binary": binary,
+        "frozenBinary": frozen, "frozenFrom": binary,
         "runtimeAssetPins": [runtime_pin], "toolProbes": probes,
         "scope": {"sourceEndpointsOnly": True, "effectiveCompilerReadsProved": False,
                   "registryAtomicityProved": False, "installedDependencyClosureProved": False, "descendantClosureProved": False}}

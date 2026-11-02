@@ -24,6 +24,7 @@ export {
   managedSourceSchema,
 } from "./native-cli-managed-input-schema";
 export const managedBuildSchemaName = "krr-native-cli-managed-build-v3";
+export const frozenManagedBuildSchemaName = "krr-native-cli-managed-build-v4";
 export const managedOwnedSchema = z
   .object({
     argv: strings,
@@ -192,7 +193,7 @@ export const managedObservationSchema = z
     scope: z.string(),
   })
   .strict();
-export const managedReceiptSchema = z
+const managedReceiptV3Schema = z
   .object({
     schema: z.literal(managedBuildSchemaName),
     status: z.literal("completed"),
@@ -232,6 +233,18 @@ export const managedReceiptSchema = z
       .strict(),
   })
   .strict();
+
+const managedReceiptV4Schema = managedReceiptV3Schema
+  .extend({
+    schema: z.literal(frozenManagedBuildSchemaName),
+    frozenBinary: managedIdentitySchema,
+    frozenFrom: managedIdentitySchema,
+  })
+  .strict();
+export const managedReceiptSchema = z.discriminatedUnion("schema", [
+  managedReceiptV3Schema,
+  managedReceiptV4Schema,
+]);
 
 export type ManagedReceipt = z.infer<typeof managedReceiptSchema>;
 export type ManagedOwned = z.infer<typeof managedOwnedSchema>;

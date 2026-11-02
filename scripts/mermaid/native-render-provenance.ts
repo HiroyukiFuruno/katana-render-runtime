@@ -820,6 +820,9 @@ function prepareRender(input: Options) {
     throw new Error("Native render binary and runtime paths must be canonical");
   }
   const build = verifyNativeBuildReceipt(input.buildReceipt, input.binary, input.runtime);
+  if (input.binary !== build.binaryPath) {
+    throw new Error("Native render executable differs from the validated build binary");
+  }
   const beforeCodePins = captureCodePins();
   const sourceParserPath = path.resolve("crates/katana-render-runtime-cli/src/diagram_source.rs");
   if (!build.sourceFiles.some((item) => item.path === sourceParserPath)) {

@@ -1211,11 +1211,16 @@ function sourceDigest(source: string): string {
 function canonicalNativeUnitAstDigest(
   module: unknown,
   extraOmittedKeys: readonly string[] = [],
+  normalizeSpreadPosition = false,
 ): string {
   const omittedKeys = new Set(["span", "ctxt", "bodyCtxt", "raw", ...extraOmittedKeys]);
   return sourceDigest(
     JSON.stringify(module, (key: string, value: unknown) =>
-      omittedKeys.has(key) ? undefined : value,
+      omittedKeys.has(key)
+        ? undefined
+        : normalizeSpreadPosition && key === "spread" && value !== null
+          ? true
+          : value,
     ),
   );
 }
@@ -1453,8 +1458,8 @@ function gitSourceInventoryCalls(
   const inventory = functionNamed(module, "assertCurrentGitSourceSet");
   if (
     !inventory ||
-    canonicalNativeUnitAstDigest(inventory) !==
-      "b7c9e2ba472c37dca75164d8fe527444e40381bce575451ae6680629565918c5" ||
+    canonicalNativeUnitAstDigest(inventory, [], true) !==
+      "6c498325892b2a74804f821349c5f2628c4df7bfcdbe95e63a24af6cc87040ba" ||
     !gitInventoryConsumersVerified(module, context)
   )
     return result;
@@ -4851,6 +4856,8 @@ export function executionGraph(
       )
         ["rust-facts-host-build", "rust-facts-host-metadata"].forEach(walkRecipe);
       analyzed.references.forEach((reference) => {
+        if (reference === "!unresolved-executable")
+          errors.push(`unresolved executable source: ${target}`);
         const referenceParent = referenceImporter(reference, target);
         walkSource(
           reference,

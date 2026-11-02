@@ -1943,6 +1943,45 @@ test.each([
     });
   },
 );
+const frozenNativeUnitCommand =
+  "bun test --path-ignore-patterns 'tmp/**' ./scripts/mermaid/native_cli_managed_frozen_build_test.ts";
+const nativeBuildUnitCommand =
+  "bun test --path-ignore-patterns 'tmp/**' ./scripts/mermaid/native_cli_managed_build_test.ts";
+
+test("frozen native unit registration accepts the current mandatory lane", () => {
+  const root = parserFixture();
+  const recipe = actualRecipeBody("runtime-asset-script-test");
+  expect(recipe).toContain(`${nativeBuildUnitCommand}\n${frozenNativeUnitCommand}`);
+  expect(inspectParserBodyOnloadRoute(root).issues).not.toContainEqual(
+    expect.objectContaining({ code: "parser-body-onload-test-unregistered" }),
+  );
+});
+
+test.each([
+  ["missing", frozenNativeUnitCommand, ""],
+  ["duplicate", frozenNativeUnitCommand, `${frozenNativeUnitCommand}\n${frozenNativeUnitCommand}`],
+  [
+    "unknown command",
+    frozenNativeUnitCommand,
+    `${frozenNativeUnitCommand}\nbun test ./unknown_test.ts`,
+  ],
+  ["extra argument", frozenNativeUnitCommand, `${frozenNativeUnitCommand} ./unknown_test.ts`],
+  [
+    "reordered",
+    `${nativeBuildUnitCommand}\n${frozenNativeUnitCommand}`,
+    `${frozenNativeUnitCommand}\n${nativeBuildUnitCommand}`,
+  ],
+] as const)("frozen native unit registration rejects %s", (_name, before, after) => {
+  const root = parserFixture();
+  const recipe = actualRecipeBody("runtime-asset-script-test");
+  expect(recipe).toContain(before);
+  recipes(root, { "runtime-asset-script-test": recipe.replace(before, after) });
+  track(root);
+  expect(inspectParserBodyOnloadRoute(root).issues).toContainEqual(
+    expect.objectContaining({ code: "parser-body-onload-test-unregistered" }),
+  );
+});
+
 test.each([
   "./scripts/mermaid/native-source-manifest_test.ts",
   "./scripts/mermaid/reference_svg_geometry_test.ts",
