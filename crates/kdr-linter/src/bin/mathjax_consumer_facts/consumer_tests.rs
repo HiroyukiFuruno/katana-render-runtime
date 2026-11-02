@@ -36,6 +36,25 @@ fn consumer_argument_list_guard_checks_order_and_count() -> Result<(), Box<dyn s
 }
 
 #[test]
+fn consumer_argument_guards_reject_non_call_expressions() -> Result<(), Box<dyn std::error::Error>>
+{
+    let expression = syn::parse_str::<syn::Expr>("request")?;
+    assert_eq!(
+        consumer::require_args(&expression, &["source"], "route")
+            .err()
+            .as_deref(),
+        Some("route:call")
+    );
+    assert_eq!(
+        consumer::require_call_arg(&expression, 0, "source", "route")
+            .err()
+            .as_deref(),
+        Some("route:call")
+    );
+    Ok(())
+}
+
+#[test]
 fn consumer_single_argument_guard_checks_position() -> Result<(), Box<dyn std::error::Error>> {
     for (source, index, name, expected) in [
         (

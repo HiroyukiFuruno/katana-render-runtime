@@ -111,3 +111,6 @@ fn block_bounds_validator_reports_parent_outside_viewbox() -> Result<(), String>
     )?;
     Ok(())
 }
+
+#[path = "js_runtime_block_style_boundary_tests.rs"]
+mod style_boundaries;

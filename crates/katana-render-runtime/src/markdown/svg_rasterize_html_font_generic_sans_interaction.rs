@@ -12,6 +12,14 @@ const RGBA_CHANNELS: usize = 4;
 const MAX_RASTER_EVENTS: usize = 256;
 const MAX_SERIALIZED_EVENT_BYTES: usize = 4096;
 
+#[cfg(test)]
+#[path = "svg_rasterize_html_font_generic_sans_frame_support.rs"]
+mod frame_support;
+
+#[cfg(test)]
+#[path = "svg_rasterize_html_font_generic_sans_frame_tests.rs"]
+mod frame_tests;
+
 pub(in super::super) fn interaction_session() -> Result<crate::HtmlBrowserSession, String> {
     let source =
         crate::HtmlBrowserSource::new(FIXTURE, "https://example.test/interaction-fidelity.html")

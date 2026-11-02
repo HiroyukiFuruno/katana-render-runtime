@@ -1,6 +1,9 @@
 use super::super::{DiagramRuntimeScript, DiagramV8Runtime};
 use super::transformed_box;
 
+#[path = "diagram_geometry_bridge_v8_boundary_tests.rs"]
+mod v8_boundary_tests;
+
 const BOUNDS_TOLERANCE: f64 = 1e-10;
 
 #[cfg(target_os = "macos")]

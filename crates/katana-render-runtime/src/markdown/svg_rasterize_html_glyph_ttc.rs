@@ -130,6 +130,14 @@ fn table_bytes_equal(tag: Tag, source: &[u8], output: &[u8]) -> bool {
 }
 
 #[cfg(test)]
+#[path = "svg_rasterize_html_glyph_ttc_verification_support.rs"]
+mod verification_support;
+
+#[cfg(test)]
+#[path = "svg_rasterize_html_glyph_ttc_verification_tests.rs"]
+mod verification_tests;
+
+#[cfg(test)]
 mod tests {
     use super::super::font_file_fixture;
     use super::{HEAD_CHECKSUM_RANGE, repack_face, table_bytes_equal};

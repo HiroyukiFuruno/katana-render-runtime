@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 const EXPECTED_NOSO_RECORDS: usize = 1;
 const SIZE_DRIFT_BYTES: usize = 1;
 const INVALID_MANIFEST_COUNT: usize = 4;
+const EXAMPLE_SHA256: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 #[test]
 fn input_rows_accepts_canonical_file_and_rejects_schema_shapes() -> Result<(), String> {
@@ -22,6 +23,38 @@ fn input_rows_accepts_canonical_file_and_rejects_schema_shapes() -> Result<(), S
     let invalid = invalid_manifests(&fixture);
     for value in invalid {
         assert!(input_rows(&value).is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn input_rows_rejects_wrong_json_shapes_and_field_types() -> Result<(), String> {
+    let fixture = write_fixture()?;
+    let path = fixture.path.to_string_lossy();
+    for (manifest, expected) in [
+        (Value::Null, "input-manifest:object"),
+        (
+            json!({"schema": "krr-macho-noso-input/v1"}),
+            "input-manifest:keys",
+        ),
+        (
+            json!({"schema": "krr-macho-noso-input/v1", "files": {}}),
+            "input-manifest:files",
+        ),
+        (
+            json!({"schema": "krr-macho-noso-input/v1", "files": [{"path": null, "size": 1, "sha256": EXAMPLE_SHA256}]}),
+            "input-file:path",
+        ),
+        (
+            json!({"schema": "krr-macho-noso-input/v1", "files": [{"path": path, "size": -1, "sha256": EXAMPLE_SHA256}]}),
+            "input-file:size",
+        ),
+        (
+            json!({"schema": "krr-macho-noso-input/v1", "files": [{"path": path, "size": 1, "sha256": null}]}),
+            "input-file:sha256",
+        ),
+    ] {
+        assert_eq!(input_rows(&manifest).err().as_deref(), Some(expected));
     }
     Ok(())
 }

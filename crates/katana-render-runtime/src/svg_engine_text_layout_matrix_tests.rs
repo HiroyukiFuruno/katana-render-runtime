@@ -7,6 +7,10 @@ use std::error::Error;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[path = "svg_engine_text_layout_path_rotation_tests.rs"]
+mod path_rotation_tests;
+#[path = "svg_engine_text_layout_path_support.rs"]
+mod path_support;
 #[path = "svg_engine_text_layout_position_tests.rs"]
 mod position_tests;
 #[path = "svg_engine_text_layout_spacing_tests.rs"]

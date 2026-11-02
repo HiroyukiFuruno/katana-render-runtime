@@ -1,7 +1,7 @@
 use super::super::{LINEAR_GRADIENT, RADIAL_GRADIENT};
 use super::{
-    clip_box_bounds, verify_standard_case, verify_static_font_manifest, verify_unclipped_glyph,
-    with_static_font,
+    clip_box_bounds, fixture_tree, verify_standard_case, verify_static_font_manifest,
+    verify_unclipped_glyph, with_static_font,
 };
 
 type PaintCase = (u32, &'static str);
@@ -82,6 +82,22 @@ fn color_font_clip_metadata_and_writer_pixels_survive_roundtrip() -> Result<(), 
     for glyph_id in NO_COLRV1_CLIP_BOX_GLYPHS {
         verify_unclipped_glyph(glyph_id)?;
     }
+    Ok(())
+}
+
+#[test]
+fn colr_fixture_rejects_glyph_without_unicode_mapping() -> Result<(), String> {
+    const MAPPED_GLYPH_ID: u32 = 96;
+    verify_static_font_manifest()?;
+    let (valid, _) = fixture_tree(MAPPED_GLYPH_ID, "mapped-glyph-control")?;
+    assert!(valid.size().width() > 0.0 && valid.size().height() > 0.0);
+    let Err(error) = fixture_tree(u32::MAX, "unmapped-glyph") else {
+        return Err("unmapped glyph unexpectedly built a tree".to_owned());
+    };
+    assert_eq!(
+        error,
+        format!("COLR glyph {} has no Unicode mapping", u32::MAX)
+    );
     Ok(())
 }
 
