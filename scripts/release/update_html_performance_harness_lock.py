@@ -11,9 +11,12 @@ import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import NamedTuple
 
 from html_performance_harness_dependency_closure import (
     RETAINED_UTF8_ITER_VERSION,
+    _harness_closure,
+    _raw_packages,
     load_pinned_parent_lock,
     verify_utf8_iter_retention,
 )
@@ -26,6 +29,16 @@ LOCK_PIN = re.compile(r'(?m)^(LOCK_SHA\s*=\s*)"([0-9a-f]{64})"$')
 SHA256 = re.compile(r"[0-9a-f]{64}")
 # Python 3.9 でも型 aliasの評価時にPEP 604の演算を実行しない。
 CommandRunner = Callable[..., "subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]"]
+RETAINED_REASONS = {
+    "utf8_iter": "immutable reference dependency closure",
+    "crc32fast": "same SDK and measurement dependency as the immutable reference",
+}
+
+
+class RetainedPackage(NamedTuple):
+    name: str
+    version: str
+    reason: str
 
 
 def parse_cargo_command(value: str) -> list[str]:
@@ -44,9 +57,39 @@ def update_command(cargo: Sequence[str]) -> list[str]:
     return [*cargo, "update", "--manifest-path", str(HARNESS_MANIFEST)]
 
 
-def retention_command(cargo: Sequence[str], manifest: Path) -> list[str]:
-    return [*cargo, "update", "--package", "utf8_iter", "--precise",
-            RETAINED_UTF8_ITER_VERSION, "--manifest-path", str(manifest)]
+def retention_plan(parent_lock: bytes) -> list[RetainedPackage]:
+    packages = _raw_packages(parent_lock)
+    _harness, _roots, closure = _harness_closure(parent_lock)
+    plan: list[RetainedPackage] = []
+    for name, reason in RETAINED_REASONS.items():
+        identities = [identity for identity in packages if identity[0] == name]
+        if (len(identities) != 1 or identities[0] not in closure
+                or identities[0][2] != "registry+https://github.com/rust-lang/crates.io-index"):
+            raise ValueError(f"immutable HTML parent must contain one retained {name} in its closure")
+        version = identities[0][1]
+        if name == "utf8_iter" and version != RETAINED_UTF8_ITER_VERSION:
+            raise ValueError("immutable HTML parent utf8_iter version differs")
+        plan.append(RetainedPackage(name, version, reason))
+    return plan
+
+
+def retention_command(cargo: Sequence[str], manifest: Path, package: RetainedPackage) -> list[str]:
+    return [*cargo, "update", "--package", package.name, "--precise", package.version,
+            "--manifest-path", str(manifest)]
+
+
+def verify_retained_packages(parent_lock: bytes, locks: Sequence[bytes],
+                             plan: Sequence[RetainedPackage]) -> None:
+    parent = _raw_packages(parent_lock)
+    for package in plan:
+        expected = [(identity, value) for identity, value in parent.items() if identity[0] == package.name]
+        if len(expected) != 1 or expected[0][0][1] != package.version:
+            raise ValueError(f"immutable HTML parent retained {package.name} differs")
+        for lock in locks:
+            actual = [(identity, value) for identity, value in _raw_packages(lock).items()
+                      if identity[0] == package.name]
+            if actual != expected:
+                raise ValueError(f"Cargo.lock does not retain immutable {package.name}")
 
 
 def lock_sha(root: Path) -> str:
@@ -76,15 +119,20 @@ def sync_lock_pin(root: Path, digest: str) -> None:
 
 
 def run_update(cargo: Sequence[str], root: Path = ROOT, runner: CommandRunner = subprocess.run) -> str:
-    runner(retention_command(cargo, ROOT_MANIFEST), cwd=root, check=True)
-    runner(update_command(cargo), cwd=root, check=True)
-    runner(retention_command(cargo, HARNESS_MANIFEST), cwd=root, check=True)
     parent_lock = load_pinned_parent_lock(root)
+    plan = retention_plan(parent_lock)
+    for package in plan:
+        runner(retention_command(cargo, ROOT_MANIFEST, package), cwd=root, check=True)
+    runner(update_command(cargo), cwd=root, check=True)
+    for package in plan:
+        runner(retention_command(cargo, HARNESS_MANIFEST, package), cwd=root, check=True)
     root_lock_path = root / ROOT_MANIFEST.with_name("Cargo.lock")
     harness_lock_path = root / HARNESS_MANIFEST.with_name("Cargo.lock")
     _require_regular(root_lock_path, "root lock")
     _require_regular(harness_lock_path, "harness lock")
-    verify_utf8_iter_retention(root_lock_path.read_bytes(), harness_lock_path.read_bytes(), parent_lock)
+    root_lock, harness_lock = root_lock_path.read_bytes(), harness_lock_path.read_bytes()
+    verify_retained_packages(parent_lock, (root_lock, harness_lock), plan)
+    verify_utf8_iter_retention(root_lock, harness_lock, parent_lock)
     digest = lock_sha(root)
     sync_lock_pin(root, digest)
     return digest
