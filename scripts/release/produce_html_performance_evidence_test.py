@@ -716,6 +716,7 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
     def closed_plan_batch(
         self, directory: Path, rows: list[gate.JsonObject],
         pins: Sequence[typed_producer.FilePin],
+        catalog_validation: typed_producer.FilePin | None = None,
     ) -> tuple[gate.Bundle, gate.JsonObject]:
         source = producer.write(directory / "source.json", {"head": "a" * 40})
         context = producer.write(directory / "context.json", {"inputs": rows})
@@ -725,7 +726,7 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
             directory, head="a" * 40, source_before=source, source_end=source,
             context_before=context, context_end=context, build_artifacts={}, build_pins=[],
             condition_ids=[], complete_condition_ids=[], policy_accepted=True,
-            attempts=[], bundle=bundle_path,
+            attempts=[], bundle=bundle_path, catalog_validation=catalog_validation,
         )
         receipt, bundle, _ = producer.load_closed_batch(directory, self.root)
         return bundle, receipt
@@ -803,6 +804,37 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         receipt["attempts"] = [{"expected": expected}]
         role = producer._resume_catalog_validation_pin(bundle, receipt)
         self.assertEqual(producer._resume_context_pin(bundle, receipt, new, role), old)
+
+    def test_empty_resume_finds_capture_validation_in_original_context(self) -> None:
+        name = "catalog-chrome-capture-validation.json"
+        old = producer.write(self.root / "old" / name, {"status": "passed"})
+        new = producer.write(self.root / "new" / name, {"status": "passed"})
+        bundle, receipt = self.resume_context_fixture(
+            self.root / "old", [{**old, "exists": True}], [old],
+        )
+        receipt["attempts"] = []
+        role = producer._resume_catalog_validation_pin(bundle, receipt, Path(old["path"]))
+        self.assertEqual(producer._resume_context_pin(bundle, receipt, new, role), old)
+        changed = producer.write(self.root / "new" / name, {"status": "changed"})
+        with self.assertRaisesRegex(ValueError, "resume context input differs"):
+            producer._resume_context_pin(bundle, receipt, changed, role)
+
+    def test_empty_resume_preserves_catalog_role_across_two_closed_batches(self) -> None:
+        name = "catalog-chrome-capture-validation.json"
+        original = producer.write(self.root / "fresh" / name, {"status": "passed"})
+        rows: list[gate.JsonObject] = [{**original, "exists": True}]
+        bundle, receipt = self.closed_plan_batch(self.root / "fresh", rows, [original])
+        for batch in ("resume-one", "resume-two"):
+            previous = Path(gate._text(gate._object(receipt["bundle"], "bundle")["path"], "path")).parent.parent
+            role = producer._resume_catalog_validation_pin(bundle, receipt, previous / name)
+            current = producer.write(self.root / batch / name, {"status": "passed"})
+            selected = producer._resume_context_pin(bundle, receipt, current, role)
+            self.assertEqual(selected, original)
+            bundle, receipt = self.closed_plan_batch(self.root / batch, rows, [original], selected)
+        self.assertEqual(producer._resume_catalog_validation_pin(bundle, receipt), original)
+        receipt["catalogCaptureValidationRef"] = {**original, "sha256": "0" * 64}
+        with self.assertRaises(ValueError):
+            producer._resume_catalog_validation_pin(bundle, receipt)
 
     def test_resume_snapshot_uses_declared_role_with_same_basename(self) -> None:
         for same_digest in (False, True):
@@ -894,6 +926,8 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         attempts = [{"expected": expected}]
         builds, _, _ = producer._resume_builds(bundle, receipt, attempts)
         self.assertEqual(str(builds["candidate"].binary), pins["candidate"]["path"])
+        empty_builds, _, _ = producer._resume_builds(bundle, receipt, [])
+        self.assertEqual(str(empty_builds["candidate"].binary), pins["candidate"]["path"])
         bad_receipt: gate.JsonObject = {"buildArtifacts": {"baseline": artifacts["baseline"],
                                                           "candidate": artifacts["baseline"]},
                                        "buildPins": []}
@@ -909,6 +943,40 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         candidate.symlink_to(Path(pins["baseline"]["path"]))
         with self.assertRaisesRegex(ValueError, "canonical regular file"):
             producer._resume_builds(bundle, receipt, attempts)
+
+    def test_empty_resume_build_validation_checks_arm_roles_and_identity(self) -> None:
+        directory = self.root / "empty-build-validation"
+        source = producer.write(directory / "source.json", {"head": "a" * 40})
+        context = producer.write(directory / "context.json", {"inputs": []})
+        artifacts = {role: producer.write(directory / f"{role}.json", {"role": role})
+                     for role in ("baseline", "candidate")}
+        bundle_path = directory / "bundle"
+        producer.write_transport_bundle(bundle_path, "a" * 40, [source, context, *artifacts.values()], [])
+        bundle = gate.Bundle(bundle_path)
+        receipt: gate.JsonObject = {"source": {"before": source}, "contexts": {"before": context}}
+        arms = cast(dict[str, typed_producer.ArmPin], {
+            gate.DEFAULT_BASELINE_ARM_ID if role == "baseline" else role: {
+                "binary_sha256": role, "source_snapshot_sha256": "snapshot",
+                "lock_sha256": "lock", "build_artifact_ref": pin,
+            } for role, pin in artifacts.items()
+        })
+
+        def validate_proof(_bundle: gate.Bundle, _root: Path, ref: object, role: str,
+                           **_kwargs: object) -> gate.JsonObject:
+            gate.require(ref == artifacts[role], "build role differs")
+            return {"binarySha256": role, "sourceSnapshotSha256": "snapshot", "lockSha256": "lock"}
+
+        with patch.object(reference, "active_reference_at_commit", return_value=None), \
+             patch.object(gate, "_validate_build_proof", side_effect=validate_proof):
+            producer._validate_empty_resume_builds(bundle, self.root, receipt, arms, None, git_query=None)
+            baseline = arms[gate.DEFAULT_BASELINE_ARM_ID]
+            baseline["build_artifact_ref"] = artifacts["candidate"]
+            with self.assertRaisesRegex(ValueError, "build role differs"):
+                producer._validate_empty_resume_builds(bundle, self.root, receipt, arms, None, git_query=None)
+            baseline["build_artifact_ref"] = artifacts["baseline"]
+            baseline["binary_sha256"] = "tampered"
+            with self.assertRaisesRegex(ValueError, "resume verified build identity differs"):
+                producer._validate_empty_resume_builds(bundle, self.root, receipt, arms, None, git_query=None)
 
     def test_context_preflight_checks_every_catalog_input_reference(self) -> None:
         keys = ("operationPlanRef", "domStateRef", "operationEvidenceRef", "catalogManifestRef",

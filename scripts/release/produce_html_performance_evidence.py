@@ -704,6 +704,7 @@ def write_transport_bundle(bundle: Path, head: str, refs: Sequence[FilePin],
 
 
 BATCH_RECEIPT_SCHEMA = "krr-html-performance-batch-receipt-v1"
+BATCH_RECEIPT_SCHEMA_V2 = "krr-html-performance-batch-receipt-v2"
 
 
 def _receipt_file_pin(value: object, label: str) -> FilePin:
@@ -735,6 +736,7 @@ def write_batch_receipt(
     policy_accepted: bool,
     attempts: Sequence[Mapping[str, FilePin]],
     bundle: Path,
+    catalog_validation: FilePin | None = None,
 ) -> FilePin:
     ordered_ids = list(condition_ids)
     complete_ids = list(complete_condition_ids)
@@ -743,7 +745,7 @@ def write_batch_receipt(
                  "batch complete condition is outside the batch")
     batch_attempts = [dict(attempt) for attempt in attempts]
     receipt: gate.JsonObject = {
-        "schema": BATCH_RECEIPT_SCHEMA,
+        "schema": BATCH_RECEIPT_SCHEMA_V2 if catalog_validation is not None else BATCH_RECEIPT_SCHEMA,
         "status": "closed",
         "formalAccepted": policy_accepted and len(complete_ids) == 84 and len(ordered_ids) == 84,
         "policyAccepted": policy_accepted,
@@ -758,6 +760,8 @@ def write_batch_receipt(
         "bundle": {"path": str((bundle / "bundle.json").resolve()),
                     "sha256": gate.sha256(bundle / "bundle.json")},
     }
+    if catalog_validation is not None:
+        receipt["catalogCaptureValidationRef"] = catalog_validation
     return write_exclusive(output / "batch-receipt.json", receipt)
 
 
@@ -784,7 +788,7 @@ def load_closed_batch(
 ) -> tuple[gate.JsonObject, gate.Bundle, list[dict[str, FilePin]]]:
     receipt_path = batch / "batch-receipt.json"
     receipt = gate.read_json(receipt_path)
-    gate.require(receipt.get("schema") == BATCH_RECEIPT_SCHEMA,
+    gate.require(receipt.get("schema") in (BATCH_RECEIPT_SCHEMA, BATCH_RECEIPT_SCHEMA_V2),
                  "unsupported HTML performance batch receipt")
     gate.require(receipt.get("status") == "closed",
                  "HTML performance batch endpoint is not closed")
@@ -1035,9 +1039,30 @@ def _resume_candidate_snapshot_pin(bundle: gate.Bundle, receipt: Mapping[str, ob
     return _receipt_file_pin(proof.get("sourceSnapshotRef"), "resume candidate source snapshot")
 
 
-def _resume_catalog_validation_pin(bundle: gate.Bundle, receipt: Mapping[str, object]) -> FilePin:
+def _resume_catalog_validation_pin(bundle: gate.Bundle, receipt: Mapping[str, object],
+                                   empty_path: Path | None = None) -> FilePin:
     attempts = gate._objects(receipt.get("attempts"), "resume attempts")
-    gate.require(bool(attempts), "resume catalog validation declaration is missing")
+    declared = receipt.get("catalogCaptureValidationRef")
+    if receipt.get("schema") == BATCH_RECEIPT_SCHEMA_V2:
+        pin = _receipt_file_pin(declared, "resume catalog validation")
+        bundle.file(pin)
+        for attempt in attempts:
+            expected = bundle.json(attempt["expected"])
+            gate.require(_receipt_file_pin(expected.get("catalogCaptureValidationRef"),
+                                           "resume catalog validation") == pin,
+                         "resume catalog validation declarations differ")
+        return pin
+    gate.require(declared is None, "unexpected catalog validation declaration")
+    if not attempts:
+        gate.require(empty_path is not None, "resume catalog validation declaration is missing")
+        contexts = gate._object(receipt.get("contexts"), "resume context refs")
+        rows = gate._objects(bundle.json(contexts["before"]).get("inputs"), "resume context inputs")
+        matches = [row for row in rows if row.get("path") == str(empty_path)]
+        gate.require(len(matches) == 1 and matches[0].get("exists") is True,
+                     "resume catalog validation declaration is missing or ambiguous")
+        pin = _receipt_file_pin(matches[0], "resume catalog validation")
+        bundle.file(pin)
+        return pin
     pins = [
         _receipt_file_pin(bundle.json(attempt["expected"]).get("catalogCaptureValidationRef"),
                           "resume catalog validation")
@@ -1051,21 +1076,21 @@ def _resume_catalog_validation_pin(bundle: gate.Bundle, receipt: Mapping[str, ob
 def _resume_builds(
     bundle: gate.Bundle, receipt: Mapping[str, object], attempts: Sequence[Mapping[str, FilePin]],
 ) -> tuple[dict[str, ArmBuildResult], dict[str, FilePin], list[FilePin]]:
-    gate.require(bool(attempts), "resume requires a completed build-bound attempt")
-    expected = bundle.json(attempts[0]["expected"])
-    arms = gate._object(expected.get("arms"), "resume expected arms")
-    baseline = gate.baseline_arm_id(expected)
+    expected = bundle.json(attempts[0]["expected"]) if attempts else None
+    arms = gate._object(expected.get("arms"), "resume expected arms") if expected else None
+    baseline = gate.baseline_arm_id(expected) if expected else gate.DEFAULT_BASELINE_ARM_ID
     artifacts = gate._object(receipt.get("buildArtifacts"), "resume build artifacts")
     builds: dict[str, ArmBuildResult] = {}
     artifact_pins: dict[str, FilePin] = {}
     for role, raw_arm in (("baseline", baseline), ("candidate", "candidate")):
         artifact = _receipt_file_pin(artifacts.get(role), "resume build artifact")
-        arm = gate._object(arms.get(raw_arm), "resume expected arm")
-        gate.require(arm.get("build_artifact_ref") == artifact, "resume build role proof differs")
+        arm = gate._object(arms.get(raw_arm), "resume expected arm") if arms else None
+        if arm is not None:
+            gate.require(arm.get("build_artifact_ref") == artifact, "resume build role proof differs")
         proof = bundle.json(artifact)
         binary = _receipt_file_pin(proof.get("frozenBinary"), "resume frozen binary")
         bundle.file(binary)
-        gate.require(binary["sha256"] == arm.get("binary_sha256")
+        gate.require((arm is None or binary["sha256"] == arm.get("binary_sha256"))
                      and os.access(binary["path"], os.X_OK), "resume frozen binary differs")
         builds[role] = ArmBuildResult([], Path(binary["path"]), binary["sha256"], proof, [])
         artifact_pins[role] = artifact
@@ -1074,6 +1099,26 @@ def _resume_builds(
     for pin in pins:
         bundle.file(pin)
     return builds, artifact_pins, pins
+
+
+def _validate_empty_resume_builds(
+    bundle: gate.Bundle, root: Path, receipt: Mapping[str, object], arms: Mapping[str, ArmPin],
+    reference_contract: gate.JsonObject | None, *, git_query: gate.GitQuery | None,
+) -> None:
+    expected: gate.JsonObject = {
+        "arms": dict(arms),
+        "sourcePair": {"before": gate._object(receipt.get("source"), "resume source refs")["before"]},
+        "endpointRefs": {"before": gate._object(receipt.get("contexts"), "resume context refs")["before"]},
+    }
+    if reference_contract is not None:
+        expected["referenceParent"] = reference_contract
+    verified = gate.validate_expected_builds(bundle, root, expected, git_query=git_query)
+    for role, arm_id in (("baseline", gate.baseline_arm_id(expected)), ("candidate", "candidate")):
+        proof, arm = verified[role], arms[arm_id]
+        gate.require(proof.get("binarySha256") == arm["binary_sha256"]
+                     and proof.get("sourceSnapshotSha256") == arm["source_snapshot_sha256"]
+                     and proof.get("lockSha256") == arm["lock_sha256"],
+                     "resume verified build identity differs")
 
 
 def _validate_planned_inputs(
@@ -2799,7 +2844,11 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         if resumed_receipt is not None and resumed_bundle is not None:
             catalog_capture_validation_pin = _resume_context_pin(
                 resumed_bundle, resumed_receipt, catalog_capture_validation_pin,
-                _resume_catalog_validation_pin(resumed_bundle, resumed_receipt),
+                _resume_catalog_validation_pin(
+                    resumed_bundle, resumed_receipt,
+                    resume_batch.resolve() / "catalog-chrome-capture-validation.json"
+                    if resume_batch is not None else None,
+                ),
             )
     harness = root / gate.HARNESS_ROOT
     lock = harness / "Cargo.lock"
@@ -3026,6 +3075,9 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         reference_parent=reference_proof, reference_contract=reference_contract,
         fresh_snapshot_sha256=fresh_inputs.snapshot["sha256"] if fresh_inputs is not None else None,
     )
+    if resumed_bundle is not None and resumed_receipt is not None and not resumed_attempts:
+        _validate_empty_resume_builds(resumed_bundle, root, resumed_receipt, arms,
+                                      reference_contract, git_query=git_query)
     before_context = context(root, target, input_paths, lifecycle, git_query=git_query)
     before_pin = write(output / "context-before.json", before_context)
     environment_sha = before_pin["sha256"]
@@ -3281,6 +3333,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 condition_ids=attempt_ids, complete_condition_ids=complete_ids,
                 policy_accepted=policy_accepted,
                 attempts=transport_attempts, bundle=bundle,
+                catalog_validation=catalog_capture_validation_pin,
             )
         verified_result = _verify_and_seal_catalog_batch(
             bundle, root, transport_attempts, complete_ids,

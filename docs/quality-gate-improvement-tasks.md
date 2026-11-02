@@ -2,6 +2,9 @@
 
 ## 最新の再開地点（2026-11-02）
 
+- [/] 空batch再開の修正はR7062 strict型185files実0、R7063静的foundation実0（重複の未承認clone0）、R7064性能関連378/378実0（43.974秒）。連続空batchのcatalog役割をv2 receiptで明示継承し、v1読取・source/environment同一性・実build proof検証を維持。独立レビューの連続再開P1を修正後、新P0/P1なし。R7061の型2件失敗は元ログのまま保持。実SDKを使う新sourceの全84受入は未完であり、unit下位proof stubの成功を実証跡の統合成功と扱わない。
+- [/] R7055正式新CPU方式のfirst1は552.010秒後に実1、complete0。candidateのCPU duringが26.2/38.6/32.1%で3試行とも25%超過。R7057の別診断は3worker実0・worker CPU寄与0.30～0.38%・host15.1～29.6%で、当該診断では対象以外の負荷が大きいが前run原因の断定や描画合格には使わない。R7058はSDK再利用を試したが、完了0のclosed batchにcatalog役割宣言がない処理不備で130.94秒後に実1。元証跡は保存し、空batchの再開とA→B→Cの参照継承・改ざん拒否を修正中。独立レビューP1を修正後、新具体的P0/P1なし、関連検査はこれから回収する。source同一性の条件を緩めず、修正前証跡を修正後sourceへ再認定しない。
+- [/] CI observer配布準備: R7056 GN runtime dependency調査実0、4,517unique filesが全存在・619,386,296bytes。R7059はKRR管理外payloadへ既存Chromiumのlicense generatorを実行し実0、LICENSE.headless_shell 2,149,992bytesを生成した。R7060の動的依存調査実0。archive・配布先・CI接続・実CIの84条件は未完。外部repoや私有原本をGit・公開へ追加していない。
 - [/] CPU観測方式の最終関連回帰R7047は375/375・実0、静的/厳格型/重複検査を含むR7046 foundationは実0。R7049は実Lefthookの入力選択10ケースを隔離fixtureで確認し、Rust入力の選択とPython/Bun lock等の非選択を確認（Rust検査本体の合格ではない）。R7050でhook対象の限定を通常commitした。新方式の正式性能84条件は引き続き未測定であり、これらの成功を描画性能合格へ転用しない。
 - [/] 性能計測の現在負荷判定を修正。R7027は同hostで履歴source/現行SDKをbuildして旧方式1条件を閉鎖できたが、R7028はload average/coreの過去平均でworker前待機が続き、PG47051を終了して実143・残process0を回収した。新方式の全84性能合格は0件（未測定）として扱う。psutil固定依存・source/worker binding・旧新混在拒否を追加。実機でcpu_percent(.1)10回中6回がcounter全差分0だったため、全ゼロをquietと認定しないcpu_times_percent内訳方式へ修正した。0.1秒窓はR7038の5試行で2無観測、1秒窓はR7039の5/5で有効だった（描画合格ではない）。新案R7044の関連375/375実0、R7045が拒否した新test clone1組を共通化してR7046 foundation実0。workerを含む区間、NoObservation限定retry、25%/3秒/統計非劣化・メモリ条件を維持する。旧方式や旧案の成功を新方式の正式合格へ転用しない。
 - [/] `release/v0.4.24`で検証基盤/描画回帰/性能履歴を統合中、未リリース。統合差分を`05177e8d`、必須release内容への固定を`fc3b9e21`に通常commit済み。stash0・worktree1。現在のGit参照は実Gitで確認し、以下の検証履歴の途中状態を現行ソースの全体合格へ転用しない。

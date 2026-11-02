@@ -15,7 +15,7 @@ LEGACY_PRODUCER_SHA256 = frozenset({
     "721ec42d4ba7ce2e06beba9cda6458e68f7b0e27222b3f9cd1fb16e6eec63736",
 })
 # The producer and its adapter must be independently reviewed and fixed together.
-CPU_PRODUCER_SHA256 = "e32d53ab6eb4859e26444cd68874550236d1968437f0614c99dbb91465b54839"
+CPU_PRODUCER_SHA256 = "b51d9b4db9459202da0828fcab217ca5760aa7deeb3ee55d2e01448c4df33fe5"
 CPU_ADAPTER_SHA256 = "bbfc04542a16b94527431f3288f2f303c34b7940b6ef675f1fab44b94edbd5e2"
 PRODUCER = "scripts/release/produce_html_performance_evidence.py"
 ADAPTER = "scripts/release/html_performance_host_load.py"
