@@ -611,7 +611,7 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         self._batch_counter += 1
         batch = self.root / f"batch-{self._batch_counter}"
         files: list[typed_producer.FilePin] = []
-        source_before = producer.write(batch / "source-before.json", {"head": "a"})
+        source_before = producer.write(batch / "source-before.json", {"head": "a", "root": str(self.root)})
         source_end = producer.write(batch / "source-end.json", {"head": "a"})
         context_before = producer.write(batch / "context-before.json", {"stable": True})
         context_end = producer.write(batch / "context-end.json", {"stable": True})
@@ -640,6 +640,8 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
     def test_resume_requires_original_context_at_both_boundaries(self) -> None:
         batch, bundle_path = self.create_batch(condition_ids=())
         receipt = gate.read_json(batch / "batch-receipt.json")
+        bundle = gate.Bundle(bundle_path)
+        source = bundle.json(gate._object(receipt["source"], "source refs")["before"])
         stable = cast(typed_producer.ContextSnapshot, {"stable": True})
         changed = cast(typed_producer.ContextSnapshot, {"stable": False})
         for before, after, error in (
@@ -651,8 +653,8 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
                 expectation = self.assertRaisesRegex(ValueError, error) if error else nullcontext()
                 with expectation:
                     producer._validate_resume_batch(
-                        receipt, gate.Bundle(bundle_path), [], head="a" * 40,
-                        source={"head": "a"}, before_context=before,
+                        receipt, bundle, [], head="a" * 40,
+                        source=source, before_context=before,
                         after_context=after, arms={},
                     )
 
@@ -1256,18 +1258,50 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
     def test_closed_batch_reader_reuses_only_complete_attempts(self) -> None:
         batch, _ = self.create_batch(complete_ids=("case-a",))
         build_facts = {"baseline": {"proof": "validated"}, "candidate": {"proof": "validated"}}
-        with patch.object(gate, "validate_expected_builds", return_value=build_facts) as builds, \
+        with patch.object(gate, "current_source", return_value={}) as source, \
+             patch.object(gate, "validate_expected_builds", return_value=build_facts) as builds, \
              patch.object(gate, "validate_attempt") as validate, \
              patch.object(gate, "committed_records", return_value={}) as records, \
              patch.object(load_validation, "verify_catalog_host_load") as host_load_check:
             receipt, _, attempts = producer.load_closed_batch(batch, self.root)
         self.assertEqual(receipt["completeConditionIds"], ["case-a"])
         self.assertEqual(len(attempts), 1)
+        self.assertEqual(source.call_count, 2)
         builds.assert_called_once()
         validate.assert_called_once()
         self.assertIs(validate.call_args.kwargs["validated_builds"], build_facts)
         records.assert_called_once_with(self.root, "a" * 40, git_query=None)
         self.assertEqual(host_load_check.call_args.args[1], attempts)
+
+    def test_closed_batch_rechecks_current_source_before_return(self) -> None:
+        batch, _ = self.create_batch(complete_ids=("case-a",))
+        with patch.object(gate, "current_source", side_effect=[{}, {"changed": ("a", 1)}]) as source, \
+             patch.object(gate, "validate_expected_builds", return_value={}), \
+             patch.object(gate, "validate_attempt"), \
+             patch.object(gate, "committed_records", return_value={}), \
+             patch.object(load_validation, "verify_catalog_host_load"):
+            with self.assertRaisesRegex(ValueError, "source changed during batch validation"):
+                producer.load_closed_batch(batch, self.root)
+        self.assertEqual(source.call_count, 2)
+
+    def test_closed_batch_source_recheck_propagates_dirty_and_exceptions(self) -> None:
+        for failure in (ValueError("dirty or untracked"), OSError("source unavailable")):
+            with self.subTest(failure=type(failure).__name__):
+                batch, _ = self.create_batch(complete_ids=("case-a",))
+                with patch.object(gate, "current_source", side_effect=[{}, failure]), \
+                     patch.object(gate, "validate_expected_builds", return_value={}), \
+                     patch.object(gate, "validate_attempt"), \
+                     patch.object(gate, "committed_records", return_value={}), \
+                     patch.object(load_validation, "verify_catalog_host_load"):
+                    with self.assertRaises(type(failure)):
+                        producer.load_closed_batch(batch, self.root)
+
+    def test_empty_closed_batch_does_not_create_shared_source(self) -> None:
+        batch, _ = self.create_batch(condition_ids=())
+        with patch.object(gate, "current_source") as source:
+            _, _, attempts = producer.load_closed_batch(batch, self.root)
+        self.assertEqual(attempts, [])
+        source.assert_not_called()
 
     def test_invalid_host_load_rejects_closed_and_partial_batch(self) -> None:
         batch, bundle_path = self.create_batch(complete_ids=("case-a",))
@@ -1275,7 +1309,8 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         attempts = cast(list[dict[str, typed_producer.FilePin]],
                         gate._objects(bundle.manifest.get("attempts"), "fixture attempts"))
         seal = Mock()
-        with patch.object(gate, "validate_expected_builds", return_value={}), \
+        with patch.object(gate, "current_source", return_value={}), \
+             patch.object(gate, "validate_expected_builds", return_value={}), \
              patch.object(gate, "validate_attempt"), \
              patch.object(gate, "committed_records", return_value={}), \
              patch.object(load_validation, "verify_catalog_host_load",
@@ -1310,7 +1345,8 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
 
     def test_partial_zero_sample_is_rejected_by_existing_attempt_validator(self) -> None:
         batch, _ = self.create_batch(complete_ids=("case-a",))
-        with patch.object(gate, "validate_expected_builds", return_value={"baseline": {}, "candidate": {}}), \
+        with patch.object(gate, "current_source", return_value={}), \
+             patch.object(gate, "validate_expected_builds", return_value={"baseline": {}, "candidate": {}}), \
              patch.object(gate, "validate_attempt", side_effect=ValueError("zero samples")):
             with self.assertRaisesRegex(ValueError, "zero samples"):
                 producer.load_closed_batch(batch, self.root)

@@ -1707,10 +1707,12 @@ class PerformanceEvidenceTest(unittest.TestCase):
     def _summary_validation_fixture(
         self, *, field: str, value: int,
     ) -> tuple[Bundle, list[JsonObject]]:
+        source_pair = gate._object(gate.read_json(self.expected_paths[0])["sourcePair"], "source pair")
         self.transport["attempts"] = []
         for index in range(84):
             condition_id = f"paired-condition-{index}"
-            expected = {"catalogCondition": {"condition_id": condition_id}}
+            expected = {"catalogCondition": {"condition_id": condition_id},
+                        "sourcePair": {"before": source_pair["before"]}}
             refs = [
                 self.add_file(
                     f"/captured/summary/{field}/{index}/{name}.json",
@@ -1887,6 +1889,41 @@ class PerformanceEvidenceTest(unittest.TestCase):
         self.transport["head"] = "0" * 40
         self.save_transport()
         self.reject()
+
+    def test_shared_source_checks_each_inventory_and_rejects_foreign_source(self) -> None:
+        before = gate.read_json(self.bundle / "0/before.json")
+        records = gate.current_source(self.root, before)
+        shared = gate.SharedCurrentSource(self.root, self.head, records, Path(cast(str, before["root"])))
+        self.assertEqual(gate._shared_current_source(self.root, before, shared), records)
+        for field, replacement in (("head", "0" * 40), ("root", "relative"),
+                                   ("trackedPaths", []), ("untrackedPaths", ["unknown"])):
+            changed = dict(before)
+            changed[field] = replacement
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                gate._shared_current_source(self.root, changed, shared)
+        changed = dict(before)
+        changed["files"] = []
+        with self.assertRaises(ValueError):
+            gate._shared_current_source(self.root, changed, shared)
+        with self.assertRaises(ValueError):
+            gate._shared_current_source(self.root.parent, before, shared)
+
+    def test_shared_source_does_not_skip_later_snapshot_validation(self) -> None:
+        bundle = gate.Bundle(self.bundle)
+        expected = bundle.json(gate._object(gate._objects(bundle.manifest["attempts"], "attempts")[0],
+                                            "first attempt")["expected"])
+        pair = gate._object(expected["sourcePair"], "source pair")
+        before = bundle.json(pair["before"])
+        shared = gate.SharedCurrentSource(self.root, self.head, gate.current_source(self.root, before),
+                                          Path(cast(str, before["root"])))
+        gate.source_contract(bundle, self.root, expected, shared_source=shared)
+        original = bundle.json
+        snapshot_ref = pair["snapshot"]
+        def changed_snapshot(reference: object) -> JsonObject:
+            value = original(reference)
+            return {**value, "digest": "0" * 64} if reference == snapshot_ref else value
+        with patch.object(bundle, "json", side_effect=changed_snapshot), self.assertRaisesRegex(ValueError, "snapshot digest differs"):
+            gate.source_contract(bundle, self.root, expected, shared_source=shared)
 
     def test_current_source_change_and_untracked_extra_fail(self) -> None:
         (self.root / "source.rs").write_text("changed")

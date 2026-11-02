@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -87,15 +88,23 @@ def _stamp(metadata: os.stat_result) -> tuple[int, int, int, int, int, int]:
             metadata.st_mtime_ns, metadata.st_ctime_ns)
 
 
-def verify_reuse_request(request_path: Path, root: Path) -> gate.JsonObject:
+def verify_reuse_request(request_path: Path, root: Path, *,
+                         expected_measured_dir: Path | None = None,
+                         expected_measured_manifest_sha256: str | None = None,
+                         expected_request_sha256: str | None = None) -> gate.JsonObject:
     path = _request_path(request_path, root, existing=True)
     descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    with os.fdopen(descriptor, "r", encoding="utf8") as stream:
+    with os.fdopen(descriptor, "rb") as stream:
         metadata = os.fstat(stream.fileno())
         current = path.lstat()
         if not stat.S_ISREG(metadata.st_mode) or _stamp(metadata) != _stamp(current):
             raise ValueError("request file changed during open")
-        value = json.load(stream, object_pairs_hook=gate.unique_object)
+        raw = stream.read()
+        if expected_request_sha256 is not None:
+            _sha(expected_request_sha256)
+            if hashlib.sha256(raw).hexdigest() != expected_request_sha256:
+                raise ValueError("request digest differs")
+        value = json.loads(raw.decode("utf8"), object_pairs_hook=gate.unique_object)
         eligibility = None
         has_eligibility = isinstance(value, dict) and value.get("schema") == ELIGIBILITY_SCHEMA
         if has_eligibility and isinstance(value, dict):
@@ -103,7 +112,14 @@ def verify_reuse_request(request_path: Path, root: Path) -> gate.JsonObject:
                 raise ValueError("invalid eligibility schema")
             eligibility = value.get("result")
             value = value.get("request")
-        result = _validate(_request(value), root.resolve(strict=True))
+        request = _request(value)
+        if (expected_measured_dir is not None
+                and Path(request["measuredDir"]) != expected_measured_dir.resolve(strict=True)):
+            raise ValueError("request measured bundle differs")
+        if (expected_measured_manifest_sha256 is not None
+                and request["measuredManifestSha256"] != _sha(expected_measured_manifest_sha256)):
+            raise ValueError("request measured manifest differs")
+        result = _validate(request, root.resolve(strict=True))
         if has_eligibility and (eligibility != result
                 or result.get("reuseKind") != "test-source-artifact-equivalence-v1"):
             raise ValueError("stored eligibility differs from revalidation")

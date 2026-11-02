@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import io
 import sys
@@ -107,6 +108,20 @@ class ReuseRequestTest(unittest.TestCase):
             cli.verify_reuse_request(self.output, self.root)
         with self.assertRaisesRegex(ValueError, "inside repository tmp"):
             cli.verify_reuse_request(self.root / "outside.json", self.root)
+
+    def test_expected_bundle_and_request_digest_bind_original_bytes(self) -> None:
+        self.output.write_text(json.dumps(self.request))
+        digest = hashlib.sha256(self.output.read_bytes()).hexdigest()
+        with patch.object(gate, "verify_source_reuse", return_value={"eligibleHead": "new"}) as verify:
+            cli.verify_reuse_request(self.output, self.root, expected_measured_dir=self.measured,
+                                     expected_measured_manifest_sha256="a" * 64,
+                                     expected_request_sha256=digest)
+            verify.assert_called_once()
+            for kwargs in ({"expected_measured_dir": self.current},
+                           {"expected_measured_manifest_sha256": "f" * 64},
+                           {"expected_request_sha256": "f" * 64}):
+                with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
+                    cli.verify_reuse_request(self.output, self.root, **kwargs)
 
     def test_artifact_eligibility_is_immutable_and_revalidated(self) -> None:
         result = {"measuredHead": "old", "eligibleHead": "new",

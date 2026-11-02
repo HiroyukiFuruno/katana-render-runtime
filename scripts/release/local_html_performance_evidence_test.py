@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import datetime
+import importlib.metadata
 import json
 import platform
 import time
@@ -9,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 import local_html_performance_evidence as proof
+import html_performance_source_reuse_cli as reuse_cli
 import local_macos_evidence as mac
 import verify_html_performance_evidence as gate
 
@@ -129,6 +131,70 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
                 proof.collect("owner/repo", 3, Path("/unused"))
             verifier.assert_called_once()
             self.assertTrue(all(call.args[1] != "POST" for call in api.call_args_list))
+
+    def test_reuse_projection_binds_measured_result_and_eligibility(self) -> None:
+        from contextlib import ExitStack
+        from pathlib import Path
+        measured, request = Path("/bundle"), Path("/request")
+        old, head = "a" * 40, "c" * 40
+        formal: dict[str, object] = {"head": old, "conditions": 84,
+                                      "candidateConditions": 84, "checks": 1680}
+        reused: dict[str, object] = {"measuredHead": old, "eligibleHead": head,
+                                      "reuseEligibility": True, "measuredResult": formal,
+                                      "reuseKind": "test-source-artifact-equivalence-v1"}
+        with ExitStack() as stack:
+            for platform_name, platform_value in (("system", "Darwin"), ("machine", "arm64"), ("platform", "host")):
+                stack.enter_context(patch.object(platform, platform_name, return_value=platform_value))
+            mac_values: list[tuple[str, object]] = [("macos_product_version", "27.2"),
+                ("require_standard_index_flags", None), ("git_status", ""),
+                ("workflow_scope_supported", True), ("head_worktree_bytes_digest", "source"),
+                ("workflow_digest", self.workflow), ("gh_token", "token"), ("canonical_owner", "owner"),
+                ("validate_pr", ("b" * 40, head)), ("base_is_merged", True), ("utc_now", "2027-01-01T00:00:00Z")]
+            for mac_name, mac_value in mac_values:
+                stack.enter_context(patch.object(mac, mac_name, return_value=mac_value))
+            stack.enter_context(patch.object(mac, "run_git", side_effect=lambda *args:
+                                            "b" * 40 if args[0] == "merge-base" else head))
+            stack.enter_context(patch.object(mac, "api_request", return_value={"login": "owner"}))
+            digest = stack.enter_context(patch.object(gate, "sha256", return_value="f" * 64))
+            stack.enter_context(patch.object(gate, "Bundle", return_value=unittest.mock.Mock(manifest={"head": old})))
+            stack.enter_context(patch.object(gate, "_require_formal_release_result"))
+            stack.enter_context(patch.object(proof, "require_measurement_host"))
+            stack.enter_context(patch.object(proof, "installed_identity", return_value="d" * 64))
+            stack.enter_context(patch.object(importlib.metadata, "version", return_value="1.18.1"))
+            verify = stack.enter_context(patch.object(reuse_cli, "verify_reuse_request", return_value=reused))
+            result = proof.collect("owner/repo", 3, measured, request)
+            self.assertEqual(result["measured_head"], old)
+            self.assertEqual(result["eligibility_sha256"], "f" * 64)
+            self.assertEqual(result["verification_kind"], "test-source-artifact-equivalence-v1")
+            verify.assert_called_with(request, mac.ROOT, expected_measured_dir=measured,
+                                      expected_measured_manifest_sha256="f" * 64,
+                                      expected_request_sha256="f" * 64)
+            reused.pop("reuseKind")
+            self.assertEqual(proof.collect("owner/repo", 3, measured, request)["verification_kind"],
+                             "documentation-source-reuse-v1")
+            reused["eligibleHead"] = "e" * 40
+            with self.assertRaisesRegex(ValueError, "PR head"):
+                proof.collect("owner/repo", 3, measured, request)
+            reused["eligibleHead"] = head
+            formal["conditions"] = 83
+            with self.assertRaisesRegex(mac.EvidenceError, "formal HTML84"):
+                proof.collect("owner/repo", 3, measured, request)
+            formal["conditions"] = 84
+            digest.side_effect = ["f" * 64, "f" * 64, "0" * 64]
+            with self.assertRaisesRegex(ValueError, "request changed"):
+                proof.collect("owner/repo", 3, measured, request)
+
+    def test_reuse_owner_projection_requires_kind_head_and_digest(self) -> None:
+        payload = {**self.payload, "command": proof.REUSE_COMMAND,
+                   "verification_kind": "test-source-artifact-equivalence-v1",
+                   "measured_head": "d" * 40, "eligibility_sha256": "e" * 64}
+        comment = {**self.comment, "body": proof.MARKER + "\n" + json.dumps(payload)}
+        self.assertTrue(self.accepted(comment))
+        for key in ("verification_kind", "measured_head", "eligibility_sha256"):
+            altered = dict(payload)
+            altered.pop(key)
+            comment = {**self.comment, "body": proof.MARKER + "\n" + json.dumps(altered)}
+            self.assertFalse(self.accepted(comment))
 
     def test_api_failure_falls_back(self) -> None:
         with patch.object(mac, "workflow_scope_supported", return_value=True), \

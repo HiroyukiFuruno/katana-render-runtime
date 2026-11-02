@@ -11,12 +11,14 @@ from pathlib import Path
 from typing import cast
 
 import local_macos_evidence as mac
+import html_performance_source_reuse_cli as reuse_cli
 from html_performance_python_identity import installed_identity
 import verify_html_performance_evidence as gate
 
 MARKER = "<!-- krr-local-html-performance:v1 -->"
 SCHEMA = "krr-local-html-performance-v1"
 COMMAND = "verify_html_performance_evidence.verify"
+REUSE_COMMAND = "html_performance_source_reuse_cli.verify_reuse_request"
 
 
 def scope(workflow_sha: str) -> str:
@@ -65,6 +67,12 @@ def valid(comment: object, repository: str, number: int, base: str, head: str,
     keys = {"schema", "repository", "pull_request", "base_sha", "head_sha", "workflow_sha256",
             "scope_sha256", "completed_at", "command", "bundle_manifest_sha256", "result_sha256",
             "conditions", "candidate_conditions", "checks", "formal_pass", "platform", "os_version", "tools"}
+    kind = value.get("verification_kind")
+    source_reuse = isinstance(kind, str) and kind in {
+        "documentation-source-reuse-v1", "test-source-artifact-equivalence-v1"
+    }
+    if source_reuse:
+        keys |= {"verification_kind", "measured_head", "eligibility_sha256"}
     user = comment.get("user")
     login = user.get("login") if isinstance(user, dict) else None
     raw_tools = value.get("tools")
@@ -78,7 +86,11 @@ def valid(comment: object, repository: str, number: int, base: str, head: str,
             or type(value.get("pull_request")) is not int or value["pull_request"] != number
             or value.get("base_sha") != base or value.get("head_sha") != head
             or value.get("workflow_sha256") != workflow_sha or value.get("scope_sha256") != scope(workflow_sha)
-            or value.get("command") != COMMAND or value.get("platform") != "macos-arm64"
+            or value.get("command") != (REUSE_COMMAND if source_reuse else COMMAND)
+            or (source_reuse and (not isinstance(value.get("measured_head"), str)
+                                  or mac.SHA_RE.fullmatch(cast(str, value["measured_head"])) is None
+                                  or not mac.is_sha256(value.get("eligibility_sha256"))))
+            or value.get("platform") != "macos-arm64"
             or not valid_macos_version(value.get("os_version"))
             or set(tools) != {"python", "scipy", "runtime_sha256"}
             or not isinstance(tools.get("python"), str)
@@ -138,7 +150,8 @@ def verify_from_api(repository: str, number: int, base: str, head: str) -> bool:
         return False
 
 
-def collect(repository: str, number: int, directory: Path) -> dict[str, object]:
+def collect(repository: str, number: int, directory: Path,
+            reuse_request: Path | None = None) -> dict[str, object]:
     os_version = mac.macos_product_version()
     if platform.system() != "Darwin" or platform.machine() != "arm64" or not valid_macos_version(os_version):
         raise mac.EvidenceError("local collection requires macOS Apple Silicon")
@@ -161,11 +174,37 @@ def collect(repository: str, number: int, directory: Path) -> dict[str, object]:
         raise mac.EvidenceError("PR source differs")
     manifest_sha = gate.sha256(directory / "bundle.json")
     runtime_identity = installed_identity("1.18.1", "2.5.4")
-    result = gate.verify(directory, mac.ROOT)
+    eligibility_sha: str | None = None
+    verification_kind: str | None = None
+    measured_head = head
+    if reuse_request is None:
+        result = gate.verify(directory, mac.ROOT)
+    else:
+        eligibility_sha = gate.sha256(reuse_request)
+        reuse_result = reuse_cli.verify_reuse_request(
+            reuse_request, mac.ROOT, expected_measured_dir=directory,
+            expected_measured_manifest_sha256=manifest_sha,
+            expected_request_sha256=eligibility_sha,
+        )
+        gate.require(reuse_result.get("reuseEligibility") is True
+                     and reuse_result.get("eligibleHead") == head,
+                     "reuse eligibility does not match PR head")
+        measured_head = gate._text(reuse_result.get("measuredHead"), "measured HEAD")
+        gate.require(mac.SHA_RE.fullmatch(measured_head) is not None
+                     and gate.Bundle(directory).manifest.get("head") == measured_head,
+                     "reuse measured bundle head differs")
+        reuse_kind = reuse_result.get("reuseKind")
+        gate.require(reuse_kind in (None, "test-source-artifact-equivalence-v1"),
+                     "unsupported reuse kind")
+        verification_kind = ("documentation-source-reuse-v1" if reuse_kind is None
+                             else "test-source-artifact-equivalence-v1")
+        result = gate._object(reuse_result.get("measuredResult"), "measured formal result")
+        gate._require_formal_release_result(result)
+        gate.require(gate.sha256(reuse_request) == eligibility_sha, "reuse request changed")
     if installed_identity("1.18.1", "2.5.4") != runtime_identity:
         raise mac.EvidenceError("scientific runtime changed during verification")
     require_measurement_host(directory, host_platform)
-    if (result.get("head") != head or result.get("conditions") != 84
+    if (result.get("head") != measured_head or result.get("conditions") != 84
             or result.get("candidateConditions") != 84 or result.get("checks") != 1680):
         raise mac.EvidenceError("formal HTML84 result differs")
     mac.require_standard_index_flags()
@@ -173,17 +212,23 @@ def collect(repository: str, number: int, directory: Path) -> dict[str, object]:
             or mac.head_worktree_bytes_digest(head) != source or mac.workflow_digest() != workflow_sha
             or not mac.workflow_scope_supported() or gate.sha256(directory / "bundle.json") != manifest_sha
             or mac.macos_product_version() != os_version or platform.platform() != host_platform
+            or (reuse_request is not None and gate.sha256(reuse_request) != eligibility_sha)
             or mac.validate_pr(mac.api_request(token, "GET", pr_path), repository, number) != (base, head)
             or not mac.base_is_merged(mac.api_request(token, "GET", f"repos/{repository}/compare/{base}...{head}"), base)):
         raise mac.EvidenceError("source or PR changed during verification")
-    return {"schema": SCHEMA, "repository": repository, "pull_request": number,
+    projection: dict[str, object] = {"schema": SCHEMA, "repository": repository, "pull_request": number,
             "base_sha": base, "head_sha": head, "workflow_sha256": workflow_sha,
-            "scope_sha256": scope(workflow_sha), "completed_at": mac.utc_now(), "command": COMMAND,
+            "scope_sha256": scope(workflow_sha), "completed_at": mac.utc_now(),
+            "command": REUSE_COMMAND if reuse_request is not None else COMMAND,
             "bundle_manifest_sha256": manifest_sha, "result_sha256": mac.sha256_bytes(mac.canonical(result)),
             "conditions": 84, "candidate_conditions": 84, "checks": 1680,
             "formal_pass": True, "platform": "macos-arm64", "os_version": os_version,
             "tools": {"python": platform.python_version(), "scipy": importlib.metadata.version("scipy"),
                       "runtime_sha256": runtime_identity}}
+    if reuse_request is not None:
+        projection.update({"verification_kind": verification_kind, "measured_head": measured_head,
+                           "eligibility_sha256": eligibility_sha})
+    return projection
 
 
 def require_fresh_measurement_if_local_expired(jobs: list[dict[str, object]]) -> None:
@@ -204,19 +249,21 @@ def main() -> int:
     parser.add_argument("--base")
     parser.add_argument("--head")
     parser.add_argument("--bundle", type=Path)
+    parser.add_argument("--reuse-request", type=Path)
     parser.add_argument("--verify", action="store_true")
     parser.add_argument("--publish", action="store_true")
     args = parser.parse_args()
     try:
         if args.verify:
-            if args.publish or args.bundle or not args.base or not args.head:
+            if args.publish or args.bundle or args.reuse_request or not args.base or not args.head:
                 raise mac.EvidenceError("invalid verification arguments")
             accepted = verify_from_api(args.repository, args.pr, args.base, args.head)
             mac.output_reuse(accepted, __import__("os").environ.get("GITHUB_OUTPUT"))
             return 0
         if args.bundle is None:
             raise mac.EvidenceError("bundle is required")
-        payload = collect(args.repository, args.pr, args.bundle.resolve())
+        payload = collect(args.repository, args.pr, args.bundle.resolve(),
+                          args.reuse_request.absolute() if args.reuse_request is not None else None)
         if args.publish:
             token = mac.gh_token()
             base = gate._text(payload.get("base_sha"), "PR base")

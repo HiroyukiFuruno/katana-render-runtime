@@ -829,8 +829,17 @@ def load_closed_batch(
     for value in gate._array(receipt.get("buildPins"), "batch build pins"):
         bundle.file(_receipt_file_pin(value, "batch build pin"))
     validated_builds: Mapping[str, gate.JsonObject] = {}
+    shared_source: gate.SharedCurrentSource | None = None
+    shared_before: gate.JsonObject | None = None
     if attempts:
         first_expected = bundle.json(attempts[0]["expected"])
+        source_refs = gate._object(receipt.get("source"), "batch source refs")
+        shared_before = bundle.json(source_refs["before"])
+        shared_source = gate.SharedCurrentSource(
+            root, gate._text(shared_before.get("head"), "source HEAD"),
+            gate.current_source(root, shared_before, git_query=git_query),
+            Path(gate._text(shared_before.get("root"), "source root")),
+        )
         validated_builds = gate.validate_expected_builds(
             bundle, root, first_expected, git_query=git_query,
         )
@@ -839,8 +848,11 @@ def load_closed_batch(
             key: value for key, value in attempt.items()
         }
         gate.validate_attempt(bundle, root, attempt_object, git_query=git_query,
-                             validated_builds=validated_builds)
+                             validated_builds=validated_builds, shared_source=shared_source)
     _verify_completed_host_load(bundle, root, attempts, git_query=git_query)
+    if shared_source is not None and shared_before is not None:
+        gate.require(gate.current_source(root, shared_before, git_query=git_query) == shared_source.records,
+                     "source changed during batch validation")
     return receipt, bundle, attempts
 
 

@@ -15,7 +15,10 @@ LEGACY_PRODUCER_SHA256 = frozenset({
     "721ec42d4ba7ce2e06beba9cda6458e68f7b0e27222b3f9cd1fb16e6eec63736",
 })
 # The producer and its adapter must be independently reviewed and fixed together.
-CPU_PRODUCER_SHA256 = "b51d9b4db9459202da0828fcab217ca5760aa7deeb3ee55d2e01448c4df33fe5"
+CPU_PRODUCER_SHA256 = "710f6ed046aee1eac06604f01e1733086a0bcb1d3f309b75483be6f5febb87e1"
+HISTORICAL_CPU_PRODUCER_SHA256 = frozenset({
+    "b51d9b4db9459202da0828fcab217ca5760aa7deeb3ee55d2e01448c4df33fe5",
+})
 CPU_ADAPTER_SHA256 = "bbfc04542a16b94527431f3288f2f303c34b7940b6ef675f1fab44b94edbd5e2"
 PRODUCER = "scripts/release/produce_html_performance_evidence.py"
 ADAPTER = "scripts/release/html_performance_host_load.py"
@@ -25,7 +28,8 @@ def _method(records: Mapping[str, tuple[str, int]]) -> str:
     producer = records.get(PRODUCER, ("", 0))[0]
     if producer in LEGACY_PRODUCER_SHA256:
         return "legacy-load-average"
-    if producer == CPU_PRODUCER_SHA256 and records.get(ADAPTER, ("", 0))[0] == CPU_ADAPTER_SHA256:
+    if ((producer == CPU_PRODUCER_SHA256 or producer in HISTORICAL_CPU_PRODUCER_SHA256)
+            and records.get(ADAPTER, ("", 0))[0] == CPU_ADAPTER_SHA256):
         return "cpu-busy"
     raise ValueError("unreviewed host-load producer source")
 
@@ -42,7 +46,7 @@ def require_current_cpu_observer_sources(root: Path) -> None:
         if not path.is_file() or path.is_symlink() or path.resolve(strict=True) != path:
             raise ValueError("host-load source is not a canonical regular file")
         records[name] = (sha256(path), path.stat().st_size)
-    if _method(records) != "cpu-busy":
+    if _method(records) != "cpu-busy" or records[PRODUCER][0] != CPU_PRODUCER_SHA256:
         raise ValueError("current host-load producer is not the CPU observer")
 
 

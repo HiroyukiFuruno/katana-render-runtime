@@ -2,6 +2,8 @@
 
 ## 最新の再開地点（2026-11-02）
 
+- [/] 初期reuse/CI統合を05e14836へ通常commit。続くソース検証の共有とlocal-proofのreuse-request接続は、R7092関連404/404実0（44.628秒）、R7093 strict187files実0、R7094静的foundation実0。各attemptのsource/snapshot/入力/資源/font/binary/host-load検査を維持し、同runの現source全走査を開始・終了に共有する。remote/historical/別HEAD経路とworker直前hashは変更していない。独立reviewの具体的P0/P1なし。CPU producer新SHA710f6ed0、旧b51はhistorical CPUとして保持しcurrent認定では拒否。R7088/R7090のunit fixture失敗は原ログを保持し、限定43件と当該集計case成功後に404件を再回収した。実検証時間の短縮量、全84・実CI受入は未測定。
+
 - [/] 証跡再利用の統合はR7080静的foundation実0、R7081性能関連394/394実0（45.807秒）、R7082 macOS証跡/workflow96/96実0（11.318秒）、R7083検証対象登録654/654実0（590.67秒）。独立reviewのP1（completed PRでlocal証跡を使った際の手動preflight取得失敗）を修正し、PR binding不正・失効・API拒否・pushは従来artifact経路へfallback、local成功時は必須job/最新generation/OWNERを再照合。R7077型29件失敗、R7079登録失敗は元ログを保持し、wrapperのtest実行分岐が不変であることをレビューしてpinを更新した。正式84の実証跡・実GitHub/CIでの受入は未完。
 
 - [/] R7076は5f7915caの性能26/84条件を収集・検証済み、残58。実1・1534.822秒の原因はBatchBudgetExhaustedで、formalAccepted=false。全84合格ではない。R7075の20条件から6条件増加。原結果を保持し、新sourceへ遡及認定しない。

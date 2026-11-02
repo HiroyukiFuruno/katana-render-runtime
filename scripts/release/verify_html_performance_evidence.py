@@ -37,6 +37,13 @@ class FileReader(Protocol):
     def json(self, reference: object) -> JsonObject: ...
 
 
+class SharedCurrentSource(NamedTuple):
+    root: Path
+    head: str
+    records: SourceRecords
+    origin: Path
+
+
 class SourceContract(TypedDict):
     head: str
     source: SourceRecords
@@ -1530,10 +1537,30 @@ def current_source(root: Path, before: JsonObject, *, git_query: GitQuery | None
     return saved
 
 
+def _shared_current_source(root: Path, before: JsonObject, shared: SharedCurrentSource) -> SourceRecords:
+    require(root == shared.root, "shared source root differs")
+    require(before.get("schema") == "krr-native-build-source-inventory-v1"
+            and before.get("sourceManifestSchema") == "krr-native-build-source-manifest-v1"
+            and before.get("head") == shared.head, "shared source identity differs")
+    origin = Path(_text(before.get("root"), "source root"))
+    require(origin.is_absolute() and origin == shared.origin, "shared source origin differs")
+    tracked = [str(Path(_text(path, "tracked path")).relative_to(origin))
+               for path in _array(before.get("trackedPaths"), "tracked paths")]
+    saved = {str(Path(path).relative_to(origin)): value
+             for path, value in records_map(before.get("files")).items()}
+    require(len(tracked) == len(set(tracked)) and set(tracked) == set(shared.records)
+            and before.get("untrackedPaths") == [] and before.get("missingTrackedPaths") == []
+            and saved == shared.records, "shared source inventory differs")
+    return saved
+
+
 def _source_for_validation(root: Path, before: JsonObject, *, git_query: GitQuery | None,
-                           reuse_context: object) -> SourceRecords:
+                           reuse_context: object,
+                           shared_source: SharedCurrentSource | None = None) -> SourceRecords:
     if reuse_context is None:
-        return current_source(root, before, git_query=git_query)
+        return (_shared_current_source(root, before, shared_source) if shared_source is not None
+                else current_source(root, before, git_query=git_query))
+    require(shared_source is None, "source reuse cannot share a current source")
     from html_performance_source_reuse import SourceReuseContext
     if not isinstance(reuse_context, SourceReuseContext):
         raise ValueError("invalid source reuse context")
@@ -1572,7 +1599,8 @@ def _verified_reuse_context(root: Path, measured_head: str, *, git_query: GitQue
 def source_contract(bundle: Bundle, root: Path, expected: JsonObject, *,
                     git_query: GitQuery | None = None,
                     validated_builds: Mapping[str, JsonObject] | None = None,
-                    reuse_context: object = None) -> SourceContract:
+                    reuse_context: object = None,
+                    shared_source: SharedCurrentSource | None = None) -> SourceContract:
     contract = _object(expected["sourcePair"], "source pair")
     before, end, approved = (bundle.json(contract[k]) for k in ("before", "end", "approvedSourceRef"))
     require(all(document.get("stableEndpoints") is True for document in (before, end, approved)), "unstable source endpoint")
@@ -1581,7 +1609,8 @@ def source_contract(bundle: Bundle, root: Path, expected: JsonObject, *,
     approved_ref = _object(contract["approvedSourceRef"], "approved source reference")
     matches = [p for p in _objects(contract["inputPins"], "source input pins") if p.get("path") == approved_ref["path"]]
     require(len(matches) == 1 and matches[0].get("sha256") == approved_ref["sha256"], "approved source pin missing")
-    saved = _source_for_validation(root, before, git_query=git_query, reuse_context=reuse_context)
+    saved = _source_for_validation(root, before, git_query=git_query, reuse_context=reuse_context,
+                                   shared_source=shared_source)
     snapshot = bundle.json(contract["snapshot"])
     rows = snapshot["records"]
     actual = records_map(rows)
@@ -2139,7 +2168,8 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
                      git_query: GitQuery | None = None,
                      validated_builds: Mapping[str, JsonObject] | None = None,
                      reuse_context: object = None,
-                     remote_context: object = None) -> JsonObject:
+                     remote_context: object = None,
+                     shared_source: SharedCurrentSource | None = None) -> JsonObject:
     expected = bundle.json(attempt["expected"])
     result = bundle.json(attempt["result"])
     manifest = bundle.json(attempt["pairManifest"])
@@ -2186,7 +2216,8 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
     require(set(viewport) == {"width", "height", "scale"} and type(viewport["scale"]) in (int, float) and viewport["scale"] == 1, "invalid viewport types/scale")
     require(isinstance(expected["operation"], str) and bool(expected["operation"]), "missing operation")
     source = source_contract(bundle, root, expected, git_query=git_query,
-                             validated_builds=validated_builds, reuse_context=reuse_context)
+                             validated_builds=validated_builds, reuse_context=reuse_context,
+                             shared_source=shared_source)
     endpoints = _object(expected["endpointRefs"], "endpoint references")
     before_context, end_context = (bundle.json(endpoints[k]) for k in ("before", "end"))
     mapping = {"sourceBeforeEqualsEnd": "source", "inputsBeforeEqualsEnd": "inputs", "registryBeforeEqualsEnd": "registry", "cacheBeforeEqualsEnd": "cache", "cacheUnionBeforeEqualsEnd": "cacheUnion", "cacheUnionScopeRestored": "scope", "configBeforeEqualsEnd": "config", "preferenceBeforeEqualsEnd": "preference", "toolContextBeforeEqualsEnd": "toolContext"}
@@ -2562,9 +2593,18 @@ def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
             else:
                 assert isinstance(remote_context, RemoteEvidenceContext)
                 validated_builds = remote_context.builds
+        shared_source: SharedCurrentSource | None = None
+        shared_before: JsonObject | None = None
+        if remote_context is None and reuse_context is None:
+            source_pair = _object(first_expected.get("sourcePair"), "source pair")
+            shared_before = bundle.json(source_pair["before"])
+            shared_source = SharedCurrentSource(root, _text(shared_before.get("head"), "source HEAD"),
+                                                current_source(root, shared_before, git_query=git_query),
+                                                Path(_text(shared_before.get("root"), "source root")))
         if remote_context is None:
             values = [validate_attempt(bundle, root, attempt, git_query=git_query,
-                                       validated_builds=validated_builds, reuse_context=reuse_context)
+                                       validated_builds=validated_builds, reuse_context=reuse_context,
+                                       shared_source=shared_source)
                       for attempt in attempts]
         else:
             values = [validate_attempt(bundle, root, attempt, git_query=git_query,
@@ -2748,6 +2788,9 @@ def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
                     f"independent stage90 score is below 90: {condition_id}")
         minimum_score = min(_numeric(row.get("score"), "independent stage90 score")
                             for row in validated_chrome)
+        if shared_source is not None and shared_before is not None:
+            require(current_source(root, shared_before, git_query=git_query) == shared_source.records,
+                    "source changed during catalog verification")
         return {"head": head, "checks": 1680,
                 "phaseRecords": phase_records, "sampleRecords": sample_records,
                 "candidateSamples": candidate_samples,

@@ -193,6 +193,27 @@ class HostLoadValidationTest(unittest.TestCase):
 
 
 class CurrentHostLoadPreflightTest(unittest.TestCase):
+    def test_historical_cpu_producer_requires_reviewed_adapter(self) -> None:
+        historical = "b51d9b4db9459202da0828fcab217ca5760aa7deeb3ee55d2e01448c4df33fe5"
+        records = {host.PRODUCER: (historical, 1), host.ADAPTER: (host.CPU_ADAPTER_SHA256, 1)}
+        self.assertEqual(host._method(records), "cpu-busy")
+        records[host.ADAPTER] = ("0" * 64, 1)
+        with self.assertRaisesRegex(ValueError, "unreviewed"):
+            host._method(records)
+
+    def test_historical_cpu_producer_is_not_a_current_observer(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            producer = root / host.PRODUCER
+            adapter = root / host.ADAPTER
+            producer.parent.mkdir(parents=True)
+            producer.write_bytes(b"historical-cpu-producer")
+            adapter.write_bytes(b"reviewed-adapter")
+            with patch.multiple(host, HISTORICAL_CPU_PRODUCER_SHA256=frozenset({gate.sha256(producer)}),
+                                CPU_ADAPTER_SHA256=gate.sha256(adapter)):
+                with self.assertRaisesRegex(ValueError, "not the CPU observer"):
+                    host.require_current_cpu_observer_sources(root)
+
     def test_cpu_ratio_excludes_idle_iowait_and_duplicate_guest(self) -> None:
         self.assertAlmostEqual(observer.ratio_from_times({"user": 30.0, "system": 10.0,
                                                         "idle": 50.0, "iowait": 10.0,
