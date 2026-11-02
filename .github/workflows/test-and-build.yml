@@ -707,6 +707,27 @@ jobs:
         with:
           python-version: '3.13'
 
+      - name: Download and verify font observer
+        id: font_observer
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          observer_work="$(mktemp -d "${RUNNER_TEMP}/krr-font-observer.XXXXXXXX")"
+          observer_work="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve(strict=True))' "$observer_work")"
+          archive="$observer_work/observer.tar.gz"
+          gh api -H 'Accept: application/octet-stream' \
+            "repos/${GITHUB_REPOSITORY}/releases/assets/702068128" > "$archive"
+          python3 scripts/release/html_performance_observer_unpack.py \
+            --archive "$archive" \
+            --archive-sha256 92102a2dad3ef4c5f50e5581c7f12a2c7b4e291ee3c3a2804299690811e8a86f \
+            --manifest-sha256 74594a04e993c89f969d6b02c42a84fe4a787d818a0bd339d7d96445380ba6dc \
+            --executable-sha256 031c93c5e822ffd8d22121bb41ed139fb6fcc4e96f6aa1f43ea31ec36fb9242c \
+            --output-dir "$observer_work/observer"
+          echo "executable=$observer_work/observer/headless_shell" >> "$GITHUB_OUTPUT"
+
       - name: Install Python analysis tools
         if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
@@ -728,7 +749,9 @@ jobs:
         run: |
           output_root="tmp/html-performance-stage90/${{ github.run_id }}-${{ github.run_attempt }}"
           manifest="$output_root/captures/catalog-stage90-captures.json"
-          just html-performance-catalog-captures "$output_root"
+          just html-performance-catalog-captures "$output_root" '' '' \
+            "${{ steps.font_observer.outputs.executable }}" \
+            031c93c5e822ffd8d22121bb41ed139fb6fcc4e96f6aa1f43ea31ec36fb9242c true
           echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
 
       - name: Measure all 84 catalog conditions against baseline

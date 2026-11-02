@@ -2,6 +2,9 @@
 
 ## 最新の再開地点（2026-11-02）
 
+- [/] CI用font observerの梱包/厳密展開を実装。R7105実0で4,518file（license含む）・177,052,225bytesのarchive生成、R7112実0で3固定SHA・全fileのbytes/mode/inventoryを再照合し別dirへ展開、R7114 Playwright実0でDOM marker一致。R7113は起動実0だがDOM出力なしでありDOM検証成功には数えない。R7119 Ruff/strict192files実0、R7120関連18/18実0、R7121静的foundation実0、R7122既存mac証跡96/96実0。標準tar/gzipを使い原input非変更・private metadata非格納、失敗した展開dirは危険なpath削除をせず保持する。新repo/crate/製品APIは増やしていない。
+- [ ] v0.4.24は未公開Draftのみ作成（Release id431559187、tag未作成を確認）。CI補助asset id702068128、SHA92102a2dad3ef4c5f50e5581c7f12a2c7b4e291ee3c3a2804299690811e8a86fを固定し、fresh paired CIがread権限だけで取得・厳密展開してfont_observer=trueでcaptureする経路へ接続。read tokenでのDraft取得と実CI84は未実証。正式公開前にDraftの仮notesを最終release notesへ必ず置換し、最終HEAD/保護merge/3crate公開を確認する。Draftや補助assetの配置は本体公開完了ではない。
+
 - [/] 初期reuse/CI統合を05e14836へ通常commit。続くソース検証の共有とlocal-proofのreuse-request接続は、R7092関連404/404実0（44.628秒）、R7093 strict187files実0、R7094静的foundation実0。各attemptのsource/snapshot/入力/資源/font/binary/host-load検査を維持し、同runの現source全走査を開始・終了に共有する。remote/historical/別HEAD経路とworker直前hashは変更していない。独立reviewの具体的P0/P1なし。CPU producer新SHA710f6ed0、旧b51はhistorical CPUとして保持しcurrent認定では拒否。R7088/R7090のunit fixture失敗は原ログを保持し、限定43件と当該集計case成功後に404件を再回収した。実検証時間の短縮量、全84・実CI受入は未測定。
 
 - [/] 証跡再利用の統合はR7080静的foundation実0、R7081性能関連394/394実0（45.807秒）、R7082 macOS証跡/workflow96/96実0（11.318秒）、R7083検証対象登録654/654実0（590.67秒）。独立reviewのP1（completed PRでlocal証跡を使った際の手動preflight取得失敗）を修正し、PR binding不正・失効・API拒否・pushは従来artifact経路へfallback、local成功時は必須job/最新generation/OWNERを再照合。R7077型29件失敗、R7079登録失敗は元ログを保持し、wrapperのtest実行分岐が不変であることをレビューしてpinを更新した。正式84の実証跡・実GitHub/CIでの受入は未完。
