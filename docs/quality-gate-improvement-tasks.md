@@ -1,6 +1,25 @@
 # 品質ゲート改善の作業台帳
 
-## 最新の再開地点（2026-11-02）
+## 最新の再開地点（2026-11-03）
+
+- [/] 検証済み変更を通常commitへ固定した。`a1fcbc40`=公式rawの観測付き生成導線、`17b7b502`=全5,550件で確認したRust境界回帰、`6a790897`=既知の依存保持とfreshness gateの整合。追加のprivate test案は未適用のまま止め、candidate build proof→現行KRR製品PNG117図の99点判定→HTML84条件の実測へ進む。ソース固定後は採点と関係のない変更を増やさない。
+
+- [/] R7191は現行Rust cohortの5,550/5,550成功・既存29skip、実test323.852秒。R7192の正式coverage policyは83,261/84,435=98.60958133475457%・未到達1,174で不合格（前1,199から25減）。原copyを`tmp/quality/resumed-owner-r3509/current-root-coverage-report-r7193/`に保持。Root coverageの100%・未計測0は未達のまま。
+- [/] 修正した正式raw取得のR7182 EN59/R7183 JA58は実0、R7184の既存official-role readerによる全117件の基準検証も実0。原本は`tmp/quality/resumed-owner-r3509/r7181-observed-official-config/`に保持。これは見本側の検証で、現行KRR製品PNGの99点合格とは区別する。新しい回帰案の追加・適用を止め、ソース固定後の製品採点とHTML84実測を優先する。
+- [/] 依存更新の保持条件とfreshness gateの不整合を修正。既存のSHA固定parent・root/harness package/checksum照合を維持し、既知CRC1.5.3→1.5.4だけを許容、未知version/他package/改変は拒否。R7195関連72/72実0、R7196静的foundation実0。最終公開ゲートの実行は未完。
+
+## 2026-11-03 導入途中の記録（最新の固定状態を優先）
+
+- [/] 通常検査付きcommit `b82575859fc93a42dfcbdc03247191e1b1162e0c` にSVGフォント境界の回帰とHTML補助処理の分離、`0be0eb19f3382eb9edb631ca0f24b28ad82b450f` にRust/Babel/ZenUMLの依存更新を取り込んだ。root/harness双方の`crc32fast 1.5.3`と`utf8_iter 1.0.4`は既存の不変な比較条件を維持するため保持し、他の更新は維持した。公開前の完全ゲートは未完。
+- [/] R7138は5,528/5,528成功・既存29skip、実test325.174秒。R7139の正式coverage判定は83,162/84,361行=98.57872713694717%・未到達1,199で不合格（前1,208から9減）。その後のR7166は5,540/5,541成功・1失敗・29skip、実test323.925秒。新規テストの「凍結ObjectへのV8書込みはエラーを返す」という仮定が誤りだったため、製品を変更せず実際に例外を投げるsetterでのエラー伝播へ修正した。旧ログは保持し、現行修正の全件成功・coverageへ読み替えない。
+- [ ] 現行の未commit cohort（Mermaid geometry/Block style、SVG textPath/COLR/フォント境界、実V8/HTML frame、kdr-linter入力契約）を関連回帰・正式全件・coverageで確認する。fixtureと実装helperは計測に残し、純粋なcase/判定だけを標準の`*_tests.rs`へ分離する。R7179の静的foundationは実0。追加のprivate patchは`tmp/quality/resumed-owner-r3509/current-handoff.md`の現行欄から引き継ぎ、未適用・未検証を完了扱いしない。
+- [/] 独立raw JS基準の再利用可否をR7171で既存`RasterComparisonBinding.validateOfficialRole`によりEN/JA別に検証し、両方とも`bun.lock`の物理endpoint変更で拒否された。公式2runtime JSは前回合格時から変更なし。ZenUML Coreの更新やcandidateのsource pinだけから公式基準を無効と推測しない。原画像・receipt・configは変更していない。
+- [/] `mermaid-reference-strict`が画像とreceiptだけを作り、正式比較に必要なprocess evidenceを生成していなかったため、既存`produce_raster_process_evidence.py`へ接続した。R7180の関連10/10は実0。新規seed/configを使い、R7182でEN59の観測付き取得が実0、JA58のR7183を回収中。取得後も既存readerによる全117の基準検証と、現行KRR PNGの採点99以上を別工程として回収する。画像生成だけを正式合格にしない。
+- [ ] 性能は旧sourceの26/84収集を現行版へ転用しない。現行84条件の時間・RSS・表示3秒未満・画像90以上・出力font一致と、厳格な再利用適格性・履歴昇格・実CIでの受入を完了する。長文全scroll/全TOC/実末尾とconsumer契約も既存条件を維持する。
+- [/] 固定容量上限4,726,095,872bytesは維持。R7149はClippy本体後の容量超過で拒否され、R7150既存保護付きclean後に通常commitを成功させた。限定検証で通常の大きいdebug設定を選んだR7155/58は再整理・再buildを招き、事前catalogと実binaryのSHAが一致しなかった。原結果を保持し、その同一性を認定しない。以後は既存のcompact coverage profileと同条件のcatalogを用い、予約binaryの保持を照合する。
+- [ ] release inclusionへ05e14836・731d3772・347743a3・b8257585・0be0eb19と後続の実装commitを固定し、manifestを更新する。最新HEADの完全ゲート/100%・未計測0、Draft PR/review/個別reply-resolve/Ready/必須3OS CI/App保護merge/3crate公開/Issue close/安全なcleanupは未完。未公開Draftの仮notesを公開前に正式notesへ置換する。Draftや補助assetは本体公開完了ではない。
+
+## 直前の再開記録（2026-11-02、上の現行状態を優先）
 
 - [/] CI用font observerの梱包/厳密展開を実装。R7105実0で4,518file（license含む）・177,052,225bytesのarchive生成、R7112実0で3固定SHA・全fileのbytes/mode/inventoryを再照合し別dirへ展開、R7114 Playwright実0でDOM marker一致。R7113は起動実0だがDOM出力なしでありDOM検証成功には数えない。R7119 Ruff/strict192files実0、R7120関連18/18実0、R7121静的foundation実0、R7122既存mac証跡96/96実0。標準tar/gzipを使い原input非変更・private metadata非格納、失敗した展開dirは危険なpath削除をせず保持する。新repo/crate/製品APIは増やしていない。
 - [ ] v0.4.24は未公開Draftのみ作成（Release id431559187、tag未作成を確認）。CI補助asset id702068128、SHA92102a2dad3ef4c5f50e5581c7f12a2c7b4e291ee3c3a2804299690811e8a86fを固定し、fresh paired CIがread権限だけで取得・厳密展開してfont_observer=trueでcaptureする経路へ接続。read tokenでのDraft取得と実CI84は未実証。正式公開前にDraftの仮notesを最終release notesへ必ず置換し、最終HEAD/保護merge/3crate公開を確認する。Draftや補助assetの配置は本体公開完了ではない。
