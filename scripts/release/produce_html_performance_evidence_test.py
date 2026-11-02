@@ -272,8 +272,14 @@ class CatalogProducerOperationTest(unittest.TestCase):
             fresh_contract: gate.JsonObject = {"role": "fresh-history-source-record",
                 "armId": "fresh-history-source-record", "recordId": "record",
                 "referenceKind": "fresh-history-source", "originalArm": "candidate", "publishedSdk": False}
+            builds["baseline"] = builds["baseline"]._replace(proof={"lockSha256": "d" * 64})
             fresh_arms = producer.expected_arm_pins(
-                builds, "c" * 64, refs, reference_contract=fresh_contract, fresh_snapshot_sha256="e" * 64)
+                builds, "c" * 64, refs, reference_contract=fresh_contract,
+                fresh_snapshot_sha256="e" * 64, fresh_lock_sha256="d" * 64)
+            self.assertEqual(fresh_arms["fresh-history-source-record"]["lock_sha256"], "d" * 64)
+            with self.assertRaisesRegex(ValueError, "fresh reference build lock differs"):
+                producer.expected_arm_pins(builds, "c" * 64, refs, reference_contract=fresh_contract,
+                                           fresh_snapshot_sha256="e" * 64, fresh_lock_sha256="0" * 64)
             self.assertEqual(fresh_arms["fresh-history-source-record"]["source_snapshot_sha256"], "e" * 64)
             self.assertEqual(fresh_arms["candidate"]["source_snapshot_sha256"], "c" * 64)
             self.assertEqual(fresh_arms["fresh-history-source-record"]["binary_sha256"], gate.sha256(baseline_binary))
@@ -2653,6 +2659,50 @@ class CapacityBindingUnitTests(unittest.TestCase):
                     self.root, history / gate.HARNESS_ROOT, "candidate", binding, self.source_records,
                     self.root / "tmp/builds/baseline", historical_source=(history, selected), git_query=query)
         command.assert_not_called()
+
+    def test_historical_build_checks_selected_and_current_locks_before_metadata(self) -> None:
+        history = self.root / "tmp/reference"
+        records: gate.SourceRecords = {}
+        for relative in (gate.HARNESS_ROOT + "Cargo.toml", gate.HARNESS_ROOT + "Cargo.lock",
+                         gate.HARNESS_ROOT + "src/main.rs", "Cargo.toml",
+                         "crates/katana-render-runtime/Cargo.toml"):
+            path = history / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes((self.root / relative).read_bytes())
+            if relative.endswith("Cargo.lock"):
+                path.write_bytes(path.read_bytes() + b"\n# historical\n")
+            records[relative] = (gate.sha256(path), path.stat().st_size)
+        old = (history / gate.HARNESS_ROOT / "Cargo.lock").read_bytes()
+        selection = reference.ActiveReference("selected", "a" * 40, "b" * 64, "c" * 64,
+                                              {"lockSha256": gate.sha256(history / gate.HARNESS_ROOT / "Cargo.lock")})
+        def query(root: Path, args: Sequence[str], input_bytes: bytes | None, text: bool) -> str:
+            self.assertEqual((root, tuple(args), input_bytes, text),
+                             (self.root, ("show", selection.source_head + ":" + gate.HARNESS_ROOT + "Cargo.lock"), None, True))
+            return old.decode()
+        with patch.dict(os.environ, self.environment, clear=True), \
+             patch.object(shutil, "which", return_value=str(self.cargo)), \
+             patch.object(gate, "LOCK_SHA", self.lock_sha), \
+             patch.object(source_materialization, "verify_selected_source", return_value=records), \
+             patch.object(typed_producer, "_measurement_command", side_effect=RuntimeError("metadata reached")) as command:
+            def build(selected: reference.ActiveReference) -> None:
+                typed_producer.guarded_arm_build(self.root, history / gate.HARNESS_ROOT, "candidate", self.binding(),
+                    self.source_records, self.root / "tmp/builds/baseline", historical_source=(history, selected), git_query=query)
+            with self.assertRaisesRegex(RuntimeError, "metadata reached"):
+                build(selection)
+            command.reset_mock()
+            with self.assertRaisesRegex(ValueError, "historical lock pin differs"):
+                build(selection._replace(build_pins={"lockSha256": "0" * 64}))
+            command.assert_not_called()
+            (history / gate.HARNESS_ROOT / "Cargo.lock").write_bytes(old + b"tampered")
+            records[gate.HARNESS_ROOT + "Cargo.lock"] = (gate.sha256(history / gate.HARNESS_ROOT / "Cargo.lock"), len(old) + 8)
+            with self.assertRaisesRegex(ValueError, "common lock pin differs"):
+                build(selection)
+            command.assert_not_called()
+            (self.harness / "Cargo.lock").write_bytes(old)
+            with self.assertRaisesRegex(ValueError, "common lock pin differs"):
+                typed_producer.guarded_arm_build(self.root, self.harness, "candidate", self.binding(),
+                    self.source_records, self.root / "tmp/builds/current")
+            command.assert_not_called()
 
     def test_selected_configuration_and_environment_drift_reject_before_guard(self) -> None:
         selected = self.harness / ".cargo/config.toml"

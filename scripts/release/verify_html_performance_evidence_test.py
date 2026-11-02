@@ -16,7 +16,7 @@ import unittest
 import warnings
 import zipfile
 from contextlib import nullcontext
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, cast
 from unittest.mock import patch
@@ -1189,6 +1189,41 @@ class PerformanceEvidenceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsupported build artifact schema"):
             gate._validate_build_proof(bundle, self.root, ref, "candidate")
 
+    def test_historical_build_uses_selected_lock_and_current_candidate_rejects_it(self) -> None:
+        current: bytes = (self.root / gate.HARNESS_ROOT / "Cargo.lock").read_bytes()
+        old = current + b"\n# historical fixture\n"
+        old_sha = hashlib.sha256(old).hexdigest()
+        selection = reference_domain.ActiveReference(
+            "active", self.head, "b" * 64, "c" * 64, {"lockSha256": old_sha},
+        )
+        before_ref = self.add_file("/captured/source-before.json", "old/source.json", {})
+        proof = {"schema": "krr-html-performance-build-artifact-v3", "arm": "candidate",
+                 "buildExit": 0, "lockSha256": old_sha, "sourceBeforeRef": before_ref}
+        ref = self.add_file("/captured/historical-build.json", "old/historical-build.json", proof)
+        self.save_transport()
+        bundle = gate.Bundle(self.bundle)
+        def query(root: Path, args: Sequence[str], input_bytes: bytes | None, text: bool) -> str | bytes:
+            self.assertEqual(root, self.root)
+            self.assertIsNone(input_bytes)
+            self.assertTrue(text)
+            self.assertEqual(tuple(args), ("show", self.head + ":" + gate.HARNESS_ROOT + "Cargo.lock"))
+            return old.decode("utf8")
+        with patch.object(gate, "_historical_reference_source", side_effect=RuntimeError("history reached")):
+            with self.assertRaisesRegex(RuntimeError, "history reached"):
+                gate._validate_build_proof(bundle, self.root, ref, "candidate",
+                                           historical_reference=selection, git_query=query)
+        with self.assertRaisesRegex(ValueError, "build artifact lock differs"):
+            gate._validate_build_proof(bundle, self.root, ref, "candidate")
+        wrong = selection._replace(build_pins={"lockSha256": "0" * 64})
+        with self.assertRaisesRegex(ValueError, "historical lock pin differs"):
+            gate._validate_build_proof(bundle, self.root, ref, "candidate",
+                                       historical_reference=wrong, git_query=query)
+        harness = self.root / gate.HARNESS_ROOT
+        self.assertEqual(gate._runtime_lock_packages(harness, historical_lock=(old, old_sha)),
+                         gate._runtime_lock_packages(harness))
+        with self.assertRaisesRegex(ValueError, "common lock pin differs"):
+            gate._runtime_lock_packages(harness, historical_lock=(old, "0" * 64))
+
     def test_remote_candidate_rejects_unreviewed_schema_role_and_source_head(self) -> None:
         cases = (("schema", "krr-html-performance-build-artifact-v1", "remote candidate build role differs"),
                  ("arm", "baseline", "remote candidate build role differs"),
@@ -1205,6 +1240,34 @@ class PerformanceEvidenceTest(unittest.TestCase):
                 self.save_transport()
                 with self.assertRaisesRegex(ValueError, message):
                     remote_evidence.validate_remote_candidate_build(gate.Bundle(self.bundle), self.root, ref, self.head)
+
+    def test_remote_candidate_binds_historical_lock_to_selected_git_and_snapshot(self) -> None:
+        current_lock = self.root / gate.HARNESS_ROOT / "Cargo.lock"
+        old = current_lock.read_bytes() + b"\n# historical fixture\n"
+        old_sha = hashlib.sha256(old).hexdigest()
+        selection = reference_domain.ActiveReference("active", self.head, "b" * 64, "c" * 64,
+                                                     {"lockSha256": old_sha})
+        rows = [{"path": gate.HARNESS_ROOT + "Cargo.lock", "sha256": old_sha, "size": len(old)}]
+        records = {gate.HARNESS_ROOT + "Cargo.lock": (old_sha, len(old))}
+        before = self.add_file("/remote/old-source", "remote/old-source", {"head": self.head, "root": str(self.root)})
+        snapshot = self.add_file("/remote/old-snapshot", "remote/old-snapshot", {"records": rows,
+            "digest": hashlib.sha256(json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()).hexdigest()})
+        proof = {"schema": "krr-html-performance-build-artifact-v3", "arm": "candidate", "buildExit": 0,
+                 "lockSha256": old_sha, "sourceBeforeRef": before, "sourceSnapshotRef": snapshot}
+        ref = self.add_file("/remote/old-build", "remote/old-build", proof)
+        self.save_transport()
+        bundle = gate.Bundle(self.bundle)
+        with patch.object(remote_evidence, "LOCK_SHA", gate.sha256(current_lock)), \
+             patch.object(remote_evidence, "_historical_reference_source", return_value=records), \
+             patch.object(remote_evidence, "current_source", return_value=records), \
+             patch.object(canonical_gate, "git", return_value=old.decode()):
+            with self.assertRaisesRegex(ValueError, "remote tool launcher"):
+                remote_evidence.validate_remote_candidate_build(bundle, self.root, ref, self.head, historical=selection)
+            with self.assertRaisesRegex(ValueError, "remote candidate lock differs"):
+                remote_evidence.validate_remote_candidate_build(bundle, self.root, ref, self.head)
+            wrong = selection._replace(build_pins={"lockSha256": "0" * 64})
+            with self.assertRaisesRegex(ValueError, "historical lock pin differs"):
+                remote_evidence.validate_remote_candidate_build(bundle, self.root, ref, self.head, historical=wrong)
 
     def test_fresh_reference_source_proof_inputs_are_bound_to_measurement_context(self) -> None:
         fields = ("controllerSourceBeforeRef", "selectedSourceProofRef", "sourceBeforeRef", "sourceSnapshotRef")

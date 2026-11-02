@@ -11,7 +11,7 @@ from verify_html_performance_evidence import (
     Bundle, ExpectedBuild, FileReader, HARNESS_ROOT, HistoricalBuildReader, JsonObject, LOCK_SHA, _array,
     _canonical_build_path, _historical_reference_source, _integer, _object, _objects, _recorded_capacity_state,
     _require_formal_release_result, _text, cargo_build_artifacts, current_source,
-    digest, read_json, records_map, require, sha256, unique_object,
+    digest, read_json, records_map, require, selected_historical_lock, sha256, unique_object,
     validate_guarded_build_argv,
 )
 
@@ -101,8 +101,10 @@ def validate_remote_candidate_build(bundle: FileReader, root: Path, reference: o
             and snapshot.get("digest") == hashlib.sha256(json.dumps(
                 rows, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
             "remote candidate source snapshot differs")
-    require(proof.get("lockSha256") == LOCK_SHA
-            and records.get(HARNESS_ROOT + "Cargo.lock", (None,))[0] == LOCK_SHA,
+    require(sha256(root / HARNESS_ROOT / "Cargo.lock") == LOCK_SHA, "current lock pin differs")
+    lock_sha = LOCK_SHA if historical is None else selected_historical_lock(root, historical)[1]
+    require(proof.get("lockSha256") == lock_sha
+            and records.get(HARNESS_ROOT + "Cargo.lock", (None,))[0] == lock_sha,
             "remote candidate lock differs")
     logical_harness = logical_root / HARNESS_ROOT.rstrip("/")
     for name in ("cargo", "rustc"):
@@ -198,7 +200,7 @@ def validate_remote_candidate_build(bundle: FileReader, root: Path, reference: o
                                 guard_python=_canonical_build_path(python.get("launcher"), "remote Python launcher"))
     return {"head": head, "binarySha256": _text(frozen.get("sha256"), "remote binary SHA"),
             "sourceSnapshotSha256": _text(snapshot_ref.get("sha256"), "remote snapshot SHA"),
-            "buildArtifactSha256": sha256(proof_path), "lockSha256": LOCK_SHA,
+            "buildArtifactSha256": sha256(proof_path), "lockSha256": lock_sha,
             "cargoExecutableSha256": _text(_object(proof.get("cargoExecutable"), "Cargo executable").get("sha256"), "Cargo SHA"),
             "rustcExecutableSha256": _text(_object(proof.get("rustcExecutable"), "Rustc executable").get("sha256"), "Rustc SHA"),
             "buildEnvironmentSha256": proof["buildEnvironmentSha256"], "toolVersions": proof["toolVersions"],

@@ -438,6 +438,7 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
     cargo_info = {"path": str(cargo), "sha256": gate.sha256(cargo)}
     rustc_info = {"path": str(rustc), "sha256": gate.sha256(rustc)}
     capacity.validate_build_executable(root, [str(cargo_tool.launcher), "build"], environment)
+    historical_lock: tuple[bytes, str] | None = None
     if historical_source is None:
         source_root, build_records = root, source_records
     else:
@@ -445,6 +446,10 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
         source_root, selection = historical_source
         gate.require(arm == "candidate" and git_query is not None, "historical build source differs")
         build_records = verify_selected_source(root, source_root, selection, git_query=git_query)
+        historical_lock = gate.selected_historical_lock(root, selection, git_query=git_query)
+    gate.require(harness == source_root / gate.HARNESS_ROOT
+                 and gate.sha256(root / gate.HARNESS_ROOT / "Cargo.lock") == gate.LOCK_SHA,
+                 "common lock pin differs")
     required = [(root / "scripts/build/cargo_capacity_guard.py", root, source_records),
                 (root / "scripts/build/cargo_capacity_guard_lock.py", root, source_records),
                 (harness / "Cargo.toml", source_root, build_records),
@@ -452,13 +457,16 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
                 (harness / "src/main.rs", source_root, build_records),
                 (source_root / "Cargo.toml", source_root, build_records),
                 (source_root / "crates/katana-render-runtime/Cargo.toml", source_root, build_records)]
+    if historical_source is not None:
+        required.append((root / gate.HARNESS_ROOT / "Cargo.lock", root, source_records))
     def validate_required(message: str) -> None:
         for path, owner, records in required:
             relative = str(path.relative_to(owner))
             gate.require(not path.is_symlink() and path.resolve() == path and relative in records
                          and records[relative] == (gate.sha256(path), path.stat().st_size), message)
     validate_required("capacity/manifest source binding differs")
-    gate.require(gate.sha256(harness / "Cargo.lock") == gate.LOCK_SHA, "common lock pin differs")
+    expected_lock_sha = historical_lock[1] if historical_lock is not None else gate.LOCK_SHA
+    gate.require(gate.sha256(harness / "Cargo.lock") == expected_lock_sha, "common lock pin differs")
     config_pins = [(path, gate.sha256(path)) for path in configs]
     metadata = _measurement_command(
         [str(cargo_tool.launcher), "metadata", "--format-version", "1", "--locked", "--manifest-path",
@@ -477,7 +485,8 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
     gate.require(capacity.cargo_configuration_paths(harness, environment) == configs, "Cargo configuration selection changed during metadata")
     gate.require(all(gate.sha256(path) == pin for path, pin in config_pins), "Cargo configuration changed during metadata")
     validate_required("capacity/manifest source changed during metadata")
-    expected = expected_build(source_root, harness, arm, value, environment)
+    expected = expected_build(source_root, harness, arm, value, environment,
+                              historical_lock=historical_lock)
     cargo_version = command([str(cargo_tool.launcher), "-vV"], text=True,
         cwd=root, env=environment, role="tool-query", log_directory=lifecycle_logs)
     rustc_version = command([str(rustc_tool.launcher), "-vV"], text=True,
@@ -538,7 +547,7 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
         "argv": argv, "buildExit": build_exit, "expectedHarness": expected.harness,
         "guardPython": guard_python, "guardLifecycleRef": lifecycle_pin,
         "expectedRuntime": expected.runtime, "artifacts": artifacts, "rawPins": pins,
-        "lockSha256": gate.LOCK_SHA, "selectedBinary": {"path": str(binary), "sha256": checksum},
+        "lockSha256": expected_lock_sha, "selectedBinary": {"path": str(binary), "sha256": checksum},
         "frozenBinary": {"path": str(frozen), "sha256": checksum},
         "cargoLauncher": cargo_launcher_pin, "cargoExecutable": cargo_info,
         "cargoConfigPins": [{"path": str(path), "sha256": pin} for path, pin in config_pins],
@@ -567,12 +576,18 @@ def expected_arm_pins(builds: Mapping[str, ArmBuildResult], snapshot_sha256: str
                       build_artifact_refs: Mapping[str, FilePin], *,
                       reference_parent: reference.ReferenceParentProof | None = None,
                       reference_contract: gate.JsonObject | None = None,
-                      fresh_snapshot_sha256: str | None = None) -> dict[str, ArmPin]:
+                      fresh_snapshot_sha256: str | None = None,
+                      fresh_lock_sha256: str | None = None) -> dict[str, ArmPin]:
+    gate.require((fresh_snapshot_sha256 is None) == (fresh_lock_sha256 is None),
+                 "fresh reference snapshot/lock pins differ")
     arms: dict[str, ArmPin] = {}
     baseline_id = (gate.baseline_arm_id({"referenceParent": reference_contract})
                    if reference_contract is not None else gate.DEFAULT_BASELINE_ARM_ID)
     for arm, build in builds.items():
         require_frozen_binary(build)
+        if arm == "baseline" and fresh_lock_sha256 is not None:
+            gate.require(build.proof.get("lockSha256") == fresh_lock_sha256,
+                         "fresh reference build lock differs")
         source_snapshot = (reference_parent.source_snapshot_sha256
                            if arm == "baseline" and reference_parent is not None else
                            fresh_snapshot_sha256 if arm == "baseline" and fresh_snapshot_sha256 is not None
@@ -582,6 +597,7 @@ def expected_arm_pins(builds: Mapping[str, ArmBuildResult], snapshot_sha256: str
             "source_snapshot_sha256": source_snapshot,
             "lock_sha256": (reference_parent.lock_sha256
                             if arm == "baseline" and reference_parent is not None
+                            else fresh_lock_sha256 if arm == "baseline" and fresh_lock_sha256 is not None
                             else gate.LOCK_SHA),
             "build_artifact_ref": build_artifact_refs[arm],
         }
@@ -3086,6 +3102,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         builds, build_inputs.snapshot["sha256"], build_artifact_refs,
         reference_parent=reference_proof, reference_contract=reference_contract,
         fresh_snapshot_sha256=fresh_inputs.snapshot["sha256"] if fresh_inputs is not None else None,
+        fresh_lock_sha256=fresh_reference.build_pins["lockSha256"] if fresh_reference is not None else None,
     )
     if resumed_bundle is not None and resumed_receipt is not None and not resumed_attempts:
         _validate_empty_resume_builds(resumed_bundle, root, resumed_receipt, arms,

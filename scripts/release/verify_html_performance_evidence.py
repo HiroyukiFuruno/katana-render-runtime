@@ -1089,11 +1089,22 @@ def _validate_build_environment(proof: JsonObject, root: Path, harness: Path, ca
     return capacity.cargo_configuration_paths(harness, environment)
 
 
-def _runtime_lock_packages(harness: Path) -> dict[str, JsonObject]:
+def selected_historical_lock(root: Path, selection: reference_domain.ActiveReference, *,
+                             git_query: GitQuery | None = None) -> tuple[bytes, str]:
+    if not isinstance(selection, reference_domain.ActiveReference):
+        raise ValueError("unapproved historical reference")
+    checksum = selection.build_pins["lockSha256"]
+    raw = git(root, "show", selection.source_head + ":" + HARNESS_ROOT + "Cargo.lock",
+              git_query=git_query).encode("utf8")
+    require(hashlib.sha256(raw).hexdigest() == checksum, "historical lock pin differs")
+    return raw, checksum
+
+
+def _runtime_lock_packages(harness: Path, *, historical_lock: tuple[bytes, str] | None = None) -> dict[str, JsonObject]:
     from toml_loader import load_toml_parser
 
-    raw = (harness / "Cargo.lock").read_bytes()
-    require(hashlib.sha256(raw).hexdigest() == LOCK_SHA, "common lock pin differs")
+    raw, checksum = historical_lock if historical_lock is not None else ((harness / "Cargo.lock").read_bytes(), LOCK_SHA)
+    require(hashlib.sha256(raw).hexdigest() == checksum, "common lock pin differs")
     lock = _object(load_toml_parser().loads(raw.decode("utf8")), "common Cargo lock")
     packages = [p for p in _objects(lock["package"], "locked packages")
                 if p.get("name") == "katana-render-runtime"]
@@ -1107,7 +1118,8 @@ def _runtime_lock_packages(harness: Path) -> dict[str, JsonObject]:
 
 
 def expected_build(root: Path, harness: Path, arm: str, metadata: JsonObject,
-                   environment: Mapping[str, str]) -> ExpectedBuild:
+                   environment: Mapping[str, str], *,
+                   historical_lock: tuple[bytes, str] | None = None) -> ExpectedBuild:
     from toml_loader import load_toml_parser
 
     require(_integer(metadata["version"], "metadata schema version") == 1, "metadata schema differs")
@@ -1141,7 +1153,7 @@ def expected_build(root: Path, harness: Path, arm: str, metadata: JsonObject,
     require(len(runtime_nodes) == 1, "resolved runtime node missing")
     runtime["resolvedFeatures"] = [_text(f, "resolved runtime feature")
                                    for f in _array(runtime_nodes[0]["features"], "resolved runtime features")]
-    locked = _runtime_lock_packages(harness)[arm]
+    locked = _runtime_lock_packages(harness, historical_lock=historical_lock)[arm]
     require(runtime.get("name") == "katana-render-runtime" and runtime.get("version") == locked["version"],
             "runtime name/version differs from fixed lock")
     manifest = _canonical_build_file(runtime["manifest_path"], "runtime manifest")
@@ -1279,8 +1291,20 @@ def _validate_build_proof(bundle: FileReader, root: Path, reference: object, arm
             "fresh historical build requires a selected reference")
     source_root = root if fresh_source_root is None else fresh_source_root
     harness = source_root / HARNESS_ROOT.rstrip("/")
-    require(proof.get("lockSha256") == LOCK_SHA and sha256(harness / "Cargo.lock") == LOCK_SHA,
+    require(sha256(root / HARNESS_ROOT / "Cargo.lock") == LOCK_SHA,
             "build artifact lock differs")
+    historical_lock: tuple[bytes, str] | None = None
+    if historical_reference is not None:
+        if not isinstance(historical_reference, reference_domain.ActiveReference):
+            raise ValueError("unapproved historical reference")
+        historical_lock = selected_historical_lock(root, historical_reference, git_query=git_query)
+        lock_sha = historical_lock[1]
+        require(proof.get("lockSha256") == lock_sha
+                and (fresh_source_root is None or sha256(harness / "Cargo.lock") == lock_sha),
+                "build artifact lock differs")
+    else:
+        require(proof.get("lockSha256") == LOCK_SHA and sha256(harness / "Cargo.lock") == LOCK_SHA,
+                "build artifact lock differs")
     source_before_ref = _object(proof["sourceBeforeRef"], "build source-before reference")
     source_before = bundle.json(source_before_ref)
     if fresh_source_root is not None:
@@ -1344,7 +1368,8 @@ def _validate_build_proof(bundle: FileReader, root: Path, reference: object, arm
             "build raw metadata/Cargo JSON pins absent")
     metadata = _object(json.loads(raw_by_name["metadata.json"].read_text(encoding="utf8"), object_pairs_hook=unique_object),
                        "Cargo metadata")
-    build_expected = expected_build(source_root, harness, arm, metadata, actual_environment)
+    build_expected = expected_build(source_root, harness, arm, metadata, actual_environment,
+                                    historical_lock=historical_lock)
     require(build_expected.harness == _object(proof["expectedHarness"], "expected harness")
             and build_expected.runtime == _object(proof["expectedRuntime"], "expected runtime"),
             "expected build package records differ")
@@ -1377,7 +1402,8 @@ def _validate_build_proof(bundle: FileReader, root: Path, reference: object, arm
             "selected/frozen binary differs from Cargo artifact")
     return {"arm": arm, "binarySha256": binary_sha, "head": _text(source_before["head"], "source HEAD"),
             "sourceSnapshotSha256": _text(snapshot_ref["sha256"], "source snapshot SHA"),
-            "lockSha256": LOCK_SHA, "buildArtifactSha256": sha256(proof_path),
+            "lockSha256": historical_lock[1] if historical_lock is not None else LOCK_SHA,
+            "buildArtifactSha256": sha256(proof_path),
             "cargoExecutableSha256": _text(cargo_info["sha256"], "Cargo executable SHA"),
             "rustcExecutableSha256": sha256(rustc_tool.executable),
             "buildEnvironmentSha256": proof["buildEnvironmentSha256"],
