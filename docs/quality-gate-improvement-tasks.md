@@ -2,6 +2,7 @@
 
 ## 最新の再開地点（2026-11-03）
 
+- [/] 最新の追加依頼としてGitHub Actionsのアクションを公式の最新stableへ確認・更新する。3workflowの`taiki-e/install-action`計12参照を更新済み（v2.89.1を4、justを7、cargo-llvm-covを1）。公式tag refが全てcommitであることとSHA一致、composite方式不変を確認。他のアクションは各公式最新stableと一致。permissions・実行条件・3OS matrixは変更せず、静的契約検査と公開前の必須CIで検証する。
 - [x] R7217で製品PNGのMermaid全117図を正式に検証し、EN59/59・最低99.085711、JA58/58・最低99.10801000000001、描画失敗0、managed全体実0/accepted=trueを確認した。対象ソースは`75f49866`。各言語の`comparison/native-product-comparison/{scores,failures}.json`を製品側の集計とし、`comparison/scores.json`の中間SVG側を混同しない。原本・基準・閾値は変更していない。
 - [x] R7220の現行HTML84条件の取得が実0、R7221の独立検証も実0。全84画像90以上・最低92.14438、出力font完全一致established、診断0。性能は`measurement=not-performed`であり、画像合格を性能合格に代用しない。Mermaidの再検証に必要な`target/debug/krr`を後継の保護registryへ追加し、R7224で固定閾値内と保持を確認した。
 - [/] 性能開始前のR7226は、履歴lockを現行lockとして判定する不整合で実1・測定0。履歴Git commit/pin・元proofへ束縛してlocal/remote/fresh経路を分ける修正を実装し、型・Lint・元retained wrapperの実reader受理、R7238のproducer/verifier全291/291、独立reviewの具体P0/P1なしを確認した。古い原本・履歴・lock・受入条件は変更していない。修正を固定し、基準binaryを再利用する正式84性能へ戻る。
