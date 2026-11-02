@@ -665,6 +665,26 @@ def encoded(value: object) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
 
 
+def _validate_planned_executable(proof: gate.JsonObject, binary: gate.JsonObject, *,
+                                 reference_proof: reference.ReferenceParentProof | None = None) -> None:
+    frozen = proof.get("frozenBinary")
+    if reference_proof is None or not reference_proof.transport_sources:
+        gate.require(frozen == binary, "planned executable differs from its role proof")
+        return
+    pin = gate._object(frozen, "reference frozen binary")
+    gate.require(set(pin) == {"path", "sha256"}, "reference frozen binary pin differs")
+    logical = gate._text(pin.get("path"), "reference frozen binary path")
+    checksum = reference._sha(pin.get("sha256"), "reference frozen binary SHA")
+    mapped = [path for name, path in reference_proof.transport_sources if name == logical]
+    gate.require(len(mapped) == 1 and mapped[0] == reference_proof.frozen_binary_path
+                 and reference.FilePin(logical, checksum) in reference_proof.dependency_refs
+                 and checksum == reference_proof.binary_sha256
+                 and binary == {"path": str(mapped[0]), "sha256": checksum}
+                 and mapped[0].is_file() and not mapped[0].is_symlink()
+                 and gate.sha256(mapped[0]) == checksum,
+                 "planned executable differs from its role proof")
+
+
 def write(path: Path, value: object) -> FilePin:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(encoded(value))
@@ -2843,6 +2863,11 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             root, reference_parent_wrapper, reference_parent_wrapper_sha256,
             git_query=git_query,
         )
+        _validate_planned_executable(
+            _pinned_json(Path(reference_wrapper_pin["path"]), reference_wrapper_pin["sha256"]),
+            {"path": str(reference_proof.frozen_binary_path), "sha256": reference_proof.binary_sha256},
+            reference_proof=reference_proof,
+        )
     elif catalog_conditions is not None and not _allow_catalog_diagnostic:
         def reference_query(path: Path, args: tuple[str, ...]) -> str:
             return gate.git(path, *args, git_query=git_query)
@@ -3165,8 +3190,8 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     }
     for role, artifact in build_artifact_refs.items():
         proof = _pinned_json(Path(artifact["path"]), artifact["sha256"])
-        gate.require(proof.get("frozenBinary") == binary_refs[role],
-                     "planned executable differs from its role proof")
+        _validate_planned_executable(proof, binary_refs[role],
+                                     reference_proof=reference_proof if role == "baseline" else None)
     planned: dict[str, ExpectedPerformance] = {}
     planned_inputs: list[tuple[gate.JsonObject, gate.JsonObject, gate.JsonObject | None,
                                list[gate.JsonObject], list[gate.JsonObject], list[gate.JsonObject]]] = []

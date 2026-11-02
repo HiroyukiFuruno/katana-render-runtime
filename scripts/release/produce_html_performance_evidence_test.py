@@ -284,6 +284,39 @@ class CatalogProducerOperationTest(unittest.TestCase):
             self.assertEqual(fresh_arms["candidate"]["source_snapshot_sha256"], "c" * 64)
             self.assertEqual(fresh_arms["fresh-history-source-record"]["binary_sha256"], gate.sha256(baseline_binary))
 
+    def test_planned_reference_binary_requires_exact_authenticated_transport(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            physical = root / "transported"
+            alias = root / "alias"
+            physical.write_bytes(b"binary")
+            alias.write_bytes(b"binary")
+            sha = gate.sha256(physical)
+            logical = str(root / "original")
+            frozen = {"path": logical, "sha256": sha}
+            binary: gate.JsonObject = {"path": str(physical), "sha256": sha}
+            parent = reference.ReferenceParentProof(
+                reference.REFERENCE_ROLE, "candidate", "3" * 40, "a" * 64, sha, gate.LOCK_SHA,
+                "d" * 64, "e" * 64, "f" * 64, (reference.FilePin(logical, sha),),
+                root / "build", physical, transport_sources=((logical, physical),))
+            producer._validate_planned_executable({"frozenBinary": frozen}, binary, reference_proof=parent)
+            with self.assertRaises(ValueError):
+                producer._validate_planned_executable(
+                    {"frozenBinary": {**frozen, "sha256": "invalid"}}, binary, reference_proof=parent)
+            for changed in (parent._replace(transport_sources=((logical, alias),)),
+                            parent._replace(dependency_refs=()),
+                            parent._replace(binary_sha256="0" * 64)):
+                with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, "planned executable differs"):
+                    producer._validate_planned_executable({"frozenBinary": frozen}, binary, reference_proof=changed)
+            with self.assertRaisesRegex(ValueError, "planned executable differs"):
+                producer._validate_planned_executable({"frozenBinary": frozen}, binary)
+            with self.assertRaisesRegex(ValueError, "planned executable differs"):
+                producer._validate_planned_executable({"frozenBinary": frozen},
+                    {"path": str(alias), "sha256": sha}, reference_proof=parent)
+            physical.write_bytes(b"tampered")
+            with self.assertRaisesRegex(ValueError, "planned executable differs"):
+                producer._validate_planned_executable({"frozenBinary": frozen}, binary, reference_proof=parent)
+
     def test_reference_parent_loader_forwards_query_and_all_dependency_refs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
