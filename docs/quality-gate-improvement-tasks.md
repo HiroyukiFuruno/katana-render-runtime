@@ -2,6 +2,10 @@
 
 ## 最新の再開地点（2026-11-03）
 
+- [/] GitHub Actionsの更新は通常commit `903a1b4a` に取り込み、連動する静的契約のfocused Bun10件も成功。公開済み最新は依然v0.4.23で、v0.4.24は未公開。必須3OS CIと公開確認は未完。
+- [/] 復旧後の性能R7291はsource `d777d84b` で5/84条件・各25組のpaired測定を取得し、各条件の厳格検証とclosed receiptまで実0（1,500 phase records）。全84の正式合格ではない。次の再開R7292は新規計測前に基準側実行ファイルの論理/輸送先パス不一致で拒否され、元closed bundleと認証済みreference mappingを使う修正を実施した。関連全294 Python回帰は実0。検証コード変更後の正式84への適格性は別途確認し、過去5件を無条件に加算しない。
+- [/] 容量不足は承認済みprivate clean-all後も回復しなかったため、未使用uv cacheと完了したChromiumのコンパイル中間物だけを整理し約45GiBを回復。Chrome本体と残すべき958ファイルの物理identity不変を事後確認。一方、旧`target/debug/krr`の消失を検出し、元117図の測定成功と現物の再利用可否を区別した。削除主体は未特定で、元receiptやpinは書き換えない。
+- [/] native CLIの検証実行体をCargo cache外へ保持するv4 receiptを通常commit `bfe26ada` へ取り込んだ。Cargo観測済みoriginと固定実行体を別々に束縛し、v3の元path/ctime検査は維持する。旧方式RED1件→既存v3を含む119/119 Bun回帰、呼出し/render86件、Python producer29件、CPU source26件、性能producer/verifier294件が成功。型・Lint・重複等の静的foundation、harness756件、必須登録660件も成功した。source位置だけが変わったASTの誤拒否を修正し、意味のあるspread/Git argv変更は引き続き拒否する。実producerからcache消失後の描画までの結合と、現行sourceの全品質・coverage100%・正式117/84・公開は未完。
 - [/] 最新の追加依頼としてGitHub Actionsのアクションを公式の最新stableへ確認・更新する。3workflowの`taiki-e/install-action`計12参照を更新済み（v2.89.1を4、justを7、cargo-llvm-covを1）。公式tag refが全てcommitであることとSHA一致、composite方式不変を確認。他のアクションは各公式最新stableと一致。permissions・実行条件・3OS matrixは変更せず、静的契約検査と公開前の必須CIで検証する。
 - [x] R7217で製品PNGのMermaid全117図を正式に検証し、EN59/59・最低99.085711、JA58/58・最低99.10801000000001、描画失敗0、managed全体実0/accepted=trueを確認した。対象ソースは`75f49866`。各言語の`comparison/native-product-comparison/{scores,failures}.json`を製品側の集計とし、`comparison/scores.json`の中間SVG側を混同しない。原本・基準・閾値は変更していない。
 - [x] R7220の現行HTML84条件の取得が実0、R7221の独立検証も実0。全84画像90以上・最低92.14438、出力font完全一致established、診断0。性能は`measurement=not-performed`であり、画像合格を性能合格に代用しない。Mermaidの再検証に必要な`target/debug/krr`を後継の保護registryへ追加し、R7224で固定閾値内と保持を確認した。
