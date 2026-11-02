@@ -8,6 +8,7 @@ import importlib
 import json
 import math
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -1550,7 +1551,8 @@ def _source_for_validation(root: Path, before: JsonObject, *, git_query: GitQuer
     return saved
 
 
-def _verified_reuse_context(root: Path, measured_head: str, *, git_query: GitQuery | None) -> object:
+def _verified_reuse_context(root: Path, measured_head: str, *, git_query: GitQuery | None,
+                            allow_test_changes: bool = False) -> object:
     from html_performance_source_reuse import validate_reuse_source
     require(re.fullmatch(r"[a-f0-9]{40}", measured_head) is not None, "invalid measured HEAD")
     eligible = git(root, "rev-parse", "HEAD", git_query=git_query).strip()
@@ -1564,7 +1566,7 @@ def _verified_reuse_context(root: Path, measured_head: str, *, git_query: GitQue
     return validate_reuse_source(root, measured_head,
                                  committed_records(root, eligible, git_query=git_query),
                                  committed_records(root, measured_head, git_query=git_query),
-                                 text_query, bytes_query)
+                                 text_query, bytes_query, allow_test_changes=allow_test_changes)
 
 
 def source_contract(bundle: Bundle, root: Path, expected: JsonObject, *,
@@ -2542,7 +2544,8 @@ def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
             raise ValueError("invalid source reuse context")
         require(bundle.manifest["head"] == reuse_context.measured_head
                 and head == reuse_context.eligible_head
-                and _verified_reuse_context(root, reuse_context.measured_head, git_query=git_query)
+                and _verified_reuse_context(root, reuse_context.measured_head, git_query=git_query,
+                                        allow_test_changes=reuse_context.artifact_equivalence)
                 == reuse_context, "reuse HEAD or source differs")
         head = reuse_context.measured_head
     attempts = _objects(bundle.manifest["attempts"], "viewport attempts")
@@ -2786,7 +2789,7 @@ def verify_source_reuse(directory: Path, root: Path, measured_manifest_sha256: s
     measured_head = _text(bundle.manifest.get("head"), "measured HEAD")
     eligible_head = git(root, "rev-parse", "HEAD", git_query=git_query).strip()
     def source_context() -> object:
-        return _verified_reuse_context(root, measured_head, git_query=git_query)
+        return _verified_reuse_context(root, measured_head, git_query=git_query, allow_test_changes=True)
     context = source_context()
     measured = _verify(directory, root, git_query=git_query, require_catalog=True,
                        reuse_context=context)
@@ -2801,12 +2804,36 @@ def verify_source_reuse(directory: Path, root: Path, measured_manifest_sha256: s
     new_build = _validate_build_proof(current_bundle, root, build_ref, "candidate", git_query=git_query)
     for key in ("binarySha256", "lockSha256", "cargoExecutableSha256", "rustcExecutableSha256"):
         require(old_build[key] == new_build[key], "measured and current build differ: " + key)
+    from html_performance_source_reuse import SourceReuseContext
+    if not isinstance(context, SourceReuseContext):
+        raise ValueError("invalid source reuse context")
+    if context.artifact_equivalence:
+        for key in ("buildEnvironmentSha256", "toolVersions", "cargoConfigPins",
+                    "cargoLauncher", "rustcLauncher", "guardPython"):
+            require(old_build[key] == new_build[key], "measured and current build differ: " + key)
+        endpoint = _object(first.get("endpointRefs"), "measurement endpoint refs")
+        before = bundle.json(endpoint.get("before"))
+        tool = _object(before.get("toolContext"), "measurement tool context")
+        environment = dict(os.environ)
+        environment["GIT_OPTIONAL_LOCKS"] = "0"
+        encoded = json.dumps(environment, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        require(tool.get("environmentSha256") == hashlib.sha256(encoded.encode()).hexdigest()
+                and tool.get("platform") == platform.platform() and tool.get("cpuCount") == os.cpu_count(),
+                "measurement execution environment differs")
     require(new_build["head"] == eligible_head and source_context() == context
             and sha256(directory / "bundle.json") == measured_manifest_sha256
             and sha256(build_directory / "bundle.json") == build_manifest_sha256,
             "source changed during reuse validation")
-    return {"measuredHead": measured_head, "eligibleHead": eligible_head,
-            "reuseEligibility": True, "measuredResult": measured}
+    result: JsonObject = {"measuredHead": measured_head, "eligibleHead": eligible_head,
+                          "reuseEligibility": True, "measuredResult": measured}
+    if context.artifact_equivalence:
+        result.update({"reuseKind": "test-source-artifact-equivalence-v1",
+                       "measuredManifestSha256": measured_manifest_sha256,
+                       "currentBuildManifestSha256": build_manifest_sha256,
+                       "currentBuildArtifactPath": build_artifact_path,
+                       "currentBuildArtifactSha256": build_artifact_sha256,
+                       "binarySha256": new_build["binarySha256"]})
+    return result
 
 
 def _verify_catalog_diagnostic(directory: Path, root: Path, *,
@@ -2841,6 +2868,37 @@ def latest_acquisition_generation(runs: list[JsonObject]) -> JsonObject:
     return latest[0]
 
 
+def _require_acquisition_jobs(jobs: JsonObject, run_id: int) -> list[JsonObject]:
+    rows = _objects(jobs["jobs"], "CI jobs")
+    require(jobs["total_count"] == len(rows), "incomplete current CI jobs")
+    for name in ("Test and Build (ubuntu-latest, linux64)", "Test and Build (macos-15, mac-arm64)",
+                 "Test and Build (windows-latest, win64)", "Native paired HTML time and RSS nonregression"):
+        matches = [job for job in rows if job["name"] == name]
+        require(len(matches) == 1 and matches[0]["run_id"] == run_id
+                and matches[0]["status"] == "completed" and matches[0]["conclusion"] == "success",
+                f"current producer dependency did not succeed: {name}")
+    return rows
+
+
+def _completed_pr_binding(run: JsonObject, repository: str, head: str) -> tuple[int, str] | None:
+    if run.get("event") != "pull_request":
+        return None
+    repo, bindings = run.get("repository"), run.get("pull_requests")
+    if (not isinstance(repo, dict) or repo.get("full_name") != repository
+            or not isinstance(bindings, list) or len(bindings) != 1
+            or not isinstance(bindings[0], dict)):
+        return None
+    binding = bindings[0]
+    number, base, pr_head = binding.get("number"), binding.get("base"), binding.get("head")
+    if (type(number) is not int or number <= 0 or not isinstance(base, dict)
+            or not isinstance(pr_head, dict) or pr_head.get("sha") != head):
+        return None
+    base_sha = base.get("sha")
+    if not isinstance(base_sha, str) or re.fullmatch(r"[a-f0-9]{40}", base_sha) is None:
+        return None
+    return number, base_sha
+
+
 
 
 def acquire(directory: Path, root: Path, repository: str, current_producer: bool = False, *,
@@ -2870,11 +2928,7 @@ def acquire(directory: Path, root: Path, repository: str, current_producer: bool
         require(run["id"] == run_id and run["run_attempt"] == attempt and run["event"] == "pull_request" and run["path"] == ".github/workflows/test-and-build.yml" and _object(run["repository"], "CI repository")["full_name"] == repository and _object(run["head_repository"], "CI head repository")["full_name"] == repository, "current CI generation identity mismatch")
         require(any(binding["number"] == pull["number"] and _object(binding["head"], "CI PR head")["sha"] == head and _object(binding["base"], "CI PR base")["sha"] == pull_base["sha"] for binding in _objects(run["pull_requests"], "CI PR bindings")), "current CI PR head/base binding mismatch")
         jobs = api(f"repos/{repository}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100")
-        job_rows = _objects(jobs["jobs"], "CI jobs")
-        require(jobs["total_count"] == len(job_rows), "incomplete current CI jobs")
-        for name in ("Test and Build (ubuntu-latest, linux64)", "Test and Build (macos-15, mac-arm64)", "Test and Build (windows-latest, win64)", "Native paired HTML time and RSS nonregression"):
-            matches = [job for job in job_rows if job["name"] == name]
-            require(len(matches) == 1 and matches[0]["run_id"] == run_id and matches[0]["status"] == "completed" and matches[0]["conclusion"] == "success", f"current producer dependency did not succeed: {name}")
+        job_rows = _require_acquisition_jobs(jobs, run_id)
     else:
         snapshot = api(f"repos/{repository}/actions/workflows/test-and-build.yml/runs?head_sha={head}&per_page=100")
         runs = _objects(snapshot["workflow_runs"], "workflow runs")
@@ -2900,10 +2954,42 @@ def acquire(directory: Path, root: Path, repository: str, current_producer: bool
         return latest_acquisition_generation(rows)
     if current_producer:
         require(current_latest() == run, "current producer is not latest exact-PR CI generation")
+        from local_html_performance_evidence import verify_from_api
+        if verify_from_api(repository, _integer(pull["number"], "PR number"),
+                           _text(pull_base["sha"], "PR base"), head):
+            require(current_latest() == run, "current producer generation changed")
+            directory.mkdir(parents=True)
+            (directory / "acquisition.json").write_text(json.dumps({
+                "kind": "owner-local-html-performance", "head": head, "runId": run["id"],
+                "runAttempt": run["run_attempt"],
+            }))
+            return {"head": head, "kind": "owner-local-html-performance", "conditions": 84}
+    elif (pr_binding := _completed_pr_binding(run, repository, head)) is not None:
+        number, base = pr_binding
+        from local_html_performance_evidence import verify_from_api
+        if verify_from_api(repository, number, base, head):
+            run_id = _integer(run.get("id"), "CI run id")
+            attempt = _integer(run.get("run_attempt"), "CI attempt")
+            _require_acquisition_jobs(api(f"repos/{repository}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100"), run_id)
+            latest = api(f"repos/{repository}/actions/runs/{run_id}")
+            require(current_latest() == run and all(latest.get(key) == run.get(key) for key in
+                    ("id", "head_sha", "run_attempt", "status", "conclusion", "event", "pull_requests")),
+                    "completed CI generation changed")
+            require(verify_from_api(repository, number, base, head),
+                    "completed CI local evidence changed")
+            directory.mkdir(parents=True)
+            (directory / "acquisition.json").write_text(json.dumps({
+                "kind": "owner-local-html-performance", "head": head, "runId": run_id,
+                "runAttempt": attempt,
+            }))
+            return {"head": head, "kind": "owner-local-html-performance", "conditions": 84}
     artifact_snapshot = api(f"repos/{repository}/actions/runs/{run['id']}/artifacts?per_page=100")
     artifacts = _objects(artifact_snapshot["artifacts"], "CI artifacts")
     require(artifact_snapshot["total_count"] == len(artifacts), "incomplete artifact page")
     matches = [a for a in artifacts if a["name"] == f"html-performance-paired-{head}-{run['id']}-{run['run_attempt']}" and a["expired"] is False]
+    if current_producer and not matches:
+        from local_html_performance_evidence import require_fresh_measurement_if_local_expired
+        require_fresh_measurement_if_local_expired(job_rows)
     require(len(matches) == 1, "one immutable current-source performance artifact required")
     directory.mkdir(parents=True)
     archive = directory / "artifact.zip"

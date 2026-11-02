@@ -108,6 +108,24 @@ class ReuseRequestTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "inside repository tmp"):
             cli.verify_reuse_request(self.root / "outside.json", self.root)
 
+    def test_artifact_eligibility_is_immutable_and_revalidated(self) -> None:
+        result = {"measuredHead": "old", "eligibleHead": "new",
+                  "reuseKind": "test-source-artifact-equivalence-v1", "binarySha256": "a" * 64}
+        with patch.object(gate, "verify_source_reuse", return_value=result):
+            cli.create_request(self.request, self.output, self.root)
+            stored = json.loads(self.output.read_text())
+            self.assertEqual(stored["schema"], cli.ELIGIBILITY_SCHEMA)
+            self.assertEqual(stored["result"], result)
+            self.assertEqual(cli.verify_reuse_request(self.output, self.root), result)
+            stored["result"]["binarySha256"] = "b" * 64
+            self.output.write_text(json.dumps(stored))
+            with self.assertRaisesRegex(ValueError, "stored eligibility differs"):
+                cli.verify_reuse_request(self.output, self.root)
+            stored["result"] = None
+            self.output.write_text(json.dumps(stored))
+            with self.assertRaisesRegex(ValueError, "stored eligibility differs"):
+                cli.verify_reuse_request(self.output, self.root)
+
 
 if __name__ == "__main__":
     unittest.main()

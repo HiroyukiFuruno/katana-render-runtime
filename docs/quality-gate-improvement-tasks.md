@@ -2,6 +2,11 @@
 
 ## 最新の再開地点（2026-11-02）
 
+- [/] 証跡再利用の統合はR7080静的foundation実0、R7081性能関連394/394実0（45.807秒）、R7082 macOS証跡/workflow96/96実0（11.318秒）、R7083検証対象登録654/654実0（590.67秒）。独立reviewのP1（completed PRでlocal証跡を使った際の手動preflight取得失敗）を修正し、PR binding不正・失効・API拒否・pushは従来artifact経路へfallback、local成功時は必須job/最新generation/OWNERを再照合。R7077型29件失敗、R7079登録失敗は元ログを保持し、wrapperのtest実行分岐が不変であることをレビューしてpinを更新した。正式84の実証跡・実GitHub/CIでの受入は未完。
+
+- [/] R7076は5f7915caの性能26/84条件を収集・検証済み、残58。実1・1534.822秒の原因はBatchBudgetExhaustedで、formalAccepted=false。全84合格ではない。R7075の20条件から6条件増加。原結果を保持し、新sourceへ遡及認定しない。
+- [ ] 同じ検査を不要に反復しないため、性能結果のtest-only source適格性保存と、既存OWNER認証を使うHTML84ローカル証跡のCI/preflight接続を統合中。R7077で静的foundationを先行実行。新validator導入以前の26条件は過去の原結果として保持し、修正後の正式合格とは区別する。固定sourceによる限定test分類・SDK byte一致・実build proof・入力/資源/font/環境/判定不変・不変eligibilityを維持し、原receiptを上書きしない。CIは証跡不在/不正なら全測定、途中失効ならfail closedとrequired job再実行。正式84による統合動作・完全gateは未検証。
+
 - [/] 空batch再開の修正はR7062 strict型185files実0、R7063静的foundation実0（重複の未承認clone0）、R7064性能関連378/378実0（43.974秒）。連続空batchのcatalog役割をv2 receiptで明示継承し、v1読取・source/environment同一性・実build proof検証を維持。独立レビューの連続再開P1を修正後、新P0/P1なし。R7061の型2件失敗は元ログのまま保持。実SDKを使う新sourceの全84受入は未完であり、unit下位proof stubの成功を実証跡の統合成功と扱わない。
 - [/] R7055正式新CPU方式のfirst1は552.010秒後に実1、complete0。candidateのCPU duringが26.2/38.6/32.1%で3試行とも25%超過。R7057の別診断は3worker実0・worker CPU寄与0.30～0.38%・host15.1～29.6%で、当該診断では対象以外の負荷が大きいが前run原因の断定や描画合格には使わない。R7058はSDK再利用を試したが、完了0のclosed batchにcatalog役割宣言がない処理不備で130.94秒後に実1。元証跡は保存し、空batchの再開とA→B→Cの参照継承・改ざん拒否を修正中。独立レビューP1を修正後、新具体的P0/P1なし、関連検査はこれから回収する。source同一性の条件を緩めず、修正前証跡を修正後sourceへ再認定しない。
 - [/] CI observer配布準備: R7056 GN runtime dependency調査実0、4,517unique filesが全存在・619,386,296bytes。R7059はKRR管理外payloadへ既存Chromiumのlicense generatorを実行し実0、LICENSE.headless_shell 2,149,992bytesを生成した。R7060の動的依存調査実0。archive・配布先・CI接続・実CIの84条件は未完。外部repoや私有原本をGit・公開へ追加していない。

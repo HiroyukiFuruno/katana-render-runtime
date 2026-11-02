@@ -67,6 +67,14 @@ class HtmlPerformanceRunnerTest(unittest.TestCase):
             *arguments,
         ])
 
+    def test_local_proof_dispatch_preserves_arguments(self) -> None:
+        arguments = ["--repository", "owner/repo", "--pr", "7", "--bundle", "/tmp/bundle"]
+        self.assertEqual(runner._command("local-proof", arguments), [
+            sys.executable,
+            str(runner.ROOT / "scripts/release/local_html_performance_evidence.py"),
+            *arguments,
+        ])
+
     def test_reuse_dispatch_preserves_arguments(self) -> None:
         arguments = ["--repo", "/repo", "--request-output", "/repo/tmp/request.json"]
         self.assertEqual(runner._command("reuse", arguments), [

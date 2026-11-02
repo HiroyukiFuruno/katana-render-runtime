@@ -1,6 +1,8 @@
 """既存paired schemaの境界・欠落・改ざんを検証する単体テスト。"""
 from __future__ import annotations
 
+import local_html_performance_evidence as local_html
+
 import hashlib
 import importlib.util
 import io
@@ -2502,6 +2504,21 @@ class PerformanceAcquisitionTest(unittest.TestCase):
         elif case == "foreign_repository":
             json_object_at(run, "head_repository")["full_name"] = "foreign/repo"
         producer = case.startswith("producer_")
+        manual_local = case.startswith("manual_local_")
+        if manual_local:
+            run.update(event="pull_request", repository={"full_name": self.repository},
+                       pull_requests=[{"number": 7, "head": {"sha": self.fixture.head},
+                                       "base": {"sha": "b" * 40}}])
+            if case == "manual_local_wrong_head":
+                json_object_at(run, "pull_requests", 0, "head")["sha"] = "c" * 40
+            if case == "manual_local_no_pr":
+                run["pull_requests"] = []
+            if case == "manual_local_multiple_pr":
+                run["pull_requests"] = [json_object_at(run, "pull_requests", 0)] * 2
+            if case == "manual_local_wrong_repo":
+                run["repository"] = {"full_name": "foreign/repo"}
+            if case == "manual_local_push":
+                run["event"] = "push"
         environment: dict[str, str] = {}
         if producer:
             run.update(head_sha="a" * 40, status="in_progress", conclusion=None, event="pull_request", repository={"full_name": self.repository}, pull_requests=[{"number": 7, "head": {"sha": self.fixture.head}, "base": {"sha": "b" * 40}}])
@@ -2567,7 +2584,8 @@ class PerformanceAcquisitionTest(unittest.TestCase):
                     payload = {"total_count": 1, "workflow_runs": [new]} if case.endswith("same_id_rerun") else {"total_count": 2, "workflow_runs": [run, new]}
             elif path.endswith("/attempts/1/jobs?per_page=100"):
                 jobs: list[JsonObject] = [{"name": name, "run_id": 101, "status": "completed", "conclusion": "success"} for name in ("Test and Build (ubuntu-latest, linux64)", "Test and Build (macos-15, mac-arm64)", "Test and Build (windows-latest, win64)", "Native paired HTML time and RSS nonregression")]
-                if case == "producer_skipped_dependency":
+                if case in {"producer_skipped_dependency", "producer_local_skipped_dependency",
+                            "manual_local_skipped_dependency"}:
                     jobs[-1]["conclusion"] = "skipped"
                 payload = {"total_count": len(jobs), "jobs": jobs}
             elif path.endswith("/artifacts?per_page=100"):
@@ -2588,6 +2606,8 @@ class PerformanceAcquisitionTest(unittest.TestCase):
         candidate_build = {"binarySha256": candidate["binary_sha256"],
                            "sourceSnapshotSha256": candidate["source_snapshot_sha256"]}
         with patch.object(gate.subprocess, "check_output", synthetic_api), \
+             patch.object(local_html, "verify_from_api", return_value=(case.startswith("producer_local")
+                 or (manual_local and case not in {"manual_local_expired", "manual_local_api_failure"}))), \
              patch.object(attestation, "verify_remote_attestation"), \
              patch.object(remote_evidence, "validate_producer_verification_receipt", return_value={}), \
              patch.object(canonical_gate, "_require_catalog_attempt_set"), \
@@ -2650,6 +2670,38 @@ class PerformanceAcquisitionTest(unittest.TestCase):
     def test_current_producer_success_before_workflow_completion(self) -> None:
         self.acquire_case("producer_success")
         self.assertEqual(gate._verify_legacy_diagnostic(self.destination, self.fixture.root)["checks"], 60)
+
+    def test_current_producer_can_use_verified_local_evidence(self) -> None:
+        self.acquire_case("producer_local_success")
+        self.assertEqual(gate.read_json(self.destination / "acquisition.json")["kind"],
+                         "owner-local-html-performance")
+        self.assertFalse(any(path.endswith("/artifacts?per_page=100") for path in self.calls))
+
+    def test_completed_pr_can_use_verified_local_evidence(self) -> None:
+        self.acquire_case("manual_local_success")
+        self.assertEqual(gate.read_json(self.destination / "acquisition.json")["kind"],
+                         "owner-local-html-performance")
+        self.assertFalse(any(path.endswith("/artifacts?per_page=100") for path in self.calls))
+
+    def test_completed_pr_local_proof_requires_matching_pr_and_successful_jobs(self) -> None:
+        with self.assertRaises(ValueError):
+            self.acquire_case("manual_local_skipped_dependency")
+        self.assertFalse(self.destination.exists())
+
+    def test_completed_pr_expired_or_unavailable_proof_uses_artifact(self) -> None:
+        for case in ("manual_local_expired", "manual_local_api_failure", "manual_local_push",
+                     "manual_local_wrong_head", "manual_local_no_pr", "manual_local_multiple_pr",
+                     "manual_local_wrong_repo"):
+            with self.subTest(case=case):
+                self.destination = self.fixture.root.parent / case
+                self.calls.clear()
+                self.acquire_case(case)
+                self.assertTrue(any(path.endswith("/artifacts?per_page=100") for path in self.calls))
+
+    def test_local_evidence_still_requires_every_completed_dependency(self) -> None:
+        with self.assertRaisesRegex(ValueError, "dependency did not succeed"):
+            self.acquire_case("producer_local_skipped_dependency")
+        self.assertFalse(self.destination.exists())
 
     def test_current_producer_requires_exact_pr_head(self) -> None:
         with self.assertRaisesRegex(ValueError, "PR head/base binding"):
@@ -2739,6 +2791,25 @@ class PerformanceJsonBoundaryTest(unittest.TestCase):
             self.assertNotEqual(acquire.call_args.args[0], existing)
             self.assertEqual(acquire.call_args.args[1:3], (root, "owner/repo"))
             local_verify.assert_not_called()
+
+    def test_local_acquisition_marker_is_reauthenticated_in_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            existing = root / "evidence"
+            existing.mkdir()
+            (existing / "acquisition.json").write_text('{"kind":"owner-local-html-performance"}')
+            argv = ["verify_html_performance_evidence.py", "--repo", str(root),
+                    "--evidence-dir", str(existing), "--repository", "owner/repo"]
+            environment = {"GITHUB_JOB": "preflight", "GITHUB_EVENT_NAME": "pull_request"}
+            with patch.object(gate.sys, "argv", argv), patch.dict(os.environ, environment), \
+                 patch.object(gate.sys, "stdout", io.StringIO()), \
+                 patch.object(gate, "acquire", return_value={"kind": "owner-local-html-performance"}) as acquire:
+                self.assertEqual(gate.main(), 0)
+            self.assertTrue(acquire.call_args.args[3])
+            with patch.object(gate.sys, "argv", argv), patch.dict(os.environ, environment), \
+                 patch.object(gate.sys, "stderr", io.StringIO()), \
+                 patch.object(gate, "acquire", side_effect=ValueError("expired")):
+                self.assertEqual(gate.main(), 1)
 
     def test_candidate_build_cli_emits_only_build_identity_pins(self) -> None:
         expected: JsonObject = {

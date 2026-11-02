@@ -647,9 +647,12 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 360
     permissions:
+      actions: read
       attestations: write
       contents: read
       id-token: write
+      issues: read
+      pull-requests: read
     steps:
       - name: Checkout exact measurement source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -661,40 +664,66 @@ jobs:
         id: source
         run: echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+      - name: Verify optional local HTML performance evidence
+        id: html_local_proof
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/release/local_html_performance_evidence.py --verify
+          --repository "${{ github.repository }}"
+          --pr "${{ github.event.pull_request.number }}"
+          --base "${{ github.event.pull_request.base.sha }}"
+          --head "${{ github.event.pull_request.head.sha }}"
+
+      - name: Report local HTML performance evidence
+        if: steps.html_local_proof.outcome == 'success' && steps.html_local_proof.outputs.reuse == 'true'
+        run: echo 'HTML performance reused from verified maintainer evidence.'
+
       - name: Install Rust toolchain
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
 
       - name: Install just
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
         uses: taiki-e/install-action@f9ed83c1523674ebae4768d47169d3068663dec4 # just
 
       - name: Install Bun
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
 
       - name: Install JavaScript dependencies
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
         run: bun install --frozen-lockfile
 
       - name: Set up Python 3.13
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.13'
 
       - name: Install Python analysis tools
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.13.0"
           enable-cache: true
 
       - name: Initialize fixed capacity reference before interaction Cargo
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
         run: python3 scripts/build/initialize_ci_capacity_state.py --root "$PWD"
 
       - name: Verify real interaction state for measurement fixture
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
         run: just browser-install html-interaction-check
 
       - name: Capture all 84 HTML catalog conditions
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
         id: html84
         run: |
           output_root="tmp/html-performance-stage90/${{ github.run_id }}-${{ github.run_attempt }}"
@@ -703,9 +732,11 @@ jobs:
           echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
 
       - name: Measure all 84 catalog conditions against baseline
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
         run: just html-performance-evidence-produce "${{ steps.html84.outputs.manifest }}"
 
       - name: Upload immutable source and run bound paired evidence
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
         id: paired_performance_upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -715,13 +746,14 @@ jobs:
           retention-days: 14
 
       - name: Attest immutable paired performance artifact
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: html-performance-paired-${{ steps.source.outputs.head }}-${{ github.run_id }}-${{ github.run_attempt }}
           subject-digest: sha256:${{ steps.paired_performance_upload.outputs.artifact-digest }}
 
       - name: Upload failed measurement diagnostics
-        if: failure()
+        if: failure() && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: html-performance-diagnostics-${{ steps.source.outputs.head }}-${{ github.run_id }}-${{ github.run_attempt }}
