@@ -28,7 +28,7 @@ RUNTIME_CAS_PRODUCER = "runtime-unused-fragment-loader"
 RUNTIME_CAS_TASK = "krr:runtime-unused-fragment-loader-producer"
 RUNTIME_CAS_DIAGNOSTIC_TARGET = "krr:runtime-script-cas-diagnostic"
 RUNTIME_CAS_OPERATION_ENV = "KRR_RUNTIME_CAS_OPERATION"
-RUNTIME_CAS_FIXED_OPERATIONS = ("validate-all", "ensure-all", "host-verify")
+RUNTIME_CAS_FIXED_OPERATIONS = ("validate-all", "ensure-all", "host-verify", "identity-all")
 RUNTIME_CAS_RECEIPT = (
     "tmp/quality/runtime-script-results/runtime-unused-fragment-loader.json"
 )
@@ -236,6 +236,24 @@ def _runtime_cas_has_dedicated_task_environment(environment: Mapping[str, str]) 
     )
 
 
+def _runtime_cas_identity_records(payload: dict[str, object]) -> dict[str, dict[str, object]]:
+    identities = payload.get("identities")
+    if payload.get("schema") != "krr-runtime-script-identities-v1" or not isinstance(identities, list):
+        raise RuntimeError("runtime CAS identity set payload schema is invalid")
+    records: dict[str, dict[str, object]] = {}
+    for value in identities:
+        identity = moon_json_object(value)
+        name = identity.get("producer")
+        if identity.get("schema") != "krr-runtime-script-identity-v2" or not isinstance(name, str):
+            raise RuntimeError("runtime CAS identity set member is invalid")
+        if name in records:
+            raise RuntimeError("runtime CAS identity set producer is duplicated")
+        records[name] = identity
+    if set(records) != set(RUNTIME_UNUSED_LEAF_IDS):
+        raise RuntimeError("runtime CAS identity set producer inventory differs")
+    return records
+
+
 def _runtime_cas_operation_result(path: Path, operation: str) -> dict[str, object]:
     kind, producer = _runtime_cas_operation_spec(operation)
     lines = path.read_bytes().decode("utf-8").splitlines()
@@ -273,7 +291,9 @@ def _runtime_cas_operation_result(path: Path, operation: str) -> dict[str, objec
     if len(payloads) != 1:
         raise RuntimeError("runtime CAS operation did not emit exactly one JSON object")
     payload = payloads[0]
-    if kind == "identity":
+    if kind == "identity-all":
+        _runtime_cas_identity_records(payload)
+    elif kind == "identity":
         if (
             payload.get("schema") != "krr-runtime-script-identity-v2"
             or payload.get("producer") != producer
@@ -292,15 +312,14 @@ def run_runtime_cas_operation(operation: str) -> int:
     kind, producer = _runtime_cas_operation_spec(operation)
     if not _runtime_cas_has_dedicated_task_environment(os.environ):
         raise RuntimeError("runtime CAS operation requires its dedicated Moon task")
-    if kind == "identity":
+    if kind in {"identity", "identity-all"}:
         command = [
             sys.executable,
             str(ROOT / "scripts/release/runtime_script_identity.py"),
             "--repo",
             str(ROOT),
-            "--producer",
-            str(producer),
         ]
+        command.extend(["--producer", str(producer)] if kind == "identity" else ["--all"])
     elif kind in {"validate-all", "ensure-all"}:
         command = [
             sys.executable,
@@ -439,6 +458,26 @@ def _runtime_cas_has_cached_hydration(operations: object) -> bool:
         if meta.get("type") == "output-hydration" and operation.get("status") == "cached":
             return True
     return False
+
+
+def _runtime_cas_has_verified_seed(action: object) -> bool:
+    if not isinstance(action, dict) or action.get("status") != "passed":
+        return False
+    operations = action.get("operations")
+    if not isinstance(operations, list):
+        return False
+    relevant = [moon_json_object(value) for value in operations]
+    for kind in ("task-execution", "archive-creation"):
+        matches = [item for item in relevant if moon_json_object(item.get("meta")).get("type") == kind]
+        if len(matches) != 1 or matches[0].get("status") != "passed":
+            return False
+        if kind == "task-execution":
+            meta = moon_json_object(matches[0].get("meta"))
+            if type(meta.get("exitCode")) is not int or meta.get("exitCode") != 0 or meta.get("command") != (
+                f"just runtime-unused-script-verify-run {RUNTIME_CAS_PRODUCER}"
+            ):
+                return False
+    return True
 
 
 def _runtime_cas_raw_directories(raw_root: Path) -> set[str]:
@@ -632,10 +671,10 @@ class RuntimeScriptCasDiagnostic:
         return exit_code, _runtime_cas_operation_result(stdout, operation)
 
     def _identity_set(self, label: str) -> dict[str, dict[str, object]]:
-        return {
-            producer: self._identity_operation(f"{label}-{producer}", producer)
-            for producer in RUNTIME_UNUSED_LEAF_IDS
-        }
+        exit_code, report = self._moon_operation(label, "identity-all")
+        if exit_code != 0:
+            raise RuntimeError("identity collection failed for fixed producers")
+        return _runtime_cas_identity_records(report)
 
     def _identity_operation(self, label: str, producer: str) -> dict[str, object]:
         exit_code, report = self._moon_operation(label, f"identity:{producer}")
@@ -946,7 +985,7 @@ class RuntimeScriptCasDiagnostic:
             seed_log = _runtime_cas_new_producer_log(
                 raw_root, raw_before, _runtime_cas_expected_command()
             )
-        else:
+        elif not _runtime_cas_has_verified_seed(seed.get("action")):
             self._assert_hydrated(seed, "repaired-epoch-seed")
         self._validate_all("validate-repaired-epoch-seed")
         seeded = _runtime_cas_snapshot_files(self.outputs)
@@ -1060,14 +1099,8 @@ class RuntimeScriptCasDiagnostic:
             ):
                 raise RuntimeError("ensure-all modified an unrelated trusted anchor")
         identities_after = self._identity_set("identity-after")
-        for producer in RUNTIME_UNUSED_LEAF_IDS:
-            before = identities_before[producer]
-            after = identities_after[producer]
-            if any(
-                before.get(field) != after.get(field)
-                for field in ("identitySha256", "inputSha256", "sourceManifestSha256")
-            ):
-                raise RuntimeError("runtime-script source identity changed during diagnostic")
+        if self._identity_pins(identities_before) != self._identity_pins(identities_after):
+            raise RuntimeError("runtime-script source identity changed during diagnostic")
         return {
             "selectedFreshEpoch": True,
             "unrelatedReceiptsUnchanged": True,

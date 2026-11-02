@@ -16,6 +16,151 @@ def _write(path: Path, value: object) -> dict[str, str]:
     return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
+class ActiveReferenceTest(unittest.TestCase):
+    def history(self, active: str = "first") -> dict[str, object]:
+        record = {
+            "id": "first", "sourceCommit": "1" * 40, "bundleManifestSha256": "2" * 64,
+            "evidence": {"verifierStdoutSha256": "3" * 64},
+            "scope": {"candidateConditions": 84},
+            "measuredAcceptance": {"verifierExitCode": 0, "performanceNonregression": True,
+                                   "outputFontIdentityEquivalence": "established",
+                                   "htmlMinimumScore": 92, "htmlScoreThreshold": 90},
+            "candidatePhaseStatistics": {name: {"maxSampleSeconds": 1.0} for name in (
+                "cold_open", "warm_open", "re_display", "full_y", "post_operation", "same_session_resize")},
+            "referenceBuild": {"schema": "krr-html-performance-reference-build-pins-v1",
+                               "buildArtifactSchema": "krr-html-performance-build-artifact-v3",
+                               **{field: "4" * 64 for field in reference.REFERENCE_BUILD_FIELDS}},
+        }
+        return {"schema": "krr-html-performance-history-v1", "activeReferenceRecordId": active,
+                "records": [record]}
+
+    def test_selection_reads_the_requested_commit_and_rejects_missing_current_history(self) -> None:
+        old = "a" * 40
+        current = "b" * 40
+        calls: list[tuple[str, ...]] = []
+        def query(_root: Path, args: tuple[str, ...]) -> str:
+            calls.append(args)
+            if args[0] == "ls-tree":
+                return reference.HISTORY_PATH if args[2] == current else ""
+            return json.dumps(self.history())
+        selected = reference.active_reference_at_commit(Path("/fixture"), current, query)
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected.record_id if selected else None, "first")
+        self.assertIsNone(reference.active_reference_at_commit(Path("/fixture"), old, query,
+                                                               allow_legacy_missing=True))
+        with self.assertRaisesRegex(ValueError, "absent"):
+            reference.active_reference_at_commit(Path("/fixture"), old, query)
+        self.assertIn(("show", f"{current}:{reference.HISTORY_PATH}"), calls)
+
+    def test_selection_uses_each_measured_commits_active_record(self) -> None:
+        old, current = "a" * 40, "b" * 40
+        first = self.history()
+        later = self.history()
+        rows = later["records"]
+        assert isinstance(rows, list) and isinstance(rows[0], dict)
+        second = dict(rows[0])
+        second["id"] = "second"
+        second["sourceCommit"] = "5" * 40
+        rows.append(second)
+        later["activeReferenceRecordId"] = "second"
+        def query(_root: Path, args: tuple[str, ...]) -> str:
+            if args[0] == "ls-tree":
+                return reference.HISTORY_PATH
+            return json.dumps(first if args[1].startswith(old + ":") else later)
+        previous = reference.active_reference_at_commit(Path("/fixture"), old, query)
+        selected = reference.active_reference_at_commit(Path("/fixture"), current, query)
+        self.assertIsNotNone(previous)
+        self.assertIsNotNone(selected)
+        self.assertEqual(previous.record_id if previous else None, "first")
+        self.assertEqual(selected.record_id if selected else None, "second")
+
+    def test_selection_rejects_unaccepted_and_invalid_pins(self) -> None:
+        def history_query(value: dict[str, object]) -> reference.GitQuery:
+            def query(_root: Path, args: tuple[str, ...]) -> str:
+                return reference.HISTORY_PATH if args[0] == "ls-tree" else json.dumps(value)
+            return query
+
+        cases = ("missing-active", "duplicate", "failed", "missing-pin", "slow")
+        for case in cases:
+            with self.subTest(case=case):
+                history = self.history("missing" if case == "missing-active" else "first")
+                records = history["records"]
+                assert isinstance(records, list) and isinstance(records[0], dict)
+                record = records[0]
+                if case == "duplicate":
+                    records.append(dict(record))
+                elif case == "failed":
+                    acceptance = record["measuredAcceptance"]
+                    assert isinstance(acceptance, dict)
+                    acceptance["performanceNonregression"] = False
+                elif case == "missing-pin":
+                    pins = record["referenceBuild"]
+                    assert isinstance(pins, dict)
+                    pins.pop("binarySha256")
+                elif case == "slow":
+                    phases = record["candidatePhaseStatistics"]
+                    assert isinstance(phases, dict) and isinstance(phases["cold_open"], dict)
+                    phases["cold_open"]["maxSampleSeconds"] = 3.0
+                with self.assertRaises(ValueError):
+                    reference.active_reference_at_commit(Path("/fixture"), "b" * 40, history_query(history))
+
+    def test_history_wrapper_binds_selected_candidate_and_rejects_role_or_pin_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            binary = root / "binary"
+            binary.write_bytes(b"binary")
+            binary_pin = {"path": str(binary), "sha256": hashlib.sha256(binary.read_bytes()).hexdigest()}
+            snapshot_pin = _write(root / "snapshot.json", {"records": []})
+            build_pin = _write(root / "build.json", {"arm": "candidate"})
+            context_pin = _write(root / "context.json", {"inputs": [binary_pin]})
+            manifest_pin = _write(root / "bundle.json", {
+                "schema": "krr-html-performance-release-bundle-v1", "head": "1" * 40})
+            stdout_pin = _write(root / "stdout.json", {"acceptance": True})
+            pins = {field: "4" * 64 for field in reference.REFERENCE_BUILD_FIELDS}
+            pins.update({"binarySha256": binary_pin["sha256"], "sourceSnapshotSha256": snapshot_pin["sha256"],
+                         "buildArtifactSha256": build_pin["sha256"], "contextBeforeSha256": context_pin["sha256"]})
+            selection = reference.ActiveReference("first", "1" * 40, manifest_pin["sha256"],
+                                                  stdout_pin["sha256"], pins)
+            wrapper: dict[str, object] = {
+                "schema": "krr-html-performance-reference-history-v1", "recordId": "first",
+                "role": "reference-history-first", "referenceKind": "accepted-history-candidate",
+                "originalArm": "candidate", "publishedSdk": False, "parentHead": "1" * 40,
+                "sourceBundleManifest": manifest_pin, "verifierStdout": stdout_pin,
+                "originalBuildArtifact": build_pin, "sourceSnapshot": snapshot_pin,
+                "frozenBinary": binary_pin, "parentContextBefore": context_pin,
+            }
+            wrapper_path = root / "wrapper.json"
+            validated: dict[str, object] = {"head": "1" * 40, **pins}
+            def resolve(value: object, _label: str) -> Path:
+                assert isinstance(value, dict)
+                path = value.get("path")
+                assert isinstance(path, str)
+                return Path(path)
+            def validate(_value: object, _selection: reference.ActiveReference) -> dict[str, object]:
+                return validated
+            for field, replacement in ((None, None), ("role", "reference-parent-371274ed"),
+                                       ("originalArm", "baseline"), ("recordId", "other")):
+                with self.subTest(field=field):
+                    current = dict(wrapper)
+                    if field is not None:
+                        current[field] = replacement
+                    _write(wrapper_path, current)
+                    if field is None:
+                        result = reference.load_history_reference_proof(
+                            wrapper_path, selection, file_resolver=resolve, validate_build=validate)
+                        self.assertEqual(result.role, "reference-history-first")
+                        self.assertEqual(result.binary_sha256, binary_pin["sha256"])
+                    else:
+                        with self.assertRaises(ValueError):
+                            reference.load_history_reference_proof(
+                                wrapper_path, selection, file_resolver=resolve, validate_build=validate)
+            _write(wrapper_path, wrapper)
+            validated["binarySha256"] = "0" * 64
+            with self.assertRaisesRegex(ValueError, "validated build differs"):
+                reference.load_history_reference_proof(
+                    wrapper_path, selection, file_resolver=resolve, validate_build=validate)
+
+
 class ReferenceParentProofTest(unittest.TestCase):
     def test_loader_preserves_candidate_origin_and_parent_pins(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

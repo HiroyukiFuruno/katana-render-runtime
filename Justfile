@@ -323,11 +323,11 @@ runtime-asset-script-other-run:
     bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-rust-facts-host_test.ts ./scripts/runtime-bundles/runtime-rust-facts-host-freshness_test.ts ./scripts/runtime-bundles/runtime-mathjax-audit-evidence_test.ts
     python3 scripts/quality/moon_cache_contract_test.py --moon bun run moon
     bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/reference_score_test.ts ./scripts/drawio/official-runtime-determinism_test.ts ./scripts/drawio/official-source-fonts_test.ts
-    bun test --path-ignore-patterns 'tmp/**' ./scripts/html/reference-capture_test.ts ./scripts/html/fidelity-suite_test.ts ./scripts/html/scroll-coverage_test.ts ./scripts/html/toc-fidelity_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/html/reference-capture_test.ts ./scripts/html/fidelity-suite_test.ts ./scripts/html/scroll-coverage_test.ts ./scripts/html/performance-history_test.ts ./scripts/html/toc-fidelity_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/html/interaction-suite_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/html/visual-state-fidelity_test.ts ./scripts/html/dynamic-fidelity_test.ts ./scripts/html/interim-feature-results_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/html/harness-contract_test.ts ./scripts/html/stage-score_test.ts ./scripts/html/stage-score-suite_test.ts ./scripts/html/catalog-font-equivalence_test.ts ./scripts/html/chromium-font-trace_test.ts ./scripts/html/catalog-capture-producer-context_test.ts ./scripts/html/anonymized-fixture_test.ts ./scripts/html/actual-svg-font-request_test.ts ./scripts/html/compare-toc-evidence_test.ts
-    bun test --path-ignore-patterns 'tmp/**' ./crates/katana-render-runtime/src/renderer/backends/html_runtime/dom_bootstrap_test.js ./scripts/mermaid/class_reference_gate_test.ts ./scripts/mermaid/class_reference_integrity_test.ts ./scripts/mermaid/diagram_update_fixtures_test.ts ./scripts/mermaid/diagram_update_markdown_reference_test.ts ./scripts/mermaid/dom_css_font_variables_contract_test.ts ./scripts/mermaid/dom_css_priority_contract_test.ts ./scripts/mermaid/dom_plain_text_measure_contract_test.ts ./scripts/mermaid/dom_svg_bbox_visibility_contract_test.ts ./scripts/mermaid/managed_full_compare_test.ts ./scripts/mermaid/mermaid_pair_manifest_test.ts ./scripts/mermaid/native-cli-process_test.ts ./scripts/mermaid/native-source-manifest_test.ts ./scripts/mermaid/native_render_provenance_test.ts ./scripts/mermaid/native_frame_build_proof_test.ts ./scripts/mermaid/native_frame_evidence_test.ts ./scripts/mermaid/native_frame_capture_context_test.ts ./scripts/mermaid/native-render-batch_test.ts ./scripts/mermaid/official_reference_mode_test.ts ./scripts/mermaid/official_raw_metrics_diagnostic_test.ts ./scripts/mermaid/official_renderer_provenance_test.ts ./scripts/mermaid/raster_comparison_binding_test.ts ./scripts/mermaid/raster_producer_observation_test.ts ./scripts/mermaid/raster_production_binding_test.ts ./scripts/mermaid/rasterize_svg_fonts_test.ts ./scripts/mermaid/rasterize_svg_input_test.ts ./scripts/mermaid/reference_pair_repository_test.ts ./scripts/mermaid/reference_pair_strict_provenance_test.ts ./scripts/mermaid/reference_score_policy_test.ts ./scripts/mermaid/reference_svg_geometry_test.ts ./scripts/mermaid/split_markdown_fixtures_test.ts ./scripts/mermaid/strict_svg_external_images_test.ts ./scripts/mermaid/svg_normalizer_general_contract_test.ts ./scripts/mermaid/svg_sequence_activation_fixes_test.ts ./scripts/quality/duplication-check_test.ts ./scripts/mermaid/native_product_score_test.ts ./scripts/runtime-bundles/runtime-bundle-checks_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./crates/katana-render-runtime/src/renderer/backends/html_runtime/dom_bootstrap_test.js ./scripts/mermaid/class_reference_gate_test.ts ./scripts/mermaid/class_reference_integrity_test.ts ./scripts/mermaid/diagram_update_fixtures_test.ts ./scripts/mermaid/diagram_update_markdown_reference_test.ts ./scripts/mermaid/dom_css_font_variables_contract_test.ts ./scripts/mermaid/dom_css_priority_contract_test.ts ./scripts/mermaid/dom_plain_text_measure_contract_test.ts ./scripts/mermaid/dom_svg_bbox_visibility_contract_test.ts ./scripts/mermaid/managed_full_compare_test.ts ./scripts/mermaid/mermaid_pair_manifest_test.ts ./scripts/mermaid/native-cli-process_test.ts ./scripts/mermaid/native-source-manifest_test.ts ./scripts/mermaid/native_render_provenance_test.ts ./scripts/mermaid/native_frame_build_proof_test.ts ./scripts/mermaid/native_frame_evidence_test.ts ./scripts/mermaid/native_frame_capture_context_test.ts ./scripts/mermaid/native-render-batch_test.ts ./scripts/mermaid/official_reference_mode_test.ts ./scripts/mermaid/official_raw_metrics_diagnostic_test.ts ./scripts/mermaid/official_renderer_provenance_test.ts ./scripts/mermaid/raster_comparison_binding_test.ts ./scripts/mermaid/raster_producer_observation_test.ts ./scripts/mermaid/raster_production_binding_test.ts ./scripts/mermaid/rasterize_svg_fonts_test.ts ./scripts/mermaid/rasterize_svg_input_test.ts ./scripts/mermaid/svg-marker-browser-capture_test.ts ./scripts/mermaid/svg-marker-browser-diagnostic_test.ts ./scripts/mermaid/svg-marker-native-artifact_test.ts ./scripts/mermaid/reference_pair_repository_test.ts ./scripts/mermaid/reference_pair_strict_provenance_test.ts ./scripts/mermaid/reference_score_policy_test.ts ./scripts/mermaid/reference_svg_geometry_test.ts ./scripts/mermaid/split_markdown_fixtures_test.ts ./scripts/mermaid/strict_svg_external_images_test.ts ./scripts/mermaid/svg_normalizer_general_contract_test.ts ./scripts/mermaid/svg_sequence_activation_fixes_test.ts ./scripts/quality/duplication-check_test.ts ./scripts/mermaid/native_product_score_test.ts ./scripts/runtime-bundles/runtime-bundle-checks_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/mermaid/native_classic_capture_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/mermaid/native_cli_managed_build_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/mermaid/native_cli_managed_build_reader_test.ts
@@ -347,6 +347,11 @@ runtime-unused-script-regression-run:
 runtime-script-cas-diagnostic-run:
     python3 -m unittest discover -s scripts/quality -p runtime_script_moon_cas_test.py --failfast
     python3 scripts/quality/runtime_script_moon_cas_diagnostic.py --moon bun run moon
+
+# WHY: receiptが無い場合は既存の各検査を再実行し、診断本体はMoonの外から起動する。
+runtime-script-cas-diagnostic:
+    bun run moon run krr:runtime-unused-script-regression
+    just runtime-script-cas-diagnostic-run
 
 runtime-unused-script-producer-run producer="runtime-unused-script-regression":
     python3 scripts/release/runtime_script_cache_cli.py run --repo {{ quote(REPO_ROOT) }} --producer {{ quote(producer) }}
@@ -656,9 +661,20 @@ release-openspec-archive:
 html-performance-nonregression-check:
     {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap verify
 
+# Git管理されたHTML性能履歴から現行基準または指定recordを表示する。
+html-performance-history record_id='':
+    bun run scripts/html/performance-history-cli.ts --root {{quote(REPO_ROOT)}} {{if record_id == "" { "" } else { "--record-id " + quote(record_id) }}}
+
 # 同一SHAの完了した実測CIからimmutableな生計測証跡を取得する。
 html-performance-evidence-acquire:
     {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap verify --acquire
+
+# 元測定と現HEADのbuild proofを検証し、再利用要求を排他的に作る。
+html-performance-evidence-reuse measured_dir measured_manifest_sha256 current_build_dir current_build_manifest_sha256 current_build_artifact_path current_build_artifact_sha256 request_output:
+    {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap reuse --repo {{quote(REPO_ROOT)}} --measured-dir {{quote(measured_dir)}} --measured-manifest-sha256 {{quote(measured_manifest_sha256)}} --current-build-dir {{quote(current_build_dir)}} --current-build-manifest-sha256 {{quote(current_build_manifest_sha256)}} --current-build-artifact-path {{quote(current_build_artifact_path)}} --current-build-artifact-sha256 {{quote(current_build_artifact_sha256)}} --request-output {{quote(request_output)}}
+
+html-performance-evidence-promote evidence_dir promotion_evidence_dir run_id:
+    {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap promote --repo {{quote(REPO_ROOT)}} --evidence-dir {{quote(evidence_dir)}} --promotion-evidence-dir {{quote(promotion_evidence_dir)}} --run-id {{quote(run_id)}}
 
 # 既存catalog CLIで84条件のstage90 raw capture manifestを作る。
 html-performance-catalog-captures output_root prior_observation='' prior_finalized='' chrome_executable='' chrome_sha256='' font_observer='false':

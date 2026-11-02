@@ -28,6 +28,7 @@ from types import FrameType
 
 import produce_html_performance_evidence as typed_producer
 import html_performance_reference as reference
+import html_performance_source_materialization as source_materialization
 import verify_html_performance_evidence as gate
 
 producer = typed_producer
@@ -243,6 +244,14 @@ class CatalogProducerOperationTest(unittest.TestCase):
             self.assertEqual(arms[reference.REFERENCE_ROLE]["lock_sha256"], reference.PARENT_LOCK_SHA256)
             self.assertEqual(arms["candidate"]["source_snapshot_sha256"], "c" * 64)
             self.assertEqual(arms["candidate"]["lock_sha256"], gate.LOCK_SHA)
+            fresh_contract: gate.JsonObject = {"role": "fresh-history-source-record",
+                "armId": "fresh-history-source-record", "recordId": "record",
+                "referenceKind": "fresh-history-source", "originalArm": "candidate", "publishedSdk": False}
+            fresh_arms = producer.expected_arm_pins(
+                builds, "c" * 64, refs, reference_contract=fresh_contract, fresh_snapshot_sha256="e" * 64)
+            self.assertEqual(fresh_arms["fresh-history-source-record"]["source_snapshot_sha256"], "e" * 64)
+            self.assertEqual(fresh_arms["candidate"]["source_snapshot_sha256"], "c" * 64)
+            self.assertEqual(fresh_arms["fresh-history-source-record"]["binary_sha256"], gate.sha256(baseline_binary))
 
     def test_reference_parent_loader_forwards_query_and_all_dependency_refs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -265,8 +274,13 @@ class CatalogProducerOperationTest(unittest.TestCase):
 
             def query(root: Path, args: Sequence[str], input_bytes: bytes | None,
                       text: bool) -> str:
-                del root, args, input_bytes, text
-                return "3" * 40
+                if root != Path(temporary).resolve() or input_bytes is not None or not text:
+                    raise ValueError("unexpected Git query context")
+                if tuple(args) == ("rev-parse", "HEAD"):
+                    return "3" * 40
+                if tuple(args) == ("ls-tree", "--name-only", "3" * 40, "--", reference.HISTORY_PATH):
+                    return ""
+                raise ValueError("unexpected Git query")
 
             with patch.object(reference, "load_reference_parent_proof",
                               return_value=proof) as loader:
@@ -344,6 +358,22 @@ class CatalogProducerOperationTest(unittest.TestCase):
 
 
 class TransportBundleUnitTests(unittest.TestCase):
+    def test_formal_receipt_is_exclusive_and_binds_verified_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            bundle = Path(temporary).resolve()
+            manifest = bundle / "bundle.json"
+            manifest.write_text("{}")
+            head = "a" * 40
+            result: gate.JsonObject = {"head": head, "conditions": 84, "candidateConditions": 84,
+                                       "performanceNonregression": True, "htmlStage90": {
+                                           "acceptance": True, "fontIdentityEquivalence": "established"}}
+            producer.write_formal_verification_receipt(bundle, head, result)
+            receipt = gate.read_json(bundle / "producer-verification.json")
+            self.assertEqual(receipt["bundleManifestSha256"], gate.sha256(manifest))
+            self.assertEqual(receipt["result"], result)
+            with self.assertRaises(FileExistsError):
+                producer.write_formal_verification_receipt(bundle, head, result)
+
     def capacity_binding(self, root: Path) -> typed_producer.CapacityBinding:
         document, state, registry = (root / name for name in
                                      ("binding.json", "state.json", "registry.json"))
@@ -422,6 +452,21 @@ class TransportBundleUnitTests(unittest.TestCase):
                 self.assertFalse(os.access(transported_private, os.X_OK))
             self.assertEqual(gate.sha256(transported_executable), pins[0]["sha256"])
             self.assertEqual(gate.sha256(transported_private), pins[1]["sha256"])
+
+    def test_historical_transport_preserves_logical_pin_and_rejects_changed_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            payload = root / "old-payload"
+            payload.write_bytes(b"original")
+            logical = str(root / "original-path")
+            pin: typed_producer.FilePin = {"path": logical, "sha256": gate.sha256(payload)}
+            producer.write_transport_bundle(root / "bundle", "a" * 40, [pin], [],
+                                            source_paths={logical: payload})
+            self.assertEqual(gate.Bundle(root / "bundle").file(pin).read_bytes(), b"original")
+            payload.write_bytes(b"modified")
+            with self.assertRaises(ValueError):
+                producer.write_transport_bundle(root / "changed", "a" * 40, [pin], [],
+                                                source_paths={logical: payload})
 
     @unittest.skipUnless(platform.system() == "Darwin", "macOS clone contract")
     def test_transport_clone_is_independent_and_keeps_source_stamp(self) -> None:
@@ -1253,22 +1298,32 @@ class RuntimeSyncPreflightTest(unittest.TestCase):
         validator = ["bun", "run", "scripts/html/fidelity-acceptance-cli.ts",
                      "catalog-stage90-validate-captures", pins[0]["path"], pins[1]["path"]]
         completed = subprocess.CompletedProcess(validator, 0, stdout=b"{}", stderr=b"")
-        with patch.object(platform, "system", return_value="Darwin"), \
-             patch.object(platform, "machine", return_value="arm64"), \
-             patch.object(producer, "load_catalog_conditions",
-                          return_value=([], *pins, binary_refs)), \
-             patch.object(producer, "source", return_value={"head": "initial"}), \
-             patch.object(producer, "_measurement_command", return_value=completed) as run, \
-             patch.object(producer, "_validate_catalog_capture_envelope", return_value=validation), \
-             patch.object(producer, "command") as build:
-            with self.assertRaisesRegex(ValueError, "HTML84 visual acceptance is not established"):
-                producer.produce(self.root, self.output, catalog_manifest_path=manifest)
-        run.assert_called_once_with(
-            validator, cwd=self.root, role="preflight",
-            log_directory=self.output.parent / f"{self.output.name}.lifecycle",
-        )
-        build.assert_not_called()
-        self.assertFalse(self.output.exists())
+        for with_wrapper in (False, True):
+            with self.subTest(with_wrapper=with_wrapper), \
+                 patch.object(platform, "system", return_value="Darwin"), \
+                 patch.object(platform, "machine", return_value="arm64"), \
+                 patch.object(producer, "load_catalog_conditions",
+                              return_value=([], *pins, binary_refs)), \
+                 patch.object(producer, "source", return_value={"head": "a" * 40}), \
+                 patch.object(producer, "_measurement_command", return_value=completed) as run, \
+                 patch.object(producer, "_validate_catalog_capture_envelope", return_value=validation), \
+                 patch.object(producer, "load_reference_parent") as load_reference, \
+                 patch.object(reference, "active_reference_at_commit") as select_reference, \
+                 patch.object(producer, "command") as build:
+                with self.assertRaisesRegex(ValueError, "HTML84 visual acceptance is not established"):
+                    producer.produce(
+                        self.root, self.output, catalog_manifest_path=manifest,
+                        reference_parent_wrapper=self.root / "wrapper.json" if with_wrapper else None,
+                        reference_parent_wrapper_sha256="c" * 64 if with_wrapper else None,
+                    )
+                run.assert_called_once_with(
+                    validator, cwd=self.root, role="preflight",
+                    log_directory=self.output.parent / f"{self.output.name}.lifecycle",
+                )
+                load_reference.assert_not_called()
+                select_reference.assert_not_called()
+                build.assert_not_called()
+                self.assertFalse(self.output.exists())
 
     def test_private_catalog_diagnostic_keeps_unaccepted_state_explicit(self) -> None:
         diagnostic = {"acceptance": False, "fontIdentityEquivalence": "not-established"}
@@ -2303,6 +2358,24 @@ class CapacityBindingUnitTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "source changed during metadata"):
             self.invoke(mutation=lambda: manifest.write_bytes(b"changed source"))
         self.assertEqual(len(self.commands), 2)
+
+    def test_unapproved_historical_source_is_rejected_before_metadata_and_build(self) -> None:
+        selected = reference.ActiveReference("selected", "a" * 40, "b" * 64, "c" * 64, {})
+        history = self.root / "tmp/reference"
+        binding = self.binding()
+        def query(root: Path, args: Sequence[str], input_bytes: bytes | None, text: bool) -> str:
+            del root, args, input_bytes, text
+            return ""
+        with patch.dict(os.environ, self.environment, clear=True), \
+             patch.object(shutil, "which", return_value=str(self.cargo)), \
+             patch.object(source_materialization, "verify_selected_source",
+                          side_effect=ValueError("historical selection rejected")), \
+             patch.object(typed_producer, "_measurement_command") as command:
+            with self.assertRaisesRegex(ValueError, "historical selection rejected"):
+                typed_producer.guarded_arm_build(
+                    self.root, history / gate.HARNESS_ROOT, "candidate", binding, self.source_records,
+                    self.root / "tmp/builds/baseline", historical_source=(history, selected), git_query=query)
+        command.assert_not_called()
 
     def test_selected_configuration_and_environment_drift_reject_before_guard(self) -> None:
         selected = self.harness / ".cargo/config.toml"

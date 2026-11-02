@@ -2,6 +2,44 @@
 
 ## 最新の再開地点（2026-11-02）
 
+- [/] `release/v0.4.24`で検証基盤/描画回帰/性能履歴を統合中、未リリース。検証開始時HEADは`d75cb28d`、stash0・worktree1。現在のGit参照は実Gitで確認し、以下の検証履歴の途中状態を現行ソースの全体合格へ転用しない。
+- [/] 現行Rust全体R6972は5,525/5,525成功・29skip（実テスト336.041秒、collectionまで実0）。R6974正式root policyは83,290/84,498＝98.57038036403229%、未到達1,208行で実1。前回から13行減、100%未達。R6976診断copyは`tmp/quality/resumed-owner-r3509/current-root-coverage-report-r6976/`、official listing827位置と全体未到達1,208は別値であり残381位置を捏造しない。
+- [/] SVGは従来1,438＋追加painting308＋集合1＝1,747全件成功、R6972全体でも再実行した。追加48の旧PNGとの差はAA変更に由来し、旧AA対照・元tree不変・本番rendererと独立geometry全画素maskで検証する。原SVG/PNG・閾値・vendorソース/manifestは不変。source foundation R6963、AST R6970、性能Python344/344 R6965、macOS証跡65/65 R6946は各実0。
+- [ ] Mermaid117/117・HTML84と長文画像の過去正式成功は、現sourceの最終合格ではない。現sourceの正式再検証または厳格な再利用適格判定が必要。性能履歴のGit管理・現行基準選択・fresh履歴source build・doc-only reuse・CI署名検証・改善時の基準昇格を実装済みだが、実Bundle/fresh84/実CIでの統合確認は未完。CI可変font observerの取得/指定も未整備。
+- [/] R6978で終了したCOVのみ2.8GiB整理、R6979固定容量判定実0。R6980は標準static/Clippyを含む24taskと実CAS診断が実0。7系統の通常検査に加え、fragment-loader1系統の同入力hit/削除後restore/破損CAS復元を検証。Moonが破損bytesを展開してもKRRが受理せず再検証して修復し、他6系統のreceiptと全source identityは不変、元blob/outputsも復元済み。R6981は同じ7系統すべてvalid/recovered=false、検証区間296.143秒→35.828秒（各1実測、全ゲート時間や製品の表示速度と混同しない）。上限4,726,095,872Bは不変。
+- [/] 公開ルールのIssue参照不足52commit（必須祖先17）について、本人が固定52SHAの対応表追加を承認。global mapを追加し、PR/HEAD未確定の現在は無効。既存PR77 mapping・必須CI/reviews/App保護を維持した。独立HighでPR本文と全commit Issue集合の既存照合漏れを補い、global171unit実0・再レビューP0/P1なし。実PR/最終HEADへの固定と運用でのadmissionは未完。元Git履歴は不変。
+- [ ] 次は容量整理→Clippy/CAS実検証→差分統合と正式描画/性能受入→coverage100%/未計測0・完全gate→依存最終確認、Draft review/個別reply・resolve、Ready後3OS CI、expected SHAのApp保護merge、GitHub Release/3crate確認、#108/#109/#114 close、cleanup。HTML最終99は後続#106のまま。
+
+## 2026-11-02の検証履歴（現行判定には上の要約を使う）
+
+- [/] 現行確認R6930 source-static-foundation実0、R6922性能Python331/331実0。RTK dry-runは固定6recipeを個別実行し、先行recipeへ後続名が引数として吸収される問題を修正、R6925限定回帰・R6926契約検査実0。旧R6873全661件の成功へは読み替えない。
+- [/] SVG追加48差の共通原因はR6937で実測。元SVG/PNGを変更せず、同じtreeの複製だけ旧AAへ戻すと48/48で元PNGとの差が既存比較条件の0となった（現行は合計4,292差画素、210clip変換）。製品描画の正しさの保証は別であり、独立した矩形geometry・変換・親clip交差の全画素mask照合を追加。R6942 AST実0、R6944実描画検査を実行中。通常1,746件の48失敗を未検証のまま合格へ置換しない。
+- [ ] 性能基準のGit履歴・厳格reuse・同hostの履歴source再build・CI署名検証・改善時active基準昇格は実装済みだが、実84条件と実CIでの受入が未完。可変fontを選択したCIでは既存observer経路が必要だが、workflowの取得・指定は未整備（実選択fontは未観測）。
+- [ ] 現sourceの正式117/HTML84・長文受入、7系統CAS hit/restore/tamper再実測、coverage100%・未計測0、完全gate、最終依存確認、commit/push、Draft review・各reply/resolve、Ready後3OS CI、保護merge・公開・Issue close・cleanupは未完。全体coverageの最新実測はR6771の98.55499538450614%・未到達1,221行。過去の117/117とHTML成功を現在sourceの合格へ転用しない。
+
+- [/] R6944は実0、48case・210clipの独立geometry mask全画素差0。ただしreviewで実renderer側のclip適用漏れを直呼出し検査では検知できないP1を確認し、製品rendererを通す単色隔離treeの比較を追加した。R6949 ASTは関数行数2件・nesting1件で実101、修正中。追加308を260旧PNG strictと48因果/geometryへ過不足なくpartitionする検査も実装済みだが未実測。R6946 macOS証跡65/65実0（8.365秒）。R6945は存在しないrecipe名を指定して検査開始前に失敗した記録として保持する。
+
+- [/] R6951 AST実0、R6952本番renderer経由の単色隔離tree全画素照合も実0。独立reviewで旧P1の経路漏れを解消、新たな具体的P0/P1なし。R6953の同binary実catalogでnormal1,438/painting308/集合1を確認し、R6954は同条件で1,747/1,747成功・3,807skip（実テスト74.605秒、process実0）。旧1,438の参照PNG厳密比較を維持し、painting260は同じ厳密比較、固定48は元PNG不変・旧AA対照差0・元tree不変・現行差の存在・独立geometryと本番rendererの全画素mask一致で検査した。元SVG/PNGと閾値を変更せず、308=260∪48のsource集合一致を検証した。Mermaid正式117や全体coverageの成功へ代用しない。
+
+- [/] R6956 Python lint/strict型178files実0、R6957昇格/起動環境27/27実0。性能基準昇格は既存pinned bootstrapの専用入口へ接続し、正式84 pairedの原sampleから非劣化と改善を判定、元record保持・候補record再導出・schema検証後にatomic更新する。元の実測履歴は未変更、実Bundleによる正式統合検査は未完。R6959 foundationはvendor libへの検査module登録が移植元SHAを変えるため拒否。保護manifestを更新せず、2moduleをKRR所有srcへ移してvendor libを元bytesへ復元し、R6962 AST実0。移動後の全件再検査とfoundationを回収する。
+
+- [/] 最新R6963 source-static-foundation実0（vendor provenance含む）、R6964所有srcへ移動後のSVG全1,747/1,747成功（72.677秒、process実0）。R6965性能関連全344/344成功（41.762秒）。これからsourceを固定し、7系統CASの実hit/restore/tamperを標準recipeで回収する。旧R6839失敗を修正後の合格へ再認定しない。
+
+- [ ] R6966標準CAS実検証は静的段階で実1。147未利用診断は既存の実consumerで解決したが、marker-native-artifact_test.tsのformat1件を拒否し、重い回帰/CAS本体は未実行。R6967で対象1fileだけ正規formatterを実行し実0。基準や例外は変更せず、R6968で修正後chainを新runとして回収する。
+
+- [ ] R6968はBiomeまで成功し、Clippyが追加補助コード2件（Fill初期化・複合戻り型）を拒否して実101。2件を同値修正後R6970 AST実0。R6971はRust解析本体を完了したが、性能harness後の固定容量チェックで5,036,462,080Bが4,726,095,872Bを超えて実1。容量上限や保護を変えず、保持中のroot COVを使う全体coverageを先に回収してから、終了したCOV profileを既存の保護付きcleanで整理し、Clippy/CASへ戻る。実ディスク不足と固定閾値超過は混同しない。
+
+以下は過去の経緯であり、上記の最新状態を優先する。
+
+- [/] R6879 strict Python176files実0、R6880性能関連Python321/321実0（48.621秒）。R6884は失敗したRTK契約2caseを限定再実行して実0。原因は共有build数そのものではなく、複数recipe名が先行recipeの引数に解釈されるdry-run呼出しであり、3recipeを個別に実行し各argv/prefixを厳密照合する修正。R6873の659成功を修正後全件合格とは再認定しない。
+- [ ] R6881寸法unit実0、R6882で元SVGの縦横比を保った48件をfresh取得（実0、9.725秒）、R6886 Biome/R6887 capture・診断unit実0。R6888実比較は実0：nativeの記録済み381差画素中230がChrome一致・151不一致、48case中12は記録済み全sampleが一致。native全PNG比較ではなく、残36caseが製品の図全体として未合格との件数へ転用しない。Chrome全画像対旧PNGも比較済み。元参照の上書き・除外・閾値変更はしていない。結果は`tmp/quality/resumed-owner-r3509/svg-marker-diagnostic-r6888.json`、new captureは`tmp/quality/resumed-owner-r3509/marker-chrome-capture-r6882/`。
+- [ ] R6873はBun661件中659成功・2失敗（627.18秒）。失敗はRTK prefix検査が共有buildのdry-run数を6件と仮定し実3件だった2case。必要な各recipe/argvを照合する修正を実装中で、全件を再実行する前に該当caseを回収する。R6875 TypeScript実0。R6876 Python lint実0・型15件失敗は実signature/None/Protocolへ修正しR6879 strict実0、R6880で性能関連Python回帰を実行中。
+- [ ] R6874画像診断は失敗。R6878で安全な原因表示を取得し、PNG読取が寸法不一致もpin不一致と誤表示する問題を確認。元SVGのviewBoxは47件200×200、percent-values.svgのみ200×100で、旧captureの300×300固定は1件を歪めていた。各case寸法47件300×300/1件300×150へ修正し、fresh captureと診断の再実行が未完。元SVG/PNG・旧capture/ログは変更しない。R6877は診断呼出し引数indexの誤りで実1、R6878の訂正結果と区別する。
+- [/] R6864でSVG不一致48件すべての独立Chrome画像を取得した（実0、9.075秒）。元SVG/参照PNGは変更せず、source・font・resource・browser・PNGを束縛した。全画像のChrome対旧参照と、R6829に保存された381差画素のnative対Chromeを分ける診断を実装し、検査中。native全PNGの一致を証明したものではない。
+- [ ] 性能Git履歴の選択・元測定の再利用CLIを実装中。R6865のPython静的/厳格型検査は実0、R6866の基準選択7件は実0。R6870は117件実行後にproducer負例の検査順序で失敗し、修正後の再検査は未回収。CIのmacOS測定をUbuntuで検証する現物path/tool結合も確認し、ローカル現物検証と移送証跡検証の契約分離が未完。履歴保存を、基準の自動昇格・CI接続の完成として報告しない。
+- [/] R6827の現行source-static-foundationは実0。R6817/R6820のTS/Python厳格型エラーとR6823の複数行recipeの字下げ照合不正を修正し、除外や基準緩和は追加していない。R6824のcache batch安全性30件、R6825の固定7系統2件は実0。R6821は共通fixture不備を確認後に専用process groupを停止して実-15、成功へ転用しない。R6828は22成功・3失敗で、残3件は負例側がfixtureの字下げを仮定して変異前に失敗していた。実recipe本文から変異する修正後の再検査は未回収。SVG拡張の正式AST R6818は実0、R6829で既存診断runnerによる描画回帰を実行中。いずれも全体coverage100%や最新117/84の合格へ代用しない。
+- [ ] SVG拡張R6829は実100、normal1,746件中1,698成功・48不一致（72.525秒）。旧1,438へpainting308を追加し、原SVG/PNG・0pixel閾値・既存2除外・個別契約は不変。不一致はcontext3/marker44/overflow1。R6837独立stock Chrome4件は成功し、既存hard-edge契約の8座標RGBAを確認したが、残44件の全差画素は未確認。全48が同じ原因や新描画不具合とは断定しない。原ログを保持し、原参照の上書き・新しい除外・許容値変更で隠さず比較する。全体coverageへの効果は未計測、manifestのnormalCaseCount1,742と実1,746の資源/個別契約差も混同しない。
+- [ ] R6839は通常7系統batchまで成功したが、外側CAS診断は実1。原CAS blobと元outputsの復元は成功し、同一入力hit・削除後hydrate・改変拒否・再検証/修復まで進んだ後、新epochの初回seedをcached hydration必須とする診断側の誤判定で失敗した。新seedでは既存修復receiptの固定verify-run成功とarchive作成成功を検証し、以後のhit/削除後restoreは従来の厳密なcached hydration・bytes同一を維持する修正が未完。診断の前後7identity取得も既存の一括collectorで14呼出し→2へ集約する。R6832の固定容量超過はR6833既存保護付き限定cleanで2.8GiB整理して復旧した。上限・保護原本は不変。R6839の原reportは`tmp/quality/runtime-script-moon-cas/moon-contract-1793572074864113000/runtime-script-moon-cas-diagnostic.json`。
 - [ ] 最新ユーザー指示：性能指標として比較に使う基準データは、改善を正式条件で確認した時点で上書き更新する。Gitの履歴記録と現行比較基準を分け、`activeReferenceRecordId`で現在の基準を明示した。初期選択は既存の合格測定であり改善昇格を捏造しない。同等/ばらつき/一部改善と引換の時間・メモリ悪化では更新しない。基準自動昇格と正式gate接続の実装・回帰・検証は未完。
 - [/] 最新ユーザー指示のGit管理：正式R6628とsanitized R6630から`docs/performance/html-performance-history.json`へ全6段階の時間/RSS・84条件×25試行・測定元commit・正式判定・元データdigestを保存した。元の数値・件数・受入値・digestと全項目が一致。手順とAGENTSへ履歴参照を追加し、JSONはBiomeの必須対象へ追加、R6789は実1fileを検査して実0。原receipt/私有原本/環境値は不変・Git対象外。
 - [ ] 性能再利用の未完部分：文書/testだけの変更で全84条件を取り直す過剰なHEAD結合を解く。元の測定と現行sourceへの再利用適格性を分け、元receiptは変更しない。同binary・計測プログラム/条件/入力/資源/フォント/ツール環境/判定の等価性を既存Bundle/parent proof検証へ追加し、実装・異常系回帰・正式検証を完了する。履歴保存だけを再利用gate完成としない。

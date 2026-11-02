@@ -19,6 +19,12 @@ mod input_contract;
 mod inventory;
 #[path = "svg_engine_render_marker_tests.rs"]
 mod marker;
+#[path = "svg_engine_render_marker_clip_mask_tests.rs"]
+mod marker_clip_mask_tests;
+#[path = "svg_engine_render_marker_isolated_mask_tests.rs"]
+mod marker_isolated_mask_tests;
+#[path = "svg_engine_render_marker_legacy_aa_tests.rs"]
+mod marker_legacy_aa;
 #[path = "svg_engine_render_morphology_color_tests.rs"]
 mod morphology_color_tests;
 #[path = "svg_engine_render_morphology_contract_tests.rs"]
@@ -54,6 +60,17 @@ fn upstream_normal_render_matches_reference(
     }
     if browser_reference_tests::is_one_axis_contract(&input)? {
         return morphology_contract::assert_one_axis_contract(&input);
+    }
+    assert_reference(&input, Mode::Normal)
+}
+
+#[rstest]
+fn upstream_painting_render_matches_its_explicit_contract(
+    #[files("../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/painting/**/*.svg")]
+    input: PathBuf,
+) -> Result<(), String> {
+    if marker_legacy_aa::MarkerLegacyAa::verify_if_member(&input)? {
+        return Ok(());
     }
     assert_reference(&input, Mode::Normal)
 }

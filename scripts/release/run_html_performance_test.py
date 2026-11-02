@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
@@ -57,6 +58,23 @@ def bootstrap_fixture(
 
 
 class HtmlPerformanceRunnerTest(unittest.TestCase):
+    def test_promotion_dispatch_preserves_arguments(self) -> None:
+        arguments = ["--repo", "/repo", "--evidence-dir", "/repo/tmp/bundle",
+                     "--promotion-evidence-dir", "/repo/tmp/proof", "--run-id", "run"]
+        self.assertEqual(runner._command("promote", arguments), [
+            sys.executable,
+            str(runner.ROOT / "scripts/release/html_performance_promotion.py"),
+            *arguments,
+        ])
+
+    def test_reuse_dispatch_preserves_arguments(self) -> None:
+        arguments = ["--repo", "/repo", "--request-output", "/repo/tmp/request.json"]
+        self.assertEqual(runner._command("reuse", arguments), [
+            sys.executable,
+            str(runner.ROOT / "scripts/release/html_performance_source_reuse_cli.py"),
+            *arguments,
+        ])
+
     def test_child_environment_binds_all_parent_values(self) -> None:
         original = {"PATH": "path", "VIRTUAL_ENV": "env", "EXTRA": "first"}
         with patch.dict(os.environ, original, clear=True):

@@ -866,16 +866,7 @@ for (const requiredTest of [
     const token = ` ./scripts/html/${requiredTest}_test.ts`;
     const mutated = recipe.replace(token, "");
     expect(mutated).not.toBe(recipe);
-
-    const root = strictUnusedRegistrationFixture();
-    recipes(root, { "runtime-asset-script-other-run": mutated });
-    track(root);
-
-    const report = inspectMathJaxUnusedAuditRoute(root);
-    expect(report.binding.standardCommandVerified).toBe(false);
-    expect(report.issues.map((issue) => issue.code)).toContain(
-      "mathjax-host-evidence-registration-unverified",
-    );
+    expectRuntimeAssetRegistrationRejected(mutated);
   });
 }
 
@@ -888,37 +879,39 @@ test.each([
   delete env.CARGO;
   const expectedPrefix = rtk === "" ? "" : "rtk proxy ";
 
-  const result = spawnSync(
-    "just",
-    [
-      "--dry-run",
-      "html-input-state-fidelity-check",
-      "html-input-state-fidelity-interim-check",
-      "html-dynamic-fidelity-check",
-      "html-dynamic-fidelity-interim-check",
-      "html-fidelity-check",
-      "html-fidelity-interim-check",
-      "build-capacity-check",
-    ],
-    {
+  const buildArgv = `${expectedPrefix}cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json`;
+  for (const recipe of [
+    "html-input-state-fidelity-check",
+    "html-input-state-fidelity-interim-check",
+    "html-dynamic-fidelity-check",
+    "html-dynamic-fidelity-interim-check",
+    "html-fidelity-check",
+    "html-fidelity-interim-check",
+  ]) {
+    const result = spawnSync("just", ["--dry-run", recipe], {
       cwd: root,
       encoding: "utf8",
       env,
-    },
-  );
-  expect(result.status).toBe(0);
-  const output = `${result.stdout}\n${result.stderr}`.split(/\r?\n/);
-  const buildCommands = output.filter((line) =>
-    line.includes("cargo test --release -p katana-render-runtime --lib --no-run"),
-  );
-  expect(buildCommands).toHaveLength(6);
-  expect(buildCommands.every((line) => line.startsWith(`${expectedPrefix}cargo test `))).toBe(true);
+    });
+    expect(result.status).toBe(0);
+    const output = `${result.stdout}\n${result.stderr}`;
+    const buildCommands = [
+      ...output.matchAll(
+        /(?:^|;\s*)((?:rtk proxy )?cargo test --release -p katana-render-runtime --lib --no-run[^;>\n]*)(?=\s*>)/gu,
+      ),
+    ].map((match) => match[1]?.trim());
+    expect(buildCommands).toEqual([buildArgv]);
+  }
 
-  const capacityCommands = output.filter((line) =>
-    line.includes("python3 -m unittest discover -s scripts/build"),
-  );
-  expect(capacityCommands).toHaveLength(1);
-  expect(capacityCommands[0]?.startsWith(`${expectedPrefix}python3 -m unittest `)).toBe(true);
+  const capacityResult = spawnSync("just", ["--dry-run", "build-capacity-check"], {
+    cwd: root,
+    encoding: "utf8",
+    env,
+  });
+  expect(capacityResult.status).toBe(0);
+  const capacityOutput = `${capacityResult.stdout}\n${capacityResult.stderr}`;
+  const capacityCommand = `${expectedPrefix}python3 -m unittest discover -s scripts/build -p 'cargo_capacity_guard*test.py' -v`;
+  expect(capacityOutput.split(capacityCommand)).toHaveLength(2);
 });
 
 test("owned Python registration accepts capacity tests with the exact RTK proxy definition", () => {
@@ -4924,6 +4917,10 @@ const classicGenerationUnitTestPaths = [
   "scripts/runtime-bundles/runtime-classic-generation_test.ts",
   "scripts/runtime-bundles/runtime-unused-semantic-adapter_test.ts",
 ];
+const performanceHistoryTestPath = "scripts/html/performance-history_test.ts";
+const markerCaptureTestPath = "scripts/mermaid/svg-marker-browser-capture_test.ts";
+const markerDiagnosticTestPath = "scripts/mermaid/svg-marker-browser-diagnostic_test.ts";
+const markerNativeArtifactTestPath = "scripts/mermaid/svg-marker-native-artifact_test.ts";
 
 function strictUnusedRegistrationFixture(): string {
   const root = fixture(),
@@ -4932,12 +4929,30 @@ function strictUnusedRegistrationFixture(): string {
     if (name !== "Justfile")
       write(root, name, fs.readFileSync(path.join(actualRoot, name), "utf8"));
   }
-  for (const name of classicGenerationUnitTestPaths)
+  for (const name of [
+    ...classicGenerationUnitTestPaths,
+    performanceHistoryTestPath,
+    markerCaptureTestPath,
+    markerDiagnosticTestPath,
+    markerNativeArtifactTestPath,
+  ])
     write(root, name, fs.readFileSync(path.join(actualRoot, name), "utf8"));
   recipes(root, { "runtime-asset-script-test": actualRecipeBody("runtime-asset-script-test-run") });
   track(root);
   return root;
 }
+
+function expectRuntimeAssetRegistrationRejected(recipe: string): void {
+  const root = strictUnusedRegistrationFixture();
+  recipes(root, { "runtime-asset-script-other-run": recipe });
+  track(root);
+  const report = inspectMathJaxUnusedAuditRoute(root);
+  expect(report.binding.standardCommandVerified).toBe(false);
+  expect(report.issues.map((issue) => issue.code)).toContain(
+    "mathjax-host-evidence-registration-unverified",
+  );
+}
+
 function installMoonGraphPolicy(root: string): void {
   const actualRoot = path.resolve(import.meta.dir, "../..");
   const actualPolicy = JSON.parse(
@@ -4960,6 +4975,30 @@ function installMoonGraphPolicy(root: string): void {
 type RecipeMutation = readonly [label: string, before: string, after: string, recipeName: string];
 
 const classicGenerationRecipeMutations = [
+  [
+    "performance history omitted",
+    " ./scripts/html/performance-history_test.ts",
+    "",
+    "runtime-asset-script-test",
+  ],
+  [
+    "performance history duplicated",
+    "./scripts/html/performance-history_test.ts",
+    "./scripts/html/performance-history_test.ts ./scripts/html/performance-history_test.ts",
+    "runtime-asset-script-test",
+  ],
+  [
+    "performance history moved",
+    "./scripts/html/scroll-coverage_test.ts ./scripts/html/performance-history_test.ts",
+    "./scripts/html/performance-history_test.ts ./scripts/html/scroll-coverage_test.ts",
+    "runtime-asset-script-test",
+  ],
+  [
+    "performance history filtered",
+    "bun test --path-ignore-patterns 'tmp/**' ./scripts/html/reference-capture_test.ts",
+    "bun test --path-ignore-patterns 'tmp/**' --test-name-pattern history ./scripts/html/reference-capture_test.ts",
+    "runtime-asset-script-test",
+  ],
   [
     "producer write mode",
     "bun scripts/runtime-bundles/bundle-runtime.ts --check --classic-generation-evidence",
@@ -5004,16 +5043,134 @@ test.each(classicGenerationRecipeMutations)(
   },
 );
 
-test("classic generation consumer registers each evidence test in local and CI", () => {
+test("runtime asset consumer registers evidence, performance history, and marker tests in local and CI", () => {
   const root = strictUnusedRegistrationFixture();
   const report = inspectOwnedValidationContract(root);
   const issueCodes = report.issues.map((issue) => `${issue.code}:${issue.path}`);
-  for (const name of classicGenerationUnitTestPaths) {
+  for (const name of [
+    ...classicGenerationUnitTestPaths,
+    performanceHistoryTestPath,
+    markerCaptureTestPath,
+    markerDiagnosticTestPath,
+    markerNativeArtifactTestPath,
+  ]) {
     expect(report.units.bun).toContain(name);
     expect(issueCodes).not.toContain(`unit-local-missing:${name}`);
     expect(issueCodes).not.toContain(`unit-ci-missing:${name}`);
   }
 });
+
+function mutateMarkerRegistration(
+  recipe: string,
+  target: string,
+  previous: string,
+  next: string,
+  mutation: "missing" | "duplicate" | "moved" | "filtered",
+): string {
+  const marker = ` ./${target}`;
+  if (mutation === "missing") return recipe.replace(marker, "");
+  if (mutation === "duplicate") return recipe.replace(marker, `${marker}${marker}`);
+  if (mutation === "moved")
+    return recipe.replace(`./${previous}${marker} ./${next}`, `./${previous} ./${next}${marker}`);
+  return recipe.replace(marker, ` --path-ignore-patterns '${target}'`);
+}
+
+const markerRegistrationNegativeCases = [
+  [
+    "capture",
+    "missing",
+    markerCaptureTestPath,
+    "scripts/mermaid/rasterize_svg_input_test.ts",
+    "scripts/mermaid/svg-marker-browser-diagnostic_test.ts",
+  ],
+  [
+    "capture",
+    "duplicate",
+    markerCaptureTestPath,
+    "scripts/mermaid/rasterize_svg_input_test.ts",
+    "scripts/mermaid/svg-marker-browser-diagnostic_test.ts",
+  ],
+  [
+    "capture",
+    "moved",
+    markerCaptureTestPath,
+    "scripts/mermaid/rasterize_svg_input_test.ts",
+    "scripts/mermaid/svg-marker-browser-diagnostic_test.ts",
+  ],
+  [
+    "capture",
+    "filtered",
+    markerCaptureTestPath,
+    "scripts/mermaid/rasterize_svg_input_test.ts",
+    "scripts/mermaid/svg-marker-browser-diagnostic_test.ts",
+  ],
+  [
+    "diagnostic",
+    "missing",
+    markerDiagnosticTestPath,
+    markerCaptureTestPath,
+    "scripts/mermaid/svg-marker-native-artifact_test.ts",
+  ],
+  [
+    "diagnostic",
+    "duplicate",
+    markerDiagnosticTestPath,
+    markerCaptureTestPath,
+    "scripts/mermaid/svg-marker-native-artifact_test.ts",
+  ],
+  [
+    "diagnostic",
+    "moved",
+    markerDiagnosticTestPath,
+    markerCaptureTestPath,
+    "scripts/mermaid/svg-marker-native-artifact_test.ts",
+  ],
+  [
+    "diagnostic",
+    "filtered",
+    markerDiagnosticTestPath,
+    markerCaptureTestPath,
+    "scripts/mermaid/svg-marker-native-artifact_test.ts",
+  ],
+  [
+    "native artifact",
+    "missing",
+    markerNativeArtifactTestPath,
+    markerDiagnosticTestPath,
+    "scripts/mermaid/reference_pair_repository_test.ts",
+  ],
+  [
+    "native artifact",
+    "duplicate",
+    markerNativeArtifactTestPath,
+    markerDiagnosticTestPath,
+    "scripts/mermaid/reference_pair_repository_test.ts",
+  ],
+  [
+    "native artifact",
+    "moved",
+    markerNativeArtifactTestPath,
+    markerDiagnosticTestPath,
+    "scripts/mermaid/reference_pair_repository_test.ts",
+  ],
+  [
+    "native artifact",
+    "filtered",
+    markerNativeArtifactTestPath,
+    markerDiagnosticTestPath,
+    "scripts/mermaid/reference_pair_repository_test.ts",
+  ],
+] as const;
+
+test.each(markerRegistrationNegativeCases)(
+  "runtime asset registration rejects %s marker test mutation: %s",
+  (_kind, mutation, target, previous, next) => {
+    const recipe = actualRecipeBody("runtime-asset-script-other-run");
+    const mutated = mutateMarkerRegistration(recipe, target, previous, next, mutation);
+    expect(mutated).not.toBe(recipe);
+    expectRuntimeAssetRegistrationRejected(mutated);
+  },
+);
 
 test.each([
   ["runtime-asset-script-preflight", "mathjax-owned-evidence"],
@@ -5026,7 +5183,7 @@ test.each([
   ["runtime-unused-mathjax-producer", "runtime-unused-tool-fingerprint-producer"],
   ["runtime-unused-native-width-producer", "runtime-unused-mathjax-producer"],
   ["runtime-unused-rust-classic-producer", "runtime-unused-native-width-producer"],
-  ["runtime-unused-script-regression", "runtime-unused-rust-classic"],
+  ["runtime-unused-script-regression", "runtime-classic-generation-evidence"],
 ] as const)(
   "Moon runtime asset leaf %s requires its shared predecessor",
   (taskName, dependency) => {

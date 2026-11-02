@@ -15,8 +15,9 @@ import html_performance_inventory as physical_inventory
 SCHEMA = "krr-tool-fingerprint-input-diagnostic-v1"
 PROFILE = "runtime-unused-tool-fingerprint"
 SEMANTIC_SCOPE = "krr-tool-fingerprint-profile-inputs-v1"
+# MOON_COLORはCLI出力の色だけを制御し、task inputを変えない。
 ORCHESTRATION_METADATA = frozenset((
-    "MOON_CACHE_DIR", "MOON_PROJECT_ID", "MOON_PROJECT_ROOT", "MOON_PROJECT_SOURCE",
+    "MOON_CACHE_DIR", "MOON_COLOR", "MOON_PROJECT_ID", "MOON_PROJECT_ROOT", "MOON_PROJECT_SOURCE",
     "MOON_PROJECT_SNAPSHOT", "MOON_TARGET", "MOON_TASK_ID", "MOON_TASK_HASH",
     "MOON_TASK_RETRY_ATTEMPT", "MOON_TASK_RETRY_TOTAL",
     "MOON_WORKSPACE_ROOT", "MOON_WORKING_DIR", "MOON_CACHE",

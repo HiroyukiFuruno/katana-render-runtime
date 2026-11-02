@@ -393,7 +393,9 @@ def freeze_binary(source: Path, destination: Path) -> str:
 
 
 def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBinding,
-                      source_records: gate.SourceRecords, output: Path) -> ArmBuildResult:
+                      source_records: gate.SourceRecords, output: Path, *,
+                      historical_source: tuple[Path, reference.ActiveReference] | None = None,
+                      git_query: gate.GitQuery | None = None) -> ArmBuildResult:
     import cargo_capacity_guard as capacity
 
     gate.require(arm in {"baseline", "candidate"}, "measurement arm differs")
@@ -434,14 +436,26 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
     cargo_info = {"path": str(cargo), "sha256": gate.sha256(cargo)}
     rustc_info = {"path": str(rustc), "sha256": gate.sha256(rustc)}
     capacity.validate_build_executable(root, [str(cargo_tool.launcher), "build"], environment)
-    required = [harness / "Cargo.toml", harness / "Cargo.lock", root / "scripts/build/cargo_capacity_guard.py",
-                root / "scripts/build/cargo_capacity_guard_lock.py", harness / "src/main.rs",
-                root / "Cargo.toml", root / "crates/katana-render-runtime/Cargo.toml"]
-    for path in required:
-        relative = str(path.relative_to(root))
-        gate.require(not path.is_symlink() and path.resolve() == path and relative in source_records
-                     and source_records[relative] == (gate.sha256(path), path.stat().st_size),
-                     "capacity/manifest source binding differs")
+    if historical_source is None:
+        source_root, build_records = root, source_records
+    else:
+        from html_performance_source_materialization import verify_selected_source
+        source_root, selection = historical_source
+        gate.require(arm == "candidate" and git_query is not None, "historical build source differs")
+        build_records = verify_selected_source(root, source_root, selection, git_query=git_query)
+    required = [(root / "scripts/build/cargo_capacity_guard.py", root, source_records),
+                (root / "scripts/build/cargo_capacity_guard_lock.py", root, source_records),
+                (harness / "Cargo.toml", source_root, build_records),
+                (harness / "Cargo.lock", source_root, build_records),
+                (harness / "src/main.rs", source_root, build_records),
+                (source_root / "Cargo.toml", source_root, build_records),
+                (source_root / "crates/katana-render-runtime/Cargo.toml", source_root, build_records)]
+    def validate_required(message: str) -> None:
+        for path, owner, records in required:
+            relative = str(path.relative_to(owner))
+            gate.require(not path.is_symlink() and path.resolve() == path and relative in records
+                         and records[relative] == (gate.sha256(path), path.stat().st_size), message)
+    validate_required("capacity/manifest source binding differs")
     gate.require(gate.sha256(harness / "Cargo.lock") == gate.LOCK_SHA, "common lock pin differs")
     config_pins = [(path, gate.sha256(path)) for path in configs]
     metadata = _measurement_command(
@@ -460,11 +474,8 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
     capacity.validate_build_selection(harness, environment)
     gate.require(capacity.cargo_configuration_paths(harness, environment) == configs, "Cargo configuration selection changed during metadata")
     gate.require(all(gate.sha256(path) == pin for path, pin in config_pins), "Cargo configuration changed during metadata")
-    for path in required:
-        gate.require(not path.is_symlink() and path.resolve() == path
-                     and source_records[str(path.relative_to(root))] == (gate.sha256(path), path.stat().st_size),
-                     "capacity/manifest source changed during metadata")
-    expected = expected_build(root, harness, arm, value, environment)
+    validate_required("capacity/manifest source changed during metadata")
+    expected = expected_build(source_root, harness, arm, value, environment)
     cargo_version = command([str(cargo_tool.launcher), "-vV"], text=True,
         cwd=root, env=environment, role="tool-query", log_directory=lifecycle_logs)
     rustc_version = command([str(rustc_tool.launcher), "-vV"], text=True,
@@ -499,10 +510,11 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
     capacity.validate_build_selection(harness, environment)
     gate.require(capacity.cargo_configuration_paths(harness, environment) == configs, "Cargo configuration selection changed during build")
     gate.require(all(gate.sha256(path) == pin for path, pin in config_pins), "Cargo configuration changed during build")
-    for path in required:
-        gate.require(not path.is_symlink() and path.resolve() == path
-                     and source_records[str(path.relative_to(root))] == (gate.sha256(path), path.stat().st_size),
-                     "capacity/manifest source changed during build")
+    validate_required("capacity/manifest source changed during build")
+    if historical_source is not None:
+        from html_performance_source_materialization import verify_selected_source
+        gate.require(verify_selected_source(root, source_root, historical_source[1], git_query=git_query) == build_records,
+                     "historical build source changed")
     cargo_version_after = command([str(cargo_tool.launcher), "-vV"], text=True,
         cwd=root, env=environment, role="tool-query", log_directory=lifecycle_logs)
     rustc_version_after = command([str(rustc_tool.launcher), "-vV"], text=True,
@@ -533,7 +545,14 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
         "toolVersions": {"cargo": cargo_version, "rustc": rustc_version}}
     config_file_pins: list[FilePin] = [{"path": str(path), "sha256": pin} for path, pin in config_pins]
     python_ref = cast(FilePin, guard_python["executable"])
-    return ArmBuildResult(configs, frozen, checksum, proof, [*pins, *config_file_pins, lifecycle_pin, python_ref])
+    tool_pins: list[FilePin] = [
+        {"path": str(cargo_tool.dispatcher), "sha256": gate._text(cargo_launcher_pin["sha256"], "Cargo dispatcher SHA")},
+        {"path": str(rustc_tool.dispatcher), "sha256": gate._text(rustc_launcher_pin["sha256"], "Rustc dispatcher SHA")},
+        {"path": str(cargo), "sha256": cargo_info["sha256"]},
+        {"path": str(rustc), "sha256": rustc_info["sha256"]},
+    ]
+    return ArmBuildResult(configs, frozen, checksum, proof,
+                          [*pins, *config_file_pins, lifecycle_pin, python_ref, *tool_pins])
 
 
 def require_frozen_binary(build: ArmBuildResult) -> None:
@@ -545,14 +564,16 @@ def require_frozen_binary(build: ArmBuildResult) -> None:
 def expected_arm_pins(builds: Mapping[str, ArmBuildResult], snapshot_sha256: str,
                       build_artifact_refs: Mapping[str, FilePin], *,
                       reference_parent: reference.ReferenceParentProof | None = None,
-                      reference_contract: gate.JsonObject | None = None) -> dict[str, ArmPin]:
+                      reference_contract: gate.JsonObject | None = None,
+                      fresh_snapshot_sha256: str | None = None) -> dict[str, ArmPin]:
     arms: dict[str, ArmPin] = {}
     baseline_id = (gate.baseline_arm_id({"referenceParent": reference_contract})
                    if reference_contract is not None else gate.DEFAULT_BASELINE_ARM_ID)
     for arm, build in builds.items():
         require_frozen_binary(build)
         source_snapshot = (reference_parent.source_snapshot_sha256
-                           if arm == "baseline" and reference_parent is not None
+                           if arm == "baseline" and reference_parent is not None else
+                           fresh_snapshot_sha256 if arm == "baseline" and fresh_snapshot_sha256 is not None
                            else snapshot_sha256)
         arms[baseline_id if arm == "baseline" else arm] = {
             "binary_sha256": build.binary_sha256,
@@ -574,7 +595,45 @@ def load_reference_parent(
 
     def query(path: Path, args: tuple[str, ...]) -> str:
         return gate.git(path, *args, git_query=git_query)
-    proof = reference.load_reference_parent_proof(wrapper, root, git_query=query)
+    head = gate.git(root, "rev-parse", "HEAD", git_query=git_query).strip()
+    selection = reference.active_reference_at_commit(root, head, query, allow_legacy_missing=True)
+    if selection is None:
+        proof = reference.load_reference_parent_proof(wrapper, root, git_query=query)
+    else:
+        wrapper_data = gate.read_json(wrapper)
+        manifest_pin = _receipt_file_pin(wrapper_data.get("sourceBundleManifest"), "source bundle manifest")
+        manifest_path = Path(manifest_pin["path"])
+        gate.require(manifest_path.name == "bundle.json", "historical bundle manifest path differs")
+        original = gate.Bundle(manifest_path.parent)
+
+        class OriginalReader:
+            def file(self, value: object) -> Path:
+                pin = gate._object(value, "historical source pin")
+                if pin == manifest_pin:
+                    return manifest_path
+                return original.file(pin)
+
+            def json(self, value: object) -> gate.JsonObject:
+                return gate.read_json(self.file(value))
+
+        historical = gate.HistoricalBuildReader(OriginalReader(), manifest_pin, selection)
+
+        def resolve(value: object, label: str) -> Path:
+            if label in {"source bundle manifest", "verifier stdout"}:
+                pin = _receipt_file_pin(value, label)
+                return Path(pin["path"])
+            return historical.file(value)
+
+        def validate(value: object, selected: reference.ActiveReference) -> gate.JsonObject:
+            return gate._validate_build_proof(historical, root, value, "candidate",
+                                              git_query=git_query, historical_reference=selected)
+
+        proof = reference.load_history_reference_proof(wrapper, selection, file_resolver=resolve,
+                                                        validate_build=validate)
+        extra = tuple(reference.FilePin(path, checksum) for path, checksum in historical.used.items())
+        sources = tuple((path, original.file({"path": path, "sha256": checksum}))
+                        for path, checksum in historical.used.items())
+        proof = proof._replace(dependency_refs=proof.dependency_refs + extra, transport_sources=sources)
     contract = reference.reference_parent_contract(proof)
     wrapper_pin: FilePin = {"path": str(wrapper), "sha256": proof.wrapper_sha256}
     contract["wrapperRef"] = wrapper_pin
@@ -615,7 +674,8 @@ def _clone_transport_file(source: Path, destination: Path, checksum: str) -> Non
 
 
 def write_transport_bundle(bundle: Path, head: str, refs: Sequence[FilePin],
-                           attempts: list[dict[str, FilePin]]) -> dict[str, str]:
+                           attempts: list[dict[str, FilePin]], *,
+                           source_paths: Mapping[str, Path] | None = None) -> dict[str, str]:
     transport_files: list[gate.JsonObject] = []
     relative_paths: dict[str, str] = {}
     transport: gate.JsonObject = {"schema": "krr-html-performance-release-bundle-v1", "head": head,
@@ -623,7 +683,9 @@ def write_transport_bundle(bundle: Path, head: str, refs: Sequence[FilePin],
     bundle.mkdir()
     unique = {ref["path"]: ref for ref in refs}
     for index, ref in enumerate(unique.values()):
-        original = Path(ref["path"])
+        original = (source_paths or {}).get(ref["path"], Path(ref["path"]))
+        if source_paths is not None and ref["path"] in source_paths:
+            _pinned_file(original, ref["sha256"])
         relative = f"payload/{index}/{original.name}"
         destination = bundle / relative
         destination.parent.mkdir(parents=True)
@@ -827,12 +889,12 @@ def _verify_and_seal_catalog_batch(
     seal: Callable[[], FilePin],
     summary: gate.JsonObject,
     git_query: gate.GitQuery | None,
-) -> None:
+) -> gate.JsonObject | None:
     if batch_failure is None and formal_ready:
         verifier = gate._verify_catalog_diagnostic if diagnostic else gate.verify
-        verifier(bundle, root, git_query=git_query)
+        verified = verifier(bundle, root, git_query=git_query)
         seal()
-        return
+        return verified
 
     current_bundle = gate.Bundle(bundle)
     validated_builds: Mapping[str, gate.JsonObject] | None = None
@@ -851,6 +913,19 @@ def _verify_and_seal_catalog_batch(
     if batch_failure is not None:
         _seal_failed_batch(batch_failure, seal, summary)
     seal()
+    return None
+
+
+def write_formal_verification_receipt(bundle: Path, head: str, result: gate.JsonObject) -> None:
+    gate.require(result.get("head") == head and result.get("conditions") == 84
+                 and result.get("candidateConditions") == 84,
+                 "formal verifier must establish all 84 candidate conditions")
+    gate._require_formal_release_result(result)
+    receipt = {"schema": "krr-html-performance-producer-verification-v1",
+               "role": "producer-formal-verification", "head": head,
+               "bundleManifestSha256": gate.sha256(bundle / "bundle.json"), "result": result}
+    with (bundle / "producer-verification.json").open("xb") as stream:
+        stream.write(encoded(receipt))
 
 
 def _completed_batch_ids(
@@ -1573,6 +1648,61 @@ class BuildSourceInputs(NamedTuple):
     capacity_input: FilePin
     snapshot: FilePin
     source_records: gate.SourceRecords
+
+
+class FreshReferenceInputs(NamedTuple):
+    source_root: Path
+    source_before: FilePin
+    snapshot: FilePin
+    materialization: FilePin
+
+
+def create_fresh_reference_inputs(root: Path, output: Path, selected: reference.ActiveReference,
+                                  controller_source: FilePin, *,
+                                  git_query: gate.GitQuery | None) -> FreshReferenceInputs:
+    from html_performance_source_materialization import create_selected_source_proof, materialize
+
+    source_root = output.parent / f"{output.name}.reference-source"
+    records = materialize(root, source_root, selected.source_head, git_query=git_query)
+    controller_pin = {"path": controller_source["path"], "sha256": controller_source["sha256"]}
+    proof = create_selected_source_proof(root, source_root, selected, controller_pin,
+                                         git_query=git_query)
+    materialization = write(output / "reference-source-proof.json", proof)
+    rows = [{"path": name, "sha256": checksum, "size": size}
+            for name, (checksum, size) in sorted(records.items())]
+    snapshot = write(output / "reference-source-snapshot.json", {
+        "records": rows, "digest": hashlib.sha256(encoded(rows)).hexdigest()})
+    absolute_rows = [{"path": str(source_root / name), "sha256": checksum, "size": size}
+                     for name, (checksum, size) in sorted(records.items())]
+    source_before = write(output / "reference-source-before.json", {
+        "schema": "krr-native-build-source-inventory-v1",
+        "sourceManifestSchema": "krr-native-build-source-manifest-v1",
+        "root": str(source_root), "head": selected.source_head, "files": absolute_rows,
+        "trackedPaths": [row["path"] for row in absolute_rows], "untrackedPaths": [],
+        "missingTrackedPaths": [], "stableEndpoints": True})
+    return FreshReferenceInputs(source_root, source_before, snapshot, materialization)
+
+
+def resume_fresh_reference_inputs(root: Path, bundle: gate.Bundle, receipt: gate.JsonObject,
+                                  selected: reference.ActiveReference, *,
+                                  git_query: gate.GitQuery | None) -> FreshReferenceInputs:
+    from html_performance_source_materialization import verify_selected_source_proof
+
+    artifacts = gate._object(receipt.get("buildArtifacts"), "resume build artifacts")
+    artifact = _receipt_file_pin(artifacts.get("baseline"), "resume reference build")
+    build = bundle.json(artifact)
+    gate.require(build.get("referenceRole") == "fresh-history-source", "resume reference role differs")
+    materialization = _receipt_file_pin(build.get("selectedSourceProofRef"), "resume selected source proof")
+    before = _receipt_file_pin(build.get("sourceBeforeRef"), "resume reference source before")
+    snapshot = _receipt_file_pin(build.get("sourceSnapshotRef"), "resume reference snapshot")
+    controller = _receipt_file_pin(build.get("controllerSourceBeforeRef"), "resume controller source before")
+    for pin in (artifact, materialization, before, snapshot, controller):
+        bundle.file(pin)
+    proof = bundle.json(materialization)
+    source_root = Path(gate._text(proof.get("materializedRoot"), "resume historical source root"))
+    controller_pin = {"path": controller["path"], "sha256": controller["sha256"]}
+    verify_selected_source_proof(root, source_root, selected, controller_pin, proof, git_query=git_query)
+    return FreshReferenceInputs(source_root, before, snapshot, materialization)
 
 
 def write_build_source_inputs(root: Path, output: Path, initial: gate.JsonObject,
@@ -2527,12 +2657,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     reference_contract: gate.JsonObject | None = None
     reference_wrapper_pin: FilePin | None = None
     reference_transport_refs: list[FilePin] = []
-    if reference_parent_wrapper is not None and reference_parent_wrapper_sha256 is not None:
-        (reference_proof, reference_contract, reference_wrapper_pin,
-         reference_transport_refs) = load_reference_parent(
-            root, reference_parent_wrapper, reference_parent_wrapper_sha256,
-            git_query=git_query,
-        )
+    fresh_reference: reference.ActiveReference | None = None
     catalog_capture_validation: gate.JsonObject | None = None
     if catalog_conditions is not None:
         if (catalog_manifest_pin is None or catalog_plan_pin is None
@@ -2552,6 +2677,27 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         )
         gate.require(source(root, git_query=git_query) == initial,
                      "source changed during strict Chrome capture validation")
+    if reference_parent_wrapper is not None and reference_parent_wrapper_sha256 is not None:
+        (reference_proof, reference_contract, reference_wrapper_pin,
+         reference_transport_refs) = load_reference_parent(
+            root, reference_parent_wrapper, reference_parent_wrapper_sha256,
+            git_query=git_query,
+        )
+    elif catalog_conditions is not None and not _allow_catalog_diagnostic:
+        def reference_query(path: Path, args: tuple[str, ...]) -> str:
+            return gate.git(path, *args, git_query=git_query)
+        selected = reference.active_reference_at_commit(
+            root, gate._text(initial["head"], "source HEAD"), reference_query,
+            allow_legacy_missing=True,
+        )
+        if selected is None:
+            raise ValueError("active performance reference is required")
+        fresh_reference = selected
+        role = "fresh-history-source-" + selected.record_id
+        reference_contract = {"role": role, "armId": role,
+                              "referenceKind": "fresh-history-source", "recordId": selected.record_id,
+                              "originalArm": "candidate", "publishedSdk": False,
+                              "parentHead": selected.source_head}
     _measurement_command(["just", "runtime-bundle-check"], cwd=root, role="preflight", log_directory=lifecycle)
     gate.require(source(root, git_query=git_query) == initial, "source changed during runtime bundle check")
     if capacity_document is None or capacity_document_sha256 is None:
@@ -2596,6 +2742,13 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             resumed_bundle, resumed_receipt, build_inputs.snapshot,
             _resume_candidate_snapshot_pin(resumed_bundle, resumed_receipt),
         ))
+    fresh_inputs: FreshReferenceInputs | None = None
+    if fresh_reference is not None:
+        fresh_inputs = (resume_fresh_reference_inputs(root, resumed_bundle, resumed_receipt,
+                                                    fresh_reference, git_query=git_query)
+                        if resumed_bundle is not None and resumed_receipt is not None else
+                        create_fresh_reference_inputs(root, output, fresh_reference,
+                                                      build_inputs.source_before, git_query=git_query))
     approved = write(output / "approved-source.json", initial)
     head = gate._text(initial["head"], "source HEAD")
     inventory_digest = gate._text(initial["inventoryDigest"], "source inventory digest")
@@ -2629,6 +2782,11 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         if arm == "baseline" and reference_proof is not None and reference_wrapper_pin is not None:
             build = ArmBuildResult([], reference_proof.frozen_binary_path,
                                    reference_proof.binary_sha256, {}, [])
+        elif arm == "baseline" and fresh_inputs is not None and fresh_reference is not None:
+            build = guarded_arm_build(root, fresh_inputs.source_root / gate.HARNESS_ROOT, "candidate",
+                                      binding, source_records, output / "builds" / arm,
+                                      historical_source=(fresh_inputs.source_root, fresh_reference),
+                                      git_query=git_query)
         else:
             build = guarded_arm_build(root, harness, arm, binding, source_records,
                                       output / "builds" / arm)
@@ -2637,9 +2795,19 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             build_artifact_pin = reference_wrapper_pin
             build_pins.append(reference_wrapper_pin)
         else:
-            build.proof.update({"sourceBeforeRef": build_inputs.source_before,
-                                "sourceSnapshotRef": build_inputs.snapshot,
-                                "capacityInputRef": build_inputs.capacity_input})
+            if arm == "baseline" and fresh_inputs is not None:
+                build.proof.update({"referenceRole": "fresh-history-source",
+                                    "controllerSourceBeforeRef": build_inputs.source_before,
+                                    "selectedSourceProofRef": fresh_inputs.materialization,
+                                    "sourceBeforeRef": fresh_inputs.source_before,
+                                    "sourceSnapshotRef": fresh_inputs.snapshot,
+                                    "capacityInputRef": build_inputs.capacity_input})
+                build_pins.extend([fresh_inputs.materialization, fresh_inputs.source_before,
+                                   fresh_inputs.snapshot, build_inputs.source_before])
+            else:
+                build.proof.update({"sourceBeforeRef": build_inputs.source_before,
+                                    "sourceSnapshotRef": build_inputs.snapshot,
+                                    "capacityInputRef": build_inputs.capacity_input})
             build_artifact_pin = write(output / "builds" / arm / "build-artifact.json", build.proof)
         build_artifact_refs[arm] = build_artifact_pin
         if arm != "baseline" or reference_wrapper_pin is None:
@@ -2647,6 +2815,16 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         binaries[arm] = build.binary
         builds[arm] = build
         gate.require(source(root, git_query=git_query) == initial, "source changed during build")
+    if fresh_inputs is not None:
+        baseline_proof, candidate_proof = builds["baseline"].proof, builds["candidate"].proof
+        gate.require(all(baseline_proof.get(key) == candidate_proof.get(key) for key in (
+            "cargoLauncher", "rustcLauncher", "cargoExecutable", "rustcExecutable",
+            "toolVersions", "buildEnvironmentSha256", "cargoConfigPins", "guardPython")),
+            "fresh reference and candidate build environments differ")
+        if reference_contract is None:
+            raise ValueError("fresh reference contract is missing")
+        reference_contract["sourceRefs"] = [baseline_proof[key] for key in (
+            "controllerSourceBeforeRef", "selectedSourceProofRef", "sourceBeforeRef", "sourceSnapshotRef")]
     resumed_ids: list[str] = []
     if resumed_receipt is not None and resumed_bundle is not None:
         resumed_ids = [
@@ -2743,7 +2921,9 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                        catalog_binary_refs.current_build_report_ref,
                    )] if catalog_binary_refs is not None else []),
                    lock, output / "shared-source-snapshot.json", *binaries.values(),
-                   *[Path(pin["path"]) for pin in reference_transport_refs],
+                   *[dict(reference_proof.transport_sources).get(pin["path"], Path(pin["path"]))
+                     if reference_proof is not None else Path(pin["path"])
+                     for pin in reference_transport_refs],
                    binding.document, binding.state, binding.registry, *capacity_configs,
                    *[Path(pin["path"]) for pin in build_pins]]
     input_paths = list(dict.fromkeys(input_paths))
@@ -2757,6 +2937,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     arms = expected_arm_pins(
         builds, build_inputs.snapshot["sha256"], build_artifact_refs,
         reference_parent=reference_proof, reference_contract=reference_contract,
+        fresh_snapshot_sha256=fresh_inputs.snapshot["sha256"] if fresh_inputs is not None else None,
     )
     before_context = context(root, target, input_paths, lifecycle, git_query=git_query)
     before_pin = write(output / "context-before.json", before_context)
@@ -2918,6 +3099,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     refs: list[FilePin] = [build_inputs.source_before, source_end, approved, build_inputs.snapshot,
                            before_pin, end_pin, build_inputs.capacity_input, *build_pins,
                            *[FilePin(path=str(p), sha256=gate.sha256(p)) for p in binaries.values()],
+                           *[FilePin(path=str(p), sha256=gate.sha256(p)) for p in provenance_input_paths],
                            *checkpoint_pins, *worker_attempt_pins, *capacity_transport_refs(binding)]
     refs.extend(reference_transport_refs)
     if resumed_bundle is not None:
@@ -2967,7 +3149,8 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 refs.append(FilePin(path=str(path), sha256=gate.sha256(path)))
     # 生成物だけを輸送し、巨大なCargo targetは公開artifactへ混入させない。
     bundle = output / "bundle"
-    write_transport_bundle(bundle, head, refs, transport_attempts)
+    write_transport_bundle(bundle, head, refs, transport_attempts,
+                           source_paths=dict(reference_proof.transport_sources) if reference_proof else None)
     current_bundle = gate.Bundle(bundle)
     attempt_ids = [_attempt_condition_id(current_bundle, attempt)
                    for attempt in transport_attempts]
@@ -3012,7 +3195,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 policy_accepted=policy_accepted,
                 attempts=transport_attempts, bundle=bundle,
             )
-        _verify_and_seal_catalog_batch(
+        verified_result = _verify_and_seal_catalog_batch(
             bundle, root, transport_attempts, complete_ids,
             formal_ready=_batch_formal_acceptance(
                 attempt_ids, complete_ids, policy_accepted,
@@ -3023,6 +3206,8 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             summary=summary,
             git_query=git_query,
         )
+        if verified_result is not None and not _allow_catalog_diagnostic:
+            write_formal_verification_receipt(bundle, head, verified_result)
     if catalog_manifest_path is None:
         gate._verify_legacy_diagnostic(bundle, root, git_query=git_query)
     print(json.dumps(summary))

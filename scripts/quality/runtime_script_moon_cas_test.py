@@ -13,7 +13,7 @@ from tempfile import TemporaryDirectory
 from typing import NamedTuple
 from unittest.mock import MagicMock, patch
 
-from moon_cache_contract_test import MOON_TASK_CONTEXT_VARIABLES, ROOT
+from moon_cache_contract_test import MOON_TASK_CONTEXT_VARIABLES, ROOT, RUNTIME_UNUSED_LEAF_IDS
 from runtime_script_moon_cas import (
     RUNTIME_CAS_DIAGNOSTIC_TARGET,
     RuntimeScriptCasDiagnostic,
@@ -22,12 +22,14 @@ from runtime_script_moon_cas import (
     _runtime_cas_operation_role,
     _runtime_cas_probe_acceptance,
     _runtime_cas_has_dedicated_task_environment,
+    _runtime_cas_has_verified_seed,
     _runtime_cas_report_is_fresh,
     _runtime_cas_repair_input_mode,
     _runtime_cas_restore_entries,
     _runtime_cas_files_match_snapshot,
     _runtime_cas_snapshot_files,
     _runtime_cas_child_environment,
+    run_runtime_cas_operation,
 )
 
 
@@ -55,7 +57,7 @@ def epoch_fixture() -> tuple[RuntimeScriptCasDiagnostic, dict[Path, tuple[bytes,
 def epoch_patches(
     diagnostic: RuntimeScriptCasDiagnostic,
     snapshot: dict[Path, tuple[bytes, int]],
-    actions: list[dict[str, str]],
+    actions: list[dict[str, object]],
     inventories: list[set[str]],
 ) -> Iterator[EpochMocks]:
     # 状態遷移の単体検証であり、実Moon/CASの動作証跡には使わない。
@@ -79,6 +81,7 @@ class RuntimeScriptMoonCasEnvironmentTest(unittest.TestCase):
             ("validate-all", "metadata"),
             ("host-verify", "metadata"),
             ("identity:runtime-unused-check", "metadata"),
+            ("identity-all", "metadata"),
             ("ensure-all", "build"),
         )
         for operation, expected in cases:
@@ -181,6 +184,112 @@ class RuntimeScriptMoonCasEnvironmentTest(unittest.TestCase):
                 _runtime_cas_operation_result(path, "validate-all")["valid"],
                 True,
             )
+
+    def test_identity_all_requires_each_fixed_producer_once(self) -> None:
+        rows = [{"schema": "krr-runtime-script-identity-v2", "producer": producer}
+                for producer in RUNTIME_UNUSED_LEAF_IDS]
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "stdout.raw"
+            def write(identities: object, schema: str = "krr-runtime-script-identities-v1") -> None:
+                path.write_text(json.dumps({"schema": schema, "identities": identities}) + "\n")
+            write(rows)
+            self.assertEqual(_runtime_cas_operation_result(path, "identity-all")["identities"], rows)
+            cases = (
+                (rows[:-1], "krr-runtime-script-identities-v1"),
+                (rows + [rows[0]], "krr-runtime-script-identities-v1"),
+                (rows[:-1] + [{"schema": "krr-runtime-script-identity-v2", "producer": "unknown"}],
+                 "krr-runtime-script-identities-v1"),
+                ([{**rows[0], "schema": "wrong"}, *rows[1:]], "krr-runtime-script-identities-v1"),
+                (rows, "wrong"),
+            )
+            for identities, schema in cases:
+                with self.subTest(schema=schema, identities=identities):
+                    write(identities, schema)
+                    with self.assertRaises(RuntimeError):
+                        _runtime_cas_operation_result(path, "identity-all")
+            write(rows)
+            path.write_text(path.read_text() * 2)
+            with self.assertRaises(RuntimeError):
+                _runtime_cas_operation_result(path, "identity-all")
+
+    def test_identity_set_uses_one_batch_and_preserves_all_pins(self) -> None:
+        diagnostic = RuntimeScriptCasDiagnostic.__new__(RuntimeScriptCasDiagnostic)
+        fields = ("sourceManifestSha256", "sourceInputsSha256", "recipeSha256",
+                  "toolEnvironmentSha256", "inputSha256", "identitySha256")
+        rows = [{"schema": "krr-runtime-script-identity-v2", "producer": producer,
+                 **{field: f"{producer}:{field}" for field in fields}}
+                for producer in RUNTIME_UNUSED_LEAF_IDS]
+        payload = {"schema": "krr-runtime-script-identities-v1", "identities": rows}
+        with patch.object(diagnostic, "_moon_operation", return_value=(0, payload)) as operation:
+            identities = diagnostic._identity_set("identity-before")
+        operation.assert_called_once_with("identity-before", "identity-all")
+        self.assertEqual(list(identities), list(RUNTIME_UNUSED_LEAF_IDS))
+        self.assertEqual(diagnostic._identity_pins(identities),
+                         {producer: {field: f"{producer}:{field}" for field in fields}
+                          for producer in RUNTIME_UNUSED_LEAF_IDS})
+        with (
+            patch.object(diagnostic, "_moon_operation", return_value=(1, {})),
+            self.assertRaisesRegex(RuntimeError, "identity collection failed"),
+        ):
+            diagnostic._identity_set("identity-before")
+
+    def test_identity_all_operation_requires_the_dedicated_moon_task(self) -> None:
+        with patch.dict(os.environ, {}, clear=True), self.assertRaises(RuntimeError):
+            run_runtime_cas_operation("identity-all")
+        environment = {"MOON_TARGET": RUNTIME_CAS_DIAGNOSTIC_TARGET,
+                       "MOON_TASK_ID": "runtime-script-cas-diagnostic"}
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            patch("runtime_script_moon_cas.subprocess.run", return_value=MagicMock(returncode=0)) as run,
+        ):
+            self.assertEqual(run_runtime_cas_operation("identity-all"), 0)
+        command = run.call_args.args[0]
+        self.assertEqual(command[-1], "--all")
+        self.assertNotIn("--producer", command)
+
+    def test_repaired_result_rejects_each_changed_identity_pin(self) -> None:
+        diagnostic, snapshot = epoch_fixture()
+        diagnostic.seed_report = None
+        diagnostic.saved_files = {}
+        fields = ("sourceManifestSha256", "sourceInputsSha256", "recipeSha256",
+                  "toolEnvironmentSha256", "inputSha256", "identitySha256")
+        before: dict[str, dict[str, object]] = {
+            producer: {field: "original" for field in fields}
+            for producer in RUNTIME_UNUSED_LEAF_IDS
+        }
+        baseline: dict[str, object] = {"identitySha256": "identity", "epoch": "old"}
+        for field in fields:
+            with self.subTest(field=field):
+                after = {producer: dict(identity) for producer, identity in before.items()}
+                after[RUNTIME_UNUSED_LEAF_IDS[0]][field] = "changed"
+                with (
+                    patch.object(diagnostic, "_validate_all"),
+                    patch.object(diagnostic, "_identity_set", return_value=after),
+                    patch("runtime_script_moon_cas.RUNTIME_CAS_OTHER_RECEIPTS", ()),
+                    patch("runtime_script_moon_cas.RUNTIME_CAS_OTHER_JUNIT", ()),
+                    patch("runtime_script_moon_cas._runtime_cas_safe_file",
+                          side_effect=lambda path: snapshot[path][0]),
+                    self.assertRaisesRegex(RuntimeError, "source identity changed"),
+                ):
+                    diagnostic._assert_repaired(baseline, before)
+
+    def test_verified_seed_requires_passed_fixed_task_and_archive(self) -> None:
+        command = "just runtime-unused-script-verify-run runtime-unused-fragment-loader"
+        task_meta: dict[str, object] = {"type": "task-execution", "command": command, "exitCode": 0}
+        task = {"status": "passed", "meta": task_meta}
+        archive = {"status": "passed", "meta": {"type": "archive-creation"}}
+        action = {"status": "passed", "operations": [task, archive]}
+        self.assertTrue(_runtime_cas_has_verified_seed(action))
+        for invalid in (
+            {**action, "status": "failed"},
+            {**action, "operations": [task]},
+            {**action, "operations": [task, {**archive, "status": "failed"}]},
+            {**action, "operations": [task, task, archive]},
+            {**action, "operations": [{**task, "meta": {**task_meta, "exitCode": 1}}, archive]},
+            {**action, "operations": [{**task, "meta": {**task_meta, "command": "other"}}, archive]},
+        ):
+            with self.subTest(invalid=invalid):
+                self.assertFalse(_runtime_cas_has_verified_seed(invalid))
 
     def test_controlled_failed_closed_requires_every_observed_boundary(self) -> None:
         cases = (
@@ -323,7 +432,7 @@ class RuntimeScriptMoonCasEnvironmentTest(unittest.TestCase):
 
     def test_repaired_epoch_seeds_new_action_and_validates_hit_and_restore(self) -> None:
         diagnostic, snapshot = epoch_fixture()
-        actions = [{"actionHash": "new-action"}] * 3
+        actions: list[dict[str, object]] = [{"actionHash": "new-action"}] * 3
         with epoch_patches(diagnostic, snapshot, actions, [{"prior"}] * 4) as mocks:
             result = diagnostic._verify_repaired_epoch_cache(Path("/fixture/raw"))
         self.assertEqual(result["actionHash"], "new-action")
@@ -332,6 +441,30 @@ class RuntimeScriptMoonCasEnvironmentTest(unittest.TestCase):
         self.assertEqual(mocks.hydrated.call_count, 3)
         self.assertEqual(mocks.validate.call_count, 3)
         mocks.remove.assert_called_once()
+
+    def test_repaired_epoch_accepts_verified_seed_then_requires_cached_hits(self) -> None:
+        diagnostic, snapshot = epoch_fixture()
+        task = {"status": "passed", "meta": {"type": "task-execution", "exitCode": 0,
+                "command": "just runtime-unused-script-verify-run runtime-unused-fragment-loader"}}
+        archive = {"status": "passed", "meta": {"type": "archive-creation"}}
+        seed: dict[str, object] = {"actionHash": "new-action", "action": {"status": "passed", "operations": [task, archive]}}
+        actions: list[dict[str, object]] = [seed, {"actionHash": "new-action"}, {"actionHash": "new-action"}]
+        with epoch_patches(diagnostic, snapshot, actions, [{"prior"}] * 4) as mocks:
+            result = diagnostic._verify_repaired_epoch_cache(Path("/fixture/raw"))
+        self.assertTrue(result["hitAndRestoreValidated"])
+        self.assertEqual(mocks.hydrated.call_count, 2)
+        self.assertEqual(mocks.validate.call_count, 3)
+        mocks.log.assert_not_called()
+        mocks.remove.assert_called_once()
+
+    def test_repaired_epoch_rejects_unverified_seed_without_hydration(self) -> None:
+        diagnostic, snapshot = epoch_fixture()
+        seed: dict[str, object] = {"actionHash": "new-action", "action": {"status": "passed", "operations": []}}
+        with epoch_patches(diagnostic, snapshot, [seed], [set()] * 2) as mocks:
+            mocks.hydrated.side_effect = RuntimeError("seed was not hydrated")
+            with self.assertRaisesRegex(RuntimeError, "seed was not hydrated"):
+                diagnostic._verify_repaired_epoch_cache(Path("/fixture/raw"))
+            mocks.validate.assert_not_called()
 
     def test_repaired_epoch_rejects_old_action_and_changed_epoch(self) -> None:
         diagnostic, snapshot = epoch_fixture()
@@ -354,7 +487,7 @@ class RuntimeScriptMoonCasEnvironmentTest(unittest.TestCase):
 
     def test_repaired_epoch_rejects_changed_action_or_new_hit_log(self) -> None:
         diagnostic, snapshot = epoch_fixture()
-        cases = (
+        cases: tuple[tuple[list[dict[str, object]], list[set[str]], str], ...] = (
             ([{"actionHash": "new-action"}, {"actionHash": "different"}],
              [{"prior"}, {"prior"}], "action changed"),
             ([{"actionHash": "new-action"}, {"actionHash": "new-action"}],

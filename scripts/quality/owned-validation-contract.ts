@@ -1255,7 +1255,7 @@ function pythonStatic(context: ContractContext, name: string): void {
 }
 const HTML_PERFORMANCE_TEST_WRAPPER = "scripts/release/run_html_performance.py";
 const HTML_PERFORMANCE_TEST_WRAPPER_SHA256 =
-  "1a1f2f62ef680e915389459ca27ff3be5461ce43d09a8371079303ef2ae29876";
+  "03b0e5b36d57176f61ba02401fec01b0b170aefe7d3c2fd2c0a651d07024727f";
 function pythonPerformanceTestSelection(
   context: ContractContext,
   words: string[],
@@ -4286,6 +4286,38 @@ function restoreReviewedFeatureCatalogTestProcess(lines: string[]): string[] | u
   return restored;
 }
 function removeReviewedRuntimeAssetTests(lines: string[]): string[] | undefined {
+  const withoutPerformanceHistory = removeReviewedTestToken(
+    lines,
+    "./scripts/html/performance-history_test.ts",
+    "./scripts/html/scroll-coverage_test.ts",
+    "./scripts/html/toc-fidelity_test.ts",
+  );
+  if (!withoutPerformanceHistory) return undefined;
+  const withoutNativeArtifact = removeReviewedTestToken(
+    withoutPerformanceHistory,
+    "./scripts/mermaid/svg-marker-native-artifact_test.ts",
+    "./scripts/mermaid/svg-marker-browser-diagnostic_test.ts",
+    "./scripts/mermaid/reference_pair_repository_test.ts",
+  );
+  if (!withoutNativeArtifact) return undefined;
+  const withoutMarkerDiagnostic = removeReviewedTestToken(
+    withoutNativeArtifact,
+    "./scripts/mermaid/svg-marker-browser-diagnostic_test.ts",
+    "./scripts/mermaid/svg-marker-browser-capture_test.ts",
+    "./scripts/mermaid/reference_pair_repository_test.ts",
+  );
+  if (!withoutMarkerDiagnostic) return undefined;
+  const withoutMarkerCapture = removeReviewedTestToken(
+    withoutMarkerDiagnostic,
+    "./scripts/mermaid/svg-marker-browser-capture_test.ts",
+    "./scripts/mermaid/rasterize_svg_input_test.ts",
+    "./scripts/mermaid/reference_pair_repository_test.ts",
+  );
+  return withoutMarkerCapture
+    ? removeRemainingReviewedRuntimeAssetTests(withoutMarkerCapture)
+    : undefined;
+}
+function removeRemainingReviewedRuntimeAssetTests(lines: string[]): string[] | undefined {
   const withoutFrameContext = removeReviewedTestToken(
     lines,
     "./scripts/mermaid/native_frame_capture_context_test.ts",

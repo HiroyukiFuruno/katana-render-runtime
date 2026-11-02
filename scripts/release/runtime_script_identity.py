@@ -20,6 +20,7 @@ import runtime_script_tool_fingerprint_inputs as pilot
 
 
 SCHEMA = "krr-runtime-script-identity-v2"
+ALL_SCHEMA = "krr-runtime-script-identities-v1"
 PROFILE = profiles.DEFAULT_PRODUCER
 TOOL_FINGERPRINT = "scripts/runtime-bundles/runtime-bundle-tool-fingerprint.ts"
 RUST_FACTS_HOST = "scripts/runtime-bundles/runtime-rust-facts-host.ts"
@@ -43,6 +44,11 @@ class IdentityReport(TypedDict):
     identitySha256: str | None
     moonTaskHash: str | None
     diagnostic: dict[str, object] | None
+
+
+class IdentityReports(TypedDict):
+    schema: str
+    identities: list[IdentityReport]
 
 
 class _CollectionFailure(ValueError):
@@ -377,6 +383,28 @@ def collect_fixed_leaf_identity_reports(repo: Path) -> dict[str, IdentityReport]
     }
 
 
+def _fixed_leaf_identity_envelope(value: object) -> IdentityReports:
+    producers = tuple(profiles.RUNTIME_SCRIPT_PROFILES)
+    if not isinstance(value, dict) or set(value) != set(producers):
+        raise _CollectionFailure("fixed_leaf_identity_set_invalid")
+    identities: list[IdentityReport] = []
+    for producer in producers:
+        report = value.get(producer)
+        if (
+            not isinstance(report, dict)
+            or report.get("schema") != SCHEMA
+            or report.get("producer") != producer
+        ):
+            raise _CollectionFailure("fixed_leaf_identity_report_invalid")
+        identities.append(cast(IdentityReport, report))
+    return {"schema": ALL_SCHEMA, "identities": identities}
+
+
+def collect_all_identity_reports(repo: Path) -> IdentityReports:
+    reports = collect_fixed_leaf_identity_reports(repo)
+    return _fixed_leaf_identity_envelope(reports)
+
+
 def _collection_miss_reason(
     error: OSError | _CollectionFailure | recipe_reader.RuntimeScriptRecipeError,
 ) -> str:
@@ -414,9 +442,19 @@ def collect_identity_report(repo: Path, producer: str) -> IdentityReport:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", required=True, type=Path)
-    parser.add_argument("--producer", required=True)
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--producer")
+    selection.add_argument("--all", action="store_true")
     args = parser.parse_args(argv)
-    report = collect_identity_report(args.repo, args.producer)
+    if args.all:
+        try:
+            report: IdentityReport | IdentityReports = collect_all_identity_reports(args.repo)
+        except _CollectionFailure as error:
+            parser.error(error.reason)
+    elif args.producer is not None:
+        report = collect_identity_report(args.repo, args.producer)
+    else:
+        parser.error("select --producer or --all")
     sys.stdout.write(json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n")
     return 0
 

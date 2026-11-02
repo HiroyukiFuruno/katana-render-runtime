@@ -9,6 +9,7 @@ import os
 import secrets
 import sys
 from collections.abc import Callable, Mapping
+from contextlib import ExitStack
 from pathlib import Path
 
 import native_coverage_local_anchor as anchor
@@ -208,21 +209,44 @@ def validate_all(repo: Path) -> dict[str, object]:
     }
 
 
-def ensure_all(repo: Path) -> dict[str, object]:
-    reports = identity_collector.collect_fixed_leaf_identity_reports(repo)
+def _stable_batch_validation(repo: Path) -> tuple[list[str], list[dict[str, str | bool]]]:
     expected = set(profiles.RUNTIME_SCRIPT_PROFILES)
-    if set(reports) != expected:
-        raise result.RuntimeScriptResultError("fixed producer identity report set is invalid")
-    invalid: list[str] = []
-    validated: list[dict[str, str | bool]] = []
-    for producer in sorted(expected):
-        try:
-            validated.append(_validate_report(repo, producer, reports[producer]))
-        except result.RuntimeScriptResultError:
-            invalid.append(producer)
+    with ExitStack() as leases:
+        for producer in sorted(expected):
+            lease, device, inode = producer_runner._lease(repo, producer)
+            leases.callback(producer_runner._release_lease, lease, device, inode)
+        before = identity_collector.collect_fixed_leaf_identity_reports(repo)
+        if set(before) != expected:
+            raise result.RuntimeScriptResultError("fixed producer identity report set is invalid")
+        invalid: list[str] = []
+        validated: list[dict[str, str | bool]] = []
+        for producer in sorted(expected):
+            try:
+                validated.append(_validate_report(repo, producer, before[producer]))
+            except result.RuntimeScriptResultError:
+                invalid.append(producer)
+        if invalid:
+            return invalid, validated
+        after = identity_collector.collect_fixed_leaf_identity_reports(repo)
+        if before != after:
+            raise result.RuntimeScriptResultError("batch reuse inputs changed during validation")
+        for producer in sorted(expected):
+            try:
+                _validate_report(repo, producer, after[producer])
+            except result.RuntimeScriptResultError:
+                invalid.append(producer)
+        return invalid, validated
+
+
+def ensure_all(repo: Path) -> dict[str, object]:
+    invalid, validated = _stable_batch_validation(repo)
     for producer in invalid:
         run_current(repo, producer)
-    report = validate_all(repo) if invalid else {
+    if invalid:
+        remaining, validated = _stable_batch_validation(repo)
+        if remaining:
+            raise result.RuntimeScriptResultError("recovered batch validation failed")
+    report: dict[str, object] = {
         "schema": "krr-runtime-script-validation-all-v1",
         "producers": validated,
         "valid": True,

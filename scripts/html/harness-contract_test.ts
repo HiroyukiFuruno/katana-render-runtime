@@ -584,19 +584,45 @@ describe("fixed native artifact and Python collector bindings", () => {
       ["operation", (value: string) => value.replace('"--dry-run"', '"--evaluate"')],
       [
         "spread executable",
-        (value: string) => value.replace('    "just",\n    [', '    ..."just",\n    ['),
+        (value: string) =>
+          value.replace(
+            'spawnSync("just", ["--dry-run", recipe]',
+            'spawnSync(..."just", ["--dry-run", recipe]',
+          ),
       ],
       [
         "spread option",
-        (value: string) => value.replace('      "--dry-run",', '      ..."--dry-run",'),
+        (value: string) => value.replace('["--dry-run", recipe]', '[..."--dry-run", recipe]'),
       ],
       [
         "recipe inventory",
-        (value: string) => value.replace('"build-capacity-check",', '"other-recipe",'),
+        (value: string) =>
+          value.replace('"html-input-state-fidelity-interim-check",', '"other-recipe",'),
       ],
       [
-        "spread argument",
-        (value: string) => value.replace('"build-capacity-check",', "...recipeNames,"),
+        "interim recipe missing",
+        (value: string) => value.replace('    "html-dynamic-fidelity-interim-check",\n', ""),
+      ],
+      [
+        "loop binding",
+        (value: string) => value.replace('["--dry-run", recipe]', '["--dry-run", otherRecipe]'),
+      ],
+      [
+        "loop mutability",
+        (value: string) => value.replace("for (const recipe of [", "for (let recipe of ["),
+      ],
+      [
+        "capacity argument",
+        (value: string) =>
+          value.replace('["--dry-run", "build-capacity-check"]', '["--dry-run", "other-recipe"]'),
+      ],
+      [
+        "options",
+        (value: string) =>
+          value.replace(
+            '      encoding: "utf8",\n      env,',
+            '      encoding: "buffer",\n      env,',
+          ),
       ],
     ] as const) {
       const changed = mutate(source);
@@ -3362,6 +3388,8 @@ function coverageFixtureJustfile(base: string): string {
     "runtime-asset-script-other-run",
     "runtime-unused-script-regression-run",
     "runtime-unused-script-final-verify-run",
+    "runtime-script-cas-diagnostic",
+    "runtime-script-cas-diagnostic-run",
     "runtime-unused-script-producer-run",
     "runtime-unused-script-verify-run",
     "runtime-unused-script-cache-key",
@@ -3842,6 +3870,52 @@ test.each(RUNTIME_UNUSED_LEAF_IDS)(
       task.command = ["just", "runtime-unused-script-producer-run", id];
     });
     expect(checkHarnessContract(snapshot).length).toBeGreaterThan(0);
+  },
+);
+
+test.each(["missing prerequisite", "single leaf runner", "cached batch"])(
+  "runtime unused batch rejects %s",
+  (mutation) => {
+    const snapshot = localCoverageMoonFixture();
+    changeMoon(snapshot, (tasks) => {
+      const task = tasks["runtime-unused-script-regression"];
+      if (!task) throw new Error("runtime unused batch missing");
+      if (mutation === "missing prerequisite") task.deps = [];
+      else if (mutation === "single leaf runner")
+        task.command = ["just", "runtime-unused-script-verify-run", RUNTIME_UNUSED_LEAF_IDS[0]];
+      else task.options = { ...task.options, cache: true };
+    });
+    expect(checkHarnessContract(snapshot)).toContain(
+      mutation === "cached batch"
+        ? "moon contract invalid: unsafe moon task options runtime-unused-script-regression"
+        : "runtime unused final verification differs",
+    );
+  },
+);
+
+test.each(["omitted", "ignored", "reordered"])(
+  "runtime script CAS outer recipe rejects %s prerequisite",
+  (mutation) => {
+    const snapshot = localCoverageMoonFixture();
+    const justfile = snapshot.read("Justfile");
+    if (justfile === undefined) throw new Error("Justfile fixture is missing");
+    const body = justRecipes(justfile).get("runtime-script-cas-diagnostic");
+    if (body === undefined) throw new Error("CAS outer recipe missing");
+    const [prerequisite, diagnostic] = body.split("\n").filter((line) => line.trim() !== "");
+    if (prerequisite === undefined || diagnostic === undefined)
+      throw new Error("CAS outer recipe commands missing");
+    expect(prerequisite.trim()).toBe("bun run moon run krr:runtime-unused-script-regression");
+    expect(diagnostic.trim()).toBe("just runtime-script-cas-diagnostic-run");
+    const expected = `${prerequisite}\n${diagnostic}\n`;
+    expect(justfile).toContain(expected);
+    const replacement =
+      mutation === "omitted"
+        ? `${diagnostic}\n`
+        : mutation === "ignored"
+          ? `${prerequisite} || true\n${diagnostic}\n`
+          : `${diagnostic}\n${prerequisite}\n`;
+    replaceSources(snapshot, { Justfile: justfile.replace(expected, replacement) });
+    expect(checkHarnessContract(snapshot)).toContain("runtime script CAS outer recipe differs");
   },
 );
 

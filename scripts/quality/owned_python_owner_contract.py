@@ -16,7 +16,7 @@ LIMITATIONS = [
 
 
 # 実 owner のレビュー済み AST。更新には owner のレビューと実回帰が必要。
-OWNER_AST_SHA256 = "c047d6b9c8454566d88c1deb51fbaee1179fcdcc76fcf57a87c600fbbc0d3e18"
+OWNER_AST_SHA256 = "b928f12efcf72d2d0c4a7d70345d78788c85c46337a3a18b769ed9771ccb9ed5"
 SCHEDULER_LEAVES = {
     "biome": "biome-run",
     "runtime-asset-script-test": "runtime-asset-script-aggregate-run",

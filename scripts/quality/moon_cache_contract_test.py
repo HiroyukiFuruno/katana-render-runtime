@@ -47,16 +47,7 @@ SCHEDULER_DEPENDENCIES: dict[str, list[str]] = {
         "runtime-unused-script-regression",
     ],
     "runtime-asset-script-other": ["runtime-classic-generation-evidence"],
-    "runtime-unused-fragment-loader-producer": ["runtime-classic-generation-evidence"],
-    "runtime-unused-bundle-definitions-producer": [
-        "runtime-unused-fragment-loader-producer"
-    ],
-    "runtime-unused-check-producer": ["runtime-unused-bundle-definitions-producer"],
-    "runtime-unused-tool-fingerprint-producer": ["runtime-unused-check-producer"],
-    "runtime-unused-mathjax-producer": ["runtime-unused-tool-fingerprint-producer"],
-    "runtime-unused-native-width-producer": ["runtime-unused-mathjax-producer"],
-    "runtime-unused-rust-classic-producer": ["runtime-unused-native-width-producer"],
-    "runtime-unused-script-regression": ["runtime-unused-rust-classic-producer"],
+    "runtime-unused-script-regression": ["runtime-classic-generation-evidence"],
     "runtime-classic-generation-evidence": ["runtime-asset-script-preflight"],
     "runtime-asset-script-preflight": ["mathjax-owned-evidence"],
     "mathjax-owned-evidence": ["static", "rust-facts-host-prebuild"],
@@ -127,13 +118,6 @@ SCHEDULER_EVENT_PHASES = (
     "runtime-asset-script-preflight",
     "runtime-classic-generation-evidence",
     "runtime-asset-script-other",
-    "runtime-unused-fragment-loader-producer",
-    "runtime-unused-bundle-definitions-producer",
-    "runtime-unused-check-producer",
-    "runtime-unused-tool-fingerprint-producer",
-    "runtime-unused-mathjax-producer",
-    "runtime-unused-native-width-producer",
-    "runtime-unused-rust-classic-producer",
     "runtime-unused-script-regression",
     "runtime-asset-script-test",
     "unit-test",
@@ -148,13 +132,6 @@ SCHEDULER_BARRIER_PHASES = (
     "runtime-asset-script-preflight",
     "runtime-classic-generation-evidence",
     "runtime-asset-script-other",
-    "runtime-unused-fragment-loader-producer",
-    "runtime-unused-bundle-definitions-producer",
-    "runtime-unused-check-producer",
-    "runtime-unused-tool-fingerprint-producer",
-    "runtime-unused-mathjax-producer",
-    "runtime-unused-native-width-producer",
-    "runtime-unused-rust-classic-producer",
     "runtime-unused-script-regression",
     "runtime-asset-script-test",
     "unit-test",
@@ -163,13 +140,6 @@ SCHEDULER_NATIVE_PHASES = (
     "runtime-asset-script-preflight",
     "runtime-classic-generation-evidence",
     "runtime-asset-script-other",
-    "runtime-unused-fragment-loader-producer",
-    "runtime-unused-bundle-definitions-producer",
-    "runtime-unused-check-producer",
-    "runtime-unused-tool-fingerprint-producer",
-    "runtime-unused-mathjax-producer",
-    "runtime-unused-native-width-producer",
-    "runtime-unused-rust-classic-producer",
     "runtime-unused-script-regression",
     "runtime-asset-script-test",
     "unit-test",
@@ -356,11 +326,12 @@ def production_task_input_binding(
     assert runtime_preflight.get("deps") == ["mathjax-owned-evidence"]
     assert classic_evidence.get("deps") == ["runtime-asset-script-preflight"]
     assert runtime_other.get("deps") == ["runtime-classic-generation-evidence"]
-    assert runtime_unused.get("deps") == ["runtime-unused-rust-classic-producer"]
+    assert runtime_unused.get("deps") == ["runtime-classic-generation-evidence"]
     assert runtime_unused.get("command") == [
         "just",
         "runtime-unused-script-final-verify-run",
     ]
+    assert moon_json_object(runtime_unused.get("options")).get("cache") is False
     assert runtime_cas_diagnostic.get("command") == [
         "just",
         "runtime-script-cas-diagnostic-run",
@@ -614,13 +585,6 @@ def scheduler_success_order_valid(phases: list[str]) -> bool:
         and positions["runtime-asset-script-other"]
         < positions["runtime-asset-script-test"]
         and positions["runtime-classic-generation-evidence"]
-        < positions["runtime-unused-fragment-loader-producer"]
-        < positions["runtime-unused-bundle-definitions-producer"]
-        < positions["runtime-unused-check-producer"]
-        < positions["runtime-unused-tool-fingerprint-producer"]
-        < positions["runtime-unused-mathjax-producer"]
-        < positions["runtime-unused-native-width-producer"]
-        < positions["runtime-unused-rust-classic-producer"]
         < positions["runtime-unused-script-regression"]
         < positions["runtime-asset-script-test"]
         < positions["unit-test"]

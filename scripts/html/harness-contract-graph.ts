@@ -469,6 +469,7 @@ function ownedRtkProxyDryRunCallVerified(
   node: Record<string, unknown>,
   context: SourceCodeContext | undefined,
   processes: Map<string, ProcessBinding>,
+  module: Record<string, unknown>,
 ): boolean {
   if (context?.name !== "scripts/quality/owned-validation-contract_test.ts") return false;
   const binding = processMethod(object(node.callee), processes);
@@ -483,18 +484,10 @@ function ownedRtkProxyDryRunCallVerified(
   const option = (name: string) =>
     properties.find((item) => item.type === "KeyValueProperty" && object(item.key)?.value === name);
   const environment = properties.find((item) => item.type === "Identifier" && item.value === "env");
-  return (
+  const safeOptions =
     args.length === 3 &&
     args.every((argument) => !object(argument)?.spread) &&
     literal(object(args[0])?.expression) === "just" &&
-    recipes?.type === "ArrayExpression" &&
-    recipeElements.length === RTK_PROXY_DRY_RUN_RECIPES.length + 1 &&
-    recipeElements.every((element) => !object(element)?.spread) &&
-    recipeElements.every((element, index) =>
-      index === 0
-        ? literal(object(element)?.expression) === "--dry-run"
-        : literal(object(element)?.expression) === RTK_PROXY_DRY_RUN_RECIPES[index - 1],
-    ) &&
     options?.type === "ObjectExpression" &&
     properties.length === 3 &&
     properties.every((property) =>
@@ -503,7 +496,55 @@ function ownedRtkProxyDryRunCallVerified(
     object(option("cwd")?.value)?.type === "Identifier" &&
     object(option("cwd")?.value)?.value === "root" &&
     literal(option("encoding")?.value) === "utf8" &&
-    environment !== undefined
+    environment !== undefined;
+  if (
+    !safeOptions ||
+    recipes?.type !== "ArrayExpression" ||
+    recipeElements.length !== 2 ||
+    recipeElements.some((element) => object(element)?.spread) ||
+    literal(object(recipeElements[0])?.expression) !== "--dry-run"
+  )
+    return false;
+  const argument = object(recipeElements[1])?.expression;
+  if (literal(argument) === "build-capacity-check") return true;
+  return astNodes(module).some((loop) => ownedRtkRecipeLoop(loop, node, argument));
+}
+
+function ownedRtkRecipeLoop(
+  loop: Record<string, unknown>,
+  call: Record<string, unknown>,
+  argument: unknown,
+): boolean {
+  const left = object(loop.left);
+  const declarations = Array.isArray(left?.declarations) ? left.declarations : [];
+  const binding = object(declarations[0])?.id;
+  const right = object(loop.right);
+  const elements = Array.isArray(right?.elements) ? right.elements : [];
+  const body = object(loop.body);
+  const statements = Array.isArray(body?.stmts) ? body.stmts : [];
+  const first = object(statements[0]);
+  const firstDeclarations = Array.isArray(first?.declarations) ? first.declarations : [];
+  return (
+    loop.type === "ForOfStatement" &&
+    !loop.await &&
+    left?.type === "VariableDeclaration" &&
+    left.kind === "const" &&
+    declarations.length === 1 &&
+    object(declarations[0])?.init == null &&
+    identifierKey(binding) !== undefined &&
+    identifierKey(binding) === identifierKey(argument) &&
+    right?.type === "ArrayExpression" &&
+    elements.length === RTK_PROXY_DRY_RUN_RECIPES.length - 1 &&
+    elements.every(
+      (element, index) =>
+        !object(element)?.spread &&
+        literal(object(element)?.expression) === RTK_PROXY_DRY_RUN_RECIPES[index],
+    ) &&
+    body?.type === "BlockStatement" &&
+    first?.type === "VariableDeclaration" &&
+    first.kind === "const" &&
+    firstDeclarations.length === 1 &&
+    object(firstDeclarations[0])?.init === call
   );
 }
 
@@ -3679,12 +3720,21 @@ function sourceCodeFromModule(
     ...duplicationExecutions.calls,
   ]);
   const ownedRtkProxyDryRunCalls = astNodes(moduleRecord).filter((node) =>
-    ownedRtkProxyDryRunCallVerified(node, context, processes),
+    ownedRtkProxyDryRunCallVerified(node, context, processes, moduleRecord),
   );
+  const ownedRtkCapacityCalls = ownedRtkProxyDryRunCalls.filter((node) => {
+    const args = Array.isArray(node.arguments) ? node.arguments : [];
+    const elements = object(object(args[1])?.expression)?.elements;
+    return (
+      Array.isArray(elements) && literal(object(elements[1])?.expression) === "build-capacity-check"
+    );
+  });
   const registeredExternalCalls = new Set([
     ...standardBiomeToolCommands(moduleRecord, context),
     ...gitSourceInventoryCalls(moduleRecord, context),
-    ...(ownedRtkProxyDryRunCalls.length === 1 ? ownedRtkProxyDryRunCalls : []),
+    ...(ownedRtkProxyDryRunCalls.length === 2 && ownedRtkCapacityCalls.length === 1
+      ? ownedRtkProxyDryRunCalls
+      : []),
   ]);
   const standardBiomeCommand = biomeContextCommand(
     moduleRecord,
@@ -4368,9 +4418,9 @@ function moonRuntimeUnusedGraphVerified(
   });
   const final = tasks.get("runtime-unused-script-regression");
   if (
-    !final ||
-    final.deps.join("\0") !== `${RUNTIME_UNUSED_LEAF_IDS.at(-1) ?? ""}-producer` ||
-    final.command.join("\0") !== "just\0runtime-unused-script-final-verify-run"
+    final?.deps.join("\0") !== "runtime-classic-generation-evidence" ||
+    final.command.join("\0") !== "just\0runtime-unused-script-final-verify-run" ||
+    final.options.cache !== false
   )
     errors.push("runtime unused final verification differs");
   if (
@@ -4378,6 +4428,16 @@ function moonRuntimeUnusedGraphVerified(
     RUNTIME_UNUSED_FINAL_VERIFY_COMMAND
   )
     errors.push("runtime unused final verification recipe differs");
+  if (
+    recipes
+      .get("runtime-script-cas-diagnostic")
+      ?.trim()
+      .split("\n")
+      .map((line) => line.trim())
+      .join("\n") !==
+    "bun run moon run krr:runtime-unused-script-regression\njust runtime-script-cas-diagnostic-run"
+  )
+    errors.push("runtime script CAS outer recipe differs");
   const compatibility = `bun test --path-ignore-patterns 'tmp/**' ${RUNTIME_UNUSED_REGRESSION_TESTS.map(
     (test) => `./${test}`,
   ).join(" ")}`;

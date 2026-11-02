@@ -135,6 +135,25 @@ class ToolFingerprintInputsTest(unittest.TestCase):
                 self.assertEqual(first["inventorySha256"], second["inventorySha256"])
                 del self.environment[name]
 
+    def test_moon_color_zero_matches_absent_semantic_environment(self) -> None:
+        without_color = self.collect()
+        self.environment["MOON_COLOR"] = "0"
+        with_color = self.collect()
+
+        self.assertTrue(without_color["inputsCollected"])
+        self.assertTrue(with_color["inputsCollected"])
+        without_components = without_color["componentDigests"]
+        with_components = with_color["componentDigests"]
+        self.assertIsInstance(without_components, dict)
+        self.assertIsInstance(with_components, dict)
+        if not isinstance(without_components, dict) or not isinstance(with_components, dict):
+            self.fail("component digest record missing")
+        self.assertEqual(without_components["semanticEnvironment"],
+                         with_components["semanticEnvironment"])
+        self.assertEqual(without_color["semanticEnvironmentNames"],
+                         with_color["semanticEnvironmentNames"])
+        self.assertEqual(without_color["inventorySha256"], with_color["inventorySha256"])
+
     def test_dispatcher_roles_are_not_semantic_inputs(self) -> None:
         name = "KRR_RUNTIME_CAS_OPERATION"
         first = self.collect()

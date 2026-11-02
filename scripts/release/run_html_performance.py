@@ -39,6 +39,10 @@ def _command(mode: str, arguments: Sequence[str]) -> list[str]:
         program = ROOT / "scripts/release/verify_html_performance_evidence.py"
     elif mode == "produce":
         program = ROOT / "scripts/release/produce_html_performance_evidence.py"
+    elif mode == "reuse":
+        program = ROOT / "scripts/release/html_performance_source_reuse_cli.py"
+    elif mode == "promote":
+        program = ROOT / "scripts/release/html_performance_promotion.py"
     elif mode == "test":
         return [sys.executable, "-m", "unittest", "discover", "-s", "scripts/release", "-p", "*_test.py", "--failfast", *arguments]
     else:
@@ -135,7 +139,7 @@ def main() -> int:
         _verify_prepared_python()
         del sys.argv[1]
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("verify", "produce", "test"))
+    parser.add_argument("mode", choices=("verify", "produce", "reuse", "promote", "test"))
     args, arguments = parser.parse_known_args()
     return run_mode(args.mode, arguments)
 

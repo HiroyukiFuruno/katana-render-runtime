@@ -23,11 +23,94 @@ PARENT_BUILD_ARTIFACT_SHA256 = "85af32ad7964531a77a0623f0757f6de067b110c8afcee0a
 PARENT_CARGO_SHA256 = "7672ead309d505577c018fff2cafb3433601f073e38cbe87359ac1f7b944bbf5"
 PARENT_RUSTC_SHA256 = "210df6794001b73ec3d453878707fa1e0bdcb63c427024a6e6574bbe5615a4da"
 PARENT_CONTEXT_BEFORE_SHA256 = "e7fbb4ff960eb75b1b7b6d4a61c08b61d18f6a07e69102b457d103d1d24bc268"
+HISTORY_PATH = "docs/performance/html-performance-history.json"
+REFERENCE_BUILD_FIELDS = frozenset({
+    "buildArtifactSha256", "sourceSnapshotSha256", "binarySha256", "lockSha256",
+    "cargoExecutableSha256", "rustcExecutableSha256", "contextBeforeSha256",
+})
 
 
 class FilePin(NamedTuple):
     logical_path: str
     sha256: str
+
+
+class ActiveReference(NamedTuple):
+    record_id: str
+    source_head: str
+    bundle_manifest_sha256: str
+    verifier_stdout_sha256: str
+    build_pins: dict[str, str]
+
+
+def active_reference_at_commit(root: Path, revision: str, git_query: GitQuery, *,
+                               allow_legacy_missing: bool = False) -> ActiveReference | None:
+    """Read the selection from the measured commit, never from the working tree."""
+    _require(len(revision) == 40 and all(c in "0123456789abcdef" for c in revision),
+             "reference selection revision is invalid")
+    found = git_query(root, ("ls-tree", "--name-only", revision, "--", HISTORY_PATH)).splitlines()
+    if not found:
+        _require(allow_legacy_missing, "reference history is absent at selected commit")
+        return None
+    _require(found == [HISTORY_PATH], "reference history Git tree differs")
+    history = json.loads(git_query(root, ("show", f"{revision}:{HISTORY_PATH}")),
+                         object_pairs_hook=_unique_object)
+    if not isinstance(history, dict) or history.get("schema") != "krr-html-performance-history-v1":
+        raise ValueError("unsupported reference history")
+    active = _text(history.get("activeReferenceRecordId"), "active reference id")
+    records = history.get("records")
+    if not isinstance(records, list) or not records or any(not isinstance(row, dict) for row in records):
+        raise ValueError("reference history records are invalid")
+    ids = [_text(row.get("id"), "reference record id") for row in records]
+    _require(len(ids) == len(set(ids)) and ids.count(active) == 1, "reference record identity differs")
+    record = records[ids.index(active)]
+    return _active_record(record, active)
+
+
+def _active_record(record: dict[str, object], active: str) -> ActiveReference:
+    source_head = _text(record.get("sourceCommit"), "reference source commit")
+    _require(len(source_head) == 40 and all(c in "0123456789abcdef" for c in source_head),
+             "reference source commit is invalid")
+    acceptance = record.get("measuredAcceptance")
+    scope = record.get("scope")
+    evidence = record.get("evidence")
+    pins = record.get("referenceBuild")
+    if not all(isinstance(item, dict) for item in (acceptance, scope, evidence, pins)):
+        raise ValueError("reference record admission fields are missing")
+    assert isinstance(acceptance, dict) and isinstance(scope, dict)
+    assert isinstance(evidence, dict) and isinstance(pins, dict)
+    score = acceptance.get("htmlMinimumScore")
+    threshold = acceptance.get("htmlScoreThreshold")
+    phases = record.get("candidatePhaseStatistics")
+    phase_names = {"cold_open", "warm_open", "re_display", "full_y", "post_operation", "same_session_resize"}
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        raise ValueError("reference score is invalid")
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+        raise ValueError("reference threshold is invalid")
+    _require(type(acceptance.get("verifierExitCode")) is int
+             and acceptance.get("verifierExitCode") == 0
+             and acceptance.get("performanceNonregression") is True
+             and acceptance.get("outputFontIdentityEquivalence") == "established"
+             and type(scope.get("candidateConditions")) is int
+             and scope.get("candidateConditions") == 84
+             and 100.0 >= float(score) >= float(threshold) >= 90.0,
+             "reference record is not an accepted complete candidate")
+    _require(isinstance(phases, dict) and set(phases) == phase_names,
+             "reference phase inventory differs")
+    assert isinstance(phases, dict)
+    for phase in phases.values():
+        if not isinstance(phase, dict):
+            raise ValueError("reference phase is invalid")
+        duration = phase.get("maxSampleSeconds")
+        _require(not isinstance(duration, bool) and isinstance(duration, (int, float))
+                 and 0 <= duration < 3.0, "reference phase exceeds the performance limit")
+    _require(pins.get("schema") == "krr-html-performance-reference-build-pins-v1"
+             and pins.get("buildArtifactSchema") == "krr-html-performance-build-artifact-v3"
+             and set(pins) == REFERENCE_BUILD_FIELDS | {"schema", "buildArtifactSchema"},
+             "reference build pin schema differs")
+    return ActiveReference(active, source_head, _sha(record.get("bundleManifestSha256"), "bundle manifest"),
+                           _sha(evidence.get("verifierStdoutSha256"), "verifier stdout"),
+                           {field: _sha(pins[field], field) for field in REFERENCE_BUILD_FIELDS})
 
 
 class ReferenceParentProof(NamedTuple):
@@ -43,6 +126,9 @@ class ReferenceParentProof(NamedTuple):
     dependency_refs: tuple[FilePin, ...]
     build_artifact_path: Path
     frozen_binary_path: Path
+    reference_kind: str = REFERENCE_KIND
+    record_id: str | None = None
+    transport_sources: tuple[tuple[str, Path], ...] = ()
 
 
 def _require(condition: bool, message: str) -> None:
@@ -249,12 +335,79 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
+def load_history_reference_proof(
+    wrapper_path: Path, selection: ActiveReference, *, file_resolver: FileResolver,
+    validate_build: Callable[[object, ActiveReference], dict[str, object]],
+) -> ReferenceParentProof:
+    """Bind a selected historical candidate to its original validated v3 build."""
+    wrapper = json.loads(wrapper_path.read_text(encoding="utf8"), object_pairs_hook=_unique_object)
+    if not isinstance(wrapper, dict):
+        raise ValueError("history reference wrapper must be an object")
+    role = "reference-history-" + selection.record_id
+    _require(wrapper.get("schema") == "krr-html-performance-reference-history-v1"
+             and wrapper.get("recordId") == selection.record_id
+             and wrapper.get("role") == role
+             and wrapper.get("referenceKind") == "accepted-history-candidate"
+             and wrapper.get("originalArm") == "candidate"
+             and wrapper.get("publishedSdk") is False
+             and wrapper.get("parentHead") == selection.source_head,
+             "history reference wrapper identity differs")
+    refs: list[FilePin] = []
+    def checked_ref(value: object, field: str, expected_sha: str) -> tuple[Path, str]:
+        if not isinstance(value, dict):
+            raise ValueError(field + " reference is missing")
+        path = _text(value.get("path"), field + " path")
+        checksum = _sha(value.get("sha256"), field + " SHA")
+        _require(checksum == expected_sha, field + " pin differs")
+        physical = file_resolver(value, field)
+        _require(physical.is_file() and not physical.is_symlink()
+                 and hashlib.sha256(physical.read_bytes()).hexdigest() == checksum,
+                 field + " bytes differ")
+        refs.append(FilePin(path, checksum))
+        return physical, checksum
+    manifest_path, _ = checked_ref(wrapper.get("sourceBundleManifest"), "source bundle manifest",
+                                   selection.bundle_manifest_sha256)
+    manifest = json.loads(manifest_path.read_text(encoding="utf8"), object_pairs_hook=_unique_object)
+    _require(isinstance(manifest, dict) and manifest.get("schema") == "krr-html-performance-release-bundle-v1"
+             and manifest.get("head") == selection.source_head, "reference source bundle identity differs")
+    checked_ref(wrapper.get("verifierStdout"), "verifier stdout", selection.verifier_stdout_sha256)
+    pins = selection.build_pins
+    build_ref = wrapper.get("originalBuildArtifact")
+    build, build_sha = checked_ref(build_ref, "original build", pins["buildArtifactSha256"])
+    snapshot, snapshot_sha = checked_ref(wrapper.get("sourceSnapshot"), "source snapshot",
+                                          pins["sourceSnapshotSha256"])
+    binary_ref = wrapper.get("frozenBinary")
+    if not isinstance(binary_ref, dict):
+        raise ValueError("frozen binary reference is missing")
+    binary, binary_sha = checked_ref(binary_ref, "frozen binary", pins["binarySha256"])
+    context, _ = checked_ref(wrapper.get("parentContextBefore"), "context before", pins["contextBeforeSha256"])
+    context_data = json.loads(context.read_text(encoding="utf8"), object_pairs_hook=_unique_object)
+    if not isinstance(context_data, dict) or not isinstance(context_data.get("inputs"), list):
+        raise ValueError("reference context input inventory differs")
+    binary_rows = [row for row in context_data["inputs"]
+                   if isinstance(row, dict) and row.get("path") == binary_ref.get("path")]
+    _require(len(binary_rows) == 1 and binary_rows[0].get("sha256") == binary_sha,
+             "reference context does not bind the frozen binary")
+    validated = validate_build(build_ref, selection)
+    for name, value in (("head", selection.source_head), ("binarySha256", binary_sha),
+                        ("sourceSnapshotSha256", snapshot_sha), ("buildArtifactSha256", build_sha),
+                        ("lockSha256", pins["lockSha256"]),
+                        ("cargoExecutableSha256", pins["cargoExecutableSha256"]),
+                        ("rustcExecutableSha256", pins["rustcExecutableSha256"])):
+        _require(validated.get(name) == value, "reference validated build differs: " + name)
+    del snapshot
+    return ReferenceParentProof(role, "candidate", selection.source_head, snapshot_sha, binary_sha,
+                                pins["lockSha256"], pins["cargoExecutableSha256"], build_sha,
+                                hashlib.sha256(wrapper_path.read_bytes()).hexdigest(), tuple(refs),
+                                build, binary, "accepted-history-candidate", selection.record_id)
+
+
 def reference_parent_contract(proof: ReferenceParentProof) -> JsonObject:
     """Return the producer-facing contract while preserving original arm identity."""
-    return {
+    contract: JsonObject = {
         "role": proof.role,
         "armId": proof.role,
-        "referenceKind": REFERENCE_KIND,
+        "referenceKind": proof.reference_kind,
         "publishedSdk": False,
         "originalArm": proof.original_arm,
         "parentHead": proof.head,
@@ -266,3 +419,6 @@ def reference_parent_contract(proof: ReferenceParentProof) -> JsonObject:
         "dependencyRefs": [{"path": pin.logical_path, "sha256": pin.sha256}
                            for pin in proof.dependency_refs],
     }
+    if proof.record_id is not None:
+        contract["recordId"] = proof.record_id
+    return contract

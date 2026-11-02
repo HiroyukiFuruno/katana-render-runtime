@@ -105,6 +105,109 @@ class RuntimeScriptCacheCliTests(unittest.TestCase):
         result.commit_receipt(self.root, producer, IDENTITY, epoch, receipt_path, receipt)
         return receipt_path
 
+    def prepare_all_profile_receipts(self) -> dict[str, dict[str, object]]:
+        reports = {}
+        for producer in profiles.RUNTIME_SCRIPT_PROFILES:
+            self.prepare_profile_receipt(producer)
+            reports[producer] = identity_report(producer=producer)
+        return reports
+
+    def assert_no_profile_leases(self, *, except_producer: str | None = None) -> None:
+        for producer in profiles.RUNTIME_SCRIPT_PROFILES:
+            if producer != except_producer:
+                self.assertFalse(
+                    (self.root / result.RECEIPT_DIRECTORY / f".{producer}.lease").exists(),
+                    f"lease remained for {producer}",
+                )
+
+    def test_ensure_all_reuses_stable_receipts_under_profile_leases(self) -> None:
+        reports = self.prepare_all_profile_receipts()
+        original_verify = result_verify.verify_receipt
+        verified: list[str] = []
+
+        def verify(repo: Path, producer: str, identity: str, epoch: str,
+                   receipt: Path) -> dict[str, object]:
+            self.assertTrue((repo / result.RECEIPT_DIRECTORY / f".{producer}.lease").is_file())
+            verified_receipt = original_verify(repo, producer, identity, epoch, receipt)
+            verified.append(producer)
+            return verified_receipt
+
+        with (
+            patch.object(identity_collector, "collect_fixed_leaf_identity_reports", return_value=reports),
+            patch.object(result_verify, "verify_receipt", side_effect=verify),
+            patch.object(cache_cli, "run_current") as run,
+        ):
+            report = cache_cli.ensure_all(self.root)
+        self.assertFalse(report["recovered"])
+        self.assertCountEqual(verified, list(profiles.RUNTIME_SCRIPT_PROFILES) * 2)
+        validated = cast(list[dict[str, object]], report["producers"])
+        self.assertCountEqual([row["producer"] for row in validated], profiles.RUNTIME_SCRIPT_PROFILES)
+        self.assertEqual(len(validated), len(profiles.RUNTIME_SCRIPT_PROFILES))
+        self.assertTrue(all(row["valid"] is True for row in validated))
+        run.assert_not_called()
+        self.assert_no_profile_leases()
+
+    def test_ensure_all_rejects_active_profile_owner_without_leaking_leases(self) -> None:
+        reports = self.prepare_all_profile_receipts()
+        producer = sorted(profiles.RUNTIME_SCRIPT_PROFILES)[-1]
+        lease, device, inode = producer_runner._lease(self.root, producer)
+        try:
+            with (
+                patch.object(identity_collector, "collect_fixed_leaf_identity_reports", return_value=reports),
+                patch.object(cache_cli, "run_current") as run,
+                self.assertRaises(producer_runner.RuntimeScriptProducerError),
+            ):
+                cache_cli.ensure_all(self.root)
+            run.assert_not_called()
+            self.assertTrue(lease.is_file())
+            self.assert_no_profile_leases(except_producer=producer)
+        finally:
+            producer_runner._release_lease(lease, device, inode)
+        self.assert_no_profile_leases()
+
+    def test_ensure_all_rejects_changed_source_or_tool_during_reuse(self) -> None:
+        for changed in ("source", "tools"):
+            with self.subTest(changed=changed):
+                before = self.prepare_all_profile_receipts()
+                after = dict(before)
+                producer = sorted(profiles.RUNTIME_SCRIPT_PROFILES)[-1]
+                after[producer] = identity_report(
+                    "7" * 64,
+                    producer=producer,
+                    input_digest="8" * 64,
+                    source_manifest="9" * 64 if changed == "source" else SOURCE_MANIFEST,
+                    source_inputs="9" * 64 if changed == "source" else SOURCE_INPUTS,
+                    tools="9" * 64 if changed == "tools" else TOOLS,
+                )
+                with (
+                    patch.object(identity_collector, "collect_fixed_leaf_identity_reports", side_effect=[before, after]),
+                    patch.object(cache_cli, "run_current", side_effect=result.RuntimeScriptResultError("recovery required")),
+                    self.assertRaises(result.RuntimeScriptResultError),
+                ):
+                    cache_cli.ensure_all(self.root)
+                self.assert_no_profile_leases()
+
+    def test_ensure_all_releases_leases_before_recovering_tampered_receipt(self) -> None:
+        reports = self.prepare_all_profile_receipts()
+        producer = sorted(profiles.RUNTIME_SCRIPT_PROFILES)[-1]
+        receipt = self.root / result.RECEIPT_DIRECTORY / f"{producer}.json"
+        receipt.write_bytes(receipt.read_bytes() + b" ")
+
+        def recover(repo: Path, profile: str) -> dict[str, object]:
+            self.assertEqual(repo, self.root)
+            self.assertEqual(profile, producer)
+            self.assert_no_profile_leases()
+            self.prepare_profile_receipt(profile)
+            return {"producer": profile, "valid": True, "executedGroups": 1}
+
+        with (
+            patch.object(identity_collector, "collect_fixed_leaf_identity_reports", return_value=reports),
+            patch.object(cache_cli, "run_current", side_effect=recover),
+        ):
+            report = cache_cli.ensure_all(self.root)
+        self.assertTrue(report["recovered"])
+        self.assert_no_profile_leases()
+
     def test_all_fixed_profiles_reuse_only_verified_stable_receipts(self) -> None:
         for producer in profiles.RUNTIME_SCRIPT_PROFILES:
             with self.subTest(producer=producer):
@@ -586,7 +689,7 @@ class RuntimeScriptCacheCliTests(unittest.TestCase):
                         identity_report(run_identity), legacy, run_identity
                     )
 
-    def test_ensure_all_uses_one_batch_when_every_leaf_is_valid(self) -> None:
+    def test_ensure_all_rechecks_batch_when_every_leaf_is_valid(self) -> None:
         reports = {
             producer: identity_report(f"{index + 1:064x}", producer=producer)
             for index, producer in enumerate(profiles.RUNTIME_SCRIPT_PROFILES)
@@ -601,7 +704,7 @@ class RuntimeScriptCacheCliTests(unittest.TestCase):
         ):
             result_report = cache_cli.ensure_all(self.root)
         self.assertFalse(result_report["recovered"])
-        self.assertEqual(collect.call_count, 1)
+        self.assertEqual(collect.call_count, 2)
 
     def test_ensure_all_recovers_only_invalid_leaf_then_revalidates_batch(self) -> None:
         reports = {
@@ -625,14 +728,14 @@ class RuntimeScriptCacheCliTests(unittest.TestCase):
                 "_validate_report",
                 side_effect=[result.RuntimeScriptResultError("stale")]
                 + [validation] * (len(reports) - 1)
-                + [validation] * len(reports),
+                + [validation] * (2 * len(reports)),
             ),
             patch.object(cache_cli, "run_current", return_value={"producer": invalid}) as run,
         ):
             result_report = cache_cli.ensure_all(self.root)
         self.assertTrue(result_report["recovered"])
         self.assertEqual(run.call_args.args, (self.root, invalid))
-        self.assertEqual(collect.call_count, 2)
+        self.assertEqual(collect.call_count, 3)
 
     def test_unavailable_collector_fails_closed_without_creating_anchor(self) -> None:
         with patch.object(

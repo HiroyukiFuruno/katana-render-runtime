@@ -7,6 +7,7 @@ import io
 import json
 import math
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -17,6 +18,13 @@ from collections.abc import Callable
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, cast
 from unittest.mock import patch
+
+import html_performance_remote_evidence as remote_evidence
+import html_performance_remote_admission as remote_admission
+import html_performance_attestation as attestation
+import html_performance_fresh_reference as fresh_reference
+import html_performance_reference as reference_domain
+import verify_html_performance_evidence as canonical_gate
 
 if TYPE_CHECKING:
     from verify_html_performance_evidence import Bundle
@@ -249,6 +257,24 @@ class CatalogOperationStreamTest(unittest.TestCase):
             path.write_bytes(b"tampered")
             with self.assertRaisesRegex(ValueError, "provenance input file differs"):
                 gate.provenance_file_refs(report)
+
+    def test_remote_provenance_requires_matching_transported_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            payload = Path(temporary) / "font"
+            payload.write_bytes(b"verified")
+            checksum = gate.sha256(payload)
+            report: JsonObject = {"fontProvenance": [{"fileBytesVerified": True,
+                                   "filePath": "/original-host/font", "fileSha256": checksum}]}
+            with self.assertRaisesRegex(ValueError, "provenance input file differs"):
+                gate.provenance_file_refs(report)
+            def resolve(pin: JsonObject) -> Path:
+                self.assertEqual(pin, {"path": "/original-host/font", "sha256": checksum})
+                return payload
+            self.assertEqual(gate.provenance_file_refs(report, file_resolver=resolve),
+                             [{"path": "/original-host/font", "sha256": checksum}])
+            payload.write_bytes(b"modified")
+            with self.assertRaisesRegex(ValueError, "provenance input file differs"):
+                gate.provenance_file_refs(report, file_resolver=resolve)
 
     def test_mutation_delivery_evidence_is_observation_not_input(self) -> None:
         self.assertEqual(gate.catalog_operation_stream("script-await-mutation-delivery", {
@@ -840,11 +866,14 @@ class PerformanceEvidenceTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root: Path = Path(self.temp.name) / "repo"
+        self.root: Path = Path(self.temp.name).resolve() / "repo"
         self.root.mkdir()
-        self.bundle: Path = Path(self.temp.name) / "bundle"
+        self.bundle: Path = Path(self.temp.name).resolve() / "bundle"
         self.bundle.mkdir()
         (self.root / "source.rs").write_text("fn main() {}\n")
+        history = self.root / "docs/performance/html-performance-history.json"
+        history.parent.mkdir(parents=True)
+        history.write_text("historical fixture\n")
         fixture_lock = Path(__file__).resolve().parents[1] / "html/performance-harness/Cargo.lock"
         lock_path = self.root / gate.HARNESS_ROOT / "Cargo.lock"
         lock_path.parent.mkdir(parents=True)
@@ -1157,6 +1186,61 @@ class PerformanceEvidenceTest(unittest.TestCase):
         bundle = gate.Bundle(self.bundle)
         with self.assertRaisesRegex(ValueError, "unsupported build artifact schema"):
             gate._validate_build_proof(bundle, self.root, ref, "candidate")
+
+    def test_remote_candidate_rejects_unreviewed_schema_role_and_source_head(self) -> None:
+        cases = (("schema", "krr-html-performance-build-artifact-v1", "remote candidate build role differs"),
+                 ("arm", "baseline", "remote candidate build role differs"),
+                 ("source", "other", "remote candidate source HEAD differs"))
+        for index, (field, changed, message) in enumerate(cases):
+            with self.subTest(field=field):
+                source = self.add_file(f"/remote/source-{index}", f"remote/source-{index}",
+                                       {"head": "f" * 40 if field == "source" else self.head})
+                proof: JsonObject = {"schema": "krr-html-performance-build-artifact-v3",
+                                     "arm": "candidate", "buildExit": 0, "sourceBeforeRef": source}
+                if field != "source":
+                    proof[field] = changed
+                ref = self.add_file(f"/remote/build-{index}", f"remote/build-{index}", proof)
+                self.save_transport()
+                with self.assertRaisesRegex(ValueError, message):
+                    remote_evidence.validate_remote_candidate_build(gate.Bundle(self.bundle), self.root, ref, self.head)
+
+    def test_fresh_reference_source_proof_inputs_are_bound_to_measurement_context(self) -> None:
+        fields = ("controllerSourceBeforeRef", "selectedSourceProofRef", "sourceBeforeRef", "sourceSnapshotRef")
+        pins = [self.add_file(f"/fresh/{field}.json", f"fresh/{field}.json", {"field": field}) for field in fields]
+        proof: JsonObject = dict(zip(fields, pins, strict=True))
+        context = self.add_file("/fresh/context.json", "fresh/context.json", {
+            "inputs": [{**pin, "exists": True} for pin in pins]})
+        self.save_transport()
+        expected: JsonObject = {"referenceParent": {"sourceRefs": pins},
+                                "sourcePair": {"before": pins[0]}, "endpointRefs": {"before": context}}
+        bundle = gate.Bundle(self.bundle)
+        fresh_reference.require_fresh_source_inputs(bundle, expected, proof)
+        wrong = dict(proof)
+        wrong["sourceSnapshotRef"] = pins[2]
+        with self.assertRaisesRegex(ValueError, "role declarations differ"):
+            fresh_reference.require_fresh_source_inputs(bundle, expected, wrong)
+        expected["sourcePair"] = {"before": pins[1]}
+        with self.assertRaisesRegex(ValueError, "controller source differs"):
+            fresh_reference.require_fresh_source_inputs(bundle, expected, proof)
+
+    def test_remote_baseline_cannot_switch_to_sdk_or_unselected_history(self) -> None:
+        selection = reference_domain.ActiveReference("active", "a" * 40, "b" * 64, "c" * 64, {})
+        cases: list[JsonObject] = [{}, {"referenceParent": {"role": "reference-history-other",
+                                   "armId": "reference-history-other", "recordId": "other",
+                                   "referenceKind": "accepted-history-candidate", "publishedSdk": False,
+                                   "originalArm": "candidate"}}]
+        with patch.object(reference_domain, "active_reference_at_commit", return_value=selection):
+            for expected in cases:
+                with self.subTest(expected=expected), \
+                     self.assertRaisesRegex(ValueError, "remote baseline is not the active history reference"):
+                    remote_evidence.validate_remote_history_baseline(
+                        gate.Bundle(self.bundle), self.root, expected, self.head)
+
+    def test_formal_verifier_rejects_untrusted_remote_context(self) -> None:
+        with self.assertRaisesRegex(ValueError, "remote evidence context differs"):
+            gate._verify(self.bundle, self.root, require_catalog=True, remote_context={})
+        with self.assertRaisesRegex(ValueError, "remote evidence context is unauthenticated"):
+            remote_admission.RemoteEvidenceContext(self.head, "0" * 64, {}, authority=object())
 
     def make_attempt(self, index: int, width: int, height: int) -> None:
         origin = "/captured/repo"
@@ -1705,6 +1789,57 @@ class PerformanceEvidenceTest(unittest.TestCase):
         self.assertIn("formal HTML performance requires all 84 catalog conditions",
                       stderr.getvalue())
 
+    def test_reuse_keeps_original_head_and_rejects_unaccepted_bundle(self) -> None:
+        history = self.root / "docs/performance/html-performance-history.json"
+        history.write_text("updated fixture\n")
+        subprocess.run(["git", "-C", str(self.root), "add", str(history)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Unit", "-c",
+                        "user.email=unit@example.invalid", "commit", "-qm", "history"], check=True)
+        eligible = gate.git(self.root, "rev-parse", "HEAD").strip()
+        context = gate._verified_reuse_context(self.root, self.head, git_query=None)
+        from html_performance_source_reuse import SourceReuseContext
+        self.assertIsInstance(context, SourceReuseContext)
+        if not isinstance(context, SourceReuseContext):
+            raise AssertionError("invalid reuse context")
+        self.assertEqual((context.measured_head, context.eligible_head), (self.head, eligible))
+        before = gate.read_json(self.bundle / "0/before.json")
+        self.assertEqual(gate._source_for_validation(self.root, before, git_query=None,
+                                                     reuse_context=context),
+                         gate.committed_records(self.root, self.head))
+        with self.assertRaisesRegex(ValueError, "bundle is not current HEAD"):
+            gate.verify(self.bundle, self.root)
+        manifest_sha = gate.sha256(self.bundle / "bundle.json")
+        with self.assertRaisesRegex(ValueError, "all 84 catalog conditions"):
+            gate.verify_source_reuse(self.bundle, self.root, manifest_sha, self.bundle,
+                                     manifest_sha, "common/candidate-build.json", "0" * 64)
+
+    def test_reuse_rejects_tampered_original_bundle_file(self) -> None:
+        manifest_sha = gate.sha256(self.bundle / "bundle.json")
+        (self.bundle / "common/dom.json").write_bytes(b"tampered")
+        with self.assertRaisesRegex(ValueError, "transport file hash mismatch"):
+            gate.verify_source_reuse(self.bundle, self.root, manifest_sha, self.bundle,
+                                     manifest_sha, "common/candidate-build.json", "0" * 64)
+
+    def test_reuse_checks_current_build_bundle_and_proof(self) -> None:
+        current_bundle = Path(self.temp.name) / "current-build"
+        shutil.copytree(self.bundle, current_bundle)
+        measured_sha = gate.sha256(self.bundle / "bundle.json")
+        current_sha = gate.sha256(current_bundle / "bundle.json")
+        artifact = current_bundle / "common/candidate-build.json"
+        artifact_sha = gate.sha256(artifact)
+        original = artifact.read_bytes()
+        with (patch.object(gate, "_verify", return_value={}),
+              patch.object(gate, "_require_formal_release_result"),
+              patch.object(gate, "validate_expected_builds", return_value={"candidate": {}})):
+            artifact.write_bytes(b"tampered")
+            with self.assertRaisesRegex(ValueError, "transport file hash mismatch"):
+                gate.verify_source_reuse(self.bundle, self.root, measured_sha, current_bundle,
+                                         current_sha, "common/candidate-build.json", artifact_sha)
+            artifact.write_bytes(original)
+            with self.assertRaisesRegex(ValueError, "unsupported build artifact schema"):
+                gate.verify_source_reuse(self.bundle, self.root, measured_sha, current_bundle,
+                                         current_sha, "common/candidate-build.json", artifact_sha)
+
     def test_formal_catalog_dispatch_requires_exact84_and_catalog_binding(self) -> None:
         attempts: list[JsonObject] = [{"expected": f"attempt-{index}"} for index in range(84)]
         gate._require_catalog_attempt_set(attempts, {"catalogCondition": {"condition_id": "first"}})
@@ -2161,6 +2296,36 @@ class PerformanceEvidenceTest(unittest.TestCase):
 
 
 class BaselineArmContractTest(unittest.TestCase):
+    def test_fresh_reference_plans_every_source_pin_before_worker(self) -> None:
+        pins: list[JsonObject] = [{"path": f"/fresh/{index}", "sha256": str(index) * 64}
+                                  for index in range(4)]
+        contract: JsonObject = {"role": "fresh-history-source-record", "armId": "fresh-history-source-record",
+                                "recordId": "record", "referenceKind": "fresh-history-source",
+                                "publishedSdk": False, "originalArm": "candidate", "sourceRefs": pins}
+        expected: JsonObject = {"referenceParent": contract, "fixture_sha256": "f" * 64,
+            "arms": {"fresh-history-source-record": {"binary_sha256": "a" * 64,
+                        "build_artifact_ref": {"path": "/baseline/proof", "sha256": "b" * 64}},
+                     "candidate": {"binary_sha256": "c" * 64,
+                        "build_artifact_ref": {"path": "/candidate/proof", "sha256": "d" * 64}}}}
+        binaries: dict[str, JsonObject] = {"baseline": {"path": "/baseline/bin", "sha256": "a" * 64},
+                                            "candidate": {"path": "/candidate/bin", "sha256": "c" * 64}}
+        planned = gate.planned_execution_inputs(Path("/repo"), expected, binaries)
+        for pin in pins:
+            self.assertIn(pin, planned)
+        contract["sourceRefs"] = pins[:-1]
+        with self.assertRaisesRegex(ValueError, "source ref inventory differs"):
+            gate.planned_execution_inputs(Path("/repo"), expected, binaries)
+
+    def test_fresh_reference_keeps_distinct_role_and_no_legacy_exception(self) -> None:
+        expected: JsonObject = {"referenceParent": {"role": "fresh-history-source-record",
+                                "armId": "fresh-history-source-record", "recordId": "record",
+                                "referenceKind": "fresh-history-source", "publishedSdk": False,
+                                "originalArm": "candidate"},
+                                "catalogCondition": {"condition_id": "navigation/all-toc-links/620x900@1",
+                                                     "operation_kind": "navigation-all-pointer-clicks"}}
+        self.assertEqual(gate.baseline_arm_id(expected), "fresh-history-source-record")
+        self.assertIsNone(gate.non_comparable_baseline_fragment(expected))
+
     def test_execution_binary_role_rejects_same_hash_at_another_path(self) -> None:
         proof: JsonObject = {"path": "/old/binary", "sha256": "a" * 64}
         row: JsonObject = {"executable": "/old/binary", "executable_sha256": "a" * 64}
@@ -2184,6 +2349,22 @@ class BaselineArmContractTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "identity differs"):
             gate.baseline_arm_id(expected)
 
+    def test_history_reference_never_inherits_legacy_fragment_exception(self) -> None:
+        contract: JsonObject = {"role": "reference-history-first", "armId": "reference-history-first",
+                                "recordId": "first", "referenceKind": "accepted-history-candidate",
+                                "publishedSdk": False, "originalArm": "candidate"}
+        expected: JsonObject = {"referenceParent": contract, "catalogCondition": {
+            "condition_id": "navigation/all-toc-links/620x900@1",
+            "operation_kind": "navigation-all-pointer-clicks"}}
+        self.assertEqual(gate.baseline_arm_id(expected), "reference-history-first")
+        self.assertIsNone(gate.non_comparable_baseline_fragment(expected))
+        for field, value in (("recordId", "other"), ("originalArm", "baseline"), ("publishedSdk", True)):
+            with self.subTest(field=field):
+                changed = dict(contract)
+                changed[field] = value
+                with self.assertRaises(ValueError):
+                    gate.baseline_arm_id({"referenceParent": changed})
+
 
 class PerformanceAcquisitionTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -2195,6 +2376,121 @@ class PerformanceAcquisitionTest(unittest.TestCase):
         self.repository: str = "owner/repo"
         self.destination: Path = self.fixture.root.parent / "acquired"
         self.calls: list[str] = []
+
+    def test_remote_formal_entry_requires_the_full_recomputed_result_to_match_receipt(self) -> None:
+        first = gate.read_json(self.fixture.expected_paths[0])
+        candidate = gate._object(gate._object(first["arms"], "fixture arms")["candidate"], "candidate arm")
+        build: JsonObject = {"binarySha256": candidate["binary_sha256"],
+                             "sourceSnapshotSha256": candidate["source_snapshot_sha256"]}
+        result: JsonObject = {"head": self.fixture.head, "performanceNonregression": True,
+                              "htmlStage90": {"acceptance": True, "fontIdentityEquivalence": "established"}}
+        with patch.object(attestation, "verify_remote_attestation"), \
+             patch.object(remote_evidence, "extract_remote_transport"), \
+             patch.object(remote_evidence, "validate_producer_verification_receipt", return_value=result), \
+             patch.object(remote_evidence, "validate_remote_candidate_build", return_value=build), \
+             patch.object(remote_evidence, "validate_remote_history_baseline", return_value={}), \
+             patch.object(canonical_gate, "_require_catalog_attempt_set"), \
+             patch.object(canonical_gate, "_verify", return_value=result) as verify:
+            verified = remote_admission.verify_authenticated_remote(
+                self.fixture.bundle, self.fixture.root / "artifact.zip", self.fixture.root,
+                self.repository, {}, "artifact", self.fixture.head)
+            self.assertEqual(verified, result)
+            self.assertIsInstance(verify.call_args.kwargs["remote_context"], remote_admission.RemoteEvidenceContext)
+            verify.return_value = {**result, "head": "b" * 40}
+            with self.assertRaisesRegex(ValueError, "remote formal result differs"):
+                remote_admission.verify_authenticated_remote(
+                    self.fixture.bundle, self.fixture.root / "artifact.zip", self.fixture.root,
+                    self.repository, {}, "artifact", self.fixture.head)
+
+    def test_attestation_requires_exact_signed_run_attempt_and_subject(self) -> None:
+        archive = self.fixture.root.parent / "attested.zip"
+        archive.write_bytes(b"signed artifact")
+        name = "paired-artifact"
+        run: JsonObject = {"id": 101, "run_attempt": 2, "head_sha": "a" * 40,
+                           "event": "push", "head_branch": "release/v0.4.24"}
+        statement: JsonObject = {"predicateType": "https://slsa.dev/provenance/v1",
+            "subject": [{"name": name, "digest": {"sha256": gate.sha256(archive)}}],
+            "predicate": {"runDetails": {"metadata": {
+                "invocationId": "https://github.com/owner/repo/actions/runs/101/attempts/2"}}}}
+        source_ref = "refs/heads/release/v0.4.24"
+        workflow_uri = "https://github.com/owner/repo/.github/workflows/test-and-build.yml@" + source_ref
+        certificate: JsonObject = {"runInvocationURI": "https://github.com/owner/repo/actions/runs/101/attempts/2",
+            "sourceRepositoryDigest": "a" * 40, "buildSignerDigest": "b" * 40, "buildConfigDigest": "c" * 40,
+            "sourceRepositoryURI": "https://github.com/owner/repo", "sourceRepositoryRef": source_ref,
+            "runnerEnvironment": "github-hosted", "buildSignerURI": workflow_uri, "buildConfigURI": workflow_uri}
+        row: JsonObject = {"attestation": {"bundle": True}, "verificationResult": {
+            "signature": {"certificate": certificate}, "verifiedTimestamps": [], "statement": statement}}
+        def verified() -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess([], 0, stdout=json.dumps([row]), stderr="")
+        with patch.object(gate.subprocess, "run", side_effect=lambda *_args, **_kwargs: verified()) as command, \
+             patch.object(attestation, "_require_reviewed_workflow_blob"):
+            attestation.verify_remote_attestation(archive, self.fixture.root, self.repository, run, name, "a" * 40)
+            argv = command.call_args.args[0]
+            self.assertIn("--deny-self-hosted-runners", argv)
+            run["run_attempt"] = 3
+            with self.assertRaisesRegex(ValueError, "certificate run or subject differs"):
+                attestation.verify_remote_attestation(archive, self.fixture.root, self.repository, run, name, "a" * 40)
+            run["run_attempt"] = 2
+            with self.assertRaisesRegex(ValueError, "certificate run or subject differs"):
+                attestation.verify_remote_attestation(archive, self.fixture.root, self.repository, run, "other", "a" * 40)
+
+    def test_pr_attestation_uses_merge_certificate_and_independent_checkout_head(self) -> None:
+        archive = self.fixture.root.parent / "pr-attested.zip"
+        archive.write_bytes(b"signed artifact")
+        head, base, merge, signer = (character * 40 for character in "abcd")
+        run: JsonObject = {"id": 101, "run_attempt": 1, "head_sha": head, "event": "pull_request",
+                           "head_branch": "release/v0.4.24",
+                           "pull_requests": [{"number": 7, "base": {"sha": base}, "head": {"sha": head}}]}
+        ref = "refs/pull/7/merge"
+        uri = "https://github.com/owner/repo/.github/workflows/test-and-build.yml@" + ref
+        signer_uri = "https://github.com/owner/repo/.github/workflows/test-and-build.yml@refs/heads/release/v0.4.24"
+        certificate: JsonObject = {"runInvocationURI": "https://github.com/owner/repo/actions/runs/101/attempts/1",
+            "sourceRepositoryDigest": merge, "buildSignerDigest": signer, "buildConfigDigest": merge,
+            "sourceRepositoryURI": "https://github.com/owner/repo", "sourceRepositoryRef": ref,
+            "runnerEnvironment": "github-hosted", "buildSignerURI": signer_uri, "buildConfigURI": uri}
+        statement: JsonObject = {"predicateType": "https://slsa.dev/provenance/v1",
+            "subject": [{"name": "artifact", "digest": {"sha256": gate.sha256(archive)}}],
+            "predicate": {"runDetails": {"metadata": {"invocationId": certificate["runInvocationURI"]}}}}
+        row: JsonObject = {"attestation": {"bundle": True}, "verificationResult": {
+            "signature": {"certificate": certificate}, "verifiedTimestamps": [], "statement": statement}}
+        completed = subprocess.CompletedProcess([], 0, stdout=json.dumps([row]), stderr="")
+        commit: JsonObject = {"sha": merge, "parents": [{"sha": base}, {"sha": head}]}
+        with patch.object(gate.subprocess, "run", return_value=completed), \
+             patch.object(attestation, "_github_json", return_value=commit), \
+             patch.object(attestation, "_require_reviewed_workflow_blob") as workflow:
+            attestation.verify_remote_attestation(archive, self.fixture.root, self.repository, run, "artifact", head)
+            self.assertEqual({call.args[2] for call in workflow.call_args_list}, {merge, signer})
+            certificate["runInvocationURI"] = "https://github.com/owner/repo/actions/runs/102/attempts/1"
+            completed.stdout = json.dumps([row])
+            with self.assertRaisesRegex(ValueError, "certificate run or subject differs"):
+                attestation.verify_remote_attestation(archive, self.fixture.root, self.repository, run, "artifact", head)
+
+    def test_producer_receipt_requires_bound_head_role_scope_and_manifest(self) -> None:
+        directory = self.fixture.root.parent / "receipt-fixture"
+        directory.mkdir()
+        manifest = directory / "bundle.json"
+        manifest.write_text(json.dumps({"schema": "krr-html-performance-release-bundle-v1",
+                                        "head": self.fixture.head, "files": [], "attempts": [{}] * 84}))
+        result: JsonObject = {"head": self.fixture.head, "conditions": 84, "candidateConditions": 84,
+                              "checks": 1680, "performanceNonregression": True,
+                              "htmlStage90": {"acceptance": True, "fontIdentityEquivalence": "established"}}
+        receipt: JsonObject = {"schema": "krr-html-performance-producer-verification-v1",
+                               "role": "producer-formal-verification", "head": self.fixture.head,
+                               "bundleManifestSha256": gate.sha256(manifest), "result": result}
+        path = directory / "producer-verification.json"
+        path.write_text(json.dumps(receipt))
+        self.assertEqual(remote_evidence.validate_producer_verification_receipt(directory, self.fixture.head), result)
+        for field, value in (("role", "other"), ("head", "b" * 40), ("bundleManifestSha256", "0" * 64)):
+            with self.subTest(field=field):
+                changed = dict(receipt)
+                changed[field] = value
+                path.write_text(json.dumps(changed))
+                with self.assertRaises(ValueError):
+                    remote_evidence.validate_producer_verification_receipt(directory, self.fixture.head)
+        path.write_text(json.dumps(receipt))
+        manifest.write_text(manifest.read_text() + " ")
+        with self.assertRaisesRegex(ValueError, "receipt identity differs"):
+            remote_evidence.validate_producer_verification_receipt(directory, self.fixture.head)
 
     def acquire_case(self, case: str) -> None:
         run: JsonObject = {"run_started_at": "2026-10-10T01:00:00Z", "id": 101, "head_sha": self.fixture.head, "head_repository": {"full_name": self.repository}, "path": ".github/workflows/test-and-build.yml", "status": "completed", "conclusion": "success", "run_attempt": 1}
@@ -2222,7 +2518,15 @@ class PerformanceAcquisitionTest(unittest.TestCase):
         with zipfile.ZipFile(buffer, "w") as zipped:
             for file in sorted(self.fixture.bundle.rglob("*")):
                 if file.is_file():
-                    zipped.writestr(str(file.relative_to(self.fixture.bundle)), file.read_bytes())
+                    relative = str(file.relative_to(self.fixture.bundle))
+                    content = file.read_bytes()
+                    if case == "remote_wrong_head" and relative == "bundle.json":
+                        document = json.loads(content)
+                        document["head"] = "c" * 40
+                        content = json.dumps(document).encode()
+                    elif case == "remote_changed_payload" and relative != "bundle.json":
+                        content = b"modified"
+                    zipped.writestr(relative, content)
             if case == "zip_traversal":
                 zipped.writestr("../escape", b"bad")
             elif case == "duplicate_zip":
@@ -2230,6 +2534,8 @@ class PerformanceAcquisitionTest(unittest.TestCase):
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", UserWarning)
                     zipped.writestr("bundle.json", b"duplicate")
+            elif case == "remote_extra_file":
+                zipped.writestr("extra", b"unexpected")
         archive = buffer.getvalue()
         self.artifact_digest: str = "sha256:" + hashlib.sha256(archive).hexdigest()
         artifact: JsonObject = {"id": 202, "name": f"html-performance-paired-{self.fixture.head}-101-1", "expired": False, "digest": self.artifact_digest}
@@ -2276,7 +2582,18 @@ class PerformanceAcquisitionTest(unittest.TestCase):
                 raise AssertionError(f"unexpected synthetic API request: {args}")
             return json.dumps(payload).encode()
 
-        with patch.object(gate.subprocess, "check_output", synthetic_api):
+        first = gate.read_json(self.fixture.expected_paths[0])
+        candidate = gate._object(gate._object(first["arms"], "fixture arms")["candidate"], "candidate arm")
+        candidate_build = {"binarySha256": candidate["binary_sha256"],
+                           "sourceSnapshotSha256": candidate["source_snapshot_sha256"]}
+        with patch.object(gate.subprocess, "check_output", synthetic_api), \
+             patch.object(attestation, "verify_remote_attestation"), \
+             patch.object(remote_evidence, "validate_producer_verification_receipt", return_value={}), \
+             patch.object(canonical_gate, "_require_catalog_attempt_set"), \
+             patch.object(remote_evidence, "validate_remote_candidate_build", return_value=candidate_build), \
+             patch.object(remote_evidence, "validate_remote_history_baseline"), \
+             patch.object(canonical_gate, "_verify", return_value={}), \
+             patch.object(canonical_gate, "_require_formal_release_result"):
             if producer:
                 with patch.dict(os.environ, environment):
                     gate.acquire(self.destination, self.fixture.root, self.repository, True)
@@ -2376,6 +2693,15 @@ class PerformanceAcquisitionTest(unittest.TestCase):
             self.acquire_case("digest_mismatch")
         self.assertFalse((self.destination / "bundle.json").exists())
 
+    def test_remote_transport_rejects_wrong_head_changed_payload_and_extra_files(self) -> None:
+        for case, message in (("remote_wrong_head", "remote bundle HEAD differs"),
+                              ("remote_changed_payload", "transport file hash mismatch"),
+                              ("remote_extra_file", "remote bundle archive inventory differs")):
+            with self.subTest(case=case):
+                self.destination = self.fixture.root.parent / case
+                with self.assertRaisesRegex(ValueError, message):
+                    self.acquire_case(case)
+
     def test_zip_traversal_is_rejected_before_extraction(self) -> None:
         with self.assertRaisesRegex(ValueError, "unsafe/duplicate archive path"):
             self.acquire_case("zip_traversal")
@@ -2394,6 +2720,25 @@ class PerformanceAcquisitionTest(unittest.TestCase):
 
 
 class PerformanceJsonBoundaryTest(unittest.TestCase):
+    def test_cached_acquisition_is_reauthenticated_before_formal_gate_reuse(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            existing = root / "evidence"
+            existing.mkdir()
+            (existing / "acquisition.json").write_text("{}")
+            result: JsonObject = {"head": "a" * 40}
+            argv = ["verify_html_performance_evidence.py", "--repo", str(root),
+                    "--evidence-dir", str(existing), "--repository", "owner/repo"]
+            with patch.object(gate.sys, "argv", argv), \
+                 patch.object(gate.sys, "stdout", io.StringIO()) as stdout, \
+                 patch.object(gate, "acquire", return_value=result) as acquire, \
+                 patch.object(gate, "verify") as local_verify:
+                self.assertEqual(gate.main(), 0)
+            self.assertEqual(json.loads(stdout.getvalue()), result)
+            self.assertNotEqual(acquire.call_args.args[0], existing)
+            self.assertEqual(acquire.call_args.args[1:3], (root, "owner/repo"))
+            local_verify.assert_not_called()
+
     def test_candidate_build_cli_emits_only_build_identity_pins(self) -> None:
         expected: JsonObject = {
             "binarySha256": "a" * 64,

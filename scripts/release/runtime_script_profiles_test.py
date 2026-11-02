@@ -9,7 +9,15 @@ import runtime_script_profiles as profiles
 
 class RuntimeScriptProfilesTests(unittest.TestCase):
     def test_exact_seven_profiles_and_recipes(self) -> None:
-        self.assertEqual(len(profiles.RUNTIME_SCRIPT_PROFILES), 7)
+        self.assertEqual(profiles.RUNTIME_SCRIPT_PROFILES, {
+            "runtime-unused-fragment-loader": "./scripts/runtime-bundles/runtime-fragment-loader_test.ts",
+            "runtime-unused-bundle-definitions": "./scripts/runtime-bundles/runtime-bundle-definitions_test.ts",
+            "runtime-unused-check": "./scripts/runtime-bundles/runtime-unused-check_test.ts",
+            "runtime-unused-tool-fingerprint": "./scripts/runtime-bundles/runtime-bundle-tool-fingerprint_test.ts",
+            "runtime-unused-mathjax": "./scripts/runtime-bundles/runtime-unused-mathjax_test.ts",
+            "runtime-unused-native-width": "./scripts/runtime-bundles/runtime-unused-native-width-hash_test.ts",
+            "runtime-unused-rust-classic": "./scripts/runtime-bundles/runtime-unused-rust-classic_test.ts",
+        })
         self.assertEqual(
             profiles.accepted_producers(),
             frozenset((*profiles.RUNTIME_SCRIPT_PROFILES, profiles.DEFAULT_PRODUCER)),

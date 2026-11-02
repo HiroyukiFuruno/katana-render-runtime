@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import io
+import json
 import os
 import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -32,6 +35,101 @@ class RuntimeScriptIdentityTests(unittest.TestCase):
         pilot_patch = patch.object(identity, "_pilot_facts", return_value=("8" * 64, {"scope": "pilot"}))
         pilot_patch.start()
         self.addCleanup(pilot_patch.stop)
+
+    def _fixed_reports(self) -> dict[str, identity.IdentityReport]:
+        reports: dict[str, identity.IdentityReport] = {}
+        for producer in profiles.RUNTIME_SCRIPT_PROFILES:
+            report = identity._miss(producer, "fixture_miss")
+            report["sourceManifestSha256"] = SOURCE
+            report["sourceInputsSha256"] = SOURCE_INPUTS
+            report["sourceInputScope"] = (
+                pilot.SEMANTIC_SCOPE
+                if producer == pilot.PROFILE
+                else "krr-native-coverage-source-inputs-v1"
+            )
+            report["recipeSha256"] = RECIPE
+            report["toolEnvironmentSha256"] = TOOLS
+            report["inputSha256"] = INPUT
+            report["identitySha256"] = SOURCE
+            report["moonTaskHash"] = RECIPE
+            if producer == pilot.PROFILE:
+                report["diagnostic"] = {
+                    "inputComponents": {"semanticEnvironment": TOOLS},
+                    "environmentNames": ["MOON_COLOR"],
+                    "runtimeTool": RECIPE,
+                    "pythonContext": INPUT,
+                }
+            reports[producer] = report
+        return reports
+
+    def test_all_cli_emits_each_fixed_report_without_changing_it(self) -> None:
+        reports = self._fixed_reports()
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory).resolve()
+            with (
+                patch.object(
+                    identity,
+                    "collect_fixed_leaf_identity_reports",
+                    return_value=reports,
+                ) as collect,
+                redirect_stdout(output),
+            ):
+                status = identity.main(["--repo", str(repo), "--all"])
+        self.assertEqual(status, 0)
+        collect.assert_called_once_with(repo)
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["schema"], "krr-runtime-script-identities-v1")
+        self.assertEqual(
+            [report["producer"] for report in payload["identities"]],
+            list(profiles.RUNTIME_SCRIPT_PROFILES),
+        )
+        self.assertEqual(
+            payload["identities"],
+            [reports[name] for name in profiles.RUNTIME_SCRIPT_PROFILES],
+        )
+
+    def test_all_cli_rejects_missing_unknown_and_mismatched_reports(self) -> None:
+        reports = self._fixed_reports()
+        leaf_producer = next(iter(profiles.RUNTIME_SCRIPT_PROFILES))
+        missing = {name: report for name, report in reports.items() if name != leaf_producer}
+        unknown_report = identity._miss("unknown-producer", "fixture")
+        unknown = {**reports, "unknown-producer": unknown_report}
+        mismatched_report = {**reports[leaf_producer], "producer": "unknown-producer"}
+        mismatched = {**reports, leaf_producer: mismatched_report}
+        for value in (missing, unknown, mismatched):
+            with self.subTest(producers=tuple(value)):
+                with self.assertRaises(identity._CollectionFailure):
+                    identity._fixed_leaf_identity_envelope(value)
+
+    def test_cli_requires_exactly_one_selection_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory).resolve()
+            for selection in ([], ["--all", "--producer", PRODUCER]):
+                with self.subTest(selection=selection), redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as error:
+                        identity.main(["--repo", str(repo), *selection])
+                self.assertEqual(error.exception.code, 2)
+
+    def test_single_producer_cli_keeps_existing_output(self) -> None:
+        report = identity._miss(PRODUCER, "single_producer_fixture")
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory).resolve()
+            with (
+                patch.object(
+                    identity,
+                    "collect_identity_report",
+                    return_value=report,
+                ) as collect,
+                patch.object(identity, "collect_fixed_leaf_identity_reports") as collect_all,
+                redirect_stdout(output),
+            ):
+                status = identity.main(["--repo", str(repo), "--producer", PRODUCER])
+        self.assertEqual(status, 0)
+        collect.assert_called_once_with(repo, PRODUCER)
+        collect_all.assert_not_called()
+        self.assertEqual(json.loads(output.getvalue()), report)
 
     def test_pilot_identity_ignores_unrelated_source_digest_but_keeps_provenance(self) -> None:
         producer = "runtime-unused-tool-fingerprint"

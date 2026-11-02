@@ -8,6 +8,17 @@
       "sourceCommit": "ea855b56b4c6733d3617e74da58133f4a10e68a8",
       "verificationCompletedAtUtc": "2026-11-01T14:25:52.356452Z",
       "bundleManifestSha256": "a824b5e21d2529c5d4926825aa8c99c2417323b5ae45286132d3e5f686ec3e71",
+      "referenceBuild": {
+        "schema": "krr-html-performance-reference-build-pins-v1",
+        "buildArtifactSchema": "krr-html-performance-build-artifact-v3",
+        "buildArtifactSha256": "d281c02cddc4e63b8157e5aa3ef184bb135af76227de4e871578301c521169b9",
+        "sourceSnapshotSha256": "1cbce71d24c99c93ab4410637ce7f0814d552a339238239df402ead247373544",
+        "binarySha256": "ed3de7cbf0558d0bdd012c3a75b600c1211e042718e65faad124ffedff6dd789",
+        "lockSha256": "7385aab6e8da1bd7f1a3c55346522c6e8b4ed0815677d22617184134af51dd20",
+        "cargoExecutableSha256": "7672ead309d505577c018fff2cafb3433601f073e38cbe87359ac1f7b944bbf5",
+        "rustcExecutableSha256": "210df6794001b73ec3d453878707fa1e0bdcb63c427024a6e6574bbe5615a4da",
+        "contextBeforeSha256": "fbaed6a9f6a177cba28391230a23a5b8797215ea801b5fcd214d7f16f9781588"
+      },
       "scope": {
         "catalog": "catalog-stage90",
         "candidateConditions": 84,

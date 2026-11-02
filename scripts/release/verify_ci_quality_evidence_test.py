@@ -979,6 +979,7 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
                 "if-no-files-found: error",
             ),
             "Upload immutable source and run bound paired evidence": (
+                "id: paired_performance_upload",
                 "name: html-performance-paired-${{ steps.source.outputs.head }}-${{ github.run_id }}-${{ github.run_attempt }}",
                 "path: tmp/html-performance-producer/bundle",
                 "retention-days: 14",
@@ -998,6 +999,16 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
                 self.assertIn(upload_pin, block)
                 for attribute in required_attributes:
                     self.assertIn(attribute, block)
+
+        paired_job = workflow[workflow.index("  paired-performance:\n") :]
+        self.assertIn("      attestations: write", paired_job)
+        self.assertIn("      id-token: write", paired_job)
+        upload = self.workflow_step(workflow, "Upload immutable source and run bound paired evidence")
+        attest = self.workflow_step(workflow, "Attest immutable paired performance artifact")
+        self.assertLess(paired_job.index(upload), paired_job.index(attest))
+        self.assertIn("uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6", attest)
+        self.assertIn("subject-name: html-performance-paired-${{ steps.source.outputs.head }}-${{ github.run_id }}-${{ github.run_attempt }}", attest)
+        self.assertIn("subject-digest: sha256:${{ steps.paired_performance_upload.outputs.artifact-digest }}", attest)
 
     def test_macos_arm64_rebuilds_v8_before_linking(self) -> None:
         workflow = (self.ROOT / ".github/workflows/test-and-build.yml").read_text(encoding="utf-8")

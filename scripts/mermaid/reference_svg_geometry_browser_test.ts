@@ -32,6 +32,7 @@ import { MagickOps } from "./reference_image_ops";
 import type { ReferencePair } from "./reference_pair_repository";
 import { scorePaintProjectedReferenceTargets } from "./reference_svg_geometry_scoring";
 import { waitForStrictSvgExternalImages } from "./strict-svg-external-images";
+import { captureMarkerFixture } from "./svg-marker-browser-capture";
 import { rawHtmlSvgViewBoxSize } from "./svg-viewbox-size";
 
 const naturalViewBoxSizingCases = [
@@ -44,6 +45,128 @@ const naturalViewBoxSizingCases = [
     viewBox: [-0.5, 0, 124.828125, 232],
   },
 ] as const;
+
+test("marker DOM capture loads original image and font resources", async ({ browser }) => {
+  const root = path.resolve("tests/fixtures/svg-engine/upstream/resvg/tests");
+  const page = await browser.newPage({
+    viewport: { width: 300, height: 300 },
+    deviceScaleFactor: 1,
+  });
+  try {
+    for (const name of ["with-an-image-child", "with-a-text-child"]) {
+      const input = `tests/painting/marker/${name}.svg`;
+      const inputSha256 = createHash("sha256")
+        .update(fs.readFileSync(path.join(root, input)))
+        .digest("hex");
+      const result = await captureMarkerFixture(page, root, {
+        input,
+        inputSha256,
+        upstreamPngSha256: "0".repeat(64),
+      });
+      expect(result.png.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+      expect(result.fontLoaded).toBe(true);
+      if (name === "with-an-image-child")
+        expect(result.resources.some((resource) => resource.path === "resources/image.svg")).toBe(
+          true,
+        );
+    }
+  } finally {
+    await page.close();
+  }
+});
+
+const markerBoundaryCases = [
+  {
+    path: "marker/the-marker-property-in-CSS.svg",
+    points: [
+      [141, 37],
+      [216, 277],
+      [21, 127],
+      [261, 127],
+      [66, 277],
+    ],
+    expected: [0, 0, 96, 96],
+  },
+  { path: "context/in-marker.svg", points: [[150, 15]], expected: [0, 0, 255, 255] },
+  { path: "context/in-nested-use-and-marker.svg", points: [[150, 15]], expected: [0, 0, 255, 255] },
+  {
+    path: "context/on-shape-with-zero-size-bbox.svg",
+    points: [[150, 277]],
+    expected: [0, 64, 0, 128],
+  },
+] as const;
+
+for (const fixture of markerBoundaryCases) {
+  test(`Chrome observes original SVG marker boundary: ${fixture.path}`, async ({
+    browser,
+  }, testInfo) => {
+    const sourcePath = path.resolve(
+      "tests/fixtures/svg-engine/upstream/resvg/tests/tests/painting",
+      fixture.path,
+    );
+    const bytes = fs.readFileSync(sourcePath);
+    const sourceSha256 = createHash("sha256").update(bytes).digest("hex");
+    const page = await browser.newPage({
+      viewport: { width: 300, height: 300 },
+      deviceScaleFactor: 1,
+    });
+    try {
+      const samples = await page.evaluate(
+        async ({ source, points }) => {
+          const bytes = Uint8Array.from(atob(source), (character) => character.charCodeAt(0));
+          const url = URL.createObjectURL(new Blob([bytes], { type: "image/svg+xml" }));
+          try {
+            const image = new Image();
+            image.src = url;
+            await image.decode();
+            const canvas = document.createElement("canvas");
+            canvas.width = 300;
+            canvas.height = 300;
+            const context = canvas.getContext("2d");
+            if (context === null) throw new Error("Canvas 2D context unavailable");
+            context.drawImage(image, 0, 0, 300, 300);
+            return points.map(([x, y]) => {
+              const raw = Array.from(context.getImageData(x, y, 1, 1).data);
+              const alpha = raw[3];
+              if (alpha === undefined) throw new Error("RGBA alpha unavailable");
+              const premultiplied = raw.map((channel, index) =>
+                index === 3 ? channel : Math.round((channel * alpha) / 255),
+              );
+              return { x, y, raw, premultiplied };
+            });
+          } finally {
+            URL.revokeObjectURL(url);
+          }
+        },
+        { source: bytes.toString("base64"), points: fixture.points },
+      );
+      await testInfo.attach("marker-boundary-observation", {
+        body: Buffer.from(
+          JSON.stringify(
+            {
+              sourcePath,
+              sourceSha256,
+              chromeVersion: browser.version(),
+              width: 300,
+              height: 300,
+              samples,
+            },
+            null,
+            2,
+          ),
+        ),
+        contentType: "application/json",
+      });
+      for (const sample of samples) {
+        expect(sample.premultiplied, `${fixture.path} (${sample.x}, ${sample.y})`).toEqual(
+          fixture.expected,
+        );
+      }
+    } finally {
+      await page.close();
+    }
+  });
+}
 
 test("SVG tspan boundaries preserve within-span kerning with a bundled font", async ({
   browser,

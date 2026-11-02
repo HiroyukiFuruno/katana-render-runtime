@@ -186,8 +186,10 @@ tasks:
 
   runtime-unused-script-regression:
     command: ['just', 'runtime-unused-script-final-verify-run']
-    deps: ['runtime-unused-rust-classic-producer']
+    deps: ['runtime-classic-generation-evidence']
     inputs: *quality-inputs
+    options:
+      cache: false
 
   runtime-script-cas-diagnostic:
     command: ['just', 'runtime-script-cas-diagnostic-run']

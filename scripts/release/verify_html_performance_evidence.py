@@ -18,6 +18,8 @@ from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from datetime import datetime
 from typing import NamedTuple, Protocol, TypedDict, cast
 from collections.abc import Callable, Mapping, Sequence
+import html_performance_reference as reference_domain
+from html_performance_harness_dependency_closure import verify_harness_closure
 from html_performance_paired_stats import evaluate_paired_regression
 
 JsonObject = dict[str, object]
@@ -27,6 +29,11 @@ CATALOG_SOURCE_SUFFIX = ("tests", "fixtures", "html", "feature-catalog.json")
 class GitQuery(Protocol):
     def __call__(self, root: Path, args: Sequence[str], input_bytes: bytes | None,
                  text: bool) -> str | bytes: ...
+
+
+class FileReader(Protocol):
+    def file(self, reference: object) -> Path: ...
+    def json(self, reference: object) -> JsonObject: ...
 
 
 class SourceContract(TypedDict):
@@ -240,12 +247,21 @@ def baseline_arm_id(expected: Mapping[str, object]) -> str:
     if reference is None:
         return DEFAULT_BASELINE_ARM_ID
     value = _object(reference, "reference parent contract")
-    require(value.get("role") == REFERENCE_PARENT_ARM_ID
-            and value.get("referenceKind") == "correct-parent-source"
-            and value.get("publishedSdk") is False,
+    role = value.get("role")
+    legacy = role == REFERENCE_PARENT_ARM_ID and value.get("referenceKind") == "correct-parent-source"
+    record_id = value.get("recordId")
+    historical = (isinstance(record_id, str) and bool(record_id)
+                  and role == "reference-history-" + record_id
+                  and value.get("referenceKind") == "accepted-history-candidate"
+                  and value.get("originalArm") == "candidate")
+    fresh = (isinstance(record_id, str) and bool(record_id)
+             and role == "fresh-history-source-" + record_id
+             and value.get("referenceKind") == "fresh-history-source"
+             and value.get("originalArm") == "candidate")
+    require((legacy or historical or fresh) and value.get("publishedSdk") is False,
             "reference parent contract identity differs")
     arm_id = _text(value.get("armId"), "reference parent arm id")
-    require(arm_id == REFERENCE_PARENT_ARM_ID, "reference parent arm id differs")
+    require(arm_id == role, "reference parent arm id differs")
     return arm_id
 
 
@@ -304,7 +320,8 @@ def _text(value: object, label: str) -> str:
     return value
 
 
-def provenance_file_refs(report: JsonObject) -> list[JsonObject]:
+def provenance_file_refs(report: JsonObject, *,
+                         file_resolver: Callable[[JsonObject], Path] | None = None) -> list[JsonObject]:
     refs: dict[str, JsonObject] = {}
     resources = report.get("resourceProvenance")
     if isinstance(resources, dict) and "requests" in resources:
@@ -314,7 +331,7 @@ def provenance_file_refs(report: JsonObject) -> list[JsonObject]:
         for request in requests:
             item = _object(request, "resource provenance request")
             _add_provenance_ref(refs, _text(item.get("bodyPath"), "resource body path"),
-                                _provenance_sha(item.get("bytesSha256"), "resource body SHA"))
+                                _provenance_sha(item.get("bytesSha256"), "resource body SHA"), file_resolver)
     fonts = report.get("fontProvenance")
     if not isinstance(fonts, list):
         raise ValueError("font provenance is unavailable")
@@ -322,7 +339,7 @@ def provenance_file_refs(report: JsonObject) -> list[JsonObject]:
         item = _object(font, "font provenance")
         require(item.get("fileBytesVerified") is True, "font physical provenance is unavailable")
         _add_provenance_ref(refs, _text(item.get("filePath"), "font file path"),
-                            _provenance_sha(item.get("fileSha256"), "font file SHA"))
+                            _provenance_sha(item.get("fileSha256"), "font file SHA"), file_resolver)
     return list(refs.values())
 
 
@@ -331,8 +348,10 @@ def _provenance_sha(value: object, label: str) -> str:
     return _text(value, label)
 
 
-def _add_provenance_ref(refs: dict[str, JsonObject], path: str, checksum: str) -> None:
-    file_path = Path(path)
+def _add_provenance_ref(refs: dict[str, JsonObject], path: str, checksum: str,
+                        file_resolver: Callable[[JsonObject], Path] | None = None) -> None:
+    pin: JsonObject = {"path": path, "sha256": checksum}
+    file_path = Path(path) if file_resolver is None else file_resolver(pin)
     require(file_path.is_file() and not file_path.is_symlink() and sha256(file_path) == checksum,
             "provenance input file differs")
     previous = refs.get(path)
@@ -380,6 +399,11 @@ def planned_execution_inputs(root: Path, expected: JsonObject,
         require(binary.get("sha256") == arm.get("binary_sha256"), "execution binary role differs")
         refs.append(binary)
         refs.append(_object(arm.get("build_artifact_ref"), "execution build artifact"))
+    contract = expected.get("referenceParent")
+    if isinstance(contract, dict) and contract.get("referenceKind") == "fresh-history-source":
+        source_refs = _objects(contract.get("sourceRefs"), "fresh reference source refs")
+        require(len(source_refs) == 4, "fresh reference source ref inventory differs")
+        refs.extend(source_refs)
     catalog = expected.get("catalogCondition")
     fixture = (_text(_object(catalog, "catalog condition")["fixture_path"], "fixture path")
                if catalog is not None else str(root / "tests/fixtures/html/interaction-fidelity.html"))
@@ -850,6 +874,46 @@ class Bundle:
         return {"path": row[2], "sha256": checksum}
 
 
+class HistoricalBuildReader:
+    """Resolve only references declared by the pinned historical bundle."""
+    def __init__(self, reader: FileReader, manifest_ref: object, selection: reference_domain.ActiveReference) -> None:
+        self.reader = reader
+        manifest_path = reader.file(manifest_ref)
+        require(sha256(manifest_path) == selection.bundle_manifest_sha256,
+                "historical manifest pin differs")
+        manifest = read_json(manifest_path)
+        require(manifest.get("schema") == "krr-html-performance-release-bundle-v1"
+                and manifest.get("head") == selection.source_head,
+                "historical manifest identity differs")
+        self.records: dict[str, str] = {}
+        self.used: dict[str, str] = {}
+        relative_paths: set[str] = set()
+        for row in _objects(manifest.get("files"), "historical manifest files"):
+            path = _text(row.get("originalPath"), "historical original path")
+            _logical_absolute_path(path, "historical original path")
+            relative = Path(_text(row.get("relativePath"), "historical transport path"))
+            require(not relative.is_absolute() and ".." not in relative.parts
+                    and relative.as_posix() not in relative_paths,
+                    "historical transport path differs")
+            relative_paths.add(relative.as_posix())
+            checksum = _text(row.get("sha256"), "historical original SHA")
+            digest(checksum)
+            require(path not in self.records, "historical original path is duplicated")
+            self.records[path] = checksum
+
+    def file(self, reference: object) -> Path:
+        pin = _object(reference, "historical file reference")
+        path = _text(pin.get("path"), "historical file path")
+        checksum = _text(pin.get("sha256"), "historical file SHA")
+        require(self.records.get(path) == checksum, "historical file is not in the original bundle")
+        physical = self.reader.file(pin)
+        self.used[path] = checksum
+        return physical
+
+    def json(self, reference: object) -> JsonObject:
+        return read_json(self.file(reference))
+
+
 class FilePin(TypedDict):
     path: str
     sha256: str
@@ -1159,7 +1223,7 @@ def cargo_build_artifacts(raw: bytes, expected: ExpectedBuild, target: Path) -> 
         "runtimeArtifact": selected[0], "binaryArtifact": selected[1], "buildFinished": finished[0]}
 
 
-def _recorded_capacity_state(bundle: Bundle, capacity_input: JsonObject) -> tuple[Path, str]:
+def _recorded_capacity_state(bundle: FileReader, capacity_input: JsonObject) -> tuple[Path, str]:
     state_ref = _object(capacity_input.get("stateRef"), "recorded prebuild capacity state")
     state_path = _canonical_build_path(state_ref.get("path"), "recorded capacity state path")
     state_sha = _text(state_ref.get("sha256"), "recorded capacity state SHA")
@@ -1167,7 +1231,7 @@ def _recorded_capacity_state(bundle: Bundle, capacity_input: JsonObject) -> tupl
     return state_path, state_sha
 
 
-def _guard_python_from_proof(bundle: Bundle, proof: JsonObject, root: Path, argv: list[str],
+def _guard_python_from_proof(bundle: FileReader, proof: JsonObject, root: Path, argv: list[str],
                              raw_by_name: Mapping[str, Path]) -> Path:
     python = _object(proof.get("guardPython"), "guard Python pin")
     require(set(python) == {"launcher", "executable"}, "guard Python pin fields differ")
@@ -1194,18 +1258,45 @@ def _guard_python_from_proof(bundle: Bundle, proof: JsonObject, root: Path, argv
     return launcher
 
 
-def _validate_build_proof(bundle: Bundle, root: Path, reference: object, arm: str, *,
-                           git_query: GitQuery | None = None) -> JsonObject:
+def _validate_build_proof(bundle: FileReader, root: Path, reference: object, arm: str, *,
+                           git_query: GitQuery | None = None,
+                           reuse_context: object = None,
+                           historical_reference: object = None,
+                           fresh_source_root: Path | None = None) -> JsonObject:
     proof_path = bundle.file(reference)
     proof = read_json(proof_path)
     require(proof.get("schema") == "krr-html-performance-build-artifact-v3", "unsupported build artifact schema")
     require(proof.get("arm") == arm and proof.get("buildExit") == 0, "build artifact arm/exit differs")
-    harness = root / HARNESS_ROOT.rstrip("/")
+    require(fresh_source_root is None or historical_reference is not None,
+            "fresh historical build requires a selected reference")
+    source_root = root if fresh_source_root is None else fresh_source_root
+    harness = source_root / HARNESS_ROOT.rstrip("/")
     require(proof.get("lockSha256") == LOCK_SHA and sha256(harness / "Cargo.lock") == LOCK_SHA,
             "build artifact lock differs")
     source_before_ref = _object(proof["sourceBeforeRef"], "build source-before reference")
     source_before = bundle.json(source_before_ref)
-    current = current_source(root, source_before, git_query=git_query)
+    if fresh_source_root is not None:
+        from html_performance_source_materialization import verify_selected_source_proof
+        if not isinstance(historical_reference, reference_domain.ActiveReference):
+            raise ValueError("fresh historical reference is invalid")
+        require(proof.get("referenceRole") == "fresh-history-source"
+                and source_before.get("root") == str(fresh_source_root),
+                "fresh historical build identity differs")
+        controller_ref = _object(proof.get("controllerSourceBeforeRef"), "controller source reference")
+        controller_pin = {"path": _text(controller_ref.get("path"), "controller source path"),
+                          "sha256": _text(controller_ref.get("sha256"), "controller source SHA")}
+        bundle.file(controller_ref)
+        current_source(root, bundle.json(controller_ref), git_query=git_query)
+        selected_proof = bundle.json(proof.get("selectedSourceProofRef"))
+        verify_selected_source_proof(root, fresh_source_root, historical_reference, controller_pin,
+                                     selected_proof, git_query=git_query)
+    if historical_reference is None:
+        current = _source_for_validation(root, source_before, git_query=git_query,
+                                         reuse_context=reuse_context)
+    else:
+        require(reuse_context is None, "historical reference cannot replace source reuse")
+        current = _historical_reference_source(root, source_before, historical_reference,
+                                               git_query=git_query)
     snapshot_ref = _object(proof["sourceSnapshotRef"], "build source snapshot reference")
     snapshot = bundle.json(snapshot_ref)
     snapshot_records = records_map(snapshot["records"])
@@ -1245,7 +1336,7 @@ def _validate_build_proof(bundle: Bundle, root: Path, reference: object, arm: st
             "build raw metadata/Cargo JSON pins absent")
     metadata = _object(json.loads(raw_by_name["metadata.json"].read_text(encoding="utf8"), object_pairs_hook=unique_object),
                        "Cargo metadata")
-    build_expected = expected_build(root, harness, arm, metadata, actual_environment)
+    build_expected = expected_build(source_root, harness, arm, metadata, actual_environment)
     require(build_expected.harness == _object(proof["expectedHarness"], "expected harness")
             and build_expected.runtime == _object(proof["expectedRuntime"], "expected runtime"),
             "expected build package records differ")
@@ -1279,7 +1370,12 @@ def _validate_build_proof(bundle: Bundle, root: Path, reference: object, arm: st
     return {"arm": arm, "binarySha256": binary_sha, "head": _text(source_before["head"], "source HEAD"),
             "sourceSnapshotSha256": _text(snapshot_ref["sha256"], "source snapshot SHA"),
             "lockSha256": LOCK_SHA, "buildArtifactSha256": sha256(proof_path),
-            "cargoExecutableSha256": _text(cargo_info["sha256"], "Cargo executable SHA")}
+            "cargoExecutableSha256": _text(cargo_info["sha256"], "Cargo executable SHA"),
+            "rustcExecutableSha256": sha256(rustc_tool.executable),
+            "buildEnvironmentSha256": proof["buildEnvironmentSha256"],
+            "toolVersions": proof["toolVersions"], "cargoConfigPins": proof["cargoConfigPins"],
+            "cargoLauncher": proof["cargoLauncher"], "rustcLauncher": proof["rustcLauncher"],
+            "guardPython": proof["guardPython"]}
 
 
 def validate_candidate_build_proof(directory: Path, root: Path, bundle_manifest_sha256: str,
@@ -1306,11 +1402,34 @@ def _validate_reference_parent_wrapper(bundle: Bundle, root: Path, expected: Jso
     helper = importlib.import_module("html_performance_reference")
     def query(path: Path, args: Sequence[str]) -> str:
         return git(path, *args, git_query=git_query)
-    proof = helper.load_reference_parent_proof(
-        wrapper, root, git_query=query,
-        file_resolver=lambda value, _label: bundle.file(value),
-    )
-    arm = _object(_object(expected["arms"], "expected arms")[REFERENCE_PARENT_ARM_ID], "reference parent arm")
+    before = bundle.json(_object(expected["sourcePair"], "source pair")["before"])
+    measured_head = _text(before.get("head"), "measured source HEAD")
+    selection = helper.active_reference_at_commit(root, measured_head, query, allow_legacy_missing=True)
+    if selection is None:
+        require(baseline_arm_id(expected) == REFERENCE_PARENT_ARM_ID, "legacy reference role differs")
+        proof = helper.load_reference_parent_proof(
+            wrapper, root, git_query=query,
+            file_resolver=lambda value, _label: bundle.file(value),
+        )
+    else:
+        require(baseline_arm_id(expected) == "reference-history-" + selection.record_id,
+                "active reference role differs")
+        wrapper_data = read_json(wrapper)
+        historical = HistoricalBuildReader(bundle, wrapper_data.get("sourceBundleManifest"), selection)
+        def resolve(value: object, label: str) -> Path:
+            if label in {"source bundle manifest", "verifier stdout"}:
+                return bundle.file(value)
+            return historical.file(value)
+        def validate(reference: object, selected: reference_domain.ActiveReference) -> JsonObject:
+            return _validate_build_proof(historical, root, reference, "candidate",
+                                         git_query=git_query, historical_reference=selected)
+        proof = helper.load_history_reference_proof(wrapper, selection, file_resolver=resolve,
+                                                    validate_build=validate)
+        extra = tuple(helper.FilePin(path, checksum) for path, checksum in historical.used.items())
+        proof = proof._replace(dependency_refs=proof.dependency_refs + extra)
+        require({key: value for key, value in contract.items() if key != "wrapperRef"}
+                == helper.reference_parent_contract(proof), "history reference contract differs")
+    arm = _object(_object(expected["arms"], "expected arms")[baseline_arm_id(expected)], "reference parent arm")
     require(arm["binary_sha256"] == proof.binary_sha256
             and arm["source_snapshot_sha256"] == proof.source_snapshot_sha256
             and arm["lock_sha256"] == proof.lock_sha256,
@@ -1356,6 +1475,39 @@ def committed_records(root: Path, ref: str = "HEAD", *, git_query: GitQuery | No
     return result
 
 
+def _historical_reference_source(root: Path, before: JsonObject, selection: object, *,
+                                 git_query: GitQuery | None) -> SourceRecords:
+    if not isinstance(selection, reference_domain.ActiveReference):
+        raise ValueError("unapproved historical reference")
+    head = selection.source_head
+    require(before.get("schema") == "krr-native-build-source-inventory-v1"
+            and before.get("sourceManifestSchema") == "krr-native-build-source-manifest-v1"
+            and before.get("head") == head, "reference source identity differs")
+    require(git(root, "rev-parse", "--verify", head + "^{commit}", git_query=git_query).strip() == head,
+            "reference source commit is unavailable")
+    origin = Path(_text(before.get("root"), "reference source root"))
+    require(origin.is_absolute(), "absolute reference source root required")
+    tracked = [str(Path(_text(name, "reference tracked path")).relative_to(origin))
+               for name in _array(before.get("trackedPaths"), "reference tracked paths")]
+    saved = {str(Path(name).relative_to(origin)): value
+             for name, value in records_map(before.get("files")).items()}
+    committed = committed_records(root, head, git_query=git_query)
+    require(len(tracked) == len(set(tracked)) and set(tracked) == set(committed)
+            and before.get("untrackedPaths") == [] and before.get("missingTrackedPaths") == []
+            and saved == committed, "reference committed source differs")
+    current = committed_records(root, git_query=git_query)
+    lock_path = HARNESS_ROOT + "Cargo.lock"
+    historical_harness = {path: value for path, value in committed.items()
+                          if path.startswith(HARNESS_ROOT) and path != lock_path}
+    current_harness = {path: value for path, value in current.items()
+                       if path.startswith(HARNESS_ROOT) and path != lock_path}
+    require(historical_harness == current_harness, "reference harness source differs")
+    old_lock = git(root, "show", head + ":" + lock_path, git_query=git_query).encode("utf8")
+    verify_harness_closure(old_lock, (root / lock_path).read_bytes(),
+                           selection.build_pins["lockSha256"])
+    return saved
+
+
 def current_source(root: Path, before: JsonObject, *, git_query: GitQuery | None = None) -> SourceRecords:
     require(before["schema"] == "krr-native-build-source-inventory-v1", "unsupported source schema")
     require(before["sourceManifestSchema"] == "krr-native-build-source-manifest-v1", "unsupported source manifest")
@@ -1377,9 +1529,48 @@ def current_source(root: Path, before: JsonObject, *, git_query: GitQuery | None
     return saved
 
 
+def _source_for_validation(root: Path, before: JsonObject, *, git_query: GitQuery | None,
+                           reuse_context: object) -> SourceRecords:
+    if reuse_context is None:
+        return current_source(root, before, git_query=git_query)
+    from html_performance_source_reuse import SourceReuseContext
+    if not isinstance(reuse_context, SourceReuseContext):
+        raise ValueError("invalid source reuse context")
+    require(before.get("schema") == "krr-native-build-source-inventory-v1"
+            and before.get("sourceManifestSchema") == "krr-native-build-source-manifest-v1"
+            and before.get("head") == reuse_context.measured_head, "measured source identity differs")
+    origin = Path(_text(before["root"], "source root"))
+    require(origin.is_absolute(), "absolute source root required")
+    saved_paths = [str(Path(_text(p, "tracked path")).relative_to(origin))
+                   for p in _array(before["trackedPaths"], "tracked paths")]
+    saved = {str(Path(p).relative_to(origin)): value for p, value in records_map(before["files"]).items()}
+    require(len(saved_paths) == len(set(saved_paths)) and set(saved_paths) == set(reuse_context.measured_records)
+            and before["untrackedPaths"] == [] and before["missingTrackedPaths"] == []
+            and saved == reuse_context.measured_records, "measured committed source differs")
+    return saved
+
+
+def _verified_reuse_context(root: Path, measured_head: str, *, git_query: GitQuery | None) -> object:
+    from html_performance_source_reuse import validate_reuse_source
+    require(re.fullmatch(r"[a-f0-9]{40}", measured_head) is not None, "invalid measured HEAD")
+    eligible = git(root, "rev-parse", "HEAD", git_query=git_query).strip()
+    def text_query(args: Sequence[str]) -> str:
+        return git(root, *args, git_query=git_query)
+    def bytes_query(args: Sequence[str]) -> bytes:
+        value = _git_output(root, args, git_query=git_query)
+        if not isinstance(value, bytes):
+            raise ValueError("Git binary query returned text output")
+        return value
+    return validate_reuse_source(root, measured_head,
+                                 committed_records(root, eligible, git_query=git_query),
+                                 committed_records(root, measured_head, git_query=git_query),
+                                 text_query, bytes_query)
+
+
 def source_contract(bundle: Bundle, root: Path, expected: JsonObject, *,
                     git_query: GitQuery | None = None,
-                    validated_builds: Mapping[str, JsonObject] | None = None) -> SourceContract:
+                    validated_builds: Mapping[str, JsonObject] | None = None,
+                    reuse_context: object = None) -> SourceContract:
     contract = _object(expected["sourcePair"], "source pair")
     before, end, approved = (bundle.json(contract[k]) for k in ("before", "end", "approvedSourceRef"))
     require(all(document.get("stableEndpoints") is True for document in (before, end, approved)), "unstable source endpoint")
@@ -1388,7 +1579,7 @@ def source_contract(bundle: Bundle, root: Path, expected: JsonObject, *,
     approved_ref = _object(contract["approvedSourceRef"], "approved source reference")
     matches = [p for p in _objects(contract["inputPins"], "source input pins") if p.get("path") == approved_ref["path"]]
     require(len(matches) == 1 and matches[0].get("sha256") == approved_ref["sha256"], "approved source pin missing")
-    saved = current_source(root, before, git_query=git_query)
+    saved = _source_for_validation(root, before, git_query=git_query, reuse_context=reuse_context)
     snapshot = bundle.json(contract["snapshot"])
     rows = snapshot["records"]
     actual = records_map(rows)
@@ -1399,7 +1590,7 @@ def source_contract(bundle: Bundle, root: Path, expected: JsonObject, *,
     expected_baseline = baseline_arm_id(expected)
     for raw_arm, arm_value in _object(expected["arms"], "expected arms").items():
         arm = _object(arm_value, "expected arm")
-        if raw_arm == expected_baseline and expected_baseline == REFERENCE_PARENT_ARM_ID:
+        if raw_arm == expected_baseline and expected_baseline != DEFAULT_BASELINE_ARM_ID:
             if validated_builds is None or "baseline" not in validated_builds:
                 raise ValueError("verified reference parent build is missing")
             build = validated_builds["baseline"]
@@ -1938,7 +2129,9 @@ def evaluate_measurement_policy(
 
 def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
                      git_query: GitQuery | None = None,
-                     validated_builds: Mapping[str, JsonObject] | None = None) -> JsonObject:
+                     validated_builds: Mapping[str, JsonObject] | None = None,
+                     reuse_context: object = None,
+                     remote_context: object = None) -> JsonObject:
     expected = bundle.json(attempt["expected"])
     result = bundle.json(attempt["result"])
     manifest = bundle.json(attempt["pairManifest"])
@@ -1947,6 +2140,13 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
     expected_arms = _object(expected["arms"], "expected arms")
     provenance = _object(expected["provenance"], "expected provenance")
     source_pair = _object(expected["sourcePair"], "source pair")
+    recorded_root = root
+    if remote_context is not None:
+        from html_performance_remote_admission import RemoteEvidenceContext
+        require(isinstance(remote_context, RemoteEvidenceContext)
+                and remote_context.manifest_sha256 == sha256(bundle.directory / "bundle.json"),
+                "remote evidence context differs")
+        recorded_root = Path(_text(bundle.json(source_pair["before"])["root"], "recorded source root"))
     expected_baseline = baseline_arm_id(expected)
     require(set(expected_arms) == {expected_baseline, "candidate"}, "versioned baseline/candidate required")
     catalog_expected = expected.get("catalogCondition")
@@ -1978,7 +2178,7 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
     require(set(viewport) == {"width", "height", "scale"} and type(viewport["scale"]) in (int, float) and viewport["scale"] == 1, "invalid viewport types/scale")
     require(isinstance(expected["operation"], str) and bool(expected["operation"]), "missing operation")
     source = source_contract(bundle, root, expected, git_query=git_query,
-                             validated_builds=validated_builds)
+                             validated_builds=validated_builds, reuse_context=reuse_context)
     endpoints = _object(expected["endpointRefs"], "endpoint references")
     before_context, end_context = (bundle.json(endpoints[k]) for k in ("before", "end"))
     mapping = {"sourceBeforeEqualsEnd": "source", "inputsBeforeEqualsEnd": "inputs", "registryBeforeEqualsEnd": "registry", "cacheBeforeEqualsEnd": "cache", "cacheUnionBeforeEqualsEnd": "cacheUnion", "cacheUnionScopeRestored": "scope", "configBeforeEqualsEnd": "config", "preferenceBeforeEqualsEnd": "preference", "toolContextBeforeEqualsEnd": "toolContext"}
@@ -2010,7 +2210,7 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
                 and plan.get("fixtureSha256") == expected["fixture_sha256"]
                 and plan.get("operationEvidenceSha256") == evidence_ref["sha256"],
                 "catalog operation plan/evidence binding differs")
-        fixture_relative = Path(_text(catalog["fixture_path"], "catalog fixture path")).relative_to(root).as_posix()
+        fixture_relative = Path(_text(catalog["fixture_path"], "catalog fixture path")).relative_to(recorded_root).as_posix()
         require(source["source"].get(fixture_relative, (None,))[0] == expected["fixture_sha256"],
                 "catalog fixture is not committed source")
         require(dom.get("status") == "observed" and dom.get("conditionId") == catalog["condition_id"]
@@ -2062,7 +2262,8 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
                 and (catalog.get("target_selector") is None
                      or target.get("selector") == catalog.get("target_selector")),
                 "catalog raw operation target differs")
-    provenance_refs = provenance_file_refs(dom) if catalog_expected is not None else []
+    provenance_refs = (provenance_file_refs(dom, file_resolver=bundle.file if remote_context is not None else None)
+                       if catalog_expected is not None else [])
     binary_refs = {
         role: _object(bundle.json(_object(expected_arms[raw_arm], "expected arm")
                                   ["build_artifact_ref"]).get("frozenBinary"),
@@ -2072,7 +2273,7 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
     context_inputs = validate_context_input_refs(
         before_context, expected, _object(source_pair["snapshot"], "snapshot reference"),
         capture_ref if catalog_expected is not None else None, link_capture_refs, provenance_refs,
-        planned_execution_inputs(root, expected, binary_refs),
+        planned_execution_inputs(recorded_root if catalog_expected is not None else root, expected, binary_refs),
     )
     require(manifest["measurement_executed"] is True and manifest["input_sha256"] == expected["fixture_sha256"] and manifest["environment_sha256"] == provenance["environment_sha256"], "runner context differs")
     if catalog_expected is not None:
@@ -2279,27 +2480,65 @@ def _require_formal_release_result(result: JsonObject) -> None:
 
 
 def validate_expected_builds(bundle: Bundle, root: Path, first_expected: JsonObject, *,
-                             git_query: GitQuery | None = None) -> dict[str, JsonObject]:
+                             git_query: GitQuery | None = None,
+                             reuse_context: object = None) -> dict[str, JsonObject]:
     """Validate each immutable arm proof once for the whole catalog batch."""
     first_arms = _object(first_expected["arms"], "expected arms")
     expected_baseline = baseline_arm_id(first_expected)
+    if expected_baseline == DEFAULT_BASELINE_ARM_ID:
+        before = bundle.json(_object(first_expected["sourcePair"], "source pair")["before"])
+        def query(path: Path, args: Sequence[str]) -> str:
+            return git(path, *args, git_query=git_query)
+        require(reference_domain.active_reference_at_commit(
+            root, _text(before.get("head"), "measured source HEAD"), query,
+            allow_legacy_missing=True) is None, "active reference wrapper is required")
     validated: dict[str, JsonObject] = {}
     for raw_arm, arm in ((expected_baseline, "baseline"), ("candidate", "candidate")):
         arm_value = _object(first_arms[raw_arm], "expected arm")
-        if arm == "baseline" and expected_baseline == REFERENCE_PARENT_ARM_ID:
-            validated[arm] = _validate_reference_parent_wrapper(
-                bundle, root, first_expected, git_query=git_query)
+        if arm == "baseline" and expected_baseline != DEFAULT_BASELINE_ARM_ID:
+            contract = _object(first_expected.get("referenceParent"), "reference contract")
+            if contract.get("referenceKind") == "fresh-history-source":
+                from html_performance_fresh_reference import validate_fresh_reference
+                validated[arm] = validate_fresh_reference(bundle, root, first_expected, git_query=git_query)
+            else:
+                validated[arm] = _validate_reference_parent_wrapper(
+                    bundle, root, first_expected, git_query=git_query)
         else:
             validated[arm] = _validate_build_proof(
-                bundle, root, arm_value.get("build_artifact_ref"), arm, git_query=git_query)
+                bundle, root, arm_value.get("build_artifact_ref"), arm, git_query=git_query,
+                reuse_context=reuse_context)
+    contract_value = first_expected.get("referenceParent")
+    if isinstance(contract_value, dict) and contract_value.get("referenceKind") == "fresh-history-source":
+        require(all(validated["baseline"].get(key) == validated["candidate"].get(key) for key in (
+            "cargoExecutableSha256", "rustcExecutableSha256", "buildEnvironmentSha256",
+            "toolVersions", "cargoConfigPins", "cargoLauncher", "rustcLauncher", "guardPython")),
+            "fresh reference and candidate verified build environments differ")
     return validated
 
 
 def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
-            require_catalog: bool, diagnostic_catalog: bool = False) -> JsonObject:
+            require_catalog: bool, diagnostic_catalog: bool = False,
+            reuse_context: object = None, remote_context: object = None) -> JsonObject:
     bundle = Bundle(directory)
     head = git(root, "rev-parse", "HEAD", git_query=git_query).strip()
-    require(bundle.manifest["head"] == head, "bundle is not current HEAD")
+    if remote_context is not None:
+        from html_performance_remote_admission import RemoteEvidenceContext
+        require(isinstance(remote_context, RemoteEvidenceContext)
+                and reuse_context is None and not diagnostic_catalog
+                and remote_context.head == head
+                and remote_context.manifest_sha256 == sha256(directory / "bundle.json"),
+                "remote evidence context differs")
+    if reuse_context is None:
+        require(bundle.manifest["head"] == head, "bundle is not current HEAD")
+    else:
+        from html_performance_source_reuse import SourceReuseContext
+        if not isinstance(reuse_context, SourceReuseContext):
+            raise ValueError("invalid source reuse context")
+        require(bundle.manifest["head"] == reuse_context.measured_head
+                and head == reuse_context.eligible_head
+                and _verified_reuse_context(root, reuse_context.measured_head, git_query=git_query)
+                == reuse_context, "reuse HEAD or source differs")
+        head = reuse_context.measured_head
     attempts = _objects(bundle.manifest["attempts"], "viewport attempts")
     first_expected = bundle.json(attempts[0]["expected"]) if attempts else {}
     if require_catalog:
@@ -2308,10 +2547,20 @@ def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
         require(len(attempts) == 84, "catalog performance requires all 84 conditions")
         validated_builds: dict[str, JsonObject] | None = None
         if not diagnostic_catalog:
-            validated_builds = validate_expected_builds(
-                bundle, root, first_expected, git_query=git_query)
-        values = [validate_attempt(bundle, root, attempt, git_query=git_query,
-                                   validated_builds=validated_builds) for attempt in attempts]
+            if remote_context is None:
+                validated_builds = validate_expected_builds(
+                    bundle, root, first_expected, git_query=git_query, reuse_context=reuse_context)
+            else:
+                assert isinstance(remote_context, RemoteEvidenceContext)
+                validated_builds = remote_context.builds
+        if remote_context is None:
+            values = [validate_attempt(bundle, root, attempt, git_query=git_query,
+                                       validated_builds=validated_builds, reuse_context=reuse_context)
+                      for attempt in attempts]
+        else:
+            values = [validate_attempt(bundle, root, attempt, git_query=git_query,
+                                       validated_builds=validated_builds, reuse_context=reuse_context,
+                                       remote_context=remote_context) for attempt in attempts]
         non_comparable_ids = {
             _text(_object(value["catalogCondition"], "catalog condition")["condition_id"],
                   "non-comparable condition id")
@@ -2398,7 +2647,10 @@ def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
         catalog_path = Path(_text(manifest.get("catalogPath"), "feature catalog path"))
         catalog_sha = _text(manifest.get("catalogSha256"), "feature catalog SHA")
         digest(catalog_sha)
-        catalog_relative = catalog_path.relative_to(root).as_posix()
+        source_root = root if remote_context is None else Path(_text(
+            bundle.json(_object(first_expected["sourcePair"], "source pair")["before"])["root"],
+            "recorded source root"))
+        catalog_relative = catalog_path.relative_to(source_root).as_posix()
         require(manifest.get("profile") == "catalog-stage90-captures"
                 and manifest.get("acceptance") is False
                 and catalog_plan.get("catalogPath") == str(catalog_path)
@@ -2509,6 +2761,46 @@ def verify(directory: Path, root: Path, *, git_query: GitQuery | None = None) ->
     return result
 
 
+def verify_source_reuse(directory: Path, root: Path, measured_manifest_sha256: str,
+                        build_directory: Path, build_manifest_sha256: str,
+                        build_artifact_path: str, build_artifact_sha256: str, *,
+                        git_query: GitQuery | None = None) -> JsonObject:
+    """旧測定の原本と現HEAD buildを照合し、文書のみの差分を別結果として認定する。"""
+    root = root.resolve()
+    digest(measured_manifest_sha256)
+    digest(build_manifest_sha256)
+    digest(build_artifact_sha256)
+    require(sha256(directory / "bundle.json") == measured_manifest_sha256,
+            "measured bundle manifest SHA differs")
+    require(sha256(build_directory / "bundle.json") == build_manifest_sha256,
+            "current build bundle manifest SHA differs")
+    bundle = Bundle(directory)
+    measured_head = _text(bundle.manifest.get("head"), "measured HEAD")
+    eligible_head = git(root, "rev-parse", "HEAD", git_query=git_query).strip()
+    def source_context() -> object:
+        return _verified_reuse_context(root, measured_head, git_query=git_query)
+    context = source_context()
+    measured = _verify(directory, root, git_query=git_query, require_catalog=True,
+                       reuse_context=context)
+    _require_formal_release_result(measured)
+    attempts = _objects(bundle.manifest["attempts"], "viewport attempts")
+    first = bundle.json(attempts[0]["expected"])
+    old_build = validate_expected_builds(bundle, root, first, git_query=git_query,
+                                         reuse_context=context)["candidate"]
+    current_bundle = Bundle(build_directory)
+    require(current_bundle.manifest["head"] == eligible_head, "current build bundle HEAD differs")
+    build_ref = current_bundle.relative_reference(build_artifact_path, build_artifact_sha256)
+    new_build = _validate_build_proof(current_bundle, root, build_ref, "candidate", git_query=git_query)
+    for key in ("binarySha256", "lockSha256", "cargoExecutableSha256", "rustcExecutableSha256"):
+        require(old_build[key] == new_build[key], "measured and current build differ: " + key)
+    require(new_build["head"] == eligible_head and source_context() == context
+            and sha256(directory / "bundle.json") == measured_manifest_sha256
+            and sha256(build_directory / "bundle.json") == build_manifest_sha256,
+            "source changed during reuse validation")
+    return {"measuredHead": measured_head, "eligibleHead": eligible_head,
+            "reuseEligibility": True, "measuredResult": measured}
+
+
 def _verify_catalog_diagnostic(directory: Path, root: Path, *,
                                git_query: GitQuery | None = None) -> JsonObject:
     result = _verify(directory, root, git_query=git_query, require_catalog=True,
@@ -2541,8 +2833,11 @@ def latest_acquisition_generation(runs: list[JsonObject]) -> JsonObject:
     return latest[0]
 
 
+
+
 def acquire(directory: Path, root: Path, repository: str, current_producer: bool = False, *,
-            git_query: GitQuery | None = None) -> None:
+            git_query: GitQuery | None = None) -> JsonObject:
+    from html_performance_remote_admission import verify_authenticated_remote
     # 同一SHAの成功CI由来だけを取得し、証跡の欠落を環境変数で免除しない。
     require(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is not None, "invalid repository")
     head = git(root, "rev-parse", "HEAD", git_query=git_query).strip()
@@ -2607,18 +2902,14 @@ def acquire(directory: Path, root: Path, repository: str, current_producer: bool
     archive.write_bytes(subprocess.check_output(["gh", "api", f"repos/{repository}/actions/artifacts/{matches[0]['id']}/zip"]))
     artifact_digest = matches[0].get("digest", "")
     require(artifact_digest == "sha256:" + sha256(archive), "GitHub artifact digest absent/mismatch")
-    with zipfile.ZipFile(archive) as zipped:
-        seen = set()
-        for entry in zipped.infolist():
-            path = (directory / entry.filename).resolve()
-            require(path.is_relative_to(directory.resolve()) and path not in seen and (entry.external_attr >> 16) & 0o170000 != 0o120000, "unsafe/duplicate archive path")
-            seen.add(path)
-        zipped.extractall(directory)
+    result = verify_authenticated_remote(directory, archive, root, repository, run,
+                                         _text(matches[0]["name"], "artifact name"), head)
     latest = api(f"repos/{repository}/actions/runs/{run['id']}")
     require(all(latest[k] == run[k] for k in ("id", "head_sha", "run_attempt", "status", "conclusion")), "CI run changed during acquisition")
     # ZIP取得中の新規runも照合し、古い成功世代だけのGETで取得を完了しない。
     require(current_latest() == run, "latest CI generation changed during acquisition")
     (directory / "acquisition.json").write_text(json.dumps({"repository": repository, "head": head, "runId": run["id"], "runAttempt": run["run_attempt"], "artifactId": matches[0]["id"], "artifactDigest": artifact_digest}, indent=2) + "\n")
+    return result
 
 
 def main() -> int:
@@ -2631,6 +2922,7 @@ def main() -> int:
     parser.add_argument("--candidate-build-proof")
     parser.add_argument("--build-artifact-sha256")
     parser.add_argument("--bundle-manifest-sha256")
+    parser.add_argument("--reuse-request", type=Path)
     parser.add_argument(
         "--diagnostic-only",
         action="store_true",
@@ -2639,6 +2931,11 @@ def main() -> int:
     args = parser.parse_args()
     try:
         require(not (args.acquire and args.acquire_current_producer), "ambiguous acquisition mode")
+        require(not (args.reuse_request is not None and (
+            args.acquire or args.acquire_current_producer or args.diagnostic_only
+            or args.candidate_build_proof is not None or args.build_artifact_sha256 is not None
+            or args.bundle_manifest_sha256 is not None)),
+            "reuse request cannot be combined with acquisition, diagnostic or candidate build proof")
         require(not (args.diagnostic_only and (args.acquire or args.acquire_current_producer
                                                or args.candidate_build_proof is not None
                                                or args.build_artifact_sha256 is not None
@@ -2646,6 +2943,11 @@ def main() -> int:
                 "diagnostic-only mode cannot be combined with acquisition or candidate build proof")
         require((args.candidate_build_proof is None) == (args.build_artifact_sha256 is None),
                 "candidate build proof path/SHA must be provided together")
+        if args.reuse_request is not None:
+            from html_performance_source_reuse_cli import verify_reuse_request
+            result = verify_reuse_request(args.reuse_request, args.repo.resolve())
+            print(json.dumps(result, sort_keys=True))
+            return 0
         if args.candidate_build_proof is not None:
             require(args.bundle_manifest_sha256 is not None,
                     "bundle manifest SHA is required for candidate build proof")
@@ -2656,7 +2958,34 @@ def main() -> int:
             print(json.dumps(result, sort_keys=True))
             return 0
         if args.acquire or args.acquire_current_producer:
-            acquire(args.evidence_dir, args.repo, args.repository, args.acquire_current_producer)
+            result = acquire(args.evidence_dir, args.repo, args.repository, args.acquire_current_producer)
+            print(json.dumps(result, sort_keys=True))
+            return 0
+        elif not args.diagnostic_only:
+            manifest_path = args.evidence_dir / "bundle.json"
+            request_path = args.evidence_dir / "reuse-request.json"
+            if request_path.exists() or request_path.is_symlink():
+                manifest_present = manifest_path.exists() or manifest_path.is_symlink()
+                use_reuse = not manifest_present
+                if manifest_present:
+                    manifest = Bundle(args.evidence_dir).manifest
+                    _objects(manifest.get("attempts"), "viewport attempts")
+                    head = git(args.repo.resolve(), "rev-parse", "HEAD").strip()
+                    use_reuse = _text(manifest.get("head"), "bundle HEAD") != head
+                if use_reuse:
+                    from html_performance_source_reuse_cli import verify_reuse_request
+                    result = verify_reuse_request(request_path, args.repo.resolve())
+                    print(json.dumps(result, sort_keys=True))
+                    return 0
+            acquisition = args.evidence_dir / "acquisition.json"
+            if acquisition.exists() or acquisition.is_symlink():
+                current_producer = (os.environ.get("GITHUB_JOB") == "preflight"
+                                    and os.environ.get("GITHUB_EVENT_NAME") == "pull_request")
+                with tempfile.TemporaryDirectory(prefix="krr-html-performance-revalidate-") as temporary:
+                    result = acquire(Path(temporary).resolve() / "evidence", args.repo,
+                                     args.repository, current_producer)
+                print(json.dumps(result, sort_keys=True))
+                return 0
         result = (_verify_catalog_diagnostic(args.evidence_dir, args.repo)
                   if args.diagnostic_only else verify(args.evidence_dir, args.repo))
         print(json.dumps(result, sort_keys=True))
