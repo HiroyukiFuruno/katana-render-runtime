@@ -2,6 +2,9 @@
 
 ## 最新の再開地点（2026-11-03）
 
+- [/] R7385の現行root検査は5,580/5,580成功・29skip（実test337.369秒）。R7386正式coverage policyは83,320/84,461=98.64908064076911%、未達1,141で不合格（前1,158から17減）。原本は既存producer配下、診断copyは`tmp/quality/resumed-owner-r3509/current-root-coverage-report-r7387/root.json`。SVG解析エラー6箇所の共通化と実フォント候補回帰を通常commit `cbcc1325` に固定。100%・未計測0の条件は維持する。
+- [/] 性能計測の認証済み入力参照を共通化し、通常commit `731131ac` へ固定。verifier全140件と厳格型・静的foundationが成功。実入力とソース・容量などの運用証跡を別々に検証するepoch接続は実装途中で、正式84性能の実測はまだ開始していない。元receipt/context/pinを変更せず、実観測を保持した再利用適格性を完成させる。
+- [/] Actionsの公式upstream12種の最新stable/tag SHAを再確認し、現workflowの全固定参照が一致した。追加更新は不要。必須3OSの実CIと公開確認は未完。
 - [x] source `5cd98651` のR7328で製品PNG全117図を再取得・採点し、実0/accepted=true。EN59最低99.085711、JA58最低99.10801000000001、失敗0。R7329の通常cleanで元Cargo実行体を削除した後も、R7330既存v4 reader、R7331日本語クラス図の実描画、R7333既存inventory検証と削除前SVGとのbyte完全一致がすべて実0。実行体保持の修正は実producer経路で確認できた。基準・閾値・原本は不変。
 - [/] 非重複担当で追加したSVG軸指定・継承・filter/marker・font cache・CLI拒否・kdr join境界を統合。製品/vendorは変更していない。CLI拒否群の責務分割、影の定数化とhelper抽出後、R7339 AST実0・R7341静的foundation実0。R7342の既存root計測は全5,566/5,566成功（追加16、既存29skip）、実テスト322.037秒・全体実0。R7343正式coverage policyは100/0未達で実1。83,295/84,453=98.62882313239317%、未到達1,158で前1,174から純減16。原本と診断copyは`tmp/quality/resumed-owner-r3509/current-root-coverage-report-r7344/`へ保持し、未達を成功へ読み替えない。
 - [/] Rust回帰14fileを通常commit `6e88d99a` へ固定。コミット前の性能lintがarm切替前の容量判定で2回拒否されたため、同じ再試行を止め、既存capacity-admissionをbaseline後・candidate後に追加した。Clippy argv・保持COV・固定上限は不変。厳密な順序契約と欠落/並替/重複拒否5回帰、R7351静的foundationが実0。修正後の通常hookがR7352/R7353とも実0となり、整理修正3fileを `eb254348` に別commitした。全665 Bun回帰・最終完全gateは別途未完。
@@ -13,7 +16,7 @@
 - [x] R7217で製品PNGのMermaid全117図を正式に検証し、EN59/59・最低99.085711、JA58/58・最低99.10801000000001、描画失敗0、managed全体実0/accepted=trueを確認した。対象ソースは`75f49866`。各言語の`comparison/native-product-comparison/{scores,failures}.json`を製品側の集計とし、`comparison/scores.json`の中間SVG側を混同しない。原本・基準・閾値は変更していない。
 - [x] R7220の現行HTML84条件の取得が実0、R7221の独立検証も実0。全84画像90以上・最低92.14438、出力font完全一致established、診断0。性能は`measurement=not-performed`であり、画像合格を性能合格に代用しない。Mermaidの再検証に必要な`target/debug/krr`を後継の保護registryへ追加し、R7224で固定閾値内と保持を確認した。
 - [/] 性能開始前のR7226は、履歴lockを現行lockとして判定する不整合で実1・測定0。履歴Git commit/pin・元proofへ束縛してlocal/remote/fresh経路を分ける修正を実装し、型・Lint・元retained wrapperの実reader受理、R7238のproducer/verifier全291/291、独立reviewの具体P0/P1なしを確認した。古い原本・履歴・lock・受入条件は変更していない。修正を固定し、基準binaryを再利用する正式84性能へ戻る。
-- [ ] 正式性能84の各表示3秒未満・時間/RSS非劣化、長文全scroll/全TOC/実末尾/consumer契約の現行受入、coverage100%/未計測0、最新source完全gate、Draft review/個別reply/resolve、Ready後3OS CI、expected HEAD付き保護merge、公開3crate/Release、Issue close・cleanupを完了する。Rust coverageの最新正式値はR7193の98.60958133475457%・未到達1174のまま。
+- [ ] 正式性能84の各表示3秒未満・時間/RSS非劣化、長文全scroll/全TOC/実末尾/consumer契約の現行受入、coverage100%/未計測0、最新source完全gate、Draft review/個別reply/resolve、Ready後3OS CI、expected HEAD付き保護merge、公開3crate/Release、Issue close・cleanupを完了する。Rust coverageの最新正式値はR7386の98.64908064076911%・未到達1,141。
 
 - [/] 検証済み変更を通常commitへ固定した。`a1fcbc40`=公式rawの観測付き生成導線、`17b7b502`=全5,550件で確認したRust境界回帰、`6a790897`=既知の依存保持とfreshness gateの整合。追加のprivate test案は未適用のまま止め、candidate build proof→現行KRR製品PNG117図の99点判定→HTML84条件の実測へ進む。ソース固定後は採点と関係のない変更を増やさない。
 
