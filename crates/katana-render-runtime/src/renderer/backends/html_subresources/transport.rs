@@ -63,7 +63,7 @@ fn load_bytes(url: &Url) -> Result<Vec<u8>, String> {
     let result = match url.scheme() {
         "data" => decode_data_url(url),
         "file" => match url.to_file_path() {
-            Ok(path) => std::fs::read(path)
+            Ok(path) => crate::resource_bytes::ResourceBytes::read_file(&path)
                 .map_err(|error| format!("local subresource could not be read: {error}")),
             Err(()) => Err("file URL is invalid".to_owned()),
         },

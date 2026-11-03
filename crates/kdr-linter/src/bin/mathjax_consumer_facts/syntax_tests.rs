@@ -166,34 +166,45 @@ fn success_render_cases() -> Vec<(&'static str, bool)> {
     ]
 }
 
+const WARNING_RENDER_CASES: &[(&str, bool)] = &[
+    (
+        "RenderOutputFactory::from_raw_string(input, input.source.clone(), warning, runtime)",
+        true,
+    ),
+    (
+        "RenderOutputFactory::from_raw_string(input, input.source.clone(), warning, other_runtime)",
+        false,
+    ),
+    (
+        "RenderOutputFactory::from_raw_string(other, input.source.clone(), warning, runtime)",
+        false,
+    ),
+    (
+        "RenderOutputFactory::from_raw_string(input, other.source.clone(), warning, runtime)",
+        false,
+    ),
+    (
+        "RenderOutputFactory::from_raw_string(input, input.source.clone(), other_warning, runtime)",
+        false,
+    ),
+    (
+        "Err(RenderOutputFactory::from_raw_string(input, input.source.clone(), warning, runtime))",
+        false,
+    ),
+    (
+        "RenderOutputFactory::from_raw_string(input, input.source.clone(), warning)",
+        false,
+    ),
+    (
+        "Other(input, input.source.clone(), warning, runtime)",
+        false,
+    ),
+    ("Ok(input)", false),
+    ("value", false),
+];
+
 #[test]
 fn mathjax_syntax_warning_render_rejects_unverified_ast_shapes()
 -> Result<(), Box<dyn std::error::Error>> {
-    assert_cases(
-        &[
-            (
-                "Ok(RenderOutputFactory::from_raw_string(input, input.source.clone(), warning, runtime))",
-                true,
-            ),
-            (
-                "Ok(RenderOutputFactory::from_raw_string(input, input.source.clone(), warning, other_runtime))",
-                false,
-            ),
-            (
-                "Err(RenderOutputFactory::from_raw_string(input, input.source.clone(), warning, runtime))",
-                false,
-            ),
-            (
-                "Ok(RenderOutputFactory::from_raw_string(input, input.source.clone(), warning))",
-                false,
-            ),
-            (
-                "Ok(Other(input, input.source.clone(), warning, runtime))",
-                false,
-            ),
-            ("Ok(input)", false),
-            ("value", false),
-        ],
-        syntax::require_warning_render,
-    )
+    assert_cases(WARNING_RENDER_CASES, syntax::require_warning_render)
 }

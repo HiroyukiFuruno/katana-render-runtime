@@ -7,6 +7,11 @@ import { z } from "zod";
 export const MATHJAX_TYPE_PROFILE = "scripts/quality/tsconfig-owned-native-mathjax.json";
 export const MATHJAX_DECL_PROFILE = "scripts/quality/tsconfig-owned-native-mathjax-decls.json";
 export const MATHJAX_PROVENANCE = "scripts/quality/mathjax-declaration-provenance.json";
+// 資源はrender_bundleへ借用するが、リクエスト直列化とMathJax入口のABI境界は維持する。
+const MATHJAX_RUST_REQUEST_SHA256 =
+  "5bd9b779ededb624dc0f0bcd49881888569c7858a9268be35d0762912870948f";
+const MATHJAX_RUST_SCRIPTS_SHA256 =
+  "cd24a56b27e96d0050eedd814ecce3fa973f480852247f358e5b99d1a4c43e10";
 export const MATHJAX_RUNTIME =
   "crates/katana-render-runtime/src/markdown/mathjax_renderer/js_runtime/render_mathjax.js";
 export const MATHJAX_ABI =
@@ -212,12 +217,12 @@ export function inspectMathJaxDeclarations(
     );
     requireBoundary(
       sha(source("crates/katana-render-runtime/src/markdown/mathjax_renderer/js_runtime.rs")) ===
-        provenance.owned.rustRequestSHA256 &&
+        MATHJAX_RUST_REQUEST_SHA256 &&
         sha(
           source(
             "crates/katana-render-runtime/src/markdown/mathjax_renderer/js_runtime_scripts.rs",
           ),
-        ) === provenance.owned.rustScriptsSHA256,
+        ) === MATHJAX_RUST_SCRIPTS_SHA256,
       "Rust MathJax request/call origin changed",
     );
     const pkg = source("node_modules/@mathjax/src/package.json");

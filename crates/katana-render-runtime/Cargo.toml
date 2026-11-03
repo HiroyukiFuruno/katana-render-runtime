@@ -54,6 +54,7 @@ name = "non_env_integration"
 path = "tests/non_env_integration.rs"
 
 [dependencies]
+moka = { workspace = true }
 katana-render-runtime-assets = { workspace = true }
 anyhow = { workspace = true }
 base64 = { workspace = true }

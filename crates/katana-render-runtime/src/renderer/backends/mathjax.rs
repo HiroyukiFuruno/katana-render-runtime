@@ -1,4 +1,7 @@
 use crate::markdown::color_preset::DiagramColorPreset;
+use crate::markdown::runtime_resource_loader::{
+    BundledResource, RuntimeResourceLoader as runtime_resource_loader,
+};
 use crate::markdown::{DiagramBlock, mathjax_renderer::MathJaxRendererOps};
 use crate::renderer::api::{DiagramKind, RenderError, RenderInput, RenderOutput, Renderer};
 use crate::renderer::output::RenderOutputFactory;
@@ -8,11 +11,21 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub struct MathJaxRenderer {
     runtime_path: PathBuf,
+    bundled: bool,
 }
 
 impl MathJaxRenderer {
     pub fn with_runtime_path(runtime_path: PathBuf) -> Self {
-        Self { runtime_path }
+        Self {
+            runtime_path,
+            bundled: false,
+        }
+    }
+    pub(crate) fn with_bundled_runtime_path(runtime_path: PathBuf) -> Self {
+        Self {
+            runtime_path,
+            bundled: true,
+        }
     }
 }
 
@@ -22,34 +35,72 @@ impl Renderer for MathJaxRenderer {
             return Err(RenderError::UnsupportedKind);
         }
         let runtime = RuntimeDescriptor::mathjax();
-        match self.render_block(input) {
+        let (result, digest) = self.render_block(input);
+        match result {
             Ok(svg) => RenderOutputFactory::from_diagram_result(
                 input,
                 crate::markdown::DiagramResult::Ok(svg),
                 runtime,
-            ),
-            Err(warning) => Ok(RenderOutputFactory::from_raw_string(
-                input,
-                input.source.clone(),
-                warning,
-                runtime,
-            )),
+            )
+            .map(|output| RenderOutputFactory::bind_resource(output, digest.as_deref())),
+            Err(warning) => {
+                let error_key = format!("error:{}:{warning}", digest.as_deref().unwrap_or(""));
+                Ok(RenderOutputFactory::bind_resource(
+                    RenderOutputFactory::from_raw_string(
+                        input,
+                        input.source.clone(),
+                        warning,
+                        runtime,
+                    ),
+                    Some(&error_key),
+                ))
+            }
         }
     }
 }
 
 impl MathJaxRenderer {
-    fn render_block(&self, input: &RenderInput) -> Result<String, String> {
+    fn render_block(&self, input: &RenderInput) -> (Result<String, String>, Option<String>) {
         let block = DiagramBlock {
             kind: crate::markdown::DiagramKind::MathJax,
             source: input.source.clone(),
         };
+        if block.source.trim().is_empty() {
+            return (Err("MathJax source is empty".to_string()), None);
+        }
+        let resource = match self.read_resource() {
+            Ok(resource) => resource,
+            Err(error) => return (Err(error), None),
+        };
         let preset = DiagramColorPreset::for_render_input(input);
-        MathJaxRendererOps::render_mathjax_with_runtime_path(
+        let result = MathJaxRendererOps::render_mathjax_with_loaded(
             &block,
-            &self.runtime_path,
             &preset,
             MathJaxRenderConfig::display(input),
+            &resource,
+        );
+        (result, resource.into_digest())
+    }
+    fn read_resource(
+        &self,
+    ) -> Result<crate::markdown::runtime_resource_loader::LoadedResource, String> {
+        runtime_resource_loader::load(
+            &self.runtime_path,
+            self.bundled.then_some(BundledResource::MathJax),
+        )
+        .map_err(|error| self.resource_error(error))
+    }
+
+    fn resource_error(&self, error: std::io::Error) -> String {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            return format!(
+                "MathJax runtime asset is not installed: {}",
+                self.runtime_path.display()
+            );
+        }
+        format!(
+            "MathJax runtime asset could not be read: {}: {error}",
+            self.runtime_path.display()
         )
     }
 }

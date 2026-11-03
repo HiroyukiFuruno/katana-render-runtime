@@ -100,8 +100,8 @@ const LIVE_CALLER_BINDING_MUTATIONS: &[(&str, &str, &str)] = &[
         "read-render-route:request-json",
     ),
     (
-        "MermaidRuntimeScripts::build(&bundle, &request_json, request.diagram_type)",
-        "MermaidRuntimeScripts::build(&bundle, &bundle, request.diagram_type)",
+        "MermaidRuntimeScripts::build(bundle, &request_json, request.diagram_type)",
+        "MermaidRuntimeScripts::build(bundle, &bundle, request.diagram_type)",
         "mermaid-request-route:argument",
     ),
     (
@@ -113,11 +113,6 @@ const LIVE_CALLER_BINDING_MUTATIONS: &[(&str, &str, &str)] = &[
         "let scripts = MermaidRuntimeScripts::build",
         "return Err(String::new());\n        let scripts = MermaidRuntimeScripts::build",
         "mermaid-request-route:statement-count",
-    ),
-    (
-        "read_mermaid_bundle(mermaid_js)",
-        "read_mermaid_bundle(&other_path)",
-        "mermaid-request-route:argument",
     ),
     (
         "MermaidRenderRequest::new(source, preset)",
@@ -279,6 +274,8 @@ mod ast_linter;
 mod capture;
 #[path = "mermaid_classic_geometry_bridge_tests.rs"]
 mod geometry_bridge;
+#[path = "mermaid_classic_resource_tests.rs"]
+mod resource;
 fn reject_mutations(
     fixture: &Fixture,
     path: &str,

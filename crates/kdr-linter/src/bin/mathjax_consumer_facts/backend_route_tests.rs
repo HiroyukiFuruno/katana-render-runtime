@@ -2,6 +2,26 @@ use super::*;
 
 const BACKEND_ROUTE_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "runtime_resource_loader::load(",
+        "runtime_resource_loader::read(",
+        "backend-runtime-path:resource-load",
+    ),
+    (
+        "self.bundled.then_some(BundledResource::MathJax)",
+        "self.bundled.then_some(BundledResource::Drawio)",
+        "backend-runtime-path:resource-load",
+    ),
+    (
+        "resource.into_digest()",
+        "other.into_digest()",
+        "backend-runtime-path:resource-digest",
+    ),
+    (
+        "            &resource,\n        );",
+        "            &other,\n        );",
+        "backend-runtime-path:arguments",
+    ),
+    (
         "        let preset = DiagramColorPreset::for_render_input(input);",
         "        let _extra = ();\n        let preset = DiagramColorPreset::for_render_input(input);",
         "backend-runtime-path:statement-count",
@@ -27,7 +47,7 @@ const BACKEND_ROUTE_MUTATIONS: &[(&str, &str, &str)] = &[
         "backend-runtime-path:preset-input",
     ),
     (
-        "MathJaxRendererOps::render_mathjax_with_runtime_path(",
+        "MathJaxRendererOps::render_mathjax_with_loaded(",
         "MathJaxRendererOps::render_mathjax_with_runtime(",
         "backend-runtime-path:arguments",
     ),

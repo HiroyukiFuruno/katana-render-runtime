@@ -15,7 +15,7 @@ impl MermaidBinaryOps {
         )
     }
 
-    fn resolve_mermaid_js_with_env(
+    pub(crate) fn resolve_mermaid_js_with_env(
         env_value: Option<std::ffi::OsString>,
         home_path: Option<PathBuf>,
     ) -> Result<PathBuf, String> {

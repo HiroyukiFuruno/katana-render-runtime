@@ -3,8 +3,9 @@ use super::{
     require_render_runtime,
 };
 
-const PREFIX: &str = "if input.kind != DiagramKind::MathJax { return Err(RenderError::UnsupportedKind); } let runtime = RuntimeDescriptor::mathjax();";
-const DISPATCH: &str = "match self.render_block(input) { Ok(svg) => RenderOutputFactory::from_diagram_result(input, crate::markdown::DiagramResult::Ok(svg), runtime), Err(warning) => Ok(RenderOutputFactory::from_raw_string(input, input.source.clone(), warning, runtime)), }";
+const PREFIX: &str = "if input.kind != DiagramKind::MathJax { return Err(RenderError::UnsupportedKind); } let runtime = RuntimeDescriptor::mathjax(); let (result, digest) = self.render_block(input);";
+const DISPATCH: &str = "match result { Ok(svg) => RenderOutputFactory::from_diagram_result(input, crate::markdown::DiagramResult::Ok(svg), runtime).map(|output| RenderOutputFactory::bind_resource(output, digest.as_deref())), Err(warning) => { let error_key = format!(\"error:{}:{warning}\", digest.as_deref().unwrap_or(\"\")); Ok(RenderOutputFactory::bind_resource(RenderOutputFactory::from_raw_string(input, input.source.clone(), warning, runtime), Some(&error_key))) }, }";
+const RESOURCE: &str = "if block.source.trim().is_empty() { return (Err(\"MathJax source is empty\".to_string()), None); } let resource = match self.read_resource() { Ok(resource) => resource, Err(error) => return (Err(error), None), };";
 
 #[test]
 fn render_dispatch_rejects_wrong_arm_counts_with_dispatch_diagnostic() -> Result<(), String> {
@@ -16,10 +17,9 @@ fn render_dispatch_rejects_wrong_arm_counts_with_dispatch_diagnostic() -> Result
         "Ok(svg) => RenderOutputFactory::from_diagram_result(input, crate::markdown::DiagramResult::Ok(svg), runtime),",
         "Ok(svg) => RenderOutputFactory::from_diagram_result(input, crate::markdown::DiagramResult::Ok(svg), runtime), Err(warning) => Ok(RenderOutputFactory::from_raw_string(input, input.source.clone(), warning, runtime)), _ => Err(RenderError::UnsupportedKind)",
     ] {
-        let block = syn::parse_str::<syn::Block>(&format!(
-            "{{ {PREFIX} match self.render_block(input) {{ {arms} }} }}"
-        ))
-        .map_err(|error| error.to_string())?;
+        let block =
+            syn::parse_str::<syn::Block>(&format!("{{ {PREFIX} match result {{ {arms} }} }}"))
+                .map_err(|error| error.to_string())?;
         assert_eq!(
             require_render_dispatch(&block).err().as_deref(),
             Some("backend-runtime-path:render-dispatch")
@@ -30,17 +30,17 @@ fn render_dispatch_rejects_wrong_arm_counts_with_dispatch_diagnostic() -> Result
 
 #[test]
 fn rejects_backend_path_shape_edges() -> Result<(), syn::Error> {
-    let non_call = syn::parse_str::<syn::Block>(
-        "{ let block = DiagramBlock { kind: crate::markdown::DiagramKind::MathJax, source: input.source.clone() }; let preset = DiagramColorPreset::for_render_input(&input); let value = 1; }",
-    )?;
+    let non_call = syn::parse_str::<syn::Block>(&format!(
+        "{{ let block = DiagramBlock {{ kind: crate::markdown::DiagramKind::MathJax, source: input.source.clone() }}; {RESOURCE} let preset = DiagramColorPreset::for_render_input(&input); let result = 1; (result, resource.into_digest()) }}",
+    ))?;
     assert_eq!(
         require_backend_runtime_path(&non_call).err().as_deref(),
         Some("backend-runtime-path:call")
     );
 
-    let non_call_runtime = syn::parse_str::<syn::Block>(
-        "{ let block = DiagramBlock { kind: crate::markdown::DiagramKind::MathJax, source: input.source.clone() }; let preset = DiagramColorPreset::for_render_input(&input); not_a_call; }",
-    )?;
+    let non_call_runtime = syn::parse_str::<syn::Block>(&format!(
+        "{{ let block = DiagramBlock {{ kind: crate::markdown::DiagramKind::MathJax, source: input.source.clone() }}; {RESOURCE} let preset = DiagramColorPreset::for_render_input(&input); let result = not_a_call; (result, resource.into_digest()) }}",
+    ))?;
     assert_eq!(
         require_backend_runtime_path(&non_call_runtime)
             .err()
@@ -60,7 +60,7 @@ fn rejects_render_route_shape_edges() -> Result<(), syn::Error> {
     );
     assert_eq!(
         require_render_kind_guard(&syn::parse_str::<syn::Block>(
-            "{ let first = 1; first; let third = 3; }"
+            "{ let first = 1; first; let third = 3; let fourth = 4; }"
         )?)
         .err()
         .as_deref(),

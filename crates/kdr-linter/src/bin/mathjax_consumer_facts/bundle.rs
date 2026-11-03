@@ -3,6 +3,10 @@ use serde_json::Value;
 use syn::parse::Parser;
 use syn::spanned::Spanned;
 
+#[path = "mathjax_resource_reader.rs"]
+mod resource_reader;
+pub(super) use resource_reader::ResourceReader;
+
 pub(super) fn inspect_scripts(source: &Source, facts: &mut Vec<Value>) -> Result<(), String> {
     let path = RUST_INPUTS[2];
     let build = super::source::method(&source.ast, "MathJaxRuntimeScripts", "build")?;
@@ -109,7 +113,12 @@ fn validate_entry_name(call: &syn::ExprCall, expected_name: &str) -> Result<(), 
     let syn::Expr::Path(callee) = call.func.as_ref() else {
         return Err("script-order:callee".into());
     };
-    if path_name(&callee.path) != "DiagramRuntimeScript::owned" || call.args.len() != 2 {
+    let expected_callee = if expected_name == "mathjax-runtime.min.js" {
+        "DiagramRuntimeScript::borrowed"
+    } else {
+        "DiagramRuntimeScript::owned"
+    };
+    if path_name(&callee.path) != expected_callee || call.args.len() != 2 {
         return Err("script-order:callee".into());
     }
     let syn::Expr::Lit(name) = &call.args[0] else {

@@ -2,16 +2,9 @@
 pub(super) use crate::markdown::runtime_asset_archive::ZENUML_RUNTIME_ASSETS_UNCOMPRESSED_LENGTH;
 use crate::markdown::runtime_asset_archive::{self, RuntimeAssetSource};
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
-    sync::{
-        Arc, Mutex, MutexGuard,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::atomic::{AtomicU64, Ordering},
 };
-
-pub(super) type RuntimeBundleCache = Mutex<HashMap<PathBuf, Arc<str>>>;
-pub(super) type RuntimeBundleGuard<'a> = MutexGuard<'a, HashMap<PathBuf, Arc<str>>>;
 
 static RUNTIME_ASSET_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 

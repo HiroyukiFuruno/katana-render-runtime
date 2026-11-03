@@ -1,11 +1,82 @@
 use super::DrawioJsRuntimeOps;
 use super::test_support::{
-    assert_render_contains, assert_render_not_contains, fake_html_text_color_bundle,
+    assert_render_contains, assert_render_not_contains, fake_bundle as fake_runtime_bundle,
+    fake_html_text_color_bundle,
 };
 use crate::markdown::color_preset::DiagramColorPreset;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static TEMP_RUNTIME_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+#[test]
+fn public_and_typed_paths_render_the_same_svg() -> Result<(), Box<dyn std::error::Error>> {
+    use crate::markdown::{DiagramBlock, DiagramKind, DiagramResult};
+    use crate::renderer::{
+        DrawioRenderer, RenderConfig, RenderContext, RenderInput, RenderKind, RenderPolicy,
+        Renderer,
+    };
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("drawio.js");
+    std::fs::write(&path, fake_runtime_bundle())?;
+    let block = DiagramBlock {
+        kind: DiagramKind::DrawIo,
+        source: "<mxGraphModel />".to_string(),
+    };
+    let input = RenderInput {
+        kind: RenderKind::Drawio,
+        source: block.source.clone(),
+        config: RenderConfig::default(),
+        policy: RenderPolicy::default(),
+        context: RenderContext::default(),
+    };
+    let public = super::super::DrawioRendererOps::render_drawio_with_runtime_path(
+        &block,
+        &path,
+        &DiagramColorPreset::for_render_input(&input),
+    );
+    let typed = DrawioRenderer::with_runtime_path(path).render(&input)?;
+    assert!(matches!(public, DiagramResult::Ok(svg) if svg == typed.svg && svg.contains("<svg")));
+    Ok(())
+}
+
+#[test]
+fn public_and_typed_paths_reject_invalid_runtime_text() -> Result<(), Box<dyn std::error::Error>> {
+    use crate::markdown::{DiagramBlock, DiagramKind, DiagramResult};
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("drawio.js");
+    std::fs::write(&path, b"\xff")?;
+    let block = DiagramBlock {
+        kind: DiagramKind::DrawIo,
+        source: "<mxGraphModel />".to_string(),
+    };
+    let error = super::super::DrawioRendererOps::render_drawio_with_runtime_path(
+        &block,
+        &path,
+        DiagramColorPreset::light(),
+    );
+    assert!(
+        matches!(error, DiagramResult::Err { source, error } if source == block.source && error == "Failed to read Draw.io JavaScript bundle: stream did not contain valid UTF-8")
+    );
+    assert_typed_invalid_runtime(path, &block.source);
+    Ok(())
+}
+
+fn assert_typed_invalid_runtime(path: std::path::PathBuf, source: &str) {
+    use crate::renderer::{
+        DrawioRenderer, RenderConfig, RenderContext, RenderError, RenderInput, RenderKind,
+        RenderPolicy, Renderer,
+    };
+    let input = RenderInput {
+        kind: RenderKind::Drawio,
+        source: source.to_owned(),
+        config: RenderConfig::default(),
+        policy: RenderPolicy::default(),
+        context: RenderContext::default(),
+    };
+    assert!(
+        matches!(DrawioRenderer::with_runtime_path(path).render(&input), Err(RenderError::Runtime(error)) if error == "Failed to read Draw.io JavaScript bundle: stream did not contain valid UTF-8")
+    );
+}
 
 const COLOR_HELPER_TEMPLATE: &str = "var mxUtils = {\n{color_helper}\n};\n";
 

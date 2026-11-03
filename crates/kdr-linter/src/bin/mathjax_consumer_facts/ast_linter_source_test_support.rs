@@ -1,6 +1,6 @@
 use super::{
-    Fixture, GENERATED_MATHJAX_RUNTIME_INDEX, MATHJAX_BACKEND_INDEX, MATHJAX_JS_RUNTIME_INDEX,
-    MATHJAX_JS_SCRIPTS_INDEX, OPAQUE_INPUTS, RUNTIME_ASSET_HELPER_INPUT_INDEX, RUST_INPUTS,
+    Fixture, GENERATED_MATHJAX_RUNTIME_INDEX, MATHJAX_BACKEND_INDEX, MATHJAX_JS_SCRIPTS_INDEX,
+    MATHJAX_RENDERER_INDEX, OPAQUE_INPUTS, RUNTIME_ASSET_HELPER_INPUT_INDEX, RUST_INPUTS,
     inspect_root, shared_readback,
 };
 use std::fs;
@@ -12,23 +12,19 @@ pub(in super::super) fn reject_backend_and_source_changes(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let backend = RUST_INPUTS[MATHJAX_BACKEND_INDEX];
     let original = repository.join(backend);
-    fixture.replace(
-        backend,
-        "match self.render_block(input) {",
-        "match Ok(String::new()) {",
-    )?;
+    fixture.replace(backend, "match result {", "match Ok(String::new()) {")?;
     fixture.reject("backend-runtime-path:render-dispatch")?;
     fixture.restore_from(backend, &original)?;
 
-    let js_runtime = RUST_INPUTS[MATHJAX_JS_RUNTIME_INDEX];
-    let original = repository.join(js_runtime);
+    let renderer = RUST_INPUTS[MATHJAX_RENDERER_INDEX];
+    let original = repository.join(renderer);
     fixture.replace(
-        js_runtime,
-        "runtime_source_from(mathjax_js)",
-        "runtime_source_from(&other_path)",
+        renderer,
+        "MathJaxJsRuntimeOps::render_bundle(&block.source, resource.text(), preset, display)",
+        "MathJaxJsRuntimeOps::render_bundle(&block.source, other.text(), preset, display)",
     )?;
-    fixture.reject("read-render-route:argument:mathjax_js")?;
-    fixture.restore_from(js_runtime, &original)?;
+    fixture.reject("read-render-route:loaded-call")?;
+    fixture.restore_from(renderer, &original)?;
     Ok(())
 }
 

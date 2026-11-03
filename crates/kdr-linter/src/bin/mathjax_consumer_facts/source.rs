@@ -2,6 +2,8 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 
+pub(super) const RESOURCE_BYTES_INPUT_INDEX: usize = 12;
+
 pub(super) const RUST_INPUTS: &[&str] = &[
     "crates/katana-render-runtime/src/markdown/mathjax_renderer/mod.rs",
     "crates/katana-render-runtime/src/markdown/mathjax_renderer/js_runtime.rs",
@@ -12,6 +14,10 @@ pub(super) const RUST_INPUTS: &[&str] = &[
     "crates/katana-render-runtime/src/v8_script.rs",
     "crates/katana-render-runtime/src/lib.rs",
     "crates/katana-render-runtime/src/markdown/runtime_assets.rs",
+    "crates/katana-render-runtime/src/markdown/runtime_resource_loader.rs",
+    "crates/katana-render-runtime/src/markdown/mermaid_renderer/render.rs",
+    "crates/katana-render-runtime/src/renderer/backends/mermaid.rs",
+    "crates/katana-render-runtime/src/resource_bytes.rs",
 ];
 pub(super) const OPAQUE_INPUTS: &[&str] = &[
     "Cargo.toml",

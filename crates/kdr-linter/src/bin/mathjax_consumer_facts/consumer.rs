@@ -4,10 +4,14 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use syn::spanned::Spanned;
 
-const RENDER_STATEMENTS: usize = 6;
-const SCRIPTS_BUILD_STATEMENT_INDEX: usize = 3;
-const RENDER_CALL_STATEMENT_INDEX: usize = 4;
-const RESPONSE_MATCH_STATEMENT_INDEX: usize = 5;
+#[path = "consumer_loaded_route.rs"]
+mod loaded_route;
+
+const RESOURCE_LOADER_INPUT_INDEX: usize = 9;
+const RENDER_STATEMENTS: usize = 5;
+const SCRIPTS_BUILD_STATEMENT_INDEX: usize = 2;
+const RENDER_CALL_STATEMENT_INDEX: usize = 3;
+const RESPONSE_MATCH_STATEMENT_INDEX: usize = 4;
 
 pub(super) fn inspect_callers(
     sources: &BTreeMap<&str, Source>,
@@ -22,12 +26,18 @@ fn inspect_mathjax_caller(
     facts: &mut Vec<Value>,
 ) -> Result<(), String> {
     let path = RUST_INPUTS[1];
-    let render = method(&sources[path].ast, "MathJaxJsRuntimeOps", "render")?;
+    let render = method(&sources[path].ast, "MathJaxJsRuntimeOps", "render_bundle")?;
     let statements = &render.block.stmts;
     if statements.len() != RENDER_STATEMENTS {
         return Err("read-render-route:statement-count".into());
     }
-    require_source_input(&render.block, &sources[path].ast)?;
+    loaded_route::require_source_input(&sources[RUST_INPUTS[0]].ast, &sources[path].ast)?;
+    super::call_binding::ResourceLoaderGuard::require_resource_loader(
+        &sources[RUST_INPUTS[RESOURCE_LOADER_INPUT_INDEX]].ast,
+    )?;
+    super::call_binding::ResourceLoaderGuard::require_bytes(
+        &sources[RUST_INPUTS[super::source::RESOURCE_BYTES_INPUT_INDEX]].ast,
+    )?;
     require_request_input(&render.block)?;
     require_script_build(&render.block)?;
     require_output_render(&render.block)?;
@@ -36,20 +46,14 @@ fn inspect_mathjax_caller(
     Ok(())
 }
 
-fn require_source_input(block: &syn::Block, file: &syn::File) -> Result<(), String> {
-    require_local_call(block, 0, "mathjax_source", "runtime_source_from")?;
-    require_call_arg(local(block, 0)?, 0, "mathjax_js", "read-render-route")?;
-    super::call_binding::require_runtime_source_reader(file)
-}
-
 fn require_request_input(block: &syn::Block) -> Result<(), String> {
-    require_local_call(block, 1, "request", "MathJaxRenderRequest::new")?;
+    require_local_call(block, 0, "request", "MathJaxRenderRequest::new")?;
     require_args(
-        local(block, 1)?,
+        local(block, 0)?,
         &["source", "preset", "display"],
         "read-render-route",
     )?;
-    require_request_json(local(block, 2)?)
+    require_request_json(local(block, 1)?)
 }
 
 fn require_script_build(block: &syn::Block) -> Result<(), String> {

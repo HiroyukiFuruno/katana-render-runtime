@@ -99,8 +99,8 @@ const INPUT_SHAPE_MUTATIONS: &[(usize, &str, &str, &str)] = &[
     ),
     (
         2,
-        "mode.mermaid_cache_extension()",
-        "mode.to_string()",
+        "hasher.finish(),\n                mode.mermaid_cache_extension()",
+        "hasher.finish(),\n                mode.to_string()",
         "render-cache-hash-route:filename",
     ),
     (
@@ -289,7 +289,11 @@ fn reject_render_cache_changes(fixture: &Fixture) -> Result<(), Box<dyn std::err
     )?;
     fixture.reject("render-cache-hash-route:statement-count")?;
     fixture.restore(cache)?;
-    fixture.replace(cache, "mermaid_cache_extension", "forged_cache_extension")?;
+    fixture.replace(
+        cache,
+        "hasher.finish(),\n                mode.mermaid_cache_extension()",
+        "hasher.finish(),\n                mode.forged_cache_extension()",
+    )?;
     fixture.reject("render-cache-hash-route:filename")?;
     Ok(())
 }

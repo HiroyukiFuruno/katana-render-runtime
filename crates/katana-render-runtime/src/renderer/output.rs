@@ -9,6 +9,12 @@ use crate::markdown::DiagramResult;
 pub(super) struct RenderOutputFactory;
 
 impl RenderOutputFactory {
+    pub(super) fn bind_resource(mut output: RenderOutput, digest: Option<&str>) -> RenderOutput {
+        output.cache_fingerprint =
+            CacheFingerprintOps::with_resource(output.cache_fingerprint, digest);
+        output
+    }
+
     pub(super) fn from_diagram_result(
         input: &RenderInput,
         result: DiagramResult,

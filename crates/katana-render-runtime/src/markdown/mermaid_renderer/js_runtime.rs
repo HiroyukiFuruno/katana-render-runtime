@@ -2,27 +2,48 @@ use super::diagram_type::MermaidDiagramType;
 use super::js_runtime_scripts::MermaidRuntimeScripts;
 use crate::markdown::color_preset::DiagramColorPreset;
 use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
-use crate::markdown::runtime_assets::{RuntimeBundleCache, RuntimeBundleGuard};
-use std::collections::HashMap;
+#[cfg(test)]
+use crate::markdown::runtime_resource_loader::{
+    BundledResource, RuntimeResourceLoader as runtime_resource_loader,
+};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+#[cfg(test)]
 use std::path::Path;
-use std::sync::{Arc, Mutex, OnceLock};
-
-static BUNDLE_CACHE: OnceLock<RuntimeBundleCache> = OnceLock::new();
 
 pub(super) struct MermaidJsRuntimeOps;
 
 impl MermaidJsRuntimeOps {
+    #[cfg(test)]
     pub(super) fn render(
         source: &str,
         mermaid_js: &Path,
         preset: &DiagramColorPreset,
     ) -> Result<String, String> {
+        Self::render_with_origin(source, mermaid_js, preset, false)
+    }
+
+    #[cfg(test)]
+    pub(super) fn render_with_origin(
+        source: &str,
+        mermaid_js: &Path,
+        preset: &DiagramColorPreset,
+        bundled: bool,
+    ) -> Result<String, String> {
+        let bundle =
+            runtime_resource_loader::read(mermaid_js, bundled.then_some(BundledResource::Mermaid))
+                .map_err(|error| format!("Failed to read Mermaid.js bundle: {error}"))?;
+        Self::render_bundle(source, &bundle, preset)
+    }
+
+    pub(super) fn render_bundle(
+        source: &str,
+        bundle: &str,
+        preset: &DiagramColorPreset,
+    ) -> Result<String, String> {
         let request = MermaidRenderRequest::new(source, preset);
-        let bundle = read_mermaid_bundle(mermaid_js)?;
         let request_json = request.to_json_value().to_string();
-        let scripts = MermaidRuntimeScripts::build(&bundle, &request_json, request.diagram_type);
+        let scripts = MermaidRuntimeScripts::build(bundle, &request_json, request.diagram_type);
         tracing::event!(
             target: "katana_render_runtime::mermaid_classic_capture",
             tracing::Level::TRACE,
@@ -84,22 +105,10 @@ impl<'a> MermaidRenderRequest<'a> {
     }
 }
 
-fn read_mermaid_bundle(mermaid_js: &Path) -> Result<Arc<str>, String> {
-    let cache = BUNDLE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let path = mermaid_js.to_path_buf();
-    if let Some(bundle) = lock_cache(cache)?.get(&path) {
-        return Ok(bundle.clone());
-    }
-
-    let bundle = std::fs::read_to_string(mermaid_js)
-        .map_err(|err| format!("Failed to read Mermaid.js bundle: {err}"))?;
-    let bundle = Arc::<str>::from(bundle);
-    lock_cache(cache)?.insert(path, bundle.clone());
-    Ok(bundle)
-}
-
-fn lock_cache(cache: &RuntimeBundleCache) -> Result<RuntimeBundleGuard<'_>, String> {
-    cache.lock().map_err(|err| err.to_string())
+#[cfg(test)]
+fn read_mermaid_bundle(mermaid_js: &Path) -> Result<String, String> {
+    runtime_resource_loader::read_file(mermaid_js)
+        .map_err(|err| format!("Failed to read Mermaid.js bundle: {err}"))
 }
 
 fn ensure_svg(svg: &str) -> Result<(), String> {

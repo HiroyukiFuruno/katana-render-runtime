@@ -1,14 +1,23 @@
 use super::consumer::local;
-use super::source::{RUST_INPUTS, Source, call, ident, method, record_fact};
-use super::syntax::{call_expr_path, require_success_render, require_warning_render, return_call};
+use super::source::{RUST_INPUTS, Source, ident, method, record_fact};
+use super::syntax::{call_expr_path, return_call};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use syn::spanned::Spanned;
 
-const RENDER_BLOCK_STMT_COUNT: usize = 3;
-const RENDER_BLOCK_RETURN_INDEX: usize = 2;
-const DISPLAY_ARG_INDEX: usize = 3;
+const RENDER_BLOCK_STMT_COUNT: usize = 6;
+const RENDER_BLOCK_RETURN_INDEX: usize = 5;
+const RENDER_TRAIT_STMT_COUNT: usize = 4;
+const RENDER_TRAIT_RETURN_INDEX: usize = 3;
 const MATHJAX_BACKEND_INPUT_INDEX: usize = 4;
+const PRESET_STATEMENT_INDEX: usize = 3;
+const RENDER_RESULT_STATEMENT_INDEX: usize = 4;
+
+#[path = "renderer_loaded_call.rs"]
+mod loaded_call;
+
+#[path = "renderer_resource_route.rs"]
+mod resource_route;
 
 pub(super) fn inspect_backend_path(
     sources: &BTreeMap<&str, Source>,
@@ -18,6 +27,7 @@ pub(super) fn inspect_backend_path(
     inspect_backend_trait_route(&sources[path].ast, path, facts)?;
     let caller = method(&sources[path].ast, "MathJaxRenderer", "render_block")?;
     require_backend_runtime_path(&caller.block)?;
+    resource_route::require_resource_methods(&sources[path].ast)?;
     record_fact(facts, "backend-runtime-path", path, caller.span());
     Ok(())
 }
@@ -28,35 +38,33 @@ fn require_backend_runtime_path(block: &syn::Block) -> Result<(), String> {
     }
     require_diagram_block(block)?;
     if !call_expr_path(
-        local(block, 1)?,
+        local(block, PRESET_STATEMENT_INDEX)?,
         "DiagramColorPreset::for_render_input",
         &["input"],
     ) {
         return Err("backend-runtime-path:preset-input".into());
     }
-    let Some(syn::Stmt::Expr(expression, _)) = block.stmts.get(RENDER_BLOCK_RETURN_INDEX) else {
-        return Err("backend-runtime-path:call".into());
-    };
-    require_runtime_path_call(expression)
+    resource_route::require_resource(block)?;
+    loaded_call::require_runtime_path_call(super::source::local(
+        block,
+        RENDER_RESULT_STATEMENT_INDEX,
+        "result",
+    )?)?;
+    require_resource_digest(block)
 }
 
-fn require_runtime_path_call(expression: &syn::Expr) -> Result<(), String> {
-    let Some(actual) = call(expression) else {
+fn require_resource_digest(block: &syn::Block) -> Result<(), String> {
+    let Some(syn::Stmt::Expr(syn::Expr::Tuple(result), _)) =
+        block.stmts.get(RENDER_BLOCK_RETURN_INDEX)
+    else {
         return Err("backend-runtime-path:call".into());
     };
-    if super::source::path_name_from_expr(&actual.func)
-        != "MathJaxRendererOps::render_mathjax_with_runtime_path"
-        || actual.args.len() != super::syntax::MATHJAX_RENDER_OUTPUT_ARGUMENT_COUNT
-        || !ident(&actual.args[0], "block")
-        || !ident(&actual.args[1], "self.runtime_path")
-        || !ident(&actual.args[2], "preset")
-        || !call_expr_path(
-            &actual.args[DISPLAY_ARG_INDEX],
-            "MathJaxRenderConfig::display",
-            &["input"],
-        )
+    if result.elems.len() != 2
+        || !ident(&result.elems[0], "result")
+        || !matches!(&result.elems[1], syn::Expr::MethodCall(call) if call.method == "into_digest"
+            && call.args.is_empty() && ident(&call.receiver, "resource"))
     {
-        return Err("backend-runtime-path:arguments".into());
+        return Err("backend-runtime-path:resource-digest".into());
     }
     Ok(())
 }
@@ -76,7 +84,7 @@ fn inspect_backend_trait_route(
 }
 
 fn require_render_kind_guard(block: &syn::Block) -> Result<(), String> {
-    if block.stmts.len() != RENDER_BLOCK_STMT_COUNT {
+    if block.stmts.len() != RENDER_TRAIT_STMT_COUNT {
         return Err("backend-runtime-path:render-route-statement-count".into());
     }
     let Some(syn::Stmt::Expr(syn::Expr::If(check), _)) = block.stmts.first() else {
@@ -129,22 +137,22 @@ fn require_render_runtime(block: &syn::Block) -> Result<(), String> {
 }
 
 fn require_render_dispatch(block: &syn::Block) -> Result<(), String> {
+    resource_route::require_render_binding(block)?;
     let Some(syn::Stmt::Expr(syn::Expr::Match(dispatch), _)) =
-        block.stmts.get(RENDER_BLOCK_RETURN_INDEX)
+        block.stmts.get(RENDER_TRAIT_RETURN_INDEX)
     else {
         return Err("backend-runtime-path:render-dispatch".into());
     };
-    if !matches!(&*dispatch.expr, syn::Expr::MethodCall(call) if call.method == "render_block" && ident(&call.receiver, "self") && call.args.len() == 1 && ident(&call.args[0], "input"))
-    {
+    if !ident(&dispatch.expr, "result") {
         return Err("backend-runtime-path:render-dispatch".into());
     }
     let [success, warning] = dispatch.arms.as_slice() else {
         return Err("backend-runtime-path:render-dispatch".into());
     };
     if !tuple_binding(&success.pat, "Ok", "svg")
-        || !require_success_render(&success.body)
+        || !resource_route::OutputGuard::require_bound_success(&success.body)
         || !tuple_binding(&warning.pat, "Err", "warning")
-        || !require_warning_render(&warning.body)
+        || !resource_route::OutputGuard::require_bound_warning(&warning.body)
     {
         return Err("backend-runtime-path:render-arm-flow".into());
     }

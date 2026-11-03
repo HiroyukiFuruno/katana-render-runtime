@@ -5,6 +5,9 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use syn::spanned::Spanned;
 
+#[path = "runtime_resolver_loaded.rs"]
+mod loaded_route;
+
 const RUNTIME_RESOLVER_STATEMENTS: usize = 2;
 const RUNTIME_PATH_INPUT_INDEX: usize = 3;
 
@@ -19,6 +22,12 @@ pub(super) fn inspect_runtime_resolver(
         "resolve_with_plantuml_cache_dir",
     )?;
     require_resolver_body(&resolver.block)?;
+    let loaded = method(
+        &sources[path].ast,
+        "RuntimePathResolver",
+        "resolve_renderer",
+    )?;
+    loaded_route::require_loaded_resolver(&sources[path].ast, &loaded.block)?;
     record_fact(facts, "runtime-path-resolver", path, resolver.span());
     Ok(())
 }
@@ -190,6 +199,7 @@ mod private_ast_tests {
     use crate::test_support::Fixture;
 
     const PLANTUML_ARM: &str = concat!(
+        "            DiagramKind::MathJax => MathJaxRendererOps::resolve_mathjax_js(),\n",
         "            DiagramKind::PlantUml => Ok(plantuml_cache_dir\n",
         "                .map_or_else(PlantUmlRendererOps::default_jar_path, |path| {\n",
         "                    PlantUmlRendererOps::default_jar_path_for_cache_dir(&path)\n",
@@ -198,22 +208,34 @@ mod private_ast_tests {
     const PLANTUML_BOUNDARY_MUTATIONS: &[(&str, &str, &str)] = &[
         (
             PLANTUML_ARM,
-            "            DiagramKind::PlantUml => Ok(plantuml_cache_dir.map_or_else(PlantUmlRendererOps::default_jar_path)),\n",
+            concat!(
+                "            DiagramKind::MathJax => MathJaxRendererOps::resolve_mathjax_js(),\n",
+                "            DiagramKind::PlantUml => Ok(plantuml_cache_dir.map_or_else(PlantUmlRendererOps::default_jar_path)),\n"
+            ),
             "runtime-path-resolver:plantuml-arm",
         ),
         (
             PLANTUML_ARM,
-            "            DiagramKind::PlantUml => Ok(plantuml_cache_dir),\n",
+            concat!(
+                "            DiagramKind::MathJax => MathJaxRendererOps::resolve_mathjax_js(),\n",
+                "            DiagramKind::PlantUml => Ok(plantuml_cache_dir),\n"
+            ),
             "runtime-path-resolver:plantuml-arm",
         ),
         (
             PLANTUML_ARM,
-            "            DiagramKind::PlantUml => Ok(plantuml_cache_dir.map_or_else(PlantUmlRendererOps::default_jar_path, |path| { let _cache = path; })),\n",
+            concat!(
+                "            DiagramKind::MathJax => MathJaxRendererOps::resolve_mathjax_js(),\n",
+                "            DiagramKind::PlantUml => Ok(plantuml_cache_dir.map_or_else(PlantUmlRendererOps::default_jar_path, |path| { let _cache = path; })),\n"
+            ),
             "runtime-path-resolver:plantuml-cache",
         ),
         (
             PLANTUML_ARM,
-            "            DiagramKind::PlantUml => Ok(plantuml_cache_dir.map_or_else(PlantUmlRendererOps::default_jar_path, |path| path)),\n",
+            concat!(
+                "            DiagramKind::MathJax => MathJaxRendererOps::resolve_mathjax_js(),\n",
+                "            DiagramKind::PlantUml => Ok(plantuml_cache_dir.map_or_else(PlantUmlRendererOps::default_jar_path, |path| path)),\n"
+            ),
             "runtime-path-resolver:plantuml-cache",
         ),
     ];

@@ -9,6 +9,12 @@ use syn::{Expr, Stmt, parse::Parser};
 mod includes;
 #[path = "mermaid_classic_scripts_realm.rs"]
 mod realm;
+#[path = "mermaid_classic_resource_backend.rs"]
+mod resource_backend;
+#[path = "mermaid_classic_resource_loader.rs"]
+mod resource_loader;
+#[path = "mermaid_classic_resource_route.rs"]
+mod resource_route;
 #[path = "mermaid_classic_scripts_route.rs"]
 mod route;
 #[path = "mermaid_classic_scripts_ast.rs"]
@@ -23,14 +29,23 @@ pub(super) const INPUTS: &[&str] = &[
     "crates/katana-render-runtime/src/markdown/diagram_js_runtime.rs",
     "crates/katana-render-runtime/src/v8_script.rs",
     "crates/katana-render-runtime/src/lib.rs",
+    source::RUST_INPUTS[10],
+    source::RUST_INPUTS[9],
+    "crates/katana-render-runtime/src/renderer/backends/mermaid.rs",
+    "crates/katana-render-runtime/src/markdown/mermaid_renderer/render_instance.rs",
+    source::RUST_INPUTS[source::RESOURCE_BYTES_INPUT_INDEX],
     "Cargo.toml",
     "Cargo.lock",
     "crates/kdr-linter/Cargo.toml",
 ];
-const RUST_INPUT_COUNT: usize = 5;
+const RUST_INPUT_COUNT: usize = 10;
 const SCRIPT_INPUT_INDEX: usize = 0;
 const CALLER_INPUT_INDEX: usize = 1;
 const REALM_INPUT_INDEX: usize = 2;
+const RENDER_INPUT_INDEX: usize = 5;
+const RESOURCE_LOADER_INPUT_INDEX: usize = 6;
+const BACKEND_INPUT_INDEX: usize = 7;
+const INSTANCE_INPUT_INDEX: usize = 8;
 const SCHEMA: &str = "kdr-linter/mermaid-classic-script-facts/v1";
 
 pub(super) fn run(root: &Path) -> Result<(), String> {
@@ -62,9 +77,7 @@ pub(super) fn inspect_root(root: &Path) -> Result<Value, String> {
         .collect::<Result<BTreeMap<_, _>, String>>()?;
     let mut facts = Vec::new();
     let manifest = scripts::inspect_scripts(&sources[INPUTS[SCRIPT_INPUT_INDEX]], &mut facts)?;
-    route::inspect_caller(&sources[INPUTS[CALLER_INPUT_INDEX]], &mut facts)?;
-    realm::inspect_realm(&sources[INPUTS[REALM_INPUT_INDEX]], &mut facts)?;
-    super::v8_route::inspect_v8_compile(&sources, &mut facts)?;
+    inspect_routes(&sources, &mut facts)?;
     super::sort_facts(&mut facts);
     let hashes = INPUTS
         .iter()
@@ -76,6 +89,27 @@ pub(super) fn inspect_root(root: &Path) -> Result<Value, String> {
         .collect();
     verify_source_snapshots(&before, &hashes)?;
     Ok(static_report(parser, facts, hashes, manifest))
+}
+
+fn inspect_routes(
+    sources: &BTreeMap<&str, source::Source>,
+    facts: &mut Vec<Value>,
+) -> Result<(), String> {
+    route::inspect_caller(&sources[INPUTS[CALLER_INPUT_INDEX]], facts)?;
+    resource_route::inspect(
+        &sources[INPUTS[RENDER_INPUT_INDEX]],
+        &sources[INPUTS[RESOURCE_LOADER_INPUT_INDEX]],
+    )?;
+    resource_backend::inspect(&sources[INPUTS[BACKEND_INPUT_INDEX]])?;
+    super::call_binding::ResourceLoaderGuard::require_bytes(
+        &sources[source::RUST_INPUTS[source::RESOURCE_BYTES_INPUT_INDEX]].ast,
+    )?;
+    resource_route::InstanceGuard::inspect(
+        &sources[INPUTS[RENDER_INPUT_INDEX]],
+        &sources[INPUTS[INSTANCE_INPUT_INDEX]],
+    )?;
+    realm::inspect_realm(&sources[INPUTS[REALM_INPUT_INDEX]], facts)?;
+    super::v8_route::inspect_v8_compile(sources, facts)
 }
 
 fn verify_source_snapshots(

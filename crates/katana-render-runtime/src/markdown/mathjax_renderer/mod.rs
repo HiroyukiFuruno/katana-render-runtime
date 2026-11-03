@@ -32,7 +32,7 @@ impl MathJaxRendererOps {
         )
     }
 
-    fn resolve_mathjax_js_with_env(
+    pub(crate) fn resolve_mathjax_js_with_env(
         env_value: Option<std::ffi::OsString>,
         bundled_path: Option<PathBuf>,
     ) -> Result<PathBuf, String> {
@@ -55,16 +55,45 @@ impl MathJaxRendererOps {
         Ok(Some(PathBuf::from(path)))
     }
 
+    #[cfg(test)]
     pub(crate) fn render_mathjax_with_runtime_path(
         block: &DiagramBlock,
         runtime_path: &Path,
         preset: &DiagramColorPreset,
         display: bool,
     ) -> Result<String, String> {
+        Self::render_mathjax_with_origin(block, runtime_path, preset, display, false)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn render_mathjax_with_origin(
+        block: &DiagramBlock,
+        runtime_path: &Path,
+        preset: &DiagramColorPreset,
+        display: bool,
+        bundled: bool,
+    ) -> Result<String, String> {
         if block.source.trim().is_empty() {
             return Err("MathJax source is empty".to_string());
         }
-        MathJaxJsRuntimeOps::render(&block.source, runtime_path, preset, display)
+        MathJaxJsRuntimeOps::render_with_origin(
+            &block.source,
+            runtime_path,
+            preset,
+            display,
+            bundled,
+        )
+    }
+    pub(crate) fn render_mathjax_with_loaded(
+        block: &DiagramBlock,
+        preset: &DiagramColorPreset,
+        display: bool,
+        resource: &crate::markdown::runtime_resource_loader::LoadedResource,
+    ) -> Result<String, String> {
+        if block.source.trim().is_empty() {
+            return Err("MathJax source is empty".to_string());
+        }
+        MathJaxJsRuntimeOps::render_bundle(&block.source, resource.text(), preset, display)
     }
 }
 

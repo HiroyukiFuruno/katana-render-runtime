@@ -4,6 +4,8 @@ use super::{Fixture, OPAQUE_INPUTS, RUST_INPUTS, inspect_root, repository_root};
 mod consumer_guard_tests;
 #[path = "materializer_shared_readback_helper_tests.rs"]
 mod helper_tests;
+#[path = "materializer_pin_contract_tests.rs"]
+mod pin_contract_tests;
 
 const HELPER: &str = "crates/katana-render-runtime/src/markdown/runtime_assets.rs";
 const MATERIALIZER_BODY_MUTATIONS: &[(&str, &str, &str)] = &[
@@ -137,24 +139,6 @@ const CALLER_BINDING_MUTATIONS: &[(&str, &str, &str)] = &[
         "shared-predicate-body",
     ),
 ];
-#[test]
-fn mathjax_shared_readback_ast_linter_binds_current_and_legacy_routes()
--> Result<(), Box<dyn std::error::Error>> {
-    let fixture = fixture()?;
-    for legacy in [false, true] {
-        if legacy {
-            legacy_readback(&fixture, RUST_INPUTS[0])?;
-        }
-        let report = inspect_root(fixture.root())?;
-        assert_eq!(report["facts"].as_array().ok_or("facts")?.len(), 13);
-        let pins = report["inputSha256"].as_object().ok_or("inputs")?;
-        assert_eq!(pins.len(), 16);
-        assert!(pins.contains_key(HELPER));
-        assert_eq!(report["generatedGlobalVerified"], false);
-        assert_eq!(report["overrideContentVerified"], false);
-    }
-    Ok(())
-}
 
 #[test]
 fn mathjax_materializer_body_rejects_each_changed_file_operation()

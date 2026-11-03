@@ -5,9 +5,9 @@ use syn::{Block, Expr, Pat, Stmt};
 #[path = "mermaid_classic_capture_unit_tests.rs"]
 mod unit_tests;
 
-const REQUEST_CAPTURE_STATEMENTS: usize = 7;
-const REQUEST_CAPTURE_EVENT_INDEX: usize = 4;
-const LEGACY_REQUEST_STATEMENT_COUNT: usize = 6;
+const REQUEST_CAPTURE_STATEMENTS: usize = 6;
+const REQUEST_CAPTURE_EVENT_INDEX: usize = 3;
+const LEGACY_REQUEST_STATEMENT_COUNT: usize = 5;
 const EVALUATE_CAPTURE_STATEMENTS: usize = 9;
 const LEGACY_EVALUATE_STATEMENT_COUNT: usize = 6;
 const SCRIPT_CAPTURE_EVENT_INDEX: usize = 1;

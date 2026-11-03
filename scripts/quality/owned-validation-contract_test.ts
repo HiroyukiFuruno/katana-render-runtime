@@ -3056,7 +3056,7 @@ test("actual Rust native width test trace remains mandatory with isolated strict
   expect(report.nativeWidthTrace.consumerSources).toEqual([
     {
       path: `${nativeWidthTraceDirectory}/js_runtime.rs`,
-      sha256: "184b6738bd8d38d9e8e02f64cc42aa561bc4349282caa341bc171431a234c265",
+      sha256: "6beaa9a5f1b2d52c87d4e34ab55e78ee2a00b57c8a992da3082ab5459300b28a",
     },
     {
       path: `${nativeWidthTraceDirectory}/js_runtime_native_width_tests.rs`,
@@ -3622,6 +3622,16 @@ test.each([
   ],
   ["self rewritten provenance", MATHJAX_PROVENANCE, (value: string) => `${value} `],
   [
+    "Rust request route changed",
+    "crates/katana-render-runtime/src/markdown/mathjax_renderer/js_runtime.rs",
+    (value: string) => `${value}\n// changed request route\n`,
+  ],
+  [
+    "Rust script route changed",
+    "crates/katana-render-runtime/src/markdown/mathjax_renderer/js_runtime_scripts.rs",
+    (value: string) => `${value}\n// changed script route\n`,
+  ],
+  [
     "vendor declaration changed",
     mathJaxFixtureProvenance.declarations[0]?.path ?? "",
     (value: string) => `${value}\n// changed vendor\n`,
@@ -4161,6 +4171,17 @@ test("standalone performance harness binds both owned Rust arms without executin
 test.each([
   ["workspace", "[workspace]", '[workspace]\nmembers = ["nested"]'],
   ["publish", "publish = false", "publish = true"],
+  [
+    "default binary",
+    'default-run = "krr-html-performance-harness"',
+    'default-run = "diagram_resource_probe"',
+  ],
+  ["probe path", 'path = "src/bin/diagram_resource_probe.rs"', 'path = "src/bin/other.rs"'],
+  [
+    "extra binary",
+    'path = "src/bin/diagram_resource_probe.rs"',
+    'path = "src/bin/diagram_resource_probe.rs"\n[[bin]]\nname = "other"\npath = "src/bin/other.rs"',
+  ],
   [
     "arms",
     'candidate = ["dep:candidate", "dep:image", "dep:url"]',

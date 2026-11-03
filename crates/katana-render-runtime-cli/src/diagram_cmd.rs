@@ -4,10 +4,10 @@ use crate::diagram_source::DiagramSourceOps;
 pub(crate) use crate::diagram_source::MermaidMarkdownOps;
 use crate::file_ops::FileOps;
 use crate::reference_cmd::ReferenceCommand;
-use katana_render_runtime::{
-    DiagramKind, DrawioRenderer, MathJaxRenderer, MermaidRenderer, PlantUmlRenderer, RenderInput,
-    RenderOutput, Renderer, RuntimePathResolver,
-};
+use katana_render_runtime::Renderer;
+use katana_render_runtime::{DiagramKind, RenderOutput, RuntimePathResolver};
+#[cfg(test)]
+use katana_render_runtime::{DrawioRenderer, MathJaxRenderer, MermaidRenderer, PlantUmlRenderer};
 use render_input::{DiagramRenderRequest, RenderInputFactory};
 use std::path::PathBuf;
 
@@ -61,7 +61,7 @@ impl DiagramCommand {
 
     fn render(self, request: DiagramRenderRequest) -> anyhow::Result<()> {
         self.validate_input_options(&request)?;
-        let runtime_path = self.resolve_runtime_path(&request)?;
+        let (runtime_path, renderer) = self.prepare_runtime(&request)?;
         let source = FileOps::read_to_string(&request.input_path)?;
         let mut attestation = Self::attestation(&request, &runtime_path, &source)?;
         let vendor_config = Self::vendor_config(self.kind, &request)?;
@@ -72,14 +72,55 @@ impl DiagramCommand {
         }
         let output = match &mut attestation {
             Some(attestation) => attestation.capture_render(&input.source, || {
-                self.render_with_runtime(runtime_path, &input)
+                renderer.render(&input).map_err(anyhow::Error::from)
             })?,
-            None => self.render_with_runtime(runtime_path, &input)?,
+            None => renderer.render(&input).map_err(anyhow::Error::from)?,
         };
         match attestation {
             Some(attestation) => attestation.complete(&input, &output),
             None => Self::write_render_output(request.output_path, &output),
         }
+    }
+
+    fn prepare_runtime(
+        &self,
+        request: &DiagramRenderRequest,
+    ) -> anyhow::Result<(PathBuf, Box<dyn Renderer>)> {
+        Self::validate_runtime_options(
+            self.kind,
+            request.runtime.as_ref(),
+            request.cache_dir.as_ref(),
+        )?;
+        let (path, renderer) = RuntimePathResolver::resolve_renderer(
+            self.kind,
+            request.runtime.clone(),
+            request.cache_dir.clone(),
+        )?;
+        if request.source_options.render_attestation.is_none() {
+            return Ok((path, renderer));
+        }
+        self.prepare_attested_runtime(request, path)
+    }
+
+    fn prepare_attested_runtime(
+        &self,
+        request: &DiagramRenderRequest,
+        path: PathBuf,
+    ) -> anyhow::Result<(PathBuf, Box<dyn Renderer>)> {
+        let path = if self.kind == DiagramKind::Mermaid
+            && request.runtime.is_none()
+            && std::env::var_os("MERMAID_JS").is_none()
+        {
+            std::fs::canonicalize(path)?
+        } else {
+            path
+        };
+        let (_, renderer) = RuntimePathResolver::resolve_renderer(
+            self.kind,
+            Some(path.clone()),
+            request.cache_dir.clone(),
+        )?;
+        Ok((path, renderer))
     }
 
     fn attestation(
@@ -118,41 +159,11 @@ impl DiagramCommand {
         request.validate_input_options(self.kind)
     }
 
-    fn resolve_runtime_path(&self, request: &DiagramRenderRequest) -> anyhow::Result<PathBuf> {
-        Self::validate_runtime_options(
-            self.kind,
-            request.runtime.as_ref(),
-            request.cache_dir.as_ref(),
-        )?;
-        let runtime_path = RuntimePathResolver::resolve_with_plantuml_cache_dir(
-            self.kind,
-            request.runtime.clone(),
-            request.cache_dir.clone(),
-        )?;
-        if request.source_options.render_attestation.is_some()
-            && self.kind == DiagramKind::Mermaid
-            && request.runtime.is_none()
-            && std::env::var_os("MERMAID_JS").is_none()
-        {
-            Ok(std::fs::canonicalize(runtime_path)?)
-        } else {
-            Ok(runtime_path)
-        }
-    }
-
     fn vendor_config(
         kind: DiagramKind,
         request: &DiagramRenderRequest,
     ) -> anyhow::Result<serde_json::Value> {
         request.vendor_config(kind)
-    }
-
-    fn render_with_runtime(
-        &self,
-        runtime_path: PathBuf,
-        input: &RenderInput,
-    ) -> anyhow::Result<RenderOutput> {
-        Ok(self.renderer(runtime_path).render(input)?)
     }
 
     fn validate_runtime_options(
@@ -163,6 +174,7 @@ impl DiagramCommand {
         RenderInputFactory::validate_runtime_options(kind, runtime, cache_dir)
     }
 
+    #[cfg(test)]
     fn renderer(&self, runtime_path: PathBuf) -> Box<dyn Renderer> {
         match self.kind {
             DiagramKind::Mermaid => Box::new(MermaidRenderer::with_runtime_path(runtime_path)),

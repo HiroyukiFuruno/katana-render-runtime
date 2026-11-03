@@ -1,7 +1,12 @@
 use super::js_runtime_scripts::MathJaxRuntimeScripts;
 use crate::markdown::color_preset::DiagramColorPreset;
 use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
+#[cfg(test)]
+use crate::markdown::runtime_resource_loader::{
+    BundledResource, RuntimeResourceLoader as runtime_resource_loader,
+};
 use serde::Deserialize;
+#[cfg(test)]
 use std::path::Path;
 
 pub(super) struct MathJaxJsRuntimeOps;
@@ -14,13 +19,39 @@ enum MathJaxRuntimeResponse {
 }
 
 impl MathJaxJsRuntimeOps {
+    #[cfg(test)]
     pub(super) fn render(
         source: &str,
         mathjax_js: &Path,
         preset: &DiagramColorPreset,
         display: bool,
     ) -> Result<String, String> {
-        let mathjax_source = runtime_source_from(mathjax_js)?;
+        Self::render_with_origin(source, mathjax_js, preset, display, false)
+    }
+
+    #[cfg(test)]
+    pub(super) fn render_with_origin(
+        source: &str,
+        mathjax_js: &Path,
+        preset: &DiagramColorPreset,
+        display: bool,
+        bundled: bool,
+    ) -> Result<String, String> {
+        let mathjax_source = if bundled {
+            runtime_resource_loader::read(mathjax_js, Some(BundledResource::MathJax))
+                .map_err(|error| error.to_string())?
+        } else {
+            runtime_source_from(mathjax_js)?.into()
+        };
+        Self::render_bundle(source, &mathjax_source, preset, display)
+    }
+
+    pub(super) fn render_bundle(
+        source: &str,
+        mathjax_source: &str,
+        preset: &DiagramColorPreset,
+        display: bool,
+    ) -> Result<String, String> {
         let request = MathJaxRenderRequest::new(source, preset, display);
         let request_json = request.to_json_value().to_string();
         let scripts = MathJaxRuntimeScripts::build(mathjax_source, &request_json);
@@ -32,8 +63,9 @@ impl MathJaxJsRuntimeOps {
     }
 }
 
+#[cfg(test)]
 fn runtime_source_from(mathjax_js: &Path) -> Result<String, String> {
-    match std::fs::read_to_string(mathjax_js) {
+    match runtime_resource_loader::read_file(mathjax_js) {
         Ok(source) => Ok(source),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(format!(
             "MathJax runtime asset is not installed: {}",

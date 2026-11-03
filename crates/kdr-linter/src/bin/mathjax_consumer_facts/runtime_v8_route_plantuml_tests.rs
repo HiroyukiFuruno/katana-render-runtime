@@ -35,8 +35,8 @@ const PLANTUML_MUTATIONS: &[(&str, &str, &str)] = &[
         "runtime-path-resolver:plantuml-arm",
     ),
     (
-        "PlantUmlRendererOps::default_jar_path",
-        "FakePlantUmlRendererOps::default_jar_path",
+        "PlantUmlRendererOps::default_jar_path, |path|",
+        "FakePlantUmlRendererOps::default_jar_path, |path|",
         "runtime-path-resolver:plantuml-default",
     ),
     (
@@ -62,9 +62,77 @@ pub(super) fn reject_mutations(
     original: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     for (before, after, expected) in PLANTUML_MUTATIONS {
-        fixture.replace(resolver, before, after)?;
+        replace_legacy_resolver(fixture, resolver, before, after)?;
         fixture.reject(expected)?;
         fixture.restore_from(resolver, original)?;
     }
+    Ok(())
+}
+
+pub(super) fn replace_legacy_resolver(
+    fixture: &Fixture,
+    relative: &str,
+    before: &str,
+    after: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let path = fixture.root().join(relative);
+    let mut source = std::fs::read_to_string(&path)?;
+    let start = source
+        .find("pub fn resolve_with_plantuml_cache_dir")
+        .ok_or("missing legacy resolver")?;
+    let end = start
+        + source[start..]
+            .find("#[cfg(test)]")
+            .ok_or("missing test boundary")?;
+    let route = &source[start..end];
+    if route.matches(before).count() != 1 {
+        return Err("legacy resolver mutation is ambiguous".into());
+    }
+    let offset = route
+        .find(before)
+        .ok_or("legacy resolver mutation missing")?;
+    source.replace_range(start + offset..start + offset + before.len(), after);
+    std::fs::write(path, source)?;
+    Ok(())
+}
+
+pub(super) fn reject_loaded_mutations(fixture: &Fixture) -> Result<(), Box<dyn std::error::Error>> {
+    fixture.reject_unique_mutations(
+        super::RUST_INPUTS[super::MATHJAX_RUNTIME_PATH_RESOLVER_INDEX],
+        &[
+            (
+                "DiagramKind::MathJax => Some(\"MATHJAX_JS\")",
+                "DiagramKind::MathJax => Some(\"WRONG_JS\")",
+                "runtime-path-resolver:loaded-env",
+            ),
+            (
+                "runtime_path.is_none() && env_name.is_some() && env_value.is_none()",
+                "runtime_path.is_none() && env_name.is_some() && env_value.is_some()",
+                "runtime-path-resolver:loaded-origin",
+            ),
+            (
+                "MathJaxRenderer::with_bundled_runtime_path(path)",
+                "MathJaxRenderer::with_runtime_path(path)",
+                "runtime-path-resolver:loaded-renderer",
+            ),
+        ],
+    )?;
+    Ok(())
+}
+
+pub(super) fn reject_non_match_dispatch_receiver(
+    fixture: &Fixture,
+    resolver: &str,
+    original: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    replace_legacy_resolver(fixture, resolver, "match kind {", "(match kind {")?;
+    replace_legacy_resolver(
+        fixture,
+        resolver,
+        "        }\n        .map_err(RenderError::RuntimeResolution)",
+        "        })\n        .map_err(RenderError::RuntimeResolution)",
+    )?;
+    fixture.reject("runtime-path-resolver:dispatch")?;
+    fixture.restore_from(resolver, original)?;
     Ok(())
 }

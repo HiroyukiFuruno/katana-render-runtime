@@ -24,6 +24,7 @@ mod css_parser_shared;
 mod html_dom;
 pub mod markdown;
 pub mod renderer;
+mod resource_bytes;
 mod svg_engine;
 mod system;
 mod v8_script;

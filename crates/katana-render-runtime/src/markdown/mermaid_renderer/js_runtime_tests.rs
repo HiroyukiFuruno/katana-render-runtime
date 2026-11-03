@@ -1,9 +1,7 @@
 use super::{
-    MermaidJsRuntimeOps, MermaidRenderRequest, ensure_svg, lock_cache, read_mermaid_bundle,
-    rendered_svg,
+    MermaidJsRuntimeOps, MermaidRenderRequest, ensure_svg, read_mermaid_bundle, rendered_svg,
 };
 use crate::markdown::color_preset::DiagramColorPreset;
-use crate::markdown::js_runtime_cache_test_support::with_poisoned_runtime_bundle_cache;
 use crate::markdown::runtime_assets::RuntimeAsset;
 
 #[test]
@@ -111,13 +109,6 @@ fn render_reports_missing_bundle_through_surface_path() {
 #[test]
 fn rendered_svg_rejects_plain_text_from_runtime() {
     assert!(rendered_svg("plain text".to_string()).is_err());
-}
-
-#[test]
-fn poisoned_cache_reports_lock_error() {
-    with_poisoned_runtime_bundle_cache("poison mermaid cache", |cache| {
-        assert!(lock_cache(cache).is_err());
-    });
 }
 
 #[test]

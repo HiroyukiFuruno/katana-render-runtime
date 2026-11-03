@@ -3,6 +3,11 @@ name = "krr-html-performance-harness"
 version = "0.1.0"
 edition = "2021"
 publish = false
+default-run = "krr-html-performance-harness"
+
+[[bin]]
+name = "diagram_resource_probe"
+path = "src/bin/diagram_resource_probe.rs"
 
 [workspace]
 

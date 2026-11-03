@@ -98,12 +98,12 @@ const SOURCE_READER_MUTATIONS: &[(&str, &str, &str)] = &[
         "read-render-route:source-reader-body",
     ),
     (
-        "std::fs::read_to_string(mathjax_js)",
-        "std::fs::read_to_string(other_path)",
+        "runtime_resource_loader::read_file(mathjax_js)",
+        "runtime_resource_loader::read_file(other_path)",
         "read-render-route:source-reader-call",
     ),
     (
-        "std::fs::read_to_string(mathjax_js)",
+        "runtime_resource_loader::read_file(mathjax_js)",
         "source_result",
         "read-render-route:source-reader-call",
     ),

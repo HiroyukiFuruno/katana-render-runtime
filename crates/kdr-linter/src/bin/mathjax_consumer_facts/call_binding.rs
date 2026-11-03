@@ -2,6 +2,10 @@ use super::consumer::require_direct_call;
 use super::source::{call, ident};
 use syn::parse::Parser;
 
+#[path = "resource_loader_guard.rs"]
+mod resource_loader_guard;
+pub(super) use resource_loader_guard::ResourceLoaderGuard;
+
 pub(super) fn require_request_json(expression: &syn::Expr) -> Result<(), String> {
     let syn::Expr::MethodCall(to_string) = expression else {
         return Err("read-render-route:request-json".into());
@@ -37,7 +41,7 @@ fn source_reader_match(file: &syn::File) -> Result<&syn::ExprMatch, String> {
     let Some(read_call) = call(&read.expr) else {
         return Err("read-render-route:source-reader-call".into());
     };
-    if super::source::path_name_from_expr(&read_call.func) != "std::fs::read_to_string"
+    if super::source::path_name_from_expr(&read_call.func) != "runtime_resource_loader::read_file"
         || read_call.args.len() != 1
         || !ident(&read_call.args[0], "mathjax_js")
     {

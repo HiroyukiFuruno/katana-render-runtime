@@ -96,7 +96,7 @@ const NATIVE_WIDTH_TYPE_PROFILE = "scripts/quality/tsconfig-owned-native-width-t
 // 更新には実cfg(test)→helper→include/result-scriptのcontextレビューが必要。
 const NATIVE_WIDTH_TEST_CONSUMERS = {
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime.rs`]:
-    "184b6738bd8d38d9e8e02f64cc42aa561bc4349282caa341bc171431a234c265",
+    "6beaa9a5f1b2d52c87d4e34ab55e78ee2a00b57c8a992da3082ab5459300b28a",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_tests.rs`]:
     "5b58a94792571378a1d04a0e1d3ba42279b6b2c7b103c3a41a1861e285a6b1fb",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_c4_description_tests.rs`]:
@@ -1662,8 +1662,17 @@ function performanceManifestAndLock(context: ContractContext, members: string[])
           version: z.string(),
           edition: z.literal("2021"),
           publish: z.literal(false),
+          "default-run": z.literal("krr-html-performance-harness"),
         })
         .strict(),
+      bin: z.tuple([
+        z
+          .object({
+            name: z.literal("diagram_resource_probe"),
+            path: z.literal("src/bin/diagram_resource_probe.rs"),
+          })
+          .strict(),
+      ]),
       workspace: z.object({}).strict(),
       profile: z
         .object({

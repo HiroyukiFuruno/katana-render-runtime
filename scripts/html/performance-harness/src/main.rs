@@ -20,6 +20,7 @@ mod options;
 #[path = "../../../../crates/katana-render-runtime/src/system/process.rs"]
 mod process;
 mod provenance;
+mod rss;
 #[cfg(test)]
 #[path = "harness_test_support.rs"]
 mod test_support;
@@ -28,14 +29,11 @@ use measurement::measure_one;
 use options::{parse_options, worker_sample, Options};
 use process::ProcessService;
 use provenance::{arm_name, hex_digest, provenance};
+use rss::ProcessRss;
 
 const SAMPLE_COUNT: usize = 5;
 const MILLISECONDS_PER_SECOND: f64 = 1_000.0;
 type PhaseSnapshot = serde_json::Map<String, serde_json::Value>;
-#[cfg(target_os = "macos")]
-const BYTES_PER_RSS_UNIT: u64 = 1;
-#[cfg(not(target_os = "macos"))]
-const BYTES_PER_RSS_UNIT: u64 = 1024;
 
 fn measure_samples(
     options: &Options,
@@ -148,7 +146,7 @@ fn phase_snapshot(
 ) -> Result<PhaseSnapshot, Box<dyn std::error::Error>> {
     let frame = session.frame_state()?;
     let elapsed_ms = start.elapsed().as_secs_f64() * MILLISECONDS_PER_SECOND;
-    let peak_rss_bytes = peak_rss_bytes()?;
+    let peak_rss_bytes = ProcessRss::peak_bytes()?;
     Ok(serde_json::Map::from_iter([
         ("elapsed_ms".to_owned(), serde_json::json!(elapsed_ms)),
         (
@@ -183,13 +181,6 @@ impl SessionFrame for HtmlBrowserSession {
 type HtmlBrowserSession = baseline::HtmlBrowserSession;
 #[cfg(feature = "candidate")]
 type HtmlBrowserSession = candidate::HtmlBrowserSession;
-
-fn peak_rss_bytes() -> Result<u64, Box<dyn std::error::Error>> {
-    /* WHY: 同じgetrusageのピークRSSを保ち、ABIとOSエラー処理は既存ライブラリへ委譲する。 */
-    let usage = nix::sys::resource::getrusage(nix::sys::resource::UsageWho::RUSAGE_SELF)?;
-    let value = u64::try_from(usage.max_rss())?;
-    Ok(value.saturating_mul(BYTES_PER_RSS_UNIT))
-}
 
 #[cfg(test)]
 #[path = "main_tests.rs"]

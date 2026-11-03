@@ -6,6 +6,9 @@ use crate::markdown::{DiagramBlock, DiagramKind, DiagramResult};
 
 type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+#[path = "render_runtime_change_tests.rs"]
+mod runtime_change_tests;
+
 #[test]
 fn render_mermaid_uses_explicit_runtime_path() -> TestResult<()> {
     let runtime = fake_mermaid_runtime("resolved");
@@ -33,7 +36,7 @@ fn render_with_runtime_path_handles_cache_and_runtime_errors() -> TestResult<()>
 
     std::fs::write(&runtime, "globalThis.mermaid = {};")?;
     let second = render_with_current_preset(&source, &runtime);
-    assert!(matches!(second, DiagramResult::Ok(svg) if svg.contains("<svg")));
+    assert!(matches!(second, DiagramResult::Err { .. }));
 
     let invalid_runtime = fake_mermaid_runtime("invalid");
     std::fs::write(&invalid_runtime, "globalThis.mermaid = {};")?;

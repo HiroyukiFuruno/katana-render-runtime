@@ -86,6 +86,7 @@ pub(super) fn reject_runtime_resolver_changes(
     fixture: &Fixture,
     repository: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    plantuml_tests::reject_loaded_mutations(fixture)?;
     reject_resolver_arm_and_dispatch(fixture, repository)?;
     reject_resolver_error_and_early_return(fixture, repository)
 }
@@ -96,7 +97,8 @@ fn reject_resolver_arm_and_dispatch(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let resolver = RUST_INPUTS[MATHJAX_RUNTIME_PATH_RESOLVER_INDEX];
     let original = repository.join(resolver);
-    fixture.replace(
+    plantuml_tests::replace_legacy_resolver(
+        fixture,
         resolver,
         "DiagramKind::MathJax => MathJaxRendererOps::resolve_mathjax_js(),",
         "DiagramKind::MathJax => FakeMathJaxOps::resolve_mathjax_js(),",
@@ -104,7 +106,12 @@ fn reject_resolver_arm_and_dispatch(
     fixture.reject("runtime-path-resolver:arm:DiagramKind::MathJax")?;
     fixture.restore_from(resolver, &original)?;
 
-    fixture.replace(resolver, "match kind {", "match runtime_path {")?;
+    plantuml_tests::replace_legacy_resolver(
+        fixture,
+        resolver,
+        "match kind {",
+        "match runtime_path {",
+    )?;
     fixture.reject("runtime-path-resolver:dispatch-shape")?;
     fixture.restore_from(resolver, &original)?;
 
@@ -117,7 +124,8 @@ fn reject_resolver_error_and_early_return(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let resolver = RUST_INPUTS[MATHJAX_RUNTIME_PATH_RESOLVER_INDEX];
     let original = repository.join(resolver);
-    fixture.replace(
+    plantuml_tests::replace_legacy_resolver(
+        fixture,
         resolver,
         "map_err(RenderError::RuntimeResolution)",
         "map_err(ForgedError::RuntimeResolution)",
@@ -125,7 +133,8 @@ fn reject_resolver_error_and_early_return(
     fixture.reject("runtime-path-resolver:map-err")?;
     fixture.restore_from(resolver, &original)?;
 
-    fixture.replace(
+    plantuml_tests::replace_legacy_resolver(
+        fixture,
         resolver,
         "if let Some(path) = runtime_path {",
         "if let Some(path) = None {",
@@ -142,35 +151,26 @@ fn reject_resolver_shape_mutations(
     original: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source = std::fs::read_to_string(original)?;
+    let source = source
+        .split_once("pub fn resolve_with_plantuml_cache_dir")
+        .ok_or("missing legacy resolver")?
+        .1
+        .split_once("#[cfg(test)]")
+        .ok_or("missing test boundary")?
+        .0;
     for (before, after, expected) in RESOLVER_SHAPE_MUTATIONS {
         assert_eq!(
             source.matches(*before).count(),
             1,
             "ambiguous mutation: {before}"
         );
-        fixture.replace(resolver, before, after)?;
+        plantuml_tests::replace_legacy_resolver(fixture, resolver, before, after)?;
         fixture.reject(expected).map_err(|error| {
             format!("resolver mutation {before:?} -> {after:?} ({expected}): {error}")
         })?;
         fixture.restore_from(resolver, original)?;
     }
-    reject_non_match_dispatch_receiver(fixture, resolver, original)?;
-    Ok(())
-}
-
-fn reject_non_match_dispatch_receiver(
-    fixture: &Fixture,
-    resolver: &str,
-    original: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    fixture.replace(resolver, "match kind {", "(match kind {")?;
-    fixture.replace(
-        resolver,
-        "        }\n        .map_err(RenderError::RuntimeResolution)",
-        "        })\n        .map_err(RenderError::RuntimeResolution)",
-    )?;
-    fixture.reject("runtime-path-resolver:dispatch")?;
-    fixture.restore_from(resolver, original)?;
+    plantuml_tests::reject_non_match_dispatch_receiver(fixture, resolver, original)?;
     Ok(())
 }
 

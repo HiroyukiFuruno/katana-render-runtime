@@ -1,9 +1,9 @@
 use super::{caller, evaluate, event, resolved_value};
 use syn::{Block, Expr, Stmt};
 
-const LEGACY_REQUEST_STATEMENTS: usize = 6;
-const SHORT_REQUEST_STATEMENTS: usize = 5;
-const LONG_REQUEST_STATEMENTS: usize = 8;
+const LEGACY_REQUEST_STATEMENTS: usize = 5;
+const SHORT_REQUEST_STATEMENTS: usize = 4;
+const LONG_REQUEST_STATEMENTS: usize = 7;
 const LEGACY_EVALUATE_STATEMENTS: usize = 6;
 const SHORT_EVALUATE_STATEMENTS: usize = 5;
 const LONG_EVALUATE_STATEMENTS: usize = 10;

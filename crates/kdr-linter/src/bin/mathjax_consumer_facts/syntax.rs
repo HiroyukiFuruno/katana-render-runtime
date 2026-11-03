@@ -136,13 +136,7 @@ pub(super) fn require_success_render(expression: &syn::Expr) -> bool {
 }
 
 pub(super) fn require_warning_render(expression: &syn::Expr) -> bool {
-    let Some(ok) = call(expression) else {
-        return false;
-    };
-    if super::source::path_name_from_expr(&ok.func) != "Ok" || ok.args.len() != 1 {
-        return false;
-    }
-    let Some(actual) = call(&ok.args[0]) else {
+    let Some(actual) = call(expression) else {
         return false;
     };
     if super::source::path_name_from_expr(&actual.func) != "RenderOutputFactory::from_raw_string"
