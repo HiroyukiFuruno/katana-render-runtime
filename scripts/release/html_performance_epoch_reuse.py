@@ -3,11 +3,69 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import platform
+import stat
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TypedDict
 
+import html_performance_inventory as inventory
+import local_macos_tool_provenance as provenance
+import native_coverage_local_context as native_context
 import verify_html_performance_evidence as gate
+
+
+class SystemOnlyObservation(TypedDict):
+    schema: str
+    worker: gate.JsonObject
+    stamp: inventory.FileStamp
+    platform: str
+    environment_sha256: str
+
+
+def observe_system_only_worker(
+    worker: gate.JsonObject, tool_context: gate.JsonObject, environment: Mapping[str, str],
+) -> SystemOnlyObservation:
+    """Observe a frozen worker at the current epoch boundary; this is not historical proof."""
+    pin = _pin(worker, "system-only worker")
+    path = Path(gate._text(pin["path"], "system-only worker path"))
+    gate.require(path.is_absolute() and str(path) == pin["path"] and path.resolve(strict=True) == path,
+                 "system-only worker path differs")
+    before = inventory._stamp(path)
+    gate.require(stat.S_ISREG(before[2]) and before[3] > 0,
+                 "system-only worker is not a regular file")
+    host = platform.platform()
+    environment_digest = _inventory_digest(dict(environment))
+    gate.require(platform.system() == "Darwin"
+                 and tool_context.get("platform") == host
+                 and tool_context.get("environmentSha256") == environment_digest,
+                 "system-only host context differs")
+    gate.require(not any(name.startswith("DYLD_") and value
+                         for env in (environment, os.environ) for name, value in env.items()),
+                 "system-only dynamic loader override")
+    data = path.read_bytes()
+    gate.require(len(data) == before[3] and hashlib.sha256(data).hexdigest() == pin["sha256"],
+                 "system-only worker bytes differ")
+    parsed = provenance._native_dependencies(data)
+    if parsed is None:
+        raise ValueError("system-only worker is not supported Mach-O")
+    dependencies, rpaths = parsed
+    gate.require(not rpaths, "system-only worker has rpaths")
+    for dependency in dependencies:
+        gate.require(dependency.startswith(("/usr/lib/", "/System/Library/"))
+                     and os.path.normpath(dependency) == dependency,
+                     "system-only worker has non-system dependency")
+    records: dict[str, dict[str, object]] = {}
+    native_context._record_macho_closure(path, records, "worker")
+    gate.require(not records and not native_context._macho_rpaths(path),
+                 "system-only worker closure differs")
+    gate.require(inventory._stamp(path) == before and gate.sha256(path) == pin["sha256"]
+                 and platform.platform() == host
+                 and _inventory_digest(dict(environment)) == environment_digest,
+                 "system-only worker or host changed during observation")
+    return {"schema": "krr-html-system-only-worker-observation-v1", "worker": pin,
+            "stamp": before, "platform": host, "environment_sha256": environment_digest}
 
 
 class DeclaredEpochInputs(TypedDict):

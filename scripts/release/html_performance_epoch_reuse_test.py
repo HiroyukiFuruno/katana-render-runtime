@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import platform
+import struct
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 import html_performance_epoch_reuse as epoch
+import native_coverage_local_context as native_context
 import verify_html_performance_evidence as gate
 
 
@@ -73,6 +77,65 @@ class DeclaredInputsTest(unittest.TestCase):
             "fonts": {"font": self.pins["font"]},
             "tool_context": {"environmentSha256": "a" * 64, "platform": "example", "cpuCount": 4},
         }
+
+    def test_system_only_observation_uses_actual_pinned_worker(self) -> None:
+        path = self.bundle.file(self.pins["candidate"])
+        path.write_bytes(struct.pack("<IIIIIIII", 0xFEEDFACF, 0x0100000C, 0, 2, 0, 0, 0, 0))
+        pin: gate.JsonObject = {"path": str(path), "sha256": gate.sha256(path)}
+        self.bundle.files[str(path)] = (path, str(pin["sha256"]))
+        tool: gate.JsonObject = {"platform": "test-host",
+                                 "environmentSha256": epoch._inventory_digest(dict(os.environ))}
+        with patch.object(platform, "system", return_value="Darwin"), \
+             patch.object(platform, "platform", return_value="test-host"), \
+             patch.object(native_context, "_run", side_effect=[f"{path}:", "", ""]):
+            result = epoch.observe_system_only_worker(pin, tool, os.environ)
+        self.assertEqual(result["worker"], pin)
+        self.assertEqual(result["stamp"][3], path.stat().st_size)
+
+    def test_system_only_observation_rejects_rpath_and_loader_override(self) -> None:
+        path = self.bundle.file(self.pins["candidate"])
+        command = struct.pack("<III", 0x8000001C, 16, 12) + b"/x\0\0"
+        path.write_bytes(struct.pack("<IIIIIIII", 0xFEEDFACF, 0x0100000C, 0, 2, 1, len(command), 0, 0) + command)
+        pin: gate.JsonObject = {"path": str(path), "sha256": gate.sha256(path)}
+        self.bundle.files[str(path)] = (path, str(pin["sha256"]))
+        with patch.object(platform, "system", return_value="Darwin"), \
+             patch.object(platform, "platform", return_value="test-host"):
+            tool: gate.JsonObject = {"platform": "test-host",
+                                     "environmentSha256": epoch._inventory_digest(dict(os.environ))}
+            with self.assertRaisesRegex(ValueError, "has rpaths"):
+                epoch.observe_system_only_worker(pin, tool, os.environ)
+            with patch.dict(os.environ, {"DYLD_INSERT_LIBRARIES": "/tmp/unknown"}):
+                tool["environmentSha256"] = epoch._inventory_digest(dict(os.environ))
+                with self.assertRaisesRegex(ValueError, "loader override"):
+                    epoch.observe_system_only_worker(pin, tool, os.environ)
+
+    def test_system_only_observation_rejects_changed_or_external_worker(self) -> None:
+        path = self.bundle.file(self.pins["candidate"])
+        def header(count: int, length: int) -> bytes:
+            return struct.pack(
+                "<IIIIIIII", 0xFEEDFACF, 0x0100000C, 0, 2, count, length, 0, 0
+            )
+        path.write_bytes(header(0, 0))
+        pin: gate.JsonObject = {"path": str(path), "sha256": gate.sha256(path)}
+        tool: gate.JsonObject = {"platform": "test-host",
+                                 "environmentSha256": epoch._inventory_digest(dict(os.environ))}
+        with patch.object(platform, "system", return_value="Darwin"), \
+             patch.object(platform, "platform", return_value="test-host"):
+            path.write_bytes(header(0, 0) + b"changed")
+            with self.assertRaisesRegex(ValueError, "worker bytes differ"):
+                epoch.observe_system_only_worker(pin, tool, os.environ)
+            name = b"/tmp/external.dylib\0"
+            size = (24 + len(name) + 7) // 8 * 8
+            command = struct.pack("<III", 0xC, size, 24) + b"\0" * 12 + name
+            path.write_bytes(header(1, size) + command.ljust(size, b"\0"))
+            pin["sha256"] = gate.sha256(path)
+            with self.assertRaisesRegex(ValueError, "non-system dependency"):
+                epoch.observe_system_only_worker(pin, tool, os.environ)
+            path.write_bytes(header(0, 0))
+            pin["sha256"] = gate.sha256(path)
+            with patch.object(native_context, "_run", side_effect=native_context.LocalCoverageContextError("macho_dependency_unresolved")):
+                with self.assertRaises(native_context.LocalCoverageContextError):
+                    epoch.observe_system_only_worker(pin, tool, os.environ)
 
     def test_identical_transport_pins_and_context_are_accepted(self) -> None:
         epoch.compare_declared_inputs(self.bundle, self.declared(), self.bundle, self.declared())
