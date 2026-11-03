@@ -816,11 +816,43 @@ def _complete_batch_attempts(
     return selected
 
 
+def _validate_live_epoch_inputs(context_value: gate.JsonObject, root: Path,
+                                environment: Mapping[str, str]) -> None:
+    """Recheck every recorded file and runtime environment without repinning it."""
+    actual_environment = dict(environment)
+    actual_environment["GIT_OPTIONAL_LOCKS"] = "0"
+    cargo_home = Path(actual_environment.get("CARGO_HOME", str(Path.home() / ".cargo"))).resolve()
+    configs = gate._objects(context_value.get("config"), "epoch config")
+    expected_configs = (root / ".cargo/config.toml", root / ".cargo/config",
+                        cargo_home / "config.toml", cargo_home / "config")
+    gate.require([row.get("path") for row in configs] == [str(path) for path in expected_configs],
+                 "partial epoch config inventory differs")
+    for section in ("inputs", "config"):
+        for row in gate._objects(context_value.get(section), "epoch " + section):
+            path = Path(gate._text(row.get("path"), "epoch input path"))
+            gate.require(path.is_absolute() and file_state(path) == row,
+                         "partial epoch live " + section + " differs")
+    preference = gate._object(context_value.get("preference"), "epoch preference")
+    preference_path = Path(gate._text(preference.get("path"), "epoch preference path"))
+    gate.require(preference_path == Path.home() / ".CFUserTextEncoding"
+                 and file_state(preference_path) == preference,
+                 "partial epoch live preference differs")
+    gate.require(context_value.get("scope") == {"registry": str(cargo_home / "registry"),
+                                                 "target": str(root / "target")},
+                 "partial epoch live cache scope differs")
+    tool = gate._object(context_value.get("toolContext"), "epoch tool context")
+    gate.require(set(tool) == {"rustc", "cargo", "platform", "cpuCount", "environmentSha256"}
+                 and tool.get("environmentSha256") == _environment_sha256(actual_environment)
+                 and tool.get("platform") == platform.platform() and tool.get("cpuCount") == os.cpu_count(),
+                 "partial epoch live environment differs")
+
+
 def load_closed_batch(
     batch: Path,
     root: Path,
     *,
     git_query: gate.GitQuery | None = None,
+    current_build: gate.PartialEpochCurrentBuild | None = None,
 ) -> tuple[gate.JsonObject, gate.Bundle, list[dict[str, FilePin]]]:
     receipt_path = batch / "batch-receipt.json"
     receipt = gate.read_json(receipt_path)
@@ -867,28 +899,51 @@ def load_closed_batch(
     validated_builds: Mapping[str, gate.JsonObject] = {}
     shared_source: gate.SharedCurrentSource | None = None
     shared_before: gate.JsonObject | None = None
+    reuse_context: object = None
+    if current_build is not None:
+        gate.require(bool(attempts), "partial epoch has no completed attempts")
     if attempts:
         first_expected = bundle.json(attempts[0]["expected"])
         source_refs = gate._object(receipt.get("source"), "batch source refs")
         shared_before = bundle.json(source_refs["before"])
-        shared_source = gate.SharedCurrentSource(
-            root, gate._text(shared_before.get("head"), "source HEAD"),
-            gate.current_source(root, shared_before, git_query=git_query),
-            Path(gate._text(shared_before.get("root"), "source root")),
-        )
+        if current_build is None:
+            shared_source = gate.SharedCurrentSource(
+                root, gate._text(shared_before.get("head"), "source HEAD"),
+                gate.current_source(root, shared_before, git_query=git_query),
+                Path(gate._text(shared_before.get("root"), "source root")),
+            )
+        else:
+            first_pair = gate._object(first_expected.get("sourcePair"), "partial epoch source pair")
+            endpoints = gate._object(first_expected.get("endpointRefs"), "partial epoch endpoints")
+            receipt_contexts = gate._object(receipt.get("contexts"), "partial epoch receipt contexts")
+            gate.require(shared_before == bundle.json(first_pair["before"])
+                         and bundle.json(receipt_contexts["before"]) == bundle.json(endpoints["before"]),
+                         "partial epoch receipt/source context differs")
+            reuse_context = gate._verified_partial_epoch_source(
+                bundle, root, first_expected, current_build, git_query=git_query,
+            )
+            _validate_live_epoch_inputs(bundle.json(endpoints["before"]), root, os.environ)
         validated_builds = gate.validate_expected_builds(
-            bundle, root, first_expected, git_query=git_query,
+            bundle, root, first_expected, git_query=git_query, reuse_context=reuse_context,
         )
     for attempt in attempts:
         attempt_object: gate.JsonObject = {
             key: value for key, value in attempt.items()
         }
         gate.validate_attempt(bundle, root, attempt_object, git_query=git_query,
-                             validated_builds=validated_builds, shared_source=shared_source)
+                             validated_builds=validated_builds, shared_source=shared_source,
+                             reuse_context=reuse_context)
     _verify_completed_host_load(bundle, root, attempts, git_query=git_query)
     if shared_source is not None and shared_before is not None:
         gate.require(gate.current_source(root, shared_before, git_query=git_query) == shared_source.records,
                      "source changed during batch validation")
+    if current_build is not None and attempts:
+        first_expected = bundle.json(attempts[0]["expected"])
+        endpoints = gate._object(first_expected.get("endpointRefs"), "partial epoch endpoints")
+        _validate_live_epoch_inputs(bundle.json(endpoints["before"]), root, os.environ)
+        gate.require(gate._verified_partial_epoch_source(
+            bundle, root, first_expected, current_build, git_query=git_query,
+        ) == reuse_context, "partial epoch source changed during validation")
     return receipt, bundle, attempts
 
 

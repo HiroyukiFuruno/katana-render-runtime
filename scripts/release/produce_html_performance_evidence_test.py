@@ -586,6 +586,35 @@ class TransportBundleUnitTests(unittest.TestCase):
                 producer._clone_transport_file(source, target, checksum)
 
 
+class PartialEpochLiveInputTest(unittest.TestCase):
+    def test_live_inputs_and_environment_are_rechecked(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            fixture = root / "fixture.html"
+            fixture.write_text("fixture")
+            preference = root / ".CFUserTextEncoding"
+            configs = (root / ".cargo/config.toml", root / ".cargo/config",
+                       root / "cargo/config.toml", root / "cargo/config")
+            environment = {"CARGO_HOME": str(root / "cargo")}
+            actual_environment = {**environment, "GIT_OPTIONAL_LOCKS": "0"}
+            context: gate.JsonObject = {
+                "inputs": [producer.file_state(fixture)],
+                "config": [producer.file_state(path) for path in configs],
+                "preference": producer.file_state(preference),
+                "scope": {"registry": str(root / "cargo/registry"), "target": str(root / "target")},
+                "toolContext": {"rustc": "rustc", "cargo": "cargo",
+                                "platform": platform.platform(), "cpuCount": os.cpu_count(),
+                                "environmentSha256": producer._environment_sha256(actual_environment)},
+            }
+            with patch.object(Path, "home", return_value=root):
+                producer._validate_live_epoch_inputs(context, root, environment)
+                with self.assertRaisesRegex(ValueError, "live environment differs"):
+                    producer._validate_live_epoch_inputs(context, root, {**environment, "CHANGED": "1"})
+                fixture.write_text("changed")
+                with self.assertRaisesRegex(ValueError, "live inputs differs"):
+                    producer._validate_live_epoch_inputs(context, root, environment)
+
+
 class HtmlPerformanceBatchUnitTests(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
