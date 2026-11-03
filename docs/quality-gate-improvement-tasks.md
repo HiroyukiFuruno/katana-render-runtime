@@ -2,6 +2,9 @@
 
 ## 最新の再開地点（2026-11-03）
 
+- [x] source `5cd98651` のR7328で製品PNG全117図を再取得・採点し、実0/accepted=true。EN59最低99.085711、JA58最低99.10801000000001、失敗0。R7329の通常cleanで元Cargo実行体を削除した後も、R7330既存v4 reader、R7331日本語クラス図の実描画、R7333既存inventory検証と削除前SVGとのbyte完全一致がすべて実0。実行体保持の修正は実producer経路で確認できた。基準・閾値・原本は不変。
+- [/] 非重複担当で追加したSVG軸指定・継承・filter/marker・font cache・CLI拒否・kdr join境界を統合。製品/vendorは変更していない。CLI拒否群の責務分割、影の定数化とhelper抽出後、R7339 AST実0・R7341静的foundation実0。R7342の既存root計測は全5,566/5,566成功（追加16、既存29skip）、実テスト322.037秒・全体実0。R7343正式coverage policyは100/0未達で実1。83,295/84,453=98.62882313239317%、未到達1,158で前1,174から純減16。原本と診断copyは`tmp/quality/resumed-owner-r3509/current-root-coverage-report-r7344/`へ保持し、未達を成功へ読み替えない。
+- [/] Rust回帰14fileを通常commit `6e88d99a` へ固定。コミット前の性能lintがarm切替前の容量判定で2回拒否されたため、同じ再試行を止め、既存capacity-admissionをbaseline後・candidate後に追加した。Clippy argv・保持COV・固定上限は不変。厳密な順序契約と欠落/並替/重複拒否5回帰、R7351静的foundationが実0。修正後の通常hookがR7352/R7353とも実0となり、整理修正3fileを `eb254348` に別commitした。全665 Bun回帰・最終完全gateは別途未完。
 - [/] GitHub Actionsの更新は通常commit `903a1b4a` に取り込み、連動する静的契約のfocused Bun10件も成功。公開済み最新は依然v0.4.23で、v0.4.24は未公開。必須3OS CIと公開確認は未完。
 - [/] 復旧後の性能R7291はsource `d777d84b` で5/84条件・各25組のpaired測定を取得し、各条件の厳格検証とclosed receiptまで実0（1,500 phase records）。全84の正式合格ではない。次の再開R7292は新規計測前に基準側実行ファイルの論理/輸送先パス不一致で拒否され、元closed bundleと認証済みreference mappingを使う修正を実施した。関連全294 Python回帰は実0。検証コード変更後の正式84への適格性は別途確認し、過去5件を無条件に加算しない。
 - [/] 容量不足は承認済みprivate clean-all後も回復しなかったため、未使用uv cacheと完了したChromiumのコンパイル中間物だけを整理し約45GiBを回復。Chrome本体と残すべき958ファイルの物理identity不変を事後確認。一方、旧`target/debug/krr`の消失を検出し、元117図の測定成功と現物の再利用可否を区別した。削除主体は未特定で、元receiptやpinは書き換えない。
