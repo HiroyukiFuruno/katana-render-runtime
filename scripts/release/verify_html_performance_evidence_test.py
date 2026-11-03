@@ -1286,6 +1286,65 @@ class PerformanceEvidenceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "common lock pin differs"):
             gate._runtime_lock_packages(harness, historical_lock=(old, "0" * 64))
 
+    def test_fixed_epoch_origin_uses_old_git_not_current_checkout(self) -> None:
+        old_expected = gate.read_json(self.expected_paths[0])
+        old_pair = json_object(old_expected["sourcePair"])
+        original = gate.Bundle(self.bundle).json(old_pair["before"])
+        original["inventoryDigest"] = hashlib.sha256(json.dumps(
+            {key: value for key, value in original.items() if key != "inventoryDigest"},
+            sort_keys=True, separators=(",", ":"),
+        ).encode()).hexdigest()
+        before = self.add_file("/fixed/source", "fixed/source.json", original)
+        artifact = self.add_file("/fixed/build", "fixed/build.json", {
+            "schema": "krr-html-performance-build-artifact-v3", "arm": "candidate",
+            "buildExit": 0, "sourceBeforeRef": before,
+        })
+        self.save_transport()
+        manifest_sha = gate.sha256(self.bundle / "bundle.json")
+        history = self.root / "docs/performance/html-performance-history.json"
+        history.write_text("new current head")
+        subprocess.run(["git", "-C", str(self.root), "add", str(history)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Unit", "-c",
+                        "user.email=unit@example.invalid", "commit", "-qm", "docs"], check=True)
+        self.assertNotEqual(gate.git(self.root, "rev-parse", "HEAD").strip(), self.head)
+        (self.root / "source.rs").write_text("dirty current source")
+        expected: JsonObject = {"binarySha256": "b" * 64, "sourceSnapshotSha256": "d" * 64,
+            "lockSha256": "e" * 64, "buildArtifactSha256": artifact["sha256"],
+            "cargoExecutableSha256": "c" * 64, "rustcExecutableSha256": "a" * 64}
+        with patch.object(remote_evidence, "_validate_transported_candidate_body", return_value=expected) as body:
+            result = remote_evidence.validate_fixed_epoch_candidate_origin(
+                self.bundle, self.root, manifest_sha, "fixed/build.json",
+                str(artifact["sha256"]), self.head,
+            )
+        self.assertEqual(result.head, self.head)
+        self.assertEqual(result.binary_sha256, "b" * 64)
+        self.assertFalse(hasattr(result, "acceptance"))
+        self.assertEqual(body.call_count, 1)
+        with self.assertRaisesRegex(ValueError, "fixed epoch bundle SHA differs"):
+            remote_evidence.validate_fixed_epoch_candidate_origin(
+                self.bundle, self.root, "0" * 64, "fixed/build.json", str(artifact["sha256"]), self.head,
+            )
+        with self.assertRaisesRegex(ValueError, "fixed epoch bundle HEAD differs"):
+            remote_evidence.validate_fixed_epoch_candidate_origin(
+                self.bundle, self.root, manifest_sha, "fixed/build.json", str(artifact["sha256"]), "0" * 40,
+            )
+        with self.assertRaisesRegex(ValueError, "bundle-relative file pin mismatch"):
+            remote_evidence.validate_fixed_epoch_candidate_origin(
+                self.bundle, self.root, manifest_sha, "fixed/build.json", "0" * 64, self.head,
+            )
+        forged = json_object(json.loads(json.dumps(original)))
+        json_object_at(forged, "files", 0)["sha256"] = "0" * 64
+        forged["inventoryDigest"] = hashlib.sha256(json.dumps(
+            {key: value for key, value in forged.items() if key != "inventoryDigest"},
+            sort_keys=True, separators=(",", ":"),
+        ).encode()).hexdigest()
+        with self.assertRaisesRegex(ValueError, "fixed epoch Git source differs"):
+            remote_evidence._fixed_epoch_git_records(self.root, forged, self.head)
+        with self.assertRaisesRegex(ValueError, "remote source snapshot"):
+            remote_evidence.validate_fixed_epoch_candidate_origin(
+                self.bundle, self.root, manifest_sha, "fixed/build.json", str(artifact["sha256"]), self.head,
+            )
+
     def test_remote_candidate_rejects_unreviewed_schema_role_and_source_head(self) -> None:
         cases = (("schema", "krr-html-performance-build-artifact-v1", "remote candidate build role differs"),
                  ("arm", "baseline", "remote candidate build role differs"),

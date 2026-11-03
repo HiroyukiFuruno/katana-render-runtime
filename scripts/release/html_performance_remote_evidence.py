@@ -5,13 +5,14 @@ import hashlib
 import json
 import zipfile
 from pathlib import Path, PurePosixPath
+from typing import NamedTuple
 
 import html_performance_reference as reference_domain
 from verify_html_performance_evidence import (
-    Bundle, ExpectedBuild, FileReader, HARNESS_ROOT, HistoricalBuildReader, JsonObject, LOCK_SHA, _array,
+    Bundle, ExpectedBuild, FileReader, GitQuery, HARNESS_ROOT, HistoricalBuildReader, JsonObject, LOCK_SHA, _array,
     _canonical_build_path, _historical_reference_source, _integer, _object, _objects, _recorded_capacity_state,
     _require_formal_release_result, _text, cargo_build_artifacts, current_source,
-    digest, read_json, records_map, require, selected_historical_lock, sha256, unique_object,
+    committed_records, digest, git, read_json, records_map, require, selected_historical_lock, sha256, unique_object,
     validate_guarded_build_argv,
 )
 
@@ -94,6 +95,17 @@ def validate_remote_candidate_build(bundle: FileReader, root: Path, reference: o
                 "remote fresh source proof differs")
     else:
         require(proof.get("referenceRole") is None, "unknown remote build role")
+    require(sha256(root / HARNESS_ROOT / "Cargo.lock") == LOCK_SHA, "current lock pin differs")
+    lock_sha = LOCK_SHA if historical is None else selected_historical_lock(root, historical)[1]
+    return _validate_transported_candidate_body(
+        bundle, proof_path, proof, head, records, logical_root, controller_root, lock_sha,
+    )
+
+
+def _validate_transported_candidate_body(
+    bundle: FileReader, proof_path: Path, proof: JsonObject, head: str,
+    records: dict[str, tuple[str, int]], logical_root: Path, controller_root: Path, lock_sha: str,
+) -> JsonObject:
     snapshot_ref = _object(proof.get("sourceSnapshotRef"), "remote source snapshot")
     snapshot = bundle.json(snapshot_ref)
     rows = _array(snapshot.get("records"), "remote source records")
@@ -101,8 +113,6 @@ def validate_remote_candidate_build(bundle: FileReader, root: Path, reference: o
             and snapshot.get("digest") == hashlib.sha256(json.dumps(
                 rows, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
             "remote candidate source snapshot differs")
-    require(sha256(root / HARNESS_ROOT / "Cargo.lock") == LOCK_SHA, "current lock pin differs")
-    lock_sha = LOCK_SHA if historical is None else selected_historical_lock(root, historical)[1]
     require(proof.get("lockSha256") == lock_sha
             and records.get(HARNESS_ROOT + "Cargo.lock", (None,))[0] == lock_sha,
             "remote candidate lock differs")
@@ -206,6 +216,87 @@ def validate_remote_candidate_build(bundle: FileReader, root: Path, reference: o
             "buildEnvironmentSha256": proof["buildEnvironmentSha256"], "toolVersions": proof["toolVersions"],
             "cargoConfigPins": proof["cargoConfigPins"], "cargoLauncher": proof["cargoLauncher"],
             "rustcLauncher": proof["rustcLauncher"], "guardPython": proof["guardPython"]}
+
+
+class FixedEpochCandidateOrigin(NamedTuple):
+    """Only the original candidate build identity; never a current release acceptance."""
+    head: str
+    binary_sha256: str
+    snapshot_sha256: str
+    lock_sha256: str
+    artifact_sha256: str
+    cargo_sha256: str
+    rustc_sha256: str
+
+
+def _fixed_epoch_git_records(root: Path, before: JsonObject, head: str, *,
+                             git_query: GitQuery | None = None) -> dict[str, tuple[str, int]]:
+    require(len(head) == 40 and all(char in "0123456789abcdef" for char in head)
+            and git(root, "rev-parse", "--verify", head + "^{commit}", git_query=git_query).strip() == head,
+            "fixed epoch commit differs")
+    require(before.get("schema") == "krr-native-build-source-inventory-v1"
+            and before.get("sourceManifestSchema") == "krr-native-build-source-manifest-v1"
+            and before.get("head") == head and before.get("stableEndpoints") is True
+            and before.get("untrackedPaths") == [] and before.get("missingTrackedPaths") == [],
+            "fixed epoch source declaration differs")
+    origin = _canonical_build_path(before.get("root"), "fixed epoch source root")
+    require(".." not in origin.parts, "fixed epoch source root differs")
+    def relative(value: object) -> str:
+        path = _canonical_build_path(value, "fixed epoch tracked path")
+        require(".." not in path.parts, "fixed epoch tracked path differs")
+        return path.relative_to(origin).as_posix()
+    tracked = [relative(value) for value in _array(before.get("trackedPaths"), "fixed tracked paths")]
+    absolute = records_map(before.get("files"))
+    saved = {relative(path): value for path, value in absolute.items()}
+    records = committed_records(root, head, git_query=git_query)
+    require(len(tracked) == len(set(tracked)) and set(tracked) == set(records)
+            and len(saved) == len(absolute) and saved == records, "fixed epoch Git source differs")
+    index = _object(before.get("index"), "fixed epoch index")
+    digest(index.get("sha256"))
+    unsigned = {key: value for key, value in before.items() if key != "inventoryDigest"}
+    actual_digest = hashlib.sha256(json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    require(before.get("inventoryDigest") == actual_digest, "fixed epoch source inventory digest differs")
+    return records
+
+
+def validate_fixed_epoch_candidate_origin(
+    directory: Path, root: Path, manifest_sha256: str, artifact_path: str,
+    artifact_sha256: str, expected_head: str, *, git_query: GitQuery | None = None,
+) -> FixedEpochCandidateOrigin:
+    """Verify original transported build and Git source without evaluating current source."""
+    digest(manifest_sha256)
+    digest(artifact_sha256)
+    require(sha256(directory / "bundle.json") == manifest_sha256, "fixed epoch bundle SHA differs")
+    bundle = Bundle(directory)
+    require(bundle.manifest.get("head") == expected_head, "fixed epoch bundle HEAD differs")
+    artifact_ref = bundle.relative_reference(artifact_path, artifact_sha256)
+    proof_path = bundle.file(artifact_ref)
+    proof = read_json(proof_path)
+    require(proof.get("schema") == "krr-html-performance-build-artifact-v3"
+            and proof.get("arm") == "candidate" and proof.get("buildExit") == 0
+            and proof.get("referenceRole") is None, "fixed epoch candidate build role differs")
+    before = bundle.json(proof.get("sourceBeforeRef"))
+    records = _fixed_epoch_git_records(root, before, expected_head, git_query=git_query)
+    lock_sha = records.get(HARNESS_ROOT + "Cargo.lock", (None,))[0]
+    digest(lock_sha)
+    if not isinstance(lock_sha, str):
+        raise ValueError("fixed epoch lock is missing")
+    logical_root = _canonical_build_path(before.get("root"), "fixed epoch source root")
+    result = _validate_transported_candidate_body(
+        bundle, proof_path, proof, expected_head, records, logical_root, logical_root, lock_sha,
+    )
+    require(sha256(bundle.directory / "bundle.json") == manifest_sha256
+            and sha256(bundle.file(artifact_ref)) == artifact_sha256
+            and _fixed_epoch_git_records(root, before, expected_head, git_query=git_query) == records,
+            "fixed epoch inputs changed during validation")
+    return FixedEpochCandidateOrigin(
+        expected_head, _text(result.get("binarySha256"), "fixed binary SHA"),
+        _text(result.get("sourceSnapshotSha256"), "fixed snapshot SHA"),
+        _text(result.get("lockSha256"), "fixed lock SHA"),
+        _text(result.get("buildArtifactSha256"), "fixed artifact SHA"),
+        _text(result.get("cargoExecutableSha256"), "fixed cargo SHA"),
+        _text(result.get("rustcExecutableSha256"), "fixed rustc SHA"),
+    )
 
 
 def validate_remote_history_baseline(bundle: Bundle, root: Path, expected: JsonObject, head: str) -> JsonObject:
