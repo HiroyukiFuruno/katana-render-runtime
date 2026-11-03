@@ -259,6 +259,66 @@ def _fixed_epoch_git_records(root: Path, before: JsonObject, head: str, *,
     return records
 
 
+class _BundleWithManifest:
+    """Expose a bundle's own manifest only under its exact pinned identity."""
+    def __init__(self, bundle: Bundle, manifest_ref: JsonObject) -> None:
+        self.bundle = bundle
+        self.manifest_ref = manifest_ref
+
+    def file(self, reference: object) -> Path:
+        if reference == self.manifest_ref:
+            path = self.bundle.directory / "bundle.json"
+            require(sha256(path) == self.manifest_ref["sha256"], "fixed epoch bundle SHA differs")
+            return path
+        return self.bundle.file(reference)
+
+    def json(self, reference: object) -> JsonObject:
+        return read_json(self.file(reference))
+
+
+def validate_fixed_epoch_candidate_origin_reader(
+    reader: FileReader, root: Path, manifest_ref: JsonObject, artifact_ref: JsonObject,
+    expected_head: str, *, git_query: GitQuery | None = None,
+) -> FixedEpochCandidateOrigin:
+    """Authenticate the old build through its pinned transport, not current acceptance."""
+    require(set(manifest_ref) == {"path", "sha256"} and set(artifact_ref) == {"path", "sha256"},
+            "fixed epoch reference fields differ")
+    manifest_sha = _text(manifest_ref.get("sha256"), "fixed epoch manifest SHA")
+    artifact_sha = _text(artifact_ref.get("sha256"), "fixed epoch artifact SHA")
+    digest(manifest_sha)
+    digest(artifact_sha)
+    # HistoricalBuildReader confines every resolution to this exact manifest's original pins.
+    selection = reference_domain.ActiveReference("fixed-epoch", expected_head, manifest_sha, "", {})
+    scoped = HistoricalBuildReader(reader, manifest_ref, selection)
+    proof_path = scoped.file(artifact_ref)
+    proof = read_json(proof_path)
+    require(proof.get("schema") == "krr-html-performance-build-artifact-v3"
+            and proof.get("arm") == "candidate" and proof.get("buildExit") == 0
+            and proof.get("referenceRole") is None, "fixed epoch candidate build role differs")
+    before = scoped.json(proof.get("sourceBeforeRef"))
+    records = _fixed_epoch_git_records(root, before, expected_head, git_query=git_query)
+    lock_sha = records.get(HARNESS_ROOT + "Cargo.lock", (None,))[0]
+    digest(lock_sha)
+    if not isinstance(lock_sha, str):
+        raise ValueError("fixed epoch lock is missing")
+    logical_root = _canonical_build_path(before.get("root"), "fixed epoch source root")
+    result = _validate_transported_candidate_body(
+        scoped, proof_path, proof, expected_head, records, logical_root, logical_root, lock_sha,
+    )
+    require(sha256(reader.file(manifest_ref)) == manifest_sha
+            and sha256(scoped.file(artifact_ref)) == artifact_sha
+            and _fixed_epoch_git_records(root, before, expected_head, git_query=git_query) == records,
+            "fixed epoch inputs changed during validation")
+    return FixedEpochCandidateOrigin(
+        expected_head, _text(result.get("binarySha256"), "fixed binary SHA"),
+        _text(result.get("sourceSnapshotSha256"), "fixed snapshot SHA"),
+        _text(result.get("lockSha256"), "fixed lock SHA"),
+        _text(result.get("buildArtifactSha256"), "fixed artifact SHA"),
+        _text(result.get("cargoExecutableSha256"), "fixed cargo SHA"),
+        _text(result.get("rustcExecutableSha256"), "fixed rustc SHA"),
+    )
+
+
 def validate_fixed_epoch_candidate_origin(
     directory: Path, root: Path, manifest_sha256: str, artifact_path: str,
     artifact_sha256: str, expected_head: str, *, git_query: GitQuery | None = None,
@@ -270,32 +330,10 @@ def validate_fixed_epoch_candidate_origin(
     bundle = Bundle(directory)
     require(bundle.manifest.get("head") == expected_head, "fixed epoch bundle HEAD differs")
     artifact_ref = bundle.relative_reference(artifact_path, artifact_sha256)
-    proof_path = bundle.file(artifact_ref)
-    proof = read_json(proof_path)
-    require(proof.get("schema") == "krr-html-performance-build-artifact-v3"
-            and proof.get("arm") == "candidate" and proof.get("buildExit") == 0
-            and proof.get("referenceRole") is None, "fixed epoch candidate build role differs")
-    before = bundle.json(proof.get("sourceBeforeRef"))
-    records = _fixed_epoch_git_records(root, before, expected_head, git_query=git_query)
-    lock_sha = records.get(HARNESS_ROOT + "Cargo.lock", (None,))[0]
-    digest(lock_sha)
-    if not isinstance(lock_sha, str):
-        raise ValueError("fixed epoch lock is missing")
-    logical_root = _canonical_build_path(before.get("root"), "fixed epoch source root")
-    result = _validate_transported_candidate_body(
-        bundle, proof_path, proof, expected_head, records, logical_root, logical_root, lock_sha,
-    )
-    require(sha256(bundle.directory / "bundle.json") == manifest_sha256
-            and sha256(bundle.file(artifact_ref)) == artifact_sha256
-            and _fixed_epoch_git_records(root, before, expected_head, git_query=git_query) == records,
-            "fixed epoch inputs changed during validation")
-    return FixedEpochCandidateOrigin(
-        expected_head, _text(result.get("binarySha256"), "fixed binary SHA"),
-        _text(result.get("sourceSnapshotSha256"), "fixed snapshot SHA"),
-        _text(result.get("lockSha256"), "fixed lock SHA"),
-        _text(result.get("buildArtifactSha256"), "fixed artifact SHA"),
-        _text(result.get("cargoExecutableSha256"), "fixed cargo SHA"),
-        _text(result.get("rustcExecutableSha256"), "fixed rustc SHA"),
+    manifest_ref: JsonObject = {"path": str(bundle.directory / "bundle.json"), "sha256": manifest_sha256}
+    return validate_fixed_epoch_candidate_origin_reader(
+        _BundleWithManifest(bundle, manifest_ref), root, manifest_ref, artifact_ref,
+        expected_head, git_query=git_query,
     )
 
 

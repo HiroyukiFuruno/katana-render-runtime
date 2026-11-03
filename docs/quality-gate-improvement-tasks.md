@@ -3,7 +3,7 @@
 ## 最新の再開地点（2026-11-03）
 
 - [/] R7385の現行root検査は5,580/5,580成功・29skip（実test337.369秒）。R7386正式coverage policyは83,320/84,461=98.64908064076911%、未達1,141で不合格（前1,158から17減）。原本は既存producer配下、診断copyは`tmp/quality/resumed-owner-r3509/current-root-coverage-report-r7387/root.json`。SVG解析エラー6箇所の共通化と実フォント候補回帰を通常commit `cbcc1325` に固定。100%・未計測0の条件は維持する。
-- [/] 性能計測の認証済み入力参照を共通化し、通常commit `731131ac` へ固定。verifier全140件と厳格型・静的foundationが成功。実入力とソース・容量などの運用証跡を別々に検証するepoch接続は実装途中で、正式84性能の実測はまだ開始していない。元receipt/context/pinを変更せず、実観測を保持した再利用適格性を完成させる。
+- [/] 性能の固定SDK・ライブcheckout・実worker観測を分離し、初回v3測定・途中封印・再開・現行build同値での最終検証まで接続。R7436 verifier150件、R7442 producer170件、R7443 worker stampのJSON往復を含むepoch回帰、R7444型・Lint・重複等の静的foundationが実0。SDK/live HEADの混同はR7441で1件の失敗を再現して修正した。実物1条件→保存→無関係変更→再開→closed→current SDK同値受入は未完で、正式84性能の実測はまだ開始していない。元receipt/context/pinは変更しない。
 - [/] Actionsの公式upstream12種の最新stable/tag SHAを再確認し、現workflowの全固定参照が一致した。追加更新は不要。必須3OSの実CIと公開確認は未完。
 - [x] source `5cd98651` のR7328で製品PNG全117図を再取得・採点し、実0/accepted=true。EN59最低99.085711、JA58最低99.10801000000001、失敗0。R7329の通常cleanで元Cargo実行体を削除した後も、R7330既存v4 reader、R7331日本語クラス図の実描画、R7333既存inventory検証と削除前SVGとのbyte完全一致がすべて実0。実行体保持の修正は実producer経路で確認できた。基準・閾値・原本は不変。
 - [/] 非重複担当で追加したSVG軸指定・継承・filter/marker・font cache・CLI拒否・kdr join境界を統合。製品/vendorは変更していない。CLI拒否群の責務分割、影の定数化とhelper抽出後、R7339 AST実0・R7341静的foundation実0。R7342の既存root計測は全5,566/5,566成功（追加16、既存29skip）、実テスト322.037秒・全体実0。R7343正式coverage policyは100/0未達で実1。83,295/84,453=98.62882313239317%、未到達1,158で前1,174から純減16。原本と診断copyは`tmp/quality/resumed-owner-r3509/current-root-coverage-report-r7344/`へ保持し、未達を成功へ読み替えない。

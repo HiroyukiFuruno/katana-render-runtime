@@ -18,7 +18,7 @@ def require_fresh_source_inputs(bundle: gate.Bundle, expected: gate.JsonObject,
     contract = gate._object(expected.get("referenceParent"), "fresh reference contract")
     gate.require(contract.get("sourceRefs") == [proof.get(field) for field in fields],
                  "fresh reference source role declarations differ")
-    source_pair = gate._object(expected.get("sourcePair"), "measurement source pair")
+    source_pair = gate.fixed_source_pair(expected)
     measured_source = gate._object(source_pair.get("before"), "measurement source before")
     controller_source = gate._object(proof.get("controllerSourceBeforeRef"), "controller source before")
     gate.require(measured_source.get("sha256") == controller_source.get("sha256"),
@@ -33,9 +33,10 @@ def require_fresh_source_inputs(bundle: gate.Bundle, expected: gate.JsonObject,
 
 
 def validate_fresh_reference(bundle: gate.Bundle, root: Path, expected: gate.JsonObject, *,
-                             git_query: gate.GitQuery | None = None) -> gate.JsonObject:
+                             git_query: gate.GitQuery | None = None,
+                             reuse_context: object = None) -> gate.JsonObject:
     contract = gate._object(expected.get("referenceParent"), "fresh reference contract")
-    source_pair = gate._object(expected.get("sourcePair"), "source pair")
+    source_pair = gate.fixed_source_pair(expected)
     before = bundle.json(source_pair.get("before"))
     head = gate._text(before.get("head"), "controller source HEAD")
     def query(path: Path, args: tuple[str, ...]) -> str:
@@ -52,8 +53,13 @@ def validate_fresh_reference(bundle: gate.Bundle, root: Path, expected: gate.Jso
     require_fresh_source_inputs(bundle, expected, proof)
     source_proof = bundle.json(proof.get("selectedSourceProofRef"))
     source_root = Path(gate._text(source_proof.get("materializedRoot"), "historical source root"))
-    result = gate._validate_build_proof(bundle, root, artifact, "candidate", git_query=git_query,
-                                        historical_reference=selected, fresh_source_root=source_root)
+    if reuse_context is None:
+        result = gate._validate_build_proof(bundle, root, artifact, "candidate", git_query=git_query,
+                                            historical_reference=selected, fresh_source_root=source_root)
+    else:
+        result = gate._validate_build_proof(bundle, root, artifact, "candidate", git_query=git_query,
+                                            historical_reference=selected, fresh_source_root=source_root,
+                                            controller_reuse_context=reuse_context)
     gate.require(result.get("head") == selected.source_head
                  and result.get("binarySha256") == arm.get("binary_sha256")
                  and result.get("sourceSnapshotSha256") == arm.get("source_snapshot_sha256")

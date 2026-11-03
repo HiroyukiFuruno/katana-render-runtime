@@ -19,7 +19,7 @@ import verify_html_performance_evidence as gate
 class SystemOnlyObservation(TypedDict):
     schema: str
     worker: gate.JsonObject
-    stamp: inventory.FileStamp
+    stamp: list[int]
     platform: str
     environment_sha256: str
 
@@ -33,7 +33,8 @@ def observe_system_only_worker(
     gate.require(path.is_absolute() and str(path) == pin["path"] and path.resolve(strict=True) == path,
                  "system-only worker path differs")
     before = inventory._stamp(path)
-    gate.require(stat.S_ISREG(before[2]) and before[3] > 0,
+    gate.require(len(before) == 6 and all(type(value) is int and value >= 0 for value in before)
+                 and stat.S_ISREG(before[2]) and before[3] > 0,
                  "system-only worker is not a regular file")
     host = platform.platform()
     environment_digest = _inventory_digest(dict(environment))
@@ -65,7 +66,7 @@ def observe_system_only_worker(
                  and _inventory_digest(dict(environment)) == environment_digest,
                  "system-only worker or host changed during observation")
     return {"schema": "krr-html-system-only-worker-observation-v1", "worker": pin,
-            "stamp": before, "platform": host, "environment_sha256": environment_digest}
+            "stamp": list(before), "platform": host, "environment_sha256": environment_digest}
 
 
 class DeclaredEpochInputs(TypedDict):

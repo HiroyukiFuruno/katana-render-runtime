@@ -87,10 +87,16 @@ class DeclaredInputsTest(unittest.TestCase):
                                  "environmentSha256": epoch._inventory_digest(dict(os.environ))}
         with patch.object(platform, "system", return_value="Darwin"), \
              patch.object(platform, "platform", return_value="test-host"), \
-             patch.object(native_context, "_run", side_effect=[f"{path}:", "", ""]):
+             patch.object(native_context, "_run", side_effect=[f"{path}:", "", ""] * 2):
             result = epoch.observe_system_only_worker(pin, tool, os.environ)
+            saved_path = path.parent / "worker-observation.json"
+            saved_path.write_text(json.dumps(result))
+            restored = json.loads(saved_path.read_text())
+            repeated = epoch.observe_system_only_worker(pin, tool, os.environ)
         self.assertEqual(result["worker"], pin)
+        self.assertIsInstance(result["stamp"], list)
         self.assertEqual(result["stamp"][3], path.stat().st_size)
+        self.assertEqual(restored, repeated)
 
     def test_system_only_observation_rejects_rpath_and_loader_override(self) -> None:
         path = self.bundle.file(self.pins["candidate"])

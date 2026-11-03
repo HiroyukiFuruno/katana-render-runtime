@@ -193,6 +193,41 @@ def _environment_sha256(environment: Mapping[str, str]) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+WORKER_METADATA_KEYS = frozenset({"KRR_PERF_RUSTC", "KRR_PERF_CARGO",
+    "KRR_PERF_ENVIRONMENT_SHA256", "KRR_PERF_LOCK_PATH", "KRR_PERF_SOURCE_SNAPSHOT_PATH"})
+
+
+def _worker_key_names_sha256(names: list[str]) -> str:
+    raw = json.dumps(names, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _worker_environment_projection(environment: Mapping[str, str]) -> gate.JsonObject:
+    gate.require(WORKER_METADATA_KEYS <= environment.keys(), "worker metadata environment is incomplete")
+    keys = sorted(environment)
+    metadata = {key: environment[key] for key in sorted(WORKER_METADATA_KEYS)}
+    non_metadata = {key: value for key, value in environment.items() if key not in WORKER_METADATA_KEYS}
+    return {"actualEnvironmentSha256": _environment_sha256(environment), "keyNames": keys,
+            "keyNamesSha256": _worker_key_names_sha256(keys),
+            "nonMetadataEnvironmentSha256": _environment_sha256(non_metadata),
+            "metadataKeys": sorted(WORKER_METADATA_KEYS),
+            "metadataValuesSha256": _environment_sha256(metadata)}
+
+
+def _worker_runtime_identity(path_text: str) -> gate.JsonObject:
+    path = Path(path_text)
+    gate.require(path.is_absolute() and str(path) == path_text and path.resolve(strict=True) == path,
+                 "worker executable path is not canonical")
+    before = inventory_ops._stamp(path)
+    gate.require(stat.S_ISREG(before[2]) and before[2] & 0o111 != 0,
+                 "worker executable is not an executable regular file")
+    checksum = gate.sha256(path)
+    gate.require(inventory_ops._stamp(path) == before, "worker executable changed during observation")
+    return {"path": path_text, "sha256": checksum, "size": before[3],
+            "device": before[0], "inode": before[1], "mode": before[2],
+            "mtimeNs": str(before[4]), "ctimeNs": str(before[5])}
+
+
 def _performance_worker_environment(rustc: str, cargo: str, environment_sha: str,
                                     lock: Path, snapshot: FilePin) -> dict[str, str]:
     return {**os.environ, "KRR_PERF_RUSTC": rustc, "KRR_PERF_CARGO": cargo,
@@ -880,6 +915,7 @@ def load_closed_batch(
     *,
     git_query: gate.GitQuery | None = None,
     current_build: gate.PartialEpochCurrentBuild | None = None,
+    fixed_epoch: FixedEpochContextInput | None = None,
 ) -> tuple[gate.JsonObject, gate.Bundle, list[dict[str, FilePin]]]:
     receipt_path = batch / "batch-receipt.json"
     receipt = gate.read_json(receipt_path)
@@ -923,6 +959,9 @@ def load_closed_batch(
         bundle.file(_receipt_file_pin(value, "batch " + arm + " artifact"))
     for value in gate._array(receipt.get("buildPins"), "batch build pins"):
         bundle.file(_receipt_file_pin(value, "batch build pin"))
+    gate.require(current_build is None or fixed_epoch is None, "resume source modes conflict")
+    if fixed_epoch is not None:
+        _resume_fixed_source_pins(root, bundle, receipt, fixed_epoch, git_query=git_query)
     validated_builds: Mapping[str, gate.JsonObject] = {}
     shared_source: gate.SharedCurrentSource | None = None
     shared_before: gate.JsonObject | None = None
@@ -933,7 +972,12 @@ def load_closed_batch(
         first_expected = bundle.json(attempts[0]["expected"])
         source_refs = gate._object(receipt.get("source"), "batch source refs")
         shared_before = bundle.json(source_refs["before"])
-        if current_build is None:
+        if fixed_epoch is not None:
+            from html_performance_source_reuse import SourceReuseContext
+            old_head = fixed_epoch["head"]
+            records = gate.committed_records(root, old_head, git_query=git_query)
+            reuse_context = SourceReuseContext(old_head, old_head, records, (), False)
+        elif current_build is None:
             shared_source = gate.SharedCurrentSource(
                 root, gate._text(shared_before.get("head"), "source HEAD"),
                 gate.current_source(root, shared_before, git_query=git_query),
@@ -1038,7 +1082,10 @@ def _verify_and_seal_catalog_batch(
     seal: Callable[[], FilePin],
     summary: gate.JsonObject,
     git_query: gate.GitQuery | None,
+    epoch_origin: FixedEpochContextInput | None = None,
 ) -> gate.JsonObject | None:
+    gate.require(epoch_origin is None or not formal_ready,
+                 "fixed epoch requires final current-build verification")
     if batch_failure is None and formal_ready:
         verifier = gate._verify_catalog_diagnostic if diagnostic else gate.verify
         verified = verifier(bundle, root, git_query=git_query)
@@ -1047,7 +1094,7 @@ def _verify_and_seal_catalog_batch(
 
     current_bundle = gate.Bundle(bundle)
     validated_builds: Mapping[str, gate.JsonObject] | None = None
-    if attempts and not diagnostic:
+    if attempts and not diagnostic and epoch_origin is None:
         first_expected = current_bundle.json(attempts[0]["expected"])
         validated_builds = gate.validate_expected_builds(
             current_bundle, root, first_expected, git_query=git_query,
@@ -1056,6 +1103,10 @@ def _verify_and_seal_catalog_batch(
     completed_attempts = []
     for attempt in attempts:
         if _attempt_condition_id(current_bundle, attempt) in complete:
+            if epoch_origin is not None:
+                expected = current_bundle.json(attempt["expected"])
+                gate.require(gate._object(expected.get("sourcePair"), "epoch source pair").get("schema")
+                             == "krr-html-performance-source-epoch-v3", "legacy epoch attempt cannot be sealed")
             gate.validate_attempt(
                 current_bundle, root, dict(attempt), git_query=git_query,
                 validated_builds=validated_builds,
@@ -1169,6 +1220,40 @@ def _resume_candidate_snapshot_pin(bundle: gate.Bundle, receipt: Mapping[str, ob
     return _receipt_file_pin(proof.get("sourceSnapshotRef"), "resume candidate source snapshot")
 
 
+def _resume_fixed_source_pins(
+    root: Path, bundle: gate.Bundle, receipt: Mapping[str, object],
+    origin: FixedEpochContextInput, *, git_query: gate.GitQuery | None = None,
+) -> tuple[FilePin, FilePin]:
+    """Select only the original authenticated SDK source; do not certify the live checkout."""
+    fixed = remote_evidence.validate_fixed_epoch_candidate_origin(
+        origin["directory"], root, origin["manifest_sha256"], origin["artifact_path"],
+        origin["artifact_sha256"], origin["head"], git_query=git_query,
+    )
+    origin_bundle = gate.Bundle(origin["directory"])
+    artifact = origin_bundle.relative_reference(origin["artifact_path"], origin["artifact_sha256"])
+    artifacts = gate._object(receipt.get("buildArtifacts"), "resume build artifacts")
+    gate.require(_receipt_file_pin(artifacts.get("candidate"), "resume candidate artifact") == artifact
+                 and receipt.get("head") == fixed.head, "resume fixed origin identity differs")
+    proof = origin_bundle.json(artifact)
+    fixed_source = _receipt_file_pin(proof.get("sourceBeforeRef"), "fixed source")
+    fixed_snapshot = _receipt_file_pin(proof.get("sourceSnapshotRef"), "fixed snapshot")
+    receipt_source = gate._object(receipt.get("source"), "resume source")
+    gate.require(_receipt_file_pin(receipt_source.get("before"), "resume source before") == fixed_source
+                 and _resume_candidate_snapshot_pin(bundle, receipt) == fixed_snapshot
+                 and fixed_snapshot["sha256"] == fixed.snapshot_sha256
+                 and proof.get("frozenBinary") == origin["workers"].get("candidate")
+                 and gate._object(proof.get("frozenBinary"), "fixed binary").get("sha256")
+                 == fixed.binary_sha256,
+                 "resume fixed source identity differs")
+    origin_bundle.file(fixed_source)
+    origin_bundle.file(fixed_snapshot)
+    bundle.file(fixed_source)
+    gate.require(gate.sha256(root / gate.HARNESS_ROOT / "Cargo.lock") == fixed.lock_sha256,
+                 "resume fixed lock differs")
+    snapshot = _resume_context_pin(bundle, receipt, fixed_snapshot, fixed_snapshot)
+    return fixed_source, snapshot
+
+
 def _resume_catalog_validation_pin(bundle: gate.Bundle, receipt: Mapping[str, object],
                                    empty_path: Path | None = None) -> FilePin:
     attempts = gate._objects(receipt.get("attempts"), "resume attempts")
@@ -1269,6 +1354,104 @@ def _validate_planned_inputs(
                                          links, provenance, execution)
 
 
+def _validate_epoch_resume_contexts(
+    bundle: gate.Bundle, receipt: Mapping[str, object], root: Path, head: str,
+    source: gate.JsonObject, before: Mapping[str, object], end: Mapping[str, object],
+    log_directory: Path, arms: Mapping[str, ArmPin], *, git_query: gate.GitQuery | None,
+) -> None:
+    """Authenticate the original epoch and live execution inputs, not release acceptance."""
+    fields = {"schema", "epochOrigin", "liveCheckout", "systemWorkers", "workerEnvironment",
+              "inputs", "registry", "cache", "cacheUnion", "scope", "config", "preference", "toolContext"}
+    refs = gate._object(receipt.get("contexts"), "resume context refs")
+    contexts = (bundle.json(refs["before"]), bundle.json(refs["end"]), before, end)
+    for item in contexts:
+        gate.require(set(item) == fields and item.get("schema") == "krr-html-performance-context-epoch-v3",
+                     "resume epoch context fields differ")
+    origin = gate._object(contexts[0].get("epochOrigin"), "epoch origin")
+    gate.require(set(origin) == {"bundleManifest", "artifact", "head", "source", "snapshot",
+                                "binarySha256", "lockSha256"}
+                 and all(item.get("epochOrigin") == origin for item in contexts),
+                 "resume epoch origin differs")
+    manifest = gate._object(origin.get("bundleManifest"), "epoch bundle manifest")
+    artifact = gate._object(origin.get("artifact"), "epoch artifact")
+    gate.require(set(manifest) == {"path", "sha256"} and set(artifact) == {"path", "sha256"},
+                 "resume epoch origin pins differ")
+    origin_head = gate._text(origin.get("head"), "epoch head")
+    fixed = remote_evidence.validate_fixed_epoch_candidate_origin_reader(
+        bundle, root, manifest, artifact, origin_head, git_query=git_query)
+    gate.require(receipt.get("head") == fixed.head == origin_head == head
+                 and origin.get("binarySha256") == fixed.binary_sha256
+                 and origin.get("lockSha256") == fixed.lock_sha256,
+                 "resume epoch build identity differs")
+    proof = bundle.json(artifact)
+    gate.require(origin.get("source") == proof.get("sourceBeforeRef")
+                 and origin.get("snapshot") == proof.get("sourceSnapshotRef")
+                 and gate._object(origin.get("snapshot"), "epoch snapshot").get("sha256") == fixed.snapshot_sha256,
+                 "resume epoch source pins differ")
+    old_source = bundle.json(origin["source"])
+    source_refs = gate._object(receipt.get("source"), "resume source refs")
+    gate.require(bundle.json(source_refs["before"]) == old_source == source,
+                 "resume epoch source differs")
+    for key in ("systemWorkers", "workerEnvironment", "inputs", "scope", "config", "preference", "toolContext"):
+        gate.require(all(item.get(key) == contexts[0].get(key) for item in contexts),
+                     "resume epoch " + key + " differs")
+    for item in gate._objects(end.get("inputs"), "resume epoch inputs"):
+        path = Path(gate._text(item.get("path"), "resume epoch input path"))
+        gate.require(file_state(path) == item, "resume epoch input bytes differ")
+    for item in contexts:
+        gate.require(item.get("cacheUnion") == {"registry": item.get("registry"), "target": item.get("cache")},
+                     "resume epoch cache union differs")
+    live = gate._object(end.get("liveCheckout"), "live checkout")
+    gate.require(_live_checkout(root, log_directory) == live,
+                 "resume live checkout differs")
+    old_records = remote_evidence._fixed_epoch_git_records(root, old_source, fixed.head, git_query=git_query)
+    program = {name: value for name, value in old_records.items()
+               if name.startswith("scripts/") or name == "Justfile"}
+    for item in contexts:
+        checkout = gate._object(item.get("liveCheckout"), "epoch checkout")
+        gate.require(set(checkout) == {"schema", "root", "head", "indexSha256", "statusBase64", "manifest"}
+                     and checkout.get("schema") == "krr-html-performance-live-source-observation-v1"
+                     and checkout.get("root") == str(root), "resume checkout fields differ")
+        manifest_value = gate._object(checkout.get("manifest"), "live source manifest")
+        gate.require(set(manifest_value) == {"schema", "digest", "files"}
+                     and manifest_value.get("schema") == "krr-native-build-source-manifest-v1",
+                     "resume live manifest differs")
+        records = gate.records_map(manifest_value.get("files"))
+        selected: gate.SourceRecords = {}
+        for manifest_path, value in records.items():
+            relative = Path(manifest_path).relative_to(root).as_posix()
+            if relative.startswith("scripts/") or relative == "Justfile":
+                selected[relative] = value
+        gate.require(selected == program, "resume measurement program differs")
+    from html_performance_source_reuse import _modes
+    tree = gate._git_output(root, ("ls-tree", "-r", "-z", fixed.head), git_query=git_query)
+    gate.require(isinstance(tree, bytes), "resume epoch Git tree differs")
+    if not isinstance(tree, bytes):
+        raise ValueError("resume epoch Git tree differs")
+    modes = _modes(tree)
+    for name in program:
+        mode = (root / name).stat().st_mode
+        gate.require(modes.get(name) == ("100755" if mode & 0o111 else "100644"),
+                     "resume measurement program mode differs")
+    workers = gate._object(end.get("systemWorkers"), "epoch workers")
+    gate.require(set(workers) == {"baseline", "candidate"}, "resume worker roles differ")
+    tool = gate._object(end.get("toolContext"), "epoch tool context")
+    gate.require("candidate" in arms and len(arms) == 2, "resume epoch arm roles differ")
+    baseline_arms = [arm for name, arm in arms.items() if name != "candidate"]
+    gate.require(len(baseline_arms) == 1, "resume epoch baseline arm differs")
+    for role in ("baseline", "candidate"):
+        observed = gate._object(workers.get(role), "epoch worker observation")
+        pin = gate._object(observed.get("worker"), "epoch worker pin")
+        arm = arms["candidate"] if role == "candidate" else baseline_arms[0]
+        gate.require(pin.get("sha256") == arm["binary_sha256"], "resume worker arm differs")
+        gate.require(epoch_reuse.observe_system_only_worker(pin, tool, dict(os.environ)) == observed,
+                     "resume worker observation differs")
+        if role == "candidate":
+            gate.require(pin == proof.get("frozenBinary") and pin.get("sha256") == fixed.binary_sha256,
+                         "resume candidate worker differs")
+    gate.require(_live_checkout(root, log_directory) == live, "resume checkout changed during validation")
+
+
 def _validate_resume_batch(
     receipt: Mapping[str, object],
     bundle: gate.Bundle,
@@ -1276,9 +1459,58 @@ def _validate_resume_batch(
     *,
     head: str,
     source: gate.JsonObject,
-    before_context: ContextSnapshot,
-    after_context: ContextSnapshot,
+    before_context: ContextSnapshot | EpochContextSnapshot,
+    after_context: ContextSnapshot | EpochContextSnapshot,
     arms: Mapping[str, ArmPin],
+    epoch_root: Path | None = None,
+    epoch_log_directory: Path | None = None,
+    git_query: gate.GitQuery | None = None,
+) -> None:
+    if before_context.get("schema") == "krr-html-performance-context-epoch-v3":
+        gate.require(bool(attempts), "resume epoch expected arms are missing")
+        gate.require(epoch_root is not None and epoch_log_directory is not None,
+                     "resume epoch validation context is missing")
+        if epoch_root is None or epoch_log_directory is None:
+            raise ValueError("resume epoch validation context is missing")
+        _validate_epoch_resume_contexts(bundle, receipt, epoch_root, head, source,
+                                        before_context, after_context, epoch_log_directory, arms,
+                                        git_query=git_query)
+    else:
+        _validate_legacy_resume_contexts(receipt, bundle, head, source, before_context, after_context)
+    for attempt in attempts:
+        expected = bundle.json(attempt["expected"])
+        old_arms = gate._object(expected.get("arms"), "resume expected arms")
+        baseline_id = gate.baseline_arm_id(expected)
+        gate.require(all(_same_arm_identity(gate._object(old_arms.get(raw_arm), "resume arm"),
+                                            gate._object(arms.get(raw_arm), "current arm"))
+                         for raw_arm in (baseline_id, "candidate")),
+                     "resume build pins differ")
+        if before_context.get("schema") == "krr-html-performance-context-epoch-v3":
+            artifacts = gate._object(receipt.get("buildArtifacts"), "resume build artifacts")
+            workers = gate._object(before_context.get("systemWorkers"), "resume workers")
+            for role, arm_id in (("baseline", baseline_id), ("candidate", "candidate")):
+                arm = gate._object(old_arms.get(arm_id), "resume expected arm")
+                artifact = gate._object(artifacts.get(role), "resume build artifact")
+                gate.require(arm.get("build_artifact_ref") == artifact
+                             and gate._object(arms.get(arm_id), "current arm").get("build_artifact_ref") == artifact,
+                             "resume role artifact differs")
+                proof = bundle.json(artifact)
+                frozen = gate._object(proof.get("frozenBinary"), "resume frozen binary")
+                observation = gate._object(workers.get(role), "resume worker observation")
+                worker = gate._object(observation.get("worker"), "resume worker pin")
+                physical = bundle.file(frozen)
+                gate.require(worker.get("sha256") == frozen.get("sha256") == arm.get("binary_sha256")
+                             and worker.get("path") in (frozen.get("path"), str(physical)),
+                             "resume worker role differs")
+                if role == "candidate":
+                    origin = gate._object(before_context.get("epochOrigin"), "resume epoch origin")
+                    gate.require(artifact == origin.get("artifact") and worker == frozen,
+                                 "resume candidate origin differs")
+
+
+def _validate_legacy_resume_contexts(
+    receipt: Mapping[str, object], bundle: gate.Bundle, head: str, source: gate.JsonObject,
+    before_context: Mapping[str, object], after_context: Mapping[str, object],
 ) -> None:
     gate.require(receipt.get("head") == head, "resume batch HEAD differs")
     source_refs = gate._object(receipt.get("source"), "resume source refs")
@@ -1289,14 +1521,6 @@ def _validate_resume_batch(
                  "resume context-before differs")
     gate.require(bundle.json(context_refs["end"]) == after_context,
                  "resume context-end differs")
-    for attempt in attempts:
-        expected = bundle.json(attempt["expected"])
-        old_arms = gate._object(expected.get("arms"), "resume expected arms")
-        baseline_id = gate.baseline_arm_id(expected)
-        gate.require(all(_same_arm_identity(gate._object(old_arms.get(raw_arm), "resume arm"),
-                                            gate._object(arms.get(raw_arm), "current arm"))
-                         for raw_arm in (baseline_id, "candidate")),
-                     "resume build pins differ")
 
 
 def _require_cpu_busy_resume(bundle: gate.Bundle, attempts: Sequence[Mapping[str, FilePin]]) -> None:
@@ -1587,7 +1811,9 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
                          cwd: Path | None = None, env: Mapping[str, str] | None = None,
                          check: bool = True, input_bytes: bytes | None = None,
                          lifecycle_sink: Callable[[Path], None] | None = None,
-                         native_attempt_token: str | None = None) -> subprocess.CompletedProcess[bytes]:
+                         native_attempt_token: str | None = None,
+                         runtime_execution_sink: Callable[[gate.JsonObject], None] | None = None,
+                         ) -> subprocess.CompletedProcess[bytes]:
     gate.require(os.name == "posix", "POSIX measurement ownership required")
     gate.require(role in MEASUREMENT_LIMITS, "unknown measurement command role")
     log_directory.mkdir(parents=True, exist_ok=True)
@@ -1611,6 +1837,11 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
     raw_identities: list[tuple[int, int]] = []
     native_closure: gate.JsonObject | None = None
     cleanup_deadline: float | None = None
+    runtime_before: gate.JsonObject | None = None
+    runtime_environment: gate.JsonObject | None = None
+    runtime_execution: gate.JsonObject | None = None
+    runtime_after: gate.JsonObject | None = None
+    runtime_failure: BaseException | None = None
 
     def interrupted(signum: int, frame: FrameType | None) -> None:
         del frame
@@ -1638,7 +1869,16 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
                 # spawn中は例外を保留し、子へblocked signal maskを継承させない。
                 for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
                     previous_handlers[signum] = signal.signal(signum, interrupted)
-                process = subprocess.Popen(list(args), cwd=cwd, env=env, stdin=stdin,
+                popen_env = env
+                if runtime_execution_sink is not None:
+                    gate.require(role == "worker" and bool(args) and env is not None,
+                                 "runtime execution requires a worker environment")
+                    if env is None:
+                        raise ValueError("runtime execution environment missing")
+                    popen_env = dict(env)
+                    runtime_environment = _worker_environment_projection(popen_env)
+                    runtime_before = _worker_runtime_identity(args[0])
+                process = subprocess.Popen(list(args), cwd=cwd, env=popen_env, stdin=stdin,
                                            stdout=stdout, stderr=stderr, start_new_session=True)
                 identity = {"pid": process.pid, "parentPid": os.getpid(),
                             "sessionId": os.getsid(process.pid), "processGroupId": os.getpgid(process.pid),
@@ -1703,6 +1943,16 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
             if primary is None:
                 primary = _signal_interruption(pending[0])
             pending.clear()
+        if runtime_execution_sink is not None and process is not None and closed:
+            try:
+                if runtime_before is None or runtime_environment is None:
+                    raise ValueError("worker runtime observation missing")
+                runtime_after = _worker_runtime_identity(args[0])
+                gate.require(runtime_before == runtime_after, "worker runtime identity changed")
+            except BaseException as error:
+                runtime_failure = error
+                if primary is None:
+                    primary = error
         if primary is None:
             if process is None or not closed:
                 raise ValueError("measurement process closure missing")
@@ -1726,6 +1976,16 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
             cleanup_failure = RuntimeError(
                 "measurement cleanup failed: " + "; ".join(repr(error) for error in cleanup_errors)
             )
+        if runtime_execution_sink is not None:
+            runtime_execution = {"schema": "krr-html-worker-runtime-execution-v1",
+                                 "binaryIdentityBefore": runtime_before,
+                                 "binaryIdentityAfter": runtime_after,
+                                 **(runtime_environment if runtime_environment is not None else {})}
+            runtime_error = runtime_failure
+            if runtime_error is None and (runtime_before is None or runtime_after is None):
+                runtime_error = primary if primary is not None else ValueError("runtime observation incomplete")
+            if runtime_error is not None:
+                runtime_execution["observationErrorType"] = type(runtime_error).__name__
         try:
             write(folder / "lifecycle.json", {
                 "schema": "krr-performance-command-lifecycle-v1", "argv": list(args), "role": role,
@@ -1739,11 +1999,14 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
                 "exitedLeaderSignalObservations": signal_observations,
                 "raw": [{"path": str(path), "sha256": gate.sha256(path) if closed else None}
                         for path in (stdout_path, stderr_path)],
+                **({"runtimeExecution": runtime_execution} if runtime_execution is not None else {}),
                 **({"nativeRawFdClosure": native_closure, "descendantClosureProved": False}
                    if native_attempt_token is not None else {}),
             })
             if lifecycle_sink is not None:
                 lifecycle_sink(folder / "lifecycle.json")
+            if runtime_execution_sink is not None and runtime_execution is not None:
+                runtime_execution_sink(runtime_execution)
         except BaseException as error:
             lifecycle_failure = error
         finally:
@@ -1955,8 +2218,16 @@ def resume_fresh_reference_inputs(root: Path, bundle: gate.Bundle, receipt: gate
 
 def write_build_source_inputs(root: Path, output: Path, initial: gate.JsonObject,
                               binding: CapacityBinding, *, git_query: gate.GitQuery | None = None,
-                              extra_capacity_inputs: Mapping[str, FilePin] | None = None) -> BuildSourceInputs:
-    source_before = write(output / "source-before.json", initial)
+                              extra_capacity_inputs: Mapping[str, FilePin] | None = None,
+                              fixed_resume: tuple[gate.Bundle, gate.JsonObject, FixedEpochContextInput] | None = None,
+                              ) -> BuildSourceInputs:
+    if fixed_resume is None:
+        source_before = write(output / "source-before.json", initial)
+    else:
+        resume_bundle, resume_receipt, origin = fixed_resume
+        source_before, _ = _resume_fixed_source_pins(root, resume_bundle, resume_receipt, origin,
+                                                     git_query=git_query)
+        gate.require(resume_bundle.json(source_before) == initial, "fixed initial source differs")
     capacity_input_value: gate.JsonObject = {
         "sourceBeforeRef": source_before,
         "bindingRef": {"path": str(binding.document), "sha256": binding.document_sha256},
@@ -1968,13 +2239,19 @@ def write_build_source_inputs(root: Path, output: Path, initial: gate.JsonObject
     if extra_capacity_inputs is not None:
         capacity_input_value.update(extra_capacity_inputs)
     capacity_input = write(output / "capacity-inputs.json", capacity_input_value)
-    snapshot_rows = [{**row, "path": str(Path(gate._text(row["path"], "source path")).relative_to(root))}
-                     for row in gate._objects(initial["files"], "source files")]
-    snapshot = write(output / "shared-source-snapshot.json", {
-        "records": snapshot_rows,
-        "digest": hashlib.sha256(encoded(snapshot_rows)).hexdigest(),
-    })
-    source_records = gate.current_source(root, initial, git_query=git_query)
+    if fixed_resume is not None:
+        resume_bundle, resume_receipt, origin = fixed_resume
+        _, snapshot = _resume_fixed_source_pins(root, resume_bundle, resume_receipt, origin,
+                                                git_query=git_query)
+        source_records = gate.committed_records(root, origin["head"], git_query=git_query)
+    else:
+        snapshot_rows = [{**row, "path": str(Path(gate._text(row["path"], "source path")).relative_to(root))}
+                         for row in gate._objects(initial["files"], "source files")]
+        snapshot = write(output / "shared-source-snapshot.json", {
+            "records": snapshot_rows,
+            "digest": hashlib.sha256(encoded(snapshot_rows)).hexdigest(),
+        })
+        source_records = gate.current_source(root, initial, git_query=git_query)
     return BuildSourceInputs(source_before, capacity_input, snapshot, source_records)
 
 
@@ -2136,6 +2413,8 @@ def _epoch_context(root: Path, target: Path, input_paths: Sequence[Path], log_di
     preference = file_state(Path.home() / ".CFUserTextEncoding")
     gate.require(_live_checkout(root, log_directory) == live, "live checkout changed during context")
     gate.require(authenticate() == fixed, "fixed origin changed during context")
+    non_metadata = {key: value for key, value in environment.items() if key not in WORKER_METADATA_KEYS}
+    non_metadata_keys = sorted(non_metadata)
     return {
         "schema": "krr-html-performance-context-epoch-v3",
         "epochOrigin": {"bundleManifest": {"path": str(origin["directory"] / "bundle.json"),
@@ -2147,6 +2426,9 @@ def _epoch_context(root: Path, target: Path, input_paths: Sequence[Path], log_di
         "workerEnvironment": {
             "schema": "krr-html-performance-worker-environment-contract-v1",
             "baseEnvironmentSha256": tools["environmentSha256"],
+            "nonMetadataEnvironmentSha256": _environment_sha256(non_metadata),
+            "nonMetadataKeyNames": non_metadata_keys,
+            "nonMetadataKeyNamesSha256": _worker_key_names_sha256(non_metadata_keys),
             "metadata": {"KRR_PERF_RUSTC": "toolContext.rustc",
                          "KRR_PERF_CARGO": "toolContext.cargo",
                          "KRR_PERF_ENVIRONMENT_SHA256": "before-context-sha256",
@@ -2344,6 +2626,7 @@ def observe_worker_attempt(
     log_directory: Path,
     *,
     batch_deadline: float | None = None,
+    capture_runtime_execution: bool = False,
 ) -> WorkerAttemptObservation:
     probe = await_quiet(batch_deadline)
     load_before = probe.before
@@ -2363,11 +2646,17 @@ def observe_worker_attempt(
     argv = [str(build.binary), "--worker", str(sample), str(fixture), str(report_path),
             str(plan_path), str(width), str(height), str(scale)]
     lifecycle_paths: list[Path] = []
+    runtime_observations: list[gate.JsonObject] = []
     result: subprocess.CompletedProcess[bytes] | None = None
     error: BaseException | None = None
     try:
-        result = _measurement_command(argv, cwd=cwd, env=env, role="worker",
-            log_directory=log_directory, check=False, lifecycle_sink=lifecycle_paths.append)
+        if capture_runtime_execution:
+            result = _measurement_command(argv, cwd=cwd, env=env, role="worker",
+                log_directory=log_directory, check=False, lifecycle_sink=lifecycle_paths.append,
+                runtime_execution_sink=runtime_observations.append)
+        else:
+            result = _measurement_command(argv, cwd=cwd, env=env, role="worker",
+                log_directory=log_directory, check=False, lifecycle_sink=lifecycle_paths.append)
     except BaseException as caught:
         error = caught
     lifecycle: FilePin | None = None
@@ -2375,6 +2664,11 @@ def observe_worker_attempt(
         lifecycle_path = lifecycle_paths[0]
         lifecycle = {"path": str(lifecycle_path.resolve()), "sha256": gate.sha256(lifecycle_path)}
     actual_exit = result.returncode if result is not None else None
+    if capture_runtime_execution and result is None and len(lifecycle_paths) == 1:
+        saved = gate.read_json(lifecycle_paths[0])
+        exit_value = saved.get("exitCode")
+        if type(exit_value) is int:
+            actual_exit = exit_value
     worker_started: bool | None = True if result is not None else None
     if result is None and len(lifecycle_paths) == 1:
         worker_started = worker_started_from_lifecycle(lifecycle_paths[0])
@@ -2400,6 +2694,10 @@ def observe_worker_attempt(
         "actualExit": actual_exit, "lifecycle": lifecycle,
         "workerStarted": worker_started, "accepted": False,
     }
+    if capture_runtime_execution and len(runtime_observations) == 1:
+        record["runtimeExecution"] = runtime_observations[0]
+    elif capture_runtime_execution and error is None:
+        error = ValueError("worker runtime execution observation missing")
     if error is not None:
         record["reason"] = ("host load observation failed" if load_error is error
                             else "worker command raised")
@@ -2434,6 +2732,7 @@ def collect_worker_sample(
     failure_sink: Callable[[list[gate.JsonObject]], None] | None = None,
     *,
     batch_deadline: float | None = None,
+    capture_runtime_execution: bool = False,
 ) -> tuple[gate.JsonObject, dict[str, float], list[gate.JsonObject]]:
     attempts: list[gate.JsonObject] = []
 
@@ -2443,10 +2742,14 @@ def collect_worker_sample(
 
     for attempt in range(1, MAX_WORKER_ATTEMPTS + 1):
         _require_batch_budget(batch_deadline)
-        observation = observe_worker_attempt(build, sample, attempt, fixture,
-            report_path, plan_path,
-            width, height, scale, cwd, env, log_directory,
-            batch_deadline=batch_deadline)
+        if capture_runtime_execution:
+            observation = observe_worker_attempt(build, sample, attempt, fixture,
+                report_path, plan_path, width, height, scale, cwd, env, log_directory,
+                batch_deadline=batch_deadline, capture_runtime_execution=True)
+        else:
+            observation = observe_worker_attempt(build, sample, attempt, fixture,
+                report_path, plan_path, width, height, scale, cwd, env, log_directory,
+                batch_deadline=batch_deadline)
         record = observation.record
         result = observation.result
         if observation.error is None and record.get("reason") is None and result is not None:
@@ -2814,6 +3117,7 @@ def _collect_condition_worker_pairs(
     builds: Mapping[str, ArmBuildResult], binaries: Mapping[str, Path],
     arms: Mapping[str, ArmPin], root: Path, lifecycle: Path, lock: Path,
     snapshot: FilePin, environment_sha: str, batch_deadline: float | None = None,
+    capture_runtime_execution: bool = False,
 ) -> ConditionWorkerCollection:
     order: list[gate.JsonObject] = []
     reports: list[Path] = []
@@ -2855,11 +3159,18 @@ def _collect_condition_worker_pairs(
             failed_attempts: list[gate.JsonObject] = []
             try:
                 for sample in range(5):
-                    payload, sample_load, sample_attempts = collect_worker_sample(
-                        builds[arm], sample, fixture, report_path, plan_path, width, height,
-                        viewport["scale"], root, environment, lifecycle,
-                        worker_attempts_directory(folder, arm, pair), failed_attempts.extend,
-                        batch_deadline=batch_deadline)
+                    if capture_runtime_execution:
+                        payload, sample_load, sample_attempts = collect_worker_sample(
+                            builds[arm], sample, fixture, report_path, plan_path, width, height,
+                            viewport["scale"], root, environment, lifecycle,
+                            worker_attempts_directory(folder, arm, pair), failed_attempts.extend,
+                            batch_deadline=batch_deadline, capture_runtime_execution=True)
+                    else:
+                        payload, sample_load, sample_attempts = collect_worker_sample(
+                            builds[arm], sample, fixture, report_path, plan_path, width, height,
+                            viewport["scale"], root, environment, lifecycle,
+                            worker_attempts_directory(folder, arm, pair), failed_attempts.extend,
+                            batch_deadline=batch_deadline)
                     samples.append(payload)
                     loads.append(sample_load)
                     worker_attempts.extend(sample_attempts)
@@ -2986,7 +3297,8 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             max_conditions: int | None = None,
             resume_batch: Path | None = None,
             reference_parent_wrapper: Path | None = None,
-            reference_parent_wrapper_sha256: str | None = None) -> None:
+            reference_parent_wrapper_sha256: str | None = None,
+            fixed_epoch: FixedEpochContextInput | None = None) -> None:
     if catalog_manifest_path is None and not _allow_legacy_diagnostic:
         raise ValueError("catalog capture manifest required for formal performance production")
     gate.require(platform.system() == "Darwin" and platform.machine() == "arm64", "measurement lane requires macOS Apple Silicon")
@@ -2997,6 +3309,9 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                      "batch max conditions requires a catalog and is between 1 and 84")
     gate.require(resume_batch is None or catalog_manifest_path is not None,
                  "batch resume requires a catalog")
+    gate.require(fixed_epoch is None or resume_batch is not None
+                 or reference_parent_wrapper is not None,
+                 "new fixed epoch requires a verified baseline wrapper")
     gate.require((reference_parent_wrapper is None) == (reference_parent_wrapper_sha256 is None),
                  "reference parent wrapper requires its SHA256")
     gate.require(reference_parent_wrapper is None or catalog_manifest_path is not None,
@@ -3009,7 +3324,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     resumed_attempts: list[dict[str, FilePin]] = []
     if resume_batch is not None:
         resumed_receipt, resumed_bundle, resumed_attempts = load_closed_batch(
-            resume_batch.resolve(), root,
+            resume_batch.resolve(), root, fixed_epoch=fixed_epoch,
         )
         _require_cpu_busy_resume(resumed_bundle, resumed_attempts)
     catalog_conditions: list[CatalogCondition] | None = None
@@ -3024,7 +3339,45 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     lifecycle = output.parent / f"{output.name}.lifecycle"
     gate.require(not lifecycle.exists(), "fresh measurement lifecycle output required")
     git_query = _make_git_query(lifecycle)
-    initial = source(root, git_query=git_query)
+    origin_bundle: gate.Bundle | None = None
+    origin_artifact: FilePin | None = None
+    fixed_source_end: FilePin | None = None
+    if fixed_epoch is not None:
+        remote_evidence.validate_fixed_epoch_candidate_origin(
+            fixed_epoch["directory"], root, fixed_epoch["manifest_sha256"],
+            fixed_epoch["artifact_path"], fixed_epoch["artifact_sha256"], fixed_epoch["head"],
+            git_query=git_query,
+        )
+        origin_bundle = gate.Bundle(fixed_epoch["directory"])
+        origin_artifact = cast(FilePin, origin_bundle.relative_reference(
+            fixed_epoch["artifact_path"], fixed_epoch["artifact_sha256"]))
+    if fixed_epoch is None:
+        initial = source(root, git_query=git_query)
+        initial_live: gate.JsonObject | None = None
+    else:
+        if origin_bundle is None or origin_artifact is None:
+            raise ValueError("fixed epoch origin is missing")
+        origin_proof = origin_bundle.json(origin_artifact)
+        initial = origin_bundle.json(origin_proof["sourceBeforeRef"])
+        if resumed_receipt is None:
+            source_ends = [
+                {"path": gate._text(item.get("originalPath"), "origin source end path"),
+                 "sha256": gate._text(item.get("sha256"), "origin source end SHA")}
+                for item in gate._objects(origin_bundle.manifest.get("files"), "origin files")
+                if gate._text(item.get("originalPath"), "origin path").endswith("/source-end.json")
+            ]
+            gate.require(len(source_ends) == 1, "fixed epoch source end is missing or ambiguous")
+            fixed_source_end = cast(FilePin, source_ends[0])
+            end_source = origin_bundle.json(fixed_source_end)
+            gate.require(all(initial.get(key) == end_source.get(key) for key in gate.SOURCE_KEYS)
+                         and end_source.get("stableEndpoints") is True,
+                         "fixed epoch original source endpoints differ")
+        initial_live = _live_checkout(root, lifecycle)
+    def require_source_stable(message: str) -> None:
+        if fixed_epoch is None:
+            gate.require(source(root, git_query=git_query) == initial, message)
+        else:
+            gate.require(_live_checkout(root, lifecycle) == initial_live, message)
     reference_proof: reference.ReferenceParentProof | None = None
     reference_contract: gate.JsonObject | None = None
     reference_wrapper_pin: FilePin | None = None
@@ -3047,8 +3400,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         gate._require_html84_acceptance(
             catalog_capture_validation, diagnostic=_allow_catalog_diagnostic,
         )
-        gate.require(source(root, git_query=git_query) == initial,
-                     "source changed during strict Chrome capture validation")
+        require_source_stable("source changed during strict Chrome capture validation")
     if reference_parent_wrapper is not None and reference_parent_wrapper_sha256 is not None:
         (reference_proof, reference_contract, reference_wrapper_pin,
          reference_transport_refs) = load_reference_parent(
@@ -3076,7 +3428,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                               "originalArm": "candidate", "publishedSdk": False,
                               "parentHead": selected.source_head}
     _measurement_command(["just", "runtime-bundle-check"], cwd=root, role="preflight", log_directory=lifecycle)
-    gate.require(source(root, git_query=git_query) == initial, "source changed during runtime bundle check")
+    require_source_stable("source changed during runtime bundle check")
     if capacity_document is None or capacity_document_sha256 is None:
         raise ValueError("capacity binding input required before builds")
     binding = load_capacity_binding(root, capacity_document, capacity_document_sha256)
@@ -3116,9 +3468,26 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         extra_capacity_inputs["catalogManifestRef"] = catalog_manifest_pin
     if catalog_plan_pin is not None:
         extra_capacity_inputs["catalogPlanRef"] = catalog_plan_pin
-    build_inputs = write_build_source_inputs(root, output, initial, binding,
-        git_query=git_query, extra_capacity_inputs=extra_capacity_inputs)
-    if resumed_receipt is not None and resumed_bundle is not None:
+    fixed_resume = ((resumed_bundle, resumed_receipt, fixed_epoch)
+                    if resumed_bundle is not None and resumed_receipt is not None
+                    and fixed_epoch is not None else None)
+    if fixed_epoch is not None and resumed_receipt is None:
+        if origin_bundle is None or origin_artifact is None:
+            raise ValueError("fixed epoch origin is missing")
+        origin_proof = origin_bundle.json(origin_artifact)
+        fixed_source = _receipt_file_pin(origin_proof.get("sourceBeforeRef"), "fixed source")
+        fixed_snapshot = _receipt_file_pin(origin_proof.get("sourceSnapshotRef"), "fixed snapshot")
+        fixed_capacity = _receipt_file_pin(origin_proof.get("capacityInputRef"), "fixed capacity input")
+        for pin in (fixed_source, fixed_snapshot, fixed_capacity):
+            origin_bundle.file(pin)
+        build_inputs = BuildSourceInputs(
+            fixed_source, fixed_capacity, fixed_snapshot,
+            gate.committed_records(root, fixed_epoch["head"], git_query=git_query),
+        )
+    else:
+        build_inputs = write_build_source_inputs(root, output, initial, binding,
+            git_query=git_query, extra_capacity_inputs=extra_capacity_inputs, fixed_resume=fixed_resume)
+    if fixed_epoch is None and resumed_receipt is not None and resumed_bundle is not None:
         build_inputs = build_inputs._replace(snapshot=_resume_context_pin(
             resumed_bundle, resumed_receipt, build_inputs.snapshot,
             _resume_candidate_snapshot_pin(resumed_bundle, resumed_receipt),
@@ -3159,7 +3528,26 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         if reference_wrapper_pin is not None:
             gate.require(build_artifact_refs["baseline"] == reference_wrapper_pin,
                          "resume baseline reference proof differs")
-    for arm in (() if resumed_receipt is not None else ("baseline", "candidate")):
+    elif fixed_epoch is not None:
+        if origin_bundle is None or origin_artifact is None or reference_proof is None or reference_wrapper_pin is None:
+            raise ValueError("fixed epoch requires candidate origin and historical baseline")
+        proof = origin_bundle.json(origin_artifact)
+        candidate_pin = _receipt_file_pin(proof.get("frozenBinary"), "fixed candidate binary")
+        gate.require(candidate_pin == fixed_epoch["workers"].get("candidate")
+                     and str(reference_proof.frozen_binary_path)
+                     == fixed_epoch["workers"]["baseline"].get("path")
+                     and reference_proof.binary_sha256
+                     == fixed_epoch["workers"]["baseline"].get("sha256"),
+                     "fixed epoch worker roles differ")
+        builds = {
+            "baseline": ArmBuildResult([], reference_proof.frozen_binary_path,
+                                       reference_proof.binary_sha256, {}, []),
+            "candidate": ArmBuildResult([], Path(candidate_pin["path"]), candidate_pin["sha256"], proof, []),
+        }
+        build_artifact_refs = {"baseline": reference_wrapper_pin, "candidate": origin_artifact}
+        binaries = {role: build.binary for role, build in builds.items()}
+        build_pins = [reference_wrapper_pin, origin_artifact]
+    for arm in (() if resumed_receipt is not None or fixed_epoch is not None else ("baseline", "candidate")):
         if arm == "baseline" and reference_proof is not None and reference_wrapper_pin is not None:
             build = ArmBuildResult([], reference_proof.frozen_binary_path,
                                    reference_proof.binary_sha256, {}, [])
@@ -3301,7 +3689,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                        catalog_binary_refs.binary_ref,
                        catalog_binary_refs.current_build_report_ref,
                    )] if catalog_binary_refs is not None else []),
-                   lock, output / "shared-source-snapshot.json", *binaries.values(),
+                   lock, Path(build_inputs.snapshot["path"]), *binaries.values(),
                    *[dict(reference_proof.transport_sources).get(pin["path"], Path(pin["path"]))
                      if reference_proof is not None else Path(pin["path"])
                      for pin in reference_transport_refs],
@@ -3324,7 +3712,15 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     if resumed_bundle is not None and resumed_receipt is not None and not resumed_attempts:
         _validate_empty_resume_builds(resumed_bundle, root, resumed_receipt, arms,
                                       reference_contract, git_query=git_query)
-    before_context = context(root, target, input_paths, lifecycle, git_query=git_query)
+    before_context = (context(root, target, input_paths, lifecycle, git_query=git_query)
+                      if fixed_epoch is None else
+                      context(root, target, input_paths, lifecycle, git_query=git_query,
+                              epoch_origin=fixed_epoch))
+    if fixed_epoch is not None:
+        if origin_bundle is None:
+            raise ValueError("fixed epoch origin is missing")
+        gate._v3_live_programs(root, gate._object(before_context.get("liveCheckout"), "live checkout"),
+                               origin_bundle.json(build_inputs.snapshot))
     before_pin = write(output / "context-before.json", before_context)
     environment_sha = before_pin["sha256"]
     if resumed_receipt is not None and resumed_bundle is not None:
@@ -3332,6 +3728,9 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         _validate_resume_batch(
             resumed_receipt, resumed_bundle, resumed_attempts, head=head, source=initial,
             before_context=before_context, after_context=before_context, arms=arms,
+            epoch_root=root if fixed_epoch is not None else None,
+            epoch_log_directory=lifecycle if fixed_epoch is not None else None,
+            git_query=git_query,
         )
     def planned_expected(row: gate.JsonObject) -> ExpectedPerformance:
         fixture = cast(Path, row["fixture"])
@@ -3430,6 +3829,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 builds=builds, binaries=binaries, arms=arms, root=root, lifecycle=lifecycle,
                 lock=lock, snapshot=build_inputs.snapshot, environment_sha=environment_sha,
                 batch_deadline=batch_deadline,
+                capture_runtime_execution=fixed_epoch is not None,
             )
         except BatchBudgetExhausted as error:
             worker_attempt_pins.extend(_worker_attempt_pins_in(folder))
@@ -3469,15 +3869,46 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         checkpoint_pins.append(write_condition_checkpoint(folder, expected, result, manifest_data))
         expected_all.append((folder, expected, result, manifest_pin))
         completed_rows.append(row)
-    after_context = context(root, target, input_paths, lifecycle, git_query=git_query)
+    after_context = (context(root, target, input_paths, lifecycle, git_query=git_query)
+                     if fixed_epoch is None else
+                     context(root, target, input_paths, lifecycle, git_query=git_query,
+                             epoch_origin=fixed_epoch))
     if resumed_receipt is not None and resumed_bundle is not None:
         _validate_resume_batch(
             resumed_receipt, resumed_bundle, resumed_attempts, head=head, source=initial,
             before_context=before_context, after_context=after_context, arms=arms,
+            epoch_root=root if fixed_epoch is not None else None,
+            epoch_log_directory=lifecycle if fixed_epoch is not None else None,
+            git_query=git_query,
         )
     end_pin = write(output / "context-end.json", after_context)
-    source_end = write(output / "source-end.json", after_context["source"])
+    fixed_context_pin: FilePin | None = None
+    fixed_pair: gate.JsonObject | None = None
+    if fixed_epoch is None:
+        source_end = write(output / "source-end.json", cast(ContextSnapshot, after_context)["source"])
+    elif resumed_bundle is not None and resumed_attempts:
+        previous_expected = resumed_bundle.json(resumed_attempts[0]["expected"])
+        previous_pair = gate._object(previous_expected["sourcePair"], "resumed source pair")
+        gate.require(previous_pair.get("schema") == "krr-html-performance-source-epoch-v3",
+                     "fixed epoch cannot reuse legacy attempts")
+        fixed_pair = gate._object(previous_pair["epochSourcePair"], "fixed epoch source pair")
+        fixed_context_pin = _receipt_file_pin(previous_pair["epochContextRef"], "fixed epoch context")
+        source_end = _receipt_file_pin(fixed_pair["end"], "fixed epoch source end")
+    else:
+        if fixed_source_end is None:
+            raise ValueError("fixed epoch source end is missing")
+        source_end = fixed_source_end
+        fixed_pair = {"before": build_inputs.source_before, "end": source_end,
+                      "approvedSourceRef": build_inputs.source_before,
+                      "inputPins": [build_inputs.source_before, build_inputs.capacity_input],
+                      "approvedInventoryDigest": inventory_digest, "snapshot": build_inputs.snapshot}
+        fixed_context_pin = write(output / "fixed-epoch-context.json", {
+            "schema": "krr-html-performance-fixed-epoch-context-v1", "source": initial,
+            "inputs": before_context["inputs"], "toolContext": before_context["toolContext"],
+        })
     mapping = {"sourceBeforeEqualsEnd": "source", "inputsBeforeEqualsEnd": "inputs", "registryBeforeEqualsEnd": "registry", "cacheBeforeEqualsEnd": "cache", "cacheUnionBeforeEqualsEnd": "cacheUnion", "cacheUnionScopeRestored": "scope", "configBeforeEqualsEnd": "config", "preferenceBeforeEqualsEnd": "preference", "toolContextBeforeEqualsEnd": "toolContext"}
+    if fixed_epoch is not None:
+        mapping["sourceBeforeEqualsEnd"] = "liveCheckout"
     before_endpoint: Mapping[str, object] = before_context
     after_endpoint: Mapping[str, object] = after_context
     flags = {name: before_endpoint[key] == after_endpoint[key] for name, key in mapping.items()}
@@ -3486,6 +3917,8 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                            *[FilePin(path=str(p), sha256=gate.sha256(p)) for p in binaries.values()],
                            *[FilePin(path=str(p), sha256=gate.sha256(p)) for p in provenance_input_paths],
                            *checkpoint_pins, *worker_attempt_pins, *capacity_transport_refs(binding)]
+    if fixed_context_pin is not None:
+        refs.append(fixed_context_pin)
     refs.extend(reference_transport_refs)
     if resumed_bundle is not None:
         refs.extend(
@@ -3493,6 +3926,19 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                     sha256=gate._text(item.get("sha256"), "resumed bundle SHA"))
             for item in gate._objects(resumed_bundle.manifest.get("files"), "resumed bundle files")
         )
+    if origin_bundle is not None and fixed_epoch is not None:
+        refs.append({"path": str(fixed_epoch["directory"] / "bundle.json"),
+                     "sha256": fixed_epoch["manifest_sha256"]})
+        refs.extend(
+            FilePin(path=gate._text(item.get("originalPath"), "origin bundle path"),
+                    sha256=gate._text(item.get("sha256"), "origin bundle SHA"))
+            for item in gate._objects(origin_bundle.manifest.get("files"), "origin bundle files")
+        )
+        for name, (checksum, _) in source_records.items():
+            if name.startswith("scripts/") or name == "Justfile":
+                path = root / name
+                gate.require(gate.sha256(path) == checksum, "fixed epoch program source differs")
+                refs.append({"path": str(path), "sha256": checksum})
     for row in all_measurement_rows:
         refs.append(FilePin(path=str(row["plan_path"]), sha256=gate.sha256(cast(Path, row["plan_path"]))))
         if row["dom"] is not None:
@@ -3518,9 +3964,16 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                      catalog_binary_refs.binary_ref,
                      catalog_binary_refs.current_build_report_ref))
     for folder, expected, result, manifest_pin in expected_all:
-        expected["sourcePair"] = {"before": build_inputs.source_before, "end": source_end,
-            "approvedSourceRef": approved, "inputPins": [approved, build_inputs.capacity_input],
-            "approvedInventoryDigest": inventory_digest, "snapshot": build_inputs.snapshot}
+        if fixed_epoch is None:
+            expected["sourcePair"] = {"before": build_inputs.source_before, "end": source_end,
+                "approvedSourceRef": approved, "inputPins": [approved, build_inputs.capacity_input],
+                "approvedInventoryDigest": inventory_digest, "snapshot": build_inputs.snapshot}
+        else:
+            if fixed_pair is None or fixed_context_pin is None:
+                raise ValueError("fixed epoch source contract is missing")
+            expected["sourcePair"] = {"schema": "krr-html-performance-source-epoch-v3",
+                "epochSourcePair": fixed_pair, "epochContextRef": fixed_context_pin,
+                "beforeContextRef": before_pin, "endContextRef": end_pin}
         expected["endpointRefs"] = {"before": before_pin, "end": end_pin}
         result.update(flags)
         expected_pin = write(folder / "expected-enriched.json", expected)
@@ -3534,8 +3987,19 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 refs.append(FilePin(path=str(path), sha256=gate.sha256(path)))
     # 生成物だけを輸送し、巨大なCargo targetは公開artifactへ混入させない。
     bundle = output / "bundle"
-    write_transport_bundle(bundle, head, refs, transport_attempts,
-                           source_paths=dict(reference_proof.transport_sources) if reference_proof else None)
+    transport_sources = dict(reference_proof.transport_sources) if reference_proof else {}
+    for previous in (resumed_bundle, origin_bundle):
+        if previous is not None:
+            for item in gate._objects(previous.manifest.get("files"), "previous transport files"):
+                logical_path = gate._text(item.get("originalPath"), "previous transport path")
+                pin = {"path": logical_path, "sha256": gate._text(item.get("sha256"), "previous transport SHA")}
+                physical = previous.file(pin)
+                if logical_path in transport_sources:
+                    gate.require(gate.sha256(transport_sources[logical_path]) == pin["sha256"],
+                                 "transport source collision differs")
+                else:
+                    transport_sources[logical_path] = physical
+    write_transport_bundle(bundle, head, refs, transport_attempts, source_paths=transport_sources)
     current_bundle = gate.Bundle(bundle)
     attempt_ids = [_attempt_condition_id(current_bundle, attempt)
                    for attempt in transport_attempts]
@@ -3564,7 +4028,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         "candidateConditions": paired_conditions + non_comparable_conditions,
         "pairedConditions": paired_conditions,
         "nonComparableConditions": non_comparable_conditions,
-        "formalAccepted": _batch_formal_acceptance(
+        "formalAccepted": fixed_epoch is None and _batch_formal_acceptance(
             attempt_ids, complete_ids, policy_accepted,
         ),
         "phaseRecords": _saved_phase_record_count(comparison_results),
@@ -3583,7 +4047,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             )
         verified_result = _verify_and_seal_catalog_batch(
             bundle, root, transport_attempts, complete_ids,
-            formal_ready=_batch_formal_acceptance(
+            formal_ready=fixed_epoch is None and _batch_formal_acceptance(
                 attempt_ids, complete_ids, policy_accepted,
             ),
             diagnostic=_allow_catalog_diagnostic,
@@ -3591,6 +4055,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             seal=seal_batch_receipt,
             summary=summary,
             git_query=git_query,
+            epoch_origin=fixed_epoch,
         )
         if verified_result is not None and not _allow_catalog_diagnostic:
             write_formal_verification_receipt(bundle, head, verified_result)
@@ -3618,6 +4083,7 @@ def main() -> None:
     )
     parser.add_argument("--reference-parent-wrapper", type=Path)
     parser.add_argument("--reference-parent-wrapper-sha256")
+    parser.add_argument("--fixed-epoch-origin", type=Path)
     parser.add_argument("--candidate-build-only", action="store_true")
     parser.add_argument(
         "--diagnostic-only",
@@ -3630,7 +4096,8 @@ def main() -> None:
                 or args.capacity_binding_sha256 is None or args.diagnostic_only
                 or args.max_conditions is not None or args.resume_batch is not None
                 or args.reference_parent_wrapper is not None
-                or args.reference_parent_wrapper_sha256 is not None):
+                or args.reference_parent_wrapper_sha256 is not None
+                or args.fixed_epoch_origin is not None):
             parser.error("candidate build-only mode requires capacity binding pins and no catalog plan")
         repo = args.repo.resolve()
         with candidate_build_locks(repo):
@@ -3658,6 +4125,24 @@ def main() -> None:
         batch_options["reference_parent_wrapper_sha256"] = cast(
             str, args.reference_parent_wrapper_sha256,
         )
+    if args.fixed_epoch_origin is not None:
+        raw_origin = gate.read_json(args.fixed_epoch_origin.resolve())
+        gate.require(set(raw_origin) == {"directory", "manifestSha256", "artifactPath",
+                                         "artifactSha256", "head", "workers"},
+                     "fixed epoch origin fields differ")
+        raw_workers = gate._object(raw_origin["workers"], "fixed epoch workers")
+        fixed_origin: FixedEpochContextInput = {
+            "directory": Path(gate._text(raw_origin["directory"], "origin directory")).resolve(),
+            "manifest_sha256": gate._text(raw_origin["manifestSha256"], "origin manifest SHA"),
+            "artifact_path": gate._text(raw_origin["artifactPath"], "origin artifact path"),
+            "artifact_sha256": gate._text(raw_origin["artifactSha256"], "origin artifact SHA"),
+            "head": gate._text(raw_origin["head"], "origin head"),
+            "workers": {role: gate._object(value, "origin worker") for role, value in raw_workers.items()},
+        }
+        with candidate_build_locks(repo):
+            produce(*arguments, fixed_epoch=fixed_origin,
+                    _allow_catalog_diagnostic=args.diagnostic_only, **batch_options)
+        return
     with candidate_build_locks(repo):
         if args.diagnostic_only:
             produce(*arguments, _allow_catalog_diagnostic=True, **batch_options)

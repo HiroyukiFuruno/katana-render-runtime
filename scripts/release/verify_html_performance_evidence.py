@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import importlib
 import json
@@ -11,6 +12,7 @@ import os
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1366,6 +1368,7 @@ def _guard_python_from_proof(bundle: FileReader, proof: JsonObject, root: Path, 
 def _validate_build_proof(bundle: FileReader, root: Path, reference: object, arm: str, *,
                            git_query: GitQuery | None = None,
                            reuse_context: object = None,
+                           controller_reuse_context: object = None,
                            historical_reference: object = None,
                            fresh_source_root: Path | None = None) -> JsonObject:
     proof_path = bundle.file(reference)
@@ -1403,7 +1406,8 @@ def _validate_build_proof(bundle: FileReader, root: Path, reference: object, arm
         controller_pin = {"path": _text(controller_ref.get("path"), "controller source path"),
                           "sha256": _text(controller_ref.get("sha256"), "controller source SHA")}
         bundle.file(controller_ref)
-        current_source(root, bundle.json(controller_ref), git_query=git_query)
+        _source_for_validation(root, bundle.json(controller_ref), git_query=git_query,
+                               reuse_context=controller_reuse_context)
         selected_proof = bundle.json(proof.get("selectedSourceProofRef"))
         verify_selected_source_proof(root, fresh_source_root, historical_reference, controller_pin,
                                      selected_proof, git_query=git_query)
@@ -1521,7 +1525,7 @@ def _validate_reference_parent_wrapper(bundle: Bundle, root: Path, expected: Jso
     helper = importlib.import_module("html_performance_reference")
     def query(path: Path, args: Sequence[str]) -> str:
         return git(path, *args, git_query=git_query)
-    before = bundle.json(_object(expected["sourcePair"], "source pair")["before"])
+    before = bundle.json(fixed_source_pair(expected)["before"])
     measured_head = _text(before.get("head"), "measured source HEAD")
     selection = helper.active_reference_at_commit(root, measured_head, query, allow_legacy_missing=True)
     if selection is None:
@@ -1817,6 +1821,310 @@ def _validate_epoch_projection_context(context: JsonObject, projection: JsonObje
             "epoch projection unclassified context differs")
 
 
+def fixed_source_pair(expected: JsonObject) -> JsonObject:
+    pair = _object(expected.get("sourcePair"), "source pair")
+    return (_object(pair.get("epochSourcePair"), "fixed epoch source pair")
+            if pair.get("schema") == "krr-html-performance-source-epoch-v3" else pair)
+
+
+def _v3_live_programs(root: Path, checkout: JsonObject, snapshot: JsonObject) -> None:
+    require(set(checkout) == {"schema", "root", "head", "indexSha256", "statusBase64", "manifest"}
+            and checkout.get("schema") == "krr-html-performance-live-source-observation-v1"
+            and checkout.get("root") == str(root), "live checkout identity differs")
+    require(re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", _text(checkout.get("head"), "live HEAD"))
+            is not None, "live checkout HEAD differs")
+    digest(checkout.get("indexSha256"))
+    status = checkout.get("statusBase64")
+    require(isinstance(status, str), "live status must be a string")
+    if not isinstance(status, str):
+        raise ValueError("live status must be a string")
+    try:
+        require(base64.b64encode(base64.b64decode(status, validate=True)).decode("ascii") == status,
+                "live status encoding differs")
+    except ValueError as error:
+        raise ValueError("live status encoding differs") from error
+    manifest = _object(checkout.get("manifest"), "live source manifest")
+    require(set(manifest) == {"schema", "digest", "files"}
+            and manifest.get("schema") == "krr-native-build-source-manifest-v1",
+            "live source manifest schema differs")
+    rows = _objects(manifest.get("files"), "live source records")
+    require(all(set(row) == {"path", "sha256", "size"} for row in rows),
+            "live source record fields differ")
+    records = records_map(rows)
+    paths = list(records)
+    require(paths == sorted(paths, key=lambda value: value.encode("utf8")),
+            "live source record order differs")
+    material = "".join(f"{path}\0{records[path][0]}\0{records[path][1]}\n" for path in paths)
+    require(hashlib.sha256(material.encode("utf8")).hexdigest() == manifest.get("digest"),
+            "live source manifest digest differs")
+    live: SourceRecords = {}
+    for name, item in records.items():
+        path = Path(name)
+        require(path.is_absolute() and os.path.normpath(name) == name and path.is_relative_to(root)
+                and path != root, "live source record path differs")
+        relative = path.relative_to(root).as_posix()
+        if relative.startswith("scripts/") or relative == "Justfile":
+            live[relative] = item
+    saved = records_map(snapshot.get("records"))
+    programs = {path: item for path, item in saved.items()
+                if path.startswith("scripts/") or path == "Justfile"}
+    require(bool(programs) and live == programs, "live measurement program differs from fixed epoch")
+
+
+def _v3_origin_and_endpoints(
+    bundle: Bundle, root: Path, expected: JsonObject, result: JsonObject,
+    before: JsonObject, end: JsonObject, *, git_query: GitQuery | None,
+) -> tuple[object, JsonObject]:
+    from html_performance_remote_evidence import validate_fixed_epoch_candidate_origin_reader
+    from html_performance_source_reuse import SourceReuseContext
+
+    require(before.get("schema") == end.get("schema") == "krr-html-performance-context-epoch-v3",
+            "v3 endpoint schema differs")
+    origin = _object(before.get("epochOrigin"), "v3 epoch origin")
+    require(origin == end.get("epochOrigin"), "v3 epoch origin changed")
+    manifest = _object(origin.get("bundleManifest"), "v3 origin bundle manifest")
+    artifact = _object(origin.get("artifact"), "v3 origin artifact")
+    manifest_path = Path(_text(manifest.get("path"), "v3 origin manifest path"))
+    require(manifest_path.is_absolute() and manifest_path.name == "bundle.json",
+            "v3 origin manifest path differs")
+    bundle.file(manifest)
+    bundle.file(artifact)
+    fixed = validate_fixed_epoch_candidate_origin_reader(
+        bundle, root, manifest, artifact, _text(origin.get("head"), "v3 origin HEAD"),
+        git_query=git_query,
+    )
+    source_pair = fixed_source_pair(expected)
+    candidate = _object(_object(expected.get("arms"), "v3 arms").get("candidate"), "v3 candidate")
+    require(origin.get("source") == source_pair.get("before")
+            and origin.get("snapshot") == source_pair.get("snapshot")
+            and origin.get("binarySha256") == fixed.binary_sha256
+            and origin.get("lockSha256") == fixed.lock_sha256
+            and artifact == candidate.get("build_artifact_ref")
+            and candidate.get("binary_sha256") == fixed.binary_sha256
+            and candidate.get("source_snapshot_sha256") == fixed.snapshot_sha256
+            and candidate.get("lock_sha256") == fixed.lock_sha256,
+            "v3 origin source or worker differs")
+    source_before = bundle.json(source_pair["before"])
+    require(source_before.get("head") == fixed.head, "v3 origin source HEAD differs")
+    records = committed_records(root, fixed.head, git_query=git_query)
+    current = git(root, "rev-parse", "HEAD", git_query=git_query).strip()
+    reuse = SourceReuseContext(fixed.head, current, records, (), True)
+    proof = bundle.json(artifact)
+    candidate_build: JsonObject = {"head": fixed.head, "binarySha256": fixed.binary_sha256,
+        "sourceSnapshotSha256": fixed.snapshot_sha256, "lockSha256": fixed.lock_sha256,
+        "buildArtifactSha256": fixed.artifact_sha256,
+        "cargoExecutableSha256": fixed.cargo_sha256, "rustcExecutableSha256": fixed.rustc_sha256}
+    for key in ("buildEnvironmentSha256", "toolVersions", "cargoConfigPins", "cargoLauncher",
+                "rustcLauncher", "guardPython"):
+        require(key in proof, "v3 candidate build environment is incomplete")
+        candidate_build[key] = proof[key]
+    mapping = {"sourceBeforeEqualsEnd": "liveCheckout", "inputsBeforeEqualsEnd": "inputs",
+               "registryBeforeEqualsEnd": "registry", "cacheBeforeEqualsEnd": "cache",
+               "cacheUnionBeforeEqualsEnd": "cacheUnion", "cacheUnionScopeRestored": "scope",
+               "configBeforeEqualsEnd": "config", "preferenceBeforeEqualsEnd": "preference",
+               "toolContextBeforeEqualsEnd": "toolContext"}
+    for flag, field in mapping.items():
+        require(field in before and field in end and type(result.get(flag)) is bool
+                and result[flag] == (before[field] == end[field]), "v3 endpoint flag differs")
+        if field not in {"liveCheckout", "registry", "cache", "cacheUnion"}:
+            require(before[field] == end[field], "v3 runtime endpoint changed")
+    require(before.get("workerEnvironment") == end.get("workerEnvironment")
+            and before.get("systemWorkers") == end.get("systemWorkers"),
+            "v3 worker boundary changed")
+    for endpoint in (before, end):
+        require(endpoint.get("cacheUnion") == {"registry": endpoint.get("registry"),
+                                               "target": endpoint.get("cache")},
+                "v3 cache inventory differs")
+    return reuse, candidate_build
+
+
+def _v3_worker_observations(bundle: Bundle, expected: JsonObject, context: JsonObject,
+                            builds: Mapping[str, JsonObject]) -> None:
+    import local_macos_tool_provenance as provenance
+
+    workers = _object(context.get("systemWorkers"), "v3 system workers")
+    binaries = execution_binary_refs(bundle, expected, builds)
+    require(set(workers) == set(binaries) == {"baseline", "candidate"},
+            "v3 system worker roles differ")
+    tool = _object(context.get("toolContext"), "v3 tool context")
+    for role, pin in binaries.items():
+        observed = _object(workers[role], "v3 worker observation")
+        require(set(observed) == {"schema", "worker", "stamp", "platform", "environment_sha256"}
+                and observed.get("schema") == "krr-html-system-only-worker-observation-v1"
+                and observed.get("worker") == pin and observed.get("platform") == tool.get("platform")
+                and observed.get("environment_sha256") == tool.get("environmentSha256"),
+                "v3 worker observation differs")
+        stamp = _array(observed.get("stamp"), "v3 worker stamp")
+        require(len(stamp) == 6 and all(type(item) is int and item >= 0 for item in stamp)
+                and stat.S_ISREG(cast(int, stamp[2])) and cast(int, stamp[3]) > 0,
+                "v3 worker stamp differs")
+        data = bundle.file(pin).read_bytes()
+        parsed = provenance._native_dependencies(data)
+        require(parsed is not None, "v3 worker is not supported Mach-O")
+        if parsed is None:
+            raise ValueError("v3 worker is not supported Mach-O")
+        dependencies, rpaths = parsed
+        require(not rpaths and all(dependency.startswith(("/usr/lib/", "/System/Library/"))
+                                   and os.path.normpath(dependency) == dependency
+                                   for dependency in dependencies),
+                "v3 worker has non-system dependencies or rpaths")
+    worker_env = _object(context.get("workerEnvironment"), "v3 worker environment")
+    metadata = _object(worker_env.get("metadata"), "v3 worker metadata")
+    snapshot = _object(fixed_source_pair(expected).get("snapshot"), "v3 source snapshot")
+    require(set(worker_env) == {"schema", "baseEnvironmentSha256", "metadata",
+                                "nonMetadataEnvironmentSha256", "nonMetadataKeyNames",
+                                "nonMetadataKeyNamesSha256"}
+            and worker_env.get("schema") == "krr-html-performance-worker-environment-contract-v1"
+            and worker_env.get("baseEnvironmentSha256") == tool.get("environmentSha256")
+            and metadata == {"KRR_PERF_RUSTC": "toolContext.rustc",
+                             "KRR_PERF_CARGO": "toolContext.cargo",
+                             "KRR_PERF_ENVIRONMENT_SHA256": "before-context-sha256",
+                             "KRR_PERF_LOCK_PATH": str(Path(_text(
+                                 _object(context["liveCheckout"], "live checkout")["root"],
+                                 "live root")) / HARNESS_ROOT / "Cargo.lock"),
+                             "KRR_PERF_SOURCE_SNAPSHOT_PATH": snapshot.get("path")},
+            "v3 worker environment contract differs")
+
+
+def _v3_json_digest(value: object) -> str:
+    raw = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf8")).hexdigest()
+
+
+def _v3_process_stamp(value: object, worker: JsonObject, stamp: list[object]) -> None:
+    identity = _object(value, "v3 worker binary identity")
+    require(set(identity) == {"path", "sha256", "size", "device", "inode", "mode", "mtimeNs", "ctimeNs"}
+            and identity.get("path") == worker.get("path")
+            and identity.get("sha256") == worker.get("sha256"), "v3 worker binary identity differs")
+    fields: list[int] = []
+    for key in ("device", "inode", "mode", "size", "mtimeNs", "ctimeNs"):
+        value = identity.get(key)
+        if key in {"mtimeNs", "ctimeNs"} and isinstance(value, str):
+            require(re.fullmatch(r"0|[1-9][0-9]*", value) is not None,
+                    "v3 worker identity timestamp differs")
+            value = int(value)
+        require(type(value) is int and value >= 0, "v3 worker identity number differs")
+        fields.append(cast(int, value))
+    require(fields == stamp, "v3 worker execution stamp differs from observed boundary")
+
+
+def _v3_worker_runtime_execution(bundle: Bundle, expected: JsonObject, manifest: JsonObject,
+                                 context: JsonObject) -> None:
+    workers = _object(context.get("systemWorkers"), "v3 system workers")
+    environment = _object(context.get("workerEnvironment"), "v3 worker environment")
+    base_names = _array(environment.get("nonMetadataKeyNames"), "v3 base environment keys")
+    require(all(isinstance(name, str) and name for name in base_names)
+            and base_names == sorted(set(cast(list[str], base_names)))
+            and environment.get("nonMetadataKeyNamesSha256") == _v3_json_digest(base_names),
+            "v3 base environment keys differ")
+    base_sha = environment.get("nonMetadataEnvironmentSha256")
+    digest(base_sha)
+    metadata_keys = sorted(("KRR_PERF_RUSTC", "KRR_PERF_CARGO", "KRR_PERF_ENVIRONMENT_SHA256",
+                            "KRR_PERF_LOCK_PATH", "KRR_PERF_SOURCE_SNAPSHOT_PATH"))
+    require(not set(cast(list[str], base_names)).intersection(metadata_keys),
+            "v3 base metadata keys overlap")
+    metadata = _object(environment.get("metadata"), "v3 metadata roles")
+    provenance = _object(expected.get("provenance"), "v3 provenance")
+    before_ref = _object(_object(expected.get("endpointRefs"), "v3 endpoints").get("before"),
+                         "v3 before endpoint")
+    values = {"KRR_PERF_RUSTC": provenance.get("rustc"),
+              "KRR_PERF_CARGO": provenance.get("cargo"),
+              "KRR_PERF_ENVIRONMENT_SHA256": before_ref.get("sha256"),
+              "KRR_PERF_LOCK_PATH": metadata.get("KRR_PERF_LOCK_PATH"),
+              "KRR_PERF_SOURCE_SNAPSHOT_PATH": metadata.get("KRR_PERF_SOURCE_SNAPSHOT_PATH")}
+    require(all(isinstance(value, str) and bool(value) for value in values.values()),
+            "v3 metadata values differ")
+    expected_names = sorted([*cast(list[str], base_names), *metadata_keys])
+    seen: set[str] = set()
+    actual_environment_sha: object = None
+    for order in _objects(manifest.get("order"), "v3 pair order"):
+        role = _text(order.get("arm"), "v3 worker role")
+        require(role in {"baseline", "candidate"}, "v3 worker role differs")
+        attempts = _objects(order.get("workerAttempts"), "v3 worker attempts")
+        if not attempts:
+            require(manifest.get("measurement_status") == "nonComparable" and order.get("status") == "missing",
+                    "v3 worker execution evidence is missing")
+            continue
+        seen.add(role)
+        observed = _object(workers.get(role), "v3 worker boundary observation")
+        pin = _object(observed.get("worker"), "v3 worker pin")
+        stamp = _array(observed.get("stamp"), "v3 worker stamp")
+        for attempt in attempts:
+            lifecycle = _validated_noncomparable_attempt_lifecycle(bundle, attempt)
+            exit_code = _integer(attempt.get("actualExit"), "v3 worker exit")
+            sample = _integer(attempt.get("sample"), "v3 worker sample")
+            require(attempt.get("workerStarted") is True
+                    and attempt.get("binarySha256Before") == pin.get("sha256")
+                    and attempt.get("binarySha256After") == pin.get("sha256"),
+                    "v3 worker attempt binary differs")
+            _validate_worker_lifecycle_identity(expected, order, lifecycle, sample=sample, exit_code=exit_code)
+            execution = _object(attempt.get("runtimeExecution"), "v3 worker runtime execution")
+            require(execution == lifecycle.get("runtimeExecution")
+                    and set(execution) == {"schema", "binaryIdentityBefore", "binaryIdentityAfter",
+                                           "actualEnvironmentSha256", "keyNames", "keyNamesSha256",
+                                           "nonMetadataEnvironmentSha256", "metadataKeys", "metadataValuesSha256"}
+                    and execution.get("schema") == "krr-html-worker-runtime-execution-v1",
+                    "v3 worker runtime execution differs")
+            _v3_process_stamp(execution.get("binaryIdentityBefore"), pin, stamp)
+            _v3_process_stamp(execution.get("binaryIdentityAfter"), pin, stamp)
+            digest(execution.get("actualEnvironmentSha256"))
+            if actual_environment_sha is None:
+                actual_environment_sha = execution.get("actualEnvironmentSha256")
+            require(execution.get("actualEnvironmentSha256") == actual_environment_sha,
+                    "v3 actual worker environment changed")
+            require(execution.get("keyNames") == expected_names
+                    and execution.get("keyNamesSha256") == _v3_json_digest(expected_names)
+                    and execution.get("nonMetadataEnvironmentSha256") == base_sha
+                    and execution.get("metadataKeys") == metadata_keys
+                    and execution.get("metadataValuesSha256") == _v3_json_digest(values),
+                    "v3 worker process environment differs")
+    require(seen == {"baseline", "candidate"}, "v3 worker role execution evidence missing")
+
+
+def _v3_epoch_validation(bundle: Bundle, root: Path, expected: JsonObject,
+                         builds: Mapping[str, JsonObject]) -> SourceEpochV3Validation:
+    from html_performance_epoch_reuse import declared_from_authenticated_refs
+
+    pair = _object(expected["sourcePair"], "v3 source pair")
+    fixed_pair = fixed_source_pair(expected)
+    snapshot_ref = _object(fixed_pair["snapshot"], "v3 source snapshot")
+    snapshot = bundle.json(snapshot_ref)
+    origin_root = Path(_text(bundle.json(fixed_pair["before"]).get("root"), "fixed epoch root"))
+    programs: dict[str, JsonObject] = {
+        path: {"path": str(origin_root / path), "sha256": item[0]}
+        for path, item in records_map(snapshot.get("records")).items()
+        if path.startswith("scripts/") or path == "Justfile"
+    }
+    old_expected = {**expected, "sourcePair": fixed_pair}
+    dom = bundle.json(expected["domStateRef"])
+    capture: JsonObject | None = None
+    links: list[JsonObject] = []
+    resources: dict[str, JsonObject] = {}
+    if expected.get("catalogCondition") is not None:
+        capture = {"path": _text(dom.get("capturePath"), "capture path"),
+                   "sha256": _text(dom.get("captureSha256"), "capture SHA")}
+        evidence = _object(dom.get("operationEvidence"), "operation evidence")
+        catalog = _object(expected["catalogCondition"], "catalog condition")
+        if catalog.get("operation_kind") == "navigation-all-pointer-clicks":
+            links = [{"path": _text(row.get("capturePath"), "link path"),
+                      "sha256": _text(row.get("captureSha256"), "link SHA")}
+                     for row in _objects(evidence.get("links"), "link captures")]
+        for ref in provenance_file_refs(dom, file_resolver=bundle.file):
+            resources[_text(ref.get("path"), "resource path")] = ref
+    binaries = execution_binary_refs(bundle, expected, builds)
+    pins = [_object(pair.get(key), "v3 context pin")
+            for key in ("epochContextRef", "beforeContextRef", "endContextRef")]
+    projections = [declared_from_authenticated_refs(bundle, origin_root, bundle.json(pin), old_expected,
+                   snapshot_ref, capture, links, resources, {}, binaries, programs) for pin in pins]
+    return SourceEpochV3Validation(
+        _text(pins[0].get("sha256"), "v3 context SHA"),
+        _text(pins[1].get("sha256"), "v3 context SHA"),
+        _text(pins[2].get("sha256"), "v3 context SHA"),
+        cast(JsonObject, projections[0]), cast(JsonObject, projections[1]),
+        cast(JsonObject, projections[2]),
+    )
+
+
 def _source_contract_v3(
     bundle: Bundle, root: Path, expected: JsonObject, validation: SourceEpochV3Validation | None,
     *, git_query: GitQuery | None, validated_builds: Mapping[str, JsonObject] | None,
@@ -1841,13 +2149,16 @@ def _source_contract_v3(
     contexts = [bundle.json(pin) for pin in pins]
     projections = [validation.fixed_projection, validation.before_projection, validation.end_projection]
     for context, projection in zip(contexts, projections, strict=True):
-        live_source = _object(context.get("source"), "v3 live source")
-        require(live_source.get("schema") == "krr-native-build-source-inventory-v1"
-                and all(key in live_source for key in SOURCE_KEYS), "v3 live source is incomplete")
         _validate_epoch_projection_context(context, projection)
     nested = _object(contract.get("epochSourcePair"), "fixed epoch source pair")
     require(contexts[0]["source"] == bundle.json(nested["before"]),
             "fixed epoch source context differs")
+    snapshot = bundle.json(nested["snapshot"])
+    origin_root = Path(_text(bundle.json(nested["before"]).get("root"), "fixed epoch root"))
+    for context in contexts[1:]:
+        require(context.get("schema") == "krr-html-performance-context-epoch-v3",
+                "v3 live context schema differs")
+        _v3_live_programs(origin_root, _object(context.get("liveCheckout"), "live checkout"), snapshot)
     compare_epoch_projections(bundle, cast(EpochProjection, projections[0]),
                               bundle, cast(EpochProjection, projections[1]))
     compare_epoch_projections(bundle, cast(EpochProjection, projections[1]),
@@ -2441,12 +2752,18 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
     expected = bundle.json(attempt["expected"])
     result = bundle.json(attempt["result"])
     manifest = bundle.json(attempt["pairManifest"])
-    require(result.get("measurementExecuted") is True and all(result.get(k) is True for k in ENDPOINT_FLAGS), "measurement/endpoint proof absent or false")
+    source_pair_contract = _object(expected["sourcePair"], "source pair")
+    is_v3 = source_pair_contract.get("schema") == "krr-html-performance-source-epoch-v3"
+    require(result.get("measurementExecuted") is True
+            and (is_v3 or all(result.get(k) is True for k in ENDPOINT_FLAGS)),
+            "measurement/endpoint proof absent or false")
     require(not result.get("failure") and not result.get("endpointFailure"), "failed measurement attempt")
     expected_arms = _object(expected["arms"], "expected arms")
     provenance = _object(expected["provenance"], "expected provenance")
-    source_pair = _object(expected["sourcePair"], "source pair")
+    source_pair = fixed_source_pair(expected)
     recorded_root = root
+    if is_v3:
+        recorded_root = Path(_text(bundle.json(source_pair["before"])["root"], "fixed source root"))
     if remote_context is not None:
         from html_performance_remote_admission import RemoteEvidenceContext
         require(isinstance(remote_context, RemoteEvidenceContext)
@@ -2483,14 +2800,49 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
     width, height = (_integer(viewport[key], "viewport dimension") for key in ("width", "height"))
     require(set(viewport) == {"width", "height", "scale"} and type(viewport["scale"]) in (int, float) and viewport["scale"] == 1, "invalid viewport types/scale")
     require(isinstance(expected["operation"], str) and bool(expected["operation"]), "missing operation")
-    source = source_contract(bundle, root, expected, git_query=git_query,
-                             validated_builds=validated_builds, reuse_context=reuse_context,
-                             shared_source=shared_source)
     endpoints = _object(expected["endpointRefs"], "endpoint references")
     before_context, end_context = (bundle.json(endpoints[k]) for k in ("before", "end"))
+    epoch_validation: SourceEpochV3Validation | None = None
+    if is_v3:
+        require(remote_context is None and shared_source is None, "unsupported v3 source context")
+        reuse_context, candidate_build = _v3_origin_and_endpoints(
+            bundle, root, expected, result, before_context, end_context, git_query=git_query,
+        )
+        fixed_expected = {**expected, "sourcePair": source_pair,
+                          "endpointRefs": {"before": source_pair_contract["epochContextRef"],
+                                           "end": source_pair_contract["epochContextRef"]}}
+        contract = fixed_expected.get("referenceParent")
+        if isinstance(contract, dict) and contract.get("referenceKind") == "fresh-history-source":
+            from html_performance_fresh_reference import validate_remote_fresh_reference
+            head = _text(bundle.json(source_pair["before"]).get("head"), "fixed source HEAD")
+            validated_builds = {
+                "baseline": validate_remote_fresh_reference(bundle, root, fixed_expected, head),
+                "candidate": candidate_build,
+            }
+            require(all(validated_builds["baseline"].get(key) == validated_builds["candidate"].get(key)
+                        for key in ("cargoExecutableSha256", "rustcExecutableSha256",
+                                    "buildEnvironmentSha256", "toolVersions", "cargoConfigPins",
+                                    "cargoLauncher", "rustcLauncher", "guardPython")),
+                    "v3 fresh reference and candidate build environments differ")
+        else:
+            require(baseline_arm_id(fixed_expected) != DEFAULT_BASELINE_ARM_ID,
+                    "v3 baseline requires an authenticated historical reference")
+            validated_builds = {
+                "baseline": _validate_reference_parent_wrapper(bundle, root, fixed_expected,
+                                                                 git_query=git_query),
+                "candidate": candidate_build,
+            }
+        _v3_worker_observations(bundle, expected, before_context, validated_builds)
+        _v3_worker_observations(bundle, expected, end_context, validated_builds)
+        _v3_worker_runtime_execution(bundle, expected, manifest, before_context)
+        epoch_validation = _v3_epoch_validation(bundle, root, expected, validated_builds)
+    source = source_contract(bundle, root, expected, git_query=git_query,
+                             validated_builds=validated_builds, reuse_context=reuse_context,
+                             shared_source=shared_source, epoch_validation=epoch_validation)
     mapping = {"sourceBeforeEqualsEnd": "source", "inputsBeforeEqualsEnd": "inputs", "registryBeforeEqualsEnd": "registry", "cacheBeforeEqualsEnd": "cache", "cacheUnionBeforeEqualsEnd": "cacheUnion", "cacheUnionScopeRestored": "scope", "configBeforeEqualsEnd": "config", "preferenceBeforeEqualsEnd": "preference", "toolContextBeforeEqualsEnd": "toolContext"}
-    require(all(before_context[key] == end_context[key] for key in mapping.values()), "raw endpoint context changed")
-    require(before_context["source"] == bundle.json(source_pair["before"]) and end_context["source"] == bundle.json(source_pair["end"]), "source/context endpoint differs")
+    if not is_v3:
+        require(all(before_context[key] == end_context[key] for key in mapping.values()), "raw endpoint context changed")
+        require(before_context["source"] == bundle.json(source_pair["before"]) and end_context["source"] == bundle.json(source_pair["end"]), "source/context endpoint differs")
     require(provenance["environment_sha256"] == _object(endpoints["before"], "before endpoint reference")["sha256"], "measurement context pin differs")
     require(before_context["cacheUnion"] == {"registry": before_context["registry"], "target": before_context["cache"]}, "cache union proof differs")
     for tool in ("rustc", "cargo"):
@@ -2540,7 +2892,9 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
                 and operation_evidence.get("sourceSha256After") == expected["fixture_sha256"]
                 and plan.get("operationStream") == catalog_operation_stream(
                     _text(catalog["operation_kind"], "catalog operation kind"), operation_evidence,
-                    (_fixture_expected_state(root / fixture_relative)
+                    ((_fixture_expected_state(bundle.file({"path": catalog["fixture_path"],
+                                                           "sha256": expected["fixture_sha256"]}))
+                      if is_v3 else _fixture_expected_state(root / fixture_relative))
                      if catalog.get("operation_kind") in {
                          "script-await-timer-microtask", "script-await-mutation-delivery",
                          "script-real-events", "script-await-resource-font",
@@ -2569,7 +2923,7 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
                 and (catalog.get("target_selector") is None
                      or target.get("selector") == catalog.get("target_selector")),
                 "catalog raw operation target differs")
-    provenance_refs = (provenance_file_refs(dom, file_resolver=bundle.file if remote_context is not None else None)
+    provenance_refs = (provenance_file_refs(dom, file_resolver=bundle.file if remote_context is not None or is_v3 else None)
                        if catalog_expected is not None else [])
     binary_refs = execution_binary_refs(bundle, expected, validated_builds)
     context_inputs = validate_context_input_refs(
@@ -2788,7 +3142,7 @@ def validate_expected_builds(bundle: Bundle, root: Path, first_expected: JsonObj
     first_arms = _object(first_expected["arms"], "expected arms")
     expected_baseline = baseline_arm_id(first_expected)
     if expected_baseline == DEFAULT_BASELINE_ARM_ID:
-        before = bundle.json(_object(first_expected["sourcePair"], "source pair")["before"])
+        before = bundle.json(fixed_source_pair(first_expected)["before"])
         def query(path: Path, args: Sequence[str]) -> str:
             return git(path, *args, git_query=git_query)
         require(reference_domain.active_reference_at_commit(
@@ -2801,7 +3155,13 @@ def validate_expected_builds(bundle: Bundle, root: Path, first_expected: JsonObj
             contract = _object(first_expected.get("referenceParent"), "reference contract")
             if contract.get("referenceKind") == "fresh-history-source":
                 from html_performance_fresh_reference import validate_fresh_reference
-                validated[arm] = validate_fresh_reference(bundle, root, first_expected, git_query=git_query)
+                if reuse_context is None:
+                    validated[arm] = validate_fresh_reference(bundle, root, first_expected,
+                                                               git_query=git_query)
+                else:
+                    validated[arm] = validate_fresh_reference(bundle, root, first_expected,
+                                                               git_query=git_query,
+                                                               reuse_context=reuse_context)
             else:
                 validated[arm] = _validate_reference_parent_wrapper(
                     bundle, root, first_expected, git_query=git_query)
@@ -2848,27 +3208,42 @@ def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
         _require_catalog_attempt_set(attempts, first_expected)
     if "catalogCondition" in first_expected:
         require(len(attempts) == 84, "catalog performance requires all 84 conditions")
+        expected_rows = [bundle.json(attempt["expected"]) for attempt in attempts]
+        v3_rows = [_object(value.get("sourcePair"), "source pair").get("schema")
+                   == "krr-html-performance-source-epoch-v3" for value in expected_rows]
+        if any(v3_rows):
+            require(remote_context is None, "unsupported v3 remote source context")
+            require(diagnostic_catalog or reuse_context is not None,
+                    "v3 formal acceptance requires current build equivalence")
+            require(all(value.get("arms") == first_expected.get("arms")
+                        and fixed_source_pair(value) == fixed_source_pair(first_expected)
+                        for value in expected_rows),
+                    "v3 catalog attempts do not share the fixed build and source")
+        legacy_expected = next((value for value, is_v3 in zip(expected_rows, v3_rows, strict=True)
+                                if not is_v3), None)
         validated_builds: dict[str, JsonObject] | None = None
         if not diagnostic_catalog:
             if remote_context is None:
-                validated_builds = validate_expected_builds(
-                    bundle, root, first_expected, git_query=git_query, reuse_context=reuse_context)
+                if legacy_expected is not None:
+                    validated_builds = validate_expected_builds(
+                        bundle, root, legacy_expected, git_query=git_query, reuse_context=reuse_context)
             else:
                 assert isinstance(remote_context, RemoteEvidenceContext)
                 validated_builds = remote_context.builds
         shared_source: SharedCurrentSource | None = None
         shared_before: JsonObject | None = None
-        if remote_context is None and reuse_context is None:
-            source_pair = _object(first_expected.get("sourcePair"), "source pair")
+        if remote_context is None and reuse_context is None and legacy_expected is not None:
+            source_pair = fixed_source_pair(legacy_expected)
             shared_before = bundle.json(source_pair["before"])
             shared_source = SharedCurrentSource(root, _text(shared_before.get("head"), "source HEAD"),
                                                 current_source(root, shared_before, git_query=git_query),
                                                 Path(_text(shared_before.get("root"), "source root")))
         if remote_context is None:
             values = [validate_attempt(bundle, root, attempt, git_query=git_query,
-                                       validated_builds=validated_builds, reuse_context=reuse_context,
-                                       shared_source=shared_source)
-                      for attempt in attempts]
+                                       validated_builds=None if is_v3 else validated_builds,
+                                       reuse_context=reuse_context,
+                                       shared_source=None if is_v3 else shared_source)
+                      for attempt, is_v3 in zip(attempts, v3_rows, strict=True)]
         else:
             values = [validate_attempt(bundle, root, attempt, git_query=git_query,
                                        validated_builds=validated_builds, reuse_context=reuse_context,
@@ -2962,7 +3337,7 @@ def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
         catalog_sha = _text(manifest.get("catalogSha256"), "feature catalog SHA")
         digest(catalog_sha)
         source_root = root if remote_context is None else Path(_text(
-            bundle.json(_object(first_expected["sourcePair"], "source pair")["before"])["root"],
+            bundle.json(fixed_source_pair(first_expected)["before"])["root"],
             "recorded source root"))
         catalog_relative = catalog_path.relative_to(source_root).as_posix()
         require(manifest.get("profile") == "catalog-stage90-captures"
@@ -3102,8 +3477,22 @@ def verify_source_reuse(directory: Path, root: Path, measured_manifest_sha256: s
     _require_formal_release_result(measured)
     attempts = _objects(bundle.manifest["attempts"], "viewport attempts")
     first = bundle.json(attempts[0]["expected"])
-    old_build = validate_expected_builds(bundle, root, first, git_query=git_query,
-                                         reuse_context=context)["candidate"]
+    pair = _object(first.get("sourcePair"), "source pair")
+    is_v3 = pair.get("schema") == "krr-html-performance-source-epoch-v3"
+    has_v3 = is_v3 or any(
+        _object(bundle.json(attempt["expected"]).get("sourcePair"), "source pair").get("schema")
+        == "krr-html-performance-source-epoch-v3" for attempt in attempts[1:]
+    )
+    if is_v3:
+        endpoints = _object(first.get("endpointRefs"), "endpoint references")
+        first_result = bundle.json(attempts[0]["result"])
+        _, old_build = _v3_origin_and_endpoints(
+            bundle, root, first, first_result, bundle.json(endpoints["before"]),
+            bundle.json(endpoints["end"]), git_query=git_query,
+        )
+    else:
+        old_build = validate_expected_builds(bundle, root, first, git_query=git_query,
+                                             reuse_context=context)["candidate"]
     current_bundle = Bundle(build_directory)
     require(current_bundle.manifest["head"] == eligible_head, "current build bundle HEAD differs")
     build_ref = current_bundle.relative_reference(build_artifact_path, build_artifact_sha256)
@@ -3113,7 +3502,7 @@ def verify_source_reuse(directory: Path, root: Path, measured_manifest_sha256: s
     from html_performance_source_reuse import SourceReuseContext
     if not isinstance(context, SourceReuseContext):
         raise ValueError("invalid source reuse context")
-    if context.artifact_equivalence:
+    if context.artifact_equivalence or has_v3:
         for key in ("buildEnvironmentSha256", "toolVersions", "cargoConfigPins",
                     "cargoLauncher", "rustcLauncher", "guardPython"):
             require(old_build[key] == new_build[key], "measured and current build differ: " + key)

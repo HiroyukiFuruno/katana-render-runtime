@@ -194,6 +194,94 @@ class CatalogProducerOperationTest(unittest.TestCase):
             run.assert_called_once_with(root, output, capacity, "g" * 64, manifest,
                                         resume_batch=batch)
 
+    def test_new_fixed_epoch_authenticates_origin_without_a_resume_batch(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            origin: typed_producer.FixedEpochContextInput = {
+                "directory": root / "origin", "manifest_sha256": "a" * 64,
+                "artifact_path": "candidate.json", "artifact_sha256": "b" * 64,
+                "head": "c" * 40, "workers": {},
+            }
+            pins = ({"path": str(root / "catalog"), "sha256": "d" * 64},
+                    {"path": str(root / "plan"), "sha256": "e" * 64})
+            marker = ValueError("fixed origin authentication reached")
+            with patch.object(platform, "system", return_value="Darwin"), \
+                 patch.object(platform, "machine", return_value="arm64"), \
+                 patch.object(load_validation, "require_current_cpu_observer_sources"), \
+                 patch.object(producer, "load_catalog_conditions", return_value=([], *pins, None)), \
+                 patch.object(remote_evidence, "validate_fixed_epoch_candidate_origin", side_effect=marker) as verify, \
+                 patch.object(producer, "load_closed_batch") as resume:
+                with self.assertRaises(ValueError) as caught:
+                    producer.produce(root, root / "tmp/output", catalog_manifest_path=root / "catalog",
+                        reference_parent_wrapper=root / "baseline", reference_parent_wrapper_sha256="f" * 64,
+                        fixed_epoch=origin)
+            self.assertIs(caught.exception, marker)
+            verify.assert_called_once()
+            resume.assert_not_called()
+            self.assertFalse((root / "tmp/output").exists())
+
+    def test_new_fixed_epoch_requires_historical_baseline_before_measurement(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            origin: typed_producer.FixedEpochContextInput = {
+                "directory": root / "origin", "manifest_sha256": "a" * 64,
+                "artifact_path": "candidate.json", "artifact_sha256": "b" * 64,
+                "head": "c" * 40, "workers": {},
+            }
+            with patch.object(platform, "system", return_value="Darwin"), \
+                 patch.object(platform, "machine", return_value="arm64"), \
+                 patch.object(load_validation, "require_current_cpu_observer_sources"), \
+                 patch.object(producer, "_measurement_command") as command:
+                with self.assertRaisesRegex(ValueError, "verified baseline wrapper"):
+                    producer.produce(root, root / "tmp/output", catalog_manifest_path=root / "catalog",
+                                     fixed_epoch=origin)
+            command.assert_not_called()
+
+    def test_fixed_epoch_checks_original_source_end_before_live_observation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            origin: typed_producer.FixedEpochContextInput = {
+                "directory": root / "origin", "manifest_sha256": "a" * 64,
+                "artifact_path": "candidate.json", "artifact_sha256": "b" * 64,
+                "head": "c" * 40, "workers": {},
+            }
+            artifact: gate.JsonObject = {"path": "/old/artifact", "sha256": "b" * 64}
+            before_pin: gate.JsonObject = {"path": "/old/source-before.json", "sha256": "d" * 64}
+            before: gate.JsonObject = {key: "fixed" for key in gate.SOURCE_KEYS}
+            before["stableEndpoints"] = True
+            good_end: gate.JsonObject = dict(before)
+            marker = ValueError("live observation reached")
+            for paths, end, expected in (
+                ([], good_end, "missing or ambiguous"),
+                (["/old/source-end.json", "/other/source-end.json"], good_end, "missing or ambiguous"),
+                (["/old/source-end.json"], {**good_end, gate.SOURCE_KEYS[0]: "changed"}, "endpoints differ"),
+                (["/old/source-end.json"], good_end, "live observation reached"),
+            ):
+                with self.subTest(paths=paths, expected=expected):
+                    bundle = Mock()
+                    bundle.relative_reference.return_value = artifact
+                    bundle.manifest = {"files": [{"originalPath": path, "sha256": "e" * 64}
+                                                  for path in paths]}
+                    bundle.json.side_effect = lambda pin, end=end: (
+                        {"sourceBeforeRef": before_pin} if pin == artifact else before
+                        if pin == before_pin else end
+                    )
+                    with patch.object(platform, "system", return_value="Darwin"), \
+                         patch.object(platform, "machine", return_value="arm64"), \
+                         patch.object(load_validation, "require_current_cpu_observer_sources"), \
+                         patch.object(producer, "load_catalog_conditions", return_value=([], {}, {}, None)), \
+                         patch.object(remote_evidence, "validate_fixed_epoch_candidate_origin"), \
+                         patch.object(gate, "Bundle", return_value=bundle), \
+                         patch.object(producer, "_live_checkout", side_effect=marker) as live, \
+                         patch.object(producer, "_measurement_command") as measurement:
+                        with self.assertRaisesRegex(ValueError, expected):
+                            producer.produce(root, root / "tmp/output", catalog_manifest_path=root / "catalog",
+                                reference_parent_wrapper=root / "baseline",
+                                reference_parent_wrapper_sha256="f" * 64, fixed_epoch=origin)
+                    self.assertEqual(live.call_count, int(expected == "live observation reached"))
+                    measurement.assert_not_called()
+                    self.assertFalse((root / "tmp/output").exists())
+
     def test_reference_parent_cli_forwards_explicit_wrapper_pin(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -424,6 +512,27 @@ class CatalogProducerOperationTest(unittest.TestCase):
 
 
 class TransportBundleUnitTests(unittest.TestCase):
+    def test_epoch_origin_and_program_files_survive_transport_without_repinning(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            originals = {"/old/bundle.json": b"original origin manifest",
+                         "/old/build.json": b"original candidate artifact",
+                         "/old/scripts/measure.py": b"measurement program"}
+            refs: list[typed_producer.FilePin] = []
+            sources: dict[str, Path] = {}
+            for index, (logical, data) in enumerate(originals.items()):
+                physical = root / f"source-{index}"
+                physical.write_bytes(data)
+                refs.append({"path": logical, "sha256": gate.sha256(physical)})
+                sources[logical] = physical
+            destination = root / "bundle"
+            producer.write_transport_bundle(destination, "a" * 40, refs, [], source_paths=sources)
+            reader = gate.Bundle(destination)
+            for ref in refs:
+                self.assertEqual(reader.file(ref).read_bytes(), originals[ref["path"]])
+            sources["/old/build.json"].write_bytes(b"later changed")
+            self.assertEqual(reader.file(refs[1]).read_bytes(), originals["/old/build.json"])
+
     def test_formal_receipt_is_exclusive_and_binds_verified_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             bundle = Path(temporary).resolve()
@@ -707,6 +816,36 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
             )
         return batch, bundle
 
+    def test_fixed_resume_revalidates_attempts_after_origin(self) -> None:
+        batch, _ = self.create_batch(condition_ids=("case-a",))
+        origin: typed_producer.FixedEpochContextInput = {
+            "directory": self.root, "manifest_sha256": "1" * 64,
+            "artifact_path": "artifact", "artifact_sha256": "2" * 64,
+            "head": "a" * 40, "workers": {},
+        }
+        with patch.object(producer, "_resume_fixed_source_pins") as select, \
+             patch.object(gate, "committed_records", return_value={}), \
+             patch.object(gate, "current_source", side_effect=AssertionError("current source")), \
+             patch.object(gate, "validate_expected_builds", return_value={}) as builds, \
+             patch.object(gate, "validate_attempt") as attempt, \
+             patch.object(producer, "_verify_completed_host_load") as host:
+            producer.load_closed_batch(batch, self.root, fixed_epoch=origin)
+            select.assert_called_once()
+            builds.assert_called_once()
+            attempt.assert_called_once()
+            host.assert_called_once()
+            self.assertIsNone(attempt.call_args.kwargs["shared_source"])
+            self.assertEqual(attempt.call_args.kwargs["reuse_context"].eligible_head, "a" * 40)
+            select.side_effect = ValueError("origin rejected")
+            builds.reset_mock()
+            attempt.reset_mock()
+            host.reset_mock()
+            with self.assertRaisesRegex(ValueError, "origin rejected"):
+                producer.load_closed_batch(batch, self.root, fixed_epoch=origin)
+            builds.assert_not_called()
+            attempt.assert_not_called()
+            host.assert_not_called()
+
     def test_resume_requires_original_context_at_both_boundaries(self) -> None:
         batch, bundle_path = self.create_batch(condition_ids=())
         receipt = gate.read_json(batch / "batch-receipt.json")
@@ -862,6 +1001,55 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         Path(old["path"]).write_text("tampered")
         with self.assertRaisesRegex(ValueError, "SHA256 differs"):
             producer._resume_context_pin(bundle, receipt, new, role)
+
+    def test_fixed_resume_selects_origin_source_and_snapshot(self) -> None:
+        source = producer.write(self.root / "old/source.json", {"head": "a" * 40})
+        snapshot = producer.write(self.root / "old/snapshot.json", {"records": []})
+        worker = producer.write(self.root / "old/worker", {"worker": "fixed"})
+        artifact = producer.write(self.root / "old/artifact.json", {
+            "sourceBeforeRef": source, "sourceSnapshotRef": snapshot, "frozenBinary": worker,
+        })
+        bundle, receipt = self.resume_context_fixture(
+            self.root / "old", [{**snapshot, "exists": True}], [source, snapshot, artifact, worker],
+        )
+        receipt["buildArtifacts"] = {"candidate": artifact}
+        receipt["source"] = {"before": source}
+        receipt["head"] = "a" * 40
+        lock = self.root / gate.HARNESS_ROOT / "Cargo.lock"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text("fixed")
+        fixed = remote_evidence.FixedEpochCandidateOrigin(
+            "a" * 40, worker["sha256"], snapshot["sha256"], gate.sha256(lock),
+            artifact["sha256"], "2" * 64, "3" * 64,
+        )
+        origin: typed_producer.FixedEpochContextInput = {
+            "directory": bundle.directory, "manifest_sha256": gate.sha256(bundle.directory / "bundle.json"),
+            "artifact_path": bundle.files[artifact["path"]][0].relative_to(bundle.directory).as_posix(),
+            "artifact_sha256": artifact["sha256"], "head": "a" * 40,
+            "workers": {
+                "baseline": dict[str, object](worker),
+                "candidate": dict[str, object](worker),
+            },
+        }
+        with patch.object(remote_evidence, "validate_fixed_epoch_candidate_origin", return_value=fixed):
+            self.assertEqual(producer._resume_fixed_source_pins(self.root, bundle, receipt, origin),
+                             (source, snapshot))
+            receipt["source"] = {"before": snapshot}
+            with self.assertRaisesRegex(ValueError, "fixed source identity differs"):
+                producer._resume_fixed_source_pins(self.root, bundle, receipt, origin)
+            receipt["source"] = {"before": source}
+            changed_origin: typed_producer.FixedEpochContextInput = {
+                **origin,
+                "workers": {
+                    "candidate": dict[str, object](snapshot),
+                    "baseline": dict[str, object](worker),
+                },
+            }
+            with self.assertRaisesRegex(ValueError, "fixed source identity differs"):
+                producer._resume_fixed_source_pins(self.root, bundle, receipt, changed_origin)
+            lock.write_text("changed")
+            with self.assertRaisesRegex(ValueError, "fixed lock differs"):
+                producer._resume_fixed_source_pins(self.root, bundle, receipt, origin)
 
     def test_resume_reuses_context_capture_validation_across_output_directories(self) -> None:
         name = "catalog-chrome-capture-validation.json"
@@ -1280,6 +1468,44 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         self.assertEqual(events, ["verify", "seal"])
         verify.assert_called_once_with(self.root / "bundle", self.root, git_query=None)
         validate.assert_not_called()
+
+    def test_fixed_epoch_does_not_claim_formal_acceptance_without_current_build(self) -> None:
+        origin: typed_producer.FixedEpochContextInput = {
+            "directory": self.root, "manifest_sha256": "a" * 64,
+            "artifact_path": "candidate.json", "artifact_sha256": "b" * 64,
+            "head": "c" * 40, "workers": {},
+        }
+        seal = Mock()
+        with patch.object(gate, "verify") as verify:
+            with self.assertRaisesRegex(ValueError, "final current-build verification"):
+                producer._verify_and_seal_catalog_batch(
+                    self.root / "bundle", self.root, (), (), formal_ready=True, diagnostic=False,
+                    batch_failure=None, seal=seal, summary={}, git_query=None, epoch_origin=origin,
+                )
+        verify.assert_not_called()
+        seal.assert_not_called()
+
+    def test_fixed_epoch_refuses_to_seal_legacy_attempts(self) -> None:
+        origin: typed_producer.FixedEpochContextInput = {
+            "directory": self.root, "manifest_sha256": "a" * 64,
+            "artifact_path": "candidate.json", "artifact_sha256": "b" * 64,
+            "head": "c" * 40, "workers": {},
+        }
+        batch, bundle_path = self.create_batch(condition_ids=("case-a",))
+        receipt = gate.read_json(batch / "batch-receipt.json")
+        attempts = cast(list[dict[str, typed_producer.FilePin]], receipt["attempts"])
+        seal = Mock()
+        with patch.object(gate.Bundle, "json", return_value={"sourcePair": {}}), \
+             patch.object(producer, "_attempt_condition_id", return_value="case-a"), \
+             patch.object(gate, "validate_attempt") as validate:
+            with self.assertRaisesRegex(ValueError, "legacy epoch attempt"):
+                producer._verify_and_seal_catalog_batch(
+                    bundle_path, self.root, attempts, ("case-a",), formal_ready=False,
+                    diagnostic=False, batch_failure=None, seal=seal, summary={}, git_query=None,
+                    epoch_origin=origin,
+                )
+        validate.assert_not_called()
+        seal.assert_not_called()
 
     def test_formal_verifier_failure_does_not_seal(self) -> None:
         failure = ValueError("formal verification failed")
@@ -1846,6 +2072,265 @@ class EpochContextTest(unittest.TestCase):
             producer._live_checkout(self.root, self.root / "logs")
 
 
+class WorkerRuntimeExecutionTest(unittest.TestCase):
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.worker = self.root / "worker"
+        self.worker.write_text("#!/bin/sh\nprintf 'sample'\n")
+        self.worker.chmod(0o755)
+        self.environment = {"PATH": os.environ.get("PATH", ""), "PRIVATE_VALUE": "do-not-export"}
+        self.environment.update({key: "metadata-value" for key in producer.WORKER_METADATA_KEYS})
+
+    def invoke(self, *, capture: bool = True) -> tuple[list[gate.JsonObject], list[Path]]:
+        observations: list[gate.JsonObject] = []
+        lifecycles: list[Path] = []
+        if capture:
+            producer._measurement_command([str(self.worker)], role="worker", log_directory=self.root / "logs",
+                cwd=self.root, env=self.environment, lifecycle_sink=lifecycles.append,
+                runtime_execution_sink=observations.append)
+        else:
+            producer._measurement_command([str(self.worker)], role="worker", log_directory=self.root / "logs",
+                cwd=self.root, env=self.environment, lifecycle_sink=lifecycles.append)
+        return observations, lifecycles
+
+    def test_runtime_record_is_bound_to_real_process_and_hides_environment_values(self) -> None:
+        observations, lifecycles = self.invoke()
+        self.assertEqual(len(observations), 1)
+        record = observations[0]
+        lifecycle = gate.read_json(lifecycles[0])
+        self.assertEqual(lifecycle["runtimeExecution"], record)
+        self.assertEqual(gate._array(lifecycle["argv"], "lifecycle argv")[0], str(self.worker))
+        self.assertEqual(record["binaryIdentityBefore"], record["binaryIdentityAfter"])
+        identity = gate._object(record["binaryIdentityBefore"], "worker identity")
+        self.assertEqual(identity["sha256"], gate.sha256(self.worker))
+        self.assertEqual(identity["inode"], self.worker.stat().st_ino)
+        self.assertEqual(record["actualEnvironmentSha256"], producer._environment_sha256(self.environment))
+        self.assertEqual(record["metadataKeys"], sorted(producer.WORKER_METADATA_KEYS))
+        self.assertNotIn("do-not-export", json.dumps(record))
+        self.assertNotIn("metadata-value", json.dumps(record))
+        changed = {**self.environment, "PRIVATE_VALUE": "changed"}
+        self.assertNotEqual(producer._worker_environment_projection(changed)["nonMetadataEnvironmentSha256"],
+                            record["nonMetadataEnvironmentSha256"])
+        changed = {**self.environment, "KRR_PERF_RUSTC": "changed"}
+        self.assertNotEqual(producer._worker_environment_projection(changed)["metadataValuesSha256"],
+                            record["metadataValuesSha256"])
+
+    def test_old_lifecycle_is_unchanged_and_missing_metadata_rejected(self) -> None:
+        records, lifecycles = self.invoke(capture=False)
+        self.assertEqual(records, [])
+        self.assertNotIn("runtimeExecution", gate.read_json(lifecycles[0]))
+        del self.environment["KRR_PERF_LOCK_PATH"]
+        with self.assertRaisesRegex(ValueError, "metadata environment is incomplete"):
+            self.invoke()
+
+    def test_attempt_binds_the_same_runtime_evidence_to_its_lifecycle(self) -> None:
+        build = typed_producer.ArmBuildResult([], self.worker, gate.sha256(self.worker), {}, [])
+        probe = host_load.Probe(0.1, 1.0, 1.0, 0, cpu_times(10.0, 90.0))
+        with patch.object(producer, "await_quiet", return_value=probe), \
+             patch.object(host_load, "finish", return_value=(0.1, 1.0, cpu_times(10.0, 90.0))):
+            observed = producer.observe_worker_attempt(build, 0, 1, self.root / "fixture",
+                self.root / "report", self.root / "plan", 800, 600, 1, self.root,
+                self.environment, self.root / "logs", capture_runtime_execution=True)
+        self.assertIsNone(observed.error)
+        runtime = gate._object(observed.record.get("runtimeExecution"), "runtime evidence")
+        lifecycle_pin = gate._object(observed.record.get("lifecycle"), "lifecycle pin")
+        lifecycle = gate.read_json(Path(gate._text(lifecycle_pin.get("path"), "lifecycle path")))
+        self.assertEqual(lifecycle["runtimeExecution"], runtime)
+        self.assertEqual(runtime["schema"], "krr-html-worker-runtime-execution-v1")
+
+    def test_changed_executable_during_process_preserves_failed_lifecycle_and_exit(self) -> None:
+        self.worker.write_text("#!/bin/sh\nprintf x >> \"$0\"\nexit 0\n")
+        lifecycles: list[Path] = []
+        observations: list[gate.JsonObject] = []
+        with self.assertRaisesRegex(ValueError, "worker runtime identity changed"):
+            producer._measurement_command([str(self.worker)], role="worker", log_directory=self.root / "logs",
+                cwd=self.root, env=self.environment, lifecycle_sink=lifecycles.append,
+                runtime_execution_sink=observations.append)
+        self.assertEqual(len(lifecycles), 1)
+        self.assertEqual(len(observations), 1)
+        lifecycle = gate.read_json(lifecycles[0])
+        self.assertEqual(lifecycle["exitCode"], 0)
+        self.assertTrue(lifecycle["groupClosed"])
+        self.assertTrue(lifecycle["rawFdsClosed"])
+        self.assertEqual(lifecycle["runtimeExecution"], observations[0])
+        self.assertEqual(observations[0]["observationErrorType"], "ValueError")
+        self.assertNotEqual(observations[0]["binaryIdentityBefore"], observations[0]["binaryIdentityAfter"])
+
+    def test_runtime_observation_failure_retains_attempt_exit_zero(self) -> None:
+        build = typed_producer.ArmBuildResult([], self.worker, gate.sha256(self.worker), {}, [])
+        probe = host_load.Probe(0.1, 1.0, 1.0, 0, cpu_times(10.0, 90.0))
+        original = producer._worker_runtime_identity
+        calls = 0
+        def identity(path: str) -> gate.JsonObject:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("post-observation failed")
+            return original(path)
+        with patch.object(producer, "await_quiet", return_value=probe), \
+             patch.object(host_load, "finish", return_value=(0.1, 1.0, cpu_times(10.0, 90.0))), \
+             patch.object(producer, "_worker_runtime_identity", side_effect=identity):
+            observed = producer.observe_worker_attempt(build, 0, 1, self.root / "fixture",
+                self.root / "report", self.root / "plan", 800, 600, 1, self.root,
+                self.environment, self.root / "logs", capture_runtime_execution=True)
+        self.assertIsInstance(observed.error, OSError)
+        self.assertIs(observed.record["accepted"], False)
+        self.assertEqual(observed.record["actualExit"], 0)
+        evidence = gate._object(observed.record["runtimeExecution"], "runtime execution")
+        self.assertIsNotNone(evidence["binaryIdentityBefore"])
+        self.assertIsNone(evidence["binaryIdentityAfter"])
+        self.assertEqual(evidence["observationErrorType"], "OSError")
+        lifecycle_pin = gate._object(observed.record["lifecycle"], "lifecycle pin")
+        lifecycle = gate.read_json(Path(gate._text(lifecycle_pin["path"], "lifecycle path")))
+        self.assertEqual(lifecycle["exitCode"], 0)
+        self.assertEqual(lifecycle["runtimeExecution"], evidence)
+
+
+class EpochResumeBoundaryTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name).resolve()
+        self.script = self.root / "scripts" / "program.py"
+        self.script.parent.mkdir()
+        self.script.write_text("program")
+        self.worker_paths = {role: self.root / role for role in ("baseline", "candidate")}
+        for role, path in self.worker_paths.items():
+            path.write_text(role)
+        self.input = self.root / "input.html"
+        self.input.write_text("fixture")
+        self.program_sha = gate.sha256(self.script)
+        self.records: gate.SourceRecords = {"scripts/program.py": (self.program_sha, self.script.stat().st_size)}
+        self.bundle_dir = self.root / "bundle"
+        self.bundle_dir.mkdir()
+        self.head = "a" * 40
+        self.live_head = "b" * 40
+        self.source: gate.JsonObject = {"head": self.head, "root": str(self.root)}
+        self.snapshot: gate.JsonObject = {"path": "/old/snapshot", "sha256": "d" * 64}
+        self.source_ref: gate.JsonObject = {"path": "/old/source", "sha256": "e" * 64}
+        self.manifest: gate.JsonObject = {"path": "/old/bundle.json", "sha256": "f" * 64}
+        self.pins = {role: {"path": str(path), "sha256": gate.sha256(path)}
+                     for role, path in self.worker_paths.items()}
+        self.artifacts: dict[str, gate.JsonObject] = {role: {"path": "/old/" + role + ".json",
+            "sha256": ("1" if role == "candidate" else "2") * 64} for role in self.pins}
+        self.fixed = remote_evidence.FixedEpochCandidateOrigin(self.head,
+            self.pins["candidate"]["sha256"], "d" * 64, "3" * 64, "1" * 64, "4" * 64, "5" * 64)
+        self.proofs: dict[str, gate.JsonObject] = {
+            role: {"frozenBinary": pin, "sourceBeforeRef": self.source_ref,
+                   "sourceSnapshotRef": self.snapshot} for role, pin in self.pins.items()}
+        self.tools: typed_producer.ToolContext = {"rustc": "r", "cargo": "c", "platform": "test",
+            "cpuCount": 4, "environmentSha256": producer._environment_sha256(os.environ)}
+        self.observed: dict[str, gate.JsonObject] = {role: {"worker": pin, "role": role}
+                                                      for role, pin in self.pins.items()}
+        self.live: gate.JsonObject = {"schema": "krr-html-performance-live-source-observation-v1",
+            "root": str(self.root), "head": self.live_head, "indexSha256": "6" * 64,
+            "statusBase64": "", "manifest": {"schema": "krr-native-build-source-manifest-v1",
+                "digest": "7" * 64, "files": [{"path": str(self.script), "sha256": self.program_sha,
+                                               "size": self.script.stat().st_size}]}}
+        self.origin: gate.JsonObject = {"bundleManifest": self.manifest, "artifact": self.artifacts["candidate"],
+            "head": self.head, "source": self.source_ref, "snapshot": self.snapshot,
+            "binarySha256": self.fixed.binary_sha256, "lockSha256": self.fixed.lock_sha256}
+        self.context: typed_producer.EpochContextSnapshot = {
+            "schema": "krr-html-performance-context-epoch-v3", "epochOrigin": self.origin,
+            "liveCheckout": self.live, "systemWorkers": dict[str, object](self.observed),
+            "workerEnvironment": {"baseEnvironmentSha256": self.tools["environmentSha256"]},
+            "inputs": [producer.file_state(self.input)], "registry": {"version": 1}, "cache": {"version": 1},
+            "cacheUnion": {"registry": {"version": 1}, "target": {"version": 1}},
+            "scope": {"registry": "/registry", "target": "/target"}, "config": [], "preference": {},
+            "toolContext": self.tools}
+        self.arms: dict[str, typed_producer.ArmPin] = {role: {
+            "binary_sha256": pin["sha256"], "source_snapshot_sha256": "d" * 64,
+            "lock_sha256": "3" * 64, "build_artifact_ref": cast(typed_producer.FilePin, self.artifacts[role])}
+            for role, pin in self.pins.items()}
+        self.arms[gate.DEFAULT_BASELINE_ARM_ID] = self.arms.pop("baseline")
+        self.expected: gate.JsonObject = {"arms": self.arms}
+        self.receipt: gate.JsonObject = {"head": self.head, "source": {"before": "source"},
+            "contexts": {"before": "before", "end": "end"}, "buildArtifacts": self.artifacts}
+        self.bundle = Mock(spec=gate.Bundle)
+        def read(reference: object) -> gate.JsonObject:
+            if reference == "source" or reference == self.source_ref:
+                return self.source
+            if reference in ("before", "end"):
+                return dict[str, object](self.context)
+            if reference == "expected":
+                return self.expected
+            for role, artifact in self.artifacts.items():
+                if reference == artifact:
+                    return self.proofs[role]
+            raise ValueError("unknown fixture reference")
+        self.bundle.json.side_effect = read
+        self.bundle.file.side_effect = lambda ref: Path(cast(str, cast(dict[str, object], ref)["path"]))
+        self.attempts = [{"expected": cast(typed_producer.FilePin, "expected")}]
+
+    def verify(self, before: typed_producer.EpochContextSnapshot,
+               after: typed_producer.EpochContextSnapshot, *, head: str | None = None,
+               source: gate.JsonObject | None = None,
+               observed_live: gate.JsonObject | None = None) -> None:
+        def observe(pin: gate.JsonObject, _tool: gate.JsonObject,
+                    _env: Mapping[str, str]) -> gate.JsonObject:
+            path = Path(gate._text(pin.get("path"), "worker path"))
+            gate.require(path.is_file() and gate.sha256(path) == pin.get("sha256"), "worker bytes differ")
+            role = "candidate" if pin == self.pins["candidate"] else "baseline"
+            return self.observed[role]
+        with patch.object(remote_evidence, "validate_fixed_epoch_candidate_origin_reader", return_value=self.fixed), \
+             patch.object(remote_evidence, "_fixed_epoch_git_records", return_value=self.records), \
+             patch.object(producer, "_live_checkout", return_value=(
+                 after["liveCheckout"] if observed_live is None else observed_live)), \
+             patch.object(gate, "_git_output", return_value=b"tree"), \
+             patch("html_performance_source_reuse._modes", return_value={"scripts/program.py": "100644"}), \
+             patch.object(epoch_reuse, "observe_system_only_worker", side_effect=observe):
+            producer._validate_resume_batch(self.receipt, self.bundle, self.attempts,
+                head=head or self.head, source=self.source if source is None else source, before_context=before,
+                after_context=after, arms=self.arms, epoch_root=self.root,
+                epoch_log_directory=self.root / "logs")
+
+    def test_v3_accepts_operational_cache_and_checkout_change(self) -> None:
+        live = copy.deepcopy(self.context)
+        live["registry"] = {"version": 2}
+        live["cache"] = {"version": 2}
+        live["cacheUnion"] = {"registry": live["registry"], "target": live["cache"]}
+        live["liveCheckout"] = {**self.live, "indexSha256": "8" * 64}
+        self.verify(live, live)
+
+    def test_v3_resume_accepts_distinct_fixed_and_live_heads(self) -> None:
+        self.assertNotEqual(self.head, self.live_head)
+        self.verify(self.context, self.context, head=self.head)
+        with self.assertRaisesRegex(ValueError, "live checkout differs"):
+            self.verify(self.context, self.context, head=self.head,
+                        observed_live={**self.live, "head": "c" * 40})
+
+    def test_v3_rejects_input_worker_environment_source_and_arm_changes(self) -> None:
+        for field in ("inputs", "systemWorkers", "workerEnvironment", "epochOrigin"):
+            value = copy.deepcopy(self.context)
+            if field == "inputs":
+                value["inputs"] = []
+            elif field == "systemWorkers":
+                value["systemWorkers"] = {"unknown": {}}
+            elif field == "workerEnvironment":
+                value["workerEnvironment"] = {"changed": True}
+            else:
+                value["epochOrigin"] = {"changed": True}
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                self.verify(value, value)
+        with self.assertRaises(ValueError):
+            self.verify(self.context, self.context, head="0" * 40)
+        with self.assertRaisesRegex(ValueError, "epoch source differs"):
+            self.verify(self.context, self.context, source={"head": "changed"})
+        self.worker_paths["baseline"].write_text("modified worker")
+        with self.assertRaisesRegex(ValueError, "worker bytes differ"):
+            self.verify(self.context, self.context)
+        self.worker_paths["baseline"].write_text("baseline")
+        self.input.write_text("changed bytes")
+        with self.assertRaisesRegex(ValueError, "input bytes differs|input bytes differ"):
+            self.verify(self.context, self.context)
+        self.input.write_text("fixture")
+        self.arms[gate.DEFAULT_BASELINE_ARM_ID]["binary_sha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "worker arm differs"):
+            self.verify(self.context, self.context)
+
+
 class WorkerAttemptContractTest(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
@@ -2374,6 +2859,22 @@ class WorkerAttemptContractTest(unittest.TestCase):
                 batch_deadline=1.0,
             )
         self.assertEqual(calls, 1)
+
+    def test_fixed_epoch_worker_collection_requests_runtime_execution_evidence(self) -> None:
+        candidate, binary, snapshot, arms, expected, row = self._condition_case()
+        marker = producer.BatchBudgetExhausted("stop after observing worker configuration")
+        with patch.object(producer, "_require_batch_budget"), \
+             patch.object(producer, "collect_worker_sample", side_effect=marker) as collect:
+            with self.assertRaises(producer.BatchBudgetExhausted):
+                producer._collect_condition_worker_pairs(
+                    folder=self.root / "condition", row=row, expected=expected,
+                    fixture=self.fixture, plan_path=self.plan, width=800, height=600,
+                    viewport=self.viewport, builds={"baseline": self.build, "candidate": candidate},
+                    binaries={"baseline": self.build.binary, "candidate": binary}, arms=arms,
+                    root=self.root, lifecycle=self.logs, lock=self.plan, snapshot=snapshot,
+                    environment_sha="e" * 64, capture_runtime_execution=True,
+                )
+        self.assertIs(collect.call_args.kwargs["capture_runtime_execution"], True)
 
     def test_partial_baseline_failure_keeps_successful_samples_and_attempts(self) -> None:
         failures: list[gate.JsonObject] = []

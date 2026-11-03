@@ -19,7 +19,7 @@ from contextlib import nullcontext
 from collections.abc import Callable, Sequence
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, cast
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import html_performance_remote_evidence as remote_evidence
 import html_performance_remote_admission as remote_admission
@@ -945,6 +945,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
         old_pair = json_object(expected["sourcePair"])
         original = gate.Bundle(self.bundle)
         fixed_source = original.json(old_pair["before"])
+        origin_root = Path(gate._text(fixed_source["root"], "fixed source root"))
         tool: JsonObject = {"rustc": "rustc fixture", "cargo": "cargo fixture",
                             "platform": "fixture", "cpuCount": 4,
                             "environmentSha256": "a" * 64}
@@ -960,9 +961,25 @@ class PerformanceEvidenceTest(unittest.TestCase):
         }
         refs = [self.plan_pin, *self.binary_refs.values()]
         rows = [{**pin, "exists": True} for pin in refs]
-        moved_source = {**fixed_source, "index": {"sha256": "f" * 64}}
-        contexts = [{"source": source, "inputs": rows, "toolContext": tool}
-                    for source in (fixed_source, fixed_source, moved_source)]
+        snapshot = original.json(old_pair["snapshot"])
+        source_records = gate.records_map(snapshot["records"])
+        live_rows = [{"path": str(origin_root / name), "sha256": checksum, "size": size}
+                     for name, (checksum, size) in sorted(source_records.items())]
+        live_material = "".join(f"{row['path']}\0{row['sha256']}\0{row['size']}\n"
+                                for row in live_rows)
+        live: JsonObject = {"schema": "krr-html-performance-live-source-observation-v1",
+                            "root": str(origin_root), "head": self.head, "indexSha256": "a" * 64,
+                            "statusBase64": "", "manifest": {
+                                "schema": "krr-native-build-source-manifest-v1", "files": live_rows,
+                                "digest": hashlib.sha256(live_material.encode()).hexdigest()}}
+        contexts: list[JsonObject] = [
+            {"source": fixed_source, "inputs": rows, "toolContext": tool},
+            {"schema": "krr-html-performance-context-epoch-v3", "liveCheckout": live,
+             "inputs": rows, "toolContext": tool},
+            {"schema": "krr-html-performance-context-epoch-v3",
+             "liveCheckout": {**live, "indexSha256": "f" * 64},
+             "inputs": rows, "toolContext": tool},
+        ]
         pins = [self.add_file(f"/v3/context-{index}", f"v3/context-{index}", context)
                 for index, context in enumerate(contexts)]
         self.save_transport()
@@ -978,7 +995,22 @@ class PerformanceEvidenceTest(unittest.TestCase):
         )
         result = gate.source_contract(bundle, self.root, expected, epoch_validation=validation)
         self.assertEqual(result["head"], self.head)
-        self.assertNotEqual(contexts[1]["source"], contexts[2]["source"])
+        self.assertNotEqual(contexts[1]["liveCheckout"], contexts[2]["liveCheckout"])
+        gate._v3_live_programs(origin_root, live, snapshot)
+        program_rows = [dict(row) for row in live_rows]
+        program_row = next(row for row in program_rows if "/scripts/" in str(row["path"]))
+        program_row["sha256"] = "0" * 64
+        altered_material = "".join(f"{row['path']}\0{row['sha256']}\0{row['size']}\n"
+                                   for row in program_rows)
+        altered = {**live, "manifest": {"schema": "krr-native-build-source-manifest-v1",
+                   "files": program_rows, "digest": hashlib.sha256(altered_material.encode()).hexdigest()}}
+        with self.assertRaisesRegex(ValueError, "program differs"):
+            gate._v3_live_programs(origin_root, altered, snapshot)
+        with self.assertRaisesRegex(ValueError, "encoding differs"):
+            gate._v3_live_programs(origin_root, {**live, "statusBase64": "!"}, snapshot)
+        with self.assertRaisesRegex(ValueError, "digest differs"):
+            gate._v3_live_programs(origin_root, {**live, "manifest": {**json_object(live["manifest"]),
+                                   "digest": "0" * 64}}, snapshot)
         with self.assertRaisesRegex(ValueError, "authenticated epoch projection is required"):
             gate.source_contract(bundle, self.root, expected)
         wrong = validation._replace(end_projection={**projection, "declared": {
@@ -999,6 +1031,142 @@ class PerformanceEvidenceTest(unittest.TestCase):
         original_source.write_bytes(b"modified")
         with self.assertRaisesRegex(ValueError, "original pin mismatch"):
             gate.source_contract(bundle, self.root, expected, epoch_validation=validation)
+
+    def test_v3_flags_report_real_cache_and_checkout_changes(self) -> None:
+        source = {"path": "/fixed/source", "sha256": "a" * 64}
+        snapshot = {"path": "/fixed/snapshot", "sha256": "b" * 64}
+        artifact = {"path": "/fixed/artifact", "sha256": "c" * 64}
+        fixed = remote_evidence.FixedEpochCandidateOrigin(
+            self.head, "d" * 64, "b" * 64, "e" * 64, "c" * 64, "f" * 64, "1" * 64,
+        )
+        origin: JsonObject = {"bundleManifest": {"path": "/fixed/bundle.json", "sha256": "2" * 64},
+            "artifact": artifact, "head": self.head, "source": source, "snapshot": snapshot,
+            "binarySha256": fixed.binary_sha256, "lockSha256": fixed.lock_sha256}
+        before: JsonObject = {"schema": "krr-html-performance-context-epoch-v3", "epochOrigin": origin,
+            "liveCheckout": {"head": "before"}, "inputs": [], "registry": {"version": 1},
+            "cache": {"version": 1}, "cacheUnion": {"registry": {"version": 1}, "target": {"version": 1}},
+            "scope": {}, "config": [], "preference": {}, "toolContext": {},
+            "workerEnvironment": {}, "systemWorkers": {}}
+        end: JsonObject = {**before, "liveCheckout": {"head": "after"}, "cache": {"version": 2},
+            "cacheUnion": {"registry": {"version": 1}, "target": {"version": 2}}}
+        result: JsonObject = {key: True for key in gate.ENDPOINT_FLAGS}
+        for key in ("sourceBeforeEqualsEnd", "cacheBeforeEqualsEnd", "cacheUnionBeforeEqualsEnd"):
+            result[key] = False
+        expected: JsonObject = {"sourcePair": {"schema": "krr-html-performance-source-epoch-v3",
+            "epochSourcePair": {"before": source, "snapshot": snapshot}}, "arms": {
+                "candidate": {"build_artifact_ref": artifact, "binary_sha256": fixed.binary_sha256,
+                    "source_snapshot_sha256": fixed.snapshot_sha256, "lock_sha256": fixed.lock_sha256}}}
+        bundle = Mock(spec=gate.Bundle)
+        proof: JsonObject = {key: {} for key in ("buildEnvironmentSha256", "toolVersions", "cargoConfigPins",
+                                                  "cargoLauncher", "rustcLauncher", "guardPython")}
+        bundle.json.side_effect = lambda reference: proof if reference == artifact else {"head": self.head}
+        with patch.object(remote_evidence, "validate_fixed_epoch_candidate_origin_reader",
+                          return_value=fixed) as verify:
+            gate._v3_origin_and_endpoints(bundle, self.root, expected, result, before, end, git_query=None)
+            self.assertEqual(verify.call_args.args,
+                             (bundle, self.root, origin["bundleManifest"], artifact, self.head))
+            bundle.file.side_effect = ValueError("origin bytes differ")
+            with self.assertRaisesRegex(ValueError, "origin bytes differ"):
+                gate._v3_origin_and_endpoints(bundle, self.root, expected, result, before, end, git_query=None)
+            bundle.file.side_effect = None
+            forged = {**result, "cacheBeforeEqualsEnd": True}
+            with self.assertRaisesRegex(ValueError, "endpoint flag differs"):
+                gate._v3_origin_and_endpoints(bundle, self.root, expected, forged, before, end, git_query=None)
+            changed_inputs = {**end, "inputs": [{"path": "/changed"}]}
+            with self.assertRaisesRegex(ValueError, "endpoint flag differs"):
+                gate._v3_origin_and_endpoints(bundle, self.root, expected, result, before, changed_inputs,
+                                               git_query=None)
+
+    def test_v3_worker_observations_reject_non_system_dependencies_and_environment(self) -> None:
+        import local_macos_tool_provenance as provenance
+
+        pins: dict[str, JsonObject] = {role: {"path": f"/fixed/{role}", "sha256": checksum * 64}
+                                      for role, checksum in (("baseline", "a"), ("candidate", "b"))}
+        tool: JsonObject = {"platform": "test", "environmentSha256": "c" * 64}
+        snapshot = {"path": "/fixed/snapshot", "sha256": "d" * 64}
+        expected: JsonObject = {"sourcePair": {"schema": "krr-html-performance-source-epoch-v3",
+                                               "epochSourcePair": {"snapshot": snapshot}}}
+        observations: JsonObject = {role: {"schema": "krr-html-system-only-worker-observation-v1",
+            "worker": pin, "stamp": [1, 2, 0o100755, 10, 3, 4], "platform": "test",
+            "environment_sha256": "c" * 64} for role, pin in pins.items()}
+        metadata: JsonObject = {"KRR_PERF_RUSTC": "toolContext.rustc",
+            "KRR_PERF_CARGO": "toolContext.cargo", "KRR_PERF_ENVIRONMENT_SHA256": "before-context-sha256",
+            "KRR_PERF_LOCK_PATH": str(self.root / gate.HARNESS_ROOT / "Cargo.lock"),
+            "KRR_PERF_SOURCE_SNAPSHOT_PATH": snapshot["path"]}
+        context: JsonObject = {"toolContext": tool, "liveCheckout": {"root": str(self.root)},
+            "systemWorkers": observations, "workerEnvironment": {
+                "schema": "krr-html-performance-worker-environment-contract-v1",
+                "baseEnvironmentSha256": "c" * 64, "metadata": metadata,
+                "nonMetadataEnvironmentSha256": "e" * 64, "nonMetadataKeyNames": ["PATH"],
+                "nonMetadataKeyNamesSha256": gate._v3_json_digest(["PATH"])}}
+        bundle = Mock(spec=gate.Bundle)
+        data = self.root / "transport-worker"
+        data.write_bytes(b"test bytes")
+        bundle.file.return_value = data
+        with patch.object(gate, "execution_binary_refs", return_value=pins), \
+             patch.object(provenance, "_native_dependencies", return_value=(["/usr/lib/libSystem.B.dylib"], [])) as parse:
+            gate._v3_worker_observations(bundle, expected, context, {})
+            parse.return_value = (["/tmp/injected.dylib"], [])
+            with self.assertRaisesRegex(ValueError, "non-system dependencies"):
+                gate._v3_worker_observations(bundle, expected, context, {})
+            parse.return_value = ([], [])
+            bad_context = {**context, "workerEnvironment": {**json_object(context["workerEnvironment"]),
+                           "baseEnvironmentSha256": "0" * 64}}
+            with self.assertRaisesRegex(ValueError, "environment contract differs"):
+                gate._v3_worker_observations(bundle, expected, bad_context, {})
+
+    def test_v3_runtime_receipts_bind_attempt_identity_and_environment(self) -> None:
+        metadata_keys = sorted(("KRR_PERF_RUSTC", "KRR_PERF_CARGO", "KRR_PERF_ENVIRONMENT_SHA256",
+                                "KRR_PERF_LOCK_PATH", "KRR_PERF_SOURCE_SNAPSHOT_PATH"))
+        values = {"KRR_PERF_RUSTC": "rustc -vV", "KRR_PERF_CARGO": "cargo -vV",
+                  "KRR_PERF_ENVIRONMENT_SHA256": "a" * 64, "KRR_PERF_LOCK_PATH": "/fixed/lock",
+                  "KRR_PERF_SOURCE_SNAPSHOT_PATH": "/fixed/snapshot"}
+        names = sorted(["PATH", *metadata_keys])
+        context: JsonObject = {"workerEnvironment": {"metadata": values,
+            "nonMetadataEnvironmentSha256": "b" * 64, "nonMetadataKeyNames": ["PATH"],
+            "nonMetadataKeyNamesSha256": gate._v3_json_digest(["PATH"])}, "systemWorkers": {}}
+        expected: JsonObject = {"provenance": {"rustc": values["KRR_PERF_RUSTC"],
+            "cargo": values["KRR_PERF_CARGO"]}, "endpointRefs": {"before": {"sha256": "a" * 64}},
+            "catalogCondition": {"fixture_path": "/fixed/input"}, "operationPlanRef": {"path": "/fixed/plan"},
+            "viewport": {"width": 800, "height": 600, "scale": 1}}
+        files: dict[str, JsonObject] = {}
+        order: list[JsonObject] = []
+        for role, checksum in (("baseline", "c"), ("candidate", "d")):
+            pin: JsonObject = {"path": f"/fixed/{role}", "sha256": checksum * 64}
+            identity: JsonObject = {**pin, "device": 1, "inode": 2, "mode": 0o100755,
+                                    "size": 10, "mtimeNs": "3", "ctimeNs": "4"}
+            execution: JsonObject = {"schema": "krr-html-worker-runtime-execution-v1",
+                "binaryIdentityBefore": identity, "binaryIdentityAfter": identity,
+                "actualEnvironmentSha256": "e" * 64, "keyNames": names,
+                "keyNamesSha256": gate._v3_json_digest(names), "nonMetadataEnvironmentSha256": "b" * 64,
+                "metadataKeys": metadata_keys, "metadataValuesSha256": gate._v3_json_digest(values)}
+            json_object(context["systemWorkers"])[role] = {"worker": pin, "stamp": [1, 2, 0o100755, 10, 3, 4]}
+            life: JsonObject = {"role": "worker", "exitCode": 0, "identity": {"pid": 123},
+                "groupClosed": True, "rawFdsClosed": True, "failure": None, "cleanupFailure": None,
+                "argv": [pin["path"], "--worker", "0", "/fixed/input", "/fixed/output",
+                         "/fixed/plan", "800", "600", "1"], "runtimeExecution": execution}
+            files[f"/{role}-lifecycle"] = life
+            attempt: JsonObject = {"sample": 0, "actualExit": 0, "workerStarted": True,
+                "binarySha256Before": pin["sha256"], "binarySha256After": pin["sha256"],
+                "lifecycle": {"path": f"/{role}-lifecycle"}, "runtimeExecution": execution}
+            files[f"/{role}-attempt"] = dict(attempt)
+            attempt["attemptRecord"] = {"path": f"/{role}-attempt"}
+            order.append({"arm": role, "executable": pin["path"], "output": "/fixed/output",
+                          "workerAttempts": [attempt]})
+        bundle = Mock(spec=gate.Bundle)
+        bundle.file.side_effect = lambda ref: Path(str(json_object(ref)["path"]))
+        manifest: JsonObject = {"order": order}
+        with patch.object(gate, "read_json", side_effect=lambda path: files[str(path)]):
+            gate._v3_worker_runtime_execution(bundle, expected, manifest, context)
+            baseline = gate._objects(order[0]["workerAttempts"], "test worker attempts")[0]
+            execution = json_object(baseline["runtimeExecution"])
+            execution["metadataValuesSha256"] = "0" * 64
+            with self.assertRaisesRegex(ValueError, "process environment differs"):
+                gate._v3_worker_runtime_execution(bundle, expected, manifest, context)
+            execution["metadataValuesSha256"] = gate._v3_json_digest(values)
+            del execution["binaryIdentityBefore"]
+            with self.assertRaisesRegex(ValueError, "runtime execution differs"):
+                gate._v3_worker_runtime_execution(bundle, expected, manifest, context)
 
     def test_bundle_relative_build_artifact_pin_requires_matching_transport_sha(self) -> None:
         bundle = gate.Bundle(self.bundle)
@@ -1344,6 +1512,43 @@ class PerformanceEvidenceTest(unittest.TestCase):
             remote_evidence.validate_fixed_epoch_candidate_origin(
                 self.bundle, self.root, manifest_sha, "fixed/build.json", str(artifact["sha256"]), self.head,
             )
+
+    def test_fixed_epoch_reader_restricts_mixed_transport_to_original_manifest(self) -> None:
+        original_pair = json_object(gate.read_json(self.expected_paths[0])["sourcePair"])
+        source = gate.Bundle(self.bundle).json(original_pair["before"])
+        source["inventoryDigest"] = hashlib.sha256(json.dumps(
+            {key: value for key, value in source.items() if key != "inventoryDigest"},
+            sort_keys=True, separators=(",", ":"),
+        ).encode()).hexdigest()
+        source_ref = self.add_file("/epoch/source", "epoch/source.json", source)
+        artifact_ref = self.add_file("/epoch/build", "epoch/build.json", {
+            "schema": "krr-html-performance-build-artifact-v3", "arm": "candidate",
+            "buildExit": 0, "sourceBeforeRef": source_ref,
+        })
+        self.save_transport()
+        manifest_bytes = (self.bundle / "bundle.json").read_bytes()
+        manifest_ref = self.add_file("/epoch/bundle.json", "mixed/old-manifest.json", manifest_bytes)
+        outsider_ref = self.add_file("/mixed/outsider", "mixed/outsider.json", {
+            "schema": "krr-html-performance-build-artifact-v3", "arm": "candidate",
+            "buildExit": 0, "sourceBeforeRef": source_ref,
+        })
+        self.save_transport()
+        mixed = gate.Bundle(self.bundle)
+        expected: JsonObject = {"binarySha256": "b" * 64, "sourceSnapshotSha256": "d" * 64,
+            "lockSha256": "e" * 64, "buildArtifactSha256": artifact_ref["sha256"],
+            "cargoExecutableSha256": "c" * 64, "rustcExecutableSha256": "a" * 64}
+        with patch.object(remote_evidence, "_validate_transported_candidate_body", return_value=expected):
+            result = remote_evidence.validate_fixed_epoch_candidate_origin_reader(
+                mixed, self.root, manifest_ref, artifact_ref, self.head)
+            self.assertEqual(result.binary_sha256, "b" * 64)
+            self.assertFalse(hasattr(result, "acceptance"))
+            with self.assertRaisesRegex(ValueError, "not in the original bundle"):
+                remote_evidence.validate_fixed_epoch_candidate_origin_reader(
+                    mixed, self.root, manifest_ref, outsider_ref, self.head)
+            mixed.file(manifest_ref).write_bytes(b"modified manifest")
+            with self.assertRaises(ValueError):
+                remote_evidence.validate_fixed_epoch_candidate_origin_reader(
+                    mixed, self.root, manifest_ref, artifact_ref, self.head)
 
     def test_remote_candidate_rejects_unreviewed_schema_role_and_source_head(self) -> None:
         cases = (("schema", "krr-html-performance-build-artifact-v1", "remote candidate build role differs"),
@@ -2133,6 +2338,75 @@ class PerformanceEvidenceTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unsupported build artifact schema"):
                 gate.verify_source_reuse(self.bundle, self.root, measured_sha, current_bundle,
                                          current_sha, "common/candidate-build.json", artifact_sha)
+
+    def test_v3_formal_requires_current_proof_and_shared_fixed_inputs(self) -> None:
+        from html_performance_source_reuse import SourceReuseContext
+
+        context = SourceReuseContext(self.head, self.head, {}, (), True)
+        pair: JsonObject = {"schema": "krr-html-performance-source-epoch-v3",
+                            "epochSourcePair": {"before": "fixed"}}
+        first: JsonObject = {"catalogCondition": {"condition_id": "case"},
+                             "sourcePair": pair, "arms": {"candidate": "fixed"}}
+        rows = [dict(first) for _ in range(84)]
+        attempts: list[JsonObject] = [{"expected": index} for index in range(84)]
+        bundle = Mock(spec=gate.Bundle)
+        bundle.manifest = {"head": self.head, "attempts": attempts}
+        bundle.json.side_effect = lambda index: rows[index]
+        with (patch.object(gate, "Bundle", return_value=bundle),
+              patch.object(gate, "_verified_reuse_context", return_value=context),
+              patch.object(gate, "_require_catalog_attempt_set")):
+            with self.assertRaisesRegex(ValueError, "current build equivalence"):
+                gate._verify(self.bundle, self.root, require_catalog=True)
+            for key, changed in (
+                ("arms", {"candidate": "other"}),
+                ("sourcePair", {**pair, "epochSourcePair": {"before": "other"}}),
+            ):
+                with self.subTest(key=key):
+                    rows[-1] = {**first, key: changed}
+                    with self.assertRaisesRegex(ValueError, "do not share the fixed build and source"):
+                        gate._verify(self.bundle, self.root, require_catalog=True, reuse_context=context)
+                    rows[-1] = dict(first)
+
+    def test_v3_origin_rejects_changed_transported_proof_bytes(self) -> None:
+        manifest = self.add_file("/fixed/bundle.json", "v3/origin-manifest.json", {"files": []})
+        artifact = self.add_file("/fixed/artifact", "v3/origin-artifact.json", {"arm": "candidate"})
+        self.save_transport()
+        bundle = gate.Bundle(self.bundle)
+        origin: JsonObject = {"bundleManifest": manifest, "artifact": artifact, "head": self.head}
+        context: JsonObject = {"schema": "krr-html-performance-context-epoch-v3",
+                               "epochOrigin": origin}
+        (self.bundle / "v3/origin-artifact.json").write_bytes(b"tampered")
+        with patch.object(remote_evidence, "validate_fixed_epoch_candidate_origin_reader") as validate:
+            with self.assertRaisesRegex(ValueError, "original pin mismatch"):
+                gate._v3_origin_and_endpoints(bundle, self.root, {}, {}, context, context, git_query=None)
+            validate.assert_not_called()
+
+    def test_v3_source_reuse_rejects_changed_current_build_identity(self) -> None:
+        from html_performance_source_reuse import SourceReuseContext
+
+        context = SourceReuseContext(self.head, self.head, {}, (), False)
+        expected: JsonObject = {"sourcePair": {"schema": "krr-html-performance-source-epoch-v3"},
+                                "endpointRefs": {"before": "before", "end": "end"}}
+        bundle = Mock(spec=gate.Bundle)
+        bundle.manifest = {"head": self.head, "attempts": [{"expected": "expected", "result": "result"}]}
+        bundle.json.side_effect = lambda key: expected if key == "expected" else {}
+        bundle.relative_reference.return_value = {"path": "/current", "sha256": "a" * 64}
+        keys = ("binarySha256", "lockSha256", "cargoExecutableSha256", "rustcExecutableSha256",
+                "buildEnvironmentSha256", "toolVersions", "cargoConfigPins", "cargoLauncher",
+                "rustcLauncher", "guardPython")
+        old: JsonObject = {key: "original" for key in keys}
+        manifest_sha = gate.sha256(self.bundle / "bundle.json")
+        with (patch.object(gate, "Bundle", return_value=bundle),
+              patch.object(gate, "_verified_reuse_context", return_value=context),
+              patch.object(gate, "_verify", return_value={}),
+              patch.object(gate, "_require_formal_release_result"),
+              patch.object(gate, "_v3_origin_and_endpoints", return_value=(context, old))):
+            for key in ("binarySha256", "lockSha256", "cargoConfigPins", "buildEnvironmentSha256"):
+                with self.subTest(key=key), \
+                     patch.object(gate, "_validate_build_proof", return_value={**old, key: "changed"}):
+                    with self.assertRaisesRegex(ValueError, "measured and current build differ: " + key):
+                        gate.verify_source_reuse(self.bundle, self.root, manifest_sha, self.bundle,
+                                                 manifest_sha, "artifact", "a" * 64)
 
     def test_formal_catalog_dispatch_requires_exact84_and_catalog_binding(self) -> None:
         attempts: list[JsonObject] = [{"expected": f"attempt-{index}"} for index in range(84)]
