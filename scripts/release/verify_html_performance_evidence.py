@@ -368,14 +368,10 @@ def _add_provenance_ref(refs: dict[str, JsonObject], path: str, checksum: str,
     refs[path] = {"path": path, "sha256": checksum}
 
 
-def validate_context_input_refs(
-    before_context: JsonObject, expected: JsonObject, snapshot: JsonObject,
-    capture: JsonObject | None, links: list[JsonObject], provenance: list[JsonObject],
-    execution_inputs: list[JsonObject],
-) -> dict[str, JsonObject]:
-    context_rows = _objects(before_context["inputs"], "context inputs")
-    context_inputs = {_text(row["path"], "context input path"): row for row in context_rows}
-    require(len(context_inputs) == len(context_rows), "duplicate context input")
+def _required_context_input_refs(
+    expected: JsonObject, snapshot: JsonObject, capture: JsonObject | None,
+    links: list[JsonObject], provenance: list[JsonObject], execution_inputs: list[JsonObject],
+) -> list[JsonObject]:
     refs = [_object(expected["operationPlanRef"], "operation reference"),
             _object(expected["domStateRef"], "DOM reference"), snapshot, *execution_inputs]
     if capture is not None:
@@ -386,6 +382,19 @@ def validate_context_input_refs(
                     "fontIdentityProbeBinary"):
             refs.append(_object(expected[key], key))
         refs.extend([capture, *links, *provenance])
+    return refs
+
+
+def validate_context_input_refs(
+    before_context: JsonObject, expected: JsonObject, snapshot: JsonObject,
+    capture: JsonObject | None, links: list[JsonObject], provenance: list[JsonObject],
+    execution_inputs: list[JsonObject],
+) -> dict[str, JsonObject]:
+    context_rows = _objects(before_context["inputs"], "context inputs")
+    context_inputs = {_text(row["path"], "context input path"): row for row in context_rows}
+    require(len(context_inputs) == len(context_rows), "duplicate context input")
+    refs = _required_context_input_refs(expected, snapshot, capture, links, provenance,
+                                        execution_inputs)
     for ref in refs:
         path = _text(ref["path"], "input reference path")
         require(path in context_inputs, "measurement input context is missing")
@@ -418,6 +427,29 @@ def planned_execution_inputs(root: Path, expected: JsonObject,
     refs.extend([{"path": fixture, "sha256": expected["fixture_sha256"]},
                  {"path": str(root / HARNESS_ROOT / "Cargo.lock"), "sha256": LOCK_SHA}])
     return refs
+
+
+def authenticated_measurement_input_refs(
+    root: Path, before_context: JsonObject, expected: JsonObject, snapshot: JsonObject,
+    capture: JsonObject | None, links: list[JsonObject], provenance: list[JsonObject],
+    binaries: Mapping[str, JsonObject],
+) -> dict[str, JsonObject]:
+    """Return only references authenticated by the existing context validator.
+
+    The caller must obtain capture, link and provenance references through the
+    existing catalog validators before calling this function.
+    """
+    require((capture is not None) == (expected.get("catalogCondition") is not None),
+            "measurement catalog capture role differs")
+    require(capture is not None or not links and not provenance,
+            "unexpected measurement input role")
+    execution_inputs = planned_execution_inputs(root, expected, binaries)
+    validated = validate_context_input_refs(before_context, expected, snapshot, capture,
+                                             links, provenance, execution_inputs)
+    refs = _required_context_input_refs(expected, snapshot, capture, links, provenance,
+                                        execution_inputs)
+    paths = {_text(ref["path"], "input reference path") for ref in refs}
+    return {path: {"path": path, "sha256": validated[path]["sha256"]} for path in sorted(paths)}
 
 
 def require_execution_binary_role(row: JsonObject, binary: JsonObject) -> None:

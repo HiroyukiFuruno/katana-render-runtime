@@ -2445,6 +2445,90 @@ class PerformanceEvidenceTest(unittest.TestCase):
         self.reject()
 
 
+class AuthenticatedMeasurementInputRefsTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = Path("/repo")
+        self.snapshot: JsonObject = {"path": "/snapshot", "sha256": "a" * 64}
+        self.binaries: dict[str, JsonObject] = {
+            "baseline": {"path": "/baseline/bin", "sha256": "b" * 64},
+            "candidate": {"path": "/candidate/bin", "sha256": "c" * 64},
+        }
+        self.expected: JsonObject = {
+            "operationPlanRef": {"path": "/plan", "sha256": "d" * 64},
+            "domStateRef": {"path": "/dom", "sha256": "e" * 64},
+            "fixture_sha256": "f" * 64,
+            "arms": {
+                "baseline-0.4.23": {"binary_sha256": "b" * 64,
+                                    "build_artifact_ref": {"path": "/baseline/proof", "sha256": "1" * 64}},
+                "candidate": {"binary_sha256": "c" * 64,
+                              "build_artifact_ref": {"path": "/candidate/proof", "sha256": "2" * 64}},
+            },
+        }
+        refs = [json_object(self.expected["operationPlanRef"]),
+                json_object(self.expected["domStateRef"]), self.snapshot,
+                *gate.planned_execution_inputs(self.root, self.expected, self.binaries)]
+        self.context: JsonObject = {"inputs": [{**pin, "exists": True} for pin in refs]
+                                    + [{"path": "/capacity", "sha256": "3" * 64, "exists": True}]}
+
+    def selected(self) -> dict[str, JsonObject]:
+        return canonical_gate.authenticated_measurement_input_refs(
+            self.root, self.context, self.expected, self.snapshot, None, [], [], self.binaries,
+        )
+
+    def test_returns_only_authenticated_planned_references(self) -> None:
+        selected = self.selected()
+        self.assertNotIn("/capacity", selected)
+        self.assertEqual(selected["/candidate/bin"], self.binaries["candidate"])
+        self.assertEqual(selected["/snapshot"], self.snapshot)
+        self.assertIn(str(self.root / gate.HARNESS_ROOT / "Cargo.lock"), selected)
+
+    def test_unknown_worker_or_unexpected_legacy_role_is_rejected(self) -> None:
+        self.binaries["unknown"] = {"path": "/other", "sha256": "4" * 64}
+        with self.assertRaisesRegex(ValueError, "execution binary roles differ"):
+            self.selected()
+        del self.binaries["unknown"]
+        with self.assertRaisesRegex(ValueError, "unexpected measurement input role"):
+            gate.authenticated_measurement_input_refs(
+                self.root, self.context, self.expected, self.snapshot, None,
+                [{"path": "/capacity", "sha256": "3" * 64}], [], self.binaries,
+            )
+
+    def test_catalog_refs_include_validated_capture_links_and_provenance(self) -> None:
+        self.expected["catalogCondition"] = {"fixture_path": "/fixture"}
+        keys = ("operationEvidenceRef", "catalogManifestRef", "catalogPlanRef",
+                "catalogCaptureValidationRef", "catalogBinaryProofRef", "catalogBuildReportRef",
+                "catalogCaptureBinaryRef", "catalogCurrentBuildReportRef", "chromeCaptureRef",
+                "chromeReceiptRef", "fontIdentityRequestRef", "fontIdentityResponseRef",
+                "fontIdentityProbeBinary")
+        rows = json_array(self.context["inputs"])
+        for key in keys:
+            pin: JsonObject = {"path": "/" + key, "sha256": "5" * 64}
+            self.expected[key] = pin
+            rows.append({**pin, "exists": True})
+        capture: JsonObject = {"path": "/capture", "sha256": "6" * 64}
+        link: JsonObject = {"path": "/link", "sha256": "7" * 64}
+        font: JsonObject = {"path": "/font", "sha256": "8" * 64}
+        rows.extend({**pin, "exists": True} for pin in (capture, link, font))
+        rows.append({"path": "/fixture", "sha256": "f" * 64, "exists": True})
+        selected = gate.authenticated_measurement_input_refs(
+            self.root, self.context, self.expected, self.snapshot, capture, [link], [font],
+            self.binaries,
+        )
+        self.assertTrue({"/capture", "/link", "/font", "/fixture"} <= set(selected))
+        self.assertTrue(all("/" + key in selected for key in keys))
+        self.assertNotIn("/capacity", selected)
+
+    def test_missing_or_changed_context_reference_is_rejected(self) -> None:
+        rows = json_array(self.context["inputs"])
+        row = next(json_object(value) for value in rows if json_object(value)["path"] == "/plan")
+        row["sha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "measurement input context differs"):
+            self.selected()
+        rows.remove(row)
+        with self.assertRaisesRegex(ValueError, "measurement input context is missing"):
+            self.selected()
+
+
 class BaselineArmContractTest(unittest.TestCase):
     def test_fresh_reference_plans_every_source_pin_before_worker(self) -> None:
         pins: list[JsonObject] = [{"path": f"/fresh/{index}", "sha256": str(index) * 64}
