@@ -938,6 +938,68 @@ class PerformanceEvidenceTest(unittest.TestCase):
         )
         return {"path": original, "sha256": checksum}
 
+    def test_v3_source_contract_keeps_fixed_and_live_contexts_separate(self) -> None:
+        import html_performance_epoch_reuse as epoch
+
+        expected = gate.read_json(self.expected_paths[0])
+        old_pair = json_object(expected["sourcePair"])
+        original = gate.Bundle(self.bundle)
+        fixed_source = original.json(old_pair["before"])
+        tool: JsonObject = {"rustc": "rustc fixture", "cargo": "cargo fixture",
+                            "platform": "fixture", "cpuCount": 4,
+                            "environmentSha256": "a" * 64}
+        declared: epoch.DeclaredEpochInputs = {
+            "workers": self.binary_refs, "programs": {"program": self.plan_pin},
+            "inputs": {"plan": self.plan_pin}, "resources": {}, "fonts": {},
+            "tool_context": tool,
+        }
+        projection: epoch.EpochProjection = {
+            "declared": declared, "operational_pins": {},
+            "operational_digest": epoch._inventory_digest({}),
+            "unclassified_context_digest": epoch._inventory_digest([]),
+        }
+        refs = [self.plan_pin, *self.binary_refs.values()]
+        rows = [{**pin, "exists": True} for pin in refs]
+        moved_source = {**fixed_source, "index": {"sha256": "f" * 64}}
+        contexts = [{"source": source, "inputs": rows, "toolContext": tool}
+                    for source in (fixed_source, fixed_source, moved_source)]
+        pins = [self.add_file(f"/v3/context-{index}", f"v3/context-{index}", context)
+                for index, context in enumerate(contexts)]
+        self.save_transport()
+        bundle = gate.Bundle(self.bundle)
+        expected["sourcePair"] = {
+            "schema": "krr-html-performance-source-epoch-v3", "epochSourcePair": old_pair,
+            "epochContextRef": pins[0], "beforeContextRef": pins[1], "endContextRef": pins[2],
+        }
+        expected["endpointRefs"] = {"before": pins[1], "end": pins[2]}
+        validation = gate.SourceEpochV3Validation(
+            str(pins[0]["sha256"]), str(pins[1]["sha256"]), str(pins[2]["sha256"]),
+            cast(JsonObject, projection), cast(JsonObject, projection), cast(JsonObject, projection),
+        )
+        result = gate.source_contract(bundle, self.root, expected, epoch_validation=validation)
+        self.assertEqual(result["head"], self.head)
+        self.assertNotEqual(contexts[1]["source"], contexts[2]["source"])
+        with self.assertRaisesRegex(ValueError, "authenticated epoch projection is required"):
+            gate.source_contract(bundle, self.root, expected)
+        wrong = validation._replace(end_projection={**projection, "declared": {
+            **declared, "inputs": {"other": self.plan_pin},
+        }})
+        with self.assertRaisesRegex(ValueError, "epoch inputs differs"):
+            gate.source_contract(bundle, self.root, expected, epoch_validation=wrong)
+        missing = {"path": "/v3/missing", "sha256": "0" * 64}
+        pair = json_object(expected["sourcePair"])
+        pair["endContextRef"] = missing
+        expected["endpointRefs"] = {"before": pins[1], "end": missing}
+        with self.assertRaises((KeyError, ValueError)):
+            gate.source_contract(bundle, self.root, expected,
+                                 epoch_validation=validation._replace(end_context_sha256="0" * 64))
+        pair["endContextRef"] = pins[2]
+        expected["endpointRefs"] = {"before": pins[1], "end": pins[2]}
+        original_source = bundle.file(old_pair["before"])
+        original_source.write_bytes(b"modified")
+        with self.assertRaisesRegex(ValueError, "original pin mismatch"):
+            gate.source_contract(bundle, self.root, expected, epoch_validation=validation)
+
     def test_bundle_relative_build_artifact_pin_requires_matching_transport_sha(self) -> None:
         bundle = gate.Bundle(self.bundle)
         row = json_object(json_array_at(self.transport, "files")[0])

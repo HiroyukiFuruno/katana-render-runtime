@@ -50,6 +50,16 @@ class SourceContract(TypedDict):
     snapshot: str
 
 
+class SourceEpochV3Validation(NamedTuple):
+    """Context pins and projections authenticated by the v3 caller."""
+    fixed_context_sha256: str
+    before_context_sha256: str
+    end_context_sha256: str
+    fixed_projection: JsonObject
+    before_projection: JsonObject
+    end_projection: JsonObject
+
+
 class ExpectedBuild(NamedTuple):
     harness: JsonObject
     runtime: JsonObject
@@ -1697,12 +1707,92 @@ def _verified_reuse_context(root: Path, measured_head: str, *, git_query: GitQue
                                  text_query, bytes_query, allow_test_changes=allow_test_changes)
 
 
+def _validate_epoch_projection_context(context: JsonObject, projection: JsonObject) -> None:
+    """Bind an authenticated projection to the actual transported context."""
+    from html_performance_epoch_reuse import _inventory_digest
+
+    declared = _object(projection.get("declared"), "epoch declared inputs")
+    require(declared.get("tool_context") == context.get("toolContext"),
+            "epoch projection tool context differs")
+    rows = _objects(context.get("inputs"), "epoch context inputs")
+    indexed = {_text(row.get("path"), "epoch context path"): row for row in rows}
+    require(len(indexed) == len(rows), "duplicate epoch context input")
+    known: set[str] = set()
+    for group in ("workers", "inputs", "resources", "fonts"):
+        for pin_value in _object(declared.get(group), "epoch " + group).values():
+            pin = _object(pin_value, "epoch input pin")
+            path = _text(pin.get("path"), "epoch input path")
+            row = indexed.get(path)
+            require(row is not None and row.get("exists") is True
+                    and row.get("sha256") == pin.get("sha256"),
+                    "epoch projection input context differs")
+            known.add(path)
+    for value in _object(projection.get("operational_pins"), "epoch operational pins").values():
+        pin = _object(value, "epoch operational pin")
+        path = _text(pin.get("path"), "epoch operational path")
+        row = indexed.get(path)
+        require(row is None or row.get("exists") is True and row.get("sha256") == pin.get("sha256"),
+                "epoch operational context differs")
+        known.add(path)
+    unknown = [row for row in rows if _text(row.get("path"), "epoch context path") not in known]
+    unknown.sort(key=lambda row: _text(row.get("path"), "epoch context path"))
+    require(projection.get("unclassified_context_digest") == _inventory_digest(unknown),
+            "epoch projection unclassified context differs")
+
+
+def _source_contract_v3(
+    bundle: Bundle, root: Path, expected: JsonObject, validation: SourceEpochV3Validation | None,
+    *, git_query: GitQuery | None, validated_builds: Mapping[str, JsonObject] | None,
+    reuse_context: object, shared_source: SharedCurrentSource | None,
+) -> SourceContract:
+    from html_performance_epoch_reuse import EpochProjection, compare_epoch_projections
+
+    if not isinstance(validation, SourceEpochV3Validation):
+        raise ValueError("authenticated epoch projection is required")
+    contract = _object(expected["sourcePair"], "v3 source pair")
+    require(set(contract) == {"schema", "epochSourcePair", "epochContextRef",
+                              "beforeContextRef", "endContextRef"}, "v3 source pair fields differ")
+    endpoints = _object(expected.get("endpointRefs"), "endpoint references")
+    require(contract["beforeContextRef"] == endpoints.get("before")
+            and contract["endContextRef"] == endpoints.get("end"), "v3 live context references differ")
+    references = [contract["epochContextRef"], contract["beforeContextRef"], contract["endContextRef"]]
+    pins = [_object(ref, "v3 context reference") for ref in references]
+    checksums = (validation.fixed_context_sha256, validation.before_context_sha256,
+                 validation.end_context_sha256)
+    require(all(pin.get("sha256") == checksum for pin, checksum in zip(pins, checksums, strict=True)),
+            "v3 authenticated context pin differs")
+    contexts = [bundle.json(pin) for pin in pins]
+    projections = [validation.fixed_projection, validation.before_projection, validation.end_projection]
+    for context, projection in zip(contexts, projections, strict=True):
+        live_source = _object(context.get("source"), "v3 live source")
+        require(live_source.get("schema") == "krr-native-build-source-inventory-v1"
+                and all(key in live_source for key in SOURCE_KEYS), "v3 live source is incomplete")
+        _validate_epoch_projection_context(context, projection)
+    nested = _object(contract.get("epochSourcePair"), "fixed epoch source pair")
+    require(contexts[0]["source"] == bundle.json(nested["before"]),
+            "fixed epoch source context differs")
+    compare_epoch_projections(bundle, cast(EpochProjection, projections[0]),
+                              bundle, cast(EpochProjection, projections[1]))
+    compare_epoch_projections(bundle, cast(EpochProjection, projections[1]),
+                              bundle, cast(EpochProjection, projections[2]))
+    original = {**expected, "sourcePair": nested}
+    return source_contract(bundle, root, original, git_query=git_query,
+                           validated_builds=validated_builds, reuse_context=reuse_context,
+                           shared_source=shared_source)
+
+
 def source_contract(bundle: Bundle, root: Path, expected: JsonObject, *,
                     git_query: GitQuery | None = None,
                     validated_builds: Mapping[str, JsonObject] | None = None,
                     reuse_context: object = None,
-                    shared_source: SharedCurrentSource | None = None) -> SourceContract:
+                    shared_source: SharedCurrentSource | None = None,
+                    epoch_validation: SourceEpochV3Validation | None = None) -> SourceContract:
     contract = _object(expected["sourcePair"], "source pair")
+    if contract.get("schema") == "krr-html-performance-source-epoch-v3":
+        return _source_contract_v3(bundle, root, expected, epoch_validation, git_query=git_query,
+                                   validated_builds=validated_builds, reuse_context=reuse_context,
+                                   shared_source=shared_source)
+    require(epoch_validation is None, "epoch validation requires v3 source schema")
     before, end, approved = (bundle.json(contract[k]) for k in ("before", "end", "approvedSourceRef"))
     require(all(document.get("stableEndpoints") is True for document in (before, end, approved)), "unstable source endpoint")
     require(all(before[k] == end[k] == approved[k] for k in SOURCE_KEYS), "source epoch differs")
