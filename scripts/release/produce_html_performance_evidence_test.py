@@ -2227,6 +2227,129 @@ class WorkerRuntimeExecutionTest(unittest.TestCase):
         self.assertEqual(lifecycle["runtimeExecution"], evidence)
 
 
+class PlannedConditionTransportTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name).resolve()
+        self.fixture = self.root / "fixture.html"
+        self.fixture.write_text("<p>fixture</p>")
+        self.plan = self.root / "plan.json"
+        self.plan.write_text("{}")
+        self.dom = self.root / "dom.json"
+        self.dom.write_text("{}")
+        self.row: gate.JsonObject = {"fixture": self.fixture, "fixture_sha256": gate.sha256(self.fixture),
+            "plan_pin": {"path": str(self.plan), "sha256": gate.sha256(self.plan)},
+            "dom": self.dom, "dom_sha256": gate.sha256(self.dom), "catalog": False}
+
+    def test_fixture_is_in_transport_and_tampering_fails_before_inventory(self) -> None:
+        refs = producer._preflight_condition_transport_refs([self.row], None)
+        fixture_pin = {"path": str(self.fixture), "sha256": gate.sha256(self.fixture)}
+        self.assertIn(fixture_pin, refs)
+        directory = self.root / "transport"
+        producer.write_transport_bundle(directory, "a" * 40, refs, [])
+        self.assertEqual(gate.Bundle(directory).file(fixture_pin).read_bytes(), self.fixture.read_bytes())
+        self.fixture.write_text("modified")
+        with self.assertRaisesRegex(ValueError, "SHA256 differs"):
+            producer._preflight_condition_transport_refs([self.row], None)
+        self.fixture.unlink()
+        with self.assertRaises(ValueError):
+            producer._preflight_condition_transport_refs([self.row], None)
+
+    def test_previous_bundle_is_used_only_for_its_authenticated_pins(self) -> None:
+        refs = producer._preflight_condition_transport_refs([self.row], None)
+        directory = self.root / "bundle"
+        producer.write_transport_bundle(directory, "a" * 40, refs, [])
+        bundle = gate.Bundle(directory)
+        self.fixture.unlink()
+        self.assertEqual(producer._preflight_condition_transport_refs([self.row], bundle), refs)
+        changed = {**self.row, "fixture_sha256": "0" * 64}
+        with self.assertRaises(ValueError):
+            producer._preflight_condition_transport_refs([changed], bundle)
+
+    def test_resumed_provenance_uses_pinned_payload_not_changed_logical_files(self) -> None:
+        body = self.root / "asset.bin"
+        body.write_bytes(b"original")
+        body_pin: typed_producer.FilePin = {"path": str(body), "sha256": gate.sha256(body)}
+        evidence = self.root / "evidence.json"
+        evidence.write_text(json.dumps({"resourceProvenance": {"requests": [
+            {"bodyPath": str(body), "bytesSha256": body_pin["sha256"]}]}, "fontProvenance": []}))
+        evidence_pin: typed_producer.FilePin = {"path": str(evidence), "sha256": gate.sha256(evidence)}
+        row: gate.JsonObject = {"operation_evidence": evidence_pin}
+        expected = producer._condition_provenance(row, None)
+        directory = self.root / "provenance-bundle"
+        producer.write_transport_bundle(directory, "a" * 40, [evidence_pin, body_pin], [])
+        bundle = gate.Bundle(directory)
+        evidence.write_text("{}")
+        body.unlink()
+        self.assertEqual(producer._condition_provenance(row, bundle), expected)
+        expected_row: gate.JsonObject = {"operationPlanRef": dict(evidence_pin),
+                                         "domStateRef": dict(evidence_pin)}
+        for name in ("operationEvidenceRef", "catalogManifestRef", "catalogPlanRef",
+                     "catalogCaptureValidationRef", "catalogBinaryProofRef", "catalogBuildReportRef",
+                     "catalogCaptureBinaryRef", "catalogCurrentBuildReportRef", "chromeCaptureRef",
+                     "chromeReceiptRef", "fontIdentityRequestRef", "fontIdentityResponseRef",
+                     "fontIdentityProbeBinary"):
+            expected_row[name] = dict(evidence_pin)
+        plan: tuple[gate.JsonObject, gate.JsonObject, gate.JsonObject | None,
+                    list[gate.JsonObject], list[gate.JsonObject], list[gate.JsonObject]] = (
+            expected_row, dict(evidence_pin), dict(evidence_pin), [], expected, [])
+        refs = producer._planned_transport_refs([plan], [], [bundle], {})
+        sources = {pin["path"]: bundle.file(pin) for pin in refs}
+        sealed = self.root / "resumed-transport"
+        producer.write_transport_bundle(sealed, "a" * 40, refs, [], source_paths=sources)
+        self.assertEqual(gate.Bundle(sealed).file(body_pin).read_bytes(), b"original")
+        transported_body = bundle.file(body_pin)
+        transported_body.write_bytes(b"tampered")
+        with self.assertRaises(ValueError):
+            producer._condition_provenance(row, bundle)
+
+    def test_resumed_missing_pin_does_not_fall_back_to_live_file(self) -> None:
+        directory = self.root / "empty-bundle"
+        producer.write_transport_bundle(directory, "a" * 40, [], [])
+        pin: gate.JsonObject = {"path": str(self.fixture), "sha256": gate.sha256(self.fixture)}
+        with self.assertRaisesRegex(ValueError, "absent from resumed bundle"):
+            producer._condition_pin_file(pin, gate.Bundle(directory))
+
+    def test_planned_context_refs_are_carried_and_conflicts_rejected(self) -> None:
+        pin: gate.JsonObject = {"path": str(self.fixture), "sha256": gate.sha256(self.fixture)}
+        expected: gate.JsonObject = {"operationPlanRef": pin, "domStateRef": pin}
+        plan: tuple[gate.JsonObject, gate.JsonObject, gate.JsonObject | None,
+                    list[gate.JsonObject], list[gate.JsonObject], list[gate.JsonObject]] = (
+            expected, pin, None, [], [], [pin])
+        refs = producer._planned_transport_refs([plan], [], [], {})
+        self.assertEqual(refs, [pin])
+        conflicting = {**pin, "sha256": "0" * 64}
+        with self.assertRaisesRegex(ValueError, "pin conflicts"):
+            producer._planned_transport_refs([plan], [cast(typed_producer.FilePin, conflicting)], [], {})
+
+    def test_all_required_pins_are_checked_before_host_inventory(self) -> None:
+        fixture = self.root / "tests/fixtures/html/interaction-fidelity.html"
+        fixture.parent.mkdir(parents=True)
+        fixture.write_text("<p>fixture</p>")
+        self.row.update({"fixture": fixture, "fixture_sha256": gate.sha256(fixture)})
+        lock = self.root / gate.HARNESS_ROOT / "Cargo.lock"
+        lock.parent.mkdir(parents=True)
+        lock.write_text("locked")
+        binary: gate.JsonObject = {"path": str(self.fixture), "sha256": gate.sha256(self.fixture)}
+        artifact = cast(typed_producer.FilePin, self.row["plan_pin"])
+        arm: typed_producer.ArmPin = {"binary_sha256": gate.sha256(self.fixture),
+            "source_snapshot_sha256": artifact["sha256"], "lock_sha256": gate.sha256(lock),
+            "build_artifact_ref": artifact}
+        arms = {gate.DEFAULT_BASELINE_ARM_ID: arm, "candidate": arm}
+        binaries = {"baseline": binary, "candidate": binary}
+        condition_refs = producer._preflight_condition_transport_refs([self.row], None)
+        snapshot: gate.JsonObject = dict(artifact)
+        with patch.object(gate, "LOCK_SHA", gate.sha256(lock)):
+            refs = producer._preflight_planned_transport(self.root, [self.row], snapshot, arms, binaries,
+                                                        None, {}, condition_refs, [], {}, None)
+            self.assertIn({"path": str(lock), "sha256": gate.sha256(lock)}, refs)
+            lock.write_text("changed")
+            with self.assertRaisesRegex(ValueError, "SHA256 differs"):
+                producer._preflight_planned_transport(self.root, [self.row], snapshot, arms, binaries,
+                                                      None, {}, condition_refs, [], {}, None)
+
+
 class EpochResumeBoundaryTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()

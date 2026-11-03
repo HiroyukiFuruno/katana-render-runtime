@@ -1371,6 +1371,122 @@ def _validate_planned_inputs(
                                          links, provenance, execution)
 
 
+def _condition_pin_file(value: object, resumed_bundle: gate.Bundle | None) -> Path:
+    raw = gate._object(value, "condition reference")
+    path = gate._text(raw.get("path"), "condition reference path")
+    checksum = gate._text(raw.get("sha256"), "condition reference SHA")
+    gate.digest(checksum)
+    pin: FilePin = {"path": path, "sha256": checksum}
+    if resumed_bundle is not None:
+        gate.require(path in resumed_bundle.files, "condition reference absent from resumed bundle")
+        return resumed_bundle.file(pin)
+    physical = Path(path)
+    _pinned_file(physical, checksum)
+    return physical
+
+
+def _condition_provenance(row: gate.JsonObject, resumed_bundle: gate.Bundle | None) -> list[gate.JsonObject]:
+    evidence = _condition_pin_file(row["operation_evidence"], resumed_bundle)
+    return gate.provenance_file_refs(
+        gate.read_json(evidence), file_resolver=lambda pin: _condition_pin_file(pin, resumed_bundle))
+
+
+def _preflight_condition_transport_refs(
+    rows: Sequence[gate.JsonObject], resumed_bundle: gate.Bundle | None,
+) -> list[FilePin]:
+    """Validate the condition-owned transport closure before host inventory."""
+    pins: dict[str, FilePin] = {}
+    def add(value: object, label: str) -> None:
+        raw = gate._object(value, label)
+        pin: FilePin = {"path": gate._text(raw.get("path"), label + " path"),
+                        "sha256": gate._text(raw.get("sha256"), label + " SHA")}
+        gate.digest(pin["sha256"])
+        previous = pins.get(pin["path"])
+        gate.require(previous is None or previous == pin, "condition transport pin conflicts")
+        if previous is not None:
+            return
+        _condition_pin_file(pin, resumed_bundle)
+        pins[pin["path"]] = pin
+    for row in rows:
+        add({"path": str(row["fixture"]), "sha256": row["fixture_sha256"]}, "fixture")
+        add(row["plan_pin"], "operation plan")
+        if not row["catalog"]:
+            add({"path": str(row["dom"]), "sha256": row["dom_sha256"]}, "DOM evidence")
+            continue
+        for role in ("operation_evidence", "capture", "chrome_capture", "chrome_receipt",
+                     "font_identity_request", "font_identity_response"):
+            add(row[role], role)
+        add({"path": row["font_identity_binary_path"],
+             "sha256": row["font_identity_binary_sha256"]}, "font probe")
+        for pin in gate._objects(row["link_captures"], "link captures"):
+            add(pin, "link capture")
+        for pin in _condition_provenance(row, resumed_bundle):
+            add(pin, "provenance")
+    return list(pins.values())
+
+
+def _planned_transport_refs(
+    plans: Sequence[tuple[gate.JsonObject, gate.JsonObject, gate.JsonObject | None,
+                          list[gate.JsonObject], list[gate.JsonObject], list[gate.JsonObject]]],
+    condition_refs: Sequence[FilePin], bundles: Sequence[gate.Bundle],
+    transport_sources: Mapping[str, Path],
+) -> list[FilePin]:
+    pins = {pin["path"]: pin for pin in condition_refs}
+    for expected, snapshot, capture, links, provenance, execution in plans:
+        required = gate._required_context_input_refs(expected, snapshot, capture, links, provenance, execution)
+        for value in required:
+            path = gate._text(value.get("path"), "planned transport path")
+            checksum = gate._text(value.get("sha256"), "planned transport SHA")
+            gate.digest(checksum)
+            pin: FilePin = {"path": path, "sha256": checksum}
+            previous = pins.get(path)
+            gate.require(previous is None or previous == pin, "planned transport pin conflicts")
+            if previous is not None:
+                continue
+            source_bundle = next((bundle for bundle in bundles if path in bundle.files), None)
+            if source_bundle is not None:
+                source_bundle.file(pin)
+            else:
+                _pinned_file(transport_sources.get(path, Path(path)), checksum)
+            pins[path] = pin
+    return list(pins.values())
+
+
+def _preflight_planned_transport(
+    root: Path, rows: Sequence[gate.JsonObject], snapshot: gate.JsonObject,
+    arms: Mapping[str, ArmPin], binaries: Mapping[str, gate.JsonObject],
+    reference_contract: gate.JsonObject | None, catalog_refs: Mapping[str, object],
+    condition_refs: Sequence[FilePin], bundles: Sequence[gate.Bundle],
+    transport_sources: Mapping[str, Path], resumed_bundle: gate.Bundle | None,
+) -> list[FilePin]:
+    plans: list[tuple[gate.JsonObject, gate.JsonObject, gate.JsonObject | None,
+                      list[gate.JsonObject], list[gate.JsonObject], list[gate.JsonObject]]] = []
+    for row in rows:
+        dom_ref = (row["operation_evidence"] if row["catalog"] else
+                   {"path": str(row["dom"]), "sha256": row["dom_sha256"]})
+        expected: gate.JsonObject = {"arms": dict(arms), "fixture_sha256": row["fixture_sha256"],
+                                     "operationPlanRef": row["plan_pin"], "domStateRef": dom_ref}
+        if reference_contract is not None:
+            expected["referenceParent"] = reference_contract
+        capture: gate.JsonObject | None = None
+        links: list[gate.JsonObject] = []
+        provenance: list[gate.JsonObject] = []
+        if row["catalog"]:
+            expected.update(catalog_refs)
+            expected.update({"catalogCondition": {"fixture_path": str(row["fixture"])},
+                "operationEvidenceRef": row["operation_evidence"], "chromeCaptureRef": row["chrome_capture"],
+                "chromeReceiptRef": row["chrome_receipt"], "fontIdentityRequestRef": row["font_identity_request"],
+                "fontIdentityResponseRef": row["font_identity_response"],
+                "fontIdentityProbeBinary": {"path": row["font_identity_binary_path"],
+                                            "sha256": row["font_identity_binary_sha256"]}})
+            capture = gate._object(row["capture"], "capture")
+            links = gate._objects(row["link_captures"], "link captures")
+            provenance = _condition_provenance(row, resumed_bundle)
+        execution = gate.planned_execution_inputs(root, expected, binaries)
+        plans.append((expected, snapshot, capture, links, provenance, execution))
+    return _planned_transport_refs(plans, condition_refs, bundles, transport_sources)
+
+
 def _validate_epoch_resume_contexts(
     bundle: gate.Bundle, receipt: Mapping[str, object], root: Path, head: str,
     source: gate.JsonObject, before: Mapping[str, object], end: Mapping[str, object],
@@ -3651,6 +3767,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             )
             row["plan_path"], row["plan"], row["plan_pin"] = old_path, old_plan, old_pin
     all_measurement_rows = measurement_rows
+    condition_transport_refs = _preflight_condition_transport_refs(all_measurement_rows, resumed_bundle)
     all_condition_ids = ([_row_condition_id(row) for row in all_measurement_rows]
                          if catalog_conditions is not None else [])
     gate.require(len(all_condition_ids) == len(set(all_condition_ids)),
@@ -3673,9 +3790,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     provenance_input_paths = [
         Path(cast(str, ref["path"]))
         for row in all_measurement_rows if row["catalog"]
-        for ref in gate.provenance_file_refs(
-            gate.read_json(Path(cast(FilePin, row["operation_evidence"])["path"]))
-        )
+        for ref in _condition_provenance(row, resumed_bundle)
     ]
     input_paths = [*[cast(Path, row["fixture"]) for row in all_measurement_rows],
                    *[cast(Path, row["plan_path"]) for row in all_measurement_rows],
@@ -3716,6 +3831,31 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         reference_parent=reference_proof, reference_contract=reference_contract,
         fresh_snapshot_sha256=fresh_inputs.snapshot["sha256"] if fresh_inputs is not None else None,
         fresh_lock_sha256=fresh_reference.build_pins["lockSha256"] if fresh_reference is not None else None,
+    )
+    binary_refs: dict[str, gate.JsonObject] = {
+        role: {"path": str(build.binary), "sha256": build.binary_sha256}
+        for role, build in builds.items()
+    }
+    for role, artifact in build_artifact_refs.items():
+        proof = _pinned_json(Path(artifact["path"]), artifact["sha256"])
+        _validate_planned_executable(proof, binary_refs[role],
+                                     reference_proof=reference_proof if role == "baseline" else None)
+    catalog_refs: dict[str, object] = {}
+    if catalog_conditions is not None:
+        if catalog_binary_refs is None:
+            raise ValueError("catalog binary proof refs are missing")
+        catalog_refs = {"catalogManifestRef": catalog_manifest_pin, "catalogPlanRef": catalog_plan_pin,
+                        "catalogCaptureValidationRef": catalog_capture_validation_pin,
+                        "catalogBinaryProofRef": catalog_binary_refs.proof_ref,
+                        "catalogBuildReportRef": catalog_binary_refs.build_report_ref,
+                        "catalogCaptureBinaryRef": catalog_binary_refs.binary_ref,
+                        "catalogCurrentBuildReportRef": catalog_binary_refs.current_build_report_ref}
+    transport_bundles = [bundle for bundle in (resumed_bundle, origin_bundle) if bundle is not None]
+    reference_sources = dict(reference_proof.transport_sources) if reference_proof is not None else {}
+    preflight_transport_refs = _preflight_planned_transport(
+        root, all_measurement_rows, cast(gate.JsonObject, build_inputs.snapshot), arms, binary_refs,
+        reference_contract, catalog_refs, condition_transport_refs,
+        transport_bundles, reference_sources, resumed_bundle,
     )
     if resumed_bundle is not None and resumed_receipt is not None and not resumed_attempts:
         if fixed_epoch is None:
@@ -3820,14 +3960,6 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             expected["catalogCurrentBuildReportRef"] = catalog_binary_refs.current_build_report_ref
         return expected
 
-    binary_refs: dict[str, gate.JsonObject] = {
-        role: {"path": str(build.binary), "sha256": build.binary_sha256}
-        for role, build in builds.items()
-    }
-    for role, artifact in build_artifact_refs.items():
-        proof = _pinned_json(Path(artifact["path"]), artifact["sha256"])
-        _validate_planned_executable(proof, binary_refs[role],
-                                     reference_proof=reference_proof if role == "baseline" else None)
     planned: dict[str, ExpectedPerformance] = {}
     planned_inputs: list[tuple[gate.JsonObject, gate.JsonObject, gate.JsonObject | None,
                                list[gate.JsonObject], list[gate.JsonObject], list[gate.JsonObject]]] = []
@@ -3836,16 +3968,21 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         name = gate._text(row["folder_name"], "measurement folder")
         gate.require(name not in planned, "measurement folders are duplicated")
         planned[name] = expected
-        evidence = gate.read_json(Path(expected["domStateRef"]["path"])) if row["catalog"] else None
+        provenance = _condition_provenance(row, resumed_bundle) if row["catalog"] else []
         planned_inputs.append((
             cast(gate.JsonObject, expected),
             cast(gate.JsonObject, build_inputs.snapshot),
             cast(gate.JsonObject, row["capture"]) if row["catalog"] else None,
             cast(list[gate.JsonObject], row["link_captures"]) if row["catalog"] else [],
-            gate.provenance_file_refs(evidence) if evidence is not None else [],
+            provenance,
             gate.planned_execution_inputs(root, cast(gate.JsonObject, expected), binary_refs),
         ))
     _validate_planned_inputs(cast(gate.JsonObject, before_context), planned_inputs)
+    planned_transport_refs = _planned_transport_refs(
+        planned_inputs, preflight_transport_refs, transport_bundles, reference_sources,
+    )
+    gate.require(planned_transport_refs == preflight_transport_refs,
+                 "planned transport closure changed after preflight")
     transport_attempts: list[dict[str, FilePin]] = list(resumed_attempts)
     expected_all: list[tuple[Path, ExpectedPerformance, gate.JsonObject, FilePin]] = []
     completed_rows: list[gate.JsonObject] = []
@@ -3965,8 +4102,8 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     flags = {name: before_endpoint[key] == after_endpoint[key] for name, key in mapping.items()}
     refs: list[FilePin] = [build_inputs.source_before, source_end, approved, build_inputs.snapshot,
                            before_pin, end_pin, build_inputs.capacity_input, *build_pins,
+                           *planned_transport_refs,
                            *[FilePin(path=str(p), sha256=gate.sha256(p)) for p in binaries.values()],
-                           *[FilePin(path=str(p), sha256=gate.sha256(p)) for p in provenance_input_paths],
                            *checkpoint_pins, *worker_attempt_pins, *capacity_transport_refs(binding)]
     if fixed_context_pin is not None:
         refs.append(fixed_context_pin)
@@ -4050,6 +4187,10 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                                  "transport source collision differs")
                 else:
                     transport_sources[logical_path] = physical
+    ref_hashes: dict[str, str] = {}
+    for ref in refs:
+        previous_sha = ref_hashes.setdefault(ref["path"], ref["sha256"])
+        gate.require(previous_sha == ref["sha256"], "transport references conflict")
     write_transport_bundle(bundle, head, refs, transport_attempts, source_paths=transport_sources)
     current_bundle = gate.Bundle(bundle)
     attempt_ids = [_attempt_condition_id(current_bundle, attempt)
