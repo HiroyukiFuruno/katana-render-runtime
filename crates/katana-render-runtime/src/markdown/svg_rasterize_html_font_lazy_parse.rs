@@ -107,7 +107,7 @@ pub(in crate::markdown::svg_rasterize) fn rasterize(
 ) -> Result<super::super::super::RasterizedSvg, super::super::super::SvgRasterizeError> {
     let compatible = super::super::super::SvgRasterizeOps::preprocess_for_rasterizer(svg);
     let (tree, document) = parse_document(&compatible, svg)
-        .map_err(|error| super::super::super::SvgRasterizeError::ParseFailed(error.to_string()))?;
+        .map_err(super::super::super::SvgRasterizeError::parse_failed)?;
     super::super::super::SvgRasterizeOps::render_html_tree_with_text_provenance(
         &tree,
         scale,

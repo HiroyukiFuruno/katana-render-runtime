@@ -20,6 +20,21 @@ fn shared_render(
 }
 
 #[test]
+fn parse_failed_preserves_external_and_owned_error_messages() -> Result<(), String> {
+    let error = usvg::roxmltree::Document::parse("<svg")
+        .err()
+        .ok_or("invalid XML unexpectedly parsed")?;
+    let expected = error.to_string();
+    for actual in [
+        SvgRasterizeError::parse_failed(error),
+        SvgRasterizeError::parse_failed(expected.clone()),
+    ] {
+        assert_parse_error::<()>(Err(actual), &expected)?;
+    }
+    Ok(())
+}
+
+#[test]
 fn shared_xml_ascii_preparation_preserves_decoded_text() {
     let cases = [
         ("A&amp;B<![CDATA[>C]]>", Some("A&B>C")),

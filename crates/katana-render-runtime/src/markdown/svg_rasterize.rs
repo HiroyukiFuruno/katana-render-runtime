@@ -242,7 +242,7 @@ impl SvgRasterizeOps {
             let result = usvg::Tree::from_str(&compatible_svg, options);
             result
         })
-        .map_err(|e| SvgRasterizeError::ParseFailed(e.to_string()))?;
+        .map_err(SvgRasterizeError::parse_failed)?;
         Self::render_tree_with_provenance(&tree, scale, &compatible_svg, provenance)
     }
 

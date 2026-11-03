@@ -35,8 +35,8 @@ pub(super) fn authored_clip_ids(
     svg: &str,
     generated: &GeneratedClipProvenance,
 ) -> Result<AuthoredClipInfo, SvgRasterizeError> {
-    let document = resvg::usvg::roxmltree::Document::parse(svg)
-        .map_err(|error| SvgRasterizeError::ParseFailed(error.to_string()))?;
+    let document =
+        resvg::usvg::roxmltree::Document::parse(svg).map_err(SvgRasterizeError::parse_failed)?;
     Ok(authored_clip_info(&document, generated))
 }
 
@@ -46,8 +46,8 @@ pub(super) fn authored_svg_context(
     generated: &GeneratedClipProvenance,
     needs_authored_clip_ids: bool,
 ) -> Result<AuthoredSvgContext, SvgRasterizeError> {
-    let document = resvg::usvg::roxmltree::Document::parse(svg)
-        .map_err(|error| SvgRasterizeError::ParseFailed(error.to_string()))?;
+    let document =
+        resvg::usvg::roxmltree::Document::parse(svg).map_err(SvgRasterizeError::parse_failed)?;
     Ok(AuthoredSvgContext {
         clips: if needs_authored_clip_ids {
             authored_clip_info(&document, generated)

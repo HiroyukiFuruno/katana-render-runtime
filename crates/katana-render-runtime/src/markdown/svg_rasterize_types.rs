@@ -16,3 +16,9 @@ pub enum SvgRasterizeError {
     #[error("Failed to rasterize SVG: {0}")]
     RasterizeFailed(String),
 }
+
+impl SvgRasterizeError {
+    pub(super) fn parse_failed(error: impl ToString) -> Self {
+        Self::ParseFailed(error.to_string())
+    }
+}

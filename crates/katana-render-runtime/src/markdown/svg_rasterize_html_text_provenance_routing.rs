@@ -31,9 +31,7 @@ impl GeneratedHtmlTextProvenance {
         if self.entries.is_empty() {
             return Ok(HtmlTextRouting::default());
         }
-        let document = document
-            .as_ref()
-            .map_err(|error| SvgRasterizeError::ParseFailed(error.to_string()))?;
+        let document = document.as_ref().map_err(SvgRasterizeError::parse_failed)?;
         Ok(validated_routing(
             &self.entries,
             document.input_text(),

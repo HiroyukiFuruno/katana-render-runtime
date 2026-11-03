@@ -27,7 +27,7 @@ pub(super) fn fallback_text_width(
     let tree = super::super::text_shaping::with_validated_tree_parse(|| {
         usvg::Tree::from_str(&svg, &options)
     })
-    .map_err(|error| SvgRasterizeError::ParseFailed(error.to_string()))?;
+    .map_err(SvgRasterizeError::parse_failed)?;
     Ok(tree
         .node_by_id("krr-text-measure")
         .map(|node| node.abs_bounding_box().width())
