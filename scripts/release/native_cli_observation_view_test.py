@@ -8,10 +8,58 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import native_cli_observation_view as view
+import native_cli_guard_observation_view as guard_view
 from produce_html_performance_evidence import NativeCliCommandEvidence
 
 
 class NativeCliObservationViewTests(unittest.TestCase):
+    def test_guard_v2_projects_only_fixed_fields(self) -> None:
+        secret = "SYNTHETIC_GUARD_SECRET"
+        payload = valid_guard_observation(secret)
+        result, stdout, stderr = run_view_text(json.dumps(payload))
+        self.assertEqual((result, stderr), (0, ""))
+        self.assertNotIn(secret, stdout)
+        summary = json.loads(stdout)
+        self.assertEqual(set(summary), {"schema", "status", "pid", "actualExit", "signal", "reaped",
+                                        "startedNs", "endedNs", "rawFdsClosed", "stdout", "stderr",
+                                        "errorClasses", "errorCount", "errorReasons"})
+        self.assertEqual(summary["errorClasses"], ["RuntimeError", "other"])
+        self.assertEqual(summary["errorCount"], 2)
+        self.assertEqual(summary["errorReasons"], ["other", "other"])
+        self.assertEqual(summary["stdout"]["sha256"], "a" * 64)
+
+    def test_guard_v2_classifies_only_exact_known_reasons(self) -> None:
+        secret = "SYNTHETIC_DYNAMIC_REASON_SECRET"
+        payload = valid_guard_observation(secret)
+        payload["errors"] = ["RuntimeError: capacity metric unavailable or over capacity",
+                             f"RuntimeError: capacity metric unavailable or over capacity {secret}"]
+        result, stdout, stderr = run_view_text(json.dumps(payload))
+        self.assertEqual((result, stderr), (0, ""))
+        self.assertNotIn(secret, stdout)
+        self.assertEqual(json.loads(stdout)["errorReasons"], ["capacity_unavailable_or_over_limit", "other"])
+
+    def test_guard_v2_rejects_schema_field_and_type_drift(self) -> None:
+        secret = "SYNTHETIC_GUARD_BAD_SECRET"
+        mutations = (
+            lambda row: row.update(schema="unknown-v2"),
+            lambda row: row.update(extra=secret),
+            lambda row: row.pop("scope"),
+            lambda row: row.update(diagnosticOnly=False),
+            lambda row: row.update(accepted=True),
+            lambda row: row.update(externalGroupClosureRequired=False),
+            lambda row: row.update(status="unknown"),
+            lambda row: cast_guard_cargo(row).update(extra=secret),
+            lambda row: cast_guard_cargo(row).pop("pid"),
+            lambda row: cast_guard_cargo(row).update(pid=True),
+            lambda row: cast_guard_cargo(row).update(endedNs=secret),
+            lambda row: cast_guard_cargo(row).update(stdout={"path": secret}),
+            lambda row: row.update(errors=[{"error": secret}]),
+        )
+        for mutation in mutations:
+            payload = valid_guard_observation(secret)
+            mutation(payload)
+            self.assert_cli_rejects_payload(payload, secret)
+
     def test_summary_accepts_native_namedtuple_wrapper(self) -> None:
         secret = "SYNTHETIC_WRAPPER_SECRET_SENTINEL"
         payload = valid_observation()
@@ -135,6 +183,35 @@ def valid_observation() -> dict[str, object]:
         "pid": 42, "actualExit": 0, "startedNs": "100", "endedNs": "200",
         "reaped": True, "errors": [],
     }
+
+
+def cast_guard_cargo(payload: dict[str, object]) -> dict[str, object]:
+    cargo = payload["ownedCargo"]
+    assert isinstance(cargo, dict)
+    return cargo
+
+
+def valid_guard_observation(secret: str) -> dict[str, object]:
+    cargo: dict[str, object] = {
+        "argv": [secret], "cwd": secret, "attemptToken": secret,
+        "environment": {"SECRET": secret}, "environmentSha256": secret,
+        "pid": 42, "parentPid": 41, "sessionId": 40, "processGroupId": 40,
+        "spawnObservedMonotonicNs": "80", "startedNs": "100", "endedNs": "200",
+        "actualExit": 1, "signal": None, "reaped": True, "rawFdsClosed": True,
+        "stdout": {"path": "/tmp/stdout", "sha256": "a" * 64, "size": 12},
+        "stderr": None, "errors": [f"RuntimeError: {secret}", f"PrivateError: {secret}"],
+    }
+    payload: dict[str, object] = {key: {"secret": secret} for key in (
+        "request", "sourceManifest", "metadata", "metadataObservation", "expectedPackage",
+        "expectedTarget", "cargo", "rustc", "cargoLauncher", "rustcLauncher", "capacityProtection")}
+    payload.update({key: None for key in (
+        "pinsBefore", "pinsAfter", "capacityBefore", "capacityAfter", "binaryBefore",
+        "binaryAfter", "artifact", "buildFinished")})
+    payload.update({"schema": guard_view.SCHEMA, "status": "failed", "diagnosticOnly": True,
+                    "accepted": False, "attemptToken": secret, "sourceDigest": secret,
+                    "scope": secret, "rustupResolutionQueries": [], "guardCodePins": [],
+                    "ownedCargo": cargo, "errors": cargo["errors"], "externalGroupClosureRequired": True})
+    return payload
 
 
 def run_view_text(payload: str) -> tuple[int, str, str]:

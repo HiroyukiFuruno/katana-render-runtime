@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import cast
 
 import verify_html_performance_evidence as gate
+import native_cli_guard_observation_view as guard_view
 
 OBSERVATION_FIELDS = {
     "argv", "stdout", "stderr", "label", "cwd", "attemptToken",
@@ -53,6 +54,8 @@ def _artifact(value: object) -> dict[str, object]:
 
 def safe_summary(value: object) -> dict[str, object]:
     observation = _observation(value)
+    if observation.get("schema") == guard_view.SCHEMA:
+        return guard_view.safe_guard_summary(observation)
     _exact_fields(observation, OBSERVATION_FIELDS)
     _validate_private_fields(observation)
     started = _timestamp(observation["startedNs"])
