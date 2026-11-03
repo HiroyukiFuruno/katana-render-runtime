@@ -1707,6 +1707,83 @@ def _verified_reuse_context(root: Path, measured_head: str, *, git_query: GitQue
                                  text_query, bytes_query, allow_test_changes=allow_test_changes)
 
 
+class PartialEpochCurrentBuild(NamedTuple):
+    directory: Path
+    manifest_sha256: str
+    artifact_path: str
+    artifact_sha256: str
+
+
+def _verified_partial_epoch_source(
+    old_bundle: Bundle, root: Path, old_expected: JsonObject, current: PartialEpochCurrentBuild,
+    *, git_query: GitQuery | None = None,
+) -> object:
+    """Authenticate source/build identity only; this does not establish runtime eligibility."""
+    from html_performance_source_reuse import SourceReuseContext, _modes
+
+    digest(current.manifest_sha256)
+    digest(current.artifact_sha256)
+    current_bundle = Bundle(current.directory)
+    require(sha256(current_bundle.directory / "bundle.json") == current.manifest_sha256,
+            "partial epoch current build bundle differs")
+    current_head = git(root, "rev-parse", "HEAD", git_query=git_query).strip()
+    require(current_bundle.manifest.get("head") == current_head,
+            "partial epoch current build HEAD differs")
+    old_pair = _object(old_expected.get("sourcePair"), "old source pair")
+    old_before = old_bundle.json(old_pair["before"])
+    old_head = _text(old_before.get("head"), "partial epoch source HEAD")
+    require(old_bundle.manifest.get("head") == old_head, "partial epoch bundle HEAD differs")
+    require(git(root, "merge-base", old_head, current_head, git_query=git_query).strip() == old_head,
+            "partial epoch source is not an ancestor")
+    old_records = committed_records(root, old_head, git_query=git_query)
+    current_records = committed_records(root, current_head, git_query=git_query)
+    require(not git(root, "status", "--porcelain=v1", "--untracked-files=all", git_query=git_query),
+            "partial epoch current source is dirty")
+    def program_closure(records: SourceRecords) -> SourceRecords:
+        return {path: value for path, value in records.items()
+                if path.startswith("scripts/") or path == "Justfile"}
+    require(program_closure(old_records) == program_closure(current_records),
+            "partial epoch measurement program source differs")
+    old_tree = _git_output(root, ("ls-tree", "-r", "-z", old_head), git_query=git_query)
+    current_tree = _git_output(root, ("ls-tree", "-r", "-z", current_head), git_query=git_query)
+    if not isinstance(old_tree, bytes) or not isinstance(current_tree, bytes):
+        raise ValueError("partial epoch Git tree output is not binary")
+    old_modes, current_modes = _modes(old_tree), _modes(current_tree)
+    require(all(old_modes.get(path) == current_modes.get(path)
+                for path in program_closure(old_records)), "partial epoch program mode differs")
+    current_ref = current_bundle.relative_reference(current.artifact_path, current.artifact_sha256)
+    current_proof = _validate_build_proof(current_bundle, root, current_ref, "candidate",
+                                          git_query=git_query)
+    require(current_proof.get("head") == current_head, "partial epoch current build source differs")
+    # The provisional object is local: it is returned only after both strict build proofs match.
+    provisional = SourceReuseContext(old_head, current_head, old_records, (), True)
+    arms = _object(old_expected.get("arms"), "old arms")
+    candidate = _object(arms.get("candidate"), "old candidate arm")
+    old_proof = _validate_build_proof(old_bundle, root, candidate.get("build_artifact_ref"),
+                                      "candidate", git_query=git_query, reuse_context=provisional)
+    require(old_proof.get("head") == old_head, "partial epoch old build source differs")
+    endpoints = _object(old_expected.get("endpointRefs"), "partial epoch endpoints")
+    old_context = old_bundle.json(endpoints.get("before"))
+    tool = _object(old_context.get("toolContext"), "partial epoch tool context")
+    versions = _object(old_proof.get("toolVersions"), "partial epoch build tool versions")
+    require(all(tool.get(name) == versions.get(name) for name in ("rustc", "cargo")),
+            "partial epoch measured/build tool versions differ")
+    for key in ("binarySha256", "lockSha256", "cargoExecutableSha256", "rustcExecutableSha256",
+                "buildEnvironmentSha256", "toolVersions", "cargoConfigPins",
+                "cargoLauncher", "rustcLauncher", "guardPython"):
+        require(key in old_proof and key in current_proof and old_proof[key] == current_proof[key],
+                "partial epoch build differs: " + key)
+    require(candidate.get("binary_sha256") == old_proof.get("binarySha256")
+            and candidate.get("source_snapshot_sha256") == old_proof.get("sourceSnapshotSha256")
+            and candidate.get("lock_sha256") == old_proof.get("lockSha256"),
+            "partial epoch candidate role differs")
+    require(sha256(current_bundle.directory / "bundle.json") == current.manifest_sha256
+            and git(root, "rev-parse", "HEAD", git_query=git_query).strip() == current_head
+            and not git(root, "status", "--porcelain=v1", "--untracked-files=all", git_query=git_query),
+            "partial epoch current source changed during validation")
+    return provisional
+
+
 def _validate_epoch_projection_context(context: JsonObject, projection: JsonObject) -> None:
     """Bind an authenticated projection to the actual transported context."""
     from html_performance_epoch_reuse import _inventory_digest

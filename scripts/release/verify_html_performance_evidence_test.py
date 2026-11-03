@@ -1966,6 +1966,64 @@ class PerformanceEvidenceTest(unittest.TestCase):
         self.assertIn("formal HTML performance requires all 84 catalog conditions",
                       stderr.getvalue())
 
+    def test_partial_epoch_source_requires_matching_independent_build_proofs(self) -> None:
+        from html_performance_source_reuse import SourceReuseContext
+
+        old_expected = gate.read_json(self.expected_paths[0])
+        bundle = gate.Bundle(self.bundle)
+        history = self.root / "docs/performance/html-performance-history.json"
+        history.write_text("changed documentation\n")
+        subprocess.run(["git", "-C", str(self.root), "add", str(history)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Unit", "-c",
+                        "user.email=unit@example.invalid", "commit", "-qm", "docs"], check=True)
+        current_head = gate.git(self.root, "rev-parse", "HEAD").strip()
+        current_bundle = Path(self.temp.name) / "v3-current-build"
+        shutil.copytree(self.bundle, current_bundle)
+        manifest_path = current_bundle / "bundle.json"
+        manifest = gate.read_json(manifest_path)
+        manifest["head"] = current_head
+        manifest_path.write_text(json.dumps(manifest, sort_keys=True))
+        proof = gate.PartialEpochCurrentBuild(
+            current_bundle, gate.sha256(manifest_path), "common/candidate-build.json",
+            gate.sha256(current_bundle / "common/candidate-build.json"),
+        )
+        old_arm = json_object_at(old_expected, "arms", "candidate")
+        common: JsonObject = {key: "fixture" for key in (
+            "cargoExecutableSha256", "rustcExecutableSha256", "buildEnvironmentSha256",
+            "toolVersions", "cargoConfigPins", "cargoLauncher", "rustcLauncher", "guardPython")}
+        common["toolVersions"] = {"rustc": "rustc 1.97\nrelease", "cargo": "cargo 1.97\nrelease"}
+        old_proof: JsonObject = {**common, "head": self.head,
+            "binarySha256": old_arm["binary_sha256"], "lockSha256": old_arm["lock_sha256"],
+            "sourceSnapshotSha256": old_arm["source_snapshot_sha256"]}
+        current_proof: JsonObject = {**common, "head": current_head,
+            "binarySha256": old_arm["binary_sha256"], "lockSha256": old_arm["lock_sha256"]}
+        with patch.object(gate, "_validate_build_proof", side_effect=[current_proof, old_proof]) as checked:
+            context = gate._verified_partial_epoch_source(bundle, self.root, old_expected, proof)
+        self.assertIsInstance(context, SourceReuseContext)
+        if not isinstance(context, SourceReuseContext):
+            raise AssertionError("partial epoch context differs")
+        self.assertEqual(checked.call_count, 2)
+        self.assertEqual(context.measured_head, self.head)
+        with patch.object(gate, "_validate_build_proof", side_effect=[{**current_proof, "binarySha256": "0" * 64}, old_proof]):
+            with self.assertRaisesRegex(ValueError, "build differs: binarySha256"):
+                gate._verified_partial_epoch_source(bundle, self.root, old_expected, proof)
+        with self.assertRaisesRegex(ValueError, "current build bundle differs"):
+            gate._verified_partial_epoch_source(
+                bundle, self.root, old_expected, proof._replace(manifest_sha256="0" * 64),
+            )
+        program = self.root / "scripts/release/new-worker.py"
+        program.parent.mkdir(parents=True)
+        program.write_text("changed program")
+        subprocess.run(["git", "-C", str(self.root), "add", str(program)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Unit", "-c",
+                        "user.email=unit@example.invalid", "commit", "-qm", "program"], check=True)
+        manifest["head"] = gate.git(self.root, "rev-parse", "HEAD").strip()
+        manifest_path.write_text(json.dumps(manifest, sort_keys=True))
+        with self.assertRaisesRegex(ValueError, "measurement program source differs"):
+            gate._verified_partial_epoch_source(
+                bundle, self.root, old_expected, proof._replace(manifest_sha256=gate.sha256(manifest_path)),
+            )
+
     def test_reuse_keeps_original_head_and_rejects_unaccepted_bundle(self) -> None:
         history = self.root / "docs/performance/html-performance-history.json"
         history.write_text("updated fixture\n")
