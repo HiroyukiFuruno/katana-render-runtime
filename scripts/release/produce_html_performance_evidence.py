@@ -1589,6 +1589,7 @@ def _validate_resume_batch(
     arms: Mapping[str, ArmPin],
     epoch_root: Path | None = None,
     epoch_log_directory: Path | None = None,
+    reference_proof: reference.ReferenceParentProof | None = None,
     git_query: gate.GitQuery | None = None,
 ) -> None:
     if before_context.get("schema") == "krr-html-performance-context-epoch-v3":
@@ -1610,26 +1611,43 @@ def _validate_resume_batch(
                          for raw_arm in (baseline_id, "candidate")),
                      "resume build pins differ")
         if before_context.get("schema") == "krr-html-performance-context-epoch-v3":
-            artifacts = gate._object(receipt.get("buildArtifacts"), "resume build artifacts")
-            workers = gate._object(before_context.get("systemWorkers"), "resume workers")
-            for role, arm_id in (("baseline", baseline_id), ("candidate", "candidate")):
-                arm = gate._object(old_arms.get(arm_id), "resume expected arm")
-                artifact = gate._object(artifacts.get(role), "resume build artifact")
-                gate.require(arm.get("build_artifact_ref") == artifact
-                             and gate._object(arms.get(arm_id), "current arm").get("build_artifact_ref") == artifact,
-                             "resume role artifact differs")
-                proof = bundle.json(artifact)
-                frozen = gate._object(proof.get("frozenBinary"), "resume frozen binary")
-                observation = gate._object(workers.get(role), "resume worker observation")
-                worker = gate._object(observation.get("worker"), "resume worker pin")
-                physical = bundle.file(frozen)
-                gate.require(worker.get("sha256") == frozen.get("sha256") == arm.get("binary_sha256")
-                             and worker.get("path") in (frozen.get("path"), str(physical)),
-                             "resume worker role differs")
-                if role == "candidate":
-                    origin = gate._object(before_context.get("epochOrigin"), "resume epoch origin")
-                    gate.require(artifact == origin.get("artifact") and worker == frozen,
-                                 "resume candidate origin differs")
+            _validate_resume_worker_roles(bundle, receipt, expected, arms,
+                                          cast(gate.JsonObject, before_context), reference_proof)
+
+
+def _validate_resume_worker_roles(
+    bundle: gate.Bundle, receipt: Mapping[str, object], expected: gate.JsonObject,
+    arms: Mapping[str, ArmPin], context_value: gate.JsonObject,
+    reference_proof: reference.ReferenceParentProof | None,
+) -> None:
+    artifacts = gate._object(receipt.get("buildArtifacts"), "resume build artifacts")
+    workers = gate._object(context_value.get("systemWorkers"), "resume workers")
+    old_arms = gate._object(expected.get("arms"), "resume expected arms")
+    for role, arm_id in (("baseline", gate.baseline_arm_id(expected)), ("candidate", "candidate")):
+        arm = gate._object(old_arms.get(arm_id), "resume expected arm")
+        artifact = gate._object(artifacts.get(role), "resume build artifact")
+        gate.require(_same_arm_identity(arm, gate._object(arms.get(arm_id), "current arm")),
+                     "resume build pins differ")
+        gate.require(arm.get("build_artifact_ref") == artifact
+                     and gate._object(arms.get(arm_id), "current arm").get("build_artifact_ref") == artifact,
+                     "resume role artifact differs")
+        proof = bundle.json(artifact)
+        frozen = gate._object(proof.get("frozenBinary"), "resume frozen binary")
+        worker = gate._object(gate._object(workers.get(role), "resume worker observation").get("worker"),
+                              "resume worker pin")
+        physical = bundle.file(frozen)
+        gate.require(worker.get("sha256") == frozen.get("sha256") == arm.get("binary_sha256"),
+                     "resume worker role differs")
+        if role == "baseline" and reference_proof is not None and reference_proof.transport_sources:
+            _validate_planned_executable(proof, worker, reference_proof=reference_proof)
+            bundle.file(worker)
+        else:
+            gate.require(worker.get("path") in (frozen.get("path"), str(physical)),
+                         "resume worker role differs")
+        if role == "candidate":
+            origin = gate._object(context_value.get("epochOrigin"), "resume epoch origin")
+            gate.require(artifact == origin.get("artifact") and worker == frozen,
+                         "resume candidate origin differs")
 
 
 def _validate_legacy_resume_contexts(
@@ -3497,6 +3515,11 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                          and end_source.get("stableEndpoints") is True,
                          "fixed epoch original source endpoints differ")
         initial_live = _live_checkout(root, lifecycle)
+        if resumed_receipt is not None and resumed_bundle is not None:
+            epoch_context = gate._object(resumed_receipt.get("epochContextRef"), "resume epoch context")
+            resumed_program_context = resumed_bundle.json(epoch_context)
+            gate._v3_program_source(root, resumed_program_context, [{"liveCheckout": initial_live}],
+                                    git_query=git_query)
     def require_source_stable(message: str) -> None:
         if fixed_epoch is None:
             gate.require(source(root, git_query=git_query) == initial, message)
@@ -3840,6 +3863,13 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         proof = _pinned_json(Path(artifact["path"]), artifact["sha256"])
         _validate_planned_executable(proof, binary_refs[role],
                                      reference_proof=reference_proof if role == "baseline" else None)
+    if fixed_epoch is not None and resumed_bundle is not None and resumed_receipt is not None:
+        previous_contexts = gate._object(resumed_receipt.get("contexts"), "resume context refs")
+        previous_context = resumed_bundle.json(previous_contexts["before"])
+        for attempt in resumed_attempts:
+            _validate_resume_worker_roles(resumed_bundle, resumed_receipt,
+                                          resumed_bundle.json(attempt["expected"]), arms,
+                                          previous_context, reference_proof)
     catalog_refs: dict[str, object] = {}
     if catalog_conditions is not None:
         if catalog_binary_refs is None:
@@ -3915,6 +3945,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             before_context=before_context, after_context=before_context, arms=arms,
             epoch_root=root if fixed_epoch is not None else None,
             epoch_log_directory=lifecycle if fixed_epoch is not None else None,
+            reference_proof=reference_proof,
             git_query=git_query,
         )
     def planned_expected(row: gate.JsonObject) -> ExpectedPerformance:
@@ -4061,6 +4092,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             before_context=before_context, after_context=after_context, arms=arms,
             epoch_root=root if fixed_epoch is not None else None,
             epoch_log_directory=lifecycle if fixed_epoch is not None else None,
+            reference_proof=reference_proof,
             git_query=git_query,
         )
     end_pin = write(output / "context-end.json", after_context)

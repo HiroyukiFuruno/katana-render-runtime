@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import copy
 import ast
+import base64
+import hashlib
 import inspect
 import json
 import errno
@@ -406,6 +408,59 @@ class CatalogProducerOperationTest(unittest.TestCase):
             physical.write_bytes(b"tampered")
             with self.assertRaisesRegex(ValueError, "planned executable differs"):
                 producer._validate_planned_executable({"frozenBinary": frozen}, binary, reference_proof=parent)
+
+    def test_resume_worker_roles_accept_two_layer_authenticated_transport_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            original = root / "original-worker"
+            original.write_bytes(b"baseline-worker")
+            frozen: typed_producer.FilePin = {"path": str(original), "sha256": gate.sha256(original)}
+            first = root / "history-bundle"
+            producer.write_transport_bundle(first, "a" * 40, [frozen], [])
+            first_bundle = gate.Bundle(first)
+            physical = first_bundle.file(frozen)
+            worker: gate.JsonObject = {"path": str(physical), "sha256": frozen["sha256"]}
+            parent = reference.ReferenceParentProof(
+                reference.REFERENCE_ROLE, "candidate", "a" * 40, "a" * 64,
+                frozen["sha256"], gate.LOCK_SHA, "b" * 64, "c" * 64, "d" * 64,
+                (reference.FilePin(frozen["path"], frozen["sha256"]),), root / "build", physical,
+                transport_sources=((frozen["path"], physical),))
+            baseline_artifact = producer.write(root / "baseline.json", {"frozenBinary": frozen})
+            candidate_file = root / "candidate"
+            candidate_file.write_bytes(b"candidate-worker")
+            candidate: typed_producer.FilePin = {"path": str(candidate_file), "sha256": gate.sha256(candidate_file)}
+            candidate_artifact = producer.write(root / "candidate.json", {"frozenBinary": candidate})
+            second = root / "measurement-bundle"
+            producer.write_transport_bundle(second, "a" * 40,
+                [frozen, cast(typed_producer.FilePin, worker), candidate, baseline_artifact, candidate_artifact], [],
+                source_paths={frozen["path"]: physical})
+            bundle = gate.Bundle(second)
+            self.assertNotEqual(str(physical), str(bundle.file(frozen)))
+            baseline: typed_producer.ArmPin = {"binary_sha256": frozen["sha256"],
+                "source_snapshot_sha256": "a" * 64, "lock_sha256": gate.LOCK_SHA,
+                "build_artifact_ref": baseline_artifact}
+            candidate_arm: typed_producer.ArmPin = {**baseline, "binary_sha256": candidate["sha256"],
+                                                    "build_artifact_ref": candidate_artifact}
+            arms = {gate.DEFAULT_BASELINE_ARM_ID: baseline, "candidate": candidate_arm}
+            expected: gate.JsonObject = {"arms": arms}
+            receipt: gate.JsonObject = {"buildArtifacts": {"baseline": baseline_artifact,
+                                                            "candidate": candidate_artifact}}
+            context: gate.JsonObject = {"systemWorkers": {"baseline": {"worker": worker},
+                "candidate": {"worker": candidate}}, "epochOrigin": {"artifact": candidate_artifact}}
+            producer._validate_resume_worker_roles(bundle, receipt, expected, arms, context, parent)
+            alias = root / "same-bytes-alias"
+            alias.write_bytes(b"baseline-worker")
+            workers = gate._object(context["systemWorkers"], "workers")
+            workers["baseline"] = {"worker": {"path": str(alias), "sha256": frozen["sha256"]}}
+            with self.assertRaises(ValueError):
+                producer._validate_resume_worker_roles(bundle, receipt, expected, arms, context, parent)
+            workers["baseline"] = {"worker": candidate}
+            with self.assertRaises(ValueError):
+                producer._validate_resume_worker_roles(bundle, receipt, expected, arms, context, parent)
+            workers["baseline"] = {"worker": worker}
+            bundle.file(frozen).write_bytes(b"tampered")
+            with self.assertRaises(ValueError):
+                producer._validate_resume_worker_roles(bundle, receipt, expected, arms, context, parent)
 
     def test_reference_parent_loader_forwards_query_and_all_dependency_refs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1938,6 +1993,53 @@ class RuntimeSyncPreflightTest(unittest.TestCase):
         gate._require_html84_acceptance(diagnostic, diagnostic=True)
         with self.assertRaisesRegex(ValueError, "HTML84 visual acceptance is not established"):
             gate._require_html84_acceptance(diagnostic)
+
+    def test_resume_rejects_changed_or_dirty_program_before_inventory(self) -> None:
+        def checkout(checksum: str, status: bytes) -> gate.JsonObject:
+            path = str(self.root / "scripts/program.py")
+            material = f"{path}\0{checksum}\0{1}\n"
+            return {"schema": "krr-html-performance-live-source-observation-v1", "root": str(self.root),
+                "head": "a" * 40, "indexSha256": "c" * 64,
+                "statusBase64": base64.b64encode(status).decode(),
+                "manifest": {"schema": "krr-native-build-source-manifest-v1",
+                    "files": [{"path": path, "sha256": checksum, "size": 1}],
+                    "digest": hashlib.sha256(material.encode()).hexdigest()}}
+        old = checkout("a" * 64, b"")
+        cases = ((checkout("b" * 64, b""), "program differs"),
+                 (checkout("a" * 64, b" M scripts/program.py\0"), "uncommitted changes"))
+        receipt: gate.JsonObject = {"epochContextRef": {"path": "/epoch", "sha256": "e" * 64}}
+        resumed = Mock(spec=gate.Bundle)
+        resumed.json.return_value = {"programSource": old}
+        origin = Mock(spec=gate.Bundle)
+        origin.relative_reference.return_value = {"path": "/artifact", "sha256": "f" * 64}
+        origin.json.side_effect = [{"sourceBeforeRef": "source"}, {"head": "a" * 40}]
+        fixed: typed_producer.FixedEpochContextInput = {"directory": self.root,
+            "manifest_sha256": "1" * 64, "artifact_path": "artifact", "artifact_sha256": "2" * 64,
+            "head": "a" * 40, "workers": {}}
+        manifest = self.root / "catalog.json"
+        pin: typed_producer.FilePin = {"path": str(manifest), "sha256": "d" * 64}
+        binary_refs = gate.CatalogBinaryRefs(pin, pin, pin, pin)
+        for live, message in cases:
+            with self.subTest(message=message), patch.dict(os.environ), \
+                 patch.object(platform, "system", return_value="Darwin"), \
+                 patch.object(platform, "machine", return_value="arm64"), \
+                 patch.object(producer, "load_closed_batch", return_value=(receipt, resumed, [])), \
+                 patch.object(producer, "_require_cpu_busy_resume"), \
+                 patch.object(producer, "load_catalog_conditions", return_value=([], pin, pin, binary_refs)), \
+                 patch.object(producer, "_make_git_query", return_value=None), \
+                 patch.object(remote_evidence, "validate_fixed_epoch_candidate_origin"), \
+                 patch.object(gate, "Bundle", return_value=origin), \
+                 patch.object(producer, "_live_checkout", return_value=live), \
+                 patch.object(gate, "committed_records", return_value={"scripts/program.py": ("a" * 64, 1)}), \
+                 patch.object(gate, "_git_output", return_value=b"100644 blob abc\tscripts/program.py\0"), \
+                 patch.object(producer, "inventory") as inventory, \
+                 patch.object(producer, "context") as context:
+                origin.json.side_effect = [{"sourceBeforeRef": "source"}, {"head": "a" * 40}]
+                with self.assertRaisesRegex(ValueError, message):
+                    producer.produce(self.root, self.output, catalog_manifest_path=manifest,
+                                     resume_batch=self.root / "closed", fixed_epoch=fixed)
+                inventory.assert_not_called()
+                context.assert_not_called()
 
     def test_stale_runtime_check_propagates_before_output_build_or_measurement(self) -> None:
         check = ["just", "runtime-bundle-check"]
