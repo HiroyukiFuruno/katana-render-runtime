@@ -32,6 +32,8 @@ import produce_html_performance_evidence as typed_producer
 import html_performance_host_load as host_load
 import html_performance_host_load_validation as load_validation
 import html_performance_reference as reference
+import html_performance_epoch_reuse as epoch_reuse
+import html_performance_remote_evidence as remote_evidence
 import html_performance_source_materialization as source_materialization
 import verify_html_performance_evidence as gate
 
@@ -1758,6 +1760,90 @@ class ContextEnvironmentPrivacyTest(unittest.TestCase):
                 "KRR_PERF_CARGO": "cargo", "KRR_PERF_ENVIRONMENT_SHA256": "context-pin",
                 "KRR_PERF_LOCK_PATH": str(root / "Cargo.lock"),
                 "KRR_PERF_SOURCE_SNAPSHOT_PATH": "snapshot.json"})
+
+
+class EpochContextTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+        self.candidate: gate.JsonObject = {"path": str(self.root / "candidate"), "sha256": "a" * 64}
+        self.baseline: gate.JsonObject = {"path": str(self.root / "baseline"), "sha256": "b" * 64}
+        self.source: gate.JsonObject = {"path": str(self.root / "fixed-source"), "sha256": "c" * 64}
+        self.snapshot: gate.JsonObject = {"path": str(self.root / "snapshot"), "sha256": "d" * 64}
+        self.fixed = remote_evidence.FixedEpochCandidateOrigin(
+            "e" * 40, "a" * 64, "d" * 64, "f" * 64, "1" * 64, "2" * 64, "3" * 64,
+        )
+        self.live: gate.JsonObject = {"schema": "krr-html-performance-live-source-observation-v1",
+                                      "root": str(self.root), "dirty": True}
+
+    def run_context(self, *, bad_candidate: bool = False,
+                    changed_checkout: bool = False, invalid_origin: bool = False,
+                    invalid_worker: bool = False) -> typed_producer.EpochContextSnapshot:
+        base_environment = {"PATH": os.environ.get("PATH", "")}
+        origin: typed_producer.FixedEpochContextInput = {
+            "directory": self.root / "bundle", "manifest_sha256": "4" * 64,
+            "artifact_path": str(self.root / "artifact"), "artifact_sha256": "1" * 64,
+            "head": "e" * 40, "workers": {"baseline": self.baseline,
+                "candidate": self.baseline if bad_candidate else self.candidate},
+        }
+        artifact: gate.JsonObject = {"path": origin["artifact_path"], "sha256": origin["artifact_sha256"]}
+        bundle = Mock()
+        bundle.relative_reference.return_value = artifact
+        bundle.json.return_value = {"sourceBeforeRef": self.source, "sourceSnapshotRef": self.snapshot,
+                                    "frozenBinary": self.candidate}
+        live_end = {**self.live, "head": "changed"} if changed_checkout else self.live
+        def tool(args: Sequence[str], **_kwargs: object) -> str:
+            return args[0] + " version"
+        with patch.dict(os.environ, base_environment, clear=True), \
+             patch.object(remote_evidence, "validate_fixed_epoch_candidate_origin",
+                          side_effect=ValueError("origin invalid") if invalid_origin else None,
+                          return_value=self.fixed), \
+             patch.object(gate, "Bundle", return_value=bundle), \
+             patch.object(gate, "sha256", return_value=self.fixed.lock_sha256), \
+             patch.object(producer, "_pinned_file"), \
+             patch.object(producer, "source", side_effect=AssertionError("legacy source called")), \
+             patch.object(producer, "_live_checkout", side_effect=[self.live, live_end]), \
+             patch.object(producer, "inventory", return_value={"files": []}), \
+             patch.object(producer, "command", side_effect=tool), \
+             patch.object(epoch_reuse, "observe_system_only_worker",
+                          side_effect=ValueError("worker invalid") if invalid_worker else None,
+                          return_value={"schema": "krr-html-system-only-worker-observation-v1"}):
+            return producer.context(self.root, self.root / "target", [], self.root / "logs",
+                                    epoch_origin=origin)
+
+    def test_fixed_origin_and_dirty_live_checkout_are_distinct(self) -> None:
+        result = self.run_context()
+        self.assertEqual(result["schema"], "krr-html-performance-context-epoch-v3")
+        self.assertEqual(result["epochOrigin"]["source"], self.source)
+        self.assertEqual(result["liveCheckout"], self.live)
+        self.assertNotIn("source", result)
+        self.assertEqual(set(result["systemWorkers"]), {"baseline", "candidate"})
+        self.assertEqual(result["cacheUnion"], {"registry": result["registry"], "target": result["cache"]})
+        contract = gate._object(result["workerEnvironment"], "worker environment")
+        self.assertEqual(contract["baseEnvironmentSha256"], result["toolContext"]["environmentSha256"])
+        metadata = gate._object(contract["metadata"], "worker metadata")
+        self.assertEqual(metadata["KRR_PERF_ENVIRONMENT_SHA256"], "before-context-sha256")
+        self.assertEqual(metadata["KRR_PERF_SOURCE_SNAPSHOT_PATH"], self.snapshot["path"])
+        self.assertNotIn("accepted", result)
+
+    def test_rejects_changed_checkout_and_invalid_origin_or_worker(self) -> None:
+        for kwargs in ({"bad_candidate": True}, {"changed_checkout": True},
+                       {"invalid_origin": True}, {"invalid_worker": True}):
+            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
+                self.run_context(**kwargs)
+
+    def test_live_checkout_calls_native_observer_and_rejects_wrong_root(self) -> None:
+        output = {"schema": "krr-html-performance-live-source-observation-v1", "root": str(self.root)}
+        result = subprocess.CompletedProcess([], 0, json.dumps(output).encode(), b"")
+        with patch.object(producer, "_measurement_command", return_value=result) as execute:
+            self.assertEqual(producer._live_checkout(self.root, self.root / "logs"), output)
+        self.assertEqual(execute.call_args.args[0], ["bun", "run",
+            "scripts/mermaid/native-live-source-observation.ts", "--root", str(self.root)])
+        result.stdout = json.dumps({**output, "root": "/other"}).encode()
+        with patch.object(producer, "_measurement_command", return_value=result), \
+             self.assertRaisesRegex(ValueError, "identity differs"):
+            producer._live_checkout(self.root, self.root / "logs")
 
 
 class WorkerAttemptContractTest(unittest.TestCase):

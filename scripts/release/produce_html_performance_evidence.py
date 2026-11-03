@@ -30,6 +30,8 @@ import html_performance_inventory as inventory_ops
 import html_performance_host_load as host_load
 import html_performance_host_load_validation as load_validation
 import html_performance_reference as reference
+import html_performance_epoch_reuse as epoch_reuse
+import html_performance_remote_evidence as remote_evidence
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "build"))
 LOCAL_CAPACITY_BASELINE = 2363047936
@@ -144,6 +146,31 @@ class ToolContext(TypedDict):
 
 class ContextSnapshot(TypedDict):
     source: gate.JsonObject
+    inputs: list[gate.JsonObject]
+    registry: gate.JsonObject
+    cache: gate.JsonObject
+    cacheUnion: dict[str, gate.JsonObject]
+    scope: dict[str, str]
+    config: list[gate.JsonObject]
+    preference: gate.JsonObject
+    toolContext: ToolContext
+
+
+class FixedEpochContextInput(TypedDict):
+    directory: Path
+    manifest_sha256: str
+    artifact_path: str
+    artifact_sha256: str
+    head: str
+    workers: Mapping[str, gate.JsonObject]
+
+
+class EpochContextSnapshot(TypedDict):
+    schema: str
+    epochOrigin: gate.JsonObject
+    liveCheckout: gate.JsonObject
+    systemWorkers: gate.JsonObject
+    workerEnvironment: gate.JsonObject
     inputs: list[gate.JsonObject]
     registry: gate.JsonObject
     cache: gate.JsonObject
@@ -2023,13 +2050,115 @@ def file_state(path: Path) -> gate.JsonObject:
     return {"path": str(path), "exists": path.is_file(), "sha256": gate.sha256(path) if path.is_file() else None}
 
 
+def _live_checkout(root: Path, log_directory: Path) -> gate.JsonObject:
+    result = _measurement_command(
+        ["bun", "run", "scripts/mermaid/native-live-source-observation.ts", "--root", str(root)],
+        cwd=root, role="preflight", log_directory=log_directory,
+    )
+    observed = gate._object(json.loads(result.stdout, object_pairs_hook=gate.unique_object),
+                            "live checkout observation")
+    gate.require(observed.get("schema") == "krr-html-performance-live-source-observation-v1"
+                 and observed.get("root") == str(root), "live checkout observation identity differs")
+    return observed
+
+
+@overload
+def context(root: Path, target: Path, input_paths: Sequence[Path], log_directory: Path, *,
+            git_query: gate.GitQuery | None = None,
+            epoch_origin: None = None) -> ContextSnapshot: ...
+
+
+@overload
+def context(root: Path, target: Path, input_paths: Sequence[Path], log_directory: Path, *,
+            git_query: gate.GitQuery | None = None,
+            epoch_origin: FixedEpochContextInput) -> EpochContextSnapshot: ...
+
+
 def context(root: Path, target: Path, input_paths: Sequence[Path], log_directory: Path,
-            *, git_query: gate.GitQuery | None = None) -> ContextSnapshot:
+            *, git_query: gate.GitQuery | None = None,
+            epoch_origin: FixedEpochContextInput | None = None) -> ContextSnapshot | EpochContextSnapshot:
+    if epoch_origin is not None:
+        return _epoch_context(root, target, input_paths, log_directory, epoch_origin,
+                              git_query=git_query)
     cargo_home = Path(os.environ.get("CARGO_HOME", str(Path.home() / ".cargo"))).resolve()
     registry = inventory(cargo_home / "registry")
     cache = inventory(target)
     scope = {"registry": str(cargo_home / "registry"), "target": str(target)}
     return {"source": source(root, git_query=git_query), "inputs": [file_state(p) for p in input_paths], "registry": registry, "cache": cache, "cacheUnion": {"registry": registry, "target": cache}, "scope": scope, "config": [file_state(p) for p in (root / ".cargo/config.toml", root / ".cargo/config", cargo_home / "config.toml", cargo_home / "config")], "preference": file_state(Path.home() / ".CFUserTextEncoding"), "toolContext": {"rustc": command(["rustc", "-vV"], text=True, role="tool-query", log_directory=log_directory), "cargo": command(["cargo", "-vV"], text=True, role="tool-query", log_directory=log_directory), "platform": platform.platform(), "cpuCount": os.cpu_count(), "environmentSha256": _environment_sha256(os.environ)}}
+
+
+def _epoch_context(root: Path, target: Path, input_paths: Sequence[Path], log_directory: Path,
+                   origin: FixedEpochContextInput, *,
+                   git_query: gate.GitQuery | None) -> EpochContextSnapshot:
+    def authenticate() -> remote_evidence.FixedEpochCandidateOrigin:
+        return remote_evidence.validate_fixed_epoch_candidate_origin(
+            origin["directory"], root, origin["manifest_sha256"], origin["artifact_path"],
+            origin["artifact_sha256"], origin["head"], git_query=git_query,
+        )
+
+    fixed = authenticate()
+    bundle = gate.Bundle(origin["directory"])
+    artifact = bundle.relative_reference(origin["artifact_path"], origin["artifact_sha256"])
+    proof = bundle.json(artifact)
+    fixed_source = gate._object(proof.get("sourceBeforeRef"), "fixed source reference")
+    fixed_snapshot = gate._object(proof.get("sourceSnapshotRef"), "fixed snapshot reference")
+    bundle.file(fixed_source)
+    bundle.file(fixed_snapshot)
+    workers = origin["workers"]
+    gate.require(set(workers) == {"baseline", "candidate"}, "epoch worker roles differ")
+    gate.require(workers["candidate"] == proof.get("frozenBinary")
+                 and workers["candidate"].get("sha256") == fixed.binary_sha256,
+                 "epoch candidate worker differs from fixed origin")
+    environment = dict(os.environ)
+    lock = root / gate.HARNESS_ROOT / "Cargo.lock"
+    gate.require(gate.sha256(lock) == fixed.lock_sha256,
+                 "epoch worker lock differs from fixed origin")
+    _pinned_file(Path(gate._text(fixed_snapshot.get("path"), "fixed snapshot path")),
+                 gate._text(fixed_snapshot.get("sha256"), "fixed snapshot SHA"))
+    live = _live_checkout(root, log_directory)
+    cargo_home = Path(os.environ.get("CARGO_HOME", str(Path.home() / ".cargo"))).resolve()
+    registry = inventory(cargo_home / "registry")
+    cache = inventory(target)
+    tools: ToolContext = {
+        "rustc": command(["rustc", "-vV"], text=True, role="tool-query", log_directory=log_directory),
+        "cargo": command(["cargo", "-vV"], text=True, role="tool-query", log_directory=log_directory),
+        "platform": platform.platform(), "cpuCount": os.cpu_count(),
+        "environmentSha256": _environment_sha256(os.environ),
+    }
+    worker_tool: gate.JsonObject = dict(tools)
+    observations: gate.JsonObject = {
+        role: dict(epoch_reuse.observe_system_only_worker(dict(pin), worker_tool, environment))
+        for role, pin in workers.items()
+    }
+    inputs = [file_state(path) for path in input_paths]
+    config = [file_state(path) for path in (root / ".cargo/config.toml", root / ".cargo/config",
+                                           cargo_home / "config.toml", cargo_home / "config")]
+    preference = file_state(Path.home() / ".CFUserTextEncoding")
+    gate.require(_live_checkout(root, log_directory) == live, "live checkout changed during context")
+    gate.require(authenticate() == fixed, "fixed origin changed during context")
+    return {
+        "schema": "krr-html-performance-context-epoch-v3",
+        "epochOrigin": {"bundleManifest": {"path": str(origin["directory"] / "bundle.json"),
+                                            "sha256": origin["manifest_sha256"]},
+                        "artifact": artifact, "head": fixed.head, "source": fixed_source,
+                        "snapshot": fixed_snapshot, "binarySha256": fixed.binary_sha256,
+                        "lockSha256": fixed.lock_sha256},
+        "liveCheckout": live, "systemWorkers": observations,
+        "workerEnvironment": {
+            "schema": "krr-html-performance-worker-environment-contract-v1",
+            "baseEnvironmentSha256": tools["environmentSha256"],
+            "metadata": {"KRR_PERF_RUSTC": "toolContext.rustc",
+                         "KRR_PERF_CARGO": "toolContext.cargo",
+                         "KRR_PERF_ENVIRONMENT_SHA256": "before-context-sha256",
+                         "KRR_PERF_LOCK_PATH": str(lock),
+                         "KRR_PERF_SOURCE_SNAPSHOT_PATH": fixed_snapshot["path"]},
+        },
+        "inputs": inputs,
+        "registry": registry, "cache": cache,
+        "cacheUnion": {"registry": registry, "target": cache},
+        "scope": {"registry": str(cargo_home / "registry"), "target": str(target)},
+        "config": config, "preference": preference, "toolContext": tools,
+    }
 
 
 def await_quiet(batch_deadline: float | None = None) -> host_load.Probe:
