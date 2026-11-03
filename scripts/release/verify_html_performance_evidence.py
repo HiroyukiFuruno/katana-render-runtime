@@ -1620,11 +1620,13 @@ def _historical_reference_source(root: Path, before: JsonObject, selection: obje
             and saved == committed, "reference committed source differs")
     current = committed_records(root, git_query=git_query)
     lock_path = HARNESS_ROOT + "Cargo.lock"
-    historical_harness = {path: value for path, value in committed.items()
-                          if path.startswith(HARNESS_ROOT) and path != lock_path}
-    current_harness = {path: value for path, value in current.items()
-                       if path.startswith(HARNESS_ROOT) and path != lock_path}
-    require(historical_harness == current_harness, "reference harness source differs")
+    from html_performance_harness_equivalence import verify_harness_sources
+    def read_harness_blob(revision: str, path: str) -> bytes:
+        value = _git_output(root, ("show", revision + ":" + path), git_query=git_query)
+        if not isinstance(value, bytes):
+            raise ValueError("harness Git blob is not binary")
+        return value
+    verify_harness_sources(committed, current, head, read_harness_blob)
     old_lock = git(root, "show", head + ":" + lock_path, git_query=git_query).encode("utf8")
     verify_harness_closure(old_lock, (root / lock_path).read_bytes(),
                            selection.build_pins["lockSha256"])
