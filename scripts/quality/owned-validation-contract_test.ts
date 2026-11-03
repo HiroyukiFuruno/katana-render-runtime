@@ -3983,6 +3983,45 @@ test("root Clippy route retains only the canonical coverage profile", () => {
     expect.objectContaining({ code: "capacity-admission-unverified", path: "capacity-admission" }),
   );
 });
+test("performance Clippy requires admission after each arm", () => {
+  const issues = inspectStandalonePerformanceRoute(performanceHarnessFixture()).issues;
+  expect(issues).not.toContainEqual(
+    expect.objectContaining({
+      code: "performance-harness-recipe-unverified",
+      path: "performance-harness-lint",
+    }),
+  );
+});
+test.each(["missing middle", "missing final", "reordered", "duplicate"])(
+  "performance Clippy rejects %s admission",
+  (variant) => {
+    const root = performanceHarnessFixture();
+    const lines = actualRecipeBody("performance-harness-lint").split("\n");
+    const middle = lines.findIndex((line) => line.trim() === "just capacity-admission; " + "\\");
+    const final = lines.findIndex((line) => line.trim() === "just capacity-admission");
+    const candidate = lines.findIndex((line) =>
+      line.includes("--check-domain performance-candidate"),
+    );
+    const admission = lines[middle];
+    const candidateLine = lines[candidate];
+    if (middle < 0 || final < 0 || candidate < 0 || !admission || !candidateLine)
+      throw new Error("performance admission fixture is incomplete");
+    if (variant === "missing middle") lines.splice(middle, 1);
+    else if (variant === "missing final") lines.splice(final, 1);
+    else if (variant === "duplicate") lines.splice(middle, 0, admission);
+    else {
+      lines[middle] = candidateLine;
+      lines[candidate] = admission;
+    }
+    performanceHarnessRecipes(root, { "performance-harness-lint": lines.join("\n") });
+    expect(inspectStandalonePerformanceRoute(root).issues).toContainEqual(
+      expect.objectContaining({
+        code: "performance-harness-recipe-unverified",
+        path: "performance-harness-lint",
+      }),
+    );
+  },
+);
 test("coverage parent collects performance before the final root report", () => {
   const root = performanceHarnessFixture();
   const original = actualRecipeBody("coverage");

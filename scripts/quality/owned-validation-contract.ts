@@ -1607,7 +1607,9 @@ function performanceRecipeCommands(): Record<string, string[]> {
       "retained_args=(); \\",
       "if [[ -n {{quote(retained_profile)}} ]]; then retained_args=(--retain-profile {{quote(retained_profile)}}); fi; \\",
       `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain performance-baseline -- {{CARGO}} clippy -j {{JOBS}} --manifest-path ${PERFORMANCE_MANIFEST} --all-targets --no-default-features --features baseline --locked -- ${deny}; \\`,
-      `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain performance-candidate -- {{CARGO}} clippy -j {{JOBS}} --manifest-path ${PERFORMANCE_MANIFEST} --all-targets --no-default-features --features candidate --locked -- ${deny}`,
+      "just capacity-admission; \\",
+      `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain performance-candidate -- {{CARGO}} clippy -j {{JOBS}} --manifest-path ${PERFORMANCE_MANIFEST} --all-targets --no-default-features --features candidate --locked -- ${deny}; \\`,
+      "just capacity-admission",
     ],
     [PERFORMANCE_RECIPES.coverage]: [PERFORMANCE_COVERAGE_WRAPPER],
     [PERFORMANCE_COVERAGE_RUN_RECIPE]: [
