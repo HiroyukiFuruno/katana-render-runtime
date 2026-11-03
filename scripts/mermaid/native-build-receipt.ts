@@ -1411,10 +1411,13 @@ export function verifyCurrentBinaryIdentity(identity: BinaryIdentity) {
 }
 
 export function parseSourceManifest(manifestPath: string): BuildSourceManifest {
-  const root = objectValue(
+  return parseSourceManifestValue(
     parseJsonValue(fs.readFileSync(manifestPath, "utf8"), "build source manifest"),
-    "build source manifest",
   );
+}
+
+export function parseSourceManifestValue(value: JsonValue): BuildSourceManifest {
+  const root = objectValue(value, "build source manifest");
   if (
     stringValue(root.schema, "source manifest schema") !== "krr-native-build-source-manifest-v1"
   ) {

@@ -3,12 +3,17 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { sha256 } from "./mermaid-pair-manifest";
+import { parseJsonValue, sha256 } from "./mermaid-pair-manifest";
 import {
   assertCurrentGitSourceSet,
   digestFileRecords,
   verifyFileRecord,
 } from "./native-build-receipt";
+import {
+  captureLiveSourceObservation,
+  parseLiveSourceObservation,
+  verifyLiveSourceObservation,
+} from "./native-live-source-observation";
 import {
   captureNativeCoverageSourceInputs,
   captureNativeSourceManifest,
@@ -211,6 +216,74 @@ test("CLI requires --root and prints one captured JSON manifest", () => {
     const unknownArgument = runNativeSourceManifestCli(["--root", root, "--extra"]);
     expect(unknownArgument.exitCode).toBe(1);
     expect(unknownArgument.stdout.toString("utf8")).toBe("");
+  });
+});
+
+test("records and independently parses clean, dirty, untracked and staged live source", () => {
+  withGitRepository((root) => {
+    fs.writeFileSync(path.join(root, "source.rs"), "committed\n");
+    commitFiles(root, ["source.rs"]);
+    const clean = captureLiveSourceObservation(root);
+    expect(clean.statusBase64).toBe("");
+    expect(clean.head).toBe(git(root, ["rev-parse", "HEAD"]).trim());
+    expect(clean.manifest.files[0]?.sha256).toBe(sha256(Buffer.from("committed\n")));
+    const json = (input: object) => parseJsonValue(JSON.stringify(input), "observation");
+    expect(verifyLiveSourceObservation(root, json(clean))).toEqual(clean);
+
+    fs.writeFileSync(path.join(root, "source.rs"), "modified\n");
+    fs.writeFileSync(path.join(root, "extra.rs"), "untracked\n");
+    const dirty = captureLiveSourceObservation(root);
+    expect(dirty.head).toBe(clean.head);
+    expect(dirty.indexSha256).toBe(clean.indexSha256);
+    expect(dirty.statusBase64).toBe(
+      execFileSync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], {
+        cwd: root,
+        env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+      }).toString("base64"),
+    );
+    expect(dirty.manifest.files.map((file) => path.basename(file.path))).toEqual([
+      "extra.rs",
+      "source.rs",
+    ]);
+    expect(dirty.manifest.files[1]?.sha256).toBe(sha256(Buffer.from("modified\n")));
+    expect(verifyLiveSourceObservation(root, json(dirty))).toEqual(dirty);
+    expect(parseLiveSourceObservation(json(clean))).toEqual(clean);
+    expect(() => verifyLiveSourceObservation(root, json(clean))).toThrow();
+
+    git(root, ["add", "source.rs"]);
+    const staged = captureLiveSourceObservation(root);
+    expect(staged.indexSha256).not.toBe(dirty.indexSha256);
+    expect(staged.indexSha256).toBe(sha256(fs.readFileSync(path.join(root, ".git", "index"))));
+    expect(staged.manifest).toEqual(dirty.manifest);
+    expect(() => verifyLiveSourceObservation(root, json(dirty))).toThrow();
+  });
+});
+
+test("rejects noncanonical roots and malformed live observations", () => {
+  withGitRepository((root) => {
+    fs.writeFileSync(path.join(root, "source.rs"), "source\n");
+    commitFiles(root, ["source.rs"]);
+    const observed = captureLiveSourceObservation(root);
+    const json = (input: object) => parseJsonValue(JSON.stringify(input), "observation");
+    const symlink = path.join(root, "alias");
+    fs.symlinkSync(root, symlink);
+    for (const noncanonical of [".", `${root}/.`, `${root}/missing/..`, symlink]) {
+      expect(() => captureLiveSourceObservation(noncanonical)).toThrow();
+      expect(() => verifyLiveSourceObservation(noncanonical, json(observed))).toThrow();
+    }
+    fs.unlinkSync(symlink);
+    const mutations = [
+      { ...observed, head: "0".repeat(40) },
+      { ...observed, indexSha256: "0".repeat(64) },
+      { ...observed, statusBase64: "AA==" },
+      { ...observed, manifest: { ...observed.manifest, digest: "0".repeat(64) } },
+      { ...observed, accepted: true },
+    ];
+    for (const mutation of mutations) {
+      expect(() => verifyLiveSourceObservation(root, json(mutation))).toThrow();
+    }
+    expect(() => parseLiveSourceObservation(json(mutations[3] ?? {}))).toThrow();
+    expect(() => parseLiveSourceObservation(json(mutations[4] ?? {}))).toThrow();
   });
 });
 
