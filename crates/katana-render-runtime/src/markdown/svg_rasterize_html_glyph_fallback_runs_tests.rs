@@ -1,3 +1,37 @@
+#[test]
+fn fallback_advance_rejects_nonfinite_coordinates() {
+    for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        assert!(super::positions::advance_position(value).is_none());
+    }
+    assert_eq!(super::positions::advance_position(2.0), Some(2.0));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn fallback_positions_reject_missing_or_extra_prepared_runs() -> Result<(), String> {
+    let tree = tree("A日本", "")?;
+    let text = text(&tree)?;
+    let mut prepared = prepare(&tree, text)?;
+    let source = super::eligibility::eligible_source(text, &prepared)
+        .ok_or("fixture did not produce eligible fallback runs")?;
+    assert!(super::positions::layout(tree.fontdb(), text, &prepared, source).is_some());
+    let extra = prepare(&tree, text)?
+        .into_iter()
+        .next()
+        .ok_or("fixture did not produce a prepared run")?;
+    prepared.push(extra);
+    let source = super::eligibility::eligible_source(text, &prepared[..prepared.len() - 1])
+        .ok_or("fixture lost eligible fallback runs")?;
+    assert!(super::positions::layout(tree.fontdb(), text, &prepared, source).is_none());
+    prepared.pop().ok_or("extra run missing")?;
+    prepared
+        .pop()
+        .ok_or("fixture did not produce enough runs")?;
+    let source = super::sources::collect(text).ok_or("fixture source missing")?;
+    assert!(super::positions::layout(tree.fontdb(), text, &prepared, source).is_none());
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 use super::super::{HtmlGlyphRasterizer, Prepared, PreparedSpan};
 #[cfg(target_os = "macos")]

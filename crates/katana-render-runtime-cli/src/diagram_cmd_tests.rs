@@ -14,7 +14,7 @@ struct InputFixture {
 impl InputFixture {
     fn new(file_name: &str, source: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let directory = TempDir::new()?;
-        let root = directory.path().to_path_buf();
+        let root = directory.path().canonicalize()?;
         let input = root.join(file_name);
         let output = root.join("output.svg");
         std::fs::write(&input, source)?;
@@ -285,3 +285,5 @@ fn drawio_render_reports_missing_runtime() -> Result<(), Box<dyn std::error::Err
         "missing-krr-drawio-runtime.js",
     )
 }
+#[path = "diagram_cmd_attestation_tests.rs"]
+mod attestation_tests;

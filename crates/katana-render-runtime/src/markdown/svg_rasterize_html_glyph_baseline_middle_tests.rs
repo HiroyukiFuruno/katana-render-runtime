@@ -32,6 +32,26 @@ const ARCHITECTURE_CHROME_PAINT_ORIGIN: f32 = 19.984_375;
 const ORIGIN_TOLERANCE: f32 = 0.0001;
 
 #[test]
+fn quantized_x_height_rejects_unusable_font_metrics() {
+    for value in [
+        f32::NAN,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        -1.0,
+        0.0,
+        0.1,
+        f32::from(u16::MAX) + 1.0,
+    ] {
+        assert_eq!(super::quantized_x_height(value), None);
+    }
+    assert_eq!(super::quantized_x_height(1.0), Some(1.0));
+    assert_eq!(
+        super::quantized_x_height(f32::from(u16::MAX)),
+        Some(f32::from(u16::MAX))
+    );
+}
+
+#[test]
 fn raw_x_height_uses_rounded_font_metric_or_usvg_fallback() {
     for (metric, expected) in [
         (Some(7.49), Some(7.0)),
