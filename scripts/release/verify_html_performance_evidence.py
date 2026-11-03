@@ -1694,7 +1694,9 @@ def _source_for_validation(root: Path, before: JsonObject, *, git_query: GitQuer
 
 
 def _verified_reuse_context(root: Path, measured_head: str, *, git_query: GitQuery | None,
-                            allow_test_changes: bool = False) -> object:
+                            allow_test_changes: bool = False,
+                            program_records: SourceRecords | None = None,
+                            program_modes: Mapping[str, str] | None = None) -> object:
     from html_performance_source_reuse import validate_reuse_source
     require(re.fullmatch(r"[a-f0-9]{40}", measured_head) is not None, "invalid measured HEAD")
     eligible = git(root, "rev-parse", "HEAD", git_query=git_query).strip()
@@ -1705,10 +1707,14 @@ def _verified_reuse_context(root: Path, measured_head: str, *, git_query: GitQue
         if not isinstance(value, bytes):
             raise ValueError("Git binary query returned text output")
         return value
-    return validate_reuse_source(root, measured_head,
-                                 committed_records(root, eligible, git_query=git_query),
-                                 committed_records(root, measured_head, git_query=git_query),
-                                 text_query, bytes_query, allow_test_changes=allow_test_changes)
+    current = committed_records(root, eligible, git_query=git_query)
+    measured = committed_records(root, measured_head, git_query=git_query)
+    if program_records is None and program_modes is None:
+        return validate_reuse_source(root, measured_head, current, measured,
+                                     text_query, bytes_query, allow_test_changes=allow_test_changes)
+    return validate_reuse_source(root, measured_head, current, measured, text_query, bytes_query,
+                                 allow_test_changes=allow_test_changes, program_records=program_records,
+                                 program_modes=program_modes)
 
 
 class PartialEpochCurrentBuild(NamedTuple):
@@ -1827,7 +1833,7 @@ def fixed_source_pair(expected: JsonObject) -> JsonObject:
             if pair.get("schema") == "krr-html-performance-source-epoch-v3" else pair)
 
 
-def _v3_live_programs(root: Path, checkout: JsonObject, snapshot: JsonObject) -> None:
+def _v3_live_programs(root: Path, checkout: JsonObject) -> SourceRecords:
     require(set(checkout) == {"schema", "root", "head", "indexSha256", "statusBase64", "manifest"}
             and checkout.get("schema") == "krr-html-performance-live-source-observation-v1"
             and checkout.get("root") == str(root), "live checkout identity differs")
@@ -1839,10 +1845,25 @@ def _v3_live_programs(root: Path, checkout: JsonObject, snapshot: JsonObject) ->
     if not isinstance(status, str):
         raise ValueError("live status must be a string")
     try:
-        require(base64.b64encode(base64.b64decode(status, validate=True)).decode("ascii") == status,
+        status_bytes = base64.b64decode(status, validate=True)
+        require(base64.b64encode(status_bytes).decode("ascii") == status,
                 "live status encoding differs")
     except ValueError as error:
         raise ValueError("live status encoding differs") from error
+    entries = status_bytes.split(b"\0")
+    require(entries[-1] == b"", "live status terminator differs")
+    index = 0
+    while index < len(entries) - 1:
+        entry = entries[index]
+        require(len(entry) >= 4 and entry[2:3] == b" ", "live status entry differs")
+        names = [entry[3:].decode("utf8")]
+        if b"R" in entry[:2] or b"C" in entry[:2]:
+            index += 1
+            require(index < len(entries) - 1, "live status rename differs")
+            names.append(entries[index].decode("utf8"))
+        require(all(name != "Justfile" and not name.startswith("scripts/") for name in names),
+                "live measurement program has uncommitted changes")
+        index += 1
     manifest = _object(checkout.get("manifest"), "live source manifest")
     require(set(manifest) == {"schema", "digest", "files"}
             and manifest.get("schema") == "krr-native-build-source-manifest-v1",
@@ -1865,10 +1886,74 @@ def _v3_live_programs(root: Path, checkout: JsonObject, snapshot: JsonObject) ->
         relative = path.relative_to(root).as_posix()
         if relative.startswith("scripts/") or relative == "Justfile":
             live[relative] = item
-    saved = records_map(snapshot.get("records"))
-    programs = {path: item for path, item in saved.items()
+    require(bool(live), "live measurement program is empty")
+    return live
+
+
+def _v3_program_source(root: Path, fixed: JsonObject, endpoints: Sequence[JsonObject], *,
+                       git_query: GitQuery | None) -> SourceRecords:
+    from html_performance_source_reuse import _modes
+
+    program_source = _object(fixed.get("programSource"), "fixed epoch program source")
+    programs = _v3_live_programs(root, program_source)
+    head = _text(program_source.get("head"), "program source HEAD")
+    committed = committed_records(root, head, git_query=git_query)
+    selected = {path: value for path, value in committed.items()
                 if path.startswith("scripts/") or path == "Justfile"}
-    require(bool(programs) and live == programs, "live measurement program differs from fixed epoch")
+    require(programs == selected, "fixed epoch program source differs from Git")
+    tree = _git_output(root, ("ls-tree", "-r", "-z", head), git_query=git_query)
+    if not isinstance(tree, bytes):
+        raise ValueError("fixed epoch program tree differs")
+    modes = _modes(tree)
+    for endpoint in endpoints:
+        checkout = _object(endpoint.get("liveCheckout"), "live checkout")
+        require(_v3_live_programs(root, checkout) == programs,
+                "live measurement program differs from fixed epoch")
+        live_head = _text(checkout.get("head"), "live program HEAD")
+        live_tree = _git_output(root, ("ls-tree", "-r", "-z", live_head), git_query=git_query)
+        if not isinstance(live_tree, bytes):
+            raise ValueError("live program tree differs")
+        live_modes = _modes(live_tree)
+        require(all(modes.get(path) == live_modes.get(path) for path in programs),
+                "live measurement program mode differs")
+    return programs
+
+
+def _host_load_source_records(bundle: Bundle, root: Path, expected: JsonObject,
+                              measured_head: str, *, git_query: GitQuery | None) -> SourceRecords:
+    pair = _object(expected.get("sourcePair"), "host-load source pair")
+    if pair.get("schema") != "krr-html-performance-source-epoch-v3":
+        return committed_records(root, measured_head, git_query=git_query)
+    fixed = bundle.json(pair["epochContextRef"])
+    endpoints = [bundle.json(pair[key]) for key in ("beforeContextRef", "endContextRef")]
+    return _v3_program_source(root, fixed, endpoints, git_query=git_query)
+
+
+def _verified_v3_reuse_context(bundle: Bundle, root: Path, measured_head: str,
+                               expected: JsonObject, *, git_query: GitQuery | None) -> object:
+    from html_performance_source_reuse import _modes
+
+    pair = _object(expected.get("sourcePair"), "v3 source pair")
+    require(pair.get("schema") == "krr-html-performance-source-epoch-v3",
+            "v3 source reuse requires v3 evidence")
+    source = bundle.json(fixed_source_pair(expected)["before"])
+    require(source.get("head") == measured_head, "v3 fixed source HEAD differs")
+    origin_root = Path(_text(source.get("root"), "v3 source root"))
+    require(origin_root == root, "v3 program source root differs")
+    fixed = bundle.json(pair["epochContextRef"])
+    endpoints = [bundle.json(pair[key]) for key in ("beforeContextRef", "endContextRef")]
+    programs = _v3_program_source(root, fixed, endpoints, git_query=git_query)
+    program_source = _object(fixed.get("programSource"), "v3 program source")
+    program_head = _text(program_source.get("head"), "v3 program HEAD")
+    raw_tree = _git_output(root, ("ls-tree", "-r", "-z", program_head), git_query=git_query)
+    if not isinstance(raw_tree, bytes):
+        raise ValueError("v3 program tree differs")
+    modes = _modes(raw_tree)
+    require(set(programs) <= set(modes), "v3 program modes missing")
+    return _verified_reuse_context(
+        root, measured_head, git_query=git_query, allow_test_changes=True,
+        program_records=programs, program_modes={path: modes[path] for path in programs},
+    )
 
 
 def _v3_origin_and_endpoints(
@@ -2082,18 +2167,20 @@ def _v3_worker_runtime_execution(bundle: Bundle, expected: JsonObject, manifest:
 
 
 def _v3_epoch_validation(bundle: Bundle, root: Path, expected: JsonObject,
-                         builds: Mapping[str, JsonObject]) -> SourceEpochV3Validation:
+                         builds: Mapping[str, JsonObject], *,
+                         git_query: GitQuery | None) -> SourceEpochV3Validation:
     from html_performance_epoch_reuse import declared_from_authenticated_refs
 
     pair = _object(expected["sourcePair"], "v3 source pair")
     fixed_pair = fixed_source_pair(expected)
     snapshot_ref = _object(fixed_pair["snapshot"], "v3 source snapshot")
-    snapshot = bundle.json(snapshot_ref)
     origin_root = Path(_text(bundle.json(fixed_pair["before"]).get("root"), "fixed epoch root"))
+    fixed_context = bundle.json(pair["epochContextRef"])
+    endpoints = [bundle.json(pair[key]) for key in ("beforeContextRef", "endContextRef")]
+    program_records = _v3_program_source(origin_root, fixed_context, endpoints, git_query=git_query)
     programs: dict[str, JsonObject] = {
         path: {"path": str(origin_root / path), "sha256": item[0]}
-        for path, item in records_map(snapshot.get("records")).items()
-        if path.startswith("scripts/") or path == "Justfile"
+        for path, item in program_records.items()
     }
     old_expected = {**expected, "sourcePair": fixed_pair}
     dom = bundle.json(expected["domStateRef"])
@@ -2115,7 +2202,8 @@ def _v3_epoch_validation(bundle: Bundle, root: Path, expected: JsonObject,
     pins = [_object(pair.get(key), "v3 context pin")
             for key in ("epochContextRef", "beforeContextRef", "endContextRef")]
     projections = [declared_from_authenticated_refs(bundle, origin_root, bundle.json(pin), old_expected,
-                   snapshot_ref, capture, links, resources, {}, binaries, programs) for pin in pins]
+                   snapshot_ref, capture, links, resources, {}, binaries, programs,
+                   program_records=program_records) for pin in pins]
     return SourceEpochV3Validation(
         _text(pins[0].get("sha256"), "v3 context SHA"),
         _text(pins[1].get("sha256"), "v3 context SHA"),
@@ -2153,12 +2241,11 @@ def _source_contract_v3(
     nested = _object(contract.get("epochSourcePair"), "fixed epoch source pair")
     require(contexts[0]["source"] == bundle.json(nested["before"]),
             "fixed epoch source context differs")
-    snapshot = bundle.json(nested["snapshot"])
     origin_root = Path(_text(bundle.json(nested["before"]).get("root"), "fixed epoch root"))
     for context in contexts[1:]:
         require(context.get("schema") == "krr-html-performance-context-epoch-v3",
                 "v3 live context schema differs")
-        _v3_live_programs(origin_root, _object(context.get("liveCheckout"), "live checkout"), snapshot)
+    _v3_program_source(origin_root, contexts[0], contexts[1:], git_query=git_query)
     compare_epoch_projections(bundle, cast(EpochProjection, projections[0]),
                               bundle, cast(EpochProjection, projections[1]))
     compare_epoch_projections(bundle, cast(EpochProjection, projections[1]),
@@ -2835,7 +2922,8 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
         _v3_worker_observations(bundle, expected, before_context, validated_builds)
         _v3_worker_observations(bundle, expected, end_context, validated_builds)
         _v3_worker_runtime_execution(bundle, expected, manifest, before_context)
-        epoch_validation = _v3_epoch_validation(bundle, root, expected, validated_builds)
+        epoch_validation = _v3_epoch_validation(bundle, root, expected, validated_builds,
+                                                git_query=git_query)
     source = source_contract(bundle, root, expected, git_query=git_query,
                              validated_builds=validated_builds, reuse_context=reuse_context,
                              shared_source=shared_source, epoch_validation=epoch_validation)
@@ -3183,6 +3271,11 @@ def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
             reuse_context: object = None, remote_context: object = None) -> JsonObject:
     bundle = Bundle(directory)
     head = git(root, "rev-parse", "HEAD", git_query=git_query).strip()
+    attempts = _objects(bundle.manifest["attempts"], "viewport attempts")
+    first_expected = bundle.json(attempts[0]["expected"]) if attempts else {}
+    first_pair_value = first_expected.get("sourcePair")
+    first_pair = _object(first_pair_value, "source pair") if first_pair_value is not None else {}
+    first_is_v3 = first_pair.get("schema") == "krr-html-performance-source-epoch-v3"
     if remote_context is not None:
         from html_performance_remote_admission import RemoteEvidenceContext
         require(isinstance(remote_context, RemoteEvidenceContext)
@@ -3196,14 +3289,15 @@ def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
         from html_performance_source_reuse import SourceReuseContext
         if not isinstance(reuse_context, SourceReuseContext):
             raise ValueError("invalid source reuse context")
+        checked_context = (_verified_v3_reuse_context(
+            bundle, root, reuse_context.measured_head, first_expected, git_query=git_query)
+            if first_is_v3 else _verified_reuse_context(
+                root, reuse_context.measured_head, git_query=git_query,
+                allow_test_changes=reuse_context.artifact_equivalence))
         require(bundle.manifest["head"] == reuse_context.measured_head
                 and head == reuse_context.eligible_head
-                and _verified_reuse_context(root, reuse_context.measured_head, git_query=git_query,
-                                        allow_test_changes=reuse_context.artifact_equivalence)
-                == reuse_context, "reuse HEAD or source differs")
+                and checked_context == reuse_context, "reuse HEAD or source differs")
         head = reuse_context.measured_head
-    attempts = _objects(bundle.manifest["attempts"], "viewport attempts")
-    first_expected = bundle.json(attempts[0]["expected"]) if attempts else {}
     if require_catalog:
         _require_catalog_attempt_set(attempts, first_expected)
     if "catalogCondition" in first_expected:
@@ -3219,6 +3313,10 @@ def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
                         and fixed_source_pair(value) == fixed_source_pair(first_expected)
                         for value in expected_rows),
                     "v3 catalog attempts do not share the fixed build and source")
+            require(first_is_v3 and all(
+                _object(value.get("sourcePair"), "source pair").get("epochContextRef")
+                == first_pair.get("epochContextRef") for value in expected_rows),
+                "v3 catalog program source differs")
         legacy_expected = next((value for value, is_v3 in zip(expected_rows, v3_rows, strict=True)
                                 if not is_v3), None)
         validated_builds: dict[str, JsonObject] | None = None
@@ -3249,7 +3347,8 @@ def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
                                        validated_builds=validated_builds, reuse_context=reuse_context,
                                        remote_context=remote_context) for attempt in attempts]
         from html_performance_host_load_validation import verify_catalog_host_load
-        verify_catalog_host_load(bundle, attempts, committed_records(root, head, git_query=git_query))
+        verify_catalog_host_load(bundle, attempts, _host_load_source_records(
+            bundle, root, first_expected, head, git_query=git_query))
         non_comparable_ids = {
             _text(_object(value["catalogCondition"], "catalog condition")["condition_id"],
                   "non-comparable condition id")
@@ -3469,16 +3568,21 @@ def verify_source_reuse(directory: Path, root: Path, measured_manifest_sha256: s
     bundle = Bundle(directory)
     measured_head = _text(bundle.manifest.get("head"), "measured HEAD")
     eligible_head = git(root, "rev-parse", "HEAD", git_query=git_query).strip()
+    attempts = _objects(bundle.manifest["attempts"], "viewport attempts")
+    first = bundle.json(attempts[0]["expected"]) if attempts else {}
+    pair_value = first.get("sourcePair")
+    pair = _object(pair_value, "source pair") if pair_value is not None else {}
+    is_v3 = pair.get("schema") == "krr-html-performance-source-epoch-v3"
     def source_context() -> object:
+        if is_v3:
+            return _verified_v3_reuse_context(bundle, root, measured_head, first, git_query=git_query)
         return _verified_reuse_context(root, measured_head, git_query=git_query, allow_test_changes=True)
     context = source_context()
     measured = _verify(directory, root, git_query=git_query, require_catalog=True,
                        reuse_context=context)
     _require_formal_release_result(measured)
-    attempts = _objects(bundle.manifest["attempts"], "viewport attempts")
-    first = bundle.json(attempts[0]["expected"])
-    pair = _object(first.get("sourcePair"), "source pair")
-    is_v3 = pair.get("schema") == "krr-html-performance-source-epoch-v3"
+    if not attempts:
+        raise ValueError("reuse evidence has no attempts")
     has_v3 = is_v3 or any(
         _object(bundle.json(attempt["expected"]).get("sourcePair"), "source pair").get("schema")
         == "krr-html-performance-source-epoch-v3" for attempt in attempts[1:]
@@ -3521,8 +3625,10 @@ def verify_source_reuse(directory: Path, root: Path, measured_manifest_sha256: s
             "source changed during reuse validation")
     result: JsonObject = {"measuredHead": measured_head, "eligibleHead": eligible_head,
                           "reuseEligibility": True, "measuredResult": measured}
-    if context.artifact_equivalence:
-        result.update({"reuseKind": "test-source-artifact-equivalence-v1",
+    if context.artifact_equivalence or context.program_equivalence:
+        result.update({"reuseKind": ("program-source-artifact-equivalence-v1"
+                                     if context.program_equivalence else
+                                     "test-source-artifact-equivalence-v1"),
                        "measuredManifestSha256": measured_manifest_sha256,
                        "currentBuildManifestSha256": build_manifest_sha256,
                        "currentBuildArtifactPath": build_artifact_path,

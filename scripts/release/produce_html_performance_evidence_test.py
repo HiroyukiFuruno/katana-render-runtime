@@ -786,6 +786,7 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         complete_ids: Sequence[str] | None = None,
         policy_accepted: bool = True,
         seal_receipt: bool = True,
+        fixed_epoch_fixture: bool = False,
     ) -> tuple[Path, Path]:
         self._batch_counter += 1
         batch = self.root / f"batch-{self._batch_counter}"
@@ -795,11 +796,20 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         context_before = producer.write(batch / "context-before.json", {"stable": True})
         context_end = producer.write(batch / "context-end.json", {"stable": True})
         files.extend([source_before, source_end, context_before, context_end])
+        epoch_context = (producer.write(batch / "epoch.json", {"programSource": {"head": "b" * 40}})
+                         if fixed_epoch_fixture else None)
+        if epoch_context is not None:
+            files.append(epoch_context)
         attempts: list[dict[str, typed_producer.FilePin]] = []
         for condition_id in condition_ids:
-            expected = producer.write(batch / f"{condition_id}-expected.json", {
+            payload: gate.JsonObject = {
                 "catalogCondition": {"condition_id": condition_id},
-            })
+                "sourcePair": {"before": source_before, "end": source_end},
+            }
+            if epoch_context is not None:
+                payload["sourcePair"] = {"schema": "krr-html-performance-source-epoch-v3",
+                                         "epochContextRef": epoch_context}
+            expected = producer.write(batch / f"{condition_id}-expected.json", payload)
             result = producer.write(batch / f"{condition_id}-result.json", {})
             manifest = producer.write(batch / f"{condition_id}-manifest.json", {})
             attempts.append({"expected": expected, "result": result, "pairManifest": manifest})
@@ -813,11 +823,12 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
                 build_pins=[], condition_ids=condition_ids,
                 complete_condition_ids=condition_ids if complete_ids is None else complete_ids,
                 policy_accepted=policy_accepted, attempts=attempts, bundle=bundle,
+                epoch_context=epoch_context,
             )
         return batch, bundle
 
     def test_fixed_resume_revalidates_attempts_after_origin(self) -> None:
-        batch, _ = self.create_batch(condition_ids=("case-a",))
+        batch, _ = self.create_batch(condition_ids=("case-a",), fixed_epoch_fixture=True)
         origin: typed_producer.FixedEpochContextInput = {
             "directory": self.root, "manifest_sha256": "1" * 64,
             "artifact_path": "artifact", "artifact_sha256": "2" * 64,
@@ -845,6 +856,34 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
             builds.assert_not_called()
             attempt.assert_not_called()
             host.assert_not_called()
+
+    def test_fixed_empty_closed_batch_preserves_program_origin(self) -> None:
+        directory = self.root / "empty-fixed"
+        source = producer.write(directory / "source.json", {"head": "a" * 40})
+        before = producer.write(directory / "before.json", {})
+        end = producer.write(directory / "end.json", {})
+        epoch_context = producer.write(directory / "epoch.json", {"programSource": {"head": "b" * 40}})
+        artifacts = {role: producer.write(directory / (role + ".json"), {"role": role})
+                     for role in ("baseline", "candidate")}
+        bundle_path = directory / "bundle"
+        producer.write_transport_bundle(bundle_path, "a" * 40,
+                                        [source, before, end, epoch_context, *artifacts.values()], [])
+        producer.write_batch_receipt(directory, head="a" * 40, source_before=source, source_end=source,
+            context_before=before, context_end=end, build_artifacts=artifacts, build_pins=[],
+            condition_ids=[], complete_condition_ids=[], policy_accepted=True, attempts=[],
+            bundle=bundle_path, epoch_context=epoch_context)
+        origin: typed_producer.FixedEpochContextInput = {
+            "directory": directory, "manifest_sha256": "1" * 64, "artifact_path": "candidate",
+            "artifact_sha256": "2" * 64, "head": "a" * 40, "workers": {},
+        }
+        with patch.object(producer, "_resume_fixed_source_pins") as authenticate:
+            receipt, _, attempts = producer.load_closed_batch(directory, self.root, fixed_epoch=origin)
+            self.assertEqual(receipt["epochContextRef"], epoch_context)
+            self.assertEqual(attempts, [])
+            authenticate.assert_called_once()
+            authenticate.side_effect = ValueError("origin differs")
+            with self.assertRaisesRegex(ValueError, "origin differs"):
+                producer.load_closed_batch(directory, self.root, fixed_epoch=origin)
 
     def test_resume_requires_original_context_at_both_boundaries(self) -> None:
         batch, bundle_path = self.create_batch(condition_ids=())
@@ -2246,8 +2285,14 @@ class EpochResumeBoundaryTest(unittest.TestCase):
             for role, pin in self.pins.items()}
         self.arms[gate.DEFAULT_BASELINE_ARM_ID] = self.arms.pop("baseline")
         self.expected: gate.JsonObject = {"arms": self.arms}
+        self.epoch_context_ref = producer.write(self.root / "epoch-context.json", {
+            "schema": "krr-html-performance-fixed-epoch-context-v1",
+            "source": self.source, "programSource": self.live,
+            "inputs": self.context["inputs"], "toolContext": self.tools,
+        })
         self.receipt: gate.JsonObject = {"head": self.head, "source": {"before": "source"},
-            "contexts": {"before": "before", "end": "end"}, "buildArtifacts": self.artifacts}
+            "contexts": {"before": "before", "end": "end"}, "buildArtifacts": self.artifacts,
+            "epochContextRef": self.epoch_context_ref}
         self.bundle = Mock(spec=gate.Bundle)
         def read(reference: object) -> gate.JsonObject:
             if reference == "source" or reference == self.source_ref:
@@ -2256,6 +2301,9 @@ class EpochResumeBoundaryTest(unittest.TestCase):
                 return dict[str, object](self.context)
             if reference == "expected":
                 return self.expected
+            if reference == self.epoch_context_ref:
+                return producer._pinned_json(Path(self.epoch_context_ref["path"]),
+                                             self.epoch_context_ref["sha256"])
             for role, artifact in self.artifacts.items():
                 if reference == artifact:
                     return self.proofs[role]
@@ -2276,6 +2324,8 @@ class EpochResumeBoundaryTest(unittest.TestCase):
             return self.observed[role]
         with patch.object(remote_evidence, "validate_fixed_epoch_candidate_origin_reader", return_value=self.fixed), \
              patch.object(remote_evidence, "_fixed_epoch_git_records", return_value=self.records), \
+             patch.object(gate, "committed_records", return_value=self.records), \
+             patch.object(gate, "_v3_program_source", return_value=self.records), \
              patch.object(producer, "_live_checkout", return_value=(
                  after["liveCheckout"] if observed_live is None else observed_live)), \
              patch.object(gate, "_git_output", return_value=b"tree"), \
@@ -2300,6 +2350,19 @@ class EpochResumeBoundaryTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "live checkout differs"):
             self.verify(self.context, self.context, head=self.head,
                         observed_live={**self.live, "head": "c" * 40})
+
+    def test_v3_empty_resume_authenticates_origin_and_both_arms(self) -> None:
+        self.attempts.clear()
+        self.verify(self.context, self.context)
+        candidate = self.proofs["candidate"]
+        original = candidate["frozenBinary"]
+        candidate["frozenBinary"] = self.pins["baseline"]
+        with self.assertRaises(ValueError):
+            self.verify(self.context, self.context)
+        candidate["frozenBinary"] = original
+        self.arms[gate.DEFAULT_BASELINE_ARM_ID]["binary_sha256"] = "0" * 64
+        with self.assertRaises(ValueError):
+            self.verify(self.context, self.context)
 
     def test_v3_rejects_input_worker_environment_source_and_arm_changes(self) -> None:
         for field in ("inputs", "systemWorkers", "workerEnvironment", "epochOrigin"):

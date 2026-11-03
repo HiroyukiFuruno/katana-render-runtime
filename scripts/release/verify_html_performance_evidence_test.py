@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import local_html_performance_evidence as local_html
 
+import base64
 import hashlib
 import importlib.util
 import io
@@ -25,6 +26,7 @@ import html_performance_remote_evidence as remote_evidence
 import html_performance_remote_admission as remote_admission
 import html_performance_attestation as attestation
 import html_performance_fresh_reference as fresh_reference
+import html_performance_host_load_validation as host_load_validation
 import html_performance_reference as reference_domain
 import verify_html_performance_evidence as canonical_gate
 
@@ -973,7 +975,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
                                 "schema": "krr-native-build-source-manifest-v1", "files": live_rows,
                                 "digest": hashlib.sha256(live_material.encode()).hexdigest()}}
         contexts: list[JsonObject] = [
-            {"source": fixed_source, "inputs": rows, "toolContext": tool},
+            {"source": fixed_source, "programSource": live, "inputs": rows, "toolContext": tool},
             {"schema": "krr-html-performance-context-epoch-v3", "liveCheckout": live,
              "inputs": rows, "toolContext": tool},
             {"schema": "krr-html-performance-context-epoch-v3",
@@ -993,10 +995,13 @@ class PerformanceEvidenceTest(unittest.TestCase):
             str(pins[0]["sha256"]), str(pins[1]["sha256"]), str(pins[2]["sha256"]),
             cast(JsonObject, projection), cast(JsonObject, projection), cast(JsonObject, projection),
         )
+        program_validation = patch.object(gate, "_v3_program_source", return_value={})
+        program_validation.start()
+        self.addCleanup(program_validation.stop)
         result = gate.source_contract(bundle, self.root, expected, epoch_validation=validation)
         self.assertEqual(result["head"], self.head)
         self.assertNotEqual(contexts[1]["liveCheckout"], contexts[2]["liveCheckout"])
-        gate._v3_live_programs(origin_root, live, snapshot)
+        gate._v3_live_programs(origin_root, live)
         program_rows = [dict(row) for row in live_rows]
         program_row = next(row for row in program_rows if "/scripts/" in str(row["path"]))
         program_row["sha256"] = "0" * 64
@@ -1004,13 +1009,13 @@ class PerformanceEvidenceTest(unittest.TestCase):
                                    for row in program_rows)
         altered = {**live, "manifest": {"schema": "krr-native-build-source-manifest-v1",
                    "files": program_rows, "digest": hashlib.sha256(altered_material.encode()).hexdigest()}}
-        with self.assertRaisesRegex(ValueError, "program differs"):
-            gate._v3_live_programs(origin_root, altered, snapshot)
+        self.assertNotEqual(gate._v3_live_programs(origin_root, live),
+                            gate._v3_live_programs(origin_root, altered))
         with self.assertRaisesRegex(ValueError, "encoding differs"):
-            gate._v3_live_programs(origin_root, {**live, "statusBase64": "!"}, snapshot)
+            gate._v3_live_programs(origin_root, {**live, "statusBase64": "!"})
         with self.assertRaisesRegex(ValueError, "digest differs"):
             gate._v3_live_programs(origin_root, {**live, "manifest": {**json_object(live["manifest"]),
-                                   "digest": "0" * 64}}, snapshot)
+                                   "digest": "0" * 64}})
         with self.assertRaisesRegex(ValueError, "authenticated epoch projection is required"):
             gate.source_contract(bundle, self.root, expected)
         wrong = validation._replace(end_projection={**projection, "declared": {
@@ -1031,6 +1036,119 @@ class PerformanceEvidenceTest(unittest.TestCase):
         original_source.write_bytes(b"modified")
         with self.assertRaisesRegex(ValueError, "original pin mismatch"):
             gate.source_contract(bundle, self.root, expected, epoch_validation=validation)
+
+    def test_v3_program_source_is_independent_of_sdk_head(self) -> None:
+        script = self.root / "scripts/release/worker.py"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("worker from program commit\n")
+        subprocess.run(["git", "-C", str(self.root), "add", str(script)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Unit", "-c",
+                        "user.email=unit@example.invalid", "commit", "-qm", "program"], check=True)
+        program_head = gate.git(self.root, "rev-parse", "HEAD").strip()
+        self.assertNotEqual(program_head, self.head)
+        records = gate.committed_records(self.root, program_head)
+        rows = [{"path": str(self.root / name), "sha256": checksum, "size": size}
+                for name, (checksum, size) in sorted(records.items())]
+        material = "".join(f"{row['path']}\0{row['sha256']}\0{row['size']}\n" for row in rows)
+        checkout: JsonObject = {"schema": "krr-html-performance-live-source-observation-v1",
+            "root": str(self.root), "head": program_head, "indexSha256": "a" * 64, "statusBase64": "",
+            "manifest": {"schema": "krr-native-build-source-manifest-v1", "files": rows,
+                         "digest": hashlib.sha256(material.encode()).hexdigest()}}
+        fixed: JsonObject = {"programSource": checkout}
+        endpoint: JsonObject = {"liveCheckout": checkout}
+        programs = gate._v3_program_source(self.root, fixed, [endpoint, endpoint], git_query=None)
+        self.assertEqual(programs["scripts/release/worker.py"], records["scripts/release/worker.py"])
+        bundle = Mock(spec=gate.Bundle)
+        values: dict[str, JsonObject] = {"source": {"head": self.head, "root": str(self.root)},
+                                         "epoch": fixed, "before": endpoint, "end": endpoint}
+        bundle.json.side_effect = lambda key: values[key]
+        expected: JsonObject = {"sourcePair": {"schema": "krr-html-performance-source-epoch-v3",
+            "epochSourcePair": {"before": "source"}, "epochContextRef": "epoch",
+            "beforeContextRef": "before", "endContextRef": "end"}}
+        context = gate._verified_v3_reuse_context(bundle, self.root, self.head, expected, git_query=None)
+        from html_performance_source_reuse import SourceReuseContext
+        self.assertIsInstance(context, SourceReuseContext)
+        if not isinstance(context, SourceReuseContext):
+            raise AssertionError("v3 source reuse context differs")
+        self.assertEqual((context.measured_head, context.eligible_head), (self.head, program_head))
+        self.assertIn("scripts/release/worker.py", context.changed_paths)
+        with self.assertRaisesRegex(ValueError, "source membership or mode differs"):
+            gate._verified_reuse_context(self.root, self.head, git_query=None, allow_test_changes=True)
+        script.write_text("changed after measurement\n")
+        subprocess.run(["git", "-C", str(self.root), "add", str(script)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Unit", "-c",
+                        "user.email=unit@example.invalid", "commit", "-qm", "changed program"], check=True)
+        with self.assertRaisesRegex(ValueError, "current measurement program differs"):
+            gate._verified_v3_reuse_context(bundle, self.root, self.head, expected, git_query=None)
+        rust = self.root / "source.rs"
+        docs = self.root / "docs/performance/html-performance-history.json"
+        rust.write_text("fn main() { println!(\"changed\"); }\n")
+        docs.write_text("changed documentation\n")
+        non_program = {str(path): path for path in (rust, docs)}
+        dirty_rows = [{**row, "sha256": gate.sha256(non_program[str(row["path"])]),
+                       "size": non_program[str(row["path"])].stat().st_size}
+                      if str(row["path"]) in non_program else row for row in rows]
+        dirty_material = "".join(f"{row['path']}\0{row['sha256']}\0{row['size']}\n" for row in dirty_rows)
+        dirty_rust = base64.b64encode(
+            b" M source.rs\0 M docs/performance/html-performance-history.json\0").decode()
+        gate._v3_program_source(self.root, fixed, [{"liveCheckout": {
+            **checkout, "statusBase64": dirty_rust, "manifest": {
+                **json_object(checkout["manifest"]), "files": dirty_rows,
+                "digest": hashlib.sha256(dirty_material.encode()).hexdigest()}}}], git_query=None)
+        dirty_program = base64.b64encode(b" M scripts/release/worker.py\0").decode()
+        with self.assertRaisesRegex(ValueError, "uncommitted changes"):
+            gate._v3_program_source(self.root, fixed, [{"liveCheckout": {
+                **checkout, "statusBase64": dirty_program}}], git_query=None)
+        with self.assertRaisesRegex(ValueError, "uncommitted changes"):
+            gate._v3_program_source(self.root, {"programSource": {
+                **checkout, "statusBase64": dirty_program}}, [endpoint], git_query=None)
+        altered = [{**row, "sha256": "0" * 64} if row["path"] == str(script) else row for row in rows]
+        changed_material = "".join(f"{row['path']}\0{row['sha256']}\0{row['size']}\n" for row in altered)
+        changed = {**checkout, "manifest": {**json_object(checkout["manifest"]), "files": altered,
+                   "digest": hashlib.sha256(changed_material.encode()).hexdigest()}}
+        with self.assertRaisesRegex(ValueError, "program differs"):
+            gate._v3_program_source(self.root, fixed, [{"liveCheckout": changed}], git_query=None)
+        with self.assertRaises(ValueError):
+            gate._v3_program_source(self.root, {}, [endpoint], git_query=None)
+
+    def test_v3_host_load_uses_authenticated_program_instead_of_legacy_sdk(self) -> None:
+        legacy = {host_load_validation.PRODUCER: (next(iter(host_load_validation.LEGACY_PRODUCER_SHA256)), 1)}
+        cpu = {host_load_validation.PRODUCER: (host_load_validation.CPU_PRODUCER_SHA256, 1),
+               host_load_validation.ADAPTER: (host_load_validation.CPU_ADAPTER_SHA256, 1)}
+        self.assertEqual(host_load_validation._method(legacy), "legacy-load-average")
+        self.assertEqual(host_load_validation._method(cpu), "cpu-busy")
+        fixed: JsonObject = {"programSource": {"head": "b" * 40}}
+        before: JsonObject = {"liveCheckout": {"head": "b" * 40}}
+        end: JsonObject = {"liveCheckout": {"head": "b" * 40}}
+        order: JsonObject = {"workerAttempts": [{"sample": i, "attempt": 1, "hostLoad": {}}
+                                               for i in range(5)],
+                             "workerLoads": [{"before": 0.1, "after": 0.1} for _ in range(5)]}
+        bundle = Mock(spec=gate.Bundle)
+        docs: dict[str, JsonObject] = {"fixed": fixed, "before": before, "end": end,
+                                       "manifest": {"order": [order]}, "report": {}}
+        bundle.json.side_effect = lambda key: docs[key if isinstance(key, str) else key["path"]]
+        expected: JsonObject = {"sourcePair": {"schema": "krr-html-performance-source-epoch-v3",
+            "epochContextRef": "fixed", "beforeContextRef": "before", "endContextRef": "end"},
+            "reportPins": [{"path": "report", "sha256": "a" * 64}]}
+        docs["expected"] = expected
+        attempt: JsonObject = {"expected": "expected", "pairManifest": "manifest"}
+        with self.assertRaisesRegex(ValueError, "mixed host-load methods"):
+            host_load_validation.verify_catalog_host_load(bundle, [attempt], legacy)
+        with patch.object(gate, "_v3_program_source", return_value=cpu) as authenticate:
+            selected = gate._host_load_source_records(bundle, self.root, expected, self.head, git_query=None)
+            self.assertEqual(host_load_validation._method(selected), "cpu-busy")
+            with patch.object(host_load_validation, "_cpu_attempt",
+                              side_effect=lambda _bundle, worker, *_: (worker["sample"], True, 0.1, 0.1)):
+                host_load_validation.verify_catalog_host_load(bundle, [attempt], selected)
+            authenticate.assert_called_once_with(self.root, fixed, [before, end], git_query=None)
+            authenticate.side_effect = ValueError("program differs")
+            with self.assertRaisesRegex(ValueError, "program differs"):
+                gate._host_load_source_records(bundle, self.root, expected, self.head, git_query=None)
+        with patch.object(gate, "committed_records", return_value=legacy) as records:
+            selected = gate._host_load_source_records(bundle, self.root,
+                                                      {"sourcePair": {}}, self.head, git_query=None)
+            self.assertEqual(host_load_validation._method(selected), "legacy-load-average")
+            records.assert_called_once_with(self.root, self.head, git_query=None)
 
     def test_v3_flags_report_real_cache_and_checkout_changes(self) -> None:
         source = {"path": "/fixed/source", "sha256": "a" * 64}
@@ -2354,6 +2472,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
         bundle.json.side_effect = lambda index: rows[index]
         with (patch.object(gate, "Bundle", return_value=bundle),
               patch.object(gate, "_verified_reuse_context", return_value=context),
+              patch.object(gate, "_verified_v3_reuse_context", return_value=context),
               patch.object(gate, "_require_catalog_attempt_set")):
             with self.assertRaisesRegex(ValueError, "current build equivalence"):
                 gate._verify(self.bundle, self.root, require_catalog=True)
@@ -2398,6 +2517,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
         manifest_sha = gate.sha256(self.bundle / "bundle.json")
         with (patch.object(gate, "Bundle", return_value=bundle),
               patch.object(gate, "_verified_reuse_context", return_value=context),
+              patch.object(gate, "_verified_v3_reuse_context", return_value=context),
               patch.object(gate, "_verify", return_value={}),
               patch.object(gate, "_require_formal_release_result"),
               patch.object(gate, "_v3_origin_and_endpoints", return_value=(context, old))):

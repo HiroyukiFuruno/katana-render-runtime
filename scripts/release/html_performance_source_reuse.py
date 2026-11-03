@@ -58,6 +58,7 @@ class SourceReuseContext:
     measured_records: Mapping[str, tuple[str, int]]
     changed_paths: tuple[str, ...]
     artifact_equivalence: bool = False
+    program_equivalence: bool = False
 
 
 def _modes(raw: bytes) -> dict[str, str]:
@@ -76,7 +77,9 @@ def _modes(raw: bytes) -> dict[str, str]:
 
 def validate_reuse_source(root: Path, measured_head: str, current: Records,
                           measured: Records, git_text: GitText,
-                          git_bytes: GitBytes, *, allow_test_changes: bool = False) -> SourceReuseContext:
+                          git_bytes: GitBytes, *, allow_test_changes: bool = False,
+                          program_records: Mapping[str, tuple[str, int]] | None = None,
+                          program_modes: Mapping[str, str] | None = None) -> SourceReuseContext:
     eligible = git_text(("rev-parse", "HEAD")).strip()
     if git_text(("merge-base", measured_head, eligible)).strip() != measured_head:
         raise ValueError("measured HEAD is not an ancestor")
@@ -84,10 +87,28 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
         raise ValueError("release source is dirty or untracked")
     old_modes = _modes(git_bytes(("ls-tree", "-r", "-z", measured_head)))
     new_modes = _modes(git_bytes(("ls-tree", "-r", "-z", eligible)))
-    if old_modes != new_modes or set(current) != set(measured) or set(current) != set(new_modes):
+    if (program_records is None) != (program_modes is None):
+        raise ValueError("program source proof is incomplete")
+    def is_program(path: str) -> bool:
+        return path.startswith("scripts/") or path == "Justfile"
+    if program_records is not None and program_modes is not None:
+        if ({path: value for path, value in current.items() if is_program(path)} != program_records
+                or {path: value for path, value in new_modes.items() if is_program(path)} != program_modes):
+            raise ValueError("current measurement program differs from authenticated program")
+    old_checked = {path: mode for path, mode in old_modes.items()
+                   if program_records is None or not is_program(path)}
+    new_checked = {path: mode for path, mode in new_modes.items()
+                   if program_records is None or not is_program(path)}
+    measured_checked = {path for path in measured if program_records is None or not is_program(path)}
+    current_checked = {path for path in current if program_records is None or not is_program(path)}
+    if (old_checked != new_checked or current_checked != measured_checked
+            or set(current) != set(new_modes) or set(measured) != set(old_modes)):
         raise ValueError("source membership or mode differs")
-    changed = tuple(sorted(path for path in current if current[path] != measured[path]))
-    test_changes = set(changed) - ALLOWED
+    changed = tuple(sorted(path for path in set(current) | set(measured)
+                           if current.get(path) != measured.get(path)
+                           or old_modes.get(path) != new_modes.get(path)))
+    program_changes = {path for path in changed if program_records is not None and is_program(path)}
+    test_changes = set(changed) - ALLOWED - program_changes
     if test_changes:
         if not allow_test_changes or not test_changes <= TEST_PATHS | {TEST_PARENT}:
             raise ValueError("source changes exceed documentation allowance")
@@ -105,7 +126,7 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
                or current.get(path, (None,))[0] != checksum
                for path, checksum in TEST_ANCHOR_SHA.items()):
             raise ValueError("test-only connection baseline differs")
-    if any(old_modes.get(path) != "100644" for path in changed):
+    if any(old_modes.get(path) != "100644" for path in changed if path not in program_changes):
         raise ValueError("changed source is not a regular non-executable file")
     for name, (checksum, size) in current.items():
         path = root / name
@@ -113,4 +134,5 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
                 or path.stat().st_size != size
                 or hashlib.sha256(path.read_bytes()).hexdigest() != checksum):
             raise ValueError("working source differs from current committed tree: " + name)
-    return SourceReuseContext(measured_head, eligible, dict(measured), changed, bool(test_changes))
+    return SourceReuseContext(measured_head, eligible, dict(measured), changed,
+                              bool(test_changes), bool(program_changes))

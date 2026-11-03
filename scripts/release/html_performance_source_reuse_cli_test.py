@@ -141,6 +141,21 @@ class ReuseRequestTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "stored eligibility differs"):
                 cli.verify_reuse_request(self.output, self.root)
 
+    def test_program_artifact_eligibility_requires_immutable_revalidation(self) -> None:
+        result = {"measuredHead": "old", "eligibleHead": "new",
+                  "reuseKind": "program-source-artifact-equivalence-v1", "binarySha256": "a" * 64}
+        with patch.object(gate, "verify_source_reuse", return_value=result):
+            self.output.write_text(json.dumps(self.request))
+            with self.assertRaisesRegex(ValueError, "immutable eligibility is required"):
+                cli.verify_reuse_request(self.output, self.root)
+        output = self.output.with_name("program-eligibility.json")
+        with patch.object(gate, "verify_source_reuse", return_value=result) as verify:
+            cli.create_request(self.request, output, self.root)
+            self.assertEqual(cli.verify_reuse_request(output, self.root), result)
+            verify.return_value = {**result, "binarySha256": "b" * 64}
+            with self.assertRaisesRegex(ValueError, "stored eligibility differs"):
+                cli.verify_reuse_request(output, self.root)
+
 
 if __name__ == "__main__":
     unittest.main()

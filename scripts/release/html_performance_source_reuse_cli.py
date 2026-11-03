@@ -15,6 +15,8 @@ import verify_html_performance_evidence as gate
 
 SCHEMA = "krr-html-performance-source-reuse-request-v1"
 ELIGIBILITY_SCHEMA = "krr-html-performance-source-reuse-eligibility-v2"
+ARTIFACT_REUSE_KINDS = ("test-source-artifact-equivalence-v1",
+                        "program-source-artifact-equivalence-v1")
 
 
 class ReuseRequest(TypedDict):
@@ -121,9 +123,9 @@ def verify_reuse_request(request_path: Path, root: Path, *,
             raise ValueError("request measured manifest differs")
         result = _validate(request, root.resolve(strict=True))
         if has_eligibility and (eligibility != result
-                or result.get("reuseKind") != "test-source-artifact-equivalence-v1"):
+                or result.get("reuseKind") not in ARTIFACT_REUSE_KINDS):
             raise ValueError("stored eligibility differs from revalidation")
-        if not has_eligibility and result.get("reuseKind") == "test-source-artifact-equivalence-v1":
+        if not has_eligibility and result.get("reuseKind") in ARTIFACT_REUSE_KINDS:
             raise ValueError("immutable eligibility is required")
         try:
             current = path.lstat()
@@ -147,7 +149,7 @@ def create_request(request: ReuseRequest, output: Path, root: Path) -> gate.Json
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
     with os.fdopen(descriptor, "w", encoding="utf8") as stream:
         payload: object = validated
-        if result.get("reuseKind") == "test-source-artifact-equivalence-v1":
+        if result.get("reuseKind") in ARTIFACT_REUSE_KINDS:
             payload = {"schema": ELIGIBILITY_SCHEMA, "request": validated, "result": result}
         json.dump(payload, stream, sort_keys=True, indent=2)
         stream.write("\n")

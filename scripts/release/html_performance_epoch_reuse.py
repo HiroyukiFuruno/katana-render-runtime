@@ -141,10 +141,12 @@ def _pin(value: object, label: str) -> gate.JsonObject:
 
 
 def _program_pins(reader: gate.FileReader, root: Path, snapshot: gate.JsonObject,
-                  programs: Mapping[str, gate.JsonObject]) -> dict[str, tuple[str, str]]:
+                  programs: Mapping[str, gate.JsonObject], *,
+                  program_records: gate.SourceRecords | None = None) -> dict[str, tuple[str, str]]:
     result = _verified_pins(reader, programs, "program")
     gate.require(bool(result), "program inventory is empty")
-    records = gate.records_map(reader.json(snapshot)["records"])
+    records = (gate.records_map(reader.json(snapshot)["records"])
+               if program_records is None else program_records)
     for path, checksum in result.values():
         relative = Path(path).relative_to(root).as_posix()
         gate.require(records.get(relative, (None,))[0] == checksum,
@@ -246,6 +248,7 @@ def declared_from_authenticated_refs(
     snapshot: gate.JsonObject, capture: gate.JsonObject | None, links: list[gate.JsonObject],
     resources: Mapping[str, gate.JsonObject], fonts: Mapping[str, gate.JsonObject],
     binaries: Mapping[str, gate.JsonObject], programs: Mapping[str, gate.JsonObject],
+    *, program_records: gate.SourceRecords | None = None,
 ) -> EpochProjection:
     """Project a previously validated attempt; this alone does not establish eligibility.
 
@@ -261,7 +264,7 @@ def declared_from_authenticated_refs(
             pin = _pin(value, category)
             path = gate._text(pin["path"], category + " path")
             gate.require(bool(role) and refs.get(path) == pin, category + " reference differs")
-    program_pins = _program_pins(reader, root, snapshot, programs)
+    program_pins = _program_pins(reader, root, snapshot, programs, program_records=program_records)
     operational = _operational_pins(reader, root, context, expected, snapshot, capture, links, refs, binaries)
     worker_paths = {gate._text(value["path"], "worker path") for value in binaries.values()}
     gate.require(not worker_paths.intersection(gate._text(pin["path"], "operational path")

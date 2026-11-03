@@ -169,6 +169,12 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
             verify.assert_called_with(request, mac.ROOT, expected_measured_dir=measured,
                                       expected_measured_manifest_sha256="f" * 64,
                                       expected_request_sha256="f" * 64)
+            reused["reuseKind"] = "program-source-artifact-equivalence-v1"
+            self.assertEqual(proof.collect("owner/repo", 3, measured, request)["verification_kind"],
+                             "program-source-artifact-equivalence-v1")
+            reused["reuseKind"] = "unknown-artifact-equivalence-v1"
+            with self.assertRaisesRegex(ValueError, "unsupported reuse kind"):
+                proof.collect("owner/repo", 3, measured, request)
             reused.pop("reuseKind")
             self.assertEqual(proof.collect("owner/repo", 3, measured, request)["verification_kind"],
                              "documentation-source-reuse-v1")
@@ -190,6 +196,12 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
                    "measured_head": "d" * 40, "eligibility_sha256": "e" * 64}
         comment = {**self.comment, "body": proof.MARKER + "\n" + json.dumps(payload)}
         self.assertTrue(self.accepted(comment))
+        program_payload = {**payload, "verification_kind": "program-source-artifact-equivalence-v1"}
+        program_comment = {**self.comment, "body": proof.MARKER + "\n" + json.dumps(program_payload)}
+        self.assertTrue(self.accepted(program_comment))
+        program_payload["verification_kind"] = "unknown-artifact-equivalence-v1"
+        program_comment["body"] = proof.MARKER + "\n" + json.dumps(program_payload)
+        self.assertFalse(self.accepted(program_comment))
         for key in ("verification_kind", "measured_head", "eligibility_sha256"):
             altered = dict(payload)
             altered.pop(key)

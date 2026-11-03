@@ -68,9 +68,9 @@ def valid(comment: object, repository: str, number: int, base: str, head: str,
             "scope_sha256", "completed_at", "command", "bundle_manifest_sha256", "result_sha256",
             "conditions", "candidate_conditions", "checks", "formal_pass", "platform", "os_version", "tools"}
     kind = value.get("verification_kind")
-    source_reuse = isinstance(kind, str) and kind in {
-        "documentation-source-reuse-v1", "test-source-artifact-equivalence-v1"
-    }
+    source_reuse = isinstance(kind, str) and kind in (
+        "documentation-source-reuse-v1", *reuse_cli.ARTIFACT_REUSE_KINDS
+    )
     if source_reuse:
         keys |= {"verification_kind", "measured_head", "eligibility_sha256"}
     user = comment.get("user")
@@ -194,10 +194,10 @@ def collect(repository: str, number: int, directory: Path,
                      and gate.Bundle(directory).manifest.get("head") == measured_head,
                      "reuse measured bundle head differs")
         reuse_kind = reuse_result.get("reuseKind")
-        gate.require(reuse_kind in (None, "test-source-artifact-equivalence-v1"),
+        gate.require(reuse_kind in (None, *reuse_cli.ARTIFACT_REUSE_KINDS),
                      "unsupported reuse kind")
         verification_kind = ("documentation-source-reuse-v1" if reuse_kind is None
-                             else "test-source-artifact-equivalence-v1")
+                             else cast(str, reuse_kind))
         result = gate._object(reuse_result.get("measuredResult"), "measured formal result")
         gate._require_formal_release_result(result)
         gate.require(gate.sha256(reuse_request) == eligibility_sha, "reuse request changed")
