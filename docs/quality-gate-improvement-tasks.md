@@ -1,7 +1,11 @@
 # 品質ゲート改善の作業台帳
 
-## 最新の再開地点（2026-11-03）
+## 最新の再開地点（2026-11-04）
 
+- [/] 資源共通化の修正で、HTMLの二重保持を除去し、Draw.ioの公開呼出し経路も共通loaderへ接続。R7550資源9件・R7565 Draw.io165件、R7581整形・R7582 AST・R7583静的foundationが実0。R7570–R7577のSVG生成診断8実行は全て実0、全測定値と適用限界を `docs/performance/resource-loading-diagnostics.md` へ保存した。HTML実フレームの正式性能・メモリ非劣化は未判定。
+- [/] 性能検証側の独立reviewで、v3の最終host-load判定が計測programではなくSDK側の版を参照する不整合を検知・修正。認証済みprogramSourceを用い、旧schemaと改変拒否を維持。R7584 verifier全152件が実0。実物の1条件取得→再開→現行build同値検証は未完。製品の描画バグと検証側の誤判定を分けて記録する。
+
+- [ ] 最新指摘：形式を問わない読み込み・変更検知・キャッシュ保持/再利用/破棄を共通責務として整理する。境界と回帰・性能条件を `docs/resource-loading-boundaries.md` に固定。JS3種だけの文字列loaderを完了扱いせず、HTMLのbyte取得と共有する形式非依存の層、各形式の変換・policy・状態管理を実経路で確認する。既存asset展開処理、既存ライブラリの適否・メモリ上限・外部overrideの更新反映を評価し、従来APIの初回/再表示を実測する。consumerの元文書取得とKRR内の資源取得を混同しない。検査・実測の完了までは未対応を維持する。
 - [/] R7385の現行root検査は5,580/5,580成功・29skip（実test337.369秒）。R7386正式coverage policyは83,320/84,461=98.64908064076911%、未達1,141で不合格（前1,158から17減）。原本は既存producer配下、診断copyは`tmp/quality/resumed-owner-r3509/current-root-coverage-report-r7387/root.json`。SVG解析エラー6箇所の共通化と実フォント候補回帰を通常commit `cbcc1325` に固定。100%・未計測0の条件は維持する。
 - [/] 性能の固定SDK・ライブcheckout・実worker観測を分離し、初回v3測定・途中封印・再開・現行build同値での最終検証まで接続。R7436 verifier150件、R7442 producer170件、R7443 worker stampのJSON往復を含むepoch回帰、R7444型・Lint・重複等の静的foundationが実0。SDK/live HEADの混同はR7441で1件の失敗を再現して修正した。実物1条件→保存→無関係変更→再開→closed→current SDK同値受入は未完で、正式84性能の実測はまだ開始していない。元receipt/context/pinは変更しない。
 - [/] Actionsの公式upstream12種の最新stable/tag SHAを再確認し、現workflowの全固定参照が一致した。追加更新は不要。必須3OSの実CIと公開確認は未完。
