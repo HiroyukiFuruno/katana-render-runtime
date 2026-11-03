@@ -89,3 +89,32 @@ fn nul_text_with_empty_family_returns_parse_error_and_undefined() {
     )]);
     assert!(matches!(result.as_deref(), Ok("true")));
 }
+
+#[test]
+fn canvas_font_measurement_recovers_after_invalid_requests() -> Result<(), String> {
+    let script = r#"(() => {
+        const measure = globalThis.__katanaMeasureCanvasText;
+        const call = (text, family, ...segments) =>
+            measure(text, family, 16, 400, false, ...segments);
+        const first = call('A', 'Noto Sans');
+        const second = call('B', 'Noto Sans');
+        const combined = call('AB', 'Noto Sans', ['A', 'B']);
+        const rejected = [
+            call('\u0000', ''),
+            call('A\u0000', '', ['A', '\u0000']),
+            measure('A', 'Noto Sans', 0, 400, false),
+            call('A', 'Noto Sans', ['A', 'B']),
+        ];
+        return [Number.isFinite(first) && first > 0,
+            Number.isFinite(second) && second > 0,
+            combined === first + second,
+            rejected.every(value => value === undefined),
+            call('A', 'Noto Sans') === first].join(',');
+    })()"#;
+    let result = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
+        "bridge-canvas-recovery",
+        script,
+    )])?;
+    assert_eq!(result, "true,true,true,true,true");
+    Ok(())
+}

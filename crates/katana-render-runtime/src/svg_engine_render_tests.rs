@@ -13,6 +13,8 @@ mod context_paint_tests;
 mod diagnostic;
 #[path = "svg_engine_render_failure_artifact_tests.rs"]
 mod failure_artifact;
+#[path = "svg_engine_render_filter_shadow_tests.rs"]
+mod filter_shadow_tests;
 #[path = "svg_engine_render_input_contract_tests.rs"]
 mod input_contract;
 #[path = "svg_engine_render_inventory_tests.rs"]

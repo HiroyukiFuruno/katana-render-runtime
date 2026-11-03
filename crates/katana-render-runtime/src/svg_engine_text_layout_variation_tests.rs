@@ -6,6 +6,11 @@ use rstest::rstest;
 #[case::single("'wght' 700", 700.0, None)]
 #[case::double_quoted("&quot;wght&quot; 700", 700.0, None)]
 #[case::two_axes("'wght' 700, 'wdth' 85", 700.0, Some(85.0))]
+#[case::short_tag("'bad' 100, 'wght' 700", 700.0, None)]
+#[case::invalid_value("'wdth' invalid, 'wght' 700", 700.0, None)]
+#[case::unquoted_tag("wdth 85, 'wght' 700", 700.0, None)]
+#[case::empty_component(", 'wght' 700, ", 700.0, None)]
+#[case::mixed_axes("'bad' 10, 'wght' 700, 'wdth' 85", 700.0, Some(85.0))]
 fn font_variations_preserve_explicit_axes(
     #[case] settings: &str,
     #[case] weight: f32,

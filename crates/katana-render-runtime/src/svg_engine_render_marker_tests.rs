@@ -6,6 +6,9 @@ use tiny_skia::Pixmap;
 #[path = "svg_engine_render_marker_geometry_tests.rs"]
 mod geometry;
 
+#[path = "svg_engine_render_marker_recursion_tests.rs"]
+mod recursion;
+
 const FIXTURE_DIR: &str =
     "../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/painting/marker";
 const SCALE: f32 = 1.0;

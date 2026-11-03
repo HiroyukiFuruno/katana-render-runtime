@@ -6,7 +6,7 @@ const DPI: f32 = 96.0;
 const PARENT_FONT_SIZE: f32 = 16.0;
 const FLOAT_TOLERANCE: f32 = 0.0001;
 
-const INITIAL_VALUES: [(AId, &str); 16] = [
+const INITIAL_VALUES: [(AId, &str); 18] = [
     (AId::Fill, "black"),
     (AId::FillOpacity, "1"),
     (AId::FillRule, "nonzero"),
@@ -15,7 +15,9 @@ const INITIAL_VALUES: [(AId, &str); 16] = [
     (AId::StrokeLinecap, "butt"),
     (AId::StrokeLinejoin, "miter"),
     (AId::StrokeMiterlimit, "4"),
+    (AId::StrokeDashoffset, "0"),
     (AId::Visibility, "visible"),
+    (AId::FontSize, "medium"),
     (AId::BaselineShift, "baseline"),
     (AId::ColorInterpolationFilters, "linearRGB"),
     (AId::Direction, "ltr"),
@@ -47,6 +49,24 @@ fn explicit_inherit_without_authored_ancestor_uses_svg_initial_values() -> Resul
     let document = parse_document(&source, None)?;
     for (aid, expected) in INITIAL_VALUES {
         assert_eq!(raw_attribute(&document, "target", aid)?, expected);
+    }
+    Ok(())
+}
+
+#[test]
+fn inherited_dash_offset_matches_public_stroke_values() -> Result<(), String> {
+    let source = format!(
+        "<svg xmlns=\"{SVG_NS}\" width=\"40\" height=\"20\"><rect id=\"default\" width=\"10\" height=\"10\" stroke=\"black\" stroke-dasharray=\"2 3\" stroke-dashoffset=\"inherit\"/><g stroke-dashoffset=\"3\"><rect id=\"inherited\" x=\"10\" width=\"10\" height=\"10\" stroke=\"black\" stroke-dasharray=\"2 3\" stroke-dashoffset=\"inherit\"/></g><rect id=\"explicit\" x=\"20\" width=\"10\" height=\"10\" stroke=\"black\" stroke-dasharray=\"2 3\" stroke-dashoffset=\"3\"/></svg>"
+    );
+    let tree = usvg::Tree::from_str(&source, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    for (id, expected) in [("default", 0.0), ("inherited", 3.0), ("explicit", 3.0)] {
+        let Some(Node::Path(path)) = tree.node_by_id(id) else {
+            return Err(format!("{id} rectangle missing"));
+        };
+        let stroke = path.stroke().ok_or("stroke missing")?;
+        assert_eq!(stroke.dashoffset(), expected, "{id}");
+        assert_eq!(stroke.dasharray(), Some(&[2.0, 3.0][..]), "{id}");
     }
     Ok(())
 }

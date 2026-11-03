@@ -3,6 +3,8 @@ use std::path::Path;
 
 #[path = "materializer_body_mutation_support.rs"]
 mod body_mutations;
+#[path = "ast_linter_materialization_join_support.rs"]
+mod join_mutations;
 
 pub(super) const DEFAULT_MATERIALIZATION_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[
     (
@@ -142,6 +144,7 @@ pub(in super::super) fn reject_default_materialization_changes(
     )?;
     fixture.reject("default-materialize:install-path-join")?;
     fixture.restore_from(renderer, &original)?;
+    join_mutations::reject_install_path_join_mutations(fixture, &original, renderer)?;
     reject_materializer_implementation_changes(fixture, &original, renderer)?;
     reject_default_materialization_shape_changes(fixture, &original, renderer)?;
     Ok(())

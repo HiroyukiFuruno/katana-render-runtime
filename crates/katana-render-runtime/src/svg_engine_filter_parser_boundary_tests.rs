@@ -125,6 +125,28 @@ fn component_transfer_ignores_non_function_children() -> Result<(), String> {
     assert_identity(transfer.func_a())
 }
 
+#[rstest]
+#[case::single("0.125", 0.125, 0.125)]
+#[case::paired("0.125 0.25", 0.125, 0.25)]
+fn turbulence_frequency_preserves_one_or_two_svg_values(
+    #[case] frequency: &str,
+    #[case] expected_x: f32,
+    #[case] expected_y: f32,
+) -> Result<(), String> {
+    let tree = parse_filter(&format!("<feTurbulence baseFrequency='{frequency}'/>"))?;
+    let primitive = tree
+        .filters()
+        .first()
+        .and_then(|filter| filter.primitives().first())
+        .ok_or("turbulence primitive missing")?;
+    let usvg::filter::Kind::Turbulence(turbulence) = primitive.kind() else {
+        return Err("turbulence kind differs".to_owned());
+    };
+    assert_eq!(turbulence.base_frequency_x().get(), expected_x);
+    assert_eq!(turbulence.base_frequency_y().get(), expected_y);
+    Ok(())
+}
+
 fn parse_filter(primitive: &str) -> Result<usvg::Tree, String> {
     let source = format!(
         "<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'><defs><filter id='f' {FILTER_REGION}>{primitive}</filter></defs><rect x='2' y='2' width='8' height='8' filter='url(#f)'/></svg>"

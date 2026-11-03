@@ -86,3 +86,28 @@ fn root_height_alone_resolves_width_from_viewbox_aspect_ratio() -> Result<(), St
     assert_eq!(tree.size().height(), 25.0);
     Ok(())
 }
+
+#[test]
+fn percentage_root_without_viewbox_uses_the_default_viewport() -> Result<(), String> {
+    let source = r#"<svg xmlns="http://www.w3.org/2000/svg" width="50%" height="25%"></svg>"#;
+    let tree = usvg::Tree::from_str(source, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    assert_eq!(tree.size().width(), 50.0);
+    assert_eq!(tree.size().height(), 25.0);
+    assert!(tree.root().children().is_empty());
+    Ok(())
+}
+
+#[test]
+fn invalid_isolation_value_falls_back_without_dropping_the_shape() -> Result<(), String> {
+    let source = r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><g isolation="invalid"><rect id="sample" width="10" height="10" fill="red"/></g></svg>"#;
+    let tree = usvg::Tree::from_str(source, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    let Some(usvg::Node::Path(path)) = tree.node_by_id("sample") else {
+        return Err("sample path missing".to_owned());
+    };
+    assert!(
+        matches!(path.fill().map(|fill| fill.paint()), Some(usvg::Paint::Color(color)) if (color.red, color.green, color.blue) == (255, 0, 0))
+    );
+    Ok(())
+}
