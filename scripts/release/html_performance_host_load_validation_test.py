@@ -194,12 +194,17 @@ class HostLoadValidationTest(unittest.TestCase):
 
 class CurrentHostLoadPreflightTest(unittest.TestCase):
     def test_previous_current_cpu_producer_is_historical_and_unknown_is_rejected(self) -> None:
-        previous = "6c4f667253690df1e7c703287eec97ed750bfe69fdaeeb65483e33445a1f9524"
-        self.assertIn(previous, host.HISTORICAL_CPU_PRODUCER_SHA256)
-        self.assertNotEqual(previous, host.CPU_PRODUCER_SHA256)
-        records = {host.PRODUCER: (previous, 1), host.ADAPTER: (host.CPU_ADAPTER_SHA256, 1)}
-        self.assertEqual(host._method(records), "cpu-busy")
-        records[host.PRODUCER] = ("0" * 64, 1)
+        previous_versions = (
+            "6c4f667253690df1e7c703287eec97ed750bfe69fdaeeb65483e33445a1f9524",
+            "d64a50f10dc9aa73617483e24ef20de218abca396f240f6466a635cf8135daaa",
+        )
+        for previous in previous_versions:
+            with self.subTest(previous=previous):
+                self.assertIn(previous, host.HISTORICAL_CPU_PRODUCER_SHA256)
+                self.assertNotEqual(previous, host.CPU_PRODUCER_SHA256)
+                records = {host.PRODUCER: (previous, 1), host.ADAPTER: (host.CPU_ADAPTER_SHA256, 1)}
+                self.assertEqual(host._method(records), "cpu-busy")
+        records = {host.PRODUCER: ("0" * 64, 1), host.ADAPTER: (host.CPU_ADAPTER_SHA256, 1)}
         with self.assertRaisesRegex(ValueError, "unreviewed"):
             host._method(records)
 

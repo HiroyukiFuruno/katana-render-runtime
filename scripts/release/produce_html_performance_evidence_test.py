@@ -808,12 +808,30 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         measured: list[tuple[Path, typed_producer.ExpectedPerformance,
                              gate.JsonObject, typed_producer.FilePin]] = [
             (self.root, cast(typed_producer.ExpectedPerformance, {}),
-             {"policy": {"status": "complete"}}, cast(typed_producer.FilePin, {})),
+             {"comparisonStatus": "paired", "policy": {"policyPass": True}},
+             cast(typed_producer.FilePin, {})),
         ]
         self.assertEqual(producer._completed_batch_ids([], planned, planned[:1], measured),
                          ["case-a"])
         with self.assertRaisesRegex(ValueError, "planned prefix"):
             producer._completed_batch_ids([], planned, planned[1:], measured)
+
+    def test_completed_ids_only_include_accepted_measurements(self) -> None:
+        non_comparable = self._non_comparable_results()[0]
+        condition_id = gate._text(gate._object(non_comparable["policy"], "policy")["conditionId"], "id")
+        rows: list[gate.JsonObject] = [{"condition_id": name}
+            for name in ("pass", "fail", condition_id, "invalid", "bad-policy-status")]
+        values: list[gate.JsonObject] = [
+            {"comparisonStatus": "paired", "policy": {"policyPass": True}},
+            {"comparisonStatus": "paired", "policy": {"policyPass": False}},
+            non_comparable,
+            {"comparisonStatus": "unknown", "policy": {"policyPass": True}},
+            {"comparisonStatus": "paired", "policy": {"policyPass": True, "status": "unknown"}},
+        ]
+        measured = [(self.root, cast(typed_producer.ExpectedPerformance, {}), value,
+                     cast(typed_producer.FilePin, {})) for value in values]
+        self.assertEqual(producer._completed_batch_ids([], rows, rows, measured),
+                         ["pass", condition_id])
 
     def test_summary_counts_actual_phase_records_and_rejects_invalid_values(self) -> None:
         def result(records: object) -> tuple[Path, typed_producer.ExpectedPerformance,
@@ -1727,6 +1745,42 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         records.assert_called_once_with(self.root, "a" * 40, git_query=None)
         self.assertEqual(host_load_check.call_args.args[1], attempts)
 
+    def test_failed_condition_is_remeasured_and_policy_can_recover(self) -> None:
+        batch, _ = self.create_batch(complete_ids=("case-a",), policy_accepted=False)
+        with patch.object(gate, "current_source", return_value={}), \
+             patch.object(gate, "validate_expected_builds", return_value={}), \
+             patch.object(gate, "validate_attempt") as validate, \
+             patch.object(gate, "committed_records", return_value={}), \
+             patch.object(load_validation, "verify_catalog_host_load"):
+            receipt, _, attempts = producer.load_closed_batch(batch, self.root)
+        self.assertIs(receipt["policyAccepted"], False)
+        self.assertEqual(len(attempts), 1)
+        validate.assert_called_once()
+        rows: list[gate.JsonObject] = [{"condition_id": "case-a"}, {"condition_id": "case-b"}]
+        self.assertEqual(producer._select_batch_rows(rows, {"case-a"}, None), [rows[1]])
+        paired: gate.JsonObject = {"comparisonStatus": "paired", "policy": {"policyPass": True}}
+        self.assertTrue(producer._batch_policy_accepted(None, [paired, paired], True))
+        self.assertFalse(producer._batch_policy_accepted(None, [paired, {
+            "comparisonStatus": "paired", "policy": {"policyPass": False},
+        }], True))
+        self.assertFalse(producer._batch_formal_acceptance(["case-a", "case-b"],
+                                                           ["case-a", "case-b"], True))
+
+    def test_completed_attempt_still_requires_strict_validation_before_seal(self) -> None:
+        batch, bundle_path = self.create_batch(complete_ids=("case-a",))
+        receipt = gate.read_json(batch / "batch-receipt.json")
+        attempts = cast(list[dict[str, typed_producer.FilePin]], receipt["attempts"])
+        seal = Mock()
+        with patch.object(gate, "validate_expected_builds", return_value={}), \
+             patch.object(gate, "validate_attempt", side_effect=ValueError("strict failure")) as validate:
+            with self.assertRaisesRegex(ValueError, "strict failure"):
+                producer._verify_and_seal_catalog_batch(
+                    bundle_path, self.root, attempts, ("case-a",), formal_ready=False,
+                    diagnostic=False, batch_failure=None, seal=seal, summary={}, git_query=None,
+                )
+        validate.assert_called_once()
+        seal.assert_not_called()
+
     def test_closed_batch_rechecks_current_source_before_return(self) -> None:
         batch, _ = self.create_batch(complete_ids=("case-a",))
         with patch.object(gate, "current_source", side_effect=[{}, {"changed": ("a", 1)}]) as source, \
@@ -1845,6 +1899,24 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         self.assertNotIn("deltaThreshold", result)
         self.assertNotIn("statistics", result)
         evaluate.assert_not_called()
+
+    def test_complete_failing_comparison_remains_paired_and_unaccepted(self) -> None:
+        policy: gate.JsonObject = {"version": "paired-wilcoxon-family-v1", "policyPass": False,
+                                   "tests": {"phase": {"peak_rss_bytes": {"detectedBad": True}}}}
+        with patch.object(gate, "evaluate_measurement_policy", return_value=policy):
+            measured = producer._condition_measurement_policy(
+                [self.root / "baseline-0.json"], cast(typed_producer.ExpectedPerformance, {}), [], 300,
+            )
+        result = producer._condition_result(measured)
+        self.assertEqual(result["comparisonStatus"], "paired")
+        self.assertIs(result["policy"], policy)
+        self.assertIs(result["formalAccepted"], False)
+        self.assertIs(result["performanceAccepted"], False)
+        self.assertFalse(producer._batch_policy_accepted(None, [result], True))
+        for status in ("incomplete", "nonComparable"):
+            with self.subTest(status=status):
+                self.assertEqual(producer._condition_result({"status": status, "policyPass": False})
+                                 ["comparisonStatus"], status)
 
     def test_known_fragment_failure_requires_exact_skipped_baseline_sequence(self) -> None:
         condition_id, fragment = next(iter(gate.NON_COMPARABLE_BASELINE_FRAGMENT_FAILURES.items()))

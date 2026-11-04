@@ -4,6 +4,9 @@
 
 ### 現在の判定と実行中の作業
 
+- [ ] R7912では1条件（async/expected-state/1280x900/DPR1）の各arm25回・300phaseを取得した。初回表示中央値は基準0.006874833秒/候補0.006815667秒、warm0.003762042/0.003563833秒、再表示0.000793/0.000786041秒。warm・再表示・全Yのpeak RSSは約0.203125MiB増で既存判定が不合格、正式0/84を維持する。各phaseまでの累積peakであり段階固有の保持量とは断定しない。旧SDKではなく基準armの実体を区別する。原因未確定で、同一candidateの対照測定を次に行う。部分結果を現行基準へ昇格しない。
+- [/] R7912は完備した不合格pairedをincompleteと分類したため封緘時に実1。分類を分離し、不合格rawをbundleへ残し、成功条件だけを厳格再検証・再開対象にする。旧falseを永続継承せず、成功subsetと新測定から既存policyで再判定する。正式validatorのpolicyPass必須・全84・非比較12集合・未知status/CPU pin拒否は維持。R7913の未実装helper RED1を保持、最終R7917静的13/R7918 producer184/R7919 host19実0、独立reviewのP1を解消し追加P0–P2なし。実再produce/非承認封緘/全84は未実証。
+- [/] R7908は採取前のGit読取りと記録保存でENOSPC実1。既存承認に従うprivate直下clean-allは実0、cleaned10/skipped16/failed0、約14GB回復、R7911保護ref検査実0。事前記録dirも作れなかったため実stdout/stderr/codeをmemory保持し、回復後R7910へ排他的保存した制限を明記。原receiptや物理pinは変更していない。KRR targetも整理されたため、warm buildの再利用を無条件に主張しない。
 - [/] R7893で依存更新4fileを通常commit `2bc89f82` へ取り込んだ。R7888最新依存530件、R7889静的21task、R7890 kdr-linter全182件、R7891 lock updater12件は実0。表示性能の成功に代用しない。R7895の現SDK build proofとR7896の固定origin検証は実0だが、candidate binary SHAは旧SDKと異なり、旧画像結果の現source適格性は未完。
 - [ ] R7897の現行性能1条件は採取前に実1（CPU監視producerのsource pinが容量role修正前のまま）。サンプル0・正式性能0/84を維持する。容量記録だけの差分をレビューし、現pin更新と過去pin保持の19回帰をR7899で実0、R7903通常commit `d8f61659`。release専用2fileの内容だけを再利用比較から分離し、元Git認証・集合・mode・worker比較を維持する修正は、R7900の再利用5件、R7901の検証器153件が実0。独立reviewのP2に従い両pathの欠落・mode・偽装の拒否を個別化し、R7904静的13task・R7905検証器153件も実0。新runで1条件→全84の実測へ戻る。元の失敗ログ、SDK、原receiptを上書きしない。
 - [/] R7877は修正後の公開 `just runtime-script-cas-diagnostic` を直接起動し実0。前段7/7valid、診断unit22成功、実診断statuspassed/fixtureOnlyfalse、CAS blob/prior outputs復元true・復元エラー0を確認した。終了後R7878で別processから既存terminal/root producer lockを取得・解放して実0、idle時のlock残留なし。これは旧7/shared CASの実証であり、native/root/性能coverage100%や新2個別restore・CI受入は引き続き別途未完。先行する旧入口の失敗は削除しない。

@@ -1163,9 +1163,13 @@ def _completed_batch_ids(
     gate.require(len(completed_rows) == len(results),
                  "batch completed rows differ from measured results")
     ids = list(resumed_ids)
-    ids.extend(_row_condition_id(row) for row, (_, _, result, _) in zip(
-        completed_rows, results, strict=True,
-    ) if gate._object(result.get("policy"), "condition policy").get("status") != "incomplete")
+    for row, (_, _, result, _) in zip(completed_rows, results, strict=True):
+        policy = gate._object(result.get("policy"), "condition policy")
+        status = result.get("comparisonStatus")
+        if (status == "paired" and policy.get("status") is None
+                or status == "nonComparable" and policy.get("conditionId") == _row_condition_id(row)):
+            if _batch_policy_accepted(None, [result], True):
+                ids.append(_row_condition_id(row))
     gate.require(len(ids) == len(set(ids)), "batch complete conditions are duplicated")
     return ids
 
@@ -1762,7 +1766,7 @@ def _batch_policy_accepted(
                 return False
             non_comparable_ids.add(condition_id)
             continue
-        if (result.get("comparisonStatus") != "paired"
+        if (result.get("comparisonStatus") != "paired" or policy.get("status") is not None
                 or policy.get("policyPass") is not True):
             return False
     if len(results) == 84:
@@ -3414,6 +3418,12 @@ def _condition_measurement_policy(
     return gate.evaluate_measurement_policy(reports, {**expected})
 
 
+def _condition_result(policy: gate.JsonObject) -> gate.JsonObject:
+    return {"formalAccepted": False, "performanceAccepted": False,
+            "measurementExecuted": True,
+            "comparisonStatus": policy.get("status") or "paired", "policy": policy}
+
+
 def _known_fragment_failure_sequence(
     failures: Sequence[gate.JsonObject], condition_id: str, fragment: str,
 ) -> bool:
@@ -4082,12 +4092,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             manifest_data.update({"measurement_status": measurement_policy["status"],
                                   "failures": condition_failures})
         manifest_pin = write(folder / "reports/pair-manifest.json", manifest_data)
-        result: gate.JsonObject = {"formalAccepted": False, "performanceAccepted": False,
-            "measurementExecuted": True,
-            "comparisonStatus": (measurement_policy.get("status")
-                                 or ("paired" if measurement_policy.get("policyPass") is True
-                                     else "incomplete")),
-            "policy": measurement_policy}
+        result = _condition_result(measurement_policy)
         if row["catalog"]:
             result["catalogCondition"] = expected["catalogCondition"]
         checkpoint_pins.append(write_condition_checkpoint(folder, expected, result, manifest_data))
@@ -4243,14 +4248,11 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     complete_ids = _completed_batch_ids(
         resumed_ids, measurement_rows, completed_rows, expected_all,
     )
-    policy_accepted = _batch_policy_accepted(
-        batch_failure, [result for _, _, result, _ in expected_all],
-        resumed_receipt is None or resumed_receipt.get("policyAccepted") is True,
-    )
     comparison_results = [
         current_bundle.json(gate._object(attempt["result"], "attempt result reference"))
         for attempt in transport_attempts
     ]
+    policy_accepted = _batch_policy_accepted(batch_failure, comparison_results, True)
     paired_conditions = sum(
         result.get("comparisonStatus") == "paired" for result in comparison_results
     )
