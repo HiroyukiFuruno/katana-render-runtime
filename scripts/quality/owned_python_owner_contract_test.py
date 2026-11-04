@@ -210,26 +210,21 @@ class MoonOwnerAstContractTests(unittest.TestCase):
         )
         self.assertEqual(
             tasks["runtime-unused-script-regression"]["deps"],
-            ["runtime-unused-rust-classic-producer"],
-        )
-        self.assertEqual(
-            tasks["runtime-unused-fragment-loader-producer"]["deps"],
             ["runtime-classic-generation-evidence"],
         )
-        for leaf in (
-            "runtime-unused-fragment-loader",
-            "runtime-unused-bundle-definitions",
-            "runtime-unused-check",
-            "runtime-unused-tool-fingerprint",
-            "runtime-unused-mathjax",
-            "runtime-unused-native-width",
-            "runtime-unused-rust-classic",
-        ):
-            with self.subTest(leaf=leaf):
-                self.assertEqual(
-                    tasks[f"{leaf}-producer"]["leaf"],
-                    "runtime-unused-script-verify-run",
-                )
+        module, _ = self.scheduler_owner_phases()
+        self.assertEqual(
+            module.RUNTIME_UNUSED_LEAF_IDS,
+            (
+                "runtime-unused-fragment-loader",
+                "runtime-unused-bundle-definitions",
+                "runtime-unused-check",
+                "runtime-unused-tool-fingerprint",
+                "runtime-unused-mathjax",
+                "runtime-unused-native-width",
+                "runtime-unused-rust-classic",
+            ),
+        )
         self.assertEqual(
             tasks["runtime-asset-script-other"]["deps"],
             ["runtime-classic-generation-evidence"],
@@ -265,7 +260,7 @@ class MoonOwnerAstContractTests(unittest.TestCase):
             "static": "static",
             "host-preparation": "rust-facts-host-prebuild",
             "evidence": "mathjax-owned-evidence",
-            "producer": "runtime-unused-fragment-loader-producer",
+            "producer": "runtime-classic-generation-evidence",
             "verify": "runtime-unused-script-regression",
             "other": "runtime-asset-script-other",
             "aggregate": "runtime-asset-script-test",

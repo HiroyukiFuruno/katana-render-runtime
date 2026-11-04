@@ -20,9 +20,9 @@ include = [
     "src/markdown/diagram_runtime/generated/*.sha256",
     "vendor/drawio/32.6.9/drawio.min.js.sha256",
     "vendor/drawio/32.6.9/LICENSE",
-    "vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js.br",
-    "vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js.sha256",
-    "vendor/mermaid/12.2.0-krr.pr6823.1/LICENSE",
+    "vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js.br",
+    "vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js.sha256",
+    "vendor/mermaid/12.3.0-krr.pr6823.1/LICENSE",
     "vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js.sha256",
     "vendor/plantuml/1.2026.9/plantuml.jar.sha256",
     "vendor/zenuml-core/4.12.2/zenuml.js.sha256",
@@ -114,7 +114,7 @@ nix = { version = "0.31.3", default-features = false, features = ["fs", "mount"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # 公開済みCPU SDKの最小構成に合わせ、ローカルSkia改変や独自SDKへ依存しない。
-skia-safe = { version = "=0.156.0", default-features = false, features = ["binary-cache", "pdf"] }
+skia-safe = { version = "=0.157.0", default-features = false, features = ["binary-cache", "pdf"] }
 fontique = { version = "=0.12.0", default-features = false, features = ["std"] }
 objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std", "CFString", "CFURL"] }
 objc2-core-text = { version = "=0.3.2", default-features = false, features = ["CTFont", "CTFontDescriptor", "CTFontTraits"] }

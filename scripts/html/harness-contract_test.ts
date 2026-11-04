@@ -2476,6 +2476,91 @@ describe("fixed moon quality graph and managed language scopes", () => {
       "Python Ruff + strict type check registration unavailable: scripts/html/managed.py",
     );
   });
+  test("Bash registration requires both syntax checks, strict ShellCheck and CI reachability", () => {
+    const entry = "scripts/runtime-assets/mermaid-12.2.0-krr.pr6823.1.build.sh";
+    const input = "scripts/runtime-assets/mermaid-12.3.0-krr.pr6823.1.inputs.sh";
+    const recipe = `\nshell-lint:\n    bash -n ${entry}\n    bash -n ${input}\n    shellcheck --external-sources --source-path=SCRIPTDIR --severity=info ${entry}\n`;
+    for (const [label, source, local, ci, name, accepted] of [
+      ["valid", recipe, true, true, entry, true],
+      ["source file", recipe, true, true, input, true],
+      ["missing recipe", "", true, true, entry, false],
+      ["no local", recipe, false, true, entry, false],
+      ["no CI", recipe, true, false, entry, false],
+      ["unknown", recipe, true, true, "scripts/runtime-assets/other.sh", false],
+      [
+        "warning only",
+        recipe.replace("severity=info", "severity=warning"),
+        true,
+        true,
+        entry,
+        false,
+      ],
+      ["error only", recipe.replace("severity=info", "severity=error"), true, true, entry, false],
+      [
+        "exclude",
+        recipe.replace(
+          "shellcheck --external-sources",
+          "shellcheck --exclude=SC1091 --external-sources",
+        ),
+        true,
+        true,
+        entry,
+        false,
+      ],
+      ["missing syntax", recipe.replace(`    bash -n ${input}\n`, ""), true, true, entry, false],
+    ] as const) {
+      const snapshot = moonFixture();
+      replaceSources(snapshot, {
+        Justfile: `${snapshot.read("Justfile")}${source}`,
+        [entry]:
+          '# shellcheck source=mermaid-12.3.0-krr.pr6823.1.inputs.sh\nsource "$repo_root/scripts/runtime-assets/mermaid-12.3.0-krr.pr6823.1.inputs.sh"\n',
+        [input]: "# inputs\n",
+      });
+      snapshot.declaredCode = [name];
+      snapshot.tracked.add(name);
+      snapshot.tracked.add(entry);
+      snapshot.tracked.add(input);
+      if (local) snapshot.graph.localRecipes?.add("shell-lint");
+      if (ci) snapshot.graph.ciRecipes?.add("shell-lint");
+      expect(
+        checkHarnessContract(snapshot).includes(
+          `Bash syntax and ShellCheck registration unavailable: ${name}`,
+        ),
+        label,
+      ).toBe(!accepted);
+    }
+  });
+  test("Bash registration rejects missing or mismatched ShellCheck source directives", () => {
+    const entry = "scripts/runtime-assets/mermaid-12.2.0-krr.pr6823.1.build.sh";
+    const input = "scripts/runtime-assets/mermaid-12.3.0-krr.pr6823.1.inputs.sh";
+    const directive = "# shellcheck source=mermaid-12.3.0-krr.pr6823.1.inputs.sh";
+    const actual =
+      'source "$repo_root/scripts/runtime-assets/mermaid-12.3.0-krr.pr6823.1.inputs.sh"';
+    const recipe = `\nshell-lint:\n    bash -n ${entry}\n    bash -n ${input}\n    shellcheck --external-sources --source-path=SCRIPTDIR --severity=info ${entry}\n`;
+    for (const altered of [
+      "",
+      "# shellcheck source=missing.sh",
+      "# shellcheck source=other-existing.sh",
+    ]) {
+      const snapshot = moonFixture();
+      replaceSources(snapshot, {
+        Justfile: `${snapshot.read("Justfile")}${recipe}`,
+        [entry]: `${altered}\n${actual}\n`,
+        [input]: "# inputs\n",
+        "scripts/runtime-assets/other-existing.sh": "# other\n",
+      });
+      snapshot.declaredCode = [entry];
+      snapshot.tracked.add(entry);
+      snapshot.tracked.add(input);
+      snapshot.tracked.add("scripts/runtime-assets/other-existing.sh");
+      snapshot.graph.localRecipes?.add("shell-lint");
+      snapshot.graph.ciRecipes?.add("shell-lint");
+      expect(checkHarnessContract(snapshot)).toContain(
+        `Bash syntax and ShellCheck registration unavailable: ${entry}`,
+      );
+      expect(altered).not.toBe(directive);
+    }
+  });
   test("rejects Python lint/type scopes that do not include the declared script", () => {
     const snapshot = moonFixture();
     snapshot.declaredCode = ["scripts/html/managed.py"];

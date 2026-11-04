@@ -1181,8 +1181,8 @@ const NATIVE_BATCH_UNIT_CALLER = {
 
 const RUNTIME_ASSET_COMPRESSOR_UNIT_PROGRAM = {
   caller: "scripts/runtime-assets/runtime-package-asset-compressor_test.ts",
-  callerSourceSha256: "341c191ee4e8079303ba3adc1f2be19dd02c652999a5e47c6265fa2f312e88fa",
-  callerAstSha256: "02e4097c2bf8d075d83dc244a8be494322b09a67a9efa2d6edd4df059f044bdd",
+  callerSourceSha256: "a7de4db5fa763f390a4703939488ce97adcd469002671c3bdecd0525006ae06c",
+  callerAstSha256: "8906c58cb34e9e6eceb7f85ed6f048f6935c9bd871617c1418f236c0dc4555ca",
   wrapper: "scripts/runtime-assets/runtime-package-asset-compressor.ts",
   wrapperSourceSha256: "1eae43d7e77deaf44bda83585159c5ccde6dcd24d0d524d395d031c081621f48",
   wrapperAstSha256: "b3b54b4f989cc4afa735785789688131dcc9f04916a2dbd24755e6208d211f85",

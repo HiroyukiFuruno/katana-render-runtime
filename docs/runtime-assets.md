@@ -4,7 +4,7 @@
 
 | runtime | version | file | sha256 |
 | --- | --- | --- | --- |
-| Mermaid.js | 12.2.0-krr.pr6823.1 (upstream 12.2.0) | `crates/katana-render-runtime/vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js` | `831ed9d054742315d8edcb9bb933c6e56fd79d0c187a2cdf41ad48e388583a4c` |
+| Mermaid.js | 12.3.0-krr.pr6823.1 (upstream 12.3.0) | `crates/katana-render-runtime/vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js` | `2c1ab92dfbd9149c5eec9c1f9c18999063b1721ad7868163ea3f4fe4e9231eaf` |
 | Mermaid ZenUML | 1.0.1 | `crates/katana-render-runtime/vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js` | `f75662869d22aac58870e52370fe4c46b89b9710bf4b03df93b3227b5e18e730` |
 | Draw.io | 32.6.9 | `crates/katana-render-runtime/vendor/drawio/32.6.9/drawio.min.js` | `d0d0ee121adcf6994612e4943f81fb17f66c463fcba017dca310731e18f88775` |
 | MathJax | 4.1.3 | `crates/katana-render-runtime/vendor/mathjax/4.1.3/tex-svg.js` | `23c036deccc0f2374834a47e4032e452419f3ac027bf17e17c104e2746b19f4c` |
@@ -35,7 +35,7 @@ just depends-update-all
 
 `depends-update-all` は Rust・JavaScript 依存を breaking change を含めて更新する。Mermaid.js の patched asset は upstream version を npm latest と比較するだけで、通常の CDN 更新による置換を拒否する。Mermaid の候補再生成は、追跡済みの patch・provenance・build recipe と固定 SHA を使う明示的な採用手順で行う。必要な基準画像、リソース、生成 bundle を更新し、比較と品質ゲートまで実行する。
 
-Mermaid.js `12.2.0-krr.pr6823.1` は Mermaid `12.2.0` に PR6823 の Sankey lexer patch を適用した KRR 管理 asset であり、公式 npm/CDN `12.2.0` の bytes ではない。取得 URL は tag 上の raw GitHub path に固定し、tag 公開時に取得 bytes と上記 SHA の一致を検証する。再現情報は `scripts/runtime-assets/mermaid-12.2.0-krr.pr6823.1.provenance.json`、patch は同名 `.patch`、recipe は同名 `.build.sh` に固定する。
+Mermaid.js `12.3.0-krr.pr6823.1` は Mermaid `12.3.0` に PR6823 の Sankey lexer patch を適用した KRR 管理 asset であり、公式 npm/CDN `12.3.0` の bytes ではない。取得 URL は tag 上の raw GitHub path に固定し、tag 公開時に取得 bytes と上記 SHA の一致を検証する。再現情報は `scripts/runtime-assets/mermaid-12.3.0-krr.pr6823.1.provenance.json`、patch と recipe は既存の `mermaid-12.2.0-krr.pr6823.1` のものを使用する。
 
 TypeScript を含む JavaScript 依存は、`bun update --latest '!@moonrepo/*'` が解決する最新互換版を維持する。Moon CLI と platform package は `package.json` の固定版に `bun.lock` と `.moon/workspace.yml` を合わせ、型検査で他依存の互換性を確認する。
 

@@ -2,7 +2,7 @@ import path from "node:path";
 import { getOptionValue } from "../shared/cli-options";
 
 const DEFAULT_MERMAID_JS =
-  "crates/katana-render-runtime/vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js";
+  "crates/katana-render-runtime/vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js";
 const DEFAULT_MERMAID_ZENUML_JS =
   "crates/katana-render-runtime/vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js";
 

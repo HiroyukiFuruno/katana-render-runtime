@@ -108,7 +108,7 @@ test("default reference asset uses the same versioned vendor bytes as the produc
   expect(inputs.mermaidJs).toBe(
     path.join(
       cwd,
-      "crates/katana-render-runtime/vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js",
+      "crates/katana-render-runtime/vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js",
     ),
   );
 });
@@ -136,7 +136,7 @@ type MermaidParser = NonNullable<MermaidWindow["mermaid"]> & {
 const cwd = path.resolve(import.meta.dir, "../..");
 const mermaidJs = path.join(
   cwd,
-  "crates/katana-render-runtime/vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js",
+  "crates/katana-render-runtime/vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js",
 );
 const positiveFixtures = new FixtureRepository(path.join(cwd, "tests/fixtures/mermaid/ja"));
 const negativeFixtures = new FixtureRepository(

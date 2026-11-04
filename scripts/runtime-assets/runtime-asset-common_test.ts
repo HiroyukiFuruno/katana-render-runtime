@@ -13,10 +13,10 @@ test("Mermaid patched asset keeps upstream version separate from artifact versio
   const mermaid = RuntimeAssetCatalog.byKind("mermaid");
   const source = mermaid.source;
   if (source === undefined) throw new Error("Mermaid patched source metadata is missing");
-  expect(mermaid.version).toBe("12.2.0-krr.pr6823.1");
-  expect(source.upstreamVersion).toBe("12.2.0");
+  expect(mermaid.version).toBe("12.3.0-krr.pr6823.1");
+  expect(source.upstreamVersion).toBe("12.3.0");
   expect(source.immutableUrl).toBe(
-    "https://raw.githubusercontent.com/HiroyukiFuruno/katana-render-runtime/v0.4.24/crates/katana-render-runtime/vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js",
+    "https://raw.githubusercontent.com/HiroyukiFuruno/katana-render-runtime/v0.4.24/crates/katana-render-runtime/vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js",
   );
   expect(isPatchedRuntimeAsset(mermaid)).toBe(true);
   expect(mermaid.downloadUrl(mermaid.version)).toBe(source.immutableUrl);
@@ -131,7 +131,7 @@ test("runtime asset freshness AST reads the six direct catalog entries and upstr
   ]);
   expect(entries[0]).toEqual({
     kind: "mermaid",
-    version: "12.2.0",
+    version: "12.3.0",
     latestUrl: "https://registry.npmjs.org/mermaid/latest",
   });
   expect(entries[1]?.version).toBe("1.0.1");

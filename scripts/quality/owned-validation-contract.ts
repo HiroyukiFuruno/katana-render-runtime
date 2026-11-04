@@ -2382,7 +2382,7 @@ function playwrightMacosWorkflowRegistered(context: ContractContext): boolean {
         "      - name: Install JavaScript dependencies\n        if: matrix.os != 'windows-latest'",
       ) &&
       workflow.includes(
-        "      - name: Install just\n        uses: taiki-e/install-action@a058860aaa8db7b0a781c0fbe50b6716c4a40f47 # just\n\n      - name: Install Chrome for the macOS official producer browser test",
+        "      - name: Install just\n        uses: taiki-e/install-action@0b43677d266e02f8bd34a2096b57e23a01a92aff # just\n\n      - name: Install Chrome for the macOS official producer browser test",
       ) &&
       workflow.includes(
         "      - name: Install Chrome for the macOS official producer browser test\n        if: matrix.platform == 'mac-arm64'\n        run: bunx playwright install chrome",
@@ -3653,7 +3653,7 @@ function officialStrictInputSelectionVerified(context: ContractContext): boolean
       return false;
     if (
       sha(fs.readFileSync(safeFile(context.root, resolver))) !==
-      "8e6976c739355714bad12a6dccefb065a67c6c80f905cf3d6f7fdb1f334bb146"
+      "ec55f7a3de65b06a8c1bbd3e4ec80b2e97c7ae39f7d41db2bfbdca9c961ef90d"
     )
       return false;
     if (
@@ -4321,8 +4321,15 @@ function restoreReviewedFeatureCatalogTestProcess(lines: string[]): string[] | u
   return restored;
 }
 function removeReviewedRuntimeAssetTests(lines: string[]): string[] | undefined {
-  const withoutPerformanceHistory = removeReviewedTestToken(
+  const withoutPatchedMermaid = removeReviewedTestToken(
     lines,
+    "./scripts/runtime-assets/patched-mermaid-build_test.ts",
+    "./scripts/runtime-assets/mermaid-patched-build-recipe_test.ts",
+    "./scripts/mermaid/official_renderer_i18n_test.ts",
+  );
+  if (!withoutPatchedMermaid) return undefined;
+  const withoutPerformanceHistory = removeReviewedTestToken(
+    withoutPatchedMermaid,
     "./scripts/html/performance-history_test.ts",
     "./scripts/html/scroll-coverage_test.ts",
     "./scripts/html/toc-fidelity_test.ts",

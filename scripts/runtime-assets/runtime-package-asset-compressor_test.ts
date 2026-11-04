@@ -250,10 +250,10 @@ test("ZenUML限定CLIは専用archiveとindexだけを書き、引数異常を�
     root,
     "crates/katana-render-runtime-assets/assets/licenses/drawio/LICENSE",
   );
-  const mermaidCompressed = path.join(
-    root,
-    "crates/katana-render-runtime/vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js.br",
+  const mermaidCompressedPath = RuntimeAssetPaths.compressedAssetFile(
+    RuntimeAssetCatalog.byKind("mermaid"),
   );
+  const mermaidCompressed = path.join(root, mermaidCompressedPath);
   const zenumlCoreSource = RuntimeAssetPaths.assetFile(RuntimeAssetCatalog.byKind("zenuml-core"));
   const mermaidZenumlSource = RuntimeAssetPaths.assetFile(
     RuntimeAssetCatalog.byKind("mermaid-zenuml"),
@@ -264,7 +264,7 @@ test("ZenUML限定CLIは専用archiveとindexだけを書き、引数異常を�
     "crates/katana-render-runtime/src/markdown/drawio_renderer/generated/drawio-resources.bin.br",
     "crates/katana-render-runtime/src/markdown/drawio_renderer/generated/drawio-resources-index.rs",
     "crates/katana-render-runtime-assets/assets/licenses/drawio/LICENSE",
-    "crates/katana-render-runtime/vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js.br",
+    mermaidCompressedPath,
   ]);
   const untouchedPaths = [drawioArchive, drawioIndex, drawioLicense, mermaidCompressed];
   const untouchedBefore = untouchedPaths.map((file) => fs.readFileSync(file));

@@ -49,14 +49,14 @@ export interface RuntimeAssetDefinition {
 }
 
 const MERMAID_PATCHED_URL =
-  "https://raw.githubusercontent.com/HiroyukiFuruno/katana-render-runtime/v0.4.24/crates/katana-render-runtime/vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js";
+  "https://raw.githubusercontent.com/HiroyukiFuruno/katana-render-runtime/v0.4.24/crates/katana-render-runtime/vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js";
 
 const DEFINITIONS: RuntimeAssetDefinition[] = [
   {
     kind: "mermaid",
     displayName: "Mermaid.js",
-    version: "12.2.0-krr.pr6823.1",
-    checksum: "831ed9d054742315d8edcb9bb933c6e56fd79d0c187a2cdf41ad48e388583a4c",
+    version: "12.3.0-krr.pr6823.1",
+    checksum: "2c1ab92dfbd9149c5eec9c1f9c18999063b1721ad7868163ea3f4fe4e9231eaf",
     fileName: "mermaid.min.js",
     rustVersionConst: "MERMAID_JS_VERSION",
     rustChecksumConst: "MERMAID_JS_CHECKSUM",
@@ -64,9 +64,9 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
     latestUrl: "https://registry.npmjs.org/mermaid/latest",
     source: {
       kind: "patched-upstream",
-      upstreamVersion: "12.2.0",
+      upstreamVersion: "12.3.0",
       immutableUrl: MERMAID_PATCHED_URL,
-      provenancePath: "scripts/runtime-assets/mermaid-12.2.0-krr.pr6823.1.provenance.json",
+      provenancePath: "scripts/runtime-assets/mermaid-12.3.0-krr.pr6823.1.provenance.json",
     },
     releasePageUrl: () => MERMAID_PATCHED_URL,
     downloadUrl: () => MERMAID_PATCHED_URL,

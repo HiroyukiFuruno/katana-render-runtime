@@ -8,10 +8,10 @@ use std::{
 
 static RUNTIME_ASSET_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
-pub const MERMAID_JS_VERSION: &str = "12.2.0-krr.pr6823.1";
+pub const MERMAID_JS_VERSION: &str = "12.3.0-krr.pr6823.1";
 pub const MERMAID_JS_CHECKSUM: &str =
-    "831ed9d054742315d8edcb9bb933c6e56fd79d0c187a2cdf41ad48e388583a4c";
-pub const MERMAID_DOWNLOAD_URL: &str = "https://raw.githubusercontent.com/HiroyukiFuruno/katana-render-runtime/v0.4.24/crates/katana-render-runtime/vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js";
+    "2c1ab92dfbd9149c5eec9c1f9c18999063b1721ad7868163ea3f4fe4e9231eaf";
+pub const MERMAID_DOWNLOAD_URL: &str = "https://raw.githubusercontent.com/HiroyukiFuruno/katana-render-runtime/v0.4.24/crates/katana-render-runtime/vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js";
 
 pub const MERMAID_ZENUML_JS_VERSION: &str = "1.0.1";
 pub const MERMAID_ZENUML_JS_CHECKSUM: &str =
@@ -60,7 +60,7 @@ impl RuntimeAsset {
             version: MERMAID_JS_VERSION,
             filename: "mermaid.min.js",
             source: RuntimeAssetSource::Brotli {
-                bytes: include_bytes!("../../vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js.br"),
+                bytes: include_bytes!("../../vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js.br"),
                 cache: &runtime_asset_archive::MERMAID_RUNTIME_ASSET_BYTES,
             },
         }

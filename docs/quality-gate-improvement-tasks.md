@@ -2,6 +2,23 @@
 
 ## 最新の再開地点（2026-11-04）
 
+### 現在の判定と実行中の作業
+
+- [x] 依存採用関連のR7688はBun6files・809/809成功・実0（135.935秒）。先行R7681の残2件は新unit tokenの有限登録漏れを修正し、Python ownerの固定DAGへshell-lintを追従したうえで既存canonical ASTの固定値1件を独立レビューして更新した。R7687は元2件と登録の正常/欠落/重複/誤位置の計6/6成功。元の失敗記録は保持し、画像基準・採点・benchmark receiptは変更していない。これは関連検査の合格であり、現sourceの全品質ゲート・描画・性能の合格ではない。
+- [x] R7689でunit DAGに存在しないstandalone producerを負例に指定していた検証不備を検出。実DAGのclassic generationへ対応付け、standalone7producerの既存検証は維持し、追加shell taskの実数48件にも追従した。独立レビュー後、R7692のPython owner25件は全成功・実0。R7690正式AST（54+2+19件）とR7691整形も実0。R7693の静的foundationはresolver固定SHAの追従漏れ2連鎖エラーで実1、他の静的項目は成功。resolverの実変更がMermaid既定path12.2→12.3の1行だけであることを独立確認し、既存SHA1値を追従、R7694の入力選択・改変拒否回帰は実0。既存の未知入力拒否や採点条件は維持し、静的全体は再回収する。
+
+公開対象はKRR既存3crateであり、SVGはKRRへ内包する。過去のfork・2crate公開・追加tokenの記述は当時の履歴で、現在の公開条件ではない。以下の合格値は記載したsourceの結果であり、依存更新後へ無条件に転用しない。Q17–Q22の実証と公開工程は未完のまま維持する。
+
+- [x] source `5d8ebd30` のR7653で既存 `html-release-fidelity-check` が実0。長文等の画像286/286が90以上（最低RMSEスコア91.98562）、scroll coverage42report、匿名化資料のTOC48entryを確認。visual6case・script5case・入力状態18caseも成功。HTML内Mermaid/Draw.ioは各11画像がすべて90以上。実行1138.187746秒。私有原本・本文・画像はGitへ取り込んでいない。
+- [x] 同sourceのR7654で実catalogから公開consumerの両軸・座標・DPR・resize状態回帰を選択し、R7655の `--exact` で実1/1成功・実0。release/default featuresの限定回帰であり、全workspace/all-featuresの合格ではない。R7656では元capture-buildのSHAに一致する描画probeとTOC実行体を既存reflink処理で保全し、元証跡は変更していない。
+- [/] R7652は実1・`BatchBudgetExhausted`。既存1200秒の新worker開始上限で途中封緘し、既存2条件を再利用して新6条件を取得、累計8/84条件・2400phase recordsを保持した。`formalAccepted=false` で、全84性能の合格ではない。新依存・現行SDKとの再利用適格性は正式readerで確認し、元receipt/head/pinは書き換えない。
+- [/] R7657の公開前チェックで最新互換lock未達を検出。Skia 0.157.0・ureq 3.5.1等とBun依存を更新し、日本語等のSankey修正を維持したMermaid 12.3.0を統合した。R7662/R7663は固定source/toolを使う別ディレクトリのビルドがともに実0、5537894 bytes・SHA `2c1ab92dfbd9149c5eec9c1f9c18999063b1721ad7868163ea3f4fe4e9231eaf` で一致。旧vendor/patch/provenance/raw/receiptは保持。R7659静的foundation実0、R7661更新Skiaの厳格Rust Lint実0、R7669最新互換依存チェック実0。新依存での画像/性能と完全ゲートは未受入。
+- [/] 新unitから到達するBashに静的検査がないことを事前検査で検出し、既存ShellCheck 0.11.0とBash syntaxをlocal/CIの先行静的DAGへ接続。source先を検査し損なうP2を修正し、`info`以上と固定source指示の対応を必須化、未知source・指示欠落/誤指定・severity緩和等の負例を追加した。R7675実ゲート0。Mermaid限定圧縮のテストは現行catalog由来の資源を不変確認するよう修正し、実行先・3有限argv・cwd/stdio不変を再レビューした既存caller identity2値だけを更新。R7680の全source事前検査は実0。R7678の関連809件中805成功・4失敗の原結果は保持し、同じ範囲を再検証する。画像基準・採点・benchmark receiptのpinは変更していない。
+- [/] performance coverageの開始時pending化と単一ownerは現行recipeへ接続済みで、旧成功の拒否・lock競合のunitも存在する。過去の「未接続」という読取りを現在の実装不足へ転用しない。現sourceでの100%/未計測0、miss→hit→復元、改変拒否と再収集、実CI等の実証は引き続き未完。
+- [ ] 依存採用後の正式117画像・HTML画像/適用font・全84性能の適格性、現sourceの完全品質ゲートとcoverage100%/未計測0、Q17–Q22の実効性、Draft/最新review/個別reply-resolve、Ready後3OS CI、expected HEAD付き保護merge、Release/3crate公開、Issue closeとcleanupを完了する。coverageの未達1141はR7386の過去値で、現在値は未計測。
+
+### これまでの実行履歴
+
 - [x] source `4e19fc34` のR7648で製品PNG全117図を正式再検証し、実0・accepted=true。英語59図の最低99.085711、日本語58図の最低99.10801000000001。承認済みの形状・配色別評価を維持し、公式raw JS・入力・閾値は変更していない。中間SVG比較の成功で代用していない。
 - [/] R7606/R7609の現行HTML画像は84/84が90以上・最低92.14438、出力フォント一致established、診断0。修正後プログラムのR7649は性能1条件・300 phase recordsの測定と封印が成功し、R7650はその参照を変更せず再利用して次の1条件だけを取得、累計2条件・600 recordsで実0。両方formalAccepted=falseであり全84性能の合格ではない。この文書だけの変更後も既存の固定SDK・計測プログラムを維持して残条件へ再開し、全条件・現行SDKとの同値性・正式validatorを確認する。元receipt/head/pinは書き換えない。
 

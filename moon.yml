@@ -70,6 +70,10 @@ tasks:
     command: ['just', 'python-typecheck']
     inputs: *quality-inputs
 
+  shell-lint:
+    command: ['just', 'shell-lint']
+    inputs: *quality-inputs
+
   html-performance-lock-pin-check:
     command: ['just', 'html-performance-lock-pin-check']
     inputs: *quality-inputs
@@ -93,6 +97,7 @@ tasks:
       - typecheck
       - python-lint
       - python-typecheck
+      - shell-lint
       - html-performance-lock-pin-check
       - duplication-check
       - html-harness-contract-check

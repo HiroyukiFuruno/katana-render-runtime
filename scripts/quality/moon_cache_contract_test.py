@@ -62,6 +62,7 @@ SCHEDULER_DEPENDENCIES: dict[str, list[str]] = {
         "typecheck",
         "python-lint",
         "python-typecheck",
+        "shell-lint",
         "html-performance-lock-pin-check",
         "duplication-check",
         "html-harness-contract-check",
@@ -76,6 +77,7 @@ SCHEDULER_DEPENDENCIES: dict[str, list[str]] = {
     "typecheck": [],
     "python-lint": [],
     "python-typecheck": [],
+    "shell-lint": [],
     "duplication-check": [],
     "html-harness-contract-check": [],
     "owned-validation-contract-check": [],
@@ -103,6 +105,7 @@ SCHEDULER_EVENT_PHASES = (
     "typecheck",
     "python-lint",
     "python-typecheck",
+    "shell-lint",
     "html-performance-lock-pin-check",
     "duplication-check",
     "html-harness-contract-check",
@@ -122,8 +125,8 @@ SCHEDULER_EVENT_PHASES = (
     "runtime-asset-script-test",
     "unit-test",
 )
-SCHEDULER_FOUNDATION_PHASES = SCHEDULER_EVENT_PHASES[:11]
-SCHEDULER_PRE_LINT_PHASES = SCHEDULER_EVENT_PHASES[:14]
+SCHEDULER_FOUNDATION_PHASES = SCHEDULER_EVENT_PHASES[:12]
+SCHEDULER_PRE_LINT_PHASES = SCHEDULER_EVENT_PHASES[:15]
 SCHEDULER_BARRIER_PHASES = (
     "lint",
     "ast-lint",
@@ -311,7 +314,7 @@ def production_task_input_binding(
     declared_path = evidence_dir / "production-declared-inputs.json"
     declared_path.write_text(declared_output)
     declared = moon_json_object(json.loads(declared_output))
-    assert len(declared) == 47, "Production Moon task count changed"
+    assert len(declared) == 48, "Production Moon task count changed"
     validate_root_test_coverage_contract(declared)
     runtime_preflight = moon_json_object(declared.get("runtime-asset-script-preflight"))
     classic_evidence = moon_json_object(

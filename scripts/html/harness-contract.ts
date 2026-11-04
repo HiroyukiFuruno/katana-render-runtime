@@ -39,6 +39,10 @@ function covered(file: string, includes: string[], excludes: string[] = []): boo
 }
 
 function staticScopeErrors(name: string, snapshot: HarnessSnapshot): string[] {
+  if (name.endsWith(".sh"))
+    return shellRegistered(name, snapshot)
+      ? []
+      : [`Bash syntax and ShellCheck registration unavailable: ${name}`];
   if (name.endsWith(".py"))
     return pythonRegistered(name, snapshot)
       ? []
@@ -65,6 +69,48 @@ function staticScopeErrors(name: string, snapshot: HarnessSnapshot): string[] {
 function recipeRegistered(name: string, snapshot: HarnessSnapshot): boolean {
   return (
     snapshot.graph.localRecipes?.has(name) === true && snapshot.graph.ciRecipes?.has(name) === true
+  );
+}
+
+const SHELL_ENTRY = "scripts/runtime-assets/mermaid-12.2.0-krr.pr6823.1.build.sh";
+const SHELL_INPUT = "scripts/runtime-assets/mermaid-12.3.0-krr.pr6823.1.inputs.sh";
+
+function shellRegistered(name: string, snapshot: HarnessSnapshot): boolean {
+  if (name !== SHELL_ENTRY && name !== SHELL_INPUT) return false;
+  const body = justRecipes(snapshot.read("Justfile") ?? "").get("shell-lint") ?? "";
+  const commands = body
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const expected = [
+    `bash -n ${SHELL_ENTRY}`,
+    `bash -n ${SHELL_INPUT}`,
+    `shellcheck --external-sources --source-path=SCRIPTDIR --severity=info ${SHELL_ENTRY}`,
+  ];
+  return (
+    commands.length === expected.length &&
+    commands.every((line, index) => line === expected[index]) &&
+    recipeRegistered("shell-lint", snapshot) &&
+    shellSourceBinding(snapshot)
+  );
+}
+
+function shellSourceBinding(snapshot: HarnessSnapshot): boolean {
+  if (
+    !snapshot.tracked.has(SHELL_ENTRY) ||
+    !snapshot.tracked.has(SHELL_INPUT) ||
+    snapshot.read(SHELL_INPUT) === undefined
+  )
+    return false;
+  const lines = (snapshot.read(SHELL_ENTRY) ?? "").split(/\r?\n/).map((line) => line.trim());
+  const directive = "# shellcheck source=mermaid-12.3.0-krr.pr6823.1.inputs.sh";
+  const source = 'source "$repo_root/scripts/runtime-assets/mermaid-12.3.0-krr.pr6823.1.inputs.sh"';
+  const index = lines.indexOf(directive);
+  return (
+    index >= 0 &&
+    lines[index + 1] === source &&
+    lines.filter((line) => /^#\s*shellcheck\s+source=/.test(line)).length === 1 &&
+    lines.filter((line) => /^source\s/.test(line)).length === 1
   );
 }
 
@@ -180,6 +226,7 @@ function rustTarget(name: string, member: string, manifest: Record<string, unkno
 }
 
 function languageRegistered(name: string, snapshot: HarnessSnapshot): boolean {
+  if (name.endsWith(".sh")) return shellRegistered(name, snapshot);
   if (name.endsWith(".py")) return pythonRegistered(name, snapshot);
   return name.endsWith(".rs") && rustRegistered(name, snapshot);
 }

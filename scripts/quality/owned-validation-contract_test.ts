@@ -1206,8 +1206,8 @@ test.each([
   ["runner", `just ${playwrightMacosRecipe}`, "just browser-contract-test"],
   [
     "Windows just availability",
-    "      - name: Install just\n        uses: taiki-e/install-action@a058860aaa8db7b0a781c0fbe50b6716c4a40f47 # just\n\n      - name: Install Chrome for the macOS official producer browser test",
-    "      - name: Install just\n        if: matrix.os != 'windows-latest'\n        uses: taiki-e/install-action@a058860aaa8db7b0a781c0fbe50b6716c4a40f47 # just\n\n      - name: Install Chrome for the macOS official producer browser test",
+    "      - name: Install just\n        uses: taiki-e/install-action@0b43677d266e02f8bd34a2096b57e23a01a92aff # just\n\n      - name: Install Chrome for the macOS official producer browser test",
+    "      - name: Install just\n        if: matrix.os != 'windows-latest'\n        uses: taiki-e/install-action@0b43677d266e02f8bd34a2096b57e23a01a92aff # just\n\n      - name: Install Chrome for the macOS official producer browser test",
   ],
 ] as const)("macOS producer registration rejects changed %s", (_label, before, after) => {
   const root = fixture(),
@@ -1953,6 +1953,43 @@ test("frozen native unit registration accepts the current mandatory lane", () =>
   const recipe = actualRecipeBody("runtime-asset-script-test");
   expect(recipe).toContain(`${nativeBuildUnitCommand}\n${frozenNativeUnitCommand}`);
   expect(inspectParserBodyOnloadRoute(root).issues).not.toContainEqual(
+    expect.objectContaining({ code: "parser-body-onload-test-unregistered" }),
+  );
+});
+
+const patchedMermaidUnit = "./scripts/runtime-assets/patched-mermaid-build_test.ts";
+const patchedMermaidNeighbors = `./scripts/runtime-assets/mermaid-patched-build-recipe_test.ts ${patchedMermaidUnit} ./scripts/mermaid/official_renderer_i18n_test.ts`;
+
+test("patched Mermaid unit registration accepts its current position", () => {
+  const root = parserFixture();
+  expect(actualRecipeBody("runtime-asset-script-test")).toContain(patchedMermaidNeighbors);
+  expect(inspectParserBodyOnloadRoute(root).issues).not.toContainEqual(
+    expect.objectContaining({ code: "parser-body-onload-test-unregistered" }),
+  );
+});
+
+test.each([
+  ["missing", patchedMermaidNeighbors.replace(` ${patchedMermaidUnit}`, "")],
+  [
+    "duplicate",
+    patchedMermaidNeighbors.replace(
+      patchedMermaidUnit,
+      `${patchedMermaidUnit} ${patchedMermaidUnit}`,
+    ),
+  ],
+  [
+    "misplaced",
+    patchedMermaidNeighbors.replace(` ${patchedMermaidUnit}`, "") + ` ${patchedMermaidUnit}`,
+  ],
+] as const)("patched Mermaid unit registration rejects %s", (_name, replacement) => {
+  const root = parserFixture();
+  const recipe = actualRecipeBody("runtime-asset-script-test");
+  expect(recipe).toContain(patchedMermaidNeighbors);
+  recipes(root, {
+    "runtime-asset-script-test": recipe.replace(patchedMermaidNeighbors, replacement),
+  });
+  track(root);
+  expect(inspectParserBodyOnloadRoute(root).issues).toContainEqual(
     expect.objectContaining({ code: "parser-body-onload-test-unregistered" }),
   );
 });

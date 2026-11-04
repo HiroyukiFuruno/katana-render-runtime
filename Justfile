@@ -41,7 +41,7 @@ TAG := "v" + VERSION_BARE
 RELEASE_REPO := env_var_or_default("RELEASE_REPO", "HiroyukiFuruno/katana-render-runtime")
 COVERAGE_MIN_LINES := env_var_or_default("COVERAGE_MIN_LINES", "100")
 COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES", "0")
-MERMAID_JS_VERSION := "12.2.0-krr.pr6823.1"
+MERMAID_JS_VERSION := "12.3.0-krr.pr6823.1"
 MERMAID_ZENUML_JS_VERSION := "1.0.1"
 DRAWIO_JS_VERSION := "32.6.9"
 MATHJAX_JS_VERSION := "4.1.3"
@@ -172,6 +172,11 @@ owned-validation-contract-check:
     {{CARGO}} metadata --locked --all-features --format-version 1 --manifest-path "{{REPO_ROOT}}/Cargo.toml" > /dev/null
     {{CARGO}} metadata --locked --no-default-features --features baseline --format-version 1 --manifest-path "{{REPO_ROOT}}/scripts/html/performance-harness/Cargo.toml" > /dev/null
     {{CARGO}} metadata --locked --no-default-features --features candidate --format-version 1 --manifest-path "{{REPO_ROOT}}/scripts/html/performance-harness/Cargo.toml" > /dev/null
+
+shell-lint:
+    bash -n scripts/runtime-assets/mermaid-12.2.0-krr.pr6823.1.build.sh
+    bash -n scripts/runtime-assets/mermaid-12.3.0-krr.pr6823.1.inputs.sh
+    shellcheck --external-sources --source-path=SCRIPTDIR --severity=info scripts/runtime-assets/mermaid-12.2.0-krr.pr6823.1.build.sh
 
 # Run coverage as a required full-check gate
 coverage:
@@ -321,7 +326,7 @@ runtime-classic-generation-evidence:
 
 runtime-asset-script-other-run:
     bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-assets/svg-engine-provenance_test.ts
-    bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-assets/runtime-asset-common_test.ts ./scripts/runtime-assets/update_test.ts ./scripts/runtime-assets/latest-check_test.ts ./scripts/runtime-assets/update_zenuml_test.ts ./scripts/runtime-assets/depends-update-all_test.ts ./scripts/runtime-assets/runtime-package-asset-compressor_test.ts ./scripts/runtime-assets/mermaid-patched-build-recipe_test.ts ./scripts/mermaid/official_renderer_i18n_test.ts ./scripts/mermaid/diagram_update_markdown_assets_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-assets/runtime-asset-common_test.ts ./scripts/runtime-assets/update_test.ts ./scripts/runtime-assets/latest-check_test.ts ./scripts/runtime-assets/update_zenuml_test.ts ./scripts/runtime-assets/depends-update-all_test.ts ./scripts/runtime-assets/runtime-package-asset-compressor_test.ts ./scripts/runtime-assets/mermaid-patched-build-recipe_test.ts ./scripts/runtime-assets/patched-mermaid-build_test.ts ./scripts/mermaid/official_renderer_i18n_test.ts ./scripts/mermaid/diagram_update_markdown_assets_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-rust-facts-host_test.ts ./scripts/runtime-bundles/runtime-rust-facts-host-freshness_test.ts ./scripts/runtime-bundles/runtime-mathjax-audit-evidence_test.ts
     python3 scripts/quality/moon_cache_contract_test.py --moon bun run moon
     bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/reference_score_test.ts ./scripts/drawio/official-runtime-determinism_test.ts ./scripts/drawio/official-source-fonts_test.ts

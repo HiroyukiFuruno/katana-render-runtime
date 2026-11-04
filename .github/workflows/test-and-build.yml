@@ -67,7 +67,13 @@ jobs:
           version: "0.13.0"
           enable-cache: true
       - name: Install just
-        uses: taiki-e/install-action@a058860aaa8db7b0a781c0fbe50b6716c4a40f47 # just
+        uses: taiki-e/install-action@0b43677d266e02f8bd34a2096b57e23a01a92aff # just
+      - name: Install ShellCheck 0.11.0
+        run: |
+          curl --fail --location --output "$RUNNER_TEMP/shellcheck.tar.xz" https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
+          tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/shellcheck-v0.11.0/shellcheck" --version | grep -Fx 'version: 0.11.0'
+          echo "$RUNNER_TEMP/shellcheck-v0.11.0" >> "$GITHUB_PATH"
       - name: Verify validation registration before scheduling checks
         run: bun scripts/html/harness-contract-cli.ts
       - name: Run independent source checks
@@ -163,18 +169,18 @@ jobs:
 
       - name: Install cargo-llvm-cov
         if: matrix.os == 'ubuntu-latest'
-        uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
+        uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
         with:
           tool: cargo-llvm-cov@0.9.1
 
       - name: Install cargo-nextest
         if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
-        uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
+        uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
         with:
           tool: cargo-nextest@0.9.148
 
       - name: Install just
-        uses: taiki-e/install-action@a058860aaa8db7b0a781c0fbe50b6716c4a40f47 # just
+        uses: taiki-e/install-action@0b43677d266e02f8bd34a2096b57e23a01a92aff # just
 
       - name: Install Chrome for the macOS official producer browser test
         if: matrix.platform == 'mac-arm64'
@@ -689,7 +695,7 @@ jobs:
 
       - name: Install just
         if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
-        uses: taiki-e/install-action@a058860aaa8db7b0a781c0fbe50b6716c4a40f47 # just
+        uses: taiki-e/install-action@0b43677d266e02f8bd34a2096b57e23a01a92aff # just
 
       - name: Install Bun
         if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
@@ -840,13 +846,13 @@ jobs:
           enable-cache: true
 
       - name: Install just
-        uses: taiki-e/install-action@a058860aaa8db7b0a781c0fbe50b6716c4a40f47 # just
+        uses: taiki-e/install-action@0b43677d266e02f8bd34a2096b57e23a01a92aff # just
 
       - name: Install capacity cleanup tool
         run: cargo install cargo-sweep --version 0.8.0 --locked
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
+        uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
         with:
           tool: cargo-llvm-cov@0.9.1
 
