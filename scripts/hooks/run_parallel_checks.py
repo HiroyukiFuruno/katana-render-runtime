@@ -272,7 +272,7 @@ def run_checks(jobs: int) -> int:
                 "exec",
                 "krr:coverage",
                 "--on-failure",
-                "continue",
+                "bail",
                 "--no-actions",
             ]
             result = subprocess.run(

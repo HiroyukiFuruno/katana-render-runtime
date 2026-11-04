@@ -9,6 +9,7 @@ import shlex
 import subprocess
 import tempfile
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -18,42 +19,97 @@ SHA_ENV = "MERMAID_RASTER_SESSION_CONFIG_SHA"
 CONFIG_FLAG = "--raster-session-config"
 SHA_FLAG = "--raster-session-config-sha"
 SHA = "0123456789abcdef" * 4
+
+
+@dataclass(frozen=True)
+class RasterProducerRoute:
+    recipe: str
+    producer: str
+    command_prefix: tuple[str, ...]
+    config_env: str
+    sha_env: str
+    config_flag: str
+    sha_flag: str
+    required_arguments: tuple[tuple[str, str], ...]
+
+
+STRICT_REFERENCE_ROUTE = RasterProducerRoute(
+    "mermaid-reference-strict",
+    "scripts/mermaid/produce_raster_process_evidence.py",
+    ("python3",),
+    CONFIG_ENV,
+    SHA_ENV,
+    "--config",
+    "--config-sha256",
+    (("--role", "official"),),
+)
 ROUTES = (
-    ("mermaid-reference-strict", "scripts/mermaid/diagram-update.ts"),
-    ("mermaid-compare", "scripts/mermaid/rasterize-svg-dir.ts"),
-    ("mermaid-compare-prebuilt", "scripts/mermaid/rasterize-svg-dir.ts"),
-    ("mermaid-capture-prebuilt", "scripts/mermaid/rasterize-svg-dir.ts"),
+    STRICT_REFERENCE_ROUTE,
+    *(
+        RasterProducerRoute(
+            recipe,
+            "scripts/mermaid/rasterize-svg-dir.ts",
+            ("bun", "run"),
+            CONFIG_ENV,
+            SHA_ENV,
+            CONFIG_FLAG,
+            SHA_FLAG,
+            (
+                ("--reference-mode", "strictVendorOriginal"),
+                ("--reference-scope", "formal"),
+            ),
+        )
+        for recipe in (
+            "mermaid-compare",
+            "mermaid-compare-prebuilt",
+            "mermaid-capture-prebuilt",
+        )
+    ),
 )
 
 
 def producer_argv(
-    recipe: str, producer: str, config: str | None, sha: str | None,
-    config_env: str = CONFIG_ENV, sha_env: str = SHA_ENV,
+    route: RasterProducerRoute,
+    config: str | None,
+    sha: str | None,
 ) -> list[str]:
     env = os.environ.copy()
-    for name, value in ((config_env, config), (sha_env, sha)):
+    for name, value in ((route.config_env, config), (route.sha_env, sha)):
         if value is None:
             env.pop(name, None)
         else:
             env[name] = value
     env["MERMAID_RASTER_ARG_CANARY"] = "unexpected-shell-expansion"
     result = subprocess.run(
-        ["rtk", "proxy", "just", "--dry-run", recipe, "tests/fixtures/mermaid/representative"],
+        [
+            "rtk",
+            "proxy",
+            "just",
+            "--dry-run",
+            route.recipe,
+            "tests/fixtures/mermaid/representative",
+        ],
         cwd=ROOT,
         env=env,
         capture_output=True,
         text=True,
         check=True,
     )
-    prefix = f"bun run {producer} "
+    prefix = f"{' '.join((*route.command_prefix, route.producer))} "
     commands = [line for line in (result.stdout + result.stderr).splitlines() if line.startswith(prefix)]
     if len(commands) != 1:
         raise AssertionError(f"expected one producer command, got {commands!r}")
     # WHY: 描画を実行せず、just が作った quoting を実 shell の引数展開で検査する。
-    arguments = commands[0][len(prefix):]
+    arguments = commands[0][len(prefix) :]
     serializer = "import json, sys; print(json.dumps(sys.argv[1:]))"
     shell = subprocess.run(
-        ["rtk", "proxy", "bash", "-uc", f"set -- {arguments}; exec python3 -c {shlex.quote(serializer)} \"$@\""],
+        [
+            "rtk",
+            "proxy",
+            "bash",
+            "-uc",
+            f"set -- {arguments}; exec python3 -c {shlex.quote(serializer)} \"$@\"",
+        ],
         cwd=ROOT,
         env=env,
         capture_output=True,
@@ -81,49 +137,52 @@ def flag_value(argv: list[str], flag: str) -> str:
 
 
 class MermaidJustRasterSessionContractTest(unittest.TestCase):
-    routes: tuple[tuple[str, str], ...] = ROUTES
-    config_env = CONFIG_ENV
-    sha_env = SHA_ENV
-    config_flag = CONFIG_FLAG
-    sha_flag = SHA_FLAG
+    routes: tuple[RasterProducerRoute, ...] = ROUTES
 
     def test_external_config_and_sha_keep_exact_shell_arguments_on_all_strict_routes(self) -> None:
         config = str(ROOT / "tmp" / "external session $MERMAID_RASTER_ARG_CANARY 'single' \"double\".json")
-        for recipe, producer in self.routes:
-            with self.subTest(recipe=recipe):
-                argv = producer_argv(recipe, producer, config, SHA, self.config_env, self.sha_env)
-                self.assertEqual(flag_value(argv, self.config_flag), config)
-                self.assertEqual(flag_value(argv, self.sha_flag), SHA)
-                self.assertEqual(flag_value(argv, "--reference-mode"), "strictVendorOriginal")
-                self.assertEqual(flag_value(argv, "--reference-scope"), "formal")
+        for route in self.routes:
+            with self.subTest(recipe=route.recipe):
+                argv = producer_argv(route, config, SHA)
+                self.assertEqual(flag_value(argv, route.config_flag), config)
+                self.assertEqual(flag_value(argv, route.sha_flag), SHA)
+                for flag, value in route.required_arguments:
+                    self.assertEqual(flag_value(argv, flag), value)
 
     def test_unset_environment_keeps_empty_arguments_on_all_strict_routes(self) -> None:
-        for recipe, producer in self.routes:
-            with self.subTest(recipe=recipe):
-                argv = producer_argv(recipe, producer, None, None, self.config_env, self.sha_env)
-                self.assertEqual(flag_value(argv, self.config_flag), "")
-                self.assertEqual(flag_value(argv, self.sha_flag), "")
+        for route in self.routes:
+            with self.subTest(recipe=route.recipe):
+                argv = producer_argv(route, None, None)
+                self.assertEqual(flag_value(argv, route.config_flag), "")
+                self.assertEqual(flag_value(argv, route.sha_flag), "")
 
     def test_either_unset_external_value_remains_empty(self) -> None:
         config = str(ROOT / "tmp" / "caller-supplied session.json")
-        for recipe, producer in self.routes:
+        for route in self.routes:
             for supplied_path, supplied_sha in ((None, SHA), (config, None)):
-                with self.subTest(recipe=recipe, path=supplied_path, sha=supplied_sha):
-                    argv = producer_argv(recipe, producer, supplied_path, supplied_sha, self.config_env, self.sha_env)
-                    self.assertEqual(flag_value(argv, self.config_flag), supplied_path or "")
-                    self.assertEqual(flag_value(argv, self.sha_flag), supplied_sha or "")
+                with self.subTest(recipe=route.recipe, path=supplied_path, sha=supplied_sha):
+                    argv = producer_argv(route, supplied_path, supplied_sha)
+                    self.assertEqual(flag_value(argv, route.config_flag), supplied_path or "")
+                    self.assertEqual(flag_value(argv, route.sha_flag), supplied_sha or "")
 
 
 class MermaidJustRasterComparisonContractTest(MermaidJustRasterSessionContractTest):
-    routes = (
-        ("mermaid-compare", "scripts/mermaid/reference-compare.ts"),
-        ("mermaid-compare-prebuilt", "scripts/mermaid/reference-compare.ts"),
-        ("mermaid-score-strict", "scripts/mermaid/reference-compare.ts"),
+    routes = tuple(
+        RasterProducerRoute(
+            recipe,
+            "scripts/mermaid/reference-compare.ts",
+            ("bun", "run"),
+            "MERMAID_RASTER_BINDING_CONFIG",
+            "MERMAID_RASTER_BINDING_CONFIG_SHA",
+            "--raster-binding-config",
+            "--raster-binding-config-sha",
+            (
+                ("--reference-mode", "strictVendorOriginal"),
+                ("--reference-scope", "formal"),
+            ),
+        )
+        for recipe in ("mermaid-compare", "mermaid-compare-prebuilt", "mermaid-score-strict")
     )
-    config_env = "MERMAID_RASTER_BINDING_CONFIG"
-    sha_env = "MERMAID_RASTER_BINDING_CONFIG_SHA"
-    config_flag = "--raster-binding-config"
-    sha_flag = "--raster-binding-config-sha"
 
     def test_score_only_recipe_does_not_render_or_capture(self) -> None:
         result = subprocess.run(
@@ -137,11 +196,12 @@ class MermaidJustRasterComparisonContractTest(MermaidJustRasterSessionContractTe
         self.assertNotIn("scripts/mermaid/rasterize-svg-dir.ts", expanded)
         self.assertNotIn("just mermaid-render-strict", expanded)
         self.assertNotIn("scripts/mermaid/diagram-update.ts", expanded)
+        self.assertNotIn("scripts/mermaid/produce_raster_process_evidence.py", expanded)
 
     def test_existing_each99_threshold_is_preserved_on_both_comparison_routes(self) -> None:
-        for recipe, producer in self.routes:
-            with self.subTest(recipe=recipe):
-                argv = producer_argv(recipe, producer, None, None, self.config_env, self.sha_env)
+        for route in self.routes:
+            with self.subTest(recipe=route.recipe):
+                argv = producer_argv(route, None, None)
                 self.assertEqual(flag_value(argv, "--min-score"), "99")
 
 

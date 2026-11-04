@@ -4650,7 +4650,7 @@ function ciMoonLeaves(
 // 実producer・consumerをreviewしたepochに固定し、呼出文字列だけの偽装を拒否する。
 const MOON_TERMINAL_SOURCES = {
   "scripts/hooks/run_parallel_checks.py":
-    "6590d3482195d88452d2592a2a690e114c7e060270e95908c735c695256ac180",
+    "275478b3b6a132b4a5c8e1db799753ffc529e91c3065b422e616361bae4b31b6",
   "scripts/html/harness-contract-cli.ts":
     "4936fe8b6c50636ffada2938130fddea2bc8e4b68d1d9758a5ba4e87bb33aaf5",
 } as const;

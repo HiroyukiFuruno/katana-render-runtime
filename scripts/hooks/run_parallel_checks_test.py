@@ -220,7 +220,7 @@ class MoonBridgeTest(unittest.TestCase):
                 "exec",
                 "krr:coverage",
                 "--on-failure",
-                "continue",
+                "bail",
                 "--no-actions",
             ],
         )
