@@ -193,6 +193,16 @@ class HostLoadValidationTest(unittest.TestCase):
 
 
 class CurrentHostLoadPreflightTest(unittest.TestCase):
+    def test_previous_current_cpu_producer_is_historical_and_unknown_is_rejected(self) -> None:
+        previous = "6c4f667253690df1e7c703287eec97ed750bfe69fdaeeb65483e33445a1f9524"
+        self.assertIn(previous, host.HISTORICAL_CPU_PRODUCER_SHA256)
+        self.assertNotEqual(previous, host.CPU_PRODUCER_SHA256)
+        records = {host.PRODUCER: (previous, 1), host.ADAPTER: (host.CPU_ADAPTER_SHA256, 1)}
+        self.assertEqual(host._method(records), "cpu-busy")
+        records[host.PRODUCER] = ("0" * 64, 1)
+        with self.assertRaisesRegex(ValueError, "unreviewed"):
+            host._method(records)
+
     def test_historical_cpu_producer_requires_reviewed_adapter(self) -> None:
         historical = "b51d9b4db9459202da0828fcab217ca5760aa7deeb3ee55d2e01448c4df33fe5"
         records = {host.PRODUCER: (historical, 1), host.ADAPTER: (host.CPU_ADAPTER_SHA256, 1)}

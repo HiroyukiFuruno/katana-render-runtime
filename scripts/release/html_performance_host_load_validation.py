@@ -15,8 +15,9 @@ LEGACY_PRODUCER_SHA256 = frozenset({
     "721ec42d4ba7ce2e06beba9cda6458e68f7b0e27222b3f9cd1fb16e6eec63736",
 })
 # The producer and its adapter must be independently reviewed and fixed together.
-CPU_PRODUCER_SHA256 = "6c4f667253690df1e7c703287eec97ed750bfe69fdaeeb65483e33445a1f9524"
+CPU_PRODUCER_SHA256 = "d64a50f10dc9aa73617483e24ef20de218abca396f240f6466a635cf8135daaa"
 HISTORICAL_CPU_PRODUCER_SHA256 = frozenset({
+    "6c4f667253690df1e7c703287eec97ed750bfe69fdaeeb65483e33445a1f9524",
     "837c0718d7e264af32ecea8ef0e4b9378a4def6d0fb40599ea25bc9ffc9ff4f2",
     "25b67939da058c13c86288dc0c5edf2a0f51b2018fef7256b104b6f8615898ec",
     "359a0241a1e9774838be30b30bd1d32b6b787375e4b9715fc09e12c7c88aa86a",
