@@ -288,27 +288,19 @@ class CapacityStateIntegrationTest(unittest.TestCase):
             "    if args[1:] != expected: raise SystemExit('initializer argv differs')\n"
             "    print('a' * 64)\n"
             f"    raise SystemExit({initializer_exit})\n"
+            "elif args[:3] == ['scripts/release/run_html_performance.py', '--bootstrap', 'produce']:\n"
+            "    root = os.environ['KRR_TEST_ROOT']\n"
+            "    expected = [\n"
+            "        'scripts/release/run_html_performance.py', '--bootstrap', 'produce',\n"
+            "        '--repo', root,\n"
+            "        '--capacity-binding', str(Path(root) / 'tmp/html-performance-capacity/binding.json'),\n"
+            "        '--capacity-binding-sha256', 'a' * 64,\n"
+            "        '--catalog-plan', os.environ['KRR_TEST_MANIFEST'],\n"
+            "    ]\n"
+            "    if args != expected: raise SystemExit('producer argv differs')\n"
+            "    Path(os.environ['KRR_TEST_CAPTURE']).write_text(json.dumps(args))\n"
+            "    raise SystemExit(0)\n"
             "else: raise SystemExit('unexpected python command')\n",
-            encoding="utf-8",
-        )
-        python_path = sys.executable.replace("\\", "/")
-        launcher.write_text(
-            "#!/usr/bin/env bash\n"
-            f"exec {shlex.quote(python_path)} {shlex.quote(script.as_posix())} \"$@\"\n",
-            encoding="utf-8",
-        )
-        launcher.chmod(0o755)
-
-    def write_recipe_uv_shim(self, launcher: Path, script: Path) -> None:
-        script.write_text(
-            "import json, os, sys\n"
-            "from pathlib import Path\n"
-            "args = sys.argv[1:]\n"
-            "lock = str(Path(os.environ['KRR_TEST_ROOT']) / 'scripts/release/html-performance-requirements.lock')\n"
-            "expected = ['run', '--isolated', '--with-requirements', lock, 'python', "
-            "'scripts/release/run_html_performance.py', 'produce']\n"
-            "if args[:len(expected)] != expected: raise SystemExit('uv argv differs')\n"
-            "Path(os.environ['KRR_TEST_CAPTURE']).write_text(json.dumps(args[len(expected):]))\n",
             encoding="utf-8",
         )
         python_path = sys.executable.replace("\\", "/")
@@ -329,7 +321,6 @@ class CapacityStateIntegrationTest(unittest.TestCase):
         self.write_recipe_python_shim(
             fake_bin / "python3", fake_bin / "python shim.py", initializer_exit
         )
-        self.write_recipe_uv_shim(fake_bin / "uv", fake_bin / "uv shim.py")
         manifest = self.root / "catalog-stage90-captures.json"
         if manifest_exists:
             manifest.write_text(
@@ -342,6 +333,7 @@ class CapacityStateIntegrationTest(unittest.TestCase):
         environment["KRR_TEST_ROOT"] = str(justfile.parent)
         environment["KRR_TEST_REPORT"] = str(report)
         environment["KRR_TEST_CAPTURE"] = str(capture)
+        environment["KRR_TEST_MANIFEST"] = str(manifest)
         result = subprocess.run(
             [
                 "just",
@@ -386,12 +378,22 @@ class CapacityStateIntegrationTest(unittest.TestCase):
         justfile = Path(__file__).resolve().parents[2] / "Justfile"
         expected_binding = str(justfile.parent / "tmp/html-performance-capacity/binding.json")
         manifest = str(self.root / "catalog-stage90-captures.json")
-        self.assertEqual(forwarded, [
-            "--repo", str(justfile.parent),
-            "--capacity-binding", expected_binding,
-            "--capacity-binding-sha256", "a" * 64,
-            "--catalog-plan", manifest,
-        ])
+        self.assertEqual(
+            forwarded,
+            [
+                "scripts/release/run_html_performance.py",
+                "--bootstrap",
+                "produce",
+                "--repo",
+                str(justfile.parent),
+                "--capacity-binding",
+                expected_binding,
+                "--capacity-binding-sha256",
+                "a" * 64,
+                "--catalog-plan",
+                manifest,
+            ],
+        )
         self.assert_performance_workflow_order(justfile)
 
     def test_performance_recipe_rejects_missing_catalog_manifest(self) -> None:

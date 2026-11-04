@@ -4,7 +4,11 @@ import {
   DependencyUpdateAllCommand,
   runtimeAssetNeedsRepair,
 } from "./depends-update-all";
-import { RuntimeAssetCatalog, type RuntimeAssetDefinition } from "./runtime-asset-common";
+import {
+  RuntimeAssetCatalog,
+  type RuntimeAssetDefinition,
+  runtimeAssetUpstreamVersion,
+} from "./runtime-asset-common";
 
 class LatestVersionStub {
   constructor(private readonly versions: ReadonlyMap<string, string>) {}
@@ -145,9 +149,10 @@ test("Draw.io の同一version更新はvendor LICENSE欠落を修復する", asy
 
 test("patched Mermaid は upstream latest と一致しても通常更新しない", async () => {
   const commands: string[][] = [];
+  const mermaid = RuntimeAssetCatalog.byKind("mermaid");
   await new DependencyUpdateAllCommand(
-    [RuntimeAssetCatalog.byKind("mermaid")],
-    new LatestVersionStub(new Map([["mermaid", "12.2.0"]])),
+    [mermaid],
+    new LatestVersionStub(new Map([["mermaid", runtimeAssetUpstreamVersion(mermaid)]])),
     async (command, args) => {
       commands.push([command, ...args]);
     },
@@ -157,14 +162,23 @@ test("patched Mermaid は upstream latest と一致しても通常更新しな�
 });
 
 test("patched Mermaid は upstream の新しい latest に通常更新しない", async () => {
+  const mermaid = RuntimeAssetCatalog.byKind("mermaid");
+  const upstream = runtimeAssetUpstreamVersion(mermaid);
+  const match = /^(0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u.exec(upstream);
+  if (!match?.[1]) throw new Error("Mermaid upstream version is not a stable semver");
+  const nextVersion = `${BigInt(match[1]) + 1n}.0.0`;
+  const commands: string[][] = [];
   await expect(
     new DependencyUpdateAllCommand(
-      [RuntimeAssetCatalog.byKind("mermaid")],
-      new LatestVersionStub(new Map([["mermaid", "12.3.0"]])),
-      async () => undefined,
+      [mermaid],
+      new LatestVersionStub(new Map([["mermaid", nextVersion]])),
+      async (command, args) => {
+        commands.push([command, ...args]);
+      },
       () => undefined,
     ).run(),
   ).rejects.toThrow("use explicit patched adoption");
+  expect(commands).toEqual([]);
 });
 
 function justRecipeLines(justfile: string, recipeName: string): string[] {

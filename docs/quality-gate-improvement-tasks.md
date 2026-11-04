@@ -4,6 +4,7 @@
 
 ### 現在の判定と実行中の作業
 
+- [/] source `e22642e8` のR7772完全ゲートは実1、25項目成功・3失敗・10スキップ。失敗はcapacity fixtureの旧uv起動前提1件、macOS任意証跡のworkflow SHA未追従1件、Mermaid updater fixtureの旧upstream前提2件。原ログを保持し、root/performance coverage未実行を明記する。3担当へ非重複に並列委譲して修正した。R7778 source-static全17実0、R7779 capacity file21/21・R7780 macOS file65/65・R7781 updater file15/15が成功。reviewで指摘された版生成の先頭ゼロ/整数精度を修正し、R7783対象Lint・R7784厳格型・R7785対象2caseも実0。workflowの実行範囲・OWNER認証・期限の判定変更やmock追加、通常patch更新の許可、引数/score/coverage/性能条件の緩和は行っていない。現sourceの完全ゲートは再実行する。
 - [x] R7760の現検証ソースでsource-static全17項目が実0。classic入力8→13、MathJax入力16→20を実Rust producerへ一致させ、厳格な集合/SHA/前後照合を維持。R7749のclassic実producer回帰6/6、R7762のunused-check314件、既存MathJax証跡producerを同条件で更新したR7763後のR7764 MathJax19/19が成功。R7762全体はMathJaxの旧準備証跡で実1だったため、成功した314件と、未実行だった後段19件を別の実結果として記録し、全体成功に書き換えない。完全ゲートはこれから実施する。
 - [x] facts宣言の照合にSWCのspread位置が混入する誤判定を、既存canonicalizerの位置正規化modeを接続して修正。spreadの有無・式・順序は維持し、sourceCode実経路のR7753 RED→R7755部分成功→R7756全6/6実0を回収。別serializerだったhost証跡照合も同じcanonicalizerを利用し、位置正規化はNativeWidthだけへ限定。他7sourceの旧serializer/default canonical/旧pinの一致を確認した。独立レビューにP0–P2なし。画像基準・score・coverage・性能条件は変更していない。
 - [x] R7734の完全ゲートで検出した静的不整合を修正し、R7747の標準source-staticが17項目すべて成功・実0。共通loader移行後のRustソース照合値、classic producerの13入力に対して旧8入力だった厳格readerとその有限AST登録、複雑度3件・文字列書式を修正。未知入力の拒否・実SHA照合・前後検査を維持し、静的診断は未解決0件。R7734/R7735/R7736/R7746の失敗原記録は保持する。製品の描画不一致とは区別し、重いテストとcoverageの合格へ転用しない。
