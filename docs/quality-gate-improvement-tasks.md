@@ -4,6 +4,10 @@
 
 ### 現在の判定と実行中の作業
 
+- [x] 依存更新後source `df9bf446` のR7715で製品PNG全117図が正式合格。EN59/59・最低99.085711、JA58/58・最低99.10801000000001、実0、completed/accepted=true、diagnosticOnly=false、R01/R02=true。新しいMermaid12.3の独立raw JSと現Skia0.157を使い、旧sourceの成功で代用していない。
+- [x] 同sourceのR7697取得とR7698独立validatorが実0。HTML画像84/84が90以上・最低92.14438、出力font一致established、診断0。measurement=not-performedであり、表示時間/RSSの合格ではない。R7701で現SDKのビルド証明も実0。原本と全証跡は管理外に保持する。
+- [/] 性能履歴への昇格処理に残っていたv3/current-build equivalenceの未接続を、長い全84測定より先に修正した。R7717は実測checkpoint0の段階で制御停止し、実child終了-15、groupClosed/rawFdsClosed=true、cleanupFailure=null、残childなしを確認、原記録は保持。R7719で未対応APIを使う回帰REDを回収した後、既存reuse verifierを用いる接続と標準Just入口のoptional引数を実装。別測定/manifest/request SHAの拘束、原bundle不変、v2互換、非改善時のactive不変を維持する。macOS一時pathの正規化差をテスト側で修正し、R7725静的foundation13task、R7726昇格15unit、R7727既存再利用13unit、R7728従来/新引数のdry-runが全成功。空白・引用符を含むrequest pathの引数保存も確認、独立差分reviewにP0/P1/P2なし。全84/実SDKによる最終reuse・昇格・履歴commit後の再検証は未実証。
+
 - [x] 依存採用関連のR7688はBun6files・809/809成功・実0（135.935秒）。先行R7681の残2件は新unit tokenの有限登録漏れを修正し、Python ownerの固定DAGへshell-lintを追従したうえで既存canonical ASTの固定値1件を独立レビューして更新した。R7687は元2件と登録の正常/欠落/重複/誤位置の計6/6成功。元の失敗記録は保持し、画像基準・採点・benchmark receiptは変更していない。これは関連検査の合格であり、現sourceの全品質ゲート・描画・性能の合格ではない。
 - [x] R7689でunit DAGに存在しないstandalone producerを負例に指定していた検証不備を検出。実DAGのclassic generationへ対応付け、standalone7producerの既存検証は維持し、追加shell taskの実数48件にも追従した。独立レビュー後、R7692のPython owner25件は全成功・実0。R7690正式AST（54+2+19件）とR7691整形も実0。R7693の静的foundationはresolver固定SHAの追従漏れ2連鎖エラーで実1、他の静的項目は成功。resolverの実変更がMermaid既定path12.2→12.3の1行だけであることを独立確認し、既存SHA1値を追従、R7694の入力選択・改変拒否回帰は実0。既存の未知入力拒否や採点条件は維持し、静的全体は再回収する。
 

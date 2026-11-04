@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 import html_performance_promotion as promotion
 import html_performance_python_identity as python_identity
+import html_performance_source_reuse_cli as reuse
 import run_html_performance as runner
 import verify_html_performance_evidence as gate
 
@@ -36,6 +37,50 @@ class PromotionComparisonTest(unittest.TestCase):
 
 
 class PromotionAtomicityTest(unittest.TestCase):
+    def reuse_fixture(self) -> tuple[Path, Path, Path]:
+        temporary = TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name).resolve()
+        bundle = root / "bundle"
+        bundle.mkdir()
+        (bundle / "bundle.json").write_bytes(b"original")
+        request = root / "request.json"
+        request.write_bytes(b"request")
+        return root, bundle, request
+
+    def test_improvement_uses_separately_bound_reuse_request(self) -> None:
+        root, bundle, request = self.reuse_fixture()
+        measured: gate.JsonObject = {"candidateConditions": 84}
+        result: gate.JsonObject = {"reuseEligibility": True, "measuredResult": measured}
+        with (patch.object(promotion, "_runtime_identity", return_value="runtime"),
+              patch.object(reuse, "verify_reuse_request", return_value=result) as verify,
+              patch.object(gate, "verify", side_effect=AssertionError("unbound verification")),
+              patch.object(gate, "Bundle", return_value=object()),
+              patch.object(promotion, "_measure", return_value=(True, {})) as measure):
+            self.assertTrue(promotion.improvement_established(bundle, root, reuse_request=request))
+        self.assertGreaterEqual(verify.call_count, 2)
+        self.assertEqual(verify.call_args.kwargs["expected_measured_dir"], bundle)
+        self.assertEqual(verify.call_args.kwargs["expected_measured_manifest_sha256"], gate.sha256(bundle / "bundle.json"))
+        self.assertEqual(verify.call_args.kwargs["expected_request_sha256"], gate.sha256(request))
+        measure.assert_called_once_with(unittest.mock.ANY, measured)
+
+    def test_improvement_rejects_mismatched_or_changed_request(self) -> None:
+        root, bundle, request = self.reuse_fixture()
+        for reason in ("request measured bundle differs", "source changed", "request file changed"):
+            with self.subTest(reason=reason), patch.object(promotion, "_runtime_identity", return_value="runtime"), \
+                 patch.object(reuse, "verify_reuse_request", side_effect=ValueError(reason)):
+                with self.assertRaisesRegex(ValueError, reason):
+                    promotion.improvement_established(bundle, root, reuse_request=request)
+
+    def test_cli_forwards_separate_reuse_request(self) -> None:
+        with (patch.object(sys, "argv", ["promotion", "--repo", "/repo", "--evidence-dir", "/bundle",
+                                        "--promotion-evidence-dir", "/proof", "--run-id", "run",
+                                        "--reuse-request", "/request"]),
+              patch.object(promotion, "promote", return_value="record") as promote,
+              contextlib.redirect_stdout(io.StringIO())):
+            self.assertEqual(promotion.main(), 0)
+        self.assertEqual(promote.call_args.kwargs["reuse_request"], Path("/request"))
+
     def test_changed_bundle_is_rejected_after_formal_verification(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -59,9 +104,9 @@ class PromotionAtomicityTest(unittest.TestCase):
         candidate = copy.deepcopy(first)
         candidate["id"] = "new-record"
         head = "a" * 40
-        for mode in ("accepted", "unchanged", "runtime-changed"):
+        for mode in ("accepted", "unchanged", "runtime-changed", "accepted-reuse", "unchanged-reuse"):
             with self.subTest(mode=mode), TemporaryDirectory() as directory:
-                root = Path(directory)
+                root = Path(directory).resolve()
                 target = root / "docs/performance/html-performance-history.json"
                 target.parent.mkdir(parents=True)
                 target.write_bytes(original)
@@ -69,14 +114,22 @@ class PromotionAtomicityTest(unittest.TestCase):
                 bundle_path.mkdir()
                 (bundle_path / "bundle.json").write_text("{}", encoding="utf8")
                 (root / "tmp").mkdir()
+                request = root / "tmp/request.json"
+                request.write_bytes(b"request")
+                reused = {"reuseEligibility": True, "measuredResult": {}}
                 bundle = gate.Bundle.__new__(gate.Bundle)
                 bundle.manifest = {"head": head}
 
                 def fake_git(_root: Path, *args: str) -> str:
                     return head + "\n" if args[0] == "rev-parse" else original.decode()
 
-                def fake_run(*_args: object, stdout: IO[bytes], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
-                    stdout.write(b"{}\n")
+                def fake_run(argv: list[str], *, stdout: IO[bytes],
+                             selected_mode: str = mode, selected_request: Path = request,
+                             selected_result: dict[str, object] = reused,
+                             **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+                    if selected_mode.endswith("-reuse"):
+                        self.assertEqual(argv[-2:], ["--reuse-request", str(selected_request)])
+                    stdout.write(json.dumps(selected_result if selected_mode.endswith("-reuse") else {}).encode() + b"\n")
                     return subprocess.CompletedProcess([], 0)
 
                 with (patch.object(gate, "git", side_effect=fake_git),
@@ -84,20 +137,25 @@ class PromotionAtomicityTest(unittest.TestCase):
                                    side_effect=["runtime", "changed" if mode == "runtime-changed" else "runtime",
                                                 "runtime"]),
                       patch.object(promotion, "_schema_validate"),
+                      patch.object(reuse, "verify_reuse_request", return_value=reused) as verify_reuse,
                       patch.object(subprocess, "run", side_effect=fake_run),
                       patch.object(gate, "Bundle", return_value=bundle),
-                      patch.object(promotion, "_measure", return_value=(mode != "unchanged", {})),
+                      patch.object(promotion, "_measure", return_value=(not mode.startswith("unchanged"), {})),
                       patch.object(promotion, "_record", return_value=candidate)):
-                    if mode == "accepted":
-                        self.assertEqual(promotion.promote(bundle_path, root, root / "tmp/proof", "run"), "new-record")
+                    request_arg = request if mode.endswith("-reuse") else None
+                    if mode.startswith("accepted"):
+                        self.assertEqual(promotion.promote(bundle_path, root, root / "tmp/proof", "run", reuse_request=request_arg), "new-record")
                         updated = gate.read_json(target)
                         self.assertEqual(updated["activeReferenceRecordId"], "new-record")
                         self.assertEqual(gate._objects(updated["records"], "updated")[0], first)
                         self.assertEqual((root / "tmp/proof").stat().st_mode & 0o777, 0o700)
+                        if request_arg is not None:
+                            self.assertEqual(verify_reuse.call_count, 2)
+                            self.assertEqual(verify_reuse.call_args.kwargs["expected_measured_dir"], bundle_path)
                     else:
                         reason = "runtime identity changed" if mode == "runtime-changed" else "improvement"
                         with self.assertRaisesRegex(ValueError, reason):
-                            promotion.promote(bundle_path, root, root / "tmp/proof", "run")
+                            promotion.promote(bundle_path, root, root / "tmp/proof", "run", reuse_request=request_arg)
                         self.assertEqual(target.read_bytes(), original)
 
     def test_atomic_update_preserves_history_on_conflict_and_releases_lock(self) -> None:

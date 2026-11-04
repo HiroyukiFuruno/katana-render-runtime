@@ -14,6 +14,7 @@ from typing import Never
 
 import html_performance_paired_stats as statistics
 import html_performance_python_identity as python_identity
+import html_performance_source_reuse_cli as reuse
 import run_html_performance as runner
 import verify_html_performance_evidence as gate
 
@@ -85,15 +86,33 @@ def _measure(bundle: gate.Bundle, result: gate.JsonObject) -> tuple[bool, gate.J
     return improvement, phases
 
 
-def improvement_established(directory: Path, root: Path) -> bool:
+def _verified_reuse(request: Path, root: Path, directory: Path, manifest_sha: str,
+                    request_sha: str) -> gate.JsonObject:
+    result = reuse.verify_reuse_request(
+        request, root, expected_measured_dir=directory,
+        expected_measured_manifest_sha256=manifest_sha, expected_request_sha256=request_sha,
+    )
+    gate.require(result.get("reuseEligibility") is True, "performance reuse is not eligible")
+    return result
+
+
+def improvement_established(directory: Path, root: Path, *, reuse_request: Path | None = None) -> bool:
     """正式な84条件の検証後、同じ補正で改善方向も判定する。"""
     root = root.resolve(strict=True)
     runtime_identity = _runtime_identity(root)
     manifest_sha = gate.sha256(directory / "bundle.json")
-    result = gate.verify(directory, root)
+    directory = directory.resolve(strict=True)
+    request_sha = gate.sha256(reuse_request) if reuse_request is not None else None
+    eligibility = (_verified_reuse(reuse_request, root, directory, manifest_sha, request_sha)
+                   if reuse_request is not None and request_sha is not None else None)
+    result = (gate._object(eligibility.get("measuredResult"), "reused measured result")
+              if eligibility is not None else gate.verify(directory, root))
     gate.require(gate.sha256(directory / "bundle.json") == manifest_sha,
                  "promotion bundle changed during verification")
     improvement, _ = _measure(gate.Bundle(directory), result)
+    if reuse_request is not None and request_sha is not None:
+        gate.require(_verified_reuse(reuse_request, root, directory, manifest_sha, request_sha) == eligibility,
+                     "performance reuse changed during comparison")
     gate.require(gate.sha256(directory / "bundle.json") == manifest_sha,
                  "promotion bundle changed during comparison")
     gate.require(_runtime_identity(root) == runtime_identity,
@@ -160,7 +179,8 @@ def _record(bundle: gate.Bundle, result: gate.JsonObject, phases: gate.JsonObjec
     }
 
 
-def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str) -> str:
+def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, *,
+            reuse_request: Path | None = None) -> str:
     """固定済み候補を再検証し、改善時だけ履歴へ新しい基準を追加する。"""
     root = root.resolve(strict=True)
     runtime_identity = _runtime_identity(root)
@@ -186,6 +206,9 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str) 
     gate.require(isinstance(history, dict), "history is invalid")
     _schema_validate(root, before)
     manifest_sha = gate.sha256(directory / "bundle.json")
+    request_sha = gate.sha256(reuse_request) if reuse_request is not None else None
+    eligibility = (_verified_reuse(reuse_request, root, directory, manifest_sha, request_sha)
+                   if reuse_request is not None and request_sha is not None else None)
     evidence_directory.mkdir(mode=0o700, parents=False, exist_ok=False)
     evidence_directory.chmod(0o700)
     gate.require(not evidence_directory.is_symlink()
@@ -195,6 +218,8 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str) 
     stderr_path = evidence_directory / "verifier.stderr"
     argv = [sys.executable, str(root / "scripts/release/verify_html_performance_evidence.py"),
             "--repo", str(root), "--evidence-dir", str(directory)]
+    if reuse_request is not None:
+        argv.extend(["--reuse-request", str(reuse_request)])
     with (evidence_directory / "command.json").open("x", encoding="utf8") as command:
         json.dump(argv, command)
     with stdout_path.open("xb") as stdout, stderr_path.open("xb") as stderr:
@@ -206,6 +231,9 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str) 
     gate.require(gate.sha256(directory / "bundle.json") == manifest_sha,
                  "promotion bundle changed during verification")
     verified = gate.read_json(stdout_path)
+    if eligibility is not None:
+        gate.require(verified == eligibility, "performance reuse verification differs")
+        verified = gate._object(verified.get("measuredResult"), "reused measured result")
     bundle = gate.Bundle(directory)
     improvement, phases = _measure(bundle, verified)
     gate.require(_runtime_identity(root) == runtime_identity,
@@ -236,6 +264,9 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str) 
                  "promotion evidence changed before update")
     gate.require(_runtime_identity(root) == runtime_identity,
                  "promotion runtime identity changed")
+    if reuse_request is not None and request_sha is not None:
+        gate.require(_verified_reuse(reuse_request, root, directory, manifest_sha, request_sha) == eligibility,
+                     "performance reuse changed before update")
     _atomic_history_update(root, history_path, before, after, head)
     return gate._text(record["id"], "new reference id")
 
@@ -279,9 +310,11 @@ def main() -> int:
     parser.add_argument("--evidence-dir", type=Path, required=True)
     parser.add_argument("--promotion-evidence-dir", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--reuse-request", type=Path)
     try:
         args = parser.parse_args()
-        selected = promote(args.evidence_dir, args.repo, args.promotion_evidence_dir, args.run_id)
+        selected = promote(args.evidence_dir, args.repo, args.promotion_evidence_dir, args.run_id,
+                           reuse_request=args.reuse_request)
     except NoImprovement:
         print(json.dumps({"status": "unchanged", "reason": "no-significant-improvement"}))
         return 0

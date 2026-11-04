@@ -681,8 +681,8 @@ html-performance-evidence-acquire:
 html-performance-evidence-reuse measured_dir measured_manifest_sha256 current_build_dir current_build_manifest_sha256 current_build_artifact_path current_build_artifact_sha256 request_output:
     {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap reuse --repo {{quote(REPO_ROOT)}} --measured-dir {{quote(measured_dir)}} --measured-manifest-sha256 {{quote(measured_manifest_sha256)}} --current-build-dir {{quote(current_build_dir)}} --current-build-manifest-sha256 {{quote(current_build_manifest_sha256)}} --current-build-artifact-path {{quote(current_build_artifact_path)}} --current-build-artifact-sha256 {{quote(current_build_artifact_sha256)}} --request-output {{quote(request_output)}}
 
-html-performance-evidence-promote evidence_dir promotion_evidence_dir run_id:
-    {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap promote --repo {{quote(REPO_ROOT)}} --evidence-dir {{quote(evidence_dir)}} --promotion-evidence-dir {{quote(promotion_evidence_dir)}} --run-id {{quote(run_id)}}
+html-performance-evidence-promote evidence_dir promotion_evidence_dir run_id reuse_request='':
+    {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap promote --repo {{quote(REPO_ROOT)}} --evidence-dir {{quote(evidence_dir)}} --promotion-evidence-dir {{quote(promotion_evidence_dir)}} --run-id {{quote(run_id)}}{{if reuse_request == "" { "" } else { " --reuse-request " + quote(reuse_request) }}}
 
 # 既存catalog CLIで84条件のstage90 raw capture manifestを作る。
 html-performance-catalog-captures output_root prior_observation='' prior_finalized='' chrome_executable='' chrome_sha256='' font_observer='false':
