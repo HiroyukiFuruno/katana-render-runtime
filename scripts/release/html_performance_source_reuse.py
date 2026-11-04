@@ -97,6 +97,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
             "3b98d203dd23f65513ab4d4cb60af4b63ca49ff2468705c34982b588877c9e97",
             "3fee6e9a540c90a10ad8f02cd95e6edddaf4b929c69f66cb2a4643a7b96594ae",
             "ddc12b9fc326b4fea119ccbcc807dbff65031bb9a35ae1cf44487ecabbd23796",
+            "9a39e0d8b2fa2f3bf78504f29cdfa68d1db71028c109de9712fd698486a8bd1f",
         }:
             return True
         if current != Path(__file__).read_bytes():
@@ -151,12 +152,22 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
                              or node.name not in additions]
         return ast.dump(old_tree, include_attributes=False) == ast.dump(current_tree, include_attributes=False)
     pins = {
+        "scripts/release/local_macos_evidence.py": (
+            "de2b7db8aa2e1b2469a79819aed9063f6c46fdfffd8466ed7a744984a63b9d9d",
+            "78ae5f111e5d7774fee2cb7e5fba6a255b74720265e6fe0de5480bb71168c1a3"),
+        "scripts/quality/owned-validation-contract.ts": (
+            "68a287400d2f7c8427d44c7be565d9b8ed38153e1c76d117ad29b6cdb167ba95",
+            "c3ec88e882c759907f8f2ce69e9556a4fcdd94cdba6c45044e07fd745b13d33d"),
+        "scripts/quality/owned-validation-contract_test.ts": (
+            "38f60e211b50840f47cb4372123a526e99c76e062f7cc0022155d96fc74079e2",
+            "4b5c0fe741e31c8b10d366804f957e63211e0b0e7ecfff782aee57d2fd424a4e"),
         "scripts/release/html_performance_reuse_entry_test.py": (
             "6b0518f9992ac91d7fc541cbbfc2563bbfc19095f1d00dcf4600dd9361c4d036",
             "ef435de25b26fefabcb2e3e3b627633b539dd6fa473e7f493a6e4bef13348e73"),
         "scripts/release/html_performance_source_reuse_test.py": (
             "bc44642c01d96526490a2ba97bce9b66bd354c942851d2ce772071b3416f8304",
-            "81a7db4b3307e566f0e0eb59448248aec60d49430ab76e6d9b123eed9727996e"),
+            frozenset({"81a7db4b3307e566f0e0eb59448248aec60d49430ab76e6d9b123eed9727996e",
+                       "49cc989141f481b7d9e522265d4ebd3c70e7f6ac4f2b98ca36ec187b3a0a3351"})),
         "scripts/release/html_performance_epoch_reuse.py": (
             "33a05103fc5100c7eb2e9d10368785c8ab20e6f8308ddc53f0ae95f63c573f1c",
             "3f50599d284dbe593bb9a1cf02d0fdd633647eb61a3f6be7867b8308d72de3c7"),
@@ -181,12 +192,14 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
             "d9d93a641fd5e5dc4db5a0135cffa2073c84f34da132cedfb9821dace49a59aa",
             frozenset({"71fa1bc5e34a3d9432d2923d14e0967f7ae2d6e5f879941eb3f858668b1da86e",
                        "5eb3892fb7d508586f43fe62df8ecfd603e3fb540af442a8abb6ceccc7e022c2",
-                       "30a772d8b1488a764185ab0761afb555cd65d798a2696674dde0821465ce4f83"})),
+                       "30a772d8b1488a764185ab0761afb555cd65d798a2696674dde0821465ce4f83",
+                       "ee23eb6dbd56ca3dcd6ae00b4f79a69675b6ec9cd408b7158d16f1ded88d4d60"})),
         "scripts/release/verify_html_performance_evidence_test.py": (
             "9f423f9edbd3fa5ef2a0f1fd1d28a2d2a61f968498650f65dd3f0e5f323be4b3",
             frozenset({"953044024351425627b8798fcbbc3d5f9216ac49d78e7c63075cd034536584e0",
                        "2daf590b500a480c83615bdb436a57c77834546a183c77638d89f2d8a74a20c7",
-                       "91c7380a5516b550acfeffbbc165bb8e5b1c5480c14e4beff11609fd4898ebe5"})),
+                       "91c7380a5516b550acfeffbbc165bb8e5b1c5480c14e4beff11609fd4898ebe5",
+                       "ee5f14f317dc8856250f217d4670a520b6759b299424a8a00ee0738eca18bb75"})),
     }
     expected = pins.get(path)
     if expected is None or expected[0] != hashlib.sha256(old).hexdigest():
@@ -225,12 +238,47 @@ def _specific_source_changes(
     old_modes: Mapping[str, str], new_modes: Mapping[str, str], git_bytes: GitBytes,
     *, allow_test_changes: bool,
 ) -> tuple[set[str], set[str]]:
-    """今回のHTML test追加とrelease文書の厳密な差分だけを認証する。"""
+    """今回のHTML test、release文書と補助ツールの厳密な差分だけを認証する。"""
     parent = "crates/katana-render-runtime/src/renderer/backends/html_interactive/session.rs"
     child = "crates/katana-render-runtime/src/renderer/backends/html_interactive/session_resource_reuse_tests.rs"
     document = "docs/release.md"
     approved: set[str] = set()
     added_tests: set[str] = set()
+
+    release_tooling_pairs = {
+        "biome.json": (
+            "05c126306e2458e596d5f79357439885f9800d58123a047ed6b706cd8a7c75e3",
+            "cf4f78df9d8b5516556d008bd7abaafc57d9c5c66b50bf884023652a3c3aa420"),
+        ".github/workflows/release-preflight.yml": (
+            "5addb675cf64e90845f02afd1795277f4469e1e1f8e39921f5672064d83f25c7",
+            "416042cb077298c23965f1e3cb135188a21f90c60ce3f7477c198a2236c396d2"),
+        ".github/workflows/release.yml": (
+            "712905ef42152c05d2f5046d7f0efaee6af49323ac0c1e27c75255ce50896375",
+            "d51fb8971a8e8b3dc7daa4827e4fcdf0152f5eb65eac245355d80458c123d93b"),
+        ".github/workflows/test-and-build.yml": (
+            "a2d9d28ee271d4ee29ff89514848be5134bbb27f809e19b7faf472111a09869b",
+            "704c54e3656210ed96791ab28f996ca4cf2c2299c0591082fb7ee812e6d0de73"),
+        "package.json": (
+            "0bc2e819ab7d2522fd59e836b7fddd97b430884da9ded25d467543e60d241107",
+            "2bd43597a3245b76613897ec56dd187c4afc38dc4f9ecaef58db675bfdbddcfa"),
+        "bun.lock": (
+            "15cb452be9d9b0788eb887b22bd8cf7065800166e6c2f32efac5fe48986fb482",
+            "a62ffe885b5e436571de07badb32cd6cee71d034bd2d5b37809d3f2e10a0c6f7"),
+    }
+    for path, (expected_old, expected_new) in release_tooling_pairs.items():
+        if measured.get(path) == current.get(path):
+            continue
+        if (path not in measured or path not in current or old_modes.get(path) != "100644"
+                or new_modes.get(path) != "100644"):
+            raise ValueError("release tooling membership or mode differs")
+        old_bytes = git_bytes(("show", measured_head + ":" + path))
+        new_bytes = (root / path).read_bytes()
+        if (hashlib.sha256(old_bytes).hexdigest() != expected_old
+                or hashlib.sha256(new_bytes).hexdigest() != expected_new
+                or measured[path] != (expected_old, len(old_bytes))
+                or current[path] != (expected_new, len(new_bytes))):
+            raise ValueError("release tooling source delta differs")
+        approved.add(path)
 
     if measured.get(document) != current.get(document):
         if document not in measured or document not in current:

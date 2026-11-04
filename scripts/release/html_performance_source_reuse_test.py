@@ -277,5 +277,99 @@ class HtmlReleaseReuseTest(unittest.TestCase):
                     _verified_reuse_context(root, measured, git_query=None, allow_test_changes=True)
 
 
+class ReleaseToolingReuseTest(unittest.TestCase):
+    tooling = (".github/workflows/release-preflight.yml", ".github/workflows/release.yml",
+               ".github/workflows/test-and-build.yml", "package.json", "bun.lock", "biome.json")
+
+    def fixture(self, root: Path, selected: tuple[str, ...], case: str = "valid") -> str:
+        repository = Path(__file__).resolve().parents[2]
+        baseline = "b9cf37535ba374b62fee4e889f9c58f58f1ab8dc"
+        parent = "crates/katana-render-runtime/src/renderer/backends/html_interactive/session.rs"
+        child = "crates/katana-render-runtime/src/renderer/backends/html_interactive/session_resource_reuse_tests.rs"
+        document = "docs/release.md"
+        for path in self.tooling:
+            target = root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            old = subprocess.check_output(["git", "-C", str(repository), "show", baseline + ":" + path])
+            target.write_bytes(old + (b" " if case == "old_bytes" and path == selected[0] else b""))
+            if case == "old_missing" and path == selected[0]:
+                target.unlink()
+        if case == "combined":
+            for path in (parent, document):
+                target = root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(subprocess.check_output(["git", "-C", str(repository), "show", baseline + ":" + path]))
+        if case == "old_mode":
+            (root / selected[0]).chmod(0o755)
+        git(root, "init", "-q")
+        git(root, "add", ".")
+        if case == "old_mode":
+            git(root, "update-index", "--chmod=+x", selected[0])
+        git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid", "commit", "-qm", "old")
+        measured = git(root, "rev-parse", "HEAD").strip()
+        if case == "old_mode":
+            self.assertTrue(git(root, "ls-tree", measured, "--", selected[0]).startswith("100755 blob "))
+            (root / selected[0]).chmod(0o644)
+        if case == "combined":
+            (root / parent).write_bytes((root / parent).read_bytes() +
+                b'\n#[cfg(test)]\n#[path = "session_resource_reuse_tests.rs"]\nmod resource_reuse_tests;\n')
+            (root / child).write_bytes((repository / child).read_bytes())
+            (root / document).write_bytes((root / document).read_bytes().replace(
+                b'- `Test and Build (macos-15-intel, mac-x64)`\n', b"", 1))
+        for path in selected:
+            target = root / path
+            if case == "removed" and path == selected[0]:
+                target.unlink()
+            else:
+                value = (repository / path).read_bytes()
+                target.write_bytes(value + (b" " if case == "new_bytes" and path == selected[0] else b""))
+        if case == "unknown":
+            (root / ".github/workflows/unknown.yml").write_text("unexpected\n")
+        if case == "new_mode":
+            (root / selected[0]).chmod(0o755)
+        git(root, "add", "-A")
+        if case == "new_mode":
+            git(root, "update-index", "--chmod=+x", selected[0])
+        git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid", "commit", "-qm", "new")
+        if case == "new_mode":
+            self.assertTrue(git(root, "ls-tree", "HEAD", "--", selected[0]).startswith("100755 blob "))
+        if case == "dirty":
+            (root / selected[0]).write_bytes(b"uncommitted")
+        return measured
+
+    def test_exact_tooling_pairs_are_independently_accepted(self) -> None:
+        for selected in (*((path,) for path in self.tooling), self.tooling):
+            with self.subTest(selected=selected), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                measured = self.fixture(root, selected)
+                result = _verified_reuse_context(root, measured, git_query=None, allow_test_changes=True)
+                if not isinstance(result, reuse.SourceReuseContext):
+                    raise AssertionError("source reuse context differs")
+                self.assertEqual(result.eligible_head, git(root, "rev-parse", "HEAD").strip())
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            measured = self.fixture(root, self.tooling, "combined")
+            _verified_reuse_context(root, measured, git_query=None, allow_test_changes=True)
+
+    def test_unknown_bytes_membership_mode_and_dirty_source_are_rejected(self) -> None:
+        for path in self.tooling:
+            for case in ("old_bytes", "new_bytes", "old_mode", "new_mode", "old_missing", "removed", "dirty"):
+                with self.subTest(path=path, case=case), tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary).resolve()
+                    measured = self.fixture(root, (path,), case)
+                    if case != "dirty":
+                        self.assertEqual(git(root, "status", "--porcelain=v1"), "")
+                    rejection = (self.assertRaisesRegex(ValueError, "release tooling membership or mode differs")
+                                 if case in {"old_mode", "new_mode"} else self.assertRaises(ValueError))
+                    with rejection:
+                        _verified_reuse_context(root, measured, git_query=None, allow_test_changes=True)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            measured = self.fixture(root, self.tooling, "unknown")
+            self.assertEqual(git(root, "status", "--porcelain=v1"), "")
+            with self.assertRaises(ValueError):
+                _verified_reuse_context(root, measured, git_query=None, allow_test_changes=True)
+
+
 if __name__ == "__main__":
     unittest.main()

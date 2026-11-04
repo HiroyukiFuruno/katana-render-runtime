@@ -46,6 +46,156 @@ JsonMutation = Callable[[JsonObject], None]
 
 
 class CommittedRecordsCacheTest(unittest.TestCase):
+    def test_real_git_reuses_blob_facts_across_heads_and_isolates_query_and_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve() / "repo"
+            root.mkdir()
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            for name, data in (("a.txt", b"same"), ("b.txt", b"same"), ("c.txt", b"third")):
+                (root / name).write_bytes(data)
+
+            def commit(label: str, *, executable: Path | None = None) -> str:
+                subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+                if executable is not None:
+                    subprocess.run(["git", "-C", str(root), "update-index", "--chmod=+x",
+                                    str(executable)], check=True)
+                subprocess.run(["git", "-C", str(root), "-c", "user.name=Unit", "-c",
+                                "user.email=unit@example.invalid", "commit", "-qm", label], check=True)
+                return canonical_gate.git(root, "rev-parse", "HEAD").strip()
+
+            batches: list[tuple[str, ...]] = []
+            trees: list[tuple[str, ...]] = []
+            def query(root: Path, args: Sequence[str], input_bytes: bytes | None, text: bool) -> str | bytes:
+                if tuple(args) == ("cat-file", "--batch"):
+                    if input_bytes is None:
+                        raise AssertionError("missing Git batch input")
+                    batches.append(tuple(input_bytes.decode("ascii").splitlines()))
+                if args[0] == "ls-tree":
+                    trees.append(tuple(args))
+                result = subprocess.run(["git", "-C", str(root), *args], input=input_bytes,
+                                        check=True, capture_output=True).stdout
+                return result.decode() if text else result
+
+            first_head = commit("first")
+            first = gate.committed_records(root, "HEAD", git_query=query)
+            self.assertEqual(first, gate.committed_records(root, first_head))
+            self.assertEqual(list(first), ["a.txt", "b.txt", "c.txt"])
+            self.assertEqual(first["a.txt"], first["b.txt"])
+            self.assertEqual(len(batches), 1)
+            self.assertEqual(len(batches[0]), 2)
+            self.assertEqual(len(set(batches[0])), 2)
+            first.clear()
+
+            (root / "a.txt").write_bytes(b"changed")
+            (root / "d.txt").write_bytes(b"third")
+            second_head = commit("second")
+            second = gate.committed_records(root, "HEAD", git_query=query)
+            self.assertEqual(second, gate.committed_records(root, second_head))
+            self.assertEqual(list(second), ["a.txt", "b.txt", "c.txt", "d.txt"])
+            self.assertEqual(len(batches), 2)
+            self.assertEqual(len(batches[1]), 1)
+            self.assertTrue(set(batches[0]).isdisjoint(batches[1]))
+            self.assertGreaterEqual(len(trees), 2)
+            self.assertEqual(trees[-1][-1], "HEAD")
+            gate.committed_records(root, first_head, git_query=query)
+            self.assertEqual(len(batches), 2)
+
+            (root / "b.txt").unlink()
+            executable = root / "c.txt"
+            executable.chmod(0o755)
+            third_head = commit("third", executable=executable)
+            self.assertTrue(gate.git(root, "ls-tree", third_head, "--", "c.txt").startswith("100755 blob "))
+            third = gate.committed_records(root, "HEAD", git_query=query)
+            self.assertEqual(third, gate.committed_records(root, third_head))
+            self.assertEqual(list(third), ["a.txt", "c.txt", "d.txt"])
+            self.assertEqual(len(batches), 2)
+
+            def other_query(root: Path, args: Sequence[str], input_bytes: bytes | None, text: bool) -> str | bytes:
+                return query(root, args, input_bytes, text)
+
+            gate.committed_records(root, first_head, git_query=other_query)
+            self.assertEqual(len(batches), 3)
+            self.assertEqual(set(batches[-1]), set(batches[0]))
+            other = Path(temporary).resolve() / "clone"
+            subprocess.run(["git", "clone", "-q", str(root), str(other)], check=True)
+            gate.committed_records(other, first_head, git_query=query)
+            self.assertEqual(len(batches), 4)
+            self.assertEqual(set(batches[-1]), set(batches[0]))
+
+    def test_failed_blob_batch_never_populates_partial_cache(self) -> None:
+        oids = ("1" * 40, "2" * 40)
+        tree = b"".join(f"100644 blob {oid}\tfile-{index}\0".encode()
+                        for index, oid in enumerate(oids))
+        for failure in ("header", "kind", "truncated", "extra"):
+            with self.subTest(failure=failure):
+                batches: list[tuple[str, ...]] = []
+                def query(root: Path, args: Sequence[str], input_bytes: bytes | None, text: bool, *,
+                          batch_log: list[tuple[str, ...]] = batches, failure_kind: str = failure) -> bytes:
+                    if args[0] == "ls-tree":
+                        return tree
+                    if input_bytes is None:
+                        raise AssertionError("missing Git batch input")
+                    requested = tuple(input_bytes.decode("ascii").splitlines())
+                    batch_log.append(requested)
+                    payload = b"".join(f"{oid} blob 1\nx\n".encode() for oid in requested)
+                    if len(batch_log) == 1:
+                        if failure_kind == "header":
+                            return payload.replace(oids[1].encode(), b"3" * 40, 1)
+                        if failure_kind == "kind":
+                            return payload.replace(b" blob ", b" tree ", 1)
+                        if failure_kind == "truncated":
+                            return payload[:-1]
+                        return payload + b"extra"
+                    return payload
+                root = Path("/facts-fixture")
+                with self.assertRaises(ValueError):
+                    gate.committed_records(root, git_query=query)
+                actual = gate.committed_records(root, git_query=query)
+                self.assertEqual(batches, [oids, oids])
+                self.assertEqual(list(actual), ["file-0", "file-1"])
+
+    def test_blob_fact_cache_evicts_least_recently_used_at_capacity(self) -> None:
+        capacity = 8192
+        oids = tuple(f"{index:040x}" for index in range(1, capacity + 2))
+        batches: list[tuple[str, ...]] = []
+        def query(root: Path, args: Sequence[str], input_bytes: bytes | None, text: bool) -> bytes:
+            if args[0] == "ls-tree":
+                if args[-1] == "full":
+                    selected = oids[:capacity]
+                elif args[-1] == "over":
+                    selected = oids
+                elif args[-1] == "new":
+                    selected = (oids[-1],)
+                elif args[-1] == "second":
+                    selected = (oids[1],)
+                else:
+                    selected = (oids[0],)
+                return b"".join(f"100644 blob {oid}\tfile-{index}\0".encode()
+                                for index, oid in enumerate(selected))
+            if input_bytes is None:
+                raise AssertionError("missing Git batch input")
+            requested = tuple(input_bytes.decode("ascii").splitlines())
+            batches.append(requested)
+            return b"".join(f"{oid} blob 1\nx\n".encode() for oid in requested)
+        root = Path("/bounded-facts-fixture")
+        gate.committed_records(root, "full", git_query=query)
+        gate.committed_records(root, "old", git_query=query)
+        gate.committed_records(root, "new", git_query=query)
+        gate.committed_records(root, "old", git_query=query)
+        gate.committed_records(root, "second", git_query=query)
+        self.assertEqual([len(batch) for batch in batches], [capacity, 1, 1])
+        self.assertEqual(batches[-1], (oids[1],))
+
+        def fresh_query(root: Path, args: Sequence[str], input_bytes: bytes | None, text: bool) -> bytes:
+            return query(root, args, input_bytes, text)
+
+        oversized = gate.committed_records(root, "over", git_query=fresh_query)
+        self.assertEqual(len(oversized), capacity + 1)
+        self.assertEqual(list(oversized), [f"file-{index}" for index in range(capacity + 1)])
+        self.assertTrue(all(value == (hashlib.sha256(b"x").hexdigest(), 1)
+                            for value in oversized.values()))
+        self.assertEqual(len(batches[-1]), capacity + 1)
+
     def test_file_sha256_matches_empty_and_multiple_chunks(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "payload"
@@ -79,14 +229,14 @@ class CommittedRecordsCacheTest(unittest.TestCase):
         for ref in ("b", "a", "c", "d", "a", "e", "b"):
             actual = gate.committed_records(root, ref, git_query=query)
             self.assertEqual(actual["file"], (hashlib.sha256(b"x").hexdigest(), 1))
-        self.assertEqual(sum(kind == "cat-file" for _, kind in calls), 6)
+        self.assertEqual(sum(kind == "cat-file" for _, kind in calls), 5)
         self.assertEqual(sum(kind == "ls-tree" for _, kind in calls), 8)
         gate.committed_records(Path("/second"), "a", git_query=query)
-        self.assertEqual(sum(kind == "cat-file" for _, kind in calls), 7)
+        self.assertEqual(sum(kind == "cat-file" for _, kind in calls), 6)
         def other(root: Path, args: Sequence[str], payload: bytes | None, text: bool) -> bytes:
             return query(root, args, payload, text)
         gate.committed_records(root, "a", git_query=other)
-        self.assertEqual(sum(kind == "cat-file" for _, kind in calls), 8)
+        self.assertEqual(sum(kind == "cat-file" for _, kind in calls), 7)
         trees["a"] = trees["a"].replace(b"\tfile\0", b"\trenamed\0")
         self.assertIn("renamed", gate.committed_records(root, "a", git_query=query))
         trees["a"] = trees["a"].replace(b"100644", b"100755")

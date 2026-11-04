@@ -23,6 +23,7 @@ from functools import lru_cache
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from datetime import datetime
 from typing import NamedTuple, Protocol, TypedDict, cast
+from collections import OrderedDict
 from collections.abc import Callable, Mapping, Sequence
 import html_performance_reference as reference_domain
 from html_performance_harness_dependency_closure import verify_harness_closure
@@ -1604,17 +1605,36 @@ def _parsed_batch_cache(query: types.FunctionType) -> _ParsedBatch:
     if cached is not None:
         return cached
     query_ref = weakref.ref(query)
+    facts: OrderedDict[tuple[str, str], tuple[str, int]] = OrderedDict()
 
-    @lru_cache(maxsize=4)
     def parsed(root_path: str, oids: tuple[str, ...]) -> tuple[tuple[str, int], ...]:
         callback = query_ref()
         if callback is None:
             raise ValueError("Git query transaction is unavailable")
-        payload = _git_output(Path(root_path), ("cat-file", "--batch"), git_query=callback,
-                              input_bytes="".join(oid + "\n" for oid in oids).encode())
-        if not isinstance(payload, bytes):
-            raise ValueError("Git blob query returned text output")
-        return _committed_blob_records(payload, oids)
+        resolved: dict[str, tuple[str, int]] = {}
+        missing: list[str] = []
+        for oid in oids:
+            key = (root_path, oid)
+            if key in facts:
+                resolved[oid] = facts[key]
+            elif oid not in resolved:
+                missing.append(oid)
+                resolved[oid] = ("", 0)
+        if missing:
+            selected = tuple(missing)
+            payload = _git_output(Path(root_path), ("cat-file", "--batch"), git_query=callback,
+                                  input_bytes="".join(oid + "\n" for oid in selected).encode())
+            if not isinstance(payload, bytes):
+                raise ValueError("Git blob query returned text output")
+            checked = _committed_blob_records(payload, selected)
+            resolved.update(zip(selected, checked, strict=True))
+        for oid in oids:
+            key = (root_path, oid)
+            facts[key] = resolved[oid]
+            facts.move_to_end(key)
+            if len(facts) > 8192:
+                facts.popitem(last=False)
+        return tuple(resolved[oid] for oid in oids)
 
     _PARSED_BATCHES[query] = parsed
     return parsed

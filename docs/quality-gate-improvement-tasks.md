@@ -4,6 +4,11 @@
 
 ### 現在の判定と未対応
 
+- [/] R8171は旧22件の再利用確認中にENOSPCで実1、採取前・新合格0で22/84を維持する。異なるHEADでも共通するblobを全OID列単位で読み直し、tool-query原ログが1.39GB生成された。原ログと欠落した外側lifecycleの区別は`tmp/quality/resumed-owner-r3509/r8171-failure-note.md`へ保存した。R8173 private clean-allは実0だが回復なし、R8174既存の保護付きdev-profile clean実0で約2.5GB回復、R8175既存validatorで保護28件実0。
+- [/] Gitの同一query/root内でblob OIDごとのSHA256・sizeだけをstdlib OrderedDict最大8192件へ保持し、未見OIDだけ既存の厳格batch検査へ渡す修正を行った。tree/modeと作業ソースの照合、実queryの原ログは維持し、失敗時に部分登録しない。R8176は重複取得のRED実1、修正後R8177は6件実0、8193件の単一入力・root/query隔離・実Gitの追加/変更/削除/mode回帰を含むR8190全166件も実0。正式再開での時間・ログ量の改善は未測定。
+- [/] 公式GitHub APIでActions12 upstreamを照合し、最新だった10件を維持、setup-java 6.2.0とinstall-action 2.90.1系の15箇所を更新した。dev依存Biome 2.6.5とschemaも更新。条件・権限・3OS・tool指定版は変更していない。旧just SHAと旧workflow全体SHAを固定した登録判定も新しい正当な値へ同期し、旧workflow受入は追加していない。R8196静的foundation13、R8197 workflow45、R8194対応負例Bun9、R8195標準Biomeはすべて実0。先行のR8183 Ruff5件・R8185型1件・R8187登録判定連鎖・R8193旧scope拒否の失敗も保持する。
+- [/] 今回の検証補助変更は固定旧/新SHA・mode・実bytesを照合する有限差分として認証し、未知変更を許すALLOWED拡大や原receiptのrepinは行っていない。R8198 source9・R8199旧/現epoch認証1も実0、producer187・hostvalidation19はR8191/92実0、独立reviewに未解決P0–P2なし。実SDKのbinary/lock/compiler/環境一致と全84性能は未完。R8178は元seedを変えず追加保護28件を含む新SDK proof専用bindingだけを準備し、既存validatorで実0だった。
+- [ ] R8200の最新依存確認は実1で、svgtypes 0.16.1→0.16.2とdraw.io 32.6.9→32.6.10を検出した。Biome更新後の後段照合で判明したもので、全依存fresh合格とはしていない。今回の補助基盤変更を先にcommitし、公式変更内容と実API/fixtureの影響確認→最新互換版の採用・再検証を行う。元b9cfの117/84画像と性能22は当時の結果として保持し、更新後の同一性を未確認のまま転用しない。
 - [x] 現行sourceの正式HTML fidelityはR8146が実0。R8149の既存reader集計で主画像286/286が90以上（最低91.98562）、TOC capture72・scroll group42、visual6/6・script5/5、dynamic15/15・input-state18/18・埋込図各11/11を確認した。84条件の性能判定とは別である。
 - [x] 公開consumer契約はR8152の実catalog選択1件が実0。DPR1/2、両軸の範囲・入力座標・resize後寸法と状態保持を確認した。binary SHAは`8f0f5338f75d26be427f5fc79a9c778fdd40e8998c8efa7969743e951b250f0c`、全Rust suiteの成功ではない。
 - [ ] 現行sourceへ性能結果を再利用する限定認証を修正中。R8153はHTML test追加をmembershipで拒否するRED実1、R8154は7件GREEN実0。独立reviewでmode負例のdirty誤検出を防ぎ、実mode/index/ls-treeと拒否理由を固定した。R8155の型3件失敗は保持し、型絞り込み後R8157はstrict199file実0。現在の標準静的・関連回帰と、最終SDK byte一致は未完。
