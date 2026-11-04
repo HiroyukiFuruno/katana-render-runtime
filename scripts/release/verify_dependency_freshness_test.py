@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import TypedDict
+from typing import Any, TypedDict
 from urllib.request import Request
 from unittest.mock import patch
 
@@ -30,7 +30,8 @@ class MetadataDependency(TypedDict, total=False):
     req: str
     source: str
     kind: str | None
-    dep_kinds: list[dict[str, None]]
+    target: str | None
+    dep_kinds: list[dict[str, str | None]]
 
 
 class MetadataPackage(TypedDict, total=False):
@@ -360,6 +361,56 @@ class DependencyFreshnessTest(unittest.TestCase):
             "utf8_iter 1.0.4 is retained to preserve the immutable HTML performance parent closure",
             stdout,
         )
+
+    def test_skia_hold_is_scoped_to_verified_macos_dependency_and_known_version(self) -> None:
+        manifest = self.root / "crates/katana-render-runtime/Cargo.toml"
+        manifest.parent.mkdir(parents=True)
+        declaration = 'skia-safe = { version = "=0.156.0", default-features = false, features = ["binary-cache", "pdf"] }\n'
+        manifest.write_text('[package]\nname = "katana-render-runtime"\nversion = "0.1.0"\n'
+                            '[target.\'cfg(target_os = "macos")\'.dependencies]\n' + declaration,
+                            encoding="utf-8")
+        registry = "registry+https://github.com/rust-lang/crates.io-index"
+        target = 'cfg(target_os = "macos")'
+        runtime_id = "runtime"
+        skia_id = registry + "#skia-safe@0.156.0"
+        metadata: CargoMetadata = {
+            "workspace_members": [runtime_id],
+            "packages": [
+                {"id": runtime_id, "name": "katana-render-runtime", "manifest_path": str(manifest),
+                 "dependencies": [{"name": "skia-safe", "rename": None, "kind": None,
+                                   "target": target, "req": "=0.156.0", "source": registry}]},
+                {"id": skia_id, "name": "skia-safe", "version": "0.156.0", "source": registry},
+            ],
+            "resolve": {"nodes": [{"id": runtime_id, "deps": [{"name": "skia_safe", "pkg": skia_id,
+                          "dep_kinds": [{"kind": None, "target": target}]}]}]},
+        }
+
+        def skia_packages() -> list[Any]:
+            return [p for p in freshness.rust_manifest_dependencies(self.root, metadata=metadata)
+                    if p.name == "skia-safe"]
+
+        package = skia_packages()[0]
+        self.assertTrue(package.skia_hold_candidate)
+        self.assertFalse(freshness.is_stale(package, "0.157.0"))
+        self.assertTrue(freshness.is_stale(package, "0.157.1"))
+
+        other = self.root / "crates/other/Cargo.toml"
+        other.parent.mkdir(parents=True)
+        other.write_text('[package]\nname = "other"\nversion = "0.1.0"\n[dependencies]\n' + declaration,
+                         encoding="utf-8")
+        candidates = skia_packages()
+        self.assertEqual(len(candidates), 2)
+        self.assertEqual(sum(freshness.is_stale(p, "0.157.0") for p in candidates), 1)
+
+        metadata["packages"][1]["source"] = "git+https://example.test/skia"
+        self.assertTrue(all(freshness.is_stale(p, "0.157.0") for p in skia_packages()))
+        metadata["packages"][1]["source"] = registry
+        metadata["resolve"]["nodes"][0]["deps"][0]["dep_kinds"] = [{"kind": None, "target": None}]
+        self.assertTrue(all(freshness.is_stale(p, "0.157.0") for p in skia_packages()))
+        metadata["resolve"]["nodes"][0]["deps"][0]["dep_kinds"] = [{"kind": None, "target": target}]
+        manifest.write_text(manifest.read_text(encoding="utf-8").replace('"=0.156.0"', '"=0.155.0"'),
+                            encoding="utf-8")
+        self.assertTrue(all(freshness.is_stale(p, "0.157.0") for p in skia_packages()))
 
     @staticmethod
     def metadata_for_krr_usvg_skrifa(

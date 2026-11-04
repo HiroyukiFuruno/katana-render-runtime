@@ -12,7 +12,7 @@ import subprocess
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from http.client import HTTPMessage
 from functools import total_ordering
 from pathlib import Path
@@ -148,6 +148,7 @@ class Package:
     incompatible_prefix_length: int | None = None
     requirement_operator: str | None = None
     cargo_requirement: str | None = None
+    skia_hold_candidate: bool = False
 
 
 @dataclass(frozen=True)
@@ -675,19 +676,47 @@ def _load_manifest_payload(root: Path, manifest: Path) -> dict[str, object]:
     return _string_keyed_object(payload, f"Rust manifest must be a table: {manifest}")
 
 
-def rust_manifest_dependencies(root: Path, coupled_skrifa_manifest: Path | None = None) -> list[Package]:
+def _verified_skia_hold(root: Path, metadata: dict[str, object]) -> bool:
+    """認証されたmacOS依存だけを性能上の保留候補にする。"""
+    try:
+        runtime, node = _runtime_metadata(metadata)
+    except ValueError:
+        return False
+    manifest = runtime.get("manifest_path")
+    if not isinstance(manifest, str) or Path(manifest).resolve() != (root / KRR_SKRIFA_MANIFEST).resolve():
+        return False
+    dependencies, edges, packages = runtime.get("dependencies"), node.get("deps"), metadata.get("packages")
+    if not isinstance(dependencies, list) or not isinstance(edges, list) or not isinstance(packages, list):
+        return False
+    target = 'cfg(target_os = "macos")'
+    registry = "registry+https://github.com/rust-lang/crates.io-index"
+    direct = [d for d in dependencies if isinstance(d, dict) and d.get("name") == "skia-safe"
+              and d.get("rename") is None and d.get("kind") is None and d.get("target") == target]
+    resolved = [d for d in edges if isinstance(d, dict) and d.get("name") == "skia_safe"
+                and d.get("dep_kinds") == [{"kind": None, "target": target}]]
+    if len(direct) != 1 or len(resolved) != 1:
+        return False
+    if direct[0].get("req") != "=0.156.0" or direct[0].get("source") != registry:
+        return False
+    matches = [p for p in packages if isinstance(p, dict) and p.get("id") == resolved[0].get("pkg")]
+    return (len(matches) == 1 and matches[0].get("name") == "skia-safe"
+            and matches[0].get("version") == "0.156.0" and matches[0].get("source") == registry)
+
+
+def rust_manifest_dependencies(root: Path, coupled_skrifa_manifest: Path | None = None,
+                               metadata: dict[str, object] | None = None) -> list[Package]:
     """Return direct registry requirements updated by ``cargo upgrade``."""
-    dependencies_by_version: dict[tuple[str, str, int | None, str | None, str | None], Package] = {}
+    dependencies_by_version: dict[tuple[str, str, int | None, str | None, str | None, bool], Package] = {}
 
     def dependency_tables(payload: dict[str, object]) -> list[tuple[str, object]]:
         sections = ("dependencies", "dev-dependencies", "build-dependencies")
         tables = [(section, payload.get(section)) for section in sections]
         target = payload.get("target")
         if isinstance(target, dict):
-            for target_config in target.values():
+            for target_name, target_config in target.items():
                 if not isinstance(target_config, dict):
                     continue
-                tables.extend((f"target.{section}", target_config.get(section)) for section in sections)
+                tables.extend((f"target.{target_name}.{section}", target_config.get(section)) for section in sections)
         workspace = payload.get("workspace")
         if isinstance(workspace, dict):
             tables.append(("workspace.dependencies", workspace.get("dependencies")))
@@ -737,10 +766,17 @@ def rust_manifest_dependencies(root: Path, coupled_skrifa_manifest: Path | None 
                     raise ValueError(
                         f"unsupported Cargo version requirement in {manifest}: {declared_name} = {version!r}"
                     ) from exc
+                if (metadata is not None and manifest.resolve() == (root / KRR_SKRIFA_MANIFEST).resolve()
+                        and scope == 'target.cfg(target_os = "macos").dependencies'
+                        and declared_name == "skia-safe"
+                        and declaration == {"version": "=0.156.0", "default-features": False,
+                                            "features": ["binary-cache", "pdf"]}
+                        and _verified_skia_hold(root, metadata)):
+                    package = replace(package, skia_hold_candidate=True)
                 dependencies_by_version[
                     (
                         package.name, package.current, package.incompatible_prefix_length,
-                        package.requirement_operator, package.cargo_requirement,
+                        package.requirement_operator, package.cargo_requirement, package.skia_hold_candidate,
                     )
                 ] = package
     return sorted(dependencies_by_version.values(), key=lambda package: (package.name, Version.parse(package.current)))
@@ -1054,6 +1090,10 @@ def display_name(package: Package) -> str:
 
 
 def is_stale(package: Package, resolved_version: str) -> bool:
+    # Issue #109: R7924 0.157 RSS +0.125 MiB; R7940 0.156 +0.015625 MiB.
+    # 各25回の同一入力診断に基づく候補保留であり、全84条件の受入を意味しない。
+    if package.skia_hold_candidate and resolved_version == "0.157.0":
+        return False
     current = Version.parse(package.current)
     resolved = Version.parse(resolved_version)
     if package.cargo_requirement is not None:
@@ -1081,7 +1121,7 @@ def main(argv: list[str] | None = None) -> int:
             print("A Cargo alternate-registry dependency has an incompatible update available.", file=sys.stderr)
             print("Run `just depends-update-all`, review its generated changes, then rerun `just release-check`.", file=sys.stderr)
             return 1
-        rust_manifest = rust_manifest_dependencies(args.root, coupled_skrifa_manifest)
+        rust_manifest = rust_manifest_dependencies(args.root, coupled_skrifa_manifest, metadata)
         javascript = js_packages(args.root)
         if not js_lock_is_latest_compatible(args.root):
             print("Dependency freshness check rejected this release:", file=sys.stderr)

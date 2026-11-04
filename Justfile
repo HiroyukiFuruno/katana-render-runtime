@@ -779,7 +779,8 @@ depends-update-all:
 
 [private]
 depends-update-mutations:
-    {{CARGO}} upgrade -i allow --pinned allow --exclude skrifa --exclude harfrust
+    # macOS の Skia 0.157 は計測でメモリ退行が確認されたため、次版の評価まで 0.156 を維持する。
+    {{CARGO}} upgrade -i allow --pinned allow --exclude skrifa --exclude harfrust --exclude skia-safe
     python3 scripts/release/update_html5ever_pair.py --cargo "{{CARGO}}"
     {{CARGO}} update
     python3 scripts/release/update_html_performance_harness_lock.py --cargo "{{CARGO}}"

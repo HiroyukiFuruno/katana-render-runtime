@@ -594,7 +594,7 @@ fn assert_dependency_update_command_order(
     let (broad_upgrade, html_pair_update, lockfile_update) = positions;
     assert_eq!(
         commands[broad_upgrade],
-        "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa --exclude harfrust"
+        "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa --exclude harfrust --exclude skia-safe"
     );
     assert_eq!(
         commands[html_pair_update],
