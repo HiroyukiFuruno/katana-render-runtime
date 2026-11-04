@@ -168,3 +168,7 @@ impl HtmlInteractiveSession {
 #[cfg(test)]
 #[path = "session_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "session_resource_reuse_tests.rs"]
+mod resource_reuse_tests;
