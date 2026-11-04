@@ -1731,7 +1731,7 @@ def _verified_partial_epoch_source(
     *, git_query: GitQuery | None = None,
 ) -> object:
     """Authenticate source/build identity only; this does not establish runtime eligibility."""
-    from html_performance_source_reuse import SourceReuseContext, _modes
+    from html_performance_source_reuse import SourceReuseContext, _modes, equivalent_program_records
 
     digest(current.manifest_sha256)
     digest(current.artifact_sha256)
@@ -1754,7 +1754,7 @@ def _verified_partial_epoch_source(
     def program_closure(records: SourceRecords) -> SourceRecords:
         return {path: value for path, value in records.items()
                 if path.startswith("scripts/") or path == "Justfile"}
-    require(program_closure(old_records) == program_closure(current_records),
+    require(equivalent_program_records(program_closure(old_records), program_closure(current_records)),
             "partial epoch measurement program source differs")
     old_tree = _git_output(root, ("ls-tree", "-r", "-z", old_head), git_query=git_query)
     current_tree = _git_output(root, ("ls-tree", "-r", "-z", current_head), git_query=git_query)
@@ -1894,7 +1894,7 @@ def _v3_live_programs(root: Path, checkout: JsonObject) -> SourceRecords:
 
 def _v3_program_source(root: Path, fixed: JsonObject, endpoints: Sequence[JsonObject], *,
                        git_query: GitQuery | None) -> SourceRecords:
-    from html_performance_source_reuse import _modes
+    from html_performance_source_reuse import RELEASE_ONLY_PROGRAMS, _modes, equivalent_program_records
 
     program_source = _object(fixed.get("programSource"), "fixed epoch program source")
     programs = _v3_live_programs(root, program_source)
@@ -1909,9 +1909,13 @@ def _v3_program_source(root: Path, fixed: JsonObject, endpoints: Sequence[JsonOb
     modes = _modes(tree)
     for endpoint in endpoints:
         checkout = _object(endpoint.get("liveCheckout"), "live checkout")
-        require(_v3_live_programs(root, checkout) == programs,
+        live_programs = _v3_live_programs(root, checkout)
+        require(equivalent_program_records(live_programs, programs),
                 "live measurement program differs from fixed epoch")
         live_head = _text(checkout.get("head"), "live program HEAD")
+        live_committed = committed_records(root, live_head, git_query=git_query)
+        require(all(live_programs.get(path) == live_committed.get(path)
+                    for path in RELEASE_ONLY_PROGRAMS), "live release-only source differs from Git")
         live_tree = _git_output(root, ("ls-tree", "-r", "-z", live_head), git_query=git_query)
         if not isinstance(live_tree, bytes):
             raise ValueError("live program tree differs")

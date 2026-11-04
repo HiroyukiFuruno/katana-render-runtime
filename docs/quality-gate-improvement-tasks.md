@@ -4,6 +4,8 @@
 
 ### 現在の判定と実行中の作業
 
+- [/] R7893で依存更新4fileを通常commit `2bc89f82` へ取り込んだ。R7888最新依存530件、R7889静的21task、R7890 kdr-linter全182件、R7891 lock updater12件は実0。表示性能の成功に代用しない。R7895の現SDK build proofとR7896の固定origin検証は実0だが、candidate binary SHAは旧SDKと異なり、旧画像結果の現source適格性は未完。
+- [ ] R7897の現行性能1条件は採取前に実1（CPU監視producerのsource pinが容量role修正前のまま）。サンプル0・正式性能0/84を維持する。容量記録だけの差分をレビューし、現pin更新と過去pin保持の19回帰をR7899で実0、R7903通常commit `d8f61659`。release専用2fileの内容だけを再利用比較から分離し、元Git認証・集合・mode・worker比較を維持する修正は、R7900の再利用5件、R7901の検証器153件が実0。独立reviewのP2に従い両pathの欠落・mode・偽装の拒否を個別化し、R7904静的13task・R7905検証器153件も実0。新runで1条件→全84の実測へ戻る。元の失敗ログ、SDK、原receiptを上書きしない。
 - [/] R7877は修正後の公開 `just runtime-script-cas-diagnostic` を直接起動し実0。前段7/7valid、診断unit22成功、実診断statuspassed/fixtureOnlyfalse、CAS blob/prior outputs復元true・復元エラー0を確認した。終了後R7878で別processから既存terminal/root producer lockを取得・解放して実0、idle時のlock残留なし。これは旧7/shared CASの実証であり、native/root/性能coverage100%や新2個別restore・CI受入は引き続き別途未完。先行する旧入口の失敗は削除しない。
 - [/] 公開CAS入口を既存lock付きPython親へ統一し、従来の前提検査→診断の2行は内部recipeへ保持した。R7873は追加testの複雑度16>15で実1、7変異を共有tableへ整理し、各変異の実適用もassertしてR7874 Biome実0。R7875の正常1＋欠落/握り潰し/順序/重複/lockなし/保護なし/再帰の負例7、計8/8が実0。独立レビューP0–P2なし。Moon taskの内部run直結、PATH等の実条件照合を維持。修正後の公開入口の実診断と完全gateはこれから確認する。
 - [/] R7872は既存Python親/lockを使う標準起動経路でCAS実診断が実0、status=passed/fixtureOnly=false。前段7/7validと診断unit22成功の後、実seed/hit・出力削除後のhydrate・選択receiptのCAS blob改変拒否・再収集と検証を確認、CAS blob/prior outputs復元true・復元エラー0。選択対象は旧fragment-loaderで、他の旧6件はidentity/receipt/JUnit不変確認の対象。新2個別restoreやcoverage100%の証明に代用しない。直接起動R7865の失敗も保持する。補助hostの環境集合差はPATHだけで、Python起動の追加検索経路を制御probeで確認したため、照合を緩めず公開入口を同じ既存Python親へ統一中。内部2行の順序とMoon直接-run契約を維持し、再帰/lockなし/保護なし等を厳格回帰へ追加する。変更後の静的/限定8件/公開入口実行は未検証。

@@ -50,6 +50,19 @@ Records = dict[str, tuple[str, int]]
 GitBytes = Callable[[Sequence[str]], bytes]
 GitText = Callable[[Sequence[str]], str]
 
+RELEASE_ONLY_PROGRAMS = frozenset({
+    "scripts/release/verify-release-target.py",
+    "scripts/release/verify_release_target_test.py",
+})
+
+
+def equivalent_program_records(left: Mapping[str, tuple[str, int]],
+                               right: Mapping[str, tuple[str, int]]) -> bool:
+    """実行しないrelease gateの内容だけを、同一集合の比較から除く。"""
+    return left.keys() == right.keys() and all(
+        left[path] == right[path] for path in left if path not in RELEASE_ONLY_PROGRAMS
+    )
+
 
 @dataclass(frozen=True)
 class SourceReuseContext:
@@ -92,7 +105,8 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
     def is_program(path: str) -> bool:
         return path.startswith("scripts/") or path == "Justfile"
     if program_records is not None and program_modes is not None:
-        if ({path: value for path, value in current.items() if is_program(path)} != program_records
+        if (not equivalent_program_records(
+                {path: value for path, value in current.items() if is_program(path)}, program_records)
                 or {path: value for path, value in new_modes.items() if is_program(path)} != program_modes):
             raise ValueError("current measurement program differs from authenticated program")
     old_checked = {path: mode for path, mode in old_modes.items()

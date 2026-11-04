@@ -18,6 +18,40 @@ def git(root: Path, *args: str) -> str:
 
 
 class SourceReuseTest(unittest.TestCase):
+    def test_release_only_program_changes_preserve_membership_and_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            names = sorted(reuse.RELEASE_ONLY_PROGRAMS)
+            names.append("scripts/release/worker.py")
+            old = {name: (hashlib.sha256(b"old").hexdigest(), 3) for name in names}
+            current = dict(old)
+            for name in names:
+                file = root / name
+                file.parent.mkdir(parents=True, exist_ok=True)
+                data = b"new" if name in reuse.RELEASE_ONLY_PROGRAMS else b"old"
+                file.write_bytes(data)
+                current[name] = (hashlib.sha256(data).hexdigest(), len(data))
+            modes = {name: "100644" for name in names}
+            def tree(selected: dict[str, str]) -> bytes:
+                return b"".join(f"{mode} blob abc\t{name}\0".encode()
+                                for name, mode in selected.items())
+            def text(args: Sequence[str]) -> str:
+                return "old" if args[0] == "merge-base" else "new" if args[0] == "rev-parse" else ""
+            def validate(records: reuse.Records, new_modes: dict[str, str]) -> reuse.SourceReuseContext:
+                return validate_reuse_source(root, "old", records, old, text,
+                    lambda args: tree(modes if args[-1] == "old" else new_modes),
+                    program_records=old, program_modes=modes)
+            self.assertEqual(set(validate(current, modes).changed_paths), reuse.RELEASE_ONLY_PROGRAMS)
+            worker = "scripts/release/worker.py"
+            with self.assertRaisesRegex(ValueError, "current measurement program differs"):
+                validate({**current, worker: ("0" * 64, 3)}, modes)
+            removed = dict(current)
+            removed.pop(names[0])
+            with self.assertRaises(ValueError):
+                validate(removed, modes)
+            with self.assertRaisesRegex(ValueError, "current measurement program differs"):
+                validate(current, {**modes, names[0]: "100755"})
+
     def test_real_git_rejects_rename_mode_and_unrelated_source(self) -> None:
         for change in ("rename", "mode", "source"):
             with self.subTest(change=change), tempfile.TemporaryDirectory() as temporary:

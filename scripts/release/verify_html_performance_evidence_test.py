@@ -1037,6 +1037,44 @@ class PerformanceEvidenceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "original pin mismatch"):
             gate.source_contract(bundle, self.root, expected, epoch_validation=validation)
 
+    def test_v3_program_comparison_allows_only_release_gate_contents(self) -> None:
+        from html_performance_source_reuse import RELEASE_ONLY_PROGRAMS
+
+        names = sorted(RELEASE_ONLY_PROGRAMS)
+        names.append("scripts/release/worker.py")
+        old = {name: ("a" * 64, 1) for name in names}
+        changed = {name: (("b" * 64, 1) if name in RELEASE_ONLY_PROGRAMS else value)
+                   for name, value in old.items()}
+        tree = b"".join(f"100644 blob abc\t{name}\0".encode() for name in names)
+        fixed: JsonObject = {"programSource": {"head": "old"}}
+        endpoint: JsonObject = {"liveCheckout": {"head": "new"}}
+        with (patch.object(gate, "_v3_live_programs", side_effect=[old, changed]),
+              patch.object(gate, "committed_records", side_effect=[old, changed]),
+              patch.object(gate, "_git_output", return_value=tree)):
+            self.assertEqual(gate._v3_program_source(self.root, fixed, [endpoint], git_query=None), old)
+        cases = [("worker", names[-1])] + [
+            (mutation, name) for mutation in ("missing", "mode", "forged") for name in names[:-1]
+        ]
+        for mutation, name in cases:
+            live = dict(changed)
+            committed = dict(changed)
+            live_tree = tree
+            if mutation == "worker":
+                live[name] = ("c" * 64, 1)
+            elif mutation == "missing":
+                live.pop(name)
+            elif mutation == "mode":
+                live_tree = tree.replace(f"100644 blob abc\t{name}".encode(),
+                                         f"100755 blob abc\t{name}".encode())
+            else:
+                committed[name] = ("c" * 64, 1)
+            with (self.subTest(mutation=mutation, name=name),
+                  patch.object(gate, "_v3_live_programs", side_effect=[old, live]),
+                  patch.object(gate, "committed_records", side_effect=[old, committed]),
+                  patch.object(gate, "_git_output", side_effect=[tree, live_tree]),
+                  self.assertRaises(ValueError)):
+                gate._v3_program_source(self.root, fixed, [endpoint], git_query=None)
+
     def test_v3_program_source_is_independent_of_sdk_head(self) -> None:
         script = self.root / "scripts/release/worker.py"
         script.parent.mkdir(parents=True, exist_ok=True)
