@@ -67,7 +67,7 @@ jobs:
           version: "0.13.0"
           enable-cache: true
       - name: Install just
-        uses: taiki-e/install-action@0b43677d266e02f8bd34a2096b57e23a01a92aff # just
+        uses: taiki-e/install-action@859dfda2225e25c12478e3c7796d19fd3735881f # just
       - name: Install ShellCheck 0.11.0
         run: |
           curl --fail --location --output "$RUNNER_TEMP/shellcheck.tar.xz" https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
@@ -132,7 +132,7 @@ jobs:
 
       - name: Install Java runtime
         if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: "21"
@@ -169,18 +169,18 @@ jobs:
 
       - name: Install cargo-llvm-cov
         if: matrix.os == 'ubuntu-latest'
-        uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: cargo-llvm-cov@0.9.1
 
       - name: Install cargo-nextest
         if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
-        uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: cargo-nextest@0.9.148
 
       - name: Install just
-        uses: taiki-e/install-action@0b43677d266e02f8bd34a2096b57e23a01a92aff # just
+        uses: taiki-e/install-action@859dfda2225e25c12478e3c7796d19fd3735881f # just
 
       - name: Install Chrome for the macOS official producer browser test
         if: matrix.platform == 'mac-arm64'
@@ -695,7 +695,7 @@ jobs:
 
       - name: Install just
         if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
-        uses: taiki-e/install-action@0b43677d266e02f8bd34a2096b57e23a01a92aff # just
+        uses: taiki-e/install-action@859dfda2225e25c12478e3c7796d19fd3735881f # just
 
       - name: Install Bun
         if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
@@ -810,7 +810,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install Java runtime
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: "21"
@@ -846,13 +846,13 @@ jobs:
           enable-cache: true
 
       - name: Install just
-        uses: taiki-e/install-action@0b43677d266e02f8bd34a2096b57e23a01a92aff # just
+        uses: taiki-e/install-action@859dfda2225e25c12478e3c7796d19fd3735881f # just
 
       - name: Install capacity cleanup tool
         run: cargo install cargo-sweep --version 0.8.0 --locked
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: cargo-llvm-cov@0.9.1
 
