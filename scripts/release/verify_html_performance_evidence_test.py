@@ -4,6 +4,7 @@ from __future__ import annotations
 import local_html_performance_evidence as local_html
 
 import base64
+import gc
 import hashlib
 import importlib.util
 import io
@@ -15,6 +16,7 @@ import subprocess
 import tempfile
 import unittest
 import warnings
+import weakref
 import zipfile
 from contextlib import nullcontext
 from collections.abc import Callable, Sequence
@@ -41,6 +43,113 @@ spec.loader.exec_module(gate)
 
 JsonObject = dict[str, object]
 JsonMutation = Callable[[JsonObject], None]
+
+
+class CommittedRecordsCacheTest(unittest.TestCase):
+    def test_parsed_batches_are_lru_scoped_and_return_fresh_dicts(self) -> None:
+        calls: list[tuple[str, str]] = []
+        trees: dict[str, bytes] = {}
+        for index, name in enumerate("abcde"):
+            oid = str(index + 1) * 40
+            trees[name] = f"100644 blob {oid}\tfile\0".encode()
+
+        def query(root: Path, args: Sequence[str], payload: bytes | None, text: bool) -> bytes:
+            self.assertFalse(text)
+            calls.append((str(root), args[0]))
+            if args[0] == "ls-tree":
+                return trees[args[-1]]
+            if payload is None:
+                raise AssertionError("missing batch")
+            oid = payload.decode().strip()
+            return f"{oid} blob 1\nx\n".encode()
+
+        root = Path("/first")
+        first = gate.committed_records(root, "a", git_query=query)
+        first["file"] = ("modified", 0)
+        for ref in ("b", "a", "c", "d", "a", "e", "b"):
+            actual = gate.committed_records(root, ref, git_query=query)
+            self.assertEqual(actual["file"], (hashlib.sha256(b"x").hexdigest(), 1))
+        self.assertEqual(sum(kind == "cat-file" for _, kind in calls), 6)
+        self.assertEqual(sum(kind == "ls-tree" for _, kind in calls), 8)
+        gate.committed_records(Path("/second"), "a", git_query=query)
+        self.assertEqual(sum(kind == "cat-file" for _, kind in calls), 7)
+        def other(root: Path, args: Sequence[str], payload: bytes | None, text: bool) -> bytes:
+            return query(root, args, payload, text)
+        gate.committed_records(root, "a", git_query=other)
+        self.assertEqual(sum(kind == "cat-file" for _, kind in calls), 8)
+        trees["a"] = trees["a"].replace(b"\tfile\0", b"\trenamed\0")
+        self.assertIn("renamed", gate.committed_records(root, "a", git_query=query))
+        trees["a"] = trees["a"].replace(b"100644", b"100755")
+        self.assertIn("renamed", gate.committed_records(root, "a", git_query=query))
+        trees["a"] = trees["a"].replace(b"100755", b"120000")
+        with self.assertRaisesRegex(ValueError, "unsupported committed source type"):
+            gate.committed_records(root, "a", git_query=query)
+
+    def test_query_lifetime_unknown_and_invalid_batches(self) -> None:
+        calls: list[str] = []
+        oid = "1" * 40
+
+        def query(_root: Path, args: Sequence[str], payload: bytes | None, _text: bool) -> bytes:
+            calls.append(args[0])
+            if args[0] == "ls-tree":
+                return f"100644 blob {oid}\tfile\0".encode()
+            return f"{oid} blob 1\nx\n".encode()
+
+        gate.committed_records(Path("/first"), git_query=query)
+        reference = weakref.ref(query)
+        del query
+        gc.collect()
+        self.assertIsNone(reference())
+
+        class NonWeakQuery:
+            __slots__ = ()
+
+            def __call__(self, _root: Path, args: Sequence[str], _payload: bytes | None,
+                         _text: bool) -> bytes:
+                calls.append(args[0])
+                if args[0] == "ls-tree":
+                    return f"100644 blob {oid}\tfile\0".encode()
+                return f"{oid} blob 1\nx\n".encode()
+
+        before = calls.count("cat-file")
+        for _ in range(2):
+            gate.committed_records(Path("/first"), git_query=NonWeakQuery())
+        self.assertEqual(calls.count("cat-file") - before, 2)
+
+        def relative_query(_root: Path, args: Sequence[str], _payload: bytes | None,
+                           _text: bool) -> bytes:
+            calls.append(args[0])
+            if args[0] == "ls-tree":
+                return f"100644 blob {oid}\tfile\0".encode()
+            return f"{oid} blob 1\nx\n".encode()
+        for root in (Path("relative-repository"), Path("/first/../first")):
+            before = calls.count("cat-file")
+            for _ in range(2):
+                gate.committed_records(root, git_query=relative_query)
+            self.assertEqual(calls.count("cat-file") - before, 2)
+
+        for invalid in ("HEAD", "g" * 40):
+            def symbolic(_root: Path, args: Sequence[str], payload: bytes | None, _text: bool,
+                         *, selected: str = invalid) -> bytes:
+                calls.append(args[0])
+                if args[0] == "ls-tree":
+                    return f"100644 blob {selected}\tfile\0".encode()
+                return f"{selected} blob 1\nx\n".encode()
+            before = calls.count("cat-file")
+            gate.committed_records(Path("/first"), git_query=symbolic)
+            gate.committed_records(Path("/first"), git_query=symbolic)
+            self.assertEqual(calls.count("cat-file") - before, 2)
+
+        def corrupt(_root: Path, args: Sequence[str], payload: bytes | None, _text: bool) -> bytes:
+            calls.append(args[0])
+            if args[0] == "ls-tree":
+                return f"100644 blob {oid}\tfile\0".encode()
+            return f"{oid} blob 2\nx\n".encode()
+        before = calls.count("cat-file")
+        for _ in range(2):
+            with self.assertRaises(ValueError):
+                gate.committed_records(Path("/first"), git_query=corrupt)
+        self.assertEqual(calls.count("cat-file") - before, 2)
 
 
 def json_object(value: object) -> JsonObject:

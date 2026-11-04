@@ -4,6 +4,9 @@
 
 ### 現在の判定と実行中の作業
 
+- [ ] R7924の同条件再測定も各arm25/300phase、warm・再表示・全YのRSS中央値+0.125MiBで不合格。修正後は実0でstatus=closed/policyAccepted=false/再利用可0を保存できた。正式性能0/84を維持する。R7923同candidate A/A各25は12phase-metricすべて差検出なしだが、R7912と環境集合が異なり、正式結果・原因確定へ転用しない。基準armは既存readerでaccepted-history-candidate `reference-history-html84-ea855b56-r6628` と確認し、公開0.4.23という推定を訂正した。
+- [/] v3ではbuild/source認証が条件ごとに重複し、R7924のGit query raw計2,510.58MiB・最大416.63MiBを確認した。巨大rawのLRU増量を避け、fresh tree/path/mode/typeと各conditionの認証を維持したまま、同query transaction/正規絶対root/完全OID列の解析済みSHA・sizeだけを標準LRU4へ保存する。callbackは弱参照、rawは保持せず、戻りdictも非共有。不明条件は従来どおり再取得する。R7928のtestクロージャLint失敗を保持し、明示bind修正後R7929 Lint/R7931静的13/R7932検証155実0、独立review P0–P2なし。実運用の短縮量・保存量は未測定。
+- [ ] RSS増加の切り分けとしてSkia0.157→0.156の別source診断候補を準備中。R7925 root lock、R7927既存updaterによるharness lock/LOCK_SHA同期が実0、public CPU SDK/minimal featuresは維持、SKIA環境overrideなし。正式採用・性能改善・描画合格は未判断。現0.157証跡は保持し、別build proofと同入力実測で判定する。fixtureは全inlineの420Bで外部資源なしのため、file resource reader差をこの条件の直接原因としない。
 - [ ] R7912では1条件（async/expected-state/1280x900/DPR1）の各arm25回・300phaseを取得した。初回表示中央値は基準0.006874833秒/候補0.006815667秒、warm0.003762042/0.003563833秒、再表示0.000793/0.000786041秒。warm・再表示・全Yのpeak RSSは約0.203125MiB増で既存判定が不合格、正式0/84を維持する。各phaseまでの累積peakであり段階固有の保持量とは断定しない。旧SDKではなく基準armの実体を区別する。原因未確定で、同一candidateの対照測定を次に行う。部分結果を現行基準へ昇格しない。
 - [/] R7912は完備した不合格pairedをincompleteと分類したため封緘時に実1。分類を分離し、不合格rawをbundleへ残し、成功条件だけを厳格再検証・再開対象にする。旧falseを永続継承せず、成功subsetと新測定から既存policyで再判定する。正式validatorのpolicyPass必須・全84・非比較12集合・未知status/CPU pin拒否は維持。R7913の未実装helper RED1を保持、最終R7917静的13/R7918 producer184/R7919 host19実0、独立reviewのP1を解消し追加P0–P2なし。実再produce/非承認封緘/全84は未実証。
 - [/] R7908は採取前のGit読取りと記録保存でENOSPC実1。既存承認に従うprivate直下clean-allは実0、cleaned10/skipped16/failed0、約14GB回復、R7911保護ref検査実0。事前記録dirも作れなかったため実stdout/stderr/codeをmemory保持し、回復後R7910へ排他的保存した制限を明記。原receiptや物理pinは変更していない。KRR targetも整理されたため、warm buildの再利用を無条件に主張しない。

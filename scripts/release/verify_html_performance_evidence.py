@@ -16,7 +16,10 @@ import stat
 import subprocess
 import sys
 import tempfile
+import types
+import weakref
 import zipfile
+from functools import lru_cache
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from datetime import datetime
 from typing import NamedTuple, Protocol, TypedDict, cast
@@ -1567,6 +1570,47 @@ def _validate_reference_parent_wrapper(bundle: Bundle, root: Path, expected: Jso
                                for pin in proof.dependency_refs]}
 
 
+def _committed_blob_records(payload: bytes, oids: tuple[str, ...]) -> tuple[tuple[str, int], ...]:
+    result: list[tuple[str, int]] = []
+    offset = 0
+    for oid in oids:
+        header_end = payload.index(b"\n", offset)
+        actual_oid, kind, size = payload[offset:header_end].decode().split()
+        require(actual_oid == oid and kind == "blob", "committed blob query differs")
+        start, length = header_end + 1, int(size)
+        data = payload[start:start + length]
+        require(len(data) == length and payload[start + length:start + length + 1] == b"\n", "truncated committed blob")
+        result.append((hashlib.sha256(data).hexdigest(), length))
+        offset = start + length + 1
+    require(offset == len(payload), "extra committed blob data")
+    return tuple(result)
+
+
+_ParsedBatch = Callable[[str, tuple[str, ...]], tuple[tuple[str, int], ...]]
+_PARSED_BATCHES: weakref.WeakKeyDictionary[types.FunctionType, _ParsedBatch] = weakref.WeakKeyDictionary()
+
+
+def _parsed_batch_cache(query: types.FunctionType) -> _ParsedBatch:
+    cached = _PARSED_BATCHES.get(query)
+    if cached is not None:
+        return cached
+    query_ref = weakref.ref(query)
+
+    @lru_cache(maxsize=4)
+    def parsed(root_path: str, oids: tuple[str, ...]) -> tuple[tuple[str, int], ...]:
+        callback = query_ref()
+        if callback is None:
+            raise ValueError("Git query transaction is unavailable")
+        payload = _git_output(Path(root_path), ("cat-file", "--batch"), git_query=callback,
+                              input_bytes="".join(oid + "\n" for oid in oids).encode())
+        if not isinstance(payload, bytes):
+            raise ValueError("Git blob query returned text output")
+        return _committed_blob_records(payload, oids)
+
+    _PARSED_BATCHES[query] = parsed
+    return parsed
+
+
 def committed_records(root: Path, ref: str = "HEAD", *, git_query: GitQuery | None = None) -> SourceRecords:
     tree = _git_output(root, ("ls-tree", "-r", "-z", ref), git_query=git_query)
     if not isinstance(tree, bytes):
@@ -1579,23 +1623,17 @@ def committed_records(root: Path, ref: str = "HEAD", *, git_query: GitQuery | No
         mode, kind, oid = metadata.decode().split()
         require(kind == "blob" and mode in ("100644", "100755"), "unsupported committed source type")
         rows.append((os.fsdecode(raw_path), oid))
-    payload = _git_output(root, ("cat-file", "--batch"), git_query=git_query,
-                          input_bytes="".join(oid + "\n" for _, oid in rows).encode())
-    if not isinstance(payload, bytes):
-        raise ValueError("Git blob query returned text output")
-    result: SourceRecords = {}
-    offset = 0
-    for name, oid in rows:
-        header_end = payload.index(b"\n", offset)
-        actual_oid, kind, size = payload[offset:header_end].decode().split()
-        require(actual_oid == oid and kind == "blob", "committed blob query differs")
-        start, length = header_end + 1, int(size)
-        data = payload[start:start + length]
-        require(len(data) == length and payload[start + length:start + length + 1] == b"\n", "truncated committed blob")
-        result[name] = (hashlib.sha256(data).hexdigest(), length)
-        offset = start + length + 1
-    require(offset == len(payload), "extra committed blob data")
-    return result
+    oids = tuple(oid for _, oid in rows)
+    if (isinstance(git_query, types.FunctionType) and root.is_absolute() and root.resolve() == root and oids
+            and all(re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", oid) for oid in oids)):
+        records = _parsed_batch_cache(git_query)(str(root), oids)
+    else:
+        payload = _git_output(root, ("cat-file", "--batch"), git_query=git_query,
+                              input_bytes="".join(oid + "\n" for oid in oids).encode())
+        if not isinstance(payload, bytes):
+            raise ValueError("Git blob query returned text output")
+        records = _committed_blob_records(payload, oids)
+    return {name: record for (name, _), record in zip(rows, records, strict=True)}
 
 
 def _historical_reference_source(root: Path, before: JsonObject, selection: object, *,
