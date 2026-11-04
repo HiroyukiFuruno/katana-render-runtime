@@ -2178,6 +2178,12 @@ def _v3_epoch_validation(bundle: Bundle, root: Path, expected: JsonObject,
     snapshot_ref = _object(fixed_pair["snapshot"], "v3 source snapshot")
     origin_root = Path(_text(bundle.json(fixed_pair["before"]).get("root"), "fixed epoch root"))
     fixed_context = bundle.json(pair["epochContextRef"])
+    fixed_fields = {"schema", "source", "inputs", "toolContext", "programSource"}
+    require(set(fixed_context) in (fixed_fields, fixed_fields | {"measurementCapacityBindingRef"}),
+            "fixed epoch context fields differ")
+    measurement_binding = (_object(fixed_context["measurementCapacityBindingRef"],
+                                   "measurement capacity binding")
+                           if "measurementCapacityBindingRef" in fixed_context else None)
     endpoints = [bundle.json(pair[key]) for key in ("beforeContextRef", "endContextRef")]
     program_records = _v3_program_source(origin_root, fixed_context, endpoints, git_query=git_query)
     programs: dict[str, JsonObject] = {
@@ -2205,7 +2211,7 @@ def _v3_epoch_validation(bundle: Bundle, root: Path, expected: JsonObject,
             for key in ("epochContextRef", "beforeContextRef", "endContextRef")]
     projections = [declared_from_authenticated_refs(bundle, origin_root, bundle.json(pin), old_expected,
                    snapshot_ref, capture, links, resources, {}, binaries, programs,
-                   program_records=program_records) for pin in pins]
+                   program_records=program_records, measurement_binding=measurement_binding) for pin in pins]
     return SourceEpochV3Validation(
         _text(pins[0].get("sha256"), "v3 context SHA"),
         _text(pins[1].get("sha256"), "v3 context SHA"),

@@ -329,11 +329,18 @@ def _pinned_json(path: Path, checksum: str) -> gate.JsonObject:
     return gate._object(json.loads(raw, object_pairs_hook=gate.unique_object), "capacity input")
 
 
-def load_capacity_binding(root: Path, document: Path, checksum: str) -> CapacityBinding:
+def load_capacity_binding(root: Path, document: Path, checksum: str, *,
+                          reader: gate.FileReader | None = None) -> CapacityBinding:
     import cargo_capacity_guard as capacity
     from cargo_capacity_guard_native_cli_observation import protected_identity
 
-    value = _pinned_json(document, checksum)
+    def payload(path: Path, sha256: str) -> Path:
+        if reader is None:
+            _pinned_file(path, sha256)
+            return path
+        return reader.file({"path": str(path), "sha256": sha256})
+
+    value = _pinned_json(payload(document, checksum), checksum)
     gate.require(value.get("schema") == "krr-html-performance-capacity-binding-v1", "capacity binding schema differs")
     state_ref = gate._object(value["state"], "capacity state pin")
     registry_ref = gate._object(value["protectedRegistry"], "protected registry pin")
@@ -341,9 +348,7 @@ def load_capacity_binding(root: Path, document: Path, checksum: str) -> Capacity
     state_sha = gate._text(state_ref["sha256"], "capacity state SHA256")
     registry = Path(gate._text(registry_ref["path"], "protected registry path"))
     registry_sha = gate._text(registry_ref["sha256"], "protected registry SHA256")
-    _pinned_file(state, state_sha)
-    _pinned_file(registry, registry_sha)
-    saved = capacity.load_state(state, state_sha)
+    saved = capacity.load_state(payload(state, state_sha), state_sha)
     gate.require(saved.get("target") == str(root / "target") and saved.get("metric") == capacity.CAPACITY_METRIC,
                  "capacity state target/metric differs")
     gate.require(gate._integer(saved["metric_version"], "capacity metric version") == capacity.CAPACITY_METRIC_VERSION,
@@ -351,7 +356,7 @@ def load_capacity_binding(root: Path, document: Path, checksum: str) -> Capacity
     gate.require(gate._integer(saved["baseline_bytes"], "capacity baseline") == LOCAL_CAPACITY_BASELINE
                  and gate._numeric(saved["factor"], "capacity factor") == 2,
                  "fixed capacity baseline/factor differs")
-    registry_value = _pinned_json(registry, registry_sha)
+    registry_value = _pinned_json(payload(registry, registry_sha), registry_sha)
     gate.require(set(registry_value) == {"schema", "physicalRefCount", "refs"},
                  "protected registry fields differ")
     gate.require(registry_value["schema"] == PROTECTED_REGISTRY_SCHEMA,
@@ -3915,6 +3920,8 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 "schema": "krr-html-performance-fixed-epoch-context-v1", "source": initial,
                 "inputs": before_context["inputs"], "toolContext": before_context["toolContext"],
                 "programSource": program_source,
+                "measurementCapacityBindingRef": {"path": str(binding.document),
+                                                   "sha256": binding.document_sha256},
             }
         else:
             if resumed_bundle is None:
@@ -3922,6 +3929,10 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             fixed_context_pin = _receipt_file_pin(resumed_receipt.get("epochContextRef"), "resume epoch context")
             fixed_context = resumed_bundle.json(fixed_context_pin)
             program_source = gate._object(fixed_context.get("programSource"), "resume program source")
+            if "measurementCapacityBindingRef" in fixed_context:
+                gate.require(fixed_context["measurementCapacityBindingRef"] == {
+                    "path": str(binding.document), "sha256": binding.document_sha256,
+                }, "resume measurement capacity binding differs")
         program_head = gate._text(program_source.get("head"), "program source HEAD")
         program_records = gate._v3_program_source(root, fixed_context, [dict(before_context)],
                                                   git_query=git_query)

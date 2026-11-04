@@ -78,6 +78,74 @@ class DeclaredInputsTest(unittest.TestCase):
             "tool_context": {"environmentSha256": "a" * 64, "platform": "example", "cpuCount": 4},
         }
 
+    def test_measurement_capacity_is_distinct_and_strictly_bound(self) -> None:
+        root = self.bundle.directory
+
+        def pin(name: str, value: object) -> gate.JsonObject:
+            file = root / name
+            file.write_text(json.dumps(value, sort_keys=True))
+            result: gate.JsonObject = {"path": str(file), "sha256": gate.sha256(file)}
+            self.bundle.files[str(file)] = (file, str(result["sha256"]))
+            return result
+
+        state_value = {"target": str(root / "target"), "baseline_bytes": 2363047936,
+                       "factor": 2, "metric": "unique-inode-allocated-bytes", "metric_version": 1}
+        reference_path = root / "program"
+        info = reference_path.stat()
+        reference = {"path": str(reference_path), "sha256": gate.sha256(reference_path),
+                     "size": info.st_size, "dev": info.st_dev, "ino": info.st_ino, "mode": info.st_mode}
+        registry_value = {"schema": "krr-protected-refs-successor-v1", "physicalRefCount": 1,
+                          "refs": [reference]}
+        state = pin("measurement-state", state_value)
+        registry = pin("measurement-registry", registry_value)
+        binding = pin("measurement-binding", {
+            "schema": "krr-html-performance-capacity-binding-v1",
+            "state": state, "protectedRegistry": registry,
+        })
+        context: gate.JsonObject = {"inputs": [{**item, "exists": True}
+                                               for item in (binding, state, registry)]}
+        proof = self.bundle.json(self.pins["candidate-proof"])
+        result = epoch._capacity_pins(self.bundle, root, proof, context, binding)
+        self.assertEqual(result["bindingRef"], self.pins["binding"])
+        self.assertEqual(result["measurementBindingRef"], binding)
+        self.assertEqual(result["measurementStateRef"], state)
+        self.assertEqual(result["measurementProtectedRegistryRef"], registry)
+        for index in range(3):
+            rows = list(gate._objects(context["inputs"], "inputs"))
+            rows[index] = {**rows[index], "sha256": "0" * 64}
+            with self.subTest(index=index), self.assertRaisesRegex(ValueError, "capacity context differs"):
+                epoch._capacity_pins(self.bundle, root, proof, {"inputs": rows}, binding)
+        with self.assertRaisesRegex(ValueError, "capacity context differs"):
+            epoch._capacity_pins(self.bundle, root, proof, {"inputs": []}, binding)
+        bad = pin("unknown-measurement-binding", {
+            "schema": "krr-html-performance-capacity-binding-v1", "state": state,
+            "protectedRegistry": registry, "unknown": True,
+        })
+        with self.assertRaisesRegex(ValueError, "measurement capacity binding differs"):
+            epoch._capacity_pins(self.bundle, root, proof, context, bad)
+        for name, invalid_state, invalid_registry in (
+            ("baseline", {**state_value, "baseline_bytes": 1}, registry_value),
+            ("target", {**state_value, "target": str(root / "other")}, registry_value),
+            ("metric", {**state_value, "metric": "other"}, registry_value),
+            ("factor", {**state_value, "factor": 3}, registry_value),
+            ("registry-schema", state_value, {**registry_value, "schema": "other"}),
+            ("registry-count", state_value, {**registry_value, "physicalRefCount": 2}),
+            ("registry-identity", state_value, {**registry_value, "refs": [{**reference, "ino": info.st_ino + 1}]}),
+        ):
+            bad_state = pin(f"{name}-state", invalid_state)
+            bad_registry = pin(f"{name}-registry", invalid_registry)
+            bad_binding = pin(f"{name}-binding", {
+                "schema": "krr-html-performance-capacity-binding-v1",
+                "state": bad_state, "protectedRegistry": bad_registry,
+            })
+            bad_context: gate.JsonObject = {"inputs": [{**item, "exists": True}
+                                                       for item in (bad_binding, bad_state, bad_registry)]}
+            with self.subTest(name=name), self.assertRaises((ValueError, RuntimeError)):
+                epoch._capacity_pins(self.bundle, root, proof, bad_context, bad_binding)
+        (root / "measurement-binding").write_text("changed")
+        with self.assertRaises(ValueError):
+            epoch._capacity_pins(self.bundle, root, proof, context, binding)
+
     def test_system_only_observation_uses_actual_pinned_worker(self) -> None:
         path = self.bundle.file(self.pins["candidate"])
         path.write_bytes(struct.pack("<IIIIIIII", 0xFEEDFACF, 0x0100000C, 0, 2, 0, 0, 0, 0))

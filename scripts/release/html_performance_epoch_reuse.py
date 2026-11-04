@@ -154,8 +154,9 @@ def _program_pins(reader: gate.FileReader, root: Path, snapshot: gate.JsonObject
     return result
 
 
-def _capacity_pins(reader: gate.FileReader, proof: gate.JsonObject,
-                   context: gate.JsonObject) -> dict[str, gate.JsonObject]:
+def _capacity_pins(reader: gate.FileReader, root: Path, proof: gate.JsonObject,
+                   context: gate.JsonObject,
+                   measurement_binding: gate.JsonObject | None = None) -> dict[str, gate.JsonObject]:
     capacity_pin = _pin(proof.get("capacityInputRef"), "capacity input")
     capacity = reader.json(capacity_pin)
     binding_pin = _pin(capacity.get("bindingRef"), "capacity binding")
@@ -171,11 +172,29 @@ def _capacity_pins(reader: gate.FileReader, proof: gate.JsonObject,
         gate.require(pin == _pin(binding.get(binding_role), binding_role),
                      "capacity binding reference differs")
         pins[role] = pin
+    for pin in pins.values():
+        reader.file(pin)
+    if measurement_binding is None:
+        measured = {role: pins[role] for role in ("bindingRef", "stateRef", "protectedRegistryRef")}
+    else:
+        from produce_html_performance_evidence import load_capacity_binding
+
+        measured_binding = _pin(measurement_binding, "measurement capacity binding")
+        measured_data = reader.json(measured_binding)
+        gate.require(set(measured_data) == {"schema", "state", "protectedRegistry"}
+                     and measured_data.get("schema") == "krr-html-performance-capacity-binding-v1",
+                     "measurement capacity binding differs")
+        validated = load_capacity_binding(root, Path(str(measured_binding["path"])),
+                                          str(measured_binding["sha256"]), reader=reader)
+        measured = {"bindingRef": measured_binding,
+                    "stateRef": {"path": str(validated.state), "sha256": validated.state_sha256},
+                    "protectedRegistryRef": {"path": str(validated.registry), "sha256": validated.registry_sha256}}
+        pins.update({"measurement" + role[0].upper() + role[1:]: pin for role, pin in measured.items()})
     rows = gate._objects(context["inputs"], "context inputs")
     indexed = {gate._text(row["path"], "context path"): row for row in rows}
     gate.require(len(indexed) == len(rows), "duplicate context input")
     for role in ("bindingRef", "stateRef", "protectedRegistryRef"):
-        pin = pins[role]
+        pin = measured[role]
         row = indexed.get(gate._text(pin["path"], role))
         gate.require(row is not None and row.get("exists") is True
                      and row.get("sha256") == pin["sha256"], "capacity context differs")
@@ -187,7 +206,8 @@ def _operational_pins(reader: gate.FileReader, root: Path, context: gate.JsonObj
                       expected: gate.JsonObject, snapshot: gate.JsonObject,
                       capture: gate.JsonObject | None, links: list[gate.JsonObject],
                       refs: Mapping[str, gate.JsonObject],
-                      binaries: Mapping[str, gate.JsonObject]) -> dict[str, gate.JsonObject]:
+                      binaries: Mapping[str, gate.JsonObject],
+                      measurement_binding: gate.JsonObject | None = None) -> dict[str, gate.JsonObject]:
     pins = {"sourceSnapshot": _pin(snapshot, "snapshot")}
     arms = gate._object(expected["arms"], "expected arms")
     for role, arm in (("baselineBuild", gate.baseline_arm_id(expected)),
@@ -199,7 +219,7 @@ def _operational_pins(reader: gate.FileReader, root: Path, context: gate.JsonObj
                  and _pin(proof.get("frozenBinary"), "candidate frozen binary") == _pin(binaries["candidate"], "candidate binary")
                  and _pin(proof.get("sourceSnapshotRef"), "candidate snapshot") == _pin(snapshot, "snapshot"),
                  "candidate build proof differs")
-    capacity_pins = _capacity_pins(reader, proof, context)
+    capacity_pins = _capacity_pins(reader, root, proof, context, measurement_binding)
     source_pair = gate._object(expected.get("sourcePair"), "source pair")
     gate.require(_pin(proof.get("sourceBeforeRef"), "candidate source")
                  == capacity_pins["sourceBeforeRef"]
@@ -217,7 +237,8 @@ def _operational_pins(reader: gate.FileReader, root: Path, context: gate.JsonObj
         for index, pin in enumerate(links):
             pins["link:" + str(index)] = _pin(pin, "link")
     pins["lock"] = {"path": str(root / gate.HARNESS_ROOT / "Cargo.lock"), "sha256": gate.LOCK_SHA}
-    context_independent = {"capacityInputRef", "sourceBeforeRef", "bindingRef", "stateRef", "protectedRegistryRef"}
+    context_independent = {"capacityInputRef", "sourceBeforeRef", "bindingRef", "stateRef", "protectedRegistryRef",
+                           "measurementBindingRef", "measurementStateRef", "measurementProtectedRegistryRef"}
     for role, pin in pins.items():
         path = gate._text(pin["path"], role)
         if role not in context_independent:
@@ -249,6 +270,7 @@ def declared_from_authenticated_refs(
     resources: Mapping[str, gate.JsonObject], fonts: Mapping[str, gate.JsonObject],
     binaries: Mapping[str, gate.JsonObject], programs: Mapping[str, gate.JsonObject],
     *, program_records: gate.SourceRecords | None = None,
+    measurement_binding: gate.JsonObject | None = None,
 ) -> EpochProjection:
     """Project a previously validated attempt; this alone does not establish eligibility.
 
@@ -265,7 +287,8 @@ def declared_from_authenticated_refs(
             path = gate._text(pin["path"], category + " path")
             gate.require(bool(role) and refs.get(path) == pin, category + " reference differs")
     program_pins = _program_pins(reader, root, snapshot, programs, program_records=program_records)
-    operational = _operational_pins(reader, root, context, expected, snapshot, capture, links, refs, binaries)
+    operational = _operational_pins(reader, root, context, expected, snapshot, capture, links, refs, binaries,
+                                    measurement_binding)
     worker_paths = {gate._text(value["path"], "worker path") for value in binaries.values()}
     gate.require(not worker_paths.intersection(gate._text(pin["path"], "operational path")
                                                 for pin in operational.values()),
