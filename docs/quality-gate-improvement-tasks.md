@@ -4,6 +4,11 @@
 
 ### 現在の判定と実行中の作業
 
+- [ ] R7940はSkia0.156で1条件の各arm25/300phase、closed/policyAccepted=true/再利用候補1まで成功した（全84のformalAcceptedはfalse）。warm・再表示・全YのRSS差は+0.125から+0.015625MiBへ縮小、速度・RSSとも既存policyで合格。全条件と現sourceの画像・font・consumer適格性は未完。旧0.157の証跡は保持し、合格条件を変更しない。
+- [/] R7944の再開は測定前に`resume epoch systemWorkers differs`で実1。固定workerのbytes/stamp/platformは同じで、環境digestだけが不同だった。非metadataキー集合は一致し、異なる値の特定は未取得。元環境全体を保存しなかった制限を明記し、過去のreceipt/hashを付け替えず、既存runnerへprivate tmpの0600・SHA付き起動環境の保存/再現を追加した。引数はbootstrapのみで消費し、未知の環境キーや比較条件を無視しない。独立reviewのstdout互換・FIFO停止を修正、R7945型検査2件をテスト側の直接依存参照で修正、R7947の追跡状態/既知wrapper SHAを正しく更新した。R7946厳格型・R7949静的13・R7950関連118件が実0。実環境での再開・全84は未完。
+- [/] 依存更新が不適合なSkia0.157へ戻すことを防ぎ、鮮度検査もcanonical manifest/macOS/registry/解決edge/版/feature一致時だけ0.157との比較を保留する候補を実装した。0.157.1以降は鮮度検査が拒否して再評価を要求する。他依存・lock・画像・全84性能は維持し、0.156の最終採用は全条件の結果で判断する。R7950の対象118件と実registryを使うR7954鮮度検査529件が実0。
+- [/] R7951鮮度検査はJS lock更新不足で実1。R7952で既存排他付きmutation専用recipeを実行してrollup 4.67.4→4.67.5とplatform lockを更新、Rust lock・runtime assetの差分は無し。R7953更新後静的13・R7954鮮度529件が実0。描画・性能・全体品質ゲートの成功へ代用しない。
+- [/] R7941は保存用の物理空きを確保するため専用controllerのargv/start/PID/PGIDを照合して制御中断、child -15/groupClosed/rawFdsClosed true/cleanupFailure null。R7943の保護ref事前検証・既存just clean・事後検証が各実0、両比較workerは保存、空き約6.17GBを回復した。transportは既存reflink-copyのCOWで、論理duを物理消費と混同しない。新たなcopy基盤や原本の圧縮・置換は行わない。
 - [ ] R7924の同条件再測定も各arm25/300phase、warm・再表示・全YのRSS中央値+0.125MiBで不合格。修正後は実0でstatus=closed/policyAccepted=false/再利用可0を保存できた。正式性能0/84を維持する。R7923同candidate A/A各25は12phase-metricすべて差検出なしだが、R7912と環境集合が異なり、正式結果・原因確定へ転用しない。基準armは既存readerでaccepted-history-candidate `reference-history-html84-ea855b56-r6628` と確認し、公開0.4.23という推定を訂正した。
 - [/] v3ではbuild/source認証が条件ごとに重複し、R7924のGit query raw計2,510.58MiB・最大416.63MiBを確認した。巨大rawのLRU増量を避け、fresh tree/path/mode/typeと各conditionの認証を維持したまま、同query transaction/正規絶対root/完全OID列の解析済みSHA・sizeだけを標準LRU4へ保存する。callbackは弱参照、rawは保持せず、戻りdictも非共有。不明条件は従来どおり再取得する。R7928のtestクロージャLint失敗を保持し、明示bind修正後R7929 Lint/R7931静的13/R7932検証155実0、独立review P0–P2なし。実運用の短縮量・保存量は未測定。
 - [ ] RSS増加の切り分けとしてSkia0.157→0.156の別source診断候補を準備中。R7925 root lock、R7927既存updaterによるharness lock/LOCK_SHA同期が実0、public CPU SDK/minimal featuresは維持、SKIA環境overrideなし。正式採用・性能改善・描画合格は未判断。現0.157証跡は保持し、別build proofと同入力実測で判定する。fixtureは全inlineの420Bで外部資源なしのため、file resource reader差をこの条件の直接原因としない。

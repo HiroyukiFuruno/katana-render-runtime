@@ -12,6 +12,7 @@ import subprocess
 import sys
 from collections.abc import Sequence
 
+import html_performance_launch_environment as launch_environment
 from html_performance_python_identity import installed_identity
 
 
@@ -66,7 +67,23 @@ def _require_private_venv_path() -> None:
 
 
 def bootstrap(arguments: Sequence[str]) -> int:
-    uv_path = shutil.which("uv")
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--capture-launch-environment", type=Path)
+    group.add_argument("--replay-launch-environment", type=Path)
+    parser.add_argument("--replay-launch-environment-sha256")
+    options, arguments = parser.parse_known_args(arguments)
+    if bool(options.replay_launch_environment) != bool(options.replay_launch_environment_sha256):
+        parser.error("replay path and digest must be provided together")
+    environment = dict(os.environ)
+    if options.capture_launch_environment:
+        digest = launch_environment.capture(ROOT, options.capture_launch_environment, environment)
+        print(f"Launch environment saved: {options.capture_launch_environment} sha256={digest}",
+              file=sys.stderr, flush=True)
+    elif options.replay_launch_environment:
+        environment = launch_environment.replay(ROOT, options.replay_launch_environment,
+                                                options.replay_launch_environment_sha256)
+    uv_path = shutil.which("uv", path=environment.get("PATH", os.defpath))
     if uv_path is None:
         raise RuntimeError("uv executable unavailable")
     uv = str(Path(uv_path).resolve(strict=True))
@@ -75,9 +92,9 @@ def bootstrap(arguments: Sequence[str]) -> int:
     uv_sha = _file_sha256(Path(uv))
     _require_private_venv_path()
     if not (VENV / "pyvenv.cfg").is_file():
-        subprocess.run([uv, "venv", "--python", python, str(VENV)], cwd=ROOT, check=True)
+        subprocess.run([uv, "venv", "--python", python, str(VENV)], cwd=ROOT, env=environment, check=True)
     _require_private_venv_path()
-    environment = dict(os.environ)
+    sync_environment = environment.copy()
     environment[BASE_PYTHON_ENV] = python_sha
     environment[BASE_PYTHON_PATH_ENV] = python
     environment[UV_ENV] = uv_sha
@@ -89,6 +106,7 @@ def bootstrap(arguments: Sequence[str]) -> int:
     subprocess.run(
         [uv, "pip", "sync", "--python", str(_venv_python()), "--require-hashes", str(REQUIREMENTS)],
         cwd=ROOT,
+        env=sync_environment,
         check=True,
     )
     if _file_sha256(Path(python)) != python_sha or _file_sha256(Path(uv)) != uv_sha:
@@ -140,9 +158,14 @@ def main() -> int:
     if sys.argv[1:2] == ["--prepared"]:
         _verify_prepared_python()
         del sys.argv[1]
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    parser.add_argument("--capture-launch-environment", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--replay-launch-environment", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--replay-launch-environment-sha256", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("mode", choices=("verify", "produce", "reuse", "promote", "local-proof", "test"))
     args, arguments = parser.parse_known_args()
+    if args.capture_launch_environment or args.replay_launch_environment or args.replay_launch_environment_sha256:
+        parser.error("launch environment options require --bootstrap")
     return run_mode(args.mode, arguments)
 
 

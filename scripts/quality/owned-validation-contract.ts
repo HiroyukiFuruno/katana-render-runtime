@@ -1293,7 +1293,7 @@ function pythonStatic(context: ContractContext, name: string): void {
 }
 const HTML_PERFORMANCE_TEST_WRAPPER = "scripts/release/run_html_performance.py";
 const HTML_PERFORMANCE_TEST_WRAPPER_SHA256 =
-  "0cfc4c226ddfd694a55e4a3c50e89a2e2de49d4b0c03096985a73e98ee4a5e62";
+  "e228f7aa0c4445e30876f9e51df7da81084342a4e54c8465c0dc1054e864f6b5";
 function pythonPerformanceTestSelection(
   context: ContractContext,
   words: string[],
