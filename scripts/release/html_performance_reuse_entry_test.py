@@ -35,6 +35,11 @@ def build_facts() -> dict[str, str]:
 
 
 class ReuseEntryTest(unittest.TestCase):
+    def setUp(self) -> None:
+        guard = patch.object(gate, "require_no_git_replacements")
+        guard.start()
+        self.addCleanup(guard.stop)
+
     def test_program_source_reuse_requires_current_binary_and_environment(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

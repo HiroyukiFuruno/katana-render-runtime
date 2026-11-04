@@ -96,31 +96,67 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
         if current_sha in {
             "3b98d203dd23f65513ab4d4cb60af4b63ca49ff2468705c34982b588877c9e97",
             "3fee6e9a540c90a10ad8f02cd95e6edddaf4b929c69f66cb2a4643a7b96594ae",
+            "ddc12b9fc326b4fea119ccbcc807dbff65031bb9a35ae1cf44487ecabbd23796",
         }:
             return True
         if current != Path(__file__).read_bytes():
             return False
         old_tree = ast.parse(old)
         current_tree = ast.parse(current)
-        additions = {"cache_only_collector_change", "known_auth_program_change"}
+        additions = {"cache_only_collector_change", "known_auth_program_change", "_specific_source_changes"}
         definitions = [node for node in current_tree.body
                        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in additions]
         if len(definitions) != len(additions) or {node.name for node in definitions} != additions:
             return False
-        trusted: dict[str, Callable[..., bool]] = {
+        trusted: dict[str, Callable[..., object]] = {
             "cache_only_collector_change": cache_only_collector_change,
             "known_auth_program_change": known_auth_program_change,
+            "_specific_source_changes": _specific_source_changes,
         }
         for node in definitions:
             actual = ast.dump(node, include_attributes=False)
             expected_nodes = ast.parse(inspect.getsource(trusted[node.name])).body
             if len(expected_nodes) != 1 or actual != ast.dump(expected_nodes[0], include_attributes=False):
                 return False
+        old_validators = [node for node in old_tree.body
+                          if isinstance(node, ast.FunctionDef) and node.name == "validate_reuse_source"]
+        current_validators = [node for node in current_tree.body
+                              if isinstance(node, ast.FunctionDef) and node.name == "validate_reuse_source"]
+        if len(old_validators) != 1 or len(current_validators) != 1:
+            return False
+        current_validator = current_validators[0]
+        fragment = ast.get_source_segment(current.decode("utf8"), current_validator)
+        if fragment is None:
+            return False
+        replacements = (
+            ("    approved_changes, new_test_files = _specific_source_changes(\n        root, measured_head, current, measured, old_modes, new_modes, git_bytes,\n        allow_test_changes=allow_test_changes,\n    )\n    old_checked = {path: mode for path, mode in old_modes.items()\n", "    old_checked = {path: mode for path, mode in old_modes.items()\n"),
+            ("    new_checked = {path: mode for path, mode in new_modes.items()\n                   if (program_records is None or not is_program(path)) and path not in new_test_files}\n", "    new_checked = {path: mode for path, mode in new_modes.items()\n                   if program_records is None or not is_program(path)}\n"),
+            ("    current_checked = {path for path in current\n                       if (program_records is None or not is_program(path)) and path not in new_test_files}\n", "    current_checked = {path for path in current if program_records is None or not is_program(path)}\n"),
+            ("    test_changes = set(changed) - ALLOWED - program_changes - approved_changes\n", "    test_changes = set(changed) - ALLOWED - program_changes\n"),
+            ("    if any(old_modes.get(path) != \"100644\" for path in changed\n           if path not in program_changes and path not in new_test_files):\n", "    if any(old_modes.get(path) != \"100644\" for path in changed if path not in program_changes):\n"),
+            ("                              bool(test_changes or new_test_files), bool(program_changes))", "                              bool(test_changes), bool(program_changes))"),
+        )
+        for added, original in replacements:
+            if fragment.count(added) != 1:
+                return False
+            fragment = fragment.replace(added, original, 1)
+        normalized = ast.parse(fragment).body
+        if len(normalized) != 1 or ast.dump(normalized[0], include_attributes=False) != ast.dump(
+                old_validators[0], include_attributes=False):
+            return False
+        current_tree.body = [old_validators[0] if node is current_validator else node
+                             for node in current_tree.body]
         current_tree.body = [node for node in current_tree.body
                              if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
                              or node.name not in additions]
         return ast.dump(old_tree, include_attributes=False) == ast.dump(current_tree, include_attributes=False)
     pins = {
+        "scripts/release/html_performance_reuse_entry_test.py": (
+            "6b0518f9992ac91d7fc541cbbfc2563bbfc19095f1d00dcf4600dd9361c4d036",
+            "ef435de25b26fefabcb2e3e3b627633b539dd6fa473e7f493a6e4bef13348e73"),
+        "scripts/release/html_performance_source_reuse_test.py": (
+            "bc44642c01d96526490a2ba97bce9b66bd354c942851d2ce772071b3416f8304",
+            "81a7db4b3307e566f0e0eb59448248aec60d49430ab76e6d9b123eed9727996e"),
         "scripts/release/html_performance_epoch_reuse.py": (
             "33a05103fc5100c7eb2e9d10368785c8ab20e6f8308ddc53f0ae95f63c573f1c",
             "3f50599d284dbe593bb9a1cf02d0fdd633647eb61a3f6be7867b8308d72de3c7"),
@@ -184,6 +220,61 @@ def _modes(raw: bytes) -> dict[str, str]:
     return result
 
 
+def _specific_source_changes(
+    root: Path, measured_head: str, current: Records, measured: Records,
+    old_modes: Mapping[str, str], new_modes: Mapping[str, str], git_bytes: GitBytes,
+    *, allow_test_changes: bool,
+) -> tuple[set[str], set[str]]:
+    """今回のHTML test追加とrelease文書の厳密な差分だけを認証する。"""
+    parent = "crates/katana-render-runtime/src/renderer/backends/html_interactive/session.rs"
+    child = "crates/katana-render-runtime/src/renderer/backends/html_interactive/session_resource_reuse_tests.rs"
+    document = "docs/release.md"
+    approved: set[str] = set()
+    added_tests: set[str] = set()
+
+    if measured.get(document) != current.get(document):
+        if document not in measured or document not in current:
+            raise ValueError("release document membership differs")
+        old_document = git_bytes(("show", measured_head + ":" + document))
+        new_document = (root / document).read_bytes()
+        removed = b'- \x60Test and Build (macos-15-intel, mac-x64)\x60\n'
+        old_sha = hashlib.sha256(old_document).hexdigest()
+        new_sha = hashlib.sha256(new_document).hexdigest()
+        if (old_sha != "1a740b364aaf0ebacd59d1969d3a73313547917a9223a8d96c4c9531900542ab"
+                or measured[document] != (old_sha, len(old_document))
+                or current[document] != (new_sha, len(new_document))
+                or old_modes.get(document) != "100644" or new_modes.get(document) != "100644"
+                or old_document.count(removed) != 1
+                or old_document.replace(removed, b"", 1) != new_document):
+            raise ValueError("release document delta differs")
+        approved.add(document)
+
+    if measured.get(parent) != current.get(parent) or measured.get(child) != current.get(child):
+        if (not allow_test_changes or child in measured or child not in current
+                or parent not in measured or parent not in current
+                or old_modes.get(parent) != "100644" or new_modes.get(parent) != "100644"
+                or child in old_modes or new_modes.get(child) != "100644"):
+            raise ValueError("HTML test membership or mode differs")
+        old_parent = git_bytes(("show", measured_head + ":" + parent))
+        new_parent = (root / parent).read_bytes()
+        test_bytes = (root / child).read_bytes()
+        suffix = b'\n#[cfg(test)]\n#[path = "session_resource_reuse_tests.rs"]\nmod resource_reuse_tests;\n'
+        old_sha = hashlib.sha256(old_parent).hexdigest()
+        new_sha = hashlib.sha256(new_parent).hexdigest()
+        test_sha = hashlib.sha256(test_bytes).hexdigest()
+        if (old_sha != "d48356aab76a79a8e634395775d5deb2da5178a2f63a108c6c33164371615548"
+                or measured[parent] != (old_sha, len(old_parent))
+                or current[parent] != (new_sha, len(new_parent))
+                or new_parent != old_parent + suffix
+                or test_sha != "f2d210b9e8c536aad4ba67f05f23a5a9d79b3caab08ce56d2417cb960da93227"
+                or current[child] != (test_sha, len(test_bytes))):
+            raise ValueError("HTML test source delta differs")
+        approved.update((parent, child))
+        added_tests.add(child)
+
+    return approved, added_tests
+
+
 def validate_reuse_source(root: Path, measured_head: str, current: Records,
                           measured: Records, git_text: GitText,
                           git_bytes: GitBytes, *, allow_test_changes: bool = False,
@@ -205,12 +296,17 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
                 {path: value for path, value in current.items() if is_program(path)}, program_records)
                 or {path: value for path, value in new_modes.items() if is_program(path)} != program_modes):
             raise ValueError("current measurement program differs from authenticated program")
+    approved_changes, new_test_files = _specific_source_changes(
+        root, measured_head, current, measured, old_modes, new_modes, git_bytes,
+        allow_test_changes=allow_test_changes,
+    )
     old_checked = {path: mode for path, mode in old_modes.items()
                    if program_records is None or not is_program(path)}
     new_checked = {path: mode for path, mode in new_modes.items()
-                   if program_records is None or not is_program(path)}
+                   if (program_records is None or not is_program(path)) and path not in new_test_files}
     measured_checked = {path for path in measured if program_records is None or not is_program(path)}
-    current_checked = {path for path in current if program_records is None or not is_program(path)}
+    current_checked = {path for path in current
+                       if (program_records is None or not is_program(path)) and path not in new_test_files}
     if (old_checked != new_checked or current_checked != measured_checked
             or set(current) != set(new_modes) or set(measured) != set(old_modes)):
         raise ValueError("source membership or mode differs")
@@ -218,7 +314,7 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
                            if current.get(path) != measured.get(path)
                            or old_modes.get(path) != new_modes.get(path)))
     program_changes = {path for path in changed if program_records is not None and is_program(path)}
-    test_changes = set(changed) - ALLOWED - program_changes
+    test_changes = set(changed) - ALLOWED - program_changes - approved_changes
     if test_changes:
         if not allow_test_changes or not test_changes <= TEST_PATHS | {TEST_PARENT}:
             raise ValueError("source changes exceed documentation allowance")
@@ -236,7 +332,8 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
                or current.get(path, (None,))[0] != checksum
                for path, checksum in TEST_ANCHOR_SHA.items()):
             raise ValueError("test-only connection baseline differs")
-    if any(old_modes.get(path) != "100644" for path in changed if path not in program_changes):
+    if any(old_modes.get(path) != "100644" for path in changed
+           if path not in program_changes and path not in new_test_files):
         raise ValueError("changed source is not a regular non-executable file")
     for name, (checksum, size) in current.items():
         path = root / name
@@ -245,4 +342,4 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
                 or hashlib.sha256(path.read_bytes()).hexdigest() != checksum):
             raise ValueError("working source differs from current committed tree: " + name)
     return SourceReuseContext(measured_head, eligible, dict(measured), changed,
-                              bool(test_changes), bool(program_changes))
+                              bool(test_changes or new_test_files), bool(program_changes))

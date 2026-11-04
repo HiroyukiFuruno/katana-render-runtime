@@ -4,6 +4,11 @@
 
 ### 現在の判定と未対応
 
+- [x] 現行sourceの正式HTML fidelityはR8146が実0。R8149の既存reader集計で主画像286/286が90以上（最低91.98562）、TOC capture72・scroll group42、visual6/6・script5/5、dynamic15/15・input-state18/18・埋込図各11/11を確認した。84条件の性能判定とは別である。
+- [x] 公開consumer契約はR8152の実catalog選択1件が実0。DPR1/2、両軸の範囲・入力座標・resize後寸法と状態保持を確認した。binary SHAは`8f0f5338f75d26be427f5fc79a9c778fdd40e8998c8efa7969743e951b250f0c`、全Rust suiteの成功ではない。
+- [ ] 現行sourceへ性能結果を再利用する限定認証を修正中。R8153はHTML test追加をmembershipで拒否するRED実1、R8154は7件GREEN実0。独立reviewでmode負例のdirty誤検出を防ぎ、実mode/index/ls-treeと拒否理由を固定した。R8155の型3件失敗は保持し、型絞り込み後R8157はstrict199file実0。現在の標準静的・関連回帰と、最終SDK byte一致は未完。
+- [/] 限定認証の最終差分はR8165静的foundation13task実0、source7・verifier163・producer187・host8・CLI9・entry3・hostvalidation19の計396件が実0。R8164の旧unitはfake Git headをref問合せにも返して誤拒否したため、対象unit classだけで既に別検証する入口guardを分離し、実際のformal失敗とbinary不一致のassertは維持した。R8166で3件成功、R8168/69も再成功。独立reviewに追加P0–P2なし。元receipt/pinと最終binary/lock/compiler/環境の照合は保持し、実SDK同一性と22件の再開は次の正式実行で確認する。
+- [x] フォント構築の診断R8156は既存binary/catalogから正確に1件実行し実0。Trebuchet MSの通常・太字各30回で新rasterizer平均約0.249/0.202ms、同rasterizerのcached29回は合計約0.0011/0.0010ms。初期font DB約138ms・manager約20ms。これは限定診断であり、全入力のresize時間/RSS非劣化の証明にはしない。実装を推測で変更せず、正式84条件を進める。
 - [x] `b9cf3753` / Skia0.156のMermaid製品PNGを全117件再取得し、全件99以上を確認した。R7991は実0、managed receiptはcompleted/accepted=true、EN59最低99.085711・JA58最低99.108010。独立raw JSのofficialをR7974/R7978で新規生成し、旧原本は保持した（`tmp/quality/resumed-owner-r3509/r7990-current-product-full/receipt.json`）。中間SVGの点数ではない。
 - [x] 同じ`b9cf3753`のHTML84条件をR8008で新規captureし実0、R8009の独立検証も実0。84/84が90以上、最低92.14438、出力fontの完全一致はestablished・拒否0だった。これは画像/fontの判定で、速度/RSSの合格ではない（`tmp/quality/resumed-owner-r3509/r8009-current-html84-independent-validation/command/`）。
 - [ ] HTML性能はR8085で個別合格・封緘済み22/84、残62。実0・receiptはclosed/policyAccepted=true/completeConditionIds=22/formalAccepted=false。R8064の18件を再測定せず引継ぎ、input-state disabledの3viewportとemptyの1280x900@1を追加した。次の再開元は`tmp/quality/resumed-owner-r3509/r8085-current-performance-all84`（controller receiptのdir）。旧R8064/R7995/R7970へ戻さない。元の原本・pinは保持し、全84・最終SDK等価性・履歴昇格は未完。実行は約29分で外側30分上限に近く、再開範囲を無条件に増やさない。
@@ -22,7 +27,7 @@
 - [x] HTML同一sessionの資源保持を既存ResourceAuditScopeと実CSS/PNGで回帰へ固定した。初回2URLのexact取得、初期JS/DOMのpositive control、開始後に変更した値と元画素の同viewport/幅変更resize後の保持、再取得成功/失敗とも0、新sessionでCSS更新・画像削除が見える対照を検証した。R8112 AST・R8113静的foundation・R8114実build・R8116実catalog選択1件・R8117 exact1件が各実0、実binary SHAは`2e61a9b03182ffb0d9636cfd2238a51740257136d26ae23ce4700b5639a98d4e`。独立review P2の初期状態対照不足も修正し追加P0–P2なし。製品API・資源loader・cache方針は変更していない。font再構築数・全84の性能・consumer全体の合格とは区別する。
 - [/] 容量回復は既存Cargo/Ninja/Moon/Bunの生成物整理で行った。R8006の標準Moon artifact GC（state reset無し）は実0、所有lockのdev/inoを保持、R8007の保護18refs検査も実0、物理空き9,882,636,288bytesを確認。比較元headless_shell・frozen worker・原receiptは保持した。duのclone共有を物理回復量と混同しない。
 - [ ] 調査用CLIもread-only照会でcwdへ生成物を書く場合がある。Siso queryの未追跡siso_result.jsonはpayload非表示・bytes/SHA保持で管理外へ移し、ソース差分を復旧した。今後この種の照会は既知の管理外作業dirをcwdとし、source rootへ生成しない。既存のsource集合・dirty検査は維持し、未知ファイルをignore追加で隠さない。
-- [ ] 上記の画像・性能結果は明記した`b9cf3753`の描画実装の結果。R8085のcollectorは`2e770a55`であり、旧18件の原本を変更せず新4件を追加した。以後の検証コード・テスト変更の最終適格性は別途確認し、旧結果を最新ソースの全体合格へ読み替えない。長文の全Y/末尾/全目次子項目・consumer両軸/resize/state、性能残62、coverage実装100%/未計測0、Q17–Q22、最新依存/Actions、完全gate、Draft/最新review/個別reply-resolve/Ready/3OS CI/保護merge/3crate公開/Issue close/cleanupは継続する。
+- [ ] 上記の84画像・性能結果は明記した`b9cf3753`の描画実装の結果。R8085のcollectorは`2e770a55`であり、旧18件の原本を変更せず新4件を追加した。以後の検証コード・テスト変更の最終適格性は別途確認し、旧結果を最新ソースの全体合格へ読み替えない。長文の全Y/末尾/全目次子項目はR8146、consumer両軸/resize/stateはR8152で成功を回収した。性能残62、coverage実装100%/未計測0、Q17–Q22、最新依存/Actions、完全gate、Draft/最新review/個別reply-resolve/Ready/3OS CI/保護merge/3crate公開/Issue close/cleanupは継続する。
 
 ### 2026-11-04までの記録（最新の状態は上記を優先）
 
