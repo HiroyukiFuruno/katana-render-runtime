@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { BrowserHandle } from "./official-renderer-types";
 import { physicalFileIdentity } from "./raster-comparison-binding";
 import type { JsonInput, JsonObject } from "./raster-json-input";
-import type { RasterEndpoint, RasterRole } from "./raster-production-binding";
+import type { RasterEndpoint, RasterFileIdentity, RasterRole } from "./raster-production-binding";
 
 export interface BrowserObservationRequest {
   role: RasterRole;
@@ -77,7 +77,9 @@ export async function observeActualBrowserIdentity(
   if (version === "") throw new Error("Actual browser version is missing");
   const identity = physicalFileIdentity(measured.argv[0] as string);
   if (identity.canonical !== fs.realpathSync(measured.osExecutablePath))
-    throw new Error("Actual OS browser executable and argv differ");
+    throw new Error(
+      `Actual OS browser executable and argv differ: ${JSON.stringify(browserMismatchProjection(identity, measured.osExecutablePath, measured.argv.length))}`,
+    );
   const evidence = {
     schema: "katana-own-browser-identity-observation-v1",
     role: request.role,
@@ -108,6 +110,37 @@ export async function observeActualBrowserIdentity(
     parentChain: measured.parentChain,
     argv: measured.argv,
   };
+}
+
+export function browserMismatchProjection(
+  argvIdentity: RasterFileIdentity,
+  osExecutablePath: string,
+  argc: number,
+) {
+  try {
+    const osIdentity = physicalFileIdentity(fs.realpathSync(osExecutablePath));
+    return {
+      schema: "katana-browser-mismatch-projection-v1",
+      pidAndAncestryVerified: true,
+      observationBeforeEndEqual: true,
+      argc,
+      osIdentityAvailable: true,
+      realpathEqual: argvIdentity.canonical === osIdentity.canonical,
+      deviceInodeEqual: argvIdentity.dev === osIdentity.dev && argvIdentity.ino === osIdentity.ino,
+      sha256Equal: argvIdentity.sha256 === osIdentity.sha256,
+    };
+  } catch {
+    return {
+      schema: "katana-browser-mismatch-projection-v1",
+      pidAndAncestryVerified: true,
+      observationBeforeEndEqual: true,
+      argc,
+      osIdentityAvailable: false,
+      realpathEqual: null,
+      deviceInodeEqual: null,
+      sha256Equal: null,
+    };
+  }
 }
 
 export function parseOwnedBrowserMeasurement(

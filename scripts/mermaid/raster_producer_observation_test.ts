@@ -2,12 +2,17 @@ import { afterAll, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { parseOwnedBrowserMeasurement, uniqueOwnBrowserPid } from "./raster-browser-observation";
+import {
+  browserMismatchProjection,
+  parseOwnedBrowserMeasurement,
+  uniqueOwnBrowserPid,
+} from "./raster-browser-observation";
 import {
   type CaptureSnapshot,
   closeCaptureObservation,
   type LoadedSvgObservation,
 } from "./raster-capture-observation";
+import { physicalFileIdentity } from "./raster-comparison-binding";
 import type { JsonObject } from "./raster-json-input";
 import { rasterSha256 } from "./raster-production-binding";
 import {
@@ -150,6 +155,33 @@ function runOfficialSeedCli(
     ...extraArgs,
   ]);
 }
+test("browser mismatch projection exposes only fixed comparisons", () => {
+  const directory = fs.mkdtempSync(path.join(root, "browser-identity-"));
+  const first = path.join(directory, "first"),
+    second = path.join(directory, "second");
+  fs.writeFileSync(first, "same bytes");
+  fs.writeFileSync(second, "same bytes");
+  const projection = browserMismatchProjection(physicalFileIdentity(first), second, 3);
+  expect(projection).toEqual({
+    schema: "katana-browser-mismatch-projection-v1",
+    pidAndAncestryVerified: true,
+    observationBeforeEndEqual: true,
+    argc: 3,
+    osIdentityAvailable: true,
+    realpathEqual: false,
+    deviceInodeEqual: false,
+    sha256Equal: true,
+  });
+  expect(JSON.stringify(projection)).not.toContain(directory);
+  expect(
+    browserMismatchProjection(physicalFileIdentity(first), path.join(directory, "missing"), 3),
+  ).toMatchObject({
+    osIdentityAvailable: false,
+    realpathEqual: null,
+    deviceInodeEqual: null,
+    sha256Equal: null,
+  });
+});
 test("own-browser CDP selects only the unique browser PID", () => {
   expect(
     uniqueOwnBrowserPid({
