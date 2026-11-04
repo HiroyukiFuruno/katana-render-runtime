@@ -46,6 +46,16 @@ JsonMutation = Callable[[JsonObject], None]
 
 
 class CommittedRecordsCacheTest(unittest.TestCase):
+    def test_file_sha256_matches_empty_and_multiple_chunks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "payload"
+            for content in (b"", b"content" * 200000):
+                path.write_bytes(content)
+                self.assertEqual(gate.sha256(path), hashlib.sha256(content).hexdigest())
+            path.unlink()
+            with self.assertRaises(FileNotFoundError):
+                gate.sha256(path)
+
     def test_parsed_batches_are_lru_scoped_and_return_fresh_dicts(self) -> None:
         calls: list[tuple[str, str]] = []
         trees: dict[str, bytes] = {}
@@ -1184,10 +1194,97 @@ class PerformanceEvidenceTest(unittest.TestCase):
                   self.assertRaises(ValueError)):
                 gate._v3_program_source(self.root, fixed, [endpoint], git_query=None)
 
-    def test_v3_cache_only_change_preserves_each_checkout_identity(self) -> None:
+    def _program_checkout(self, root: Path, commit_label: str | None = None, *,
+                          mode_path: Path | None = None, executable: bool = False) -> JsonObject:
         gate._cargo_capacity_guard()
         from cargo_capacity_guard_native_cli_observation import source_digest
 
+        if commit_label is not None:
+            subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+            if mode_path is not None:
+                subprocess.run(["git", "-C", str(root), "update-index",
+                                "--chmod=+x" if executable else "--chmod=-x", str(mode_path)], check=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Unit", "-c",
+                            "user.email=unit@example.invalid", "commit", "-qm", commit_label], check=True)
+        head = gate.git(root, "rev-parse", "HEAD").strip()
+        records = gate.committed_records(root, head)
+        rows: list[JsonObject] = [{"path": str(root / path), "sha256": checksum, "size": size}
+                                  for path, (checksum, size) in sorted(records.items())]
+        return {"schema": "krr-html-performance-live-source-observation-v1", "root": str(root),
+                "head": head, "indexSha256": "a" * 64, "statusBase64": "",
+                "manifest": {"schema": "krr-native-build-source-manifest-v1", "files": rows,
+                             "digest": source_digest(rows)}}
+
+    def test_v3_program_cache_is_scoped_to_query_root_and_committed_identity(self) -> None:
+        script = self.root / "scripts/release/worker.py"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("worker\n")
+
+        fixed_checkout = self._program_checkout(self.root, "program", mode_path=script)
+        self.assertTrue(gate.git(self.root, "ls-tree", "HEAD", "--", str(script)).startswith("100644 blob "))
+        fixed: JsonObject = {"programSource": fixed_checkout}
+        endpoint: JsonObject = {"liveCheckout": fixed_checkout}
+        calls: list[tuple[str, ...]] = []
+
+        def query(root: Path, args: Sequence[str], input_bytes: bytes | None, text: bool) -> str | bytes:
+            calls.append(tuple(args))
+            output = subprocess.run(["git", "-C", str(root), *args], input=input_bytes,
+                                    capture_output=True, check=True).stdout
+            return output.decode() if text else output
+
+        first = gate._v3_program_source(self.root, fixed, [endpoint], git_query=query)
+        first_count = len(calls)
+        self.assertGreater(first_count, 0)
+        first.clear()
+        second = gate._v3_program_source(self.root, fixed, [endpoint], git_query=query)
+        self.assertTrue(second)
+        self.assertEqual(len(calls), first_count)
+
+        def second_query(root: Path, args: Sequence[str], input_bytes: bytes | None, text: bool) -> str | bytes:
+            return query(root, args, input_bytes, text)
+
+        gate._v3_program_source(self.root, fixed, [endpoint], git_query=second_query)
+        self.assertGreater(len(calls), first_count)
+        previous_count = len(calls)
+        clone = Path(self.temp.name).resolve() / "other"
+        subprocess.run(["git", "clone", "-q", str(self.root), str(clone)], check=True)
+        clone_checkout = self._program_checkout(clone)
+        gate._v3_program_source(clone, {"programSource": clone_checkout},
+                                [{"liveCheckout": clone_checkout}], git_query=query)
+        self.assertGreater(len(calls), previous_count)
+
+        symbolic_branch = gate.git(self.root, "symbolic-ref", "--short", "HEAD").strip()
+        self.assertTrue(symbolic_branch)
+
+        def reject_symbolic_heads() -> None:
+            for symbolic_head in ("HEAD", symbolic_branch):
+                symbolic = {**fixed_checkout, "head": symbolic_head}
+                before_count = len(calls)
+                with self.subTest(symbolic_head=symbolic_head, position="fixed"):
+                    with self.assertRaisesRegex(ValueError, "live checkout HEAD differs"):
+                        gate._v3_program_source(self.root, {"programSource": symbolic}, [endpoint], git_query=query)
+                with self.subTest(symbolic_head=symbolic_head, position="endpoint"):
+                    with self.assertRaisesRegex(ValueError, "live checkout HEAD differs"):
+                        gate._v3_program_source(self.root, fixed, [{"liveCheckout": symbolic}], git_query=query)
+                self.assertEqual(len(calls), before_count)
+
+        reject_symbolic_heads()
+        script.write_text("different worker\n")
+        changed_checkout = self._program_checkout(self.root, "different bytes")
+        reject_symbolic_heads()
+        with self.assertRaises(ValueError):
+            gate._v3_program_source(self.root, fixed, [{"liveCheckout": changed_checkout}], git_query=query)
+        script.write_text("worker\n")
+        changed_checkout = self._program_checkout(self.root, "different mode", mode_path=script, executable=True)
+        self.assertTrue(gate.git(self.root, "ls-tree", "HEAD", "--", str(script)).startswith("100755 blob "))
+        with self.assertRaises(ValueError):
+            gate._v3_program_source(self.root, fixed, [{"liveCheckout": changed_checkout}], git_query=query)
+        (script.parent / "unknown.py").write_text("unknown\n")
+        changed_checkout = self._program_checkout(self.root, "different membership", mode_path=script)
+        with self.assertRaises(ValueError):
+            gate._v3_program_source(self.root, fixed, [{"liveCheckout": changed_checkout}], git_query=query)
+
+    def test_v3_cache_only_change_preserves_each_checkout_identity(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         old = subprocess.run(
             ["git", "-C", str(repository), "show",
@@ -1210,27 +1307,10 @@ class PerformanceEvidenceTest(unittest.TestCase):
         script = self.root / "scripts/release/produce_html_performance_evidence.py"
         script.parent.mkdir(parents=True, exist_ok=True)
 
-        def commit(content: str, label: str) -> None:
-            script.write_text(content, encoding="utf8")
-            subprocess.run(["git", "-C", str(self.root), "add", str(script)], check=True)
-            subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Unit", "-c",
-                            "user.email=unit@example.invalid", "commit", "-qm", label], check=True)
-
-        commit(old, "old collector")
-
-        def checkout() -> JsonObject:
-            head = gate.git(self.root, "rev-parse", "HEAD").strip()
-            records = gate.committed_records(self.root, head)
-            rows = [{"path": str(self.root / name), "sha256": checksum, "size": size}
-                    for name, (checksum, size) in sorted(records.items())]
-            return {"schema": "krr-html-performance-live-source-observation-v1",
-                    "root": str(self.root), "head": head, "indexSha256": "a" * 64, "statusBase64": "",
-                    "manifest": {"schema": "krr-native-build-source-manifest-v1", "files": rows,
-                                 "digest": source_digest(cast(list[JsonObject], rows))}}
-
-        previous = checkout()
-        commit(current, "cache wiring")
-        live = checkout()
+        script.write_text(old, encoding="utf8")
+        previous = self._program_checkout(self.root, "old collector")
+        script.write_text(current, encoding="utf8")
+        live = self._program_checkout(self.root, "cache wiring")
         old_records = gate._v3_live_programs(self.root, previous)
         live_records = gate._v3_live_programs(self.root, live)
         name = "scripts/release/produce_html_performance_evidence.py"
@@ -1239,11 +1319,49 @@ class PerformanceEvidenceTest(unittest.TestCase):
                          [{"liveCheckout": live}], git_query=None), old_records)
         self.assertEqual(gate._v3_live_programs(self.root, live)[name], live_records[name])
 
-        commit(current.replace("batch_deadline = _batch_deadline(",
-                               "batch_deadline = changed_deadline(", 1), "changed policy")
+        script.write_text(current.replace("batch_deadline = _batch_deadline(",
+                                          "batch_deadline = changed_deadline(", 1), encoding="utf8")
+        changed = self._program_checkout(self.root, "changed policy")
         with self.assertRaises(ValueError):
             gate._v3_program_source(self.root, {"programSource": previous},
-                                    [{"liveCheckout": checkout()}], git_query=None)
+                                    [{"liveCheckout": changed}], git_query=None)
+
+    def test_v3_program_history_accepts_reviewed_old_and_current_endpoints(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        old_head = "b9cf37535ba374b62fee4e889f9c58f58f1ab8dc"
+        historical_head = "5de8ddd363d28444e63b998b46c33324495f53bf"
+        names = ("html_performance_source_reuse.py", "html_performance_epoch_reuse.py",
+                 "html_performance_host_load_validation.py", "html_performance_host_load_validation_test.py",
+                 "produce_html_performance_evidence.py", "produce_html_performance_evidence_test.py",
+                 "verify_html_performance_evidence.py", "verify_html_performance_evidence_test.py")
+        paths = ["scripts/release/" + name for name in names]
+        def write_revision(revision: str | None) -> None:
+            for name in paths:
+                source = (repository / name).read_bytes() if revision is None else subprocess.run(
+                    ["git", "-C", str(repository), "show", revision + ":" + name],
+                    check=True, capture_output=True).stdout
+                destination = self.root / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(source)
+
+        write_revision(old_head)
+        fixed = self._program_checkout(self.root, "fixed epoch")
+        write_revision(historical_head)
+        historical = self._program_checkout(self.root, "historical endpoint")
+        write_revision(None)
+        current = self._program_checkout(self.root, "current endpoint")
+        expected = gate._v3_live_programs(self.root, fixed)
+        result = gate._v3_program_source(self.root, {"programSource": fixed},
+                                         [{"liveCheckout": historical}, {"liveCheckout": current}],
+                                         git_query=None)
+        self.assertEqual(result, expected)
+        verifier = self.root / "scripts/release/verify_html_performance_evidence.py"
+        verifier.write_bytes(verifier.read_bytes() + b"\n# unknown byte\n")
+        altered = self._program_checkout(self.root, "unreviewed endpoint")
+        with self.assertRaisesRegex(ValueError, "live measurement program differs"):
+            gate._v3_program_source(self.root, {"programSource": fixed},
+                                    [{"liveCheckout": historical}, {"liveCheckout": altered}],
+                                    git_query=None)
 
     def test_reviewed_program_changes_reject_unknown_source_bytes(self) -> None:
         from html_performance_source_reuse import known_auth_program_change
@@ -1264,6 +1382,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
             current = (repository / path).read_bytes()
             with self.subTest(path=path):
                 self.assertTrue(known_auth_program_change(path, old, current))
+                self.assertFalse(known_auth_program_change(path, old, current + b" "))
                 self.assertFalse(known_auth_program_change(path, old, current + b"\npolicy_change()\n"))
                 self.assertFalse(known_auth_program_change("scripts/release/unknown.py", old, current))
                 if path.endswith("html_performance_source_reuse.py"):

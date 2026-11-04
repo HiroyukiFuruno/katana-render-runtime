@@ -314,7 +314,8 @@ def require(ok: bool, message: str) -> None:
 
 
 def sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def digest(value: object) -> None:
@@ -1930,16 +1931,20 @@ def _v3_live_programs(root: Path, checkout: JsonObject) -> SourceRecords:
     return live
 
 
-def _v3_program_source(root: Path, fixed: JsonObject, endpoints: Sequence[JsonObject], *,
-                       git_query: GitQuery | None) -> SourceRecords:
+_ProgramItems = tuple[tuple[str, str, int], ...]
+_ProgramEndpoints = tuple[tuple[str, _ProgramItems], ...]
+_ProgramCache = Callable[[str, str, _ProgramItems, _ProgramEndpoints], _ProgramItems]
+_PROGRAM_CACHES: weakref.WeakKeyDictionary[types.FunctionType, _ProgramCache] = weakref.WeakKeyDictionary()
+
+
+def _v3_authenticate_programs(root: Path, head: str, items: _ProgramItems,
+                              endpoints: _ProgramEndpoints, *, git_query: GitQuery | None) -> _ProgramItems:
     from html_performance_source_reuse import (
         RELEASE_ONLY_PROGRAMS, _modes, cache_only_collector_change, equivalent_program_records,
         known_auth_program_change,
     )
 
-    program_source = _object(fixed.get("programSource"), "fixed epoch program source")
-    programs = _v3_live_programs(root, program_source)
-    head = _text(program_source.get("head"), "program source HEAD")
+    programs = {name: (checksum, size) for name, checksum, size in items}
     committed = committed_records(root, head, git_query=git_query)
     selected = {path: value for path, value in committed.items()
                 if path.startswith("scripts/") or path == "Justfile"}
@@ -1948,10 +1953,8 @@ def _v3_program_source(root: Path, fixed: JsonObject, endpoints: Sequence[JsonOb
     if not isinstance(tree, bytes):
         raise ValueError("fixed epoch program tree differs")
     modes = _modes(tree)
-    for endpoint in endpoints:
-        checkout = _object(endpoint.get("liveCheckout"), "live checkout")
-        live_programs = _v3_live_programs(root, checkout)
-        live_head = _text(checkout.get("head"), "live program HEAD")
+    for live_head, live_items in endpoints:
+        live_programs = {name: (checksum, size) for name, checksum, size in live_items}
         live_committed = committed_records(root, live_head, git_query=git_query)
         live_selected = {path: value for path, value in live_committed.items()
                          if path.startswith("scripts/") or path == "Justfile"}
@@ -1977,7 +1980,49 @@ def _v3_program_source(root: Path, fixed: JsonObject, endpoints: Sequence[JsonOb
         live_modes = _modes(live_tree)
         require(all(modes.get(path) == live_modes.get(path) for path in programs),
                 "live measurement program mode differs")
-    return programs
+    return tuple((name, checksum, size) for name, (checksum, size) in sorted(programs.items()))
+
+
+def _v3_program_cache(query: types.FunctionType) -> _ProgramCache:
+    cached = _PROGRAM_CACHES.get(query)
+    if cached is not None:
+        return cached
+    query_ref = weakref.ref(query)
+
+    @lru_cache(maxsize=4)
+    def authenticate(root_path: str, head: str, items: _ProgramItems,
+                     endpoints: _ProgramEndpoints) -> _ProgramItems:
+        callback = query_ref()
+        if callback is None:
+            raise ValueError("Git query transaction is unavailable")
+        return _v3_authenticate_programs(Path(root_path), head, items, endpoints, git_query=callback)
+
+    _PROGRAM_CACHES[query] = authenticate
+    return authenticate
+
+
+def _v3_program_source(root: Path, fixed: JsonObject, endpoints: Sequence[JsonObject], *,
+                       git_query: GitQuery | None) -> SourceRecords:
+    program_source = _object(fixed.get("programSource"), "fixed epoch program source")
+    programs = _v3_live_programs(root, program_source)
+    head = _text(program_source.get("head"), "program source HEAD")
+    items = tuple((name, checksum, size) for name, (checksum, size) in sorted(programs.items()))
+    live_items: list[tuple[str, _ProgramItems]] = []
+    for endpoint in endpoints:
+        checkout = _object(endpoint.get("liveCheckout"), "live checkout")
+        live = _v3_live_programs(root, checkout)
+        live_head = _text(checkout.get("head"), "live program HEAD")
+        live_items.append((live_head, tuple((name, checksum, size)
+                                           for name, (checksum, size) in sorted(live.items()))))
+    endpoint_items = tuple(live_items)
+    if (isinstance(git_query, types.FunctionType) and root.is_absolute() and root.resolve() == root
+            and re.fullmatch(r"[0-9a-f]{40}", head) is not None
+            and all(re.fullmatch(r"[0-9a-f]{40}", live_head) is not None
+                    for live_head, _ in endpoint_items)):
+        checked = _v3_program_cache(git_query)(str(root), head, items, endpoint_items)
+    else:
+        checked = _v3_authenticate_programs(root, head, items, endpoint_items, git_query=git_query)
+    return {name: (checksum, size) for name, checksum, size in checked}
 
 
 def _host_load_source_records(bundle: Bundle, root: Path, expected: JsonObject,

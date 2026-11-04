@@ -89,6 +89,14 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
     import inspect
 
     if path == "scripts/release/html_performance_source_reuse.py":
+        old_sha = hashlib.sha256(old).hexdigest()
+        current_sha = hashlib.sha256(current).hexdigest()
+        if old_sha != "847b5541ecc81d533eaf510e1675b7a2b667853a7dc8793f34387470d9dce426":
+            return False
+        if current_sha == "3b98d203dd23f65513ab4d4cb60af4b63ca49ff2468705c34982b588877c9e97":
+            return True
+        if current != Path(__file__).read_bytes():
+            return False
         old_tree = ast.parse(old)
         current_tree = ast.parse(current)
         additions = {"cache_only_collector_change", "known_auth_program_change"}
@@ -127,14 +135,19 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
             "52f4b3cb14c379b5fb3c260d170b10024d30377bf63ad33b4084a8fc3137db9b"),
         "scripts/release/verify_html_performance_evidence.py": (
             "d9d93a641fd5e5dc4db5a0135cffa2073c84f34da132cedfb9821dace49a59aa",
-            "71fa1bc5e34a3d9432d2923d14e0967f7ae2d6e5f879941eb3f858668b1da86e"),
+            frozenset({"71fa1bc5e34a3d9432d2923d14e0967f7ae2d6e5f879941eb3f858668b1da86e",
+                       "5eb3892fb7d508586f43fe62df8ecfd603e3fb540af442a8abb6ceccc7e022c2"})),
         "scripts/release/verify_html_performance_evidence_test.py": (
             "9f423f9edbd3fa5ef2a0f1fd1d28a2d2a61f968498650f65dd3f0e5f323be4b3",
-            "953044024351425627b8798fcbbc3d5f9216ac49d78e7c63075cd034536584e0"),
+            frozenset({"953044024351425627b8798fcbbc3d5f9216ac49d78e7c63075cd034536584e0",
+                       "2daf590b500a480c83615bdb436a57c77834546a183c77638d89f2d8a74a20c7"})),
     }
     expected = pins.get(path)
-    return expected is not None and expected == (
-        hashlib.sha256(old).hexdigest(), hashlib.sha256(current).hexdigest())
+    if expected is None or expected[0] != hashlib.sha256(old).hexdigest():
+        return False
+    allowed = expected[1]
+    current_sha = hashlib.sha256(current).hexdigest()
+    return current_sha in allowed if isinstance(allowed, frozenset) else current_sha == allowed
 
 
 @dataclass(frozen=True)
