@@ -61,6 +61,7 @@ const REPOSITORY_GRAPH_TEST_TIMEOUT_MS = 15_000;
 
 const fixtures: string[] = [];
 let fixtureTemplate: string | undefined;
+let fixtureVerifiedAssets = 0;
 const duplication = JSON.parse(
   fs.readFileSync(path.join(import.meta.dir, "duplication-policy.json"), "utf8"),
 );
@@ -191,7 +192,9 @@ afterEach(cleanupFixtures);
 beforeAll(() => {
   try {
     fixtureTemplate = buildFixture();
-    expect(inspectOwnedValidationContract(fixtureTemplate).issues).toEqual([]);
+    const report = inspectOwnedValidationContract(fixtureTemplate);
+    expect(report.issues).toEqual([]);
+    fixtureVerifiedAssets = report.verifiedAssets;
     const templateIndex = fixtures.indexOf(fixtureTemplate);
     if (templateIndex < 0) throw new Error("fixture template was not registered");
     fixtures.splice(templateIndex, 1);
@@ -1979,7 +1982,7 @@ test.each([
   ],
   [
     "misplaced",
-    patchedMermaidNeighbors.replace(` ${patchedMermaidUnit}`, "") + ` ${patchedMermaidUnit}`,
+    `${patchedMermaidNeighbors.replace(` ${patchedMermaidUnit}`, "")} ${patchedMermaidUnit}`,
   ],
 ] as const)("patched Mermaid unit registration rejects %s", (_name, replacement) => {
   const root = parserFixture();
@@ -2456,33 +2459,43 @@ test.each([
     }),
   );
 });
-test("generated Rust fingerprint binds same-path resource bytes and added or removed paths", () => {
+const shapeResource =
+  "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/resources/shapes/basic.xml";
+const addedShapeResource =
+  "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/resources/shapes/added.xml";
+
+function changeShapeResource(root: string): void {
+  write(root, shapeResource, "changed resource bytes");
+  track(root);
+}
+
+test("generated Rust fingerprint binds same-path resource bytes", () => {
   const root = fixture();
   const before = inspectOwnedValidationContract(root);
-  const shape =
-    "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/resources/shapes/basic.xml";
-  write(root, shape, "changed resource bytes");
-  track(root);
+  changeShapeResource(root);
   const changed = inspectOwnedValidationContract(root);
   expect(changed.generatedRustAssets.inputCount).toBe(before.generatedRustAssets.inputCount);
   expect(changed.generatedRustAssets.inputDigest).not.toBe(before.generatedRustAssets.inputDigest);
   expect(changed.sourceDigest).not.toBe(before.sourceDigest);
+});
 
-  const added =
-    "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/resources/shapes/added.xml";
-  write(root, added, "additional same-group resource");
+test("generated Rust fingerprint binds added paths and restores after removal", () => {
+  const root = fixture();
+  changeShapeResource(root);
+  const changed = inspectOwnedValidationContract(root);
+  write(root, addedShapeResource, "additional same-group resource");
   track(root);
   const withAdded = inspectOwnedValidationContract(root);
-  expect(withAdded.generatedRustAssets.inputCount).toBe(before.generatedRustAssets.inputCount + 1);
+  expect(withAdded.generatedRustAssets.inputCount).toBe(changed.generatedRustAssets.inputCount + 1);
   expect(withAdded.generatedRustAssets.inputDigest).not.toBe(
     changed.generatedRustAssets.inputDigest,
   );
-  expect(withAdded.generatedRustAssets.paths).toEqual(before.generatedRustAssets.paths);
+  expect(withAdded.generatedRustAssets.paths).toEqual(changed.generatedRustAssets.paths);
 
-  fs.rmSync(path.join(root, added));
+  fs.rmSync(path.join(root, addedShapeResource));
   track(root);
   const withRemoved = inspectOwnedValidationContract(root);
-  expect(withRemoved.generatedRustAssets.inputCount).toBe(before.generatedRustAssets.inputCount);
+  expect(withRemoved.generatedRustAssets.inputCount).toBe(changed.generatedRustAssets.inputCount);
   expect(withRemoved.generatedRustAssets.inputDigest).toBe(changed.generatedRustAssets.inputDigest);
 });
 test("generated Rust resource symlinks fail closed during source fingerprinting", () => {
@@ -3296,20 +3309,30 @@ test("a separate Rust workspace remains an explicit missing registration", () =>
   track(root);
   expect(codes(root)).toContain("rust-workspace-scope-missing:scripts/performance/src/main.rs");
 });
-test("generated/vendor directory labels alone cannot exclude owned code", () => {
-  const root = fixture();
-  const verifiedAssetBaseline = inspectOwnedValidationContract(root).verifiedAssets;
-  const name = "scripts/generated/owned.ts";
-  const value = "export const generated = 1;\n";
-  write(root, name, value);
-  track(root);
-  expect(codes(root)).toContain(`unbound-excluded-source:${name}`);
-  write(root, `${name}.sha256`, `${createHash("sha256").update(value).digest("hex")}  owned.ts\n`);
-  track(root);
-  expect(inspectOwnedValidationContract(root).verifiedAssets).toBe(verifiedAssetBaseline + 1);
-  write(root, name, "export const changed = 2;\n");
-  expect(() => inspectOwnedValidationContract(root)).toThrow("asset checksum mismatch");
-});
+test.each(["unbound", "valid", "tampered"] as const)(
+  "generated/vendor owned code is %s",
+  (state) => {
+    const root = fixture();
+    const name = "scripts/generated/owned.ts";
+    const value = "export const generated = 1;\n";
+    write(root, name, value);
+    if (state !== "unbound") {
+      write(
+        root,
+        `${name}.sha256`,
+        `${createHash("sha256").update(value).digest("hex")}  owned.ts\n`,
+      );
+    }
+    track(root);
+    if (state === "unbound") expect(codes(root)).toContain(`unbound-excluded-source:${name}`);
+    else if (state === "valid")
+      expect(inspectOwnedValidationContract(root).verifiedAssets).toBe(fixtureVerifiedAssets + 1);
+    else {
+      write(root, name, "export const changed = 2;\n");
+      expect(() => inspectOwnedValidationContract(root)).toThrow("asset checksum mismatch");
+    }
+  },
+);
 test("independent local and CI registration sets cannot substitute for each other", () => {
   const root = fixture();
   write(
@@ -3330,23 +3353,26 @@ test("Python imports are parsed without executing code and uncertain binding fai
   );
   expect(codes(root)).toContain("python-unit-classification-unknown:scripts/tool_test.py");
 });
-test("nonstandard Bun unit filename needs explicit selection and nested Python needs discovery package", () => {
-  const root = fixture();
-  write(root, "scripts/custom.ts", sources["scripts/tool_test.ts"]);
-  write(root, "scripts/nested/tool_test.py", sources["scripts/tool_test.py"]);
-  track(root);
-  const missingBeforeRegistration = codes(root);
-  expect(missingBeforeRegistration).toContain("unit-local-missing:scripts/custom.ts");
-  expect(missingBeforeRegistration).toContain("unit-ci-missing:scripts/nested/tool_test.py");
-  recipes(root, { unit: `${recipeBodies.unit}\nbun test ./scripts/custom.ts` });
-  write(root, "scripts/nested/__init__.py", "");
-  track(root);
-  const missingAfterRegistration = codes(root);
-  expect(missingAfterRegistration).not.toContain("unit-local-missing:scripts/custom.ts");
-  expect(missingAfterRegistration).not.toContain("unit-ci-missing:scripts/nested/tool_test.py");
-  recipes(root, { unit: `${recipeBodies.unit}\nbun test ${path.join(root, "scripts/custom.ts")}` });
-  expect(codes(root)).not.toContain("unit-local-missing:scripts/custom.ts");
-});
+test.each(["relative", "absolute"] as const)(
+  "nonstandard Bun %s selection and nested Python package",
+  (kind) => {
+    const root = fixture();
+    write(root, "scripts/custom.ts", sources["scripts/tool_test.ts"]);
+    write(root, "scripts/nested/tool_test.py", sources["scripts/tool_test.py"]);
+    track(root);
+    const missingBeforeRegistration = codes(root);
+    expect(missingBeforeRegistration).toContain("unit-local-missing:scripts/custom.ts");
+    expect(missingBeforeRegistration).toContain("unit-ci-missing:scripts/nested/tool_test.py");
+    const selected =
+      kind === "relative" ? "./scripts/custom.ts" : path.join(root, "scripts/custom.ts");
+    recipes(root, { unit: `${recipeBodies.unit}\nbun test ${selected}` });
+    write(root, "scripts/nested/__init__.py", "");
+    track(root);
+    const missingAfterRegistration = codes(root);
+    expect(missingAfterRegistration).not.toContain("unit-local-missing:scripts/custom.ts");
+    expect(missingAfterRegistration).not.toContain("unit-ci-missing:scripts/nested/tool_test.py");
+  },
+);
 
 test("stale static includes are diagnosed even when other patterns cover current files", () => {
   const root = fixture();

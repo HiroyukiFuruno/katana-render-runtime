@@ -39,6 +39,17 @@ function covered(file: string, includes: string[], excludes: string[] = []): boo
 }
 
 function staticScopeErrors(name: string, snapshot: HarnessSnapshot): string[] {
+  const registeredErrors = registeredLanguageErrors(name, snapshot);
+  if (registeredErrors !== undefined) return registeredErrors;
+  if (!/\.[cm]?[jt]sx?$/.test(name))
+    return [`required static checks unavailable for code language: ${name}`];
+  const errors: string[] = [];
+  if (!covered(name, snapshot.biomeIncludes)) errors.push(`lint scope missing: ${name}`);
+  errors.push(...typedScopeErrors(name, snapshot));
+  return errors;
+}
+
+function registeredLanguageErrors(name: string, snapshot: HarnessSnapshot): string[] | undefined {
   if (name.endsWith(".sh"))
     return shellRegistered(name, snapshot)
       ? []
@@ -51,19 +62,19 @@ function staticScopeErrors(name: string, snapshot: HarnessSnapshot): string[] {
     return rustRegistered(name, snapshot)
       ? []
       : [`Rust workspace/Clippy registration unavailable: ${name}`];
-  if (!/\.[cm]?[jt]sx?$/.test(name))
-    return [`required static checks unavailable for code language: ${name}`];
-  const errors: string[] = [];
-  if (!covered(name, snapshot.biomeIncludes)) errors.push(`lint scope missing: ${name}`);
-  if (/\.[cm]?jsx?$/.test(name)) {
-    try {
-      if (snapshot.javaScriptTyped?.(name) !== true) errors.push(`type scope missing: ${name}`);
-    } catch (error) {
-      errors.push(`TypeScript project authority unavailable: ${name}: ${String(error)}`);
-    }
-  } else if (!covered(name, snapshot.typeIncludes, snapshot.typeExcludes))
-    errors.push(`type scope missing: ${name}`);
-  return errors;
+  return undefined;
+}
+
+function typedScopeErrors(name: string, snapshot: HarnessSnapshot): string[] {
+  if (!/\.[cm]?jsx?$/.test(name))
+    return covered(name, snapshot.typeIncludes, snapshot.typeExcludes)
+      ? []
+      : [`type scope missing: ${name}`];
+  try {
+    return snapshot.javaScriptTyped?.(name) === true ? [] : [`type scope missing: ${name}`];
+  } catch (error) {
+    return [`TypeScript project authority unavailable: ${name}: ${String(error)}`];
+  }
 }
 
 function recipeRegistered(name: string, snapshot: HarnessSnapshot): boolean {

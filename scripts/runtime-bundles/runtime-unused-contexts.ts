@@ -356,7 +356,7 @@ export const officialStrictConsumerRoute = [
   },
   {
     sourcePath: "scripts/mermaid/official-renderer-asset-inputs.ts",
-    sourceSha256: "8e6976c739355714bad12a6dccefb065a67c6c80f905cf3d6f7fdb1f334bb146",
+    sourceSha256: "ec55f7a3de65b06a8c1bbd3e4ec80b2e97c7ae39f7d41db2bfbdca9c961ef90d",
   },
   {
     sourcePath: "scripts/mermaid/diagram-update.ts",
@@ -833,7 +833,7 @@ const nativeWidthV8CompilerCall = "ScriptCompiler::compile_with_origin(scope, so
 const nativeWidthLegacyRoute = {
   [nativeWidthHelper]: "6abdd41feed03bb662fd2505dcb263d777b29f8114c967b1e44913f6060bda61",
   [`${nativeWidthBase}js_runtime.rs`]:
-    "184b6738bd8d38d9e8e02f64cc42aa561bc4349282caa341bc171431a234c265",
+    "6beaa9a5f1b2d52c87d4e34ab55e78ee2a00b57c8a992da3082ab5459300b28a",
   [`${nativeWidthBase}js_runtime_native_width_tests.rs`]:
     "5b58a94792571378a1d04a0e1d3ba42279b6b2c7b103c3a41a1861e285a6b1fb",
   [`${nativeWidthBase}js_runtime_native_width_c4_description_tests.rs`]:

@@ -1087,6 +1087,63 @@ describe("fixed native artifact and Python collector bindings", () => {
     if (name === "Justfile") return classicJustfile;
     return undefined;
   };
+  const factsPositionCases = [
+    [
+      "Classic",
+      classicFactsSource,
+      classicFactsReferences,
+      "validateOutput(value, before)",
+      [
+        "validateOutput(...value, before)",
+        "validateOutput(other, before)",
+        "validateOutput(before, value)",
+      ],
+    ],
+    [
+      "MathJax",
+      mathjaxFactsSource,
+      mathjaxFactsReferences,
+      "[...MATHJAX_RUST_INPUT_PATHS].sort()",
+      [
+        "[MATHJAX_RUST_INPUT_PATHS].sort()",
+        "[...MATHJAX_RUST_FACT_IDS].sort()",
+        "[...MATHJAX_RUST_INPUT_PATHS, other].sort()",
+      ],
+    ],
+    [
+      "NativeWidth",
+      nativeWidthFactsSource,
+      (source: string) =>
+        sourceCode(source, { name: nativeWidthFactsCaller, read: nativeWidthFactsRead }),
+      "new Map([...classicBefore, ...hashBefore])",
+      [
+        "new Map([classicBefore, ...hashBefore])",
+        "new Map([...other, ...hashBefore])",
+        "new Map([...hashBefore, ...classicBefore])",
+      ],
+    ],
+  ] as const;
+
+  test.each(factsPositionCases)(
+    "%s facts caller ignores leading source position",
+    (_name, source, inspect) => {
+      expect(inspect(source)).not.toContain("!unresolved-executable");
+      expect(inspect(`\n/* position only */\n${source}`)).not.toContain("!unresolved-executable");
+    },
+  );
+
+  test.each(factsPositionCases)(
+    "%s facts caller rejects semantic changes",
+    (_name, source, inspect, before, changes) => {
+      expect(inspect(source)).not.toContain("!unresolved-executable");
+      expect(source).toContain(before);
+      for (const after of changes) {
+        const changed = source.replace(before, after);
+        expect(changed).not.toBe(source);
+        expect(inspect(changed)).toContain("!unresolved-executable");
+      }
+    },
+  );
 
   test("recognizes only the reviewed NativeWidth facts caller process route", () => {
     expect(

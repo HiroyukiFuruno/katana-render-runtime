@@ -992,6 +992,12 @@ describe("native width fixture", () => {
   const nativeBBoxTrace = `${nativeBase}js_runtime_native_width_bbox_trace.js`;
   const nativeScripts = `${nativeBase}js_runtime_scripts.rs`;
   const nativeScriptTests = `${nativeBase}js_runtime_scripts_tests.rs`;
+  const nativeRawIdentityRoute = new Set([
+    "crates/katana-render-runtime/src/markdown/runtime_resource_loader.rs",
+    "crates/katana-render-runtime/src/renderer/backends/mermaid.rs",
+    "crates/katana-render-runtime/src/markdown/mermaid_renderer/render_instance.rs",
+    "crates/katana-render-runtime/src/resource_bytes.rs",
+  ]);
   const nativeRoute = [
     nativeHelper,
     `${nativeBase}js_runtime.rs`,
@@ -1379,7 +1385,7 @@ describe("native width fixture", () => {
   test.each(nativeRoute.filter((name) => name !== nativeScripts))(
     "native width rejects changed consumer/trace %s",
     (name) => {
-      const { nativeRoot } = nativeWidthSources();
+      const { nativeRoot, nativeRaw } = nativeWidthSources();
       const target = path.join(nativeRoot, name);
       const before = fs.readFileSync(target);
       try {
@@ -1387,9 +1393,14 @@ describe("native width fixture", () => {
         const changed =
           nativeRouteMutations.get(name)?.(original) ?? `${original}\n// changed consumer\n`;
         fs.writeFileSync(target, changed);
-        expect(() => nativeWidthUnusedContext(nativeRoot, new Map())).toThrow(
-          "changed native width consumer",
-        );
+        if (nativeRawIdentityRoute.has(name))
+          expect(() => nativeWidthUnusedContext(nativeRoot, new Map(nativeRaw))).toThrow(
+            "changed native width input",
+          );
+        else
+          expect(() => nativeWidthUnusedContext(nativeRoot, new Map())).toThrow(
+            "changed native width consumer",
+          );
       } finally {
         fs.writeFileSync(target, before);
       }
@@ -2258,7 +2269,7 @@ test("official strict resolver preserves direct and Justfile defaults and explic
   expect(direct).toEqual({
     mermaidJs: path.join(
       cwd,
-      "crates/katana-render-runtime/vendor/mermaid/12.2.0-krr.pr6823.1/mermaid.min.js",
+      "crates/katana-render-runtime/vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js",
     ),
     mermaidZenumlJs: path.join(
       cwd,

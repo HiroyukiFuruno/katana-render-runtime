@@ -2017,11 +2017,11 @@ const NATIVE_WIDTH_CONSUMER_AST = {
   readNativeWidthPhysicalInputs: "40e1e85daf01047b426729d6ac8806afb14f617f5789929c756eee9f7de9306e",
   requireSourceSubset: "abe613fc9fba49248ca4e10032fa6ad3087ce85e9bf661c44795cb7ef3b93ccf",
   assertStablePhysicalInputs: "c2610c33fdfc7380a65aeb44cfadf19af1c193fd86cc5b6bef76919e690498a5",
-  validateNativeWidthHashFacts: "3f58b9222722e6e65daa3cac6307e57fd442e23e84008fca8f03797b0569c42d",
+  validateNativeWidthHashFacts: "fc55ae82042fc306cecb5b8e0499313415b97919645ea54422637b37123f7ddc",
   parseNativeWidthHashFactsOutput:
     "93fb8ae9308e22324620741fb915b5e8e81be83e075c85cae457147959a2d16a",
   inspectNativeWidthConsumerFacts:
-    "4d9bd0bf0501ccd998ca3126f91a6f12cce2595d642b769154bb8d313a48d6df",
+    "0d86e57bc151ae8f9e4da0f2623a5093505724ee2e1010c6fda46fb4f8d4ee74",
 } as const;
 
 function nativeWidthConsumerFactsVerified(
@@ -2423,7 +2423,7 @@ const CLASSIC_FACTS_CALLER = "scripts/runtime-bundles/runtime-unused-rust-classi
 const CLASSIC_FACTS_AST = {
   manifestSchema: "4f3bc09febd0fa4ab07cc9d44be39c800247f103ba466ba29b1c606addcbab19",
   rangeSchema: "1669679b1b5636b2cb4afab69338d466a48184e6562763c207d76768160e4c4b",
-  RUST_CLASSIC_INPUT_PATHS: "2dcb0b5a3637d13a17a99114d822bfa2341d3872abda04a6c63e91ac3d146dc7",
+  RUST_CLASSIC_INPUT_PATHS: "e1ff2062016a527a4c043cccb4a4400e6652fab81f88e5a3529dd896b215c1d0",
   factPaths: "9159a6ee11e1cb39f40082b3428a97b07a2f34b2678e8dd377a68571eb58c348",
   scriptEntry: "60b243937e96cddd057ad490114fb07bab5823963c86310fc11641821d5199f6",
   relativeIdentity: "51533ef50bf54562579d7cec2781eb1c865e62198d14dbed835675d9af901974",
@@ -2451,7 +2451,8 @@ function factsDeclarationsVerified(
           node.declarations.length === 1 &&
           object(object(node.declarations[0])?.id)?.value === name,
     );
-    if (nodes.length !== 1 || canonicalNativeUnitAstDigest(nodes[0]) !== expected) return false;
+    if (nodes.length !== 1 || canonicalNativeUnitAstDigest(nodes[0], [], true) !== expected)
+      return false;
   }
   return true;
 }
@@ -2611,16 +2612,16 @@ const MATHJAX_FACTS_AST = {
   MATHJAX_RUST_FACTS_SCHEMA: "a603a05d5530071950bdd17700f8f9571c59ec09022c0c504cf7911a8e477a10",
   MATHJAX_RUST_FACT_IDS: "df56d3699a8db1732c9f1e8c741bc5a521cc865880e37d90b7f55500ee45665c",
   MATHJAX_RUST_FACT_PATHS: "a3c4ce80f8b89bb031fa984a32313c29cbe7381332fa2fe28f0f226e5a8370db",
-  MATHJAX_RUST_INPUT_PATHS: "012e7a6ffe8646584099107cf701fc9dfddfda4a9e442a74a16999b163504cc2",
+  MATHJAX_RUST_INPUT_PATHS: "2073234d2df9dc0850ef311aff4a6065f9fab0830da28d8c3f33013dc439c0f3",
   rustFactRangeSchema: "1fab1e7e72ee9daba05111c8f8e2d7e65d7f618703261af7816fa65f8f595192",
   mathJaxRustFactsSchema: "72aea7ad0090d9dba0a6c96eb84b69d3b31a0a768a114dc4e6d0f39e34ee5127",
-  validateMathJaxRustFacts: "d4312bf6f5c42a5dc697caa193f5aaa35d4c1fc2fb90baf4182e9f5081cc23ee",
+  validateMathJaxRustFacts: "5a4908836b4b7cc3137e3aacfa5fd79a52ca4fe20c281b60d6b6670096eabfb7",
   validateMathJaxRustFactRange: "68d6a7e42d70fdb78d7f703eaa0796217b6a41f2e8258c0f379f1ab0436eb1ce",
   parseMathJaxRustFactsOutput: "eb1c1d482ad062557db51596807cc13c1802818987c1e6b526c07a72a3c4bfec",
   inspectMathJaxRustFacts: "74e0bda24cf1301b2095e8278c1851180b2edd7aee709f61d4d2bfced16d339e",
   safeRelative: "a13a33316a5eac5fd7a1fabe62d02911f117688e460a65a6fe6469762f3d5e03",
   readSource: "e90b6e2f1699171640220d66e1237ed827a1dd443a200ad90e58ebc63673f3a3",
-  readMathJaxOwnedAuditEvidence: "8bc6692319868129cef25b2fd04eaea2891e03e01cfce6e67f23de5ebd5ba8a3",
+  readMathJaxOwnedAuditEvidence: "029960f4ab929dd954368b63f5a73078fec954c1a16dd5cd1eb038cbdddde95f",
 } as const;
 
 function factsPathBindingVerified(module: Record<string, unknown>): boolean {
@@ -3657,7 +3658,7 @@ function bindExternalCall(
 // 実 source の独立レビュー後にだけ固定し、未知の process 辺へ一般化しない。
 const HOST_EVIDENCE_SOURCE_AST_SHA256: Record<string, string> = {
   "scripts/runtime-bundles/runtime-unused-native-width-hash.ts":
-    "0e5850eca32f88bbf854a3056e903819e27199e8a1afde65fc451579a118ae5f",
+    "87c8d1d68c8b1237f6b0c359a62565df6e6f03bc5c997fef1f684dba776b941f",
   "scripts/runtime-bundles/runtime-rust-facts-host.ts":
     "2061efe1c89dbba078fba37fbebfd8cb90bfb562b9b312933b02c0e16343f21a",
   "scripts/runtime-bundles/runtime-rust-facts-host-inputs.ts":
@@ -3678,10 +3679,7 @@ export function hostEvidenceSourceVerified(name: string, source: string): boolea
   if (!expected || swcVersion !== REVIEWED_SWC_VERSION) return false;
   try {
     const ast = parseSync(source, { syntax: "typescript", tsx: false });
-    const normalized = JSON.stringify(ast, (key: string, value: unknown) =>
-      ["span", "ctxt", "bodyCtxt", "raw"].includes(key) ? undefined : value,
-    );
-    return createHash("sha256").update(normalized).digest("hex") === expected;
+    return canonicalNativeUnitAstDigest(ast, [], name === NATIVE_WIDTH_HASH_CALLER) === expected;
   } catch {
     return false;
   }

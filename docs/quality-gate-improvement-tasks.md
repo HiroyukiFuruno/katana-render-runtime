@@ -4,6 +4,10 @@
 
 ### 現在の判定と実行中の作業
 
+- [x] R7760の現検証ソースでsource-static全17項目が実0。classic入力8→13、MathJax入力16→20を実Rust producerへ一致させ、厳格な集合/SHA/前後照合を維持。R7749のclassic実producer回帰6/6、R7762のunused-check314件、既存MathJax証跡producerを同条件で更新したR7763後のR7764 MathJax19/19が成功。R7762全体はMathJaxの旧準備証跡で実1だったため、成功した314件と、未実行だった後段19件を別の実結果として記録し、全体成功に書き換えない。完全ゲートはこれから実施する。
+- [x] facts宣言の照合にSWCのspread位置が混入する誤判定を、既存canonicalizerの位置正規化modeを接続して修正。spreadの有無・式・順序は維持し、sourceCode実経路のR7753 RED→R7755部分成功→R7756全6/6実0を回収。別serializerだったhost証跡照合も同じcanonicalizerを利用し、位置正規化はNativeWidthだけへ限定。他7sourceの旧serializer/default canonical/旧pinの一致を確認した。独立レビューにP0–P2なし。画像基準・score・coverage・性能条件は変更していない。
+- [x] R7734の完全ゲートで検出した静的不整合を修正し、R7747の標準source-staticが17項目すべて成功・実0。共通loader移行後のRustソース照合値、classic producerの13入力に対して旧8入力だった厳格readerとその有限AST登録、複雑度3件・文字列書式を修正。未知入力の拒否・実SHA照合・前後検査を維持し、静的診断は未解決0件。R7734/R7735/R7736/R7746の失敗原記録は保持する。製品の描画不一致とは区別し、重いテストとcoverageの合格へ転用しない。
+- [/] R7738関連5fileは1551件中1548成功・3件が5000msの制限時間超過。検査呼出しが集中していた3テストを共有fixtureと観点ごとへ分け、R7745で該当7ケースすべて成功・実0。timeout延長や比較項目削除は行わず、全体の再実行は未完。R7739は環境不一致で意図したREDへ到達せず保持し、既存host環境projectionでPATHだけの差を特定。同じJust環境の準備後、R7743で追加5入力のschema拒否をREDとして回収した。reader修正後の実回帰をこれから確認する。
 - [x] 依存更新後source `df9bf446` のR7715で製品PNG全117図が正式合格。EN59/59・最低99.085711、JA58/58・最低99.10801000000001、実0、completed/accepted=true、diagnosticOnly=false、R01/R02=true。新しいMermaid12.3の独立raw JSと現Skia0.157を使い、旧sourceの成功で代用していない。
 - [x] 同sourceのR7697取得とR7698独立validatorが実0。HTML画像84/84が90以上・最低92.14438、出力font一致established、診断0。measurement=not-performedであり、表示時間/RSSの合格ではない。R7701で現SDKのビルド証明も実0。原本と全証跡は管理外に保持する。
 - [/] 性能履歴への昇格処理に残っていたv3/current-build equivalenceの未接続を、長い全84測定より先に修正した。R7717は実測checkpoint0の段階で制御停止し、実child終了-15、groupClosed/rawFdsClosed=true、cleanupFailure=null、残childなしを確認、原記録は保持。R7719で未対応APIを使う回帰REDを回収した後、既存reuse verifierを用いる接続と標準Just入口のoptional引数を実装。別測定/manifest/request SHAの拘束、原bundle不変、v2互換、非改善時のactive不変を維持する。macOS一時pathの正規化差をテスト側で修正し、R7725静的foundation13task、R7726昇格15unit、R7727既存再利用13unit、R7728従来/新引数のdry-runが全成功。空白・引用符を含むrequest pathの引数保存も確認、独立差分reviewにP0/P1/P2なし。全84/実SDKによる最終reuse・昇格・履歴commit後の再検証は未実証。

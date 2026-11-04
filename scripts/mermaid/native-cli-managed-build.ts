@@ -36,6 +36,49 @@ export function verifyManagedNativeBuildReceipt(
   expectedRoot: string,
 ): NativeBuildReceiptSummary {
   const receipt = managedReceiptSchema.parse(value);
+  const attempt = verifyManagedReceiptContext(receipt, receiptPath, expectedRoot);
+  verifyManagedInputs(receipt);
+  const request = managedRequestSchema.parse(read(receipt.request));
+  const observation = managedObservationSchema.parse(read(receipt.observation));
+  const execution =
+    receipt.schema === "krr-native-cli-managed-build-v4" ? receipt.frozenBinary : receipt.binary;
+  verifyManagedRequest(
+    receipt,
+    receiptPath,
+    attempt,
+    request,
+    observation,
+    execution,
+    expectedBinary,
+  );
+  verifyManagedToolPins(receipt, request, observation);
+  const source = verifyManagedSource(receipt, attempt, request, observation);
+  verifyManagedExecution(receipt, attempt, execution, source, observation, expectedRuntime);
+  verifyManagedToolProbes(receipt, request);
+  const cargoLock = source.files.find((pin) => pin.path === path.join(receipt.cwd, "Cargo.lock"));
+  requireBound(cargoLock !== undefined, "Cargo.lock absent");
+  if (cargoLock === undefined) throw new Error("Cargo.lock absent");
+  return {
+    receiptPath,
+    receiptSha256: fileSha256(receiptPath),
+    sourceManifestPath: request.sourceManifest.path,
+    sourceManifestSha256: request.sourceManifest.sha256,
+    sourceDigest: source.digest,
+    sourceFileCount: source.files.length,
+    sourceFiles: source.files,
+    binaryPath: execution.path,
+    binarySha256: execution.sha256,
+    cargoLockPath: cargoLock.path,
+    cargoLockSha256: cargoLock.sha256,
+    runtimeAssetPins: receipt.runtimeAssetPins,
+  };
+}
+
+function verifyManagedReceiptContext(
+  receipt: ManagedReceipt,
+  receiptPath: string,
+  expectedRoot: string,
+): string {
   requireBound(
     receipt.cwd === path.resolve(expectedRoot) && fs.realpathSync(receipt.cwd) === receipt.cwd,
     "working directory differs",
@@ -52,11 +95,18 @@ export function verifyManagedNativeBuildReceipt(
       receipt.expectedProtectedRegistry.path.startsWith(`${receipt.cwd}/tmp/`),
     "admission/request path boundary differs",
   );
-  verifyManagedInputs(receipt);
-  const request = managedRequestSchema.parse(read(receipt.request));
-  const observation = managedObservationSchema.parse(read(receipt.observation));
-  const execution =
-    receipt.schema === "krr-native-cli-managed-build-v4" ? receipt.frozenBinary : receipt.binary;
+  return attempt;
+}
+
+function verifyManagedRequest(
+  receipt: ManagedReceipt,
+  receiptPath: string,
+  attempt: string,
+  request: ManagedRequest,
+  observation: ReturnType<typeof managedObservationSchema.parse>,
+  execution: ManagedReceipt["binary"],
+  expectedBinary: string,
+): void {
   verifyManagedRoles(receipt, request, observation, receiptPath);
   same(
     observation.pinsAfter.unsupportedCargoConfigsAbsent,
@@ -122,6 +172,13 @@ export function verifyManagedNativeBuildReceipt(
       receipt.buildObservation.label === "probe-6-native-cli-build",
     "outer build attempt binding differs",
   );
+}
+
+function verifyManagedToolPins(
+  receipt: ManagedReceipt,
+  request: ManagedRequest,
+  observation: ReturnType<typeof managedObservationSchema.parse>,
+): void {
   verifyHostPrebuild(receipt, request);
   same(request.cargo, receipt.snapshotAfter.tools.cargo, "request Cargo tool");
   same(request.rustc, receipt.snapshotAfter.tools.rustc, "request Rustc tool");
@@ -143,6 +200,14 @@ export function verifyManagedNativeBuildReceipt(
     ),
     "guard code inventory",
   );
+}
+
+function verifyManagedSource(
+  receipt: ManagedReceipt,
+  attempt: string,
+  request: ManagedRequest,
+  observation: ReturnType<typeof managedObservationSchema.parse>,
+): ReturnType<typeof managedSourceSchema.parse> {
   const source = managedSourceSchema.parse(read(request.sourceManifest));
   same(source, managedSourceSchema.parse(read(receipt.expectedSource)), "request source admission");
   requireBound(
@@ -151,6 +216,17 @@ export function verifyManagedNativeBuildReceipt(
     "source manifest role/digest differs",
   );
   verifyManagedCargo(receipt, request, observation);
+  return source;
+}
+
+function verifyManagedExecution(
+  receipt: ManagedReceipt,
+  attempt: string,
+  execution: ManagedReceipt["binary"],
+  source: ReturnType<typeof managedSourceSchema.parse>,
+  observation: ReturnType<typeof managedObservationSchema.parse>,
+  expectedRuntime: string,
+): void {
   same(receipt.binary, observation.binaryAfter, "observed binary identity");
   if (receipt.schema === "krr-native-cli-managed-build-v4") {
     same(receipt.frozenFrom, receipt.binary, "frozen binary origin");
@@ -173,6 +249,9 @@ export function verifyManagedNativeBuildReceipt(
     ),
     "selected runtime absent from source",
   );
+}
+
+function verifyManagedToolProbes(receipt: ManagedReceipt, request: ManagedRequest): void {
   for (const [index, probe] of receipt.toolProbes.entries()) {
     owned(probe.observation, probe.lifecycle, "tool-query");
     requireBound(
@@ -194,23 +273,6 @@ export function verifyManagedNativeBuildReceipt(
     );
     requireBound(fs.statSync(probe.observation.stdout.path).size > 0, "empty tool version");
   }
-  const cargoLock = source.files.find((pin) => pin.path === path.join(receipt.cwd, "Cargo.lock"));
-  requireBound(cargoLock !== undefined, "Cargo.lock absent");
-  if (cargoLock === undefined) throw new Error("Cargo.lock absent");
-  return {
-    receiptPath,
-    receiptSha256: fileSha256(receiptPath),
-    sourceManifestPath: request.sourceManifest.path,
-    sourceManifestSha256: request.sourceManifest.sha256,
-    sourceDigest: source.digest,
-    sourceFileCount: source.files.length,
-    sourceFiles: source.files,
-    binaryPath: execution.path,
-    binarySha256: execution.sha256,
-    cargoLockPath: cargoLock.path,
-    cargoLockSha256: cargoLock.sha256,
-    runtimeAssetPins: receipt.runtimeAssetPins,
-  };
 }
 
 function verifyHostPrebuild(receipt: ManagedReceipt, request: ManagedRequest): void {

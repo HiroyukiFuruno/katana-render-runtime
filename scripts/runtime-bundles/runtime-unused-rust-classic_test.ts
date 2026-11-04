@@ -32,7 +32,7 @@ function copiedSourceRoot(name: string): string {
     fs.copyFileSync(source, target);
     expect(sha256(fs.readFileSync(target))).toBe(expectedSha256);
   }
-  expect(Object.keys(facts.inputSha256)).toHaveLength(8);
+  expect(Object.keys(facts.inputSha256)).toHaveLength(13);
   return fs.realpathSync(sourceRoot);
 }
 
@@ -77,6 +77,16 @@ test("the public Rust adapter preserves the actual four- and five-script manifes
   expect(facts.schema).toBe("kdr-linter/mermaid-classic-script-facts/v1");
   expect(facts.status).toBe("verified");
   expect(facts.facts).toHaveLength(9);
+  expect(Object.keys(facts.inputSha256)).toEqual(
+    expect.arrayContaining([
+      "crates/katana-render-runtime/src/markdown/mermaid_renderer/render.rs",
+      "crates/katana-render-runtime/src/markdown/runtime_resource_loader.rs",
+      "crates/katana-render-runtime/src/renderer/backends/mermaid.rs",
+      "crates/katana-render-runtime/src/markdown/mermaid_renderer/render_instance.rs",
+      "crates/katana-render-runtime/src/resource_bytes.rs",
+    ]),
+  );
+  expect(Object.keys(facts.inputSha256)).toHaveLength(13);
   expect(facts.manifest.normal.map((script) => script.name)).toEqual([
     "mermaid-runtime.min.js",
     "mermaid.min.js",

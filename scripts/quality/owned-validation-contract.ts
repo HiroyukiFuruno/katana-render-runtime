@@ -2567,7 +2567,7 @@ function emptyParserBodyOnloadBinding(inputs: string[]): OwnedValidationReport["
 }
 const REVIEWED_SWC_VERSION = "1.16.21";
 const MATHJAX_EVIDENCE_CONSUMER_AST_SHA256 =
-  "8b47146db5270840e71f73dd276d099750e181928bb0834e58ffd9bc0e99ebb1";
+  "a285f1fe5bb863217729fdc47f300986ac299faaf56651f5d65944bf775e2f73";
 function mathJaxEvidenceConsumerVerified(source: string): boolean {
   if (swcVersion !== REVIEWED_SWC_VERSION) return false;
   try {
@@ -4192,7 +4192,7 @@ function restoreReviewedBrowserContractProcess(lines: string[]): string[] | unde
   );
   return prepared;
 }
-function reviewedRuntimeAssetTestCommandsWithoutClassic(lines: string[]): string[] | undefined {
+function normalizeNativeWidthTestCommand(lines: string[]): string[] | undefined {
   // 既知の recipe を固定し、canonical runtime-bundles command 内だけを認識する。
   const nativeWidthIndexes = lines.flatMap((line, index) =>
     unitCommand(line).includes(`./${NATIVE_WIDTH_HASH_TEST}`) ? [index] : [],
@@ -4231,7 +4231,12 @@ function reviewedRuntimeAssetTestCommandsWithoutClassic(lines: string[]): string
     if (withoutFocusedTest === line) return undefined;
     normalized[nativeWidthIndex] = withoutFocusedTest;
   }
+  return normalized;
+}
 
+function reviewedRuntimeAssetTestCommandsWithoutClassic(lines: string[]): string[] | undefined {
+  const normalized = normalizeNativeWidthTestCommand(lines);
+  if (!normalized) return undefined;
   const withoutAudit = removeTerminalRecipeCommand(normalized, MATHJAX_UNUSED_AUDIT_COMMAND);
   if (!withoutAudit) return undefined;
   const withoutStandardGate = withoutAudit.includes(MATHJAX_UNUSED_STANDARD_GATE_COMMAND)

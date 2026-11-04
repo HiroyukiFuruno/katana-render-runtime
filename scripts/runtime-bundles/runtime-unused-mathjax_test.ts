@@ -48,7 +48,15 @@ test("the guarded Rust facts route binds the live parser, facts, and input inven
   });
   expect(rustFacts.facts).toHaveLength(13);
   expect(rustFacts.facts.map((fact) => fact.id)).toContain("default-materializer");
-  expect(Object.keys(rustFacts.inputSha256)).toHaveLength(16);
+  expect(Object.keys(rustFacts.inputSha256)).toHaveLength(20);
+  expect(Object.keys(rustFacts.inputSha256)).toEqual(
+    expect.arrayContaining([
+      "crates/katana-render-runtime/src/markdown/runtime_resource_loader.rs",
+      "crates/katana-render-runtime/src/markdown/mermaid_renderer/render.rs",
+      "crates/katana-render-runtime/src/renderer/backends/mermaid.rs",
+      "crates/katana-render-runtime/src/resource_bytes.rs",
+    ]),
+  );
   expect(
     rustFacts.inputSha256["crates/katana-render-runtime/src/markdown/runtime_assets.rs"],
   ).toMatch(/^[a-f0-9]{64}$/);
@@ -130,6 +138,18 @@ test.each([
     "shared read helper omitted",
     (value: ReturnType<typeof inspectMathJaxRustFacts>) => {
       delete value.inputSha256["crates/katana-render-runtime/src/markdown/runtime_assets.rs"];
+    },
+  ],
+  [
+    "shared byte resource omitted",
+    (value: ReturnType<typeof inspectMathJaxRustFacts>) => {
+      delete value.inputSha256["crates/katana-render-runtime/src/resource_bytes.rs"];
+    },
+  ],
+  [
+    "shared byte resource hash",
+    (value: ReturnType<typeof inspectMathJaxRustFacts>) => {
+      value.inputSha256["crates/katana-render-runtime/src/resource_bytes.rs"] = "0".repeat(64);
     },
   ],
   [
