@@ -927,6 +927,14 @@ def records_map(rows: object) -> SourceRecords:
     return result
 
 
+def require_no_git_replacements(root: Path, *, git_query: GitQuery | None = None) -> None:
+    """置換参照でGitの解釈が変わるため、証跡の検証では使用を認めない。"""
+    require(os.environ.get("GIT_REPLACE_REF_BASE") in (None, "refs/replace/"),
+            "Git replacement ref base is not supported")
+    refs = git(root, "for-each-ref", "--format=%(refname)", "refs/replace/", git_query=git_query)
+    require(not refs.strip(), "Git replacement refs invalidate performance evidence")
+
+
 class Bundle:
     # 絶対パスを含む元証跡は書き換えず、輸送索引だけでファイルを再配置する。
     def __init__(self, directory: Path) -> None:
@@ -3412,7 +3420,7 @@ def validate_expected_builds(bundle: Bundle, root: Path, first_expected: JsonObj
     return validated
 
 
-def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
+def _verify_impl(directory: Path, root: Path, *, git_query: GitQuery | None = None,
             require_catalog: bool, diagnostic_catalog: bool = False,
             reuse_context: object = None, remote_context: object = None) -> JsonObject:
     bundle = Bundle(directory)
@@ -3692,13 +3700,24 @@ def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
     return {"head": head, "checks": 60, "phaseRecords": len(VIEWPORTS) * len(PHASES) * 50, "performanceNonregression": True}
 
 
+def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
+            require_catalog: bool, diagnostic_catalog: bool = False,
+            reuse_context: object = None, remote_context: object = None) -> JsonObject:
+    require_no_git_replacements(root, git_query=git_query)
+    result = _verify_impl(directory, root, git_query=git_query, require_catalog=require_catalog,
+                          diagnostic_catalog=diagnostic_catalog, reuse_context=reuse_context,
+                          remote_context=remote_context)
+    require_no_git_replacements(root, git_query=git_query)
+    return result
+
+
 def verify(directory: Path, root: Path, *, git_query: GitQuery | None = None) -> JsonObject:
     result = _verify(directory, root, git_query=git_query, require_catalog=True)
     _require_formal_release_result(result)
     return result
 
 
-def verify_source_reuse(directory: Path, root: Path, measured_manifest_sha256: str,
+def _verify_source_reuse_impl(directory: Path, root: Path, measured_manifest_sha256: str,
                         build_directory: Path, build_manifest_sha256: str,
                         build_artifact_path: str, build_artifact_sha256: str, *,
                         git_query: GitQuery | None = None) -> JsonObject:
@@ -3780,6 +3799,19 @@ def verify_source_reuse(directory: Path, root: Path, measured_manifest_sha256: s
                        "currentBuildArtifactPath": build_artifact_path,
                        "currentBuildArtifactSha256": build_artifact_sha256,
                        "binarySha256": new_build["binarySha256"]})
+    return result
+
+
+def verify_source_reuse(directory: Path, root: Path, measured_manifest_sha256: str,
+                        build_directory: Path, build_manifest_sha256: str,
+                        build_artifact_path: str, build_artifact_sha256: str, *,
+                        git_query: GitQuery | None = None) -> JsonObject:
+    root = root.resolve()
+    require_no_git_replacements(root, git_query=git_query)
+    result = _verify_source_reuse_impl(directory, root, measured_manifest_sha256,
+                                       build_directory, build_manifest_sha256,
+                                       build_artifact_path, build_artifact_sha256, git_query=git_query)
+    require_no_git_replacements(root, git_query=git_query)
     return result
 
 

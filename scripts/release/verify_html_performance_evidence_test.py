@@ -1330,6 +1330,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
         repository = Path(__file__).resolve().parents[2]
         old_head = "b9cf37535ba374b62fee4e889f9c58f58f1ab8dc"
         historical_head = "5de8ddd363d28444e63b998b46c33324495f53bf"
+        later_historical_head = "76fecb70be64b11341d5232d92a08a351b2f726a"
         names = ("html_performance_source_reuse.py", "html_performance_epoch_reuse.py",
                  "html_performance_host_load_validation.py", "html_performance_host_load_validation_test.py",
                  "produce_html_performance_evidence.py", "produce_html_performance_evidence_test.py",
@@ -1348,11 +1349,14 @@ class PerformanceEvidenceTest(unittest.TestCase):
         fixed = self._program_checkout(self.root, "fixed epoch")
         write_revision(historical_head)
         historical = self._program_checkout(self.root, "historical endpoint")
+        write_revision(later_historical_head)
+        later_historical = self._program_checkout(self.root, "later historical endpoint")
         write_revision(None)
         current = self._program_checkout(self.root, "current endpoint")
         expected = gate._v3_live_programs(self.root, fixed)
         result = gate._v3_program_source(self.root, {"programSource": fixed},
-                                         [{"liveCheckout": historical}, {"liveCheckout": current}],
+                                         [{"liveCheckout": historical}, {"liveCheckout": later_historical},
+                                          {"liveCheckout": current}],
                                          git_query=None)
         self.assertEqual(result, expected)
         verifier = self.root / "scripts/release/verify_html_performance_evidence.py"
@@ -2720,6 +2724,19 @@ class PerformanceEvidenceTest(unittest.TestCase):
         self.assertEqual(gate.sha256(fixture_lock), gate.LOCK_SHA)
         host_load_validation.require_current_cpu_observer_sources(Path(__file__).resolve().parents[2])
 
+    def test_formal_verification_rejects_real_git_replace_refs(self) -> None:
+        gate._verify_legacy_diagnostic(self.bundle, self.root)
+        original = gate.git(self.root, "rev-parse", "HEAD").strip()
+        source = self.root / "source.rs"
+        source.write_text("fn main() { println!(\"replacement\"); }\n")
+        subprocess.run(["git", "-C", str(self.root), "add", str(source)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Unit", "-c",
+                        "user.email=unit@example.invalid", "commit", "-qm", "replacement"], check=True)
+        replacement = gate.git(self.root, "rev-parse", "HEAD").strip()
+        subprocess.run(["git", "-C", str(self.root), "replace", original, replacement], check=True)
+        with self.assertRaisesRegex(ValueError, "Git replacement refs"):
+            gate._verify_legacy_diagnostic(self.bundle, self.root)
+
     def test_tampered_harness_lock_is_rejected(self) -> None:
         lock_path = self.root / gate.HARNESS_ROOT / "Cargo.lock"
         with patch.object(gate, "LOCK_SHA", "0" * 64):
@@ -2853,6 +2870,44 @@ class PerformanceEvidenceTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unsupported build artifact schema"):
                 gate.verify_source_reuse(self.bundle, self.root, measured_sha, current_bundle,
                                          current_sha, "common/candidate-build.json", artifact_sha)
+
+    def test_reuse_rechecks_real_replace_refs_after_inner_verification(self) -> None:
+        from html_performance_source_reuse import SourceReuseContext
+
+        source = self.root / "source.rs"
+        source.write_text("fn main() { println!(\"changed\"); }\n")
+        subprocess.run(["git", "-C", str(self.root), "add", str(source)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Unit", "-c",
+                        "user.email=unit@example.invalid", "commit", "-qm", "current"], check=True)
+        current_head = gate.git(self.root, "rev-parse", "HEAD").strip()
+        current_bundle = Path(self.temp.name) / "current-build"
+        shutil.copytree(self.bundle, current_bundle)
+        current_manifest = current_bundle / "bundle.json"
+        manifest = gate.read_json(current_manifest)
+        manifest["head"] = current_head
+        current_manifest.write_text(json.dumps(manifest, sort_keys=True))
+        measured_sha = gate.sha256(self.bundle / "bundle.json")
+        current_sha = gate.sha256(current_manifest)
+        artifact = current_bundle / "common/candidate-build.json"
+        artifact_sha = gate.sha256(artifact)
+        context = SourceReuseContext(self.head, current_head, {}, (), False)
+        build: JsonObject = {"head": current_head, "binarySha256": "a" * 64, "lockSha256": "b" * 64,
+                             "cargoExecutableSha256": "c" * 64, "rustcExecutableSha256": "d" * 64}
+
+        def add_replace(_result: object) -> None:
+            subprocess.run(["git", "-C", str(self.root), "replace", self.head, current_head], check=True)
+
+        with (patch.object(gate, "_verified_reuse_context", return_value=context) as source_context,
+              patch.object(gate, "_verify", return_value={}) as inner_verify,
+              patch.object(gate, "_require_formal_release_result", side_effect=add_replace),
+              patch.object(gate, "validate_expected_builds", return_value={"candidate": build}),
+              patch.object(gate, "_validate_build_proof", return_value=build) as build_verify):
+            with self.assertRaisesRegex(ValueError, "Git replacement refs"):
+                gate.verify_source_reuse(self.bundle, self.root, measured_sha, current_bundle,
+                                         current_sha, "common/candidate-build.json", artifact_sha)
+            inner_verify.assert_called_once()
+            build_verify.assert_called_once()
+            self.assertEqual(source_context.call_count, 2)
 
     def test_v3_formal_requires_current_proof_and_shared_fixed_inputs(self) -> None:
         from html_performance_source_reuse import SourceReuseContext

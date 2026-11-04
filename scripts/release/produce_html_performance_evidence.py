@@ -2301,7 +2301,7 @@ def command(args: Sequence[str], *, text: bool = False, cwd: Path | None = None,
 def _make_git_query(log_directory: Path) -> gate.GitQuery:
     def execute(root: Path, args: Sequence[str], input_bytes: bytes | None,
                 text: bool) -> str | bytes:
-        completed = _measurement_command(["git", "-C", str(root), *args], role="tool-query",
+        completed = _measurement_command(["git", "--no-replace-objects", "-C", str(root), *args], role="tool-query",
                                          log_directory=log_directory, cwd=root, input_bytes=input_bytes)
         if text:
             with io.TextIOWrapper(io.BytesIO(completed.stdout)) as stream:
@@ -2315,8 +2315,41 @@ def _make_git_query(log_directory: Path) -> gate.GitQuery:
             raise ValueError("Git batch query returned text output")
         return result
 
+    @lru_cache(maxsize=32)
+    def cached_git_metadata(root_path: str, args: tuple[str, ...], text: bool) -> str | bytes:
+        return execute(Path(root_path), args, None, text)
+
+    stable_paths = frozenset({
+        "scripts/release/html_performance_source_reuse.py",
+        "scripts/release/html_performance_epoch_reuse.py",
+        "scripts/release/html_performance_host_load_validation.py",
+        "scripts/release/html_performance_host_load_validation_test.py",
+        "scripts/release/produce_html_performance_evidence.py",
+        "scripts/release/produce_html_performance_evidence_test.py",
+        "scripts/release/verify_html_performance_evidence.py",
+        "scripts/release/verify_html_performance_evidence_test.py",
+        "Cargo.lock",
+        gate.HARNESS_ROOT + "Cargo.lock",
+    })
+    immutable_oid = r"(?:[0-9a-f]{40}|[0-9a-f]{64})"
+
     def query(root: Path, args: Sequence[str], input_bytes: bytes | None, text: bool) -> str | bytes:
         argv = tuple(args)
+        stable_tree = (len(argv) == 4 and argv[:3] == ("ls-tree", "-r", "-z")
+                       and re.fullmatch(immutable_oid, argv[3]) is not None)
+        stable_commit = (len(argv) == 3 and argv[:2] == ("rev-parse", "--verify")
+                         and re.fullmatch(immutable_oid + r"\^\{commit\}", argv[2]) is not None)
+        stable_show = False
+        if len(argv) == 2 and argv[0] == "show":
+            oid, separator, path = argv[1].partition(":")
+            stable_show = (separator == ":" and re.fullmatch(immutable_oid, oid) is not None
+                           and path in stable_paths)
+        if input_bytes is None and (stable_tree or stable_commit or stable_show):
+            value = cached_git_metadata(str(root.resolve()), argv, text)
+            size = len(value.encode("utf8")) if isinstance(value, str) else len(value)
+            if size > 2 * 1024 * 1024:
+                cached_git_metadata.cache_clear()
+            return value
         object_ids = input_bytes[:-1].split(b"\n") if input_bytes and input_bytes.endswith(b"\n") else []
         stable_object_batch = bool(object_ids) and all(
             re.fullmatch(rb"(?:[0-9a-f]{40}|[0-9a-f]{64})", object_id) is not None
@@ -2330,6 +2363,7 @@ def _make_git_query(log_directory: Path) -> gate.GitQuery:
 
 
 def source(root: Path, *, git_query: gate.GitQuery | None = None) -> gate.JsonObject:
+    gate.require_no_git_replacements(root, git_query=git_query)
     gate.require(not gate.git(root, "status", "--porcelain=v1", "--untracked-files=all", git_query=git_query), "clean committed source required before measurement")
     rows: list[SourceFile] = [{"path": str(root / name), "sha256": checksum, "size": size} for name, (checksum, size) in sorted(gate.committed_records(root, git_query=git_query).items())]
     index_path = Path(gate.git(root, "rev-parse", "--git-path", "index", git_query=git_query).strip())
@@ -2338,6 +2372,7 @@ def source(root: Path, *, git_query: gate.GitQuery | None = None) -> gate.JsonOb
     payload: gate.JsonObject = {"schema": "krr-native-build-source-inventory-v1", "sourceManifestSchema": "krr-native-build-source-manifest-v1", "root": str(root), "head": gate.git(root, "rev-parse", "HEAD", git_query=git_query).strip(), "index": {"sha256": gate.sha256(index_path)}, "files": rows, "trackedPaths": [row["path"] for row in rows], "untrackedPaths": [], "missingTrackedPaths": [], "stableEndpoints": True}
     payload["inventoryDigest"] = hashlib.sha256(encoded(payload)).hexdigest()
     gate.current_source(root, payload, git_query=git_query)
+    gate.require_no_git_replacements(root, git_query=git_query)
     return payload
 
 
@@ -2515,6 +2550,7 @@ def file_state(path: Path) -> gate.JsonObject:
 
 
 def _live_checkout(root: Path, log_directory: Path) -> gate.JsonObject:
+    gate.require_no_git_replacements(root)
     result = _measurement_command(
         ["bun", "run", "scripts/mermaid/native-live-source-observation.ts", "--root", str(root)],
         cwd=root, role="preflight", log_directory=log_directory,
@@ -2523,6 +2559,7 @@ def _live_checkout(root: Path, log_directory: Path) -> gate.JsonObject:
                             "live checkout observation")
     gate.require(observed.get("schema") == "krr-html-performance-live-source-observation-v1"
                  and observed.get("root") == str(root), "live checkout observation identity differs")
+    gate.require_no_git_replacements(root)
     return observed
 
 

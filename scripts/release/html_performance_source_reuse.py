@@ -93,7 +93,10 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
         current_sha = hashlib.sha256(current).hexdigest()
         if old_sha != "847b5541ecc81d533eaf510e1675b7a2b667853a7dc8793f34387470d9dce426":
             return False
-        if current_sha == "3b98d203dd23f65513ab4d4cb60af4b63ca49ff2468705c34982b588877c9e97":
+        if current_sha in {
+            "3b98d203dd23f65513ab4d4cb60af4b63ca49ff2468705c34982b588877c9e97",
+            "3fee6e9a540c90a10ad8f02cd95e6edddaf4b929c69f66cb2a4643a7b96594ae",
+        }:
             return True
         if current != Path(__file__).read_bytes():
             return False
@@ -123,24 +126,31 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
             "3f50599d284dbe593bb9a1cf02d0fdd633647eb61a3f6be7867b8308d72de3c7"),
         "scripts/release/html_performance_host_load_validation.py": (
             "eaf150043f1361b9a5d75ee5eb4f6348c6541564c1299a091265f446cd445f74",
-            "546885df19bbaf8d40b6428af6dcbece6c4ba59c7f73f5bb4aa7ec72a0339269"),
+            frozenset({"546885df19bbaf8d40b6428af6dcbece6c4ba59c7f73f5bb4aa7ec72a0339269",
+                       "80b59b6d1fb10ba7953e2f598bed2928483a8ee50aea09ae1992796f6239b87a"})),
         "scripts/release/html_performance_host_load_validation_test.py": (
             "977394a86e45b307f9939a952aa6ef66d3cf770154564794d7196036aa6c2497",
-            "a550c3e89979dda00597eb3497bf627c793a8a5228c88bc740976526ad70aa66"),
+            frozenset({"a550c3e89979dda00597eb3497bf627c793a8a5228c88bc740976526ad70aa66",
+                       "fee51a18a8da4d4ae389ce9d2a03519b392f60ec03a661567bc3a58cd0c920f1"})),
         "scripts/release/produce_html_performance_evidence.py": (
             "d4d85ae7e2120e3720ef31afe6a7228011385d0267ec770060e68f606e21388e",
-            "490233a4797d9690f7393000cfeda1ceb4d806e1a7df2c588bbb300d8cc1dae5"),
+            frozenset({"490233a4797d9690f7393000cfeda1ceb4d806e1a7df2c588bbb300d8cc1dae5",
+                       "bffd5b7781ea1650185d2756a90c4c7350d7708726d7482cf6fff397c4b14aa8"})),
         "scripts/release/produce_html_performance_evidence_test.py": (
             "1ed2ab04cc2fccc6674b0eb565e097d9df37d44ca66d5b6fc70e12d7583e2fe2",
-            "52f4b3cb14c379b5fb3c260d170b10024d30377bf63ad33b4084a8fc3137db9b"),
+            frozenset({"52f4b3cb14c379b5fb3c260d170b10024d30377bf63ad33b4084a8fc3137db9b",
+                       "f519cb6810e911a59c5eb0ca3b41ba410aa0d98ed9cc23e600822b4d38ab51ed",
+                       "7ff9328bebff71189ca1c32719923d50688665b88e284f0a2c4d16ff4c216cad"})),
         "scripts/release/verify_html_performance_evidence.py": (
             "d9d93a641fd5e5dc4db5a0135cffa2073c84f34da132cedfb9821dace49a59aa",
             frozenset({"71fa1bc5e34a3d9432d2923d14e0967f7ae2d6e5f879941eb3f858668b1da86e",
-                       "5eb3892fb7d508586f43fe62df8ecfd603e3fb540af442a8abb6ceccc7e022c2"})),
+                       "5eb3892fb7d508586f43fe62df8ecfd603e3fb540af442a8abb6ceccc7e022c2",
+                       "30a772d8b1488a764185ab0761afb555cd65d798a2696674dde0821465ce4f83"})),
         "scripts/release/verify_html_performance_evidence_test.py": (
             "9f423f9edbd3fa5ef2a0f1fd1d28a2d2a61f968498650f65dd3f0e5f323be4b3",
             frozenset({"953044024351425627b8798fcbbc3d5f9216ac49d78e7c63075cd034536584e0",
-                       "2daf590b500a480c83615bdb436a57c77834546a183c77638d89f2d8a74a20c7"})),
+                       "2daf590b500a480c83615bdb436a57c77834546a183c77638d89f2d8a74a20c7",
+                       "91c7380a5516b550acfeffbbc165bb8e5b1c5480c14e4beff11609fd4898ebe5"})),
     }
     expected = pins.get(path)
     if expected is None or expected[0] != hashlib.sha256(old).hexdigest():

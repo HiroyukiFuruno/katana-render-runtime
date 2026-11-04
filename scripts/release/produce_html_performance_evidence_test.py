@@ -2341,6 +2341,7 @@ class EpochContextTest(unittest.TestCase):
                 self.run_context(**kwargs)
 
     def test_live_checkout_calls_native_observer_and_rejects_wrong_root(self) -> None:
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
         output = {"schema": "krr-html-performance-live-source-observation-v1", "root": str(self.root)}
         result = subprocess.CompletedProcess([], 0, json.dumps(output).encode(), b"")
         with patch.object(producer, "_measurement_command", return_value=result) as execute:
@@ -4397,6 +4398,95 @@ class MeasurementLifecycleIntegrationTests(unittest.TestCase):
                                       if gate._array(gate.read_json(path)["argv"], "Git argv")[-2:]
                                       == ["cat-file", "--batch"]]
             self.assertEqual(len(updated_cat_file_calls), 2)
+
+    def test_immutable_git_metadata_cache_uses_real_factory_and_git(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary).resolve()
+            root, source_path = self.create_git_fixture(parent)
+            lock = root / "Cargo.lock"
+            lock.write_text("small lock\n")
+            subprocess.run(["git", "-C", str(root), "add", "Cargo.lock"], check=True)
+            self.commit_git_fixture(root, "add lock")
+            first_head = gate.git(root, "rev-parse", "HEAD").strip()
+            query = typed_producer._make_git_query(self.logs)
+
+            def calls() -> int:
+                return len(list(self.logs.glob("tool-query-*/lifecycle.json")))
+
+            def repeated(args: tuple[str, ...], *, text: bool, cached: bool,
+                         repository: Path = root, callback: gate.GitQuery = query) -> str | bytes:
+                before = calls()
+                first = callback(repository, args, None, text)
+                middle = calls()
+                second = callback(repository, args, None, text)
+                self.assertEqual(first, second)
+                self.assertEqual(middle, before + 1)
+                self.assertEqual(calls(), middle + (0 if cached else 1))
+                return first
+
+            repository = Path(__file__).resolve().parents[2]
+            baseline_tree = repeated(
+                ("ls-tree", "-r", "-z", "b9cf37535ba374b62fee4e889f9c58f58f1ab8dc"),
+                text=False, cached=True, repository=repository)
+            self.assertIsInstance(baseline_tree, bytes)
+            self.assertEqual(len(baseline_tree), 1_263_159)
+            first_tree = repeated(("ls-tree", "-r", "-z", first_head), text=False, cached=True)
+            lifecycle = next(path for path in self.logs.glob("tool-query-*/lifecycle.json")
+                             if gate._array(gate.read_json(path)["argv"], "Git argv")[-1] == first_head)
+            argv = gate._array(gate.read_json(lifecycle)["argv"], "Git argv")
+            self.assertEqual(argv, ["git", "--no-replace-objects", "-C", str(root),
+                                    "ls-tree", "-r", "-z", first_head])
+            repeated(("rev-parse", "--verify", first_head + "^{commit}"), text=True, cached=True)
+            show = ("show", first_head + ":Cargo.lock")
+            self.assertEqual(repeated(show, text=False, cached=True), b"small lock\n")
+            self.assertEqual(repeated(show, text=True, cached=True), "small lock\n")
+            repeated(("show", first_head + ":source.py"), text=False, cached=False)
+            repeated(("rev-parse", "HEAD"), text=True, cached=False)
+            repeated(("rev-parse", "--verify", "HEAD^{commit}"), text=True, cached=False)
+            repeated(("status", "--porcelain=v1"), text=True, cached=False)
+
+            second_query = typed_producer._make_git_query(self.logs)
+            repeated(show, text=False, cached=True, callback=second_query)
+            other_parent = parent / "other"
+            other_parent.mkdir()
+            other, _ = self.create_git_fixture(other_parent)
+            subprocess.run(["git", "-C", str(other), "fetch", str(root), first_head], check=True,
+                           capture_output=True)
+            repeated(show, text=False, cached=True, repository=other)
+
+            before_status = query(root, ("status", "--porcelain=v1"), None, True)
+            source_path.write_text("value = 2\n")
+            after_status = query(root, ("status", "--porcelain=v1"), None, True)
+            self.assertNotEqual(before_status, after_status)
+            head_before = query(root, ("rev-parse", "HEAD"), None, True)
+            self.commit_git_fixture(root, "updated fixture")
+            head_after = query(root, ("rev-parse", "HEAD"), None, True)
+            self.assertNotEqual(head_before, head_after)
+            second_head = gate.git(root, "rev-parse", "HEAD").strip()
+            self.assertEqual(typed_producer.source(root, git_query=query)["head"], second_head)
+            with patch.dict(os.environ, {"GIT_REPLACE_REF_BASE": "refs/other-private/"}):
+                with self.assertRaisesRegex(ValueError, "replacement ref base") as caught:
+                    typed_producer.source(root, git_query=query)
+                self.assertNotIn("refs/other-private/", str(caught.exception))
+            subprocess.run(["git", "-C", str(root), "replace", first_head, second_head], check=True)
+            with self.assertRaisesRegex(ValueError, "Git replacement refs"):
+                typed_producer.source(root, git_query=query)
+            with self.assertRaisesRegex(ValueError, "Git replacement refs"):
+                typed_producer._live_checkout(root, self.logs)
+            fresh_query = typed_producer._make_git_query(self.logs)
+            for callback in (query, fresh_query):
+                self.assertEqual(callback(root, ("ls-tree", "-r", "-z", first_head), None, False), first_tree)
+                self.assertEqual(callback(root, ("show", first_head + ":source.py"), None, False), b"value = 1\n")
+            repeated(("ls-tree", "-r", "-z", "HEAD"), text=False, cached=False)
+            repeated(("show", "HEAD:Cargo.lock"), text=False, cached=False)
+
+            lock.write_bytes(b"x" * (2 * 1024 * 1024 + 1))
+            subprocess.run(["git", "-C", str(root), "add", "Cargo.lock"], check=True)
+            self.commit_git_fixture(root, "large lock")
+            large_head = gate.git(root, "rev-parse", "HEAD").strip()
+            large = repeated(("show", large_head + ":Cargo.lock"), text=False, cached=False)
+            self.assertEqual(len(large), 2 * 1024 * 1024 + 1)
+            repeated(show, text=False, cached=True)
 
     def test_symbolic_cat_file_batch_input_is_never_cached(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
