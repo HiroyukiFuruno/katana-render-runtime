@@ -98,6 +98,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
             "3fee6e9a540c90a10ad8f02cd95e6edddaf4b929c69f66cb2a4643a7b96594ae",
             "ddc12b9fc326b4fea119ccbcc807dbff65031bb9a35ae1cf44487ecabbd23796",
             "9a39e0d8b2fa2f3bf78504f29cdfa68d1db71028c109de9712fd698486a8bd1f",
+            "dbf7f198d1dbc28ca3a8067af0fde153640f4208d4c9bc18c73896e137668055",
         }:
             return True
         if current != Path(__file__).read_bytes():
@@ -193,7 +194,8 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
             frozenset({"71fa1bc5e34a3d9432d2923d14e0967f7ae2d6e5f879941eb3f858668b1da86e",
                        "5eb3892fb7d508586f43fe62df8ecfd603e3fb540af442a8abb6ceccc7e022c2",
                        "30a772d8b1488a764185ab0761afb555cd65d798a2696674dde0821465ce4f83",
-                       "ee23eb6dbd56ca3dcd6ae00b4f79a69675b6ec9cd408b7158d16f1ded88d4d60"})),
+                       "ee23eb6dbd56ca3dcd6ae00b4f79a69675b6ec9cd408b7158d16f1ded88d4d60",
+                       "630cb08266eb1b24b249bf295b3591cbe87da9529e6f770ce600715ad93ab656"})),
         "scripts/release/verify_html_performance_evidence_test.py": (
             "9f423f9edbd3fa5ef2a0f1fd1d28a2d2a61f968498650f65dd3f0e5f323be4b3",
             frozenset({"953044024351425627b8798fcbbc3d5f9216ac49d78e7c63075cd034536584e0",

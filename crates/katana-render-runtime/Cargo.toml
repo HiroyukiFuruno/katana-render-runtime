@@ -18,8 +18,8 @@ include = [
     "src/renderer/backends/html_runtime/*.js",
     "src/markdown/diagram_runtime/generated/*.js",
     "src/markdown/diagram_runtime/generated/*.sha256",
-    "vendor/drawio/32.6.9/drawio.min.js.sha256",
-    "vendor/drawio/32.6.9/LICENSE",
+    "vendor/drawio/32.6.10/drawio.min.js.sha256",
+    "vendor/drawio/32.6.10/LICENSE",
     "vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js.br",
     "vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js.sha256",
     "vendor/mermaid/12.3.0-krr.pr6823.1/LICENSE",
@@ -105,7 +105,7 @@ taffy = { workspace = true }
 cssparser = { workspace = true }
 kurbo = "=0.13.1"
 simplecss = "=0.2.2"
-svgtypes = "=0.16.1"
+svgtypes = "=0.16.2"
 unicode-linebreak = { workspace = true }
 unicode-width = { workspace = true }
 
