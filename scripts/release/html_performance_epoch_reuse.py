@@ -94,7 +94,8 @@ def _verified_pins(reader: gate.FileReader, values: Mapping[str, gate.JsonObject
 
 
 def compare_declared_inputs(old_reader: gate.FileReader, old: DeclaredEpochInputs,
-                            new_reader: gate.FileReader, new: DeclaredEpochInputs) -> None:
+                            new_reader: gate.FileReader, new: DeclaredEpochInputs, *,
+                            program_changes: frozenset[str] = frozenset()) -> None:
     """宣言済み入力だけを比較する。宣言の完全性や測定適格性は呼出側が検証する。"""
     for epoch in (old, new):
         gate.require(set(epoch["workers"]) == {"baseline", "candidate"},
@@ -116,7 +117,12 @@ def compare_declared_inputs(old_reader: gate.FileReader, old: DeclaredEpochInput
     for name, old_group, new_group in groups:
         old_pins = _verified_pins(old_reader, old_group, "old " + name)
         new_pins = _verified_pins(new_reader, new_group, "new " + name)
-        gate.require(old_pins == new_pins, "epoch " + name + " differs")
+        if name == "programs":
+            gate.require(old_pins.keys() == new_pins.keys()
+                         and all(old_pins[key] == new_pins[key] or key in program_changes
+                                 for key in old_pins), "epoch programs differs")
+        else:
+            gate.require(old_pins == new_pins, "epoch " + name + " differs")
     gate.require(old["tool_context"] == new["tool_context"], "epoch tool context differs")
 
 
@@ -147,8 +153,14 @@ def _program_pins(reader: gate.FileReader, root: Path, snapshot: gate.JsonObject
     gate.require(bool(result), "program inventory is empty")
     records = (gate.records_map(reader.json(snapshot)["records"])
                if program_records is None else program_records)
-    for path, checksum in result.values():
-        relative = Path(path).relative_to(root).as_posix()
+    for role, (path, checksum) in result.items():
+        actual = Path(path)
+        relative = actual.relative_to(root).as_posix()
+        if role.startswith("scripts/") or role == "Justfile":
+            alias = root / "tmp/html-performance-programs" / checksum / role
+            gate.require(actual == root / role or actual == alias,
+                         "program source storage path differs")
+            relative = role
         gate.require(records.get(relative, (None,))[0] == checksum,
                      "program source snapshot differs")
     return result
@@ -312,7 +324,8 @@ def declared_from_authenticated_refs(
 
 
 def compare_epoch_projections(old_reader: gate.FileReader, old: EpochProjection,
-                              new_reader: gate.FileReader, new: EpochProjection) -> None:
+                              new_reader: gate.FileReader, new: EpochProjection, *,
+                              program_changes: frozenset[str] = frozenset()) -> None:
     """Compare classified inputs while independently validating operational pins."""
     for reader, value in ((old_reader, old), (new_reader, new)):
         pins = value["operational_pins"]
@@ -323,4 +336,5 @@ def compare_epoch_projections(old_reader: gate.FileReader, old: EpochProjection,
     gate.require(set(old["operational_pins"]) == set(new["operational_pins"])
                  and old["unclassified_context_digest"] == new["unclassified_context_digest"],
                  "epoch role or unclassified context differs")
-    compare_declared_inputs(old_reader, old["declared"], new_reader, new["declared"])
+    compare_declared_inputs(old_reader, old["declared"], new_reader, new["declared"],
+                            program_changes=program_changes)

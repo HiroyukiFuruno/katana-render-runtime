@@ -64,6 +64,73 @@ def equivalent_program_records(left: Mapping[str, tuple[str, int]],
     )
 
 
+def cache_only_collector_change(old: bytes, current: bytes) -> bool:
+    """認証queryの配線だけを移した既知の変更を、byte単位で照合する。"""
+    lifecycle = (b'    lifecycle = output.parent / f"{output.name}.lifecycle"\n'
+                 b'    gate.require(not lifecycle.exists(), "fresh measurement lifecycle output required")\n'
+                 b'    git_query = _make_git_query(lifecycle)\n')
+    old_call = b'resume_batch.resolve(), root, fixed_epoch=fixed_epoch,'
+    new_call = b'resume_batch.resolve(), root, fixed_epoch=fixed_epoch, git_query=git_query,'
+    anchor = b'    if resume_batch is not None:\n'
+    marker = b'def produce('
+    if old.count(marker) != 1:
+        return False
+    prefix, body = old.split(marker, 1)
+    if body.count(lifecycle) != 1 or body.count(old_call) != 1 or body.count(anchor) != 1:
+        return False
+    transformed = body.replace(lifecycle, b'', 1).replace(old_call, new_call, 1)
+    transformed = transformed.replace(anchor, lifecycle + anchor, 1)
+    return prefix + marker + transformed == current
+
+
+def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
+    """この移行でレビューする認証・輸送コードの実体だけを許可する。"""
+    import ast
+    import inspect
+
+    if path == "scripts/release/html_performance_source_reuse.py":
+        old_tree = ast.parse(old)
+        current_tree = ast.parse(current)
+        additions = {"cache_only_collector_change", "known_auth_program_change"}
+        definitions = [node for node in current_tree.body
+                       if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in additions]
+        if len(definitions) != len(additions) or {node.name for node in definitions} != additions:
+            return False
+        trusted: dict[str, Callable[..., bool]] = {
+            "cache_only_collector_change": cache_only_collector_change,
+            "known_auth_program_change": known_auth_program_change,
+        }
+        for node in definitions:
+            actual = ast.dump(node, include_attributes=False)
+            expected_nodes = ast.parse(inspect.getsource(trusted[node.name])).body
+            if len(expected_nodes) != 1 or actual != ast.dump(expected_nodes[0], include_attributes=False):
+                return False
+        current_tree.body = [node for node in current_tree.body
+                             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                             or node.name not in additions]
+        return ast.dump(old_tree, include_attributes=False) == ast.dump(current_tree, include_attributes=False)
+    pins = {
+        "scripts/release/html_performance_epoch_reuse.py": (
+            "33a05103fc5100c7eb2e9d10368785c8ab20e6f8308ddc53f0ae95f63c573f1c",
+            "3f50599d284dbe593bb9a1cf02d0fdd633647eb61a3f6be7867b8308d72de3c7"),
+        "scripts/release/produce_html_performance_evidence.py": (
+            "d4d85ae7e2120e3720ef31afe6a7228011385d0267ec770060e68f606e21388e",
+            "490233a4797d9690f7393000cfeda1ceb4d806e1a7df2c588bbb300d8cc1dae5"),
+        "scripts/release/produce_html_performance_evidence_test.py": (
+            "1ed2ab04cc2fccc6674b0eb565e097d9df37d44ca66d5b6fc70e12d7583e2fe2",
+            "52f4b3cb14c379b5fb3c260d170b10024d30377bf63ad33b4084a8fc3137db9b"),
+        "scripts/release/verify_html_performance_evidence.py": (
+            "d9d93a641fd5e5dc4db5a0135cffa2073c84f34da132cedfb9821dace49a59aa",
+            "71fa1bc5e34a3d9432d2923d14e0967f7ae2d6e5f879941eb3f858668b1da86e"),
+        "scripts/release/verify_html_performance_evidence_test.py": (
+            "9f423f9edbd3fa5ef2a0f1fd1d28a2d2a61f968498650f65dd3f0e5f323be4b3",
+            "649ff5531031391cdf7ea802ca0fa014c52dd8ad687cd249b335287878c97e00"),
+    }
+    expected = pins.get(path)
+    return expected is not None and expected == (
+        hashlib.sha256(old).hexdigest(), hashlib.sha256(current).hexdigest())
+
+
 @dataclass(frozen=True)
 class SourceReuseContext:
     measured_head: str

@@ -239,6 +239,41 @@ class CatalogProducerOperationTest(unittest.TestCase):
                                      fixed_epoch=origin)
             command.assert_not_called()
 
+    def test_resume_and_origin_authentication_share_git_transaction(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            output = root / "tmp/output"
+            batch = root / "tmp/closed"
+            origin: typed_producer.FixedEpochContextInput = {
+                "directory": root / "origin", "manifest_sha256": "a" * 64,
+                "artifact_path": "candidate.json", "artifact_sha256": "b" * 64,
+                "head": "c" * 40, "workers": {},
+            }
+            query = Mock()
+            marker = ValueError("origin reached")
+            initial_lock_value = "preserve-before-resume"
+            with (patch.dict(os.environ, {"GIT_OPTIONAL_LOCKS": initial_lock_value}),
+                  patch.object(platform, "system", return_value="Darwin"),
+                  patch.object(platform, "machine", return_value="arm64"),
+                  patch.object(load_validation, "require_current_cpu_observer_sources"),
+                  patch.object(producer, "_make_git_query", return_value=query) as make_query,
+                  patch.object(producer, "load_closed_batch", return_value=({}, Mock(), [])) as load,
+                  patch.object(producer, "_require_cpu_busy_resume"),
+                  patch.object(producer, "load_catalog_conditions", return_value=([], None, None, None)),
+                  patch.object(remote_evidence, "validate_fixed_epoch_candidate_origin", side_effect=marker) as verify):
+                def authenticate(*_args: object, **_kwargs: object) -> tuple[dict[str, object], Mock, list[object]]:
+                    self.assertEqual(os.environ["GIT_OPTIONAL_LOCKS"], initial_lock_value)
+                    return {}, Mock(), []
+
+                load.side_effect = authenticate
+                with self.assertRaises(ValueError) as caught:
+                    producer.produce(root, output, catalog_manifest_path=root / "catalog",
+                                     resume_batch=batch, fixed_epoch=origin)
+            self.assertIs(caught.exception, marker)
+            make_query.assert_called_once_with(root / "tmp/output.lifecycle")
+            load.assert_called_once_with(batch.resolve(), root, fixed_epoch=origin, git_query=query)
+            self.assertIs(verify.call_args.kwargs["git_query"], query)
+
     def test_fixed_epoch_checks_original_source_end_before_live_observation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -567,6 +602,39 @@ class CatalogProducerOperationTest(unittest.TestCase):
 
 
 class TransportBundleUnitTests(unittest.TestCase):
+    def test_program_transport_uses_one_git_batch_for_all_blobs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            directory = root / "scripts/release"
+            directory.mkdir(parents=True)
+            for index in range(12):
+                (directory / f"program-{index}.py").write_text(f"program {index}\n")
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Unit", "-c",
+                            "user.email=unit@example.invalid", "commit", "-qm", "fixture"], check=True)
+            head = gate.git(root, "rev-parse", "HEAD").strip()
+            records = gate.committed_records(root, head)
+            calls: list[tuple[str, ...]] = []
+
+            def query(root: Path, args: Sequence[str], input_bytes: bytes | None, text: bool) -> str | bytes:
+                calls.append(tuple(args))
+                completed = subprocess.run(["git", "-C", str(root), *args], input=input_bytes,
+                                           capture_output=True, check=True)
+                return completed.stdout.decode() if text else completed.stdout
+
+            blobs, modes = producer._program_transport_blobs(root, head, records, git_query=query)
+            self.assertEqual(calls, [("ls-tree", "-r", "-z", head), ("cat-file", "--batch")])
+            self.assertEqual(set(blobs), set(records))
+            for path, data in blobs.items():
+                self.assertEqual(data, (root / path).read_bytes())
+                self.assertEqual(modes[path], "100644")
+            wrong = dict(records)
+            name = next(iter(wrong))
+            wrong[name] = ("0" * 64, wrong[name][1])
+            with self.assertRaises(ValueError):
+                producer._program_transport_blobs(root, head, wrong, git_query=query)
+
     def test_epoch_origin_and_program_files_survive_transport_without_repinning(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -2077,7 +2145,7 @@ class RuntimeSyncPreflightTest(unittest.TestCase):
                     "files": [{"path": path, "sha256": checksum, "size": 1}],
                     "digest": hashlib.sha256(material.encode()).hexdigest()}}
         old = checkout("a" * 64, b"")
-        cases = ((checkout("b" * 64, b""), "program differs"),
+        cases = ((checkout("b" * 64, b""), "live program source differs from Git"),
                  (checkout("a" * 64, b" M scripts/program.py\0"), "uncommitted changes"))
         receipt: gate.JsonObject = {"epochContextRef": {"path": "/epoch", "sha256": "e" * 64}}
         resumed = Mock(spec=gate.Bundle)

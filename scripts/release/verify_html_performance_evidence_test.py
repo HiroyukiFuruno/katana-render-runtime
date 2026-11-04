@@ -1184,6 +1184,134 @@ class PerformanceEvidenceTest(unittest.TestCase):
                   self.assertRaises(ValueError)):
                 gate._v3_program_source(self.root, fixed, [endpoint], git_query=None)
 
+    def test_v3_cache_only_change_preserves_each_checkout_identity(self) -> None:
+        gate._cargo_capacity_guard()
+        from cargo_capacity_guard_native_cli_observation import source_digest
+
+        repository = Path(__file__).resolve().parents[2]
+        old = subprocess.run(
+            ["git", "-C", str(repository), "show",
+             "b9cf37535ba374b62fee4e889f9c58f58f1ab8dc:scripts/release/produce_html_performance_evidence.py"],
+            check=True, capture_output=True, text=True,
+        ).stdout
+        lifecycle = ('    lifecycle = output.parent / f"{output.name}.lifecycle"\n'
+                     '    gate.require(not lifecycle.exists(), "fresh measurement lifecycle output required")\n'
+                     '    git_query = _make_git_query(lifecycle)\n')
+        start = old.index("def produce(")
+        prefix, body = old[:start], old[start:]
+        self.assertEqual(body.count(lifecycle), 1)
+        old_call = "resume_batch.resolve(), root, fixed_epoch=fixed_epoch,"
+        self.assertEqual(body.count(old_call), 1)
+        body = body.replace(lifecycle, "", 1).replace(
+            old_call, "resume_batch.resolve(), root, fixed_epoch=fixed_epoch, git_query=git_query,", 1)
+        anchor = "    if resume_batch is not None:\n"
+        self.assertEqual(body.count(anchor), 1)
+        current = prefix + body.replace(anchor, lifecycle + anchor, 1)
+        script = self.root / "scripts/release/produce_html_performance_evidence.py"
+        script.parent.mkdir(parents=True, exist_ok=True)
+
+        def commit(content: str, label: str) -> None:
+            script.write_text(content, encoding="utf8")
+            subprocess.run(["git", "-C", str(self.root), "add", str(script)], check=True)
+            subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Unit", "-c",
+                            "user.email=unit@example.invalid", "commit", "-qm", label], check=True)
+
+        commit(old, "old collector")
+
+        def checkout() -> JsonObject:
+            head = gate.git(self.root, "rev-parse", "HEAD").strip()
+            records = gate.committed_records(self.root, head)
+            rows = [{"path": str(self.root / name), "sha256": checksum, "size": size}
+                    for name, (checksum, size) in sorted(records.items())]
+            return {"schema": "krr-html-performance-live-source-observation-v1",
+                    "root": str(self.root), "head": head, "indexSha256": "a" * 64, "statusBase64": "",
+                    "manifest": {"schema": "krr-native-build-source-manifest-v1", "files": rows,
+                                 "digest": source_digest(cast(list[JsonObject], rows))}}
+
+        previous = checkout()
+        commit(current, "cache wiring")
+        live = checkout()
+        old_records = gate._v3_live_programs(self.root, previous)
+        live_records = gate._v3_live_programs(self.root, live)
+        name = "scripts/release/produce_html_performance_evidence.py"
+        self.assertNotEqual(old_records[name], live_records[name])
+        self.assertEqual(gate._v3_program_source(self.root, {"programSource": previous},
+                         [{"liveCheckout": live}], git_query=None), old_records)
+        self.assertEqual(gate._v3_live_programs(self.root, live)[name], live_records[name])
+
+        commit(current.replace("batch_deadline = _batch_deadline(",
+                               "batch_deadline = changed_deadline(", 1), "changed policy")
+        with self.assertRaises(ValueError):
+            gate._v3_program_source(self.root, {"programSource": previous},
+                                    [{"liveCheckout": checkout()}], git_query=None)
+
+    def test_reviewed_program_changes_reject_unknown_source_bytes(self) -> None:
+        from html_performance_source_reuse import known_auth_program_change
+
+        repository = Path(__file__).resolve().parents[2]
+        paths = ("scripts/release/html_performance_source_reuse.py",
+                 "scripts/release/html_performance_epoch_reuse.py",
+                 "scripts/release/produce_html_performance_evidence.py",
+                 "scripts/release/produce_html_performance_evidence_test.py",
+                 "scripts/release/verify_html_performance_evidence.py",
+                 "scripts/release/verify_html_performance_evidence_test.py")
+        for path in paths:
+            old = subprocess.run(["git", "-C", str(repository), "show",
+                                  "b9cf37535ba374b62fee4e889f9c58f58f1ab8dc:" + path],
+                                 check=True, capture_output=True).stdout
+            current = (repository / path).read_bytes()
+            with self.subTest(path=path):
+                self.assertTrue(known_auth_program_change(path, old, current))
+                self.assertFalse(known_auth_program_change(path, old, current + b"\npolicy_change()\n"))
+                self.assertFalse(known_auth_program_change("scripts/release/unknown.py", old, current))
+                if path.endswith("html_performance_source_reuse.py"):
+                    self.assertFalse(known_auth_program_change(
+                        path, old, current.replace(b"return prefix + marker + transformed == current",
+                                                   b"return True", 1)))
+                    self.assertFalse(known_auth_program_change(
+                        path, old, current + b"\ndef known_auth_program_change(path, old, current):\n    return True\n"))
+                if path.endswith("produce_html_performance_evidence.py"):
+                    self.assertFalse(known_auth_program_change(
+                        path, old, current.replace(b"batch_deadline = _batch_deadline(",
+                                                   b"batch_deadline = changed_deadline(", 1)))
+
+    def test_program_transport_binds_two_versions_to_one_source_path(self) -> None:
+        import html_performance_epoch_reuse as epoch
+
+        name = "scripts/release/produce_html_performance_evidence.py"
+        old = self.add_file(str(self.root / name), "programs/old.py", b"old collector\n")
+        current_sha = hashlib.sha256(b"current collector\n").hexdigest()
+        current = self.add_file(str(self.root / "tmp/html-performance-programs" / current_sha / name),
+                                "programs/current.py", b"current collector\n")
+        self.save_transport()
+        bundle = gate.Bundle(self.bundle)
+        old_records = {name: (str(old["sha256"]), len(b"old collector\n"))}
+        current_records = {name: (str(current["sha256"]), len(b"current collector\n"))}
+        self.assertEqual(epoch._program_pins(bundle, self.root, {}, {name: old},
+                                            program_records=old_records)[name],
+                         (old["path"], old["sha256"]))
+        self.assertEqual(epoch._program_pins(bundle, self.root, {}, {name: current},
+                                            program_records=current_records)[name],
+                         (current["path"], current["sha256"]))
+        tool: JsonObject = {"environmentSha256": "a" * 64, "platform": "fixture", "cpuCount": 4}
+        common = {"workers": self.binary_refs, "inputs": {"plan": self.plan_pin},
+                  "resources": {}, "fonts": {}, "tool_context": tool}
+        old_declared = cast(epoch.DeclaredEpochInputs, {**common, "programs": {name: old}})
+        new_declared = cast(epoch.DeclaredEpochInputs, {**common, "programs": {name: current}})
+        with self.assertRaises(ValueError):
+            epoch.compare_declared_inputs(bundle, old_declared, bundle, new_declared)
+        epoch.compare_declared_inputs(bundle, old_declared, bundle, new_declared,
+                                      program_changes=frozenset({name}))
+        self.assertNotEqual(old_declared["programs"][name], new_declared["programs"][name])
+        with self.assertRaises(ValueError):
+            epoch._program_pins(bundle, self.root, {}, {name: current}, program_records=old_records)
+        with self.assertRaises(ValueError):
+            epoch._program_pins(bundle, self.root, {}, {"scripts/release/other.py": current},
+                                program_records=current_records)
+        bundle.file(current).write_bytes(b"tampered collector\n")
+        with self.assertRaises(ValueError):
+            epoch._program_pins(bundle, self.root, {}, {name: current}, program_records=current_records)
+
     def test_v3_program_source_is_independent_of_sdk_head(self) -> None:
         script = self.root / "scripts/release/worker.py"
         script.parent.mkdir(parents=True, exist_ok=True)
@@ -1253,7 +1381,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
         changed_material = "".join(f"{row['path']}\0{row['sha256']}\0{row['size']}\n" for row in altered)
         changed = {**checkout, "manifest": {**json_object(checkout["manifest"]), "files": altered,
                    "digest": hashlib.sha256(changed_material.encode()).hexdigest()}}
-        with self.assertRaisesRegex(ValueError, "program differs"):
+        with self.assertRaisesRegex(ValueError, "live program source differs from Git"):
             gate._v3_program_source(self.root, fixed, [{"liveCheckout": changed}], git_query=None)
         with self.assertRaises(ValueError):
             gate._v3_program_source(self.root, {}, [endpoint], git_query=None)

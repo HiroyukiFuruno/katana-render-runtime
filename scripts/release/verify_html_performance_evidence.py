@@ -1932,7 +1932,10 @@ def _v3_live_programs(root: Path, checkout: JsonObject) -> SourceRecords:
 
 def _v3_program_source(root: Path, fixed: JsonObject, endpoints: Sequence[JsonObject], *,
                        git_query: GitQuery | None) -> SourceRecords:
-    from html_performance_source_reuse import RELEASE_ONLY_PROGRAMS, _modes, equivalent_program_records
+    from html_performance_source_reuse import (
+        RELEASE_ONLY_PROGRAMS, _modes, cache_only_collector_change, equivalent_program_records,
+        known_auth_program_change,
+    )
 
     program_source = _object(fixed.get("programSource"), "fixed epoch program source")
     programs = _v3_live_programs(root, program_source)
@@ -1948,12 +1951,26 @@ def _v3_program_source(root: Path, fixed: JsonObject, endpoints: Sequence[JsonOb
     for endpoint in endpoints:
         checkout = _object(endpoint.get("liveCheckout"), "live checkout")
         live_programs = _v3_live_programs(root, checkout)
-        require(equivalent_program_records(live_programs, programs),
-                "live measurement program differs from fixed epoch")
         live_head = _text(checkout.get("head"), "live program HEAD")
         live_committed = committed_records(root, live_head, git_query=git_query)
-        require(all(live_programs.get(path) == live_committed.get(path)
-                    for path in RELEASE_ONLY_PROGRAMS), "live release-only source differs from Git")
+        live_selected = {path: value for path, value in live_committed.items()
+                         if path.startswith("scripts/") or path == "Justfile"}
+        require(live_programs == live_selected, "live program source differs from Git")
+        comparable = dict(live_programs)
+        require(programs.keys() == live_programs.keys(), "live measurement program membership differs")
+        for path in programs:
+            if path in RELEASE_ONLY_PROGRAMS or programs[path] == live_programs[path]:
+                continue
+            old_blob = _git_output(root, ("show", head + ":" + path), git_query=git_query)
+            new_blob = _git_output(root, ("show", live_head + ":" + path), git_query=git_query)
+            require(isinstance(old_blob, bytes) and isinstance(new_blob, bytes)
+                    and (path == "scripts/release/produce_html_performance_evidence.py"
+                         and cache_only_collector_change(old_blob, new_blob)
+                         or known_auth_program_change(path, old_blob, new_blob)),
+                    "live measurement program differs from fixed epoch")
+            comparable[path] = programs[path]
+        require(equivalent_program_records(comparable, programs),
+                "live measurement program differs from fixed epoch")
         live_tree = _git_output(root, ("ls-tree", "-r", "-z", live_head), git_query=git_query)
         if not isinstance(live_tree, bytes):
             raise ValueError("live program tree differs")
@@ -1975,7 +1992,9 @@ def _host_load_source_records(bundle: Bundle, root: Path, expected: JsonObject,
 
 def _verified_v3_reuse_context(bundle: Bundle, root: Path, measured_head: str,
                                expected: JsonObject, *, git_query: GitQuery | None) -> object:
-    from html_performance_source_reuse import _modes
+    from html_performance_source_reuse import (
+        RELEASE_ONLY_PROGRAMS, _modes, cache_only_collector_change, known_auth_program_change,
+    )
 
     pair = _object(expected.get("sourcePair"), "v3 source pair")
     require(pair.get("schema") == "krr-html-performance-source-epoch-v3",
@@ -1994,9 +2013,30 @@ def _verified_v3_reuse_context(bundle: Bundle, root: Path, measured_head: str,
         raise ValueError("v3 program tree differs")
     modes = _modes(raw_tree)
     require(set(programs) <= set(modes), "v3 program modes missing")
+    live_head = git(root, "rev-parse", "HEAD", git_query=git_query).strip()
+    live_records = committed_records(root, live_head, git_query=git_query)
+    live_programs = {path: value for path, value in live_records.items()
+                     if path.startswith("scripts/") or path == "Justfile"}
+    require(programs.keys() == live_programs.keys(), "current measurement program membership differs")
+    for path in programs:
+        if path in RELEASE_ONLY_PROGRAMS or programs[path] == live_programs[path]:
+            continue
+        old_blob = _git_output(root, ("show", program_head + ":" + path), git_query=git_query)
+        live_blob = _git_output(root, ("show", live_head + ":" + path), git_query=git_query)
+        require(isinstance(old_blob, bytes) and isinstance(live_blob, bytes)
+                and (path == "scripts/release/produce_html_performance_evidence.py"
+                     and cache_only_collector_change(old_blob, live_blob)
+                     or known_auth_program_change(path, old_blob, live_blob)),
+                "current measurement program differs from authenticated program")
+    live_tree = _git_output(root, ("ls-tree", "-r", "-z", live_head), git_query=git_query)
+    require(isinstance(live_tree, bytes), "current program tree differs")
+    if not isinstance(live_tree, bytes):
+        raise ValueError("current program tree differs")
+    live_modes = _modes(live_tree)
+    require(all(modes[path] == live_modes.get(path) for path in programs), "current program mode differs")
     return _verified_reuse_context(
         root, measured_head, git_query=git_query, allow_test_changes=True,
-        program_records=programs, program_modes={path: modes[path] for path in programs},
+        program_records=live_programs, program_modes={path: live_modes[path] for path in live_programs},
     )
 
 
@@ -2228,10 +2268,16 @@ def _v3_epoch_validation(bundle: Bundle, root: Path, expected: JsonObject,
                            if "measurementCapacityBindingRef" in fixed_context else None)
     endpoints = [bundle.json(pair[key]) for key in ("beforeContextRef", "endContextRef")]
     program_records = _v3_program_source(origin_root, fixed_context, endpoints, git_query=git_query)
-    programs: dict[str, JsonObject] = {
-        path: {"path": str(origin_root / path), "sha256": item[0]}
-        for path, item in program_records.items()
-    }
+    endpoint_records = [_v3_live_programs(origin_root, _object(endpoint.get("liveCheckout"), "live checkout"))
+                        for endpoint in endpoints]
+    all_records = [program_records, *endpoint_records]
+    def program_refs(records: SourceRecords) -> dict[str, JsonObject]:
+        return {
+            path: {"path": str(origin_root / path if item == program_records[path]
+                               else origin_root / "tmp/html-performance-programs" / item[0] / path),
+                   "sha256": item[0]}
+            for path, item in records.items()
+        }
     old_expected = {**expected, "sourcePair": fixed_pair}
     dom = bundle.json(expected["domStateRef"])
     capture: JsonObject | None = None
@@ -2252,8 +2298,9 @@ def _v3_epoch_validation(bundle: Bundle, root: Path, expected: JsonObject,
     pins = [_object(pair.get(key), "v3 context pin")
             for key in ("epochContextRef", "beforeContextRef", "endContextRef")]
     projections = [declared_from_authenticated_refs(bundle, origin_root, bundle.json(pin), old_expected,
-                   snapshot_ref, capture, links, resources, {}, binaries, programs,
-                   program_records=program_records, measurement_binding=measurement_binding) for pin in pins]
+                   snapshot_ref, capture, links, resources, {}, binaries, program_refs(records),
+                   program_records=records, measurement_binding=measurement_binding)
+                   for pin, records in zip(pins, all_records, strict=True)]
     return SourceEpochV3Validation(
         _text(pins[0].get("sha256"), "v3 context SHA"),
         _text(pins[1].get("sha256"), "v3 context SHA"),
@@ -2295,11 +2342,15 @@ def _source_contract_v3(
     for context in contexts[1:]:
         require(context.get("schema") == "krr-html-performance-context-epoch-v3",
                 "v3 live context schema differs")
-    _v3_program_source(origin_root, contexts[0], contexts[1:], git_query=git_query)
+    fixed_programs = _v3_program_source(origin_root, contexts[0], contexts[1:], git_query=git_query)
+    live_programs = [_v3_live_programs(origin_root, _object(context.get("liveCheckout"), "live checkout"))
+                     for context in contexts[1:]]
+    changes = frozenset(path for records in live_programs for path in fixed_programs
+                        if records[path] != fixed_programs[path])
     compare_epoch_projections(bundle, cast(EpochProjection, projections[0]),
-                              bundle, cast(EpochProjection, projections[1]))
+                              bundle, cast(EpochProjection, projections[1]), program_changes=changes)
     compare_epoch_projections(bundle, cast(EpochProjection, projections[1]),
-                              bundle, cast(EpochProjection, projections[2]))
+                              bundle, cast(EpochProjection, projections[2]), program_changes=changes)
     original = {**expected, "sourcePair": nested}
     return source_contract(bundle, root, original, git_query=git_query,
                            validated_builds=validated_builds, reuse_context=reuse_context,

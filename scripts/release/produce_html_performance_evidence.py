@@ -778,6 +778,42 @@ def _clone_transport_file(source: Path, destination: Path, checksum: str) -> Non
                  "transport source changed during validation")
 
 
+def _program_transport_blobs(root: Path, head: str, records: gate.SourceRecords, *,
+                             git_query: gate.GitQuery | None) -> tuple[dict[str, bytes], dict[str, str]]:
+    from html_performance_source_reuse import _modes
+
+    tree = gate._git_output(root, ("ls-tree", "-r", "-z", head), git_query=git_query)
+    gate.require(isinstance(tree, bytes), "program transport Git tree differs")
+    if not isinstance(tree, bytes):
+        raise ValueError("program transport Git tree differs")
+    modes = _modes(tree)
+    rows: list[tuple[str, str]] = []
+    for entry in tree.split(b"\0"):
+        if entry:
+            metadata, raw_path = entry.split(b"\t", 1)
+            name = os.fsdecode(raw_path)
+            if name in records:
+                _, _, oid = metadata.decode("ascii").split()
+                rows.append((name, oid))
+    gate.require({name for name, _ in rows} == set(records), "program transport source membership differs")
+    oids = tuple(oid for _, oid in rows)
+    payload = gate._git_output(root, ("cat-file", "--batch"), git_query=git_query,
+                               input_bytes="".join(oid + "\n" for oid in oids).encode())
+    gate.require(isinstance(payload, bytes), "program transport Git batch differs")
+    if not isinstance(payload, bytes):
+        raise ValueError("program transport Git batch differs")
+    identities = gate._committed_blob_records(payload, oids)
+    result: dict[str, bytes] = {}
+    offset = 0
+    for (name, _), identity in zip(rows, identities, strict=True):
+        gate.require(identity == records[name], "program transport Git blob differs")
+        start = payload.index(b"\n", offset) + 1
+        length = identity[1]
+        result[name] = payload[start:start + length]
+        offset = start + length + 1
+    return result, {name: modes[name] for name in records}
+
+
 def write_transport_bundle(bundle: Path, head: str, refs: Sequence[FilePin],
                            attempts: list[dict[str, FilePin]], *,
                            source_paths: Mapping[str, Path] | None = None) -> dict[str, str]:
@@ -3479,9 +3515,12 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     resumed_receipt: gate.JsonObject | None = None
     resumed_bundle: gate.Bundle | None = None
     resumed_attempts: list[dict[str, FilePin]] = []
+    lifecycle = output.parent / f"{output.name}.lifecycle"
+    gate.require(not lifecycle.exists(), "fresh measurement lifecycle output required")
+    git_query = _make_git_query(lifecycle)
     if resume_batch is not None:
         resumed_receipt, resumed_bundle, resumed_attempts = load_closed_batch(
-            resume_batch.resolve(), root, fixed_epoch=fixed_epoch,
+            resume_batch.resolve(), root, fixed_epoch=fixed_epoch, git_query=git_query,
         )
         _require_cpu_busy_resume(resumed_bundle, resumed_attempts)
     catalog_conditions: list[CatalogCondition] | None = None
@@ -3493,9 +3532,6 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
          catalog_binary_refs) = load_catalog_conditions(root, catalog_manifest_path)
     os.environ["GIT_OPTIONAL_LOCKS"] = "0"
     # 生成済みJSとsourceの同期が未確認のcandidateをビルド・計測しない。
-    lifecycle = output.parent / f"{output.name}.lifecycle"
-    gate.require(not lifecycle.exists(), "fresh measurement lifecycle output required")
-    git_query = _make_git_query(lifecycle)
     origin_bundle: gate.Bundle | None = None
     origin_artifact: FilePin | None = None
     fixed_source_end: FilePin | None = None
@@ -4156,6 +4192,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     if fixed_context_pin is not None:
         refs.append(fixed_context_pin)
     refs.extend(reference_transport_refs)
+    program_sources: dict[str, Path] = {}
     if resumed_bundle is not None:
         refs.extend(
             FilePin(path=gate._text(item.get("originalPath"), "resumed bundle path"),
@@ -4170,11 +4207,36 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                     sha256=gate._text(item.get("sha256"), "origin bundle SHA"))
             for item in gate._objects(origin_bundle.manifest.get("files"), "origin bundle files")
         )
-        for name, (checksum, _) in program_records.items():
-            if name.startswith("scripts/") or name == "Justfile":
-                path = root / name
-                gate.require(gate.sha256(path) == checksum, "fixed epoch program source differs")
-                refs.append({"path": str(path), "sha256": checksum})
+        checkout_sources = [(program_head, program_records)]
+        for endpoint in (before_context, after_context):
+            live = gate._object(endpoint.get("liveCheckout"), "live checkout")
+            checkout_sources.append((gate._text(live.get("head"), "live program HEAD"),
+                                     gate._v3_live_programs(root, live)))
+        blob_cache: dict[str, tuple[dict[str, bytes], dict[str, str]]] = {}
+        for source_head, records in checkout_sources:
+            if source_head not in blob_cache:
+                blob_cache[source_head] = _program_transport_blobs(root, source_head, records, git_query=git_query)
+            blobs, program_modes = blob_cache[source_head]
+            gate.require(blobs.keys() == records.keys(), "program transport cached membership differs")
+            for name, (checksum, size) in records.items():
+                logical = (root / name if (checksum, size) == program_records[name]
+                           else root / "tmp/html-performance-programs" / checksum / name)
+                blob = blobs[name]
+                gate.require(len(blob) == size and hashlib.sha256(blob).hexdigest() == checksum,
+                             "program transport Git blob differs")
+                physical = output / "program-blobs" / checksum / name
+                if not physical.exists():
+                    physical.parent.mkdir(parents=True, exist_ok=True)
+                    with physical.open("xb") as handle:
+                        handle.write(blob)
+                    os.chmod(physical, 0o755 if program_modes[name] == "100755" else 0o644)
+                gate.require(not physical.is_symlink() and gate.sha256(physical) == checksum
+                             and stat.S_IMODE(physical.stat().st_mode)
+                             == (0o755 if program_modes[name] == "100755" else 0o644),
+                             "program transport source differs")
+                previous = program_sources.setdefault(str(logical), physical)
+                gate.require(gate.sha256(previous) == checksum, "program transport pin conflicts")
+                refs.append({"path": str(logical), "sha256": checksum})
     for row in all_measurement_rows:
         refs.append(FilePin(path=str(row["plan_path"]), sha256=gate.sha256(cast(Path, row["plan_path"]))))
         if row["dom"] is not None:
@@ -4224,12 +4286,15 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     # 生成物だけを輸送し、巨大なCargo targetは公開artifactへ混入させない。
     bundle = output / "bundle"
     transport_sources = dict(reference_proof.transport_sources) if reference_proof else {}
-    for previous in (resumed_bundle, origin_bundle):
-        if previous is not None:
-            for item in gate._objects(previous.manifest.get("files"), "previous transport files"):
+    for program_logical, physical in program_sources.items():
+        program_prior = transport_sources.setdefault(program_logical, physical)
+        gate.require(gate.sha256(program_prior) == gate.sha256(physical), "program transport source collision differs")
+    for prior_bundle in (resumed_bundle, origin_bundle):
+        if prior_bundle is not None:
+            for item in gate._objects(prior_bundle.manifest.get("files"), "previous transport files"):
                 logical_path = gate._text(item.get("originalPath"), "previous transport path")
                 pin = {"path": logical_path, "sha256": gate._text(item.get("sha256"), "previous transport SHA")}
-                physical = previous.file(pin)
+                physical = prior_bundle.file(pin)
                 if logical_path in transport_sources:
                     gate.require(gate.sha256(transport_sources[logical_path]) == pin["sha256"],
                                  "transport source collision differs")
