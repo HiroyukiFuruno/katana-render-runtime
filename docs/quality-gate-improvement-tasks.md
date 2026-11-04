@@ -6,7 +6,7 @@
 
 - [x] `b9cf3753` / Skia0.156のMermaid製品PNGを全117件再取得し、全件99以上を確認した。R7991は実0、managed receiptはcompleted/accepted=true、EN59最低99.085711・JA58最低99.108010。独立raw JSのofficialをR7974/R7978で新規生成し、旧原本は保持した（`tmp/quality/resumed-owner-r3509/r7990-current-product-full/receipt.json`）。中間SVGの点数ではない。
 - [x] 同じ`b9cf3753`のHTML84条件をR8008で新規captureし実0、R8009の独立検証も実0。84/84が90以上、最低92.14438、出力fontの完全一致はestablished・拒否0だった。これは画像/fontの判定で、速度/RSSの合格ではない（`tmp/quality/resumed-owner-r3509/r8009-current-html84-independent-validation/command/`）。
-- [ ] HTML性能はR8064で個別合格・封緘済み18/84、残66。実0・receiptはclosed/policyAccepted=true/completeConditionIds=18/formalAccepted=false。R7995の16件を再測定せず引継ぎ、events expected-state 620x900/960x720@1の2件を追加した。次の再開元は`tmp/quality/resumed-owner-r3509/r8064-current-performance-all84`（controller receiptのdir）。旧R7995/R7970へ戻さない。元の原本・pinは保持し、全84・最終SDK等価性・履歴昇格は未完。
+- [ ] HTML性能はR8085で個別合格・封緘済み22/84、残62。実0・receiptはclosed/policyAccepted=true/completeConditionIds=22/formalAccepted=false。R8064の18件を再測定せず引継ぎ、input-state disabledの3viewportとemptyの1280x900@1を追加した。次の再開元は`tmp/quality/resumed-owner-r3509/r8085-current-performance-all84`（controller receiptのdir）。旧R8064/R7995/R7970へ戻さない。元の原本・pinは保持し、全84・最終SDK等価性・履歴昇格は未完。実行は約29分で外側30分上限に近く、再開範囲を無条件に増やさない。
 - [ ] 再開認証の重複を#114で是正中。初回load_closed_batchには既存transaction queryが渡されず、後段で作るLRUを使えていなかった。queryを共有する最小配線のR8010は想定した引数欠落でRED1、R8011はGREEN1、正規Python環境のR8013はproducer全185件成功、R8014静的foundationも実0。R8012は主担当が標準の依存環境を使わずreflink_copy不足62件で実1になった記録を保持する。試行数・phase・閾値・timeout・20分budget・環境代入順序は変更していない。旧16件と更新後のcollectorの安全な互換認証・immutable旧program輸送は設計中で、再利用成功や短縮量はまだ断定しない。
 - [ ] R8015/R8016は各1件だけ実行し、旧/現collectorのsource比較と同一論理pathの2版輸送が現行実装で拒否されるRED（各実1）を確認した。固定b9cfの実Git blob、endpointごとの実SHA・保存path・論理pathを保ち、未知差分と測定意味の変更を拒否する互換認証を実装中。原16件のreceipt/pinを変更しない。
 - [/] 互換認証・輸送の実装後、独立reviewのP1（追加認証関数の任意body/重複定義）とP2（全programの個別Git process反復）を修正した。現Git/working-sourceで認証した実行中関数へAST本体・定義数を照合し、別programは旧b9cf/現blobの固定SHA組だけを認める。輸送はhead単位の既存Git batchとrun内共有を使う。R8021互換1・R8022未知/任意True/重複拒否1・R8023実Git12fileのbatch回数1は実0、再reviewに追加の具体P0–P2なし。R8031厳格型199file・R8026静的13taskは実0、R8032 producer186・R8033 verifier158・R8029 epoch9・R8030 source5の計358件も実0。先行したR8018 import不足、R8024/25型失敗、R8027/28旧message期待失敗は保持し、成功へ差替えない。旧16件の実再利用と実時間短縮はまだ未実証であり、commit後の再開で確認する。
@@ -21,7 +21,7 @@
 - [/] 現490commitを既存parserで全文内部照合し、参照欠落52・承認済map内52・範囲外0・余剰map0を確認した。本文を出力・公開していない。最終PR番号/HEADのtrusted guard固定はDraft後の既存admission工程として残す。52件の範囲を拡張する追加承認は必要ない。
 - [/] 容量回復は既存Cargo/Ninja/Moon/Bunの生成物整理で行った。R8006の標準Moon artifact GC（state reset無し）は実0、所有lockのdev/inoを保持、R8007の保護18refs検査も実0、物理空き9,882,636,288bytesを確認。比較元headless_shell・frozen worker・原receiptは保持した。duのclone共有を物理回復量と混同しない。
 - [ ] 調査用CLIもread-only照会でcwdへ生成物を書く場合がある。Siso queryの未追跡siso_result.jsonはpayload非表示・bytes/SHA保持で管理外へ移し、ソース差分を復旧した。今後この種の照会は既知の管理外作業dirをcwdとし、source rootへ生成しない。既存のsource集合・dirty検査は維持し、未知ファイルをignore追加で隠さない。
-- [ ] 上記の画像・性能結果は明記した`b9cf3753`の結果。以後の検証コード・テスト変更の最終適格性は別途確認し、旧結果を最新ソースの全体合格へ読み替えない。長文の全Y/末尾/全目次子項目・consumer両軸/resize/state、性能残68、coverage実装100%/未計測0、Q17–Q22、最新依存/Actions、完全gate、Draft/最新review/個別reply-resolve/Ready/3OS CI/保護merge/3crate公開/Issue close/cleanupは継続する。
+- [ ] 上記の画像・性能結果は明記した`b9cf3753`の描画実装の結果。R8085のcollectorは`2e770a55`であり、旧18件の原本を変更せず新4件を追加した。以後の検証コード・テスト変更の最終適格性は別途確認し、旧結果を最新ソースの全体合格へ読み替えない。長文の全Y/末尾/全目次子項目・consumer両軸/resize/state、性能残62、coverage実装100%/未計測0、Q17–Q22、最新依存/Actions、完全gate、Draft/最新review/個別reply-resolve/Ready/3OS CI/保護merge/3crate公開/Issue close/cleanupは継続する。
 
 ### 2026-11-04までの記録（最新の状態は上記を優先）
 

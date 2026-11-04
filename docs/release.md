@@ -15,7 +15,6 @@ GitHub のブランチ保護（branch protection）では、少なくとも次�
 
 - `Test and Build (ubuntu-latest, linux64)`
 - `Test and Build (macos-15, mac-arm64)`
-- `Test and Build (macos-15-intel, mac-x64)`
 - `Test and Build (windows-latest, win64)`
 - `preflight`
 
