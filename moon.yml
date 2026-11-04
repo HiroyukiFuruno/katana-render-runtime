@@ -170,6 +170,8 @@ tasks:
     deps:
       - runtime-asset-script-other
       - runtime-unused-script-regression
+      - runtime-quality-owned-source-inventory-producer
+      - runtime-quality-owned-validation-contract-producer
     inputs: *quality-inputs
 
   runtime-classic-generation-evidence:
@@ -299,6 +301,34 @@ tasks:
     checks:
       - check: fingerprint
         script: just runtime-unused-script-cache-key runtime-unused-rust-classic
+        hash: stdout
+
+  runtime-quality-owned-source-inventory-producer:
+    command: ['just', 'runtime-unused-script-verify-run', 'runtime-quality-owned-source-inventory']
+    deps: ['runtime-classic-generation-evidence']
+    inputs: *quality-inputs
+    outputs:
+      - 'tmp/quality/runtime-script-results/runtime-quality-owned-source-inventory.json'
+      - 'tmp/quality/runtime-script-results/runtime-quality-owned-source-inventory-current-group-001.xml'
+    options:
+      cache: local
+    checks:
+      - check: fingerprint
+        script: just runtime-unused-script-cache-key runtime-quality-owned-source-inventory
+        hash: stdout
+
+  runtime-quality-owned-validation-contract-producer:
+    command: ['just', 'runtime-unused-script-verify-run', 'runtime-quality-owned-validation-contract']
+    deps: ['runtime-classic-generation-evidence']
+    inputs: *quality-inputs
+    outputs:
+      - 'tmp/quality/runtime-script-results/runtime-quality-owned-validation-contract.json'
+      - 'tmp/quality/runtime-script-results/runtime-quality-owned-validation-contract-current-group-001.xml'
+    options:
+      cache: local
+    checks:
+      - check: fingerprint
+        script: just runtime-unused-script-cache-key runtime-quality-owned-validation-contract
         hash: stdout
 
   rust-facts-host-prebuild:

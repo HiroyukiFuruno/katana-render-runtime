@@ -205,8 +205,22 @@ class MoonOwnerAstContractTests(unittest.TestCase):
         self.assertEqual(tasks["lint"]["leaf"], "lint")
         self.assertEqual(tasks["unit-test"]["deps"], ["runtime-asset-script-test"])
         self.assertEqual(
+            declarations["SCHEDULER_DEPENDENCIES"]["runtime-asset-script-test"],
+            [
+                "runtime-asset-script-other",
+                "runtime-unused-script-regression",
+                "runtime-quality-owned-source-inventory-producer",
+                "runtime-quality-owned-validation-contract-producer",
+            ],
+        )
+        self.assertEqual(
             tasks["runtime-asset-script-test"]["deps"],
-            ["runtime-asset-script-other", "runtime-unused-script-regression"],
+            [
+                "runtime-asset-script-other",
+                "runtime-quality-owned-source-inventory-producer",
+                "runtime-quality-owned-validation-contract-producer",
+                "runtime-unused-script-regression",
+            ],
         )
         self.assertEqual(
             tasks["runtime-unused-script-regression"]["deps"],
@@ -225,6 +239,22 @@ class MoonOwnerAstContractTests(unittest.TestCase):
                 "runtime-unused-rust-classic",
             ),
         )
+        self.assertEqual(
+            module.RUNTIME_QUALITY_LEAF_IDS,
+            (
+                "runtime-quality-owned-source-inventory",
+                "runtime-quality-owned-validation-contract",
+            ),
+        )
+        for leaf in module.RUNTIME_QUALITY_LEAF_IDS:
+            task_name = f"{leaf}-producer"
+            with self.subTest(task=task_name):
+                self.assertEqual(
+                    tasks[task_name]["deps"], ["runtime-classic-generation-evidence"]
+                )
+                self.assertEqual(
+                    tasks[task_name]["leaf"], "runtime-unused-script-verify-run"
+                )
         self.assertEqual(
             tasks["runtime-asset-script-other"]["deps"],
             ["runtime-classic-generation-evidence"],
@@ -263,6 +293,8 @@ class MoonOwnerAstContractTests(unittest.TestCase):
             "producer": "runtime-classic-generation-evidence",
             "verify": "runtime-unused-script-regression",
             "other": "runtime-asset-script-other",
+            "owned-source-inventory": "runtime-quality-owned-source-inventory-producer",
+            "owned-validation-contract": "runtime-quality-owned-validation-contract-producer",
             "aggregate": "runtime-asset-script-test",
             "unit": "unit-test",
         }
@@ -273,6 +305,13 @@ class MoonOwnerAstContractTests(unittest.TestCase):
                 moved = [item for item in phases if item != phase]
                 moved.insert(0, phase)
                 self.assertIs(validate(moved), False)
+
+    def test_quality_producers_remain_independently_schedulable(self) -> None:
+        module, phases = self.scheduler_owner_phases()
+        first = phases.index("runtime-quality-owned-source-inventory-producer")
+        second = phases.index("runtime-quality-owned-validation-contract-producer")
+        phases[first], phases[second] = phases[second], phases[first]
+        self.assertIs(module.scheduler_success_order_valid(phases), True)
 
     def test_foundation_format_cannot_follow_host_preparation(self) -> None:
         module, phases = self.scheduler_owner_phases()

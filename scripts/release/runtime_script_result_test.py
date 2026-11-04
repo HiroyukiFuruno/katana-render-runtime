@@ -78,6 +78,29 @@ class RuntimeScriptResultTests(unittest.TestCase):
                 grouped,
                 ("./scripts/runtime-bundles/runtime-bundle-definitions_test.ts",),
             )
+        quality_path = profiles.QUALITY_SCRIPT_PROFILES[
+            "runtime-quality-owned-source-inventory"
+        ]
+        quality_grouped = (
+            b"<testsuites tests='2'><testsuite file='"
+            + quality_path.encode()
+            + b"' tests='2'><testcase name='a'/><testcase name='b'/></testsuite></testsuites>"
+        )
+        self.assertEqual(
+            junit.parse_junit(quality_grouped, (quality_path,))["tests"], 2
+        )
+        with self.assertRaisesRegex(junit.RuntimeScriptJUnitError, "declared test files"):
+            junit.parse_junit(
+                quality_grouped,
+                (profiles.QUALITY_SCRIPT_PROFILES[
+                    "runtime-quality-owned-validation-contract"
+                ],),
+            )
+        unsupported_quality_path = (
+            b"<testsuite file='./scripts/quality/unlisted_test.ts'><testcase name='a'/></testsuite>"
+        )
+        with self.assertRaisesRegex(junit.RuntimeScriptJUnitError, "file path is unsupported"):
+            junit.parse_junit(unsupported_quality_path)
         second = JUNIT.replace(b"name='one'", b"name='three'").replace(
             b"name='two'", b"name='four'"
         )

@@ -17,6 +17,7 @@ import { z } from "zod";
 import {
   type ExternalToolRequest,
   justRecipes,
+  RUNTIME_QUALITY_LEAVES,
   RUNTIME_UNUSED_REGRESSION_TESTS,
   shellWords,
   sourceCode,
@@ -286,7 +287,11 @@ const mathJaxFactsRecipe =
   '@CARGO_TARGET_DIR={{quote(root + "/target")}} bun {{quote(root + "/scripts/runtime-bundles/runtime-rust-facts-host.ts")}} run {{quote(root)}} mathjax {{quote(root)}} {{quote(root + "/tmp/quality/rust-facts-host/current/receipt.json")}}';
 
 function actualRuntimeAssetTestInvocations(): string[][] {
-  return actualRecipeBody("runtime-asset-script-other-run")
+  return [
+    actualRecipeBody("runtime-asset-script-other-run"),
+    ...RUNTIME_QUALITY_LEAVES.map(([id]) => actualRecipeBody(`${id}-run`)),
+  ]
+    .join("\n")
     .split("\n")
     .flatMap((line): string[][] => {
       const words = shellWords(line);
@@ -355,6 +360,9 @@ function fixtureRecipeBodies(): Record<string, string> {
       "runtime-unused-script-regression-run",
     ),
     ...runtimeUnusedLeafRecipes,
+    ...Object.fromEntries(
+      RUNTIME_QUALITY_LEAVES.map(([id]) => [`${id}-run`, actualRecipeBody(`${id}-run`)]),
+    ),
     "runtime-bundle-check": actualRecipeBody("runtime-bundle-check"),
     "rust-facts-host-build": actualRecipeBody("rust-facts-host-build", true),
     "rust-facts-host-metadata": actualRecipeBody("rust-facts-host-metadata", true),
@@ -847,10 +855,18 @@ test("runtime asset registration uses Playwright without dropping sibling Bun te
     pureHtmlTests,
   );
   const runtimeAssetCommands = actualRecipeBody("runtime-asset-script-test").split("\n");
-  expect(runtimeAssetCommands.at(-2)).toBe("just browser-contract-test");
-  expect(runtimeAssetCommands.at(-1)).toBe(
-    "bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-source-inventory_test.ts ./scripts/quality/owned-validation-contract_test.ts",
-  );
+  expect(runtimeAssetCommands.slice(-2)).toEqual([
+    `just ${playwrightMacosRecipe}`,
+    "just browser-contract-test",
+  ]);
+  for (const [id, testPath] of RUNTIME_QUALITY_LEAVES) {
+    expect(actualRecipeBody(`${id}-run`)).toBe(
+      `bun test --path-ignore-patterns 'tmp/**' ./${testPath}`,
+    );
+    expect(actualRecipeBody("runtime-asset-script-aggregate-run")).toContain(
+      `just runtime-unused-script-verify-run ${id}`,
+    );
+  }
   expect(actualRecipeBody("browser-contract-test")).toBe(
     "node node_modules/playwright/cli.js test --config scripts/html/playwright.config.ts",
   );
@@ -982,13 +998,12 @@ test.each(["current", "previous canonical"] as const)(
       line.includes("./scripts/runtime-assets/runtime-asset-common_test.ts"),
     );
     const host = commands.find((line) => line.includes("runtime-rust-facts-host_test.ts"));
-    const owned = commands.find((line) =>
-      line.includes("./scripts/quality/owned-source-inventory_test.ts"),
-    );
     const moon = commands.find((line) =>
       line.startsWith("python3 scripts/quality/moon_cache_contract_test.py"),
     );
-    if (!asset || !host || !owned || !moon) throw new Error("missing runtime asset order fixture");
+    if (!asset || !host || !moon) throw new Error("missing runtime asset order fixture");
+    const owned =
+      "bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-source-inventory_test.ts ./scripts/quality/owned-validation-contract_test.ts";
     const body =
       order === "current"
         ? commands.join("\n")
@@ -997,10 +1012,28 @@ test.each(["current", "previous canonical"] as const)(
             owned,
             moon,
             asset,
-            ...commands.filter((line) => ![asset, host, owned, moon].includes(line)),
+            ...commands.filter((line) => ![asset, host, moon].includes(line)),
           ].join("\n");
     const root = strictUnusedRegistrationFixture();
-    recipes(root, { "runtime-asset-script-other-run": body });
+    recipes(root, {
+      "runtime-asset-script-other-run": body,
+      ...(order === "previous canonical"
+        ? {
+            "runtime-asset-script-aggregate-run":
+              "bun scripts/runtime-bundles/runtime-unused-check.ts --gate",
+          }
+        : {}),
+    });
+    if (order === "previous canonical") {
+      const justfile = path.join(root, "Justfile");
+      let content = fs.readFileSync(justfile, "utf8");
+      for (const [id] of RUNTIME_QUALITY_LEAVES) {
+        const block = `${id}-run:\n    ${actualRecipeBody(`${id}-run`)}\n`;
+        expect(content).toContain(block);
+        content = content.replace(block, "");
+      }
+      write(root, "Justfile", content);
+    }
     track(root);
     const report = inspectMathJaxUnusedAuditRoute(root);
     expect(report.binding).toMatchObject({
@@ -1017,24 +1050,22 @@ test.each(["current", "previous canonical"] as const)(
   },
 );
 
-function mutateRuntimeAssetOrder(mutation: string): string {
+function mutateRuntimeAssetOrder(mutation: string): Record<string, string> {
   const commands = actualRecipeBody("runtime-asset-script-other-run").split("\n");
-  const ownedIndex = commands.findIndex((line) =>
-    line.includes("./scripts/quality/owned-source-inventory_test.ts"),
-  );
+  const leaf = `${RUNTIME_QUALITY_LEAVES[0][0]}-run`;
+  const owned = actualRecipeBody(leaf);
   const browserIndex = commands.indexOf("just browser-contract-test");
-  if (ownedIndex < 0 || browserIndex < 0) throw new Error("missing runtime asset mutation fixture");
-  if (mutation === "missing owned") commands.splice(ownedIndex, 1);
-  if (mutation === "duplicate owned") commands.push(commands[ownedIndex] ?? "");
-  if (mutation === "changed arguments")
-    commands[ownedIndex] = `${commands[ownedIndex]} --filter altered`;
+  if (!owned || browserIndex < 0) throw new Error("missing runtime asset mutation fixture");
+  if (mutation === "missing owned") return { [leaf]: "" };
+  if (mutation === "duplicate owned") return { [leaf]: `${owned}\n${owned}` };
+  if (mutation === "changed arguments") return { [leaf]: `${owned} --filter altered` };
   if (mutation === "browser moved") {
     const browser = commands.splice(browserIndex, 1)[0];
     if (browser === undefined) throw new Error("missing browser command");
     commands.splice(3, 0, browser);
   }
   mutateMacosBrowserOrder(commands, mutation);
-  return commands.join("\n");
+  return { "runtime-asset-script-other-run": commands.join("\n") };
 }
 
 function mutateMacosBrowserOrder(commands: string[], mutation: string): void {
@@ -1059,10 +1090,10 @@ test.each([
   "duplicate macOS browser",
   "macOS browser moved",
 ] as const)("owned validation rejects runtime asset order mutation: %s", (mutation) => {
-  const body = mutateRuntimeAssetOrder(mutation);
-  expect(body).not.toBe(actualRecipeBody("runtime-asset-script-other-run"));
+  const changes = mutateRuntimeAssetOrder(mutation);
+  for (const [name, body] of Object.entries(changes)) expect(body).not.toBe(actualRecipeBody(name));
   const root = strictUnusedRegistrationFixture();
-  recipes(root, { "runtime-asset-script-other-run": body });
+  recipes(root, changes);
   track(root);
   const report = inspectMathJaxUnusedAuditRoute(root);
   expect(report.binding.standardCommandVerified).toBe(false);
@@ -3503,7 +3534,8 @@ function newUnitCommand(omit?: (typeof newlyRegisteredUnits)[number]): string {
     newlyRegisteredUnits[2] === omit
       ? ""
       : "\npython3 -m unittest discover -s scripts/quality -p '*_test.py'";
-  return `${recipeBodies.unit?.replace(" ./scripts\n", " ./scripts/tool_test.ts\n")}\nbun test --path-ignore-patterns 'tmp/**' ${bun.join(" ")}${python}`;
+  const quality = RUNTIME_QUALITY_LEAVES.map(([id]) => `just ${id}-run`).join("\n");
+  return `${recipeBodies.unit?.replace(" ./scripts\n", " ./scripts/tool_test.ts\n")}\nbun test --path-ignore-patterns 'tmp/**' ${bun.join(" ")}${python}\n${quality}`;
 }
 function newUnitFixture(omit?: {
   lane: RegistrationLane;
@@ -5637,6 +5669,32 @@ describe("host evidence registration mutations", () => {
         "mathjax-host-evidence-registration-unverified",
       );
     },
+  );
+});
+test.each(
+  RUNTIME_QUALITY_LEAVES.flatMap(([id, testPath]) =>
+    ["missing leaf", "bare path", "missing verification", "duplicate verification"].map(
+      (mutation) => [id, testPath, mutation] as const,
+    ),
+  ),
+)("quality cache leaf registration rejects %s / %s / %s", (id, testPath, mutation) => {
+  const root = strictUnusedRegistrationFixture();
+  const verify = `just runtime-unused-script-verify-run ${id}`;
+  const aggregate = actualRecipeBody("runtime-asset-script-aggregate-run");
+  const leaf = `${id}-run`;
+  const changes: Record<string, string> = {};
+  if (mutation === "missing leaf") changes[leaf] = "";
+  else if (mutation === "bare path")
+    changes[leaf] = `bun test --path-ignore-patterns 'tmp/**' ${testPath}`;
+  else if (mutation === "missing verification")
+    changes["runtime-asset-script-aggregate-run"] = aggregate.replace(`${verify}\n`, "");
+  else changes["runtime-asset-script-aggregate-run"] = `${verify}\n${aggregate}`;
+  recipes(root, changes);
+  track(root);
+  const report = inspectMathJaxUnusedAuditRoute(root);
+  expect(report.binding.standardCommandVerified).toBe(false);
+  expect(report.issues.map((issue) => issue.code)).toContain(
+    "mathjax-host-evidence-registration-unverified",
   );
 });
 test.each([

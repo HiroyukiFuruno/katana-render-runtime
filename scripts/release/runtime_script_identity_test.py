@@ -32,6 +32,39 @@ REAL_PILOT_FACTS = identity._pilot_facts
 
 
 class RuntimeScriptIdentityTests(unittest.TestCase):
+    def test_quality_profiles_share_execution_and_reuse_identity_without_broad_host(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory).resolve()
+            with (patch.object(identity, "_source_state", return_value=(SOURCE, SOURCE_INPUTS)),
+                  patch.object(identity, "_runtime_bundle_fingerprint", return_value={"tools": {}}),
+                  patch.object(identity, "_python_context", return_value={"python": "fixed"}),
+                  patch.object(identity, "_quality_fingerprint", return_value=TOOLS) as quality,
+                  patch.object(identity, "_tool_fingerprint",
+                               side_effect=identity._CollectionFailure("rust_facts_host_unavailable")) as broad):
+                for producer in profiles.QUALITY_SCRIPT_PROFILES:
+                    recipe = recipe_reader.RuntimeScriptRecipe(profiles.producer_recipe(producer), RECIPE, ())
+                    with patch.object(recipe_reader, "read_runtime_script_recipe", return_value=recipe):
+                        execution = identity.collect_execution_snapshot(repo, producer)
+                        reuse = identity.collect_identity_report(repo, producer)
+                        quality.return_value = INPUT
+                        changed = identity.collect_identity_report(repo, producer)
+                        quality.return_value = TOOLS
+                    self.assertTrue(execution["cacheable"])
+                    self.assertEqual(execution, reuse)
+                    self.assertNotEqual(reuse["identitySha256"], changed["identitySha256"])
+                broad.assert_not_called()
+
+    def test_quality_fingerprint_rejects_changed_inputs_or_source(self) -> None:
+        root = Path("/fixture")
+        with (patch.object(pilot, "collect_quality_inputs", side_effect=["first", "second"]),
+              patch.object(identity, "_source_state", return_value=(SOURCE, SOURCE_INPUTS))):
+            with self.assertRaisesRegex(identity._CollectionFailure, "quality_inputs_unavailable"):
+                identity._quality_fingerprint(root, (SOURCE, SOURCE_INPUTS))
+        with (patch.object(pilot, "collect_quality_inputs", return_value="same"),
+              patch.object(identity, "_source_state", return_value=(OTHER_SOURCE, SOURCE_INPUTS))):
+            with self.assertRaisesRegex(identity._CollectionFailure, "quality_inputs_unavailable"):
+                identity._quality_fingerprint(root, (SOURCE, SOURCE_INPUTS))
+
     def setUp(self) -> None:
         pilot_patch = patch.object(identity, "_pilot_facts", return_value=("8" * 64, {"scope": "pilot"}))
         pilot_patch.start()

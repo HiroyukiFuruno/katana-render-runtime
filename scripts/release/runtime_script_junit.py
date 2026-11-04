@@ -14,6 +14,7 @@ PRODUCER_NAMES = (
     "runtime-asset-script-other",
     "runtime-unused-script-regression",
     *sorted(profiles.RUNTIME_SCRIPT_PROFILES),
+    *sorted(profiles.QUALITY_SCRIPT_PROFILES),
 )
 
 
@@ -134,8 +135,13 @@ def parse_junit(
 def _normalize_suite_file(path: str) -> str:
     normalized = path.removeprefix("./")
     if (
-        not normalized.startswith("scripts/runtime-bundles/")
-        or not normalized.endswith("_test.ts")
+        not (
+            (
+                normalized.startswith("scripts/runtime-bundles/")
+                and normalized.endswith("_test.ts")
+            )
+            or normalized in profiles.QUALITY_SCRIPT_TEST_PATHS
+        )
         or ".." in Path(normalized).parts
         or Path(normalized).is_absolute()
     ):

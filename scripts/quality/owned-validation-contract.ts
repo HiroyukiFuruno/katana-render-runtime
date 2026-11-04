@@ -19,12 +19,12 @@ import {
   FACTS_CARGO_GUARD_SOURCE as NATIVE_WIDTH_CARGO_GUARD_SOURCE,
   normalizeClassicFactsTestCommands,
   policyContract,
+  RUNTIME_QUALITY_LEAVES,
   RUNTIME_UNUSED_FINAL_VERIFY_COMMAND,
   RUNTIME_UNUSED_LEAF_IDS,
   RUNTIME_UNUSED_PRODUCER_RUN_RECIPE,
   RUNTIME_UNUSED_REGRESSION_TESTS,
   RUNTIME_UNUSED_VERIFY_RUN_RECIPE,
-  runtimeUnusedLeafRunRecipe,
   shellWords,
   sourceCode,
 } from "../html/harness-contract-graph";
@@ -290,6 +290,44 @@ function runtimeUnusedRecipeBody(context: ContractContext): string {
 }
 function runtimeAggregateRecipeBody(context: ContractContext): string {
   return context.recipes.get(RUNTIME_ASSET_AGGREGATE_RECIPE) ?? "";
+}
+function qualityLeafRecipesPresent(context: ContractContext): boolean {
+  return RUNTIME_QUALITY_LEAVES.some(([id]) => context.recipes.has(`${id}-run`));
+}
+function qualityLeafRecipesVerified(context: ContractContext): boolean {
+  return RUNTIME_QUALITY_LEAVES.every(
+    ([id, test]) =>
+      context.recipes.get(`${id}-run`)?.trim() ===
+      `bun test --path-ignore-patterns 'tmp/**' ./${test}`,
+  );
+}
+function reviewedRuntimeAggregateBody(context: ContractContext): string {
+  const body = runtimeAggregateRecipeBody(context)
+    .trim()
+    .split("\n")
+    .map((line) => line.trim())
+    .join("\n");
+  if (!qualityLeafRecipesPresent(context)) return body;
+  const expected = [
+    ...RUNTIME_QUALITY_LEAVES.map(([id]) => `just ${RUNTIME_UNUSED_VERIFY_RUN_RECIPE} ${id}`),
+    MATHJAX_UNUSED_STANDARD_GATE_COMMAND,
+  ].join("\n");
+  return qualityLeafRecipesVerified(context) && body === expected
+    ? MATHJAX_UNUSED_STANDARD_GATE_COMMAND
+    : "";
+}
+function reviewedRuntimeAssetCommands(context: ContractContext): string[] | undefined {
+  const commands = unconditionalRecipeCommands(runtimeAssetRecipeBody(context));
+  if (!qualityLeafRecipesPresent(context)) return commands;
+  if (
+    reviewedRuntimeAggregateBody(context) !== MATHJAX_UNUSED_STANDARD_GATE_COMMAND ||
+    commands.some((line) =>
+      RUNTIME_QUALITY_LEAVES.some(([, test]) => unitCommand(line).includes(`./${test}`)),
+    )
+  )
+    return undefined;
+  // 実行を分離した2件も厳格な登録確認後に従来の比較用配列へ対応させる。
+  return [...commands, OWNED_VALIDATION_COMMAND];
 }
 function runtimePreflightRecipeBody(context: ContractContext): string {
   return context.recipes.get(RUNTIME_ASSET_PREFLIGHT_RECIPE) ?? "";
@@ -2412,7 +2450,7 @@ function playwrightMacosRegistered(context: ContractContext, lane: Set<string>):
   }
 }
 function playwrightRegistered(context: ContractContext, lane: Set<string>): boolean {
-  const lines = unconditionalRecipeCommands(runtimeAssetRecipeBody(context)).filter(
+  const lines = (reviewedRuntimeAssetCommands(context) ?? []).filter(
     (line) => line !== SVG_ENGINE_PROVENANCE_TEST_COMMAND,
   );
   const reviewed = normalizeMovedRuntimeAssetCommands(lines);
@@ -2597,7 +2635,7 @@ function hostEvidenceInputRegistered(context: ContractContext, name: string): bo
   }
 }
 function hostEvidenceRecipesRegistered(context: ContractContext): boolean {
-  const commands = unconditionalRecipeCommands(runtimeAssetRecipeBody(context));
+  const commands = reviewedRuntimeAssetCommands(context) ?? [];
   const preflight = unconditionalRecipeCommands(runtimePreflightRecipeBody(context));
   const result =
     context.recipes.get("runtime-asset-script-test")?.trim() ===
@@ -2614,7 +2652,7 @@ function hostEvidenceRecipesRegistered(context: ContractContext): boolean {
       "python3 scripts/release/runtime_script_cache_cli.py key --repo {{ quote(REPO_ROOT) }} --producer {{ quote(producer) }}" &&
     context.recipes.get(RUNTIME_UNUSED_FINAL_VERIFY_RECIPE)?.trim() ===
       RUNTIME_UNUSED_FINAL_VERIFY_COMMAND &&
-    runtimeAggregateRecipeBody(context).trim() === MATHJAX_UNUSED_STANDARD_GATE_COMMAND &&
+    reviewedRuntimeAggregateBody(context) === MATHJAX_UNUSED_STANDARD_GATE_COMMAND &&
     preflight.length === HOST_EVIDENCE_PRECONDITIONS.length &&
     HOST_EVIDENCE_PRECONDITIONS.every((command, index) => preflight[index] === command) &&
     registered(context, RUNTIME_ASSET_PREFLIGHT_RECIPE) &&
@@ -2728,7 +2766,7 @@ function mathJaxUnusedAuditBinding(
   // WHY: audit-only実行は必ずexit 1なので、成功laneは明示gateだけを受理し、audit文字列は台帳に残す。
   const standardCommandVerified =
     strictStandardGateCommandVerified(
-      runtimeAggregateRecipeBody(context),
+      reviewedRuntimeAggregateBody(context),
       inputSelectionVerified,
     ) && hostEvidenceRegistered;
   const standardLocalCheckRegistered =
@@ -4023,7 +4061,8 @@ function reviewedSplitRuntimeAssetTestCommands(context: ContractContext): string
   return runtimeAssetTestCommands(context);
 }
 function runtimeAssetTestCommands(context: ContractContext): string[] | undefined {
-  const commands = unconditionalRecipeCommands(runtimeAssetRecipeBody(context));
+  const commands = reviewedRuntimeAssetCommands(context);
+  if (commands === undefined) return undefined;
   const provenanceCommands = commands.filter((line) => line === SVG_ENGINE_PROVENANCE_TEST_COMMAND);
   if (provenanceCommands.length !== 1) return undefined;
   const reviewedCommands = commands.filter((line) => line !== SVG_ENGINE_PROVENANCE_TEST_COMMAND);
@@ -4732,11 +4771,7 @@ function moonOwnerTaskMatches(
   const cacheLeafException =
     expected.options.cache === false &&
     ((name === "runtime-bundle-check" && actual.options.cache === true) ||
-      (name.endsWith("-producer") &&
-        RUNTIME_UNUSED_LEAF_IDS.includes(
-          name.slice(0, -"-producer".length) as (typeof RUNTIME_UNUSED_LEAF_IDS)[number],
-        ) &&
-        actual.options.cache === "local")) &&
+      (runtimeScriptCacheProducer(name) && actual.options.cache === "local")) &&
     JSON.stringify(expectedOptions.filter(([key]) => key !== "cache")) ===
       JSON.stringify(actualOptions.filter(([key]) => key !== "cache"));
   const leafMatches = moonOwnerLeafMatches(name, actual.leaf, expected.leaf);
@@ -4747,15 +4782,23 @@ function moonOwnerTaskMatches(
   );
 }
 
+function runtimeScriptCacheProducer(name: string): boolean {
+  if (!name.endsWith("-producer")) return false;
+  const id = name.slice(0, -"-producer".length);
+  return (
+    RUNTIME_UNUSED_LEAF_IDS.some((name) => name === id) ||
+    RUNTIME_QUALITY_LEAVES.some(([name]) => name === id)
+  );
+}
+
 function moonOwnerLeafMatches(
   name: string,
   actual: string | null,
   expected: string | null,
 ): boolean {
   if (!name.endsWith("-producer")) return actual === expected;
-  const id = name.slice(0, -"-producer".length);
-  if (!(RUNTIME_UNUSED_LEAF_IDS as readonly string[]).includes(id)) return actual === expected;
-  const selected = runtimeUnusedLeafRunRecipe(id);
+  if (!runtimeScriptCacheProducer(name)) return actual === expected;
+  const selected = RUNTIME_UNUSED_VERIFY_RUN_RECIPE;
   return actual === selected && expected === selected;
 }
 

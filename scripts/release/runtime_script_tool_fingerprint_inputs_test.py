@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -69,6 +70,119 @@ class ToolFingerprintInputsTest(unittest.TestCase):
     def test_unreviewed_test_source_change_is_rejected(self) -> None:
         self.write(inputs.SOURCE_FILES[0], b"new dependency")
         self.assertEqual(self.collect()["missReason"], "reviewed_source_changed")
+
+    def test_quality_inputs_bind_package_bytes_and_environment_without_disclosure(self) -> None:
+        for name in (
+            "@swc/core/index.js", "@swc/types/index.js", "@swc/counter/index.js",
+            "@swc/core-test/native.node", "typescript/index.js",
+            "@typescript/typescript-test/compiler",
+        ):
+            self.write(f"node_modules/{name}", b"original")
+        environment = {"HOME": str(self.home), "PATH": "/bin", "QUALITY_SECRET": "private-value"}
+        with (patch.object(inputs, "_quality_git", return_value="git-identity"),
+              patch.object(inputs, "_quality_python", return_value="python-identity"),
+              patch.object(tempfile, "gettempdir", return_value=str(self.home))):
+            before = inputs.collect_quality_inputs(self.root, environment)
+            self.assertNotIn("private-value", before)
+            changed_env = inputs.collect_quality_inputs(self.root, {**environment, "QUALITY_SECRET": "other"})
+            self.assertNotEqual(before, changed_env)
+            self.write("node_modules/@swc/core-test/native.node", b"changed")
+            self.assertNotEqual(before, inputs.collect_quality_inputs(self.root, environment))
+            self.write("bunfig.toml", b"preload = []")
+            with self.assertRaisesRegex(ValueError, "configuration_or_preload_not_admitted"):
+                inputs.collect_quality_inputs(self.root, environment)
+
+    def test_quality_inputs_reject_missing_native_package(self) -> None:
+        with self.assertRaises((OSError, ValueError)):
+            inputs._quality_packages(self.root)
+
+    def test_quality_git_hashes_effective_configuration_without_disclosure(self) -> None:
+        binary = self.write("git", b"fixture git")
+        environment = {"PATH": str(self.root)}
+        first = subprocess.CompletedProcess([], 0, stdout=b"secret-one", stderr=b"")
+        second = subprocess.CompletedProcess([], 0, stdout=b"secret-two", stderr=b"")
+        with (patch.object(shutil, "which", return_value=str(binary)),
+              patch.object(inputs, "_quality_git_files", return_value=[]),
+              patch.object(inputs, "_quality_git_conditions"),
+              patch.object(subprocess, "run", side_effect=[first, second])):
+            before = inputs._quality_git(self.root, environment)
+            after = inputs._quality_git(self.root, environment)
+        self.assertNotEqual(before, after)
+        self.assertNotIn("secret", before)
+
+    def test_quality_git_rejects_conditional_includes_without_disclosure(self) -> None:
+        result = subprocess.CompletedProcess([], 0, stdout=b"includeif.onbranch:private.path\0", stderr=b"")
+        with patch.object(subprocess, "run", return_value=result):
+            with self.assertRaisesRegex(ValueError, "quality_git_conditional_include_not_admitted"):
+                inputs._quality_git_conditions(self.root / "git", self.root, {"HOME": str(self.home)})
+
+    def test_quality_git_conditions_only_accept_disjoint_absolute_anchors(self) -> None:
+        temp = self.root / "temporary"
+        roots = {temp, temp.resolve(strict=False)}
+        environment = {"HOME": str(self.home)}
+        workspace = (self.home / "work").as_posix()
+        temp_path = temp.as_posix()
+        anchor = Path(temp.anchor).as_posix()
+        for condition in (f"gitdir:{workspace}/**", "gitdir/i:~/work/**"):
+            inputs._quality_git_condition(f"includeif.{condition}.path", roots, environment)
+        for condition in (f"gitdir:{temp_path}/**", f"gitdir/i:{temp_path.upper()}/**",
+                          f"gitdir:{temp_path}/child/**", f"gitdir:{anchor}**",
+                          "gitdir:relative/**", f"gitdir:{workspace}/../tmp/**", "onbranch:main"):
+            with self.subTest(condition=condition):
+                with self.assertRaisesRegex(ValueError, "quality_git_conditional_include_not_admitted"):
+                    inputs._quality_git_condition(f"includeif.{condition}.path", roots, environment)
+
+    def test_quality_git_files_bind_external_ignore_and_attributes(self) -> None:
+        ignore = self.home / "external-ignore"
+        attributes = self.home / "external-attributes"
+        environment = {"HOME": str(self.home)}
+        no_value = subprocess.CompletedProcess([], 1, stdout=b"", stderr=b"")
+        values = [subprocess.CompletedProcess([], 0, stdout=bytes(path) + b"\0", stderr=b"")
+                  for path in (ignore, attributes)]
+        with patch.object(subprocess, "run", side_effect=values * 4 + [no_value, no_value] * 2):
+            before = inputs._quality_git_files(self.root / "git", self.root, environment)
+            ignore.write_text("scripts/helper.mts\n", encoding="utf8")
+            added = inputs._quality_git_files(self.root / "git", self.root, environment)
+            ignore.write_text("changed\n", encoding="utf8")
+            changed = inputs._quality_git_files(self.root / "git", self.root, environment)
+            attributes.write_text("*.mts text\n", encoding="utf8")
+            changed_attributes = inputs._quality_git_files(self.root / "git", self.root, environment)
+            default = inputs._quality_git_files(self.root / "git", self.root, environment)
+            default_ignore = self.home / ".config/git/ignore"
+            default_ignore.parent.mkdir(parents=True)
+            default_ignore.write_text("scripts/helper.mts\n", encoding="utf8")
+            changed_default = inputs._quality_git_files(self.root / "git", self.root, environment)
+        self.assertNotEqual(before, added)
+        self.assertNotEqual(added, changed)
+        self.assertNotEqual(changed, changed_attributes)
+        self.assertNotEqual(changed_attributes, default)
+        self.assertNotEqual(default, changed_default)
+        self.assertNotIn("scripts/helper.mts", str(added))
+
+    def test_quality_git_files_reject_relative_config_path(self) -> None:
+        relative = subprocess.CompletedProcess([], 0, stdout=b"relative-ignore\0", stderr=b"")
+        with patch.object(subprocess, "run", return_value=relative):
+            with self.assertRaisesRegex(ValueError, "quality_git_path_not_absolute"):
+                inputs._quality_git_files(self.root / "git", self.root, {"HOME": str(self.home)})
+
+    def test_quality_ruff_rejects_external_config_in_temp_and_xdg(self) -> None:
+        environment = {"HOME": str(self.home), "XDG_CONFIG_HOME": str(self.home)}
+        with patch.object(tempfile, "gettempdir", return_value=str(self.home)):
+            inputs._quality_ruff_absence(self.root, self.home, environment)
+            for relative in ("ruff.toml", "ruff/pyproject.toml"):
+                config = self.home / relative
+                config.parent.mkdir(parents=True, exist_ok=True)
+                config.write_text("secret fixture", encoding="utf8")
+                with self.assertRaisesRegex(ValueError, "quality_external_ruff_config_not_admitted"):
+                    inputs._quality_ruff_absence(self.root, self.home, environment)
+                config.unlink()
+
+    def test_quality_python_binds_path_selected_executable(self) -> None:
+        binary = self.write("python3", b"first")
+        with patch.object(shutil, "which", return_value=str(binary)):
+            before = inputs._quality_python({"PATH": str(self.root)})
+            binary.write_bytes(b"second")
+            self.assertNotEqual(before, inputs._quality_python({"PATH": str(self.root)}))
 
     def test_configuration_and_unknown_runtime_override_are_rejected(self) -> None:
         config = self.write("bunfig.toml", b"preload = []")

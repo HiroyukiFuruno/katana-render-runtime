@@ -16,7 +16,7 @@ LIMITATIONS = [
 
 
 # 実 owner のレビュー済み AST。更新には owner のレビューと実回帰が必要。
-OWNER_AST_SHA256 = "d0a40996cec6c4608e3df1eb0578613f0e3df29378a894a3c7c34770ffb63c59"
+OWNER_AST_SHA256 = "2b37ea486755c7064cd311df1c33788e6640b1eb0bd3614e5d838b50aa4fdb28"
 SCHEDULER_LEAVES = {
     "biome": "biome-run",
     "runtime-asset-script-test": "runtime-asset-script-aggregate-run",
@@ -29,6 +29,8 @@ SCHEDULER_LEAVES = {
     "runtime-unused-mathjax-producer": "runtime-unused-script-verify-run",
     "runtime-unused-native-width-producer": "runtime-unused-script-verify-run",
     "runtime-unused-rust-classic-producer": "runtime-unused-script-verify-run",
+    "runtime-quality-owned-source-inventory-producer": "runtime-unused-script-verify-run",
+    "runtime-quality-owned-validation-contract-producer": "runtime-unused-script-verify-run",
     "runtime-unused-script-regression": "runtime-unused-script-final-verify-run",
 }
 

@@ -40,12 +40,20 @@ RUNTIME_UNUSED_LEAF_IDS = (
     "runtime-unused-native-width",
     "runtime-unused-rust-classic",
 )
+RUNTIME_QUALITY_LEAF_IDS = (
+    "runtime-quality-owned-source-inventory",
+    "runtime-quality-owned-validation-contract",
+)
 SCHEDULER_DEPENDENCIES: dict[str, list[str]] = {
     "unit-test": ["runtime-asset-script-test"],
     "runtime-asset-script-test": [
         "runtime-asset-script-other",
         "runtime-unused-script-regression",
+        "runtime-quality-owned-source-inventory-producer",
+        "runtime-quality-owned-validation-contract-producer",
     ],
+    "runtime-quality-owned-source-inventory-producer": ["runtime-classic-generation-evidence"],
+    "runtime-quality-owned-validation-contract-producer": ["runtime-classic-generation-evidence"],
     "runtime-asset-script-other": ["runtime-classic-generation-evidence"],
     "runtime-unused-script-regression": ["runtime-classic-generation-evidence"],
     "runtime-classic-generation-evidence": ["runtime-asset-script-preflight"],
@@ -122,6 +130,8 @@ SCHEDULER_EVENT_PHASES = (
     "runtime-classic-generation-evidence",
     "runtime-asset-script-other",
     "runtime-unused-script-regression",
+    "runtime-quality-owned-source-inventory-producer",
+    "runtime-quality-owned-validation-contract-producer",
     "runtime-asset-script-test",
     "unit-test",
 )
@@ -136,6 +146,8 @@ SCHEDULER_BARRIER_PHASES = (
     "runtime-classic-generation-evidence",
     "runtime-asset-script-other",
     "runtime-unused-script-regression",
+    "runtime-quality-owned-source-inventory-producer",
+    "runtime-quality-owned-validation-contract-producer",
     "runtime-asset-script-test",
     "unit-test",
 )
@@ -144,6 +156,8 @@ SCHEDULER_NATIVE_PHASES = (
     "runtime-classic-generation-evidence",
     "runtime-asset-script-other",
     "runtime-unused-script-regression",
+    "runtime-quality-owned-source-inventory-producer",
+    "runtime-quality-owned-validation-contract-producer",
     "runtime-asset-script-test",
     "unit-test",
 )
@@ -314,7 +328,7 @@ def production_task_input_binding(
     declared_path = evidence_dir / "production-declared-inputs.json"
     declared_path.write_text(declared_output)
     declared = moon_json_object(json.loads(declared_output))
-    assert len(declared) == 48, "Production Moon task count changed"
+    assert len(declared) == 50, "Production Moon task count changed"
     validate_root_test_coverage_contract(declared)
     runtime_preflight = moon_json_object(declared.get("runtime-asset-script-preflight"))
     classic_evidence = moon_json_object(
@@ -367,18 +381,19 @@ def production_task_input_binding(
     assert "html-performance-lock-pin-check" in foundation_deps
     verify_run_count = 0
     legacy_run_count = 0
-    for index, leaf in enumerate(RUNTIME_UNUSED_LEAF_IDS):
+    for index, leaf in enumerate((*RUNTIME_UNUSED_LEAF_IDS, *RUNTIME_QUALITY_LEAF_IDS)):
         producer = moon_json_object(declared.get(f"{leaf}-producer"))
         previous = (
             "runtime-classic-generation-evidence"
-            if index == 0
+            if index == 0 or index >= len(RUNTIME_UNUSED_LEAF_IDS)
             else f"{RUNTIME_UNUSED_LEAF_IDS[index - 1]}-producer"
         )
         assert producer.get("deps") == [previous]
         command = producer.get("command")
         assert command == ["just", "runtime-unused-script-verify-run", leaf]
-        verify_run_count += int(command == ["just", "runtime-unused-script-verify-run", leaf])
-        legacy_run_count += int(command == ["just", "runtime-unused-script-producer-run", leaf])
+        if index < len(RUNTIME_UNUSED_LEAF_IDS):
+            verify_run_count += int(command == ["just", "runtime-unused-script-verify-run", leaf])
+            legacy_run_count += int(command == ["just", "runtime-unused-script-producer-run", leaf])
         assert producer.get("outputs") == [
             f"tmp/quality/runtime-script-results/{leaf}.json",
             f"tmp/quality/runtime-script-results/{leaf}-current-group-001.xml",
@@ -396,6 +411,8 @@ def production_task_input_binding(
     assert runtime_aggregate.get("deps") == [
         "runtime-asset-script-other",
         "runtime-unused-script-regression",
+        "runtime-quality-owned-source-inventory-producer",
+        "runtime-quality-owned-validation-contract-producer",
     ]
     for name, raw in declared.items():
         task = moon_json_object(raw)
@@ -590,7 +607,13 @@ def scheduler_success_order_valid(phases: list[str]) -> bool:
         and positions["runtime-classic-generation-evidence"]
         < positions["runtime-unused-script-regression"]
         < positions["runtime-asset-script-test"]
-        < positions["unit-test"]
+        and all(
+            positions["runtime-classic-generation-evidence"]
+            < positions[f"{leaf}-producer"]
+            < positions["runtime-asset-script-test"]
+            for leaf in RUNTIME_QUALITY_LEAF_IDS
+        )
+        and positions["runtime-asset-script-test"] < positions["unit-test"]
     )
 
 
@@ -1579,6 +1602,8 @@ def main() -> int:
                     "runtime-classic-generation-evidence",
                     "runtime-asset-script-other",
                     "runtime-unused-script-regression",
+                    "runtime-quality-owned-source-inventory-producer",
+                    "runtime-quality-owned-validation-contract-producer",
                     "runtime-asset-script-test",
                     "unit-test",
                 ),

@@ -4,13 +4,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 
 import html_performance_inventory as physical_inventory
+import runtime_script_profiles as profiles
 
 SCHEMA = "krr-tool-fingerprint-input-diagnostic-v1"
 PROFILE = "runtime-unused-tool-fingerprint"
@@ -46,6 +49,184 @@ REVIEWED_SOURCES = {
     SOURCE_FILES[1]: "b2f734840251199f02372fec8201510276811d880e9976ad8910438c4b52768c",
     SOURCE_FILES[2]: "5a27a1ae123f3668751caf1a35180a1266798a2329db57225693c5ac41523612",
 }
+
+QUALITY_PROFILES = frozenset(profiles.QUALITY_SCRIPT_PROFILES)
+
+
+def _quality_ruff_absence(repo: Path, home: Path, environment: Mapping[str, str]) -> list[str]:
+    temporary = {Path(tempfile.gettempdir()).resolve(strict=True)}
+    for name in ("TMPDIR", "TMP", "TEMP"):
+        value = environment.get(name)
+        if value:
+            if not Path(value).is_absolute():
+                raise ValueError("quality_temp_path_not_absolute")
+            temporary.add(Path(value).resolve(strict=True))
+    directories = {repo.parent, *repo.parents}
+    for parent in temporary:
+        directories.update((parent, *parent.parents))
+    xdg = environment.get("XDG_CONFIG_HOME")
+    if xdg and not Path(xdg).is_absolute():
+        raise ValueError("quality_xdg_path_not_absolute")
+    directories.add((Path(xdg) if xdg else home / ".config") / "ruff")
+    candidates = sorted(str(directory / name) for directory in directories
+                        for name in ("ruff.toml", ".ruff.toml", "pyproject.toml"))
+    if any(os.path.lexists(path) for path in candidates):
+        raise ValueError("quality_external_ruff_config_not_admitted")
+    return candidates
+
+
+def _quality_git(repo: Path, environment: Mapping[str, str]) -> str:
+    executable = shutil.which("git", path=environment.get("PATH", ""))
+    if executable is None:
+        raise ValueError("quality_git_unavailable")
+    git = Path(executable).resolve(strict=True)
+    binary = physical_inventory._file_row(git, git.parent)
+    result = subprocess.run(
+        [str(git), "config", "--includes", "--null", "--list", "--show-origin"],
+        cwd=repo, env=dict(environment), capture_output=True, check=False,
+    )
+    if result.returncode != 0:
+        raise ValueError("quality_git_config_unavailable")
+    _quality_git_conditions(git, repo, environment)
+    files = _quality_git_files(git, repo, environment)
+    return _digest({"binary": binary, "configurationSha256": hashlib.sha256(result.stdout).hexdigest(),
+                    "files": files})
+
+
+def _quality_git_conditions(git: Path, repo: Path, environment: Mapping[str, str]) -> None:
+    result = subprocess.run(
+        [str(git), "config", "--includes", "--null", "--name-only", "--get-regexp", r"^includeif\..*\.path$"],
+        cwd=repo, env=dict(environment), capture_output=True, check=False,
+    )
+    if result.returncode == 1 and not result.stdout:
+        return
+    if result.returncode != 0 or not result.stdout.endswith(b"\0"):
+        raise ValueError("quality_git_config_unavailable")
+    roots = _quality_temp_roots(environment)
+    for raw in result.stdout[:-1].split(b"\0"):
+        _quality_git_condition(os.fsdecode(raw), roots, environment)
+
+
+def _quality_temp_roots(environment: Mapping[str, str]) -> set[Path]:
+    roots = {Path(tempfile.gettempdir())}
+    if os.name != "nt":
+        roots.update((Path("/tmp"), Path("/var/tmp")))
+    for name in ("TMPDIR", "TMP", "TEMP"):
+        if environment.get(name):
+            roots.add(Path(environment[name]))
+    if any(not root.is_absolute() for root in roots):
+        raise ValueError("quality_git_conditional_include_not_admitted")
+    return roots | {root.resolve(strict=False) for root in roots}
+
+
+def _quality_git_condition(name: str, roots: set[Path], environment: Mapping[str, str]) -> None:
+    lower = name.lower()
+    if not lower.startswith("includeif.") or not lower.endswith(".path"):
+        raise ValueError("quality_git_conditional_include_not_admitted")
+    condition = name[len("includeif."):-len(".path")]
+    if condition.lower().startswith("gitdir/i:"):
+        pattern = condition[len("gitdir/i:"):]
+    elif condition.lower().startswith("gitdir:"):
+        pattern = condition[len("gitdir:"):]
+    else:
+        raise ValueError("quality_git_conditional_include_not_admitted")
+    if "\\" in pattern or any(p in (".", "..") for p in pattern.split("/")):
+        raise ValueError("quality_git_conditional_include_not_admitted")
+    if pattern.startswith("~/"):
+        pattern = (Path(environment.get("HOME", "")) / pattern[2:]).as_posix()
+    if not Path(pattern).is_absolute():
+        raise ValueError("quality_git_conditional_include_not_admitted")
+    first_glob = min((pattern.find(char) for char in "*?[" if char in pattern), default=len(pattern))
+    literal = pattern[:first_glob]
+    prefix = Path(literal if literal.endswith("/") else literal.rpartition("/")[0] + "/")
+    prefixes = (prefix, prefix.resolve(strict=False))
+    for left in prefixes:
+        for right in roots:
+            a, b = left.as_posix().casefold().rstrip("/"), right.as_posix().casefold().rstrip("/")
+            if not a or not b or a == b or a.startswith(b + "/") or b.startswith(a + "/"):
+                raise ValueError("quality_git_conditional_include_not_admitted")
+
+
+def _quality_git_files(git: Path, repo: Path, environment: Mapping[str, str]) -> list[object]:
+    home = Path(environment.get("HOME", ""))
+    xdg = Path(environment.get("XDG_CONFIG_HOME") or home / ".config")
+    if not home.is_absolute() or not xdg.is_absolute():
+        raise ValueError("quality_git_path_not_absolute")
+    paths = {xdg / "git" / "ignore", xdg / "git" / "attributes"}
+    for key in ("core.excludesFile", "core.attributesFile"):
+        result = subprocess.run([str(git), "config", "--includes", "--null", "--path", "--get-all", key],
+                                cwd=repo, env=dict(environment), capture_output=True, check=False)
+        if result.returncode not in (0, 1) or (result.returncode == 1 and result.stdout):
+            raise ValueError("quality_git_config_unavailable")
+        if result.returncode == 0:
+            if not result.stdout.endswith(b"\0"):
+                raise ValueError("quality_git_config_unavailable")
+            for value in result.stdout[:-1].split(b"\0"):
+                path = Path(os.fsdecode(value))
+                if not value or not path.is_absolute():
+                    raise ValueError("quality_git_path_not_absolute")
+                paths.add(path)
+    return [_quality_git_file(path) for path in sorted(paths)]
+
+
+def _quality_git_file(path: Path) -> object:
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return {"path": str(path), "exists": False}
+    resolved = path.resolve(strict=True)
+    return {"path": str(path), "resolved": str(resolved),
+            "file": physical_inventory._file_row(resolved, resolved.parent)}
+
+
+def _quality_python(environment: Mapping[str, str]) -> str:
+    executable = shutil.which("python3", path=environment.get("PATH", ""))
+    if executable is None:
+        raise ValueError("quality_python_unavailable")
+    python = Path(executable).resolve(strict=True)
+    return _digest(physical_inventory._file_row(python, python.parent))
+
+
+def _quality_packages(repo: Path) -> str:
+    modules = (repo / "node_modules").resolve(strict=True)
+    if modules != repo / "node_modules" or not modules.is_dir():
+        raise ValueError("quality_modules_not_canonical")
+    packages = [modules / "@swc/core", modules / "@swc/types", modules / "@swc/counter",
+                modules / "typescript", modules / "zod"]
+    for parent, prefix in ((modules / "@swc", "core-"), (modules / "@typescript", "typescript-")):
+        found = sorted(path for path in parent.iterdir() if path.name.startswith(prefix))
+        if not found:
+            raise ValueError("quality_native_package_missing")
+        packages.extend(found)
+    return _digest([_checked_inventory(package, modules) for package in packages])
+
+
+def collect_quality_inputs(repo: Path, environment: Mapping[str, str]) -> str:
+    """2件の品質契約に必要な外部入力を固定digestとして取得する。"""
+    home = Path(environment.get("HOME", ""))
+    if not home.is_absolute() or home.resolve(strict=True) != home:
+        raise ValueError("quality_home_not_canonical")
+    if any(environment.get(name) for name in OVERRIDES):
+        raise ValueError("quality_unsupported_override")
+    if any(value and (name.startswith("LD_") or name.startswith("DYLD_"))
+           for name, value in environment.items()):
+        raise ValueError("quality_unsupported_loader")
+    absence = _config_absence(repo, home, environment)
+    ruff_absence = _quality_ruff_absence(repo, home, environment)
+    git = _quality_git(repo, environment)
+    python = _quality_python(environment)
+    packages = _quality_packages(repo)
+    if (absence != _config_absence(repo, home, environment)
+            or ruff_absence != _quality_ruff_absence(repo, home, environment)
+            or git != _quality_git(repo, environment)
+            or python != _quality_python(environment)
+            or packages != _quality_packages(repo)):
+        raise ValueError("quality_inputs_changed")
+    selected = {name: value for name, value in environment.items()
+                if name not in ORCHESTRATION_METADATA or name == "CARGO_CAPACITY_PROTECTED_REFS"}
+    return _digest({"git": git, "python": python, "packages": packages, "absence": absence,
+                    "ruffAbsence": ruff_absence,
+                    "environmentSha256": _digest(selected)})
 
 
 def _digest(value: object) -> str:

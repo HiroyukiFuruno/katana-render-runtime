@@ -128,6 +128,69 @@ class RuntimeScriptProducerTests(unittest.TestCase):
                 with self.subTest(producer=producer_name):
                     self._run_profile_success(repo, producer_name, test_path)
 
+    def test_two_quality_profiles_run_real_bun_and_commit_separate_receipts(self) -> None:
+        with self._repo() as directory:
+            repo = Path(directory).resolve()
+            for producer_name, test_path in profiles.QUALITY_SCRIPT_PROFILES.items():
+                with self.subTest(producer=producer_name):
+                    self._run_profile_success(repo, producer_name, test_path)
+
+    def test_quality_profile_inventory_rejects_missing_other_and_extra_files(self) -> None:
+        producer_name = "runtime-quality-owned-source-inventory"
+        command_prefix = ("bun", "test", "--path-ignore-patterns", "tmp/**")
+        invalid_commands = (
+            command_prefix,
+            (*command_prefix, "./scripts/quality/owned-validation-contract_test.ts"),
+            (
+                *command_prefix,
+                profiles.QUALITY_SCRIPT_PROFILES[producer_name],
+                "./scripts/runtime-bundles/extra_test.ts",
+            ),
+        )
+        for command in invalid_commands:
+            with self.subTest(command=command), self.assertRaisesRegex(
+                producer.RuntimeScriptProducerError, "inventory"
+            ):
+                producer._expected_files(command, producer_name)
+
+    def test_expected_files_requires_dot_slash_for_default_and_all_fixed_profiles(self) -> None:
+        profile_pairs = (
+            (profiles.DEFAULT_PRODUCER, "./scripts/runtime-bundles/example_test.ts"),
+            *profiles.RUNTIME_SCRIPT_PROFILES.items(),
+            *profiles.QUALITY_SCRIPT_PROFILES.items(),
+        )
+        command_prefix = ("bun", "test", "--path-ignore-patterns", "tmp/**")
+        for producer_name, accepted_path in profile_pairs:
+            with self.subTest(producer=producer_name):
+                self.assertEqual(
+                    producer._expected_files((*command_prefix, accepted_path), producer_name),
+                    (accepted_path.removeprefix("./"),),
+                )
+                with self.assertRaisesRegex(
+                    producer.RuntimeScriptProducerError, "inventory is unsupported"
+                ):
+                    producer._expected_files(
+                        (*command_prefix, accepted_path.removeprefix("./")), producer_name
+                    )
+                with self.assertRaisesRegex(
+                    producer.RuntimeScriptProducerError, "inventory is unsupported"
+                ):
+                    producer._expected_files(
+                        (*command_prefix, "/repo/" + accepted_path.removeprefix("./")),
+                        producer_name,
+                    )
+
+    def test_fixed_profile_rejects_multiple_commands_before_identity_collection(self) -> None:
+        producer_name, test_path = next(iter(profiles.QUALITY_SCRIPT_PROFILES.items()))
+        command = ("bun", "test", "--path-ignore-patterns", "tmp/**", test_path)
+        recipe_value = recipe.RuntimeScriptRecipe(
+            f"{producer_name}-run", "a" * 64, (command, command)
+        )
+        with self._repo() as directory:
+            repo = Path(directory).resolve()
+            with self.assertRaisesRegex(producer.RuntimeScriptProducerError, "one command"):
+                producer.run_runtime_script(repo, producer_name, "b" * 64, recipe_value)
+
     def test_cross_profile_inventory_is_rejected_before_bun(self) -> None:
         profiles_list = list(profiles.RUNTIME_SCRIPT_PROFILES.items())
         _, declared_path = profiles_list[0]

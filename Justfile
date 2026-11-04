@@ -312,6 +312,8 @@ runtime-asset-script-test:
     bun run moon exec krr:runtime-asset-script-test
 
 runtime-asset-script-aggregate-run:
+    just runtime-unused-script-verify-run runtime-quality-owned-source-inventory
+    just runtime-unused-script-verify-run runtime-quality-owned-validation-contract
     bun scripts/runtime-bundles/runtime-unused-check.ts --gate
 
 runtime-asset-script-preflight-run:
@@ -343,7 +345,6 @@ runtime-asset-script-other-run:
     bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/parser-body-onload-generation.test.ts
     just macos-browser-contract-test
     just browser-contract-test
-    bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-source-inventory_test.ts ./scripts/quality/owned-validation-contract_test.ts
 
 # WHY: 関連leafだけの診断再実行であり、full quality gateの代替ではない。
 runtime-unused-script-regression:
@@ -358,6 +359,9 @@ runtime-script-cas-diagnostic-run:
 
 # WHY: receiptが無い場合は既存の各検査を再実行し、診断本体はMoonの外から起動する。
 runtime-script-cas-diagnostic:
+    python3 scripts/hooks/run_locked_command.py --protect-root-producer -- just runtime-script-cas-diagnostic-owned-run
+
+runtime-script-cas-diagnostic-owned-run:
     bun run moon run krr:runtime-unused-script-regression
     just runtime-script-cas-diagnostic-run
 
@@ -393,6 +397,12 @@ runtime-unused-native-width-run:
 
 runtime-unused-rust-classic-run:
     bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-unused-rust-classic_test.ts
+
+runtime-quality-owned-source-inventory-run:
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-source-inventory_test.ts
+
+runtime-quality-owned-validation-contract-run:
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-validation-contract_test.ts
 
 # WHY: ブラウザ起動の管理は既存fixtureへ任せ、テスト本体の5秒制限を維持する。
 browser-contract-test:

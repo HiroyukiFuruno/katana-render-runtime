@@ -190,7 +190,7 @@ def _python_context() -> dict[str, object]:
     }
 
 
-def _tool_fingerprint(repo: Path) -> dict[str, object]:
+def _runtime_bundle_fingerprint(repo: Path) -> dict[str, object]:
     fingerprint = _run_json(repo, ["bun", TOOL_FINGERPRINT], "tool_fingerprint_unavailable")
     if (
         not isinstance(fingerprint, dict)
@@ -199,17 +199,40 @@ def _tool_fingerprint(repo: Path) -> dict[str, object]:
         or not isinstance(fingerprint.get("environment"), list)
     ):
         raise _CollectionFailure("tool_fingerprint_shape_unsupported")
+    return cast(dict[str, object], fingerprint)
+
+
+def _tool_fingerprint(repo: Path) -> dict[str, object]:
+    fingerprint = _runtime_bundle_fingerprint(repo)
     try:
         prepared_digest = _digest_bytes((repo / PREPARED_RUNTIME).read_bytes())
     except OSError as error:
         raise _CollectionFailure("producer_context_unavailable") from error
     return {
-        "runtimeBundle": cast(dict[str, object], fingerprint),
+        "runtimeBundle": fingerprint,
         "rustFactsHostFingerprint": _rust_host_fingerprint(repo),
         "mathjaxEvidenceFingerprint": _mathjax_evidence_fingerprint(repo),
         **_python_context(),
         "preparedRuntimeSha256": prepared_digest,
     }
+
+
+def _quality_fingerprint(repo: Path, source_state: tuple[str, str]) -> str:
+    try:
+        before = pilot.collect_quality_inputs(repo, os.environ)
+        if _source_state(repo) != source_state:
+            raise ValueError("quality_source_changed")
+        after = pilot.collect_quality_inputs(repo, os.environ)
+        if before != after or _source_state(repo) != source_state:
+            raise ValueError("quality_inputs_changed")
+        return before
+    except (OSError, TypeError, ValueError) as error:
+        raise _CollectionFailure("quality_inputs_unavailable") from error
+
+
+def _quality_tool_fingerprint(repo: Path, source_state: tuple[str, str]) -> dict[str, object]:
+    return {"runtimeBundle": _runtime_bundle_fingerprint(repo), **_python_context(),
+            "qualityInputsSha256": _quality_fingerprint(repo, source_state)}
 
 
 def _moon_context() -> tuple[str | None, str | None]:
@@ -306,9 +329,14 @@ def _collect_facts(
     source_before, inputs_before = _source_state(repo)
     pilot_before = _shared_pilot_facts(repo, producers)
     definitions_before = _definitions_facts(repo, pilot_before) if definitions.PROFILE in producers else None
-    has_broad_profile = (any(producer not in {pilot.PROFILE, definitions.PROFILE} for producer in producers)
+    quality = [producer for producer in producers if producer in pilot.QUALITY_PROFILES]
+    if quality and len(producers) != 1:
+        raise _CollectionFailure("mixed_quality_profiles_unsupported")
+    has_broad_profile = (any(producer not in {pilot.PROFILE, definitions.PROFILE, *pilot.QUALITY_PROFILES}
+                             for producer in producers)
                          or (definitions.PROFILE in producers and definitions_before is None))
-    tool_before = _tool_fingerprint(repo) if has_broad_profile else {}
+    tool_before = (_quality_tool_fingerprint(repo, (source_before, inputs_before)) if quality
+                   else _tool_fingerprint(repo) if has_broad_profile else {})
     recipes = {
         producer: recipe_reader.read_runtime_script_recipe(repo, producer)
         for producer in producers
@@ -316,7 +344,8 @@ def _collect_facts(
     for producer, recipe in recipes.items():
         if recipe.recipe_name != profiles.producer_recipe(producer):
             raise _CollectionFailure("recipe_profile_mismatch")
-    tool_after = _tool_fingerprint(repo) if has_broad_profile else {}
+    tool_after = (_quality_tool_fingerprint(repo, (source_before, inputs_before)) if quality
+                  else _tool_fingerprint(repo) if has_broad_profile else {})
     pilot_after = _shared_pilot_facts(repo, producers)
     definitions_after = _definitions_facts(repo, pilot_after) if definitions.PROFILE in producers else None
     source_after, inputs_after = _source_state(repo)
@@ -372,6 +401,8 @@ def _read_execution_facts(
             source_inputs_digest, tool = facts
         else:
             tool = _tool_fingerprint(repo)
+    elif producer in pilot.QUALITY_PROFILES:
+        tool = _quality_tool_fingerprint(repo, (source_digest, source_inputs_digest))
     else:
         tool = _tool_fingerprint(repo)
     return source_digest, source_inputs_digest, recipe, tool

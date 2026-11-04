@@ -76,11 +76,10 @@ def _parse_commands(recipe: dict[str, object], producer: str) -> tuple[tuple[str
         raise RuntimeScriptRecipeError("just_recipe_command_profile_changed")
     test_paths = commands[0][len(TEST_PREFIX) :]
     if not test_paths or any(
-        not path.startswith("./scripts/runtime-bundles/") or not path.endswith("_test.ts")
-        for path in test_paths
+        not profiles.is_supported_test_path(path, producer) for path in test_paths
     ) or len(set(test_paths)) != len(test_paths):
         raise RuntimeScriptRecipeError("just_recipe_test_paths_unsupported")
-    expected_path = profiles.RUNTIME_SCRIPT_PROFILES.get(producer)
+    expected_path = profiles.fixed_profile_test_path(producer)
     if expected_path is not None and tuple(test_paths) != (expected_path,):
         raise RuntimeScriptRecipeError("just_recipe_profile_test_mismatch")
     return tuple(commands)

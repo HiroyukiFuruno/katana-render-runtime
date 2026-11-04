@@ -3955,11 +3955,21 @@ export const RUNTIME_UNUSED_LEAF_IDS = [
   "runtime-unused-native-width",
   "runtime-unused-rust-classic",
 ] as const;
+export const RUNTIME_QUALITY_LEAVES = [
+  ["runtime-quality-owned-source-inventory", "scripts/quality/owned-source-inventory_test.ts"],
+  [
+    "runtime-quality-owned-validation-contract",
+    "scripts/quality/owned-validation-contract_test.ts",
+  ],
+] as const;
 export const RUNTIME_UNUSED_VERIFY_RUN_RECIPE = "runtime-unused-script-verify-run";
 export const RUNTIME_UNUSED_PRODUCER_RUN_RECIPE = "runtime-unused-script-producer-run";
 
 export function runtimeUnusedLeafRunRecipe(id: string): string {
-  if (!(RUNTIME_UNUSED_LEAF_IDS as readonly string[]).includes(id))
+  if (
+    !(RUNTIME_UNUSED_LEAF_IDS as readonly string[]).includes(id) &&
+    !RUNTIME_QUALITY_LEAVES.some(([quality]) => quality === id)
+  )
     throw new Error(`unknown runtime unused producer profile ${id}`);
   return RUNTIME_UNUSED_VERIFY_RUN_RECIPE;
 }
@@ -4014,7 +4024,10 @@ function validateRuntimeUnusedScriptProducerTask(
   const options = object(task.options);
   if (options?.cache !== "local") throw new Error("runtime unused producer cache differs");
   const id = name.endsWith("-producer") ? name.slice(0, -"-producer".length) : "";
-  if (!(RUNTIME_UNUSED_LEAF_IDS as readonly string[]).includes(id))
+  if (
+    !(RUNTIME_UNUSED_LEAF_IDS as readonly string[]).includes(id) &&
+    !RUNTIME_QUALITY_LEAVES.some(([quality]) => quality === id)
+  )
     throw new Error(`unknown runtime unused producer profile ${name}`);
   if (
     !Array.isArray(task.command) ||
@@ -4062,7 +4075,9 @@ function moonTaskOptionsValid(
     (options.cache === false ||
       nativeCache ||
       (name === "runtime-bundle-check" && options.cache === true) ||
-      (RUNTIME_UNUSED_LEAF_IDS.some((id) => name === `${id}-producer`) &&
+      ([...RUNTIME_UNUSED_LEAF_IDS, ...RUNTIME_QUALITY_LEAVES.map(([id]) => id)].some(
+        (id) => name === `${id}-producer`,
+      ) &&
         options.cache === "local"))
   );
 }
@@ -4398,7 +4413,11 @@ function moonCoverageGraphVerified(
     assetAggregate === undefined ||
     assetAggregate.leaf !== "runtime-asset-script-aggregate-run" ||
     assetAggregate.deps.join("\0") !==
-      ["runtime-asset-script-other", "runtime-unused-script-regression"].join("\0")
+      [
+        "runtime-asset-script-other",
+        "runtime-unused-script-regression",
+        ...RUNTIME_QUALITY_LEAVES.map(([id]) => `${id}-producer`),
+      ].join("\0")
   )
     errors.push("moon asset script aggregate differs");
 }
@@ -4421,6 +4440,7 @@ function moonRuntimeUnusedGraphVerified(
   RUNTIME_UNUSED_LEAF_IDS.forEach((id, index) => {
     moonRuntimeUnusedProfileVerified(id, index, tasks, recipes, errors);
   });
+  moonRuntimeQualityProfilesVerified(tasks, recipes, errors);
   const final = tasks.get("runtime-unused-script-regression");
   if (
     final?.deps.join("\0") !== "runtime-classic-generation-evidence" ||
@@ -4435,12 +4455,14 @@ function moonRuntimeUnusedGraphVerified(
     errors.push("runtime unused final verification recipe differs");
   if (
     recipes
-      .get("runtime-script-cas-diagnostic")
+      .get("runtime-script-cas-diagnostic-owned-run")
       ?.trim()
       .split("\n")
       .map((line) => line.trim())
       .join("\n") !==
-    "bun run moon run krr:runtime-unused-script-regression\njust runtime-script-cas-diagnostic-run"
+      "bun run moon run krr:runtime-unused-script-regression\njust runtime-script-cas-diagnostic-run" ||
+    recipes.get("runtime-script-cas-diagnostic")?.trim() !==
+      "python3 scripts/hooks/run_locked_command.py --protect-root-producer -- just runtime-script-cas-diagnostic-owned-run"
   )
     errors.push("runtime script CAS outer recipe differs");
   const compatibility = `bun test --path-ignore-patterns 'tmp/**' ${RUNTIME_UNUSED_REGRESSION_TESTS.map(
@@ -4448,6 +4470,33 @@ function moonRuntimeUnusedGraphVerified(
   ).join(" ")}`;
   if (recipes.get("runtime-unused-script-regression-run")?.trim() !== compatibility)
     errors.push("runtime unused compatibility recipe differs");
+}
+
+function moonRuntimeQualityProfilesVerified(
+  tasks: Map<string, MoonTask>,
+  recipes: Map<string, string>,
+  errors: string[],
+): void {
+  for (const [id, test] of RUNTIME_QUALITY_LEAVES) {
+    const task = tasks.get(`${id}-producer`);
+    if (
+      task?.deps.join("\0") !== "runtime-classic-generation-evidence" ||
+      task.command.join("\0") !== `just\0${RUNTIME_UNUSED_VERIFY_RUN_RECIPE}\0${id}` ||
+      recipes.get(`${id}-run`)?.trim() !== `bun test --path-ignore-patterns 'tmp/**' ./${test}`
+    )
+      errors.push(`runtime quality profile differs: ${id}`);
+  }
+  const expected = [
+    ...RUNTIME_QUALITY_LEAVES.map(([id]) => `just ${RUNTIME_UNUSED_VERIFY_RUN_RECIPE} ${id}`),
+    "bun scripts/runtime-bundles/runtime-unused-check.ts --gate",
+  ].join("\n");
+  const aggregate = recipes
+    .get("runtime-asset-script-aggregate-run")
+    ?.trim()
+    .split("\n")
+    .map((line) => line.trim())
+    .join("\n");
+  if (aggregate !== expected) errors.push("runtime quality aggregate verification differs");
 }
 
 function moonRuntimeUnusedProfileVerified(
@@ -4880,6 +4929,7 @@ export function executionGraph(
           "runtime-asset-script-preflight-run",
           "runtime-classic-generation-evidence",
           "runtime-asset-script-other-run",
+          ...RUNTIME_QUALITY_LEAVES.map(([id]) => `${id}-run`),
           ...new Set(RUNTIME_UNUSED_LEAF_IDS.map(runtimeUnusedLeafRunRecipe)),
         ].forEach(walkRecipe);
       }

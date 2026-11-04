@@ -125,11 +125,10 @@ def _expected_files(argv: tuple[str, ...], producer: str) -> tuple[str, ...]:
         raise RuntimeScriptProducerError("unsupported Bun producer command")
     files = argv[len(recipe_reader.TEST_PREFIX) :]
     if not files or any(
-        not path.startswith("./scripts/runtime-bundles/") or not path.endswith("_test.ts")
-        for path in files
+        not profiles.is_supported_test_path(path, producer) for path in files
     ):
         raise RuntimeScriptProducerError("Bun producer test inventory is unsupported")
-    expected = profiles.RUNTIME_SCRIPT_PROFILES.get(producer)
+    expected = profiles.fixed_profile_test_path(producer)
     if expected is not None and tuple(files) != (expected,):
         raise RuntimeScriptProducerError("Bun producer test inventory does not match profile")
     return tuple(path.removeprefix("./") for path in files)
@@ -148,6 +147,8 @@ def run_runtime_script(
         raise RuntimeScriptProducerError("repository root is not canonical")
     if not recipe.commands:
         raise RuntimeScriptProducerError("runtime-script recipe has no commands")
+    if producer != profiles.DEFAULT_PRODUCER and len(recipe.commands) != 1:
+        raise RuntimeScriptProducerError("fixed runtime-script profile requires one command")
     try:
         identity_sha256 = result.build_identity(producer, input_sha256)
     except result.RuntimeScriptResultError as error:
