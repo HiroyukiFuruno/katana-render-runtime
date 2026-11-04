@@ -113,6 +113,12 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
         "scripts/release/html_performance_epoch_reuse.py": (
             "33a05103fc5100c7eb2e9d10368785c8ab20e6f8308ddc53f0ae95f63c573f1c",
             "3f50599d284dbe593bb9a1cf02d0fdd633647eb61a3f6be7867b8308d72de3c7"),
+        "scripts/release/html_performance_host_load_validation.py": (
+            "eaf150043f1361b9a5d75ee5eb4f6348c6541564c1299a091265f446cd445f74",
+            "546885df19bbaf8d40b6428af6dcbece6c4ba59c7f73f5bb4aa7ec72a0339269"),
+        "scripts/release/html_performance_host_load_validation_test.py": (
+            "977394a86e45b307f9939a952aa6ef66d3cf770154564794d7196036aa6c2497",
+            "a550c3e89979dda00597eb3497bf627c793a8a5228c88bc740976526ad70aa66"),
         "scripts/release/produce_html_performance_evidence.py": (
             "d4d85ae7e2120e3720ef31afe6a7228011385d0267ec770060e68f606e21388e",
             "490233a4797d9690f7393000cfeda1ceb4d806e1a7df2c588bbb300d8cc1dae5"),
@@ -124,7 +130,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
             "71fa1bc5e34a3d9432d2923d14e0967f7ae2d6e5f879941eb3f858668b1da86e"),
         "scripts/release/verify_html_performance_evidence_test.py": (
             "9f423f9edbd3fa5ef2a0f1fd1d28a2d2a61f968498650f65dd3f0e5f323be4b3",
-            "649ff5531031391cdf7ea802ca0fa014c52dd8ad687cd249b335287878c97e00"),
+            "953044024351425627b8798fcbbc3d5f9216ac49d78e7c63075cd034536584e0"),
     }
     expected = pins.get(path)
     return expected is not None and expected == (

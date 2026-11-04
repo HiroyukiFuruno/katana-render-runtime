@@ -1251,6 +1251,8 @@ class PerformanceEvidenceTest(unittest.TestCase):
         repository = Path(__file__).resolve().parents[2]
         paths = ("scripts/release/html_performance_source_reuse.py",
                  "scripts/release/html_performance_epoch_reuse.py",
+                 "scripts/release/html_performance_host_load_validation.py",
+                 "scripts/release/html_performance_host_load_validation_test.py",
                  "scripts/release/produce_html_performance_evidence.py",
                  "scripts/release/produce_html_performance_evidence_test.py",
                  "scripts/release/verify_html_performance_evidence.py",
@@ -2597,6 +2599,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
     def test_current_harness_lock_matches_explicit_pin(self) -> None:
         fixture_lock = Path(__file__).resolve().parents[1] / "html/performance-harness/Cargo.lock"
         self.assertEqual(gate.sha256(fixture_lock), gate.LOCK_SHA)
+        host_load_validation.require_current_cpu_observer_sources(Path(__file__).resolve().parents[2])
 
     def test_tampered_harness_lock_is_rejected(self) -> None:
         lock_path = self.root / gate.HARNESS_ROOT / "Cargo.lock"
