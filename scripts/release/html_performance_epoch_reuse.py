@@ -122,10 +122,12 @@ def compare_declared_inputs(old_reader: gate.FileReader, old: DeclaredEpochInput
             additions = set(new_pins) - set(old_pins)
             gate.require(not (set(old_pins) - set(new_pins))
                          and (not additions or additions == set(VALIDATION_COHORT_ADDITIONS))
-                         and all(new_pins[key][1] == VALIDATION_COHORT_ADDITIONS[key][0]
+                         and all((new_pins[key][1] == VALIDATION_COHORT_ADDITIONS[key][0]
+                                  or key == "scripts/drawio/candidate-svg-rasterize.ts"
+                                  and new_pins[key][1] == "96244e3710fd8b69307ad6da002cc67487bc6f55f43ed87d87eee7211e3ffbad")
                                  and new_pins[key][0].endswith(
                                      "/tmp/html-performance-programs/"
-                                     + VALIDATION_COHORT_ADDITIONS[key][0] + "/" + key)
+                                     + new_pins[key][1] + "/" + key)
                                  for key in additions)
                          and all(old_pins[key] == new_pins[key] or key in program_changes
                                  for key in old_pins), "epoch programs differs")

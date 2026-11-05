@@ -1598,6 +1598,14 @@ class PerformanceEvidenceTest(unittest.TestCase):
             gate._v3_program_source(self.root, {"programSource": previous},
                                     [{"liveCheckout": changed}], git_query=None)
 
+    @staticmethod
+    def _historical_lock_verifier(repository: Path) -> bytes:
+        return subprocess.run(
+            ["git", "-C", str(repository), "show",
+             "9e88ede8:scripts/release/verify_html_performance_evidence.py"],
+            check=True, capture_output=True,
+        ).stdout
+
     def test_v3_program_history_accepts_reviewed_old_and_current_endpoints(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         old_head = "b9cf37535ba374b62fee4e889f9c58f58f1ab8dc"
@@ -1624,6 +1632,8 @@ class PerformanceEvidenceTest(unittest.TestCase):
         write_revision(later_historical_head)
         later_historical = self._program_checkout(self.root, "later historical endpoint")
         write_revision(None)
+        verifier = self.root / "scripts/release/verify_html_performance_evidence.py"
+        verifier.write_bytes(self._historical_lock_verifier(repository))
         current = self._program_checkout(self.root, "current endpoint")
         expected = gate._v3_live_programs(self.root, fixed)
         result = gate._v3_program_source(self.root, {"programSource": fixed},
@@ -1631,13 +1641,34 @@ class PerformanceEvidenceTest(unittest.TestCase):
                                           {"liveCheckout": current}],
                                          git_query=None)
         self.assertEqual(result, expected)
-        verifier = self.root / "scripts/release/verify_html_performance_evidence.py"
         verifier.write_bytes(verifier.read_bytes() + b"\n# unknown byte\n")
         altered = self._program_checkout(self.root, "unreviewed endpoint")
         with self.assertRaisesRegex(ValueError, "live measurement program differs"):
             gate._v3_program_source(self.root, {"programSource": fixed},
                                     [{"liveCheckout": historical}, {"liveCheckout": altered}],
                                     git_query=None)
+
+    def test_v3_current_lock_format_cohort_preserves_actual_identity(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        paths = ("scripts/drawio/candidate-svg-rasterize.ts",
+                 "scripts/release/html_performance_epoch_reuse.py",
+                 "scripts/release/html_performance_epoch_reuse_test.py",
+                 "scripts/release/html_performance_source_reuse.py",
+                 "scripts/release/html_performance_source_reuse_test.py",
+                 "scripts/release/verify_html_performance_evidence.py",
+                 "scripts/release/verify_html_performance_evidence_test.py")
+        for name in paths:
+            target = self.root / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(subprocess.run(["git", "-C", str(repository), "show", "a476765c:" + name],
+                                              check=True, capture_output=True).stdout)
+        fixed = self._program_checkout(self.root, "current-lock baseline")
+        for name in paths:
+            (self.root / name).write_bytes((repository / name).read_bytes())
+        current = self._program_checkout(self.root, "current-lock reviewed format")
+        self.assertEqual(gate._v3_program_source(self.root, {"programSource": fixed},
+                         [{"liveCheckout": current}], git_query=None),
+                         gate._v3_live_programs(self.root, fixed))
 
     def test_v3_reviewed_validation_cohort_preserves_actual_membership(self) -> None:
         import produce_html_performance_evidence as producer
@@ -1672,6 +1703,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
         old_auth = {name: subprocess.run(["git", "-C", str(repository), "show", older + ":" + name],
                                         check=True, capture_output=True).stdout for name in auth_names}
         current_auth = {name: (repository / name).read_bytes() for name in auth_names}
+        current_auth["scripts/release/verify_html_performance_evidence.py"] = self._historical_lock_verifier(repository)
         install(older)
         for name in auth_names:
             (self.root / name).write_bytes(old_auth[name])
@@ -1736,12 +1768,21 @@ class PerformanceEvidenceTest(unittest.TestCase):
             old = subprocess.run(["git", "-C", str(repository), "show",
                                   "b9cf37535ba374b62fee4e889f9c58f58f1ab8dc:" + path],
                                  check=True, capture_output=True).stdout
-            current = (repository / path).read_bytes()
+            current = (self._historical_lock_verifier(repository)
+                       if path == "scripts/release/verify_html_performance_evidence.py"
+                       else (repository / path).read_bytes())
             with self.subTest(path=path):
                 self.assertTrue(known_auth_program_change(path, old, current))
                 self.assertFalse(known_auth_program_change(path, old, current + b" "))
                 self.assertFalse(known_auth_program_change(path, old, current + b"\npolicy_change()\n"))
                 self.assertFalse(known_auth_program_change("scripts/release/unknown.py", old, current))
+                if path == "scripts/release/verify_html_performance_evidence.py":
+                    actual_current = (repository / path).read_bytes()
+                    self.assertNotEqual(current, actual_current)
+                    self.assertFalse(known_auth_program_change(path, old, actual_current))
+                    previous_lock = b"c1ee6b8e84c86893968190f76314a4adbbcb1d9fd5731625ab5e9444ebe3ee93"
+                    self.assertEqual(current.count(previous_lock), 1)
+                    self.assertFalse(known_auth_program_change(path, old, current.replace(previous_lock, b"0" * 64)))
                 if path.endswith("html_performance_source_reuse.py"):
                     self.assertFalse(known_auth_program_change(
                         path, old, current.replace(b"return prefix + marker + transformed == current",

@@ -238,6 +238,26 @@ class DeclaredInputsTest(unittest.TestCase):
         new = self.declared()
         new["programs"] = {**new["programs"], **additions}
         epoch.compare_declared_inputs(reader, old, reader, new)
+        name = "scripts/drawio/candidate-svg-rasterize.ts"
+        data = (repo / name).read_bytes()
+        checksum = hashlib.sha256(data).hexdigest()
+        relative = "added-formatted"
+        (root / relative).write_bytes(data)
+        logical = str(root / "tmp/html-performance-programs" / checksum / name)
+        files.append({"originalPath": logical, "relativePath": relative, "sha256": checksum})
+        (root / "bundle.json").write_text(json.dumps(document))
+        reader = gate.Bundle(root)
+        new["programs"] = {**new["programs"], name: {"path": logical, "sha256": checksum}}
+        epoch.compare_declared_inputs(reader, old, reader, new)
+        prior = self.declared()
+        prior["programs"] = {**prior["programs"], **additions}
+        with self.assertRaisesRegex(ValueError, "epoch programs differs"):
+            epoch.compare_declared_inputs(reader, prior, reader, new)
+        epoch.compare_declared_inputs(reader, prior, reader, new, program_changes=frozenset({name}))
+        new["programs"] = {**new["programs"], name: self.pins["program"]}
+        with self.assertRaisesRegex(ValueError, "epoch programs differs"):
+            epoch.compare_declared_inputs(reader, old, reader, new)
+        new["programs"] = {**new["programs"], name: {"path": logical, "sha256": checksum}}
         new["programs"] = {key: value for key, value in new["programs"].items()
                            if key != next(iter(additions))}
         with self.assertRaisesRegex(ValueError, "epoch programs differs"):

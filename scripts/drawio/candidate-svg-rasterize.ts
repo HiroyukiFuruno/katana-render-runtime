@@ -95,7 +95,12 @@ async function main() {
   const assertOutputIndex = argv.indexOf("--assert-output");
   if (assertOutputIndex >= 0) {
     const output = argv[assertOutputIndex + 1];
-    if (assertOutputIndex !== 0 || argv.length !== 2 || output === undefined || output.startsWith("--")) {
+    if (
+      assertOutputIndex !== 0 ||
+      argv.length !== 2 ||
+      output === undefined ||
+      output.startsWith("--")
+    ) {
       throw new Error("Invalid arguments for --assert-output");
     }
     assertFreshDrawioOutput(path.resolve(output));

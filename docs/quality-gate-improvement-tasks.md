@@ -2,6 +2,13 @@
 
 ## 最新の再開地点（2026-11-06）
 
+### R8489時点：HTML性能84/84採取、既存CAS診断の静的停止を修正
+
+- [x] 採取単位と有限認証の修正を189281beへ通常commit。R8477は旧36を厳格に再利用して新32を加算（closed68、policy合格、全84正式未判定）。R8480は記録のfsyncで一時的ENOSPC、closed77・policy不合格の原本を保持。R8485で未採用R7819のGit query stdoutと対応transport14件だけを可逆整理し、展開全bytes・modeと8保持bundle/保護35の事後整合を確認。実空き2,047,328,256→4,983,304,192bytes。SDK・画像・私有原本・使用中証跡は変えていない。
+- [x] R8483は既存readerがR8480の完了77を厳格再認証し、未完7だけを採取。実0、closed84/84・25200 phase records・policyAccepted=true、fixed epochのためformalAccepted=false。receipt SHA `553fe8a8d4b775d54344da89f66ed4f2cedc78c2f109219e17997d75de2e0444`。旧失敗のpolicy/pinを書き換えていない。これは全採取条件の性能基準通過であり、最終HEADのSDK等価性、正式reuse verify、Git性能履歴の記録/改善時昇格は別に残る。
+- [/] Q19の既存CAS診断R8486は先行Biomeで実1、診断本体は未起動。raw warnings147は実利用照合でresolved147、未解決は検証用 `candidate-svg-rasterize.ts` のformat1件。対象だけ既存Biomeで整形し、前後Bun生成JS一致・100644不変を確認。新旧の正確な整形差分を既存source/epoch有限認証へ同期し、元pin・未知bytes/modeの拒否を維持した。古いtooling/lockの正例fixtureを該当する実Git版へ固定し、現lockの正例を分離。旧SDKへの新lockや新依存の等価許可は追加しない。R8489のsource17/epoch10/verifier5と厳格型201fileは実0。通常commit後に同既存CAS診断を再実行する。
+- [ ] 実CAS/Nextest/coverage再利用と改変拒否・再収集、最終性能source照合と履歴、完全品質ゲート・実装coverage100%/未計測0、release inclusion、最終Mermaid117、Draft review/個別reply-resolve/Ready/3OS CI/保護merge、既存3crateとGitHub Release、Issue close・cleanupは未完。旧sourceの成功や部分合格を全体合格へ転用しない。
+
 ### R8474時点：更新後SDKの描画合格、性能36/84・残48
 
 - [x] 依存更新とSWC版認証の共有化をa476765cへ統合。更新後SDK af0bのMermaid製品PNGはR8459/R8460で117/117が99以上（EN最低99.085711、JA最低99.10801000000001）。HTML84条件はR8449で全件90以上・最低92.14438・出力font完全一致、R8451標準全領域検査も286/286・最低91.98562、全目次72・末尾・動的状態・入力・埋込図が成功。これらは採取元ソースの成功であり、最終HEADの完全ゲートを代用しない。

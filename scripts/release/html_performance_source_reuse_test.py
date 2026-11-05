@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import html_performance_source_reuse as reuse
 from html_performance_source_reuse import validate_reuse_source
-from verify_html_performance_evidence import _v3_authenticate_programs, _verified_reuse_context, committed_records
+from verify_html_performance_evidence import LOCK_SHA, _v3_authenticate_programs, _verified_reuse_context, committed_records
 
 
 def git(root: Path, *args: str) -> str:
@@ -18,6 +18,40 @@ def git(root: Path, *args: str) -> str:
 
 
 class SourceReuseTest(unittest.TestCase):
+    def test_format_cohort_from_current_sdk_source_is_exact(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        head = "a476765c"
+        lock = "scripts/html/performance-harness/Cargo.lock"
+        old_lock = subprocess.check_output(["git", "-C", str(root), "show", head + ":" + lock])
+        self.assertEqual(hashlib.sha256(old_lock).hexdigest(), LOCK_SHA)
+        self.assertEqual(hashlib.sha256((root / lock).read_bytes()).hexdigest(), LOCK_SHA)
+        names = ("html_performance_source_reuse.py", "html_performance_source_reuse_test.py",
+                 "html_performance_epoch_reuse.py", "html_performance_epoch_reuse_test.py")
+        for name in names:
+            path = "scripts/release/" + name
+            old = subprocess.check_output(["git", "-C", str(root), "show", head + ":" + path])
+            new = (root / path).read_bytes()
+            before = (hashlib.sha256(old).hexdigest(), len(old))
+            after = (hashlib.sha256(new).hexdigest(), len(new))
+            with self.subTest(path=path):
+                self.assertTrue(reuse.validation_cohort_change(path, before, after, "100644", "100644"))
+                self.assertFalse(reuse.validation_cohort_change(path, before, after, "100644", "100755"))
+
+    def test_reviewed_drawio_format_transition_is_exact(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        path = "scripts/drawio/candidate-svg-rasterize.ts"
+        old = subprocess.check_output(["git", "-C", str(root), "show", "637cd465:" + path])
+        new = (root / path).read_bytes()
+        previous = (hashlib.sha256(old).hexdigest(), len(old))
+        current = (hashlib.sha256(new).hexdigest(), len(new))
+        unknown = (hashlib.sha256(new + b" ").hexdigest(), len(new) + 1)
+        self.assertTrue(reuse.validation_cohort_change(path, None, previous, None, "100644"))
+        self.assertTrue(reuse.validation_cohort_change(path, None, current, None, "100644"))
+        self.assertTrue(reuse.validation_cohort_change(path, previous, current, "100644", "100644"))
+        self.assertFalse(reuse.validation_cohort_change(path, previous, unknown, "100644", "100644"))
+        self.assertFalse(reuse.validation_cohort_change(path, previous, current, "100644", "100755"))
+        self.assertFalse(reuse.validation_cohort_change(path, previous, None, "100644", None))
+
     def test_reviewed_producer_cohort_reaches_current_worktree(self) -> None:
         root = Path(__file__).resolve().parents[2]
         for name in ("produce_html_performance_evidence.py", "produce_html_performance_evidence_test.py"):
@@ -414,7 +448,12 @@ class ReleaseToolingReuseTest(unittest.TestCase):
             if case == "removed" and path == selected[0]:
                 target.unlink()
             else:
-                value = (repository / path).read_bytes()
+                if path in {"package.json", "bun.lock"} and case != "live_dependencies":
+                    value = subprocess.check_output([
+                        "git", "-C", str(repository), "show", "137f5ce40ece72685970ccbf2932659c4626c51d:" + path,
+                    ])
+                else:
+                    value = (repository / path).read_bytes()
                 target.write_bytes(value + (b" " if case == "new_bytes" and path == selected[0] else b""))
         if case == "unknown":
             (root / ".github/workflows/unknown.yml").write_text("unexpected\n")
@@ -462,6 +501,14 @@ class ReleaseToolingReuseTest(unittest.TestCase):
             self.assertEqual(git(root, "status", "--porcelain=v1"), "")
             with self.assertRaises(ValueError):
                 _verified_reuse_context(root, measured, git_query=None, allow_test_changes=True)
+
+    def test_unreviewed_live_dependency_deltas_are_rejected(self) -> None:
+        for path in ("package.json", "bun.lock"):
+            with self.subTest(path=path), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                measured = self.fixture(root, (path,), "live_dependencies")
+                with self.assertRaisesRegex(ValueError, "release tooling source delta differs"):
+                    _verified_reuse_context(root, measured, git_query=None, allow_test_changes=True)
 
 
 if __name__ == "__main__":
