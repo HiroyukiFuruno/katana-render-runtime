@@ -4274,7 +4274,9 @@ function normalizeNativeWidthTestCommand(lines: string[]): string[] | undefined 
 }
 
 function reviewedRuntimeAssetTestCommandsWithoutClassic(lines: string[]): string[] | undefined {
-  const normalized = normalizeNativeWidthTestCommand(lines);
+  const withoutDrawioCapture = removeReviewedDrawioCaptureCommands(lines);
+  if (!withoutDrawioCapture) return undefined;
+  const normalized = normalizeNativeWidthTestCommand(withoutDrawioCapture);
   if (!normalized) return undefined;
   const withoutAudit = removeTerminalRecipeCommand(normalized, MATHJAX_UNUSED_AUDIT_COMMAND);
   if (!withoutAudit) return undefined;
@@ -4290,6 +4292,29 @@ function reviewedRuntimeAssetTestCommandsWithoutClassic(lines: string[]): string
   return withoutReviewedTests && digest === PARSER_TEST_RECIPE_SHA256
     ? withoutReviewedTests
     : undefined;
+}
+function removeReviewedDrawioCaptureCommands(lines: string[]): string[] | undefined {
+  const anchor =
+    "bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/reference_score_test.ts ./scripts/drawio/official-runtime-determinism_test.ts ./scripts/drawio/official-source-fonts_test.ts";
+  const commands = [
+    "bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/svg_capture_test.ts ./scripts/drawio/full_compare_inventory_test.ts",
+    "bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/svg_capture_browser_test.ts",
+  ];
+  const matches = lines.flatMap((line, index) =>
+    /\.\/scripts\/drawio\/(?:svg_capture(?:_browser)?|full_compare_inventory)_test\.ts/.test(line)
+      ? [index]
+      : [],
+  );
+  if (matches.length === 0) return lines;
+  const anchorIndex = lines.indexOf(anchor);
+  if (
+    matches.length !== commands.length ||
+    anchorIndex < 0 ||
+    lines.lastIndexOf(anchor) !== anchorIndex ||
+    !commands.every((command, offset) => lines[anchorIndex + offset + 1] === command)
+  )
+    return undefined;
+  return lines.filter((_, index) => !matches.includes(index));
 }
 function removeRequiredFrozenNativeTest(lines: string[]): string[] | undefined {
   const previous =

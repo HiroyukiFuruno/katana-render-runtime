@@ -158,10 +158,12 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
             "78ae5f111e5d7774fee2cb7e5fba6a255b74720265e6fe0de5480bb71168c1a3"),
         "scripts/quality/owned-validation-contract.ts": (
             "68a287400d2f7c8427d44c7be565d9b8ed38153e1c76d117ad29b6cdb167ba95",
-            "c3ec88e882c759907f8f2ce69e9556a4fcdd94cdba6c45044e07fd745b13d33d"),
+            frozenset({"c3ec88e882c759907f8f2ce69e9556a4fcdd94cdba6c45044e07fd745b13d33d",
+                       "bea812c143b520f502c1d02840ad3d8d0233ae4016856adf5268df5cdd21e34b"})),
         "scripts/quality/owned-validation-contract_test.ts": (
             "38f60e211b50840f47cb4372123a526e99c76e062f7cc0022155d96fc74079e2",
-            "4b5c0fe741e31c8b10d366804f957e63211e0b0e7ecfff782aee57d2fd424a4e"),
+            frozenset({"4b5c0fe741e31c8b10d366804f957e63211e0b0e7ecfff782aee57d2fd424a4e",
+                       "d3a1199e399a20562d90b0e5e614e1b4491319b5073a91e4970570fe2deaedc3"})),
         "scripts/release/html_performance_reuse_entry_test.py": (
             "6b0518f9992ac91d7fc541cbbfc2563bbfc19095f1d00dcf4600dd9361c4d036",
             "ef435de25b26fefabcb2e3e3b627633b539dd6fa473e7f493a6e4bef13348e73"),
@@ -175,7 +177,8 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
         "scripts/release/html_performance_host_load_validation.py": (
             "eaf150043f1361b9a5d75ee5eb4f6348c6541564c1299a091265f446cd445f74",
             frozenset({"546885df19bbaf8d40b6428af6dcbece6c4ba59c7f73f5bb4aa7ec72a0339269",
-                       "80b59b6d1fb10ba7953e2f598bed2928483a8ee50aea09ae1992796f6239b87a"})),
+                       "80b59b6d1fb10ba7953e2f598bed2928483a8ee50aea09ae1992796f6239b87a",
+                       "50c1fd0439f46472bb789865ecfd83714f6feaaaa8c882521880dab6710b3659"})),
         "scripts/release/html_performance_host_load_validation_test.py": (
             "977394a86e45b307f9939a952aa6ef66d3cf770154564794d7196036aa6c2497",
             frozenset({"a550c3e89979dda00597eb3497bf627c793a8a5228c88bc740976526ad70aa66",
@@ -183,12 +186,14 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
         "scripts/release/produce_html_performance_evidence.py": (
             "d4d85ae7e2120e3720ef31afe6a7228011385d0267ec770060e68f606e21388e",
             frozenset({"490233a4797d9690f7393000cfeda1ceb4d806e1a7df2c588bbb300d8cc1dae5",
-                       "bffd5b7781ea1650185d2756a90c4c7350d7708726d7482cf6fff397c4b14aa8"})),
+                       "bffd5b7781ea1650185d2756a90c4c7350d7708726d7482cf6fff397c4b14aa8",
+                       "80ded11e1b2984635cd455aa55dd926eefbbd03759d8c9eccd719dc16bfd7d45"})),
         "scripts/release/produce_html_performance_evidence_test.py": (
             "1ed2ab04cc2fccc6674b0eb565e097d9df37d44ca66d5b6fc70e12d7583e2fe2",
             frozenset({"52f4b3cb14c379b5fb3c260d170b10024d30377bf63ad33b4084a8fc3137db9b",
                        "f519cb6810e911a59c5eb0ca3b41ba410aa0d98ed9cc23e600822b4d38ab51ed",
-                       "7ff9328bebff71189ca1c32719923d50688665b88e284f0a2c4d16ff4c216cad"})),
+                       "7ff9328bebff71189ca1c32719923d50688665b88e284f0a2c4d16ff4c216cad",
+                       "ea9484f7714c5279d7f8880fb4a499e4fd24fb8b7fa7818b227dd5075cdf9cc9"})),
         "scripts/release/verify_html_performance_evidence.py": (
             "d9d93a641fd5e5dc4db5a0135cffa2073c84f34da132cedfb9821dace49a59aa",
             frozenset({"71fa1bc5e34a3d9432d2923d14e0967f7ae2d6e5f879941eb3f858668b1da86e",

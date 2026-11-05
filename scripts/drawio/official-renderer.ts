@@ -1,14 +1,8 @@
-import fs from "node:fs";
-import path from "node:path";
 import { expandHome, PlaywrightLoader } from "../mermaid/official-renderer";
-import type {
-  BrowserHandle,
-  FontReadyDocument,
-  PageHandle,
-} from "../mermaid/official-renderer-types";
+import type { BrowserHandle, PageHandle } from "../mermaid/official-renderer-types";
 import { OfficialDrawioResourceResolver } from "./official-resource-resolver";
 import { installDrawioDeterminism } from "./official-runtime-determinism";
-import { OfficialDrawioSourceFonts } from "./official-source-fonts";
+import { captureDrawioSvg, drawioCaptureHtml } from "./svg-capture";
 
 export interface DrawioRendererOptions {
   outputDir: string;
@@ -76,7 +70,7 @@ export class OfficialDrawioRenderer {
     await page.setContent(this.baseHtml(), { waitUntil: "load" });
     await page.evaluate(installDrawioDeterminism);
     await page.addScriptTag({ path: this.options.drawioJs });
-    const source = DrawioSource.prepare(fixture.source);
+    const source = prepareDrawioSource(fixture.source);
     const svg = this.resourceResolver.resolveSvg(await this.renderSvg(page, source));
     await this.capture(page, fixture, svg, source);
   }
@@ -125,52 +119,11 @@ export class OfficialDrawioRenderer {
     svg: string,
     source: string,
   ) {
-    fs.writeFileSync(path.join(this.options.outputDir, `${fixture.slug}.svg`), svg, "utf8");
-    await page.evaluate((markup) => {
-      const diagram = document.getElementById("diagram") as HTMLElement;
-      diagram.innerHTML = markup;
-    }, svg);
-    await OfficialDrawioSourceFonts.install(page, source);
-    await this.waitForSvgImages(page);
-    await this.resizeCapture(page);
-    await page.evaluate(() => (document as FontReadyDocument).fonts.ready);
-    await page.locator("#capture").screenshot({
-      path: path.join(this.options.outputDir, `${fixture.slug}.png`),
-      omitBackground: false,
-    });
-  }
-
-  private waitForSvgImages(page: PageHandle): Promise<void> {
-    return page.evaluate(() =>
-      Promise.all(
-        Array.from(document.querySelectorAll("#diagram image")).map(
-          (element) =>
-            new Promise<void>((resolve) => {
-              const href = element.getAttribute("href") ?? element.getAttribute("xlink:href") ?? "";
-              const image = new Image();
-              image.onload = () => resolve();
-              image.onerror = () => resolve();
-              image.src = href;
-            }),
-        ),
-      ).then(() => undefined),
-    );
-  }
-
-  private resizeCapture(page: PageHandle): Promise<void> {
-    return page.evaluate(() => {
-      const svg = document.querySelector("#diagram svg") as SVGSVGElement;
-      const viewBox = svg.viewBox.baseVal;
-      const box = svg.getBoundingClientRect();
-      const positiveDimension = (primary: number, fallback: number): number =>
-        [primary, fallback].find((size) => size > 0) ?? 1;
-      const width = Math.ceil(positiveDimension(viewBox.width, box.width));
-      const height = Math.ceil(positiveDimension(viewBox.height, box.height));
-      svg.setAttribute("width", String(width));
-      svg.setAttribute("height", String(height));
-      const capture = document.getElementById("capture") as HTMLElement;
-      capture.style.width = `${width + 24}px`;
-      capture.style.height = `${height + 24}px`;
+    await captureDrawioSvg(page, {
+      slug: fixture.slug,
+      svg: Buffer.from(svg, "utf8"),
+      sourceFonts: source,
+      outputDir: this.options.outputDir,
     });
   }
 
@@ -191,12 +144,7 @@ export class OfficialDrawioRenderer {
   }
 
   private baseHtml() {
-    return `<!doctype html><html><head><meta charset="utf-8"><style>
-html,body{margin:0;background:#1e1e1e;color:#e0e0e0;color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-#capture{display:flex;align-items:center;justify-content:center;overflow:hidden;padding:12px;box-sizing:border-box;background:#1e1e1e}
-#diagram{max-width:100%;max-height:100%;display:flex;align-items:center;justify-content:center}
-#diagram svg{max-width:100%;max-height:100%}
-</style></head><body><div id="capture"><div id="diagram"></div></div></body></html>`;
+    return drawioCaptureHtml();
   }
 }
 
@@ -219,5 +167,9 @@ const DrawioSource = {
     return [start >= 0, end >= start].every(Boolean);
   },
 };
+
+export function prepareDrawioSource(source: string): string {
+  return DrawioSource.prepare(source);
+}
 
 export { expandHome };

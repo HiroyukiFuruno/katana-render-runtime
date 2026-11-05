@@ -332,6 +332,8 @@ runtime-asset-script-other-run:
     bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-bundles/runtime-rust-facts-host_test.ts ./scripts/runtime-bundles/runtime-rust-facts-host-freshness_test.ts ./scripts/runtime-bundles/runtime-mathjax-audit-evidence_test.ts
     python3 scripts/quality/moon_cache_contract_test.py --moon bun run moon
     bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/reference_score_test.ts ./scripts/drawio/official-runtime-determinism_test.ts ./scripts/drawio/official-source-fonts_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/svg_capture_test.ts ./scripts/drawio/full_compare_inventory_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/svg_capture_browser_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/html/reference-capture_test.ts ./scripts/html/fidelity-suite_test.ts ./scripts/html/scroll-coverage_test.ts ./scripts/html/performance-history_test.ts ./scripts/html/toc-fidelity_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/html/interaction-suite_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/html/visual-state-fidelity_test.ts ./scripts/html/dynamic-fidelity_test.ts ./scripts/html/interim-feature-results_test.ts
@@ -959,6 +961,11 @@ drawio-render-prebuilt fixtures output='tmp/krr-drawio-rendered':
 drawio-reference fixtures:
     bun run scripts/drawio/diagram-update.ts --fixtures "{{fixtures}}" --output "{{fixtures}}/official" --drawio-js "{{DRAWIO_JS}}" --resources "{{DRAWIO_RESOURCE_DIR}}" --resource-manifest "{{DRAWIO_RESOURCE_MANIFEST}}"
 
+# Write official references to a fresh caller-owned directory, never the fixture tree.
+drawio-reference-output fixtures output:
+    bun run scripts/drawio/candidate-svg-rasterize.ts --assert-output "{{output}}"
+    bun run scripts/drawio/diagram-update.ts --fixtures "{{fixtures}}" --output "{{output}}" --drawio-js "{{DRAWIO_JS}}" --resources "{{DRAWIO_RESOURCE_DIR}}" --resource-manifest "{{DRAWIO_RESOURCE_MANIFEST}}"
+
 # Update all committed Draw.io reference SVG / PNG fixtures
 drawio-reference-all:
     @set -euo pipefail; \
@@ -993,30 +1000,34 @@ drawio-reference-all:
       "$root/representative" \
       | xargs -P "{{FIXTURE_JOBS}}" -I {} bash -c 'slug=${1#tests/fixtures/drawio/}; log="{{RUNTIME_UPDATE_LOG_DIR}}/drawio-reference-${slug//\//-}.log"; if just drawio-reference "$1" >"$log" 2>&1; then echo "drawio reference passed: $slug (log: $log)"; else echo "drawio reference failed: $slug (log: $log)" >&2; tail -n 80 "$log" >&2; exit 1; fi' _ {}
 
-# Compare committed official Draw.io reference with krr rendering through ImageMagick score
+# Compare fresh official Draw.io capture with krr rendering through ImageMagick score
 drawio-compare fixtures min_score='99' output='tmp/krr-drawio' baseline='':
+    bun run scripts/drawio/candidate-svg-rasterize.ts --assert-output "{{output}}"
     just drawio-render "{{fixtures}}" "{{output}}/rendered"
-    bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/rendered" --output "{{output}}/rendered-browser"
+    just drawio-reference-output "{{fixtures}}" "{{output}}/official"
+    bun run scripts/drawio/candidate-svg-rasterize.ts --fixtures "{{fixtures}}" --candidate-svg "{{output}}/rendered" --official "{{output}}/official" --output "{{output}}/rendered-browser"
     @if [ -n "{{baseline}}" ]; then \
-      bun run scripts/drawio/reference-compare.ts --official "{{fixtures}}/official" --katana "{{output}}/rendered-browser" --output "{{output}}/comparison" --min-score "{{min_score}}" --baseline "{{baseline}}"; \
+      bun run scripts/drawio/reference-compare.ts --official "{{output}}/official" --katana "{{output}}/rendered-browser" --output "{{output}}/comparison" --min-score "{{min_score}}" --baseline "{{baseline}}"; \
     else \
-      bun run scripts/drawio/reference-compare.ts --official "{{fixtures}}/official" --katana "{{output}}/rendered-browser" --output "{{output}}/comparison" --min-score "{{min_score}}"; \
+      bun run scripts/drawio/reference-compare.ts --official "{{output}}/official" --katana "{{output}}/rendered-browser" --output "{{output}}/comparison" --min-score "{{min_score}}"; \
     fi
 
-# Compare Draw.io fixtures using the prebuilt krr binary
+# Compare a Draw.io domain with fresh official references using the prebuilt krr binary
 drawio-compare-prebuilt fixtures min_score='99' output='tmp/krr-drawio' baseline='':
+    bun run scripts/drawio/candidate-svg-rasterize.ts --assert-output "{{output}}"
     just drawio-render-prebuilt "{{fixtures}}" "{{output}}/rendered"
-    bun run scripts/mermaid/rasterize-svg-dir.ts --input "{{output}}/rendered" --output "{{output}}/rendered-browser"
+    just drawio-reference-output "{{fixtures}}" "{{output}}/official"
+    bun run scripts/drawio/candidate-svg-rasterize.ts --fixtures "{{fixtures}}" --candidate-svg "{{output}}/rendered" --official "{{output}}/official" --output "{{output}}/rendered-browser"
     @if [ -n "{{baseline}}" ]; then \
-      bun run scripts/drawio/reference-compare.ts --official "{{fixtures}}/official" --katana "{{output}}/rendered-browser" --output "{{output}}/comparison" --min-score "{{min_score}}" --baseline "{{baseline}}"; \
+      bun run scripts/drawio/reference-compare.ts --official "{{output}}/official" --katana "{{output}}/rendered-browser" --output "{{output}}/comparison" --min-score "{{min_score}}" --baseline "{{baseline}}"; \
     else \
-      bun run scripts/drawio/reference-compare.ts --official "{{fixtures}}/official" --katana "{{output}}/rendered-browser" --output "{{output}}/comparison" --min-score "{{min_score}}"; \
+      bun run scripts/drawio/reference-compare.ts --official "{{output}}/official" --katana "{{output}}/rendered-browser" --output "{{output}}/comparison" --min-score "{{min_score}}"; \
     fi
 
 # Compare representative Draw.io patterns for CI/CD
 drawio-compare-ci min_score='99':
     just krr-build
-    just drawio-compare-prebuilt tests/fixtures/drawio/representative "{{min_score}}" tmp/krr-drawio-ci tests/fixtures/drawio/representative/score-baseline.json
+    @set -euo pipefail; run_root="$(mktemp -d tmp/krr-drawio-ci.XXXXXX)"; output="$run_root/representative"; echo "Draw.io comparison output: $output"; just drawio-compare-prebuilt tests/fixtures/drawio/representative "{{min_score}}" "$output" tests/fixtures/drawio/representative/score-baseline.json
 
 # Compare basic Draw.io patterns as a smoke check
 drawio-compare-basic min_score='99':
@@ -1027,7 +1038,9 @@ drawio-compare-basic min_score='99':
 drawio-compare-full min_score='99':
     just krr-build
     @set -euo pipefail; \
-    mkdir -p "{{RUNTIME_UPDATE_LOG_DIR}}"; \
+    output="$(mktemp -d tmp/krr-drawio-full.XXXXXX)"; \
+    echo "Draw.io comparison output: $output"; \
+    mkdir -p "$output/logs"; \
     root="tests/fixtures/drawio"; \
     printf '%s\n' \
       "$root/basic" \
@@ -1055,7 +1068,7 @@ drawio-compare-full min_score='99':
       "$root/official/templates/uml" \
       "$root/official/templates/venn" \
       "$root/official/templates/world" \
-      | xargs -P "{{FIXTURE_JOBS}}" -I {} bash -c 'slug=${1#tests/fixtures/drawio/}; output_slug=${slug//\//-}; log="{{RUNTIME_UPDATE_LOG_DIR}}/drawio-compare-$output_slug.log"; if just drawio-compare-prebuilt "$1" "$2" "tmp/krr-drawio-full/$output_slug" >"$log" 2>&1; then echo "drawio compare passed: $slug (log: $log)"; else echo "drawio compare failed: $slug (log: $log)" >&2; tail -n 80 "$log" >&2; exit 1; fi' _ {} "{{min_score}}"
+      | xargs -P "{{FIXTURE_JOBS}}" -I {} bash -c 'slug=${1#tests/fixtures/drawio/}; output_slug=${slug//\//-}; log="$3/logs/drawio-compare-$output_slug.log"; if just drawio-compare-prebuilt "$1" "$2" "$3/$output_slug" >"$log" 2>&1; then echo "drawio compare passed: $slug (log: $log)"; else echo "drawio compare failed: $slug (log: $log)" >&2; tail -n 80 "$log" >&2; exit 1; fi' _ {} "{{min_score}}" "$output"
 
 # Render Draw.io fixtures for a timing smoke check
 drawio-bench fixtures:

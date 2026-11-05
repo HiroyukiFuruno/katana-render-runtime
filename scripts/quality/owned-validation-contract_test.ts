@@ -1908,6 +1908,27 @@ test.each([
   );
 });
 
+test.each(["valid", "duplicate", "partial", "changed"] as const)(
+  "Draw.io capture registration accepts only the reviewed command block: %s",
+  (variant) => {
+    const root = parserFixture();
+    const command =
+      "bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/svg_capture_browser_test.ts";
+    const original = actualRecipeBody("runtime-asset-script-other-run");
+    const changes = {
+      valid: original,
+      duplicate: `${original}\n${command}`,
+      partial: original.replace(command, ""),
+      changed: original.replace(command, `${command} --only`),
+    };
+    recipes(root, { "runtime-asset-script-other-run": changes[variant] });
+    track(root);
+    expect(inspectParserBodyOnloadRoute(root).binding.localTestRegistered).toBe(
+      variant === "valid",
+    );
+  },
+);
+
 test("the actual repository binds only parser body-onload output to its producer and standard checks", () => {
   const report = inspectParserBodyOnloadRoute(path.resolve(import.meta.dir, "../.."));
   expect(

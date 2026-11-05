@@ -3305,6 +3305,40 @@ class WorkerAttemptContractTest(unittest.TestCase):
                 )
         self.assertIs(collect.call_args.kwargs["capture_runtime_execution"], True)
 
+    def test_same_binary_control_records_candidate_identity_for_both_roles(self) -> None:
+        candidate, binary, snapshot, arms, expected, row = self._condition_case()
+        payload = self._worker_report_sample(expected)
+        with patch.object(producer, "collect_worker_sample", return_value=(
+            payload, {"before": 0.0, "after": 0.0}, [],
+        )) as collect:
+            result = producer._collect_condition_worker_pairs(
+                folder=self.root / "control", row=row, expected=expected,
+                fixture=self.fixture, plan_path=self.plan, width=800, height=600,
+                viewport=self.viewport, builds={"baseline": candidate, "candidate": candidate},
+                binaries={"baseline": binary, "candidate": binary}, arms=arms,
+                root=self.root, lifecycle=self.logs, lock=self.plan, snapshot=snapshot,
+                environment_sha="e" * 64, same_binary_control=True,
+            )
+        self.assertEqual(collect.call_count, 50)
+        self.assertEqual(result.actual_phase_records, 300)
+        self.assertTrue(all(gate.read_json(path)["arm"] == "candidate" for path in result.reports))
+        with self.assertRaisesRegex(ValueError, "arm or pair index"):
+            gate.evaluate_measurement_policy(result.reports, cast(gate.JsonObject, expected))
+
+    def test_same_binary_control_rejects_different_workers_before_collection(self) -> None:
+        candidate, binary, snapshot, arms, expected, row = self._condition_case()
+        with patch.object(producer, "collect_worker_sample") as collect:
+            with self.assertRaisesRegex(ValueError, "same-binary diagnostic workers differ"):
+                producer._collect_condition_worker_pairs(
+                    folder=self.root / "control", row=row, expected=expected,
+                    fixture=self.fixture, plan_path=self.plan, width=800, height=600,
+                    viewport=self.viewport, builds={"baseline": self.build, "candidate": candidate},
+                    binaries={"baseline": self.binary, "candidate": binary}, arms=arms,
+                    root=self.root, lifecycle=self.logs, lock=self.plan, snapshot=snapshot,
+                    environment_sha="e" * 64, same_binary_control=True,
+                )
+        collect.assert_not_called()
+
     def test_partial_baseline_failure_keeps_successful_samples_and_attempts(self) -> None:
         failures: list[gate.JsonObject] = []
         samples: list[gate.JsonObject] = []

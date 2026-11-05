@@ -3341,8 +3341,13 @@ def _collect_condition_worker_pairs(
     builds: Mapping[str, ArmBuildResult], binaries: Mapping[str, Path],
     arms: Mapping[str, ArmPin], root: Path, lifecycle: Path, lock: Path,
     snapshot: FilePin, environment_sha: str, batch_deadline: float | None = None,
-    capture_runtime_execution: bool = False,
+    capture_runtime_execution: bool = False, same_binary_control: bool = False,
 ) -> ConditionWorkerCollection:
+    if same_binary_control:
+        gate.require(builds["baseline"] == builds["candidate"]
+                     and binaries["baseline"] == binaries["candidate"] == builds["candidate"].binary
+                     and arms["candidate"]["binary_sha256"] == builds["candidate"].binary_sha256,
+                     "same-binary diagnostic workers differ")
     order: list[gate.JsonObject] = []
     reports: list[Path] = []
     report_pins: list[FilePin] = []
@@ -3356,7 +3361,8 @@ def _collect_condition_worker_pairs(
             _require_batch_budget(batch_deadline)
             binary = binaries[arm]
             report_path = folder / "reports" / f"{arm}-{pair}.json"
-            raw_arm = gate.baseline_arm_id(expected) if arm == "baseline" else arm
+            raw_arm = ("candidate" if same_binary_control else gate.baseline_arm_id(expected)) \
+                if arm == "baseline" else arm
             if _baseline_slot_is_missing(arm, baseline_failure):
                 missing_failure: gate.JsonObject = {"status": "missing",
                     "reason": "baseline skipped after known fragment refusal",
@@ -4424,6 +4430,8 @@ def main() -> None:
     parser.add_argument("--reference-parent-wrapper", type=Path)
     parser.add_argument("--reference-parent-wrapper-sha256")
     parser.add_argument("--fixed-epoch-origin", type=Path)
+    parser.add_argument("--same-binary-control", metavar="CONDITION_ID")
+    parser.add_argument("--same-binary-batch-sha256")
     parser.add_argument("--candidate-build-only", action="store_true")
     parser.add_argument(
         "--diagnostic-only",
@@ -4437,7 +4445,8 @@ def main() -> None:
                 or args.max_conditions is not None or args.resume_batch is not None
                 or args.reference_parent_wrapper is not None
                 or args.reference_parent_wrapper_sha256 is not None
-                or args.fixed_epoch_origin is not None):
+                or args.fixed_epoch_origin is not None or args.same_binary_control is not None
+                or args.same_binary_batch_sha256 is not None):
             parser.error("candidate build-only mode requires capacity binding pins and no catalog plan")
         repo = args.repo.resolve()
         with candidate_build_locks(repo):
@@ -4446,7 +4455,7 @@ def main() -> None:
             )
         print(json.dumps(result, sort_keys=True))
         return
-    if args.catalog_plan is None:
+    if args.catalog_plan is None and args.same_binary_control is None:
         parser.error("--catalog-plan is required for HTML performance production")
     if args.max_conditions is not None and not 0 < args.max_conditions <= 84:
         parser.error("--max-conditions must be between 1 and 84")
@@ -4454,7 +4463,8 @@ def main() -> None:
         parser.error("reference parent wrapper requires --reference-parent-wrapper-sha256")
     repo = args.repo.resolve()
     arguments = (repo, args.output.resolve(), args.capacity_binding,
-                 args.capacity_binding_sha256, args.catalog_plan.resolve())
+                 args.capacity_binding_sha256,
+                 args.catalog_plan.resolve() if args.catalog_plan is not None else None)
     batch_options: BatchOptions = {}
     if args.max_conditions is not None:
         batch_options["max_conditions"] = args.max_conditions
@@ -4480,9 +4490,21 @@ def main() -> None:
             "workers": {role: gate._object(value, "origin worker") for role, value in raw_workers.items()},
         }
         with candidate_build_locks(repo):
+            if args.same_binary_control is not None:
+                if (args.resume_batch is None or args.catalog_plan is not None
+                        or args.same_binary_batch_sha256 is None):
+                    parser.error("same-binary control requires a pinned batch and no catalog plan")
+                import html_performance_same_binary_diagnostic as diagnostic
+                diagnostic.run(repo, args.output.resolve(), args.resume_batch.resolve(),
+                               args.same_binary_batch_sha256, fixed_origin, args.same_binary_control)
+                return
+            if args.same_binary_batch_sha256 is not None:
+                parser.error("same-binary batch SHA requires the diagnostic mode")
             produce(*arguments, fixed_epoch=fixed_origin,
                     _allow_catalog_diagnostic=args.diagnostic_only, **batch_options)
         return
+    if args.same_binary_control is not None or args.same_binary_batch_sha256 is not None:
+        parser.error("same-binary control requires a fixed epoch origin")
     with candidate_build_locks(repo):
         if args.diagnostic_only:
             produce(*arguments, _allow_catalog_diagnostic=True, **batch_options)
