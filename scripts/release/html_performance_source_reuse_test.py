@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import html_performance_source_reuse as reuse
 from html_performance_source_reuse import validate_reuse_source
-from verify_html_performance_evidence import _verified_reuse_context
+from verify_html_performance_evidence import _v3_authenticate_programs, _verified_reuse_context, committed_records
 
 
 def git(root: Path, *args: str) -> str:
@@ -18,6 +18,35 @@ def git(root: Path, *args: str) -> str:
 
 
 class SourceReuseTest(unittest.TestCase):
+    def test_historical_validation_cohort_auth_module_is_retained(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        path = "scripts/release/html_performance_source_reuse.py"
+        heads = ("70c3981a0df4f3a3833b4833bb78248a08602ee3", "3469ac28", "7d8c4c0ed9bb6ea4fb0efe3f0ab232db40a9976c")
+        blobs = [subprocess.check_output(["git", "-C", str(root), "show", head + ":" + path])
+                 for head in heads]
+        records = [(hashlib.sha256(blob).hexdigest(), len(blob)) for blob in blobs]
+        modes = [git(root, "ls-tree", head, "--", path).split()[0] for head in heads]
+        for index in (1, 2):
+            self.assertTrue(reuse.validation_cohort_change(path, records[0], records[index], modes[0], modes[index]))
+            self.assertFalse(reuse.validation_cohort_change(path, records[0],
+                             (hashlib.sha256(blobs[index] + b" ").hexdigest(), len(blobs[index]) + 1),
+                             modes[0], modes[index]))
+            self.assertFalse(reuse.validation_cohort_change(path, records[0], records[index], modes[0], "100755"))
+
+    def test_historical_validation_cohort_actual_git_endpoints(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        old_head = "70c3981a0df4f3a3833b4833bb78248a08602ee3"
+        new_head = git(root, "rev-parse", "3469ac28").strip()
+        prior_head = "7d8c4c0ed9bb6ea4fb0efe3f0ab232db40a9976c"
+        def items(head: str) -> tuple[tuple[str, str, int], ...]:
+            records = committed_records(root, head)
+            return tuple((path, checksum, size) for path, (checksum, size) in sorted(records.items())
+                         if path.startswith("scripts/") or path == "Justfile")
+        old_items = items(old_head)
+        self.assertEqual(_v3_authenticate_programs(root, old_head, old_items,
+                         ((new_head, items(new_head)), (prior_head, items(prior_head))),
+                         git_query=None), old_items)
+
     def test_reviewed_fact_cache_program_changes_are_exact(self) -> None:
         root = Path(__file__).resolve().parents[2]
         old_head = "3469ac28"
@@ -39,6 +68,13 @@ class SourceReuseTest(unittest.TestCase):
         self.assertTrue(reuse.known_auth_program_change(path, old, current))
         self.assertFalse(reuse.known_auth_program_change(path, old + b" ", current))
         self.assertFalse(reuse.known_auth_program_change(path, old, current + b" "))
+        test_path = "scripts/release/html_performance_source_reuse_test.py"
+        test_old = subprocess.check_output(["git", "-C", str(root), "show", "7d8c4c0ed9bb6ea4fb0efe3f0ab232db40a9976c:" + test_path])
+        test_new = (root / test_path).read_bytes()
+        old_record = (hashlib.sha256(test_old).hexdigest(), len(test_old))
+        new_record = (hashlib.sha256(test_new).hexdigest(), len(test_new))
+        self.assertTrue(reuse.validation_cohort_change(test_path, old_record, new_record, "100644", "100644"))
+        self.assertFalse(reuse.validation_cohort_change(test_path, old_record, new_record, "100644", "100755"))
 
     def test_release_only_program_changes_preserve_membership_and_modes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

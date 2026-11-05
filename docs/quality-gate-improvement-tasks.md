@@ -4,6 +4,8 @@
 
 ### 最新確定と次の実行（R8385、下の当時の件数より優先）
 
+- [/] R8396の正式resumeは採取前に`live validation cohort differs`で実1。旧endpointが以前の実行moduleだったことを認証する規則が、validator更新後にその履歴を失っていた。元closed30と原失敗を保持し、original→記録済み3469、original→review済み7d8、既存のtest endpoint56ad/5000などの正確な組を残した。新しいtestもexact pinへ追加し、未知byte/mode/dirtyの拒否を維持。R8400は実Gitで70c固定sourceから3469/7d8両endpointを同時に検証し、strict型201fileと関連8unitが実0。正式な統合resumeの成功は次の実行で確認する。実行module一致と上位Git/clean認証という既存の信頼境界を変えず、自己認証frameworkは増設しない。
+
 - [/] facts枠変更は通常commit/hook実0の`4d7dabbb`へ固定。既存の有限program認証へ旧3469/70cからreview済みverifier/testのexact SHA/size/modeを追加し、auth自身は既知旧bytes＋現実行moduleのexact bytesと上位Git/clean検証、という既存の信頼境界を維持する。任意path/bodyの例外は追加しない。R8388で旧認証REDと限定6unit GREENを回収した。R8390のstrict型失敗は保持し、可変長list展開を明示引数へ修正してtest pinも同期。R8392のstrict型201fileと最終6unitは実0。旧closed30の正式な統合resumeは次に行う。
 - [/] R8389は未受入R8362の新規生成ログと輸送copy123件を2,147,160,626bytesから21,106,232bytesへ可逆保管。全展開SHA/size・元stamp不変、保護31参照と現行closed30のreceipt/manifest/全transportを実検証し、空きは6,709,694,464bytesへ回復した。旧inodeを再認定せず、索引と対応表をlocal artifactへ保持する。追加確認は求めていない。
 
