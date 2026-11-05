@@ -3560,7 +3560,6 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     gate.require(reference_parent_wrapper is None or catalog_manifest_path is not None,
                  "reference parent wrapper requires a catalog")
     batch_mode = _batch_mode(catalog_manifest_path, max_conditions, resume_batch)
-    batch_deadline = _batch_deadline(time.monotonic(), batch_mode)
     batch_failure: BaseException | None = None
     resumed_receipt: gate.JsonObject | None = None
     resumed_bundle: gate.Bundle | None = None
@@ -3573,6 +3572,8 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             resume_batch.resolve(), root, fixed_epoch=fixed_epoch, git_query=git_query,
         )
         _require_cpu_busy_resume(resumed_bundle, resumed_attempts)
+    # 既存結果の認証に新規採取の予算を消費しない。
+    batch_deadline = _batch_deadline(time.monotonic(), batch_mode)
     catalog_conditions: list[CatalogCondition] | None = None
     catalog_manifest_pin: FilePin | None = None
     catalog_plan_pin: FilePin | None = None

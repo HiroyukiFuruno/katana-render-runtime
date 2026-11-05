@@ -274,6 +274,55 @@ class CatalogProducerOperationTest(unittest.TestCase):
             load.assert_called_once_with(batch.resolve(), root, fixed_epoch=origin, git_query=query)
             self.assertIs(verify.call_args.kwargs["git_query"], query)
 
+    def test_resume_budget_starts_once_after_closed_batch_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            origin: typed_producer.FixedEpochContextInput = {
+                "directory": root / "origin", "manifest_sha256": "a" * 64,
+                "artifact_path": "candidate.json", "artifact_sha256": "b" * 64,
+                "head": "c" * 40, "workers": {},
+            }
+            clock = [100.0]
+            events: list[str] = []
+            deadline = producer._batch_deadline
+            marker = ValueError("origin reached")
+
+            def load(*_args: object, **_kwargs: object) -> tuple[dict[str, object], Mock, list[object]]:
+                events.append("closed")
+                clock[0] += producer.BATCH_WORK_BUDGET_SECONDS + 30
+                return {}, Mock(), []
+
+            def cpu(*_args: object) -> None:
+                events.append("cpu")
+                clock[0] += 10
+
+            def start_budget(started: float, enabled: bool) -> float | None:
+                events.append("deadline")
+                return deadline(started, enabled)
+
+            with (patch.object(platform, "system", return_value="Darwin"),
+                  patch.object(platform, "machine", return_value="arm64"),
+                  patch.object(load_validation, "require_current_cpu_observer_sources"),
+                  patch.object(producer, "_make_git_query", return_value=Mock()),
+                  patch.object(time, "monotonic", side_effect=lambda: clock[0]),
+                  patch.object(producer, "load_closed_batch", side_effect=load),
+                  patch.object(producer, "_require_cpu_busy_resume", side_effect=cpu),
+                  patch.object(producer, "_batch_deadline", side_effect=start_budget) as start,
+                  patch.object(producer, "load_catalog_conditions", return_value=([], None, None, None)),
+                  patch.object(remote_evidence, "validate_fixed_epoch_candidate_origin", side_effect=marker)):
+                with self.assertRaises(ValueError) as caught:
+                    producer.produce(root, root / "tmp/output", catalog_manifest_path=root / "catalog",
+                                     resume_batch=root / "closed", fixed_epoch=origin)
+                self.assertIs(caught.exception, marker)
+                self.assertEqual(events, ["closed", "cpu", "deadline"])
+                start.assert_called_once_with(1340.0, True)
+                limit = deadline(1340.0, True)
+                clock[0] = 2539.0
+                producer._require_batch_budget(limit)
+                clock[0] = 2540.0
+                with self.assertRaises(producer.BatchBudgetExhausted):
+                    producer._require_batch_budget(limit)
+
     def test_fixed_epoch_checks_original_source_end_before_live_observation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

@@ -2,6 +2,14 @@
 
 ## 最新の再開地点（2026-11-05）
 
+### R8424時点（最新確定36/84、残48）
+
+- [x] R8417は既存bootstrapを通常起動し、誤った全体build制限を排して終了回収。producer実1は既存budgetによる部分封緘、controller実0。closed36/36、10800 phase records、policyAccepted=true/formalAccepted=false。receipt SHA `89224efeb5530cf5237e34720ffbfab11576510b8aae4837442bed4163641cb5`。新6件を加算し、正式性能36/84・未判定48。全体所要1714.342秒は検証運用時間であり製品の表示時間ではない。
+- [/] 再開時のclosed厳格再検証が新規採取の1200秒予算を消費し、件数増加で新規0件になり得るため、deadline代入1行をclosed＋CPU resume認証後へ移す。以後のcatalog/preflight/build/workerは同じ単一1200秒枠と既存個別timeoutを維持する。R8418で旧実装の順序不正RED、修正後R8421で関連unit実0。ループ毎期限更新や測定・判定省略は行わない。
+- [/] 独立reviewで、新producer有限認証が先行returnに遮られるP1とCPU current pin未同期P1を検出。実70c/9e旧blob→現worktree正例を追加してR8422の旧routing REDを保存、認証対象既知pairだけ先行returnし未知targetは後段の正確な新pairへ渡す。CPU currentを新producer、旧5bを履歴へ保持し、関連helper/testと既存auth履歴の有限pinを同期する。R8423のstrict201fileは実0、最終関連unitはR8424で回収中。未知bytes/mode拒否を維持。
+- [/] R8424の最終関連35unitは実0。新producerへの実70c/9e旧blobからの正例、未知bytes/mode負例、予算開始順・期限後worker未起動、CPU current/historical・不正source拒否と既存program履歴を確認した。修正後の独立readonlyレビューに追加P0–P2なし。R8426で最終foundationを回収し、通常commit後に旧closed36から再開する。新36以降の合格はまだ加算しない。
+- [ ] 最終foundation・通常commit・36からの次の正式再開、全84性能、完全gate/実装coverage100%・未計測0、cache実再利用/復元/改変拒否、最新依存/Actions、Draft review・個別reply/resolve・Ready・3OS CI・保護merge・既存3crate公開・Issue close/cleanupは未完。進捗だけで停止しない。
+
 ### R8413時点の継続（下の実行中表記は履歴）
 
 - [ ] 性能の正式合格はR8361の30/84、未判定54を維持。R8404/exec3598は1800秒でouter1・inner-15、receiptなし、新合格0。Mermaid117/117、HTML84/84画像・全領域286/286は既存結果を維持する。

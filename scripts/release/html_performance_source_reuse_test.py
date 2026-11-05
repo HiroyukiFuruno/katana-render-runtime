@@ -18,6 +18,23 @@ def git(root: Path, *args: str) -> str:
 
 
 class SourceReuseTest(unittest.TestCase):
+    def test_reviewed_producer_cohort_reaches_current_worktree(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        for name in ("produce_html_performance_evidence.py", "produce_html_performance_evidence_test.py"):
+            path = "scripts/release/" + name
+            current = (root / path).read_bytes()
+            new_record = (hashlib.sha256(current).hexdigest(), len(current))
+            new_mode = "100755" if (root / path).stat().st_mode & 0o111 else "100644"
+            for head in ("70c3981a0df4f3a3833b4833bb78248a08602ee3", "9e88ede8"):
+                old = subprocess.check_output(["git", "-C", str(root), "show", head + ":" + path])
+                old_record = (hashlib.sha256(old).hexdigest(), len(old))
+                old_mode = git(root, "ls-tree", head, "--", path).split()[0]
+                unknown = (hashlib.sha256(current + b" ").hexdigest(), len(current) + 1)
+                with self.subTest(path=path, head=head):
+                    self.assertTrue(reuse.validation_cohort_change(path, old_record, new_record, old_mode, new_mode))
+                    self.assertFalse(reuse.validation_cohort_change(path, old_record, unknown, old_mode, new_mode))
+                    self.assertFalse(reuse.validation_cohort_change(path, old_record, new_record, old_mode, "100755"))
+
     def test_historical_validation_cohort_auth_module_is_retained(self) -> None:
         root = Path(__file__).resolve().parents[2]
         path = "scripts/release/html_performance_source_reuse.py"
