@@ -1968,8 +1968,9 @@ _PROGRAM_CACHES: weakref.WeakKeyDictionary[types.FunctionType, _ProgramCache] = 
 def _v3_authenticate_programs(root: Path, head: str, items: _ProgramItems,
                               endpoints: _ProgramEndpoints, *, git_query: GitQuery | None) -> _ProgramItems:
     from html_performance_source_reuse import (
-        RELEASE_ONLY_PROGRAMS, _modes, cache_only_collector_change, equivalent_program_records,
-        known_auth_program_change,
+        RELEASE_ONLY_PROGRAMS, VALIDATION_COHORT_ADDITIONS, VALIDATION_COHORT_CHANGES,
+        _modes, cache_only_collector_change,
+        equivalent_program_records, known_auth_program_change, validation_cohort_change,
     )
 
     programs = {name: (checksum, size) for name, checksum, size in items}
@@ -1987,10 +1988,31 @@ def _v3_authenticate_programs(root: Path, head: str, items: _ProgramItems,
         live_selected = {path: value for path, value in live_committed.items()
                          if path.startswith("scripts/") or path == "Justfile"}
         require(live_programs == live_selected, "live program source differs from Git")
-        comparable = dict(live_programs)
-        require(programs.keys() == live_programs.keys(), "live measurement program membership differs")
+        live_tree = _git_output(root, ("ls-tree", "-r", "-z", live_head), git_query=git_query)
+        if not isinstance(live_tree, bytes):
+            raise ValueError("live program tree differs")
+        live_modes = _modes(live_tree)
+        additions = set(live_programs) - set(programs)
+        require(not (set(programs) - set(live_programs))
+                and (not additions or additions == set(VALIDATION_COHORT_ADDITIONS))
+                and all(validation_cohort_change(path, None, live_programs[path], None,
+                                                 live_modes.get(path)) for path in additions),
+                "live measurement program membership differs")
+        if additions:
+            cohort = set(VALIDATION_COHORT_CHANGES) | {
+                "scripts/release/html_performance_source_reuse.py",
+            }
+            require(all(path in programs and path in live_programs
+                        and validation_cohort_change(path, programs[path], live_programs[path],
+                                                     modes.get(path), live_modes.get(path))
+                        for path in cohort), "live validation cohort differs")
+        comparable = {path: live_programs[path] for path in programs}
         for path in programs:
             if path in RELEASE_ONLY_PROGRAMS or programs[path] == live_programs[path]:
+                continue
+            if validation_cohort_change(path, programs[path], live_programs[path],
+                                        modes.get(path), live_modes.get(path)):
+                comparable[path] = programs[path]
                 continue
             old_blob = _git_output(root, ("show", head + ":" + path), git_query=git_query)
             new_blob = _git_output(root, ("show", live_head + ":" + path), git_query=git_query)
@@ -2002,10 +2024,6 @@ def _v3_authenticate_programs(root: Path, head: str, items: _ProgramItems,
             comparable[path] = programs[path]
         require(equivalent_program_records(comparable, programs),
                 "live measurement program differs from fixed epoch")
-        live_tree = _git_output(root, ("ls-tree", "-r", "-z", live_head), git_query=git_query)
-        if not isinstance(live_tree, bytes):
-            raise ValueError("live program tree differs")
-        live_modes = _modes(live_tree)
         require(all(modes.get(path) == live_modes.get(path) for path in programs),
                 "live measurement program mode differs")
     return tuple((name, checksum, size) for name, (checksum, size) in sorted(programs.items()))
@@ -2065,9 +2083,7 @@ def _host_load_source_records(bundle: Bundle, root: Path, expected: JsonObject,
 
 def _verified_v3_reuse_context(bundle: Bundle, root: Path, measured_head: str,
                                expected: JsonObject, *, git_query: GitQuery | None) -> object:
-    from html_performance_source_reuse import (
-        RELEASE_ONLY_PROGRAMS, _modes, cache_only_collector_change, known_auth_program_change,
-    )
+    from html_performance_source_reuse import _modes
 
     pair = _object(expected.get("sourcePair"), "v3 source pair")
     require(pair.get("schema") == "krr-html-performance-source-epoch-v3",
@@ -2090,17 +2106,10 @@ def _verified_v3_reuse_context(bundle: Bundle, root: Path, measured_head: str,
     live_records = committed_records(root, live_head, git_query=git_query)
     live_programs = {path: value for path, value in live_records.items()
                      if path.startswith("scripts/") or path == "Justfile"}
-    require(programs.keys() == live_programs.keys(), "current measurement program membership differs")
-    for path in programs:
-        if path in RELEASE_ONLY_PROGRAMS or programs[path] == live_programs[path]:
-            continue
-        old_blob = _git_output(root, ("show", program_head + ":" + path), git_query=git_query)
-        live_blob = _git_output(root, ("show", live_head + ":" + path), git_query=git_query)
-        require(isinstance(old_blob, bytes) and isinstance(live_blob, bytes)
-                and (path == "scripts/release/produce_html_performance_evidence.py"
-                     and cache_only_collector_change(old_blob, live_blob)
-                     or known_auth_program_change(path, old_blob, live_blob)),
-                "current measurement program differs from authenticated program")
+    fixed_items = tuple((name, checksum, size) for name, (checksum, size) in sorted(programs.items()))
+    live_items = tuple((name, checksum, size) for name, (checksum, size) in sorted(live_programs.items()))
+    _v3_authenticate_programs(root, program_head, fixed_items, ((live_head, live_items),),
+                              git_query=git_query)
     live_tree = _git_output(root, ("ls-tree", "-r", "-z", live_head), git_query=git_query)
     require(isinstance(live_tree, bytes), "current program tree differs")
     if not isinstance(live_tree, bytes):
@@ -2346,7 +2355,8 @@ def _v3_epoch_validation(bundle: Bundle, root: Path, expected: JsonObject,
     all_records = [program_records, *endpoint_records]
     def program_refs(records: SourceRecords) -> dict[str, JsonObject]:
         return {
-            path: {"path": str(origin_root / path if item == program_records[path]
+            path: {"path": str(origin_root / path if path in program_records
+                               and item == program_records[path]
                                else origin_root / "tmp/html-performance-programs" / item[0] / path),
                    "sha256": item[0]}
             for path, item in records.items()

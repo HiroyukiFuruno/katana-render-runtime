@@ -55,6 +55,80 @@ RELEASE_ONLY_PROGRAMS = frozenset({
     "scripts/release/verify_release_target_test.py",
 })
 
+# WHY: 固定epoch後の検証専用cohortを実Git blob単位で限定する。
+VALIDATION_COHORT_ADDITIONS: dict[str, tuple[str, int]] = {
+    "scripts/drawio/candidate-svg-rasterize.ts": ("22b874614043742c806cbdb77862f37212480e4201eb0aad4a940cfba74bedda", 3621),
+    "scripts/drawio/full_compare_inventory_test.ts": ("042093a5ccdea86f96d1eb3a6d732f0d6651cf63bb8f5466960c169eb9375215", 5165),
+    "scripts/drawio/svg-capture.ts": ("b2fc26287b3d4a336db4497cb3f54039f9168295f3aff40f02dad5bc63868a79", 4476),
+    "scripts/drawio/svg_capture_browser_test.ts": ("613745c16e650b4031477ba20aaf71cdf62b3b40385f504b12eb99a95f2b14d1", 1809),
+    "scripts/drawio/svg_capture_test.ts": ("b706b5f2f43b71a6b14c4958646eea6e3c38afad8b0bc9f71cfbe2b391e479fe", 1532),
+    "scripts/release/html_performance_same_binary_diagnostic.py": ("0f6a3ce678431eeb59bc021b390c5e71b0fb3005a5e33538fccc92b3706c6a12", 10533),
+    "scripts/release/html_performance_same_binary_diagnostic_test.py": ("5cbeccc03f1b5093ad5c0ac992e17203071d9bd831b98decea602b95188bef01", 1722),
+}
+VALIDATION_COHORT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, int]]] = {
+    "Justfile": (("5c44338aa86b1f711534e7aff2dc77626e2632f790a73ed90ed8af9da2bf7067", 84265), ("39d45b22a2f5f6d60ca4ee02cc1c8054de86f6a104b67fd4f6765039b3160dc9", 85579)),
+    "scripts/drawio/official-renderer.ts": (("17ed1965601971df914cc9b24ea40bbc9562dc7d416acc27e32d8088136c8f2a", 7551), ("ae2d05f5df65ebb4bb07c684938dc9341bbedd670a50a51acf185d701853cea2", 5177)),
+    "scripts/quality/owned-validation-contract.ts": (("c3ec88e882c759907f8f2ce69e9556a4fcdd94cdba6c45044e07fd745b13d33d", 218924), ("bea812c143b520f502c1d02840ad3d8d0233ae4016856adf5268df5cdd21e34b", 220172)),
+    "scripts/quality/owned-validation-contract_test.ts": (("4b5c0fe741e31c8b10d366804f957e63211e0b0e7ecfff782aee57d2fd424a4e", 256387), ("d3a1199e399a20562d90b0e5e614e1b4491319b5073a91e4970570fe2deaedc3", 257191)),
+    "scripts/release/html_performance_host_load_validation.py": (("80b59b6d1fb10ba7953e2f598bed2928483a8ee50aea09ae1992796f6239b87a", 10040), ("50c1fd0439f46472bb789865ecfd83714f6feaaaa8c882521880dab6710b3659", 10112)),
+    "scripts/release/produce_html_performance_evidence.py": (("bffd5b7781ea1650185d2756a90c4c7350d7708726d7482cf6fff397c4b14aa8", 252854), ("80ded11e1b2984635cd455aa55dd926eefbbd03759d8c9eccd719dc16bfd7d45", 254521)),
+    "scripts/release/produce_html_performance_evidence_test.py": (("7ff9328bebff71189ca1c32719923d50688665b88e284f0a2c4d16ff4c216cad", 292734), ("ea9484f7714c5279d7f8880fb4a499e4fd24fb8b7fa7818b227dd5075cdf9cc9", 295024)),
+}
+
+
+def validation_cohort_change(path: str, old: tuple[str, int] | None,
+                             new: tuple[str, int] | None, old_mode: str | None,
+                             new_mode: str | None) -> bool:
+    if path in VALIDATION_COHORT_ADDITIONS:
+        return (old is None and old_mode is None and new == VALIDATION_COHORT_ADDITIONS[path]
+                and new_mode == "100644")
+    pair = VALIDATION_COHORT_CHANGES.get(path)
+    if pair is not None:
+        followup = {
+            "scripts/release/produce_html_performance_evidence.py":
+                ("5b5c62c6ec147f0ed9a541c6eb9d07a883cb3ad90d75eb71bc5b6d8f7750e08c", 254729),
+            "scripts/release/html_performance_host_load_validation.py":
+                ("81ca438ccce28208836dd811438ce81ef27961fe289051110750d1403f2069c5", 10184),
+        }
+        return (old == pair[0] and new is not None and (new == pair[1] or new == followup.get(path))
+                and old_mode == new_mode == "100644")
+    if path == "scripts/release/html_performance_source_reuse.py":
+        original = ("6f679815a6417ed21e9dceddd9fa201e39a4ab7499288e5b49a4181f9ecf18ec", 24436)
+        data = Path(__file__).read_bytes()
+        live = (hashlib.sha256(data).hexdigest(), len(data))
+        prior = ("7d75f7a2642103908ebaaf24ccffc175b0ff61e8bbb020fea9f9b0d0e4648dfe", 24917)
+        if old != original or old_mode != "100644" or new_mode != "100644":
+            return False
+        if new == prior:
+            return True
+        if new != live:
+            return False
+        import subprocess
+        baseline = subprocess.run(
+            ["git", "--no-replace-objects", "-C", str(Path(__file__).resolve().parents[2]), "show",
+             "b9cf37535ba374b62fee4e889f9c58f58f1ab8dc:" + path],
+            check=True, capture_output=True,
+        ).stdout
+        return known_auth_program_change(path, baseline, data)
+    test_changes = {
+        "scripts/release/verify_html_performance_evidence.py": (
+            ("630cb08266eb1b24b249bf295b3591cbe87da9529e6f770ce600715ad93ab656", 249838),
+            ("04dc3d5e4d44f239c4bf1e664273d8ad0b4fcd22bb50591bed2535b6d36c9aef", 250526)),
+        "scripts/release/html_performance_epoch_reuse.py": (
+            ("3f50599d284dbe593bb9a1cf02d0fdd633647eb61a3f6be7867b8308d72de3c7", 19278),
+            ("958c35a3b8a4e515b42ff45eff5c4019e9d7bb0dc3542e8391ee90151ccb0126", 19876)),
+        "scripts/release/verify_html_performance_evidence_test.py": (
+            ("ee5f14f317dc8856250f217d4670a520b6759b299424a8a00ee0738eca18bb75", 250692),
+            ("30f00fa2d26a68c4ed95bac4fb7624864fa2588914da65abf606c91fefbfff97", 255806)),
+        "scripts/release/html_performance_epoch_reuse_test.py": (
+            ("7af8025db42ec26ab39c0d62eee8423d38d7632f465c431c07553e33bca18a73", 21105),
+            ("fffb60fd613de735c238bbc0357711b94aa5c330dc3f10b1ac5e0e15d6f4d938", 23028)),
+    }
+    test_pair = test_changes.get(path)
+    if test_pair is not None:
+        return old == test_pair[0] and new == test_pair[1] and old_mode == new_mode == "100644"
+    return False
+
 
 def equivalent_program_records(left: Mapping[str, tuple[str, int]],
                                right: Mapping[str, tuple[str, int]]) -> bool:
@@ -105,7 +179,8 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
             return False
         old_tree = ast.parse(old)
         current_tree = ast.parse(current)
-        additions = {"cache_only_collector_change", "known_auth_program_change", "_specific_source_changes"}
+        additions = {"cache_only_collector_change", "known_auth_program_change", "_specific_source_changes",
+                     "validation_cohort_change"}
         definitions = [node for node in current_tree.body
                        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in additions]
         if len(definitions) != len(additions) or {node.name for node in definitions} != additions:
@@ -114,6 +189,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
             "cache_only_collector_change": cache_only_collector_change,
             "known_auth_program_change": known_auth_program_change,
             "_specific_source_changes": _specific_source_changes,
+            "validation_cohort_change": validation_cohort_change,
         }
         for node in definitions:
             actual = ast.dump(node, include_attributes=False)
@@ -151,6 +227,14 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
         current_tree.body = [node for node in current_tree.body
                              if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
                              or node.name not in additions]
+        constants = {"VALIDATION_COHORT_ADDITIONS": VALIDATION_COHORT_ADDITIONS,
+                     "VALIDATION_COHORT_CHANGES": VALIDATION_COHORT_CHANGES}
+        for name, value in constants.items():
+            nodes = [node for node in current_tree.body if isinstance(node, ast.AnnAssign)
+                     and isinstance(node.target, ast.Name) and node.target.id == name]
+            if len(nodes) != 1 or nodes[0].value is None or ast.literal_eval(nodes[0].value) != value:
+                return False
+            current_tree.body.remove(nodes[0])
         return ast.dump(old_tree, include_attributes=False) == ast.dump(current_tree, include_attributes=False)
     pins = {
         "scripts/release/local_macos_evidence.py": (
@@ -173,12 +257,17 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
                        "49cc989141f481b7d9e522265d4ebd3c70e7f6ac4f2b98ca36ec187b3a0a3351"})),
         "scripts/release/html_performance_epoch_reuse.py": (
             "33a05103fc5100c7eb2e9d10368785c8ab20e6f8308ddc53f0ae95f63c573f1c",
-            "3f50599d284dbe593bb9a1cf02d0fdd633647eb61a3f6be7867b8308d72de3c7"),
+            frozenset({"3f50599d284dbe593bb9a1cf02d0fdd633647eb61a3f6be7867b8308d72de3c7",
+                       "958c35a3b8a4e515b42ff45eff5c4019e9d7bb0dc3542e8391ee90151ccb0126"})),
+        "scripts/release/html_performance_epoch_reuse_test.py": (
+            "7af8025db42ec26ab39c0d62eee8423d38d7632f465c431c07553e33bca18a73",
+            "fffb60fd613de735c238bbc0357711b94aa5c330dc3f10b1ac5e0e15d6f4d938"),
         "scripts/release/html_performance_host_load_validation.py": (
             "eaf150043f1361b9a5d75ee5eb4f6348c6541564c1299a091265f446cd445f74",
             frozenset({"546885df19bbaf8d40b6428af6dcbece6c4ba59c7f73f5bb4aa7ec72a0339269",
                        "80b59b6d1fb10ba7953e2f598bed2928483a8ee50aea09ae1992796f6239b87a",
-                       "50c1fd0439f46472bb789865ecfd83714f6feaaaa8c882521880dab6710b3659"})),
+                       "50c1fd0439f46472bb789865ecfd83714f6feaaaa8c882521880dab6710b3659",
+                       "81ca438ccce28208836dd811438ce81ef27961fe289051110750d1403f2069c5"})),
         "scripts/release/html_performance_host_load_validation_test.py": (
             "977394a86e45b307f9939a952aa6ef66d3cf770154564794d7196036aa6c2497",
             frozenset({"a550c3e89979dda00597eb3497bf627c793a8a5228c88bc740976526ad70aa66",
@@ -187,7 +276,8 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
             "d4d85ae7e2120e3720ef31afe6a7228011385d0267ec770060e68f606e21388e",
             frozenset({"490233a4797d9690f7393000cfeda1ceb4d806e1a7df2c588bbb300d8cc1dae5",
                        "bffd5b7781ea1650185d2756a90c4c7350d7708726d7482cf6fff397c4b14aa8",
-                       "80ded11e1b2984635cd455aa55dd926eefbbd03759d8c9eccd719dc16bfd7d45"})),
+                       "80ded11e1b2984635cd455aa55dd926eefbbd03759d8c9eccd719dc16bfd7d45",
+                       "5b5c62c6ec147f0ed9a541c6eb9d07a883cb3ad90d75eb71bc5b6d8f7750e08c"})),
         "scripts/release/produce_html_performance_evidence_test.py": (
             "1ed2ab04cc2fccc6674b0eb565e097d9df37d44ca66d5b6fc70e12d7583e2fe2",
             frozenset({"52f4b3cb14c379b5fb3c260d170b10024d30377bf63ad33b4084a8fc3137db9b",
@@ -200,13 +290,16 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
                        "5eb3892fb7d508586f43fe62df8ecfd603e3fb540af442a8abb6ceccc7e022c2",
                        "30a772d8b1488a764185ab0761afb555cd65d798a2696674dde0821465ce4f83",
                        "ee23eb6dbd56ca3dcd6ae00b4f79a69675b6ec9cd408b7158d16f1ded88d4d60",
-                       "630cb08266eb1b24b249bf295b3591cbe87da9529e6f770ce600715ad93ab656"})),
+                       "630cb08266eb1b24b249bf295b3591cbe87da9529e6f770ce600715ad93ab656",
+                       "04dc3d5e4d44f239c4bf1e664273d8ad0b4fcd22bb50591bed2535b6d36c9aef"})),
         "scripts/release/verify_html_performance_evidence_test.py": (
             "9f423f9edbd3fa5ef2a0f1fd1d28a2d2a61f968498650f65dd3f0e5f323be4b3",
             frozenset({"953044024351425627b8798fcbbc3d5f9216ac49d78e7c63075cd034536584e0",
                        "2daf590b500a480c83615bdb436a57c77834546a183c77638d89f2d8a74a20c7",
                        "91c7380a5516b550acfeffbbc165bb8e5b1c5480c14e4beff11609fd4898ebe5",
-                       "ee5f14f317dc8856250f217d4670a520b6759b299424a8a00ee0738eca18bb75"})),
+                       "ee5f14f317dc8856250f217d4670a520b6759b299424a8a00ee0738eca18bb75",
+                       "095ccaa79b72cb540d37e8ec24e77937a67b539be074a3e019edee27aaac22f3",
+                       "30f00fa2d26a68c4ed95bac4fb7624864fa2588914da65abf606c91fefbfff97"})),
     }
     expected = pins.get(path)
     if expected is None or expected[0] != hashlib.sha256(old).hexdigest():

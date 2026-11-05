@@ -118,7 +118,15 @@ def compare_declared_inputs(old_reader: gate.FileReader, old: DeclaredEpochInput
         old_pins = _verified_pins(old_reader, old_group, "old " + name)
         new_pins = _verified_pins(new_reader, new_group, "new " + name)
         if name == "programs":
-            gate.require(old_pins.keys() == new_pins.keys()
+            from html_performance_source_reuse import VALIDATION_COHORT_ADDITIONS
+            additions = set(new_pins) - set(old_pins)
+            gate.require(not (set(old_pins) - set(new_pins))
+                         and (not additions or additions == set(VALIDATION_COHORT_ADDITIONS))
+                         and all(new_pins[key][1] == VALIDATION_COHORT_ADDITIONS[key][0]
+                                 and new_pins[key][0].endswith(
+                                     "/tmp/html-performance-programs/"
+                                     + VALIDATION_COHORT_ADDITIONS[key][0] + "/" + key)
+                                 for key in additions)
                          and all(old_pins[key] == new_pins[key] or key in program_changes
                                  for key in old_pins), "epoch programs differs")
         else:

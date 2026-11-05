@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import platform
+import subprocess
 import struct
 import tempfile
 import unittest
@@ -213,6 +214,37 @@ class DeclaredInputsTest(unittest.TestCase):
 
     def test_identical_transport_pins_and_context_are_accepted(self) -> None:
         epoch.compare_declared_inputs(self.bundle, self.declared(), self.bundle, self.declared())
+
+    def test_reviewed_added_programs_require_exact_transport_membership(self) -> None:
+        from html_performance_source_reuse import VALIDATION_COHORT_ADDITIONS
+
+        repo = Path(__file__).resolve().parents[2]
+        root = self.bundle.directory
+        document = gate.read_json(root / "bundle.json")
+        files = gate._array(document["files"], "files")
+        additions: dict[str, gate.JsonObject] = {}
+        for index, (name, (checksum, size)) in enumerate(VALIDATION_COHORT_ADDITIONS.items()):
+            data = subprocess.run(["git", "-C", str(repo), "show", "637cd465:" + name],
+                                  check=True, capture_output=True).stdout
+            self.assertEqual((hashlib.sha256(data).hexdigest(), len(data)), (checksum, size))
+            relative = f"added-{index}"
+            (root / relative).write_bytes(data)
+            logical = str(root / "tmp/html-performance-programs" / checksum / name)
+            files.append({"originalPath": logical, "relativePath": relative, "sha256": checksum})
+            additions[name] = {"path": logical, "sha256": checksum}
+        (root / "bundle.json").write_text(json.dumps(document))
+        reader = gate.Bundle(root)
+        old = self.declared()
+        new = self.declared()
+        new["programs"] = {**new["programs"], **additions}
+        epoch.compare_declared_inputs(reader, old, reader, new)
+        new["programs"] = {key: value for key, value in new["programs"].items()
+                           if key != next(iter(additions))}
+        with self.assertRaisesRegex(ValueError, "epoch programs differs"):
+            epoch.compare_declared_inputs(reader, old, reader, new)
+        new["programs"] = {**new["programs"], "scripts/unknown.py": self.pins["program"]}
+        with self.assertRaisesRegex(ValueError, "epoch programs differs"):
+            epoch.compare_declared_inputs(reader, old, reader, new)
 
     def test_changed_role_pin_or_inventory_is_rejected(self) -> None:
         for group, role in (("workers", "candidate"), ("programs", "producer"),

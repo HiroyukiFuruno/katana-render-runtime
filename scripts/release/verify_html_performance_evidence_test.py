@@ -1517,6 +1517,87 @@ class PerformanceEvidenceTest(unittest.TestCase):
                                     [{"liveCheckout": historical}, {"liveCheckout": altered}],
                                     git_query=None)
 
+    def test_v3_reviewed_validation_cohort_preserves_actual_membership(self) -> None:
+        import produce_html_performance_evidence as producer
+
+        repository = Path(__file__).resolve().parents[2]
+        older = "70c3981a0df4f3a3833b4833bb78248a08602ee3"
+        newer = "637cd465"
+        paths = subprocess.run(
+            ["git", "-C", str(repository), "diff", "--name-only", older, newer,
+             "--", "Justfile", "scripts/"], check=True, capture_output=True, text=True,
+        ).stdout.splitlines()
+        self.assertEqual(len(paths), 15)
+
+        def install(revision: str) -> None:
+            for name in paths:
+                target = self.root / name
+                result = subprocess.run(["git", "-C", str(repository), "show", f"{revision}:{name}"],
+                                        capture_output=True, check=False)
+                if result.returncode == 0:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(result.stdout)
+                elif target.exists():
+                    target.unlink()
+
+        auth_names = ("scripts/release/verify_html_performance_evidence.py",
+                      "scripts/release/verify_html_performance_evidence_test.py",
+                      "scripts/release/html_performance_epoch_reuse.py",
+                      "scripts/release/html_performance_epoch_reuse_test.py",
+                      "scripts/release/html_performance_source_reuse.py",
+                      "scripts/release/produce_html_performance_evidence.py",
+                      "scripts/release/html_performance_host_load_validation.py")
+        old_auth = {name: subprocess.run(["git", "-C", str(repository), "show", older + ":" + name],
+                                        check=True, capture_output=True).stdout for name in auth_names}
+        current_auth = {name: (repository / name).read_bytes() for name in auth_names}
+        install(older)
+        for name in auth_names:
+            (self.root / name).write_bytes(old_auth[name])
+        fixed = self._program_checkout(self.root, "fixed cohort")
+        install(newer)
+        for name in auth_names:
+            (self.root / name).write_bytes(current_auth[name])
+        live = self._program_checkout(self.root, "reviewed cohort")
+        fixed_records = gate._v3_live_programs(self.root, fixed)
+        live_records = gate._v3_live_programs(self.root, live)
+        self.assertNotEqual(set(fixed_records), set(live_records))
+        self.assertEqual(gate._v3_program_source(self.root, {"programSource": fixed},
+                         [{"liveCheckout": live}], git_query=None), fixed_records)
+        name = "scripts/drawio/svg-capture.ts"
+        self.assertEqual(producer._program_storage_path(self.root, name, live_records[name], fixed_records),
+                         self.root / "tmp/html-performance-programs" / live_records[name][0] / name)
+        existing = "scripts/drawio/official-renderer.ts"
+        self.assertEqual(producer._program_storage_path(self.root, existing, fixed_records[existing], fixed_records),
+                         self.root / existing)
+        self.assertNotEqual(producer._program_storage_path(self.root, existing, live_records[existing], fixed_records),
+                            self.root / existing)
+        for name in auth_names:
+            (self.root / name).write_bytes(current_auth[name] + b"\n# unreviewed on-disk code\n")
+            altered = self._program_checkout(self.root, "unreviewed auth code")
+            with self.assertRaisesRegex(ValueError, "program|cohort"):
+                gate._v3_program_source(self.root, {"programSource": fixed},
+                                        [{"liveCheckout": altered}], git_query=None)
+            (self.root / name).write_bytes(current_auth[name])
+        added = self.root / "scripts/drawio/svg-capture.ts"
+        added.write_bytes(added.read_bytes() + b"\n// unknown\n")
+        altered = self._program_checkout(self.root, "unreviewed added file")
+        with self.assertRaisesRegex(ValueError, "program"):
+            gate._v3_program_source(self.root, {"programSource": fixed},
+                                    [{"liveCheckout": altered}], git_query=None)
+        install(newer)
+        altered = self._program_checkout(self.root, "changed cohort mode", mode_path=added,
+                                         executable=True)
+        with self.assertRaisesRegex(ValueError, "program"):
+            gate._v3_program_source(self.root, {"programSource": fixed},
+                                    [{"liveCheckout": altered}], git_query=None)
+        self._program_checkout(self.root, "restore cohort mode", mode_path=added)
+        extra = self.root / "scripts/drawio/unknown.py"
+        extra.write_text("unknown\n", encoding="utf8")
+        altered = self._program_checkout(self.root, "unknown member")
+        with self.assertRaisesRegex(ValueError, "program"):
+            gate._v3_program_source(self.root, {"programSource": fixed},
+                                    [{"liveCheckout": altered}], git_query=None)
+
     def test_reviewed_program_changes_reject_unknown_source_bytes(self) -> None:
         from html_performance_source_reuse import known_auth_program_change
 
@@ -1628,7 +1709,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
         subprocess.run(["git", "-C", str(self.root), "add", str(script)], check=True)
         subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Unit", "-c",
                         "user.email=unit@example.invalid", "commit", "-qm", "changed program"], check=True)
-        with self.assertRaisesRegex(ValueError, "current measurement program differs"):
+        with self.assertRaisesRegex(ValueError, "live measurement program differs from fixed epoch"):
             gate._verified_v3_reuse_context(bundle, self.root, self.head, expected, git_query=None)
         rust = self.root / "source.rs"
         docs = self.root / "docs/performance/html-performance-history.json"

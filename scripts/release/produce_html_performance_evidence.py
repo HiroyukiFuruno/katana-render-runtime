@@ -814,6 +814,13 @@ def _program_transport_blobs(root: Path, head: str, records: gate.SourceRecords,
     return result, {name: modes[name] for name in records}
 
 
+def _program_storage_path(root: Path, name: str, item: tuple[str, int],
+                          fixed: Mapping[str, tuple[str, int]]) -> Path:
+    if name in fixed and fixed[name] == item:
+        return root / name
+    return root / "tmp/html-performance-programs" / item[0] / name
+
+
 def write_transport_bundle(bundle: Path, head: str, refs: Sequence[FilePin],
                            attempts: list[dict[str, FilePin]], *,
                            source_paths: Mapping[str, Path] | None = None) -> dict[str, str]:
@@ -4262,8 +4269,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             blobs, program_modes = blob_cache[source_head]
             gate.require(blobs.keys() == records.keys(), "program transport cached membership differs")
             for name, (checksum, size) in records.items():
-                logical = (root / name if (checksum, size) == program_records[name]
-                           else root / "tmp/html-performance-programs" / checksum / name)
+                logical = _program_storage_path(root, name, (checksum, size), program_records)
                 blob = blobs[name]
                 gate.require(len(blob) == size and hashlib.sha256(blob).hexdigest() == checksum,
                              "program transport Git blob differs")

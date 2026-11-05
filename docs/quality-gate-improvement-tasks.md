@@ -2,11 +2,12 @@
 
 ## 最新の再開地点（2026-11-05）
 
-### 現在の判定と未対応（R8292）
+### 現在の判定と未対応（R8302）
 
 - [x] 採取元`70c3981a`のMermaid製品PNGはR8274で117/117が99以上、未合格0。EN59最低99.085711、JA58最低99.108010。独立raw JS見本を現endpointで新規生成し、R8276でpin付き製品score/failureを集計した。旧原本・閾値は変更していない。
 - [x] 同sourceのHTMLはR8238で84/84が90以上・最低92.14438、出力font完全一致を確認。R8244/R8245は全領域286/286、目次72・scroll42群、dynamic15・input18・埋込図各11が合格。R8247のDPR/両軸/座標/resize/資源再利用4件とR8250の公開consumer1件も実0。
 - [ ] HTML性能はR8262で4条件・1200 phase recordsを取得し、合格済み3/84、未完81（RSS不合格1・未測定80）。closed receiptのpolicyAccepted=false、formalAccepted=falseを維持。時間の6phaseはいずれも劣化検出なし。未合格`async/expected-state/620x900@1`は一部phaseのRSS中央値差+112KiB。旧epochの22件を現SDKの合格へ加算しない。次は既存resumeで成功3件を厳格再認証し、max12程度で他の未測定を先に進める。未合格1件の追究だけで全体を止めない。
+- [/] R8302のresumeは計測前のprogram membership認証で実1。先に追加した検証専用7ファイルを旧結果の認証が扱えず、再利用を拒否した。原結果・合格3件を保持し、レビューした有限の旧/新Git blob・modeだけを認める互換修正とepoch/transportを整合した。R8313の限定回帰5件とR8314の静的foundation13タスクは実0。現在の7 Pythonファイルを実Gitへ導入し、未知byte・mode・追加ファイルの拒否を確認。正式resumeでの再利用は未検証。追加Draw.io拡張と別途630件比較は停止し、このHTML再開に必要な修正へ限定する。
 - [/] RSS対照診断R8281は同candidate実行体の25組・300 phaseを取得し、時間/RSS検定とも劣化検出なし。元workerとの非metadata環境digestとkey集合は一致、metadata digestは異なる。正式84合格へ転用しない。LLDB/vmmap/heapではlive heap差+32bytes、residentには旧実行体内でも288KiBの揺れを観測したが、元の112KiB peak RSS不合格の根因・解消とは断定しない。
 - [/] 診断専用entryは既存collectorを共有し、両armの真のcandidate identityと正式受入不可schemaを使う。normal経路のrole・25組・6phase・判定は維持。CPU current pinと旧BFFD履歴を同期し、R8282のproducer/host/source関連unitは実0。新validation sourceの完全静的gate・正常program互換・最終SDK同値検証は未完。
 - [/] 依存更新後のdraw.io比較経路でMermaid専用rasterizerへの誤接続を検出したが、HTMLより先に追加整備を広げたのは優先順位の判断誤り。ユーザー是正により追加拡張・別途630件比較を停止し、着手差分の整合だけ実施。共有captureはSVG bytes/DOM寸法属性を保持し、実Chromeでwidth100/viewBox200とwidth200/viewBox200が124px/224pxの別画像になる回帰を確認した。R8292のunit/harness契約は物理raw/exitを保存して実0。新画像比較全件の合格とは扱わない。
