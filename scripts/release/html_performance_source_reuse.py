@@ -96,6 +96,8 @@ def validation_cohort_change(path: str, old: tuple[str, int] | None,
         original = ("6f679815a6417ed21e9dceddd9fa201e39a4ab7499288e5b49a4181f9ecf18ec", 24436)
         data = Path(__file__).read_bytes()
         live = (hashlib.sha256(data).hexdigest(), len(data))
+        if old == ("8c3503e588e2e7ab93770a86c4e1ffb0c10ea463e2d98c808d2e6fef1a6895bd", 32039):
+            return new == live and old_mode == new_mode == "100644"
         prior = ("7d75f7a2642103908ebaaf24ccffc175b0ff61e8bbb020fea9f9b0d0e4648dfe", 24917)
         if old != original or old_mode != "100644" or new_mode != "100644":
             return False
@@ -110,6 +112,27 @@ def validation_cohort_change(path: str, old: tuple[str, int] | None,
             check=True, capture_output=True,
         ).stdout
         return known_auth_program_change(path, baseline, data)
+    fact_cache_changes = {
+        "scripts/release/verify_html_performance_evidence.py": (
+            ("04dc3d5e4d44f239c4bf1e664273d8ad0b4fcd22bb50591bed2535b6d36c9aef", 250526),
+            ("65beb54c881365eafb607d9ced7f345f6fdc63221386bd16dc403e3a8b835fd2", 250579)),
+        "scripts/release/verify_html_performance_evidence_test.py": (
+            ("30f00fa2d26a68c4ed95bac4fb7624864fa2588914da65abf606c91fefbfff97", 255806),
+            ("aa3211d3807addbacad8290e5724f46302f9a72451a96732b3cf070fe241c899", 256885)),
+        "scripts/release/html_performance_source_reuse_test.py": (
+            ("49cc989141f481b7d9e522265d4ebd3c70e7f6ac4f2b98ca36ec187b3a0a3351", 22385),
+            ("56ad9f0eaf412507fe4b6a9325931f3cebe47e385df5d117963407c4c6a88bba", 24025)),
+    }
+    if path in fact_cache_changes and (old, new) == fact_cache_changes[path]:
+        return old_mode == new_mode == "100644"
+    cohort_predecessors = {
+        "scripts/release/verify_html_performance_evidence.py":
+            ("630cb08266eb1b24b249bf295b3591cbe87da9529e6f770ce600715ad93ab656", 249838),
+        "scripts/release/verify_html_performance_evidence_test.py":
+            ("ee5f14f317dc8856250f217d4670a520b6759b299424a8a00ee0738eca18bb75", 250692),
+    }
+    if path in cohort_predecessors and old == cohort_predecessors[path] and new == fact_cache_changes[path][1]:
+        return old_mode == new_mode == "100644"
     test_changes = {
         "scripts/release/verify_html_performance_evidence.py": (
             ("630cb08266eb1b24b249bf295b3591cbe87da9529e6f770ce600715ad93ab656", 249838),
@@ -165,6 +188,8 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
     if path == "scripts/release/html_performance_source_reuse.py":
         old_sha = hashlib.sha256(old).hexdigest()
         current_sha = hashlib.sha256(current).hexdigest()
+        if old_sha == "8c3503e588e2e7ab93770a86c4e1ffb0c10ea463e2d98c808d2e6fef1a6895bd":
+            return current == Path(__file__).read_bytes()
         if old_sha != "847b5541ecc81d533eaf510e1675b7a2b667853a7dc8793f34387470d9dce426":
             return False
         if current_sha in {
@@ -254,7 +279,8 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
         "scripts/release/html_performance_source_reuse_test.py": (
             "bc44642c01d96526490a2ba97bce9b66bd354c942851d2ce772071b3416f8304",
             frozenset({"81a7db4b3307e566f0e0eb59448248aec60d49430ab76e6d9b123eed9727996e",
-                       "49cc989141f481b7d9e522265d4ebd3c70e7f6ac4f2b98ca36ec187b3a0a3351"})),
+                       "49cc989141f481b7d9e522265d4ebd3c70e7f6ac4f2b98ca36ec187b3a0a3351",
+                       "56ad9f0eaf412507fe4b6a9325931f3cebe47e385df5d117963407c4c6a88bba"})),
         "scripts/release/html_performance_epoch_reuse.py": (
             "33a05103fc5100c7eb2e9d10368785c8ab20e6f8308ddc53f0ae95f63c573f1c",
             frozenset({"3f50599d284dbe593bb9a1cf02d0fdd633647eb61a3f6be7867b8308d72de3c7",
@@ -291,7 +317,8 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
                        "30a772d8b1488a764185ab0761afb555cd65d798a2696674dde0821465ce4f83",
                        "ee23eb6dbd56ca3dcd6ae00b4f79a69675b6ec9cd408b7158d16f1ded88d4d60",
                        "630cb08266eb1b24b249bf295b3591cbe87da9529e6f770ce600715ad93ab656",
-                       "04dc3d5e4d44f239c4bf1e664273d8ad0b4fcd22bb50591bed2535b6d36c9aef"})),
+                       "04dc3d5e4d44f239c4bf1e664273d8ad0b4fcd22bb50591bed2535b6d36c9aef",
+                       "65beb54c881365eafb607d9ced7f345f6fdc63221386bd16dc403e3a8b835fd2"})),
         "scripts/release/verify_html_performance_evidence_test.py": (
             "9f423f9edbd3fa5ef2a0f1fd1d28a2d2a61f968498650f65dd3f0e5f323be4b3",
             frozenset({"953044024351425627b8798fcbbc3d5f9216ac49d78e7c63075cd034536584e0",
@@ -299,7 +326,8 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
                        "91c7380a5516b550acfeffbbc165bb8e5b1c5480c14e4beff11609fd4898ebe5",
                        "ee5f14f317dc8856250f217d4670a520b6759b299424a8a00ee0738eca18bb75",
                        "095ccaa79b72cb540d37e8ec24e77937a67b539be074a3e019edee27aaac22f3",
-                       "30f00fa2d26a68c4ed95bac4fb7624864fa2588914da65abf606c91fefbfff97"})),
+                       "30f00fa2d26a68c4ed95bac4fb7624864fa2588914da65abf606c91fefbfff97",
+                       "aa3211d3807addbacad8290e5724f46302f9a72451a96732b3cf070fe241c899"})),
     }
     expected = pins.get(path)
     if expected is None or expected[0] != hashlib.sha256(old).hexdigest():

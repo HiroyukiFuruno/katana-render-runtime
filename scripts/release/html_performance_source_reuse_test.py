@@ -18,6 +18,28 @@ def git(root: Path, *args: str) -> str:
 
 
 class SourceReuseTest(unittest.TestCase):
+    def test_reviewed_fact_cache_program_changes_are_exact(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        old_head = "3469ac28"
+        new_head = "4d7dabbbfb8f848fcadf2b3ce1c5b6e83789747a"
+        for name in ("verify_html_performance_evidence.py", "verify_html_performance_evidence_test.py"):
+            path = "scripts/release/" + name
+            blobs = [subprocess.check_output(["git", "-C", str(root), "show", head + ":" + path])
+                     for head in (old_head, new_head)]
+            records = [(hashlib.sha256(blob).hexdigest(), len(blob)) for blob in blobs]
+            modes = [git(root, "ls-tree", head, "--", path).split()[0] for head in (old_head, new_head)]
+            with self.subTest(path=path):
+                self.assertTrue(reuse.validation_cohort_change(path, records[0], records[1], modes[0], modes[1]))
+                self.assertFalse(reuse.validation_cohort_change(path, records[0],
+                                 (hashlib.sha256(blobs[1] + b" ").hexdigest(), len(blobs[1]) + 1), modes[0], modes[1]))
+                self.assertFalse(reuse.validation_cohort_change(path, records[0], records[1], modes[0], "100755"))
+        path = "scripts/release/html_performance_source_reuse.py"
+        old = subprocess.check_output(["git", "-C", str(root), "show", old_head + ":" + path])
+        current = (root / path).read_bytes()
+        self.assertTrue(reuse.known_auth_program_change(path, old, current))
+        self.assertFalse(reuse.known_auth_program_change(path, old + b" ", current))
+        self.assertFalse(reuse.known_auth_program_change(path, old, current + b" "))
+
     def test_release_only_program_changes_preserve_membership_and_modes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
