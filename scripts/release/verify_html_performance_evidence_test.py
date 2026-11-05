@@ -4,6 +4,7 @@ from __future__ import annotations
 import local_html_performance_evidence as local_html
 
 import base64
+import copy
 import gc
 import hashlib
 import importlib.util
@@ -19,6 +20,7 @@ import warnings
 import weakref
 import zipfile
 from contextlib import nullcontext
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable, Sequence
 from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, cast
@@ -43,6 +45,106 @@ spec.loader.exec_module(gate)
 
 JsonObject = dict[str, object]
 JsonMutation = Callable[[JsonObject], None]
+
+
+class LiveProgramsCacheTest(unittest.TestCase):
+    def setUp(self) -> None:
+        with gate._V3_LIVE_CACHE_LOCK:
+            gate._V3_LIVE_CACHE.clear()
+        self.root = Path("/live-cache-fixture")
+        path = str(self.root / "scripts/worker.py")
+        checksum = "a" * 64
+        material = f"{path}\0{checksum}\0{1}\n".encode()
+        self.checkout: JsonObject = {
+            "schema": "krr-html-performance-live-source-observation-v1", "root": str(self.root),
+            "head": "b" * 40, "indexSha256": "c" * 64, "statusBase64": "",
+            "manifest": {"schema": "krr-native-build-source-manifest-v1",
+                         "digest": hashlib.sha256(material).hexdigest(),
+                         "files": [{"path": path, "sha256": checksum, "size": 1}]},
+        }
+
+    def test_hit_returns_independent_dict_and_rejects_changes(self) -> None:
+        with patch.object(gate, "_v3_live_programs_uncached", wraps=gate._v3_live_programs_uncached) as validator:
+            first = gate._v3_live_programs(self.root, self.checkout)
+            first.clear()
+            self.assertEqual(gate._v3_live_programs(self.root, self.checkout), {"scripts/worker.py": ("a" * 64, 1)})
+            self.assertEqual(validator.call_count, 1)
+            self.checkout["unexpected"] = True
+            with self.assertRaises(ValueError):
+                gate._v3_live_programs(self.root, self.checkout)
+            self.assertEqual(validator.call_count, 2)
+
+    def test_failure_type_and_recursive_values_are_not_cached(self) -> None:
+        gate._v3_live_programs(self.root, self.checkout)
+        changed = copy.deepcopy(self.checkout)
+        manifest = cast(dict[str, object], changed["manifest"])
+        rows = cast(list[dict[str, object]], manifest["files"])
+        rows[0]["size"] = True
+        with self.assertRaises(ValueError):
+            gate._v3_live_programs(self.root, changed)
+        with gate._V3_LIVE_CACHE_LOCK:
+            gate._V3_LIVE_CACHE.clear()
+        for value in (True, "1", (1,), object()):
+            invalid = dict(self.checkout)
+            invalid["manifest"] = value
+            for _ in range(2):
+                with self.assertRaises(ValueError):
+                    gate._v3_live_programs(self.root, invalid)
+        recursive: list[object] = []
+        recursive.append(recursive)
+        invalid = {**self.checkout, "unexpected": recursive}
+        with self.assertRaises(ValueError):
+            gate._v3_live_programs(self.root, invalid)
+        self.assertFalse(gate._V3_LIVE_CACHE)
+
+    def test_eviction_and_oversized_input(self) -> None:
+        for index in range(9):
+            checkout = {**self.checkout, "head": f"{index:040x}"}
+            gate._v3_live_programs(self.root, checkout)
+        self.assertEqual(len(gate._V3_LIVE_CACHE), 8)
+        self.assertNotIn(gate._v3_live_key(self.root, {**self.checkout, "head": "0" * 40}), gate._V3_LIVE_CACHE)
+        with patch.object(gate, "_V3_LIVE_CACHE_BYTES", 1):
+            self.assertEqual(gate._v3_live_programs(self.root, self.checkout), {"scripts/worker.py": ("a" * 64, 1)})
+        self.assertEqual(len(gate._V3_LIVE_CACHE), 8)
+
+    def test_metadata_byte_budget_evicts_oldest(self) -> None:
+        key = gate._v3_live_key(self.root, self.checkout)
+        self.assertIsNotNone(key)
+        if key is None:
+            return
+        other = {**self.checkout, "head": "d" * 40}
+        other_key = gate._v3_live_key(self.root, other)
+        self.assertIsNotNone(other_key)
+        if other_key is None:
+            return
+        with patch.object(gate, "_V3_LIVE_CACHE_BYTES", max(len(key[1]), len(other_key[1]))):
+            gate._v3_live_programs(self.root, self.checkout)
+            gate._v3_live_programs(self.root, other)
+            self.assertNotIn(key, gate._V3_LIVE_CACHE)
+            self.assertIn(other_key, gate._V3_LIVE_CACHE)
+
+    def test_container_subclass_bypasses_cache(self) -> None:
+        class Input(dict[str, object]):
+            pass
+        checkout = Input(self.checkout)
+        self.assertEqual(gate._v3_live_programs(self.root, checkout), {"scripts/worker.py": ("a" * 64, 1)})
+        self.assertFalse(gate._V3_LIVE_CACHE)
+
+    def test_changed_input_during_validation_is_not_cached(self) -> None:
+        original = gate._v3_live_programs_uncached
+        def mutate(root: Path, checkout: JsonObject) -> dict[str, tuple[str, int]]:
+            result = cast(dict[str, tuple[str, int]], original(root, checkout))
+            checkout["head"] = "d" * 40
+            return result
+        with patch.object(gate, "_v3_live_programs_uncached", side_effect=mutate):
+            gate._v3_live_programs(self.root, self.checkout)
+        self.assertFalse(gate._V3_LIVE_CACHE)
+
+    def test_parallel_calls_do_not_share_mutable_result(self) -> None:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            results = list(executor.map(lambda _: gate._v3_live_programs(self.root, self.checkout), range(12)))
+        results[0].clear()
+        self.assertTrue(all(result == {"scripts/worker.py": ("a" * 64, 1)} for result in results[1:]))
 
 
 class CommittedRecordsCacheTest(unittest.TestCase):

@@ -2,6 +2,15 @@
 
 ## 最新の再開地点（2026-11-05）
 
+### R8413時点の継続（下の実行中表記は履歴）
+
+- [ ] 性能の正式合格はR8361の30/84、未判定54を維持。R8404/exec3598は1800秒でouter1・inner-15、receiptなし、新合格0。Mermaid117/117、HTML84/84画像・全領域286/286は既存結果を維持する。
+- [/] 時間切れはproducer全体を個別build用の1800秒監視へ誤分類したことが原因。tracked標準bootstrap CLIは全体にこの制限を設けず、1200秒予算は新規worker開始を制限する。次回は標準CLIを通常起動し、実argv・raw・実終了を保存する。producer自身の2排他lockと個別build/worker上限、受入基準は維持する。
+- [/] R8405のcanonical1件profileは31.674秒、同じpure metadata検査10回9.845秒。R8406のmarshal v4試作は参照共有によりkeyが変わり実1、不採用。参照共有を使わないprotocol2のR8410試作は実0、1miss/9hit・18.206秒。ただし冷warm差を含むので時間比率を正式な改善値にしない。組込み版はbuiltin JSON型のみ・全入力key・8件/32MiB・変異隔離・失敗非保存・外側認証維持を実装し、旧/新の正確な有限program認証を追加中。
+- [/] R8412の静的foundationは新test helperのAny return1件で実1、重い検査は起動していない。動的module境界へ既存castで型を明示し、新test pinを同期してR8413の既存python-typecheckを先行回収する。Lint・型・認証の緩和は行わない。最終unit/foundation・通常commit・正式resumeは未完。
+- [/] R8413のstrict型201file、R8414の関連26unitは実0。8件/32MiB退役・返却値変異隔離・未知field/型/再帰・計算中変異・並列、実Gitと旧/新endpoint・未知bytes/mode拒否を確認した。独立readonly差分レビューに具体P0–P2なし。最終foundationはR8415で回収する。検証時間の正式な改善率と全84性能合格は未判定。
+- [/] R8407/R8408は未受入R8404のログ、R8411は診断専用ログを可逆圧縮し、展開SHA/size・保護31/currentclosed30のreceipt/manifest/全transportを再検証した。旧inodeは退役し再認定しない。保存形式について追加確認しない。索引・原失敗・元受入条件を維持する。
+
 ### 最新確定と次の実行（R8385、下の当時の件数より優先）
 
 - [/] R8396の正式resumeは採取前に`live validation cohort differs`で実1。旧endpointが以前の実行moduleだったことを認証する規則が、validator更新後にその履歴を失っていた。元closed30と原失敗を保持し、original→記録済み3469、original→review済み7d8、既存のtest endpoint56ad/5000などの正確な組を残した。新しいtestもexact pinへ追加し、未知byte/mode/dirtyの拒否を維持。R8400は実Gitで70c固定sourceから3469/7d8両endpointを同時に検証し、strict型201fileと関連8unitが実0。正式な統合resumeの成功は次の実行で確認する。実行module一致と上位Git/clean認証という既存の信頼境界を変えず、自己認証frameworkは増設しない。

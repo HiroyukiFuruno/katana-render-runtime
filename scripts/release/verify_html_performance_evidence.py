@@ -7,6 +7,7 @@ import base64
 import hashlib
 import importlib
 import json
+import marshal
 import math
 import os
 import platform
@@ -22,6 +23,7 @@ import zipfile
 from functools import lru_cache
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from datetime import datetime
+from threading import Lock
 from typing import NamedTuple, Protocol, TypedDict, cast
 from collections import OrderedDict
 from collections.abc import Callable, Mapping, Sequence
@@ -1903,7 +1905,62 @@ def fixed_source_pair(expected: JsonObject) -> JsonObject:
             if pair.get("schema") == "krr-html-performance-source-epoch-v3" else pair)
 
 
+_V3_LIVE_CACHE: OrderedDict[tuple[str, bytes], tuple[tuple[str, tuple[str, int]], ...]] = OrderedDict()
+_V3_LIVE_CACHE_LOCK = Lock()
+_V3_LIVE_CACHE_BYTES = 32 * 1024 * 1024
+
+
+def _v3_live_key(root: Path, checkout: JsonObject) -> tuple[str, bytes] | None:
+    if type(root) is not type(Path()) or type(checkout) is not dict:
+        return None
+    pending: list[object] = [checkout]
+    seen: set[int] = set()
+    while pending:
+        value = pending.pop()
+        if type(value) is dict:
+            if id(value) in seen or any(type(key) is not str for key in value):
+                return None
+            seen.add(id(value))
+            pending.extend(value.values())
+        elif type(value) is list:
+            if id(value) in seen:
+                return None
+            seen.add(id(value))
+            pending.extend(value)
+        elif type(value) not in (str, int, float, bool, type(None)):
+            return None
+    try:
+        raw = marshal.dumps(checkout, 2)
+    except (TypeError, ValueError, OverflowError, RecursionError):
+        return None
+    return (str(root), raw) if len(raw) <= _V3_LIVE_CACHE_BYTES else None
+
+
 def _v3_live_programs(root: Path, checkout: JsonObject) -> SourceRecords:
+    key = _v3_live_key(root, checkout)
+    if key is None:
+        return _v3_live_programs_uncached(root, checkout)
+    with _V3_LIVE_CACHE_LOCK:
+        cached = _V3_LIVE_CACHE.get(key)
+        if cached is not None:
+            _V3_LIVE_CACHE.move_to_end(key)
+    if cached is not None:
+        if _v3_live_key(root, checkout) == key:
+            return dict(cached)
+        return _v3_live_programs_uncached(root, checkout)
+    result = _v3_live_programs_uncached(root, checkout)
+    if _v3_live_key(root, checkout) != key:
+        return result
+    with _V3_LIVE_CACHE_LOCK:
+        _V3_LIVE_CACHE[key] = tuple(result.items())
+        _V3_LIVE_CACHE.move_to_end(key)
+        while (len(_V3_LIVE_CACHE) > 8
+               or sum(len(item[1]) for item in _V3_LIVE_CACHE) > _V3_LIVE_CACHE_BYTES):
+            _V3_LIVE_CACHE.popitem(last=False)
+    return dict(result)
+
+
+def _v3_live_programs_uncached(root: Path, checkout: JsonObject) -> SourceRecords:
     require(set(checkout) == {"schema", "root", "head", "indexSha256", "statusBase64", "manifest"}
             and checkout.get("schema") == "krr-html-performance-live-source-observation-v1"
             and checkout.get("root") == str(root), "live checkout identity differs")
