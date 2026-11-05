@@ -1,6 +1,14 @@
 # 品質ゲート改善の作業台帳
 
-## 最新の再開地点（2026-11-05）
+## 最新の再開地点（2026-11-06）
+
+### R8474時点：更新後SDKの描画合格、性能36/84・残48
+
+- [x] 依存更新とSWC版認証の共有化をa476765cへ統合。更新後SDK af0bのMermaid製品PNGはR8459/R8460で117/117が99以上（EN最低99.085711、JA最低99.10801000000001）。HTML84条件はR8449で全件90以上・最低92.14438・出力font完全一致、R8451標準全領域検査も286/286・最低91.98562、全目次72・末尾・動的状態・入力・埋込図が成功。これらは採取元ソースの成功であり、最終HEADの完全ゲートを代用しない。
+- [x] 更新後SDKの性能はR8467でclosed36/36・10800 phase records・policyAccepted=true/formalAccepted=false、残48条件。receipt SHA `dfccb07008f8627dec4026a88df3042dfc0d211acf77167a410ea50422cfb7c7`。旧SDKの44件とは合算しない。原結果・同一SDK・入力・資源・フォントを保持し、厳格な再利用認証を通して継続する。
+- [/] 9条件ごとに過去全件の認証を反復する負担を減らすため、既存producerの採取作業枠を選択件数に応じ1200秒の1～3枠へまとめる。旧closed/CPU認証後・catalog前の単一時計起点を維持し、ループ中に期限を延長しない。worker/build個別上限、静穏CPU、25組×6phase、表示3秒未満・時間/RSS非劣化、全84と厳格認証は不変。新CLI・framework・cacheは追加しない。R8469 RED、R8472関連80unit・R8474 source6/host19unit・strict201file・R8475標準静的foundation13taskが実0、別担当の相互レビューに具体P0–P2なし。通常commit後に正式resumeで効果・再利用適格性を確認する。
+- [x] R8466は未採用R7912ログ15件だけを可逆圧縮し、展開後全bytes/SHA/mode一致・使用中4bundle/保護35との未参照・事後整合を確認。実空きは1,320,169,472→4,165,677,056bytes。現行SDK・原本・基準画像・保護証跡の物理identityは変更していない。
+- [ ] 残りは性能48条件と全84正式判定・Git性能履歴への現行結果反映、実cache lifecycle、非coverage実装完了後の完全ゲート/実装coverage100%・未計測0、release inclusion、最終HEADのMermaid117再確認、Draft review/個別reply-resolve/Ready/3OS CI/保護merge、既存3crateとGitHub Releaseの公開、Issue close・安全なcleanup。後続#106のHTML99目標と今回の90暫定条件を混同しない。
 
 ### R8440時点：旧SDK性能44/84を保持し、依存更新後を検証中
 

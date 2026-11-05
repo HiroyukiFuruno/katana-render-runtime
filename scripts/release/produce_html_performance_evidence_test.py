@@ -263,7 +263,7 @@ class CatalogProducerOperationTest(unittest.TestCase):
                   patch.object(remote_evidence, "validate_fixed_epoch_candidate_origin", side_effect=marker) as verify):
                 def authenticate(*_args: object, **_kwargs: object) -> tuple[dict[str, object], Mock, list[object]]:
                     self.assertEqual(os.environ["GIT_OPTIONAL_LOCKS"], initial_lock_value)
-                    return {}, Mock(), []
+                    return {"completeConditionIds": []}, Mock(), []
 
                 load.side_effect = authenticate
                 with self.assertRaises(ValueError) as caught:
@@ -290,15 +290,20 @@ class CatalogProducerOperationTest(unittest.TestCase):
             def load(*_args: object, **_kwargs: object) -> tuple[dict[str, object], Mock, list[object]]:
                 events.append("closed")
                 clock[0] += producer.BATCH_WORK_BUDGET_SECONDS + 30
-                return {}, Mock(), []
+                return {"completeConditionIds": []}, Mock(), []
 
             def cpu(*_args: object) -> None:
                 events.append("cpu")
                 clock[0] += 10
 
-            def start_budget(started: float, enabled: bool) -> float | None:
+            def catalog(*_args: object) -> tuple[list[object], None, None, None]:
+                events.append("catalog")
+                clock[0] += 30
+                return [], None, None, None
+
+            def start_budget(started: float, enabled: bool, selected_count: int) -> float | None:
                 events.append("deadline")
-                return deadline(started, enabled)
+                return deadline(started, enabled, selected_count)
 
             with (patch.object(platform, "system", return_value="Darwin"),
                   patch.object(platform, "machine", return_value="arm64"),
@@ -308,15 +313,15 @@ class CatalogProducerOperationTest(unittest.TestCase):
                   patch.object(producer, "load_closed_batch", side_effect=load),
                   patch.object(producer, "_require_cpu_busy_resume", side_effect=cpu),
                   patch.object(producer, "_batch_deadline", side_effect=start_budget) as start,
-                  patch.object(producer, "load_catalog_conditions", return_value=([], None, None, None)),
+                  patch.object(producer, "load_catalog_conditions", side_effect=catalog),
                   patch.object(remote_evidence, "validate_fixed_epoch_candidate_origin", side_effect=marker)):
                 with self.assertRaises(ValueError) as caught:
                     producer.produce(root, root / "tmp/output", catalog_manifest_path=root / "catalog",
                                      resume_batch=root / "closed", fixed_epoch=origin)
                 self.assertIs(caught.exception, marker)
-                self.assertEqual(events, ["closed", "cpu", "deadline"])
-                start.assert_called_once_with(1340.0, True)
-                limit = deadline(1340.0, True)
+                self.assertEqual(events, ["closed", "cpu", "catalog", "deadline"])
+                start.assert_called_once_with(1340.0, True, 0)
+                limit = deadline(1340.0, True, 0)
                 clock[0] = 2539.0
                 producer._require_batch_budget(limit)
                 clock[0] = 2540.0
@@ -905,16 +910,37 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         self.root = Path(temporary.name).resolve()
         self._batch_counter = 0
 
+    def test_selected_condition_budget_boundaries(self) -> None:
+        for count, seconds in ((0, 1200), (9, 1200), (10, 2400), (18, 2400),
+                               (19, 3600), (27, 3600), (28, 3600), (57, 3600), (84, 3600)):
+            with self.subTest(count=count):
+                self.assertEqual(producer._batch_deadline(100.0, True, count), 100.0 + seconds)
+        self.assertIsNone(producer._batch_deadline(100.0, False, 0))
+        for count in (-1, 85, True):
+            with self.subTest(invalid=count), self.assertRaises(ValueError):
+                producer._batch_deadline(100.0, True, count)
+
+    def test_batch_selection_rejects_invalid_inventory_and_limit(self) -> None:
+        rows: list[gate.JsonObject] = [{"condition_id": str(index)} for index in range(12)]
+        self.assertEqual(len(producer._select_batch_rows(rows, {"0", "1"}, 9)), 9)
+        self.assertEqual(len(producer._select_batch_rows(rows, {"0", "1"}, None)), 10)
+        self.assertEqual(producer._select_batch_rows(rows, {str(index) for index in range(12)}, None), [])
+        for invalid_rows, complete, limit in ((rows, {"unknown"}, None),
+                                               (rows + rows[:1], set(), None),
+                                               (rows, set(), 0), (rows, set(), 85)):
+            with self.subTest(limit=limit, complete=complete), self.assertRaises(ValueError):
+                producer._select_batch_rows(invalid_rows, complete, limit)
+
     def test_catalog_default_batch_has_the_existing_budget_and_legacy_does_not(self) -> None:
         catalog_mode = producer._batch_mode(self.root / "catalog.json", None, None)
         legacy_mode = producer._batch_mode(None, None, None)
         self.assertTrue(catalog_mode)
         self.assertFalse(legacy_mode)
         self.assertEqual(
-            producer._batch_deadline(100.0, catalog_mode),
+            producer._batch_deadline(100.0, catalog_mode, 0),
             100.0 + producer.BATCH_WORK_BUDGET_SECONDS,
         )
-        self.assertIsNone(producer._batch_deadline(100.0, legacy_mode))
+        self.assertIsNone(producer._batch_deadline(100.0, legacy_mode, 0))
         self.assertTrue(producer._batch_mode(None, 1, None))
         self.assertTrue(producer._batch_mode(None, None, self.root / "resume"))
 

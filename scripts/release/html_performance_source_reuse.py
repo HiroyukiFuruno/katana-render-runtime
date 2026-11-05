@@ -100,7 +100,8 @@ def validation_cohort_change(path: str, old: tuple[str, int] | None,
         reviewed = ("d3d6a94ad5cb0465a46cf0b98fb74a4fe9cb46c5a9ac5a72ca9fa4824e762015", 34030)
         retained = ("e11014eb370b864d812928235c7b033fca37acb8f2e0d8341bfd86c55c2672b2", 35728)
         latest_reviewed = ("37c6a3b87c0d5367d2144b8850f9cd7b97294e92fe32886fbb408768033d3ad2", 37269)
-        history = (intermediate, reviewed, retained, latest_reviewed)
+        budget_predecessor = ("0bde8075042a47d5601044e860d997f49e8aaf85a8b67a1c6ea862e37df90844", 40090)
+        history = (intermediate, reviewed, retained, latest_reviewed, budget_predecessor)
         if old in history:
             return (new == live or new in history[history.index(old) + 1:]) and old_mode == new_mode == "100644"
         prior = ("7d75f7a2642103908ebaaf24ccffc175b0ff61e8bbb020fea9f9b0d0e4648dfe", 24917)
@@ -166,6 +167,21 @@ def validation_cohort_change(path: str, old: tuple[str, int] | None,
     }
     metadata_pair = reviewed_program_changes.get(path)
     if metadata_pair is not None and old in metadata_pair[0] and new == metadata_pair[1]:
+        return old_mode == new_mode == "100644"
+    budget_targets = {
+        "scripts/release/produce_html_performance_evidence.py":
+            ("b8e3fdbc94a9f397051a1268060efb1f0ffe1604e2f0adda0f89afa779bdb359", 255681),
+        "scripts/release/produce_html_performance_evidence_test.py":
+            ("561775468b65b6b0d741a14cb494d8cbb7d6e015c36783ad59e688a628f65c9a", 299581),
+        "scripts/release/html_performance_host_load_validation.py":
+            ("506a9d3f807144d16e49eb3ab66d938d5795096cf0218df47308f788d449e484", 10328),
+        "scripts/release/html_performance_host_load_validation_test.py":
+            ("0f21f8e498358bc151949060099ca8680d3d84b14eeb7221b834b345452a464a", 14559),
+        "scripts/release/html_performance_source_reuse_test.py":
+            ("42fe5276c8fe9f36066218e4859942308141de39dfb0e6428703619787ff40e6", 29428),
+    }
+    if (metadata_pair is not None and path in budget_targets
+            and (old in metadata_pair[0] or old == metadata_pair[1]) and new == budget_targets[path]):
         return old_mode == new_mode == "100644"
     if path in fact_cache_changes and (old, new) == fact_cache_changes[path]:
         return old_mode == new_mode == "100644"
@@ -247,7 +263,8 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
         history = ("8c3503e588e2e7ab93770a86c4e1ffb0c10ea463e2d98c808d2e6fef1a6895bd",
                    "d3d6a94ad5cb0465a46cf0b98fb74a4fe9cb46c5a9ac5a72ca9fa4824e762015",
                    "e11014eb370b864d812928235c7b033fca37acb8f2e0d8341bfd86c55c2672b2",
-                   "37c6a3b87c0d5367d2144b8850f9cd7b97294e92fe32886fbb408768033d3ad2")
+                   "37c6a3b87c0d5367d2144b8850f9cd7b97294e92fe32886fbb408768033d3ad2",
+                   "0bde8075042a47d5601044e860d997f49e8aaf85a8b67a1c6ea862e37df90844")
         if old_sha in history:
             return current == Path(__file__).read_bytes() or current_sha in history[history.index(old_sha) + 1:]
         if old_sha != "847b5541ecc81d533eaf510e1675b7a2b667853a7dc8793f34387470d9dce426":
@@ -345,7 +362,8 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
                        "56ad9f0eaf412507fe4b6a9325931f3cebe47e385df5d117963407c4c6a88bba",
                        "7420dbdd9dc22f325bbaa756ee49ba9a5e08db58761b459b7873463ca47cebf9",
                        "8dcddecb1bbb303590ba7ead09c870c1424cfdaf46e93ac2c631dddae1564931",
-                       "0a4069d980a508ff27e1b9853db092ca4dd8fe5e3a3b90c9c029bd550130f6d9"})),
+                       "0a4069d980a508ff27e1b9853db092ca4dd8fe5e3a3b90c9c029bd550130f6d9",
+                       "42fe5276c8fe9f36066218e4859942308141de39dfb0e6428703619787ff40e6"})),
         "scripts/release/html_performance_epoch_reuse.py": (
             "33a05103fc5100c7eb2e9d10368785c8ab20e6f8308ddc53f0ae95f63c573f1c",
             frozenset({"3f50599d284dbe593bb9a1cf02d0fdd633647eb61a3f6be7867b8308d72de3c7",
@@ -359,26 +377,30 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
                        "80b59b6d1fb10ba7953e2f598bed2928483a8ee50aea09ae1992796f6239b87a",
                        "50c1fd0439f46472bb789865ecfd83714f6feaaaa8c882521880dab6710b3659",
                        "81ca438ccce28208836dd811438ce81ef27961fe289051110750d1403f2069c5",
-                       "289cb02b3c0bbb68db26d76857f97b6cc2d967bc566ad0f80de6a502b9acc700"})),
+                       "289cb02b3c0bbb68db26d76857f97b6cc2d967bc566ad0f80de6a502b9acc700",
+                       "506a9d3f807144d16e49eb3ab66d938d5795096cf0218df47308f788d449e484"})),
         "scripts/release/html_performance_host_load_validation_test.py": (
             "977394a86e45b307f9939a952aa6ef66d3cf770154564794d7196036aa6c2497",
             frozenset({"a550c3e89979dda00597eb3497bf627c793a8a5228c88bc740976526ad70aa66",
                        "fee51a18a8da4d4ae389ce9d2a03519b392f60ec03a661567bc3a58cd0c920f1",
-                       "bbf598af312742ad33a5585d7b6c800712b48797770858223f2ad274c8ac5239"})),
+                       "bbf598af312742ad33a5585d7b6c800712b48797770858223f2ad274c8ac5239",
+                       "0f21f8e498358bc151949060099ca8680d3d84b14eeb7221b834b345452a464a"})),
         "scripts/release/produce_html_performance_evidence.py": (
             "d4d85ae7e2120e3720ef31afe6a7228011385d0267ec770060e68f606e21388e",
             frozenset({"490233a4797d9690f7393000cfeda1ceb4d806e1a7df2c588bbb300d8cc1dae5",
                        "bffd5b7781ea1650185d2756a90c4c7350d7708726d7482cf6fff397c4b14aa8",
                        "80ded11e1b2984635cd455aa55dd926eefbbd03759d8c9eccd719dc16bfd7d45",
                        "5b5c62c6ec147f0ed9a541c6eb9d07a883cb3ad90d75eb71bc5b6d8f7750e08c",
-                       "a2b967f5b5ce92ec9ed3c6fcc066f68f3e4ae25db1d43de3948a3b9f7786e816"})),
+                       "a2b967f5b5ce92ec9ed3c6fcc066f68f3e4ae25db1d43de3948a3b9f7786e816",
+                       "b8e3fdbc94a9f397051a1268060efb1f0ffe1604e2f0adda0f89afa779bdb359"})),
         "scripts/release/produce_html_performance_evidence_test.py": (
             "1ed2ab04cc2fccc6674b0eb565e097d9df37d44ca66d5b6fc70e12d7583e2fe2",
             frozenset({"52f4b3cb14c379b5fb3c260d170b10024d30377bf63ad33b4084a8fc3137db9b",
                        "f519cb6810e911a59c5eb0ca3b41ba410aa0d98ed9cc23e600822b4d38ab51ed",
                        "7ff9328bebff71189ca1c32719923d50688665b88e284f0a2c4d16ff4c216cad",
                        "ea9484f7714c5279d7f8880fb4a499e4fd24fb8b7fa7818b227dd5075cdf9cc9",
-                       "84393cc63ad448a3c4d561d2c49967cc993ea59ac14d41aeb6cb6bbb603fc074"})),
+                       "84393cc63ad448a3c4d561d2c49967cc993ea59ac14d41aeb6cb6bbb603fc074",
+                       "561775468b65b6b0d741a14cb494d8cbb7d6e015c36783ad59e688a628f65c9a"})),
         "scripts/release/verify_html_performance_evidence.py": (
             "d9d93a641fd5e5dc4db5a0135cffa2073c84f34da132cedfb9821dace49a59aa",
             frozenset({"71fa1bc5e34a3d9432d2923d14e0967f7ae2d6e5f879941eb3f858668b1da86e",

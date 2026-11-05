@@ -1089,6 +1089,11 @@ def _same_arm_identity(left: Mapping[str, object], right: Mapping[str, object]) 
 def _select_batch_rows(
     rows: Sequence[gate.JsonObject], completed_ids: set[str], limit: int | None,
 ) -> list[gate.JsonObject]:
+    ids = [_row_condition_id(row) for row in rows]
+    gate.require(len(ids) == len(set(ids)), "measurement condition ids are duplicated")
+    gate.require(completed_ids <= set(ids), "resume batch contains an unknown condition")
+    gate.require(limit is None or type(limit) is int and 0 < limit <= 84,
+                 "batch max conditions requires a catalog and is between 1 and 84")
     remaining = [row for row in rows if _row_condition_id(row) not in completed_ids]
     return remaining if limit is None else remaining[:limit]
 
@@ -1099,8 +1104,10 @@ def _batch_mode(
     return catalog_manifest_path is not None or max_conditions is not None or resume_batch is not None
 
 
-def _batch_deadline(started_at: float, enabled: bool) -> float | None:
-    return started_at + BATCH_WORK_BUDGET_SECONDS if enabled else None
+def _batch_deadline(started_at: float, enabled: bool, selected_count: int) -> float | None:
+    gate.require(type(selected_count) is int and 0 <= selected_count <= 84, "batch selection count differs")
+    periods = min(3, max(1, (selected_count + 8) // 9))
+    return started_at + BATCH_WORK_BUDGET_SECONDS * periods if enabled else None
 
 
 def _batch_formal_acceptance(
@@ -3573,7 +3580,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         )
         _require_cpu_busy_resume(resumed_bundle, resumed_attempts)
     # 既存結果の認証に新規採取の予算を消費しない。
-    batch_deadline = _batch_deadline(time.monotonic(), batch_mode)
+    batch_started = time.monotonic()
     catalog_conditions: list[CatalogCondition] | None = None
     catalog_manifest_pin: FilePin | None = None
     catalog_plan_pin: FilePin | None = None
@@ -3581,6 +3588,18 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     if catalog_manifest_path is not None:
         (catalog_conditions, catalog_manifest_pin, catalog_plan_pin,
          catalog_binary_refs) = load_catalog_conditions(root, catalog_manifest_path)
+    resumed_ids: list[str] = []
+    if resumed_receipt is not None and resumed_bundle is not None:
+        resumed_ids = [gate._text(value, "resumed condition id")
+                       for value in gate._array(resumed_receipt.get("completeConditionIds"),
+                                                "resumed complete condition ids")]
+        gate.require(len(resumed_ids) == len(set(resumed_ids)), "resumed condition ids are duplicated")
+    resumed_id_set = set(resumed_ids)
+    catalog_rows: list[gate.JsonObject] = [
+        {"condition_id": condition["condition_id"]} for condition in catalog_conditions or []
+    ]
+    selected_ids = [_row_condition_id(row) for row in _select_batch_rows(catalog_rows, resumed_id_set, max_conditions)]
+    batch_deadline = _batch_deadline(batch_started, batch_mode, len(selected_ids))
     os.environ["GIT_OPTIONAL_LOCKS"] = "0"
     # 生成済みJSとsourceの同期が未確認のcandidateをビルド・計測しない。
     origin_bundle: gate.Bundle | None = None
@@ -3843,14 +3862,6 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             raise ValueError("fresh reference contract is missing")
         reference_contract["sourceRefs"] = [baseline_proof[key] for key in (
             "controllerSourceBeforeRef", "selectedSourceProofRef", "sourceBeforeRef", "sourceSnapshotRef")]
-    resumed_ids: list[str] = []
-    if resumed_receipt is not None and resumed_bundle is not None:
-        resumed_ids = [
-            gate._text(value, "resumed condition id")
-            for value in gate._array(resumed_receipt.get("completeConditionIds"),
-                                     "resumed complete condition ids")
-        ]
-    resumed_id_set = set(resumed_ids)
     measurement_rows: list[gate.JsonObject] = []
     if catalog_conditions is None:
         assert fixture is not None and plan_path is not None and dom is not None and plan is not None and plan_pin is not None
@@ -3897,13 +3908,10 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                          if catalog_conditions is not None else [])
     gate.require(len(all_condition_ids) == len(set(all_condition_ids)),
                  "measurement condition ids are duplicated")
-    if resumed_receipt is not None:
-        gate.require(resumed_id_set <= set(all_condition_ids),
-                     "resume batch contains an unknown condition")
-        measurement_rows = [row for row in all_measurement_rows
-                            if _row_condition_id(row) not in resumed_id_set]
-    if max_conditions is not None:
-        measurement_rows = measurement_rows[:max_conditions]
+    if catalog_conditions is not None:
+        measurement_rows = _select_batch_rows(all_measurement_rows, resumed_id_set, max_conditions)
+        gate.require([_row_condition_id(row) for row in measurement_rows] == selected_ids,
+                     "batch selection changed")
     font_probe_input_paths: list[Path] = []
     if catalog_conditions:
         first_catalog = catalog_conditions[0]
