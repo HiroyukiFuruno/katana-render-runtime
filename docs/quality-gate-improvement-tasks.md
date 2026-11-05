@@ -2,6 +2,15 @@
 
 ## 最新の再開地点（2026-11-05）
 
+### R8440時点：旧SDK性能44/84を保持し、依存更新後を検証中
+
+- [x] R8429はcontroller実0、producer実1（既存batch budgetによる部分封緘）、closed44/44・13200 phase records・policyAccepted=true/formalAccepted=false。旧SDK/runtime70c相当の性能44/84・残40、receipt SHA `8c2599b7975f49e4f3a0411dd5af9249f7c44c612538c4ca0d13c886336fa877`。全体2177.249秒は検証運用の所要時間であり、製品表示時間とは区別する。
+- [/] ユーザーのdepends-update-allは実行中検証のlockで拒否されたため、実PIDの保有を確認し終了直後にmainがR8430で標準recipeを実行。mutation/資産再生成が完了し、winnow1.0.5・SWC1.16.22・ZenUML Core4.13.0を取得。標準checkはSWC review済版の不一致で停止（全体実1）したため、更新全体の合格とはしていない。
+- [x] SWC固定版の不一致はR8431の既存56unitで13失敗を保存。source/AST SHAを一切変更せずreview済versionだけ同期し、R8432で同56unit全成功（169expect）、R8433全contract preflight errors0を確認。R8434でquality側の重複した旧版も検知した。R8435 fixture初期検査RED1を保持し、既存graphの定数をnamed exportしてqualityから共有（新file/frameworkなし）。R8436は既存48unit全成功（92expect）、R8437の最終foundation13とR8439の既存AST lint選択75caseが実0。未知/危険processの拒否と既存固定SHAは維持する。
+- [/] Actionsはread-only調査で12upstreamと現refが一致、変更対象0との報告。tool-specific install-action tagは維持。これは調査要約であり、公開直前のprimary再確認と必須3OS CIを代用しない。Rust/JS/runtime資産の標準freshnessはR8440で回収中。
+- [x] R8440の標準freshnessはresolved dependenciesとpinned runtime assets計528で実0。immutable parentのutf8_iter/CRC保持と既存Skia保留条件は緩めない。最終公開差分のreadonly reviewに具体P0–P2なし。新ZenUMLの実JS SHA/sizeと宣言/index、harness lockとverifier pinも一致した。新SDK・画質・性能の適格性はこの静的成功と区別して、通常commit後に実検証する。
+- [ ] ZenUMLの埋込資産とCargo.lockが変わったため、新SDKのビルド証明と旧SDKに対するbinary/入力/資源/フォント/tool/envの厳格照合が必要。更新前のMermaid117/HTML84・全領域286・性能44は当時の証跡として保持し、未確認で更新後sourceへ転用・repinしない。通常commit→既存SDK producer→必要範囲の描画/性能→完全gate/実装coverage100%・未計測0/cache lifecycle/review/3OSCI/公開/Issue整理・cleanupを継続する。
+
 ### R8424時点（最新確定36/84、残48）
 
 - [x] R8417は既存bootstrapを通常起動し、誤った全体build制限を排して終了回収。producer実1は既存budgetによる部分封緘、controller実0。closed36/36、10800 phase records、policyAccepted=true/formalAccepted=false。receipt SHA `89224efeb5530cf5237e34720ffbfab11576510b8aae4837442bed4163641cb5`。新6件を加算し、正式性能36/84・未判定48。全体所要1714.342秒は検証運用時間であり製品の表示時間ではない。

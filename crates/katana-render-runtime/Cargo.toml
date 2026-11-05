@@ -25,7 +25,7 @@ include = [
     "vendor/mermaid/12.3.0-krr.pr6823.1/LICENSE",
     "vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js.sha256",
     "vendor/plantuml/1.2026.9/plantuml.jar.sha256",
-    "vendor/zenuml-core/4.12.2/zenuml.js.sha256",
+    "vendor/zenuml-core/4.13.0/zenuml.js.sha256",
     "src/markdown/generated/zenuml-runtime-assets.bin.br",
     "src/markdown/drawio_renderer/generated/drawio-resources.bin.br",
 ]

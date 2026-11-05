@@ -8,7 +8,7 @@
 | Mermaid ZenUML | 1.0.1 | `crates/katana-render-runtime/vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js` | `f75662869d22aac58870e52370fe4c46b89b9710bf4b03df93b3227b5e18e730` |
 | Draw.io | 32.6.10 | `crates/katana-render-runtime/vendor/drawio/32.6.10/drawio.min.js` | `c5ca831069b3a2cb4129f8581f807cb1c7d6a6b0c541b89976cc91c32df5a067` |
 | MathJax | 4.1.3 | `crates/katana-render-runtime/vendor/mathjax/4.1.3/tex-svg.js` | `23c036deccc0f2374834a47e4032e452419f3ac027bf17e17c104e2746b19f4c` |
-| ZenUML Core | 4.12.2 | `crates/katana-render-runtime/vendor/zenuml-core/4.12.2/zenuml.js` | `49527ba7d088f7cd7c67172580a271e48aea461da4071713c6b031907b8911e2` |
+| ZenUML Core | 4.13.0 | `crates/katana-render-runtime/vendor/zenuml-core/4.13.0/zenuml.js` | `a506cffa7280b246704de1c4717639d059adbea81711ee1f6eeaa66ff5511fd9` |
 | PlantUML | 1.2026.9 | `crates/katana-render-runtime/vendor/plantuml/1.2026.9/plantuml.jar.sha256` | `1dbb847646f0f440595fecd5f991e902aae47dc3391a01f64bab548089241a46` |
 
 MathJax は公式配布の JavaScript asset を repository 上で checksum 管理し、実行に使う自己完結 bundle は

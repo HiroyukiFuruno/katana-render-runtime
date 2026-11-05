@@ -1160,7 +1160,7 @@ function observerRouteVerified(
     : undefined;
 }
 
-const REVIEWED_SWC_VERSION = "1.16.21";
+export const REVIEWED_SWC_VERSION = "1.16.22";
 
 // レビュー済みunit全体だけを識別し、test名や動的binaryそのものを許可条件にしない。
 const NATIVE_UNIT_PROGRAM = {

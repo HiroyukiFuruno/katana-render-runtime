@@ -19,6 +19,7 @@ import {
   FACTS_CARGO_GUARD_SOURCE as NATIVE_WIDTH_CARGO_GUARD_SOURCE,
   normalizeClassicFactsTestCommands,
   policyContract,
+  REVIEWED_SWC_VERSION,
   RUNTIME_QUALITY_LEAVES,
   RUNTIME_UNUSED_FINAL_VERIFY_COMMAND,
   RUNTIME_UNUSED_LEAF_IDS,
@@ -2603,7 +2604,6 @@ function emptyParserBodyOnloadBinding(inputs: string[]): OwnedValidationReport["
     byteVerification: "not-executed",
   };
 }
-const REVIEWED_SWC_VERSION = "1.16.21";
 const MATHJAX_EVIDENCE_CONSUMER_AST_SHA256 =
   "a285f1fe5bb863217729fdc47f300986ac299faaf56651f5d65944bf775e2f73";
 function mathJaxEvidenceConsumerVerified(source: string): boolean {
