@@ -1598,6 +1598,7 @@ def _committed_blob_records(payload: bytes, oids: tuple[str, ...]) -> tuple[tupl
 
 _ParsedBatch = Callable[[str, tuple[str, ...]], tuple[tuple[str, int], ...]]
 _PARSED_BATCHES: weakref.WeakKeyDictionary[types.FunctionType, _ParsedBatch] = weakref.WeakKeyDictionary()
+_PARSED_BATCH_FACT_LIMIT = 32768
 
 
 def _parsed_batch_cache(query: types.FunctionType) -> _ParsedBatch:
@@ -1632,7 +1633,7 @@ def _parsed_batch_cache(query: types.FunctionType) -> _ParsedBatch:
             key = (root_path, oid)
             facts[key] = resolved[oid]
             facts.move_to_end(key)
-            if len(facts) > 8192:
+            if len(facts) > _PARSED_BATCH_FACT_LIMIT:
                 facts.popitem(last=False)
         return tuple(resolved[oid] for oid in oids)
 

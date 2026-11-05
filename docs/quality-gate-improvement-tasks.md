@@ -2,12 +2,21 @@
 
 ## 最新の再開地点（2026-11-05）
 
+### 最新確定と次の実行（R8385、下の当時の件数より優先）
+
+- [x] HTML性能はR8361のclosed receiptで30/84条件合格、未判定54。policyAccepted=true、formalAccepted=false、9000 phase records。receipt SHAは`96026c59d0ec9e74ebd2ee8f57759ca10fda09c2a45c8db9824f635583efbb11`。元24条件を再利用し新6条件を封緘した。全84の正式受入とは区別する。
+- [ ] R8362は測定後の検証が既存1800秒上限に達し、内側exit -15、groupClosed/rawFdsClosed=true、残process0。exec5274はouter exit1で終了回収済み。receiptなし・新合格0であり、成功30件を維持する。時間上限の延長や同条件の反復では対処しない。
+- [/] 実Git問い合わせ記録R8384で、280回のcat-fileが合計4,550,568,148bytes・97,248blobを返す一方、root/OIDの実作業集合は8,634件・443,518,425bytesだった。既存facts枠8,192件が作業集合を下回り、同じblob約4.1GBを再取得していた。既存のSHA256/長さだけを保持する枠を32,768件へ調整し、raw bytesを保持しない。R8385の旧枠REDは要求batchが[8419,227,442,227]、変更後GREENは[8419,215]。実Git・root/query隔離・失敗時部分登録禁止・LRU境界を含む7unitが成功。静的gate・実時間/メモリ・正式resumeの適格性と全84の受入は未完。
+- [/] JSONのparseだけを再利用する別案は、毎回の実bytes/SHA検証と変異分離を維持したR8382で、17MB文書が約10.7%・6MB文書が約5.2%遅くなったため採用しない。新しい共有認証frameworkや認証省略は追加しない。
+- [/] R8380の既存`just clean`、R8381のprivate直下`just clean-all`は両方実0・保護31参照維持だが、空きは約5.7GBで実質回復なし。R8383の旧scope整理案は候補0を検知してarchive開始前に終了し、原本は変更していない。次は未受入R8362の新規生成ログだけを、最新closed Bundle/保護ref/物理aliasと照合して可逆圧縮する。追加確認は求めず、現行受入の物理pinは維持する。
+- [ ] 既存必須条件、Mermaid製品117件99以上、HTML84条件90以上/全領域286画像/出力font一致、表示3秒未満/時間RSS非劣化、実装coverage100%/未計測0、cacheの実hit/restore/改変拒否、完全gate、最新依存/Actions、Draft review/個別reply-resolve/Ready/3OS CI/保護merge/既存3crate公開/Issue close/cleanupを維持する。進捗はlocal artifactだけに記録し、Issueへ途中報告しない。
+
 ### 進捗の記録先と保存形式（最新ユーザー是正）
 
 - [/] 途中進捗はローカルの台帳・アーティファクトへ保存し、Issue本文やコメントへ途中報告を追加しない。今回の#108/#109への追記は自分が追加した先頭部分だけを除去し、既存本文を復元した。`tmp/quality/resumed-owner-r3509/progress-2026-11-05.md`へ保存済み。Issue作成・統合・公開後の最終証跡/closeは、依頼済みのライフサイクル操作として区別する。アンチパターンは進捗を尋ねられるたびにIssueへ追記すること。正しくはローカル成果物を更新して回答する。検索語: `Issue途中報告禁止`, `local progress artifact`。
 - [/] 本人は未採用ログの圧縮整理を許可し、「可逆なら保存形式なんてどーでもいい」と明示した。以後、元の内容を復元できる保存形式の変更について再確認しない。変更前後の内容一致と対応表を保持し、退役した旧物理証跡を再認定しない。画像基準・私有資料・受入条件を都合よく変更しない。現在受入に使う物理pinは維持する。AGENTS.md:56の一律な原本保持より、この最新の明示指示を優先する。初回対象は採取前失敗R8171のstdout3件で、保護31参照とactive2Bundleからの参照0を確認した。検索語: `可逆保存形式は確認不要`, `retired evidence`, `reversible archival`。
 
-### 現在の判定と未対応（R8347）
+### R8347時点の判定と経過（現在値は上のR8385を優先）
 
 - [x] 採取元`70c3981a`のMermaid製品PNGはR8274で117/117が99以上、未合格0。EN59最低99.085711、JA58最低99.108010。独立raw JS見本を現endpointで新規生成し、R8276でpin付き製品score/failureを集計した。旧原本・閾値は変更していない。
 - [x] 同sourceのHTMLはR8238で84/84が90以上・最低92.14438、出力font完全一致を確認。R8244/R8245は全領域286/286、目次72・scroll42群、dynamic15・input18・埋込図各11が合格。R8247のDPR/両軸/座標/resize/資源再利用4件とR8250の公開consumer1件も実0。

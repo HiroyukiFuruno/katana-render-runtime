@@ -154,8 +154,28 @@ class CommittedRecordsCacheTest(unittest.TestCase):
                 self.assertEqual(batches, [oids, oids])
                 self.assertEqual(list(actual), ["file-0", "file-1"])
 
+    def test_blob_fact_cache_reuses_measured_working_set(self) -> None:
+        oids = tuple(f"{index:040x}" for index in range(1, 8635))
+        batches: list[tuple[str, ...]] = []
+
+        def query(root: Path, args: Sequence[str], input_bytes: bytes | None, text: bool) -> bytes:
+            if args[0] == "ls-tree":
+                selected = oids[:8419] if args[-1] == "first" else oids[215:]
+                return b"".join(f"100644 blob {oid}\tfile-{index}\0".encode()
+                                for index, oid in enumerate(selected))
+            if input_bytes is None:
+                raise AssertionError("missing Git batch input")
+            requested = tuple(input_bytes.decode("ascii").splitlines())
+            batches.append(requested)
+            return b"".join(f"{oid} blob 1\nx\n".encode() for oid in requested)
+
+        root = Path("/working-set-fixture")
+        for ref in ("first", "second", "first", "second"):
+            gate.committed_records(root, ref, git_query=query)
+        self.assertEqual([len(batch) for batch in batches], [8419, 215])
+
     def test_blob_fact_cache_evicts_least_recently_used_at_capacity(self) -> None:
-        capacity = 8192
+        capacity = 32768
         oids = tuple(f"{index:040x}" for index in range(1, capacity + 2))
         batches: list[tuple[str, ...]] = []
         def query(root: Path, args: Sequence[str], input_bytes: bytes | None, text: bool) -> bytes:
