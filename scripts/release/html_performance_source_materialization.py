@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 import html_performance_reference as reference
 import verify_html_performance_evidence as gate
 from html_performance_harness_dependency_closure import verify_harness_closure
+from html_performance_harness_equivalence import verify_harness_sources
 
 
 def _selection_value(selected: reference.ActiveReference) -> dict[str, object]:
@@ -122,9 +123,7 @@ def verify_transported_source_proof(root: Path, selected: reference.ActiveRefere
                  "transported historical source records differ")
     current = gate.committed_records(root, git_query=git_query)
     lock = gate.HARNESS_ROOT + "Cargo.lock"
-    gate.require({k: v for k, v in records.items() if k.startswith(gate.HARNESS_ROOT) and k != lock}
-                 == {k: v for k, v in current.items() if k.startswith(gate.HARNESS_ROOT) and k != lock},
-                 "transported historical harness differs")
+    _verify_harness(root, selected.source_head, records, current, git_query)
     old_lock = gate.git(root, "show", selected.source_head + ":" + lock, git_query=git_query).encode("utf8")
     verify_harness_closure(old_lock, (root / lock).read_bytes(), selected.build_pins["lockSha256"])
     return records
@@ -154,6 +153,40 @@ def _tree(root: Path, revision: str, git_query: gate.GitQuery | None) -> list[tu
     return rows
 
 
+def _verify_harness(root: Path, old_head: str, old: gate.SourceRecords,
+                    current: gate.SourceRecords, git_query: gate.GitQuery | None) -> None:
+    old_modes = {name: mode for name, _, mode in _tree(root, old_head, git_query)
+                 if name.startswith(gate.HARNESS_ROOT)}
+    current_modes = {name: mode for name, _, mode in _tree(root, "HEAD", git_query)
+                     if name.startswith(gate.HARNESS_ROOT)}
+    gate.require(bool(old_modes) and all(current_modes.get(name) == mode
+                                        for name, mode in old_modes.items())
+                 and all(mode == 0o644 for name, mode in current_modes.items() if name not in old_modes),
+                 "historical harness mode differs")
+    def read(revision: str, path: str) -> bytes:
+        value = gate._git_output(root, ("show", revision + ":" + path), git_query=git_query)
+        if not isinstance(value, bytes):
+            raise ValueError("harness Git blob is not binary")
+        return value
+    verify_harness_sources(old, current, old_head, read)
+
+
+def _preflight_harness(root: Path, old_head: str, old_rows: list[tuple[str, str, int]],
+                       git_query: gate.GitQuery | None) -> None:
+    def records(rows: list[tuple[str, str, int]]) -> gate.SourceRecords:
+        selected = [(name, oid) for name, oid, _ in rows
+                    if name.startswith(gate.HARNESS_ROOT) and name != gate.HARNESS_ROOT + "Cargo.lock"]
+        gate.require(bool(selected), "historical harness source differs")
+        oids = tuple(oid for _, oid in selected)
+        payload = gate._git_output(root, ("cat-file", "--batch"), git_query=git_query,
+                                   input_bytes="".join(oid + "\n" for oid in oids).encode())
+        if not isinstance(payload, bytes):
+            raise ValueError("harness Git batch is not binary")
+        values = gate._committed_blob_records(payload, oids)
+        return {name: value for (name, _), value in zip(selected, values, strict=True)}
+    _verify_harness(root, old_head, records(old_rows), records(_tree(root, "HEAD", git_query)), git_query)
+
+
 def materialize(root: Path, destination: Path, revision: str, *,
                 git_query: gate.GitQuery | None = None) -> gate.SourceRecords:
     """Write every selected commit blob once and verify bytes and Git modes."""
@@ -171,6 +204,7 @@ def materialize(root: Path, destination: Path, revision: str, *,
                           git_query=git_query).strip() == revision,
                  "historical source commit differs")
     rows = _tree(root, revision, git_query)
+    _preflight_harness(root, revision, rows, git_query)
     payload = gate._git_output(root, ("cat-file", "--batch"), git_query=git_query,
                                input_bytes="".join(oid + "\n" for _, oid, _ in rows).encode())
     if not isinstance(payload, bytes):
@@ -250,11 +284,7 @@ def verify_selected_source(root: Path, destination: Path, selected: reference.Ac
     historical = verify_materialized(root, destination, selected.source_head, git_query=git_query)
     controller = gate.committed_records(root, git_query=git_query)
     lock = gate.HARNESS_ROOT + "Cargo.lock"
-    def harness(records: gate.SourceRecords) -> gate.SourceRecords:
-        return {path: value for path, value in records.items()
-                if path.startswith(gate.HARNESS_ROOT) and path != lock}
-    gate.require(harness(historical) == harness(controller) and bool(harness(historical)),
-                 "historical harness source differs")
+    _verify_harness(root, selected.source_head, historical, controller, git_query)
     verify_harness_closure((destination / lock).read_bytes(), (root / lock).read_bytes(),
                            selected.build_pins["lockSha256"])
     return historical

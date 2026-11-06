@@ -16,6 +16,33 @@ from verify_html_performance_evidence import GitQuery
 
 
 class HistoricalSourceMaterializationTest(unittest.TestCase):
+    def test_selected_source_uses_shared_harness_authentication(self) -> None:
+        selected = reference.ActiveReference("record", "a" * 40, "b" * 64, "c" * 64,
+                                             {"lockSha256": "d" * 64})
+        lock = gate.HARNESS_ROOT + "Cargo.lock"
+        records: gate.SourceRecords = {lock: ("d" * 64, 4)}
+        def query(root: Path, args: Sequence[str], input_bytes: bytes | None, text: bool) -> str:
+            del root, input_bytes, text
+            if args[0] == "rev-parse":
+                return "f" * 40
+            if args[0] in {"status", "merge-base"}:
+                return ""
+            raise ValueError("unexpected Git query")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            destination = root / "tmp/reference"
+            for file in (root / lock, destination / lock):
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_bytes(b"lock")
+            with patch.object(reference, "active_reference_at_commit", return_value=selected), \
+                 patch.object(materialization, "verify_materialized", return_value=records), \
+                 patch.object(gate, "committed_records", return_value=records), \
+                 patch.object(materialization, "_verify_harness") as harness, \
+                 patch.object(materialization, "verify_harness_closure"):
+                self.assertEqual(materialization.verify_selected_source(
+                    root, destination, selected, git_query=query), records)
+                harness.assert_called_once_with(root, selected.source_head, records, records, query)
+
     def test_transported_source_proof_uses_git_tree_without_producer_host_path(self) -> None:
         selected = reference.ActiveReference("record", "a" * 40, "b" * 64, "c" * 64, {"lockSha256": "d" * 64})
         lock = gate.HARNESS_ROOT + "Cargo.lock"
@@ -47,11 +74,13 @@ class HistoricalSourceMaterializationTest(unittest.TestCase):
             with patch.object(reference, "active_reference_at_commit", return_value=selected), \
                  patch.object(gate, "committed_records", return_value=records), \
                  patch.object(materialization, "_tree_records", return_value=rows), \
+                 patch.object(materialization, "_verify_harness") as harness, \
                  patch.object(materialization, "verify_harness_closure"):
                 checked = materialization.verify_transported_source_proof(
                     root, selected, pin, proof, Path("/producer/repo"), file_resolver=lambda _pin: controller,
                     git_query=query)
                 self.assertEqual(checked, records)
+                harness.assert_called_once_with(root, selected.source_head, records, records, query)
                 altered = dict(proof)
                 altered["sourceRecords"] = [{**rows[0], "mode": "0755"}, rows[1]]
                 unsigned = {key: value for key, value in altered.items() if key != "digest"}
@@ -61,6 +90,28 @@ class HistoricalSourceMaterializationTest(unittest.TestCase):
                     materialization.verify_transported_source_proof(
                         root, selected, pin, altered, Path("/producer/repo"),
                         file_resolver=lambda _pin: controller, git_query=query)
+
+    def test_harness_modes_require_shared_identity_and_regular_additions(self) -> None:
+        main = gate.HARNESS_ROOT + "src/main.rs"
+        added = gate.HARNESS_ROOT + "src/rss.rs"
+        old = {main: ("a" * 64, 1)}
+        current = {**old, added: ("b" * 64, 1)}
+        root = Path("/fixture")
+        old_rows = [(main, "a" * 40, 0o644)]
+        for mode_main, mode_added, valid in ((0o644, 0o644, True),
+                                              (0o755, 0o644, False),
+                                              (0o644, 0o755, False)):
+            with self.subTest(mode_main=mode_main, mode_added=mode_added):
+                rows = [(main, "a" * 40, mode_main), (added, "b" * 40, mode_added)]
+                with patch.object(materialization, "_tree", side_effect=[old_rows, rows]), \
+                     patch.object(materialization, "verify_harness_sources") as verify:
+                    if valid:
+                        materialization._verify_harness(root, "old", old, current, None)
+                        verify.assert_called_once()
+                    else:
+                        with self.assertRaisesRegex(ValueError, "harness mode differs"):
+                            materialization._verify_harness(root, "old", old, current, None)
+                        verify.assert_not_called()
 
     def test_selected_source_proof_binds_selection_controller_and_tree(self) -> None:
         selected = reference.ActiveReference("active-record", "a" * 40, "b" * 64,
@@ -138,11 +189,17 @@ class HistoricalSourceMaterializationTest(unittest.TestCase):
             root = Path(temporary).resolve()
             (root / "tmp").mkdir()
             destination = root / "tmp/reference"
-            records = materialization.materialize(root, destination, revision, git_query=query)
+            with patch.object(materialization, "_preflight_harness", side_effect=ValueError("harness differs")), \
+                 self.assertRaisesRegex(ValueError, "harness differs"):
+                materialization.materialize(root, destination, revision, git_query=query)
+            self.assertFalse(destination.exists())
+            with patch.object(materialization, "_preflight_harness") as preflight:
+                records = materialization.materialize(root, destination, revision, git_query=query)
+                preflight.assert_called_once()
             self.assertEqual(set(records), {"nested/source", "script"})
             self.assertEqual((destination / "nested/source").read_bytes(), b"source")
             self.assertEqual((destination / "script").stat().st_mode & 0o777, 0o755)
-            with self.assertRaises(FileExistsError):
+            with patch.object(materialization, "_preflight_harness"), self.assertRaises(FileExistsError):
                 materialization.materialize(root, destination, revision, git_query=query)
             (destination / "script").chmod(0o644)
             with self.assertRaisesRegex(ValueError, "historical source file differs"):

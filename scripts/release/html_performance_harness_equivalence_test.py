@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -30,7 +31,10 @@ class HarnessEquivalenceTest(unittest.TestCase):
         self.old = {equivalence.MANIFEST: manifest, equivalence.MAIN: old_main.encode(), other: b"timing"}
         probe = (Path(__file__).resolve().parents[2] / equivalence.PROBE).read_bytes()
         self.current = {equivalence.MANIFEST: new_manifest, equivalence.MAIN: current_main.encode(),
-                        equivalence.RSS: rss.encode(), equivalence.PROBE: probe, other: b"timing"}
+                        equivalence.RSS: rss.encode(), equivalence.PROBE: probe,
+                        equivalence.PROBE_TEST: (Path(__file__).resolve().parents[2]
+                                                 / equivalence.PROBE_TEST).read_bytes(),
+                        other: b"timing"}
 
     def verify(self) -> None:
         def records(files: dict[str, bytes]) -> dict[str, tuple[str, int]]:
@@ -42,12 +46,21 @@ class HarnessEquivalenceTest(unittest.TestCase):
     def test_only_rss_extraction_and_independent_diagnostic_are_accepted(self) -> None:
         self.verify()
 
+    def test_historical_two_file_diagnostic_remains_accepted(self) -> None:
+        del self.current[equivalence.PROBE_TEST]
+        self.current[equivalence.PROBE] = subprocess.check_output(
+            ["git", "--no-replace-objects", "show", "3ac29dd6:" + equivalence.PROBE],
+            cwd=Path(__file__).resolve().parents[2],
+        )
+        self.verify()
+
     def test_changed_driver_settings_timing_rss_and_unknown_modules_are_rejected(self) -> None:
         mutations = {
             "cargo_feature": (equivalence.MANIFEST, b'\n[features]\nchanged = []\n'),
             "timing": (equivalence.MAIN, b'\nfn timing_changed() {}\n'),
             "rss": (equivalence.RSS, b'\nfn alternate_rss() {}\n'),
             "probe": (equivalence.PROBE, b'\nfn unexpected() {}\n'),
+            "probe_test": (equivalence.PROBE_TEST, b'\nfn unexpected() {}\n'),
             "module": (equivalence.ROOT + "src/unknown.rs", b"mod unexpected;"),
         }
         for name, (path, suffix) in mutations.items():
