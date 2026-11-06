@@ -656,6 +656,27 @@ class CatalogProducerOperationTest(unittest.TestCase):
 
 
 class TransportBundleUnitTests(unittest.TestCase):
+    def test_staged_transport_publishes_only_a_complete_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = root / "original.raw"
+            source.write_bytes(b"original process evidence")
+            pin: typed_producer.FilePin = {"path": str(source), "sha256": gate.sha256(source)}
+            staging = root / "staging"
+            staging.mkdir()
+            bundle = root / "bundle"
+            with patch.object(producer, "write", side_effect=OSError("manifest write failed")):
+                with self.assertRaisesRegex(OSError, "manifest write failed"):
+                    producer.write_transport_bundle(bundle, "a" * 40, [pin], [], staging=staging)
+            self.assertFalse(bundle.exists())
+            self.assertEqual(list(staging.iterdir()), [])
+            producer.write_transport_bundle(bundle, "a" * 40, [pin], [], staging=staging)
+            self.assertEqual(gate.Bundle(bundle).file(pin).read_bytes(), source.read_bytes())
+            self.assertEqual(list(staging.iterdir()), [])
+            with self.assertRaises(FileExistsError):
+                producer.write_transport_bundle(bundle, "a" * 40, [pin], [], staging=staging)
+            self.assertEqual(gate.Bundle(bundle).file(pin).read_bytes(), source.read_bytes())
+
     def test_incomplete_bundle_is_removed_and_source_is_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

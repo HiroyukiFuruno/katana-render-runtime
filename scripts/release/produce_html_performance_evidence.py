@@ -32,6 +32,7 @@ import html_performance_host_load_validation as load_validation
 import html_performance_reference as reference
 import html_performance_epoch_reuse as epoch_reuse
 import html_performance_remote_evidence as remote_evidence
+import html_performance_transport_scratch as transport_scratch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "build"))
 LOCAL_CAPACITY_BASELINE = 2363047936
@@ -56,6 +57,7 @@ def candidate_build_locks(root: Path) -> Iterator[None]:
             path.parent.mkdir(parents=True, exist_ok=True)
         for path in lock_paths:
             locks.enter_context(review_lock(path))
+        transport_scratch.recover_transport_scratch(root / "tmp")
         yield
 
 
@@ -883,19 +885,23 @@ def _transport_output_directory(bundle: Path) -> Iterator[None]:
 
 def write_transport_bundle(bundle: Path, head: str, refs: Sequence[FilePin],
                            attempts: list[dict[str, FilePin]], *,
-                           source_paths: Mapping[str, Path] | None = None) -> dict[str, str]:
+                           source_paths: Mapping[str, Path] | None = None,
+                           staging: Path | None = None) -> dict[str, str]:
     transport_files: list[gate.JsonObject] = []
     relative_paths: dict[str, str] = {}
     transport: gate.JsonObject = {"schema": "krr-html-performance-release-bundle-v1", "head": head,
                                   "files": transport_files, "attempts": attempts}
     unique = {ref["path"]: ref for ref in refs}
-    with _transport_output_directory(bundle):
+    destination_root = bundle if staging is None else staging / "bundle"
+    if staging is not None and (bundle.exists() or bundle.is_symlink()):
+        raise FileExistsError(bundle)
+    with _transport_output_directory(destination_root):
         for index, ref in enumerate(unique.values()):
             original = (source_paths or {}).get(ref["path"], Path(ref["path"]))
             if source_paths is not None and ref["path"] in source_paths:
                 _pinned_file(original, ref["sha256"])
             relative = f"payload/{index}/{original.name}"
-            destination = bundle / relative
+            destination = destination_root / relative
             destination.parent.mkdir(parents=True)
             if platform.system() == "Darwin":
                 _clone_transport_file(original, destination, ref["sha256"])
@@ -905,7 +911,11 @@ def write_transport_bundle(bundle: Path, head: str, refs: Sequence[FilePin],
             transport_files.append({"originalPath": ref["path"], "relativePath": relative,
                                     "sha256": ref["sha256"]})
             relative_paths[ref["path"]] = relative
-        write(bundle / "bundle.json", transport)
+        write(destination_root / "bundle.json", transport)
+        if staging is not None:
+            if bundle.exists() or bundle.is_symlink():
+                raise FileExistsError(bundle)
+            destination_root.rename(bundle)
     return relative_paths
 
 
@@ -2627,7 +2637,9 @@ def produce_candidate_build_proof(root: Path, output: Path, capacity_document: P
             if path.is_file():
                 refs.append({"path": str(path), "sha256": gate.sha256(path)})
     bundle = output / "bundle"
-    relative_paths = write_transport_bundle(bundle, gate._text(initial["head"], "source HEAD"), refs, [])
+    with transport_scratch.transport_workspace(tmp_root) as staging:
+        relative_paths = write_transport_bundle(bundle, gate._text(initial["head"], "source HEAD"),
+                                                refs, [], staging=staging)
     bundle_sha256 = gate.sha256(bundle / "bundle.json")
     relative_artifact = relative_paths[artifact_pin["path"]]
     facts = gate.validate_candidate_build_proof(
@@ -4414,8 +4426,9 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 refs.append(FilePin(path=str(path), sha256=gate.sha256(path)))
     # 生成物だけを輸送し、巨大なCargo targetは公開artifactへ混入させない。
     bundle = output / "bundle"
-    with _program_transport_sources(output, root, checkout_sources, program_records, refs,
-                                    git_query=git_query) as program_sources:
+    with (transport_scratch.transport_workspace(root / "tmp") as staging,
+          _program_transport_sources(staging, root, checkout_sources, program_records, refs,
+                                     git_query=git_query) as program_sources):
         transport_sources = dict(reference_proof.transport_sources) if reference_proof else {}
         for program_logical, physical in program_sources.items():
             program_prior = transport_sources.setdefault(program_logical, physical)
@@ -4435,7 +4448,8 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         for ref in refs:
             previous_sha = ref_hashes.setdefault(ref["path"], ref["sha256"])
             gate.require(previous_sha == ref["sha256"], "transport references conflict")
-        write_transport_bundle(bundle, head, refs, transport_attempts, source_paths=transport_sources)
+        write_transport_bundle(bundle, head, refs, transport_attempts, source_paths=transport_sources,
+                               staging=staging)
     current_bundle = gate.Bundle(bundle)
     attempt_ids = [_attempt_condition_id(current_bundle, attempt)
                    for attempt in transport_attempts]
