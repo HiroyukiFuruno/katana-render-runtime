@@ -149,6 +149,7 @@ class Package:
     requirement_operator: str | None = None
     cargo_requirement: str | None = None
     skia_hold_candidate: bool = False
+    ast_lint_hold_candidate: bool = False
 
 
 @dataclass(frozen=True)
@@ -703,10 +704,51 @@ def _verified_skia_hold(root: Path, metadata: dict[str, object]) -> bool:
             and matches[0].get("version") == "0.156.0" and matches[0].get("source") == registry)
 
 
+def _verified_ast_lint_hold(root: Path, metadata: dict[str, object]) -> bool:
+    """既知の検査回帰に対し、実際のlinter依存だけを保留する。"""
+    packages, members, resolve = metadata.get("packages"), metadata.get("workspace_members"), metadata.get("resolve")
+    if not isinstance(packages, list) or not isinstance(members, list) or not isinstance(resolve, dict):
+        return False
+    nodes = resolve.get("nodes")
+    if not isinstance(nodes, list):
+        return False
+    workspace = [p for p in packages if isinstance(p, dict) and p.get("id") in members]
+    if len(workspace) != len(members) or any(not isinstance(p.get("dependencies"), list) for p in workspace):
+        return False
+    owners = [p for p in workspace if any(isinstance(d, dict) and d.get("name") == "katana-ast-lint"
+                                           for d in p["dependencies"])]
+    if len(owners) != 1:
+        return False
+    owner = owners[0]
+    manifest = owner.get("manifest_path")
+    if (owner.get("name") != "kdr-linter" or owner.get("source") is not None
+            or not isinstance(manifest, str)
+            or Path(manifest).resolve() != (root / "crates/kdr-linter/Cargo.toml").resolve()):
+        return False
+    declaration = _load_manifest_payload(root, Path(manifest)).get("dependencies")
+    if not isinstance(declaration, dict) or declaration.get("katana-ast-lint") != {"workspace": True}:
+        return False
+    registry = "registry+https://github.com/rust-lang/crates.io-index"
+    direct = [d for d in owner["dependencies"] if isinstance(d, dict) and d.get("name") == "katana-ast-lint"]
+    if (len(direct) != 1 or direct[0].get("rename") is not None or direct[0].get("kind") is not None
+            or direct[0].get("target") is not None or direct[0].get("req") != "=0.5.3"
+            or direct[0].get("source") != registry):
+        return False
+    owner_nodes = [n for n in nodes if isinstance(n, dict) and n.get("id") == owner.get("id")]
+    if len(owner_nodes) != 1 or not isinstance(owner_nodes[0].get("deps"), list):
+        return False
+    edges = [e for e in owner_nodes[0]["deps"] if isinstance(e, dict) and e.get("name") == "katana_ast_lint"]
+    if len(edges) != 1 or edges[0].get("dep_kinds") != [{"kind": None, "target": None}]:
+        return False
+    resolved = [p for p in packages if isinstance(p, dict) and p.get("id") == edges[0].get("pkg")]
+    return (len(resolved) == 1 and resolved[0].get("name") == "katana-ast-lint"
+            and resolved[0].get("version") == "0.5.3" and resolved[0].get("source") == registry)
+
+
 def rust_manifest_dependencies(root: Path, coupled_skrifa_manifest: Path | None = None,
                                metadata: dict[str, object] | None = None) -> list[Package]:
     """Return direct registry requirements updated by ``cargo upgrade``."""
-    dependencies_by_version: dict[tuple[str, str, int | None, str | None, str | None, bool], Package] = {}
+    dependencies_by_version: dict[tuple[str, str, int | None, str | None, str | None, bool, bool], Package] = {}
 
     def dependency_tables(payload: dict[str, object]) -> list[tuple[str, object]]:
         sections = ("dependencies", "dev-dependencies", "build-dependencies")
@@ -773,10 +815,15 @@ def rust_manifest_dependencies(root: Path, coupled_skrifa_manifest: Path | None 
                                             "features": ["binary-cache", "pdf"]}
                         and _verified_skia_hold(root, metadata)):
                     package = replace(package, skia_hold_candidate=True)
+                if (metadata is not None and manifest.resolve() == (root / "Cargo.toml").resolve()
+                        and scope == "workspace.dependencies" and declared_name == "katana-ast-lint"
+                        and declaration == "=0.5.3" and _verified_ast_lint_hold(root, metadata)):
+                    package = replace(package, ast_lint_hold_candidate=True)
                 dependencies_by_version[
                     (
                         package.name, package.current, package.incompatible_prefix_length,
                         package.requirement_operator, package.cargo_requirement, package.skia_hold_candidate,
+                        package.ast_lint_hold_candidate,
                     )
                 ] = package
     return sorted(dependencies_by_version.values(), key=lambda package: (package.name, Version.parse(package.current)))
@@ -1093,6 +1140,8 @@ def is_stale(package: Package, resolved_version: str) -> bool:
     # Issue #109: R7924 0.157 RSS +0.125 MiB; R7940 0.156 +0.015625 MiB.
     # 各25回の同一入力診断に基づく候補保留であり、全84条件の受入を意味しない。
     if package.skia_hold_candidate and resolved_version == "0.157.0":
+        return False
+    if package.ast_lint_hold_candidate and resolved_version == "0.5.4":
         return False
     current = Version.parse(package.current)
     resolved = Version.parse(resolved_version)

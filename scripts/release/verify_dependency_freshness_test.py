@@ -362,6 +362,59 @@ class DependencyFreshnessTest(unittest.TestCase):
             stdout,
         )
 
+    def test_ast_lint_hold_requires_exact_workspace_owner_and_candidate(self) -> None:
+        manifest = self.root / "crates/kdr-linter/Cargo.toml"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text('[package]\nname = "kdr-linter"\nversion = "0.1.0"\n'
+                            '[dependencies]\nkatana-ast-lint = { workspace = true }\n', encoding="utf-8")
+        (self.root / "Cargo.toml").write_text(
+            '[workspace]\nmembers = ["crates/kdr-linter"]\n'
+            '[workspace.dependencies]\nkatana-ast-lint = "=0.5.3"\n', encoding="utf-8")
+        registry = "registry+https://github.com/rust-lang/crates.io-index"
+        owner_id, lint_id = "owner", registry + "#katana-ast-lint@0.5.3"
+        metadata: CargoMetadata = {
+            "workspace_members": [owner_id],
+            "packages": [
+                {"id": owner_id, "name": "kdr-linter", "source": None, "manifest_path": str(manifest),
+                 "dependencies": [{"name": "katana-ast-lint", "rename": None, "kind": None,
+                                   "target": None, "req": "=0.5.3", "source": registry}]},
+                {"id": lint_id, "name": "katana-ast-lint", "version": "0.5.3", "source": registry},
+            ],
+            "resolve": {"nodes": [{"id": owner_id, "deps": [{"name": "katana_ast_lint", "pkg": lint_id,
+                                  "dep_kinds": [{"kind": None, "target": None}]}]}]},
+        }
+
+        def held() -> bool:
+            packages = freshness.rust_manifest_dependencies(self.root, metadata=metadata)
+            return not freshness.is_stale(next(p for p in packages if p.name == "katana-ast-lint"), "0.5.4")
+
+        self.assertTrue(held())
+        package = next(p for p in freshness.rust_manifest_dependencies(self.root, metadata=metadata)
+                       if p.name == "katana-ast-lint")
+        self.assertTrue(freshness.is_stale(package, "0.5.5"))
+        direct: Any = metadata["packages"][0]["dependencies"][0]
+        for field, value in [("rename", "other"), ("kind", "dev"), ("target", "cfg(unix)"),
+                             ("req", "^0.5.3"), ("source", "git+https://example.test/lint")]:
+            original = direct[field]
+            direct[field] = value
+            self.assertFalse(held(), field)
+            direct[field] = original
+        resolved: Any = metadata["packages"][1]
+        for field, value in [("version", "0.5.4"), ("source", "git+https://example.test/lint")]:
+            original = resolved[field]
+            resolved[field] = value
+            self.assertFalse(held(), field)
+            resolved[field] = original
+        edge: Any = metadata["resolve"]["nodes"][0]["deps"][0]
+        edge["dep_kinds"] = [{"kind": "dev", "target": None}]
+        self.assertFalse(held())
+        edge["dep_kinds"] = [{"kind": None, "target": None}]
+        metadata["packages"][0]["manifest_path"] = str(self.root / "other/Cargo.toml")
+        self.assertFalse(held())
+        metadata["packages"][0]["manifest_path"] = str(manifest)
+        metadata["packages"][0]["name"] = "other"
+        self.assertFalse(held())
+
     def test_skia_hold_is_scoped_to_verified_macos_dependency_and_known_version(self) -> None:
         manifest = self.root / "crates/katana-render-runtime/Cargo.toml"
         manifest.parent.mkdir(parents=True)
