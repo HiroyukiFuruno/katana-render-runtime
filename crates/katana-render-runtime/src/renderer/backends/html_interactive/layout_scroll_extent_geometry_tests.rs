@@ -139,6 +139,29 @@ fn viewport_polygon_intersection_keeps_all_four_clip_boundaries() -> Result<(), 
 }
 
 #[test]
+fn viewport_clipping_respects_each_active_axis() -> Result<(), String> {
+    let input = viewport(-5.0, -7.0, 20.0, 20.0);
+    let cases = [
+        ((false, false), (-5.0, -7.0, 15.0, 13.0)),
+        ((true, false), (0.0, -7.0, 10.0, 13.0)),
+        ((false, true), (-5.0, 0.0, 15.0, 8.0)),
+        ((true, true), (0.0, 0.0, 10.0, 8.0)),
+    ];
+    for (axes, (left, top, right, bottom)) in cases {
+        let actual =
+            polygon::clip_viewport_polygon(&clip(10.0, 8.0).with_active_axes(axes), &input)?;
+        assert_eq!(actual.len(), RECT_CORNER_COUNT, "axes: {axes:?}");
+        for corner in [(left, top), (right, top), (right, bottom), (left, bottom)] {
+            assert!(
+                actual.contains(&corner),
+                "axes: {axes:?}, corner: {corner:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn collapsed_polygon_with_no_active_normal_cannot_expose_viewport_pixels() {
     let mut collapsed = clip(10.0, 8.0);
     collapsed.transformed_corners = [(0.0, 0.0); RECT_CORNER_COUNT];

@@ -43,8 +43,16 @@ fn assert_extent_metrics(
     assert_eq!(frame_generation, metrics.generation);
     assert_eq!(metrics.viewport_width, LOGICAL_WIDTH);
     assert_eq!(metrics.viewport_height, LOGICAL_HEIGHT);
-    assert!((metrics.content_width - expected_width).abs() <= tolerance);
-    assert!((metrics.content_height - expected_height).abs() <= tolerance);
+    assert!(
+        (metrics.content_width - expected_width).abs() <= tolerance,
+        "content width: expected {expected_width}, got {}",
+        metrics.content_width
+    );
+    assert!(
+        (metrics.content_height - expected_height).abs() <= tolerance,
+        "content height: expected {expected_height}, got {}",
+        metrics.content_height
+    );
     let expected_max_x = (expected_width.round() - LOGICAL_WIDTH).max(0.0);
     let expected_max_y = (expected_height.round() - LOGICAL_HEIGHT).max(0.0);
     assert_eq!(metrics.max_scroll_x(), expected_max_x);
@@ -89,6 +97,22 @@ fn negative_content_crossing_origin_contributes_positive_extent() -> TestResult 
         240.0,
         0.0,
     )
+}
+
+#[rstest::rstest]
+#[case::visible("overflow:visible", 650.0, 550.0)]
+#[case::clip_x("overflow-x:clip;overflow-y:visible", 500.0, 550.0)]
+#[case::clip_y("overflow-x:visible;overflow-y:clip", 650.0, 380.0)]
+#[case::clip_both("overflow:clip", 500.0, 380.0)]
+fn offscreen_parent_clips_descendant_extent_by_axis(
+    #[case] overflow: &str,
+    #[case] width: f32,
+    #[case] height: f32,
+) -> TestResult {
+    let source = format!(
+        r#"<style>html,body{{margin:0}}#parent{{position:absolute;left:400px;top:300px;width:100px;height:80px;{overflow}}}#child{{position:absolute;left:200px;top:200px;width:50px;height:50px}}</style><div id=parent><div id=child></div></div>"#
+    );
+    assert_extent(&source, width, height, 0.0)
 }
 
 #[test]

@@ -21,13 +21,18 @@ pub(super) fn axis_aligned_extent(
         }
     }
     let (left, top, right, bottom) = bounds;
-    Ok(
-        if right > left && bottom > top && right > 0.0 && bottom > 0.0 {
-            AxisAlignedExtent::Visible((right, bottom))
-        } else {
-            AxisAlignedExtent::Empty
-        },
-    )
+    /* WHY: 片軸のクリップが空でも、反対軸のスクロール範囲は残る。 */
+    let horizontal = positive_axis_extent(left, right);
+    let vertical = positive_axis_extent(top, bottom);
+    Ok(if horizontal > 0.0 || vertical > 0.0 {
+        AxisAlignedExtent::Visible((horizontal, vertical))
+    } else {
+        AxisAlignedExtent::Empty
+    })
+}
+
+fn positive_axis_extent(start: f32, end: f32) -> f32 {
+    if end > start { end.max(0.0) } else { 0.0 }
 }
 
 fn intersect_axis_aligned_clip(
