@@ -121,6 +121,36 @@ fn rounded_rectangle_uses_single_authored_radius_on_both_axes(
 }
 
 #[test]
+fn shape_conversion_normalizes_radii_and_skips_invalid_geometry() -> Result<(), String> {
+    let cases = [
+        (
+            "<rect id='sample' x='1' y='1' width='6' height='4' rx='99' ry='99' fill='red'/>",
+            Some("<rect id='sample' x='1' y='1' width='6' height='4' rx='3' ry='2' fill='red'/>"),
+        ),
+        ("<rect id='sample' width='0' height='4' fill='red'/>", None),
+        ("<rect id='sample' width='4' height='0' fill='red'/>", None),
+        ("<polyline id='sample' points='1,1' fill='red'/>", None),
+        ("<polygon id='sample' points='bad' fill='red'/>", None),
+        ("<circle id='sample' r='0' fill='red'/>", None),
+    ];
+    let wrap = |shape: &str| {
+        format!("<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'>{shape}</svg>")
+    };
+    for (shape, expected_shape) in cases {
+        let actual = parse_with_languages(&wrap(shape), &[])?;
+        if let Some(expected_shape) = expected_shape {
+            let expected = parse_with_languages(&wrap(expected_shape), &[])?;
+            let actual_segments = sample_path(&actual)?.data().segments();
+            let expected_segments = sample_path(&expected)?.data().segments();
+            assert!(actual_segments.eq(expected_segments), "{shape}");
+        } else {
+            assert!(actual.node_by_id("sample").is_none(), "{shape}");
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn recursive_use_is_skipped_without_affecting_following_rendered_content() -> Result<(), String> {
     let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8">
       <use id="recursive" href="#recursive" fill="#ff0000"/>
