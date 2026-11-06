@@ -18,7 +18,7 @@ def _cli(root: Path, command: str, producer: str) -> tuple[int, dict[str, object
     result = subprocess.run(
         [sys.executable, str(root / "scripts/release/native_coverage_result_cli.py"),
          "--repo", str(root), command, "--producer", producer],
-        cwd=root, check=False, capture_output=True, text=True,
+        cwd=root, check=False, capture_output=True, text=True, env=dict(os.environ),
     )
     try:
         payload = json.loads(result.stdout)

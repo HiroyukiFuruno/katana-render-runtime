@@ -44,13 +44,17 @@ class LocalCoverageAggregateUnitTests(unittest.TestCase):
         with patch.dict(os.environ, {"MOON_TASK_ID": "coverage", "MOON_TASK_HASH": "cached-task"}), \
              patch("native_coverage_local_aggregate.subprocess.run", side_effect=outputs) as run:
             row = aggregate.validate_or_refresh(Path("/fixture"), "root")
+            parent_environment = dict(os.environ)
         self.assertTrue(row["valid"])
         self.assertTrue(row["refreshed"])
         self.assertEqual(run.call_count, 3)
         self.assertEqual(run.call_args_list[0].args[0][4], "local-validate")
         self.assertEqual(run.call_args_list[1].args[0], ["just", "root-test-and-coverage"])
         self.assertEqual(run.call_args_list[2].args[0][4], "local-validate")
+        for index in (0, 2):
+            self.assertTrue(run.call_args_list[index].kwargs.get("env") == parent_environment)
         self.assertNotIn("MOON_TASK_ID", run.call_args_list[1].kwargs["env"])
+        self.assertNotIn("MOON_TASK_HASH", run.call_args_list[1].kwargs["env"])
 
     def test_post_refresh_policy_failure_remains_a_policy_failure(self) -> None:
         outputs = [
