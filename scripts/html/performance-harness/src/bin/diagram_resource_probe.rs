@@ -173,5 +173,10 @@ mod tests {
         assert!(parse_options(args("drawio", "2")).is_ok());
         assert!(parse_options(args("mathjax", "1")).is_err());
         assert!(parse_options(args("mermaid", "0")).is_err());
+        assert!(parse_options(args("mermaid", "not-a-number")).is_err());
+        assert!(parse_options(Vec::new()).is_err());
+        let mut extra = args("mermaid", "1");
+        extra.push("unexpected".to_owned());
+        assert!(parse_options(extra).is_err());
     }
 }

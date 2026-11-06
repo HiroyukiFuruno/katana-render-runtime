@@ -1,7 +1,23 @@
+use super::super::mathjax_facts_ast_linter_tests::shared_resource_loader_mutations::SHARED_RESOURCE_LOADER_MUTATIONS;
 use super::{Fixture, INPUTS, mermaid_classic_scripts, reject_mutations};
 
 const RESOURCE_BYTES_INDEX: usize = 9;
 const RENDER_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "Ok(bundle) => bundle,",
+        "Ok(bundle) => other,",
+        "mermaid-resource-route:load",
+    ),
+    (
+        "Self::error(block, format!(\"Failed to read Mermaid.js bundle: {error}\"))",
+        "Self::error(other, format!(\"Failed to read Mermaid.js bundle: {error}\"))",
+        "mermaid-resource-route:load",
+    ),
+    (
+        "let mut cache_file = Self::cache_file_path",
+        "let cache_file = Self::cache_file_path",
+        "mermaid-resource-route:cache-binding",
+    ),
     (
         "runtime_resource_loader::load(",
         "runtime_resource_loader::other(",
@@ -31,38 +47,33 @@ const RENDER_MUTATIONS: &[(&str, &str, &str)] = &[
 
 const LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
-        "let snapshot = ResourceBytes::snapshot(path)?;",
-        "let snapshot = ResourceBytes::snapshot(other)?;",
-        "resource-loader:source",
-    ),
-    (
-        "ResourceSource::File { snapshot, text }",
-        "ResourceSource::File { snapshot: other, text }",
-        "resource-loader:source",
-    ),
-    (
-        "Some(snapshot.digest())",
-        "Some(other.digest())",
-        "resource-loader:accessors",
-    ),
-    (
-        "crate::resource_bytes::ResourceBytes::read_text(path)",
-        "crate::resource_bytes::ResourceBytes::read_text(other)",
-        "resource-loader:external-read",
-    ),
-    (
         "RuntimeAsset::mermaid()",
         "RuntimeAsset::drawio()",
         "mermaid-resource-route:bundled",
     ),
     (
-        "Self::read_file(path).map(Cow::Owned)",
-        "Self::read_file(other).map(Cow::Owned)",
-        "resource-loader:external-role",
+        "Some(BundledResource::Mermaid) => RuntimeAsset::mermaid()",
+        "Some(BundledResource::Drawio) => RuntimeAsset::mermaid()",
+        "mermaid-resource-route:bundled",
     ),
 ];
 
 const BACKEND_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "Err(error) => return (error, None),",
+        "Err(error) => return (other, None),",
+        "mermaid-resource-backend:read",
+    ),
+    (
+        "Ok(resource) => resource,",
+        "Ok(resource) => other,",
+        "mermaid-resource-backend:read",
+    ),
+    (
+        "self.bundled.then_some(BundledResource::Mermaid)",
+        "self.bundled.then_some(BundledResource::Drawio)",
+        "mermaid-resource-backend:reader",
+    ),
     (
         "self.render_empty(&block, &preset)",
         "self.render_empty(&other, &preset)",
@@ -151,6 +162,7 @@ fn resource_route_rejects_loader_and_snapshot_drift() -> Result<(), Box<dyn std:
     let fixture = Fixture::copy_mermaid_classic_inputs(INPUTS)?;
     mermaid_classic_scripts::inspect_root(fixture.root())?;
     reject_mutations(&fixture, INPUTS[5], RENDER_MUTATIONS)?;
+    reject_mutations(&fixture, INPUTS[6], SHARED_RESOURCE_LOADER_MUTATIONS)?;
     reject_mutations(&fixture, INPUTS[6], LOADER_MUTATIONS)?;
     reject_mutations(&fixture, INPUTS[7], BACKEND_MUTATIONS)?;
     reject_mutations(&fixture, INPUTS[8], INSTANCE_MUTATIONS)?;

@@ -1,25 +1,21 @@
+use super::shared_resource_loader_mutations::SHARED_RESOURCE_LOADER_MUTATIONS;
 use super::*;
 
-const RESOURCE_LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
-    (
-        "crate::resource_bytes::ResourceBytes::read_text(path)",
-        "crate::resource_bytes::ResourceBytes::read_text(other)",
-        "resource-loader:external-read",
-    ),
-    (
-        "let snapshot = ResourceBytes::snapshot(path)?;",
-        "let snapshot = ResourceBytes::snapshot(other)?;",
-        "resource-loader:source",
-    ),
+const MATHJAX_RESOURCE_LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
         "diagram_runtime/generated/mathjax-runtime.min.js",
         "other.js",
         "resource-loader:mathjax-source",
     ),
     (
-        "None => return Self::read_file(path).map(Cow::Owned)",
-        "None => return Self::read_file(other).map(Cow::Owned)",
-        "resource-loader:external-role",
+        "Some(BundledResource::MathJax) => {",
+        "Some(BundledResource::Drawio) => {",
+        "resource-loader:mathjax-role",
+    ),
+    (
+        "return Ok(Cow::Borrowed(include_str!(",
+        "return Ok(Cow::Owned(include_str!(",
+        "resource-loader:mathjax-source",
     ),
 ];
 
@@ -27,7 +23,8 @@ const RESOURCE_LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
 fn mathjax_loader_rejects_changed_source_and_digest_binding()
 -> Result<(), Box<dyn std::error::Error>> {
     let fixture = mathjax_fixture()?;
-    fixture.reject_unique_mutations(RUST_INPUTS[9], RESOURCE_LOADER_MUTATIONS)
+    fixture.reject_unique_mutations(RUST_INPUTS[9], SHARED_RESOURCE_LOADER_MUTATIONS)?;
+    fixture.reject_unique_mutations(RUST_INPUTS[9], MATHJAX_RESOURCE_LOADER_MUTATIONS)
 }
 
 const RESOURCE_BYTES_MUTATIONS: &[(&str, &str, &str)] = &[

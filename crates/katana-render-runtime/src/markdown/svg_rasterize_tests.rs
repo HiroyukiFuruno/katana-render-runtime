@@ -69,6 +69,34 @@ fn rasterize_svg_renders_distinct_japanese_glyphs_with_system_font_fallback() ->
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn html_svg_keeps_both_lines_of_authored_middle_baseline_text() -> Result<(), String> {
+    const WIDTH: usize = 96;
+    const HEIGHT: u32 = 64;
+    let svg = concat!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="96" height="64">"#,
+        r#"<text x="12" y="20" font-family="Noto Sans" font-size="14" dominant-baseline="middle">"#,
+        r#"<tspan x="12" dy="0">AB</tspan><tspan x="12" dy="24">CD</tspan>"#,
+        "</text></svg>",
+    );
+    let options = html_rasterizer_options(svg);
+    let tree = usvg::Tree::from_str(svg, &options).map_err(|error| error.to_string())?;
+    assert!(super::html_glyph::has_nested_middle_candidate(&tree));
+
+    let image = SvgRasterizeOps::rasterize_html_svg(svg, 1.0).map_err(|error| error.to_string())?;
+    assert_eq!((image.width as usize, image.height), (WIDTH, HEIGHT));
+    let rows = image
+        .rgba
+        .as_chunks::<RGBA_CHANNELS>()
+        .0
+        .chunks_exact(WIDTH);
+    let row_has_ink = |pixels: &[[u8; RGBA_CHANNELS]]| pixels.iter().any(|pixel| pixel[3] != 0);
+    assert!(rows.clone().take(32).any(row_has_ink));
+    assert!(rows.skip(32).any(row_has_ink));
+    Ok(())
+}
+
 #[test]
 fn html_text_measurement_uses_the_same_shaping_as_rasterization() -> Result<(), String> {
     let family = "Noto Sans";

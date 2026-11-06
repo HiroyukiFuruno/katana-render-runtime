@@ -28,6 +28,9 @@ mod consumer_tests;
 #[path = "bundle_execution_tests.rs"]
 mod bundle_execution_tests;
 
+#[path = "shared_resource_loader_mutations_tests.rs"]
+pub(super) mod shared_resource_loader_mutations;
+
 #[path = "input_source_tests.rs"]
 mod input_source_tests;
 

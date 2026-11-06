@@ -96,28 +96,54 @@ pub(super) fn replace_legacy_resolver(
     Ok(())
 }
 
+const LOADED_RESOLVER_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "let env_name = Self::runtime_env_name(kind);",
+        "let env_name = Self::runtime_env_name(other);",
+        "runtime-path-resolver:loaded-env",
+    ),
+    (
+        "let env_value = if runtime_path.is_none() {",
+        "let env_value = if runtime_path.is_some() {",
+        "runtime-path-resolver:loaded-env",
+    ),
+    (
+        "None => Self::resolve_selected_path(kind, env_value, plantuml_cache_dir)?,",
+        "None => Self::resolve_selected_path(kind, other, plantuml_cache_dir)?,",
+        "runtime-path-resolver:loaded-path",
+    ),
+    (
+        "Self::make_renderer(kind, &path, bundled)",
+        "Self::make_renderer(kind, &other, bundled)",
+        "runtime-path-resolver:loaded-renderer",
+    ),
+    (
+        "Ok((path, renderer))",
+        "Ok((renderer, path))",
+        "runtime-path-resolver:loaded-result",
+    ),
+    (
+        "DiagramKind::MathJax => Some(\"MATHJAX_JS\")",
+        "DiagramKind::MathJax => Some(\"WRONG_JS\")",
+        "runtime-path-resolver:loaded-env",
+    ),
+    (
+        "runtime_path.is_none() && env_name.is_some() && env_value.is_none()",
+        "runtime_path.is_none() && env_name.is_some() && env_value.is_some()",
+        "runtime-path-resolver:loaded-origin",
+    ),
+    (
+        "MathJaxRenderer::with_bundled_runtime_path(path)",
+        "MathJaxRenderer::with_runtime_path(path)",
+        "runtime-path-resolver:loaded-renderer",
+    ),
+];
+
 pub(super) fn reject_loaded_mutations(fixture: &Fixture) -> Result<(), Box<dyn std::error::Error>> {
     fixture.reject_unique_mutations(
         super::RUST_INPUTS[super::MATHJAX_RUNTIME_PATH_RESOLVER_INDEX],
-        &[
-            (
-                "DiagramKind::MathJax => Some(\"MATHJAX_JS\")",
-                "DiagramKind::MathJax => Some(\"WRONG_JS\")",
-                "runtime-path-resolver:loaded-env",
-            ),
-            (
-                "runtime_path.is_none() && env_name.is_some() && env_value.is_none()",
-                "runtime_path.is_none() && env_name.is_some() && env_value.is_some()",
-                "runtime-path-resolver:loaded-origin",
-            ),
-            (
-                "MathJaxRenderer::with_bundled_runtime_path(path)",
-                "MathJaxRenderer::with_runtime_path(path)",
-                "runtime-path-resolver:loaded-renderer",
-            ),
-        ],
-    )?;
-    Ok(())
+        LOADED_RESOLVER_MUTATIONS,
+    )
 }
 
 pub(super) fn reject_non_match_dispatch_receiver(
