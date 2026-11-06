@@ -34,6 +34,16 @@ const RENDER_MUTATIONS: &[(&str, &str, &str)] = &[
         "mermaid-resource-route:cache-digest",
     ),
     (
+        "cache_file.set_extension(format!(\"{digest}.{}\", mode.mermaid_cache_extension()));",
+        "other.set_extension(format!(\"{digest}.{}\", mode.mermaid_cache_extension()));",
+        "mermaid-resource-route:cache-digest",
+    ),
+    (
+        "Self::error(block, format!(\"Failed to read Mermaid.js bundle: {error}\"))",
+        "Other::error(block, format!(\"Failed to read Mermaid.js bundle: {error}\"))",
+        "mermaid-resource-route:load",
+    ),
+    (
         "bundle.text()",
         "other.text()",
         "mermaid-resource-route:render",
@@ -87,6 +97,16 @@ const BACKEND_MUTATIONS: &[(&str, &str, &str)] = &[
     (
         "self.render_block(input)",
         "self.render_block(other)",
+        "mermaid-resource-backend:entry",
+    ),
+    (
+        "let (result, digest) = self.render_block(input);",
+        "let (result, other) = self.render_block(input);",
+        "mermaid-resource-backend:entry",
+    ),
+    (
+        ".map(|output| RenderOutputFactory::bind_resource(output, digest.as_deref()))",
+        ".map(|other| RenderOutputFactory::bind_resource(output, digest.as_deref()))",
         "mermaid-resource-backend:entry",
     ),
     (

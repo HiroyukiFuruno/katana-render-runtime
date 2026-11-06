@@ -97,20 +97,23 @@ fn existing_nonzero_first_dy_lane_keeps_its_previous_admission() -> Result<(), S
 #[cfg(target_os = "macos")]
 #[test]
 fn additional_lane_rejects_resolved_fallback_faces() -> Result<(), String> {
-    let tree = file_fixture(
+    for body in [
         "<tspan x='0' dy='0'>AB動物</tspan><tspan x='0' dy='16.8'>CD</tspan>",
-        "",
-    )?;
-    let text = text(&tree)?;
-    assert_eq!(text.chunks().len(), MULTILINE_CHUNK_COUNT);
-    let faces = text
-        .layouted()
-        .iter()
-        .flat_map(|span| &span.positioned_glyphs)
-        .map(|glyph| glyph.font)
-        .collect::<std::collections::HashSet<_>>();
-    assert!(faces.len() > 1);
-    assert!(!additional_middle_layout_supported(text));
+        "<tspan x='0' dy='0'>AB</tspan><tspan x='0' dy='16.8'>CD動物</tspan>",
+        "<tspan x='0' dy='0'>動物AB</tspan><tspan x='0' dy='16.8'>CD</tspan>",
+    ] {
+        let tree = file_fixture(body, "")?;
+        let text = text(&tree)?;
+        assert_eq!(text.chunks().len(), MULTILINE_CHUNK_COUNT);
+        let faces = text
+            .layouted()
+            .iter()
+            .flat_map(|span| &span.positioned_glyphs)
+            .map(|glyph| glyph.font)
+            .collect::<std::collections::HashSet<_>>();
+        assert!(faces.len() > 1, "fixture must use a fallback face: {body}");
+        assert!(!additional_middle_layout_supported(text), "{body}");
+    }
     Ok(())
 }
 

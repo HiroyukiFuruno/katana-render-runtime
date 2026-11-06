@@ -210,19 +210,24 @@ fn real_fallback_faces_are_not_grouped() -> Result<(), String> {
     let font = FontShape::new(TEST_FONT_SIZE, TEST_FONT_WEIGHT, false);
     let base = matching_font_face(&database, "Noto Sans", TEST_FONT_WEIGHT, false)
         .ok_or("Noto face missing")?;
-    let runs = resolved_font_runs(&database, base, "Noto Sans", "A日", TEST_FONT_WEIGHT, false);
-    assert_eq!(
-        runs.len(),
-        2,
-        "fixture must resolve distinct physical faces"
-    );
-    assert_ne!(runs[0].0, runs[1].0);
-    let fragments = vec!["A".to_owned(), "日".to_owned()];
-    assert!(
-        layout_in_database(&database, "A日", &fragments, "Noto Sans", font)
-            .map_err(|e| format!("{e:?}"))?
-            .is_none()
-    );
+    for parts in [&["A", "日"][..], &["日", "A"][..], &["A", "日", "B"][..]] {
+        let fragments: Vec<String> = parts.iter().map(|part| (*part).to_owned()).collect();
+        let text = fragments.concat();
+        let runs = resolved_font_runs(&database, base, "Noto Sans", &text, TEST_FONT_WEIGHT, false);
+        assert_eq!(runs.len(), parts.len(), "fallback runs for {text}");
+        assert_eq!(
+            runs.iter().map(|(_, run)| run.as_str()).collect::<String>(),
+            text
+        );
+        for pair in runs.windows(2) {
+            assert_ne!(pair[0].0, pair[1].0, "adjacent runs share a face: {text}");
+        }
+        assert!(
+            layout_in_database(&database, &text, &fragments, "Noto Sans", font)
+                .map_err(|e| format!("{e:?}"))?
+                .is_none()
+        );
+    }
     Ok(())
 }
 

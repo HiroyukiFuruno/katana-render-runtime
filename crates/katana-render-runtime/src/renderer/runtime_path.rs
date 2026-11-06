@@ -141,9 +141,13 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let kind = DiagramKind::PlantUml;
         let cache_dir = PathBuf::from("/tmp/krr-api-cache");
-        let resolved =
-            RuntimePathResolver::resolve_with_plantuml_cache_dir(kind, None, Some(cache_dir))?;
+        let resolved = RuntimePathResolver::resolve_with_plantuml_cache_dir(
+            kind,
+            None,
+            Some(cache_dir.clone()),
+        )?;
 
+        assert!(resolved.starts_with(cache_dir));
         assert!(resolved.to_string_lossy().contains(PLANTUML_JAR_VERSION));
         assert!(resolved.ends_with("plantuml.jar"));
         Ok(())
@@ -154,6 +158,34 @@ mod tests {
         let resolved = RuntimePathResolver::resolve(DiagramKind::PlantUml, None)?;
 
         assert!(resolved.ends_with("plantuml.jar"));
+        Ok(())
+    }
+
+    #[test]
+    fn drawio_runtime_override_selects_existing_file() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let runtime = temp.path().join("drawio.js");
+        std::fs::write(&runtime, b"fixture runtime")?;
+
+        let resolved = RuntimePathResolver::resolve_selected_path(
+            DiagramKind::Drawio,
+            Some(runtime.as_os_str().to_os_string()),
+            None,
+        )?;
+
+        assert_eq!(resolved, runtime);
+        assert!(resolved.is_file());
+        Ok(())
+    }
+
+    #[test]
+    fn mathjax_without_override_selects_bundled_runtime() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let resolved =
+            RuntimePathResolver::resolve_selected_path(DiagramKind::MathJax, None, None)?;
+
+        assert!(resolved.ends_with("generated/mathjax-runtime.min.js"));
+        assert!(resolved.is_file());
         Ok(())
     }
 }

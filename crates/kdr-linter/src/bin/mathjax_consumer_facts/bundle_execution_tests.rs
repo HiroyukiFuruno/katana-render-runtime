@@ -113,6 +113,31 @@ const RESOURCE_BYTES_MUTATIONS: &[(&str, &str, &str)] = &[
         "Ok(Arc::clone(other))",
         "resource-loader:accessors",
     ),
+    (
+        "self.digest.get_or_init(|| {",
+        "self.digest.get_or_init(|other| {",
+        "resource-loader:accessors",
+    ),
+    (
+        "stream did not contain valid UTF-8",
+        "stream contained invalid text",
+        "resource-loader:bytes-text",
+    ),
+    (
+        "ResourceContent::Binary(bytes) => bytes,",
+        "ResourceContent::Binary(bytes) => other,",
+        "resource-loader:accessors",
+    ),
+    (
+        "ResourceContent::Text(text) => Ok(text.as_str()),",
+        "ResourceContent::Text(text) => Ok(other.as_str()),",
+        "resource-loader:accessors",
+    ),
+    (
+        "Err(error) => ResourceContent::Binary(error.into_bytes()),",
+        "Err(error) => ResourceContent::Binary(other.into_bytes()),",
+        "resource-loader:content",
+    ),
 ];
 
 #[test]
