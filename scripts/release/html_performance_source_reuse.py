@@ -108,7 +108,9 @@ def validation_cohort_change(path: str, old: tuple[str, int] | None,
         latest_reviewed = ("37c6a3b87c0d5367d2144b8850f9cd7b97294e92fe32886fbb408768033d3ad2", 37269)
         budget_predecessor = ("0bde8075042a47d5601044e860d997f49e8aaf85a8b67a1c6ea862e37df90844", 40090)
         format_predecessor = ("10225a74072a6d30b58ca01d3a6e93f0797d75bc1b700b963c725bc4192a8384", 41784)
-        history = (intermediate, reviewed, retained, latest_reviewed, budget_predecessor, format_predecessor)
+        promotion_predecessor = ("4a57d835945ea1b095b039fa565f80fbc01ee7e5d231bad1c7c560c53d94d6b0", 44350)
+        history = (intermediate, reviewed, retained, latest_reviewed, budget_predecessor,
+                   format_predecessor, promotion_predecessor)
         if old in history:
             return (new == live or new in history[history.index(old) + 1:]) and old_mode == new_mode == "100644"
         prior = ("7d75f7a2642103908ebaaf24ccffc175b0ff61e8bbb020fea9f9b0d0e4648dfe", 24917)
@@ -211,6 +213,23 @@ def validation_cohort_change(path: str, old: tuple[str, int] | None,
     if (format_pair is not None and (old in format_pair[0]
             or metadata_pair is not None and old in metadata_pair[0]) and new == format_pair[1]):
         return old_mode == new_mode == "100644"
+    promotion_changes = {
+        "scripts/release/html_performance_promotion.py": (
+            ("8aa8615182f51bcdf53ceecf2301579d4222794c0102298a26c82a92cdc8ed6c", 18397),
+            ("0459e7f4f51768f98149e6b47fa04d5a859f663a8d18e584f505c83aa6b0d4ef", 18952)),
+        "scripts/release/html_performance_promotion_test.py": (
+            ("3407e354b940fabc6288c3c21c034381358e91d14497519fd282e4dbc79b5b37", 13310),
+            ("ccf04c8bb03a673e5cd688cfac9f195afc64af1d5b8c078f2228157f128ee0eb", 15430)),
+    }
+    promotion_pair = promotion_changes.get(path)
+    if promotion_pair is not None and (old, new) == promotion_pair:
+        return old_mode == new_mode == "100644"
+    if (path == "scripts/release/html_performance_source_reuse_test.py"
+            and new == ("994934a37600f9b902eb03a8093a02c370b3abe622aa56ea5b3ec8f48b6a66e3", 34393)
+            and (format_pair is not None and (old in format_pair[0] or old == format_pair[1])
+                 or metadata_pair is not None and (old in metadata_pair[0] or old == metadata_pair[1])
+                 or old == budget_targets[path])):
+        return old_mode == new_mode == "100644"
     if path in fact_cache_changes and (old, new) == fact_cache_changes[path]:
         return old_mode == new_mode == "100644"
     if path == "scripts/release/html_performance_source_reuse_test.py":
@@ -293,7 +312,8 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
                    "e11014eb370b864d812928235c7b033fca37acb8f2e0d8341bfd86c55c2672b2",
                    "37c6a3b87c0d5367d2144b8850f9cd7b97294e92fe32886fbb408768033d3ad2",
                    "0bde8075042a47d5601044e860d997f49e8aaf85a8b67a1c6ea862e37df90844",
-                   "10225a74072a6d30b58ca01d3a6e93f0797d75bc1b700b963c725bc4192a8384")
+                   "10225a74072a6d30b58ca01d3a6e93f0797d75bc1b700b963c725bc4192a8384",
+                   "4a57d835945ea1b095b039fa565f80fbc01ee7e5d231bad1c7c560c53d94d6b0")
         if old_sha in history:
             return current == Path(__file__).read_bytes() or current_sha in history[history.index(old_sha) + 1:]
         if old_sha != "847b5541ecc81d533eaf510e1675b7a2b667853a7dc8793f34387470d9dce426":
@@ -393,7 +413,8 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
                        "8dcddecb1bbb303590ba7ead09c870c1424cfdaf46e93ac2c631dddae1564931",
                        "0a4069d980a508ff27e1b9853db092ca4dd8fe5e3a3b90c9c029bd550130f6d9",
                        "42fe5276c8fe9f36066218e4859942308141de39dfb0e6428703619787ff40e6",
-                       "f07cc35c9e42f2c711e8e4a43dbcf1c9770124728d1b76338b6449cd7aefb147"})),
+                       "f07cc35c9e42f2c711e8e4a43dbcf1c9770124728d1b76338b6449cd7aefb147",
+                       "994934a37600f9b902eb03a8093a02c370b3abe622aa56ea5b3ec8f48b6a66e3"})),
         "scripts/release/html_performance_epoch_reuse.py": (
             "33a05103fc5100c7eb2e9d10368785c8ab20e6f8308ddc53f0ae95f63c573f1c",
             frozenset({"3f50599d284dbe593bb9a1cf02d0fdd633647eb61a3f6be7867b8308d72de3c7",

@@ -183,6 +183,7 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, 
             reuse_request: Path | None = None) -> str:
     """固定済み候補を再検証し、改善時だけ履歴へ新しい基準を追加する。"""
     root = root.resolve(strict=True)
+    execution_environment = dict(os.environ)
     runtime_identity = _runtime_identity(root)
     directory = directory.resolve(strict=True)
     gate.require(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", run_id) is not None,
@@ -209,6 +210,7 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, 
     request_sha = gate.sha256(reuse_request) if reuse_request is not None else None
     eligibility = (_verified_reuse(reuse_request, root, directory, manifest_sha, request_sha)
                    if reuse_request is not None and request_sha is not None else None)
+    gate.require(dict(os.environ) == execution_environment, "promotion environment changed before verification")
     evidence_directory.mkdir(mode=0o700, parents=False, exist_ok=False)
     evidence_directory.chmod(0o700)
     gate.require(not evidence_directory.is_symlink()
@@ -223,11 +225,13 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, 
     with (evidence_directory / "command.json").open("x", encoding="utf8") as command:
         json.dump(argv, command)
     with stdout_path.open("xb") as stdout, stderr_path.open("xb") as stderr:
-        result = subprocess.run(argv, cwd=root, stdout=stdout, stderr=stderr, check=False)
+        result = subprocess.run(argv, cwd=root, stdout=stdout, stderr=stderr, check=False,
+                                env=execution_environment.copy())
     completed_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     with (evidence_directory / "exit.json").open("x", encoding="utf8") as exit_file:
         json.dump({"exitCode": result.returncode, "completedAtUtc": completed_at}, exit_file)
     gate.require(result.returncode == 0, "formal performance verification failed")
+    gate.require(dict(os.environ) == execution_environment, "promotion environment changed during verification")
     gate.require(gate.sha256(directory / "bundle.json") == manifest_sha,
                  "promotion bundle changed during verification")
     verified = gate.read_json(stdout_path)
@@ -236,6 +240,7 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, 
         verified = gate._object(verified.get("measuredResult"), "reused measured result")
     bundle = gate.Bundle(directory)
     improvement, phases = _measure(bundle, verified)
+    gate.require(dict(os.environ) == execution_environment, "promotion environment changed during comparison")
     gate.require(_runtime_identity(root) == runtime_identity,
                  "promotion runtime identity changed during comparison")
     if not improvement:
@@ -267,6 +272,7 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, 
     if reuse_request is not None and request_sha is not None:
         gate.require(_verified_reuse(reuse_request, root, directory, manifest_sha, request_sha) == eligibility,
                      "performance reuse changed before update")
+    gate.require(dict(os.environ) == execution_environment, "promotion environment changed before update")
     _atomic_history_update(root, history_path, before, after, head)
     return gate._text(record["id"], "new reference id")
 

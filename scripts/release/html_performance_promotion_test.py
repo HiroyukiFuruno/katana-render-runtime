@@ -104,7 +104,8 @@ class PromotionAtomicityTest(unittest.TestCase):
         candidate = copy.deepcopy(first)
         candidate["id"] = "new-record"
         head = "a" * 40
-        for mode in ("accepted", "unchanged", "runtime-changed", "accepted-reuse", "unchanged-reuse"):
+        for mode in ("accepted", "unchanged", "runtime-changed", "environment-changed", "child-failed",
+                     "environment-comparison", "environment-final-reuse", "accepted-reuse", "unchanged-reuse"):
             with self.subTest(mode=mode), TemporaryDirectory() as directory:
                 root = Path(directory).resolve()
                 target = root / "docs/performance/html-performance-history.json"
@@ -123,24 +124,44 @@ class PromotionAtomicityTest(unittest.TestCase):
                 def fake_git(_root: Path, *args: str) -> str:
                     return head + "\n" if args[0] == "rev-parse" else original.decode()
 
-                def fake_run(argv: list[str], *, stdout: IO[bytes],
+                def fake_run(argv: list[str], *, stdout: IO[bytes], stderr: IO[bytes],
                              selected_mode: str = mode, selected_request: Path = request,
                              selected_result: dict[str, object] = reused,
                              **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+                    self.assertTrue(_kwargs.get("env") == dict(os.environ))
                     if selected_mode.endswith("-reuse"):
                         self.assertEqual(argv[-2:], ["--reuse-request", str(selected_request)])
                     stdout.write(json.dumps(selected_result if selected_mode.endswith("-reuse") else {}).encode() + b"\n")
-                    return subprocess.CompletedProcess([], 0)
+                    if selected_mode == "environment-changed":
+                        os.environ["KRR_PROMOTION_TEST_MUTATION"] = "changed"
+                    if selected_mode == "child-failed":
+                        stderr.write(b"dummy-private-verifier-marker\n")
+                    return subprocess.CompletedProcess([], 7 if selected_mode == "child-failed" else 0)
 
-                with (patch.object(gate, "git", side_effect=fake_git),
+                def fake_measure(*_args: object, selected_mode: str = mode) -> tuple[bool, gate.JsonObject]:
+                    if selected_mode == "environment-comparison":
+                        os.environ["KRR_PROMOTION_TEST_MUTATION"] = "changed"
+                    return not selected_mode.startswith("unchanged"), {}
+
+                reuse_calls = [0]
+                def fake_reuse(*_args: object, selected_mode: str = mode,
+                               calls: list[int] = reuse_calls,
+                               result: dict[str, object] = reused, **_kwargs: object) -> dict[str, object]:
+                    calls[0] += 1
+                    if selected_mode == "environment-final-reuse" and calls[0] == 2:
+                        os.environ["KRR_PROMOTION_TEST_MUTATION"] = "changed"
+                    return result
+
+                with (patch.dict(os.environ, {}, clear=False),
+                      patch.object(gate, "git", side_effect=fake_git),
                       patch.object(promotion, "_runtime_identity",
                                    side_effect=["runtime", "changed" if mode == "runtime-changed" else "runtime",
                                                 "runtime"]),
                       patch.object(promotion, "_schema_validate"),
-                      patch.object(reuse, "verify_reuse_request", return_value=reused) as verify_reuse,
+                      patch.object(reuse, "verify_reuse_request", side_effect=fake_reuse) as verify_reuse,
                       patch.object(subprocess, "run", side_effect=fake_run),
                       patch.object(gate, "Bundle", return_value=bundle),
-                      patch.object(promotion, "_measure", return_value=(not mode.startswith("unchanged"), {})),
+                      patch.object(promotion, "_measure", side_effect=fake_measure),
                       patch.object(promotion, "_record", return_value=candidate)):
                     request_arg = request if mode.endswith("-reuse") else None
                     if mode.startswith("accepted"):
@@ -153,10 +174,18 @@ class PromotionAtomicityTest(unittest.TestCase):
                             self.assertEqual(verify_reuse.call_count, 2)
                             self.assertEqual(verify_reuse.call_args.kwargs["expected_measured_dir"], bundle_path)
                     else:
-                        reason = "runtime identity changed" if mode == "runtime-changed" else "improvement"
-                        with self.assertRaisesRegex(ValueError, reason):
+                        reason = ("runtime identity changed" if mode == "runtime-changed" else
+                                  "environment changed" if mode.startswith("environment-") else
+                                  "formal performance verification failed" if mode == "child-failed" else "improvement")
+                        with self.assertRaisesRegex(ValueError, reason) as caught:
                             promotion.promote(bundle_path, root, root / "tmp/proof", "run", reuse_request=request_arg)
                         self.assertEqual(target.read_bytes(), original)
+                        if mode == "child-failed":
+                            proof = root / "tmp/proof"
+                            self.assertNotIn("dummy-private-verifier-marker", str(caught.exception))
+                            self.assertEqual((proof / "verifier.stderr").read_bytes(), b"dummy-private-verifier-marker\n")
+                            self.assertEqual(gate.read_json(proof / "exit.json")["exitCode"], 7)
+                            self.assertEqual(proof.stat().st_mode & 0o777, 0o700)
 
     def test_atomic_update_preserves_history_on_conflict_and_releases_lock(self) -> None:
         with TemporaryDirectory() as directory:

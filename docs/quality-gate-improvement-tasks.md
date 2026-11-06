@@ -2,6 +2,14 @@
 
 ## 最新の再開地点（2026-11-06）
 
+### R8507時点：HTML性能の現source正式照合と実CASを確認、昇格の環境修正
+
+- [x] R8491の整形/有限認証をe1bc9abdへ通常commitし、R8492標準静的検査と実Moon CAS診断を通過。選択したruntime producerで正常復元、改変の拒否、実再収集、元blob/出力復元を確認（25 steps、復元エラー0）。native cache全経路やcoverage100%の証拠ではない。
+- [x] R8494の現SDK proofは実0、旧計測workerと全bytes同一。R8495は同入力/環境・固定元証跡を既存validatorで厳格照合し、e1bc9abdの84/84正式性能・画像最低92.14438・出力font一致を実0で確認。再測定なし、request SHA `7b774b798bb0dda3c14d288af8690523c6a233dca15e5cc36a1925d76eb4e545`。R8496の既存比較は改善あり、初回表示最大0.389152792秒。最終release HEADの適格性・履歴昇格は別に残る。
+- [/] R8499の昇格は、親検証後に子の実行環境が変わって実1・履歴不変。実probeでmacOSの`XPC_SERVICE_NAME`のみが暗黙継承で変化し、明示copyで全digest一致を確認。子へ親検証時のsnapshotを渡し、途中変化を拒否する。子が非0の場合はprivate原stderr/実exitを保存し、外側の失敗へ環境値を出さない回帰を追加。既存の3段階検証・atomic更新・全閾値・旧pinを維持。旧実Git moduleのR8505期待RED、R8506全関連33件、R8507最終静的/対象2件が成功。失敗時に昇格済みとは扱わない。
+- [/] native cacheの同時ownerは、R8502で実ownerの継続中に第2processが既存root lockで実1拒否。R8501は初回Nextest stageでENOSPC実101、全test/coverage未判定。既存clean後、R8504で未採用R7612のGit query logs14件のみを展開検証付きで可逆整理し、10保持bundle・保護35・現CAS/性能proofの整合を維持。実空き2,909,073,408→5,937,926,144bytes。閾値は引き上げず現sourceの実collectionを再開する。
+- [ ] 残りはnative hit/restore/改変拒否・再収集・failed begin、完全品質ゲート/実装coverage100%・未計測0、最終source proof・比較基準と履歴更新、release inclusion、最終描画、Draft review/個別reply-resolve/Ready/3OS CI/保護merge、公開・Issue close・cleanup。実行可能な残作業を継続する。
+
 ### R8489時点：HTML性能84/84採取、既存CAS診断の静的停止を修正
 
 - [x] 採取単位と有限認証の修正を189281beへ通常commit。R8477は旧36を厳格に再利用して新32を加算（closed68、policy合格、全84正式未判定）。R8480は記録のfsyncで一時的ENOSPC、closed77・policy不合格の原本を保持。R8485で未採用R7819のGit query stdoutと対応transport14件だけを可逆整理し、展開全bytes・modeと8保持bundle/保護35の事後整合を確認。実空き2,047,328,256→4,983,304,192bytes。SDK・画像・私有原本・使用中証跡は変えていない。

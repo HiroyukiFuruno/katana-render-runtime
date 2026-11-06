@@ -18,6 +18,30 @@ def git(root: Path, *args: str) -> str:
 
 
 class SourceReuseTest(unittest.TestCase):
+    def test_promotion_environment_transition_is_exact(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        for name in ("html_performance_promotion.py", "html_performance_promotion_test.py"):
+            path = "scripts/release/" + name
+            new = (root / path).read_bytes()
+            current = (hashlib.sha256(new).hexdigest(), len(new))
+            for head in ("a476765c", "e1bc9abd"):
+                old = subprocess.check_output(["git", "-C", str(root), "show", head + ":" + path])
+                previous = (hashlib.sha256(old).hexdigest(), len(old))
+                mode = git(root, "ls-tree", head, "--", path).split()[0]
+                unknown = (hashlib.sha256(new + b" ").hexdigest(), len(new) + 1)
+                with self.subTest(path=path, head=head):
+                    self.assertTrue(reuse.validation_cohort_change(path, previous, current, mode, "100644"))
+                    self.assertFalse(reuse.validation_cohort_change(path, previous, unknown, mode, "100644"))
+                    self.assertFalse(reuse.validation_cohort_change(path, previous, current, mode, "100755"))
+        for name in ("html_performance_source_reuse.py", "html_performance_source_reuse_test.py"):
+            path = "scripts/release/" + name
+            old = subprocess.check_output(["git", "-C", str(root), "show", "e1bc9abd:" + path])
+            new = (root / path).read_bytes()
+            previous = (hashlib.sha256(old).hexdigest(), len(old))
+            current = (hashlib.sha256(new).hexdigest(), len(new))
+            self.assertTrue(reuse.validation_cohort_change(path, previous, current, "100644", "100644"))
+            self.assertFalse(reuse.validation_cohort_change(path, previous, current, "100644", "100755"))
+
     def test_format_cohort_from_current_sdk_source_is_exact(self) -> None:
         root = Path(__file__).resolve().parents[2]
         head = "a476765c"
