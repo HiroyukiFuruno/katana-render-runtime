@@ -12,6 +12,11 @@ const BACKEND_ROUTE_MUTATIONS: &[(&str, &str, &str)] = &[
         "backend-runtime-path:empty-source",
     ),
     (
+        "return (Err(\"MathJax source is empty\".to_string()), None);",
+        "return (Err(\"MathJax source is empty\".to_string()), Some(other));",
+        "backend-runtime-path:empty-source",
+    ),
+    (
         "Ok(resource) => resource,",
         "Ok(resource) => other,",
         "backend-runtime-path:resource-errors",
@@ -27,6 +32,11 @@ const BACKEND_ROUTE_MUTATIONS: &[(&str, &str, &str)] = &[
         "backend-runtime-path:resource-load",
     ),
     (
+        ".map_err(|error| self.resource_error(error))",
+        ".map_err(|other| self.resource_error(error))",
+        "backend-runtime-path:resource-load",
+    ),
+    (
         "if error.kind() == std::io::ErrorKind::NotFound {",
         "if error.kind() != std::io::ErrorKind::NotFound {",
         "backend-runtime-path:resource-errors",
@@ -37,8 +47,23 @@ const BACKEND_ROUTE_MUTATIONS: &[(&str, &str, &str)] = &[
         "backend-runtime-path:resource-errors",
     ),
     (
+        "MathJax runtime asset could not be read: {}: {error}",
+        "MathJax runtime asset could not be loaded: {}: {error}",
+        "backend-runtime-path:resource-errors",
+    ),
+    (
+        "let (result, digest) = self.render_block(input);",
+        "let (result, other) = self.render_block(input);",
+        "backend-runtime-path:render-dispatch",
+    ),
+    (
         ".map(|output| RenderOutputFactory::bind_resource(output, digest.as_deref()))",
         ".map(|output| RenderOutputFactory::bind_resource(output, other.as_deref()))",
+        "backend-runtime-path:render-arm-flow",
+    ),
+    (
+        ".map(|output| RenderOutputFactory::bind_resource(output, digest.as_deref()))",
+        ".map(|other| RenderOutputFactory::bind_resource(output, digest.as_deref()))",
         "backend-runtime-path:render-arm-flow",
     ),
     (
