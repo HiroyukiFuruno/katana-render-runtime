@@ -107,6 +107,44 @@ fn explicit_inherit_resolves_ancestor_direct_parent_and_attribute_defaults() -> 
     Ok(())
 }
 
+#[rstest::rstest]
+#[case::expands_declared_properties(
+    r#"<svg xmlns="http://www.w3.org/2000/svg">
+      <style>.label { font: italic small-caps bold condensed 16px serif; }</style>
+      <g id="target" class="label"/></svg>"#,
+    &[
+        (AId::FontStyle, "italic"),
+        (AId::FontVariant, "small-caps"),
+        (AId::FontWeight, "bold"),
+        (AId::FontStretch, "condensed"),
+        (AId::FontSize, "16px"),
+        (AId::FontFamily, "serif"),
+        (AId::LineHeight, "normal"),
+    ],
+)]
+#[case::resets_longhands_except_important_declarations(
+    r#"<svg xmlns="http://www.w3.org/2000/svg">
+      <g id="target" style="font-style: oblique; font-weight: 900 !important; font: 12px sans-serif"/>
+      </svg>"#,
+    &[
+        (AId::FontStyle, "normal"),
+        (AId::FontWeight, "900"),
+        (AId::FontStretch, "normal"),
+        (AId::FontSize, "12px"),
+        (AId::FontFamily, "sans-serif"),
+    ],
+)]
+fn font_shorthand_applies_longhand_values(
+    #[case] source: &str,
+    #[case] expected_attributes: &[(AId, &str)],
+) -> Result<(), String> {
+    let document = parse_document(source, None)?;
+    for &(attribute, expected) in expected_attributes {
+        assert_eq!(raw_attribute(&document, "target", attribute)?, expected);
+    }
+    Ok(())
+}
+
 #[test]
 fn recursive_pattern_child_fill_is_neutralized() -> Result<(), String> {
     assert_attribute_value(

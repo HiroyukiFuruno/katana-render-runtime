@@ -77,13 +77,62 @@ fn marker_first_stroke_then_fill_preserves_the_path_paint_order() -> Result<(), 
     Ok(())
 }
 
-#[test]
-fn root_height_alone_resolves_width_from_viewbox_aspect_ratio() -> Result<(), String> {
-    let source = r#"<svg xmlns="http://www.w3.org/2000/svg" height="25" viewBox="0 0 200 100"><rect width="200" height="100"/></svg>"#;
-    let tree = usvg::Tree::from_str(source, &usvg::Options::default())
+#[rstest]
+#[case::height_only(r#"height="25" viewBox="0 0 200 100""#, (50.0, 25.0))]
+#[case::width_only(r#"width="50" viewBox="0 0 200 100""#, (50.0, 25.0))]
+#[case::percentages(r#"width="50%" height="25%" viewBox="10 20 200 100""#, (100.0, 25.0))]
+fn root_dimensions_resolve_against_viewbox(
+    #[case] attributes: &str,
+    #[case] expected: (f32, f32),
+) -> Result<(), String> {
+    let source = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" {attributes}><rect width="200" height="100"/></svg>"#
+    );
+    let tree = usvg::Tree::from_str(&source, &usvg::Options::default())
         .map_err(|error| error.to_string())?;
-    assert_eq!(tree.size().width(), 50.0);
-    assert_eq!(tree.size().height(), 25.0);
+    assert_eq!((tree.size().width(), tree.size().height()), expected);
+    Ok(())
+}
+
+#[rstest]
+#[case::zero_width("width=\"0\" height=\"10\"")]
+#[case::zero_height("width=\"10\" height=\"0\"")]
+fn root_rejects_nonpositive_explicit_dimensions(#[case] dimensions: &str) {
+    let source = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" {dimensions}><rect width=\"10\" height=\"10\"/></svg>"
+    );
+    assert!(matches!(
+        usvg::Tree::from_str(&source, &usvg::Options::default()),
+        Err(usvg::Error::InvalidSize)
+    ));
+}
+
+#[rstest]
+#[case::solid_color("red", true)]
+#[case::non_color_paint("url(#missing)", false)]
+fn root_background_color_adds_only_a_solid_background_path(
+    #[case] background: &str,
+    #[case] expected: bool,
+) -> Result<(), String> {
+    let source = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\" background-color=\"{background}\"><rect width=\"10\" height=\"10\"/></svg>"
+    );
+    let tree = usvg::Tree::from_str(&source, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    if expected {
+        let [usvg::Node::Group(group)] = tree.root().children() else {
+            return Err("solid root background did not create a wrapper group".to_owned());
+        };
+        let Some(usvg::Node::Path(path)) = group.children().first() else {
+            return Err("solid root background path missing".to_owned());
+        };
+        assert!(matches!(
+            path.fill().map(|fill| fill.paint()),
+            Some(usvg::Paint::Color(color)) if (color.red, color.green, color.blue) == (255, 0, 0)
+        ));
+    } else {
+        assert!(matches!(tree.root().children(), [usvg::Node::Path(_)]));
+    }
     Ok(())
 }
 
