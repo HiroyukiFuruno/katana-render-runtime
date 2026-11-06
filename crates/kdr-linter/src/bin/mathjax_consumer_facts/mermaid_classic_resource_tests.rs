@@ -4,6 +4,21 @@ use super::{Fixture, INPUTS, mermaid_classic_scripts, reject_mutations};
 const RESOURCE_BYTES_INDEX: usize = 9;
 const RENDER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "Err(error) => {\n                return Self::error(block, format!(\"Failed to read Mermaid.js bundle: {error}\"));\n            }",
+        "Err(error) => other,",
+        "mermaid-resource-route:load",
+    ),
+    (
+        "return Self::error(block, format!(\"Failed to read Mermaid.js bundle: {error}\"));",
+        "return other;",
+        "mermaid-resource-route:load",
+    ),
+    (
+        "Self::render_svg_with_bundle(block, bundle.text(), preset, &cache_file)",
+        "other",
+        "mermaid-resource-route:render",
+    ),
+    (
         "Ok(bundle) => bundle,",
         "Ok(bundle) => other,",
         "mermaid-resource-route:load",
@@ -69,6 +84,16 @@ const LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
 ];
 
 const BACKEND_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        ".map(|output| RenderOutputFactory::bind_resource(output, digest.as_deref()))",
+        ".map(other)",
+        "mermaid-resource-backend:entry",
+    ),
+    (
+        ".map(|output| RenderOutputFactory::bind_resource(output, digest.as_deref()))",
+        ".map(|output| output)",
+        "mermaid-resource-backend:entry",
+    ),
     (
         "Err(error) => return (error, None),",
         "Err(error) => return (other, None),",

@@ -1,8 +1,11 @@
 use super::font_file_fixture;
-use super::{FIXTURE_HEIGHT, FIXTURE_WIDTH, HtmlGlyphRasterizer, assert_unsupported};
+use super::{
+    FIXTURE_HEIGHT, FIXTURE_WIDTH, HtmlGlyphRasterizer, assert_unsupported, parse_text,
+    parse_text_content, render_bounds,
+};
 use resvg::usvg::{Node, Options, Tree};
 use std::sync::Arc;
-use tiny_skia::Pixmap;
+use tiny_skia::{Pixmap, Transform};
 
 #[test]
 fn removed_real_font_face_is_reported_unavailable() -> Result<(), Box<dyn std::error::Error>> {
@@ -100,5 +103,68 @@ fn malformed_typeface_is_rejected_without_poisoning_font_manager() -> Result<(),
 
     let valid = skia_safe::Data::new_copy(font_file_fixture::FONT_BYTES);
     assert!(rasterizer.create_backend_face(&valid, 0)?.is_some());
+    Ok(())
+}
+
+#[test]
+fn real_file_glyph_runs_reuse_cached_face_without_changing_pixels() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let fixture = font_file_fixture::create(
+        directory.path().join("font.ttf"),
+        font_file_fixture::FONT_BYTES,
+    )
+    .map_err(|error| error.to_string())?;
+    for content in ["Ag", "VA", "A 9"] {
+        let (tree, count) = parse_text_content(
+            fixture.database.clone(),
+            "Noto Sans",
+            400,
+            false,
+            content,
+            "",
+        )?;
+        assert!(count > 0);
+        let Some(Node::Text(text)) = tree.node_by_id("run") else {
+            return Err("glyph fixture text missing".to_owned());
+        };
+        let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+        assert_cached_glyph_pixels(&rasterizer, text, content)?;
+    }
+    Ok(())
+}
+
+fn assert_cached_glyph_pixels(
+    rasterizer: &HtmlGlyphRasterizer<'_>,
+    text: &resvg::usvg::Text,
+    content: &str,
+) -> Result<(), String> {
+    let mut pixmap =
+        Pixmap::new(FIXTURE_WIDTH, FIXTURE_HEIGHT).ok_or("pixmap allocation failed")?;
+    let first = render_bounds(rasterizer, text, Transform::identity(), &mut pixmap)?;
+    assert!(first.is_some(), "glyphs did not paint: {content}");
+    let pixels = pixmap.data().to_vec();
+    pixmap.fill(tiny_skia::Color::TRANSPARENT);
+    let second = render_bounds(rasterizer, text, Transform::identity(), &mut pixmap)?;
+    assert_eq!(second, first);
+    assert_eq!(pixmap.data(), pixels.as_slice());
+    assert_eq!(rasterizer.faces.borrow().len(), 1);
+    Ok(())
+}
+
+#[test]
+fn binary_font_fallback_renders_real_glyphs_without_partial_paint() -> Result<(), String> {
+    let mut database = resvg::usvg::fontdb::Database::new();
+    database.load_font_data(font_file_fixture::FONT_BYTES.to_vec());
+    let (tree, count) = parse_text(database, "Noto Sans", 400, false)?;
+    assert!(count > 0);
+    let Some(Node::Text(text)) = tree.node_by_id("run") else {
+        return Err("binary glyph fixture missing".to_owned());
+    };
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    let mut pixmap =
+        Pixmap::new(FIXTURE_WIDTH, FIXTURE_HEIGHT).ok_or("pixmap allocation failed")?;
+    assert_unsupported(&rasterizer, text, &mut pixmap)?;
+    resvg::render(&tree, Transform::identity(), &mut pixmap.as_mut());
+    assert!(super::alpha_bounds(&pixmap).is_some());
     Ok(())
 }

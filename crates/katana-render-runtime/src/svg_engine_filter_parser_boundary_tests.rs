@@ -147,6 +147,28 @@ fn turbulence_frequency_preserves_one_or_two_svg_values(
     Ok(())
 }
 
+#[rstest]
+#[case::zero_seed("0", "1")]
+#[case::upper_seed("2147483647", "2147483646")]
+#[case::ordinary_seed("17", "17")]
+fn stitched_turbulence_seed_boundaries_preserve_rendered_pixels(
+    #[case] seed: &str,
+    #[case] normalized_seed: &str,
+) -> Result<(), String> {
+    let render = |seed: &str| {
+        super::fixture(&format!(
+            "<feTurbulence type='fractalNoise' baseFrequency='1' numOctaves='1' seed='{seed}' stitchTiles='stitch'/>",
+        ))
+        .and_then(|tree| super::render(&tree))
+    };
+    let actual = render(seed)?;
+    let expected = render(normalized_seed)?;
+
+    assert_eq!(actual.data(), expected.data());
+    assert!(actual.data().chunks_exact(4).any(|pixel| pixel[3] > 0));
+    Ok(())
+}
+
 fn parse_filter(primitive: &str) -> Result<usvg::Tree, String> {
     let source = format!(
         "<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'><defs><filter id='f' {FILTER_REGION}>{primitive}</filter></defs><rect x='2' y='2' width='8' height='8' filter='url(#f)'/></svg>"

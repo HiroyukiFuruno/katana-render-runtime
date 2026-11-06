@@ -27,6 +27,21 @@ const BACKEND_ROUTE_MUTATIONS: &[(&str, &str, &str)] = &[
         "backend-runtime-path:resource-errors",
     ),
     (
+        "Err(error) => return (Err(error), None),",
+        "Err(error) => return (Err(error), None),\n            _ => other,",
+        "backend-runtime-path:resource-load",
+    ),
+    (
+        "Err(error) => return (Err(error), None),",
+        "Err(error) => other,",
+        "backend-runtime-path:resource-errors",
+    ),
+    (
+        "Err(error) => return (Err(error), None),",
+        "Err(error) => return Err(error),",
+        "backend-runtime-path:resource-errors",
+    ),
+    (
         ".map_err(|error| self.resource_error(error))",
         ".map_err(|error| self.resource_error(other))",
         "backend-runtime-path:resource-load",

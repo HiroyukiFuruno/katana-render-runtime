@@ -11,7 +11,6 @@ pub(super) fn require_resource(block: &syn::Block) -> Result<(), String> {
     };
     if !matches!(dispatch.expr.as_ref(), syn::Expr::MethodCall(value) if value.method == "read_resource"
         && value.args.is_empty() && ident(&value.receiver, "self"))
-        || dispatch.arms.len() != 2
     {
         return Err("backend-runtime-path:resource-load".into());
     }
