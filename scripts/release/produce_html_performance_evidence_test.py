@@ -656,6 +656,65 @@ class CatalogProducerOperationTest(unittest.TestCase):
 
 
 class TransportBundleUnitTests(unittest.TestCase):
+    def test_incomplete_bundle_is_removed_and_source_is_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = root / "source.raw"
+            source.write_bytes(b"original process evidence")
+            pin: typed_producer.FilePin = {"path": str(source), "sha256": gate.sha256(source)}
+            bundle = root / "bundle"
+            with patch.object(producer, "write", side_effect=OSError("manifest write failed")):
+                with self.assertRaisesRegex(OSError, "manifest write failed"):
+                    producer.write_transport_bundle(bundle, "a" * 40, [pin], [])
+            self.assertFalse(bundle.exists())
+            self.assertEqual(source.read_bytes(), b"original process evidence")
+
+            bundle.mkdir()
+            existing = bundle / "existing"
+            existing.touch()
+            with self.assertRaises(FileExistsError):
+                producer.write_transport_bundle(bundle, "a" * 40, [pin], [])
+            self.assertTrue(existing.is_file())
+
+    def test_program_transport_scratch_is_removed_after_success_and_failure(self) -> None:
+        for fail in (False, True):
+            with self.subTest(fail=fail), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                output = root / "output"
+                output.mkdir()
+                name = "scripts/release/example.py"
+                old, current = b"old program\n", b"new program\n"
+                old_record = (hashlib.sha256(old).hexdigest(), len(old))
+                new_record = (hashlib.sha256(current).hexdigest(), len(current))
+                fixed = {name: old_record}
+                checkouts = [("a" * 40, fixed), ("b" * 40, {name: new_record})]
+                refs: list[typed_producer.FilePin] = []
+                scratch_paths: list[Path] = []
+                bundle_path = output / "bundle"
+
+                expected_error = self.assertRaisesRegex(RuntimeError, "transport failure") if fail else nullcontext()
+                blobs = [({name: content}, {name: "100644"}) for content in (old, current)]
+                with patch.object(producer, "_program_transport_blobs", side_effect=blobs), expected_error:
+                    with producer._program_transport_sources(output, root, checkouts, fixed, refs,
+                                                             git_query=None) as sources:
+                        old_logical = str(root / name)
+                        new_logical = str(root / "tmp/html-performance-programs" / new_record[0] / name)
+                        self.assertEqual(set(sources), {old_logical, new_logical})
+                        scratch_paths = list(sources.values())
+                        self.assertTrue(all(path.is_file() and path.is_relative_to(output) for path in scratch_paths))
+                        self.assertEqual(sources[old_logical].read_bytes(), old)
+                        self.assertEqual(sources[new_logical].read_bytes(), current)
+                        self.assertEqual({(pin["path"], pin["sha256"]) for pin in refs},
+                                         {(old_logical, old_record[0]), (new_logical, new_record[0])})
+                        producer.write_transport_bundle(bundle_path, "a" * 40, refs, [], source_paths=sources)
+                        if fail:
+                            raise RuntimeError("transport failure")
+                self.assertTrue(scratch_paths)
+                self.assertTrue(all(not path.exists() for path in scratch_paths))
+                bundle = gate.Bundle(bundle_path)
+                for pin, content in zip(refs, (old, current), strict=True):
+                    self.assertEqual(bundle.file(pin).read_bytes(), content)
+
     def test_program_transport_uses_one_git_batch_for_all_blobs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -4478,6 +4537,36 @@ class MeasurementLifecycleIntegrationTests(unittest.TestCase):
         records = list(self.logs.glob("tool-query-*/lifecycle.json"))
         self.assertEqual(len(records), 1)
         self.assertTrue(gate.read_json(records[0])["groupClosed"])
+
+    def test_immutable_git_batches_reuse_two_alternating_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root, source_path = self.create_git_fixture(Path(temporary))
+            first_oid = gate.git(root, "rev-parse", "HEAD:source.py").strip()
+            source_path.write_text("second source\n")
+            self.commit_git_fixture(root, "second source")
+            second_oid = gate.git(root, "rev-parse", "HEAD:source.py").strip()
+            self.assertNotEqual(first_oid, second_oid)
+            query = typed_producer._make_git_query(self.logs)
+            argv = ("cat-file", "--batch")
+            first_input, second_input = (oid.encode("ascii") + b"\n" for oid in (first_oid, second_oid))
+            first = query(root, argv, first_input, False)
+            second = query(root, argv, second_input, False)
+            self.assertEqual(query(root, argv, first_input, False), first)
+            for payload, object_id, content in ((first, first_oid, b"value = 1\n"),
+                                                (second, second_oid, b"second source\n")):
+                self.assertEqual(payload, f"{object_id} blob {len(content)}\n".encode() + content + b"\n")
+            entries = list(self.logs.glob("tool-query-*"))
+            self.assertEqual(len(entries), 2)
+            for entry in entries:
+                self.assertTrue((entry / "lifecycle.json").is_file())
+                self.assertTrue((entry / "stdout.raw").is_file())
+                self.assertTrue((entry / "stderr.raw").is_file())
+            first_raw = next(entry / "stdout.raw" for entry in entries
+                             if (entry / "stdout.raw").read_bytes() == first)
+            first_raw.write_bytes(b"changed")
+            with self.assertRaisesRegex(ValueError, "cached Git batch identity changed"):
+                query(root, argv, first_input, False)
+            self.assertEqual(len(list(self.logs.glob("tool-query-*"))), 2)
 
     def test_producer_git_query_reads_real_temporary_repository(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

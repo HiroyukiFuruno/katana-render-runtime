@@ -821,6 +821,66 @@ def _program_storage_path(root: Path, name: str, item: tuple[str, int],
     return root / "tmp/html-performance-programs" / item[0] / name
 
 
+@contextmanager
+def _program_transport_sources(
+    output: Path, root: Path, checkout_sources: Sequence[tuple[str, gate.SourceRecords]],
+    program_records: gate.SourceRecords, refs: list[FilePin], *, git_query: gate.GitQuery | None,
+) -> Iterator[dict[str, Path]]:
+    if not checkout_sources:
+        yield {}
+        return
+    # bundleへ渡す物理パスだけを一時領域に置き、論理参照と封緘済みファイルを維持する。
+    with tempfile.TemporaryDirectory(prefix="program-blobs-", dir=output) as directory:
+        program_sources: dict[str, Path] = {}
+        processed: dict[str, gate.SourceRecords] = {}
+        for source_head, records in checkout_sources:
+            if source_head in processed:
+                gate.require(processed[source_head] == records, "program transport source records differ")
+                continue
+            processed[source_head] = records
+            blobs, program_modes = _program_transport_blobs(root, source_head, records, git_query=git_query)
+            gate.require(blobs.keys() == records.keys(), "program transport membership differs")
+            for name, (checksum, size) in records.items():
+                logical = _program_storage_path(root, name, (checksum, size), program_records)
+                blob = blobs[name]
+                gate.require(len(blob) == size and hashlib.sha256(blob).hexdigest() == checksum,
+                             "program transport Git blob differs")
+                physical = Path(directory) / checksum / name
+                mode = 0o755 if program_modes[name] == "100755" else 0o644
+                if not physical.exists():
+                    physical.parent.mkdir(parents=True, exist_ok=True)
+                    with physical.open("xb") as handle:
+                        handle.write(blob)
+                    os.chmod(physical, mode)
+                gate.require(not physical.is_symlink() and gate.sha256(physical) == checksum
+                             and stat.S_IMODE(physical.stat().st_mode) == mode,
+                             "program transport source differs")
+                previous = program_sources.setdefault(str(logical), physical)
+                gate.require(gate.sha256(previous) == checksum, "program transport pin conflicts")
+                refs.append({"path": str(logical), "sha256": checksum})
+            del blobs
+        yield program_sources
+
+
+@contextmanager
+def _transport_output_directory(bundle: Path) -> Iterator[None]:
+    bundle.mkdir()
+    owner = bundle.lstat()
+    try:
+        yield
+    except BaseException as error:
+        try:
+            current = bundle.lstat()
+            gate.require(stat.S_ISDIR(current.st_mode) and (current.st_dev, current.st_ino)
+                         == (owner.st_dev, owner.st_ino), "incomplete transport directory ownership changed")
+            shutil.rmtree(bundle)
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError) as cleanup_error:
+            error.add_note(f"Incomplete transport cleanup failed: {cleanup_error}")
+        raise
+
+
 def write_transport_bundle(bundle: Path, head: str, refs: Sequence[FilePin],
                            attempts: list[dict[str, FilePin]], *,
                            source_paths: Mapping[str, Path] | None = None) -> dict[str, str]:
@@ -828,24 +888,24 @@ def write_transport_bundle(bundle: Path, head: str, refs: Sequence[FilePin],
     relative_paths: dict[str, str] = {}
     transport: gate.JsonObject = {"schema": "krr-html-performance-release-bundle-v1", "head": head,
                                   "files": transport_files, "attempts": attempts}
-    bundle.mkdir()
     unique = {ref["path"]: ref for ref in refs}
-    for index, ref in enumerate(unique.values()):
-        original = (source_paths or {}).get(ref["path"], Path(ref["path"]))
-        if source_paths is not None and ref["path"] in source_paths:
-            _pinned_file(original, ref["sha256"])
-        relative = f"payload/{index}/{original.name}"
-        destination = bundle / relative
-        destination.parent.mkdir(parents=True)
-        if platform.system() == "Darwin":
-            _clone_transport_file(original, destination, ref["sha256"])
-        else:
-            shutil.copyfile(original, destination)
-        os.chmod(destination, stat.S_IMODE(original.stat().st_mode))
-        transport_files.append({"originalPath": ref["path"], "relativePath": relative,
-                                "sha256": ref["sha256"]})
-        relative_paths[ref["path"]] = relative
-    write(bundle / "bundle.json", transport)
+    with _transport_output_directory(bundle):
+        for index, ref in enumerate(unique.values()):
+            original = (source_paths or {}).get(ref["path"], Path(ref["path"]))
+            if source_paths is not None and ref["path"] in source_paths:
+                _pinned_file(original, ref["sha256"])
+            relative = f"payload/{index}/{original.name}"
+            destination = bundle / relative
+            destination.parent.mkdir(parents=True)
+            if platform.system() == "Darwin":
+                _clone_transport_file(original, destination, ref["sha256"])
+            else:
+                shutil.copyfile(original, destination)
+            os.chmod(destination, stat.S_IMODE(original.stat().st_mode))
+            transport_files.append({"originalPath": ref["path"], "relativePath": relative,
+                                    "sha256": ref["sha256"]})
+            relative_paths[ref["path"]] = relative
+        write(bundle / "bundle.json", transport)
     return relative_paths
 
 
@@ -2312,21 +2372,56 @@ def command(args: Sequence[str], *, text: bool = False, cwd: Path | None = None,
     return result
 
 
+class _GitBatchFile(NamedTuple):
+    path: Path
+    identity: tuple[int, int, int, int, int]
+    mode: int
+    sha256: str
+
+
+def _read_git_batch(record: _GitBatchFile) -> bytes:
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+    with os.fdopen(os.open(record.path, flags), "rb") as handle:
+        before = os.fstat(handle.fileno())
+        gate.require(before.st_mode == record.mode and _file_identity(before) == record.identity,
+                     "cached Git batch identity changed")
+        data = handle.read()
+        after = os.fstat(handle.fileno())
+    current = record.path.lstat()
+    gate.require(after.st_mode == current.st_mode == record.mode
+                 and _file_identity(after) == _file_identity(current) == record.identity
+                 and hashlib.sha256(data).hexdigest() == record.sha256,
+                 "cached Git batch bytes changed")
+    return data
+
+
 def _make_git_query(log_directory: Path) -> gate.GitQuery:
+    batch_files: dict[tuple[str, tuple[str, ...], bytes], _GitBatchFile] = {}
+
     def execute(root: Path, args: Sequence[str], input_bytes: bytes | None,
-                text: bool) -> str | bytes:
+                text: bool, lifecycle_sink: Callable[[Path], None] | None = None) -> str | bytes:
         completed = _measurement_command(["git", "--no-replace-objects", "-C", str(root), *args], role="tool-query",
-                                         log_directory=log_directory, cwd=root, input_bytes=input_bytes)
+                                         log_directory=log_directory, cwd=root, input_bytes=input_bytes,
+                                         lifecycle_sink=lifecycle_sink)
         if text:
             with io.TextIOWrapper(io.BytesIO(completed.stdout)) as stream:
                 return gate._text(stream.read(), "Git query stdout")
         return completed.stdout
 
-    @lru_cache(maxsize=1)
     def cached_cat_file_batch(root_path: str, args: tuple[str, ...], input_bytes: bytes) -> bytes:
-        result = execute(Path(root_path), args, input_bytes, False)
-        if not isinstance(result, bytes):
-            raise ValueError("Git batch query returned text output")
+        key = (root_path, args, input_bytes)
+        if key in batch_files:
+            return _read_git_batch(batch_files[key])
+        lifecycle: list[Path] = []
+        result = execute(Path(root_path), args, input_bytes, False, lifecycle.append)
+        if not isinstance(result, bytes) or len(lifecycle) != 1:
+            raise ValueError("Git batch query has no single raw output record")
+        raw = lifecycle[0].with_name("stdout.raw")
+        identity = raw.lstat()
+        gate.require(stat.S_ISREG(identity.st_mode), "Git batch raw output is not a regular file")
+        # 大きいGit出力をRAMに保持せず、同一runが既に保存した原本を次回の照会に使う。
+        batch_files[key] = _GitBatchFile(raw, _file_identity(identity), identity.st_mode,
+                                         hashlib.sha256(result).hexdigest())
         return result
 
     @lru_cache(maxsize=32)
@@ -4251,7 +4346,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     if fixed_context_pin is not None:
         refs.append(fixed_context_pin)
     refs.extend(reference_transport_refs)
-    program_sources: dict[str, Path] = {}
+    checkout_sources: list[tuple[str, gate.SourceRecords]] = []
     if resumed_bundle is not None:
         refs.extend(
             FilePin(path=gate._text(item.get("originalPath"), "resumed bundle path"),
@@ -4271,30 +4366,6 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             live = gate._object(endpoint.get("liveCheckout"), "live checkout")
             checkout_sources.append((gate._text(live.get("head"), "live program HEAD"),
                                      gate._v3_live_programs(root, live)))
-        blob_cache: dict[str, tuple[dict[str, bytes], dict[str, str]]] = {}
-        for source_head, records in checkout_sources:
-            if source_head not in blob_cache:
-                blob_cache[source_head] = _program_transport_blobs(root, source_head, records, git_query=git_query)
-            blobs, program_modes = blob_cache[source_head]
-            gate.require(blobs.keys() == records.keys(), "program transport cached membership differs")
-            for name, (checksum, size) in records.items():
-                logical = _program_storage_path(root, name, (checksum, size), program_records)
-                blob = blobs[name]
-                gate.require(len(blob) == size and hashlib.sha256(blob).hexdigest() == checksum,
-                             "program transport Git blob differs")
-                physical = output / "program-blobs" / checksum / name
-                if not physical.exists():
-                    physical.parent.mkdir(parents=True, exist_ok=True)
-                    with physical.open("xb") as handle:
-                        handle.write(blob)
-                    os.chmod(physical, 0o755 if program_modes[name] == "100755" else 0o644)
-                gate.require(not physical.is_symlink() and gate.sha256(physical) == checksum
-                             and stat.S_IMODE(physical.stat().st_mode)
-                             == (0o755 if program_modes[name] == "100755" else 0o644),
-                             "program transport source differs")
-                previous = program_sources.setdefault(str(logical), physical)
-                gate.require(gate.sha256(previous) == checksum, "program transport pin conflicts")
-                refs.append({"path": str(logical), "sha256": checksum})
     for row in all_measurement_rows:
         refs.append(FilePin(path=str(row["plan_path"]), sha256=gate.sha256(cast(Path, row["plan_path"]))))
         if row["dom"] is not None:
@@ -4343,26 +4414,28 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 refs.append(FilePin(path=str(path), sha256=gate.sha256(path)))
     # 生成物だけを輸送し、巨大なCargo targetは公開artifactへ混入させない。
     bundle = output / "bundle"
-    transport_sources = dict(reference_proof.transport_sources) if reference_proof else {}
-    for program_logical, physical in program_sources.items():
-        program_prior = transport_sources.setdefault(program_logical, physical)
-        gate.require(gate.sha256(program_prior) == gate.sha256(physical), "program transport source collision differs")
-    for prior_bundle in (resumed_bundle, origin_bundle):
-        if prior_bundle is not None:
-            for item in gate._objects(prior_bundle.manifest.get("files"), "previous transport files"):
-                logical_path = gate._text(item.get("originalPath"), "previous transport path")
-                pin = {"path": logical_path, "sha256": gate._text(item.get("sha256"), "previous transport SHA")}
-                physical = prior_bundle.file(pin)
-                if logical_path in transport_sources:
-                    gate.require(gate.sha256(transport_sources[logical_path]) == pin["sha256"],
-                                 "transport source collision differs")
-                else:
-                    transport_sources[logical_path] = physical
-    ref_hashes: dict[str, str] = {}
-    for ref in refs:
-        previous_sha = ref_hashes.setdefault(ref["path"], ref["sha256"])
-        gate.require(previous_sha == ref["sha256"], "transport references conflict")
-    write_transport_bundle(bundle, head, refs, transport_attempts, source_paths=transport_sources)
+    with _program_transport_sources(output, root, checkout_sources, program_records, refs,
+                                    git_query=git_query) as program_sources:
+        transport_sources = dict(reference_proof.transport_sources) if reference_proof else {}
+        for program_logical, physical in program_sources.items():
+            program_prior = transport_sources.setdefault(program_logical, physical)
+            gate.require(gate.sha256(program_prior) == gate.sha256(physical), "program transport source collision differs")
+        for prior_bundle in (resumed_bundle, origin_bundle):
+            if prior_bundle is not None:
+                for item in gate._objects(prior_bundle.manifest.get("files"), "previous transport files"):
+                    logical_path = gate._text(item.get("originalPath"), "previous transport path")
+                    pin = {"path": logical_path, "sha256": gate._text(item.get("sha256"), "previous transport SHA")}
+                    physical = prior_bundle.file(pin)
+                    if logical_path in transport_sources:
+                        gate.require(gate.sha256(transport_sources[logical_path]) == pin["sha256"],
+                                     "transport source collision differs")
+                    else:
+                        transport_sources[logical_path] = physical
+        ref_hashes: dict[str, str] = {}
+        for ref in refs:
+            previous_sha = ref_hashes.setdefault(ref["path"], ref["sha256"])
+            gate.require(previous_sha == ref["sha256"], "transport references conflict")
+        write_transport_bundle(bundle, head, refs, transport_attempts, source_paths=transport_sources)
     current_bundle = gate.Bundle(bundle)
     attempt_ids = [_attempt_condition_id(current_bundle, attempt)
                    for attempt in transport_attempts]
