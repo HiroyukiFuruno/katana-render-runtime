@@ -31,6 +31,14 @@ fn natural_metrics(
     (advance, scale)
 }
 
+fn positioned_glyphs(tree: &usvg::Tree) -> Result<&[usvg::layout::PositionedGlyph], String> {
+    text(tree)?
+        .layouted()
+        .first()
+        .map(|span| span.positioned_glyphs.as_slice())
+        .ok_or_else(|| "span missing".to_owned())
+}
+
 #[test]
 fn letter_spacing_changes_distance_without_scaling_glyphs() -> Result<(), String> {
     let ordinary = parse("", "HH")?;
@@ -157,5 +165,61 @@ fn negative_spacing_removes_only_the_first_glyph() -> Result<(), String> {
     assert_eq!(remaining.text, "i");
     assert_eq!(remaining.id, second.id);
     near(remaining.transform().tx, first.transform().tx);
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case::regular_space("H H", 6, &[("H", 0.0), (" ", 0.0), ("H", 6.0)])]
+#[case::multiple_spaces(
+    "H H H",
+    3,
+    &[("H", 0.0), (" ", 0.0), ("H", 3.0), (" ", 3.0), ("H", 6.0)],
+)]
+#[case::no_space("HH", 9, &[("H", 0.0), ("H", 0.0)])]
+#[case::nonbreaking_space(
+    "H\u{00a0}H",
+    4,
+    &[("H", 0.0), ("\u{00a0}", 0.0), ("H", 4.0)],
+)]
+fn word_spacing_changes_only_advance_after_separators(
+    #[case] content: &str,
+    #[case] spacing: u32,
+    #[case] expected: &[(&str, f32)],
+) -> Result<(), String> {
+    let common = "style='font-kerning:none' xml:space='preserve'";
+    let natural = parse(common, content)?;
+    let spaced = parse(&format!("word-spacing='{spacing}' {common}"), content)?;
+    let natural_glyphs = positioned_glyphs(&natural)?;
+    let spaced_glyphs = positioned_glyphs(&spaced)?;
+    assert_eq!(natural_glyphs.len(), expected.len());
+    assert_eq!(spaced_glyphs.len(), expected.len());
+    for (index, &(glyph, displacement)) in expected.iter().enumerate() {
+        let before = &natural_glyphs[index];
+        let after = &spaced_glyphs[index];
+        assert_eq!(before.text, glyph);
+        assert_eq!(after.text, glyph);
+        assert_eq!(before.id, after.id);
+        near(before.transform().sx, after.transform().sx);
+        near(after.transform().tx - before.transform().tx, displacement);
+    }
+    Ok(())
+}
+
+#[test]
+fn letter_spacing_is_ignored_for_devanagari_clusters() -> Result<(), String> {
+    let natural = parse("style='font-kerning:none'", "\u{0915}\u{0915}")?;
+    let tracked = parse(
+        "letter-spacing='8' style='font-kerning:none'",
+        "\u{0915}\u{0915}",
+    )?;
+    let natural_glyphs = positioned_glyphs(&natural)?;
+    let tracked_glyphs = positioned_glyphs(&tracked)?;
+    assert_eq!(natural_glyphs.len(), 2);
+    assert_eq!(tracked_glyphs.len(), 2);
+    for (before, after) in natural_glyphs.iter().zip(tracked_glyphs) {
+        assert_eq!(before.id, after.id);
+        near(before.transform().tx, after.transform().tx);
+        near(before.transform().sx, after.transform().sx);
+    }
     Ok(())
 }
