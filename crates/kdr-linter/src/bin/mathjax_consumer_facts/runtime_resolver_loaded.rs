@@ -87,7 +87,7 @@ fn require_main_path(block: &syn::Block) -> Result<(), String> {
     let syn::Expr::Match(value) = local(block, RESOLVED_PATH_STATEMENT_INDEX, "path")? else {
         return Err("runtime-path-resolver:loaded-path".into());
     };
-    if !ident(&value.expr, "runtime_path") || value.arms.len() != 2 {
+    if !ident(&value.expr, "runtime_path") {
         return Err("runtime-path-resolver:loaded-path".into());
     }
     let [provided, selected] = value.arms.as_slice() else {

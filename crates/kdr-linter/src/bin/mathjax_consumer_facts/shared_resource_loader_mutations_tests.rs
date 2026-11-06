@@ -1,5 +1,15 @@
 pub(in super::super) const SHARED_RESOURCE_LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "Ok(LoadedResource { source })",
+        "Ok(LoadedResource { source });",
+        "resource-loader:tail",
+    ),
+    (
+        "let source = if bundled.is_some() {\n            match Self::read(path, bundled)? {\n                Cow::Borrowed(text) => ResourceSource::Static(text),\n                Cow::Owned(_) => {\n                    return Err(std::io::Error::other(\"bundled resource is not static\"));\n                }\n            }\n        } else {\n            let snapshot = ResourceBytes::snapshot(path)?;\n            let text = snapshot.text_handle()?;\n            ResourceSource::File { snapshot, text }\n        };",
+        "let source = ResourceSource::Static(\"\");",
+        "resource-loader:source",
+    ),
+    (
         "crate::resource_bytes::ResourceBytes::read_text(path)",
         "crate::resource_bytes::ResourceBytes::read_text(other)",
         "resource-loader:external-read",

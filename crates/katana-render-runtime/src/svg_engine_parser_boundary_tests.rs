@@ -103,6 +103,44 @@ fn switch_matches_system_language_prefix_and_uses_fallback_when_unmatched() -> R
     Ok(())
 }
 
+#[rstest]
+#[case::rx_sets_ry("rx='4'")]
+#[case::ry_sets_rx("ry='4'")]
+fn rounded_rectangle_uses_single_authored_radius_on_both_axes(
+    #[case] radius: &str,
+) -> Result<(), String> {
+    let square = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8">
+      <rect x="4" y="4" width="8" height="8" fill="#ff0000"/></svg>"##;
+    let rounded = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><rect x='4' y='4' width='8' height='8' {radius} fill='#ff0000'/></svg>"
+    );
+
+    assert_eq!(center_pixel(square, &[])?, [255, 0, 0, 255]);
+    assert_eq!(center_pixel(&rounded, &[])?, [0, 0, 0, 0]);
+    Ok(())
+}
+
+#[test]
+fn recursive_use_is_skipped_without_affecting_following_rendered_content() -> Result<(), String> {
+    let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8">
+      <use id="recursive" href="#recursive" fill="#ff0000"/>
+      <rect width="8" height="8" fill="#00ff00"/></svg>"##;
+
+    assert_eq!(center_pixel(source, &[])?, [0, 255, 0, 255]);
+    Ok(())
+}
+
+#[test]
+fn flood_filter_replaces_source_color_in_the_filtered_shape() -> Result<(), String> {
+    let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8">
+      <defs><filter id="green" x="0" y="0" width="8" height="8">
+        <feFlood flood-color="#00ff00"/></filter></defs>
+      <rect width="8" height="8" fill="#ff0000" filter="url(#green)"/></svg>"##;
+
+    assert_eq!(center_pixel(source, &[])?, [0, 255, 0, 255]);
+    Ok(())
+}
+
 #[test]
 fn linked_linear_gradient_inherits_stops_coordinates_and_spread_method() -> Result<(), String> {
     let source = r##"<svg xmlns="http://www.w3.org/2000/svg"

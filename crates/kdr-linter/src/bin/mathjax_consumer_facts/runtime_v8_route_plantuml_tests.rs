@@ -98,6 +98,26 @@ pub(super) fn replace_legacy_resolver(
 
 const LOADED_RESOLVER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        ".map_err(RenderError::RuntimeResolution)\n    }\n\n    fn make_renderer(",
+        ".unwrap_or_default()\n    }\n\n    fn make_renderer(",
+        "runtime-path-resolver:loaded-path",
+    ),
+    (
+        "let path = match runtime_path {\n            Some(path) => path,\n            None => Self::resolve_selected_path(kind, env_value, plantuml_cache_dir)?,\n        };",
+        "let path = runtime_path;",
+        "runtime-path-resolver:loaded-path",
+    ),
+    (
+        "None => Self::resolve_selected_path(kind, env_value, plantuml_cache_dir)?,",
+        "None => Self::resolve_selected_path(kind, env_value, plantuml_cache_dir)?,\n            _ => other,",
+        "runtime-path-resolver:loaded-path",
+    ),
+    (
+        "Ok((path, renderer))",
+        "(path, renderer)",
+        "runtime-path-resolver:loaded-result",
+    ),
+    (
         "let env_name = Self::runtime_env_name(kind);",
         "let env_name = Self::runtime_env_name(other);",
         "runtime-path-resolver:loaded-env",
