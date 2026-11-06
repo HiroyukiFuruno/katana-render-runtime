@@ -25,6 +25,20 @@ fn svg_css_shadow_preserves_valid_modern_rgba_and_renders_geometry() {
 }
 
 #[test]
+fn svg_css_shadow_preserves_mixed_legacy_and_modern_rgba() {
+    let mixed = format!("{LEGACY_SHADOW} {MODERN_SHADOW}");
+    for markup in [
+        format!("<rect style=\"filter:{mixed}\"/>"),
+        format!("<style>.unused{{filter:{mixed}}}</style>"),
+        format!("<style>.unused{{filter:{LEGACY_SHADOW}}}.other{{filter:{MODERN_SHADOW}}}</style>"),
+        "<rect style=\"filter:drop-shadow(1px 2px rgba(185 185 185 / var(--x, .7)))\"/>".to_owned(),
+        "<rect style=\"filter:drop-shadow(1px 2px rgba(185 185 185 / .7 /* ,,, */))\"/>".to_owned(),
+    ] {
+        assert_preserved_and_rendered(&natural_svg(&markup));
+    }
+}
+
+#[test]
 fn svg_css_shadow_preserves_valid_namespace_rule_and_renders_geometry() {
     /* WHY: 未対応の正常なセミコロン at-rule があれば、部分的な色変換を残さない。 */
     let markup = format!(

@@ -4,6 +4,8 @@ use super::{consume_nested, is_nested_token};
 use cssparser::{ParseError, Parser, Token};
 use svgtypes::Color;
 
+const LEGACY_RGBA_COMMAS: usize = 3;
+
 struct ColorReplacement {
     range: Range<usize>,
     value: String,
@@ -13,17 +15,19 @@ pub(super) fn scan_filter_value(
     input: &mut Parser<'_>,
     inside_drop_shadow: bool,
     edits: &mut Vec<Range<usize>>,
-) -> Result<(), ParseError<()>> {
+) -> Result<usize, ParseError<()>> {
+    let mut commas = 0;
     while !input.is_exhausted() {
         let start = input.position().byte_index();
         let token = input.next_including_whitespace_and_comments()?.clone();
-        if let Token::Function(name) = token {
-            scan_function(input, start, &name, inside_drop_shadow, edits)?;
-        } else if is_nested_token(&token) {
-            input.parse_nested_block(consume_nested)?;
+        match token {
+            Token::Function(name) => scan_function(input, start, &name, inside_drop_shadow, edits)?,
+            Token::Comma => commas += 1,
+            token if is_nested_token(&token) => input.parse_nested_block(consume_nested)?,
+            _ => {}
         }
     }
-    Ok(())
+    Ok(commas)
 }
 
 fn scan_function(
@@ -35,7 +39,11 @@ fn scan_function(
 ) -> Result<(), ParseError<()>> {
     let is_drop_shadow = name.eq_ignore_ascii_case("drop-shadow");
     let is_rgba = name.eq_ignore_ascii_case("rgba");
-    input.parse_nested_block(|nested| scan_filter_value(nested, is_drop_shadow, edits))?;
+    let commas =
+        input.parse_nested_block(|nested| scan_filter_value(nested, is_drop_shadow, edits))?;
+    if inside_drop_shadow && is_rgba && commas != LEGACY_RGBA_COMMAS {
+        return Err(ParseError::unexpected_token());
+    }
     if inside_drop_shadow && is_rgba {
         edits.push(start..input.position().byte_index());
     }
