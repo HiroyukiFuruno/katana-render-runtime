@@ -84,16 +84,22 @@ export function assertCatalogProducerContext(value: unknown): CatalogCaptureProd
 }
 
 export function sameCatalogProducerContext(leftValue: unknown, rightValue: unknown): boolean {
+  return catalogProducerContextChanges(leftValue, rightValue).length === 0;
+}
+
+export function catalogProducerContextChanges(leftValue: unknown, rightValue: unknown): string[] {
   const left = assertCatalogProducerContext(leftValue);
   const right = assertCatalogProducerContext(rightValue);
-  return (
-    left.sourceManifest.sha256 === right.sourceManifest.sha256 &&
-    left.sourceManifest.digest === right.sourceManifest.digest &&
-    JSON.stringify(left.tools) === JSON.stringify(right.tools) &&
-    JSON.stringify(left.playwrightFiles) === JSON.stringify(right.playwrightFiles) &&
-    JSON.stringify(left.os) === JSON.stringify(right.os) &&
-    JSON.stringify(left.fontEnvironment) === JSON.stringify(right.fontEnvironment)
-  );
+  const changes: string[] = [];
+  if (
+    left.sourceManifest.sha256 !== right.sourceManifest.sha256 ||
+    left.sourceManifest.digest !== right.sourceManifest.digest
+  )
+    changes.push("sourceManifest");
+  for (const name of ["tools", "playwrightFiles", "os", "fontEnvironment"] as const) {
+    if (JSON.stringify(left[name]) !== JSON.stringify(right[name])) changes.push(name);
+  }
+  return changes;
 }
 
 function capturePlaywrightFiles(): FileRecord[] {

@@ -7,6 +7,7 @@ import { collectRuntimeBundleToolFingerprint } from "../runtime-bundles/runtime-
 import {
   assertCatalogProducerContext,
   type CatalogCaptureProducerContext,
+  catalogProducerContextChanges,
   sameCatalogProducerContext,
 } from "./catalog-capture-producer-context";
 
@@ -64,14 +65,14 @@ test("catalog producer context verifies source, tools and font identities", () =
       }),
     ).toBe(false);
     expect(
-      sameCatalogProducerContext(before, {
+      catalogProducerContextChanges(before, {
         ...before,
         fontEnvironment: {
           ...before.fontEnvironment,
           inventorySha256: "0".repeat(64),
         },
       }),
-    ).toBe(false);
+    ).toEqual(["fontEnvironment"]);
     const { fontEnvironment: _fontEnvironment, ...legacyContext } = before;
     expect(() => assertCatalogProducerContext(legacyContext)).toThrow(
       /invalid catalog capture producer context/,

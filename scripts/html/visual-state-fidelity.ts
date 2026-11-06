@@ -12,6 +12,7 @@ import {
 import {
   type CatalogCaptureProducerContext,
   captureCatalogProducerContext,
+  catalogProducerContextChanges,
   sameCatalogProducerContext,
 } from "./catalog-capture-producer-context";
 import { withObserverBrowser } from "./chromium-font-capture";
@@ -917,8 +918,11 @@ function assertCatalogProducerContextStable(
   before: CatalogCaptureProducerContext,
   after: CatalogCaptureProducerContext,
 ): void {
-  if (!sameCatalogProducerContext(before, after))
-    throw new Error("Catalog capture producer context changed during capture");
+  const changes = catalogProducerContextChanges(before, after);
+  if (changes.length > 0)
+    throw new Error(
+      `Catalog capture producer context changed during capture: ${changes.join(", ")}`,
+    );
 }
 
 interface CatalogStage90ResumeState {
