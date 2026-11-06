@@ -82,8 +82,33 @@ const BACKEND_ROUTE_MUTATIONS: &[(&str, &str, &str)] = &[
         "backend-runtime-path:render-arm-flow",
     ),
     (
+        ".map(|output| RenderOutputFactory::bind_resource(output, digest.as_deref()))",
+        ".map(bind_output)",
+        "backend-runtime-path:render-arm-flow",
+    ),
+    (
+        ".map(|output| RenderOutputFactory::bind_resource(output, digest.as_deref()))",
+        ".map(|output| output)",
+        "backend-runtime-path:render-arm-flow",
+    ),
+    (
         "format!(\"error:{}:{warning}\", digest.as_deref().unwrap_or(\"\"))",
         "format!(\"error:{}:{warning}\", other.as_deref().unwrap_or(\"\"))",
+        "backend-runtime-path:render-arm-flow",
+    ),
+    (
+        "format!(\"error:{}:{warning}\", digest.as_deref().unwrap_or(\"\"))",
+        "warning.to_string()",
+        "backend-runtime-path:render-arm-flow",
+    ),
+    (
+        "Ok(RenderOutputFactory::bind_resource(\n                    RenderOutputFactory::from_raw_string(",
+        "Ok(RenderOutputFactory::bind_other(\n                    RenderOutputFactory::from_raw_string(",
+        "backend-runtime-path:render-arm-flow",
+    ),
+    (
+        "Some(&error_key),",
+        "None,",
         "backend-runtime-path:render-arm-flow",
     ),
     (
@@ -197,4 +222,71 @@ fn rejects_backend_route_changes_at_their_contract_boundary()
         );
     }
     super::call_binding_tests::reject_mutations(&fixture, relative, BACKEND_ROUTE_MUTATIONS)
+}
+
+const RESOURCE_READER_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "let source = match bundled {",
+        "let source = match other {",
+        "resource-loader:read-dispatch",
+    ),
+    (
+        "return Ok(Cow::Borrowed(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                )));",
+        "return other;",
+        "resource-loader:mathjax-source",
+    ),
+    (
+        "return Ok(Cow::Borrowed(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                )));",
+        "return Ok(other);",
+        "resource-loader:mathjax-source",
+    ),
+    (
+        "return Ok(Cow::Borrowed(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                )));",
+        "return Ok(Cow::Borrowed(other));",
+        "resource-loader:mathjax-source",
+    ),
+    (
+        "\"diagram_runtime/generated/mathjax-runtime.min.js\"",
+        "concat!(\"diagram_runtime/generated/mathjax-runtime.min.js\")",
+        "resource-loader:mathjax-source",
+    ),
+];
+
+const SNAPSHOT_IDENTITY_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "struct Identity {",
+        "struct OtherIdentity {",
+        "resource-loader:metadata",
+    ),
+    (
+        "len: metadata.len(),",
+        "length: metadata.len(),",
+        "resource-loader:metadata",
+    ),
+    (
+        "modified: metadata.modified().ok(),",
+        "modified: metadata.modified(),",
+        "resource-loader:metadata",
+    ),
+    (
+        "created: metadata.created().ok(),",
+        "created: other,",
+        "resource-loader:metadata",
+    ),
+    (
+        "unix: (\n                metadata.dev(),",
+        "os_identity: (\n                metadata.dev(),",
+        "resource-loader:metadata",
+    ),
+];
+
+#[test]
+fn rejects_resource_reader_and_snapshot_identity_shape_drift()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = mathjax_fixture()?;
+    fixture.reject_unique_mutations(RUST_INPUTS[9], RESOURCE_READER_SHAPE_MUTATIONS)?;
+    fixture.reject_unique_mutations(
+        RUST_INPUTS[super::super::source::RESOURCE_BYTES_INPUT_INDEX],
+        SNAPSHOT_IDENTITY_SHAPE_MUTATIONS,
+    )
 }
