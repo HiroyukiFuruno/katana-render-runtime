@@ -32,6 +32,7 @@ CommandRunner = Callable[..., "subprocess.CompletedProcess[bytes] | subprocess.C
 RETAINED_REASONS = {
     "utf8_iter": "immutable reference dependency closure",
     "crc32fast": "same SDK and measurement dependency as the immutable reference",
+    "flate2": "same SDK and PNG measurement dependency as the immutable reference",
 }
 
 

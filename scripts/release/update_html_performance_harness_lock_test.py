@@ -24,11 +24,13 @@ class UpdateHtmlPerformanceHarnessLockTest(unittest.TestCase):
         registry = "registry+https://github.com/rust-lang/crates.io-index"
         return (
             'version = 4\n[[package]]\nname = "krr-html-performance-harness"\n'
-            'version = "0.1.0"\ndependencies = ["utf8_iter", "crc32fast"]\n'
+            'version = "0.1.0"\ndependencies = ["utf8_iter", "crc32fast", "flate2"]\n'
             f'[[package]]\nname = "utf8_iter"\nversion = "1.0.4"\nsource = "{registry}"\n'
             f'checksum = "{"a" * 64}"\n'
             f'[[package]]\nname = "crc32fast"\nversion = "1.5.3"\nsource = "{registry}"\n'
             f'checksum = "{"b" * 64}"\n'
+            f'[[package]]\nname = "flate2"\nversion = "1.1.10"\nsource = "{registry}"\n'
+            f'checksum = "{"d" * 64}"\n'
         ).encode()
 
     @staticmethod
@@ -73,7 +75,7 @@ class UpdateHtmlPerformanceHarnessLockTest(unittest.TestCase):
         parent = self.retained_parent()
         plan = MODULE.retention_plan(parent)
         self.assertEqual([(item.name, item.version) for item in plan],
-                         [("utf8_iter", "1.0.4"), ("crc32fast", "1.5.3")])
+                         [("utf8_iter", "1.0.4"), ("crc32fast", "1.5.3"), ("flate2", "1.1.10")])
         self.assertTrue(all(item.reason for item in plan))
         MODULE.verify_retained_packages(parent, (parent, parent), plan)
         changed = parent.replace(b'"1.5.3"', b'"1.5.4"')

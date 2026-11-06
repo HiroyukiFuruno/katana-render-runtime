@@ -61,8 +61,9 @@ UTF8_ITER_RETENTION_CHANGES = {
     ("Updating", "utf8_iter", RETAINED_UTF8_ITER_VERSION,
      UTF8_ITER_LATEST_COMPATIBLE_VERSION),
 }
-CRC32FAST_RETENTION_CHANGES = {
+SINGLE_PACKAGE_RETENTION_CHANGES = {
     ("Updating", "crc32fast", "1.5.3", "1.5.4"),
+    ("Updating", "flate2", "1.1.10", "1.1.11"),
 }
 LOCK_CHANGE_RE = re.compile(
     r"^\s+(Adding|Updating|Removing|Downgrading) ([A-Za-z0-9_-]+) v([^\s]+)"
@@ -913,7 +914,7 @@ def rust_lock_is_latest_compatible(root: Path) -> bool:
     Registry ``newest_version`` can be a prerelease or a major version outside
     the workspace's semver requirements.  Cargo is the authority for the
     highest compatible resolution, including transitive dependencies. The
-    pinned utf8_iter and crc32fast transitions are accepted only as known diffs.
+    pinned utf8_iter, crc32fast and flate2 transitions are accepted only as known diffs.
     """
     completed = subprocess.run(
         # リリース workflow は CARGO_TERM_COLOR=always を設定するため、Locking 件数を
@@ -929,9 +930,8 @@ def rust_lock_is_latest_compatible(root: Path) -> bool:
     output = f"{completed.stdout}\n{completed.stderr}"
     # WHY: Cargoの要約文言変更に依存せず、件数と実際の変更packageを照合する。
     changes = _cargo_lock_changes(output)
-    return changes in (
-        set(), UTF8_ITER_RETENTION_CHANGES, CRC32FAST_RETENTION_CHANGES,
-        UTF8_ITER_RETENTION_CHANGES | CRC32FAST_RETENTION_CHANGES,
+    return changes is not None and changes - SINGLE_PACKAGE_RETENTION_CHANGES in (
+        set(), UTF8_ITER_RETENTION_CHANGES,
     )
 
 
@@ -1141,7 +1141,8 @@ def is_stale(package: Package, resolved_version: str) -> bool:
     # 各25回の同一入力診断に基づく候補保留であり、全84条件の受入を意味しない。
     if package.skia_hold_candidate and resolved_version == "0.157.0":
         return False
-    if package.ast_lint_hold_candidate and resolved_version == "0.5.4":
+    # 0.5.4と0.5.5は同じ160件の長さ診断で現行のASTゲートに失敗した。
+    if package.ast_lint_hold_candidate and resolved_version in {"0.5.4", "0.5.5"}:
         return False
     current = Version.parse(package.current)
     resolved = Version.parse(resolved_version)

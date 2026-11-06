@@ -19,11 +19,11 @@ pub const MERMAID_ZENUML_JS_CHECKSUM: &str =
 pub const MERMAID_ZENUML_DOWNLOAD_URL: &str =
     "https://cdn.jsdelivr.net/npm/@mermaid-js/mermaid-zenuml@1.0.1/dist/mermaid-zenuml.min.js";
 
-pub const ZENUML_CORE_JS_VERSION: &str = "4.13.0";
+pub const ZENUML_CORE_JS_VERSION: &str = "4.13.1";
 pub const ZENUML_CORE_JS_CHECKSUM: &str =
-    "a506cffa7280b246704de1c4717639d059adbea81711ee1f6eeaa66ff5511fd9";
+    "4ffaa8cca9fd0042e4e32f4677934ce36fe55b1aec25e32419f396376ef8b767";
 pub const ZENUML_CORE_DOWNLOAD_URL: &str =
-    "https://cdn.jsdelivr.net/npm/@zenuml/core@4.13.0/dist/zenuml.js";
+    "https://cdn.jsdelivr.net/npm/@zenuml/core@4.13.1/dist/zenuml.js";
 
 pub const DRAWIO_JS_VERSION: &str = "32.6.10";
 pub const DRAWIO_JS_CHECKSUM: &str =
