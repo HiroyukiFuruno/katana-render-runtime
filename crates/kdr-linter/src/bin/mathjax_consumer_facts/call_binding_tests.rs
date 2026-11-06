@@ -27,6 +27,11 @@ const RENDER_ROUTE_MUTATIONS: &[(&str, &str, &str)] = &[
         "read-render-route:response-arms",
     ),
     (
+        "MathJaxRuntimeResponse::Error { message } => Err(message),",
+        "",
+        "read-render-route:response-arms",
+    ),
+    (
         "let scripts = MathJaxRuntimeScripts::build(mathjax_source, &request_json);",
         "let scripts = MathJaxRuntimeScripts::build(&request_json, mathjax_source);",
         "read-render-route:argument:mathjax_source",

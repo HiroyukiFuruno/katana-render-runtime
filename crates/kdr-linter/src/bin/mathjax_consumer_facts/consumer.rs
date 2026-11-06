@@ -99,11 +99,7 @@ fn require_response_match(statement: &syn::Stmt) -> Result<(), String> {
 }
 
 fn require_response_arms(expression: &syn::ExprMatch) -> Result<(), String> {
-    if expression.arms.len() != 2 {
-        return Err("read-render-route:response-arms".into());
-    }
-    let arms = expression.arms.iter().collect::<Vec<_>>();
-    let [svg, error] = arms.as_slice() else {
+    let [svg, error] = expression.arms.as_slice() else {
         return Err("read-render-route:response-arms".into());
     };
     require_pattern_field(&svg.pat, "Svg", "svg")?;
