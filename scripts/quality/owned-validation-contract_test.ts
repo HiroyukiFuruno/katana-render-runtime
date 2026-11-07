@@ -1240,8 +1240,8 @@ test.each([
   ["runner", `just ${playwrightMacosRecipe}`, "just browser-contract-test"],
   [
     "Windows just availability",
-    "      - name: Install just\n        uses: taiki-e/install-action@859dfda2225e25c12478e3c7796d19fd3735881f # just\n\n      - name: Install Chrome for the macOS official producer browser test",
-    "      - name: Install just\n        if: matrix.os != 'windows-latest'\n        uses: taiki-e/install-action@859dfda2225e25c12478e3c7796d19fd3735881f # just\n\n      - name: Install Chrome for the macOS official producer browser test",
+    "      - name: Install just\n        uses: taiki-e/install-action@56e0547d8ae60783cb5425ff9d8eaacd60a0de09 # just\n\n      - name: Install Chrome for the macOS official producer browser test",
+    "      - name: Install just\n        if: matrix.os != 'windows-latest'\n        uses: taiki-e/install-action@56e0547d8ae60783cb5425ff9d8eaacd60a0de09 # just\n\n      - name: Install Chrome for the macOS official producer browser test",
   ],
 ] as const)("macOS producer registration rejects changed %s", (_label, before, after) => {
   const root = fixture(),
