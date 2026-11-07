@@ -23,7 +23,6 @@ impl HtmlInteractiveSession {
         #[cfg(all(test, target_os = "macos"))]
         let _font_observer =
             crate::markdown::svg_rasterize::SvgRasterizeOps::font_work_frame_scope();
-        let _style_declaration_scope = super::style_declaration_cache::Scope::enter();
         let generation = self.generation + 1;
         let total_started = self.trace.start();
         let (render, pixels) = SvgRasterizeOps::with_html_font_face_cache_scope(|| {
@@ -42,20 +41,7 @@ impl HtmlInteractiveSession {
         generation: u64,
         resolve_resize_scroll: bool,
     ) -> Result<(LayoutResult, Vec<u8>), HtmlBrowserError> {
-        let mut render = if resolve_resize_scroll {
-            self.layout_resize_frame(generation)?
-        } else {
-            self.traced_layout(generation)?
-        };
-        for _ in 0..2 {
-            if self.update_scroll(&render) {
-                render = self.traced_layout(generation)?;
-            }
-            if !self.sync_intersection_geometry(&render)? {
-                break;
-            }
-            render = self.traced_layout(generation)?;
-        }
+        let render = self.layout_frame(generation, resolve_resize_scroll)?;
         let pixels = self.traced_rasterize(
             generation,
             &render.svg,
@@ -63,6 +49,31 @@ impl HtmlInteractiveSession {
             &render.generated_html_text_provenance,
         )?;
         Ok((render, pixels))
+    }
+
+    fn layout_frame(
+        &mut self,
+        generation: u64,
+        resolve_resize_scroll: bool,
+    ) -> Result<LayoutResult, HtmlBrowserError> {
+        let _style_declaration_scope = super::style_declaration_cache::Scope::enter();
+        let mut render = if resolve_resize_scroll {
+            self.layout_resize_frame(generation)?
+        } else {
+            self.traced_layout(generation)?
+        };
+        for _ in 0..2 {
+            if self.update_scroll(&render) {
+                drop(render);
+                render = self.traced_layout(generation)?;
+            }
+            if !self.sync_intersection_geometry(&render)? {
+                break;
+            }
+            drop(render);
+            render = self.traced_layout(generation)?;
+        }
+        Ok(render)
     }
 
     fn layout_resize_frame(&mut self, generation: u64) -> Result<LayoutResult, HtmlBrowserError> {
@@ -79,6 +90,7 @@ impl HtmlInteractiveSession {
         if self.scroll_geometry.scroll_y == previous_scroll {
             return Ok(layout);
         }
+        drop(layout);
         self.traced_layout(generation)
     }
 
