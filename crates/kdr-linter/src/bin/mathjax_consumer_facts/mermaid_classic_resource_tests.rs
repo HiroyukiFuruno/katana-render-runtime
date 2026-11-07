@@ -72,6 +72,26 @@ const RENDER_MUTATIONS: &[(&str, &str, &str)] = &[
 
 const LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "let source = match bundled {",
+        "let source = match other {",
+        "resource-loader:read-dispatch",
+    ),
+    (
+        "None => return Self::read_file(path).map(Cow::Owned)",
+        "ref None => return Self::read_file(path).map(Cow::Owned)",
+        "mermaid-resource-route:external",
+    ),
+    (
+        "Self::read_file(path).map(Cow::Owned)",
+        "(Self::read_file)(path).map(Cow::Owned)",
+        "mermaid-resource-route:callee:Self::read_file",
+    ),
+    (
+        ".map(Cow::Borrowed)",
+        ".map(Cow::Owned)",
+        "mermaid-resource-route:utf8",
+    ),
+    (
         "RuntimeAsset::mermaid()",
         "RuntimeAsset::drawio()",
         "mermaid-resource-route:bundled",
@@ -212,4 +232,54 @@ fn resource_route_rejects_loader_and_snapshot_drift() -> Result<(), Box<dyn std:
     reject_mutations(&fixture, INPUTS[7], BACKEND_MUTATIONS)?;
     reject_mutations(&fixture, INPUTS[8], INSTANCE_MUTATIONS)?;
     reject_mutations(&fixture, INPUTS[RESOURCE_BYTES_INDEX], SNAPSHOT_MUTATIONS)
+}
+
+type Replacement = (&'static str, &'static str);
+
+struct LoaderPriorityCase {
+    replacements: [Replacement; 2],
+    expected: &'static str,
+}
+
+const WRONG_ASSET: Replacement = ("RuntimeAsset::mermaid()", "RuntimeAsset::drawio()");
+const TERMINATED_TAIL: Replacement = (
+    ".map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
+    ".map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error));",
+);
+const LOADER_PRIORITY_CASES: &[LoaderPriorityCase] = &[
+    LoaderPriorityCase {
+        replacements: [
+            ("let source = match bundled {", "let source = match other {"),
+            WRONG_ASSET,
+        ],
+        expected: "resource-loader:read-dispatch",
+    },
+    LoaderPriorityCase {
+        replacements: [WRONG_ASSET, TERMINATED_TAIL],
+        expected: "mermaid-resource-route:bundled",
+    },
+    LoaderPriorityCase {
+        replacements: [
+            (
+                "None => return Self::read_file(path).map(Cow::Owned)",
+                "ref None => return Self::read_file(path).map(Cow::Owned)",
+            ),
+            TERMINATED_TAIL,
+        ],
+        expected: "mermaid-classic-route:tail",
+    },
+];
+
+#[test]
+fn resource_loader_preserves_multi_error_priority() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::copy_mermaid_classic_inputs(INPUTS)?;
+    for case in LOADER_PRIORITY_CASES {
+        for (original, changed) in case.replacements {
+            fixture.replace(INPUTS[6], original, changed)?;
+        }
+        fixture.reject(case.expected)?;
+        fixture.restore(INPUTS[6])?;
+        mermaid_classic_scripts::inspect_root(fixture.root())?;
+    }
+    Ok(())
 }

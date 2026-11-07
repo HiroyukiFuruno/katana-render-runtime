@@ -15,7 +15,9 @@ impl ResourceLoaderGuard {
         snapshot_guard::inspect(file)
     }
 
-    pub(crate) fn require_resource_loader(file: &syn::File) -> Result<(), String> {
+    pub(crate) fn require_resource_loader(
+        file: &syn::File,
+    ) -> Result<super::super::bundle::ValidatedResourceRead<'_>, String> {
         require_external_reader(file)?;
         require_load(file)?;
         accessors::require_loaded_accessors(file)?;

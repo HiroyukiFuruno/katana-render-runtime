@@ -1,17 +1,23 @@
 use super::super::source::{call, ident};
 
-const RESOURCE_READ_ARM_COUNT: usize = 4;
-const EXTERNAL_RESOURCE_ARM_INDEX: usize = 3;
-
 pub(crate) struct ResourceReader;
 
+pub(crate) struct ValidatedResourceRead<'a> {
+    pub(crate) read: &'a syn::ImplItemFn,
+    pub(crate) bundled: &'a syn::Arm,
+    pub(crate) external: &'a syn::Arm,
+    pub(crate) external_map: &'a syn::ExprMethodCall,
+}
+
 impl ResourceReader {
-    pub(crate) fn require_resource_read(file: &syn::File) -> Result<(), String> {
+    pub(crate) fn require_resource_read(
+        file: &syn::File,
+    ) -> Result<ValidatedResourceRead<'_>, String> {
         require_resource_read(file)
     }
 }
 
-fn require_resource_read(file: &syn::File) -> Result<(), String> {
+fn require_resource_read(file: &syn::File) -> Result<ValidatedResourceRead<'_>, String> {
     let read = super::super::source::method(file, "RuntimeResourceLoader", "read")?;
     if read.block.stmts.len() != 2 {
         return Err("resource-loader:read-body".into());
@@ -20,11 +26,20 @@ fn require_resource_read(file: &syn::File) -> Result<(), String> {
     let syn::Expr::Match(dispatch) = source else {
         return Err("resource-loader:read-dispatch".into());
     };
-    if !ident(&dispatch.expr, "bundled") || dispatch.arms.len() != RESOURCE_READ_ARM_COUNT {
+    if !ident(&dispatch.expr, "bundled") {
         return Err("resource-loader:read-dispatch".into());
     }
-    require_mathjax_arm(&dispatch.arms[2])?;
-    require_external_arm(&dispatch.arms[EXTERNAL_RESOURCE_ARM_INDEX])
+    let [bundled, _, mathjax, external] = dispatch.arms.as_slice() else {
+        return Err("resource-loader:read-dispatch".into());
+    };
+    require_mathjax_arm(mathjax)?;
+    let external_map = require_external_arm(external)?;
+    Ok(ValidatedResourceRead {
+        read,
+        bundled,
+        external,
+        external_map,
+    })
 }
 
 fn require_mathjax_arm(mathjax: &syn::Arm) -> Result<(), String> {
@@ -76,18 +91,22 @@ fn require_borrowed_source(value: &syn::Expr) -> Result<(), String> {
     Ok(())
 }
 
-fn require_external_arm(external: &syn::Arm) -> Result<(), String> {
+fn require_external_arm(external: &syn::Arm) -> Result<&syn::ExprMethodCall, String> {
     if !matches!(&external.pat, syn::Pat::Ident(value) if value.ident == "None") {
         return Err("resource-loader:external-role".into());
     }
     let syn::Expr::Return(value) = external.body.as_ref() else {
         return Err("resource-loader:external-role".into());
     };
-    if !matches!(value.expr.as_deref(), Some(syn::Expr::MethodCall(map))
-        if map.method == "map" && map.args.len() == 1 && ident(&map.args[0], "Cow::Owned")
-        && super::super::syntax::call_expr_path(&map.receiver, "Self::read_file", &["path"]))
+    let Some(syn::Expr::MethodCall(map)) = value.expr.as_deref() else {
+        return Err("resource-loader:external-role".into());
+    };
+    if map.method != "map"
+        || map.args.len() != 1
+        || !ident(&map.args[0], "Cow::Owned")
+        || !super::super::syntax::call_expr_path(&map.receiver, "Self::read_file", &["path"])
     {
         return Err("resource-loader:external-role".into());
     }
-    Ok(())
+    Ok(map)
 }

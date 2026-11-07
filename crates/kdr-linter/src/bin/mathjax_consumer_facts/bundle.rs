@@ -5,7 +5,7 @@ use syn::spanned::Spanned;
 
 #[path = "mathjax_resource_reader.rs"]
 mod resource_reader;
-pub(super) use resource_reader::ResourceReader;
+pub(super) use resource_reader::{ResourceReader, ValidatedResourceRead};
 
 pub(super) fn inspect_scripts(source: &Source, facts: &mut Vec<Value>) -> Result<(), String> {
     let path = RUST_INPUTS[2];
