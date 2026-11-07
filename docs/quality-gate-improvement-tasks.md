@@ -9,6 +9,9 @@
 - [x] 上記5件はActions更新後の旧Just SHA照合による連鎖と確定。既存contractと負例の現行pinだけ同期し、`actions-contract-unit-ryk7gnp4` のworkflow31件・CI証跡61件・cache再利用8件が全成功。`ast055-boundary-integrated-static-q_0mfhoe` のfoundationも実0。完全ゲート・3 OS CIの代用にはしない。
 - [x] 初回のlinter helperの可視性7件・相対import1件と、統合コンパイルで判明した既存参照経路を各担当が修正。`ast055-cli-final-static-kn2aig8i` はAST・完全source-static・標準Clippyとperformance両armの全phaseが実0。続く `ast055-full-rust-regression-_n8o9h_p` の標準Nextestは5,660件成功・29 skip・失敗0、実0、HEADとdiff SHAの前後一致をmainも照合。no-report診断であり正式coverage100%の代用にしない。
 - [x] 完了した診断のproject binaryだけを `ast055-retire-diagnostic-binaries-x8jf2fs7` の既存Cargo cleanで整理。保護25参照の前後検証は実0、debugと依存cacheを保持しLLVM用成果物を1,092,328 KiB削減した。固定容量上限を変更せず、原結果・画像基準・私有資料も保持した。
+- [x] 上記の描画境界・KAL更新を `70d20b71`、Actionsの12固定参照と登録契約を `b62e80f2` へ通常hook付きcommit。`actions-owned-contract-regression-_7v01suk` の標準Bun検査は690/690成功・589.19秒、実0。公開までのIssue整理には既存の #108/#109/#114 を含め、最終HTML99の #106 を維持する。
+- [x] #119の外部KAL校正を `ast_linter_length_regressions.rs` へ追加し、既存 `just ast-lint` の同じfilterで2ケース成功。外部cfg(test)/path宣言後の製品200/201行と、関数brace差30/31・宣言33:4・実current31を、公開KAL0.5.5と既定設定で検査する。TempDirで入力を所有し終了時に整理する。`kal119-regression-static-6q3gixi2` のAST/foundationはともに実0。最新版依存指示に沿って0.5.5を採用し、0.5.4の検出修正を含む版として扱う。
+- [ ] #119の「検査対象維持」とvendor37ファイルの新しい関数長例外には範囲の不一致がある。既存外部例外方針を広く解釈して追加した点を本人へ説明し、例外採用か外部135関数の分割かを確認中。例外の最終採用・公開判定は回答に従い、独立する描画・性能・カバレッジ作業を継続する。
 
 - [x] `394e890b` の独立 raw JS 比較は Mermaid 製品 PNG 117/117件が99以上（最低99.085711）、不合格0。`mermaid-product-394e890b-clean-retry-edu4u3gk/comparison/receipt.json` は completed/accepted、R01/R02ともtrue、実終了0。`d5ca9a64` のHTMLは84/84条件が90以上（最低92.14438）、出力フォント完全一致、全スクロール・動的状態・入力・埋込図の標準検査も合格した。後続のテスト・検証コード変更後も最終公開ソースとの適格性を確認する。
 - [ ] `3f235f7e` の HTML 性能は83/84条件合格。残る日本語・英語混在の1条件には最大RSSの差があり、Brotli 6.2に戻した診断でも差は解消しなかった。Brotli 6.3に戻し、不要な中間レイアウトとCSS宣言キャッシュの保持を短縮した `87846987` は関連回帰35件と同条件の25組測定で既存判定を通過した。全縦スクロールと再表示の最大RSS中央値差は＋192 KiB。新旧結果を合算せず、現行の正式84条件を別途判定する。
