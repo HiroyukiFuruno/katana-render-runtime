@@ -78,7 +78,7 @@ class UpdateHtml5everPairTest(unittest.TestCase):
         broad_upgrade_index = next(index for index, line in enumerate(commands) if "{{CARGO}} upgrade " in line)
         pair_update_index = next(index for index, line in enumerate(commands) if "update_html5ever_pair.py" in line)
         lock_update_index = next(index for index, line in enumerate(commands) if line == "{{CARGO}} update")
-        self.assertEqual(commands[broad_upgrade_index], "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa --exclude harfrust --exclude skia-safe")
+        self.assertEqual(commands[broad_upgrade_index], "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa --exclude harfrust --exclude skia-safe --exclude katana-ast-lint")
         self.assertEqual(sum("{{CARGO}} upgrade " in line for line in commands), 1)
         self.assertEqual(sum("update_html5ever_pair.py" in line for line in commands), 1)
         self.assertEqual(sum(line == "{{CARGO}} update" for line in commands), 1)

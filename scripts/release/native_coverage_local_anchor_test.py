@@ -51,8 +51,28 @@ class NativeCoverageLocalAnchorTests(unittest.TestCase):
             "runtime-asset-script-other": "runtime-asset-script-other.json",
             "runtime-unused-script-regression": "runtime-unused-script-regression.json",
             **{producer: f"{producer}.json" for producer in profiles.RUNTIME_SCRIPT_PROFILES},
+            "runtime-quality-owned-source-inventory":
+                "runtime-quality-owned-source-inventory.json",
+            "runtime-quality-owned-validation-contract":
+                "runtime-quality-owned-validation-contract.json",
         }
         self.assertEqual(anchor.PRODUCERS, expected_files)
+        quality_profiles = {
+            "runtime-quality-owned-source-inventory": (
+                "./scripts/quality/owned-source-inventory_test.ts",
+                "runtime-quality-owned-source-inventory-run",
+            ),
+            "runtime-quality-owned-validation-contract": (
+                "./scripts/quality/owned-validation-contract_test.ts",
+                "runtime-quality-owned-validation-contract-run",
+            ),
+        }
+        for producer, (test_path, recipe) in quality_profiles.items():
+            with self.subTest(quality_producer=producer):
+                self.assertEqual(anchor.PRODUCERS[producer], f"{producer}.json")
+                self.assertEqual(profiles.QUALITY_SCRIPT_PROFILES[producer], test_path)
+                self.assertTrue(profiles.is_supported_test_path(test_path, producer))
+                self.assertEqual(profiles.producer_recipe(producer), recipe)
         leaf_anchors: dict[str, tuple[str, str, bytes]] = {}
         for index, producer in enumerate(expected_files):
             identity = f"{index:064x}"

@@ -587,7 +587,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
     def test_old_workflow_and_bun_proofs_are_not_reused(self) -> None:
         good = valid_comment()
         payload = json.loads(comment_body(good).split("\n", 1)[1])
-        old_workflow = "8d396285903838be6fad97a76ab391e3f94565dfe289a5ee1d7341c470634db9"
+        old_workflow = "704c54e3656210ed96791ab28f996ca4cf2c2299c0591082fb7ee812e6d0de73"
         old_scope = {**payload, "workflow_sha256": old_workflow,
                      "scope_sha256": EVIDENCE.scope_digest(old_workflow)}
         old_bun = {**payload, "tools": {**payload["tools"], "bun": "1.4.3"}}
@@ -597,6 +597,16 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,
                 fetch=snapshots(comment), now=NOW, expected_workflow_digest="d" * 64,
             ))
+
+    def test_old_workflow_bytes_do_not_match_supported_scope(self) -> None:
+        old = subprocess.check_output([
+            "git", "-C", str(MODULE_PATH.parents[2]), "show",
+            "b62e80f27b40f669b6c0497db28130da4d06eaab^:.github/workflows/test-and-build.yml",
+        ])
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "workflow.yml"
+            path.write_bytes(old)
+            self.assertFalse(EVIDENCE.workflow_scope_supported(path))
 
     def test_macos_chrome_lane_is_always_run_by_ci(self) -> None:
         workflow = EVIDENCE.WORKFLOW.read_text(encoding="utf-8")

@@ -290,7 +290,7 @@ class UpdateUsvgSkrifaPairTest(unittest.TestCase):
         justfile = (ROOT / "Justfile").read_text(encoding="utf-8")
         recipe = justfile.split("depends-update-mutations:\n", maxsplit=1)[1].split("\n\n", maxsplit=1)[0]
         commands = [line.strip() for line in recipe.splitlines() if line.strip()]
-        broad_upgrade = "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa --exclude harfrust"
+        broad_upgrade = "{{CARGO}} upgrade -i allow --pinned allow --exclude skrifa --exclude harfrust --exclude skia-safe --exclude katana-ast-lint"
         html_pair = "python3 scripts/release/update_html5ever_pair.py --cargo \"{{CARGO}}\""
         lock_update = "{{CARGO}} update"
         harness_lock = "python3 scripts/release/update_html_performance_harness_lock.py --cargo \"{{CARGO}}\""
