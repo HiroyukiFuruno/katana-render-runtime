@@ -1,5 +1,17 @@
 # 品質ゲート改善の作業台帳
 
+## 現在の実行地点（2026-11-07、以下の過去結果と区別する）
+
+- [x] 追加cohortのAST79件・source-static-foundationは `ast-foundation-static-current-YU1BfOiN` で実0。実runtimeは `native-nextest-catalog-fivecase-x6vh4035` の同一binary SHA・実catalogへ照合した5件が全成功、診断実終了0・0.078秒、前後source一致。外側の後処理がstdoutだけを探して実1になった点は原記録を保持し、stderrの5実PASSと実summaryを別の訂正記録で照合した。完全品質ゲートや性能候補の有効性の代用にはしない。
+- [/] 先行 `native-nextest-fivecase-I9cGBBPU` はmain指定名のthe欠落で4件だけ実行され、さらにログpath探索の曖昧な入れ子regexが後処理で停滞した。検査本体0とhelper中断130を区別して保存。再実行は同一binaryのbounded lookup・実catalogの完全名5件から選択し、5/5成功。catalog選択・後処理監視・両stream照合をAGENTSへ明文化し、元4件を5件に補完していない。
+- [x] `8da926fd` の実製品Mermaid PNGを独立raw JSと全117件再比較し、117/117が99以上、不合格0。EN59最低99.085711、JA58最低99.10801000000001。`mermaid-product-shared-sdk-8da926fd-345p4jpa/comparison/receipt.json` はcompleted/accepted/R01/R02すべて成功、実終了0、SHA `8d30a9bfd21e38050f92a02f28176df7a1a3d3e65bfb6be4af49fb3d782e24e4`。
+- [ ] 同じSDKを共有したHTML性能は、先行async1条件の25組診断がpolicy通過後、標準全84採取の最初の10条件で7条件通過・3条件RSS増加を確認。所有producerへ1回SIGINTし、実終了254・closed receiptと3,000 phase recordsを保持した。残74条件は未採取、全体は未合格。`html-full84-fixed-sdk-8da926fd-qiuh2_xv/safe-summary.json`。失敗はasync620の全Y/再表示/warm RSS中央値+81920B、async960とdecoration/clipped1280のcold +114688B。時間の劣化検出0。単独診断や過去版の成功で3失敗を置き換えない。
+- [ ] HTMLの通常layoutからエラー整形を分離する `layout_error` の `#[cold]` 1属性を、効果未確認の限定候補として実装。clipのinactive/collapsed軸・不正corner radius、欠損フォントの装飾fallback、KDR routeの入力境界は既存driverへ追加し、上述のAST79件・runtime5件とfoundationを通過した。商用判定・入力原本・基準画像・閾値は変更していない。効果が無ければ性能候補だけを通常revertし、独立した回帰を保持する。
+- [/] 先行 `ast-foundation-static-8da-onC89zQk` はfoundation実0、AST実101（55成功・新規1失敗）。新MathJax変異が先行statement-count検査へ達したため、両tableを担当別に再確認し、目的のresource-load検査へ届く単一statement変異へ修正した。続くmagic numbers/comment指摘も値を維持して修正し、最新 `ast-foundation-static-current-YU1BfOiN` はAST79件・foundationがともに実0。検査や期待を緩めず、元の失敗ログ・前後source一致を保持した。
+- [ ] 既存root coverageは依然 `5cac0ae4` の85,476/86,732（98.5518609%）、未カバー1,256行。現存performance baseline/candidate JSONはそれぞれ1,163/1,163・1,170/1,170の100%だが、最終sourceの適格性は別途確認する。古いbaseline未95を現存reportの課題として数えない。元rootの標準missing-lines stdoutは889位置であり、LLVM summaryの1,256と同じ集計ではないため、分母や未カバー数を書き換えない。
+- [ ] vendor37ファイル・135関数の関数長例外は、#119の検査対象維持条件との相違を説明して本人回答待ち。暫定設定の実装・Lint通過を最終採用許可と扱わない。独立した実装・検証は継続する。
+- [ ] 最終sourceのHTML84・性能・Mermaid適格性、全品質ゲートと実装coverage100%/未計測0、#114の実native cache/CI再利用、Draftレビュー/個別reply-resolve/Ready/必須3OS/保護merge、GitHub Releaseと既存3crate公開、#108/#109/#114/#119整理、安全なcleanupを完了する。HTML最終99の#106はOPEN維持。公開日時は未確定。
+
 ## 最新の再開地点（2026-11-07）
 
 - [x] SVG前処理の文字列コピー方式を `210784e4` で限定比較。関連91/91と通常hookは成功したが、async1条件25組の性能は不合格。初回RSS中央値差+311296bytes、時間6phaseは劣化検出なし。`html-memory-async-svg-copy-diagnostic-210784e4-_mi85hau/safe-summary.json` に記録し、`23de569d` で通常revert、2file全bytesが実験前と一致することを確認。正式84条件の合格へ加算しない。

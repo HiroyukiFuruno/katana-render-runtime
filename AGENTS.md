@@ -71,7 +71,9 @@
 - Cargoを伴わない予備の直接rustfmt検査も、対象manifestのeditionを明示する（現workspaceは`--edition 2024`）。既定editionによる整形成功を`cargo fmt`と同条件の成功に扱わず、不要な既存整形差分を混入させない。正式判定では既存`fmt-check`を維持する。
 - 絞り込み検証も既存recipeを優先する。引数を受けるrecipeがない場合は `just --command cargo ...` を使い、Justfileの作業場所・dotenv・export済みの `RUSTFLAGS` 等を保持する。既存ゲートと同じworkspace・features・targetsを保ち、libtestのcase filterで絞る。変更が必要なら別fingerprintとなる範囲を明記し、別条件の成功を元ゲートへ転用しない。別条件の直接Cargo実行で依存物を再コンパイルしない。既存binaryの診断実行は、同じbinaryの物理SHAと対象caseを記録し、ソース変更後の合格へ転用しない。
 - Rustのmodule名とcase名をファイル名から推測しない。importは実際の`mod`宣言と可視性へ照合し、限定caseの完全名は同条件のコンパイル済みbinaryの`--list`等、既存runnerの実catalogへ照合する。catalogのbinary SHAとrawを保存し、選択した各caseが意図した件数だけ実行されたことを確認する。0件や未選択のcaseを成功に含めない。
+- catalogのbinaryは構造化metadataを優先し、既存profileを調べる場合も対象directoryと実行可能file名を限定してSHAへ束縛する。ログ全体からpathを探す曖昧な入れ子正規表現を使わない。rstestの関数名はcase名の末尾とは限らないため、実catalogのmodule componentへ照合して完全名を選択し、実行前に予定件数を確認する。
 - 結果の件数判定をsummary文の単数形・複数形や色付けへの完全一致へ依存させない。既存runnerの構造化結果があれば優先し、実終了コード・個別case結果・実行件数を照合する。後処理の失敗と検査本体の失敗を区別し、原失敗を保持して実rawから訂正する。訂正で未実行caseを補完しない。
+- 外側の記録処理が動いているだけで検査継続中と報告しない。保存済みの検査実終了コードと子processを先に確認し、終了後の集計停滞を分けて回収する。結果を探すstreamを決め付けず、標準runnerの出力契約に従ってstdoutとstderrを照合し、後処理の訂正は新しい記録へ残す。
 
 ## 容量不足時の回復手順
 
