@@ -179,6 +179,7 @@ fn apply_flow_grid_columns(layout: &mut Style, style: &CssStyle) {
         .collect();
 }
 
+#[cold]
 pub(super) fn layout_error(error: impl ToString) -> String {
     format!("CSS flow layout failed: {}", error.to_string())
 }
