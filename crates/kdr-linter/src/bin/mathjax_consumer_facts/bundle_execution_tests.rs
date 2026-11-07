@@ -1,6 +1,9 @@
 use super::shared_resource_loader_mutations::SHARED_RESOURCE_LOADER_MUTATIONS;
 use super::*;
 
+#[path = "resource_snapshot_shape_mutations_tests.rs"]
+mod resource_snapshot_shape_mutations;
+
 const MATHJAX_RESOURCE_LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
         "diagram_runtime/generated/mathjax-runtime.min.js",
@@ -146,6 +149,10 @@ fn mathjax_loader_rejects_changed_byte_acquisition() -> Result<(), Box<dyn std::
     fixture.reject_unique_mutations(
         RUST_INPUTS[super::super::source::RESOURCE_BYTES_INPUT_INDEX],
         RESOURCE_BYTES_MUTATIONS,
+    )?;
+    fixture.reject_unique_mutations(
+        RUST_INPUTS[super::super::source::RESOURCE_BYTES_INPUT_INDEX],
+        resource_snapshot_shape_mutations::CASES,
     )
 }
 

@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "mathjax_backend_shape_mutations_tests.rs"]
+mod mathjax_backend_shape_mutations;
+
 const BACKEND_ROUTE_MUTATIONS: &[(&str, &str, &str)] = &[
     (
         "if block.source.trim().is_empty() {",
@@ -221,7 +224,8 @@ fn rejects_backend_route_changes_at_their_contract_boundary()
             "mutation anchor: {before}"
         );
     }
-    super::call_binding_tests::reject_mutations(&fixture, relative, BACKEND_ROUTE_MUTATIONS)
+    super::call_binding_tests::reject_mutations(&fixture, relative, BACKEND_ROUTE_MUTATIONS)?;
+    fixture.reject_unique_mutations(relative, mathjax_backend_shape_mutations::CASES)
 }
 
 const RESOURCE_READER_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[

@@ -9,6 +9,9 @@ const CHANNEL_COUNT: usize = 4;
 #[path = "svg_engine_parser_paint_boundary_tests.rs"]
 mod paint_boundary_tests;
 
+#[path = "svg_engine_parser_shape_boundary_tests.rs"]
+mod shape_boundary_tests;
+
 #[derive(Clone, Copy)]
 enum PublicInput {
     Bytes(&'static [u8]),

@@ -216,8 +216,25 @@ fn assert_captured_weights(events: &[serde_json::Value]) -> Result<(), String> {
 #[test]
 fn variable_instance_keys_reject_invalid_axes() {
     let id = ID::default();
-    assert!(InstanceKey::new(id, &[FontVariation::new(*b"wght", f32::NAN)]).is_err());
+    for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        assert!(InstanceKey::new(id, &[FontVariation::new(*b"wght", value)]).is_err());
+    }
     assert!(InstanceKey::new(id, &[FontVariation::new(*b"wght", REGULAR_WEIGHT); 2]).is_err());
+}
+
+#[test]
+fn variable_instance_key_normalizes_axis_order_and_signed_zero() -> Result<(), String> {
+    let font = ID::default();
+    let weight = FontVariation::new(*b"wght", REGULAR_WEIGHT);
+    let positive = FontVariation::new(*b"opsz", 0.0);
+    let negative = FontVariation::new(*b"opsz", -0.0);
+    let first = InstanceKey::new(font, &[weight, positive])?;
+    assert_eq!(first, InstanceKey::new(font, &[negative, weight])?);
+    assert_ne!(
+        first,
+        InstanceKey::new(font, &[FontVariation::new(*b"wght", BOLD_WEIGHT), positive])?
+    );
+    Ok(())
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use tiny_skia::Pixmap;
 
-const CHANNELS: usize = 4;
+pub(super) const CHANNELS: usize = 4;
 const ALPHA: usize = 3;
 const MAX_ALPHA: f64 = 255.0;
 const ROUNDING_OFFSET: f64 = 0.5;

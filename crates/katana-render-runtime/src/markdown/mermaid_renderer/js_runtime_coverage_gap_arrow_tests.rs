@@ -53,14 +53,21 @@ fn block_arrow_validator_reports_too_few_vertices() {
 
 #[test]
 fn block_arrow_validator_reports_nonfinite_polygon_coordinates() {
-    assert_error(
-        &arrow(
-            r#"<polygon points="NaN,-10 10,-10 10,0"/>"#,
-            "classic",
-            LABEL,
-        ),
-        "non-finite Block arrow polygon point",
-    );
+    for points in [
+        "NaN,-10 10,-10 10,0",
+        "0,NaN 10,-10 10,0",
+        "-inf,-10 10,-10 10,0",
+        "0,inf 10,-10 10,0",
+    ] {
+        assert_error(
+            &arrow(
+                &format!(r#"<polygon points="{points}"/>"#),
+                "classic",
+                LABEL,
+            ),
+            "non-finite Block arrow polygon point",
+        );
+    }
 }
 
 #[test]
@@ -90,14 +97,16 @@ fn block_arrow_validator_reports_malformed_polygon_points() {
 
 #[test]
 fn block_arrow_validator_reports_wrong_orientation() {
-    assert_error(
-        &arrow(
-            r#"<polygon points="0,10 10,10 10,0 0,0"/>"#,
-            "classic",
-            LABEL,
-        ),
-        "Block arrow polygon no longer points down from its baseline",
-    );
+    for points in ["0,10 10,10 10,0 0,0", "0,-10 10,-10 10,-1", "0,0 10,0 20,0"] {
+        assert_error(
+            &arrow(
+                &format!(r#"<polygon points="{points}"/>"#),
+                "classic",
+                LABEL,
+            ),
+            "Block arrow polygon no longer points down from its baseline",
+        );
+    }
 }
 
 #[test]
@@ -109,6 +118,12 @@ fn block_arrow_validator_reports_wrong_identity_and_missing_points() {
     );
     assert_error(
         &arrow(polygon, "classic", "arrow"),
+        "Block arrow must retain three serialized NBSP tokens",
+    );
+    let extra_token =
+        arrow(polygon, "classic", LABEL).replace("<svg ", "<svg data-extra='&amp;nbsp;' ");
+    assert_error(
+        &extra_token,
         "Block arrow must retain three serialized NBSP tokens",
     );
     assert_error(
@@ -126,6 +141,15 @@ fn connected_block_edge_validator_reports_missing_edge_and_changed_label() -> Re
     assert_eq!(
         arrows::assert_connected_block_edges(document.root_element()).err(),
         Some("missing connected Block edge \"ID-D\"".to_owned())
+    );
+    let partial = svg.replace(
+        "</svg>",
+        r#"<path data-edge="true" data-id="edge-ID-D" marker-end="url(#marker)"/></svg>"#,
+    );
+    let document = Document::parse(&partial).map_err(|error| error.to_string())?;
+    assert_eq!(
+        arrows::assert_connected_block_edges(document.root_element()).err(),
+        Some("missing connected Block edge \"C-D\"".to_owned())
     );
     let changed = svg.replace(LABEL, "arrow");
     let document = Document::parse(&changed).map_err(|error| error.to_string())?;

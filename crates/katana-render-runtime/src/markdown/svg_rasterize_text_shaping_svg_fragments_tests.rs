@@ -185,7 +185,15 @@ fn invalid_fragments_rtl_and_ligatures_are_rejected() -> Result<(), String> {
 
 #[test]
 fn invalid_font_sizes_are_rejected() -> Result<(), String> {
-    for size in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+    for size in [
+        0.0,
+        -1.0,
+        f32::NAN,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::MIN_POSITIVE,
+        f32::MAX,
+    ] {
         assert!(
             shaped_svg_fragment_layout(
                 &["A".to_owned()],

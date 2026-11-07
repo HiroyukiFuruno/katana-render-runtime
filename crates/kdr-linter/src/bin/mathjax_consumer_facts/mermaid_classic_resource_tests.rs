@@ -1,13 +1,11 @@
 use super::super::mathjax_facts_ast_linter_tests::shared_resource_loader_mutations::SHARED_RESOURCE_LOADER_MUTATIONS;
 use super::{Fixture, INPUTS, mermaid_classic_scripts, reject_mutations};
 
+#[path = "mermaid_render_shape_mutations_tests.rs"]
+mod mermaid_render_shape_mutations;
+
 const RESOURCE_BYTES_INDEX: usize = 9;
 const RENDER_MUTATIONS: &[(&str, &str, &str)] = &[
-    (
-        "Err(error) => {\n                return Self::error(block, format!(\"Failed to read Mermaid.js bundle: {error}\"));\n            }",
-        "Err(error) => other,",
-        "mermaid-resource-route:load",
-    ),
     (
         "return Self::error(block, format!(\"Failed to read Mermaid.js bundle: {error}\"));",
         "return other;",
@@ -242,6 +240,7 @@ fn resource_route_rejects_loader_and_snapshot_drift() -> Result<(), Box<dyn std:
     let fixture = Fixture::copy_mermaid_classic_inputs(INPUTS)?;
     mermaid_classic_scripts::inspect_root(fixture.root())?;
     reject_mutations(&fixture, INPUTS[5], RENDER_MUTATIONS)?;
+    reject_mutations(&fixture, INPUTS[5], mermaid_render_shape_mutations::CASES)?;
     reject_mutations(&fixture, INPUTS[6], SHARED_RESOURCE_LOADER_MUTATIONS)?;
     reject_mutations(&fixture, INPUTS[6], LOADER_MUTATIONS)?;
     reject_mutations(&fixture, INPUTS[7], BACKEND_MUTATIONS)?;

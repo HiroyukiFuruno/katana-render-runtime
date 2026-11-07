@@ -2,6 +2,9 @@ use super::{Mode, parse_source, render, usvg};
 use rstest::rstest;
 use std::path::Path;
 
+#[path = "svg_engine_render_filter_coverage_tests.rs"]
+mod coverage_tests;
+
 const SHADOW_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="16"><defs><filter id="f" filterUnits="userSpaceOnUse" x="0" y="0" width="24" height="16" color-interpolation-filters="sRGB"><feDropShadow dx="8" dy="0" stdDeviation="SIGMA" flood-color="red"/></filter></defs><rect x="4" y="4" width="6" height="8" fill="black" filter="url(#f)"/></svg>"##;
 const SOURCE_SAMPLE_X: u32 = 5;
 const SHADOW_SAMPLE_X: u32 = 15;
