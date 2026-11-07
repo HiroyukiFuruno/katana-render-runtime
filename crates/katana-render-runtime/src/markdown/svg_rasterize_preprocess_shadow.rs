@@ -9,24 +9,21 @@ mod css;
 const DROP_SHADOW: &str = "drop-shadow(";
 const RGBA: &str = "rgba(";
 
-pub(super) fn normalize_filter_shadow_colors(svg_text: impl Into<String>) -> String {
-    let svg_text = svg_text.into();
-    if !contains_ascii_case_insensitive(&svg_text, DROP_SHADOW)
-        || !contains_ascii_case_insensitive(&svg_text, RGBA)
+pub(super) fn normalize_filter_shadow_colors(svg_text: impl AsRef<str>) -> String {
+    let svg_text = svg_text.as_ref();
+    if !contains_ascii_case_insensitive(svg_text, DROP_SHADOW)
+        || !contains_ascii_case_insensitive(svg_text, RGBA)
     {
-        return svg_text;
+        return svg_text.to_owned();
     }
-    let Ok(document) = Document::parse(&svg_text) else {
-        return svg_text;
+    let Ok(document) = Document::parse(svg_text) else {
+        return svg_text.to_owned();
     };
     let mut edits = Vec::new();
     for node in document.descendants().filter(|node| node.is_element()) {
-        collect_node_edits(node, &svg_text, &mut edits);
+        collect_node_edits(node, svg_text, &mut edits);
     }
-    if edits.is_empty() {
-        return svg_text;
-    }
-    apply_source_edits(&svg_text, edits, false)
+    apply_source_edits(svg_text, edits, false)
 }
 
 fn contains_ascii_case_insensitive(source: &str, needle: &str) -> bool {
