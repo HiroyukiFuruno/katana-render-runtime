@@ -98,6 +98,41 @@ pub(super) fn replace_legacy_resolver(
 
 const LOADED_RESOLVER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "let env_value = if runtime_path.is_none() {\n            env_name.and_then(std::env::var_os)\n        } else {\n            None\n        };",
+        "let env_value = None;",
+        "runtime-path-resolver:loaded-env",
+    ),
+    (
+        "let bundled = runtime_path.is_none() && env_name.is_some() && env_value.is_none();",
+        "let bundled = false;",
+        "runtime-path-resolver:loaded-origin",
+    ),
+    (
+        "let path = match runtime_path {",
+        "let path = match other {",
+        "runtime-path-resolver:loaded-path",
+    ),
+    (
+        "match kind {\n            DiagramKind::Mermaid => Some(\"MERMAID_JS\"),\n            DiagramKind::Drawio => Some(\"DRAWIO_JS\"),\n            DiagramKind::MathJax => Some(\"MATHJAX_JS\"),\n            DiagramKind::PlantUml => None,\n        }",
+        "None",
+        "runtime-path-resolver:loaded-env",
+    ),
+    (
+        "DiagramKind::Drawio => Some(\"DRAWIO_JS\"),",
+        "",
+        "runtime-path-resolver:loaded-env",
+    ),
+    (
+        ") -> Result<PathBuf, RenderError> {\n        match kind {",
+        ") -> Result<PathBuf, RenderError> {\n        match other {",
+        "runtime-path-resolver:loaded-path",
+    ),
+    (
+        "MathJaxRendererOps::resolve_mathjax_js_with_env(\n                env_value,\n                MathJaxRendererOps::default_install_path(),\n            )",
+        "other",
+        "runtime-path-resolver:loaded-path",
+    ),
+    (
         ".map_err(RenderError::RuntimeResolution)\n    }\n\n    fn make_renderer(",
         ".unwrap_or_default()\n    }\n\n    fn make_renderer(",
         "runtime-path-resolver:loaded-path",

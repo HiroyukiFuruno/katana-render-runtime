@@ -170,6 +170,7 @@ fn negative_spacing_removes_only_the_first_glyph() -> Result<(), String> {
 
 #[rstest::rstest]
 #[case::regular_space("H H", 6, &[("H", 0.0), (" ", 0.0), ("H", 6.0)])]
+#[case::negative_space("H H", -4, &[("H", 0.0), (" ", 0.0), ("H", -4.0)])]
 #[case::multiple_spaces(
     "H H H",
     3,
@@ -183,7 +184,7 @@ fn negative_spacing_removes_only_the_first_glyph() -> Result<(), String> {
 )]
 fn word_spacing_changes_only_advance_after_separators(
     #[case] content: &str,
-    #[case] spacing: u32,
+    #[case] spacing: i32,
     #[case] expected: &[(&str, f32)],
 ) -> Result<(), String> {
     let common = "style='font-kerning:none' xml:space='preserve'";
@@ -202,6 +203,38 @@ fn word_spacing_changes_only_advance_after_separators(
         near(before.transform().sx, after.transform().sx);
         near(after.transform().tx - before.transform().tx, displacement);
     }
+    Ok(())
+}
+
+#[rstest::rstest]
+#[case::shorter(1)]
+#[case::longer(80)]
+fn single_glyph_spacing_length_does_not_move_or_scale_glyph(
+    #[case] length: u32,
+) -> Result<(), String> {
+    let natural = parse("style='font-kerning:none'", "H")?;
+    let adjusted = parse(
+        &format!("style='font-kerning:none' textLength='{length}' lengthAdjust='spacing'"),
+        "H",
+    )?;
+    let span = text(&adjusted)?
+        .chunks()
+        .first()
+        .and_then(|chunk| chunk.spans().first())
+        .ok_or("adjusted text span missing")?;
+    assert_eq!(span.text_length(), Some(length as f32));
+    assert_eq!(span.length_adjust(), usvg::LengthAdjust::Spacing);
+    let [before] = positioned_glyphs(&natural)? else {
+        return Err("expected one natural glyph".to_owned());
+    };
+    let [after] = positioned_glyphs(&adjusted)? else {
+        return Err("expected one adjusted glyph".to_owned());
+    };
+    assert_eq!(before.id, after.id);
+    near(before.transform().sx, after.transform().sx);
+    near(before.transform().sy, after.transform().sy);
+    near(before.transform().tx, after.transform().tx);
+    near(before.transform().ty, after.transform().ty);
     Ok(())
 }
 

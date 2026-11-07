@@ -175,6 +175,56 @@ fn start_marker_renders_at_its_first_vertex() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn marker_default_overflow_matches_hidden_and_clips_oversized_children() -> Result<(), String> {
+    let source = fixture("default-clip")?;
+    let hidden = source.replace(
+        "markerHeight=\"20\">",
+        "markerHeight=\"20\" overflow=\"hidden\">",
+    );
+    let visible = source.replace(
+        "markerHeight=\"20\">",
+        "markerHeight=\"20\" overflow=\"visible\">",
+    );
+    assert_ne!(source, hidden);
+    assert_ne!(source, visible);
+    let default_image = render_source(&source)?;
+    let hidden_image = render_source(&hidden)?;
+    let visible_image = render_source(&visible)?;
+    assert_eq!(default_image.data(), hidden_image.data());
+    assert!(blue_pixels(&visible_image) > blue_pixels(&default_image));
+    Ok(())
+}
+
+#[test]
+fn empty_marker_definition_adds_no_rendered_content() -> Result<(), String> {
+    let source = fixture("empty")?;
+    let without_marker = source.replace(
+        "<marker id=\"marker1\" refX=\"16\" refY=\"16\" markerWidth=\"32\" markerHeight=\"32\"/>",
+        "",
+    );
+    assert_ne!(source, without_marker);
+    let with_marker = render_source(&source)?;
+    let bare_path = render_source(&without_marker)?;
+    assert_eq!(with_marker.data(), bare_path.data());
+    Ok(())
+}
+
+#[test]
+fn marker_on_shape_inside_clip_path_does_not_change_the_clip() -> Result<(), String> {
+    const SOURCE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="24">
+      <defs><marker id="m" markerWidth="12" markerHeight="12"><path d="M0 0L12 6L0 12Z" fill="red"/></marker>
+      <clipPath id="c"><path d="M4 4H36V20H4Z" marker-start="url(#m)"/></clipPath></defs>
+      <rect width="40" height="24" fill="blue" clip-path="url(#c)"/></svg>"##;
+    let without_marker = SOURCE.replace(" marker-start=\"url(#m)\"", "");
+    assert_ne!(SOURCE, without_marker);
+    let marked = render_source(SOURCE)?;
+    let plain_clip = render_source(&without_marker)?;
+    assert_eq!(marked.data(), plain_clip.data());
+    assert!(blue_pixels(&marked) > 0);
+    Ok(())
+}
+
 fn render_source(source: &str) -> Result<Pixmap, String> {
     let tree = parse(source)?;
     render(&tree, Mode::Extra(SCALE))
