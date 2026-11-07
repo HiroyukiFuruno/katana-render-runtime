@@ -23,6 +23,15 @@ def _legacy_retention(values: Sequence[float]) -> policy.RetentionResult:
     return policy.evaluate_retention(values, policy_version=policy.LEGACY_POLICY_VERSION)
 
 
+class MemoryPolicyV4RedTest(unittest.TestCase):
+    def test_default_policy_accepts_bounded_temporary_tail(self) -> None:
+        baseline = _series(50 * policy.MIB)
+        candidate = baseline.copy()
+        candidate[-4:] = [baseline[0] + 3 * policy.MIB] * 4
+        self.assertTrue(policy.evaluate_peak_phase(
+            baseline, candidate, _series(20), _series(20)).peak_allowed)
+
+
 class MemoryPolicyTest(unittest.TestCase):
     def test_small_peak_requires_both_bounds_and_no_time_regression(self) -> None:
         cases = [
@@ -156,7 +165,7 @@ class MemoryPolicyV3Test(unittest.TestCase):
         ]
         for values in cases:
             with self.subTest(first=values[0]):
-                self.assertTrue(policy.evaluate_retention(values, policy_version="html-memory-v3").retention_allowed)
+                self.assertTrue(policy.evaluate_retention(values, policy_version=policy.PREVIOUS_POLICY_VERSION).retention_allowed)
         for values in cases[1:]:
             with self.subTest(first=values[0]):
                 self.assertFalse(policy.evaluate_retention(values, policy_version="html-memory-v2").retention_allowed)
@@ -166,11 +175,11 @@ class MemoryPolicyV3Test(unittest.TestCase):
         candidate = [50_085_888.0] * 24 + [53_985_280.0]
         arguments = (baseline, candidate, _series(20), _series(20))
         self.assertFalse(policy.evaluate_peak_phase(*arguments, policy_version="html-memory-v2").peak_allowed)
-        self.assertTrue(policy.evaluate_peak_phase(*arguments, policy_version="html-memory-v3").peak_allowed)
+        self.assertTrue(policy.evaluate_peak_phase(*arguments, policy_version=policy.PREVIOUS_POLICY_VERSION).peak_allowed)
 
     def test_v3_rejects_growth_bad_time_and_peak_bounds(self) -> None:
         sustained = [100 * policy.MIB + index * 10_000 for index in range(25)]
-        self.assertFalse(policy.evaluate_retention(sustained, policy_version="html-memory-v3").retention_allowed)
+        self.assertFalse(policy.evaluate_retention(sustained, policy_version=policy.PREVIOUS_POLICY_VERSION).retention_allowed)
         for base, increase in ((100 * policy.MIB, 8 * policy.MIB + 1),
                                (20 * policy.MIB, 5 * policy.MIB + 1)):
             candidate = _series(base)
@@ -178,11 +187,11 @@ class MemoryPolicyV3Test(unittest.TestCase):
             with self.subTest(base=base):
                 self.assertFalse(policy.evaluate_peak_phase(
                     _series(base), candidate, _series(20), _series(20),
-                    policy_version="html-memory-v3",
+                    policy_version=policy.PREVIOUS_POLICY_VERSION,
                 ).peak_allowed)
         self.assertFalse(policy.evaluate_peak_phase(
             _series(100 * policy.MIB), _series(100 * policy.MIB), _series(20), _series(25),
-            policy_version="html-memory-v3",
+            policy_version=policy.PREVIOUS_POLICY_VERSION,
         ).peak_allowed)
 
     def test_v3_central_increase_requires_speedup_and_retention_limits_both_bounds(self) -> None:
@@ -191,14 +200,19 @@ class MemoryPolicyV3Test(unittest.TestCase):
             with self.subTest(elapsed=elapsed):
                 result = policy.evaluate_peak_phase(
                     _series(base), _series(base + 2 * policy.MIB), _series(20), _series(elapsed),
+                    policy_version=policy.PREVIOUS_POLICY_VERSION,
                 )
                 self.assertEqual(result.peak_allowed, expected)
         for start, increase in ((20 * policy.MIB, 5 * policy.MIB),
                                 (40 * policy.MIB, 8 * policy.MIB)):
             with self.subTest(start=start):
-                self.assertTrue(policy.evaluate_retention([start] * 15 + [start + increase] * 10).retention_allowed)
+                self.assertTrue(policy.evaluate_retention(
+                    [start] * 15 + [start + increase] * 10,
+                    policy_version=policy.PREVIOUS_POLICY_VERSION,
+                ).retention_allowed)
                 self.assertFalse(policy.evaluate_retention(
                     [start] * 15 + [start + increase + 1] * 10,
+                    policy_version=policy.PREVIOUS_POLICY_VERSION,
                 ).retention_allowed)
 
     def test_unknown_policy_version_is_rejected(self) -> None:
@@ -207,6 +221,61 @@ class MemoryPolicyV3Test(unittest.TestCase):
         with self.assertRaises(ValueError):
             policy.evaluate_peak_phase(_series(100), _series(100), _series(1), _series(1),
                                        policy_version="unknown")
+
+
+class MemoryPolicyV4Test(unittest.TestCase):
+    def test_tail_is_bounded_separately_from_median(self) -> None:
+        baseline = _series(50 * policy.MIB)
+        cases = ((8 * policy.MIB, False, True),
+                 (8 * policy.MIB + 1, False, False))
+        for increase, v3_allowed, v4_allowed in cases:
+            candidate = baseline.copy()
+            candidate[-4:] = [baseline[0] + increase] * 4
+            with self.subTest(increase=increase):
+                args = (baseline, candidate, _series(20), _series(20))
+                self.assertFalse(policy.evaluate_peak_phase(
+                    *args, policy_version=policy.LEGACY_POLICY_VERSION).peak_allowed)
+                self.assertEqual(policy.evaluate_peak_phase(
+                    *args, policy_version=policy.PREVIOUS_POLICY_VERSION).peak_allowed, v3_allowed)
+                self.assertEqual(policy.evaluate_peak_phase(*args).peak_allowed, v4_allowed)
+
+    def test_v4_rejects_tail_above_relative_limit(self) -> None:
+        baseline = _series(20 * policy.MIB)
+        candidate = baseline.copy()
+        candidate[-4:] = [baseline[0] + 5 * policy.MIB + 1] * 4
+        self.assertFalse(policy.evaluate_peak_phase(
+            baseline, candidate, _series(20), _series(20)).peak_allowed)
+
+    def test_v4_median_small_bounds_are_inclusive(self) -> None:
+        cases = ((50 * policy.MIB, policy.MIB), (10 * policy.MIB, policy.MIB // 2))
+        for baseline, limit in cases:
+            for offset, accepted in ((0, True), (1, False)):
+                with self.subTest(baseline=baseline, offset=offset):
+                    self.assertEqual(policy.evaluate_peak_phase(
+                        _series(baseline), _series(baseline + limit + offset),
+                        _series(20), _series(20)).peak_allowed, accepted)
+
+    def test_v4_retains_speed_and_sustained_growth_requirements(self) -> None:
+        base = 40 * policy.MIB
+        for elapsed, accepted in ((20, False), (19, False), (18, True)):
+            with self.subTest(elapsed=elapsed):
+                self.assertEqual(policy.evaluate_peak_phase(
+                    _series(base), _series(base + 2 * policy.MIB), _series(20),
+                    _series(elapsed)).peak_allowed, accepted)
+        self.assertFalse(policy.evaluate_peak_phase(
+            _series(base), _series(base), _series(20), _series(25)).peak_allowed)
+        self.assertFalse(policy.evaluate_retention(
+            [100 * policy.MIB + index * 10_000 for index in range(25)]).retention_allowed)
+
+    def test_v3_and_v4_retention_remain_equal_except_version(self) -> None:
+        from dataclasses import asdict
+
+        values = [44_875_776] * 22 + [49_184_768] * 3
+        previous = asdict(policy.evaluate_retention(values, policy_version=policy.PREVIOUS_POLICY_VERSION))
+        current = asdict(policy.evaluate_retention(values))
+        self.assertEqual(previous.pop("version"), policy.PREVIOUS_POLICY_VERSION)
+        self.assertEqual(current.pop("version"), policy.POLICY_VERSION)
+        self.assertEqual(previous, current)
 
 
 if __name__ == "__main__":

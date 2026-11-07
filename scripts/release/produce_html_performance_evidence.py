@@ -1055,6 +1055,7 @@ def load_closed_batch(
     current_build: gate.PartialEpochCurrentBuild | None = None,
     fixed_epoch: FixedEpochContextInput | None = None,
     memory_policy_version: str | None = None,
+    accepted_condition_ids_sink: list[str] | None = None,
 ) -> tuple[gate.JsonObject, gate.Bundle, list[dict[str, FilePin]]]:
     receipt_path = batch / "batch-receipt.json"
     receipt = gate.read_json(receipt_path)
@@ -1159,7 +1160,10 @@ def load_closed_batch(
                              allow_memory_rejected=memory_policy_version is not None)
         if memory_policy_version is None or accepted == [True]:
             accepted_attempts.append(attempt)
-    attempts = accepted_attempts
+            if accepted_condition_ids_sink is not None:
+                accepted_condition_ids_sink.append(_attempt_condition_id(bundle, attempt))
+    if memory_policy_version != "html-memory-v4":
+        attempts = accepted_attempts
     _verify_completed_host_load(bundle, root, attempts, git_query=git_query)
     if shared_source is not None and shared_before is not None:
         gate.require(gate.current_source(root, shared_before, git_query=git_query) == shared_source.records,
@@ -1221,6 +1225,21 @@ def _seal_failed_batch(
     raise failure
 
 
+def _finalize_with_failure_receipt(
+    finalize: Callable[[], gate.JsonObject | None],
+    failure_seal: Callable[[], object] | None,
+) -> gate.JsonObject | None:
+    try:
+        return finalize()
+    except BaseException as error:
+        if failure_seal is not None:
+            try:
+                failure_seal()
+            except BaseException as seal_error:
+                error.add_note(f"failure receipt could not be saved: {seal_error}")
+        raise
+
+
 def _verify_completed_host_load(
     bundle: gate.Bundle, root: Path, attempts: Sequence[Mapping[str, FilePin]], *,
     git_query: gate.GitQuery | None,
@@ -1252,40 +1271,55 @@ def _verify_and_seal_catalog_batch(
     summary: gate.JsonObject,
     git_query: gate.GitQuery | None,
     epoch_origin: FixedEpochContextInput | None = None,
+    failure_seal: Callable[[], FilePin] | None = None,
 ) -> gate.JsonObject | None:
-    gate.require(epoch_origin is None or not formal_ready,
-                 "fixed epoch requires final current-build verification")
-    if batch_failure is None and formal_ready:
-        verified = (gate._verify_catalog_diagnostic(bundle, root, git_query=git_query) if diagnostic else
-                    gate.verify(bundle, root, git_query=git_query, memory_policy_version="html-memory-v3"))
-        seal()
-        return verified
+    seal_started = False
 
-    current_bundle = gate.Bundle(bundle)
-    validated_builds: Mapping[str, gate.JsonObject] | None = None
-    if attempts and not diagnostic and epoch_origin is None:
-        first_expected = current_bundle.json(attempts[0]["expected"])
-        validated_builds = gate.validate_expected_builds(
-            current_bundle, root, first_expected, git_query=git_query,
-        )
-    complete = set(complete_ids)
-    completed_attempts = []
-    for attempt in attempts:
-        if _attempt_condition_id(current_bundle, attempt) in complete:
-            if epoch_origin is not None:
-                expected = current_bundle.json(attempt["expected"])
-                gate.require(gate._object(expected.get("sourcePair"), "epoch source pair").get("schema")
-                             == "krr-html-performance-source-epoch-v3", "legacy epoch attempt cannot be sealed")
-            gate.validate_attempt(
-                current_bundle, root, dict(attempt), git_query=git_query,
-                validated_builds=validated_builds, memory_policy_version="html-memory-v3",
+    def tracked_seal() -> FilePin:
+        nonlocal seal_started
+        seal_started = True
+        return seal()
+
+    def finalize() -> gate.JsonObject | None:
+        gate.require(epoch_origin is None or not formal_ready,
+                     "fixed epoch requires final current-build verification")
+        if batch_failure is None and formal_ready:
+            verified = (gate._verify_catalog_diagnostic(bundle, root, git_query=git_query) if diagnostic else
+                        gate.verify(bundle, root, git_query=git_query, memory_policy_version="html-memory-v4"))
+            tracked_seal()
+            return verified
+
+        current_bundle = gate.Bundle(bundle)
+        validated_builds: Mapping[str, gate.JsonObject] | None = None
+        if attempts and not diagnostic and epoch_origin is None:
+            first_expected = current_bundle.json(attempts[0]["expected"])
+            validated_builds = gate.validate_expected_builds(
+                current_bundle, root, first_expected, git_query=git_query,
             )
-            completed_attempts.append(attempt)
-    _verify_completed_host_load(current_bundle, root, completed_attempts, git_query=git_query)
-    if batch_failure is not None:
-        _seal_failed_batch(batch_failure, seal, summary)
-    seal()
-    return None
+        complete = set(complete_ids)
+        completed_attempts = []
+        for attempt in attempts:
+            if _attempt_condition_id(current_bundle, attempt) in complete:
+                if epoch_origin is not None:
+                    expected = current_bundle.json(attempt["expected"])
+                    gate.require(gate._object(expected.get("sourcePair"), "epoch source pair").get("schema")
+                                 == "krr-html-performance-source-epoch-v3", "legacy epoch attempt cannot be sealed")
+                gate.validate_attempt(
+                    current_bundle, root, dict(attempt), git_query=git_query,
+                    validated_builds=validated_builds, memory_policy_version="html-memory-v4",
+                )
+                completed_attempts.append(attempt)
+        _verify_completed_host_load(current_bundle, root, completed_attempts, git_query=git_query)
+        if batch_failure is not None:
+            _seal_failed_batch(batch_failure, tracked_seal, summary)
+        tracked_seal()
+        return None
+
+    def seal_failure_if_needed() -> None:
+        if not seal_started and failure_seal is not None:
+            failure_seal()
+
+    return _finalize_with_failure_receipt(finalize, seal_failure_if_needed)
 
 
 def write_formal_verification_receipt(bundle: Path, head: str, result: gate.JsonObject) -> None:
@@ -1703,7 +1737,7 @@ def _validate_epoch_resume_contexts(
     program_source = gate._object(fixed_context.get("programSource"), "resume program source")
     program_head = gate._text(program_source.get("head"), "resume program source HEAD")
     program = gate._v3_program_source(root, fixed_context, [dict(item) for item in contexts],
-                                      git_query=git_query, memory_policy_version="html-memory-v3")
+                                      git_query=git_query, memory_policy_version="html-memory-v4")
     from html_performance_source_reuse import _modes
     tree = gate._git_output(root, ("ls-tree", "-r", "-z", program_head), git_query=git_query)
     gate.require(isinstance(tree, bytes), "resume epoch Git tree differs")
@@ -1900,7 +1934,7 @@ def _batch_policy_accepted(
         if memory_policy is not None:
             memory = gate._object(memory_policy, "memory policy")
             retention = gate._object(memory.get("retention"), "retention policy")
-            if (memory.get("version") not in ("html-memory-v2", "html-memory-v3")
+            if (memory.get("version") not in ("html-memory-v2", "html-memory-v3", "html-memory-v4")
                     or retention.get("retention_allowed") is not True
                     or (result.get("comparisonStatus") == "paired"
                         and memory.get("policyPass") is not True)):
@@ -3738,13 +3772,15 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     resumed_receipt: gate.JsonObject | None = None
     resumed_bundle: gate.Bundle | None = None
     resumed_attempts: list[dict[str, FilePin]] = []
+    resumed_accepted_ids: list[str] = []
     lifecycle = output.parent / f"{output.name}.lifecycle"
     gate.require(not lifecycle.exists(), "fresh measurement lifecycle output required")
     git_query = _make_git_query(lifecycle)
     if resume_batch is not None:
         resumed_receipt, resumed_bundle, resumed_attempts = load_closed_batch(
             resume_batch.resolve(), root, fixed_epoch=fixed_epoch, git_query=git_query,
-            memory_policy_version="html-memory-v3",
+            memory_policy_version="html-memory-v4",
+            accepted_condition_ids_sink=resumed_accepted_ids,
         )
         _require_cpu_busy_resume(resumed_bundle, resumed_attempts)
     # 既存結果の認証に新規採取の予算を消費しない。
@@ -3806,7 +3842,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             epoch_context = gate._object(resumed_receipt.get("epochContextRef"), "resume epoch context")
             resumed_program_context = resumed_bundle.json(epoch_context)
             gate._v3_program_source(root, resumed_program_context, [{"liveCheckout": initial_live}],
-                                    git_query=git_query, memory_policy_version="html-memory-v3")
+                                    git_query=git_query, memory_policy_version="html-memory-v4")
     def require_source_stable(message: str) -> None:
         if fixed_epoch is None:
             gate.require(source(root, git_query=git_query) == initial, message)
@@ -4206,7 +4242,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 }, "resume measurement capacity binding differs")
         program_head = gate._text(program_source.get("head"), "program source HEAD")
         program_records = gate._v3_program_source(root, fixed_context, [dict(before_context)],
-                                                  git_query=git_query, memory_policy_version="html-memory-v3")
+                                                  git_query=git_query, memory_policy_version="html-memory-v4")
         from html_performance_source_reuse import _modes
         tree = gate._git_output(root, ("ls-tree", "-r", "-z", program_head), git_query=git_query)
         if not isinstance(tree, bytes):
@@ -4533,78 +4569,109 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             gate.require(previous_sha == ref["sha256"], "transport references conflict")
         write_transport_bundle(bundle, head, refs, transport_attempts, source_paths=transport_sources,
                                staging=staging)
-    current_bundle = gate.Bundle(bundle)
-    attempt_ids = [_attempt_condition_id(current_bundle, attempt)
-                   for attempt in transport_attempts]
-    gate.require(len(attempt_ids) == len(set(attempt_ids)),
-                 "batch attempts contain duplicate conditions")
-    complete_ids = _completed_batch_ids(
-        resumed_ids, measurement_rows, completed_rows, expected_all,
-    )
-    comparison_results = []
-    reassessments: list[gate.JsonObject] = []
-    for attempt in transport_attempts:
-        result = current_bundle.json(gate._object(attempt["result"], "attempt result reference"))
-        attempt_expected = current_bundle.json(gate._object(attempt["expected"], "attempt expected reference"))
-        if "memoryPolicy" in result:
-            paths = [current_bundle.file(pin) for pin in gate._objects(attempt_expected["reportPins"], "report pins")]
-            evaluated: list[gate.JsonObject] = []
-            gate._require_v2_memory_policy(
-                current_bundle, attempt_expected, result, paths,
-                non_comparable=result.get("comparisonStatus") == "nonComparable",
-                policy_version="html-memory-v3", policy_sink=evaluated,
-                assessment_sink=reassessments, allow_rejected=True,
-            )
-            gate.require(len(evaluated) == 1, "memory policy evaluation is missing")
-            result = {**result, "memoryPolicy": evaluated[0]}
-        comparison_results.append(result)
-    policy_accepted = _batch_policy_accepted(batch_failure, comparison_results, True)
-    paired_conditions = sum(
-        result.get("comparisonStatus") == "paired" for result in comparison_results
-    )
-    non_comparable_conditions = sum(
-        result.get("comparisonStatus") == "nonComparable" for result in comparison_results
-    )
-    summary: gate.JsonObject = {
-        "head": head, "bundle": str(bundle), "checks": len(transport_attempts) * 20,
-        "completeConditions": len(complete_ids), "conditions": len(attempt_ids),
-        "candidateConditions": paired_conditions + non_comparable_conditions,
-        "pairedConditions": paired_conditions,
-        "nonComparableConditions": non_comparable_conditions,
-        "formalAccepted": fixed_epoch is None and _batch_formal_acceptance(
-            attempt_ids, complete_ids, policy_accepted,
-        ),
-        "phaseRecords": _saved_phase_record_count(comparison_results),
-        "batchFailure": type(batch_failure).__name__ if batch_failure else None,
-        "memoryPolicyVersion": "html-memory-v3",
-        "memoryPolicyAssessments": reassessments,
-    }
-    if catalog_manifest_path is not None:
-        def seal_batch_receipt() -> FilePin:
-            return write_batch_receipt(
-                output, head=head, source_before=build_inputs.source_before,
-                source_end=source_end, context_before=before_pin, context_end=end_pin,
-                build_artifacts=build_artifact_refs, build_pins=build_pins,
-                condition_ids=attempt_ids, complete_condition_ids=complete_ids,
-                policy_accepted=policy_accepted,
-                attempts=transport_attempts, bundle=bundle,
-                catalog_validation=catalog_capture_validation_pin,
-                epoch_context=fixed_context_pin,
-            )
-        verified_result = _verify_and_seal_catalog_batch(
-            bundle, root, transport_attempts, complete_ids,
-            formal_ready=fixed_epoch is None and _batch_formal_acceptance(
+    seal_started = False
+
+    def seal_failed_receipt() -> FilePin:
+        nonlocal seal_started
+        seal_started = True
+        failed_bundle = gate.Bundle(bundle)
+        failed_ids = [_attempt_condition_id(failed_bundle, attempt) for attempt in transport_attempts]
+        gate.require(len(failed_ids) == len(set(failed_ids)),
+                     "batch attempts contain duplicate conditions")
+        return write_batch_receipt(
+            output, head=head, source_before=build_inputs.source_before,
+            source_end=source_end, context_before=before_pin, context_end=end_pin,
+            build_artifacts=build_artifact_refs, build_pins=build_pins,
+            condition_ids=failed_ids, complete_condition_ids=(), policy_accepted=False,
+            attempts=transport_attempts, bundle=bundle,
+            catalog_validation=catalog_capture_validation_pin, epoch_context=fixed_context_pin,
+        )
+
+    def failure_seal_if_needed() -> None:
+        if not seal_started:
+            seal_failed_receipt()
+
+    def finalize() -> gate.JsonObject:
+        current_bundle = gate.Bundle(bundle)
+        attempt_ids = [_attempt_condition_id(current_bundle, attempt)
+                       for attempt in transport_attempts]
+        gate.require(len(attempt_ids) == len(set(attempt_ids)),
+                     "batch attempts contain duplicate conditions")
+        complete_ids = _completed_batch_ids(
+            resumed_accepted_ids, measurement_rows, completed_rows, expected_all,
+        )
+        comparison_results = []
+        reassessments: list[gate.JsonObject] = []
+        for attempt in transport_attempts:
+            result = current_bundle.json(gate._object(attempt["result"], "attempt result reference"))
+            attempt_expected = current_bundle.json(gate._object(attempt["expected"], "attempt expected reference"))
+            if "memoryPolicy" in result:
+                paths = [current_bundle.file(pin) for pin in gate._objects(attempt_expected["reportPins"], "report pins")]
+                evaluated: list[gate.JsonObject] = []
+                gate._require_v2_memory_policy(
+                    current_bundle, attempt_expected, result, paths,
+                    non_comparable=result.get("comparisonStatus") == "nonComparable",
+                    policy_version="html-memory-v4", policy_sink=evaluated,
+                    assessment_sink=reassessments, allow_rejected=True,
+                )
+                gate.require(len(evaluated) == 1, "memory policy evaluation is missing")
+                result = {**result, "memoryPolicy": evaluated[0]}
+            comparison_results.append(result)
+        policy_accepted = _batch_policy_accepted(batch_failure, comparison_results, True)
+        paired_conditions = sum(
+            result.get("comparisonStatus") == "paired" for result in comparison_results
+        )
+        non_comparable_conditions = sum(
+            result.get("comparisonStatus") == "nonComparable" for result in comparison_results
+        )
+        summary: gate.JsonObject = {
+            "head": head, "bundle": str(bundle), "checks": len(transport_attempts) * 20,
+            "completeConditions": len(complete_ids), "conditions": len(attempt_ids),
+            "candidateConditions": paired_conditions + non_comparable_conditions,
+            "pairedConditions": paired_conditions,
+            "nonComparableConditions": non_comparable_conditions,
+            "formalAccepted": fixed_epoch is None and _batch_formal_acceptance(
                 attempt_ids, complete_ids, policy_accepted,
             ),
-            diagnostic=_allow_catalog_diagnostic,
-            batch_failure=batch_failure,
-            seal=seal_batch_receipt,
-            summary=summary,
-            git_query=git_query,
-            epoch_origin=fixed_epoch,
-        )
-        if verified_result is not None and not _allow_catalog_diagnostic:
-            write_formal_verification_receipt(bundle, head, verified_result)
+            "phaseRecords": _saved_phase_record_count(comparison_results),
+            "batchFailure": type(batch_failure).__name__ if batch_failure else None,
+            "memoryPolicyVersion": "html-memory-v4",
+            "memoryPolicyAssessments": reassessments,
+        }
+        if catalog_manifest_path is not None:
+            def seal_batch_receipt(*, failed: bool = False) -> FilePin:
+                nonlocal seal_started
+                seal_started = True
+                return write_batch_receipt(
+                    output, head=head, source_before=build_inputs.source_before,
+                    source_end=source_end, context_before=before_pin, context_end=end_pin,
+                    build_artifacts=build_artifact_refs, build_pins=build_pins,
+                    condition_ids=attempt_ids, complete_condition_ids=() if failed else complete_ids,
+                    policy_accepted=False if failed else policy_accepted,
+                    attempts=transport_attempts, bundle=bundle,
+                    catalog_validation=catalog_capture_validation_pin,
+                    epoch_context=fixed_context_pin,
+                )
+            verified_result = _verify_and_seal_catalog_batch(
+                bundle, root, transport_attempts, complete_ids,
+                formal_ready=fixed_epoch is None and _batch_formal_acceptance(
+                    attempt_ids, complete_ids, policy_accepted,
+                ),
+                diagnostic=_allow_catalog_diagnostic,
+                batch_failure=batch_failure,
+                seal=seal_batch_receipt,
+                failure_seal=seal_failed_receipt,
+                summary=summary,
+                git_query=git_query,
+                epoch_origin=fixed_epoch,
+            )
+            if verified_result is not None and not _allow_catalog_diagnostic:
+                write_formal_verification_receipt(bundle, head, verified_result)
+        return summary
+
+    summary = _finalize_with_failure_receipt(
+        finalize, failure_seal_if_needed if catalog_manifest_path is not None else None,
+    )
     if catalog_manifest_path is None:
         gate._verify_legacy_diagnostic(bundle, root, git_query=git_query)
     print(json.dumps(summary))

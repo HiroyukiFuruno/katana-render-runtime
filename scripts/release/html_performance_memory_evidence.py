@@ -1,4 +1,4 @@
-"""Derive v2 memory observations from existing validated report shapes.
+"""Derive versioned memory observations from existing validated report shapes.
 
 The caller must authenticate retained RSS source, binary and raw evidence, and
 must run the complete attempt/endpoint validator. This module never grants

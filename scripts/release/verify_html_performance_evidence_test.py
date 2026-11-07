@@ -1671,6 +1671,32 @@ class PerformanceEvidenceTest(unittest.TestCase):
                     memory_policy_version="html-memory-v3"), records)
                 self.assertEqual(validator.call_count, 2)
 
+    def test_program_authentication_cache_separates_v3_and_v4(self) -> None:
+        fixed: JsonObject = {"programSource": {"head": "a" * 40}}
+        endpoint: JsonObject = {"liveCheckout": {"head": "b" * 40}}
+        records = {"scripts/fixture.py": ("c" * 64, 1)}
+        def authenticate(*_args: object, **kwargs: object) -> tuple[tuple[str, str, int], ...]:
+            if kwargs.get("memory_policy_version") != "html-memory-v4":
+                raise ValueError("v3 endpoint differs")
+            return (("scripts/fixture.py", "c" * 64, 1),)
+        for modes in (("html-memory-v3", "html-memory-v4"), ("html-memory-v4", "html-memory-v3")):
+            def query(_root: Path, _args: Sequence[str], _input: bytes | None, _text: bool) -> str | bytes:
+                raise AssertionError("mock authentication must own Git reads")
+            with self.subTest(modes=modes), \
+                 patch.object(gate, "_v3_live_programs", return_value=records), \
+                 patch.object(gate, "_v3_authenticate_programs", side_effect=authenticate) as validator:
+                for mode in modes:
+                    if mode == "html-memory-v3":
+                        with self.assertRaisesRegex(ValueError, "v3 endpoint differs"):
+                            gate._v3_program_source(self.root, fixed, [endpoint], git_query=query,
+                                                    memory_policy_version=mode)
+                    else:
+                        self.assertEqual(gate._v3_program_source(
+                            self.root, fixed, [endpoint], git_query=query, memory_policy_version=mode), records)
+                self.assertEqual(gate._v3_program_source(
+                    self.root, fixed, [endpoint], git_query=query, memory_policy_version="html-memory-v4"), records)
+                self.assertEqual(validator.call_count, 2)
+
     def test_v3_program_history_accepts_reviewed_old_and_current_endpoints(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         old_head = "b9cf37535ba374b62fee4e889f9c58f58f1ab8dc"
@@ -1913,7 +1939,8 @@ class PerformanceEvidenceTest(unittest.TestCase):
 
         repository = Path(__file__).resolve().parents[2]
         base = "ea4f8e2a21432be76e0e8821756a7bfd3a6226e3"
-        changes = subprocess.run(["git", "-C", str(repository), "diff", "--name-only", base,
+        endpoint = "a39bd810784a70c3bd34013256a437ad7239c9bd"
+        changes = subprocess.run(["git", "-C", str(repository), "diff", "--name-only", base, endpoint,
                                   "--", "Justfile", "scripts"],
                                  check=True, capture_output=True, text=True).stdout.splitlines()
         paths = set(changes) - reuse.RELEASE_ONLY_PROGRAMS
@@ -1922,7 +1949,8 @@ class PerformanceEvidenceTest(unittest.TestCase):
         for path in sorted(paths):
             old = subprocess.run(["git", "-C", str(repository), "show", base + ":" + path],
                                  check=True, capture_output=True).stdout
-            current = (repository / path).read_bytes()
+            current = subprocess.run(["git", "-C", str(repository), "show", endpoint + ":" + path],
+                                     check=True, capture_output=True).stdout
             with self.subTest(path=path):
                 self.assertTrue(reuse.v3_reassessment_program_change(
                     path, old, current, old_mode="100644", new_mode="100644"))
@@ -1930,6 +1958,50 @@ class PerformanceEvidenceTest(unittest.TestCase):
                     path, old, current + b" ", old_mode="100644", new_mode="100644"))
                 self.assertFalse(reuse.v3_reassessment_program_change(
                     path, old, current, old_mode="100644", new_mode="100755"))
+
+    def test_v4_reassessment_covers_changed_program_sources(self) -> None:
+        import html_performance_source_reuse as reuse
+
+        repository = Path(__file__).resolve().parents[2]
+        refs = ("ea4f8e2a21432be76e0e8821756a7bfd3a6226e3",
+                "a39bd810784a70c3bd34013256a437ad7239c9bd")
+        paths: set[str] = set()
+        for ref in refs:
+            changes = subprocess.run(["git", "-C", str(repository), "diff", "--name-only", ref,
+                                      "--", "Justfile", "scripts"],
+                                     check=True, capture_output=True, text=True).stdout.splitlines()
+            paths.update(changes)
+        paths -= reuse.RELEASE_ONLY_PROGRAMS
+        self.assertEqual(paths, set(reuse.V4_REASSESSMENT_PROGRAM_PAIRS) |
+                         {"scripts/release/html_performance_source_reuse.py"})
+        for path in sorted(paths):
+            current = (repository / path).read_bytes()
+            for ref in refs:
+                old = subprocess.run(["git", "-C", str(repository), "show", ref + ":" + path],
+                                     check=True, capture_output=True).stdout
+                if old != current:
+                    with self.subTest(path=path, ref=ref):
+                        self.assertTrue(reuse.v4_reassessment_program_change(
+                            path, old, current, old_mode="100644", new_mode="100644"))
+
+    def test_v4_reassessment_requires_exact_endpoint_and_mode(self) -> None:
+        import html_performance_source_reuse as reuse
+
+        path = "scripts/html/performance-history.ts"
+        old, current = b"old", b"current"
+        def record(value: bytes) -> tuple[str, int]:
+            return hashlib.sha256(value).hexdigest(), len(value)
+        pairs = {path: frozenset({(record(old), record(current))})}
+        with patch.object(reuse, "V4_REASSESSMENT_PROGRAM_PAIRS", pairs):
+            self.assertTrue(reuse.v4_reassessment_program_change(
+                path, old, current, old_mode="100644", new_mode="100644"))
+            for changed_path, before, after, mode in (
+                (path, old + b" ", current, "100644"), (path, old, current + b" ", "100644"),
+                (path, old, current, "100755"), ("scripts/unknown.ts", old, current, "100644"),
+            ):
+                with self.subTest(path=changed_path, mode=mode):
+                    self.assertFalse(reuse.v4_reassessment_program_change(
+                        changed_path, before, after, old_mode="100644", new_mode=mode))
 
     def test_v3_reassessment_program_binding_rejects_unknown_bytes_and_modes(self) -> None:
         import html_performance_source_reuse as reuse
@@ -3686,10 +3758,12 @@ class PerformanceEvidenceTest(unittest.TestCase):
                         self.change_candidate_metric(path, phase, metric, baseline)
                     self.reaggregate(0)
 
-    def memory_policy_fixture(self, retention: list[float]) -> tuple[JsonObject, JsonObject]:
+    def memory_policy_fixture(self, retention: list[float], *,
+                              version: str = "html-memory-v3") -> tuple[JsonObject, JsonObject]:
         expected = gate.read_json(self.expected_paths[0])
         expected["memoryRetentionRef"] = {"path": "/retention", "sha256": "a" * 64}
-        policy = memory_evidence.evaluate_paired(self.report_paths[0], expected, retention)
+        policy = memory_evidence.evaluate_paired(
+            self.report_paths[0], expected, retention, policy_version=version)
         return expected, {"memoryPolicy": policy}
 
     def assert_memory_policy(self, expected: JsonObject, result: JsonObject,
@@ -3701,6 +3775,19 @@ class PerformanceEvidenceTest(unittest.TestCase):
                 gate.Bundle(self.bundle), expected, result, self.report_paths[0],
                 non_comparable=False,
             ))
+
+    def test_saved_v2_and_v3_reauthenticate_and_reject_tampering(self) -> None:
+        retention = [100.0] * 25
+        for version in ("html-memory-v2", "html-memory-v3"):
+            with self.subTest(version=version):
+                expected, result = self.memory_policy_fixture(retention, version=version)
+                policy = gate._object(result["memoryPolicy"], "memory")
+                self.assertEqual(policy["version"], version)
+                self.assertTrue(self.assert_memory_policy(expected, result, retention))
+                changed = copy.deepcopy(result)
+                gate._object(changed["memoryPolicy"], "memory")["policyPass"] = False
+                with self.assertRaisesRegex(ValueError, "saved memory policy differs"):
+                    self.assert_memory_policy(expected, changed, retention)
 
     def test_v2_reauthenticates_small_peak_despite_v1_rss_failure(self) -> None:
         for path in self.report_paths[0]:
@@ -3766,8 +3853,24 @@ class PerformanceEvidenceTest(unittest.TestCase):
                     non_comparable=False,
                 )
 
+    def test_v4_reassesses_v3_without_mutating_saved_policy(self) -> None:
+        retained = [100.0] * 25
+        expected, _ = self.memory_policy_fixture(retained)
+        saved = memory_evidence.evaluate_paired(
+            self.report_paths[0], expected, retained, policy_version="html-memory-v3")
+        original = copy.deepcopy(saved)
+        reader = RetentionReaderModule("html_performance_retention_evidence")
+        reader.read_retained_rss = Mock(return_value=retained)
+        evaluated: list[JsonObject] = []
+        with patch.dict(sys.modules, {"html_performance_retention_evidence": reader}):
+            self.assertTrue(gate._require_v2_memory_policy(
+                gate.Bundle(self.bundle), expected, {"memoryPolicy": saved}, self.report_paths[0],
+                non_comparable=False, policy_version="html-memory-v4", policy_sink=evaluated))
+        self.assertEqual(saved, original)
+        self.assertEqual(evaluated[0]["version"], "html-memory-v4")
+
     def test_v3_reassesses_authenticated_v2_without_changing_original(self) -> None:
-        from html_performance_memory_policy import LEGACY_POLICY_VERSION, POLICY_VERSION
+        from html_performance_memory_policy import LEGACY_POLICY_VERSION, PREVIOUS_POLICY_VERSION
 
         retained = [100.0] * 5 + [110.0] * 20
         expected, _ = self.memory_policy_fixture(retained)
@@ -3784,7 +3887,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
                     {"memoryPolicy": saved}, self.report_paths[0], non_comparable=False)
             self.assertTrue(gate._require_v2_memory_policy(
                 gate.Bundle(self.bundle), expected, {"memoryPolicy": saved}, self.report_paths[0],
-                non_comparable=False, policy_version=POLICY_VERSION,
+                non_comparable=False, policy_version=PREVIOUS_POLICY_VERSION,
             ))
             for version in ("", "unknown"):
                 with self.subTest(version=version), self.assertRaisesRegex(ValueError, "unsupported memory policy version"):
@@ -3796,7 +3899,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "saved memory policy differs"):
                 gate._require_v2_memory_policy(
                     gate.Bundle(self.bundle), expected, {"memoryPolicy": tampered}, self.report_paths[0],
-                    non_comparable=False, policy_version=POLICY_VERSION,
+                    non_comparable=False, policy_version=PREVIOUS_POLICY_VERSION,
                 )
         self.assertEqual(saved, original)
 
@@ -5007,6 +5110,18 @@ class MemoryPolicyCliTest(unittest.TestCase):
                 self.assertEqual(self.verify_cli(result, "--require-memory-policy-v3"), 1)
         self.assertEqual(self.verify_cli(valid, "--require-memory-policy-v2",
                                          "--require-memory-policy-v3"), 1)
+
+    def test_v4_requirement_needs_all_assessments(self) -> None:
+        valid: JsonObject = {"memoryPolicyVersion": "html-memory-v4",
+                             "retainedMemoryConditions": 84,
+                             "memoryPolicyAssessments": [{} for _ in range(84)]}
+        self.assertEqual(self.verify_cli(valid, "--require-memory-policy-v4"), 0)
+        for result in ({}, {**valid, "retainedMemoryConditions": 83},
+                       {**valid, "memoryPolicyVersion": "html-memory-v3"}):
+            with self.subTest(result=result):
+                self.assertEqual(self.verify_cli(result, "--require-memory-policy-v4"), 1)
+        self.assertEqual(self.verify_cli(valid, "--require-memory-policy-v3",
+                                         "--require-memory-policy-v4"), 1)
 
     def test_v2_rejects_diagnostic_build_and_acquisition_modes(self) -> None:
         for arguments in (("--diagnostic-only",), ("--acquire",),

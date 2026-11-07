@@ -24,7 +24,7 @@ from typing import BinaryIO, NamedTuple, cast
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 from collections.abc import Callable, Mapping, Sequence
 from types import FrameType
 
@@ -272,7 +272,8 @@ class CatalogProducerOperationTest(unittest.TestCase):
             self.assertIs(caught.exception, marker)
             make_query.assert_called_once_with(root / "tmp/output.lifecycle")
             load.assert_called_once_with(batch.resolve(), root, fixed_epoch=origin, git_query=query,
-                                         memory_policy_version="html-memory-v3")
+                                         memory_policy_version="html-memory-v4",
+                                         accepted_condition_ids_sink=ANY)
             self.assertIs(verify.call_args.kwargs["git_query"], query)
 
     def test_resume_budget_starts_once_after_closed_batch_validation(self) -> None:
@@ -1823,7 +1824,7 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
 
         self.assertEqual(events, ["verify", "seal"])
         verify.assert_called_once_with(self.root / "bundle", self.root, git_query=None,
-                                       memory_policy_version="html-memory-v3")
+                                       memory_policy_version="html-memory-v4")
         validate.assert_not_called()
 
     def test_fixed_epoch_does_not_claim_formal_acceptance_without_current_build(self) -> None:
@@ -1863,6 +1864,78 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
                 )
         validate.assert_not_called()
         seal.assert_not_called()
+
+    def _negative_receipt_fixture(
+        self,
+    ) -> tuple[Path, Path, list[dict[str, typed_producer.FilePin]], Callable[[], typed_producer.FilePin]]:
+        batch, bundle_path = self.create_batch(
+            condition_ids=("case-a", "case-b"), complete_ids=(),
+            policy_accepted=False, seal_receipt=False)
+        bundle = gate.Bundle(bundle_path)
+        attempts = cast(list[dict[str, typed_producer.FilePin]],
+                        gate._objects(bundle.manifest["attempts"], "attempts"))
+        pins: dict[str, typed_producer.FilePin] = {
+            name: {"path": str((batch / name).resolve()), "sha256": gate.sha256(batch / name)}
+            for name in ("source-before.json", "source-end.json",
+                         "context-before.json", "context-end.json")
+        }
+        def seal_failure() -> typed_producer.FilePin:
+            return producer.write_batch_receipt(
+                batch, head="a" * 40, source_before=pins["source-before.json"],
+                source_end=pins["source-end.json"], context_before=pins["context-before.json"],
+                context_end=pins["context-end.json"], build_artifacts={}, build_pins=[],
+                condition_ids=("case-a", "case-b"), complete_condition_ids=(),
+                policy_accepted=False, attempts=attempts, bundle=bundle_path)
+        return batch, bundle_path, attempts, seal_failure
+
+    def _assert_negative_receipt(
+        self, batch: Path, attempts: list[dict[str, typed_producer.FilePin]],
+    ) -> None:
+        receipt = gate.read_json(batch / "batch-receipt.json")
+        self.assertEqual(receipt["completeConditionIds"], [])
+        self.assertEqual(receipt["attempts"], attempts)
+        self.assertIs(receipt["policyAccepted"], False)
+        self.assertIs(receipt["formalAccepted"], False)
+
+    def test_final_validation_failure_seals_negative_receipt_and_reraises(self) -> None:
+        for failure in (ValueError("bad attempt"), KeyboardInterrupt()):
+            with self.subTest(failure=type(failure).__name__):
+                batch, bundle_path, attempts, failure_seal = self._negative_receipt_fixture()
+                normal_seal = Mock()
+                with patch.object(gate, "validate_expected_builds", return_value={}), \
+                     patch.object(gate, "validate_attempt", side_effect=failure):
+                    with self.assertRaises(type(failure)) as raised:
+                        producer._verify_and_seal_catalog_batch(
+                            bundle_path, self.root, attempts, ("case-a",), formal_ready=False,
+                            diagnostic=False, batch_failure=None, seal=normal_seal,
+                            failure_seal=failure_seal, summary={}, git_query=None)
+                self.assertIs(raised.exception, failure)
+                normal_seal.assert_not_called()
+                self._assert_negative_receipt(batch, attempts)
+
+    def test_summary_failure_seals_negative_receipt_and_reraises(self) -> None:
+        for failure in (ValueError("summary failed"), KeyboardInterrupt()):
+            with self.subTest(failure=type(failure).__name__):
+                batch, _, attempts, failure_seal = self._negative_receipt_fixture()
+                def finalize() -> gate.JsonObject:
+                    return {"phaseRecords": producer._saved_phase_record_count([])}
+                with patch.object(producer, "_saved_phase_record_count", side_effect=failure):
+                    with self.assertRaises(type(failure)) as raised:
+                        producer._finalize_with_failure_receipt(finalize, failure_seal)
+                self.assertIs(raised.exception, failure)
+                self._assert_negative_receipt(batch, attempts)
+
+    def test_failure_receipt_error_preserves_original_exception(self) -> None:
+        failure = ValueError("validation failed")
+        with patch.object(gate, "verify", side_effect=failure):
+            with self.assertRaises(ValueError) as raised:
+                producer._verify_and_seal_catalog_batch(
+                    self.root / "bundle", self.root, (), (), formal_ready=True,
+                    diagnostic=False, batch_failure=None, seal=Mock(),
+                    failure_seal=Mock(side_effect=OSError("receipt failed")),
+                    summary={}, git_query=None)
+        self.assertIs(raised.exception, failure)
+        self.assertTrue(any("receipt failed" in note for note in failure.__notes__))
 
     def test_formal_verifier_failure_does_not_seal(self) -> None:
         failure = ValueError("formal verification failed")
@@ -1989,6 +2062,36 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         self.assertIs(validate.call_args.kwargs["validated_builds"], build_facts)
         records.assert_called_once_with(self.root, "a" * 40, git_query=None)
         self.assertEqual(host_load_check.call_args.args[1], attempts)
+
+    def test_v4_resume_keeps_observed_rejected_attempts_without_remeasurement(self) -> None:
+        batch, _ = self.create_batch(complete_ids=("case-a",), policy_accepted=False)
+        accepted: list[str] = []
+
+        def validate(*_args: object, **kwargs: object) -> None:
+            sink = cast(list[bool], kwargs["memory_acceptance_sink"])
+            sink.append(not sink_values.pop(0))
+
+        sink_values = [False, True]
+        with patch.object(producer, "_reassessment_candidates", side_effect=lambda _bundle, attempts: attempts), \
+             patch.object(gate, "current_source", return_value={}), \
+             patch.object(gate, "validate_expected_builds", return_value={}), \
+             patch.object(gate, "validate_attempt", side_effect=validate), \
+             patch.object(gate, "committed_records", return_value={}), \
+             patch.object(load_validation, "verify_catalog_host_load"):
+            receipt, bundle, attempts = producer.load_closed_batch(
+                batch, self.root, memory_policy_version="html-memory-v4",
+                accepted_condition_ids_sink=accepted,
+            )
+        observed = [producer._attempt_condition_id(bundle, attempt) for attempt in attempts]
+        self.assertEqual(observed, ["case-a", "case-b"])
+        self.assertEqual(accepted, ["case-a"])
+        self.assertEqual(producer._select_batch_rows(
+            [{"condition_id": value} for value in ("case-a", "case-b", "case-c")],
+            set(observed), None), [{"condition_id": "case-c"}])
+        self.assertEqual(producer._completed_batch_ids(accepted, [], [], []), ["case-a"])
+        self.assertEqual(gate._objects(bundle.manifest["attempts"], "attempts"), attempts)
+        self.assertFalse(producer._batch_formal_acceptance(observed, accepted, False))
+        self.assertFalse(receipt["policyAccepted"])
 
     def test_failed_condition_is_remeasured_and_policy_can_recover(self) -> None:
         batch, _ = self.create_batch(complete_ids=("case-a",), policy_accepted=False)

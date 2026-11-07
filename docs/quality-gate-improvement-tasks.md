@@ -2,6 +2,15 @@
 
 ## 現在の実行地点（2026-11-08、以下の過去結果と区別する）
 
+- [x] メモリv4の差分適用・統合検査を完了。`memory-v4-foundation-g6bl0fmv` の標準静的13項目が実0。関連はmemory20・evidence6・promotion25・reference10・reuse CLI12・source reuse20・producer203・verifier197・local proof10・TS履歴12件が各実0。最終reference/有限移行2回帰は `memory-v4-final-targeted-f8e2y69g` で実0。先行失敗は各runへ保持し、変更のないmodule成功は反復せず区別して回収した。これは検証処理の検査成功であり、HTML性能84条件の正式合格ではない。
+- [/] v4は原版のraw/評価を保持して再評価し、観測済み不合格を未観測へ戻さず保持する。完成bundle後のpolicy/summary/最終検証で例外やSIGINTが起きても、全attemptを含む負の終端記録を排他的に作成し、元例外を維持する。新規重複4組は規則を緩和せず共通化した。過去17条件の原観測も別途認証してv4評価し、過去v3で再採取された2条件の良い数値だけを採用しない。正式な実raw認証は未完。
+- [/] 最新指示で#119の外部135関数も分割することが確定した。37ファイルのfunction-length例外を撤回し、処理・公開API・描画・性能を維持して責務単位で分割する。まず適用済みメモリv4差分の静的検査・関連回帰・通常commitを完了し、その保存点から製品側の分割へ進む。分割後のSDKと既存44条件の再利用適格性を正式検証し、旧SDKの採取数を最新版の合格数へ転用しない。
+- [/] RSSは引き続き記録・評価し、macOSのアプリ負担量は原因調査の補助として扱う。一時的なコード常駐・allocator保持と持続増加を分け、表示速度を優先する。本人は指標の違いの説明を求めており、主担当が上記方針を提案した。
+- [ ] 最新のメモリ評価は別版 `html-memory-v4` へ移行する。v2/v3の原判定・raw・receiptを維持し、中央値だけを通常量の1MiBかつ5%枠へ入れ、p95/最大値を各8MiBかつ25%の一時枠へ入れる。中央値が小幅枠を超える場合の同phase短縮10%以上かつ1ms以上、保持8MiBかつ25%と持続増加拒否、全phase時間非劣化・各表示3秒未満・84条件・5+25回を維持する。主担当の数値選定であり、正式なv4合格は未取得。
+- [/] `html-v3-fixed-fe5-resume-8xfyz99z` はbundleに44条件分を保存したが、mainのSIGINTが最終検証へ入り実254となった。元source前後一致・子0、元bundle/raw/result/logは保持。`html-v3-negative-terminal-recovery-ka7c_jgd` は既存writerで未作成だった負の終端receiptをexclusive生成し実0。complete=[]・policyAccepted=false・formalAccepted=falseであり、44件成功の証明ではない。SDK/入力等の再認証とv4評価が必要で、残40条件の採取も続ける。復旧中の2失敗は各別runに保持した。
+- [ ] 完全rawの観測済IDと合格IDを分離し、不合格を未観測へ戻して黙って再採取する経路を修正する。最終検証の例外/SIGINT時も、原例外を維持して全attemptを含む負の終端記録を残す。取得済みの原17条件もv4で確認し、再採取で良い値だけを選ばない。
+- [/] policy/controller/historyの3系統の差分案はignored patch artifactとして準備済みで、適用・検査は未実施。独立レビューで中央値境界、旧2/3の回帰維持、昇格時の全条件RSS非劣化と順序依存回帰を補完した。基準昇格は全体の時間/RSS非劣化と実改善がある場合だけ行い、トレードオフを許容した受入結果も履歴へ記録する。base SHA照合→尾部の回帰1件を実RED→差分適用→同GREEN→新版有限pair/CPU pin確定→静的/関連回帰→通常commit→原raw再認証の順に進める。
+
 - [/] v2の初期1MiB制限は単発RSS最大値と解放後allocator保持量にも適用され、通常量の差が約0.1MiBでも未合格になった。`html-v2-fixed-fe5-resume-aWK0pUjI` はSIGINTを1回送り、子0・source/seed/旧pilot不変を確認して実254・closed receiptへ封緘。attempted17・complete7・policyAccepted=false・formalAccepted=false、receipt SHA `c76fa8183a298991f313c1f1a4a6b36624a85fb1cdc416aa061be62d69444756`。元policy・raw・receiptの判定を、その時点の結果として保存する。
 - [x] `html-retention-heap-diagnostic-Pn3e1nrd` で同e0 workerと実fixture3条件を各30回開閉し、READY/ACK境界でApple heap/vmmapを観測した。全実0。stacked960はmalloc resident12.5→22.7MiBに対しlive約2064→2075KiB、translucent1280はresident13.6→20.5MiBに対しlive約2062→2073KiB。source無変更で、allocatorの解放済み領域保持と整合する。ただしattachによる影響がある診断値であり、通常の速度・RSS正式値とは別に保持する。
 - [ ] 主担当判断として新基準を別version `html-memory-v3` へ分離する。通常量のmedian/p95は1MiBかつ5%以内、単発maximumは既存案の8MiBかつ25%以内を独立評価する。通常量が小幅枠を超える場合は従来どおり同phaseの検証済み10%以上・1ms以上の短縮を要する。解放後RSSの一時的保持は8MiBかつ25%以内とし、全窓・末尾窓の持続増加検出を維持する。表示3秒未満・全phase時間非劣化・旧12条件の扱い、製品のallocatorとcache制御を維持する。

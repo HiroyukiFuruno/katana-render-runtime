@@ -178,13 +178,14 @@ def collect(repository: str, number: int, directory: Path,
     verification_kind: str | None = None
     measured_head = head
     if reuse_request is None:
-        result = gate.verify(directory, mac.ROOT)
+        result = gate.verify(directory, mac.ROOT, memory_policy_version="html-memory-v4")
     else:
         eligibility_sha = gate.sha256(reuse_request)
         reuse_result = reuse_cli.verify_reuse_request(
             reuse_request, mac.ROOT, expected_measured_dir=directory,
             expected_measured_manifest_sha256=manifest_sha,
             expected_request_sha256=eligibility_sha,
+            memory_policy_version="html-memory-v4",
         )
         gate.require(reuse_result.get("reuseEligibility") is True
                      and reuse_result.get("eligibleHead") == head,
@@ -201,6 +202,7 @@ def collect(repository: str, number: int, directory: Path,
         result = gate._object(reuse_result.get("measuredResult"), "measured formal result")
         gate._require_formal_release_result(result)
         gate.require(gate.sha256(reuse_request) == eligibility_sha, "reuse request changed")
+    gate._require_cli_memory_v4(result, reused=False)
     if installed_identity("1.18.1", "2.5.4") != runtime_identity:
         raise mac.EvidenceError("scientific runtime changed during verification")
     require_measurement_host(directory, host_platform)

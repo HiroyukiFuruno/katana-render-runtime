@@ -1,4 +1,4 @@
-"""Evaluate v2 peak and retained RSS observations without accepting evidence."""
+"""Evaluate versioned peak and retained RSS observations without accepting evidence."""
 
 from __future__ import annotations
 
@@ -11,7 +11,9 @@ from dataclasses import dataclass
 from html_performance_paired_stats import PairedRegressionResult, evaluate_paired_regression
 
 LEGACY_POLICY_VERSION = "html-memory-v2"
-POLICY_VERSION = "html-memory-v3"
+PREVIOUS_POLICY_VERSION = "html-memory-v3"
+POLICY_VERSION = "html-memory-v4"
+SUPPORTED_POLICY_VERSIONS = (LEGACY_POLICY_VERSION, PREVIOUS_POLICY_VERSION, POLICY_VERSION)
 SAMPLE_COUNT = 25
 MIB = 1024 * 1024
 SMALL_PEAK_BYTES = MIB
@@ -111,7 +113,7 @@ def _within(delta: PeakDelta, byte_limit: float, ratio_limit: float) -> bool:
 
 
 def _check_policy_version(policy_version: str) -> None:
-    if policy_version not in (LEGACY_POLICY_VERSION, POLICY_VERSION):
+    if policy_version not in SUPPORTED_POLICY_VERSIONS:
         raise ValueError("unsupported memory policy version")
 
 
@@ -141,7 +143,8 @@ def evaluate_peak_phase(
     speedup_ratio = speedup_ms / base_median if base_median > 0 else 0.0
     if not math.isfinite(speedup_ms) or not math.isfinite(speedup_ratio):
         raise ValueError("elapsed comparison is not finite")
-    central = differences if policy_version == LEGACY_POLICY_VERSION else (median, p95)
+    central = {LEGACY_POLICY_VERSION: differences, PREVIOUS_POLICY_VERSION: (median, p95),
+               POLICY_VERSION: (median,)}[policy_version]
     small = all(_within(item, SMALL_PEAK_BYTES, SMALL_PEAK_RATIO) for item in central)
     bounded = all(_within(item, MAX_PEAK_BYTES, MAX_PEAK_RATIO) for item in differences)
     faster = (improvement.test_performed and improvement.detected_bad

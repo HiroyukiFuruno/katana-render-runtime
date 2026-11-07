@@ -377,6 +377,20 @@ V3_REASSESSMENT_SELF_PREDECESSORS: frozenset[tuple[str, int]] = frozenset({
 })
 
 
+def _reassessment_producer_ast_matches(old: bytes, current: bytes, *, v4: bool) -> bool:
+    import ast
+
+    changed = {"load_closed_batch", "_reassessment_candidates", "_batch_policy_accepted",
+               "_validate_epoch_resume_contexts", "_verify_and_seal_catalog_batch", "produce"}
+    if v4:
+        changed.add("_finalize_with_failure_receipt")
+    def unchanged(source: bytes) -> list[str]:
+        tree = ast.parse(source)
+        return [ast.dump(node, include_attributes=False) for node in tree.body
+                if not (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in changed)]
+    return unchanged(old) == unchanged(current)
+
+
 def v3_reassessment_program_change(path: str, old: bytes, current: bytes, *,
                                    old_mode: str | None, new_mode: str | None) -> bool:
     """認証済み取得と新判定の差分だけをV3の明示再評価時に認める。"""
@@ -385,20 +399,50 @@ def v3_reassessment_program_change(path: str, old: bytes, current: bytes, *,
     before = (hashlib.sha256(old).hexdigest(), len(old))
     after = (hashlib.sha256(current).hexdigest(), len(current))
     if path == "scripts/release/html_performance_source_reuse.py":
-        return before in V3_REASSESSMENT_SELF_PREDECESSORS and current == Path(__file__).read_bytes()
+        return (before in V3_REASSESSMENT_SELF_PREDECESSORS
+                and after == ("42995d2e0cf3a4d1e988c70699b909cdef73cb2058bddc4e48486746bd6a3dc9", 65857))
     if V3_REASSESSMENT_PROGRAM_PAIRS.get(path) != (before, after):
         return False
-    if path != "scripts/release/produce_html_performance_evidence.py":
-        return True
-    import ast
+    return path != "scripts/release/produce_html_performance_evidence.py" or _reassessment_producer_ast_matches(old, current, v4=False)
 
-    changed = {"load_closed_batch", "_reassessment_candidates", "_batch_policy_accepted",
-               "_validate_epoch_resume_contexts", "_verify_and_seal_catalog_batch", "produce"}
-    def unchanged(source: bytes) -> list[str]:
-        tree = ast.parse(source)
-        return [ast.dump(node, include_attributes=False) for node in tree.body
-                if not (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in changed)]
-    return unchanged(old) == unchanged(current)
+
+# V4のソース確定後、統合時に有限の組を固定する。
+V4_REASSESSMENT_PROGRAM_PAIRS: dict[str, frozenset[tuple[tuple[str, int], tuple[str, int]]]] = {
+    'Justfile': frozenset({(('26a60314d6f99585564ae828130c376726deee1f824c3250423631ba72a5e6b2', 85775), ('6b5ab582a4acd17d92ac4c3ca997ac637bfce4adf8236d4fb4955337afcc473b', 85802)), (('dbf845e130ad88db66d467e7ee39665c28b9dae95cc587c98e26035c704f3470', 85775), ('6b5ab582a4acd17d92ac4c3ca997ac637bfce4adf8236d4fb4955337afcc473b', 85802))}),
+    'scripts/html/performance-history.ts': frozenset({(('8e85ad5a2cb35702ed3af2db10523bd57ffe4c114d92016efcaec1c7e9a7fb9c', 7578), ('d5d49713dad9c362cf264d455d5ddd992f8841638bf243996ae8e96d16f6eac7', 7607)), (('9816902330d44dcdc17acc45f53927083665f8552cd2c31da1b352cd12cbc641', 6855), ('d5d49713dad9c362cf264d455d5ddd992f8841638bf243996ae8e96d16f6eac7', 7607))}),
+    'scripts/html/performance-history_test.ts': frozenset({(('14d802c65b4e9963b24726d7ebb307a04f97d73e11cb375c8532df3e8db9dd0b', 11664), ('6f798161f9b210b8c2fcef7dd1c752d40f3e6675c6ef6f7ed7f6dddf01233dd9', 13071)), (('7ab7eb760da1c7fc6fe100b0ff7690509ad6377fb3b5a7add7ec43640042f212', 9995), ('6f798161f9b210b8c2fcef7dd1c752d40f3e6675c6ef6f7ed7f6dddf01233dd9', 13071))}),
+    'scripts/release/html_performance_host_load_validation.py': frozenset({(('1122db2cae41f9077b03c313d52cb782b0e1063cd289ec611186b629f6acd9be', 10544), ('527966f32a04e641365dbf06d07002441ffc28ec9527f01cd522a430bd243178', 10616)), (('5002ba1bd630e232a95f799734775aba293fac2410e605fc78b6c618a939f39d', 10472), ('527966f32a04e641365dbf06d07002441ffc28ec9527f01cd522a430bd243178', 10616))}),
+    'scripts/release/html_performance_memory_evidence.py': frozenset({(('48f119be884e37ef525da9cb35e6e8e2498514031b63ddeaa9894b67a11828b1', 5188), ('f8a06ac169fea9712fc74923f7d82a0a1425d37c20bfd8c8df05db2aed2d38eb', 5424)), (('d490af4d926c124c660a2bae335211aea82c69e288d291695170a09fd0affb4a', 5417), ('f8a06ac169fea9712fc74923f7d82a0a1425d37c20bfd8c8df05db2aed2d38eb', 5424))}),
+    'scripts/release/html_performance_memory_evidence_test.py': frozenset({(('2d71c16ee3d6a30580fbf4bbe8b23ca72c957275d85e9b15245ec47db93ccd2a', 6782), ('316cf7ceaba4cab53336f9ef14fc0c84bbf38688521815f53b607b804e714324', 7139)), (('2f3b4d3b4af28f497e46891457cf6ae5f75794aad7078297b1562e6801ff34b3', 5289), ('316cf7ceaba4cab53336f9ef14fc0c84bbf38688521815f53b607b804e714324', 7139))}),
+    'scripts/release/html_performance_memory_policy.py': frozenset({(('c36424f254fc86d00d5f23ab8543154039230253ae6219679a93b50173cb7f0f', 7316), ('8864ab51bea24bcfd38adc52c24550121d0981b7b8cd189ba032eeddbf5b9ca2', 7506)), (('c9a513edaa64a0a5983237feef82e1bfaf438e681608eab2b040bb8ba780aef3', 6668), ('8864ab51bea24bcfd38adc52c24550121d0981b7b8cd189ba032eeddbf5b9ca2', 7506))}),
+    'scripts/release/html_performance_memory_policy_test.py': frozenset({(('c38d1f9894a42f115f87600be13cae0b5585997682ad5b4af92e86b785c4c8bb', 10900), ('8aa7a51fef9932a6112c04a1d14eb7da84596deb01434b60fe92444222956be2', 14655)), (('d22479fc07aa834cf6bc3456af9e34fd667b16e9400ae8acc9fe18baa5cfc656', 7128), ('8aa7a51fef9932a6112c04a1d14eb7da84596deb01434b60fe92444222956be2', 14655))}),
+    'scripts/release/html_performance_promotion.py': frozenset({(('7da57201fd9853c8da3d6445f03fece07577734a2ae5bee89a48a0fe4c19291b', 20638), ('fd462f5318069d00173250aa09aa0ebd65a11d3efe0a049b1f4ac8848ba2937b', 22979)), (('f4f60bef9976e010d402b8c883cafa8bdc0eebcbbf0f33e91ae255e2b68e0805', 22601), ('fd462f5318069d00173250aa09aa0ebd65a11d3efe0a049b1f4ac8848ba2937b', 22979))}),
+    'scripts/release/html_performance_promotion_test.py': frozenset({(('5f5344c9e2b794c8f38d87f837b5bfc9f3e0874d788d3cf0ab9e576b032038e8', 22985), ('f74bd1a78bd9b85d8db09029c9b6f4f9aa846adf752665787de0d85ea5f40802', 35275)), (('6c8381e7c303d4e8f9c75e0bbfdc61299b0f656648b815ed87766402fff67d59', 32877), ('f74bd1a78bd9b85d8db09029c9b6f4f9aa846adf752665787de0d85ea5f40802', 35275))}),
+    'scripts/release/html_performance_reference.py': frozenset({(('6b5dcbf020a1f8b201e29af2294f64033919762aef26b76d7b4ea2abbf42a0bd', 27317), ('821479c23a10c5efa1cc2a86e36516fd00b53a63dd1824825add66c493adbd4e', 27578)), (('f689af203b1807318de7b9ae0954e0e53f98bfb6894f759db7e3ec9980d9eccc', 27512), ('821479c23a10c5efa1cc2a86e36516fd00b53a63dd1824825add66c493adbd4e', 27578))}),
+    'scripts/release/html_performance_reference_test.py': frozenset({(('a997a465a52872b58104323a4672427f17f89b78e9f9c3e93916ff642517d5ea', 27474), ('2a2d9eb8956c8716ffe598d251b7f86dc748c28c4a6201035b617003f459cba3', 29049)), (('f94d5702eb640c405918160f9cf29e779fd72dbea93a785c441418716c66d9d3', 25103), ('2a2d9eb8956c8716ffe598d251b7f86dc748c28c4a6201035b617003f459cba3', 29049))}),
+    'scripts/release/html_performance_source_reuse_cli.py': frozenset({(('3a0114bf9859067a6d67468c4f48fdf5e1799eb1c6e1d2b63ad9811f74ff692c', 8685), ('d49416a4c83e18f177a0572b510a925ef41276e84d2d3ba8e735c732f06028a2', 10235)), (('e02659cbf4bfac9c8eebb0bb4c45c7254172474e5b5a7f7b9e07654e91bfaa9c', 9866), ('d49416a4c83e18f177a0572b510a925ef41276e84d2d3ba8e735c732f06028a2', 10235))}),
+    'scripts/release/html_performance_source_reuse_cli_test.py': frozenset({(('6e376322520047d3dd16471137e4ec326f1a732fb7d4e724d7eab1c98e7b67d5', 8841), ('5b5a97a585e37f4583f6321935847acfc092d84dd8f1f8d194c3df30f4408554', 11721)), (('e1531684372e64307eb41785dca1ce223898e95a5f65b1be84e31e6ebc916b60', 10590), ('5b5a97a585e37f4583f6321935847acfc092d84dd8f1f8d194c3df30f4408554', 11721))}),
+    'scripts/release/local_html_performance_evidence.py': frozenset({(('6f47f76911050667f0480902ce121b04e1befec6d1dcef39b9eb92b7dad8d29d', 17232), ('34a2e56ecac228ca5bd9ecfd2c605a5c182773402652ceadc9019d031ebfd3ca', 17378))}),
+    'scripts/release/local_html_performance_evidence_test.py': frozenset({(('97a51614a478f19e38a923813d75a913dc7ec6c659338c904109d3261c3f68df', 14399), ('d019f3fb492a3cae377a7c98a0046e087fd86359c3ee661a377fd061a07c99a7', 18001))}),
+    'scripts/release/produce_html_performance_evidence.py': frozenset({(('2803c2a0a5f212eaeff21334ca2b99e6c80e1fe46f6df232a2a6c20de581d555', 265983), ('43d967863089f9c2267326f2dde177db898861d1c0634f2e951eda7b212cbbff', 269141)), (('43cad2e67fc7aac594e3d120643fcdcb03e97462f40e04c0fdee8a8c9599c323', 263362), ('43d967863089f9c2267326f2dde177db898861d1c0634f2e951eda7b212cbbff', 269141))}),
+    'scripts/release/produce_html_performance_evidence_test.py': frozenset({(('5bd6152ae75b0b40bd0305453c746ef9020d9156b6f1f3c52ff0212f9b7723be', 313113), ('09e332a5143e9a3ec1edadc5d7b7d8d4ef55973de8d6c0ed3619643d860d9ac8', 319469)), (('cfcb9b4ac50cbea8e58c5d261664be0ca60504084b5b2cdc2edf582787a5f1d5', 311180), ('09e332a5143e9a3ec1edadc5d7b7d8d4ef55973de8d6c0ed3619643d860d9ac8', 319469))}),
+    'scripts/release/verify_html_performance_evidence.py': frozenset({(('c2d4b4a6b495d5a481006bf8d4f3569036647626c450d8329b9c29f8e129ed72', 258471), ('73ffb34fc4fd5d46a698059879e29753f546c10f53815b20df5d7a9d17468060', 268550)), (('f9446c16dee3734c80a57dbc1354a9afb99c454b7696582aae81c38aaf9b5cde', 266526), ('73ffb34fc4fd5d46a698059879e29753f546c10f53815b20df5d7a9d17468060', 268550))}),
+    'scripts/release/verify_html_performance_evidence_test.py': frozenset({(('bd1e61edf9de4b1f783cd5b2bc8f49c1bec8abddba9099df44a08fac600573aa', 285472), ('868e20d17e195e38d8e17cd65acca868c54d7fae3d2a92e3ee7f19d2253cfd5e', 301671)), (('f863b3302d585e927b8e57c13872bd0b61edf1b54cdb35198cbf2bb3d457876c', 294355), ('868e20d17e195e38d8e17cd65acca868c54d7fae3d2a92e3ee7f19d2253cfd5e', 301671))}),
+}
+
+
+def v4_reassessment_program_change(path: str, old: bytes, current: bytes, *,
+                                   old_mode: str | None, new_mode: str | None) -> bool:
+    if old_mode != "100644" or new_mode != "100644":
+        return False
+    before = (hashlib.sha256(old).hexdigest(), len(old))
+    after = (hashlib.sha256(current).hexdigest(), len(current))
+    if path == "scripts/release/html_performance_source_reuse.py":
+        return (before in V3_REASSESSMENT_SELF_PREDECESSORS
+                or before == ("42995d2e0cf3a4d1e988c70699b909cdef73cb2058bddc4e48486746bd6a3dc9", 65857)) and current == Path(__file__).read_bytes()
+    if (before, after) not in V4_REASSESSMENT_PROGRAM_PAIRS.get(path, frozenset()):
+        return False
+    return path != "scripts/release/produce_html_performance_evidence.py" or _reassessment_producer_ast_matches(old, current, v4=True)
 
 
 def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:

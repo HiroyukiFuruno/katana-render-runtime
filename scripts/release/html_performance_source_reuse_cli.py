@@ -127,8 +127,10 @@ def verify_reuse_request(request_path: Path, root: Path, *,
         original_version = None
         if has_eligibility and isinstance(eligibility, dict):
             measured = eligibility.get("measuredResult")
-            if isinstance(measured, dict) and measured.get("memoryPolicyVersion") == "html-memory-v3":
-                original_version = "html-memory-v3"
+            if isinstance(measured, dict) and measured.get("memoryPolicyVersion") in ("html-memory-v3", "html-memory-v4"):
+                original_version = measured["memoryPolicyVersion"]
+                if not isinstance(original_version, str):
+                    raise ValueError("invalid stored memory policy version")
         original = (_validate(request, root.resolve(strict=True), memory_policy_version=original_version)
                     if has_eligibility else None)
         if has_eligibility and (eligibility != original or original is None
@@ -179,7 +181,9 @@ def main() -> int:
     parser.add_argument("--current-build-artifact-path", required=True)
     parser.add_argument("--current-build-artifact-sha256", required=True)
     parser.add_argument("--request-output", type=Path, required=True)
-    parser.add_argument("--require-memory-policy-v3", action="store_true")
+    policy_group = parser.add_mutually_exclusive_group()
+    policy_group.add_argument("--require-memory-policy-v3", action="store_true")
+    policy_group.add_argument("--require-memory-policy-v4", action="store_true")
     args = parser.parse_args()
     request: ReuseRequest = {
         "schema": SCHEMA, "measuredDir": args.measured_dir,
@@ -191,7 +195,7 @@ def main() -> int:
     }
     try:
         result = create_request(request, args.request_output, args.repo,
-                                memory_policy_version="html-memory-v3" if args.require_memory_policy_v3 else None)
+                                memory_policy_version="html-memory-v4" if args.require_memory_policy_v4 else "html-memory-v3" if args.require_memory_policy_v3 else None)
         print(json.dumps(result, sort_keys=True))
         return 0
     except (OSError, ValueError, KeyError) as error:

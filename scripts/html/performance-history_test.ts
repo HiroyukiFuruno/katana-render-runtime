@@ -65,6 +65,20 @@ function addV2Record(history: PerformanceHistory): PerformanceHistoryRecord {
   return record;
 }
 
+function validMemoryPolicyV4(
+  _record: PerformanceHistoryRecord,
+): NonNullable<PerformanceHistoryRecord["memoryPolicy"]> {
+  return {
+    version: "html-memory-v4",
+    policySha256: "e".repeat(64),
+    retentionEvidenceSha256: "f".repeat(64),
+    candidateConditions: 84,
+    acceptedConditions: 84,
+    warmupCycles: 5,
+    measuredCycles: 25,
+  };
+}
+
 function addV3Record(history: PerformanceHistory): PerformanceHistoryRecord {
   history.schema = "krr-html-performance-history-v2";
   const record = structuredClone(firstRecord(history));
@@ -110,6 +124,15 @@ function expectInvalidMemoryPolicyChanges(
     change(addRecord(history));
     expect(() => parsePerformanceHistory(history)).toThrow();
   }
+}
+
+function addV4Record(history: PerformanceHistory): PerformanceHistoryRecord {
+  history.schema = "krr-html-performance-history-v2";
+  const record = structuredClone(firstRecord(history));
+  record.id = "html-memory-v4-record";
+  record.memoryPolicy = validMemoryPolicyV4(record);
+  history.records.push(record);
+  return record;
 }
 
 function runHistoryCli(args: string[]): ReturnType<typeof Bun.spawnSync> {
@@ -234,12 +257,29 @@ test("accepts v3 policy evidence alongside unchanged v1 and v2 records", () => {
   expect(activeReference(parsed).id).toBe(history.activeReferenceRecordId);
 });
 
+test("accepts v4 evidence alongside unchanged v1, v2, and v3 records", () => {
+  const history = fixture();
+  const legacy = structuredClone(firstRecord(history));
+  const v2Record = addV2Record(history);
+  const v3Record = addV3Record(history);
+  const v4Record = addV4Record(history);
+  const parsed = parsePerformanceHistory(history);
+  expect(parsed.records[0]).toEqual(legacy);
+  expect(v2Record.memoryPolicy?.version).toBe("html-memory-v2");
+  expect(v3Record.memoryPolicy?.version).toBe("html-memory-v3");
+  expect(v4Record.memoryPolicy).toEqual(validMemoryPolicyV4(v4Record));
+});
+
 test("rejects malformed or incomplete v2 memory policy evidence", () => {
   expectInvalidMemoryPolicyChanges(addV2Record);
 });
 
 test("rejects malformed or incomplete v3 memory policy evidence", () => {
   expectInvalidMemoryPolicyChanges(addV3Record);
+});
+
+test("rejects malformed or incomplete v4 memory policy evidence", () => {
+  expectInvalidMemoryPolicyChanges(addV4Record);
 });
 
 test("rejects a reference that does not meet its recorded acceptance", () => {

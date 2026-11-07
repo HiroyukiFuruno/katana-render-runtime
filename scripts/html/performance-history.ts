@@ -25,16 +25,17 @@ const memoryPolicyV2 = z.strictObject({
   warmupCycles: z.literal(5),
   measuredCycles: z.literal(25),
 });
-const memoryPolicyV3 = z.strictObject({
+const memoryPolicyV3 = memoryPolicyV2.extend({
   version: z.literal("html-memory-v3"),
-  policySha256: sha256,
-  retentionEvidenceSha256: sha256,
-  candidateConditions: count,
-  acceptedConditions: count,
-  warmupCycles: z.literal(5),
-  measuredCycles: z.literal(25),
 });
-const memoryPolicy = z.discriminatedUnion("version", [memoryPolicyV2, memoryPolicyV3]);
+const memoryPolicyV4 = memoryPolicyV2.extend({
+  version: z.literal("html-memory-v4"),
+});
+const memoryPolicy = z.discriminatedUnion("version", [
+  memoryPolicyV2,
+  memoryPolicyV3,
+  memoryPolicyV4,
+]);
 const seconds = z.number().finite().nonnegative();
 const phase = z
   .strictObject({
@@ -119,8 +120,12 @@ const record = z
           message: "memory policy must accept every recorded candidate condition",
         });
       }
-      if (entry.memoryPolicy.version === "html-memory-v3" &&
-          (entry.memoryPolicy.candidateConditions !== 84 || entry.memoryPolicy.acceptedConditions !== 84)) {
+      if (
+        (entry.memoryPolicy.version === "html-memory-v3" ||
+          entry.memoryPolicy.version === "html-memory-v4") &&
+        (entry.memoryPolicy.candidateConditions !== 84 ||
+          entry.memoryPolicy.acceptedConditions !== 84)
+      ) {
         context.addIssue({
           code: "custom",
           path: ["memoryPolicy", "candidateConditions"],

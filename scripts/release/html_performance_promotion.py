@@ -56,6 +56,7 @@ def _measure(bundle: gate.Bundle, result: gate.JsonObject) -> tuple[bool, gate.J
     attempts = gate._objects(bundle.manifest["attempts"], "promotion attempts")
     gate.require(len(attempts) == 84, "promotion attempt inventory differs")
     improvement = False
+    rss_nonregression = True
     elapsed: dict[str, list[float]] = {phase: [] for phase in gate.PHASES}
     rss: dict[str, list[float]] = {phase: [] for phase in gate.PHASES}
     for attempt in attempts:
@@ -73,11 +74,14 @@ def _measure(bundle: gate.Bundle, result: gate.JsonObject) -> tuple[bool, gate.J
                 baseline, candidate = samples["baseline"], samples["candidate"]
                 memory_policy_version = result.get("memoryPolicyVersion")
                 if index == 0 or memory_policy_version not in (
-                    "html-memory-v2", "html-memory-v3",
+                    "html-memory-v2", "html-memory-v3", "html-memory-v4",
                 ):
                     improvement |= _compare(baseline, candidate)
                 else:
-                    # WHY: v2/v3は正式gateで許容したpeak増加を履歴判定で再度拒否しない。
+                    rss_nonregression &= not statistics.evaluate_paired_regression(
+                        baseline, candidate,
+                    ).detected_bad
+                    # WHY: V4受入で許容したRSS増加でも、基準昇格では全RSSの非劣化を求める。
                     improvement |= statistics.evaluate_paired_regression(
                         candidate, baseline,
                     ).detected_bad
@@ -93,7 +97,7 @@ def _measure(bundle: gate.Bundle, result: gate.JsonObject) -> tuple[bool, gate.J
             "p95Seconds": gate._percentile(elapsed[phase], 0.95) / 1000,
             "maxPeakRssBytes": int(max(rss[phase])),
         }
-    return improvement, phases
+    return improvement and rss_nonregression, phases
 
 
 def _verified_reuse(request: Path, root: Path, directory: Path, manifest_sha: str,
@@ -101,7 +105,7 @@ def _verified_reuse(request: Path, root: Path, directory: Path, manifest_sha: st
     result = reuse.verify_reuse_request(
         request, root, expected_measured_dir=directory,
         expected_measured_manifest_sha256=manifest_sha, expected_request_sha256=request_sha,
-        memory_policy_version="html-memory-v3",
+        memory_policy_version="html-memory-v4",
     )
     gate.require(result.get("reuseEligibility") is True, "performance reuse is not eligible")
     return result
@@ -118,8 +122,8 @@ def improvement_established(directory: Path, root: Path, *, reuse_request: Path 
                    if reuse_request is not None and request_sha is not None else None)
     result = (gate._object(eligibility.get("measuredResult"), "reused measured result")
               if eligibility is not None else
-              gate.verify(directory, root, memory_policy_version="html-memory-v3"))
-    gate._require_cli_memory_v3(result, reused=False)
+              gate.verify(directory, root, memory_policy_version="html-memory-v4"))
+    gate._require_cli_memory_v4(result, reused=False)
     gate.require(gate.sha256(directory / "bundle.json") == manifest_sha,
                  "promotion bundle changed during verification")
     improvement, _ = _measure(gate.Bundle(directory), result)
@@ -179,18 +183,19 @@ def _memory_policy_record(bundle: gate.Bundle, result: gate.JsonObject) -> gate.
             "candidateConditions": 84, "acceptedConditions": 84,
             "warmupCycles": 5, "measuredCycles": 25,
         }}
-    gate.require(version == "html-memory-v3", "promotion memory policy version differs")
+    gate.require(version in ("html-memory-v3", "html-memory-v4"), "promotion memory policy version differs")
     assessments = gate._objects(result["memoryPolicyAssessments"], "memory policy assessments")
     gate.require(len(assessments) == 84, "memory policy assessment count differs")
     fields = {"conditionId", "version", "policySha256", "retentionSha256",
               "originalPolicyVersion", "originalPolicySha256"}
+    original_versions = (("html-memory-v2", "html-memory-v3")
+                         if version == "html-memory-v3" else
+                         ("html-memory-v2", "html-memory-v3", "html-memory-v4"))
     condition_ids: list[str] = []
     for assessment in assessments:
         gate.require(set(assessment) == fields
-                     and assessment.get("version") == "html-memory-v3"
-                     and assessment.get("originalPolicyVersion") in (
-                         "html-memory-v2", "html-memory-v3",
-                     ),
+                     and assessment.get("version") == version
+                     and assessment.get("originalPolicyVersion") in original_versions,
                      "memory policy assessment fields differ")
         condition_ids.append(gate._text(assessment.get("conditionId"), "condition id"))
         for key in ("policySha256", "retentionSha256", "originalPolicySha256"):
@@ -204,7 +209,7 @@ def _memory_policy_record(bundle: gate.Bundle, result: gate.JsonObject) -> gate.
         key=lambda item: gate._text(item["conditionId"], "condition id"),
     )
     return {"memoryPolicy": {
-        "version": "html-memory-v3", "policySha256": gate._v3_json_digest(assessments),
+        "version": version, "policySha256": gate._v3_json_digest(assessments),
         "retentionEvidenceSha256": gate._v3_json_digest(retention),
         "candidateConditions": 84, "acceptedConditions": 84,
         "warmupCycles": 5, "measuredCycles": 25,
@@ -284,7 +289,7 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, 
     stderr_path = evidence_directory / "verifier.stderr"
     argv = [sys.executable, str(root / "scripts/release/verify_html_performance_evidence.py"),
             "--repo", str(root), "--evidence-dir", str(directory),
-            "--require-memory-policy-v3"]
+            "--require-memory-policy-v4"]
     if reuse_request is not None:
         argv.extend(["--reuse-request", str(reuse_request)])
     with (evidence_directory / "command.json").open("x", encoding="utf8") as command:
@@ -303,7 +308,7 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, 
     if eligibility is not None:
         gate.require(verified == eligibility, "performance reuse verification differs")
         verified = gate._object(verified.get("measuredResult"), "reused measured result")
-    gate._require_cli_memory_v3(verified, reused=False)
+    gate._require_cli_memory_v4(verified, reused=False)
     bundle = gate.Bundle(directory)
     improvement, phases = _measure(bundle, verified)
     gate.require(dict(os.environ) == execution_environment, "promotion environment changed during comparison")

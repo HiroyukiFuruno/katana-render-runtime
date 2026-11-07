@@ -30,12 +30,17 @@ class MemoryEvidenceTest(unittest.TestCase):
         retained = [40 * policy.MIB] * 15 + [44 * policy.MIB] * 10
         legacy = evidence.evaluate_paired(self.paths, self.expected, retained,
                                           policy_version=policy.LEGACY_POLICY_VERSION)
-        current = evidence.evaluate_paired(self.paths, self.expected, retained)
+        current = evidence.evaluate_paired(self.paths, self.expected, retained,
+                                           policy_version=policy.PREVIOUS_POLICY_VERSION)
+        latest = evidence.evaluate_paired(self.paths, self.expected, retained)
         self.assertEqual(legacy["version"], policy.LEGACY_POLICY_VERSION)
-        self.assertEqual(current["version"], policy.POLICY_VERSION)
+        self.assertEqual(current["version"], policy.PREVIOUS_POLICY_VERSION)
+        self.assertEqual(latest["version"], policy.POLICY_VERSION)
         self.assertEqual(legacy["v1Policy"], current["v1Policy"])
+        self.assertEqual(current["v1Policy"], latest["v1Policy"])
         self.assertFalse(legacy["policyPass"])
         self.assertTrue(current["policyPass"])
+        self.assertTrue(latest["policyPass"])
         with self.assertRaisesRegex(ValueError, "unsupported memory policy version"):
             evidence.evaluate_paired(self.paths, self.expected, retained, policy_version="unknown")
 

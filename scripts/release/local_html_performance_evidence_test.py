@@ -129,8 +129,55 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
             verifier = stack.enter_context(patch.object(gate, "verify", side_effect=ValueError("failed")))
             with self.assertRaisesRegex(ValueError, "failed"):
                 proof.collect("owner/repo", 3, Path("/unused"))
-            verifier.assert_called_once()
+            verifier.assert_called_once_with(Path("/unused"), mac.ROOT,
+                                              memory_policy_version="html-memory-v4")
             self.assertTrue(all(call.args[1] != "POST" for call in api.call_args_list))
+
+    def test_collector_requires_v4_for_fresh_and_rejects_legacy_results(self) -> None:
+        from contextlib import ExitStack
+        from pathlib import Path
+        formal: dict[str, object] = {
+            "head": "c" * 40, "conditions": 84, "candidateConditions": 84,
+            "checks": 1680, "memoryPolicyVersion": "html-memory-v4",
+            "retainedMemoryConditions": 84, "memoryPolicyAssessments": [{}] * 84,
+        }
+        with ExitStack() as stack:
+            for name, value in (("system", "Darwin"), ("machine", "arm64"), ("platform", "host")):
+                stack.enter_context(patch.object(platform, name, return_value=value))
+            mac_patches: tuple[tuple[str, object], ...] = (
+                ("macos_product_version", "27.2"),
+                ("require_standard_index_flags", None), ("git_status", ""),
+                ("workflow_scope_supported", True),
+                ("head_worktree_bytes_digest", "source"),
+                ("workflow_digest", self.workflow), ("gh_token", "token"),
+                ("canonical_owner", "owner"), ("validate_pr", ("b" * 40, "c" * 40)),
+                ("base_is_merged", True), ("utc_now", "2027-01-01T00:00:00Z"),
+            )
+            for patch_name, patch_return_value in mac_patches:
+                stack.enter_context(patch.object(mac, patch_name, return_value=patch_return_value))
+            stack.enter_context(patch.object(mac, "run_git", side_effect=lambda *args:
+                                            "b" * 40 if args[0] == "merge-base" else "c" * 40))
+            stack.enter_context(patch.object(mac, "api_request", return_value={"login": "owner"}))
+            stack.enter_context(patch.object(gate, "sha256", return_value="d" * 64))
+            stack.enter_context(patch.object(proof, "installed_identity", return_value="f" * 64))
+            stack.enter_context(patch.object(proof, "require_measurement_host"))
+            stack.enter_context(patch.object(importlib.metadata, "version", return_value="1.18.1"))
+            verify = stack.enter_context(patch.object(gate, "verify", return_value=formal))
+            require_v4 = stack.enter_context(patch.object(
+                gate, "_require_cli_memory_v4", wraps=gate._require_cli_memory_v4))
+            proof.collect("owner/repo", 3, Path("/unused"))
+            verify.assert_called_once_with(Path("/unused"), mac.ROOT,
+                                           memory_policy_version="html-memory-v4")
+            require_v4.assert_called_once_with(formal, reused=False)
+
+        with self.assertRaisesRegex(ValueError, "v4 retained memory"):
+            gate._require_cli_memory_v4({}, reused=False)
+        legacy: gate.JsonObject = {
+            "memoryPolicyVersion": "html-memory-v3", "retainedMemoryConditions": 84,
+            "memoryPolicyAssessments": [{}] * 84,
+        }
+        with self.assertRaisesRegex(ValueError, "v4 retained memory"):
+            gate._require_cli_memory_v4(legacy, reused=False)
 
     def test_reuse_projection_binds_measured_result_and_eligibility(self) -> None:
         from contextlib import ExitStack
@@ -138,7 +185,10 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
         measured, request = Path("/bundle"), Path("/request")
         old, head = "a" * 40, "c" * 40
         formal: dict[str, object] = {"head": old, "conditions": 84,
-                                      "candidateConditions": 84, "checks": 1680}
+                                      "candidateConditions": 84, "checks": 1680,
+                                      "memoryPolicyVersion": "html-memory-v4",
+                                      "retainedMemoryConditions": 84,
+                                      "memoryPolicyAssessments": [{}] * 84}
         reused: dict[str, object] = {"measuredHead": old, "eligibleHead": head,
                                       "reuseEligibility": True, "measuredResult": formal,
                                       "reuseKind": "test-source-artifact-equivalence-v1"}
@@ -158,6 +208,8 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
             digest = stack.enter_context(patch.object(gate, "sha256", return_value="f" * 64))
             stack.enter_context(patch.object(gate, "Bundle", return_value=unittest.mock.Mock(manifest={"head": old})))
             stack.enter_context(patch.object(gate, "_require_formal_release_result"))
+            require_v4 = stack.enter_context(patch.object(
+                gate, "_require_cli_memory_v4", wraps=gate._require_cli_memory_v4))
             stack.enter_context(patch.object(proof, "require_measurement_host"))
             stack.enter_context(patch.object(proof, "installed_identity", return_value="d" * 64))
             stack.enter_context(patch.object(importlib.metadata, "version", return_value="1.18.1"))
@@ -168,7 +220,9 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
             self.assertEqual(result["verification_kind"], "test-source-artifact-equivalence-v1")
             verify.assert_called_with(request, mac.ROOT, expected_measured_dir=measured,
                                       expected_measured_manifest_sha256="f" * 64,
-                                      expected_request_sha256="f" * 64)
+                                      expected_request_sha256="f" * 64,
+                                      memory_policy_version="html-memory-v4")
+            require_v4.assert_called_with(formal, reused=False)
             reused["reuseKind"] = "program-source-artifact-equivalence-v1"
             self.assertEqual(proof.collect("owner/repo", 3, measured, request)["verification_kind"],
                              "program-source-artifact-equivalence-v1")

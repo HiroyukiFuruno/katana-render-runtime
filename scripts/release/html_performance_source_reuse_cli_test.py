@@ -181,5 +181,21 @@ class ReuseRequestTest(unittest.TestCase):
         self.assertEqual(verify.call_args.kwargs["memory_policy_version"], "html-memory-v3")
 
 
+    def test_v4_reassessment_revalidates_original_v3_first(self) -> None:
+        original = {"measuredHead": "old", "eligibleHead": "new",
+                    "reuseKind": "test-source-artifact-equivalence-v1",
+                    "measuredResult": {"memoryPolicyVersion": "html-memory-v3"}}
+        reassessed = {**original, "measuredResult": {"memoryPolicyVersion": "html-memory-v4"}}
+        with patch.object(gate, "verify_source_reuse", return_value=original):
+            cli.create_request(self.request, self.output, self.root, memory_policy_version="html-memory-v3")
+        before = self.output.read_bytes()
+        with patch.object(gate, "verify_source_reuse", side_effect=[original, reassessed]) as verify:
+            self.assertEqual(cli.verify_reuse_request(
+                self.output, self.root, memory_policy_version="html-memory-v4"), reassessed)
+        self.assertEqual(self.output.read_bytes(), before)
+        self.assertEqual(verify.call_args_list[0].kwargs["memory_policy_version"], "html-memory-v3")
+        self.assertEqual(verify.call_args_list[1].kwargs["memory_policy_version"], "html-memory-v4")
+
+
 if __name__ == "__main__":
     unittest.main()
