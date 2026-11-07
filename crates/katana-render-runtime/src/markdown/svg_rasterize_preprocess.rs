@@ -17,12 +17,12 @@ const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
 
 pub(super) fn preprocess_for_rasterizer(svg_text: &str) -> String {
     let with_xml_entities = normalize_html_entities_for_xml(svg_text);
-    let without_foreign_objects = strip_foreign_objects(&with_xml_entities);
+    let without_foreign_objects = strip_foreign_objects(with_xml_entities);
     let with_normalized_styles =
         style_prefix::normalize_inline_style_prefixes(&without_foreign_objects)
             .unwrap_or(without_foreign_objects);
-    let with_resolved_colors = resolve_light_dark_functions(&with_normalized_styles);
-    let with_normalized_shadows = shadow::normalize_filter_shadow_colors(&with_resolved_colors);
+    let with_resolved_colors = resolve_light_dark_functions(with_normalized_styles);
+    let with_normalized_shadows = shadow::normalize_filter_shadow_colors(with_resolved_colors);
     let with_normalized_markers = marker::normalize_marker_selectors(with_normalized_shadows);
     geometry::materialize_geometry_properties(with_normalized_markers)
 }
@@ -38,24 +38,27 @@ fn normalize_html_entities_for_xml(svg_text: &str) -> String {
     svg_text.replace("&nbsp;", "&#160;")
 }
 
-fn strip_foreign_objects(svg_text: &str) -> String {
+fn strip_foreign_objects(svg_text: String) -> String {
     if !svg_text
         .as_bytes()
         .windows(FOREIGN_OBJECT_LOCAL_NAME.len())
         .any(|bytes| bytes.eq_ignore_ascii_case(FOREIGN_OBJECT_LOCAL_NAME.as_bytes()))
     {
-        return svg_text.to_owned();
+        return svg_text;
     }
-    let Ok(document) = resvg::usvg::roxmltree::Document::parse(svg_text) else {
-        return svg_text.to_owned();
+    let Ok(document) = resvg::usvg::roxmltree::Document::parse(&svg_text) else {
+        return svg_text;
     };
-    let edits = document
+    let edits: Vec<_> = document
         .descendants()
         .filter(|node| is_foreign_object(*node))
         .filter(|node| !node.ancestors().skip(1).any(is_foreign_object))
         .map(|node| source_edits::SourceEdit::new(node.range(), String::new()))
         .collect();
-    source_edits::apply_source_edits(svg_text, edits, false)
+    if edits.is_empty() {
+        return svg_text;
+    }
+    source_edits::apply_source_edits(&svg_text, edits, false)
 }
 
 fn is_foreign_object(node: resvg::usvg::roxmltree::Node<'_, '_>) -> bool {
@@ -74,28 +77,37 @@ fn is_foreign_object(node: resvg::usvg::roxmltree::Node<'_, '_>) -> bool {
 #[path = "svg_rasterize_preprocess_foreign_object_tests.rs"]
 mod foreign_object_tests;
 
-fn resolve_light_dark_functions(svg_text: &str) -> String {
-    let mut result = String::with_capacity(svg_text.len());
-    let mut remaining = svg_text;
+fn resolve_light_dark_functions(svg_text: String) -> String {
+    let mut result = None;
+    let mut remaining = svg_text.as_str();
+    let mut copied_until = 0;
     while let Some(start) = find_light_dark_function(remaining) {
         let content_start = start + LIGHT_DARK_FUNCTION.len();
-        result.push_str(&remaining[..start]);
         let Some((content_end, light_color)) =
             parse_light_dark_function(&remaining[content_start..])
         else {
-            result.push_str(&remaining[start..content_start]);
             remaining = &remaining[content_start..];
             continue;
         };
+        let offset = svg_text.len() - remaining.len();
+        let result = result.get_or_insert_with(|| String::with_capacity(svg_text.len()));
+        result.push_str(&svg_text[copied_until..offset + start]);
         result.push_str(light_color.trim());
         remaining = &remaining[content_start + content_end + 1..];
+        copied_until = svg_text.len() - remaining.len();
     }
-    result.push_str(remaining);
-    result
+    if let Some(mut result) = result {
+        result.push_str(&svg_text[copied_until..]);
+        result
+    } else {
+        svg_text
+    }
 }
 
 fn find_light_dark_function(text: &str) -> Option<usize> {
-    text.to_ascii_lowercase().find(LIGHT_DARK_FUNCTION)
+    text.as_bytes()
+        .windows(LIGHT_DARK_FUNCTION.len())
+        .position(|bytes| bytes.eq_ignore_ascii_case(LIGHT_DARK_FUNCTION.as_bytes()))
 }
 
 pub(super) fn parse_light_dark_function(content: &str) -> Option<(usize, &str)> {
@@ -125,16 +137,19 @@ mod allocation_tests {
     use super::{resolve_light_dark_functions, shadow, strip_foreign_objects};
 
     #[test]
-    fn unchanged_svg_preprocess_stages_preserve_content() {
+    fn unchanged_svg_preprocess_stages_reuse_the_input_buffer() {
         let source = "<svg><title>日本語</title></svg>";
-        let stages: [fn(&str) -> String; 3] = [
+        let stages: [fn(String) -> String; 3] = [
             strip_foreign_objects,
             resolve_light_dark_functions,
-            |source| shadow::normalize_filter_shadow_colors(source),
+            shadow::normalize_filter_shadow_colors,
         ];
         for normalize in stages {
-            let output = normalize(source);
+            let input = source.to_owned();
+            let address = input.as_ptr();
+            let output = normalize(input);
             assert_eq!(output, source);
+            assert_eq!(output.as_ptr(), address);
         }
     }
 
@@ -142,7 +157,7 @@ mod allocation_tests {
     fn light_dark_preprocess_preserves_malformed_calls_between_valid_calls() {
         let input = "日本語 LiGhT-DaRk(#111,#eee) light-dark(#123) LIGHT-DARK(#222,#fff)";
         assert_eq!(
-            resolve_light_dark_functions(input),
+            resolve_light_dark_functions(input.to_owned()),
             "日本語 #111 light-dark(#123) #222"
         );
     }
