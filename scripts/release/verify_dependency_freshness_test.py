@@ -1174,6 +1174,10 @@ target-build = "=3.0.0"
             "    Updating crc32fast v1.5.3 -> v1.5.4": True,
             "Locking 1 package to latest compatible version\n"
             "    Updating flate2 v1.1.10 -> v1.1.11": True,
+            "Locking 1 package to latest compatible version\n"
+            "    Updating smallvec v1.16.4 -> v1.16.5": True,
+            "Locking 1 package to latest compatible version\n"
+            "    Updating smallvec v1.16.4 -> v1.16.6": False,
             ("Locking 4 packages to latest compatible versions\n"
              "    Adding utf_types v1.0.0\n"
              "    Updating utf8_iter v1.0.4 -> v1.1.0\n"
@@ -1229,13 +1233,15 @@ target-build = "=3.0.0"
         registry = "registry+https://github.com/rust-lang/crates.io-index"
         parent = (
             'version = 4\n[[package]]\nname = "krr-html-performance-harness"\n'
-            'version = "0.1.0"\ndependencies = ["utf8_iter", "crc32fast", "flate2"]\n'
+            'version = "0.1.0"\ndependencies = ["utf8_iter", "crc32fast", "flate2", "smallvec"]\n'
             f'[[package]]\nname = "utf8_iter"\nversion = "1.0.4"\nsource = "{registry}"\n'
             f'checksum = "{"a" * 64}"\n'
             f'[[package]]\nname = "crc32fast"\nversion = "1.5.3"\nsource = "{registry}"\n'
             f'checksum = "{"b" * 64}"\n'
             f'[[package]]\nname = "flate2"\nversion = "1.1.10"\nsource = "{registry}"\n'
             f'checksum = "{"d" * 64}"\n'
+            f'[[package]]\nname = "smallvec"\nversion = "1.16.4"\nsource = "{registry}"\n'
+            f'checksum = "{"e" * 64}"\n'
         ).encode()
         root_lock = self.root / "Cargo.lock"
         harness_lock = self.root / "scripts/html/performance-harness/Cargo.lock"
@@ -1245,7 +1251,7 @@ target-build = "=3.0.0"
             for lock in (root_lock, harness_lock):
                 lock.write_bytes(parent)
             freshness.verify_current_utf8_iter_retention(self.root)
-            for package, checksum in (("crc32fast", b"b"), ("flate2", b"d")):
+            for package, checksum in (("crc32fast", b"b"), ("flate2", b"d"), ("smallvec", b"e")):
                 changed = parent.replace(checksum * 64, b"c" * 64)
                 for lock in (root_lock, harness_lock):
                     with self.subTest(package=package, lock=lock):

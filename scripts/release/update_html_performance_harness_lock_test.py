@@ -24,13 +24,15 @@ class UpdateHtmlPerformanceHarnessLockTest(unittest.TestCase):
         registry = "registry+https://github.com/rust-lang/crates.io-index"
         return (
             'version = 4\n[[package]]\nname = "krr-html-performance-harness"\n'
-            'version = "0.1.0"\ndependencies = ["utf8_iter", "crc32fast", "flate2"]\n'
+            'version = "0.1.0"\ndependencies = ["utf8_iter", "crc32fast", "flate2", "smallvec"]\n'
             f'[[package]]\nname = "utf8_iter"\nversion = "1.0.4"\nsource = "{registry}"\n'
             f'checksum = "{"a" * 64}"\n'
             f'[[package]]\nname = "crc32fast"\nversion = "1.5.3"\nsource = "{registry}"\n'
             f'checksum = "{"b" * 64}"\n'
             f'[[package]]\nname = "flate2"\nversion = "1.1.10"\nsource = "{registry}"\n'
             f'checksum = "{"d" * 64}"\n'
+            f'[[package]]\nname = "smallvec"\nversion = "1.16.4"\nsource = "{registry}"\n'
+            f'checksum = "{"e" * 64}"\n'
         ).encode()
 
     @staticmethod
@@ -75,12 +77,16 @@ class UpdateHtmlPerformanceHarnessLockTest(unittest.TestCase):
         parent = self.retained_parent()
         plan = MODULE.retention_plan(parent)
         self.assertEqual([(item.name, item.version) for item in plan],
-                         [("utf8_iter", "1.0.4"), ("crc32fast", "1.5.3"), ("flate2", "1.1.10")])
+                         [("utf8_iter", "1.0.4"), ("crc32fast", "1.5.3"),
+                          ("flate2", "1.1.10"), ("smallvec", "1.16.4")])
         self.assertTrue(all(item.reason for item in plan))
         MODULE.verify_retained_packages(parent, (parent, parent), plan)
         changed = parent.replace(b'"1.5.3"', b'"1.5.4"')
         with self.assertRaisesRegex(ValueError, "retain immutable crc32fast"):
             MODULE.verify_retained_packages(parent, (parent, changed), plan)
+        changed_smallvec = parent.replace(b'"1.16.4"', b'"1.16.5"')
+        with self.assertRaisesRegex(ValueError, "retain immutable smallvec"):
+            MODULE.verify_retained_packages(parent, (changed_smallvec, parent), plan)
         with self.assertRaises(ValueError):
             MODULE.retention_plan(parent.replace(b'"crc32fast"', b'"missing-crc"'))
         duplicate = parent + (
@@ -90,6 +96,16 @@ class UpdateHtmlPerformanceHarnessLockTest(unittest.TestCase):
         ).encode()
         with self.assertRaises(ValueError):
             MODULE.retention_plan(duplicate)
+
+    def test_smallvec_retention_tracks_the_pinned_harness_url_closure(self) -> None:
+        parent = MODULE.load_pinned_parent_lock(ROOT)
+        _harness, _roots, closure = MODULE._harness_closure(parent)
+        smallvec = next(identity for identity in closure if identity[0] == "smallvec")
+        self.assertEqual(smallvec[1], "1.16.4")
+        self.assertTrue(any(identity[0] == "idna" and smallvec in record[1]
+                            for identity, record in closure.items()))
+        self.assertIn(("smallvec", smallvec[1]),
+                      [(item.name, item.version) for item in MODULE.retention_plan(parent)])
 
     def test_depends_update_runs_retention_updater_after_both_generic_lock_updates(self) -> None:
         justfile = (ROOT / "Justfile").read_text(encoding="utf-8")

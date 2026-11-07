@@ -2,6 +2,11 @@
 
 ## 現在の実行地点（2026-11-08、以下の過去結果と区別する）
 
+- [x] メモリv2実装を `391fce40dd96ddfd9227e718dc1240d41bb51914` へ通常commit。fmt・AST・root/harness Clippyを含むhookは実0、32fileを統合し、先行の品質fixture7fileは `f2c8c12a912e8b22730cd5156e93ed3c29ce23cd` へ分離した。通常buildのv2実測はまだ0/84であり、実装commitを性能合格へ置き換えない。
+- [x] `depends-update-mutations-retry-hu2hgca0` の既存標準mutationが実0。root/harnessのuuidを1.29.0から1.29.1へ更新。smallvec1.16.5は公式差分がCI・コメント・整形のみのため、固定parentの非SDK計測条件を保ち1.16.4を両lockで保持する判断をmainが行った。将来の更新は自動許可しない。`dependency-freshness-verify-7re4roll` はfoundation、updater13・closure11・freshness74の計98unit、実freshness528依存が全段実0、source前後一致。Actions63参照のupstream一致と区別して記録する。
+- [ ] 次は依存更新の通常commit、memory/依存commitのrelease inclusionとmanifest・snapshot最終同期、新SDK proof、通常buildでv2の1条件pilot、全84への展開。最後の全Python回帰は1278件でmanifest1失敗のまま保持し、最終gateで全体を回収する。root未カバー1256は旧source値、cache実再利用・最新版の描画・完全gate・review/3OS/公開も未完。
+- [/] native cacheの読取り結論を訂正。通常root report/receipt/anchorは既存validatorでinodeを束縛せず、別途保護stampのない出力は既存Moon CASから復元・再認証できる。新framework/出力overrideの追加を既定にしない。実行計画は `tmp/quality/resumed-owner-r3509/native-cache-binding-review-nov08.md` に保存し、実hit/restoreを先に、anchorをinvalidateする改変拒否・正規再収集を後に行う。実証は未実行。
+
 - [/] `verifier-historical-terra-kehho8yu` はLint・strict型・verifier全186件が実0。標準release全回帰は1278件で実1、残った失敗は既存HEADのrelease内容manifest不一致1件（既存opt-in skip1）だった。3件の歴史正例は既存認証済み7d8c/e1bc/3469のimmutable bytesへ固定し、現v2を旧epochへ再利用する拒否負例を保持。v2 productionを旧v1と等価にする例外は追加していない。
 - [x] `release-target-head-sync-lod04wk2` で既存recipeによるHEAD5fのmanifest同期と対象22件が実0。これは現HEADの暫定同期であり、新しい実装commit後に必要commit・manifest・snapshotを再同期する。`dependency-freshness-nov08-_wau9a25` はRust lockの最新互換解決との差で実1。JS/runtimeは未判定のまま、検証済み差分の通常commit後に既存mutation recipeで依存更新を取り込む。Actionsは `actions-freshness-nov08-07uylulw/safe-summary.json` で全63参照のworktree pinと担当のupstream照合結果が一致し、更新候補0。primary rawをmainが保持した証跡とは区別する。
 - [ ] 次は通常hook commit、依存更新・対応検査、新SDK proof、通常buildでv2の1条件pilot、全84への展開。root coverage1256未カバー、cache実再利用、最新版の描画と完全品質ゲート、Draft review/3OS/公開/Issue close/cleanupは未完。全体Python1278件の実1や旧測定の失敗を成功に置き換えない。

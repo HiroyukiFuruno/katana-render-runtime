@@ -64,6 +64,7 @@ UTF8_ITER_RETENTION_CHANGES = {
 SINGLE_PACKAGE_RETENTION_CHANGES = {
     ("Updating", "crc32fast", "1.5.3", "1.5.4"),
     ("Updating", "flate2", "1.1.10", "1.1.11"),
+    ("Updating", "smallvec", "1.16.4", "1.16.5"),
 }
 LOCK_CHANGE_RE = re.compile(
     r"^\s+(Adding|Updating|Removing|Downgrading) ([A-Za-z0-9_-]+) v([^\s]+)"
@@ -914,7 +915,7 @@ def rust_lock_is_latest_compatible(root: Path) -> bool:
     Registry ``newest_version`` can be a prerelease or a major version outside
     the workspace's semver requirements.  Cargo is the authority for the
     highest compatible resolution, including transitive dependencies. The
-    pinned utf8_iter, crc32fast and flate2 transitions are accepted only as known diffs.
+    Pinned harness dependency transitions are accepted only as known diffs.
     """
     completed = subprocess.run(
         # リリース workflow は CARGO_TERM_COLOR=always を設定するため、Locking 件数を
