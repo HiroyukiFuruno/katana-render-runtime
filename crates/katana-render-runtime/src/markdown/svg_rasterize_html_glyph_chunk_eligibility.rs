@@ -4,6 +4,16 @@ use super::super::{
 use super::anchor;
 use resvg::usvg;
 
+#[path = "svg_rasterize_html_glyph_chunk_single_middle.rs"]
+mod single_middle;
+#[path = "svg_rasterize_html_glyph_chunk_text.rs"]
+mod text;
+pub(super) use single_middle::single_middle_input;
+pub(in super::super) use text::ranges_cover_chunk;
+#[cfg(test)]
+use text::valid_span_range;
+use text::{printable_ascii, supported_ltr_text};
+
 #[cfg(test)]
 #[path = "svg_rasterize_html_glyph_chunk_row_diagnostic.rs"]
 mod diagnostic;
@@ -23,84 +33,6 @@ pub(super) struct Input<'a> {
 }
 
 pub(super) type RowInput<'a> = (Input<'a>, std::ops::Range<usize>);
-
-pub(super) struct SingleMiddleInput {
-    pub(super) layout: anchor::LayoutAnchor,
-    pub(super) anchor_x: f32,
-    pub(super) paint_css_size: f32,
-}
-
-pub(super) fn single_middle_input(
-    text: &usvg::Text,
-    prepared: &[PreparedSpan],
-) -> Option<SingleMiddleInput> {
-    let [span] = prepared else { return None };
-    let [chunk] = text.chunks() else { return None };
-    let [source] = chunk.spans() else { return None };
-    let css_scale = anchor::run_origin_css_scale(text, prepared)?;
-    if !single_source_supported(chunk, source) {
-        return None;
-    }
-    let layout = single_middle_layout(text, chunk, span, css_scale)?;
-    let paint_css_size = anchor::paint_size(span.font_size, css_scale, css_scale)?;
-    if paint_css_size == span.font_size * css_scale {
-        return None;
-    }
-    Some(SingleMiddleInput {
-        layout,
-        anchor_x: chunk.x()?,
-        paint_css_size,
-    })
-}
-
-fn single_middle_layout(
-    text: &usvg::Text,
-    chunk: &usvg::TextChunk,
-    span: &PreparedSpan,
-    css_scale: f32,
-) -> Option<anchor::LayoutAnchor> {
-    let width = text.bounding_box().width();
-    let anchor_x = chunk.x()?;
-    advance_bounds_match_origin(span, width, anchor_x).then_some(anchor::LayoutAnchor {
-        width,
-        anchor: chunk.anchor(),
-        css_scale,
-    })
-}
-
-fn single_source_supported(chunk: &usvg::TextChunk, source: &usvg::TextSpan) -> bool {
-    chunk.anchor() == usvg::TextAnchor::Middle
-        && printable_ascii(chunk.text())
-        && source.apply_kerning()
-        && !source.small_caps()
-        && source.baseline_shift().is_empty()
-        && single_font_variations_supported(source.font())
-}
-
-fn single_font_variations_supported(font: &usvg::Font) -> bool {
-    if standard_font_variation(font) {
-        return true;
-    }
-    let [weight, italic] = font.variations() else {
-        return false;
-    };
-    font.style() == usvg::FontStyle::Italic
-        && weight.tag == *b"wght"
-        && weight.value == f32::from(font.weight())
-        && italic.tag == *b"ital"
-        && italic.value == 1.0
-}
-
-fn advance_bounds_match_origin(span: &PreparedSpan, width: f32, anchor_x: f32) -> bool {
-    let Some(first) = span.glyphs.first() else {
-        return false;
-    };
-    /* WHY: bboxをadvance幅として使う前に、元のmiddle penとの前方向の整合を確認する。 */
-    width.is_finite()
-        && width > 0.0
-        && anchor_x.is_finite()
-        && first.transform().tx == anchor_x - width / 2.0
-}
 
 pub(super) fn input<'a>(text: &'a usvg::Text, prepared: &[PreparedSpan]) -> Option<Input<'a>> {
     let [chunk] = text.chunks() else { return None };
@@ -204,32 +136,6 @@ fn chunk_supported(chunk: &usvg::TextChunk, prepared: &[PreparedSpan]) -> bool {
         && matches!(chunk.text_flow(), usvg::TextFlow::Linear)
         && supported_ltr_text(chunk.text())
         && ranges_cover_chunk(chunk)
-}
-
-fn printable_ascii(text: &str) -> bool {
-    text.bytes()
-        .all(|value| value.is_ascii() && !value.is_ascii_control())
-}
-
-fn supported_ltr_text(text: &str) -> bool {
-    text.chars().all(|character| {
-        matches!(character, '\u{20}'..='\u{7e}' | '\u{c0}'..='\u{d6}' | '\u{d8}'..='\u{f6}' | '\u{f8}'..='\u{ff}' | '\u{3041}'..='\u{3096}' | '\u{30a1}'..='\u{30fa}' | '\u{4e00}'..='\u{9fff}')
-    })
-}
-
-pub(in super::super) fn ranges_cover_chunk(chunk: &usvg::TextChunk) -> bool {
-    let mut end = 0;
-    for span in chunk.spans() {
-        if span.start() != end || !valid_span_range(chunk.text(), span.start(), span.end()) {
-            return false;
-        }
-        end = span.end();
-    }
-    end == chunk.text().len()
-}
-
-fn valid_span_range(text: &str, start: usize, end: usize) -> bool {
-    start < end && text.get(start..end).is_some()
 }
 
 fn spans_supported(chunk: &usvg::TextChunk, prepared: &[PreparedSpan]) -> bool {

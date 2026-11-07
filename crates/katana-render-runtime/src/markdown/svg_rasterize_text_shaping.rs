@@ -71,21 +71,9 @@ pub(super) use tests::diagnostic_resolved_font_runs;
 pub(super) use usvg_cmap::install as install_html_font_resolver;
 pub(super) use usvg_cmap::loaded_html_font;
 
-pub(super) fn with_font_face_cache_scope<T>(operation: impl FnOnce() -> T) -> T {
-    /* WHY: 同一frameのlayoutからraster完了までlibrary-owned metricsを共有する。 */
-    let _font_scope = harfrust::face_cache::FontFaceCacheScope::enter();
-    operation()
-}
-
-pub(super) fn with_render_scoped_stamp_batch<T>(operation: impl FnMut() -> T) -> T {
-    let mut operation = operation;
-    font::with_render_scoped_stamp_batch(|| {
-        let _family_scope = family_scope_cache::Scope::enter();
-        let _font_scope = harfrust::face_cache::FontFaceCacheScope::enter();
-        let _token_scope = measurement_token::Scope::enter();
-        operation()
-    })
-}
+#[path = "svg_rasterize_text_shaping_scope.rs"]
+mod scope;
+pub(super) use scope::{with_font_face_cache_scope, with_render_scoped_stamp_batch};
 
 #[cfg(test)]
 pub(super) fn shaped_text_width(
@@ -168,35 +156,10 @@ fn shaped_runs_advance(
     advance_runs(database, runs, shape, font_feature_settings)
 }
 
-fn advance_runs(
-    database: &std::sync::Arc<usvg::fontdb::Database>,
-    runs: Vec<(usvg::fontdb::ID, String)>,
-    shape: FontShape,
-    settings: Option<&str>,
-) -> Option<f32> {
-    runs.into_iter().try_fold(0.0, |advance, (face_id, run)| {
-        cached_shaped_run_with_trim(database, face_id, &run, shape, settings)
-            .map(|width| advance + width)
-    })
-}
-
-pub(super) fn html_text_font_runs(
-    text: &str,
-    font_family: &str,
-    font_weight: u16,
-    italic: bool,
-) -> Option<Vec<(String, String)>> {
-    let database = html_font_db_for_measured_text(font_family, text, font_weight, italic);
-    let base = matching_font_face(&database, font_family, font_weight, italic)?;
-    let runs = resolved_font_runs(&database, base, font_family, text, font_weight, italic);
-    runs.into_iter()
-        .map(|(face_id, run)| {
-            let face = database.face(face_id)?;
-            let family = face.families.first()?.0.clone();
-            Some((family, run))
-        })
-        .collect()
-}
+#[path = "svg_rasterize_text_shaping_font_runs.rs"]
+mod font_runs;
+use font_runs::advance_runs;
+pub(super) use font_runs::html_text_font_runs;
 
 #[path = "svg_rasterize_text_harfrust.rs"]
 mod harfrust;

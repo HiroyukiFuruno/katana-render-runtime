@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 #[cfg(test)]
-#[path = "session_feature_diagnostic.rs"]
+#[path = "session_feature_diagnostic_tests.rs"]
 mod session_feature_diagnostic;
 
 #[path = "session_interaction.rs"]

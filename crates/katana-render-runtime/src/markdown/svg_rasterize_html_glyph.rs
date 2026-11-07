@@ -1,14 +1,13 @@
-use super::composite::TextRasterizer;
 use resvg::usvg;
-use skia_safe::{
-    AlphaType, Borrows, Canvas, ColorType, Data, FontMgr, ImageInfo, Surface, surfaces,
-};
-use skrifa::{FontRef, MetadataProvider, raw::TableProvider};
+use skia_safe::FontMgr;
 use std::cell::{OnceCell, RefCell};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
-use tiny_skia::{PixmapMut, Transform};
-use types::{CachedFace, CachedTypeface, FaceMetadata, SpanInput};
+use types::{CachedFace, CachedTypeface, FaceMetadata};
+
+#[cfg(test)]
+use super::composite::TextRasterizer;
+#[cfg(test)]
+use super::physical_font_face as ttc;
 
 const RGBA_CHANNELS: usize = 4;
 const RED_CHANNEL: usize = 0;
@@ -21,8 +20,17 @@ thread_local! {
     static HTML_FONT_MANAGER: FontMgr = FontMgr::default();
 }
 
+#[path = "svg_rasterize_html_glyph_alignment.rs"]
+mod alignment;
 #[path = "svg_rasterize_html_glyph_anchor.rs"]
 mod anchor;
+pub(super) use alignment::alignment_positioning_supported_with_dy;
+#[cfg(test)]
+use alignment::alignment_text_supported;
+use alignment::{
+    alignment_dy_supported, alignment_positioning_supported, alignment_source_span_supported,
+    all_zero, horizontal_glyphs, single_horizontal_alignment,
+};
 #[path = "svg_rasterize_html_glyph_baseline.rs"]
 mod baseline;
 #[path = "svg_rasterize_html_glyph_chunk.rs"]
@@ -35,13 +43,21 @@ mod fallback_runs;
 mod multi_chunk_alignment;
 #[path = "svg_rasterize_html_glyph_paint.rs"]
 mod paint;
+#[path = "svg_rasterize_html_glyph_prepare.rs"]
+mod prepare;
 #[path = "svg_rasterize_html_glyph_runs.rs"]
 mod runs;
-#[path = "svg_rasterize_html_glyph_surface.rs"]
-mod surface;
-use super::physical_font_face as ttc;
+use types::SpanInput;
+#[path = "svg_rasterize_html_glyph_render.rs"]
+mod render;
+#[cfg(test)]
+use render::{uniform_raster_scale, wrap_pixmap};
+#[path = "svg_rasterize_html_glyph_face.rs"]
+mod face;
 #[path = "svg_rasterize_html_glyph_instances.rs"]
 mod instances;
+#[path = "svg_rasterize_html_glyph_surface.rs"]
+mod surface;
 #[path = "svg_rasterize_html_glyph_types.rs"]
 mod types;
 
@@ -133,321 +149,6 @@ impl<'a> HtmlGlyphRasterizer<'a> {
         self.authored_text_context
             .is_some_and(|context| context.matches_additional(text))
     }
-
-    fn prepare(&self, text: &usvg::Text) -> Result<Prepared, String> {
-        let policy = baseline::resolved_policy(self, text)?;
-        let has_effects = text.layouted().iter().any(decorations::has_effects);
-        if has_effects && text.layouted().len() != 1 {
-            return Ok(Prepared::Unsupported);
-        }
-        let mut prepared = Vec::new();
-        for span in text
-            .layouted()
-            .iter()
-            .filter(|span| !span.positioned_glyphs.is_empty())
-        {
-            if !self.prepare_span(span, policy, &mut prepared)? {
-                return Ok(Prepared::Unsupported);
-            }
-        }
-        if has_effects && (prepared.len() != 1 || prepared[0].baseline_shift != 0.0) {
-            return Ok(Prepared::Unsupported);
-        }
-        if !has_effects || !text.layouted().iter().any(decorations::has_decorations) {
-            self.apply_horizontal_alignment(text, &mut prepared)?;
-        }
-        Ok(Prepared::Ready(prepared))
-    }
-
-    fn apply_horizontal_alignment(
-        &self,
-        text: &usvg::Text,
-        prepared: &mut [PreparedSpan],
-    ) -> Result<(), String> {
-        if self.apply_fallback_alignment(text, prepared)? {
-            return Ok(());
-        }
-        if chunk::apply_single_middle(text, prepared)? {
-            return Ok(());
-        }
-        if let Some(anchor_x) = single_horizontal_alignment(text, prepared) {
-            let alignment = XAlignment {
-                anchor_x,
-                layout: anchor::layout_anchor(text),
-                origin_snap_css_scale: anchor::run_origin_css_scale(text, prepared),
-            };
-            if let Some(span) = prepared.first_mut() {
-                span.x_alignment = Some(alignment);
-            }
-            return Ok(());
-        }
-        if multi_chunk_alignment::apply(text, prepared) {
-            return Ok(());
-        }
-        chunk::apply(self.database, text, prepared)
-    }
-
-    fn apply_fallback_alignment(
-        &self,
-        text: &usvg::Text,
-        prepared: &mut [PreparedSpan],
-    ) -> Result<bool, String> {
-        /* WHY: fallback runも実faceのCSSサイズで測り、名目SVGサイズの文字間隔を残さない。 */
-        let Some(layouts) = fallback_runs::layout(self.database, text, prepared)? else {
-            return Ok(false);
-        };
-        for (span, layout) in prepared.iter_mut().zip(layouts) {
-            span.fallback_alignment = Some(layout);
-        }
-        Ok(true)
-    }
-
-    fn prepare_span(
-        &self,
-        span: &usvg::layout::Span,
-        policy: Option<baseline::Policy>,
-        prepared: &mut Vec<PreparedSpan>,
-    ) -> Result<bool, String> {
-        if !span_supported(span) {
-            return Ok(false);
-        }
-        let Some(mut effects) = prepare_effects(span)? else {
-            return Ok(false);
-        };
-        let Some((color, opacity)) = solid_fill(span) else {
-            return Ok(false);
-        };
-        if !effects_runs_supported(span, effects.is_some()) {
-            return Ok(false);
-        }
-        for run in runs::consecutive_runs(&span.positioned_glyphs) {
-            let Some(input) = self.prepare_run_inputs(span, color, opacity, &run)? else {
-                return Ok(false);
-            };
-            let mut prepared_span = self.prepared_run(span, &run, input, policy);
-            prepared_span.effects = effects.take();
-            prepared.push(prepared_span);
-        }
-        Ok(true)
-    }
-
-    fn prepare_run_inputs(
-        &self,
-        span: &usvg::layout::Span,
-        color: usvg::Color,
-        opacity: u8,
-        run: &runs::GlyphRun,
-    ) -> Result<Option<SpanInput>, String> {
-        let Some((face, variable_instance)) =
-            self.ensure_run_face(span, run.font, run.font_size)?
-        else {
-            return Ok(None);
-        };
-        let glyphs = &span.positioned_glyphs[run.start..run.end];
-        if !run.font_size.is_finite() || run.font_size <= 0.0 {
-            return Err("SVG text span has invalid font size".to_string());
-        }
-        let Some(glyph_ids) = glyph_ids(glyphs) else {
-            return Ok(None);
-        };
-        Ok(Some(SpanInput {
-            color,
-            opacity,
-            font: run.font,
-            face,
-            variable_instance,
-            font_size: run.font_size,
-            glyph_ids,
-        }))
-    }
-
-    fn prepared_run(
-        &self,
-        span: &usvg::layout::Span,
-        run: &runs::GlyphRun,
-        input: SpanInput,
-        policy: Option<baseline::Policy>,
-    ) -> PreparedSpan {
-        let baseline_shift = policy
-            .map(|value| baseline::glyph_shift(self.database, input.font, &input.face, value))
-            .unwrap_or(0.0);
-        PreparedSpan {
-            fill: [
-                input.color.red,
-                input.color.green,
-                input.color.blue,
-                input.opacity,
-            ],
-            font: input.font,
-            glyphs: span.positioned_glyphs[run.start..run.end].to_vec(),
-            glyph_ids: input.glyph_ids,
-            upem: input.face.upem,
-            font_size: input.font_size,
-            baseline_shift,
-            x_alignment: None,
-            chunk_alignment: None,
-            fallback_alignment: None,
-            effects: None,
-            variable_instance: input.variable_instance,
-        }
-    }
-
-    fn ensure_face(&self, id: usvg::fontdb::ID) -> Result<Option<CachedFace>, String> {
-        if let Some(face) = self.faces.borrow().get(&id) {
-            return Ok(face.clone());
-        }
-        let Some((path, index)) = self.face_file(id)? else {
-            self.faces.borrow_mut().insert(id, None);
-            return Ok(None);
-        };
-        let metadata = self.face_metadata(id)?;
-        if metadata.unsupported {
-            self.faces.borrow_mut().insert(id, None);
-            return Ok(None);
-        }
-        let data = self.map_face_data(id, &path)?;
-        let Some(typeface) = self.create_backend_face(&data, index)? else {
-            self.faces.borrow_mut().insert(id, None);
-            return Ok(None);
-        };
-        let face = CachedFace {
-            typeface,
-            upem: metadata.upem,
-            ascent: metadata.ascent,
-            descent: metadata.descent,
-            x_height: metadata.x_height,
-        };
-        self.faces.borrow_mut().insert(id, Some(face.clone()));
-        Ok(Some(face))
-    }
-
-    fn create_backend_face(
-        &self,
-        data: &Data,
-        index: u32,
-    ) -> Result<Option<CachedTypeface>, String> {
-        let font_mgr = self
-            .font_mgr
-            .get_or_init(|| HTML_FONT_MANAGER.with(Clone::clone));
-        let Some(typeface) = ttc::create_physical_typeface(data, index, font_mgr)? else {
-            return Ok(None);
-        };
-        Ok(Some(CachedTypeface::Skia(typeface)))
-    }
-
-    fn face_file(&self, id: usvg::fontdb::ID) -> Result<Option<(std::path::PathBuf, u32)>, String> {
-        let Some((source, index)) = self.database.face_source(id) else {
-            return Err(format!("SVG font face {id:?} is unavailable"));
-        };
-        match source {
-            usvg::fontdb::Source::File(path) | usvg::fontdb::Source::SharedFile(path, _) => {
-                Ok(Some((path, index)))
-            }
-            usvg::fontdb::Source::Binary(_) => Ok(None),
-        }
-    }
-
-    fn face_metadata(&self, id: usvg::fontdb::ID) -> Result<FaceMetadata, String> {
-        self.face_metadata_at(id, None)
-    }
-
-    fn face_metadata_at(
-        &self,
-        id: usvg::fontdb::ID,
-        variations: Option<&[usvg::FontVariation]>,
-    ) -> Result<FaceMetadata, String> {
-        self.database
-            .with_face_data(id, |bytes, index| {
-                parsed_face_metadata(bytes, index, variations)
-            })
-            .flatten()
-            .ok_or_else(|| format!("SVG font face {id:?} cannot be parsed"))
-    }
-
-    fn map_face_data(&self, id: usvg::fontdb::ID, path: &Path) -> Result<Data, String> {
-        let Some(data) = Data::from_filename(path) else {
-            return Err(format!("SVG font file {} cannot be mapped", path.display()));
-        };
-        let Some(same_bytes) = self
-            .database
-            .with_face_data(id, |bytes, _| bytes == data.as_bytes())
-        else {
-            return Err(format!("SVG font face {id:?} data is unavailable"));
-        };
-        if !same_bytes {
-            return Err(format!(
-                "SVG font file {} differs from parsed face",
-                path.display()
-            ));
-        }
-        Ok(data)
-    }
-}
-
-fn effects_runs_supported(span: &usvg::layout::Span, has_effects: bool) -> bool {
-    !has_effects || runs::consecutive_runs(&span.positioned_glyphs).count() == 1
-}
-
-fn prepare_effects(
-    span: &usvg::layout::Span,
-) -> Result<Option<Option<Box<decorations::Effects>>>, String> {
-    if !decorations::has_effects(span) {
-        return Ok(Some(None));
-    }
-    Ok(decorations::prepare(span)?.map(|effects| Some(Box::new(effects))))
-}
-
-fn parsed_face_metadata(
-    bytes: &[u8],
-    index: u32,
-    variations: Option<&[usvg::FontVariation]>,
-) -> Option<FaceMetadata> {
-    let font = FontRef::from_index(bytes, index).ok()?;
-    let metrics = font_metrics_at(&font, variations);
-    let variable = !font.axes().is_empty();
-    let color_or_bitmap =
-        font.colr().is_ok() || font.svg().is_ok() || !font.bitmap_strikes().is_empty();
-    Some(FaceMetadata {
-        upem: font.head().ok()?.units_per_em() as f32,
-        unsupported: (variable && variations.is_none()) || color_or_bitmap,
-        ascent: metrics.ascent.round(),
-        descent: metrics.descent.round(),
-        x_height: metrics.x_height,
-    })
-}
-
-fn font_metrics_at(
-    font: &FontRef<'_>,
-    variations: Option<&[usvg::FontVariation]>,
-) -> skrifa::metrics::Metrics {
-    let location = match variations {
-        Some(axes) => font.axes().location(
-            axes.iter()
-                .map(|axis| (skrifa::Tag::from_be_bytes(axis.tag), axis.value)),
-        ),
-        None => font.axes().location(std::iter::empty::<(&str, f32)>()),
-    };
-    font.metrics(skrifa::prelude::Size::unscaled(), &location)
-}
-
-fn glyph_ids(glyphs: &[usvg::layout::PositionedGlyph]) -> Option<Vec<u16>> {
-    glyphs
-        .iter()
-        .map(|glyph| u16::try_from(glyph.id.0).ok())
-        .collect()
-}
-
-fn span_supported(span: &usvg::layout::Span) -> bool {
-    span.visible
-        && (decorations::has_effects(span) || span.paint_order == usvg::PaintOrder::FillAndStroke)
-}
-
-fn solid_fill(span: &usvg::layout::Span) -> Option<(usvg::Color, u8)> {
-    let fill = span.fill.as_ref()?;
-    let usvg::Paint::Color(color) = fill.paint() else {
-        return None;
-    };
-    Some((*color, fill.opacity().to_u8()))
 }
 
 #[derive(Clone, Copy)]
@@ -455,229 +156,6 @@ struct XAlignment {
     anchor_x: f32,
     layout: Option<anchor::LayoutAnchor>,
     origin_snap_css_scale: Option<f32>,
-}
-
-fn single_horizontal_alignment(text: &usvg::Text, prepared: &[PreparedSpan]) -> Option<f32> {
-    let [span] = prepared else { return None };
-    let [chunk] = text.chunks() else { return None };
-    let [source_span] = chunk.spans() else {
-        return None;
-    };
-    if !alignment_text_supported(text, chunk, source_span, span) {
-        return None;
-    }
-    if !horizontal_glyphs(&span.glyphs) {
-        return None;
-    }
-    let anchor_x = chunk.x().unwrap_or(0.0);
-    anchor_x.is_finite().then_some(anchor_x)
-}
-
-fn alignment_text_supported(
-    text: &usvg::Text,
-    chunk: &usvg::TextChunk,
-    source_span: &usvg::TextSpan,
-    prepared: &PreparedSpan,
-) -> bool {
-    text.layouted().len() == 1
-        && alignment_positioning_supported(text, chunk)
-        && alignment_source_span_supported(source_span)
-        && !prepared.glyphs.is_empty()
-}
-
-fn alignment_positioning_supported(text: &usvg::Text, chunk: &usvg::TextChunk) -> bool {
-    alignment_positioning_supported_with_dy(text, chunk, text.dy())
-}
-
-pub(super) fn alignment_positioning_supported_with_dy(
-    text: &usvg::Text,
-    chunk: &usvg::TextChunk,
-    dy: &[f32],
-) -> bool {
-    all_zero(text.dx())
-        && alignment_dy_supported(dy)
-        && all_zero(text.rotate())
-        && text.writing_mode() == usvg::WritingMode::LeftToRight
-        && matches!(chunk.text_flow(), usvg::TextFlow::Linear)
-}
-
-fn alignment_source_span_supported(source_span: &usvg::TextSpan) -> bool {
-    source_span.letter_spacing() == 0.0
-        && source_span.word_spacing() == 0.0
-        && source_span.text_length().is_none()
-}
-
-fn alignment_dy_supported(values: &[f32]) -> bool {
-    values.first().is_none_or(|first| first.is_finite())
-        && values.iter().skip(1).all(|value| *value == 0.0)
-}
-
-fn all_zero(values: &[f32]) -> bool {
-    values.iter().all(|value| *value == 0.0)
-}
-
-fn horizontal_glyphs(glyphs: &[usvg::layout::PositionedGlyph]) -> bool {
-    glyphs.iter().all(|glyph| {
-        let transform = glyph.transform();
-        transform.sx.is_finite()
-            && transform.sy.is_finite()
-            && transform.sx > 0.0
-            && transform.sy > 0.0
-            && transform.sx == transform.sy
-            && transform.kx == 0.0
-            && transform.ky == 0.0
-    })
-}
-
-impl TextRasterizer for HtmlGlyphRasterizer<'_> {
-    fn render(
-        &self,
-        text: &usvg::Text,
-        transform: Transform,
-        pixmap: &mut PixmapMut<'_>,
-    ) -> Result<bool, String> {
-        if self.resvg_text_ids.contains(text.id()) {
-            return Ok(false);
-        }
-        let prepared = match self.prepare(text)? {
-            Prepared::Unsupported => return Ok(false),
-            Prepared::Ready(value) => value,
-        };
-        if prepared.is_empty() {
-            return Ok(true);
-        }
-        let full_transform = transform.pre_concat(text.flattened().transform());
-        self.render_prepared(prepared, text, full_transform, pixmap)
-    }
-}
-
-impl HtmlGlyphRasterizer<'_> {
-    fn render_prepared(
-        &self,
-        prepared: Vec<PreparedSpan>,
-        text: &usvg::Text,
-        full_transform: Transform,
-        pixmap: &mut PixmapMut<'_>,
-    ) -> Result<bool, String> {
-        let shifts = prepared
-            .iter()
-            .fold((0.0_f32, 0.0_f32), |(min, max), span| {
-                (min.min(span.baseline_shift), max.max(span.baseline_shift))
-            });
-        let Some(crop) = surface::text_crop(
-            text,
-            full_transform,
-            pixmap.width(),
-            pixmap.height(),
-            shifts,
-            prepared.iter().any(|span| span.effects.is_some()),
-        ) else {
-            return Ok(true);
-        };
-        self.draw_prepared(prepared, full_transform, crop, pixmap)?;
-        Ok(true)
-    }
-
-    fn draw_prepared(
-        &self,
-        prepared: Vec<PreparedSpan>,
-        full_transform: Transform,
-        crop: surface::Crop,
-        pixmap: &mut PixmapMut<'_>,
-    ) -> Result<(), String> {
-        self.draw_skia_prepared(prepared, full_transform, &crop, pixmap)
-    }
-
-    fn draw_skia_prepared(
-        &self,
-        prepared: Vec<PreparedSpan>,
-        full_transform: Transform,
-        crop: &surface::Crop,
-        pixmap: &mut PixmapMut<'_>,
-    ) -> Result<(), String> {
-        /* WHY: BlinkのSVG文字と同様に、等方倍率をfont sizeへ移してstrike選択を揃える。 */
-        let (raster_scale, canvas_transform) = skia_transforms(full_transform);
-        let mut skia_surface = wrap_pixmap(pixmap)?;
-        /* WHY: 旧crop surfaceのdevice境界を、変換設定前の整数clipで維持する。 */
-        clip_crop(skia_surface.canvas(), crop);
-        let matrix = surface::skia_matrix(canvas_transform, 0.0, 0.0);
-        let matrix = skia_safe::M44::from(&matrix);
-        skia_surface.canvas().set_matrix(&matrix);
-        self.draw_spans(&mut skia_surface, prepared, raster_scale)?;
-        drop(skia_surface);
-        Ok(())
-    }
-
-    fn draw_spans(
-        &self,
-        skia_surface: &mut skia_safe::Surface,
-        prepared: Vec<PreparedSpan>,
-        raster_scale: f32,
-    ) -> Result<(), String> {
-        for span in prepared {
-            if let Some(instance) = &span.variable_instance {
-                let typeface = instance.face.typeface.as_skia()?;
-                surface::draw_span(skia_surface.canvas(), &span, typeface, raster_scale)?;
-                continue;
-            }
-            let Some(face) = self.ensure_face(span.font)? else {
-                return Err(format!(
-                    "cached SVG font face {:?} became unavailable",
-                    span.font
-                ));
-            };
-            let typeface = face.typeface.as_skia()?;
-            surface::draw_span(skia_surface.canvas(), &span, typeface, raster_scale)?;
-        }
-        Ok(())
-    }
-}
-
-fn wrap_pixmap<'a>(pixmap: &'a mut PixmapMut<'_>) -> Result<Borrows<'a, Surface>, String> {
-    let info = ImageInfo::new(
-        (pixmap.width() as i32, pixmap.height() as i32),
-        ColorType::RGBA8888,
-        AlphaType::Premul,
-        None,
-    );
-    surfaces::wrap_pixels(&info, pixmap.data_mut(), info.min_row_bytes(), None)
-        .ok_or_else(|| "Skia text surface allocation failed".to_string())
-}
-
-fn clip_crop(canvas: &Canvas, crop: &surface::Crop) {
-    canvas.clip_rect(
-        skia_safe::Rect::from_xywh(
-            crop.x as f32,
-            crop.y as f32,
-            crop.width as f32,
-            crop.height as f32,
-        ),
-        None,
-        false,
-    );
-}
-
-fn uniform_raster_scale(transform: Transform) -> f32 {
-    if transform.sx.is_finite()
-        && transform.sx > 0.0
-        && transform.sx == transform.sy
-        && transform.kx == 0.0
-        && transform.ky == 0.0
-    {
-        transform.sx
-    } else {
-        1.0
-    }
-}
-
-fn skia_transforms(transform: Transform) -> (f32, Transform) {
-    let raster_scale = uniform_raster_scale(transform);
-    let canvas = if raster_scale == 1.0 {
-        transform
-    } else {
-        transform.pre_scale(1.0 / raster_scale, 1.0 / raster_scale)
-    };
-    (raster_scale, canvas)
 }
 
 struct PreparedSpan {

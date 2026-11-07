@@ -3,10 +3,8 @@ use super::{FontSourceGeneration, HtmlFontRequest, font_source_generation};
 use resvg::usvg::fontdb::{Database, ID};
 use std::{
     cell::RefCell,
-    fmt,
-    hash::{Hash, Hasher},
     marker::PhantomData,
-    rc::{Rc, Weak as RcWeak},
+    rc::Rc,
     sync::{Arc, Weak as DbWeak},
 };
 
@@ -21,33 +19,9 @@ use token_store::TokenStore;
 mod selection;
 use selection::{mode_memo_result, token_for_selected};
 
-#[derive(Clone)]
-pub(crate) struct HtmlTextMeasurementTokenKey {
-    proof: RcWeak<Proof>,
-}
-
-impl PartialEq for HtmlTextMeasurementTokenKey {
-    fn eq(&self, other: &Self) -> bool {
-        RcWeak::ptr_eq(&self.proof, &other.proof)
-    }
-}
-
-impl Eq for HtmlTextMeasurementTokenKey {}
-
-impl fmt::Debug for HtmlTextMeasurementTokenKey {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_tuple("HtmlTextMeasurementTokenKey")
-            .field(&self.proof.as_ptr())
-            .finish()
-    }
-}
-
-impl Hash for HtmlTextMeasurementTokenKey {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.proof.as_ptr().hash(state);
-    }
-}
+#[path = "svg_rasterize_text_measurement_token_key.rs"]
+mod key;
+pub(crate) use key::HtmlTextMeasurementTokenKey;
 
 struct Proof {
     database: DbWeak<Database>,
@@ -96,12 +70,6 @@ impl Drop for Scope {
 }
 
 impl HtmlTextMeasurementToken {
-    pub(crate) fn key(&self) -> HtmlTextMeasurementTokenKey {
-        HtmlTextMeasurementTokenKey {
-            proof: Rc::downgrade(&self.proof),
-        }
-    }
-
     pub(crate) fn is_usable(&self) -> bool {
         if !super::font::memo_usable() {
             return false;

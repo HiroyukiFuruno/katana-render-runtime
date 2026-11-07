@@ -48,7 +48,7 @@ pub(super) fn run_origin_css_scale(text: &usvg::Text, prepared: &[PreparedSpan])
     let [source_span] = chunk.spans() else {
         return None;
     };
-    if !super::alignment_text_supported(text, chunk, source_span, span)
+    if !super::alignment::alignment_text_supported(text, chunk, source_span, span)
         || !super::horizontal_glyphs(&span.glyphs)
         || layout_anchor(text).is_some()
     {

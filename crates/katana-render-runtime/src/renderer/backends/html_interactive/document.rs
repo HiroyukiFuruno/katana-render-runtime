@@ -1,14 +1,26 @@
+#[cfg(test)]
 use super::constants::MIN_LAYOUT_WIDTH;
 #[cfg(test)]
 use super::constants::TEXT_CHARACTER_WIDTH_FACTOR;
+#[cfg(test)]
 use super::style::{CssStyle, CssWhiteSpace};
-use super::text_measurement_diagnostic::{record_wrap_timing, start_wrap_timing};
+#[cfg(test)]
 use super::text_metrics::text_width;
-use unicode_linebreak::{BreakClass, break_property, linebreaks};
+#[cfg(test)]
+use unicode_linebreak::linebreaks;
 use unicode_width::UnicodeWidthStr;
 
-const TEXT_LAYOUT_SUBPIXEL_SCALE: f32 = 64.0;
-const TEXT_FIT_EPSILON: f32 = 1.0 / TEXT_LAYOUT_SUBPIXEL_SCALE;
+#[path = "document_line_break.rs"]
+mod line_break;
+#[path = "document_text_wrap.rs"]
+mod text_wrap;
+
+pub(super) use line_break::css_auto_linebreak_ends;
+#[cfg(test)]
+use line_break::{is_css_letter, suppress_slash_letter_breaks};
+#[cfg(test)]
+use text_wrap::{TEXT_FIT_EPSILON, take_styled_line};
+pub(super) use text_wrap::{wrap_text_with_initial_width, wrap_text_with_style};
 
 #[path = "document_nodes.rs"]
 mod nodes;
@@ -88,204 +100,6 @@ fn append_breakable_segment(
 #[cfg(test)]
 fn push_wrapped_line(line: String, lines: &mut Vec<String>) {
     lines.push(line.trim_end().to_string());
-}
-
-pub(super) fn wrap_text_with_style(text: &str, width: f32, style: &CssStyle) -> Vec<String> {
-    wrap_text_with_initial_width(text, width, width, style)
-}
-
-pub(super) fn wrap_text_with_initial_width(
-    text: &str,
-    initial_width: f32,
-    continuing_width: f32,
-    style: &CssStyle,
-) -> Vec<String> {
-    if text.is_empty() {
-        return Vec::new();
-    }
-    if style.white_space == CssWhiteSpace::NoWrap {
-        return explicit_text_lines(text);
-    }
-    wrap_normal_text(text, initial_width, continuing_width, style)
-}
-
-fn wrap_normal_text(
-    text: &str,
-    initial_width: f32,
-    continuing_width: f32,
-    style: &CssStyle,
-) -> Vec<String> {
-    let started = start_wrap_timing();
-    let lines = wrap_normal_text_body(text, initial_width, continuing_width, style);
-    record_wrap_timing(started);
-    lines
-}
-
-fn wrap_normal_text_body(
-    text: &str,
-    initial_width: f32,
-    continuing_width: f32,
-    style: &CssStyle,
-) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut remaining = text;
-    let mut width = initial_width.max(MIN_LAYOUT_WIDTH);
-    while !remaining.is_empty() {
-        if width + TEXT_FIT_EPSILON < continuing_width
-            && should_defer_unbreakable_line(remaining, width, continuing_width, style)
-        {
-            lines.push(String::new());
-            width = continuing_width.max(MIN_LAYOUT_WIDTH);
-            continue;
-        }
-        let (line, consumed) = take_styled_line(remaining, width, style);
-        lines.push(line);
-        remaining = &remaining[consumed..];
-        width = continuing_width.max(MIN_LAYOUT_WIDTH);
-    }
-    lines
-}
-
-fn should_defer_unbreakable_line(
-    text: &str,
-    initial_width: f32,
-    continuing_width: f32,
-    style: &CssStyle,
-) -> bool {
-    let forced_end = text.find('\n').unwrap_or(text.len());
-    let forced_line = &text[..forced_end];
-    if forced_line.is_empty()
-        || forced_line
-            .chars()
-            .next()
-            .is_some_and(super::layout_text::is_css_whitespace)
-    {
-        return false;
-    }
-    let break_ends = css_auto_linebreak_ends(forced_line);
-    if last_fitting_end(forced_line, &break_ends, initial_width, style).is_some() {
-        return false;
-    }
-    let Some(first_break_end) = break_ends.first().copied() else {
-        return false;
-    };
-    let first_segment =
-        forced_line[..first_break_end].trim_end_matches(super::layout_text::is_css_whitespace);
-    !first_segment.is_empty()
-        && text_width(first_segment, style) <= continuing_width + TEXT_FIT_EPSILON
-}
-
-fn explicit_text_lines(text: &str) -> Vec<String> {
-    text.split_terminator('\n')
-        .map(|line| {
-            line.trim_end_matches(super::layout_text::is_css_whitespace)
-                .to_string()
-        })
-        .collect()
-}
-
-fn take_styled_line(text: &str, width: f32, style: &CssStyle) -> (String, usize) {
-    if text.starts_with('\n') {
-        return (String::new(), 1);
-    }
-    let forced_end = text.find('\n').unwrap_or(text.len());
-    let forced_line = &text[..forced_end];
-    let trimmed_line = forced_line.trim_end_matches(super::layout_text::is_css_whitespace);
-    if text_width(trimmed_line, style) <= width + TEXT_FIT_EPSILON {
-        let consumed = forced_end + usize::from(forced_end < text.len());
-        return (trimmed_line.to_string(), consumed);
-    }
-    let break_ends = css_auto_linebreak_ends(forced_line);
-    let mut fitted_end = last_fitting_end(forced_line, &break_ends, width, style).unwrap_or(0);
-    if fitted_end == 0 {
-        fitted_end = fitted_character_end(forced_line, width, style);
-    }
-    (
-        forced_line[..fitted_end]
-            .trim_end_matches(super::layout_text::is_css_whitespace)
-            .to_string(),
-        fitted_end,
-    )
-}
-
-pub(super) fn css_auto_linebreak_ends(text: &str) -> Vec<usize> {
-    if !text.chars().any(is_conditional_japanese_starter) {
-        return suppress_slash_letter_breaks(text, linebreaks(text).map(|(end, _)| end).collect());
-    }
-    /* WHY: Chromeのauto改行ではCJをIDとして扱い、他の禁則・結合制御は維持する。 */
-    let mut normalized = String::with_capacity(text.len());
-    let mut offsets = Vec::new();
-    for (start, character) in text.char_indices() {
-        normalized.push(if is_conditional_japanese_starter(character) {
-            '一'
-        } else {
-            character
-        });
-        offsets.push((normalized.len(), start + character.len_utf8()));
-    }
-    let ends = linebreaks(&normalized)
-        .filter_map(|(end, _)| {
-            offsets
-                .binary_search_by_key(&end, |(offset, _)| *offset)
-                .ok()
-                .map(|index| offsets[index].1)
-        })
-        .collect();
-    suppress_slash_letter_breaks(text, ends)
-}
-
-fn suppress_slash_letter_breaks(text: &str, ends: Vec<usize>) -> Vec<usize> {
-    ends.into_iter()
-        .filter(|&end| {
-            let Some('/') = text[..end].chars().next_back() else {
-                return true;
-            };
-            !text[end..].chars().next().is_some_and(is_css_letter)
-        })
-        .collect()
-}
-
-/* CSS Textのslash/letter規則はGeneral Category Lを対象にする。直接の
- * category table依存がないため、現状はASCII letterを保守的に扱う。 */
-fn is_css_letter(character: char) -> bool {
-    character.is_ascii_alphabetic()
-}
-
-fn is_conditional_japanese_starter(character: char) -> bool {
-    break_property(character as u32) == BreakClass::ConditionalJapaneseStarter
-}
-
-fn fitted_character_end(text: &str, width: f32, style: &CssStyle) -> usize {
-    let character_ends = text
-        .char_indices()
-        .map(|(index, character)| index + character.len_utf8())
-        .collect::<Vec<_>>();
-    last_fitting_end(text, &character_ends, width, style)
-        .unwrap_or_else(|| character_ends.first().copied().unwrap_or(0))
-}
-
-fn last_fitting_end(
-    text: &str,
-    candidate_ends: &[usize],
-    width: f32,
-    style: &CssStyle,
-) -> Option<usize> {
-    let mut low = 0;
-    let mut high = candidate_ends.len();
-    while low < high {
-        let middle = low + (high - low) / 2;
-        let end = candidate_ends[middle];
-        let fits = text_width(
-            text[..end].trim_end_matches(super::layout_text::is_css_whitespace),
-            style,
-        ) <= width + TEXT_FIT_EPSILON;
-        if fits {
-            low = middle + 1;
-        } else {
-            high = middle;
-        }
-    }
-    low.checked_sub(1).map(|index| candidate_ends[index])
 }
 
 pub(super) fn text_display_columns(text: &str) -> usize {

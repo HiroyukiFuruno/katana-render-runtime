@@ -2,6 +2,14 @@
 
 ## 最新の再開地点（2026-11-07）
 
+- [x] SVG前処理の文字列コピー方式を `210784e4` で限定比較。関連91/91と通常hookは成功したが、async1条件25組の性能は不合格。初回RSS中央値差+311296bytes、時間6phaseは劣化検出なし。`html-memory-async-svg-copy-diagnostic-210784e4-_mi85hau/safe-summary.json` に記録し、`23de569d` で通常revert、2file全bytesが実験前と一致することを確認。正式84条件の合格へ加算しない。
+- [ ] 依存更新の最終確認でActions12usesとkatana-ast-lint0.5.5を更新中。npm直接27件はlatest一致。Skia0.157は既存RSS不合格のため0.156を保持、flate2 1.1.11は不変の比較基準・PNG計測の非SDK依存閉包を変えるため1.1.10を保持する。保持は新版性能劣化の証明と区別する。
+- [x] AST0.5.5が旧版の検出漏れを修正して検出した自社file-length25件を、3担当とmainの責務分割で解消。公開経路・処理・テストを維持し、製品200行・test300行の上限も維持した。test-only外部モジュールの命名を整え、root coverageの標準report引数にファイル名除外がないことも確認。`actions-ast055-static-uy7ufho_` の旧失敗は保持し、最終結果は後述の実検査へ対応付ける。
+- [x] 取り込み済みSVGエンジンの外部由来function-length135件は、採用元・ライセンス・更新時の再評価理由を記した37ファイル限定の規則例外として扱った。既存の全設定と自社実装の閾値・対象範囲を維持し、更新後ASTを通過した。実装カバレッジの対象は減らしていない。
+- [x] 上記5件はActions更新後の旧Just SHA照合による連鎖と確定。既存contractと負例の現行pinだけ同期し、`actions-contract-unit-ryk7gnp4` のworkflow31件・CI証跡61件・cache再利用8件が全成功。`ast055-boundary-integrated-static-q_0mfhoe` のfoundationも実0。完全ゲート・3 OS CIの代用にはしない。
+- [x] 初回のlinter helperの可視性7件・相対import1件と、統合コンパイルで判明した既存参照経路を各担当が修正。`ast055-cli-final-static-kn2aig8i` はAST・完全source-static・標準Clippyとperformance両armの全phaseが実0。続く `ast055-full-rust-regression-_n8o9h_p` の標準Nextestは5,660件成功・29 skip・失敗0、実0、HEADとdiff SHAの前後一致をmainも照合。no-report診断であり正式coverage100%の代用にしない。
+- [x] 完了した診断のproject binaryだけを `ast055-retire-diagnostic-binaries-x8jf2fs7` の既存Cargo cleanで整理。保護25参照の前後検証は実0、debugと依存cacheを保持しLLVM用成果物を1,092,328 KiB削減した。固定容量上限を変更せず、原結果・画像基準・私有資料も保持した。
+
 - [x] `394e890b` の独立 raw JS 比較は Mermaid 製品 PNG 117/117件が99以上（最低99.085711）、不合格0。`mermaid-product-394e890b-clean-retry-edu4u3gk/comparison/receipt.json` は completed/accepted、R01/R02ともtrue、実終了0。`d5ca9a64` のHTMLは84/84条件が90以上（最低92.14438）、出力フォント完全一致、全スクロール・動的状態・入力・埋込図の標準検査も合格した。後続のテスト・検証コード変更後も最終公開ソースとの適格性を確認する。
 - [ ] `3f235f7e` の HTML 性能は83/84条件合格。残る日本語・英語混在の1条件には最大RSSの差があり、Brotli 6.2に戻した診断でも差は解消しなかった。Brotli 6.3に戻し、不要な中間レイアウトとCSS宣言キャッシュの保持を短縮した `87846987` は関連回帰35件と同条件の25組測定で既存判定を通過した。全縦スクロールと再表示の最大RSS中央値差は＋192 KiB。新旧結果を合算せず、現行の正式84条件を別途判定する。
 - [ ] `5cac0ae4` の全体テストは5,660件合格・29件スキップ。行カバレッジは85,476/86,732（98.5519%）、未カバー1,256行。Desktopの私有原本の初回フレームは `a6b21479` で3回測定し中央値0.911秒、正式84条件へは加算しない。

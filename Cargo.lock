@@ -1385,9 +1385,9 @@ dependencies = [
 
 [[package]]
 name = "katana-ast-lint"
-version = "0.5.3"
+version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43ca579031d22ca86595782a6c054d6a38204a79f0af812b02ed16d91244863b"
+checksum = "414a1350ca7675ace2eda862e554466f590d144252dfc1afe82e59bb07ad192b"
 dependencies = [
  "chrono",
  "ignore",

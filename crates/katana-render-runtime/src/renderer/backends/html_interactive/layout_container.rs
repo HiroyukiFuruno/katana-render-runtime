@@ -5,6 +5,13 @@ use super::style::{CssPosition, CssStyle};
 use super::types::{DetailsContext, LayoutContext, OverflowClip};
 use std::rc::Rc;
 
+#[path = "layout_container_measurement.rs"]
+mod measurement;
+#[path = "layout_container_paint.rs"]
+mod paint;
+#[cfg(test)]
+use paint::overflow_clip_applies_to;
+
 #[path = "layout_container_helpers.rs"]
 mod helpers;
 #[path = "layout_multicolumn.rs"]
@@ -116,176 +123,6 @@ impl HtmlLayoutRenderer {
         container_height(bottom - trailing_margin, start, style)
     }
 
-    fn resolve_container_containing_block(
-        &mut self,
-        children: &[HtmlDocumentNode],
-        geometry: &ContainerGeometry,
-        style: &CssStyle,
-        details: DetailsContext,
-    ) -> Option<ContainingBlock> {
-        if style.position == CssPosition::Static && !style.has_transform {
-            return None;
-        }
-        let height = style
-            .height
-            .map(|height| style.outer_height(height))
-            .unwrap_or_else(|| {
-                let measured =
-                    self.measure_auto_container_height(children, geometry, style, details);
-                self.accept_auto_container_height(measured, style)
-            });
-        Some(ContainingBlock {
-            owner_node_id: self.current_element_owner(),
-            x: geometry.box_x,
-            y: geometry.start,
-            width: geometry.box_width,
-            height,
-            establishes_fixed_containing_block: style.has_transform,
-        })
-    }
-
-    fn record_overflow_clip(
-        &mut self,
-        descendant_box_start: usize,
-        geometry: &ContainerGeometry,
-        height: f32,
-        style: &CssStyle,
-    ) {
-        if !style.clips_overflow() {
-            return;
-        }
-        let Some(owner_node_id) = self.current_element_owner() else {
-            return;
-        };
-        if !self.clips_element_overflow(owner_node_id, style) {
-            return;
-        }
-        let (x, y, width, height) = overflow_clip_geometry(geometry, height, style);
-        let corner_radii = overflow_clip_radius(geometry, height, style);
-        let clip = OverflowClip::new(owner_node_id, x, y, width, height, 0.0, 0.0)
-            .with_active_axes(self.element_overflow_clip_axes(owner_node_id, style))
-            .with_corner_radii(corner_radii);
-        for element_box in &mut self.element_boxes[descendant_box_start..] {
-            if overflow_clip_applies_to(element_box, owner_node_id) {
-                element_box.overflow_clips.push(clip);
-            }
-        }
-    }
-
-    fn accept_auto_container_height(
-        &mut self,
-        measured: Result<f32, String>,
-        style: &CssStyle,
-    ) -> f32 {
-        measured.unwrap_or_else(|error| {
-            self.layout_error = Some(error);
-            style.minimum_outer_height()
-        })
-    }
-
-    fn measure_auto_container_height(
-        &self,
-        children: &[HtmlDocumentNode],
-        geometry: &ContainerGeometry,
-        style: &CssStyle,
-        details: DetailsContext,
-    ) -> Result<f32, String> {
-        let renderer = self.new_auto_measurement_renderer(geometry);
-        let bottom = self
-            .render_children_for_auto_measurement(renderer, children, geometry, style, details)?;
-        Ok(container_height(bottom, 0.0, style))
-    }
-
-    fn new_auto_measurement_renderer(&self, geometry: &ContainerGeometry) -> Self {
-        let viewport = HtmlBrowserViewport {
-            width: geometry.inner_width.ceil().max(1.0) as u32,
-            height: 1,
-            device_scale_factor: 1.0,
-        };
-        Self::new_with_measurement_cache(
-            viewport,
-            0.0,
-            &self.input_values,
-            self.focused_input,
-            Rc::clone(&self.flow_measurements),
-        )
-    }
-
-    fn render_children_for_auto_measurement(
-        &self,
-        mut renderer: Self,
-        children: &[HtmlDocumentNode],
-        geometry: &ContainerGeometry,
-        style: &CssStyle,
-        details: DetailsContext,
-    ) -> Result<f32, String> {
-        let mut child_style = style.clone();
-        child_style.percentage_height_basis = None;
-        let content_start = style.border_top_width() + style.padding_top;
-        renderer
-            .render_flow_children(
-                children,
-                LayoutContext::new(
-                    0.0,
-                    content_start,
-                    geometry.inner_width,
-                    &child_style,
-                    details,
-                ),
-                None,
-            )
-            .and_then(|bottom| renderer.ensure_layout_succeeded().map(|()| bottom))
-    }
-
-    fn paint_container_box(
-        &mut self,
-        box_start: usize,
-        content_start: usize,
-        geometry: &ContainerGeometry,
-        height: f32,
-        style: &CssStyle,
-    ) {
-        self.paint_container_overflow(content_start, geometry, height, style);
-        let before_background = self.svg.len();
-        self.insert_box(
-            box_start,
-            geometry.box_x,
-            geometry.start,
-            geometry.box_width,
-            height,
-            style,
-        );
-        self.record_stacking_background(self.svg.len() - before_background);
-    }
-
-    fn paint_container_overflow(
-        &mut self,
-        content_start: usize,
-        geometry: &ContainerGeometry,
-        height: f32,
-        style: &CssStyle,
-    ) {
-        self.capture_stacking_context_children();
-        if style.clips_overflow()
-            && self
-                .current_element_owner()
-                .is_none_or(|owner| self.clips_element_overflow(owner, style))
-        {
-            let source_owner = (geometry.box_x, geometry.start, geometry.box_width, height);
-            let (x, y, width, height) = overflow_clip_geometry(geometry, height, style);
-            let corner_radii = overflow_clip_radius(geometry, height, style);
-            let Some(owner_node_id) = self.current_element_owner() else {
-                self.layout_error = Some("overflow paint clip has no owner".to_string());
-                return;
-            };
-            let clip = OverflowClip::new(owner_node_id, x, y, width, height, 0.0, 0.0)
-                .with_active_axes(self.element_overflow_clip_axes(owner_node_id, style))
-                .with_corner_radii(corner_radii);
-            let clip_id = self.clip_painted_range(content_start, clip, source_owner);
-            self.clip_deferred_paint(owner_node_id, clip_id);
-        }
-    }
-
     fn render_container_children(
         &mut self,
         children: &[HtmlDocumentNode],
@@ -347,55 +184,6 @@ impl HtmlLayoutRenderer {
             .unwrap_or(0.0);
         geometry.start + style.border_top_width() + style.padding_top - leading_margin
     }
-}
-
-fn overflow_clip_geometry(
-    geometry: &ContainerGeometry,
-    height: f32,
-    style: &CssStyle,
-) -> (f32, f32, f32, f32) {
-    let left = style.border_left_width();
-    let top = style.border_top_width();
-    let width = (geometry.box_width - left - style.border_right_width()).max(0.0);
-    let height = (height - top - style.border_bottom_width()).max(0.0);
-    (geometry.box_x + left, geometry.start + top, width, height)
-}
-
-fn overflow_clip_radius(
-    geometry: &ContainerGeometry,
-    height: f32,
-    style: &CssStyle,
-) -> [(f32, f32); BORDER_RADIUS_CORNER_COUNT] {
-    style.resolved_inner_border_radii(geometry.box_width, height)
-}
-
-fn overflow_clip_applies_to(element_box: &super::types::ElementBox, owner_node_id: u64) -> bool {
-    let context = element_box.positioning_context;
-    if context.escapes_element_root() {
-        return false;
-    }
-    if element_box.participates_in_flow {
-        return true;
-    }
-    context
-        .containing_block_owner()
-        .is_some_and(|containing_block_owner| {
-            contains_overflow_clip_owner(element_box, owner_node_id, containing_block_owner)
-        })
-}
-
-fn contains_overflow_clip_owner(
-    element_box: &super::types::ElementBox,
-    owner_node_id: u64,
-    containing_block_owner: u64,
-) -> bool {
-    element_box
-        .ancestor_node_ids
-        .iter()
-        .position(|ancestor| *ancestor == containing_block_owner)
-        .is_some_and(|containing_block_index| {
-            element_box.ancestor_node_ids[..=containing_block_index].contains(&owner_node_id)
-        })
 }
 
 #[cfg(test)]

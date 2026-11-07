@@ -1,6 +1,6 @@
 use harfrust::font::Font;
 use resvg::usvg::fontdb::{Database, Source};
-use std::{cell::RefCell, marker::PhantomData, rc::Rc};
+use std::cell::RefCell;
 
 #[path = "svg_rasterize_text_harfrust_face_cache_entry.rs"]
 mod entry;
@@ -48,24 +48,9 @@ thread_local! {
     static ACTIVE_SCOPE: RefCell<ActiveCache> = const { RefCell::new(ActiveCache { depth: 0, entry: None, spare: None }) };
 }
 
-pub(crate) struct FontFaceCacheScope(PhantomData<Rc<()>>);
-
-impl FontFaceCacheScope {
-    pub(crate) fn enter() -> Self {
-        ACTIVE_SCOPE.with(|scope| scope.borrow_mut().enter());
-        #[cfg(all(test, target_os = "macos"))]
-        observation::publish();
-        Self(PhantomData)
-    }
-}
-
-impl Drop for FontFaceCacheScope {
-    fn drop(&mut self) {
-        ACTIVE_SCOPE.with(|scope| scope.borrow_mut().leave());
-        #[cfg(all(test, target_os = "macos"))]
-        observation::publish();
-    }
-}
+#[path = "svg_rasterize_text_harfrust_face_cache_scope.rs"]
+mod scope;
+pub(crate) use scope::FontFaceCacheScope;
 
 fn cached_font(key: &CacheKey) -> Option<FontHandle> {
     #[cfg(all(test, target_os = "macos"))]

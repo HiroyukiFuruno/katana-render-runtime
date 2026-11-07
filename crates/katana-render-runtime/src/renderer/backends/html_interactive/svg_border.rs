@@ -1,8 +1,8 @@
 use super::super::style::CssStyle;
 use super::escape_xml;
 
-const BORDER_EDGE_COUNT: usize = 4;
-
+#[path = "svg_border_edges.rs"]
+mod edges;
 #[path = "svg_border_rounded.rs"]
 mod rounded;
 #[path = "svg_border_uniform.rs"]
@@ -48,7 +48,7 @@ fn append_border_edges(
         rounded::append_rounded_border_edges(svg, x, y, width, height, style);
         return;
     }
-    for edge in border_edges(x, y, width, height, style) {
+    for edge in edges::border_edges(x, y, width, height, style) {
         append_border_edge(
             svg,
             edge.start,
@@ -58,116 +58,6 @@ fn append_border_edges(
             edge.dasharray,
             edge.dotted,
         );
-    }
-}
-
-struct BorderEdge<'a> {
-    start: (f32, f32),
-    end: (f32, f32),
-    color: Option<&'a str>,
-    width: f32,
-    dasharray: Option<String>,
-    dotted: bool,
-}
-
-fn border_edges<'a>(
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    style: &'a CssStyle,
-) -> [BorderEdge<'a>; BORDER_EDGE_COUNT] {
-    [
-        top_edge(x, y, width, style),
-        right_edge(x, y, width, height, style),
-        bottom_edge(x, y, width, height, style),
-        left_edge(x, y, height, style),
-    ]
-}
-
-fn top_edge<'a>(x: f32, y: f32, width: f32, style: &'a CssStyle) -> BorderEdge<'a> {
-    horizontal_edge(
-        x,
-        y + style.border_top_width() / 2.0,
-        width,
-        style.border_top_color(),
-        style.border_top_width(),
-        style.border_top_dasharray(),
-        style.border_top_dotted(),
-    )
-}
-
-fn right_edge<'a>(x: f32, y: f32, width: f32, height: f32, style: &'a CssStyle) -> BorderEdge<'a> {
-    vertical_edge(
-        x + width - style.border_right_width() / 2.0,
-        y,
-        height,
-        style.border_right_color(),
-        style.border_right_width(),
-        style.border_right_dasharray(),
-        style.border_right_dotted(),
-    )
-}
-
-fn bottom_edge<'a>(x: f32, y: f32, width: f32, height: f32, style: &'a CssStyle) -> BorderEdge<'a> {
-    horizontal_edge(
-        x,
-        y + height - style.border_bottom_width() / 2.0,
-        width,
-        style.border_bottom_color(),
-        style.border_bottom_width(),
-        style.border_bottom_dasharray(),
-        style.border_bottom_dotted(),
-    )
-}
-
-fn left_edge<'a>(x: f32, y: f32, height: f32, style: &'a CssStyle) -> BorderEdge<'a> {
-    vertical_edge(
-        x + style.border_left_width() / 2.0,
-        y,
-        height,
-        style.border_left_color(),
-        style.border_left_width(),
-        style.border_left_dasharray(),
-        style.border_left_dotted(),
-    )
-}
-
-fn horizontal_edge<'a>(
-    x: f32,
-    y: f32,
-    length: f32,
-    color: Option<&'a str>,
-    width: f32,
-    dasharray: Option<String>,
-    dotted: bool,
-) -> BorderEdge<'a> {
-    BorderEdge {
-        start: (x, y),
-        end: (x + length, y),
-        color,
-        width,
-        dasharray,
-        dotted,
-    }
-}
-
-fn vertical_edge<'a>(
-    x: f32,
-    y: f32,
-    length: f32,
-    color: Option<&'a str>,
-    width: f32,
-    dasharray: Option<String>,
-    dotted: bool,
-) -> BorderEdge<'a> {
-    BorderEdge {
-        start: (x, y),
-        end: (x, y + length),
-        color,
-        width,
-        dasharray,
-        dotted,
     }
 }
 

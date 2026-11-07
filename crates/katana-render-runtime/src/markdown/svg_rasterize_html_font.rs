@@ -1,5 +1,5 @@
 #[cfg(all(test, target_os = "macos"))]
-#[path = "svg_rasterize_html_font_lazy_diagnostic.rs"]
+#[path = "svg_rasterize_html_font_lazy_diagnostic_tests.rs"]
 mod lazy_diagnostic;
 #[cfg(all(test, target_os = "macos"))]
 pub(in crate::markdown::svg_rasterize) use lazy_diagnostic::record_actual_selected_face;
