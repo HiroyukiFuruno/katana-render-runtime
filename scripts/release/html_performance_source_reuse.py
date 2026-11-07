@@ -88,6 +88,48 @@ def validation_cohort_change(path: str, old: tuple[str, int] | None,
                     and new_mode == "100644")
         return (old is None and old_mode is None and new == VALIDATION_COHORT_ADDITIONS[path]
                 and new_mode == "100644")
+    just_launcher_changes = {
+        "Justfile": (("1ddc7e15691a169667301c09896879df62142bf264e7a6b3c18b39a206c42b22", 85605),
+            ("b0b8129c75f5f2da37b1fca70625a4d123c4185a7928fddea65036810097a0da", 85756)),
+        "scripts/html/harness-contract-graph.ts": (("a514eac95f19c08d01eff4a65181e9079a3646f1e4d88a1b15946e375f8a9291", 197561),
+            ("9f7e80b6007edf1b1d2c32e43478805779ca80a1d698732726e72a56bdabb86b", 197904)),
+        "scripts/html/harness-contract_test.ts": (("731937522cdeb18769b038f760aef65d7b2bd10dbb29698385753dabefd1442d", 264923),
+            ("6ee0ee3a528be4e1300498356964bd8226499256bba5f71a1fa4c9c3e4dd6269", 266949)),
+        "scripts/mermaid/native-cli-managed-build-input-test-fixture.ts": (("071ed9ccaeb01df5d409fb61d01e98c9582897604b69596df222d872a750c2b4", 12580),
+            ("5e95a724320af262f12babb8cd6886e529dfe222cd66e63cdbd5cfc9c9ef9f7b", 13630)),
+        "scripts/mermaid/native-cli-managed-build-schema.ts": (("c8d92904803968c542a75ae9c520aaa948dd5e1b6d3dde7c54d08667bd44d02f", 7835),
+            ("562f53afb924ca81acb367eed22bb441680aa336a7e15058a163dbba47d67d6e", 7982)),
+        "scripts/mermaid/native-cli-managed-build-test-fixture.ts": (("37600a6eb713c062dde2521a23652f0e714e649222a1e13285de842b421a778a", 15036),
+            ("db45ddd958784813c84f937630088e3b2c9b524122d3f40be01c37d14c739358", 16112)),
+        "scripts/mermaid/native-cli-managed-build.ts": (("fc37d9ce83950f0d5596ca9e5b7f68ec14b83aec48c616e5de735130acb799c9", 11693),
+            ("272e649de81bc2da8e6e4576ca32d249d4da1dff813a49020f1e3d68f551724b", 13999)),
+        "scripts/mermaid/native-cli-managed-cargo.ts": (("1b78df712dd3bf87ccdebfd5faf8bece9abc0499a3af66a10e6d7394066ed74e", 20334),
+            ("438b7e29486622020d61c368ea9ea29a67f8182be41792ef10748824bfa7ca50", 20358)),
+        "scripts/mermaid/native-cli-managed-input-schema.ts": (("915e8bef83d7134a7e8df4ba4e0bb822d17735fd99d82bf67a169678d35dad8a", 4642),
+            ("7c38a0d21d23a20fa91e5ab6ce4b62526519b3f51f3810be2765ba47c44660f1", 5613)),
+        "scripts/mermaid/native-cli-managed-inputs.ts": (("b4cfeb9e28d0883081aef021eaf60dce60fcdef832c6af280d65b9911d342cd8", 7812),
+            ("2e95e77675af9f26f2f53fd2c2a63f1b9e296fd42c7854666304627a1d82f882", 9205)),
+        "scripts/mermaid/native_cli_build_bindings.py": (("4cc205fcc4869aead7ee63bf6bb911ad1f23858082f8787c390155dc9092b18b", 15900),
+            ("997d9114d2f6faa3e753193d8b7fae04a57b8bb84146fde6e769692475fda3c3", 19203)),
+        "scripts/mermaid/native_cli_build_producer_test.py": (("905d0f05094c416e684d344a1888deb107851651ec41b3ee4ce747940e3a62a5", 37118),
+            ("8ab429d6b676153745f5a3e2b75a43b3f0171e7a68b721caae84ce72c1cb83d6", 40840)),
+        "scripts/mermaid/native_cli_managed_build_reader_test.ts": (("11379abd45fdf80c7bdb487998cd8e51866620b8230d1f37cdd821530504d288", 33628),
+            ("2434d0a53edc15f013636b3bb5a66b6cf7769c2e2a9253470849bb01344156da", 36985)),
+        "scripts/mermaid/produce_native_cli_build_receipt.py": (("c5e346bb8bd2a36af6d36d6162555e377487c8f2a0134edd158dedc870f05743", 20268),
+            ("6e9be36f90e0209b2fea288d9dc4462ef77cb6777c3e3df5b36e6bc7f8c5dee4", 20454)),
+        "scripts/runtime-bundles/runtime-rust-facts-host-freshness_test.ts": (("4670b3578bd3d564e11d02bb4f514339ef990866c9e18fa8bd99d9c9ac99660f", 9119),
+            ("817542ee4958eea7663550e11eef7cc757cccedf5355a217cf44cbeaaee579a0", 12068)),
+        "scripts/runtime-bundles/runtime-rust-facts-host-inputs.ts": (("b053cfa3fb85a4de1bf761bd7dca39e36028bec15aa7a319ddb25340424bed32", 7599),
+            ("b3b2d25b69b7df09eecf41d196a278025c435251eb66966d64e2937d2bc16bab", 9334)),
+        "scripts/runtime-bundles/runtime-rust-facts-host-protocol.ts": (("ffe16c0ef5e50ec1b0573adb228f3a8151df2eeb5c0c890df6918533e359ce81", 14567),
+            ("6fc68ddc1487baa396454c263f3a6de79fe759550fc0be356dfb1288d18b6aed", 14811)),
+        "scripts/runtime-bundles/runtime-rust-facts-host.ts": (("a47f6005ab71db0027b888683973fa0c5fba0620eb209b7bff813381e4c31e08", 15040),
+            ("ce45d76d1b8159cef32a671b5572a27fb7304bdd08904984903e7a6e57e0e8ba", 15585)),
+        "scripts/runtime-bundles/runtime-rust-facts-host_test.ts": (("4837857c9dfe95b350d65592bd11d6117a5891f37a877927adbc88f5b44bdf22", 20282),
+            ("edbac16de7851e51ceed681f4c2723874641ec557679dc03f06e77c0aa455000", 20436)),
+    }
+    if path in just_launcher_changes and (old, new) == just_launcher_changes[path]:
+        return old_mode == new_mode == "100644"
     pair = VALIDATION_COHORT_CHANGES.get(path)
     if pair is not None:
         followup = {
@@ -109,8 +151,9 @@ def validation_cohort_change(path: str, old: tuple[str, int] | None,
         budget_predecessor = ("0bde8075042a47d5601044e860d997f49e8aaf85a8b67a1c6ea862e37df90844", 40090)
         format_predecessor = ("10225a74072a6d30b58ca01d3a6e93f0797d75bc1b700b963c725bc4192a8384", 41784)
         promotion_predecessor = ("4a57d835945ea1b095b039fa565f80fbc01ee7e5d231bad1c7c560c53d94d6b0", 44350)
+        just_predecessor = ("d92d9865cd7e501fccf45202d3eaee6df795f2f0d27bf0cc9d6d284ca5aa4099", 45823)
         history = (intermediate, reviewed, retained, latest_reviewed, budget_predecessor,
-                   format_predecessor, promotion_predecessor)
+                   format_predecessor, promotion_predecessor, just_predecessor)
         if old in history:
             return (new == live or new in history[history.index(old) + 1:]) and old_mode == new_mode == "100644"
         prior = ("7d75f7a2642103908ebaaf24ccffc175b0ff61e8bbb020fea9f9b0d0e4648dfe", 24917)
@@ -225,6 +268,11 @@ def validation_cohort_change(path: str, old: tuple[str, int] | None,
     if promotion_pair is not None and (old, new) == promotion_pair:
         return old_mode == new_mode == "100644"
     if (path == "scripts/release/html_performance_source_reuse_test.py"
+            and new == ("6b055a8a3697a99e5ab78653de7c51a4031730a111134b0781cdd3245c5c03ef", 40163)):
+        previous = ("994934a37600f9b902eb03a8093a02c370b3abe622aa56ea5b3ec8f48b6a66e3", 34393)
+        return (old_mode == new_mode == "100644" and (old == previous
+                or validation_cohort_change(path, old, previous, old_mode, new_mode)))
+    if (path == "scripts/release/html_performance_source_reuse_test.py"
             and new == ("994934a37600f9b902eb03a8093a02c370b3abe622aa56ea5b3ec8f48b6a66e3", 34393)
             and (format_pair is not None and (old in format_pair[0] or old == format_pair[1])
                  or metadata_pair is not None and (old in metadata_pair[0] or old == metadata_pair[1])
@@ -313,7 +361,8 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
                    "37c6a3b87c0d5367d2144b8850f9cd7b97294e92fe32886fbb408768033d3ad2",
                    "0bde8075042a47d5601044e860d997f49e8aaf85a8b67a1c6ea862e37df90844",
                    "10225a74072a6d30b58ca01d3a6e93f0797d75bc1b700b963c725bc4192a8384",
-                   "4a57d835945ea1b095b039fa565f80fbc01ee7e5d231bad1c7c560c53d94d6b0")
+                   "4a57d835945ea1b095b039fa565f80fbc01ee7e5d231bad1c7c560c53d94d6b0",
+                   "d92d9865cd7e501fccf45202d3eaee6df795f2f0d27bf0cc9d6d284ca5aa4099")
         if old_sha in history:
             return current == Path(__file__).read_bytes() or current_sha in history[history.index(old_sha) + 1:]
         if old_sha != "847b5541ecc81d533eaf510e1675b7a2b667853a7dc8793f34387470d9dce426":
@@ -414,7 +463,8 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
                        "0a4069d980a508ff27e1b9853db092ca4dd8fe5e3a3b90c9c029bd550130f6d9",
                        "42fe5276c8fe9f36066218e4859942308141de39dfb0e6428703619787ff40e6",
                        "f07cc35c9e42f2c711e8e4a43dbcf1c9770124728d1b76338b6449cd7aefb147",
-                       "994934a37600f9b902eb03a8093a02c370b3abe622aa56ea5b3ec8f48b6a66e3"})),
+                       "994934a37600f9b902eb03a8093a02c370b3abe622aa56ea5b3ec8f48b6a66e3",
+                       "6b055a8a3697a99e5ab78653de7c51a4031730a111134b0781cdd3245c5c03ef"})),
         "scripts/release/html_performance_epoch_reuse.py": (
             "33a05103fc5100c7eb2e9d10368785c8ab20e6f8308ddc53f0ae95f63c573f1c",
             frozenset({"3f50599d284dbe593bb9a1cf02d0fdd633647eb61a3f6be7867b8308d72de3c7",
@@ -594,6 +644,76 @@ def _specific_source_changes(
             raise ValueError("HTML test source delta differs")
         approved.update((parent, child))
         added_tests.add(child)
+
+    test_cohort = {
+        "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime_coverage_gap_arrow_tests.rs": (("6accdb5675d801c5b26d5f144756c80d5a0ce15fde9dc31c89dd932e2d3a8611", 4255), ("3cfc61c620818207153699b67c177aa270fa87e333ba83bcb44eff4052baf5ec", 5179)),
+        "crates/katana-render-runtime/src/markdown/svg_rasterize_html_glyph_instances_tests.rs": (("aa7efda0ad82341e40b2fd8f386916c87efa6511c8378f0afa8a126b14589d11", 10669), ("6abe3020035675c95be3c11bbd2d094a0535a881de3acafdbd3bf7bde8dae536", 11310)),
+        "crates/katana-render-runtime/src/markdown/svg_rasterize_text_shaping_svg_fragments_tests.rs": (("daf7b57a647213588f12531521e6f13de146e859a6973be9c46867562dd559e6", 8606), ("c60f5c8df144249ed10a9e22fcd9e79d26d24dae1699b94a5a42ba1e26cb9462", 8717)),
+        "crates/katana-render-runtime/src/svg_engine_parser_boundary_tests.rs": (("9f92c836a164c23be101fefe4aa16eec851b941f486b81f73b09c001f6fb3742", 11833), ("05f6eff97360095a517e5102c89a76cdcabdd38edba797dbc7c7837abcb2742b", 11914)),
+        "crates/katana-render-runtime/src/svg_engine_parser_paint_boundary_tests.rs": (("3aa06c65e76258fcd704218f632dc185cb488a2c4c09a4c47c555feedcd0b7a3", 6757), ("9ebad52e95ecb48ddd1d07c332312e683b00bc460c6929fda271d287c25cbe51", 12022)),
+        "crates/katana-render-runtime/src/svg_engine_parser_shape_boundary_tests.rs": (None, ("34729a9401f9f618227a09752c0f5ba7423d3405a315b840bcbd5f491d39c877", 1683)),
+        "crates/katana-render-runtime/src/svg_engine_render_compare_tests.rs": (("28cc1bf2fe975adf992ad3496fc97a79a869dd754f5a06768161683f8ba9b77d", 3214), ("20272f7c034583f7de1fed81809c1bcc2aedf716c1f75a165e9677e6114c736e", 3225)),
+        "crates/katana-render-runtime/src/svg_engine_render_filter_coverage_tests.rs": (None, ("fac834f41746e67736ddf014eb0457ad00c8b4292185a924ec1956a41a1c883b", 3043)),
+        "crates/katana-render-runtime/src/svg_engine_render_filter_shadow_tests.rs": (("de49038437dc0c3ba5fac3fb6f4d268a9ef3d97a3d1e503d761d221cefcffae9", 2099), ("0da7255e3c460c47da541411010c8979bee21ba0f36e7bcd4573cde9360a3663", 2175)),
+        "crates/katana-render-runtime/src/svg_engine_render_marker_tests.rs": (("cfd2d5f82082d5940c55eef4961f8232504bae18245f64d1c421b65520d5d29f", 6695), ("f1a2e1aaaf7afb0c3d4eabf53d903f818a0ac1685f7d53cd68cb9923bc02e078", 8718)),
+        "crates/katana-render-runtime/src/svg_engine_text_layout_spacing_tests.rs": (("1cca57085e42db7a2076285740acbdb4be4bd4e9cd516074c7d2fb38bf9fd4be", 7970), ("1e609ade23cb2add14450419b36dce7829581d8251e323d8bebd3ec1fa65def1", 9219)),
+        "crates/kdr-linter/src/bin/mathjax_consumer_facts/backend_route_edge_mutations_tests.rs": (None, ("bac5187c3d7baa9529901f89e2f32f04fc2b2b373993983cc93e4eaa4cceca65", 1325)),
+        "crates/kdr-linter/src/bin/mathjax_consumer_facts/backend_route_tests.rs": (("a84dd8898ab9fa7c8ab28d230bf56e64824867d61a06d11cf76cebce520a6a02", 10068), ("8e09b1cd07dbcbe085ac37030d9ec882e87c1884578c6966441201550e678b6b", 9931)),
+        "crates/kdr-linter/src/bin/mathjax_consumer_facts/bundle_execution_tests.rs": (("51feaea679e8d6011d0dd8ff5d7252a39ae0eb886283b19f4e393633f610e641", 10404), ("222c96eab71e037c0919a479a0b16ccbf92b9cda36154981f8c3e2e62b1618a6", 10665)),
+        "crates/kdr-linter/src/bin/mathjax_consumer_facts/mathjax_backend_shape_mutations_tests.rs": (None, ("71ca42940ad7ab3347b006fe02e5c900f2d6205bd126d6844c53c2d917cb373f", 1856)),
+        "crates/kdr-linter/src/bin/mathjax_consumer_facts/mermaid_classic_resource_edge_mutations_tests.rs": (None, ("44d702e0537bd5fd810c9a7a0092833a1ef098d9642e79775afc8fc31189e756", 1699)),
+        "crates/kdr-linter/src/bin/mathjax_consumer_facts/mermaid_classic_resource_tests.rs": (("985354b8899dc7fa19e74078a8bca05db06c953f7b8b450f71b5eac119cc2eb2", 10622), ("6daf1f2289f7437a34bb5dd18a5e69f5c25c76cab6decceefdbfb44e0c6c5518", 10478)),
+        "crates/kdr-linter/src/bin/mathjax_consumer_facts/mermaid_render_shape_mutations_tests.rs": (None, ("346faa7c7c1cf26be5b7e466f0f83e4facce7c0cc9386485bd7505724a538522", 1777)),
+        "crates/kdr-linter/src/bin/mathjax_consumer_facts/resource_snapshot_shape_mutations_tests.rs": (None, ("7cc85e6690a4a0d0e74eda026dc3d176c71c9192970e85a3f51d2c39b1ebc139", 1445)),
+        "crates/kdr-linter/src/bin/mathjax_consumer_facts/runtime_v8_route_plantuml_tests.rs": (("a4b7157ec64e3b736440a07c37ed82bd8d9e02f399c665f8c3e728e793c489b8", 6464), ("c88e9f369ec3f0a8a01c3e1d402770fb32834d9875fba20ad17d322000944082", 7916)),
+    }
+    test_anchors = {
+        "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime.rs": ("6beaa9a5f1b2d52c87d4e34ab55e78ee2a00b57c8a992da3082ab5459300b28a", 4480),
+        "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime_tests.rs": ("91b414ac482e6f543dee80bd1828f0174bc313d31852cc24906a3b2fd2739ec7", 4658),
+        "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime_tests_block_geometry.rs": ("d27f32df71cbb09a3bd63daf2d8ab281b99d1edecd06218c87e5b82ce857b322", 2445),
+        "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime_coverage_gap_tests.rs": ("7451561b72037373d8aebbb7b1b285a4dad4f261cdaf7337ba7c836a247836b1", 138),
+        "crates/katana-render-runtime/src/markdown/svg_rasterize_html_glyph_instances.rs": ("b9fb49bdc1b6b8ec02537a4ca441bae92956d105fd68992fd883627c8f578230", 5923),
+        "crates/katana-render-runtime/src/markdown/svg_rasterize_text_shaping_svg_fragments.rs": ("752c3d7daff11b21bdb5f3fd99d836772f377d0ef6abe4b46f155bf8ba290e90", 5381),
+        "crates/katana-render-runtime/src/svg_engine.rs": ("c18945e539f8e6176c435ae0104b96d9b964b544d63afcdbff0d96fbb2c4bd39", 1952),
+        "crates/katana-render-runtime/src/svg_engine_render_tests.rs": ("74dc29569c589fac46caa3f560d660d182c852921328d69f1eb3219a936c8040", 7098),
+        "crates/katana-render-runtime/src/svg_engine_text_model_tests.rs": ("acebe5d6cbac8e9fdda49d5fc9035a11bcc47628c677a4255deccf8c95c279e3", 8403),
+        "crates/katana-render-runtime/src/svg_engine_text_layout_matrix_tests.rs": ("78dd5c2a5c4fcad32db5deb9df82b186b439b30cfd7def83230025a359a6aaa1", 9114),
+        "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/text.rs": ("7b48f425e37fd5fa71d336f85ee0be6df0b1222143f08b18c57c10a3f2b5f307", 18938),
+        "crates/kdr-linter/src/bin/mathjax_consumer_facts.rs": ("e5fd686cbf0035422d1e8a95dfe9e7b5af990b3e58d824a32caf9224a85fc43f", 6391),
+        "crates/kdr-linter/src/bin/mathjax_consumer_facts/ast_linter_tests.rs": ("b3832f508a3b27c4de35ac15ffd87b3dfe9ab9fd4f312749783a7d3a641f4618", 2926),
+        "crates/kdr-linter/src/bin/mathjax_consumer_facts/mermaid_classic_scripts_tests.rs": ("6303a96003a43f287579e0a4ec07f1258780aa9f62f6a18434163f101e3fe735", 9863),
+        "crates/kdr-linter/src/bin/mathjax_consumer_facts/runtime_v8_route_tests.rs": ("1b11e1d66ae62827b6b676446ae8d5c593b01a08d7fa9b82ceb24c16af652ecd", 10381),
+    }
+    sentinels = {
+        "crates/kdr-linter/src/bin/mathjax_consumer_facts/backend_route_edge_mutations_tests.rs",
+        "crates/kdr-linter/src/bin/mathjax_consumer_facts/mermaid_classic_resource_edge_mutations_tests.rs",
+    }
+    if any(path not in measured and path in current for path in sentinels):
+        if not allow_test_changes:
+            raise ValueError("test-only cohort is not enabled")
+        for path, (before, after) in test_cohort.items():
+            if (measured.get(path) != before or current.get(path) != after
+                    or old_modes.get(path) != ("100644" if before is not None else None)
+                    or new_modes.get(path) != "100644"):
+                raise ValueError("test-only cohort membership, mode or record differs")
+            data = (root / path).read_bytes()
+            if (hashlib.sha256(data).hexdigest(), len(data)) != after:
+                raise ValueError("test-only cohort current bytes differ")
+            if before is not None:
+                data = git_bytes(("show", measured_head + ":" + path))
+                if (hashlib.sha256(data).hexdigest(), len(data)) != before:
+                    raise ValueError("test-only cohort measured bytes differ")
+        for path, expected in test_anchors.items():
+            if (measured.get(path) != expected or current.get(path) != expected
+                    or old_modes.get(path) != "100644" or new_modes.get(path) != "100644"):
+                raise ValueError("test-only cohort anchor differs")
+            old_data = git_bytes(("show", measured_head + ":" + path))
+            new_data = (root / path).read_bytes()
+            if ((hashlib.sha256(old_data).hexdigest(), len(old_data)) != expected
+                    or (hashlib.sha256(new_data).hexdigest(), len(new_data)) != expected):
+                raise ValueError("test-only cohort anchor bytes differ")
+        approved.update(test_cohort)
+        added_tests.update(path for path, (before, _) in test_cohort.items() if before is None)
 
     return approved, added_tests
 

@@ -18,6 +18,90 @@ def git(root: Path, *args: str) -> str:
 
 
 class SourceReuseTest(unittest.TestCase):
+    def test_test_only_cohort_requires_exact_records_modes_and_anchors(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        head = "d5ca9a64"
+        names = git(root, "diff", "--name-only", head, "--", "crates").splitlines()
+        self.assertEqual(len(names), 20)
+        measured = committed_records(root, head)
+        tree = subprocess.check_output(["git", "-C", str(root), "ls-tree", "-r", "-z", head])
+        old_modes = reuse._modes(tree)
+        current, new_modes = dict(measured), dict(old_modes)
+        for name in names:
+            data = (root / name).read_bytes()
+            current[name] = (hashlib.sha256(data).hexdigest(), len(data))
+            new_modes[name] = "100644"
+        cached: dict[str, bytes] = {}
+        def git_bytes(args: Sequence[str]) -> bytes:
+            if args[1] not in cached:
+                cached[args[1]] = subprocess.check_output(["git", "-C", str(root), *args])
+            return cached[args[1]]
+        def check(records: reuse.Records, modes: dict[str, str], *, allow: bool = True) -> tuple[set[str], set[str]]:
+            return reuse._specific_source_changes(root, head, records, measured, old_modes, modes,
+                                                  git_bytes, allow_test_changes=allow)
+        approved, added = check(current, new_modes)
+        self.assertEqual(approved, set(names))
+        self.assertEqual(added, set(names) - measured.keys())
+        self.assertEqual(len(added), 7)
+        with self.assertRaises(ValueError):
+            check(current, new_modes, allow=False)
+        for name in names:
+            with self.subTest(path=name):
+                with self.assertRaises(ValueError):
+                    check({**current, name: ("0" * 64, current[name][1])}, new_modes)
+                with self.assertRaises(ValueError):
+                    check(current, {**new_modes, name: "100755"})
+                missing = dict(current)
+                missing.pop(name)
+                with self.assertRaises(ValueError):
+                    check(missing, new_modes)
+        anchor = "crates/kdr-linter/src/bin/mathjax_consumer_facts.rs"
+        with self.assertRaises(ValueError):
+            check({**current, anchor: ("0" * 64, current[anchor][1])}, new_modes)
+        with self.assertRaises(ValueError):
+            check(current, {**new_modes, anchor: "100755"})
+
+    def test_just_launcher_cohort_actual_git_endpoints(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        target = "a2fab616"
+        paths = git(root, "diff", "--name-only", "d5ca9a64", target, "--", "Justfile", "scripts").splitlines()
+        self.assertEqual(len(paths), 19)
+        for head in ("d5ca9a64", "5cac0ae4"):
+            old_items = tuple((path, checksum, size) for path, (checksum, size)
+                              in sorted(committed_records(root, head).items())
+                              if path.startswith("scripts/") or path == "Justfile")
+            new_items = tuple((path, checksum, size) for path, (checksum, size)
+                              in sorted(committed_records(root, target).items())
+                              if path.startswith("scripts/") or path == "Justfile")
+            self.assertEqual(_v3_authenticate_programs(root, head, old_items, ((target, new_items),),
+                             git_query=None), old_items)
+            for path in paths:
+                old = subprocess.check_output(["git", "-C", str(root), "show", head + ":" + path])
+                new = subprocess.check_output(["git", "-C", str(root), "show", target + ":" + path])
+                before = (hashlib.sha256(old).hexdigest(), len(old))
+                after = (hashlib.sha256(new).hexdigest(), len(new))
+                old_mode = git(root, "ls-tree", head, "--", path).split()[0]
+                new_mode = git(root, "ls-tree", target, "--", path).split()[0]
+                with self.subTest(head=head, path=path):
+                    self.assertTrue(reuse.validation_cohort_change(path, before, after, old_mode, new_mode))
+                    self.assertFalse(reuse.validation_cohort_change(path, before,
+                                     (hashlib.sha256(new + b" ").hexdigest(), len(new) + 1), old_mode, new_mode))
+                    self.assertFalse(reuse.validation_cohort_change(path, before, after, old_mode, "100755"))
+                    self.assertFalse(reuse.validation_cohort_change(path, before, None, old_mode, None))
+        for name in ("html_performance_source_reuse.py", "html_performance_source_reuse_test.py"):
+            path = "scripts/release/" + name
+            old = subprocess.check_output(["git", "-C", str(root), "show", "d5ca9a64:" + path])
+            new = (root / path).read_bytes()
+            before = (hashlib.sha256(old).hexdigest(), len(old))
+            after = (hashlib.sha256(new).hexdigest(), len(new))
+            self.assertTrue(reuse.validation_cohort_change(path, before, after, "100644", "100644"))
+            self.assertFalse(reuse.validation_cohort_change(path, before, after, "100644", "100755"))
+            self.assertFalse(reuse.validation_cohort_change(path, before,
+                             (hashlib.sha256(new + b" ").hexdigest(), len(new) + 1), "100644", "100644"))
+            if name == "html_performance_source_reuse.py":
+                self.assertTrue(reuse.known_auth_program_change(path, old, new))
+                self.assertFalse(reuse.known_auth_program_change(path, old + b" ", new))
+
     def test_promotion_environment_transition_is_exact(self) -> None:
         root = Path(__file__).resolve().parents[2]
         for name in ("html_performance_promotion.py", "html_performance_promotion_test.py"):
@@ -47,7 +131,8 @@ class SourceReuseTest(unittest.TestCase):
         head = "a476765c"
         lock = "scripts/html/performance-harness/Cargo.lock"
         old_lock = subprocess.check_output(["git", "-C", str(root), "show", head + ":" + lock])
-        self.assertEqual(hashlib.sha256(old_lock).hexdigest(), LOCK_SHA)
+        self.assertEqual(hashlib.sha256(old_lock).hexdigest(),
+                         "dc865c759e8b6493cc01bf7311309fb4dfb60e41db792abf5a288bb51d20dd9d")
         self.assertEqual(hashlib.sha256((root / lock).read_bytes()).hexdigest(), LOCK_SHA)
         names = ("html_performance_source_reuse.py", "html_performance_source_reuse_test.py",
                  "html_performance_epoch_reuse.py", "html_performance_epoch_reuse_test.py")
@@ -76,13 +161,13 @@ class SourceReuseTest(unittest.TestCase):
         self.assertFalse(reuse.validation_cohort_change(path, previous, current, "100644", "100755"))
         self.assertFalse(reuse.validation_cohort_change(path, previous, None, "100644", None))
 
-    def test_reviewed_producer_cohort_reaches_current_worktree(self) -> None:
+    def test_reviewed_producer_cohort_reaches_budget_epoch(self) -> None:
         root = Path(__file__).resolve().parents[2]
         for name in ("produce_html_performance_evidence.py", "produce_html_performance_evidence_test.py"):
             path = "scripts/release/" + name
-            current = (root / path).read_bytes()
+            current = subprocess.check_output(["git", "-C", str(root), "show", "189281be:" + path])
             new_record = (hashlib.sha256(current).hexdigest(), len(current))
-            new_mode = "100755" if (root / path).stat().st_mode & 0o111 else "100644"
+            new_mode = git(root, "ls-tree", "189281be", "--", path).split()[0]
             for head in ("70c3981a0df4f3a3833b4833bb78248a08602ee3", "9e88ede8", "a476765c"):
                 old = subprocess.check_output(["git", "-C", str(root), "show", head + ":" + path])
                 old_record = (hashlib.sha256(old).hexdigest(), len(old))
@@ -93,13 +178,14 @@ class SourceReuseTest(unittest.TestCase):
                     self.assertFalse(reuse.validation_cohort_change(path, old_record, unknown, old_mode, new_mode))
                     self.assertFalse(reuse.validation_cohort_change(path, old_record, new_record, old_mode, "100755"))
 
-    def test_current_cpu_validation_cohort_reaches_current_worktree(self) -> None:
+    def test_cpu_validation_cohort_and_current_auth_module(self) -> None:
         root = Path(__file__).resolve().parents[2]
         for name in ("html_performance_host_load_validation.py", "html_performance_host_load_validation_test.py",
                      "html_performance_source_reuse.py", "html_performance_source_reuse_test.py"):
             path = "scripts/release/" + name
             old = subprocess.check_output(["git", "-C", str(root), "show", "a476765c:" + path])
-            current = (root / path).read_bytes()
+            current = ((root / path).read_bytes() if name.startswith("html_performance_source_reuse")
+                       else subprocess.check_output(["git", "-C", str(root), "show", "189281be:" + path]))
             old_record = (hashlib.sha256(old).hexdigest(), len(old))
             new_record = (hashlib.sha256(current).hexdigest(), len(current))
             unknown = (hashlib.sha256(current + b" ").hexdigest(), len(current) + 1)
@@ -472,7 +558,7 @@ class ReleaseToolingReuseTest(unittest.TestCase):
             if case == "removed" and path == selected[0]:
                 target.unlink()
             else:
-                if path in {"package.json", "bun.lock"} and case != "live_dependencies":
+                if path not in {"package.json", "bun.lock"} or case != "live_dependencies":
                     value = subprocess.check_output([
                         "git", "-C", str(repository), "show", "137f5ce40ece72685970ccbf2932659c4626c51d:" + path,
                     ])
