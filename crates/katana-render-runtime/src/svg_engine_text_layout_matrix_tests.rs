@@ -9,6 +9,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[path = "svg_engine_text_layout_decoration_boundary_tests.rs"]
 mod decoration_boundary_tests;
+#[path = "svg_engine_text_layout_fallback_tests.rs"]
+mod fallback_tests;
 #[path = "svg_engine_text_layout_path_rotation_tests.rs"]
 mod path_rotation_tests;
 #[path = "svg_engine_text_layout_path_support.rs"]

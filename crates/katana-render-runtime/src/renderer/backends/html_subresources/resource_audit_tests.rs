@@ -6,6 +6,26 @@ use crate::renderer::backends::html_subresources::transport;
 use std::path::PathBuf;
 
 #[test]
+fn existing_resource_body_is_rejected_without_replacement() -> Result<(), String> {
+    let fixture = LocalFixture::new()?;
+    let path = fixture.root.join("existing-body.bin");
+    let original = b"original body";
+    std::fs::write(&path, original).map_err(|error| error.to_string())?;
+
+    let error = super::persist_body(&path, b"replacement")
+        .err()
+        .ok_or("existing resource body was accepted")?;
+    assert!(error.contains("could not create fresh resource body"));
+    assert_eq!(
+        std::fs::read(&path)
+            .map_err(|error| error.to_string())?
+            .as_slice(),
+        original.as_slice()
+    );
+    Ok(())
+}
+
+#[test]
 fn file_load_persists_the_actual_bytes_and_url() -> Result<(), String> {
     let fixture = LocalFixture::new()?;
     let source = fixture.root.join("source.bin");

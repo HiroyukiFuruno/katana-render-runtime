@@ -1,5 +1,6 @@
 use super::RuntimePathResolver;
 use crate::markdown::plantuml_renderer::PLANTUML_JAR_VERSION;
+use crate::markdown::plantuml_renderer::PlantUmlRendererOps;
 use crate::renderer::api::DiagramKind;
 use std::path::PathBuf;
 
@@ -31,6 +32,25 @@ fn plantuml_default_runtime_path_is_resolvable() -> Result<(), Box<dyn std::erro
     let resolved = RuntimePathResolver::resolve(DiagramKind::PlantUml, None)?;
 
     assert!(resolved.ends_with("plantuml.jar"));
+    Ok(())
+}
+
+#[test]
+fn plantuml_renderer_selects_default_and_requested_cache_paths()
+-> Result<(), Box<dyn std::error::Error>> {
+    let cache = tempfile::tempdir()?;
+    let (default, _) = RuntimePathResolver::resolve_renderer(DiagramKind::PlantUml, None, None)?;
+    let (selected, _) = RuntimePathResolver::resolve_renderer(
+        DiagramKind::PlantUml,
+        None,
+        Some(cache.path().into()),
+    )?;
+
+    assert_eq!(default, PlantUmlRendererOps::default_jar_path());
+    assert_eq!(
+        selected,
+        PlantUmlRendererOps::default_jar_path_for_cache_dir(cache.path())
+    );
     Ok(())
 }
 
