@@ -210,3 +210,21 @@ fn assert_overflow_preconditions(candidate: &usvg::Tree) -> Result<(), String> {
     assert!(scale.is_finite() && scale == 2.0 && (radius * scale).is_infinite());
     Ok(())
 }
+
+#[test]
+fn zero_object_bounding_box_offset_subregion_drops_only_filtered_shape() -> Result<(), String> {
+    let parse = |primitive_width: &str| {
+        let svg = format!(
+            "<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'><defs><filter id='f' filterUnits='userSpaceOnUse' primitiveUnits='objectBoundingBox' x='0' y='0' width='16' height='16'><feOffset width='{primitive_width}' height='1'/></filter></defs><rect id='subject' x='2' y='2' width='8' height='8' filter='url(#f)'/><rect id='control' x='1' y='1' width='1' height='1'/></svg>"
+        );
+        usvg::Tree::from_str(&svg, &usvg::Options::default()).map_err(|error| error.to_string())
+    };
+    let invalid = parse("0")?;
+    assert!(invalid.node_by_id("subject").is_none());
+    assert!(invalid.node_by_id("control").is_some());
+
+    let valid = parse("1")?;
+    assert!(valid.node_by_id("subject").is_some());
+    assert!(valid.node_by_id("control").is_some());
+    Ok(())
+}

@@ -72,6 +72,11 @@ const RENDER_MUTATIONS: &[(&str, &str, &str)] = &[
 
 const LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "Some(BundledResource::Mermaid) => RuntimeAsset::mermaid()\n                .bytes()\n                .map_err(std::io::Error::other)?,",
+        "Some(BundledResource::Mermaid) => RuntimeAsset::mermaid()\n                .bytes()\n                .map_err(std::io::Error::other),",
+        "mermaid-resource-route:bundled",
+    ),
+    (
         "let source = match bundled {",
         "let source = match other {",
         "resource-loader:read-dispatch",
@@ -104,6 +109,16 @@ const LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
 ];
 
 const BACKEND_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "runtime_resource_loader::load(\n            &self.runtime_path,\n            self.bundled.then_some(BundledResource::Mermaid),\n        )\n        .map_err(|error| {\n            runtime_resource_loader::diagram_error(\n                block,\n                &self.runtime_path,\n                error,\n                \"Mermaid\",\n                crate::markdown::runtime_assets::MERMAID_DOWNLOAD_URL,\n                \"Failed to read Mermaid.js bundle\",\n            )\n        })",
+        "other",
+        "mermaid-resource-backend:reader",
+    ),
+    (
+        "runtime_resource_loader::load(\n            &self.runtime_path,\n            self.bundled.then_some(BundledResource::Mermaid),\n        )\n        .map_err(|error| {",
+        "other.map_err(|error| {",
+        "mermaid-resource-backend:reader",
+    ),
     (
         ".map(|output| RenderOutputFactory::bind_resource(output, digest.as_deref()))",
         ".map(other)",

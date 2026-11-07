@@ -35,6 +35,35 @@ fn public_session_advance_time_drives_delayed_timer_and_resets_on_navigation() -
     Ok(())
 }
 
+#[test]
+fn failed_timer_preserves_frame_and_later_timer_can_publish() -> TestResult {
+    let html = "<body style='background:red'><script>setTimeout(() => { throw new Error('timer-failure'); }, 25); setTimeout(() => document.body.setAttribute('style', 'background:blue'), 50)</script></body>";
+    let source = HtmlBrowserSource::new(html, "https://example.test/timer-failure.html")
+        .map_err(to_string)?;
+    let mut session = start_session(source)?;
+    let initial = session
+        .latest_frame()
+        .cloned()
+        .ok_or("initial frame missing")?;
+    assert!(session.take_frame_update().is_some());
+
+    assert!(matches!(
+        session.advance_time(Duration::from_millis(25)),
+        Err(HtmlBrowserError::RuntimeFailure { error }) if error.contains("timer-failure")
+    ));
+    assert_eq!(session.latest_frame(), Some(&initial));
+    assert!(session.take_frame_update().is_none());
+
+    session
+        .advance_time(Duration::from_millis(25))
+        .map_err(to_string)?;
+    let updated = session.latest_frame().ok_or("updated frame missing")?;
+    assert!(updated.generation > initial.generation);
+    assert_ne!(updated.pixels, initial.pixels);
+    assert!(session.take_frame_update().is_some());
+    session.close().map_err(to_string)
+}
+
 fn assert_no_frame_update(session: &mut HtmlBrowserSession, expected: u64) -> TestResult {
     session
         .advance_time(Duration::from_millis(TIMER_BEFORE_DEADLINE_MS))
