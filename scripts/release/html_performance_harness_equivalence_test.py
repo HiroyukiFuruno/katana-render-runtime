@@ -54,6 +54,45 @@ class HarnessEquivalenceTest(unittest.TestCase):
         )
         self.verify()
 
+    def test_pinned_history_accepts_only_the_reviewed_retention_addition(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+
+        def sources(revision: str) -> dict[str, bytes]:
+            paths = subprocess.check_output(
+                ["git", "--no-replace-objects", "ls-tree", "-r", "--name-only", revision,
+                 "--", equivalence.ROOT], cwd=root, text=True,
+            ).splitlines()
+            return {path: subprocess.check_output(
+                ["git", "--no-replace-objects", "show", f"{revision}:{path}"], cwd=root,
+            ) for path in paths}
+
+        self.old, self.current = sources("a6b21479"), sources("fe5b455bdc041a102b4eb9cc0d146380357efb33")
+        self.verify()
+        for path in ("src/main.rs", "src/retention.rs", "src/retention_tests.rs",
+                     "src/measurement.rs", "src/operations.rs", "tests/cli_execution.rs",
+                     "tests/cli_execution/retention_contract_tests.rs"):
+            full = equivalence.ROOT + path
+            with self.subTest(path=path):
+                previous = self.current[full]
+                self.current[full] += b"\n// unexpected\n"
+                with self.assertRaises(ValueError):
+                    self.verify()
+                self.current[full] = previous
+        main = equivalence.ROOT + "src/main.rs"
+        previous = self.current[main]
+        self.current[main] = previous.replace(b'.arg("--worker")', b'.arg("--workes")', 1)
+        self.assertNotEqual(self.current[main], previous)
+        with self.assertRaises(ValueError):
+            self.verify()
+        self.current[main] = previous
+        removed = self.current.pop(equivalence.ROOT + "src/retention_tests.rs")
+        with self.assertRaises(ValueError):
+            self.verify()
+        self.current[equivalence.ROOT + "src/retention_tests.rs"] = removed
+        self.current[equivalence.ROOT + "src/unknown.rs"] = b"unexpected"
+        with self.assertRaises(ValueError):
+            self.verify()
+
     def test_changed_driver_settings_timing_rss_and_unknown_modules_are_rejected(self) -> None:
         mutations = {
             "cargo_feature": (equivalence.MANIFEST, b'\n[features]\nchanged = []\n'),
