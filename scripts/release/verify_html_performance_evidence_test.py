@@ -1908,6 +1908,29 @@ class PerformanceEvidenceTest(unittest.TestCase):
                         path, old, current.replace(b"batch_deadline = _batch_deadline(",
                                                    b"batch_deadline = changed_deadline(", 1)))
 
+    def test_v3_reassessment_covers_changed_program_sources(self) -> None:
+        import html_performance_source_reuse as reuse
+
+        repository = Path(__file__).resolve().parents[2]
+        base = "ea4f8e2a21432be76e0e8821756a7bfd3a6226e3"
+        changes = subprocess.run(["git", "-C", str(repository), "diff", "--name-only", base,
+                                  "--", "Justfile", "scripts"],
+                                 check=True, capture_output=True, text=True).stdout.splitlines()
+        paths = set(changes) - reuse.RELEASE_ONLY_PROGRAMS
+        self.assertEqual(paths, set(reuse.V3_REASSESSMENT_PROGRAM_PAIRS) |
+                         {"scripts/release/html_performance_source_reuse.py"})
+        for path in sorted(paths):
+            old = subprocess.run(["git", "-C", str(repository), "show", base + ":" + path],
+                                 check=True, capture_output=True).stdout
+            current = (repository / path).read_bytes()
+            with self.subTest(path=path):
+                self.assertTrue(reuse.v3_reassessment_program_change(
+                    path, old, current, old_mode="100644", new_mode="100644"))
+                self.assertFalse(reuse.v3_reassessment_program_change(
+                    path, old, current + b" ", old_mode="100644", new_mode="100644"))
+                self.assertFalse(reuse.v3_reassessment_program_change(
+                    path, old, current, old_mode="100644", new_mode="100755"))
+
     def test_v3_reassessment_program_binding_rejects_unknown_bytes_and_modes(self) -> None:
         import html_performance_source_reuse as reuse
 
@@ -1919,6 +1942,8 @@ class PerformanceEvidenceTest(unittest.TestCase):
         with patch.object(reuse, "V3_REASSESSMENT_PROGRAM_PAIRS", {path: (record(old), record(new))}):
             self.assertTrue(reuse.v3_reassessment_program_change(
                 path, old, new, old_mode="100644", new_mode="100644"))
+            self.assertFalse(reuse.v3_reassessment_program_change(
+                "scripts/unknown.py", old, new, old_mode="100644", new_mode="100644"))
             self.assertFalse(reuse.v3_reassessment_program_change(
                 path, old, new + b" ", old_mode="100644", new_mode="100644"))
             self.assertFalse(reuse.v3_reassessment_program_change(
