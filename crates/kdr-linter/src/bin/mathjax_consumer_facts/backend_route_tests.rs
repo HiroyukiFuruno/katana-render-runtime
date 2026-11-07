@@ -1,24 +1,11 @@
 use super::*;
 
+#[path = "backend_route_edge_mutations_tests.rs"]
+mod backend_route_edge_mutations;
 #[path = "mathjax_backend_shape_mutations_tests.rs"]
 mod mathjax_backend_shape_mutations;
 
 const BACKEND_ROUTE_MUTATIONS: &[(&str, &str, &str)] = &[
-    (
-        "if block.source.trim().is_empty() {",
-        "if block.source.is_empty() {",
-        "backend-runtime-path:empty-source",
-    ),
-    (
-        "return (Err(\"MathJax source is empty\".to_string()), None);",
-        "return (Err(\"other\".to_string()), None);",
-        "backend-runtime-path:empty-source",
-    ),
-    (
-        "return (Err(\"MathJax source is empty\".to_string()), None);",
-        "return (Err(\"MathJax source is empty\".to_string()), Some(other));",
-        "backend-runtime-path:empty-source",
-    ),
     (
         "Ok(resource) => resource,",
         "Ok(resource) => other,",
@@ -225,6 +212,11 @@ fn rejects_backend_route_changes_at_their_contract_boundary()
         );
     }
     super::call_binding_tests::reject_mutations(&fixture, relative, BACKEND_ROUTE_MUTATIONS)?;
+    super::call_binding_tests::reject_mutations(
+        &fixture,
+        relative,
+        backend_route_edge_mutations::CASES,
+    )?;
     fixture.reject_unique_mutations(relative, mathjax_backend_shape_mutations::CASES)
 }
 

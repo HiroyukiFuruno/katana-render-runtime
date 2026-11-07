@@ -1,6 +1,8 @@
 use super::super::mathjax_facts_ast_linter_tests::shared_resource_loader_mutations::SHARED_RESOURCE_LOADER_MUTATIONS;
 use super::{Fixture, INPUTS, mermaid_classic_scripts, reject_mutations};
 
+#[path = "mermaid_classic_resource_edge_mutations_tests.rs"]
+mod mermaid_classic_resource_edge_mutations;
 #[path = "mermaid_render_shape_mutations_tests.rs"]
 mod mermaid_render_shape_mutations;
 
@@ -199,19 +201,6 @@ const BACKEND_MUTATIONS: &[(&str, &str, &str)] = &[
     ),
 ];
 
-const INSTANCE_MUTATIONS: &[(&str, &str, &str)] = &[
-    (
-        "svg.replace(&root_id, &unique_id)",
-        "svg.replace(&root_id, &root_id)",
-        "mermaid-resource-route:instance",
-    ),
-    (
-        "MERMAID_SVG_RENDER_SEQUENCE.fetch_add(1, Ordering::Relaxed)",
-        "MERMAID_SVG_RENDER_SEQUENCE.fetch_add(2, Ordering::Relaxed)",
-        "mermaid-resource-route:instance",
-    ),
-];
-
 const SNAPSHOT_MUTATIONS: &[(&str, &str, &str)] = &[
     (
         "File::open(path)",
@@ -244,7 +233,16 @@ fn resource_route_rejects_loader_and_snapshot_drift() -> Result<(), Box<dyn std:
     reject_mutations(&fixture, INPUTS[6], SHARED_RESOURCE_LOADER_MUTATIONS)?;
     reject_mutations(&fixture, INPUTS[6], LOADER_MUTATIONS)?;
     reject_mutations(&fixture, INPUTS[7], BACKEND_MUTATIONS)?;
-    reject_mutations(&fixture, INPUTS[8], INSTANCE_MUTATIONS)?;
+    reject_mutations(
+        &fixture,
+        INPUTS[7],
+        mermaid_classic_resource_edge_mutations::BACKEND_CASES,
+    )?;
+    reject_mutations(
+        &fixture,
+        INPUTS[8],
+        mermaid_classic_resource_edge_mutations::INSTANCE_MUTATIONS,
+    )?;
     reject_mutations(&fixture, INPUTS[RESOURCE_BYTES_INDEX], SNAPSHOT_MUTATIONS)
 }
 
