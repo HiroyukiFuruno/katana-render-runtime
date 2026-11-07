@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { canonicalRegularFile } from "../mermaid/native-build-receipt";
 import {
@@ -115,6 +116,45 @@ function toolLocation(
   return Bun.which(name, options);
 }
 
+export function resolveRustFactsHostJust(
+  root: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): RustFactsHostInputs["tools"]["just"] {
+  const invocationPath = toolLocation(root, "just", environment);
+  if (
+    !invocationPath ||
+    !path.isAbsolute(invocationPath) ||
+    path.resolve(invocationPath) !== invocationPath
+  )
+    throw new Error("Rust facts host Just invocation path differs");
+  const source = fs.readFileSync(path.join(root, "Justfile"), "utf8");
+  const declarations = source.match(/^\s*NATIVE_JUST_EXECUTABLE\s*[:+?]?=/gm) ?? [];
+  if (
+    declarations.length !== 1 ||
+    !source.split(/\r?\n/).includes("NATIVE_JUST_EXECUTABLE := just_executable()")
+  )
+    throw new Error("Rust facts host Just executable declaration differs");
+  const launcher = hostFileRecord(fs.realpathSync(invocationPath));
+  const output = execFileSync(invocationPath, ["--evaluate", "NATIVE_JUST_EXECUTABLE"], {
+    encoding: "utf8",
+    cwd: root,
+    env: environment,
+    timeout: 120_000,
+  });
+  const selected = output.replace(/\r?\n$/u, "");
+  if (
+    !selected ||
+    /[\r\n]/u.test(selected) ||
+    !path.isAbsolute(selected) ||
+    path.normalize(selected) !== selected
+  )
+    throw new Error("Rust facts host Just resolution differs");
+  const executable = hostFileRecord(fs.realpathSync(selected));
+  if (!isDeepStrictEqual(launcher, hostFileRecord(fs.realpathSync(invocationPath))))
+    throw new Error("Rust facts host Just launcher changed");
+  return { launcher, executable, invocationPath };
+}
+
 function currentTools(
   root: string,
   prepared?: RustFactsHostInputs["tools"],
@@ -124,6 +164,8 @@ function currentTools(
   return hostInputsSchema.shape.tools.parse(
     Object.fromEntries(
       names.map((name) => {
+        if (name === "just" && (!prepared || prepared.just.invocationPath !== undefined))
+          return [name, resolveRustFactsHostJust(root, environment)];
         const located = toolLocation(root, name, environment);
         if (!located) {
           if (name === "rtk" && !environment.RTK) return [name, null];

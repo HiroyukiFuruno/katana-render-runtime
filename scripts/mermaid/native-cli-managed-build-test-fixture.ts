@@ -31,7 +31,10 @@ function identity(pin: FileRecord) {
     ctimeNs: stat.ctimeNs.toString(),
   };
 }
-export function createManagedReaderFixture(withCapacityCleanup = false) {
+export function createManagedReaderFixture(
+  withCapacityCleanup = false,
+  withJustDispatcher = false,
+) {
   const {
     root,
     token,
@@ -52,7 +55,7 @@ export function createManagedReaderFixture(withCapacityCleanup = false) {
     main,
     runtime,
     control,
-  } = createManagedReaderInputs();
+  } = createManagedReaderInputs(withJustDispatcher);
   const expectedPackage = {
     id: "unit#cli",
     name: "katana-render-runtime-cli",
@@ -141,7 +144,12 @@ export function createManagedReaderFixture(withCapacityCleanup = false) {
   const build = owned(
     "build",
     "build",
-    [tool("rtk").path, "proxy", tool("just").path, "krr-build"],
+    [
+      tool("rtk").path,
+      "proxy",
+      snapshot.toolLaunchers.just?.path ?? tool("just").path,
+      "krr-build",
+    ],
     102,
     "probe-6-native-cli-build",
     "unit outer output",
@@ -217,6 +225,32 @@ export function createManagedReaderFixture(withCapacityCleanup = false) {
       { startedNs: "46", endedNs: "48" },
     ),
   ]);
+  const justLauncher = snapshot.toolLaunchers.just;
+  const justResolutionQueries =
+    justLauncher === undefined
+      ? undefined
+      : [
+          owned(
+            "tool-query",
+            "just-resolution-before",
+            [tool("rtk").path, "proxy", ...justLauncher.resolutionArgv],
+            112,
+            "probe-just-resolution",
+            tool("just").path,
+            environment,
+            { startedNs: "5", endedNs: "8" },
+          ),
+          owned(
+            "tool-query",
+            "just-resolution-after",
+            [tool("rtk").path, "proxy", ...justLauncher.resolutionArgv],
+            113,
+            "probe-just-resolution",
+            `${tool("just").path}\n`,
+            environment,
+            { startedNs: "60", endedNs: "63" },
+          ),
+        ];
   const pins = {
     source: source.files,
     cargo: tool("cargo"),
@@ -387,7 +421,12 @@ export function createManagedReaderFixture(withCapacityCleanup = false) {
   const hostPrebuildEvidence = owned(
     "build",
     "host-prebuild",
-    [tool("rtk").path, "proxy", tool("just").path, "rust-facts-host-prebuild"],
+    [
+      tool("rtk").path,
+      "proxy",
+      snapshot.toolLaunchers.just?.path ?? tool("just").path,
+      "rust-facts-host-prebuild",
+    ],
     100,
     "rust-facts-host-prebuild",
     "",
@@ -477,6 +516,7 @@ export function createManagedReaderFixture(withCapacityCleanup = false) {
     binary,
     runtimeAssetPins: [runtime],
     toolProbes,
+    ...(justResolutionQueries === undefined ? {} : { justResolutionQueries }),
     scope: {
       sourceEndpointsOnly: true,
       effectiveCompilerReadsProved: false,

@@ -1,3 +1,4 @@
+import path from "node:path";
 import { z } from "zod";
 
 export const digest = z.string().regex(/^[0-9a-f]{64}$/);
@@ -25,6 +26,35 @@ export const rustToolLauncherSchema = z
       context.addIssue({
         code: "custom",
         message: "Rustup resolution argv differs",
+        path: ["resolutionArgv"],
+      });
+    }
+  });
+const normalizedAbsolutePath = z
+  .string()
+  .refine(
+    (value) => path.isAbsolute(value) && path.normalize(value) === value,
+    "path must be normalized and absolute",
+  );
+export const justToolLauncherSchema = z
+  .object({
+    path: normalizedAbsolutePath,
+    resolvedPath: normalizedAbsolutePath,
+    sha256: digest,
+    resolutionArgv: strings,
+  })
+  .strict()
+  .superRefine((launcher, context) => {
+    if (
+      path.basename(launcher.path) !== "just" ||
+      launcher.resolutionArgv.length !== 3 ||
+      launcher.resolutionArgv[0] !== launcher.path ||
+      launcher.resolutionArgv[1] !== "--evaluate" ||
+      launcher.resolutionArgv[2] !== "NATIVE_JUST_EXECUTABLE"
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Just launcher identity or resolution argv differs",
         path: ["resolutionArgv"],
       });
     }
@@ -95,7 +125,11 @@ export const managedSnapshotSchema = z
       })
       .strict(),
     toolLaunchers: z
-      .object({ cargo: rustToolLauncherSchema, rustc: rustToolLauncherSchema })
+      .object({
+        cargo: rustToolLauncherSchema,
+        rustc: rustToolLauncherSchema,
+        just: justToolLauncherSchema.optional(),
+      })
       .strict(),
     control: files,
     environment,

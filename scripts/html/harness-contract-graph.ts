@@ -3656,15 +3656,21 @@ function bindExternalCall(
 }
 
 // 実 source の独立レビュー後にだけ固定し、未知の process 辺へ一般化しない。
-const HOST_EVIDENCE_SOURCE_AST_SHA256: Record<string, string> = {
+const HOST_EVIDENCE_SOURCE_AST_SHA256: Record<string, string | readonly string[]> = {
   "scripts/runtime-bundles/runtime-unused-native-width-hash.ts":
     "87c8d1d68c8b1237f6b0c359a62565df6e6f03bc5c997fef1f684dba776b941f",
-  "scripts/runtime-bundles/runtime-rust-facts-host.ts":
+  "scripts/runtime-bundles/runtime-rust-facts-host.ts": [
     "2061efe1c89dbba078fba37fbebfd8cb90bfb562b9b312933b02c0e16343f21a",
-  "scripts/runtime-bundles/runtime-rust-facts-host-inputs.ts":
+    "44853e4e8df1cfa6078c1024b409d599f8c0c2e390f563b066cb820c82175988",
+  ],
+  "scripts/runtime-bundles/runtime-rust-facts-host-inputs.ts": [
     "40df14dfcb4405647185a8816425a6fbd1eb7898d6729e28cc2af72e4ebb85ad",
-  "scripts/runtime-bundles/runtime-rust-facts-host-protocol.ts":
+    "4ae163123adbbd0181db59242638d6d449e71f8b2180a900d3f4e2e8779fae50",
+  ],
+  "scripts/runtime-bundles/runtime-rust-facts-host-protocol.ts": [
     "344dcff1107ae20df8a5a7aa75403b76980b2975e55eb22d26150ad44a87d238",
+    "bbcf3d61a04e5ccebaf7ec759d0e2a78d20e8ee8d097e885f3896083546a4ad6",
+  ],
   "scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts":
     "4484139b289df41f69436936caa5a09477a132822f25b9c35dd68282332dadca",
   "scripts/runtime-bundles/runtime-mathjax-audit-evidence-inputs.ts":
@@ -3679,7 +3685,8 @@ export function hostEvidenceSourceVerified(name: string, source: string): boolea
   if (!expected || swcVersion !== REVIEWED_SWC_VERSION) return false;
   try {
     const ast = parseSync(source, { syntax: "typescript", tsx: false });
-    return canonicalNativeUnitAstDigest(ast, [], name === NATIVE_WIDTH_HASH_CALLER) === expected;
+    const digest = canonicalNativeUnitAstDigest(ast, [], name === NATIVE_WIDTH_HASH_CALLER);
+    return typeof expected === "string" ? digest === expected : expected.includes(digest);
   } catch {
     return false;
   }

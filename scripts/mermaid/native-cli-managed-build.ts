@@ -40,6 +40,7 @@ export function verifyManagedNativeBuildReceipt(
   verifyManagedInputs(receipt);
   const request = managedRequestSchema.parse(read(receipt.request));
   const observation = managedObservationSchema.parse(read(receipt.observation));
+  verifyJustResolutionQueries(receipt, request);
   const execution =
     receipt.schema === "krr-native-cli-managed-build-v4" ? receipt.frozenBinary : receipt.binary;
   verifyManagedRequest(
@@ -72,6 +73,60 @@ export function verifyManagedNativeBuildReceipt(
     cargoLockSha256: cargoLock.sha256,
     runtimeAssetPins: receipt.runtimeAssetPins,
   };
+}
+
+function verifyJustResolutionQueries(receipt: ManagedReceipt, request: ManagedRequest): void {
+  const launcher = receipt.snapshotAfter.toolLaunchers.just;
+  const queries = receipt.justResolutionQueries;
+  if (launcher === undefined) {
+    requireBound(queries === undefined, "legacy receipt has new Just resolution evidence");
+    return;
+  }
+  if (queries === undefined || queries.length < 2)
+    throw new Error("Just resolution query pair is absent");
+  const attempt = path.dirname(receipt.request.path);
+  const tools = receipt.snapshotAfter.tools;
+  for (const query of queries) {
+    const proof = query.observation;
+    owned(proof, query.lifecycle, "tool-query");
+    same(
+      proof.argv,
+      [tools.rtk.path, "proxy", ...launcher.resolutionArgv],
+      "Just resolution query argv",
+    );
+    same(proof.environment, request.environment, "Just resolution query environment");
+    requireBound(
+      proof.cwd === receipt.cwd &&
+        proof.attemptToken === receipt.attemptToken &&
+        proof.label === "probe-just-resolution" &&
+        query.lifecycle.path.startsWith(path.join(attempt, "lifecycle")),
+      "Just resolution query attempt binding differs",
+    );
+    const output = fs.readFileSync(proof.stdout.path, "utf8");
+    const outputLines = output.split(/\r?\n/);
+    if (outputLines.at(-1) === "") outputLines.pop();
+    if (outputLines.length !== 1 || outputLines[0] === undefined || outputLines[0] === "")
+      throw new Error("Just resolution output is not one path");
+    const resolved = outputLines[0];
+    requireBound(
+      path.isAbsolute(resolved) &&
+        path.normalize(resolved) === resolved &&
+        !resolved.split(path.sep).includes("..") &&
+        fs.realpathSync(resolved) === tools.just.path &&
+        fs.statSync(proof.stderr.path).size === 0,
+      "Just resolution target differs",
+    );
+  }
+  requireBound(
+    queries.some(
+      (query) =>
+        BigInt(query.observation.endedNs) <= BigInt(receipt.hostPrebuild.observation.startedNs),
+    ) &&
+      queries.some(
+        (query) => BigInt(query.observation.startedNs) >= BigInt(receipt.buildObservation.endedNs),
+      ),
+    "Just resolution query endpoints are incomplete",
+  );
 }
 
 function verifyManagedReceiptContext(
@@ -294,7 +349,7 @@ function verifyHostPrebuild(receipt: ManagedReceipt, request: ManagedRequest): v
     [
       receipt.snapshotAfter.tools.rtk.path,
       "proxy",
-      receipt.snapshotAfter.tools.just.path,
+      receipt.snapshotAfter.toolLaunchers.just?.path ?? receipt.snapshotAfter.tools.just.path,
       "rust-facts-host-prebuild",
     ],
     "host prebuild argv",

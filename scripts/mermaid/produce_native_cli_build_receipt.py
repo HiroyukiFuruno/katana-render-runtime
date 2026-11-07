@@ -123,7 +123,7 @@ def _prebuild_rust_facts_host(bindings: Bindings) -> owner.NativeCliCommandEvide
     guard.require(guard.REQUEST_ENV not in environment and guard.REQUEST_SHA_ENV not in environment,
                   "Rust facts host prebuild must precede the CLI request")
     rtk = _text(bindings.tools["rtk"]["path"], "RTK path")
-    just = _text(bindings.tools["just"]["path"], "Just path")
+    just = _text(bindings.tool_launchers["just"]["path"], "Just launcher path")
     return bindings.run([rtk, "proxy", just, "rust-facts-host-prebuild"],
                         "build", "rust-facts-host-prebuild")
 
@@ -188,6 +188,7 @@ def produce(root: Path, expected_source: Path, expected_sha: str, registry: Path
     _capacity_preflight(bindings, root, attempt)
     host_prebuild = _prebuild_rust_facts_host(bindings)
     host_receipt = guard.file_record(root / "tmp/quality/rust-facts-host/current/receipt.json")
+    initial_just_queries = bindings.just_resolution_queries
     bindings = construct_bindings(root, attempt, expected_source, expected_sha, registry, registry_sha, cargo, rustc)
     after_preflight = bindings.snapshot()
     for key in ("source", "tools", "toolLaunchers", "control", "environment", "environmentSha256",
@@ -199,7 +200,7 @@ def produce(root: Path, expected_source: Path, expected_sha: str, registry: Path
     runtime_pin = guard.file_record(runtime)
     guard.require(runtime_pin in source_files, "selected runtime absent from admitted source")
     rtk = _text(bindings.tools["rtk"]["path"], "RTK path")
-    just = _text(bindings.tools["just"]["path"], "Just path")
+    just = _text(bindings.tool_launchers["just"]["path"], "Just launcher path")
     probes: list[JsonObject] = []
     for number, (name, flags) in enumerate((("cargo", ["--version"]), ("rustc", ["-Vv"])), 3):
         probe = bindings.run([rtk, "proxy", _text(bindings.tool_launchers[name]["path"], name), *flags],
@@ -280,6 +281,7 @@ def produce(root: Path, expected_source: Path, expected_sha: str, registry: Path
         "snapshotBefore": before, "snapshotAfter": after, "binary": binary,
         "frozenBinary": frozen, "frozenFrom": binary,
         "runtimeAssetPins": [runtime_pin], "toolProbes": probes,
+        "justResolutionQueries": initial_just_queries + bindings.just_resolution_queries,
         "scope": {"sourceEndpointsOnly": True, "effectiveCompilerReadsProved": False,
                   "registryAtomicityProved": False, "installedDependencyClosureProved": False, "descendantClosureProved": False}}
     output = attempt / "receipt.json"

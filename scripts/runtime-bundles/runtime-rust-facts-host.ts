@@ -8,6 +8,7 @@ import { canonicalRegularFile } from "../mermaid/native-build-receipt";
 import {
   currentRustFactsHostInputs,
   parseRustFactsHostMetadata,
+  resolveRustFactsHostJust,
 } from "./runtime-rust-facts-host-inputs";
 
 import {
@@ -108,6 +109,13 @@ function appendToolInputDifferences(
       expectedTool.executable,
       actualTool.executable,
     );
+    if (name === "just")
+      appendInputDifference(
+        differences,
+        "tools.just.invocationPath",
+        expected.just.invocationPath ?? null,
+        actual.just.invocationPath ?? null,
+      );
   }
 }
 
@@ -181,11 +189,11 @@ export function prepareRustFactsHost(
   assertRecipes(root);
   const attempt = randomUUID();
   const directory = createRustFactsHostAttemptDirectory(root, receipt, attempt);
-  const just = Bun.which("just");
-  if (!just) throw new Error("Rust facts host requires Just");
+  const just = resolveRustFactsHostJust(root);
+  if (!just.invocationPath) throw new Error("Rust facts host Just invocation is missing");
   const metadataBefore = observeRustFactsHostRecipe(
     root,
-    fs.realpathSync(just),
+    just.invocationPath,
     "rust-facts-host-metadata",
     directory,
     "metadata-before",
@@ -193,9 +201,11 @@ export function prepareRustFactsHost(
   requireRustFactsHostSuccess(metadataBefore.proof);
   const metadata = parseRustFactsHostMetadata(metadataBefore.stdout);
   const before = currentRustFactsHostInputs(root, metadata);
+  if (!isDeepStrictEqual(just, before.tools.just))
+    throw new Error("Rust facts host Just changed during metadata");
   const build = observeRustFactsHostRecipe(
     root,
-    before.tools.just.executable.path,
+    before.tools.just.invocationPath ?? before.tools.just.executable.path,
     "rust-facts-host-build",
     directory,
     "build",
@@ -205,7 +215,7 @@ export function prepareRustFactsHost(
   const binary = publishRustFactsHostBinary(root, receipt, attempt, buildOutput);
   const metadataAfter = observeRustFactsHostRecipe(
     root,
-    before.tools.just.executable.path,
+    before.tools.just.invocationPath ?? before.tools.just.executable.path,
     "rust-facts-host-metadata",
     directory,
     "metadata-after",
@@ -267,7 +277,11 @@ export function verifyRustFactsHost(
     requireRustFactsHostSuccess(proof);
     if (
       proof.cwd !== root ||
-      !isDeepStrictEqual(proof.argv, [value.inputs.tools.just.executable.path, label, root])
+      !isDeepStrictEqual(proof.argv, [
+        value.inputs.tools.just.invocationPath ?? value.inputs.tools.just.executable.path,
+        label,
+        root,
+      ])
     )
       throw new Error("Rust facts host prepared command differs");
     assertHostPhysicalRecord(proof.stdout);

@@ -324,7 +324,7 @@ export function verifyManagedCargo(
   const launchers = receipt.snapshotAfter.toolLaunchers;
   same(
     receipt.buildObservation.argv,
-    [tools.rtk.path, "proxy", tools.just.path, "krr-build"],
+    [tools.rtk.path, "proxy", launchers.just?.path ?? tools.just.path, "krr-build"],
     "sole build argv",
   );
   same(

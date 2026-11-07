@@ -25,10 +25,11 @@ const hostToolSchema = z.strictObject({
   launcher: hostFileRecordSchema,
   executable: hostFileRecordSchema,
 });
+const hostJustToolSchema = hostToolSchema.extend({ invocationPath: z.string().optional() });
 export const hostInputsSchema = z.strictObject({
   files: z.array(hostFileRecordSchema).min(1),
   tools: z.strictObject({
-    just: hostToolSchema,
+    just: hostJustToolSchema,
     cargo: hostToolSchema,
     rustc: hostToolSchema,
     python3: hostToolSchema,
@@ -280,7 +281,9 @@ export function observeRustFactsHostRecipe(
   directory: string,
   label: "metadata-before" | "metadata-after" | "build",
 ) {
-  canonicalRegularFile(just, "Rust facts host Just");
+  if (!path.isAbsolute(just) || path.resolve(just) !== just)
+    throw new Error("Rust facts host Just invocation path differs");
+  canonicalRegularFile(fs.realpathSync(just), "Rust facts host Just");
   return runObserved(root, [just, recipe, root], directory, label);
 }
 

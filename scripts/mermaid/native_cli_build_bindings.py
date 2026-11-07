@@ -98,9 +98,44 @@ def guard_environment(base: dict[str, str], root: Path) -> dict[str, str]:
     return {**base, "PWD": str(root), "_": str(python)}
 
 
+def _just_launcher(environment: dict[str, str]) -> JsonObject:
+    selected = shutil.which("just", path=environment["PATH"])
+    if selected is None:
+        raise RuntimeError("required tool unavailable: just")
+    launcher = Path(selected)
+    guard.require(launcher.is_absolute() and launcher.name == "just",
+                  "Just launcher path differs")
+    target = launcher.resolve(strict=True)
+    pin = guard.file_record(target)
+    guard.require(bool(target.stat().st_mode & 0o111), "Just target is not executable")
+    return {"path": str(launcher), "resolvedPath": str(target), "sha256": pin["sha256"],
+            "resolutionArgv": [str(launcher), "--evaluate", "NATIVE_JUST_EXECUTABLE"]}
+
+
+def _query_just(root: Path, attempt: Path, environment: dict[str, str], rtk: str,
+                launcher: JsonObject, queries: list[JsonObject]) -> JsonObject:
+    argv = [_text(item, "Just resolution argv")
+            for item in _array(launcher["resolutionArgv"], "Just resolution argv")]
+    result = owner.observe_native_cli_command([rtk, "proxy", *argv], role="tool-query",
+        cwd=root, env=environment, log_directory=attempt / "lifecycle",
+        attempt_token=attempt.name, label="probe-just-resolution")
+    queries.append({"observation": result.observation, "lifecycle": result.lifecycle})
+    output = guard.validate_record(result.observation["stdout"])
+    lines = Path(_text(output["path"], "Just resolution output")).read_bytes().decode("utf-8").splitlines()
+    guard.require(len(lines) == 1, "Just resolution output differs")
+    selected = Path(lines[0])
+    guard.require(selected.is_absolute() and str(selected) == lines[0] and ".." not in selected.parts,
+                  "Just executable path differs")
+    executable = selected.resolve(strict=True)
+    pin = guard.file_record(executable)
+    guard.require(bool(executable.stat().st_mode & 0o111), "Just executable is not executable")
+    return pin
+
+
 def validate_just(root: Path) -> None:
     text = (root / "Justfile").read_text()
     required = ['set shell := ["bash", "-uc"]',
+                'NATIVE_JUST_EXECUTABLE := just_executable()',
                 'export CARGO := env_var_or_default("CARGO", RTK_PROXY_CMD + "cargo")',
                 'JOBS := env_var_or_default("JOBS", "2")',
                 'export CARGO_BUILD_JOBS := JOBS',
@@ -115,6 +150,8 @@ def validate_just(root: Path) -> None:
     required += [f'export {key} := env_var_or_default("{key}", "")'
                  for key in guard.EMPTY_JUST_ENVIRONMENT_KEYS]
     guard.require(all(text.count(line) == 1 for line in required), "fixed Just route differs")
+    guard.require(len(re.findall(r"(?m)^\s*NATIVE_JUST_EXECUTABLE\s*[:+?]?=", text)) == 1,
+                  "fixed Just executable declaration differs")
     host_prebuild = re.search(r"^rust-facts-host-prebuild:\n((?:[ \t]+.*\n|\n)*)", text, re.MULTILINE)
     guard.require(host_prebuild is not None and host_prebuild[1].strip()
                   == 'bun scripts/runtime-bundles/runtime-rust-facts-host.ts prepare {{quote(REPO_ROOT)}} '
@@ -141,6 +178,7 @@ class Bindings:
     child_environment: dict[str, str]
     capacity: JsonObject
     expected: JsonObject
+    just_resolution_queries: list[JsonObject]
 
     def run(self, argv: list[str], role: owner.MeasurementRole, label: str,
             *, environment: dict[str, str] | None = None) -> owner.NativeCliCommandEvidence:
@@ -177,7 +215,13 @@ class Bindings:
                 "toolchainAbsent": [str(path) for path in toolchains if not path.exists()]}
 
     def resolve_tool_launchers(self) -> dict[str, JsonObject]:
-        resolved: dict[str, JsonObject] = {}
+        resolved: dict[str, JsonObject] = {"just": _just_launcher(self.child_environment)}
+        guard.require(resolved["just"] == self.tool_launchers["just"], "Just launcher identity changed")
+        just = _query_just(self.root, self.attempt, self.child_environment,
+                           _text(self.tools["rtk"]["path"], "RTK path"), resolved["just"],
+                           self.just_resolution_queries)
+        guard.require(just == self.tools["just"] and _just_launcher(self.child_environment) == resolved["just"],
+                      "Just executable or launcher identity changed")
         for name in ("cargo", "rustc"):
             tool = gate.resolve_rust_tool(
                 self.root, name, self.child_environment, cwd=self.root)
@@ -185,7 +229,7 @@ class Bindings:
             guard.require(tool.executable == executable, name + " Rustup resolution changed")
             guard.require(tool.dispatcher.name == "rustup", name + " Rustup launcher is required")
             resolved[name] = gate.rust_tool_launcher_pin(tool)
-        guard.require(resolved == self.tool_launchers, "Rustup launcher identity changed")
+        guard.require(resolved == self.tool_launchers, "tool launcher identity changed")
         return resolved
 
 
@@ -256,15 +300,23 @@ def construct_bindings(root: Path, attempt: Path, expected_path: Path, expected_
                   "Cargo/rustc must be one selected toolchain directory")
     paths = {"cargo": cargo, "rustc": rustc}
     paths["lsof"] = owner.native_raw_fd_observer_path()
-    for name in ("rtk", "just", "python3", "git", "bash", "bun"):
+    for name in ("rtk", "python3", "git", "bash", "bun"):
         resolved = shutil.which(name, path=environment["PATH"])
         guard.require(resolved is not None, "required tool unavailable: " + name)
         paths[name] = Path(str(resolved)).resolve(strict=True)
+    validate_just(root)
+    just_launcher = _just_launcher(environment)
+    child_environment = guard_environment(environment, root)
+    queries: list[JsonObject] = []
+    native_just = _query_just(root, attempt, child_environment, str(paths["rtk"]), just_launcher, queries)
+    guard.require(_just_launcher(environment) == just_launcher, "Just launcher changed during admission")
+    paths["just"] = Path(_text(native_just["path"], "Just executable"))
     tools = {name: guard.file_record(path) for name, path in paths.items()}
+    guard.require(tools["just"] == native_just, "Just executable changed during admission")
     guard.require(all(path.stat().st_mode & 0o111 for path in paths.values())
                   and cargo.name == "cargo" and rustc.name == "rustc", "tool executable/name differs")
-    validate_just(root)
     tool_launchers = {name: gate.rust_tool_launcher_pin(tool)
                       for name, tool in (("cargo", cargo_tool), ("rustc", rustc_tool))}
+    tool_launchers["just"] = just_launcher
     return Bindings(root, attempt, tools, tool_launchers, environment,
-                    guard_environment(environment, root), capacity, expected)
+                    child_environment, capacity, expected, queries)

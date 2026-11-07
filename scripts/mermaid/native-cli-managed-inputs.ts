@@ -96,6 +96,7 @@ export function verifyManagedInputs(receipt: ManagedReceipt): void {
     ...receipt.runtimeAssetPins,
   ])
     verifyFileRecord(pin, "managed input");
+  verifyJustLauncher(root, snapshot);
   requireBound(
     snapshot.tools.bun.path === fs.realpathSync(process.execPath),
     "current reader Bun differs",
@@ -200,5 +201,41 @@ export function verifyManagedInputs(receipt: ManagedReceipt): void {
     snapshot.toolchainAbsent,
     candidates.filter((name) => !exists(name)),
     "toolchain absence inventory",
+  );
+}
+
+function verifyJustLauncher(root: string, snapshot: ManagedReceipt["snapshotAfter"]): void {
+  const tool = snapshot.tools.just;
+  const launcher = snapshot.toolLaunchers.just;
+  if (launcher === undefined) {
+    requireBound(
+      path.basename(tool.path) === "just" && fs.realpathSync(tool.path) === tool.path,
+      "legacy just invocation is not canonical",
+    );
+    return;
+  }
+  const stat = fs.statSync(launcher.path);
+  requireBound(
+    stat.isFile() && (stat.mode & 0o111) !== 0,
+    "logical just launcher is not executable",
+  );
+  const justfile = snapshot.source.find(
+    (pin) => pin.path.toLowerCase() === path.join(root, "justfile").toLowerCase(),
+  );
+  if (justfile === undefined) throw new Error("tracked Justfile pin is absent");
+  const declaration = "NATIVE_JUST_EXECUTABLE := just_executable()";
+  requireBound(
+    fs
+      .readFileSync(justfile.path, "utf8")
+      .split(/\r?\n/)
+      .filter((line) => line.trim() === declaration).length === 1,
+    "Just executable declaration is not uniquely source-bound",
+  );
+  requireBound(
+    path.basename(launcher.path) === "just" &&
+      fs.realpathSync(launcher.path) === launcher.resolvedPath &&
+      sha256(fs.readFileSync(launcher.resolvedPath)) === launcher.sha256 &&
+      fs.realpathSync(tool.path) === tool.path,
+    "logical just launcher identity differs",
   );
 }

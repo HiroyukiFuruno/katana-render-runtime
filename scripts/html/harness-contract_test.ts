@@ -76,6 +76,60 @@ test.each([
   },
 );
 
+test.each([
+  [
+    "fixed Just evaluation",
+    "runtime-rust-facts-host-inputs.ts",
+    '["--evaluate", "NATIVE_JUST_EXECUTABLE"]',
+    '["--evaluate", "OTHER_EXECUTABLE"]',
+  ],
+  [
+    "Just invocation origin",
+    "runtime-rust-facts-host-inputs.ts",
+    'toolLocation(root, "just", environment)',
+    "environment.UNTRUSTED_JUST",
+  ],
+  [
+    "Just invocation path validation",
+    "runtime-rust-facts-host-inputs.ts",
+    "!path.isAbsolute(invocationPath)",
+    "false",
+  ],
+  ["Just evaluation timeout", "runtime-rust-facts-host-inputs.ts", "    timeout: 120_000,\n", ""],
+  [
+    "Just metadata invocation",
+    "runtime-rust-facts-host.ts",
+    '    just.invocationPath,\n    "rust-facts-host-metadata",',
+    '    process.env.UNTRUSTED_JUST ?? just.invocationPath,\n    "rust-facts-host-metadata",',
+  ],
+  [
+    "Just build invocation",
+    "runtime-rust-facts-host.ts",
+    '    before.tools.just.invocationPath ?? before.tools.just.executable.path,\n    "rust-facts-host-build",',
+    '    process.env.UNTRUSTED_JUST ?? before.tools.just.executable.path,\n    "rust-facts-host-build",',
+  ],
+  [
+    "Just canonical target validation",
+    "runtime-rust-facts-host-protocol.ts",
+    'canonicalRegularFile(fs.realpathSync(just), "Rust facts host Just")',
+    'canonicalRegularFile(just, "Rust facts host Just")',
+  ],
+])("Rust facts host source pin rejects %s drift", (_label, basename, before, after) => {
+  const name = `scripts/runtime-bundles/${basename}`;
+  const source = fs.readFileSync(
+    path.resolve(import.meta.dir, `../runtime-bundles/${basename}`),
+    "utf8",
+  );
+  const changed = source.replace(before, after);
+  expect(changed).not.toBe(source);
+  expect(hostEvidenceSourceVerified(name, source)).toBe(true);
+  expect(sourceCode(source, { name, read: () => undefined })).not.toContain(
+    "!unresolved-executable",
+  );
+  expect(hostEvidenceSourceVerified(name, changed)).toBe(false);
+  expect(sourceCode(changed, { name, read: () => undefined })).toContain("!unresolved-executable");
+});
+
 test("MathJax import scanner source pin rejects resolver drift", () => {
   const name = "scripts/runtime-bundles/runtime-unused-import-scan.ts";
   const source = fs.readFileSync(

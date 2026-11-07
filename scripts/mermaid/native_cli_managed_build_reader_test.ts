@@ -79,6 +79,19 @@ function observation(fixture: Fixture) {
     JSON.stringify(fixture.observation),
   );
 }
+function replaceJustResolutionOutput(fixture: Fixture, output: string) {
+  const query = fixture.receipt.justResolutionQueries?.[0];
+  if (query === undefined) throw new Error("Just resolution fixture missing");
+  query.observation.stdout = writeFile(query.observation.stdout.path, output);
+  const lifecycle = JSON.parse(fs.readFileSync(query.lifecycle.path, "utf8")) as {
+    raw: { path: string; sha256: string }[];
+  };
+  const raw = lifecycle.raw[0];
+  if (raw === undefined) throw new Error("Just lifecycle raw missing");
+  raw.sha256 = query.observation.stdout.sha256;
+  query.lifecycle = writeFile(query.lifecycle.path, JSON.stringify(lifecycle));
+  return query;
+}
 function updateCapacityPreflight(
   fixture: Fixture,
   update: (value: { [key: string]: unknown }) => void,
@@ -340,6 +353,81 @@ test("managed v3 receipt binds the Rustup launchers and no-clean preflight FileR
     fs.rmSync(f.root, { recursive: true, force: true });
   }
 });
+
+test("managed receipt resolves a logical Just symlink to the pinned native executable", () => {
+  const f = createManagedReaderFixture(false, true);
+  try {
+    expect(f.receipt.snapshotAfter.toolLaunchers.just?.path).toMatch(/\/just$/);
+    expect(verify(f).sourceFileCount).toBe(f.receipt.snapshotAfter.source.length);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("managed receipt rejects a Just dispatcher whose delegated executable drifts", () => {
+  const f = createManagedReaderFixture(false, true);
+  try {
+    const other = writeFile(path.join(f.root, "tmp/toolchain/other-just"), "different native Just");
+    fs.chmodSync(other.path, 0o700);
+    replaceJustResolutionOutput(f, `${other.path}\n`);
+    const dispatcher = f.receipt.snapshotAfter.toolLaunchers.just;
+    if (dispatcher === undefined) throw new Error("Just dispatcher fixture missing");
+    expect(fs.readFileSync(dispatcher.resolvedPath, "utf8")).toBe("unit Just dispatcher");
+    expect(() => verify(f)).toThrow(/Just resolution target differs/);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("managed receipt rejects multiline Just resolution output", () => {
+  const f = createManagedReaderFixture(false, true);
+  try {
+    replaceJustResolutionOutput(
+      f,
+      `${f.receipt.snapshotAfter.tools.just.path}\n${f.receipt.snapshotAfter.tools.just.path}\n`,
+    );
+    expect(() => verify(f)).toThrow(/Just resolution output is not one path/);
+  } finally {
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+for (const [name, mutate] of [
+  [
+    "dispatcher hash",
+    (f: Fixture) => {
+      const launcher = f.receipt.snapshotAfter.toolLaunchers.just;
+      if (launcher === undefined) throw new Error("Just launcher fixture missing");
+      launcher.sha256 = "0".repeat(64);
+    },
+  ],
+  [
+    "logical alias path",
+    (f: Fixture) => {
+      const launcher = f.receipt.snapshotAfter.toolLaunchers.just;
+      if (launcher === undefined) throw new Error("Just launcher fixture missing");
+      launcher.path = `${launcher.path}-other`;
+    },
+  ],
+  [
+    "resolution argv",
+    (f: Fixture) => {
+      const launcher = f.receipt.snapshotAfter.toolLaunchers.just;
+      if (launcher === undefined) throw new Error("Just launcher fixture missing");
+      launcher.resolutionArgv[2] = "OTHER_VARIABLE";
+    },
+  ],
+] as const) {
+  test(`managed receipt rejects altered Just ${name}`, () => {
+    const f = createManagedReaderFixture(false, true);
+    try {
+      mutate(f);
+      expect(() => verify(f)).toThrow();
+    } finally {
+      fs.rmSync(f.root, { recursive: true, force: true });
+    }
+  });
+}
 
 test("managed observer rejects a Rustup query rewritten as a direct executable call", () => {
   const f = createManagedReaderFixture();

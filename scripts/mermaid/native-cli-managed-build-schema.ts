@@ -222,6 +222,9 @@ const managedReceiptV3Schema = z
     toolProbes: z
       .array(z.object({ observation: managedOwnedSchema, lifecycle: managedFileSchema }).strict())
       .length(2),
+    justResolutionQueries: z
+      .array(z.object({ observation: managedOwnedSchema, lifecycle: managedFileSchema }).strict())
+      .optional(),
     scope: z
       .object({
         sourceEndpointsOnly: z.literal(true),

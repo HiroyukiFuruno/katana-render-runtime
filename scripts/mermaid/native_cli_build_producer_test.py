@@ -470,6 +470,19 @@ class InputAdmissionTests(unittest.TestCase):
         rustup.chmod(0o700)
         (proxy / "cargo").symlink_to(rustup)
         (proxy / "rustc").symlink_to(rustup)
+        native_just = proxy / "native-just"
+        native_just.write_text('#!/bin/sh\nprintf "%s\\n" "$0"\n')
+        native_just.chmod(0o700)
+        selected_just = proxy / "selected-just"
+        selected_just.symlink_to(native_just)
+        just_dispatcher = proxy / "dispatcher"
+        just_dispatcher.write_text(
+            '#!/bin/sh\ncase "${0##*/}" in just) '
+            f'exec "{selected_just}" "$@" ;; *) exit 8 ;; esac\n'
+        )
+        just_dispatcher.chmod(0o700)
+        just_launcher = proxy / "just"
+        just_launcher.symlink_to(just_dispatcher)
         (self.root / "Justfile").write_bytes((Path(__file__).resolve().parents[2] / "Justfile").read_bytes())
         expected = self.root / "tmp/expected.json"
         expected.write_text(json.dumps(self.expected))
@@ -479,7 +492,16 @@ class InputAdmissionTests(unittest.TestCase):
         registry.write_text(json.dumps({"schema": "krr-protected-refs-successor-v1", "physicalRefCount": 1,
             "refs": [{**guard.file_record(self.source), "dev": stat.st_dev, "ino": stat.st_ino, "mode": stat.st_mode}]}))
         parent_path = str(proxy) + os.pathsep + os.environ["PATH"]
-        with patch.dict(os.environ, {"PATH": parent_path}):
+        def observe(argv: list[str], **kwargs: object) -> owner.NativeCliCommandEvidence:
+            del kwargs
+            self.assertEqual(argv[1:], ["proxy", str(just_launcher), "--evaluate", "NATIVE_JUST_EXECUTABLE"])
+            result = subprocess.run(argv[2:], capture_output=True, check=True)
+            output = self.root / "just-query.raw"
+            output.write_bytes(result.stdout)
+            return owner.NativeCliCommandEvidence({"stdout": guard.file_record(output)}, {})
+
+        with (patch.dict(os.environ, {"PATH": parent_path}),
+              patch.object(owner, "observe_native_cli_command", side_effect=observe)):
             result = bindings.construct_bindings(self.root, attempt, expected, str(guard.file_record(expected)["sha256"]),
                 registry, str(guard.file_record(registry)["sha256"]), toolchain / "cargo", toolchain / "rustc")
             self.assertEqual(os.environ["PATH"], parent_path)
@@ -489,7 +511,48 @@ class InputAdmissionTests(unittest.TestCase):
             self.assertEqual(result.tool_launchers["cargo"]["path"], str(proxy / "cargo"))
             self.assertEqual(result.tool_launchers["cargo"]["resolvedPath"], str(rustup))
             self.assertEqual(result.tool_launchers["rustc"]["path"], str(proxy / "rustc"))
+            self.assertEqual(result.tool_launchers["just"], {
+                "path": str(just_launcher), "resolvedPath": str(just_dispatcher),
+                "sha256": guard.file_record(just_dispatcher)["sha256"],
+                "resolutionArgv": [str(just_launcher), "--evaluate", "NATIVE_JUST_EXECUTABLE"],
+            })
+            self.assertEqual(result.tools["just"], guard.file_record(native_just))
+            invocation = subprocess.run([str(just_launcher), "krr-build"],
+                                        capture_output=True, text=True, check=False)
+            self.assertEqual((invocation.returncode, invocation.stdout), (0, str(selected_just) + "\n"))
+            direct = subprocess.run([str(just_dispatcher), "krr-build"],
+                                    capture_output=True, text=True, check=False)
+            self.assertEqual(direct.returncode, 8)
             self.assertEqual(result.resolve_tool_launchers(), result.tool_launchers)
+            other_native = proxy / "other-native"
+            other_native.write_bytes(native_just.read_bytes())
+            other_native.chmod(0o700)
+            selected_just.unlink()
+            selected_just.symlink_to(other_native)
+            with self.assertRaisesRegex(RuntimeError, "identity changed"):
+                result.resolve_tool_launchers()
+            selected_just.unlink()
+            selected_just.symlink_to(native_just)
+            just_bytes = just_dispatcher.read_bytes()
+            just_dispatcher.write_bytes(just_bytes + b"# changed\n")
+            with self.assertRaisesRegex(RuntimeError, "identity changed"):
+                result.resolve_tool_launchers()
+            just_dispatcher.write_bytes(just_bytes)
+            alternative = proxy / "alternative"
+            alternative.write_bytes(just_bytes)
+            alternative.chmod(0o700)
+            just_launcher.unlink()
+            just_launcher.symlink_to(alternative)
+            with self.assertRaisesRegex(RuntimeError, "identity changed"):
+                result.resolve_tool_launchers()
+            just_launcher.unlink()
+            just_launcher.symlink_to(just_dispatcher)
+            other_proxy = self.root / "other-proxy"
+            other_proxy.mkdir()
+            (other_proxy / "just").symlink_to(just_dispatcher)
+            with patch.dict(result.child_environment, {"PATH": str(other_proxy) + os.pathsep + parent_path}):
+                with self.assertRaisesRegex(RuntimeError, "identity changed"):
+                    result.resolve_tool_launchers()
             dispatcher = rustup.read_bytes()
             rustup.write_bytes(dispatcher + b"# identity mutation\n")
             with self.assertRaisesRegex(RuntimeError, "identity changed"):
@@ -523,7 +586,8 @@ class InputAdmissionTests(unittest.TestCase):
 
         binding = SimpleNamespace(
             child_environment={"PATH": "/bin"},
-            tools={"rtk": {"path": "/bin/rtk"}, "just": {"path": "/bin/just"}},
+            tools={"rtk": {"path": "/bin/rtk"}},
+            tool_launchers={"just": {"path": "/bin/just"}},
             run=run,
         )
         result = producer._prebuild_rust_facts_host(cast(bindings.Bindings, binding))
@@ -574,6 +638,7 @@ class JustEnvironmentTests(unittest.TestCase):
     def test_changed_just_export_defaults_are_rejected(self) -> None:
         text = (Path(__file__).resolve().parents[2] / "Justfile").read_text()
         changes = (
+            ('NATIVE_JUST_EXECUTABLE := just_executable()', 'NATIVE_JUST_EXECUTABLE := "other"'),
             ('JOBS := env_var_or_default("JOBS", "2")', 'JOBS := env_var_or_default("JOBS", "3")'),
             ('export CARGO_BUILD_JOBS := JOBS', 'export CARGO_BUILD_JOBS := "3"'),
             ('export TEST_THREADS := env_var_or_default("TEST_THREADS", "2")',

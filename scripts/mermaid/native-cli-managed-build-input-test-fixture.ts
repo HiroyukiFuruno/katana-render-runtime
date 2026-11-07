@@ -24,7 +24,24 @@ function pythonHostSources(directory: string): string[] {
   return files;
 }
 
-export function createManagedReaderInputs() {
+function createJustDispatcher(root: string, enabled: boolean, nativeJustPath: string) {
+  if (!enabled) return undefined;
+  fs.chmodSync(nativeJustPath, 0o700);
+  const dispatcherPath = path.join(root, "tmp/toolchain/bin/just-dispatcher.py");
+  fs.mkdirSync(path.dirname(dispatcherPath), { recursive: true });
+  const dispatcher = writeFile(dispatcherPath, "unit Just dispatcher");
+  fs.chmodSync(dispatcher.path, 0o700);
+  const aliasPath = path.join(path.dirname(dispatcher.path), "just");
+  fs.symlinkSync(dispatcher.path, aliasPath);
+  return {
+    path: aliasPath,
+    resolvedPath: dispatcher.path,
+    sha256: sha256(fs.readFileSync(dispatcher.path)),
+    resolutionArgv: [aliasPath, "--evaluate", "NATIVE_JUST_EXECUTABLE"],
+  };
+}
+
+export function createManagedReaderInputs(withJustDispatcher = false) {
   // 全reader入口の単体data graph。Cargo/native/コピーしたTSを実行しない。
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "managed-reader-unit-")));
   const token = "f".repeat(64);
@@ -105,6 +122,8 @@ export function createManagedReaderInputs() {
       save(`tmp/toolchain/${name}`, `unexecuted unit ${name} data`),
     ]),
   );
+  const nativeJust = tools.just;
+  if (nativeJust === undefined) throw new Error("Unit native Just fixture missing");
   const python = process.env.PATH?.split(path.delimiter)
     .map((base) => path.join(base, "python3"))
     .find((file) => fs.existsSync(file) && (fs.statSync(file).mode & 0o111) !== 0);
@@ -141,7 +160,12 @@ export function createManagedReaderInputs() {
       resolutionArgv: [rustup.path, "which", name],
     };
   };
-  const toolLaunchers = { cargo: toolLauncher("cargo"), rustc: toolLauncher("rustc") };
+  const justLauncher = createJustDispatcher(root, withJustDispatcher, nativeJust.path);
+  const toolLaunchers = {
+    cargo: toolLauncher("cargo"),
+    rustc: toolLauncher("rustc"),
+    ...(justLauncher === undefined ? {} : { just: justLauncher }),
+  };
   const protectedPin = save("tmp/protected", "unit protected bytes"),
     protectedStat = fs.statSync(protectedPin.path);
   const refs = [

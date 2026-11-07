@@ -69,6 +69,10 @@ export function fixture(nested = false) {
     root,
     "Justfile",
     [
+      "NATIVE_JUST_EXECUTABLE := just_executable()",
+      "REPO_ROOT := justfile_directory()",
+      'CARGO := "cargo"',
+      'CARGO_BUILD := "cargo"',
       "rust-facts-host-build root=REPO_ROOT:",
       '    @CARGO_TARGET_DIR={{quote(root + "/target")}} {{CARGO_BUILD}} build --locked -p kdr-linter --bin mathjax_consumer_facts',
       "rust-facts-host-metadata root=REPO_ROOT:",

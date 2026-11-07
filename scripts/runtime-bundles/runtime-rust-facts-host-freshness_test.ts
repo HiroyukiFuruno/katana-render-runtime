@@ -3,7 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { rustFactsHostInputDifferences, verifyRustFactsHost } from "./runtime-rust-facts-host";
 import { fixture as hostFixture } from "./runtime-rust-facts-host_test";
-import { currentRustFactsHostInputs, hostFileRecord } from "./runtime-rust-facts-host-inputs";
+import {
+  currentRustFactsHostInputs,
+  hostFileRecord,
+  resolveRustFactsHostJust,
+} from "./runtime-rust-facts-host-inputs";
 import {
   hostEnvironmentDiagnostics,
   hostEnvironmentDigest,
@@ -30,6 +34,79 @@ function input(f: ReturnType<typeof fixture>, relative: string, value: string) {
   fs.writeFileSync(file, value);
   return file;
 }
+
+test.skipIf(process.platform === "win32")(
+  "Just alias keeps invocation identity and detects dispatcher and executable changes",
+  () => {
+    const f = fixture();
+    const native = input(
+      f,
+      "just-fixture/native",
+      '#!/bin/sh\n[ "$1" = "--evaluate" ] && [ "$2" = "NATIVE_JUST_EXECUTABLE" ] || exit 7\nprintf "%s%s" "$0" "$HOST_TEST_SUFFIX"\n',
+    );
+    const dispatcher = input(
+      f,
+      "just-fixture/dispatcher",
+      '#!/bin/sh\nexec "$HOST_TEST_JUST" "$@"\n',
+    );
+    fs.chmodSync(native, 0o755);
+    fs.chmodSync(dispatcher, 0o755);
+    const alias = path.join(f.root, "just-fixture/just");
+    fs.symlinkSync(dispatcher, alias);
+    const environment = {
+      ...process.env,
+      PATH: `${path.dirname(alias)}${path.delimiter}${process.env.PATH ?? ""}`,
+      HOST_TEST_JUST: native,
+      HOST_TEST_SUFFIX: "",
+    };
+    const first = resolveRustFactsHostJust(f.root, environment);
+    expect(first.invocationPath).toBe(alias);
+    expect(first.launcher).toEqual(hostFileRecord(dispatcher));
+    expect(first.executable).toEqual(hostFileRecord(native));
+    for (const suffix of ["\n", "\r\n"])
+      expect(
+        resolveRustFactsHostJust(f.root, { ...environment, HOST_TEST_SUFFIX: suffix }),
+      ).toEqual(first);
+    for (const suffix of ["\n\n", "\nextra", "\r"])
+      expect(() =>
+        resolveRustFactsHostJust(f.root, { ...environment, HOST_TEST_SUFFIX: suffix }),
+      ).toThrow("Just resolution differs");
+    f.value.inputs = currentRustFactsHostInputs(
+      f.root,
+      f.metadata,
+      { ...f.value.inputs.tools, just: first },
+      environment,
+    );
+    for (const proof of [f.value.metadataBefore, f.value.build, f.value.metadataAfter]) {
+      proof.argv[0] = alias;
+      const name = path.basename(proof.stdout.path, ".stdout");
+      fs.writeFileSync(
+        path.join(path.dirname(proof.stdout.path), `${name}.process.json`),
+        JSON.stringify(proof),
+      );
+    }
+    fs.writeFileSync(f.receipt, JSON.stringify(f.value));
+    expect(() => verifyRustFactsHost(f.root, f.receipt, environment)).not.toThrow();
+    fs.appendFileSync(dispatcher, "# changed dispatcher\n");
+    expect(resolveRustFactsHostJust(f.root, environment).launcher.sha256).not.toBe(
+      first.launcher.sha256,
+    );
+    expect(() => verifyRustFactsHost(f.root, f.receipt, environment)).toThrow("stale");
+    f.value.inputs = currentRustFactsHostInputs(
+      f.root,
+      f.metadata,
+      f.value.inputs.tools,
+      environment,
+    );
+    fs.writeFileSync(f.receipt, JSON.stringify(f.value));
+    expect(() => verifyRustFactsHost(f.root, f.receipt, environment)).not.toThrow();
+    fs.appendFileSync(native, "# changed native\n");
+    expect(resolveRustFactsHostJust(f.root, environment).executable.sha256).not.toBe(
+      first.executable.sha256,
+    );
+    expect(() => verifyRustFactsHost(f.root, f.receipt, environment)).toThrow("stale");
+  },
+);
 
 test.each(["tmp", "target", "__pycache__", ".git"])(
   "compiled package input under src/%s remains in freshness closure",

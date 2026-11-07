@@ -1,6 +1,8 @@
 set shell := ["bash", "-uc"]
 
 REPO_ROOT := justfile_directory()
+# WHY: 呼出名で動作を切り替えるlauncherと、委譲先のJust本体を別々に認証する。
+NATIVE_JUST_EXECUTABLE := just_executable()
 RTK := env_var_or_default("RTK", `command -v rtk 2> /dev/null || true`)
 RTK_CMD := if RTK == "" { "" } else { RTK + " " }
 RTK_PROXY_CMD := if RTK == "" { "" } else { RTK + " proxy " }
