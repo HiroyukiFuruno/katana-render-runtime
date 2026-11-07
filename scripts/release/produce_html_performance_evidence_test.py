@@ -271,7 +271,8 @@ class CatalogProducerOperationTest(unittest.TestCase):
                                      resume_batch=batch, fixed_epoch=origin)
             self.assertIs(caught.exception, marker)
             make_query.assert_called_once_with(root / "tmp/output.lifecycle")
-            load.assert_called_once_with(batch.resolve(), root, fixed_epoch=origin, git_query=query)
+            load.assert_called_once_with(batch.resolve(), root, fixed_epoch=origin, git_query=query,
+                                         memory_policy_version="html-memory-v3")
             self.assertIs(verify.call_args.kwargs["git_query"], query)
 
     def test_resume_budget_starts_once_after_closed_batch_validation(self) -> None:
@@ -1039,6 +1040,26 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "planned prefix"):
             producer._completed_batch_ids([], planned, planned[1:], measured)
 
+    def test_reassessment_candidates_require_complete_measurement_and_retention(self) -> None:
+        attempts = [cast(dict[str, typed_producer.FilePin], {"expected": {"path": str(index)},
+                                                           "result": {"path": str(index)}})
+                    for index in range(5)]
+        rows: list[tuple[gate.JsonObject, gate.JsonObject]] = [
+            ({"memoryRetentionRef": {}}, {"memoryPolicy": {}, "comparisonStatus": "paired",
+                                          "policy": {"phaseRecords": 300}}),
+            ({"memoryRetentionRef": {}}, {"memoryPolicy": {}, "comparisonStatus": "nonComparable",
+                                          "policy": {"phaseRecords": 150}}),
+            ({}, {"memoryPolicy": {}, "comparisonStatus": "paired", "policy": {"phaseRecords": 300}}),
+            ({"memoryRetentionRef": {}}, {"memoryPolicy": {}, "comparisonStatus": "paired",
+                                          "policy": {"phaseRecords": 299}}),
+            ({"memoryRetentionRef": {}}, {"memoryPolicy": {}, "comparisonStatus": "paired",
+                                          "policy": {"phaseRecords": 300}, "failure": "worker"}),
+        ]
+        bundle = Mock(spec=gate.Bundle)
+        values = iter(value for pair in rows for value in pair)
+        bundle.json.side_effect = lambda _ref: next(values)
+        self.assertEqual(producer._reassessment_candidates(bundle, attempts), attempts[:2])
+
     def test_completed_ids_only_include_accepted_measurements(self) -> None:
         non_comparable = self._non_comparable_results()[0]
         condition_id = gate._text(gate._object(non_comparable["policy"], "policy")["conditionId"], "id")
@@ -1801,7 +1822,8 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
             )
 
         self.assertEqual(events, ["verify", "seal"])
-        verify.assert_called_once_with(self.root / "bundle", self.root, git_query=None)
+        verify.assert_called_once_with(self.root / "bundle", self.root, git_query=None,
+                                       memory_policy_version="html-memory-v3")
         validate.assert_not_called()
 
     def test_fixed_epoch_does_not_claim_formal_acceptance_without_current_build(self) -> None:
@@ -2205,9 +2227,14 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
             }, False),
             ("unknown memory policy version is rejected", {
                 "comparisonStatus": "paired", "policy": {"policyPass": True},
-                "memoryPolicy": {"version": "html-memory-v3", "policyPass": True,
+                "memoryPolicy": {"version": "html-memory-unknown", "policyPass": True,
                                  "retention": {"retention_allowed": True}},
             }, False),
+            ("v3 memory policy is accepted", {
+                "comparisonStatus": "paired", "policy": {"policyPass": True},
+                "memoryPolicy": {"version": "html-memory-v3", "policyPass": True,
+                                 "retention": {"retention_allowed": True}},
+            }, True),
             ("legacy v1 policy failure remains rejected", {
                 "comparisonStatus": "paired", "policy": {"policyPass": False},
             }, False),

@@ -352,6 +352,53 @@ def cache_only_collector_change(old: bytes, current: bytes) -> bool:
     return prefix + marker + transformed == current
 
 
+V3_REASSESSMENT_PROGRAM_PAIRS: dict[str, tuple[tuple[str, int], tuple[str, int]]] = {
+    'Justfile': (('26a60314d6f99585564ae828130c376726deee1f824c3250423631ba72a5e6b2', 85775), ('dbf845e130ad88db66d467e7ee39665c28b9dae95cc587c98e26035c704f3470', 85775)),
+    'scripts/release/html_performance_host_load_validation.py': (('5002ba1bd630e232a95f799734775aba293fac2410e605fc78b6c618a939f39d', 10472), ('1122db2cae41f9077b03c313d52cb782b0e1063cd289ec611186b629f6acd9be', 10544)),
+    'scripts/release/html_performance_memory_evidence.py': (('48f119be884e37ef525da9cb35e6e8e2498514031b63ddeaa9894b67a11828b1', 5188), ('d490af4d926c124c660a2bae335211aea82c69e288d291695170a09fd0affb4a', 5417)),
+    'scripts/release/html_performance_memory_evidence_test.py': (('2f3b4d3b4af28f497e46891457cf6ae5f75794aad7078297b1562e6801ff34b3', 5289), ('2d71c16ee3d6a30580fbf4bbe8b23ca72c957275d85e9b15245ec47db93ccd2a', 6782)),
+    'scripts/release/html_performance_memory_policy.py': (('c9a513edaa64a0a5983237feef82e1bfaf438e681608eab2b040bb8ba780aef3', 6668), ('c36424f254fc86d00d5f23ab8543154039230253ae6219679a93b50173cb7f0f', 7316)),
+    'scripts/release/html_performance_memory_policy_test.py': (('d22479fc07aa834cf6bc3456af9e34fd667b16e9400ae8acc9fe18baa5cfc656', 7128), ('c38d1f9894a42f115f87600be13cae0b5585997682ad5b4af92e86b785c4c8bb', 10900)),
+    'scripts/release/html_performance_promotion.py': (('7da57201fd9853c8da3d6445f03fece07577734a2ae5bee89a48a0fe4c19291b', 20638), ('f4f60bef9976e010d402b8c883cafa8bdc0eebcbbf0f33e91ae255e2b68e0805', 22601)),
+    'scripts/release/html_performance_promotion_test.py': (('5f5344c9e2b794c8f38d87f837b5bfc9f3e0874d788d3cf0ab9e576b032038e8', 22985), ('6c8381e7c303d4e8f9c75e0bbfdc61299b0f656648b815ed87766402fff67d59', 32877)),
+    'scripts/release/html_performance_reference.py': (('6b5dcbf020a1f8b201e29af2294f64033919762aef26b76d7b4ea2abbf42a0bd', 27317), ('f689af203b1807318de7b9ae0954e0e53f98bfb6894f759db7e3ec9980d9eccc', 27512)),
+    'scripts/release/html_performance_reference_test.py': (('f94d5702eb640c405918160f9cf29e779fd72dbea93a785c441418716c66d9d3', 25103), ('a997a465a52872b58104323a4672427f17f89b78e9f9c3e93916ff642517d5ea', 27474)),
+    'scripts/release/html_performance_source_reuse_cli.py': (('3a0114bf9859067a6d67468c4f48fdf5e1799eb1c6e1d2b63ad9811f74ff692c', 8685), ('e02659cbf4bfac9c8eebb0bb4c45c7254172474e5b5a7f7b9e07654e91bfaa9c', 9866)),
+    'scripts/release/html_performance_source_reuse_cli_test.py': (('6e376322520047d3dd16471137e4ec326f1a732fb7d4e724d7eab1c98e7b67d5', 8841), ('e1531684372e64307eb41785dca1ce223898e95a5f65b1be84e31e6ebc916b60', 10590)),
+    'scripts/release/produce_html_performance_evidence.py': (('43cad2e67fc7aac594e3d120643fcdcb03e97462f40e04c0fdee8a8c9599c323', 263362), ('2803c2a0a5f212eaeff21334ca2b99e6c80e1fe46f6df232a2a6c20de581d555', 265983)),
+    'scripts/release/produce_html_performance_evidence_test.py': (('cfcb9b4ac50cbea8e58c5d261664be0ca60504084b5b2cdc2edf582787a5f1d5', 311180), ('5bd6152ae75b0b40bd0305453c746ef9020d9156b6f1f3c52ff0212f9b7723be', 313113)),
+    'scripts/release/verify_html_performance_evidence.py': (('c2d4b4a6b495d5a481006bf8d4f3569036647626c450d8329b9c29f8e129ed72', 258471), ('f9446c16dee3734c80a57dbc1354a9afb99c454b7696582aae81c38aaf9b5cde', 266526)),
+    'scripts/release/verify_html_performance_evidence_test.py': (('bd1e61edf9de4b1f783cd5b2bc8f49c1bec8abddba9099df44a08fac600573aa', 285472), ('e97fcbd7c4fff79091aac2f6ecfc1d6a8cfa97142514620e52e6bd49b4d3d567', 292735)),
+}
+V3_REASSESSMENT_SELF_PREDECESSORS: frozenset[tuple[str, int]] = frozenset({
+    ("a64529247d7c2a2e8d5075bfeed60e2dc12df3bf2abe26aab803b4d6e7d4f331", 60472),
+})
+
+
+def v3_reassessment_program_change(path: str, old: bytes, current: bytes, *,
+                                   old_mode: str | None, new_mode: str | None) -> bool:
+    """認証済み取得と新判定の差分だけをV3の明示再評価時に認める。"""
+    if old_mode != "100644" or new_mode != "100644":
+        return False
+    before = (hashlib.sha256(old).hexdigest(), len(old))
+    after = (hashlib.sha256(current).hexdigest(), len(current))
+    if path == "scripts/release/html_performance_source_reuse.py":
+        return before in V3_REASSESSMENT_SELF_PREDECESSORS and current == Path(__file__).read_bytes()
+    if V3_REASSESSMENT_PROGRAM_PAIRS.get(path) != (before, after):
+        return False
+    if path != "scripts/release/produce_html_performance_evidence.py":
+        return True
+    import ast
+
+    changed = {"load_closed_batch", "_reassessment_candidates", "_batch_policy_accepted",
+               "_validate_epoch_resume_contexts", "_verify_and_seal_catalog_batch", "produce"}
+    def unchanged(source: bytes) -> list[str]:
+        tree = ast.parse(source)
+        return [ast.dump(node, include_attributes=False) for node in tree.body
+                if not (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in changed)]
+    return unchanged(old) == unchanged(current)
+
+
 def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
     """この移行でレビューする認証・輸送コードの実体だけを許可する。"""
     import ast

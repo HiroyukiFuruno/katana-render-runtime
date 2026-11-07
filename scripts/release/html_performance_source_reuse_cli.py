@@ -63,11 +63,13 @@ def _request(value: object) -> ReuseRequest:
             "currentBuildArtifactSha256": _sha(value["currentBuildArtifactSha256"])}
 
 
-def _validate(request: ReuseRequest, root: Path) -> gate.JsonObject:
+def _validate(request: ReuseRequest, root: Path, *,
+              memory_policy_version: str | None = None) -> gate.JsonObject:
     return gate.verify_source_reuse(
         Path(request["measuredDir"]), root, request["measuredManifestSha256"],
         Path(request["currentBuildDir"]), request["currentBuildManifestSha256"],
         request["currentBuildArtifactPath"], request["currentBuildArtifactSha256"],
+        **gate._memory_policy_kwargs(memory_policy_version),
     )
 
 
@@ -93,7 +95,8 @@ def _stamp(metadata: os.stat_result) -> tuple[int, int, int, int, int, int]:
 def verify_reuse_request(request_path: Path, root: Path, *,
                          expected_measured_dir: Path | None = None,
                          expected_measured_manifest_sha256: str | None = None,
-                         expected_request_sha256: str | None = None) -> gate.JsonObject:
+                         expected_request_sha256: str | None = None,
+                         memory_policy_version: str | None = None) -> gate.JsonObject:
     path = _request_path(request_path, root, existing=True)
     descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     with os.fdopen(descriptor, "rb") as stream:
@@ -121,10 +124,19 @@ def verify_reuse_request(request_path: Path, root: Path, *,
         if (expected_measured_manifest_sha256 is not None
                 and request["measuredManifestSha256"] != _sha(expected_measured_manifest_sha256)):
             raise ValueError("request measured manifest differs")
-        result = _validate(request, root.resolve(strict=True))
-        if has_eligibility and (eligibility != result
-                or result.get("reuseKind") not in ARTIFACT_REUSE_KINDS):
+        original_version = None
+        if has_eligibility and isinstance(eligibility, dict):
+            measured = eligibility.get("measuredResult")
+            if isinstance(measured, dict) and measured.get("memoryPolicyVersion") == "html-memory-v3":
+                original_version = "html-memory-v3"
+        original = (_validate(request, root.resolve(strict=True), memory_policy_version=original_version)
+                    if has_eligibility else None)
+        if has_eligibility and (eligibility != original or original is None
+                or original.get("reuseKind") not in ARTIFACT_REUSE_KINDS):
             raise ValueError("stored eligibility differs from revalidation")
+        result = (_validate(request, root.resolve(strict=True), memory_policy_version=memory_policy_version)
+                  if memory_policy_version is not None else
+                  original if original is not None else _validate(request, root.resolve(strict=True)))
         if not has_eligibility and result.get("reuseKind") in ARTIFACT_REUSE_KINDS:
             raise ValueError("immutable eligibility is required")
         try:
@@ -136,7 +148,8 @@ def verify_reuse_request(request_path: Path, root: Path, *,
         return result
 
 
-def create_request(request: ReuseRequest, output: Path, root: Path) -> gate.JsonObject:
+def create_request(request: ReuseRequest, output: Path, root: Path, *,
+                   memory_policy_version: str | None = None) -> gate.JsonObject:
     path = _request_path(output, root, existing=False)
     try:
         path.lstat()
@@ -145,7 +158,7 @@ def create_request(request: ReuseRequest, output: Path, root: Path) -> gate.Json
     else:
         raise FileExistsError(f"request already exists: {path}")
     validated = _request(request)
-    result = _validate(validated, root.resolve(strict=True))
+    result = _validate(validated, root.resolve(strict=True), memory_policy_version=memory_policy_version)
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
     with os.fdopen(descriptor, "w", encoding="utf8") as stream:
         payload: object = validated
@@ -166,6 +179,7 @@ def main() -> int:
     parser.add_argument("--current-build-artifact-path", required=True)
     parser.add_argument("--current-build-artifact-sha256", required=True)
     parser.add_argument("--request-output", type=Path, required=True)
+    parser.add_argument("--require-memory-policy-v3", action="store_true")
     args = parser.parse_args()
     request: ReuseRequest = {
         "schema": SCHEMA, "measuredDir": args.measured_dir,
@@ -176,7 +190,8 @@ def main() -> int:
         "currentBuildArtifactSha256": args.current_build_artifact_sha256,
     }
     try:
-        result = create_request(request, args.request_output, args.repo)
+        result = create_request(request, args.request_output, args.repo,
+                                memory_policy_version="html-memory-v3" if args.require_memory_policy_v3 else None)
         print(json.dumps(result, sort_keys=True))
         return 0
     except (OSError, ValueError, KeyError) as error:

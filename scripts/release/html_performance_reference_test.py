@@ -43,6 +43,15 @@ class ActiveReferenceTest(unittest.TestCase):
             **overrides,
         }
 
+    @staticmethod
+    def memory_policy_v3(**overrides: object) -> dict[str, object]:
+        return {
+            "version": "html-memory-v3", "policySha256": "a" * 64,
+            "retentionEvidenceSha256": "b" * 64, "candidateConditions": 84,
+            "acceptedConditions": 84, "warmupCycles": 5, "measuredCycles": 25,
+            **overrides,
+        }
+
     def history_query(self, value: dict[str, object]) -> reference.GitQuery:
         def query(_root: Path, args: tuple[str, ...]) -> str:
             return reference.HISTORY_PATH if args[0] == "ls-tree" else json.dumps(value)
@@ -141,7 +150,7 @@ class ActiveReferenceTest(unittest.TestCase):
             )
 
         invalid_policy_values: tuple[tuple[str, object], ...] = (
-            ("version", "html-memory-v3"),
+            ("version", "html-memory-v4"),
             ("policySha256", "A" * 64),
             ("retentionEvidenceSha256", "bad"),
             ("candidateConditions", 83),
@@ -171,6 +180,46 @@ class ActiveReferenceTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             reference.active_reference_at_commit(
                 Path("/fixture"), "b" * 40, self.history_query(malformed),
+            )
+
+    def test_v3_active_reference_accepts_only_complete_memory_assessments(self) -> None:
+        history = self.history()
+        history["schema"] = "krr-html-performance-history-v2"
+        history["activeReferenceSelectionNote"] = "existing active reference retained"
+        rows = history["records"]
+        assert isinstance(rows, list) and isinstance(rows[0], dict)
+        rows[0]["memoryPolicy"] = self.memory_policy_v3()
+        legacy = dict(rows[0])
+        legacy["id"] = "legacy-v1"
+        legacy.pop("memoryPolicy")
+        rows.append(legacy)
+        selected = reference.active_reference_at_commit(
+            Path("/fixture"), "b" * 40, self.history_query(history),
+        )
+        self.assertEqual(selected.record_id if selected else None, "first")
+
+        for field, value in (("candidateConditions", 83), ("acceptedConditions", 83),
+                             ("warmupCycles", 4), ("measuredCycles", 24),
+                             ("retentionEvidenceSha256", "bad")):
+            with self.subTest(field=field):
+                invalid = json.loads(json.dumps(history))
+                records = invalid["records"]
+                assert isinstance(records, list) and isinstance(records[0], dict)
+                policy = records[0]["memoryPolicy"]
+                assert isinstance(policy, dict)
+                policy[field] = value
+                with self.assertRaises(ValueError):
+                    reference.active_reference_at_commit(
+                        Path("/fixture"), "b" * 40, self.history_query(invalid),
+                    )
+
+        invalid_v1 = self.history()
+        records = invalid_v1["records"]
+        assert isinstance(records, list) and isinstance(records[0], dict)
+        records[0]["memoryPolicy"] = self.memory_policy_v3()
+        with self.assertRaisesRegex(ValueError, "v1 history cannot contain"):
+            reference.active_reference_at_commit(
+                Path("/fixture"), "b" * 40, self.history_query(invalid_v1),
             )
 
         unknown = json.loads(json.dumps(history))

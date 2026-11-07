@@ -10,7 +10,8 @@ from dataclasses import dataclass
 
 from html_performance_paired_stats import PairedRegressionResult, evaluate_paired_regression
 
-POLICY_VERSION = "html-memory-v2"
+LEGACY_POLICY_VERSION = "html-memory-v2"
+POLICY_VERSION = "html-memory-v3"
 SAMPLE_COUNT = 25
 MIB = 1024 * 1024
 SMALL_PEAK_BYTES = MIB
@@ -109,13 +110,21 @@ def _within(delta: PeakDelta, byte_limit: float, ratio_limit: float) -> bool:
     return delta.delta_bytes <= byte_limit and delta.delta_ratio <= ratio_limit
 
 
+def _check_policy_version(policy_version: str) -> None:
+    if policy_version not in (LEGACY_POLICY_VERSION, POLICY_VERSION):
+        raise ValueError("unsupported memory policy version")
+
+
 def evaluate_peak_phase(
     baseline_rss: Sequence[float],
     candidate_rss: Sequence[float],
     baseline_elapsed: Sequence[float],
     candidate_elapsed: Sequence[float],
+    *,
+    policy_version: str = POLICY_VERSION,
 ) -> PeakPhaseResult:
     """Judge one phase; input provenance and cross-phase checks belong to the caller."""
+    _check_policy_version(policy_version)
     base_rss = _values(baseline_rss, "baseline RSS")
     cand_rss = _values(candidate_rss, "candidate RSS")
     # Zero-duration full-Y is admitted only when the outer validator proves zero scroll.
@@ -132,13 +141,14 @@ def evaluate_peak_phase(
     speedup_ratio = speedup_ms / base_median if base_median > 0 else 0.0
     if not math.isfinite(speedup_ms) or not math.isfinite(speedup_ratio):
         raise ValueError("elapsed comparison is not finite")
-    small = all(_within(item, SMALL_PEAK_BYTES, SMALL_PEAK_RATIO) for item in differences)
+    central = differences if policy_version == LEGACY_POLICY_VERSION else (median, p95)
+    small = all(_within(item, SMALL_PEAK_BYTES, SMALL_PEAK_RATIO) for item in central)
     bounded = all(_within(item, MAX_PEAK_BYTES, MAX_PEAK_RATIO) for item in differences)
     faster = (improvement.test_performed and improvement.detected_bad
               and speedup_ms >= MIN_SPEEDUP_MS and speedup_ratio >= MIN_SPEEDUP_RATIO)
-    category = "small" if small else "tradeoff" if bounded and faster else "rejected"
+    category = "small" if small and bounded else "tradeoff" if bounded and faster else "rejected"
     return PeakPhaseResult(
-        POLICY_VERSION, median, p95, maximum, regression, improvement, speedup_ms,
+        policy_version, median, p95, maximum, regression, improvement, speedup_ms,
         speedup_ratio, category, not regression.detected_bad and category != "rejected",
     )
 
@@ -158,19 +168,23 @@ def _trend(values: Sequence[float]) -> Trend:
     return Trend(tau, p_value, tau > 0 and p_value <= TREND_ALPHA)
 
 
-def evaluate_retention(candidate_current_rss: Sequence[float]) -> RetentionResult:
+def evaluate_retention(candidate_current_rss: Sequence[float], *,
+                       policy_version: str = POLICY_VERSION) -> RetentionResult:
     """Assess the finite post-release window; this cannot establish absence of leaks."""
+    _check_policy_version(policy_version)
     values = _values(candidate_current_rss, "candidate current RSS")
     initial = statistics.median(values[:5])
     final = statistics.median(values[-5:])
     delta = final - initial
-    budget = min(RETENTION_BYTES, initial * RETENTION_RATIO)
+    budget = (min(RETENTION_BYTES, initial * RETENTION_RATIO)
+              if policy_version == LEGACY_POLICY_VERSION
+              else min(MAX_PEAK_BYTES, initial * MAX_PEAK_RATIO))
     overall = _trend(values)
     tail = _trend(values[-10:])
     tail_increase = final > statistics.median(values[-10:-5])
     sustained = overall.significant_upward and tail.significant_upward and tail_increase
     return RetentionResult(
-        POLICY_VERSION, TREND_FAMILY_COMPARISONS, TREND_FAMILY_ALPHA, TREND_ALPHA,
+        policy_version, TREND_FAMILY_COMPARISONS, TREND_FAMILY_ALPHA, TREND_ALPHA,
         initial, final, delta, budget, overall, tail, tail_increase,
         delta <= budget and not sustained,
     )

@@ -58,6 +58,14 @@ class SourceContract(TypedDict):
     snapshot: str
 
 
+class MemoryPolicyKwargs(TypedDict, total=False):
+    memory_policy_version: str
+
+
+def _memory_policy_kwargs(version: str | None) -> MemoryPolicyKwargs:
+    return {"memory_policy_version": version} if version is not None else {}
+
+
 class SourceEpochV3Validation(NamedTuple):
     """Context pins and projections authenticated by the v3 caller."""
     fixed_context_sha256: str
@@ -2019,16 +2027,18 @@ def _v3_live_programs_uncached(root: Path, checkout: JsonObject) -> SourceRecord
 
 _ProgramItems = tuple[tuple[str, str, int], ...]
 _ProgramEndpoints = tuple[tuple[str, _ProgramItems], ...]
-_ProgramCache = Callable[[str, str, _ProgramItems, _ProgramEndpoints], _ProgramItems]
+_ProgramCache = Callable[[str, str, _ProgramItems, _ProgramEndpoints, str | None], _ProgramItems]
 _PROGRAM_CACHES: weakref.WeakKeyDictionary[types.FunctionType, _ProgramCache] = weakref.WeakKeyDictionary()
 
 
 def _v3_authenticate_programs(root: Path, head: str, items: _ProgramItems,
-                              endpoints: _ProgramEndpoints, *, git_query: GitQuery | None) -> _ProgramItems:
+                              endpoints: _ProgramEndpoints, *, git_query: GitQuery | None,
+                              memory_policy_version: str | None = None) -> _ProgramItems:
     from html_performance_source_reuse import (
         RELEASE_ONLY_PROGRAMS, VALIDATION_COHORT_ADDITIONS, VALIDATION_COHORT_CHANGES,
         _modes, cache_only_collector_change,
         equivalent_program_records, known_auth_program_change, validation_cohort_change,
+        v3_reassessment_program_change,
     )
 
     programs = {name: (checksum, size) for name, checksum, size in items}
@@ -2077,7 +2087,11 @@ def _v3_authenticate_programs(root: Path, head: str, items: _ProgramItems,
             require(isinstance(old_blob, bytes) and isinstance(new_blob, bytes)
                     and (path == "scripts/release/produce_html_performance_evidence.py"
                          and cache_only_collector_change(old_blob, new_blob)
-                         or known_auth_program_change(path, old_blob, new_blob)),
+                         or known_auth_program_change(path, old_blob, new_blob)
+                         or memory_policy_version == "html-memory-v3"
+                         and v3_reassessment_program_change(
+                             path, old_blob, new_blob, old_mode=modes.get(path),
+                             new_mode=live_modes.get(path))),
                     "live measurement program differs from fixed epoch")
             comparable[path] = programs[path]
         require(equivalent_program_records(comparable, programs),
@@ -2095,18 +2109,21 @@ def _v3_program_cache(query: types.FunctionType) -> _ProgramCache:
 
     @lru_cache(maxsize=4)
     def authenticate(root_path: str, head: str, items: _ProgramItems,
-                     endpoints: _ProgramEndpoints) -> _ProgramItems:
+                     endpoints: _ProgramEndpoints, memory_policy_version: str | None) -> _ProgramItems:
         callback = query_ref()
         if callback is None:
             raise ValueError("Git query transaction is unavailable")
-        return _v3_authenticate_programs(Path(root_path), head, items, endpoints, git_query=callback)
+        return _v3_authenticate_programs(Path(root_path), head, items, endpoints, git_query=callback,
+            **({"memory_policy_version": memory_policy_version}
+               if memory_policy_version is not None else {}))
 
     _PROGRAM_CACHES[query] = authenticate
     return authenticate
 
 
 def _v3_program_source(root: Path, fixed: JsonObject, endpoints: Sequence[JsonObject], *,
-                       git_query: GitQuery | None) -> SourceRecords:
+                       git_query: GitQuery | None,
+                       memory_policy_version: str | None = None) -> SourceRecords:
     program_source = _object(fixed.get("programSource"), "fixed epoch program source")
     programs = _v3_live_programs(root, program_source)
     head = _text(program_source.get("head"), "program source HEAD")
@@ -2123,24 +2140,29 @@ def _v3_program_source(root: Path, fixed: JsonObject, endpoints: Sequence[JsonOb
             and re.fullmatch(r"[0-9a-f]{40}", head) is not None
             and all(re.fullmatch(r"[0-9a-f]{40}", live_head) is not None
                     for live_head, _ in endpoint_items)):
-        checked = _v3_program_cache(git_query)(str(root), head, items, endpoint_items)
+        checked = _v3_program_cache(git_query)(str(root), head, items, endpoint_items, memory_policy_version)
     else:
-        checked = _v3_authenticate_programs(root, head, items, endpoint_items, git_query=git_query)
+        checked = _v3_authenticate_programs(root, head, items, endpoint_items, git_query=git_query,
+                                            **({"memory_policy_version": memory_policy_version}
+                                               if memory_policy_version is not None else {}))
     return {name: (checksum, size) for name, checksum, size in checked}
 
 
 def _host_load_source_records(bundle: Bundle, root: Path, expected: JsonObject,
-                              measured_head: str, *, git_query: GitQuery | None) -> SourceRecords:
+                              measured_head: str, *, git_query: GitQuery | None,
+                              memory_policy_version: str | None = None) -> SourceRecords:
     pair = _object(expected.get("sourcePair"), "host-load source pair")
     if pair.get("schema") != "krr-html-performance-source-epoch-v3":
         return committed_records(root, measured_head, git_query=git_query)
     fixed = bundle.json(pair["epochContextRef"])
     endpoints = [bundle.json(pair[key]) for key in ("beforeContextRef", "endContextRef")]
-    return _v3_program_source(root, fixed, endpoints, git_query=git_query)
+    return _v3_program_source(root, fixed, endpoints, git_query=git_query,
+                              memory_policy_version=memory_policy_version)
 
 
 def _verified_v3_reuse_context(bundle: Bundle, root: Path, measured_head: str,
-                               expected: JsonObject, *, git_query: GitQuery | None) -> object:
+                               expected: JsonObject, *, git_query: GitQuery | None,
+                               memory_policy_version: str | None = None) -> object:
     from html_performance_source_reuse import _modes
 
     pair = _object(expected.get("sourcePair"), "v3 source pair")
@@ -2152,7 +2174,8 @@ def _verified_v3_reuse_context(bundle: Bundle, root: Path, measured_head: str,
     require(origin_root == root, "v3 program source root differs")
     fixed = bundle.json(pair["epochContextRef"])
     endpoints = [bundle.json(pair[key]) for key in ("beforeContextRef", "endContextRef")]
-    programs = _v3_program_source(root, fixed, endpoints, git_query=git_query)
+    programs = _v3_program_source(root, fixed, endpoints, git_query=git_query,
+                                  memory_policy_version=memory_policy_version)
     program_source = _object(fixed.get("programSource"), "v3 program source")
     program_head = _text(program_source.get("head"), "v3 program HEAD")
     raw_tree = _git_output(root, ("ls-tree", "-r", "-z", program_head), git_query=git_query)
@@ -2167,7 +2190,7 @@ def _verified_v3_reuse_context(bundle: Bundle, root: Path, measured_head: str,
     fixed_items = tuple((name, checksum, size) for name, (checksum, size) in sorted(programs.items()))
     live_items = tuple((name, checksum, size) for name, (checksum, size) in sorted(live_programs.items()))
     _v3_authenticate_programs(root, program_head, fixed_items, ((live_head, live_items),),
-                              git_query=git_query)
+                              git_query=git_query, memory_policy_version=memory_policy_version)
     live_tree = _git_output(root, ("ls-tree", "-r", "-z", live_head), git_query=git_query)
     require(isinstance(live_tree, bytes), "current program tree differs")
     if not isinstance(live_tree, bytes):
@@ -2429,7 +2452,8 @@ def _v3_worker_runtime_execution(bundle: Bundle, expected: JsonObject, manifest:
 
 def _v3_epoch_validation(bundle: Bundle, root: Path, expected: JsonObject,
                          builds: Mapping[str, JsonObject], *,
-                         git_query: GitQuery | None) -> SourceEpochV3Validation:
+                         git_query: GitQuery | None,
+                         memory_policy_version: str | None = None) -> SourceEpochV3Validation:
     from html_performance_epoch_reuse import declared_from_authenticated_refs
 
     pair = _object(expected["sourcePair"], "v3 source pair")
@@ -2444,7 +2468,8 @@ def _v3_epoch_validation(bundle: Bundle, root: Path, expected: JsonObject,
                                    "measurement capacity binding")
                            if "measurementCapacityBindingRef" in fixed_context else None)
     endpoints = [bundle.json(pair[key]) for key in ("beforeContextRef", "endContextRef")]
-    program_records = _v3_program_source(origin_root, fixed_context, endpoints, git_query=git_query)
+    program_records = _v3_program_source(origin_root, fixed_context, endpoints, git_query=git_query,
+                                         memory_policy_version=memory_policy_version)
     endpoint_records = [_v3_live_programs(origin_root, _object(endpoint.get("liveCheckout"), "live checkout"))
                         for endpoint in endpoints]
     all_records = [program_records, *endpoint_records]
@@ -2492,6 +2517,7 @@ def _source_contract_v3(
     bundle: Bundle, root: Path, expected: JsonObject, validation: SourceEpochV3Validation | None,
     *, git_query: GitQuery | None, validated_builds: Mapping[str, JsonObject] | None,
     reuse_context: object, shared_source: SharedCurrentSource | None,
+    memory_policy_version: str | None = None,
 ) -> SourceContract:
     from html_performance_epoch_reuse import EpochProjection, compare_epoch_projections
 
@@ -2520,7 +2546,8 @@ def _source_contract_v3(
     for context in contexts[1:]:
         require(context.get("schema") == "krr-html-performance-context-epoch-v3",
                 "v3 live context schema differs")
-    fixed_programs = _v3_program_source(origin_root, contexts[0], contexts[1:], git_query=git_query)
+    fixed_programs = _v3_program_source(origin_root, contexts[0], contexts[1:], git_query=git_query,
+                                         memory_policy_version=memory_policy_version)
     live_programs = [_v3_live_programs(origin_root, _object(context.get("liveCheckout"), "live checkout"))
                      for context in contexts[1:]]
     changes = frozenset(path for records in live_programs for path in fixed_programs
@@ -2540,12 +2567,13 @@ def source_contract(bundle: Bundle, root: Path, expected: JsonObject, *,
                     validated_builds: Mapping[str, JsonObject] | None = None,
                     reuse_context: object = None,
                     shared_source: SharedCurrentSource | None = None,
-                    epoch_validation: SourceEpochV3Validation | None = None) -> SourceContract:
+                    epoch_validation: SourceEpochV3Validation | None = None,
+                    memory_policy_version: str | None = None) -> SourceContract:
     contract = _object(expected["sourcePair"], "source pair")
     if contract.get("schema") == "krr-html-performance-source-epoch-v3":
         return _source_contract_v3(bundle, root, expected, epoch_validation, git_query=git_query,
                                    validated_builds=validated_builds, reuse_context=reuse_context,
-                                   shared_source=shared_source)
+                                   shared_source=shared_source, memory_policy_version=memory_policy_version)
     require(epoch_validation is None, "epoch validation requires v3 source schema")
     before, end, approved = (bundle.json(contract[k]) for k in ("before", "end", "approvedSourceRef"))
     require(all(document.get("stableEndpoints") is True for document in (before, end, approved)), "unstable source endpoint")
@@ -3112,23 +3140,52 @@ def evaluate_measurement_policy(
 def _require_v2_memory_policy(
     bundle: Bundle, expected: JsonObject, result: JsonObject,
     paths: list[Path], *, non_comparable: bool,
+    policy_version: str | None = None,
+    assessment_sink: list[JsonObject] | None = None,
+    policy_sink: list[JsonObject] | None = None,
+    allow_rejected: bool = False,
 ) -> bool:
     if "memoryPolicy" not in result:
         return False
-    _object(expected.get("memoryRetentionRef"), "memory retention reference")
+    retention_ref = _object(expected.get("memoryRetentionRef"), "memory retention reference")
     saved = _object(result["memoryPolicy"], "memory policy")
     from html_performance_memory_evidence import evaluate_candidate_only, evaluate_paired
+    from html_performance_memory_policy import LEGACY_POLICY_VERSION, POLICY_VERSION
     from html_performance_retention_evidence import read_retained_rss
 
     retained = read_retained_rss(bundle, expected)
-    canonical = (evaluate_candidate_only(paths, expected, retained) if non_comparable
-                 else evaluate_paired(paths, expected, retained))
+    original_version = _text(saved.get("version"), "saved memory policy version")
+    require(original_version in (LEGACY_POLICY_VERSION, POLICY_VERSION),
+            "unsupported saved memory policy version")
+    evaluator = evaluate_candidate_only if non_comparable else evaluate_paired
+    canonical = evaluator(paths, expected, retained, policy_version=original_version)
     require(saved == canonical, "saved memory policy differs from authenticated evidence")
+    requested = original_version if policy_version is None else policy_version
+    require(requested in (LEGACY_POLICY_VERSION, POLICY_VERSION), "unsupported memory policy version")
+    if requested != original_version:
+        canonical = evaluator(paths, expected, retained, policy_version=requested)
+    if policy_sink is not None:
+        policy_sink.append(canonical)
+    accepted = (canonical.get("candidateRetentionPass") is True if non_comparable
+                else canonical.get("policyPass") is True)
+    if assessment_sink is not None:
+        catalog = _object(expected.get("catalogCondition"), "memory catalog condition")
+        retention_sha = _text(retention_ref.get("sha256"), "retention SHA")
+        digest(retention_sha)
+        assessment_sink.append({
+            "conditionId": _text(catalog.get("condition_id"), "memory condition id"),
+            "version": requested, "policySha256": _v3_json_digest(canonical),
+            "retentionSha256": retention_sha,
+            "originalPolicyVersion": original_version,
+            "originalPolicySha256": _v3_json_digest(saved),
+        })
+    if allow_rejected:
+        return accepted
     if non_comparable:
-        require(canonical.get("candidateRetentionPass") is True,
+        require(accepted,
                 "candidate retained memory regression")
     else:
-        require(canonical.get("policyPass") is True, "paired time/memory regression")
+        require(accepted, "paired time/memory regression")
     return True
 
 
@@ -3191,7 +3248,11 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
                      validated_builds: Mapping[str, JsonObject] | None = None,
                      reuse_context: object = None,
                      remote_context: object = None,
-                     shared_source: SharedCurrentSource | None = None) -> JsonObject:
+                     shared_source: SharedCurrentSource | None = None,
+                     memory_policy_version: str | None = None,
+                     memory_assessment_sink: list[JsonObject] | None = None,
+                     memory_acceptance_sink: list[bool] | None = None,
+                     allow_memory_rejected: bool = False) -> JsonObject:
     expected = bundle.json(attempt["expected"])
     result = bundle.json(attempt["result"])
     manifest = bundle.json(attempt["pairManifest"])
@@ -3279,10 +3340,12 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
         _v3_worker_observations(bundle, expected, end_context, validated_builds)
         _v3_worker_runtime_execution(bundle, expected, manifest, before_context)
         epoch_validation = _v3_epoch_validation(bundle, root, expected, validated_builds,
-                                                git_query=git_query)
+                                                git_query=git_query,
+                                                memory_policy_version=memory_policy_version)
     source = source_contract(bundle, root, expected, git_query=git_query,
                              validated_builds=validated_builds, reuse_context=reuse_context,
-                             shared_source=shared_source, epoch_validation=epoch_validation)
+                             shared_source=shared_source, epoch_validation=epoch_validation,
+                             memory_policy_version=memory_policy_version)
     mapping = {"sourceBeforeEqualsEnd": "source", "inputsBeforeEqualsEnd": "inputs", "registryBeforeEqualsEnd": "registry", "cacheBeforeEqualsEnd": "cache", "cacheUnionBeforeEqualsEnd": "cacheUnion", "cacheUnionScopeRestored": "scope", "configBeforeEqualsEnd": "config", "preferenceBeforeEqualsEnd": "preference", "toolContextBeforeEqualsEnd": "toolContext"}
     if not is_v3:
         require(all(before_context[key] == end_context[key] for key in mapping.values()), "raw endpoint context changed")
@@ -3484,7 +3547,13 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
         }
         require(result.get("policy") == expected_policy,
                 "saved non-comparable candidate policy differs")
-        _require_v2_memory_policy(bundle, expected, result, paths, non_comparable=True)
+        memory_accepted = _require_v2_memory_policy(
+            bundle, expected, result, paths, non_comparable=True,
+            policy_version=memory_policy_version, assessment_sink=memory_assessment_sink,
+            allow_rejected=allow_memory_rejected,
+        )
+        if memory_acceptance_sink is not None:
+            memory_acceptance_sink.append(memory_accepted)
         return _validated_attempt_summary(
             expected, source, "nonComparable", candidate_samples=25,
             sample_records=25,
@@ -3495,7 +3564,14 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
     require(aggregate["measurement_executed"] is True, "actual measurements absent")
     saved = _object(result["policy"], "measurement policy")
     require(saved == canonical_policy, "saved paired policy differs from raw reports")
-    if not _require_v2_memory_policy(bundle, expected, result, paths, non_comparable=False):
+    memory_accepted = _require_v2_memory_policy(
+        bundle, expected, result, paths, non_comparable=False,
+        policy_version=memory_policy_version, assessment_sink=memory_assessment_sink,
+        allow_rejected=allow_memory_rejected,
+    )
+    if memory_acceptance_sink is not None:
+        memory_acceptance_sink.append(memory_accepted)
+    if not memory_accepted and "memoryPolicy" not in result:
         require(canonical_policy["policyPass"] is True, "paired time/RSS regression")
     require(result.get("comparisonStatus") == "paired",
             "paired condition comparison status differs")
@@ -3541,7 +3617,8 @@ def _require_formal_release_result(result: JsonObject) -> None:
             "HTML performance non-regression is not established")
 
 
-def _catalog_memory_summary(bundle: Bundle, attempts: list[JsonObject]) -> JsonObject:
+def _catalog_memory_summary(bundle: Bundle, attempts: list[JsonObject], *,
+                            assessments: list[JsonObject] | None = None) -> JsonObject:
     """Summarize only attempts already authenticated by validate_attempt."""
     results = [bundle.json(attempt["result"]) for attempt in attempts]
     present = ["memoryPolicy" in result for result in results]
@@ -3549,11 +3626,18 @@ def _catalog_memory_summary(bundle: Bundle, attempts: list[JsonObject]) -> JsonO
         return {}
     require(len(results) == 84 and all(present),
             "catalog memory policy requires all 84 conditions")
-    from html_performance_memory_policy import POLICY_VERSION
+    from html_performance_memory_policy import LEGACY_POLICY_VERSION, POLICY_VERSION
 
-    require(all(_object(result["memoryPolicy"], "memory policy").get("version") == POLICY_VERSION
-                for result in results), "catalog memory policy version differs")
-    return {"memoryPolicyVersion": POLICY_VERSION, "retainedMemoryConditions": 84}
+    if assessments is not None:
+        require(len(assessments) == 84
+                and all(row.get("version") == POLICY_VERSION for row in assessments),
+                "catalog memory policy assessment differs")
+        return {"memoryPolicyVersion": POLICY_VERSION, "retainedMemoryConditions": 84,
+                "memoryPolicyAssessments": assessments}
+    versions = {_object(result["memoryPolicy"], "memory policy").get("version") for result in results}
+    require(len(versions) == 1 and versions <= {LEGACY_POLICY_VERSION, POLICY_VERSION},
+            "catalog memory policy version differs")
+    return {"memoryPolicyVersion": next(iter(versions)), "retainedMemoryConditions": 84}
 
 
 def validate_expected_builds(bundle: Bundle, root: Path, first_expected: JsonObject, *,
@@ -3601,7 +3685,8 @@ def validate_expected_builds(bundle: Bundle, root: Path, first_expected: JsonObj
 
 def _verify_impl(directory: Path, root: Path, *, git_query: GitQuery | None = None,
             require_catalog: bool, diagnostic_catalog: bool = False,
-            reuse_context: object = None, remote_context: object = None) -> JsonObject:
+                         reuse_context: object = None, remote_context: object = None,
+                         memory_policy_version: str | None = None) -> JsonObject:
     bundle = Bundle(directory)
     head = git(root, "rev-parse", "HEAD", git_query=git_query).strip()
     attempts = _objects(bundle.manifest["attempts"], "viewport attempts")
@@ -3623,7 +3708,8 @@ def _verify_impl(directory: Path, root: Path, *, git_query: GitQuery | None = No
         if not isinstance(reuse_context, SourceReuseContext):
             raise ValueError("invalid source reuse context")
         checked_context = (_verified_v3_reuse_context(
-            bundle, root, reuse_context.measured_head, first_expected, git_query=git_query)
+            bundle, root, reuse_context.measured_head, first_expected, git_query=git_query,
+            memory_policy_version=memory_policy_version)
             if first_is_v3 else _verified_reuse_context(
                 root, reuse_context.measured_head, git_query=git_query,
                 allow_test_changes=reuse_context.artifact_equivalence))
@@ -3669,20 +3755,26 @@ def _verify_impl(directory: Path, root: Path, *, git_query: GitQuery | None = No
             shared_source = SharedCurrentSource(root, _text(shared_before.get("head"), "source HEAD"),
                                                 current_source(root, shared_before, git_query=git_query),
                                                 Path(_text(shared_before.get("root"), "source root")))
+        assessments: list[JsonObject] | None = [] if memory_policy_version is not None else None
         if remote_context is None:
             values = [validate_attempt(bundle, root, attempt, git_query=git_query,
                                        validated_builds=None if is_v3 else validated_builds,
                                        reuse_context=reuse_context,
-                                       shared_source=None if is_v3 else shared_source)
+                                       shared_source=None if is_v3 else shared_source,
+                                       memory_policy_version=memory_policy_version,
+                                       memory_assessment_sink=assessments)
                       for attempt, is_v3 in zip(attempts, v3_rows, strict=True)]
         else:
             values = [validate_attempt(bundle, root, attempt, git_query=git_query,
                                        validated_builds=validated_builds, reuse_context=reuse_context,
-                                       remote_context=remote_context) for attempt in attempts]
-        memory_summary = _catalog_memory_summary(bundle, attempts)
+                                       remote_context=remote_context,
+                                       memory_policy_version=memory_policy_version,
+                                       memory_assessment_sink=assessments) for attempt in attempts]
+        memory_summary = _catalog_memory_summary(bundle, attempts, assessments=assessments)
         from html_performance_host_load_validation import verify_catalog_host_load
         verify_catalog_host_load(bundle, attempts, _host_load_source_records(
-            bundle, root, first_expected, head, git_query=git_query))
+            bundle, root, first_expected, head, git_query=git_query,
+            memory_policy_version=memory_policy_version))
         non_comparable_ids = {
             _text(_object(value["catalogCondition"], "catalog condition")["condition_id"],
                   "non-comparable condition id")
@@ -3882,17 +3974,22 @@ def _verify_impl(directory: Path, root: Path, *, git_query: GitQuery | None = No
 
 def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
             require_catalog: bool, diagnostic_catalog: bool = False,
-            reuse_context: object = None, remote_context: object = None) -> JsonObject:
+            reuse_context: object = None, remote_context: object = None,
+            memory_policy_version: str | None = None) -> JsonObject:
     require_no_git_replacements(root, git_query=git_query)
     result = _verify_impl(directory, root, git_query=git_query, require_catalog=require_catalog,
                           diagnostic_catalog=diagnostic_catalog, reuse_context=reuse_context,
-                          remote_context=remote_context)
+                          remote_context=remote_context,
+                          **({"memory_policy_version": memory_policy_version}
+                             if memory_policy_version is not None else {}))
     require_no_git_replacements(root, git_query=git_query)
     return result
 
 
-def verify(directory: Path, root: Path, *, git_query: GitQuery | None = None) -> JsonObject:
-    result = _verify(directory, root, git_query=git_query, require_catalog=True)
+def verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
+           memory_policy_version: str | None = None) -> JsonObject:
+    result = _verify(directory, root, git_query=git_query, require_catalog=True,
+                     **_memory_policy_kwargs(memory_policy_version))
     _require_formal_release_result(result)
     return result
 
@@ -3900,7 +3997,8 @@ def verify(directory: Path, root: Path, *, git_query: GitQuery | None = None) ->
 def _verify_source_reuse_impl(directory: Path, root: Path, measured_manifest_sha256: str,
                         build_directory: Path, build_manifest_sha256: str,
                         build_artifact_path: str, build_artifact_sha256: str, *,
-                        git_query: GitQuery | None = None) -> JsonObject:
+                        git_query: GitQuery | None = None,
+                        memory_policy_version: str | None = None) -> JsonObject:
     """旧測定の原本と現HEAD buildを照合し、文書のみの差分を別結果として認定する。"""
     root = root.resolve()
     digest(measured_manifest_sha256)
@@ -3920,11 +4018,13 @@ def _verify_source_reuse_impl(directory: Path, root: Path, measured_manifest_sha
     is_v3 = pair.get("schema") == "krr-html-performance-source-epoch-v3"
     def source_context() -> object:
         if is_v3:
-            return _verified_v3_reuse_context(bundle, root, measured_head, first, git_query=git_query)
+            return _verified_v3_reuse_context(bundle, root, measured_head, first, git_query=git_query,
+                                               memory_policy_version=memory_policy_version)
         return _verified_reuse_context(root, measured_head, git_query=git_query, allow_test_changes=True)
     context = source_context()
     measured = _verify(directory, root, git_query=git_query, require_catalog=True,
-                       reuse_context=context)
+                       reuse_context=context,
+                       **_memory_policy_kwargs(memory_policy_version))
     _require_formal_release_result(measured)
     if not attempts:
         raise ValueError("reuse evidence has no attempts")
@@ -3985,12 +4085,15 @@ def _verify_source_reuse_impl(directory: Path, root: Path, measured_manifest_sha
 def verify_source_reuse(directory: Path, root: Path, measured_manifest_sha256: str,
                         build_directory: Path, build_manifest_sha256: str,
                         build_artifact_path: str, build_artifact_sha256: str, *,
-                        git_query: GitQuery | None = None) -> JsonObject:
+                        git_query: GitQuery | None = None,
+                        memory_policy_version: str | None = None) -> JsonObject:
     root = root.resolve()
     require_no_git_replacements(root, git_query=git_query)
     result = _verify_source_reuse_impl(directory, root, measured_manifest_sha256,
                                        build_directory, build_manifest_sha256,
-                                       build_artifact_path, build_artifact_sha256, git_query=git_query)
+                                       build_artifact_path, build_artifact_sha256, git_query=git_query,
+                                       **({"memory_policy_version": memory_policy_version}
+                                          if memory_policy_version is not None else {}))
     require_no_git_replacements(root, git_query=git_query)
     return result
 
@@ -4166,6 +4269,18 @@ def acquire(directory: Path, root: Path, repository: str, current_producer: bool
 
 
 def _require_cli_memory_v2(result: JsonObject, *, reused: bool) -> None:
+    from html_performance_memory_policy import LEGACY_POLICY_VERSION
+
+    if reused:
+        require(result.get("reuseEligibility") is True, "performance reuse is not eligible")
+        result = _object(result.get("measuredResult"), "reused measured result")
+    require(result.get("memoryPolicyVersion") == LEGACY_POLICY_VERSION
+            and type(result.get("retainedMemoryConditions")) is int
+            and result.get("retainedMemoryConditions") == 84,
+            "HTML performance requires v2 retained memory for all 84 conditions")
+
+
+def _require_cli_memory_v3(result: JsonObject, *, reused: bool) -> None:
     from html_performance_memory_policy import POLICY_VERSION
 
     if reused:
@@ -4173,8 +4288,9 @@ def _require_cli_memory_v2(result: JsonObject, *, reused: bool) -> None:
         result = _object(result.get("measuredResult"), "reused measured result")
     require(result.get("memoryPolicyVersion") == POLICY_VERSION
             and type(result.get("retainedMemoryConditions")) is int
-            and result.get("retainedMemoryConditions") == 84,
-            "HTML performance requires v2 retained memory for all 84 conditions")
+            and result.get("retainedMemoryConditions") == 84
+            and len(_array(result.get("memoryPolicyAssessments"), "memory assessments")) == 84,
+            "HTML performance requires v3 retained memory for all 84 conditions")
 
 
 def main() -> int:
@@ -4189,6 +4305,7 @@ def main() -> int:
     parser.add_argument("--bundle-manifest-sha256")
     parser.add_argument("--reuse-request", type=Path)
     parser.add_argument("--require-memory-policy-v2", action="store_true")
+    parser.add_argument("--require-memory-policy-v3", action="store_true")
     parser.add_argument(
         "--diagnostic-only",
         action="store_true",
@@ -4197,7 +4314,9 @@ def main() -> int:
     args = parser.parse_args()
     try:
         require(not (args.acquire and args.acquire_current_producer), "ambiguous acquisition mode")
-        require(not (args.require_memory_policy_v2 and (
+        require(not (args.require_memory_policy_v2 and args.require_memory_policy_v3),
+                "memory policy versions cannot be combined")
+        require(not ((args.require_memory_policy_v2 or args.require_memory_policy_v3) and (
             args.acquire or args.acquire_current_producer or args.diagnostic_only
             or args.candidate_build_proof is not None or args.build_artifact_sha256 is not None
             or args.bundle_manifest_sha256 is not None)),
@@ -4216,9 +4335,12 @@ def main() -> int:
                 "candidate build proof path/SHA must be provided together")
         if args.reuse_request is not None:
             from html_performance_source_reuse_cli import verify_reuse_request
-            result = verify_reuse_request(args.reuse_request, args.repo.resolve())
+            result = verify_reuse_request(args.reuse_request, args.repo.resolve(),
+                **_memory_policy_kwargs("html-memory-v3" if args.require_memory_policy_v3 else None))
             if args.require_memory_policy_v2:
                 _require_cli_memory_v2(result, reused=True)
+            if args.require_memory_policy_v3:
+                _require_cli_memory_v3(result, reused=True)
             print(json.dumps(result, sort_keys=True))
             return 0
         if args.candidate_build_proof is not None:
@@ -4247,14 +4369,17 @@ def main() -> int:
                     use_reuse = _text(manifest.get("head"), "bundle HEAD") != head
                 if use_reuse:
                     from html_performance_source_reuse_cli import verify_reuse_request
-                    result = verify_reuse_request(request_path, args.repo.resolve())
+                    result = verify_reuse_request(request_path, args.repo.resolve(),
+                        **_memory_policy_kwargs("html-memory-v3" if args.require_memory_policy_v3 else None))
                     if args.require_memory_policy_v2:
                         _require_cli_memory_v2(result, reused=True)
+                    if args.require_memory_policy_v3:
+                        _require_cli_memory_v3(result, reused=True)
                     print(json.dumps(result, sort_keys=True))
                     return 0
             acquisition = args.evidence_dir / "acquisition.json"
             if acquisition.exists() or acquisition.is_symlink():
-                require(not args.require_memory_policy_v2,
+                require(not (args.require_memory_policy_v2 or args.require_memory_policy_v3),
                         "v2 memory policy cannot be checked by acquisition")
                 current_producer = (os.environ.get("GITHUB_JOB") == "preflight"
                                     and os.environ.get("GITHUB_EVENT_NAME") == "pull_request")
@@ -4264,9 +4389,12 @@ def main() -> int:
                 print(json.dumps(result, sort_keys=True))
                 return 0
         result = (_verify_catalog_diagnostic(args.evidence_dir, args.repo)
-                  if args.diagnostic_only else verify(args.evidence_dir, args.repo))
+                  if args.diagnostic_only else verify(args.evidence_dir, args.repo,
+                      **_memory_policy_kwargs("html-memory-v3" if args.require_memory_policy_v3 else None)))
         if args.require_memory_policy_v2:
             _require_cli_memory_v2(result, reused=False)
+        if args.require_memory_policy_v3:
+            _require_cli_memory_v3(result, reused=False)
         print(json.dumps(result, sort_keys=True))
         return 0
     except (ValueError, KeyError, TypeError, OSError, subprocess.CalledProcessError, zipfile.BadZipFile) as error:

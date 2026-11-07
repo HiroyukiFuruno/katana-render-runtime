@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -22,6 +23,55 @@ import html_performance_source_reuse_cli as reuse
 import run_html_performance as runner
 import verify_html_performance_evidence as gate
 import verify_html_performance_evidence_test as gate_fixture
+
+
+def _memory_v3_assessments(
+    original_versions: tuple[str, ...] = ("html-memory-v2",),
+) -> list[gate.JsonObject]:
+    return [
+        {"conditionId": f"condition-{index:02}", "version": "html-memory-v3",
+         "policySha256": hashlib.sha256(f"policy-{index}".encode()).hexdigest(),
+         "retentionSha256": hashlib.sha256(f"retention-{index}".encode()).hexdigest(),
+         "originalPolicyVersion": original_versions[index % len(original_versions)],
+         "originalPolicySha256": hashlib.sha256(f"legacy-{index}".encode()).hexdigest()}
+        for index in range(84)
+    ]
+
+
+def _measurement_fixture(memory_policy_version: str) -> tuple[Mock, gate.JsonObject]:
+    bundle = Mock(spec=gate.Bundle)
+    bundle.manifest = {"attempts": [{"expected": {}} for _ in range(84)]}
+    bundle.json.return_value = {"reportPins": []}
+    result: gate.JsonObject = {
+        "candidateConditions": 84,
+        "pairedConditions": 84,
+        "nonComparableConditions": 0,
+        "performanceNonregression": True,
+        "memoryPolicyVersion": memory_policy_version,
+    }
+    return bundle, result
+
+
+def _measurement_sample(time: float, rss: int) -> gate.JsonObject:
+    phase: gate.JsonObject = {"elapsed_ms": time, "peak_rss_bytes": rss}
+    return {"phases": {
+        name: ({"measurement": dict(phase)} if name in ("post_operation", "same_session_resize")
+               else dict(phase))
+        for name in gate.PHASES
+    }}
+
+
+def _grouped_samples(
+    baseline_time: float,
+    baseline_rss: int,
+    candidate_time: float,
+    candidate_rss: int,
+) -> gate.JsonObject:
+    return {
+        arm: {pair: {"samples": [_measurement_sample(time, rss)] * 5} for pair in range(5)}
+        for arm, time, rss in (("baseline", baseline_time, baseline_rss),
+                               ("candidate", candidate_time, candidate_rss))
+    }
 
 
 class PromotionComparisonTest(unittest.TestCase):
@@ -45,23 +95,10 @@ class PromotionComparisonTest(unittest.TestCase):
         def paired(baseline: tuple[float, ...], candidate: tuple[float, ...]) -> object:
             return original(baseline, candidate)
 
-        def sample(time: float, rss: float) -> gate.JsonObject:
-            phase: gate.JsonObject = {"elapsed_ms": time, "peak_rss_bytes": rss}
-            return {"phases": {name: ({"measurement": dict(phase)}
-                                      if name in ("post_operation", "same_session_resize")
-                                      else dict(phase)) for name in gate.PHASES}}
-
-        bundle = Mock(spec=gate.Bundle)
-        bundle.manifest = {"attempts": [{"expected": {}} for _ in range(84)]}
-        bundle.json.return_value = {"reportPins": []}
-        result: gate.JsonObject = {"candidateConditions": 84, "pairedConditions": 84,
-                                   "nonComparableConditions": 0, "performanceNonregression": True,
-                                   "memoryPolicyVersion": "html-memory-v2"}
+        bundle, result = _measurement_fixture("html-memory-v2")
         cases = [(18.0, 102.0, True), (20.0, 90.0, True), (20.0, 102.0, False)]
         for elapsed, rss, improved in cases:
-            grouped = {arm: {pair: {"samples": [sample(time, peak)] * 5} for pair in range(5)}
-                       for arm, time, peak in (("baseline", 20.0, 100.0),
-                                               ("candidate", elapsed, rss))}
+            grouped = _grouped_samples(20.0, 100, elapsed, int(rss))
             with self.subTest(elapsed=elapsed, rss=rss), \
                  patch.object(gate, "_group_reports", return_value=grouped), \
                  patch.object(paired_stats, "evaluate_paired_regression",
@@ -72,13 +109,21 @@ class PromotionComparisonTest(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "regression"):
                         promotion._measure(bundle, {key: value for key, value in result.items()
                                                     if key != "memoryPolicyVersion"})
-        grouped = {arm: {pair: {"samples": [sample(time, 100.0)] * 5} for pair in range(5)}
-                   for arm, time in (("baseline", 20.0), ("candidate", 21.0))}
+        grouped = _grouped_samples(20.0, 100, 21.0, 100)
         with patch.object(gate, "_group_reports", return_value=grouped), \
              patch.object(paired_stats, "evaluate_paired_regression",
                           side_effect=lambda base, cand: paired(tuple(base), tuple(cand))):
             with self.assertRaisesRegex(ValueError, "regression"):
                 promotion._measure(bundle, result)
+
+    def test_v3_peak_reduction_is_improvement_but_growth_is_not(self) -> None:
+        bundle, result = _measurement_fixture("html-memory-v3")
+        for candidate_rss, expected_improvement in ((110, False), (90, True)):
+            grouped = _grouped_samples(100.0, 100, 100.0, candidate_rss)
+            with self.subTest(candidate_rss=candidate_rss), \
+                 patch.object(gate, "_group_reports", return_value=grouped):
+                improved, _ = promotion._measure(bundle, result)
+            self.assertEqual(improved, expected_improvement)
 
 
 class PromotionMemoryPolicyTest(unittest.TestCase):
@@ -112,13 +157,65 @@ class PromotionMemoryPolicyTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "original pin mismatch"):
             promotion._memory_policy_record(self.bundle, self.summary)
 
+    def test_v3_binds_assessments_and_retention_digests(self) -> None:
+        for original_versions in (("html-memory-v3",),
+                                  ("html-memory-v2", "html-memory-v3")):
+            assessments = _memory_v3_assessments(original_versions)
+            result: gate.JsonObject = {"memoryPolicyVersion": "html-memory-v3",
+                                       "retainedMemoryConditions": 84,
+                                       "memoryPolicyAssessments": assessments}
+            retention = sorted(
+                ({"conditionId": gate._text(item["conditionId"], "condition id"),
+                  "sha256": gate._text(item["retentionSha256"], "retention SHA256")}
+                 for item in assessments),
+                key=lambda item: gate._text(item["conditionId"], "condition id"),
+            )
+            with self.subTest(original_versions=original_versions):
+                self.assertEqual(promotion._memory_policy_record(self.bundle, result), {
+                    "memoryPolicy": {
+                        "version": "html-memory-v3",
+                        "policySha256": gate._v3_json_digest(assessments),
+                        "retentionEvidenceSha256": gate._v3_json_digest(retention),
+                        "candidateConditions": 84, "acceptedConditions": 84,
+                        "warmupCycles": 5, "measuredCycles": 25,
+                    },
+                })
+
+    def test_v3_rejects_incomplete_or_duplicate_assessments(self) -> None:
+        assessments = _memory_v3_assessments()
+        for result in (
+            {"memoryPolicyVersion": "unknown", "retainedMemoryConditions": 84,
+             "memoryPolicyAssessments": assessments},
+            {"memoryPolicyVersion": "html-memory-v3", "retainedMemoryConditions": 83,
+             "memoryPolicyAssessments": assessments},
+            {"memoryPolicyVersion": "html-memory-v3", "retainedMemoryConditions": 84,
+             "memoryPolicyAssessments": assessments[:-1]},
+        ):
+            with self.subTest(result=result), self.assertRaisesRegex(ValueError, "promotion|memory policy"):
+                promotion._memory_policy_record(self.bundle, result)
+        duplicate = copy.deepcopy(assessments)
+        duplicate[1]["conditionId"] = duplicate[0]["conditionId"]
+        with self.assertRaisesRegex(ValueError, "duplicated"):
+            promotion._memory_policy_record(self.bundle, {
+                "memoryPolicyVersion": "html-memory-v3", "retainedMemoryConditions": 84,
+                "memoryPolicyAssessments": duplicate,
+            })
+        unknown_version = copy.deepcopy(assessments)
+        unknown_version[0]["originalPolicyVersion"] = "html-memory-v4"
+        with self.assertRaisesRegex(ValueError, "assessment fields"):
+            promotion._memory_policy_record(self.bundle, {
+                "memoryPolicyVersion": "html-memory-v3", "retainedMemoryConditions": 84,
+                "memoryPolicyAssessments": unknown_version,
+            })
+
     def test_v2_rejects_unknown_version_and_incomplete_conditions(self) -> None:
-        for value in ({**self.summary, "memoryPolicyVersion": "unknown"},
-                      {**self.summary, "retainedMemoryConditions": 83}):
-            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "all retained-memory"):
+        cases = (({**self.summary, "memoryPolicyVersion": "unknown"}, "version differs"),
+                 ({**self.summary, "retainedMemoryConditions": 83}, "all retained-memory"))
+        for value, expected_error in cases:
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, expected_error):
                 promotion._memory_policy_record(self.bundle, value)
         self.bundle.manifest["attempts"] = gate._array(self.bundle.manifest["attempts"], "attempts")[:-1]
-        with self.assertRaisesRegex(ValueError, "attempt count"):
+        with self.assertRaisesRegex(ValueError, "all retained-memory"):
             promotion._memory_policy_record(self.bundle, self.summary)
 
     def test_record_adds_only_v2_memory_metadata_to_existing_fields(self) -> None:
@@ -136,6 +233,24 @@ class PromotionMemoryPolicyTest(unittest.TestCase):
         self.assertEqual({key: value for key, value in v2.items() if key != "memoryPolicy"}, v1)
         self.assertEqual(v2["memoryPolicy"], promotion._memory_policy_record(self.bundle, self.summary)["memoryPolicy"])
 
+    def test_record_adds_v3_assessment_digest_without_rewriting_other_fields(self) -> None:
+        result: gate.JsonObject = {
+            "head": self.bundle.manifest["head"], "checks": 1680,
+            "htmlStage90": {"acceptance": True, "fontIdentityEquivalence": "established",
+                            "minimumScore": 95, "threshold": 90},
+            "memoryPolicyVersion": "html-memory-v3", "retainedMemoryConditions": 84,
+            "memoryPolicyAssessments": _memory_v3_assessments(),
+        }
+        v1_result = {key: value for key, value in result.items()
+                     if key not in {"memoryPolicyVersion", "retainedMemoryConditions", "memoryPolicyAssessments"}}
+        with patch.object(promotion, "_candidate_pins", return_value={"pin": "fixture"}):
+            v1 = promotion._record(self.bundle, v1_result, {}, "run", "a" * 64, "b" * 64,
+                                   "c" * 64, "2026-01-01T00:00:00Z")
+            v3 = promotion._record(self.bundle, result, {}, "run", "a" * 64, "b" * 64,
+                                   "c" * 64, "2026-01-01T00:00:00Z")
+        self.assertEqual({key: value for key, value in v3.items() if key != "memoryPolicy"}, v1)
+        self.assertEqual(v3["memoryPolicy"], promotion._memory_policy_record(self.bundle, result)["memoryPolicy"])
+
 
 class PromotionAtomicityTest(unittest.TestCase):
     def reuse_fixture(self) -> tuple[Path, Path, Path]:
@@ -151,7 +266,9 @@ class PromotionAtomicityTest(unittest.TestCase):
 
     def test_improvement_uses_separately_bound_reuse_request(self) -> None:
         root, bundle, request = self.reuse_fixture()
-        measured: gate.JsonObject = {"candidateConditions": 84}
+        measured: gate.JsonObject = {"memoryPolicyVersion": "html-memory-v3",
+                                    "retainedMemoryConditions": 84,
+                                    "memoryPolicyAssessments": _memory_v3_assessments()}
         result: gate.JsonObject = {"reuseEligibility": True, "measuredResult": measured}
         with (patch.object(promotion, "_runtime_identity", return_value="runtime"),
               patch.object(reuse, "verify_reuse_request", return_value=result) as verify,
@@ -163,7 +280,30 @@ class PromotionAtomicityTest(unittest.TestCase):
         self.assertEqual(verify.call_args.kwargs["expected_measured_dir"], bundle)
         self.assertEqual(verify.call_args.kwargs["expected_measured_manifest_sha256"], gate.sha256(bundle / "bundle.json"))
         self.assertEqual(verify.call_args.kwargs["expected_request_sha256"], gate.sha256(request))
+        self.assertEqual([call.args[0] for call in verify.call_args_list], [request, request])
+        self.assertEqual([call.kwargs["memory_policy_version"] for call in verify.call_args_list],
+                         ["html-memory-v3", "html-memory-v3"])
         measure.assert_called_once_with(unittest.mock.ANY, measured)
+
+    def test_improvement_requires_v3_for_fresh_and_reused_results(self) -> None:
+        root, bundle, _request = self.reuse_fixture()
+        result: gate.JsonObject = {"memoryPolicyVersion": "html-memory-v3",
+                                   "retainedMemoryConditions": 84,
+                                   "memoryPolicyAssessments": _memory_v3_assessments()}
+        with (patch.object(promotion, "_runtime_identity", return_value="runtime"),
+              patch.object(gate, "verify", return_value=result) as verify,
+              patch.object(gate, "Bundle", return_value=object()),
+              patch.object(promotion, "_measure", return_value=(True, {}))):
+            self.assertTrue(promotion.improvement_established(bundle, root))
+        self.assertEqual(verify.call_args.kwargs["memory_policy_version"], "html-memory-v3")
+
+        legacy: gate.JsonObject = {"candidateConditions": 84}
+        with (patch.object(promotion, "_runtime_identity", return_value="runtime"),
+              patch.object(gate, "verify", return_value=legacy),
+              patch.object(gate, "Bundle", return_value=object()),
+              patch.object(promotion, "_measure", return_value=(True, {}))):
+            with self.assertRaisesRegex(ValueError, "v3 retained memory"):
+                promotion.improvement_established(bundle, root)
 
     def test_improvement_rejects_mismatched_or_changed_request(self) -> None:
         root, bundle, request = self.reuse_fixture()
@@ -174,13 +314,16 @@ class PromotionAtomicityTest(unittest.TestCase):
                     promotion.improvement_established(bundle, root, reuse_request=request)
 
     def test_cli_forwards_separate_reuse_request(self) -> None:
+        output = io.StringIO()
         with (patch.object(sys, "argv", ["promotion", "--repo", "/repo", "--evidence-dir", "/bundle",
                                         "--promotion-evidence-dir", "/proof", "--run-id", "run",
                                         "--reuse-request", "/request"]),
-              patch.object(promotion, "promote", return_value="record") as promote,
-              contextlib.redirect_stdout(io.StringIO())):
+              patch.object(promotion, "promote",
+                           return_value=promotion.PromotionResult("record", "recorded")) as promote,
+              contextlib.redirect_stdout(output)):
             self.assertEqual(promotion.main(), 0)
         self.assertEqual(promote.call_args.kwargs["reuse_request"], Path("/request"))
+        self.assertEqual(json.loads(output.getvalue()), {"status": "recorded", "recordId": "record"})
 
     def test_changed_bundle_is_rejected_after_formal_verification(self) -> None:
         with TemporaryDirectory() as directory:
@@ -188,26 +331,37 @@ class PromotionAtomicityTest(unittest.TestCase):
             manifest = root / "bundle.json"
             manifest.write_bytes(b"original")
 
-            def altered(_directory: Path, _root: Path) -> gate.JsonObject:
+            def altered(_directory: Path, _root: Path, *,
+                        memory_policy_version: str | None = None) -> gate.JsonObject:
+                self.assertEqual(memory_policy_version, "html-memory-v3")
                 manifest.write_bytes(b"modified")
-                return {}
+                return {"memoryPolicyVersion": "html-memory-v3",
+                        "retainedMemoryConditions": 84,
+                        "memoryPolicyAssessments": _memory_v3_assessments()}
 
             with (patch.object(gate, "verify", side_effect=altered),
                   patch.object(promotion, "_runtime_identity", return_value="runtime")):
                 with self.assertRaisesRegex(ValueError, "bundle changed"):
                     promotion.improvement_established(root, root)
 
-    def test_promotion_appends_only_after_validation_and_keeps_old_record(self) -> None:
+    def test_promotion_records_every_accepted_candidate_and_updates_only_on_improvement(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         original = (repository / "docs/performance/html-performance-history.json").read_bytes()
         history = gate._object(json.loads(original), "test history")
         first = gate._objects(history["records"], "test records")[0]
+        original_active_id = history["activeReferenceRecordId"]
+        original_selection_note = history["activeReferenceSelectionNote"]
         candidate = copy.deepcopy(first)
         candidate["id"] = "new-record"
+        candidate["memoryPolicy"] = {
+            "version": "html-memory-v3", "policySha256": "a" * 64,
+            "retentionEvidenceSha256": "b" * 64, "candidateConditions": 84,
+            "acceptedConditions": 84, "warmupCycles": 5, "measuredCycles": 25,
+        }
         head = "a" * 40
         for mode in ("accepted", "unchanged", "runtime-changed", "environment-changed", "child-failed",
                      "environment-comparison", "environment-final-reuse", "accepted-reuse", "unchanged-reuse",
-                     "v1", "short", "unknown", "v1-reuse"):
+                     "v1", "v2", "short", "unknown", "v1-reuse"):
             with self.subTest(mode=mode), TemporaryDirectory() as directory:
                 root = Path(directory).resolve()
                 target = root / "docs/performance/html-performance-history.json"
@@ -219,10 +373,13 @@ class PromotionAtomicityTest(unittest.TestCase):
                 (root / "tmp").mkdir()
                 request = root / "tmp/request.json"
                 request.write_bytes(b"request")
-                measured: gate.JsonObject = {"memoryPolicyVersion": "html-memory-v2",
-                                             "retainedMemoryConditions": 84}
+                measured: gate.JsonObject = {"memoryPolicyVersion": "html-memory-v3",
+                                             "retainedMemoryConditions": 84,
+                                             "memoryPolicyAssessments": _memory_v3_assessments()}
                 if mode.startswith("v1"):
                     measured = {}
+                elif mode == "v2":
+                    measured["memoryPolicyVersion"] = "html-memory-v2"
                 elif mode == "short":
                     measured["retainedMemoryConditions"] = 83
                 elif mode == "unknown":
@@ -240,7 +397,7 @@ class PromotionAtomicityTest(unittest.TestCase):
                              selected_measured: gate.JsonObject = measured,
                              **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
                     self.assertTrue(_kwargs.get("env") == dict(os.environ))
-                    self.assertIn("--require-memory-policy-v2", argv)
+                    self.assertIn("--require-memory-policy-v3", argv)
                     if selected_mode.endswith("-reuse"):
                         self.assertEqual(argv[-2:], ["--reuse-request", str(selected_request)])
                     stdout.write(json.dumps(selected_result if selected_mode.endswith("-reuse") else selected_measured).encode() + b"\n")
@@ -276,24 +433,38 @@ class PromotionAtomicityTest(unittest.TestCase):
                       patch.object(promotion, "_measure", side_effect=fake_measure) as measure,
                       patch.object(promotion, "_record", return_value=candidate) as record):
                     request_arg = request if mode.endswith("-reuse") else None
-                    if mode.startswith("accepted"):
-                        self.assertEqual(promotion.promote(bundle_path, root, root / "tmp/proof", "run", reuse_request=request_arg), "new-record")
+                    if mode.startswith(("accepted", "unchanged")):
+                        outcome = promotion.promote(bundle_path, root, root / "tmp/proof", "run", reuse_request=request_arg)
+                        self.assertEqual(outcome.record_id, "new-record")
+                        expected_status = "recorded" if mode.startswith("unchanged") else "promoted"
+                        self.assertEqual(outcome.status, expected_status)
                         updated = gate.read_json(target)
-                        self.assertEqual(updated["activeReferenceRecordId"], "new-record")
+                        self.assertEqual(updated["activeReferenceRecordId"],
+                                         original_active_id if expected_status == "recorded" else "new-record")
+                        if expected_status == "recorded":
+                            self.assertEqual(updated["activeReferenceSelectionNote"], original_selection_note)
                         self.assertEqual(gate._objects(updated["records"], "updated")[0], first)
+                        self.assertEqual(gate._objects(updated["records"], "updated")[-1], candidate)
+                        self.assertEqual(updated["schema"], "krr-html-performance-history-v2")
                         self.assertEqual((root / "tmp/proof").stat().st_mode & 0o777, 0o700)
+                        summary = gate.read_json(root / "tmp/proof/summary.json")
+                        self.assertEqual(summary["significantImprovement"], expected_status == "promoted")
                         if request_arg is not None:
                             self.assertEqual(verify_reuse.call_count, 2)
+                            self.assertEqual([call.args[0] for call in verify_reuse.call_args_list],
+                                             [request, request])
                             self.assertEqual(verify_reuse.call_args.kwargs["expected_measured_dir"], bundle_path)
+                            self.assertEqual(verify_reuse.call_args.kwargs["memory_policy_version"],
+                                             "html-memory-v3")
                     else:
-                        reason = ("requires v2 retained memory" if mode in ("v1", "short", "unknown", "v1-reuse") else
+                        reason = ("requires v3 retained memory" if mode in ("v1", "v2", "short", "unknown", "v1-reuse") else
                                   "runtime identity changed" if mode == "runtime-changed" else
                                   "environment changed" if mode.startswith("environment-") else
                                   "formal performance verification failed" if mode == "child-failed" else "improvement")
                         with self.assertRaisesRegex(ValueError, reason) as caught:
                             promotion.promote(bundle_path, root, root / "tmp/proof", "run", reuse_request=request_arg)
                         self.assertEqual(target.read_bytes(), original)
-                        if mode in ("v1", "short", "unknown", "v1-reuse"):
+                        if mode in ("v1", "v2", "short", "unknown", "v1-reuse"):
                             measure.assert_not_called()
                             record.assert_not_called()
                         if mode == "child-failed":

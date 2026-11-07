@@ -16,7 +16,7 @@ const referenceBuild = z.strictObject({
 });
 const count = z.number().int().positive().safe();
 const nonnegativeCount = z.number().int().nonnegative().safe();
-const memoryPolicy = z.strictObject({
+const memoryPolicyV2 = z.strictObject({
   version: z.literal("html-memory-v2"),
   policySha256: sha256,
   retentionEvidenceSha256: sha256,
@@ -25,6 +25,16 @@ const memoryPolicy = z.strictObject({
   warmupCycles: z.literal(5),
   measuredCycles: z.literal(25),
 });
+const memoryPolicyV3 = z.strictObject({
+  version: z.literal("html-memory-v3"),
+  policySha256: sha256,
+  retentionEvidenceSha256: sha256,
+  candidateConditions: count,
+  acceptedConditions: count,
+  warmupCycles: z.literal(5),
+  measuredCycles: z.literal(25),
+});
+const memoryPolicy = z.discriminatedUnion("version", [memoryPolicyV2, memoryPolicyV3]);
 const seconds = z.number().finite().nonnegative();
 const phase = z
   .strictObject({
@@ -107,6 +117,14 @@ const record = z
           code: "custom",
           path: ["memoryPolicy", "acceptedConditions"],
           message: "memory policy must accept every recorded candidate condition",
+        });
+      }
+      if (entry.memoryPolicy.version === "html-memory-v3" &&
+          (entry.memoryPolicy.candidateConditions !== 84 || entry.memoryPolicy.acceptedConditions !== 84)) {
+        context.addIssue({
+          code: "custom",
+          path: ["memoryPolicy", "candidateConditions"],
+          message: "v3 memory policy must cover all 84 conditions",
         });
       }
       if (!entry.measuredAcceptance.performanceNonregression) {

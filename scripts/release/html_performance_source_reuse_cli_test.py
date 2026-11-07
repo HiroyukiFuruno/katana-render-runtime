@@ -156,6 +156,30 @@ class ReuseRequestTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "stored eligibility differs"):
                 cli.verify_reuse_request(output, self.root)
 
+    def test_v3_reassessment_keeps_original_eligibility_unchanged(self) -> None:
+        original = {"measuredHead": "old", "eligibleHead": "new",
+                    "reuseKind": "test-source-artifact-equivalence-v1"}
+        reassessed = {**original, "measuredResult": {"memoryPolicyVersion": "html-memory-v3"}}
+        with patch.object(gate, "verify_source_reuse", return_value=original):
+            cli.create_request(self.request, self.output, self.root)
+        before = self.output.read_bytes()
+        with patch.object(gate, "verify_source_reuse", side_effect=[original, reassessed]) as verify:
+            self.assertEqual(cli.verify_reuse_request(
+                self.output, self.root, memory_policy_version="html-memory-v3"), reassessed)
+        self.assertEqual(self.output.read_bytes(), before)
+        self.assertNotIn("memory_policy_version", verify.call_args_list[0].kwargs)
+        self.assertEqual(verify.call_args_list[1].kwargs["memory_policy_version"], "html-memory-v3")
+
+    def test_v3_eligibility_is_reauthenticated_using_its_own_version(self) -> None:
+        result = {"measuredHead": "old", "eligibleHead": "new",
+                  "reuseKind": "test-source-artifact-equivalence-v1",
+                  "measuredResult": {"memoryPolicyVersion": "html-memory-v3"}}
+        with patch.object(gate, "verify_source_reuse", return_value=result):
+            cli.create_request(self.request, self.output, self.root, memory_policy_version="html-memory-v3")
+        with patch.object(gate, "verify_source_reuse", return_value=result) as verify:
+            self.assertEqual(cli.verify_reuse_request(self.output, self.root), result)
+        self.assertEqual(verify.call_args.kwargs["memory_policy_version"], "html-memory-v3")
+
 
 if __name__ == "__main__":
     unittest.main()

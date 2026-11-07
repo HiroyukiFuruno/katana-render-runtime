@@ -34,7 +34,8 @@ def _samples(reports: Mapping[int, gate.JsonObject], phase: str) -> tuple[list[f
 
 
 def evaluate_paired(
-    report_paths: list[Path], expected: Mapping[str, object], retained_rss: Sequence[float]
+    report_paths: list[Path], expected: Mapping[str, object], retained_rss: Sequence[float], *,
+    policy_version: str = memory.POLICY_VERSION,
 ) -> gate.JsonObject:
     """Compute a paired policy; the caller authenticates reports and retention evidence."""
     expected_object = cast(gate.JsonObject, expected)
@@ -46,12 +47,13 @@ def evaluate_paired(
     for phase in gate.PHASES:
         base_time, base_rss = _samples(grouped["baseline"], phase)
         candidate_time, candidate_rss = _samples(grouped["candidate"], phase)
-        result = memory.evaluate_peak_phase(base_rss, candidate_rss, base_time, candidate_time)
+        result = memory.evaluate_peak_phase(base_rss, candidate_rss, base_time, candidate_time,
+                                            policy_version=policy_version)
         phases[phase] = asdict(result)
         accepted = accepted and result.peak_allowed
-    retention = memory.evaluate_retention(retained_rss)
+    retention = memory.evaluate_retention(retained_rss, policy_version=policy_version)
     return {
-        "version": memory.POLICY_VERSION,
+        "version": policy_version,
         "comparisonStatus": "paired",
         "v1Policy": gate.evaluate_measurement_policy(report_paths, expected_object),
         "aggregate": aggregate,
@@ -88,7 +90,8 @@ def _candidate_reports(
 
 
 def evaluate_candidate_only(
-    report_paths: list[Path], expected: Mapping[str, object], retained_rss: Sequence[float]
+    report_paths: list[Path], expected: Mapping[str, object], retained_rss: Sequence[float], *,
+    policy_version: str = memory.POLICY_VERSION,
 ) -> gate.JsonObject:
     """Evaluate only known non-comparable candidates, without passing comparison policy."""
     expected_object = cast(gate.JsonObject, expected)
@@ -98,9 +101,9 @@ def evaluate_candidate_only(
                  "candidate-only condition is not an authorized baseline refusal")
     reports = _candidate_reports(report_paths, expected_object)
     aggregate = gate.aggregate_reports(reports, expected_object)
-    retention = memory.evaluate_retention(retained_rss)
+    retention = memory.evaluate_retention(retained_rss, policy_version=policy_version)
     return {
-        "version": memory.POLICY_VERSION,
+        "version": policy_version,
         "comparisonStatus": "nonComparable",
         "conditionId": condition_id,
         "candidateSamples": 25,

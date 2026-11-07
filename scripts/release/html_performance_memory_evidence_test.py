@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 import html_performance_memory_evidence as evidence
+import html_performance_memory_policy as policy
 import verify_html_performance_evidence as gate
 import verify_html_performance_evidence_test as fixture_module
 
@@ -24,6 +25,19 @@ class MemoryEvidenceTest(unittest.TestCase):
         self.assertEqual(result["formalAccepted"], False)
         self.assertEqual(set(gate._object(result["phases"], "phases")), set(gate.PHASES))
         self.assertEqual(before, {path: path.read_bytes() for path in self.paths})
+
+    def test_explicit_v2_and_v3_keep_v1_and_apply_own_retention_budget(self) -> None:
+        retained = [40 * policy.MIB] * 15 + [44 * policy.MIB] * 10
+        legacy = evidence.evaluate_paired(self.paths, self.expected, retained,
+                                          policy_version=policy.LEGACY_POLICY_VERSION)
+        current = evidence.evaluate_paired(self.paths, self.expected, retained)
+        self.assertEqual(legacy["version"], policy.LEGACY_POLICY_VERSION)
+        self.assertEqual(current["version"], policy.POLICY_VERSION)
+        self.assertEqual(legacy["v1Policy"], current["v1Policy"])
+        self.assertFalse(legacy["policyPass"])
+        self.assertTrue(current["policyPass"])
+        with self.assertRaisesRegex(ValueError, "unsupported memory policy version"):
+            evidence.evaluate_paired(self.paths, self.expected, retained, policy_version="unknown")
 
     def test_paired_rejects_missing_or_unexecuted_reports(self) -> None:
         with self.assertRaises(ValueError):
@@ -77,6 +91,13 @@ class MemoryEvidenceTest(unittest.TestCase):
         self.assertFalse(result["policyPass"])
         self.assertFalse(result["formalAccepted"])
         self.assertEqual(result["candidateSamples"], 25)
+        legacy = evidence.evaluate_candidate_only(candidates, self.expected, self.retained,
+                                                   policy_version=policy.LEGACY_POLICY_VERSION)
+        self.assertEqual(legacy["version"], policy.LEGACY_POLICY_VERSION)
+        self.assertFalse(legacy["formalAccepted"])
+        with self.assertRaisesRegex(ValueError, "unsupported memory policy version"):
+            evidence.evaluate_candidate_only(candidates, self.expected, self.retained,
+                                             policy_version="unknown")
         with self.assertRaises(ValueError):
             evidence.evaluate_candidate_only(candidates[:-1], self.expected, self.retained)
         with self.assertRaises(ValueError):

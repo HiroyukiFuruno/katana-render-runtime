@@ -10,7 +10,7 @@ import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Never
+from typing import Never, NamedTuple
 
 import html_performance_paired_stats as statistics
 import html_performance_python_identity as python_identity
@@ -19,8 +19,9 @@ import run_html_performance as runner
 import verify_html_performance_evidence as gate
 
 
-class NoImprovement(ValueError):
-    """正式な比較で昇格すべき改善が確認されなかった。"""
+class PromotionResult(NamedTuple):
+    record_id: str
+    status: str
 
 
 def _runtime_identity(root: Path) -> str:
@@ -70,10 +71,13 @@ def _measure(bundle: gate.Bundle, result: gate.JsonObject) -> tuple[bool, gate.J
                     for arm in ("baseline", "candidate")
                 }
                 baseline, candidate = samples["baseline"], samples["candidate"]
-                if index == 0 or result.get("memoryPolicyVersion") != "html-memory-v2":
+                memory_policy_version = result.get("memoryPolicyVersion")
+                if index == 0 or memory_policy_version not in (
+                    "html-memory-v2", "html-memory-v3",
+                ):
                     improvement |= _compare(baseline, candidate)
                 else:
-                    # WHY: v2で許容した一時peak増加を旧判定で再度拒否しない。
+                    # WHY: v2/v3は正式gateで許容したpeak増加を履歴判定で再度拒否しない。
                     improvement |= statistics.evaluate_paired_regression(
                         candidate, baseline,
                     ).detected_bad
@@ -97,6 +101,7 @@ def _verified_reuse(request: Path, root: Path, directory: Path, manifest_sha: st
     result = reuse.verify_reuse_request(
         request, root, expected_measured_dir=directory,
         expected_measured_manifest_sha256=manifest_sha, expected_request_sha256=request_sha,
+        memory_policy_version="html-memory-v3",
     )
     gate.require(result.get("reuseEligibility") is True, "performance reuse is not eligible")
     return result
@@ -112,7 +117,9 @@ def improvement_established(directory: Path, root: Path, *, reuse_request: Path 
     eligibility = (_verified_reuse(reuse_request, root, directory, manifest_sha, request_sha)
                    if reuse_request is not None and request_sha is not None else None)
     result = (gate._object(eligibility.get("measuredResult"), "reused measured result")
-              if eligibility is not None else gate.verify(directory, root))
+              if eligibility is not None else
+              gate.verify(directory, root, memory_policy_version="html-memory-v3"))
+    gate._require_cli_memory_v3(result, reused=False)
     gate.require(gate.sha256(directory / "bundle.json") == manifest_sha,
                  "promotion bundle changed during verification")
     improvement, _ = _measure(gate.Bundle(directory), result)
@@ -155,20 +162,50 @@ def _candidate_pins(bundle: gate.Bundle) -> gate.JsonObject:
 
 
 def _memory_policy_record(bundle: gate.Bundle, result: gate.JsonObject) -> gate.JsonObject:
-    if "memoryPolicyVersion" not in result:
+    version = result.get("memoryPolicyVersion")
+    if version is None:
         return {}
-    gate.require(result.get("memoryPolicyVersion") == "html-memory-v2"
-                 and result.get("retainedMemoryConditions") == 84,
-                 "promotion requires all retained-memory conditions")
     attempts = gate._objects(bundle.manifest["attempts"], "memory policy attempts")
-    gate.require(len(attempts) == 84, "memory policy attempt count differs")
-    policies = [bundle.json(attempt["result"])["memoryPolicy"] for attempt in attempts]
-    references = [bundle.json(attempt["expected"])["memoryRetentionRef"] for attempt in attempts]
-    for reference in references:
-        bundle.file(reference)
+    gate.require(len(attempts) == 84 and result.get("retainedMemoryConditions") == 84,
+                 "promotion requires all retained-memory conditions")
+    if version == "html-memory-v2":
+        policies = [bundle.json(attempt["result"])["memoryPolicy"] for attempt in attempts]
+        references = [bundle.json(attempt["expected"])["memoryRetentionRef"] for attempt in attempts]
+        for reference in references:
+            bundle.file(reference)
+        return {"memoryPolicy": {
+            "version": "html-memory-v2", "policySha256": gate._v3_json_digest(policies),
+            "retentionEvidenceSha256": gate._v3_json_digest(references),
+            "candidateConditions": 84, "acceptedConditions": 84,
+            "warmupCycles": 5, "measuredCycles": 25,
+        }}
+    gate.require(version == "html-memory-v3", "promotion memory policy version differs")
+    assessments = gate._objects(result["memoryPolicyAssessments"], "memory policy assessments")
+    gate.require(len(assessments) == 84, "memory policy assessment count differs")
+    fields = {"conditionId", "version", "policySha256", "retentionSha256",
+              "originalPolicyVersion", "originalPolicySha256"}
+    condition_ids: list[str] = []
+    for assessment in assessments:
+        gate.require(set(assessment) == fields
+                     and assessment.get("version") == "html-memory-v3"
+                     and assessment.get("originalPolicyVersion") in (
+                         "html-memory-v2", "html-memory-v3",
+                     ),
+                     "memory policy assessment fields differ")
+        condition_ids.append(gate._text(assessment.get("conditionId"), "condition id"))
+        for key in ("policySha256", "retentionSha256", "originalPolicySha256"):
+            gate.digest(assessment.get(key))
+    gate.require(len(condition_ids) == len(set(condition_ids)),
+                 "memory policy assessment conditions are duplicated")
+    retention = sorted(
+        ({"conditionId": gate._text(item["conditionId"], "condition id"),
+          "sha256": gate._text(item["retentionSha256"], "retention SHA256")}
+         for item in assessments),
+        key=lambda item: gate._text(item["conditionId"], "condition id"),
+    )
     return {"memoryPolicy": {
-        "version": "html-memory-v2", "policySha256": gate._v3_json_digest(policies),
-        "retentionEvidenceSha256": gate._v3_json_digest(references),
+        "version": "html-memory-v3", "policySha256": gate._v3_json_digest(assessments),
+        "retentionEvidenceSha256": gate._v3_json_digest(retention),
         "candidateConditions": 84, "acceptedConditions": 84,
         "warmupCycles": 5, "measuredCycles": 25,
     }}
@@ -207,8 +244,8 @@ def _record(bundle: gate.Bundle, result: gate.JsonObject, phases: gate.JsonObjec
 
 
 def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, *,
-            reuse_request: Path | None = None) -> str:
-    """固定済み候補を再検証し、改善時だけ履歴へ新しい基準を追加する。"""
+            reuse_request: Path | None = None) -> PromotionResult:
+    """正式な84条件の結果を履歴へ追加し、有意改善時だけ現行基準を更新する。"""
     root = root.resolve(strict=True)
     execution_environment = dict(os.environ)
     runtime_identity = _runtime_identity(root)
@@ -247,7 +284,7 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, 
     stderr_path = evidence_directory / "verifier.stderr"
     argv = [sys.executable, str(root / "scripts/release/verify_html_performance_evidence.py"),
             "--repo", str(root), "--evidence-dir", str(directory),
-            "--require-memory-policy-v2"]
+            "--require-memory-policy-v3"]
     if reuse_request is not None:
         argv.extend(["--reuse-request", str(reuse_request)])
     with (evidence_directory / "command.json").open("x", encoding="utf8") as command:
@@ -266,21 +303,20 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, 
     if eligibility is not None:
         gate.require(verified == eligibility, "performance reuse verification differs")
         verified = gate._object(verified.get("measuredResult"), "reused measured result")
-    gate._require_cli_memory_v2(verified, reused=False)
+    gate._require_cli_memory_v3(verified, reused=False)
     bundle = gate.Bundle(directory)
     improvement, phases = _measure(bundle, verified)
     gate.require(dict(os.environ) == execution_environment, "promotion environment changed during comparison")
     gate.require(_runtime_identity(root) == runtime_identity,
                  "promotion runtime identity changed during comparison")
-    if not improvement:
-        raise NoImprovement("significant performance improvement is not established")
     gate.require(gate.sha256(directory / "bundle.json") == manifest_sha,
                  "promotion bundle changed during comparison")
     summary_path = evidence_directory / "summary.json"
     with summary_path.open("xb") as summary:
         summary.write((json.dumps({"schema": "krr-html-performance-promotion-summary-v1",
                                    "bundleManifestSha256": manifest_sha,
-                                   "candidatePhaseStatistics": phases},
+                                   "candidatePhaseStatistics": phases,
+                                   "significantImprovement": improvement},
                                   sort_keys=True, separators=(",", ":")) + "\n").encode())
     stdout_sha, summary_sha = gate.sha256(stdout_path), gate.sha256(summary_path)
     record = _record(bundle, verified, phases, run_id, manifest_sha,
@@ -290,8 +326,9 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, 
     history["records"] = [*records, record]
     if "memoryPolicy" in record:
         history["schema"] = "krr-html-performance-history-v2"
-    history["activeReferenceRecordId"] = record["id"]
-    history["activeReferenceSelectionNote"] = "正式な同一条件の比較で有意な改善と非劣化を確認。"
+    if improvement:
+        history["activeReferenceRecordId"] = record["id"]
+        history["activeReferenceSelectionNote"] = "正式な同一条件の比較で有意な改善と非劣化を確認。"
     after = (json.dumps(history, ensure_ascii=False, indent=2) + "\n").encode()
     _schema_validate(root, after)
     gate.require(gate.sha256(directory / "bundle.json") == manifest_sha
@@ -305,7 +342,8 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, 
                      "performance reuse changed before update")
     gate.require(dict(os.environ) == execution_environment, "promotion environment changed before update")
     _atomic_history_update(root, history_path, before, after, head)
-    return gate._text(record["id"], "new reference id")
+    return PromotionResult(gate._text(record["id"], "new reference id"),
+                           "promoted" if improvement else "recorded")
 
 
 def _atomic_history_update(root: Path, history_path: Path, before: bytes, after: bytes, head: str) -> None:
@@ -350,15 +388,12 @@ def main() -> int:
     parser.add_argument("--reuse-request", type=Path)
     try:
         args = parser.parse_args()
-        selected = promote(args.evidence_dir, args.repo, args.promotion_evidence_dir, args.run_id,
-                           reuse_request=args.reuse_request)
-    except NoImprovement:
-        print(json.dumps({"status": "unchanged", "reason": "no-significant-improvement"}))
-        return 0
+        result = promote(args.evidence_dir, args.repo, args.promotion_evidence_dir, args.run_id,
+                         reuse_request=args.reuse_request)
     except (ValueError, KeyError, TypeError, OSError, RuntimeError, subprocess.SubprocessError):
         print("HTML performance promotion failed; inspect history and saved evidence", file=sys.stderr)
         return 1
-    print(json.dumps({"status": "promoted", "recordId": selected}))
+    print(json.dumps({"status": result.status, "recordId": result.record_id}))
     return 0
 
 

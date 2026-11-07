@@ -42,6 +42,20 @@ function validMemoryPolicy(
   };
 }
 
+function validMemoryPolicyV3(
+  record: PerformanceHistoryRecord,
+): NonNullable<PerformanceHistoryRecord["memoryPolicy"]> {
+  return {
+    version: "html-memory-v3",
+    policySha256: "c".repeat(64),
+    retentionEvidenceSha256: "d".repeat(64),
+    candidateConditions: record.scope.candidateConditions,
+    acceptedConditions: record.scope.candidateConditions,
+    warmupCycles: 5,
+    measuredCycles: 25,
+  };
+}
+
 function addV2Record(history: PerformanceHistory): PerformanceHistoryRecord {
   history.schema = "krr-html-performance-history-v2";
   const record = structuredClone(firstRecord(history));
@@ -49,6 +63,53 @@ function addV2Record(history: PerformanceHistory): PerformanceHistoryRecord {
   record.memoryPolicy = validMemoryPolicy(record);
   history.records.push(record);
   return record;
+}
+
+function addV3Record(history: PerformanceHistory): PerformanceHistoryRecord {
+  history.schema = "krr-html-performance-history-v2";
+  const record = structuredClone(firstRecord(history));
+  record.id = "html-memory-v3-record";
+  record.memoryPolicy = validMemoryPolicyV3(record);
+  history.records.push(record);
+  return record;
+}
+
+function invalidMemoryPolicyChanges(): Array<(record: PerformanceHistoryRecord) => void> {
+  return [
+    (record) => {
+      if (!record.memoryPolicy) throw new Error("fixture has no memory policy");
+      record.memoryPolicy.policySha256 = "invalid";
+    },
+    (record) => {
+      if (!record.memoryPolicy) throw new Error("fixture has no memory policy");
+      record.memoryPolicy.candidateConditions += 1;
+    },
+    (record) => {
+      if (!record.memoryPolicy) throw new Error("fixture has no memory policy");
+      record.memoryPolicy.acceptedConditions -= 1;
+    },
+    (record) => {
+      if (!record.memoryPolicy) throw new Error("fixture has no memory policy");
+      Object.assign(record.memoryPolicy, { warmupCycles: 4 });
+    },
+    (record) => {
+      if (!record.memoryPolicy) throw new Error("fixture has no memory policy");
+      Object.assign(record.memoryPolicy, { measuredCycles: 24 });
+    },
+    (record) => {
+      record.measuredAcceptance.performanceNonregression = false;
+    },
+  ];
+}
+
+function expectInvalidMemoryPolicyChanges(
+  addRecord: (history: PerformanceHistory) => PerformanceHistoryRecord,
+): void {
+  for (const change of invalidMemoryPolicyChanges()) {
+    const history = fixture();
+    change(addRecord(history));
+    expect(() => parsePerformanceHistory(history)).toThrow();
+  }
 }
 
 function runHistoryCli(args: string[]): ReturnType<typeof Bun.spawnSync> {
@@ -160,37 +221,25 @@ test("accepts v2 policy evidence alongside unchanged v1 records", () => {
   expect(activeReference(parsed).id).toBe(history.activeReferenceRecordId);
 });
 
+test("accepts v3 policy evidence alongside unchanged v1 and v2 records", () => {
+  const history = fixture();
+  const legacy = structuredClone(firstRecord(history));
+  const v2Record = addV2Record(history);
+  const v3Record = addV3Record(history);
+
+  const parsed = parsePerformanceHistory(history);
+  expect(parsed.records[0]).toEqual(legacy);
+  expect(v2Record.memoryPolicy?.version).toBe("html-memory-v2");
+  expect(v3Record.memoryPolicy).toEqual(validMemoryPolicyV3(v3Record));
+  expect(activeReference(parsed).id).toBe(history.activeReferenceRecordId);
+});
+
 test("rejects malformed or incomplete v2 memory policy evidence", () => {
-  const changes: Array<(record: PerformanceHistoryRecord) => void> = [
-    (record) => {
-      if (!record.memoryPolicy) throw new Error("fixture has no memory policy");
-      record.memoryPolicy.policySha256 = "invalid";
-    },
-    (record) => {
-      if (!record.memoryPolicy) throw new Error("fixture has no memory policy");
-      record.memoryPolicy.candidateConditions += 1;
-    },
-    (record) => {
-      if (!record.memoryPolicy) throw new Error("fixture has no memory policy");
-      record.memoryPolicy.acceptedConditions -= 1;
-    },
-    (record) => {
-      if (!record.memoryPolicy) throw new Error("fixture has no memory policy");
-      Object.assign(record.memoryPolicy, { warmupCycles: 4 });
-    },
-    (record) => {
-      if (!record.memoryPolicy) throw new Error("fixture has no memory policy");
-      Object.assign(record.memoryPolicy, { measuredCycles: 24 });
-    },
-    (record) => {
-      record.measuredAcceptance.performanceNonregression = false;
-    },
-  ];
-  for (const change of changes) {
-    const history = fixture();
-    change(addV2Record(history));
-    expect(() => parsePerformanceHistory(history)).toThrow();
-  }
+  expectInvalidMemoryPolicyChanges(addV2Record);
+});
+
+test("rejects malformed or incomplete v3 memory policy evidence", () => {
+  expectInvalidMemoryPolicyChanges(addV3Record);
 });
 
 test("rejects a reference that does not meet its recorded acceptance", () => {

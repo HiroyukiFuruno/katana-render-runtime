@@ -681,7 +681,7 @@ release-openspec-archive:
 
 # 同一sourceの時間と保持メモリを再検証し、v2の全84条件を要求する。
 html-performance-nonregression-check:
-    {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap verify --require-memory-policy-v2
+    {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap verify --require-memory-policy-v3
 
 # Git管理されたHTML性能履歴から現行基準または指定recordを表示する。
 html-performance-history record_id='':

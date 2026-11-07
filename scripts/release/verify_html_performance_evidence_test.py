@@ -1349,6 +1349,17 @@ class PerformanceEvidenceTest(unittest.TestCase):
         self.assertEqual(gate._catalog_memory_summary(bundle, attempts), {
             "memoryPolicyVersion": "html-memory-v2", "retainedMemoryConditions": 84,
         })
+        assessments = [{"version": "html-memory-v3", "conditionId": str(index)}
+                       for index in range(84)]
+        rows["0"] = {"memoryPolicy": {"version": "html-memory-v3"}}
+        self.assertEqual(gate._catalog_memory_summary(bundle, attempts, assessments=assessments), {
+            "memoryPolicyVersion": "html-memory-v3", "retainedMemoryConditions": 84,
+            "memoryPolicyAssessments": assessments,
+        })
+        with self.assertRaisesRegex(ValueError, "version differs"):
+            gate._catalog_memory_summary(bundle, attempts)
+        with self.assertRaisesRegex(ValueError, "assessment differs"):
+            gate._catalog_memory_summary(bundle, attempts, assessments=assessments[:-1])
         rows["0"] = {}
         with self.assertRaisesRegex(ValueError, "all 84 conditions"):
             gate._catalog_memory_summary(bundle, attempts)
@@ -1633,6 +1644,33 @@ class PerformanceEvidenceTest(unittest.TestCase):
             check=True, capture_output=True,
         ).stdout
 
+    def test_program_authentication_cache_does_not_cross_policy_modes(self) -> None:
+        fixed: JsonObject = {"programSource": {"head": "a" * 40}}
+        endpoint: JsonObject = {"liveCheckout": {"head": "b" * 40}}
+        records = {"scripts/fixture.py": ("c" * 64, 1)}
+        def authenticate(*_args: object, **kwargs: object) -> tuple[tuple[str, str, int], ...]:
+            if kwargs.get("memory_policy_version") != "html-memory-v3":
+                raise ValueError("legacy program differs")
+            return (("scripts/fixture.py", "c" * 64, 1),)
+        for modes in (("html-memory-v3", None), (None, "html-memory-v3")):
+            def query(_root: Path, _args: Sequence[str], _input: bytes | None, _text: bool) -> str | bytes:
+                raise AssertionError("mock authentication must own Git reads")
+            with self.subTest(modes=modes), \
+                 patch.object(gate, "_v3_live_programs", return_value=records), \
+                 patch.object(gate, "_v3_authenticate_programs", side_effect=authenticate) as validator:
+                for mode in modes:
+                    if mode is None:
+                        with self.assertRaisesRegex(ValueError, "legacy program differs"):
+                            gate._v3_program_source(self.root, fixed, [endpoint], git_query=query)
+                    else:
+                        self.assertEqual(gate._v3_program_source(
+                            self.root, fixed, [endpoint], git_query=query,
+                            memory_policy_version=mode), records)
+                self.assertEqual(gate._v3_program_source(
+                    self.root, fixed, [endpoint], git_query=query,
+                    memory_policy_version="html-memory-v3"), records)
+                self.assertEqual(validator.call_count, 2)
+
     def test_v3_program_history_accepts_reviewed_old_and_current_endpoints(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         old_head = "b9cf37535ba374b62fee4e889f9c58f58f1ab8dc"
@@ -1822,6 +1860,8 @@ class PerformanceEvidenceTest(unittest.TestCase):
                  "scripts/release/verify_html_performance_evidence.py",
                  "scripts/release/verify_html_performance_evidence_test.py")
         historical_targets = {
+            "scripts/release/html_performance_source_reuse.py": "7d8c4c0ed9bb6ea4fb0efe3f0ab232db40a9976c",
+            "scripts/release/html_performance_host_load_validation.py": "ea4f8e2a21432be76e0e8821756a7bfd3a6226e3",
             "scripts/release/html_performance_host_load_validation_test.py": "189281be",
             "scripts/release/produce_html_performance_evidence.py": "189281be",
             "scripts/release/produce_html_performance_evidence_test.py": "189281be",
@@ -1867,6 +1907,26 @@ class PerformanceEvidenceTest(unittest.TestCase):
                     self.assertFalse(known_auth_program_change(
                         path, old, current.replace(b"batch_deadline = _batch_deadline(",
                                                    b"batch_deadline = changed_deadline(", 1)))
+
+    def test_v3_reassessment_program_binding_rejects_unknown_bytes_and_modes(self) -> None:
+        import html_performance_source_reuse as reuse
+
+        path = "scripts/release/produce_html_performance_evidence.py"
+        old = b"def measure():\n    return 1\ndef produce():\n    return 1\n"
+        new = b"def measure():\n    return 1\ndef produce():\n    return 2\n"
+        def record(value: bytes) -> tuple[str, int]:
+            return hashlib.sha256(value).hexdigest(), len(value)
+        with patch.object(reuse, "V3_REASSESSMENT_PROGRAM_PAIRS", {path: (record(old), record(new))}):
+            self.assertTrue(reuse.v3_reassessment_program_change(
+                path, old, new, old_mode="100644", new_mode="100644"))
+            self.assertFalse(reuse.v3_reassessment_program_change(
+                path, old, new + b" ", old_mode="100644", new_mode="100644"))
+            self.assertFalse(reuse.v3_reassessment_program_change(
+                path, old, new, old_mode="100644", new_mode="100755"))
+        changed_measurement = new.replace(b"return 1", b"return 3")
+        with patch.object(reuse, "V3_REASSESSMENT_PROGRAM_PAIRS", {path: (record(old), record(changed_measurement))}):
+            self.assertFalse(reuse.v3_reassessment_program_change(
+                path, old, changed_measurement, old_mode="100644", new_mode="100644"))
 
     def test_program_transport_binds_two_versions_to_one_source_path(self) -> None:
         import html_performance_epoch_reuse as epoch
@@ -2008,7 +2068,8 @@ class PerformanceEvidenceTest(unittest.TestCase):
             with patch.object(host_load_validation, "_cpu_attempt",
                               side_effect=lambda _bundle, worker, *_: (worker["sample"], True, 0.1, 0.1)):
                 host_load_validation.verify_catalog_host_load(bundle, [attempt], selected)
-            authenticate.assert_called_once_with(self.root, fixed, [before, end], git_query=None)
+            authenticate.assert_called_once_with(self.root, fixed, [before, end], git_query=None,
+                                                 memory_policy_version=None)
             authenticate.side_effect = ValueError("program differs")
             with self.assertRaisesRegex(ValueError, "program differs"):
                 gate._host_load_source_records(bundle, self.root, expected, self.head, git_query=None)
@@ -3663,11 +3724,12 @@ class PerformanceEvidenceTest(unittest.TestCase):
                              if key != "memoryRetentionRef"}
         with self.assertRaises(ValueError):
             self.assert_memory_policy(without_reference, result, [100.0] * 25)
-        for field, value in (("version", "unknown"), ("policyPass", False)):
+        for field, value, message in (("version", "unknown", "unsupported saved memory policy version"),
+                                      ("policyPass", False, "saved memory policy differs")):
             changed = copy.deepcopy(result)
             gate._object(changed["memoryPolicy"], "memory")[field] = value
             with self.subTest(field=field), self.assertRaisesRegex(
-                ValueError, "saved memory policy differs"
+                ValueError, message
             ):
                 self.assert_memory_policy(expected, changed, [100.0] * 25)
         reader = RetentionReaderModule("html_performance_retention_evidence")
@@ -3678,6 +3740,40 @@ class PerformanceEvidenceTest(unittest.TestCase):
                     gate.Bundle(self.bundle), expected, result, self.report_paths[0],
                     non_comparable=False,
                 )
+
+    def test_v3_reassesses_authenticated_v2_without_changing_original(self) -> None:
+        from html_performance_memory_policy import LEGACY_POLICY_VERSION, POLICY_VERSION
+
+        retained = [100.0] * 5 + [110.0] * 20
+        expected, _ = self.memory_policy_fixture(retained)
+        saved = memory_evidence.evaluate_paired(
+            self.report_paths[0], expected, retained, policy_version=LEGACY_POLICY_VERSION,
+        )
+        self.assertFalse(saved["policyPass"])
+        original = copy.deepcopy(saved)
+        reader = RetentionReaderModule("html_performance_retention_evidence")
+        reader.read_retained_rss = Mock(return_value=retained)
+        with patch.dict(sys.modules, {"html_performance_retention_evidence": reader}):
+            with self.assertRaisesRegex(ValueError, "paired time/memory regression"):
+                gate._require_v2_memory_policy(gate.Bundle(self.bundle), expected,
+                    {"memoryPolicy": saved}, self.report_paths[0], non_comparable=False)
+            self.assertTrue(gate._require_v2_memory_policy(
+                gate.Bundle(self.bundle), expected, {"memoryPolicy": saved}, self.report_paths[0],
+                non_comparable=False, policy_version=POLICY_VERSION,
+            ))
+            for version in ("", "unknown"):
+                with self.subTest(version=version), self.assertRaisesRegex(ValueError, "unsupported memory policy version"):
+                    gate._require_v2_memory_policy(
+                        gate.Bundle(self.bundle), expected, {"memoryPolicy": saved}, self.report_paths[0],
+                        non_comparable=False, policy_version=version,
+                    )
+            tampered = {**saved, "policyPass": True}
+            with self.assertRaisesRegex(ValueError, "saved memory policy differs"):
+                gate._require_v2_memory_policy(
+                    gate.Bundle(self.bundle), expected, {"memoryPolicy": tampered}, self.report_paths[0],
+                    non_comparable=False, policy_version=POLICY_VERSION,
+                )
+        self.assertEqual(saved, original)
 
     def test_v2_noncomparable_retains_v1_failure_and_requires_retention(self) -> None:
         _, expected, _, _, failure = self._noncomparable_baseline_fixture("memory-v2")
@@ -4873,6 +4969,19 @@ class MemoryPolicyCliTest(unittest.TestCase):
                        {**valid, "memoryPolicyVersion": "unknown"}):
             with self.subTest(result=result):
                 self.assertEqual(self.verify_cli(result, "--require-memory-policy-v2"), 1)
+
+    def test_v3_requirement_needs_all_assessments(self) -> None:
+        valid: JsonObject = {"memoryPolicyVersion": "html-memory-v3",
+                             "retainedMemoryConditions": 84,
+                             "memoryPolicyAssessments": [{} for _ in range(84)]}
+        self.assertEqual(self.verify_cli(valid, "--require-memory-policy-v3"), 0)
+        for result in ({}, {**valid, "retainedMemoryConditions": 83},
+                       {**valid, "memoryPolicyAssessments": [{} for _ in range(83)]},
+                       {**valid, "memoryPolicyVersion": "html-memory-v2"}):
+            with self.subTest(result=result):
+                self.assertEqual(self.verify_cli(result, "--require-memory-policy-v3"), 1)
+        self.assertEqual(self.verify_cli(valid, "--require-memory-policy-v2",
+                                         "--require-memory-policy-v3"), 1)
 
     def test_v2_rejects_diagnostic_build_and_acquisition_modes(self) -> None:
         for arguments in (("--diagnostic-only",), ("--acquire",),
