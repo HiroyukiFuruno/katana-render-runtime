@@ -1,7 +1,12 @@
-use super::super::types::OverflowClip;
-use super::{Point, RECT_CORNER_COUNT, axis_aligned, plane, polygon};
+use super::super::super::html_browser::HtmlBrowserViewport;
+use super::super::layout::HtmlLayoutRenderer;
+use super::super::types::{ElementPositioningContext, OverflowClip};
+use super::{Point, PolygonScratch, RECT_CORNER_COUNT, axis_aligned, plane, polygon};
+use std::collections::HashMap;
 
 const NON_FINITE_GEOMETRY_ERROR: &str = "scrollable overflow contains non-finite geometry";
+const OWNER_VIEWPORT_WIDTH: u32 = 10;
+const OWNER_VIEWPORT_HEIGHT: u32 = 8;
 
 fn clip(width: f32, height: f32) -> OverflowClip {
     OverflowClip::new(1, 0.0, 0.0, width, height, 0.0, 0.0)
@@ -169,4 +174,47 @@ fn collapsed_polygon_with_no_active_normal_cannot_expose_viewport_pixels() {
         polygon::clip_viewport_polygon(&collapsed, &viewport(0.0, 0.0, 10.0, 8.0)),
         Ok(Vec::new())
     );
+}
+
+fn owner_renderer() -> HtmlLayoutRenderer {
+    let viewport = HtmlBrowserViewport {
+        width: OWNER_VIEWPORT_WIDTH,
+        height: OWNER_VIEWPORT_HEIGHT,
+        device_scale_factor: 1.0,
+    };
+    let mut renderer = HtmlLayoutRenderer::new(viewport, 0.0, &HashMap::new(), None);
+    renderer.start_element_box(1, ElementPositioningContext::InFlow, true, None);
+    renderer
+}
+
+#[test]
+fn owner_polygon_keeps_inactive_axes_and_rejects_a_collapsed_active_axis() {
+    let points = viewport(1.0, 2.0, 3.0, 4.0).to_vec();
+    let indices = HashMap::from([(1, 0)]);
+    let mut renderer = owner_renderer();
+    for (axes, expected) in [((false, false), true), ((true, false), false)] {
+        renderer.element_boxes[0].overflow_clip_axes = axes;
+        let mut scratch = PolygonScratch {
+            first: points.clone(),
+            second: Vec::new(),
+        };
+        let mut first = true;
+        let result = polygon::clip_owner_polygon(
+            &clip(10.0, 8.0),
+            &renderer.element_boxes,
+            &indices,
+            &mut scratch,
+            &mut first,
+        );
+        assert_eq!(result, Ok(expected), "axes: {axes:?}");
+        assert!(first);
+        assert_eq!(scratch.first, points);
+        assert!(scratch.second.is_empty());
+        if expected {
+            assert_eq!(
+                axis_aligned::polygon_right_bottom(scratch.current(first)),
+                Ok(Some((4.0, 6.0)))
+            );
+        }
+    }
 }

@@ -145,6 +145,17 @@ mod clip_hit_tests {
     }
 
     #[test]
+    fn invalid_corner_radii_never_admit_hits() {
+        let original = clip((true, true), 100.0, 100.0);
+        assert!(clip_contains_point(&original, 50.0, 50.0));
+        for radius in [(-1.0, 2.0), (2.0, -1.0), (f32::NAN, 2.0), (2.0, f32::NAN)] {
+            let mut invalid = original;
+            invalid.corner_radii[0] = radius;
+            assert!(!clip_contains_point(&invalid, 50.0, 50.0), "{radius:?}");
+        }
+    }
+
+    #[test]
     fn axis_metadata_preserves_the_previous_clip_storage_bound() {
         const PREVIOUS_CLIP_BYTES: usize = 96;
         assert!(std::mem::size_of::<OverflowClip>() <= PREVIOUS_CLIP_BYTES);

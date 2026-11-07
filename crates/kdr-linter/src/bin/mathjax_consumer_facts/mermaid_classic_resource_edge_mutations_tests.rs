@@ -34,6 +34,66 @@ pub(super) const BACKEND_CASES: &[(&str, &str, &str)] = &[
         "(result, resource.digest())",
         "mermaid-resource-backend:result",
     ),
+    (
+        "let preset = DiagramColorPreset::for_render_input(input);",
+        "let _entry_shape = ();\n        let preset = DiagramColorPreset::for_render_input(input);",
+        "mermaid-resource-backend:shape",
+    ),
+    (
+        "DiagramColorPreset::for_render_input(input)",
+        "OtherPreset::for_render_input(input)",
+        "mermaid-resource-backend:callee:DiagramColorPreset::for_render_input",
+    ),
+    (
+        "let (result, digest) = self.render_block(input);",
+        "let _entry_context = ();\n        let (result, digest) = self.render_block(input);",
+        "mermaid-resource-backend:entry",
+    ),
+    (
+        "let (result, digest) = self.render_block(input);",
+        "self.render_block(input);",
+        "mermaid-resource-backend:entry",
+    ),
+    (
+        "RenderOutputFactory::from_diagram_result(input, result, RuntimeDescriptor::mermaid())\n            .map(|output| RenderOutputFactory::bind_resource(output, digest.as_deref()))",
+        "other",
+        "mermaid-resource-backend:entry",
+    ),
+    (
+        ".map(|output| RenderOutputFactory::bind_resource(output, digest.as_deref()))",
+        ".and_then(|output| RenderOutputFactory::bind_resource(output, digest.as_deref()))",
+        "mermaid-resource-backend:entry",
+    ),
+    (
+        "RenderOutputFactory::from_diagram_result(input, result, RuntimeDescriptor::mermaid())",
+        "other",
+        "mermaid-resource-backend:entry",
+    ),
+    (
+        "RuntimeDescriptor::mermaid()",
+        "RuntimeDescriptor::native()",
+        "mermaid-resource-backend:entry",
+    ),
+    (
+        "(result, resource.into_digest())",
+        "result",
+        "mermaid-resource-backend:result",
+    ),
+    (
+        "DiagramBlock {\n            kind: crate::markdown::DiagramKind::Mermaid,\n            source: input.source.clone(),\n        }",
+        "input.source.clone()",
+        "mermaid-resource-backend:input",
+    ),
+    (
+        "let resource = match self.read_resource(&block) {\n            Ok(resource) => resource,\n            Err(error) => return (error, None),\n        };",
+        "let resource = self.read_resource(&block);",
+        "mermaid-resource-backend:read",
+    ),
+    (
+        "\n        runtime_resource_loader::load(",
+        "\n        let _reader_context = ();\n        runtime_resource_loader::load(",
+        "mermaid-resource-backend:reader",
+    ),
 ];
 
 pub(super) const INSTANCE_MUTATIONS: &[(&str, &str, &str)] = &[
