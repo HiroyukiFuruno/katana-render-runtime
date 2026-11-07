@@ -8,6 +8,9 @@ const HEIGHT: u32 = 720;
 #[cfg(feature = "candidate")]
 #[path = "cli_execution/native_frame_capture.rs"]
 mod native_frame_capture;
+#[cfg(feature = "candidate")]
+#[path = "cli_execution/retention_contract_tests.rs"]
+mod retention_contract_tests;
 #[cfg(feature = "baseline")]
 const ARM: &str = "baseline-0.4.23";
 #[cfg(feature = "candidate")]

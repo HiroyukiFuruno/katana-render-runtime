@@ -55,12 +55,29 @@ def active_reference_at_commit(root: Path, revision: str, git_query: GitQuery, *
     _require(found == [HISTORY_PATH], "reference history Git tree differs")
     history = json.loads(git_query(root, ("show", f"{revision}:{HISTORY_PATH}")),
                          object_pairs_hook=_unique_object)
-    if not isinstance(history, dict) or history.get("schema") != "krr-html-performance-history-v1":
+    if not isinstance(history, dict):
         raise ValueError("unsupported reference history")
+    schema = history.get("schema")
+    if not isinstance(schema, str) or schema not in (
+        "krr-html-performance-history-v1", "krr-html-performance-history-v2",
+    ):
+        raise ValueError("unsupported reference history")
+    if schema == "krr-html-performance-history-v2":
+        _text(history.get("activeReferenceSelectionNote"), "active reference selection note")
     active = _text(history.get("activeReferenceRecordId"), "active reference id")
     records = history.get("records")
     if not isinstance(records, list) or not records or any(not isinstance(row, dict) for row in records):
         raise ValueError("reference history records are invalid")
+    for row in records:
+        if "memoryPolicy" not in row:
+            continue
+        if schema == "krr-html-performance-history-v1":
+            raise ValueError("v1 history cannot contain memory policy metadata")
+        scope = row.get("scope")
+        acceptance = row.get("measuredAcceptance")
+        if not isinstance(scope, dict) or not isinstance(acceptance, dict):
+            raise ValueError("memory policy admission fields are missing")
+        _validate_memory_policy(row, scope, acceptance, schema)
     ids = [_text(row.get("id"), "reference record id") for row in records]
     _require(len(ids) == len(set(ids)) and ids.count(active) == 1, "reference record identity differs")
     record = records[ids.index(active)]
@@ -111,6 +128,34 @@ def _active_record(record: dict[str, object], active: str) -> ActiveReference:
     return ActiveReference(active, source_head, _sha(record.get("bundleManifestSha256"), "bundle manifest"),
                            _sha(evidence.get("verifierStdoutSha256"), "verifier stdout"),
                            {field: _sha(pins[field], field) for field in REFERENCE_BUILD_FIELDS})
+
+
+def _validate_memory_policy(record: dict[str, object], scope: dict[str, object],
+                            acceptance: dict[str, object], history_schema: str) -> None:
+    if "memoryPolicy" not in record:
+        return
+    if history_schema == "krr-html-performance-history-v1":
+        raise ValueError("v1 history cannot contain memory policy metadata")
+    policy = record.get("memoryPolicy")
+    fields = {"version", "policySha256", "retentionEvidenceSha256", "candidateConditions",
+              "acceptedConditions", "warmupCycles", "measuredCycles"}
+    if not isinstance(policy, dict) or set(policy) != fields:
+        raise ValueError("memory policy metadata is invalid")
+    _require(policy.get("version") == "html-memory-v2", "memory policy version differs")
+    _sha(policy.get("policySha256"), "memory policy SHA256")
+    _sha(policy.get("retentionEvidenceSha256"), "retention evidence SHA256")
+    candidate_conditions = policy.get("candidateConditions")
+    accepted_conditions = policy.get("acceptedConditions")
+    _require(type(candidate_conditions) is int and candidate_conditions > 0
+             and candidate_conditions == scope.get("candidateConditions"),
+             "memory policy candidate conditions differ from scope")
+    _require(type(accepted_conditions) is int and accepted_conditions == candidate_conditions,
+             "memory policy accepted conditions differ")
+    _require(type(policy.get("warmupCycles")) is int and policy.get("warmupCycles") == 5
+             and type(policy.get("measuredCycles")) is int and policy.get("measuredCycles") == 25,
+             "memory policy cycle counts differ")
+    _require(acceptance.get("performanceNonregression") is True,
+             "memory policy requires performance nonregression")
 
 
 class ReferenceParentProof(NamedTuple):

@@ -679,9 +679,9 @@ release-openspec-archive:
     bash scripts/release/check-openspec-release-archive.sh --self-test
     bash scripts/release/check-openspec-release-archive.sh "{{VERSION}}"
 
-# 同一committed sourceの3幅・実測時間/RSSを再集計し、劣化時は公開を止める。
+# 同一sourceの時間と保持メモリを再検証し、v2の全84条件を要求する。
 html-performance-nonregression-check:
-    {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap verify
+    {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap verify --require-memory-policy-v2
 
 # Git管理されたHTML性能履歴から現行基準または指定recordを表示する。
 html-performance-history record_id='':

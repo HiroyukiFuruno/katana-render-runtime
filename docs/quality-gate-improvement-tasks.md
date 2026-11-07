@@ -1,7 +1,28 @@
 # 品質ゲート改善の作業台帳
 
-## 現在の実行地点（2026-11-07、以下の過去結果と区別する）
+## 現在の実行地点（2026-11-08、以下の過去結果と区別する）
 
+- [/] `verifier-historical-terra-kehho8yu` はLint・strict型・verifier全186件が実0。標準release全回帰は1278件で実1、残った失敗は既存HEADのrelease内容manifest不一致1件（既存opt-in skip1）だった。3件の歴史正例は既存認証済み7d8c/e1bc/3469のimmutable bytesへ固定し、現v2を旧epochへ再利用する拒否負例を保持。v2 productionを旧v1と等価にする例外は追加していない。
+- [x] `release-target-head-sync-lod04wk2` で既存recipeによるHEAD5fのmanifest同期と対象22件が実0。これは現HEADの暫定同期であり、新しい実装commit後に必要commit・manifest・snapshotを再同期する。`dependency-freshness-nov08-_wau9a25` はRust lockの最新互換解決との差で実1。JS/runtimeは未判定のまま、検証済み差分の通常commit後に既存mutation recipeで依存更新を取り込む。Actionsは `actions-freshness-nov08-07uylulw/safe-summary.json` で全63参照のworktree pinと担当のupstream照合結果が一致し、更新候補0。primary rawをmainが保持した証跡とは区別する。
+- [ ] 次は通常hook commit、依存更新・対応検査、新SDK proof、通常buildでv2の1条件pilot、全84への展開。root coverage1256未カバー、cache実再利用、最新版の描画と完全品質ゲート、Draft review/3OS/公開/Issue close/cleanupは未完。全体Python1278件の実1や旧測定の失敗を成功に置き換えない。
+
+- [x] `retention-coverage-final-bIdEN5XJ` は標準AST・静的基盤・performance-harness coverageが実0。baseline76件・1163/1163行、candidate82件・1207/1207行、実BINによる30回開閉・誤ACK・EOF・操作失敗の回帰3件が成功し、source前後一致。これは計測harnessの100%であり、rootの未カバー1256行や通常buildのv2性能合格を代替しない。
+- [/] `verifier-v2-release-final-u7d04tcn` はPython Lint・厳格型・v2限定回帰が実0、標準release全回帰は1252件で実1（error1・既存opt-in skip1）、source前後一致。歴史cohortを現v2 productionと等価に扱うテストfixtureを、既存許可のimmutable Git endpointへ固定して修正中。現v2を旧v1と等価認証する許可は追加しない。同file全回帰を先行して同類の不整合をまとめて回収し、その後に全回帰を行う。
+- [ ] 関連全回帰・通常hook commit後、新SDK proofを生成し、既存producerの `--max-conditions 1` で通常時間25組とretention5+25回の初回実測を採取する。v2正式合格は現在0/84。raw/旧v1結果の書換え・再認定はせず、新SDK・環境・資源・入力の厳格束縛を確認して全84へ進む。
+
+- [/] v2追加の現ソースは `memory-v2-ast-foundation-t7aksb2w/0` のAST79件が実0。直後のfoundationはRuff1件、次はstrict mypy8件で実1となり、検査・型を緩めず修正した。`memory-v2-foundation-retry-wmy3k481`、さらにprivacy修正後の `memory-v2-foundation-retry-q7cs4k4d` と歴史cohort修正後の `memory-v2-foundation-retry-k1xwqhmj` はそれぞれ既存foundation実0。成功した各runのsource前後一致を照合し、失敗原本も保持した。実Rust probeの追加回帰後はASTを再確認する。
+- [x] `retention-python-unit-q6wr_t_1` はpinned Pythonでmemory14・retention15・promotion19・reference8の計56件が全成功、全4段実0、source前後一致。これは後述のprivacy・昇格入口修正前の限定結果であり、修正後の全回帰・正式84条件の成功には加算しない。
+- [/] 追加レビューのP1を2件修正。新規基準昇格にv2全84件を必須化し、旧v1履歴は参照用途で保持する。retentionの新しいnative FD closureは、生環境辞書を含めないv2 projectionをworkerの観測へ厳密結合する。既存NativeCLIの非公開v1原本は維持し、書換え・repin・公開を行わない。修正後の実回帰と新Bundleの公開境界は未確認。
+- [/] `html-release-python-full-az0y1jaf` は標準release Python回帰218件で実1、歴史promotion遷移がworktreeのv2を旧仕様と等価要求するunit1件が失敗した。正例を既存5f889a3eのimmutable blobへ固定し、現v2を旧遷移と誤認しない負例を追加。変更したtest-only fileのexact bytes/modeだけを既存の有限認証へ登録し、production v2を旧v1と同等にする例外は追加しない。旧正解データ・旧判定・原rawは保持する。再回帰は未完。
+- [ ] 次は実Rust `--retention` の30回SAMPLE/READY/ACK・誤ACK/EOF/操作失敗を既存実BINへ追加し、AST→静的→標準Python回帰→通常hook commit→新SDK proof→v2実測を進める。通常workerへ実行modeが増えるため、旧SDKとの同一性を未確認で断定しない。同一性・再利用適格性が成立しない場合は正確な新sourceで必要な84条件を採取し、過去の完了数を現版へ付け替えない。root coverage1256未カバー、cache実再利用、レビュー/3OS/公開など既存残DoDも維持する。
+- [/] 最新ユーザー指示により、最大RSSだけの一律非劣化から、表示時間・増加量・解放後の保持量を分けたv2性能判定へ変更する。小幅の一時増加や速度向上とのトレードオフを許容し、時間とメモリの同時悪化、不要なメモリの継続増加は拒否する。下のv1 RSS不合格は当時の結果として保持し、元receipt・policy・rawを変更せず新判定を別保存する。v2の合格件数はまだ0件であり、基準変更だけで旧失敗を合格へ数えない。
+- [/] v2の保守的な初期設定は主担当が選定し、実測を踏まえ最終レビューする。各phaseのpeak median/p95/max増加がそれぞれ1MiB以内かつ5%以内なら、時間非劣化を維持して許容する。それを超える場合は8MiB以内かつ25%以内に限り、同phaseの25組で検定済みの速度改善と中央値10%以上・1ms以上の短縮を要する。他phaseの時間悪化は免除しない。表示3秒未満は各frameへ適用し、全Yスクロールの累計時間へ新制限を追加しない。
+- [ ] 保持量は既存操作を同一processでwarm-up5回＋測定25回繰り返し、session close/dropと結果JSON破棄後のRSS/VMSを既存psutilで採取する。初末5点のRSS中央値差が1MiBまたは初期中央値の5%を超えれば拒否する。予算内でも、有意な上向き傾向が最後10点まで続く場合は拒否する。定常化するcacheと継続増加を区別し、有限の測定だけであらゆるleakの不存在を保証したとは扱わない。欠測・失敗・source/binary/input/font等の束縛不一致は合格にしない。旧版が失敗する既存12条件へ、新たに旧版の保持量一致を追加要求しない。
+- [/] 保持量の上向き傾向は、既存SciPy 1.18.1の片側Kendallを用い、84条件×全窓/末尾窓2検定でfamily alpha 0.05を補正する。条件ごとの0.05判定による偶発的な不合格の積み重なりを避ける。速度・peakの評価器、保持量probe、履歴schemaを分担して実装中。新規の依存ライブラリ・公開API・crateは追加しない。
+- [/] `ast-lint-retention-policy-4jhsuh3j` の標準ASTは実101、56成功・外部workspace規則1失敗。別probe binaryとの共有のため追加した公開free function2件が拒否されたため、別binary案を退役し既存SDKのcandidate専用 `--retention` 経路へ最小化する。通常 `--worker` の処理は維持する。公式SDK証明・既存候補coverage・終了回収をそのまま使い、新しいbuild roleや品質laneを増やさない。新sourceのAST再検証・実計測は未完。
+- [/] 単一SDKへの修正後の限定ASTは `ast-ts-memory-policy-yxp0qvz5` で実0。ただし当時の新規Rust2fileは未追跡だったため全Rust合格に転用しない。履歴の既存2unitはactive referenceが先頭recordであると誤認していた。期待するreject観点を保持して選択をactiveReferenceRecordIdへ直し、`html-history-bun2-oef5ohx4` で8/8成功・51 assertions・実0、diffcheck0、対象2fileの前後SHA一致を確認した。
+- [/] v2のpure判定・既存raw再計算・最終verifier接続・30cycle観測とraw reader・履歴のv1/v2境界を実装し検証中。`retention-foundation-static-9wrqmaq6` はPython Lintの5件で実1、後続検査の合格へ転用しない。定数属性setattr4件は直接代入へ修正、当時未完成だったlegacy環境認証を共通化して仕上げる。既存正式catalogの非fixed-epoch経路も壊さず維持し、v2の不足を旧v1の成功で補完しない。正式release recipeにv2全84条件の必須確認を追加する。
+- [x] cold属性revert後の `5f889a3e` は `current-perf-sdk-5f889a3e-tqsd5gvo` のSDK proofで実終了0・buildProofValidated=true。通常計測probe SHA `8cb8395c54e2cecb15c78a69e678a6c97dbfd8dccc0fac8eabd3304b8bcc839d` は8daのworkerと同一。これは現SDKのビルド証明であり、保持量・v2判定・全84条件の正式合格は未確認。
 - [/] `4345121d` のcold属性候補は、同HEADのSDK proof成功後、標準先頭4条件・25組・1,200 phaseを採取して実終了0。1条件通過・3条件RSS不合格、時間の劣化検出0、RSS中央値差の全phase範囲−16384～+180224Bで、改善候補として不採用にした。`html-first4-cold-layout-4345121d-3dpouk7y/safe-summary.json`、receipt SHA `672957f529164075a2cd662b1d7fc5789ba3589cf18164ab1059b3c3abc53746`。`20b8a9ec` の属性1行だけを通常revertで戻し、追加回帰と原結果を保持する。旧8daの7/10通過や別診断の成功と合算しない。
 - [x] 追加cohortのAST79件・source-static-foundationは `ast-foundation-static-current-YU1BfOiN` で実0。実runtimeは `native-nextest-catalog-fivecase-x6vh4035` の同一binary SHA・実catalogへ照合した5件が全成功、診断実終了0・0.078秒、前後source一致。外側の後処理がstdoutだけを探して実1になった点は原記録を保持し、stderrの5実PASSと実summaryを別の訂正記録で照合した。完全品質ゲートや性能候補の有効性の代用にはしない。
 - [/] 先行 `native-nextest-fivecase-I9cGBBPU` はmain指定名のthe欠落で4件だけ実行され、さらにログpath探索の曖昧な入れ子regexが後処理で停滞した。検査本体0とhelper中断130を区別して保存。再実行は同一binaryのbounded lookup・実catalogの完全名5件から選択し、5/5成功。catalog選択・後処理監視・両stream照合をAGENTSへ明文化し、元4件を5件に補完していない。

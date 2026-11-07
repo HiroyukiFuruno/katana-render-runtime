@@ -22,6 +22,35 @@ function firstRecord(history: PerformanceHistory): PerformanceHistoryRecord {
   return first;
 }
 
+function activeRecord(history: PerformanceHistory): PerformanceHistoryRecord {
+  const active = history.records.find((record) => record.id === history.activeReferenceRecordId);
+  if (!active) throw new Error("fixture has no active record");
+  return active;
+}
+
+function validMemoryPolicy(
+  record: PerformanceHistoryRecord,
+): NonNullable<PerformanceHistoryRecord["memoryPolicy"]> {
+  return {
+    version: "html-memory-v2",
+    policySha256: "a".repeat(64),
+    retentionEvidenceSha256: "b".repeat(64),
+    candidateConditions: record.scope.candidateConditions,
+    acceptedConditions: record.scope.candidateConditions,
+    warmupCycles: 5,
+    measuredCycles: 25,
+  };
+}
+
+function addV2Record(history: PerformanceHistory): PerformanceHistoryRecord {
+  history.schema = "krr-html-performance-history-v2";
+  const record = structuredClone(firstRecord(history));
+  record.id = "html-memory-v2-record";
+  record.memoryPolicy = validMemoryPolicy(record);
+  history.records.push(record);
+  return record;
+}
+
 function runHistoryCli(args: string[]): ReturnType<typeof Bun.spawnSync> {
   return Bun.spawnSync(["bun", path.join(import.meta.dir, "performance-history-cli.ts"), ...args], {
     cwd: root,
@@ -64,7 +93,7 @@ test("rejects malformed or internally inconsistent history", () => {
       firstRecord(history).sourceCommit = "not-a-commit";
     },
     (history) => {
-      delete firstRecord(history).referenceBuild;
+      delete activeRecord(history).referenceBuild;
     },
     (history) => {
       const build = firstRecord(history).referenceBuild;
@@ -100,6 +129,9 @@ test("rejects malformed or internally inconsistent history", () => {
     (history) => {
       firstRecord(history).candidatePhaseStatistics.cold_open.maxPeakRssBytes = 1.5;
     },
+    (history) => {
+      firstRecord(history).memoryPolicy = validMemoryPolicy(firstRecord(history));
+    },
   ];
   for (const change of changes) {
     const history = fixture();
@@ -109,22 +141,74 @@ test("rejects malformed or internally inconsistent history", () => {
   expect(() => parsePerformanceHistory({ ...fixture(), extra: true })).toThrow();
 });
 
+test("accepts v2 policy evidence alongside unchanged v1 records", () => {
+  const history = fixture();
+  const legacy = structuredClone(firstRecord(history));
+  const v2Record = addV2Record(history);
+
+  const parsed = parsePerformanceHistory(history);
+  expect(parsed.records[0]).toEqual(legacy);
+  expect(v2Record.memoryPolicy).toEqual({
+    version: "html-memory-v2",
+    policySha256: "a".repeat(64),
+    retentionEvidenceSha256: "b".repeat(64),
+    candidateConditions: v2Record.scope.candidateConditions,
+    acceptedConditions: v2Record.scope.candidateConditions,
+    warmupCycles: 5,
+    measuredCycles: 25,
+  });
+  expect(activeReference(parsed).id).toBe(history.activeReferenceRecordId);
+});
+
+test("rejects malformed or incomplete v2 memory policy evidence", () => {
+  const changes: Array<(record: PerformanceHistoryRecord) => void> = [
+    (record) => {
+      if (!record.memoryPolicy) throw new Error("fixture has no memory policy");
+      record.memoryPolicy.policySha256 = "invalid";
+    },
+    (record) => {
+      if (!record.memoryPolicy) throw new Error("fixture has no memory policy");
+      record.memoryPolicy.candidateConditions += 1;
+    },
+    (record) => {
+      if (!record.memoryPolicy) throw new Error("fixture has no memory policy");
+      record.memoryPolicy.acceptedConditions -= 1;
+    },
+    (record) => {
+      if (!record.memoryPolicy) throw new Error("fixture has no memory policy");
+      Object.assign(record.memoryPolicy, { warmupCycles: 4 });
+    },
+    (record) => {
+      if (!record.memoryPolicy) throw new Error("fixture has no memory policy");
+      Object.assign(record.memoryPolicy, { measuredCycles: 24 });
+    },
+    (record) => {
+      record.measuredAcceptance.performanceNonregression = false;
+    },
+  ];
+  for (const change of changes) {
+    const history = fixture();
+    change(addV2Record(history));
+    expect(() => parsePerformanceHistory(history)).toThrow();
+  }
+});
+
 test("rejects a reference that does not meet its recorded acceptance", () => {
   const changes: Array<(history: PerformanceHistory) => void> = [
     (history) => {
-      firstRecord(history).measuredAcceptance.verifierExitCode = 1;
+      activeRecord(history).measuredAcceptance.verifierExitCode = 1;
     },
     (history) => {
-      firstRecord(history).measuredAcceptance.performanceNonregression = false;
+      activeRecord(history).measuredAcceptance.performanceNonregression = false;
     },
     (history) => {
-      firstRecord(history).measuredAcceptance.htmlMinimumScore = 0;
+      activeRecord(history).measuredAcceptance.htmlMinimumScore = 0;
     },
     (history) => {
-      firstRecord(history).measuredAcceptance.outputFontIdentityEquivalence = "not-established";
+      activeRecord(history).measuredAcceptance.outputFontIdentityEquivalence = "not-established";
     },
     (history) => {
-      firstRecord(history).candidatePhaseStatistics.cold_open.maxSampleSeconds = 3;
+      activeRecord(history).candidatePhaseStatistics.cold_open.maxSampleSeconds = 3;
     },
   ];
   for (const change of changes) {

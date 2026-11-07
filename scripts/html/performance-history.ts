@@ -16,6 +16,15 @@ const referenceBuild = z.strictObject({
 });
 const count = z.number().int().positive().safe();
 const nonnegativeCount = z.number().int().nonnegative().safe();
+const memoryPolicy = z.strictObject({
+  version: z.literal("html-memory-v2"),
+  policySha256: sha256,
+  retentionEvidenceSha256: sha256,
+  candidateConditions: count,
+  acceptedConditions: count,
+  warmupCycles: z.literal(5),
+  measuredCycles: z.literal(25),
+});
 const seconds = z.number().finite().nonnegative();
 const phase = z
   .strictObject({
@@ -65,6 +74,7 @@ const record = z
       outputFontIdentityEquivalence: z.enum(["established", "not-established"]),
     }),
     candidatePhaseStatistics: phases,
+    memoryPolicy: memoryPolicy.optional(),
     evidence: z.strictObject({
       summaryRun: z.string().min(1),
       summarySha256: sha256,
@@ -82,11 +92,39 @@ const record = z
       value.candidateAndBaselineSamplesPerPhase ===
         (value.candidateConditions + value.pairedConditions) * value.trialsPerConditionPerPhase &&
       value.phaseRecords === value.candidateAndBaselineSamplesPerPhase * 6,
-  );
+  )
+  .superRefine((entry, context) => {
+    if (entry.memoryPolicy) {
+      if (entry.memoryPolicy.candidateConditions !== entry.scope.candidateConditions) {
+        context.addIssue({
+          code: "custom",
+          path: ["memoryPolicy", "candidateConditions"],
+          message: "memory policy condition count differs from scope",
+        });
+      }
+      if (entry.memoryPolicy.acceptedConditions !== entry.memoryPolicy.candidateConditions) {
+        context.addIssue({
+          code: "custom",
+          path: ["memoryPolicy", "acceptedConditions"],
+          message: "memory policy must accept every recorded candidate condition",
+        });
+      }
+      if (!entry.measuredAcceptance.performanceNonregression) {
+        context.addIssue({
+          code: "custom",
+          path: ["measuredAcceptance", "performanceNonregression"],
+          message: "memory policy evidence requires recorded performance nonregression",
+        });
+      }
+    }
+  });
 
 export const performanceHistorySchema = z
   .strictObject({
-    schema: z.literal("krr-html-performance-history-v1"),
+    schema: z.union([
+      z.literal("krr-html-performance-history-v1"),
+      z.literal("krr-html-performance-history-v2"),
+    ]),
     activeReferenceRecordId: z.string().min(1),
     activeReferenceSelectionNote: z.string().min(1),
     records: z.array(record).min(1),
@@ -95,6 +133,17 @@ export const performanceHistorySchema = z
     const ids = new Set(history.records.map((entry) => entry.id));
     if (ids.size !== history.records.length) {
       context.addIssue({ code: "custom", message: "duplicate record id" });
+    }
+    if (history.schema === "krr-html-performance-history-v1") {
+      history.records.forEach((entry, index) => {
+        if (entry.memoryPolicy !== undefined) {
+          context.addIssue({
+            code: "custom",
+            path: ["records", index, "memoryPolicy"],
+            message: "v1 history cannot contain memory policy metadata",
+          });
+        }
+      });
     }
   });
 

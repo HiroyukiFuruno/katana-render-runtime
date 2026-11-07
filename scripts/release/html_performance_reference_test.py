@@ -34,6 +34,20 @@ class ActiveReferenceTest(unittest.TestCase):
         return {"schema": "krr-html-performance-history-v1", "activeReferenceRecordId": active,
                 "records": [record]}
 
+    @staticmethod
+    def memory_policy(**overrides: object) -> dict[str, object]:
+        return {
+            "version": "html-memory-v2", "policySha256": "a" * 64,
+            "retentionEvidenceSha256": "b" * 64, "candidateConditions": 84,
+            "acceptedConditions": 84, "warmupCycles": 5, "measuredCycles": 25,
+            **overrides,
+        }
+
+    def history_query(self, value: dict[str, object]) -> reference.GitQuery:
+        def query(_root: Path, args: tuple[str, ...]) -> str:
+            return reference.HISTORY_PATH if args[0] == "ls-tree" else json.dumps(value)
+        return query
+
     def test_selection_reads_the_requested_commit_and_rejects_missing_current_history(self) -> None:
         old = "a" * 40
         current = "b" * 40
@@ -75,11 +89,6 @@ class ActiveReferenceTest(unittest.TestCase):
         self.assertEqual(selected.record_id if selected else None, "second")
 
     def test_selection_rejects_unaccepted_and_invalid_pins(self) -> None:
-        def history_query(value: dict[str, object]) -> reference.GitQuery:
-            def query(_root: Path, args: tuple[str, ...]) -> str:
-                return reference.HISTORY_PATH if args[0] == "ls-tree" else json.dumps(value)
-            return query
-
         cases = ("missing-active", "duplicate", "failed", "missing-pin", "slow")
         for case in cases:
             with self.subTest(case=case):
@@ -102,7 +111,74 @@ class ActiveReferenceTest(unittest.TestCase):
                     assert isinstance(phases, dict) and isinstance(phases["cold_open"], dict)
                     phases["cold_open"]["maxSampleSeconds"] = 3.0
                 with self.assertRaises(ValueError):
-                    reference.active_reference_at_commit(Path("/fixture"), "b" * 40, history_query(history))
+                    reference.active_reference_at_commit(Path("/fixture"), "b" * 40,
+                                                         self.history_query(history))
+
+    def test_v2_active_reference_accepts_memory_policy_and_rejects_invalid_boundaries(self) -> None:
+        history = self.history()
+        history["schema"] = "krr-html-performance-history-v2"
+        history["activeReferenceSelectionNote"] = "selected by the recorded policy"
+        records = history["records"]
+        assert isinstance(records, list) and isinstance(records[0], dict)
+        records[0]["memoryPolicy"] = self.memory_policy()
+        legacy_record = dict(records[0])
+        legacy_record["id"] = "legacy"
+        legacy_record.pop("memoryPolicy")
+        records.append(legacy_record)
+        selected = reference.active_reference_at_commit(
+            Path("/fixture"), "b" * 40, self.history_query(history),
+        )
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected.record_id if selected else None, "first")
+
+        v1_history = self.history()
+        v1_records = v1_history["records"]
+        assert isinstance(v1_records, list) and isinstance(v1_records[0], dict)
+        v1_records[0]["memoryPolicy"] = self.memory_policy()
+        with self.assertRaisesRegex(ValueError, "v1 history cannot contain"):
+            reference.active_reference_at_commit(
+                Path("/fixture"), "b" * 40, self.history_query(v1_history),
+            )
+
+        invalid_policy_values: tuple[tuple[str, object], ...] = (
+            ("version", "html-memory-v3"),
+            ("policySha256", "A" * 64),
+            ("retentionEvidenceSha256", "bad"),
+            ("candidateConditions", 83),
+            ("acceptedConditions", 83),
+            ("warmupCycles", 4),
+            ("measuredCycles", 24),
+        )
+        for field, value in invalid_policy_values:
+            with self.subTest(field=field):
+                malformed = json.loads(json.dumps(history))
+                malformed_records = malformed["records"]
+                assert isinstance(malformed_records, list) and isinstance(malformed_records[0], dict)
+                policy = malformed_records[0]["memoryPolicy"]
+                assert isinstance(policy, dict)
+                policy[field] = value
+                with self.assertRaises(ValueError):
+                    reference.active_reference_at_commit(
+                        Path("/fixture"), "b" * 40, self.history_query(malformed),
+                    )
+
+        malformed = json.loads(json.dumps(history))
+        malformed_records = malformed["records"]
+        assert isinstance(malformed_records, list) and isinstance(malformed_records[0], dict)
+        acceptance = malformed_records[0]["measuredAcceptance"]
+        assert isinstance(acceptance, dict)
+        acceptance["performanceNonregression"] = False
+        with self.assertRaises(ValueError):
+            reference.active_reference_at_commit(
+                Path("/fixture"), "b" * 40, self.history_query(malformed),
+            )
+
+        unknown = json.loads(json.dumps(history))
+        unknown["schema"] = "krr-html-performance-history-v3"
+        with self.assertRaisesRegex(ValueError, "unsupported reference history"):
+            reference.active_reference_at_commit(
+                Path("/fixture"), "b" * 40, self.history_query(unknown),
+            )
 
     def test_history_wrapper_binds_selected_candidate_and_rejects_role_or_pin_changes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

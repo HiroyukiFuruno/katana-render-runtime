@@ -7,6 +7,24 @@ class WilcoxonResult:
     pvalue: float
 
 
+class SignificanceResult:
+    statistic: float
+    pvalue: float
+
+
+def kendalltau(
+    x: Sequence[float],
+    y: Sequence[float],
+    *,
+    nan_policy: Literal["propagate", "raise", "omit"] = "propagate",
+    method: Literal["auto", "asymptotic", "exact"] = "auto",
+    variant: Literal["b", "c"] = "b",
+    alternative: Literal["two-sided", "less", "greater"] = "two-sided",
+    axis: int | None = None,
+    keepdims: bool = False,
+) -> SignificanceResult: ...
+
+
 def wilcoxon(
     x: Sequence[float],
     y: Sequence[float],

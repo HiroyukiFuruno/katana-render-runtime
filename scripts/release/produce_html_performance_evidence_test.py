@@ -2183,6 +2183,48 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         self.assertFalse(producer._batch_policy_accepted(
             producer.BatchBudgetExhausted("bounded"), [accepted], False))
 
+    def test_v2_retention_policy_controls_batch_acceptance_without_erasing_v1_failure(self) -> None:
+        cases: list[tuple[str, gate.JsonObject, bool]] = [
+            ("v2 retention may accept a historical RSS-only failure", {
+                "comparisonStatus": "paired",
+                "policy": {"policyPass": False, "tests": {"peak_rss_bytes": {"detectedBad": True}}},
+                "memoryPolicy": {"version": "html-memory-v2", "policyPass": True,
+                                 "retention": {"retention_allowed": True}},
+            }, True),
+            ("time regression remains rejected", {
+                "comparisonStatus": "paired", "policy": {
+                    "policyPass": False, "tests": {"cold_open": {"detectedBad": True}},
+                },
+                "memoryPolicy": {"version": "html-memory-v2", "policyPass": False,
+                                 "retention": {"retention_allowed": True}},
+            }, False),
+            ("retention regression is rejected", {
+                "comparisonStatus": "paired", "policy": {"policyPass": False},
+                "memoryPolicy": {"version": "html-memory-v2", "policyPass": True,
+                                 "retention": {"retention_allowed": False}},
+            }, False),
+            ("unknown memory policy version is rejected", {
+                "comparisonStatus": "paired", "policy": {"policyPass": True},
+                "memoryPolicy": {"version": "html-memory-v3", "policyPass": True,
+                                 "retention": {"retention_allowed": True}},
+            }, False),
+            ("legacy v1 policy failure remains rejected", {
+                "comparisonStatus": "paired", "policy": {"policyPass": False},
+            }, False),
+        ]
+        for label, result, expected in cases:
+            with self.subTest(case=label):
+                self.assertIs(producer._batch_policy_accepted(None, [result], True), expected)
+        malformed_results: list[tuple[str, gate.JsonObject, str]] = [
+            ("missing retention evidence", {
+                "comparisonStatus": "paired", "policy": {"policyPass": True},
+                "memoryPolicy": {"version": "html-memory-v2", "policyPass": True},
+            }, "retention policy"),
+        ]
+        for label, result, message in malformed_results:
+            with self.subTest(case=label), self.assertRaisesRegex(ValueError, message):
+                producer._batch_policy_accepted(None, [result], True)
+
     @staticmethod
     def _non_comparable_results() -> list[gate.JsonObject]:
         return [
@@ -2302,7 +2344,8 @@ class RuntimeSyncPreflightTest(unittest.TestCase):
         old = checkout("a" * 64, b"")
         cases = ((checkout("b" * 64, b""), "live program source differs from Git"),
                  (checkout("a" * 64, b" M scripts/program.py\0"), "uncommitted changes"))
-        receipt: gate.JsonObject = {"epochContextRef": {"path": "/epoch", "sha256": "e" * 64}}
+        receipt: gate.JsonObject = {"epochContextRef": {"path": "/epoch", "sha256": "e" * 64},
+                                    "completeConditionIds": []}
         resumed = Mock(spec=gate.Bundle)
         resumed.json.return_value = {"programSource": old}
         origin = Mock(spec=gate.Bundle)
@@ -4740,6 +4783,36 @@ class MeasurementLifecycleIntegrationTests(unittest.TestCase):
 
 @unittest.skipUnless(os.name == "posix", "POSIX ownership boundary unit only")
 class NativeCliOwnerHookTests(unittest.TestCase):
+    def test_worker_native_fd_projection_keeps_environment_values_private(self) -> None:
+        marker = "synthetic-private-retention-marker-2b87"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            environment = {"PATH": os.environ["PATH"], "KRR_UNIT_SECRET": marker,
+                           **{key: "synthetic" for key in typed_producer.WORKER_METADATA_KEYS}}
+            lifecycles: list[Path] = []
+            runtime: list[gate.JsonObject] = []
+            result = typed_producer._measurement_command(
+                [str(Path(sys.executable).resolve()), "-c", "pass"], role="worker", cwd=root,
+                env=environment, log_directory=root / "logs", native_attempt_token="f" * 64,
+                lifecycle_sink=lifecycles.append, runtime_execution_sink=runtime.append,
+            )
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(len(lifecycles), 1)
+            self.assertEqual(len(runtime), 1)
+            raw = lifecycles[0].read_bytes()
+            self.assertNotIn(marker.encode(), raw)
+            lifecycle = gate.read_json(lifecycles[0])
+            closure = gate._object(lifecycle["nativeRawFdClosure"], "native closure")
+            self.assertEqual(closure["schema"], "krr-native-raw-fd-closure-v2")
+            self.assertNotIn("environment", closure)
+            self.assertEqual(closure["environmentProjection"],
+                             typed_producer._worker_environment_projection(environment))
+            self.assertEqual(closure["environmentSha256"], runtime[0]["actualEnvironmentSha256"])
+            raw_refs = gate._objects(lifecycle["raw"], "worker raw")
+            raw_refs.extend(gate._object(closure[key], "observer raw") for key in ("stdout", "stderr"))
+            for ref in raw_refs:
+                self.assertNotIn(marker.encode(), Path(gate._text(ref["path"], "raw path")).read_bytes())
+
     def test_txt_mapping_without_access_is_read_only_but_writable_controls_remain_holders(self) -> None:
         identity = (0x1000010, 833523274)
 

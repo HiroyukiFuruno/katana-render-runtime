@@ -268,6 +268,11 @@ def validation_cohort_change(path: str, old: tuple[str, int] | None,
     if promotion_pair is not None and (old, new) == promotion_pair:
         return old_mode == new_mode == "100644"
     if (path == "scripts/release/html_performance_source_reuse_test.py"
+            and new == ("3f169f0de723a8e28551284ae455a7b95edac4ad18249f989074d4089d76ebd4", 41308)):
+        previous = ("6b055a8a3697a99e5ab78653de7c51a4031730a111134b0781cdd3245c5c03ef", 40163)
+        return (old_mode == new_mode == "100644" and (old == previous
+                or validation_cohort_change(path, old, previous, old_mode, new_mode)))
+    if (path == "scripts/release/html_performance_source_reuse_test.py"
             and new == ("6b055a8a3697a99e5ab78653de7c51a4031730a111134b0781cdd3245c5c03ef", 40163)):
         previous = ("994934a37600f9b902eb03a8093a02c370b3abe622aa56ea5b3ec8f48b6a66e3", 34393)
         return (old_mode == new_mode == "100644" and (old == previous
@@ -481,7 +486,8 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
                        "50c1fd0439f46472bb789865ecfd83714f6feaaaa8c882521880dab6710b3659",
                        "81ca438ccce28208836dd811438ce81ef27961fe289051110750d1403f2069c5",
                        "289cb02b3c0bbb68db26d76857f97b6cc2d967bc566ad0f80de6a502b9acc700",
-                       "506a9d3f807144d16e49eb3ab66d938d5795096cf0218df47308f788d449e484"})),
+                       "506a9d3f807144d16e49eb3ab66d938d5795096cf0218df47308f788d449e484",
+                       "5002ba1bd630e232a95f799734775aba293fac2410e605fc78b6c618a939f39d"})),
         "scripts/release/html_performance_host_load_validation_test.py": (
             "977394a86e45b307f9939a952aa6ef66d3cf770154564794d7196036aa6c2497",
             frozenset({"a550c3e89979dda00597eb3497bf627c793a8a5228c88bc740976526ad70aa66",

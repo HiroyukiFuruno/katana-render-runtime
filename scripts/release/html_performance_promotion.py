@@ -70,7 +70,13 @@ def _measure(bundle: gate.Bundle, result: gate.JsonObject) -> tuple[bool, gate.J
                     for arm in ("baseline", "candidate")
                 }
                 baseline, candidate = samples["baseline"], samples["candidate"]
-                improvement |= _compare(baseline, candidate)
+                if index == 0 or result.get("memoryPolicyVersion") != "html-memory-v2":
+                    improvement |= _compare(baseline, candidate)
+                else:
+                    # WHY: v2で許容した一時peak増加を旧判定で再度拒否しない。
+                    improvement |= statistics.evaluate_paired_regression(
+                        candidate, baseline,
+                    ).detected_bad
                 (elapsed if index == 0 else rss)[phase].extend(candidate)
     phases: gate.JsonObject = {}
     for phase in gate.PHASES:
@@ -148,6 +154,26 @@ def _candidate_pins(bundle: gate.Bundle) -> gate.JsonObject:
     }
 
 
+def _memory_policy_record(bundle: gate.Bundle, result: gate.JsonObject) -> gate.JsonObject:
+    if "memoryPolicyVersion" not in result:
+        return {}
+    gate.require(result.get("memoryPolicyVersion") == "html-memory-v2"
+                 and result.get("retainedMemoryConditions") == 84,
+                 "promotion requires all retained-memory conditions")
+    attempts = gate._objects(bundle.manifest["attempts"], "memory policy attempts")
+    gate.require(len(attempts) == 84, "memory policy attempt count differs")
+    policies = [bundle.json(attempt["result"])["memoryPolicy"] for attempt in attempts]
+    references = [bundle.json(attempt["expected"])["memoryRetentionRef"] for attempt in attempts]
+    for reference in references:
+        bundle.file(reference)
+    return {"memoryPolicy": {
+        "version": "html-memory-v2", "policySha256": gate._v3_json_digest(policies),
+        "retentionEvidenceSha256": gate._v3_json_digest(references),
+        "candidateConditions": 84, "acceptedConditions": 84,
+        "warmupCycles": 5, "measuredCycles": 25,
+    }}
+
+
 def _record(bundle: gate.Bundle, result: gate.JsonObject, phases: gate.JsonObject,
             run_id: str, manifest_sha: str, stdout_sha: str, summary_sha: str,
             completed_at: str) -> gate.JsonObject:
@@ -176,6 +202,7 @@ def _record(bundle: gate.Bundle, result: gate.JsonObject, phases: gate.JsonObjec
         "evidence": {"summaryRun": run_id, "summarySha256": summary_sha,
                      "verifierStdoutSha256": stdout_sha},
         "reuseStatus": "historical-result; current-source eligibility must be verified separately",
+        **_memory_policy_record(bundle, result),
     }
 
 
@@ -219,7 +246,8 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, 
     stdout_path = evidence_directory / "verifier.stdout"
     stderr_path = evidence_directory / "verifier.stderr"
     argv = [sys.executable, str(root / "scripts/release/verify_html_performance_evidence.py"),
-            "--repo", str(root), "--evidence-dir", str(directory)]
+            "--repo", str(root), "--evidence-dir", str(directory),
+            "--require-memory-policy-v2"]
     if reuse_request is not None:
         argv.extend(["--reuse-request", str(reuse_request)])
     with (evidence_directory / "command.json").open("x", encoding="utf8") as command:
@@ -238,6 +266,7 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, 
     if eligibility is not None:
         gate.require(verified == eligibility, "performance reuse verification differs")
         verified = gate._object(verified.get("measuredResult"), "reused measured result")
+    gate._require_cli_memory_v2(verified, reused=False)
     bundle = gate.Bundle(directory)
     improvement, phases = _measure(bundle, verified)
     gate.require(dict(os.environ) == execution_environment, "promotion environment changed during comparison")
@@ -259,6 +288,8 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, 
     records = gate._objects(history["records"], "history records")
     gate.require(all(item.get("id") != record["id"] for item in records), "record already exists")
     history["records"] = [*records, record]
+    if "memoryPolicy" in record:
+        history["schema"] = "krr-html-performance-history-v2"
     history["activeReferenceRecordId"] = record["id"]
     history["activeReferenceSelectionNote"] = "正式な同一条件の比較で有意な改善と非劣化を確認。"
     after = (json.dumps(history, ensure_ascii=False, indent=2) + "\n").encode()

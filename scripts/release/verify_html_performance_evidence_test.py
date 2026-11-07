@@ -14,6 +14,7 @@ import math
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import warnings
@@ -23,6 +24,7 @@ from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable, Sequence
 from pathlib import Path, PureWindowsPath
+from types import ModuleType
 from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock, patch
 
@@ -31,6 +33,7 @@ import html_performance_remote_admission as remote_admission
 import html_performance_attestation as attestation
 import html_performance_fresh_reference as fresh_reference
 import html_performance_host_load_validation as host_load_validation
+import html_performance_memory_evidence as memory_evidence
 import html_performance_reference as reference_domain
 import verify_html_performance_evidence as canonical_gate
 
@@ -45,6 +48,10 @@ spec.loader.exec_module(gate)
 
 JsonObject = dict[str, object]
 JsonMutation = Callable[[JsonObject], None]
+
+
+class RetentionReaderModule(ModuleType):
+    read_retained_rss: Mock
 
 
 class LiveProgramsCacheTest(unittest.TestCase):
@@ -1331,6 +1338,26 @@ class PerformanceEvidenceTest(unittest.TestCase):
         )
         return {"path": original, "sha256": checksum}
 
+    def test_catalog_memory_summary_requires_every_condition_and_preserves_v1(self) -> None:
+        attempts: list[JsonObject] = [{"result": {"path": str(index)}} for index in range(84)]
+        bundle = Mock(spec=gate.Bundle)
+        rows: dict[str, JsonObject] = {str(index): {} for index in range(84)}
+        bundle.json.side_effect = lambda ref: rows[str(json_object(ref)["path"])]
+        self.assertEqual(gate._catalog_memory_summary(bundle, attempts), {})
+        for row in rows.values():
+            row["memoryPolicy"] = {"version": "html-memory-v2"}
+        self.assertEqual(gate._catalog_memory_summary(bundle, attempts), {
+            "memoryPolicyVersion": "html-memory-v2", "retainedMemoryConditions": 84,
+        })
+        rows["0"] = {}
+        with self.assertRaisesRegex(ValueError, "all 84 conditions"):
+            gate._catalog_memory_summary(bundle, attempts)
+        rows["0"] = {"memoryPolicy": {"version": "wrong"}}
+        with self.assertRaisesRegex(ValueError, "version differs"):
+            gate._catalog_memory_summary(bundle, attempts)
+        with self.assertRaisesRegex(ValueError, "all 84 conditions"):
+            gate._catalog_memory_summary(bundle, attempts[:-1])
+
     def test_v3_source_contract_keeps_fixed_and_live_contexts_separate(self) -> None:
         import html_performance_epoch_reuse as epoch
 
@@ -1611,6 +1638,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
         old_head = "b9cf37535ba374b62fee4e889f9c58f58f1ab8dc"
         historical_head = "5de8ddd363d28444e63b998b46c33324495f53bf"
         later_historical_head = "76fecb70be64b11341d5232d92a08a351b2f726a"
+        reviewed_current_head = "7d8c4c0ed9bb6ea4fb0efe3f0ab232db40a9976c"
         names = ("html_performance_source_reuse.py", "html_performance_epoch_reuse.py",
                  "html_performance_host_load_validation.py", "html_performance_host_load_validation_test.py",
                  "produce_html_performance_evidence.py", "produce_html_performance_evidence_test.py",
@@ -1631,16 +1659,22 @@ class PerformanceEvidenceTest(unittest.TestCase):
         historical = self._program_checkout(self.root, "historical endpoint")
         write_revision(later_historical_head)
         later_historical = self._program_checkout(self.root, "later historical endpoint")
-        write_revision(None)
+        write_revision(reviewed_current_head)
         verifier = self.root / "scripts/release/verify_html_performance_evidence.py"
         verifier.write_bytes(self._historical_lock_verifier(repository))
-        current = self._program_checkout(self.root, "current endpoint")
+        current = self._program_checkout(self.root, "reviewed current endpoint")
         expected = gate._v3_live_programs(self.root, fixed)
         result = gate._v3_program_source(self.root, {"programSource": fixed},
                                          [{"liveCheckout": historical}, {"liveCheckout": later_historical},
                                           {"liveCheckout": current}],
                                          git_query=None)
         self.assertEqual(result, expected)
+        write_revision(None)
+        verifier.write_bytes((repository / "scripts/release/verify_html_performance_evidence.py").read_bytes())
+        unreviewed_current = self._program_checkout(self.root, "unreviewed v2 current endpoint")
+        with self.assertRaisesRegex(ValueError, "live measurement program differs"):
+            gate._v3_program_source(self.root, {"programSource": fixed},
+                                    [{"liveCheckout": unreviewed_current}], git_query=None)
         verifier.write_bytes(verifier.read_bytes() + b"\n# unknown byte\n")
         altered = self._program_checkout(self.root, "unreviewed endpoint")
         with self.assertRaisesRegex(ValueError, "live measurement program differs"):
@@ -1650,6 +1684,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
 
     def test_v3_current_lock_format_cohort_preserves_actual_identity(self) -> None:
         repository = Path(__file__).resolve().parents[2]
+        reviewed_current_head = "e1bc9abde2507fdbd6cee7cd66306506aa7b4399"
         paths = ("scripts/drawio/candidate-svg-rasterize.ts",
                  "scripts/release/html_performance_epoch_reuse.py",
                  "scripts/release/html_performance_epoch_reuse_test.py",
@@ -1664,11 +1699,20 @@ class PerformanceEvidenceTest(unittest.TestCase):
                                               check=True, capture_output=True).stdout)
         fixed = self._program_checkout(self.root, "current-lock baseline")
         for name in paths:
-            (self.root / name).write_bytes((repository / name).read_bytes())
-        current = self._program_checkout(self.root, "current-lock reviewed format")
+            (self.root / name).write_bytes(subprocess.run(
+                ["git", "-C", str(repository), "show", reviewed_current_head + ":" + name],
+                check=True, capture_output=True,
+            ).stdout)
+        current = self._program_checkout(self.root, "current-lock reviewed historical format")
         self.assertEqual(gate._v3_program_source(self.root, {"programSource": fixed},
                          [{"liveCheckout": current}], git_query=None),
                          gate._v3_live_programs(self.root, fixed))
+        for name in paths:
+            (self.root / name).write_bytes((repository / name).read_bytes())
+        unreviewed_current = self._program_checkout(self.root, "current-lock unreviewed v2 format")
+        with self.assertRaisesRegex(ValueError, "live measurement program differs"):
+            gate._v3_program_source(self.root, {"programSource": fixed},
+                                    [{"liveCheckout": unreviewed_current}], git_query=None)
 
     def test_v3_reviewed_validation_cohort_preserves_actual_membership(self) -> None:
         import produce_html_performance_evidence as producer
@@ -1702,7 +1746,12 @@ class PerformanceEvidenceTest(unittest.TestCase):
                       "scripts/release/html_performance_host_load_validation.py")
         old_auth = {name: subprocess.run(["git", "-C", str(repository), "show", older + ":" + name],
                                         check=True, capture_output=True).stdout for name in auth_names}
-        current_auth = {name: (repository / name).read_bytes() for name in auth_names}
+        reviewed_current_head = "3469ac28c247e75a03e84fd97a558e1011135273"
+        current_auth = {name: subprocess.run(
+            ["git", "-C", str(repository), "show", reviewed_current_head + ":" + name],
+            check=True, capture_output=True,
+        ).stdout for name in auth_names}
+        unreviewed_current_auth = {name: (repository / name).read_bytes() for name in auth_names}
         current_auth["scripts/release/verify_html_performance_evidence.py"] = self._historical_lock_verifier(repository)
         install(older)
         for name in auth_names:
@@ -1717,6 +1766,14 @@ class PerformanceEvidenceTest(unittest.TestCase):
         self.assertNotEqual(set(fixed_records), set(live_records))
         self.assertEqual(gate._v3_program_source(self.root, {"programSource": fixed},
                          [{"liveCheckout": live}], git_query=None), fixed_records)
+        for name in auth_names:
+            (self.root / name).write_bytes(unreviewed_current_auth[name])
+        unreviewed_live = self._program_checkout(self.root, "unreviewed v2 validation cohort")
+        with self.assertRaisesRegex(ValueError, "program|cohort"):
+            gate._v3_program_source(self.root, {"programSource": fixed},
+                                    [{"liveCheckout": unreviewed_live}], git_query=None)
+        for name in auth_names:
+            (self.root / name).write_bytes(current_auth[name])
         name = "scripts/drawio/svg-capture.ts"
         self.assertEqual(producer._program_storage_path(self.root, name, live_records[name], fixed_records),
                          self.root / "tmp/html-performance-programs" / live_records[name][0] / name)
@@ -1764,18 +1821,35 @@ class PerformanceEvidenceTest(unittest.TestCase):
                  "scripts/release/produce_html_performance_evidence_test.py",
                  "scripts/release/verify_html_performance_evidence.py",
                  "scripts/release/verify_html_performance_evidence_test.py")
+        historical_targets = {
+            "scripts/release/html_performance_host_load_validation_test.py": "189281be",
+            "scripts/release/produce_html_performance_evidence.py": "189281be",
+            "scripts/release/produce_html_performance_evidence_test.py": "189281be",
+            "scripts/release/verify_html_performance_evidence_test.py": "5f889a3e217a72806c1561aaa311e79a685761e3",
+        }
         for path in paths:
             old = subprocess.run(["git", "-C", str(repository), "show",
                                   "b9cf37535ba374b62fee4e889f9c58f58f1ab8dc:" + path],
                                  check=True, capture_output=True).stdout
-            current = (self._historical_lock_verifier(repository)
-                       if path == "scripts/release/verify_html_performance_evidence.py"
-                       else (repository / path).read_bytes())
+            if path == "scripts/release/verify_html_performance_evidence.py":
+                current = self._historical_lock_verifier(repository)
+            elif path in historical_targets:
+                current = subprocess.run(["git", "-C", str(repository), "show",
+                                          historical_targets[path] + ":" + path],
+                                         check=True, capture_output=True).stdout
+            else:
+                current = (repository / path).read_bytes()
             with self.subTest(path=path):
                 self.assertTrue(known_auth_program_change(path, old, current))
                 self.assertFalse(known_auth_program_change(path, old, current + b" "))
                 self.assertFalse(known_auth_program_change(path, old, current + b"\npolicy_change()\n"))
                 self.assertFalse(known_auth_program_change("scripts/release/unknown.py", old, current))
+                if path == "scripts/release/html_performance_host_load_validation.py":
+                    self.assertFalse(known_auth_program_change(path, old + b" ", current))
+                if path in historical_targets:
+                    live = (repository / path).read_bytes()
+                    self.assertNotEqual(current, live)
+                    self.assertFalse(known_auth_program_change(path, old, live))
                 if path == "scripts/release/verify_html_performance_evidence.py":
                     actual_current = (repository / path).read_bytes()
                     self.assertNotEqual(current, actual_current)
@@ -2070,6 +2144,40 @@ class PerformanceEvidenceTest(unittest.TestCase):
         manifest: JsonObject = {"order": order}
         with patch.object(gate, "read_json", side_effect=lambda path: files[str(path)]):
             gate._v3_worker_runtime_execution(bundle, expected, manifest, context)
+            candidate = gate._objects(order[1]["workerAttempts"], "candidate attempts")[0]
+            candidate_lifecycle = files["/candidate-lifecycle"]
+            candidate_execution = json_object(candidate["runtimeExecution"])
+            self.assertEqual(gate.validate_worker_runtime_environment(
+                candidate_execution, non_metadata_environment_sha="b" * 64,
+                metadata_values=values,
+            ), "e" * 64)
+            with self.assertRaisesRegex(ValueError, "process environment differs"):
+                gate.validate_worker_runtime_environment(
+                    candidate_execution, non_metadata_environment_sha="0" * 64,
+                    metadata_values=values,
+                )
+            with self.assertRaisesRegex(ValueError, "process environment differs"):
+                gate.validate_worker_runtime_environment(
+                    candidate_execution, non_metadata_environment_sha="b" * 64,
+                    metadata_values=values, non_metadata_key_names=["OTHER"],
+                )
+            with self.assertRaisesRegex(ValueError, "metadata values differ"):
+                gate.validate_worker_runtime_environment(
+                    candidate_execution, non_metadata_environment_sha="b" * 64,
+                    metadata_values={},
+                )
+            self.assertEqual(
+                gate.validate_v3_worker_runtime_execution(
+                    expected, context, "candidate", candidate, candidate_lifecycle,
+                    expected_environment_sha="e" * 64,
+                ),
+                "e" * 64,
+            )
+            with self.assertRaisesRegex(ValueError, "environment changed"):
+                gate.validate_v3_worker_runtime_execution(
+                    expected, context, "candidate", candidate, candidate_lifecycle,
+                    expected_environment_sha="f" * 64,
+                )
             baseline = gate._objects(order[0]["workerAttempts"], "test worker attempts")[0]
             execution = json_object(baseline["runtimeExecution"])
             execution["metadataValuesSha256"] = "0" * 64
@@ -3492,6 +3600,170 @@ class PerformanceEvidenceTest(unittest.TestCase):
                         self.change_candidate_metric(path, phase, metric, baseline)
                     self.reaggregate(0)
 
+    def memory_policy_fixture(self, retention: list[float]) -> tuple[JsonObject, JsonObject]:
+        expected = gate.read_json(self.expected_paths[0])
+        expected["memoryRetentionRef"] = {"path": "/retention", "sha256": "a" * 64}
+        policy = memory_evidence.evaluate_paired(self.report_paths[0], expected, retention)
+        return expected, {"memoryPolicy": policy}
+
+    def assert_memory_policy(self, expected: JsonObject, result: JsonObject,
+                             retention: list[float]) -> bool:
+        reader = RetentionReaderModule("html_performance_retention_evidence")
+        reader.read_retained_rss = Mock(return_value=retention)
+        with patch.dict(sys.modules, {"html_performance_retention_evidence": reader}):
+            return cast(bool, gate._require_v2_memory_policy(
+                gate.Bundle(self.bundle), expected, result, self.report_paths[0],
+                non_comparable=False,
+            ))
+
+    def test_v2_reauthenticates_small_peak_despite_v1_rss_failure(self) -> None:
+        for path in self.report_paths[0]:
+            if path.name.startswith("candidate-"):
+                self.change_candidate_metric(path, "cold_open", "peak_rss_bytes", 101)
+        expected, result = self.memory_policy_fixture([100.0] * 25)
+        policy = gate._object(result["memoryPolicy"], "memory")
+        self.assertFalse(gate._object(policy["v1Policy"], "v1")["policyPass"])
+        self.assertTrue(self.assert_memory_policy(expected, result, [100.0] * 25))
+        self.assertFalse(gate._require_v2_memory_policy(
+            gate.Bundle(self.bundle), expected, {}, self.report_paths[0], non_comparable=False,
+        ))
+        self.reaggregate(0)
+        with self.assertRaisesRegex(ValueError, "paired time/RSS regression"):
+            gate._verify_legacy_diagnostic(self.bundle, self.root)
+        self.mutate_json(
+            self.expected_paths[0],
+            lambda value: value.update(memoryRetentionRef=expected["memoryRetentionRef"]),
+        )
+        self.mutate_json(
+            self.result_paths[0], lambda value: value.update(memoryPolicy=result["memoryPolicy"]),
+        )
+        reader = RetentionReaderModule("html_performance_retention_evidence")
+        reader.read_retained_rss = Mock(return_value=[100.0] * 25)
+        with patch.dict(sys.modules, {"html_performance_retention_evidence": reader}):
+            gate._verify_legacy_diagnostic(self.bundle, self.root)
+
+    def test_v2_rejects_time_or_retained_memory_regression(self) -> None:
+        for path in self.report_paths[0]:
+            if path.name.startswith("candidate-"):
+                self.change_candidate_metric(path, "cold_open", "elapsed_ms", 11)
+        expected, result = self.memory_policy_fixture([100.0] * 25)
+        with self.assertRaisesRegex(ValueError, "paired time/memory regression"):
+            self.assert_memory_policy(expected, result, [100.0] * 25)
+        for path in self.report_paths[0]:
+            if path.name.startswith("candidate-"):
+                self.change_candidate_metric(path, "cold_open", "elapsed_ms", 10)
+        retention = [100.0 + index for index in range(25)]
+        expected, result = self.memory_policy_fixture(retention)
+        with self.assertRaisesRegex(ValueError, "paired time/memory regression"):
+            self.assert_memory_policy(expected, result, retention)
+
+    def test_v2_rejects_missing_reference_and_tampered_policy(self) -> None:
+        expected, result = self.memory_policy_fixture([100.0] * 25)
+        without_reference = {key: value for key, value in expected.items()
+                             if key != "memoryRetentionRef"}
+        with self.assertRaises(ValueError):
+            self.assert_memory_policy(without_reference, result, [100.0] * 25)
+        for field, value in (("version", "unknown"), ("policyPass", False)):
+            changed = copy.deepcopy(result)
+            gate._object(changed["memoryPolicy"], "memory")[field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(
+                ValueError, "saved memory policy differs"
+            ):
+                self.assert_memory_policy(expected, changed, [100.0] * 25)
+        reader = RetentionReaderModule("html_performance_retention_evidence")
+        reader.read_retained_rss = Mock(side_effect=ValueError("tampered retention"))
+        with patch.dict(sys.modules, {"html_performance_retention_evidence": reader}):
+            with self.assertRaisesRegex(ValueError, "tampered retention"):
+                gate._require_v2_memory_policy(
+                    gate.Bundle(self.bundle), expected, result, self.report_paths[0],
+                    non_comparable=False,
+                )
+
+    def test_v2_noncomparable_retains_v1_failure_and_requires_retention(self) -> None:
+        _, expected, _, _, failure = self._noncomparable_baseline_fixture("memory-v2")
+        identity = gate._object(expected["catalogCondition"], "catalog")
+        evidence = gate._object(expected["operationEvidenceRef"], "operation evidence")
+        expected["memoryRetentionRef"] = {"path": "/retention", "sha256": "a" * 64}
+        paths = [path for path in self.report_paths[0] if path.name.startswith("candidate-")]
+        for path in paths:
+            report = gate.read_json(path)
+            report.update(condition_id=identity["condition_id"], case_id=identity["case_id"],
+                          state=identity["state"], operation_kind=identity["operation_kind"],
+                          operation_evidence_ref=evidence, catalog_condition=identity)
+            for sample in gate._objects(report["samples"], "samples"):
+                sample["catalog_condition"] = {
+                    "profile": "catalog-plan84", "condition_id": identity["condition_id"],
+                    "case_id": identity["case_id"], "state": identity["state"],
+                    "operation_kind": identity["operation_kind"],
+                    "operation_evidence_sha256": evidence["sha256"],
+                }
+            def apply_report(value: JsonObject, report: JsonObject = report) -> None:
+                value.update(report)
+
+            self.mutate_report(path, apply_report)
+        expected["reportPins"] = gate.read_json(self.expected_paths[0])["reportPins"]
+        baseline_failure = copy.deepcopy(failure)
+        for retained, accepted in (([100.0] * 25, True),
+                                   ([100.0 + index for index in range(25)], False)):
+            policy = memory_evidence.evaluate_candidate_only(paths, expected, retained)
+            self.assertFalse(policy["policyPass"])
+            reader = RetentionReaderModule("html_performance_retention_evidence")
+            reader.read_retained_rss = Mock(return_value=retained)
+            with patch.dict(sys.modules, {"html_performance_retention_evidence": reader}):
+                if accepted:
+                    self.assertTrue(gate._require_v2_memory_policy(
+                        gate.Bundle(self.bundle), expected, {"memoryPolicy": policy}, paths,
+                        non_comparable=True,
+                    ))
+                else:
+                    with self.assertRaisesRegex(ValueError, "candidate retained memory regression"):
+                        gate._require_v2_memory_policy(
+                            gate.Bundle(self.bundle), expected, {"memoryPolicy": policy}, paths,
+                            non_comparable=True,
+                        )
+        self.assertEqual(failure, baseline_failure)
+
+    def test_measurement_sample_checks_each_frame_and_candidate_operation(self) -> None:
+        expected = gate.read_json(self.expected_paths[0])
+        plan = gate.read_json(self.bundle / "common/plan.json")
+        path = next(path for path in self.report_paths[0] if path.name == "candidate-0.json")
+        report = gate.read_json(path)
+        sample = gate._objects(report["samples"], "samples")[0]
+        gate.validate_measurement_sample(sample, expected, plan, candidate=True)
+        invalid_frame = copy.deepcopy(sample)
+        phases = gate._object(invalid_frame["phases"], "phases")
+        cold = gate._object(phases["cold_open"], "cold")
+        gate._object(cold["frame"], "frame")["pixel_bytes"] = 0
+        with self.assertRaisesRegex(ValueError, "actual rendered viewport differs"):
+            gate.validate_measurement_sample(invalid_frame, expected, plan, candidate=True)
+        invalid_operation = copy.deepcopy(sample)
+        operation = gate._object(gate._object(invalid_operation["phases"], "phases")
+                                 ["post_operation"], "operation")
+        operation["visual_change_observed"] = False
+        with self.assertRaisesRegex(ValueError, "operation did not produce a changed frame"):
+            gate.validate_measurement_sample(invalid_operation, expected, plan, candidate=True)
+        gate.validate_measurement_sample(invalid_operation, expected, plan, candidate=False)
+
+    def test_measurement_sample_rejects_changed_catalog_dispatch(self) -> None:
+        _, expected, _, _, _ = self._noncomparable_baseline_fixture("sample-dispatch")
+        path = next(path for path in self.report_paths[0] if path.name == "candidate-0.json")
+        sample = gate._objects(gate.read_json(path)["samples"], "samples")[0]
+        catalog = gate._object(expected["catalogCondition"], "catalog")
+        reference = gate._object(expected["operationEvidenceRef"], "operation evidence")
+        operation = gate._object(gate._object(sample["phases"], "phases")
+                                 ["post_operation"], "operation")
+        operation["catalog_operation"] = {
+            "condition_id": catalog["condition_id"], "case_id": catalog["case_id"],
+            "state": catalog["state"], "operation_kind": catalog["operation_kind"],
+            "operation_evidence_sha256": reference["sha256"],
+            "dispatched_inputs": ["pointer_down"],
+        }
+        plan: JsonObject = {"operationStream": [{"kind": "pointer_down"}]}
+        gate.validate_measurement_sample(sample, expected, plan, candidate=True)
+        gate._object(operation["catalog_operation"], "catalog operation")["dispatched_inputs"] = []
+        with self.assertRaisesRegex(ValueError, "catalog dispatched inputs differ"):
+            gate.validate_measurement_sample(sample, expected, plan, candidate=True)
+
     def test_candidate_display_phases_require_each_frame_under_three_seconds(self) -> None:
         candidate = next(path for path in self.report_paths[0] if path.name.startswith("candidate"))
         report = json_object(gate.read_json(candidate))
@@ -4575,6 +4847,67 @@ class PerformanceJsonBoundaryTest(unittest.TestCase):
             with self.subTest(elapsed_ms=value), self.assertRaises(ValueError):
                 gate._phase_sample(sample, "cold_open")
         self.assertEqual(gate._number(1, "positive measurement"), 1.0)
+
+
+class MemoryPolicyCliTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.arguments = ["verify_html_performance_evidence.py", "--repo", str(self.root),
+                          "--evidence-dir", str(self.root)]
+
+    def verify_cli(self, result: JsonObject, *extra: str) -> int:
+        with patch.object(gate.sys, "argv", [*self.arguments, *extra]), \
+             patch.object(gate, "verify", return_value=result), \
+             patch.object(gate.sys, "stdout", new_callable=io.StringIO), \
+             patch.object(gate.sys, "stderr", new_callable=io.StringIO):
+            return cast(int, gate.main())
+
+    def test_v2_requirement_preserves_unflagged_v1_and_rejects_invalid_summaries(self) -> None:
+        valid: JsonObject = {"memoryPolicyVersion": "html-memory-v2", "retainedMemoryConditions": 84}
+        self.assertEqual(self.verify_cli({}), 0)
+        self.assertEqual(self.verify_cli(valid, "--require-memory-policy-v2"), 0)
+        for result in ({}, {**valid, "retainedMemoryConditions": 83},
+                       {**valid, "retainedMemoryConditions": True},
+                       {**valid, "memoryPolicyVersion": "unknown"}):
+            with self.subTest(result=result):
+                self.assertEqual(self.verify_cli(result, "--require-memory-policy-v2"), 1)
+
+    def test_v2_rejects_diagnostic_build_and_acquisition_modes(self) -> None:
+        for arguments in (("--diagnostic-only",), ("--acquire",),
+                          ("--acquire-current-producer",),
+                          ("--candidate-build-proof", "proof"),
+                          ("--build-artifact-sha256", "a" * 64),
+                          ("--bundle-manifest-sha256", "b" * 64)):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(self.verify_cli({}, "--require-memory-policy-v2", *arguments), 1)
+        (self.root / "acquisition.json").write_text("{}")
+        self.assertEqual(self.verify_cli({}, "--require-memory-policy-v2"), 1)
+
+    def test_v2_requires_authenticated_measured_result_for_reuse(self) -> None:
+        valid: JsonObject = {"memoryPolicyVersion": "html-memory-v2", "retainedMemoryConditions": 84}
+        rows = [({"reuseEligibility": True, "measuredResult": valid}, 0),
+                ({"reuseEligibility": True, "measuredResult": {}}, 1),
+                ({"reuseEligibility": False, "measuredResult": valid}, 1),
+                ({"reuseEligibility": True, **valid}, 1)]
+        for payload, expected in rows:
+            with self.subTest(payload=payload), \
+                 patch.object(gate.sys, "argv", [*self.arguments, "--require-memory-policy-v2",
+                                                  "--reuse-request", str(self.root / "request")]), \
+                 patch("html_performance_source_reuse_cli.verify_reuse_request", return_value=payload), \
+                 patch.object(gate.sys, "stdout", new_callable=io.StringIO), \
+                 patch.object(gate.sys, "stderr", new_callable=io.StringIO):
+                self.assertEqual(gate.main(), expected)
+        (self.root / "reuse-request.json").write_text("{}")
+        for measured, expected in ((valid, 0), ({}, 1)):
+            payload = {"reuseEligibility": True, "measuredResult": measured}
+            with self.subTest(automatic_reuse=measured), \
+                 patch.object(gate.sys, "argv", [*self.arguments, "--require-memory-policy-v2"]), \
+                 patch("html_performance_source_reuse_cli.verify_reuse_request", return_value=payload), \
+                 patch.object(gate.sys, "stdout", new_callable=io.StringIO), \
+                 patch.object(gate.sys, "stderr", new_callable=io.StringIO):
+                self.assertEqual(gate.main(), expected)
 
 
 if __name__ == "__main__":

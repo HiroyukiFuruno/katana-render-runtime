@@ -2317,8 +2317,44 @@ def _v3_process_stamp(value: object, worker: JsonObject, stamp: list[object]) ->
     require(fields == stamp, "v3 worker execution stamp differs from observed boundary")
 
 
-def _v3_worker_runtime_execution(bundle: Bundle, expected: JsonObject, manifest: JsonObject,
-                                 context: JsonObject) -> None:
+def validate_worker_runtime_environment(
+    execution: JsonObject, *, non_metadata_environment_sha: str,
+    metadata_values: Mapping[str, object], non_metadata_key_names: Sequence[str] | None = None,
+    expected_environment_sha: str | None = None,
+) -> str:
+    """Check one execution against independently authenticated environment inputs."""
+    metadata_keys = sorted(("KRR_PERF_RUSTC", "KRR_PERF_CARGO", "KRR_PERF_ENVIRONMENT_SHA256",
+                            "KRR_PERF_LOCK_PATH", "KRR_PERF_SOURCE_SNAPSHOT_PATH"))
+    require(set(metadata_values) == set(metadata_keys)
+            and all(isinstance(value, str) and bool(value) for value in metadata_values.values()),
+            "v3 metadata values differ")
+    digest(non_metadata_environment_sha)
+    names = _array(execution.get("keyNames"), "v3 worker environment keys")
+    require(all(isinstance(name, str) and bool(name) for name in names)
+            and names == sorted(set(cast(list[str], names)))
+            and set(metadata_keys) <= set(cast(list[str], names)),
+            "v3 worker process environment differs")
+    base_names = [name for name in cast(list[str], names) if name not in metadata_keys]
+    require(non_metadata_key_names is None or base_names == list(non_metadata_key_names),
+            "v3 worker process environment differs")
+    actual_environment_sha = _text(execution.get("actualEnvironmentSha256"), "v3 worker environment SHA")
+    digest(actual_environment_sha)
+    require(expected_environment_sha is None or actual_environment_sha == expected_environment_sha,
+            "v3 actual worker environment changed")
+    require(execution.get("keyNamesSha256") == _v3_json_digest(names)
+            and execution.get("nonMetadataEnvironmentSha256") == non_metadata_environment_sha
+            and execution.get("metadataKeys") == metadata_keys
+            and execution.get("metadataValuesSha256") == _v3_json_digest(dict(metadata_values)),
+            "v3 worker process environment differs")
+    return actual_environment_sha
+
+
+def validate_v3_worker_runtime_execution(
+    expected: JsonObject, context: JsonObject, role: str, attempt: JsonObject,
+    lifecycle: JsonObject, *, expected_environment_sha: str | None = None,
+) -> str:
+    """Authenticate one worker execution; caller validates lifecycle role and argv."""
+    require(role in {"baseline", "candidate"}, "v3 worker role differs")
     workers = _object(context.get("systemWorkers"), "v3 system workers")
     environment = _object(context.get("workerEnvironment"), "v3 worker environment")
     base_names = _array(environment.get("nonMetadataKeyNames"), "v3 base environment keys")
@@ -2343,9 +2379,33 @@ def _v3_worker_runtime_execution(bundle: Bundle, expected: JsonObject, manifest:
               "KRR_PERF_SOURCE_SNAPSHOT_PATH": metadata.get("KRR_PERF_SOURCE_SNAPSHOT_PATH")}
     require(all(isinstance(value, str) and bool(value) for value in values.values()),
             "v3 metadata values differ")
-    expected_names = sorted([*cast(list[str], base_names), *metadata_keys])
+    observed = _object(workers.get(role), "v3 worker boundary observation")
+    pin = _object(observed.get("worker"), "v3 worker pin")
+    stamp = _array(observed.get("stamp"), "v3 worker stamp")
+    require(attempt.get("workerStarted") is True
+            and attempt.get("binarySha256Before") == pin.get("sha256")
+            and attempt.get("binarySha256After") == pin.get("sha256"),
+            "v3 worker attempt binary differs")
+    execution = _object(attempt.get("runtimeExecution"), "v3 worker runtime execution")
+    require(execution == lifecycle.get("runtimeExecution")
+            and set(execution) == {"schema", "binaryIdentityBefore", "binaryIdentityAfter",
+                                   "actualEnvironmentSha256", "keyNames", "keyNamesSha256",
+                                   "nonMetadataEnvironmentSha256", "metadataKeys", "metadataValuesSha256"}
+            and execution.get("schema") == "krr-html-worker-runtime-execution-v1",
+            "v3 worker runtime execution differs")
+    _v3_process_stamp(execution.get("binaryIdentityBefore"), pin, stamp)
+    _v3_process_stamp(execution.get("binaryIdentityAfter"), pin, stamp)
+    return validate_worker_runtime_environment(
+        execution, non_metadata_environment_sha=_text(base_sha, "v3 base environment SHA"),
+        metadata_values=values, non_metadata_key_names=cast(list[str], base_names),
+        expected_environment_sha=expected_environment_sha,
+    )
+
+
+def _v3_worker_runtime_execution(bundle: Bundle, expected: JsonObject, manifest: JsonObject,
+                                 context: JsonObject) -> None:
     seen: set[str] = set()
-    actual_environment_sha: object = None
+    actual_environment_sha: str | None = None
     for order in _objects(manifest.get("order"), "v3 pair order"):
         role = _text(order.get("arm"), "v3 worker role")
         require(role in {"baseline", "candidate"}, "v3 worker role differs")
@@ -2355,38 +2415,15 @@ def _v3_worker_runtime_execution(bundle: Bundle, expected: JsonObject, manifest:
                     "v3 worker execution evidence is missing")
             continue
         seen.add(role)
-        observed = _object(workers.get(role), "v3 worker boundary observation")
-        pin = _object(observed.get("worker"), "v3 worker pin")
-        stamp = _array(observed.get("stamp"), "v3 worker stamp")
         for attempt in attempts:
             lifecycle = _validated_noncomparable_attempt_lifecycle(bundle, attempt)
             exit_code = _integer(attempt.get("actualExit"), "v3 worker exit")
             sample = _integer(attempt.get("sample"), "v3 worker sample")
-            require(attempt.get("workerStarted") is True
-                    and attempt.get("binarySha256Before") == pin.get("sha256")
-                    and attempt.get("binarySha256After") == pin.get("sha256"),
-                    "v3 worker attempt binary differs")
             _validate_worker_lifecycle_identity(expected, order, lifecycle, sample=sample, exit_code=exit_code)
-            execution = _object(attempt.get("runtimeExecution"), "v3 worker runtime execution")
-            require(execution == lifecycle.get("runtimeExecution")
-                    and set(execution) == {"schema", "binaryIdentityBefore", "binaryIdentityAfter",
-                                           "actualEnvironmentSha256", "keyNames", "keyNamesSha256",
-                                           "nonMetadataEnvironmentSha256", "metadataKeys", "metadataValuesSha256"}
-                    and execution.get("schema") == "krr-html-worker-runtime-execution-v1",
-                    "v3 worker runtime execution differs")
-            _v3_process_stamp(execution.get("binaryIdentityBefore"), pin, stamp)
-            _v3_process_stamp(execution.get("binaryIdentityAfter"), pin, stamp)
-            digest(execution.get("actualEnvironmentSha256"))
-            if actual_environment_sha is None:
-                actual_environment_sha = execution.get("actualEnvironmentSha256")
-            require(execution.get("actualEnvironmentSha256") == actual_environment_sha,
-                    "v3 actual worker environment changed")
-            require(execution.get("keyNames") == expected_names
-                    and execution.get("keyNamesSha256") == _v3_json_digest(expected_names)
-                    and execution.get("nonMetadataEnvironmentSha256") == base_sha
-                    and execution.get("metadataKeys") == metadata_keys
-                    and execution.get("metadataValuesSha256") == _v3_json_digest(values),
-                    "v3 worker process environment differs")
+            actual_environment_sha = validate_v3_worker_runtime_execution(
+                expected, context, role, attempt, lifecycle,
+                expected_environment_sha=actual_environment_sha,
+            )
     require(seen == {"baseline", "candidate"}, "v3 worker role execution evidence missing")
 
 
@@ -3072,6 +3109,83 @@ def evaluate_measurement_policy(
 
 
 
+def _require_v2_memory_policy(
+    bundle: Bundle, expected: JsonObject, result: JsonObject,
+    paths: list[Path], *, non_comparable: bool,
+) -> bool:
+    if "memoryPolicy" not in result:
+        return False
+    _object(expected.get("memoryRetentionRef"), "memory retention reference")
+    saved = _object(result["memoryPolicy"], "memory policy")
+    from html_performance_memory_evidence import evaluate_candidate_only, evaluate_paired
+    from html_performance_retention_evidence import read_retained_rss
+
+    retained = read_retained_rss(bundle, expected)
+    canonical = (evaluate_candidate_only(paths, expected, retained) if non_comparable
+                 else evaluate_paired(paths, expected, retained))
+    require(saved == canonical, "saved memory policy differs from authenticated evidence")
+    if non_comparable:
+        require(canonical.get("candidateRetentionPass") is True,
+                "candidate retained memory regression")
+    else:
+        require(canonical.get("policyPass") is True, "paired time/memory regression")
+    return True
+
+
+def validate_measurement_sample(
+    sample: JsonObject, expected: JsonObject, plan: JsonObject, *, candidate: bool,
+) -> None:
+    """Validate the frame and operation evidence of one real worker sample."""
+    viewport = _object(expected["viewport"], "viewport")
+    require(sample.get("viewport") == viewport, "worker viewport differs")
+    phases = _object(sample.get("phases"), "sample phases")
+    require(set(phases) == set(PHASES), "incomplete sample/phase coverage")
+    for phase in PHASES:
+        measured = _object(phases[phase], "measured phase")
+        if phase in ("post_operation", "same_session_resize"):
+            measured = _object(measured["measurement"], "post-operation measurement")
+        frame = _object(measured["frame"], "measured frame")
+        expected_frame_viewport = viewport
+        if phase == "same_session_resize":
+            resize = _object(phases[phase], "same-session resize")
+            resize_evidence = _object(resize["resize_evidence"], "resize evidence")
+            expected_frame_viewport = _object(resize_evidence["to_viewport"], "resize target viewport")
+        expected_pixels = (_integer(expected_frame_viewport["width"], "frame viewport width")
+                           * _integer(expected_frame_viewport["height"], "frame viewport height") * 4)
+        require(frame["viewport"] == expected_frame_viewport and frame["pixel_bytes"] == expected_pixels,
+                "actual rendered viewport differs")
+    if candidate:
+        _validate_candidate_operation(phases, expected, plan)
+
+
+def _validate_candidate_operation(phases: JsonObject, expected: JsonObject, plan: JsonObject) -> None:
+    operation = _object(phases["post_operation"], "post operation")
+    catalog_expected = expected.get("catalogCondition")
+    if catalog_expected is None:
+        digest(operation["pixel_sha_before"])
+        digest(operation["pixel_sha_after"])
+        require(_numeric(operation["generation_after"], "generation after") > _numeric(operation["generation_before"], "generation before") and operation["pixel_sha_before"] != operation["pixel_sha_after"] and operation["visual_change_observed"] is True, "operation did not produce a changed frame")
+        return
+    operation_evidence = _object(operation.get("catalog_operation"), "catalog operation result")
+    catalog = _object(catalog_expected, "catalog condition")
+    require(operation_evidence.get("condition_id") == catalog["condition_id"]
+            and operation_evidence.get("case_id") == catalog["case_id"]
+            and operation_evidence.get("state") == catalog["state"]
+            and operation_evidence.get("operation_kind") == catalog["operation_kind"]
+            and operation_evidence.get("operation_evidence_sha256") == _object(expected["operationEvidenceRef"], "operation evidence ref")["sha256"],
+            "catalog post-operation identity differs")
+    if not plan["operationStream"]:
+        require(operation_evidence.get("delivery") == "measured-close-and-new-session-open",
+                "catalog static state did not use a measured close/reopen")
+    else:
+        dispatched = _array(operation_evidence.get("dispatched_inputs"), "dispatched catalog inputs")
+        expected_kinds = [{"pointer_move": "pointer_move", "pointer_down": "pointer_down",
+                           "pointer_up": "pointer_up", "text": "text", "key_down": "key_down",
+                           "key_up": "key_up", "scroll": "scroll", "advance_time": "advance_time"}[_text(_object(item, "catalog operation stream item")["kind"], "catalog operation kind")]
+                          for item in _array(plan["operationStream"], "operation stream")]
+        require(dispatched == expected_kinds, "catalog dispatched inputs differ from observed operation stream")
+
+
 def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
                      git_query: GitQuery | None = None,
                      validated_builds: Mapping[str, JsonObject] | None = None,
@@ -3331,47 +3445,7 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
         samples = _objects(report["samples"], "report samples")
         require([s["sample"] for s in samples] == list(range(5)) and all(type(s["sample"]) is int and set(_object(s["phases"], "sample phases")) == set(PHASES) for s in samples), "incomplete sample/phase coverage")
         for sample in samples:
-            require(sample["viewport"] == viewport, "worker viewport differs")
-            phases = _object(sample["phases"], "sample phases")
-            for phase in PHASES:
-                measured = _object(phases[phase], "measured phase")
-                if phase in ("post_operation", "same_session_resize"):
-                    measured = _object(measured["measurement"], "post-operation measurement")
-                frame = _object(measured["frame"], "measured frame")
-                expected_frame_viewport = viewport
-                if phase == "same_session_resize":
-                    resize = _object(phases[phase], "same-session resize")
-                    resize_evidence = _object(resize["resize_evidence"], "resize evidence")
-                    expected_frame_viewport = _object(resize_evidence["to_viewport"], "resize target viewport")
-                expected_pixels = (_integer(expected_frame_viewport["width"], "frame viewport width")
-                                   * _integer(expected_frame_viewport["height"], "frame viewport height") * 4)
-                require(frame["viewport"] == expected_frame_viewport and frame["pixel_bytes"] == expected_pixels, "actual rendered viewport differs")
-        if arm == "candidate":
-            operation = _object(phases["post_operation"], "post operation")
-            if catalog_expected is None:
-                digest(operation["pixel_sha_before"])
-                digest(operation["pixel_sha_after"])
-                require(_numeric(operation["generation_after"], "generation after") > _numeric(operation["generation_before"], "generation before") and operation["pixel_sha_before"] != operation["pixel_sha_after"] and operation["visual_change_observed"] is True, "operation did not produce a changed frame")
-            else:
-                operation_evidence = _object(operation.get("catalog_operation"), "catalog operation result")
-                catalog = _object(catalog_expected, "catalog condition")
-                operation_plan = _object(plan, "catalog operation plan")
-                require(operation_evidence.get("condition_id") == catalog["condition_id"]
-                        and operation_evidence.get("case_id") == catalog["case_id"]
-                        and operation_evidence.get("state") == catalog["state"]
-                        and operation_evidence.get("operation_kind") == catalog["operation_kind"]
-                        and operation_evidence.get("operation_evidence_sha256") == _object(expected["operationEvidenceRef"], "operation evidence ref")["sha256"],
-                        "catalog post-operation identity differs")
-                if not operation_plan["operationStream"]:
-                    require(operation_evidence.get("delivery") == "measured-close-and-new-session-open",
-                            "catalog static state did not use a measured close/reopen")
-                else:
-                    dispatched = _array(operation_evidence.get("dispatched_inputs"), "dispatched catalog inputs")
-                    expected_kinds = [{"pointer_move": "pointer_move", "pointer_down": "pointer_down",
-                                       "pointer_up": "pointer_up", "text": "text", "key_down": "key_down",
-                                       "key_up": "key_up", "scroll": "scroll", "advance_time": "advance_time"}[_text(_object(item, "catalog operation stream item")["kind"], "catalog operation kind")]
-                                      for item in _array(operation_plan["operationStream"], "operation stream")]
-                    require(dispatched == expected_kinds, "catalog dispatched inputs differ from observed operation stream")
+            validate_measurement_sample(sample, expected, plan, candidate=arm == "candidate")
         loads = _objects(row["workerLoads"], "worker loads")
         require(len(loads) == 5, "all five worker load observations required")
         for load in loads:
@@ -3410,6 +3484,7 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
         }
         require(result.get("policy") == expected_policy,
                 "saved non-comparable candidate policy differs")
+        _require_v2_memory_policy(bundle, expected, result, paths, non_comparable=True)
         return _validated_attempt_summary(
             expected, source, "nonComparable", candidate_samples=25,
             sample_records=25,
@@ -3420,7 +3495,8 @@ def validate_attempt(bundle: Bundle, root: Path, attempt: JsonObject, *,
     require(aggregate["measurement_executed"] is True, "actual measurements absent")
     saved = _object(result["policy"], "measurement policy")
     require(saved == canonical_policy, "saved paired policy differs from raw reports")
-    require(canonical_policy["policyPass"] is True, "paired time/RSS regression")
+    if not _require_v2_memory_policy(bundle, expected, result, paths, non_comparable=False):
+        require(canonical_policy["policyPass"] is True, "paired time/RSS regression")
     require(result.get("comparisonStatus") == "paired",
             "paired condition comparison status differs")
     arms = _object(aggregate["arms"], "aggregate arms")
@@ -3463,6 +3539,21 @@ def _require_formal_release_result(result: JsonObject) -> None:
     _require_html84_acceptance(stage90)
     require(result.get("performanceNonregression") is True,
             "HTML performance non-regression is not established")
+
+
+def _catalog_memory_summary(bundle: Bundle, attempts: list[JsonObject]) -> JsonObject:
+    """Summarize only attempts already authenticated by validate_attempt."""
+    results = [bundle.json(attempt["result"]) for attempt in attempts]
+    present = ["memoryPolicy" in result for result in results]
+    if not any(present):
+        return {}
+    require(len(results) == 84 and all(present),
+            "catalog memory policy requires all 84 conditions")
+    from html_performance_memory_policy import POLICY_VERSION
+
+    require(all(_object(result["memoryPolicy"], "memory policy").get("version") == POLICY_VERSION
+                for result in results), "catalog memory policy version differs")
+    return {"memoryPolicyVersion": POLICY_VERSION, "retainedMemoryConditions": 84}
 
 
 def validate_expected_builds(bundle: Bundle, root: Path, first_expected: JsonObject, *,
@@ -3588,6 +3679,7 @@ def _verify_impl(directory: Path, root: Path, *, git_query: GitQuery | None = No
             values = [validate_attempt(bundle, root, attempt, git_query=git_query,
                                        validated_builds=validated_builds, reuse_context=reuse_context,
                                        remote_context=remote_context) for attempt in attempts]
+        memory_summary = _catalog_memory_summary(bundle, attempts)
         from html_performance_host_load_validation import verify_catalog_host_load
         verify_catalog_host_load(bundle, attempts, _host_load_source_records(
             bundle, root, first_expected, head, git_query=git_query))
@@ -3779,7 +3871,7 @@ def _verify_impl(directory: Path, root: Path, *, git_query: GitQuery | None = No
                 "htmlStage90": {"threshold": 90, "minimumScore": minimum_score,
                                 "acceptance": validation["acceptance"],
                                 "fontIdentityEquivalence": validation["fontIdentityEquivalence"]},
-                "performanceNonregression": True}
+                "performanceNonregression": True, **memory_summary}
     require(len(attempts) == 3, "all three viewports required")
     values = [validate_attempt(bundle, root, attempt, git_query=git_query) for attempt in attempts]
     require([v["viewport"] for v in values] == [{"width": w, "height": h, "scale": 1} for w, h in VIEWPORTS], "viewport coverage/order differs")
@@ -4073,6 +4165,18 @@ def acquire(directory: Path, root: Path, repository: str, current_producer: bool
     return result
 
 
+def _require_cli_memory_v2(result: JsonObject, *, reused: bool) -> None:
+    from html_performance_memory_policy import POLICY_VERSION
+
+    if reused:
+        require(result.get("reuseEligibility") is True, "performance reuse is not eligible")
+        result = _object(result.get("measuredResult"), "reused measured result")
+    require(result.get("memoryPolicyVersion") == POLICY_VERSION
+            and type(result.get("retainedMemoryConditions")) is int
+            and result.get("retainedMemoryConditions") == 84,
+            "HTML performance requires v2 retained memory for all 84 conditions")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path.cwd())
@@ -4084,6 +4188,7 @@ def main() -> int:
     parser.add_argument("--build-artifact-sha256")
     parser.add_argument("--bundle-manifest-sha256")
     parser.add_argument("--reuse-request", type=Path)
+    parser.add_argument("--require-memory-policy-v2", action="store_true")
     parser.add_argument(
         "--diagnostic-only",
         action="store_true",
@@ -4092,6 +4197,11 @@ def main() -> int:
     args = parser.parse_args()
     try:
         require(not (args.acquire and args.acquire_current_producer), "ambiguous acquisition mode")
+        require(not (args.require_memory_policy_v2 and (
+            args.acquire or args.acquire_current_producer or args.diagnostic_only
+            or args.candidate_build_proof is not None or args.build_artifact_sha256 is not None
+            or args.bundle_manifest_sha256 is not None)),
+            "v2 memory policy requires formal verification, not acquisition or diagnostics")
         require(not (args.reuse_request is not None and (
             args.acquire or args.acquire_current_producer or args.diagnostic_only
             or args.candidate_build_proof is not None or args.build_artifact_sha256 is not None
@@ -4107,6 +4217,8 @@ def main() -> int:
         if args.reuse_request is not None:
             from html_performance_source_reuse_cli import verify_reuse_request
             result = verify_reuse_request(args.reuse_request, args.repo.resolve())
+            if args.require_memory_policy_v2:
+                _require_cli_memory_v2(result, reused=True)
             print(json.dumps(result, sort_keys=True))
             return 0
         if args.candidate_build_proof is not None:
@@ -4136,10 +4248,14 @@ def main() -> int:
                 if use_reuse:
                     from html_performance_source_reuse_cli import verify_reuse_request
                     result = verify_reuse_request(request_path, args.repo.resolve())
+                    if args.require_memory_policy_v2:
+                        _require_cli_memory_v2(result, reused=True)
                     print(json.dumps(result, sort_keys=True))
                     return 0
             acquisition = args.evidence_dir / "acquisition.json"
             if acquisition.exists() or acquisition.is_symlink():
+                require(not args.require_memory_policy_v2,
+                        "v2 memory policy cannot be checked by acquisition")
                 current_producer = (os.environ.get("GITHUB_JOB") == "preflight"
                                     and os.environ.get("GITHUB_EVENT_NAME") == "pull_request")
                 with tempfile.TemporaryDirectory(prefix="krr-html-performance-revalidate-") as temporary:
@@ -4149,6 +4265,8 @@ def main() -> int:
                 return 0
         result = (_verify_catalog_diagnostic(args.evidence_dir, args.repo)
                   if args.diagnostic_only else verify(args.evidence_dir, args.repo))
+        if args.require_memory_policy_v2:
+            _require_cli_memory_v2(result, reused=False)
         print(json.dumps(result, sort_keys=True))
         return 0
     except (ValueError, KeyError, TypeError, OSError, subprocess.CalledProcessError, zipfile.BadZipFile) as error:

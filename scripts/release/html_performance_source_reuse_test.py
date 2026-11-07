@@ -21,16 +21,19 @@ class SourceReuseTest(unittest.TestCase):
     def test_test_only_cohort_requires_exact_records_modes_and_anchors(self) -> None:
         root = Path(__file__).resolve().parents[2]
         head = "d5ca9a64"
-        names = git(root, "diff", "--name-only", head, "--", "crates").splitlines()
+        target = "faf85d7c12770fb41154ce548347de5c408025d7"
+        names = git(root, "diff", "--name-only", head, target, "--", "crates").splitlines()
         self.assertEqual(len(names), 20)
         measured = committed_records(root, head)
         tree = subprocess.check_output(["git", "-C", str(root), "ls-tree", "-r", "-z", head])
         old_modes = reuse._modes(tree)
+        target_tree = subprocess.check_output(["git", "-C", str(root), "ls-tree", "-r", "-z", target])
+        target_modes = reuse._modes(target_tree)
         current, new_modes = dict(measured), dict(old_modes)
         for name in names:
-            data = (root / name).read_bytes()
+            data = subprocess.check_output(["git", "-C", str(root), "show", target + ":" + name])
             current[name] = (hashlib.sha256(data).hexdigest(), len(data))
-            new_modes[name] = "100644"
+            new_modes[name] = target_modes[name]
         cached: dict[str, bytes] = {}
         def git_bytes(args: Sequence[str]) -> bytes:
             if args[1] not in cached:
@@ -39,27 +42,34 @@ class SourceReuseTest(unittest.TestCase):
         def check(records: reuse.Records, modes: dict[str, str], *, allow: bool = True) -> tuple[set[str], set[str]]:
             return reuse._specific_source_changes(root, head, records, measured, old_modes, modes,
                                                   git_bytes, allow_test_changes=allow)
-        approved, added = check(current, new_modes)
-        self.assertEqual(approved, set(names))
-        self.assertEqual(added, set(names) - measured.keys())
-        self.assertEqual(len(added), 7)
-        with self.assertRaises(ValueError):
-            check(current, new_modes, allow=False)
-        for name in names:
-            with self.subTest(path=name):
-                with self.assertRaises(ValueError):
-                    check({**current, name: ("0" * 64, current[name][1])}, new_modes)
-                with self.assertRaises(ValueError):
-                    check(current, {**new_modes, name: "100755"})
-                missing = dict(current)
-                missing.pop(name)
-                with self.assertRaises(ValueError):
-                    check(missing, new_modes)
-        anchor = "crates/kdr-linter/src/bin/mathjax_consumer_facts.rs"
-        with self.assertRaises(ValueError):
-            check({**current, anchor: ("0" * 64, current[anchor][1])}, new_modes)
-        with self.assertRaises(ValueError):
-            check(current, {**new_modes, anchor: "100755"})
+        target_cache: dict[str, bytes] = {}
+        def target_bytes(path: Path) -> bytes:
+            name = str(path.relative_to(root))
+            if name not in target_cache:
+                target_cache[name] = subprocess.check_output(["git", "-C", str(root), "show", target + ":" + name])
+            return target_cache[name]
+        with patch.object(Path, "read_bytes", autospec=True, side_effect=target_bytes):
+            approved, added = check(current, new_modes)
+            self.assertEqual(approved, set(names))
+            self.assertEqual(added, set(names) - measured.keys())
+            self.assertEqual(len(added), 7)
+            with self.assertRaises(ValueError):
+                check(current, new_modes, allow=False)
+            for name in names:
+                with self.subTest(path=name):
+                    with self.assertRaises(ValueError):
+                        check({**current, name: ("0" * 64, current[name][1])}, new_modes)
+                    with self.assertRaises(ValueError):
+                        check(current, {**new_modes, name: "100755"})
+                    missing = dict(current)
+                    missing.pop(name)
+                    with self.assertRaises(ValueError):
+                        check(missing, new_modes)
+            anchor = "crates/kdr-linter/src/bin/mathjax_consumer_facts.rs"
+            with self.assertRaises(ValueError):
+                check({**current, anchor: ("0" * 64, current[anchor][1])}, new_modes)
+            with self.assertRaises(ValueError):
+                check(current, {**new_modes, anchor: "100755"})
 
     def test_just_launcher_cohort_actual_git_endpoints(self) -> None:
         root = Path(__file__).resolve().parents[2]
@@ -106,8 +116,11 @@ class SourceReuseTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         for name in ("html_performance_promotion.py", "html_performance_promotion_test.py"):
             path = "scripts/release/" + name
-            new = (root / path).read_bytes()
+            new = subprocess.check_output(["git", "-C", str(root), "show",
+                                           "5f889a3e217a72806c1561aaa311e79a685761e3:" + path])
             current = (hashlib.sha256(new).hexdigest(), len(new))
+            live = (root / path).read_bytes()
+            live_record = (hashlib.sha256(live).hexdigest(), len(live))
             for head in ("a476765c", "e1bc9abd"):
                 old = subprocess.check_output(["git", "-C", str(root), "show", head + ":" + path])
                 previous = (hashlib.sha256(old).hexdigest(), len(old))
@@ -117,6 +130,7 @@ class SourceReuseTest(unittest.TestCase):
                     self.assertTrue(reuse.validation_cohort_change(path, previous, current, mode, "100644"))
                     self.assertFalse(reuse.validation_cohort_change(path, previous, unknown, mode, "100644"))
                     self.assertFalse(reuse.validation_cohort_change(path, previous, current, mode, "100755"))
+                    self.assertFalse(reuse.validation_cohort_change(path, previous, live_record, mode, "100644"))
         for name in ("html_performance_source_reuse.py", "html_performance_source_reuse_test.py"):
             path = "scripts/release/" + name
             old = subprocess.check_output(["git", "-C", str(root), "show", "e1bc9abd:" + path])

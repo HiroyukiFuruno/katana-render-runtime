@@ -268,6 +268,7 @@ class ExpectedPerformance(_ExpectedFields, total=False):
     catalogCaptureBinaryRef: FilePin
     catalogCurrentBuildReportRef: FilePin
     referenceParent: gate.JsonObject
+    memoryRetentionRef: FilePin
 
 
 class ConditionWorkerCollection(NamedTuple):
@@ -1869,6 +1870,15 @@ def _batch_policy_accepted(
     non_comparable_ids: set[str] = set()
     for result in results:
         policy = gate._object(result.get("policy"), "condition policy")
+        memory_policy = result.get("memoryPolicy")
+        if memory_policy is not None:
+            memory = gate._object(memory_policy, "memory policy")
+            retention = gate._object(memory.get("retention"), "retention policy")
+            if (memory.get("version") != "html-memory-v2"
+                    or retention.get("retention_allowed") is not True
+                    or (result.get("comparisonStatus") == "paired"
+                        and memory.get("policyPass") is not True)):
+                return False
         if result.get("comparisonStatus") == "nonComparable":
             condition_id = gate._text(policy.get("conditionId"),
                                       "non-comparable condition id")
@@ -1887,7 +1897,7 @@ def _batch_policy_accepted(
             non_comparable_ids.add(condition_id)
             continue
         if (result.get("comparisonStatus") != "paired" or policy.get("status") is not None
-                or policy.get("policyPass") is not True):
+                or (memory_policy is None and policy.get("policyPass") is not True)):
             return False
     if len(results) == 84:
         return (not non_comparable_ids
@@ -2035,9 +2045,12 @@ def _writable_raw_holders(raw: bytes, identities: list[tuple[int, int]]) -> list
 
 def _native_raw_fd_closure(paths: tuple[Path, Path], identities: list[tuple[int, int]],
                            cwd: Path | None, env: Mapping[str, str] | None,
-                           attempt: str, deadline: float) -> gate.JsonObject:
+                           attempt: str, deadline: float, *,
+                           project_environment: bool = False) -> gate.JsonObject:
     if env is None or cwd is None:
         raise ValueError("native observer needs exact cwd/environment")
+    environment = dict(env)
+    projection = _worker_environment_projection(environment) if project_environment else None
     gate.require([(path.stat().st_dev, path.stat().st_ino) for path in paths] == identities,
                  "native raw file identity changed")
     tool = native_raw_fd_observer_path()
@@ -2051,7 +2064,7 @@ def _native_raw_fd_closure(paths: tuple[Path, Path], identities: list[tuple[int,
     gate.require(remaining > 0, "native FD observation cleanup deadline exceeded")
     with stdout.open("xb") as out, stderr.open("xb") as err:
         try:
-            process = subprocess.Popen(argv, cwd=cwd, env=env, stdout=out, stderr=err, start_new_session=True)
+            process = subprocess.Popen(argv, cwd=cwd, env=environment, stdout=out, stderr=err, start_new_session=True)
             identity: gate.JsonObject = {"pid": process.pid, "parentPid": os.getpid(),
                 "sessionId": os.getsid(process.pid), "processGroupId": os.getpgid(process.pid)}
             gate.require(identity["sessionId"] == process.pid == identity["processGroupId"], "native FD observer group differs")
@@ -2064,11 +2077,15 @@ def _native_raw_fd_closure(paths: tuple[Path, Path], identities: list[tuple[int,
     gate.require(not stderr.read_bytes(), "native FD observer coverage is unknown")
     gate.require({"path": str(tool), "sha256": gate.sha256(tool), "size": tool.stat().st_size} == pin,
                  "native FD observer tool changed")
-    environment = dict(env)
+    gate.require(dict(env) == environment and (projection is None
+                 or _worker_environment_projection(environment) == projection),
+                 "native FD observer environment changed")
     environment_sha = _environment_sha256(environment)
-    return {"schema": "krr-native-raw-fd-closure-v1", "toolBefore": pin, "toolAfter": pin,
+    return {"schema": "krr-native-raw-fd-closure-v2" if project_environment else "krr-native-raw-fd-closure-v1",
+        "toolBefore": pin, "toolAfter": pin,
         "argv": argv, "cwd": str(cwd), "attemptToken": attempt,
-        "environment": environment, "environmentSha256": environment_sha, "identity": identity,
+        **({"environmentProjection": projection} if project_environment else {"environment": environment}),
+        "environmentSha256": environment_sha, "identity": identity,
         "actualExit": process.returncode, "startedNs": str(started), "endedNs": str(time.time_ns()),
         "reaped": True, "groupClosed": True, "rawFdsClosed": out.closed and err.closed,
         "runLimitSeconds": remaining, "cleanupLimitSeconds": MEASUREMENT_CLEANUP_SECONDS,
@@ -2084,9 +2101,12 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
                          lifecycle_sink: Callable[[Path], None] | None = None,
                          native_attempt_token: str | None = None,
                          runtime_execution_sink: Callable[[gate.JsonObject], None] | None = None,
+                         interaction: Callable[[subprocess.Popen[bytes], Path, float], None] | None = None,
                          ) -> subprocess.CompletedProcess[bytes]:
     gate.require(os.name == "posix", "POSIX measurement ownership required")
     gate.require(role in MEASUREMENT_LIMITS, "unknown measurement command role")
+    gate.require(interaction is None or (role == "worker" and input_bytes is None),
+                 "interactive measurement requires worker without fixed input")
     log_directory.mkdir(parents=True, exist_ok=True)
     gate.require(not log_directory.is_symlink(), "measurement raw directory must not be a symlink")
     folder = Path(tempfile.mkdtemp(prefix=f"{role}-", dir=log_directory))
@@ -2126,6 +2146,8 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
                 raw_identities = [(os.fstat(handle.fileno()).st_dev, os.fstat(handle.fileno()).st_ino)
                                   for handle in (stdout, stderr)]
             stdin: int | BinaryIO = subprocess.DEVNULL
+            if interaction is not None:
+                stdin = subprocess.PIPE
             if input_bytes is not None:
                 input_file = stack.enter_context(tempfile.TemporaryFile(mode="w+b"))
                 input_file.write(input_bytes)
@@ -2165,7 +2187,11 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
                         raise _signal_interruption(pending_signum)
                     if time.monotonic() >= deadline:
                         raise subprocess.TimeoutExpired(list(args), MEASUREMENT_LIMITS[role])
+                    if interaction is not None:
+                        interaction(process, stdout_path, deadline)
                     if _measurement_exit(process):
+                        if interaction is not None:
+                            interaction(process, stdout_path, deadline)
                         break
                     time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
             except BaseException as error:
@@ -2173,6 +2199,11 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
             finally:
                 cleanup_deadline = time.monotonic() + MEASUREMENT_CLEANUP_SECONDS
                 if process is not None:
+                    if process.stdin is not None:
+                        try:
+                            process.stdin.close()
+                        except BaseException as error:
+                            cleanup_errors.append(error)
                     try:
                         previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM, signal.SIGHUP})
                     except BaseException as error:
@@ -2189,7 +2220,8 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
                 if cleanup_deadline is None:
                     raise ValueError("native cleanup deadline missing")
                 native_closure = _native_raw_fd_closure((stdout_path, stderr_path), raw_identities,
-                                                       cwd, env, native_attempt_token, cleanup_deadline)
+                                                       cwd, env, native_attempt_token, cleanup_deadline,
+                                                       project_environment=runtime_execution_sink is not None)
                 gate.require(native_closure["holders"] == [], "native raw output has unknown writable holders; no unknown PID is signalled")
                 raw_closed = True
             except BaseException as error:
@@ -2228,7 +2260,9 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
             if process is None or not closed:
                 raise ValueError("measurement process closure missing")
             returncode = gate._integer(process.returncode, "measurement exit code")
-            result = subprocess.CompletedProcess(list(args), returncode, stdout_path.read_bytes(), stderr_path.read_bytes())
+            result = subprocess.CompletedProcess(list(args), returncode,
+                stdout_path.read_bytes() if interaction is None else b"",
+                stderr_path.read_bytes() if interaction is None else b"")
             if check:
                 result.check_returncode()
     except BaseException as error:
@@ -2295,7 +2329,7 @@ def _measurement_command(args: Sequence[str], *, role: MeasurementRole, log_dire
         message = "measurement cleanup failed" if cleanup_failure is not None else "measurement lifecycle record write failed"
         raise RuntimeError(message + "; " + "; ".join(failures)) from primary or cleanup_failure or lifecycle_failure
     if primary is not None:
-        if isinstance(primary, subprocess.TimeoutExpired) and closed:
+        if isinstance(primary, subprocess.TimeoutExpired) and closed and interaction is None:
             primary.output, primary.stderr = stdout_path.read_bytes(), stderr_path.read_bytes()
         raise primary
     if result is None:
@@ -4242,6 +4276,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     completed_rows: list[gate.JsonObject] = []
     checkpoint_pins: list[FilePin] = []
     worker_attempt_pins: list[FilePin] = []
+    retention_transport_pins: list[FilePin] = []
     for row in measurement_rows:
         try:
             _require_batch_budget(batch_deadline)
@@ -4297,6 +4332,28 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         result = _condition_result(measurement_policy)
         if row["catalog"]:
             result["catalogCondition"] = expected["catalogCondition"]
+            import html_performance_retention_collection as retention_collection
+
+            worker_environment = _performance_worker_environment(
+                expected["provenance"]["rustc"], expected["provenance"]["cargo"],
+                environment_sha, lock, build_inputs.snapshot,
+            )
+            try:
+                _require_batch_budget(batch_deadline)
+                retention_pin, retention_refs = retention_collection.collect(
+                    folder, cast(gate.JsonObject, expected), binary=binaries["candidate"],
+                    fixture=fixture, plan=plan_path, root=root, environment=worker_environment,
+                )
+                expected["memoryRetentionRef"] = retention_pin
+                retention_transport_pins.extend(retention_refs)
+                result["memoryPolicy"] = retention_collection.policy(
+                    reports, cast(gate.JsonObject, expected), result,
+                )
+            except BaseException as error:
+                if not batch_mode:
+                    raise
+                batch_failure = error
+                break
         checkpoint_pins.append(write_condition_checkpoint(folder, expected, result, manifest_data))
         expected_all.append((folder, expected, result, manifest_pin))
         completed_rows.append(row)
@@ -4354,7 +4411,8 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                            before_pin, end_pin, build_inputs.capacity_input, *build_pins,
                            *planned_transport_refs,
                            *[FilePin(path=str(p), sha256=gate.sha256(p)) for p in binaries.values()],
-                           *checkpoint_pins, *worker_attempt_pins, *capacity_transport_refs(binding)]
+                           *checkpoint_pins, *worker_attempt_pins, *retention_transport_pins,
+                           *capacity_transport_refs(binding)]
     if fixed_context_pin is not None:
         refs.append(fixed_context_pin)
     refs.extend(reference_transport_refs)

@@ -107,6 +107,10 @@ fn measure_sample_worker(
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "candidate")]
+    if env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--retention")) {
+        return retention::run();
+    }
+    #[cfg(feature = "candidate")]
     if env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--input")) {
         native_frame_capture::main();
         return Ok(());
@@ -181,6 +185,10 @@ impl SessionFrame for HtmlBrowserSession {
 type HtmlBrowserSession = baseline::HtmlBrowserSession;
 #[cfg(feature = "candidate")]
 type HtmlBrowserSession = candidate::HtmlBrowserSession;
+
+#[cfg(feature = "candidate")]
+#[path = "retention.rs"]
+mod retention;
 
 #[cfg(test)]
 #[path = "main_tests.rs"]
