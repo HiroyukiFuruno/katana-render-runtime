@@ -1,6 +1,16 @@
 # 品質ゲート改善の作業台帳
 
-## 現在の実行地点（2026-11-08、以下の過去結果と区別する）
+## 現在の実行地点（2026-11-09、以下の過去結果と区別する）
+
+- [x] skip正常化の実検証: `skip-cohort-sha-fixed-build-auyew0ph` はfmt/重複/AST実0、同coverage profileのcompile成功（none選択の実4は合格件数へ含めない）。`skip-normal-current-catalog-a6s4hjca` のruntime実catalog5468件と `skip-current-ignored-catalog-kavb4rb8` のignore14件を照合した。none選択のNextest metadataはtestcases空のため、件数0を全catalogと誤認せず実binaryのlist/ignored listを別々に取得した。
+- [x] `skip-normal-exact27-ta0889j2` はfont8・raw geometry5・出力所有/拒否4・新outer7・既存outer3の27caseが全実0。さらに `skip-normal-survey1757-yvyyianr` のupstream全1757入力のsurvey1caseが103.91秒・実0。いずれもsource/binary不変、一時profile残0。元29ignoreから14件を通常化し、新outerから既存producer7件を駆動した。surveyは差分の収集整合性を検査する診断であり、製品画像99合格の代わりにはしない。
+- [ ] runtimeに残る14ignoreのうち11件は正式driver/通常outerがexact実行するproducer。残3件は私有HTML原本、stock Chrome固定値に束縛するmacOSフォント、固定Hiraginoフォントの診断。別integration binaryのLive固定snapshot1件を合わせて、入力/環境依存4件を実行済みと混同しない。私有原本やApple fontはGitへ追加せず、通常の匿名fixture・物理font/fallback回帰を維持する。上記28case成功後、生成物のRGBA/SVGとreport SHA照合を追加したため、その最終差分の再確認は未完。
+- [/] 最終差分と新しいgeometry/opacity境界回帰は小単位で確認中。`skip-boundary-final-build-vt33cw7a` はfmt/重複実0、ASTがgeometry test34行で実101、Rust再compileを起動せず停止した。mutation定数tableへ分離した次の `skip-boundary-length-build-dm2rs4h6` はfmt/重複実0、ASTがtree request helper31行で実101。閾値は維持し、request保存責務を分離して再確認する。旧28caseの成功を変更後の合格へ転用しない。
+- [x] 上記の最終修正を `skip-opacity-mut-build-hup6_vtu` でfmt/重複/AST実0、compile成功（none選択実4）まで確認。`skip-boundary-fixed-catalog-x8544wdx` の実catalogで選択し、`skip-boundary-exact30-ttxqetv0` の30caseが全実0・source/binary不変・profile残0。frame RGBA/保存SVG各SHA、tree入力SVG一致/outline構造の照合、geometry異常3mutationの具体Err、opacity画面外・子エラー時の非合成を維持する。main差分レビューで私有資料・font bytes・原golden変更なしを確認。全体coverage100/0・最終画像/性能・公開gateは引き続き未完。
+- [x] 関心ごとのcommit: `ccc3f5e1` は14ignore解除とproducer通常実行、`29f0ec20` はGit geometry異常回帰、`e56b3d4b` はopacity境界回帰。ユーザー許可済みのcommit `--no-verify` のみを使い、直前の静的/限定結果を維持した。pushの検査は省略しない。次はこのsourceの正式root collectionでcoverageと実行/skip件数を取得する。
+
+- [x] 最新 `1594907d` の正式rootは `scope-fixed-current-root-collection-bj2hzorg`。実行対象5791caseが全件成功、別に29skip。collection実0・collection真正性実0・厳格100/0判定はcoverage-policyで実1、source前後一致。root.json SHA `d382aab03b995509ca5343a22907e4e796140248261b824dad6ebf891b616c7c` は88278行中87224covered、98.8060445411%・未カバー1054行。途中の5256/5791はこのRust実行の成功数/実行予定数であり、画像や性能条件の合格数として扱わない。
+- [x] 同sourceの正式再利用 `same-source-root-checkpoint-reuse-jt86u6n6` はpreflight実0・標準producer実0・collection真正性実0、source前後一致。既存checkpointがaccepted、prior-all-passedでtests stageを起動せずreportだけ再生成し、report SHAも不変。100/0合格を意味しない。Moon CAS hit/restore/改変拒否・再収集と、失敗unit変更後の無関係成功の再利用の全DoDは別に残る。
 
 - [x] 最新の小修正はコミットまで完了: `c9f3801c` は独立Chromeに反するSVG marker2件を修正し、`independent-marker-all38-green-rqf7lgi2` の38caseが全実0・source/binary不変・profile残0。最後に誤ったunreachableコメントだけを除去したため、この38caseは除去前sourceの挙動証拠であり、最終sourceの完全gateを代替しない。新SDKの描画/性能受入は別に残る。
 - [x] 正式runtime cacheにも同じcleanup scopeキーが到達することを確認し、`edeedc4b` で1名だけを限定除外した。初回のcandidate-onlyラベルからの非使用推論は訂正する。`runtime-cache-scope-expected-red-bofbnzzt` の独立2caseが各実1、その後 `runtime-scope-and-marker-fixed-build-tpck0rf_` の静的3項目・fingerprint26/identity33/cache CLI32test・ASTが全実0。未知名・保護ref・source/toolの変更は引き続き束縛し、既存raw/goldenを変更していない。
