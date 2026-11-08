@@ -183,3 +183,7 @@ fn admitted_ttc_face(
     })
     .ok_or_else(|| "actual TTC nonzero face did not pass existing admission".to_owned())
 }
+
+#[cfg(test)]
+#[path = "svg_rasterize_html_font_selected_face_fixture_tests.rs"]
+mod tests;
