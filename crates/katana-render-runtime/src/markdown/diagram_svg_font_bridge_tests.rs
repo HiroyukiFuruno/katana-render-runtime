@@ -2,6 +2,7 @@ use super::set_svg_metric_properties;
 use super::set_svg_metric_property;
 use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
 use crate::markdown::svg_rasterize::SvgTextRunMetrics;
+use crate::v8_script::ScriptCompiler;
 
 const BASE_METRICS: SvgTextRunMetrics = SvgTextRunMetrics {
     advance: 11.5,
@@ -203,6 +204,43 @@ fn real_v8_x_height_bridge_rejects_invalid_numeric_requests() -> Result<(), Stri
     .collect::<Vec<_>>()
     .join(",");
     assert_eq!(observed, expected);
+    Ok(())
+}
+
+#[test]
+fn svg_font_bridge_reports_throwing_registration_setter() {
+    DiagramV8Runtime::ensure_initialized();
+    DiagramV8Runtime::with_empty_try_catch(|scope| {
+        let source = concat!(
+            "Object.defineProperty(globalThis, '__katanaMeasureSvgFontXHeight', ",
+            "{set() { throw new Error('blocked'); }, configurable: true}); true;",
+        );
+        let configured = v8::String::new(scope, source).and_then(|source| {
+            let name = v8::String::new(scope, "font-registration-rejection")?;
+            let script = ScriptCompiler::compile_with_origin(scope, source, name)?;
+            script.run(scope)
+        });
+        assert!(configured.is_some());
+        assert_eq!(
+            super::install(scope),
+            Err("SVG font x-height bridge registration failed".to_owned())
+        );
+    });
+}
+
+#[test]
+fn real_v8_x_height_bridge_returns_bundled_font_metric() -> Result<(), String> {
+    let script = r#"(() => {
+        const value = globalThis.__katanaMeasureSvgFontXHeight('Noto Sans', 16, 400, false);
+        return Number.isFinite(value) && value > 0;
+    })()"#;
+    let observed = DiagramV8Runtime::render(&[
+        crate::markdown::diagram_js_runtime::DiagramRuntimeScript::borrowed(
+            "bridge-valid-x-height",
+            script,
+        ),
+    ])?;
+    assert_eq!(observed, "true");
     Ok(())
 }
 
