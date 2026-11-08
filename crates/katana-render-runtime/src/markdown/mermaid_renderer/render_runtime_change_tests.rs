@@ -1,4 +1,5 @@
 use super::*;
+use crate::markdown::runtime_resource_loader::RuntimeResourceLoader;
 
 #[test]
 fn runtime_content_partitions_svg_cache_at_same_path()
@@ -64,5 +65,20 @@ fn product_bundle_render_rejects_invalid_runtime_without_publishing_cache() -> T
         if actual == source.source && !error.is_empty())
     );
     assert!(!cache.exists());
+    Ok(())
+}
+#[test]
+fn blank_source_short_circuits_loaded_bundle_render() -> TestResult<()> {
+    let directory = tempfile::tempdir()?;
+    let resource = directory.path().join("mermaid.js");
+    std::fs::write(&resource, "unused")?;
+    let bundle = RuntimeResourceLoader::load(&resource, None)?;
+    let result = MermaidRenderOps::render_mermaid_with_loaded(
+        &block(" \n\t"),
+        &resource,
+        DiagramColorPreset::current(),
+        &bundle,
+    );
+    assert!(matches!(result, DiagramResult::Ok(svg) if svg.is_empty()));
     Ok(())
 }
