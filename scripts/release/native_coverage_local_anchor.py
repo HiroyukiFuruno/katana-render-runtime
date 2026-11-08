@@ -227,6 +227,21 @@ def prepare(repo: Path, producer: str, identity_sha256: str) -> str | None:
     return cast(str, pending["epoch"])
 
 
+def read_epoch(repo: Path, producer: str, identity_sha256: str) -> str | None:
+    """Read an existing epoch without changing another identity's anchor."""
+    if producer not in PRODUCERS or SHA256_RE.fullmatch(identity_sha256) is None:
+        raise ValueError("invalid local coverage anchor identity")
+    directory = _anchor_directory(repo, create=False)
+    if directory is None:
+        return None
+    current = _read(directory, producer)
+    if current is None:
+        return None
+    if current["identitySha256"] != identity_sha256:
+        raise ValueError("local coverage anchor identity differs")
+    return cast(str, current["epoch"])
+
+
 def _begin_existing(repo: Path, producer: str, identity_sha256: str, epoch: str) -> bool:
     directory = _anchor_directory(repo, create=False)
     if directory is None:

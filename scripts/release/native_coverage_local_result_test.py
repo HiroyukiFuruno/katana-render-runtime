@@ -455,6 +455,40 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
         )
         self.assertEqual(receipt["role"], "collection")
 
+    def test_different_validation_identity_preserves_existing_collection_anchor(self) -> None:
+        self.prepare_reports()
+        with (
+            patch.object(local_result, "_source_state", return_value=self.source_state),
+            patch.object(local_result, "_local_context", return_value=self.context),
+            patch.object(local_result, "_execution_environment_digest", return_value="a" * 64) as environment,
+        ):
+            for validate in (local_result.local_collection_validate, local_result.local_validate):
+                with self.subTest(validate=validate.__name__):
+                    environment.return_value = "a" * 64
+                    self.begin_producer("root")
+                    directory = local_anchor._anchor_directory(self.root, create=False)
+                    self.assertIsNotNone(directory)
+                    pending_path = cast(Path, directory) / "root.json"
+                    initial = json.loads(pending_path.read_bytes())
+                    self.assertTrue(local_anchor.begin_root_collection(
+                        self.root, initial["identitySha256"], initial["epoch"]))
+                    pending_bytes = pending_path.read_bytes()
+                    pending = json.loads(pending_bytes)
+                    self.assertEqual(pending["state"], "pending")
+                    self.assertEqual(local_anchor.read_epoch(
+                        self.root, "root", pending["identitySha256"]), pending["epoch"])
+                    self.assertEqual(pending_path.read_bytes(), pending_bytes)
+                    local_result.local_collect_finish(self.root, "root", 0)
+                    anchor_path = cast(Path, directory) / "root.json"
+                    original_anchor = anchor_path.read_bytes()
+                    self.assertTrue(local_result.local_collection_validate(self.root, "root")["valid"])
+                    environment.return_value = "b" * 64
+                    with self.assertRaises(local_result.LocalCoverageError):
+                        validate(self.root, "root")
+                    self.assertEqual(anchor_path.read_bytes(), original_anchor)
+                    environment.return_value = "a" * 64
+                    self.assertTrue(local_result.local_collection_validate(self.root, "root")["valid"])
+
     def test_collection_validation_rejects_malformed_report(self) -> None:
         self.prepare_reports()
         with (

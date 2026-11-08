@@ -288,14 +288,15 @@ def _identity(repo: Path, producer: str, source_state: JsonObject) -> JsonObject
     }
 
 
-def _bound_identity(repo: Path, producer: str, source_state: JsonObject) -> JsonObject:
+def _bound_identity(repo: Path, producer: str, source_state: JsonObject, *,
+                    prepare_anchor: bool = True) -> JsonObject:
     base = _identity(repo, producer, source_state)
     base_digest = cast(str, base["identitySha256"])
-    epoch = (
-        local_anchor.prepare(repo, producer, base_digest)
-        if base["cacheable"] is True
-        else None
-    )
+    try:
+        epoch = ((local_anchor.prepare if prepare_anchor else local_anchor.read_epoch)(
+            repo, producer, base_digest) if base["cacheable"] is True else None)
+    except ValueError as error:
+        raise LocalCoverageError("local coverage anchor identity differs") from error
     payload = {
         key: value
         for key, value in base.items()
@@ -490,7 +491,7 @@ def local_begin(repo: Path, producer: str) -> JsonObject:
 
 def _current_run(repo: Path, producer: str) -> tuple[JsonObject, JsonObject, str | None]:
     source_state = _source_state(repo)
-    identity = _bound_identity(repo, producer, source_state)
+    identity = _bound_identity(repo, producer, source_state, prepare_anchor=False)
     token = _probe_token(repo, producer, identity)
     run = coverage_result._object(
         _read_json(_paths(repo, producer)["run"], "local run"), "local run"
@@ -571,7 +572,7 @@ def _authenticated_collection(
     repo: Path, producer: str
 ) -> tuple[JsonObject, JsonObject]:
     source_state = _source_state(repo)
-    identity = _bound_identity(repo, producer, source_state)
+    identity = _bound_identity(repo, producer, source_state, prepare_anchor=False)
     token = _probe_token(repo, producer, identity)
     receipt_path = _paths(repo, producer)["receipt"]
     try:
