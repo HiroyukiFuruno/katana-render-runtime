@@ -663,10 +663,7 @@ fn apply_drop_shadow(
     ts: crate::svg_engine::usvg::Transform,
     input: Image,
 ) -> Result<Image, Error> {
-    let (dx, dy) = match scale_coordinates(fe.dx(), fe.dy(), ts) {
-        Some(v) => v,
-        None => return Ok(input),
-    };
+    let (dx, dy) = scale_coordinates(fe.dx(), fe.dy(), ts);
 
     let mut pixmap = tiny_skia::Pixmap::try_create(input.width(), input.height())?;
     let input_pixmap = input.into_color_space(cs)?.take()?;
@@ -765,10 +762,7 @@ fn apply_offset(
     ts: crate::svg_engine::usvg::Transform,
     input: Image,
 ) -> Result<Image, Error> {
-    let (dx, dy) = match scale_coordinates(fe.dx(), fe.dy(), ts) {
-        Some(v) => v,
-        None => return Ok(input),
-    };
+    let (dx, dy) = scale_coordinates(fe.dx(), fe.dy(), ts);
 
     if dx.approx_zero_ulps(4) && dy.approx_zero_ulps(4) {
         return Ok(input);
@@ -1057,10 +1051,7 @@ fn apply_morphology(
     ts: crate::svg_engine::usvg::Transform,
     input: Image,
 ) -> Result<Image, Error> {
-    let (rx, ry) = match scale_coordinates(fe.radius_x().get(), fe.radius_y().get(), ts) {
-        Some(v) => v,
-        None => return Ok(input),
-    };
+    let (rx, ry) = scale_coordinates(fe.radius_x().get(), fe.radius_y().get(), ts);
     if !rx.is_finite() || !ry.is_finite() {
         return Err(Error::InvalidRegion);
     }
@@ -1088,10 +1079,7 @@ fn apply_displacement_map(
 
     let mut pixmap = tiny_skia::Pixmap::try_create(region.width(), region.height())?;
 
-    let (sx, sy) = match scale_coordinates(fe.scale(), fe.scale(), ts) {
-        Some(v) => v,
-        None => return Ok(Image::from_image(pixmap1, cs)),
-    };
+    let (sx, sy) = scale_coordinates(fe.scale(), fe.scale(), ts);
 
     displacement_map::apply(
         fe,
@@ -1247,7 +1235,7 @@ fn apply_to_canvas(
 ///
 /// If the last flag is set, then a box blur should be used. Or IIR otherwise.
 fn resolve_std_dev(std_dx: f32, std_dy: f32, ts: crate::svg_engine::usvg::Transform) -> Option<(f64, f64, bool)> {
-    let (mut std_dx, mut std_dy) = scale_coordinates(std_dx, std_dy, ts)?;
+    let (mut std_dx, mut std_dy) = scale_coordinates(std_dx, std_dy, ts);
 
     // 'A negative value or a value of zero disables the effect of the given filter primitive
     // (i.e., the result is the filter input image).'
@@ -1271,9 +1259,9 @@ fn resolve_std_dev(std_dx: f32, std_dy: f32, ts: crate::svg_engine::usvg::Transf
     Some((std_dx as f64, std_dy as f64, box_blur))
 }
 
-fn scale_coordinates(x: f32, y: f32, ts: crate::svg_engine::usvg::Transform) -> Option<(f32, f32)> {
+fn scale_coordinates(x: f32, y: f32, ts: crate::svg_engine::usvg::Transform) -> (f32, f32) {
     let (sx, sy) = ts.get_scale();
-    Some((x * sx, y * sy))
+    (x * sx, y * sy)
 }
 
 #[cfg(test)]
