@@ -17,6 +17,7 @@
 - [x] 独立レビューのpaint P2を修正。有効な非循環参照を3種追加し、同じfallback指定でも実際に参照内容の緑が描画される正常対照を確認した。元の循環fallback期待は不変。
 - [x] `bridge-boundary-current-build-8gqkk0kv` はfoundation/AST実0・compile成功（none選択実4）。実catalog `bridge-boundary-current-catalog-zkbe73cg` を用いた `bridge-other-boundaries-exact32-toiuiu1m` はpaint12/convolve8/font bridge6/geometry2/frame2/metrics2の32case実0、source/binary不変・profile残0。targetY範囲外、実font無効size、close後のframe欠落、登録setterの具体エラーとJS例外を確認した。正式coverageはまだ旧998行から更新しない。
 - [/] 実V8の新readonly登録case `readonly-registration-exact1-9d5qbyxq` は実101。`set=Some(true)` でもpropertyがsentinelのまま、SVG font bridge installがOkを返すことを実確認した。source/binary不変・profile残0、元失敗を保持。通常fresh contextの起動事故とは断定せず、SVG2callbackの登録後identity確認とgetter例外伝播を限定修正する。失敗をpassへ読み替えない。
+- [x] 登録修正案の `font-registration-fix-current-build-m7a9ttgz` は既存font helperとの85token重複でfoundation実1、AST/compile未起動。例外を加えず既存 `diagram_font_bridge::install_callback` へ統合し、通常文字/Canvas/SVGの4登録でset後の実function identityを確認した。既存の全エラー文字列を維持。修正後 `shared-font-registration-current-build-lt8li64p` はfoundation/AST実0・compile成功（none選択実4）。実catalog `shared-font-registration-current-catalog-juh20w_t` に照合した `shared-font-registration-exact20-mh_71ezc` は関連20case全実0、source/binary不変・profile残0。4名のreadonly/setter/getter拒否と例外保持、正常の文字/Canvas/SVG計測・geometry・実frameを確認し、先のREDは解消。製品の性能影響と正式coverageは未計測であり、後続の完全判定を維持する。
 
 ### 経過の記録（以下の旧数値・未実行予定は上の現在実数と区別する）
 
