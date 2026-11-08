@@ -75,7 +75,7 @@ jobs:
 
       - name: Install just
         if: steps.version.outputs.eligible == 'true'
-        uses: taiki-e/install-action@56e0547d8ae60783cb5425ff9d8eaacd60a0de09 # just
+        uses: taiki-e/install-action@66f567e72f7d264686a8d5f09f38f0829b4feb80 # just
 
       - name: Install Bun
         if: steps.version.outputs.eligible == 'true'
@@ -121,7 +121,7 @@ jobs:
           shared-key: release-ubuntu-stable-publish
 
       - name: Install just
-        uses: taiki-e/install-action@56e0547d8ae60783cb5425ff9d8eaacd60a0de09 # just
+        uses: taiki-e/install-action@66f567e72f7d264686a8d5f09f38f0829b4feb80 # just
 
       - name: Install Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0

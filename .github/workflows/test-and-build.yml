@@ -67,7 +67,7 @@ jobs:
           version: "0.13.0"
           enable-cache: true
       - name: Install just
-        uses: taiki-e/install-action@56e0547d8ae60783cb5425ff9d8eaacd60a0de09 # just
+        uses: taiki-e/install-action@66f567e72f7d264686a8d5f09f38f0829b4feb80 # just
       - name: Install ShellCheck 0.11.0
         run: |
           curl --fail --location --output "$RUNNER_TEMP/shellcheck.tar.xz" https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
@@ -169,18 +169,18 @@ jobs:
 
       - name: Install cargo-llvm-cov
         if: matrix.os == 'ubuntu-latest'
-        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-llvm-cov@0.9.1
 
       - name: Install cargo-nextest
         if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
-        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-nextest@0.9.148
 
       - name: Install just
-        uses: taiki-e/install-action@56e0547d8ae60783cb5425ff9d8eaacd60a0de09 # just
+        uses: taiki-e/install-action@66f567e72f7d264686a8d5f09f38f0829b4feb80 # just
 
       - name: Install Chrome for the macOS official producer browser test
         if: matrix.platform == 'mac-arm64'
@@ -695,7 +695,7 @@ jobs:
 
       - name: Install just
         if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
-        uses: taiki-e/install-action@56e0547d8ae60783cb5425ff9d8eaacd60a0de09 # just
+        uses: taiki-e/install-action@66f567e72f7d264686a8d5f09f38f0829b4feb80 # just
 
       - name: Install Bun
         if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
@@ -846,13 +846,13 @@ jobs:
           enable-cache: true
 
       - name: Install just
-        uses: taiki-e/install-action@56e0547d8ae60783cb5425ff9d8eaacd60a0de09 # just
+        uses: taiki-e/install-action@66f567e72f7d264686a8d5f09f38f0829b4feb80 # just
 
       - name: Install capacity cleanup tool
         run: cargo install cargo-sweep --version 0.8.0 --locked
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-llvm-cov@0.9.1
 
