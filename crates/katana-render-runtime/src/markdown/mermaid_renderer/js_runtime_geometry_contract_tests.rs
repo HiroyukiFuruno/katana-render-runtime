@@ -147,6 +147,37 @@ fn geometry_contract_rejects_git_missing_relationships_and_misassociated_commit_
     Ok(())
 }
 
+const INVALID_GIT_COMMIT_GEOMETRY: &[(&str, &str, &str)] = &[
+    (
+        r#"class="commit base" cx="20" cy="20" r="10""#,
+        r#"class="commit base" cx="20" cy="20" r="0""#,
+        "commit bullet must have area",
+    ),
+    (
+        r#"class="commit merged" cx="100" cy="20""#,
+        r#"class="commit merged" cx="25" cy="35""#,
+        "commit label nearer a different source commit",
+    ),
+    (
+        "</svg>",
+        r#"<circle class="commit extra" cx="145" cy="95" r="3"/></svg>"#,
+        "git commit inventory changed",
+    ),
+];
+
+#[test]
+fn geometry_contract_rejects_invalid_git_commit_geometry() -> Result<(), String> {
+    GeometryContract::git_graph(GIT)?;
+    for (original, replacement, expected) in INVALID_GIT_COMMIT_GEOMETRY {
+        let svg = GIT.replacen(*original, replacement, 1);
+        assert_eq!(
+            GeometryContract::git_graph(&svg).err().as_deref(),
+            Some(*expected)
+        );
+    }
+    Ok(())
+}
+
 fn shared_git_labels() -> String {
     GIT.replace("base</text></g><g><rect", "base</text><rect")
         .replacen("<g><rect", "<g class=\"commit-labels\"><rect", 1)
