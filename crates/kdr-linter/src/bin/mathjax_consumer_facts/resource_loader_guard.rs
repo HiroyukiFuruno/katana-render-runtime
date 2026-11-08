@@ -157,3 +157,7 @@ fn require_owned_rejection(expression: &Expr) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "resource_loader_guard_boundary_tests.rs"]
+mod boundary_tests;

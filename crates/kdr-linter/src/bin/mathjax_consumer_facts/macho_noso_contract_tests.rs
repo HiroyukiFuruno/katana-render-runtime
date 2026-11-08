@@ -118,6 +118,27 @@ fn inspect_file_rejects_size_or_digest_drift() -> Result<(), String> {
 }
 
 #[test]
+fn inspect_file_rejects_nonfile_and_digest_matched_invalid_binary() -> Result<(), String> {
+    let fixture = write_fixture()?;
+    let directory = fixture.path.parent().ok_or("fixture parent missing")?;
+    assert_eq!(
+        inspect_file(directory.to_path_buf(), 0, &fixture.digest)
+            .err()
+            .as_deref(),
+        Some("input-file:size-or-type-changed")
+    );
+    let invalid = b"not-mach-o";
+    std::fs::write(&fixture.path, invalid).map_err(|error| error.to_string())?;
+    let result = inspect_file(fixture.path.clone(), invalid.len() as u64, &sha256(invalid));
+    assert!(
+        result
+            .err()
+            .is_some_and(|error| error.starts_with("macho-kind:"))
+    );
+    Ok(())
+}
+
+#[test]
 fn run_rejects_noncanonical_manifest_and_accepts_verified_fixture() -> Result<(), String> {
     let fixture = write_fixture()?;
     assert_verified_manifest_runs(&fixture)?;
