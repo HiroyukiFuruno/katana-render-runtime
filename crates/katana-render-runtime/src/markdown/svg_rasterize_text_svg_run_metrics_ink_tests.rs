@@ -1,11 +1,12 @@
-use super::{FontShape, shape_svg_run_metrics_with_face};
-use resvg::usvg::fontdb::Database;
+use super::{FontShape, shape_svg_run_metrics_with_face, svg_run_endpoints_with_face};
+use resvg::usvg::fontdb::{Database, ID};
 
 const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 const TEST_TEXT: &str = "Noto Sans";
+const VALID_SIZE: f32 = 16.0;
+const NORMAL_WEIGHT: u16 = 400;
 
-#[test]
-fn ink_diagnostic_preserves_metrics_for_checked_in_font() -> Result<(), String> {
+fn checked_in_font_face() -> Result<(Database, ID), String> {
     let mut database = Database::new();
     database.load_font_data(FONT_BYTES.to_vec());
     let face = database
@@ -13,6 +14,28 @@ fn ink_diagnostic_preserves_metrics_for_checked_in_font() -> Result<(), String> 
         .next()
         .ok_or("checked-in Noto Sans face missing")?
         .id;
+    Ok((database, face))
+}
+
+#[test]
+fn invalid_sizes_reject_real_font_run_and_endpoints() -> Result<(), String> {
+    let (database, face) = checked_in_font_face()?;
+    let valid = FontShape::new(VALID_SIZE, NORMAL_WEIGHT, false);
+    assert!(shape_svg_run_metrics_with_face(&database, face, TEST_TEXT, valid, false).is_some());
+    assert!(svg_run_endpoints_with_face(&database, face, valid).is_some());
+    for size in [0.0, -1.0, f32::NAN, f32::INFINITY, f32::MAX] {
+        let invalid = FontShape::new(size, NORMAL_WEIGHT, false);
+        assert!(
+            shape_svg_run_metrics_with_face(&database, face, TEST_TEXT, invalid, false).is_none()
+        );
+        assert!(svg_run_endpoints_with_face(&database, face, invalid).is_none());
+    }
+    Ok(())
+}
+
+#[test]
+fn ink_diagnostic_preserves_metrics_for_checked_in_font() -> Result<(), String> {
+    let (database, face) = checked_in_font_face()?;
     let shape = FontShape::new(18.0, 400, false);
     let raw_missing = raw_harfrust_glyphs_without_extents(TEST_TEXT, shape)?;
     let plain = shape_svg_run_metrics_with_face(&database, face, TEST_TEXT, shape, false)

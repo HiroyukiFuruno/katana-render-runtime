@@ -1,8 +1,22 @@
 use super::{
-    frame_support::invalid_frames, initial_frame_sha, interaction_session, validate_raster_frame,
+    frame_support::invalid_frames, initial_frame_sha, interaction_session, record_raster_phase,
+    validate_raster_frame,
 };
 
 const SHA256_HEX_LEN: usize = 64;
+
+#[test]
+fn closed_interaction_cannot_record_raster_phase() -> Result<(), String> {
+    let mut session = interaction_session()?;
+    assert!(session.latest_frame().is_some());
+    session.close().map_err(|error| error.to_string())?;
+    let observer = super::html::raster_observer::Scope::enter();
+    assert_eq!(
+        record_raster_phase(&session, &observer, "closed"),
+        Err("fixture produced no frame".to_owned())
+    );
+    Ok(())
+}
 
 #[test]
 fn real_interaction_frame_rejects_inconsistent_rgba_dimensions() -> Result<(), String> {
