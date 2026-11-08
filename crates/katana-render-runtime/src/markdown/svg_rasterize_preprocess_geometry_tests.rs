@@ -157,6 +157,31 @@ fn unsupported_complex_values_preserve_existing_attribute() {
 }
 
 #[test]
+fn css_wide_geometry_keywords_override_but_trailing_tokens_do_not() {
+    for keyword in [
+        "inherit",
+        "initial",
+        "unset",
+        "revert",
+        "revert-layer",
+        "INHERIT",
+    ] {
+        let source = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><style>.shape {{ rx: 12px; rx: {keyword}; }}</style><rect class=\"shape\" rx=\"5\"/></svg>"
+        );
+        assert_eq!(preprocess(&source), source, "keyword={keyword}");
+
+        let invalid = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><style>.shape {{ rx: 12px; rx: {keyword} extra; }}</style><rect class=\"shape\" rx=\"5\"/></svg>"
+        );
+        assert!(
+            preprocess(&invalid).contains("rx=\"12px\""),
+            "keyword={keyword}"
+        );
+    }
+}
+
+#[test]
 fn negative_zero_is_materialized_as_nonnegative_zero() {
     let source = r#"<svg xmlns="http://www.w3.org/2000/svg"><style>.shape { rx: -0px; }</style><rect class="shape" rx="5"/></svg>"#;
     assert!(preprocess(source).contains("rx=\"0px\""));

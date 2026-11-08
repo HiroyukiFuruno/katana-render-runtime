@@ -130,6 +130,28 @@ fn polygon_right_bottom_returns_finite_extrema_for_unordered_points() {
 }
 
 #[test]
+fn disjoint_axis_aligned_clip_has_no_visible_extent() -> Result<(), String> {
+    let mut renderer = owner_renderer();
+    renderer.element_boxes[0].transformed_corners =
+        [(0.0, 0.0), (10.0, 0.0), (10.0, 8.0), (0.0, 8.0)];
+    renderer.element_boxes[0].overflow_clip_axes = (true, true);
+    let subject = [(20.0, 30.0), (25.0, 30.0), (25.0, 37.0), (20.0, 37.0)];
+    let indices = HashMap::from([(1, 0)]);
+
+    assert_eq!(
+        super::visible_extent(
+            &subject,
+            &[clip(10.0, 8.0)],
+            &renderer.element_boxes,
+            &indices,
+            &mut PolygonScratch::default(),
+        ),
+        Ok(None)
+    );
+    Ok(())
+}
+
+#[test]
 fn viewport_polygon_intersection_keeps_all_four_clip_boundaries() -> Result<(), String> {
     let polygon =
         polygon::clip_viewport_polygon(&clip(10.0, 8.0), &viewport(-1.0, -1.0, 12.0, 10.0))?;

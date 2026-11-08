@@ -286,3 +286,6 @@ fn variable_face_keeps_direct_none_and_full_parser_fallback() -> TestResult {
         Ok(())
     })
 }
+
+#[path = "svg_rasterize_text_harfrust_line_metrics_rejection_tests.rs"]
+mod rejection_tests;

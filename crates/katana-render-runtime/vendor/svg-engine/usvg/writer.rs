@@ -1856,3 +1856,6 @@ fn write_alignment_baseline(span: &TextSpan, xml: &mut XmlWriter) {
         xml.write_svg_attribute(AId::AlignmentBaseline, name);
     }
 }
+
+#[cfg(test)]
+crate::svg_engine::owned_svg_model_tests!("../../../src/svg_engine_writer_dispatch_boundary_tests.rs");

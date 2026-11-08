@@ -102,6 +102,28 @@ fn observer_work_preparation_timeout_discards_the_runtime() {
     assert!(session.context.is_none());
 }
 
+#[test]
+fn window_scroll_timeout_discards_session_and_rejects_later_url_update()
+-> Result<(), HtmlRuntimeError> {
+    let mut session =
+        start("<script>window.addEventListener('scroll', () => { for (;;) {} });</script>");
+    session.set_active_element(None)?;
+
+    assert_eq!(
+        session.dispatch_window_scroll(),
+        Err(HtmlRuntimeError::ExecutionTimeout)
+    );
+    assert!(session.isolate.is_none());
+    assert!(session.context.is_none());
+    assert_eq!(
+        session.update_document_url("https://example.test/after-timeout"),
+        Err(HtmlRuntimeError::DomBridge(
+            "HTML runtime session was discarded after timeout".to_string()
+        ))
+    );
+    Ok(())
+}
+
 fn observed_target_boxes(
     visible: u64,
     hidden: u64,

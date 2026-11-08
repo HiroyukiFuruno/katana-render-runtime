@@ -27,6 +27,27 @@ fn nonzero_text_path_offset_survives_preserving_writer() -> Result<(), String> {
     Ok(())
 }
 
+#[rstest]
+#[case::double_attribute_quotes(false, "'Odd/Face', Noto Sans")]
+#[case::single_attribute_quotes(true, "\"Odd/Face\", Noto Sans")]
+fn quoted_font_family_survives_preserving_writer_roundtrip(
+    #[case] use_single_quote: bool,
+    #[case] expected_family: &str,
+) -> Result<(), String> {
+    let input = r#"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60"><text x="12" y="32" font-family="'Odd/Face', Noto Sans" font-size="18">Text</text></svg>"#;
+    let original = parse_writer_svg(input, "writer-quoted-font-family")?;
+    let options = usvg::WriteOptions {
+        preserve_text: true,
+        use_single_quote,
+        ..usvg::WriteOptions::default()
+    };
+    let serialized = original.to_string(&options);
+    assert_tspan_attribute(&serialized, "font-family", expected_family)?;
+    let reparsed = parse_writer_svg(&serialized, "writer-quoted-font-family")?;
+    assert_pixels_equal(&original, &reparsed, "quoted font family")?;
+    Ok(())
+}
+
 #[test]
 fn dominant_no_change_inherits_parent_before_writer_roundtrip() -> Result<(), String> {
     let input = r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text x="50" y="50" font-family="Noto Sans" font-size="18" dominant-baseline="middle"><tspan dominant-baseline="no-change">Edge Text</tspan></text></svg>"#;

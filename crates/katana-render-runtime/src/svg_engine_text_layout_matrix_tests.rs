@@ -61,6 +61,21 @@ fn near(actual: f32, expected: f32) {
     );
 }
 
+#[test]
+fn physical_font_size_units_resolve_to_css_pixels() -> TestResult<()> {
+    for unit in ["1in", "2.54cm", "25.4mm", "72pt", "6pc"] {
+        let content = format!("<tspan font-size='{unit}'>A</tspan>");
+        let tree = parse("", &content)?;
+        let span = text(&tree)?
+            .chunks()
+            .first()
+            .and_then(|chunk| chunk.spans().first())
+            .ok_or(std::io::Error::other("physical font-size span missing"))?;
+        near(span.font_size().get(), 96.0);
+    }
+    Ok(())
+}
+
 #[rstest]
 #[case::zero(UPM_ZERO)]
 #[case::below_minimum(UPM_BELOW_MINIMUM)]

@@ -80,3 +80,16 @@ fn fixture_path(relative_path: &str) -> PathBuf {
         .join("../../tests/fixtures/svg-engine/upstream/resvg/tests/tests")
         .join(relative_path)
 }
+
+#[test]
+fn fontdb_mut_clones_shared_database_before_loading_font() {
+    let mut options = usvg::Options::default();
+    let original = std::sync::Arc::clone(&options.fontdb);
+    assert!(std::sync::Arc::ptr_eq(&original, &options.fontdb));
+    options
+        .fontdb_mut()
+        .load_font_data(include_bytes!("../assets/fonts/NotoSans-Regular.ttf").to_vec());
+    assert!(!std::sync::Arc::ptr_eq(&original, &options.fontdb));
+    assert_eq!(original.faces().count(), 0);
+    assert_eq!(options.fontdb.faces().count(), 1);
+}

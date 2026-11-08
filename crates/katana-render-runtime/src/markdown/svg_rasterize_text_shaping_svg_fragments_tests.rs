@@ -177,6 +177,7 @@ fn invalid_fragments_rtl_and_ligatures_are_rejected() -> Result<(), String> {
             .is_none()
         );
     }
+    assert!(layout(&["A", "אב"])?.is_none());
     assert!(layout(&["f", "fi"])?.is_none());
     assert!(layout(&["e", "\u{301}"])?.is_none());
     assert!(fragment_advances(&["é".to_owned()], &[]).is_none());

@@ -5,6 +5,14 @@ use std::sync::Arc;
 
 const TEXT: &str = "KatanA renderer context";
 
+#[test]
+fn devanagari_request_uses_the_known_unicode_fallback_route() {
+    let request = HtmlFontRequest::from_text("sans-serif", "अ");
+    assert!(request.needs_unicode_fallback);
+    let (database, proof) = sources::build_known_html_font_db(&request);
+    assert!(proof.current(&database));
+}
+
 struct ExpectedGenericSansStyle {
     weight: u16,
     italic: bool,

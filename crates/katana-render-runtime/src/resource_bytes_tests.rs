@@ -59,6 +59,27 @@ fn oversized_file_is_read_but_not_retained() -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
+#[cfg(unix)]
+#[test]
+fn pipe_snapshot_rejects_stream_bytes_that_disagree_with_metadata()
+-> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+
+    let (reader, writer) = nix::unistd::pipe()?;
+    let reader = std::fs::File::from(reader);
+    let before = super::Identity::from_metadata(&reader.metadata()?);
+    let mut writer = std::fs::File::from(writer);
+    writer.write_all(b"resource bytes")?;
+    drop(writer);
+
+    let result = ResourceBytes::read_snapshot(reader, before);
+    assert_eq!(
+        result.err().map(|error| error.kind()),
+        Some(std::io::ErrorKind::Other)
+    );
+    Ok(())
+}
+
 #[test]
 fn text_snapshot_digest_matches_its_bytes() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;

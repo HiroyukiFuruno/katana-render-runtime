@@ -276,3 +276,20 @@ fn text_node(id: &str, abs_transform: Transform) -> Result<Node, String> {
 mod filter_model_tests;
 #[path = "svg_engine_tree_image_model_tests.rs"]
 mod image_model_tests;
+
+#[test]
+fn f64_valid_length_requires_positive_finite_values() {
+    use super::IsValidLength;
+
+    for (value, expected) in [
+        (f64::NEG_INFINITY, false),
+        (-1.0, false),
+        (0.0, false),
+        (f64::NAN, false),
+        (f64::INFINITY, false),
+        (f64::MIN_POSITIVE, true),
+        (1.0, true),
+    ] {
+        assert_eq!(value.is_valid_length(), expected, "value={value}");
+    }
+}

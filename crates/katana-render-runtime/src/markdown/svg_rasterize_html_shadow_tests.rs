@@ -157,6 +157,34 @@ fn unsupported_shadow_forms_are_noops() -> Result<(), String> {
     )
 }
 
+#[test]
+fn empty_and_unsupported_shadow_regions_are_noops() -> Result<(), String> {
+    let no_filter = r#"<svg xmlns="http://www.w3.org/2000/svg"><g id="without-filter"><rect width="10" height="10"/></g></svg>"#;
+    let source_alpha = SRGB_SVG.replace(
+        r#"<feDropShadow dx="#,
+        r#"<feDropShadow in="SourceAlpha" dx="#,
+    );
+    let empty_source = SRGB_SVG
+        .replace(
+            r#"<filter id="s" x="#,
+            r#"<filter id="s" filterUnits="userSpaceOnUse" x="#,
+        )
+        .replace(
+            r#"<rect x="20" y="20" width="10" height="10" fill="blue"/>"#,
+            r#"<rect x="20" y="20" width="0" height="0" fill="blue"/>"#,
+        );
+    let tight_region = SRGB_SVG.replace(r#"width="100" height="100""#, r#"width="25" height="25""#);
+    for svg in [
+        no_filter,
+        source_alpha.as_str(),
+        empty_source.as_str(),
+        tight_region.as_str(),
+    ] {
+        assert_unsupported(svg, Transform::identity())?;
+    }
+    Ok(())
+}
+
 fn assert_unsupported(svg: &str, transform: Transform) -> Result<(), String> {
     let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
         .map_err(|error| error.to_string())?;

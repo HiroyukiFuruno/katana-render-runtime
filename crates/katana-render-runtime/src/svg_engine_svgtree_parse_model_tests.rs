@@ -107,6 +107,36 @@ fn explicit_inherit_resolves_ancestor_direct_parent_and_attribute_defaults() -> 
     Ok(())
 }
 
+#[test]
+fn explicit_inherit_uses_group_defaults_and_skips_undefined_defaults() -> Result<(), String> {
+    let source = r#"<svg xmlns="http://www.w3.org/2000/svg"><g>
+      <text id="target" image-rendering="inherit" shape-rendering="inherit"
+        text-rendering="inherit" letter-spacing="inherit" word-spacing="inherit"
+        font-optical-sizing="inherit">A</text>
+      </g></svg>"#;
+    let document = parse_document(source, None)?;
+    for (attribute, expected) in [
+        (AId::ImageRendering, "auto"),
+        (AId::ShapeRendering, "auto"),
+        (AId::TextRendering, "auto"),
+        (AId::LetterSpacing, "normal"),
+        (AId::WordSpacing, "normal"),
+    ] {
+        assert_eq!(raw_attribute(&document, "target", attribute)?, expected);
+    }
+    let target = document
+        .element_by_id("target")
+        .ok_or_else(|| "target text missing".to_owned())?;
+    assert!(
+        target
+            .attributes()
+            .iter()
+            .all(|attribute| attribute.name != AId::FontOpticalSizing),
+        "font-optical-sizing without an inherited default must not be inserted"
+    );
+    Ok(())
+}
+
 #[rstest::rstest]
 #[case::expands_declared_properties(
     r#"<svg xmlns="http://www.w3.org/2000/svg">

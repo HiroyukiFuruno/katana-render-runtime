@@ -1,4 +1,4 @@
-use super::GlyphPainter;
+use super::{GlyphPainter, XmlWriterExt};
 use skrifa::{
     FontRef,
     color::{Brush, ColorPainter, ColorStop, CompositeMode, Extend, Transform},
@@ -238,3 +238,29 @@ fn unsupported_brush_is_noop_and_unsupported_composite_uses_normal() -> Result<(
 
 #[path = "svg_engine_colr_outline_model_tests.rs"]
 mod outline_model_tests;
+
+#[test]
+fn unclipped_fill_preserves_path_and_emits_no_geometry() -> Result<(), String> {
+    let font = font()?;
+    let mut svg = writer();
+    let mut path = "unchanged".to_owned();
+    {
+        let mut painter = painter(&font, &mut svg, &mut path);
+        painter.fill(solid_brush());
+    }
+    assert_eq!(path, "unchanged");
+    assert!(!finish(svg).contains("<path"));
+    Ok(())
+}
+
+#[test]
+fn unknown_spread_method_leaves_the_attribute_unset() {
+    let mut svg = writer();
+    svg.start_element("linearGradient");
+    svg.write_spread_method_attribute(Extend::Unknown);
+    svg.write_attribute("id", &"gradient");
+    svg.end_element();
+    let output = finish(svg);
+    assert!(output.contains("id=\"gradient\""));
+    assert!(!output.contains("spreadMethod"));
+}

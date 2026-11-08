@@ -15,6 +15,22 @@ fn missing_button_value_and_empty_select_produce_empty_dom_values() -> Result<()
 }
 
 #[test]
+fn select_reads_the_first_nested_optgroup_option() -> Result<(), String> {
+    let mut document = HtmlDocument::parse(
+        "<select id=choice><optgroup label=group><option>nested choice</option></optgroup></select>",
+    );
+    let select = document
+        .get_element_by_id("choice")
+        .ok_or("select must exist")?;
+
+    assert_eq!(
+        document.form_value(select)?,
+        Some("nested choice".to_string())
+    );
+    Ok(())
+}
+
+#[test]
 fn missing_override_and_document_form_helpers_keep_non_element_boundaries() {
     let mut document = HtmlDocument::parse("<select><option>label</option></select>");
     document.clear_select_value_override_for(MISSING_NODE_ID);

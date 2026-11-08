@@ -130,3 +130,31 @@ fn probe_child_propagates_real_request_validation_failure() -> Result<(), String
     assert!(error.starts_with("ignored font probe failed with status Some("));
     Ok(())
 }
+
+#[test]
+fn probe_child_rejects_reused_request_path() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let response_path = temp.path().join("response.json");
+    let request_path = response_path.with_extension("request.json");
+    fs::write(&request_path, b"existing").map_err(|error| error.to_string())?;
+    let error = run_probe_child(&request(), &response_path, PROBE_TEST)
+        .err()
+        .ok_or("reused request path must be rejected")?;
+    assert_eq!(error, "probe request and response paths must be fresh");
+    assert_eq!(
+        fs::read(&request_path).map_err(|error| error.to_string())?,
+        b"existing"
+    );
+    Ok(())
+}
+
+#[test]
+fn probe_child_reports_request_write_failure() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let response_path = temp.path().join("missing-parent").join("response.json");
+    let error = run_probe_child(&request(), &response_path, PROBE_TEST)
+        .err()
+        .ok_or("request write must fail when the parent is missing")?;
+    assert!(error.starts_with("write request:"));
+    Ok(())
+}

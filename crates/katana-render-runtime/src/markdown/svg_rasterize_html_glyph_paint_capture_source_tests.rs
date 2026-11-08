@@ -35,3 +35,19 @@ pub(super) fn assert_transformed_source(index: usize, event: &serde_json::Value)
         event["sourceSpan"]["glyphs"][index]["id"]
     );
 }
+
+#[test]
+fn full_capture_drops_the_next_real_source_and_draw() -> Result<(), String> {
+    let (span, typeface, _fixture) = super::prepared_fixture(false)?;
+    let font = skia_safe::Font::new(typeface, 14.0);
+    let scope = super::PaintCaptureScope::enter();
+    for _ in 0..super::capture::MAX_EVENTS_FOR_TEST {
+        super::record_test_event(&font, 0.0);
+    }
+    super::capture::record_source(&span, 1.0, None);
+    super::record_test_event(&font, 0.0);
+    let snapshot = scope.snapshot();
+    assert_eq!(snapshot.events.len(), super::capture::MAX_EVENTS_FOR_TEST);
+    assert_eq!(snapshot.dropped, 1);
+    Ok(())
+}

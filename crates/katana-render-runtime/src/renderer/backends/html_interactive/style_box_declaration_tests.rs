@@ -93,6 +93,7 @@ mod tests {
 
         style.apply_box_property("overflow", "auto hidden clip");
         style.apply_box_property("overflow-x", "invalid");
+        style.apply_box_property("overflow-y", "auto hidden");
 
         assert_eq!(style.specified_overflow_axes(), before);
     }

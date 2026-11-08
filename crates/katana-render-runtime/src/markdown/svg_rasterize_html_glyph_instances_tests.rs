@@ -19,6 +19,9 @@ const OPTICAL_AXIS: Tag = Tag::from_be_bytes(*b"opsz");
 #[path = "svg_rasterize_html_glyph_tracking_tests.rs"]
 mod tracking;
 
+#[path = "svg_rasterize_html_glyph_instances_fixture_tests.rs"]
+mod fixture_tests;
+
 fn variable_tree(content: &str) -> Result<Tree, String> {
     let mut database = Database::new();
     let ids = database.load_font_source(Source::File(PathBuf::from(

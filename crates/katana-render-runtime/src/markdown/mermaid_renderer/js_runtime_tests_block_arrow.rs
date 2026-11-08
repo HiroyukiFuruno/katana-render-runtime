@@ -7,6 +7,9 @@ use svgtypes::{Transform, ViewBox};
 mod geometry;
 pub(super) use geometry::{svg_number_or, transform_bounds};
 
+#[path = "js_runtime_tests_block_arrow_contract_tests.rs"]
+mod contract_tests;
+
 pub(super) fn assert_block_arrow(root: SvgNode<'_, '_>, svg: &str) -> Result<(), String> {
     let arrow = semantic_node(root, "-blockArrowId6")?;
     if node_text(arrow) != "&nbsp;&nbsp;&nbsp;"

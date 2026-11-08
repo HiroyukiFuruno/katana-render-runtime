@@ -54,6 +54,10 @@ use self::metrics_support::assert_run_layout_metrics;
 mod metrics_support;
 
 #[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_glyph_fallback_capture_tests.rs"]
+mod capture_tests;
+
+#[cfg(target_os = "macos")]
 #[path = "svg_rasterize_html_glyph_fallback_anchor_tests.rs"]
 mod anchor_tests;
 

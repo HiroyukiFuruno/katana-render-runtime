@@ -8,6 +8,7 @@ mod interaction;
 mod intersection_observer;
 mod layout_diagnostic;
 mod rendering;
+mod scroll_policy;
 mod support;
 mod toc_diagnostic;
 

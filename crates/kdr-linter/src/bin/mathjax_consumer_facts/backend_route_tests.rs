@@ -1,5 +1,9 @@
 use super::*;
 
+#[path = "backend_resource_reader_mutations_tests.rs"]
+mod backend_resource_reader_mutations;
+use backend_resource_reader_mutations::RESOURCE_READER_SHAPE_MUTATIONS;
+
 #[path = "backend_route_edge_mutations_tests.rs"]
 mod backend_route_edge_mutations;
 #[path = "mathjax_backend_shape_mutations_tests.rs"]
@@ -219,34 +223,6 @@ fn rejects_backend_route_changes_at_their_contract_boundary()
     )?;
     fixture.reject_unique_mutations(relative, mathjax_backend_shape_mutations::CASES)
 }
-
-const RESOURCE_READER_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[
-    (
-        "let source = match bundled {",
-        "let source = match other {",
-        "resource-loader:read-dispatch",
-    ),
-    (
-        "return Ok(Cow::Borrowed(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                )));",
-        "return other;",
-        "resource-loader:mathjax-source",
-    ),
-    (
-        "return Ok(Cow::Borrowed(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                )));",
-        "return Ok(other);",
-        "resource-loader:mathjax-source",
-    ),
-    (
-        "return Ok(Cow::Borrowed(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                )));",
-        "return Ok(Cow::Borrowed(other));",
-        "resource-loader:mathjax-source",
-    ),
-    (
-        "\"diagram_runtime/generated/mathjax-runtime.min.js\"",
-        "concat!(\"diagram_runtime/generated/mathjax-runtime.min.js\")",
-        "resource-loader:mathjax-source",
-    ),
-];
 
 const SNAPSHOT_IDENTITY_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[
     (

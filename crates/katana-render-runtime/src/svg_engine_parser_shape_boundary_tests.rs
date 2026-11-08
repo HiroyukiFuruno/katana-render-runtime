@@ -38,6 +38,29 @@ fn ellipse_negative_radius_and_path_parse_edges_preserve_only_valid_geometry() -
     Ok(())
 }
 
+#[rstest::rstest]
+#[case::zero(0, false)]
+#[case::normal(4, true)]
+fn valid_rx_does_not_hide_invalid_ry(
+    #[case] ry: i32,
+    #[case] expected: bool,
+) -> Result<(), String> {
+    let normal = parse_shape("<ellipse id='sample' rx='4' ry='4' fill='red'/>")?;
+    let shape = format!("<ellipse id='sample' rx='4' ry='{ry}' fill='red'/>");
+    let actual = parse_shape(&shape)?;
+    assert_eq!(actual.node_by_id("sample").is_some(), expected, "{shape}");
+    if expected {
+        assert!(
+            sample_path(&actual)?
+                .data()
+                .segments()
+                .eq(sample_path(&normal)?.data().segments()),
+            "{shape}"
+        );
+    }
+    Ok(())
+}
+
 #[test]
 fn polyline_and_polygon_without_points_are_skipped() -> Result<(), String> {
     for shape in [

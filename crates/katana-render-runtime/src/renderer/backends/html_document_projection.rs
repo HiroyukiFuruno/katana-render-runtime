@@ -217,6 +217,33 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn interactive_projection_omits_the_document_root() {
+        let document = HtmlDocument::parse("<main><p>text</p></main>");
+        let css = StaticCss::for_interactive_document_with_styles_at_width(
+            &document.document,
+            &HashMap::new(),
+            1024.0,
+        );
+        let empty = HashSet::new();
+
+        assert!(
+            document
+                .interactive_node_with_state(
+                    &document.document,
+                    &css,
+                    &[],
+                    (0, 0, 0),
+                    ProjectionState {
+                        hovered: &empty,
+                        focused: &empty,
+                        focus_visible: &empty,
+                    },
+                )
+                .is_none()
+        );
+    }
+
     fn find_text(node: &Handle) -> Option<Handle> {
         if matches!(node.data, NodeData::Text { .. }) {
             return Some(node.clone());

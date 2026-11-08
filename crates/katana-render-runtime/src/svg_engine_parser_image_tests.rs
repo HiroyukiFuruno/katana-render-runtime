@@ -36,6 +36,25 @@ fn matches_format(kind: &usvg::ImageKind, format: Format) -> bool {
     )
 }
 
+#[test]
+fn unsupported_bmp_is_not_mistaken_for_svg() -> Result<(), String> {
+    const BMP: &str =
+        "Qk06AAAAAAAAADYAAAAoAAAAAQAAAAEAAAABABgAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAD/AA==";
+    let data = STANDARD.decode(BMP).map_err(|error| error.to_string())?;
+    assert!(matches!(
+        imagesize::image_type(&data),
+        Ok(imagesize::ImageType::Bmp)
+    ));
+    let source = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'><image id='unsupported' width='1' height='1' href='data:text/plain;base64,{BMP}'/><rect id='control' width='1' height='1'/></svg>"
+    );
+    let tree = usvg::Tree::from_str(&source, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    assert!(tree.node_by_id("unsupported").is_none());
+    assert!(tree.node_by_id("control").is_some());
+    Ok(())
+}
+
 #[rstest]
 #[case::png("image.png", Format::Png)]
 #[case::gif("image.gif", Format::Gif)]

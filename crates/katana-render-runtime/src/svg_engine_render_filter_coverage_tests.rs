@@ -68,3 +68,25 @@ fn zero_radius_morphology_and_zero_scale_displacement_preserve_source_pixels() -
     }
     Ok(())
 }
+
+#[test]
+fn lighting_smaller_than_three_pixels_is_transparent() -> Result<(), String> {
+    for (width, height) in [(2, 2), (2, 4), (4, 2)] {
+        let source = format!(
+            "<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}'><defs><filter id='f' filterUnits='userSpaceOnUse' x='0' y='0' width='{width}' height='{height}'><feDiffuseLighting><feDistantLight azimuth='45' elevation='45'/></feDiffuseLighting></filter></defs><rect width='{width}' height='{height}' filter='url(#f)'/></svg>"
+        );
+        let image = render_svg(&source)?;
+        assert_eq!((image.width(), image.height()), (width, height));
+        assert!(image.data().iter().all(|channel| *channel == 0));
+    }
+    Ok(())
+}
+
+#[test]
+fn point_light_behind_surface_has_zero_specular_at_singularity() -> Result<(), String> {
+    let source = r#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><defs><filter id="f" filterUnits="userSpaceOnUse" x="0" y="0" width="4" height="4"><feSpecularLighting in="SourceAlpha" surfaceScale="0" specularConstant="1" specularExponent="1"><fePointLight x="1" y="1" z="-1"/></feSpecularLighting></filter></defs><rect width="4" height="4" filter="url(#f)"/></svg>"#;
+    let image = render_svg(source)?;
+    assert_eq!(rgba(&image, 1, 1)?, [0, 0, 0, 0]);
+    assert!(rgba(&image, 0, 0)?[3] > 0);
+    Ok(())
+}

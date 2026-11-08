@@ -101,3 +101,26 @@ fn coretext_rejects_descriptor_postscript_name_mismatch() -> Result<(), String> 
     assert_eq!(error, NAME_MISMATCH_ERROR);
     Ok(())
 }
+
+#[test]
+fn coretext_lookup_rejects_a_missing_font_file() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let path = temp.path().join("missing.ttf");
+    let result = super::descriptors_from_url(&path);
+    match result {
+        Err(error) => assert_eq!(error, "CoreText URL descriptor lookup returned null"),
+        Ok(descriptors) => assert!(descriptors.is_empty()),
+    }
+    Ok(())
+}
+
+#[test]
+fn coretext_lookup_skips_descriptors_with_a_different_name() -> Result<(), String> {
+    let (_temp, database, _) = physical_font_fixture()?;
+    let face = database.faces().next().ok_or("font face missing")?;
+    let identity = super::super::face_identity(&database, face)?;
+    let path = identity.path.clone();
+    let matches = super::resolve_file(&path, identity, "krr-unmatched-postscript-name")?;
+    assert!(matches.is_empty());
+    Ok(())
+}

@@ -30,3 +30,29 @@ fn nested_viewbox_matches_browser_transform(
     );
     Ok(())
 }
+
+#[rstest]
+#[case::x_min("50 100", "xMinYMid", 0.0, 0.0)]
+#[case::x_mid("50 100", "xMidYMid", 25.0, 0.0)]
+#[case::x_max("50 100", "xMaxYMid", 50.0, 0.0)]
+#[case::y_min("100 50", "xMidYMin", 0.0, 0.0)]
+#[case::y_mid("100 50", "xMidYMid", 0.0, 25.0)]
+#[case::y_max("100 50", "xMidYMax", 0.0, 50.0)]
+fn viewbox_alignment_places_letterboxed_content(
+    #[case] view_box: &str,
+    #[case] alignment: &str,
+    #[case] x: f32,
+    #[case] y: f32,
+) -> Result<(), String> {
+    let svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><svg width="100" height="100" viewBox="0 0 {view_box}" preserveAspectRatio="{alignment}"><path id="target" d="M0 0 H1 V1 Z"/></svg></svg>"#
+    );
+    let tree =
+        usvg::Tree::from_str(&svg, &usvg::Options::default()).map_err(|error| error.to_string())?;
+    let node = tree.node_by_id("target").ok_or("target path missing")?;
+    assert_eq!(
+        node.abs_transform(),
+        Transform::from_row(1.0, 0.0, 0.0, 1.0, x, y)
+    );
+    Ok(())
+}

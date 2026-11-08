@@ -72,3 +72,6 @@ fn interpolate_table(values: &[f32], c: f32) -> f32 {
         vk + (c - k / n) * n * (vk1 - vk)
     }
 }
+
+#[cfg(test)]
+crate::svg_engine::owned_svg_model_tests!("../../../../src/svg_engine_component_transfer_identity_tests.rs");
