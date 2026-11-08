@@ -121,3 +121,40 @@ fn disjoint_paint_clip_and_non_finite_inverse_have_distinct_results() {
         Err("non-finite inverse owner transform point".to_owned())
     );
 }
+
+#[test]
+fn finite_owner_geometry_that_overflows_transform_is_rejected() {
+    let corners = [(0.0, 0.0), (f32::MAX, 0.0), (f32::MAX, 1.0), (0.0, 1.0)];
+    assert_eq!(
+        super::owner_transform((0.0, 0.0, 0.5, 1.0), &corners)
+            .err()
+            .as_deref(),
+        Some("non-finite owner transform for paint clip")
+    );
+}
+
+#[test]
+fn noninvertible_owner_transforms_hide_paint_clip() {
+    use super::super::layout::HtmlLayoutRenderer;
+    use super::super::types::OverflowClip;
+    use crate::HtmlBrowserViewport;
+    use std::collections::HashMap;
+    use tiny_skia::Transform;
+
+    let viewport = HtmlBrowserViewport {
+        width: 100,
+        height: 100,
+        device_scale_factor: 1.0,
+    };
+    let renderer = HtmlLayoutRenderer::new(viewport, 0.0, &HashMap::new(), None);
+    let clip = OverflowClip::new(1, 0.0, 0.0, 20.0, 20.0, 0.0, 0.0);
+    for transform in [
+        Transform::from_scale(0.0, 1.0),
+        Transform::from_row(1.0, 1.0, 1.0, 1.0, 0.0, 0.0),
+    ] {
+        assert_eq!(
+            super::transformed_clip_path(&renderer, &clip, transform),
+            Ok("M 0 0 Z".to_string())
+        );
+    }
+}

@@ -49,9 +49,10 @@ fn transformed_clip_path(
     if polygon.is_empty() {
         return Ok("M 0 0 Z".to_string());
     }
-    let inverse = transform
-        .invert()
-        .ok_or_else(|| "singular owner transform for paint clip".to_string())?;
+    /* WHY: scale(0)などの非可逆変換で文書全体の描画を失敗させない。 */
+    let Some(inverse) = transform.invert().filter(|inverse| inverse.is_finite()) else {
+        return Ok("M 0 0 Z".to_string());
+    };
     Ok(polygon_path(&local_polygon(polygon, inverse, renderer)?))
 }
 
