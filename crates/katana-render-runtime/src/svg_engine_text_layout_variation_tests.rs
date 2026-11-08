@@ -1,6 +1,9 @@
 use super::{parse, text};
 use rstest::rstest;
 
+#[path = "svg_engine_text_layout_css_x_height_tests.rs"]
+mod css_x_height_tests;
+
 #[rstest]
 #[case::normal("normal", 400.0, None)]
 #[case::single("'wght' 700", 700.0, None)]

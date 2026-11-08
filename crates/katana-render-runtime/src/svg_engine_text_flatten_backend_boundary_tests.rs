@@ -1,4 +1,4 @@
-use super::{FONT, TestResult, usvg};
+use super::{FONT, TestResult, font_fixture_tests::fixture_database, usvg};
 use crate::svg_engine::usvg::flatten::DatabaseExt as FlattenDatabaseExt;
 use crate::svg_engine::usvg::layout::DatabaseExt as LayoutDatabaseExt;
 use rstest::rstest;
@@ -29,15 +29,6 @@ enum Backend {
 enum TestGlyph {
     Character(char),
     Id(u32),
-}
-
-fn fixture_database(bytes: &[u8]) -> TestResult<(Arc<usvg::fontdb::Database>, usvg::fontdb::ID)> {
-    let mut database = usvg::fontdb::Database::new();
-    let ids = database.load_font_source(usvg::fontdb::Source::Binary(Arc::new(bytes.to_vec())));
-    let [face] = ids.as_slice() else {
-        return Err("expected one fixture font face".into());
-    };
-    Ok((Arc::new(database), *face))
 }
 
 fn fixture_glyph(bytes: &[u8], glyph: TestGlyph) -> TestResult<usvg::GlyphId> {

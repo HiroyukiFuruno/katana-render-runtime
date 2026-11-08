@@ -13,6 +13,8 @@ mod decoration_boundary_tests;
 mod fallback_tests;
 #[path = "svg_engine_text_flatten_backend_boundary_tests.rs"]
 mod flatten_backend_boundary_tests;
+#[path = "svg_engine_text_layout_font_fixture_tests.rs"]
+mod font_fixture_tests;
 #[path = "svg_engine_text_layout_path_rotation_tests.rs"]
 mod path_rotation_tests;
 #[path = "svg_engine_text_layout_path_support.rs"]
