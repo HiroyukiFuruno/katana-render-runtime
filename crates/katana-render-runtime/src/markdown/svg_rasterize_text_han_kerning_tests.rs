@@ -1,9 +1,14 @@
 use super::class::{HanClass, quote_class, should_kern, should_kern_last};
 use super::{CHWS, HALT, HanKerningTrim, PALT, han_kerning_features, has_layout_feature};
+use skrifa::MetadataProvider;
 
 const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 const HAN_FONT_BYTES: &[u8] =
     include_bytes!("../../../../tests/fixtures/fonts/han-kerning/NotoSansCJKjp-han14.otf");
+const CHWS_FONT_BYTES: &[u8] = include_bytes!(
+    "../../../../tests/fixtures/fonts/han-kerning/NotoSansCJKjp-Regular-subset-chws.otf"
+);
+const CHWS_TEXT: &str = "国）（国";
 
 const TAG_LENGTH: usize = 4;
 
@@ -99,6 +104,52 @@ fn explicit_chws_zero_still_suppresses_the_default() -> Result<(), String> {
         han_kerning_features(FONT_BYTES, 0, "（あ）", HanKerningTrim::Normal, &[explicit])?
             .is_empty()
     );
+    Ok(())
+}
+
+#[test]
+fn actual_chws_font_enables_full_range_feature() -> Result<(), String> {
+    let font =
+        skrifa::FontRef::from_index(CHWS_FONT_BYTES, 0).map_err(|error| error.to_string())?;
+    assert!(has_layout_feature(&font, CHWS));
+    for character in CHWS_TEXT.chars() {
+        assert!(font.charmap().map(character).is_some(), "{character}");
+    }
+    let features =
+        han_kerning_features(CHWS_FONT_BYTES, 0, CHWS_TEXT, HanKerningTrim::Normal, &[])?;
+    assert_full_range_chws(&features);
+    Ok(())
+}
+
+fn assert_full_range_chws(features: &[harfrust::Feature]) {
+    assert_eq!(features.len(), 1);
+    let actual = &features[0];
+    assert_eq!(
+        (actual.tag, actual.value, actual.start, actual.end),
+        (CHWS, 1, 0, u32::MAX)
+    );
+}
+
+#[test]
+fn actual_chws_font_respects_explicit_spacing_policy() -> Result<(), String> {
+    let disabled = harfrust::Feature::new(CHWS, 0, ..);
+    for (trim, explicit) in [
+        (HanKerningTrim::SpaceAll, vec![]),
+        (HanKerningTrim::Normal, vec![disabled]),
+        (HanKerningTrim::Normal, vec![feature(b"halt")]),
+        (HanKerningTrim::Normal, vec![feature(b"palt")]),
+    ] {
+        assert!(han_kerning_features(CHWS_FONT_BYTES, 0, CHWS_TEXT, trim, &explicit)?.is_empty());
+    }
+    let disabled_halt = harfrust::Feature::new(HALT, 0, ..);
+    let features = han_kerning_features(
+        CHWS_FONT_BYTES,
+        0,
+        CHWS_TEXT,
+        HanKerningTrim::Normal,
+        &[disabled_halt],
+    )?;
+    assert_full_range_chws(&features);
     Ok(())
 }
 

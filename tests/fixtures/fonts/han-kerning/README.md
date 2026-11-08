@@ -11,3 +11,7 @@ hb-subset "$SOURCE_FONT" --unicodes=0020,0028,0029,0041,2018,2019,201C,201D,3000
 ```
 
 元フォントの著作権表示は © 2014–2021 Adobe です。元フォントと本サブセットは SIL Open Font License 1.1 です。対応する固定元のライセンス全文と著作権条件は同梱の `OFL.txt` を参照してください。
+
+`NotoSansCJKjp-Regular-subset-chws.otf` は [WPT の固定 commit c2504f4062db9bed36540e28c49caae3e4fd873c](https://github.com/web-platform-tests/wpt/blob/c2504f4062db9bed36540e28c49caae3e4fd873c/fonts/noto/cjk/NotoSansCJKjp-Regular-subset-chws.otf) の原本です。サイズは 30,016 bytes、SHA-256 は `fa2f2a3e29179fbd4e258f3f3f988c2c7ab95979ae7d2297e2bd22b8f953067b`、Git blob は `18859d5e2fe1200da5caef5f88d15864d0477963` です。
+
+[WPT の説明](https://github.com/web-platform-tests/wpt/blob/c2504f4062db9bed36540e28c49caae3e4fd873c/fonts/noto/cjk/README.md)では Noto CJK を chws_tool で処理してサブセット化したフォントとされています。処理元フォントと生成ツールの正確な版は不明です。このfixtureはWPTの固定binaryを改変せずに使用します。WPT 同梱の [LICENSE.txt](https://github.com/web-platform-tests/wpt/blob/c2504f4062db9bed36540e28c49caae3e4fd873c/fonts/noto/cjk/LICENSE.txt) は上記 `OFL.txt` と同一bytesで、SIL Open Font License 1.1 を適用します。
