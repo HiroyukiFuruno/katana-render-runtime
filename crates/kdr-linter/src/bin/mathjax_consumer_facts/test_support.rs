@@ -28,14 +28,13 @@ impl Fixture {
         )
     }
 
-    pub(super) fn inspect_parser_pin(&self) -> Result<String, String> {
-        let workspace =
-            fs::read_to_string(self.root.join("Cargo.toml")).map_err(|error| error.to_string())?;
-        let linter = fs::read_to_string(self.root.join("crates/kdr-linter/Cargo.toml"))
-            .map_err(|error| error.to_string())?;
-        let lock =
-            fs::read_to_string(self.root.join("Cargo.lock")).map_err(|error| error.to_string())?;
-        super::source::parser_pin(&self.root, &lock, &workspace, &linter)
+    pub(super) fn inspect_parser_pin(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let workspace = fs::read_to_string(self.root.join("Cargo.toml"))?;
+        let linter = fs::read_to_string(self.root.join("crates/kdr-linter/Cargo.toml"))?;
+        let lock = fs::read_to_string(self.root.join("Cargo.lock"))?;
+        Ok(super::source::parser_pin(
+            &self.root, &lock, &workspace, &linter,
+        )?)
     }
 
     pub(super) fn inspect_parser_pin_inputs(
@@ -43,12 +42,13 @@ impl Fixture {
         workspace: &str,
         linter: &str,
         lock: &str,
-    ) -> Result<String, String> {
-        fs::write(self.root.join("Cargo.toml"), workspace).map_err(|error| error.to_string())?;
-        fs::write(self.root.join("crates/kdr-linter/Cargo.toml"), linter)
-            .map_err(|error| error.to_string())?;
-        fs::write(self.root.join("Cargo.lock"), lock).map_err(|error| error.to_string())?;
-        super::source::parser_pin(&self.root, lock, workspace, linter)
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        fs::write(self.root.join("Cargo.toml"), workspace)?;
+        fs::write(self.root.join("crates/kdr-linter/Cargo.toml"), linter)?;
+        fs::write(self.root.join("Cargo.lock"), lock)?;
+        Ok(super::source::parser_pin(
+            &self.root, lock, workspace, linter,
+        )?)
     }
 
     pub(super) fn copy_native_width_inputs(

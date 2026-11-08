@@ -1,6 +1,9 @@
 use super::super::test_support::Fixture;
 use std::fs;
 
+#[path = "source_parser_pin_io_tests.rs"]
+mod source_parser_pin_io_tests;
+
 const INPUT_PATHS: &[&str] = &["Cargo.toml", "Cargo.lock", "crates/kdr-linter/Cargo.toml"];
 const WORKSPACE: &str = "[workspace]\n[workspace.dependencies]\nsyn = { version = \"3\", features = [\"full\", \"visit\"] }\n";
 const LINTER: &str = "[dependencies]\nsyn = { workspace = true }\n";
@@ -242,8 +245,9 @@ fn mathjax_consumer_facts_ast_lookup_rejects_nonmatching_expression_shapes() -> 
 }
 
 #[test]
-fn mathjax_consumer_facts_ast_linter_accepts_current_parser_pin() -> Result<(), String> {
-    let fixture = Fixture::copy_mathjax_inputs(INPUT_PATHS).map_err(|error| error.to_string())?;
+fn mathjax_consumer_facts_ast_linter_accepts_current_parser_pin()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::copy_mathjax_inputs(INPUT_PATHS)?;
     let version = fixture.inspect_parser_pin()?;
     assert!(
         version.starts_with("3."),
@@ -267,7 +271,7 @@ fn mathjax_consumer_facts_ast_linter_rejects_parser_pin_manifest_and_lock_cases(
             ));
         };
         assert!(
-            error.starts_with(case.expected),
+            error.to_string().starts_with(case.expected),
             "expected {} diagnostic, got: {error}",
             case.expected
         );
