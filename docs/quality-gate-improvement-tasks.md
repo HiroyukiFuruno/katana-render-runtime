@@ -30,6 +30,9 @@
 
 - [x] ID移転の内部モデル契約は `filter-id-transfer-current-build-rpfvxkaq` のfoundation/AST実0・同profile compile成功（none選択実4）後、実catalog `filter-id-transfer-current-catalog-4icl3llb` へ照合。`filter-transfer-feimage-exact13-7ly5q938` はprivate filter8/既存feImage5の13case全実0、source/binary不変・profile残0。実SVG由来のGroup/Path/PNG Image/Text cloneで4分岐を直接検査し、wrapper ID移転・子ID消去・PNG元bytes・元Tree・後続子の不変を確認した。空root/非Group先頭/空wrapper/既存wrapper ID/空child IDはnoop、先頭以外のwrapperも不変。所有test2fileだけの変更であり、公開SVG経路の到達や正式coverage減少を未測定のまま断定しない。
 
+- [x] 既定font resolverの追加は事前レビューで可変Arc引数とnamed選択の偽陽性を修正。初回 `default-font-resolver-current-build-qfguea5z` はfoundation/AST実0だが新font path欠落でcompile実101、`default-font-path-fixed-build-p1bb4qxt` も相対階層不足で実101として保持した。主担当がsource file起点で正確な `../../../tests/.../Yellowtail-Regular.ttf` を実在・60,864bytesへ照合後、`default-font-relative-path-verified-build-nv3962lr` はAST実0・同profile compile成功（none選択実4）。修正パスを実在確認せず再試行した失敗を省略しない。
+- [x] 実catalog `default-font-resolver-current-catalog-4_blorzb` に照合した `default-font-resolver-exact17-c460xyen` はresolver9/既存backend5/CSS2/fixture1の17case全実0、source/binary不変・profile残0。generic5種は各DB setterだけをNotoへ設定し、別genericへ誤対応しても代替で成功しない条件とした。named Notoはserif未設定、未登録namedだけ設定serifへfallback。空DB拒否、実Yellowtailへの正常fallback→base face実削除後の拒否を確認し、対象case自身で既存loggerを初期化してwarning生成も通した。次にこの一連のcommitを固定した正式rootを収集し、旧973行の減少を実測する。
+
 ### 経過の記録（以下の旧数値・未実行予定は上の現在実数と区別する）
 
 - [/] 集計対象helperの限定補完: cmapのIO・HTMLの座標/実frame・KDRのparser pin fixtureを非重複3担当で変更中。成功/元のエラー表示とWindows callerを保ち、欠落ファイル・不正属性/viewport・closed session・fixture read/write失敗を実入力で検証する。実装の除外や分母変更はせず、純粋な判定caseは既存のtestファイル境界へ置く。レビューでcmap fixtureの早期失敗時の残骸も見つかったため、create_new成功後の所有とhandle解放後のDropへ整理する。まだ変更後未検証でありcoverage解消数へ加算しない。
