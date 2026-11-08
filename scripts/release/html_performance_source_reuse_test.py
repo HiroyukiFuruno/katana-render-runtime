@@ -278,6 +278,42 @@ class SourceReuseTest(unittest.TestCase):
                 repository, base, items, ((live, live_items),), git_query=None,
                 memory_policy_version="html-memory-v4"), items)
 
+    def test_historical_self_and_migrations_are_exact(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        histories = ("6d2e83a2458f6fd297972ecb82ee22d359a4eab1",
+                     "5d80409466a6edfec480516d7c0bb1e7969b7ae9")
+        paths = ("scripts/release/html_performance_source_reuse.py",
+                 "scripts/release/html_performance_source_reuse_test.py",
+                 "scripts/release/html_performance_source_reuse_cli.py",
+                 "scripts/release/html_performance_source_reuse_cli_test.py",
+                 "scripts/release/verify_html_performance_evidence.py")
+        for head in histories:
+            for path in paths:
+                with self.subTest(head=head, path=path):
+                    base = subprocess.check_output(["git", "-C", str(repository), "show",
+                                                    reuse.SAME_BINARY_REVIEWED_BASE + ":" + path])
+                    historical = subprocess.check_output(["git", "-C", str(repository), "show",
+                                                          head + ":" + path])
+                    def check(before: bytes, after: bytes, mode: str = "100644",
+                              current_path: str = path) -> bool:
+                        return reuse.reviewed_same_binary_migration(
+                            current_path, before, after, old_mode="100644", new_mode=mode)
+                    self.assertTrue(check(base, historical))
+                    self.assertFalse(check(base + b" ", historical))
+                    self.assertFalse(check(base, historical + b" "))
+                    self.assertFalse(check(base, historical, "100755"))
+                    if path.endswith("html_performance_source_reuse.py"):
+                        self.assertFalse(reuse.reviewed_same_binary_self(historical))
+                        self.assertTrue(reuse.reviewed_same_binary_self(historical, allow_historical=True))
+                        self.assertFalse(reuse.reviewed_same_binary_self(
+                            historical + b"\n# unknown\n", allow_historical=True))
+                        self.assertFalse(reuse.reviewed_same_binary_self(
+                            historical + b'\nSELF_MODULE_CANONICAL_SHA256 = "' + b"0" * 64 + b'"\n',
+                            allow_historical=True))
+                        self.assertFalse(reuse.reviewed_same_binary_self(
+                            historical.replace(b"SELF_MODULE_CANONICAL_SHA256", b"UNKNOWN_CONSTANT", 1),
+                            allow_historical=True))
+
     def test_reviewed_self_rejects_body_constant_duplicate_and_mode_changes(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         path = "scripts/release/html_performance_source_reuse.py"
@@ -294,6 +330,37 @@ class SourceReuseTest(unittest.TestCase):
         self.assertFalse(check(current, "100755"))
         self.assertFalse(reuse.reviewed_same_binary_migration(path, old + b" ", current,
                                                               old_mode="100644", new_mode="100644"))
+
+    def test_fixed_epoch_accepts_exact_historical_controller_program(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        base = reuse.SAME_BINARY_REVIEWED_BASE
+        history = "6d2e83a2458f6fd297972ecb82ee22d359a4eab1"
+        paths = ("scripts/release/html_performance_source_reuse.py",
+                 "scripts/release/html_performance_source_reuse_test.py")
+        def blobs(head: str) -> dict[str, bytes]:
+            return {path: subprocess.check_output(
+                ["git", "-C", str(repository), "show", head + ":" + path]) for path in paths}
+        old, current = blobs(base), blobs(history)
+        def records(values: dict[str, bytes]) -> dict[str, tuple[str, int]]:
+            return {path: (hashlib.sha256(data).hexdigest(), len(data)) for path, data in values.items()}
+        old_records, historical_records = records(old), records(current)
+        tree = b"".join(f"100644 blob {'0' * 40}\t{path}\0".encode() for path in paths)
+        def git_bytes(_root: Path, arguments: tuple[str, ...], **_kwargs: object) -> bytes:
+            if arguments[0] == "ls-tree":
+                return tree
+            if arguments[0] == "show":
+                head, path = arguments[1].split(":", 1)
+                return (old if head == base else current)[path]
+            raise AssertionError("unexpected Git query")
+        items = tuple((path, sha, size) for path, (sha, size) in sorted(old_records.items()))
+        history_items = tuple((path, sha, size) for path, (sha, size) in sorted(historical_records.items()))
+        with (patch.object(evidence, "committed_records", side_effect=lambda _root, head, **_kwargs:
+                           old_records if head == base else historical_records),
+              patch.object(evidence, "_git_output", side_effect=git_bytes),
+              patch.object(evidence, "git", return_value=base)):
+            self.assertEqual(evidence._v3_authenticate_programs(
+                repository, base, items, ((history, history_items),), git_query=None,
+                memory_policy_version="html-memory-v4"), items)
 
     def test_test_only_cohort_requires_exact_records_modes_and_anchors(self) -> None:
         root = Path(__file__).resolve().parents[2]

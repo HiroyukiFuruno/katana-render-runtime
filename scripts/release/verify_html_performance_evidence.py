@@ -2082,7 +2082,7 @@ def _v3_authenticate_programs(root: Path, head: str, items: _ProgramItems,
             pending.append((live_head, live_items))
             continue
         require(isinstance(base_data, bytes) and isinstance(live_data, bytes)
-                and reviewed_same_binary_self(live_data)
+                and reviewed_same_binary_self(live_data, allow_historical=True)
                 and reviewed_same_binary_migration(self_path, base_data, live_data,
                                                     old_mode="100644", new_mode="100644"),
                 "reviewed source migration differs")

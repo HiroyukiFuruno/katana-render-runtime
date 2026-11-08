@@ -8,6 +8,9 @@ import os
 import re
 import stat
 import sys
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TypedDict
 
@@ -64,13 +67,22 @@ def _request(value: object) -> ReuseRequest:
             "currentBuildArtifactSha256": _sha(value["currentBuildArtifactSha256"])}
 
 
-def _validate(request: ReuseRequest, root: Path, *,
+@contextmanager
+def _new_git_query(parent: Path) -> Iterator[gate.GitQuery]:
+    from produce_html_performance_evidence import _make_git_query
+
+    # 照会ログの物理pinはこの認証中だけ使い、結果へ持ち出さない。
+    with tempfile.TemporaryDirectory(prefix="source-reuse-git-", dir=parent) as directory:
+        yield _make_git_query(Path(directory))
+
+
+def _validate(request: ReuseRequest, root: Path, *, git_query: gate.GitQuery,
               memory_policy_version: str | None = None) -> gate.JsonObject:
     return gate.verify_source_reuse(
         Path(request["measuredDir"]), root, request["measuredManifestSha256"],
         Path(request["currentBuildDir"]), request["currentBuildManifestSha256"],
         request["currentBuildArtifactPath"], request["currentBuildArtifactSha256"],
-        **gate._memory_policy_kwargs(memory_policy_version),
+        git_query=git_query, **gate._memory_policy_kwargs(memory_policy_version),
     )
 
 
@@ -146,14 +158,16 @@ def verify_reuse_request(request_path: Path, root: Path, *,
                 original_version = measured["memoryPolicyVersion"]
                 if not isinstance(original_version, str):
                     raise ValueError("invalid stored memory policy version")
-        original = (_validate(request, root.resolve(strict=True), memory_policy_version=original_version)
-                    if has_eligibility else None)
-        if has_eligibility and (not _eligibility_matches(eligibility, original) or original is None
-                or original.get("reuseKind") not in ARTIFACT_REUSE_KINDS):
-            raise ValueError("stored eligibility differs from revalidation")
-        result = (_validate(request, root.resolve(strict=True), memory_policy_version=memory_policy_version)
-                  if memory_policy_version is not None else
-                  original if original is not None else _validate(request, root.resolve(strict=True)))
+        with _new_git_query(path.parent) as git_query:
+            original = (_validate(request, root.resolve(strict=True), git_query=git_query,
+                                  memory_policy_version=original_version) if has_eligibility else None)
+            if has_eligibility and (not _eligibility_matches(eligibility, original) or original is None
+                    or original.get("reuseKind") not in ARTIFACT_REUSE_KINDS):
+                raise ValueError("stored eligibility differs from revalidation")
+            result = (original if original is not None and memory_policy_version == original_version else
+                      _validate(request, root.resolve(strict=True), git_query=git_query,
+                                memory_policy_version=memory_policy_version)
+                      if memory_policy_version is not None or original is None else original)
         if not has_eligibility and result.get("reuseKind") in ARTIFACT_REUSE_KINDS:
             raise ValueError("immutable eligibility is required")
         try:
@@ -175,7 +189,9 @@ def create_request(request: ReuseRequest, output: Path, root: Path, *,
     else:
         raise FileExistsError(f"request already exists: {path}")
     validated = _request(request)
-    result = _validate(validated, root.resolve(strict=True), memory_policy_version=memory_policy_version)
+    with _new_git_query(path.parent) as git_query:
+        result = _validate(validated, root.resolve(strict=True), git_query=git_query,
+                           memory_policy_version=memory_policy_version)
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
     with os.fdopen(descriptor, "w", encoding="utf8") as stream:
         payload: object = validated

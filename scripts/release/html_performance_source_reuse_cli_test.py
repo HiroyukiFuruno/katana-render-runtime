@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import html_performance_source_reuse_cli as cli
 import verify_html_performance_evidence as gate
@@ -44,7 +44,7 @@ class ReuseRequestTest(unittest.TestCase):
             self.assertEqual(cli.verify_reuse_request(self.output, self.root), result)
             self.assertEqual(verify.call_count, 2)
             verify.assert_called_with(self.measured, self.root, "a" * 64, self.current,
-                                      "b" * 64, "build/proof.json", "c" * 64)
+                                      "b" * 64, "build/proof.json", "c" * 64, git_query=ANY)
             verify.reset_mock()
             with self.assertRaises(FileExistsError):
                 cli.create_request(self.request, self.output, self.root)
@@ -62,7 +62,8 @@ class ReuseRequestTest(unittest.TestCase):
         for operation in ("rewrite", "replace"):
             with self.subTest(operation=operation):
                 self.output.write_text(json.dumps(self.request))
-                def mutate(*_args: object, current_operation: str = operation) -> dict[str, object]:
+                def mutate(*_args: object, current_operation: str = operation,
+                           **_kwargs: object) -> dict[str, object]:
                     if current_operation == "rewrite":
                         self.output.write_text(json.dumps(self.request) + " ")
                     else:
@@ -91,7 +92,7 @@ class ReuseRequestTest(unittest.TestCase):
               redirect_stdout(io.StringIO())):
             self.assertEqual(cli.main(), 0)
         verify.assert_called_once_with(self.measured, self.root, "a" * 64, self.current,
-                                       "b" * 64, "build/proof.json", "c" * 64)
+                                       "b" * 64, "build/proof.json", "c" * 64, git_query=ANY)
 
     def test_rejects_malformed_and_noncanonical_requests(self) -> None:
         for value in (
@@ -219,6 +220,71 @@ class ReuseRequestTest(unittest.TestCase):
         self.assertEqual(self.output.read_bytes(), before)
         self.assertEqual(verify.call_args_list[0].kwargs["memory_policy_version"], "html-memory-v3")
         self.assertEqual(verify.call_args_list[1].kwargs["memory_policy_version"], "html-memory-v4")
+
+    def test_same_policy_reuses_one_validation_and_different_policy_reuses_query(self) -> None:
+        v3 = {"measuredHead": "old", "eligibleHead": "new",
+              "reuseKind": "binary-bound-product-source-equivalence-v1",
+              "measuredResult": {"memoryPolicyVersion": "html-memory-v3"}}
+        v4 = {**v3, "measuredResult": {"memoryPolicyVersion": "html-memory-v4"}}
+        with patch.object(gate, "verify_source_reuse", return_value=v3):
+            cli.create_request(self.request, self.output, self.root, memory_policy_version="html-memory-v3")
+        with patch.object(gate, "verify_source_reuse", return_value=v3) as verify:
+            self.assertEqual(cli.verify_reuse_request(
+                self.output, self.root, memory_policy_version="html-memory-v3"), v3)
+            self.assertEqual(verify.call_count, 1)
+            self.assertTrue(callable(verify.call_args.kwargs["git_query"]))
+        with patch.object(gate, "verify_source_reuse", side_effect=[v3, v4]) as verify:
+            self.assertEqual(cli.verify_reuse_request(
+                self.output, self.root, memory_policy_version="html-memory-v4"), v4)
+            self.assertEqual(verify.call_count, 2)
+            self.assertIs(verify.call_args_list[0].kwargs["git_query"],
+                          verify.call_args_list[1].kwargs["git_query"])
+        output_v4 = self.output.with_name("v4.json")
+        with patch.object(gate, "verify_source_reuse", return_value=v4):
+            cli.create_request(self.request, output_v4, self.root, memory_policy_version="html-memory-v4")
+        with patch.object(gate, "verify_source_reuse", return_value=v4) as verify:
+            self.assertEqual(cli.verify_reuse_request(
+                output_v4, self.root, memory_policy_version="html-memory-v4"), v4)
+            self.assertEqual(verify.call_count, 1)
+
+    def test_new_query_logs_are_fresh_and_below_request_parent(self) -> None:
+        import produce_html_performance_evidence as producer
+
+        with patch.object(producer, "_make_git_query") as factory:
+            with cli._new_git_query(self.output.parent) as first:
+                first_path = factory.call_args.args[0]
+                with cli._new_git_query(self.output.parent) as second:
+                    second_path = factory.call_args.args[0]
+                    self.assertIs(first, factory.return_value)
+                    self.assertIs(second, factory.return_value)
+                    self.assertNotEqual(first_path, second_path)
+                    self.assertEqual(first_path.parent, self.output.parent)
+                    self.assertEqual(second_path.parent, self.output.parent)
+                    self.assertTrue(first_path.is_dir() and second_path.is_dir())
+        self.assertFalse(first_path.exists() or second_path.exists())
+
+    def test_query_logs_are_removed_on_validation_failure_and_interrupt(self) -> None:
+        for error in (ValueError("pin mismatch"), KeyboardInterrupt()):
+            with self.subTest(error=type(error).__name__):
+                with patch.object(gate, "verify_source_reuse", side_effect=error):
+                    with self.assertRaises(type(error)):
+                        cli.create_request(self.request, self.output, self.root)
+                self.assertFalse(self.output.exists())
+                self.assertEqual(list(self.tmp.glob("source-reuse-git-*")), [])
+
+    def test_new_query_keeps_dynamic_and_unknown_commands_fresh(self) -> None:
+        from types import SimpleNamespace
+        import produce_html_performance_evidence as producer
+
+        with patch.object(producer, "_measurement_command",
+                          side_effect=[SimpleNamespace(stdout=f"{i}".encode()) for i in range(8)]) as execute:
+            with cli._new_git_query(self.output.parent) as query:
+                for argv in (("rev-parse", "HEAD"), ("status", "--porcelain"),
+                             ("for-each-ref", "--format=%(refname)", "refs/replace/"),
+                             ("show", "HEAD:Cargo.lock")):
+                    self.assertNotEqual(query(self.root, argv, None, True),
+                                        query(self.root, argv, None, True))
+                self.assertEqual(execute.call_count, 8)
 
 
 if __name__ == "__main__":
