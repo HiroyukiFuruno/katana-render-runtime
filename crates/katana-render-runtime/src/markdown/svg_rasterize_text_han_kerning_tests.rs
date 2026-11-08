@@ -1,7 +1,9 @@
 use super::class::{HanClass, quote_class, should_kern, should_kern_last};
-use super::{HanKerningTrim, han_kerning_features};
+use super::{CHWS, HALT, HanKerningTrim, PALT, han_kerning_features, has_layout_feature};
 
 const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
+const HAN_FONT_BYTES: &[u8] =
+    include_bytes!("../../../../tests/fixtures/fonts/han-kerning/NotoSansCJKjp-han14.otf");
 
 const TAG_LENGTH: usize = 4;
 
@@ -31,12 +33,45 @@ fn space_all_and_explicit_exclusive_features_disable_defaults() -> Result<(), St
 
 #[test]
 fn unsupported_font_does_not_receive_synthetic_han_features() -> Result<(), String> {
-    let features = han_kerning_features(FONT_BYTES, 0, "plain ASCII", HanKerningTrim::Normal, &[])?;
-    assert!(
-        features
-            .iter()
-            .all(|feature| feature.tag != harfrust::Tag::from_be_bytes(*b"halt"))
-    );
+    for text in ["plain ASCII", "（あ）"] {
+        let features = han_kerning_features(FONT_BYTES, 0, text, HanKerningTrim::Normal, &[])?;
+        assert!(features.is_empty());
+    }
+    Ok(())
+}
+
+fn assert_han_font_features() -> Result<(), String> {
+    let font = skrifa::FontRef::from_index(HAN_FONT_BYTES, 0).map_err(|error| error.to_string())?;
+    assert!(has_layout_feature(&font, HALT));
+    assert!(has_layout_feature(&font, PALT));
+    assert!(!has_layout_feature(&font, CHWS));
+    Ok(())
+}
+
+#[test]
+fn actual_halt_font_trims_fullwidth_pairs_at_utf8_byte_boundaries() -> Result<(), String> {
+    const BRACKET_BYTES: u32 = '（'.len_utf8() as u32;
+    const PREFIX_BYTES: u32 = 'A'.len_utf8() as u32;
+    assert_han_font_features()?;
+    for (text, start, end_exclusive) in [
+        ("（（", BRACKET_BYTES, BRACKET_BYTES + BRACKET_BYTES),
+        ("））", 0, BRACKET_BYTES),
+        (
+            "A（（",
+            PREFIX_BYTES + BRACKET_BYTES,
+            PREFIX_BYTES + BRACKET_BYTES + BRACKET_BYTES,
+        ),
+        ("A））", PREFIX_BYTES, PREFIX_BYTES + BRACKET_BYTES),
+    ] {
+        let features = han_kerning_features(HAN_FONT_BYTES, 0, text, HanKerningTrim::Normal, &[])?;
+        assert_eq!(features.len(), 1, "{text}");
+        let found = &features[0];
+        assert_eq!(
+            (found.tag, found.value, found.start, found.end),
+            (HALT, 1, start, end_exclusive - 1),
+            "{text}"
+        );
+    }
     Ok(())
 }
 
