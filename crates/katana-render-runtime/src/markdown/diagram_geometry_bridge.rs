@@ -163,7 +163,8 @@ fn set_number_property(
     let name = v8::String::new(scope, property)
         .ok_or_else(|| "SVG transformed bounds property allocation failed".to_string())?;
     let value = v8::Number::new(scope, value);
-    if object.set(scope, name.into(), value.into()) != Some(true) {
+    /* WHY: 結果辞書の値をprototype setterに奪わせず、書込み不能も検出する。 */
+    if object.create_data_property(scope, name.into(), value.into()) != Some(true) {
         return Err("SVG transformed bounds property write failed".to_string());
     }
     Ok(())

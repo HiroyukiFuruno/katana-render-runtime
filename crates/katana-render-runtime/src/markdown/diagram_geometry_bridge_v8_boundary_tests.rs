@@ -47,7 +47,12 @@ fn real_v8_rejects_invalid_bounds_and_accepts_zero_height() -> Result<(), String
 fn throwing_v8_setters_report_bounds_property_write_errors() {
     DiagramV8Runtime::ensure_initialized();
     DiagramV8Runtime::with_empty_try_catch(|scope| {
-        let source = "({set width(value) { throw new Error('width rejected'); }, set x(value) { throw new Error('x rejected'); }})";
+        let source = concat!(
+            "new Proxy({}, {",
+            "set(_target, property) { throw new Error(property + ' rejected'); },",
+            "defineProperty(_target, property) { throw new Error(property + ' rejected'); }",
+            "})",
+        );
         let object = v8::String::new(scope, source).and_then(|source| {
             let name = v8::String::new(scope, "geometry-throwing-setters")?;
             let script = ScriptCompiler::compile_with_origin(scope, source, name)?;
@@ -90,4 +95,24 @@ fn assert_throwing_setters(
             .is_some_and(|error| error.to_rust_string_lossy(scope).contains("x rejected"))
     );
     scope.reset();
+}
+#[test]
+fn geometry_bridge_rejects_throwing_registration_setter() {
+    DiagramV8Runtime::ensure_initialized();
+    DiagramV8Runtime::with_empty_try_catch(|scope| {
+        let source = concat!(
+            "Object.defineProperty(globalThis, '__katanaTransformSvgBox', ",
+            "{set() { throw new Error('blocked'); }, configurable: true}); true;",
+        );
+        let configured = v8::String::new(scope, source).and_then(|source| {
+            let name = v8::String::new(scope, "geometry-registration-rejection")?;
+            let script = ScriptCompiler::compile_with_origin(scope, source, name)?;
+            script.run(scope)
+        });
+        assert!(configured.is_some());
+        assert_eq!(
+            super::super::install(scope),
+            Err("SVG transform bridge registration failed".to_owned())
+        );
+    });
 }

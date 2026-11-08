@@ -131,6 +131,32 @@ fn v8_transform_callback_returns_bounds_and_rejects_finite_input_overflow() -> R
 }
 
 #[test]
+fn v8_transform_callback_uses_own_fields_despite_prototype_setter() -> Result<(), String> {
+    let script = r#"(() => {
+        const previous = Object.getOwnPropertyDescriptor(Object.prototype, 'x');
+        let intercepted = 0;
+        Object.defineProperty(Object.prototype, 'x', {
+            configurable: true,
+            set(_) { intercepted += 1; },
+        });
+        try {
+            const bounds = globalThis.__katanaTransformSvgBox('translate(10,20)', 1, 2, 3, 4);
+            return [Object.hasOwn(bounds, 'x'), bounds.x, bounds.y,
+                    bounds.width, bounds.height, intercepted].join(',');
+        } finally {
+            if (previous) Object.defineProperty(Object.prototype, 'x', previous);
+            else delete Object.prototype.x;
+        }
+    })()"#;
+    let result = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
+        "geometry-bridge-prototype-setter",
+        script,
+    )])?;
+    assert_eq!(result, "true,11,22,3,4,0");
+    Ok(())
+}
+
+#[test]
 fn v8_transform_callback_handles_boundary_case_table() -> Result<(), String> {
     let result = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
         "geometry-bridge-boundary-cases",
@@ -143,6 +169,28 @@ fn v8_transform_callback_handles_boundary_case_table() -> Result<(), String> {
          malformed-transform:2,3,4,5"
     );
     Ok(())
+}
+
+#[test]
+fn frozen_target_rejects_transformed_box_properties() {
+    DiagramV8Runtime::ensure_initialized();
+    DiagramV8Runtime::with_empty_try_catch(|scope| {
+        let object = v8::Object::new(scope);
+        assert_eq!(
+            object.set_integrity_level(scope, v8::IntegrityLevel::Frozen),
+            Some(true)
+        );
+        let bounds = super::TransformedBox {
+            x: 1.0,
+            y: 2.0,
+            width: 3.0,
+            height: 4.0,
+        };
+        assert_eq!(
+            super::set_box_properties(scope, object, bounds),
+            Err("SVG transformed bounds property write failed".to_owned())
+        );
+    });
 }
 
 fn assert_bounds(
