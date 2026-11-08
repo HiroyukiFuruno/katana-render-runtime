@@ -1,4 +1,7 @@
 use super::RuntimePathResolver;
+use crate::markdown::drawio_renderer::DrawioRendererOps;
+use crate::markdown::mathjax_renderer::MathJaxRendererOps;
+use crate::markdown::mermaid_renderer::MermaidBinaryOps;
 use crate::markdown::plantuml_renderer::PLANTUML_JAR_VERSION;
 use crate::markdown::plantuml_renderer::PlantUmlRendererOps;
 use crate::renderer::api::{
@@ -57,29 +60,46 @@ fn plantuml_renderer_selects_default_and_requested_cache_paths()
 }
 
 #[test]
-fn drawio_runtime_override_selects_existing_file() -> Result<(), Box<dyn std::error::Error>> {
+fn javascript_runtime_overrides_select_existing_files() -> Result<(), Box<dyn std::error::Error>> {
     let temp = tempfile::tempdir()?;
-    let runtime = temp.path().join("drawio.js");
-    std::fs::write(&runtime, b"fixture runtime")?;
+    for (kind, variable) in javascript_override_cases() {
+        let runtime = temp.path().join(format!("{variable}.js"));
+        std::fs::write(&runtime, b"fixture runtime")?;
+        let resolved = RuntimePathResolver::resolve_selected_path(
+            kind,
+            Some(runtime.as_os_str().to_os_string()),
+            None,
+        )?;
 
-    let resolved = RuntimePathResolver::resolve_selected_path(
-        DiagramKind::Drawio,
-        Some(runtime.as_os_str().to_os_string()),
-        None,
-    )?;
-
-    assert_eq!(resolved, runtime);
-    assert!(resolved.is_file());
+        assert_eq!(resolved, runtime);
+        assert!(resolved.is_file());
+    }
     Ok(())
 }
 
 #[test]
-fn mathjax_without_override_selects_bundled_runtime() -> Result<(), Box<dyn std::error::Error>> {
-    let resolved = RuntimePathResolver::resolve_selected_path(DiagramKind::MathJax, None, None)?;
+fn javascript_without_override_selects_bundled_runtimes() -> Result<(), Box<dyn std::error::Error>>
+{
+    for (kind, _) in javascript_override_cases() {
+        let resolved = RuntimePathResolver::resolve_selected_path(kind, None, None)?;
+        let default = default_javascript_path(kind).ok_or("missing default JavaScript path")?;
 
-    assert!(resolved.ends_with("generated/mathjax-runtime.min.js"));
-    assert!(resolved.is_file());
+        assert_eq!(resolved, default);
+        assert!(resolved.is_file());
+        if kind == DiagramKind::MathJax {
+            assert!(resolved.ends_with("generated/mathjax-runtime.min.js"));
+        }
+    }
     Ok(())
+}
+
+fn default_javascript_path(kind: DiagramKind) -> Option<PathBuf> {
+    match kind {
+        DiagramKind::Mermaid => MermaidBinaryOps::default_install_path(),
+        DiagramKind::Drawio => DrawioRendererOps::default_install_path(),
+        DiagramKind::MathJax => MathJaxRendererOps::default_install_path(),
+        DiagramKind::PlantUml => None,
+    }
 }
 
 #[test]
