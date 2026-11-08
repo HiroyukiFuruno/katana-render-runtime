@@ -14,7 +14,9 @@
 - [x] 上記の変更後 `chws-paint-current-build-ckpm3t8e` はfoundation/AST実0・同profile compile成功（none選択実4）。実catalog `chws-paint-current-catalog-wfly5r47` へ照合した `chws-paint-runtime-exact23-1a9p8dhb` はHan10/paint11/runtime2の23caseが全実0、source/binary不変・profile残0。全範囲は同じfactoryで期待を計算せず固定tuple(CHWS,1,0,u32::MAX)、fallbackのUTF84組・explicit指定・無対応fontの期待を維持。循環gradient/patternのfallback色とmixed unitsの全画素/標本を確認し、runtimeの既存2caseをJS3種へ拡張した。旧998行にこの差分の未取得効果を加算しない。
 
 - [x] TTCの出力head/maxp欠落とsource/output table data欠落を追加。`ttc-output-boundary-current-build-s2nzts99` はfoundation/AST実0・compile成功（none選択実4）。実catalog `ttc-output-boundary-current-catalog-krkfu9de` を用いた `ttc-output-boundary-exact7-c176_dhh` はTTC全7case実0、source/binary不変・profile残0。公開入口の先行table集合拒否とprivate metric拒否を混同せず確認した。製品変更・除外追加なし、全体coverage効果は未計測。
-- [ ] 独立レビューのpaint P2: 空の循環参照だけではhref無視も同じfallbackになるため、有効な非循環参照が解決される3種の正常対照を追加する。元の循環fallback期待は維持する。
+- [x] 独立レビューのpaint P2を修正。有効な非循環参照を3種追加し、同じfallback指定でも実際に参照内容の緑が描画される正常対照を確認した。元の循環fallback期待は不変。
+- [x] `bridge-boundary-current-build-8gqkk0kv` はfoundation/AST実0・compile成功（none選択実4）。実catalog `bridge-boundary-current-catalog-zkbe73cg` を用いた `bridge-other-boundaries-exact32-toiuiu1m` はpaint12/convolve8/font bridge6/geometry2/frame2/metrics2の32case実0、source/binary不変・profile残0。targetY範囲外、実font無効size、close後のframe欠落、登録setterの具体エラーとJS例外を確認した。正式coverageはまだ旧998行から更新しない。
+- [/] 実V8の新readonly登録case `readonly-registration-exact1-9d5qbyxq` は実101。`set=Some(true)` でもpropertyがsentinelのまま、SVG font bridge installがOkを返すことを実確認した。source/binary不変・profile残0、元失敗を保持。通常fresh contextの起動事故とは断定せず、SVG2callbackの登録後identity確認とgetter例外伝播を限定修正する。失敗をpassへ読み替えない。
 
 ### 経過の記録（以下の旧数値・未実行予定は上の現在実数と区別する）
 
