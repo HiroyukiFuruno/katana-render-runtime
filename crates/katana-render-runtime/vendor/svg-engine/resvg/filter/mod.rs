@@ -1275,3 +1275,6 @@ fn scale_coordinates(x: f32, y: f32, ts: crate::svg_engine::usvg::Transform) -> 
     let (sx, sy) = ts.get_scale();
     Some((x * sx, y * sy))
 }
+
+#[cfg(test)]
+crate::svg_engine::owned_svg_model_tests!("../../../../src/svg_engine_filter_internal_boundary_tests.rs");
