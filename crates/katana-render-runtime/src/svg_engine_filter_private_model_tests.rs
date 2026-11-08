@@ -9,6 +9,9 @@ use super::{
     convert_lighting_child, converter,
 };
 
+#[path = "svg_engine_filter_id_transfer_tests.rs"]
+mod id_transfer_tests;
+
 const REGION_SIZE: f32 = 100.0;
 const LIGHT_X: f32 = 2.0;
 const LIGHT_Y: f32 = 3.0;
