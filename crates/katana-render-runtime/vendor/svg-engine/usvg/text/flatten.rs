@@ -8,7 +8,7 @@ use crate::svg_engine::usvg::GlyphId;
 use fontdb::{Database, ID};
 use skrifa::MetadataProvider;
 use skrifa::Tag;
-use skrifa::bitmap::{BitmapData, BitmapFormat};
+use skrifa::bitmap::{BitmapData, BitmapFormat, BitmapGlyph, BitmapStrikes};
 use skrifa::outline::{DrawSettings, OutlinePen};
 use skrifa::prelude::LocationRef;
 use skrifa::raw::TableProvider as _;
@@ -76,120 +76,16 @@ fn push_outline_paths(
 
 pub(crate) fn flatten(text: &mut Text, cache: &mut Cache) -> Option<(Group, NonZeroRect)> {
     let mut new_children = vec![];
-
     let abs_transform = text.abs_transform;
     let rendering_mode = resolve_rendering_mode(text);
-
     for span in &text.layouted {
-        if let Some(path) = span.overline.as_ref() {
-            let mut path = path.clone();
-            path.rendering_mode = rendering_mode;
-            new_children.push(Node::Path(Box::new(path)));
-        }
-
-        if let Some(path) = span.underline.as_ref() {
-            let mut path = path.clone();
-            path.rendering_mode = rendering_mode;
-            new_children.push(Node::Path(Box::new(path)));
-        }
-
-        // Instead of always processing each glyph separately, we always collect
-        // as many outline glyphs as possible by pushing them into the span_builder
-        // and only if we encounter a different glyph, or we reach the very end of the
-        // span to we push the actual outline paths into new_children. This way, we don't need
-        // to create a new path for every glyph if we have many consecutive glyphs
-        // with just outlines (which is the most common case).
-        let mut span_builder = tiny_skia_path::PathBuilder::new();
-
-        for glyph in &span.positioned_glyphs {
-            let variations = effective_variations(cache, span, glyph);
-
-            // A (best-effort conversion of a) COLR glyph.
-            if let Some(tree) = cache.fontdb_colr(glyph.font, glyph.id, &variations) {
-                let mut group = Group {
-                    transform: glyph.colr_transform(),
-                    ..Group::empty()
-                };
-                // TODO: Probably need to update abs_transform of children? Same
-                // for SVG and bitmap glyphs.
-                group.children.push(Node::Group(Box::new(tree.root)));
-                group.calculate_bounding_boxes();
-
-                new_children.push(Node::Group(Box::new(group)));
-            }
-            // An SVG glyph. Will return the usvg node containing the glyph descriptions.
-            else if let Some(node) = cache.fontdb_svg(glyph.font, glyph.id) {
-                push_outline_paths(
-                    span,
-                    &mut span_builder,
-                    &mut new_children,
-                    rendering_mode,
-                    abs_transform,
-                );
-
-                let mut group = Group {
-                    transform: glyph.svg_transform(),
-                    ..Group::empty()
-                };
-                group.children.push(node);
-                group.calculate_bounding_boxes();
-
-                new_children.push(Node::Group(Box::new(group)));
-            }
-            // A bitmap glyph.
-            else if let Some(img) = cache.fontdb_raster(glyph.font, glyph.id) {
-                push_outline_paths(
-                    span,
-                    &mut span_builder,
-                    &mut new_children,
-                    rendering_mode,
-                    abs_transform,
-                );
-
-                let transform = if img.is_sbix {
-                    glyph.sbix_transform(
-                        img.x as f32,
-                        img.y as f32,
-                        img.glyph_bbox.map(|bbox| bbox.x_min).unwrap_or(0) as f32,
-                        img.glyph_bbox.map(|bbox| bbox.y_min).unwrap_or(0) as f32,
-                        img.pixels_per_em as f32,
-                        img.image.size.height(),
-                    )
-                } else {
-                    glyph.cbdt_transform(img.x as f32, img.y as f32, img.pixels_per_em as f32)
-                };
-
-                let mut group = Group {
-                    transform,
-                    ..Group::empty()
-                };
-                group.children.push(Node::Image(Box::new(img.image)));
-                group.calculate_bounding_boxes();
-
-                new_children.push(Node::Group(Box::new(group)));
-            } else {
-                let outline = cache.fontdb_outline(glyph.font, glyph.id, &variations);
-
-                if let Some(outline) = outline.and_then(|p| p.transform(glyph.outline_transform()))
-                {
-                    span_builder.push_path(&outline);
-                }
-            }
-        }
-
-        push_outline_paths(
+        flatten_span(
             span,
-            &mut span_builder,
-            &mut new_children,
+            cache,
             rendering_mode,
             abs_transform,
+            &mut new_children,
         );
-
-        if let Some(path) = span.line_through.as_ref() {
-            let mut path = path.clone();
-            path.rendering_mode = rendering_mode;
-            new_children.push(Node::Path(Box::new(path)));
-        }
     }
 
     let mut group = Group {
@@ -204,6 +100,115 @@ pub(crate) fn flatten(text: &mut Text, cache: &mut Cache) -> Option<(Group, NonZ
     group.calculate_bounding_boxes();
     let stroke_bbox = group.stroke_bounding_box().to_non_zero_rect()?;
     Some((group, stroke_bbox))
+}
+
+fn flatten_span(
+    span: &layout::Span,
+    cache: &mut Cache,
+    rendering_mode: ShapeRendering,
+    abs_transform: Transform,
+    children: &mut Vec<Node>,
+) {
+    push_decoration(span.overline.as_ref(), rendering_mode, children);
+    push_decoration(span.underline.as_ref(), rendering_mode, children);
+    let mut flattener = SpanFlattener {
+        span,
+        builder: tiny_skia_path::PathBuilder::new(),
+        children,
+        rendering_mode,
+        abs_transform,
+    };
+    for glyph in &span.positioned_glyphs {
+        flattener.append_glyph(glyph, cache);
+    }
+    flattener.flush_outline();
+    push_decoration(
+        span.line_through.as_ref(),
+        rendering_mode,
+        flattener.children,
+    );
+}
+
+fn push_decoration(path: Option<&Path>, rendering_mode: ShapeRendering, children: &mut Vec<Node>) {
+    if let Some(path) = path {
+        let mut path = path.clone();
+        path.rendering_mode = rendering_mode;
+        children.push(Node::Path(Box::new(path)));
+    }
+}
+
+struct SpanFlattener<'a> {
+    span: &'a layout::Span,
+    builder: tiny_skia_path::PathBuilder,
+    children: &'a mut Vec<Node>,
+    rendering_mode: ShapeRendering,
+    abs_transform: Transform,
+}
+
+impl SpanFlattener<'_> {
+    fn append_glyph(&mut self, glyph: &layout::PositionedGlyph, cache: &mut Cache) {
+        let variations = effective_variations(cache, self.span, glyph);
+        if let Some(tree) = cache.fontdb_colr(glyph.font, glyph.id, &variations) {
+            self.append_group(glyph.colr_transform(), Node::Group(Box::new(tree.root)));
+        } else if let Some(node) = cache.fontdb_svg(glyph.font, glyph.id) {
+            self.flush_outline();
+            self.append_group(glyph.svg_transform(), node);
+        } else if let Some(image) = cache.fontdb_raster(glyph.font, glyph.id) {
+            self.flush_outline();
+            let transform = bitmap_transform(&image, glyph);
+            self.append_group(transform, Node::Image(Box::new(image.image)));
+        } else {
+            self.append_outline(glyph, &variations, cache);
+        }
+    }
+
+    fn append_outline(
+        &mut self,
+        glyph: &layout::PositionedGlyph,
+        variations: &[FontVariation],
+        cache: &mut Cache,
+    ) {
+        let outline = cache.fontdb_outline(glyph.font, glyph.id, variations);
+        if let Some(outline) = outline.and_then(|path| path.transform(glyph.outline_transform())) {
+            self.builder.push_path(&outline);
+        }
+    }
+
+    fn flush_outline(&mut self) {
+        // 連続するoutlineをまとめ、glyphごとのPath生成を避ける。
+        push_outline_paths(
+            self.span,
+            &mut self.builder,
+            self.children,
+            self.rendering_mode,
+            self.abs_transform,
+        );
+    }
+
+    fn append_group(&mut self, transform: Transform, child: Node) {
+        let mut group = Group {
+            transform,
+            ..Group::empty()
+        };
+        group.children.push(child);
+        group.calculate_bounding_boxes();
+        self.children.push(Node::Group(Box::new(group)));
+    }
+}
+
+fn bitmap_transform(image: &BitmapImage, glyph: &layout::PositionedGlyph) -> Transform {
+    if image.is_sbix {
+        glyph.sbix_transform(
+            image.x as f32,
+            image.y as f32,
+            image.glyph_bbox.map(|bbox| bbox.x_min).unwrap_or(0) as f32,
+            image.glyph_bbox.map(|bbox| bbox.y_min).unwrap_or(0) as f32,
+            image.pixels_per_em as f32,
+            image.image.size.height(),
+        )
+    } else {
+        glyph.cbdt_transform(image.x as f32, image.y as f32, image.pixels_per_em as f32)
+    }
 }
 
 #[derive(Default)]
@@ -243,7 +248,12 @@ pub(crate) trait DatabaseExt {
     fn has_opsz_axis(&self, id: ID) -> bool;
     fn raster(&self, id: ID, glyph_id: GlyphId) -> Option<BitmapImage>;
     fn svg(&self, id: ID, glyph_id: GlyphId) -> Option<Node>;
-    fn colr(&self, id: ID, glyph_id: GlyphId, variations: &[crate::svg_engine::usvg::FontVariation]) -> Option<Tree>;
+    fn colr(
+        &self,
+        id: ID,
+        glyph_id: GlyphId,
+        variations: &[crate::svg_engine::usvg::FontVariation],
+    ) -> Option<Tree>;
 }
 
 #[derive(Clone)]
@@ -299,50 +309,7 @@ impl DatabaseExt for Database {
     fn raster(&self, id: ID, glyph_id: GlyphId) -> Option<BitmapImage> {
         self.with_face_data(id, |data, face_index| -> Option<BitmapImage> {
             let font = skrifa::FontRef::from_index(data, face_index).ok()?;
-            let bitmap_strikes = font.bitmap_strikes();
-
-            // We set size to unscaled to get the largest image available
-            let size = skrifa::prelude::Size::unscaled();
-            let location = LocationRef::default();
-            let image = bitmap_strikes.glyph_for_size(size, glyph_id.into())?;
-
-            match image.data {
-                BitmapData::Png(data) => {
-                    let metrics = font.glyph_metrics(size, location);
-                    let bounding_box = metrics.bounds(glyph_id.into()).map(|bbox| BoundingBox {
-                        x_min: bbox.x_min as i16,
-                        y_min: bbox.y_min as i16,
-                        x_max: bbox.x_max as i16,
-                        y_max: bbox.y_max as i16,
-                    });
-
-                    let bitmap_image = BitmapImage {
-                        image: Image {
-                            id: String::new(),
-                            visible: true,
-                            size: Size::from_wh(image.width as f32, image.height as f32)?,
-                            rendering_mode: ImageRendering::OptimizeQuality,
-                            kind: ImageKind::PNG(Arc::new(data.to_vec())),
-                            abs_transform: Transform::default(),
-                            abs_bounding_box: NonZeroRect::from_xywh(
-                                0.0,
-                                0.0,
-                                image.width as f32,
-                                image.height as f32,
-                            )?,
-                        },
-                        x: image.inner_bearing_x as i16,
-                        y: image.inner_bearing_y as i16,
-                        pixels_per_em: image.ppem_x as u16,
-                        glyph_bbox: bounding_box,
-                        is_sbix: bitmap_strikes.format() == Some(BitmapFormat::Sbix),
-                    };
-
-                    Some(bitmap_image)
-                }
-                // TODO: implement other bitmap formats
-                BitmapData::Bgra(_) | BitmapData::Mask(_) => None,
-            }
+            raster_glyph(&font, glyph_id)
         })?
     }
 
@@ -357,75 +324,154 @@ impl DatabaseExt for Database {
         // add a cache so we don't need to reparse the data every time.
         self.with_face_data(id, |data, face_index| -> Option<Node> {
             let font = skrifa::FontRef::from_index(data, face_index).ok()?;
-            let svg_table = font.svg().ok()?;
-            let image_data = svg_table.glyph_data(glyph_id.into())?;
-            let tree = Tree::from_data(image_data, &Options::default()).ok()?;
-
-            // Twitter Color Emoji seems to always have one SVG record per glyph,
-            // while Noto Color Emoji sometimes contains multiple ones. It's kind of hacky,
-            // but the best we have for now.
-            let document_list = svg_table.svg_document_list().ok()?;
-            let doc_record = document_list.document_records().iter().find(|r| {
-                (r.start_glyph_id.get().to_u32()..=r.end_glyph_id.get().to_u32())
-                    .contains(&glyph_id.0)
-            })?;
-            let node = if doc_record.start_glyph_id == doc_record.end_glyph_id {
-                Node::Group(Box::new(tree.root))
-            } else {
-                tree.node_by_id(&format!("glyph{}", glyph_id.0))
-                    .log_none(|| {
-                        log::warn!("Failed to find SVG glyph node for glyph {}", glyph_id.0);
-                    })
-                    .cloned()?
-            };
-
-            Some(node)
+            svg_glyph(&font, glyph_id)
         })?
     }
 
-    fn colr(&self, id: ID, glyph_id: GlyphId, variations: &[crate::svg_engine::usvg::FontVariation]) -> Option<Tree> {
+    fn colr(
+        &self,
+        id: ID,
+        glyph_id: GlyphId,
+        variations: &[crate::svg_engine::usvg::FontVariation],
+    ) -> Option<Tree> {
         self.with_face_data(id, |data, face_index| -> Option<Tree> {
             let font = skrifa::FontRef::from_index(data, face_index).ok()?;
-
-            let location = font.axes().location(
-                variations
-                    .iter()
-                    .map(|v| (Tag::from_be_bytes(v.tag), v.value)),
-            );
-
-            let mut svg = XmlWriter::new(xmlwriter::Options::default());
-
-            svg.start_element("svg");
-            svg.write_attribute("xmlns", "http://www.w3.org/2000/svg");
-            svg.write_attribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
-
-            let mut path_buf = String::with_capacity(256);
-            let gradient_index = 1;
-            let clip_path_index = 1;
-
-            svg.start_element("g");
-
-            let mut glyph_painter = GlyphPainter {
-                font: &font,
-                location: LocationRef::from(&location),
-                svg: &mut svg,
-                path_buf: &mut path_buf,
-                gradient_index,
-                clip_path_index,
-                foreground_color: Color::new_rgba(0, 0, 0, 255),
-                transform: skrifa::color::Transform::default(),
-                outline_transform: skrifa::color::Transform::default(),
-                transforms_stack: vec![skrifa::color::Transform::default()],
-                clip_stack: Vec::new(),
-            };
-
-            font.color_glyphs()
-                .get(glyph_id.into())?
-                .paint(&location, &mut glyph_painter)
-                .ok()?;
-            svg.end_element();
-
-            Tree::from_data(svg.end_document().as_bytes(), &Options::default()).ok()
+            colr_glyph(&font, glyph_id, variations)
         })?
+    }
+}
+
+fn raster_glyph(font: &skrifa::FontRef<'_>, glyph_id: GlyphId) -> Option<BitmapImage> {
+    let bitmap_strikes = font.bitmap_strikes();
+    // 最大の画像を選ぶため、スケールを指定しない。
+    let size = skrifa::prelude::Size::unscaled();
+    let location = LocationRef::default();
+    let image = bitmap_strikes.glyph_for_size(size, glyph_id.into())?;
+    match &image.data {
+        BitmapData::Png(data) => png_bitmap_image(
+            font,
+            glyph_id,
+            &image,
+            data,
+            &bitmap_strikes,
+            size,
+            location,
+        ),
+        BitmapData::Bgra(_) | BitmapData::Mask(_) => None,
+    }
+}
+
+fn png_bitmap_image(
+    font: &skrifa::FontRef<'_>,
+    glyph_id: GlyphId,
+    image: &BitmapGlyph<'_>,
+    data: &[u8],
+    strikes: &BitmapStrikes<'_>,
+    size: skrifa::prelude::Size,
+    location: LocationRef<'_>,
+) -> Option<BitmapImage> {
+    let metrics = font.glyph_metrics(size, location);
+    let bounding_box = metrics.bounds(glyph_id.into()).map(|bbox| BoundingBox {
+        x_min: bbox.x_min as i16,
+        y_min: bbox.y_min as i16,
+        x_max: bbox.x_max as i16,
+        y_max: bbox.y_max as i16,
+    });
+    Some(BitmapImage {
+        image: png_glyph_image(image, data)?,
+        x: image.inner_bearing_x as i16,
+        y: image.inner_bearing_y as i16,
+        pixels_per_em: image.ppem_x as u16,
+        glyph_bbox: bounding_box,
+        is_sbix: strikes.format() == Some(BitmapFormat::Sbix),
+    })
+}
+
+fn png_glyph_image(image: &BitmapGlyph<'_>, data: &[u8]) -> Option<Image> {
+    Some(Image {
+        id: String::new(),
+        visible: true,
+        size: Size::from_wh(image.width as f32, image.height as f32)?,
+        rendering_mode: ImageRendering::OptimizeQuality,
+        kind: ImageKind::PNG(Arc::new(data.to_vec())),
+        abs_transform: Transform::default(),
+        abs_bounding_box: NonZeroRect::from_xywh(
+            0.0,
+            0.0,
+            image.width as f32,
+            image.height as f32,
+        )?,
+    })
+}
+
+fn svg_glyph(font: &skrifa::FontRef<'_>, glyph_id: GlyphId) -> Option<Node> {
+    let svg_table = font.svg().ok()?;
+    let image_data = svg_table.glyph_data(glyph_id.into())?;
+    let tree = Tree::from_data(image_data, &Options::default()).ok()?;
+    // 1glyphの文書はroot全体を、共有文書は対象IDのnodeを使う。
+    let document_list = svg_table.svg_document_list().ok()?;
+    let doc_record = document_list.document_records().iter().find(|record| {
+        (record.start_glyph_id.get().to_u32()..=record.end_glyph_id.get().to_u32())
+            .contains(&glyph_id.0)
+    })?;
+    let node = if doc_record.start_glyph_id == doc_record.end_glyph_id {
+        Node::Group(Box::new(tree.root))
+    } else {
+        tree.node_by_id(&format!("glyph{}", glyph_id.0))
+            .log_none(|| log::warn!("Failed to find SVG glyph node for glyph {}", glyph_id.0))
+            .cloned()?
+    };
+    Some(node)
+}
+
+fn colr_glyph(
+    font: &skrifa::FontRef<'_>,
+    glyph_id: GlyphId,
+    variations: &[FontVariation],
+) -> Option<Tree> {
+    let location = font.axes().location(
+        variations
+            .iter()
+            .map(|variation| (Tag::from_be_bytes(variation.tag), variation.value)),
+    );
+    let mut svg = colr_svg_writer();
+    let mut path_buf = String::with_capacity(256);
+    svg.start_element("g");
+    let mut painter =
+        new_glyph_painter(font, LocationRef::from(&location), &mut svg, &mut path_buf);
+    font.color_glyphs()
+        .get(glyph_id.into())?
+        .paint(&location, &mut painter)
+        .ok()?;
+    svg.end_element();
+    Tree::from_data(svg.end_document().as_bytes(), &Options::default()).ok()
+}
+
+fn colr_svg_writer() -> XmlWriter {
+    let mut svg = XmlWriter::new(xmlwriter::Options::default());
+    svg.start_element("svg");
+    svg.write_attribute("xmlns", "http://www.w3.org/2000/svg");
+    svg.write_attribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+    svg
+}
+
+fn new_glyph_painter<'a>(
+    font: &'a skrifa::FontRef<'a>,
+    location: LocationRef<'a>,
+    svg: &'a mut XmlWriter,
+    path_buf: &'a mut String,
+) -> GlyphPainter<'a> {
+    GlyphPainter {
+        font,
+        location,
+        svg,
+        path_buf,
+        gradient_index: 1,
+        clip_path_index: 1,
+        foreground_color: Color::new_rgba(0, 0, 0, 255),
+        transform: skrifa::color::Transform::default(),
+        outline_transform: skrifa::color::Transform::default(),
+        transforms_stack: vec![skrifa::color::Transform::default()],
+        clip_stack: Vec::new(),
     }
 }

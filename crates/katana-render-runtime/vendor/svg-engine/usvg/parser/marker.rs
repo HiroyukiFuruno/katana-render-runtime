@@ -85,6 +85,13 @@ enum MarkerOrientation {
     Angle(f32),
 }
 
+struct MarkerPlacement {
+    rect: NonZeroRect,
+    view_box_ts: Transform,
+    stroke_scale: f32,
+    clip_path: Option<Arc<ClipPath>>,
+}
+
 fn resolve(
     shape_node: SvgNode,
     path: &tiny_skia_path::Path,
@@ -95,123 +102,138 @@ fn resolve(
     parent: &mut Group,
 ) -> Option<()> {
     let stroke_scale = stroke_scale(shape_node, marker_node, state)?.get();
+    let rect = convert_rect(marker_node, state)?;
+    let view_box_ts = marker_view_box_transform(marker_node, rect);
+    let clip_path = marker_clip(marker_node, rect, view_box_ts, cache)?;
+    let segments = marker_segments(path);
+    let placement = MarkerPlacement { rect, view_box_ts, stroke_scale, clip_path };
+    draw_markers(&segments, marker_kind, |p, idx| {
+        draw_one_marker(marker_node, state, cache, parent, &placement, &segments, (p, idx));
+    });
+    Some(())
+}
 
-    let r = convert_rect(marker_node, state)?;
-
-    let view_box_ts = marker_node
-        .parse_viewbox()
+fn marker_view_box_transform(node: SvgNode, rect: NonZeroRect) -> Transform {
+    node.parse_viewbox()
         .map(|vb| {
             ViewBox {
                 rect: vb,
-                aspect: marker_node
-                    .attribute(AId::PreserveAspectRatio)
-                    .unwrap_or_default(),
+                aspect: node.attribute(AId::PreserveAspectRatio).unwrap_or_default(),
             }
-            .to_transform(r.size())
+            .to_transform(rect.size())
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
 
-    let has_overflow = {
-        let overflow = marker_node.attribute(AId::Overflow);
-        // `overflow` is `hidden` by default.
-        overflow.is_none() || overflow == Some("hidden") || overflow == Some("scroll")
-    };
+fn marker_clip(
+    node: SvgNode,
+    rect: NonZeroRect,
+    view_box_ts: Transform,
+    cache: &mut converter::Cache,
+) -> Option<Option<Arc<ClipPath>>> {
+    let overflow = node.attribute(AId::Overflow);
+    let has_overflow = overflow.is_none() || overflow == Some("hidden") || overflow == Some("scroll");
+    if !has_overflow {
+        return Some(None);
+    }
+    let clip_rect = rect.size().to_non_zero_rect(0.0, 0.0).transform(view_box_ts.invert()?)?;
+    let mut clip_path = ClipPath::empty(cache.gen_clip_path_id());
+    let mut path = Path::new_simple(Arc::new(tiny_skia_path::PathBuilder::from_rect(
+        clip_rect.to_rect(),
+    )))?;
+    path.fill = Some(Fill::default());
+    path.rendering_mode = ShapeRendering::CrispEdges;
+    clip_path.root.children.push(Node::Path(Box::new(path)));
+    clip_path.root.calculate_bounding_boxes();
+    Some(Some(Arc::new(clip_path)))
+}
 
-    let clip_path = if has_overflow {
-        let clip_rect = r
-            .size()
-            .to_non_zero_rect(0.0, 0.0)
-            .transform(view_box_ts.invert()?)?;
-
-        let mut clip_path = ClipPath::empty(cache.gen_clip_path_id());
-
-        let mut path = Path::new_simple(Arc::new(tiny_skia_path::PathBuilder::from_rect(
-            clip_rect.to_rect(),
-        )))?;
-        path.fill = Some(Fill::default());
-        path.rendering_mode = ShapeRendering::CrispEdges;
-
-        clip_path.root.children.push(Node::Path(Box::new(path)));
-        clip_path.root.calculate_bounding_boxes();
-
-        Some(Arc::new(clip_path))
-    } else {
-        None
-    };
-
-    // TODO: avoid allocation
+fn marker_segments(path: &tiny_skia_path::Path) -> Vec<Segment> {
     let mut segments: Vec<Segment> = Vec::with_capacity(path.len());
-    let mut prev = Point::zero();
-    let mut prev_move = Point::zero();
+    let mut points = (Point::zero(), Point::zero());
     for seg in path.segments() {
-        match seg {
-            tiny_skia_path::PathSegment::MoveTo(p) => {
-                segments.push(Segment::MoveTo(p));
-                prev = p;
-                prev_move = p;
-            }
-            tiny_skia_path::PathSegment::LineTo(p) => {
-                segments.push(Segment::LineTo(p));
-                prev = p;
-            }
-            tiny_skia_path::PathSegment::QuadTo(p1, p) => {
-                let (p1, p2, p) = quad_to_curve(prev, p1, p);
-                segments.push(Segment::CubicTo(p1, p2, p));
-                prev = p;
-            }
-            tiny_skia_path::PathSegment::CubicTo(p1, p2, p) => {
-                segments.push(Segment::CubicTo(p1, p2, p));
-                prev = p;
-            }
-            tiny_skia_path::PathSegment::Close => {
-                segments.push(Segment::Close);
-                prev = prev_move;
-            }
+        append_marker_segment(seg, &mut segments, &mut points);
+    }
+    segments
+}
+
+fn append_marker_segment(
+    seg: tiny_skia_path::PathSegment,
+    segments: &mut Vec<Segment>,
+    points: &mut (Point, Point),
+) {
+    match seg {
+        tiny_skia_path::PathSegment::MoveTo(p) => {
+            segments.push(Segment::MoveTo(p));
+            points.0 = p;
+            points.1 = p;
+        }
+        tiny_skia_path::PathSegment::LineTo(p) => {
+            segments.push(Segment::LineTo(p));
+            points.0 = p;
+        }
+        tiny_skia_path::PathSegment::QuadTo(p1, p) => {
+            let (p1, p2, p) = quad_to_curve(points.0, p1, p);
+            segments.push(Segment::CubicTo(p1, p2, p));
+            points.0 = p;
+        }
+        tiny_skia_path::PathSegment::CubicTo(p1, p2, p) => {
+            segments.push(Segment::CubicTo(p1, p2, p));
+            points.0 = p;
+        }
+        tiny_skia_path::PathSegment::Close => {
+            segments.push(Segment::Close);
+            points.0 = points.1;
         }
     }
+}
 
-    let draw_marker = |p: tiny_skia_path::Point, idx: usize| {
-        let mut ts = Transform::from_translate(p.x, p.y);
-
-        let angle = match convert_orientation(marker_node) {
-            MarkerOrientation::AutoStartReverse if idx == 0 => {
-                (calc_vertex_angle(&segments, idx) + 180.0) % 360.0
-            }
-            MarkerOrientation::Auto | MarkerOrientation::AutoStartReverse => {
-                calc_vertex_angle(&segments, idx)
-            }
-            MarkerOrientation::Angle(angle) => angle,
-        };
-
-        if !angle.approx_zero_ulps(4) {
-            ts = ts.pre_rotate(angle);
+fn marker_transform(
+    marker_node: SvgNode,
+    placement: &MarkerPlacement,
+    segments: &[Segment],
+    position: (Point, usize),
+) -> Transform {
+    let (p, idx) = position;
+    let mut ts = Transform::from_translate(p.x, p.y);
+    let angle = match convert_orientation(marker_node) {
+        MarkerOrientation::AutoStartReverse if idx == 0 => {
+            (calc_vertex_angle(segments, idx) + 180.0) % 360.0
         }
-
-        let (sx, sy) = view_box_ts.get_scale();
-        ts = ts.pre_scale(sx * stroke_scale, sy * stroke_scale);
-        ts = ts.pre_translate(-r.x(), -r.y());
-
-        // TODO: do not create a group when no clipPath
-        let mut g = Group {
-            transform: ts,
-            abs_transform: parent.abs_transform.pre_concat(ts),
-            clip_path: clip_path.clone(),
-            ..Group::empty()
-        };
-
-        let mut marker_state = state.clone();
-        marker_state.parent_markers.push(marker_node);
-        converter::convert_children(marker_node, &marker_state, cache, &mut g);
-        g.calculate_bounding_boxes();
-
-        if g.has_children() {
-            parent.children.push(Node::Group(Box::new(g)));
-        }
+        MarkerOrientation::Auto | MarkerOrientation::AutoStartReverse => calc_vertex_angle(segments, idx),
+        MarkerOrientation::Angle(angle) => angle,
     };
+    if !angle.approx_zero_ulps(4) {
+        ts = ts.pre_rotate(angle);
+    }
+    let (sx, sy) = placement.view_box_ts.get_scale();
+    ts = ts.pre_scale(sx * placement.stroke_scale, sy * placement.stroke_scale);
+    ts.pre_translate(-placement.rect.x(), -placement.rect.y())
+}
 
-    draw_markers(&segments, marker_kind, draw_marker);
-
-    Some(())
+fn draw_one_marker(
+    marker_node: SvgNode,
+    state: &converter::State,
+    cache: &mut converter::Cache,
+    parent: &mut Group,
+    placement: &MarkerPlacement,
+    segments: &[Segment],
+    position: (Point, usize),
+) {
+    let ts = marker_transform(marker_node, placement, segments, position);
+    let mut g = Group {
+        transform: ts,
+        abs_transform: parent.abs_transform.pre_concat(ts),
+        clip_path: placement.clip_path.clone(),
+        ..Group::empty()
+    };
+    let mut marker_state = state.clone();
+    marker_state.parent_markers.push(marker_node);
+    converter::convert_children(marker_node, &marker_state, cache, &mut g);
+    g.calculate_bounding_boxes();
+    if g.has_children() {
+        parent.children.push(Node::Group(Box::new(g)));
+    }
 }
 
 fn stroke_scale(
@@ -235,7 +257,15 @@ where
                 draw_marker(p, 0);
             }
         }
-        MarkerKind::Middle => {
+        MarkerKind::Middle => draw_middle_markers(path, &mut draw_marker),
+        MarkerKind::End => draw_end_marker(path, &mut draw_marker),
+    }
+}
+
+fn draw_middle_markers<P>(path: &[Segment], draw_marker: &mut P)
+where
+    P: FnMut(tiny_skia_path::Point, usize),
+{
             let total = path.len() - 1;
             let mut i = 1;
             while i < total {
@@ -253,8 +283,12 @@ where
 
                 i += 1;
             }
-        }
-        MarkerKind::End => {
+}
+
+fn draw_end_marker<P>(path: &[Segment], draw_marker: &mut P)
+where
+    P: FnMut(tiny_skia_path::Point, usize),
+{
             let idx = path.len() - 1;
             match path.last().cloned() {
                 Some(Segment::LineTo(p)) => {
@@ -269,136 +303,164 @@ where
                 }
                 _ => {}
             }
-        }
-    }
 }
 
 fn calc_vertex_angle(path: &[Segment], idx: usize) -> f32 {
     if idx == 0 {
-        // First segment.
-
-        debug_assert!(path.len() > 1);
-
-        let seg1 = path[0];
-        let seg2 = path[1];
-
-        match (seg1, seg2) {
-            (Segment::MoveTo(pm), Segment::LineTo(p)) => calc_line_angle(pm.x, pm.y, p.x, p.y),
-            (Segment::MoveTo(pm), Segment::CubicTo(p1, _, p)) => {
-                if pm.x.approx_eq_ulps(&p1.x, 4) && pm.y.approx_eq_ulps(&p1.y, 4) {
-                    calc_line_angle(pm.x, pm.y, p.x, p.y)
-                } else {
-                    calc_line_angle(pm.x, pm.y, p1.x, p1.y)
-                }
-            }
-            _ => 0.0,
-        }
+        first_vertex_angle(path)
     } else if idx == path.len() - 1 {
-        // Last segment.
-
-        let seg1 = path[idx - 1];
-        let seg2 = path[idx];
-
-        match (seg1, seg2) {
-            (_, Segment::MoveTo(_)) => 0.0, // unreachable
-            (_, Segment::LineTo(p)) => {
-                let prev = get_prev_vertex(path, idx);
-                calc_line_angle(prev.x, prev.y, p.x, p.y)
-            }
-            (_, Segment::CubicTo(p1, p2, p)) => {
-                if p2.x.approx_eq_ulps(&p.x, 4) && p2.y.approx_eq_ulps(&p.y, 4) {
-                    calc_line_angle(p1.x, p1.y, p.x, p.y)
-                } else {
-                    calc_line_angle(p2.x, p2.y, p.x, p.y)
-                }
-            }
-            (Segment::LineTo(p), Segment::Close) => {
-                let next = get_subpath_start(path, idx);
-                calc_line_angle(p.x, p.y, next.x, next.y)
-            }
-            (Segment::CubicTo(_, p2, p), Segment::Close) => {
-                let prev = get_prev_vertex(path, idx);
-                let next = get_subpath_start(path, idx);
-                calc_curves_angle(
-                    prev.x, prev.y, p2.x, p2.y, p.x, p.y, next.x, next.y, next.x, next.y,
-                )
-            }
-            (_, Segment::Close) => 0.0,
-        }
+        last_vertex_angle(path, idx)
     } else {
-        // Middle segments.
+        middle_vertex_angle(path, idx)
+    }
+}
 
-        let seg1 = path[idx];
-        let seg2 = path[idx + 1];
+fn first_vertex_angle(path: &[Segment]) -> f32 {
+    // First segment.
 
-        // TODO: Not sure if there is a better way.
-        match (seg1, seg2) {
-            (Segment::MoveTo(pm), Segment::LineTo(p)) => calc_line_angle(pm.x, pm.y, p.x, p.y),
-            (Segment::MoveTo(pm), Segment::CubicTo(p1, _, _)) => {
+    debug_assert!(path.len() > 1);
+
+    let seg1 = path[0];
+    let seg2 = path[1];
+
+    match (seg1, seg2) {
+        (Segment::MoveTo(pm), Segment::LineTo(p)) => calc_line_angle(pm.x, pm.y, p.x, p.y),
+        (Segment::MoveTo(pm), Segment::CubicTo(p1, _, p)) => {
+            if pm.x.approx_eq_ulps(&p1.x, 4) && pm.y.approx_eq_ulps(&p1.y, 4) {
+                calc_line_angle(pm.x, pm.y, p.x, p.y)
+            } else {
                 calc_line_angle(pm.x, pm.y, p1.x, p1.y)
             }
-            (Segment::LineTo(p1), Segment::LineTo(p2)) => {
-                let prev = get_prev_vertex(path, idx);
-                calc_angle(prev.x, prev.y, p1.x, p1.y, p1.x, p1.y, p2.x, p2.y)
+        }
+        _ => 0.0,
+    }
+}
+
+fn last_vertex_angle(path: &[Segment], idx: usize) -> f32 {
+    // Last segment.
+
+    let seg1 = path[idx - 1];
+    let seg2 = path[idx];
+
+    match (seg1, seg2) {
+        (_, Segment::MoveTo(_)) => 0.0, // unreachable
+        (_, Segment::LineTo(p)) => {
+            let prev = get_prev_vertex(path, idx);
+            calc_line_angle(prev.x, prev.y, p.x, p.y)
+        }
+        (_, Segment::CubicTo(p1, p2, p)) => {
+            if p2.x.approx_eq_ulps(&p.x, 4) && p2.y.approx_eq_ulps(&p.y, 4) {
+                calc_line_angle(p1.x, p1.y, p.x, p.y)
+            } else {
+                calc_line_angle(p2.x, p2.y, p.x, p.y)
             }
-            (Segment::CubicTo(_, c1_p2, c1_p), Segment::CubicTo(c2_p1, _, c2_p)) => {
-                let prev = get_prev_vertex(path, idx);
-                calc_curves_angle(
-                    prev.x, prev.y, c1_p2.x, c1_p2.y, c1_p.x, c1_p.y, c2_p1.x, c2_p1.y, c2_p.x,
-                    c2_p.y,
-                )
-            }
-            (Segment::LineTo(pl), Segment::CubicTo(p1, _, p)) => {
-                let prev = get_prev_vertex(path, idx);
-                calc_curves_angle(
-                    prev.x, prev.y, prev.x, prev.y, pl.x, pl.y, p1.x, p1.y, p.x, p.y,
-                )
-            }
-            (Segment::CubicTo(_, p2, p), Segment::LineTo(pl)) => {
-                let prev = get_prev_vertex(path, idx);
-                calc_curves_angle(prev.x, prev.y, p2.x, p2.y, p.x, p.y, pl.x, pl.y, pl.x, pl.y)
-            }
-            (Segment::LineTo(p), Segment::MoveTo(_)) => {
+        }
+        (Segment::LineTo(p), Segment::Close) => {
+            let next = get_subpath_start(path, idx);
+            calc_line_angle(p.x, p.y, next.x, next.y)
+        }
+        (Segment::CubicTo(_, p2, p), Segment::Close) => last_closed_curve_angle(path, idx, p2, p),
+        (_, Segment::Close) => 0.0,
+    }
+}
+
+fn last_closed_curve_angle(path: &[Segment], idx: usize, p2: Point, p: Point) -> f32 {
+    let prev = get_prev_vertex(path, idx);
+    let next = get_subpath_start(path, idx);
+    calc_curves_angle(
+        prev.x, prev.y, p2.x, p2.y, p.x, p.y, next.x, next.y, next.x, next.y,
+    )
+}
+
+fn middle_vertex_angle(path: &[Segment], idx: usize) -> f32 {
+    let previous = path[idx];
+    match path[idx + 1] {
+        Segment::MoveTo(_) => middle_move_angle(path, idx, previous),
+        Segment::LineTo(point) => middle_line_angle(path, idx, previous, point),
+        Segment::CubicTo(control, _, point) => middle_curve_angle(path, idx, previous, control, point),
+        Segment::Close => middle_close_angle(path, idx, previous),
+    }
+}
+
+fn middle_line_angle(path: &[Segment], idx: usize, previous: Segment, point: Point) -> f32 {
+    match previous {
+        Segment::MoveTo(pm) => calc_line_angle(pm.x, pm.y, point.x, point.y),
+        Segment::LineTo(p1) => {
+            let prev = get_prev_vertex(path, idx);
+            calc_angle(prev.x, prev.y, p1.x, p1.y, p1.x, p1.y, point.x, point.y)
+        }
+        Segment::CubicTo(_, p2, p) => {
+            let prev = get_prev_vertex(path, idx);
+            calc_curves_angle(prev.x, prev.y, p2.x, p2.y, p.x, p.y, point.x, point.y, point.x, point.y)
+        }
+        Segment::Close => 0.0,
+    }
+}
+
+fn middle_curve_angle(path: &[Segment], idx: usize, previous: Segment, control: Point, point: Point) -> f32 {
+    match previous {
+        Segment::MoveTo(pm) => calc_line_angle(pm.x, pm.y, control.x, control.y),
+        Segment::LineTo(pl) => {
+            let prev = get_prev_vertex(path, idx);
+            calc_curves_angle(prev.x, prev.y, prev.x, prev.y, pl.x, pl.y, control.x, control.y, point.x, point.y)
+        }
+        Segment::CubicTo(_, p2, p) => {
+            let prev = get_prev_vertex(path, idx);
+            calc_curves_angle(prev.x, prev.y, p2.x, p2.y, p.x, p.y, control.x, control.y, point.x, point.y)
+        }
+        Segment::Close => 0.0,
+    }
+}
+
+fn middle_move_angle(path: &[Segment], idx: usize, previous: Segment) -> f32 {
+    match previous {
+        Segment::LineTo(p) => {
+            let prev = get_prev_vertex(path, idx);
+            calc_line_angle(prev.x, prev.y, p.x, p.y)
+        }
+        Segment::CubicTo(_, p2, p) => {
+            if p.x.approx_eq_ulps(&p2.x, 4) && p.y.approx_eq_ulps(&p2.y, 4) {
                 let prev = get_prev_vertex(path, idx);
                 calc_line_angle(prev.x, prev.y, p.x, p.y)
+            } else {
+                calc_line_angle(p2.x, p2.y, p.x, p.y)
             }
-            (Segment::CubicTo(_, p2, p), Segment::MoveTo(_)) => {
-                if p.x.approx_eq_ulps(&p2.x, 4) && p.y.approx_eq_ulps(&p2.y, 4) {
-                    let prev = get_prev_vertex(path, idx);
-                    calc_line_angle(prev.x, prev.y, p.x, p.y)
-                } else {
-                    calc_line_angle(p2.x, p2.y, p.x, p.y)
-                }
-            }
-            (Segment::LineTo(p), Segment::Close) => {
-                let prev = get_prev_vertex(path, idx);
-                let next = get_subpath_start(path, idx);
-                calc_angle(prev.x, prev.y, p.x, p.y, p.x, p.y, next.x, next.y)
-            }
-            /* WHY: 第2制御点が終点と重なる場合は、第1制御点が入射接線を決める。 */
-            (Segment::CubicTo(p1, p2, p), Segment::Close) => {
-                let prev = get_prev_vertex(path, idx);
-                let next = get_subpath_start(path, idx);
-                let incoming = if p2.x.approx_eq_ulps(&p.x, 4)
-                    && p2.y.approx_eq_ulps(&p.y, 4)
-                    && !(p1.x.approx_eq_ulps(&p.x, 4) && p1.y.approx_eq_ulps(&p.y, 4))
-                {
-                    p1
-                } else {
-                    prev
-                };
-                calc_curves_angle(
-                    incoming.x, incoming.y, p2.x, p2.y, p.x, p.y, next.x, next.y, next.x, next.y,
-                )
-            }
-            (_, Segment::Close) => {
-                let prev = get_prev_vertex(path, idx);
-                let next = get_subpath_start(path, idx);
-                calc_line_angle(prev.x, prev.y, next.x, next.y)
-            }
-            (_, Segment::MoveTo(_)) | (Segment::Close, _) => 0.0,
+        }
+        _ => 0.0,
+    }
+}
+
+fn middle_close_angle(path: &[Segment], idx: usize, previous: Segment) -> f32 {
+    match previous {
+        Segment::LineTo(p) => {
+            let prev = get_prev_vertex(path, idx);
+            let next = get_subpath_start(path, idx);
+            calc_angle(prev.x, prev.y, p.x, p.y, p.x, p.y, next.x, next.y)
+        }
+        Segment::CubicTo(p1, p2, p) => middle_closed_curve_angle(path, idx, p1, p2, p),
+        _ => {
+            let prev = get_prev_vertex(path, idx);
+            let next = get_subpath_start(path, idx);
+            calc_line_angle(prev.x, prev.y, next.x, next.y)
         }
     }
+}
+
+// 第2制御点が終点と重なる場合は、第1制御点が入射接線を決める。
+fn middle_closed_curve_angle(path: &[Segment], idx: usize, p1: Point, p2: Point, p: Point) -> f32 {
+    let prev = get_prev_vertex(path, idx);
+    let next = get_subpath_start(path, idx);
+    let incoming = if p2.x.approx_eq_ulps(&p.x, 4)
+        && p2.y.approx_eq_ulps(&p.y, 4)
+        && !(p1.x.approx_eq_ulps(&p.x, 4) && p1.y.approx_eq_ulps(&p.y, 4))
+    {
+        p1
+    } else {
+        prev
+    };
+    calc_curves_angle(
+        incoming.x, incoming.y, p2.x, p2.y, p.x, p.y, next.x, next.y, next.x, next.y,
+    )
 }
 
 fn calc_line_angle(x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {

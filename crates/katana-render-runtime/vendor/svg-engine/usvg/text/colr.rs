@@ -196,6 +196,10 @@ impl<'a> GlyphPainter<'a> {
         self.write_gradient_stops(color_stops);
         self.svg.end_element();
 
+        self.paint_gradient_path(&gradient_id);
+    }
+
+    fn paint_gradient_path(&mut self, gradient_id: &str) {
         self.svg.start_element("path");
         self.svg
             .write_attribute_fmt("fill", format_args!("url(#{})", gradient_id));
@@ -239,13 +243,7 @@ impl<'a> GlyphPainter<'a> {
         self.write_gradient_stops(color_stops);
         self.svg.end_element();
 
-        self.svg.start_element("path");
-        self.svg
-            .write_attribute_fmt("fill", format_args!("url(#{})", gradient_id));
-        self.svg
-            .write_transform_attribute("transform", self.outline_transform);
-        self.svg.write_attribute("d", self.path_buf);
-        self.svg.end_element();
+        self.paint_gradient_path(&gradient_id);
     }
 
     fn paint_sweep_gradient(
@@ -364,10 +362,7 @@ impl GlyphPainter<'_> {
             Brush::Solid {
                 palette_index,
                 alpha,
-            } => {
-                let color = self.palette_index_to_color(palette_index, alpha);
-                self.paint_solid(color);
-            }
+            } => self.paint_palette_color(palette_index, alpha),
             Brush::LinearGradient {
                 p0,
                 p1,
@@ -391,6 +386,28 @@ impl GlyphPainter<'_> {
                 extend,
             } => self.paint_sweep_gradient(c0, start_angle, end_angle, color_stops, extend),
         }
+    }
+
+    fn paint_palette_color(&mut self, palette_index: u16, alpha: f32) {
+        let color = self.palette_index_to_color(palette_index, alpha);
+        self.paint_solid(color);
+    }
+
+    fn write_clip_region(&mut self, region: tiny_skia_path::Rect) {
+        self.path_buf.clear();
+        write!(
+            self.path_buf,
+            "M {} {} L {} {} L {} {} L {} {} Z",
+            region.left(),
+            region.top(),
+            region.right(),
+            region.top(),
+            region.right(),
+            region.bottom(),
+            region.left(),
+            region.bottom()
+        )
+        .unwrap();
     }
 
     fn palette_index_to_color(&self, palette_index: u16, alpha: f32) -> Color {
@@ -501,35 +518,11 @@ impl<'a> skrifa::color::ColorPainter for GlyphPainter<'a> {
             return;
         }
 
-        let mut region: Option<tiny_skia_path::Rect> = None;
-        for bounds in &self.clip_stack {
-            // A clip with no (or unknown) bounds clips everything away.
-            let Some(bounds) = bounds else { return };
-            region = Some(match region {
-                Some(region) => match intersect_rects(region, *bounds) {
-                    Some(r) => r,
-                    // An empty intersection - there is nothing to paint.
-                    None => return,
-                },
-                None => *bounds,
-            });
-        }
-        let Some(region) = region else { return };
+        let Some(region) = clip_intersection(&self.clip_stack) else {
+            return;
+        };
 
-        self.path_buf.clear();
-        write!(
-            self.path_buf,
-            "M {} {} L {} {} L {} {} L {} {} Z",
-            region.left(),
-            region.top(),
-            region.right(),
-            region.top(),
-            region.right(),
-            region.bottom(),
-            region.left(),
-            region.bottom()
-        )
-        .unwrap();
+        self.write_clip_region(region);
 
         // The covering rectangle is in the root coordinate space.
         self.outline_transform = Transform::default();
@@ -538,32 +531,7 @@ impl<'a> skrifa::color::ColorPainter for GlyphPainter<'a> {
     }
 
     fn push_layer(&mut self, composite_mode: skrifa::color::CompositeMode) {
-        use skrifa::color::CompositeMode;
-        // TODO: Need to figure out how to represent the other blend modes in SVG.
-        let composite_mode = match composite_mode {
-            CompositeMode::SrcOver => "normal",
-            CompositeMode::Screen => "screen",
-            CompositeMode::Overlay => "overlay",
-            CompositeMode::Darken => "darken",
-            CompositeMode::Lighten => "lighten",
-            CompositeMode::ColorDodge => "color-dodge",
-            CompositeMode::ColorBurn => "color-burn",
-            CompositeMode::HardLight => "hard-light",
-            CompositeMode::SoftLight => "soft-light",
-            CompositeMode::Difference => "difference",
-            CompositeMode::Exclusion => "exclusion",
-            CompositeMode::Multiply => "multiply",
-            CompositeMode::HslHue => "hue",
-            CompositeMode::HslSaturation => "saturation",
-            CompositeMode::HslColor => "color",
-            CompositeMode::HslLuminosity => "luminosity",
-            _ => {
-                // Unsupported blend mode
-                // TODO: support other blend modes
-                // TODO: surface warning without printing to stdout
-                "normal"
-            }
-        };
+        let composite_mode = svg_composite_mode(composite_mode);
 
         self.svg.start_element("g");
         self.svg.write_attribute_fmt(
@@ -574,6 +542,47 @@ impl<'a> skrifa::color::ColorPainter for GlyphPainter<'a> {
 
     fn pop_layer(&mut self) {
         self.svg.end_element();
+    }
+}
+
+fn clip_intersection(clips: &[Option<tiny_skia_path::Rect>]) -> Option<tiny_skia_path::Rect> {
+    let mut region = None;
+    for bounds in clips {
+        let bounds = (*bounds)?;
+        region = Some(match region {
+            Some(region) => intersect_rects(region, bounds)?,
+            None => bounds,
+        });
+    }
+    region
+}
+
+fn svg_composite_mode(composite_mode: skrifa::color::CompositeMode) -> &'static str {
+    use skrifa::color::CompositeMode;
+    // TODO: Need to figure out how to represent the other blend modes in SVG.
+    match composite_mode {
+        CompositeMode::SrcOver => "normal",
+        CompositeMode::Screen => "screen",
+        CompositeMode::Overlay => "overlay",
+        CompositeMode::Darken => "darken",
+        CompositeMode::Lighten => "lighten",
+        CompositeMode::ColorDodge => "color-dodge",
+        CompositeMode::ColorBurn => "color-burn",
+        CompositeMode::HardLight => "hard-light",
+        CompositeMode::SoftLight => "soft-light",
+        CompositeMode::Difference => "difference",
+        CompositeMode::Exclusion => "exclusion",
+        CompositeMode::Multiply => "multiply",
+        CompositeMode::HslHue => "hue",
+        CompositeMode::HslSaturation => "saturation",
+        CompositeMode::HslColor => "color",
+        CompositeMode::HslLuminosity => "luminosity",
+        _ => {
+            // Unsupported blend mode
+            // TODO: support other blend modes
+            // TODO: surface warning without printing to stdout
+            "normal"
+        }
     }
 }
 

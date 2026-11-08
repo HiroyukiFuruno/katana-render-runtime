@@ -10,7 +10,14 @@ use crate::svg_engine::usvg::filter::ColorMatrixKind as ColorMatrix;
 /// Input image pixels should have an **unpremultiplied alpha**.
 pub fn apply(matrix: &ColorMatrix, src: ImageRefMut) {
     match matrix {
-        ColorMatrix::Matrix(m) => {
+        ColorMatrix::Matrix(m) => apply_matrix(m, src),
+        ColorMatrix::Saturate(v) => apply_saturate(v.get(), src),
+        ColorMatrix::HueRotate(angle) => apply_hue_rotate(*angle, src),
+        ColorMatrix::LuminanceToAlpha => apply_luminance(src),
+    }
+}
+
+fn apply_matrix(m: &[f32], src: ImageRefMut) {
             for pixel in src.data {
                 let (r, g, b, a) = to_normalized_components(*pixel);
 
@@ -24,9 +31,10 @@ pub fn apply(matrix: &ColorMatrix, src: ImageRefMut) {
                 pixel.b = from_normalized(new_b);
                 pixel.a = from_normalized(new_a);
             }
-        }
-        ColorMatrix::Saturate(v) => {
-            let v = v.get().max(0.0);
+}
+
+fn apply_saturate(v: f32, src: ImageRefMut) {
+            let v = v.max(0.0);
             let m = [
                 0.213 + 0.787 * v,
                 0.715 - 0.715 * v,
@@ -39,19 +47,10 @@ pub fn apply(matrix: &ColorMatrix, src: ImageRefMut) {
                 0.072 + 0.928 * v,
             ];
 
-            for pixel in src.data {
-                let (r, g, b, _) = to_normalized_components(*pixel);
+            apply_rgb_matrix(&m, src);
+}
 
-                let new_r = r * m[0] + g * m[1] + b * m[2];
-                let new_g = r * m[3] + g * m[4] + b * m[5];
-                let new_b = r * m[6] + g * m[7] + b * m[8];
-
-                pixel.r = from_normalized(new_r);
-                pixel.g = from_normalized(new_g);
-                pixel.b = from_normalized(new_b);
-            }
-        }
-        ColorMatrix::HueRotate(angle) => {
+fn apply_hue_rotate(angle: f32, src: ImageRefMut) {
             let angle = angle.to_radians();
             let a1 = angle.cos();
             let a2 = angle.sin();
@@ -67,19 +66,22 @@ pub fn apply(matrix: &ColorMatrix, src: ImageRefMut) {
                 0.072 + 0.928 * a1 + 0.072 * a2,
             ];
 
-            for pixel in src.data {
-                let (r, g, b, _) = to_normalized_components(*pixel);
+            apply_rgb_matrix(&m, src);
+}
 
-                let new_r = r * m[0] + g * m[1] + b * m[2];
-                let new_g = r * m[3] + g * m[4] + b * m[5];
-                let new_b = r * m[6] + g * m[7] + b * m[8];
+fn apply_rgb_matrix(m: &[f32; 9], src: ImageRefMut) {
+    for pixel in src.data {
+        let (r, g, b, _) = to_normalized_components(*pixel);
+        let new_r = r * m[0] + g * m[1] + b * m[2];
+        let new_g = r * m[3] + g * m[4] + b * m[5];
+        let new_b = r * m[6] + g * m[7] + b * m[8];
+        pixel.r = from_normalized(new_r);
+        pixel.g = from_normalized(new_g);
+        pixel.b = from_normalized(new_b);
+    }
+}
 
-                pixel.r = from_normalized(new_r);
-                pixel.g = from_normalized(new_g);
-                pixel.b = from_normalized(new_b);
-            }
-        }
-        ColorMatrix::LuminanceToAlpha => {
+fn apply_luminance(src: ImageRefMut) {
             for pixel in src.data {
                 let (r, g, b, _) = to_normalized_components(*pixel);
 
@@ -90,8 +92,6 @@ pub fn apply(matrix: &ColorMatrix, src: ImageRefMut) {
                 pixel.b = 0;
                 pixel.a = from_normalized(new_a);
             }
-        }
-    }
 }
 
 #[inline]

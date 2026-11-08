@@ -105,56 +105,18 @@ impl FontResolver<'_> {
     /// [`Options`](crate::svg_engine::usvg::Options).
     pub fn default_font_selector() -> FontSelectionFn<'static> {
         Box::new(move |font, fontdb| {
-            let mut name_list = Vec::new();
-            for family in &font.families {
-                name_list.push(match family {
-                    FontFamily::Serif => fontdb::Family::Serif,
-                    FontFamily::SansSerif => fontdb::Family::SansSerif,
-                    FontFamily::Cursive => fontdb::Family::Cursive,
-                    FontFamily::Fantasy => fontdb::Family::Fantasy,
-                    FontFamily::Monospace => fontdb::Family::Monospace,
-                    FontFamily::Named(s) => fontdb::Family::Name(s),
-                });
-            }
-
-            // Use the default font as fallback.
-            name_list.push(fontdb::Family::Serif);
-
-            let stretch = match font.stretch {
-                FontStretch::UltraCondensed => fontdb::Stretch::UltraCondensed,
-                FontStretch::ExtraCondensed => fontdb::Stretch::ExtraCondensed,
-                FontStretch::Condensed => fontdb::Stretch::Condensed,
-                FontStretch::SemiCondensed => fontdb::Stretch::SemiCondensed,
-                FontStretch::Normal => fontdb::Stretch::Normal,
-                FontStretch::SemiExpanded => fontdb::Stretch::SemiExpanded,
-                FontStretch::Expanded => fontdb::Stretch::Expanded,
-                FontStretch::ExtraExpanded => fontdb::Stretch::ExtraExpanded,
-                FontStretch::UltraExpanded => fontdb::Stretch::UltraExpanded,
-            };
-
-            let style = match font.style {
-                FontStyle::Normal => fontdb::Style::Normal,
-                FontStyle::Italic => fontdb::Style::Italic,
-                FontStyle::Oblique => fontdb::Style::Oblique,
-            };
+            let name_list = fontdb_families(font);
 
             let query = fontdb::Query {
                 families: &name_list,
                 weight: fontdb::Weight(font.weight),
-                stretch,
-                style,
+                stretch: fontdb_stretch(font.stretch),
+                style: fontdb_style(font.style),
             };
 
             let id = fontdb.query(&query);
             if id.is_none() {
-                log::warn!(
-                    "No match for '{}' font-family.",
-                    font.families
-                        .iter()
-                        .map(|f| f.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
+                log_missing_font(font);
             }
 
             id
@@ -189,25 +151,76 @@ impl FontResolver<'_> {
                     continue;
                 }
 
-                let base_family = base_face
-                    .families
-                    .iter()
-                    .find(|f| f.1 == fontdb::Language::English_UnitedStates)
-                    .unwrap_or(&base_face.families[0]);
-
-                let new_family = face
-                    .families
-                    .iter()
-                    .find(|f| f.1 == fontdb::Language::English_UnitedStates)
-                    .unwrap_or(&face.families[0]);
-
-                log::warn!("Fallback from {} to {}.", base_family.0, new_family.0);
+                log_fallback(base_face, face);
                 return Some(face.id);
             }
 
             None
         })
     }
+}
+
+fn fontdb_families(font: &Font) -> Vec<fontdb::Family<'_>> {
+    let mut name_list = Vec::new();
+    for family in &font.families {
+        name_list.push(match family {
+            FontFamily::Serif => fontdb::Family::Serif,
+            FontFamily::SansSerif => fontdb::Family::SansSerif,
+            FontFamily::Cursive => fontdb::Family::Cursive,
+            FontFamily::Fantasy => fontdb::Family::Fantasy,
+            FontFamily::Monospace => fontdb::Family::Monospace,
+            FontFamily::Named(s) => fontdb::Family::Name(s),
+        });
+    }
+    name_list.push(fontdb::Family::Serif);
+    name_list
+}
+
+fn log_missing_font(font: &Font) {
+    log::warn!(
+        "No match for '{}' font-family.",
+        font.families
+            .iter()
+            .map(|f| f.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+}
+
+fn fontdb_stretch(stretch: FontStretch) -> fontdb::Stretch {
+    match stretch {
+        FontStretch::UltraCondensed => fontdb::Stretch::UltraCondensed,
+        FontStretch::ExtraCondensed => fontdb::Stretch::ExtraCondensed,
+        FontStretch::Condensed => fontdb::Stretch::Condensed,
+        FontStretch::SemiCondensed => fontdb::Stretch::SemiCondensed,
+        FontStretch::Normal => fontdb::Stretch::Normal,
+        FontStretch::SemiExpanded => fontdb::Stretch::SemiExpanded,
+        FontStretch::Expanded => fontdb::Stretch::Expanded,
+        FontStretch::ExtraExpanded => fontdb::Stretch::ExtraExpanded,
+        FontStretch::UltraExpanded => fontdb::Stretch::UltraExpanded,
+    }
+}
+
+fn fontdb_style(style: FontStyle) -> fontdb::Style {
+    match style {
+        FontStyle::Normal => fontdb::Style::Normal,
+        FontStyle::Italic => fontdb::Style::Italic,
+        FontStyle::Oblique => fontdb::Style::Oblique,
+    }
+}
+
+fn log_fallback(base_face: &fontdb::FaceInfo, face: &fontdb::FaceInfo) {
+    let base_family = base_face
+        .families
+        .iter()
+        .find(|f| f.1 == fontdb::Language::English_UnitedStates)
+        .unwrap_or(&base_face.families[0]);
+    let new_family = face
+        .families
+        .iter()
+        .find(|f| f.1 == fontdb::Language::English_UnitedStates)
+        .unwrap_or(&face.families[0]);
+    log::warn!("Fallback from {} to {}.", base_family.0, new_family.0);
 }
 
 impl std::fmt::Debug for FontResolver<'_> {

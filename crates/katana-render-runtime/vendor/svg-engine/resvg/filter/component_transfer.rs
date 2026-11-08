@@ -41,20 +41,7 @@ fn transfer(func: &TransferFunction, c: u8) -> u8 {
     let c = c as f32 / 255.0;
     let c = match func {
         TransferFunction::Identity => c,
-        TransferFunction::Table(values) => {
-            let n = values.len() - 1;
-            let k = (c * (n as f32)).floor() as usize;
-            let k = std::cmp::min(k, n);
-            if k == n {
-                values[k]
-            } else {
-                let vk = values[k];
-                let vk1 = values[k + 1];
-                let k = k as f32;
-                let n = n as f32;
-                vk + (c - k / n) * n * (vk1 - vk)
-            }
-        }
+        TransferFunction::Table(values) => interpolate_table(values, c),
         TransferFunction::Discrete(values) => {
             let n = values.len();
             let k = (c * (n as f32)).floor() as usize;
@@ -69,4 +56,19 @@ fn transfer(func: &TransferFunction, c: u8) -> u8 {
     };
 
     (f32_bound(0.0, c, 1.0) * 255.0) as u8
+}
+
+fn interpolate_table(values: &[f32], c: f32) -> f32 {
+    let n = values.len() - 1;
+    let k = (c * (n as f32)).floor() as usize;
+    let k = std::cmp::min(k, n);
+    if k == n {
+        values[k]
+    } else {
+        let vk = values[k];
+        let vk1 = values[k + 1];
+        let k = k as f32;
+        let n = n as f32;
+        vk + (c - k / n) * n * (vk1 - vk)
+    }
 }

@@ -30,13 +30,20 @@ pub(crate) fn convert_length(
         Unit::Mm => n * dpi / 25.4,
         Unit::Pt => n * dpi / 72.0,
         Unit::Pc => n * dpi / 6.0,
-        Unit::Percent => {
-            if object_units == Units::ObjectBoundingBox {
-                n / 100.0
-            } else {
-                let view_box = state.view_box;
+        Unit::Percent => convert_percentage_length(length, aid, object_units, state),
+    }
+}
 
-                match aid {
+fn convert_percentage_length(length: Length, aid: AId, object_units: Units, state: &converter::State) -> f32 {
+    if object_units == Units::ObjectBoundingBox {
+        return length.number as f32 / 100.0;
+    }
+    convert_viewbox_percentage(length, aid, state)
+}
+
+fn convert_viewbox_percentage(length: Length, aid: AId, state: &converter::State) -> f32 {
+    let view_box = state.view_box;
+    match aid {
                     AId::Cx
                     | AId::Dx
                     | AId::Fx
@@ -57,15 +64,15 @@ pub(crate) fn convert_length(
                     | AId::Y
                     | AId::Y1
                     | AId::Y2 => convert_percent(length, view_box.height()),
-                    _ => {
-                        let mut vb_len = view_box.width().powi(2) + view_box.height().powi(2);
-                        vb_len = (vb_len / 2.0).sqrt();
-                        convert_percent(length, vb_len)
-                    }
-                }
-            }
-        }
+                    _ => convert_diagonal_percentage(length, state),
     }
+}
+
+fn convert_diagonal_percentage(length: Length, state: &converter::State) -> f32 {
+    let view_box = state.view_box;
+    let mut vb_len = view_box.width().powi(2) + view_box.height().powi(2);
+    vb_len = (vb_len / 2.0).sqrt();
+    convert_percent(length, vb_len)
 }
 
 pub(crate) fn convert_user_length(
@@ -102,14 +109,24 @@ pub(crate) fn resolve_font_size(node: SvgNode, state: &converter::State) -> f32 
     for n in nodes.iter().rev().skip(1) {
         // skip Root
         if let Some(length) = n.try_attribute::<Length>(AId::FontSize) {
-            let dpi = state.opt.dpi;
-            let number = length.number as f32;
-            font_size = match length.unit {
+            font_size = convert_font_size_length(length, *n, state, font_size);
+        } else if let Some(name) = n.attribute(AId::FontSize) {
+            font_size = convert_named_font_size(name, font_size);
+        }
+    }
+
+    font_size
+}
+
+fn convert_font_size_length(length: Length, node: SvgNode, state: &converter::State, font_size: f32) -> f32 {
+    let dpi = state.opt.dpi;
+    let number = length.number as f32;
+    match length.unit {
                 Unit::None | Unit::Px => number,
                 Unit::Em => number * font_size,
                 Unit::Ex => {
                     {
-                        number * resolve_parent_css_ex(*n, state, font_size)
+                        number * resolve_parent_css_ex(node, state, font_size)
                     }
                 }
                 Unit::In => number * dpi,
@@ -122,13 +139,7 @@ pub(crate) fn resolve_font_size(node: SvgNode, state: &converter::State) -> f32 
                     // is relative to the parent node `font-size`.
                     number * font_size * 0.01
                 }
-            }
-        } else if let Some(name) = n.attribute(AId::FontSize) {
-            font_size = convert_named_font_size(name, font_size);
-        }
     }
-
-    font_size
 }
 
 fn resolve_css_ex(node: SvgNode, state: &converter::State) -> f32 {

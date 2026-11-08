@@ -95,6 +95,13 @@ fn is_valid_sys_lang(node: SvgNode, opt: &Options) -> bool {
     // But we support only simple cases like `en` or `en-US`.
     // No one really uses this, especially with complex BCP 47 values.
     if let Some(langs) = node.attribute::<&str>(AId::SystemLanguage) {
+        matches_system_language(langs, opt)
+    } else {
+        true
+    }
+}
+
+fn matches_system_language(langs: &str, opt: &Options) -> bool {
         let mut has_match = false;
         for lang in langs.split(',') {
             let lang = lang.trim();
@@ -119,7 +126,4 @@ fn is_valid_sys_lang(node: SvgNode, opt: &Options) -> bool {
         }
 
         has_match
-    } else {
-        true
-    }
 }

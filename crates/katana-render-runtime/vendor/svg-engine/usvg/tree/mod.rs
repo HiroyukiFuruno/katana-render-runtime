@@ -1297,6 +1297,26 @@ pub struct Path {
     pub(crate) abs_stroke_bounding_box: Rect,
 }
 
+fn path_absolute_bounds(
+    data: &tiny_skia_path::Path,
+    stroke: Option<&Stroke>,
+    transform: Transform,
+    bounding_box: Rect,
+    stroke_bounding_box: Rect,
+) -> Option<(Rect, Rect)> {
+    if transform.has_skew() {
+        let path = data.clone().transform(transform)?;
+        let bounds = path.compute_tight_bounds()?;
+        let stroke_bounds = Path::calculate_stroke_bbox(stroke, &path).unwrap_or(bounds);
+        Some((bounds, stroke_bounds))
+    } else {
+        Some((
+            bounding_box.transform(transform)?,
+            stroke_bounding_box.transform(transform)?,
+        ))
+    }
+}
+
 impl Path {
     pub(crate) fn new_simple(data: Arc<tiny_skia_path::Path>) -> Option<Self> {
         Self::new(
@@ -1325,20 +1345,13 @@ impl Path {
         let stroke_bounding_box =
             Path::calculate_stroke_bbox(stroke.as_ref(), &data).unwrap_or(bounding_box);
 
-        let abs_bounding_box: Rect;
-        let abs_stroke_bounding_box: Rect;
-        if abs_transform.has_skew() {
-            // TODO: avoid re-alloc
-            let path2 = data.as_ref().clone();
-            let path2 = path2.transform(abs_transform)?;
-            abs_bounding_box = path2.compute_tight_bounds()?;
-            abs_stroke_bounding_box =
-                Path::calculate_stroke_bbox(stroke.as_ref(), &path2).unwrap_or(abs_bounding_box);
-        } else {
-            // A transform without a skew can be performed just on a bbox.
-            abs_bounding_box = bounding_box.transform(abs_transform)?;
-            abs_stroke_bounding_box = stroke_bounding_box.transform(abs_transform)?;
-        }
+        let (abs_bounding_box, abs_stroke_bounding_box) = path_absolute_bounds(
+            &data,
+            stroke.as_ref(),
+            abs_transform,
+            bounding_box,
+            stroke_bounding_box,
+        )?;
 
         Some(Path {
             id,
@@ -1865,58 +1878,27 @@ impl Group {
     }
 
     pub(crate) fn calculate_bounding_boxes(&mut self) -> Option<()> {
-        let mut bbox = BBox::default();
-        let mut abs_bbox = BBox::default();
-        let mut stroke_bbox = BBox::default();
-        let mut abs_stroke_bbox = BBox::default();
-        let mut layer_bbox = BBox::default();
+        let mut bounds = GroupBounds::default();
         for child in &self.children {
-            {
-                let mut c_bbox = child.bounding_box();
-                if let Node::Group(group) = child {
-                    if let Some(r) = c_bbox.transform(group.transform) {
-                        c_bbox = r;
-                    }
-                }
-
-                bbox = bbox.expand(c_bbox);
-            }
-
-            abs_bbox = abs_bbox.expand(child.abs_bounding_box());
-
-            {
-                let mut c_bbox = child.stroke_bounding_box();
-                if let Node::Group(group) = child {
-                    if let Some(r) = c_bbox.transform(group.transform) {
-                        c_bbox = r;
-                    }
-                }
-
-                stroke_bbox = stroke_bbox.expand(c_bbox);
-            }
-
-            abs_stroke_bbox = abs_stroke_bbox.expand(child.abs_stroke_bounding_box());
-
-            if let Node::Group(group) = child {
-                let r = group.layer_bounding_box;
-                if let Some(r) = r.transform(group.transform) {
-                    layer_bbox = layer_bbox.expand(r);
-                }
-            } else {
-                // Not a group - no need to transform.
-                layer_bbox = layer_bbox.expand(child.stroke_bounding_box());
-            }
+            bounds.expand(child);
         }
 
         // `bbox` can be None for empty groups, but we still have to
         // calculate `layer_bounding_box after` it.
-        if let Some(bbox) = bbox.to_rect() {
+        if let Some(bbox) = bounds.bbox.to_rect() {
             self.bounding_box = bbox;
-            self.abs_bounding_box = abs_bbox.to_rect()?;
-            self.stroke_bounding_box = stroke_bbox.to_rect()?;
-            self.abs_stroke_bounding_box = abs_stroke_bbox.to_rect()?;
+            self.abs_bounding_box = bounds.abs_bbox.to_rect()?;
+            self.stroke_bounding_box = bounds.stroke_bbox.to_rect()?;
+            self.abs_stroke_bounding_box = bounds.abs_stroke_bbox.to_rect()?;
         }
 
+        self.calculate_layer_bounding_box(bounds.layer_bbox)?;
+        self.abs_layer_bounding_box = self.layer_bounding_box.transform(self.abs_transform)?;
+
+        Some(())
+    }
+
+    fn calculate_layer_bounding_box(&mut self, layer_bbox: BBox) -> Option<()> {
         // Filter bbox has a higher priority than layers bbox.
         if let Some(filter_bbox) = self.filters_bounding_box() {
             self.layer_bounding_box = filter_bbox;
@@ -1936,10 +1918,46 @@ impl Group {
             self.layer_bounding_box = layer_bbox;
         }
 
-        self.abs_layer_bounding_box = self.layer_bounding_box.transform(self.abs_transform)?;
-
         Some(())
     }
+}
+
+#[derive(Default)]
+struct GroupBounds {
+    bbox: BBox,
+    abs_bbox: BBox,
+    stroke_bbox: BBox,
+    abs_stroke_bbox: BBox,
+    layer_bbox: BBox,
+}
+
+impl GroupBounds {
+    fn expand(&mut self, child: &Node) {
+        self.bbox = self
+            .bbox
+            .expand(group_transformed_bbox(child, child.bounding_box()));
+        self.abs_bbox = self.abs_bbox.expand(child.abs_bounding_box());
+        self.stroke_bbox = self
+            .stroke_bbox
+            .expand(group_transformed_bbox(child, child.stroke_bounding_box()));
+        self.abs_stroke_bbox = self.abs_stroke_bbox.expand(child.abs_stroke_bounding_box());
+        if let Node::Group(group) = child {
+            if let Some(r) = group.layer_bounding_box.transform(group.transform) {
+                self.layer_bbox = self.layer_bbox.expand(r);
+            }
+        } else {
+            self.layer_bbox = self.layer_bbox.expand(child.stroke_bounding_box());
+        }
+    }
+}
+
+fn group_transformed_bbox(child: &Node, bbox: Rect) -> Rect {
+    if let Node::Group(group) = child {
+        if let Some(transformed) = bbox.transform(group.transform) {
+            return transformed;
+        }
+    }
+    bbox
 }
 
 #[cfg(test)]

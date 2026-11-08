@@ -55,19 +55,22 @@ fn create_box_gauss(sigma: f32) -> [i32; STEPS] {
             / (-4.0 * wl_float - 4.0);
         let m = m_ideal.round() as usize;
 
-        let mut sizes = [0; STEPS];
-        for i in 0..STEPS {
-            if i < m {
-                sizes[i] = wl;
-            } else {
-                sizes[i] = wu;
-            }
-        }
-
-        sizes
+        box_sizes(wl, wu, m)
     } else {
         [1; STEPS]
     }
+}
+
+fn box_sizes(wl: i32, wu: i32, m: usize) -> [i32; STEPS] {
+    let mut sizes = [0; STEPS];
+    for i in 0..STEPS {
+        if i < m {
+            sizes[i] = wl;
+        } else {
+            sizes[i] = wu;
+        }
+    }
+    sizes
 }
 
 #[inline]
@@ -87,114 +90,13 @@ fn box_blur_vert(blur_radius: usize, backbuf: &ImageRefMut, frontbuf: &mut Image
         frontbuf.data.copy_from_slice(backbuf.data);
         return;
     }
-
     let width = backbuf.width as usize;
     let height = backbuf.height as usize;
-
-    let iarr = 1.0 / (blur_radius + blur_radius + 1) as f32;
-    let blur_radius_prev = blur_radius as isize - height as isize;
-    let blur_radius_next = blur_radius as isize + 1;
-
+    let spec = BlurLineSpec::new(height, width, blur_radius);
     for i in 0..width {
-        let col_start = i; //inclusive
-        let col_end = i + width * (height - 1); //inclusive
-        let mut ti = i;
-        let mut li = ti;
-        let mut ri = ti + blur_radius * width;
-
-        let fv = RGBA8::default();
-        let lv = RGBA8::default();
-
-        let mut val_r = blur_radius_next * (fv.r as isize);
-        let mut val_g = blur_radius_next * (fv.g as isize);
-        let mut val_b = blur_radius_next * (fv.b as isize);
-        let mut val_a = blur_radius_next * (fv.a as isize);
-
-        // Get the pixel at the specified index, or the first pixel of the column
-        // if the index is beyond the top edge of the image
-        let get_top = |i| {
-            if i < col_start { fv } else { backbuf.data[i] }
-        };
-
-        // Get the pixel at the specified index, or the last pixel of the column
-        // if the index is beyond the bottom edge of the image
-        let get_bottom = |i| {
-            if i > col_end { lv } else { backbuf.data[i] }
-        };
-
-        for j in 0..cmp::min(blur_radius, height) {
-            let bb = backbuf.data[ti + j * width];
-            val_r += bb.r as isize;
-            val_g += bb.g as isize;
-            val_b += bb.b as isize;
-            val_a += bb.a as isize;
-        }
-        if blur_radius > height {
-            val_r += blur_radius_prev * (lv.r as isize);
-            val_g += blur_radius_prev * (lv.g as isize);
-            val_b += blur_radius_prev * (lv.b as isize);
-            val_a += blur_radius_prev * (lv.a as isize);
-        }
-
-        for _ in 0..cmp::min(height, blur_radius + 1) {
-            let bb = get_bottom(ri);
-            ri += width;
-            val_r += sub(bb.r, fv.r);
-            val_g += sub(bb.g, fv.g);
-            val_b += sub(bb.b, fv.b);
-            val_a += sub(bb.a, fv.a);
-
-            frontbuf.data[ti] = RGBA8 {
-                r: round(val_r as f32 * iarr) as u8,
-                g: round(val_g as f32 * iarr) as u8,
-                b: round(val_b as f32 * iarr) as u8,
-                a: round(val_a as f32 * iarr) as u8,
-            };
-            ti += width;
-        }
-
-        if height <= blur_radius {
-            // otherwise `(height - blur_radius)` will underflow
-            continue;
-        }
-
-        for _ in (blur_radius + 1)..(height - blur_radius) {
-            let bb1 = backbuf.data[ri];
-            ri += width;
-            let bb2 = backbuf.data[li];
-            li += width;
-
-            val_r += sub(bb1.r, bb2.r);
-            val_g += sub(bb1.g, bb2.g);
-            val_b += sub(bb1.b, bb2.b);
-            val_a += sub(bb1.a, bb2.a);
-
-            frontbuf.data[ti] = RGBA8 {
-                r: round(val_r as f32 * iarr) as u8,
-                g: round(val_g as f32 * iarr) as u8,
-                b: round(val_b as f32 * iarr) as u8,
-                a: round(val_a as f32 * iarr) as u8,
-            };
-            ti += width;
-        }
-
-        for _ in 0..cmp::min(height - blur_radius - 1, blur_radius) {
-            let bb = get_top(li);
-            li += width;
-
-            val_r += sub(lv.r, bb.r);
-            val_g += sub(lv.g, bb.g);
-            val_b += sub(lv.b, bb.b);
-            val_a += sub(lv.a, bb.a);
-
-            frontbuf.data[ti] = RGBA8 {
-                r: round(val_r as f32 * iarr) as u8,
-                g: round(val_g as f32 * iarr) as u8,
-                b: round(val_b as f32 * iarr) as u8,
-                a: round(val_a as f32 * iarr) as u8,
-            };
-            ti += width;
-        }
+        let start = i;
+        let end = i + width * (height - 1);
+        blur_line(&spec, start, end, backbuf, frontbuf);
     }
 }
 
@@ -204,118 +106,127 @@ fn box_blur_horz(blur_radius: usize, backbuf: &ImageRefMut, frontbuf: &mut Image
         frontbuf.data.copy_from_slice(backbuf.data);
         return;
     }
-
     let width = backbuf.width as usize;
     let height = backbuf.height as usize;
-
-    let iarr = 1.0 / (blur_radius + blur_radius + 1) as f32;
-    let blur_radius_prev = blur_radius as isize - width as isize;
-    let blur_radius_next = blur_radius as isize + 1;
-
+    let spec = BlurLineSpec::new(width, 1, blur_radius);
     for i in 0..height {
-        let row_start = i * width; // inclusive
-        let row_end = (i + 1) * width - 1; // inclusive
-        let mut ti = i * width; // VERTICAL: $i;
-        let mut li = ti;
-        let mut ri = ti + blur_radius;
+        let start = i * width;
+        let end = (i + 1) * width - 1;
+        blur_line(&spec, start, end, backbuf, frontbuf);
+    }
+}
 
-        let fv = RGBA8::default();
-        let lv = RGBA8::default();
+struct BlurLineSpec {
+    length: usize,
+    step: usize,
+    radius: usize,
+    inverse: f32,
+    radius_prev: isize,
+    radius_next: isize,
+}
 
-        let mut val_r = blur_radius_next * (fv.r as isize);
-        let mut val_g = blur_radius_next * (fv.g as isize);
-        let mut val_b = blur_radius_next * (fv.b as isize);
-        let mut val_a = blur_radius_next * (fv.a as isize);
+impl BlurLineSpec {
+    fn new(length: usize, step: usize, radius: usize) -> Self {
+        let inverse = 1.0 / (radius + radius + 1) as f32;
+        let radius_prev = radius as isize - length as isize;
+        let radius_next = radius as isize + 1;
+        Self { length, step, radius, inverse, radius_prev, radius_next }
+    }
+}
 
-        // Get the pixel at the specified index, or the first pixel of the row
-        // if the index is beyond the left edge of the image
-        let get_left = |i| {
-            if i < row_start { fv } else { backbuf.data[i] }
+struct BlurLine {
+    first_index: usize,
+    last_index: usize,
+    target: usize,
+    left: usize,
+    right: usize,
+    first: RGBA8,
+    last: RGBA8,
+    red: isize,
+    green: isize,
+    blue: isize,
+    alpha: isize,
+}
+
+impl BlurLine {
+    fn new(spec: &BlurLineSpec, first_index: usize, last_index: usize) -> Self {
+        let target = first_index;
+        let left = target;
+        let right = target + spec.radius * spec.step;
+        let first = RGBA8::default();
+        let last = RGBA8::default();
+        let red = spec.radius_next * (first.r as isize);
+        let green = spec.radius_next * (first.g as isize);
+        let blue = spec.radius_next * (first.b as isize);
+        let alpha = spec.radius_next * (first.a as isize);
+        Self { first_index, last_index, target, left, right, first, last, red, green, blue, alpha }
+    }
+
+    fn write(&mut self, added: RGBA8, removed: RGBA8, spec: &BlurLineSpec, frontbuf: &mut ImageRefMut) {
+        self.red += sub(added.r, removed.r);
+        self.green += sub(added.g, removed.g);
+        self.blue += sub(added.b, removed.b);
+        self.alpha += sub(added.a, removed.a);
+        frontbuf.data[self.target] = RGBA8 {
+            r: round(self.red as f32 * spec.inverse) as u8,
+            g: round(self.green as f32 * spec.inverse) as u8,
+            b: round(self.blue as f32 * spec.inverse) as u8,
+            a: round(self.alpha as f32 * spec.inverse) as u8,
         };
+        self.target += spec.step;
+    }
+}
 
-        // Get the pixel at the specified index, or the last pixel of the row
-        // if the index is beyond the right edge of the image
-        let get_right = |i| {
-            if i > row_end { lv } else { backbuf.data[i] }
-        };
+fn blur_line(spec: &BlurLineSpec, start: usize, end: usize, backbuf: &ImageRefMut, frontbuf: &mut ImageRefMut) {
+    let mut line = BlurLine::new(spec, start, end);
+    seed_blur_line(&mut line, spec, backbuf);
+    blur_leading_edge(&mut line, spec, backbuf, frontbuf);
+    if spec.length <= spec.radius {
+        return;
+    }
+    blur_middle(&mut line, spec, backbuf, frontbuf);
+    blur_trailing_edge(&mut line, spec, backbuf, frontbuf);
+}
 
-        for j in 0..cmp::min(blur_radius, width) {
-            let bb = backbuf.data[ti + j]; // VERTICAL: ti + j * width
-            val_r += bb.r as isize;
-            val_g += bb.g as isize;
-            val_b += bb.b as isize;
-            val_a += bb.a as isize;
-        }
-        if blur_radius > width {
-            val_r += blur_radius_prev * (lv.r as isize);
-            val_g += blur_radius_prev * (lv.g as isize);
-            val_b += blur_radius_prev * (lv.b as isize);
-            val_a += blur_radius_prev * (lv.a as isize);
-        }
+fn seed_blur_line(line: &mut BlurLine, spec: &BlurLineSpec, backbuf: &ImageRefMut) {
+    for j in 0..cmp::min(spec.radius, spec.length) {
+        let bb = backbuf.data[line.target + j * spec.step];
+        line.red += bb.r as isize;
+        line.green += bb.g as isize;
+        line.blue += bb.b as isize;
+        line.alpha += bb.a as isize;
+    }
+    if spec.radius > spec.length {
+        line.red += spec.radius_prev * (line.last.r as isize);
+        line.green += spec.radius_prev * (line.last.g as isize);
+        line.blue += spec.radius_prev * (line.last.b as isize);
+        line.alpha += spec.radius_prev * (line.last.a as isize);
+    }
+}
 
-        // Process the left side where we need pixels from beyond the left edge
-        for _ in 0..cmp::min(width, blur_radius + 1) {
-            let bb = get_right(ri);
-            ri += 1;
-            val_r += sub(bb.r, fv.r);
-            val_g += sub(bb.g, fv.g);
-            val_b += sub(bb.b, fv.b);
-            val_a += sub(bb.a, fv.a);
+fn blur_leading_edge(line: &mut BlurLine, spec: &BlurLineSpec, backbuf: &ImageRefMut, frontbuf: &mut ImageRefMut) {
+    for _ in 0..cmp::min(spec.length, spec.radius + 1) {
+        let bb = if line.right > line.last_index { line.last } else { backbuf.data[line.right] };
+        line.right += spec.step;
+        line.write(bb, line.first, spec, frontbuf);
+    }
+}
 
-            frontbuf.data[ti] = RGBA8 {
-                r: round(val_r as f32 * iarr) as u8,
-                g: round(val_g as f32 * iarr) as u8,
-                b: round(val_b as f32 * iarr) as u8,
-                a: round(val_a as f32 * iarr) as u8,
-            };
-            ti += 1; // VERTICAL : ti += width, same with the other areas
-        }
+fn blur_middle(line: &mut BlurLine, spec: &BlurLineSpec, backbuf: &ImageRefMut, frontbuf: &mut ImageRefMut) {
+    for _ in (spec.radius + 1)..(spec.length - spec.radius) {
+        let bb1 = backbuf.data[line.right];
+        line.right += spec.step;
+        let bb2 = backbuf.data[line.left];
+        line.left += spec.step;
+        line.write(bb1, bb2, spec, frontbuf);
+    }
+}
 
-        if width <= blur_radius {
-            // otherwise `(width - blur_radius)` will underflow
-            continue;
-        }
-
-        // Process the middle where we know we won't bump into borders
-        // without the extra indirection of get_left/get_right. This is faster.
-        for _ in (blur_radius + 1)..(width - blur_radius) {
-            let bb1 = backbuf.data[ri];
-            ri += 1;
-            let bb2 = backbuf.data[li];
-            li += 1;
-
-            val_r += sub(bb1.r, bb2.r);
-            val_g += sub(bb1.g, bb2.g);
-            val_b += sub(bb1.b, bb2.b);
-            val_a += sub(bb1.a, bb2.a);
-
-            frontbuf.data[ti] = RGBA8 {
-                r: round(val_r as f32 * iarr) as u8,
-                g: round(val_g as f32 * iarr) as u8,
-                b: round(val_b as f32 * iarr) as u8,
-                a: round(val_a as f32 * iarr) as u8,
-            };
-            ti += 1;
-        }
-
-        // Process the right side where we need pixels from beyond the right edge
-        for _ in 0..cmp::min(width - blur_radius - 1, blur_radius) {
-            let bb = get_left(li);
-            li += 1;
-
-            val_r += sub(lv.r, bb.r);
-            val_g += sub(lv.g, bb.g);
-            val_b += sub(lv.b, bb.b);
-            val_a += sub(lv.a, bb.a);
-
-            frontbuf.data[ti] = RGBA8 {
-                r: round(val_r as f32 * iarr) as u8,
-                g: round(val_g as f32 * iarr) as u8,
-                b: round(val_b as f32 * iarr) as u8,
-                a: round(val_a as f32 * iarr) as u8,
-            };
-            ti += 1;
-        }
+fn blur_trailing_edge(line: &mut BlurLine, spec: &BlurLineSpec, backbuf: &ImageRefMut, frontbuf: &mut ImageRefMut) {
+    for _ in 0..cmp::min(spec.length - spec.radius - 1, spec.radius) {
+        let bb = if line.left < line.first_index { line.first } else { backbuf.data[line.left] };
+        line.left += spec.step;
+        line.write(line.last, bb, spec, frontbuf);
     }
 }
 
@@ -334,3 +245,6 @@ fn round(mut x: f32) -> f32 {
 fn sub(c1: u8, c2: u8) -> isize {
     c1 as isize - c2 as isize
 }
+
+#[cfg(test)]
+crate::svg_engine::owned_svg_model_tests!("../../../../src/svg_engine_box_blur_axis_regression_tests.rs");

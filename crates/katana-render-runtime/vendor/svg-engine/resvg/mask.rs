@@ -16,21 +16,7 @@ pub fn apply(
 
     let mut mask_pixmap = tiny_skia::Pixmap::new(pixmap.width(), pixmap.height()).unwrap();
 
-    {
-        // TODO: only when needed
-        // Mask has to be clipped by mask.region
-        let mut alpha_mask = tiny_skia::Mask::new(pixmap.width(), pixmap.height()).unwrap();
-        alpha_mask.fill_path(
-            &tiny_skia::PathBuilder::from_rect(mask.rect().to_rect()),
-            tiny_skia::FillRule::Winding,
-            true,
-            transform,
-        );
-
-        crate::svg_engine::resvg::render::render_nodes(mask.root(), ctx, transform, &mut mask_pixmap.as_mut());
-
-        mask_pixmap.apply_mask(&alpha_mask);
-    }
+    render_mask(mask, ctx, transform, &mut mask_pixmap);
 
     if let Some(mask) = mask.mask() {
         self::apply(mask, ctx, transform, pixmap);
@@ -43,4 +29,23 @@ pub fn apply(
 
     let mask = tiny_skia::Mask::from_pixmap(mask_pixmap.as_ref(), mask_type);
     pixmap.apply_mask(&mask);
+}
+
+fn render_mask(
+    mask: &crate::svg_engine::usvg::Mask,
+    ctx: &Context,
+    transform: tiny_skia::Transform,
+    mask_pixmap: &mut tiny_skia::Pixmap,
+) {
+    // TODO: only when needed
+    // Mask has to be clipped by mask.region
+    let mut alpha_mask = tiny_skia::Mask::new(mask_pixmap.width(), mask_pixmap.height()).unwrap();
+    alpha_mask.fill_path(
+        &tiny_skia::PathBuilder::from_rect(mask.rect().to_rect()),
+        tiny_skia::FillRule::Winding,
+        true,
+        transform,
+    );
+    crate::svg_engine::resvg::render::render_nodes(mask.root(), ctx, transform, &mut mask_pixmap.as_mut());
+    mask_pixmap.apply_mask(&alpha_mask);
 }

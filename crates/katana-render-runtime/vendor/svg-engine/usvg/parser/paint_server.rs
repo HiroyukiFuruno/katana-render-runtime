@@ -57,17 +57,12 @@ fn convert_linear(node: SvgNode, state: &converter::State) -> Option<ServerOrCol
     let transform =
         resolve_attr(node, AId::GradientTransform).resolve_transform(AId::GradientTransform, state);
 
+    let (x1, y1, x2, y2) = linear_gradient_coordinates(node, units, state);
     let gradient = LinearGradient {
-        x1: resolve_number(node, AId::X1, units, state, Length::zero()),
-        y1: resolve_number(node, AId::Y1, units, state, Length::zero()),
-        x2: resolve_number(
-            node,
-            AId::X2,
-            units,
-            state,
-            Length::new(100.0, Unit::Percent),
-        ),
-        y2: resolve_number(node, AId::Y2, units, state, Length::zero()),
+        x1,
+        y1,
+        x2,
+        y2,
         base: BaseGradient {
             id,
             units,
@@ -80,6 +75,18 @@ fn convert_linear(node: SvgNode, state: &converter::State) -> Option<ServerOrCol
     Some(ServerOrColor::Server(Paint::LinearGradient(Arc::new(
         gradient,
     ))))
+}
+
+fn linear_gradient_coordinates(
+    node: SvgNode,
+    units: Units,
+    state: &converter::State,
+) -> (f32, f32, f32, f32) {
+    let x1 = resolve_number(node, AId::X1, units, state, Length::zero());
+    let y1 = resolve_number(node, AId::Y1, units, state, Length::zero());
+    let x2 = resolve_number(node, AId::X2, units, state, Length::new(100.0, Unit::Percent));
+    let y2 = resolve_number(node, AId::Y2, units, state, Length::zero());
+    (x1, y1, x2, y2)
 }
 
 #[inline(never)]
@@ -107,23 +114,20 @@ fn convert_radial(node: SvgNode, state: &converter::State) -> Option<ServerOrCol
         });
     }
 
+    Some(make_radial_gradient(node, state, id, stops, units, r, fr))
+}
+
+fn make_radial_gradient(
+    node: SvgNode,
+    state: &converter::State,
+    id: NonEmptyString,
+    stops: Vec<Stop>,
+    units: Units,
+    r: f32,
+    fr: f32,
+) -> ServerOrColor {
     let spread_method = convert_spread_method(node);
-    let cx = resolve_number(
-        node,
-        AId::Cx,
-        units,
-        state,
-        Length::new(50.0, Unit::Percent),
-    );
-    let cy = resolve_number(
-        node,
-        AId::Cy,
-        units,
-        state,
-        Length::new(50.0, Unit::Percent),
-    );
-    let fx = resolve_number(node, AId::Fx, units, state, Length::new_number(cx as f64));
-    let fy = resolve_number(node, AId::Fy, units, state, Length::new_number(cy as f64));
+    let (cx, cy, fx, fy) = radial_gradient_coordinates(node, units, state);
     let transform =
         resolve_attr(node, AId::GradientTransform).resolve_transform(AId::GradientTransform, state);
 
@@ -143,9 +147,31 @@ fn convert_radial(node: SvgNode, state: &converter::State) -> Option<ServerOrCol
         },
     };
 
-    Some(ServerOrColor::Server(Paint::RadialGradient(Arc::new(
-        gradient,
-    ))))
+    ServerOrColor::Server(Paint::RadialGradient(Arc::new(gradient)))
+}
+
+fn radial_gradient_coordinates(
+    node: SvgNode,
+    units: Units,
+    state: &converter::State,
+) -> (f32, f32, f32, f32) {
+    let cx = resolve_number(
+        node,
+        AId::Cx,
+        units,
+        state,
+        Length::new(50.0, Unit::Percent),
+    );
+    let cy = resolve_number(
+        node,
+        AId::Cy,
+        units,
+        state,
+        Length::new(50.0, Unit::Percent),
+    );
+    let fx = resolve_number(node, AId::Fx, units, state, Length::new_number(cx as f64));
+    let fy = resolve_number(node, AId::Fy, units, state, Length::new_number(cy as f64));
+    (cx, cy, fx, fy)
 }
 
 #[inline(never)]
@@ -158,14 +184,7 @@ fn convert_pattern(
 
     let id = NonEmptyString::new(node.element_id().to_string())?;
 
-    let view_box = {
-        let n1 = resolve_attr(node, AId::ViewBox);
-        let n2 = resolve_attr(node, AId::PreserveAspectRatio);
-        n1.parse_viewbox().map(|vb| ViewBox {
-            rect: vb,
-            aspect: n2.attribute(AId::PreserveAspectRatio).unwrap_or_default(),
-        })
-    };
+    let view_box = pattern_view_box(node);
 
     let units = convert_units(node, AId::PatternUnits, Units::ObjectBoundingBox);
     let content_units = convert_units(node, AId::PatternContentUnits, Units::UserSpaceOnUse);
@@ -173,18 +192,7 @@ fn convert_pattern(
     let transform =
         resolve_attr(node, AId::PatternTransform).resolve_transform(AId::PatternTransform, state);
 
-    let rect = NonZeroRect::from_xywh(
-        resolve_number(node, AId::X, units, state, Length::zero()),
-        resolve_number(node, AId::Y, units, state, Length::zero()),
-        resolve_number(node, AId::Width, units, state, Length::zero()),
-        resolve_number(node, AId::Height, units, state, Length::zero()),
-    );
-    let rect = rect.log_none(|| {
-        log::warn!(
-            "Pattern '{}' has an invalid size. Skipped.",
-            node.element_id()
-        );
-    })?;
+    let rect = pattern_rect(node, units, state)?;
 
     let mut patt = Pattern {
         id,
@@ -196,14 +204,54 @@ fn convert_pattern(
         root: Group::empty(),
     };
 
+    populate_pattern(&mut patt, node_with_children, state, cache)?;
+    finish_pattern(&mut patt, cache);
+    Some(ServerOrColor::Server(Paint::Pattern(Arc::new(patt))))
+}
+
+fn finish_pattern(patt: &mut Pattern, cache: &mut converter::Cache) {
+    patt.root.calculate_bounding_boxes();
+    update_paint_servers(&mut patt.root, Transform::default(), None, None, cache);
+}
+
+fn pattern_view_box(node: SvgNode) -> Option<ViewBox> {
+    let n1 = resolve_attr(node, AId::ViewBox);
+    let n2 = resolve_attr(node, AId::PreserveAspectRatio);
+    n1.parse_viewbox().map(|vb| ViewBox {
+        rect: vb,
+        aspect: n2.attribute(AId::PreserveAspectRatio).unwrap_or_default(),
+    })
+}
+
+fn pattern_rect(node: SvgNode, units: Units, state: &converter::State) -> Option<NonZeroRect> {
+    let rect = NonZeroRect::from_xywh(
+        resolve_number(node, AId::X, units, state, Length::zero()),
+        resolve_number(node, AId::Y, units, state, Length::zero()),
+        resolve_number(node, AId::Width, units, state, Length::zero()),
+        resolve_number(node, AId::Height, units, state, Length::zero()),
+    );
+    rect.log_none(|| {
+        log::warn!(
+            "Pattern '{}' has an invalid size. Skipped.",
+            node.element_id()
+        );
+    })
+}
+
+fn populate_pattern(
+    patt: &mut Pattern,
+    node_with_children: SvgNode,
+    state: &converter::State,
+    cache: &mut converter::Cache,
+) -> Option<()> {
     // We can apply viewbox transform only for user space coordinates.
     // Otherwise we need a bounding box, which is unknown at this point.
-    if patt.view_box.is_some()
+    if let Some(view_box) = patt.view_box
         && patt.units == Units::UserSpaceOnUse
         && patt.content_units == Units::UserSpaceOnUse
     {
         let mut g = Group::empty();
-        g.transform = view_box.unwrap().to_transform(rect.size());
+        g.transform = view_box.to_transform(patt.rect.size());
         g.abs_transform = g.transform;
 
         converter::convert_children(node_with_children, state, cache, &mut g);
@@ -220,10 +268,7 @@ fn convert_pattern(
         }
     }
 
-    patt.root.calculate_bounding_boxes();
-    update_paint_servers(&mut patt.root, Transform::default(), None, None, cache);
-
-    Some(ServerOrColor::Server(Paint::Pattern(Arc::new(patt))))
+    Some(())
 }
 
 fn convert_spread_method(node: SvgNode) -> SpreadMethod {
@@ -279,53 +324,65 @@ fn find_pattern_with_children<'a, 'input: 'a>(
 }
 
 fn convert_stops(grad: SvgNode) -> Vec<Stop> {
+    let mut stops = read_gradient_stops(grad);
+    remove_middle_equal_stops(&mut stops);
+    separate_zero_stops(&mut stops);
+    shift_equal_stops(&mut stops);
+    stops
+}
+
+fn read_gradient_stops(grad: SvgNode) -> Vec<Stop> {
     let mut stops = Vec::new();
-
-    {
-        let mut prev_offset = Length::zero();
-        for stop in grad.children() {
-            if stop.tag_name() != Some(EId::Stop) {
-                log::warn!("Invalid gradient child: '{:?}'.", stop.tag_name().unwrap());
-                continue;
-            }
-
-            // `number` can be either a number or a percentage.
-            let offset = stop.attribute(AId::Offset).unwrap_or(prev_offset);
-            let offset = match offset.unit {
-                Unit::None => offset.number,
-                Unit::Percent => offset.number / 100.0,
-                _ => prev_offset.number,
-            };
-            prev_offset = Length::new_number(offset);
-            let offset = crate::svg_engine::usvg::f32_bound(0.0, offset as f32, 1.0);
-
-            let (color, opacity) = match stop.attribute(AId::StopColor) {
-                Some("currentColor") => stop
-                    .find_attribute(AId::Color)
-                    .unwrap_or_else(svgtypes::Color::black),
-                Some(value) => {
-                    if let Ok(c) = svgtypes::Color::from_str(value) {
-                        c
-                    } else {
-                        log::warn!("Failed to parse stop-color value: '{}'.", value);
-                        svgtypes::Color::black()
-                    }
-                }
-                _ => svgtypes::Color::black(),
-            }
-            .split_alpha();
-
-            let stop_opacity = stop
-                .attribute::<Opacity>(AId::StopOpacity)
-                .unwrap_or(Opacity::ONE);
-            stops.push(Stop {
-                offset: StopOffset::new_clamped(offset),
-                color,
-                opacity: opacity * stop_opacity,
-            });
+    let mut prev_offset = Length::zero();
+    for stop in grad.children() {
+        if stop.tag_name() != Some(EId::Stop) {
+            log::warn!("Invalid gradient child: '{:?}'.", stop.tag_name().unwrap());
+            continue;
         }
+        stops.push(read_gradient_stop(stop, &mut prev_offset));
     }
+    stops
+}
 
+fn read_gradient_stop(stop: SvgNode, prev_offset: &mut Length) -> Stop {
+    // `number` can be either a number or a percentage.
+    let offset = stop.attribute(AId::Offset).unwrap_or(*prev_offset);
+    let offset = match offset.unit {
+        Unit::None => offset.number,
+        Unit::Percent => offset.number / 100.0,
+        _ => prev_offset.number,
+    };
+    *prev_offset = Length::new_number(offset);
+    let offset = crate::svg_engine::usvg::f32_bound(0.0, offset as f32, 1.0);
+    let (color, opacity) = gradient_stop_color(stop).split_alpha();
+    let stop_opacity = stop
+        .attribute::<Opacity>(AId::StopOpacity)
+        .unwrap_or(Opacity::ONE);
+    Stop {
+        offset: StopOffset::new_clamped(offset),
+        color,
+        opacity: opacity * stop_opacity,
+    }
+}
+
+fn gradient_stop_color(stop: SvgNode) -> svgtypes::Color {
+    match stop.attribute(AId::StopColor) {
+        Some("currentColor") => stop
+            .find_attribute(AId::Color)
+            .unwrap_or_else(svgtypes::Color::black),
+        Some(value) => {
+            if let Ok(c) = svgtypes::Color::from_str(value) {
+                c
+            } else {
+                log::warn!("Failed to parse stop-color value: '{}'.", value);
+                svgtypes::Color::black()
+            }
+        }
+        _ => svgtypes::Color::black(),
+    }
+}
+
+fn remove_middle_equal_stops(stops: &mut Vec<Stop>) {
     // Remove stops with equal offset.
     //
     // Example:
@@ -350,6 +407,9 @@ fn convert_stops(grad: SvgNode) -> Vec<Stop> {
         }
     }
 
+}
+
+fn separate_zero_stops(stops: &mut [Stop]) {
     // Remove zeros.
     //
     // From:
@@ -375,6 +435,9 @@ fn convert_stops(grad: SvgNode) -> Vec<Stop> {
         }
     }
 
+}
+
+fn shift_equal_stops(stops: &mut [Stop]) {
     // Shift equal offsets.
     //
     // From:
@@ -404,7 +467,6 @@ fn convert_stops(grad: SvgNode) -> Vec<Stop> {
         }
     }
 
-    stops
 }
 
 #[inline(never)]
@@ -439,7 +501,20 @@ fn resolve_lg_attr<'a, 'input: 'a>(node: SvgNode<'a, 'input>, name: AId) -> SvgN
             None => return node,
         };
 
-        match (name, tag_name) {
+        if linear_gradient_attr_matches(name, tag_name) {
+            if link.has_attribute(name) {
+                return link;
+            }
+        } else {
+            break;
+        }
+    }
+
+    node
+}
+
+fn linear_gradient_attr_matches(name: AId, tag_name: EId) -> bool {
+        matches!((name, tag_name),
             // Coordinates can be resolved only from
             // ref element with the same type.
               (AId::X1, EId::LinearGradient)
@@ -453,16 +528,7 @@ fn resolve_lg_attr<'a, 'input: 'a>(node: SvgNode<'a, 'input>, name: AId) -> SvgN
             | (AId::SpreadMethod, EId::LinearGradient)
             | (AId::SpreadMethod, EId::RadialGradient)
             | (AId::GradientTransform, EId::LinearGradient)
-            | (AId::GradientTransform, EId::RadialGradient) => {
-                if link.has_attribute(name) {
-                    return link;
-                }
-            }
-            _ => break,
-        }
-    }
-
-    node
+            | (AId::GradientTransform, EId::RadialGradient))
 }
 
 fn resolve_rg_attr<'a, 'input>(node: SvgNode<'a, 'input>, name: AId) -> SvgNode<'a, 'input> {
@@ -472,7 +538,20 @@ fn resolve_rg_attr<'a, 'input>(node: SvgNode<'a, 'input>, name: AId) -> SvgNode<
             None => return node,
         };
 
-        match (name, tag_name) {
+        if radial_gradient_attr_matches(name, tag_name) {
+            if link.has_attribute(name) {
+                return link;
+            }
+        } else {
+            break;
+        }
+    }
+
+    node
+}
+
+fn radial_gradient_attr_matches(name: AId, tag_name: EId) -> bool {
+        matches!((name, tag_name),
             // Coordinates can be resolved only from
             // ref element with the same type.
               (AId::Cx, EId::RadialGradient)
@@ -488,16 +567,7 @@ fn resolve_rg_attr<'a, 'input>(node: SvgNode<'a, 'input>, name: AId) -> SvgNode<
             | (AId::SpreadMethod, EId::LinearGradient)
             | (AId::SpreadMethod, EId::RadialGradient)
             | (AId::GradientTransform, EId::LinearGradient)
-            | (AId::GradientTransform, EId::RadialGradient) => {
-                if link.has_attribute(name) {
-                    return link;
-                }
-            }
-            _ => break,
-        }
-    }
-
-    node
+            | (AId::GradientTransform, EId::RadialGradient))
 }
 
 fn resolve_pattern_attr<'a, 'input: 'a>(
@@ -598,23 +668,8 @@ fn node_to_user_coordinates(
             // Paths inside `Text::flattened` are special and must use text's bounding box
             // instead of their own.
             let bbox = text_bbox.unwrap_or(path.bounding_box);
-
-            process_fill(
-                &mut path.fill,
-                path.abs_transform,
-                context_transform,
-                context_bbox,
-                bbox,
-                cache,
-            );
-            process_stroke(
-                &mut path.stroke,
-                path.abs_transform,
-                context_transform,
-                context_bbox,
-                bbox,
-                cache,
-            );
+            let path_transform = path.abs_transform;
+            process_path_paint(path, path_transform, context_transform, context_bbox, bbox, cache);
         }
         Node::Image(image) => {
             if let ImageKind::SVG(tree) = &mut image.kind {
@@ -622,6 +677,17 @@ fn node_to_user_coordinates(
             }
         }
         Node::Text(text) => {
+            update_text_paint(text, context_transform, context_bbox, cache);
+        }
+    }
+}
+
+fn update_text_paint(
+    text: &mut Text,
+    context_transform: Transform,
+    context_bbox: Option<Rect>,
+    cache: &mut Cache,
+) {
             // By the SVG spec, `tspan` doesn't have a bbox and uses the parent `text` bbox.
             // Therefore we have to use text's bbox when converting tspan and flatted text
             // paint servers.
@@ -632,18 +698,28 @@ fn node_to_user_coordinates(
             // 2. The fills/strokes of the layouted elements of the text.
             // 3. The fills/strokes of the outlined text.
 
-            // 1.
+            process_original_text_paint(text, context_transform, context_bbox, bbox, cache);
+            process_layouted_text_paint(text, context_transform, context_bbox, bbox, cache);
+            update_paint_servers(
+                &mut text.flattened,
+                context_transform,
+                context_bbox,
+                Some(bbox),
+                cache,
+            );
+}
+
+fn process_original_text_paint(
+    text: &mut Text,
+    context_transform: Transform,
+    context_bbox: Option<Rect>,
+    bbox: Rect,
+    cache: &mut Cache,
+) {
             for chunk in &mut text.chunks {
                 for span in &mut chunk.spans {
-                    process_fill(
+                    process_fill_and_stroke(
                         &mut span.fill,
-                        text.abs_transform,
-                        context_transform,
-                        context_bbox,
-                        bbox,
-                        cache,
-                    );
-                    process_stroke(
                         &mut span.stroke,
                         text.abs_transform,
                         context_transform,
@@ -657,17 +733,18 @@ fn node_to_user_coordinates(
                 }
             }
 
-            // 2.
+}
+
+fn process_layouted_text_paint(
+    text: &mut Text,
+    context_transform: Transform,
+    context_bbox: Option<Rect>,
+    bbox: Rect,
+    cache: &mut Cache,
+) {
             for span in &mut text.layouted {
-                process_fill(
+                process_fill_and_stroke(
                     &mut span.fill,
-                    text.abs_transform,
-                    context_transform,
-                    context_bbox,
-                    bbox,
-                    cache,
-                );
-                process_stroke(
                     &mut span.stroke,
                     text.abs_transform,
                     context_transform,
@@ -676,48 +753,53 @@ fn node_to_user_coordinates(
                     cache,
                 );
 
-                let mut process_decoration = |path: &mut Path| {
-                    process_fill(
-                        &mut path.fill,
-                        text.abs_transform,
-                        context_transform,
-                        context_bbox,
-                        bbox,
-                        cache,
-                    );
-                    process_stroke(
-                        &mut path.stroke,
-                        text.abs_transform,
-                        context_transform,
-                        context_bbox,
-                        bbox,
-                        cache,
-                    );
-                };
-
-                if let Some(path) = &mut span.overline {
-                    process_decoration(path);
-                }
-
-                if let Some(path) = &mut span.underline {
-                    process_decoration(path);
-                }
-
-                if let Some(path) = &mut span.line_through {
-                    process_decoration(path);
+                for path in [&mut span.overline, &mut span.underline, &mut span.line_through]
+                    .into_iter()
+                    .flatten()
+                {
+                        process_path_paint(
+                            path,
+                            text.abs_transform,
+                            context_transform,
+                            context_bbox,
+                            bbox,
+                            cache,
+                        );
                 }
             }
 
-            // 3.
-            update_paint_servers(
-                &mut text.flattened,
-                context_transform,
-                context_bbox,
-                Some(bbox),
-                cache,
-            );
-        }
-    }
+}
+
+fn process_path_paint(
+    path: &mut Path,
+    path_transform: Transform,
+    context_transform: Transform,
+    context_bbox: Option<Rect>,
+    bbox: Rect,
+    cache: &mut Cache,
+) {
+    process_fill_and_stroke(
+        &mut path.fill,
+        &mut path.stroke,
+        path_transform,
+        context_transform,
+        context_bbox,
+        bbox,
+        cache,
+    );
+}
+
+fn process_fill_and_stroke(
+    fill: &mut Option<Fill>,
+    stroke: &mut Option<Stroke>,
+    path_transform: Transform,
+    context_transform: Transform,
+    context_bbox: Option<Rect>,
+    bbox: Rect,
+    cache: &mut Cache,
+) {
+    process_fill(fill, path_transform, context_transform, context_bbox, bbox, cache);
+    process_stroke(stroke, path_transform, context_transform, context_bbox, bbox, cache);
 }
 
 fn process_fill(
@@ -796,9 +878,17 @@ fn process_context_paint(
 
     match paint {
         Paint::Color(_) => {}
-        Paint::LinearGradient(lg) => {
-            let transform = lg.transform.post_concat(rev_transform);
-            *paint = Paint::LinearGradient(Arc::new(LinearGradient {
+        Paint::LinearGradient(lg) => *paint = context_linear_gradient(lg, rev_transform, cache),
+        Paint::RadialGradient(rg) => *paint = context_radial_gradient(rg, rev_transform, cache),
+        Paint::Pattern(pat) => *paint = context_pattern(pat, rev_transform, cache),
+    }
+
+    Some(())
+}
+
+fn context_linear_gradient(lg: &LinearGradient, rev_transform: Transform, cache: &mut Cache) -> Paint {
+    let transform = lg.transform.post_concat(rev_transform);
+    Paint::LinearGradient(Arc::new(LinearGradient {
                 x1: lg.x1,
                 y1: lg.y1,
                 x2: lg.x2,
@@ -810,11 +900,12 @@ fn process_context_paint(
                     spread_method: lg.spread_method,
                     stops: lg.stops.clone(),
                 },
-            }));
-        }
-        Paint::RadialGradient(rg) => {
-            let transform = rg.transform.post_concat(rev_transform);
-            *paint = Paint::RadialGradient(Arc::new(RadialGradient {
+    }))
+}
+
+fn context_radial_gradient(rg: &RadialGradient, rev_transform: Transform, cache: &mut Cache) -> Paint {
+    let transform = rg.transform.post_concat(rev_transform);
+    Paint::RadialGradient(Arc::new(RadialGradient {
                 cx: rg.cx,
                 cy: rg.cy,
                 r: rg.r,
@@ -828,11 +919,12 @@ fn process_context_paint(
                     spread_method: rg.spread_method,
                     stops: rg.stops.clone(),
                 },
-            }));
-        }
-        Paint::Pattern(pat) => {
-            let transform = pat.transform.post_concat(rev_transform);
-            *paint = Paint::Pattern(Arc::new(Pattern {
+    }))
+}
+
+fn context_pattern(pat: &Pattern, rev_transform: Transform, cache: &mut Cache) -> Paint {
+    let transform = pat.transform.post_concat(rev_transform);
+    Paint::Pattern(Arc::new(Pattern {
                 id: cache.gen_pattern_id(),
                 units: pat.units,
                 content_units: pat.content_units,
@@ -840,11 +932,7 @@ fn process_context_paint(
                 rect: pat.rect,
                 view_box: pat.view_box,
                 root: pat.root.clone(),
-            }));
-        }
-    }
-
-    Some(())
+    }))
 }
 
 pub(crate) fn process_paint(
@@ -916,7 +1004,16 @@ impl Paint {
         // This reduces the amount of cloning and preserves the original ID as well.
         match self {
             Paint::Color(_) => {} // unreachable
-            Paint::LinearGradient(lg) => {
+            Paint::LinearGradient(lg) => linear_to_user_coordinates(lg, bbox, cache),
+            Paint::RadialGradient(rg) => radial_to_user_coordinates(rg, bbox, cache),
+            Paint::Pattern(patt) => pattern_to_user_coordinates(patt, bbox, cache),
+        }
+
+        Some(())
+    }
+}
+
+fn linear_to_user_coordinates(lg: &mut Arc<LinearGradient>, bbox: NonZeroRect, cache: &mut Cache) {
                 let transform = lg.transform.post_concat(Transform::from_bbox(bbox));
                 if let Some(lg) = Arc::get_mut(lg) {
                     lg.base.transform = transform;
@@ -936,8 +1033,9 @@ impl Paint {
                         },
                     });
                 }
-            }
-            Paint::RadialGradient(rg) => {
+}
+
+fn radial_to_user_coordinates(rg: &mut Arc<RadialGradient>, bbox: NonZeroRect, cache: &mut Cache) {
                 let transform = rg.transform.post_concat(Transform::from_bbox(bbox));
                 if let Some(rg) = Arc::get_mut(rg) {
                     rg.base.transform = transform;
@@ -959,8 +1057,9 @@ impl Paint {
                         },
                     });
                 }
-            }
-            Paint::Pattern(patt) => {
+}
+
+fn pattern_to_user_coordinates(patt: &mut Arc<Pattern>, bbox: NonZeroRect, cache: &mut Cache) {
                 let rect = if patt.units == Units::ObjectBoundingBox {
                     patt.rect.bbox_transform(bbox)
                 } else {
@@ -968,6 +1067,13 @@ impl Paint {
                 };
 
                 if let Some(patt) = Arc::get_mut(patt) {
+                    update_unique_pattern(patt, bbox, rect);
+                } else {
+                    update_shared_pattern(patt, bbox, rect, cache);
+                }
+}
+
+fn update_unique_pattern(patt: &mut Pattern, bbox: NonZeroRect, rect: NonZeroRect) {
                     patt.rect = rect;
                     patt.units = Units::UserSpaceOnUse;
 
@@ -982,7 +1088,27 @@ impl Paint {
                     }
 
                     patt.content_units = Units::UserSpaceOnUse;
-                } else {
+}
+
+fn update_shared_pattern(
+    patt: &mut Arc<Pattern>,
+    bbox: NonZeroRect,
+    rect: NonZeroRect,
+    cache: &mut Cache,
+) {
+    let root = shared_pattern_root(patt, bbox, rect);
+    *patt = Arc::new(Pattern {
+        id: cache.gen_pattern_id(),
+        units: Units::UserSpaceOnUse,
+        content_units: Units::UserSpaceOnUse,
+        transform: patt.transform,
+        rect,
+        view_box: patt.view_box,
+        root,
+    });
+}
+
+fn shared_pattern_root(patt: &Pattern, bbox: NonZeroRect, rect: NonZeroRect) -> Group {
                     let mut root = if patt.content_units == Units::ObjectBoundingBox
                         && patt.view_box.is_none()
                     {
@@ -1000,21 +1126,7 @@ impl Paint {
                         push_pattern_transform(&mut root, view_box.to_transform(rect.size()));
                     }
 
-                    *patt = Arc::new(Pattern {
-                        id: cache.gen_pattern_id(),
-                        units: Units::UserSpaceOnUse,
-                        content_units: Units::UserSpaceOnUse,
-                        transform: patt.transform,
-                        rect,
-                        view_box: patt.view_box,
-                        root,
-                    });
-                }
-            }
-        }
-
-        Some(())
-    }
+    root
 }
 
 #[cfg(test)]

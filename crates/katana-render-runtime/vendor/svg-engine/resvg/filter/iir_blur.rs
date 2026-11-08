@@ -77,8 +77,16 @@ fn gaussian_channel(data: &mut [u8], d: &BlurData, channel: usize, buf: &mut [f6
 }
 
 fn gaussianiir2d(d: &BlurData, buf: &mut [f64]) {
+    let (lambda_x, dnu_x) = filter_rows(d, buf);
+    let (lambda_y, dnu_y) = filter_columns(d, buf);
+    let post_scale =
+        ((dnu_x * dnu_y).sqrt() / (lambda_x * lambda_y).sqrt()).powi(2 * d.steps as i32);
+    buf.iter_mut().for_each(|v| *v *= post_scale);
+}
+
+fn filter_rows(d: &BlurData, buf: &mut [f64]) -> (f64, f64) {
     // Filter horizontally along each row.
-    let (lambda_x, dnu_x) = if d.sigma_x > 0.0 {
+    if d.sigma_x > 0.0 {
         let (lambda, dnu) = gen_coefficients(d.sigma_x, d.steps);
 
         for y in 0..d.height {
@@ -103,10 +111,12 @@ fn gaussianiir2d(d: &BlurData, buf: &mut [f64]) {
         (lambda, dnu)
     } else {
         (1.0, 1.0)
-    };
+    }
+}
 
+fn filter_columns(d: &BlurData, buf: &mut [f64]) -> (f64, f64) {
     // Filter vertically along each column.
-    let (lambda_y, dnu_y) = if d.sigma_y > 0.0 {
+    if d.sigma_y > 0.0 {
         let (lambda, dnu) = gen_coefficients(d.sigma_y, d.steps);
         for x in 0..d.width {
             for _ in 0..d.steps {
@@ -132,11 +142,7 @@ fn gaussianiir2d(d: &BlurData, buf: &mut [f64]) {
         (lambda, dnu)
     } else {
         (1.0, 1.0)
-    };
-
-    let post_scale =
-        ((dnu_x * dnu_y).sqrt() / (lambda_x * lambda_y).sqrt()).powi(2 * d.steps as i32);
-    buf.iter_mut().for_each(|v| *v *= post_scale);
+    }
 }
 
 fn gen_coefficients(sigma: f64, steps: usize) -> (f64, f64) {

@@ -8,7 +8,9 @@ use svgtypes::{Length, LengthUnit};
 use super::svgtree::{AId, EId, SvgNode};
 use super::{converter, style};
 use crate::svg_engine::usvg::tree::ContextElement;
-use crate::svg_engine::usvg::{Group, IsValidLength, Node, NonZeroRect, Path, Size, Transform, ViewBox};
+use crate::svg_engine::usvg::{
+    ClipPath, Group, IsValidLength, Node, NonZeroRect, Path, Size, Transform, ViewBox,
+};
 
 pub(crate) fn convert(
     node: SvgNode,
@@ -28,6 +30,33 @@ pub(crate) fn convert(
         return;
     }
 
+    let mut use_state = use_node_state(node, state, cache);
+    convert_use_reference(node, child, state, &mut use_state, cache, parent);
+}
+
+fn convert_use_reference(
+    node: SvgNode,
+    child: SvgNode,
+    state: &converter::State,
+    use_state: &mut converter::State,
+    cache: &mut converter::Cache,
+    parent: &mut Group,
+) {
+    let original = node.resolve_transform(AId::Transform, state);
+    let translation = use_node_translation(node, use_state);
+    if child.tag_name() == Some(EId::Symbol) {
+        convert_symbol(node, child, original, translation, use_state, cache, parent);
+    } else {
+        let transform = original.pre_concat(translation);
+        convert_regular_use(node, child, transform, use_state, cache, parent);
+    }
+}
+
+fn use_node_state<'a>(
+    node: SvgNode,
+    state: &converter::State<'a>,
+    cache: &mut converter::Cache,
+) -> converter::State<'a> {
     let mut use_state = state.clone();
     use_state.context_element = Some((
         style::resolve_fill(node, true, state, cache).map(|mut f| {
@@ -40,123 +69,128 @@ pub(crate) fn convert(
         }),
     ));
 
-    // We require an original transformation to setup 'clipPath'.
-    let mut orig_ts = node.resolve_transform(AId::Transform, state);
-    let mut new_ts = Transform::default();
+    use_state
+}
 
-    {
-        let x = node.convert_user_length(AId::X, &use_state, Length::zero());
-        let y = node.convert_user_length(AId::Y, &use_state, Length::zero());
-        new_ts = new_ts.pre_translate(x, y);
-    }
+fn use_node_translation(node: SvgNode, state: &converter::State) -> Transform {
+    let x = node.convert_user_length(AId::X, state, Length::zero());
+    let y = node.convert_user_length(AId::Y, state, Length::zero());
+    Transform::default().pre_translate(x, y)
+}
 
-    let linked_to_symbol = child.tag_name() == Some(EId::Symbol);
-
-    if linked_to_symbol {
-        // If a `use` element has a width/height attribute and references a symbol
-        // then relative units (like percentages) should be resolved relative
-        // to the width/height of the `use` element, and not the original SVG.
-        // This is why we need to (potentially) adapt the view box here.
-        use_state.view_box = {
-            let def = Length::new(100.0, LengthUnit::Percent);
-            let x = use_state.view_box.x();
-            let y = use_state.view_box.y();
-
-            let width = if node.has_attribute(AId::Width) {
-                node.convert_user_length(AId::Width, &use_state, def)
-            } else {
-                use_state.view_box.width()
-            };
-
-            let height = if node.has_attribute(AId::Height) {
-                node.convert_user_length(AId::Height, &use_state, def)
-            } else {
-                use_state.view_box.height()
-            };
-
-            NonZeroRect::from_xywh(x, y, width, height)
-                // Fail silently if the rect is not valid.
-                .unwrap_or(use_state.view_box)
-        };
-
-        if let Some(ts) = viewbox_transform(node, child, &use_state) {
-            new_ts = new_ts.pre_concat(ts);
-        }
-
-        if let Some(clip_rect) = get_clip_rect(node, child, &use_state) {
-            let mut g = clip_element(node, clip_rect, orig_ts, &use_state, cache);
-            g.abs_transform = parent.abs_transform;
-
-            // Make group for `use`.
-            if let Some(mut g2) =
-                converter::convert_group(node, &use_state, true, cache, &mut g, &|cache, g2| {
-                    convert_children(child, new_ts, &use_state, cache, false, g2);
-                })
-            {
-                // We must reset transform, because it was already set
-                // to the group with clip-path.
-                g.is_context_element = true;
-                g2.id = String::new(); // Prevent ID duplication.
-                g2.transform = Transform::default();
-                g.children.push(Node::Group(Box::new(g2)));
-            }
-
-            if g.children.is_empty() {
-                return;
-            }
-
-            g.calculate_bounding_boxes();
-            parent.children.push(Node::Group(Box::new(g)));
-            return;
-        }
-    }
-
-    orig_ts = orig_ts.pre_concat(new_ts);
-
-    if linked_to_symbol {
-        // Make group for `use`.
-        if let Some(mut g) =
-            converter::convert_group(node, &use_state, false, cache, parent, &|cache, g| {
-                convert_children(child, orig_ts, &use_state, cache, false, g);
-            })
-        {
-            g.is_context_element = true;
-            g.transform = Transform::default();
-            parent.children.push(Node::Group(Box::new(g)));
-        }
+fn symbol_view_box(node: SvgNode, state: &converter::State) -> NonZeroRect {
+    // symbol内の相対寸法は参照元useの寸法を基準にする。
+    let def = Length::new(100.0, LengthUnit::Percent);
+    let x = state.view_box.x();
+    let y = state.view_box.y();
+    let width = if node.has_attribute(AId::Width) {
+        node.convert_user_length(AId::Width, state, def)
     } else {
-        let linked_to_svg = child.tag_name() == Some(EId::Svg);
-        if linked_to_svg {
-            // When a `use` element references a `svg` element,
-            // we have to remember `use` element size and use it
-            // instead of `svg` element size.
+        state.view_box.width()
+    };
+    let height = if node.has_attribute(AId::Height) {
+        node.convert_user_length(AId::Height, state, def)
+    } else {
+        state.view_box.height()
+    };
+    NonZeroRect::from_xywh(x, y, width, height).unwrap_or(state.view_box)
+}
 
-            let def = Length::new(100.0, LengthUnit::Percent);
-            // As per usual, the SVG spec doesn't clarify this edge case,
-            // but it seems like `use` size has to be reset by each `use`.
-            // Meaning if we have two nested `use` elements, where one had set `width` and
-            // other set `height`, we have to ignore the first `width`.
-            //
-            // Example:
-            // <use id="use1" xlink:href="#use2" width="100"/>
-            // <use id="use2" xlink:href="#svg2" height="100"/>
-            // <svg id="svg2" x="40" y="40" width="80" height="80" xmlns="http://www.w3.org/2000/svg"/>
-            //
-            // In this case `svg2` size is 80x100 and not 100x100.
-            use_state.use_size = (None, None);
+fn convert_symbol(
+    node: SvgNode,
+    child: SvgNode,
+    original: Transform,
+    mut transform: Transform,
+    state: &mut converter::State,
+    cache: &mut converter::Cache,
+    parent: &mut Group,
+) {
+    state.view_box = symbol_view_box(node, state);
+    if let Some(viewbox) = viewbox_transform(node, child, state) {
+        transform = transform.pre_concat(viewbox);
+    }
+    if let Some(rect) = get_clip_rect(node, child, state) {
+        let mut group = clip_element(node, rect, original, state, cache);
+        group.abs_transform = parent.abs_transform;
+        populate_symbol_clip(node, child, transform, state, cache, &mut group);
+        append_nonempty_symbol_clip(group, parent);
+    } else {
+        let transform = original.pre_concat(transform);
+        append_symbol_group(node, child, transform, state, cache, parent);
+    }
+}
 
-            // Width and height can be set independently.
-            if node.has_attribute(AId::Width) {
-                use_state.use_size.0 = Some(node.convert_user_length(AId::Width, &use_state, def));
-            }
-            if node.has_attribute(AId::Height) {
-                use_state.use_size.1 = Some(node.convert_user_length(AId::Height, &use_state, def));
-            }
+fn populate_symbol_clip(
+    node: SvgNode,
+    child: SvgNode,
+    transform: Transform,
+    state: &converter::State,
+    cache: &mut converter::Cache,
+    group: &mut Group,
+) {
+    if let Some(mut child_group) =
+        converter::convert_group(node, state, true, cache, group, &|cache, child_group| {
+            convert_children(child, transform, state, cache, false, child_group);
+        })
+    {
+        // clip用groupに設定済みの変換とIDを子へ重複適用しない。
+        group.is_context_element = true;
+        child_group.id = String::new();
+        child_group.transform = Transform::default();
+        group.children.push(Node::Group(Box::new(child_group)));
+    }
+}
 
-            convert_children(node, orig_ts, &use_state, cache, true, parent);
-        } else {
-            convert_children(node, orig_ts, &use_state, cache, true, parent);
-        }
+fn append_nonempty_symbol_clip(mut group: Group, parent: &mut Group) {
+    if group.children.is_empty() {
+        return;
+    }
+    group.calculate_bounding_boxes();
+    parent.children.push(Node::Group(Box::new(group)));
+}
+
+fn append_symbol_group(
+    node: SvgNode,
+    child: SvgNode,
+    transform: Transform,
+    state: &converter::State,
+    cache: &mut converter::Cache,
+    parent: &mut Group,
+) {
+    if let Some(mut group) =
+        converter::convert_group(node, state, false, cache, parent, &|cache, group| {
+            convert_children(child, transform, state, cache, false, group);
+        })
+    {
+        group.is_context_element = true;
+        group.transform = Transform::default();
+        parent.children.push(Node::Group(Box::new(group)));
+    }
+}
+
+fn convert_regular_use(
+    node: SvgNode,
+    child: SvgNode,
+    transform: Transform,
+    state: &mut converter::State,
+    cache: &mut converter::Cache,
+    parent: &mut Group,
+) {
+    if child.tag_name() == Some(EId::Svg) {
+        set_use_size(node, state);
+    }
+    convert_children(node, transform, state, cache, true, parent);
+}
+
+fn set_use_size(node: SvgNode, state: &mut converter::State) {
+    let def = Length::new(100.0, LengthUnit::Percent);
+    // 入れ子のuseでは外側の片軸指定を引き継がず、各軸を独立に設定する。
+    state.use_size = (None, None);
+    if node.has_attribute(AId::Width) {
+        state.use_size.0 = Some(node.convert_user_length(AId::Width, state, def));
+    }
+    if node.has_attribute(AId::Height) {
+        state.use_size.1 = Some(node.convert_user_length(AId::Height, state, def));
     }
 }
 
@@ -178,25 +212,7 @@ pub(crate) fn convert_svg(
         new_ts = new_ts.pre_concat(ts);
     }
 
-    // We have to create a new state which would have its viewBox set to the current SVG element.
-    // Note that we're not updating State::size - it's a completely different property.
-    let mut new_state = state.clone();
-    new_state.view_box = {
-        if let Some(vb) = node.parse_viewbox() {
-            vb
-        } else {
-            // No `viewBox` attribute? Then use `x`, `y`, `width` and `height` instead.
-            let (mut w, mut h) = use_node_size(node, state);
-
-            // If attributes `width` and/or `height` are provided on the `use` element,
-            // then these values will override the corresponding attributes
-            // on the `svg` in the generated tree.
-            w = state.use_size.0.unwrap_or(w);
-            h = state.use_size.1.unwrap_or(h);
-
-            NonZeroRect::from_xywh(x, y, w, h).unwrap_or(state.view_box)
-        }
-    };
+    let new_state = nested_svg_state(node, x, y, state);
 
     if let Some(clip_rect) = get_clip_rect(node, node, state) {
         let mut g = clip_element(node, clip_rect, orig_ts, state, cache);
@@ -210,6 +226,23 @@ pub(crate) fn convert_svg(
     }
 }
 
+fn nested_svg_state<'a>(
+    node: SvgNode,
+    x: f32,
+    y: f32,
+    state: &converter::State<'a>,
+) -> converter::State<'a> {
+    let mut nested = state.clone();
+    nested.view_box = if let Some(view_box) = node.parse_viewbox() {
+        view_box
+    } else {
+        let (width, height) = use_node_size(node, state);
+        let (width, height) = override_use_size(width, height, state);
+        NonZeroRect::from_xywh(x, y, width, height).unwrap_or(state.view_box)
+    };
+    nested
+}
+
 fn clip_element(
     node: SvgNode,
     clip_rect: NonZeroRect,
@@ -221,31 +254,7 @@ fn clip_element(
     // because it will be affected by a possible transform.
     // So we have to create an additional group.
 
-    // Emulate a new viewport via clipPath.
-    //
-    // From:
-    // <defs/>
-    // <elem/>
-    //
-    // To:
-    // <defs>
-    //   <clipPath id="clipPath1">
-    //     <rect/>
-    //   </clipPath>
-    // </defs>
-    // <g clip-path="ulr(#clipPath1)">
-    //   <elem/>
-    // </g>
-
-    let mut clip_path = crate::svg_engine::usvg::ClipPath::empty(cache.gen_clip_path_id());
-
-    let mut path = Path::new_simple(Arc::new(tiny_skia_path::PathBuilder::from_rect(
-        clip_rect.to_rect(),
-    )))
-    .unwrap();
-    path.fill = Some(crate::svg_engine::usvg::Fill::default());
-    clip_path.root.children.push(Node::Path(Box::new(path)));
-    clip_path.root.calculate_bounding_boxes();
+    let clip_path = clip_path_for_rect(clip_rect, cache);
 
     // Nodes generated by markers must not have an ID. Otherwise we would have duplicates.
     let id = if state.parent_markers.is_empty() {
@@ -260,6 +269,36 @@ fn clip_element(
         clip_path: Some(Arc::new(clip_path)),
         ..Group::empty()
     }
+}
+
+// Emulate a new viewport via clipPath.
+//
+// From:
+// <defs/>
+// <elem/>
+//
+// To:
+// <defs>
+//   <clipPath id="clipPath1">
+//     <rect/>
+//   </clipPath>
+// </defs>
+// <g clip-path="ulr(#clipPath1)">
+//   <elem/>
+// </g>
+
+fn clip_path_for_rect(clip_rect: NonZeroRect, cache: &mut converter::Cache) -> ClipPath {
+    let mut clip_path = ClipPath::empty(cache.gen_clip_path_id());
+
+    let mut path = Path::new_simple(Arc::new(tiny_skia_path::PathBuilder::from_rect(
+        clip_rect.to_rect(),
+    )))
+    .unwrap();
+    path.fill = Some(crate::svg_engine::usvg::Fill::default());
+    clip_path.root.children.push(Node::Path(Box::new(path)));
+    clip_path.root.calculate_bounding_boxes();
+
+    clip_path
 }
 
 fn convert_children(
@@ -298,12 +337,25 @@ fn get_clip_rect(
     symbol_node: SvgNode,
     state: &converter::State,
 ) -> Option<NonZeroRect> {
+    if !requires_clip_rect(use_node, symbol_node, state) {
+        return None;
+    }
+    let x = use_node.convert_user_length(AId::X, state, Length::zero());
+    let y = use_node.convert_user_length(AId::Y, state, Length::zero());
+    let (width, height) = viewport_size(use_node, state);
+    if !width.is_valid_length() || !height.is_valid_length() {
+        return None;
+    }
+    NonZeroRect::from_xywh(x, y, width, height)
+}
+
+fn requires_clip_rect(use_node: SvgNode, symbol_node: SvgNode, state: &converter::State) -> bool {
     // No need to clip elements with overflow:visible.
     if matches!(
         symbol_node.attribute(AId::Overflow),
         Some("visible") | Some("auto")
     ) {
-        return None;
+        return false;
     }
 
     // A nested `svg` with only the `viewBox` attribute and no "rectangle" (x, y, width, height)
@@ -312,31 +364,12 @@ fn get_clip_rect(
         // Nested `svg` referenced by `use` still should be clipped, but by `use` bounds.
         if state.use_size.0.is_none() && state.use_size.1.is_none() {
             if !(use_node.has_attribute(AId::Width) && use_node.has_attribute(AId::Height)) {
-                return None;
+                return false;
             }
         }
     }
 
-    let (x, y, mut w, mut h) = {
-        let x = use_node.convert_user_length(AId::X, state, Length::zero());
-        let y = use_node.convert_user_length(AId::Y, state, Length::zero());
-        let (w, h) = use_node_size(use_node, state);
-        (x, y, w, h)
-    };
-
-    if use_node.tag_name() == Some(EId::Svg) {
-        // If attributes `width` and/or `height` are provided on the `use` element,
-        // then these values will override the corresponding attributes
-        // on the `svg` in the generated tree.
-        w = state.use_size.0.unwrap_or(w);
-        h = state.use_size.1.unwrap_or(h);
-    }
-
-    if !w.is_valid_length() || !h.is_valid_length() {
-        return None;
-    }
-
-    NonZeroRect::from_xywh(x, y, w, h)
+    true
 }
 
 fn use_node_size(node: SvgNode, state: &converter::State) -> (f32, f32) {
@@ -351,15 +384,7 @@ fn viewbox_transform(
     linked: SvgNode,
     state: &converter::State,
 ) -> Option<Transform> {
-    let (mut w, mut h) = use_node_size(node, state);
-
-    if node.tag_name() == Some(EId::Svg) {
-        // If attributes `width` and/or `height` are provided on the `use` element,
-        // then these values will override the corresponding attributes
-        // on the `svg` in the generated tree.
-        w = state.use_size.0.unwrap_or(w);
-        h = state.use_size.1.unwrap_or(h);
-    }
+    let (w, h) = viewport_size(node, state);
 
     let size = Size::from_wh(w, h)?;
     let rect = linked.parse_viewbox()?;
@@ -369,4 +394,21 @@ fn viewbox_transform(
     let view_box = ViewBox { rect, aspect };
 
     Some(view_box.to_transform(size))
+}
+
+fn viewport_size(node: SvgNode, state: &converter::State) -> (f32, f32) {
+    let (width, height) = use_node_size(node, state);
+    if node.tag_name() == Some(EId::Svg) {
+        override_use_size(width, height, state)
+    } else {
+        (width, height)
+    }
+}
+
+fn override_use_size(width: f32, height: f32, state: &converter::State) -> (f32, f32) {
+    // useの各軸指定を、参照するSVGの対応する寸法へ適用する。
+    (
+        state.use_size.0.unwrap_or(width),
+        state.use_size.1.unwrap_or(height),
+    )
 }

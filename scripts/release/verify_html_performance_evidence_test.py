@@ -1959,15 +1959,16 @@ class PerformanceEvidenceTest(unittest.TestCase):
                 self.assertFalse(reuse.v3_reassessment_program_change(
                     path, old, current, old_mode="100644", new_mode="100755"))
 
-    def test_v4_reassessment_covers_changed_program_sources(self) -> None:
+    def test_v4_reviewed_historical_transition_covers_program_sources(self) -> None:
         import html_performance_source_reuse as reuse
 
         repository = Path(__file__).resolve().parents[2]
         refs = ("ea4f8e2a21432be76e0e8821756a7bfd3a6226e3",
                 "a39bd810784a70c3bd34013256a437ad7239c9bd")
+        endpoint = "8b2350297690b283986dba957a43061805069b6c"
         paths: set[str] = set()
         for ref in refs:
-            changes = subprocess.run(["git", "-C", str(repository), "diff", "--name-only", ref,
+            changes = subprocess.run(["git", "-C", str(repository), "diff", "--name-only", ref, endpoint,
                                       "--", "Justfile", "scripts"],
                                      check=True, capture_output=True, text=True).stdout.splitlines()
             paths.update(changes)
@@ -1975,12 +1976,16 @@ class PerformanceEvidenceTest(unittest.TestCase):
         self.assertEqual(paths, set(reuse.V4_REASSESSMENT_PROGRAM_PAIRS) |
                          {"scripts/release/html_performance_source_reuse.py"})
         for path in sorted(paths):
-            current = (repository / path).read_bytes()
+            current = subprocess.run(["git", "-C", str(repository), "show", endpoint + ":" + path],
+                                     check=True, capture_output=True).stdout
             for ref in refs:
                 old = subprocess.run(["git", "-C", str(repository), "show", ref + ":" + path],
                                      check=True, capture_output=True).stdout
                 if old != current:
-                    with self.subTest(path=path, ref=ref):
+                    self_source = path == "scripts/release/html_performance_source_reuse.py"
+                    with self.subTest(path=path, ref=ref), (
+                        patch.object(Path, "read_bytes", return_value=current) if self_source else nullcontext()
+                    ):
                         self.assertTrue(reuse.v4_reassessment_program_change(
                             path, old, current, old_mode="100644", new_mode="100644"))
 

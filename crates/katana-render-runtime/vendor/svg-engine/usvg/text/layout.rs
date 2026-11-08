@@ -6,21 +6,22 @@ use std::num::NonZeroU16;
 use std::sync::Arc;
 
 use fontdb::{Database, ID};
-use svg_harfrust::ShapeOptions;
 use kurbo::{ParamCurve, ParamCurveArclen, ParamCurveDeriv};
 use skrifa::MetadataProvider;
 use skrifa::Tag;
 use skrifa::prelude::Size;
 use skrifa::raw::TableProvider;
 use strict_num::NonZeroPositiveF32;
+use svg_harfrust::ShapeOptions;
 use tiny_skia_path::{NonZeroRect, Transform};
 use unicode_script::UnicodeScript;
 
 use crate::svg_engine::usvg::tree::{BBox, IsValidLength};
 use crate::svg_engine::usvg::{
     AlignmentBaseline, ApproxZeroUlps, BaselineShift, DominantBaseline, Fill, FillRule, Font,
-    FontResolver, GlyphId, LengthAdjust, PaintOrder, Path, ShapeRendering, Stroke, Text,
-    TextAnchor, TextChunk, TextDecorationStyle, TextFlow, TextPath, TextSpan, WritingMode,
+    FontOpticalSizing, FontResolver, GlyphId, LengthAdjust, PaintOrder, Path, ShapeRendering,
+    Stroke, Text, TextAnchor, TextChunk, TextDecorationStyle, TextFlow, TextPath, TextSpan,
+    WritingMode,
 };
 
 /// A glyph that has already been positioned correctly.
@@ -205,8 +206,301 @@ pub(crate) fn layout_text(
     resolver: &FontResolver,
     fontdb: &mut Arc<fontdb::Database>,
 ) -> Option<(Vec<Span>, NonZeroRect)> {
-    let mut fonts_cache: FontsCache = HashMap::new();
+    let fonts_cache = load_text_fonts(text_node, resolver, fontdb);
+    let mut state = TextLayoutState::default();
+    for chunk in &text_node.chunks {
+        layout_chunk(text_node, chunk, &fonts_cache, resolver, fontdb, &mut state);
+    }
+    let bbox = state.bbox.to_non_zero_rect()?;
+    Some((state.spans, bbox))
+}
 
+#[derive(Default)]
+struct TextLayoutState {
+    spans: Vec<Span>,
+    char_offset: usize,
+    last_x: f32,
+    last_y: f32,
+    bbox: BBox,
+}
+
+fn layout_chunk(
+    text_node: &Text,
+    chunk: &TextChunk,
+    fonts_cache: &FontsCache,
+    resolver: &FontResolver,
+    fontdb: &mut Arc<fontdb::Database>,
+    state: &mut TextLayoutState,
+) {
+    let (x, y) = chunk_origin(chunk, state);
+    let prepared = prepare_layout_clusters(
+        text_node,
+        chunk,
+        fonts_cache,
+        resolver,
+        fontdb,
+        state.char_offset,
+    );
+    if let Some((clusters, mut curr_pos)) = prepared {
+        let text_ts = chunk_text_transform(text_node.writing_mode, &chunk.text_flow, x, y);
+        let context = SpanLayoutContext {
+            text_node,
+            chunk,
+            fonts_cache,
+            clusters: &clusters,
+            text_ts,
+            x,
+            y,
+        };
+        layout_chunk_spans(&context, &mut state.bbox, &mut state.spans);
+        state.char_offset += chunk.text.chars().count();
+        finish_chunk_position(state, &context, &mut curr_pos);
+    } else {
+        state.char_offset += chunk.text.chars().count();
+    }
+}
+
+fn chunk_origin(chunk: &TextChunk, state: &TextLayoutState) -> (f32, f32) {
+    match chunk.text_flow {
+        TextFlow::Linear => (
+            chunk.x.unwrap_or(state.last_x),
+            chunk.y.unwrap_or(state.last_y),
+        ),
+        TextFlow::Path(_) => (0.0, 0.0),
+    }
+}
+
+fn finish_chunk_position(
+    state: &mut TextLayoutState,
+    context: &SpanLayoutContext<'_>,
+    curr_pos: &mut (f32, f32),
+) {
+    if context.text_node.writing_mode == WritingMode::TopToBottom {
+        if let TextFlow::Linear = context.chunk.text_flow {
+            std::mem::swap(&mut curr_pos.0, &mut curr_pos.1);
+        }
+    }
+    state.last_x = context.x + curr_pos.0;
+    state.last_y = context.y + curr_pos.1;
+}
+
+fn prepare_layout_clusters(
+    text_node: &Text,
+    chunk: &TextChunk,
+    fonts_cache: &FontsCache,
+    resolver: &FontResolver,
+    fontdb: &mut Arc<fontdb::Database>,
+    char_offset: usize,
+) -> Option<(Vec<GlyphCluster>, (f32, f32))> {
+    let mut clusters = process_chunk(chunk, fonts_cache, resolver, fontdb);
+    if clusters.is_empty() {
+        return None;
+    }
+    apply_writing_mode(text_node.writing_mode, &mut clusters);
+    apply_letter_spacing(chunk, &mut clusters);
+    apply_word_spacing(chunk, &mut clusters);
+    apply_length_adjust(chunk, &mut clusters);
+    let curr_pos = resolve_clusters_positions(
+        text_node,
+        chunk,
+        char_offset,
+        text_node.writing_mode,
+        fonts_cache,
+        &mut clusters,
+    );
+    Some((clusters, curr_pos))
+}
+
+fn chunk_text_transform(mode: WritingMode, flow: &TextFlow, x: f32, y: f32) -> Transform {
+    let mut transform = Transform::default();
+    if mode == WritingMode::TopToBottom {
+        if let TextFlow::Linear = flow {
+            transform = transform.pre_rotate_at(90.0, x, y);
+        }
+    }
+    transform
+}
+
+struct SpanLayoutContext<'a> {
+    text_node: &'a Text,
+    chunk: &'a TextChunk,
+    fonts_cache: &'a FontsCache,
+    clusters: &'a [GlyphCluster],
+    text_ts: Transform,
+    x: f32,
+    y: f32,
+}
+
+fn layout_chunk_spans(context: &SpanLayoutContext<'_>, bbox: &mut BBox, spans: &mut Vec<Span>) {
+    for span in &context.chunk.spans {
+        layout_one_span(context, span, bbox, spans);
+    }
+}
+
+fn layout_one_span(
+    context: &SpanLayoutContext<'_>,
+    span: &TextSpan,
+    bbox: &mut BBox,
+    spans: &mut Vec<Span>,
+) {
+    let Some(font) = context.fonts_cache.get(&span.font) else {
+        return;
+    };
+    let decoration_spans = collect_decoration_spans(span, context.clusters);
+    let mut span_ts = context.text_ts;
+    span_ts = span_ts.pre_translate(context.x, context.y);
+    if let TextFlow::Linear = context.chunk.text_flow {
+        let shift = resolve_baseline(span, font, context.text_node.writing_mode);
+        span_ts = span_ts.pre_translate(0.0, shift);
+    }
+    let decorations = layout_span_decorations(
+        span,
+        font,
+        context.text_node.writing_mode,
+        &decoration_spans,
+        span_ts,
+        bbox,
+    );
+    let mut fill = span.fill.clone();
+    if let Some(ref mut fill) = fill {
+        fill.rule = FillRule::NonZero;
+    }
+    if let Some((fragments, span_bbox)) = convert_span(span, context.clusters, span_ts) {
+        *bbox = bbox.expand(span_bbox);
+        let positioned_glyphs = position_span_glyphs(fragments, span_ts);
+        spans.push(make_layout_span(span, fill, positioned_glyphs, decorations));
+    }
+}
+
+struct SpanDecorations {
+    underline: Option<Path>,
+    overline: Option<Path>,
+    line_through: Option<Path>,
+}
+
+struct DecorationContext<'a> {
+    span: &'a TextSpan,
+    font: &'a ResolvedFont,
+    mode: WritingMode,
+    spans: &'a [DecorationSpan],
+    ts: Transform,
+}
+
+fn layout_span_decorations(
+    span: &TextSpan,
+    font: &ResolvedFont,
+    mode: WritingMode,
+    spans: &[DecorationSpan],
+    ts: Transform,
+    bbox: &mut BBox,
+) -> SpanDecorations {
+    let context = DecorationContext {
+        span,
+        font,
+        mode,
+        spans,
+        ts,
+    };
+    let underline = layout_underline(&context, bbox);
+    let overline = layout_overline(&context, bbox);
+    let line_through = layout_line_through(&context, bbox);
+    SpanDecorations {
+        underline,
+        overline,
+        line_through,
+    }
+}
+
+fn layout_underline(context: &DecorationContext<'_>, bbox: &mut BBox) -> Option<Path> {
+    let decoration = context.span.decoration.underline.clone()?;
+    let offset = match context.mode {
+        WritingMode::LeftToRight => -context
+            .font
+            .underline_position(context.span.font_size.get()),
+        WritingMode::TopToBottom => context.font.height(context.span.font_size.get()) / 2.0,
+    };
+    decoration_with_bounds(context, decoration, offset, bbox)
+}
+
+fn layout_overline(context: &DecorationContext<'_>, bbox: &mut BBox) -> Option<Path> {
+    let decoration = context.span.decoration.overline.clone()?;
+    let offset = match context.mode {
+        WritingMode::LeftToRight => -context.font.ascent(context.span.font_size.get()),
+        WritingMode::TopToBottom => -context.font.height(context.span.font_size.get()) / 2.0,
+    };
+    decoration_with_bounds(context, decoration, offset, bbox)
+}
+
+fn layout_line_through(context: &DecorationContext<'_>, bbox: &mut BBox) -> Option<Path> {
+    let decoration = context.span.decoration.line_through.clone()?;
+    let offset = match context.mode {
+        WritingMode::LeftToRight => -context
+            .font
+            .line_through_position(context.span.font_size.get()),
+        WritingMode::TopToBottom => 0.0,
+    };
+    decoration_with_bounds(context, decoration, offset, bbox)
+}
+
+fn decoration_with_bounds(
+    context: &DecorationContext<'_>,
+    decoration: TextDecorationStyle,
+    offset: f32,
+    bbox: &mut BBox,
+) -> Option<Path> {
+    let path = convert_decoration(
+        offset,
+        context.span,
+        context.font,
+        decoration,
+        context.spans,
+        context.ts,
+    )?;
+    *bbox = bbox.expand(path.data.bounds());
+    Some(path)
+}
+
+fn position_span_glyphs(fragments: Vec<GlyphCluster>, span_ts: Transform) -> Vec<PositionedGlyph> {
+    fragments
+        .into_iter()
+        .flat_map(|mut gc| {
+            let cluster_ts = gc.transform();
+            gc.glyphs.iter_mut().for_each(|pg| {
+                pg.cluster_ts = cluster_ts;
+                pg.span_ts = span_ts;
+            });
+            gc.glyphs
+        })
+        .collect()
+}
+
+fn make_layout_span(
+    span: &TextSpan,
+    fill: Option<Fill>,
+    positioned_glyphs: Vec<PositionedGlyph>,
+    decorations: SpanDecorations,
+) -> Span {
+    Span {
+        fill,
+        stroke: span.stroke.clone(),
+        paint_order: span.paint_order,
+        font_size: span.font_size,
+        variations: span.font.variations.clone(),
+        font_optical_sizing: span.font_optical_sizing,
+        visible: span.visible,
+        positioned_glyphs,
+        underline: decorations.underline,
+        overline: decorations.overline,
+        line_through: decorations.line_through,
+    }
+}
+
+fn load_text_fonts(
+    text_node: &Text,
+    resolver: &FontResolver,
+    fontdb: &mut Arc<fontdb::Database>,
+) -> FontsCache {
+    let mut fonts_cache = HashMap::new();
     for chunk in &text_node.chunks {
         for span in &chunk.spans {
             if !fonts_cache.contains_key(&span.font) {
@@ -218,170 +512,7 @@ pub(crate) fn layout_text(
             }
         }
     }
-
-    let mut spans = vec![];
-    let mut char_offset = 0;
-    let mut last_x = 0.0;
-    let mut last_y = 0.0;
-    let mut bbox = BBox::default();
-    for chunk in &text_node.chunks {
-        let (x, y) = match chunk.text_flow {
-            TextFlow::Linear => (chunk.x.unwrap_or(last_x), chunk.y.unwrap_or(last_y)),
-            TextFlow::Path(_) => (0.0, 0.0),
-        };
-
-        let mut clusters = process_chunk(chunk, &fonts_cache, resolver, fontdb);
-        if clusters.is_empty() {
-            char_offset += chunk.text.chars().count();
-            continue;
-        }
-
-        apply_writing_mode(text_node.writing_mode, &mut clusters);
-        apply_letter_spacing(chunk, &mut clusters);
-        apply_word_spacing(chunk, &mut clusters);
-
-        apply_length_adjust(chunk, &mut clusters);
-        let mut curr_pos = resolve_clusters_positions(
-            text_node,
-            chunk,
-            char_offset,
-            text_node.writing_mode,
-            &fonts_cache,
-            &mut clusters,
-        );
-
-        let mut text_ts = Transform::default();
-        if text_node.writing_mode == WritingMode::TopToBottom {
-            if let TextFlow::Linear = chunk.text_flow {
-                text_ts = text_ts.pre_rotate_at(90.0, x, y);
-            }
-        }
-
-        for span in &chunk.spans {
-            let font = match fonts_cache.get(&span.font) {
-                Some(v) => v,
-                None => continue,
-            };
-
-            let decoration_spans = collect_decoration_spans(span, &clusters);
-
-            let mut span_ts = text_ts;
-            span_ts = span_ts.pre_translate(x, y);
-            if let TextFlow::Linear = chunk.text_flow {
-                let shift = resolve_baseline(span, font, text_node.writing_mode);
-
-                // In case of a horizontal flow, shift transform and not clusters,
-                // because clusters can be rotated and an additional shift will lead
-                // to invalid results.
-                span_ts = span_ts.pre_translate(0.0, shift);
-            }
-
-            let mut underline = None;
-            let mut overline = None;
-            let mut line_through = None;
-
-            if let Some(decoration) = span.decoration.underline.clone() {
-                // TODO: No idea what offset should be used for top-to-bottom layout.
-                // There is
-                // https://www.w3.org/TR/css-text-decor-3/#text-underline-position-property
-                // but it doesn't go into details.
-                let offset = match text_node.writing_mode {
-                    WritingMode::LeftToRight => -font.underline_position(span.font_size.get()),
-                    WritingMode::TopToBottom => font.height(span.font_size.get()) / 2.0,
-                };
-
-                if let Some(path) =
-                    convert_decoration(offset, span, font, decoration, &decoration_spans, span_ts)
-                {
-                    bbox = bbox.expand(path.data.bounds());
-                    underline = Some(path);
-                }
-            }
-
-            if let Some(decoration) = span.decoration.overline.clone() {
-                let offset = match text_node.writing_mode {
-                    WritingMode::LeftToRight => -font.ascent(span.font_size.get()),
-                    WritingMode::TopToBottom => -font.height(span.font_size.get()) / 2.0,
-                };
-
-                if let Some(path) =
-                    convert_decoration(offset, span, font, decoration, &decoration_spans, span_ts)
-                {
-                    bbox = bbox.expand(path.data.bounds());
-                    overline = Some(path);
-                }
-            }
-
-            if let Some(decoration) = span.decoration.line_through.clone() {
-                let offset = match text_node.writing_mode {
-                    WritingMode::LeftToRight => -font.line_through_position(span.font_size.get()),
-                    WritingMode::TopToBottom => 0.0,
-                };
-
-                if let Some(path) =
-                    convert_decoration(offset, span, font, decoration, &decoration_spans, span_ts)
-                {
-                    bbox = bbox.expand(path.data.bounds());
-                    line_through = Some(path);
-                }
-            }
-
-            let mut fill = span.fill.clone();
-            if let Some(ref mut fill) = fill {
-                // The `fill-rule` should be ignored.
-                // https://www.w3.org/TR/SVG2/text.html#TextRenderingOrder
-                //
-                // 'Since the fill-rule property does not apply to SVG text elements,
-                // the specific order of the subpaths within the equivalent path does not matter.'
-                fill.rule = FillRule::NonZero;
-            }
-
-            if let Some((span_fragments, span_bbox)) = convert_span(span, &clusters, span_ts) {
-                bbox = bbox.expand(span_bbox);
-
-                let positioned_glyphs = span_fragments
-                    .into_iter()
-                    .flat_map(|mut gc| {
-                        let cluster_ts = gc.transform();
-                        gc.glyphs.iter_mut().for_each(|pg| {
-                            pg.cluster_ts = cluster_ts;
-                            pg.span_ts = span_ts;
-                        });
-                        gc.glyphs
-                    })
-                    .collect();
-
-                spans.push(Span {
-                    fill,
-                    stroke: span.stroke.clone(),
-                    paint_order: span.paint_order,
-                    font_size: span.font_size,
-                    variations: span.font.variations.clone(),
-                    font_optical_sizing: span.font_optical_sizing,
-                    visible: span.visible,
-                    positioned_glyphs,
-                    underline,
-                    overline,
-                    line_through,
-                });
-            }
-        }
-
-        char_offset += chunk.text.chars().count();
-
-        if text_node.writing_mode == WritingMode::TopToBottom {
-            if let TextFlow::Linear = chunk.text_flow {
-                std::mem::swap(&mut curr_pos.0, &mut curr_pos.1);
-            }
-        }
-
-        last_x = x + curr_pos.0;
-        last_y = y + curr_pos.1;
-    }
-
-    let bbox = bbox.to_non_zero_rect()?;
-
-    Some((spans, bbox))
+    fonts_cache
 }
 
 fn convert_span(
@@ -401,17 +532,7 @@ fn convert_span(
             span_clusters.push(cluster.clone());
         }
 
-        let mut advance = cluster.advance;
-        if advance <= 0.0 {
-            advance = 1.0;
-        }
-
-        // We have to calculate text bbox using font metrics and not glyph shape.
-        if let Some(r) = NonZeroRect::from_xywh(0.0, -cluster.ascent, advance, cluster.height()) {
-            if let Some(r) = r.transform(cluster.transform()) {
-                bboxes_builder.push_rect(r.to_rect());
-            }
-        }
+        push_cluster_bbox(cluster, &mut bboxes_builder);
     }
 
     let mut bboxes = bboxes_builder.finish()?;
@@ -419,6 +540,19 @@ fn convert_span(
     let bbox = bboxes.compute_tight_bounds()?.to_non_zero_rect()?;
 
     Some((span_clusters, bbox))
+}
+
+fn push_cluster_bbox(cluster: &GlyphCluster, builder: &mut tiny_skia_path::PathBuilder) {
+    let mut advance = cluster.advance;
+    if advance <= 0.0 {
+        advance = 1.0;
+    }
+    // We have to calculate text bbox using font metrics and not glyph shape.
+    if let Some(r) = NonZeroRect::from_xywh(0.0, -cluster.ascent, advance, cluster.height()) {
+        if let Some(r) = r.transform(cluster.transform()) {
+            builder.push_rect(r.to_rect());
+        }
+    }
 }
 
 fn collect_decoration_spans(span: &TextSpan, clusters: &[GlyphCluster]) -> Vec<DecorationSpan> {
@@ -431,8 +565,7 @@ fn collect_decoration_spans(span: &TextSpan, clusters: &[GlyphCluster]) -> Vec<D
     for cluster in clusters {
         if span_contains(span, cluster.byte_idx) {
             if started && cluster.has_relative_shift {
-                started = false;
-                spans.push(DecorationSpan { width, transform });
+                finish_decoration_span(&mut spans, &mut started, width, transform);
             }
 
             if !started {
@@ -442,17 +575,25 @@ fn collect_decoration_spans(span: &TextSpan, clusters: &[GlyphCluster]) -> Vec<D
             } else {
                 width += cluster.advance;
             }
-        } else if started {
-            spans.push(DecorationSpan { width, transform });
-            started = false;
+        } else {
+            finish_decoration_span(&mut spans, &mut started, width, transform);
         }
     }
 
-    if started {
-        spans.push(DecorationSpan { width, transform });
-    }
-
+    finish_decoration_span(&mut spans, &mut started, width, transform);
     spans
+}
+
+fn finish_decoration_span(
+    spans: &mut Vec<DecorationSpan>,
+    started: &mut bool,
+    width: f32,
+    transform: Transform,
+) {
+    if *started {
+        spans.push(DecorationSpan { width, transform });
+        *started = false;
+    }
 }
 
 pub(crate) fn convert_decoration(
@@ -469,23 +610,9 @@ pub(crate) fn convert_decoration(
 
     let mut builder = tiny_skia_path::PathBuilder::new();
     for dec_span in decoration_spans {
-        let rect = match NonZeroRect::from_xywh(0.0, -thickness / 2.0, dec_span.width, thickness) {
-            Some(v) => v,
-            None => {
-                log::warn!("a decoration span has a malformed bbox");
-                continue;
-            }
-        };
-
-        let ts = dec_span.transform.pre_translate(0.0, dy);
-
-        let mut path = tiny_skia_path::PathBuilder::from_rect(rect.to_rect());
-        path = match path.transform(ts) {
-            Some(v) => v,
-            None => continue,
-        };
-
-        builder.push_path(&path);
+        if let Some(path) = decoration_span_path(dec_span, thickness, dy) {
+            builder.push_path(&path);
+        }
     }
 
     let mut path_data = builder.finish()?;
@@ -501,6 +628,22 @@ pub(crate) fn convert_decoration(
         Arc::new(path_data),
         Transform::default(),
     )
+}
+
+fn decoration_span_path(
+    span: &DecorationSpan,
+    thickness: f32,
+    dy: f32,
+) -> Option<tiny_skia_path::Path> {
+    let rect = match NonZeroRect::from_xywh(0.0, -thickness / 2.0, span.width, thickness) {
+        Some(v) => v,
+        None => {
+            log::warn!("a decoration span has a malformed bbox");
+            return None;
+        }
+    };
+    let ts = span.transform.pre_translate(0.0, dy);
+    tiny_skia_path::PathBuilder::from_rect(rect.to_rect()).transform(ts)
 }
 
 /// A text decoration span.
@@ -593,20 +736,22 @@ fn resolve_clusters_positions_horizontal(
         }
     }
 
-    let mut left = f32::INFINITY;
-    let mut right = f32::NEG_INFINITY;
-    let mut advance = 0.0;
-    for (cluster, (shift_x, _)) in clusters.iter().zip(&shifts) {
-        let start = advance + shift_x;
-        let end = start + cluster.advance - cluster.text_length_spacing;
-        left = left.min(start).min(end);
-        right = right.max(start).max(end);
-        advance += cluster.advance;
-    }
+    let (left, right) = horizontal_cluster_extent(clusters, &shifts);
+    let x = shifts[first].0 - left + process_anchor(chunk.anchor, right - left);
+    let x = place_horizontal_clusters(text, chunk, offset, clusters, &shifts, x);
 
-    let mut x = shifts[first].0 - left + process_anchor(chunk.anchor, right - left);
+    (x + shifts[last].0, shifts[last].1)
+}
 
-    for (cluster, (shift_x, shift_y)) in clusters.iter_mut().zip(&shifts) {
+fn place_horizontal_clusters(
+    text: &Text,
+    chunk: &TextChunk,
+    offset: usize,
+    clusters: &mut [GlyphCluster],
+    shifts: &[(f32, f32)],
+    mut x: f32,
+) -> f32 {
+    for (cluster, (shift_x, shift_y)) in clusters.iter_mut().zip(shifts) {
         let cp = offset + cluster.byte_idx.code_point_at(&chunk.text);
 
         cluster.transform = cluster.transform.pre_translate(x + shift_x, *shift_y);
@@ -621,7 +766,21 @@ fn resolve_clusters_positions_horizontal(
         x += cluster.advance;
     }
 
-    (x + shifts[last].0, shifts[last].1)
+    x
+}
+
+fn horizontal_cluster_extent(clusters: &[GlyphCluster], shifts: &[(f32, f32)]) -> (f32, f32) {
+    let mut left = f32::INFINITY;
+    let mut right = f32::NEG_INFINITY;
+    let mut advance = 0.0;
+    for (cluster, (shift_x, _)) in clusters.iter().zip(shifts) {
+        let start = advance + shift_x;
+        let end = start + cluster.advance - cluster.text_length_spacing;
+        left = left.min(start).min(end);
+        right = right.max(start).max(end);
+        advance += cluster.advance;
+    }
+    (left, right)
 }
 
 // Baseline resolving in SVG is a mess.
@@ -681,73 +840,102 @@ fn resolve_clusters_positions_path(
 
     let (shifts, _) = resolve_relative_shifts(text, chunk, char_offset, clusters);
 
-    // In the text path mode, chunk's x/y coordinates provide an additional offset along the path.
-    // The X coordinate is used in a horizontal mode, and Y in vertical.
+    let start_offset = text_path_start_offset(chunk, path, writing_mode, clusters);
+
+    let normals = collect_normals(text, clusters, &shifts, &path.path, start_offset);
+    let placement = PathPlacement {
+        text,
+        chunk,
+        char_offset,
+        writing_mode,
+        fonts_cache,
+    };
+    for ((cluster, normal), (_, dy)) in clusters.iter_mut().zip(normals).zip(shifts) {
+        if let Some((x, y)) = position_cluster_on_path(&placement, cluster, normal, dy) {
+            last_x = x;
+            last_y = y;
+        }
+    }
+
+    (last_x, last_y)
+}
+
+fn text_path_start_offset(
+    chunk: &TextChunk,
+    path: &TextPath,
+    writing_mode: WritingMode,
+    clusters: &[GlyphCluster],
+) -> f32 {
+    // textPath上の追加offsetには横書きでx、縦書きでyを使う。
     let chunk_offset = match writing_mode {
         WritingMode::LeftToRight => chunk.x.unwrap_or(0.0),
         WritingMode::TopToBottom => chunk.y.unwrap_or(0.0),
     };
+    chunk_offset + path.start_offset + process_anchor(chunk.anchor, clusters_length(clusters))
+}
 
-    let start_offset =
-        chunk_offset + path.start_offset + process_anchor(chunk.anchor, clusters_length(clusters));
+struct PathPlacement<'a> {
+    text: &'a Text,
+    chunk: &'a TextChunk,
+    char_offset: usize,
+    writing_mode: WritingMode,
+    fonts_cache: &'a FontsCache,
+}
 
-    let normals = collect_normals(text, clusters, &shifts, &path.path, start_offset);
-    for ((cluster, normal), (_, dy)) in clusters.iter_mut().zip(normals).zip(shifts) {
-        let (x, y, angle) = match normal {
-            Some(normal) => (normal.x, normal.y, normal.angle),
-            None => {
-                // Hide clusters that are outside the text path.
-                cluster.visible = false;
-                continue;
-            }
-        };
+fn position_cluster_on_path(
+    placement: &PathPlacement<'_>,
+    cluster: &mut GlyphCluster,
+    normal: Option<PathNormal>,
+    dy: f32,
+) -> Option<(f32, f32)> {
+    let Some(normal) = normal else {
+        cluster.visible = false;
+        return None;
+    };
+    let (x, y, angle) = (normal.x, normal.y, normal.angle);
+    cluster.has_relative_shift = true;
+    let orig_ts = cluster.transform;
+    let half_width = cluster.width / 2.0;
+    cluster.transform = Transform::default();
+    cluster.transform = cluster.transform.pre_translate(x - half_width, y);
+    cluster.transform = cluster.transform.pre_rotate_at(angle, half_width, 0.0);
+    let cp = placement.char_offset + cluster.byte_idx.code_point_at(&placement.chunk.text);
+    let baseline_shift = path_baseline_shift(placement, cluster);
+    apply_path_offsets(placement, cluster, cp, dy, baseline_shift);
+    cluster.transform = cluster.transform.pre_concat(orig_ts);
+    Some((x + cluster.advance, y))
+}
 
-        // We have to break a decoration line for each cluster during text-on-path.
-        cluster.has_relative_shift = true;
-
-        let orig_ts = cluster.transform;
-
-        // Clusters should be rotated by the x-midpoint x baseline position.
-        let half_width = cluster.width / 2.0;
-        cluster.transform = Transform::default();
-        cluster.transform = cluster.transform.pre_translate(x - half_width, y);
-        cluster.transform = cluster.transform.pre_rotate_at(angle, half_width, 0.0);
-
-        let cp = char_offset + cluster.byte_idx.code_point_at(&chunk.text);
-
-        let baseline_shift = chunk_span_at(chunk, cluster.byte_idx)
-            .map(|span| {
-                let font = match fonts_cache.get(&span.font) {
-                    Some(v) => v,
-                    None => return 0.0,
-                };
-                -resolve_baseline(span, font, writing_mode)
-            })
-            .unwrap_or(0.0);
-
-        // Shift only by `dy` since we already applied `dx`
-        // during offset along the path calculation.
-        if !dy.approx_zero_ulps(4) || !baseline_shift.approx_zero_ulps(4) {
-            let shift = kurbo::Vec2::new(0.0, (dy - baseline_shift) as f64);
-            cluster.transform = cluster
-                .transform
-                .pre_translate(shift.x as f32, shift.y as f32);
-        }
-
-        if let Some(angle) = text.rotate.get(cp).cloned() {
-            if !angle.approx_zero_ulps(4) {
-                cluster.transform = cluster.transform.pre_rotate(angle);
-            }
-        }
-
-        // The possible `lengthAdjust` transform should be applied after text-on-path positioning.
-        cluster.transform = cluster.transform.pre_concat(orig_ts);
-
-        last_x = x + cluster.advance;
-        last_y = y;
+fn apply_path_offsets(
+    placement: &PathPlacement<'_>,
+    cluster: &mut GlyphCluster,
+    cp: usize,
+    dy: f32,
+    baseline_shift: f32,
+) {
+    if !dy.approx_zero_ulps(4) || !baseline_shift.approx_zero_ulps(4) {
+        let shift = kurbo::Vec2::new(0.0, (dy - baseline_shift) as f64);
+        cluster.transform = cluster
+            .transform
+            .pre_translate(shift.x as f32, shift.y as f32);
     }
+    if let Some(angle) = placement.text.rotate.get(cp).cloned() {
+        if !angle.approx_zero_ulps(4) {
+            cluster.transform = cluster.transform.pre_rotate(angle);
+        }
+    }
+}
 
-    (last_x, last_y)
+fn path_baseline_shift(placement: &PathPlacement<'_>, cluster: &GlyphCluster) -> f32 {
+    chunk_span_at(placement.chunk, cluster.byte_idx)
+        .map(|span| {
+            let font = match placement.fonts_cache.get(&span.font) {
+                Some(v) => v,
+                None => return 0.0,
+            };
+            -resolve_baseline(span, font, placement.writing_mode)
+        })
+        .unwrap_or(0.0)
 }
 
 pub(crate) fn process_anchor(a: TextAnchor, text_width: f32) -> f32 {
@@ -771,124 +959,192 @@ fn collect_normals(
     path: &tiny_skia_path::Path,
     offset: f32,
 ) -> Vec<Option<PathNormal>> {
-    let mut offsets = Vec::with_capacity(clusters.len());
-    let mut normals = Vec::with_capacity(clusters.len());
-    {
-        let mut advance = offset;
-        for (cluster, (shift_x, _)) in clusters.iter().zip(shifts) {
-            // Clusters should be rotated by the x-midpoint x baseline position.
-            let half_width = cluster.width / 2.0;
-
-            let offset = advance + shift_x + half_width;
-
-            // Clusters outside the path have no normals.
-            if offset < 0.0 {
-                normals.push(None);
-            }
-
-            offsets.push(offset as f64);
-            advance += cluster.advance;
-        }
-    }
-
-    let mut prev_mx = path.points()[0].x;
-    let mut prev_my = path.points()[0].y;
-    let mut prev_x = prev_mx;
-    let mut prev_y = prev_my;
-
-    fn create_curve_from_line(px: f32, py: f32, x: f32, y: f32) -> kurbo::CubicBez {
-        let line = kurbo::Line::new(
-            kurbo::Point::new(px as f64, py as f64),
-            kurbo::Point::new(x as f64, y as f64),
-        );
-        let p1 = line.eval(0.33);
-        let p2 = line.eval(0.66);
-        kurbo::CubicBez {
-            p0: line.p0,
-            p1,
-            p2,
-            p3: line.p1,
-        }
-    }
-
-    let mut length: f64 = 0.0;
-    for seg in path.segments() {
-        let curve = match seg {
-            tiny_skia_path::PathSegment::MoveTo(p) => {
-                prev_mx = p.x;
-                prev_my = p.y;
-                prev_x = p.x;
-                prev_y = p.y;
-                continue;
-            }
-            tiny_skia_path::PathSegment::LineTo(p) => {
-                create_curve_from_line(prev_x, prev_y, p.x, p.y)
-            }
-            tiny_skia_path::PathSegment::QuadTo(p1, p) => kurbo::QuadBez {
-                p0: kurbo::Point::new(prev_x as f64, prev_y as f64),
-                p1: kurbo::Point::new(p1.x as f64, p1.y as f64),
-                p2: kurbo::Point::new(p.x as f64, p.y as f64),
-            }
-            .raise(),
-            tiny_skia_path::PathSegment::CubicTo(p1, p2, p) => kurbo::CubicBez {
-                p0: kurbo::Point::new(prev_x as f64, prev_y as f64),
-                p1: kurbo::Point::new(p1.x as f64, p1.y as f64),
-                p2: kurbo::Point::new(p2.x as f64, p2.y as f64),
-                p3: kurbo::Point::new(p.x as f64, p.y as f64),
-            },
-            tiny_skia_path::PathSegment::Close => {
-                create_curve_from_line(prev_x, prev_y, prev_mx, prev_my)
-            }
+    let (offsets, mut normals) = path_cluster_offsets(clusters, shifts, offset);
+    let mut cursor = NormalPathCursor::new(path);
+    let mut length = 0.0;
+    for segment in path.segments() {
+        let Some(curve) = cursor.curve(segment) else {
+            continue;
         };
-
-        let arclen_accuracy = {
-            let base_arclen_accuracy = 0.5;
-            // Accuracy depends on a current scale.
-            // When we have a tiny path scaled by a large value,
-            // we have to increase out accuracy accordingly.
-            let (sx, sy) = text.abs_transform.get_scale();
-            // 1.0 acts as a threshold to prevent division by 0 and/or low accuracy.
-            base_arclen_accuracy / (sx * sy).sqrt().max(1.0)
-        };
-
-        let curve_len = curve.arclen(arclen_accuracy as f64);
-
-        for offset in &offsets[normals.len()..] {
-            if *offset >= length && *offset <= length + curve_len {
-                let mut offset = curve.inv_arclen(offset - length, arclen_accuracy as f64);
-                // some rounding error may occur, so we give offset a little tolerance
-                debug_assert!((-1.0e-3..=1.0 + 1.0e-3).contains(&offset));
-                offset = offset.clamp(0.0, 1.0);
-
-                let pos = curve.eval(offset);
-                let d = curve.deriv().eval(offset);
-                let d = kurbo::Vec2::new(-d.y, d.x); // tangent
-                let angle = d.atan2().to_degrees() - 90.0;
-
-                normals.push(Some(PathNormal {
-                    x: pos.x as f32,
-                    y: pos.y as f32,
-                    angle: angle as f32,
-                }));
-
-                if normals.len() == offsets.len() {
-                    break;
-                }
-            }
-        }
-
+        let (sx, sy) = text.abs_transform.get_scale();
+        let accuracy = 0.5 / (sx * sy).sqrt().max(1.0);
+        let curve_len = curve.arclen(accuracy as f64);
+        append_curve_normals(&curve, &offsets, &mut normals, length, curve_len, accuracy);
         length += curve_len;
-        prev_x = curve.p3.x as f32;
-        prev_y = curve.p3.y as f32;
+        cursor.advance(&curve);
     }
-
-    // If path ended and we still have unresolved normals - set them to `None`.
     for _ in 0..(offsets.len() - normals.len()) {
         normals.push(None);
     }
-
     normals
 }
+
+fn path_cluster_offsets(
+    clusters: &[GlyphCluster],
+    shifts: &[(f32, f32)],
+    offset: f32,
+) -> (Vec<f64>, Vec<Option<PathNormal>>) {
+    let mut offsets = Vec::with_capacity(clusters.len());
+    let mut normals = Vec::with_capacity(clusters.len());
+    let mut advance = offset;
+    for (cluster, (shift_x, _)) in clusters.iter().zip(shifts) {
+        let half_width = cluster.width / 2.0;
+        let offset = advance + shift_x + half_width;
+        if offset < 0.0 {
+            normals.push(None);
+        }
+        offsets.push(offset as f64);
+        advance += cluster.advance;
+    }
+    (offsets, normals)
+}
+
+struct NormalPathCursor {
+    prev_mx: f32,
+    prev_my: f32,
+    prev_x: f32,
+    prev_y: f32,
+}
+
+impl NormalPathCursor {
+    fn new(path: &tiny_skia_path::Path) -> Self {
+        let prev_mx = path.points()[0].x;
+        let prev_my = path.points()[0].y;
+        Self {
+            prev_mx,
+            prev_my,
+            prev_x: prev_mx,
+            prev_y: prev_my,
+        }
+    }
+
+    fn curve(&mut self, seg: tiny_skia_path::PathSegment) -> Option<kurbo::CubicBez> {
+        use tiny_skia_path::PathSegment;
+        match seg {
+            PathSegment::MoveTo(p) => {
+                self.prev_mx = p.x;
+                self.prev_my = p.y;
+                self.prev_x = p.x;
+                self.prev_y = p.y;
+                None
+            }
+            PathSegment::LineTo(p) => {
+                Some(normal_curve_from_line(self.prev_x, self.prev_y, p.x, p.y))
+            }
+            PathSegment::QuadTo(p1, p) => Some(self.quadratic(p1, p)),
+            PathSegment::CubicTo(p1, p2, p) => Some(self.cubic(p1, p2, p)),
+            PathSegment::Close => Some(normal_curve_from_line(
+                self.prev_x,
+                self.prev_y,
+                self.prev_mx,
+                self.prev_my,
+            )),
+        }
+    }
+
+    fn advance(&mut self, curve: &kurbo::CubicBez) {
+        self.prev_x = curve.p3.x as f32;
+        self.prev_y = curve.p3.y as f32;
+    }
+
+    fn quadratic(&self, p1: tiny_skia_path::Point, p: tiny_skia_path::Point) -> kurbo::CubicBez {
+        kurbo::QuadBez {
+            p0: kurbo::Point::new(self.prev_x as f64, self.prev_y as f64),
+            p1: kurbo::Point::new(p1.x as f64, p1.y as f64),
+            p2: kurbo::Point::new(p.x as f64, p.y as f64),
+        }
+        .raise()
+    }
+
+    fn cubic(
+        &self,
+        p1: tiny_skia_path::Point,
+        p2: tiny_skia_path::Point,
+        p: tiny_skia_path::Point,
+    ) -> kurbo::CubicBez {
+        kurbo::CubicBez {
+            p0: kurbo::Point::new(self.prev_x as f64, self.prev_y as f64),
+            p1: kurbo::Point::new(p1.x as f64, p1.y as f64),
+            p2: kurbo::Point::new(p2.x as f64, p2.y as f64),
+            p3: kurbo::Point::new(p.x as f64, p.y as f64),
+        }
+    }
+}
+
+fn normal_curve_from_line(px: f32, py: f32, x: f32, y: f32) -> kurbo::CubicBez {
+    let line = kurbo::Line::new(
+        kurbo::Point::new(px as f64, py as f64),
+        kurbo::Point::new(x as f64, y as f64),
+    );
+    let p1 = line.eval(0.33);
+    let p2 = line.eval(0.66);
+    kurbo::CubicBez {
+        p0: line.p0,
+        p1,
+        p2,
+        p3: line.p1,
+    }
+}
+
+fn append_curve_normals(
+    curve: &kurbo::CubicBez,
+    offsets: &[f64],
+    normals: &mut Vec<Option<PathNormal>>,
+    length: f64,
+    curve_len: f64,
+    accuracy: f32,
+) {
+    for offset in &offsets[normals.len()..] {
+        if *offset >= length && *offset <= length + curve_len {
+            let mut offset = curve.inv_arclen(offset - length, accuracy as f64);
+            debug_assert!((-1.0e-3..=1.0 + 1.0e-3).contains(&offset));
+            offset = offset.clamp(0.0, 1.0);
+            let pos = curve.eval(offset);
+            let d = curve.deriv().eval(offset);
+            let d = kurbo::Vec2::new(-d.y, d.x);
+            let angle = d.atan2().to_degrees() - 90.0;
+            normals.push(Some(PathNormal {
+                x: pos.x as f32,
+                y: pos.y as f32,
+                angle: angle as f32,
+            }));
+            if normals.len() == offsets.len() {
+                break;
+            }
+        }
+    }
+}
+
+// The way this function works is a bit tricky.
+//
+// The first problem is BIDI reordering.
+// We cannot shape text span-by-span, because glyph clusters are not guarantee to be continuous.
+//
+// For example:
+// <text>Hel<tspan fill="url(#lg1)">lo של</tspan>ום.</text>
+//
+// Would be shaped as:
+// H e l l o   ש ל  ו  ם .   (characters)
+// 0 1 2 3 4 5 12 10 8 6 14  (cluster indices in UTF-8)
+//       ---         ---     (green span)
+//
+// As you can see, our continuous `lo של` span was split into two separated one.
+// So our 3 spans: black - green - black, become 5 spans: black - green - black - green - black.
+// If we shape `Hel`, then `lo של` an then `ום` separately - we would get an incorrect output.
+// To properly handle this we simply shape the whole chunk.
+//
+// But this introduces another issue - what to do when we have multiple fonts?
+// The easy solution would be to simply shape text with each font,
+// where the first font output is used as a base one and all others overwrite it.
+// This way in case of:
+// <text font-family="Arial">Hello <tspan font-family="Helvetica">world</tspan></text>
+// we would replace Arial glyphs for `world` with Helvetica one. Pretty simple.
+//
+// Well, it would work most of the time, but not always.
+// This is because different fonts can produce different amount of glyphs for the same text.
+// The most common example are ligatures. Some fonts can shape `fi` as two glyphs `f` and `i`,
+// but some can use `ﬁ` (U+FB01) instead.
+// Meaning that during merging we have to overwrite not individual glyphs, but clusters.
 
 /// Converts a text chunk into a list of outlined clusters.
 ///
@@ -900,37 +1156,16 @@ fn process_chunk(
     resolver: &FontResolver,
     fontdb: &mut Arc<fontdb::Database>,
 ) -> Vec<GlyphCluster> {
-    // The way this function works is a bit tricky.
-    //
-    // The first problem is BIDI reordering.
-    // We cannot shape text span-by-span, because glyph clusters are not guarantee to be continuous.
-    //
-    // For example:
-    // <text>Hel<tspan fill="url(#lg1)">lo של</tspan>ום.</text>
-    //
-    // Would be shaped as:
-    // H e l l o   ש ל  ו  ם .   (characters)
-    // 0 1 2 3 4 5 12 10 8 6 14  (cluster indices in UTF-8)
-    //       ---         ---     (green span)
-    //
-    // As you can see, our continuous `lo של` span was split into two separated one.
-    // So our 3 spans: black - green - black, become 5 spans: black - green - black - green - black.
-    // If we shape `Hel`, then `lo של` an then `ום` separately - we would get an incorrect output.
-    // To properly handle this we simply shape the whole chunk.
-    //
-    // But this introduces another issue - what to do when we have multiple fonts?
-    // The easy solution would be to simply shape text with each font,
-    // where the first font output is used as a base one and all others overwrite it.
-    // This way in case of:
-    // <text font-family="Arial">Hello <tspan font-family="Helvetica">world</tspan></text>
-    // we would replace Arial glyphs for `world` with Helvetica one. Pretty simple.
-    //
-    // Well, it would work most of the time, but not always.
-    // This is because different fonts can produce different amount of glyphs for the same text.
-    // The most common example are ligatures. Some fonts can shape `fi` as two glyphs `f` and `i`,
-    // but some can use `ﬁ` (U+FB01) instead.
-    // Meaning that during merging we have to overwrite not individual glyphs, but clusters.
+    let glyphs = shape_chunk_glyphs(chunk, fonts_cache, resolver, fontdb);
+    glyphs_to_clusters(chunk, &glyphs)
+}
 
+fn shape_chunk_glyphs(
+    chunk: &TextChunk,
+    fonts_cache: &FontsCache,
+    resolver: &FontResolver,
+    fontdb: &mut Arc<fontdb::Database>,
+) -> Vec<Glyph> {
     // Glyph splitting assigns distinct glyphs to the same index in the original text, we need to
     // store previously used indices to make sure we do not re-use the same index while overwriting
     // span glyphs.
@@ -943,17 +1178,7 @@ fn process_chunk(
             None => continue,
         };
 
-        let tmp_glyphs = shape_text(
-            &chunk.text,
-            font,
-            span.small_caps,
-            span.apply_kerning,
-            &span.font,
-            span.font_size.get(),
-            span.font_optical_sizing,
-            resolver,
-            fontdb,
-        );
+        let tmp_glyphs = shape_chunk_span(chunk, span, font, resolver, fontdb);
 
         // Do nothing with the first run.
         if glyphs.is_empty() {
@@ -961,49 +1186,85 @@ fn process_chunk(
             continue;
         }
 
-        positions.clear();
-
-        // Overwrite span's glyphs.
-        let mut iter = tmp_glyphs.into_iter();
-        while let Some(new_glyph) = iter.next() {
-            if !span_contains(span, new_glyph.byte_idx) {
-                continue;
-            }
-
-            let Some(idx) = glyphs
-                .iter()
-                .position(|g| g.byte_idx == new_glyph.byte_idx)
-                .filter(|pos| !positions.contains(pos))
-            else {
-                continue;
-            };
-
-            positions.insert(idx);
-
-            let prev_cluster_len = glyphs[idx].cluster_len;
-            if prev_cluster_len < new_glyph.cluster_len {
-                // If the new font represents the same cluster with fewer glyphs
-                // then remove remaining glyphs.
-                for _ in 1..new_glyph.cluster_len {
-                    glyphs.remove(idx + 1);
-                }
-            } else if prev_cluster_len > new_glyph.cluster_len {
-                // If the new font represents the same cluster with more glyphs
-                // then insert them after the current one.
-                for j in 1..prev_cluster_len {
-                    if let Some(g) = iter.next() {
-                        glyphs.insert(idx + j, g);
-                    }
-                }
-            }
-
-            glyphs[idx] = new_glyph;
-        }
+        merge_span_glyphs(span, &mut glyphs, tmp_glyphs, &mut positions);
     }
 
+    glyphs
+}
+
+fn shape_chunk_span(
+    chunk: &TextChunk,
+    span: &TextSpan,
+    font: Arc<ResolvedFont>,
+    resolver: &FontResolver,
+    fontdb: &mut Arc<fontdb::Database>,
+) -> Vec<Glyph> {
+    shape_text(
+        &chunk.text,
+        font,
+        span.small_caps,
+        span.apply_kerning,
+        &span.font,
+        span.font_size.get(),
+        span.font_optical_sizing,
+        resolver,
+        fontdb,
+    )
+}
+
+fn merge_span_glyphs(
+    span: &TextSpan,
+    glyphs: &mut Vec<Glyph>,
+    new_glyphs: Vec<Glyph>,
+    positions: &mut HashSet<usize>,
+) {
+    positions.clear();
+    let mut iter = new_glyphs.into_iter();
+    while let Some(new_glyph) = iter.next() {
+        if !span_contains(span, new_glyph.byte_idx) {
+            continue;
+        }
+
+        let Some(idx) = glyphs
+            .iter()
+            .position(|g| g.byte_idx == new_glyph.byte_idx)
+            .filter(|pos| !positions.contains(pos))
+        else {
+            continue;
+        };
+
+        positions.insert(idx);
+
+        resize_glyph_cluster(glyphs, idx, new_glyph.cluster_len, &mut iter);
+
+        glyphs[idx] = new_glyph;
+    }
+}
+
+fn resize_glyph_cluster(
+    glyphs: &mut Vec<Glyph>,
+    idx: usize,
+    new_len: usize,
+    iter: &mut std::vec::IntoIter<Glyph>,
+) {
+    let prev_cluster_len = glyphs[idx].cluster_len;
+    if prev_cluster_len < new_len {
+        for _ in 1..new_len {
+            glyphs.remove(idx + 1);
+        }
+    } else if prev_cluster_len > new_len {
+        for j in 1..prev_cluster_len {
+            if let Some(g) = iter.next() {
+                glyphs.insert(idx + j, g);
+            }
+        }
+    }
+}
+
+fn glyphs_to_clusters(chunk: &TextChunk, glyphs: &[Glyph]) -> Vec<GlyphCluster> {
     // Convert glyphs to clusters.
     let mut clusters = Vec::new();
-    for (range, byte_idx) in GlyphClusters::new(&glyphs) {
+    for (range, byte_idx) in GlyphClusters::new(glyphs) {
         if let Some(span) = chunk_span_at(chunk, byte_idx) {
             clusters.push(form_glyph_clusters(
                 &glyphs[range],
@@ -1025,54 +1286,73 @@ fn apply_length_adjust(chunk: &TextChunk, clusters: &mut [GlyphCluster]) {
             None => continue,
         };
 
-        let mut width = 0.0;
-        let mut cluster_indexes = Vec::new();
-        for i in span.start..span.end {
-            if let Some(index) = clusters.iter().position(|c| c.byte_idx.value() == i) {
-                cluster_indexes.push(index);
-            }
-        }
-        // Complex scripts can have multi-codepoint clusters therefore we have to remove duplicates.
-        cluster_indexes.sort();
-        cluster_indexes.dedup();
-
-        for i in &cluster_indexes {
-            // Use the original cluster `width` and not `advance`.
-            // This method essentially discards any `word-spacing` and `letter-spacing`.
-            width += clusters[*i].width;
-        }
+        let (cluster_indexes, width) = span_cluster_width(span, clusters);
 
         if cluster_indexes.is_empty() {
             continue;
         }
 
         if span.length_adjust == LengthAdjust::Spacing {
-            let factor = if cluster_indexes.len() > 1 {
-                (target_width - width) / (cluster_indexes.len() - 1) as f32
-            } else {
-                0.0
-            };
-
-            for i in cluster_indexes {
-                clusters[i].advance = clusters[i].width + factor;
-                clusters[i].text_length_spacing = factor;
-            }
+            adjust_cluster_spacing(clusters, &cluster_indexes, target_width, width);
         } else {
-            let factor = target_width / width;
-            // Prevent multiplying by zero.
-            if factor < 0.001 {
-                continue;
-            }
+            scale_span_clusters(
+                clusters,
+                &cluster_indexes,
+                target_width / width,
+                is_horizontal,
+            );
+        }
+    }
+}
 
-            for i in cluster_indexes {
-                clusters[i].transform = clusters[i].transform.pre_scale(factor, 1.0);
+fn adjust_cluster_spacing(
+    clusters: &mut [GlyphCluster],
+    indexes: &[usize],
+    target_width: f32,
+    width: f32,
+) {
+    let factor = if indexes.len() > 1 {
+        (target_width - width) / (indexes.len() - 1) as f32
+    } else {
+        0.0
+    };
+    for &i in indexes {
+        clusters[i].advance = clusters[i].width + factor;
+        clusters[i].text_length_spacing = factor;
+    }
+}
 
-                // Technically just a hack to support the current text-on-path algorithm.
-                if !is_horizontal {
-                    clusters[i].advance *= factor;
-                    clusters[i].width *= factor;
-                }
-            }
+fn span_cluster_width(span: &TextSpan, clusters: &[GlyphCluster]) -> (Vec<usize>, f32) {
+    let mut cluster_indexes = Vec::new();
+    for i in span.start..span.end {
+        if let Some(index) = clusters.iter().position(|c| c.byte_idx.value() == i) {
+            cluster_indexes.push(index);
+        }
+    }
+    // 複数codepointのclusterを重複して数えない。
+    cluster_indexes.sort();
+    cluster_indexes.dedup();
+    let mut width = 0.0;
+    for i in &cluster_indexes {
+        width += clusters[*i].width;
+    }
+    (cluster_indexes, width)
+}
+
+fn scale_span_clusters(
+    clusters: &mut [GlyphCluster],
+    indexes: &[usize],
+    factor: f32,
+    is_horizontal: bool,
+) {
+    if factor < 0.001 {
+        return;
+    }
+    for i in indexes {
+        clusters[*i].transform = clusters[*i].transform.pre_scale(factor, 1.0);
+        if !is_horizontal {
+            clusters[*i].advance *= factor;
+            clusters[*i].width *= factor;
         }
     }
 }
@@ -1087,21 +1367,7 @@ fn apply_writing_mode(writing_mode: WritingMode, clusters: &mut [GlyphCluster]) 
     for cluster in clusters {
         let orientation = unicode_vo::char_orientation(cluster.codepoint);
         if orientation == unicode_vo::Orientation::Upright {
-            let mut ts = Transform::default();
-            // Position glyph in the center of vertical axis.
-            ts = ts.pre_translate(0.0, (cluster.ascent + cluster.descent) / 2.0);
-            // Rotate by 90 degrees in the center.
-            ts = ts.pre_rotate_at(
-                -90.0,
-                cluster.width / 2.0,
-                -(cluster.ascent + cluster.descent) / 2.0,
-            );
-
-            cluster.path_transform = ts;
-
-            // Move "baseline" to the middle and make height equal to width.
-            cluster.ascent = cluster.width / 2.0;
-            cluster.descent = -cluster.width / 2.0;
+            orient_upright_cluster(cluster);
         } else {
             // Could not find a spec that explains this,
             // but this is how other applications are shifting the "rotated" characters
@@ -1111,6 +1377,19 @@ fn apply_writing_mode(writing_mode: WritingMode, clusters: &mut [GlyphCluster]) 
                 .pre_translate(0.0, (cluster.ascent + cluster.descent) / 2.0);
         }
     }
+}
+
+fn orient_upright_cluster(cluster: &mut GlyphCluster) {
+    let mut ts = Transform::default();
+    ts = ts.pre_translate(0.0, (cluster.ascent + cluster.descent) / 2.0);
+    ts = ts.pre_rotate_at(
+        -90.0,
+        cluster.width / 2.0,
+        -(cluster.ascent + cluster.descent) / 2.0,
+    );
+    cluster.path_transform = ts;
+    cluster.ascent = cluster.width / 2.0;
+    cluster.descent = -cluster.width / 2.0;
 }
 
 /// Applies the `letter-spacing` property to a text chunk clusters.
@@ -1135,21 +1414,22 @@ fn apply_letter_spacing(chunk: &TextChunk, clusters: &mut [GlyphCluster]) {
         let script = cluster.codepoint.script();
         if script_supports_letter_spacing(script) {
             if let Some(span) = chunk_span_at(chunk, cluster.byte_idx) {
-                // A space after the last cluster should be ignored,
-                // since it affects the bbox and text alignment.
-                if i != num_clusters - 1 {
-                    cluster.advance += span.letter_spacing;
-                }
-
-                // If the cluster advance became negative - clear it.
-                // This is an UB so we can do whatever we want, and we mimic Chrome's behavior.
-                if !cluster.advance.is_valid_length() {
-                    cluster.width = 0.0;
-                    cluster.advance = 0.0;
-                    cluster.glyphs = vec![];
-                }
+                apply_cluster_letter_spacing(cluster, span, i != num_clusters - 1);
             }
         }
+    }
+}
+
+fn apply_cluster_letter_spacing(cluster: &mut GlyphCluster, span: &TextSpan, has_next: bool) {
+    // 末尾の間隔は境界矩形と配置に影響させない。
+    if has_next {
+        cluster.advance += span.letter_spacing;
+    }
+    // 無効な負の送り幅はChromeと同じように消去する。
+    if !cluster.advance.is_valid_length() {
+        cluster.width = 0.0;
+        cluster.advance = 0.0;
+        cluster.glyphs = vec![];
     }
 }
 
@@ -1183,35 +1463,30 @@ fn apply_word_spacing(chunk: &TextChunk, clusters: &mut [GlyphCluster]) {
 fn form_glyph_clusters(glyphs: &[Glyph], text: &str, font_size: f32) -> GlyphCluster {
     debug_assert!(!glyphs.is_empty());
 
+    let mut positioned_glyphs = vec![];
+    let (width, advance) = position_cluster_glyphs(glyphs, font_size, &mut positioned_glyphs);
+    make_glyph_cluster(
+        &glyphs[0],
+        text,
+        font_size,
+        width,
+        advance,
+        positioned_glyphs,
+    )
+}
+
+fn position_cluster_glyphs(
+    glyphs: &[Glyph],
+    font_size: f32,
+    positioned_glyphs: &mut Vec<PositionedGlyph>,
+) -> (f32, f32) {
     let mut x = 0.0;
     let mut width = 0.0;
     let mut advance = 0.0;
-
-    let mut positioned_glyphs = vec![];
-
     for glyph in glyphs {
         let sx = glyph.font.scale(font_size);
 
-        // Apply offset.
-        //
-        // The first glyph in the cluster will have an offset from 0x0,
-        // but the later one will have an offset from the "current position".
-        // So we have to keep an advance.
-        // TODO: should be done only inside a single text span
-        let ts = Transform::from_translate(x + glyph.dx as f32, -glyph.dy as f32);
-
-        positioned_glyphs.push(PositionedGlyph {
-            glyph_ts: ts,
-            // Will be set later.
-            cluster_ts: Transform::default(),
-            // Will be set later.
-            span_ts: Transform::default(),
-            units_per_em: glyph.font.units_per_em.get(),
-            font_size,
-            font: glyph.font.id,
-            text: glyph.text.clone(),
-            id: glyph.id,
-        });
+        positioned_glyphs.push(position_glyph(glyph, x, font_size));
 
         x += glyph.width as f32;
 
@@ -1222,8 +1497,19 @@ fn form_glyph_clusters(glyphs: &[Glyph], text: &str, font_size: f32) -> GlyphClu
         }
     }
 
-    let byte_idx = glyphs[0].byte_idx;
-    let font = glyphs[0].font.clone();
+    (width, advance)
+}
+
+fn make_glyph_cluster(
+    glyph: &Glyph,
+    text: &str,
+    font_size: f32,
+    width: f32,
+    advance: f32,
+    positioned_glyphs: Vec<PositionedGlyph>,
+) -> GlyphCluster {
+    let byte_idx = glyph.byte_idx;
+    let font = glyph.font.clone();
     GlyphCluster {
         byte_idx,
         codepoint: byte_idx.char_from(text),
@@ -1240,8 +1526,27 @@ fn form_glyph_clusters(glyphs: &[Glyph], text: &str, font_size: f32) -> GlyphClu
     }
 }
 
+fn position_glyph(glyph: &Glyph, x: f32, font_size: f32) -> PositionedGlyph {
+    // 後続glyphの位置はcluster内の現在位置からの相対値となる。
+    let ts = Transform::from_translate(x + glyph.dx as f32, -glyph.dy as f32);
+    PositionedGlyph {
+        glyph_ts: ts,
+        cluster_ts: Transform::default(),
+        span_ts: Transform::default(),
+        units_per_em: glyph.font.units_per_em.get(),
+        font_size,
+        font: glyph.font.id,
+        text: glyph.text.clone(),
+        id: glyph.id,
+    }
+}
+
 pub(crate) trait DatabaseExt {
-    fn load_font(&self, id: ID, variations: &[crate::svg_engine::usvg::FontVariation]) -> Option<ResolvedFont>;
+    fn load_font(
+        &self,
+        id: ID,
+        variations: &[crate::svg_engine::usvg::FontVariation],
+    ) -> Option<ResolvedFont>;
     fn has_char(&self, id: ID, c: char) -> bool;
 }
 
@@ -1280,7 +1585,11 @@ pub(crate) fn css_font_x_height(
 
 impl DatabaseExt for Database {
     #[inline(never)]
-    fn load_font(&self, id: ID, variations: &[crate::svg_engine::usvg::FontVariation]) -> Option<ResolvedFont> {
+    fn load_font(
+        &self,
+        id: ID,
+        variations: &[crate::svg_engine::usvg::FontVariation],
+    ) -> Option<ResolvedFont> {
         self.with_face_data(id, |data, face_index| -> Option<ResolvedFont> {
             let font = skrifa::FontRef::from_index(data, face_index).ok()?;
 
@@ -1295,89 +1604,7 @@ impl DatabaseExt for Database {
             let coords = location.coords();
             let metrics = font.metrics(Size::unscaled(), &location);
 
-            // Reject fonts with an out-of-range unitsPerEm, like `ttf-parser` did.
-            if !(16..=16384).contains(&metrics.units_per_em) {
-                return None;
-            }
-            let units_per_em = NonZeroU16::new(metrics.units_per_em)?;
-            /* WHY: opszの有無は同じfaceで既に取得したSkrifa metadataから保持する。 */
-            let has_optical_sizing_axis = font
-                .axes()
-                .get_by_tag(crate::svg_engine::usvg::text::OPSZ)
-                .is_some();
-
-            let ascent = metrics.ascent;
-            let descent = metrics.descent;
-
-            let x_height = metrics
-                .x_height
-                .filter(|x| *x > 0.0)
-                .and_then(|x| u16::try_from(x.round() as i32).ok())
-                .and_then(NonZeroU16::new);
-            let x_height = match x_height {
-                Some(height) => height,
-                None => {
-                    // If not set - fallback to height * 45%.
-                    // 45% is what Firefox uses.
-                    u16::try_from(((ascent - descent) * 0.45).round() as i32)
-                        .ok()
-                        .and_then(NonZeroU16::new)?
-                }
-            };
-
-            let line_through = metrics.strikeout;
-            let line_through_position = match line_through {
-                Some(metrics) => metrics.offset.round() as i16,
-                None => x_height.get() as i16 / 2,
-            };
-
-            let (underline_position, underline_thickness) = match metrics.underline {
-                Some(metrics) => {
-                    let thickness = u16::try_from(metrics.thickness.round() as i32)
-                        .ok()
-                        .and_then(NonZeroU16::new)
-                        // `skrifa` guarantees that units_per_em is > 0
-                        .unwrap_or_else(|| NonZeroU16::new(units_per_em.get() / 12).unwrap());
-
-                    (metrics.offset.round() as i16, thickness)
-                }
-                None => (
-                    -(units_per_em.get() as i16) / 9,
-                    NonZeroU16::new(units_per_em.get() / 12).unwrap(),
-                ),
-            };
-
-            // 0.2 and 0.4 are generic offsets used by some applications (Inkscape/librsvg).
-            let mut subscript_offset = (units_per_em.get() as f32 / 0.2).round() as i16;
-            let mut superscript_offset = (units_per_em.get() as f32 / 0.4).round() as i16;
-
-            // TODO: Consider upstreaming into skrifa
-            if let Ok(os2) = font.os2() {
-                subscript_offset = os2.y_subscript_y_offset();
-                superscript_offset = os2.y_superscript_y_offset();
-            }
-            if let (Ok(mvar), true) = (font.mvar(), !coords.is_empty()) {
-                use skrifa::raw::tables::mvar::tags::*;
-                let metric_delta =
-                    |tag| mvar.metric_delta(tag, coords).unwrap_or_default().to_f32();
-
-                subscript_offset += metric_delta(SBYO).round() as i16;
-                superscript_offset += metric_delta(SPYO).round() as i16;
-            }
-
-            Some(ResolvedFont {
-                id,
-                units_per_em,
-                has_optical_sizing_axis,
-                ascent: ascent.round() as i16,
-                descent: descent.round() as i16,
-                x_height,
-                underline_position,
-                underline_thickness,
-                line_through_position,
-                subscript_offset,
-                superscript_offset,
-            })
+            resolved_font_from_metrics(&font, &metrics, coords, id)
         })?
     }
 
@@ -1394,6 +1621,114 @@ impl DatabaseExt for Database {
     }
 }
 
+fn resolved_font_from_metrics(
+    font: &skrifa::FontRef<'_>,
+    metrics: &skrifa::metrics::Metrics,
+    coords: &[skrifa::instance::NormalizedCoord],
+    id: ID,
+) -> Option<ResolvedFont> {
+    let (units_per_em, has_optical_sizing_axis) = resolved_font_identity(font, metrics)?;
+    let ascent = metrics.ascent;
+    let descent = metrics.descent;
+
+    let x_height = resolved_x_height(metrics)?;
+
+    let line_through = metrics.strikeout;
+    let line_through_position = match line_through {
+        Some(metrics) => metrics.offset.round() as i16,
+        None => x_height.get() as i16 / 2,
+    };
+
+    let (underline_position, underline_thickness) = resolved_underline(metrics, units_per_em);
+    let (subscript_offset, superscript_offset) =
+        resolved_script_offsets(font, coords, units_per_em);
+
+    Some(ResolvedFont {
+        id,
+        units_per_em,
+        has_optical_sizing_axis,
+        ascent: ascent.round() as i16,
+        descent: descent.round() as i16,
+        x_height,
+        underline_position,
+        underline_thickness,
+        line_through_position,
+        subscript_offset,
+        superscript_offset,
+    })
+}
+
+fn resolved_font_identity(
+    font: &skrifa::FontRef<'_>,
+    metrics: &skrifa::metrics::Metrics,
+) -> Option<(NonZeroU16, bool)> {
+    // Reject fonts with an out-of-range unitsPerEm, like `ttf-parser` did.
+    if !(16..=16384).contains(&metrics.units_per_em) {
+        return None;
+    }
+    let units_per_em = NonZeroU16::new(metrics.units_per_em)?;
+    /* WHY: opszの有無は同じfaceで既に取得したSkrifa metadataから保持する。 */
+    let has_optical_sizing_axis = font
+        .axes()
+        .get_by_tag(crate::svg_engine::usvg::text::OPSZ)
+        .is_some();
+
+    Some((units_per_em, has_optical_sizing_axis))
+}
+
+fn resolved_x_height(metrics: &skrifa::metrics::Metrics) -> Option<NonZeroU16> {
+    let x_height = metrics
+        .x_height
+        .filter(|x| *x > 0.0)
+        .and_then(|x| u16::try_from(x.round() as i32).ok())
+        .and_then(NonZeroU16::new);
+    match x_height {
+        Some(height) => Some(height),
+        None => u16::try_from(((metrics.ascent - metrics.descent) * 0.45).round() as i32)
+            .ok()
+            .and_then(NonZeroU16::new),
+    }
+}
+
+fn resolved_underline(
+    metrics: &skrifa::metrics::Metrics,
+    units_per_em: NonZeroU16,
+) -> (i16, NonZeroU16) {
+    match metrics.underline {
+        Some(metrics) => {
+            let thickness = u16::try_from(metrics.thickness.round() as i32)
+                .ok()
+                .and_then(NonZeroU16::new)
+                .unwrap_or_else(|| NonZeroU16::new(units_per_em.get() / 12).unwrap());
+            (metrics.offset.round() as i16, thickness)
+        }
+        None => (
+            -(units_per_em.get() as i16) / 9,
+            NonZeroU16::new(units_per_em.get() / 12).unwrap(),
+        ),
+    }
+}
+
+fn resolved_script_offsets(
+    font: &skrifa::FontRef<'_>,
+    coords: &[skrifa::instance::NormalizedCoord],
+    units_per_em: NonZeroU16,
+) -> (i16, i16) {
+    let mut subscript_offset = (units_per_em.get() as f32 / 0.2).round() as i16;
+    let mut superscript_offset = (units_per_em.get() as f32 / 0.4).round() as i16;
+    if let Ok(os2) = font.os2() {
+        subscript_offset = os2.y_subscript_y_offset();
+        superscript_offset = os2.y_superscript_y_offset();
+    }
+    if let (Ok(mvar), true) = (font.mvar(), !coords.is_empty()) {
+        use skrifa::raw::tables::mvar::tags::*;
+        let metric_delta = |tag| mvar.metric_delta(tag, coords).unwrap_or_default().to_f32();
+        subscript_offset += metric_delta(SBYO).round() as i16;
+        superscript_offset += metric_delta(SPYO).round() as i16;
+    }
+    (subscript_offset, superscript_offset)
+}
+
 /// Text shaping with font fallback.
 pub(crate) fn shape_text(
     text: &str,
@@ -1406,98 +1741,118 @@ pub(crate) fn shape_text(
     resolver: &FontResolver,
     fontdb: &mut Arc<fontdb::Database>,
 ) -> Vec<Glyph> {
-    let variations = requested_font.variations();
-    let mut glyphs = shape_text_with_font(
+    let context = FallbackContext {
         text,
-        font.clone(),
         small_caps,
         apply_kerning,
-        variations,
+        requested_font,
         font_size,
         font_optical_sizing,
+        resolver,
+    };
+    let glyphs = shape_with_fallback(&context, font, fontdb);
+    warn_missing_glyphs(text, &glyphs);
+    glyphs
+}
+
+struct FallbackContext<'a> {
+    text: &'a str,
+    small_caps: bool,
+    apply_kerning: bool,
+    requested_font: &'a Font,
+    font_size: f32,
+    font_optical_sizing: FontOpticalSizing,
+    resolver: &'a FontResolver<'a>,
+}
+
+fn shape_with_fallback(
+    context: &FallbackContext<'_>,
+    font: Arc<ResolvedFont>,
+    fontdb: &mut Arc<fontdb::Database>,
+) -> Vec<Glyph> {
+    let mut glyphs = shape_with_selected_font(context, font.clone(), fontdb);
+    let mut used_fonts = vec![font.id];
+    loop {
+        let missing = glyphs
+            .iter()
+            .find(|glyph| glyph.is_missing())
+            .map(|glyph| glyph.byte_idx.char_from(context.text));
+        let Some(c) = missing else { break };
+        let Some(fallback_font) = select_fallback_font(context, c, &used_fonts, fontdb) else {
+            break;
+        };
+        let fallback_glyphs = shape_with_selected_font(context, fallback_font.clone(), fontdb);
+        if !merge_fallback_glyphs(&mut glyphs, fallback_glyphs) {
+            break;
+        }
+        used_fonts.push(fallback_font.id);
+    }
+    glyphs
+}
+
+fn shape_with_selected_font(
+    context: &FallbackContext<'_>,
+    font: Arc<ResolvedFont>,
+    fontdb: &fontdb::Database,
+) -> Vec<Glyph> {
+    shape_text_with_font(
+        context.text,
+        font,
+        context.small_caps,
+        context.apply_kerning,
+        context.requested_font.variations(),
+        context.font_size,
+        context.font_optical_sizing,
         fontdb,
     )
-    .unwrap_or_default();
+    .unwrap_or_default()
+}
 
-    // Remember all fonts used for shaping.
-    let mut used_fonts = vec![font.id];
+fn select_fallback_font(
+    context: &FallbackContext<'_>,
+    c: char,
+    used_fonts: &[ID],
+    fontdb: &mut Arc<fontdb::Database>,
+) -> Option<Arc<ResolvedFont>> {
+    let selected = match &context.resolver.select_styled_fallback {
+        Some(selector) => selector(context.requested_font, c, used_fonts, fontdb),
+        None => (context.resolver.select_fallback)(c, used_fonts, fontdb),
+    };
+    selected
+        .and_then(|id| fontdb.load_font(id, context.requested_font.variations()))
+        .map(Arc::new)
+}
 
-    // Loop until all glyphs become resolved or until no more fonts are left.
-    'outer: loop {
-        let mut missing = None;
-        for glyph in &glyphs {
-            if glyph.is_missing() {
-                missing = Some(glyph.byte_idx.char_from(text));
-                break;
+fn merge_fallback_glyphs(glyphs: &mut Vec<Glyph>, fallback: Vec<Glyph>) -> bool {
+    let all_matched = fallback.iter().all(|g| !g.is_missing());
+    let same_boundaries = glyphs.len() == fallback.len()
+        && glyphs
+            .iter()
+            .zip(&fallback)
+            .all(|(primary, other)| primary.byte_idx == other.byte_idx);
+    if all_matched && !same_boundaries {
+        *glyphs = fallback;
+        return false;
+    }
+    if glyphs.len() != fallback.len() {
+        return false;
+    }
+    if all_matched && same_boundaries {
+        replace_missing_clusters(glyphs, &fallback);
+    } else {
+        for i in 0..glyphs.len() {
+            if glyphs[i].is_missing() && !fallback[i].is_missing() {
+                glyphs[i] = fallback[i].clone();
             }
-        }
-
-        if let Some(c) = missing {
-            let selected = match &resolver.select_styled_fallback {
-                Some(selector) => selector(requested_font, c, &used_fonts, fontdb),
-                None => (resolver.select_fallback)(c, &used_fonts, fontdb),
-            };
-            let fallback_font = match selected
-                .and_then(|id| fontdb.load_font(id, variations))
-            {
-                Some(v) => Arc::new(v),
-                None => break 'outer,
-            };
-
-            // Shape again, using a new font.
-            let fallback_glyphs = shape_text_with_font(
-                text,
-                fallback_font.clone(),
-                small_caps,
-                apply_kerning,
-                variations,
-                font_size,
-                font_optical_sizing,
-                fontdb,
-            )
-            .unwrap_or_default();
-
-            let all_matched = fallback_glyphs.iter().all(|g| !g.is_missing());
-            let same_cluster_boundaries = glyphs.len() == fallback_glyphs.len()
-                && glyphs
-                    .iter()
-                    .zip(&fallback_glyphs)
-                    .all(|(primary, fallback)| primary.byte_idx == fallback.byte_idx);
-            if all_matched && !same_cluster_boundaries {
-                // WHY: 同じbyte境界なら主faceのcluster対応を保ち、異なる場合だけ従来の全置換を使う。
-                // Replace all glyphs when all of them were matched.
-                glyphs = fallback_glyphs;
-                break 'outer;
-            }
-
-            // We assume, that shaping with an any font will produce the same amount of glyphs.
-            // This is incorrect, but good enough for now.
-            if glyphs.len() != fallback_glyphs.len() {
-                break 'outer;
-            }
-
-            if all_matched && same_cluster_boundaries {
-                replace_missing_clusters(&mut glyphs, &fallback_glyphs);
-            } else {
-                for i in 0..glyphs.len() {
-                    if glyphs[i].is_missing() && !fallback_glyphs[i].is_missing() {
-                        glyphs[i] = fallback_glyphs[i].clone();
-                    }
-                }
-            }
-
-            // Remember this font.
-            used_fonts.push(fallback_font.id);
-        } else {
-            break 'outer;
         }
     }
+    true
+}
 
-    // Warn about missing glyphs.
-    for glyph in &glyphs {
+fn warn_missing_glyphs(text: &str, glyphs: &[Glyph]) {
+    for glyph in glyphs {
         if glyph.is_missing() {
             let c = glyph.byte_idx.char_from(text);
-            // TODO: print a full grapheme
             log::warn!(
                 "No fonts with a {}/U+{:X} character were found.",
                 c,
@@ -1505,8 +1860,6 @@ pub(crate) fn shape_text(
             );
         }
     }
-
-    glyphs
 }
 
 fn replace_missing_clusters(glyphs: &mut [Glyph], fallback_glyphs: &[Glyph]) {
@@ -1538,39 +1891,14 @@ fn shape_text_with_font(
     fontdb: &fontdb::Database,
 ) -> Option<Vec<Glyph>> {
     fontdb.with_face_data(font.id, |font_data, face_index| -> Option<Vec<Glyph>> {
-        use svg_harfrust::{Feature, ShaperData, ShaperInstance, Tag, UnicodeBuffer, Variation};
-
-        use crate::svg_engine::usvg::text::OPSZ;
+        use svg_harfrust::{ShaperData, ShaperInstance};
 
         let hr_font = svg_harfrust::FontRef::from_index(font_data, face_index).ok()?;
 
-        // Build the list of variations to apply
-        let mut variations: Vec<Variation> = variations
-            .iter()
-            .map(|v| Variation {
-                tag: Tag::from_be_bytes(v.tag),
-                value: v.value,
-            })
-            .collect();
-
-        // Automatic optical sizing: if font-optical-sizing is auto and the font has
-        // an 'opsz' axis that isn't explicitly set, auto-set it to match font size.
-        // This matches browser behavior (CSS font-optical-sizing: auto).
-        if font_optical_sizing == crate::svg_engine::usvg::FontOpticalSizing::Auto {
-            let has_explicit_opsz = variations.iter().any(|v| v.tag == *b"opsz");
-            if !has_explicit_opsz && font.has_optical_sizing_axis {
-                variations.push(Variation {
-                    tag: OPSZ,
-                    value: font_size,
-                });
-            }
-        }
+        let variations = shaping_variations(variations, &font, font_size, font_optical_sizing);
 
         let bidi_info = unicode_bidi::BidiInfo::new(text, Some(unicode_bidi::Level::ltr()));
         let paragraph = &bidi_info.paragraphs[0];
-        let line = paragraph.range.clone();
-
-        let mut glyphs = Vec::new();
 
         // A shaper instance is only needed to apply variations.
         let instance_data = (!variations.is_empty())
@@ -1581,75 +1909,147 @@ fn shape_text_with_font(
             .instance(instance_data.as_ref())
             .build();
 
-        let mut features = Vec::new();
-        if small_caps {
-            features.push(Feature::new(Tag::new(b"smcp"), 1, ..));
-        }
-        if !apply_kerning {
-            features.push(Feature::new(Tag::new(b"kern"), 0, ..));
-        }
+        let features = shaping_features(small_caps, apply_kerning);
 
-        let (levels, runs) = bidi_info.visual_runs(paragraph, line);
-        for run in runs.iter() {
-            let sub_text = &text[run.clone()];
-            if sub_text.is_empty() {
-                continue;
-            }
-
-            let ltr = levels[run.start].is_ltr();
-            let direction = if ltr {
-                svg_harfrust::Direction::LeftToRight
-            } else {
-                svg_harfrust::Direction::RightToLeft
-            };
-
-            let mut buffer = UnicodeBuffer::new();
-            buffer.push_str(sub_text);
-            buffer.set_direction(direction);
-
-            // TODO: explicitly set language?
-            buffer.guess_segment_properties();
-
-            let output = shaper.shape(
-                buffer,
-                ShapeOptions::new()
-                    .point_size(Some(font_size))
-                    .features(&features),
-            );
-
-            let positions = output.glyph_positions();
-            let infos = output.glyph_infos();
-
-            for i in 0..output.len() {
-                let pos = positions[i];
-                let info = infos[i];
-                let idx = run.start + info.cluster as usize;
-
-                let start = info.cluster as usize;
-
-                let end = if ltr {
-                    i.checked_add(1)
-                } else {
-                    i.checked_sub(1)
-                }
-                .and_then(|last| infos.get(last))
-                .map_or(sub_text.len(), |info| info.cluster as usize);
-
-                glyphs.push(Glyph {
-                    byte_idx: ByteIndex::new(idx),
-                    cluster_len: end.checked_sub(start).unwrap_or(0), // TODO: can fail?
-                    text: sub_text[start..end].to_string(),
-                    id: GlyphId(info.glyph_id),
-                    dx: pos.x_offset,
-                    dy: pos.y_offset,
-                    width: pos.x_advance,
-                    font: font.clone(),
-                });
-            }
-        }
-
-        Some(glyphs)
+        Some(shape_visual_runs(
+            text, &font, &shaper, &features, font_size, &bidi_info, paragraph,
+        ))
     })?
+}
+
+fn shape_visual_runs(
+    text: &str,
+    font: &Arc<ResolvedFont>,
+    shaper: &svg_harfrust::Shaper<'_>,
+    features: &[svg_harfrust::Feature],
+    font_size: f32,
+    bidi_info: &unicode_bidi::BidiInfo<'_>,
+    paragraph: &unicode_bidi::ParagraphInfo,
+) -> Vec<Glyph> {
+    let (levels, runs) = bidi_info.visual_runs(paragraph, paragraph.range.clone());
+    let context = ShapingContext {
+        text,
+        font,
+        shaper,
+        features,
+        font_size,
+    };
+    let mut glyphs = Vec::new();
+    for run in &runs {
+        append_shaped_run(&context, run, &levels, &mut glyphs);
+    }
+    glyphs
+}
+
+struct ShapingContext<'a> {
+    text: &'a str,
+    font: &'a Arc<ResolvedFont>,
+    shaper: &'a svg_harfrust::Shaper<'a>,
+    features: &'a [svg_harfrust::Feature],
+    font_size: f32,
+}
+
+fn append_shaped_run(
+    context: &ShapingContext<'_>,
+    run: &std::ops::Range<usize>,
+    levels: &[unicode_bidi::Level],
+    glyphs: &mut Vec<Glyph>,
+) {
+    let sub_text = &context.text[run.clone()];
+    if sub_text.is_empty() {
+        return;
+    }
+    let ltr = levels[run.start].is_ltr();
+    let direction = if ltr {
+        svg_harfrust::Direction::LeftToRight
+    } else {
+        svg_harfrust::Direction::RightToLeft
+    };
+    let mut buffer = svg_harfrust::UnicodeBuffer::new();
+    buffer.push_str(sub_text);
+    buffer.set_direction(direction);
+    // TODO: explicitly set language?
+    buffer.guess_segment_properties();
+    let output = context.shaper.shape(
+        buffer,
+        ShapeOptions::new()
+            .point_size(Some(context.font_size))
+            .features(context.features),
+    );
+    append_shaped_glyphs(&output, sub_text, run.start, ltr, context.font, glyphs);
+}
+
+fn append_shaped_glyphs(
+    output: &svg_harfrust::GlyphBuffer,
+    sub_text: &str,
+    run_start: usize,
+    ltr: bool,
+    font: &Arc<ResolvedFont>,
+    glyphs: &mut Vec<Glyph>,
+) {
+    let positions = output.glyph_positions();
+    let infos = output.glyph_infos();
+    for i in 0..output.len() {
+        let pos = positions[i];
+        let info = infos[i];
+        let idx = run_start + info.cluster as usize;
+        let start = info.cluster as usize;
+        let end = if ltr {
+            i.checked_add(1)
+        } else {
+            i.checked_sub(1)
+        }
+        .and_then(|last| infos.get(last))
+        .map_or(sub_text.len(), |info| info.cluster as usize);
+        glyphs.push(Glyph {
+            byte_idx: ByteIndex::new(idx),
+            cluster_len: end.checked_sub(start).unwrap_or(0),
+            text: sub_text[start..end].to_string(),
+            id: GlyphId(info.glyph_id),
+            dx: pos.x_offset,
+            dy: pos.y_offset,
+            width: pos.x_advance,
+            font: font.clone(),
+        });
+    }
+}
+
+fn shaping_variations(
+    variations: &[crate::svg_engine::usvg::FontVariation],
+    font: &ResolvedFont,
+    font_size: f32,
+    optical_sizing: FontOpticalSizing,
+) -> Vec<svg_harfrust::Variation> {
+    use svg_harfrust::{Tag, Variation};
+    let mut variations: Vec<Variation> = variations
+        .iter()
+        .map(|v| Variation {
+            tag: Tag::from_be_bytes(v.tag),
+            value: v.value,
+        })
+        .collect();
+    if optical_sizing == FontOpticalSizing::Auto {
+        let has_explicit_opsz = variations.iter().any(|v| v.tag == *b"opsz");
+        if !has_explicit_opsz && font.has_optical_sizing_axis {
+            variations.push(Variation {
+                tag: crate::svg_engine::usvg::text::OPSZ,
+                value: font_size,
+            });
+        }
+    }
+    variations
+}
+
+fn shaping_features(small_caps: bool, apply_kerning: bool) -> Vec<svg_harfrust::Feature> {
+    use svg_harfrust::{Feature, Tag};
+    let mut features = Vec::new();
+    if small_caps {
+        features.push(Feature::new(Tag::new(b"smcp"), 1, ..));
+    }
+    if !apply_kerning {
+        features.push(Feature::new(Tag::new(b"kern"), 0, ..));
+    }
+    features
 }
 
 /// An iterator over glyph clusters.

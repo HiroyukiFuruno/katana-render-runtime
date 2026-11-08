@@ -58,6 +58,10 @@ resvgの `identity_op` / `too_many_arguments` / `upper_case_acronyms` / `wrong_s
   primary faceの物理weightで要求CSS weightを置き換えず、nested SVGにも同じresolverを渡す。
   未設定時は元のfallback resolverを使い、既定の選択処理は変更しない。
 
+Issue #119では37ファイルの135関数を責務ごとのprivate helperへ分割する。
+公開API、演算順、キャッシュ、描画動作を維持し、既存の描画・性能回帰で確認する。
+box blurの両軸回帰は `src/svg_engine_box_blur_axis_regression_tests.rs` に置く。
+
 元のテスト2件と期待値は保持し、新しい回帰はKRR側へ追加する。
 `PROVENANCE.json` に、元commit、全ファイルの元パス・移植先・両SHA256・変更件数と、
 ライセンスのSHA256を記録している。SHA256は各ファイルの全バイトから算出する。

@@ -51,19 +51,27 @@ fn draw_children(
                 draw_children(text.flattened(), mode, transform, pixmap);
             }
             crate::svg_engine::usvg::Node::Group(group) => {
-                let transform = transform.pre_concat(group.transform());
-
-                if let Some(clip) = group.clip_path() {
-                    // If a `clipPath` child also has a `clip-path`
-                    // then we should render this child on a new canvas,
-                    // clip it, and only then draw it to the `clipPath`.
-                    clip_group(group, clip, transform, pixmap);
-                } else {
-                    draw_children(group, mode, transform, pixmap);
-                }
+                draw_group(group, mode, transform, pixmap);
             }
             _ => {}
         }
+    }
+}
+
+fn draw_group(
+    group: &crate::svg_engine::usvg::Group,
+    mode: tiny_skia::BlendMode,
+    transform: tiny_skia::Transform,
+    pixmap: &mut tiny_skia::PixmapMut,
+) {
+    let transform = transform.pre_concat(group.transform());
+    if let Some(clip) = group.clip_path() {
+        // If a `clipPath` child also has a `clip-path`
+        // then we should render this child on a new canvas,
+        // clip it, and only then draw it to the `clipPath`.
+        clip_group(group, clip, transform, pixmap);
+    } else {
+        draw_children(group, mode, transform, pixmap);
     }
 }
 

@@ -377,28 +377,41 @@ impl SvgColorExt for svgtypes::Color {
 pub(crate) fn convert_doc(svg_doc: &svgtree::Document, opt: &Options) -> Result<Tree, Error> {
     let svg = svg_doc.root_element();
     let shared_fontdb = Rc::new(RefCell::new(opt.fontdb.clone()));
-    let (size, restore_viewbox) = resolve_svg_size(
-        &svg,
-        opt,
-        shared_fontdb.clone(),
-    );
+    let (size, restore_viewbox) = resolve_svg_size(&svg, opt, shared_fontdb.clone());
     let size = size?;
-    let view_box = ViewBox {
-        rect: svg
-            .parse_viewbox()
-            .unwrap_or_else(|| size.to_non_zero_rect(0.0, 0.0)),
-        aspect: svg.attribute(AId::PreserveAspectRatio).unwrap_or_default(),
-    };
+    let view_box = svg_view_box(svg, size);
+    let background_color = svg_background(svg);
+    let mut tree = empty_svg_tree(size, opt);
+    if !svg.is_visible_element(opt) {
+        return Ok(tree);
+    }
+    let state = root_state(view_box.rect, opt, shared_fontdb.clone());
+    let shared_fontdb = state.fontdb.clone();
+    let mut cache = Cache::new(opt.fontdb.clone(), shared_fontdb);
+    collect_source_ids(svg_doc, &mut cache);
+    convert_svg_root(svg_doc, &state, &mut cache, &mut tree, view_box, background_color);
+    finish_svg_tree(&mut tree, cache, restore_viewbox);
+    Ok(tree)
+}
 
-    let background_color = svg
-        .attribute::<&str>(AId::BackgroundColor)
+fn svg_view_box(svg: SvgNode, size: Size) -> ViewBox {
+    ViewBox {
+        rect: svg.parse_viewbox().unwrap_or_else(|| size.to_non_zero_rect(0.0, 0.0)),
+        aspect: svg.attribute(AId::PreserveAspectRatio).unwrap_or_default(),
+    }
+}
+
+fn svg_background(svg: SvgNode) -> Option<svgtypes::Color> {
+    svg.attribute::<&str>(AId::BackgroundColor)
         .and_then(|s| svgtypes::Paint::from_str(s).ok())
         .and_then(|paint| match paint {
             svgtypes::Paint::Color(c) => Some(c),
             _ => None,
-        });
+        })
+}
 
-    let mut tree = Tree {
+fn empty_svg_tree(size: Size, opt: &Options) -> Tree {
+    Tree {
         size,
         root: Group::empty(),
         linear_gradients: Vec::new(),
@@ -408,29 +421,23 @@ pub(crate) fn convert_doc(svg_doc: &svgtree::Document, opt: &Options) -> Result<
         masks: Vec::new(),
         filters: Vec::new(),
         fontdb: opt.fontdb.clone(),
-    };
-
-    if !svg.is_visible_element(opt) {
-        return Ok(tree);
     }
+}
 
-    let state = State {
+fn root_state<'a>(view_box: NonZeroRect, opt: &'a Options<'a>, fontdb: Rc<RefCell<Arc<Database>>>) -> State<'a> {
+    State {
         parent_clip_path: None,
         context_element: None,
         parent_markers: Vec::new(),
         fe_image_link: false,
-        view_box: view_box.rect,
+        view_box,
         use_size: (None, None),
         opt,
-        fontdb: shared_fontdb.clone(),
-    };
+        fontdb,
+    }
+}
 
-    let shared_fontdb = state.fontdb.clone();
-    let mut cache = Cache::new(
-        opt.fontdb.clone(),
-        shared_fontdb,
-    );
-
+fn collect_source_ids(svg_doc: &svgtree::Document, cache: &mut Cache) {
     for node in svg_doc.descendants() {
         if let Some(tag) = node.tag_name() {
             if matches!(
@@ -449,39 +456,56 @@ pub(crate) fn convert_doc(svg_doc: &svgtree::Document, opt: &Options) -> Result<
             }
         }
     }
+}
 
-    // The root transform wraps the viewBox mapping, so its origin is resolved
-    // against the viewport rather than the viewBox.
+fn convert_svg_root(
+    svg_doc: &svgtree::Document,
+    state: &State,
+    cache: &mut Cache,
+    tree: &mut Tree,
+    view_box: ViewBox,
+    background_color: Option<svgtypes::Color>,
+) {
     let root_state = State {
-        view_box: size.to_non_zero_rect(0.0, 0.0),
+        view_box: tree.size.to_non_zero_rect(0.0, 0.0),
         ..state.clone()
     };
-    let svg_ts = svg.resolve_transform(AId::Transform, &root_state);
+    let svg_ts = svg_doc.root_element().resolve_transform(AId::Transform, &root_state);
     let root_ts = svg_ts.pre_concat(view_box.to_transform(tree.size()));
     if root_ts.is_identity() && background_color.is_none() {
-        convert_children(svg_doc.root(), &state, &mut cache, &mut tree.root);
+        convert_children(svg_doc.root(), state, cache, &mut tree.root);
     } else {
-        let mut g = Group::empty();
-
-        if let Some(background_color) = background_color {
-            if let Some(path) = background_path(background_color, view_box.rect.to_rect()) {
-                g.children.push(Node::Path(Box::new(path)));
-            }
-        }
-
-        g.transform = root_ts;
-        g.abs_transform = root_ts;
-        convert_children(svg_doc.root(), &state, &mut cache, &mut g);
-        g.calculate_bounding_boxes();
-        tree.root.children.push(Node::Group(Box::new(g)));
+        append_svg_root_group(svg_doc, state, cache, tree, view_box, background_color, root_ts);
     }
+}
 
-    // Clear cache to make sure that all `Arc<T>` objects have a single strong reference.
+fn append_svg_root_group(
+    svg_doc: &svgtree::Document,
+    state: &State,
+    cache: &mut Cache,
+    tree: &mut Tree,
+    view_box: ViewBox,
+    background_color: Option<svgtypes::Color>,
+    root_ts: Transform,
+) {
+    let mut g = Group::empty();
+    if let Some(background_color) = background_color {
+        if let Some(path) = background_path(background_color, view_box.rect.to_rect()) {
+            g.children.push(Node::Path(Box::new(path)));
+        }
+    }
+    g.transform = root_ts;
+    g.abs_transform = root_ts;
+    convert_children(svg_doc.root(), state, cache, &mut g);
+    g.calculate_bounding_boxes();
+    tree.root.children.push(Node::Group(Box::new(g)));
+}
+
+fn finish_svg_tree(tree: &mut Tree, mut cache: Cache, restore_viewbox: bool) {
     cache.clip_paths.clear();
     cache.masks.clear();
     cache.filters.clear();
     cache.paint.clear();
-
     super::paint_server::update_paint_servers(
         &mut tree.root,
         Transform::default(),
@@ -494,18 +518,10 @@ pub(crate) fn convert_doc(svg_doc: &svgtree::Document, opt: &Options) -> Result<
     tree.root.collect_masks(&mut tree.masks);
     tree.root.collect_filters(&mut tree.filters);
     tree.root.calculate_bounding_boxes();
-
-    // The fontdb might have been mutated and we want to apply these changes to
-    // the tree's fontdb.
-    {
-        tree.fontdb = cache.fontdb;
-    }
-
+    tree.fontdb = cache.fontdb;
     if restore_viewbox {
-        calculate_svg_bbox(&mut tree);
+        calculate_svg_bbox(tree);
     }
-
-    Ok(tree)
 }
 
 fn background_path(background_color: svgtypes::Color, area: Rect) -> Option<Path> {
@@ -532,78 +548,80 @@ fn resolve_svg_size(
     opt: &Options,
     shared_fontdb: Rc<RefCell<Arc<Database>>>,
 ) -> (Result<Size, Error>, bool) {
-    let mut state = State {
-        parent_clip_path: None,
-        context_element: None,
-        parent_markers: Vec::new(),
-        fe_image_link: false,
-        view_box: NonZeroRect::from_xywh(0.0, 0.0, 100.0, 100.0).unwrap(),
-        use_size: (None, None),
-        opt,
-        fontdb: shared_fontdb,
-    };
-
+    let default_view_box = NonZeroRect::from_xywh(0.0, 0.0, 100.0, 100.0).unwrap();
+    let mut state = root_state(default_view_box, opt, shared_fontdb);
     let def = Length::new(100.0, Unit::Percent);
     let mut width: Length = svg.attribute(AId::Width).unwrap_or(def);
     let mut height: Length = svg.attribute(AId::Height).unwrap_or(def);
-
     let view_box = svg.parse_viewbox();
-
-    let restore_viewbox =
-        if (width.unit == Unit::Percent || height.unit == Unit::Percent) && view_box.is_none() {
-            // Apply the percentages to the fallback size.
-            if width.unit == Unit::Percent {
-                width = Length::new(
-                    (width.number / 100.0) * state.opt.default_size.width() as f64,
-                    Unit::None,
-                );
-            }
-
-            if height.unit == Unit::Percent {
-                height = Length::new(
-                    (height.number / 100.0) * state.opt.default_size.height() as f64,
-                    Unit::None,
-                );
-            }
-
-            true
-        } else {
-            false
-        };
-
+    let restore_viewbox = resolve_fallback_size(&mut width, &mut height, view_box, &state);
     let size = if let Some(vbox) = view_box {
         state.view_box = vbox;
-
-        let w = if width.unit == Unit::Percent {
-            vbox.width() * (width.number as f32 / 100.0)
-        } else {
-            svg.convert_user_length(AId::Width, &state, def)
-        };
-
-        let h = if height.unit == Unit::Percent {
-            vbox.height() * (height.number as f32 / 100.0)
-        } else {
-            svg.convert_user_length(AId::Height, &state, def)
-        };
-
-        // If exactly one of width and height is specified, compute the missing
-        // dimension from the specified one and the viewBox aspect ratio.
-        match (
-            svg.attribute::<Length>(AId::Width),
-            svg.attribute::<Length>(AId::Height),
-        ) {
-            (Some(_), None) => Size::from_wh(w, vbox.height() * w / vbox.width()),
-            (None, Some(_)) => Size::from_wh(vbox.width() * h / vbox.height(), h),
-            (_, _) => Size::from_wh(w, h),
-        }
+        size_with_view_box(svg, &state, vbox, width, height, def)
     } else {
         Size::from_wh(
             svg.convert_user_length(AId::Width, &state, def),
             svg.convert_user_length(AId::Height, &state, def),
         )
     };
-
     (size.ok_or(Error::InvalidSize), restore_viewbox)
+}
+
+fn resolve_fallback_size(
+    width: &mut Length,
+    height: &mut Length,
+    view_box: Option<NonZeroRect>,
+    state: &State,
+) -> bool {
+    if (width.unit == Unit::Percent || height.unit == Unit::Percent) && view_box.is_none() {
+        if width.unit == Unit::Percent {
+            *width = Length::new(
+                (width.number / 100.0) * state.opt.default_size.width() as f64,
+                Unit::None,
+            );
+        }
+        if height.unit == Unit::Percent {
+            *height = Length::new(
+                (height.number / 100.0) * state.opt.default_size.height() as f64,
+                Unit::None,
+            );
+        }
+        true
+    } else {
+        false
+    }
+}
+
+fn size_with_view_box(
+    svg: &SvgNode,
+    state: &State,
+    vbox: NonZeroRect,
+    width: Length,
+    height: Length,
+    def: Length,
+) -> Option<Size> {
+    let w = if width.unit == Unit::Percent {
+        vbox.width() * (width.number as f32 / 100.0)
+    } else {
+        svg.convert_user_length(AId::Width, state, def)
+    };
+    let h = if height.unit == Unit::Percent {
+        vbox.height() * (height.number as f32 / 100.0)
+    } else {
+        svg.convert_user_length(AId::Height, state, def)
+    };
+    size_from_view_box(svg, vbox, w, h)
+}
+
+fn size_from_view_box(svg: &SvgNode, vbox: NonZeroRect, w: f32, h: f32) -> Option<Size> {
+    match (
+        svg.attribute::<Length>(AId::Width),
+        svg.attribute::<Length>(AId::Height),
+    ) {
+        (Some(_), None) => Size::from_wh(w, vbox.height() * w / vbox.width()),
+        (None, Some(_)) => Size::from_wh(vbox.width() * h / vbox.height(), h),
+        (_, _) => Size::from_wh(w, h),
+    }
 }
 
 /// Calculates SVG's size and viewBox in case there were not set.
@@ -643,25 +661,7 @@ pub(crate) fn convert_element(node: SvgNode, state: &State, cache: &mut Cache, p
         return;
     }
 
-    if tag_name == EId::Use {
-        super::use_node::convert(node, state, cache, parent);
-        return;
-    }
-
-    if tag_name == EId::Switch {
-        super::switch::convert(node, state, cache, parent);
-        return;
-    }
-
-    // A nested `svg` is handled just like `use`: it must not be wrapped in an
-    // additional `convert_group`, otherwise its `transform` (and other group
-    // properties) would be applied twice, since `convert_svg`
-    // already creates its own group. The outermost `svg` (no parent element)
-    // is intentionally not handled here - it's processed directly in
-    // `convert_doc`.
-    if tag_name == EId::Svg && node.parent_element().is_some() {
-        super::use_node::convert_svg(node, state, cache, parent);
-
+    if convert_special_element(tag_name, node, state, cache, parent) {
         return;
     }
 
@@ -670,6 +670,30 @@ pub(crate) fn convert_element(node: SvgNode, state: &State, cache: &mut Cache, p
     }) {
         parent.children.push(Node::Group(Box::new(g)));
     }
+}
+
+fn convert_special_element(tag_name: EId, node: SvgNode, state: &State, cache: &mut Cache, parent: &mut Group) -> bool {
+    if tag_name == EId::Use {
+        super::use_node::convert(node, state, cache, parent);
+        return true;
+    }
+
+    if tag_name == EId::Switch {
+        super::switch::convert(node, state, cache, parent);
+        return true;
+    }
+
+    convert_nested_svg(tag_name, node, state, cache, parent)
+}
+
+// 入れ子のSVGは自身でグループを作るため、外側で重ねると変換が二重になる。
+fn convert_nested_svg(tag_name: EId, node: SvgNode, state: &State, cache: &mut Cache, parent: &mut Group) -> bool {
+    if tag_name == EId::Svg && node.parent_element().is_some() {
+        super::use_node::convert_svg(node, state, cache, parent);
+
+        return true;
+    }
+    false
 }
 
 #[inline(never)]
@@ -687,11 +711,7 @@ fn convert_element_impl(
         | EId::Line
         | EId::Polyline
         | EId::Polygon
-        | EId::Path => {
-            if let Some(path) = super::shapes::convert(node, state) {
-                convert_path(node, path, state, cache, parent);
-            }
-        }
+        | EId::Path => convert_shape(node, state, cache, parent),
         EId::Image => {
             super::image::convert(node, state, cache, parent);
         }
@@ -710,6 +730,12 @@ fn convert_element_impl(
             convert_children(node, state, cache, parent);
         }
         _ => {}
+    }
+}
+
+fn convert_shape(node: SvgNode, state: &State, cache: &mut Cache, parent: &mut Group) {
+    if let Some(path) = super::shapes::convert(node, state) {
+        convert_path(node, path, state, cache, parent);
     }
 }
 
@@ -807,17 +833,27 @@ pub(crate) fn convert_group(
     parent: &mut Group,
     collect_children: &dyn Fn(&mut Cache, &mut Group),
 ) -> Option<Group> {
-    // A `clipPath` child cannot have an opacity.
-    let opacity = if state.parent_clip_path.is_none() {
-        node.attribute::<Opacity>(AId::Opacity)
-            .unwrap_or(Opacity::ONE)
-    } else {
-        Opacity::ONE
-    };
+    let (mut group, is_g_or_use) = initial_group(node, state, parent);
+    collect_children(cache, &mut group);
+    let object_bbox = group.calculate_object_bbox();
+    let clip_path = group_clip_path(node, state, object_bbox, cache)?;
+    let mask = group_mask(node, state, object_bbox, cache)?;
+    let filters = group_filters(node, state, object_bbox, cache)?;
+    if !group_required(&group, is_g_or_use, force, &clip_path, &mask, &filters) {
+        parent.children.append(&mut group.children);
+        return None;
+    }
+    group.clip_path = clip_path;
+    group.mask = mask;
+    group.filters = filters;
+    group.calculate_bounding_boxes();
+    Some(group)
+}
 
+fn initial_group(node: SvgNode, state: &State, parent: &Group) -> (Group, bool) {
+    let opacity = group_opacity(node, state);
     let is_root_svg = node.tag_name() == Some(EId::Svg) && node.parent_element().is_none();
     let transform = if is_root_svg {
-        // Already applied outside the viewBox mapping in `convert_doc`.
         Transform::default()
     } else {
         node.resolve_transform(AId::Transform, state)
@@ -825,18 +861,34 @@ pub(crate) fn convert_group(
     let blend_mode: BlendMode = node.attribute(AId::MixBlendMode).unwrap_or_default();
     let isolation: Isolation = node.attribute(AId::Isolation).unwrap_or_default();
     let isolate = isolation == Isolation::Isolate;
-
-    // Nodes generated by markers must not have an ID. Otherwise we would have duplicates.
     let is_g_or_use = matches!(node.tag_name(), Some(EId::G) | Some(EId::Use));
     let id = if is_g_or_use && state.parent_markers.is_empty() {
         node.element_id().to_string()
     } else {
         String::new()
     };
-
     let abs_transform = parent.abs_transform.pre_concat(transform);
+    (group_from_properties(id, transform, abs_transform, opacity, blend_mode, isolate), is_g_or_use)
+}
+
+fn group_opacity(node: SvgNode, state: &State) -> Opacity {
+    if state.parent_clip_path.is_none() {
+        node.attribute::<Opacity>(AId::Opacity).unwrap_or(Opacity::ONE)
+    } else {
+        Opacity::ONE
+    }
+}
+
+fn group_from_properties(
+    id: String,
+    transform: Transform,
+    abs_transform: Transform,
+    opacity: Opacity,
+    blend_mode: BlendMode,
+    isolate: bool,
+) -> Group {
     let dummy = Rect::from_xywh(0.0, 0.0, 0.0, 0.0).unwrap();
-    let mut g = Group {
+    Group {
         id,
         transform,
         abs_transform,
@@ -854,86 +906,92 @@ pub(crate) fn convert_group(
         layer_bounding_box: NonZeroRect::from_xywh(0.0, 0.0, 1.0, 1.0).unwrap(),
         abs_layer_bounding_box: NonZeroRect::from_xywh(0.0, 0.0, 1.0, 1.0).unwrap(),
         children: Vec::new(),
-    };
-    collect_children(cache, &mut g);
+    }
+}
 
-    // We need to know group's bounding box before converting
-    // clipPaths, masks and filters.
-    let object_bbox = g.calculate_object_bbox();
-
-    // `mask` and `filter` cannot be set on `clipPath` children.
-    // But `clip-path` can.
-
+fn group_clip_path(
+    node: SvgNode,
+    state: &State,
+    bbox: Option<NonZeroRect>,
+    cache: &mut Cache,
+) -> Option<Option<Arc<ClipPath>>> {
     let mut clip_path = None;
     if let Some(link) = node.attribute::<SvgNode>(AId::ClipPath) {
-        clip_path = super::clippath::convert(link, state, object_bbox, cache);
+        clip_path = super::clippath::convert(link, state, bbox, cache);
         if clip_path.is_none() {
             return None;
         }
     }
+    Some(clip_path)
+}
 
+fn group_mask(
+    node: SvgNode,
+    state: &State,
+    bbox: Option<NonZeroRect>,
+    cache: &mut Cache,
+) -> Option<Option<Arc<Mask>>> {
     let mut mask = None;
     if state.parent_clip_path.is_none() {
         if let Some(link) = node.attribute::<SvgNode>(AId::Mask) {
-            mask = super::mask::convert(link, state, object_bbox, cache);
+            mask = super::mask::convert(link, state, bbox, cache);
             if mask.is_none() {
                 return None;
             }
         }
     }
+    Some(mask)
+}
 
-    let filters = {
-        let mut filters = Vec::new();
-        if state.parent_clip_path.is_none() {
-            if node.attribute(AId::Filter) == Some("none") {
-                // Do nothing.
-            } else if node.has_attribute(AId::Filter) {
-                if let Ok(f) = super::filter::convert(node, state, object_bbox, cache) {
-                    filters = f;
-                } else {
-                    // A filter that not a link or a filter with a link to a non existing element.
-                    //
-                    // Unlike `clip-path` and `mask`, when a `filter` link is invalid
-                    // then the whole element should be ignored.
-                    //
-                    // This is kinda an undefined behaviour.
-                    // In most cases, Chrome, Firefox and rsvg will ignore such elements,
-                    // but in some cases Chrome allows it. Not sure why.
-                    // Inkscape (0.92) simply ignores such attributes, rendering element as is.
-                    // Batik (1.12) crashes.
-                    //
-                    // Test file: e-filter-051.svg
-                    return None;
-                }
+fn group_filters(
+    node: SvgNode,
+    state: &State,
+    bbox: Option<NonZeroRect>,
+    cache: &mut Cache,
+) -> Option<Vec<Arc<filter::Filter>>> {
+    let mut filters = Vec::new();
+    if state.parent_clip_path.is_none() {
+        if node.attribute(AId::Filter) == Some("none") {
+            // Do nothing.
+        } else if node.has_attribute(AId::Filter) {
+            if let Ok(f) = super::filter::convert(node, state, bbox, cache) {
+                filters = f;
+            } else {
+                return None;
             }
         }
+    }
+    Some(filters)
+}
 
-        filters
-    };
-
-    let required = opacity.get().approx_ne_ulps(&1.0, 4)
+fn group_required(
+    group: &Group,
+    is_g_or_use: bool,
+    force: bool,
+    clip_path: &Option<Arc<ClipPath>>,
+    mask: &Option<Arc<Mask>>,
+    filters: &[Arc<filter::Filter>],
+) -> bool {
+    group.opacity.get().approx_ne_ulps(&1.0, 4)
         || clip_path.is_some()
         || mask.is_some()
         || !filters.is_empty()
-        || !transform.is_identity()
-        || blend_mode != BlendMode::Normal
-        || isolate
+        || !group.transform.is_identity()
+        || group.blend_mode != BlendMode::Normal
+        || group.isolate
         || is_g_or_use
-        || force;
+        || force
+}
 
-    if !required {
-        parent.children.append(&mut g.children);
-        return None;
-    }
-
-    g.clip_path = clip_path;
-    g.mask = mask;
-    g.filters = filters;
-
-    // Must be called after we set Group::filters
-    g.calculate_bounding_boxes();
-
-    Some(g)
+struct PreparedPath {
+    fill: Option<Fill>,
+    stroke: Option<Stroke>,
+    visibility: Visibility,
+    visible: bool,
+    rendering_mode: ShapeRendering,
+    raw_paint_order: svgtypes::PaintOrder,
+    paint_order: PaintOrder,
+    transform: Transform,
 }
 
 fn convert_path(
@@ -947,8 +1005,24 @@ fn convert_path(
     if tiny_skia_path.len() < 2 {
         return;
     }
+    let prepared = prepare_path(node, &tiny_skia_path, state, cache, parent);
+    let marker = path_markers(node, &tiny_skia_path, state, cache, parent, &prepared);
+    let raw_paint_order = prepared.raw_paint_order;
+    let path = match make_path(node, tiny_skia_path, state, prepared) {
+        Some(v) => v,
+        None => return,
+    };
+    append_ordered_path(path, raw_paint_order, marker, parent);
+}
 
-    let has_bbox = tiny_skia_path.bounds().width() > 0.0 && tiny_skia_path.bounds().height() > 0.0;
+fn prepare_path(
+    node: SvgNode,
+    path: &tiny_skia_path::Path,
+    state: &State,
+    cache: &mut Cache,
+    parent: &Group,
+) -> PreparedPath {
+    let has_bbox = path.bounds().width() > 0.0 && path.bounds().height() > 0.0;
     let mut fill = super::style::resolve_fill(node, has_bbox, state, cache);
     let mut stroke = super::style::resolve_stroke(node, has_bbox, state, cache);
     let visibility: Visibility = node.find_attribute(AId::Visibility).unwrap_or_default();
@@ -956,112 +1030,94 @@ fn convert_path(
     let rendering_mode: ShapeRendering = node
         .find_attribute(AId::ShapeRendering)
         .unwrap_or(state.opt.shape_rendering);
-
-    // TODO: handle `markers` before `stroke`
-    let raw_paint_order: svgtypes::PaintOrder =
-        node.find_attribute(AId::PaintOrder).unwrap_or_default();
+    let raw_paint_order: svgtypes::PaintOrder = node.find_attribute(AId::PaintOrder).unwrap_or_default();
     let paint_order = svg_paint_order_to_usvg(raw_paint_order);
-    let path_transform = parent.abs_transform;
-
-    // If a path doesn't have a fill or a stroke then it's invisible.
-    // By setting `visibility` to `hidden` we are disabling rendering of this path.
+    let transform = parent.abs_transform;
     if fill.is_none() && stroke.is_none() {
         visible = false;
     }
-
     if let Some(fill) = fill.as_mut() {
-        if let Some(ContextElement::PathNode(context_transform, context_bbox)) =
-            fill.context_element
-        {
-            process_paint(
-                &mut fill.paint,
-                true,
-                context_transform,
-                context_bbox.map(|r| r.to_rect()),
-                path_transform,
-                tiny_skia_path.bounds(),
-                cache,
-            );
-            fill.context_element = None;
-        }
+        process_path_context(&mut fill.paint, &mut fill.context_element, transform, path, cache);
     }
-
     if let Some(stroke) = stroke.as_mut() {
-        if let Some(ContextElement::PathNode(context_transform, context_bbox)) =
-            stroke.context_element
-        {
-            process_paint(
-                &mut stroke.paint,
-                true,
-                context_transform,
-                context_bbox.map(|r| r.to_rect()),
-                path_transform,
-                tiny_skia_path.bounds(),
-                cache,
-            );
-            stroke.context_element = None;
-        }
+        process_path_context(&mut stroke.paint, &mut stroke.context_element, transform, path, cache);
     }
+    PreparedPath { fill, stroke, visibility, visible, rendering_mode, raw_paint_order, paint_order, transform }
+}
 
-    let mut marker = None;
-    if marker::is_valid(node) && visibility == Visibility::Visible {
-        let mut marker_group = Group {
-            abs_transform: parent.abs_transform,
-            ..Group::empty()
-        };
-
-        let mut marker_state = state.clone();
-
-        let bbox = tiny_skia_path
-            .compute_tight_bounds()
-            .and_then(|r| r.to_non_zero_rect());
-
-        let fill = fill.clone().map(|mut f| {
-            f.context_element = Some(ContextElement::PathNode(path_transform, bbox));
-            f
-        });
-
-        let stroke = stroke.clone().map(|mut s| {
-            s.context_element = Some(ContextElement::PathNode(path_transform, bbox));
-            s
-        });
-
-        marker_state.context_element = Some((fill, stroke));
-
-        marker::convert(
-            node,
-            &tiny_skia_path,
-            &marker_state,
+fn process_path_context(
+    paint: &mut Paint,
+    context: &mut Option<ContextElement>,
+    transform: Transform,
+    path: &tiny_skia_path::Path,
+    cache: &mut Cache,
+) {
+    if let Some(ContextElement::PathNode(context_transform, context_bbox)) = *context {
+        process_paint(
+            paint,
+            true,
+            context_transform,
+            context_bbox.map(|r| r.to_rect()),
+            transform,
+            path.bounds(),
             cache,
-            &mut marker_group,
         );
-        marker_group.calculate_bounding_boxes();
-        marker = Some(marker_group);
+        *context = None;
     }
+}
 
-    // Nodes generated by markers must not have an ID. Otherwise we would have duplicates.
+fn path_markers(
+    node: SvgNode,
+    path: &tiny_skia_path::Path,
+    state: &State,
+    cache: &mut Cache,
+    parent: &Group,
+    prepared: &PreparedPath,
+) -> Option<Group> {
+    if !marker::is_valid(node) || prepared.visibility != Visibility::Visible {
+        return None;
+    }
+    let mut marker_group = Group { abs_transform: parent.abs_transform, ..Group::empty() };
+    let mut marker_state = state.clone();
+    let bbox = path.compute_tight_bounds().and_then(|r| r.to_non_zero_rect());
+    let fill = prepared.fill.clone().map(|mut f| {
+        f.context_element = Some(ContextElement::PathNode(prepared.transform, bbox));
+        f
+    });
+    let stroke = prepared.stroke.clone().map(|mut s| {
+        s.context_element = Some(ContextElement::PathNode(prepared.transform, bbox));
+        s
+    });
+    marker_state.context_element = Some((fill, stroke));
+    marker::convert(node, path, &marker_state, cache, &mut marker_group);
+    marker_group.calculate_bounding_boxes();
+    Some(marker_group)
+}
+
+fn make_path(
+    node: SvgNode,
+    tiny_skia_path: Arc<tiny_skia_path::Path>,
+    state: &State,
+    prepared: PreparedPath,
+) -> Option<Path> {
     let id = if state.parent_markers.is_empty() {
         node.element_id().to_string()
     } else {
         String::new()
     };
-
-    let path = Path::new(
+    Path::new(
         id,
-        visible,
-        fill,
-        stroke,
-        paint_order,
-        rendering_mode,
+        prepared.visible,
+        prepared.fill,
+        prepared.stroke,
+        prepared.paint_order,
+        prepared.rendering_mode,
         tiny_skia_path,
-        path_transform,
-    );
+        prepared.transform,
+    )
+}
 
-    let path = match path {
-        Some(v) => v,
-        None => return,
-    };
-
+fn append_ordered_path(path: Path, raw_paint_order: svgtypes::PaintOrder, marker: Option<Group>, parent: &mut Group) {
     match (raw_paint_order.order, marker) {
         ([PaintOrderKind::Markers, _, _], Some(markers_node)) => {
             parent.children.push(Node::Group(Box::new(markers_node)));
@@ -1117,40 +1173,33 @@ impl SvgNode<'_, '_> {
         let mut transform: Transform = self.attribute(transform_aid).unwrap_or_default();
         let transform_origin = self
             .attribute::<TransformOrigin>(AId::TransformOrigin)
-            .or_else(|| {
-                // The root SVG uses the CSS initial origin; other SVG elements use (0, 0).
-                if self.tag_name() == Some(EId::Svg) && self.parent_element().is_none() {
-                    Some(TransformOrigin::new(
-                        Length::new(50.0, Unit::Percent),
-                        Length::new(50.0, Unit::Percent),
-                        Length::zero(),
-                    ))
-                } else {
-                    None
-                }
-            });
+            .or_else(|| default_transform_origin(*self));
 
         if let Some(transform_origin) = transform_origin {
-            let dx = convert_length(
-                transform_origin.x_offset,
-                *self,
-                AId::Width,
-                Units::UserSpaceOnUse,
-                state,
-            );
-            let dy = convert_length(
-                transform_origin.y_offset,
-                *self,
-                AId::Height,
-                Units::UserSpaceOnUse,
-                state,
-            );
-            transform = Transform::default()
-                .pre_translate(dx, dy)
-                .pre_concat(transform)
-                .pre_translate(-dx, -dy);
+            transform = apply_transform_origin(*self, state, transform, transform_origin);
         }
 
         transform
     }
+}
+
+fn default_transform_origin(node: SvgNode) -> Option<TransformOrigin> {
+    if node.tag_name() == Some(EId::Svg) && node.parent_element().is_none() {
+        Some(TransformOrigin::new(
+            Length::new(50.0, Unit::Percent),
+            Length::new(50.0, Unit::Percent),
+            Length::zero(),
+        ))
+    } else {
+        None
+    }
+}
+
+fn apply_transform_origin(node: SvgNode, state: &State, transform: Transform, origin: TransformOrigin) -> Transform {
+    let dx = convert_length(origin.x_offset, node, AId::Width, Units::UserSpaceOnUse, state);
+    let dy = convert_length(origin.y_offset, node, AId::Height, Units::UserSpaceOnUse, state);
+    Transform::default()
+        .pre_translate(dx, dy)
+        .pre_concat(transform)
+        .pre_translate(-dx, -dy)
 }

@@ -35,7 +35,14 @@ pub(crate) fn convert_path(node: SvgNode) -> Option<Arc<Path>> {
             }
         };
 
-        match segment {
+        append_path_segment(&mut builder, segment);
+    }
+
+    builder.finish().map(Arc::new)
+}
+
+fn append_path_segment(builder: &mut tiny_skia_path::PathBuilder, segment: svgtypes::SimplePathSegment) {
+    match segment {
             svgtypes::SimplePathSegment::MoveTo { x, y } => {
                 builder.move_to(x as f32, y as f32);
             }
@@ -60,13 +67,32 @@ pub(crate) fn convert_path(node: SvgNode) -> Option<Arc<Path>> {
             svgtypes::SimplePathSegment::ClosePath => {
                 builder.close();
             }
-        }
     }
-
-    builder.finish().map(Arc::new)
 }
 
 fn convert_rect(node: SvgNode, state: &converter::State) -> Option<Arc<Path>> {
+    let (width, height) = rect_size(node, state)?;
+    let x = node.convert_user_length(AId::X, state, Length::zero());
+    let y = node.convert_user_length(AId::Y, state, Length::zero());
+
+    let (mut rx, mut ry) = resolve_rx_ry(node, state);
+
+    // Clamp rx/ry to the half of the width/height.
+    //
+    // Should be done only after resolving.
+    if rx > width / 2.0 {
+        rx = width / 2.0;
+    }
+    if ry > height / 2.0 {
+        ry = height / 2.0;
+    }
+
+    // Conversion according to https://www.w3.org/TR/SVG11/shapes.html#RectElement
+    let path = rect_path(x, y, width, height, rx, ry)?;
+    Some(Arc::new(path))
+}
+
+fn rect_size(node: SvgNode, state: &converter::State) -> Option<(f32, f32)> {
     // 'width' and 'height' attributes must be positive and non-zero.
     let width = node.convert_user_length(AId::Width, state, Length::zero());
     let height = node.convert_user_length(AId::Height, state, Length::zero());
@@ -85,22 +111,10 @@ fn convert_rect(node: SvgNode, state: &converter::State) -> Option<Arc<Path>> {
         return None;
     }
 
-    let x = node.convert_user_length(AId::X, state, Length::zero());
-    let y = node.convert_user_length(AId::Y, state, Length::zero());
+    Some((width, height))
+}
 
-    let (mut rx, mut ry) = resolve_rx_ry(node, state);
-
-    // Clamp rx/ry to the half of the width/height.
-    //
-    // Should be done only after resolving.
-    if rx > width / 2.0 {
-        rx = width / 2.0;
-    }
-    if ry > height / 2.0 {
-        ry = height / 2.0;
-    }
-
-    // Conversion according to https://www.w3.org/TR/SVG11/shapes.html#RectElement
+fn rect_path(x: f32, y: f32, width: f32, height: f32, rx: f32, ry: f32) -> Option<Path> {
     let path = if rx.approx_eq_ulps(&0.0, 4) {
         tiny_skia_path::PathBuilder::from_rect(Rect::from_xywh(x, y, width, height)?)
     } else {
@@ -124,7 +138,7 @@ fn convert_rect(node: SvgNode, state: &converter::State) -> Option<Arc<Path>> {
         builder.finish()?
     };
 
-    Some(Arc::new(path))
+    Some(path)
 }
 
 fn resolve_rx_ry(node: SvgNode, state: &converter::State) -> (f32, f32) {
@@ -143,7 +157,10 @@ fn resolve_rx_ry(node: SvgNode, state: &converter::State) -> (f32, f32) {
         }
     }
 
-    // Resolve.
+    resolve_rect_radii(node, state, rx_opt, ry_opt)
+}
+
+fn resolve_rect_radii(node: SvgNode, state: &converter::State, rx_opt: Option<Length>, ry_opt: Option<Length>) -> (f32, f32) {
     match (rx_opt, ry_opt) {
         (None, None) => (0.0, 0.0),
         (Some(rx), None) => {
@@ -186,19 +203,9 @@ fn convert_polygon(node: SvgNode) -> Option<Arc<Path>> {
 }
 
 fn points_to_path(node: SvgNode, eid: &str) -> Option<tiny_skia_path::PathBuilder> {
-    use svgtypes::PointsParser;
-
     let mut builder = tiny_skia_path::PathBuilder::new();
     match node.attribute::<&str>(AId::Points) {
-        Some(text) => {
-            for (x, y) in PointsParser::from(text) {
-                if builder.is_empty() {
-                    builder.move_to(x as f32, y as f32);
-                } else {
-                    builder.line_to(x as f32, y as f32);
-                }
-            }
-        }
+        Some(text) => append_points(&mut builder, text),
         _ => {
             log::warn!(
                 "{} '{}' has an invalid 'points' value. Skipped.",
@@ -220,6 +227,16 @@ fn points_to_path(node: SvgNode, eid: &str) -> Option<tiny_skia_path::PathBuilde
     }
 
     Some(builder)
+}
+
+fn append_points(builder: &mut tiny_skia_path::PathBuilder, text: &str) {
+    for (x, y) in svgtypes::PointsParser::from(text) {
+        if builder.is_empty() {
+            builder.move_to(x as f32, y as f32);
+        } else {
+            builder.line_to(x as f32, y as f32);
+        }
+    }
 }
 
 fn convert_circle(node: SvgNode, state: &converter::State) -> Option<Arc<Path>> {
@@ -311,10 +328,15 @@ impl PathBuilderExt for tiny_skia_path::PathBuilder {
             sweep,
         };
 
-        match kurbo::Arc::from_svg_arc(&svg_arc) {
+        append_svg_arc(self, &svg_arc, x, y);
+    }
+}
+
+fn append_svg_arc(builder: &mut tiny_skia_path::PathBuilder, svg_arc: &kurbo::SvgArc, x: f32, y: f32) {
+        match kurbo::Arc::from_svg_arc(svg_arc) {
             Some(arc) => {
                 arc.to_cubic_beziers(0.1, |p1, p2, p| {
-                    self.cubic_to(
+                    builder.cubic_to(
                         p1.x as f32,
                         p1.y as f32,
                         p2.x as f32,
@@ -325,8 +347,7 @@ impl PathBuilderExt for tiny_skia_path::PathBuilder {
                 });
             }
             None => {
-                self.line_to(x, y);
+                builder.line_to(x, y);
             }
         }
-    }
 }

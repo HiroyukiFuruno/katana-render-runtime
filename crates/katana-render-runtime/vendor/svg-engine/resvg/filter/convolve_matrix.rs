@@ -13,10 +13,6 @@ use crate::svg_engine::usvg::filter::{ConvolveMatrix, EdgeMode};
 ///
 /// This method will allocate a copy of the `src` image as a back buffer.
 pub fn apply(matrix: &ConvolveMatrix, src: ImageRefMut) {
-    fn bound(min: i32, val: i32, max: i32) -> i32 {
-        core::cmp::max(min, core::cmp::min(max, val))
-    }
-
     let width_max = src.width as i32 - 1;
     let height_max = src.height as i32 - 1;
 
@@ -25,44 +21,50 @@ pub fn apply(matrix: &ConvolveMatrix, src: ImageRefMut) {
     let mut x = 0;
     let mut y = 0;
     for in_p in src.data.iter() {
+        let [new_r, new_g, new_b, new_a] = accumulate_kernel(
+            matrix,
+            &src,
+            (x, y),
+            (width_max, height_max),
+        );
+        let new_a = convolved_alpha(matrix, in_p.a, new_a);
+        let bounded_new_a = f32_bound(0.0, new_a, 1.0);
+        let out_p = buf.pixel_at_mut(x, y);
+        write_convolved_pixel(out_p, matrix, [new_r, new_g, new_b], new_a, bounded_new_a);
+        x += 1;
+        if x == src.width {
+            x = 0;
+            y += 1;
+        }
+    }
+    // Do not use `mem::swap` because `data` referenced via FFI.
+    src.data.copy_from_slice(buf.data);
+}
+
+fn convolved_alpha(matrix: &ConvolveMatrix, input_alpha: u8, new_a: f32) -> f32 {
+    if matrix.preserve_alpha() {
+        input_alpha as f32 / 255.0
+    } else {
+        new_a / matrix.divisor().get() + matrix.bias()
+    }
+}
+
+fn accumulate_kernel(
+    matrix: &ConvolveMatrix,
+    src: &ImageRefMut,
+    position: (u32, u32),
+    bounds: (i32, i32),
+) -> [f32; 4] {
+        let (x, y) = position;
         let mut new_r = 0.0;
         let mut new_g = 0.0;
         let mut new_b = 0.0;
         let mut new_a = 0.0;
         for oy in 0..matrix.matrix().rows() {
             for ox in 0..matrix.matrix().columns() {
-                let mut tx = x as i32 - matrix.matrix().target_x() as i32 + ox as i32;
-                let mut ty = y as i32 - matrix.matrix().target_y() as i32 + oy as i32;
-
-                match matrix.edge_mode() {
-                    EdgeMode::None => {
-                        if tx < 0 || tx > width_max || ty < 0 || ty > height_max {
-                            continue;
-                        }
-                    }
-                    EdgeMode::Duplicate => {
-                        tx = bound(0, tx, width_max);
-                        ty = bound(0, ty, height_max);
-                    }
-                    EdgeMode::Wrap => {
-                        while tx < 0 {
-                            tx += src.width as i32;
-                        }
-                        tx %= src.width as i32;
-
-                        while ty < 0 {
-                            ty += src.height as i32;
-                        }
-                        ty %= src.height as i32;
-                    }
-                }
-
-                let k = matrix.matrix().get(
-                    matrix.matrix().columns() - ox - 1,
-                    matrix.matrix().rows() - oy - 1,
-                );
-
-                let p = src.pixel_at(tx as u32, ty as u32);
+                let Some((p, k)) = kernel_sample(matrix, src, (x, y), (ox, oy), bounds) else {
+                    continue;
+                };
                 new_r += (p.r as f32) / 255.0 * k;
                 new_g += (p.g as f32) / 255.0 * k;
                 new_b += (p.b as f32) / 255.0 * k;
@@ -73,13 +75,37 @@ pub fn apply(matrix: &ConvolveMatrix, src: ImageRefMut) {
             }
         }
 
-        if matrix.preserve_alpha() {
-            new_a = in_p.a as f32 / 255.0;
-        } else {
-            new_a = new_a / matrix.divisor().get() + matrix.bias();
-        }
+        [new_r, new_g, new_b, new_a]
+}
 
-        let bounded_new_a = f32_bound(0.0, new_a, 1.0);
+fn kernel_sample(
+    matrix: &ConvolveMatrix,
+    src: &ImageRefMut,
+    position: (u32, u32),
+    offset: (u32, u32),
+    bounds: (i32, i32),
+) -> Option<(RGBA8, f32)> {
+    let (x, y) = position;
+    let (ox, oy) = offset;
+    let tx = x as i32 - matrix.matrix().target_x() as i32 + ox as i32;
+    let ty = y as i32 - matrix.matrix().target_y() as i32 + oy as i32;
+    let (tx, ty) = kernel_coordinates(matrix.edge_mode(), (tx, ty), bounds, (src.width, src.height))?;
+    let k = matrix.matrix().get(
+        matrix.matrix().columns() - ox - 1,
+        matrix.matrix().rows() - oy - 1,
+    );
+    let p = src.pixel_at(tx as u32, ty as u32);
+    Some((p, k))
+}
+
+fn write_convolved_pixel(
+    out_p: &mut RGBA8,
+    matrix: &ConvolveMatrix,
+    rgb: [f32; 3],
+    new_a: f32,
+    bounded_new_a: f32,
+) {
+        let [new_r, new_g, new_b] = rgb;
 
         let calc = |x| {
             let x = x / matrix.divisor().get() + matrix.bias() * new_a;
@@ -93,19 +119,41 @@ pub fn apply(matrix: &ConvolveMatrix, src: ImageRefMut) {
             (x * 255.0 + 0.5) as u8
         };
 
-        let out_p = buf.pixel_at_mut(x, y);
         out_p.r = calc(new_r);
         out_p.g = calc(new_g);
         out_p.b = calc(new_b);
         out_p.a = (bounded_new_a * 255.0 + 0.5) as u8;
 
-        x += 1;
-        if x == src.width {
-            x = 0;
-            y += 1;
+}
+
+fn kernel_coordinates(
+    mode: EdgeMode,
+    coordinate: (i32, i32),
+    bounds: (i32, i32),
+    size: (u32, u32),
+) -> Option<(i32, i32)> {
+    let (mut tx, mut ty) = coordinate;
+    let (width_max, height_max) = bounds;
+    match mode {
+        EdgeMode::None => {
+            if tx < 0 || tx > width_max || ty < 0 || ty > height_max {
+                return None;
+            }
+        }
+        EdgeMode::Duplicate => {
+            tx = core::cmp::max(0, core::cmp::min(width_max, tx));
+            ty = core::cmp::max(0, core::cmp::min(height_max, ty));
+        }
+        EdgeMode::Wrap => {
+            while tx < 0 {
+                tx += size.0 as i32;
+            }
+            tx %= size.0 as i32;
+            while ty < 0 {
+                ty += size.1 as i32;
+            }
+            ty %= size.1 as i32;
         }
     }
-
-    // Do not use `mem::swap` because `data` referenced via FFI.
-    src.data.copy_from_slice(buf.data);
+    Some((tx, ty))
 }

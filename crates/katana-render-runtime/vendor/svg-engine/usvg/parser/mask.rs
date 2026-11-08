@@ -7,7 +7,9 @@ use svgtypes::{Length, LengthUnit as Unit};
 
 use super::svgtree::{AId, EId, SvgNode};
 use super::{OptionLog, converter};
-use crate::svg_engine::usvg::{Group, Mask, MaskType, Node, NonEmptyString, NonZeroRect, Transform, Units};
+use crate::svg_engine::usvg::{
+    Group, Mask, MaskType, Node, NonEmptyString, NonZeroRect, Transform, Units,
+};
 
 pub(crate) fn convert(
     node: SvgNode,
@@ -15,40 +17,56 @@ pub(crate) fn convert(
     object_bbox: Option<NonZeroRect>,
     cache: &mut converter::Cache,
 ) -> Option<Arc<Mask>> {
-    // A `mask` attribute must reference a `mask` element.
     if node.tag_name() != Some(EId::Mask) {
         return None;
     }
-
-    let units = node
-        .attribute(AId::MaskUnits)
-        .unwrap_or(Units::ObjectBoundingBox);
-
-    let content_units = node
-        .attribute(AId::MaskContentUnits)
-        .unwrap_or(Units::UserSpaceOnUse);
-
-    // Check if this element was already converted.
-    //
-    // Only `userSpaceOnUse` masks can be shared,
-    // because `objectBoundingBox` one will be converted into user one
-    // and will become node-specific.
+    let (units, content_units) = mask_units(node);
+    // objectBoundingBoxは対象ごとに座標が変わるため共有しない。
     let cacheable = units == Units::UserSpaceOnUse && content_units == Units::UserSpaceOnUse;
     if cacheable {
         if let Some(mask) = cache.masks.get(node.element_id()) {
             return Some(mask.clone());
         }
     }
+    let (rect, mask_all) = resolved_mask_rect(node, units, state, object_bbox)?;
+    let id = mask_id(node, cacheable, cache)?;
+    let id_copy = id.get().to_string();
+    let mask = if mask_all {
+        empty_mask(id, rect)
+    } else {
+        build_mask(node, state, object_bbox, cache, id, rect, content_units)?
+    };
+    let mask = Arc::new(mask);
+    cache.masks.insert(id_copy, mask.clone());
+    Some(mask)
+}
 
+fn mask_units(node: SvgNode) -> (Units, Units) {
+    (
+        node.attribute(AId::MaskUnits)
+            .unwrap_or(Units::ObjectBoundingBox),
+        node.attribute(AId::MaskContentUnits)
+            .unwrap_or(Units::UserSpaceOnUse),
+    )
+}
+
+fn mask_rect(node: SvgNode, units: Units, state: &converter::State) -> Option<NonZeroRect> {
     let rect = NonZeroRect::from_xywh(
         node.convert_length(AId::X, units, state, Length::new(-10.0, Unit::Percent)),
         node.convert_length(AId::Y, units, state, Length::new(-10.0, Unit::Percent)),
         node.convert_length(AId::Width, units, state, Length::new(120.0, Unit::Percent)),
         node.convert_length(AId::Height, units, state, Length::new(120.0, Unit::Percent)),
     );
-    let mut rect =
-        rect.log_none(|| log::warn!("Mask '{}' has an invalid size. Skipped.", node.element_id()))?;
+    rect.log_none(|| log::warn!("Mask '{}' has an invalid size. Skipped.", node.element_id()))
+}
 
+fn resolved_mask_rect(
+    node: SvgNode,
+    units: Units,
+    state: &converter::State,
+    object_bbox: Option<NonZeroRect>,
+) -> Option<(NonZeroRect, bool)> {
+    let mut rect = mask_rect(node, units, state)?;
     let mut mask_all = false;
     if units == Units::ObjectBoundingBox {
         if let Some(bbox) = object_bbox {
@@ -60,27 +78,34 @@ pub(crate) fn convert(
             mask_all = true;
         }
     }
+    Some((rect, mask_all))
+}
 
+fn mask_id(node: SvgNode, cacheable: bool, cache: &mut converter::Cache) -> Option<NonEmptyString> {
     let mut id = NonEmptyString::new(node.element_id().to_string())?;
     // Generate ID only when we're parsing `objectBoundingBox` mask for the second time.
     if !cacheable && cache.masks.contains_key(id.get()) {
         id = cache.gen_mask_id();
     }
-    let id_copy = id.get().to_string();
+    Some(id)
+}
 
-    if mask_all {
-        let mask = Arc::new(Mask {
-            id,
-            rect,
-            kind: MaskType::Luminance,
-            mask: None,
-            root: Group::empty(),
-        });
-        cache.masks.insert(id_copy, mask.clone());
-        return Some(mask);
+fn empty_mask(id: NonEmptyString, rect: NonZeroRect) -> Mask {
+    Mask {
+        id,
+        rect,
+        kind: MaskType::Luminance,
+        mask: None,
+        root: Group::empty(),
     }
+}
 
-    // Resolve linked mask.
+fn linked_mask(
+    node: SvgNode,
+    state: &converter::State,
+    object_bbox: Option<NonZeroRect>,
+    cache: &mut converter::Cache,
+) -> Option<Option<Arc<Mask>>> {
     let mut mask = None;
     if let Some(link) = node.attribute::<SvgNode>(AId::Mask) {
         mask = convert(link, state, object_bbox, cache);
@@ -91,6 +116,19 @@ pub(crate) fn convert(
         }
     }
 
+    Some(mask)
+}
+
+fn build_mask(
+    node: SvgNode,
+    state: &converter::State,
+    object_bbox: Option<NonZeroRect>,
+    cache: &mut converter::Cache,
+    id: NonEmptyString,
+    rect: NonZeroRect,
+    content_units: Units,
+) -> Option<Mask> {
+    let mask = linked_mask(node, state, object_bbox, cache)?;
     let kind = if node.attribute(AId::MaskType) == Some("alpha") {
         MaskType::Alpha
     } else {
@@ -104,30 +142,46 @@ pub(crate) fn convert(
         mask,
         root: Group::empty(),
     };
+    populate_mask_root(
+        &mut mask.root,
+        node,
+        state,
+        object_bbox,
+        content_units,
+        cache,
+    )?;
+    Some(mask)
+}
 
-    // To emulate content `objectBoundingBox` units we have to put
-    // mask children into a group with a transform.
-    let mut subroot = None;
-    if content_units == Units::ObjectBoundingBox {
-        let object_bbox = match object_bbox {
-            Some(v) => v,
-            None => {
-                log::warn!("Masking of zero-sized shapes is not allowed.");
-                return None;
-            }
-        };
-
-        let mut g = Group::empty();
-        g.transform = Transform::from_bbox(object_bbox);
-        // Make sure to set `abs_transform`, because it must propagate to all children.
-        g.abs_transform = g.transform;
-
-        subroot = Some(g);
+fn mask_subroot(content_units: Units, object_bbox: Option<NonZeroRect>) -> Option<Option<Group>> {
+    if content_units != Units::ObjectBoundingBox {
+        return Some(None);
     }
+    let object_bbox = match object_bbox {
+        Some(v) => v,
+        None => {
+            log::warn!("Masking of zero-sized shapes is not allowed.");
+            return None;
+        }
+    };
+    // 子要素にもbbox変換が伝わるよう絶対変換も初期化する。
+    let mut group = Group::empty();
+    group.transform = Transform::from_bbox(object_bbox);
+    group.abs_transform = group.transform;
+    Some(Some(group))
+}
 
+fn populate_mask_root(
+    root: &mut Group,
+    node: SvgNode,
+    state: &converter::State,
+    object_bbox: Option<NonZeroRect>,
+    content_units: Units,
+    cache: &mut converter::Cache,
+) -> Option<()> {
+    let mut subroot = mask_subroot(content_units, object_bbox)?;
     {
-        // Prefer `subroot` to `mask.root`.
-        let real_root = subroot.as_mut().unwrap_or(&mut mask.root);
+        let real_root = subroot.as_mut().unwrap_or(&mut *root);
         converter::convert_children(node, state, cache, real_root);
 
         // A mask without children at this point is invalid.
@@ -139,19 +193,11 @@ pub(crate) fn convert(
 
     if let Some(mut subroot) = subroot {
         subroot.calculate_bounding_boxes();
-        mask.root.children.push(Node::Group(Box::new(subroot)));
+        root.children.push(Node::Group(Box::new(subroot)));
     }
 
-    mask.root.calculate_bounding_boxes();
-    super::paint_server::update_paint_servers(
-        &mut mask.root,
-        Transform::default(),
-        None,
-        None,
-        cache,
-    );
+    root.calculate_bounding_boxes();
+    super::paint_server::update_paint_servers(root, Transform::default(), None, None, cache);
 
-    let mask = Arc::new(mask);
-    cache.masks.insert(id_copy, mask.clone());
-    Some(mask)
+    Some(())
 }

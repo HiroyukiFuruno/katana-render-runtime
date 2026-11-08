@@ -73,55 +73,56 @@ impl<'input> Document<'input> {
     }
 }
 
+macro_rules! writeln_indented {
+    ($depth:expr, $f:expr, $fmt:expr) => {
+        for _ in 0..$depth { write!($f, "    ")?; }
+        writeln!($f, $fmt)?;
+    };
+    ($depth:expr, $f:expr, $fmt:expr, $($arg:tt)*) => {
+        for _ in 0..$depth { write!($f, "    ")?; }
+        writeln!($f, $fmt, $($arg)*)?;
+    };
+}
+
+fn print_children(
+    parent: SvgNode,
+    depth: usize,
+    f: &mut std::fmt::Formatter,
+) -> Result<(), std::fmt::Error> {
+    for child in parent.children() {
+        if child.is_element() {
+            writeln_indented!(depth, f, "Element {{");
+            writeln_indented!(depth, f, "    tag_name: {:?}", child.tag_name());
+
+            if !child.attributes().is_empty() {
+                writeln_indented!(depth + 1, f, "attributes: [");
+                for attr in child.attributes() {
+                    writeln_indented!(depth + 2, f, "{:?}", attr);
+                }
+                writeln_indented!(depth + 1, f, "]");
+            }
+
+            if child.has_children() {
+                writeln_indented!(depth, f, "    children: [");
+                print_children(child, depth + 2, f)?;
+                writeln_indented!(depth, f, "    ]");
+            }
+
+            writeln_indented!(depth, f, "}}");
+        } else {
+            writeln_indented!(depth, f, "{:?}", child);
+        }
+    }
+
+    Ok(())
+}
+
 impl std::fmt::Debug for Document<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         if !self.root().has_children() {
             return write!(f, "Document []");
         }
 
-        macro_rules! writeln_indented {
-            ($depth:expr, $f:expr, $fmt:expr) => {
-                for _ in 0..$depth { write!($f, "    ")?; }
-                writeln!($f, $fmt)?;
-            };
-            ($depth:expr, $f:expr, $fmt:expr, $($arg:tt)*) => {
-                for _ in 0..$depth { write!($f, "    ")?; }
-                writeln!($f, $fmt, $($arg)*)?;
-            };
-        }
-
-        fn print_children(
-            parent: SvgNode,
-            depth: usize,
-            f: &mut std::fmt::Formatter,
-        ) -> Result<(), std::fmt::Error> {
-            for child in parent.children() {
-                if child.is_element() {
-                    writeln_indented!(depth, f, "Element {{");
-                    writeln_indented!(depth, f, "    tag_name: {:?}", child.tag_name());
-
-                    if !child.attributes().is_empty() {
-                        writeln_indented!(depth + 1, f, "attributes: [");
-                        for attr in child.attributes() {
-                            writeln_indented!(depth + 2, f, "{:?}", attr);
-                        }
-                        writeln_indented!(depth + 1, f, "]");
-                    }
-
-                    if child.has_children() {
-                        writeln_indented!(depth, f, "    children: [");
-                        print_children(child, depth + 2, f)?;
-                        writeln_indented!(depth, f, "    ]");
-                    }
-
-                    writeln_indented!(depth, f, "}}");
-                } else {
-                    writeln_indented!(depth, f, "{:?}", child);
-                }
-            }
-
-            Ok(())
-        }
 
         writeln!(f, "Document [")?;
         print_children(self.root(), 1, f)?;
@@ -282,21 +283,7 @@ impl<'a, 'input: 'a> SvgNode<'a, 'input> {
             .iter()
             .find(|a| a.name == aid)
             .map(|a| a.value.as_str())?;
-        // These AId have an initial value of none
-        let is_possible_none = matches!(
-            aid,
-            AId::Mask
-                | AId::MarkerStart
-                | AId::MarkerMid
-                | AId::MarkerEnd
-                | AId::ClipPath
-                | AId::Filter
-                | AId::FontSizeAdjust
-                | AId::TextDecoration
-                | AId::Stroke
-                | AId::StrokeDasharray
-        );
-        if is_possible_none && value == "none" {
+        if is_none_attribute(aid, value) {
             return None;
         }
         match T::parse(*self, aid, value) {
@@ -494,6 +481,23 @@ impl<'a, 'input: 'a> SvgNode<'a, 'input> {
             visited_overflow: None,
         }
     }
+}
+
+fn is_none_attribute(aid: AId, value: &str) -> bool {
+    // These AId have an initial value of none
+    matches!(
+        aid,
+        AId::Mask
+            | AId::MarkerStart
+            | AId::MarkerMid
+            | AId::MarkerEnd
+            | AId::ClipPath
+            | AId::Filter
+            | AId::FontSizeAdjust
+            | AId::TextDecoration
+            | AId::Stroke
+            | AId::StrokeDasharray
+    ) && value == "none"
 }
 
 impl std::fmt::Debug for SvgNode<'_, '_> {
@@ -718,27 +722,16 @@ impl EId {
 
 impl AId {
     fn is_presentation(&self) -> bool {
+        self.presentation_font()
+            || self.presentation_text()
+            || self.presentation_paint()
+            || self.presentation_other()
+    }
+
+    fn presentation_font(&self) -> bool {
         matches!(
             self,
-            AId::AlignmentBaseline
-                | AId::BaselineShift
-                | AId::BackgroundColor // non-standard SVG attribute
-                | AId::ClipPath
-                | AId::ClipRule
-                | AId::Color
-                | AId::ColorInterpolation
-                | AId::ColorInterpolationFilters
-                | AId::ColorRendering
-                | AId::Direction
-                | AId::Display
-                | AId::DominantBaseline
-                | AId::Fill
-                | AId::FillOpacity
-                | AId::FillRule
-                | AId::Filter
-                | AId::FloodColor
-                | AId::FloodOpacity
-                | AId::FontFamily
+            AId::FontFamily
                 | AId::FontKerning // technically not presentation
                 | AId::FontOpticalSizing // technically not presentation
                 | AId::FontSize
@@ -750,20 +743,42 @@ impl AId {
                 | AId::FontVariationSettings
                 | AId::GlyphOrientationHorizontal
                 | AId::GlyphOrientationVertical
-                | AId::ImageRendering
-                | AId::Isolation // technically not presentation
+        )
+    }
+
+    fn presentation_text(&self) -> bool {
+        matches!(
+            self,
+            AId::AlignmentBaseline
+                | AId::BaselineShift
+                | AId::Direction
+                | AId::DominantBaseline
                 | AId::LetterSpacing
+                | AId::TextAnchor
+                | AId::TextDecoration
+                | AId::TextOverflow
+                | AId::TextRendering
+                | AId::UnicodeBidi
+                | AId::WhiteSpace
+                | AId::WordSpacing
+                | AId::WritingMode
+        )
+    }
+
+    fn presentation_paint(&self) -> bool {
+        matches!(
+            self,
+            AId::Color
+                | AId::ColorInterpolation
+                | AId::ColorInterpolationFilters
+                | AId::ColorRendering
+                | AId::Fill
+                | AId::FillOpacity
+                | AId::FillRule
+                | AId::FloodColor
+                | AId::FloodOpacity
                 | AId::LightingColor
-                | AId::MarkerEnd
-                | AId::MarkerMid
-                | AId::MarkerStart
-                | AId::Mask
-                | AId::MaskType
-                | AId::MixBlendMode // technically not presentation
-                | AId::Opacity
-                | AId::Overflow
                 | AId::PaintOrder
-                | AId::ShapeRendering
                 | AId::StopColor
                 | AId::StopOpacity
                 | AId::Stroke
@@ -774,18 +789,32 @@ impl AId {
                 | AId::StrokeMiterlimit
                 | AId::StrokeOpacity
                 | AId::StrokeWidth
-                | AId::TextAnchor
-                | AId::TextDecoration
-                | AId::TextOverflow
-                | AId::TextRendering
+        )
+    }
+
+    fn presentation_other(&self) -> bool {
+        matches!(
+            self,
+            AId::BackgroundColor // non-standard SVG attribute
+                | AId::ClipPath
+                | AId::ClipRule
+                | AId::Display
+                | AId::Filter
+                | AId::ImageRendering
+                | AId::Isolation // technically not presentation
+                | AId::MarkerEnd
+                | AId::MarkerMid
+                | AId::MarkerStart
+                | AId::Mask
+                | AId::MaskType
+                | AId::MixBlendMode // technically not presentation
+                | AId::Opacity
+                | AId::Overflow
+                | AId::ShapeRendering
                 | AId::Transform
                 | AId::TransformOrigin
-                | AId::UnicodeBidi
                 | AId::VectorEffect
                 | AId::Visibility
-                | AId::WhiteSpace
-                | AId::WordSpacing
-                | AId::WritingMode
         )
     }
 
@@ -799,24 +828,16 @@ impl AId {
     }
 
     fn allows_inherit_value(&self) -> bool {
+        self.inherit_value_font()
+            || self.inherit_value_text()
+            || self.inherit_value_paint()
+            || self.inherit_value_other()
+    }
+
+    fn inherit_value_font(&self) -> bool {
         matches!(
             self,
-            AId::AlignmentBaseline
-                | AId::BaselineShift
-                | AId::ClipPath
-                | AId::ClipRule
-                | AId::Color
-                | AId::ColorInterpolationFilters
-                | AId::Direction
-                | AId::Display
-                | AId::DominantBaseline
-                | AId::Fill
-                | AId::FillOpacity
-                | AId::FillRule
-                | AId::Filter
-                | AId::FloodColor
-                | AId::FloodOpacity
-                | AId::FontFamily
+            AId::FontFamily
                 | AId::FontKerning
                 | AId::FontOpticalSizing
                 | AId::FontSize
@@ -824,16 +845,36 @@ impl AId {
                 | AId::FontStyle
                 | AId::FontVariant
                 | AId::FontWeight
-                | AId::ImageRendering
                 | AId::Kerning
+        )
+    }
+
+    fn inherit_value_text(&self) -> bool {
+        matches!(
+            self,
+            AId::AlignmentBaseline
+                | AId::BaselineShift
+                | AId::Direction
+                | AId::DominantBaseline
                 | AId::LetterSpacing
-                | AId::MarkerEnd
-                | AId::MarkerMid
-                | AId::MarkerStart
-                | AId::Mask
-                | AId::Opacity
-                | AId::Overflow
-                | AId::ShapeRendering
+                | AId::TextAnchor
+                | AId::TextDecoration
+                | AId::TextRendering
+                | AId::WordSpacing
+                | AId::WritingMode
+        )
+    }
+
+    fn inherit_value_paint(&self) -> bool {
+        matches!(
+            self,
+            AId::Color
+                | AId::ColorInterpolationFilters
+                | AId::Fill
+                | AId::FillOpacity
+                | AId::FillRule
+                | AId::FloodColor
+                | AId::FloodOpacity
                 | AId::StopColor
                 | AId::StopOpacity
                 | AId::Stroke
@@ -844,12 +885,25 @@ impl AId {
                 | AId::StrokeMiterlimit
                 | AId::StrokeOpacity
                 | AId::StrokeWidth
-                | AId::TextAnchor
-                | AId::TextDecoration
-                | AId::TextRendering
+        )
+    }
+
+    fn inherit_value_other(&self) -> bool {
+        matches!(
+            self,
+            AId::ClipPath
+                | AId::ClipRule
+                | AId::Display
+                | AId::Filter
+                | AId::ImageRendering
+                | AId::MarkerEnd
+                | AId::MarkerMid
+                | AId::MarkerStart
+                | AId::Mask
+                | AId::Opacity
+                | AId::Overflow
+                | AId::ShapeRendering
                 | AId::Visibility
-                | AId::WordSpacing
-                | AId::WritingMode
         )
     }
 }

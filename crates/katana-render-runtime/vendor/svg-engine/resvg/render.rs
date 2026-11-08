@@ -59,26 +59,23 @@ fn render_group(
         return Some(());
     }
 
-    let rest = if group.filters().is_empty() {
-        tiny_skia::Transform::identity()
-    } else {
-        let sx = transform.sx.hypot(transform.ky);
-        let sy = transform.kx.hypot(transform.sy);
-        tiny_skia::Transform::from_row(
-            transform.sx / sx,
-            transform.ky / sx,
-            transform.kx / sy,
-            transform.sy / sy,
-            0.0,
-            0.0,
-        )
-    };
+    let rest = layer_transform(group, transform);
     let inv_rest = rest.invert()?;
 
     let max_bbox = ctx.max_bbox.to_rect().transform(inv_rest)?.round_out()?;
     let (layer, ibbox) =
         render_layer(group, &Context { max_bbox }, inv_rest.pre_concat(transform))?;
+    composite_layer(group, &layer, ibbox, rest, pixmap);
+    Some(())
+}
 
+fn composite_layer(
+    group: &crate::svg_engine::usvg::Group,
+    layer: &tiny_skia::Pixmap,
+    ibbox: tiny_skia::IntRect,
+    rest: tiny_skia::Transform,
+    pixmap: &mut tiny_skia::PixmapMut,
+) {
     let paint = tiny_skia::Paint {
         shader: tiny_skia::Pattern::new(
             layer.as_ref(),
@@ -94,7 +91,23 @@ fn render_group(
     let path = tiny_skia::PathBuilder::from_rect(ibbox.to_rect());
     pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding, rest, None);
 
-    Some(())
+}
+
+fn layer_transform(group: &crate::svg_engine::usvg::Group, transform: tiny_skia::Transform) -> tiny_skia::Transform {
+    if group.filters().is_empty() {
+        tiny_skia::Transform::identity()
+    } else {
+        let sx = transform.sx.hypot(transform.ky);
+        let sy = transform.kx.hypot(transform.sy);
+        tiny_skia::Transform::from_row(
+            transform.sx / sx,
+            transform.ky / sx,
+            transform.kx / sy,
+            transform.sy / sy,
+            0.0,
+            0.0,
+        )
+    }
 }
 
 /// Renders an isolated group into a new layer, returning it and its position.
@@ -104,36 +117,7 @@ fn render_layer(
     transform: tiny_skia::Transform,
 ) -> Option<(tiny_skia::Pixmap, tiny_skia::IntRect)> {
     let bbox = group.layer_bounding_box().transform(transform)?;
-
-    let mut ibbox = if group.filters().is_empty() {
-        // Convert group bbox into an integer one, expanding each side outwards by 2px
-        // to make sure that anti-aliased pixels would not be clipped.
-        tiny_skia::IntRect::from_xywh(
-            (bbox.x().floor() as i32).checked_sub(2)?,
-            (bbox.y().floor() as i32).checked_sub(2)?,
-            (bbox.width().ceil() as u32).checked_add(4)?,
-            (bbox.height().ceil() as u32).checked_add(4)?,
-        )?
-    } else {
-        // The bounding box for groups with filters is special and should not be expanded by 2px,
-        // because it's already acting as a clipping region.
-        let bbox = tiny_skia::IntRect::from_xywh(
-            bbox.x().floor() as i32,
-            bbox.y().floor() as i32,
-            bbox.width().ceil().max(1.0) as u32,
-            bbox.height().ceil().max(1.0) as u32,
-        )?;
-        // Make sure our filter region is not bigger than 4x the canvas size.
-        // This is required mainly to prevent huge filter regions that would tank the performance.
-        // It should not affect the final result in any way.
-        crate::svg_engine::resvg::geom::fit_to_rect(bbox, ctx.max_bbox)?
-    };
-
-    // Make sure our layer is not bigger than 4x the canvas size.
-    // This is required to prevent huge layers.
-    if group.filters().is_empty() {
-        ibbox = crate::svg_engine::resvg::geom::fit_to_rect(ibbox, ctx.max_bbox)?;
-    }
+    let ibbox = layer_bbox(group, ctx, bbox)?;
 
     let shift_ts = {
         // Original shift.
@@ -153,22 +137,68 @@ fn render_layer(
         .log_none(|| log::warn!("Failed to allocate a group layer for: {:?}.", ibbox))?;
 
     render_nodes(group, ctx, transform, &mut sub_pixmap.as_mut());
+    apply_layer_effects(group, ctx, transform, &mut sub_pixmap);
+    Some((sub_pixmap, ibbox))
+}
 
+fn layer_bbox(
+    group: &crate::svg_engine::usvg::Group,
+    ctx: &Context,
+    bbox: tiny_skia::NonZeroRect,
+) -> Option<tiny_skia::IntRect> {
+    let mut ibbox = if group.filters().is_empty() {
+        // Convert group bbox into an integer one, expanding each side outwards by 2px
+        // to make sure that anti-aliased pixels would not be clipped.
+        tiny_skia::IntRect::from_xywh(
+            (bbox.x().floor() as i32).checked_sub(2)?,
+            (bbox.y().floor() as i32).checked_sub(2)?,
+            (bbox.width().ceil() as u32).checked_add(4)?,
+            (bbox.height().ceil() as u32).checked_add(4)?,
+        )?
+    } else {
+        filtered_layer_bbox(bbox, ctx)?
+    };
+
+    // Make sure our layer is not bigger than 4x the canvas size.
+    // This is required to prevent huge layers.
+    if group.filters().is_empty() {
+        ibbox = crate::svg_engine::resvg::geom::fit_to_rect(ibbox, ctx.max_bbox)?;
+    }
+
+    Some(ibbox)
+}
+
+fn filtered_layer_bbox(bbox: tiny_skia::NonZeroRect, ctx: &Context) -> Option<tiny_skia::IntRect> {
+    // The filter region already acts as a clipping region and must not be expanded.
+    let bbox = tiny_skia::IntRect::from_xywh(
+        bbox.x().floor() as i32,
+        bbox.y().floor() as i32,
+        bbox.width().ceil().max(1.0) as u32,
+        bbox.height().ceil().max(1.0) as u32,
+    )?;
+    crate::svg_engine::resvg::geom::fit_to_rect(bbox, ctx.max_bbox)
+}
+
+fn apply_layer_effects(
+    group: &crate::svg_engine::usvg::Group,
+    ctx: &Context,
+    transform: tiny_skia::Transform,
+    sub_pixmap: &mut tiny_skia::Pixmap,
+) {
     if !group.filters().is_empty() {
         for filter in group.filters() {
-            crate::svg_engine::resvg::filter::apply(filter, transform, &mut sub_pixmap);
+            crate::svg_engine::resvg::filter::apply(filter, transform, sub_pixmap);
         }
     }
 
     if let Some(clip_path) = group.clip_path() {
-        crate::svg_engine::resvg::clip::apply(clip_path, transform, &mut sub_pixmap);
+        crate::svg_engine::resvg::clip::apply(clip_path, transform, sub_pixmap);
     }
 
     if let Some(mask) = group.mask() {
-        crate::svg_engine::resvg::mask::apply(mask, ctx, transform, &mut sub_pixmap);
+        crate::svg_engine::resvg::mask::apply(mask, ctx, transform, sub_pixmap);
     }
 
-    Some((sub_pixmap, ibbox))
 }
 
 pub fn convert_blend_mode(mode: crate::svg_engine::usvg::BlendMode) -> tiny_skia::BlendMode {

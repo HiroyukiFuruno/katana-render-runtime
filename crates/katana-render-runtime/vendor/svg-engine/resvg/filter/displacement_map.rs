@@ -3,6 +3,7 @@
 
 use super::{ImageRef, ImageRefMut};
 use crate::svg_engine::usvg::filter::{ColorChannel, DisplacementMap};
+use rgb::RGBA8;
 
 /// Applies a displacement map.
 ///
@@ -29,19 +30,8 @@ pub fn apply(
     let mut x: u32 = 0;
     let mut y: u32 = 0;
     for pixel in map.data.iter() {
-        let calc_offset = |channel| {
-            let c = match channel {
-                ColorChannel::B => pixel.b,
-                ColorChannel::G => pixel.g,
-                ColorChannel::R => pixel.r,
-                ColorChannel::A => pixel.a,
-            };
-
-            c as f32 / 255.0 - 0.5
-        };
-
-        let dx = calc_offset(fe.x_channel_selector());
-        let dy = calc_offset(fe.y_channel_selector());
+        let dx = channel_offset(pixel, fe.x_channel_selector());
+        let dy = channel_offset(pixel, fe.y_channel_selector());
         let ox = (x as f32 + dx * scale_x).round() as i32;
         let oy = (y as f32 + dy * scale_y).round() as i32;
 
@@ -59,4 +49,14 @@ pub fn apply(
             y += 1;
         }
     }
+}
+
+fn channel_offset(pixel: &RGBA8, channel: ColorChannel) -> f32 {
+    let c = match channel {
+        ColorChannel::B => pixel.b,
+        ColorChannel::G => pixel.g,
+        ColorChannel::R => pixel.r,
+        ColorChannel::A => pixel.a,
+    };
+    c as f32 / 255.0 - 0.5
 }

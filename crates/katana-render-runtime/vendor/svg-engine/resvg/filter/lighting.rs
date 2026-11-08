@@ -181,36 +181,7 @@ pub fn specular_lighting(
     debug_assert!(src.width == dest.width && src.height == dest.height);
 
     let light_factor = |normal: Normal, light_vector: Vector3| {
-        let h = light_vector + Vector3::new(0.0, 0.0, 1.0);
-        let h_length = h.length();
-
-        if h_length.approx_zero_ulps(4) {
-            return 0.0;
-        }
-
-        let k = if normal.normal.approx_zero() {
-            let n_dot_h = h.z / h_length;
-            if fe.specular_exponent().approx_eq_ulps(&1.0, 4) {
-                n_dot_h
-            } else {
-                n_dot_h.powf(fe.specular_exponent())
-            }
-        } else {
-            let mut n = normal.normal * (fe.surface_scale() / 255.0);
-            n.x *= normal.factor.x;
-            n.y *= normal.factor.y;
-
-            let normal = Vector3::new(n.x, n.y, 1.0);
-
-            let n_dot_h = normal.dot(&h) / normal.length() / h_length;
-            if fe.specular_exponent().approx_eq_ulps(&1.0, 4) {
-                n_dot_h
-            } else {
-                n_dot_h.powf(fe.specular_exponent())
-            }
-        };
-
-        fe.specular_constant() * k
+        specular_factor(fe, normal, light_vector)
     };
 
     apply(
@@ -222,6 +193,39 @@ pub fn specular_lighting(
         src,
         dest,
     );
+}
+
+fn specular_factor(fe: &SpecularLighting, normal: Normal, light_vector: Vector3) -> f32 {
+        let h = light_vector + Vector3::new(0.0, 0.0, 1.0);
+        let h_length = h.length();
+
+        if h_length.approx_zero_ulps(4) {
+            return 0.0;
+        }
+
+        let k = if normal.normal.approx_zero() {
+            let n_dot_h = h.z / h_length;
+            specular_power(fe, n_dot_h)
+        } else {
+            let mut n = normal.normal * (fe.surface_scale() / 255.0);
+            n.x *= normal.factor.x;
+            n.y *= normal.factor.y;
+
+            let normal = Vector3::new(n.x, n.y, 1.0);
+
+            let n_dot_h = normal.dot(&h) / normal.length() / h_length;
+            specular_power(fe, n_dot_h)
+        };
+
+        fe.specular_constant() * k
+}
+
+fn specular_power(fe: &SpecularLighting, n_dot_h: f32) -> f32 {
+    if fe.specular_exponent().approx_eq_ulps(&1.0, 4) {
+        n_dot_h
+    } else {
+        n_dot_h.powf(fe.specular_exponent())
+    }
 }
 
 fn apply(
@@ -237,11 +241,52 @@ fn apply(
         return;
     }
 
-    let width = src.width;
-    let height = src.height;
+    let mut light_vector = initial_light_vector(light_source);
 
+    let mut calc = |nx, ny, normal: Normal| {
+        update_light_vector(light_source, nx, ny, src, surface_scale, &mut light_vector);
+
+        let light_color = light_color(&light_source, lighting_color, light_vector);
+        let factor = light_factor(normal, light_vector);
+
+        let pixel = lighting_pixel(light_color, factor, calc_alpha);
+        *dest.pixel_at_mut(nx, ny) = pixel;
+    };
+
+    apply_normals(src, &mut calc);
+}
+
+fn update_light_vector(
+    source: LightSource,
+    nx: u32,
+    ny: u32,
+    src: ImageRef,
+    surface_scale: f32,
+    light_vector: &mut Vector3,
+) {
+    match source {
+        LightSource::DistantLight(_) => {}
+        LightSource::PointLight(ref light) => {
+            *light_vector = point_light_vector(light.x, light.y, light.z, nx, ny, src, surface_scale);
+        }
+        LightSource::SpotLight(ref light) => {
+            *light_vector = point_light_vector(light.x, light.y, light.z, nx, ny, src, surface_scale);
+        }
+    }
+}
+
+fn lighting_pixel(color: Color, factor: f32, calc_alpha: fn(u8, u8, u8) -> u8) -> RGBA8 {
+    let compute = |x| (f32_bound(0.0, x as f32 * factor, 255.0) + 0.5) as u8;
+    let r = compute(color.red);
+    let g = compute(color.green);
+    let b = compute(color.blue);
+    let a = calc_alpha(r, g, b);
+    RGBA8 { b, g, r, a }
+}
+
+fn initial_light_vector(light_source: LightSource) -> Vector3 {
     // `feDistantLight` has a fixed vector, so calculate it beforehand.
-    let mut light_vector = match light_source {
+    match light_source {
         LightSource::DistantLight(light) => {
             let azimuth = light.azimuth.to_radians();
             let elevation = light.elevation.to_radians();
@@ -252,38 +297,27 @@ fn apply(
             )
         }
         _ => Vector3::new(1.0, 1.0, 1.0),
-    };
+    }
+}
 
-    let mut calc = |nx, ny, normal: Normal| {
-        match light_source {
-            LightSource::DistantLight(_) => {}
-            LightSource::PointLight(ref light) => {
-                let nz = src.alpha_at(nx, ny) as f32 / 255.0 * surface_scale;
-                let origin = Vector3::new(light.x, light.y, light.z);
-                let v = origin - Vector3::new(nx as f32, ny as f32, nz);
-                light_vector = v.normalized().unwrap_or(v);
-            }
-            LightSource::SpotLight(ref light) => {
-                let nz = src.alpha_at(nx, ny) as f32 / 255.0 * surface_scale;
-                let origin = Vector3::new(light.x, light.y, light.z);
-                let v = origin - Vector3::new(nx as f32, ny as f32, nz);
-                light_vector = v.normalized().unwrap_or(v);
-            }
-        }
+fn point_light_vector(
+    x: f32,
+    y: f32,
+    z: f32,
+    nx: u32,
+    ny: u32,
+    src: ImageRef,
+    surface_scale: f32,
+) -> Vector3 {
+    let nz = src.alpha_at(nx, ny) as f32 / 255.0 * surface_scale;
+    let origin = Vector3::new(x, y, z);
+    let v = origin - Vector3::new(nx as f32, ny as f32, nz);
+    v.normalized().unwrap_or(v)
+}
 
-        let light_color = light_color(&light_source, lighting_color, light_vector);
-        let factor = light_factor(normal, light_vector);
-
-        let compute = |x| (f32_bound(0.0, x as f32 * factor, 255.0) + 0.5) as u8;
-
-        let r = compute(light_color.red);
-        let g = compute(light_color.green);
-        let b = compute(light_color.blue);
-        let a = calc_alpha(r, g, b);
-
-        *dest.pixel_at_mut(nx, ny) = RGBA8 { b, g, r, a };
-    };
-
+fn apply_normals(src: ImageRef, calc: &mut impl FnMut(u32, u32, Normal)) {
+    let width = src.width;
+    let height = src.height;
     calc(0, 0, top_left_normal(src));
     calc(width - 1, 0, top_right_normal(src));
     calc(0, height - 1, bottom_left_normal(src));

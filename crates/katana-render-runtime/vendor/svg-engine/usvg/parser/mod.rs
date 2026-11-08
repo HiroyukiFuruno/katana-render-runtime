@@ -134,17 +134,7 @@ impl crate::svg_engine::usvg::Tree {
             // fontdb, not the one from the cache.
             fontdb: opt.fontdb.clone(),
             // Can't clone the resolver, so we create a new one that forwards to it.
-            font_resolver: crate::svg_engine::usvg::FontResolver {
-                select_font: Box::new(|font, db| (opt.font_resolver.select_font)(font, db)),
-                select_fallback: Box::new(|c, used_fonts, db| {
-                    (opt.font_resolver.select_fallback)(c, used_fonts, db)
-                }),
-                select_styled_fallback: opt.font_resolver.select_styled_fallback.as_ref().map(|selector| {
-                    let forward: crate::svg_engine::usvg::StyledFallbackSelectionFn<'_> =
-                        Box::new(move |font, c, used_fonts, db| selector(font, c, used_fonts, db));
-                    forward
-                }),
-            },
+            font_resolver: nested_font_resolver(opt),
             ..Options::default()
         };
 
@@ -168,6 +158,20 @@ impl crate::svg_engine::usvg::Tree {
     pub fn from_xmltree(doc: &roxmltree::Document, opt: &Options) -> Result<Self, Error> {
         let doc = svgtree::Document::parse_tree(doc, opt.style_sheet.as_deref())?;
         self::converter::convert_doc(&doc, opt)
+    }
+}
+
+fn nested_font_resolver<'a>(opt: &'a Options<'_>) -> crate::svg_engine::usvg::FontResolver<'a> {
+    crate::svg_engine::usvg::FontResolver {
+        select_font: Box::new(|font, db| (opt.font_resolver.select_font)(font, db)),
+        select_fallback: Box::new(|c, used_fonts, db| {
+            (opt.font_resolver.select_fallback)(c, used_fonts, db)
+        }),
+        select_styled_fallback: opt.font_resolver.select_styled_fallback.as_ref().map(|selector| {
+            let forward: crate::svg_engine::usvg::StyledFallbackSelectionFn<'_> =
+                Box::new(move |font, c, used_fonts, db| selector(font, c, used_fonts, db));
+            forward
+        }),
     }
 }
 
