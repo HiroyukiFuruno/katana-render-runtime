@@ -101,6 +101,49 @@ fn verification_rejects_changed_table_set_and_missing_metric_tables() -> Result<
 }
 
 #[test]
+fn metric_guard_rejects_missing_output_metric_tables() -> Result<(), String> {
+    let source = ReadFontRef::from_index(FONT_BYTES, 0).map_err(|error| format!("{error:?}"))?;
+    for (tag, expected) in [
+        (Tag::new(b"maxp"), "repacked head table missing:"),
+        (Tag::new(b"head"), "repacked maxp table missing:"),
+    ] {
+        let incomplete = font_with_only(tag)?;
+        let output =
+            ReadFontRef::from_index(&incomplete, 0).map_err(|error| format!("{error:?}"))?;
+        let error = validate_metrics(&source, &output)
+            .err()
+            .ok_or("incomplete output unexpectedly accepted")?;
+        assert!(error.starts_with(expected), "unexpected error: {error}");
+        assert_eq!(
+            verify_face(FONT_BYTES, 0, &incomplete),
+            Err("repacked face table tag set changed".into())
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn verification_rejects_missing_source_and_output_table_data() -> Result<(), String> {
+    let complete = font_with_only(Tag::new(b"name"))?;
+    let truncated = truncated_name_font()?;
+    for (source, output, expected) in [
+        (
+            truncated.as_slice(),
+            complete.as_slice(),
+            "source table data missing",
+        ),
+        (
+            complete.as_slice(),
+            truncated.as_slice(),
+            "repacked table data missing",
+        ),
+    ] {
+        assert_eq!(verify_face(source, 0, output), Err(expected.into()));
+    }
+    Ok(())
+}
+
+#[test]
 fn metric_guard_rejects_changed_units_and_glyph_count() -> Result<(), String> {
     let source = ReadFontRef::from_index(FONT_BYTES, 0).map_err(|error| format!("{error:?}"))?;
     for (tag, offset, expected) in METRIC_CASES {
