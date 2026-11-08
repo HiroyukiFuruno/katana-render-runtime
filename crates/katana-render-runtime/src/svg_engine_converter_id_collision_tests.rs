@@ -6,6 +6,9 @@ use rstest::rstest;
 
 use super::{Cache, NonEmptyString, collect_source_ids, svgtree};
 
+#[path = "svg_engine_converter_node_boundary_tests.rs"]
+mod node_boundary_tests;
+
 type Generator = fn(&mut Cache) -> NonEmptyString;
 
 const CONSECUTIVE_COLLISIONS: usize = 3;
