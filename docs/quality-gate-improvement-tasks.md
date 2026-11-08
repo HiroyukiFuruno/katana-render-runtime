@@ -28,6 +28,8 @@
 - [x] 次のCSS/font fixture/filter private境界は `css-filter-boundary-current-build-_j26uynm` でfoundation実0、ASTは新WHYコメントの書式だけ実101となりcompile未起動。コメント1行を既存規約へ合わせた `css-filter-comment-fixed-build-u6axpall` はAST・provenance unit・実manifest validatorが実0、同profile compile成功（none選択実4）。scopeを限定して再検査し、coverage/lint除外は追加していない。元upstream source SHA/bytes・adaptation数・licenseを保持し、filterのtest hook追加後の移植先SHA/bytesとmanifest pinだけを正規更新した。
 - [x] 実catalog `css-filter-boundary-current-catalog-qzuvdp14` に照合した `css-filter-boundaries-exact23-8_2ts_2j` は23case全実0、source/binary不変・profile残0。RobotoFlexのYTLC 416/514/570は独立ttf-parserのx-height/UPMへ一致（整数丸め差1font unit以内）、min/maxの実変化を無条件assertで確認、空axisとdefaultも一致。Noto正常の有限正値、resolver None/実face削除後の拒否、不正bytes拒否を確認し、共有helper移動後の既存5backendとvariation9caseも維持。filterの4内部防御契約と実光源3種・先頭優先を旧製品ロジックでcharacterizeした。私有helperの直接検査を公開SVG到達の証明と呼ばず、製品ロジック/raw JS/画像基準は不変。正式root973行は次の全体収集まで更新しない。
 
+- [x] ID移転の内部モデル契約は `filter-id-transfer-current-build-rpfvxkaq` のfoundation/AST実0・同profile compile成功（none選択実4）後、実catalog `filter-id-transfer-current-catalog-4icl3llb` へ照合。`filter-transfer-feimage-exact13-7ly5q938` はprivate filter8/既存feImage5の13case全実0、source/binary不変・profile残0。実SVG由来のGroup/Path/PNG Image/Text cloneで4分岐を直接検査し、wrapper ID移転・子ID消去・PNG元bytes・元Tree・後続子の不変を確認した。空root/非Group先頭/空wrapper/既存wrapper ID/空child IDはnoop、先頭以外のwrapperも不変。所有test2fileだけの変更であり、公開SVG経路の到達や正式coverage減少を未測定のまま断定しない。
+
 ### 経過の記録（以下の旧数値・未実行予定は上の現在実数と区別する）
 
 - [/] 集計対象helperの限定補完: cmapのIO・HTMLの座標/実frame・KDRのparser pin fixtureを非重複3担当で変更中。成功/元のエラー表示とWindows callerを保ち、欠落ファイル・不正属性/viewport・closed session・fixture read/write失敗を実入力で検証する。実装の除外や分母変更はせず、純粋な判定caseは既存のtestファイル境界へ置く。レビューでcmap fixtureの早期失敗時の残骸も見つかったため、create_new成功後の所有とhandle解放後のDropへ整理する。まだ変更後未検証でありcoverage解消数へ加算しない。
