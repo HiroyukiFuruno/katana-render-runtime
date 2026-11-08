@@ -243,5 +243,33 @@ fn changed_owned_real_arial_file_invalidates_known_admission() -> Result<(), Str
     Ok(())
 }
 
+#[test]
+fn face_metadata_rejects_memory_backed_font() -> Result<(), String> {
+    let mut database = Database::new();
+    database.load_font_data(include_bytes!("../../assets/fonts/NotoSans-Regular.ttf").to_vec());
+    let id = database
+        .faces()
+        .next()
+        .map(|face| face.id)
+        .ok_or_else(|| "bundled Noto Sans face missing".to_owned())?;
+    let error = face_metadata(&database, id)
+        .err()
+        .ok_or_else(|| "memory-backed face must not report a file path".to_owned())?;
+    assert_eq!(error, "selected face is not File-backed");
+    Ok(())
+}
+
+#[test]
+fn owned_font_mutation_helpers_report_missing_file() -> Result<(), String> {
+    let copied = OwnedFontCopy::from_real_arial()?;
+    let original_len = std::fs::metadata(&copied.path)
+        .map_err(|error| error.to_string())?
+        .len();
+    std::fs::remove_file(&copied.path).map_err(|error| error.to_string())?;
+    assert!(copied.append_sentinel(FILE_SENTINEL).is_err());
+    assert!(copied.restore_len(original_len).is_err());
+    Ok(())
+}
+
 #[path = "svg_rasterize_html_font_admission_boundary_tests.rs"]
 mod boundary_tests;
