@@ -11,6 +11,26 @@ fn shared_file_keeps_warm_file_metrics_reusable() -> Result<(), String> {
     check_shared_file_preserves_cache(&fixture.database, fixture.face_id)
 }
 
+#[test]
+fn malformed_shared_file_does_not_prevent_normal_file_shaping() -> Result<(), String> {
+    let fixture = shared_font_file_fixture("shared-malformed-recovery")?;
+    let mut malformed = FONT_BYTES.to_vec();
+    malformed[0] = !malformed[0];
+    let (shared_db, shared_id) = shared_database(Arc::new(malformed))?;
+    let _scope = FontFaceCacheScope::enter();
+    assert!(font_for_face(&shared_db, shared_id).is_none());
+
+    let file = font_for_face(&fixture.database, fixture.face_id)
+        .ok_or("normal file font missing after malformed shared source")?;
+    let baseline = harfrust::font::Font::new(FONT_BYTES.to_vec(), 0)
+        .ok_or("independent baseline font missing")?;
+    assert_eq!(
+        super::shape_width(&file, super::VARIATION_SIZE, "AVoffice")?,
+        super::shape_width(&baseline, super::VARIATION_SIZE, "AVoffice")?
+    );
+    Ok(())
+}
+
 fn check_shared_file_preserves_cache(
     file_db: &Database,
     file_id: resvg::usvg::fontdb::ID,
