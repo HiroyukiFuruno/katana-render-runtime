@@ -27,6 +27,8 @@ const INVALID_DIVISOR: &str =
     "<feFlood result='visible'/><feConvolveMatrix order='2 1' kernelMatrix='1 2' divisor='0'/>";
 const INVALID_TARGET: &str =
     "<feFlood result='visible'/><feConvolveMatrix order='2 1' kernelMatrix='1 2' targetX='2'/>";
+const INVALID_TARGET_Y: &str =
+    "<feFlood result='visible'/><feConvolveMatrix order='2 1' kernelMatrix='1 2' targetY='1'/>";
 const INVALID_KERNEL_LENGTH: &str =
     "<feFlood result='visible'/><feConvolveMatrix order='2 1' kernelMatrix='1 2 3'/>";
 
@@ -119,6 +121,7 @@ fn assert_convolve_values(value: &usvg::filter::ConvolveMatrix, expected: Expect
 #[rstest]
 #[case::zero_divisor(INVALID_DIVISOR)]
 #[case::out_of_bounds_target(INVALID_TARGET)]
+#[case::out_of_bounds_target_y(INVALID_TARGET_Y)]
 #[case::wrong_kernel_length(INVALID_KERNEL_LENGTH)]
 fn invalid_convolve_matrix_becomes_transparent_dummy_after_prior_primitive(
     #[case] children: &str,
