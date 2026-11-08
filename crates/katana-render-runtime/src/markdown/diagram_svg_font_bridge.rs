@@ -1,5 +1,7 @@
 use super::DiagramTryCatchScope;
-use super::diagram_font_bridge::{font_measure_number, font_measure_request_with_size_policy};
+use super::diagram_font_bridge::{
+    font_measure_number, font_measure_request_with_size_policy, install_callback,
+};
 
 #[path = "diagram_svg_fragment_font_bridge.rs"]
 mod fragment;
@@ -16,20 +18,20 @@ const MAX_FONT_WEIGHT: f64 = 1000.0;
 pub(super) fn install(scope: &mut DiagramTryCatchScope<'_, '_, '_, '_>) -> Result<(), String> {
     let context = scope.get_current_context();
     let global = context.global(scope);
-    let svg_name = v8::String::new(scope, "__katanaMeasureSvgTextMetrics")
-        .ok_or_else(|| "SVG font metric bridge name allocation failed".to_string())?;
-    let svg_callback = v8::Function::new(scope, svg_font_measure_callback)
-        .ok_or_else(|| "SVG font metric bridge callback allocation failed".to_string())?;
-    global
-        .set(scope, svg_name.into(), svg_callback.into())
-        .ok_or_else(|| "SVG font metric bridge registration failed".to_string())?;
-    let x_height_name = v8::String::new(scope, "__katanaMeasureSvgFontXHeight")
-        .ok_or_else(|| "SVG font x-height bridge name allocation failed".to_string())?;
-    let x_height_callback = v8::Function::new(scope, svg_font_x_height_callback)
-        .ok_or_else(|| "SVG font x-height bridge callback allocation failed".to_string())?;
-    global
-        .set(scope, x_height_name.into(), x_height_callback.into())
-        .ok_or_else(|| "SVG font x-height bridge registration failed".to_string())?;
+    install_callback(
+        scope,
+        global,
+        "__katanaMeasureSvgTextMetrics",
+        svg_font_measure_callback,
+        "SVG font metric",
+    )?;
+    install_callback(
+        scope,
+        global,
+        "__katanaMeasureSvgFontXHeight",
+        svg_font_x_height_callback,
+        "SVG font x-height",
+    )?;
     fragment::install(scope, global)?;
     Ok(())
 }
