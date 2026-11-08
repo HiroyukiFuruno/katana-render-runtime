@@ -4,6 +4,9 @@ use super::{
 };
 
 const SHA256_HEX_LEN: usize = 64;
+const EMPTY_RASTER_EVENTS_ERROR: &str = "actual raster observer recorded no events";
+const MISSING_GENERIC_DECISION_ERROR: &str =
+    "actual initial link layout did not record the fixture generic family";
 
 #[test]
 fn closed_interaction_cannot_record_raster_phase() -> Result<(), String> {
@@ -16,6 +19,26 @@ fn closed_interaction_cannot_record_raster_phase() -> Result<(), String> {
         Err("fixture produced no frame".to_owned())
     );
     Ok(())
+}
+
+#[test]
+fn live_frame_without_observed_raster_events_is_rejected() -> Result<(), String> {
+    let mut session = interaction_session()?;
+    assert!(session.latest_frame().is_some());
+    let observer = super::html::raster_observer::Scope::enter();
+    let result = record_raster_phase(&session, &observer, "observer_started_after_frame");
+    let closed = session.close().map_err(|error| error.to_string());
+    assert_eq!(result, Err(EMPTY_RASTER_EVENTS_ERROR.to_owned()));
+    closed?;
+    Ok(())
+}
+
+#[test]
+fn initial_generic_decision_rejects_an_empty_observation() {
+    assert_eq!(
+        super::initial_generic_decision(&[]).err().as_deref(),
+        Some(MISSING_GENERIC_DECISION_ERROR)
+    );
 }
 
 #[test]
