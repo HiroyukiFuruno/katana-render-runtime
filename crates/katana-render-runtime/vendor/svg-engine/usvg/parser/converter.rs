@@ -1203,3 +1203,6 @@ fn apply_transform_origin(node: SvgNode, state: &State, transform: Transform, or
         .pre_concat(transform)
         .pre_translate(-dx, -dy)
 }
+
+#[cfg(test)]
+crate::svg_engine::owned_svg_model_tests!("../../../../src/svg_engine_converter_id_collision_tests.rs");
