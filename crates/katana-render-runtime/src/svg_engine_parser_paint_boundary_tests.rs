@@ -1,6 +1,9 @@
 use super::{CHANNEL_COUNT, VIEWPORT, parse_with_languages, sample_path, usvg};
 use rstest::rstest;
 
+#[path = "svg_engine_parser_paint_additional_boundary_tests.rs"]
+mod additional_boundaries;
+
 const OPAQUE_ALPHA: f32 = 1.0;
 const GRADIENT_FALLBACK_COLOR: (u8, u8, u8) = (18, 52, 86);
 const PATTERN_FALLBACK_COLOR: (u8, u8, u8) = (171, 205, 239);
