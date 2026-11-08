@@ -33,6 +33,9 @@
 - [x] 既定font resolverの追加は事前レビューで可変Arc引数とnamed選択の偽陽性を修正。初回 `default-font-resolver-current-build-qfguea5z` はfoundation/AST実0だが新font path欠落でcompile実101、`default-font-path-fixed-build-p1bb4qxt` も相対階層不足で実101として保持した。主担当がsource file起点で正確な `../../../tests/.../Yellowtail-Regular.ttf` を実在・60,864bytesへ照合後、`default-font-relative-path-verified-build-nv3962lr` はAST実0・同profile compile成功（none選択実4）。修正パスを実在確認せず再試行した失敗を省略しない。
 - [x] 実catalog `default-font-resolver-current-catalog-4_blorzb` に照合した `default-font-resolver-exact17-c460xyen` はresolver9/既存backend5/CSS2/fixture1の17case全実0、source/binary不変・profile残0。generic5種は各DB setterだけをNotoへ設定し、別genericへ誤対応しても代替で成功しない条件とした。named Notoはserif未設定、未登録namedだけ設定serifへfallback。空DB拒否、実Yellowtailへの正常fallback→base face実削除後の拒否を確認し、対象case自身で既存loggerを初期化してwarning生成も通した。次にこの一連のcommitを固定した正式rootを収集し、旧973行の減少を実測する。
 
+- [x] 生成ID/writer補完の `converter-writer-current-build-vv3y3oh4` はfoundation/AST/provenance4unit/実validatorが実0だが、新子moduleの `super::usvg` が存在せずcompile実101。主担当が実在する内部moduleへimportを修正し、余分なborrowも除去。`writer-import-fixed-current-build-yazwqzn3` はAST実0・同profile compile成功（none選択実4）、実catalogは `converter-writer-current-catalog-hpjeh2vd`。元source SHA/bytes/adaptation数は保持し、converter test hookの移植先SHA/bytesとmanifest pinだけを更新した。
+- [x] `converter-writer-boundaries-exact16-qyfzkpvl` はconverter12/image3/nested mask1の16case全実0・source/binary不変・profile残0。実svgtreeからsource IDを収集したCacheで4 generator×衝突0/1/3件を個別選択でき、正確な次番号・非空・source非衝突・連続一意を確認。IDなしPNGはID捏造なし/PNG種別/寸法/画素を維持、入れ子maskは実chain・xlink宣言・feImage参照先と2回往復の非空描画を確認した。IDなしcaseでwriterのIDあり書出し分岐を網羅したとは主張しない。全体953行からの改善はまだ未計測。
+
 ### 経過の記録（以下の旧数値・未実行予定は上の現在実数と区別する）
 
 - [/] 集計対象helperの限定補完: cmapのIO・HTMLの座標/実frame・KDRのparser pin fixtureを非重複3担当で変更中。成功/元のエラー表示とWindows callerを保ち、欠落ファイル・不正属性/viewport・closed session・fixture read/write失敗を実入力で検証する。実装の除外や分母変更はせず、純粋な判定caseは既存のtestファイル境界へ置く。レビューでcmap fixtureの早期失敗時の残骸も見つかったため、create_new成功後の所有とhandle解放後のDropへ整理する。まだ変更後未検証でありcoverage解消数へ加算しない。
