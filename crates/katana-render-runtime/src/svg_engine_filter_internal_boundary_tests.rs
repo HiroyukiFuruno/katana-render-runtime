@@ -1,8 +1,12 @@
-use super::{Error, PixmapExt, apply, apply_primitives, apply_turbulence, get_input};
+use super::{
+    Error, PixmapExt, apply, apply_morphology, apply_offset, apply_primitives, apply_turbulence,
+    get_input,
+};
 use crate::svg_engine::usvg::{self, filter};
 
 const CANVAS_SIZE: u32 = 4;
-const SOURCE_RGBA: [u8; 4] = [11, 29, 47, 255];
+const RGBA_CHANNELS: usize = 4;
+const SOURCE_RGBA: [u8; RGBA_CHANNELS] = [11, 29, 47, 255];
 const FILTER_FREQUENCY: f32 = 0.1;
 
 fn region() -> Result<tiny_skia::IntRect, String> {
@@ -99,5 +103,83 @@ fn clear_makes_all_pixels_transparent() -> Result<(), String> {
     PixmapExt::clear(&mut image);
     assert!(image.data().iter().all(|byte| *byte == 0));
     assert_eq!((image.width(), image.height()), (CANVAS_SIZE, CANVAS_SIZE));
+    Ok(())
+}
+
+fn source_image() -> Result<super::Image, String> {
+    get_input(&filter::Input::SourceGraphic, region()?, &source()?, &[])
+        .map_err(|error| format!("{error:?}"))
+}
+
+fn assert_offset_pixels(image: &tiny_skia::Pixmap, shift_x: i32, shift_y: i32) {
+    for y in 0..CANVAS_SIZE as i32 {
+        for x in 0..CANVAS_SIZE as i32 {
+            let source_x = x - shift_x;
+            let source_y = y - shift_y;
+            let inside = (0..CANVAS_SIZE as i32).contains(&source_x)
+                && (0..CANVAS_SIZE as i32).contains(&source_y);
+            let expected = if inside {
+                SOURCE_RGBA
+            } else {
+                [0; RGBA_CHANNELS]
+            };
+            let index = (y * CANVAS_SIZE as i32 + x) as usize * RGBA_CHANNELS;
+            assert_eq!(
+                &image.data()[index..index + RGBA_CHANNELS],
+                &expected,
+                "pixel ({x}, {y})"
+            );
+        }
+    }
+}
+
+#[test]
+fn offset_moves_and_clips_pixels_at_finite_scaled_coordinates() -> Result<(), String> {
+    for (dx, dy, scale_x, shift_x, shift_y) in [
+        (0.0, 0.0, 1.0, 0, 0),
+        (1.0, 0.0, 1.0, 1, 0),
+        (-1.0, 0.0, 1.0, -1, 0),
+        (0.0, 1.0, 1.0, 0, 1),
+        (0.0, -1.0, 1.0, 0, -1),
+        (1.0, 0.0, 2.0, 2, 0),
+        (-1.0, 0.0, 2.0, -2, 0),
+    ] {
+        let offset = filter::Offset {
+            input: filter::Input::SourceGraphic,
+            dx,
+            dy,
+        };
+        let image = apply_offset(
+            &offset,
+            usvg::Transform::from_scale(scale_x, 1.0),
+            source_image()?,
+        )
+        .map_err(|error| format!("{error:?}"))?;
+        assert_offset_pixels(&image.image, shift_x, shift_y);
+    }
+    Ok(())
+}
+
+#[test]
+fn morphology_rejects_radius_overflow_after_scaling() -> Result<(), String> {
+    let max = strict_num::PositiveF32::new(f32::MAX).ok_or("invalid maximum radius".to_owned())?;
+    let one = strict_num::PositiveF32::new(1.0).ok_or("invalid radius".to_owned())?;
+    for (radius_x, radius_y, scale_x, scale_y) in [(max, one, 2.0, 1.0), (one, max, 1.0, 2.0)] {
+        let morphology = filter::Morphology {
+            input: filter::Input::SourceGraphic,
+            operator: filter::MorphologyOperator::Dilate,
+            radius_x,
+            radius_y,
+        };
+        assert!(matches!(
+            apply_morphology(
+                &morphology,
+                filter::ColorInterpolation::SRGB,
+                usvg::Transform::from_scale(scale_x, scale_y),
+                source_image()?,
+            ),
+            Err(Error::InvalidRegion)
+        ));
+    }
     Ok(())
 }
