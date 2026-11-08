@@ -105,6 +105,38 @@ class LocalCoverageContextTests(unittest.TestCase):
         with self.assertRaisesRegex(local_context.LocalCoverageContextError, "unsupported_tool_override"):
             local_context._record_environment({"LLVM_COV": "/unreviewed/llvm-cov"})
 
+    def test_cleanup_scope_is_volatile_but_other_inputs_remain_bound(self) -> None:
+        first = {"WORKSPACE_RUST_CLEANUP_SCOPE": "run-one", "CARGO": "cargo",
+                 "CARGO_TARGET_DIR": "/target", "CARGO_CAPACITY_PROTECTED_REFS": "refs-one"}
+        baseline = local_context._record_environment(first)
+        self.assertEqual(baseline, local_context._record_environment(
+            {**first, "WORKSPACE_RUST_CLEANUP_SCOPE": "run-two"}))
+        for change in ({"WORKSPACE_RUST_CLEANUP_SCOPE_OTHER": "run-one"},
+                       {"CARGO": "other-cargo"}, {"CARGO_TARGET_DIR": "/other"},
+                       {"CARGO_CAPACITY_PROTECTED_REFS": "refs-two"}):
+            with self.subTest(key=next(iter(change))):
+                self.assertNotEqual(baseline, local_context._record_environment({**first, **change}))
+
+    def test_cleanup_scope_does_not_remove_resource_or_font_binding(self) -> None:
+        tool = {"tool:rustc": {"sha256": "a", "size": 1}}
+        font = {"font:face": {"sha256": "b", "size": 2}}
+        def stage(records: dict[str, dict[str, object]]) -> tuple[dict[str, str], dict[str, dict[str, object]], dict[str, object], dict[str, float]]:
+            return {key: "version" for key in local_context.TOOLS}, records, {}, {}
+        with (patch.object(platform, "system", return_value="Darwin"),
+              patch.object(platform, "machine", return_value="arm64"),
+              patch.object(local_context, "_collect_stages", side_effect=[
+                  stage({**tool, **font}), stage({**tool, **font}),
+                  stage({**tool, "font:face": {"sha256": "c", "size": 2}}),
+                  stage({**font, "tool:rustc": {"sha256": "d", "size": 1}}),
+              ]), patch.object(local_context, "_run", return_value="host-version")):
+            first = local_context._collect(Path.cwd(), {"WORKSPACE_RUST_CLEANUP_SCOPE": "one"})
+            second = local_context._collect(Path.cwd(), {"WORKSPACE_RUST_CLEANUP_SCOPE": "two"})
+            changed_font = local_context._collect(Path.cwd(), {"WORKSPACE_RUST_CLEANUP_SCOPE": "two"})
+            changed_tool = local_context._collect(Path.cwd(), {"WORKSPACE_RUST_CLEANUP_SCOPE": "two"})
+        self.assertEqual(first, second)
+        self.assertNotEqual(first["resourcesSha256"], changed_font["resourcesSha256"])
+        self.assertNotEqual(first["resourcesSha256"], changed_tool["resourcesSha256"])
+
     def test_opt_in_profile_keeps_environment_details_aggregate_only(self) -> None:
         secret = "profile-secret-value"
         env = {
