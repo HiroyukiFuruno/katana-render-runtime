@@ -49,3 +49,100 @@ fn tref_collects_referenced_text_and_preserves_following_text(
     assert_eq!(actual, expected);
     Ok(())
 }
+
+#[test]
+fn compressed_non_utf8_svg_reports_encoding_error() -> Result<(), String> {
+    let gzip = [
+        31, 139, 8, 0, 0, 0, 0, 0, 2, 255, 251, 15, 0, 0, 0, 0, 255, 1, 0, 0, 0,
+    ];
+    let error = match usvg::Tree::from_data(&gzip, &usvg::Options::default()) {
+        Ok(_) => return Err("non-UTF-8 gzip payload was accepted".to_owned()),
+        Err(error) => error,
+    };
+    assert!(matches!(&error, usvg::Error::NotAnUtf8Str));
+    assert_eq!(error.to_string(), "provided data has not an UTF-8 encoding");
+    Ok(())
+}
+
+fn nested_fallback_resolver(
+    styled: bool,
+    observed: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+) -> usvg::FontResolver<'static> {
+    use std::sync::atomic::Ordering;
+
+    let mut resolver = usvg::FontResolver::default();
+    if styled {
+        resolver.select_styled_fallback = Some(Box::new(move |_, character, _, _| {
+            if character == '\u{10fffd}' {
+                observed.fetch_add(1, Ordering::Relaxed);
+            }
+            None
+        }));
+    } else {
+        resolver.select_fallback = Box::new(move |character, _, _| {
+            if character == '\u{10fffd}' {
+                observed.fetch_add(1, Ordering::Relaxed);
+            }
+            None
+        });
+    }
+    resolver
+}
+
+#[rstest]
+#[case::legacy(false)]
+#[case::styled(true)]
+fn nested_svg_forwards_missing_glyph_fallback(#[case] styled: bool) -> Result<(), String> {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let options = usvg::Options {
+        fontdb: upstream_writer_font_database()?,
+        font_resolver: nested_fallback_resolver(styled, Arc::clone(&calls)),
+        ..usvg::Options::default()
+    };
+    let input = "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='50'><text id='target' font-family='Yellowtail'>A\u{10fffd}</text></svg>";
+    let tree = usvg::Tree::from_data_nested(input.as_bytes(), &options)
+        .map_err(|error| error.to_string())?;
+    assert!(tree.node_by_id("target").is_some());
+    assert!(
+        calls.load(Ordering::Relaxed) > 0,
+        "nested fallback was not called"
+    );
+    Ok(())
+}
+
+#[rstest]
+#[case::top_level(false, 1)]
+#[case::nested(true, 0)]
+fn nested_svg_disables_external_image_resolver(
+    #[case] nested: bool,
+    #[case] expected_calls: usize,
+) -> Result<(), String> {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&calls);
+    let mut options = usvg::Options::default();
+    options.image_href_resolver.resolve_string = Box::new(move |_, _| {
+        observed.fetch_add(1, Ordering::Relaxed);
+        None
+    });
+    let input = b"<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'><image id='external' href='other.svg' width='5' height='5'/><rect id='control' width='10' height='10'/></svg>";
+    let result = if nested {
+        usvg::Tree::from_data_nested(input, &options)
+    } else {
+        usvg::Tree::from_data(input, &options)
+    };
+    let tree = result.map_err(|error| error.to_string())?;
+    assert_eq!(calls.load(Ordering::Relaxed), expected_calls);
+    assert!(tree.node_by_id("external").is_none());
+    assert!(tree.node_by_id("control").is_some());
+    Ok(())
+}

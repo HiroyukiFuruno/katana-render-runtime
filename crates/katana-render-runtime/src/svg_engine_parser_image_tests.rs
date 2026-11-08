@@ -192,3 +192,30 @@ fn raster_image_viewport_uses_intrinsic_aspect_ratio(
     assert_eq!((bounds.width(), bounds.height()), (width, height));
     Ok(())
 }
+
+#[rstest]
+#[case::png("image.png")]
+#[case::jpeg("image.jpg")]
+#[case::gif("image.gif")]
+#[case::webp("image.webp")]
+fn truncated_recognized_raster_does_not_paint(#[case] file: &str) -> Result<(), String> {
+    let bytes =
+        std::fs::read(Path::new(RESOURCES).join(file)).map_err(|error| error.to_string())?;
+    let cutoff = (1..bytes.len())
+        .find(|end| imagesize::blob_size(&bytes[..*end]).is_ok())
+        .ok_or("no recognizable raster header")?;
+    let url = STANDARD.encode(&bytes[..cutoff]);
+    let input = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'><image id='image' width='2' height='2' href='data:text/plain;base64,{url}'/></svg>"
+    );
+    let tree = usvg::Tree::from_str(&input, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    assert!(
+        tree.node_by_id("image").is_some(),
+        "recognized header must reach rendering"
+    );
+    let mut pixmap = Pixmap::new(VIEWPORT, VIEWPORT).ok_or("pixmap unavailable")?;
+    resvg::render(&tree, Transform::identity(), &mut pixmap.as_mut());
+    assert!(pixmap.data().iter().all(|value| *value == 0));
+    Ok(())
+}

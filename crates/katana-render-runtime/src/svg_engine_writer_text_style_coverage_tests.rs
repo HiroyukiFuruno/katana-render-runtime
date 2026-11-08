@@ -240,3 +240,42 @@ fn assert_span_model(first: &usvg::TextSpan, second: &usvg::TextSpan) {
     assert_eq!(first.dominant_baseline(), second.dominant_baseline());
     assert_eq!(first.alignment_baseline(), second.alignment_baseline());
 }
+
+#[test]
+fn nested_group_text_path_definition_survives_writer_roundtrip() -> Result<(), String> {
+    let input = r##"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60">
+      <defs><path id="curve" d="M5 35 C30 10 70 10 110 35"/></defs>
+      <g transform="translate(1 2)"><g opacity="0.9"><text font-family="Noto Sans" font-size="12">
+      <textPath href="#curve" startOffset="10%">Nested path</textPath></text></g></g>
+    </svg>"##;
+    let original = parse_writer_svg(input, "nested-group-text-path")?;
+    let options = usvg::WriteOptions {
+        preserve_text: true,
+        ..usvg::WriteOptions::default()
+    };
+    let serialized = original.to_string(&options);
+    assert_text_path_definition(&serialized)?;
+    let reparsed = parse_writer_svg(&serialized, "nested-group-text-path-roundtrip")?;
+    assert_pixels_equal(&original, &reparsed, "nested group text path")?;
+    Ok(())
+}
+
+fn assert_text_path_definition(serialized: &str) -> Result<(), String> {
+    let document =
+        usvg::roxmltree::Document::parse(serialized).map_err(|error| error.to_string())?;
+    let text_path = document
+        .descendants()
+        .find(|node| node.has_tag_name("textPath"))
+        .ok_or("serialized textPath missing")?;
+    let reference = text_path
+        .attribute(("http://www.w3.org/1999/xlink", "href"))
+        .or_else(|| text_path.attribute("href"))
+        .and_then(|href| href.strip_prefix('#'))
+        .ok_or("textPath reference missing")?;
+    assert!(
+        document
+            .descendants()
+            .any(|node| node.has_tag_name("path") && node.attribute("id") == Some(reference))
+    );
+    Ok(())
+}

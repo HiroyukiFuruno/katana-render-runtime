@@ -149,7 +149,7 @@ fn percentage_root_without_viewbox_uses_the_default_viewport() -> Result<(), Str
 
 #[test]
 fn invalid_isolation_value_falls_back_without_dropping_the_shape() -> Result<(), String> {
-    let source = r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><g isolation="invalid"><rect id="sample" width="10" height="10" fill="red"/></g></svg>"#;
+    let source = r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><g style="isolation:invalid"><rect id="sample" width="10" height="10" fill="red"/></g></svg>"#;
     let tree = usvg::Tree::from_str(source, &usvg::Options::default())
         .map_err(|error| error.to_string())?;
     let Some(usvg::Node::Path(path)) = tree.node_by_id("sample") else {
@@ -158,5 +158,84 @@ fn invalid_isolation_value_falls_back_without_dropping_the_shape() -> Result<(),
     assert!(
         matches!(path.fill().map(|fill| fill.paint()), Some(usvg::Paint::Color(color)) if (color.red, color.green, color.blue) == (255, 0, 0))
     );
+    Ok(())
+}
+
+#[test]
+fn recursive_marker_keeps_one_marker_without_recursing() -> Result<(), String> {
+    let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">
+      <defs><marker id="m" markerWidth="4" markerHeight="4" overflow="visible">
+        <path d="M0 0 L4 2 L0 4 Z" fill="green" marker-start="url(#m)"/>
+      </marker></defs>
+      <path id="sample" d="M5 5 L30 5" fill="none" stroke="blue" marker-start="url(#m)"/>
+    </svg>"##;
+    let tree = usvg::Tree::from_str(source, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    assert_eq!(
+        marker_sibling_sequence(tree.root()).ok_or("marker siblings missing")?,
+        ["stroke", "marker"]
+    );
+    assert_eq!(marker_path_transforms(tree.root()).len(), 1);
+    Ok(())
+}
+
+#[test]
+fn marker_before_new_subpath_uses_the_degenerate_cubic_incoming_direction() -> Result<(), String> {
+    let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">
+      <defs><marker id="m" markerUnits="userSpaceOnUse" markerWidth="4" markerHeight="4"
+      orient="auto" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="green"/></marker></defs>
+      <path id="sample" d="M5 5 C5 15 20 20 20 20 M25 20 L35 20"
+      fill="none" stroke="blue" marker-mid="url(#m)"/>
+    </svg>"##;
+    let tree = usvg::Tree::from_str(source, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    let transforms = marker_path_transforms(tree.root());
+    let [first, second] = transforms.as_slice() else {
+        return Err(format!(
+            "expected two middle markers, got {}",
+            transforms.len()
+        ));
+    };
+    let diagonal = std::f32::consts::FRAC_1_SQRT_2;
+    assert!((first.sx - diagonal).abs() < 0.001);
+    assert!((first.ky - diagonal).abs() < 0.001);
+    assert!((first.tx - 20.0).abs() < 0.001 && (first.ty - 20.0).abs() < 0.001);
+    assert!((second.sx - 1.0).abs() < 0.001 && second.ky.abs() < 0.001);
+    Ok(())
+}
+
+fn marker_path_transforms(group: &usvg::Group) -> Vec<tiny_skia::Transform> {
+    group
+        .children()
+        .iter()
+        .flat_map(|node| match node {
+            usvg::Node::Group(child) => marker_path_transforms(child),
+            usvg::Node::Path(path) if path.id().is_empty() => vec![path.abs_transform()],
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
+#[rstest]
+#[case::auto("auto", false)]
+#[case::isolate("isolate", true)]
+fn none_filter_preserves_group_isolation_and_shape(
+    #[case] isolation: &str,
+    #[case] expected: bool,
+) -> Result<(), String> {
+    let source = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><g id="holder" filter="none" style="isolation:{isolation}"><rect id="sample" width="10" height="10" fill="red"/></g></svg>"#
+    );
+    let tree = usvg::Tree::from_str(&source, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    let Some(usvg::Node::Group(group)) = tree.node_by_id("holder") else {
+        return Err("holder group missing".to_owned());
+    };
+    assert_eq!(group.isolate(), expected);
+    assert!(group.filters().is_empty());
+    assert!(matches!(
+        tree.node_by_id("sample"),
+        Some(usvg::Node::Path(_))
+    ));
     Ok(())
 }

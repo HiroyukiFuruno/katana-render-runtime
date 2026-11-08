@@ -247,3 +247,47 @@ pub(super) fn assert_attribute(
     );
     Ok(())
 }
+
+#[test]
+fn nested_clip_reference_survives_writer_roundtrip() -> Result<(), String> {
+    let input = r##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+      <defs>
+        <clipPath id="inner"><rect x="2" y="2" width="12" height="12"/></clipPath>
+        <clipPath id="outer" clip-path="url(#inner)"><rect width="18" height="18"/></clipPath>
+      </defs>
+      <rect width="20" height="20" fill="red" clip-path="url(#outer)"/>
+    </svg>"##;
+    let original = parse_writer_svg(input, "writer-nested-clip")?;
+    let serialized = original.to_string(&usvg::WriteOptions::default());
+    assert_attribute(&serialized, "clipPath", "clip-path", "url(#inner)")?;
+    let reparsed = parse_writer_svg(&serialized, "writer-nested-clip-roundtrip")?;
+    assert_pixels_equal(&original, &reparsed, "nested clip")?;
+    Ok(())
+}
+
+#[rstest]
+#[case::blend(
+    "mix-blend-mode:multiply",
+    false,
+    "mix-blend-mode:multiply;isolation:auto"
+)]
+#[case::isolation("isolation:isolate", true, "mix-blend-mode:normal;isolation:isolate")]
+fn group_blending_survives_writer_roundtrip(
+    #[case] style: &str,
+    #[case] isolate: bool,
+    #[case] expected: &str,
+) -> Result<(), String> {
+    let input = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="white"/><g id="holder" style="{style}"><rect width="8" height="8" fill="red"/></g></svg>"#
+    );
+    let original = parse_writer_svg(&input, "writer-group-blending")?;
+    let serialized = original.to_string(&usvg::WriteOptions::default());
+    assert_attribute(&serialized, "g", "style", expected)?;
+    let reparsed = parse_writer_svg(&serialized, "writer-group-blending-roundtrip")?;
+    let Some(usvg::Node::Group(group)) = reparsed.node_by_id("holder") else {
+        return Err("blending group missing".to_owned());
+    };
+    assert_eq!(group.isolate(), isolate);
+    assert_pixels_equal(&original, &reparsed, "group blending")?;
+    Ok(())
+}
