@@ -13,6 +13,9 @@
 - [/] Hanのchws実font経路を補完中。Noto CJK Sans2.004と公式Google Fonts NotoSansJPにはchwsが無かったが、公式WPT固定commit `c2504f4062db9bed36540e28c49caae3e4fd873c` の既存chws fixtureを見つけ、原本30,016bytes/SHA `fa2f2a3e29179fbd4e258f3f3f988c2c7ab95979ae7d2297e2bd22b8f953067b`・Git blob `18859d5e2fe1200da5caef5f88d15864d0477963`を確認した。OFLは既存同梱原本とbytes一致。hb-infoでchwsと使用字の実在を確認、hb-shapeの同一「国）（国」でchws=0/1により閉じ括弧advanceが1000→500となり実lookupの効果も観測した（Rust/製品合格とは別）。取得原本を改変せずGitへ含め、全範囲とexplicit/SpaceAll抑制の固定期待を準備。まだRust未実行。並行してruntime default/overrideのJS3種と、patternのmixed units・循環paint参照も小回帰で補う。
 - [x] 上記の変更後 `chws-paint-current-build-ckpm3t8e` はfoundation/AST実0・同profile compile成功（none選択実4）。実catalog `chws-paint-current-catalog-wfly5r47` へ照合した `chws-paint-runtime-exact23-1a9p8dhb` はHan10/paint11/runtime2の23caseが全実0、source/binary不変・profile残0。全範囲は同じfactoryで期待を計算せず固定tuple(CHWS,1,0,u32::MAX)、fallbackのUTF84組・explicit指定・無対応fontの期待を維持。循環gradient/patternのfallback色とmixed unitsの全画素/標本を確認し、runtimeの既存2caseをJS3種へ拡張した。旧998行にこの差分の未取得効果を加算しない。
 
+- [x] TTCの出力head/maxp欠落とsource/output table data欠落を追加。`ttc-output-boundary-current-build-s2nzts99` はfoundation/AST実0・compile成功（none選択実4）。実catalog `ttc-output-boundary-current-catalog-krkfu9de` を用いた `ttc-output-boundary-exact7-c176_dhh` はTTC全7case実0、source/binary不変・profile残0。公開入口の先行table集合拒否とprivate metric拒否を混同せず確認した。製品変更・除外追加なし、全体coverage効果は未計測。
+- [ ] 独立レビューのpaint P2: 空の循環参照だけではhref無視も同じfallbackになるため、有効な非循環参照が解決される3種の正常対照を追加する。元の循環fallback期待は維持する。
+
 ### 経過の記録（以下の旧数値・未実行予定は上の現在実数と区別する）
 
 - [/] 集計対象helperの限定補完: cmapのIO・HTMLの座標/実frame・KDRのparser pin fixtureを非重複3担当で変更中。成功/元のエラー表示とWindows callerを保ち、欠落ファイル・不正属性/viewport・closed session・fixture read/write失敗を実入力で検証する。実装の除外や分母変更はせず、純粋な判定caseは既存のtestファイル境界へ置く。レビューでcmap fixtureの早期失敗時の残骸も見つかったため、create_new成功後の所有とhandle解放後のDropへ整理する。まだ変更後未検証でありcoverage解消数へ加算しない。
