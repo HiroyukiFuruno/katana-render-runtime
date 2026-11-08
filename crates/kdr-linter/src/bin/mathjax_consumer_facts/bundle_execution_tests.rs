@@ -252,6 +252,11 @@ const BUNDLE_STRUCTURE_MUTATIONS: &[(&str, &str, &str)] = &[
     ),
     (
         "DiagramRuntimeScript::borrowed(\"mathjax-runtime.min.js\", runtime_source)",
+        "DiagramRuntimeScript::borrowed(\"wrong.js\", runtime_source)",
+        "script-order:name",
+    ),
+    (
+        "DiagramRuntimeScript::borrowed(\"mathjax-runtime.min.js\", runtime_source)",
         "DiagramRuntimeScript::borrowed(runtime_name, runtime_source)",
         "script-order:name",
     ),

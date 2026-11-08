@@ -208,3 +208,27 @@ fn mathjax_syntax_warning_render_rejects_unverified_ast_shapes()
 -> Result<(), Box<dyn std::error::Error>> {
     assert_cases(WARNING_RENDER_CASES, syntax::require_warning_render)
 }
+
+#[test]
+fn source_lookup_handles_wrapped_calls_and_other_impl_items() -> Result<(), syn::Error> {
+    let call = syn::parse_str::<syn::Expr>("(render(input))")?;
+    assert!(super::source::call(&call).is_some());
+    let group = syn::Expr::Group(syn::ExprGroup {
+        attrs: Vec::new(),
+        group_token: Default::default(),
+        expr: Box::new(syn::parse_str("render(input)")?),
+    });
+    assert!(super::source::call(&group).is_some());
+    let group = syn::Expr::Group(syn::ExprGroup {
+        attrs: Vec::new(),
+        group_token: Default::default(),
+        expr: Box::new(syn::parse_str("request.payload")?),
+    });
+    assert_eq!(
+        super::source::path_name_from_expr(&group),
+        "request.payload"
+    );
+    let file = syn::parse_file("impl Example { const X: usize = 0; fn target() {} }")?;
+    assert!(super::source::method(&file, "Example", "target").is_ok());
+    Ok(())
+}

@@ -2,6 +2,16 @@ use super::{HELPER, fixture, inspect_root, reject_mutations};
 
 const HELPER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "pub(super) fn exists_with_matching_bytes(",
+        "pub(super) unsafe fn exists_with_matching_bytes(",
+        "helper-binding-signature",
+    ),
+    (
+        "pub(crate) struct RuntimeAsset {",
+        "trait Path {}\npub(crate) struct RuntimeAsset {",
+        "helper-binding-signature",
+    ),
+    (
         "match std::fs::read(path)",
         "match std::fs::read(other_path)",
         "default-materializer:read-shape",

@@ -118,3 +118,46 @@ fn actual_source_statement_shapes_are_rejected_by_the_ast_route()
     )?;
     Ok(())
 }
+
+#[test]
+fn mermaid_script_producers_reject_invalid_ast_shapes() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::copy_mermaid_classic_inputs(INPUTS)?;
+    reject_mutations(
+        &fixture,
+        INPUTS[0],
+        &[
+            (
+                "uses_zenuml_runtime: bool,",
+                "other: bool,",
+                "mermaid-scripts:parameters",
+            ),
+            (
+                "Self::build_scripts(\n            bundle,\n            MERMAID_ZENUML_RUNTIME,\n            request_json,\n            diagram_type == MermaidDiagramType::Zenuml,\n        )",
+                "bundle",
+                "mermaid-scripts:forward",
+            ),
+            (
+                "format!(\"katanaRunMermaidRuntime({request_json});\")",
+                "request_json",
+                "mermaid-scripts:format",
+            ),
+        ],
+    )
+}
+
+#[test]
+fn mermaid_parser_pin_rejects_changed_workspace_manifest() -> Result<(), Box<dyn std::error::Error>>
+{
+    let fixture = Fixture::copy_mermaid_classic_inputs(INPUTS)?;
+    let manifest = fixture.root().join("Cargo.toml");
+    let mut text = std::fs::read_to_string(&manifest)?;
+    text.push('\n');
+    std::fs::write(manifest, text)?;
+    assert_eq!(
+        mermaid_classic_scripts::inspect_root(fixture.root())
+            .err()
+            .as_deref(),
+        Some("parser-pin:build-input-drift")
+    );
+    Ok(())
+}

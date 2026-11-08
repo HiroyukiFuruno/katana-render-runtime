@@ -74,4 +74,29 @@ pub(super) const RENDER_MUTATIONS: &[(&str, &str, &str)] = &[
         "MermaidJsRuntimeOps::render_bundle(&block.source, other, preset)",
         "mermaid-resource-route:argument",
     ),
+    (
+        "let bundle = match runtime_resource_loader::load(",
+        "let bundle = other; let ignored = match runtime_resource_loader::load(",
+        "mermaid-resource-route:origin-shape",
+    ),
+    (
+        "let mode = DiagramRuntimeMode::current();",
+        "let mode = DiagramRuntimeMode::current(other);",
+        "mermaid-resource-route:argument-count",
+    ),
+    (
+        "cache_file.set_extension(format!(\"{digest}.{}\", mode.mermaid_cache_extension()));",
+        "cache_file.set_extension(format!(\"{digest}\", mode.mermaid_cache_extension()));",
+        "mermaid-resource-route:cache-digest",
+    ),
+    (
+        "Self::render_svg_with_bundle(block, bundle.text(), preset, &cache_file)",
+        "Self::render_svg_with_bundle(block, bundle.text(), preset, &other)",
+        "mermaid-resource-route:render",
+    ),
+    (
+        "MermaidJsRuntimeOps::render_bundle(&block.source, bundle, preset)",
+        "MermaidJsRuntimeOps::render_bundle(&other.source, bundle, preset)",
+        "mermaid-resource-route:argument",
+    ),
 ];

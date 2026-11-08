@@ -107,4 +107,29 @@ pub(super) const INSTANCE_MUTATIONS: &[(&str, &str, &str)] = &[
         "MERMAID_SVG_RENDER_SEQUENCE.fetch_add(2, Ordering::Relaxed)",
         "mermaid-resource-route:instance",
     ),
+    (
+        "Self::root_svg_id(&svg)",
+        "Self::root_svg_id(&other)",
+        "mermaid-resource-route:instance",
+    ),
+    (
+        "return svg;",
+        "return String::new();",
+        "mermaid-resource-route:instance",
+    ),
+    (
+        "fetch_add(1, Ordering::Relaxed)",
+        "fetch_add(0, Ordering::Relaxed)",
+        "mermaid-resource-route:instance",
+    ),
+    (
+        "format!(\"{root_id}-{sequence:016x}\")",
+        "format!(\"{root_id}-{sequence:016X}\")",
+        "mermaid-resource-route:instance",
+    ),
+    (
+        "svg.replace(&root_id, &unique_id)",
+        "svg.replacen(&root_id, &unique_id, 1)",
+        "mermaid-resource-route:instance",
+    ),
 ];

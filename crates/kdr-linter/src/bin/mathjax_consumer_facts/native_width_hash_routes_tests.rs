@@ -11,13 +11,18 @@ const HASH_STATEMENT_NEGATIVES: &[(&str, &str)] = &[
     ("other.hash(&mut hasher);", "receiver"),
     ("source.hash(other);", "hasher argument"),
     ("source.hash(&mut hasher, 1);", "argument count"),
+    ("let unused = 1;", "non-expression"),
 ];
 const HASHER_BINDING_NEGATIVES: &[&str] = &[
     "let hasher = OtherHasher::new();",
     "let hasher = DefaultHasher::new(1);",
     "let hasher = DefaultHasher;",
+    "let hasher;",
+    "let hasher = 7;",
 ];
 const HASH_LITERAL_NEGATIVES: &[(&str, &str)] = &[
+    ("source.hash(&mut hasher);", "expected-domain"),
+    ("true.hash(&mut hasher);", "expected-domain"),
     ("DOMAIN.hash(&mut hasher);", "expected-domain"),
     (
         "\"expected-domain\".write_hash(&mut hasher);",
@@ -29,6 +34,7 @@ const HASH_LITERAL_NEGATIVES: &[(&str, &str)] = &[
     ),
 ];
 const SHARED_CALL_NEGATIVES: &[(&str, &str)] = &[
+    ("source;", "not a function call"),
     ("hash_fields(&mut hasher, source, preset);", "callee"),
     (
         "super::hash_mermaid_source_and_preset(&mut hasher, source);",

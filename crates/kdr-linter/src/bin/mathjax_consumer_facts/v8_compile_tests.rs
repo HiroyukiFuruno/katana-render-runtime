@@ -17,6 +17,10 @@ const ORIGIN_ARGUMENTS: [&str; 11] = [
 ];
 const ORIGIN_ARGUMENT_VARIANTS: &[(usize, &str)] = &[
     (0, "other_scope"),
+    (1, "other_name.into()"),
+    (1, "origin_name.into(extra)"),
+    (6, "Some(other_name.into())"),
+    (6, "other(origin_name.into())"),
     (2, "1"),
     (3, "1"),
     (4, "true"),
@@ -34,6 +38,9 @@ const INVALID_COMPILE_CALLS: &[&str] = &[
     "v8::Script::compile(scope, source, Some(origin))",
     "v8::Script::compile(scope, source)",
     "v8::Script::compile(scope, source, Some(&origin), extra)",
+    "v8::Script::compile(scope, source, None)",
+    "v8::Script::compile(scope, source, Some(&other))",
+    "v8::Script::compile(scope, source, Some(&origin, extra))",
 ];
 
 #[test]
@@ -94,7 +101,12 @@ fn script_compile_requires_the_origin_borrow_and_expected_arguments() -> Result<
 fn private_module_requires_an_out_of_line_declaration() -> Result<(), String> {
     let accepted = syn::parse_file("mod v8_script;").map_err(|error| error.to_string())?;
     assert_eq!(super::private_module(&accepted)?.ident, "v8_script");
-    for source in ["struct Other;", "mod v8_script {}"] {
+    for source in [
+        "struct Other;",
+        "mod v8_script {}",
+        "pub mod v8_script;",
+        "mod v8_script; mod v8_script;",
+    ] {
         let file = syn::parse_file(source).map_err(|error| error.to_string())?;
         assert_eq!(
             super::private_module(&file).err().as_deref(),

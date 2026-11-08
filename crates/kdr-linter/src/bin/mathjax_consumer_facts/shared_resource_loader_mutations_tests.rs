@@ -59,4 +59,29 @@ pub(in super::super) const SHARED_RESOURCE_LOADER_MUTATIONS: &[(&str, &str, &str
         "None => return Self::read_file(other).map(Cow::Owned)",
         "resource-loader:external-role",
     ),
+    (
+        "ResourceSource::Static(text) => text,",
+        "ResourceSource::Static(text) => other,",
+        "resource-loader:accessors",
+    ),
+    (
+        "ResourceSource::Static(_) => None,",
+        "ResourceSource::Static(_) => Some(other),",
+        "resource-loader:accessors",
+    ),
+    (
+        "ResourceSource::File { text, .. } => text.as_str(),",
+        "ResourceSource::File { text, .. } => other.as_str(),",
+        "resource-loader:accessors",
+    ),
+    (
+        "ResourceSource::File { snapshot, text }",
+        "ResourceSource::File { snapshot, text: other }",
+        "resource-loader:source",
+    ),
+    (
+        "Cow::Borrowed(text) => ResourceSource::Static(text),",
+        "Cow::Borrowed(other) => ResourceSource::Static(text),",
+        "resource-loader:source",
+    ),
 ];

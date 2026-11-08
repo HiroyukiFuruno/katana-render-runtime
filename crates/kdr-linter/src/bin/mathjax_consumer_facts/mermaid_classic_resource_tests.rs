@@ -15,6 +15,26 @@ const RESOURCE_BYTES_INDEX: usize = 9;
 const LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
         "Some(BundledResource::Mermaid) => RuntimeAsset::mermaid()\n                .bytes()\n                .map_err(std::io::Error::other)?,",
+        "Some(BundledResource::Mermaid) => other?,",
+        "mermaid-resource-route:bundled",
+    ),
+    (
+        "std::str::from_utf8(source)\n            .map(Cow::Borrowed)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
+        "source",
+        "mermaid-resource-route:utf8",
+    ),
+    (
+        "std::str::from_utf8(source)\n            .map(Cow::Borrowed)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
+        "std::str::from_utf8(source).map(Cow::Borrowed).map(|error| error)",
+        "mermaid-resource-route:utf8",
+    ),
+    (
+        "std::str::from_utf8(source)\n            .map(Cow::Borrowed)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
+        "source.map_err(|error| error)",
+        "mermaid-resource-route:utf8",
+    ),
+    (
+        "Some(BundledResource::Mermaid) => RuntimeAsset::mermaid()\n                .bytes()\n                .map_err(std::io::Error::other)?,",
         "Some(BundledResource::Mermaid) => RuntimeAsset::mermaid()\n                .bytes()\n                .map_err(std::io::Error::other),",
         "mermaid-resource-route:bundled",
     ),
@@ -51,6 +71,21 @@ const LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
 ];
 
 const BACKEND_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "if block.source.trim().is_empty() {\n            return (self.render_empty(&block, &preset), None);\n        }",
+        "let ignored = ();",
+        "mermaid-resource-backend:empty",
+    ),
+    (
+        "if block.source.trim().is_empty() {\n            return (self.render_empty(&block, &preset), None);\n        }",
+        "if block.source.is_empty() {\n            return (self.render_empty(&block, &preset), None);\n        }",
+        "mermaid-resource-backend:empty",
+    ),
+    (
+        "if block.source.trim().is_empty() {\n            return (self.render_empty(&block, &preset), None);\n        }",
+        "if block.source.trim().is_empty() {\n            self.render_empty(&block, &preset);\n        }",
+        "mermaid-resource-backend:empty",
+    ),
     (
         "runtime_resource_loader::load(\n            &self.runtime_path,\n            self.bundled.then_some(BundledResource::Mermaid),\n        )\n        .map_err(|error| {\n            runtime_resource_loader::diagram_error(\n                block,\n                &self.runtime_path,\n                error,\n                \"Mermaid\",\n                crate::markdown::runtime_assets::MERMAID_DOWNLOAD_URL,\n                \"Failed to read Mermaid.js bundle\",\n            )\n        })",
         "other",

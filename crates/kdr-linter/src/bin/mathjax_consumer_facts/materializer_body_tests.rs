@@ -101,3 +101,56 @@ fn actual_materialize_block() -> Result<syn::Block, Box<dyn std::error::Error>> 
     .map_err(std::io::Error::other)?;
     Ok(method.block.clone())
 }
+
+#[test]
+fn unknown_owner_and_nested_runtime_source_are_checked() -> Result<(), syn::Error> {
+    let file = syn::parse_file("struct Unknown;")?;
+    assert!(!materializer::canonical_materializer_impl(&file, "Unknown"));
+    for (expression, expected) in [
+        ("sink(MathJaxRuntimeScripts::runtime_source())", true),
+        ("sink(other())", false),
+    ] {
+        let expression = syn::parse_str(expression)?;
+        assert_eq!(
+            materializer_body::call_expr(
+                &expression,
+                "sink",
+                &["MathJaxRuntimeScripts::runtime_source"]
+            ),
+            expected
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn default_install_path_rejects_invalid_shapes() -> Result<(), String> {
+    let root = "other.join(\"katana-render-runtime\").join(\"generated\").join(\"mathjax-runtime.min.js\")";
+    for (body, expected) in [
+        (
+            "let value = 1; Some(value)".to_string(),
+            "default-materialize:install-path-statement-count",
+        ),
+        (
+            "None(value)".to_string(),
+            "default-materialize:install-path",
+        ),
+        (
+            "Some(value)".to_string(),
+            "default-materialize:install-path-join",
+        ),
+        (
+            format!("Some({root})"),
+            "default-materialize:install-path-temp-dir",
+        ),
+    ] {
+        let block = source::parsed_block(&format!("fn fixture() {{ {body} }}"), "fixture")?;
+        assert_eq!(
+            super::super::default_route::require_default_install_path(&block)
+                .err()
+                .as_deref(),
+            Some(expected)
+        );
+    }
+    Ok(())
+}

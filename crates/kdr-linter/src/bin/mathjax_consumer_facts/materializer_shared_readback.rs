@@ -189,3 +189,7 @@ fn test_asset_index(item: &syn::ItemMacro) -> bool {
         && syn::parse2::<syn::LitStr>(item.mac.tokens.clone())
             .is_ok_and(|path| path.value() == "generated/zenuml-runtime-assets-index.rs")
 }
+
+#[cfg(test)]
+#[path = "materializer_shared_readback_ast_tests.rs"]
+mod ast_tests;

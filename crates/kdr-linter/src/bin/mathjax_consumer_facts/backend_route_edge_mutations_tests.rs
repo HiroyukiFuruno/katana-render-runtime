@@ -89,4 +89,39 @@ pub(super) const CASES: &[(&str, &str, &str)] = &[
         "self.render_block(input);",
         "backend-runtime-path:render-dispatch",
     ),
+    (
+        "Err(warning) => {",
+        "Err(other) => {",
+        "backend-runtime-path:render-arm-flow",
+    ),
+    (
+        "let error_key = format!(\"error:{}:{warning}\", digest.as_deref().unwrap_or(\"\"));",
+        "let error_key = format!(\"error:{}:{warning}\", digest.as_deref().unwrap_or(\"missing\"));",
+        "backend-runtime-path:render-arm-flow",
+    ),
+    (
+        "Ok(RenderOutputFactory::bind_resource(\n                    RenderOutputFactory::from_raw_string(",
+        "Some(RenderOutputFactory::bind_resource(\n                    RenderOutputFactory::from_raw_string(",
+        "backend-runtime-path:render-arm-flow",
+    ),
+    (
+        "RenderOutputFactory::from_raw_string(\n                        input,\n                        input.source.clone(),\n                        warning,\n                        runtime,\n                    )",
+        "RenderOutputFactory::from_raw_string(input, input.source.clone(), warning, other)",
+        "backend-runtime-path:render-arm-flow",
+    ),
+    (
+        "crate::markdown::DiagramResult::Ok(svg),",
+        "crate::markdown::DiagramResult::Ok(other),",
+        "backend-runtime-path:render-arm-flow",
+    ),
+    (
+        ".map(|output| RenderOutputFactory::bind_resource(output, digest.as_deref()))",
+        ".and_then(|output| RenderOutputFactory::bind_resource(output, digest.as_deref()))",
+        "backend-runtime-path:render-arm-flow",
+    ),
+    (
+        "let (result, digest) = self.render_block(input);",
+        "let (result, digest) = self.render_block(other);",
+        "backend-runtime-path:render-dispatch",
+    ),
 ];

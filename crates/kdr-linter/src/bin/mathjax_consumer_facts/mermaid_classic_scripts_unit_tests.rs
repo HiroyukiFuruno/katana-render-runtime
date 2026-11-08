@@ -65,3 +65,84 @@ fn hash_source(source: &[u8]) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
+
+#[test]
+fn request_binding_requires_an_initialized_nonreference_local() -> Result<(), String> {
+    for (source, expected) in [
+        ("{ let request_json = encode(); }", true),
+        ("{ let mut request_json = encode(); }", true),
+        ("{ let other = encode(); }", false),
+        ("{ let ref request_json = encode(); }", false),
+        ("{ let request_json; }", false),
+        ("{ encode(); }", false),
+        (
+            "{ let Some(request_json) = encode() else { return; }; }",
+            false,
+        ),
+    ] {
+        let block = syn::parse_str::<syn::Block>(source).map_err(|error| error.to_string())?;
+        assert_eq!(
+            super::plain_local(&block, 0, "request_json").is_ok(),
+            expected,
+            "{source}"
+        );
+    }
+    Ok(())
+}
+
+const SCRIPT_PUSH_CASES: [(&str, bool); 6] = [
+    (
+        "scripts.push(DiagramRuntimeScript::borrowed(\"main.js\", source));",
+        true,
+    ),
+    (
+        "other.push(DiagramRuntimeScript::borrowed(\"main.js\", source));",
+        false,
+    ),
+    (
+        "scripts.push(DiagramRuntimeScript::owned(\"main.js\", source));",
+        false,
+    ),
+    (
+        "scripts.push(DiagramRuntimeScript::borrowed(\"other.js\", source));",
+        false,
+    ),
+    (
+        "scripts.push(DiagramRuntimeScript::borrowed(\"main.js\", other));",
+        false,
+    ),
+    (
+        "scripts.push(DiagramRuntimeScript::borrowed(\"main.js\", source), extra);",
+        false,
+    ),
+];
+
+#[test]
+fn script_push_keeps_the_named_source_and_borrowed_role() -> Result<(), String> {
+    for (source, expected) in SCRIPT_PUSH_CASES {
+        assert_push_case(source, expected)?;
+    }
+    assert!(super::push_entry(None, "main.js", "source", false).is_err());
+    Ok(())
+}
+
+fn assert_push_case(source: &str, expected: bool) -> Result<(), String> {
+    let statement = syn::parse_str::<syn::Stmt>(source).map_err(|error| error.to_string())?;
+    assert_eq!(
+        super::push_entry(Some(&statement), "main.js", "source", false).is_ok(),
+        expected,
+        "{source}"
+    );
+    Ok(())
+}
+
+#[test]
+fn realm_macro_requires_the_expected_name_and_arguments() -> Result<(), String> {
+    let statement =
+        syn::parse_str::<syn::Stmt>("scope!(handle);").map_err(|error| error.to_string())?;
+    assert!(super::macro_statement(Some(&statement), "scope!(handle);").is_ok());
+    assert!(super::macro_statement(Some(&statement), "scope!(other);").is_err());
+    assert!(super::macro_statement(Some(&statement), "other!(handle);").is_err());
+    assert!(super::macro_statement(None, "scope!(handle);").is_err());
+    Ok(())
+}

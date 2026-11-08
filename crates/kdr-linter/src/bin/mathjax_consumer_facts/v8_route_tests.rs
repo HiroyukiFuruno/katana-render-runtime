@@ -7,6 +7,13 @@ type Rejection = super::test_support::SourceRejection;
 
 const ALLOCATION_CASES: &[Rejection] = &[
     (
+        "allocation binding changed",
+        SOURCE_ALLOCATION_STATEMENT_INDEX,
+        "let other = required(v8::String::new(scope, script_code), SOURCE_ALLOC_ERR)?;",
+        check_source_allocation,
+        "v8-compile-order:allocation",
+    ),
+    (
         "method is not a call",
         SCRIPT_CODE_STATEMENT_INDEX,
         "let script_code = script.code;",
@@ -247,3 +254,20 @@ fn v8_route_ast_linter_reports_source_constant_drift() -> Result<(), String> {
 #[cfg(test)]
 #[path = "v8_route_origin_tests.rs"]
 mod origin_helper_tests;
+
+#[test]
+fn grouped_method_call_is_unwrapped() -> Result<(), syn::Error> {
+    let call = syn::parse_str::<syn::Expr>("script.run(scope)")?;
+    let group = syn::Expr::Group(syn::ExprGroup {
+        attrs: Vec::new(),
+        group_token: Default::default(),
+        expr: Box::new(call),
+    });
+    assert_eq!(
+        method_call(&group)
+            .map(|value| value.method.to_string())
+            .as_deref(),
+        Some("run")
+    );
+    Ok(())
+}

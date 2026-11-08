@@ -200,3 +200,7 @@ fn hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 #[path = "source_tests.rs"]
 mod ast_linter_source_tests;
+
+#[cfg(test)]
+#[path = "source_io_tests.rs"]
+mod ast_linter_source_io_tests;

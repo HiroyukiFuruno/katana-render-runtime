@@ -114,3 +114,19 @@ fn sha256_validation_is_lowercase_hex_and_exact_length() {
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeG"
     ));
 }
+
+#[test]
+fn rejects_incomplete_object_dependency_fields() -> Result<(), String> {
+    let linter = parsed(VALID_LINTER)?;
+    for dependency in [
+        "object = { default-features = false, features = [\"read\", \"std\"] }",
+        "object = { version = \"0.40.0\", default-features = false }",
+        "object = { version = \"0.40.0\", default-features = false, features = [\"read\", \"read\"] }",
+        "object = { version = \"0.40.0\", default-features = false, features = [\"std\", \"std\"] }",
+        "object = \"0.40.0\"",
+    ] {
+        let workspace = parsed(&format!("[workspace.dependencies]\n{dependency}\n"))?;
+        assert!(ParserPin::validate_object_dependency(&workspace, &linter).is_err());
+    }
+    Ok(())
+}

@@ -89,3 +89,26 @@ fn rejects_render_runtime_and_dispatch_shapes() -> Result<(), syn::Error> {
     );
     Ok(())
 }
+
+#[test]
+fn output_binding_guards_reject_malformed_expressions() -> Result<(), syn::Error> {
+    for source in ["other", "other.map()"] {
+        let expression = syn::parse_str(source)?;
+        assert!(!super::resource_route::OutputGuard::require_bound_success(
+            &expression
+        ));
+    }
+    let key = r#"let error_key = format!("error:{}:{warning}", digest.as_deref().unwrap_or("")); "#;
+    for body in [
+        "let other = 0; Ok(())".to_string(),
+        format!("{key} let other = 0;"),
+        format!("{key} Err(())"),
+        format!("{key} Ok(other)"),
+    ] {
+        let expression = syn::parse_str(&format!("{{ {body} }}"))?;
+        assert!(!super::resource_route::OutputGuard::require_bound_warning(
+            &expression
+        ));
+    }
+    Ok(())
+}

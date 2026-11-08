@@ -192,6 +192,56 @@ const LOADED_RESOLVER_MUTATIONS: &[(&str, &str, &str)] = &[
         "MathJaxRenderer::with_runtime_path(path)",
         "runtime-path-resolver:loaded-renderer",
     ),
+    (
+        "env_name.and_then(std::env::var_os)",
+        "env_name.and_then(std::env::var)",
+        "runtime-path-resolver:loaded-env",
+    ),
+    (
+        "runtime_path.is_none() && env_name.is_some() && env_value.is_none()",
+        "runtime_path.is_none() || env_name.is_some() || env_value.is_none()",
+        "runtime-path-resolver:loaded-origin",
+    ),
+    (
+        "Some(path) => path,",
+        "Some(path) => other,",
+        "runtime-path-resolver:loaded-path",
+    ),
+    (
+        "None => Self::resolve_selected_path(kind, env_value, plantuml_cache_dir)?,",
+        "None => Self::resolve_selected_path(kind, env_value, plantuml_cache_dir),",
+        "runtime-path-resolver:loaded-path",
+    ),
+    (
+        "Self::make_renderer(kind, &path, bundled)",
+        "Self::make_renderer(kind, &path, false)",
+        "runtime-path-resolver:loaded-renderer",
+    ),
+    (
+        "let path = path.to_path_buf();",
+        "let path = PathBuf::new();",
+        "runtime-path-resolver:loaded-renderer",
+    ),
+    (
+        "MathJaxRenderer::with_runtime_path(path)",
+        "MathJaxRenderer::with_bundled_runtime_path(path)",
+        "runtime-path-resolver:loaded-renderer",
+    ),
+    (
+        "MathJaxRendererOps::default_install_path(),",
+        "MathJaxRendererOps::default_install_path(other),",
+        "runtime-path-resolver:loaded-path",
+    ),
+    (
+        "Ok((path, renderer))",
+        "Ok((path, renderer, bundled))",
+        "runtime-path-resolver:loaded-result",
+    ),
+    (
+        "DiagramKind::MathJax => Some(\"MATHJAX_JS\"),",
+        "DiagramKind::MathJax => None,",
+        "runtime-path-resolver:loaded-env",
+    ),
 ];
 
 pub(super) fn reject_loaded_mutations(fixture: &Fixture) -> Result<(), Box<dyn std::error::Error>> {

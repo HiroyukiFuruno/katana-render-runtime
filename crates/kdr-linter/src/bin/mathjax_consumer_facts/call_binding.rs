@@ -175,3 +175,7 @@ fn matches_formatted_error(
         }
     })
 }
+
+#[cfg(test)]
+#[path = "call_binding_expected_args_tests.rs"]
+mod expected_args_tests;
