@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -79,6 +80,90 @@ def _is_dev_profile_clean(options: list[str]) -> bool:
     return selectors in (["--profile", "dev"], ["--profile=dev"])
 
 
+def _is_scoped_package_clean(command_arguments: list[str]) -> bool:
+    from cargo_capacity_guard import _unwrap_cargo
+
+    words = _unwrap_cargo(command_arguments[1:])
+    if len(words) != 8 or words[0] != "cargo" or words[1:4] != ["clean", "--profile", "dev"]:
+        return False
+    return (words[4] == words[6] == "-p"
+            and {words[5], words[7]} == {"katana-render-runtime", "katana-render-runtime-assets"})
+
+
+def _stable_clean_path(path: Path) -> os.stat_result:
+    if not path.is_absolute() or path.resolve(strict=True) != path:
+        raise RuntimeError("clean plan contains a noncanonical or symbolic path")
+    metadata = path.lstat()
+    if not (stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)):
+        raise RuntimeError("clean plan contains an unsupported filesystem entry")
+    return metadata
+
+
+def _raise_walk_error(error: OSError) -> None:
+    raise error
+
+
+def _protected_clean_entries(references: list[str]) -> tuple[list[Path], set[tuple[int, int]]]:
+    protected: list[Path] = []
+    identities: set[tuple[int, int]] = set()
+    for reference in references:
+        path = Path(reference)
+        details = _stable_clean_path(path)
+        protected.append(path)
+        identities.add((details.st_dev, details.st_ino))
+        if stat.S_ISDIR(details.st_mode):
+            for parent, directories, files in os.walk(path, followlinks=False, onerror=_raise_walk_error):
+                for name in (*directories, *files):
+                    child = Path(parent) / name
+                    details = _stable_clean_path(child)
+                    identities.add((details.st_dev, details.st_ino))
+    return protected, identities
+
+
+def _check_planned_directory_entries(planned: set[Path]) -> None:
+    for path in planned:
+        if path.is_dir():
+            for parent, directories, files in os.walk(path, followlinks=False, onerror=_raise_walk_error):
+                for name in (*directories, *files):
+                    child = Path(parent) / name
+                    _stable_clean_path(child)
+                    if child not in planned:
+                        raise RuntimeError("package clean plan omits a directory entry")
+
+
+def _validate_package_clean_plan(command_arguments: list[str], root: Path, references: list[str]) -> None:
+    target = root / "target"
+    debug = target / "debug"
+    _stable_clean_path(target)
+    _stable_clean_path(debug)
+    configured_target = Path(os.environ.get("CARGO_TARGET_DIR", str(target)))
+    if not configured_target.is_absolute():
+        configured_target = root / configured_target
+    if configured_target != target or configured_target.resolve(strict=True) != target:
+        raise RuntimeError("package clean requires the canonical repository target")
+    protected, identities = _protected_clean_entries(references)
+    try:
+        result = subprocess.run([*command_arguments[1:], "--dry-run", "--verbose"], cwd=root,
+                                check=False, shell=False, capture_output=True, text=True)
+    except UnicodeError as error:
+        raise RuntimeError("package clean dry-run output is not valid text") from error
+    if result.returncode != 0 or not result.stdout or not result.stdout.endswith("\n"):
+        raise RuntimeError("package clean dry-run failed or has no complete plan")
+    planned: set[Path] = set()
+    for line in result.stdout.splitlines():
+        path = Path(line)
+        if not line or str(path) != line or path == debug or not path.is_relative_to(debug):
+            raise RuntimeError("package clean plan escaped the debug target")
+        details = _stable_clean_path(path)
+        if ((details.st_dev, details.st_ino) in identities
+                or any(path == ref or path.is_relative_to(ref) or ref.is_relative_to(path) for ref in protected)):
+            raise RuntimeError("package clean plan overlaps a protected reference")
+        planned.add(path)
+    if not planned:
+        raise RuntimeError("package clean plan is empty")
+    _check_planned_directory_entries(planned)
+
+
 def _protected_clean_reference(command_arguments: list[str], root: Path) -> Path | None:
     build_scripts = str(Path(__file__).resolve().parents[1] / "build")
     if build_scripts not in sys.path:
@@ -91,6 +176,9 @@ def _protected_clean_reference(command_arguments: list[str], root: Path) -> Path
     references = collect_protected_references(
         [], os.environ.get("CARGO_CAPACITY_PROTECTED_REFS"),
     )
+    if _is_scoped_package_clean(command_arguments):
+        _validate_package_clean_plan(command_arguments, root.resolve(strict=True), references)
+        return None
     if not references:
         return None
     for reference in references:

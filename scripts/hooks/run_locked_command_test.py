@@ -116,6 +116,83 @@ class LockedCommandTest(unittest.TestCase):
                 root,
             )
 
+    def _planned_package_clean(self, root: Path, plan: list[Path], *, exit_code: int = 0,
+                               options: list[str] | None = None) -> tuple[int, list[list[str]]]:
+        observed: list[list[str]] = []
+        def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+            observed.append(command)
+            if "--dry-run" in command:
+                return subprocess.CompletedProcess(command, exit_code,
+                                                   "".join(f"{path}\n" for path in plan), "")
+            return subprocess.CompletedProcess(command, 0, "", "")
+        selected = options if options is not None else [
+            "--profile", "dev", "-p", "katana-render-runtime", "-p", "katana-render-runtime-assets",
+        ]
+        with patch.object(subprocess, "run", side_effect=run):
+            status = self._run_clean_with_refs(root, "rtk", selected, root / "producer/lock",
+                                               [root / "target/debug/krr"])
+        return status, observed
+
+    def test_disjoint_package_clean_uses_original_argv_after_dry_run(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            debug = root / "target/debug"
+            debug.mkdir(parents=True)
+            (debug / "krr").write_text("reserved", encoding="utf-8")
+            artifact = debug / "package-artifact"
+            artifact.write_text("package", encoding="utf-8")
+            status, calls = self._planned_package_clean(root, [artifact])
+            self.assertEqual(status, 0)
+            self.assertEqual(len(calls), 2)
+            self.assertIn("--dry-run", calls[0])
+            self.assertIn("--verbose", calls[0])
+            actual = [word for word in calls[0] if word not in ("--dry-run", "--verbose")]
+            self.assertEqual(calls[1], actual)
+            self.assertEqual(calls[1][-6:], ["--profile", "dev", "-p", "katana-render-runtime",
+                                             "-p", "katana-render-runtime-assets"])
+
+    def test_package_clean_rejects_unsafe_or_incomplete_plan(self) -> None:
+        for case in ("reference", "ancestor", "hardlink", "outside", "failed", "empty",
+                     "symlink", "missing", "relative"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                debug = root / "target/debug"
+                debug.mkdir(parents=True)
+                reference = debug / "krr"
+                reference.write_text("reserved", encoding="utf-8")
+                artifact = debug / "package-artifact"
+                artifact.write_text("package", encoding="utf-8")
+                selected = {"reference": reference, "ancestor": debug,
+                            "outside": root / "outside", "failed": artifact,
+                            "empty": artifact, "hardlink": debug / "hardlink",
+                            "symlink": debug / "symlink", "missing": debug / "missing",
+                            "relative": Path("relative-path")}[case]
+                if case == "hardlink":
+                    os.link(reference, selected)
+                elif case == "symlink":
+                    selected.symlink_to(artifact)
+                elif case == "outside":
+                    selected.write_text("outside", encoding="utf-8")
+                status, calls = self._planned_package_clean(root, [] if case == "empty" else [selected],
+                                                            exit_code=1 if case == "failed" else 0)
+                self.assertEqual(status, 1)
+                self.assertFalse(any("--dry-run" not in command for command in calls))
+                self.assertEqual(reference.read_text(encoding="utf-8"), "reserved")
+
+    def test_package_clean_rejects_unknown_package_without_running_clean(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            debug = root / "target/debug"
+            debug.mkdir(parents=True)
+            (debug / "krr").write_text("reserved", encoding="utf-8")
+            artifact = debug / "artifact"
+            artifact.write_text("package", encoding="utf-8")
+            status, calls = self._planned_package_clean(root, [artifact], options=[
+                "--profile", "dev", "-p", "unknown-package",
+            ])
+            self.assertEqual(status, 1)
+            self.assertFalse(any("--dry-run" not in command for command in calls))
+
     def test_protected_clean_without_references_preserves_relative_target_dir(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
