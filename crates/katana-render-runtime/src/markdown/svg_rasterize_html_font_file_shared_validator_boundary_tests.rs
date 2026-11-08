@@ -13,6 +13,9 @@ static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 type ArmValidator = fn(&Arm) -> Result<(), String>;
 type LibraryBytes = Arc<dyn AsRef<[u8]> + Send + Sync>;
 
+#[path = "svg_rasterize_html_font_file_shared_validator_additional_boundary_tests.rs"]
+mod additional_boundaries;
+
 fn cloned_arm(actual: &Arm) -> Arm {
     Arm {
         route: actual.route,
@@ -201,7 +204,9 @@ impl OwnedFile {
             .open(&path)
             .map_err(|error| error.to_string())?;
         let owned = Self(path);
-        std::io::Write::write_all(&mut output, &bytes).map_err(|error| error.to_string())?;
+        let written = std::io::Write::write_all(&mut output, &bytes);
+        drop(output);
+        written.map_err(|error| error.to_string())?;
         Ok(owned)
     }
 }
