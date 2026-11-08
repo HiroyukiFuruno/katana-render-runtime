@@ -6,6 +6,9 @@ use super::{
 use rstest::rstest;
 use std::path::Path;
 
+#[path = "svg_engine_writer_filter_nested_mask_image_tests.rs"]
+mod nested_mask_image_tests;
+
 #[path = "svg_engine_writer_lighting_input_tests.rs"]
 mod lighting_input_tests;
 

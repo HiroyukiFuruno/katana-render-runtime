@@ -60,6 +60,19 @@ fn inline_rgba_png_decodes_places_and_roundtrips() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn idless_inline_png_roundtrips_without_synthesizing_an_id() -> Result<(), String> {
+    let input = inline_png_svg()?.replace(" id=\"rgba\"", "");
+    let original = parse_writer_svg(&input, "idless-inline-png")?;
+    assert_idless_png_image(&original)?;
+    let serialized = original.to_string(&writer_options("idless-inline-png"));
+    assert!(serialized.contains("data:image/png;base64"));
+    assert!(!serialized.contains("<image id="));
+    let reparsed = parse_writer_svg(&serialized, "idless-inline-png-roundtrip")?;
+    assert_idless_png_image(&reparsed)?;
+    assert_roundtrip_pixels(&original, &reparsed, (1, 1), (255, 0, 0, 255))
+}
+
 #[rstest]
 #[case("embedded-jpeg-as-image-jpg.svg", RasterFormat::Jpeg)]
 #[case("embedded-gif.svg", RasterFormat::Gif)]
@@ -140,6 +153,14 @@ fn assert_embedded_svg(tree: &usvg::Tree) -> Result<(), String> {
 
 fn assert_png_image(tree: &usvg::Tree) -> Result<(), String> {
     let image = image_node(tree, "rgba")?;
+    assert_image_size(image, (2.0, 2.0));
+    assert!(matches!(image.kind(), usvg::ImageKind::PNG(_)));
+    Ok(())
+}
+
+fn assert_idless_png_image(tree: &usvg::Tree) -> Result<(), String> {
+    let image = find_image_node(tree.root()).ok_or("image without ID missing")?;
+    assert!(image.id().is_empty());
     assert_image_size(image, (2.0, 2.0));
     assert!(matches!(image.kind(), usvg::ImageKind::PNG(_)));
     Ok(())
