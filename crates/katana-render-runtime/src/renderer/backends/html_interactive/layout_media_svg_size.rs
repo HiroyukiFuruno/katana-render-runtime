@@ -147,7 +147,7 @@ pub(super) fn parse_view_box(value: &str) -> Option<ViewBox> {
 mod tests {
     use super::super::super::layout::HtmlLayoutRenderer;
     use super::super::super::style::CssStyle;
-    use super::super::test_support::{find_svg, svg_coordinate};
+    use super::super::test_support::{TestResult, find_svg, svg_coordinate};
     use super::{embedded_svg_size, quantize_css_layout};
     use crate::HtmlBrowserViewport;
     use crate::renderer::backends::html_document::HtmlDocument;
@@ -221,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn svg_max_height_keeps_centered_parent_origin() -> Result<(), String> {
+    fn svg_max_height_keeps_centered_parent_origin() -> TestResult {
         let svg = rendered_journey_svg()?;
         for (name, expected) in [
             ("x", JOURNEY_CENTERED_OFFSET),
@@ -243,18 +243,18 @@ mod tests {
         ]
     }
 
-    fn rendered_journey_svg() -> Result<Element, String> {
+    fn rendered_journey_svg() -> TestResult<Element> {
         let html = format!(
             "<style>html,body{{margin:0}}</style><main style=\"width:{JOURNEY_CAPTURE_WIDTH}px;height:{JOURNEY_CAPTURE_HEIGHT}px;display:flex;align-items:center;justify-content:center\"><div style=\"width:{JOURNEY_HOST_WIDTH}px;height:{JOURNEY_HOST_HEIGHT}px;display:flex;align-items:center;justify-content:center\"><svg width=\"{JOURNEY_SVG_WIDTH}\" height=\"{JOURNEY_SVG_HEIGHT}\" viewBox=\"{JOURNEY_VIEW_BOX}\" style=\"max-width:{JOURNEY_SVG_WIDTH}px;max-height:100%\"></svg></div></main>"
         );
         let document = HtmlDocument::parse(&html);
         let nodes = document.interactive_nodes_with_styles(&HashMap::new());
-        let viewport = HtmlBrowserViewport::new(JOURNEY_CAPTURE_WIDTH, JOURNEY_CAPTURE_HEIGHT, 1.0)
-            .map_err(|error| error.to_string())?;
+        let viewport =
+            HtmlBrowserViewport::new(JOURNEY_CAPTURE_WIDTH, JOURNEY_CAPTURE_HEIGHT, 1.0)?;
         let layout = HtmlLayoutRenderer::render(&nodes, viewport, 0.0, &HashMap::new(), None)?;
-        let root = Element::parse(layout.svg.as_bytes()).map_err(|error| error.to_string())?;
+        let root = Element::parse(layout.svg.as_bytes())?;
         find_svg(&root)
             .cloned()
-            .ok_or_else(|| "missing journey SVG".to_owned())
+            .ok_or_else(|| "missing journey SVG".into())
     }
 }

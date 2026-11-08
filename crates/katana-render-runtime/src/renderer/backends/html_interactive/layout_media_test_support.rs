@@ -1,5 +1,7 @@
 use xmltree::{Element, XMLNode};
 
+pub(super) type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
 pub(super) fn find_svg(root: &Element) -> Option<&Element> {
     root.children.iter().find_map(|node| match node {
         XMLNode::Element(element) if element.name == "svg" => Some(element),
@@ -8,12 +10,12 @@ pub(super) fn find_svg(root: &Element) -> Option<&Element> {
     })
 }
 
-pub(super) fn svg_coordinate(svg: &Element, name: &str) -> Result<f32, String> {
-    svg.attributes
+pub(super) fn svg_coordinate(svg: &Element, name: &str) -> TestResult<f32> {
+    Ok(svg
+        .attributes
         .get(name)
         .ok_or_else(|| format!("missing SVG {name}"))?
-        .parse::<f32>()
-        .map_err(|error| error.to_string())
+        .parse::<f32>()?)
 }
 
 pub(super) fn capture_frame_pixels(
@@ -21,14 +23,20 @@ pub(super) fn capture_frame_pixels(
     url: &str,
     width: u32,
     height: u32,
-) -> Result<Vec<u8>, String> {
-    let source = crate::HtmlBrowserSource::new(html, url).map_err(|error| error.to_string())?;
-    let viewport =
-        crate::HtmlBrowserViewport::new(width, height, 1.0).map_err(|error| error.to_string())?;
-    let session =
-        crate::HtmlBrowserSession::new(source, viewport).map_err(|error| error.to_string())?;
+) -> TestResult<Vec<u8>> {
+    let source = crate::HtmlBrowserSource::new(html, url)?;
+    let viewport = crate::HtmlBrowserViewport::new(width, height, 1.0)?;
+    let session = crate::HtmlBrowserSession::new(source, viewport)?;
+    session_frame_pixels(&session)
+}
+
+pub(super) fn session_frame_pixels(session: &crate::HtmlBrowserSession) -> TestResult<Vec<u8>> {
     session
         .latest_frame()
         .map(|frame| frame.pixels.clone())
-        .ok_or_else(|| "missing SVG frame".to_owned())
+        .ok_or_else(|| "missing SVG frame".into())
 }
+
+#[cfg(test)]
+#[path = "layout_media_test_support_tests.rs"]
+mod tests;

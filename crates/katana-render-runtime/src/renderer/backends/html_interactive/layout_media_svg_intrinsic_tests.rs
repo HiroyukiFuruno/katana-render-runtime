@@ -1,13 +1,12 @@
 use super::super::layout::HtmlLayoutRenderer;
 use super::super::style::CssStyle;
-use super::test_support::{find_svg, svg_coordinate};
+use super::test_support::{TestResult, find_svg, svg_coordinate};
 use super::{embedded_svg_size, intrinsic_image_width};
 use crate::HtmlBrowserViewport;
 use crate::renderer::backends::html_document::{HtmlDocument, HtmlDocumentNode};
 use std::collections::HashMap;
 use xmltree::Element;
 
-type TestResult<T = ()> = Result<T, String>;
 const NATURAL_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="80" height="50" viewBox="0 0 80 50"><rect width="80" height="50" fill="#ff0000"/><circle cx="40" cy="25" r="15" fill="#0000ff"/></svg>"##;
 const PERCENT_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100%" style="max-width:600.40625px" viewBox="4 4 600.40625 380"><rect x="4" y="4" width="600.40625" height="380" fill="#ff0000"/></svg>"##;
 const BACKGROUND_RGBA: [u8; 4] = [30, 30, 30, 255];
@@ -244,8 +243,7 @@ fn assert_geometry(html: &str, width: f32, height: f32) -> TestResult {
             .attributes
             .get(name)
             .ok_or("missing SVG dimension")?
-            .parse::<f32>()
-            .map_err(|error| error.to_string())?;
+            .parse::<f32>()?;
         assert!(
             (actual - expected).abs() < 0.001,
             "SVG {name}={actual}, expected {expected}"
@@ -262,11 +260,35 @@ fn rendered_svg_x_and_width(html: &str) -> TestResult<(f32, f32)> {
     Ok((x, width))
 }
 
+#[test]
+fn svg_coordinate_reports_missing_and_invalid_values() -> TestResult {
+    let missing = Element::parse("<svg/>".as_bytes())?;
+    let missing_error = svg_coordinate(&missing, "width")
+        .err()
+        .ok_or("missing width was accepted")?;
+    assert_eq!(missing_error.to_string(), "missing SVG width");
+
+    let invalid = Element::parse("<svg width=\"wide\"/>".as_bytes())?;
+    let actual_error = svg_coordinate(&invalid, "width")
+        .err()
+        .ok_or("invalid width was accepted")?;
+    let expected_error = "wide"
+        .parse::<f32>()
+        .err()
+        .ok_or("invalid numeric fixture was accepted")?;
+    assert!(
+        actual_error
+            .downcast_ref::<std::num::ParseFloatError>()
+            .is_some()
+    );
+    assert_eq!(actual_error.to_string(), expected_error.to_string());
+    Ok(())
+}
+
 fn rendered_svg_document(html: &str) -> TestResult<Element> {
     let document = HtmlDocument::parse(html);
     let nodes = document.interactive_nodes_with_styles(&HashMap::new());
-    let viewport = HtmlBrowserViewport::new(CAPTURE_WIDTH, CAPTURE_HEIGHT, 1.0)
-        .map_err(|error| error.to_string())?;
+    let viewport = HtmlBrowserViewport::new(CAPTURE_WIDTH, CAPTURE_HEIGHT, 1.0)?;
     let layout = HtmlLayoutRenderer::render(&nodes, viewport, 0.0, &HashMap::new(), None)?;
-    Element::parse(layout.svg.as_bytes()).map_err(|error| error.to_string())
+    Ok(Element::parse(layout.svg.as_bytes())?)
 }

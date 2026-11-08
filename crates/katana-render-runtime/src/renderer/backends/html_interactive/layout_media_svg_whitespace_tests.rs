@@ -1,4 +1,4 @@
-use super::test_support::capture_frame_pixels;
+use super::test_support::{TestResult, capture_frame_pixels};
 
 const CAPTURE_WIDTH: u32 = 160;
 const CAPTURE_HEIGHT: u32 = 48;
@@ -10,7 +10,7 @@ const TEXT_WITH_SPACES: &str = "DOM   shim";
 const TEXT_WITH_ONE_SPACE: &str = "DOM shim";
 
 #[test]
-fn embedded_svg_whitespace_follows_child_context_in_the_real_frame() -> Result<(), String> {
+fn embedded_svg_whitespace_follows_child_context_in_the_real_frame() -> TestResult {
     let default_frame = capture_svg(&svg_markup(None, None, TEXT_WITH_SPACES))?;
     let single_frame = capture_svg(&svg_markup(None, None, TEXT_WITH_ONE_SPACE))?;
     let preserved_frame = capture_svg(&svg_markup(Some("preserve"), None, TEXT_WITH_SPACES))?;
@@ -48,7 +48,7 @@ fn svg_markup(root_space: Option<&str>, child_space: Option<&str>, text: &str) -
     )
 }
 
-fn capture_svg(svg: &str) -> Result<Vec<u8>, String> {
+fn capture_svg(svg: &str) -> TestResult<Vec<u8>> {
     let html = format!(
         "<!doctype html><html><head><style>html,body{{margin:0}}</style></head><body>{svg}</body></html>"
     );
@@ -60,12 +60,12 @@ fn capture_svg(svg: &str) -> Result<Vec<u8>, String> {
     )
 }
 
-fn assert_real_ink(pixels: &[u8], empty: &[u8]) -> Result<(), String> {
+fn assert_real_ink(pixels: &[u8], empty: &[u8]) -> TestResult {
     if pixels.len() != (CAPTURE_WIDTH * CAPTURE_HEIGHT * CHANNEL_COUNT as u32) as usize {
-        return Err("unexpected frame dimensions".to_owned());
+        return Err("unexpected frame dimensions".into());
     }
     if pixels == empty {
-        return Err("whitespace regression frame is empty".to_owned());
+        return Err("whitespace regression frame is empty".into());
     }
     if pixels.chunks_exact(CHANNEL_COUNT).all(|pixel| {
         pixel[ALPHA_INDEX] == 0
@@ -73,7 +73,7 @@ fn assert_real_ink(pixels: &[u8], empty: &[u8]) -> Result<(), String> {
                 .iter()
                 .any(|channel| *channel > BLACK_CHANNEL_MAX)
     }) {
-        return Err("whitespace regression frame has no ink".to_owned());
+        return Err("whitespace regression frame has no ink".into());
     }
     Ok(())
 }
