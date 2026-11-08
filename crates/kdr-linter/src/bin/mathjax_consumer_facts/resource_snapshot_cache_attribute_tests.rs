@@ -47,3 +47,25 @@ fn cache_guard_rejects_constructor_closure_argument_attribute()
     fixture.reject("resource-loader:cache")?;
     Ok(())
 }
+
+#[test]
+fn cache_guard_rejects_attributes_on_insert_and_pending_calls()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = mathjax_fixture()?;
+    let input = RUST_INPUTS[super::super::source::RESOURCE_BYTES_INPUT_INDEX];
+    for (call, attributed) in [
+        (
+            "cache.insert(path.to_path_buf(), snapshot.clone());",
+            "#[allow(unused)] cache.insert(path.to_path_buf(), snapshot.clone());",
+        ),
+        (
+            "cache.run_pending_tasks();",
+            "#[allow(unused)] cache.run_pending_tasks();",
+        ),
+    ] {
+        fixture.replace(input, call, attributed)?;
+        fixture.reject("resource-loader:cache")?;
+        fixture.restore(input)?;
+    }
+    Ok(())
+}

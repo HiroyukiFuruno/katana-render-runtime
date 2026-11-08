@@ -86,6 +86,26 @@ const CONSTRUCTOR_CASES: &[(&str, &str, &str)] = &[
         "value\n                    .bytes()\n                    .len()\n                    .saturating_add(path.as_os_str().len())\n                    .saturating_add(ENTRY_OVERHEAD)\n                    .try_into()\n                    .unwrap_or(0)",
         "resource-loader:cache",
     ),
+    (
+        ".weigher(|path: &PathBuf, value: &Arc<ResourceSnapshot>| {",
+        ".weigher(|ref path: &PathBuf, value: &Arc<ResourceSnapshot>| {",
+        "resource-loader:cache",
+    ),
+    (
+        ".weigher(|path: &PathBuf, value: &Arc<ResourceSnapshot>| {",
+        ".weigher(|path @ _: &PathBuf, value: &Arc<ResourceSnapshot>| {",
+        "resource-loader:cache",
+    ),
+    (
+        ".weigher(|path: &PathBuf, value: &Arc<ResourceSnapshot>| {",
+        ".weigher(|same: &PathBuf, same: &Arc<ResourceSnapshot>| {",
+        "resource-loader:cache",
+    ),
+    (
+        ".try_into()\n                    .unwrap_or(u32::MAX)",
+        ".try_into()\n                    .unwrap_or(u32::MIN)",
+        "resource-loader:cache",
+    ),
 ];
 
 #[test]

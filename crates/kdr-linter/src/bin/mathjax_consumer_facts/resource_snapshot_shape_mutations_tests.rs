@@ -112,6 +112,11 @@ pub(super) const CASES: &[(&str, &str, &str)] = &[
         "resource-loader:cache",
     ),
     (
+        "CACHE_BYTES as usize",
+        "CACHE_BYTES as u64",
+        "resource-loader:cache",
+    ),
+    (
         "snapshot.identity.modified.is_some() && weight <= CACHE_BYTES as usize",
         "snapshot.identity.modified.is_some() || weight <= CACHE_BYTES as usize",
         "resource-loader:cache",
@@ -144,6 +149,11 @@ pub(super) const CASES: &[(&str, &str, &str)] = &[
     (
         "cache.run_pending_tasks();",
         "other.run_pending_tasks();",
+        "resource-loader:cache",
+    ),
+    (
+        "cache.run_pending_tasks();",
+        "run_pending_tasks!(cache);",
         "resource-loader:cache",
     ),
     (
