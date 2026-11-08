@@ -111,6 +111,11 @@ fn geometry_bridge_rejects_throwing_registration_setter() {
     ] {
         assert_registration_setter_rejected(property, expected);
     }
+    #[cfg(target_os = "macos")]
+    assert_registration_setter_rejected(
+        "__katanaSvgPathBounds",
+        "SVG path bounds bridge registration failed",
+    );
 }
 
 fn assert_registration_setter_rejected(property: &str, expected: &str) {
