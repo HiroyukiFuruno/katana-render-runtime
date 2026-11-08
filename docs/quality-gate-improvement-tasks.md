@@ -2,6 +2,12 @@
 
 ## 現在の実行地点（2026-11-09、以下の過去結果と区別する）
 
+- **現在のroot実数**: `de342ebf`、5837/5837成功・別に15skip、88361行中87340covered、98.84451285069204%・未カバー1021行。`measured-helpers-moon-root-9_3310v9` のMoon producer実0、tests 413.711秒、全体9分35.471秒。`moon-root-policy-auth-8la73h6b` は同じMoon注入経路で認証後のstrict100/0だけがcoverage-policy・実1、refreshed=false。外側の異なる経路で行った照合のanchor identity拒否を、結果自体の改ざんやcoverage-policy失敗と混同しない。root SHAは `b7c23d1c9d9876becd51ab39f485db7c711166a2b652de0b83a29f0a1342579c`。旧正式1055行から34行減少したが、公開条件100/0は未達。
+- **rootの実キャッシュ検証は完了**: `native-moon-root-hit-mteiizvu` はMoon hit・20.934秒、output bytes同一・新test attemptなし。`native-moon-root-restore-02j11hn7` は保護対象外のcanonical2出力だけを退避して実CAS復元、21.019秒・同bytes・新test attemptなし。復元後 `moon-root-restored-auth-qpqm691v` は認証成功後のcoverage-policy・refreshed=false。`moon-root-tamper-refresh-lgsof8xv` は復元コピーへJSONの意味を変えない1byteを加えた改ざんを拒否し、既存aggregateが正規producer実0で再生成。認証済checkpointがaccepted/prior-all-passedとなりtests/cleanなし、reportだけを生成し同じreport SHA・新receiptへ正規認証した。旧原本・失敗raw・改ざんコピーは保持し、anchor/旧receiptの手動復元やrepinはしていない。最終100/0・完全gate・CI再利用の受入は別に残す。
+- **残DoD**: 未カバー1021行の補完→100/0達成後の結果を変えない共通化/境界整理→main自己レビュー。最終SDKのMermaid117・HTML84/全scroll/出力font/consumer契約・性能84と履歴適格性、最終依存/Actions照合、完全品質gate、Draft reviewと個別reply/resolve、Ready・3 OS CI・保護merge・3crate/GitHub公開・Issue整理・安全なcleanupを維持する。旧SDKの成功を最終sourceの合格へ置換しない。
+
+### 経過の記録（以下の旧数値・未実行予定は上の現在実数と区別する）
+
 - [/] 集計対象helperの限定補完: cmapのIO・HTMLの座標/実frame・KDRのparser pin fixtureを非重複3担当で変更中。成功/元のエラー表示とWindows callerを保ち、欠落ファイル・不正属性/viewport・closed session・fixture read/write失敗を実入力で検証する。実装の除外や分母変更はせず、純粋な判定caseは既存のtestファイル境界へ置く。レビューでcmap fixtureの早期失敗時の残骸も見つかったため、create_new成功後の所有とhandle解放後のDropへ整理する。まだ変更後未検証でありcoverage解消数へ加算しない。
 - [/] 製品bridgeの未検証経路は、実V8で登録を拒否する第2のSVG path length setterを既存table caseへ追加する。第1transform拒否もfresh contextごとに維持し、エラー文字列とpending exceptionを確認する。OOMやfresh objectの書込み失敗を通常入力で再現可能と推測して合格扱いしない。
 - [/] 限定補完の先行 `measured-helpers-current-build-gajepj1v` はfoundation/AST実0（新KDR fixture IO caseも通常AST経路で実行成功）。Rust compileは新SVG負例2箇所がxmltreeのRead引数へstrを渡してE0277・実101となり終了回収済み。既存通りbytes入力へ直し、同じ小scopeを再確認する。失敗rawを保持し、未実行のruntime caseを成功へ数えない。
@@ -92,7 +98,7 @@
 - [/] coverage補完候補patchは適用済み。更新後AST `coverage-cohort-ast-3uyqlpf9` は実0。全root collection `coverage-cohort-root-collection-ztpe49ob` は実0、5,725/5,725成功・29 skip、source前後一致。coverageは86,997/88,141 = 98.70207962242316%、未計測1,144行（338 files）、report SHA `18ea97776d868bcfd039ffec751a792a1185e920c4213a08050045d53bad58bd`。前回の1,224行から80行減少したが100%未達。追加境界patchを並行準備する。分母/欠落行は現行reportと一致させ、到達不能に見える製品guardを自動除外しない。coverage
   100%・未計測0を達成する。
 - [/] same-binary performance reuseは適用済み。実行ファイルとbuild/input/resource/font/environmentの認証を正式readerで再実行し、未知の非Rust変更・vendor変更は有限認証を維持する。parse5 8.1.0→8.1.1だけを更新し、HTML性能に非依存のpackage/bun限定差分を81570起点・同一binary証明後だけ受入する有限認証を追加。更新後 `coverage-cohort-source-static-4wxqjrat` は静的17項目実0、`coverage-cohort-related-aecy6xtm` はPython670件/Bun provenance4件実0、各source前後一致。独立review具体的P0–P2なし。真正な新SDK証明と正式再利用・新parse5環境のMermaid比較は未完。Rust直接34/34とActionsの各専用branch pinは最新を確認済み。
-- [ ] 実Moon native coverage cache lifecycleを既存Moon 2.6.5/CASと既存validatorで実証する。現在の全dependency DAGと共有Cargo/PlantUML lockを守り、same-source
+- [x] 実Moon native coverage cache lifecycleを既存Moon 2.6.5/CASと既存validatorで実証する。完了証跡は上記の現在実行地点を参照。完全gateの全dependency DAGと共有Cargo/PlantUML lockを維持し、same-source
   hit、outputs除去後のCAS restore、strict collection validation、tamper拒否、拒否後の正規fresh recollectionを別々に記録する。root
   output以外の保護原本・registry予約を変更せず、失敗したvalidator後は旧receiptを再利用しない。単なるruntime asset CASやcache表示をnative acceptanceとしない。
 - [ ]
