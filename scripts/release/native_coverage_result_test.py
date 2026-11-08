@@ -9,6 +9,7 @@ from typing import cast
 from unittest.mock import patch
 
 import native_coverage_result as coverage_result
+import native_nextest_coverage_commands as nextest_coverage_commands
 
 
 def _fixture_report_path(root: Path, domain: str) -> Path:
@@ -34,6 +35,11 @@ def initialize_fixture_repository(root: Path) -> tuple[str, dict[str, str], dict
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"input:{relative}\n", encoding="utf-8")
+    repository = Path(__file__).resolve().parents[2]
+    for relative in nextest_coverage_commands.ROOT_TEST_ONLY_SHA256:
+        path = root / relative
+        path.write_bytes((repository / relative).read_bytes())
+        path.chmod(0o644)
     test_only_source = root / "scripts/html/performance-harness/src/main_tests.rs"
     test_only_source.parent.mkdir(parents=True, exist_ok=True)
     test_only_source.write_text("#![cfg(test)]\n", encoding="utf-8")
@@ -117,7 +123,9 @@ class NativeCoverageResultTests(unittest.TestCase):
         self.assertEqual(command["selectedTarget"], "target/llvm-cov-target")
         self.assertEqual(command["argv"], [
             "cargo", "llvm-cov", "report", "--workspace", "--profile", "krr-coverage", "--locked", "--json",
-            "--show-missing-lines", "--output-path", "tmp/quality/standalone-performance-coverage/root.json",
+            "--show-missing-lines", "--ignore-filename-regex",
+            nextest_coverage_commands.root_coverage_ignore_regex(Path("<REPO>")), "--output-path",
+            "tmp/quality/standalone-performance-coverage/root.json",
         ])
         self.assertEqual(command["testScope"], {
             "initialArgv": [

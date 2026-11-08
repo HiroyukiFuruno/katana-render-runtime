@@ -4202,6 +4202,17 @@ class CoverageDomainUnitTests(unittest.TestCase):
                 test_source = root / "scripts/html/performance-harness/src/main_tests.rs"
                 test_source.parent.mkdir(parents=True)
                 test_source.write_text("#![cfg(test)]\n")
+            if domain == "root" or diagnostic:
+                scope = guard._root_coverage_commands()
+                repository = Path(guard.__file__).resolve().parents[2]
+                for relative in scope.ROOT_TEST_ONLY_SHA256:
+                    destination = root / relative
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes((repository / relative).read_bytes())
+                    destination.chmod(0o644)
+                subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+                subprocess.run(["git", "add", "--", *scope.ROOT_TEST_ONLY_SHA256],
+                               cwd=root, check=True)
             state = root / "tmp/.cargo-capacity-guard.json"
             state.parent.mkdir()
             state.write_text(json.dumps({"baseline_bytes": 16777216, "factor": 2.0,
@@ -4267,6 +4278,7 @@ class CoverageDomainUnitTests(unittest.TestCase):
                 patch("cargo_capacity_guard.resolve_target", return_value=root / "target"), \
                 patch("cargo_capacity_guard.cargo_configuration_paths", return_value=[] if configuration is None else [configuration]), \
                 patch("cargo_capacity_guard.busy_processes", return_value=[]), \
+                patch("cargo_capacity_guard._validate_root_test_only_scope"), \
                 patch("cargo_capacity_guard.subprocess.run", side_effect=child), \
                 patch.dict(os.environ, environment, clear=True), \
                 contextlib.redirect_stdout(self.output), contextlib.redirect_stderr(self.errors):
@@ -4305,6 +4317,8 @@ class CoverageDomainUnitTests(unittest.TestCase):
                     environment.pop("LLVM_PROFILE_FILE_NAME")
                 args.command = ["cargo", "llvm-cov", "report", "--workspace", "--profile", "krr-coverage",
                                 "--locked", "--json", "--show-missing-lines", "--output-path", str(output)]
+                if not diagnostic:
+                    args.command = ["cargo", *guard._root_coverage_commands().report_arguments(root)]
                 self.assert_overcapacity_report_retains_artifacts(root, args, environment)
 
     def test_retained_root_profile_allows_guarded_report_eviction(self) -> None:
@@ -4314,8 +4328,7 @@ class CoverageDomainUnitTests(unittest.TestCase):
             args.retain_profile = [str(profile)]
             output = root / "tmp/quality/standalone-performance-coverage/root.json"
             output.parent.mkdir(parents=True)
-            args.command = ["cargo", "llvm-cov", "report", "--workspace", "--profile", "krr-coverage",
-                            "--locked", "--json", "--show-missing-lines", "--output-path", str(output)]
+            args.command = ["cargo", *guard._root_coverage_commands().report_arguments(root)]
             measured = {"metric_available": True, "baseline_bytes": 100, "current_bytes": 300,
                         "threshold_bytes": 200, "over_capacity": True}
             with patch("cargo_capacity_guard.inspect", return_value=measured), \
@@ -4640,9 +4653,7 @@ class CoverageDomainUnitTests(unittest.TestCase):
                                 candidate.append(mutation[1])
                         guard.coverage_selection(root, target, "root", candidate, environment, collection=True)
 
-                report = ["cargo", "llvm-cov", "report", "--workspace", "--profile", "krr-coverage", "--locked",
-                          "--json", "--show-missing-lines", "--output-path",
-                          str(root / "tmp/quality/standalone-performance-coverage/root.json")]
+                report = ["cargo", *guard._root_coverage_commands().report_arguments(root)]
                 report_environment = {key: value for key, value in environment.items()
                                       if key != "LLVM_PROFILE_FILE_NAME"}
                 self.assertEqual(guard.coverage_selection(root, target, "root", report,
@@ -4651,11 +4662,11 @@ class CoverageDomainUnitTests(unittest.TestCase):
                 report_mutations: tuple[tuple[str, str | None], ...] = (("--workspace", None), ("--profile", "dev"), ("--no-clean", None),
                                  ("--output-path", str(root / "tmp/quality/other.json")),
                                  ("--json", None), ("--summary-only", None),
-                                 ("--show-missing-lines", None))
+                                 ("--show-missing-lines", None), ("--ignore-filename-regex", ".*"))
                 for mutation in report_mutations:
                     with self.subTest(report_mutation=mutation), self.assertRaisesRegex(RuntimeError, "fixed"):
                         candidate = list(report)
-                        if mutation[0] in {"--profile", "--output-path"}:
+                        if mutation[0] in {"--profile", "--output-path", "--ignore-filename-regex"}:
                             index = candidate.index(mutation[0])
                             candidate[index + 1] = mutation[1] or ""
                         elif mutation[0] in {"--json", "--show-missing-lines", "--workspace"}:

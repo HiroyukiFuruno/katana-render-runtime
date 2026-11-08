@@ -3,9 +3,28 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import uuid
 
 REPORT_DIRECTORY = Path("tmp/quality/standalone-performance-coverage")
+
+ROOT_TEST_ONLY_DIRECTORY = "crates/kdr-linter/src/bin/mathjax_consumer_facts"
+ROOT_TEST_ONLY_SHA256 = {
+    f"{ROOT_TEST_ONLY_DIRECTORY}/bundle_private_ast_tests.rs": "e446403f7e6c5818cb4fb8fd6beb257619e5a1b21087ac0084807136ebff6e83",
+    f"{ROOT_TEST_ONLY_DIRECTORY}/default_route_tests.rs": "10ebe13ddd4e1e3b6427a745fab6bcec62eb047ec5fe2123755c9ca3dfeeff46",
+    f"{ROOT_TEST_ONLY_DIRECTORY}/default_materialize_private_ast_tests.rs": "dcf25f56d59e5c23f3183269fb44f599201e40435b47b257bcb65e75aae2dd84",
+    f"{ROOT_TEST_ONLY_DIRECTORY}/runtime_dispatch_private_ast_tests.rs": "be1196e1b64af1b7fbdcde58852782bcbb4479443d619cb213fd44689a8285f9",
+}
+
+
+def root_coverage_ignore_regex(repo: Path) -> str:
+    def escaped_path(path: Path) -> str:
+        parts = path.parts
+        if path.anchor:
+            parts = (parts[0].removesuffix(path.anchor[-1:]), *parts[1:])
+        return r"[/\\]".join(re.escape(part) for part in parts)
+
+    return "^(" + "|".join(escaped_path(repo / path) for path in ROOT_TEST_ONLY_SHA256) + ")$"
 
 
 def clean_arguments() -> list[str]:
@@ -33,5 +52,6 @@ def nextest_arguments(repo: Path, threads: str, parent: str | None) -> list[str]
 def report_arguments(repo: Path) -> list[str]:
     return [
         "llvm-cov", "report", "--workspace", "--profile", "krr-coverage", "--locked", "--json",
-        "--show-missing-lines", "--output-path", str(repo / REPORT_DIRECTORY / "root.json"),
+        "--show-missing-lines", "--ignore-filename-regex", root_coverage_ignore_regex(repo),
+        "--output-path", str(repo / REPORT_DIRECTORY / "root.json"),
     ]

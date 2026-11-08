@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import hashlib
+import importlib.util
 import json
 import logging
 import os
@@ -26,7 +27,7 @@ from pathlib import Path
 from collections.abc import Callable, Iterator, Mapping
 from types import FunctionType, ModuleType
 from dataclasses import replace
-from typing import TextIO, cast
+from typing import Protocol, TextIO, cast
 
 from cargo_capacity_guard_build_script_ownership import BuildScriptOwnership, build_script_ownership
 from cargo_capacity_guard_build_script_ownership import SourcePin, source_pin
@@ -1293,14 +1294,70 @@ def _coverage_nextest_retry_selection(root: Path, target: Path, words: list[str]
     return "test", selected
 
 
+class _RootCoverageCommands(Protocol):
+    ROOT_TEST_ONLY_SHA256: dict[str, str]
+
+    def report_arguments(self, repo: Path) -> list[str]: ...
+    def root_coverage_ignore_regex(self, repo: Path) -> str: ...
+
+
+def _root_coverage_commands() -> _RootCoverageCommands:
+    path = Path(__file__).resolve().parents[1] / "release/native_nextest_coverage_commands.py"
+    spec = importlib.util.spec_from_file_location("_krr_root_coverage_commands", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("root coverage command contract is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return cast(_RootCoverageCommands, module)
+
+
+def _validate_root_test_only_scope(root: Path, pins: Mapping[str, str]) -> None:
+    for relative, digest in pins.items():
+        path = root / relative
+        if not _path_has_no_symlink_components(path, root):
+            raise RuntimeError("root test-only source escaped its fixed scope")
+        try:
+            descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(descriptor, "rb") as source:
+                details = os.fstat(source.fileno())
+                content = source.read()
+        except OSError as error:
+            raise RuntimeError("root test-only source is unavailable") from error
+        if (not stat.S_ISREG(details.st_mode) or (os.name != "nt" and stat.S_IMODE(details.st_mode) != 0o644)
+                or not content.startswith(b"#![cfg(test)]\n")
+                or hashlib.sha256(content).hexdigest() != digest):
+            raise RuntimeError("root test-only source differs from its fixed content")
+    result = subprocess.run(
+        ["git", "ls-files", "--stage", "-z", "--", *pins],
+        cwd=root, check=False, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+    )
+    expected = set(pins)
+    entries = result.stdout.split(b"\0")
+    if result.returncode != 0 or not entries or entries.pop() != b"":
+        raise RuntimeError("root test-only index is unavailable")
+    for entry in entries:
+        match = re.fullmatch(rb"100644 [0-9a-f]{40} 0\t(.+)", entry)
+        if match is None:
+            raise RuntimeError("root test-only index mode differs")
+        try:
+            relative = match.group(1).decode("utf-8")
+        except UnicodeError as error:
+            raise RuntimeError("root test-only index path differs") from error
+        if relative not in expected:
+            raise RuntimeError("root test-only index path differs")
+        expected.remove(relative)
+    if expected:
+        raise RuntimeError("root test-only index is incomplete")
+
+
 def _coverage_report_selection(root: Path, target: Path, words: list[str],
                                environment: Mapping[str, str]) -> tuple[str, Path]:
     selected = target / "llvm-cov-target"
-    output = root / "tmp/quality/standalone-performance-coverage/root.json"
-    expected = ["cargo", "llvm-cov", "report", "--workspace", "--profile", "krr-coverage", "--locked",
-                "--json", "--show-missing-lines", "--output-path", str(output)]
+    commands = _root_coverage_commands()
+    expected = ["cargo", *commands.report_arguments(root)]
     if words != expected:
         raise RuntimeError("root coverage report differs from its fixed report contract")
+    _validate_root_test_only_scope(root, commands.ROOT_TEST_ONLY_SHA256)
     _validate_coverage_environment(root, target, selected, environment, root / "Cargo.toml")
     return "report", selected
 

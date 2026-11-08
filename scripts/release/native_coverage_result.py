@@ -16,7 +16,9 @@ from pathlib import Path
 from types import ModuleType
 from typing import cast
 
-from native_nextest_coverage_commands import nextest_arguments, report_arguments
+from native_nextest_coverage_commands import (
+    ROOT_TEST_ONLY_SHA256, nextest_arguments, report_arguments, root_coverage_ignore_regex,
+)
 
 
 SCHEMA = "krr-native-test-coverage-result-v1"
@@ -34,6 +36,8 @@ SOURCE_INPUTS = (
     ".github/workflows/test-and-build.yml",
     "scripts/build/cargo_capacity_guard.py",
     "scripts/release/nextest-local-user.toml",
+    "scripts/release/native_nextest_coverage_commands.py",
+    *ROOT_TEST_ONLY_SHA256,
 )
 REPORT_DIRECTORY = "tmp/quality/standalone-performance-coverage"
 COMMIT_RE = re.compile(r"[0-9a-f]{40}\Z")
@@ -299,6 +303,7 @@ def _domain_command(root: Path, domain: str, report_name: str, threads: str) -> 
     manifest_argv = list(argv)
     if domain == "root":
         manifest_argv[manifest_argv.index("--output-path") + 1] = f"{REPORT_DIRECTORY}/{report_name}"
+        manifest_argv[manifest_argv.index("--ignore-filename-regex") + 1] = root_coverage_ignore_regex(Path("<REPO>"))
     record: JsonObject = {
         "guardDomain": domain, "justTarget": just_target, "argv": manifest_argv,
         "selectedTarget": str(selected.relative_to(root)),

@@ -4,6 +4,7 @@ import json
 import importlib
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -334,9 +335,17 @@ class CapacityStateIntegrationTest(unittest.TestCase):
         environment["KRR_TEST_REPORT"] = str(report)
         environment["KRR_TEST_CAPTURE"] = str(capture)
         environment["KRR_TEST_MANIFEST"] = str(manifest)
+        just_executable = shutil.which("just")
+        if just_executable is None:
+            raise FileNotFoundError("just executable was not found")
+        just_path = Path(just_executable)
+        just_command = [just_executable]
+        with just_path.open("rb") as source:
+            if source.read(128).startswith(b"#!/usr/bin/env python"):
+                just_command.insert(0, sys.executable)
         result = subprocess.run(
             [
-                "just",
+                *just_command,
                 "--justfile",
                 str(justfile),
                 "html-performance-evidence-produce",

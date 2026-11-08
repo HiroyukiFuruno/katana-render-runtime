@@ -329,7 +329,8 @@ fn assert_root_coverage_commands(commands: &str) {
             "\"llvm-cov\", \"nextest\", \"--workspace\", \"--all-targets\", \"--all-features\"",
             "\"--cargo-profile\", \"krr-coverage\", \"--no-report\"",
             "\"llvm-cov\", \"report\", \"--workspace\", \"--profile\", \"krr-coverage\"",
-            "\"--show-missing-lines\", \"--output-path\", str(repo / REPORT_DIRECTORY / \"root.json\")",
+            "\"--show-missing-lines\", \"--ignore-filename-regex\", root_coverage_ignore_regex(repo)",
+            "\"--output-path\", str(repo / REPORT_DIRECTORY / \"root.json\")",
         ],
     );
 }
