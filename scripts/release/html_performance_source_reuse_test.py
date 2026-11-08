@@ -219,9 +219,10 @@ class SourceReuseTest(unittest.TestCase):
         self.assertFalse(reuse.v4_reassessment_program_change(
             path, old, base + b" ", old_mode="100644", new_mode="100644"))
 
-    def test_selector_program_migration_is_exact_and_mode_bound(self) -> None:
+    def test_reviewed_program_migration_is_exact_and_mode_bound(self) -> None:
         repository = Path(__file__).resolve().parents[2]
-        for path in ("scripts/release/produce_html_performance_evidence.py",
+        for path in ("scripts/release/html_performance_remote_evidence.py",
+                     "scripts/release/produce_html_performance_evidence.py",
                      "scripts/release/produce_html_performance_evidence_test.py",
                      "scripts/release/html_performance_host_load_validation.py",
                      "scripts/release/html_performance_host_load_validation_test.py"):
@@ -281,11 +282,13 @@ class SourceReuseTest(unittest.TestCase):
     def test_historical_self_and_migrations_are_exact(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         histories = ("6d2e83a2458f6fd297972ecb82ee22d359a4eab1",
-                     "5d80409466a6edfec480516d7c0bb1e7969b7ae9")
+                     "5d80409466a6edfec480516d7c0bb1e7969b7ae9",
+                     "be3ef664076b9e52db78da63a10964b93cf4d48b")
         paths = ("scripts/release/html_performance_source_reuse.py",
                  "scripts/release/html_performance_source_reuse_test.py",
                  "scripts/release/html_performance_source_reuse_cli.py",
                  "scripts/release/html_performance_source_reuse_cli_test.py",
+                 "scripts/release/verify_html_performance_evidence_test.py",
                  "scripts/release/verify_html_performance_evidence.py")
         for head in histories:
             for path in paths:

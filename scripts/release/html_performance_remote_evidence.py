@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import zipfile
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
@@ -244,12 +245,23 @@ def _fixed_epoch_git_records(root: Path, before: JsonObject, head: str, *,
     def relative(value: object) -> str:
         path = _canonical_build_path(value, "fixed epoch tracked path")
         require(".." not in path.parts, "fixed epoch tracked path differs")
-        return path.relative_to(origin).as_posix()
-    tracked = [relative(value) for value in _array(before.get("trackedPaths"), "fixed tracked paths")]
+        if os.name == "nt":
+            return path.relative_to(origin).as_posix()
+        require(Path(path.anchor) == Path(origin.anchor), "fixed epoch tracked path differs")
+        relative_path = os.path.relpath(path, origin)
+        require(relative_path != os.pardir and not relative_path.startswith(os.pardir + os.sep),
+                "fixed epoch tracked path differs")
+        return Path(relative_path).as_posix()
+    tracked = _array(before.get("trackedPaths"), "fixed tracked paths")
+    tracked_paths = ({relative(value) for value in tracked} if os.name == "nt" else
+                     {_text(value, "fixed epoch tracked path") for value in tracked})
     absolute = records_map(before.get("files"))
+    require(len(tracked_paths) == len(tracked)
+            and (os.name == "nt" or tracked_paths == absolute.keys()),
+            "fixed epoch Git source differs")
     saved = {relative(path): value for path, value in absolute.items()}
     records = committed_records(root, head, git_query=git_query)
-    require(len(tracked) == len(set(tracked)) and set(tracked) == set(records)
+    require((os.name != "nt" or tracked_paths == records.keys())
             and len(saved) == len(absolute) and saved == records, "fixed epoch Git source differs")
     index = _object(before.get("index"), "fixed epoch index")
     digest(index.get("sha256"))

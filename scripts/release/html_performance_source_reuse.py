@@ -638,18 +638,19 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "84c6f083827bb1aeb1afc52fe41ed38444bf52bcce20da1394f63e3407fdd22a"
+SELF_MODULE_CANONICAL_SHA256 = "e74539aa42a84ded142f4659dd8cef84f731a5da3f6e92b178987417f49dc960"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 
 # 実行中 checker は品質ゲートとレビューで信頼し、入力 bytes の改変を拒否する。
 _SAME_BINARY_REVIEWED_FILES = {
+    "scripts/release/html_performance_remote_evidence.py": ("e6b82ad9987bc409f1ad6dbc9b3aa9d790f665b111538152dfecd2628efbf712", "f23053b1cd1fa3d1c5a6729659edab0e24b374cb2893df9f1a7aaeacdcd92c6f"),
     "scripts/release/html_performance_host_load_validation.py": ("527966f32a04e641365dbf06d07002441ffc28ec9527f01cd522a430bd243178", "a239f5caa5f0a55a7c182532620e43a93364cc2087c3b75880c4778329acf12b"),
     "scripts/release/html_performance_host_load_validation_test.py": ("68e27e9b1b715bbed15eb260ac45b0449bdd4d24e76897964e06eafd8a98acc0", "cd47e6b4bc807c64db170a16c7add7514875857a5f1bc3914419271764f44742"),
     "scripts/release/produce_html_performance_evidence.py": ("43d967863089f9c2267326f2dde177db898861d1c0634f2e951eda7b212cbbff", "213afcfcf895ee1f048564e70d10668187e0829eee49cbb3fbdc384648777e1b"),
     "scripts/release/produce_html_performance_evidence_test.py": ("09e332a5143e9a3ec1edadc5d7b7d8d4ef55973de8d6c0ed3619643d860d9ac8", "e4c92f155972b92f4b9a46ca4fd735f1ff89d7e6bca75357460b6298dd33da03"),
     "scripts/release/verify_html_performance_evidence.py": ("73ffb34fc4fd5d46a698059879e29753f546c10f53815b20df5d7a9d17468060", "befc62abf92871676e8402337c8b8aae2ce209b373a10cba64e218fd07a889d9"),
-    "scripts/release/verify_html_performance_evidence_test.py": ("7c0f9385c5b896a3ceb4f119a97f2329f9083cd9853028fc8663dade2339bf86", "3f562c30a3995d06cd5c54c7e5c1d1b630d8c45b7515a5a364fc11b9de4e07f6"),
-    "scripts/release/html_performance_source_reuse_test.py": ("3f169f0de723a8e28551284ae455a7b95edac4ad18249f989074d4089d76ebd4", "ae8d52c5b22cf934d710b8c099a0ffbe260c12c845bca34e2bd9c62adfde1d0c"),
+    "scripts/release/verify_html_performance_evidence_test.py": ("7c0f9385c5b896a3ceb4f119a97f2329f9083cd9853028fc8663dade2339bf86", "887bcbc646e293938df96a9b38b2a91d29f92a6c463eaef9f69e0e374a83f56b"),
+    "scripts/release/html_performance_source_reuse_test.py": ("3f169f0de723a8e28551284ae455a7b95edac4ad18249f989074d4089d76ebd4", "7f385f64a95de6ed5c3ee402fb0ea1d08e980b2df44babd9e3423e92b6d4a763"),
     "scripts/release/html_performance_source_reuse_cli.py": ("d49416a4c83e18f177a0572b510a925ef41276e84d2d3ba8e735c732f06028a2", "73e202554a1893741b774fced28d59a598432715f59fa5c935001ed70db2dcf0"),
     "scripts/release/html_performance_source_reuse_cli_test.py": ("5b5a97a585e37f4583f6321935847acfc092d84dd8f1f8d194c3df30f4408554", "3a7b680aebd158c594d66c8d7224d51f76bcf0f0922ead6142154a7160cf74b3"),
     "scripts/release/html_performance_reuse_entry_test.py": ("ef435de25b26fefabcb2e3e3b627633b539dd6fa473e7f493a6e4bef13348e73", "06be7d060ee3ff06ffa187b4575fbdbdbd42d0d16de8877f4b0452eceabc5695"),
@@ -670,6 +671,8 @@ def reviewed_same_binary_self(current: bytes, *, allow_historical: bool = False)
             "4a07266dbe727c9a6fef6ba07d09850422ded4b517f22425a70a0d8a627dfac8",
         "68679b525416b96b51a4f4072154d70881c3596ed86ac52eb07121d577dd394a":
             "91b449135672db61560b1b749a9aad8a98511f5d8afcdcf40a59043d620e3fc7",
+        "c2fb007d478dc3acc1996b9d91b189363a39c8d6f2e4be969f26046935dfec70":
+            "84c6f083827bb1aeb1afc52fe41ed38444bf52bcce20da1394f63e3407fdd22a",
     }
     if declared != SELF_MODULE_CANONICAL_SHA256 and (
         not allow_historical or historical.get(hashlib.sha256(current).hexdigest()) != declared
@@ -691,7 +694,11 @@ def reviewed_same_binary_migration(path: str, old: bytes, current: bytes, *,
         "scripts/release/html_performance_source_reuse_test.py": (
             "3f169f0de723a8e28551284ae455a7b95edac4ad18249f989074d4089d76ebd4",
             frozenset({"d5ed585d010c7ae5110a77245a2213c3387f964fafa388d5baebff43c223428d",
-                       "7d3a16959b8681a12cdcaf759d12916d5b5cc8b9ba137f051da76a338e191555"})),
+                       "7d3a16959b8681a12cdcaf759d12916d5b5cc8b9ba137f051da76a338e191555",
+                       "ae8d52c5b22cf934d710b8c099a0ffbe260c12c845bca34e2bd9c62adfde1d0c"})),
+        "scripts/release/verify_html_performance_evidence_test.py": (
+            "7c0f9385c5b896a3ceb4f119a97f2329f9083cd9853028fc8663dade2339bf86",
+            frozenset({"3f562c30a3995d06cd5c54c7e5c1d1b630d8c45b7515a5a364fc11b9de4e07f6"})),
         "scripts/release/html_performance_source_reuse_cli.py": (
             "d49416a4c83e18f177a0572b510a925ef41276e84d2d3ba8e735c732f06028a2",
             frozenset({"cf246f950aec2619cf27d4605a411d268d52e5f84f34d7815ab5c944a17b00b9"})),

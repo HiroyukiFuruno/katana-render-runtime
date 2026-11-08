@@ -2759,6 +2759,100 @@ class PerformanceEvidenceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "common lock pin differs"):
             gate._runtime_lock_packages(harness, historical_lock=(old, "0" * 64))
 
+    def test_fixed_epoch_source_path_boundaries_and_inventory(self) -> None:
+        expected = gate.read_json(self.expected_paths[0])
+        source_pair = json_object(expected["sourcePair"])
+        original = gate.Bundle(self.bundle).json(source_pair["before"])
+        origin = json_text(original["root"])
+
+        def seal(source: JsonObject) -> None:
+            source["inventoryDigest"] = hashlib.sha256(json.dumps(
+                {key: value for key, value in source.items() if key != "inventoryDigest"},
+                sort_keys=True, separators=(",", ":"),
+            ).encode()).hexdigest()
+
+        def paths(source: JsonObject, replacement: str) -> None:
+            json_array(source["trackedPaths"])[0] = replacement
+            json_object_at(source, "files", 0)["path"] = replacement
+
+        seal(original)
+        records = remote_evidence._fixed_epoch_git_records(self.root, original, self.head)
+        for key in ("trackedPaths", "files"):
+            reordered = copy.deepcopy(original)
+            json_array(reordered[key]).reverse()
+            seal(reordered)
+            self.assertEqual(remote_evidence._fixed_epoch_git_records(self.root, reordered, self.head), records)
+
+        if os.name == "nt":
+            position = next(index for index, letter in enumerate(origin) if letter.isascii() and letter.isalpha())
+            alternate = origin[:position] + origin[position].swapcase() + origin[position + 1:]
+            different_case = copy.deepcopy(original)
+            different_case["trackedPaths"] = [alternate + json_text(path)[len(origin):]
+                                               for path in json_array(original["trackedPaths"])]
+            seal(different_case)
+            self.assertEqual(remote_evidence._fixed_epoch_git_records(
+                self.root, different_case, self.head), records)
+
+        first = json_text(json_array(original["trackedPaths"])[0])
+        relative = first[len(origin) + 1:]
+        cases: tuple[str, ...] = (
+            "duplicate", "nonstring", "empty", "noncanonical", "dotdot", "adjacent",
+            "parent", "root", "missing_tracked", "extra_tracked", "missing_file", "extra_file", "duplicate_file",
+            "bad_sha", "wrong_sha", "bad_size", "wrong_size", "bad_index", "bad_digest",
+        )
+        if os.name != "nt":
+            cases += ("double_slash_anchor",)
+        for case in cases:
+            with self.subTest(case=case):
+                value = copy.deepcopy(original)
+                tracked = json_array(value["trackedPaths"])
+                files = json_array(value["files"])
+                row = json_object(files[0])
+                if case == "duplicate":
+                    tracked.append(tracked[0])
+                elif case == "nonstring":
+                    tracked[0] = 42
+                elif case == "empty":
+                    tracked[0] = ""
+                elif case == "noncanonical":
+                    paths(value, origin + "/./" + relative)
+                elif case == "dotdot":
+                    paths(value, origin + "/../" + relative)
+                elif case == "adjacent":
+                    paths(value, origin + "-other/" + relative)
+                elif case == "double_slash_anchor":
+                    paths(value, "//" + origin.lstrip("/") + "/" + relative)
+                elif case == "parent":
+                    paths(value, str(Path(origin).parent))
+                elif case == "root":
+                    paths(value, origin)
+                elif case == "missing_tracked":
+                    tracked.pop()
+                elif case == "extra_tracked":
+                    tracked.append(origin + "/unknown")
+                elif case == "missing_file":
+                    files.pop()
+                elif case == "extra_file":
+                    files.append({"path": origin + "/unknown", "sha256": "a" * 64, "size": 0})
+                elif case == "duplicate_file":
+                    files.append(copy.deepcopy(row))
+                elif case == "bad_sha":
+                    row["sha256"] = "invalid"
+                elif case == "wrong_sha":
+                    row["sha256"] = "0" * 64
+                elif case == "bad_size":
+                    row["size"] = -1
+                elif case == "wrong_size":
+                    row["size"] = cast(int, row["size"]) + 1
+                elif case == "bad_index":
+                    json_object(value["index"])["sha256"] = "invalid"
+                if case != "bad_digest":
+                    seal(value)
+                else:
+                    value["inventoryDigest"] = "0" * 64
+                with self.assertRaises(ValueError):
+                    remote_evidence._fixed_epoch_git_records(self.root, value, self.head)
+
     def test_fixed_epoch_origin_uses_old_git_not_current_checkout(self) -> None:
         old_expected = gate.read_json(self.expected_paths[0])
         old_pair = json_object(old_expected["sourcePair"])
