@@ -2,12 +2,21 @@
 
 ## 現在の実行地点（2026-11-08、以下の過去結果と区別する）
 
+- [x] 最新の小修正はコミットまで完了: `c9f3801c` は独立Chromeに反するSVG marker2件を修正し、`independent-marker-all38-green-rqf7lgi2` の38caseが全実0・source/binary不変・profile残0。最後に誤ったunreachableコメントだけを除去したため、この38caseは除去前sourceの挙動証拠であり、最終sourceの完全gateを代替しない。新SDKの描画/性能受入は別に残る。
+- [x] 正式runtime cacheにも同じcleanup scopeキーが到達することを確認し、`edeedc4b` で1名だけを限定除外した。初回のcandidate-onlyラベルからの非使用推論は訂正する。`runtime-cache-scope-expected-red-bofbnzzt` の独立2caseが各実1、その後 `runtime-scope-and-marker-fixed-build-tpck0rf_` の静的3項目・fingerprint26/identity33/cache CLI32test・ASTが全実0。未知名・保護ref・source/toolの変更は引き続き束縛し、既存raw/goldenを変更していない。
+- [ ] 次の正式root collectionでは同sourceの収集成功、読取の真正性成功、100/0の数値合否を別々に記録する。以前のinvalid-collectionをcoverage-policy拒否と混同せず、新identityへ旧receipt/anchorを付け替えない。全実装100%未達では公開を許可しない。達成後の挙動を変えない共通化/境界refactor・main自己レビュー・完全gate・Draft review/CI/公開の残DoDは維持する。
+
 - [x] 公開条件は追加差分のcoverageだけではなく、全実装coverage100%・未計測0。`c6336982` で公開scriptのCargo呼出前へ既存のexact-source CI/merged release/acquisition検証を接続し、未達・検証器欠落の5caseで公開試行0を確認した。有効な同一source/検査条件のローカルreportをCIで再利用する方針は維持し、その接続範囲を再確認する。前回releaseの調査は行わない。
 - [x] SVG geometryのown property回帰は `b191169d`、非可逆CSS transformの空clip回帰は `4ade8fd7` へ取り込み済み。前者は `geometry-own-property-green-4d38n_31` の13case、後者は `axis-clip-noninvertible-green-a4nkt2sp` の10caseが実0。以前の未修正記載は経緯として保持する。製品変更後の新SDKで描画・性能を正式再確認する。
 - [x] HTML空文字列入力の誤changeは `empty-text-expected-red-xnse6aaa` の実101で再現し、`8a931e5e` で空文字列をdirty化しない最小修正を取り込んだ。`empty-text-input-related-green-s98hyi63` の関連13caseが全実0、source/binary不変、一時profile残0。未入力・空入力・実入力・実入力後の空入力の4状態を回帰する。
 - [x] CI再利用の現接続を読取確認: PRのmacOS全範囲は `local_macos_evidence.py`、HTML性能は既存の保守者証跡検証で同PR/base/HEAD・条件一致時に再利用し、不一致は実CIへfallback。Linux coverageはGitHub署名付きexact-context cacheだけを再利用する。任意の未署名ローカルreportをLinux合格として扱う経路は追加しない。実release PRで使う証跡の適格性は別に確認する。
 - [x] KDRの現coverage profile実catalog164caseは `kdr-boundary-all164-l1y7uiif` で全実0、source/binary不変、一時profile残0。外側集計はshould-panic表示suffixのため実1となったが、原結果を保持し `case-accounting-correction.json` で実164行とcatalog全件の一致を訂正した。再実行や未実行caseの補完はしていない。fixture所有/cleanupは `902ee125`、cache属性/容量検査は `527a97ac`、その他の境界回帰は `2e5bd73b`、承認済み純粋test4file/9caseの固定境界は `cb60d15b` へ関心ごとに取り込んだ。
 - [ ] 次は現sourceの正式root collectionを実行し、以前の98.7020796224%・未カバー1,144行との差を実測する。collection生成と100%受入は別に扱う。100%・未計測0に届いてから、結果を維持した共通化/境界refactorとPR前のmain自己レビューへ進む。
+- [x] `74dccd77` の正式root collection `current-boundary-root-collection-3p104ia5` は実0、source前後一致。5786test全成功/29skip、clean実0・test実0（351.37秒）・report実0。root.json SHA `2b98a93dfafa39904cb9bd2b3b9eb230b955611e0fdcfcb2735c37cc240658d2` は88277行中87217covered、98.7992342286%・未カバー1060行。前回より84行減ったが100/0未達。公式report stdoutの未カバー行一覧を次の限定回帰へ使う。
+- [ ] 直後の `current-root-strict-acceptance-3nc7ycxv` は実1のinvalid-collectionであり、coverage-policy拒否とは区別する。再計算identityが異なる時、検証readerのprepareが既存anchorをpendingへ書き換える経路を確認した。両runのsource/保護ref指定は一致し、最初に異なるhost identity構成要素は未確定。旧証跡のrepinや再取得で隠さず、別identityの読取で既存の有効anchorを壊さないRED→最小修正を行う。数値の100/0条件と改変拒否は維持する。
+- [x] anchor読取の非破壊化は `380867ba`、起動ごとに変わるcleanup scope1キーの限定除外は `32523381` へ取り込んだ。`coverage-anchor-readonly-red-hb3bwt5b` は1testの期待RED実1、`anchor-scope-and-rust-boundary-build-kko08omk` は静的3項目実0・関連73test実0（1skip）・AST実0。実Just子環境2回の `actual-just-scope-environment-probe-nnlyrh9o` はキー集合一致、全env集合digest不一致、この1キーを除いた集合digest一致を確認した。未知名・Cargo・保護ref・font/resource変更は引き続き束縛する。新正式collectionと再利用の実適格性は別に残る。
+- [x] cache構文の残分を `20f28c83` で補完。初回 `anchor-and-boundary-fixed-build-7r4kh85f` はAST71成功/1失敗で、新mutationが無効Rustだった。完全callを有効なmacro呼出しへ置き換え、同じ期待errorを維持し、再検査 `anchor-scope-and-rust-boundary-build-kko08omk` のAST72caseを含む既存全chainが実0となった。0件選択compileの実4は品質合格へ加算しない。
+- [ ] 新規marker回帰4件を独立Chromeへ照合し、未採用期待2件の誤りを検出した。`marker-stock-chrome-yr4kke07` はChrome実0、middleの空閉鎖subpathは右向き、末尾moveにも終端markerを描画する。元testは `marker-independent-expectation-review-tnl49ekv` にSHA付き保存し、新期待だけ独立captureへ訂正した。raw JS基準/既存goldenは不変。製品側の実REDを回収してから必要な最小修正を行い、他のmarkerケースも維持する。
 
 - [x] SVG限定18case（新17＋既存invalid CSS指定修正1）は `svg-isolation-fixed-exact-xntlyaq7` で全実0、source/binary不変・一時profile残0。5テストfileを許可済み `--no-verify` commit `d3d998f2` へ取り込んだ。前の失敗と原入力は保持し、raw JS基準や期待pixelを変更していない。
 - [/] 独立した埋込図7case `coverage-markdown-exact-cases-thc879c8` は6成功/1失敗。V8のObject::Setは非throwなら書込不能でもSome(true)を返すため、frozen targetで誤ってOkとなることを実測した。公開geometry callbackがObject.prototype.xのsetterに影響されないown fieldを返す実入力回帰を追加し、製品変更前の限定REDを実行する。既存の例外伝播の観点は維持する。
