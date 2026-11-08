@@ -291,7 +291,7 @@ where
 {
             let idx = path.len() - 1;
             match path.last().cloned() {
-                Some(Segment::LineTo(p)) => {
+                Some(Segment::MoveTo(p) | Segment::LineTo(p)) => {
                     draw_marker(p, idx);
                 }
                 Some(Segment::CubicTo(_, _, p)) => {
@@ -343,7 +343,7 @@ fn last_vertex_angle(path: &[Segment], idx: usize) -> f32 {
     let seg2 = path[idx];
 
     match (seg1, seg2) {
-        (_, Segment::MoveTo(_)) => 0.0, // unreachable
+        (_, Segment::MoveTo(_)) => 0.0,
         (_, Segment::LineTo(p)) => {
             let prev = get_prev_vertex(path, idx);
             calc_line_angle(prev.x, prev.y, p.x, p.y)
@@ -432,6 +432,7 @@ fn middle_move_angle(path: &[Segment], idx: usize, previous: Segment) -> f32 {
 
 fn middle_close_angle(path: &[Segment], idx: usize, previous: Segment) -> f32 {
     match previous {
+        Segment::MoveTo(_) => 0.0,
         Segment::LineTo(p) => {
             let prev = get_prev_vertex(path, idx);
             let next = get_subpath_start(path, idx);

@@ -9,6 +9,9 @@ mod geometry;
 #[path = "svg_engine_render_marker_recursion_tests.rs"]
 mod recursion;
 
+#[path = "svg_engine_parser_marker_boundary_tests.rs"]
+mod parser_boundary;
+
 const FIXTURE_DIR: &str =
     "../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/painting/marker";
 const SCALE: f32 = 1.0;

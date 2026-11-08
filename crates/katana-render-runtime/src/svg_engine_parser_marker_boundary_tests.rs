@@ -1,0 +1,67 @@
+use super::{marker_path_count, parse, render_source};
+use tiny_skia::Pixmap;
+
+const MARKER: &str = "<defs><marker id='m' markerUnits='userSpaceOnUse' markerWidth='10' markerHeight='10' orient='auto' overflow='visible'><path d='M0 -2 L8 0 L0 2 Z' fill='red'/></marker></defs>";
+
+fn source(path: &str, marker: &str) -> String {
+    format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='80' height='40'>{MARKER}<path id='route' d='{path}' fill='none' stroke='black' {marker}/></svg>"
+    )
+}
+
+fn assert_red(image: &Pixmap, x: u32, y: u32) -> Result<(), String> {
+    let pixel = image.pixel(x, y).ok_or("marker sample outside image")?;
+    assert!(
+        pixel.red() > pixel.green() && pixel.red() > pixel.blue(),
+        "{x},{y}: {pixel:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn move_then_close_middle_markers_preserve_both_tangents() -> Result<(), String> {
+    let svg = source("M10 20 L30 20 M50 20 Z", "marker-mid='url(#m)'");
+    let tree = parse(&svg)?;
+    assert_eq!(marker_path_count(tree.root()), 2);
+    let image = render_source(&svg)?;
+    assert_red(&image, 33, 20)?;
+    assert_red(&image, 53, 20)?;
+    assert_eq!(image.pixel(47, 20).ok_or("sample missing")?.alpha(), 0);
+    Ok(())
+}
+
+#[test]
+fn zero_length_closed_subpath_end_marker_uses_its_own_vertex() -> Result<(), String> {
+    let svg = source("M10 20 L30 20 M50 20 Z", "marker-end='url(#m)'");
+    let tree = parse(&svg)?;
+    assert_eq!(marker_path_count(tree.root()), 1);
+    let image = render_source(&svg)?;
+    assert_red(&image, 53, 20)?;
+    assert_eq!(image.pixel(47, 20).ok_or("sample missing")?.alpha(), 0);
+    Ok(())
+}
+
+#[test]
+fn closed_empty_first_subpath_start_marker_has_zero_angle() -> Result<(), String> {
+    let svg = source("M10 20 Z L30 20", "marker-start='url(#m)'");
+    let tree = parse(&svg)?;
+    assert_eq!(marker_path_count(tree.root()), 1);
+    let image = render_source(&svg)?;
+    assert_red(&image, 13, 20)?;
+    assert_eq!(image.pixel(6, 20).ok_or("sample missing")?.alpha(), 0);
+    Ok(())
+}
+
+#[test]
+fn trailing_move_receives_the_path_end_marker() -> Result<(), String> {
+    let path = "M10 20 L30 20 M50 20";
+    let marked = source(path, "marker-end='url(#m)'");
+    let plain = source(path, "");
+    assert_eq!(marker_path_count(parse(&marked)?.root()), 1);
+    let actual = render_source(&marked)?;
+    let expected = render_source(&plain)?;
+    assert_red(&actual, 53, 20)?;
+    assert_ne!(actual.data(), expected.data());
+    assert!(actual.pixels().iter().any(|pixel| pixel.alpha() > 0));
+    Ok(())
+}
