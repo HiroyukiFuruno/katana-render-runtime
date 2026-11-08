@@ -2,8 +2,10 @@ use super::{resvg, usvg};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use image::{ExtendedColorType, ImageEncoder, codecs::webp::WebPEncoder};
 use rstest::rstest;
-use std::{path::Path, sync::Arc};
+use std::{error::Error, path::Path, sync::Arc};
 use tiny_skia::{Pixmap, Transform};
+
+type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
 const RESOURCES: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -37,10 +39,10 @@ fn matches_format(kind: &usvg::ImageKind, format: Format) -> bool {
 }
 
 #[test]
-fn unsupported_bmp_is_not_mistaken_for_svg() -> Result<(), String> {
+fn unsupported_bmp_is_not_mistaken_for_svg() -> TestResult {
     const BMP: &str =
         "Qk06AAAAAAAAADYAAAAoAAAAAQAAAAEAAAABABgAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAD/AA==";
-    let data = STANDARD.decode(BMP).map_err(|error| error.to_string())?;
+    let data = STANDARD.decode(BMP)?;
     assert!(matches!(
         imagesize::image_type(&data),
         Ok(imagesize::ImageType::Bmp)
@@ -48,8 +50,7 @@ fn unsupported_bmp_is_not_mistaken_for_svg() -> Result<(), String> {
     let source = format!(
         "<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'><image id='unsupported' width='1' height='1' href='data:text/plain;base64,{BMP}'/><rect id='control' width='1' height='1'/></svg>"
     );
-    let tree = usvg::Tree::from_str(&source, &usvg::Options::default())
-        .map_err(|error| error.to_string())?;
+    let tree = usvg::Tree::from_str(&source, &usvg::Options::default())?;
     assert!(tree.node_by_id("unsupported").is_none());
     assert!(tree.node_by_id("control").is_some());
     Ok(())
@@ -63,8 +64,8 @@ fn unsupported_bmp_is_not_mistaken_for_svg() -> Result<(), String> {
 fn plain_text_data_resolver_sniffs_real_raster_magic(
     #[case] file: &str,
     #[case] expected: Format,
-) -> Result<(), String> {
-    let bytes = std::fs::read(Path::new(RESOURCES).join(file)).map_err(|e| e.to_string())?;
+) -> TestResult {
+    let bytes = std::fs::read(Path::new(RESOURCES).join(file))?;
     let resolver = usvg::ImageHrefResolver::default_data_resolver();
     let kind = resolver("text/plain", Arc::new(bytes), &usvg::Options::default())
         .ok_or("image magic was not recognised")?;
@@ -80,7 +81,7 @@ fn plain_text_data_resolver_sniffs_real_raster_magic(
 fn string_resolver_loads_real_images_from_resource_directory(
     #[case] file: &str,
     #[case] expected: Format,
-) -> Result<(), String> {
+) -> TestResult {
     let options = usvg::Options {
         resources_dir: Some(Path::new(RESOURCES).to_path_buf()),
         ..Default::default()
@@ -109,10 +110,9 @@ fn data_resolver_accepts_svg_and_rejects_bad_or_unknown_data() {
 }
 
 #[test]
-fn file_resolver_rejects_missing_directory_and_unknown_file() -> Result<(), String> {
-    let temporary = tempfile::tempdir().map_err(|error| error.to_string())?;
-    std::fs::write(temporary.path().join("unknown.bin"), b"not an image")
-        .map_err(|error| error.to_string())?;
+fn file_resolver_rejects_missing_directory_and_unknown_file() -> TestResult {
+    let temporary = tempfile::tempdir()?;
+    std::fs::write(temporary.path().join("unknown.bin"), b"not an image")?;
     let options = usvg::Options {
         resources_dir: Some(temporary.path().to_path_buf()),
         ..Default::default()
@@ -129,13 +129,10 @@ fn webp_svg(
     bytes: &[u8],
     dimensions: (u32, u32),
     attributes: &str,
-) -> Result<String, String> {
+) -> TestResult<String> {
     let mut data = Vec::new();
-    WebPEncoder::new_lossless(&mut data)
-        .write_image(bytes, dimensions.0, dimensions.1, color)
-        .map_err(|e| e.to_string())?;
-    let decoder = image_webp::WebPDecoder::new(std::io::Cursor::new(&data))
-        .map_err(|error| error.to_string())?;
+    WebPEncoder::new_lossless(&mut data).write_image(bytes, dimensions.0, dimensions.1, color)?;
+    let decoder = image_webp::WebPDecoder::new(std::io::Cursor::new(&data))?;
     assert_eq!(
         decoder.has_alpha(),
         matches!(color, ExtendedColorType::Rgba8)
@@ -153,14 +150,14 @@ fn lossless_webp_decodes_real_rgb_and_rgba(
     #[case] color: ExtendedColorType,
     #[case] source: &[u8],
     #[case] expected: (u8, u8, u8, u8),
-) -> Result<(), String> {
+) -> TestResult {
     let svg = webp_svg(
         color,
         source,
         SINGLE_PIXEL,
         "width='1' height='1' image-rendering='pixelated'",
     )?;
-    let tree = usvg::Tree::from_str(&svg, &usvg::Options::default()).map_err(|e| e.to_string())?;
+    let tree = usvg::Tree::from_str(&svg, &usvg::Options::default())?;
     let mut pixmap = Pixmap::new(VIEWPORT, VIEWPORT).ok_or("pixmap unavailable")?;
     resvg::render(&tree, Transform::identity(), &mut pixmap.as_mut());
     let pixel = pixmap.pixel(0, 0).ok_or("pixel unavailable")?;
@@ -179,14 +176,14 @@ fn raster_image_viewport_uses_intrinsic_aspect_ratio(
     #[case] attributes: &str,
     #[case] width: f32,
     #[case] height: f32,
-) -> Result<(), String> {
+) -> TestResult {
     let svg = webp_svg(
         ExtendedColorType::Rgb8,
         &OPAQUE_RGB_WIDE,
         WIDE_PIXELS,
         attributes,
     )?;
-    let tree = usvg::Tree::from_str(&svg, &usvg::Options::default()).map_err(|e| e.to_string())?;
+    let tree = usvg::Tree::from_str(&svg, &usvg::Options::default())?;
     let node = tree.node_by_id("image").ok_or("image missing")?;
     let bounds = node.abs_bounding_box();
     assert_eq!((bounds.width(), bounds.height()), (width, height));
@@ -198,9 +195,8 @@ fn raster_image_viewport_uses_intrinsic_aspect_ratio(
 #[case::jpeg("image.jpg")]
 #[case::gif("image.gif")]
 #[case::webp("image.webp")]
-fn truncated_recognized_raster_does_not_paint(#[case] file: &str) -> Result<(), String> {
-    let bytes =
-        std::fs::read(Path::new(RESOURCES).join(file)).map_err(|error| error.to_string())?;
+fn truncated_recognized_raster_does_not_paint(#[case] file: &str) -> TestResult {
+    let bytes = std::fs::read(Path::new(RESOURCES).join(file))?;
     let cutoff = (1..bytes.len())
         .find(|end| imagesize::blob_size(&bytes[..*end]).is_ok())
         .ok_or("no recognizable raster header")?;
@@ -208,8 +204,7 @@ fn truncated_recognized_raster_does_not_paint(#[case] file: &str) -> Result<(), 
     let input = format!(
         "<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'><image id='image' width='2' height='2' href='data:text/plain;base64,{url}'/></svg>"
     );
-    let tree = usvg::Tree::from_str(&input, &usvg::Options::default())
-        .map_err(|error| error.to_string())?;
+    let tree = usvg::Tree::from_str(&input, &usvg::Options::default())?;
     assert!(
         tree.node_by_id("image").is_some(),
         "recognized header must reach rendering"

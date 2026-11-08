@@ -2,7 +2,7 @@ use super::super::{HtmlBrowserSource, HtmlBrowserViewport};
 use super::{HtmlBrowserError, HtmlBrowserFrame, HtmlBrowserScrollMetrics, HtmlBrowserSession};
 use crate::HtmlBrowserOrigin;
 
-type TestResult<T = ()> = Result<T, String>;
+type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 type FramePair = (HtmlBrowserFrame, HtmlBrowserScrollMetrics);
 
 const ORIGIN: &str = "https://example.test/sync.html";
@@ -14,17 +14,16 @@ const HTML: &str =
     "<body style='margin:0'><div style='height:200px'></div><p id=target>target</p></body>";
 
 fn open() -> TestResult<HtmlBrowserSession> {
-    let source = HtmlBrowserSource::new(HTML, ORIGIN).map_err(|error| error.to_string())?;
-    let viewport = HtmlBrowserViewport::new(VIEWPORT_WIDTH, VIEWPORT_HEIGHT, 1.0)
-        .map_err(|error| error.to_string())?;
-    HtmlBrowserSession::new(source, viewport).map_err(|error| error.to_string())
+    let source = HtmlBrowserSource::new(HTML, ORIGIN)?;
+    let viewport = HtmlBrowserViewport::new(VIEWPORT_WIDTH, VIEWPORT_HEIGHT, 1.0)?;
+    Ok(HtmlBrowserSession::new(source, viewport)?)
 }
 
 fn current_pair(session: &HtmlBrowserSession) -> TestResult<FramePair> {
-    session
+    Ok(session
         .latest_frame_with_metrics()
         .map(|(frame, metrics)| (frame.clone(), *metrics))
-        .ok_or_else(|| "real runtime must publish a frame/metrics pair".to_owned())
+        .ok_or("real runtime must publish a frame/metrics pair")?)
 }
 
 fn stage_frame(session: &mut HtmlBrowserSession) -> TestResult<FramePair> {
@@ -32,9 +31,7 @@ fn stage_frame(session: &mut HtmlBrowserSession) -> TestResult<FramePair> {
         .interactive
         .as_mut()
         .ok_or_else(|| "real runtime must exist".to_owned())?;
-    interactive
-        .refresh_frame()
-        .map_err(|error| error.to_string())?;
+    interactive.refresh_frame()?;
     let frame = interactive.latest_frame().cloned().ok_or("staged frame")?;
     let metrics = interactive
         .latest_scroll_metrics()
@@ -44,9 +41,26 @@ fn stage_frame(session: &mut HtmlBrowserSession) -> TestResult<FramePair> {
 }
 
 fn sync_pair(session: &mut HtmlBrowserSession, pair: FramePair) -> TestResult {
-    session
-        .sync_interactive_frame_with_metrics(Some(pair.0), Some(pair.1))
-        .map_err(|error| error.to_string())
+    session.sync_interactive_frame_with_metrics(Some(pair.0), Some(pair.1))?;
+    Ok(())
+}
+
+#[test]
+fn closed_session_helpers_preserve_missing_runtime_and_frame_errors() -> TestResult {
+    let mut session = open()?;
+    session.close()?;
+    let stage_error = stage_frame(&mut session)
+        .err()
+        .ok_or("stage unexpectedly succeeded")?;
+    assert_eq!(stage_error.to_string(), "real runtime must exist");
+    let pair_error = current_pair(&session)
+        .err()
+        .ok_or("pair unexpectedly succeeded")?;
+    assert_eq!(
+        pair_error.to_string(),
+        "real runtime must publish a frame/metrics pair"
+    );
+    Ok(())
 }
 
 #[test]
@@ -58,15 +72,12 @@ fn paired_helper_commits_real_frame_and_same_generation_metrics_without_republis
     assert_eq!(current_pair(&session)?, pair);
     assert!(session.take_frame_update_with_metrics().is_some());
     sync_pair(&mut session, pair.clone())?;
-    session
-        .sync_interactive_frame_with_metrics(None, Some(pair.1))
-        .map_err(|error| error.to_string())?;
-    session
-        .sync_interactive_frame_with_metrics(None, None)
-        .map_err(|error| error.to_string())?;
+    session.sync_interactive_frame_with_metrics(None, Some(pair.1))?;
+    session.sync_interactive_frame_with_metrics(None, None)?;
     assert!(session.take_frame_update_with_metrics().is_none());
     assert_eq!(current_pair(&session)?, pair);
-    session.close().map_err(|error| error.to_string())
+    session.close()?;
+    Ok(())
 }
 
 #[test]
@@ -81,7 +92,8 @@ fn rejected_real_pair_preserves_public_snapshot_and_can_retry() -> TestResult {
     sync_pair(&mut session, pair.clone())?;
     assert_eq!(current_pair(&session)?, pair);
     assert_ne!(snapshot.0.generation, pair.0.generation);
-    session.close().map_err(|error| error.to_string())
+    session.close()?;
+    Ok(())
 }
 
 #[test]
@@ -96,26 +108,28 @@ fn same_generation_metrics_mismatch_keeps_the_committed_pair() -> TestResult {
             .is_err()
     );
     assert_eq!(current_pair(&session)?, snapshot);
-    session.close().map_err(|error| error.to_string())
+    session.close()?;
+    Ok(())
 }
 
 #[test]
 fn paired_fragment_acceptance_updates_origin_only_after_validation() -> TestResult {
     let mut session = open()?;
     let mut pair = stage_frame(&mut session)?;
-    pair.0.origin = HtmlBrowserOrigin::parse(FRAGMENT_ORIGIN).map_err(|error| error.to_string())?;
+    pair.0.origin = HtmlBrowserOrigin::parse(FRAGMENT_ORIGIN)?;
     sync_pair(&mut session, pair.clone())?;
     assert_eq!(session.source().origin, pair.0.origin);
     assert_eq!(current_pair(&session)?, pair);
-    session.close().map_err(|error| error.to_string())
+    session.close()?;
+    Ok(())
 }
 
 #[test]
 fn paired_fragment_rejection_restores_origin_and_closed_state() -> TestResult {
     let mut session = open()?;
     let mut pair = stage_frame(&mut session)?;
-    pair.0.origin = HtmlBrowserOrigin::parse(FRAGMENT_ORIGIN).map_err(|error| error.to_string())?;
-    session.close().map_err(|error| error.to_string())?;
+    pair.0.origin = HtmlBrowserOrigin::parse(FRAGMENT_ORIGIN)?;
+    session.close()?;
     assert_eq!(
         session.sync_interactive_frame_with_metrics(Some(pair.0), Some(pair.1)),
         Err(HtmlBrowserError::SessionClosed)
@@ -129,28 +143,23 @@ fn paired_fragment_rejection_restores_origin_and_closed_state() -> TestResult {
 fn frame_only_helper_commits_real_frame_and_ignores_duplicate_generation() -> TestResult {
     let mut session = open()?;
     let (frame, _) = stage_frame(&mut session)?;
-    session
-        .sync_interactive_frame(Some(frame.clone()))
-        .map_err(|error| error.to_string())?;
+    session.sync_interactive_frame(Some(frame.clone()))?;
     assert_eq!(session.latest_frame(), Some(&frame));
     assert!(session.latest_scroll_metrics().is_none());
     assert!(session.take_frame_update().is_some());
-    session
-        .sync_interactive_frame(Some(frame))
-        .map_err(|error| error.to_string())?;
-    session
-        .sync_interactive_frame(None)
-        .map_err(|error| error.to_string())?;
+    session.sync_interactive_frame(Some(frame))?;
+    session.sync_interactive_frame(None)?;
     assert!(session.take_frame_update().is_none());
-    session.close().map_err(|error| error.to_string())
+    session.close()?;
+    Ok(())
 }
 
 #[test]
 fn frame_only_rejects_fragment_after_close_and_preserves_origin() -> TestResult {
     let mut session = open()?;
     let (mut frame, _) = stage_frame(&mut session)?;
-    frame.origin = HtmlBrowserOrigin::parse(FRAGMENT_ORIGIN).map_err(|error| error.to_string())?;
-    session.close().map_err(|error| error.to_string())?;
+    frame.origin = HtmlBrowserOrigin::parse(FRAGMENT_ORIGIN)?;
+    session.close()?;
     assert_eq!(
         session.sync_interactive_frame(Some(frame)),
         Err(HtmlBrowserError::SessionClosed)
@@ -164,12 +173,13 @@ fn paired_foreign_origin_rejection_leaves_real_frame_and_metrics_unchanged() -> 
     let mut session = open()?;
     let snapshot = current_pair(&session)?;
     let mut pair = stage_frame(&mut session)?;
-    pair.0.origin = HtmlBrowserOrigin::parse(FOREIGN_ORIGIN).map_err(|error| error.to_string())?;
+    pair.0.origin = HtmlBrowserOrigin::parse(FOREIGN_ORIGIN)?;
     assert!(matches!(
         session.sync_interactive_frame_with_metrics(Some(pair.0), Some(pair.1)),
         Err(HtmlBrowserError::FrameOriginMismatch { .. })
     ));
     assert_eq!(current_pair(&session)?, snapshot);
     assert_eq!(session.source().origin.as_str(), ORIGIN);
-    session.close().map_err(|error| error.to_string())
+    session.close()?;
+    Ok(())
 }
