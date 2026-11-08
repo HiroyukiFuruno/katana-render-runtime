@@ -136,7 +136,9 @@ impl HtmlInteractiveSession {
         let (state, runtime) = (&mut self.state, &mut self.runtime);
         let value = state.input_values.entry(node_id).or_default();
         value.push_str(text);
-        state.dirty_inputs.insert(node_id);
+        if !text.is_empty() {
+            state.dirty_inputs.insert(node_id);
+        }
         runtime.set_value(node_id, value).map_err(runtime_failure)?;
         self.dispatch_runtime_event(HtmlRuntimeEvent::Input {
             target: HtmlNodeId(node_id),

@@ -14,22 +14,27 @@ fn listener_error_session(html: &str) -> Result<HtmlInteractiveSession, HtmlBrow
     HtmlInteractiveSession::start(source, viewport)
 }
 
-const BLUR_CHANGE_CASES: [(bool, &str); 2] = [(false, ">initial<"), (true, ">changed<")];
+const BLUR_CHANGE_CASES: [(&str, &[&str], &str); 4] = [
+    ("untouched", &[], ">initial<"),
+    ("empty-text", &[""], ">initial<"),
+    ("typed-text", &["typed"], ">changed<"),
+    ("typed-then-empty", &["typed", ""], ">changed<"),
+];
 const BLUR_CHANGE_HTML: &str = r#"<input id=target><p id=result>initial</p><script>
 document.getElementById('target').addEventListener('change', () => {
   document.getElementById('result').textContent = 'changed';
 });</script>"#;
 
 #[test]
-fn blur_dispatches_change_only_for_a_dirty_real_input() -> Result<(), String> {
-    for (dirty, expected) in BLUR_CHANGE_CASES {
-        let session = blur_input_session(BLUR_CHANGE_HTML, dirty)?;
-        assert_blur_result(&session, expected, dirty)?;
+fn blur_dispatches_change_only_after_text_changes_value() -> Result<(), String> {
+    for (case, texts, expected) in BLUR_CHANGE_CASES {
+        let session = blur_input_session(BLUR_CHANGE_HTML, texts)?;
+        assert_blur_result(&session, expected, case)?;
     }
     Ok(())
 }
 
-fn blur_input_session(html: &str, dirty: bool) -> Result<HtmlInteractiveSession, String> {
+fn blur_input_session(html: &str, texts: &[&str]) -> Result<HtmlInteractiveSession, String> {
     use crate::renderer::backends::html_browser::HtmlBrowserInput;
     let mut session = listener_error_session(html).map_err(|error| error.to_string())?;
     let node = session
@@ -39,10 +44,10 @@ fn blur_input_session(html: &str, dirty: bool) -> Result<HtmlInteractiveSession,
     session
         .focus_input_without_frame(node.0)
         .map_err(|error| error.to_string())?;
-    if dirty {
+    for &text in texts {
         session
             .dispatch_input(HtmlBrowserInput::Text {
-                text: "typed".to_owned(),
+                text: text.to_owned(),
             })
             .map_err(|error| error.to_string())?;
     }
@@ -55,13 +60,13 @@ fn blur_input_session(html: &str, dirty: bool) -> Result<HtmlInteractiveSession,
 fn assert_blur_result(
     session: &HtmlInteractiveSession,
     expected: &str,
-    dirty: bool,
+    case: &str,
 ) -> Result<(), String> {
     let snapshot = session
         .runtime
         .snapshot()
         .map_err(|error| error.to_string())?;
-    assert!(snapshot.contains(expected), "dirty={dirty}: {snapshot}");
+    assert!(snapshot.contains(expected), "case={case}: {snapshot}");
     assert_eq!(session.focused_node, None);
     assert_eq!(session.focused_input, None);
     Ok(())
