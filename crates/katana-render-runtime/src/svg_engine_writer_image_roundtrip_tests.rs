@@ -26,6 +26,7 @@ const PNG_SAMPLES: [PngPixelSample; 4] = [
     ((1, 2), (0, 0, 255, 255)),
     ((2, 2), (255, 255, 0, 255)),
 ];
+const INTERNAL_IMAGE_ID: &str = "writer-image-node";
 
 #[test]
 fn embedded_svg_image_preserves_kind_size_and_pixel_through_writer() -> Result<(), String> {
@@ -71,6 +72,43 @@ fn idless_inline_png_roundtrips_without_synthesizing_an_id() -> Result<(), Strin
     let reparsed = parse_writer_svg(&serialized, "idless-inline-png-roundtrip")?;
     assert_idless_png_image(&reparsed)?;
     assert_roundtrip_pixels(&original, &reparsed, (1, 1), (255, 0, 0, 255))
+}
+
+#[test]
+fn internal_image_id_is_written_and_roundtrips_with_png() -> Result<(), String> {
+    let mut original = parse_writer_svg(&inline_png_svg()?, "internal-image-id")?;
+    assert!(original.node_by_id(INTERNAL_IMAGE_ID).is_none());
+    let image = find_image_node_mut(&mut original.root).ok_or("PNG image missing")?;
+    assert!(image.id.is_empty());
+    let usvg::ImageKind::PNG(bytes) = image.kind() else {
+        return Err("fixture image is not PNG".to_owned());
+    };
+    let png = bytes.as_ref().clone();
+    image.id = INTERNAL_IMAGE_ID.to_owned();
+    let serialized = original.to_string(&writer_options("internal-image-id"));
+    assert_serialized_image_id(&serialized)?;
+    let reparsed = parse_writer_svg(&serialized, "internal-image-id-roundtrip")?;
+    let image = image_node(&reparsed, INTERNAL_IMAGE_ID)?;
+    let usvg::ImageKind::PNG(bytes) = image.kind() else {
+        return Err("roundtrip image is not PNG".to_owned());
+    };
+    assert_eq!(bytes.as_slice(), png);
+    assert_roundtrip_pixels(&original, &reparsed, (1, 1), (255, 0, 0, 255))
+}
+
+fn assert_serialized_image_id(serialized: &str) -> Result<(), String> {
+    let document =
+        usvg::roxmltree::Document::parse(serialized).map_err(|error| error.to_string())?;
+    let image = document
+        .descendants()
+        .find(|node| node.has_tag_name("image"))
+        .ok_or("serialized image missing")?;
+    assert_eq!(image.attribute("id"), Some(INTERNAL_IMAGE_ID));
+    let href = image
+        .attribute(("http://www.w3.org/1999/xlink", "href"))
+        .ok_or("serialized image href missing")?;
+    assert!(href.starts_with("data:image/png;base64,"));
+    Ok(())
 }
 
 #[rstest]
@@ -184,6 +222,14 @@ fn find_image_node(group: &usvg::Group) -> Option<&usvg::Image> {
     group.children().iter().find_map(|node| match node {
         usvg::Node::Image(image) => Some(image.as_ref()),
         usvg::Node::Group(group) => find_image_node(group),
+        _ => None,
+    })
+}
+
+fn find_image_node_mut(group: &mut usvg::Group) -> Option<&mut usvg::Image> {
+    group.children.iter_mut().find_map(|node| match node {
+        usvg::Node::Image(image) => Some(image.as_mut()),
+        usvg::Node::Group(group) => find_image_node_mut(group),
         _ => None,
     })
 }
