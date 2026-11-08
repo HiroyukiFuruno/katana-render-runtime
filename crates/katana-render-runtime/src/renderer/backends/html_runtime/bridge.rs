@@ -68,7 +68,7 @@ fn set_bridge_error(
         return;
     };
     let exception = v8::Exception::error(scope, message);
-    mark_native_dom_error(scope, exception);
+    mark_native_dom_error(scope, exception, message);
     return_value.set(scope.throw_exception(exception));
 }
 
@@ -79,7 +79,11 @@ fn native_dom_error_key<'scope>(
     Some(v8::Private::for_api(scope, Some(name)))
 }
 
-fn mark_native_dom_error(scope: &mut v8::PinScope, exception: v8::Local<v8::Value>) {
+fn mark_native_dom_error<'scope>(
+    scope: &mut v8::PinScope<'scope, '_>,
+    exception: v8::Local<'scope, v8::Value>,
+    message: v8::Local<'scope, v8::String>,
+) {
     let (Some(property), Some(name), Some(object)) = (
         v8::String::new(scope, "name"),
         v8::String::new(scope, NATIVE_DOM_ERROR_NAME),
@@ -94,9 +98,8 @@ fn mark_native_dom_error(scope: &mut v8::PinScope, exception: v8::Local<v8::Valu
         v8::PropertyAttribute::NONE,
     );
     if let Some(key) = native_dom_error_key(scope) {
-        let marker = v8::Boolean::new(scope, true);
         /* WHY: 印の設定に失敗しても例外はthrowし、非公開の印を確認できない例外はJS例外に留める。 */
-        let _marked = object.set_private(scope, key, marker.into());
+        let _marked = object.set_private(scope, key, message.into());
     }
 }
 
@@ -111,12 +114,13 @@ pub(super) fn uncaught_dom_error(
         return None;
     }
     let key = native_dom_error_key(scope)?;
-    if !exception.get_private(scope, key)?.is_true() {
-        return None;
-    }
+    /* WHY: 元の文言を例外に結び付け、後続エラーやJSのmessage変更から切り離す。 */
+    let message = v8::Local::<v8::String>::try_from(exception.get_private(scope, key)?).ok()?;
+    let message = message.to_rust_string_lossy(scope);
     scope
         .get_slot::<HtmlDomBridgeState>()
         .and_then(|state| state.error.borrow_mut().take())
+        .map(|_| message)
 }
 
 fn dom_value<'scope>(
@@ -159,6 +163,7 @@ mod tests {
     use crate::renderer::backends::html_runtime::script::HtmlTryCatchScope;
     use crate::renderer::backends::html_runtime::script::check_bridge_error;
     use crate::renderer::backends::html_runtime::script::{evaluate_value, install_dom_bridge};
+    use rstest::rstest;
 
     macro_rules! with_v8_context {
         ($isolate:ident, $scope:ident, [$($prepare:stmt;)*], [$($setup:expr;)*], $body:block $(,)?) => {{
@@ -299,34 +304,71 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn uncaught_bridge_and_javascript_errors_keep_distinct_types() -> Result<(), String> {
-        for (source, native) in [
-            ("__krr_dom('unsupported');", true),
-            ("throw new Error('ordinary');", false),
-            (
-                "try { __krr_dom('unsupported'); } catch (error) { if (error.name !== 'KrrNativeDomError') throw error; } throw new Error('ordinary');",
-                false,
-            ),
-            (
-                "const error = new Error('ordinary'); error.name = 'KrrNativeDomError'; throw error;",
-                false,
-            ),
-            (
-                "try { __krr_dom('unsupported'); } catch (native) { const error = new Error('ordinary'); error.name = 'KrrNativeDomError'; throw error; }",
-                false,
-            ),
-            (
-                "try { __krr_dom('unsupported'); } catch (native) { throw native; }",
-                true,
-            ),
-        ] {
-            assert_script_error_classification(source, native)?;
-        }
-        Ok(())
+    #[rstest]
+    #[case::native(
+        "__krr_dom('unsupported');",
+        true,
+        "unsupported DOM operation: unsupported"
+    )]
+    #[case::javascript("throw new Error('ordinary');", false, "ordinary")]
+    #[case::caught_native_then_javascript(
+        "try { __krr_dom('unsupported'); } catch (error) { if (error.name !== 'KrrNativeDomError') throw error; } throw new Error('ordinary');",
+        false,
+        "ordinary"
+    )]
+    #[case::forged_name(
+        "const error = new Error('ordinary'); error.name = 'KrrNativeDomError'; throw error;",
+        false,
+        "ordinary"
+    )]
+    #[case::caught_native_then_forged_name(
+        "try { __krr_dom('unsupported'); } catch (native) { const error = new Error('ordinary'); error.name = 'KrrNativeDomError'; throw error; }",
+        false,
+        "ordinary"
+    )]
+    #[case::rethrow_native(
+        "try { __krr_dom('unsupported'); } catch (native) { throw native; }",
+        true,
+        "unsupported DOM operation: unsupported"
+    )]
+    #[case::rethrow_first_after_second(
+        "let first; try { __krr_dom('unsupported'); } catch (error) { first = error; } try { __krr_dom('other'); } catch (error) {} throw first;",
+        true,
+        "unsupported DOM operation: unsupported"
+    )]
+    #[case::rethrow_second(
+        "try { __krr_dom('other'); } catch (error) {} try { __krr_dom('unsupported'); } catch (error) { throw error; }",
+        true,
+        "unsupported DOM operation: unsupported"
+    )]
+    #[case::two_native_then_forged_name(
+        "try { __krr_dom('unsupported'); } catch (error) {} try { __krr_dom('other'); } catch (error) {} const error = new Error('ordinary'); error.name = 'KrrNativeDomError'; throw error;",
+        false,
+        "ordinary"
+    )]
+    #[case::native_message_changed(
+        "try { __krr_dom('unsupported'); } catch (error) { error.message = 'ordinary'; if (error.message !== 'ordinary') throw new Error('message assignment failed'); throw error; }",
+        true,
+        "unsupported DOM operation: unsupported"
+    )]
+    #[case::native_name_changed(
+        "try { __krr_dom('unsupported'); } catch (error) { error.name = 'OtherError'; error.message = 'ordinary'; if (error.name !== 'OtherError' || error.message !== 'ordinary') throw new Error('property assignment failed'); throw error; }",
+        false,
+        "OtherError"
+    )]
+    fn uncaught_bridge_and_javascript_errors_keep_distinct_types(
+        #[case] source: &str,
+        #[case] native: bool,
+        #[case] expected_message: &str,
+    ) -> Result<(), String> {
+        assert_script_error_classification(source, native, expected_message)
     }
 
-    fn assert_script_error_classification(source: &str, native: bool) -> Result<(), String> {
+    fn assert_script_error_classification(
+        source: &str,
+        native: bool,
+        expected_message: &str,
+    ) -> Result<(), String> {
         with_v8_context!(
             isolate,
             scope,
@@ -335,22 +377,39 @@ mod tests {
             {
                 install_dom_bridge(scope, "about:blank").map_err(|error| error.to_string())?;
                 let result = evaluate_value(scope, "bridge-error-classification", source);
+                assert_error_classification(result.as_ref().err(), native, expected_message);
                 if native {
-                    assert!(matches!(
-                        result,
-                        Err(super::super::types::HtmlRuntimeError::DomBridge(message))
-                            if message == "unsupported DOM operation: unsupported"
-                    ));
-                } else {
-                    assert!(matches!(
-                        result,
-                        Err(super::super::types::HtmlRuntimeError::JavaScriptException(message))
-                            if message.contains("ordinary")
-                    ));
+                    assert!(check_bridge_error(scope).is_ok());
                 }
                 Ok(())
             },
         )
+    }
+
+    fn assert_error_classification(
+        error: Option<&super::super::types::HtmlRuntimeError>,
+        native: bool,
+        expected_message: &str,
+    ) {
+        if native {
+            assert!(
+                matches!(
+                    error,
+                    Some(super::super::types::HtmlRuntimeError::DomBridge(message))
+                        if message == expected_message
+                ),
+                "actual error: {error:?}"
+            );
+        } else {
+            assert!(
+                matches!(
+                    error,
+                    Some(super::super::types::HtmlRuntimeError::JavaScriptException(message))
+                        if message.contains(expected_message)
+                ),
+                "actual error: {error:?}"
+            );
+        }
     }
 
     #[test]
