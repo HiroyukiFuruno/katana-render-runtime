@@ -2,8 +2,12 @@
 
 ## 現在の実行地点（2026-11-08、以下の過去結果と区別する）
 
+- [/] 最新優先順は、実行中の性能結果回収 → 任意の1条件を指定する個別実行の実装・回帰・通常commit → 前処理/測定/判定の所要時間を実測して重複を削減 → 安全な並列化の評価と採用。検証基盤も継続利用する製品コードとして扱い、実行単位、結果の安全な再利用、時間、失敗・中断時の後始末をLint・型・重複・回帰・CIで担保する。全84条件の最終受入、実装coverage100%・未計測0、公開までのDoDは維持する。
+- [/] 個別実行selectorはproducer/testへ実適用済み。`--condition-id`でcatalog内の指定条件だけを選択し、未知/重複/既採取IDとmax指定との併用を拒否する。RED `condition-selector-red-x8y8n1oi` は未知CLI引数による期待した実1（failfastで2件目失敗）。GREEN16件、全producer211件、有限source移行27件は各実0。全関連回帰の初回 `condition-selector-performance-related-sc3vl3vb` は37件目で旧CPU preflight pinを検出して実1、原失敗を保持した。producer新SHAをcurrentへ、旧SHAをhistoricalへ保持して認証を同期し、限定host19件が実0。修正後 `condition-selector-performance-verified-z9tocly3` は全680件実0（251.402秒）、`--durations 10`で遅い既存テストも記録した。最終 `condition-selector-cpu-static-lk31akez` はPython Lint・strict型213file・重複2100source/未承認0の3項目が実0。独立read reviewの具体的P0–P2なし。既存epochからの正式reader認証、実際の1条件CLI採取と部分receipt確認、通常commitは未完。準備したpatch数を完了数へ加算しない。
+- [/] 報告ではHTML性能の全84条件を固定し、確定済み/採取済み正式判定待ち/採取未完了の3区分で合計84を示す。未完分の採取を「追加条件」と呼ばない。表・文字組などの測定入力と、6phaseの時間/RSS/retentionという評価指標を分け、Chrome画像スコアの表示精度検証を性能合格へ混同しない。
+
 - [/] 135関数分割の基点はHEAD `81570a15263b2d47206c2d953e8721f55e255eb3`。37ファイルの分割とfunction-length例外37件除去をcommit済み。基点の通常hook成功、AST・静的17項目・両arm
-  Clippy・全root回帰は各実0。現行rootは5,675/5,675成功、29 skip、coverage 86,896/88,120 = 98.610985%、未計測1,224行。収集成功を100%合格とみなさず、追加テスト適用・再計測と未計測0を完了する。
+  Clippy・全root回帰は各実0。基点当時のrootは5,675/5,675成功、29 skip、coverage 86,896/88,120 = 98.610985%、未計測1,224行。後続collectionは下記の5,725成功・未計測1,144行を参照する。収集成功を100%合格とみなさず、追加テスト適用・再計測と未計測0を完了する。
 - [x] 現SDKで製品Mermaid PNGを独立raw JSと照合し117/117が99以上、最低99.085711、R01/R02合格。receipt
   `tmp/quality/resumed-owner-r3509/mermaid-product-shared-sdk-81570a15-q9blivak` SHA
   `5f20c9499bec4b93f9d226d8a5944f606836f0ac10b68a8e1a4eb49c8fc65153`。
@@ -12,12 +16,8 @@
 - [x] 私有HTML原本3回の初回frameは0.926148–0.939434417秒、中央値0.936828416秒（全て3秒未満）。これは初回表示の独立証拠であり、原本はGitへ含めない。
 - [/] HTMLメモリv4の境界・評価器・履歴実装と関連単体検証は完了。v2/v3 rawを保持し不合格を消さず、通常量median 1MiB/5%、p95/max 8MiB/25%、retained
   8MiB/25%、持続増加拒否、全phase速度非劣化を維持する。正式性能判定は未完。
-- [ ] 現行sourceの正式HTML性能84条件を完了する。full run `html-v4-full-81570a15-fhkfeww0` は終了コード1 `BatchBudgetExhausted` で正常にclosed negative
-  endpointを保存。`policyAccepted=true`、complete 28/84、paired 28、nonComparable 0、checks 560、phase 8400、残り56条件。receipt SHA
-  `9ab10e7010e6bfb8bfbff63e2a8d481ca35f8acce45ff6b4bdde195758ac3cae`、safe summary
-  `tmp/quality/resumed-owner-r3509/html-v4-full-81570a15-fhkfeww0/safe-summary.json`。ただし `formalAccepted=false`
-  で全体未合格。未完条件を採取し、途中結果・過去HEAD・別SDKを合算せず、表示3秒未満、phase時間/peak/retained RSSの受入境界、連続増加拒否を全84条件で確認してGit性能履歴へ記録する。基準昇格は既存改善条件を満たす場合だけ行う。
-- [x] 旧17条件は `historical-v4-audit-0htual8y` で原本を認証し、17/17 accepted、実0。historical-v4-reassessmentでありcurrentAcceptance=false。現行28条件へ合算せず、元receipt・SDK・失敗履歴を保持する。
+- [ ] 現行sourceの正式HTML性能84条件を完了する。`html-v4-resume-6d2e83a2-ikmjaihj` はexec75321から実終了コード0を回収し、closed receiptで `policyAccepted=true`、complete84/84、paired84、nonComparable0、checks1680、phase25200、batchFailureなし。receipt SHA `f99c5e059e4a47bca50cddcfd10abb43392bff8d2492c4b78ecef57414719006`、safe summary `tmp/quality/resumed-owner-r3509/html-v4-resume-6d2e83a2-ikmjaihj/safe-summary.json`。採取対象は固定SDK/HEAD81570であり `formalAccepted=false`。controller HEAD6d2e83a2とworktree cleanを終了時確認。28→57→84の既存closed結果を厳格認証して引継ぎ、再採取・旧receipt書換え・別SDKの合算はしていない。最新sourceのbuild proof/同一binary・program移行を正式readerで照合し、全84の表示3秒未満とphase時間/peak/retained RSS・連続増加拒否の正式合格をGit性能履歴へ記録する。基準昇格は既存改善条件を満たす場合だけ行う。
+- [x] 旧17条件は `historical-v4-audit-0htual8y` で原本を認証し、17/17 accepted、実0。historical-v4-reassessmentでありcurrentAcceptance=false。現行84条件へ合算せず、元receipt・SDK・失敗履歴を保持する。
 - [/] coverage補完候補patchは適用済み。更新後AST `coverage-cohort-ast-3uyqlpf9` は実0。全root collection `coverage-cohort-root-collection-ztpe49ob` は実0、5,725/5,725成功・29 skip、source前後一致。coverageは86,997/88,141 = 98.70207962242316%、未計測1,144行（338 files）、report SHA `18ea97776d868bcfd039ffec751a792a1185e920c4213a08050045d53bad58bd`。前回の1,224行から80行減少したが100%未達。追加境界patchを並行準備する。分母/欠落行は現行reportと一致させ、到達不能に見える製品guardを自動除外しない。coverage
   100%・未計測0を達成する。
 - [/] same-binary performance reuseは適用済み。実行ファイルとbuild/input/resource/font/environmentの認証を正式readerで再実行し、未知の非Rust変更・vendor変更は有限認証を維持する。parse5 8.1.0→8.1.1だけを更新し、HTML性能に非依存のpackage/bun限定差分を81570起点・同一binary証明後だけ受入する有限認証を追加。更新後 `coverage-cohort-source-static-4wxqjrat` は静的17項目実0、`coverage-cohort-related-aecy6xtm` はPython670件/Bun provenance4件実0、各source前後一致。独立review具体的P0–P2なし。真正な新SDK証明と正式再利用・新parse5環境のMermaid比較は未完。Rust直接34/34とActionsの各専用branch pinは最新を確認済み。

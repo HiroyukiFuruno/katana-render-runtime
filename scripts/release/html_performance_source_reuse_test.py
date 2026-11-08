@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import html_performance_source_reuse as reuse
+import verify_html_performance_evidence as evidence
 from html_performance_source_reuse import validate_reuse_source
 from verify_html_performance_evidence import LOCK_SHA, _v3_authenticate_programs, _verified_reuse_context, committed_records
 
@@ -217,6 +218,65 @@ class SourceReuseTest(unittest.TestCase):
             path, old, base, old_mode="100644", new_mode="100644"))
         self.assertFalse(reuse.v4_reassessment_program_change(
             path, old, base + b" ", old_mode="100644", new_mode="100644"))
+
+    def test_selector_program_migration_is_exact_and_mode_bound(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        for path in ("scripts/release/produce_html_performance_evidence.py",
+                     "scripts/release/produce_html_performance_evidence_test.py",
+                     "scripts/release/html_performance_host_load_validation.py",
+                     "scripts/release/html_performance_host_load_validation_test.py"):
+            with self.subTest(path=path):
+                old = subprocess.check_output(["git", "-C", str(repository), "show",
+                                               reuse.SAME_BINARY_REVIEWED_BASE + ":" + path])
+                current = (repository / path).read_bytes()
+                self.assertTrue(reuse.reviewed_same_binary_migration(
+                    path, old, current, old_mode="100644", new_mode="100644"))
+                self.assertFalse(reuse.reviewed_same_binary_migration(
+                    path, old + b" ", current, old_mode="100644", new_mode="100644"))
+                self.assertFalse(reuse.reviewed_same_binary_migration(
+                    path, old, current + b" ", old_mode="100644", new_mode="100644"))
+                for old_mode, new_mode in (("100755", "100644"), ("100644", "100755"),
+                                           (None, "100644"), ("100644", None)):
+                    self.assertFalse(reuse.reviewed_same_binary_migration(
+                        path, old, current, old_mode=old_mode, new_mode=new_mode))
+
+    def test_selector_program_migration_reauthenticates_fixed_epoch(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        base, live = reuse.SAME_BINARY_REVIEWED_BASE, "d" * 40
+        paths = ("scripts/release/html_performance_source_reuse.py",
+                 "scripts/release/produce_html_performance_evidence.py",
+                 "scripts/release/produce_html_performance_evidence_test.py",
+                 "scripts/release/html_performance_host_load_validation.py",
+                 "scripts/release/html_performance_host_load_validation_test.py")
+        old = {path: subprocess.check_output(["git", "-C", str(repository), "show", base + ":" + path])
+               for path in paths}
+        current = {path: (repository / path).read_bytes() for path in paths}
+
+        def records(blobs: dict[str, bytes]) -> dict[str, tuple[str, int]]:
+            return {path: (hashlib.sha256(data).hexdigest(), len(data)) for path, data in blobs.items()}
+
+        def tree() -> bytes:
+            return b"".join(f"100644 blob {'0' * 40}\t{path}\0".encode() for path in paths)
+
+        def git_bytes(_root: Path, arguments: tuple[str, ...], **_kwargs: object) -> bytes:
+            if arguments[0] == "ls-tree":
+                return tree()
+            if arguments[0] == "show":
+                head, path = arguments[1].split(":", 1)
+                return (old if head == base else current)[path]
+            raise AssertionError("unexpected Git query")
+
+        base_records, live_records = records(old), records(current)
+        items = tuple((path, sha, size) for path, (sha, size) in sorted(base_records.items()))
+        live_items = tuple((path, sha, size) for path, (sha, size) in sorted(live_records.items()))
+        with (patch.object(evidence, "committed_records",
+                           side_effect=lambda _root, head, **_kwargs:
+                           base_records if head == base else live_records),
+              patch.object(evidence, "_git_output", side_effect=git_bytes),
+              patch.object(evidence, "git", return_value=base)):
+            self.assertEqual(evidence._v3_authenticate_programs(
+                repository, base, items, ((live, live_items),), git_query=None,
+                memory_policy_version="html-memory-v4"), items)
 
     def test_reviewed_self_rejects_body_constant_duplicate_and_mode_changes(self) -> None:
         repository = Path(__file__).resolve().parents[2]

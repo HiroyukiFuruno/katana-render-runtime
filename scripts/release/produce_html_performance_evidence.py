@@ -185,6 +185,7 @@ class EpochContextSnapshot(TypedDict):
 
 class BatchOptions(TypedDict, total=False):
     max_conditions: int
+    condition_ids: list[str]
     resume_batch: Path
     reference_parent_wrapper: Path
     reference_parent_wrapper_sha256: str
@@ -1187,15 +1188,38 @@ def _same_arm_identity(left: Mapping[str, object], right: Mapping[str, object]) 
                for key in ("binary_sha256", "source_snapshot_sha256", "lock_sha256"))
 
 
+def _checked_requested_ids(
+    condition_ids: Sequence[str] | None, limit: int | None,
+) -> set[str] | None:
+    if condition_ids is None:
+        return None
+    gate.require(limit is None, "condition ids cannot be combined with batch max conditions")
+    gate.require(not isinstance(condition_ids, (str, bytes)) and bool(condition_ids),
+                 "condition ids must be a nonempty sequence")
+    gate.require(all(isinstance(value, str) and value for value in condition_ids),
+                 "condition ids must be nonempty strings")
+    selected = set(condition_ids)
+    gate.require(len(selected) == len(condition_ids), "condition ids are duplicated")
+    return selected
+
+
 def _select_batch_rows(
     rows: Sequence[gate.JsonObject], completed_ids: set[str], limit: int | None,
+    condition_ids: Sequence[str] | None = None,
 ) -> list[gate.JsonObject]:
     ids = [_row_condition_id(row) for row in rows]
     gate.require(len(ids) == len(set(ids)), "measurement condition ids are duplicated")
     gate.require(completed_ids <= set(ids), "resume batch contains an unknown condition")
     gate.require(limit is None or type(limit) is int and 0 < limit <= 84,
                  "batch max conditions requires a catalog and is between 1 and 84")
-    remaining = [row for row in rows if _row_condition_id(row) not in completed_ids]
+    selected = _checked_requested_ids(condition_ids, limit)
+    if selected is not None:
+        gate.require(selected <= set(ids), "requested condition id is not in the catalog")
+        gate.require(not selected & completed_ids,
+                     "requested condition id already has a recorded attempt; use a fresh run")
+    remaining = [row for row in rows
+                 if _row_condition_id(row) not in completed_ids
+                 and (selected is None or _row_condition_id(row) in selected)]
     return remaining if limit is None else remaining[:limit]
 
 
@@ -3746,12 +3770,16 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             _allow_legacy_diagnostic: bool = False,
             _allow_catalog_diagnostic: bool = False,
             max_conditions: int | None = None,
+            condition_ids: Sequence[str] | None = None,
             resume_batch: Path | None = None,
             reference_parent_wrapper: Path | None = None,
             reference_parent_wrapper_sha256: str | None = None,
             fixed_epoch: FixedEpochContextInput | None = None) -> None:
     if catalog_manifest_path is None and not _allow_legacy_diagnostic:
         raise ValueError("catalog capture manifest required for formal performance production")
+    gate.require(condition_ids is None or catalog_manifest_path is not None,
+                 "condition ids require a catalog")
+    _checked_requested_ids(condition_ids, max_conditions)
     gate.require(platform.system() == "Darwin" and platform.machine() == "arm64", "measurement lane requires macOS Apple Silicon")
     gate.require(not output.exists() and output.is_relative_to(root / "tmp"), "fresh ignored owned output required")
     load_validation.require_current_cpu_observer_sources(root)
@@ -3800,7 +3828,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     catalog_rows: list[gate.JsonObject] = [
         {"condition_id": condition["condition_id"]} for condition in catalog_conditions or []
     ]
-    selected_ids = [_row_condition_id(row) for row in _select_batch_rows(catalog_rows, resumed_id_set, max_conditions)]
+    selected_ids = [_row_condition_id(row) for row in _select_batch_rows(catalog_rows, resumed_id_set, max_conditions, condition_ids)]
     batch_deadline = _batch_deadline(batch_started, batch_mode, len(selected_ids))
     os.environ["GIT_OPTIONAL_LOCKS"] = "0"
     # 生成済みJSとsourceの同期が未確認のcandidateをビルド・計測しない。
@@ -4111,7 +4139,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     gate.require(len(all_condition_ids) == len(set(all_condition_ids)),
                  "measurement condition ids are duplicated")
     if catalog_conditions is not None:
-        measurement_rows = _select_batch_rows(all_measurement_rows, resumed_id_set, max_conditions)
+        measurement_rows = _select_batch_rows(all_measurement_rows, resumed_id_set, max_conditions, condition_ids)
         gate.require([_row_condition_id(row) for row in measurement_rows] == selected_ids,
                      "batch selection changed")
     font_probe_input_paths: list[Path] = []
@@ -4691,6 +4719,10 @@ def main() -> None:
         help="run at most this many not-yet-complete catalog conditions",
     )
     parser.add_argument(
+        "--condition-id", action="append",
+        help="measure only this catalog condition; may be repeated",
+    )
+    parser.add_argument(
         "--resume-batch", type=Path,
         help="reuse only the closed, strictly validated conditions from this batch",
     )
@@ -4706,6 +4738,13 @@ def main() -> None:
         help="produce a catalog-bound diagnostic bundle while retaining acceptance=false",
     )
     args = parser.parse_args()
+    if args.condition_id is not None:
+        if args.catalog_plan is None or args.same_binary_control is not None or args.candidate_build_only:
+            parser.error("--condition-id requires catalog production")
+        try:
+            _checked_requested_ids(args.condition_id, args.max_conditions)
+        except ValueError as error:
+            parser.error(str(error))
     if args.candidate_build_only:
         if (args.catalog_plan is not None or args.capacity_binding is None
                 or args.capacity_binding_sha256 is None or args.diagnostic_only
@@ -4735,6 +4774,8 @@ def main() -> None:
     batch_options: BatchOptions = {}
     if args.max_conditions is not None:
         batch_options["max_conditions"] = args.max_conditions
+    if args.condition_id is not None:
+        batch_options["condition_ids"] = args.condition_id
     if args.resume_batch is not None:
         batch_options["resume_batch"] = args.resume_batch.resolve()
     if args.reference_parent_wrapper is not None:

@@ -638,14 +638,18 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "4a07266dbe727c9a6fef6ba07d09850422ded4b517f22425a70a0d8a627dfac8"
+SELF_MODULE_CANONICAL_SHA256 = "91b449135672db61560b1b749a9aad8a98511f5d8afcdcf40a59043d620e3fc7"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 
 # 実行中 checker は品質ゲートとレビューで信頼し、入力 bytes の改変を拒否する。
 _SAME_BINARY_REVIEWED_FILES = {
+    "scripts/release/html_performance_host_load_validation.py": ("527966f32a04e641365dbf06d07002441ffc28ec9527f01cd522a430bd243178", "a239f5caa5f0a55a7c182532620e43a93364cc2087c3b75880c4778329acf12b"),
+    "scripts/release/html_performance_host_load_validation_test.py": ("68e27e9b1b715bbed15eb260ac45b0449bdd4d24e76897964e06eafd8a98acc0", "cd47e6b4bc807c64db170a16c7add7514875857a5f1bc3914419271764f44742"),
+    "scripts/release/produce_html_performance_evidence.py": ("43d967863089f9c2267326f2dde177db898861d1c0634f2e951eda7b212cbbff", "213afcfcf895ee1f048564e70d10668187e0829eee49cbb3fbdc384648777e1b"),
+    "scripts/release/produce_html_performance_evidence_test.py": ("09e332a5143e9a3ec1edadc5d7b7d8d4ef55973de8d6c0ed3619643d860d9ac8", "e4c92f155972b92f4b9a46ca4fd735f1ff89d7e6bca75357460b6298dd33da03"),
     "scripts/release/verify_html_performance_evidence.py": ("73ffb34fc4fd5d46a698059879e29753f546c10f53815b20df5d7a9d17468060", "486f9d60ffe64f6bb674a534ca26b070f145d80beb3a51e6060bc47d995b83f8"),
     "scripts/release/verify_html_performance_evidence_test.py": ("7c0f9385c5b896a3ceb4f119a97f2329f9083cd9853028fc8663dade2339bf86", "3f562c30a3995d06cd5c54c7e5c1d1b630d8c45b7515a5a364fc11b9de4e07f6"),
-    "scripts/release/html_performance_source_reuse_test.py": ("3f169f0de723a8e28551284ae455a7b95edac4ad18249f989074d4089d76ebd4", "d5ed585d010c7ae5110a77245a2213c3387f964fafa388d5baebff43c223428d"),
+    "scripts/release/html_performance_source_reuse_test.py": ("3f169f0de723a8e28551284ae455a7b95edac4ad18249f989074d4089d76ebd4", "7d3a16959b8681a12cdcaf759d12916d5b5cc8b9ba137f051da76a338e191555"),
     "scripts/release/html_performance_source_reuse_cli.py": ("d49416a4c83e18f177a0572b510a925ef41276e84d2d3ba8e735c732f06028a2", "cf246f950aec2619cf27d4605a411d268d52e5f84f34d7815ab5c944a17b00b9"),
     "scripts/release/html_performance_source_reuse_cli_test.py": ("5b5a97a585e37f4583f6321935847acfc092d84dd8f1f8d194c3df30f4408554", "4b033395eee9281e1672acdd2498354fb1061d2c1be3759b125e468526681e52"),
     "scripts/release/html_performance_reuse_entry_test.py": ("ef435de25b26fefabcb2e3e3b627633b539dd6fa473e7f493a6e4bef13348e73", "06be7d060ee3ff06ffa187b4575fbdbdbd42d0d16de8877f4b0452eceabc5695"),

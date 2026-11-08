@@ -163,6 +163,70 @@ class CatalogProducerOperationTest(unittest.TestCase):
             run.assert_called_once_with(root, output, capacity, "d" * 64, manifest,
                                         _allow_catalog_diagnostic=True)
 
+    def test_condition_selector_preserves_catalog_order_and_rejects_invalid_inputs(self) -> None:
+        rows: list[gate.JsonObject] = [{"condition_id": value} for value in ("a", "b", "c")]
+        self.assertEqual(producer._select_batch_rows(rows, set(), None, ["c", "a"]), [rows[0], rows[2]])
+        self.assertEqual(producer._select_batch_rows(rows, {"b"}, None, ["c", "a"]), [rows[0], rows[2]])
+        for requested, completed, limit in (
+            (["a", "a"], set(), None),
+            (["missing"], set(), None),
+            (["b"], {"b"}, None),
+            ([], set(), None),
+            (["a"], set(), 1),
+        ):
+            with self.subTest(requested=requested, completed=completed, limit=limit):
+                with self.assertRaises(ValueError):
+                    producer._select_batch_rows(rows, completed, limit, requested)
+
+    def test_condition_selector_keeps_existing_unselected_batch_behavior(self) -> None:
+        rows: list[gate.JsonObject] = [{"condition_id": value} for value in ("a", "b", "c")]
+        self.assertEqual(producer._select_batch_rows(rows, {"a"}, 1), [rows[1]])
+        self.assertEqual(producer._select_batch_rows(rows, {"a"}, None), rows[1:])
+        self.assertFalse(producer._batch_formal_acceptance(["a"], ["a"], True))
+
+    def test_condition_cli_forwards_repeatable_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root, output, capacity, manifest = self._catalog_cli_fixture(temporary)
+            argv = self._catalog_cli_argv(root, output, capacity, manifest, "f" * 64,
+                                         "--condition-id", "c", "--condition-id", "a")
+            with patch.object(sys, "argv", argv), patch.object(producer, "produce") as run:
+                producer.main()
+            run.assert_called_once_with(root, output, capacity, "f" * 64, manifest,
+                                        condition_ids=["c", "a"])
+
+    def test_condition_cli_rejects_duplicate_empty_and_max_before_production(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root, output, capacity, manifest = self._catalog_cli_fixture(temporary)
+            for extra in (
+                ("--condition-id", "a", "--condition-id", "a"),
+                ("--condition-id", ""),
+                ("--condition-id", "a", "--max-conditions", "1"),
+                ("--condition-id", "a", "--same-binary-control", "a"),
+            ):
+                argv = self._catalog_cli_argv(root, output, capacity, manifest, "f" * 64, *extra)
+                with (self.subTest(extra=extra), patch.object(sys, "argv", argv),
+                      patch.object(sys, "stderr", io.StringIO()), patch.object(producer, "produce") as run):
+                    with self.assertRaises(SystemExit):
+                        producer.main()
+                    run.assert_not_called()
+
+    def test_unknown_condition_fails_before_source_capture_and_build(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            row = cast(producer.CatalogCondition, {"condition_id": "known"})
+            with (patch.object(platform, "system", return_value="Darwin"),
+                  patch.object(platform, "machine", return_value="arm64"),
+                  patch.object(load_validation, "require_current_cpu_observer_sources"),
+                  patch.object(producer, "load_catalog_conditions", return_value=([row], None, None, None)),
+                  patch.object(producer, "source") as source,
+                  patch.object(producer, "guarded_arm_build") as build):
+                with self.assertRaisesRegex(ValueError, "not in the catalog"):
+                    producer.produce(root, root / "tmp/evidence", catalog_manifest_path=root / "catalog",
+                                     condition_ids=["missing"])
+            source.assert_not_called()
+            build.assert_not_called()
+            self.assertFalse((root / "tmp/evidence").exists())
+
     def test_batch_cli_forwards_max_conditions_without_changing_catalog_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -2063,6 +2127,46 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
         records.assert_called_once_with(self.root, "a" * 40, git_query=None)
         self.assertEqual(host_load_check.call_args.args[1], attempts)
 
+    def test_produce_rejects_selected_previously_failed_resume_before_build(self) -> None:
+        batch, _ = self.create_batch(complete_ids=("case-a",), policy_accepted=False)
+        catalog = [cast(producer.CatalogCondition, {"condition_id": value})
+                   for value in ("case-a", "case-b", "case-c")]
+        decisions = [True, False]
+
+        def validate(*_args: object, **kwargs: object) -> None:
+            cast(list[bool], kwargs["memory_acceptance_sink"]).append(decisions.pop(0))
+
+        with (patch.object(platform, "system", return_value="Darwin"),
+              patch.object(platform, "machine", return_value="arm64"),
+              patch.object(load_validation, "require_current_cpu_observer_sources"),
+              patch.object(load_validation, "verify_catalog_host_load"),
+              patch.object(producer, "_reassessment_candidates", side_effect=lambda _bundle, attempts: attempts),
+              patch.object(producer, "_require_cpu_busy_resume"),
+              patch.object(producer, "_make_git_query", return_value=None),
+              patch.object(gate, "current_source", return_value={}),
+              patch.object(gate, "validate_expected_builds", return_value={}),
+              patch.object(gate, "validate_attempt", side_effect=validate),
+              patch.object(gate, "committed_records", return_value={}),
+              patch.object(producer, "load_catalog_conditions", return_value=(catalog, None, None, None)),
+              patch.object(producer, "guarded_arm_build") as build,
+              patch.object(producer, "_collect_condition_worker_pairs") as worker):
+            with self.assertRaisesRegex(ValueError, "already has a recorded attempt"):
+                producer.produce(self.root, self.root / "tmp/selected", catalog_manifest_path=self.root / "catalog",
+                                 resume_batch=batch, condition_ids=["case-b"])
+        build.assert_not_called()
+        worker.assert_not_called()
+
+    def test_selected_catalog_row_seals_only_its_partial_receipt(self) -> None:
+        rows: list[gate.JsonObject] = [{"condition_id": name}
+                                      for name in ("case-a", "case-b", "case-c")]
+        selected = producer._select_batch_rows(rows, set(), None, ["case-b"])
+        selected_ids = [gate._text(row["condition_id"], "selected id") for row in selected]
+        batch, _ = self.create_batch(condition_ids=selected_ids, complete_ids=selected_ids)
+        receipt = gate.read_json(batch / "batch-receipt.json")
+        self.assertEqual(receipt["conditionIds"], ["case-b"])
+        self.assertEqual(receipt["completeConditionIds"], ["case-b"])
+        self.assertIs(receipt["formalAccepted"], False)
+
     def test_v4_resume_keeps_observed_rejected_attempts_without_remeasurement(self) -> None:
         batch, _ = self.create_batch(complete_ids=("case-a",), policy_accepted=False)
         accepted: list[str] = []
@@ -3540,6 +3644,29 @@ class WorkerAttemptContractTest(unittest.TestCase):
                 snapshot=snapshot, arms=arms, expected=expected, row=row,
             )
         self.assertEqual(calls, {"baseline": 1, "candidate": 0})
+
+    def test_selected_catalog_row_collects_only_its_paired_workers(self) -> None:
+        candidate, binary, snapshot, arms, expected, row = self._condition_case()
+        rows: list[gate.JsonObject] = [{**row, "condition_id": name}
+                                      for name in ("case-a", "case-b", "case-c")]
+        selected = producer._select_batch_rows(rows, set(), None, ["case-b"])
+        payload = self._worker_report_sample(expected)
+        collections: list[typed_producer.ConditionWorkerCollection] = []
+        with patch.object(producer, "collect_worker_sample", return_value=(
+            payload, {"before": 0.0, "after": 0.0}, [],
+        )) as collect:
+            for item in selected:
+                collections.append(self._collect_condition(
+                    folder=self.root / gate._text(item["condition_id"], "condition id"),
+                    candidate=candidate, candidate_binary=binary, snapshot=snapshot,
+                    arms=arms, expected=expected, row=item,
+                ))
+        self.assertEqual([item["condition_id"] for item in selected], ["case-b"])
+        self.assertEqual(len(collections), 1)
+        self.assertEqual(collect.call_count, 50)
+        self.assertEqual(sum(call.args[0] is self.build for call in collect.call_args_list), 25)
+        self.assertEqual(sum(call.args[0] is candidate for call in collect.call_args_list), 25)
+        self.assertEqual(collections[0].actual_phase_records, 25 * 2 * len(gate.PHASES))
 
     def test_known_baseline_refusal_collects_and_requires_all_candidate_samples(self) -> None:
         (candidate_build, candidate_binary, snapshot, arms, expected, row,
