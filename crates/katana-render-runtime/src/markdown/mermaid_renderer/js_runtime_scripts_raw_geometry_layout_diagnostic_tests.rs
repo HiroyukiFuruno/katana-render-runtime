@@ -1,6 +1,6 @@
 use super::{
-    GIT_METRIC_LABELS, GIT_PATH, GIT_SOURCE, assert_render_binding, diagnostic_record,
-    fixture_mermaid_source, raw_geometry_request, raw_geometry_vendor_config,
+    DiagnosticOutput, GIT_METRIC_LABELS, GIT_PATH, GIT_SOURCE, assert_render_binding,
+    diagnostic_record, fixture_mermaid_source, raw_geometry_request, raw_geometry_vendor_config,
     render_vendor_raw_and_processed_mode, render_vendor_raw_and_processed_with_metric_labels,
     write_diagnostic_record,
 };
@@ -65,8 +65,8 @@ const C4_METRIC_LABELS: &[&str] = &[
 ];
 
 #[test]
-#[ignore = "diagnostic only; requires a fresh absolute TMP output path"]
 fn captures_layout_fixtures_before_and_after_normalization() -> Result<(), String> {
+    let output = DiagnosticOutput::new(LAYOUT_OUTPUT_ENV)?;
     let block_words = ["A", " wide", " one", " in", " the", " middle"];
     let block_text = block_words.concat();
     let block_labels = [&[block_text.as_str()][..], &block_words[..]].concat();
@@ -77,18 +77,25 @@ fn captures_layout_fixtures_before_and_after_normalization() -> Result<(), Strin
             capture_layout_fixture(fixture).map_err(|error| format!("{error} for {path}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    write_diagnostic_record(LAYOUT_OUTPUT_ENV, json!(records))
+    write_diagnostic_record(&output, json!(records))
 }
 
 #[test]
-#[ignore = "diagnostic only; requires a fresh absolute TMP output path"]
 fn captures_c4_layout_measurements_before_serialization() -> Result<(), String> {
+    let output = DiagnosticOutput::new(C4_OUTPUT_ENV)?;
     let source = fixture_mermaid_source(C4_SOURCE)?;
     let request = raw_geometry_request(&source);
     let config = raw_geometry_vendor_config();
     let (envelope, font_source_audit) = render_c4_with_font_source_audit(&request, &config)?;
     assert_layout_render_identity(C4_PATH, &request, &config, &envelope)?;
-    write_c4_diagnostic_record(&source, request, config, &envelope, font_source_audit)?;
+    write_c4_diagnostic_record(
+        &source,
+        request,
+        config,
+        &envelope,
+        font_source_audit,
+        &output,
+    )?;
     assert_c4_observations(&envelope)
 }
 
@@ -132,6 +139,7 @@ fn write_c4_diagnostic_record(
     config: serde_json::Value,
     envelope: &serde_json::Value,
     font_source_audit: serde_json::Value,
+    output: &DiagnosticOutput,
 ) -> Result<(), String> {
     let mut record = diagnostic_record(C4_PATH, source, request, config, envelope.clone())?;
     let fields = record
@@ -143,7 +151,7 @@ fn write_c4_diagnostic_record(
     );
     fields.insert("c4Observer".to_string(), c4_observer_fields(envelope));
     fields.insert("actualFontSourceAudit".to_string(), font_source_audit);
-    write_diagnostic_record(C4_OUTPUT_ENV, record)
+    write_diagnostic_record(output, record)
 }
 
 fn c4_observer_fields(envelope: &serde_json::Value) -> serde_json::Value {

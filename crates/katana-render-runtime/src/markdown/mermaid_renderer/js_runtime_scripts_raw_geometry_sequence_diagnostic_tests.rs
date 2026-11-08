@@ -1,3 +1,4 @@
+use super::diagnostic_output::DiagnosticOutput;
 use super::{
     envelope_svg, fixture_mermaid_source, render_vendor_raw_and_processed_through_runtime,
 };
@@ -10,10 +11,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     collections::hash_map::DefaultHasher,
-    fs::OpenOptions,
     hash::{Hash, Hasher},
-    io::Write,
-    path::{Path, PathBuf},
 };
 
 #[path = "js_runtime_scripts_raw_geometry_sequence_metric_trace_tests.rs"]
@@ -47,13 +45,10 @@ struct SequenceFixtureExpectation {
 }
 
 #[test]
-#[ignore = "diagnostic only; requires a fresh absolute TMP output path"]
 fn captures_real_sequence_vendor_svg_before_and_after_normalization() -> Result<(), String> {
+    let output = DiagnosticOutput::new(OUTPUT_ENV)?;
     let record = diagnostic_record(capture_fixture_rows()?)?;
-    write_fresh_output(
-        &diagnostic_output_path()?,
-        &serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?,
-    )
+    output.write(&serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?)
 }
 
 fn capture_fixture_rows() -> Result<Vec<Value>, String> {
@@ -233,45 +228,6 @@ fn sequence_vendor_config(request: &Value) -> Value {
             "clusterBkg": background, "clusterBorder": stroke, "titleColor": text,
         },
     })
-}
-
-fn diagnostic_output_path() -> Result<PathBuf, String> {
-    let output = std::env::var_os(OUTPUT_ENV).ok_or("diagnostic output path is required")?;
-    let path = PathBuf::from(output);
-    if !path.is_absolute() {
-        return Err("diagnostic output path must be absolute".into());
-    }
-    Ok(path)
-}
-
-pub(super) fn write_fresh_output(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or("diagnostic output parent is missing")?
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let workspace = manifest
-        .parent()
-        .and_then(Path::parent)
-        .ok_or("workspace root missing")?;
-    let tmp = workspace
-        .join("tmp")
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
-    if !parent.starts_with(&tmp) {
-        return Err("diagnostic output must be under workspace tmp".into());
-    }
-    let file_path = parent.join(
-        path.file_name()
-            .ok_or("diagnostic output filename is missing")?,
-    );
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(file_path)
-        .map_err(|e| e.to_string())?;
-    file.write_all(bytes).map_err(|e| e.to_string())
 }
 
 pub(super) fn sha256(bytes: &[u8]) -> String {

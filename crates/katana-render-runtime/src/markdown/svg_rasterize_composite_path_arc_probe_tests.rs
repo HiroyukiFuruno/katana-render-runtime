@@ -18,6 +18,10 @@ struct Request {
 #[ignore = "diagnostic only; isolated full-canvas paint differs from actual crop and clip"]
 fn isolated_cubic_and_conic_paint_probe() -> Result<(), String> {
     let request = read_request()?;
+    run_probe(&request)
+}
+
+fn run_probe(request: &Request) -> Result<(), String> {
     let svg = read_pinned(&request.svg, &request.expected_svg_sha256)?;
     let data = read_pinned(&request.path_data, &request.expected_path_sha256)?;
     if !svg.contains(data.trim()) {
@@ -50,6 +54,10 @@ fn read_request() -> Result<Request, String> {
     if !path.is_absolute() {
         return Err("diagnostic request path must be absolute".to_owned());
     }
+    read_request_at(&path)
+}
+
+fn read_request_at(path: &std::path::Path) -> Result<Request, String> {
     let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
     let request: Request = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
     if !request.svg.is_absolute()
@@ -214,3 +222,6 @@ fn sha256(bytes: &[u8]) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
+
+#[path = "svg_rasterize_composite_path_arc_probe_public_fixture_tests.rs"]
+mod public_fixture_tests;

@@ -48,7 +48,6 @@ fn assert_uncommitted_mapping(font: &cache::FontHandle) {
 }
 
 #[test]
-#[ignore = "diagnostic comparison; run explicitly under the existing macOS test recipe"]
 fn fontique_mmap_and_lazy_helvetica_face_one_repeat_probe() -> Result<(), String> {
     let path = super::helvetica_path();
     let expected_sha = super::source_sha(&path)?;
@@ -57,7 +56,6 @@ fn fontique_mmap_and_lazy_helvetica_face_one_repeat_probe() -> Result<(), String
 }
 
 #[test]
-#[ignore = "diagnostic cache lifecycle; run explicitly under the existing macOS test recipe"]
 fn immutable_helvetica_face_reuses_only_after_shape_commit() -> Result<(), String> {
     let path = super::helvetica_path();
     let (database, face) = super::database_for_index(&path, 1)?;
@@ -77,7 +75,6 @@ fn immutable_helvetica_face_reuses_only_after_shape_commit() -> Result<(), Strin
 }
 
 #[test]
-#[ignore = "diagnostic filesystem eligibility; run explicitly under the existing macOS test recipe"]
 fn canonical_system_font_immutable_mapping_eligibility() -> Result<(), String> {
     let path = super::helvetica_path();
     let (database, face) = super::database_for_index(&path, 1)?;

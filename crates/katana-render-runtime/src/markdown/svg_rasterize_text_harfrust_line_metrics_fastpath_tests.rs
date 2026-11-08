@@ -245,10 +245,7 @@ fn invalid_required_tables_keep_the_full_parser_rejection() -> TestResult {
 
 fn recursive_bytes() -> Result<Vec<u8>, String> {
     use sha2::{Digest, Sha256};
-    let path = std::path::PathBuf::from(
-        std::env::var_os("KRR_RECURSIVE_PROBE_SFNT_PATH").ok_or("public SFNT path missing")?,
-    );
-    assert!(path.is_absolute());
+    let path = crate::markdown::svg_rasterize::probe_test_support::recursive_sfnt_path()?;
     let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
     let sha = Sha256::digest(&bytes)
         .iter()
@@ -262,7 +259,6 @@ fn recursive_bytes() -> Result<Vec<u8>, String> {
 }
 
 #[test]
-#[ignore = "diagnostic only; pinned public Recursive SFNT required"]
 fn variable_face_keeps_direct_none_and_full_parser_fallback() -> TestResult {
     let bytes = recursive_bytes()?;
     assert!(

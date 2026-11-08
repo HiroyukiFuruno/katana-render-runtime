@@ -275,7 +275,6 @@ pub(super) fn run_repeated_probe(
 }
 
 #[test]
-#[ignore = "diagnostic comparison; run explicitly under the existing macOS test recipe"]
 fn fontique_mmap_matches_lazy_file_metrics() -> Result<(), String> {
     let path = fixture_path();
     let (database, face) = super::file_database(&path)?;
@@ -287,7 +286,6 @@ fn fontique_mmap_matches_lazy_file_metrics() -> Result<(), String> {
 }
 
 #[test]
-#[ignore = "diagnostic timing comparison; run explicitly under the existing macOS test recipe"]
 fn fontique_mmap_and_lazy_file_repeat_creation_and_shape_probe() -> Result<(), String> {
     let path = fixture_path();
     let expected_sha = source_sha(&path)?;

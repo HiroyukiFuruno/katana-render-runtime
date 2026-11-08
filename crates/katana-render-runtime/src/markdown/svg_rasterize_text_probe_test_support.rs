@@ -8,6 +8,19 @@ pub(crate) struct TempProbeDirectory {
     _owner: tempfile::TempDir,
 }
 
+pub(in crate::markdown::svg_rasterize) fn recursive_sfnt_path() -> Result<PathBuf, String> {
+    let path = std::env::var_os("KRR_RECURSIVE_PROBE_SFNT_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("assets/test-fixtures/font-probes/recursive-latin-crsv-normal.ttf")
+        });
+    if !path.is_absolute() {
+        return Err("public SFNT path must be absolute".to_owned());
+    }
+    Ok(path)
+}
+
 impl TempProbeDirectory {
     pub(crate) fn create() -> Result<Self, Box<dyn std::error::Error>> {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

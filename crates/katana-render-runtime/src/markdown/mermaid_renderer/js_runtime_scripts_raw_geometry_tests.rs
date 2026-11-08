@@ -4,6 +4,9 @@ use crate::markdown::{diagram_js_runtime::DiagramV8Runtime, runtime_assets::Runt
 mod c4_geometry_observer;
 #[path = "js_runtime_scripts_raw_geometry_class_git_diagnostic_tests.rs"]
 mod class_git_diagnostic;
+
+#[path = "js_runtime_scripts_raw_geometry_diagnostic_output.rs"]
+mod diagnostic_output;
 #[path = "js_runtime_scripts_raw_geometry_er_attribute_tests.rs"]
 mod er_attribute_tests;
 #[path = "js_runtime_scripts_raw_geometry_tree_tests.rs"]

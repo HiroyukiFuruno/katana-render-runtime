@@ -13,11 +13,7 @@ const SAMPLE_LETTER_SPACING: f32 = 0.25;
 const METRIC_ROUNDING_EPSILON: f32 = 0.0001;
 
 fn recursive_input() -> TestResult<(PathBuf, Vec<u8>)> {
-    let path = PathBuf::from(
-        std::env::var_os("KRR_RECURSIVE_PROBE_SFNT_PATH")
-            .ok_or("controlled public SFNT path missing")?,
-    );
-    assert!(path.is_absolute());
+    let path = crate::markdown::svg_rasterize::probe_test_support::recursive_sfnt_path()?;
     let bytes = std::fs::read(&path)?;
     assert_eq!(
         Sha256::digest(&bytes)
@@ -199,7 +195,6 @@ fn assert_variable_measurement(
 }
 
 #[test]
-#[ignore = "diagnostic only; pinned public Recursive SFNT required"]
 fn variable_sources_read_back_weight_and_preserve_width_bits() -> TestResult<()> {
     let (path, bytes) = recursive_input()?;
     for source in [
@@ -220,7 +215,6 @@ fn variable_sources_read_back_weight_and_preserve_width_bits() -> TestResult<()>
 }
 
 #[test]
-#[ignore = "diagnostic only; pinned public Recursive SFNT required"]
 fn existing_resolver_mixed_fallback_cells_follow_each_actual_face() -> TestResult<()> {
     let (path, bytes) = recursive_input()?;
     let (db, family) = mixed_database(&bytes)?;

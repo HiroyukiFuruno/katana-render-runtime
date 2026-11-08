@@ -1,10 +1,28 @@
 use serde_json::Value;
+#[cfg(target_os = "macos")]
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 const ROOT_FQN: &str = "markdown::svg_rasterize::text";
 const FIXTURES: &str = "assets/test-fixtures/font-probes";
 const BOLD_FONT_WEIGHT: u16 = 700;
 const NORMAL_FONT_WEIGHT: u16 = 400;
+
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_probe_normal_lane_tests.rs"]
+mod html_probe_normal_lane_tests;
+
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_tree_probe_normal_lane_tests.rs"]
+mod tree_probe_normal_lane_tests;
+
+#[cfg(target_os = "macos")]
+fn sha256(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
 
 #[test]
 fn public_bbox_probe_runs_in_normal_lane() -> TestResult<()> {
@@ -131,13 +149,28 @@ fn validate_row(row: &Value, recursive: bool) -> TestResult<()> {
 
 fn run_probe(suffix: &str, environment: &[(&str, &std::path::PathBuf)]) -> TestResult<()> {
     let fqn = format!("{ROOT_FQN}::{suffix}");
+    run_exact_probe(&fqn, environment).map(|_| ())
+}
+
+fn run_exact_probe(
+    fqn: &str,
+    environment: &[(&str, &PathBuf)],
+) -> TestResult<std::process::Output> {
     let mut command = crate::system::ProcessService::create_command(std::env::current_exe()?);
-    command.args(["--ignored", "--exact", &fqn, "--test-threads=1", "--quiet"]);
+    command.args([
+        "--ignored",
+        "--exact",
+        fqn,
+        "--test-threads=1",
+        "--quiet",
+        "--nocapture",
+    ]);
     for (key, value) in environment {
         command.env(key, value);
     }
     let output = command.output()?;
-    validate_probe_output(&fqn, &output)
+    validate_probe_output(fqn, &output)?;
+    Ok(output)
 }
 
 fn validate_probe_output(fqn: &str, output: &std::process::Output) -> TestResult<()> {

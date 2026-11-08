@@ -1,10 +1,10 @@
+use super::diagnostic_output::DiagnosticOutput;
 use super::{
     envelope_svg, fixture_mermaid_source, raw_geometry_request, raw_geometry_vendor_config,
     render_vendor_raw_and_processed_mode, render_vendor_raw_and_processed_with_metric_labels,
 };
 use crate::markdown::runtime_assets::{MERMAID_JS_CHECKSUM, RuntimeAsset};
 use serde_json::json;
-use std::path::PathBuf;
 
 #[path = "js_runtime_scripts_raw_geometry_auxiliary_metric_tests.rs"]
 mod auxiliary_metric;
@@ -22,22 +22,22 @@ const GIT_METRIC_LABELS: [&str; 3] = ["main", "base", "rust-js"];
 #[path = "js_runtime_scripts_raw_geometry_layout_diagnostic_tests.rs"]
 mod layout_diagnostic;
 #[test]
-#[ignore = "diagnostic only; requires a fresh absolute TMP output path"]
 fn captures_class_fixture_before_and_after_normalization() -> Result<(), String> {
-    capture_fixture(CLASS_PATH, CLASS_SOURCE, &CLASS_METRIC_LABELS, OUTPUT_ENV)
+    let output = DiagnosticOutput::new(OUTPUT_ENV)?;
+    capture_fixture(CLASS_PATH, CLASS_SOURCE, &CLASS_METRIC_LABELS, &output)
 }
 
 #[test]
-#[ignore = "diagnostic only; requires a fresh absolute TMP output path"]
 fn captures_git_fixture_before_and_after_normalization() -> Result<(), String> {
-    capture_fixture(GIT_PATH, GIT_SOURCE, &GIT_METRIC_LABELS, OUTPUT_ENV)
+    let output = DiagnosticOutput::new(OUTPUT_ENV)?;
+    capture_fixture(GIT_PATH, GIT_SOURCE, &GIT_METRIC_LABELS, &output)
 }
 
 fn capture_fixture(
     path: &str,
     markdown: &str,
     metric_labels: &[&str],
-    output_env: &str,
+    output: &DiagnosticOutput,
 ) -> Result<(), String> {
     let source = fixture_mermaid_source(markdown)?;
     let request = raw_geometry_request(&source);
@@ -47,7 +47,7 @@ fn capture_fixture(
     assert_render_binding(path, &source, &request, &config, &envelope)?;
     assert_selected_metrics(path, metric_labels, &envelope)?;
     let record = diagnostic_record(path, &source, request, config, envelope)?;
-    write_diagnostic_record(output_env, record)
+    write_diagnostic_record(output, record)
 }
 
 fn assert_selected_metrics(
@@ -198,14 +198,9 @@ fn diagnostic_metric_fields(envelope: &serde_json::Value, vendor: &[u8]) -> serd
     })
 }
 
-fn write_diagnostic_record(output_env: &str, record: serde_json::Value) -> Result<(), String> {
-    let output =
-        PathBuf::from(std::env::var_os(output_env).ok_or("diagnostic output path is required")?);
-    if !output.is_absolute() {
-        return Err("diagnostic output path must be absolute".to_string());
-    }
-    super::sequence_diagnostic::write_fresh_output(
-        &output,
-        &serde_json::to_vec_pretty(&record).map_err(|error| error.to_string())?,
-    )
+fn write_diagnostic_record(
+    output: &DiagnosticOutput,
+    record: serde_json::Value,
+) -> Result<(), String> {
+    output.write(&serde_json::to_vec_pretty(&record).map_err(|error| error.to_string())?)
 }
