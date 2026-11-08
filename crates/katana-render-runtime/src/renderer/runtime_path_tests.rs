@@ -101,25 +101,72 @@ fn external_renderers_report_the_missing_resource_for_each_kind()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let missing = directory.path().join("missing-runtime.js");
-    for (kind, source) in renderer_resource_cases() {
-        let renderer = RuntimePathResolver::make_renderer(kind, &missing, false);
-        let result = renderer.render(&renderer_input(kind, source));
-        match kind {
-            DiagramKind::Drawio => assert!(matches!(result,
-                Err(RenderError::NotInstalled { kind, install_path, .. })
-                    if kind == "Draw.io" && install_path == missing)),
-            DiagramKind::MathJax => {
-                let output = result?;
-                assert_eq!(output.svg, source);
-                assert_eq!(output.diagnostics.errors.len(), 1);
-                assert!(
-                    output.diagnostics.errors[0].contains("MathJax runtime asset is not installed")
-                );
-            }
-            _ => return Err("unexpected resource case".into()),
-        }
+    for (kind, source) in renderer_resource_cases()
+        .into_iter()
+        .chain([(DiagramKind::Mermaid, "graph TD\nA-->B")])
+    {
+        assert_missing_resource_at_resolved_path(kind, source, &missing)?;
     }
     Ok(())
+}
+
+#[test]
+fn empty_javascript_overrides_are_rejected_for_each_runtime()
+-> Result<(), Box<dyn std::error::Error>> {
+    for (kind, variable) in javascript_override_cases() {
+        let result =
+            RuntimePathResolver::resolve_selected_path(kind, Some(std::ffi::OsString::new()), None);
+        assert!(matches!(result,
+            Err(RenderError::RuntimeResolution(message)) if message == format!("{variable} is empty")));
+    }
+    Ok(())
+}
+
+fn assert_missing_resource_at_resolved_path(
+    kind: DiagramKind,
+    source: &str,
+    missing: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (resolved, renderer) =
+        RuntimePathResolver::resolve_renderer(kind, Some(missing.to_path_buf()), None)?;
+    assert_eq!(resolved.as_path(), missing);
+    let result = renderer.render(&renderer_input(kind, source));
+    match kind {
+        DiagramKind::Drawio | DiagramKind::Mermaid => {
+            let expected_name =
+                missing_runtime_name(kind).ok_or("unexpected missing-resource case")?;
+            assert!(matches!(result,
+                Err(RenderError::NotInstalled { kind, install_path, .. })
+                    if kind == expected_name && install_path.as_path() == missing));
+        }
+        DiagramKind::MathJax => {
+            let output = result?;
+            assert_eq!(output.svg, source);
+            assert_eq!(output.diagnostics.errors.len(), 1);
+            assert!(
+                output.diagnostics.errors[0].contains("MathJax runtime asset is not installed")
+            );
+        }
+        DiagramKind::PlantUml => return Err("unexpected external renderer case".into()),
+    }
+    Ok(())
+}
+
+fn missing_runtime_name(kind: DiagramKind) -> Option<&'static str> {
+    match kind {
+        DiagramKind::Drawio => Some("Draw.io"),
+        DiagramKind::Mermaid => Some("Mermaid"),
+        _ => None,
+    }
+}
+
+fn javascript_override_cases() -> impl Iterator<Item = (DiagramKind, &'static str)> {
+    [
+        (DiagramKind::Mermaid, "MERMAID_JS"),
+        (DiagramKind::Drawio, "DRAWIO_JS"),
+        (DiagramKind::MathJax, "MATHJAX_JS"),
+    ]
+    .into_iter()
 }
 
 fn renderer_resource_cases() -> [(DiagramKind, &'static str); 2] {
