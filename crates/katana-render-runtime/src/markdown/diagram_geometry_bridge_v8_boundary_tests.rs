@@ -99,20 +99,38 @@ fn assert_throwing_setters(
 #[test]
 fn geometry_bridge_rejects_throwing_registration_setter() {
     DiagramV8Runtime::ensure_initialized();
+    for (property, expected) in [
+        (
+            "__katanaTransformSvgBox",
+            "SVG transform bridge registration failed",
+        ),
+        (
+            "__katanaSvgPathLength",
+            "SVG path length bridge registration failed",
+        ),
+    ] {
+        assert_registration_setter_rejected(property, expected);
+    }
+}
+
+fn assert_registration_setter_rejected(property: &str, expected: &str) {
     DiagramV8Runtime::with_empty_try_catch(|scope| {
-        let source = concat!(
-            "Object.defineProperty(globalThis, '__katanaTransformSvgBox', ",
-            "{set() { throw new Error('blocked'); }, configurable: true}); true;",
+        let source = format!(
+            "Object.defineProperty(globalThis, '{property}', \
+             {{set() {{ throw new Error('blocked'); }}, configurable: true}}); true;"
         );
-        let configured = v8::String::new(scope, source).and_then(|source| {
+        let configured = v8::String::new(scope, &source).and_then(|source| {
             let name = v8::String::new(scope, "geometry-registration-rejection")?;
             let script = ScriptCompiler::compile_with_origin(scope, source, name)?;
             script.run(scope)
         });
         assert!(configured.is_some());
-        assert_eq!(
-            super::super::install(scope),
-            Err("SVG transform bridge registration failed".to_owned())
+        assert_eq!(super::super::install(scope), Err(expected.to_owned()));
+        assert!(scope.has_caught());
+        assert!(
+            scope
+                .exception()
+                .is_some_and(|error| error.to_rust_string_lossy(scope).contains("blocked"))
         );
     });
 }
