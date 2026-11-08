@@ -52,16 +52,11 @@ fn rewrite_cmap(
 pub(super) fn rewrite_with_same_modified_time(
     path: &std::path::Path,
     bytes: &[u8],
-) -> Result<(), String> {
-    let modified = std::fs::metadata(path)
-        .map_err(|error| error.to_string())?
-        .modified()
-        .map_err(|error| error.to_string())?;
-    std::fs::write(path, bytes).map_err(|error| error.to_string())?;
+) -> std::io::Result<()> {
+    let modified = std::fs::metadata(path)?.modified()?;
+    std::fs::write(path, bytes)?;
     std::fs::OpenOptions::new()
         .write(true)
-        .open(path)
-        .map_err(|error| error.to_string())?
+        .open(path)?
         .set_times(std::fs::FileTimes::new().set_modified(modified))
-        .map_err(|error| error.to_string())
 }

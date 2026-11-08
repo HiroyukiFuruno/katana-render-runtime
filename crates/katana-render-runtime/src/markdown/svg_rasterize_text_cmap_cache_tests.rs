@@ -14,6 +14,8 @@ use std::sync::atomic::AtomicUsize;
 
 static TEMP_FILE: AtomicUsize = AtomicUsize::new(0);
 const FILES: CmapFileFixture = CmapFileFixture::new("krr-cmap-cache", &TEMP_FILE);
+#[cfg(windows)]
+type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 #[test]
 fn file_cmap_matches_ttf_parser_for_positive_and_negative_characters() -> Result<(), String> {
@@ -111,7 +113,7 @@ fn unavailable_generation_invalidates_existing_durable_cmap_entry() -> Result<()
 
 #[cfg(windows)]
 #[test]
-fn same_length_same_modified_file_rewrite_does_not_reuse_cached_cmap() -> Result<(), String> {
+fn same_length_same_modified_file_rewrite_does_not_reuse_cached_cmap() -> TestResult {
     let original = bundled_bytes()?;
     let replacement = font_with_only_b_cmap(&original)?;
     let (database, id, guard) = FILES.database(&original)?;

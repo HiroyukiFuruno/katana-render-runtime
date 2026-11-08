@@ -7,6 +7,7 @@ use super::{CacheResetOnDrop, begin};
 use super::{FONT_BYTES, cache, entry, generation, insert, lookup, mapping};
 use resvg::usvg::fontdb::Source;
 use resvg::usvg::fontdb::{Database, ID};
+use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -25,6 +26,19 @@ impl Drop for TestFontFile {
     }
 }
 
+fn create_test_font_file(path: std::path::PathBuf, bytes: &[u8]) -> Result<TestFontFile, String> {
+    let mut output = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|error| error.to_string())?;
+    let file = TestFontFile(path);
+    let result = output.write_all(bytes);
+    drop(output);
+    result.map_err(|error| error.to_string())?;
+    Ok(file)
+}
+
 fn file_database(bytes: &[u8]) -> Result<FileDatabase, String> {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     let path = std::env::temp_dir().join(format!(
@@ -32,10 +46,10 @@ fn file_database(bytes: &[u8]) -> Result<FileDatabase, String> {
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
-    std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
+    let file = create_test_font_file(path, bytes)?;
     let mut database = Database::new();
     database.load_font_data(FONT_BYTES.to_vec());
-    database.load_font_source(Source::File(path.clone()));
+    database.load_font_source(Source::File(file.0.clone()));
     let database = Arc::new(database);
     let ids = database.faces().map(|face| face.id).collect::<Vec<_>>();
     let base_id = *ids.first().ok_or("base font face missing")?;
@@ -47,7 +61,7 @@ fn file_database(bytes: &[u8]) -> Result<FileDatabase, String> {
         database,
         base_id,
         file_id,
-        file: TestFontFile(path),
+        file,
     })
 }
 
@@ -196,7 +210,58 @@ fn rewrite_same_modified_time(path: &std::path::Path, bytes: &[u8]) -> Result<()
     if u64::try_from(bytes.len()).map_err(|error| error.to_string())? != original_len {
         return Err("rewrite changed font length".into());
     }
-    rewrite_with_same_modified_time(path, bytes)
+    rewrite_with_same_modified_time(path, bytes).map_err(|error| error.to_string())
+}
+
+#[test]
+fn existing_font_file_is_preserved_until_owner_cleanup() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = file_database(FONT_BYTES)?;
+    let path = fixture.file.0.clone();
+    let original = std::fs::read(&path)?;
+    let expected = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .err()
+        .ok_or("exclusive create unexpectedly succeeded")?;
+    assert_eq!(expected.kind(), std::io::ErrorKind::AlreadyExists);
+    let actual = create_test_font_file(path.clone(), b"replacement")
+        .err()
+        .ok_or("existing fixture unexpectedly replaced")?;
+    assert_eq!(actual, expected.to_string());
+    assert_eq!(std::fs::read(&path)?, original);
+    drop(fixture);
+    assert!(!path.exists());
+    Ok(())
+}
+
+#[test]
+fn rewrite_preserves_bytes_and_modified_time() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = file_database(FONT_BYTES)?;
+    let path = &fixture.file.0;
+    let original = std::fs::read(path)?;
+    let modified = std::fs::metadata(path)?.modified()?;
+    let mut replacement = original.clone();
+    replacement[0] ^= 1;
+    rewrite_with_same_modified_time(path, &replacement)?;
+    assert_ne!(original, replacement);
+    assert_eq!(original.len(), replacement.len());
+    assert_eq!(std::fs::read(path)?, replacement);
+    assert_eq!(std::fs::metadata(path)?.modified()?, modified);
+    Ok(())
+}
+
+#[test]
+fn rewrite_missing_file_returns_not_found() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = file_database(FONT_BYTES)?;
+    let path = &fixture.file.0;
+    std::fs::remove_file(path)?;
+    let error = rewrite_with_same_modified_time(path, b"replacement")
+        .err()
+        .ok_or("missing rewrite unexpectedly succeeded")?;
+    assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    assert!(!path.exists());
+    Ok(())
 }
 
 fn cmap_directory(font: &[u8]) -> Result<(usize, usize, usize), String> {
