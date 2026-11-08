@@ -73,13 +73,25 @@ impl Fixture {
             .join(namespace)
             .join("fixtures")
             .join(format!("{}-{id}", std::process::id()));
+        Self::copy_inputs_at(&repository, root, input_paths, inspector)
+    }
+
+    fn copy_inputs_at(
+        repository: &Path,
+        root: PathBuf,
+        input_paths: &[&str],
+        inspector: Inspector,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        fs::create_dir_all(root.parent().ok_or("fixture parent")?)?;
+        fs::create_dir(&root)?;
+        let fixture = Self { root, inspector };
         for relative in input_paths {
             let source = repository.join(relative);
-            let target = root.join(relative);
+            let target = fixture.root.join(relative);
             fs::create_dir_all(target.parent().ok_or("fixture parent")?)?;
             fs::copy(source, target)?;
         }
-        Ok(Self { root, inspector })
+        Ok(fixture)
     }
 
     pub(super) fn copy_mermaid_classic_inputs(
@@ -169,3 +181,7 @@ pub(super) fn repository_root() -> Result<PathBuf, Box<dyn std::error::Error>> {
         .ok_or("repository root")?
         .to_path_buf())
 }
+
+#[cfg(test)]
+#[path = "test_support_io_tests.rs"]
+mod io_tests;
