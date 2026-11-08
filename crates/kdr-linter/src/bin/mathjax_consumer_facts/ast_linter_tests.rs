@@ -28,6 +28,12 @@ mod consumer_tests;
 #[path = "bundle_execution_tests.rs"]
 mod bundle_execution_tests;
 
+#[path = "resource_snapshot_cache_constructor_tests.rs"]
+mod resource_snapshot_cache_constructor_tests;
+
+#[path = "resource_snapshot_cache_attribute_tests.rs"]
+mod resource_snapshot_cache_attribute_tests;
+
 #[path = "shared_resource_loader_mutations_tests.rs"]
 pub(super) mod shared_resource_loader_mutations;
 
