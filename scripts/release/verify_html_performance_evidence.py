@@ -2061,7 +2061,8 @@ def _v3_authenticate_programs(root: Path, head: str, items: _ProgramItems,
     modes = _modes(tree)
     # WHY: 固定 epoch から既存認証を維持し、今回の移行だけ別に固定する。
     from html_performance_source_reuse import (
-        SAME_BINARY_REVIEWED_BASE, reviewed_same_binary_migration, reviewed_same_binary_self,
+        SAME_BINARY_REVIEWED_ADDITIONS, SAME_BINARY_REVIEWED_BASE,
+        reviewed_same_binary_migration, reviewed_same_binary_self,
     )
     pending = []
     self_path = "scripts/release/html_performance_source_reuse.py"
@@ -2091,9 +2092,12 @@ def _v3_authenticate_programs(root: Path, head: str, items: _ProgramItems,
                          if path.startswith("scripts/") or path == "Justfile"}
         live_programs = {name: (checksum, size) for name, checksum, size in live_items}
         actual_live = committed_records(root, live_head, git_query=git_query)
+        additions = set(live_programs) - set(base_programs)
         require(live_programs == {path: value for path, value in actual_live.items()
                                   if path.startswith("scripts/") or path == "Justfile"}
-                and set(base_programs) == set(live_programs), "reviewed program membership differs")
+                and not (set(base_programs) - set(live_programs))
+                and (not additions or additions == set(SAME_BINARY_REVIEWED_ADDITIONS)),
+                "reviewed program membership differs")
         base_tree = _git_output(root, ("ls-tree", "-r", "-z", SAME_BINARY_REVIEWED_BASE),
                                 git_query=git_query)
         live_tree = _git_output(root, ("ls-tree", "-r", "-z", live_head), git_query=git_query)
@@ -2102,6 +2106,9 @@ def _v3_authenticate_programs(root: Path, head: str, items: _ProgramItems,
         if not isinstance(base_tree, bytes) or not isinstance(live_tree, bytes):
             raise ValueError("reviewed program tree differs")
         base_modes, live_modes = _modes(base_tree), _modes(live_tree)
+        require(all(live_programs[path] == SAME_BINARY_REVIEWED_ADDITIONS[path]
+                    and live_modes.get(path) == "100644" for path in additions),
+                "reviewed program addition differs")
         for path in base_programs:
             require(base_modes.get(path) == live_modes.get(path), "reviewed program mode differs")
             if base_programs[path] == live_programs[path]:

@@ -638,19 +638,34 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "e74539aa42a84ded142f4659dd8cef84f731a5da3f6e92b178987417f49dc960"
+SELF_MODULE_CANONICAL_SHA256 = "ded22671818bda6a5321d1abb38d129ed8cf135c0320b28956cee2f969cefb81"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
+SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
+    "scripts/build/cargo_capacity_guard_root_scope_test.py":
+        ("4b2c62c1f6921fe9ddb82e5c023ed6e6720c51a4c1f96ce95b41158656858955", 3743),
+}
 
 # 実行中 checker は品質ゲートとレビューで信頼し、入力 bytes の改変を拒否する。
 _SAME_BINARY_REVIEWED_FILES = {
+    "scripts/release/publish-crates.sh": ("27a3543b8af5114c1958612d68a4d6ebc60092ea83ccec761aa9ab96b615a654", "fb69ddf60e8a667340b2147f1a2c5b4bdf652766f398ec7c0b8e1ebb8772ebd6"),
+    "scripts/release/publish_crates_test.py": ("924d5e48839b98401435860ed64d3e91f9158abe0b9136f9c91d3b63b0343686", "70f5a79be0545f6868ae290dade37ce8d4ee961d29480f4fe3d536e5e375c629"),
+    "scripts/hooks/run_locked_command.py": ("a13ecdd3a5795349796a738f144a64cf7e2599f33a93d1dc994ba86724227336", "a3d2091307219fdc6069881c5919d0e7167630b709c17f272a1af2aa372e2f25"),
+    "scripts/hooks/run_locked_command_test.py": ("1b1c81bfcb0887c93db0c24b265230652b19a85e87a77b968c72787d1bf2d2f5", "d97ea778a522a13137997c1d6f43a1e9be2945d4f02cf9c4f6a0d37d6870f31e"),
+    "scripts/build/cargo_capacity_guard.py": ("f9f8e97cf0628e5281c45be3dbc67c24f08dbb2ae281909438619a50abff6448", "d108bba44b0575cfa5b1122860fbd1e6e31613905fc1f3d406e551a1a57e7ff8"),
+    "scripts/build/cargo_capacity_guard_test.py": ("f01e32aca9cd651a9dea9cf5cdddc6c5b97e255faf9b55c7e1a387766e2317ce", "a840886e57e3f7ca600c4cfbfecbce299be73a59751313c0b1813498cda90ed5"),
+    "scripts/build/cargo_capacity_guard_state_integration_test.py": ("c833fa2261b950dbc6045f7a9513a394959e34811053901dceeb3be015747261", "91cb48ba570f7249506d6ed959d7a2f6ce2f7b3930df2b179f5b78653a0d787c"),
+    "scripts/release/native_coverage_result.py": ("b9ca6c28772c561d2c961c7b4b6b869e1f5dc4990781d6cfb8f3e01f35e12f6d", "3000a0aea2245ee95c298c41b95594034bcfb8fa1c583db4041324a96d576084"),
+    "scripts/release/native_coverage_result_test.py": ("9a2b81372f5713f222d45bdd81526dd2562e7300fb5b1b33a33f93d9dd938c0b", "3f172d60dc835c7564c23728cab45c79dc070fdb79a99e3585fa8a2851a8e69f"),
+    "scripts/release/native_nextest_coverage_commands.py": ("9f2b9b5ca377795692ecf57473532a821f1f6aaa9d417b1d9e0763a7f61c961f", "5f5aa41d7ab72b9dcd5c921cf9cfe1d2ea2ca1d27a23e797cf2b767dc99d3b47"),
+    "scripts/release/native_nextest_root_coverage_test.py": ("fcaef83f88da28667b329c0478b1df2a19aa535c4d85ff91536894a0a1e3e936", "6fd8053fcf727b3082398caceee6643216216842a01dd5c4027f689114a3e5af"),
     "scripts/release/html_performance_remote_evidence.py": ("e6b82ad9987bc409f1ad6dbc9b3aa9d790f665b111538152dfecd2628efbf712", "f23053b1cd1fa3d1c5a6729659edab0e24b374cb2893df9f1a7aaeacdcd92c6f"),
     "scripts/release/html_performance_host_load_validation.py": ("527966f32a04e641365dbf06d07002441ffc28ec9527f01cd522a430bd243178", "a239f5caa5f0a55a7c182532620e43a93364cc2087c3b75880c4778329acf12b"),
     "scripts/release/html_performance_host_load_validation_test.py": ("68e27e9b1b715bbed15eb260ac45b0449bdd4d24e76897964e06eafd8a98acc0", "cd47e6b4bc807c64db170a16c7add7514875857a5f1bc3914419271764f44742"),
     "scripts/release/produce_html_performance_evidence.py": ("43d967863089f9c2267326f2dde177db898861d1c0634f2e951eda7b212cbbff", "213afcfcf895ee1f048564e70d10668187e0829eee49cbb3fbdc384648777e1b"),
     "scripts/release/produce_html_performance_evidence_test.py": ("09e332a5143e9a3ec1edadc5d7b7d8d4ef55973de8d6c0ed3619643d860d9ac8", "e4c92f155972b92f4b9a46ca4fd735f1ff89d7e6bca75357460b6298dd33da03"),
-    "scripts/release/verify_html_performance_evidence.py": ("73ffb34fc4fd5d46a698059879e29753f546c10f53815b20df5d7a9d17468060", "befc62abf92871676e8402337c8b8aae2ce209b373a10cba64e218fd07a889d9"),
+    "scripts/release/verify_html_performance_evidence.py": ("73ffb34fc4fd5d46a698059879e29753f546c10f53815b20df5d7a9d17468060", "c3b06e39f36228753283e713ac39698feb578ba5425f5e93b4d66a7fad417746"),
     "scripts/release/verify_html_performance_evidence_test.py": ("7c0f9385c5b896a3ceb4f119a97f2329f9083cd9853028fc8663dade2339bf86", "887bcbc646e293938df96a9b38b2a91d29f92a6c463eaef9f69e0e374a83f56b"),
-    "scripts/release/html_performance_source_reuse_test.py": ("3f169f0de723a8e28551284ae455a7b95edac4ad18249f989074d4089d76ebd4", "7f385f64a95de6ed5c3ee402fb0ea1d08e980b2df44babd9e3423e92b6d4a763"),
+    "scripts/release/html_performance_source_reuse_test.py": ("3f169f0de723a8e28551284ae455a7b95edac4ad18249f989074d4089d76ebd4", "91270d5087c058eb9e5d341ba1462c634954037fe2c50c3716cc0fb7a7fe6b45"),
     "scripts/release/html_performance_source_reuse_cli.py": ("d49416a4c83e18f177a0572b510a925ef41276e84d2d3ba8e735c732f06028a2", "73e202554a1893741b774fced28d59a598432715f59fa5c935001ed70db2dcf0"),
     "scripts/release/html_performance_source_reuse_cli_test.py": ("5b5a97a585e37f4583f6321935847acfc092d84dd8f1f8d194c3df30f4408554", "3a7b680aebd158c594d66c8d7224d51f76bcf0f0922ead6142154a7160cf74b3"),
     "scripts/release/html_performance_reuse_entry_test.py": ("ef435de25b26fefabcb2e3e3b627633b539dd6fa473e7f493a6e4bef13348e73", "06be7d060ee3ff06ffa187b4575fbdbdbd42d0d16de8877f4b0452eceabc5695"),
@@ -667,6 +682,8 @@ def reviewed_same_binary_self(current: bytes, *, allow_historical: bool = False)
     match = matches[0]
     declared = match.group(1).decode("ascii")
     historical = {
+        "90adfdc15b010fd330301c94b464f46dbfa5e823e1805118d66736cc898a545b":
+            "e74539aa42a84ded142f4659dd8cef84f731a5da3f6e92b178987417f49dc960",
         "cc8ea5b99cd1afb2d9a7270775a97ff7ab326a9daee3562906e06ac724c9199f":
             "4a07266dbe727c9a6fef6ba07d09850422ded4b517f22425a70a0d8a627dfac8",
         "68679b525416b96b51a4f4072154d70881c3596ed86ac52eb07121d577dd394a":
@@ -695,7 +712,8 @@ def reviewed_same_binary_migration(path: str, old: bytes, current: bytes, *,
             "3f169f0de723a8e28551284ae455a7b95edac4ad18249f989074d4089d76ebd4",
             frozenset({"d5ed585d010c7ae5110a77245a2213c3387f964fafa388d5baebff43c223428d",
                        "7d3a16959b8681a12cdcaf759d12916d5b5cc8b9ba137f051da76a338e191555",
-                       "ae8d52c5b22cf934d710b8c099a0ffbe260c12c845bca34e2bd9c62adfde1d0c"})),
+                       "ae8d52c5b22cf934d710b8c099a0ffbe260c12c845bca34e2bd9c62adfde1d0c",
+                       "7f385f64a95de6ed5c3ee402fb0ea1d08e980b2df44babd9e3423e92b6d4a763"})),
         "scripts/release/verify_html_performance_evidence_test.py": (
             "7c0f9385c5b896a3ceb4f119a97f2329f9083cd9853028fc8663dade2339bf86",
             frozenset({"3f562c30a3995d06cd5c54c7e5c1d1b630d8c45b7515a5a364fc11b9de4e07f6"})),
@@ -707,7 +725,8 @@ def reviewed_same_binary_migration(path: str, old: bytes, current: bytes, *,
             frozenset({"4b033395eee9281e1672acdd2498354fb1061d2c1be3759b125e468526681e52"})),
         "scripts/release/verify_html_performance_evidence.py": (
             "73ffb34fc4fd5d46a698059879e29753f546c10f53815b20df5d7a9d17468060",
-            frozenset({"486f9d60ffe64f6bb674a534ca26b070f145d80beb3a51e6060bc47d995b83f8"})),
+            frozenset({"486f9d60ffe64f6bb674a534ca26b070f145d80beb3a51e6060bc47d995b83f8",
+                       "befc62abf92871676e8402337c8b8aae2ce209b373a10cba64e218fd07a889d9"})),
     }
     historic = historical_pairs.get(path)
     if historic is not None and hashlib.sha256(old).hexdigest() == historic[0]:

@@ -221,7 +221,18 @@ class SourceReuseTest(unittest.TestCase):
 
     def test_reviewed_program_migration_is_exact_and_mode_bound(self) -> None:
         repository = Path(__file__).resolve().parents[2]
-        for path in ("scripts/release/html_performance_remote_evidence.py",
+        for path in ("scripts/release/publish-crates.sh",
+                     "scripts/release/publish_crates_test.py",
+                     "scripts/hooks/run_locked_command.py",
+                     "scripts/hooks/run_locked_command_test.py",
+                     "scripts/build/cargo_capacity_guard.py",
+                     "scripts/build/cargo_capacity_guard_test.py",
+                     "scripts/build/cargo_capacity_guard_state_integration_test.py",
+                     "scripts/release/native_coverage_result.py",
+                     "scripts/release/native_coverage_result_test.py",
+                     "scripts/release/native_nextest_coverage_commands.py",
+                     "scripts/release/native_nextest_root_coverage_test.py",
+                     "scripts/release/html_performance_remote_evidence.py",
                      "scripts/release/produce_html_performance_evidence.py",
                      "scripts/release/produce_html_performance_evidence_test.py",
                      "scripts/release/html_performance_host_load_validation.py",
@@ -240,6 +251,50 @@ class SourceReuseTest(unittest.TestCase):
                                            (None, "100644"), ("100644", None)):
                     self.assertFalse(reuse.reviewed_same_binary_migration(
                         path, old, current, old_mode=old_mode, new_mode=new_mode))
+
+    def test_reviewed_program_membership_accepts_only_fixed_coverage_test(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        base, live = reuse.SAME_BINARY_REVIEWED_BASE, "d" * 40
+        self_path = "scripts/release/html_performance_source_reuse.py"
+        addition = "scripts/build/cargo_capacity_guard_root_scope_test.py"
+        old = subprocess.check_output(["git", "-C", str(repository), "show", base + ":" + self_path])
+        current = (repository / self_path).read_bytes()
+        added = (repository / addition).read_bytes()
+        def record(data: bytes) -> tuple[str, int]:
+            return hashlib.sha256(data).hexdigest(), len(data)
+        base_records = {self_path: record(old)}
+        def authenticate(candidate: dict[str, tuple[str, int]], *, mode: str = "100644",
+                         actual: dict[str, tuple[str, int]] | None = None) -> object:
+            def tree(records: dict[str, tuple[str, int]]) -> bytes:
+                return b"".join(f"{mode if path == addition else '100644'} blob {'0' * 40}\t{path}\0".encode()
+                                for path in records)
+            def git_bytes(_root: Path, arguments: tuple[str, ...], **_kwargs: object) -> bytes:
+                if arguments[0] == "ls-tree":
+                    return tree(base_records if arguments[-1] == base else candidate)
+                if arguments[0] == "show":
+                    return old if arguments[1].startswith(base + ":") else current
+                raise AssertionError("unexpected Git query")
+            def items(records: dict[str, tuple[str, int]]) -> tuple[tuple[str, str, int], ...]:
+                return tuple((path, sha, size) for path, (sha, size) in sorted(records.items()))
+            with (patch.object(evidence, "committed_records", side_effect=lambda _root, head, **_kwargs:
+                               base_records if head == base else actual if actual is not None else candidate),
+                  patch.object(evidence, "_git_output", side_effect=git_bytes),
+                  patch.object(evidence, "git", return_value=base)):
+                return evidence._v3_authenticate_programs(repository, base, items(base_records),
+                    ((live, items(candidate)),), git_query=None, memory_policy_version="html-memory-v4")
+        live_records = {self_path: record(current), addition: record(added)}
+        self.assertTrue(authenticate(live_records))
+        self.assertTrue(authenticate({self_path: record(current)}))
+        for candidate in ({**live_records, addition: record(added + b" ")},
+                          {**live_records, addition: (record(added)[0], len(added) + 1)},
+                          {self_path: record(current), addition + ".unknown": record(added)},
+                          {addition: record(added)}):
+            with self.subTest(candidate=candidate), self.assertRaises(ValueError):
+                authenticate(candidate)
+        with self.assertRaises(ValueError):
+            authenticate(live_records, mode="100755")
+        with self.assertRaises(ValueError):
+            authenticate(live_records, actual={self_path: record(current)})
 
     def test_selector_program_migration_reauthenticates_fixed_epoch(self) -> None:
         repository = Path(__file__).resolve().parents[2]
