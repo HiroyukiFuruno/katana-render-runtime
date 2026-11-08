@@ -26,6 +26,21 @@ pub(super) fn font_with_only(tag: Tag) -> Result<Vec<u8>, String> {
     Ok(builder.build())
 }
 
+pub(super) fn font_with_changed_table_byte(
+    bytes: &[u8],
+    tag: Tag,
+    offset: usize,
+) -> Result<Vec<u8>, String> {
+    let font = ReadFontRef::from_index(bytes, 0).map_err(|error| format!("{error:?}"))?;
+    let data = font.data_for_tag(tag).ok_or("source table missing")?;
+    let mut table = data.as_bytes().to_vec();
+    let byte = table.get_mut(offset).ok_or("table byte missing")?;
+    *byte ^= 1;
+    let mut builder = FontBuilder::new();
+    builder.add_raw(tag, &table);
+    Ok(builder.copy_missing_tables(font).build())
+}
+
 pub(super) fn truncated_name_font() -> Result<Vec<u8>, String> {
     let mut font = font_with_only(Tag::new(b"name"))?;
     font.truncate(SINGLE_TABLE_DIRECTORY_BYTES);
