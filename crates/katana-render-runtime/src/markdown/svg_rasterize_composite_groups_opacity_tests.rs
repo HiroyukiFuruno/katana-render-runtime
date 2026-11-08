@@ -251,3 +251,6 @@ fn render_existing_svg(svg: &str) -> Result<Pixmap, String> {
     resvg::render(&tree, Transform::identity(), &mut pixmap.as_mut());
     Ok(pixmap)
 }
+
+#[path = "svg_rasterize_composite_groups_opacity_boundary_tests.rs"]
+mod boundary_tests;
