@@ -14,6 +14,59 @@ fn listener_error_session(html: &str) -> Result<HtmlInteractiveSession, HtmlBrow
     HtmlInteractiveSession::start(source, viewport)
 }
 
+const BLUR_CHANGE_CASES: [(bool, &str); 2] = [(false, ">initial<"), (true, ">changed<")];
+const BLUR_CHANGE_HTML: &str = r#"<input id=target><p id=result>initial</p><script>
+document.getElementById('target').addEventListener('change', () => {
+  document.getElementById('result').textContent = 'changed';
+});</script>"#;
+
+#[test]
+fn blur_dispatches_change_only_for_a_dirty_real_input() -> Result<(), String> {
+    for (dirty, expected) in BLUR_CHANGE_CASES {
+        let session = blur_input_session(BLUR_CHANGE_HTML, dirty)?;
+        assert_blur_result(&session, expected, dirty)?;
+    }
+    Ok(())
+}
+
+fn blur_input_session(html: &str, dirty: bool) -> Result<HtmlInteractiveSession, String> {
+    use crate::renderer::backends::html_browser::HtmlBrowserInput;
+    let mut session = listener_error_session(html).map_err(|error| error.to_string())?;
+    let node = session
+        .runtime
+        .node_for_element_id("target")
+        .ok_or("missing input")?;
+    session
+        .focus_input_without_frame(node.0)
+        .map_err(|error| error.to_string())?;
+    if dirty {
+        session
+            .dispatch_input(HtmlBrowserInput::Text {
+                text: "typed".to_owned(),
+            })
+            .map_err(|error| error.to_string())?;
+    }
+    session
+        .update_focus(false)
+        .map_err(|error| error.to_string())?;
+    Ok(session)
+}
+
+fn assert_blur_result(
+    session: &HtmlInteractiveSession,
+    expected: &str,
+    dirty: bool,
+) -> Result<(), String> {
+    let snapshot = session
+        .runtime
+        .snapshot()
+        .map_err(|error| error.to_string())?;
+    assert!(snapshot.contains(expected), "dirty={dirty}: {snapshot}");
+    assert_eq!(session.focused_node, None);
+    assert_eq!(session.focused_input, None);
+    Ok(())
+}
+
 #[test]
 fn commit_focused_input_is_noop_when_not_focusing() -> Result<(), HtmlBrowserError> {
     let mut session = start_minimal_session()?;

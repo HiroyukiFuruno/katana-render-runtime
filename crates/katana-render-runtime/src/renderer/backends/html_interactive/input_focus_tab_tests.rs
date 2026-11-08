@@ -28,6 +28,26 @@ const SECOND_TAB_INDEX: &str = "2";
 const NEGATIVE_TAB_INDEX: &str = "-1";
 
 #[test]
+fn tab_navigation_handles_empty_missing_middle_and_wraparound_focus() {
+    let order = [FIRST_ID, LINK_ID, NATURAL_ID];
+    for (focused, backwards, expected) in [
+        (None, false, Some(FIRST_ID)),
+        (None, true, Some(NATURAL_ID)),
+        (Some(u64::MAX), false, Some(FIRST_ID)),
+        (Some(u64::MAX), true, Some(NATURAL_ID)),
+        (Some(LINK_ID), false, Some(NATURAL_ID)),
+        (Some(LINK_ID), true, Some(FIRST_ID)),
+        (Some(NATURAL_ID), false, Some(FIRST_ID)),
+        (Some(FIRST_ID), true, Some(NATURAL_ID)),
+    ] {
+        assert_eq!(next_candidate(&order, focused, backwards), expected);
+    }
+    for backwards in [false, true] {
+        assert_eq!(next_candidate(&[], Some(FIRST_ID), backwards), None);
+    }
+}
+
+#[test]
 fn tab_order_sorts_positive_values_and_skips_unavailable_nodes() {
     let (ordered, pointer_focusable) = focus_candidates(&fixture());
     assert_eq!(ordered, expected_order());

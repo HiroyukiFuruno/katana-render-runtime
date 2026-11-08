@@ -9,6 +9,27 @@ const HIDDEN_OVERFLOW_DOCUMENT: &str = r#"<body style="margin:0;overflow-y:hidde
 });</script></body>"#;
 
 #[test]
+fn text_without_focused_input_preserves_dom_and_frame() -> TestResult {
+    let mut session = start("<input id=field value=initial><p id=result>unchanged</p>")?;
+    let before = session.runtime.snapshot().map_err(to_string)?;
+    let generation = session
+        .latest_frame()
+        .ok_or_else(|| "initial frame must exist".to_string())?
+        .generation;
+    session
+        .dispatch_input(HtmlBrowserInput::Text {
+            text: "ignored".to_owned(),
+        })
+        .map_err(to_string)?;
+    assert_eq!(session.runtime.snapshot().map_err(to_string)?, before);
+    assert_eq!(
+        session.latest_frame().map(|frame| frame.generation),
+        Some(generation)
+    );
+    Ok(())
+}
+
+#[test]
 fn hidden_viewport_overflow_rejects_host_scroll_and_skips_window_event() -> TestResult {
     let mut session = start(HIDDEN_OVERFLOW_DOCUMENT)?;
     let generation = session

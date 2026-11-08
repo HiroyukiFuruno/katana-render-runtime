@@ -79,6 +79,24 @@ fn plane_clipping_clears_empty_output_and_rejects_non_finite_distance() {
 }
 
 #[test]
+fn plane_clipping_rejects_nonfinite_distances_and_overflowing_intersections() {
+    let cases: &[&[Point]] = &[
+        &[(0.0, f64::NAN), (1.0, 1.0)],
+        &[(0.0, 1.0), (1.0, f64::INFINITY)],
+        &[(f64::MAX, 1.0), (-f64::MAX, -1.0)],
+    ];
+    for input in cases {
+        let mut output = Vec::new();
+        assert_eq!(
+            plane::clip_plane(input, &mut output, (0.0, 0.0), (0.0, 1.0), 0.0, true)
+                .err()
+                .as_deref(),
+            Some(NON_FINITE_GEOMETRY_ERROR)
+        );
+    }
+}
+
+#[test]
 fn axis_aligned_extent_accepts_finite_degenerate_and_rejects_empty_or_invalid_bounds() {
     const OVERFLOW_COORDINATE: f64 = f64::MAX;
     const DEGENERATE_SINGLETON: [(f64, f64); 1] = [(7.0, 11.0)];
@@ -240,3 +258,6 @@ fn owner_polygon_keeps_inactive_axes_and_rejects_a_collapsed_active_axis() {
         }
     }
 }
+
+#[path = "layout_scroll_extent_owner_index_tests.rs"]
+mod owner_index_tests;
