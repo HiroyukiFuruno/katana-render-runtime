@@ -36,6 +36,9 @@
 - [x] 生成ID/writer補完の `converter-writer-current-build-vv3y3oh4` はfoundation/AST/provenance4unit/実validatorが実0だが、新子moduleの `super::usvg` が存在せずcompile実101。主担当が実在する内部moduleへimportを修正し、余分なborrowも除去。`writer-import-fixed-current-build-yazwqzn3` はAST実0・同profile compile成功（none選択実4）、実catalogは `converter-writer-current-catalog-hpjeh2vd`。元source SHA/bytes/adaptation数は保持し、converter test hookの移植先SHA/bytesとmanifest pinだけを更新した。
 - [x] `converter-writer-boundaries-exact16-qyfzkpvl` はconverter12/image3/nested mask1の16case全実0・source/binary不変・profile残0。実svgtreeからsource IDを収集したCacheで4 generator×衝突0/1/3件を個別選択でき、正確な次番号・非空・source非衝突・連続一意を確認。IDなしPNGはID捏造なし/PNG種別/寸法/画素を維持、入れ子maskは実chain・xlink宣言・feImage参照先と2回往復の非空描画を確認した。IDなしcaseでwriterのIDあり書出し分岐を網羅したとは主張しない。全体953行からの改善はまだ未計測。
 
+- [x] `converter-node-image-id-current-build-bx0v__3r` はfoundation/AST実0・同profile compile成功（none選択実4）。実catalog `converter-node-image-id-current-catalog-ri8o_kvm` に照合した `converter-node-image-id-exact18-lrqyq4u_` はconverter13/image4/nested mask1の18case全実0、source/binary不変・profile残0。実PNG TreeのImage.idだけを一意IDへ変更し、XMLのimage要素自身のID/xlink data、再parse後のID検索・元PNG bytes・全画素同一を確認。bbox/transformを組み直さず内部モデル契約として検査し、IDなしcaseは維持した。converterは実text nodeで出力Group不変、同じState/Cacheの実rectで子1件の正常対照を確認。製品・vendor変更なし、953行からの正式改善は未計測。
+- [ ] HTML bridgeの潜在的な状態間干渉: 異なるnativeエラー2件をcatch後に最初の例外を再throwすると、単一state.errorが2件目の文言を返す可能性がある。実V8で最初/最後の再throwと偽装通常Errorの対照を先に再現し、失敗が確定してから最小修正する。現時点は読取の仮説であり、不具合確定や解消とは報告しない。
+
 ### 経過の記録（以下の旧数値・未実行予定は上の現在実数と区別する）
 
 - [/] 集計対象helperの限定補完: cmapのIO・HTMLの座標/実frame・KDRのparser pin fixtureを非重複3担当で変更中。成功/元のエラー表示とWindows callerを保ち、欠落ファイル・不正属性/viewport・closed session・fixture read/write失敗を実入力で検証する。実装の除外や分母変更はせず、純粋な判定caseは既存のtestファイル境界へ置く。レビューでcmap fixtureの早期失敗時の残骸も見つかったため、create_new成功後の所有とhandle解放後のDropへ整理する。まだ変更後未検証でありcoverage解消数へ加算しない。
