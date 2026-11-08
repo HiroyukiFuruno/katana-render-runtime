@@ -26,6 +26,8 @@ ORCHESTRATION_METADATA = frozenset((
     "MOON_WORKSPACE_ROOT", "MOON_WORKING_DIR", "MOON_CACHE",
     "MOON_CACHE_CAS_VERIFY_INTEGRITY", "MOON_EXPERIMENT_CAS_OUTPUTS_CACHE",
     "CARGO_CAPACITY_PROTECTED_REFS", "KRR_RUNTIME_CAS_OPERATION",
+    # 検証ランチャーの一時出力先の所有管理に使う実行単位の識別子。
+    "WORKSPACE_RUST_CLEANUP_SCOPE",
 ))
 SOURCE_FILES = (
     "scripts/runtime-bundles/runtime-bundle-tool-fingerprint_test.ts",

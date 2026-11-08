@@ -84,6 +84,14 @@ class ToolFingerprintInputsTest(unittest.TestCase):
               patch.object(tempfile, "gettempdir", return_value=str(self.home))):
             before = inputs.collect_quality_inputs(self.root, environment)
             self.assertNotIn("private-value", before)
+            for scope in ("run-one", "run-two"):
+                with self.subTest(cleanup_scope=scope):
+                    self.assertEqual(before, inputs.collect_quality_inputs(
+                        self.root, {**environment, "WORKSPACE_RUST_CLEANUP_SCOPE": scope}))
+            for change in ({"WORKSPACE_RUST_CLEANUP_SCOPE_OTHER": "run-one"},
+                           {"CARGO_CAPACITY_PROTECTED_REFS": "protected"}):
+                with self.subTest(changed_key=next(iter(change))):
+                    self.assertNotEqual(before, inputs.collect_quality_inputs(self.root, {**environment, **change}))
             changed_env = inputs.collect_quality_inputs(self.root, {**environment, "QUALITY_SECRET": "other"})
             self.assertNotEqual(before, changed_env)
             self.write("node_modules/@swc/core-test/native.node", b"changed")
@@ -248,6 +256,17 @@ class ToolFingerprintInputsTest(unittest.TestCase):
                 second = self.collect()
                 self.assertEqual(first["inventorySha256"], second["inventorySha256"])
                 del self.environment[name]
+
+    def test_cleanup_scope_is_not_a_tool_fingerprint_input(self) -> None:
+        first = self.collect()
+        self.assertTrue(first["inputsCollected"])
+        for scope in ("run-one", "run-two"):
+            with self.subTest(cleanup_scope=scope):
+                self.environment["WORKSPACE_RUST_CLEANUP_SCOPE"] = scope
+                self.assertEqual(first["inventorySha256"], self.collect()["inventorySha256"])
+        del self.environment["WORKSPACE_RUST_CLEANUP_SCOPE"]
+        self.environment["WORKSPACE_RUST_CLEANUP_SCOPE_OTHER"] = "run-one"
+        self.assertNotEqual(first["inventorySha256"], self.collect()["inventorySha256"])
 
     def test_moon_color_zero_matches_absent_semantic_environment(self) -> None:
         without_color = self.collect()
