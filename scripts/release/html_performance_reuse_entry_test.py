@@ -63,14 +63,19 @@ class ReuseEntryTest(unittest.TestCase):
                     return {}
             with (patch.object(gate, "Bundle", FakeBundle),
                   patch.object(gate, "git", return_value=new_head),
-                  patch.object(gate, "_verified_v3_reuse_context", return_value=context),
+                  patch.object(gate, "_verified_v3_reuse_context", return_value=context) as source,
                   patch.object(gate, "_verify", return_value={"conditions": 84}),
                   patch.object(gate, "_require_formal_release_result"),
                   patch.object(gate, "_v3_origin_and_endpoints", return_value=(context, facts)),
                   patch.object(gate, "_validate_build_proof", return_value=current)):
                 args = (old, root, checksum, new, checksum, "artifact", checksum)
                 result = gate.verify_source_reuse(*args)
-                self.assertEqual(result["reuseKind"], "program-source-artifact-equivalence-v1")
+                self.assertEqual(result["reuseKind"], "binary-bound-product-source-equivalence-v1")
+                for artifact in (False, True):
+                    source.return_value = reuse.SourceReuseContext(old_head, new_head, {}, (), artifact)
+                    result = gate.verify_source_reuse(*args)
+                    self.assertEqual(result["reuseKind"], "binary-bound-product-source-equivalence-v1")
+                source.return_value = context
                 for key in ("binarySha256", "cargoConfigPins", "buildEnvironmentSha256"):
                     saved = current[key]
                     current[key] = "changed"

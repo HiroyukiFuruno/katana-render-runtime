@@ -12,6 +12,7 @@ import io
 import json
 import math
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -1265,6 +1266,127 @@ def _set_policy_test_field(value: JsonObject, field: str, replacement: object) -
 
 
 class PerformanceEvidenceTest(unittest.TestCase):
+    def test_v3_same_binary_requires_matching_authenticated_build(self) -> None:
+        from html_performance_source_reuse import SourceReuseContext
+
+        bundle = Mock(spec=gate.Bundle)
+        bundle.manifest = {"head": "a" * 40}
+        environment = dict(os.environ)
+        environment["GIT_OPTIONAL_LOCKS"] = "0"
+        encoded = json.dumps(environment, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        tool = {"environmentSha256": hashlib.sha256(encoded.encode()).hexdigest(),
+                "platform": platform.platform(), "cpuCount": os.cpu_count()}
+        bundle.json.side_effect = lambda _ref: {"toolContext": tool}
+        current = gate.PartialEpochCurrentBuild(self.bundle, "b" * 64, "worker.json", "c" * 64)
+        current_bundle = Mock(spec=gate.Bundle)
+        current_bundle.manifest = {"head": "d" * 40}
+        current_bundle.relative_reference.return_value = {"ref": "worker"}
+        keys = ("binarySha256", "lockSha256", "cargoExecutableSha256", "rustcExecutableSha256",
+                "buildEnvironmentSha256", "toolVersions", "cargoConfigPins", "cargoLauncher",
+                "rustcLauncher", "guardPython")
+        old: JsonObject = {key: "authenticated" for key in keys}
+        new: JsonObject = {**old, "head": "d" * 40}
+        context = SourceReuseContext("a" * 40, "d" * 40, {}, (), True)
+        expected: JsonObject = {"endpointRefs": {"before": "before", "end": "end"}}
+        with (patch.object(gate, "Bundle", return_value=current_bundle),
+              patch.object(gate, "sha256", return_value="b" * 64),
+              patch.object(gate, "git", return_value="d" * 40),
+              patch.object(gate, "_v3_origin_and_endpoints", return_value=(context, old)) as origin,
+              patch.object(gate, "_validate_build_proof", return_value=new) as proof,
+              patch.object(gate, "_verified_v3_reuse_context", return_value=context) as source):
+            self.assertEqual(gate._same_binary_v3_reuse_context(
+                bundle, self.root, expected, {}, current, git_query=None), context)
+            self.assertEqual(proof.call_count, 1)
+            self.assertEqual(origin.call_count, 1)
+            self.assertTrue(source.call_args.kwargs["same_binary_rust"])
+            for key in keys:
+                with self.subTest(key=key):
+                    proof.return_value = {**new, key: "different"}
+                    with self.assertRaisesRegex(ValueError, "measured and current build differ"):
+                        gate._same_binary_v3_reuse_context(
+                            bundle, self.root, expected, {}, current, git_query=None)
+            source.reset_mock()
+            proof.side_effect = ValueError("forged build proof")
+            with self.assertRaisesRegex(ValueError, "forged build proof"):
+                gate._same_binary_v3_reuse_context(
+                    bundle, self.root, expected, {}, current, git_query=None)
+            source.assert_not_called()
+            proof.side_effect = None
+            proof.return_value = new
+            origin.side_effect = ValueError("forged measured origin")
+            with self.assertRaisesRegex(ValueError, "forged measured origin"):
+                gate._same_binary_v3_reuse_context(
+                    bundle, self.root, expected, {}, current, git_query=None)
+            source.assert_not_called()
+            origin.side_effect = None
+            tool["environmentSha256"] = "0" * 64
+            with self.assertRaisesRegex(ValueError, "measurement execution environment differs"):
+                gate._same_binary_v3_reuse_context(
+                    bundle, self.root, expected, {}, current, git_query=None)
+            source.assert_not_called()
+
+    def test_same_binary_requires_reviewed_ancestry_and_committed_checker(self) -> None:
+        import html_performance_source_reuse as reuse
+
+        current = Path(reuse.__file__).read_bytes()
+        head = "a" * 40
+        def query(_root: Path, args: Sequence[str], _input: bytes | None, text: bool) -> str | bytes:
+            if args[0] == "merge-base" and text:
+                return reuse.SAME_BINARY_REVIEWED_BASE
+            if args[0] == "show" and not text:
+                return current
+            raise AssertionError(args)
+        gate._require_reviewed_same_binary_program(self.root, head, git_query=query)
+        with patch.object(reuse, "reviewed_same_binary_self", return_value=False):
+            with self.assertRaisesRegex(ValueError, "reviewed same-binary source differs"):
+                gate._require_reviewed_same_binary_program(self.root, head, git_query=query)
+        def wrong_base(_root: Path, _args: Sequence[str], _input: bytes | None,
+                       _text: bool) -> str | bytes:
+            return "b" * 40
+        with self.assertRaisesRegex(ValueError, "not an ancestor"):
+            gate._require_reviewed_same_binary_program(self.root, head, git_query=wrong_base)
+
+    def test_v3_reader_reauthenticates_current_build_reference(self) -> None:
+        from html_performance_source_reuse import SourceReuseContext
+
+        context = SourceReuseContext(self.head, self.head, {}, (), True)
+        pair: JsonObject = {"schema": "krr-html-performance-source-epoch-v3"}
+        first: JsonObject = {"sourcePair": pair}
+        bundle = Mock(spec=gate.Bundle)
+        bundle.manifest = {"head": self.head,
+                           "attempts": [{"expected": "first", "result": "result"}]}
+        bundle.json.side_effect = lambda key: first if key == "first" else {}
+        current = gate.PartialEpochCurrentBuild(self.bundle, "a" * 64, "worker", "b" * 64)
+        with (patch.object(gate, "Bundle", return_value=bundle),
+              patch.object(gate, "_same_binary_v3_reuse_context",
+                           side_effect=ValueError("forged build proof")) as reauthenticate):
+            with self.assertRaisesRegex(ValueError, "forged build proof"):
+                gate._verify(self.bundle, self.root, require_catalog=True,
+                             reuse_context=context, current_build=current)
+            reauthenticate.assert_called_once()
+
+    def test_v3_same_binary_migration_rejects_unknown_program_bytes(self) -> None:
+        import html_performance_source_reuse as reuse
+
+        root = Path(__file__).resolve().parents[2]
+        for path in reuse._SAME_BINARY_REVIEWED_FILES:
+            with self.subTest(path=path):
+                old = subprocess.check_output(["git", "-C", str(root), "show",
+                                               reuse.SAME_BINARY_REVIEWED_BASE + ":" + path])
+                current = (root / path).read_bytes()
+                if path == "scripts/runtime-assets/svg-engine-provenance.ts":
+                    current = old.replace(
+                        b"8cd06cd2533360467d8f90cf2de422747927d3fb54a2dd41e85a6018f1d4905f",
+                        b"07c779270618a9c2d0133367f247abf09bf2227b83b8af8bca3e64bc1fa9e145")
+                self.assertTrue(reuse.reviewed_same_binary_migration(
+                    path, old, current, old_mode="100644", new_mode="100644"))
+                self.assertFalse(reuse.reviewed_same_binary_migration(
+                    path, old, current + b"\n# unknown\n", old_mode="100644", new_mode="100644"))
+                self.assertFalse(reuse.reviewed_same_binary_migration(
+                    path, old, current, old_mode="100755", new_mode="100644"))
+                self.assertFalse(reuse.reviewed_same_binary_migration(
+                    path, old + b" ", current, old_mode="100644", new_mode="100644"))
+
     def setUp(self) -> None:
         self.temp: tempfile.TemporaryDirectory[str] = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -3640,7 +3762,7 @@ class PerformanceEvidenceTest(unittest.TestCase):
               patch.object(gate, "_v3_origin_and_endpoints", return_value=(context, old))):
             for key in ("binarySha256", "lockSha256", "cargoConfigPins", "buildEnvironmentSha256"):
                 with self.subTest(key=key), \
-                     patch.object(gate, "_validate_build_proof", return_value={**old, key: "changed"}):
+                     patch.object(gate, "_validate_build_proof", return_value={**old, "head": self.head, key: "changed"}):
                     with self.assertRaisesRegex(ValueError, "measured and current build differ: " + key):
                         gate.verify_source_reuse(self.bundle, self.root, manifest_sha, self.bundle,
                                                  manifest_sha, "artifact", "a" * 64)

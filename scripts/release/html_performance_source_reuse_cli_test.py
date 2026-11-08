@@ -156,6 +156,30 @@ class ReuseRequestTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "stored eligibility differs"):
                 cli.verify_reuse_request(output, self.root)
 
+    def test_binary_bound_kind_preserves_legacy_eligibility_and_requires_revalidation(self) -> None:
+        current = {"measuredHead": "old", "eligibleHead": "new",
+                   "reuseKind": "binary-bound-product-source-equivalence-v1", "binarySha256": "a" * 64}
+        for old_kind in ("test-source-artifact-equivalence-v1",
+                         "program-source-artifact-equivalence-v1"):
+            old = {**current, "reuseKind": old_kind}
+            with patch.object(gate, "verify_source_reuse", return_value=old):
+                output = self.output.with_name(old_kind + ".json")
+                cli.create_request(self.request, output, self.root)
+            before = output.read_bytes()
+            with patch.object(gate, "verify_source_reuse", return_value=current):
+                self.assertEqual(cli.verify_reuse_request(output, self.root), current)
+            self.assertEqual(output.read_bytes(), before)
+            with patch.object(gate, "verify_source_reuse", return_value={**current, "binarySha256": "b" * 64}):
+                with self.assertRaisesRegex(ValueError, "stored eligibility differs"):
+                    cli.verify_reuse_request(output, self.root)
+        fresh = self.output.with_name("binary-eligibility.json")
+        with patch.object(gate, "verify_source_reuse", return_value=current):
+            cli.create_request(self.request, fresh, self.root)
+            self.assertEqual(cli.verify_reuse_request(fresh, self.root), current)
+            self.output.write_text(json.dumps(self.request))
+            with self.assertRaisesRegex(ValueError, "immutable eligibility is required"):
+                cli.verify_reuse_request(self.output, self.root)
+
     def test_v3_reassessment_keeps_original_eligibility_unchanged(self) -> None:
         original = {"measuredHead": "old", "eligibleHead": "new",
                     "reuseKind": "test-source-artifact-equivalence-v1"}

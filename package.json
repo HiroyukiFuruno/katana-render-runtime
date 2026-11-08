@@ -34,7 +34,7 @@
     "css-tree": "3.2.1",
     "magic-string": "1.4.5",
     "p-map": "7.1.1",
-    "parse5": "8.1.0",
+    "parse5": "8.1.1",
     "playwright": "1.65.0",
     "rollup": "^4.68.0",
     "source-map-js": "1.2.2",

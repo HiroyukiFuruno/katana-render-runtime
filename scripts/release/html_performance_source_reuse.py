@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -155,7 +156,8 @@ def validation_cohort_change(path: str, old: tuple[str, int] | None,
         history = (intermediate, reviewed, retained, latest_reviewed, budget_predecessor,
                    format_predecessor, promotion_predecessor, just_predecessor)
         if old in history:
-            return (new == live or new in history[history.index(old) + 1:]) and old_mode == new_mode == "100644"
+            base = ("85d9ff1f649fcef4b85cdd7634b4ce4c711a4e567d7203eecbea33793954b4eb", 74484)
+            return (new == live or new == base or new in history[history.index(old) + 1:]) and old_mode == new_mode == "100644"
         prior = ("7d75f7a2642103908ebaaf24ccffc175b0ff61e8bbb020fea9f9b0d0e4648dfe", 24917)
         if old != original or old_mode != "100644" or new_mode != "100644":
             return False
@@ -439,7 +441,7 @@ def v4_reassessment_program_change(path: str, old: bytes, current: bytes, *,
     after = (hashlib.sha256(current).hexdigest(), len(current))
     if path == "scripts/release/html_performance_source_reuse.py":
         return (before in V3_REASSESSMENT_SELF_PREDECESSORS
-                or before == ("42995d2e0cf3a4d1e988c70699b909cdef73cb2058bddc4e48486746bd6a3dc9", 65857)) and current == Path(__file__).read_bytes()
+                or before == ("42995d2e0cf3a4d1e988c70699b909cdef73cb2058bddc4e48486746bd6a3dc9", 65857)) and (current == Path(__file__).read_bytes() or before != after and after == ("85d9ff1f649fcef4b85cdd7634b4ce4c711a4e567d7203eecbea33793954b4eb", 74484))
     if (before, after) not in V4_REASSESSMENT_PROGRAM_PAIRS.get(path, frozenset()):
         return False
     return path != "scripts/release/produce_html_performance_evidence.py" or _reassessment_producer_ast_matches(old, current, v4=True)
@@ -462,7 +464,9 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
                    "4a57d835945ea1b095b039fa565f80fbc01ee7e5d231bad1c7c560c53d94d6b0",
                    "d92d9865cd7e501fccf45202d3eaee6df795f2f0d27bf0cc9d6d284ca5aa4099")
         if old_sha in history:
-            return current == Path(__file__).read_bytes() or current_sha in history[history.index(old_sha) + 1:]
+            return (current == Path(__file__).read_bytes()
+                    or current_sha == "85d9ff1f649fcef4b85cdd7634b4ce4c711a4e567d7203eecbea33793954b4eb"
+                    or current_sha in history[history.index(old_sha) + 1:])
         if old_sha != "847b5541ecc81d533eaf510e1675b7a2b667853a7dc8793f34387470d9dce426":
             return False
         if current_sha in {
@@ -633,6 +637,91 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
     return current_sha in allowed if isinstance(allowed, frozenset) else current_sha == allowed
 
 
+# この定数だけをゼロへ正規化してモジュール全体を固定する。
+SELF_MODULE_CANONICAL_SHA256 = "4a07266dbe727c9a6fef6ba07d09850422ded4b517f22425a70a0d8a627dfac8"
+SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
+
+# 実行中 checker は品質ゲートとレビューで信頼し、入力 bytes の改変を拒否する。
+_SAME_BINARY_REVIEWED_FILES = {
+    "scripts/release/verify_html_performance_evidence.py": ("73ffb34fc4fd5d46a698059879e29753f546c10f53815b20df5d7a9d17468060", "486f9d60ffe64f6bb674a534ca26b070f145d80beb3a51e6060bc47d995b83f8"),
+    "scripts/release/verify_html_performance_evidence_test.py": ("7c0f9385c5b896a3ceb4f119a97f2329f9083cd9853028fc8663dade2339bf86", "3f562c30a3995d06cd5c54c7e5c1d1b630d8c45b7515a5a364fc11b9de4e07f6"),
+    "scripts/release/html_performance_source_reuse_test.py": ("3f169f0de723a8e28551284ae455a7b95edac4ad18249f989074d4089d76ebd4", "d5ed585d010c7ae5110a77245a2213c3387f964fafa388d5baebff43c223428d"),
+    "scripts/release/html_performance_source_reuse_cli.py": ("d49416a4c83e18f177a0572b510a925ef41276e84d2d3ba8e735c732f06028a2", "cf246f950aec2619cf27d4605a411d268d52e5f84f34d7815ab5c944a17b00b9"),
+    "scripts/release/html_performance_source_reuse_cli_test.py": ("5b5a97a585e37f4583f6321935847acfc092d84dd8f1f8d194c3df30f4408554", "4b033395eee9281e1672acdd2498354fb1061d2c1be3759b125e468526681e52"),
+    "scripts/release/html_performance_reuse_entry_test.py": ("ef435de25b26fefabcb2e3e3b627633b539dd6fa473e7f493a6e4bef13348e73", "06be7d060ee3ff06ffa187b4575fbdbdbd42d0d16de8877f4b0452eceabc5695"),
+    "scripts/release/local_html_performance_evidence_test.py": ("d019f3fb492a3cae377a7c98a0046e087fd86359c3ee661a377fd061a07c99a7", "fab4f5a15ba5d3509c25db5789c8af2c98a3a01af4a276ea79308febf38e71aa"),
+    "scripts/runtime-assets/svg-engine-provenance.ts": ("1c08a971ff2e98f5a99c805846bfefc3a11acc1dd6db900a216bff1a37a8d4ea", "f57f6244c0b4557592b0a2b2eaca20ca0906d27deff4c20796e6025b9def57a5"),
+}
+
+
+def reviewed_same_binary_self(current: bytes) -> bool:
+    pattern = rb'(?m)^SELF_MODULE_CANONICAL_SHA256 = "([0-9a-f]{64})"$'
+    matches = list(re.finditer(pattern, current))
+    if len(matches) != 1 or matches[0].group(1).decode("ascii") != SELF_MODULE_CANONICAL_SHA256:
+        return False
+    match = matches[0]
+    normalized = current[:match.start(1)] + b"0" * 64 + current[match.end(1):]
+    return hashlib.sha256(normalized).hexdigest() == SELF_MODULE_CANONICAL_SHA256
+
+
+def reviewed_same_binary_migration(path: str, old: bytes, current: bytes, *,
+                                   old_mode: str | None, new_mode: str | None) -> bool:
+    if old_mode != "100644" or new_mode != "100644":
+        return False
+    if path == "scripts/release/html_performance_source_reuse.py":
+        return (hashlib.sha256(old).hexdigest()
+                == "85d9ff1f649fcef4b85cdd7634b4ce4c711a4e567d7203eecbea33793954b4eb"
+                and reviewed_same_binary_self(current))
+    expected = _SAME_BINARY_REVIEWED_FILES.get(path)
+    return (expected is not None and hashlib.sha256(old).hexdigest() == expected[0]
+            and hashlib.sha256(current).hexdigest() == expected[1])
+
+
+def reviewed_svg_provenance_change(measured: Records, current: Records,
+                                   old_modes: Mapping[str, str], new_modes: Mapping[str, str]) -> bool:
+    """既存の由来 gate で固定する二つの vendor 接続だけを性能再利用に認める。"""
+    prefix = "crates/katana-render-runtime/vendor/svg-engine/"
+    changes = {
+        "PROVENANCE.json": (
+            ("8cd06cd2533360467d8f90cf2de422747927d3fb54a2dd41e85a6018f1d4905f", 28884),
+            ("07c779270618a9c2d0133367f247abf09bf2227b83b8af8bca3e64bc1fa9e145", 28884)),
+        "usvg/writer.rs": (
+            ("9ab4bff1772c728af183b659831dc381d49ff8e9a1c4cee223730b0ff8f3eb78", 60372),
+            ("c73e39790272815346f2640bf582e17e0768db002da2b54f0c74f8c6e19f88ec", 60490)),
+        "resvg/filter/component_transfer.rs": (
+            ("5e9e6ed542fc9988a0060e7c642592797b6b04b8846f57aacfcac13c2d6d69cf", 2249),
+            ("734564bd09c8a77fae2f04104bcaeee6117e329ccb8bfa3040ae91829500857b", 2373)),
+    }
+    anchors = {
+        "README.md": ("0eb3c8eca056cf62fd51cda3471ca73bdf6d8e50bd6e989523d895d9c58e6a23", 7958),
+        "LICENSE-APACHE": ("a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9", 10173),
+        "LICENSE-MIT": ("f5d934dc281b44e0003ee461ac740b18b6629a454decd872c774d34e4ee0b21d", 1057),
+    }
+    old_vendor = {path for path in measured if path.startswith(prefix)}
+    new_vendor = {path for path in current if path.startswith(prefix)}
+    if old_vendor != new_vendor:
+        return False
+    for path in old_vendor:
+        if old_modes.get(path) != "100644" or new_modes.get(path) != "100644":
+            return False
+        name = path[len(prefix):]
+        if name in changes:
+            if (measured.get(path), current.get(path)) != changes[name]:
+                return False
+        elif measured.get(path) != current.get(path):
+            return False
+    if not all(measured.get(prefix + name) == current.get(prefix + name) == record
+               for name, record in anchors.items()):
+        return False
+    if not all(prefix + name in old_vendor for name in changes):
+        return False
+    program = "scripts/runtime-assets/svg-engine-provenance.ts"
+    return (measured.get(program), current.get(program), old_modes.get(program), new_modes.get(program)) == (
+        ("1c08a971ff2e98f5a99c805846bfefc3a11acc1dd6db900a216bff1a37a8d4ea", 5233),
+        ("f57f6244c0b4557592b0a2b2eaca20ca0906d27deff4c20796e6025b9def57a5", 5233),
+        "100644", "100644")
+
+
 @dataclass(frozen=True)
 class SourceReuseContext:
     measured_head: str
@@ -657,10 +746,53 @@ def _modes(raw: bytes) -> dict[str, str]:
     return result
 
 
+def _reviewed_parse5_cohort(
+    root: Path, measured_head: str, current: Records, measured: Records,
+    old_modes: Mapping[str, str], new_modes: Mapping[str, str], git_bytes: GitBytes,
+) -> bool:
+    if measured_head != SAME_BINARY_REVIEWED_BASE:
+        return False
+    pairs = {
+        "package.json": (
+            ("e084ea89276814cbe65f383c5d76a5d1896b6cae76f869dc8aa3de05cf6cdc61", 2306),
+            ("dc042ef81b6d708539359e9fa7febd3588eaa81ad3cb9cd8a584216520c105b3", 2306)),
+        "bun.lock": (
+            ("a158d17634338c8bb8d90e535488f1f437bd6c4be7927ac09518f030a319aca3", 37784),
+            ("a718edcc3070d497cc7243d143fe48e4d92db256dcda13fdc7a4d781ea58f470", 37784)),
+    }
+    replacements = {
+        "package.json": ((b'"parse5": "8.1.0"', b'"parse5": "8.1.1"'),),
+        "bun.lock": (
+            (b'"parse5": "8.1.0"', b'"parse5": "8.1.1"'),
+            (b'"parse5@8.1.0", "", { "dependencies": { "entities": "^9.0.0" } }, '
+             b'"sha512-sq3qBFpee5jeocbFbO48VHlGr8sT7mbXS0vxlKN6sottBtJzrOG3998sr0llSZcQAGgfpdmEYAIZE0P9z0dE8w=="',
+             b'"parse5@8.1.1", "", { "dependencies": { "entities": "^9.0.0" } }, '
+             b'"sha512-EcR/6WDcU7b2N3vQSxKALCk9lXGtUMQxXio008OEMBE0kavu/7JLfBEeFPzi43nMqVDSbEn3QCK+BMCc9zO//w=="'),
+        ),
+    }
+    for path, (old_record, new_record) in pairs.items():
+        if (measured.get(path) != old_record or current.get(path) != new_record
+                or old_modes.get(path) != "100644" or new_modes.get(path) != "100644"):
+            return False
+        old = git_bytes(("show", measured_head + ":" + path))
+        new = (root / path).read_bytes()
+        if ((hashlib.sha256(old).hexdigest(), len(old)) != old_record
+                or (hashlib.sha256(new).hexdigest(), len(new)) != new_record):
+            return False
+        expected = old
+        for previous, replacement in replacements[path]:
+            if expected.count(previous) != 1:
+                return False
+            expected = expected.replace(previous, replacement, 1)
+        if expected != new:
+            return False
+    return True
+
+
 def _specific_source_changes(
     root: Path, measured_head: str, current: Records, measured: Records,
     old_modes: Mapping[str, str], new_modes: Mapping[str, str], git_bytes: GitBytes,
-    *, allow_test_changes: bool,
+    *, allow_test_changes: bool, same_binary_rust: bool = False,
 ) -> tuple[set[str], set[str]]:
     """今回のHTML test、release文書と補助ツールの厳密な差分だけを認証する。"""
     parent = "crates/katana-render-runtime/src/renderer/backends/html_interactive/session.rs"
@@ -668,6 +800,10 @@ def _specific_source_changes(
     document = "docs/release.md"
     approved: set[str] = set()
     added_tests: set[str] = set()
+    if same_binary_rust and _reviewed_parse5_cohort(
+        root, measured_head, current, measured, old_modes, new_modes, git_bytes,
+    ):
+        approved.update(("package.json", "bun.lock"))
 
     release_tooling_pairs = {
         "biome.json": (
@@ -690,6 +826,8 @@ def _specific_source_changes(
             "a62ffe885b5e436571de07badb32cd6cee71d034bd2d5b37809d3f2e10a0c6f7"),
     }
     for path, (expected_old, expected_new) in release_tooling_pairs.items():
+        if path in approved:
+            continue
         if measured.get(path) == current.get(path):
             continue
         if (path not in measured or path not in current or old_modes.get(path) != "100644"
@@ -721,7 +859,7 @@ def _specific_source_changes(
             raise ValueError("release document delta differs")
         approved.add(document)
 
-    if measured.get(parent) != current.get(parent) or measured.get(child) != current.get(child):
+    if not same_binary_rust and (measured.get(parent) != current.get(parent) or measured.get(child) != current.get(child)):
         if (not allow_test_changes or child in measured or child not in current
                 or parent not in measured or parent not in current
                 or old_modes.get(parent) != "100644" or new_modes.get(parent) != "100644"
@@ -787,7 +925,7 @@ def _specific_source_changes(
         "crates/kdr-linter/src/bin/mathjax_consumer_facts/backend_route_edge_mutations_tests.rs",
         "crates/kdr-linter/src/bin/mathjax_consumer_facts/mermaid_classic_resource_edge_mutations_tests.rs",
     }
-    if any(path not in measured and path in current for path in sentinels):
+    if not same_binary_rust and any(path not in measured and path in current for path in sentinels):
         if not allow_test_changes:
             raise ValueError("test-only cohort is not enabled")
         for path, (before, after) in test_cohort.items():
@@ -821,7 +959,8 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
                           measured: Records, git_text: GitText,
                           git_bytes: GitBytes, *, allow_test_changes: bool = False,
                           program_records: Mapping[str, tuple[str, int]] | None = None,
-                          program_modes: Mapping[str, str] | None = None) -> SourceReuseContext:
+                          program_modes: Mapping[str, str] | None = None,
+                          same_binary_rust: bool = False) -> SourceReuseContext:
     eligible = git_text(("rev-parse", "HEAD")).strip()
     if git_text(("merge-base", measured_head, eligible)).strip() != measured_head:
         raise ValueError("measured HEAD is not an ancestor")
@@ -838,17 +977,62 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
                 {path: value for path, value in current.items() if is_program(path)}, program_records)
                 or {path: value for path, value in new_modes.items() if is_program(path)} != program_modes):
             raise ValueError("current measurement program differs from authenticated program")
+    parse5_cohort = same_binary_rust and _reviewed_parse5_cohort(
+        root, measured_head, current, measured, old_modes, new_modes, git_bytes,
+    )
+    if same_binary_rust and any(
+        path.rsplit("/", 1)[-1] in {"Cargo.lock", "bun.lock", "bun.lockb",
+                                    "package-lock.json", "pnpm-lock.yaml", "yarn.lock"}
+        and measured.get(path) != current.get(path)
+        and not (path == "bun.lock" and parse5_cohort)
+        for path in set(measured) | set(current)
+    ):
+        raise ValueError("lockfile differs")
+    provenance = "crates/katana-render-runtime/vendor/svg-engine/PROVENANCE.json"
+    metadata_changes: set[str] = set()
+    provenance_program = "scripts/runtime-assets/svg-engine-provenance.ts"
+    projected_program = ("f57f6244c0b4557592b0a2b2eaca20ca0906d27deff4c20796e6025b9def57a5", 5233)
+    provenance_changed = measured.get(provenance) != current.get(provenance)
+    vendor_prefix = "crates/katana-render-runtime/vendor/svg-engine/"
+    vendor_rust_changed = any(
+        path.startswith(vendor_prefix) and path.endswith(".rs")
+        and measured.get(path) != current.get(path)
+        for path in set(measured) | set(current)
+    )
+    if same_binary_rust and (provenance_changed or vendor_rust_changed
+                             or current.get(provenance_program) == projected_program):
+        if not reviewed_svg_provenance_change(measured, current, old_modes, new_modes):
+            raise ValueError("SVG engine provenance cohort differs")
+        if provenance_changed:
+            metadata_changes.add(provenance)
     approved_changes, new_test_files = _specific_source_changes(
         root, measured_head, current, measured, old_modes, new_modes, git_bytes,
-        allow_test_changes=allow_test_changes,
+        allow_test_changes=allow_test_changes, same_binary_rust=same_binary_rust,
     )
+    def binary_rust_path(path: str) -> bool:
+        parts = path.split("/")
+        product = len(parts) >= 4 and parts[0] == "crates" and parts[2] == "src"
+        vendor = (len(parts) >= 6 and parts[:4] == [
+            "crates", "katana-render-runtime", "vendor", "svg-engine",
+        ] and parts[4] in {"usvg", "resvg"})
+        return (product or vendor) and path.endswith(".rs") and parts[-1] != "build.rs"
+    rust_changes = {path for path in set(current) | set(measured)
+                    if same_binary_rust and binary_rust_path(path)
+                    and (current.get(path) != measured.get(path)
+                         or old_modes.get(path) != new_modes.get(path))}
+    if any(mode != "100644" for path in rust_changes
+           for mode in (old_modes.get(path), new_modes.get(path)) if mode is not None):
+        raise ValueError("changed Rust source mode differs")
     old_checked = {path: mode for path, mode in old_modes.items()
-                   if program_records is None or not is_program(path)}
+                   if (program_records is None or not is_program(path)) and path not in rust_changes}
     new_checked = {path: mode for path, mode in new_modes.items()
-                   if (program_records is None or not is_program(path)) and path not in new_test_files}
-    measured_checked = {path for path in measured if program_records is None or not is_program(path)}
+                   if (program_records is None or not is_program(path)) and path not in new_test_files
+                   and path not in rust_changes}
+    measured_checked = {path for path in measured
+                        if (program_records is None or not is_program(path)) and path not in rust_changes}
     current_checked = {path for path in current
-                       if (program_records is None or not is_program(path)) and path not in new_test_files}
+                       if (program_records is None or not is_program(path)) and path not in new_test_files
+                       and path not in rust_changes}
     if (old_checked != new_checked or current_checked != measured_checked
             or set(current) != set(new_modes) or set(measured) != set(old_modes)):
         raise ValueError("source membership or mode differs")
@@ -856,7 +1040,7 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
                            if current.get(path) != measured.get(path)
                            or old_modes.get(path) != new_modes.get(path)))
     program_changes = {path for path in changed if program_records is not None and is_program(path)}
-    test_changes = set(changed) - ALLOWED - program_changes - approved_changes
+    test_changes = set(changed) - ALLOWED - program_changes - approved_changes - rust_changes - metadata_changes
     if test_changes:
         if not allow_test_changes or not test_changes <= TEST_PATHS | {TEST_PARENT}:
             raise ValueError("source changes exceed documentation allowance")
@@ -875,7 +1059,7 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
                for path, checksum in TEST_ANCHOR_SHA.items()):
             raise ValueError("test-only connection baseline differs")
     if any(old_modes.get(path) != "100644" for path in changed
-           if path not in program_changes and path not in new_test_files):
+           if path not in program_changes and path not in new_test_files and path not in rust_changes):
         raise ValueError("changed source is not a regular non-executable file")
     for name, (checksum, size) in current.items():
         path = root / name
@@ -884,4 +1068,4 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
                 or hashlib.sha256(path.read_bytes()).hexdigest() != checksum):
             raise ValueError("working source differs from current committed tree: " + name)
     return SourceReuseContext(measured_head, eligible, dict(measured), changed,
-                              bool(test_changes or new_test_files), bool(program_changes))
+                              bool(test_changes or new_test_files or rust_changes), bool(program_changes))

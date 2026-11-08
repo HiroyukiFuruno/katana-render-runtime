@@ -1776,7 +1776,8 @@ def _source_for_validation(root: Path, before: JsonObject, *, git_query: GitQuer
 def _verified_reuse_context(root: Path, measured_head: str, *, git_query: GitQuery | None,
                             allow_test_changes: bool = False,
                             program_records: SourceRecords | None = None,
-                            program_modes: Mapping[str, str] | None = None) -> object:
+                            program_modes: Mapping[str, str] | None = None,
+                            same_binary_rust: bool = False) -> object:
     from html_performance_source_reuse import validate_reuse_source
     require(re.fullmatch(r"[a-f0-9]{40}", measured_head) is not None, "invalid measured HEAD")
     eligible = git(root, "rev-parse", "HEAD", git_query=git_query).strip()
@@ -1794,7 +1795,7 @@ def _verified_reuse_context(root: Path, measured_head: str, *, git_query: GitQue
                                      text_query, bytes_query, allow_test_changes=allow_test_changes)
     return validate_reuse_source(root, measured_head, current, measured, text_query, bytes_query,
                                  allow_test_changes=allow_test_changes, program_records=program_records,
-                                 program_modes=program_modes)
+                                 program_modes=program_modes, same_binary_rust=same_binary_rust)
 
 
 class PartialEpochCurrentBuild(NamedTuple):
@@ -1802,6 +1803,14 @@ class PartialEpochCurrentBuild(NamedTuple):
     manifest_sha256: str
     artifact_path: str
     artifact_sha256: str
+
+
+class CurrentBuildKwargs(TypedDict, total=False):
+    current_build: PartialEpochCurrentBuild
+
+
+def _current_build_kwargs(current: PartialEpochCurrentBuild | None) -> CurrentBuildKwargs:
+    return {"current_build": current} if current is not None else {}
 
 
 def _verified_partial_epoch_source(
@@ -2050,7 +2059,65 @@ def _v3_authenticate_programs(root: Path, head: str, items: _ProgramItems,
     if not isinstance(tree, bytes):
         raise ValueError("fixed epoch program tree differs")
     modes = _modes(tree)
+    # WHY: 固定 epoch から既存認証を維持し、今回の移行だけ別に固定する。
+    from html_performance_source_reuse import (
+        SAME_BINARY_REVIEWED_BASE, reviewed_same_binary_migration, reviewed_same_binary_self,
+    )
+    pending = []
+    self_path = "scripts/release/html_performance_source_reuse.py"
     for live_head, live_items in endpoints:
+        if self_path not in {name for name, _, _ in live_items}:
+            pending.append((live_head, live_items))
+            continue
+        live_data = _git_output(root, ("show", live_head + ":" + self_path), git_query=git_query)
+        try:
+            base_data = _git_output(root, ("show", SAME_BINARY_REVIEWED_BASE + ":" + self_path),
+                                    git_query=git_query)
+            base_ancestor = (git(root, "merge-base", SAME_BINARY_REVIEWED_BASE, live_head,
+                                 git_query=git_query).strip() == SAME_BINARY_REVIEWED_BASE)
+        except subprocess.CalledProcessError:
+            base_ancestor = False
+            base_data = None
+        if not base_ancestor or base_data == live_data:
+            pending.append((live_head, live_items))
+            continue
+        require(isinstance(base_data, bytes) and isinstance(live_data, bytes)
+                and reviewed_same_binary_self(live_data)
+                and reviewed_same_binary_migration(self_path, base_data, live_data,
+                                                    old_mode="100644", new_mode="100644"),
+                "reviewed source migration differs")
+        base_records = committed_records(root, SAME_BINARY_REVIEWED_BASE, git_query=git_query)
+        base_programs = {path: value for path, value in base_records.items()
+                         if path.startswith("scripts/") or path == "Justfile"}
+        live_programs = {name: (checksum, size) for name, checksum, size in live_items}
+        actual_live = committed_records(root, live_head, git_query=git_query)
+        require(live_programs == {path: value for path, value in actual_live.items()
+                                  if path.startswith("scripts/") or path == "Justfile"}
+                and set(base_programs) == set(live_programs), "reviewed program membership differs")
+        base_tree = _git_output(root, ("ls-tree", "-r", "-z", SAME_BINARY_REVIEWED_BASE),
+                                git_query=git_query)
+        live_tree = _git_output(root, ("ls-tree", "-r", "-z", live_head), git_query=git_query)
+        require(isinstance(base_tree, bytes) and isinstance(live_tree, bytes),
+                "reviewed program tree differs")
+        if not isinstance(base_tree, bytes) or not isinstance(live_tree, bytes):
+            raise ValueError("reviewed program tree differs")
+        base_modes, live_modes = _modes(base_tree), _modes(live_tree)
+        for path in base_programs:
+            require(base_modes.get(path) == live_modes.get(path), "reviewed program mode differs")
+            if base_programs[path] == live_programs[path]:
+                continue
+            old_blob = _git_output(root, ("show", SAME_BINARY_REVIEWED_BASE + ":" + path),
+                                   git_query=git_query)
+            new_blob = _git_output(root, ("show", live_head + ":" + path), git_query=git_query)
+            require(isinstance(old_blob, bytes) and isinstance(new_blob, bytes)
+                    and reviewed_same_binary_migration(path, old_blob, new_blob,
+                                                       old_mode=base_modes.get(path),
+                                                       new_mode=live_modes.get(path)),
+                    "unreviewed program migration")
+        base_items = tuple((name, checksum, size) for name, (checksum, size) in sorted(base_programs.items()))
+        _v3_authenticate_programs(root, head, items, ((SAME_BINARY_REVIEWED_BASE, base_items),),
+                                  git_query=git_query, memory_policy_version=memory_policy_version)
+    for live_head, live_items in pending:
         live_programs = {name: (checksum, size) for name, checksum, size in live_items}
         live_committed = committed_records(root, live_head, git_query=git_query)
         live_selected = {path: value for path, value in live_committed.items()
@@ -2165,9 +2232,23 @@ def _host_load_source_records(bundle: Bundle, root: Path, expected: JsonObject,
                               memory_policy_version=memory_policy_version)
 
 
+def _require_reviewed_same_binary_program(root: Path, live_head: str, *,
+                                          git_query: GitQuery | None) -> None:
+    from html_performance_source_reuse import SAME_BINARY_REVIEWED_BASE, reviewed_same_binary_self
+
+    require(git(root, "merge-base", SAME_BINARY_REVIEWED_BASE, live_head,
+                git_query=git_query).strip() == SAME_BINARY_REVIEWED_BASE,
+            "reviewed same-binary base is not an ancestor")
+    source = _git_output(root, ("show", live_head + ":scripts/release/html_performance_source_reuse.py"),
+                         git_query=git_query)
+    require(isinstance(source, bytes) and reviewed_same_binary_self(source),
+            "reviewed same-binary source differs")
+
+
 def _verified_v3_reuse_context(bundle: Bundle, root: Path, measured_head: str,
                                expected: JsonObject, *, git_query: GitQuery | None,
-                               memory_policy_version: str | None = None) -> object:
+                               memory_policy_version: str | None = None,
+                               same_binary_rust: bool = False) -> object:
     from html_performance_source_reuse import _modes
 
     pair = _object(expected.get("sourcePair"), "v3 source pair")
@@ -2189,6 +2270,8 @@ def _verified_v3_reuse_context(bundle: Bundle, root: Path, measured_head: str,
     modes = _modes(raw_tree)
     require(set(programs) <= set(modes), "v3 program modes missing")
     live_head = git(root, "rev-parse", "HEAD", git_query=git_query).strip()
+    if same_binary_rust:
+        _require_reviewed_same_binary_program(root, live_head, git_query=git_query)
     live_records = committed_records(root, live_head, git_query=git_query)
     live_programs = {path: value for path, value in live_records.items()
                      if path.startswith("scripts/") or path == "Justfile"}
@@ -2205,6 +2288,7 @@ def _verified_v3_reuse_context(bundle: Bundle, root: Path, measured_head: str,
     return _verified_reuse_context(
         root, measured_head, git_query=git_query, allow_test_changes=True,
         program_records=live_programs, program_modes={path: live_modes[path] for path in live_programs},
+        same_binary_rust=same_binary_rust,
     )
 
 
@@ -3689,10 +3773,55 @@ def validate_expected_builds(bundle: Bundle, root: Path, first_expected: JsonObj
     return validated
 
 
+def _require_measurement_execution_environment(before: JsonObject) -> None:
+    tool = _object(before.get("toolContext"), "measurement tool context")
+    environment = dict(os.environ)
+    environment["GIT_OPTIONAL_LOCKS"] = "0"
+    encoded = json.dumps(environment, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    require(tool.get("environmentSha256") == hashlib.sha256(encoded.encode()).hexdigest()
+            and tool.get("platform") == platform.platform() and tool.get("cpuCount") == os.cpu_count(),
+            "measurement execution environment differs")
+
+
+def _same_binary_v3_reuse_context(
+    bundle: Bundle, root: Path, expected: JsonObject, result: JsonObject,
+    current: PartialEpochCurrentBuild, *, git_query: GitQuery | None,
+    memory_policy_version: str | None = None,
+) -> object:
+    """実行済み worker と現 HEAD の build を再認証してから Rust 差分を許す。"""
+    digest(current.manifest_sha256)
+    digest(current.artifact_sha256)
+    current_bundle = Bundle(current.directory)
+    require(sha256(current.directory / "bundle.json") == current.manifest_sha256,
+            "current build bundle manifest SHA differs")
+    live_head = git(root, "rev-parse", "HEAD", git_query=git_query).strip()
+    require(current_bundle.manifest.get("head") == live_head, "current build bundle HEAD differs")
+    endpoints = _object(expected.get("endpointRefs"), "measurement endpoint refs")
+    before = bundle.json(endpoints.get("before"))
+    _, old = _v3_origin_and_endpoints(bundle, root, expected, result, before,
+                                      bundle.json(endpoints.get("end")), git_query=git_query)
+    ref = current_bundle.relative_reference(current.artifact_path, current.artifact_sha256)
+    new = _validate_build_proof(current_bundle, root, ref, "candidate", git_query=git_query)
+    require(new.get("head") == live_head, "current build source differs")
+    for key in ("binarySha256", "lockSha256", "cargoExecutableSha256", "rustcExecutableSha256",
+                "buildEnvironmentSha256", "toolVersions", "cargoConfigPins",
+                "cargoLauncher", "rustcLauncher", "guardPython"):
+        require(key in old and key in new and old[key] == new[key],
+                "measured and current build differ: " + key)
+    _require_measurement_execution_environment(before)
+    context = _verified_v3_reuse_context(
+        bundle, root, _text(bundle.manifest.get("head"), "measured HEAD"), expected,
+        git_query=git_query, memory_policy_version=memory_policy_version, same_binary_rust=True)
+    require(sha256(current.directory / "bundle.json") == current.manifest_sha256,
+            "current build bundle changed during verification")
+    return context
+
+
 def _verify_impl(directory: Path, root: Path, *, git_query: GitQuery | None = None,
             require_catalog: bool, diagnostic_catalog: bool = False,
                          reuse_context: object = None, remote_context: object = None,
-                         memory_policy_version: str | None = None) -> JsonObject:
+                         memory_policy_version: str | None = None,
+                         current_build: PartialEpochCurrentBuild | None = None) -> JsonObject:
     bundle = Bundle(directory)
     head = git(root, "rev-parse", "HEAD", git_query=git_query).strip()
     attempts = _objects(bundle.manifest["attempts"], "viewport attempts")
@@ -3707,13 +3836,19 @@ def _verify_impl(directory: Path, root: Path, *, git_query: GitQuery | None = No
                 and remote_context.head == head
                 and remote_context.manifest_sha256 == sha256(directory / "bundle.json"),
                 "remote evidence context differs")
+    if current_build is not None:
+        require(reuse_context is not None and first_is_v3 and bool(attempts),
+                "current build reuse requires v3 source context")
     if reuse_context is None:
         require(bundle.manifest["head"] == head, "bundle is not current HEAD")
     else:
         from html_performance_source_reuse import SourceReuseContext
         if not isinstance(reuse_context, SourceReuseContext):
             raise ValueError("invalid source reuse context")
-        checked_context = (_verified_v3_reuse_context(
+        checked_context = (_same_binary_v3_reuse_context(
+            bundle, root, first_expected, bundle.json(attempts[0]["result"]), current_build,
+            git_query=git_query, memory_policy_version=memory_policy_version)
+            if current_build is not None else _verified_v3_reuse_context(
             bundle, root, reuse_context.measured_head, first_expected, git_query=git_query,
             memory_policy_version=memory_policy_version)
             if first_is_v3 else _verified_reuse_context(
@@ -3981,13 +4116,14 @@ def _verify_impl(directory: Path, root: Path, *, git_query: GitQuery | None = No
 def _verify(directory: Path, root: Path, *, git_query: GitQuery | None = None,
             require_catalog: bool, diagnostic_catalog: bool = False,
             reuse_context: object = None, remote_context: object = None,
-            memory_policy_version: str | None = None) -> JsonObject:
+            memory_policy_version: str | None = None,
+            current_build: PartialEpochCurrentBuild | None = None) -> JsonObject:
     require_no_git_replacements(root, git_query=git_query)
     result = _verify_impl(directory, root, git_query=git_query, require_catalog=require_catalog,
                           diagnostic_catalog=diagnostic_catalog, reuse_context=reuse_context,
                           remote_context=remote_context,
-                          **({"memory_policy_version": memory_policy_version}
-                             if memory_policy_version is not None else {}))
+                          **_current_build_kwargs(current_build),
+                          **_memory_policy_kwargs(memory_policy_version))
     require_no_git_replacements(root, git_query=git_query)
     return result
 
@@ -4022,14 +4158,19 @@ def _verify_source_reuse_impl(directory: Path, root: Path, measured_manifest_sha
     pair_value = first.get("sourcePair")
     pair = _object(pair_value, "source pair") if pair_value is not None else {}
     is_v3 = pair.get("schema") == "krr-html-performance-source-epoch-v3"
+    current_build = PartialEpochCurrentBuild(build_directory, build_manifest_sha256,
+                                             build_artifact_path, build_artifact_sha256)
     def source_context() -> object:
         if is_v3:
-            return _verified_v3_reuse_context(bundle, root, measured_head, first, git_query=git_query,
-                                               memory_policy_version=memory_policy_version)
+            require(bool(attempts), "reuse evidence has no attempts")
+            return _same_binary_v3_reuse_context(bundle, root, first, bundle.json(attempts[0]["result"]),
+                                                 current_build, git_query=git_query,
+                                                 memory_policy_version=memory_policy_version)
         return _verified_reuse_context(root, measured_head, git_query=git_query, allow_test_changes=True)
     context = source_context()
     measured = _verify(directory, root, git_query=git_query, require_catalog=True,
                        reuse_context=context,
+                       **_current_build_kwargs(current_build if is_v3 else None),
                        **_memory_policy_kwargs(memory_policy_version))
     _require_formal_release_result(measured)
     if not attempts:
@@ -4063,21 +4204,16 @@ def _verify_source_reuse_impl(directory: Path, root: Path, measured_manifest_sha
             require(old_build[key] == new_build[key], "measured and current build differ: " + key)
         endpoint = _object(first.get("endpointRefs"), "measurement endpoint refs")
         before = bundle.json(endpoint.get("before"))
-        tool = _object(before.get("toolContext"), "measurement tool context")
-        environment = dict(os.environ)
-        environment["GIT_OPTIONAL_LOCKS"] = "0"
-        encoded = json.dumps(environment, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        require(tool.get("environmentSha256") == hashlib.sha256(encoded.encode()).hexdigest()
-                and tool.get("platform") == platform.platform() and tool.get("cpuCount") == os.cpu_count(),
-                "measurement execution environment differs")
+        _require_measurement_execution_environment(before)
     require(new_build["head"] == eligible_head and source_context() == context
             and sha256(directory / "bundle.json") == measured_manifest_sha256
             and sha256(build_directory / "bundle.json") == build_manifest_sha256,
             "source changed during reuse validation")
     result: JsonObject = {"measuredHead": measured_head, "eligibleHead": eligible_head,
                           "reuseEligibility": True, "measuredResult": measured}
-    if context.artifact_equivalence or context.program_equivalence:
-        result.update({"reuseKind": ("program-source-artifact-equivalence-v1"
+    if is_v3 or context.artifact_equivalence or context.program_equivalence:
+        result.update({"reuseKind": ("binary-bound-product-source-equivalence-v1" if is_v3 else
+                                     "program-source-artifact-equivalence-v1"
                                      if context.program_equivalence else
                                      "test-source-artifact-equivalence-v1"),
                        "measuredManifestSha256": measured_manifest_sha256,

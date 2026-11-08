@@ -2,96 +2,39 @@
 
 ## 現在の実行地点（2026-11-08、以下の過去結果と区別する）
 
-- [/] 通常書式化後の現行全回帰は `vendor-boundary-root-collection-3xlci_fb` で実0、5,675/5,675件成功・既存29件skip、標準report/collection receiptとsource前後同一9352を回収した。カバレッジ86,896/88,120行、98.6109850%・未1,224行、report SHA `f37f1aa6c0f729eb180449566bc8ff821121555b513e72019766c4231ada2b2a`。書式と分割で計測行が変わっており、旧1,223行との増減を性能・品質改善の代用にしない。現行AST・静的17項目・全Clippyも各実0。通常commit→旧17件の歴史的V4監査→新SDKと私有原本の初回表示・描画/代表性能→未カバー補完→最終117/84/全性能/完全gate→Draft/review/3OS/merge/公開の順で続ける。未計測の現行画像・性能を過去の合格へ合算しない。
-- [/] #119の通常書式化前の全回帰は `vendor-boundary-root-collection-szsjk5sa` で実0、5,675/5,675件成功・既存29件skip。追加blur9件も全成功。標準reportとcollection receiptまで作成し、前後9352 sourceは同一。カバレッジは86,439/87,662行、98.6048687%・未1,223行、root report SHA `3b1a38401d27c75ca8db7b530ea3cfc1d5c968017824a8578cbe48ac8c56ec4c`。これは収集成功であり100%ゲート合格ではない。独立したresvg/SVG parser差分レビューに具体的P0–P2なし。新SDK・描画・性能の再認証は残る。
-- [/] 文字・出力6ファイルを通常のrustfmtへ揃え、整形で長くなった処理を追加分割した。現行AST `vendor-boundary-final-ast-_18megzf`、静的17項目 `vendor-boundary-source-static-wyft_x04`、rootとperformance両armのClippy `vendor-boundary-clippy-awgcbq1b` は各実0。先行Clippyはroot compile成功後の容量確認で実1として保持し、保護25ref・aliasなし・実行中buildなしを確認して、旧performance両profileと旧release cacheだけを既存Cargo cleanで整理した。閾値と新しいrootのwarm成果物は維持。現行Rustの全回帰を回収して通常commitへ進む。
-- [/] 次のカバレッジ補完候補を3担当で分類し、主担当が `tmp/quality/resumed-owner-r3509/coverage-cohort-plan-nov08.md` へ保存した。LLVMの欠落行一覧はreportのstdoutにあり、summaryの1,223行とは集計差があるため完全内訳へ転用しない。純粋なテスト判定と実装helperを分け、到達不能に見える製品guardを自動除外しない。既存の実入力・mutation tableを再利用する。
-- [/] 先行run `vendor-boundary-root-collection-h_7572yp` は同5,675件成功後のreport admissionで実1。保護25refとaliasを照合し、既存Cargoのdev profile clean `vendor-boundary-dev-clean-ls0hzcab` を排他付きで実0、約2.8GiBを整理してtargetは約4.2GiBへ減少した。閾値・rootのprofile data・保護原本は維持。再開時のNextest checkpointがidentity-or-shapeで拒否され全件再実行となった。旧identityの比較情報不足により原因は未確定、現runの固定digest projectionは保存した。成功結果の再利用と実Moon hit/restoreは引き続き実証対象とする。
-- [/] #119の135関数は例外37件を外した標準ASTで違反0。`vendor-boundary-final-ast-jzwl2wkc` は実0、`vendor-boundary-source-static-ebz_v9uq` は標準静的17項目が実0、`vendor-boundary-clippy-nejmfy3t` はrootとperformance両armのClippyが実0。各実行はcanonical native source manifestを前後採取し、全9352ファイルの同一性を確認した。由来情報は全48fileの元SHA/ライセンスを維持し、承認済み変更37fileの移植後SHA/bytesだけ同期。先行の型/規則失敗は原runへ保持した。
-- [/] 元のbox blur二軸の同値性を確認する9caseをowned testへ追加した。手計算のRGBA期待値とpremultiplied-alpha条件を共有表で検査する。`vendor-boundary-related-nck3wnhv` は歴史的V4移行の固定8b endpointと未知endpoint/mode拒否の2回帰、および由来4回帰が実0。Rust実テストはこれから既存のroot-test-and-coverage共有実行で一括回収し、旧98.55%・未1256行を現行値へ置き換える。旧44件の性能採取をSVG変更後の現行合格へ合算しない。製品の描画・代表性能確認後に未カバー補完を行い、最終ソースの全117/84と性能・完全gateを確定する。
-- [/] v4の23ファイルは `8b2350297690b283986dba957a43061805069b6c` へ通常hook付きcommit、実0。GitHubのv0.4.24はDraftで未公開、対象branchのOpen PRは0件。続いてkal.jsonのfunction-length例外37件を除去した。`vendor-function-length-inventory-g11unlkj` の標準ASTは実101で135関数/37ファイルを検出、対象外error0・source前後一致。正確な一覧は同runの `function-inventory.json` へ保存し、描画45件/16file・SVG解析44件/14file・文字/出力46件/7fileを非重複担当へ実装委譲した。全担当freeze後、標準fmt→AST→compile/既存回帰→描画/性能再認証を行う。
-- [x] メモリv4の差分適用・統合検査を完了。`memory-v4-foundation-g6bl0fmv` の標準静的13項目が実0。関連はmemory20・evidence6・promotion25・reference10・reuse CLI12・source reuse20・producer203・verifier197・local proof10・TS履歴12件が各実0。最終reference/有限移行2回帰は `memory-v4-final-targeted-f8e2y69g` で実0。先行失敗は各runへ保持し、変更のないmodule成功は反復せず区別して回収した。これは検証処理の検査成功であり、HTML性能84条件の正式合格ではない。
-- [/] v4は原版のraw/評価を保持して再評価し、観測済み不合格を未観測へ戻さず保持する。完成bundle後のpolicy/summary/最終検証で例外やSIGINTが起きても、全attemptを含む負の終端記録を排他的に作成し、元例外を維持する。新規重複4組は規則を緩和せず共通化した。過去17条件の原観測も別途認証してv4評価し、過去v3で再採取された2条件の良い数値だけを採用しない。正式な実raw認証は未完。
-- [/] 最新指示で#119の外部135関数も分割することが確定した。37ファイルのfunction-length例外を撤回し、処理・公開API・描画・性能を維持して責務単位で分割する。まず適用済みメモリv4差分の静的検査・関連回帰・通常commitを完了し、その保存点から製品側の分割へ進む。分割後のSDKと既存44条件の再利用適格性を正式検証し、旧SDKの採取数を最新版の合格数へ転用しない。
-- [/] RSSは引き続き記録・評価し、macOSのアプリ負担量は原因調査の補助として扱う。一時的なコード常駐・allocator保持と持続増加を分け、表示速度を優先する。本人は指標の違いの説明を求めており、主担当が上記方針を提案した。
-- [ ] 最新のメモリ評価は別版 `html-memory-v4` へ移行する。v2/v3の原判定・raw・receiptを維持し、中央値だけを通常量の1MiBかつ5%枠へ入れ、p95/最大値を各8MiBかつ25%の一時枠へ入れる。中央値が小幅枠を超える場合の同phase短縮10%以上かつ1ms以上、保持8MiBかつ25%と持続増加拒否、全phase時間非劣化・各表示3秒未満・84条件・5+25回を維持する。主担当の数値選定であり、正式なv4合格は未取得。
-- [/] `html-v3-fixed-fe5-resume-8xfyz99z` はbundleに44条件分を保存したが、mainのSIGINTが最終検証へ入り実254となった。元source前後一致・子0、元bundle/raw/result/logは保持。`html-v3-negative-terminal-recovery-ka7c_jgd` は既存writerで未作成だった負の終端receiptをexclusive生成し実0。complete=[]・policyAccepted=false・formalAccepted=falseであり、44件成功の証明ではない。SDK/入力等の再認証とv4評価が必要で、残40条件の採取も続ける。復旧中の2失敗は各別runに保持した。
-- [ ] 完全rawの観測済IDと合格IDを分離し、不合格を未観測へ戻して黙って再採取する経路を修正する。最終検証の例外/SIGINT時も、原例外を維持して全attemptを含む負の終端記録を残す。取得済みの原17条件もv4で確認し、再採取で良い値だけを選ばない。
-- [/] policy/controller/historyの3系統の差分案はignored patch artifactとして準備済みで、適用・検査は未実施。独立レビューで中央値境界、旧2/3の回帰維持、昇格時の全条件RSS非劣化と順序依存回帰を補完した。基準昇格は全体の時間/RSS非劣化と実改善がある場合だけ行い、トレードオフを許容した受入結果も履歴へ記録する。base SHA照合→尾部の回帰1件を実RED→差分適用→同GREEN→新版有限pair/CPU pin確定→静的/関連回帰→通常commit→原raw再認証の順に進める。
+- [/] 135関数分割の基点はHEAD `81570a15263b2d47206c2d953e8721f55e255eb3`。37ファイルの分割とfunction-length例外37件除去をcommit済み。基点の通常hook成功、AST・静的17項目・両arm
+  Clippy・全root回帰は各実0。現行rootは5,675/5,675成功、29 skip、coverage 86,896/88,120 = 98.610985%、未計測1,224行。収集成功を100%合格とみなさず、追加テスト適用・再計測と未計測0を完了する。
+- [x] 現SDKで製品Mermaid PNGを独立raw JSと照合し117/117が99以上、最低99.085711、R01/R02合格。receipt
+  `tmp/quality/resumed-owner-r3509/mermaid-product-shared-sdk-81570a15-q9blivak` SHA
+  `5f20c9499bec4b93f9d226d8a5944f606836f0ac10b68a8e1a4eb49c8fc65153`。
+- [x] 現SDKのHTML描画は84/84が90以上、最低92.14438、出力フォント完全一致。追加の現行source確認はscroll 286/286が90以上、41 browser tests、6 feature cases、9 TOC
+  reportsが実0。動的更新・入力・埋込図・スクロール契約の証跡を性能合格へ混同しない。
+- [x] 私有HTML原本3回の初回frameは0.926148–0.939434417秒、中央値0.936828416秒（全て3秒未満）。これは初回表示の独立証拠であり、原本はGitへ含めない。
+- [/] HTMLメモリv4の境界・評価器・履歴実装と関連単体検証は完了。v2/v3 rawを保持し不合格を消さず、通常量median 1MiB/5%、p95/max 8MiB/25%、retained
+  8MiB/25%、持続増加拒否、全phase速度非劣化を維持する。正式性能判定は未完。
+- [ ] 現行sourceの正式HTML性能84条件を完了する。full run `html-v4-full-81570a15-fhkfeww0` は終了コード1 `BatchBudgetExhausted` で正常にclosed negative
+  endpointを保存。`policyAccepted=true`、complete 28/84、paired 28、nonComparable 0、checks 560、phase 8400、残り56条件。receipt SHA
+  `9ab10e7010e6bfb8bfbff63e2a8d481ca35f8acce45ff6b4bdde195758ac3cae`、safe summary
+  `tmp/quality/resumed-owner-r3509/html-v4-full-81570a15-fhkfeww0/safe-summary.json`。ただし `formalAccepted=false`
+  で全体未合格。未完条件を採取し、途中結果・過去HEAD・別SDKを合算せず、表示3秒未満、phase時間/peak/retained RSSの受入境界、連続増加拒否を全84条件で確認してGit性能履歴へ記録する。基準昇格は既存改善条件を満たす場合だけ行う。
+- [x] 旧17条件は `historical-v4-audit-0htual8y` で原本を認証し、17/17 accepted、実0。historical-v4-reassessmentでありcurrentAcceptance=false。現行28条件へ合算せず、元receipt・SDK・失敗履歴を保持する。
+- [/] coverage補完候補patchは適用済み。更新後AST `coverage-cohort-ast-3uyqlpf9` は実0。全root collection `coverage-cohort-root-collection-ztpe49ob` は実0、5,725/5,725成功・29 skip、source前後一致。coverageは86,997/88,141 = 98.70207962242316%、未計測1,144行（338 files）、report SHA `18ea97776d868bcfd039ffec751a792a1185e920c4213a08050045d53bad58bd`。前回の1,224行から80行減少したが100%未達。追加境界patchを並行準備する。分母/欠落行は現行reportと一致させ、到達不能に見える製品guardを自動除外しない。coverage
+  100%・未計測0を達成する。
+- [/] same-binary performance reuseは適用済み。実行ファイルとbuild/input/resource/font/environmentの認証を正式readerで再実行し、未知の非Rust変更・vendor変更は有限認証を維持する。parse5 8.1.0→8.1.1だけを更新し、HTML性能に非依存のpackage/bun限定差分を81570起点・同一binary証明後だけ受入する有限認証を追加。更新後 `coverage-cohort-source-static-4wxqjrat` は静的17項目実0、`coverage-cohort-related-aecy6xtm` はPython670件/Bun provenance4件実0、各source前後一致。独立review具体的P0–P2なし。真正な新SDK証明と正式再利用・新parse5環境のMermaid比較は未完。Rust直接34/34とActionsの各専用branch pinは最新を確認済み。
+- [ ] 実Moon native coverage cache lifecycleを既存Moon 2.6.5/CASと既存validatorで実証する。現在の全dependency DAGと共有Cargo/PlantUML lockを守り、same-source
+  hit、outputs除去後のCAS restore、strict collection validation、tamper拒否、拒否後の正規fresh recollectionを別々に記録する。root
+  output以外の保護原本・registry予約を変更せず、失敗したvalidator後は旧receiptを再利用しない。単なるruntime asset CASやcache表示をnative acceptanceとしない。
+- [ ]
+  依存関係とlockfileをrelease直前に確認し、互換な最新依存を既存完全gateで評価する。ゲートやcoverage基準は下げない。外部private資料・認証情報・性能原rawをGit/公開artifactへ含めず、保護refを守って不要cache等を既存の安全なcleanupで整理する。
+- [ ] Release DoDを全て完了する: 最終sourceでMermaid 117/117 >=99、HTML 84/84
+  >=90・出力font完全一致・表示3秒未満・全性能/RSS条件、scroll/TOC/JS/dynamic/input/embedded図の回帰、coverage 100%/未計測0、native cache/CI reuse実証。#106のHTML
+  99後続も独立follow-upとして保持する。
+- [ ] v0.4.24はDraftのままレビューし、Codex review・自己レビュー・Issueコメント/formal review/review
+  thread全取得、全指摘への個別reply/resolve、P0/P1ゼロを確認してReadyへ昇格する。required Linux x64/Windows x64/macOS Apple Silicon CI成功後、expected HEAD
+  SHA付き保護mergeを行い、GitHub Releaseと3 crate公開を確認する。
+- [ ] #108/#109/#114/#119のIssue状態・close条件を検証し整理する。#114 native cache/CI条件は上記実証後に判定する。PR/公開後は既存の安全なbranch/worktree/stash/cache cleanupを確認する。
+- [/] Credential owner rotationは別ownerの非blocking follow-up。private資料保護とtracked-file scanの確認を維持するが、rotation確認を本リリースの停止条件へ追加しない。
 
-- [/] v2の初期1MiB制限は単発RSS最大値と解放後allocator保持量にも適用され、通常量の差が約0.1MiBでも未合格になった。`html-v2-fixed-fe5-resume-aWK0pUjI` はSIGINTを1回送り、子0・source/seed/旧pilot不変を確認して実254・closed receiptへ封緘。attempted17・complete7・policyAccepted=false・formalAccepted=false、receipt SHA `c76fa8183a298991f313c1f1a4a6b36624a85fb1cdc416aa061be62d69444756`。元policy・raw・receiptの判定を、その時点の結果として保存する。
-- [x] `html-retention-heap-diagnostic-Pn3e1nrd` で同e0 workerと実fixture3条件を各30回開閉し、READY/ACK境界でApple heap/vmmapを観測した。全実0。stacked960はmalloc resident12.5→22.7MiBに対しlive約2064→2075KiB、translucent1280はresident13.6→20.5MiBに対しlive約2062→2073KiB。source無変更で、allocatorの解放済み領域保持と整合する。ただしattachによる影響がある診断値であり、通常の速度・RSS正式値とは別に保持する。
-- [ ] 主担当判断として新基準を別version `html-memory-v3` へ分離する。通常量のmedian/p95は1MiBかつ5%以内、単発maximumは既存案の8MiBかつ25%以内を独立評価する。通常量が小幅枠を超える場合は従来どおり同phaseの検証済み10%以上・1ms以上の短縮を要する。解放後RSSの一時的保持は8MiBかつ25%以内とし、全窓・末尾窓の持続増加検出を維持する。表示3秒未満・全phase時間非劣化・旧12条件の扱い、製品のallocatorとcache制御を維持する。
-- [ ] v2の旧評価器と原結果を保持し、v3は元rawを認証して別評価する。SDK e0・入力/資源/フォント/30回protocol/既存25組の時間取得は不変。完全な既存採取は再評価・再利用し、欠測だけを取得する。全84正式検証とGit性能履歴への記録は未完。履歴は合格した全数結果を保存し、基準のactive更新は既存の改善条件を満たした場合だけ行う。source凍結後に静的→関連回帰→通常commit→実測再開とし、全release回帰・最終manifest同期はsource安定後にまとめる。
-
-- [x] メモリv2実装を `391fce40dd96ddfd9227e718dc1240d41bb51914` へ通常commit。fmt・AST・root/harness Clippyを含むhookは実0、32fileを統合し、先行の品質fixture7fileは `f2c8c12a912e8b22730cd5156e93ed3c29ce23cd` へ分離した。通常buildのv2実測はまだ0/84であり、実装commitを性能合格へ置き換えない。
-- [x] `depends-update-mutations-retry-hu2hgca0` の既存標準mutationが実0。root/harnessのuuidを1.29.0から1.29.1へ更新。smallvec1.16.5は公式差分がCI・コメント・整形のみのため、固定parentの非SDK計測条件を保ち1.16.4を両lockで保持する判断をmainが行った。将来の更新は自動許可しない。`dependency-freshness-verify-7re4roll` はfoundation、updater13・closure11・freshness74の計98unit、実freshness528依存が全段実0、source前後一致。Actions63参照のupstream一致と区別して記録する。
-- [x] 依存更新は `d678c077`、release inclusion・manifestの暫定同期は `fe5b455b`、通常計測と保持量modeの等価性は `ea4f8e2a` へ通常commitした。`current-perf-sdk-fe5b455b-5ylc7ht0` のSDK proofは実0、worker SHA `e0c3850a661701536b85e85ee11bdd471c8fafdeefdd8cad7b321c675aed8271`。同SDKのv2 pilotは1/1合格し、その後の17条件の封緘結果は先頭項目に記録した。Pythonのみのv3追加を理由に同SDKを再buildしない。
-- [/] v3統合の初回foundationは `memory-v3-foundation-hqxlrrpi` で実1。新規テストの未承認重複2pairを検出したため、テスト観点を保持して共通化する。別担当の統合reviewで履歴記録の親側がv3要求を渡していないP1も検出し、子との同一評価・前後再検証を回帰で固定する。元v2結果の再認証・v3正式84件は未完。
-- [/] v3の重複共通化・親子版の伝播・未知版拒否を修正し、`memory-v3-foundation-20as4jdr` の標準foundation13taskと `memory-v3-type-knabz6_d` のstrict型213fileが実0。`memory-v3-related-oh1g6rdc` のmemory14・evidence6・promotion24・reference9・reuse CLI11・source reuse20が実0。`memory-v3-remaining-ut49sawy` はsource reuse20・producer199が実0、verifier190は旧test期待の不一致2件で実1。拒否の挙動を維持して期待値を修正し、verifier全体と未実行のTS履歴を先行回収する。全release回帰・正式性能の成功へ転用しない。
-- [x] 旧test期待2件の修正後、`memory-v3-type-svqr4un6` のstrict型213fileと `memory-v3-foundation-3h107580` の標準foundation13taskが実0。`memory-v3-verifier-final-43lb4dnj` はverifier全190件とTS履歴が実0、実行source前後一致。先行成功の変更がないmoduleは反復せず、変更されたverifierと未実行のTSを検証した。通常commit後、既存SDK・seed・closed rawを厳格に認証してv3の実採取へ戻る。
-- [/] v3実装を `8475a28a` へ通常commitし、fmt・AST・root/harness Clippyのhookは実0。実resume `html-v3-fixed-fe5-resume-vxiynxiu` は採取開始前にprogram認証で実1、source前後一致・旧batch不変。診断で、有限移行表からTS履歴の実装/テスト2fileだけが漏れていたと特定した。他の移行対象と旧rawの判定を変更せず、この2fileの正確な移行とprogram差分全体の網羅回帰を追加する。v3の正式性能合格は未取得。
-- [x] 上記2fileを含む18組の有限移行へ修正。`memory-v3-type-6o4b3f3a` のstrict型213fileと `memory-v3-foundation-skknv6wv` のfoundation13task、`memory-v3-source-admission-gtc1v1c3` の全変更網羅・改変/未知path/mode拒否の2回帰が実0。変更のない190件全体やTS10件を反復せず、新しい認証差分を限定検証した。通常commit後に新runで実resumeを再開し、前回の実1は保持する。
-- [ ] 次はv3の統合静的検査・関連回帰・通常commit、既存SDK/rawの厳格な再利用と欠測採取、全84条件の正式判定・Git履歴への保存。release inclusionとmanifestの最終同期はsource安定後に実施する。最後の全Python回帰1278件のmanifest1失敗は保存し、最終gateで全体を回収する。root未カバー1256は旧source値、cache実再利用・最新版の描画・完全gate・review/3OS/公開も未完。
-- [/] native cacheの読取り結論を訂正。通常root report/receipt/anchorは既存validatorでinodeを束縛せず、別途保護stampのない出力は既存Moon CASから復元・再認証できる。新framework/出力overrideの追加を既定にしない。実行計画は `tmp/quality/resumed-owner-r3509/native-cache-binding-review-nov08.md` に保存し、実hit/restoreを先に、anchorをinvalidateする改変拒否・正規再収集を後に行う。実証は未実行。
-
-- [/] `verifier-historical-terra-kehho8yu` はLint・strict型・verifier全186件が実0。標準release全回帰は1278件で実1、残った失敗は既存HEADのrelease内容manifest不一致1件（既存opt-in skip1）だった。3件の歴史正例は既存認証済み7d8c/e1bc/3469のimmutable bytesへ固定し、現v2を旧epochへ再利用する拒否負例を保持。v2 productionを旧v1と等価にする例外は追加していない。
-- [x] `release-target-head-sync-lod04wk2` で既存recipeによるHEAD5fのmanifest同期と対象22件が実0。これは現HEADの暫定同期であり、新しい実装commit後に必要commit・manifest・snapshotを再同期する。`dependency-freshness-nov08-_wau9a25` はRust lockの最新互換解決との差で実1。JS/runtimeは未判定のまま、検証済み差分の通常commit後に既存mutation recipeで依存更新を取り込む。Actionsは `actions-freshness-nov08-07uylulw/safe-summary.json` で全63参照のworktree pinと担当のupstream照合結果が一致し、更新候補0。primary rawをmainが保持した証跡とは区別する。
-- [ ] 次は通常hook commit、依存更新・対応検査、新SDK proof、通常buildでv2の1条件pilot、全84への展開。root coverage1256未カバー、cache実再利用、最新版の描画と完全品質ゲート、Draft review/3OS/公開/Issue close/cleanupは未完。全体Python1278件の実1や旧測定の失敗を成功に置き換えない。
-
-- [x] `retention-coverage-final-bIdEN5XJ` は標準AST・静的基盤・performance-harness coverageが実0。baseline76件・1163/1163行、candidate82件・1207/1207行、実BINによる30回開閉・誤ACK・EOF・操作失敗の回帰3件が成功し、source前後一致。これは計測harnessの100%であり、rootの未カバー1256行や通常buildのv2性能合格を代替しない。
-- [/] `verifier-v2-release-final-u7d04tcn` はPython Lint・厳格型・v2限定回帰が実0、標準release全回帰は1252件で実1（error1・既存opt-in skip1）、source前後一致。歴史cohortを現v2 productionと等価に扱うテストfixtureを、既存許可のimmutable Git endpointへ固定して修正中。現v2を旧v1と等価認証する許可は追加しない。同file全回帰を先行して同類の不整合をまとめて回収し、その後に全回帰を行う。
-- [ ] 関連全回帰・通常hook commit後、新SDK proofを生成し、既存producerの `--max-conditions 1` で通常時間25組とretention5+25回の初回実測を採取する。v2正式合格は現在0/84。raw/旧v1結果の書換え・再認定はせず、新SDK・環境・資源・入力の厳格束縛を確認して全84へ進む。
-
-- [/] v2追加の現ソースは `memory-v2-ast-foundation-t7aksb2w/0` のAST79件が実0。直後のfoundationはRuff1件、次はstrict mypy8件で実1となり、検査・型を緩めず修正した。`memory-v2-foundation-retry-wmy3k481`、さらにprivacy修正後の `memory-v2-foundation-retry-q7cs4k4d` と歴史cohort修正後の `memory-v2-foundation-retry-k1xwqhmj` はそれぞれ既存foundation実0。成功した各runのsource前後一致を照合し、失敗原本も保持した。実Rust probeの追加回帰後はASTを再確認する。
-- [x] `retention-python-unit-q6wr_t_1` はpinned Pythonでmemory14・retention15・promotion19・reference8の計56件が全成功、全4段実0、source前後一致。これは後述のprivacy・昇格入口修正前の限定結果であり、修正後の全回帰・正式84条件の成功には加算しない。
-- [/] 追加レビューのP1を2件修正。新規基準昇格にv2全84件を必須化し、旧v1履歴は参照用途で保持する。retentionの新しいnative FD closureは、生環境辞書を含めないv2 projectionをworkerの観測へ厳密結合する。既存NativeCLIの非公開v1原本は維持し、書換え・repin・公開を行わない。修正後の実回帰と新Bundleの公開境界は未確認。
-- [/] `html-release-python-full-az0y1jaf` は標準release Python回帰218件で実1、歴史promotion遷移がworktreeのv2を旧仕様と等価要求するunit1件が失敗した。正例を既存5f889a3eのimmutable blobへ固定し、現v2を旧遷移と誤認しない負例を追加。変更したtest-only fileのexact bytes/modeだけを既存の有限認証へ登録し、production v2を旧v1と同等にする例外は追加しない。旧正解データ・旧判定・原rawは保持する。再回帰は未完。
-- [ ] 次は実Rust `--retention` の30回SAMPLE/READY/ACK・誤ACK/EOF/操作失敗を既存実BINへ追加し、AST→静的→標準Python回帰→通常hook commit→新SDK proof→v2実測を進める。通常workerへ実行modeが増えるため、旧SDKとの同一性を未確認で断定しない。同一性・再利用適格性が成立しない場合は正確な新sourceで必要な84条件を採取し、過去の完了数を現版へ付け替えない。root coverage1256未カバー、cache実再利用、レビュー/3OS/公開など既存残DoDも維持する。
-- [/] 最新ユーザー指示により、最大RSSだけの一律非劣化から、表示時間・増加量・解放後の保持量を分けたv2性能判定へ変更する。小幅の一時増加や速度向上とのトレードオフを許容し、時間とメモリの同時悪化、不要なメモリの継続増加は拒否する。下のv1 RSS不合格は当時の結果として保持し、元receipt・policy・rawを変更せず新判定を別保存する。v2の合格件数はまだ0件であり、基準変更だけで旧失敗を合格へ数えない。
-- [/] v2の保守的な初期設定は主担当が選定し、実測を踏まえ最終レビューする。各phaseのpeak median/p95/max増加がそれぞれ1MiB以内かつ5%以内なら、時間非劣化を維持して許容する。それを超える場合は8MiB以内かつ25%以内に限り、同phaseの25組で検定済みの速度改善と中央値10%以上・1ms以上の短縮を要する。他phaseの時間悪化は免除しない。表示3秒未満は各frameへ適用し、全Yスクロールの累計時間へ新制限を追加しない。
-- [ ] 保持量は既存操作を同一processでwarm-up5回＋測定25回繰り返し、session close/dropと結果JSON破棄後のRSS/VMSを既存psutilで採取する。初末5点のRSS中央値差が1MiBまたは初期中央値の5%を超えれば拒否する。予算内でも、有意な上向き傾向が最後10点まで続く場合は拒否する。定常化するcacheと継続増加を区別し、有限の測定だけであらゆるleakの不存在を保証したとは扱わない。欠測・失敗・source/binary/input/font等の束縛不一致は合格にしない。旧版が失敗する既存12条件へ、新たに旧版の保持量一致を追加要求しない。
-- [/] 保持量の上向き傾向は、既存SciPy 1.18.1の片側Kendallを用い、84条件×全窓/末尾窓2検定でfamily alpha 0.05を補正する。条件ごとの0.05判定による偶発的な不合格の積み重なりを避ける。速度・peakの評価器、保持量probe、履歴schemaを分担して実装中。新規の依存ライブラリ・公開API・crateは追加しない。
-- [/] `ast-lint-retention-policy-4jhsuh3j` の標準ASTは実101、56成功・外部workspace規則1失敗。別probe binaryとの共有のため追加した公開free function2件が拒否されたため、別binary案を退役し既存SDKのcandidate専用 `--retention` 経路へ最小化する。通常 `--worker` の処理は維持する。公式SDK証明・既存候補coverage・終了回収をそのまま使い、新しいbuild roleや品質laneを増やさない。新sourceのAST再検証・実計測は未完。
-- [/] 単一SDKへの修正後の限定ASTは `ast-ts-memory-policy-yxp0qvz5` で実0。ただし当時の新規Rust2fileは未追跡だったため全Rust合格に転用しない。履歴の既存2unitはactive referenceが先頭recordであると誤認していた。期待するreject観点を保持して選択をactiveReferenceRecordIdへ直し、`html-history-bun2-oef5ohx4` で8/8成功・51 assertions・実0、diffcheck0、対象2fileの前後SHA一致を確認した。
-- [/] v2のpure判定・既存raw再計算・最終verifier接続・30cycle観測とraw reader・履歴のv1/v2境界を実装し検証中。`retention-foundation-static-9wrqmaq6` はPython Lintの5件で実1、後続検査の合格へ転用しない。定数属性setattr4件は直接代入へ修正、当時未完成だったlegacy環境認証を共通化して仕上げる。既存正式catalogの非fixed-epoch経路も壊さず維持し、v2の不足を旧v1の成功で補完しない。正式release recipeにv2全84条件の必須確認を追加する。
-- [x] cold属性revert後の `5f889a3e` は `current-perf-sdk-5f889a3e-tqsd5gvo` のSDK proofで実終了0・buildProofValidated=true。通常計測probe SHA `8cb8395c54e2cecb15c78a69e678a6c97dbfd8dccc0fac8eabd3304b8bcc839d` は8daのworkerと同一。これは現SDKのビルド証明であり、保持量・v2判定・全84条件の正式合格は未確認。
-- [/] `4345121d` のcold属性候補は、同HEADのSDK proof成功後、標準先頭4条件・25組・1,200 phaseを採取して実終了0。1条件通過・3条件RSS不合格、時間の劣化検出0、RSS中央値差の全phase範囲−16384～+180224Bで、改善候補として不採用にした。`html-first4-cold-layout-4345121d-3dpouk7y/safe-summary.json`、receipt SHA `672957f529164075a2cd662b1d7fc5789ba3589cf18164ab1059b3c3abc53746`。`20b8a9ec` の属性1行だけを通常revertで戻し、追加回帰と原結果を保持する。旧8daの7/10通過や別診断の成功と合算しない。
-- [x] 追加cohortのAST79件・source-static-foundationは `ast-foundation-static-current-YU1BfOiN` で実0。実runtimeは `native-nextest-catalog-fivecase-x6vh4035` の同一binary SHA・実catalogへ照合した5件が全成功、診断実終了0・0.078秒、前後source一致。外側の後処理がstdoutだけを探して実1になった点は原記録を保持し、stderrの5実PASSと実summaryを別の訂正記録で照合した。完全品質ゲートや性能候補の有効性の代用にはしない。
-- [/] 先行 `native-nextest-fivecase-I9cGBBPU` はmain指定名のthe欠落で4件だけ実行され、さらにログpath探索の曖昧な入れ子regexが後処理で停滞した。検査本体0とhelper中断130を区別して保存。再実行は同一binaryのbounded lookup・実catalogの完全名5件から選択し、5/5成功。catalog選択・後処理監視・両stream照合をAGENTSへ明文化し、元4件を5件に補完していない。
-- [x] `8da926fd` の実製品Mermaid PNGを独立raw JSと全117件再比較し、117/117が99以上、不合格0。EN59最低99.085711、JA58最低99.10801000000001。`mermaid-product-shared-sdk-8da926fd-345p4jpa/comparison/receipt.json` はcompleted/accepted/R01/R02すべて成功、実終了0、SHA `8d30a9bfd21e38050f92a02f28176df7a1a3d3e65bfb6be4af49fb3d782e24e4`。
-- [ ] 同じSDKを共有したHTML性能は、先行async1条件の25組診断がpolicy通過後、標準全84採取の最初の10条件で7条件通過・3条件RSS増加を確認。所有producerへ1回SIGINTし、実終了254・closed receiptと3,000 phase recordsを保持した。残74条件は未採取、全体は未合格。`html-full84-fixed-sdk-8da926fd-qiuh2_xv/safe-summary.json`。失敗はasync620の全Y/再表示/warm RSS中央値+81920B、async960とdecoration/clipped1280のcold +114688B。時間の劣化検出0。単独診断や過去版の成功で3失敗を置き換えない。
-- [/] HTMLの通常layoutからエラー整形を分離する1属性は、上述の同条件比較でRSS差を解消できず取り消した。clipのinactive/collapsed軸・不正corner radius、欠損フォントの装飾fallback、KDR routeの入力境界は既存driverへ追加し、AST79件・runtime5件とfoundationを通過した。追加回帰、商用判定、入力原本、基準画像、閾値を保持し、実コードの常駐差を次に調べる。
-- [/] 先行 `ast-foundation-static-8da-onC89zQk` はfoundation実0、AST実101（55成功・新規1失敗）。新MathJax変異が先行statement-count検査へ達したため、両tableを担当別に再確認し、目的のresource-load検査へ届く単一statement変異へ修正した。続くmagic numbers/comment指摘も値を維持して修正し、最新 `ast-foundation-static-current-YU1BfOiN` はAST79件・foundationがともに実0。検査や期待を緩めず、元の失敗ログ・前後source一致を保持した。
-- [ ] 既存root coverageは依然 `5cac0ae4` の85,476/86,732（98.5518609%）、未カバー1,256行。現存performance baseline/candidate JSONはそれぞれ1,163/1,163・1,170/1,170の100%だが、最終sourceの適格性は別途確認する。古いbaseline未95を現存reportの課題として数えない。元rootの標準missing-lines stdoutは889位置であり、LLVM summaryの1,256と同じ集計ではないため、分母や未カバー数を書き換えない。
-- [ ] vendor37ファイル・135関数の関数長例外は、#119の検査対象維持条件との相違を説明して本人回答待ち。暫定設定の実装・Lint通過を最終採用許可と扱わない。独立した実装・検証は継続する。
-- [ ] 最終sourceのHTML84・性能・Mermaid適格性、全品質ゲートと実装coverage100%/未計測0、#114の実native cache/CI再利用、Draftレビュー/個別reply-resolve/Ready/必須3OS/保護merge、GitHub Releaseと既存3crate公開、#108/#109/#114/#119整理、安全なcleanupを完了する。HTML最終99の#106はOPEN維持。公開日時は未確定。
-
-## 最新の再開地点（2026-11-07）
-
-- [x] SVG前処理の文字列コピー方式を `210784e4` で限定比較。関連91/91と通常hookは成功したが、async1条件25組の性能は不合格。初回RSS中央値差+311296bytes、時間6phaseは劣化検出なし。`html-memory-async-svg-copy-diagnostic-210784e4-_mi85hau/safe-summary.json` に記録し、`23de569d` で通常revert、2file全bytesが実験前と一致することを確認。正式84条件の合格へ加算しない。
-- [ ] 依存更新の最終確認でActions12usesとkatana-ast-lint0.5.5を更新中。npm直接27件はlatest一致。Skia0.157は既存RSS不合格のため0.156を保持、flate2 1.1.11は不変の比較基準・PNG計測の非SDK依存閉包を変えるため1.1.10を保持する。保持は新版性能劣化の証明と区別する。
-- [x] AST0.5.5が旧版の検出漏れを修正して検出した自社file-length25件を、3担当とmainの責務分割で解消。公開経路・処理・テストを維持し、製品200行・test300行の上限も維持した。test-only外部モジュールの命名を整え、root coverageの標準report引数にファイル名除外がないことも確認。`actions-ast055-static-uy7ufho_` の旧失敗は保持し、最終結果は後述の実検査へ対応付ける。
-- [x] 取り込み済みSVGエンジンの外部由来function-length135件は、採用元・ライセンス・更新時の再評価理由を記した37ファイル限定の規則例外として扱った。既存の全設定と自社実装の閾値・対象範囲を維持し、更新後ASTを通過した。実装カバレッジの対象は減らしていない。
-- [x] 上記5件はActions更新後の旧Just SHA照合による連鎖と確定。既存contractと負例の現行pinだけ同期し、`actions-contract-unit-ryk7gnp4` のworkflow31件・CI証跡61件・cache再利用8件が全成功。`ast055-boundary-integrated-static-q_0mfhoe` のfoundationも実0。完全ゲート・3 OS CIの代用にはしない。
-- [x] 初回のlinter helperの可視性7件・相対import1件と、統合コンパイルで判明した既存参照経路を各担当が修正。`ast055-cli-final-static-kn2aig8i` はAST・完全source-static・標準Clippyとperformance両armの全phaseが実0。続く `ast055-full-rust-regression-_n8o9h_p` の標準Nextestは5,660件成功・29 skip・失敗0、実0、HEADとdiff SHAの前後一致をmainも照合。no-report診断であり正式coverage100%の代用にしない。
-- [x] 完了した診断のproject binaryだけを `ast055-retire-diagnostic-binaries-x8jf2fs7` の既存Cargo cleanで整理。保護25参照の前後検証は実0、debugと依存cacheを保持しLLVM用成果物を1,092,328 KiB削減した。固定容量上限を変更せず、原結果・画像基準・私有資料も保持した。
-- [x] 上記の描画境界・KAL更新を `70d20b71`、Actionsの12固定参照と登録契約を `b62e80f2` へ通常hook付きcommit。`actions-owned-contract-regression-_7v01suk` の標準Bun検査は690/690成功・589.19秒、実0。公開までのIssue整理には既存の #108/#109/#114 を含め、最終HTML99の #106 を維持する。
-- [x] #119の外部KAL校正を `ast_linter_length_regressions.rs` へ追加し、既存 `just ast-lint` の同じfilterで2ケース成功。外部cfg(test)/path宣言後の製品200/201行と、関数brace差30/31・宣言33:4・実current31を、公開KAL0.5.5と既定設定で検査する。TempDirで入力を所有し終了時に整理する。`kal119-regression-static-6q3gixi2` のAST/foundationはともに実0。最新版依存指示に沿って0.5.5を採用し、0.5.4の検出修正を含む版として扱う。
-- [ ] #119の「検査対象維持」とvendor37ファイルの新しい関数長例外には範囲の不一致がある。既存外部例外方針を広く解釈して追加した点を本人へ説明し、例外採用か外部135関数の分割かを確認中。例外の最終採用・公開判定は回答に従い、独立する描画・性能・カバレッジ作業を継続する。
-
-- [x] `394e890b` の独立 raw JS 比較は Mermaid 製品 PNG 117/117件が99以上（最低99.085711）、不合格0。`mermaid-product-394e890b-clean-retry-edu4u3gk/comparison/receipt.json` は completed/accepted、R01/R02ともtrue、実終了0。`d5ca9a64` のHTMLは84/84条件が90以上（最低92.14438）、出力フォント完全一致、全スクロール・動的状態・入力・埋込図の標準検査も合格した。後続のテスト・検証コード変更後も最終公開ソースとの適格性を確認する。
-- [ ] `3f235f7e` の HTML 性能は83/84条件合格。残る日本語・英語混在の1条件には最大RSSの差があり、Brotli 6.2に戻した診断でも差は解消しなかった。Brotli 6.3に戻し、不要な中間レイアウトとCSS宣言キャッシュの保持を短縮した `87846987` は関連回帰35件と同条件の25組測定で既存判定を通過した。全縦スクロールと再表示の最大RSS中央値差は＋192 KiB。新旧結果を合算せず、現行の正式84条件を別途判定する。
-- [ ] `5cac0ae4` の全体テストは5,660件合格・29件スキップ。行カバレッジは85,476/86,732（98.5519%）、未カバー1,256行。Desktopの私有原本の初回フレームは `a6b21479` で3回測定し中央値0.911秒、正式84条件へは加算しない。
-- [ ] `d5ca9a64` の正式性能は5条件採取（3合格・2条件でRSS増加）で原因調査を先行するため所有producerを中断し、終端254と原結果を保持した。未採取79条件。async条件のRSS増加は初回＋160 KiB、全縦スクロール・再表示＋176 KiB。独立したlldb/vmmap診断では確保量が近く、実行コードのresident差が＋144 KiBだったが、正式性能合格や完全な因果証明には使わない。判定方法に関する質問は回答待ち、現行RSS基準は維持する。独立するカバレッジ対応を継続する。
-- [ ] `5cac0ae4` の候補SDK proofは成功したが、Mermaid再照合は画像生成前のJust起動で終了した。producerがargv[0]依存のlauncherを実体Python dispatcherへ置き換えていた。呼出path・dispatcher・Just本体を別々に認証し、Justの固定builtin照会をowned queryとして前後検証する修正を進める。直近117図は旧sourceで合格し、現sourceは画像の採点待ち。公開条件と既存原証跡を維持する。
-- [/] 起動修正の標準静的検査 `just-launcher-checked-chain-m9m4yysz` は、実hostのbuildとreceipt検証まで成功し、後続Biomeの未解決8件で終了1。非null assertion2件・認知複雑度1件・整形5件を限定修正する。型/重複の先行失敗も保持し、後続Bunテストは静的成功後に実行する。性能履歴の整形は数値・全record・現行基準の同一性を確認し、測定結果は変えない。
-- [/] `just-launcher-checked-chain-b8ek_9lx` の標準静的検査は終了0・未解決指摘0。続く関連Bun6ファイルは978件中974件成功・新規4件失敗、303.09秒、終了1。失敗はfixture内のcontrol Justfileの上書きとprocess記録の更新漏れ。製品の照合条件を維持してfixtureを修正し、該当4件を先に再確認する。既存974件を変更後の完全ゲートの代用にしない。
-- [x] Just起動修正は `a2fab616` へ通常hook付きcommit。最終標準静的検査と対象14件は `just-launcher-final-targeted-33l0dafd` で終了0。実CLIコンパイル後の容量超過は既存 `just clean` で整理し、保護25参照の前後一致・固定上限維持を確認。取得済み候補SDKを再buildせず新runへ厳格に束縛し、上記117件の製品比較を完了した。
-- [ ] 既存性能結果の再利用では、Just/検証コードの変更も既存のprogram closureへ入る。review済み旧/新bytes・size・modeに限定した整合を既存の仕組みへ追加し、元5条件を変更せず適格性を検証する。同一binaryだけを全体合格の根拠にしない。RSS判定は維持したまま、独立するlinterの未到達分岐への回帰追加も並行する。
-- [/] 上記の認証はJust関連19ファイルとRust test-only 20ファイル・不変接続元15件に限定して実装。`performance-reuse-final-all-units-m930ydf7` のPython Lint/厳格型とsource認証20件・epoch認証10件が終了0。過去の承認済み移行の正例が現物へ追従していた9失敗は、正しい履歴Git blobへ固定し、古いlockと現行lockを別々に検査する形へ修正した。新しいlockや未知sourceの許可は追加していない。実証跡での再利用は未確認。
-- [x] linterの追加10入力は既存2driverで検証。`linter-resource-edge-ast-4wu60ps6` の標準ASTは終了0、関係する56件とworkspace2件・外部19件が成功。検査範囲外だったclosure変異は実在する引数個数の検査へ届く入力に修正し、製品の検査条件は維持した。Rustの全体カバレッジは次の正式計測まで上記1,256未カバーを維持する。
-- [ ] 最終ソースの描画・性能再検証、完全品質ゲートとカバレッジ100%・未計測0、Draft PR・Codexレビューと指摘対応、Ready後の3 OS CI・保護merge、GitHub Release・3 crateの公開、Issue close・安全な整理が残る。
 
 ## 最新の再開地点（2026-11-06）
 

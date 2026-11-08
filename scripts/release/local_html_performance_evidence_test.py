@@ -226,6 +226,9 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
             reused["reuseKind"] = "program-source-artifact-equivalence-v1"
             self.assertEqual(proof.collect("owner/repo", 3, measured, request)["verification_kind"],
                              "program-source-artifact-equivalence-v1")
+            reused["reuseKind"] = "binary-bound-product-source-equivalence-v1"
+            self.assertEqual(proof.collect("owner/repo", 3, measured, request)["verification_kind"],
+                             "binary-bound-product-source-equivalence-v1")
             reused["reuseKind"] = "unknown-artifact-equivalence-v1"
             with self.assertRaisesRegex(ValueError, "unsupported reuse kind"):
                 proof.collect("owner/repo", 3, measured, request)
@@ -252,6 +255,9 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
         self.assertTrue(self.accepted(comment))
         program_payload = {**payload, "verification_kind": "program-source-artifact-equivalence-v1"}
         program_comment = {**self.comment, "body": proof.MARKER + "\n" + json.dumps(program_payload)}
+        self.assertTrue(self.accepted(program_comment))
+        program_payload["verification_kind"] = "binary-bound-product-source-equivalence-v1"
+        program_comment["body"] = proof.MARKER + "\n" + json.dumps(program_payload)
         self.assertTrue(self.accepted(program_comment))
         program_payload["verification_kind"] = "unknown-artifact-equivalence-v1"
         program_comment["body"] = proof.MARKER + "\n" + json.dumps(program_payload)

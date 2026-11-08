@@ -16,7 +16,8 @@ import verify_html_performance_evidence as gate
 SCHEMA = "krr-html-performance-source-reuse-request-v1"
 ELIGIBILITY_SCHEMA = "krr-html-performance-source-reuse-eligibility-v2"
 ARTIFACT_REUSE_KINDS = ("test-source-artifact-equivalence-v1",
-                        "program-source-artifact-equivalence-v1")
+                        "program-source-artifact-equivalence-v1",
+                        "binary-bound-product-source-equivalence-v1")
 
 
 class ReuseRequest(TypedDict):
@@ -92,6 +93,20 @@ def _stamp(metadata: os.stat_result) -> tuple[int, int, int, int, int, int]:
             metadata.st_mtime_ns, metadata.st_ctime_ns)
 
 
+def _eligibility_matches(stored: object, current: gate.JsonObject | None) -> bool:
+    if stored == current:
+        return True
+    if not isinstance(stored, dict) or current is None:
+        return False
+    old_kind = stored.get("reuseKind")
+    if (old_kind not in {"test-source-artifact-equivalence-v1",
+                         "program-source-artifact-equivalence-v1"}
+            or current.get("reuseKind") != "binary-bound-product-source-equivalence-v1"):
+        return False
+    # WHY: 再認証結果の名称だけを比較時に読み替え、過去の記録は変更しない。
+    return {**stored, "reuseKind": current["reuseKind"]} == current
+
+
 def verify_reuse_request(request_path: Path, root: Path, *,
                          expected_measured_dir: Path | None = None,
                          expected_measured_manifest_sha256: str | None = None,
@@ -133,7 +148,7 @@ def verify_reuse_request(request_path: Path, root: Path, *,
                     raise ValueError("invalid stored memory policy version")
         original = (_validate(request, root.resolve(strict=True), memory_policy_version=original_version)
                     if has_eligibility else None)
-        if has_eligibility and (eligibility != original or original is None
+        if has_eligibility and (not _eligibility_matches(eligibility, original) or original is None
                 or original.get("reuseKind") not in ARTIFACT_REUSE_KINDS):
             raise ValueError("stored eligibility differs from revalidation")
         result = (_validate(request, root.resolve(strict=True), memory_policy_version=memory_policy_version)

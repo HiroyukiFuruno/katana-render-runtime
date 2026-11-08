@@ -17,7 +17,224 @@ def git(root: Path, *args: str) -> str:
     return subprocess.check_output(["git", "-C", str(root), *args], text=True)
 
 
+def historical_reuse_endpoint(root: Path, path: str) -> bytes:
+    if path == "scripts/release/html_performance_source_reuse_test.py":
+        return subprocess.check_output(["git", "-C", str(root), "show",
+                                        reuse.SAME_BINARY_REVIEWED_BASE + ":" + path])
+    return (root / path).read_bytes()
+
+
 class SourceReuseTest(unittest.TestCase):
+    def test_parse5_cohort_requires_exact_pair_and_same_binary_scope(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        measured_head = reuse.SAME_BINARY_REVIEWED_BASE
+        eligible_head = "a" * 40
+        names = ("package.json", "bun.lock", "Cargo.lock")
+        old_bytes = {name: (b"cargo" if name == "Cargo.lock" else
+                     subprocess.check_output(["git", "-C", str(repository), "show",
+                                              measured_head + ":" + name])) for name in names}
+        new_bytes = {name: (b"cargo" if name == "Cargo.lock" else (repository / name).read_bytes())
+                     for name in names}
+        def record(value: bytes) -> tuple[str, int]:
+            return hashlib.sha256(value).hexdigest(), len(value)
+        measured = {name: record(value) for name, value in old_bytes.items()}
+        current = {name: record(value) for name, value in new_bytes.items()}
+        old_modes = {name: "100644" for name in names}
+        new_modes = dict(old_modes)
+        def text_query(args: Sequence[str]) -> str:
+            if args[0] == "rev-parse":
+                return eligible_head
+            if args[0] == "merge-base":
+                return measured_head
+            if args[0] == "status":
+                return ""
+            raise AssertionError(args)
+        def bytes_query(args: Sequence[str]) -> bytes:
+            if args[0] == "show":
+                return old_bytes[args[1].split(":", 1)[1]]
+            if args[0] == "ls-tree":
+                modes = old_modes if args[-1] == measured_head else new_modes
+                return b"".join(f"{mode} blob {'0' * 40}\t{name}\0".encode()
+                                for name, mode in sorted(modes.items()))
+            raise AssertionError(args)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            for name, data in new_bytes.items():
+                (root / name).write_bytes(data)
+            def check(*, enabled: bool = True) -> reuse.SourceReuseContext:
+                return validate_reuse_source(root, measured_head, current, measured, text_query, bytes_query,
+                                             same_binary_rust=enabled)
+            self.assertEqual(set(check().changed_paths), {"package.json", "bun.lock"})
+            with self.assertRaises(ValueError):
+                check(enabled=False)
+            self.assertFalse(reuse._reviewed_parse5_cohort(
+                root, "b" * 40, current, measured, old_modes, new_modes, bytes_query))
+            for name in ("package.json", "bun.lock"):
+                original = new_bytes[name]
+                invalid = [old_bytes[name], original + b" "]
+                if name == "bun.lock":
+                    invalid.extend((original.replace(b'"entities": "^9.0.0"', b'"entities": "^8.0.0"'),
+                                    original.replace(b"sha512-EcR/6W", b"sha512-FcR/6W")))
+                for changed in invalid:
+                    with self.subTest(path=name, changed=changed == old_bytes[name]):
+                        (root / name).write_bytes(changed)
+                        current[name] = record(changed)
+                        with self.assertRaises(ValueError):
+                            check()
+                (root / name).write_bytes(original)
+                current[name] = record(original)
+                new_modes[name] = "100755"
+                with self.assertRaises(ValueError):
+                    check()
+                new_modes[name] = "100644"
+            current["Cargo.lock"] = record(b"changed")
+            with self.assertRaises(ValueError):
+                check()
+            current["Cargo.lock"] = measured["Cargo.lock"]
+            new_modes["extra/Cargo.lock"] = "100644"
+            current["extra/Cargo.lock"] = record(b"new")
+            with self.assertRaises(ValueError):
+                check()
+
+    def test_same_binary_source_scope_and_real_git_membership(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            paths = {
+                "crates/katana-render-runtime/src/old.rs": b"old",
+                "crates/katana-render-runtime/src/deleted.rs": b"deleted",
+                "crates/katana-render-runtime/vendor/svg-engine/usvg/writer.rs": b"vendor",
+                "crates/katana-render-runtime/vendor/svg-engine/PROVENANCE.json": b"metadata",
+                "crates/katana-render-runtime/build.rs": b"build",
+                "Cargo.lock": b"lock",
+                "tests/fixtures/input.html": b"input",
+            }
+            for name, data in paths.items():
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            git(root, "init", "-q")
+            git(root, "add", ".")
+            git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+                "commit", "-qm", "old")
+            old = git(root, "rev-parse", "HEAD").strip()
+            (root / "crates/katana-render-runtime/src/old.rs").write_bytes(b"changed")
+            (root / "crates/katana-render-runtime/src/deleted.rs").unlink()
+            (root / "crates/katana-render-runtime/src/new.rs").write_bytes(b"new")
+            git(root, "add", "-A")
+            git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+                "commit", "-qm", "new")
+            current = git(root, "rev-parse", "HEAD").strip()
+            measured = committed_records(root, old)
+            live = committed_records(root, current)
+            def text_query(args: Sequence[str]) -> str:
+                return git(root, *args)
+            def bytes_query(args: Sequence[str]) -> bytes:
+                return subprocess.check_output(["git", "-C", str(root), *args])
+            def check(*, same_binary: bool = True) -> reuse.SourceReuseContext:
+                return validate_reuse_source(root, old, live, measured, text_query, bytes_query,
+                                             same_binary_rust=same_binary)
+            self.assertTrue(check().artifact_equivalence)
+            with self.assertRaises(ValueError):
+                check(same_binary=False)
+            (root / "Cargo.lock").write_bytes(b"dirty")
+            with self.assertRaises(ValueError):
+                check()
+            (root / "Cargo.lock").write_bytes(b"lock")
+            vendor = root / "crates/katana-render-runtime/vendor/svg-engine/usvg/writer.rs"
+            vendor.write_bytes(b"changed")
+            git(root, "add", str(vendor))
+            git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+                "commit", "-qm", "unsynchronised vendor")
+            live = committed_records(root, git(root, "rev-parse", "HEAD").strip())
+            with self.assertRaisesRegex(ValueError, "provenance cohort differs"):
+                check()
+            vendor.write_bytes(b"vendor")
+            git(root, "add", str(vendor))
+            git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+                "commit", "-qm", "restore vendor")
+            live = committed_records(root, git(root, "rev-parse", "HEAD").strip())
+            for name in ("Cargo.lock", "crates/katana-render-runtime/build.rs",
+                         "tests/fixtures/input.html",
+                         "crates/katana-render-runtime/vendor/svg-engine/PROVENANCE.json"):
+                path = root / name
+                original = path.read_bytes()
+                path.write_bytes(original + b"changed")
+                git(root, "add", name)
+                git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+                    "commit", "-qm", "unsafe")
+                live = committed_records(root, git(root, "rev-parse", "HEAD").strip())
+                with self.subTest(path=name), self.assertRaises(ValueError):
+                    check()
+                path.write_bytes(original)
+                git(root, "add", name)
+                git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+                    "commit", "-qm", "restore")
+                live = committed_records(root, git(root, "rev-parse", "HEAD").strip())
+            (root / "crates/katana-render-runtime/src/new.rs").chmod(0o755)
+            git(root, "update-index", "--chmod=+x", "crates/katana-render-runtime/src/new.rs")
+            git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+                "commit", "-qm", "unsafe mode")
+            live = committed_records(root, git(root, "rev-parse", "HEAD").strip())
+            with self.assertRaises(ValueError):
+                check()
+
+    def test_svg_provenance_cohort_is_exact_and_keeps_licenses_and_inventory(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        base = reuse.SAME_BINARY_REVIEWED_BASE
+        measured = committed_records(repository, base)
+        tree = subprocess.check_output(["git", "-C", str(repository), "ls-tree", "-r", "-z", base])
+        modes = reuse._modes(tree)
+        current = dict(measured)
+        prefix = "crates/katana-render-runtime/vendor/svg-engine/"
+        current[prefix + "PROVENANCE.json"] = (
+            "07c779270618a9c2d0133367f247abf09bf2227b83b8af8bca3e64bc1fa9e145", 28884)
+        current[prefix + "usvg/writer.rs"] = (
+            "c73e39790272815346f2640bf582e17e0768db002da2b54f0c74f8c6e19f88ec", 60490)
+        current[prefix + "resvg/filter/component_transfer.rs"] = (
+            "734564bd09c8a77fae2f04104bcaeee6117e329ccb8bfa3040ae91829500857b", 2373)
+        program = "scripts/runtime-assets/svg-engine-provenance.ts"
+        current[program] = ("f57f6244c0b4557592b0a2b2eaca20ca0906d27deff4c20796e6025b9def57a5", 5233)
+        self.assertTrue(reuse.reviewed_svg_provenance_change(measured, current, modes, modes))
+        for path in (prefix + "PROVENANCE.json", prefix + "usvg/writer.rs",
+                     prefix + "resvg/filter/component_transfer.rs", prefix + "LICENSE-MIT",
+                     prefix + "README.md", program):
+            with self.subTest(path=path):
+                changed = {**current, path: ("0" * 64, current[path][1])}
+                self.assertFalse(reuse.reviewed_svg_provenance_change(measured, changed, modes, modes))
+                self.assertFalse(reuse.reviewed_svg_provenance_change(
+                    measured, current, modes, {**modes, path: "100755"}))
+        added = {**current, prefix + "usvg/unknown.rs": ("0" * 64, 1)}
+        self.assertFalse(reuse.reviewed_svg_provenance_change(measured, added, modes, modes))
+
+    def test_v4_authenticates_fixed_historical_base_without_live_self_alias(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        path = "scripts/release/html_performance_source_reuse.py"
+        old = subprocess.check_output(["git", "-C", str(repository), "show",
+                                       "a39bd810784a70c3bd34013256a437ad7239c9bd:" + path])
+        base = subprocess.check_output(["git", "-C", str(repository), "show",
+                                        reuse.SAME_BINARY_REVIEWED_BASE + ":" + path])
+        self.assertTrue(reuse.v4_reassessment_program_change(
+            path, old, base, old_mode="100644", new_mode="100644"))
+        self.assertFalse(reuse.v4_reassessment_program_change(
+            path, old, base + b" ", old_mode="100644", new_mode="100644"))
+
+    def test_reviewed_self_rejects_body_constant_duplicate_and_mode_changes(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        path = "scripts/release/html_performance_source_reuse.py"
+        old = subprocess.check_output(["git", "-C", str(repository), "show",
+                                       reuse.SAME_BINARY_REVIEWED_BASE + ":" + path])
+        current = (repository / path).read_bytes()
+        def check(data: bytes, mode: str = "100644") -> bool:
+            return reuse.reviewed_same_binary_migration(path, old, data,
+                                                        old_mode="100644", new_mode=mode)
+        self.assertTrue(check(current))
+        self.assertFalse(check(current + b"\n# unknown\n"))
+        self.assertFalse(check(current.replace(reuse.SELF_MODULE_CANONICAL_SHA256.encode(), b"f" * 64, 1)))
+        self.assertFalse(check(current + b'\nSELF_MODULE_CANONICAL_SHA256 = "' + b"0" * 64 + b'"\n'))
+        self.assertFalse(check(current, "100755"))
+        self.assertFalse(reuse.reviewed_same_binary_migration(path, old + b" ", current,
+                                                              old_mode="100644", new_mode="100644"))
+
     def test_test_only_cohort_requires_exact_records_modes_and_anchors(self) -> None:
         root = Path(__file__).resolve().parents[2]
         head = "d5ca9a64"
@@ -101,13 +318,17 @@ class SourceReuseTest(unittest.TestCase):
         for name in ("html_performance_source_reuse.py", "html_performance_source_reuse_test.py"):
             path = "scripts/release/" + name
             old = subprocess.check_output(["git", "-C", str(root), "show", "d5ca9a64:" + path])
-            new = (root / path).read_bytes()
+            new = historical_reuse_endpoint(root, path)
             before = (hashlib.sha256(old).hexdigest(), len(old))
             after = (hashlib.sha256(new).hexdigest(), len(new))
             self.assertTrue(reuse.validation_cohort_change(path, before, after, "100644", "100644"))
             self.assertFalse(reuse.validation_cohort_change(path, before, after, "100644", "100755"))
             self.assertFalse(reuse.validation_cohort_change(path, before,
                              (hashlib.sha256(new + b" ").hexdigest(), len(new) + 1), "100644", "100644"))
+            if name == "html_performance_source_reuse_test.py":
+                live = (root / path).read_bytes()
+                self.assertFalse(reuse.validation_cohort_change(
+                    path, before, (hashlib.sha256(live).hexdigest(), len(live)), "100644", "100644"))
             if name == "html_performance_source_reuse.py":
                 self.assertTrue(reuse.known_auth_program_change(path, old, new))
                 self.assertFalse(reuse.known_auth_program_change(path, old + b" ", new))
@@ -134,11 +355,15 @@ class SourceReuseTest(unittest.TestCase):
         for name in ("html_performance_source_reuse.py", "html_performance_source_reuse_test.py"):
             path = "scripts/release/" + name
             old = subprocess.check_output(["git", "-C", str(root), "show", "e1bc9abd:" + path])
-            new = (root / path).read_bytes()
+            new = historical_reuse_endpoint(root, path)
             previous = (hashlib.sha256(old).hexdigest(), len(old))
             current = (hashlib.sha256(new).hexdigest(), len(new))
             self.assertTrue(reuse.validation_cohort_change(path, previous, current, "100644", "100644"))
             self.assertFalse(reuse.validation_cohort_change(path, previous, current, "100644", "100755"))
+            if name == "html_performance_source_reuse_test.py":
+                live = (root / path).read_bytes()
+                self.assertFalse(reuse.validation_cohort_change(
+                    path, previous, (hashlib.sha256(live).hexdigest(), len(live)), "100644", "100644"))
 
     def test_format_cohort_from_current_sdk_source_is_exact(self) -> None:
         root = Path(__file__).resolve().parents[2]
@@ -153,12 +378,16 @@ class SourceReuseTest(unittest.TestCase):
         for name in names:
             path = "scripts/release/" + name
             old = subprocess.check_output(["git", "-C", str(root), "show", head + ":" + path])
-            new = (root / path).read_bytes()
+            new = historical_reuse_endpoint(root, path)
             before = (hashlib.sha256(old).hexdigest(), len(old))
             after = (hashlib.sha256(new).hexdigest(), len(new))
             with self.subTest(path=path):
                 self.assertTrue(reuse.validation_cohort_change(path, before, after, "100644", "100644"))
                 self.assertFalse(reuse.validation_cohort_change(path, before, after, "100644", "100755"))
+                if name == "html_performance_source_reuse_test.py":
+                    live = (root / path).read_bytes()
+                    self.assertFalse(reuse.validation_cohort_change(
+                        path, before, (hashlib.sha256(live).hexdigest(), len(live)), "100644", "100644"))
 
     def test_reviewed_drawio_format_transition_is_exact(self) -> None:
         root = Path(__file__).resolve().parents[2]
@@ -198,8 +427,8 @@ class SourceReuseTest(unittest.TestCase):
                      "html_performance_source_reuse.py", "html_performance_source_reuse_test.py"):
             path = "scripts/release/" + name
             old = subprocess.check_output(["git", "-C", str(root), "show", "a476765c:" + path])
-            current = ((root / path).read_bytes() if name.startswith("html_performance_source_reuse")
-                       else subprocess.check_output(["git", "-C", str(root), "show", "189281be:" + path]))
+            endpoint = reuse.SAME_BINARY_REVIEWED_BASE if name.startswith("html_performance_source_reuse") else "189281be"
+            current = subprocess.check_output(["git", "-C", str(root), "show", endpoint + ":" + path])
             old_record = (hashlib.sha256(old).hexdigest(), len(old))
             new_record = (hashlib.sha256(current).hexdigest(), len(current))
             unknown = (hashlib.sha256(current + b" ").hexdigest(), len(current) + 1)
@@ -207,6 +436,10 @@ class SourceReuseTest(unittest.TestCase):
                 self.assertTrue(reuse.validation_cohort_change(path, old_record, new_record, "100644", "100644"))
                 self.assertFalse(reuse.validation_cohort_change(path, old_record, unknown, "100644", "100644"))
                 self.assertFalse(reuse.validation_cohort_change(path, old_record, new_record, "100644", "100755"))
+                if name == "html_performance_source_reuse_test.py":
+                    live = (root / path).read_bytes()
+                    live_record = (hashlib.sha256(live).hexdigest(), len(live))
+                    self.assertFalse(reuse.validation_cohort_change(path, old_record, live_record, "100644", "100644"))
                 if name == "html_performance_source_reuse.py":
                     self.assertTrue(reuse.known_auth_program_change(path, old, current))
                     self.assertFalse(reuse.known_auth_program_change(path, old, current + b" "))
@@ -263,11 +496,14 @@ class SourceReuseTest(unittest.TestCase):
         self.assertFalse(reuse.known_auth_program_change(path, old, current + b" "))
         test_path = "scripts/release/html_performance_source_reuse_test.py"
         test_old = subprocess.check_output(["git", "-C", str(root), "show", "7d8c4c0ed9bb6ea4fb0efe3f0ab232db40a9976c:" + test_path])
-        test_new = (root / test_path).read_bytes()
+        test_new = historical_reuse_endpoint(root, test_path)
         old_record = (hashlib.sha256(test_old).hexdigest(), len(test_old))
         new_record = (hashlib.sha256(test_new).hexdigest(), len(test_new))
         self.assertTrue(reuse.validation_cohort_change(test_path, old_record, new_record, "100644", "100644"))
         self.assertFalse(reuse.validation_cohort_change(test_path, old_record, new_record, "100644", "100755"))
+        live = (root / test_path).read_bytes()
+        self.assertFalse(reuse.validation_cohort_change(
+            test_path, old_record, (hashlib.sha256(live).hexdigest(), len(live)), "100644", "100644"))
 
     def test_release_only_program_changes_preserve_membership_and_modes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
