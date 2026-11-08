@@ -1369,3 +1369,6 @@ fn convert_drop_shadow_function(
         opacity,
     })
 }
+
+#[cfg(test)]
+crate::svg_engine::owned_svg_model_tests!("../../../../src/svg_engine_filter_private_model_tests.rs");
