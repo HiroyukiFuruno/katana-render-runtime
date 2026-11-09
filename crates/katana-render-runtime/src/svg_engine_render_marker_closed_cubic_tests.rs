@@ -13,6 +13,29 @@ const MID_MARKER_INDEX: usize = 0;
 const END_MARKER_INDEX: usize = 1;
 
 #[test]
+fn closed_subpath_preserves_mid_markers_before_and_after_the_seam() -> Result<(), String> {
+    let source = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='{VIEWBOX_SIZE}' height='{VIEWBOX_SIZE}'>{MARKER_DEFINITION}<path id='source' d='M20 20 L60 20 L60 60 Z M20 80 L80 80' fill='none' stroke='black' marker-mid='url(#m)'/></svg>"
+    );
+    let options = usvg::Options {
+        fontdb: upstream_writer_font_database()?,
+        ..usvg::Options::default()
+    };
+    let tree = usvg::Tree::from_str(&source, &options).map_err(|error| error.to_string())?;
+    let transforms = marker_path_transforms(&tree);
+    let [first, second, after_close] = transforms.as_slice() else {
+        return Err(format!(
+            "expected three mid markers, got {}",
+            transforms.len()
+        ));
+    };
+    assert_marker_basis(*first, (60.0, 20.0), (0.707_106_77, 0.707_106_77));
+    assert_marker_basis(*second, (60.0, 60.0), (-0.923_879_5, 0.382_683_43));
+    assert_marker_basis(*after_close, (20.0, 80.0), (1.0, 0.0));
+    Ok(())
+}
+
+#[test]
 fn closed_cubic_mid_and_end_markers_use_curve_and_closing_edge_tangents() -> Result<(), String> {
     let tree = parse_closed_cubic_svg(CUBIC_CONTROL_2)?;
     let transforms = marker_path_transforms(&tree);
