@@ -6,6 +6,9 @@ use crate::markdown::svg_rasterize::{
 };
 use resvg::usvg::{Node, Options, Tree};
 
+#[path = "svg_rasterize_html_glyph_baseline_middle_scale_tests.rs"]
+mod scale_tests;
+
 const FONT_UNITS_PER_EM: f32 = 1000.0;
 const FONT_ASCENT: f32 = 800.0;
 const FONT_DESCENT: f32 = -200.0;
