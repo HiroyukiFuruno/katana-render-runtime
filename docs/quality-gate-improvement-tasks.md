@@ -64,6 +64,8 @@
 
 - [x] 実CoreTextのHelveticaと同じ物理File/SharedFile faceを受理し、同梱Notoの別の所有fileを拒否（既存Binary/削除対照維持）。同梱Notoとhan14のBASE有無をread-fontsで独立照合し、空DBの不明IDは欠落確定と混同しないことを確認。通常Proxyはname trapが動かず元の例外を保持。 `physical-font-proxy-boundaries-current-build-gqyoqxcm` はfoundation/fmt/重複/AST実0・compile成功（none選択実4）、`physical-font-proxy-boundaries-exact10-i_io7aqv` は新規6＋既存4の全実0、source/binary不変・profile残0、catalog削除0。Appleの対照は既存macOS module上で実行、追加skipなし。基準/製品動作は変更なし。正式coverage・C4の全体実行時短縮は次回集計で確認する。
 
+- [x] SVG不正font-familyは実Yellowtail設定のfallbackに進み、明示正常/子属性なし親serifとは別に検証。同じ実Notoを公開FontDB APIのFile/Binaryへ登録して対照を成功させ、face削除と主File消失後の具体的なshaping/primary metrics拒否を確認。実radial paintはwidth 0のRectを拒否し、paint値/Arc/元値を維持。bbox正常の元caseは責務単位で子moduleへ移し判定同一。 `svg-font-source-bbox-current-build-x1aufudu` はfoundation/fmt/重複/AST実0・compile成功（none選択実4）、`svg-font-source-bbox-exact10-k6p3g6om` は新規6＋既存4が全実0、source/binary不変・profile残0。実catalogで旧bbox 1名→新名の1対1だけ、全既存ケースを保持。製品・基準・skip変更なし。正式カバレッジは限定結果では更新しない。
+
 ### 経過の記録（以下の旧数値・未実行予定は上の現在実数と区別する）
 
 - [/] 集計対象helperの限定補完: cmapのIO・HTMLの座標/実frame・KDRのparser pin fixtureを非重複3担当で変更中。成功/元のエラー表示とWindows callerを保ち、欠落ファイル・不正属性/viewport・closed session・fixture read/write失敗を実入力で検証する。実装の除外や分母変更はせず、純粋な判定caseは既存のtestファイル境界へ置く。レビューでcmap fixtureの早期失敗時の残骸も見つかったため、create_new成功後の所有とhandle解放後のDropへ整理する。まだ変更後未検証でありcoverage解消数へ加算しない。
