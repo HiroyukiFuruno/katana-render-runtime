@@ -68,6 +68,27 @@ fn weight_coordinate_requires_an_axis_and_an_in_range_value() {
 }
 
 #[test]
+fn static_font_descriptor_rejects_a_different_postscript_name() -> Result<(), String> {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/NotoSans-Regular.ttf");
+    let descriptors = super::super::descriptors_from_url(&path)?;
+    let descriptor = descriptors
+        .iter()
+        .next()
+        .ok_or("CoreText returned no descriptor for the fixture font")?;
+    let name = super::descriptor_postscript_name(&descriptor)?;
+    super::verify_ctfont_descriptor_name(&descriptor, &name)?;
+    assert_eq!(
+        super::verify_ctfont_descriptor_name(&descriptor, "krr-unmatched-postscript-name")
+            .err()
+            .as_deref(),
+        Some("CTFont and URL-bound descriptor PostScript names differ")
+    );
+    assert!(super::coordinates(&descriptor)?.is_empty());
+    Ok(())
+}
+
+#[test]
 fn coordinate_pairs_parse_real_corefoundation_values_and_reject_bad_types() {
     let cases = [
         (CoordinateEntry::Valid, None),
