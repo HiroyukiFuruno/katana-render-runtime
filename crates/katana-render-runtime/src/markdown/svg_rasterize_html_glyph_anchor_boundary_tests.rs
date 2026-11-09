@@ -120,3 +120,38 @@ fn differently_painted_source_spans_reject_single_span_anchor_shortcuts() -> Res
     assert!(anchor::run_origin_css_scale(text, &spans[..1]).is_none());
     Ok(())
 }
+
+#[test]
+fn second_chunk_per_glyph_dy_rejects_all_origin_snapping() -> Result<(), String> {
+    let fixture = font_fixture("later-chunk-dy")?;
+    let control = "<tspan x='20' y='30'>AB</tspan><tspan x='50' y='50'>CD</tspan>";
+    let shifted = "<tspan x='20' y='30'>AB</tspan><tspan x='50' y='50' dy='0 1'>CD</tspan>";
+    for (content, expected) in [(control, true), (shifted, false)] {
+        let tree = fixture_tree_with_content(&fixture, "", content)?;
+        assert_two_chunk_snapping(&tree, expected)?;
+    }
+    Ok(())
+}
+
+fn assert_two_chunk_snapping(tree: &resvg::usvg::Tree, expected: bool) -> Result<(), String> {
+    let text = fixture_text(tree)?;
+    assert_eq!(text.chunks().len(), 2);
+    assert_eq!(text.layouted().len(), 2);
+    assert_eq!(
+        text.dy().get(3).copied(),
+        Some(if expected { 0.0 } else { 1.0 })
+    );
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    let Prepared::Ready(spans) = rasterizer.prepare(text)? else {
+        return Err("two-chunk SVG did not prepare".into());
+    };
+    assert_eq!(spans.len(), 2);
+    for span in &spans {
+        assert_eq!(
+            span.x_alignment
+                .is_some_and(|alignment| alignment.origin_snap_css_scale.is_some()),
+            expected
+        );
+    }
+    Ok(())
+}
