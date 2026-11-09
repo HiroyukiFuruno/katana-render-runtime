@@ -1,5 +1,20 @@
 pub(super) const RENDER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "fn render_mermaid_with_origin(",
+        "fn renamed_render_mermaid_with_origin(",
+        "missing-method:MermaidRenderOps::render_mermaid_with_origin",
+    ),
+    (
+        "fn render_mermaid_with_loaded(",
+        "fn renamed_render_mermaid_with_loaded(",
+        "missing-method:MermaidRenderOps::render_mermaid_with_loaded",
+    ),
+    (
+        "fn render_svg_with_bundle(",
+        "fn renamed_render_svg_with_bundle(",
+        "missing-method:MermaidRenderOps::render_svg_with_bundle",
+    ),
+    (
         "mod render_instance;",
         "mod other_instance;",
         "mermaid-resource-route:instance-module",
