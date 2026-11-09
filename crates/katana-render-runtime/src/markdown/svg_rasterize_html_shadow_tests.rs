@@ -103,8 +103,7 @@ fn color(bytes: [u8; COLOR_CHANNELS]) -> Color {
 }
 
 fn render_srgb_fixture() -> Result<(Pixmap, u32), String> {
-    let tree = resvg::usvg::Tree::from_str(SRGB_SVG, &resvg::usvg::Options::default())
-        .map_err(|error| error.to_string())?;
+    let tree = parse_shadow_svg(SRGB_SVG)?;
     let group = find_group(&tree)?;
     let mut target =
         Pixmap::new(CANVAS_SIZE, CANVAS_SIZE).ok_or_else(|| "target allocation".to_owned())?;
@@ -122,6 +121,29 @@ fn render_srgb_fixture() -> Result<(Pixmap, u32), String> {
     )?;
     assert!(handled);
     Ok((target, calls))
+}
+
+#[test]
+fn shadow_source_paint_failure_preserves_destination() -> Result<(), String> {
+    const SOURCE_ERROR: &str = "shadow source renderer failed";
+    let tree = parse_shadow_svg(SRGB_SVG)?;
+    let group = find_group(&tree)?;
+    let mut target = Pixmap::new(CANVAS_SIZE, CANVAS_SIZE).ok_or("target allocation")?;
+    target.fill(color(BACKGROUND_GRAY));
+    let before = target.data().to_vec();
+    let error = HtmlShadowRasterizer::render(
+        group,
+        Transform::from_scale(2.0, 2.0),
+        &mut target.as_mut(),
+        &mut |transform, pixels| {
+            paint_blue_source(transform, pixels)?;
+            assert!(pixels.data_mut().iter().any(|byte| *byte != 0));
+            Err(SOURCE_ERROR.to_owned())
+        },
+    );
+    assert_eq!(error.err().as_deref(), Some(SOURCE_ERROR));
+    assert_eq!(target.data(), before.as_slice());
+    Ok(())
 }
 
 const SRGB_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
@@ -216,8 +238,7 @@ fn supported_shadow_outside_the_canvas_skips_source_paint() -> Result<(), String
 }
 
 fn assert_unsupported(svg: &str, transform: Transform) -> Result<(), String> {
-    let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
-        .map_err(|error| error.to_string())?;
+    let tree = parse_shadow_svg(svg)?;
     let group = find_group(&tree)?;
     let mut target = Pixmap::new(UNSUPPORTED_CANVAS_SIZE, UNSUPPORTED_CANVAS_SIZE)
         .ok_or_else(|| "target allocation".to_owned())?;
@@ -234,4 +255,9 @@ fn assert_unsupported(svg: &str, transform: Transform) -> Result<(), String> {
     assert_eq!(calls, 0);
     assert_eq!(target.data(), before.as_slice());
     Ok(())
+}
+
+fn parse_shadow_svg(svg: &str) -> Result<resvg::usvg::Tree, String> {
+    resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
+        .map_err(|error| error.to_string())
 }
