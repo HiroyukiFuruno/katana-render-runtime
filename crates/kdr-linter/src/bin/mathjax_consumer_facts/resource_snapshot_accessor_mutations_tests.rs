@@ -1,6 +1,30 @@
 use super::{RUST_INPUTS, mathjax_fixture};
 
 #[test]
+fn snapshot_loader_rejects_missing_identity_and_cache_hit_guards()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = mathjax_fixture()?;
+    let input = RUST_INPUTS[super::super::super::source::RESOURCE_BYTES_INPUT_INDEX];
+    fixture.reject_unique_mutations(input, &[
+        (
+            "let before = Identity::from_metadata(&file.metadata()?);",
+            "let before = file;",
+            "resource-loader:metadata",
+        ),
+        (
+            "if let Some(snapshot) = Self::cached(cache, path, &before) {\n            return Ok(snapshot);\n        }",
+            "let snapshot = Self::cached(cache, path, &before);",
+            "resource-loader:cache",
+        ),
+        (
+            "before != after || before.len != bytes.len() as u64",
+            "before",
+            "resource-loader:changed",
+        ),
+    ])
+}
+
+#[test]
 fn snapshot_loader_rejects_missing_snapshot_and_cache_methods()
 -> Result<(), Box<dyn std::error::Error>> {
     let fixture = mathjax_fixture()?;
