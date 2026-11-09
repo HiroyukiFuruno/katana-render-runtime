@@ -135,3 +135,30 @@ fn truncated_sfnt_table_records_are_rejected_without_cache_entry() -> Result<(),
     assert_rejected(&database, face);
     std::fs::remove_file(path).map_err(|error| error.to_string())
 }
+
+#[test]
+fn lazy_font_reports_missing_and_truncated_files_before_loading_tables()
+-> Result<(), Box<dyn std::error::Error>> {
+    use std::io::ErrorKind;
+
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("NotoSans-Regular.ttf");
+    assert_lazy_directory_error(&path, ErrorKind::NotFound)?;
+    std::fs::write(&path, &EMBEDDED_FONT_BYTES[..11])?;
+    assert_lazy_directory_error(&path, ErrorKind::UnexpectedEof)?;
+    std::fs::write(&path, EMBEDDED_FONT_BYTES)?;
+    let font = super::lazy_table::load(&path, 0)?;
+    assert!(font.font.units_per_em() > 0);
+    Ok(())
+}
+
+fn assert_lazy_directory_error(
+    path: &Path,
+    kind: std::io::ErrorKind,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let error = super::lazy_table::load(path, 0)
+        .err()
+        .ok_or("invalid font directory was accepted")?;
+    assert_eq!(error.kind(), kind);
+    Ok(())
+}
