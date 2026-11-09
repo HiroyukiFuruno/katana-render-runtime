@@ -51,6 +51,12 @@ fn viewport_and_clip_non_finite_geometry_return_exact_error() {
         polygon::clip_polygon(&invalid_clip).err().as_deref(),
         Some(NON_FINITE_GEOMETRY_ERROR)
     );
+    assert_eq!(
+        polygon::clip_viewport_polygon(&invalid_clip, &viewport(0.0, 0.0, 4.0, 4.0))
+            .err()
+            .as_deref(),
+        Some(NON_FINITE_GEOMETRY_ERROR)
+    );
 }
 
 #[test]
