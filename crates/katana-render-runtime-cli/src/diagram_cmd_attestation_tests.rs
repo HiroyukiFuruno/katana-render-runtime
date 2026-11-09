@@ -1,7 +1,7 @@
 use super::super::{DiagramCommand, RenderInputFactory, render_input::DiagramRenderRequest};
 use super::InputFixture;
 use crate::commands::{DiagramAction, DiagramInputFormat, DiagramSourceOptions};
-use katana_render_runtime::{DiagramKind, RuntimePathResolver};
+use katana_render_runtime::{DiagramKind, RenderError, RuntimePathResolver};
 use std::{fs, path::PathBuf};
 
 fn attested_mermaid_action(fixture: &InputFixture, receipt_path: PathBuf) -> DiagramAction {
@@ -38,6 +38,27 @@ fn attestation_render_uses_real_mermaid_runtime_in_process()
     assert_eq!(receipt["actualRenderInput"]["source"], source);
     assert_eq!(receipt["attemptToken"], "in-process-success");
     assert_eq!(receipt["actualExit"], serde_json::Value::Null);
+    Ok(())
+}
+
+#[test]
+fn attested_mermaid_syntax_error_keeps_runtime_error_and_publishes_nothing()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = "graph TD\nA-->";
+    let fixture = InputFixture::new("invalid.mmd", source)?;
+    let receipt_path = fixture.root.join("attestation.json");
+    let result = DiagramCommand::new(DiagramKind::Mermaid)
+        .run(attested_mermaid_action(&fixture, receipt_path.clone()));
+    let Err(error) = result else {
+        return Err("invalid Mermaid unexpectedly succeeded".into());
+    };
+    assert!(matches!(
+        error.downcast_ref::<RenderError>(),
+        Some(RenderError::Runtime(message)) if !message.is_empty()
+    ));
+    assert_eq!(fs::read_to_string(&fixture.input)?, source);
+    assert!(!fixture.output.exists());
+    assert!(!receipt_path.exists());
     Ok(())
 }
 
