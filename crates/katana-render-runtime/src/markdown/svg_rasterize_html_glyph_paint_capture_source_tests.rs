@@ -69,3 +69,18 @@ fn rotated_real_text_selects_transformed_glyph_painting() -> Result<(), String> 
     }
     Ok(())
 }
+
+#[test]
+fn font_instance_recorded_without_scope_does_not_leak_into_next_draw() -> Result<(), String> {
+    let (span, typeface, _fixture) = super::prepared_fixture(false)?;
+    super::capture::record_instance(&typeface, &[]);
+    let mut surface = skia_safe::surfaces::raster_n32_premul((128, 64))
+        .ok_or("capture test surface unavailable")?;
+    let scope = super::PaintCaptureScope::enter();
+    super::super::draw_span(surface.canvas(), &span, &typeface, 1.0)?;
+    let snapshot = scope.snapshot();
+    assert_eq!(snapshot.events.len(), 1);
+    assert!(snapshot.events[0]["appliedVariationCoordinates"].is_null());
+    assert_eq!(snapshot.dropped, 0);
+    Ok(())
+}

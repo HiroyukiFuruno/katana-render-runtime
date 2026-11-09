@@ -157,3 +157,30 @@ fn variable_instance_propagates_invalid_font_size() -> Result<(), String> {
     assert!(rasterizer.variable_faces.borrow().instances.is_empty());
     Ok(())
 }
+
+#[test]
+fn variable_svg_ignores_unknown_axis_and_normalizes_actual_design() -> Result<(), String> {
+    let tree = fixture_tree(COLR_VARIABLE, Some("'SWPS' 10"), colr_linear_character()?)?;
+    let (_, span, id) = target_span(&tree)?;
+    let mut requested = span.variations.clone();
+    assert!(requested.iter().any(|axis| axis.tag == *b"SWPS"));
+    requested.push(usvg::FontVariation::new(*b"ZZZZ", 42.0));
+    let (effective, design, normalized) = html_glyph_variations::resolve(
+        tree.fontdb(),
+        id,
+        &requested,
+        span.font_optical_sizing,
+        FONT_SIZE,
+    )?;
+    assert!(effective.iter().any(|axis| axis.tag == *b"SWPS"));
+    assert!(!effective.iter().any(|axis| axis.tag == *b"ZZZZ"));
+    assert!(design.iter().any(|axis| axis.tag == *b"SWPS"));
+    assert!(!design.iter().any(|axis| axis.tag == *b"ZZZZ"));
+    assert!(!normalized.is_empty());
+    assert!(
+        normalized
+            .iter()
+            .all(|value| value.is_finite() && (-1.0..=1.0).contains(value))
+    );
+    Ok(())
+}
