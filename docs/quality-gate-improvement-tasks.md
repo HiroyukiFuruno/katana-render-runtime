@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-09、以下の過去結果と区別する）
 
+- [x] SVGフォントの限定回帰を追加。実Notoのface選択と空DB、実CBDT/SBIXの正常glyphと幅・高さ0の拒否、CSS切り下げの最小サイズとshaping整数倍率の上下限を確認。初回 `svg-quantization-bitmap-exact-7e5d0hf9` は14件中13件成功、CSS切り下げとshaping倍率を分けた `svg-css-size-boundary-exact-retry-864l8b0u` は関連2件成功。両buildの静的・AST・provenanceは実0、実catalogは追加2・削除0。基準画像・実行除外・製品処理は変更なし。この限定結果は正式集計の代用にしない。
+
 - **現在のroot実数**: `47cb3a4b`、5956/5956成功・別に15skip、88035行中87123covered、98.96404838984495%・未カバー912行（前回同値）。`c4-scroll-font-moon-root-i93r7_vl` のMoon producer実0、Nextest 390.881秒。同じMoon経路のaggregateは認証後のstrict100/0だけがcoverage-policy・実1、refreshed=false、source前後一致。root SHAは `481722174d742610e071b13a67ed62e15cb2eafb88a39b724aeda96ece63478b`。歴史コピーと集計は `coverage-history-47cb3a4b-5ow2_75h`（原anchorとは別）。C4 2caseの同方式時間合計は87.177→44.444秒（−42.733秒）、Nextest全体413.315→390.881秒（−22.434秒の観測差）。製品表示速度と混同しない。公開条件100/0は未達であり、root限定成功を完全gateへ代用しない。
 - [x] 前回 `89f6a235` は5949成功・15skip、88035行中87123covered、98.96404838984495%・未カバー912行。前々回933行から−21、分母不変。Mermaid renderの不足8→0/診断出力5→4、HTML主font7→5/middle7→5/styled observer7→0、Mach-O8→7。HTML bridge不足3は不変。歴史コピー `coverage-history-89f6a235-gs8s6280`。
 - [x] 前回 `0ec3b4d8` は5934成功・15skip、88035行中87102covered、98.9401942409269%・未カバー933行。前々回934から−1は不正clip修正の重複整理（分母−22/covered−21）。歴史コピー `coverage-history-0ec3b4d8-ddkyi65m`。
