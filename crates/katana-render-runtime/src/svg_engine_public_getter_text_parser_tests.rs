@@ -139,7 +139,23 @@ fn tref_collects_referenced_text_and_preserves_following_text(
     let input = format!(
         "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='50'><defs><text id='source'>A<tspan>B</tspan></text></defs><text id='target' font-family='Yellowtail'><tref href='{href}'/>X</text></svg>"
     );
-    let tree = parse_svg(&input)?;
+    assert_target_text(&input, expected)
+}
+
+#[test]
+fn tref_without_a_reference_preserves_adjacent_text() -> Result<(), String> {
+    let input = "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='50'><text id='target' font-family='Yellowtail'>A<tref/>B</text></svg>";
+    assert_target_text(input, "AB")
+}
+
+#[test]
+fn default_whitespace_trims_both_edges_across_three_text_spans() -> Result<(), String> {
+    let input = "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='50'><text id='target' font-family='Yellowtail'> A<tspan>B</tspan><tspan>C </tspan></text></svg>";
+    assert_target_text(input, "ABC")
+}
+
+fn assert_target_text(input: &str, expected: &str) -> Result<(), String> {
+    let tree = parse_svg(input)?;
     let text = text_node(&tree, "target")?;
     let actual: String = text.chunks().iter().map(|chunk| chunk.text()).collect();
     assert_eq!(actual, expected);
