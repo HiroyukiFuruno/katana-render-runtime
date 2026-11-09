@@ -2,6 +2,20 @@ use super::{assert_image_reference, assert_rendered_pixels, parse_writer_svg, wr
 use crate::svg_engine::usvg;
 
 #[test]
+fn invalid_linked_mask_discards_only_the_masked_element() -> Result<(), String> {
+    let input = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40">
+      <defs><mask id="invalid" width="0" height="10"><rect width="10" height="10"/></mask>
+        <mask id="outer" mask="url(#invalid)" maskUnits="userSpaceOnUse"
+          width="10" height="10"><rect width="10" height="10" fill="white"/></mask></defs>
+      <rect id="unmasked" x="20" width="10" height="10"/>
+      <rect id="masked" width="10" height="10" mask="url(#outer)"/></svg>"##;
+    let tree = parse_writer_svg(input, "invalid-linked-mask")?;
+    assert!(tree.node_by_id("unmasked").is_some());
+    assert!(tree.node_by_id("masked").is_none());
+    Ok(())
+}
+
+#[test]
 fn linked_image_inside_nested_mask_preserves_xlink_and_rendering() -> Result<(), String> {
     let input = r##"<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80">
       <defs><g id="target"><rect width="40" height="40" fill="lime"/></g>
