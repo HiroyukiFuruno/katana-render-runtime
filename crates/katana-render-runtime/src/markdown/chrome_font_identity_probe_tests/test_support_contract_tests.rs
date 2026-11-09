@@ -50,13 +50,7 @@ fn font_probe_rejects_invalid_request_shape_and_duplicate_selected_font() -> Res
 #[test]
 fn font_probe_keeps_duplicate_resources_and_incomplete_identity_unknown() -> Result<(), String> {
     let (temp, _, mut selected) = physical_font_fixture()?;
-    let path = temp.path().join("physical-font.ttf");
-    let (_, bytes_sha256, _) = physical_file(&path)?;
-    let resource = ResourceFile {
-        url: "https://example.test/font".into(),
-        body_path: path,
-        bytes_sha256,
-    };
+    let resource = captured_font_resource(&temp)?;
     let mut request = request();
     selected.is_custom_font = true;
     request.captures[0].selected_fonts = vec![selected.clone()];
@@ -75,6 +69,44 @@ fn font_probe_keeps_duplicate_resources_and_incomplete_identity_unknown() -> Res
     });
     let observed = probe_serialized(&request)?;
     assert_unknown_captures(observed)
+}
+
+#[test]
+fn captured_font_bytes_do_not_resolve_a_different_postscript_name() -> Result<(), String> {
+    let (temp, _, mut selected) = physical_font_fixture()?;
+    let resource = captured_font_resource(&temp)?;
+    selected.is_custom_font = true;
+    let mut request = request();
+    request.captures[0].selected_fonts = vec![selected.clone()];
+    request.captures[0].resource_files = vec![resource.clone()];
+    selected.post_script_name = "KRR-Uncaptured-PostScript-Face".into();
+    request.captures.push(CaptureRequest {
+        condition_id: "uncaptured-font".into(),
+        selected_fonts: vec![selected],
+        resource_files: vec![resource],
+    });
+    let observed = probe_serialized(&request)?;
+    let [verified, unknown] = observed.captures.as_slice() else {
+        return Err("expected two font captures".into());
+    };
+    assert_eq!(verified.status, "resolved");
+    assert_eq!(verified.font_provenance.len(), 1);
+    assert_eq!(unknown.status, "unknown");
+    assert!(unknown.font_provenance.is_empty());
+    assert!(unknown.unknown_reasons.iter().any(|reason| {
+        reason.contains("no exact physical face matched the CDP PostScript name")
+    }));
+    Ok(())
+}
+
+fn captured_font_resource(temp: &TempDirectory) -> Result<ResourceFile, String> {
+    let body_path = temp.path().join("physical-font.ttf");
+    let (_, bytes_sha256, _) = physical_file(&body_path)?;
+    Ok(ResourceFile {
+        url: "https://example.test/font".into(),
+        body_path,
+        bytes_sha256,
+    })
 }
 
 fn probe_serialized(request: &ProbeRequest) -> Result<ProbeResponse, String> {
