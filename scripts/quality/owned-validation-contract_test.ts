@@ -4609,15 +4609,15 @@ test.each([
   ["fmt-check", "{{CARGO}} fmt --all -- --check", "echo formatting", "root format"],
   [
     "fmt-check",
-    "rustfmt --edition 2024 --check crates/katana-render-runtime/src/svg_engine_*_model_tests.rs",
+    "rustfmt --edition 2024 --check {{OWNED_SVG_TEST_ROOTS}}",
     "",
     "owned SVG format omitted",
   ],
   ["fmt-check", "rustfmt --edition 2024 --check", "rustfmt --edition 2021 --check", "SVG edition"],
   [
     "fmt-check",
-    "rustfmt --edition 2024 --check crates/katana-render-runtime/src/svg_engine_*_model_tests.rs",
-    "rustfmt --edition 2024 --check crates/katana-render-runtime/src/svg_engine_*_model_tests.rs\necho extra",
+    "rustfmt --edition 2024 --check {{OWNED_SVG_TEST_ROOTS}}",
+    "rustfmt --edition 2024 --check {{OWNED_SVG_TEST_ROOTS}}\necho extra",
     "unowned format command",
   ],
   ["lint", "--all-features", "--no-default-features", "root lint"],

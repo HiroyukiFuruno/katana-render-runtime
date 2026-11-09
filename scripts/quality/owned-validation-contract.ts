@@ -1655,7 +1655,7 @@ function performanceRecipeCommands(): Record<string, string[]> {
     ],
     "fmt-check": [
       "{{CARGO}} fmt --all -- --check",
-      "rustfmt --edition 2024 --check crates/katana-render-runtime/src/svg_engine_*_model_tests.rs",
+      "rustfmt --edition 2024 --check {{OWNED_SVG_TEST_ROOTS}}",
       `just ${PERFORMANCE_RECIPES.format}`,
     ],
     coverage: [
