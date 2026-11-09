@@ -51,6 +51,8 @@
 
 - [x] 実NotoのOS/2欠落時のex高さを独立した実glyph bbox/UPMと比較。marker-start/mid/endが非markerを参照しても元の線を保持し、実marker対照との差を確認。oversized markerのscroll/hiddenは全画素一致し、visibleとの差も既存対照で維持。変更はテストのみ、基準画像とskip維持。`svg-metrics-marker-current-build-savel8ub` はfoundation/fmt/重複/AST実0・compile成功（none選択実4）。`svg-metrics-marker-exact11-j9q5qtds` の新規4＋既存7が全実0、実catalog削除0、source/binary不変・profile残0。正式カバレッジは次の集計で確認する。
 
+- [x] 同梱Mermaidの実cache契約、HTML実Noto File faceのmiddle scale境界、Mach-Oの拒否理由を限定検証。Mermaidは同梱assetを所有TempDirに展開し、初回生成後の実ファイル退避でcold失敗/warm成功、cache bytes不変、返却XML root IDの非重複、不正構文で元source保持とcache未生成を確認。正式raw JS画像の代用ではない。middleは同一faceで欠落/NaN/0/負のscaleを拒否し正scaleで有限補正、Mach-Oは実fixtureのパス/サイズ/SHA/記録とサイズ違い/SHA違い/実NotFoundを区別。初回 `runtime-cache-font-macho-current-build-g4zbind1` は整形後304行でAST実101、compile未起動。倍率だけ専用テストfileへ分離、`runtime-cache-font-scale-boundary-current-build-y7aptv36` はfoundation/fmt/重複/AST実0・同profile compile成功（none選択実4）。`runtime-cache-font-macho-krr-exact7-mw_pmv11` と `runtime-cache-font-macho-kdr-exact4-9ee_zu8z` は別suiteの実catalogで選んだ全11が実0、source/binary不変・profile残0。製品・基準画像・skipは変更なし。正式カバレッジは未カバー933のまま次回集計を待つ。
+
 ### 経過の記録（以下の旧数値・未実行予定は上の現在実数と区別する）
 
 - [/] 集計対象helperの限定補完: cmapのIO・HTMLの座標/実frame・KDRのparser pin fixtureを非重複3担当で変更中。成功/元のエラー表示とWindows callerを保ち、欠落ファイル・不正属性/viewport・closed session・fixture read/write失敗を実入力で検証する。実装の除外や分母変更はせず、純粋な判定caseは既存のtestファイル境界へ置く。レビューでcmap fixtureの早期失敗時の残骸も見つかったため、create_new成功後の所有とhandle解放後のDropへ整理する。まだ変更後未検証でありcoverage解消数へ加算しない。
