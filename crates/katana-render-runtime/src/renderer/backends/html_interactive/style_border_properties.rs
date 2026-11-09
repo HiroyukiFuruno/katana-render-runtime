@@ -182,6 +182,7 @@ mod tests {
         let mut style = CssStyle::browser_default();
         style.apply_border_side_style("border-top-style", "solid");
         style.apply_border_side_style("border-top-style", "unsupported");
+        style.apply_border_side_style("border-top", "dashed");
         assert_eq!(style.border_top_style, Some(CssBorderStyle::Solid));
         assert!(style.explicit_border);
     }
