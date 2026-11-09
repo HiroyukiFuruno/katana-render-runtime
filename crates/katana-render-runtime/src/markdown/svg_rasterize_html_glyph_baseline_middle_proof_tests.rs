@@ -1,8 +1,22 @@
-use super::{FONT_FAMILY, MULTILINE, fixture, source, text};
+use super::{FONT_FAMILY, LINE_ADVANCE, MULTILINE, MULTILINE_CHUNK_COUNT, fixture, source, text};
 use crate::markdown::svg_rasterize::{
     GeneratedClipProvenance,
     provenance::{self, AuthoredTextContext},
 };
+
+#[test]
+fn additional_lane_rejects_nonzero_first_dy_with_otherwise_valid_lines() -> Result<(), String> {
+    let shifted = MULTILINE.replacen("dy='0'", "dy='1'", 1);
+    for (body, first_dy, expected) in [(MULTILINE, 0.0, true), (shifted.as_str(), 1.0, false)] {
+        let tree = fixture(body, "")?;
+        let text = text(&tree)?;
+        assert_eq!(text.chunks().len(), MULTILINE_CHUNK_COUNT);
+        assert_eq!(text.dy().first(), Some(&first_dy));
+        assert!(text.dy().contains(&LINE_ADVANCE));
+        assert_eq!(super::additional_middle_layout_supported(text), expected);
+    }
+    Ok(())
+}
 
 #[test]
 fn multiline_proof_rejects_unsupported_stylesheet() -> Result<(), String> {

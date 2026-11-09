@@ -44,6 +44,45 @@ fn component_transfer_declines_unsupported_inputs_and_primitive_shapes() -> Resu
 }
 
 #[test]
+fn component_transfer_rejects_unfiltered_group_and_non_transfer_matrix() -> Result<(), String> {
+    let unfiltered = parse(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="5" height="5"/></svg>"#,
+    )?;
+    assert!(transfer::supported_filter(unfiltered.root()).is_none());
+
+    let tree = parse(&filtered_svg(r#"<feGaussianBlur stdDeviation="1"/>"#))?;
+    let filter =
+        transfer::supported_filter(filtered_group(&tree)?).ok_or("filter fixture missing")?;
+    let [primitive] = filter.primitives() else {
+        return Err("expected one primitive".to_owned());
+    };
+    assert!(transfer::transfer_matrix(primitive)?.is_none());
+    Ok(())
+}
+
+#[test]
+fn component_transfer_disjoint_source_keeps_sibling_pixels() -> Result<(), String> {
+    let svg = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><defs><filter id="f" filterUnits="userSpaceOnUse" x="0" y="0" width="10" height="10" color-interpolation-filters="sRGB"><feComponentTransfer>{}</feComponentTransfer></filter></defs><rect x="12" y="12" width="5" height="5" fill="#ff0000"/><g filter="url(#f)"><rect x="25" y="25" width="5" height="5" fill="#00ff00"/></g></svg>"##,
+        super::LINEAR_FUNCTIONS
+    );
+    let (pixels, _) = super::render_svg(&svg)?;
+    let size = super::SIZE as usize;
+    assert_eq!(pixels.len(), size * size);
+    for (index, pixel) in pixels.iter().enumerate() {
+        let x = index % size;
+        let y = index / size;
+        let expected = if (12..17).contains(&x) && (12..17).contains(&y) {
+            [255, 0, 0, 255]
+        } else {
+            [0, 0, 0, 0]
+        };
+        assert_eq!(*pixel, expected, "pixel ({x}, {y})");
+    }
+    Ok(())
+}
+
+#[test]
 fn component_transfer_declines_unsupported_and_off_canvas_transforms() -> Result<(), String> {
     let svg =
         super::component_transfer_svg(super::LINEAR_FUNCTIONS, super::FILTER_REGION, "", "", "");

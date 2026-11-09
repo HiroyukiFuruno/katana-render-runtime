@@ -1,7 +1,10 @@
 use crate::markdown::svg_rasterize::{SvgRasterizeOps, font, text_shaping};
 use font::{DatabaseKey, DiscoveryMode, HtmlFontRequest};
 use resvg::usvg::fontdb::Database;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 const DUPLICATE_FACE_COUNT: usize = 512;
 const OVERSIZED_REQUEST_FAMILY_COUNT: usize = 3_000;
@@ -18,6 +21,35 @@ fn real_database() -> Result<Database, String> {
         Some(true)
     );
     Ok(database)
+}
+
+#[test]
+fn default_fallback_invalidates_fast_path_for_candidate_and_no_match() -> Result<(), String> {
+    let mut database = real_database()?;
+    database.load_font_data(font::BUNDLED_SANS_SERIF_FONT.to_vec());
+    let ids: Vec<_> = database.faces().map(|face| face.id).collect();
+    let [base, candidate] = ids.as_slice() else {
+        return Err("expected two bundled font faces".into());
+    };
+    let mut database = Arc::new(database);
+    let valid = Arc::new(AtomicBool::new(true));
+    let mut options = resvg::usvg::Options::default();
+    super::install_fallback(&mut options, Arc::clone(&valid));
+    let stock = resvg::usvg::FontResolver::default_fallback_selector();
+
+    for (excluded, expected) in [
+        (vec![*base], Some(*candidate)),
+        (vec![*base, *candidate], None),
+    ] {
+        assert_eq!(stock('A', &excluded, &mut database), expected);
+        valid.store(true, Ordering::Relaxed);
+        assert_eq!(
+            (options.font_resolver.select_fallback)('A', &excluded, &mut database),
+            expected
+        );
+        assert!(!valid.load(Ordering::Relaxed));
+    }
+    Ok(())
 }
 
 fn key(discovery: DiscoveryMode, family: &str) -> DatabaseKey {
