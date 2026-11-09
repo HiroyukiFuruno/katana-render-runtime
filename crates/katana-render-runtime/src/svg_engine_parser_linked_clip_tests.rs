@@ -28,3 +28,13 @@ fn linked_clip_distinguishes_invalid_reference_from_empty_geometry(
 ) -> Result<(), String> {
     assert_same_visible_pixels(&LINKED_CLIP.replace("TARGET", id), oracle)
 }
+
+#[test]
+fn malformed_clip_transform_matches_upstream_invalid_transform_fixture() -> Result<(), String> {
+    let source = include_str!(
+        "../../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/masking/clipPath/invalid-transform-on-clipPath.svg"
+    );
+    let malformed = source.replace("matrix(0 0 0 0 0 0)", "translate(not-a-number)");
+    assert_ne!(source, malformed);
+    assert_same_visible_pixels(&malformed, source)
+}
