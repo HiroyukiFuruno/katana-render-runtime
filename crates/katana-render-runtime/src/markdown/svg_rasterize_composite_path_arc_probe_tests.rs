@@ -43,8 +43,8 @@ fn run_probe(request: &Request) -> Result<(), String> {
     let (cubic, arc) = paint_pair(&tree, node, &mut prepared, conic.clone(), false)?;
     prepared.path = cubic_path.clone();
     let white = paint_pair(&tree, node, &mut prepared, conic, true)?;
-    save_result(&request, node, &prepared, &cubic_path, &cubic, &arc, &white)?;
-    save_resvg(&request, &tree)
+    save_result(request, node, &prepared, &cubic_path, &cubic, &arc, &white)?;
+    save_resvg(request, &tree)
 }
 
 fn read_request() -> Result<Request, String> {
