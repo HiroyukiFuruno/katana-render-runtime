@@ -2,6 +2,11 @@ use super::{text_node, upstream_writer_font_database, usvg};
 use rstest::rstest;
 
 const OFFSET_TOLERANCE: f32 = 0.001;
+const PATH_POINT_COUNT: usize = 2;
+const PLAIN_PATH_POINTS: [(f32, f32); PATH_POINT_COUNT] = [(0.0, 0.0), (20.0, 0.0)];
+const TRANSFORMED_PATH_POINTS: [(f32, f32); PATH_POINT_COUNT] = [(10.0, 5.0), (50.0, 5.0)];
+const PLAIN_HALF_LENGTH: f32 = 10.0;
+const TRANSFORMED_HALF_LENGTH: f32 = 20.0;
 
 fn parse_svg(input: &str) -> Result<usvg::Tree, String> {
     let options = usvg::Options {
@@ -30,6 +35,39 @@ fn text_path_percentage_uses_entire_path_length(
         return Err("textPath flow missing".to_owned());
     };
     assert!((flow.start_offset() - expected).abs() < OFFSET_TOLERANCE);
+    Ok(())
+}
+
+#[rstest]
+#[case::plain("", PLAIN_PATH_POINTS, PLAIN_HALF_LENGTH)]
+#[case::transformed(
+    "transform='matrix(2 0 0 2 10 5)'",
+    TRANSFORMED_PATH_POINTS,
+    TRANSFORMED_HALF_LENGTH
+)]
+fn text_path_uses_transformed_geometry_for_percentage_offset(
+    #[case] transform: &str,
+    #[case] expected_points: [(f32, f32); PATH_POINT_COUNT],
+    #[case] expected_offset: f32,
+) -> Result<(), String> {
+    let input = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='50'><defs><path id='curve' d='M0 0 L20 0' {transform}/></defs><text id='target' font-family='Yellowtail'><textPath href='#curve' startOffset='50%'>A</textPath></text></svg>"
+    );
+    let tree = parse_svg(&input)?;
+    let chunk = text_node(&tree, "target")?
+        .chunks()
+        .first()
+        .ok_or("chunk missing")?;
+    let usvg::TextFlow::Path(flow) = chunk.text_flow() else {
+        return Err("textPath flow missing".to_owned());
+    };
+    let points = flow.path().points();
+    assert_eq!(points.len(), expected_points.len());
+    for (point, (x, y)) in points.iter().zip(expected_points) {
+        assert!((point.x - x).abs() < OFFSET_TOLERANCE);
+        assert!((point.y - y).abs() < OFFSET_TOLERANCE);
+    }
+    assert!((flow.start_offset() - expected_offset).abs() < OFFSET_TOLERANCE);
     Ok(())
 }
 
