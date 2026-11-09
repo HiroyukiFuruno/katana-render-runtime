@@ -4,6 +4,32 @@ use crate::svg_engine::usvg::{AlignmentBaseline, DominantBaseline, FontStyle, Le
 use rstest::rstest;
 
 #[rstest]
+#[case::single_space(" ", "")]
+#[case::leading_space_in_nested_span("A<tspan> B</tspan>", "AB")]
+#[case::preserved_space_at_span_boundary(
+    "<tspan xml:space='preserve'>A </tspan><tspan> B</tspan>",
+    "A B"
+)]
+fn text_whitespace_respects_span_boundaries(
+    #[case] content: &str,
+    #[case] expected: &str,
+) -> Result<(), String> {
+    let source =
+        format!("<svg xmlns='http://www.w3.org/2000/svg'><text id='sample'>{content}</text></svg>");
+    let document = parse_document(&source, None)?;
+    let sample = document
+        .element_by_id("sample")
+        .ok_or("text node missing")?;
+    let actual: String = sample
+        .descendants()
+        .filter(SvgNode::is_text)
+        .map(|node| node.text())
+        .collect();
+    assert_eq!(actual, expected);
+    Ok(())
+}
+
+#[rstest]
 #[case::alignment("alignment-baseline", AId::AlignmentBaseline, "middle")]
 #[case::dominant("dominant-baseline", AId::DominantBaseline, "hanging")]
 #[case::length("lengthAdjust", AId::LengthAdjust, "spacingAndGlyphs")]

@@ -6,6 +6,33 @@ const DPI: f32 = 96.0;
 const PARENT_FONT_SIZE: f32 = 16.0;
 const FLOAT_TOLERANCE: f32 = 0.0001;
 
+#[test]
+fn recursive_use_children_do_not_expand_or_remove_valid_siblings() -> Result<(), String> {
+    let source = r##"<svg xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <g id="parent"><use href="#parent"/><rect width="9" height="9"/></g>
+        <g id="indirect"><use href="#indirect-instance"/><rect width="9" height="9"/></g>
+        <rect id="target" width="4" height="4"/>
+      </defs>
+      <use id="parent-instance" href="#parent"/>
+      <use id="indirect-instance" href="#indirect"/>
+      <use id="valid-instance" href="#target"/>
+      <rect id="after" width="8" height="8" fill="green"/>
+      </svg>"##;
+    let document = parse_document(source, None)?;
+    for id in ["parent-instance", "indirect-instance"] {
+        let node = document.element_by_id(id).ok_or("use element missing")?;
+        assert!(node.children().next().is_none(), "{id}");
+    }
+    let valid = document
+        .element_by_id("valid-instance")
+        .and_then(|node| node.children().next())
+        .ok_or("valid use did not expand")?;
+    assert_eq!(valid.attribute::<&str>(AId::Width), Some("4"));
+    assert_eq!(raw_attribute(&document, "after", AId::Fill)?, "green");
+    Ok(())
+}
+
 const INITIAL_VALUES: [(AId, &str); 18] = [
     (AId::Fill, "black"),
     (AId::FillOpacity, "1"),
