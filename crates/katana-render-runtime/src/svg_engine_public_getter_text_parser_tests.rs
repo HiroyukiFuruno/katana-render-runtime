@@ -72,6 +72,35 @@ fn text_path_uses_transformed_geometry_for_percentage_offset(
 }
 
 #[rstest]
+#[case::missing("#missing", "AD", "")]
+#[case::resolved("#curve", "ABCD", "BC")]
+fn text_path_reference_preserves_surrounding_text_and_path_flow(
+    #[case] href: &str,
+    #[case] expected_text: &str,
+    #[case] expected_path_text: &str,
+) -> Result<(), String> {
+    let input = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='50'><defs><path id='curve' d='M0 20 L100 20'/></defs><text id='target' x='10 20 30 40' font-family='Yellowtail'>A<textPath href='{href}'>BC</textPath>D</text></svg>"
+    );
+    let tree = parse_svg(&input)?;
+    let text = text_node(&tree, "target")?;
+    let chunks = text.chunks();
+    let actual: String = chunks.iter().map(|chunk| chunk.text()).collect();
+    assert_eq!(actual, expected_text);
+    assert_eq!(text_in_flow(chunks, true), expected_path_text);
+    assert_eq!(text_in_flow(chunks, false), "AD");
+    Ok(())
+}
+
+fn text_in_flow(chunks: &[usvg::TextChunk], path: bool) -> String {
+    chunks
+        .iter()
+        .filter(|chunk| matches!(chunk.text_flow(), usvg::TextFlow::Path(_)) == path)
+        .map(|chunk| chunk.text())
+        .collect()
+}
+
+#[rstest]
 #[case::resolved("#source", "ABX")]
 #[case::missing("#missing", "X")]
 fn tref_collects_referenced_text_and_preserves_following_text(

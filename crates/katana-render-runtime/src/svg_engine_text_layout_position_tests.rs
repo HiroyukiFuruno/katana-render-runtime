@@ -3,6 +3,20 @@ use rstest::rstest;
 
 const SHIFT_X: f32 = 7.0;
 const SHIFT_Y: f32 = 5.0;
+const INHERITED_ROTATIONS: &[f32] = &[10.0, 20.0, 20.0, 20.0];
+const OVERRIDDEN_ROTATIONS: &[f32] = &[10.0, 20.0, 30.0, 30.0];
+
+#[rstest]
+#[case::inherited("<tspan>CD</tspan>", INHERITED_ROTATIONS)]
+#[case::child_override("<tspan rotate='30'>CD</tspan>", OVERRIDDEN_ROTATIONS)]
+fn nested_rotation_repeats_last_value_and_prefers_child(
+    #[case] child: &str,
+    #[case] expected: &[f32],
+) -> Result<(), String> {
+    let tree = parse("rotate='10 20'", &format!("AB{child}"))?;
+    assert_eq!(text(&tree)?.rotate(), expected);
+    Ok(())
+}
 
 #[rstest]
 #[case::horizontal("", usvg::WritingMode::LeftToRight)]
