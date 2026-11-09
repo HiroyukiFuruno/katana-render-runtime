@@ -32,6 +32,22 @@ const HEADER_TRUNCATION_BYTES: usize = 1;
 const THIN_ONLY_ERROR: &str = "macho-kind:thin-32-or-64-required";
 
 #[test]
+fn rejects_truncated_symbol_command_and_oversized_command_region() -> Result<(), String> {
+    for is_64 in [false, true] {
+        let valid = MachoNosoFixture::thin_macho(is_64, Corruption::None);
+        assert!(MachOReader::records(&valid).is_ok());
+        let mut short_command = valid.clone();
+        let command_size = header_bytes(is_64) + 4;
+        short_command[command_size..command_size + 4].copy_from_slice(&8_u32.to_le_bytes());
+        assert_error_prefix(&short_command, "macho-symtab-command:")?;
+        let mut oversized_commands = valid;
+        oversized_commands[20..24].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert_error_prefix(&oversized_commands, "macho-load-commands:")?;
+    }
+    Ok(())
+}
+
+#[test]
 fn rejects_corrupted_thin_macho32_and_macho64_inputs() -> Result<(), String> {
     for (is_64, corruption, expected_prefixes) in CORRUPTED_FIXTURE_CASES {
         let bytes = MachoNosoFixture::thin_macho(*is_64, *corruption);
