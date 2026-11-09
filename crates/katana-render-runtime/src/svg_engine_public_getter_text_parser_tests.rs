@@ -17,6 +17,35 @@ fn parse_svg(input: &str) -> Result<usvg::Tree, String> {
 }
 
 #[rstest]
+#[case::valid("font-family='Yellowtail'", usvg::FontFamily::Named("Yellowtail".into()))]
+#[case::invalid("font-family='Red/Black, sans-serif'", usvg::FontFamily::Named("Yellowtail".into()))]
+#[case::inherited("", usvg::FontFamily::Serif)]
+fn malformed_family_uses_configured_fallback_instead_of_parent(
+    #[case] child_attribute: &str,
+    #[case] expected: usvg::FontFamily,
+) -> Result<(), String> {
+    assert!(svgtypes::parse_font_families("Red/Black, sans-serif").is_err());
+    let mut database = upstream_writer_font_database()?;
+    std::sync::Arc::make_mut(&mut database).set_serif_family("Yellowtail");
+    let options = usvg::Options {
+        fontdb: database,
+        font_family: "Yellowtail".to_owned(),
+        ..usvg::Options::default()
+    };
+    let input = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='50'><g font-family='serif'><text id='target' {child_attribute}>A</text></g></svg>"
+    );
+    let tree = usvg::Tree::from_str(&input, &options).map_err(|error| error.to_string())?;
+    let span = text_node(&tree, "target")?
+        .chunks()
+        .first()
+        .and_then(|chunk| chunk.spans().first())
+        .ok_or("text span missing")?;
+    assert_eq!(span.font().families(), &[expected]);
+    Ok(())
+}
+
+#[rstest]
 #[case::quadratic("M0 0 Q10 0 20 0", 10.0)]
 #[case::closed("M0 0 L20 0 Z", 20.0)]
 fn text_path_percentage_uses_entire_path_length(
