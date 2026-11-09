@@ -7,8 +7,10 @@ type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 const HTML: &str = r#"<!doctype html><link rel="stylesheet" href="style.css">
 <div id="panel"></div><img src="image.png" width="16" height="16">
-<p id="state">initial</p><script>window.resourceSentinel = 37;</script>"#;
+<p id="state">initial</p><script>window.resourceSentinel = 37;</script><div id="tail"></div>"#;
 const RGBA_CHANNELS: usize = 4;
+const TAIL_HEIGHT_PX: usize = 512;
+const SMALL_SCROLL_DELTA: f32 = 1.0;
 const EXPECTED_RESOURCE_COUNT: usize = 2;
 const INITIAL_SENTINEL: i32 = 37;
 const RETAINED_SENTINEL: i32 = 91;
@@ -19,7 +21,9 @@ const RED: [u8; RGBA_CHANNELS] = [255, 0, 0, 255];
 fn css(root: &Path, color: &str) -> TestResult {
     std::fs::write(
         root.join("style.css"),
-        format!("html,body{{margin:0}} #panel{{width:16px;height:16px;background:{color}}}"),
+        format!(
+            "html,body{{margin:0}} #panel{{width:16px;height:16px;background:{color}}} #tail{{height:{TAIL_HEIGHT_PX}px}}"
+        ),
     )?;
     Ok(())
 }
@@ -67,6 +71,27 @@ fn assert_frame_and_state(
         .runtime
         .observe_feature_state("window.resourceSentinel")?;
     assert_eq!(sentinel, RETAINED_SENTINEL);
+    Ok(())
+}
+
+fn scroll_retained_session(
+    session: &mut HtmlInteractiveSession,
+    viewport: HtmlBrowserViewport,
+) -> TestResult {
+    session.dispatch_input(
+        crate::renderer::backends::html_browser::HtmlBrowserInput::Scroll {
+            delta_x: 0.0,
+            delta_y: SMALL_SCROLL_DELTA,
+        },
+    )?;
+    assert_frame_and_state(session, viewport)?;
+    assert_eq!(
+        session
+            .latest_frame()
+            .ok_or("missing scrolled frame")?
+            .scroll_y,
+        SMALL_SCROLL_DELTA
+    );
     Ok(())
 }
 
@@ -148,13 +173,27 @@ fn resize_reuses_loaded_resources_and_fresh_session_observes_changes() -> TestRe
 
     css(root, "#0000ff")?;
     std::fs::remove_file(root.join("image.png"))?;
-    let resize_audit = ResourceAuditScope::start();
-    session.resize(initial)?;
-    assert_frame_and_state(&mut session, initial)?;
-    session.resize(resized)?;
-    assert_frame_and_state(&mut session, resized)?;
-    let resize_inventory = audit(resize_audit, root, "resize-audit")?;
-    assert!(resize_inventory.complete, "{}", resize_inventory.reason);
-    assert_eq!(resize_inventory.requests.as_array().map(Vec::len), Some(0));
+    assert_retained_resources_after_resize_and_scroll(&mut session, root, initial, resized)?;
     assert_fresh_session(root, source, resized)
+}
+
+fn assert_retained_resources_after_resize_and_scroll(
+    session: &mut HtmlInteractiveSession,
+    root: &Path,
+    initial: HtmlBrowserViewport,
+    resized: HtmlBrowserViewport,
+) -> TestResult {
+    let retained_audit = ResourceAuditScope::start();
+    session.resize(initial)?;
+    assert_frame_and_state(session, initial)?;
+    session.resize(resized)?;
+    assert_frame_and_state(session, resized)?;
+    scroll_retained_session(session, resized)?;
+    let retained_inventory = audit(retained_audit, root, "resize-scroll-audit")?;
+    assert!(retained_inventory.complete, "{}", retained_inventory.reason);
+    assert_eq!(
+        retained_inventory.requests.as_array().map(Vec::len),
+        Some(0)
+    );
+    Ok(())
 }
