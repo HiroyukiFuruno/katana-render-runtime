@@ -81,6 +81,21 @@ const DIGEST_INITIALIZER: &str = "self.digest.get_or_init(|| {\n            Sha2
 
 const ACCESSOR_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        DIGEST_INITIALIZER,
+        "&self.digest",
+        "resource-loader:accessors",
+    ),
+    (
+        "ResourceContent::Text(text) => Ok(text.as_str()),\n            ResourceContent::Binary(_) => Err(Self::invalid_utf8()),",
+        "ResourceContent::Text(text) => Ok(text.as_str()),\n            ResourceContent::Binary(_) => Ok(\"\"),",
+        "resource-loader:accessors",
+    ),
+    (
+        "Self::snapshot(path)?.text().map(str::to_owned)",
+        "Self::snapshot(path)?.text().map(|_| String::new())",
+        "resource-loader:bytes-text",
+    ),
+    (
         "std::io::Error::new(\n            std::io::ErrorKind::InvalidData,\n            \"stream did not contain valid UTF-8\",\n        )",
         "std::io::ErrorKind::InvalidData.into()",
         "resource-loader:bytes-text",
