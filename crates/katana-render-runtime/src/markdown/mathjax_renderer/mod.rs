@@ -230,6 +230,29 @@ mod tests {
         assert!(matches!(rendered, Ok(value) if value == "<svg/>"));
     }
 
+    #[test]
+    fn loaded_mathjax_bundle_rejects_blank_input_and_renders_real_math() -> Result<(), String> {
+        use crate::markdown::runtime_resource_loader::{BundledResource, RuntimeResourceLoader};
+
+        let resource =
+            RuntimeResourceLoader::load(Path::new("unused.js"), Some(BundledResource::MathJax))
+                .map_err(|error| error.to_string())?;
+        let preset = DiagramColorPreset::current();
+        let mut block = DiagramBlock {
+            kind: DiagramKind::MathJax,
+            source: " \t\n".into(),
+        };
+        assert_eq!(
+            MathJaxRendererOps::render_mathjax_with_loaded(&block, preset, false, &resource),
+            Err("MathJax source is empty".into())
+        );
+        block.source = "x^2".into();
+        let rendered =
+            MathJaxRendererOps::render_mathjax_with_loaded(&block, preset, false, &resource)?;
+        assert!(rendered.contains("<svg"));
+        Ok(())
+    }
+
     fn test_path(name: &str) -> PathBuf {
         let id = TEMP_ID.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!(
