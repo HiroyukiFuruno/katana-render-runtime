@@ -28,7 +28,7 @@ const C4_DEPLOYMENT_SOURCE: &str = "C4Deployment
         Container(mobile, \"Mobile App\", \"Xamarin\")
     }";
 
-const ARCHITECTURE_SERVICE_ICONS_SOURCE: &str = "architecture-beta
+pub(super) const ARCHITECTURE_SERVICE_ICONS_SOURCE: &str = "architecture-beta
     group api(cloud)[API]
 
     service db(database)[Database] in api
@@ -181,7 +181,7 @@ fn runtime_normalizes_architecture_simple_renderer_coordinates_ja() -> Result<()
     Ok(())
 }
 
-fn render_mermaid_svg(source: &str) -> Result<String, String> {
+pub(super) fn render_mermaid_svg(source: &str) -> Result<String, String> {
     let mermaid = RuntimeAsset::mermaid();
     mermaid
         .materialize_at(mermaid.materialized_path())
