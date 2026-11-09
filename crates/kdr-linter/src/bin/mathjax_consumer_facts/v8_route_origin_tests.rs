@@ -34,6 +34,11 @@ const ORIGIN_HELPER_SHAPE_CASES: &[(&str, &str, &str)] = &[
         "route-initializer:origin",
     ),
     (
+        ORIGIN_INITIALIZER,
+        "        let origin = origin_name;\n",
+        "v8-script-origin-helper:origin",
+    ),
+    (
         "v8::ScriptOrigin::new(",
         "Some(",
         "v8-script-origin-helper:origin",
@@ -46,6 +51,11 @@ const ORIGIN_HELPER_SHAPE_CASES: &[(&str, &str, &str)] = &[
     (
         ORIGIN_COMPILE,
         "        v8::Script::compile(scope, source, None)",
+        "v8-script-origin-helper:compile",
+    ),
+    (
+        ORIGIN_COMPILE,
+        "        source",
         "v8-script-origin-helper:compile",
     ),
 ];

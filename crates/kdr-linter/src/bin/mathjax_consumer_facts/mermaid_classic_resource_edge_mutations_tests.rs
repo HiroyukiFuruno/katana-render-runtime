@@ -98,6 +98,21 @@ pub(super) const BACKEND_CASES: &[(&str, &str, &str)] = &[
 
 pub(super) const INSTANCE_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "let unique_id = format!(\"{root_id}-{sequence:016x}\");",
+        "let unique_id = root_id.to_string();",
+        "mermaid-resource-route:instance",
+    ),
+    (
+        "let unique_id = format!(\"{root_id}-{sequence:016x}\");",
+        "let extra = ();\n        let unique_id = format!(\"{root_id}-{sequence:016x}\");",
+        "mermaid-resource-route:instance",
+    ),
+    (
+        "let Some(root_id) = Self::root_svg_id(&svg) else {\n            return svg;\n        };",
+        "Self::root_svg_id(&svg);",
+        "mermaid-resource-route:instance",
+    ),
+    (
         "svg.replace(&root_id, &unique_id)",
         "svg.replace(&root_id, &root_id)",
         "mermaid-resource-route:instance",
