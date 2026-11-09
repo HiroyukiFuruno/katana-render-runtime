@@ -2,6 +2,11 @@
 
 ## 現在の実行地点（2026-11-09、以下の過去結果と区別する）
 
+- [/] 11月10日、`96e3bbf9` のroot coverageを個別収集。Nextestは5,975/5,975成功、別に15件skip。86,846/87,735行、98.9867%、未カバー889行。ソース前後一致。収集は実0、閾値判定は`coverage-policy`で実1（`tmp/quality/resumed-owner-r3509/root-coverage-after-final-gate-fixes-iddpuvor/safe-summary.json`）。全体ゲートや公開の合格へ転用しない。
+- [x] 公開ゲートの既知の失敗を3コミットで修正。HTML性能再利用の履歴入力を固定（`060d02fd`）、macOS証跡を現行CIに照合（`f08eb309`）、SVGテスト5ファイルを整形対象へ追加（`96e3bbf9`）。対象回帰4件、Python Lint・型・重複、Rust整形・ASTが成功。後半1,337件中1件の先行失敗は `owned-svg-formatter-verified-1c27ovlc`、修正後の個別結果は `final-gate-targeted-fixes-uz9xny29` に保持。完全ゲートの再判定は未完。
+- [x] 整形コマンド変更と静的契約の厳密照合を同期。旧照合の拒否は `svg-indic-fallback-focused-_s_nihc4` に保持。修正後 `svg-indic-fallback-static-aligned-8jw2e0cw` で契約の異常系4件、静的foundation・整形・重複・ASTが成功した。
+- [x] SVGフォールバック回帰を追加。両フォントでクラスタ境界が異なる実Indic合字で、フォールバックが正常glyphと文字位置を維持する。コンパイル済みbinaryの目録で対象を特定し、新規1件と既存2件が成功、source/binary不変、計測一時ファイル回収済み（`svg-indic-fallback-exact-1jgoas1u/safe-summary.json`）。全体カバレッジの再測定は未実施。
+
 - [/] HTML性能の現行候補 `71fa67d1` は `html-current-candidate-proof-9_lfxs5s` で正式build proof実0。probe SHA `7b27a9f0f429b85185a89eb0a9c7ff0133751aae80986535056ed8f5d5ec6b66` は合格済み84条件のprobe `9a07b8fa…` と異なり、再利用不可。1条件 `typography/nowrap/1280x900@1` の初回は成果物上限の事前検査で採取なし。既存のパッケージ指定cleanをpreview照合後実行し、32生成file・1.0GiBを整理、3,591,811,072B／上限4,726,095,872B、35保護ref再検証実0。再試行 `html-current-one-condition-35gco2ja` は現行build通過、比較元の最初の試行3回の採取後負荷が27.6%・32.9%・30.3%で25%上限を超え、全て無効。実1、closed receipt `8d3ceee69b31444d2bc1ac0d323f511e2856d5701bbcdb145bdb9fab7722799d`、完了0、速度・メモリの合否未計測。両失敗と原結果は保持、閾値変更なし。負荷が下がるまで性能再試行を連発せず、独立した最終Mermaid/公開準備を進める。
 
 - [x] CLIの成功証跡の誤生成を防ぐ2回帰を確認。同梱Mermaidの実構文エラーは元の `RenderError::Runtime` と入力を維持し、SVG・成功receiptを生成しない。実tracing subscriberが描画後も保持された場合はcaptureを拒否し証跡fileなし。既存の正常receiptを含む `cli-mermaid-error-exact-06mj44vo` は3件すべて実0、source/binary不変・一時profile0。準備中の並行編集で整形失敗2回、誤importのcompile失敗1回を原ログに保持。対象固定・参照修正後 `cli-attestation-import-fixed-build-qcc0zf0v` はfoundation/fmt/重複/AST実0・compile成功。catalog追加2・削除0、スキップ変更なし。正式coverage未集計。
