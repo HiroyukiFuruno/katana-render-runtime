@@ -95,3 +95,43 @@ fn v8_route_ast_linter_rejects_origin_helper_statement_shapes() -> Result<(), St
     }
     Ok(())
 }
+
+#[test]
+fn v8_route_rejects_a_different_run_exception_handler() -> Result<(), String> {
+    let mut sources = crate::v8_route::test_support::actual_sources()?;
+    let root = crate::test_support::repository_root().map_err(|error| error.to_string())?;
+    let path = crate::source::RUST_INPUTS[5];
+    let text = std::fs::read_to_string(root.join(path)).map_err(|error| error.to_string())?;
+    let before = "script.run(scope).ok_or_else(|| exception_message(scope))";
+    assert_eq!(text.matches(before).count(), 1);
+    let changed = text.replacen(before, "script.run(scope).ok_or_else(|| other(scope))", 1);
+    sources
+        .get_mut(path)
+        .ok_or("missing V8 runtime source")?
+        .ast = syn::parse_file(&changed).map_err(|error| error.to_string())?;
+    assert_eq!(
+        crate::v8_route::inspect_v8_compile(&sources, &mut Vec::new())
+            .err()
+            .as_deref(),
+        Some("v8-compile-order:run")
+    );
+    Ok(())
+}
+
+#[test]
+fn v8_compiler_import_accepts_a_non_import_before_it() -> Result<(), String> {
+    let mut sources = crate::v8_route::test_support::actual_sources()?;
+    let root = crate::test_support::repository_root().map_err(|error| error.to_string())?;
+    let path = crate::source::RUST_INPUTS[5];
+    let text = std::fs::read_to_string(root.join(path)).map_err(|error| error.to_string())?;
+    sources
+        .get_mut(path)
+        .ok_or("missing V8 runtime source")?
+        .ast = syn::parse_file(&format!("const OTHER: () = ();\n{text}"))
+        .map_err(|error| error.to_string())?;
+    assert_eq!(
+        crate::v8_compile::inspect_compiler_helper(&sources, &mut Vec::new()),
+        Ok(())
+    );
+    Ok(())
+}
