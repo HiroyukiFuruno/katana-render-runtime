@@ -1,5 +1,31 @@
 use super::{RUST_INPUTS, mathjax_fixture};
 
+#[test]
+fn snapshot_loader_rejects_missing_snapshot_and_cache_methods()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = mathjax_fixture()?;
+    fixture.reject_unique_mutations(
+        RUST_INPUTS[super::super::super::source::RESOURCE_BYTES_INPUT_INDEX],
+        &[
+            (
+                "pub(crate) fn snapshot(path: &Path)",
+                "pub(crate) fn renamed_snapshot(path: &Path)",
+                "missing-method:ResourceBytes::snapshot",
+            ),
+            (
+                "fn read_snapshot(mut file: File, before: Identity)",
+                "fn renamed_read_snapshot(mut file: File, before: Identity)",
+                "missing-method:ResourceBytes::read_snapshot",
+            ),
+            (
+                "fn cached(\n",
+                "fn renamed_cached(\n",
+                "missing-method:ResourceBytes::cached",
+            ),
+        ],
+    )
+}
+
 const DIGEST_INITIALIZER: &str = "self.digest.get_or_init(|| {\n            Sha256::digest(self.bytes())\n                .iter()\n                .map(|byte| format!(\"{byte:02x}\"))\n                .collect()\n        })";
 
 const ACCESSOR_MUTATIONS: &[(&str, &str, &str)] = &[
