@@ -182,6 +182,44 @@ fn eligible_chunk_metric_failure_is_returned_to_the_caller() -> Result<(), Strin
     Ok(())
 }
 
+#[test]
+fn eligible_chunk_rejects_inconsistent_shaping_results() -> Result<(), String> {
+    use super::super::{eligibility, metrics};
+
+    let source = tree(SPLIT_CONTENT, "", CSS_SCALE)?;
+    let Some(Node::Text(text)) = source.node_by_id("run") else {
+        return Err("metric fixture text is missing".into());
+    };
+    let spans = prepared_tree(&source)?;
+    let input = eligibility::input(text, &spans).ok_or("metric fixture is ineligible")?;
+    let shaped = metrics::character_metrics(source.fontdb(), &input)?;
+    assert!(metrics::span_widths(input.chunk, &shaped).is_ok());
+    assert_inconsistent_metric_counts(input.chunk, &shaped);
+
+    let mut invalid = shaped;
+    invalid[0][0].1 = f32::NAN;
+    assert!(
+        metrics::span_widths(input.chunk, &invalid)
+            .is_err_and(|error| error == "eligible SVG chunk metrics are not finite")
+    );
+    invalid[0].fill((0.0, 0.0));
+    assert!(
+        metrics::span_widths(input.chunk, &invalid)
+            .is_err_and(|error| error == "eligible SVG chunk span advance is not positive")
+    );
+    Ok(())
+}
+
+fn assert_inconsistent_metric_counts(chunk: &resvg::usvg::TextChunk, shaped: &[Vec<(f32, f32)>]) {
+    use super::super::metrics::span_widths;
+
+    let count_error = "eligible SVG chunk character metrics count mismatch".to_owned();
+    let mut missing_character = shaped.to_vec();
+    missing_character[0].pop();
+    assert_eq!(span_widths(chunk, &shaped[1..]), Err(count_error.clone()));
+    assert_eq!(span_widths(chunk, &missing_character), Err(count_error));
+}
+
 fn assert_excluded(content: &str, attributes: &str) -> Result<(), String> {
     let source = tree(content, attributes, CSS_SCALE)?;
     if let Prepared::Ready(spans) = prepare_tree(&source)? {

@@ -1,5 +1,5 @@
 use super::{current_process_rss_kib, html_font_memory_snapshot};
-use resvg::usvg::fontdb::Database;
+use resvg::usvg::fontdb::{Database, Source};
 use serde_json::{Value, json};
 use skia_safe::{Data, FontMgr};
 use std::time::Instant;
@@ -25,6 +25,48 @@ fn physical_font_stage_helpers_verify_and_draw_selected_source()
 #[test]
 fn physical_font_stage_rejects_a_database_without_the_selected_family() {
     assert!(selected_physical_font(&Database::new()).is_err());
+}
+
+#[test]
+fn selected_font_rejects_binary_backed_real_face() -> Result<(), Box<dyn std::error::Error>> {
+    let source = selected_physical_font(&acquire_font_database())?;
+    let mut database = Database::new();
+    let loaded = database.load_font_source(Source::Binary(std::sync::Arc::new(source.bytes)));
+    assert!(!loaded.is_empty());
+    let error = selected_physical_font(&database)
+        .err()
+        .ok_or("binary source was accepted")?;
+    assert_eq!(error.to_string(), "selected face is not file-backed");
+    Ok(())
+}
+
+#[test]
+fn selected_typeface_rejects_mismatched_source_bytes_and_index()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = selected_physical_font(&acquire_font_database())?;
+    let (_manager, typeface) = load_selected_typeface(&source)?;
+    assert_typeface_source(&typeface, &source)?;
+    let mut altered = PhysicalFont {
+        path: source.path.clone(),
+        index: source.index,
+        bytes: source.bytes.clone(),
+    };
+    altered.bytes.push(0);
+    assert_eq!(
+        assert_typeface_source(&typeface, &altered)
+            .err()
+            .map(|error| error.to_string()),
+        Some("loaded typeface differs from the selected physical source".to_owned())
+    );
+    altered.bytes = source.bytes;
+    altered.index = source.index.checked_add(1).ok_or("font index overflow")?;
+    assert_eq!(
+        assert_typeface_source(&typeface, &altered)
+            .err()
+            .map(|error| error.to_string()),
+        Some("loaded typeface differs from the selected physical source".to_owned())
+    );
+    Ok(())
 }
 
 #[test]
