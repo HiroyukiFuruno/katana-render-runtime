@@ -26,7 +26,11 @@ const PROBE_VALUE: i32 = 8;
 #[test]
 fn font_bridge_reports_throwing_registration_setter() {
     DiagramV8Runtime::ensure_initialized();
-    for &(property, expected) in REGISTRATIONS {
+    let fragment = (
+        "__katanaMeasureSvgFragmentLayout",
+        "SVG fragment bridge registration failed",
+    );
+    for &(property, expected) in REGISTRATIONS.iter().chain(std::iter::once(&fragment)) {
         assert_accessor_registration_rejected(
             property,
             expected,
