@@ -5,6 +5,9 @@ use std::sync::Arc;
 const VARIABLE_FONT: &[u8] = include_bytes!(
     "../../../tests/fixtures/svg-engine/upstream/resvg/tests/fonts/RobotoFlex.subset.ttf"
 );
+const EMOJI_FONT: &[u8] = include_bytes!(
+    "../../../tests/fixtures/svg-engine/upstream/resvg/tests/fonts/NotoColorEmojiCBDT.subset.ttf"
+);
 const AXIS: [u8; 4] = *b"YTLC";
 const MINIMUM: f32 = 416.0;
 const DEFAULT: f32 = 514.0;
@@ -64,6 +67,24 @@ fn variable_axis_changes_css_x_height_against_independent_oracle() -> TestResult
         usvg::layout::css_font_x_height(&font, &selected_face_resolver(Some(id)), &mut database)
             .ok_or("default x-height unavailable")?;
     assert!((actual - default.0).abs() <= default.1);
+    Ok(())
+}
+
+#[test]
+fn svg_ex_uses_half_em_when_selected_font_has_no_x_glyph_or_x_height() -> TestResult<()> {
+    let face = Face::parse(EMOJI_FONT, 0)?;
+    assert_eq!(face.x_height(), Some(0));
+    assert!(face.glyph_index('x').is_none());
+    let (database, id) = fixture_database(EMOJI_FONT)?;
+    let options = usvg::Options {
+        fontdb: database,
+        font_resolver: selected_face_resolver(Some(id)),
+        ..usvg::Options::default()
+    };
+    let svg = "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='40'><rect id='sample' font-size='20' x='2ex' width='10' height='10'/></svg>";
+    let tree = usvg::Tree::from_str(svg, &options)?;
+    let sample = tree.node_by_id("sample").ok_or("sample path missing")?;
+    assert_eq!(sample.abs_bounding_box().x(), 20.0);
     Ok(())
 }
 
