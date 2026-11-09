@@ -181,21 +181,49 @@ fn start_marker_renders_at_its_first_vertex() -> Result<(), String> {
 #[test]
 fn marker_default_overflow_matches_hidden_and_clips_oversized_children() -> Result<(), String> {
     let source = fixture("default-clip")?;
-    let hidden = source.replace(
-        "markerHeight=\"20\">",
-        "markerHeight=\"20\" overflow=\"hidden\">",
-    );
-    let visible = source.replace(
-        "markerHeight=\"20\">",
-        "markerHeight=\"20\" overflow=\"visible\">",
-    );
-    assert_ne!(source, hidden);
-    assert_ne!(source, visible);
+    let image = |overflow| {
+        let configured = source.replace(
+            "markerHeight=\"20\">",
+            &format!("markerHeight=\"20\" overflow=\"{overflow}\">"),
+        );
+        assert_ne!(source, configured);
+        render_source(&configured)
+    };
     let default_image = render_source(&source)?;
-    let hidden_image = render_source(&hidden)?;
-    let visible_image = render_source(&visible)?;
+    let hidden_image = image("hidden")?;
+    let visible_image = image("visible")?;
+    let scroll_image = image("scroll")?;
     assert_eq!(default_image.data(), hidden_image.data());
+    assert_eq!(scroll_image.data(), hidden_image.data());
     assert!(blue_pixels(&visible_image) > blue_pixels(&default_image));
+    Ok(())
+}
+
+#[rstest]
+#[case::start("marker-start")]
+#[case::mid("marker-mid")]
+#[case::end("marker-end")]
+fn non_marker_reference_renders_only_the_original_path(
+    #[case] property: &str,
+) -> Result<(), String> {
+    const PLAIN: &str = "<svg xmlns='http://www.w3.org/2000/svg' width='80' height='40'><path d='M10 20 L30 20 L50 20' fill='none' stroke='black'/></svg>";
+    let input = |id: &str| {
+        format!(
+            "<svg xmlns='http://www.w3.org/2000/svg' width='80' height='40'><defs><rect id='wrong' width='8' height='8'/><marker id='valid' markerUnits='userSpaceOnUse' markerWidth='8' markerHeight='8' overflow='visible'><path d='M0 0 L8 4 L0 8 Z' fill='red'/></marker></defs><path d='M10 20 L30 20 L50 20' fill='none' stroke='black' {property}='url(#{id})'/></svg>"
+        )
+    };
+    let invalid = render_source(&input("wrong"))?;
+    let plain = render_source(PLAIN)?;
+    let valid = render_source(&input("valid"))?;
+    assert!(plain.pixels().iter().any(|pixel| pixel.alpha() != 0));
+    assert_eq!(invalid.data(), plain.data());
+    assert!(
+        valid
+            .pixels()
+            .iter()
+            .any(|pixel| pixel.red() > pixel.green())
+    );
+    assert_ne!(valid.data(), plain.data());
     Ok(())
 }
 
