@@ -75,7 +75,8 @@ pub(in super::super) fn assert_view_box_matches(
 ) -> Result<(), String> {
     let actual = svg_view_box(actual)?;
     for (index, (actual, expected)) in actual.into_iter().zip(expected).enumerate() {
-        if (actual - expected).abs() > VIEW_BOX_SERIALIZATION_TOLERANCE {
+        let difference = (actual - expected).abs();
+        if !difference.is_finite() || difference > VIEW_BOX_SERIALIZATION_TOLERANCE {
             return Err(format!(
                 "SVG viewBox component {index} differs: {actual} vs {expected} (raw SHA-256 {source_sha256})"
             ));

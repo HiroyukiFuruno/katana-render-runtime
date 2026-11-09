@@ -206,6 +206,26 @@ fn real_timeline_ex_title_matches_independent_official_view_box() -> Result<(), 
     result.map_err(|error| format!("{error}; native font observations: {observations}"))
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn raw_view_box_comparison_rejects_non_finite_components_and_geometry_drift() -> Result<(), String>
+{
+    let expected = [0.0, 0.0, 10.0, 20.0];
+    let source = oracle::TIMELINE_RAW_SOURCE_SHA256;
+    let svg = |component: &str| format!(r#"<svg viewBox="0 0 {component} 20"/>"#);
+    assert_view_box_matches(&svg("10.01"), expected, source)?;
+    for component in ["10.25", "NaN", "inf"] {
+        let error = assert_view_box_matches(&svg(component), expected, source)
+            .err()
+            .ok_or_else(|| format!("invalid viewBox component {component} was accepted"))?;
+        assert!(error.contains("component 2 differs") && error.contains(source));
+    }
+    let mut invalid_reference = expected;
+    invalid_reference[2] = f64::NAN;
+    assert!(assert_view_box_matches(&svg("10"), invalid_reference, source).is_err());
+    Ok(())
+}
+
 fn assert_svg_contains(rendered: &Result<String, String>, expected: &str) {
     assert!(
         rendered.as_ref().is_ok_and(|svg| svg.contains(expected)),
