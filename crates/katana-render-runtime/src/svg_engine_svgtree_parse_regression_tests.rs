@@ -46,6 +46,21 @@ fn recursive_use_children_do_not_expand_or_remove_valid_siblings() -> Result<(),
     Ok(())
 }
 
+#[test]
+fn deep_use_reference_chain_returns_the_public_depth_limit_error() {
+    let mut source = format!("<svg xmlns='{SVG_NS}'><defs>");
+    for index in 0..520 {
+        source.push_str(&format!("<use id='u{index}' href='#u{}'/>", index + 1));
+    }
+    source.push_str("<rect id='u520' width='4' height='4'/></defs><use href='#u0'/></svg>");
+    assert!(matches!(
+        usvg::Tree::from_str(&source, &usvg::Options::default()),
+        Err(usvg::Error::ParsingFailed(
+            roxmltree::Error::NodesLimitReached
+        ))
+    ));
+}
+
 const INITIAL_VALUES: [(AId, &str); 18] = [
     (AId::Fill, "black"),
     (AId::FillOpacity, "1"),
