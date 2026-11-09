@@ -6,6 +6,8 @@ const MATHJAX_RUNTIME_PATH_RESOLVER_INDEX: usize = 3;
 const DIAGRAM_JS_RUNTIME_INDEX: usize = 5;
 const V8_SCRIPT_ORIGIN_HELPER_INDEX: usize = 6;
 const LIB_MODULE_REGISTRATION_INDEX: usize = 7;
+#[path = "runtime_resolver_lookup_mutations_tests.rs"]
+mod lookup_mutations;
 #[path = "runtime_v8_route_plantuml_tests.rs"]
 mod plantuml_tests;
 
@@ -87,6 +89,7 @@ pub(super) fn reject_runtime_resolver_changes(
     repository: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     plantuml_tests::reject_loaded_mutations(fixture)?;
+    lookup_mutations::reject_changes(fixture, repository)?;
     reject_resolver_arm_and_dispatch(fixture, repository)?;
     reject_resolver_error_and_early_return(fixture, repository)
 }
