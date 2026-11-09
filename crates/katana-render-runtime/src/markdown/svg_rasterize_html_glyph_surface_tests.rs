@@ -100,3 +100,31 @@ fn assert_offscreen_noop(
     assert_eq!(offscreen.data(), before);
     Ok(())
 }
+
+#[test]
+fn text_crop_rejects_zero_canvas_and_unrepresentable_transformed_bounds() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let fixture = super::super::super::font_file_fixture::create(
+        directory.path().join("NotoSans-Regular.ttf"),
+        super::super::super::font_file_fixture::FONT_BYTES,
+    )
+    .map_err(|error| error.to_string())?;
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40"><text id="run" x="0" y="20" font-family="Noto Sans" font-size="16">AB</text></svg>"#;
+    let tree = fixture.parse_svg(svg).map_err(|error| error.to_string())?;
+    let Some(Node::Text(text)) = tree.node_by_id("run") else {
+        return Err("crop fixture text missing".into());
+    };
+    let crop = |transform, width, height| {
+        super::text_crop(text, transform, width, height, (0.0, 0.0), false)
+    };
+    assert!(crop(Transform::identity(), OFFSCREEN_WIDTH, OFFSCREEN_HEIGHT).is_some());
+    for (width, height) in [(0, OFFSCREEN_HEIGHT), (OFFSCREEN_WIDTH, 0)] {
+        assert!(crop(Transform::identity(), width, height).is_none());
+    }
+    let huge = Transform::from_row(1.0e9, 0.0, 0.0, 1.0, -8.0e9, 0.0);
+    let bounds = transformed_text_bounds(text, huge, (0.0, 0.0), false)
+        .ok_or("transformed text bounds missing")?;
+    assert!(bounds.0 < i32::MIN as f32 && bounds.2 > i32::MAX as f32);
+    assert!(crop(huge, OFFSCREEN_WIDTH, OFFSCREEN_HEIGHT).is_none());
+    Ok(())
+}
