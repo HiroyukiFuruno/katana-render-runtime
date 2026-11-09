@@ -61,6 +61,8 @@
 - [x] C4英語Contextの同一描画をwidth/descriptionで共有し、2描画→1。Dynamic/Contextの旧2case名、width語・Rust実幅・labelWidths、descriptionの2行/全span/bbox/macOS font audit、両診断キーを維持。元 `89f6a235` 全体での2case所要は44.700＋42.477秒（並列suite中のcase合計）。初回staticは既存2 source pin不一致を拒否、実cfg(test)→同helper→trace/result→両assertを独立確認して当該source pinと検査の期待2値のみを更新。次回ASTは資源caseが31行で拒否、resize/scrollの監査を責務で抽出して閾値を維持した。修正後 `c4-reuse-scroll-helper-fixed-build-wh8wx107` はfoundation/fmt/重複/AST実0、Bun trace 14件実0、compile成功（none選択実4）。`c4-reuse-scroll-contract-exact5-cgq9vvzb` はC4 2＋HTML 3の全実0、source/binary不変・profile残0。C4出力はDynamicにwidth 1、Contextにwidth 1/description 1。個別実行2.733/41.284秒を記録、旧全体中の時間とは条件が異なり短縮率へ換算しない。
 - [x] 上記HTML検証では実斜めスクロールとclick後、物理1120×920/DPR2へresizeして縦横を240/140へclamp、frame/metrics同世代・viewportと赤画素の状態維持を確認。既存片軸対照はそのまま。資源ケースは既存同一sessionでCSS変更・PNG削除後、resize→実1px scrollまで元緑/赤画素・JS/DOM状態・再取得0件を確認し、fresh sessionで新CSSと画像欠落を確認。製品コード・基準・skip変更なし、catalog削除0/追加1。正式coverage、HTML84の性能判定は別。
 
+- [x] 実CoreTextのHelveticaと同じ物理File/SharedFile faceを受理し、同梱Notoの別の所有fileを拒否（既存Binary/削除対照維持）。同梱Notoとhan14のBASE有無をread-fontsで独立照合し、空DBの不明IDは欠落確定と混同しないことを確認。通常Proxyはname trapが動かず元の例外を保持。 `physical-font-proxy-boundaries-current-build-gqyoqxcm` はfoundation/fmt/重複/AST実0・compile成功（none選択実4）、`physical-font-proxy-boundaries-exact10-i_io7aqv` は新規6＋既存4の全実0、source/binary不変・profile残0、catalog削除0。Appleの対照は既存macOS module上で実行、追加skipなし。基準/製品動作は変更なし。正式coverage・C4の全体実行時短縮は次回集計で確認する。
+
 ### 経過の記録（以下の旧数値・未実行予定は上の現在実数と区別する）
 
 - [/] 集計対象helperの限定補完: cmapのIO・HTMLの座標/実frame・KDRのparser pin fixtureを非重複3担当で変更中。成功/元のエラー表示とWindows callerを保ち、欠落ファイル・不正属性/viewport・closed session・fixture read/write失敗を実入力で検証する。実装の除外や分母変更はせず、純粋な判定caseは既存のtestファイル境界へ置く。レビューでcmap fixtureの早期失敗時の残骸も見つかったため、create_new成功後の所有とhandle解放後のDropへ整理する。まだ変更後未検証でありcoverage解消数へ加算しない。
