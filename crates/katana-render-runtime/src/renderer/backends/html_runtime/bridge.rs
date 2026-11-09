@@ -108,7 +108,8 @@ pub(super) fn uncaught_dom_error(
 ) -> Option<String> {
     let property = v8::String::new(scope, "name")?;
     let expected = v8::String::new(scope, NATIVE_DOM_ERROR_NAME)?;
-    let exception = scope.exception()?.to_object(scope)?;
+    /* WHY: プリミティブ例外を変換して、元の例外を別のTypeErrorで上書きしない。 */
+    let exception = v8::Local::<v8::Object>::try_from(scope.exception()?).ok()?;
     let name = exception.get(scope, property.into())?;
     if !name.strict_equals(expected.into()) {
         return None;

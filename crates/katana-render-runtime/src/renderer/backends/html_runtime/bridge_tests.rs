@@ -165,6 +165,25 @@ fn uncaught_bridge_and_javascript_errors_keep_distinct_types(
     assert_script_error_classification(source, native, expected_message)
 }
 
+#[rstest]
+#[case::null("null")]
+#[case::undefined("undefined")]
+#[case::number("42")]
+fn thrown_primitive_keeps_the_original_javascript_message(
+    #[case] literal: &str,
+) -> Result<(), String> {
+    use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
+    let source = format!("throw {literal};");
+    let error = with_v8_context!(isolate, scope, [], [], {
+        evaluate_value(scope, "bridge-primitive", &source).err()
+    });
+    let Some(HtmlRuntimeError::JavaScriptException(message)) = error else {
+        return Err(format!("expected a JavaScript exception, got {error:?}"));
+    };
+    assert_eq!(message.lines().next(), Some(literal), "{message}");
+    Ok(())
+}
+
 #[test]
 fn callback_coercion_cannot_use_host_timeout_allowance() -> Result<(), String> {
     for expression in [
