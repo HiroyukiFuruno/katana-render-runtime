@@ -1,6 +1,9 @@
-use super::super::test_support::{PROBE_TEST, TempDirectory, read_response, run_probe_child};
+use super::super::test_support::{
+    PROBE_TEST, TempDirectory, physical_font_fixture, read_response, run_probe_child,
+};
 use super::super::{
     CaptureRequest, CaptureResult, ProbeRequest, ProbeResponse, REQUEST_SCHEMA, RESPONSE_SCHEMA,
+    ResourceFile, identity::physical_file, probe::probe,
 };
 use super::{request_sha256, verified_single_capture};
 use std::fs;
@@ -20,6 +23,83 @@ fn request() -> ProbeRequest {
             resource_files: Vec::new(),
         }],
     }
+}
+
+#[test]
+fn font_probe_rejects_invalid_request_shape_and_duplicate_selected_font() -> Result<(), String> {
+    let mut wrong_schema = request();
+    wrong_schema.schema = "unknown-schema".into();
+    let mut empty = request();
+    empty.captures.clear();
+    for invalid in [wrong_schema, empty] {
+        assert_eq!(
+            probe_serialized(&invalid).err().as_deref(),
+            Some("unsupported request schema or empty capture list")
+        );
+    }
+    let (_temp, _, selected) = physical_font_fixture()?;
+    let mut duplicate = request();
+    duplicate.captures[0].selected_fonts = vec![selected.clone(), selected];
+    assert_eq!(
+        probe_serialized(&duplicate).err().as_deref(),
+        Some("duplicate CDP selected-font entry")
+    );
+    Ok(())
+}
+
+#[test]
+fn font_probe_keeps_duplicate_resources_and_incomplete_identity_unknown() -> Result<(), String> {
+    let (temp, _, mut selected) = physical_font_fixture()?;
+    let path = temp.path().join("physical-font.ttf");
+    let (_, bytes_sha256, _) = physical_file(&path)?;
+    let resource = ResourceFile {
+        url: "https://example.test/font".into(),
+        body_path: path,
+        bytes_sha256,
+    };
+    let mut request = request();
+    selected.is_custom_font = true;
+    request.captures[0].selected_fonts = vec![selected.clone()];
+    request.captures[0].resource_files = vec![
+        resource.clone(),
+        ResourceFile {
+            url: "https://example.test/same-font".into(),
+            ..resource
+        },
+    ];
+    selected.glyph_count = 0;
+    request.captures.push(CaptureRequest {
+        condition_id: "incomplete-font".into(),
+        selected_fonts: vec![selected],
+        resource_files: Vec::new(),
+    });
+    let observed = probe_serialized(&request)?;
+    assert_unknown_captures(observed)
+}
+
+fn probe_serialized(request: &ProbeRequest) -> Result<ProbeResponse, String> {
+    let bytes = serde_json::to_vec(request).map_err(|error| error.to_string())?;
+    probe(&bytes)
+}
+
+fn assert_unknown_captures(observed: ProbeResponse) -> Result<(), String> {
+    let [duplicate, incomplete] = observed.captures.as_slice() else {
+        return Err("expected two font captures".into());
+    };
+    for (capture, expected) in [
+        (duplicate, "duplicate physical font resource path"),
+        (incomplete, "CDP selected-font identity is incomplete"),
+    ] {
+        assert_eq!(capture.status, "unknown");
+        assert!(capture.font_provenance.is_empty());
+        assert!(
+            capture
+                .unknown_reasons
+                .iter()
+                .any(|reason| reason.contains(expected))
+        );
+    }
+    Ok(())
 }
 
 fn response(schema: &str, binding: &str, conditions: &[&str]) -> ProbeResponse {

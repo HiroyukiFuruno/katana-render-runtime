@@ -112,3 +112,33 @@ fn selected_family(database: &Arc<Database>, families: &str) -> Result<ID, Strin
     }
     Ok(ids[0])
 }
+
+#[test]
+fn svg_generic_family_selection_uses_configured_real_faces() -> Result<(), String> {
+    let mut database = Database::new();
+    database.load_font_data(FONT_BYTES.to_vec());
+    let original = database
+        .faces()
+        .next()
+        .cloned()
+        .ok_or("bundled face missing")?;
+    database.remove_face(original.id);
+    let cursive = database.push_face_info(face_as_alias(&original, "Script Fixture", Weight::BOLD));
+    let fantasy =
+        database.push_face_info(face_as_alias(&original, "Display Fixture", Weight::BOLD));
+    let mono = database.push_face_info(face_as_alias(&original, "Mono Fixture", Weight::BOLD));
+    database.set_cursive_family("Script Fixture");
+    database.set_fantasy_family("Display Fixture");
+    database.set_monospace_family("Mono Fixture");
+    let database = Arc::new(database);
+    for (family, expected) in [
+        ("cursive", cursive),
+        ("fantasy", fantasy),
+        ("monospace", mono),
+        ("Missing, fantasy, cursive", fantasy),
+        ("Missing, cursive, fantasy", cursive),
+    ] {
+        assert_eq!(selected_family(&database, family)?, expected, "{family}");
+    }
+    Ok(())
+}
