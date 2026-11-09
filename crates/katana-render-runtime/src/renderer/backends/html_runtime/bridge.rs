@@ -106,17 +106,18 @@ fn mark_native_dom_error<'scope>(
 pub(super) fn uncaught_dom_error(
     scope: &mut super::script::HtmlTryCatchScope<'_, '_, '_, '_>,
 ) -> Option<String> {
-    let property = v8::String::new(scope, "name")?;
-    let expected = v8::String::new(scope, NATIVE_DOM_ERROR_NAME)?;
     /* WHY: プリミティブ例外を変換して、元の例外を別のTypeErrorで上書きしない。 */
     let exception = v8::Local::<v8::Object>::try_from(scope.exception()?).ok()?;
+    let key = native_dom_error_key(scope)?;
+    /* WHY: 非公開の印を先に調べ、通常例外のname getterを実行しない。 */
+    let message = v8::Local::<v8::String>::try_from(exception.get_private(scope, key)?).ok()?;
+    let property = v8::String::new(scope, "name")?;
+    let expected = v8::String::new(scope, NATIVE_DOM_ERROR_NAME)?;
     let name = exception.get(scope, property.into())?;
     if !name.strict_equals(expected.into()) {
         return None;
     }
-    let key = native_dom_error_key(scope)?;
-    /* WHY: 元の文言を例外に結び付け、後続エラーやJSのmessage変更から切り離す。 */
-    let message = v8::Local::<v8::String>::try_from(exception.get_private(scope, key)?).ok()?;
+    /* WHY: 元の文言は後続エラーやJSのmessage変更と独立して保持する。 */
     let message = message.to_rust_string_lossy(scope);
     scope
         .get_slot::<HtmlDomBridgeState>()

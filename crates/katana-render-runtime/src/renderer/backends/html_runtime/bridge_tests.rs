@@ -172,15 +172,24 @@ fn uncaught_bridge_and_javascript_errors_keep_distinct_types(
 fn thrown_primitive_keeps_the_original_javascript_message(
     #[case] literal: &str,
 ) -> Result<(), String> {
+    assert_ordinary_exception_summary(&format!("throw {literal};"), literal)
+}
+
+#[test]
+fn ordinary_thrown_object_does_not_run_name_getter_during_classification() -> Result<(), String> {
+    let source = "let getterUsed = false; throw { toString() { return getterUsed ? 'ordinary after getter' : 'ordinary original'; }, get name() { getterUsed = true; throw new Error('name getter was run'); } };";
+    assert_ordinary_exception_summary(source, "ordinary original")
+}
+
+fn assert_ordinary_exception_summary(source: &str, expected: &str) -> Result<(), String> {
     use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
-    let source = format!("throw {literal};");
     let error = with_v8_context!(isolate, scope, [], [], {
-        evaluate_value(scope, "bridge-primitive", &source).err()
+        evaluate_value(scope, "bridge-ordinary-exception", source).err()
     });
     let Some(HtmlRuntimeError::JavaScriptException(message)) = error else {
         return Err(format!("expected a JavaScript exception, got {error:?}"));
     };
-    assert_eq!(message.lines().next(), Some(literal), "{message}");
+    assert_eq!(message.lines().next(), Some(expected), "{message}");
     Ok(())
 }
 
