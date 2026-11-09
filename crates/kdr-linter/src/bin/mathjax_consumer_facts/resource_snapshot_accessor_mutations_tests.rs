@@ -32,3 +32,31 @@ fn loader_guard_rejects_short_circuited_snapshot_accessors()
     let input = RUST_INPUTS[super::super::super::source::RESOURCE_BYTES_INPUT_INDEX];
     fixture.reject_unique_mutations(input, ACCESSOR_MUTATIONS)
 }
+
+#[test]
+fn loader_guard_rejects_incomplete_digest_and_snapshot_wrappers()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = mathjax_fixture()?;
+    let input = RUST_INPUTS[super::super::super::source::RESOURCE_BYTES_INPUT_INDEX];
+    let digest = "Sha256::digest(self.bytes())\n                .iter()\n                .map(|byte| format!(\"{byte:02x}\"))\n                .collect()";
+    let cases = [
+        (digest, "digest", "resource-loader:digest"),
+        (digest, "digest.collect()", "resource-loader:digest"),
+        (
+            digest,
+            "digest.map(|byte| byte).collect()",
+            "resource-loader:digest",
+        ),
+        (
+            "Ok(Arc::new(ResourceSnapshot {\n            content,\n            digest: OnceLock::new(),\n            identity: after,\n        }))",
+            "Ok(snapshot)",
+            "resource-loader:result",
+        ),
+        (
+            "Self::snapshot(path)?.text().map(str::to_owned)",
+            "snapshot",
+            "resource-loader:bytes-text",
+        ),
+    ];
+    fixture.reject_unique_mutations(input, &cases)
+}
