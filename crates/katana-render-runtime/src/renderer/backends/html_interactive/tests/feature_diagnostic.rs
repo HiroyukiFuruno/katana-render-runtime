@@ -6,6 +6,9 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
+#[path = "feature_diagnostic_operation_contract_tests.rs"]
+mod operation_contract_tests;
+
 const MAX_JS_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 #[test]
