@@ -2,6 +2,11 @@ use super::authored_text_context::collect;
 use resvg::usvg::roxmltree::Document;
 
 const LABEL: &str = "Runtime";
+const AUTHORED_FRAME_SIZE: (u32, u32) = (64, 32);
+const RENDERED_AUTHORED_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"><style>
+.label { font-size: 16px; dominant-baseline: middle; }
+</style><text class="label" x="2" y="16"><tspan dy="0">Runtime</tspan></text></svg>"#;
+const INLINE_AUTHORED_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"><text font-size="16px" dominant-baseline="middle" x="2" y="16"><tspan dy="0">Runtime</tspan></text></svg>"#;
 const ACCEPTED_KEYFRAMES: &str = r#"<svg xmlns="http://www.w3.org/2000/svg"><style>
 .ishikawa text { font-size: 16px; }
 .ishikawa .label { dominant-baseline: middle; }
@@ -86,6 +91,26 @@ fn nested_single_line_context_requires_unambiguous_authored_structure() -> Resul
         assert_eq!(context_matches(source, LABEL)?, expected, "{source}");
     }
     assert!(!context_matches(ACCEPTED_KEYFRAMES, "Runtime ")?);
+    Ok(())
+}
+
+#[test]
+fn css_styled_and_inline_authored_text_render_identically() -> Result<(), String> {
+    let document = Document::parse(RENDERED_AUTHORED_SVG).map_err(|error| error.to_string())?;
+    assert!(collect(&document).matches_text(LABEL));
+    let render = |svg| {
+        crate::markdown::svg_rasterize::SvgRasterizeOps::rasterize_html_svg(svg, 1.0)
+            .map_err(|error| error.to_string())
+    };
+    let css_render = render(RENDERED_AUTHORED_SVG)?;
+    let inline_render = render(INLINE_AUTHORED_SVG)?;
+    assert_eq!((css_render.width, css_render.height), AUTHORED_FRAME_SIZE);
+    assert_eq!(
+        (inline_render.width, inline_render.height),
+        AUTHORED_FRAME_SIZE
+    );
+    assert_eq!(css_render.rgba, inline_render.rgba);
+    assert!(css_render.rgba.chunks_exact(4).any(|pixel| pixel[3] != 0));
     Ok(())
 }
 
