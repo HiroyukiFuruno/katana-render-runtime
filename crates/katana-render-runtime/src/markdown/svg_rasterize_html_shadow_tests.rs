@@ -210,6 +210,11 @@ fn empty_and_unsupported_shadow_regions_are_noops() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn supported_shadow_outside_the_canvas_skips_source_paint() -> Result<(), String> {
+    assert_unsupported(SRGB_SVG, Transform::from_scale(2.0, 2.0))
+}
+
 fn assert_unsupported(svg: &str, transform: Transform) -> Result<(), String> {
     let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
         .map_err(|error| error.to_string())?;

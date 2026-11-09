@@ -51,3 +51,21 @@ fn full_capture_drops_the_next_real_source_and_draw() -> Result<(), String> {
     assert_eq!(snapshot.dropped, 1);
     Ok(())
 }
+
+#[test]
+fn rotated_real_text_selects_transformed_glyph_painting() -> Result<(), String> {
+    let (span, typeface, _fixture) = super::prepared_fixture(true)?;
+    let mut surface = skia_safe::surfaces::raster_n32_premul((128, 64))
+        .ok_or("capture test surface unavailable")?;
+    let scope = super::PaintCaptureScope::enter();
+    super::super::draw_span(surface.canvas(), &span, &typeface, 1.0)?;
+    let snapshot = scope.snapshot();
+    assert!(!span.glyphs.is_empty());
+    assert_eq!(snapshot.events.len(), span.glyphs.len());
+    assert_eq!(snapshot.dropped, 0);
+    for (index, event) in snapshot.events.iter().enumerate() {
+        assert_transformed_source(index, event);
+        super::assert_transformed_capture(event)?;
+    }
+    Ok(())
+}
