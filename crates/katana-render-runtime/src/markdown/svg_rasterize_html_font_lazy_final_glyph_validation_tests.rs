@@ -143,3 +143,61 @@ fn replace_audit_text_transform(group: &mut Group, transform: Transform) -> bool
     }
     false
 }
+
+#[test]
+fn final_glyph_capture_truncates_faces_and_stops_at_capacity() -> Result<(), String> {
+    use crate::markdown::svg_rasterize::SvgRasterizeOps;
+
+    let empty_svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="24"/>"#;
+    let empty = Tree::from_str(empty_svg, &resvg::usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    let tree = bundled_tree()?;
+    let source = tree.to_string(&resvg::usvg::WriteOptions {
+        preserve_text: true,
+        ..Default::default()
+    });
+    /* WHY: バイナリフォントの通常記録はツリー・face・物理由来不明のエラーの3枠を使う。 */
+    const RECORDS_PER_TREE: usize = 3;
+    let empty_rows = (audit::MAX_FINAL_GLYPH_RECORDS - 1) % RECORDS_PER_TREE;
+    let full_rows = (audit::MAX_FINAL_GLYPH_RECORDS - 1 - empty_rows) / RECORDS_PER_TREE;
+    let (_, capture) = SvgRasterizeOps::with_actual_font_source_audit(|| {
+        for paint_call in 0..empty_rows {
+            audit::record(&empty, empty_svg, paint_call as u64);
+        }
+        for paint_call in empty_rows..(empty_rows + full_rows + 2) {
+            audit::record(&tree, &source, paint_call as u64);
+        }
+    })
+    .map_err(|error| error.to_string())?;
+    assert_glyph_capacity_boundary(&capture, empty_rows, full_rows)
+}
+
+fn assert_glyph_capacity_boundary(
+    capture: &serde_json::Value,
+    empty_rows: usize,
+    full_rows: usize,
+) -> Result<(), String> {
+    let trees = capture["finalGlyphTrees"]
+        .as_array()
+        .ok_or("glyph trees missing")?;
+    assert_eq!(trees.len(), empty_rows + full_rows + 1);
+    for tree in &trees[..empty_rows] {
+        assert_eq!(tree["faces"].as_array().map(Vec::len), Some(0));
+    }
+    for tree in &trees[empty_rows..trees.len() - 1] {
+        assert_eq!(tree["faces"].as_array().map(Vec::len), Some(1));
+    }
+    assert_eq!(
+        trees
+            .last()
+            .and_then(|tree| tree["faces"].as_array())
+            .map(Vec::len),
+        Some(0)
+    );
+    assert_eq!(
+        capture["finalGlyphErrors"].as_array().map(Vec::len),
+        Some(full_rows)
+    );
+    assert_eq!(capture["finalGlyphDropped"], 5);
+    Ok(())
+}

@@ -1,8 +1,12 @@
 use super::{
-    CTFont, Database, Source, mac_roman_name, matches, name_id, postscript_name, ttf_parser,
-    unique_postscript_index,
+    CTFont, Database, Source, mac_roman_name, matches, name_id, postscript_name, same_file,
+    ttf_parser, unique_postscript_index,
 };
+use core_foundation::base::TCFType;
+use core_graphics::{data_provider::CGDataProvider, font::CGFont};
+use core_text::font::new_from_CGFont;
 use objc2_core_foundation::CFString;
+use std::sync::Arc;
 
 const FONT: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 const SFNT_HEADER_BYTES: usize = 12;
@@ -122,6 +126,21 @@ fn current_helvetica_file_face_matches_coretext() -> Result<(), String> {
         .ok_or("normal Helvetica file face missing")?;
     let font = helvetica_coretext_font();
     assert!(matches(&database, id, &font));
+    Ok(())
+}
+
+#[test]
+fn coretext_font_from_memory_has_no_file_identity() -> Result<(), String> {
+    let provider = CGDataProvider::from_buffer(Arc::new(FONT.to_vec()));
+    let graphics_font =
+        CGFont::from_data_provider(provider).map_err(|_| "CGFont creation failed")?;
+    let font = new_from_CGFont(&graphics_font, FONT_SIZE);
+    /* WHY: 両クレートが参照する同一のCTFontを、所有者の生存中だけ借用する。 */
+    let borrowed = unsafe { &*font.as_concrete_TypeRef().cast::<CTFont>() };
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/NotoSans-Regular.ttf");
+    assert!(path.is_file());
+    assert!(!same_file(borrowed, &path));
     Ok(())
 }
 
