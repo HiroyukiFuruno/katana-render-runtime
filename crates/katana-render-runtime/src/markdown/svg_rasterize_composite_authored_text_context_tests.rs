@@ -1,4 +1,5 @@
 use super::authored_text_context::collect;
+use super::{GeneratedClip, GeneratedClipProvenance, authored_svg_context};
 use resvg::usvg::roxmltree::Document;
 
 const LABEL: &str = "Runtime";
@@ -111,6 +112,33 @@ fn css_styled_and_inline_authored_text_render_identically() -> Result<(), String
     );
     assert_eq!(css_render.rgba, inline_render.rgba);
     assert!(css_render.rgba.chunks_exact(4).any(|pixel| pixel[3] != 0));
+    Ok(())
+}
+
+#[test]
+fn authored_context_keeps_clip_provenance_and_text_together() -> Result<(), String> {
+    let shape = r#"<rect width="1" height="1"/>"#;
+    let source = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg"><defs>
+        <clipPath id="authored" clipPathUnits="objectBoundingBox">{shape}</clipPath>
+        <clipPath id="generated">{shape}</clipPath>
+        </defs><text x="2" y="16"><tspan dy="0">{LABEL}</tspan></text></svg>"#
+    );
+    let generated = GeneratedClipProvenance {
+        clips: vec![GeneratedClip {
+            id: "generated".into(),
+            shape: shape.into(),
+        }],
+    };
+    let context =
+        authored_svg_context(&source, &generated, true).map_err(|error| error.to_string())?;
+    assert_eq!(context.clips.ids.len(), 2);
+    assert!(context.clips.ids.contains("authored"));
+    assert!(context.clips.ids.contains("generated"));
+    assert_eq!(context.clips.generated_ids.len(), 1);
+    assert!(context.clips.generated_ids.contains("generated"));
+    assert!(context.clips.has_object_bounding_box);
+    assert!(context.text.matches_text(LABEL));
     Ok(())
 }
 

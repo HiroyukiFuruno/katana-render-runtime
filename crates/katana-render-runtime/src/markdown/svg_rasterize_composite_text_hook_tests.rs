@@ -4,6 +4,31 @@ use super::{
 };
 use std::cell::Cell;
 
+pub(in super::super) const TEXT_RASTERIZER_FAILURE: &str = "unit text rasterizer failure";
+
+#[derive(Default)]
+pub(in super::super) struct FailingTextRasterizer {
+    calls: Cell<usize>,
+}
+
+impl FailingTextRasterizer {
+    pub(in super::super) fn calls(&self) -> usize {
+        self.calls.get()
+    }
+}
+
+impl TextRasterizer for FailingTextRasterizer {
+    fn render(
+        &self,
+        _text: &resvg::usvg::Text,
+        _transform: tiny_skia::Transform,
+        _pixmap: &mut tiny_skia::PixmapMut<'_>,
+    ) -> Result<bool, String> {
+        self.calls.set(self.calls.get() + 1);
+        Err(TEXT_RASTERIZER_FAILURE.to_owned())
+    }
+}
+
 mod existing_resvg_fallback_tests {
     use super::super::assert_matches_existing_resvg;
 

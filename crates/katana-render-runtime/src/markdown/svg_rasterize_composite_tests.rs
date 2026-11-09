@@ -3,6 +3,7 @@ use std::collections::HashSet;
 
 #[path = "svg_rasterize_composite_text_hook_tests.rs"]
 mod text_hook_tests;
+pub(super) use text_hook_tests::{FailingTextRasterizer, TEXT_RASTERIZER_FAILURE};
 
 const SVG_CANVAS_SIZE: u32 = 40;
 

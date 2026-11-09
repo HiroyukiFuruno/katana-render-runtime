@@ -1,4 +1,5 @@
 use super::super::AuthoredClipInfo;
+use super::super::tests::{FailingTextRasterizer, TEXT_RASTERIZER_FAILURE};
 use resvg::usvg::{Group, Node, Options, Tree};
 use tiny_skia::{IntRect, Pixmap, Transform};
 
@@ -133,4 +134,25 @@ fn layer(tree: &Tree) -> Result<&Group, String> {
 
 fn canvas() -> Result<Pixmap, String> {
     Pixmap::new(SIZE, SIZE).ok_or_else(|| "layer fixture canvas allocation failed".to_owned())
+}
+
+#[test]
+fn clipped_text_error_preserves_destination() -> Result<(), String> {
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><defs><clipPath id="clip"><rect width="32" height="32"/></clipPath></defs><g id="layer" clip-path="url(#clip)"><rect width="20" height="20" fill="red"/><text x="2" y="16" font-size="12">Test</text></g></svg>"##;
+    let options = super::super::super::font::html_rasterizer_options(svg);
+    let tree = Tree::from_str(svg, &options).map_err(|error| error.to_string())?;
+    let mut pixmap = canvas()?;
+    let before = pixmap.data().to_vec();
+    let rasterizer = FailingTextRasterizer::default();
+    let result = super::render_clipped_group(
+        layer(&tree)?,
+        Transform::identity(),
+        &mut pixmap.as_mut(),
+        &AuthoredClipInfo::default(),
+        Some(&rasterizer),
+    );
+    assert_eq!(result.err().as_deref(), Some(TEXT_RASTERIZER_FAILURE));
+    assert_eq!(rasterizer.calls(), 1);
+    assert_eq!(pixmap.data(), before);
+    Ok(())
 }
