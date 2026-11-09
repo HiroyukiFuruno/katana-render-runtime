@@ -223,6 +223,21 @@ const LOADED_RESOLVER_MUTATIONS: &[(&str, &str, &str)] = &[
         "runtime-path-resolver:loaded-renderer",
     ),
     (
+        "let path = path.to_path_buf();\n        match kind {",
+        "let path = path.to_path_buf();\n        match other {",
+        "runtime-path-resolver:loaded-renderer",
+    ),
+    (
+        "DiagramKind::MathJax => Box::new(if bundled {",
+        "DiagramKind::MathJax => other(if bundled {",
+        "runtime-path-resolver:loaded-renderer",
+    ),
+    (
+        "DiagramKind::MathJax => Box::new(if bundled {",
+        "DiagramKind::MathJax => Box::new(other, if bundled {",
+        "runtime-path-resolver:loaded-renderer",
+    ),
+    (
         "MathJaxRenderer::with_runtime_path(path)",
         "MathJaxRenderer::with_bundled_runtime_path(path)",
         "runtime-path-resolver:loaded-renderer",

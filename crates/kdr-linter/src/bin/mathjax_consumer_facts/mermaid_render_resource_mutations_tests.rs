@@ -1,5 +1,20 @@
 pub(super) const RENDER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "runtime_resource_loader::load(\n            mermaid_js,\n            bundled.then_some(BundledResource::Mermaid),\n        )",
+        "other",
+        "mermaid-resource-route:load",
+    ),
+    (
+        "return Self::error(block, format!(\"Failed to read Mermaid.js bundle: {error}\"));",
+        "let ignored = error;",
+        "mermaid-resource-route:load",
+    ),
+    (
+        "let mode = DiagramRuntimeMode::current();",
+        "let ignored = (); let mode = DiagramRuntimeMode::current();",
+        "mermaid-resource-route:loaded-shape",
+    ),
+    (
         "Ok(bundle) => bundle,",
         "Ok((bundle, x)) => bundle,",
         "mermaid-resource-route:load",

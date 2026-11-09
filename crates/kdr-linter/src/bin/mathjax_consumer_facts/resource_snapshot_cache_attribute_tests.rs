@@ -1,6 +1,22 @@
 use super::*;
 
 #[test]
+fn cache_guard_rejects_implicit_capacity_type_and_missing_weight_binding()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = mathjax_fixture()?;
+    let input = RUST_INPUTS[super::super::source::RESOURCE_BYTES_INPUT_INDEX];
+    let cases = [
+        (
+            "CACHE_BYTES as usize",
+            "CACHE_BYTES as _",
+            "resource-loader:cache",
+        ),
+        ("let weight = snapshot", "snapshot", "resource-loader:cache"),
+    ];
+    fixture.reject_unique_mutations(input, &cases)
+}
+
+#[test]
 fn cache_guard_rejects_missing_capacity_or_weigher() -> Result<(), Box<dyn std::error::Error>> {
     let fixture = mathjax_fixture()?;
     let input = RUST_INPUTS[super::super::source::RESOURCE_BYTES_INPUT_INDEX];
