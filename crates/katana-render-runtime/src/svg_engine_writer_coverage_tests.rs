@@ -4,6 +4,9 @@ use rstest::rstest;
 
 use super::{ALPHA_CHANNEL, RGBA_CHANNELS, parse_writer_svg, render_tree, usvg};
 
+#[path = "svg_engine_writer_linked_gradient_marker_tests.rs"]
+mod linked_gradient_marker_tests;
+
 const FILTER_FIXTURES: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/filters"
