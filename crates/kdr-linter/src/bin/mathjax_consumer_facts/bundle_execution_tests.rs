@@ -1,6 +1,8 @@
 use super::shared_resource_loader_mutations::SHARED_RESOURCE_LOADER_MUTATIONS;
 use super::*;
 
+#[path = "resource_snapshot_accessor_mutations_tests.rs"]
+mod resource_snapshot_accessor_mutations;
 #[path = "resource_snapshot_shape_mutations_tests.rs"]
 mod resource_snapshot_shape_mutations;
 
