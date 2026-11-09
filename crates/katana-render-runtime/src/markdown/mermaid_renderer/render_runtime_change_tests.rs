@@ -1,4 +1,5 @@
 use super::*;
+use crate::markdown::runtime_assets::RuntimeAsset;
 use crate::markdown::runtime_resource_loader::RuntimeResourceLoader;
 
 #[test]
@@ -81,4 +82,82 @@ fn blank_source_short_circuits_loaded_bundle_render() -> TestResult<()> {
     );
     assert!(matches!(result, DiagramResult::Ok(svg) if svg.is_empty()));
     Ok(())
+}
+
+#[test]
+fn real_runtime_cache_hit_survives_runtime_removal_and_keeps_cached_bytes() -> TestResult<()> {
+    let directory = tempfile::tempdir()?;
+    let runtime = materialized_runtime(directory.path())?;
+    let cache = directory.path().join("cache.svg");
+    let source = block("graph TD; A-->B");
+    assert!(!cache.exists());
+    let first = render_with_owned_cache(&source, &runtime, &cache)?;
+    let bytes = std::fs::read(&cache)?;
+    std::fs::rename(&runtime, directory.path().join("held-mermaid.min.js"))?;
+    assert!(!runtime.exists());
+    let cold_cache = directory.path().join("cold.svg");
+    assert!(render_with_owned_cache(&source, &runtime, &cold_cache).is_err());
+    assert!(!cold_cache.exists());
+    let second = render_with_owned_cache(&source, &runtime, &cache)?;
+    assert_eq!(std::fs::read(&cache)?, bytes);
+    assert_ne!(svg_root_id(&first)?, svg_root_id(&second)?);
+    Ok(())
+}
+
+#[test]
+fn real_runtime_syntax_error_preserves_source_and_does_not_publish_cache() -> TestResult<()> {
+    let directory = tempfile::tempdir()?;
+    let runtime = materialized_runtime(directory.path())?;
+    let cache = directory.path().join("invalid.svg");
+    let source = block("graph TD\nA-->");
+    assert!(!cache.exists());
+    let result = MermaidRenderOps::render_mermaid_with_cache_file(
+        &source,
+        &runtime,
+        DiagramColorPreset::current(),
+        &cache,
+    );
+    assert!(
+        matches!(result, DiagramResult::Err { source: actual, error }
+        if actual == source.source && !error.is_empty())
+    );
+    assert!(!cache.exists());
+    let control = directory.path().join("valid.svg");
+    let svg = render_with_owned_cache(&block("graph TD; A-->B"), &runtime, &control)?;
+    svg_root_id(&svg)?;
+    assert!(control.is_file());
+    Ok(())
+}
+
+fn materialized_runtime(directory: &std::path::Path) -> TestResult<std::path::PathBuf> {
+    Ok(RuntimeAsset::mermaid().materialize_at(directory.join("mermaid.min.js"))?)
+}
+
+fn render_with_owned_cache(
+    source: &DiagramBlock,
+    runtime: &std::path::Path,
+    cache: &std::path::Path,
+) -> TestResult<String> {
+    match MermaidRenderOps::render_mermaid_with_cache_file(
+        source,
+        runtime,
+        DiagramColorPreset::current(),
+        cache,
+    ) {
+        DiagramResult::Ok(svg) => Ok(svg),
+        result => Err(format!("real Mermaid rendering failed: {result:?}").into()),
+    }
+}
+
+fn svg_root_id(svg: &str) -> TestResult<String> {
+    let document = resvg::usvg::roxmltree::Document::parse(svg)?;
+    let root = document.root_element();
+    if root.tag_name().name() != "svg" {
+        return Err("rendered root is not SVG".into());
+    }
+    let id = root.attribute("id").ok_or("rendered SVG has no ID")?;
+    if !id.starts_with("katana-mermaid-svg-") {
+        return Err("rendered SVG has an unexpected ID".into());
+    }
+    Ok(id.to_owned())
 }
