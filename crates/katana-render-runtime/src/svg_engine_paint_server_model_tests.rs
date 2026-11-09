@@ -172,43 +172,6 @@ fn assert_source_gradient(gradient: &RadialGradient, units: Units) -> Result<(),
     assert_identity_transform(gradient.transform())
 }
 
-fn assert_shared_bbox_conversion(
-    original: &Arc<RadialGradient>,
-    converted: &Arc<RadialGradient>,
-) -> Result<(), String> {
-    if Arc::ptr_eq(original, converted)
-        || converted.base.units != Units::UserSpaceOnUse
-        || converted.id() == GRADIENT_ID
-    {
-        return Err("shared gradient Arc or units contract changed".to_owned());
-    }
-    assert_source_gradient(original, Units::ObjectBoundingBox)?;
-    assert_authored_radial_values(converted)?;
-    assert_transform_points(
-        converted.transform(),
-        [
-            Point::from_xy(BBOX_X, BBOX_Y),
-            Point::from_xy(BBOX_X + BBOX_WIDTH, BBOX_Y),
-            Point::from_xy(BBOX_X, BBOX_Y + BBOX_HEIGHT),
-        ],
-    )
-}
-
-fn process_bbox_paint(paint: &mut Paint, bbox: Rect, cache: &mut Cache) -> Result<(), String> {
-    if !process_paint(
-        paint,
-        false,
-        Transform::identity(),
-        None,
-        Transform::identity(),
-        bbox,
-        cache,
-    ) {
-        return Err("non-zero object bbox paint was rejected".to_owned());
-    }
-    Ok(())
-}
-
 fn singular_skew_transform() -> Transform {
     Transform::from_row(
         UNIT_COORDINATE,
@@ -257,20 +220,6 @@ fn radial_context_paint_uses_inverse_translation_and_preserves_gradient_data() -
 }
 
 #[test]
-fn shared_radial_gradient_is_cloned_into_bbox_user_coordinates() -> Result<(), String> {
-    let source = authored_gradient(Units::ObjectBoundingBox)?;
-    let original = Arc::clone(&source);
-    let mut paint = Paint::RadialGradient(source);
-    let mut cache = cache();
-    let bbox = Rect::from_xywh(BBOX_X, BBOX_Y, BBOX_WIDTH, BBOX_HEIGHT)
-        .ok_or_else(|| "test bbox is invalid".to_owned())?;
-
-    process_bbox_paint(&mut paint, bbox, &mut cache)?;
-    let converted = radial_gradient(&paint)?;
-    assert_shared_bbox_conversion(&original, converted)
-}
-
-#[test]
 fn singular_skew_context_returns_none_without_mutating_the_paint() -> Result<(), String> {
     let source = authored_gradient(Units::UserSpaceOnUse)?;
     let original = Arc::clone(&source);
@@ -297,3 +246,6 @@ fn singular_skew_context_returns_none_without_mutating_the_paint() -> Result<(),
     assert_source_gradient(&original, Units::UserSpaceOnUse)?;
     Ok(())
 }
+
+#[path = "svg_engine_paint_server_bbox_tests.rs"]
+mod bbox_tests;
