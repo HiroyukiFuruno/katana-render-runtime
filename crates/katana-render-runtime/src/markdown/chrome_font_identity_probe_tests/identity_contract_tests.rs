@@ -75,6 +75,26 @@ fn physical_font_face_is_bound_to_the_real_file_bytes() -> Result<(), String> {
 }
 
 #[test]
+fn mismatched_face_source_cannot_attest_different_physical_bytes() -> Result<(), String> {
+    let (temp, database, _) = physical_font_fixture()?;
+    let mut face = database
+        .faces()
+        .next()
+        .cloned()
+        .ok_or("fontdb did not load the font")?;
+    let other_path = temp.path().join("other-physical-font.ttf");
+    let mut other_bytes = FONT_BYTES.to_vec();
+    other_bytes.push(0);
+    fs::write(&other_path, other_bytes).map_err(|error| error.to_string())?;
+    face.source = Source::File(other_path);
+    assert_eq!(
+        face_identity(&database, &face).err().as_deref(),
+        Some("fontdb face bytes differ from the physical file")
+    );
+    Ok(())
+}
+
+#[test]
 fn shared_file_identity_requires_matching_physical_bytes() -> Result<(), String> {
     for (case, append_byte, expected_error) in SHARED_FILE_CASES {
         let (temp, database, source_bytes) = shared_physical_font_fixture(append_byte)?;
