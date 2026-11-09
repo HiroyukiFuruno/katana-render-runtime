@@ -1,6 +1,10 @@
 use super::CreationProof;
+use crate::markdown::svg_rasterize::font::html::shared_raster::shared_sources::{
+    SharedSourceSeed, SharedSources,
+};
 use crate::markdown::svg_rasterize::{SvgRasterizeOps, font::HtmlFontRequest};
 use resvg::usvg::fontdb::{Database, FaceInfo, Source};
+use std::sync::Arc;
 
 const SHARED_BUDGET_BYTES: usize = 64 * 1024 * 1024;
 
@@ -76,4 +80,48 @@ fn assert_same_face_metadata(file: &FaceInfo, shared: &FaceInfo) {
     assert_eq!(file.weight, shared.weight);
     assert_eq!(file.stretch, shared.stretch);
     assert_eq!(file.monospaced, shared.monospaced);
+}
+
+#[test]
+fn shared_font_seed_with_wrong_length_fails_closed() -> Result<(), String> {
+    SvgRasterizeOps::with_html_font_render_scope(|| {
+        let request = HtmlFontRequest::from_text("Helvetica", "preload source");
+        let (original, original_proof) =
+            super::super::sources::build_known_html_font_db_with_shared_budget(
+                &request,
+                SHARED_BUDGET_BYTES,
+            );
+        let seeds = original_proof.reusable_shared_sources(&original);
+        let seed = seeds.first().ok_or("system font seed missing")?;
+        let (path, stamp, data) = seed;
+        let (valid_proof, valid_database) = load_seed_without_budget(seed)?;
+        assert!(!valid_proof.failed);
+        assert!(
+            valid_database
+                .faces()
+                .any(|face| matches!(face.source, Source::SharedFile(_, _)))
+        );
+        let (_, shortened) = data.as_ref().as_ref().split_last().ok_or("empty seed")?;
+        let bad_seed: SharedSourceSeed =
+            (path.clone(), stamp.clone(), Arc::new(shortened.to_vec()));
+        let (proof, database) = load_seed_without_budget(&bad_seed)?;
+        assert!(proof.failed);
+        assert!(database.is_empty());
+        Ok(())
+    })
+}
+
+fn load_seed_without_budget(seed: &SharedSourceSeed) -> Result<(CreationProof, Database), String> {
+    let mut sources = SharedSources::with_seeds(std::slice::from_ref(seed));
+    let mut proof = CreationProof::default();
+    let mut database = Database::new();
+    let mut remaining = 0;
+    proof.load_shared(
+        &mut database,
+        &[seed.0.to_str().ok_or("system font path is not UTF-8")?],
+        &mut sources,
+        &mut remaining,
+    );
+    assert_eq!(remaining, 0);
+    Ok((proof, database))
 }

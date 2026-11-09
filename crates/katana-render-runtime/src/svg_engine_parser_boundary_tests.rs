@@ -271,30 +271,28 @@ fn public_parser_returns_expected_error_for_invalid_inputs(
     #[case] input: PublicInput,
     #[case] expected: PublicErrorKind,
 ) -> Result<(), String> {
-    let result = match input {
+    let error = match input {
         PublicInput::Bytes(bytes) => usvg::Tree::from_data(bytes, &usvg::Options::default()),
         PublicInput::Text(text) => usvg::Tree::from_str(text, &usvg::Options::default()),
-    };
-    let error = match result {
-        Ok(_) => return Err(format!("{label}: invalid input was accepted")),
-        Err(error) => error,
-    };
-    assert_error_kind(label, expected, &error)
+    }
+    .err()
+    .ok_or_else(|| format!("{label}: invalid input was accepted"))?;
+    error_kind_matches(expected, &error)
+        .then_some(())
+        .ok_or_else(|| format!("{label}: unexpected parser error: {error}"))
 }
 
-fn assert_error_kind(
-    label: &str,
-    expected: PublicErrorKind,
-    error: &usvg::Error,
-) -> Result<(), String> {
-    let matches = match expected {
+fn error_kind_matches(expected: PublicErrorKind, error: &usvg::Error) -> bool {
+    match expected {
         PublicErrorKind::InvalidUtf8 => matches!(error, usvg::Error::NotAnUtf8Str),
-        PublicErrorKind::MalformedGzip => matches!(error, usvg::Error::MalformedGZip),
+        PublicErrorKind::MalformedGzip => {
+            matches!(error, usvg::Error::MalformedGZip)
+                && error.to_string() == "provided data has a malformed GZip content"
+        }
         PublicErrorKind::ParsingFailed => matches!(error, usvg::Error::ParsingFailed(_)),
-        PublicErrorKind::InvalidSize => matches!(error, usvg::Error::InvalidSize),
-    };
-    if !matches {
-        return Err(format!("{label}: unexpected parser error: {error}"));
+        PublicErrorKind::InvalidSize => {
+            matches!(error, usvg::Error::InvalidSize)
+                && error.to_string() == "SVG has an invalid size"
+        }
     }
-    Ok(())
 }
