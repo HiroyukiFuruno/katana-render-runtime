@@ -97,3 +97,26 @@ fn assert_decorated_run(
     assert!(anchor::run_origin_css_scale(text, &spans).is_none());
     Ok(())
 }
+
+#[test]
+fn differently_painted_source_spans_reject_single_span_anchor_shortcuts() -> Result<(), String> {
+    let fixture = font_fixture("multi-source-anchor-boundary")?;
+    let tree = fixture_tree_with_content(
+        &fixture,
+        "",
+        "<tspan fill='red'>A</tspan><tspan fill='blue'>B</tspan>",
+    )?;
+    let text = fixture_text(&tree)?;
+    let [chunk] = text.chunks() else {
+        return Err("expected one text chunk".into());
+    };
+    assert_eq!(chunk.spans().len(), 2);
+    assert!(anchor::layout_anchor(text).is_none());
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    let Prepared::Ready(spans) = rasterizer.prepare(text)? else {
+        return Err("painted spans were not prepared".into());
+    };
+    assert_eq!(spans.len(), 2);
+    assert!(anchor::run_origin_css_scale(text, &spans[..1]).is_none());
+    Ok(())
+}

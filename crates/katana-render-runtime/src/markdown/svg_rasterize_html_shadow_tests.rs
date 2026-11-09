@@ -1,6 +1,7 @@
 use super::Transform;
 
 use super::HtmlShadowRasterizer;
+use super::bounds::map_bounds;
 use super::geometry::{Bounds, bounded_crop};
 use tiny_skia::{Color, Paint as TinyPaint, Pixmap, PixmapMut, Rect as TinyRect};
 
@@ -22,6 +23,30 @@ const ZERO_TRANSLATION: f32 = 0.0;
 const SOURCE_BLUE: [u8; 4] = [0, 0, 255, 255];
 const SHADOW_RED: [u8; 4] = [255, 0, 0, 255];
 const BACKGROUND_GRAY: [u8; 4] = [128, 128, 128, 255];
+
+#[test]
+fn shadow_bounds_reject_unsupported_and_overflowing_transforms() {
+    let bounds = Bounds {
+        left: SOURCE_X,
+        top: SOURCE_X,
+        right: SOURCE_X + SOURCE_SIZE,
+        bottom: SOURCE_X + SOURCE_SIZE,
+    };
+    assert!(map_bounds(bounds, Transform::identity()).is_ok());
+    let cases = [
+        (
+            Transform::from_rotate(30.0),
+            "drop-shadow transform is not positive scale and translation",
+        ),
+        (
+            Transform::from_scale(f32::MAX, UNIT_SCALE),
+            "drop-shadow transformed bounds are non-finite",
+        ),
+    ];
+    for (transform, expected) in cases {
+        assert!(map_bounds(bounds, transform).is_err_and(|error| error == expected));
+    }
+}
 
 #[test]
 fn bounded_crop_rejects_outside_without_mutating_target() -> Result<(), String> {
