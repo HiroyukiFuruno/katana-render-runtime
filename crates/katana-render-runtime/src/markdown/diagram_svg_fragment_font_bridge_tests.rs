@@ -1,4 +1,46 @@
 use crate::markdown::diagram_js_runtime::{DiagramRuntimeScript, DiagramV8Runtime};
+use crate::v8_script::ScriptCompiler;
+
+#[test]
+fn fragment_advances_reject_a_frozen_result_object() {
+    DiagramV8Runtime::ensure_initialized();
+    DiagramV8Runtime::with_empty_try_catch(|scope| {
+        let object = v8::Object::new(scope);
+        assert_eq!(
+            object.set_integrity_level(scope, v8::IntegrityLevel::Frozen),
+            Some(true)
+        );
+        assert_eq!(
+            super::set_advances(scope, object, &[2.0]),
+            Err("SVG fragment result allocation failed")
+        );
+    });
+}
+
+#[test]
+fn fragment_advances_preserve_a_throwing_array_setter() {
+    DiagramV8Runtime::ensure_initialized();
+    DiagramV8Runtime::with_empty_try_catch(|scope| {
+        let source = "Object.defineProperty(Array.prototype, '0', {set() { throw new Error('index rejected'); }});";
+        let configured = v8::String::new(scope, source).and_then(|source| {
+            let name = v8::String::new(scope, "svg-fragment-array-setter")?;
+            let script = ScriptCompiler::compile_with_origin(scope, source, name)?;
+            script.run(scope)
+        });
+        assert!(configured.is_some());
+        let object = v8::Object::new(scope);
+        assert_eq!(
+            super::set_advances(scope, object, &[2.0]),
+            Err("SVG fragment result allocation failed")
+        );
+        assert!(scope.has_caught());
+        assert!(scope.exception().is_some_and(|exception| {
+            exception
+                .to_rust_string_lossy(scope)
+                .contains("index rejected")
+        }));
+    });
+}
 
 #[test]
 fn fragment_bridge_preserves_five_argument_svg_metrics_and_rejects_invalid_inputs()
