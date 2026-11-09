@@ -6,7 +6,6 @@ use super::{
 };
 use serde_json::{Value, json};
 
-const EXPECTED_NOSO_RECORDS: usize = 1;
 const SIZE_DRIFT_BYTES: usize = 1;
 const INVALID_MANIFEST_COUNT: usize = 4;
 const EXAMPLE_SHA256: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -87,9 +86,12 @@ fn inspect_file_accepts_verified_macho() -> Result<(), String> {
         &fixture.digest,
     )?;
     assert_eq!(output["format"], "MachO64");
+    assert_eq!(output["path"], json!(fixture.path));
+    assert_eq!(output["size"], json!(fixture.bytes.len()));
+    assert_eq!(output["sha256"], fixture.digest);
     assert_eq!(
-        output["nOso"].as_array().map(Vec::len),
-        Some(EXPECTED_NOSO_RECORDS)
+        output["nOso"],
+        json!([{"symbolIndex": 0, "name": "/tmp/krr-object.o"}])
     );
     assert!(is_sha256(&fixture.digest));
     Ok(())
@@ -98,22 +100,38 @@ fn inspect_file_accepts_verified_macho() -> Result<(), String> {
 #[test]
 fn inspect_file_rejects_size_or_digest_drift() -> Result<(), String> {
     let fixture = write_fixture()?;
-    assert!(
+    assert_eq!(
         inspect_file(
             fixture.path.clone(),
             (fixture.bytes.len() + SIZE_DRIFT_BYTES) as u64,
             &fixture.digest
         )
-        .is_err()
+        .err()
+        .as_deref(),
+        Some("input-file:size-or-type-changed")
     );
-    assert!(
+    assert_eq!(
         inspect_file(
             fixture.path,
             fixture.bytes.len() as u64,
             &sha256(b"different")
         )
-        .is_err()
+        .err()
+        .as_deref(),
+        Some("input-file:sha256-changed")
     );
+    Ok(())
+}
+
+#[test]
+fn inspect_file_preserves_missing_file_io_error() -> Result<(), String> {
+    let (_directory, missing) = invalid_path_inputs()?;
+    let error = std::fs::metadata(&missing)
+        .err()
+        .ok_or("missing path exists")?;
+    assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    let actual = inspect_file(missing, 0, &sha256(b"unused"));
+    assert_eq!(actual.err().as_deref(), Some(error.to_string().as_str()));
     Ok(())
 }
 
