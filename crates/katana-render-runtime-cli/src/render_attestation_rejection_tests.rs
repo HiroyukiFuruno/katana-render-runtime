@@ -76,6 +76,37 @@ fn invalid_token_and_relative_paths_are_rejected() -> anyhow::Result<()> {
 }
 
 #[test]
+fn missing_receipt_parent_rejects_attestation_before_creating_output() -> anyhow::Result<()> {
+    let fixture = Fixture::new("classDiagram")?;
+    let receipt = fixture.root.join("missing-parent").join("receipt.json");
+    let result = RenderAttestation::begin(
+        AttestationPaths {
+            input: &fixture.input,
+            output: Some(&fixture.output),
+            runtime: &fixture.runtime,
+            receipt: &receipt,
+        },
+        Some("contract-test"),
+        DiagramInputFormat::DiagramSource,
+        b"classDiagram",
+    );
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => anyhow::bail!("missing receipt parent was accepted"),
+    };
+    assert_eq!(
+        error
+            .downcast_ref::<std::io::Error>()
+            .map(|error| error.kind()),
+        Some(std::io::ErrorKind::NotFound)
+    );
+    assert!(!fixture.output.exists());
+    assert!(!receipt.exists());
+    assert!(!receipt.with_extension("artifacts").exists());
+    Ok(())
+}
+
+#[test]
 fn attestation_requires_output_path() -> anyhow::Result<()> {
     let fixture = Fixture::new("classDiagram")?;
     let error = match RenderAttestation::begin(
