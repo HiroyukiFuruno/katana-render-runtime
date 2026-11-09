@@ -96,6 +96,9 @@ pub(super) fn replace_legacy_resolver(
     Ok(())
 }
 
+#[path = "runtime_resolver_additional_mutations_tests.rs"]
+mod additional_mutations;
+
 const LOADED_RESOLVER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
         "let env_value = if runtime_path.is_none() {\n            env_name.and_then(std::env::var_os)\n        } else {\n            None\n        };",
@@ -260,6 +263,10 @@ const LOADED_RESOLVER_MUTATIONS: &[(&str, &str, &str)] = &[
 ];
 
 pub(super) fn reject_loaded_mutations(fixture: &Fixture) -> Result<(), Box<dyn std::error::Error>> {
+    fixture.reject_unique_mutations(
+        super::RUST_INPUTS[super::MATHJAX_RUNTIME_PATH_RESOLVER_INDEX],
+        additional_mutations::CASES,
+    )?;
     fixture.reject_unique_mutations(
         super::RUST_INPUTS[super::MATHJAX_RUNTIME_PATH_RESOLVER_INDEX],
         LOADED_RESOLVER_MUTATIONS,
