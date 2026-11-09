@@ -859,6 +859,12 @@ class SourceReuseTest(unittest.TestCase):
 
 
 
+def _reviewed_resource_reuse_test(repository: Path, child: str) -> bytes:
+    # 証跡の再利用で承認した当時のテストを、現在の編集から分離する。
+    revision = "22f54a4365f4ddd2c8091592de3c10e2f1c07165"
+    return subprocess.check_output(["git", "-C", str(repository), "show", revision + ":" + child])
+
+
 class HtmlReleaseReuseTest(unittest.TestCase):
     def fixture(self, root: Path, case: str) -> tuple[str, str]:
         repository = Path(__file__).resolve().parents[2]
@@ -874,7 +880,7 @@ class HtmlReleaseReuseTest(unittest.TestCase):
             target.write_bytes(content)
         previous_parent = original(parent)
         previous_document = original(document)
-        child_bytes = (repository / child).read_bytes()
+        child_bytes = _reviewed_resource_reuse_test(repository, child)
         suffix = b'\n#[cfg(test)]\n#[path = "session_resource_reuse_tests.rs"]\nmod resource_reuse_tests;\n'
         removed_line = b'- \x60Test and Build (macos-15-intel, mac-x64)\x60\n'
         write(parent, previous_parent)
@@ -985,7 +991,7 @@ class ReleaseToolingReuseTest(unittest.TestCase):
         if case == "combined":
             (root / parent).write_bytes((root / parent).read_bytes() +
                 b'\n#[cfg(test)]\n#[path = "session_resource_reuse_tests.rs"]\nmod resource_reuse_tests;\n')
-            (root / child).write_bytes((repository / child).read_bytes())
+            (root / child).write_bytes(_reviewed_resource_reuse_test(repository, child))
             (root / document).write_bytes((root / document).read_bytes().replace(
                 b'- `Test and Build (macos-15-intel, mac-x64)`\n', b"", 1))
         for path in selected:
