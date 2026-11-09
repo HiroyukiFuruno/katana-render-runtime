@@ -7,6 +7,9 @@ use crate::markdown::svg_rasterize::SvgRasterizeError;
 use resvg::usvg::fontdb::Database;
 use std::sync::Arc;
 
+#[path = "svg_rasterize_text_shaping_svg_fragment_source_tests.rs"]
+mod source_tests;
+
 const FONT: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 const FRAGMENT_FAMILY: &str = "Noto Sans";
 const SVG_TEXT_FRAGMENTS: [&str; 2] = ["A ", "12-3,$%()"];
