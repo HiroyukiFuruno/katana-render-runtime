@@ -9,6 +9,18 @@ const INPUTS: [&str; 3] = [
 ];
 const MUTATIONS: &[(&str, &str, &str, &str)] = &[
     (
+        INPUTS[1],
+        "format!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
+        "format!(\"katana-mermaid-svg-{:016x}\" hasher.finish())",
+        "svg-id-hash-route:output",
+    ),
+    (
+        INPUTS[2],
+        ".join(format!(\n                \"{:016x}.{}\",",
+        ".join(format!(\n                \"{:016x}.{}\"",
+        "render-cache-hash-route:filename",
+    ),
+    (
         INPUTS[2],
         "fn cache_file_path_with_zenuml_key(",
         "fn renamed_cache_file_path_with_zenuml_key(",
