@@ -9,6 +9,18 @@ const INPUTS: [&str; 3] = [
 ];
 const MUTATIONS: &[(&str, &str, &str, &str)] = &[
     (
+        INPUTS[2],
+        "fn cache_file_path_with_zenuml_key(",
+        "fn renamed_cache_file_path_with_zenuml_key(",
+        "missing-method:MermaidRenderOps::cache_file_path_with_zenuml_key",
+    ),
+    (
+        INPUTS[2],
+        "super::hash_mermaid_source_and_preset(&mut hasher, source, preset);",
+        "super::hash_mermaid_source_and_preset(&mut hasher, preset, source);",
+        "render-cache-hash-route:shared-fields",
+    ),
+    (
         INPUTS[0],
         "use std::hash::{Hash, Hasher};",
         "use std::hash::Hash;",
