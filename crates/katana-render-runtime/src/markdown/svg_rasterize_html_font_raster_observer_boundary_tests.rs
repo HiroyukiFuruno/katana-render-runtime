@@ -12,6 +12,9 @@ use std::sync::{Arc, Weak};
 type FontBytesWeak = Weak<dyn AsRef<[u8]> + Send + Sync>;
 type RealDatabase = (Arc<Database>, ID, FontBytesWeak);
 
+#[path = "svg_rasterize_html_font_raster_observer_styled_tests.rs"]
+mod styled_tests;
+
 #[test]
 fn raster_observer_real_binary_face_retains_256_and_drops_257() -> Result<(), String> {
     let (database, id, bytes) = real_database()?;
