@@ -255,6 +255,13 @@ fn missing_geometry_attribute_is_added_for_rect_and_ellipse() {
 }
 
 #[test]
+fn geometry_attribute_is_inserted_before_a_regular_opening_tag_end() {
+    let source = r#"<svg xmlns="http://www.w3.org/2000/svg"><style>rect{rx:6px}</style><rect data-label="a>b"><title>shape</title></rect></svg>"#;
+    let expected = source.replace("data-label=\"a>b\">", "data-label=\"a>b\" rx=\"6px\">");
+    assert_eq!(preprocess(source), expected);
+}
+
+#[test]
 fn auto_removes_an_existing_geometry_attribute() {
     let source = r#"<svg xmlns="http://www.w3.org/2000/svg"><style>.round { rx: auto; }</style><rect class="round" rx="6px"/></svg>"#;
     let actual = preprocess(source);

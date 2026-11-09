@@ -163,6 +163,24 @@ fn paths_without_html_rasterizer_keep_the_existing_resvg_route() -> Result<(), S
     Ok(())
 }
 
+#[test]
+fn custom_path_rejects_nonfinite_transform_without_touching_pixels() -> Result<(), String> {
+    let svg = svg_with_path(SQUARE_PATH, "id=\"sample\" fill=\"red\"");
+    let (tree, mut pixmap) = parse(&svg)?;
+    let Some(usvg::Node::Path(path)) = tree.node_by_id("sample") else {
+        return Err("path fixture missing".into());
+    };
+    let before = pixmap.data().to_vec();
+    let transform = Transform::from_translate(f32::NAN, 0.0);
+    assert!(!super::render_if_supported(
+        path,
+        transform,
+        &mut pixmap.as_mut(),
+    )?);
+    assert_eq!(pixmap.data(), before);
+    Ok(())
+}
+
 fn render_path(path: &str, attributes: &str, transform: Transform) -> Result<Pixmap, String> {
     let svg = svg_with_path(path, attributes);
     let (tree, mut pixmap) = parse(&svg)?;
