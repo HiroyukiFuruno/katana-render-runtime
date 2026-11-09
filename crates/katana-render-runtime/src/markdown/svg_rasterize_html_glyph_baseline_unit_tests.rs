@@ -124,6 +124,44 @@ fn middle_policy_preserves_math_and_central_leading_dy_policies() -> Result<(), 
 }
 
 #[test]
+fn mathematical_policy_keeps_primary_shift_only_when_font_is_loaded() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let fixture = crate::markdown::svg_rasterize::font_file_fixture::create(
+        directory.path().join("NotoSans-Regular.ttf"),
+        crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES,
+    )
+    .map_err(|error| error.to_string())?;
+    let tree = mathematical_fixture_tree(&fixture.database)?;
+    let Some(Node::Text(text)) = tree.node_by_id("run") else {
+        return Err("mathematical baseline text missing".to_owned());
+    };
+    let loaded = HtmlGlyphRasterizer::new(&fixture.database);
+    let empty_database = resvg::usvg::fontdb::Database::new();
+    let unloaded = HtmlGlyphRasterizer::new(&empty_database);
+    let loaded_policy = super::resolved_policy(&loaded, text)?
+        .ok_or("loaded mathematical baseline policy missing")?;
+    let unloaded_policy = super::resolved_policy(&unloaded, text)?
+        .ok_or("unloaded mathematical baseline policy missing")?;
+    assert_eq!(loaded_policy.kind, PolicyKind::Mathematical);
+    assert_eq!(unloaded_policy.kind, PolicyKind::Mathematical);
+    assert!(loaded_policy.primary_shift.is_some_and(f32::is_finite));
+    assert_eq!(unloaded_policy.primary_shift, None);
+    Ok(())
+}
+
+fn mathematical_fixture_tree(database: &resvg::usvg::fontdb::Database) -> Result<Tree, String> {
+    let source = r#"<svg xmlns="http://www.w3.org/2000/svg"><text id="run" x="0" y="20" dy="1" font-family="Noto Sans" dominant-baseline="mathematical">AB</text></svg>"#;
+    Tree::from_str(
+        source,
+        &Options {
+            fontdb: std::sync::Arc::new(database.clone()),
+            ..Options::default()
+        },
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[test]
 fn baseline_policy_uses_legacy_metrics_for_nonuniform_or_invalid_scale() -> Result<(), String> {
     let policy = parse_policy(
         r#"<text id="run" transform="scale(2 1)" dominant-baseline="mathematical" x="0" y="20">A</text>"#,
