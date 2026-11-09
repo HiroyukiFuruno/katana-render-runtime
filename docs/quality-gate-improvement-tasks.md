@@ -48,6 +48,8 @@
 - [x] HTMLの例外identity修正: 既に生成したV8文字列を例外自身のPrivate値へ格納し、既存name判定と厳密String型確認を通った例外から元の文言を返す。共有state.errorは成功後checkのため保持し、native分類時のtake/clearも維持。公開API・成功時処理・永続handle/Map・依存は変更なし。最初の修正後 `html-bridge-error-identity-fixed-exact21-e23imls8` は元RED成功を含む20成功/新name変更対照のみ1失敗。実分類は正しいJavaScriptException(OtherError)だったが、既存のV8 stack優先表示は作成時の元文言を保持し、新testだけが可変messageのordinary表示を誤って仮定した。元ログを保持し、既存ケースの期待は維持、追加name対照だけ実型とOtherErrorを期待し、JS内の実property変更確認も追加。商用formatterは変更していない。
 - [x] 最終限定 `html-bridge-error-message-expectation-build-sofkyp3k` はfoundation/AST実0・同profile compile成功（none選択実4）。実catalog `html-bridge-error-message-expectation-catalog-5v7k9h3s` に照合した `html-bridge-error-message-expectation-exact21-yfwlbxd6` はbridge全17/frame4の21case全実0、source/binary不変・profile残0。元REDのfirst再throw、last再throw、通常Error偽装、message/name変更、native分類後のstate消去、既存callback/host budgetを確認。frameあり・eventなし/decision空の2診断も正常対照を維持。正式rootはまだ12bの953、変更後の描画/性能は未測定、全体100/0・最終公開条件は未完。
 
+- [x] 実NotoのOS/2欠落時のex高さを独立した実glyph bbox/UPMと比較。marker-start/mid/endが非markerを参照しても元の線を保持し、実marker対照との差を確認。oversized markerのscroll/hiddenは全画素一致し、visibleとの差も既存対照で維持。変更はテストのみ、基準画像とskip維持。`svg-metrics-marker-current-build-savel8ub` はfoundation/fmt/重複/AST実0・compile成功（none選択実4）。`svg-metrics-marker-exact11-j9q5qtds` の新規4＋既存7が全実0、実catalog削除0、source/binary不変・profile残0。正式カバレッジは次の集計で確認する。
+
 ### 経過の記録（以下の旧数値・未実行予定は上の現在実数と区別する）
 
 - [/] 集計対象helperの限定補完: cmapのIO・HTMLの座標/実frame・KDRのparser pin fixtureを非重複3担当で変更中。成功/元のエラー表示とWindows callerを保ち、欠落ファイル・不正属性/viewport・closed session・fixture read/write失敗を実入力で検証する。実装の除外や分母変更はせず、純粋な判定caseは既存のtestファイル境界へ置く。レビューでcmap fixtureの早期失敗時の残骸も見つかったため、create_new成功後の所有とhandle解放後のDropへ整理する。まだ変更後未検証でありcoverage解消数へ加算しない。
