@@ -130,6 +130,29 @@ fn current_helvetica_file_face_matches_coretext() -> Result<(), String> {
 }
 
 #[test]
+fn moved_font_symlink_stops_matching_the_old_coretext_file_path()
+-> Result<(), Box<dyn std::error::Error>> {
+    let database =
+        crate::markdown::svg_rasterize::font::html_font_db_for_text(HELVETICA_FAMILY, "A");
+    let id =
+        normal_file_face(&database, HELVETICA_FAMILY).ok_or("normal Helvetica face missing")?;
+    let face = database.face(id).ok_or("selected Helvetica face missing")?;
+    let (Source::File(path) | Source::SharedFile(path, _)) = &face.source else {
+        return Err("Helvetica fixture has no file path".into());
+    };
+    let directory = tempfile::tempdir()?;
+    let before = directory.path().join("linked-font");
+    let after = directory.path().join("moved-font");
+    let font = helvetica_coretext_font();
+    std::os::unix::fs::symlink(path, &before)?;
+    assert!(same_file(&font, &before));
+    std::fs::rename(&before, &after)?;
+    assert!(!same_file(&font, &before));
+    assert!(same_file(&font, &after));
+    Ok(())
+}
+
+#[test]
 fn coretext_font_from_memory_has_no_file_identity() -> Result<(), String> {
     let provider = CGDataProvider::from_buffer(Arc::new(FONT.to_vec()));
     let graphics_font =
