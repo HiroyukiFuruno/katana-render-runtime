@@ -1223,6 +1223,17 @@ def _select_batch_rows(
     return remaining if limit is None else remaining[:limit]
 
 
+def _catalog_ordered_attempts(
+    catalog_ids: Sequence[str], attempt_ids: Sequence[str], attempts: Sequence[dict[str, FilePin]],
+) -> list[dict[str, FilePin]]:
+    by_id = dict(zip(attempt_ids, attempts, strict=True))
+    catalog = set(catalog_ids)
+    gate.require(len(catalog) == len(catalog_ids), "catalog condition ids are duplicated")
+    gate.require(len(by_id) == len(attempt_ids), "batch attempts contain duplicate conditions")
+    gate.require(by_id.keys() <= catalog, "batch attempts contain an unknown condition")
+    return [by_id[condition_id] for condition_id in catalog_ids if condition_id in by_id]
+
+
 def _batch_mode(
     catalog_manifest_path: Path | None, max_conditions: int | None, resume_batch: Path | None,
 ) -> bool:
@@ -4590,6 +4601,11 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         result_pin = write(folder / "result.json", result)
         transport_attempts.append({"expected": expected_pin, "result": result_pin, "pairManifest": manifest_pin})
         refs.extend([expected_pin, result_pin, manifest_pin, *expected["reportPins"]])
+    if catalog_conditions is not None:
+        # 個別実行の順序と目録順は異なるため、証跡の目録だけを正規順へ戻す。
+        transport_attempts = _catalog_ordered_attempts(
+            all_condition_ids, [*resumed_ids, *map(_row_condition_id, completed_rows)], transport_attempts,
+        )
     # 終了後に確定したrawとclosure記録も同じ輸送SHAへ束縛する。
     for log_directory in [lifecycle, *(output / "builds").glob("*.lifecycle")]:
         for path in sorted(log_directory.rglob("*")):
@@ -4649,9 +4665,11 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                        for attempt in transport_attempts]
         gate.require(len(attempt_ids) == len(set(attempt_ids)),
                      "batch attempts contain duplicate conditions")
-        complete_ids = _completed_batch_ids(
+        accepted_ids = set(_completed_batch_ids(
             resumed_accepted_ids, measurement_rows, completed_rows, expected_all,
-        )
+        ))
+        gate.require(accepted_ids <= set(attempt_ids), "batch complete conditions are missing from attempts")
+        complete_ids = [condition_id for condition_id in attempt_ids if condition_id in accepted_ids]
         comparison_results = []
         reassessments: list[gate.JsonObject] = []
         for attempt in transport_attempts:

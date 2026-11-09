@@ -184,6 +184,19 @@ class CatalogProducerOperationTest(unittest.TestCase):
         self.assertEqual(producer._select_batch_rows(rows, {"a"}, None), rows[1:])
         self.assertFalse(producer._batch_formal_acceptance(["a"], ["a"], True))
 
+    def test_transport_orders_resumed_and_new_attempts_without_filling_gaps(self) -> None:
+        catalog = ["a", "b", "c", "d"]
+        attempts: list[dict[str, typed_producer.FilePin]] = [
+            {"expected": {"path": name, "sha256": "a" * 64}} for name in ("d", "a", "b")
+        ]
+        self.assertEqual(
+            typed_producer._catalog_ordered_attempts(catalog, ["d", "a", "b"], attempts),
+            [attempts[1], attempts[2], attempts[0]],
+        )
+        for invalid_ids in (["d", "d", "b"], ["d", "a", "unknown"], ["d", "a"]):
+            with self.subTest(attempt_ids=invalid_ids), self.assertRaises(ValueError):
+                typed_producer._catalog_ordered_attempts(catalog, invalid_ids, attempts)
+
     def test_condition_cli_forwards_repeatable_ids(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root, output, capacity, manifest = self._catalog_cli_fixture(temporary)
