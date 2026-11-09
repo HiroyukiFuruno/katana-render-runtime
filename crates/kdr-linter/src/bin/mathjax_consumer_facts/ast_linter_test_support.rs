@@ -10,7 +10,7 @@ pub(super) const GENERATED_MATHJAX_RUNTIME_INDEX: usize = 3;
 
 #[path = "ast_linter_materialization_test_support.rs"]
 mod materialization;
-#[path = "ast_linter_source_test_support.rs"]
+#[path = "ast_linter_source_mutation_tests.rs"]
 mod source;
 
 pub(super) use materialization::{mathjax_fixture, reject_default_materialization_changes};
