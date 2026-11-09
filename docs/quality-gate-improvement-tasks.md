@@ -58,6 +58,9 @@
 
 - [x] 通常throw objectの `name` getter が元のJS例外を置換することを実V8で再現。`observer-error-boundaries-exact22-lmbwwrq_` は21成功・1実101、元の `ordinary original` が `Error: name getter was run` になった。元case差分は `ordinary-exception-red-source-xbr81z8m`。Object確認後に非公開String印を先に照合し、通常例外のgetterを分類処理から呼ばない。nativeのname分類・例外別payload・state消去は維持。実Noto/Yellowtailでstyled selectorの選択/除外、元selectorと観測値・回数を比較。Mermaid診断は親なし/親未作成/filenameなしの実pathを拒否し、所有tmpに副生成なし。OSのrootをworkspace絶対pathから得る。修正後 `ordinary-exception-fixed-build-j80zgl9o` はfoundation/fmt/重複/AST実0・compile成功（none選択実4）、`ordinary-exception-fixed-exact22-1dl_597q` は22/22実0、source/binary不変・profile残0。既存case/画像/skipは維持し、正式全体は次の集計で確認。
 
+- [x] C4英語Contextの同一描画をwidth/descriptionで共有し、2描画→1。Dynamic/Contextの旧2case名、width語・Rust実幅・labelWidths、descriptionの2行/全span/bbox/macOS font audit、両診断キーを維持。元 `89f6a235` 全体での2case所要は44.700＋42.477秒（並列suite中のcase合計）。初回staticは既存2 source pin不一致を拒否、実cfg(test)→同helper→trace/result→両assertを独立確認して当該source pinと検査の期待2値のみを更新。次回ASTは資源caseが31行で拒否、resize/scrollの監査を責務で抽出して閾値を維持した。修正後 `c4-reuse-scroll-helper-fixed-build-wh8wx107` はfoundation/fmt/重複/AST実0、Bun trace 14件実0、compile成功（none選択実4）。`c4-reuse-scroll-contract-exact5-cgq9vvzb` はC4 2＋HTML 3の全実0、source/binary不変・profile残0。C4出力はDynamicにwidth 1、Contextにwidth 1/description 1。個別実行2.733/41.284秒を記録、旧全体中の時間とは条件が異なり短縮率へ換算しない。
+- [x] 上記HTML検証では実斜めスクロールとclick後、物理1120×920/DPR2へresizeして縦横を240/140へclamp、frame/metrics同世代・viewportと赤画素の状態維持を確認。既存片軸対照はそのまま。資源ケースは既存同一sessionでCSS変更・PNG削除後、resize→実1px scrollまで元緑/赤画素・JS/DOM状態・再取得0件を確認し、fresh sessionで新CSSと画像欠落を確認。製品コード・基準・skip変更なし、catalog削除0/追加1。正式coverage、HTML84の性能判定は別。
+
 ### 経過の記録（以下の旧数値・未実行予定は上の現在実数と区別する）
 
 - [/] 集計対象helperの限定補完: cmapのIO・HTMLの座標/実frame・KDRのparser pin fixtureを非重複3担当で変更中。成功/元のエラー表示とWindows callerを保ち、欠落ファイル・不正属性/viewport・closed session・fixture read/write失敗を実入力で検証する。実装の除外や分母変更はせず、純粋な判定caseは既存のtestファイル境界へ置く。レビューでcmap fixtureの早期失敗時の残骸も見つかったため、create_new成功後の所有とhandle解放後のDropへ整理する。まだ変更後未検証でありcoverage解消数へ加算しない。
