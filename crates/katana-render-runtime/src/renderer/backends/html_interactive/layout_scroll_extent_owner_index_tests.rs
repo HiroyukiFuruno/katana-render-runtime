@@ -67,7 +67,31 @@ fn rotated_owner_and_viewport_clip_preserve_diamond_extent() -> Result<(), Strin
         &mut first,
     )?);
     assert_diamond_extent(scratch.current(first))?;
-    assert_diamond_extent(&polygon::clip_viewport_polygon(&rotated, &input)?)
+    assert_diamond_extent(&polygon::clip_viewport_polygon(&rotated, &input)?)?;
+    assert_axis_aligned_subject_extent(&rotated, &renderer, &indices)
+}
+
+fn assert_axis_aligned_subject_extent(
+    rotated: &OverflowClip,
+    renderer: &HtmlLayoutRenderer,
+    indices: &HashMap<u64, usize>,
+) -> Result<(), String> {
+    const SUBJECT_EDGE: f32 = 12.0;
+    let subject = [
+        (0.0, 0.0),
+        (SUBJECT_EDGE, 0.0),
+        (SUBJECT_EDGE, SUBJECT_EDGE),
+        (0.0, SUBJECT_EDGE),
+    ];
+    let extent = super::super::visible_extent(
+        &subject,
+        std::slice::from_ref(rotated),
+        &renderer.element_boxes,
+        indices,
+        &mut PolygonScratch::default(),
+    )?;
+    assert_eq!(extent, Some((10.0, 10.0)));
+    Ok(())
 }
 
 fn assert_diamond_extent(result: &[(f64, f64)]) -> Result<(), String> {
