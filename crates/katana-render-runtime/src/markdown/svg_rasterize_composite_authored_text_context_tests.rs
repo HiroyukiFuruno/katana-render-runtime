@@ -99,19 +99,31 @@ fn nested_single_line_context_requires_unambiguous_authored_structure() -> Resul
 fn css_styled_and_inline_authored_text_render_identically() -> Result<(), String> {
     let document = Document::parse(RENDERED_AUTHORED_SVG).map_err(|error| error.to_string())?;
     assert!(collect(&document).matches_text(LABEL));
+    assert_same_visible_render(RENDERED_AUTHORED_SVG, INLINE_AUTHORED_SVG)
+}
+
+#[test]
+fn inert_styles_preserve_nested_text_rendering() -> Result<(), String> {
+    let candidate = INLINE_AUTHORED_SVG.replace(
+        "<text ",
+        "<style type='text/plain'>tspan { font-size: 28px; }</style><style/><text ",
+    );
+    assert!(context_matches(&candidate, LABEL)?);
+    assert_same_visible_render(&candidate, INLINE_AUTHORED_SVG)
+}
+
+fn assert_same_visible_render(candidate: &str, control: &str) -> Result<(), String> {
     let render = |svg| {
         crate::markdown::svg_rasterize::SvgRasterizeOps::rasterize_html_svg(svg, 1.0)
             .map_err(|error| error.to_string())
     };
-    let css_render = render(RENDERED_AUTHORED_SVG)?;
-    let inline_render = render(INLINE_AUTHORED_SVG)?;
-    assert_eq!((css_render.width, css_render.height), AUTHORED_FRAME_SIZE);
-    assert_eq!(
-        (inline_render.width, inline_render.height),
-        AUTHORED_FRAME_SIZE
-    );
-    assert_eq!(css_render.rgba, inline_render.rgba);
-    assert!(css_render.rgba.chunks_exact(4).any(|pixel| pixel[3] != 0));
+    let candidate = render(candidate)?;
+    let control = render(control)?;
+    for frame in [&candidate, &control] {
+        assert_eq!((frame.width, frame.height), AUTHORED_FRAME_SIZE);
+    }
+    assert_eq!(candidate.rgba, control.rgba);
+    assert!(control.rgba.chunks_exact(4).any(|pixel| pixel[3] != 0));
     Ok(())
 }
 
