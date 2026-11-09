@@ -1,6 +1,22 @@
 use super::*;
 
 const CONSTRUCTOR_CASES: &[(&str, &str, &str)] = &[
+    (".build()", ".finish()", "resource-loader:cache"),
+    (
+        ".weigher(|path: &PathBuf, value: &Arc<ResourceSnapshot>| {",
+        ".weigher(|value: &Arc<ResourceSnapshot>| {",
+        "resource-loader:cache",
+    ),
+    (
+        ".weigher(|path: &PathBuf, value: &Arc<ResourceSnapshot>| {\n                value\n                    .bytes()\n                    .len()\n                    .saturating_add(path.as_os_str().len())\n                    .saturating_add(ENTRY_OVERHEAD)\n                    .try_into()\n                    .unwrap_or(u32::MAX)\n            })",
+        ".weigher(weigher)",
+        "resource-loader:cache",
+    ),
+    (
+        "value\n                    .bytes()\n                    .len()\n                    .saturating_add(path.as_os_str().len())\n                    .saturating_add(ENTRY_OVERHEAD)\n                    .try_into()\n                    .unwrap_or(u32::MAX)",
+        "let ignored = 0;",
+        "resource-loader:cache",
+    ),
     (
         ".max_capacity(CACHE_BYTES)\n            .weigher(|path: &PathBuf, value: &Arc<ResourceSnapshot>| {\n                value\n                    .bytes()\n                    .len()\n                    .saturating_add(path.as_os_str().len())\n                    .saturating_add(ENTRY_OVERHEAD)\n                    .try_into()\n                    .unwrap_or(u32::MAX)\n            })",
         ".weigher(|path: &PathBuf, value: &Arc<ResourceSnapshot>| {\n                value\n                    .bytes()\n                    .len()\n                    .saturating_add(path.as_os_str().len())\n                    .saturating_add(ENTRY_OVERHEAD)\n                    .try_into()\n                    .unwrap_or(u32::MAX)\n            })\n            .max_capacity(0)",
