@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-09、以下の過去結果と区別する）
 
+- [/] HTML性能の現行候補 `71fa67d1` は `html-current-candidate-proof-9_lfxs5s` で正式build proof実0。probe SHA `7b27a9f0f429b85185a89eb0a9c7ff0133751aae80986535056ed8f5d5ec6b66` は合格済み84条件のprobe `9a07b8fa…` と異なり、再利用不可。1条件 `typography/nowrap/1280x900@1` の初回は成果物上限の事前検査で採取なし。既存のパッケージ指定cleanをpreview照合後実行し、32生成file・1.0GiBを整理、3,591,811,072B／上限4,726,095,872B、35保護ref再検証実0。再試行 `html-current-one-condition-35gco2ja` は現行build通過、比較元の最初の試行3回の採取後負荷が27.6%・32.9%・30.3%で25%上限を超え、全て無効。実1、closed receipt `8d3ceee69b31444d2bc1ac0d323f511e2856d5701bbcdb145bdb9fab7722799d`、完了0、速度・メモリの合否未計測。両失敗と原結果は保持、閾値変更なし。負荷が下がるまで性能再試行を連発せず、独立した最終Mermaid/公開準備を進める。
+
 - [x] CLIの成功証跡の誤生成を防ぐ2回帰を確認。同梱Mermaidの実構文エラーは元の `RenderError::Runtime` と入力を維持し、SVG・成功receiptを生成しない。実tracing subscriberが描画後も保持された場合はcaptureを拒否し証跡fileなし。既存の正常receiptを含む `cli-mermaid-error-exact-06mj44vo` は3件すべて実0、source/binary不変・一時profile0。準備中の並行編集で整形失敗2回、誤importのcompile失敗1回を原ログに保持。対象固定・参照修正後 `cli-attestation-import-fixed-build-qcc0zf0v` はfoundation/fmt/重複/AST実0・compile成功。catalog追加2・削除0、スキップ変更なし。正式coverage未集計。
 
 - [x] 入れ子の回転overflow clipで、対照と大きな子の両軸スクロール最大・実位置81、clip内外2点、全画素を比較。初回 `html-overflow-authored-exact-s8mw78vm` は境界が重なる157半透明画素だけが異なった。対照の塗りをclipより2px外まで延ばし、全画素一致を維持した `html-overflow-authored-exact-yx0f9s1g` は該当1件実0。同初回でSVG文字のCSS指定と同値の直接指定も寸法・全画素一致（空画像でないことを確認）。両buildのfoundation/fmt/重複/AST実0、source/binary不変・一時profile0、catalog追加2・削除0。製品・基準画像・スキップは変更なし。正式カバレッジの更新はまだ行っていない。
