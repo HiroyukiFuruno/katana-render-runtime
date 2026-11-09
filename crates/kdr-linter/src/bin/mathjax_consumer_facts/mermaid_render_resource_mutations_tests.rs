@@ -1,5 +1,10 @@
 pub(super) const RENDER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "Self::cache_file_path(&block.source, mermaid_js, preset, mode)",
+        "Self::cache_file_path(&block.source, mermaid_js, preset, other)",
+        "mermaid-resource-route:argument:mode",
+    ),
+    (
         "fn render_mermaid_with_origin(",
         "fn renamed_render_mermaid_with_origin(",
         "missing-method:MermaidRenderOps::render_mermaid_with_origin",

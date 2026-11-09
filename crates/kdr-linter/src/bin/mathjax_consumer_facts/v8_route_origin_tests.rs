@@ -14,6 +14,11 @@ const ORIGIN_HELPER_BODY: &str = concat!(
 );
 const ORIGIN_HELPER_SHAPE_CASES: &[(&str, &str, &str)] = &[
     (
+        "fn compile_with_origin<'scope>(",
+        "fn renamed_compile_with_origin<'scope>(",
+        "missing-method:ScriptCompiler::compile_with_origin",
+    ),
+    (
         ORIGIN_HELPER_BODY,
         "",
         "v8-script-origin-helper:statement-count",
