@@ -1,6 +1,25 @@
 use super::*;
 
 #[test]
+fn cache_guard_rejects_missing_capacity_or_weigher() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = mathjax_fixture()?;
+    let input = RUST_INPUTS[super::super::source::RESOURCE_BYTES_INPUT_INDEX];
+    let weigher = ".weigher(|path: &PathBuf, value: &Arc<ResourceSnapshot>| {\n                value\n                    .bytes()\n                    .len()\n                    .saturating_add(path.as_os_str().len())\n                    .saturating_add(ENTRY_OVERHEAD)\n                    .try_into()\n                    .unwrap_or(u32::MAX)\n            })";
+    let settings = format!(".max_capacity(CACHE_BYTES)\n            {weigher}");
+    let settings = settings.as_str();
+    let cases = [
+        (settings, "", "resource-loader:cache"),
+        (
+            settings,
+            ".max_capacity(CACHE_BYTES)",
+            "resource-loader:cache",
+        ),
+        (settings, weigher, "resource-loader:cache"),
+    ];
+    fixture.reject_unique_mutations(input, &cases)
+}
+
+#[test]
 fn cache_guard_rejects_conditionally_removed_identity_check()
 -> Result<(), Box<dyn std::error::Error>> {
     let fixture = mathjax_fixture()?;
