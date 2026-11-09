@@ -1,5 +1,15 @@
 pub(super) const CASES: &[(&str, &str, &str)] = &[
     (
+        "(result, resource.into_digest())",
+        "result",
+        "backend-runtime-path:call",
+    ),
+    (
+        "match result {",
+        "return match result {",
+        "backend-runtime-path:render-dispatch",
+    ),
+    (
         "if block.source.trim().is_empty() {",
         "if block.source.is_empty() {",
         "backend-runtime-path:empty-source",
