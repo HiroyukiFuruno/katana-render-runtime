@@ -97,6 +97,45 @@ fn missing_font_table_uses_decoration_fallback(
     check(&resolved, &before, &after)
 }
 
+#[test]
+fn missing_x_height_uses_real_glyph_bounds() -> TestResult<()> {
+    use read_fonts::TableProvider;
+    use skrifa::MetadataProvider;
+
+    let font = super::requested_font()?;
+    let (mut normal, normal_id) = database_with_font(FONT.to_vec())?;
+    super::assert_font_metrics_accepted(&mut normal, normal_id, &font)?;
+    let bytes = font_with_hidden_table(b"OS/2", b"OS/3")?;
+    assert!(read_fonts::FontRef::new(&bytes)?.os2().is_err());
+    let source = skrifa::FontRef::from_index(&bytes, 0)?;
+    let location = source.axes().location(std::iter::empty::<(&str, f32)>());
+    assert!(
+        source
+            .metrics(skrifa::prelude::Size::unscaled(), &location)
+            .x_height
+            .is_none()
+    );
+    let expected = glyph_x_height_oracle(&bytes)?;
+    let (mut database, id) = database_with_font(bytes)?;
+    let resolver = usvg::FontResolver::default();
+    assert_eq!((resolver.select_font)(&font, &mut database), Some(id));
+    let actual = usvg::layout::css_font_x_height(&font, &resolver, &mut database)
+        .ok_or("glyph x-height missing")?;
+    assert!((actual - expected.0).abs() <= expected.1);
+    Ok(())
+}
+
+fn glyph_x_height_oracle(bytes: &[u8]) -> TestResult<(f32, f32)> {
+    let face = rustybuzz::ttf_parser::Face::parse(bytes, 0)?;
+    let glyph = face.glyph_index('x').ok_or("x glyph missing")?;
+    let bounds = face
+        .glyph_bounding_box(glyph)
+        .ok_or("x glyph bounds missing")?;
+    assert!(bounds.y_max > 0);
+    let units = f32::from(face.units_per_em());
+    Ok((f32::from(bounds.y_max) / units, 1.0 / units))
+}
+
 fn assert_missing_underline(
     font: &ResolvedFont,
     before: &skrifa::metrics::Metrics,
