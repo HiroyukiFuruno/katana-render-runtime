@@ -108,3 +108,7 @@ fn primary_face_metadata(
     }
     Ok(Some((id, metadata, None)))
 }
+
+#[cfg(test)]
+#[path = "svg_rasterize_html_glyph_baseline_primary_tests.rs"]
+mod tests;
