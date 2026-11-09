@@ -1,5 +1,15 @@
 pub(super) const RENDER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "mod render_instance;",
+        "mod other_instance;",
+        "mermaid-resource-route:instance-module",
+    ),
+    (
+        "#[path = \"render_instance.rs\"]",
+        "#[path = \"other_instance.rs\"]",
+        "mermaid-resource-route:instance-module",
+    ),
+    (
         "runtime_resource_loader::load(\n            mermaid_js,\n            bundled.then_some(BundledResource::Mermaid),\n        )",
         "other",
         "mermaid-resource-route:load",
