@@ -7,6 +7,7 @@ mod input_pointer_frame;
 mod interaction;
 mod intersection_observer;
 mod layout_diagnostic;
+mod nested_rotated_scroll_tests;
 mod rendering;
 mod scroll_policy;
 mod support;
