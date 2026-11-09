@@ -35,9 +35,11 @@ fn nested_viewbox_matches_browser_transform(
 #[case::x_min("50 100", "xMinYMid", 0.0, 0.0)]
 #[case::x_mid("50 100", "xMidYMid", 25.0, 0.0)]
 #[case::x_max("50 100", "xMaxYMid", 50.0, 0.0)]
+#[case::x_max_y_min("50 100", "xMaxYMin", 50.0, 0.0)]
 #[case::y_min("100 50", "xMidYMin", 0.0, 0.0)]
 #[case::y_mid("100 50", "xMidYMid", 0.0, 25.0)]
 #[case::y_max("100 50", "xMidYMax", 0.0, 50.0)]
+#[case::x_min_y_max("100 50", "xMinYMax", 0.0, 50.0)]
 fn viewbox_alignment_places_letterboxed_content(
     #[case] view_box: &str,
     #[case] alignment: &str,
