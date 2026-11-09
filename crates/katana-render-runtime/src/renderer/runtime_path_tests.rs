@@ -7,6 +7,7 @@ use crate::markdown::plantuml_renderer::PlantUmlRendererOps;
 use crate::renderer::api::{
     DiagramKind, RenderConfig, RenderContext, RenderError, RenderInput, RenderPolicy,
 };
+use crate::system::ProcessService;
 use std::path::PathBuf;
 
 #[test]
@@ -138,6 +139,48 @@ fn empty_javascript_overrides_are_rejected_for_each_runtime()
             RuntimePathResolver::resolve_selected_path(kind, Some(std::ffi::OsString::new()), None);
         assert!(matches!(result,
             Err(RenderError::RuntimeResolution(message)) if message == format!("{variable} is empty")));
+    }
+    Ok(())
+}
+
+#[test]
+fn public_runtime_resolver_validates_environment_in_an_isolated_process()
+-> Result<(), Box<dyn std::error::Error>> {
+    const CHILD: &str = "KRR_TEST_RUNTIME_PATH_RESOLVER_CHILD";
+    const NAME: &str = "renderer::runtime_path::tests::public_runtime_resolver_validates_environment_in_an_isolated_process";
+    const VERIFIED: &str = "runtime override contracts verified";
+    if std::env::var_os(CHILD).is_some() {
+        assert_public_runtime_override_contracts()?;
+        println!("{VERIFIED}");
+        return Ok(());
+    }
+
+    let mut command = ProcessService::create_command(std::env::current_exe()?);
+    command
+        .args(["--exact", NAME, "--nocapture"])
+        .env(CHILD, "1");
+    for (_, variable) in javascript_override_cases() {
+        command.env(variable, "");
+    }
+    let output = command.output()?;
+    let report = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success() && report.contains(VERIFIED),
+        "{report}"
+    );
+    Ok(())
+}
+
+fn assert_public_runtime_override_contracts() -> Result<(), Box<dyn std::error::Error>> {
+    for (kind, variable) in javascript_override_cases() {
+        let result = RuntimePathResolver::resolve(kind, None);
+        assert!(matches!(result,
+            Err(RenderError::RuntimeResolution(message)) if message == format!("{variable} is empty")));
+        let explicit = PathBuf::from(format!("{variable}.js"));
+        assert_eq!(
+            RuntimePathResolver::resolve(kind, Some(explicit.clone()))?,
+            explicit
+        );
     }
     Ok(())
 }
