@@ -184,3 +184,34 @@ fn variable_svg_ignores_unknown_axis_and_normalizes_actual_design() -> Result<()
     );
     Ok(())
 }
+
+#[test]
+fn run_face_accepts_static_font_and_declines_variable_color_font() -> Result<(), String> {
+    let static_tree = fixture_tree(STATIC_FONT, None, 'A')?;
+    let (_, static_span, static_id) = target_span(&static_tree)?;
+    let static_rasterizer = HtmlGlyphRasterizer::new(static_tree.fontdb());
+    let (face, variable) = static_rasterizer
+        .ensure_run_face(static_span, static_id, FONT_SIZE)?
+        .ok_or("static text face was rejected")?;
+    assert!(variable.is_none());
+    assert!(face.upem > 0.0);
+
+    let color_tree = fixture_tree(COLR_VARIABLE, Some("'SWPS' 10"), colr_linear_character()?)?;
+    let (_, color_span, color_id) = target_span(&color_tree)?;
+    let color_rasterizer = HtmlGlyphRasterizer::new(color_tree.fontdb());
+    assert!(color_rasterizer.face_metadata(color_id)?.unsupported);
+    let (_, design) = html_glyph_variations::resolve_design(
+        color_tree.fontdb(),
+        color_id,
+        &color_span.variations,
+        color_span.font_optical_sizing,
+        FONT_SIZE,
+    )?;
+    assert!(!design.is_empty());
+    assert!(
+        color_rasterizer
+            .ensure_run_face(color_span, color_id, FONT_SIZE)?
+            .is_none()
+    );
+    Ok(())
+}
