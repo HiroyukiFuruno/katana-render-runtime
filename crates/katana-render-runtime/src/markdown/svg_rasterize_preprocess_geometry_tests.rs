@@ -116,6 +116,21 @@ fn stylesheet_important_overrides_geometry_attributes() {
 }
 
 #[test]
+fn geometry_preprocessing_preserves_malformed_svg_bytes() {
+    let source =
+        "<svg xmlns='http://www.w3.org/2000/svg'><style>rect{rx:12px}</style><rect rx='5'></svg>";
+    assert_eq!(preprocess(source), source);
+}
+
+#[test]
+fn geometry_preprocessing_ignores_non_css_style_blocks() {
+    let source = "<svg xmlns='http://www.w3.org/2000/svg'><style type='text/css'>rect{rx:8px}</style><style type='text/plain'>rect{rx:12px}</style><rect rx='5'/></svg>";
+    let actual = preprocess(source);
+    assert!(actual.contains("<rect rx='8px'"), "{actual}");
+    assert!(actual.contains("<style type='text/plain'>rect{rx:12px}</style>"));
+}
+
+#[test]
 fn important_stylesheet_beats_normal_inline_and_inline_important_wins_tie() {
     let source = r#"<svg xmlns="http://www.w3.org/2000/svg"><style>.shape { rx: 8px !important; ry: 9px !important; }</style><rect class="shape" rx="5" ry="5" style="rx: 10px; ry: 10px !important"/></svg>"#;
     let actual = preprocess(source);

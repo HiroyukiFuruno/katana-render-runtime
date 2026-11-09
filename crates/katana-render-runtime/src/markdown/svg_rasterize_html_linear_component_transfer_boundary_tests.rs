@@ -129,3 +129,32 @@ fn filtered_group(tree: &Tree) -> Result<&Group, String> {
     }
     find(tree.root()).ok_or_else(|| "filtered fixture group is missing".to_owned())
 }
+
+#[test]
+fn disjoint_filter_and_primitive_regions_decline_transfer_without_drawing() -> Result<(), String> {
+    let svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><defs><filter id="f" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse" x="0" y="0" width="10" height="10" color-interpolation-filters="sRGB"><feComponentTransfer x="20" y="20" width="5" height="5">{}</feComponentTransfer></filter></defs><g filter="url(#f)"><rect width="30" height="30"/></g></svg>"#,
+        super::LINEAR_FUNCTIONS
+    );
+    let tree = parse(&svg)?;
+    let group = filtered_group(&tree)?;
+    let filter = transfer::supported_filter(group).ok_or("filter missing")?;
+    let [primitive] = filter.primitives() else {
+        return Err("expected one component-transfer primitive".into());
+    };
+    assert!(filter.rect().right() < primitive.rect().x());
+    assert!(filter.rect().bottom() < primitive.rect().y());
+    assert!(transfer::transfer_spec(group, Transform::identity())?.is_none());
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    let mut target = Pixmap::new(super::SIZE, super::SIZE).ok_or("transfer canvas missing")?;
+    let before = target.data().to_vec();
+    assert!(!transfer::render(
+        group,
+        Transform::identity(),
+        &mut target.as_mut(),
+        &super::AuthoredClipInfo::default(),
+        &rasterizer,
+    )?);
+    assert_eq!(target.data(), before);
+    Ok(())
+}
