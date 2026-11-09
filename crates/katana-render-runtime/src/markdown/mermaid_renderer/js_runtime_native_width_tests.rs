@@ -42,6 +42,17 @@ const ARCHITECTURE_BETA_FIXTURE_MARKDOWN: &str =
     include_str!("../../../../../tests/fixtures/mermaid/ja/09-02-architecture-beta.md");
 
 #[test]
+fn native_width_capture_propagates_invalid_mermaid_render_error() -> Result<(), String> {
+    let control = render_fixture(FLOWCHART_SOURCE)?;
+    assert!(control.svg.contains("<svg"));
+    let error = render_fixture("flowchart LR\n  A -->")
+        .err()
+        .ok_or("invalid flowchart unexpectedly rendered")?;
+    assert!(!error.trim().is_empty());
+    Ok(())
+}
+
+#[test]
 fn nonclass_flowchart_uses_native_advance_for_noto_and_weighted_cjk_runs() -> Result<(), String> {
     let plain = render_fixture(FLOWCHART_SOURCE)?;
     assert_label_run_weights(&plain.calls, 400);
