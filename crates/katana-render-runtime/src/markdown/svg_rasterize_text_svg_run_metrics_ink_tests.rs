@@ -1,4 +1,6 @@
-use super::{FontShape, shape_svg_run_metrics_with_face, svg_run_endpoints_with_face};
+use super::{
+    FontShape, shape_svg_run_metrics_with_face, svg_run_endpoints_with_face, validate_shaping_size,
+};
 use resvg::usvg::fontdb::{Database, ID};
 
 const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
@@ -6,6 +8,8 @@ const TEST_TEXT: &str = "Noto Sans";
 const VALID_SIZE: f32 = 16.0;
 const NORMAL_WEIGHT: u16 = 400;
 const SPACE: &str = " ";
+const FIRST_VISIBLE_CSS_SIZE: f32 = 0.01;
+const FIRST_OVERSIZED_SHAPING_SIZE: f32 = 32_768.0;
 
 fn checked_in_font_face() -> Result<(Database, ID), String> {
     let mut database = Database::new();
@@ -31,7 +35,28 @@ fn invalid_sizes_reject_real_font_run_and_endpoints() -> Result<(), String> {
         );
         assert!(svg_run_endpoints_with_face(&database, face, invalid).is_none());
     }
+    assert_adjacent_shaping_size_boundaries();
+    assert_adjacent_css_size_boundaries(&database, face);
     Ok(())
+}
+
+fn assert_adjacent_shaping_size_boundaries() {
+    let minimum = 1.0 / super::HARFRUST_SCALE;
+    let below_minimum = f32::from_bits(minimum.to_bits() - 1);
+    let below_limit = f32::from_bits(FIRST_OVERSIZED_SHAPING_SIZE.to_bits() - 1);
+    assert!(validate_shaping_size(below_minimum).is_none());
+    assert!(validate_shaping_size(minimum).is_some());
+    assert!(validate_shaping_size(below_limit).is_some());
+    assert!(validate_shaping_size(FIRST_OVERSIZED_SHAPING_SIZE).is_none());
+}
+
+fn assert_adjacent_css_size_boundaries(database: &Database, face: ID) {
+    let previous = f32::from_bits(FIRST_VISIBLE_CSS_SIZE.to_bits() - 1);
+    let too_small = FontShape::new(previous, NORMAL_WEIGHT, false);
+    let visible = FontShape::new(FIRST_VISIBLE_CSS_SIZE, NORMAL_WEIGHT, false);
+    assert!(shape_svg_run_metrics_with_face(database, face, TEST_TEXT, too_small, false).is_none());
+    assert!(svg_run_endpoints_with_face(database, face, too_small).is_none());
+    assert!(svg_run_endpoints_with_face(database, face, visible).is_some());
 }
 
 #[test]
