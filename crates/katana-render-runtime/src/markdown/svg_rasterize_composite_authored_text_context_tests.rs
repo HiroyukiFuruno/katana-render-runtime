@@ -168,3 +168,14 @@ fn blockless_keyframes_rejects_authored_text_context() -> Result<(), String> {
     assert!(!context_matches(blockless, LABEL)?);
     Ok(())
 }
+
+#[test]
+fn malformed_keyframes_preludes_cannot_prove_authored_text_layout() -> Result<(), String> {
+    for (prelude, expected) in [("motion", true), ("123", false), ("motion extra", false)] {
+        let source = format!(
+            r#"<svg><style>@keyframes {prelude} {{ from {{ opacity: 1; }} }}</style><text><tspan dy="0">{LABEL}</tspan></text></svg>"#
+        );
+        assert_eq!(context_matches(&source, LABEL)?, expected, "{prelude}");
+    }
+    Ok(())
+}
