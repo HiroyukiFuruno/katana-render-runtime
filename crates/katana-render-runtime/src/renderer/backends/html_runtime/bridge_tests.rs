@@ -181,6 +181,12 @@ fn ordinary_thrown_object_does_not_run_name_getter_during_classification() -> Re
     assert_ordinary_exception_summary(source, "ordinary original")
 }
 
+#[test]
+fn ordinary_proxy_does_not_run_name_trap_during_classification() -> Result<(), String> {
+    let source = "let trapUsed = false; throw new Proxy({ toString() { return trapUsed ? 'proxy after trap' : 'ordinary proxy'; } }, { get(target, property, receiver) { if (property === 'name') { trapUsed = true; throw new Error('name trap was run'); } return Reflect.get(target, property, receiver); } });";
+    assert_ordinary_exception_summary(source, "ordinary proxy")
+}
+
 fn assert_ordinary_exception_summary(source: &str, expected: &str) -> Result<(), String> {
     use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
     let error = with_v8_context!(isolate, scope, [], [], {
