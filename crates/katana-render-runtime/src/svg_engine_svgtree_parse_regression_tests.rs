@@ -5,6 +5,19 @@ const SVG_NS: &str = "http://www.w3.org/2000/svg";
 const DPI: f32 = 96.0;
 const PARENT_FONT_SIZE: f32 = 16.0;
 const FLOAT_TOLERANCE: f32 = 0.0001;
+const OVER_LIMIT_SVG_CHILD_COUNT: usize = 1_000_001;
+
+#[test]
+fn svg_node_limit_rejects_wide_documents() -> Result<(), String> {
+    let children = "<g/>".repeat(OVER_LIMIT_SVG_CHILD_COUNT);
+    let source = format!(r#"<svg xmlns="{SVG_NS}">{children}</svg>"#);
+    let xml = roxmltree::Document::parse(&source).map_err(|error| error.to_string())?;
+    assert!(matches!(
+        super::Document::parse_tree(&xml, None),
+        Err(roxmltree::Error::NodesLimitReached)
+    ));
+    Ok(())
+}
 
 #[test]
 fn recursive_use_children_do_not_expand_or_remove_valid_siblings() -> Result<(), String> {

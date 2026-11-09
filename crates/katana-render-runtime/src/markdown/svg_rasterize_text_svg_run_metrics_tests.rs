@@ -113,3 +113,35 @@ fn subunit_integer_shape_scale_is_rejected_for_a_usable_real_font() -> Result<()
     assert!(svg_run_endpoints_with_face(&database, face, tiny).is_none());
     Ok(())
 }
+
+#[test]
+fn shaped_real_font_run_rejects_invalid_line_metrics() -> Result<(), String> {
+    let face =
+        harfrust::font::Font::new(FONT_BYTES.to_vec(), 0).ok_or("real font could not be parsed")?;
+    let instance = face.instance_builder().build();
+    let shaper =
+        harfrust::ShaperFont::new(&instance).with_scale((16.0 * super::HARFRUST_SCALE) as i32);
+    let mut glyphs = harfrust::Buffer::new();
+    glyphs.push_str("A");
+    glyphs.guess_segment_properties();
+    harfrust::shape(
+        &shaper,
+        &mut glyphs,
+        harfrust::ShapeOptions::new().point_size(Some(16.0)),
+    )
+    .map_err(|error| error.to_string())?;
+
+    let valid = super::svg_text_run_metrics(&glyphs, 12.0, 4.0)
+        .ok_or("valid line metrics were rejected")?;
+    assert!(valid.advance > 0.0);
+    assert_eq!((valid.ascent, valid.descent), (12.0, 4.0));
+    for (ascent, descent) in [
+        (f32::NAN, 4.0),
+        (12.0, f32::INFINITY),
+        (0.0, 0.0),
+        (1.0, -2.0),
+    ] {
+        assert!(super::svg_text_run_metrics(&glyphs, ascent, descent).is_none());
+    }
+    Ok(())
+}
