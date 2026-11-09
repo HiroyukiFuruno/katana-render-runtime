@@ -14,23 +14,38 @@ const SINGLE_RADIUS_1: &[Pixel] = &[[30, 15, 0, 60], [60, 30, 10, 70], [0, 15, 3
 const LINE_RADIUS_2: &[Pixel] = &[[54, 36, 24, 102]; 3];
 const SINGLE_RADIUS_2: &[Pixel] = &[[18, 9, 0, 36], [36, 18, 6, 42], [0, 9, 18, 24]];
 const GRID: &[Pixel] = &[
-    [90, 45, 0, 180], [180, 90, 30, 210], [0, 45, 90, 120],
-    [30, 60, 120, 150], [60, 120, 30, 180], [120, 0, 60, 150],
+    [90, 45, 0, 180],
+    [180, 90, 30, 210],
+    [0, 45, 90, 120],
+    [30, 60, 120, 150],
+    [60, 120, 30, 180],
+    [120, 0, 60, 150],
 ];
 const GRID_HORZ: &[Pixel] = &[
-    [90, 45, 10, 130], [90, 60, 40, 170], [60, 45, 40, 110],
-    [30, 60, 50, 110], [70, 60, 70, 160], [60, 40, 30, 110],
+    [90, 45, 10, 130],
+    [90, 60, 40, 170],
+    [60, 45, 40, 110],
+    [30, 60, 50, 110],
+    [70, 60, 70, 160],
+    [60, 40, 30, 110],
 ];
 const GRID_VERT: &[Pixel] = &[
-    [40, 35, 40, 110], [80, 70, 20, 130], [40, 15, 50, 90],
-    [40, 35, 40, 110], [80, 70, 20, 130], [40, 15, 50, 90],
+    [40, 35, 40, 110],
+    [80, 70, 20, 130],
+    [40, 15, 50, 90],
+    [40, 35, 40, 110],
+    [80, 70, 20, 130],
+    [40, 15, 50, 90],
 ];
 
 fn pixels(values: &[Pixel]) -> Vec<RGBA8> {
-    values.iter().map(|&[r, g, b, a]| {
-        assert!(r <= a && g <= a && b <= a);
-        RGBA8 { r, g, b, a }
-    }).collect()
+    values
+        .iter()
+        .map(|&[r, g, b, a]| {
+            assert!(r <= a && g <= a && b <= a);
+            RGBA8 { r, g, b, a }
+        })
+        .collect()
 }
 
 fn run_axis(width: u32, height: u32, radius: usize, input: &[Pixel], vertical: bool) -> Vec<RGBA8> {
@@ -64,6 +79,12 @@ fn zero_extended_blur_by_axis(
     #[case] horizontal: &[Pixel],
     #[case] vertical: &[Pixel],
 ) {
-    assert_eq!(run_axis(width, height, radius, input, false), pixels(horizontal));
-    assert_eq!(run_axis(width, height, radius, input, true), pixels(vertical));
+    assert_eq!(
+        run_axis(width, height, radius, input, false),
+        pixels(horizontal)
+    );
+    assert_eq!(
+        run_axis(width, height, radius, input, true),
+        pixels(vertical)
+    );
 }

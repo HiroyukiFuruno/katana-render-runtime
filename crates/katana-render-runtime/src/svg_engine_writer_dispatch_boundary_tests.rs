@@ -33,12 +33,16 @@ fn incompatible_primitive(
     filter: &filter::Filter,
     dispatch: Dispatch,
 ) -> Result<&filter::Primitive, String> {
-    filter.primitives().iter().find(|primitive| match dispatch {
-        Dispatch::Basic | Dispatch::Geometry => {
-            matches!(primitive.kind(), filter::Kind::Morphology(_))
-        }
-        Dispatch::Effect => matches!(primitive.kind(), filter::Kind::Flood(_)),
-    }).ok_or_else(|| "unexpected filter primitive".to_owned())
+    filter
+        .primitives()
+        .iter()
+        .find(|primitive| match dispatch {
+            Dispatch::Basic | Dispatch::Geometry => {
+                matches!(primitive.kind(), filter::Kind::Morphology(_))
+            }
+            Dispatch::Effect => matches!(primitive.kind(), filter::Kind::Flood(_)),
+        })
+        .ok_or_else(|| "unexpected filter primitive".to_owned())
 }
 
 fn assert_dispatch_panics(
@@ -51,10 +55,15 @@ fn assert_dispatch_panics(
         invoke_misrouted(dispatch, primitive, filter, &mut xml);
     }));
     let payload = panic.err().ok_or("misrouted primitive was accepted")?;
-    let message = payload.downcast_ref::<&str>().copied()
+    let message = payload
+        .downcast_ref::<&str>()
+        .copied()
         .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
         .ok_or("panic payload was not a string")?;
-    assert!(message.contains("internal error: entered unreachable code"), "{dispatch:?}: {message}");
+    assert!(
+        message.contains("internal error: entered unreachable code"),
+        "{dispatch:?}: {message}"
+    );
     Ok(())
 }
 

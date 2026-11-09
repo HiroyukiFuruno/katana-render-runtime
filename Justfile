@@ -64,6 +64,12 @@ PLANTUML_CACHE_DIR := env_var_or_default("KRR_PLANTUML_CACHE_DIR", `bash scripts
 PLANTUML_CACHE_JAR := PLANTUML_CACHE_DIR + "/" + PLANTUML_JAR_VERSION + "/plantuml.jar"
 DRAWIO_RESOURCE_DIR := "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/resources"
 DRAWIO_RESOURCE_MANIFEST := DRAWIO_RESOURCE_DIR + "/drawio-resource-manifest.json"
+OWNED_SVG_TEST_ROOTS := "crates/katana-render-runtime/src/svg_engine_*_model_tests.rs" + \
+    " crates/katana-render-runtime/src/svg_engine_box_blur_axis_regression_tests.rs" + \
+    " crates/katana-render-runtime/src/svg_engine_component_transfer_identity_tests.rs" + \
+    " crates/katana-render-runtime/src/svg_engine_converter_id_collision_tests.rs" + \
+    " crates/katana-render-runtime/src/svg_engine_filter_internal_boundary_tests.rs" + \
+    " crates/katana-render-runtime/src/svg_engine_writer_dispatch_boundary_tests.rs"
 
 default: help
 
@@ -75,12 +81,12 @@ help:
 fmt:
     {{CARGO}} fmt --all
     {{CARGO}} fmt --manifest-path scripts/html/performance-harness/Cargo.toml --all
-    rustfmt --edition 2024 crates/katana-render-runtime/src/svg_engine_*_model_tests.rs
+    rustfmt --edition 2024 {{OWNED_SVG_TEST_ROOTS}}
 
 # Check Rust formatting
 fmt-check:
     {{CARGO}} fmt --all -- --check
-    rustfmt --edition 2024 --check crates/katana-render-runtime/src/svg_engine_*_model_tests.rs
+    rustfmt --edition 2024 --check {{OWNED_SVG_TEST_ROOTS}}
     just performance-harness-fmt-check
 
 # 配布と同じ最適化ビルドで初期描画は3秒未満、closeとプロセス全体は60秒上限で検証する。
