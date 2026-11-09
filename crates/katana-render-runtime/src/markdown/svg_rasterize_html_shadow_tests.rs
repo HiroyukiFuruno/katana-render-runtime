@@ -49,6 +49,29 @@ fn shadow_bounds_reject_unsupported_and_overflowing_transforms() {
 }
 
 #[test]
+fn skia_shadow_bounds_reject_empty_and_nonfinite_geometry() -> Result<(), String> {
+    use super::surface::skia_bounds;
+    use skia_safe::Rect;
+
+    let valid = skia_bounds(Rect::from_ltrb(-2.0, -1.0, 3.0, 4.0))?;
+    assert_eq!(
+        [valid.left, valid.top, valid.right, valid.bottom],
+        [-2.0, -1.0, 3.0, 4.0]
+    );
+    for invalid in [
+        Rect::from_ltrb(-2.0, 4.0, 3.0, 4.0),
+        Rect::from_ltrb(3.0, -1.0, -2.0, 4.0),
+        Rect::from_ltrb(f32::NEG_INFINITY, -1.0, 3.0, 4.0),
+    ] {
+        assert_eq!(
+            skia_bounds(invalid).err().as_deref(),
+            Some("drop-shadow filter bounds are invalid")
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn bounded_crop_rejects_outside_without_mutating_target() -> Result<(), String> {
     let mut target = Pixmap::new(CROP_TARGET_SIZE, CROP_TARGET_SIZE)
         .ok_or_else(|| "test target allocation".to_owned())?;
