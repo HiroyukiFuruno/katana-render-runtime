@@ -5,6 +5,7 @@ const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.tt
 const TEST_TEXT: &str = "Noto Sans";
 const VALID_SIZE: f32 = 16.0;
 const NORMAL_WEIGHT: u16 = 400;
+const SPACE: &str = " ";
 
 fn checked_in_font_face() -> Result<(Database, ID), String> {
     let mut database = Database::new();
@@ -34,6 +35,68 @@ fn invalid_sizes_reject_real_font_run_and_endpoints() -> Result<(), String> {
 }
 
 #[test]
+fn foreign_face_id_is_rejected_and_original_database_recovers() -> Result<(), String> {
+    let _scope = super::face_cache::FontFaceCacheScope::enter();
+    let (database, face) = checked_in_font_face()?;
+    let font = FontShape::new(VALID_SIZE, NORMAL_WEIGHT, false);
+    let missing = Database::new();
+    for (database, expected) in [(&database, true), (&missing, false), (&database, true)] {
+        assert_eq!(
+            shape_svg_run_metrics_with_face(database, face, TEST_TEXT, font, false).is_some(),
+            expected
+        );
+        assert_eq!(
+            svg_run_endpoints_with_face(database, face, font).is_some(),
+            expected
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn space_run_has_advance_without_ink_and_diagnostics_preserve_metrics() -> Result<(), String> {
+    let (database, face) = checked_in_font_face()?;
+    let font = FontShape::new(VALID_SIZE, NORMAL_WEIGHT, false);
+    let expected_advance = space_advance_from_font()?;
+    let plain = shape_svg_run_metrics_with_face(&database, face, SPACE, font, false)
+        .ok_or("plain space run unavailable")?;
+    let (metrics, diagnostic) = shape_svg_run_metrics_with_face(&database, face, SPACE, font, true)
+        .ok_or("diagnostic space run unavailable")?;
+    assert!(plain.1.is_none());
+    assert_run_metrics_equal(plain.0, metrics);
+    assert!((metrics.advance - expected_advance).abs() <= 1.0 / super::HARFRUST_SCALE);
+    assert!(metrics.advance > 0.0);
+    assert!(metrics.ink_bounds.is_none());
+    let diagnostic = diagnostic.ok_or("space diagnostic missing")?;
+    assert!(diagnostic.bounds.is_none());
+    assert_eq!(
+        diagnostic.glyphs_without_extents,
+        raw_harfrust_glyphs_without_extents(SPACE, font)?
+    );
+    Ok(())
+}
+
+fn assert_run_metrics_equal(plain: super::SvgTextRunMetrics, diagnosed: super::SvgTextRunMetrics) {
+    assert_eq!(plain.advance.to_bits(), diagnosed.advance.to_bits());
+    assert_eq!(plain.ascent.to_bits(), diagnosed.ascent.to_bits());
+    assert_eq!(plain.descent.to_bits(), diagnosed.descent.to_bits());
+}
+
+fn space_advance_from_font() -> Result<f32, String> {
+    let face = rustybuzz::ttf_parser::Face::parse(FONT_BYTES, 0)
+        .map_err(|error| format!("Noto Sans parse failed: {error:?}"))?;
+    let glyph = face
+        .glyph_index(' ')
+        .ok_or("space glyph missing from cmap")?;
+    let advance = face
+        .glyph_hor_advance(glyph)
+        .ok_or("space advance missing")?;
+    assert!(advance > 0);
+    assert!(face.glyph_bounding_box(glyph).is_none());
+    Ok(f32::from(advance) * VALID_SIZE / f32::from(face.units_per_em()))
+}
+
+#[test]
 fn ink_diagnostic_preserves_metrics_for_checked_in_font() -> Result<(), String> {
     let (database, face) = checked_in_font_face()?;
     let shape = FontShape::new(18.0, 400, false);
@@ -43,9 +106,7 @@ fn ink_diagnostic_preserves_metrics_for_checked_in_font() -> Result<(), String> 
     let (diagnosed, ink) = shape_svg_run_metrics_with_face(&database, face, TEST_TEXT, shape, true)
         .ok_or("diagnostic real-font metrics unavailable")?;
     assert!(plain.1.is_none());
-    assert_eq!(plain.0.advance.to_bits(), diagnosed.advance.to_bits());
-    assert_eq!(plain.0.ascent.to_bits(), diagnosed.ascent.to_bits());
-    assert_eq!(plain.0.descent.to_bits(), diagnosed.descent.to_bits());
+    assert_run_metrics_equal(plain.0, diagnosed);
     let ink = ink.ok_or("ink diagnostic was not produced")?;
     let bounds = ink.bounds.ok_or("real glyphs had no ink extents")?;
     assert!(bounds.iter().all(|value| value.is_finite()));
