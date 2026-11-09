@@ -75,3 +75,36 @@ fn c4_validator_reports_reversed_relation_and_detached_label() {
         Some("C4 relation label detached from edge corridor".to_owned())
     );
 }
+
+#[test]
+fn c4_validator_rejects_missing_api_identity_and_type() -> Result<(), String> {
+    GeometryContract::dynamic(tests::C4, false)?;
+    for (before, after) in [
+        (r#"id="id-api""#, r#"id="id-other""#),
+        (
+            r#"class="c4-type"><text x="40" y="35">Java and Spring Boot"#,
+            r#"class="other"><text x="40" y="35">Java and Spring Boot"#,
+        ),
+    ] {
+        assert_eq!(tests::C4.matches(before).count(), 1);
+        let changed = tests::C4.replacen(before, after, 1);
+        assert_eq!(
+            GeometryContract::dynamic(&changed, false).err().as_deref(),
+            Some("semantic element must be unique")
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn c4_validator_rejects_relation_without_target_coordinate() -> Result<(), String> {
+    GeometryContract::dynamic(tests::C4, false)?;
+    let before = r#"x2="200" y2="40""#;
+    assert_eq!(tests::C4.matches(before).count(), 1);
+    let changed = tests::C4.replacen(before, r#"y2="40""#, 1);
+    assert_eq!(
+        GeometryContract::dynamic(&changed, false).err().as_deref(),
+        Some("missing x2")
+    );
+    Ok(())
+}
