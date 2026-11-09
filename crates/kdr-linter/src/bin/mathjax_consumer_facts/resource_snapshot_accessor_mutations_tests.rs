@@ -81,6 +81,16 @@ const DIGEST_INITIALIZER: &str = "self.digest.get_or_init(|| {\n            Sha2
 
 const ACCESSOR_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "if before != after || before.len != bytes.len() as u64 {\n            return Err(std::io::Error::other(\"resource changed while reading\"));\n        }",
+        "let _changed = before != after || before.len != bytes.len() as u64;",
+        "resource-loader:changed",
+    ),
+    (
+        "Ok(Arc::new(ResourceSnapshot {\n            content,\n            digest: OnceLock::new(),\n            identity: after,\n        }))",
+        "Some(Arc::new(ResourceSnapshot {\n            content,\n            digest: OnceLock::new(),\n            identity: after,\n        }))",
+        "resource-loader:result",
+    ),
+    (
         DIGEST_INITIALIZER,
         "&self.digest",
         "resource-loader:accessors",

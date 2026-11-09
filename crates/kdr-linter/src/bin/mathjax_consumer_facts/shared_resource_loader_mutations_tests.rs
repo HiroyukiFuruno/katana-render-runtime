@@ -1,5 +1,10 @@
 pub(in super::super) const SHARED_RESOURCE_LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "ResourceSource::File { snapshot, .. } => Some(snapshot.digest())",
+        "ResourceSource::File { text, .. } => Some(snapshot.digest())",
+        "resource-loader:accessors",
+    ),
+    (
         "let source = if bundled.is_some() {",
         "let extra = ();\n        let source = if bundled.is_some() {",
         "resource-loader:load-body",
