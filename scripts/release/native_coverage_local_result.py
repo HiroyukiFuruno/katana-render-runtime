@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 from typing import cast
@@ -266,10 +267,22 @@ def _execution_environment_digest() -> str:
     return _digest(values)
 
 
-def _identity(repo: Path, producer: str, source_state: JsonObject) -> JsonObject:
+def _identity(repo: Path, producer: str, source_state: JsonObject, *,
+              context_phase: str | None = None) -> JsonObject:
     _producer_domains(producer)
     _fixed_coverage_policy()
     context = _local_context(repo)
+    if context_phase is not None:
+        print(json.dumps({"coverageContext": {
+            "producer": producer,
+            "phase": context_phase,
+            "cacheable": context["cacheable"],
+            "hostSha256": _digest(context["host"]),
+            "toolsSha256": _digest(context["tools"]),
+            "environmentSha256": context["environmentSha256"],
+            "resourcesSha256": context["resourcesSha256"],
+            "hostContextSha256": context["hostContextSha256"],
+        }}), file=sys.stderr, flush=True)
     command_rows = _commands(repo, producer)
     context_digest = cast(str, context["hostContextSha256"])
     payload: JsonObject = {
@@ -289,8 +302,8 @@ def _identity(repo: Path, producer: str, source_state: JsonObject) -> JsonObject
 
 
 def _bound_identity(repo: Path, producer: str, source_state: JsonObject, *,
-                    prepare_anchor: bool = True) -> JsonObject:
-    base = _identity(repo, producer, source_state)
+                    prepare_anchor: bool = True, context_phase: str | None = None) -> JsonObject:
+    base = _identity(repo, producer, source_state, context_phase=context_phase)
     base_digest = cast(str, base["identitySha256"])
     try:
         epoch = ((local_anchor.prepare if prepare_anchor else local_anchor.read_epoch)(
@@ -450,7 +463,7 @@ def _probe_token(repo: Path, producer: str, identity: JsonObject) -> str | None:
 def local_begin(repo: Path, producer: str) -> JsonObject:
     _ensure_report_directory(repo)
     source_state = _source_state(repo)
-    identity = _bound_identity(repo, producer, source_state)
+    identity = _bound_identity(repo, producer, source_state, context_phase="begin")
     if identity["cacheable"] is True and producer == "performance":
         if not local_anchor.begin_coverage_collection(
             repo,
@@ -491,7 +504,8 @@ def local_begin(repo: Path, producer: str) -> JsonObject:
 
 def _current_run(repo: Path, producer: str) -> tuple[JsonObject, JsonObject, str | None]:
     source_state = _source_state(repo)
-    identity = _bound_identity(repo, producer, source_state, prepare_anchor=False)
+    identity = _bound_identity(repo, producer, source_state, prepare_anchor=False,
+                               context_phase="current")
     token = _probe_token(repo, producer, identity)
     run = coverage_result._object(
         _read_json(_paths(repo, producer)["run"], "local run"), "local run"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import io
 import json
 import os
 import subprocess
@@ -176,6 +177,31 @@ class NativeCoverageLocalResultTests(unittest.TestCase):
                 local_result.LocalCoverageError, "inputs changed between begin and finish"
             ):
                 local_result.local_finish(self.root, "root", 0)
+
+    def test_resource_drift_reports_component_digests_and_rejects_collection(self) -> None:
+        self.prepare_reports()
+        changed_context = {**self.context, "resourcesSha256": "d" * 64}
+        changed_context.pop("hostContextSha256")
+        changed_context["hostContextSha256"] = local_result._digest(changed_context)
+        stderr = io.StringIO()
+        with (
+            patch.object(local_result, "_source_state", return_value=self.source_state),
+            patch.object(local_result, "_local_context", side_effect=[self.context, self.context, changed_context]),
+            patch("sys.stderr", stderr),
+        ):
+            self.begin_producer("root")
+            with self.assertRaisesRegex(local_result.LocalCoverageError, "anchor identity differs"):
+                local_result.local_collect_finish(self.root, "root", 0)
+        begin, current = [json.loads(line)["coverageContext"] for line in stderr.getvalue().splitlines()]
+        self.assertEqual((begin.pop("phase"), current.pop("phase")), ("begin", "current"))
+        self.assertEqual(
+            {key for key in begin if begin[key] != current[key]},
+            {"resourcesSha256", "hostContextSha256"},
+        )
+        self.assertEqual(set(begin), {
+            "producer", "cacheable", "hostSha256", "toolsSha256", "environmentSha256",
+            "resourcesSha256", "hostContextSha256",
+        })
 
     def test_cached_receipt_survives_later_ledger_only_change(self) -> None:
         self.prepare_reports()
