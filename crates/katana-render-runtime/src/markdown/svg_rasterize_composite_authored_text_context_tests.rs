@@ -146,3 +146,13 @@ fn context_matches(source: &str, text: &str) -> Result<bool, String> {
     let document = Document::parse(source).map_err(|error| error.to_string())?;
     Ok(collect(&document).matches_text(text))
 }
+
+#[test]
+fn blockless_keyframes_rejects_authored_text_context() -> Result<(), String> {
+    let valid = r#"<svg><style>@keyframes motion { from { opacity: 1; } }</style><text><tspan dy="0">Runtime</tspan></text></svg>"#;
+    let blockless =
+        r#"<svg><style>@keyframes motion;</style><text><tspan dy="0">Runtime</tspan></text></svg>"#;
+    assert!(context_matches(valid, LABEL)?);
+    assert!(!context_matches(blockless, LABEL)?);
+    Ok(())
+}

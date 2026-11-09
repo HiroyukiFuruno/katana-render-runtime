@@ -26,6 +26,33 @@ fn request() -> ProbeRequest {
 }
 
 #[test]
+fn font_probe_child_rejects_relative_response_paths() -> Result<(), String> {
+    use crate::system::ProcessService;
+
+    let temp = TempDirectory::new()?;
+    let request_path = temp.path().join("request.json");
+    let output_path = "relative-response.json";
+    let bytes = serde_json::to_vec(&request()).map_err(|error| error.to_string())?;
+    fs::write(&request_path, bytes).map_err(|error| error.to_string())?;
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    let result = ProcessService::create_command(executable)
+        .current_dir(temp.path())
+        .args(["--ignored", "--exact", PROBE_TEST, "--nocapture"])
+        .env("KRR_CHROME_FONT_IDENTITY_REQUEST", request_path)
+        .env("KRR_CHROME_FONT_IDENTITY_OUTPUT", output_path)
+        .output()
+        .map_err(|error| error.to_string())?;
+    assert!(!result.status.success());
+    let report = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        report.contains("response path must be absolute"),
+        "{report}"
+    );
+    assert!(!temp.path().join(output_path).exists());
+    Ok(())
+}
+
+#[test]
 fn font_probe_rejects_invalid_request_shape_and_duplicate_selected_font() -> Result<(), String> {
     let mut wrong_schema = request();
     wrong_schema.schema = "unknown-schema".into();

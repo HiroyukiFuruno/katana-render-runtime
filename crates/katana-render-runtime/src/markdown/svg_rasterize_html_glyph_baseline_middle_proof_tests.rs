@@ -91,3 +91,16 @@ fn context(source: &str) -> Result<AuthoredTextContext, String> {
         .map(|context| context.text)
         .map_err(|error| error.to_string())
 }
+
+#[test]
+fn multiline_proof_rejects_zero_second_line_advance() -> Result<(), String> {
+    let tree = fixture(MULTILINE, "")?;
+    let text = text(&tree)?;
+    assert_eq!(text.chunks().len(), MULTILINE_CHUNK_COUNT);
+    assert!(text.dy().contains(&LINE_ADVANCE));
+    let original = source(MULTILINE, "", FONT_FAMILY);
+    assert!(context(&original)?.matches_additional(text));
+    let changed = original.replace("dy='16.8'", "dy='0'");
+    assert_ne!(changed, original);
+    assert_rejected_proof(MULTILINE, &changed)
+}
