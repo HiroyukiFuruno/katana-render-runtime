@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-09、以下の過去結果と区別する）
 
+- [/] 11月10日の直近正式rootは `4d868279`、6,018/6,018成功・別15skip、86,958/87,755行（99.09178964161586%）、未カバー797行。前回の815行から18減、分母は20行増。ソース前後一致、収集実0、厳格閾値は `coverage-policy` で実1（`tmp/quality/resumed-owner-r3509/root-coverage-4d868279-rv4uu0j_/safe-summary.json`）。以降の限定回帰と正式結果を区別する。
+
 - [x] `7b84e114` のMermaidを独立raw JSと製品PNGで正式比較し、117/117件が99以上、最低99.085711、R01/R02成立、実0、source前後一致（`tmp/quality/resumed-owner-r3509/mermaid-current-after-capacity-recovery-7h1_h288/comparison/receipt.json`）。先行の固定容量超過と再試行前拒否を原ログに保持。release/coverage生成物を保護照合して限定整理し、35参照とdebug CLIを保持して3.40GB/上限4.73GBで再開した。
 - [x] `854a559f` と `7b84e114` のMermaid上下ポート・HTMLフォント異常入力の回帰を統合。関連4件、静的/ASTが実0。限定LLVM計測で前回0回の経路を実通過（`tmp/quality/resumed-owner-r3509/mermaid-html-focused-coverage-b37nhilf/safe-summary.json`）。全体coverageの更新には使わない。
 - [/] HTML性能は `7b84e114` のビルド証明成功後、093cea48の84条件の再利用をsource membershipで拒否。新規1条件も同一コミットに過去の移行規則を適用して測定前に停止（`current-html-one-condition-verified-epoch-3ocyyabn`）。同一コミットを厳密なGit照合へ分岐し、正例・ファイル欠落・改変を含む関連36テストとLint/型/重複で実0（`html-same-commit-program-verified-mnctk65i`）。新規採取0、現行84条件の合格は未確認。
@@ -138,11 +140,11 @@
 - [x] 保護を迂回しない限定cleanをcommit `cf087adb` へ取り込んだ。既存の排他内で正確なruntime/assetsのdev package cleanだけCargo dry-runを検査し、target/debug外・未列挙dir内容・symlink・保護path/子孫/ancestor/hardlink・空/失敗/不明planを拒否する。RED `scoped-clean-guard-red-zbhvdaun` は21case中期待した1失敗、修正後21caseと静的3項目は実0。実適用 `capacity-scoped-clean-recovery-4s1ece2h` は140file/652MiB整理→既存admission→保護35再検証が全実0、source不変。整理後4,715,606,016bytes < 固定4,726,095,872bytes、soft目標未達だがhardcap内。全target clean/保護ref削除/閾値変更はしていない。既存library-alias案はCargo launcher条件が合わず実2で停止し、別launcherへ迂回していない。
 - [/] Rust補完を実catalogからSVG17/Markdown7/renderer7へ分離。`coverage-target-catalog-build-b0kdunau` はAST実0・compile完了後意図した0件選択の実4（品質成功ではない）。current Nextest record `3af04f0e-588e-4ac7-ad1c-8b6243de986e` のmetadataからruntime binaryを同定し、`coverage-runtime-current-catalog-qcd13xgk` で実catalog5452件・SHA/source不変・一時profile残0を確認した。SVG限定 `coverage-svg-exact-cases-ydczykbo` は16成功/1失敗、source/binary不変。新規未採用testのisolation指定がCSSではなく無視されるpresentation attributeだったため、既存parser/writerの契約どおりstyleへ修正し、期待値は維持した。既存invalid-value testもstyleにして実際に対象の変換分岐を検証する。再compile/限定確認はこれから。raw JS基準・golden画像・描画thresholdは変更していない。
 
-- [ ] 最新指示の公開条件: 実装coverage100%・未計測0を公開入口でも必須化する。過去releaseのcoverage調査/追加行との分類はユーザーが不要としたため行わない。既存のexact-source CI判定をpublish-crates.shのCargo呼出前にも接続し、未達/検証器欠落で公開試行0を単体検証する。同じsource・検査条件で合格済みのローカルreportはCIで再利用し、未実施/不一致の必要検査は維持する。
+- [/] 公開入口は `publish-crates.sh` がCargoより先に同一ソースのCI証拠を検査する。Linux必須ジョブは認証済みの同一条件の結果を再利用し、それ以外は厳格な `just coverage` を実行する。カバレッジ未達・検証器欠落でCargo呼び出し0、必須ジョブ拒否、Linuxの実行契約を対象5件で確認（`tmp/quality/resumed-owner-r3509/release-coverage-publication-gate-4bpj5opk/safe-summary.json`）。公開候補の100%・未計測0と実CIは未達。
 - [/] 最新ユーザー許可により、最終push前の小さな検証済みcommitは `git commit --no-verify` を利用可。対象別test・差分確認・自己レビューと最終品質gateは維持し、pushのhookやprotected mergeは省略しない。恒久的なgate無効化を追加する許可ではない。
 - [ ] 最新ユーザー指示: coverage100%・未計測0を先に達成し、その同じテスト結果・描画/性能/公開APIの契約を維持してから共通化と責務境界をリファクタリングする。単なる行数削減やcoverage除外で完了にしない。既存ケースを減らさず、潜在バグを探す境界値・異常入力・状態遷移・失敗/中断時の所有権を検証する。リファクタリング前後の差分、同一検証条件、成功結果を記録する。
 - [ ] リファクタリングでは既存library/frameworkと適合するデザインパターンを優先し、保守性が上がる根拠があれば大きめの抽象化も採用する。共通責務・差し替え箇所・依存方向・変更の局所化・影響範囲で評価する。実行順は小さい挙動/責務ごとに再現test→修正→同じ限定test→通常commit、最後に統合検査。後でまとめて検査して原因が追えない進め方にしない。
-- [ ] 読取で発見したHTML入力の潜在不具合: `Text { text: "" }` は値が変わらなくてもdirty化され、blur時changeが発火する疑いがある。限定再現で確定し、必要な修正と同じ回帰で確認する。読取推論だけで不具合解消や合格にしない。現行補完cohortの対象別確認/commit後に独立した小変更として扱う。
+- [/] HTML空入力のblur時changeは `8a931e5e` で修正済み。実テスト `blur_dispatches_change_only_after_text_changes_value` は未入力・空文字・通常入力・通常入力後の空文字を比較し、`4d868279` の正式テストで成功。現在も同じ修正とテストが含まれる。HTML84条件の最終受入は別に判定する。
 - [ ] リファクタリングと検証の後、Draft PR作成前にmainの自己レビューを必ず実施する。目的適合・設計/共通化/境界・潜在不具合・維持する検査範囲を確認し、指摘を修正/再検証してからDraftへ進む。自己レビューをremote Codex review/CIで代替しない。Draft以後の最新HEADレビュー・個別reply/resolve・Ready・3 OS CI・保護merge・公開の既存条件も維持する。
 - [x] `coverage-python-boundary-related-xunlan44` は静的3項目、修正したrecipe3case、固定test-only scope6case、native coverage関連9file、有限source再利用30caseが各実0。source前後一致。先行466testの2失敗はPython製Just launcherのshebangがテスト用Python shimへ渡る入口の不具合であり、同じlauncherを実Pythonから起動して隔離を修正した。466全件の再実行ではなく該当3caseだけを再確認した。これはPython境界の成功であり、Rust補完テスト・coverage100%・最終全体ゲートの代替ではない。
 
