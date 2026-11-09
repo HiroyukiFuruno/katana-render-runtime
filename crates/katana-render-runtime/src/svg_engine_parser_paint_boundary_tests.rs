@@ -119,6 +119,20 @@ fn invalid_gradient_stop_color_uses_initial_black_without_losing_valid_stop() ->
 }
 
 #[test]
+fn non_stop_gradient_child_does_not_change_valid_stops_or_paint() -> Result<(), String> {
+    let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8">
+      <defs><linearGradient id="gradient"><stop stop-color="red"/><rect width="8" height="8" fill="lime"/><stop offset="1" stop-color="blue"/></linearGradient></defs>
+      <rect id="sample" width="8" height="8" fill="url(#gradient)"/></svg>"##;
+    let control = source.replace("<rect width=\"8\" height=\"8\" fill=\"lime\"/>", "");
+    assert_ne!(source, control);
+    let actual = rendered_svg(source)?;
+    let expected = rendered_svg(&control)?;
+    assert!(expected.iter().any(|channel| *channel != 0));
+    assert_eq!(actual, expected);
+    Ok(())
+}
+
+#[test]
 fn invalid_pattern_size_uses_the_authored_fallback_color() -> Result<(), String> {
     let tree = parse_with_languages(INVALID_PATTERN_SIZE_SVG, &[])?;
     assert_solid_fill_color(&tree, "sample", INVALID_PATTERN_SIZE_FALLBACK)
