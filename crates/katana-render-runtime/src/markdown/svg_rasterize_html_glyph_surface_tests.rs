@@ -2,7 +2,6 @@ use super::super::super::composite::TextRasterizer;
 use super::{skia_matrix, transformed_text_bounds};
 use resvg::usvg::{Node, Options, Tree};
 use skia_safe::Point as SkiaPoint;
-use std::sync::Arc;
 use tiny_skia::{Color, Pixmap, Transform};
 
 const OFFSCREEN_WIDTH: u32 = 80;
@@ -63,14 +62,7 @@ fn fully_offscreen_glyph_is_handled_as_noop_with_visible_control() -> Result<(),
     let svg = format!(
         "<svg xmlns='http://www.w3.org/2000/svg' width='{OFFSCREEN_WIDTH}' height='{OFFSCREEN_HEIGHT}'><text id='run' x='8' y='24' font-family='Noto Sans' font-size='18'>Ag</text></svg>"
     );
-    let tree = Tree::from_str(
-        &svg,
-        &Options {
-            fontdb: Arc::new(fixture.database.clone()),
-            ..Options::default()
-        },
-    )
-    .map_err(|error| error.to_string())?;
+    let tree = fixture.parse_svg(&svg).map_err(|error| error.to_string())?;
     let Some(Node::Text(text)) = tree.node_by_id("run") else {
         return Err("offscreen text missing".to_owned());
     };
