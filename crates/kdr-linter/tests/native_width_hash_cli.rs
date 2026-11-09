@@ -9,6 +9,24 @@ const INPUTS: [&str; 3] = [
 ];
 const MUTATIONS: &[(&str, &str, &str, &str)] = &[
     (
+        INPUTS[0],
+        "use std::hash::{Hash, Hasher};",
+        "use std::hash::Hash;",
+        "hash-fields:imports",
+    ),
+    (
+        INPUTS[0],
+        "    source: &str,\n    preset: &DiagramColorPreset,",
+        "    source: &str,",
+        "hash-fields:signature",
+    ),
+    (
+        INPUTS[1],
+        "fn svg_id(source: &str, preset: &DiagramColorPreset) -> String",
+        "fn svg_id(source: &str, preset: &DiagramColorPreset) -> PathBuf",
+        "svg-id-hash-route:signature",
+    ),
+    (
         INPUTS[1],
         "katana-mermaid-svg-{:016x}",
         "katana-mermaid-svg-{:x}",
