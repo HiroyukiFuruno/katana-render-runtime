@@ -836,7 +836,7 @@ pub(crate) fn convert_group(
     let (mut group, is_g_or_use) = initial_group(node, state, parent);
     collect_children(cache, &mut group);
     let object_bbox = group.calculate_object_bbox();
-    let clip_path = group_clip_path(node, state, object_bbox, cache)?;
+    let clip_path = super::clippath::convert_reference(node, state, object_bbox, cache)?;
     let mask = group_mask(node, state, object_bbox, cache)?;
     let filters = group_filters(node, state, object_bbox, cache)?;
     if !group_required(&group, is_g_or_use, force, &clip_path, &mask, &filters) {
@@ -907,22 +907,6 @@ fn group_from_properties(
         abs_layer_bounding_box: NonZeroRect::from_xywh(0.0, 0.0, 1.0, 1.0).unwrap(),
         children: Vec::new(),
     }
-}
-
-fn group_clip_path(
-    node: SvgNode,
-    state: &State,
-    bbox: Option<NonZeroRect>,
-    cache: &mut Cache,
-) -> Option<Option<Arc<ClipPath>>> {
-    let mut clip_path = None;
-    if let Some(link) = node.attribute::<SvgNode>(AId::ClipPath) {
-        clip_path = super::clippath::convert(link, state, bbox, cache);
-        if clip_path.is_none() {
-            return None;
-        }
-    }
-    Some(clip_path)
 }
 
 fn group_mask(

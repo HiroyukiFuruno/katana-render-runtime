@@ -47,9 +47,9 @@
       "source": "crates/usvg/src/parser/clippath.rs",
       "destination": "usvg/parser/clippath.rs",
       "sourceSha256": "7c5fe4eca5cd4913b528e11578d19a5b79ecfe5fb8983e793e389ffb3ef3094e",
-      "transplantedSha256": "2462fbb9961171747635b9ac3b0ba663f366fa86ede8224e4edc877139f50087",
+      "transplantedSha256": "1fc311d8a0507de6014e61b74dd3a7a64471b30b105cb3a157aa6426fb119ecb",
       "sourceBytes": 3661,
-      "transplantedBytes": 4746,
+      "transplantedBytes": 4616,
       "adaptations": {
         "cratePaths": 1,
         "enabledFeaturePredicates": {},
@@ -60,9 +60,9 @@
       "source": "crates/usvg/src/parser/converter.rs",
       "destination": "usvg/parser/converter.rs",
       "sourceSha256": "e658958b50f48996944cc8cb2025cd2c40cd9acadcd00d993e733806758f0a50",
-      "transplantedSha256": "30f7f596c67f4cf01e0d64c9781e7454497ce41687e7f6e4408dd6ba3cfba3a8",
+      "transplantedSha256": "2eee598d7e60c1dab4dcb1bf68e67e056603ea3d6a208178ba09d4a2422775c4",
       "sourceBytes": 37306,
-      "transplantedBytes": 37954,
+      "transplantedBytes": 37558,
       "adaptations": {
         "cratePaths": 6,
         "enabledFeaturePredicates": {

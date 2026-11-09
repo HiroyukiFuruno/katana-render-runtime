@@ -8,17 +8,27 @@ use super::converter;
 use super::svgtree::{AId, EId, SvgNode};
 use crate::svg_engine::usvg::{ClipPath, Group, NonEmptyString, NonZeroRect, Transform, Units};
 
-pub(crate) fn convert(
+pub(crate) fn convert_reference(
+    node: SvgNode,
+    state: &converter::State,
+    object_bbox: Option<NonZeroRect>,
+    cache: &mut converter::Cache,
+) -> Option<Option<Arc<ClipPath>>> {
+    /* WHY: 無効な参照はクリップ指定なしとして扱い、有効な要素の変換失敗とは区別する。 */
+    match node.attribute::<SvgNode>(AId::ClipPath) {
+        Some(link) if link.tag_name() == Some(EId::ClipPath) => {
+            convert(link, state, object_bbox, cache).map(Some)
+        }
+        _ => Some(None),
+    }
+}
+
+fn convert(
     node: SvgNode,
     state: &converter::State,
     object_bbox: Option<NonZeroRect>,
     cache: &mut converter::Cache,
 ) -> Option<Arc<ClipPath>> {
-    // A `clip-path` attribute must reference a `clipPath` element.
-    if node.tag_name() != Some(EId::ClipPath) {
-        return None;
-    }
-
     // The whole clip path should be ignored when a transform is invalid.
     let transform = resolve_clip_path_transform(node, state)?;
 
@@ -30,7 +40,7 @@ pub(crate) fn convert(
     }
 
     let transform = apply_clip_units(transform, units, object_bbox)?;
-    let clip_path = resolve_linked_clip(node, state, object_bbox, cache)?;
+    let clip_path = convert_reference(node, state, object_bbox, cache)?;
     build_clip(node, state, cache, cacheable, transform, clip_path)
 }
 
@@ -61,26 +71,6 @@ fn apply_clip_units(mut transform: Transform, units: Units, object_bbox: Option<
         transform = transform.pre_concat(ts);
     }
     Some(transform)
-}
-
-fn resolve_linked_clip(
-    node: SvgNode,
-    state: &converter::State,
-    object_bbox: Option<NonZeroRect>,
-    cache: &mut converter::Cache,
-) -> Option<Option<Arc<ClipPath>>> {
-    // Resolve linked clip path.
-    let mut clip_path = None;
-    if let Some(link) = node.attribute::<SvgNode>(AId::ClipPath) {
-        clip_path = convert(link, state, object_bbox, cache);
-
-        // Linked `clipPath` must be valid.
-        if clip_path.is_none() {
-            return None;
-        }
-    }
-
-    Some(clip_path)
 }
 
 fn build_clip(

@@ -2,6 +2,9 @@ use super::{resvg, usvg};
 use rstest::rstest;
 use tiny_skia::{Pixmap, Transform};
 
+#[path = "svg_engine_parser_linked_clip_tests.rs"]
+mod linked_clip_tests;
+
 const CLIP_VIEWPORT_WIDTH: u32 = 100;
 const CLIP_VIEWPORT_HEIGHT: u32 = 80;
 const OBJECT_BBOX_HALF_CLIP_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80">
@@ -12,6 +15,13 @@ const OBJECT_BBOX_HALF_CLIP_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/sv
 const OBJECT_BBOX_HALF_CLIP_ORACLE_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80">
   <rect x="10" y="10" width="20" height="20" fill="red"/>
   <rect x="60" y="30" width="10" height="40" fill="blue"/>
+</svg>"#;
+const WRONG_CLIP_TARGET_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80">
+  <defs><rect id="not-a-clip-path" width="4" height="4"/></defs>
+  <rect x="10" y="10" width="30" height="20" fill="red" clip-path="url(#not-a-clip-path)"/>
+</svg>"#;
+const WRONG_CLIP_TARGET_ORACLE_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80">
+  <rect x="10" y="10" width="30" height="20" fill="red"/>
 </svg>"#;
 
 #[rstest]
@@ -194,10 +204,22 @@ fn recursive_marker_keeps_one_marker_without_recursing() -> Result<(), String> {
 
 #[test]
 fn object_bounding_box_clip_is_resolved_per_target_size() -> Result<(), String> {
-    let clipped = render_svg(OBJECT_BBOX_HALF_CLIP_SVG)?;
-    let oracle = render_svg(OBJECT_BBOX_HALF_CLIP_ORACLE_SVG)?;
-    assert!(clipped.pixels().iter().any(|pixel| pixel.alpha() != 0));
-    assert_eq!(clipped.data(), oracle.data());
+    assert_same_visible_pixels(OBJECT_BBOX_HALF_CLIP_SVG, OBJECT_BBOX_HALF_CLIP_ORACLE_SVG)
+}
+
+#[test]
+fn non_clippath_reference_leaves_the_target_unclipped() -> Result<(), String> {
+    assert_same_visible_pixels(WRONG_CLIP_TARGET_SVG, WRONG_CLIP_TARGET_ORACLE_SVG)
+}
+
+fn assert_same_visible_pixels(input: &str, expected: &str) -> Result<(), String> {
+    let rendered = render_svg(input)?;
+    let oracle = render_svg(expected)?;
+    assert!(
+        rendered.pixels().iter().any(|pixel| pixel.alpha() != 0),
+        "the input rendered no visible pixels"
+    );
+    assert_eq!(rendered.data(), oracle.data());
     Ok(())
 }
 
