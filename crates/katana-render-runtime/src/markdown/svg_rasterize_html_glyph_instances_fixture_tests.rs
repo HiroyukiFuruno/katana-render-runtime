@@ -143,3 +143,17 @@ fn variable_colr_font_declines_skia_instance_for_color_tables() -> Result<(), St
     assert!(rasterizer.primary_variable_face(text, id)?.is_none());
     Ok(())
 }
+
+#[test]
+fn variable_instance_propagates_invalid_font_size() -> Result<(), String> {
+    let tree = fixture_tree(STATIC_FONT, None, 'A')?;
+    let (_, span, id) = target_span(&tree)?;
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    let error = rasterizer.variable_instance(span, id, 0.0).err();
+    assert_eq!(
+        error,
+        Some(format!("invalid variation font size for face {id:?}"))
+    );
+    assert!(rasterizer.variable_faces.borrow().instances.is_empty());
+    Ok(())
+}

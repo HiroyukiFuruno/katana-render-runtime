@@ -60,6 +60,33 @@ fn v8_svg_path_bounds_bridge_handles_valid_and_unsupported_paths() -> Result<(),
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn v8_svg_path_bounds_bridge_rejects_finite_coordinates_with_overflowing_extent()
+-> Result<(), String> {
+    let script = r#"(() => {
+        const pathBounds = globalThis.__katanaSvgPathBounds;
+        const horizontal = 'M-2e38,0 L2e38,1';
+        const vertical = 'M0,-2e38 L1,2e38';
+        return [horizontal, vertical].map(path => {
+            try {
+                return JSON.stringify(pathBounds(path));
+            } catch (error) {
+                return error.message;
+            }
+        }).join('|');
+    })()"#;
+    let result = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
+        "path-bounds-extent-overflow",
+        script,
+    )])?;
+    assert_eq!(
+        result,
+        "SVG path bounds are non-finite|SVG path bounds are non-finite"
+    );
+    Ok(())
+}
+
 const V8_BOUNDARY_CASES_SCRIPT: &str = r#"(() => {
     const transform = globalThis.__katanaTransformSvgBox;
     const cases = [
