@@ -7,6 +7,7 @@ import MagicString, { Bundle } from "magic-string";
 import { z } from "zod";
 import { resolveOfficialRendererAssetInputs } from "../mermaid/official-renderer-asset-inputs";
 import { MermaidRuntimeScripts } from "../mermaid/official-renderer-i18n";
+import { NATIVE_WIDTH_CONSUMER_PINS } from "./native-width-consumer-contract";
 import {
   OFFICIAL_BROWSER_CONSUMER_PINS,
   OFFICIAL_BROWSER_PROVIDER_COUNT,
@@ -830,26 +831,9 @@ const nativeWidthV8ScriptSha256 =
 const nativeWidthV8Import = "use crate::v8_script::ScriptCompiler;";
 const nativeWidthV8CompileCall = "v8::Script::compile(scope, source, Some(&origin))";
 const nativeWidthV8CompilerCall = "ScriptCompiler::compile_with_origin(scope, source, origin_name)";
-const nativeWidthLegacyRoute = {
-  [nativeWidthHelper]: "6abdd41feed03bb662fd2505dcb263d777b29f8114c967b1e44913f6060bda61",
-  [`${nativeWidthBase}js_runtime.rs`]:
-    "6beaa9a5f1b2d52c87d4e34ab55e78ee2a00b57c8a992da3082ab5459300b28a",
-  [`${nativeWidthBase}js_runtime_native_width_tests.rs`]:
-    "5b58a94792571378a1d04a0e1d3ba42279b6b2c7b103c3a41a1861e285a6b1fb",
-  [`${nativeWidthBase}js_runtime_native_width_c4_description_tests.rs`]:
-    "c08a896a1cfac21b227c97623ec45fea1b5d48ec121be0f0849fd9ddc2c4134c",
-  [`${nativeWidthBase}js_runtime_native_width_c4_tests.rs`]:
-    "23f0a46c985e135c195b2826f06e7ab944565ba5041790df2832b711ad8af318",
-  [`${nativeWidthBase}js_runtime_native_width_ishikawa_tests.rs`]:
-    "8d818595edc6750bafbead131fef9beea1987a9995a0a2613cabf1b2de3d5a9f",
-  [`${nativeWidthBase}js_runtime_native_width_oracle_boundary_tests.rs`]:
-    "f4375e4ca17e4d1931efbf21020b7b48bf06079ed9ae00de3ea160d31683731f",
-  [nativeWidthTrace]: "80953163facdebd8d765bb26923f838873043eb673eacf40963c64c0233ffd0e",
-  [nativeWidthBBoxTrace]: "e2aae9c8755431d6a5a0c92c7816b273fc204fb4f8f845cf1eae57574b929d4b",
-} as const;
 const nativeWidthRoute = [
   ...new Set([
-    ...Object.keys(nativeWidthLegacyRoute),
+    ...Object.keys(NATIVE_WIDTH_CONSUMER_PINS),
     ...NATIVE_WIDTH_HASH_INPUT_PATHS,
     nativeWidthDiagramRuntime,
     nativeWidthLibrary,
@@ -930,7 +914,8 @@ export function nativeWidthUnusedContext(
   const sources = new Map<string, RawUnusedSource>();
   for (const sourcePath of nativeWidthRoute) {
     const source = readUnusedPhysicalSource(root, sourcePath);
-    const expected = nativeWidthLegacyRoute[sourcePath as keyof typeof nativeWidthLegacyRoute];
+    const expected =
+      NATIVE_WIDTH_CONSUMER_PINS[sourcePath as keyof typeof NATIVE_WIDTH_CONSUMER_PINS];
     if (expected && source.sha256 !== expected)
       throw new Error(`changed native width consumer: ${sourcePath}`);
     if (sourcePath === nativeWidthV8Script && source.sha256 !== nativeWidthV8ScriptSha256)

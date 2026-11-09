@@ -34,6 +34,7 @@ import {
   generatedRuntimeRustAssetPaths,
 } from "../runtime-assets/runtime-package-asset-compressor";
 import { verifySvgEngineProvenance } from "../runtime-assets/svg-engine-provenance";
+import { NATIVE_WIDTH_CONSUMER_PINS } from "../runtime-bundles/native-width-consumer-contract";
 import { OFFICIAL_BROWSER_CONSUMER_PINS } from "../runtime-bundles/official-browser-consumer-contract";
 import {
   astObject,
@@ -94,24 +95,16 @@ const NATIVE_WIDTH_TRACE = `${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_tr
 const NATIVE_WIDTH_BBOX_TRACE = `${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_bbox_trace.js`;
 const NATIVE_WIDTH_HOST = `${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_trace_host.d.ts`;
 const NATIVE_WIDTH_TYPE_PROFILE = "scripts/quality/tsconfig-owned-native-width-trace.json";
-// 更新には実cfg(test)→helper→include/result-scriptのcontextレビューが必要。
-const NATIVE_WIDTH_TEST_CONSUMERS = {
-  [`${NATIVE_WIDTH_DIRECTORY}/js_runtime.rs`]:
-    "6beaa9a5f1b2d52c87d4e34ab55e78ee2a00b57c8a992da3082ab5459300b28a",
-  [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_tests.rs`]:
-    "5b58a94792571378a1d04a0e1d3ba42279b6b2c7b103c3a41a1861e285a6b1fb",
-  [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_c4_description_tests.rs`]:
-    "b5a7e3e5ffb73a22ad6df961f46ad915debb6590d4b7c984a4ceb9e8aa62e6e2",
-  [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_c4_tests.rs`]:
-    "28610a5998405703b5a07c6c1023efbf4e3315b2eb5d93b56ad043f8dcef2ead",
-  [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_ishikawa_tests.rs`]:
-    "8d818595edc6750bafbead131fef9beea1987a9995a0a2613cabf1b2de3d5a9f",
-  [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_helpers.rs`]:
-    "6abdd41feed03bb662fd2505dcb263d777b29f8114c967b1e44913f6060bda61",
-  [NATIVE_WIDTH_BBOX_TRACE]: "e2aae9c8755431d6a5a0c92c7816b273fc204fb4f8f845cf1eae57574b929d4b",
-  [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_oracle_boundary_tests.rs`]:
-    "f4375e4ca17e4d1931efbf21020b7b48bf06079ed9ae00de3ea160d31683731f",
-};
+const NATIVE_WIDTH_TEST_CONSUMERS = [
+  `${NATIVE_WIDTH_DIRECTORY}/js_runtime.rs`,
+  `${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_tests.rs`,
+  `${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_c4_description_tests.rs`,
+  `${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_c4_tests.rs`,
+  `${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_ishikawa_tests.rs`,
+  `${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_helpers.rs`,
+  NATIVE_WIDTH_BBOX_TRACE,
+  `${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_oracle_boundary_tests.rs`,
+] as const satisfies readonly (keyof typeof NATIVE_WIDTH_CONSUMER_PINS)[];
 const NATIVE_TYPED_UTILITIES = new Set([
   "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/svg_transform_bounds.js",
   "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime/svg_bounds_attrs.js",
@@ -921,7 +914,9 @@ function nativeWidthTraceBinding(
   types: TypeScope[],
 ): OwnedValidationReport["nativeWidthTrace"] {
   const present = context.visible.has(NATIVE_WIDTH_TRACE);
-  const consumers = Object.entries(NATIVE_WIDTH_TEST_CONSUMERS);
+  const consumers = NATIVE_WIDTH_TEST_CONSUMERS.map(
+    (name) => [name, NATIVE_WIDTH_CONSUMER_PINS[name]] as const,
+  );
   const selected = types.find((scope) => scope.name === NATIVE_WIDTH_TYPE_PROFILE);
   const active = present || consumers.some(([name]) => context.visible.has(name)) || !!selected;
   const consumerSources = active
