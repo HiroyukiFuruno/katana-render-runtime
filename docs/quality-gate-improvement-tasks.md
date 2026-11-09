@@ -55,6 +55,8 @@
 
 - [x] HTMLのプリミティブ例外が分類時に上書きされる不具合を実V8で再現。`runtime-error-primary-font-exact19-5qqmjlex` は16成功、`throw null` と `throw undefined` は実101、最初のメッセージが `TypeError: Cannot convert undefined or null to object` に変わった。数値・既存native error分類は成功。Mermaidの別1失敗は子libtestの名前にcrate区分を含め0件だった。元差分は `runtime-error-primary-font-red-source-c5akr_mb` に保全。HTMLは非coerciveなObject型判定で、実Objectのname/Private payload確認は従来どおり。Mermaidは子完全名を正し、親環境を変えず同梱実bundleの製品入口でcache親障害（元source、原因、衝突file不変）と独立正常対照を確認。実Notoの主font有/無でMathematical policy維持と補正の有無も確認。`runtime-error-preservation-fixed-build-bn3drcqv` はfoundation/fmt/重複/AST実0・compile成功（none選択実4）、`runtime-error-preservation-fixed-exact19-l7gupcpt` は19/19実0、source/binary不変・profile残0。元ケースとskipを減らしていない。対象OSの正式CI、最新全体coverage・描画・性能は別。
 
+- [x] 通常throw objectの `name` getter が元のJS例外を置換することを実V8で再現。`observer-error-boundaries-exact22-lmbwwrq_` は21成功・1実101、元の `ordinary original` が `Error: name getter was run` になった。元case差分は `ordinary-exception-red-source-xbr81z8m`。Object確認後に非公開String印を先に照合し、通常例外のgetterを分類処理から呼ばない。nativeのname分類・例外別payload・state消去は維持。実Noto/Yellowtailでstyled selectorの選択/除外、元selectorと観測値・回数を比較。Mermaid診断は親なし/親未作成/filenameなしの実pathを拒否し、所有tmpに副生成なし。OSのrootをworkspace絶対pathから得る。修正後 `ordinary-exception-fixed-build-j80zgl9o` はfoundation/fmt/重複/AST実0・compile成功（none選択実4）、`ordinary-exception-fixed-exact22-1dl_597q` は22/22実0、source/binary不変・profile残0。既存case/画像/skipは維持し、正式全体は次の集計で確認。
+
 ### 経過の記録（以下の旧数値・未実行予定は上の現在実数と区別する）
 
 - [/] 集計対象helperの限定補完: cmapのIO・HTMLの座標/実frame・KDRのparser pin fixtureを非重複3担当で変更中。成功/元のエラー表示とWindows callerを保ち、欠落ファイル・不正属性/viewport・closed session・fixture read/write失敗を実入力で検証する。実装の除外や分母変更はせず、純粋な判定caseは既存のtestファイル境界へ置く。レビューでcmap fixtureの早期失敗時の残骸も見つかったため、create_new成功後の所有とhandle解放後のDropへ整理する。まだ変更後未検証でありcoverage解消数へ加算しない。
