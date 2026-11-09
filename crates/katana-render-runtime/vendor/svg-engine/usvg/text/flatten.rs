@@ -475,3 +475,6 @@ fn new_glyph_painter<'a>(
         clip_stack: Vec::new(),
     }
 }
+
+#[cfg(test)]
+crate::svg_engine::owned_svg_model_tests!("../../../../src/svg_engine_text_flatten_png_glyph_model_tests.rs");

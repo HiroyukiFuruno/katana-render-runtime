@@ -319,9 +319,9 @@
       "source": "crates/usvg/src/text/flatten.rs",
       "destination": "usvg/text/flatten.rs",
       "sourceSha256": "b27b10e17bcf35fbbae67198451cbc40406276ed916e2e66d45a561a253f7c3b",
-      "transplantedSha256": "944c95195fa7cfbd69378711562d8c56698859f3ea939e742b6b422da1616a5f",
+      "transplantedSha256": "1c3f7c126093367d7cf0b3e93fa8448b26dfe0da779ffc94fbec1f3b38a4a3ae",
       "sourceBytes": 16066,
-      "transplantedBytes": 15657,
+      "transplantedBytes": 15782,
       "adaptations": {
         "cratePaths": 9,
         "enabledFeaturePredicates": {},
