@@ -64,6 +64,31 @@ fn geometry_contract_rejects_architecture_group_escape_missing_edges_and_invalid
 }
 
 #[test]
+fn geometry_contract_checks_architecture_vertical_ports_in_either_path_direction() {
+    for (path, expected) in [
+        ("M40 80L240 0", None),
+        ("M240 0L40 80", None),
+        (
+            "M40 79L240 0",
+            Some("edge endpoints detached from source ports"),
+        ),
+    ] {
+        let svg = ARCH.replace("M80 40L200 40", path);
+        assert_eq!(
+            GeometryContract::architecture(
+                &svg,
+                &[("a", "A"), ("b", "B")],
+                &[("a", "b", 'B', 'T')],
+                ("app", "Group"),
+            )
+            .err()
+            .as_deref(),
+            expected
+        );
+    }
+}
+
+#[test]
 fn geometry_contract_rejects_c4_detached_endpoints_missing_relation_and_wrong_node_labels()
 -> Result<(), String> {
     GeometryContract::dynamic(C4, false)?;
