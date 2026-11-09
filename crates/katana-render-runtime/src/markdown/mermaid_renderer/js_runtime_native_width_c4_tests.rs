@@ -1,4 +1,4 @@
-use super::helpers::render_fixture_with_font_audit;
+use super::helpers::{MeasurementFixture, render_fixture_with_font_audit};
 use super::oracle::{assert_bridge_widths_match_rust, call_text, rounded_width};
 use crate::markdown::svg_rasterize::{SvgRasterizeOps, SvgTextRunMetrics};
 use serde_json::Value;
@@ -8,36 +8,33 @@ title Runtime width probe
 Container(spa, "Single Page Application", "javascript and react")
 Container(api, "API Application", "Java and Spring Boot")
 Rel(spa, api, "Uses", "JSON/HTTPS")"#;
-const C4_CONTEXT_FIXTURE_MARKDOWN: &str =
-    include_str!("../../../../../tests/fixtures/mermaid/en/08-02-c4-context-full.md");
 const C4_LABEL_PROBE_FAMILY: &str = "\"Open Sans\",sans-serif";
 const C4_LABEL_PROBE_SIZE: f32 = 14.0;
 const C4_LABEL_PROBE_WEIGHT: u16 = 700;
 
 #[test]
 fn nonclass_c4_uses_native_advance_for_svg_text() -> Result<(), String> {
-    for (source, expected) in [
-        (C4_SOURCE, "Application"),
-        (
-            super::mermaid_fixture_source(C4_CONTEXT_FIXTURE_MARKDOWN)?,
-            "Banking Customer A",
-        ),
-    ] {
-        let (result, font_audit) = render_fixture_with_font_audit(source)?;
-        println!(
-            "c4_native_width_observation={}",
-            serde_json::json!({
-                "label": expected,
-                "calls": &result.calls,
-                "boxes": &result.boxes,
-                "labelWidths": c4_label_width_probe(expected)?,
-                "fontAudit": font_audit
-            })
-        );
-        assert_c4_label_tokens(&result.calls, expected);
-        assert_bridge_widths_match_rust(&result.calls)?;
-    }
-    Ok(())
+    let (result, audit) = render_fixture_with_font_audit(C4_SOURCE)?;
+    assert_c4_width_observation(&result, &audit, "Application")
+}
+
+pub(super) fn assert_c4_width_observation(
+    result: &MeasurementFixture,
+    font_audit: &Value,
+    label: &str,
+) -> Result<(), String> {
+    println!(
+        "c4_native_width_observation={}",
+        serde_json::json!({
+            "label": label,
+            "calls": &result.calls,
+            "boxes": &result.boxes,
+            "labelWidths": c4_label_width_probe(label)?,
+            "fontAudit": font_audit
+        })
+    );
+    assert_c4_label_tokens(&result.calls, label);
+    assert_bridge_widths_match_rust(&result.calls)
 }
 
 fn assert_c4_label_tokens(calls: &[Value], label: &str) {

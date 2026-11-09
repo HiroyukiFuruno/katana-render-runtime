@@ -52,6 +52,7 @@ fn observe_c4_fixture(fixture: &str, targets: &[(&str, &str)]) -> Result<(), Str
 fn c4_description_rows_record_real_bbox_and_span_advances() -> Result<(), String> {
     let source = super::mermaid_fixture_source(FIXTURE)?;
     let (result, audit) = render_fixture_with_font_audit(source)?;
+    super::c4_tests::assert_c4_width_observation(&result, &audit, "Banking Customer A")?;
     println!(
         "c4_description_width_observation={}",
         serde_json::json!({"rows": &result.c4_description_rows, "fontAudit": &audit})

@@ -101,9 +101,9 @@ const NATIVE_WIDTH_TEST_CONSUMERS = {
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_tests.rs`]:
     "5b58a94792571378a1d04a0e1d3ba42279b6b2c7b103c3a41a1861e285a6b1fb",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_c4_description_tests.rs`]:
-    "c08a896a1cfac21b227c97623ec45fea1b5d48ec121be0f0849fd9ddc2c4134c",
+    "b5a7e3e5ffb73a22ad6df961f46ad915debb6590d4b7c984a4ceb9e8aa62e6e2",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_c4_tests.rs`]:
-    "23f0a46c985e135c195b2826f06e7ab944565ba5041790df2832b711ad8af318",
+    "28610a5998405703b5a07c6c1023efbf4e3315b2eb5d93b56ad043f8dcef2ead",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_ishikawa_tests.rs`]:
     "8d818595edc6750bafbead131fef9beea1987a9995a0a2613cabf1b2de3d5a9f",
   [`${NATIVE_WIDTH_DIRECTORY}/js_runtime_native_width_helpers.rs`]:
