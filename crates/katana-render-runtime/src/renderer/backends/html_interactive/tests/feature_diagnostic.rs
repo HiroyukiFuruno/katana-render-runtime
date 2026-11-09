@@ -268,7 +268,11 @@ fn catalog_operation_kind(case_id: &str, state: &str) -> Option<&'static str> {
         ("async", "expected-state") => "script-await-timer-microtask",
         ("observers", "expected-state") => "script-await-mutation-delivery",
         ("resources", "expected-state") => "script-await-resource-font",
-        ("typography" | "layout" | "table" | "decoration", _) => "load-and-observe-target",
+        ("typography" | "layout" | "table" | "decoration", _)
+            if catalog_target(case_id, state).is_some() =>
+        {
+            "load-and-observe-target"
+        }
         _ => return None,
     })
 }

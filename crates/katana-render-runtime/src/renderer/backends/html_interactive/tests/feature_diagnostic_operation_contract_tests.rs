@@ -1,4 +1,6 @@
-use super::{CatalogOperation, FeatureRequest, TestResult, validate_operation_request};
+use super::{
+    CatalogOperation, FeatureRequest, TestResult, catalog_target, validate_operation_request,
+};
 use serde_json::{Value, json};
 
 #[test]
@@ -77,6 +79,71 @@ fn rejects_unknown_boundary_state_for_scripted_catalog_case() -> TestResult {
         &request,
         "unknown catalog case or boundary state",
     )
+}
+
+#[test]
+fn rejects_unknown_boundary_states_for_static_catalog_cases() -> TestResult {
+    for case_id in ["typography", "layout", "table", "decoration"] {
+        let mut request = fixture_request();
+        request.case_id = case_id.into();
+        let operation = fixture_operation(&[
+            ("caseId", json!(case_id)),
+            ("boundaryState", json!("unknown")),
+            (
+                "conditionId",
+                json!(format!("{case_id}/unknown/1280x900@1")),
+            ),
+            ("targetSelector", Value::Null),
+        ])?;
+        assert_rejected(
+            &operation,
+            &request,
+            "unknown catalog case or boundary state",
+        )
+        .map_err(|error| format!("{case_id}: {error}"))?;
+    }
+    Ok(())
+}
+
+#[test]
+fn accepts_all_defined_static_catalog_states() -> TestResult {
+    let catalog = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/fixtures/html/feature-catalog.json"
+    ));
+    let catalog: Value = serde_json::from_str(catalog).map_err(|error| error.to_string())?;
+    let aspects = catalog["visualAspects"]
+        .as_array()
+        .ok_or("visual aspects missing")?;
+    for case_id in ["typography", "layout", "table", "decoration"] {
+        let states = aspects
+            .iter()
+            .find(|aspect| aspect["id"] == case_id)
+            .and_then(|aspect| aspect["boundaryStates"].as_array())
+            .filter(|states| !states.is_empty())
+            .ok_or_else(|| format!("{case_id} catalog states missing"))?;
+        for state in states {
+            assert_static_catalog_state(case_id, state.as_str().ok_or("invalid catalog state")?)?;
+        }
+    }
+    Ok(())
+}
+
+fn assert_static_catalog_state(case_id: &str, state: &str) -> TestResult {
+    let mut request = fixture_request();
+    request.case_id = case_id.into();
+    let target = catalog_target(case_id, state)
+        .ok_or_else(|| format!("{case_id}/{state} target missing"))?;
+    let operation = fixture_operation(&[
+        ("caseId", json!(case_id)),
+        ("boundaryState", json!(state)),
+        (
+            "conditionId",
+            json!(format!("{case_id}/{state}/1280x900@1")),
+        ),
+        ("targetSelector", json!(target)),
+    ])?;
+    validate_operation_request(&operation, &request)
 }
 
 fn assert_rejected_operations(
