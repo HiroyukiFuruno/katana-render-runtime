@@ -1,6 +1,20 @@
 use super::{RUST_INPUTS, mathjax_fixture};
 
 #[test]
+fn snapshot_cache_rejects_caching_without_modified_timestamp()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = mathjax_fixture()?;
+    fixture.reject_unique_mutations(
+        RUST_INPUTS[super::super::super::source::RESOURCE_BYTES_INPUT_INDEX],
+        &[(
+            "snapshot.identity.modified.is_some() && weight <= CACHE_BYTES as usize",
+            "!snapshot.identity.modified.is_some() && weight <= CACHE_BYTES as usize",
+            "resource-loader:cache",
+        )],
+    )
+}
+
+#[test]
 fn snapshot_loader_rejects_missing_identity_and_cache_hit_guards()
 -> Result<(), Box<dyn std::error::Error>> {
     let fixture = mathjax_fixture()?;
