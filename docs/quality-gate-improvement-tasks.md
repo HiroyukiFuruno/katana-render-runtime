@@ -2,7 +2,8 @@
 
 ## 現在の実行地点（2026-11-09、以下の過去結果と区別する）
 
-- **現在のroot実数**: `89f6a235`、5949/5949成功・別に15skip、88035行中87123covered、98.96404838984495%・未カバー912行。`html-exception-observer-moon-root-q1z_y2vo` のMoon producer実0、Nextest 413.315秒。同じMoon経路のaggregateは認証後のstrict100/0だけがcoverage-policy・実1、refreshed=false、source前後一致。root SHAは `0abbd053002c01ad4e049453cf02d2cfe66cbc673c0134be627b7dfb50a76539`。前回933行から−21、分母不変。Mermaid renderの不足8→0/診断出力5→4、HTML主font7→5/middle7→5/styled observer7→0、Mach-O8→7。HTML bridge不足3は不変で、実不具合修正とcoverage増を区別する。歴史コピーと集計は `coverage-history-89f6a235-gs8s6280`（原anchorとは別）。公開条件100/0は未達であり、root限定成功を完全gateへ代用しない。
+- **現在のroot実数**: `47cb3a4b`、5956/5956成功・別に15skip、88035行中87123covered、98.96404838984495%・未カバー912行（前回同値）。`c4-scroll-font-moon-root-i93r7_vl` のMoon producer実0、Nextest 390.881秒。同じMoon経路のaggregateは認証後のstrict100/0だけがcoverage-policy・実1、refreshed=false、source前後一致。root SHAは `481722174d742610e071b13a67ed62e15cb2eafb88a39b724aeda96ece63478b`。歴史コピーと集計は `coverage-history-47cb3a4b-5ow2_75h`（原anchorとは別）。C4 2caseの同方式時間合計は87.177→44.444秒（−42.733秒）、Nextest全体413.315→390.881秒（−22.434秒の観測差）。製品表示速度と混同しない。公開条件100/0は未達であり、root限定成功を完全gateへ代用しない。
+- [x] 前回 `89f6a235` は5949成功・15skip、88035行中87123covered、98.96404838984495%・未カバー912行。前々回933行から−21、分母不変。Mermaid renderの不足8→0/診断出力5→4、HTML主font7→5/middle7→5/styled observer7→0、Mach-O8→7。HTML bridge不足3は不変。歴史コピー `coverage-history-89f6a235-gs8s6280`。
 - [x] 前回 `0ec3b4d8` は5934成功・15skip、88035行中87102covered、98.9401942409269%・未カバー933行。前々回934から−1は不正clip修正の重複整理（分母−22/covered−21）。歴史コピー `coverage-history-0ec3b4d8-ddkyi65m`。
 - [x] 前回 `16c9d306` は5917成功・15skip、88057行中87123covered、98.9393233928024%・未カバー934行。純テスト境界の整理で分母−312/covered−304/未カバー−8。歴史コピー `coverage-history-16c9d306-5jdmm1pz`。
 - [x] 前回 `dc177ea9` は5917成功・15skip、88369行中87427covered、98.93401532211521%・未カバー942行。前々回953行から11行減少、分母−5/covered+6。converterは不足11→6、writer10→8、generic Sans interaction8→4。bridgeの実例外修正は計測307→302/covered300→295/不足7不変。歴史コピーは `coverage-history-dc177ea9-ph3nrd11`。
