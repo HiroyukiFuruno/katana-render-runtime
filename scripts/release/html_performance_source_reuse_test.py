@@ -219,6 +219,9 @@ class SourceReuseTest(unittest.TestCase):
         self.assertFalse(reuse.v4_reassessment_program_change(
             path, old, base + b" ", old_mode="100644", new_mode="100644"))
 
+    # 承認済み移行の正例を現行checkerの変更から分離する。
+    reviewed_program_migration_head = "9d26f49139f2a073ddd699fd415c9760d214e84f"
+
     def test_reviewed_program_migration_is_exact_and_mode_bound(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         for path in ("scripts/release/publish-crates.sh",
@@ -240,7 +243,8 @@ class SourceReuseTest(unittest.TestCase):
             with self.subTest(path=path):
                 old = subprocess.check_output(["git", "-C", str(repository), "show",
                                                reuse.SAME_BINARY_REVIEWED_BASE + ":" + path])
-                current = (repository / path).read_bytes()
+                current = subprocess.check_output(["git", "-C", str(repository), "show",
+                                                   self.reviewed_program_migration_head + ":" + path])
                 self.assertTrue(reuse.reviewed_same_binary_migration(
                     path, old, current, old_mode="100644", new_mode="100644"))
                 self.assertFalse(reuse.reviewed_same_binary_migration(
@@ -306,7 +310,9 @@ class SourceReuseTest(unittest.TestCase):
                  "scripts/release/html_performance_host_load_validation_test.py")
         old = {path: subprocess.check_output(["git", "-C", str(repository), "show", base + ":" + path])
                for path in paths}
-        current = {path: (repository / path).read_bytes() for path in paths}
+        current = {path: subprocess.check_output(["git", "-C", str(repository), "show",
+                                                  self.reviewed_program_migration_head + ":" + path])
+                   for path in paths}
 
         def records(blobs: dict[str, bytes]) -> dict[str, tuple[str, int]]:
             return {path: (hashlib.sha256(data).hexdigest(), len(data)) for path, data in blobs.items()}

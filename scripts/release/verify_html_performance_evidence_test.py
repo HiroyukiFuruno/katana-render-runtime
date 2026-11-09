@@ -1369,15 +1369,18 @@ class PerformanceEvidenceTest(unittest.TestCase):
         import html_performance_source_reuse as reuse
 
         root = Path(__file__).resolve().parents[2]
+        reviewed_head = "9d26f49139f2a073ddd699fd415c9760d214e84f"
         for path in reuse._SAME_BINARY_REVIEWED_FILES:
             with self.subTest(path=path):
                 old = subprocess.check_output(["git", "-C", str(root), "show",
                                                reuse.SAME_BINARY_REVIEWED_BASE + ":" + path])
-                current = (root / path).read_bytes()
                 if path == "scripts/runtime-assets/svg-engine-provenance.ts":
                     current = old.replace(
                         b"8cd06cd2533360467d8f90cf2de422747927d3fb54a2dd41e85a6018f1d4905f",
                         b"07c779270618a9c2d0133367f247abf09bf2227b83b8af8bca3e64bc1fa9e145")
+                else:
+                    current = subprocess.check_output(["git", "-C", str(root), "show",
+                                                       reviewed_head + ":" + path])
                 self.assertTrue(reuse.reviewed_same_binary_migration(
                     path, old, current, old_mode="100644", new_mode="100644"))
                 self.assertFalse(reuse.reviewed_same_binary_migration(
