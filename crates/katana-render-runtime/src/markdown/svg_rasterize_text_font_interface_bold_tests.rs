@@ -134,6 +134,34 @@ fn interface_fallback_is_excluded_only_when_required() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn duplicate_native_bold_alias_disables_ambiguous_fallback_and_cache() -> Result<(), String> {
+    let (mut database, base, alias) = test_support::shared_file_alias_fixture()?;
+    retain_primary_and_alias(&mut database, base, alias);
+    let character = alias_character(&database, alias, true)?;
+    let select = |database: &resvg::usvg::fontdb::Database| {
+        super::matching_fallback_with_probe(
+            database,
+            base,
+            character,
+            super::INTERFACE_BOLD_WEIGHT,
+            false,
+            |id, glyph| super::probe_font_has_char(database, id, glyph),
+        )
+    };
+    assert_eq!(select(&database), (Some(alias), true));
+    let duplicate = database
+        .face(alias)
+        .ok_or("interface alias missing")?
+        .clone();
+    assert_ne!(database.push_face_info(duplicate), alias);
+    assert!(super::super::super::font::has_native_interface_candidate(
+        &database
+    ));
+    assert_eq!(select(&database), (None, false));
+    Ok(())
+}
+
 fn retain_primary_and_alias(
     database: &mut resvg::usvg::fontdb::Database,
     base: resvg::usvg::fontdb::ID,
