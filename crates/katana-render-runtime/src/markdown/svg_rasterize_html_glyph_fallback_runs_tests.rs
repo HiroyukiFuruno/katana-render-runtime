@@ -33,6 +33,58 @@ fn fallback_positions_reject_missing_or_extra_prepared_runs() -> Result<(), Stri
 }
 
 #[cfg(target_os = "macos")]
+#[test]
+fn fallback_eligibility_rejects_incomplete_and_extra_runs() -> Result<(), String> {
+    let tree = tree("A日本A", "")?;
+    let text = text(&tree)?;
+    let mut prepared = prepare(&tree, text)?;
+    assert!(
+        prepared.len() >= 3,
+        "fixture must cross font boundaries twice"
+    );
+    assert!(super::eligibility::eligible_source(text, &prepared).is_some());
+    assert!(super::eligibility::eligible_source(text, &[]).is_none());
+    assert!(super::eligibility::eligible_source(text, &prepared[..prepared.len() - 1]).is_none());
+    let extra = prepare(&tree, text)?
+        .into_iter()
+        .next()
+        .ok_or("missing run")?;
+    prepared.push(extra);
+    assert!(super::eligibility::eligible_source(text, &prepared).is_none());
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn fallback_script_fragments_reject_inconsistent_run_data() -> Result<(), String> {
+    let tree = tree("A日本", "")?;
+    let text = text(&tree)?;
+    let mut prepared = prepare(&tree, text)?;
+    let source = &text
+        .layouted()
+        .first()
+        .ok_or("missing source layout")?
+        .positioned_glyphs;
+    let scripts = super::resolved_scripts(source).ok_or("missing scripts")?;
+    let span = prepared.first_mut().ok_or("missing prepared run")?;
+    let run = source
+        .get(..span.glyphs.len())
+        .ok_or("run exceeds source")?;
+    let run_scripts = scripts
+        .get(..span.glyphs.len())
+        .ok_or("run exceeds scripts")?;
+    assert!(super::matching_script_fragments(run, span, run_scripts).is_some());
+    assert!(
+        super::matching_script_fragments(run, span, &run_scripts[..run_scripts.len() - 1])
+            .is_none()
+    );
+    let glyph_id = span.glyph_ids.first_mut().ok_or("missing glyph ID")?;
+    *glyph_id ^= 1;
+    assert!(super::matching_script_fragments(run, span, run_scripts).is_none());
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
 use super::super::{HtmlGlyphRasterizer, Prepared, PreparedSpan};
 #[cfg(target_os = "macos")]
 use crate::markdown::svg_rasterize::font::html_font_db_for_text;
