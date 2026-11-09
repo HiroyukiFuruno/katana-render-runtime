@@ -185,3 +185,25 @@ fn shared_document_hash_ranges_follow_original_utf8_source() -> Result<(), Strin
     assert!(routing(&provenance, &svg)?.all_text_verified);
     Ok(())
 }
+
+#[test]
+fn unmarkable_markup_preserves_input_and_next_generated_id() -> Result<(), String> {
+    let mut provenance = GeneratedHtmlTextProvenance::default();
+    for markup in [
+        r#"<path d="M0 0"/>"#,
+        r#"<text x="1""#,
+        r#"<text id="authored">A</text>"#,
+    ] {
+        assert_eq!(provenance.record(markup.to_owned()), markup);
+        assert_eq!(provenance.next_id, 0);
+        assert!(provenance.entries.is_empty());
+    }
+    let marked = recorded_markup(&mut provenance);
+    assert_eq!(provenance.next_id, 1);
+    assert_eq!(provenance.entries.len(), 1);
+    assert_eq!(
+        validated(&provenance, &wrap(&marked))?,
+        HashSet::from(["krr-html-text-1".to_owned()])
+    );
+    Ok(())
+}
