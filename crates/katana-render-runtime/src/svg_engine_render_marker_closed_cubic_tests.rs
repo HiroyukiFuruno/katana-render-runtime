@@ -65,6 +65,30 @@ fn closed_cubic_with_end_control_at_endpoint_uses_distinct_mid_and_seam_tangents
     Ok(())
 }
 
+#[test]
+fn closed_cubic_with_both_controls_at_endpoint_matches_line_mid_marker() -> Result<(), String> {
+    let svg = |path: &str| {
+        format!(
+            "<svg xmlns='http://www.w3.org/2000/svg' width='{VIEWBOX_SIZE}' height='{VIEWBOX_SIZE}'>{MARKER_DEFINITION}<path id='source' d='{path}' fill='none' stroke='black' stroke-opacity='0' marker-mid='url(#m)'/></svg>"
+        )
+    };
+    let cubic = usvg::Tree::from_str(
+        &svg("M20 40 C80 80 80 80 80 80 Z"),
+        &usvg::Options::default(),
+    )
+    .map_err(|error| error.to_string())?;
+    let line = usvg::Tree::from_str(&svg("M20 40 L80 80 Z"), &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    let cubic_markers = marker_path_transforms(&cubic);
+    assert_eq!(cubic_markers.len(), 1);
+    assert_eq!(cubic_markers, marker_path_transforms(&line));
+    let cubic_image = super::super::render(&cubic, super::super::Mode::Normal)?;
+    let line_image = super::super::render(&line, super::super::Mode::Normal)?;
+    assert!(line_image.pixels().iter().any(|pixel| pixel.alpha() > 0));
+    assert_eq!(cubic_image.data(), line_image.data());
+    Ok(())
+}
+
 fn parse_closed_cubic_svg(control_2: (f32, f32)) -> Result<usvg::Tree, String> {
     let source = format!(
         "<svg xmlns='http://www.w3.org/2000/svg' width='{VIEWBOX_SIZE}' height='{VIEWBOX_SIZE}' viewBox='0 0 {VIEWBOX_SIZE} {VIEWBOX_SIZE}'>{MARKER_DEFINITION}<path id='source' d='M{} {} C{} {} {} {} {} {} Z' fill='none' stroke='black' marker-mid='url(#m)' marker-end='url(#m)'/></svg>",
