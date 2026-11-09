@@ -1,5 +1,18 @@
-use super::usvg;
+use super::{resvg, usvg};
 use rstest::rstest;
+use tiny_skia::{Pixmap, Transform};
+
+const CLIP_VIEWPORT_WIDTH: u32 = 100;
+const CLIP_VIEWPORT_HEIGHT: u32 = 80;
+const OBJECT_BBOX_HALF_CLIP_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80">
+  <defs><clipPath id="half" clipPathUnits="objectBoundingBox"><rect width="0.5" height="1"/></clipPath></defs>
+  <rect x="10" y="10" width="40" height="20" fill="red" clip-path="url(#half)"/>
+  <rect x="60" y="30" width="20" height="40" fill="blue" clip-path="url(#half)"/>
+</svg>"#;
+const OBJECT_BBOX_HALF_CLIP_ORACLE_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80">
+  <rect x="10" y="10" width="20" height="20" fill="red"/>
+  <rect x="60" y="30" width="10" height="40" fill="blue"/>
+</svg>"#;
 
 #[rstest]
 #[case::markers_first("markers fill stroke", "red", "blue", &["marker", "both"][..])]
@@ -177,6 +190,24 @@ fn recursive_marker_keeps_one_marker_without_recursing() -> Result<(), String> {
     );
     assert_eq!(marker_path_transforms(tree.root()).len(), 1);
     Ok(())
+}
+
+#[test]
+fn object_bounding_box_clip_is_resolved_per_target_size() -> Result<(), String> {
+    let clipped = render_svg(OBJECT_BBOX_HALF_CLIP_SVG)?;
+    let oracle = render_svg(OBJECT_BBOX_HALF_CLIP_ORACLE_SVG)?;
+    assert!(clipped.pixels().iter().any(|pixel| pixel.alpha() != 0));
+    assert_eq!(clipped.data(), oracle.data());
+    Ok(())
+}
+
+fn render_svg(source: &str) -> Result<Pixmap, String> {
+    let tree = usvg::Tree::from_str(source, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    let mut pixmap = Pixmap::new(CLIP_VIEWPORT_WIDTH, CLIP_VIEWPORT_HEIGHT)
+        .ok_or("clip comparison pixmap unavailable")?;
+    resvg::render(&tree, Transform::identity(), &mut pixmap.as_mut());
+    Ok(pixmap)
 }
 
 #[test]
