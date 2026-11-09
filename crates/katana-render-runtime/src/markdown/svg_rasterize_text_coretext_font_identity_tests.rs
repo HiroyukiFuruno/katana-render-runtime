@@ -7,6 +7,25 @@ use objc2_core_foundation::CFString;
 const FONT: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 const SFNT_HEADER_BYTES: usize = 12;
 const FONT_SIZE: f64 = 16.0;
+const HELVETICA_FAMILY: &str = "Helvetica";
+
+fn helvetica_coretext_font() -> objc2_core_foundation::CFRetained<CTFont> {
+    /* WHY: 各source対照で同じCoreText要求を再利用し、差をfontdb faceだけに限定する。 */
+    let name = CFString::from_str(HELVETICA_FAMILY);
+    unsafe { CTFont::with_name(&name, FONT_SIZE, std::ptr::null()) }
+}
+
+fn normal_file_face(database: &Database, family: &str) -> Option<resvg::usvg::fontdb::ID> {
+    database
+        .faces()
+        .find(|face| {
+            face.weight == resvg::usvg::fontdb::Weight::NORMAL
+                && face.style == resvg::usvg::fontdb::Style::Normal
+                && face.families.iter().any(|(name, _)| name == family)
+                && matches!(&face.source, Source::File(_) | Source::SharedFile(_, _))
+        })
+        .map(|face| face.id)
+}
 
 #[test]
 fn mac_roman_postscript_names_require_ascii() {
@@ -48,8 +67,7 @@ fn bundled_font_postscript_identity_rejects_missing_name_and_truncated_font() ->
 
 #[test]
 fn binary_and_removed_font_faces_cannot_match_coretext() -> Result<(), String> {
-    let name = CFString::from_str("Helvetica");
-    let font = unsafe { CTFont::with_name(&name, FONT_SIZE, std::ptr::null()) };
+    let font = helvetica_coretext_font();
     let mut database = Database::new();
     database.load_font_data(FONT.to_vec());
     let id = database.faces().next().ok_or("bundled font missing")?.id;
@@ -61,5 +79,32 @@ fn binary_and_removed_font_faces_cannot_match_coretext() -> Result<(), String> {
     database.remove_face(id);
     assert!(database.face(id).is_none());
     assert!(!matches(&database, id, &font));
+    Ok(())
+}
+
+#[test]
+fn current_helvetica_file_face_matches_coretext() -> Result<(), String> {
+    let database =
+        crate::markdown::svg_rasterize::font::html_font_db_for_text(HELVETICA_FAMILY, "A");
+    let id = normal_file_face(&database, HELVETICA_FAMILY)
+        .ok_or("normal Helvetica file face missing")?;
+    let font = helvetica_coretext_font();
+    assert!(matches(&database, id, &font));
+    Ok(())
+}
+
+#[test]
+fn bundled_noto_file_face_does_not_match_helvetica_coretext() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let path = directory.path().join("NotoSans-Regular.ttf");
+    std::fs::write(&path, FONT).map_err(|error| error.to_string())?;
+    let mut database = Database::new();
+    database.load_font_source(Source::File(path));
+    let face = database.faces().next().ok_or("Noto file face missing")?;
+    assert_eq!(face.weight, resvg::usvg::fontdb::Weight::NORMAL);
+    assert!(face.families.iter().any(|(name, _)| name == "Noto Sans"));
+    assert!(matches!(&face.source, Source::File(_)));
+    let font = helvetica_coretext_font();
+    assert!(!matches(&database, face.id, &font));
     Ok(())
 }
