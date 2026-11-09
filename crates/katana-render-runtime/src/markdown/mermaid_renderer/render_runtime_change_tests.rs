@@ -161,3 +161,111 @@ fn svg_root_id(svg: &str) -> TestResult<String> {
     }
     Ok(id.to_owned())
 }
+
+const CACHE_PARENT_CHILD: &str = "KRR_TEST_MERMAID_CACHE_PARENT_CHILD";
+const CACHE_PARENT_SENTINEL: &[u8] = b"owned cache parent blocker";
+
+#[test]
+fn bundled_render_reports_cache_parent_failure_in_isolated_process() -> TestResult<()> {
+    if let Some(mode) = std::env::var_os(CACHE_PARENT_CHILD) {
+        return check_cache_parent_child(&mode);
+    }
+    for blocked in [true, false] {
+        let directory = tempfile::tempdir()?;
+        let parent = directory.path().join("katana_mermaid_cache");
+        if blocked {
+            std::fs::write(&parent, CACHE_PARENT_SENTINEL)?;
+        }
+        run_cache_parent_child(directory.path(), blocked)?;
+        if blocked {
+            assert_eq!(std::fs::read(&parent)?, CACHE_PARENT_SENTINEL);
+        }
+    }
+    Ok(())
+}
+
+fn run_cache_parent_child(directory: &std::path::Path, blocked: bool) -> TestResult<()> {
+    let (_, module) = module_path!()
+        .split_once("::")
+        .ok_or("test module missing")?;
+    let name = format!("{module}::bundled_render_reports_cache_parent_failure_in_isolated_process");
+    let output = crate::system::ProcessService::create_command(std::env::current_exe()?)
+        .args([
+            name.as_str(),
+            "--exact",
+            "--test-threads=1",
+            "--color=never",
+        ])
+        .env(
+            CACHE_PARENT_CHILD,
+            if blocked { "blocked" } else { "normal" },
+        )
+        .env("TMPDIR", directory)
+        .env("TMP", directory)
+        .env("TEMP", directory)
+        .output()?;
+    let stdout = std::str::from_utf8(&output.stdout)?;
+    let passed = format!("test {name} ... ok");
+    assert!(output.status.success(), "isolated Mermaid child failed");
+    assert_eq!(stdout.lines().filter(|line| *line == passed).count(), 1);
+    Ok(())
+}
+
+fn check_cache_parent_child(mode: &std::ffi::OsStr) -> TestResult<()> {
+    let directory =
+        std::path::PathBuf::from(std::env::var_os("TMPDIR").ok_or("child temp missing")?);
+    assert!(
+        std::env::temp_dir().canonicalize()? == directory.canonicalize()?,
+        "isolated temp directory mismatch"
+    );
+    let runtime = directory.join("bundled-mermaid.js");
+    let source = block("graph TD; A-->B");
+    let parent = directory.join("katana_mermaid_cache");
+    if mode == "blocked" {
+        check_blocked_cache_parent(&source, &runtime, &parent)
+    } else if mode == "normal" {
+        check_normal_cache_parent(&source, &runtime, &parent)
+    } else {
+        Err("unknown isolated child mode".into())
+    }
+}
+
+fn check_blocked_cache_parent(
+    source: &DiagramBlock,
+    runtime: &std::path::Path,
+    parent: &std::path::Path,
+) -> TestResult<()> {
+    assert_eq!(std::fs::read(parent)?, CACHE_PARENT_SENTINEL);
+    let result = MermaidRenderOps::render_mermaid_with_origin(
+        source,
+        runtime,
+        DiagramColorPreset::current(),
+        true,
+    );
+    assert!(
+        matches!(result, DiagramResult::Err { source: actual, error }
+        if actual == source.source && error.contains("Mermaid cache create parent failed"))
+    );
+    assert_eq!(std::fs::read(parent)?, CACHE_PARENT_SENTINEL);
+    Ok(())
+}
+
+fn check_normal_cache_parent(
+    source: &DiagramBlock,
+    runtime: &std::path::Path,
+    parent: &std::path::Path,
+) -> TestResult<()> {
+    assert!(!parent.exists());
+    let result = MermaidRenderOps::render_mermaid_with_origin(
+        source,
+        runtime,
+        DiagramColorPreset::current(),
+        true,
+    );
+    let DiagramResult::Ok(svg) = result else {
+        return Err("bundled control failed".into());
+    };
+    svg_root_id(&svg)?;
+    assert!(parent.is_dir());
+    Ok(())
+}
