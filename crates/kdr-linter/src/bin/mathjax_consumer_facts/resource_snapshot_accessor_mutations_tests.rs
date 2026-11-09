@@ -1,6 +1,19 @@
 use super::{RUST_INPUTS, mathjax_fixture};
 
 #[test]
+fn snapshot_cache_rejects_discarded_cache_lookup() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = mathjax_fixture()?;
+    fixture.reject_unique_mutations(
+        RUST_INPUTS[super::super::super::source::RESOURCE_BYTES_INPUT_INDEX],
+        &[(
+            ".filter(|snapshot| snapshot.identity == *identity)",
+            ".filter(|snapshot| snapshot.identity == *identity);",
+            "resource-loader:tail",
+        )],
+    )
+}
+
+#[test]
 fn snapshot_cache_rejects_caching_without_modified_timestamp()
 -> Result<(), Box<dyn std::error::Error>> {
     let fixture = mathjax_fixture()?;
