@@ -165,6 +165,25 @@ fn run_rejects_noncanonical_manifest_and_accepts_verified_fixture() -> Result<()
     Ok(())
 }
 
+#[test]
+fn run_rejects_invalid_manifest_schema_and_file_size() -> Result<(), String> {
+    let fixture = write_fixture()?;
+    let path = write_verified_manifest(&fixture)?;
+    let invalid_schema = json!({"schema": "wrong", "files": []});
+    std::fs::write(&path, invalid_schema.to_string()).map_err(|error| error.to_string())?;
+    assert_eq!(
+        MachoNoso::run(&path).err().as_deref(),
+        Some("input-manifest:schema")
+    );
+    let wrong_size = manifest(&fixture.path, fixture.bytes.len() + 1, &fixture.digest);
+    std::fs::write(&path, wrong_size.to_string()).map_err(|error| error.to_string())?;
+    assert_eq!(
+        MachoNoso::run(&path).err().as_deref(),
+        Some("input-file:size-or-type-changed")
+    );
+    Ok(())
+}
+
 fn assert_verified_manifest_runs(fixture: &super::Fixture) -> Result<(), String> {
     let manifest_path = write_verified_manifest(fixture)?;
     MachoNoso::run(&manifest_path)
