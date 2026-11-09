@@ -7,6 +7,9 @@ use std::sync::Arc;
 const SVG_FONT: &[u8] = include_bytes!(
     "../../../tests/fixtures/svg-engine/upstream/resvg/tests/fonts/TwitterColorEmoji.subset.ttf"
 );
+const SHARED_SVG_FONT: &[u8] = include_bytes!(
+    "../../../tests/fixtures/svg-engine/upstream/resvg/tests/fonts/NotoColorEmojiCOLR.subset.ttf"
+);
 const CBDT_FONT: &[u8] = include_bytes!(
     "../../../tests/fixtures/svg-engine/upstream/resvg/tests/fonts/NotoColorEmojiCBDT.subset.ttf"
 );
@@ -59,6 +62,18 @@ fn backend_has_glyph(
         Backend::Svg => FlattenDatabaseExt::svg(database, face, glyph).is_some(),
         Backend::Colr => FlattenDatabaseExt::colr(database, face, glyph, &[]).is_some(),
     }
+}
+
+#[test]
+fn shared_svg_document_selects_the_requested_glyph_node() -> TestResult<()> {
+    let (database, face) = fixture_database(SHARED_SVG_FONT)?;
+    for (character, expected_id) in [('🌓', "glyph1"), ('🥳', "glyph2")] {
+        let glyph = fixture_glyph(SHARED_SVG_FONT, TestGlyph::Character(character))?;
+        let node = FlattenDatabaseExt::svg(database.as_ref(), face, glyph)
+            .ok_or("shared SVG glyph missing")?;
+        assert_eq!(node.id(), expected_id);
+    }
+    Ok(())
 }
 
 #[rstest]
