@@ -395,6 +395,29 @@ class SourceReuseTest(unittest.TestCase):
         self.assertFalse(reuse.reviewed_same_binary_migration(path, old + b" ", current,
                                                               old_mode="100644", new_mode="100644"))
 
+    def test_fixed_epoch_authenticates_programs_at_the_same_commit(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        head = git(root, "rev-parse", "HEAD").strip()
+        records = committed_records(root, head)
+        programs = tuple(
+            (path, digest, size) for path, (digest, size) in sorted(records.items())
+            if path.startswith("scripts/") or path == "Justfile"
+        )
+        with patch.object(reuse, "reviewed_same_binary_migration",
+                          side_effect=AssertionError("same commit needs no program migration")):
+            self.assertEqual(evidence._v3_authenticate_programs(
+                root, head, programs, ((head, programs),), git_query=None,
+                memory_policy_version="html-memory-v4",
+            ), programs)
+            path, digest, size = programs[0]
+            forged = ((path, digest, size + 1), *programs[1:])
+            for endpoint in (programs[1:], forged):
+                with self.assertRaisesRegex(ValueError, "live program source differs from Git"):
+                    evidence._v3_authenticate_programs(
+                        root, head, programs, ((head, endpoint),), git_query=None,
+                        memory_policy_version="html-memory-v4",
+                    )
+
     def test_fixed_epoch_accepts_exact_historical_controller_program(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         base = reuse.SAME_BINARY_REVIEWED_BASE

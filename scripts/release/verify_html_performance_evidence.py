@@ -2067,7 +2067,7 @@ def _v3_authenticate_programs(root: Path, head: str, items: _ProgramItems,
     pending = []
     self_path = "scripts/release/html_performance_source_reuse.py"
     for live_head, live_items in endpoints:
-        if self_path not in {name for name, _, _ in live_items}:
+        if live_head == head or self_path not in {name for name, _, _ in live_items}:
             pending.append((live_head, live_items))
             continue
         live_data = _git_output(root, ("show", live_head + ":" + self_path), git_query=git_query)

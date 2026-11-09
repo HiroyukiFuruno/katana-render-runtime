@@ -2,6 +2,10 @@
 
 ## 現在の実行地点（2026-11-09、以下の過去結果と区別する）
 
+- [x] `7b84e114` のMermaidを独立raw JSと製品PNGで正式比較し、117/117件が99以上、最低99.085711、R01/R02成立、実0、source前後一致（`tmp/quality/resumed-owner-r3509/mermaid-current-after-capacity-recovery-7h1_h288/comparison/receipt.json`）。先行の固定容量超過と再試行前拒否を原ログに保持。release/coverage生成物を保護照合して限定整理し、35参照とdebug CLIを保持して3.40GB/上限4.73GBで再開した。
+- [x] `854a559f` と `7b84e114` のMermaid上下ポート・HTMLフォント異常入力の回帰を統合。関連4件、静的/ASTが実0。限定LLVM計測で前回0回の経路を実通過（`tmp/quality/resumed-owner-r3509/mermaid-html-focused-coverage-b37nhilf/safe-summary.json`）。全体coverageの更新には使わない。
+- [/] HTML性能は `7b84e114` のビルド証明成功後、093cea48の84条件の再利用をsource membershipで拒否。新規1条件も同一コミットに過去の移行規則を適用して測定前に停止（`current-html-one-condition-verified-epoch-3ocyyabn`）。同一コミットを厳密なGit照合へ分岐し、正例・ファイル欠落・改変を含む関連36テストとLint/型/重複で実0（`html-same-commit-program-verified-mnctk65i`）。新規採取0、現行84条件の合格は未確認。
+
 - [/] 11月10日、`96e3bbf9` のroot coverageを個別収集。Nextestは5,975/5,975成功、別に15件skip。86,846/87,735行、98.9867%、未カバー889行。ソース前後一致。収集は実0、閾値判定は`coverage-policy`で実1（`tmp/quality/resumed-owner-r3509/root-coverage-after-final-gate-fixes-iddpuvor/safe-summary.json`）。全体ゲートや公開の合格へ転用しない。
 - [x] 公開ゲートの既知の失敗を3コミットで修正。HTML性能再利用の履歴入力を固定（`060d02fd`）、macOS証跡を現行CIに照合（`f08eb309`）、SVGテスト5ファイルを整形対象へ追加（`96e3bbf9`）。対象回帰4件、Python Lint・型・重複、Rust整形・ASTが成功。後半1,337件中1件の先行失敗は `owned-svg-formatter-verified-1c27ovlc`、修正後の個別結果は `final-gate-targeted-fixes-uz9xny29` に保持。完全ゲートの再判定は未完。
 - [x] 整形コマンド変更と静的契約の厳密照合を同期。旧照合の拒否は `svg-indic-fallback-focused-_s_nihc4` に保持。修正後 `svg-indic-fallback-static-aligned-8jw2e0cw` で契約の異常系4件、静的foundation・整形・重複・ASTが成功した。
