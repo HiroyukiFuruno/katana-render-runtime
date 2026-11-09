@@ -93,6 +93,38 @@ fn static_font_without_axes_skips_variable_instance() -> Result<(), String> {
 }
 
 #[test]
+fn variation_resolution_rejects_invalid_size_and_missing_face() -> Result<(), String> {
+    let tree = fixture_tree(STATIC_FONT, None, 'A')?;
+    let (_, span, id) = target_span(&tree)?;
+    let expected_size = format!("invalid variation font size for face {id:?}");
+    for size in [0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        let error = html_glyph_variations::resolve_design(
+            tree.fontdb(),
+            id,
+            &span.variations,
+            span.font_optical_sizing,
+            size,
+        )
+        .err();
+        assert_eq!(error.as_deref(), Some(expected_size.as_str()), "{size}");
+    }
+    let empty = Database::new();
+    let error = html_glyph_variations::resolve_design(
+        &empty,
+        id,
+        &span.variations,
+        span.font_optical_sizing,
+        FONT_SIZE,
+    )
+    .err();
+    assert_eq!(
+        error,
+        Some(format!("font face data unavailable for {id:?}"))
+    );
+    Ok(())
+}
+
+#[test]
 fn variable_colr_font_declines_skia_instance_for_color_tables() -> Result<(), String> {
     let character = colr_linear_character()?;
     let tree = fixture_tree(COLR_VARIABLE, Some("'SWPS' 10"), character)?;
