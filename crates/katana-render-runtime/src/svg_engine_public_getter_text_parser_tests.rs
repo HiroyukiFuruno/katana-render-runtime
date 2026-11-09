@@ -154,6 +154,12 @@ fn default_whitespace_trims_both_edges_across_three_text_spans() -> Result<(), S
     assert_target_text(input, "ABC")
 }
 
+#[test]
+fn whitespace_only_final_span_does_not_leave_trailing_space() -> Result<(), String> {
+    let input = "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='50'><text id='target' font-family='Yellowtail'>A <tspan> </tspan></text></svg>";
+    assert_target_text(input, "A")
+}
+
 fn assert_target_text(input: &str, expected: &str) -> Result<(), String> {
     let tree = parse_svg(input)?;
     let text = text_node(&tree, "target")?;

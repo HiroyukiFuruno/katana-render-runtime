@@ -256,3 +256,24 @@ fn multiple_physical_faces_with_stroke_are_rejected_without_painting() -> Result
     assert!(glyphs.iter().any(|glyph| glyph.font != first.font));
     assert_tree_rejected(&tree)
 }
+
+#[test]
+fn translucent_decoration_paths_decline_native_text_without_painting() -> Result<(), String> {
+    for decoration in ["underline", "line-through"] {
+        let style = format!("text-decoration='{decoration}' fill-opacity='0.5'");
+        let (tree, _fixture) = fixture(&style, CONTENT)?;
+        let text = text(&tree)?;
+        let [span] = text.layouted() else {
+            return Err("expected one decorated layout span".into());
+        };
+        let path = match decoration {
+            "underline" => span.underline.as_ref(),
+            _ => span.line_through.as_ref(),
+        }
+        .ok_or("decoration path missing")?;
+        assert_eq!(path.fill().map(|fill| fill.opacity().get()), Some(0.5));
+        assert!(super::decorations::prepare(span)?.is_none());
+        assert_tree_rejected(&tree)?;
+    }
+    Ok(())
+}
