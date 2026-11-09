@@ -75,7 +75,7 @@ impl Fixture {
     }
 }
 
-fn unit_output() -> RenderOutput {
+pub(super) fn unit_output() -> RenderOutput {
     RenderOutput {
         svg: "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>unit contract output</text></svg>"
             .into(),

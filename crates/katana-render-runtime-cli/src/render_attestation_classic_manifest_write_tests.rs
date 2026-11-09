@@ -1,3 +1,5 @@
+use super::super::super::tests::unit_output;
+use super::super::capture;
 use super::{
     CLASSIC_PROGRAM_COUNT, SOURCE, observe, programs, request, request_json, unit_tempdir,
     write_capture,
@@ -32,5 +34,29 @@ fn existing_manifest_rejects_write_after_capture_programs_are_saved() -> anyhow:
         std::fs::read(root.join("classic-capture.json"))? == b"reserved",
         "existing manifest was overwritten"
     );
+    Ok(())
+}
+
+#[test]
+fn capture_rejects_a_subscriber_retained_after_render() -> anyhow::Result<()> {
+    let artifacts = unit_tempdir()?;
+    let mut escaped_dispatch = None;
+    let error = capture(artifacts.path(), SOURCE, || {
+        tracing::dispatcher::get_default(|dispatch| escaped_dispatch = Some(dispatch.clone()));
+        Ok(unit_output())
+    })
+    .err()
+    .context("capture accepted a subscriber retained after render")?;
+    ensure!(
+        error
+            .to_string()
+            .contains("classic subscriber escaped render"),
+        "unexpected capture rejection: {error}"
+    );
+    ensure!(
+        std::fs::read_dir(artifacts.path())?.next().is_none(),
+        "capture wrote evidence before rejecting the escaped subscriber"
+    );
+    drop(escaped_dispatch);
     Ok(())
 }
