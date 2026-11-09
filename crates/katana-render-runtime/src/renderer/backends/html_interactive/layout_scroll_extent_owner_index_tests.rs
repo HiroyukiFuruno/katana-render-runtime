@@ -111,3 +111,90 @@ fn assert_diamond_extent(result: &[(f64, f64)]) -> Result<(), String> {
     assert!((f64::from(bottom) - 10.0).abs() < EPSILON);
     Ok(())
 }
+
+#[test]
+fn nonfinite_element_and_inline_fragment_propagate_extent_errors() -> Result<(), String> {
+    use super::super::super::types::InlineFragment;
+
+    let mut renderer = owner_renderer();
+    let valid = [(1.0, 2.0), (4.0, 2.0), (4.0, 6.0), (1.0, 6.0)];
+    renderer.element_boxes[0].transformed_corners = valid;
+    renderer.element_boxes[0]
+        .inline_fragments
+        .push(InlineFragment::new(1.0, 2.0, 3.0, 4.0));
+    let indices = HashMap::from([(1, 0)]);
+    let measure = |renderer: &HtmlLayoutRenderer| {
+        super::super::scrollable_extent(&renderer.element_boxes, &indices, 10.0, 8.0, 0.0)
+    };
+    assert_eq!(measure(&renderer), Ok((10.0, 8.0)));
+    renderer.element_boxes[0].transformed_corners[0].0 = f32::NAN;
+    assert_eq!(
+        measure(&renderer).err().as_deref(),
+        Some(NON_FINITE_GEOMETRY_ERROR)
+    );
+    renderer.element_boxes[0].transformed_corners = valid;
+    renderer.element_boxes[0].inline_fragments[0].transformed_corners[0].1 = f32::INFINITY;
+    assert_eq!(
+        measure(&renderer).err().as_deref(),
+        Some(NON_FINITE_GEOMETRY_ERROR)
+    );
+    Ok(())
+}
+
+#[test]
+fn rotated_subject_touching_clip_edge_has_no_area_or_scroll_extent() -> Result<(), String> {
+    const RIGHT_EDGE: f32 = 10.0;
+    const DIAMOND_MIDDLE_X: f32 = 12.0;
+    const DIAMOND_RIGHT_X: f32 = 14.0;
+    let subject = [
+        (RIGHT_EDGE, 4.0),
+        (DIAMOND_MIDDLE_X, 2.0),
+        (DIAMOND_RIGHT_X, 4.0),
+        (DIAMOND_MIDDLE_X, 6.0),
+    ];
+    let mut renderer = owner_renderer();
+    renderer.element_boxes[0].transformed_corners =
+        [(0.0, 0.0), (RIGHT_EDGE, 0.0), (RIGHT_EDGE, 8.0), (0.0, 8.0)];
+    renderer.element_boxes[0].overflow_clip_axes = (true, true);
+    let indices = HashMap::from([(1, 0)]);
+    let clip = clip(RIGHT_EDGE, 8.0);
+    assert_edge_contact(&subject, &clip, &renderer, &indices)?;
+    let extent = super::super::visible_extent(
+        &subject,
+        &[clip],
+        &renderer.element_boxes,
+        &indices,
+        &mut PolygonScratch::default(),
+    )?;
+    assert_eq!(extent, None);
+    Ok(())
+}
+
+fn assert_edge_contact(
+    subject: &[(f32, f32); RECT_CORNER_COUNT],
+    clip: &OverflowClip,
+    renderer: &HtmlLayoutRenderer,
+    indices: &HashMap<u64, usize>,
+) -> Result<(), String> {
+    let mut scratch = PolygonScratch {
+        first: subject
+            .iter()
+            .map(|&(x, y)| (f64::from(x), f64::from(y)))
+            .collect(),
+        second: Vec::new(),
+    };
+    let mut first = true;
+    assert!(polygon::clip_owner_polygon(
+        clip,
+        &renderer.element_boxes,
+        indices,
+        &mut scratch,
+        &mut first
+    )?);
+    assert!(!scratch.current(first).is_empty());
+    assert_eq!(
+        axis_aligned::polygon_right_bottom(scratch.current(first))?,
+        None
+    );
+    Ok(())
+}

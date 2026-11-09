@@ -1,7 +1,8 @@
 use super::helpers::{
     accept_flow_result, container_height, horizontal_box_geometry, inline_container_width,
 };
-use super::{CssStyle, HtmlDocumentNode};
+use super::{CssStyle, DetailsContext, HtmlBrowserViewport, HtmlDocumentNode, HtmlLayoutRenderer};
+use std::collections::HashMap;
 
 #[test]
 fn flow_errors_are_recorded_at_the_container_start() {
@@ -12,6 +13,24 @@ fn flow_errors_are_recorded_at_the_container_start() {
         12.0
     );
     assert_eq!(layout_error, Some("taffy failed".to_string()));
+}
+
+#[test]
+fn overflow_paint_without_an_element_owner_records_layout_error() {
+    const EDGE: u32 = 40;
+    let viewport = HtmlBrowserViewport {
+        width: EDGE,
+        height: EDGE,
+        device_scale_factor: 1.0,
+    };
+    let mut renderer = HtmlLayoutRenderer::new(viewport, 0.0, &HashMap::new(), None);
+    let mut style = CssStyle::browser_default();
+    style.apply("overflow", "hidden");
+    renderer.render_container(&[], 0.0, 0.0, EDGE as f32, &style, DetailsContext::NONE);
+    assert_eq!(
+        renderer.layout_error.as_deref(),
+        Some("overflow paint clip has no owner")
+    );
 }
 
 #[test]
