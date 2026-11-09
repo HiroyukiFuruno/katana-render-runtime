@@ -1403,6 +1403,31 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     producer._resume_condition_plan(bundle, receipt, condition, current)
 
+    def test_legacy_resume_keeps_original_build_source_before_pin(self) -> None:
+        initial: gate.JsonObject = {"head": "a" * 40, "files": []}
+        original = producer.write(self.root / "old/source-before.json", initial)
+        endpoint = producer.write(self.root / "prior-resume/source-before.json", initial)
+        artifact = producer.write(self.root / "old/build-artifact.json", {"sourceBeforeRef": original})
+        bundle, receipt = self.resume_context_fixture(self.root / "old", [], [original, endpoint, artifact])
+        receipt["buildArtifacts"] = {"candidate": artifact}
+        receipt["source"] = {"before": endpoint}
+        binding_path = self.root / "capacity"
+        binding = producer.CapacityBinding(binding_path, "b" * 64, binding_path, "c" * 64,
+                                           binding_path, "d" * 64, ())
+        output = self.root / "new"
+        with patch.object(gate, "current_source", return_value={}):
+            inputs = producer.write_build_source_inputs(
+                self.root, output, initial, binding, legacy_resume=(bundle, receipt),
+            )
+        self.assertEqual(inputs.source_before, original)
+        self.assertEqual(gate.read_json(Path(inputs.capacity_input["path"]))["sourceBeforeRef"], original)
+        self.assertFalse((output / "source-before.json").exists())
+        with self.assertRaisesRegex(ValueError, "resume candidate source before differs"):
+            producer._resume_legacy_source_before(bundle, receipt, {**initial, "head": "e" * 40})
+        Path(original["path"]).write_text("tampered")
+        with self.assertRaisesRegex(ValueError, "SHA256 differs"):
+            producer._resume_legacy_source_before(bundle, receipt, initial)
+
     def test_resume_reuses_context_snapshot_across_output_directories(self) -> None:
         old = producer.write(self.root / "old/shared-source-snapshot.json", {"records": []})
         new = producer.write(self.root / "new/shared-source-snapshot.json", {"records": []})

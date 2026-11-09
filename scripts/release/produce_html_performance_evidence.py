@@ -1444,11 +1444,28 @@ def _resume_context_pin(
     return pin
 
 
-def _resume_candidate_snapshot_pin(bundle: gate.Bundle, receipt: Mapping[str, object]) -> FilePin:
+def _resume_candidate_build_proof(bundle: gate.Bundle, receipt: Mapping[str, object]) -> gate.JsonObject:
     artifacts = gate._object(receipt.get("buildArtifacts"), "resume build artifacts")
     artifact = _receipt_file_pin(artifacts.get("candidate"), "resume candidate build artifact")
-    proof = bundle.json(artifact)
+    return bundle.json(artifact)
+
+
+def _resume_candidate_snapshot_pin(bundle: gate.Bundle, receipt: Mapping[str, object]) -> FilePin:
+    proof = _resume_candidate_build_proof(bundle, receipt)
     return _receipt_file_pin(proof.get("sourceSnapshotRef"), "resume candidate source snapshot")
+
+
+def _resume_legacy_source_before(bundle: gate.Bundle, receipt: Mapping[str, object],
+                                 initial: gate.JsonObject) -> FilePin:
+    proof = _resume_candidate_build_proof(bundle, receipt)
+    source = _receipt_file_pin(proof.get("sourceBeforeRef"), "resume candidate source before")
+    endpoints = gate._object(receipt.get("source"), "resume source refs")
+    endpoint = _receipt_file_pin(endpoints.get("before"), "resume source before")
+    gate.require(endpoint["sha256"] == source["sha256"] and bundle.json(source) == initial,
+                 "resume candidate source before differs")
+    bundle.file(endpoint)
+    _pinned_file(Path(source["path"]), source["sha256"])
+    return source
 
 
 def _resume_fixed_source_pins(
@@ -2679,14 +2696,17 @@ def write_build_source_inputs(root: Path, output: Path, initial: gate.JsonObject
                               binding: CapacityBinding, *, git_query: gate.GitQuery | None = None,
                               extra_capacity_inputs: Mapping[str, FilePin] | None = None,
                               fixed_resume: tuple[gate.Bundle, gate.JsonObject, FixedEpochContextInput] | None = None,
+                              legacy_resume: tuple[gate.Bundle, gate.JsonObject] | None = None,
                               ) -> BuildSourceInputs:
-    if fixed_resume is None:
-        source_before = write(output / "source-before.json", initial)
-    else:
+    if fixed_resume is not None:
         resume_bundle, resume_receipt, origin = fixed_resume
         source_before, _ = _resume_fixed_source_pins(root, resume_bundle, resume_receipt, origin,
                                                      git_query=git_query)
         gate.require(resume_bundle.json(source_before) == initial, "fixed initial source differs")
+    elif legacy_resume is not None:
+        source_before = _resume_legacy_source_before(*legacy_resume, initial)
+    else:
+        source_before = write(output / "source-before.json", initial)
     capacity_input_value: gate.JsonObject = {
         "sourceBeforeRef": source_before,
         "bindingRef": {"path": str(binding.document), "sha256": binding.document_sha256},
@@ -3983,8 +4003,12 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             gate.committed_records(root, fixed_epoch["head"], git_query=git_query),
         )
     else:
+        legacy_resume = ((resumed_bundle, resumed_receipt)
+                         if resumed_bundle is not None and resumed_receipt is not None
+                         and fixed_epoch is None else None)
         build_inputs = write_build_source_inputs(root, output, initial, binding,
-            git_query=git_query, extra_capacity_inputs=extra_capacity_inputs, fixed_resume=fixed_resume)
+            git_query=git_query, extra_capacity_inputs=extra_capacity_inputs,
+            fixed_resume=fixed_resume, legacy_resume=legacy_resume)
     if fixed_epoch is None and resumed_receipt is not None and resumed_bundle is not None:
         build_inputs = build_inputs._replace(snapshot=_resume_context_pin(
             resumed_bundle, resumed_receipt, build_inputs.snapshot,
