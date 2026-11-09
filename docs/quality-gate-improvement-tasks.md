@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-09、以下の過去結果と区別する）
 
+- [x] CLIの成功証跡の誤生成を防ぐ2回帰を確認。同梱Mermaidの実構文エラーは元の `RenderError::Runtime` と入力を維持し、SVG・成功receiptを生成しない。実tracing subscriberが描画後も保持された場合はcaptureを拒否し証跡fileなし。既存の正常receiptを含む `cli-mermaid-error-exact-06mj44vo` は3件すべて実0、source/binary不変・一時profile0。準備中の並行編集で整形失敗2回、誤importのcompile失敗1回を原ログに保持。対象固定・参照修正後 `cli-attestation-import-fixed-build-qcc0zf0v` はfoundation/fmt/重複/AST実0・compile成功。catalog追加2・削除0、スキップ変更なし。正式coverage未集計。
+
 - [x] 入れ子の回転overflow clipで、対照と大きな子の両軸スクロール最大・実位置81、clip内外2点、全画素を比較。初回 `html-overflow-authored-exact-s8mw78vm` は境界が重なる157半透明画素だけが異なった。対照の塗りをclipより2px外まで延ばし、全画素一致を維持した `html-overflow-authored-exact-yx0f9s1g` は該当1件実0。同初回でSVG文字のCSS指定と同値の直接指定も寸法・全画素一致（空画像でないことを確認）。両buildのfoundation/fmt/重複/AST実0、source/binary不変・一時profile0、catalog追加2・削除0。製品・基準画像・スキップは変更なし。正式カバレッジの更新はまだ行っていない。
 
 - **最新の正式root**: `77091824`、5964/5964成功・別に15skip、88035行中87131covered、98.97313568467086%・未カバー904行（912→904、分母不変）。`svg-font-boundaries-moon-root-tw07ppx5` のproducer実0、Nextest 402.783秒。aggregateはsource一致認証後、strict100/0のみ実1（coverage-policy、refreshed=false）。不足減はpaint server 2、SVG parser text 3、shaping fragments 2、cmap selector 1。bitmap/sizeは検証成功したが計測行増なし。report SHA `617117f684081705c99567ff6aa58ed5352c547ae1fcfd93ec90f2f9152eba16`、履歴コピー `coverage-history-77091824-rtnjxohu`。公開条件未達。次は同じ経路から複数箇所を検証できる範囲を優先し、根拠が薄い単一分岐のための追加実行は行わない。
