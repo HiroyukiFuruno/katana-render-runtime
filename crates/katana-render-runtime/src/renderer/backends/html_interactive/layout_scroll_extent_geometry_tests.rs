@@ -103,6 +103,28 @@ fn plane_clipping_rejects_nonfinite_distances_and_overflowing_intersections() {
 }
 
 #[test]
+fn viewport_clip_propagates_intersection_errors_from_both_planes() {
+    const INSIDE_X: f64 = 0.5;
+    const PAST_RIGHT_X: f64 = 2.0;
+    const INNER_Y: f64 = f64::MAX / 2.0;
+    for (left, right) in [(-INSIDE_X, INSIDE_X), (INSIDE_X, PAST_RIGHT_X)] {
+        let viewport = [
+            (left, -f64::MAX),
+            (right, INNER_Y),
+            (right, f64::MAX),
+            (left, -INNER_Y),
+        ];
+        assert_eq!(
+            polygon::clip_viewport_polygon(&clip(1.0, 1.0), &viewport)
+                .err()
+                .as_deref(),
+            Some(NON_FINITE_GEOMETRY_ERROR),
+            "viewport x range {left} to {right}"
+        );
+    }
+}
+
+#[test]
 fn axis_aligned_extent_accepts_finite_degenerate_and_rejects_empty_or_invalid_bounds() {
     const OVERFLOW_COORDINATE: f64 = f64::MAX;
     const DEGENERATE_SINGLETON: [(f64, f64); 1] = [(7.0, 11.0)];
