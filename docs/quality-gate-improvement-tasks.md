@@ -2,6 +2,9 @@
 
 ## 現在の実行地点（2026-11-10、以下の過去結果と区別する）
 
+- [x] `b7820c9e` でSVG writerの既定の文字幅とベースライン3属性を明示しても、省略した入力と同じ出力になり、属性を出力しないことを固定。foundation・AST・関連2件は実0。手前の判定3箇所は各3回、到達不能な3分岐は各0回。製品コードを変更せず回帰を確立（`tmp/quality/resumed-owner-r3509/coverage-svg-writer-defaults-exact-z9dk20_e/safe-summary.json`）。
+- [/] 共有hook台帳が別作業1件で置換されていたため原本を管理外に保持し、直近の観測で確認した未完16項目を復元。過去の個別証跡は本台帳を参照。置換前のhook台帳44項目の完全な原本は回収できていない（`tmp/quality/resumed-owner-r3509/krr-shared-ledger-recovery-7607uqyv/`）。
+
 - [/] `8425b927` の正式rootは6,166件成功・別に15件skip、86,760/87,362行（99.3109132117%）、未カバー602行。前回の608行から6減、分母は同じ。SVG参照2行、線形・放射グラデーション各1行、RTLを専用経路へ渡す条件と空白のink除外各1行。ソース前後一致・収集実0・`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-88fw3auz/safe-summary.json`）。製品コードは変更せず、GitHubのv0.4.24は未公開。
 - [x] `8425b927` で同梱フォントによる右から左へ読む文字列の整形経路と、日本語代替書体の後ろの空白がadvanceに加わる一方でink範囲を変えないことを確認。foundation・AST・関連3件は実0。`svg_fragment_run.rs:18`、`svg_metrics.rs:183` の未実行領域が到達し、一時profile回収済み（`tmp/quality/resumed-owner-r3509/coverage-svg-ink-and-rtl-exact-f5muy34p/safe-summary.json`）。
 - [ ] 100%達成の前提として、実入力では到達しないと証明済みの重複だけを等価に整理する順序が必要。例はSVG writerの既定属性の二重判定、照明要素を3種に限定した後の重複判定、HTMLの空slice二重判定。SVGは `text_style_survives_preserving_writer` と既定属性の省略、`filter_writer_preserves_renderable_semantics`、HTMLは `plane_clipping_clears_empty_output_and_rejects_non_finite_distance` で挙動を固定する。OSによって実行できる分岐は該当OSで検証。現段階の製品変更・閾値変更・検査除外はなし。到達できる回帰は順序の判断と独立に進める。
