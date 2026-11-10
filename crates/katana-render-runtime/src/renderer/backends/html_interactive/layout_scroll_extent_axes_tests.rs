@@ -10,13 +10,13 @@ const PROJECTION_RECTANGLE: [Point; RECT_CORNER_COUNT] =
 
 #[test]
 fn owner_axes_use_finite_edge_fallback_and_reject_invalid_corners() {
-    let fallback = polygon_axes(&FALLBACK_RECTANGLE, (true, false))
-        .map(|axes| axes.map(|axes| (axes.local_x, axes.local_y)));
-    assert_eq!(fallback, Ok(Some((Some((1.0, 0.0)), None))));
+    let fallback =
+        polygon_axes(&FALLBACK_RECTANGLE, (true, false)).map(|axes| (axes.local_x, axes.local_y));
+    assert_eq!(fallback, Ok((Some((1.0, 0.0)), None)));
 
-    let collapsed = polygon_axes(&COLLAPSED_RECTANGLE, (true, false))
-        .map(|axes| axes.map(|axes| (axes.local_x, axes.local_y)));
-    assert_eq!(collapsed, Ok(Some((None, None))));
+    let collapsed =
+        polygon_axes(&COLLAPSED_RECTANGLE, (true, false)).map(|axes| (axes.local_x, axes.local_y));
+    assert_eq!(collapsed, Ok((None, None)));
 
     let mut invalid = FALLBACK_RECTANGLE;
     invalid[2].0 = f64::NAN;

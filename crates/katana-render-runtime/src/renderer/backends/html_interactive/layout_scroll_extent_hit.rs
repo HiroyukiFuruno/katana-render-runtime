@@ -17,9 +17,7 @@ fn clip_point_position(
     point: Point,
 ) -> Result<Option<(Point, Point)>, String> {
     let polygon = clip_polygon(clip)?;
-    let Some(axes) = polygon_axes(&polygon, clip.active_axes)? else {
-        return Ok(None);
-    };
+    let axes = polygon_axes(&polygon, clip.active_axes)?;
     let mut values = [(0.0, 0.0); 2];
     let active = [clip.active_axes.0, clip.active_axes.1];
     for (index, axis) in [axes.local_x, axes.local_y].into_iter().enumerate() {

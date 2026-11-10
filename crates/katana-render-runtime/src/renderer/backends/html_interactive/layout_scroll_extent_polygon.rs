@@ -17,9 +17,7 @@ pub(super) fn clip_owner_polygon(
     if !active_axes.0 && !active_axes.1 {
         return Ok(true);
     }
-    let Some(axes) = owner_axes(owner, active_axes)? else {
-        return Ok(false);
-    };
+    let axes = owner_axes(owner, active_axes)?;
     let clip_polygon = clip_polygon(clip)?;
     clip_active_axis_planes(active_axes, &axes, &clip_polygon, scratch, current_first)
 }
@@ -53,9 +51,7 @@ pub(in super::super) fn clip_viewport_polygon(
         return Err(non_finite_geometry());
     }
     let polygon = clip_polygon(clip)?;
-    let Some(axes) = polygon_axes(&polygon, clip.active_axes)? else {
-        return Ok(Vec::new());
-    };
+    let axes = polygon_axes(&polygon, clip.active_axes)?;
     let mut scratch = PolygonScratch {
         first: viewport.to_vec(),
         second: Vec::new(),

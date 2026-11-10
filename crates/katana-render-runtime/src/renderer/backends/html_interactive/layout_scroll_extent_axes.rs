@@ -5,7 +5,7 @@ use super::{
 pub(super) fn owner_axes(
     owner: &ElementBox,
     active_axes: (bool, bool),
-) -> Result<Option<OwnerAxes>, String> {
+) -> Result<OwnerAxes, String> {
     let corners: [Point; RECT_CORNER_COUNT] = owner
         .transformed_corners
         .map(|(x, y)| (f64::from(x), f64::from(y)));
@@ -15,7 +15,7 @@ pub(super) fn owner_axes(
 pub(super) fn polygon_axes(
     corners: &[Point; RECT_CORNER_COUNT],
     active_axes: (bool, bool),
-) -> Result<Option<OwnerAxes>, String> {
+) -> Result<OwnerAxes, String> {
     if !corners.iter().all(|(x, y)| x.is_finite() && y.is_finite()) {
         return Err(non_finite_geometry());
     }
@@ -26,11 +26,11 @@ pub(super) fn polygon_axes(
     );
     let local_x = active_axis_normal(active_axes.0, local_y_edge, local_x_edge)?;
     let local_y = active_axis_normal(active_axes.1, local_x_edge, local_y_edge)?;
-    Ok(Some(OwnerAxes {
+    Ok(OwnerAxes {
         origin: corners[0],
         local_x,
         local_y,
-    }))
+    })
 }
 
 fn active_axis_normal(
