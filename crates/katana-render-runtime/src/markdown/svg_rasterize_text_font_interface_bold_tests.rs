@@ -82,6 +82,35 @@ fn missing_alias_glyph_requires_non_interface_fallback() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn unreadable_alias_disables_requested_fallback_and_caching() -> Result<(), String> {
+    use resvg::usvg::fontdb::Source;
+
+    let (mut database, base, alias) = test_support::shared_file_alias_fixture()?;
+    let mut face = database
+        .face(alias)
+        .ok_or("interface alias missing")?
+        .clone();
+    let Source::SharedFile(path, _) = &face.source else {
+        return Err("interface fixture is not shared-file backed".into());
+    };
+    face.source = Source::File(path.join("unavailable-font"));
+    database.remove_face(alias);
+    let alias = database.push_face_info(face);
+    assert_eq!(
+        super::super::super::font::bold_alias_id(&database),
+        Some(alias)
+    );
+    assert_eq!(super::probe_font_has_char(&database, alias, 'A'), None);
+    let attributes = super::fallback_attributes(super::INTERFACE_BOLD_WEIGHT, false);
+    let mut probe = |id, glyph| super::probe_font_has_char(&database, id, glyph);
+    assert_eq!(
+        super::requested_preflight(&database, base, 'A', attributes, &mut probe),
+        Err((None, false))
+    );
+    Ok(())
+}
+
 fn assert_real_non_interface_fallback(
     database: &resvg::usvg::fontdb::Database,
     base: resvg::usvg::fontdb::ID,

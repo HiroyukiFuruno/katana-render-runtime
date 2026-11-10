@@ -6,11 +6,23 @@ const MISSING_FAMILY_ERROR: &str =
     "selected family has no uniquely indexed physical font file in fontdb";
 
 #[test]
-fn coretext_candidate_files_match_a_real_fontdb_family() -> Result<(), String> {
-    let (temp, database, selected) = physical_font_fixture()?;
-    let candidates = candidate_files(&database, &selected)?;
+fn coretext_candidate_files_accept_only_supported_paths_for_a_real_family() -> Result<(), String> {
+    let (temp, mut database, selected) = physical_font_fixture()?;
     let expected_path =
         fs::canonicalize(temp.path().join("physical-font.ttf")).map_err(|e| e.to_string())?;
+    let unsupported_path = temp.path().join("physical-font.bin");
+    fs::copy(&expected_path, &unsupported_path).map_err(|error| error.to_string())?;
+    database
+        .load_font_file(&unsupported_path)
+        .map_err(|error| error.to_string())?;
+    assert!(database.faces().any(|face| {
+        matches!(&face.source, resvg::usvg::fontdb::Source::File(path) if path == &unsupported_path)
+            && face
+                .families
+                .iter()
+                .any(|(family, _)| family == &selected.family_name)
+    }));
+    let candidates = candidate_files(&database, &selected)?;
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates.keys().next(), Some(&expected_path));
     Ok(())
