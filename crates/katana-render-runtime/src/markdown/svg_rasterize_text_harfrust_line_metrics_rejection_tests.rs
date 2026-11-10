@@ -1,6 +1,8 @@
+use super::super::super::{FontShape, svg_run_endpoints_with_face, svg_run_x_height_with_face};
 use super::{
-    FONT_BYTES, HHEA_ASCENDER_OFFSET, cached_face_line_metrics, diagnosed_cached_face_line_metrics,
-    font, metrics_from_font, oracle, set_word, static_library_metrics,
+    FONT_BYTES, HHEA_ASCENDER_OFFSET, OS2_FS_SELECTION_OFFSET, cached_face_line_metrics,
+    diagnosed_cached_face_line_metrics, font, metrics_from_font, oracle, set_word,
+    static_library_metrics,
 };
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
 use read_fonts::TableProvider;
@@ -17,6 +19,10 @@ const SFNT_SEARCH_RANGE_OFFSET: usize = SFNT_NUM_TABLES_OFFSET + SFNT_WORD_LENGT
 const SFNT_ENTRY_SELECTOR_OFFSET: usize = SFNT_SEARCH_RANGE_OFFSET + SFNT_WORD_LENGTH;
 const SFNT_RANGE_SHIFT_OFFSET: usize = SFNT_ENTRY_SELECTOR_OFFSET + SFNT_WORD_LENGTH;
 const METRIC_TEST_SIZE: f32 = 15.0;
+const METRIC_TEST_WEIGHT: u16 = 400;
+const OS2_USE_TYPO_METRICS: u16 = 1 << 7;
+const OS2_TYPO_ASCENDER_OFFSET: usize = 68;
+const OS2_TYPO_DESCENDER_OFFSET: usize = 70;
 const OS2_X_HEIGHT_OFFSET: usize = 86;
 const INVALID_X_HEIGHT: i16 = -1;
 const VARIABLE_FONT: &str =
@@ -41,7 +47,6 @@ fn absent_face_returns_no_metrics_for_both_readers() -> TestResult {
 
 #[test]
 fn negative_os2_x_height_is_rejected_for_a_parseable_font() -> TestResult {
-    use super::super::super::{FontShape, svg_run_x_height_with_face};
     let mut bytes = FONT_BYTES.to_vec();
     set_word(
         &mut bytes,
@@ -52,11 +57,9 @@ fn negative_os2_x_height_is_rejected_for_a_parseable_font() -> TestResult {
     let invalid = font(&bytes)?;
     let os2 = invalid.tables().os2().map_err(|error| error.to_string())?;
     assert_eq!(os2.sx_height(), Some(INVALID_X_HEIGHT));
-    let shape = FontShape::new(METRIC_TEST_SIZE, 400, false);
+    let shape = FontShape::new(METRIC_TEST_SIZE, METRIC_TEST_WEIGHT, false);
     for (bytes, usable) in [(FONT_BYTES.to_vec(), true), (bytes, false)] {
-        let mut database = Database::new();
-        database.load_font_data(bytes);
-        let id = database.faces().next().ok_or("font fixture missing")?.id;
+        let (database, id) = loaded_font(bytes)?;
         let actual = svg_run_x_height_with_face(&database, id, shape);
         if usable {
             assert!(actual.flatten().is_some_and(|height| height > 0.0));
@@ -65,6 +68,41 @@ fn negative_os2_x_height_is_rejected_for_a_parseable_font() -> TestResult {
         }
     }
     Ok(())
+}
+
+#[test]
+fn equal_line_endpoints_are_rejected_for_a_parseable_font() -> TestResult {
+    let mut bytes = FONT_BYTES.to_vec();
+    set_word(
+        &mut bytes,
+        b"OS/2",
+        OS2_FS_SELECTION_OFFSET,
+        OS2_USE_TYPO_METRICS,
+    )?;
+    for field in [OS2_TYPO_ASCENDER_OFFSET, OS2_TYPO_DESCENDER_OFFSET] {
+        set_word(&mut bytes, b"OS/2", field, 0)?;
+    }
+    let invalid = font(&bytes)?;
+    let line = invalid
+        .metrics()
+        .h_line()
+        .ok_or("fixture metrics missing")?;
+    assert_eq!(line.ascender.to_f32(), 0.0);
+    assert_eq!(line.descender, line.ascender);
+
+    let shape = FontShape::new(METRIC_TEST_SIZE, METRIC_TEST_WEIGHT, false);
+    let (control, control_id) = loaded_font(FONT_BYTES.to_vec())?;
+    assert!(svg_run_endpoints_with_face(&control, control_id, shape).is_some());
+    let (database, id) = loaded_font(bytes)?;
+    assert_eq!(svg_run_endpoints_with_face(&database, id, shape), None);
+    Ok(())
+}
+
+fn loaded_font(bytes: Vec<u8>) -> Result<(Database, ID), String> {
+    let mut database = Database::new();
+    database.load_font_data(bytes);
+    let id = database.faces().next().ok_or("font fixture missing")?.id;
+    Ok((database, id))
 }
 
 #[test]

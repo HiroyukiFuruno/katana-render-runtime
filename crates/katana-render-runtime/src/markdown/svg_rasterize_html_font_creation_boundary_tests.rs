@@ -54,6 +54,31 @@ fn creation_proof_second_load_rejects_replaced_real_font_generation() -> Result<
     Ok(())
 }
 
+#[test]
+fn creation_proof_rejects_font_removed_between_presence_and_identity_checks() -> Result<(), String>
+{
+    let fixture = Fixture::new()?;
+    let mut proof = CreationProof::default();
+    assert!(!proof.record_missing(&fixture.present));
+    std::fs::remove_file(&fixture.present).map_err(|error| error.to_string())?;
+    assert!(!proof.mark_loaded_identity(&fixture.present));
+    assert!(proof.failed);
+    assert!(proof.absent.is_empty());
+    assert!(proof.loaded_paths.is_empty());
+    std::fs::write(&fixture.present, font::BUNDLED_SANS_SERIF_FONT)
+        .map_err(|error| error.to_string())?;
+    let mut database = Database::new();
+    proof.load(
+        &mut database,
+        &[fixture.present.to_str().ok_or("path not UTF-8")?],
+    );
+    assert!(!database.is_empty());
+    assert!(!proof.current(&database));
+    assert!(proof.transient(&Arc::new(database)).is_none());
+    fixture.cleanup()?;
+    Ok(())
+}
+
 fn binary_source() -> Source {
     Source::Binary(Arc::new(font::BUNDLED_SANS_SERIF_FONT.to_vec()))
 }
