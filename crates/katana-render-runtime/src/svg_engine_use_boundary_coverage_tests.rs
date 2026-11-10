@@ -26,6 +26,26 @@ fn clip_children_accept_referenced_paths_and_reject_invalid_elements(
     Ok(())
 }
 
+#[rstest]
+#[case::missing_target("#missing")]
+#[case::invalid_reference("not-a-fragment")]
+fn invalid_modern_use_href_does_not_fall_back_to_legacy_reference(
+    #[case] modern: &str,
+) -> Result<(), String> {
+    let source = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="200"><defs><rect id="legacy" width="200" height="200" fill="red"/></defs><rect width="200" height="200" fill="blue"/><use xlink:href="#legacy" href="{modern}"/></svg>"##
+    );
+    let legacy_only = source.replace(&format!(" href=\"{modern}\""), "");
+    assert_ne!(source, legacy_only);
+    let actual = usvg::Tree::from_str(&source, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    let control = usvg::Tree::from_str(&legacy_only, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    assert_eq!(render_sample(&actual)?, [0, 0, 255, 255]);
+    assert_eq!(render_sample(&control)?, [255, 0, 0, 255]);
+    Ok(())
+}
+
 fn fixture_path(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join(FIXTURE_ROOT)
