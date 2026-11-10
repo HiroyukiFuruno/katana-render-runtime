@@ -1,5 +1,6 @@
 use super::{HanClass, classify, classify_bounds, quote_is_fullwidth};
 use icu_properties::{CodePointMapData, props::GeneralCategory};
+use rustybuzz::ttf_parser::{RawFace, Tag};
 use skrifa::{FontRef, MetadataProvider, instance::LocationRef, prelude::Size};
 
 const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
@@ -183,6 +184,55 @@ fn quote_pair_rejects_missing_glyph_and_mismatched_roles() -> Result<(), String>
             );
         }
     }
+    assert_invalid_font_tables()
+}
+
+fn assert_invalid_font_tables() -> Result<(), String> {
+    for (tag, has_advance) in [
+        (Tag::from_bytes(b"maxp"), false),
+        (Tag::from_bytes(b"glyf"), true),
+    ] {
+        let font_bytes = font_with_empty_table(tag)?;
+        assert_unusable_punctuation_metrics(&font_bytes, has_advance)?;
+    }
+    Ok(())
+}
+
+fn font_with_empty_table(tag: Tag) -> Result<Vec<u8>, String> {
+    const SFNT_HEADER_BYTES: usize = 12;
+    const TABLE_RECORD_BYTES: usize = 16;
+    const TABLE_LENGTH_OFFSET: usize = 12;
+
+    let face = RawFace::parse(FONT_BYTES, 0).map_err(|error| format!("{error:?}"))?;
+    let index = face
+        .table_records
+        .into_iter()
+        .position(|table| table.tag == tag)
+        .ok_or("fixture table missing")?;
+    let length_offset = SFNT_HEADER_BYTES + index * TABLE_RECORD_BYTES + TABLE_LENGTH_OFFSET;
+    let mut data = FONT_BYTES.to_vec();
+    data[length_offset..length_offset + size_of::<u32>()].copy_from_slice(&0u32.to_be_bytes());
+    Ok(data)
+}
+
+fn assert_unusable_punctuation_metrics(data: &[u8], has_advance: bool) -> Result<(), String> {
+    let font = FontRef::from_index(data, 0).map_err(|error| error.to_string())?;
+    let metrics = font.glyph_metrics(Size::unscaled(), LocationRef::default());
+    let glyph = font
+        .charmap()
+        .map('(')
+        .ok_or("bracket cmap entry missing")?;
+    assert_eq!(metrics.advance_width(glyph).is_some(), has_advance);
+    if has_advance {
+        assert!(metrics.bounds(glyph).is_none());
+    }
+    assert_eq!(classify('(', &font, &metrics, false), HanClass::Other);
+    assert!(!super::quote_pair(
+        &font,
+        &metrics,
+        ['(', '('],
+        HanClass::Open
+    ));
     Ok(())
 }
 
