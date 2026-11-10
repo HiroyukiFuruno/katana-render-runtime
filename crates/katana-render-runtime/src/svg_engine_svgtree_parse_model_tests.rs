@@ -91,6 +91,15 @@ fn css_cascade_inline_style_first_child_and_unsupported_pseudo_are_distinguished
 }
 
 #[test]
+fn quoted_semicolon_in_font_family_does_not_split_inline_declarations() -> Result<(), String> {
+    let source = r#"<svg xmlns="http://www.w3.org/2000/svg"><text id="t" style="font-family:'A;B'; fill:red"/></svg>"#;
+    let document = parse_document(source, None)?;
+    assert_eq!(raw_attribute(&document, "t", AId::FontFamily)?, "'A;B'");
+    assert_eq!(raw_attribute(&document, "t", AId::Fill)?, "red");
+    Ok(())
+}
+
+#[test]
 fn explicit_inherit_resolves_ancestor_direct_parent_and_attribute_defaults() -> Result<(), String> {
     let source = r#"<svg xmlns="http://www.w3.org/2000/svg">
       <g opacity="0.25" fill="red"><g><rect id="descendant" fill="inherit" opacity="inherit" stroke="inherit"/></g>
@@ -228,6 +237,21 @@ fn recursive_feimage_filter_link_is_neutralized() -> Result<(), String> {
         AId::Filter,
         "none",
     )?;
+    Ok(())
+}
+
+#[test]
+fn recursive_feimage_in_filter_list_does_not_change_unrelated_filter() -> Result<(), String> {
+    let source = r##"<svg xmlns="http://www.w3.org/2000/svg"><defs>
+      <filter id="other"/><filter id="f"><feImage href="#target"/></filter>
+      </defs><g><rect id="target" filter="url(#other) url(#f)"/></g>
+      <rect id="unrelated" filter="url(#other)"/></svg>"##;
+    let document = parse_document(source, None)?;
+    assert_eq!(raw_attribute(&document, "target", AId::Filter)?, "none");
+    assert_eq!(
+        raw_attribute(&document, "unrelated", AId::Filter)?,
+        "url(#other)"
+    );
     Ok(())
 }
 
