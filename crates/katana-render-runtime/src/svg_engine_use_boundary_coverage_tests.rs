@@ -59,6 +59,26 @@ fn empty_clip_on_symbol_use_does_not_hide_visible_sibling() -> Result<(), String
     Ok(())
 }
 
+#[rstest]
+#[case::percentage("50%", "75%")]
+#[case::physical_inches("1in", "2in")]
+fn symbol_use_width_resolves_units_before_clipping(
+    #[case] narrow: &str,
+    #[case] wide: &str,
+) -> Result<(), String> {
+    let source = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><defs><symbol id="shape" viewBox="0 0 10 10" preserveAspectRatio="none"><rect width="10" height="10" fill="red"/></symbol></defs><rect width="200" height="200" fill="blue"/><use href="#shape" width="{narrow}" height="100"/></svg>"##
+    );
+    let control = source.replace(&format!("width=\"{narrow}\""), &format!("width=\"{wide}\""));
+    let actual = usvg::Tree::from_str(&source, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    let control = usvg::Tree::from_str(&control, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    assert_eq!(render_sample(&actual)?, [0, 0, 255, 255]);
+    assert_eq!(render_sample(&control)?, [255, 0, 0, 255]);
+    Ok(())
+}
+
 fn fixture_path(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join(FIXTURE_ROOT)
