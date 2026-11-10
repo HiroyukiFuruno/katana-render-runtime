@@ -1,4 +1,4 @@
-use super::{HtmlGlyphRasterizer, Prepared, PreparedSpan, RGBA_CHANNELS, paint, surface};
+use super::{HtmlGlyphRasterizer, Prepared, PreparedSpan, RGBA_CHANNELS, paint};
 use resvg::usvg::{Node, Options, Tree, fontdb::Weight};
 use skia_safe::{AlphaType, BlendMode, ColorType, Data, ImageInfo, Paint};
 use tiny_skia::{Pixmap, Transform};
@@ -56,7 +56,14 @@ fn compare_compositing(fixture: &Fixture) -> Result<(), String> {
     let mut transparent = backdrop([0; RGBA_CHANNELS])?;
     draw_on(&rasterizer, &prepared, &mut transparent)?;
     let mut tiny = backdrop(fixture.backdrop)?;
-    surface::composite_rgba(&mut tiny.as_mut(), transparent.data(), full_crop())?;
+    tiny.draw_pixmap(
+        0,
+        0,
+        transparent.as_ref(),
+        &tiny_skia::PixmapPaint::default(),
+        Transform::identity(),
+        None,
+    );
     let image = skia_image_composite(&transparent, fixture.backdrop)?;
     let mut current = backdrop(fixture.backdrop)?;
     rasterizer.render_prepared(prepared, text, Transform::identity(), &mut current.as_mut())?;
@@ -108,15 +115,6 @@ fn image_info() -> ImageInfo {
         AlphaType::Premul,
         None,
     )
-}
-
-fn full_crop() -> surface::Crop {
-    surface::Crop {
-        x: 0,
-        y: 0,
-        width: WIDTH,
-        height: HEIGHT,
-    }
 }
 
 fn draw_on(

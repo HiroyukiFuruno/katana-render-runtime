@@ -1,8 +1,6 @@
 pub(super) use super::paint::draw_span;
 use resvg::usvg;
 use skia_safe::Matrix;
-#[cfg(test)]
-use tiny_skia::PixmapMut;
 use tiny_skia::{IntRect, Point, Transform};
 
 const BBOX_CORNER_COUNT: usize = 4;
@@ -122,26 +120,6 @@ pub(super) fn skia_matrix(transform: Transform, x: f32, y: f32) -> Matrix {
         0.0,
         1.0,
     )
-}
-
-#[cfg(test)]
-pub(super) fn composite_rgba(
-    pixmap: &mut PixmapMut<'_>,
-    pixels: &[u8],
-    crop: Crop,
-) -> Result<(), String> {
-    let Some(source) = tiny_skia::PixmapRef::from_bytes(pixels, crop.width, crop.height) else {
-        return Err("tiny-skia text surface import failed".to_string());
-    };
-    pixmap.draw_pixmap(
-        crop.x,
-        crop.y,
-        source,
-        &tiny_skia::PixmapPaint::default(),
-        tiny_skia::Transform::identity(),
-        None,
-    );
-    Ok(())
 }
 
 #[cfg(test)]
