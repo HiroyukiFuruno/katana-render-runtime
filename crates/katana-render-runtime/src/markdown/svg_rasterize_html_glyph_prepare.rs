@@ -115,9 +115,7 @@ impl HtmlGlyphRasterizer<'_> {
             return Ok(None);
         };
         let glyphs = &span.positioned_glyphs[run.start..run.end];
-        if !run.font_size.is_finite() || run.font_size <= 0.0 {
-            return Err("SVG text span has invalid font size".to_string());
-        }
+        /* WHY: usvgの字形サイズはNonZeroPositiveF32の元spanからそのまま渡る。 */
         let Some(glyph_ids) = glyph_ids(glyphs) else {
             return Ok(None);
         };
