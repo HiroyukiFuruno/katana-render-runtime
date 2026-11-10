@@ -1040,14 +1040,7 @@ fn convert_lighting_color(node: SvgNode) -> Color {
 
 #[inline(never)]
 fn convert_light_source(parent: SvgNode) -> Option<LightSource> {
-    let child = parent.children().find(|n| {
-        matches!(
-            n.tag_name(),
-            Some(EId::FeDistantLight) | Some(EId::FePointLight) | Some(EId::FeSpotLight)
-        )
-    })?;
-
-    match child.tag_name() {
+    parent.children().find_map(|child| match child.tag_name() {
         Some(EId::FeDistantLight) => Some(LightSource::DistantLight(DistantLight {
             azimuth: child.attribute(AId::Azimuth).unwrap_or(0.0),
             elevation: child.attribute(AId::Elevation).unwrap_or(0.0),
@@ -1059,7 +1052,7 @@ fn convert_light_source(parent: SvgNode) -> Option<LightSource> {
         })),
         Some(EId::FeSpotLight) => Some(convert_spot_light(child)),
         _ => None,
-    }
+    })
 }
 
 fn convert_spot_light(child: SvgNode) -> LightSource {

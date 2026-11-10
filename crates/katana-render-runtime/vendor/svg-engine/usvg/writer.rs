@@ -1764,20 +1764,18 @@ fn font_family_to_string(font_family: &FontFamily, opt: &WriteOptions) -> String
 }
 
 fn write_span_stretch(span: &TextSpan, xml: &mut XmlWriter) {
-    if span.font.stretch != FontStretch::Normal {
-        let name = match span.font.stretch {
-            FontStretch::Condensed => "condensed",
-            FontStretch::ExtraCondensed => "extra-condensed",
-            FontStretch::UltraCondensed => "ultra-condensed",
-            FontStretch::SemiCondensed => "semi-condensed",
-            FontStretch::Expanded => "expanded",
-            FontStretch::SemiExpanded => "semi-expanded",
-            FontStretch::ExtraExpanded => "extra-expanded",
-            FontStretch::UltraExpanded => "ultra-expanded",
-            FontStretch::Normal => unreachable!(),
-        };
-        xml.write_svg_attribute(AId::FontStretch, name);
-    }
+    let name = match span.font.stretch {
+        FontStretch::Condensed => "condensed",
+        FontStretch::ExtraCondensed => "extra-condensed",
+        FontStretch::UltraCondensed => "ultra-condensed",
+        FontStretch::SemiCondensed => "semi-condensed",
+        FontStretch::Expanded => "expanded",
+        FontStretch::SemiExpanded => "semi-expanded",
+        FontStretch::ExtraExpanded => "extra-expanded",
+        FontStretch::UltraExpanded => "ultra-expanded",
+        FontStretch::Normal => return,
+    };
+    xml.write_svg_attribute(AId::FontStretch, name);
 }
 
 fn write_span_layout(span: &TextSpan, xml: &mut XmlWriter) {
@@ -1818,43 +1816,39 @@ fn write_span_spacing(span: &TextSpan, xml: &mut XmlWriter) {
 }
 
 fn write_dominant_baseline(span: &TextSpan, xml: &mut XmlWriter) {
-    if span.dominant_baseline != DominantBaseline::Auto {
-        let name = match span.dominant_baseline {
-            DominantBaseline::UseScript => "use-script",
-            DominantBaseline::NoChange => "no-change",
-            DominantBaseline::ResetSize => "reset-size",
-            DominantBaseline::TextBeforeEdge => "text-before-edge",
-            DominantBaseline::Middle => "middle",
-            DominantBaseline::Central => "central",
-            DominantBaseline::TextAfterEdge => "text-after-edge",
-            DominantBaseline::Ideographic => "ideographic",
-            DominantBaseline::Alphabetic => "alphabetic",
-            DominantBaseline::Hanging => "hanging",
-            DominantBaseline::Mathematical => "mathematical",
-            DominantBaseline::Auto => unreachable!(),
-        };
-        xml.write_svg_attribute(AId::DominantBaseline, name);
-    }
+    let name = match span.dominant_baseline {
+        DominantBaseline::UseScript => "use-script",
+        DominantBaseline::NoChange => "no-change",
+        DominantBaseline::ResetSize => "reset-size",
+        DominantBaseline::TextBeforeEdge => "text-before-edge",
+        DominantBaseline::Middle => "middle",
+        DominantBaseline::Central => "central",
+        DominantBaseline::TextAfterEdge => "text-after-edge",
+        DominantBaseline::Ideographic => "ideographic",
+        DominantBaseline::Alphabetic => "alphabetic",
+        DominantBaseline::Hanging => "hanging",
+        DominantBaseline::Mathematical => "mathematical",
+        DominantBaseline::Auto => return,
+    };
+    xml.write_svg_attribute(AId::DominantBaseline, name);
 }
 
 fn write_alignment_baseline(span: &TextSpan, xml: &mut XmlWriter) {
-    if span.alignment_baseline != AlignmentBaseline::Auto {
-        let name = match span.alignment_baseline {
-            AlignmentBaseline::Baseline => "baseline",
-            AlignmentBaseline::BeforeEdge => "before-edge",
-            AlignmentBaseline::TextBeforeEdge => "text-before-edge",
-            AlignmentBaseline::Middle => "middle",
-            AlignmentBaseline::Central => "central",
-            AlignmentBaseline::AfterEdge => "after-edge",
-            AlignmentBaseline::TextAfterEdge => "text-after-edge",
-            AlignmentBaseline::Ideographic => "ideographic",
-            AlignmentBaseline::Alphabetic => "alphabetic",
-            AlignmentBaseline::Hanging => "hanging",
-            AlignmentBaseline::Mathematical => "mathematical",
-            AlignmentBaseline::Auto => unreachable!(),
-        };
-        xml.write_svg_attribute(AId::AlignmentBaseline, name);
-    }
+    let name = match span.alignment_baseline {
+        AlignmentBaseline::Baseline => "baseline",
+        AlignmentBaseline::BeforeEdge => "before-edge",
+        AlignmentBaseline::TextBeforeEdge => "text-before-edge",
+        AlignmentBaseline::Middle => "middle",
+        AlignmentBaseline::Central => "central",
+        AlignmentBaseline::AfterEdge => "after-edge",
+        AlignmentBaseline::TextAfterEdge => "text-after-edge",
+        AlignmentBaseline::Ideographic => "ideographic",
+        AlignmentBaseline::Alphabetic => "alphabetic",
+        AlignmentBaseline::Hanging => "hanging",
+        AlignmentBaseline::Mathematical => "mathematical",
+        AlignmentBaseline::Auto => return,
+    };
+    xml.write_svg_attribute(AId::AlignmentBaseline, name);
 }
 
 #[cfg(test)]
