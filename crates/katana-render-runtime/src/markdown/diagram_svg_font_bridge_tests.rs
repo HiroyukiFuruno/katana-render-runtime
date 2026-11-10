@@ -225,6 +225,23 @@ fn real_v8_x_height_bridge_returns_bundled_font_metric() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn real_v8_x_height_bridge_leaves_metric_undefined_for_symbol_font() -> Result<(), String> {
+    let script = r#"(() => {
+        const value = globalThis.__katanaMeasureSvgFontXHeight('Zapf Dingbats', 16, 400, false);
+        return value === undefined;
+    })()"#;
+    let observed = DiagramV8Runtime::render(&[
+        crate::markdown::diagram_js_runtime::DiagramRuntimeScript::borrowed(
+            "bridge-optional-symbol-x-height",
+            script,
+        ),
+    ])?;
+    assert_eq!(observed, "true");
+    Ok(())
+}
+
 #[test]
 fn real_v8_x_height_bridge_rejects_missing_family_measurements() -> Result<(), String> {
     let observed = DiagramV8Runtime::render(&[
