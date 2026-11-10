@@ -167,6 +167,12 @@ fn tref_without_a_reference_preserves_adjacent_text() -> Result<(), String> {
 }
 
 #[test]
+fn tref_rejects_non_svg_namespace_target_and_keeps_adjacent_text() -> Result<(), String> {
+    let input = "<svg xmlns='http://www.w3.org/2000/svg' xmlns:other='urn:other' width='100' height='50'><defs><other:text id='source'>X</other:text></defs><text id='target' font-family='Yellowtail'>A<tref href='#source'/>B</text></svg>";
+    assert_target_text(input, "AB")
+}
+
+#[test]
 fn default_whitespace_trims_both_edges_across_three_text_spans() -> Result<(), String> {
     let input = "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='50'><text id='target' font-family='Yellowtail'> A<tspan>B</tspan><tspan>C </tspan></text></svg>";
     assert_target_text(input, "ABC")

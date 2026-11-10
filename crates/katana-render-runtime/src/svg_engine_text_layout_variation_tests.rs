@@ -40,3 +40,48 @@ fn font_variations_preserve_explicit_axes(
     );
     Ok(())
 }
+
+#[test]
+fn explicit_four_variation_axes_override_standard_style_axes() -> Result<(), String> {
+    let tree = parse(
+        "font-style='oblique' font-variation-settings=\"'wght' 650, 'wdth' 80, 'ital' 1, 'slnt' -8\"",
+        "H",
+    )?;
+    let span = text(&tree)?
+        .chunks()
+        .first()
+        .and_then(|chunk| chunk.spans().first())
+        .ok_or("span missing")?;
+    let axes = span.font().variations();
+    for (tag, value) in [
+        (b"wght", 650.0),
+        (b"wdth", 80.0),
+        (b"ital", 1.0),
+        (b"slnt", -8.0),
+    ] {
+        let matching: Vec<_> = axes.iter().filter(|axis| &axis.tag == tag).collect();
+        assert_eq!(matching.len(), 1);
+        assert_eq!(matching[0].value, value);
+    }
+    Ok(())
+}
+
+#[test]
+fn invalid_baseline_shift_is_baseline_while_percentage_uses_font_size() -> Result<(), String> {
+    let tree = parse(
+        "",
+        "<tspan baseline-shift='invalid'>A</tspan><tspan baseline-shift='25%'>B</tspan>",
+    )?;
+    let spans = text(&tree)?
+        .chunks()
+        .first()
+        .ok_or("chunk missing")?
+        .spans();
+    assert_eq!(spans.len(), 2);
+    assert!(spans[0].baseline_shift().is_empty());
+    assert_eq!(
+        spans[1].baseline_shift(),
+        &[super::usvg::BaselineShift::Number(5.0)]
+    );
+    Ok(())
+}

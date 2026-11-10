@@ -37,6 +37,16 @@ fn svg_css_shadow_keeps_mermaid_style_declarations_while_rewriting_filter() {
 }
 
 #[test]
+fn malformed_inline_declaration_preserves_the_entire_shadow_style() {
+    let style = "filter: drop-shadow(1px 2px 2px rgba(185,185,185,0.7))";
+    let valid = shadow_svg(style, "");
+    let invalid = shadow_svg(&format!("{style}; broken"), "");
+
+    assert!(normalize_filter_shadow_colors(valid).contains("#B9B9B9B3"));
+    assert_eq!(normalize_filter_shadow_colors(&invalid), invalid);
+}
+
+#[test]
 fn svg_css_shadow_rgba_hex_and_presentation_pixels_match() -> Result<(), String> {
     let rgba = shadow_image("filter: drop-shadow(1px 2px 2px rgba(185,185,185,0.7))")?;
     let hex = shadow_image("filter: drop-shadow(1px 2px 2px #B9B9B9B3)")?;
