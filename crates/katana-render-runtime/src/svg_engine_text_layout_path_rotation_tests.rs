@@ -1,3 +1,4 @@
+use super::path_support::path_text_with_content;
 use super::{near, path_support::path_text, text, usvg};
 
 #[test]
@@ -29,4 +30,35 @@ fn rotation_is_applied_to_a_glyph_following_a_horizontal_path() -> Result<(), St
     near(actual.kx, -initial.sy);
     near(actual.sy, initial.kx);
     Ok(())
+}
+
+#[test]
+fn path_text_preserves_surviving_glyph_positions_when_a_span_font_is_missing() -> Result<(), String>
+{
+    let available = path_text_with_content(0, "ABC")?;
+    let missing = path_text_with_content(
+        0,
+        "A<tspan font-family='UnavailableFixtureFamily'>B</tspan>C",
+    )?;
+    let expected: Vec<_> = path_glyphs(text(&available)?)
+        .filter(|(value, _, _)| *value != "B")
+        .collect();
+    assert_eq!(
+        expected
+            .iter()
+            .map(|(value, _, _)| *value)
+            .collect::<Vec<_>>(),
+        ["A", "C"]
+    );
+    assert_eq!(path_glyphs(text(&missing)?).collect::<Vec<_>>(), expected);
+    Ok(())
+}
+
+fn path_glyphs(
+    text: &usvg::Text,
+) -> impl Iterator<Item = (&str, usvg::GlyphId, tiny_skia::Transform)> {
+    text.layouted()
+        .iter()
+        .flat_map(|span| &span.positioned_glyphs)
+        .map(|glyph| (glyph.text.as_str(), glyph.id, glyph.transform()))
 }
