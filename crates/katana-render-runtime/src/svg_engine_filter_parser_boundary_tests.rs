@@ -155,6 +155,21 @@ fn stitched_turbulence_seed_boundaries_preserve_rendered_pixels(
     Ok(())
 }
 
+#[test]
+fn stitched_turbulence_rounds_fractional_frequency_to_one_tile_cycle() -> Result<(), String> {
+    let render_frequency = |frequency: &str| {
+        super::fixture(&format!(
+            "<feTurbulence type='fractalNoise' baseFrequency='{frequency} 0' numOctaves='2' seed='17' stitchTiles='stitch'/>"
+        ))
+        .and_then(|tree| super::render(&tree))
+    };
+    let fractional = render_frequency("0.05")?;
+    let one_cycle = render_frequency("0.0625")?;
+    assert!(one_cycle.pixels().iter().any(|pixel| pixel.alpha() > 0));
+    assert_eq!(fractional.data(), one_cycle.data());
+    Ok(())
+}
+
 fn parse_filter(primitive: &str) -> Result<usvg::Tree, String> {
     let source = format!(
         "<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'><defs><filter id='f' {FILTER_REGION}>{primitive}</filter></defs><rect x='2' y='2' width='8' height='8' filter='url(#f)'/></svg>"

@@ -31,6 +31,20 @@ fn select_reads_the_first_nested_optgroup_option() -> Result<(), String> {
 }
 
 #[test]
+fn select_skips_comments_and_text_when_resolving_grouped_options() -> Result<(), String> {
+    let mut document = HtmlDocument::parse(
+        "<select id=choice><!--before-->\n<optgroup label=group><!--inside-->\n<option value=first>First</option><!--between--><option value=second>Second</option></optgroup></select>",
+    );
+    let select = document
+        .get_element_by_id("choice")
+        .ok_or("select must exist")?;
+    assert_eq!(document.form_value(select)?.as_deref(), Some("first"));
+    document.set_select_value(select, "second")?;
+    assert_eq!(document.form_value(select)?.as_deref(), Some("second"));
+    Ok(())
+}
+
+#[test]
 fn missing_override_and_document_form_helpers_keep_non_element_boundaries() {
     let mut document = HtmlDocument::parse("<select><option>label</option></select>");
     document.clear_select_value_override_for(MISSING_NODE_ID);
