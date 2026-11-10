@@ -31,6 +31,30 @@ fn real_svg_bridge_distinguishes_true_zero_from_positive_f64_underflow() -> Resu
 }
 
 #[test]
+fn finite_size_above_shaping_range_is_rejected_by_both_svg_font_callbacks() -> Result<(), String> {
+    let script = r#"(() => {
+        const measure = globalThis.__katanaMeasureSvgTextMetrics;
+        const xHeight = globalThis.__katanaMeasureSvgFontXHeight;
+        const size = 1e8;
+        const checks = [
+            [() => measure('DB', 'Noto Sans', size, 400, false), 'SVG font metric measurement failed'],
+            [() => xHeight('Noto Sans', size, 400, false), 'SVG font x-height measurement failed'],
+        ];
+        return Number.isFinite(Math.fround(size)) && checks.every(([call, expected]) => {
+            try { call(); }
+            catch (error) { return error instanceof Error && error.message === expected; }
+            return false;
+        });
+    })()"#;
+    let result = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
+        "bridge-svg-shaping-scale-range",
+        script,
+    )])?;
+    assert_eq!(result, "true");
+    Ok(())
+}
+
+#[test]
 fn finite_javascript_size_outside_f32_request_range_returns_undefined() -> Result<(), String> {
     let script = r#"(() => {
         const measure = globalThis.__katanaMeasureText;
