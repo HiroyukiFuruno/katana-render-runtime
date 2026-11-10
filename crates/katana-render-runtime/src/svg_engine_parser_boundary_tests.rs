@@ -154,11 +154,11 @@ fn shape_conversion_normalizes_radii_and_skips_invalid_geometry() -> Result<(), 
 }
 
 #[test]
-fn recursive_use_is_skipped_without_affecting_following_rendered_content() -> Result<(), String> {
+fn recursive_use_references_leave_the_visible_sibling_unchanged() -> Result<(), String> {
     let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8">
-      <use id="recursive" href="#recursive" fill="#ff0000"/>
-      <rect width="8" height="8" fill="#00ff00"/></svg>"##;
-
+      <defs><g id="group"><rect width="8" height="8" fill="#ff0000"/><use href="#group"/></g></defs>
+      <use id="recursive" href="#recursive"/>
+      <rect width="8" height="8" fill="#00ff00"/><use href="#group"/></svg>"##;
     assert_eq!(center_pixel(source, &[])?, [0, 255, 0, 255]);
     Ok(())
 }

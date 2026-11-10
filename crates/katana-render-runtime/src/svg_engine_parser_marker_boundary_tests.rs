@@ -80,3 +80,18 @@ fn marker_with_unrepresentable_clip_leaves_the_stroked_path_visible() -> Result<
     assert_eq!(actual.data(), unmarked.data());
     Ok(())
 }
+
+#[test]
+fn default_marker_overflow_clips_to_marker_viewport() -> Result<(), String> {
+    let visible = source("M10 20 L30 20", "marker-start='url(#m)'")
+        .replace("markerWidth='10'", "markerWidth='3'");
+    let clipped = visible.replace(" overflow='visible'", "");
+    assert_eq!(marker_path_count(parse(&clipped)?.root()), 1);
+    let clipped_image = render_source(&clipped)?;
+    let visible_image = render_source(&visible)?;
+    assert_red(&clipped_image, 11, 20)?;
+    assert_red(&visible_image, 15, 20)?;
+    let clipped_pixel = clipped_image.pixel(15, 20).ok_or("sample missing")?;
+    assert!(clipped_pixel.red() <= clipped_pixel.green());
+    Ok(())
+}
