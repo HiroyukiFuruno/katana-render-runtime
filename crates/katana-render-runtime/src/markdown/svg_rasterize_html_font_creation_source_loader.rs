@@ -8,6 +8,10 @@ use std::{path::Path, sync::Arc};
 mod mapping;
 use mapping::shared_source;
 
+#[cfg(test)]
+#[path = "svg_rasterize_html_font_creation_source_loader_tests.rs"]
+mod tests;
+
 type Sharing<'a> = (&'a mut SharedSources, &'a mut usize);
 type LoadedShared = (SharedBytes, usize, Vec<ID>, bool);
 
