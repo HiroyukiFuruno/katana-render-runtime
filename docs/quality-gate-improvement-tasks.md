@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-10、以下の過去結果と区別する）
 
+- [x] `7ee966e7` で、実フォントを使う8件の計測キャッシュが満杯のとき、製品の `for_measured_text` でも9件目を登録しないことを検証。foundation・AST・限定1件は実0。`svg_rasterize_text_measurement_token.rs:113` は正式元データ0回、限定LLVMで1回。ソースとbinaryは実行前後で一致、一時profile回収済み（`tmp/quality/resumed-owner-r3509/coverage-measured-font-cap-exact-8o95k60j/safe-summary.json`）。製品コードと正式root結果は変更なし。
+
 - [x] `ce1cde36` で、静的SVGの `:hover` と `:focus` が通常の角丸指定を上書きしないことを検証。foundation・AST・限定1件は実0。`svg_rasterize_preprocess_geometry_support.rs:89` は正式元データ0回、限定LLVMで8回。ソースとbinaryは実行前後で一致、一時profile回収済み（`tmp/quality/resumed-owner-r3509/coverage-svg-static-pseudo-geometry-exact-3xq61dda/safe-summary.json`）。製品コードと正式root結果は変更なし。
 
 - [x] `19aae4e5` で実HTMLのチェックボックスを押して離し、DEBUG診断が座標・押下ノードID・hitを保持することを確認。既存 `tracing` だけを使い、受信はテストのスレッド内に限定。foundation・AST・限定1件実0。`input_dispatch.rs:74` は正式元データ0回から限定LLVMで1回。ソース・binary前後一致、一時profile・export回収済み（`tmp/quality/resumed-owner-r3509/coverage-html-pointer-tracing-exact-_f81w4st/safe-summary.json`）。製品コードと正式root結果は変更なし。
