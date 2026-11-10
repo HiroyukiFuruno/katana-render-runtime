@@ -158,6 +158,37 @@ fn interface_bold_registration_rejects_ambiguous_physical_identity() -> Result<(
 
 #[cfg(target_os = "macos")]
 #[test]
+fn interface_bold_rejects_an_in_memory_copy_claiming_the_native_alias() -> Result<(), String> {
+    use resvg::usvg::fontdb::{Database, Language, Source};
+    use std::sync::Arc;
+
+    let mut database = Database::new();
+    super::load_font_paths(&mut database, super::SYSTEM_CJK_FONT_PATHS);
+    let mut face = database
+        .faces()
+        .find(|face| face.post_script_name == ".HiraKakuInterface-W6")
+        .ok_or("native interface bold face missing")?
+        .clone();
+    let native_id = face.id;
+    let bytes = database
+        .with_face_data(native_id, |data, _| data.to_vec())
+        .ok_or("native interface bold font data unavailable")?;
+    face.source = Source::Binary(Arc::new(bytes));
+    face.families.push((
+        INTERNAL_INTERFACE_BOLD_FAMILY.into(),
+        Language::English_UnitedStates,
+    ));
+    let copy_id = database.push_face_info(face);
+
+    assert!(bold_alias_id(&database).is_none());
+    assert!(register_interface_bold(&mut database).is_none());
+    assert!(database.face(native_id).is_some());
+    assert!(database.face(copy_id).is_some());
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn interface_bold_registration_rejects_database_without_native_face() {
     let mut database = resvg::usvg::fontdb::Database::new();
     database.load_font_data(super::super::super::BUNDLED_SANS_SERIF_FONT.to_vec());

@@ -130,3 +130,49 @@ fn partial_fallback_preserves_unmatched_primary_cluster() -> TestResult<()> {
     assert_eq!(missing.font.id, primary_id);
     Ok(())
 }
+
+#[test]
+fn partial_indic_fallback_preserves_an_existing_latin_glyph_and_missing_character() -> TestResult<()>
+{
+    crate::svg_engine::init_test_logger();
+    /* WHY: 最初の文字がシェーピングの用字系を決めるため、Indic合字を先に置く。 */
+    let text = "\u{0915}\u{094d}\u{0937}A\u{10fffd}";
+    let (primary, primary_id) = verify_partial_indic_shaping(text)?;
+    let primary_latin = primary
+        .iter()
+        .find(|glyph| glyph.text == "A")
+        .ok_or("primary A missing")?;
+    assert_ne!(primary_latin.id.0, 0);
+    let (actual, _, _) = shape(text)?;
+    let actual_latin = actual
+        .iter()
+        .find(|glyph| glyph.text == "A")
+        .ok_or("actual A missing")?;
+    assert_eq!(actual_latin.id, primary_latin.id);
+    assert_eq!(actual_latin.font.id, primary_id);
+    assert!(
+        actual
+            .iter()
+            .any(|glyph| glyph.text.contains(MISSING_CHARACTER) && glyph.id.0 == 0)
+    );
+    Ok(())
+}
+
+fn verify_partial_indic_shaping(
+    text: &str,
+) -> TestResult<(Vec<usvg::layout::Glyph>, usvg::fontdb::ID)> {
+    let (database, primary_id, fallback_id) = fallback_font_database();
+    let no_fallback = usvg::FontResolver {
+        select_fallback: Box::new(|_, _, _| None),
+        ..usvg::FontResolver::default()
+    };
+    let primary = shape_with_font(text, database.clone(), primary_id, &no_fallback)?;
+    let fallback = shape_with_font(text, database, fallback_id, &no_fallback)?;
+    assert_ne!(
+        primary.len(),
+        fallback.len(),
+        "fixture must shape differently"
+    );
+    assert!(fallback.iter().any(|glyph| glyph.id.0 == 0));
+    Ok((primary, primary_id))
+}
