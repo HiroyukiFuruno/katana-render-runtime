@@ -32,3 +32,6 @@ fn write_fresh_response(
         .write_all(&response_bytes)
         .map_err(|error| format!("write response: {error}"))
 }
+
+#[path = "cli_response_contract_tests.rs"]
+mod response_contract_tests;
