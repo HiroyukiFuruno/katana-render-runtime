@@ -32,6 +32,11 @@ const SCRIPT_STATEMENT_MUTATIONS: &[(&str, &str, &str)] = &[
 
 const SCRIPT_INCLUDE_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "include_str!(\"../diagram_runtime/generated/mermaid-runtime.min.js\")",
+        "concat!(\"../diagram_runtime/generated/mermaid-runtime.min.js\")",
+        "mermaid-scripts:include",
+    ),
+    (
         "const MERMAID_RUNTIME: &str = include_str!(\"../diagram_runtime/generated/mermaid-runtime.min.js\");",
         "const MERMAID_RUNTIME: &str = include_str!(\"../diagram_runtime/generated/mermaid-runtime.min.js\");\nconst MERMAID_RUNTIME: &str = include_str!(\"../diagram_runtime/generated/mermaid-runtime.min.js\");",
         "mermaid-scripts:include-count",
