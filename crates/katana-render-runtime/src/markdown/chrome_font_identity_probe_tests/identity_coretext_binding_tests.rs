@@ -1,10 +1,17 @@
 use super::super::super::test_support::{TempDirectory, physical_font_fixture};
 use super::super::PhysicalFace;
+use super::{SelectedFont, resolve_font};
 use core_foundation::{base::CFType, dictionary::CFDictionary, string::CFString};
 use core_text::font_descriptor::new_from_attributes;
-use std::fs;
+use resvg::usvg::fontdb::Database;
+use std::{fs, path::Path};
 
 const FONT_BYTES: &[u8] = include_bytes!("../../../assets/fonts/NotoSans-Regular.ttf");
+const VARIABLE_FONT_BYTES: &[u8] = include_bytes!(
+    "../../../../../tests/fixtures/svg-engine/upstream/resvg/tests/fonts/RobotoFlex.subset.ttf"
+);
+const WEIGHT_AXIS: u32 = u32::from_be_bytes(*b"wght");
+const BOLD_WEIGHT: f64 = 700.0;
 const PATH_MISMATCH_ERROR: &str = "exact CoreText descriptor URL differs from its query file";
 const IDENTITY_MISMATCH_ERROR: &str =
     "physical candidate changed before CoreText descriptor lookup";
@@ -123,4 +130,66 @@ fn coretext_lookup_skips_descriptors_with_a_different_name() -> Result<(), Strin
     let matches = super::resolve_file(&path, identity, "krr-unmatched-postscript-name")?;
     assert!(matches.is_empty());
     Ok(())
+}
+
+#[test]
+fn coretext_rejects_the_same_named_variable_face_in_distinct_files() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let first = temp.path().join("first-variable.ttf");
+    let second = temp.path().join("second-variable.ttf");
+    for path in [&first, &second] {
+        fs::write(path, VARIABLE_FONT_BYTES).map_err(|error| error.to_string())?;
+    }
+    let mut database = Database::new();
+    database
+        .load_font_file(&first)
+        .map_err(|error| error.to_string())?;
+    let selected = selected_named_font(&database, &first)?;
+    let control = resolve_font(&database, &selected)?;
+    assert_eq!(
+        control.identity.path,
+        fs::canonicalize(&first).map_err(|error| error.to_string())?
+    );
+
+    database
+        .load_font_file(&second)
+        .map_err(|error| error.to_string())?;
+    assert_eq!(
+        resolve_font(&database, &selected).err().as_deref(),
+        Some("multiple URL-bound CoreText physical face matches are ambiguous")
+    );
+    Ok(())
+}
+
+fn selected_named_font(database: &Database, path: &Path) -> Result<SelectedFont, String> {
+    let family_name = database
+        .faces()
+        .next()
+        .and_then(|face| face.families.first())
+        .map(|(name, _)| name.clone())
+        .ok_or("variable font family missing")?;
+    Ok(SelectedFont {
+        family_name,
+        post_script_name: named_bold_face(path)?,
+        glyph_count: 1,
+        is_custom_font: false,
+    })
+}
+
+fn named_bold_face(path: &Path) -> Result<String, String> {
+    let url_path = path.to_str().ok_or("fixture path must be UTF-8")?;
+    let descriptors = super::descriptors_from_url(path)?;
+    descriptors
+        .iter()
+        .find_map(|descriptor| {
+            let evidence = super::variations::evidence(url_path, &descriptor).ok()?;
+            evidence
+                .variation_coordinates
+                .iter()
+                .any(|coordinate| {
+                    coordinate.identifier == WEIGHT_AXIS && coordinate.value == BOLD_WEIGHT
+                })
+                .then_some(evidence.post_script_name)
+        })
+        .ok_or_else(|| "CoreText bold instance missing from bundled font".to_owned())
 }
