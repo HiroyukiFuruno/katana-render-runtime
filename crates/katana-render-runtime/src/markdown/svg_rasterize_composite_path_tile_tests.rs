@@ -156,6 +156,31 @@ fn cropped_curve_keeps_frame_tile_origin_and_transparent_backdrop() -> Result<()
     Ok(())
 }
 
+#[test]
+fn curve_with_overflowing_transformed_bounds_uses_untiled_renderer() -> Result<(), String> {
+    let tree = usvg::Tree::from_str(CURVE, &usvg::Options::default()).map_err(|e| e.to_string())?;
+    let node = path(&tree)?;
+    let transform = Transform::from_scale(f32::MAX, 1.0);
+    assert!(node.stroke_bounding_box().transform(transform).is_none());
+
+    let mut tiled = canvas(WIDTH)?;
+    let mut direct = canvas(WIDTH)?;
+    assert!(super::super::render_if_supported_at_origin(
+        node,
+        transform,
+        &mut tiled.as_mut(),
+        Some(frame_context(0)),
+    )?);
+    assert!(super::super::render_if_supported_at_origin(
+        node,
+        transform,
+        &mut direct.as_mut(),
+        None,
+    )?);
+    assert_eq!(tiled.data(), direct.data());
+    Ok(())
+}
+
 fn frame_context(x: i32) -> super::super::super::TileContext {
     super::super::super::TileContext {
         origin: (x, 0),
