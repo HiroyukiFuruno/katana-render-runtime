@@ -41,6 +41,29 @@ mod image_roundtrip_tests;
 #[path = "svg_engine_writer_text_style_coverage_tests.rs"]
 mod text_style_coverage_tests;
 
+#[test]
+fn explicit_default_text_styles_are_omitted_from_preserved_svg() -> Result<(), String> {
+    let implicit = r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text x="50" y="50" font-family="Noto Sans" font-size="18">Edge Text</text></svg>"#;
+    let explicit = implicit.replace(
+        "<text ",
+        r#"<text style="font-stretch:normal;dominant-baseline:auto;alignment-baseline:auto" "#,
+    );
+    let options = usvg::WriteOptions {
+        preserve_text: true,
+        ..usvg::WriteOptions::default()
+    };
+    let serialized = parse_writer_svg(&explicit, "explicit defaults")?.to_string(&options);
+    let default_svg = parse_writer_svg(implicit, "implicit defaults")?.to_string(&options);
+    assert_eq!(serialized, default_svg);
+    for attribute in ["font-stretch=", "dominant-baseline=", "alignment-baseline="] {
+        assert!(
+            !serialized.contains(attribute),
+            "writer emitted {attribute}"
+        );
+    }
+    Ok(())
+}
+
 fn first_text(group: &usvg::Group) -> Option<&usvg::Text> {
     group.children().iter().find_map(|node| match node {
         usvg::Node::Text(text) => Some(text.as_ref()),
