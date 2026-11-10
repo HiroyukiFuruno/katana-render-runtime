@@ -3,7 +3,7 @@ const directory = "crates/katana-render-runtime/src/markdown/mermaid_renderer/";
 // 実テストとトレースの経路をレビューしたときだけ更新する。
 export const NATIVE_WIDTH_CONSUMER_PINS = {
   [`${directory}js_runtime_native_width_helpers.rs`]:
-    "6abdd41feed03bb662fd2505dcb263d777b29f8114c967b1e44913f6060bda61",
+    "0a429cafcd569dc8c1ed993141ef394d0ee10717fe2883f2583af5b7e14232fd",
   [`${directory}js_runtime.rs`]: "6beaa9a5f1b2d52c87d4e34ab55e78ee2a00b57c8a992da3082ab5459300b28a",
   [`${directory}js_runtime_native_width_tests.rs`]:
     "fc4bc1f529ab42eb8e8433137940c9c2f3750a16ef2b8a4adfb6be56bd15793a",

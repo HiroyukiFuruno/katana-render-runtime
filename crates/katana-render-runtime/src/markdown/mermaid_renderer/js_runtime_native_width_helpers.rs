@@ -158,3 +158,7 @@ fn insert_trace(scripts: &mut Vec<DiagramRuntimeScript<'_>>) -> Result<(), Strin
 fn result_script() -> &'static str {
     "if (globalThis.__krrActualBBoxTraceOverflow) throw new Error('native width getBBox trace overflow'); if (globalThis.__krrActualBBoxTraceFailure) throw new Error('native width getBBox snapshot failed: ' + globalThis.__krrActualBBoxTraceFailure); JSON.stringify({ calls: globalThis.__krrActualWidths, boxes: globalThis.__krrActualBBoxes, c4DescriptionRows: globalThis.__krrC4DescriptionRows, svg: globalThis.__krrRenderedSvg, probes: nativeWidthProbeResult() })"
 }
+
+#[cfg(test)]
+#[path = "js_runtime_native_width_decode_tests.rs"]
+mod decode_tests;
