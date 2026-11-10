@@ -230,21 +230,22 @@ mod diagnostic_binary_fixture {
     );
 
     #[cfg(target_os = "macos")]
-    pub(super) fn real_database(source_error: &'static str) -> Result<RealDatabase, String> {
-        let mut database = resvg::usvg::fontdb::Database::new();
-        database.load_font_data(super::super::BUNDLED_SANS_SERIF_FONT.to_vec());
-        let face = database.faces().next().ok_or("real Noto face missing")?;
-        let id = face.id;
-        let resvg::usvg::fontdb::Source::Binary(bytes) = &face.source else {
-            return Err(source_error.into());
-        };
-        let bytes = std::sync::Arc::downgrade(bytes);
+    pub(super) fn real_database() -> Result<RealDatabase, String> {
+        use resvg::usvg::fontdb::{Database, Source};
+        use std::sync::Arc;
+
+        let mut database = Database::new();
+        let binary: Arc<dyn AsRef<[u8]> + Send + Sync> =
+            Arc::new(super::super::BUNDLED_SANS_SERIF_FONT.to_vec());
+        let bytes = Arc::downgrade(&binary);
+        let ids = database.load_font_source(Source::Binary(binary));
+        let id = ids.first().copied().ok_or("real Noto face missing")?;
         assert_eq!(
             database.with_face_data(id, |data, _| {
                 data == super::super::BUNDLED_SANS_SERIF_FONT
             }),
             Some(true)
         );
-        Ok((std::sync::Arc::new(database), id, bytes))
+        Ok((Arc::new(database), id, bytes))
     }
 }

@@ -1,4 +1,4 @@
-use super::super::diagnostic_binary_fixture::real_database as shared_real_database;
+use super::super::diagnostic_binary_fixture::real_database;
 use super::{
     Capture, MAX_CAPTURED_RECORDS, Mode, SourceRoute, active, measure, record_selected_face,
     with_route,
@@ -13,7 +13,6 @@ const REGULAR_FONT_WEIGHT: u16 = 400;
 const REGULAR_FONT_WEIGHT_STYLE: &str = "font-weight:400";
 const INITIAL_MARKUP_RECORDS: usize = 3;
 type FontBytesWeak = Weak<dyn AsRef<[u8]> + Send + Sync>;
-type RealDatabase = (Arc<Database>, ID, FontBytesWeak);
 type MissingCaptureRouteCase = (fn() -> Capture, &'static str);
 
 #[test]
@@ -39,10 +38,6 @@ fn lazy_capture_real_face_enforces_weighted_limit_and_restores_nested_route() ->
     drop(database);
     assert_released_backing(&capture, &owner, &bytes);
     Ok(())
-}
-
-fn real_database() -> Result<RealDatabase, String> {
-    shared_real_database("real bundled source is not Binary")
 }
 
 fn fill_real_faces(database: &Arc<Database>, id: ID) {

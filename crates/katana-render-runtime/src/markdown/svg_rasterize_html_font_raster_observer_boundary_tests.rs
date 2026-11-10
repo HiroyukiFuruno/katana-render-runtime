@@ -1,4 +1,4 @@
-use super::super::diagnostic_binary_fixture::real_database as shared_real_database;
+use super::super::diagnostic_binary_fixture::real_database;
 use super::{
     MAX_EVENTS, Scope, TreeParseTiming, admission_result, eager_attempt, eager_reparse,
     eager_result, install_eager, known_attempt, known_fallback, known_result, known_return,
@@ -37,10 +37,6 @@ fn raster_observer_real_binary_face_retains_256_and_drops_257() -> Result<(), St
     assert!(bytes.upgrade().is_none());
     assert_eq!(before.events.len(), MAX_EVENTS);
     Ok(())
-}
-
-fn real_database() -> Result<RealDatabase, String> {
-    shared_real_database("loaded Noto source is not Binary")
 }
 
 fn assert_real_face_events(snapshot: &super::Snapshot, id: ID) {

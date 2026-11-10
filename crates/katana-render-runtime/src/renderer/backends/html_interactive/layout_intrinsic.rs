@@ -310,24 +310,20 @@ mod tests {
 
     #[test]
     fn flex_item_intrinsic_width_keeps_inline_badge_padding() {
-        let badge = element(
-            "span",
-            "display:inline-block;padding:4px 10px",
-            vec![HtmlDocumentNode::Text("要件仕様 v1".to_string())],
-        );
-        let style = CssStyle::browser_default();
-        let badge_style = match &badge {
-            HtmlDocumentNode::Element {
-                tag,
-                attributes,
-                children,
-                ..
-            } => {
-                let mut style = CssStyle::from_element(tag, attributes, &style);
-                style.resolve_text_line_height(children);
-                style
-            }
-            HtmlDocumentNode::Text(_) => unreachable!(),
+        let tag = "span".to_string();
+        let attributes = vec![(
+            "style".to_string(),
+            "display:inline-block;padding:4px 10px".to_string(),
+        )];
+        let children = vec![HtmlDocumentNode::Text("要件仕様 v1".to_string())];
+        let mut badge_style =
+            CssStyle::from_element(&tag, &attributes, &CssStyle::browser_default());
+        badge_style.resolve_text_line_height(&children);
+        let badge = HtmlDocumentNode::Element {
+            node_id: 1,
+            tag,
+            attributes,
+            children,
         };
         let text_width = measured_text_width("要件仕様 v1", &badge_style);
 
