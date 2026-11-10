@@ -56,6 +56,10 @@ fn ninth_request_is_rejected_by_active_scope_cap() {
             assert!(HtmlTextMeasurementToken::for_request(text, family).is_some());
         }
         assert!(HtmlTextMeasurementToken::for_request(TEXTS[8], FAMILIES[8]).is_none());
+        let weight = resvg::usvg::fontdb::Weight::NORMAL.0;
+        let token =
+            HtmlTextMeasurementToken::for_measured_text(TEXTS[8], FAMILIES[8], weight, false);
+        assert!(token.is_none());
     });
 }
 
