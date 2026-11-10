@@ -9,6 +9,18 @@ const INPUTS: [&str; 3] = [
 ];
 const MUTATIONS: &[(&str, &str, &str, &str)] = &[
     (
+        INPUTS[0],
+        "fn hash_mermaid_source_and_preset<H: Hasher>(",
+        "fn renamed_hash_mermaid_source_and_preset<H: Hasher>(",
+        "missing-function:hash_mermaid_source_and_preset",
+    ),
+    (
+        INPUTS[1],
+        "fn svg_id(source: &str, preset: &DiagramColorPreset) -> String",
+        "fn renamed_svg_id(source: &str, preset: &DiagramColorPreset) -> String",
+        "missing-method:MermaidRenderRequest::svg_id",
+    ),
+    (
         INPUTS[1],
         "format!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
         "format!(\"katana-mermaid-svg-{:016x}\" hasher.finish())",
