@@ -105,11 +105,10 @@ fn chunk_input<'a>(
     chunk: &'a usvg::TextChunk,
     prepared: &[PreparedSpan],
 ) -> Option<Input<'a>> {
-    let first = prepared.first()?;
-    let source = chunk.spans().first()?;
-    if !chunk_supported(chunk, prepared) || !spans_supported(chunk, prepared) {
+    if !chunk_supported(chunk, prepared) {
         return None;
     }
+    let (source, first) = first_supported_spans(chunk, prepared)?;
     let css_scale = anchor::uniform_css_scale(text.abs_transform())?;
     let paint_css_size = anchor::paint_size(first.font_size, css_scale, css_scale)?;
     if paint_css_size == first.font_size * css_scale {
@@ -138,21 +137,21 @@ fn chunk_supported(chunk: &usvg::TextChunk, prepared: &[PreparedSpan]) -> bool {
         && ranges_cover_chunk(chunk)
 }
 
-fn spans_supported(chunk: &usvg::TextChunk, prepared: &[PreparedSpan]) -> bool {
-    let Some(first) = prepared.first() else {
-        return false;
-    };
-    let Some(first_source) = chunk.spans().first() else {
-        return false;
-    };
-    chunk.spans().iter().zip(prepared).all(|(source, span)| {
+fn first_supported_spans<'a, 'b>(
+    chunk: &'a usvg::TextChunk,
+    prepared: &'b [PreparedSpan],
+) -> Option<(&'a usvg::TextSpan, &'b PreparedSpan)> {
+    let first = prepared.first()?;
+    let first_source = chunk.spans().first()?;
+    let supported = chunk.spans().iter().zip(prepared).all(|(source, span)| {
         source_supported(source)
             && source.font() == first_source.font()
             && span.font == first.font
             && span.font_size == first.font_size
             && span.baseline_shift == first.baseline_shift
             && glyphs_supported(chunk, source, span)
-    })
+    });
+    supported.then_some((first_source, first))
 }
 
 fn source_supported(source: &usvg::TextSpan) -> bool {

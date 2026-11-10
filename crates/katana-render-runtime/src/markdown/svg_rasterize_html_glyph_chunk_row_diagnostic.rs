@@ -1,6 +1,6 @@
 use super::{
-    PreparedSpan, chunk_input, chunk_supported, glyphs_supported, row_input, row_inputs,
-    rows_supported, source_supported, spans_supported,
+    PreparedSpan, chunk_input, chunk_supported, first_supported_spans, glyphs_supported, row_input,
+    row_inputs, rows_supported, source_supported,
 };
 use resvg::usvg;
 
@@ -41,7 +41,7 @@ fn diagnostic_row(
     serde_json::json!({
         "sourceCount": chunk.spans().len(), "text": chunk.text(), "anchor": format!("{:?}", chunk.anchor()),
         "chunkSupported": spans.map(|spans| chunk_supported(chunk, spans)),
-        "spansSupported": spans.map(|spans| spans_supported(chunk, spans)),
+        "spansSupported": spans.map(|spans| first_supported_spans(chunk, spans).is_some()),
         "chunkInput": spans.map(|spans| chunk_input(text, chunk, spans).is_some()),
         "cssScale": super::super::anchor::uniform_css_scale(text.abs_transform()),
         "paintSize": spans.and_then(|spans| spans.first()).and_then(|span| super::super::anchor::uniform_css_scale(text.abs_transform()).and_then(|scale| super::super::anchor::paint_size(span.font_size, scale, scale))),
