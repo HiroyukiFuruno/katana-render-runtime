@@ -7,6 +7,8 @@ const PLAIN_PATH_POINTS: [(f32, f32); PATH_POINT_COUNT] = [(0.0, 0.0), (20.0, 0.
 const TRANSFORMED_PATH_POINTS: [(f32, f32); PATH_POINT_COUNT] = [(10.0, 5.0), (50.0, 5.0)];
 const PLAIN_HALF_LENGTH: f32 = 10.0;
 const TRANSFORMED_HALF_LENGTH: f32 = 20.0;
+const FOLLOWING_TEXT_X: f32 = 40.0;
+const FOLLOWING_TEXT_X_WITHOUT_PATH: f32 = 20.0;
 
 fn parse_svg(input: &str) -> Result<usvg::Tree, String> {
     let options = usvg::Options {
@@ -101,15 +103,27 @@ fn text_path_uses_transformed_geometry_for_percentage_offset(
 }
 
 #[rstest]
-#[case::missing("#missing", "AD", "")]
-#[case::resolved("#curve", "ABCD", "BC")]
+#[case::missing("<textPath href='#missing'>BC</textPath>", "AD", "", FOLLOWING_TEXT_X)]
+#[case::resolved(
+    "<textPath href='#curve'>BC</textPath>",
+    "ABCD",
+    "BC",
+    FOLLOWING_TEXT_X
+)]
+#[case::nested(
+    "<tspan><textPath href='#curve'>BC</textPath></tspan>",
+    "AD",
+    "",
+    FOLLOWING_TEXT_X_WITHOUT_PATH
+)]
 fn text_path_reference_preserves_surrounding_text_and_path_flow(
-    #[case] href: &str,
+    #[case] path_text: &str,
     #[case] expected_text: &str,
     #[case] expected_path_text: &str,
+    #[case] expected_following_text_x: f32,
 ) -> Result<(), String> {
     let input = format!(
-        "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='50'><defs><path id='curve' d='M0 20 L100 20'/></defs><text id='target' x='10 20 30 40' font-family='Yellowtail'>A<textPath href='{href}'>BC</textPath>D</text></svg>"
+        "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='50'><defs><path id='curve' d='M0 20 L100 20'/></defs><text id='target' x='10 20 30 40' font-family='Yellowtail'>A{path_text}D</text></svg>"
     );
     let tree = parse_svg(&input)?;
     let text = text_node(&tree, "target")?;
@@ -118,6 +132,10 @@ fn text_path_reference_preserves_surrounding_text_and_path_flow(
     assert_eq!(actual, expected_text);
     assert_eq!(text_in_flow(chunks, true), expected_path_text);
     assert_eq!(text_in_flow(chunks, false), "AD");
+    assert_eq!(
+        chunks.last().and_then(usvg::TextChunk::x),
+        Some(expected_following_text_x)
+    );
     Ok(())
 }
 
