@@ -83,15 +83,7 @@ mod raster_images {
         let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGBA);
         let mut decoder = zune_jpeg::JpegDecoder::new_with_options(cursor, options);
         decoder.decode_headers().ok()?;
-        let output_cs = decoder.output_colorspace()?;
-
-        let img_data = {
-            let data = decoder.decode().ok()?;
-            match output_cs {
-                ColorSpace::RGBA => data,
-                _ => return None,
-            }
-        };
+        let img_data = decoder.decode().ok()?;
 
         let info = decoder.info()?;
 

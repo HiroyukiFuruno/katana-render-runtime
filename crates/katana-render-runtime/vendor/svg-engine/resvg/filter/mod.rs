@@ -831,12 +831,19 @@ fn apply_composite(
 
     let mut pixmap = tiny_skia::Pixmap::try_create(region.width(), region.height())?;
 
-    if let Operator::Arithmetic { k1, k2, k3, k4 } = fe.operator() {
-        composite_arithmetic([k1, k2, k3, k4], input1, input2, &mut pixmap)?;
-        return Ok(Image::from_image(pixmap, cs));
-    }
-
-    composite_blend(fe.operator(), input1, input2, &mut pixmap);
+    let blend_mode = match fe.operator() {
+        Operator::Arithmetic { k1, k2, k3, k4 } => {
+            composite_arithmetic([k1, k2, k3, k4], input1, input2, &mut pixmap)?;
+            return Ok(Image::from_image(pixmap, cs));
+        }
+        Operator::Over => tiny_skia::BlendMode::SourceOver,
+        Operator::In => tiny_skia::BlendMode::SourceIn,
+        Operator::Out => tiny_skia::BlendMode::SourceOut,
+        Operator::Atop => tiny_skia::BlendMode::SourceAtop,
+        Operator::Xor => tiny_skia::BlendMode::Xor,
+        Operator::Lighter => tiny_skia::BlendMode::Plus,
+    };
+    composite_blend(blend_mode, input1, input2, &mut pixmap);
     Ok(Image::from_image(pixmap, cs))
 }
 
@@ -862,7 +869,7 @@ fn composite_arithmetic(
 }
 
 fn composite_blend(
-    operator: crate::svg_engine::usvg::filter::CompositeOperator,
+    blend_mode: tiny_skia::BlendMode,
     input1: Image,
     input2: Image,
     pixmap: &mut tiny_skia::Pixmap,
@@ -876,8 +883,6 @@ fn composite_blend(
         None,
     );
 
-    let blend_mode = composite_blend_mode(operator);
-
     pixmap.draw_pixmap(
         0,
         0,
@@ -890,19 +895,6 @@ fn composite_blend(
         None,
     );
 
-}
-
-fn composite_blend_mode(operator: crate::svg_engine::usvg::filter::CompositeOperator) -> tiny_skia::BlendMode {
-    use crate::svg_engine::usvg::filter::CompositeOperator as Operator;
-    match operator {
-        Operator::Over => tiny_skia::BlendMode::SourceOver,
-        Operator::In => tiny_skia::BlendMode::SourceIn,
-        Operator::Out => tiny_skia::BlendMode::SourceOut,
-        Operator::Atop => tiny_skia::BlendMode::SourceAtop,
-        Operator::Xor => tiny_skia::BlendMode::Xor,
-        Operator::Lighter => tiny_skia::BlendMode::Plus,
-        Operator::Arithmetic { .. } => tiny_skia::BlendMode::SourceOver,
-    }
 }
 
 fn apply_merge(
