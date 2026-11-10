@@ -17,7 +17,7 @@ mod capacity_tests;
 mod lifecycle_tests;
 
 const MAX_CONTEXTS: usize = 16;
-const MAX_CONTEXT_CHARS: usize = 256;
+pub(super) const MAX_CONTEXT_CHARS: usize = 256;
 const MAX_TOTAL_ENTRIES: usize = 4096;
 const MAX_FAMILY_BYTES: usize = 4096;
 const MAX_TOTAL_FAMILY_BYTES: usize = 64 * 1024;

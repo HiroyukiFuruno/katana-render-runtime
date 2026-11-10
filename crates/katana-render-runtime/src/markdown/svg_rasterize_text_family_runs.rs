@@ -1,13 +1,11 @@
 use super::fallback::html_font_runs;
-use super::family_scope_cache;
+use super::family_scope_cache::{self, MAX_CONTEXT_CHARS as MAX_SELECTED_FONT_MEMO_ENTRIES};
 use super::font::{
     append_font_run, cached_font_has_char_with_generation, matching_font_face,
     with_reusable_stamp_batch,
 };
 use resvg::usvg::fontdb::{Database, ID};
 use std::{collections::HashMap, sync::Arc};
-
-const MAX_SELECTED_FONT_MEMO_ENTRIES: usize = 256;
 
 pub(super) fn resolved_font_runs(
     database: &Arc<Database>,
@@ -50,9 +48,6 @@ fn try_scoped_font_runs(
         family_scope_cache::lookup_known(database, base, family, style.0, style.1, text)?;
     if missing.is_empty() {
         return rebuild_font_runs(text, &known);
-    }
-    if known.len() + missing.chars().count() > MAX_SELECTED_FONT_MEMO_ENTRIES {
-        return None;
     }
     resolve_partial_font_runs(database, base, family, text, style, known, &missing)
 }
