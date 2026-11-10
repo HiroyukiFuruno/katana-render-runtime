@@ -58,6 +58,10 @@ fn bundled_font_postscript_identity_rejects_missing_name_and_truncated_font() ->
         .find_map(postscript_name)
         .ok_or("bundled font has no PostScript name")?;
     assert_eq!(unique_postscript_index(FONT, &name), Some(0));
+    let collection = super::super::super::tests::duplicate_sfnt_as_two_face_ttc(FONT)?;
+    assert_eq!(ttf_parser::fonts_in_collection(&collection), Some(2));
+    assert!(ttf_parser::Face::parse(&collection, 1).is_ok());
+    assert_eq!(unique_postscript_index(&collection, &name), None);
     assert_eq!(
         unique_postscript_index(FONT, "Definitely-Not-The-Bundled-Font"),
         None

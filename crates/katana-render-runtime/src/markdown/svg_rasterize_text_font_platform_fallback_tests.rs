@@ -35,10 +35,12 @@ fn assert_rejects_altered_face(
         .clone();
     let wrong_source_id = altered.push_face_info(wrong_source);
     assert_eq!(fallback_family(&altered, wrong_source_id, '注'), None);
-    let mut unknown = face;
-    unknown.post_script_name = "__krr_missing_physical_postscript__".into();
-    let unknown_id = altered.push_face_info(unknown);
-    assert_eq!(fallback_family(&altered, unknown_id, '注'), None);
+    for name in ["", "__krr_missing_physical_postscript__"] {
+        let mut unknown = face.clone();
+        unknown.post_script_name = name.into();
+        let unknown_id = altered.push_face_info(unknown);
+        assert_eq!(fallback_family(&altered, unknown_id, '注'), None);
+    }
     Ok(())
 }
 

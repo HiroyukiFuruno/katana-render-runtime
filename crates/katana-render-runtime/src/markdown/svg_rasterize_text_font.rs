@@ -321,7 +321,7 @@ mod tests {
             .ok_or("bundled face must exist".to_string())
     }
 
-    fn duplicate_sfnt_as_two_face_ttc(sfnt: &[u8]) -> Result<Vec<u8>, String> {
+    pub(super) fn duplicate_sfnt_as_two_face_ttc(sfnt: &[u8]) -> Result<Vec<u8>, String> {
         let table_count = sfnt_table_count(sfnt)?;
         let directory_end = table_count
             .checked_mul(16)
