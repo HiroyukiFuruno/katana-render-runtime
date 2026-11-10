@@ -11,10 +11,5 @@ pub(in crate::markdown::svg_rasterize) fn shaped_svg_font_x_height(
     let font: FontShape = validated_svg_font_shape(size, weight, italic)?;
     let database = html_font_db_for_measured_text(family, "x", font.weight, font.italic);
     let face = matching_font_face(&database, family, font.weight, font.italic)?;
-    let metric = svg_run_x_height_with_face(&database, face, font)?;
-    match metric {
-        None => Some(None),
-        Some(value) if value.is_finite() && value > 0.0 => Some(Some(value)),
-        Some(_) => None,
-    }
+    svg_run_x_height_with_face(&database, face, font)
 }
