@@ -78,3 +78,29 @@ fn malformed_fill_and_stroke_fall_back_independently() -> Result<(), String> {
     assert!(path.stroke().is_none());
     Ok(())
 }
+
+#[test]
+fn current_color_resolves_independently_for_fill_and_stroke() -> Result<(), String> {
+    let tree = parse_path("color='#123456' fill='currentColor' stroke='currentColor'")?;
+    let path = sample_path(&tree)?;
+    let fill = path.fill().ok_or("fill missing")?;
+    let stroke = path.stroke().ok_or("stroke missing")?;
+    for paint in [fill.paint(), stroke.paint()] {
+        assert!(matches!(paint, usvg::Paint::Color(color)
+            if (color.red, color.green, color.blue) == (18, 52, 86)));
+    }
+    Ok(())
+}
+
+#[test]
+fn inherited_current_color_uses_child_color_after_style_override() -> Result<(), String> {
+    let source = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+      <g fill="currentColor" color="red"><path id="sample" d="M2 2 H18 V18 Z"
+      fill="inherit" style="color: #123456"/></g></svg>"#;
+    let tree = usvg::Tree::from_str(source, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    let fill = sample_path(&tree)?.fill().ok_or("fill missing")?;
+    assert!(matches!(fill.paint(), usvg::Paint::Color(color)
+        if (color.red, color.green, color.blue) == (18, 52, 86)));
+    Ok(())
+}
