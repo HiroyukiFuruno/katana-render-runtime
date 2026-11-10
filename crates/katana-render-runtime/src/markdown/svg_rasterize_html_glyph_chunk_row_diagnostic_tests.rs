@@ -80,6 +80,19 @@ fn diagnostic_exposes_guard_rejection_and_incomplete_preparation() -> Result<(),
     Ok(())
 }
 
+#[test]
+fn nested_row_with_per_character_y_shift_declines_alignment() -> Result<(), String> {
+    let (_font, tree, prepared) = prepared_fixture("relative-y", "dy='0 2'")?;
+    let text = fixture_text(&tree)?;
+    let diagnostic = row_diagnostic(text, &prepared);
+    assert_eq!(diagnostic["rowsSupported"], json!(true));
+    assert_eq!(diagnostic["rowInputs"], json!(false));
+    let first = &diagnostic["rows"][0];
+    assert_eq!(first["detail"]["dySupported"], json!(false));
+    assert_eq!(first["rowInput"], json!(false));
+    Ok(())
+}
+
 fn prepared_fixture(
     name: &str,
     attributes: &str,

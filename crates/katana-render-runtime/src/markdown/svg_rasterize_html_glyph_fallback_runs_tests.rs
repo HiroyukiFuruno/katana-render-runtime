@@ -8,6 +8,51 @@ fn fallback_advance_rejects_nonfinite_coordinates() {
 
 #[cfg(target_os = "macos")]
 #[test]
+fn corrupted_physical_fallback_font_rejects_glyph_cmap() -> Result<(), String> {
+    let tree = tree_with_physical_noto("A日本", "", "Noto Sans", "Noto Sans")?;
+    let prepared = prepare(&tree, text(&tree)?)?;
+    let span = prepared
+        .iter()
+        .find(|span| span.glyphs.len() == 1 && span.glyphs[0].text == "A")
+        .ok_or("Latin glyph run missing")?;
+    assert!(super::eligibility::glyph_ids_match_cmap(
+        tree.fontdb(),
+        span.font,
+        "A",
+        &span.glyphs
+    ));
+    let face = tree.fontdb().face(span.font).ok_or("face missing")?.clone();
+    assert_corrupt_font_cmap(face, &span.glyphs)
+}
+
+#[cfg(target_os = "macos")]
+fn assert_corrupt_font_cmap(
+    mut face: resvg::usvg::fontdb::FaceInfo,
+    glyphs: &[resvg::usvg::layout::PositionedGlyph],
+) -> Result<(), String> {
+    use resvg::usvg::fontdb::{Database, Source};
+
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let path = directory.path().join("corrupted.ttf");
+    write_corrupted_noto(&path)?;
+    face.source = Source::File(path);
+    let mut database = Database::new();
+    let id = database.push_face_info(face);
+    assert!(!super::eligibility::glyph_ids_match_cmap(
+        &database, id, "A", glyphs
+    ));
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn write_corrupted_noto(path: &std::path::Path) -> Result<(), String> {
+    let mut bytes = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf").to_vec();
+    bytes[0] = !bytes[0];
+    std::fs::write(path, bytes).map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn fallback_positions_reject_missing_or_extra_prepared_runs() -> Result<(), String> {
     let tree = tree("A日本", "")?;
     let text = text(&tree)?;
