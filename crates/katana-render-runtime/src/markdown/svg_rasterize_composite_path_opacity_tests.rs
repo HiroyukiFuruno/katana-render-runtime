@@ -25,6 +25,33 @@ fn transparent_stroke_keeps_opaque_fill_on_custom_path() -> Result<(), String> {
     )
 }
 
+#[test]
+fn transparent_fill_and_stroke_leave_the_entire_frame_unchanged() -> Result<(), String> {
+    const ATTRIBUTES: &str =
+        r##"id="transparent" fill="#ff0000" fill-opacity="0" stroke="#0000ff" stroke-opacity="0""##;
+    let svg = svg_with_path(super::SQUARE_PATH, ATTRIBUTES);
+    let (tree, mut direct) = parse(&svg)?;
+    let Some(usvg::Node::Path(path)) = tree.node_by_id("transparent") else {
+        return Err("missing transparent path".to_owned());
+    };
+    assert!(path.is_visible());
+    assert!(path.fill().is_some_and(|fill| fill.opacity().get() == 0.0));
+    assert!(
+        path.stroke()
+            .is_some_and(|stroke| stroke.opacity().get() == 0.0)
+    );
+    assert!(!render_if_supported(
+        path,
+        Transform::identity(),
+        &mut direct.as_mut()
+    )?);
+    let expected = allocate_pixmap()?;
+    assert_eq!(direct.data(), expected.data());
+    let rendered = super::render_path(super::SQUARE_PATH, ATTRIBUTES, Transform::identity())?;
+    assert_eq!(rendered.data(), expected.data());
+    Ok(())
+}
+
 fn assert_custom_path_uses_visible_paint(
     attributes: &str,
     expected_paint: VisiblePaint,
