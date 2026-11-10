@@ -661,9 +661,6 @@ fn parse_variation_part(part: &str) -> Option<FontVariation> {
 }
 
 fn parse_variation_tag(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<String> {
-    while chars.peek().map_or(false, |c| c.is_whitespace()) {
-        chars.next();
-    }
     let quote = match chars.next() {
         Some('"') => '"',
         Some('\'') => '\'',
