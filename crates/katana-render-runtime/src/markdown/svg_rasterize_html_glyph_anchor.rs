@@ -81,12 +81,8 @@ pub(super) fn nonempty_ordered_scalar_per_glyph(
     if text.chars().count() != glyphs.len() || glyphs.is_empty() {
         return false;
     }
-    let mut characters = text.chars();
     let mut previous_x = None;
-    for glyph in glyphs {
-        let Some(character) = characters.next() else {
-            return false;
-        };
+    for (character, glyph) in text.chars().zip(glyphs) {
         if glyph.text.chars().count() != 1 || !glyph.text.starts_with(character) {
             return false;
         }
@@ -99,7 +95,7 @@ pub(super) fn nonempty_ordered_scalar_per_glyph(
         }
         previous_x = Some(transform.tx);
     }
-    characters.next().is_none()
+    true
 }
 
 pub(super) fn uniform_css_scale(transform: Transform) -> Option<f32> {
