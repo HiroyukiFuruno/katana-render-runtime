@@ -2,11 +2,13 @@ use super::{has_known_missing_base_table, usvg};
 use crate::markdown::svg_rasterize::{font_file_fixture, html_glyph::HtmlGlyphRasterizer};
 use read_fonts::{FontRef, TableProvider, types::Tag};
 use rstest::rstest;
+use skrifa::MetadataProvider;
 use std::sync::Arc;
 
 const NOTO: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 const CJK: &[u8] =
     include_bytes!("../../../../tests/fixtures/fonts/han-kerning/NotoSansCJKjp-han14.otf");
+const COLR_LINEAR_GLYPH: u32 = 9;
 
 #[rstest]
 #[case::noto_without_base(NOTO, false)]
@@ -71,4 +73,59 @@ fn assert_primary_face_boundary(
         assert!(policy.primary_shift.is_some_and(f32::is_finite));
     }
     Ok(())
+}
+
+#[test]
+fn middle_baseline_declines_unsupported_variable_color_face() -> Result<(), String> {
+    let (tree, id) = variable_color_middle_tree()?;
+    let Some(usvg::Node::Text(text)) = tree.node_by_id("run") else {
+        return Err("color text missing".into());
+    };
+    assert!(super::uniform_policy_with_context(text, false, false).is_some());
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    assert!(rasterizer.face_metadata(id)?.unsupported);
+    assert!(rasterizer.primary_variable_face(text, id)?.is_none());
+    assert!(super::resolved_policy(&rasterizer, text)?.is_none());
+    Ok(())
+}
+
+fn variable_color_middle_tree() -> Result<(usvg::Tree, usvg::fontdb::ID), String> {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/svg-engine/colr-public-fonts/colr_1_variable.ttf");
+    let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
+    let character = variable_color_character(&bytes)?;
+    let mut database = usvg::fontdb::Database::new();
+    let id = *database
+        .load_font_source(usvg::fontdb::Source::File(path))
+        .first()
+        .ok_or("color face missing")?;
+    let family = &database
+        .face(id)
+        .and_then(|face| face.families.first())
+        .ok_or("color family missing")?
+        .0;
+    let svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg"><text id="run" x="0" y="20" dy="1" font-family="{family}" font-size="20" dominant-baseline="middle" font-variation-settings="'SWPS' 10">{character}</text></svg>"#
+    );
+    let tree = usvg::Tree::from_str(
+        &svg,
+        &usvg::Options {
+            fontdb: Arc::new(database),
+            ..usvg::Options::default()
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    Ok((tree, id))
+}
+
+fn variable_color_character(bytes: &[u8]) -> Result<char, String> {
+    let font = FontRef::new(bytes).map_err(|error| error.to_string())?;
+    font.charmap()
+        .mappings()
+        .find_map(|(codepoint, glyph)| {
+            (glyph.to_u32() == COLR_LINEAR_GLYPH)
+                .then(|| char::from_u32(codepoint))
+                .flatten()
+        })
+        .ok_or_else(|| "color font character missing".into())
 }
