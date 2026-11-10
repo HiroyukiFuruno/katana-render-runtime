@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-10、以下の過去結果と区別する）
 
+- [x] `ce1cde36` で、静的SVGの `:hover` と `:focus` が通常の角丸指定を上書きしないことを検証。foundation・AST・限定1件は実0。`svg_rasterize_preprocess_geometry_support.rs:89` は正式元データ0回、限定LLVMで8回。ソースとbinaryは実行前後で一致、一時profile回収済み（`tmp/quality/resumed-owner-r3509/coverage-svg-static-pseudo-geometry-exact-3xq61dda/safe-summary.json`）。製品コードと正式root結果は変更なし。
+
 - [x] `19aae4e5` で実HTMLのチェックボックスを押して離し、DEBUG診断が座標・押下ノードID・hitを保持することを確認。既存 `tracing` だけを使い、受信はテストのスレッド内に限定。foundation・AST・限定1件実0。`input_dispatch.rs:74` は正式元データ0回から限定LLVMで1回。ソース・binary前後一致、一時profile・export回収済み（`tmp/quality/resumed-owner-r3509/coverage-html-pointer-tracing-exact-_f81w4st/safe-summary.json`）。製品コードと正式root結果は変更なし。
 - [/] Mermaid ASTの `mermaid_classic_scripts_route.rs:40` は、先行の `caller` が成功時に5文だけ返すため到達しない。既存の不正文数テストは先行側の拒否を通る。集計条件は維持し、この後段への到達を目的とするテストは追加しなかった。
 - [x] `c3a50db1` で実フォントの混在するSVGに `alignment-baseline="hanging"` を加え、字形のY位置が異なるとフォールバック位置補正を見送ることを確認。foundation・AST・限定1件は実0。正式の元データで `svg_rasterize_html_glyph_fallback_source_spans.rs:49` は0回、限定LLVMは2回。ソース・binary前後一致、一時profile・export回収済み（`tmp/quality/resumed-owner-r3509/coverage-svg-baseline-rejection-exact-n5ibjdh4/safe-summary.json`）。製品コード、正式root、公開条件は変更していない。
