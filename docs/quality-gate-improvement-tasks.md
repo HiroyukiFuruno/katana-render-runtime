@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-10、以下の過去結果と区別する）
 
+- [x] `fed3a1de`・`ea951bad` で、引用符内のセミコロンと直後のCSS宣言、複数filter URLで循環対象のみの無効化、実フォントを使ったRTL断片のフォールバック計測拒否を確認。foundation・AST・限定3件実0。限定LLVMで前回未実行の `svg_rasterize_html_glyph_fallback_metrics.rs:20` に1回到達。SVGパーサーの対象行446・874は0回のまま。両ケースの正常な解析・無効化はアサーションで確認した。一時profile・export回収済み（`tmp/quality/resumed-owner-r3509/coverage-svg-parser-and-rtl-exact-jm63wle6/safe-summary.json`）。製品コードと正式root結果は変更なし。
+- [/] マーカーとシャドウのテキスト走査は `is_text()` により `text() == None` の分岐へ届かず、マーカーCSSの置換は前段で残り予算以内に制限するため直後の予算超過へ届かない。これらに人工入力を追加せず、検証条件は維持する。
 - [/] 最新の正式rootは `e862ef88`。6,144件成功・別に15件skip、86,745/87,362行（99.2937432751%）、未カバー617行。前回 `f5b5dc1a` の625行から8減、分母は同じ。差分はSVG循環参照1、Chromeフォント証明1、SVGテキスト・CSSの証明3、SVG計測API3。ソース前後一致・収集実0・厳格閾値 `coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-cm9yjhk3/safe-summary.json`）。製品コードは変更していない。完全ゲートと公開は未完。
 - [x] `c33b5203`・`4004ab6d`・`e862ef88` でSVGの文字計測のサイズ上限、座標変換で範囲があふれる曲線の描画、空白のみの複数行と周囲の空白、空のkeyframeセレクターを検証。foundation・AST・限定5件は実0。限定LLVMで前回未実行だった6行に到達したが、タイルのエラー伝播行は全体の行数差には現れず、計測APIは限定比較外の1行も増えた。最初の候補で誤っていた曲線のゼロ倍率と空白の期待を修正し、通常のSVGで生成されない状態を組み立てるwriter候補は採用しなかった（`tmp/quality/resumed-owner-r3509/coverage-svg-boundaries-exact-7s30chaa/safe-summary.json`）。
 - [/] 実入力から到達できない未実行行を分けて扱う。SVG文字の選択キャッシュ上限は前段で同じ256種類の上限を適用し、`viewBox` の有限性は `svgtypes` 0.16.2 の数値パーサーが検査済み。HTML inline配置の `Start` は分岐前にreturn済み。除外や集計条件の変更は行わず、次は引用内のセミコロンを含むSVGのCSSと複数filter参照の独立回帰を既存テストと比較する。
