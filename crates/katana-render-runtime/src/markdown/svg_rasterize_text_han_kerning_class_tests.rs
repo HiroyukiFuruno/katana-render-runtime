@@ -3,6 +3,8 @@ use icu_properties::{CodePointMapData, props::GeneralCategory};
 use skrifa::{FontRef, MetadataProvider, instance::LocationRef, prelude::Size};
 
 const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
+const CJK_FONT_BYTES: &[u8] =
+    include_bytes!("../../../../tests/fixtures/fonts/han-kerning/NotoSansCJKjp-han14.otf");
 
 fn font_metrics() -> Result<(FontRef<'static>, skrifa::metrics::GlyphMetrics<'static>), String> {
     let font = FontRef::from_index(FONT_BYTES, 0).map_err(|error| error.to_string())?;
@@ -180,6 +182,28 @@ fn quote_pair_rejects_missing_glyph_and_mismatched_roles() -> Result<(), String>
                 super::metric_class(advance, glyph_bounds) == Some(expected)
             );
         }
+    }
+    Ok(())
+}
+
+#[test]
+fn cjk_quote_pair_checks_both_glyph_roles_with_equal_advances() -> Result<(), String> {
+    let font = FontRef::from_index(CJK_FONT_BYTES, 0).map_err(|error| error.to_string())?;
+    let metrics = font.glyph_metrics(Size::unscaled(), LocationRef::default());
+    let open = font.charmap().map('「').ok_or("open glyph missing")?;
+    let close = font.charmap().map('」').ok_or("close glyph missing")?;
+    let open_advance = metrics.advance_width(open).ok_or("open advance missing")?;
+    assert!(open_advance > 0.0);
+    assert_eq!(metrics.advance_width(close), Some(open_advance));
+    for (characters, role, expected) in [
+        (['「', '「'], HanClass::Open, true),
+        (['」', '」'], HanClass::Close, true),
+        (['「', '」'], HanClass::Open, false),
+    ] {
+        assert_eq!(
+            super::quote_pair(&font, &metrics, characters, role),
+            expected
+        );
     }
     Ok(())
 }
