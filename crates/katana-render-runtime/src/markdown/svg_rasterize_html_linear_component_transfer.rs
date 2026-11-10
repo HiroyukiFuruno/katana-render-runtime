@@ -25,9 +25,7 @@ pub(super) fn render(
     let Some(spec) = transfer_spec(group, child_transform)? else {
         return Ok(false);
     };
-    let Some(source) = source_bounds(group, child_transform)? else {
-        return Ok(false);
-    };
+    let source = source_bounds(group, child_transform)?;
     let Some(bounds) = intersect(spec.bounds, source) else {
         return Ok(false);
     };
@@ -163,9 +161,9 @@ fn spec_bounds(
 fn source_bounds(
     group: &usvg::Group,
     transform: Transform,
-) -> Result<Option<super::super::html_shadow::Bounds>, String> {
+) -> Result<super::super::html_shadow::Bounds, String> {
     let rect = group.layer_bounding_box().to_rect();
-    super::super::html_shadow::map_rect(rect, transform).map(Some)
+    super::super::html_shadow::map_rect(rect, transform)
 }
 
 fn intersect(
