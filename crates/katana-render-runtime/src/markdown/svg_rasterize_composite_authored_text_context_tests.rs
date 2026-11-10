@@ -179,3 +179,10 @@ fn malformed_keyframes_preludes_cannot_prove_authored_text_layout() -> Result<()
     }
     Ok(())
 }
+
+#[test]
+fn nested_custom_property_tokens_in_keyframes_do_not_disqualify_text() -> Result<(), String> {
+    let source = r#"<svg><style>@keyframes motion { from { --paint: [var(--stroke)]; } }</style><text><tspan dy="0">Runtime</tspan></text></svg>"#;
+    assert!(context_matches(source, LABEL)?);
+    Ok(())
+}

@@ -72,3 +72,33 @@ fn polyline_and_polygon_without_points_are_skipped() -> Result<(), String> {
     }
     Ok(())
 }
+
+#[test]
+fn overflowing_offscreen_transform_preserves_visible_sibling() -> Result<(), String> {
+    let source = "<g transform='scale(1e20)'><path id='overflow' d='M1e19 0 L2e19 1' stroke='red'/></g><rect id='sample' width='4' height='4' fill='blue'/>";
+    let control = "<rect id='sample' width='4' height='4' fill='blue'/>";
+    let actual = parse_shape(source)?;
+    let expected = parse_shape(control)?;
+    assert!(actual.node_by_id("sample").is_some());
+    assert!(actual.node_by_id("overflow").is_none());
+    let mut actual_image = tiny_skia::Pixmap::new(8, 8).ok_or("actual pixmap missing")?;
+    let mut expected_image = tiny_skia::Pixmap::new(8, 8).ok_or("expected pixmap missing")?;
+    super::super::resvg::render(
+        &actual,
+        tiny_skia::Transform::identity(),
+        &mut actual_image.as_mut(),
+    );
+    super::super::resvg::render(
+        &expected,
+        tiny_skia::Transform::identity(),
+        &mut expected_image.as_mut(),
+    );
+    assert_eq!(actual_image.data(), expected_image.data());
+    assert!(
+        expected_image
+            .pixels()
+            .iter()
+            .any(|pixel| pixel.alpha() > 0)
+    );
+    Ok(())
+}

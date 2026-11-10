@@ -74,3 +74,9 @@ fn normalizes_svg_without_namespace() {
     let expected = r#"<svg><text style=" font-weight:bold"/></svg>"#;
     assert_eq!(normalized_svg(input), expected);
 }
+
+#[test]
+fn malformed_svg_style_is_left_for_the_svg_parser() {
+    let input = r#"<svg><text style="; font-weight:bold"></svg>"#;
+    assert!(normalize_inline_style_prefixes(input).is_none());
+}
