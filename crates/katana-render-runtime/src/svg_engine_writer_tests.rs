@@ -41,6 +41,31 @@ mod image_roundtrip_tests;
 #[path = "svg_engine_writer_text_style_coverage_tests.rs"]
 mod text_style_coverage_tests;
 
+#[rstest]
+#[case::linear("<text x='10' y='35' font-family='Noto Sans' font-size='18' ROTATE>Text</text>")]
+#[case::path(
+    "<defs><path id='curve' d='M10 35 H110'/></defs><text font-family='Noto Sans' font-size='18' ROTATE><textPath href='#curve'>Text</textPath></text>"
+)]
+fn explicit_zero_rotation_preserves_text_pixels(#[case] body: &str) -> Result<(), String> {
+    let wrap = |attribute: &str| {
+        format!(
+            "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='60'>{}</svg>",
+            body.replace("ROTATE", attribute)
+        )
+    };
+    let rotated = parse_writer_svg(&wrap("rotate='0'"), "zero-rotation")?;
+    let reference = parse_writer_svg(&wrap(""), "implicit-rotation")?;
+    let rendered =
+        writer_coverage_tests::assert_pixels_equal(&rotated, &reference, "zero rotation")?;
+    assert!(
+        rendered
+            .data()
+            .chunks_exact(RGBA_CHANNELS)
+            .any(|pixel| pixel[ALPHA_CHANNEL] != 0)
+    );
+    Ok(())
+}
+
 #[test]
 fn explicit_default_text_styles_are_omitted_from_preserved_svg() -> Result<(), String> {
     let implicit = r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text x="50" y="50" font-family="Noto Sans" font-size="18">Edge Text</text></svg>"#;
