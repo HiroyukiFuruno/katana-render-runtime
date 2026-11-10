@@ -1,9 +1,7 @@
 use super::super::super::{HtmlGlyphRasterizer, Prepared, PreparedSpan};
-use super::super::layout;
+use super::super::{layout, metrics, scripts::ScriptFragment};
 use super::{FONT_FAMILIES, TITLE, text, tree_with_fonts, tree_with_physical_noto};
-use crate::markdown::svg_rasterize::text_shaping::{
-    FontShape, shape_run_character_metrics_with_trim,
-};
+use crate::markdown::svg_rasterize::text_shaping::FontShape;
 use resvg::usvg::Tree;
 use std::collections::HashSet;
 
@@ -202,17 +200,24 @@ fn rtl_metrics_rejected(tree: &Tree, span: &PreparedSpan) -> bool {
         .iter()
         .map(|glyph| glyph.text.as_str())
         .collect::<String>();
-    run_text
+    if !run_text
         .chars()
         .any(|character| matches!(character, '\u{0590}'..='\u{05ff}'))
-        && shape_run_character_metrics_with_trim(
-            tree.fontdb(),
-            span.font,
-            &run_text,
-            FontShape::new(span.font_size, NORMAL_FONT_WEIGHT, false),
-            None,
-        )
-        .is_none()
+    {
+        return false;
+    }
+    let fragment = ScriptFragment {
+        glyph_range: 0..span.glyphs.len(),
+        text: run_text,
+    };
+    metrics::measure_fragment(
+        tree.fontdb(),
+        span,
+        &fragment,
+        &span.glyphs,
+        FontShape::new(span.font_size, NORMAL_FONT_WEIGHT, false),
+    )
+    .is_none()
 }
 
 #[cfg(target_os = "macos")]
