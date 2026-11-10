@@ -2,7 +2,10 @@
 
 ## 現在の実行地点（2026-11-10、以下の過去結果と区別する）
 
-- [/] 最新の正式rootは `f529f40d`、6,105件成功、別に15件skip、86,987/87,660行（99.2322610084%）、未カバー673行。前回の675行から2減、分母は同じ。ソース前後一致、収集実0、厳格閾値は `coverage-policy` で実1（`tmp/quality/resumed-owner-r3509/root-coverage-f529f40d-9tc0my4g/safe-summary.json`）。現行HEADの完全ゲートと公開は未完。
+- [/] 最新の正式rootは `fd0fd366`、6,110件成功、別に15件skip、86,887/87,538行（99.2563229683%）、未カバー651行。前回の654行から3減、分母は同じ。ソース前後一致、収集実0、厳格閾値は `coverage-policy` で実1（`tmp/quality/resumed-owner-r3509/root-coverage-fd0fd366-threads4-ktw2amwh/safe-summary.json`）。現行HEADの完全ゲートと公開は未完。
+- [x] `7a511d70` で承認済みのテスト専用補助3ファイルを個別パスとSHAで固定し、集計を分離した。`66bb6602` の正式結果は未カバー654行。先行の673行との差19行は、計測対象に残る実装9行の通過と、テスト専用ファイル由来の未実行10行。隣接する検証実装は全て計測対象（`tmp/quality/resumed-owner-r3509/root-coverage-66bb6602-eisvxf9w/scope-and-coverage-delta.json`）。
+- [x] `9d889c0a` は実フォントの逆順glyphでアンカー補正を拒否し、空clip付きsymbolが可視背景を隠さないことを対照と比較。限定2件・静的・AST実0、前回0回の3箇所を通過（`tmp/quality/resumed-owner-r3509/coverage-anchor-and-symbol-exact-vow7d5cq/safe-summary.json`）。正式集計は未更新。
+- [ ] 実入力で届かない分岐を実装の不変条件と照合。CLIのattestationでは明示済み `Some(path)` が選択エラー経路を通らない。HTMLの `polygon_axes` は外側が成功またはエラーで、内側の軸だけが欠落し得る。MathJaxのliteral比較は先行template検証が同じ値を要求する。これらの到達不能枝と、初回のruntime選択・非有限geometry・template不一致の実エラーを区別して扱う。計測条件を変えず、実入力で到達可能な未対応分岐の検証を先行する。
 - [x] 古い計測バイナリが現行ソースの末尾を越える行を報告したため、保護対象を照合して既存のcoverage profileだけを整理し、上記の正式結果を取り直した。現行ソース末尾を越えるマッピングは `e0f8bcb3` で拒否。Nextestアーカイブの隔離回帰は `b90b0a25` で実測済み、正式収集への組み込みは未完。
 - [x] `9bea92ed` はSVGマーカーのクリップ変換を表現できないときに、元の線が残ることを画像で確認。関連5件、AST・整形が成功（`tmp/quality/resumed-owner-r3509/coverage-marker-clip-exact-155v3929/safe-summary.json`）。限定LLVMで前回0回だったエラー経路を通過。上記の正式未カバー行数は未更新。
 - [x] `570641f6` はmacOSの実可変フォントで補正量と描画準備済みglyphの一致を確認し、別種の参照先を持つSVGグラデーションは色停止点と全画素を対照と照合。静的検査・ASTと新規2件が成功。前回0回だった可変faceの補正経路を3回通過。グラデーションの限定測定では新規実行範囲0（`tmp/quality/resumed-owner-r3509/coverage-font-and-paint-exact-05b9tw77/safe-summary.json`）。
