@@ -50,6 +50,7 @@ fn malformed_family_uses_configured_fallback_instead_of_parent(
 #[rstest]
 #[case::quadratic("M0 0 Q10 0 20 0", 10.0)]
 #[case::closed("M0 0 L20 0 Z", 20.0)]
+#[case::separate_subpaths("M0 0 L20 0 M50 0 L60 0 Z", 20.0)]
 fn text_path_percentage_uses_entire_path_length(
     #[case] path: &str,
     #[case] expected: f32,
