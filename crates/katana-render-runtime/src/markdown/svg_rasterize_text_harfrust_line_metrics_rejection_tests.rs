@@ -17,6 +17,8 @@ const SFNT_SEARCH_RANGE_OFFSET: usize = SFNT_NUM_TABLES_OFFSET + SFNT_WORD_LENGT
 const SFNT_ENTRY_SELECTOR_OFFSET: usize = SFNT_SEARCH_RANGE_OFFSET + SFNT_WORD_LENGTH;
 const SFNT_RANGE_SHIFT_OFFSET: usize = SFNT_ENTRY_SELECTOR_OFFSET + SFNT_WORD_LENGTH;
 const METRIC_TEST_SIZE: f32 = 15.0;
+const OS2_X_HEIGHT_OFFSET: usize = 86;
+const INVALID_X_HEIGHT: i16 = -1;
 const VARIABLE_FONT: &str =
     "../../tests/fixtures/svg-engine/upstream/resvg/tests/fonts/RobotoFlex.subset.ttf";
 
@@ -35,6 +37,34 @@ fn absent_face_returns_no_metrics_for_both_readers() -> TestResult {
         );
         Ok(())
     })
+}
+
+#[test]
+fn negative_os2_x_height_is_rejected_for_a_parseable_font() -> TestResult {
+    use super::super::super::{FontShape, svg_run_x_height_with_face};
+    let mut bytes = FONT_BYTES.to_vec();
+    set_word(
+        &mut bytes,
+        b"OS/2",
+        OS2_X_HEIGHT_OFFSET,
+        u16::from_be_bytes(INVALID_X_HEIGHT.to_be_bytes()),
+    )?;
+    let invalid = font(&bytes)?;
+    let os2 = invalid.tables().os2().map_err(|error| error.to_string())?;
+    assert_eq!(os2.sx_height(), Some(INVALID_X_HEIGHT));
+    let shape = FontShape::new(METRIC_TEST_SIZE, 400, false);
+    for (bytes, usable) in [(FONT_BYTES.to_vec(), true), (bytes, false)] {
+        let mut database = Database::new();
+        database.load_font_data(bytes);
+        let id = database.faces().next().ok_or("font fixture missing")?.id;
+        let actual = svg_run_x_height_with_face(&database, id, shape);
+        if usable {
+            assert!(actual.flatten().is_some_and(|height| height > 0.0));
+        } else {
+            assert_eq!(actual, None);
+        }
+    }
+    Ok(())
 }
 
 #[test]

@@ -21,6 +21,37 @@ fn fallback_run_layout_rejects_word_spacing_ligatures_rtl_and_nonuniform_scale()
 }
 
 #[cfg(target_os = "macos")]
+#[test]
+fn fallback_combining_cluster_preserves_shaped_glyphs_without_run_alignment() -> Result<(), String>
+{
+    const CONTENT: &str = "A\u{301}日本";
+    let tree = tree_with_physical_noto(CONTENT, "", "Noto Sans", "Noto Sans")?;
+    let text = text(&tree)?;
+    let prepared = prepare_text(&tree, text, CONTENT)?;
+    assert_prepared_fallback(&prepared, CONTENT);
+    assert_ligature_fixture(text, CONTENT);
+    assert!(layout(tree.fontdb(), text, &prepared)?.is_none());
+    assert!(
+        prepared
+            .iter()
+            .all(|span| span.fallback_alignment.is_none())
+    );
+    let original = text
+        .layouted()
+        .iter()
+        .flat_map(|span| &span.positioned_glyphs)
+        .map(|glyph| (glyph.font, glyph.id, glyph.transform()))
+        .collect::<Vec<_>>();
+    let actual = prepared
+        .iter()
+        .flat_map(|span| &span.glyphs)
+        .map(|glyph| (glyph.font, glyph.id, glyph.transform()))
+        .collect::<Vec<_>>();
+    assert_eq!(actual, original);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
 struct RejectionCase {
     content: &'static str,
     attributes: &'static str,
