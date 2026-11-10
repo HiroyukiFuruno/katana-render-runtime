@@ -20,6 +20,24 @@ fn fallback_run_layout_rejects_word_spacing_ligatures_rtl_and_nonuniform_scale()
 
 #[cfg(target_os = "macos")]
 #[test]
+fn fallback_alignment_rejects_distinct_authored_baselines() -> Result<(), String> {
+    const CONTENT: &str = "A日<tspan alignment-baseline='hanging'>B</tspan>";
+    let tree = tree_with_physical_noto(CONTENT, "", "Noto Sans", "Noto Sans")?;
+    let text = text(&tree)?;
+    let prepared = prepare_text(&tree, text, CONTENT)?;
+    assert_prepared_fallback(&prepared, CONTENT);
+    let mut glyphs = text
+        .layouted()
+        .iter()
+        .flat_map(|span| &span.positioned_glyphs);
+    let first = glyphs.next().ok_or("baseline fixture has no glyphs")?;
+    assert!(glyphs.any(|glyph| glyph.transform().ty != first.transform().ty));
+    assert!(layout(tree.fontdb(), text, &prepared)?.is_none());
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn fallback_combining_cluster_preserves_shaped_glyphs_without_run_alignment() -> Result<(), String>
 {
     const CONTENT: &str = "A\u{301}日本";
