@@ -174,6 +174,16 @@ fn geometry_contract_rejects_git_missing_relationships_and_misassociated_commit_
 
 const INVALID_GIT_COMMIT_GEOMETRY: &[(&str, &str, &str)] = &[
     (
+        r#"<g class="branchLabel"><text>feature</text></g>"#,
+        "",
+        "semantic element must be unique",
+    ),
+    (
+        r#"<g class="branchLabel"><text>feature</text></g>"#,
+        r#"<g class="branchLabel"><text>main</text></g>"#,
+        "semantic element must be unique",
+    ),
+    (
         r#"class="commit base" cx="20" cy="20" r="10""#,
         r#"class="commit base" cx="20" cy="20" r="0""#,
         "commit bullet must have area",

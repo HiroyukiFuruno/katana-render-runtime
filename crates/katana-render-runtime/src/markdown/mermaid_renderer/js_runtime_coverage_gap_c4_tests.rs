@@ -1,4 +1,6 @@
-use super::super::{GeometryContract, tests};
+use super::super::super::reference_score_tests::{C4_DEPLOYMENT_SOURCE, render_mermaid_svg};
+use super::super::{GeometryContract, tests, text};
+use resvg::usvg::roxmltree::Document;
 
 #[test]
 fn c4_validator_reports_wrong_root_and_duplicate_inventory() {
@@ -105,6 +107,28 @@ fn c4_validator_rejects_relation_without_target_coordinate() -> Result<(), Strin
     assert_eq!(
         GeometryContract::dynamic(&changed, false).err().as_deref(),
         Some("missing x2")
+    );
+    Ok(())
+}
+
+#[test]
+fn c4_deployment_rejects_a_real_label_displaced_from_its_parent() -> Result<(), String> {
+    let svg = render_mermaid_svg(C4_DEPLOYMENT_SOURCE)?;
+    GeometryContract::deployment(&svg)?;
+    let document = Document::parse(&svg).map_err(|error| error.to_string())?;
+    let label = document
+        .descendants()
+        .find(|node| node.has_tag_name("text") && text(*node) == "[Apple iOS or Android]")
+        .ok_or("deployment technology label missing")?;
+    let position = label
+        .attribute_node("x")
+        .ok_or("label x position missing")?;
+    let range = position.range_value();
+    let mut displaced = svg.clone();
+    displaced.replace_range(range, "1000000");
+    assert_eq!(
+        GeometryContract::deployment(&displaced).err().as_deref(),
+        Some("deployment labels detached from parent")
     );
     Ok(())
 }

@@ -22,7 +22,7 @@ const C4_DYNAMIC_SOURCE_JA: &str = "C4Dynamic
     Container(api, \"APIアプリケーション\", \"Java と Spring Boot\")
     Rel(spa, api, \"利用する\", \"JSON/HTTPS\")";
 
-const C4_DEPLOYMENT_SOURCE: &str = "C4Deployment
+pub(super) const C4_DEPLOYMENT_SOURCE: &str = "C4Deployment
     title Deployment diagram for Internet Banking System
     Deployment_Node(mob, \"Customer's mobile device\", \"Apple iOS or Android\") {
         Container(mobile, \"Mobile App\", \"Xamarin\")

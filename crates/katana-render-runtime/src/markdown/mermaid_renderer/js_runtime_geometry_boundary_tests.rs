@@ -88,3 +88,11 @@ fn malformed_paths_missing_viewbox_and_empty_labels_are_rejected() -> Result<(),
     );
     Ok(())
 }
+
+#[test]
+fn closed_subpath_preserves_the_explicit_endpoints_of_the_full_path() -> Result<(), String> {
+    let svg = element("<svg><path d='M0 0 L4 0 L4 4 Z M6 6 L9 7'/></svg>")?;
+    let path = first_element(&svg, "path")?;
+    assert_eq!(endpoints(path)?, ([0.0, 0.0], [9.0, 7.0]));
+    Ok(())
+}
