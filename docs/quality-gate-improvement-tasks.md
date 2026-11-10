@@ -2,6 +2,9 @@
 
 ## 現在の実行地点（2026-11-10、以下の過去結果と区別する）
 
+- [x] `2095cc8c`、`9dd5e6c9`、`42f3b613` は実SVGで入れ子の `<use>` の正常・欠落・循環参照と、逆変換できない線形・放射グラデーションを検証。通常の変換と対照し、下地の画素が残ることを確認。初回ASTはテストファイル307行で失敗し、参照テストを専用モジュールへ移して既存循環ケースも再実行。最終foundation・AST・限定3件は実0。前回0回だった `svgtree/parse.rs:691–692` と `resvg/path.rs:124,143` は限定LLVMで各1回。ソース・binary前後一致、一時profile回収済み（`tmp/quality/resumed-owner-r3509/coverage-svg-missing-nested-use-exact-8bvya972/safe-summary.json`）。正式rootの608行は未更新。製品コードと公開条件は変更なし。
+- [/] 到達性の確認。`svg_rasterize_html_glyph_baseline.rs:76,125,163` は直前に同じ列挙値を除外。`:116,156` はmacOSのレイアウト測定が常に値を返し、他OSの値なしは既存テストで検証済み。`layout_scroll_extent_plane.rs:18` は同じ入力sliceの空を先に除外し、usvg `parser/filter.rs:1061` は照明要素を直前に3種に限定。実入力で検証できる箇所と区別し、除外や疑似入力による集計の穴埋めはしていない。
+
 - [/] `569e6beb` の正式rootは6,162件成功・別に15件skip、86,754/87,362行（99.3040452371%）、未カバー608行。前回 `46368258` の613行から5減、分母は同じ。クリック診断、フォント差し替え、SVGベースライン、角丸の疑似クラス、計測キャッシュ上限が各1行。ソース前後一致・収集実0・`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-vnf1auxz/safe-summary.json`）。未カバーにはSVG writerの `Normal` / `Auto` を事前に除く3分岐など実入力では到達しない箇所も含む。到達可能なケースを補完し、到達不能の根拠を区別する。公開条件は維持し、HTML全体の再測定はリファクタリング後に実施する。
 
 - [x] `7ee966e7` で、実フォントを使う8件の計測キャッシュが満杯のとき、製品の `for_measured_text` でも9件目を登録しないことを検証。foundation・AST・限定1件は実0。`svg_rasterize_text_measurement_token.rs:113` は正式元データ0回、限定LLVMで1回。ソースとbinaryは実行前後で一致、一時profile回収済み（`tmp/quality/resumed-owner-r3509/coverage-measured-font-cap-exact-8o95k60j/safe-summary.json`）。製品コードと正式root結果は変更なし。
