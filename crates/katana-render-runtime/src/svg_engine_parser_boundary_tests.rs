@@ -12,6 +12,9 @@ mod paint_boundary_tests;
 #[path = "svg_engine_parser_shape_boundary_tests.rs"]
 mod shape_boundary_tests;
 
+#[path = "svg_engine_parser_use_boundary_tests.rs"]
+mod use_boundary_tests;
+
 #[derive(Clone, Copy)]
 enum PublicInput {
     Bytes(&'static [u8]),
@@ -150,16 +153,6 @@ fn shape_conversion_normalizes_radii_and_skips_invalid_geometry() -> Result<(), 
             assert!(actual.node_by_id("sample").is_none(), "{shape}");
         }
     }
-    Ok(())
-}
-
-#[test]
-fn recursive_use_references_leave_the_visible_sibling_unchanged() -> Result<(), String> {
-    let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8">
-      <defs><g id="group"><rect width="8" height="8" fill="#ff0000"/><use href="#group"/></g></defs>
-      <use id="recursive" href="#recursive"/>
-      <rect width="8" height="8" fill="#00ff00"/><use href="#group"/></svg>"##;
-    assert_eq!(center_pixel(source, &[])?, [0, 255, 0, 255]);
     Ok(())
 }
 
