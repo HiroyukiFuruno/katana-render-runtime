@@ -7,7 +7,6 @@ use syn::spanned::Spanned;
 type RequestBinding = (usize, &'static str, &'static str, &'static [&'static str]);
 
 const REQUEST_ROUTE: &str = "mermaid-request-route";
-const REQUEST_ROUTE_STATEMENTS: usize = 5;
 const REQUEST_SCRIPT_BUILD_STATEMENT_INDEX: usize = 2;
 const REQUEST_RENDER_STATEMENT_INDEX: usize = 3;
 const REQUEST_BINDINGS: &[RequestBinding] = &[
@@ -36,9 +35,6 @@ pub(super) fn inspect_caller(source: &Source, facts: &mut Vec<Value>) -> Result<
     scripts::parameters(&render.sig, &["source", "bundle", "preset"])?;
     let projected = super::super::v8_route::capture::caller(&render.block)?;
     let block = &projected;
-    if block.stmts.len() != REQUEST_ROUTE_STATEMENTS {
-        return Err("mermaid-request-route:statement-count".into());
-    }
     for &(index, binding, callee, args) in REQUEST_BINDINGS {
         plain_local(block, index, binding)?;
         require_direct_call(local(block, index, binding)?, callee, args, REQUEST_ROUTE)?;

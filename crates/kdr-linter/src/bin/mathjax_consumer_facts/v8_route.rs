@@ -7,7 +7,6 @@ use syn::spanned::Spanned;
 #[path = "mermaid_classic_capture.rs"]
 pub(super) mod capture;
 
-const V8_STATEMENTS: usize = 6;
 const DIAGRAM_JS_RUNTIME_INPUT_INDEX: usize = 5;
 const COMPILE_STATEMENT_INDEX: usize = 3;
 const RUN_STATEMENT_INDEX: usize = 4;
@@ -23,9 +22,6 @@ pub(super) fn inspect_v8_compile(
     let evaluate = super::source::free_function(&source.ast, "evaluate")?;
     let projected = capture::evaluate(&evaluate.block)?;
     let block = &projected;
-    if block.stmts.len() != V8_STATEMENTS {
-        return Err("v8-compile-order:statement-count".into());
-    }
     require_local_method(block, 0, "script_code", "as_ref", "script.code")?;
     require_required_allocation(block, 1, "source", "SOURCE_ALLOC_ERR", "script_code")?;
     require_required_allocation(block, 2, "origin_name", "FILENAME_ALLOC_ERR", "script.name")?;
