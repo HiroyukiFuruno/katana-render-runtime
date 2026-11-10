@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use super::{input_rows, sha256};
 use crate::macho_noso_test_support::{Corruption, MachoNosoFixture};
 use serde_json::{Value, json};

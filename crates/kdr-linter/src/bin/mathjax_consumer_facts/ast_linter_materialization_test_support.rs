@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use super::{Fixture, MATHJAX_RENDERER_INDEX, OPAQUE_INPUTS, RUST_INPUTS, shared_readback};
 use std::path::Path;
 

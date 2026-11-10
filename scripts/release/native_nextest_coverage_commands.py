@@ -10,10 +10,13 @@ REPORT_DIRECTORY = Path("tmp/quality/standalone-performance-coverage")
 
 ROOT_TEST_ONLY_DIRECTORY = "crates/kdr-linter/src/bin/mathjax_consumer_facts"
 ROOT_TEST_ONLY_SHA256 = {
+    f"{ROOT_TEST_ONLY_DIRECTORY}/ast_linter_materialization_test_support.rs": "8da256b7b7eeee0856e7241441b59704b1cf11d5b5b00d96b79cfab926ad3909",
     f"{ROOT_TEST_ONLY_DIRECTORY}/bundle_private_ast_tests.rs": "e446403f7e6c5818cb4fb8fd6beb257619e5a1b21087ac0084807136ebff6e83",
     f"{ROOT_TEST_ONLY_DIRECTORY}/default_route_tests.rs": "10ebe13ddd4e1e3b6427a745fab6bcec62eb047ec5fe2123755c9ca3dfeeff46",
     f"{ROOT_TEST_ONLY_DIRECTORY}/default_materialize_private_ast_tests.rs": "dcf25f56d59e5c23f3183269fb44f599201e40435b47b257bcb65e75aae2dd84",
+    f"{ROOT_TEST_ONLY_DIRECTORY}/macho_noso_tests_private.rs": "8c1893ff2f1ee0fb16ff5e20f9dfdcc18ba63e10fd27bd06086040be94d092d3",
     f"{ROOT_TEST_ONLY_DIRECTORY}/runtime_dispatch_private_ast_tests.rs": "be1196e1b64af1b7fbdcde58852782bcbb4479443d619cb213fd44689a8285f9",
+    f"{ROOT_TEST_ONLY_DIRECTORY}/v8_route_test_support.rs": "df25cc83cb41909bc68d2b6edd5e26b5bff366f7c3a1fe057e9c3cab79aeee49",
 }
 
 

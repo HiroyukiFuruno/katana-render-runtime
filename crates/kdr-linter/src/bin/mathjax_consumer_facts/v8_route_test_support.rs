@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use crate::source::{self, RUST_INPUTS, Source};
 use std::collections::BTreeMap;
 

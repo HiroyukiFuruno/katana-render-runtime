@@ -4676,6 +4676,32 @@ class CoverageDomainUnitTests(unittest.TestCase):
                         guard.coverage_selection(root, target, "root", candidate,
                                                  report_environment, collection=True)
 
+    def test_root_test_only_scope_keeps_adjacent_validators_measured(self) -> None:
+        with self.fixture("root", "test", collection=True) as (root, _, _):
+            commands = guard._root_coverage_commands()
+            guard._validate_root_test_only_scope(root, commands.ROOT_TEST_ONLY_SHA256)
+            directory = root / "crates/kdr-linter/src/bin/mathjax_consumer_facts"
+            pattern = commands.root_coverage_ignore_regex(root)
+            for test_file, implementation in (
+                ("macho_noso_tests_private.rs", "macho_noso.rs"),
+                ("ast_linter_materialization_test_support.rs", "materializer.rs"),
+                ("v8_route_test_support.rs", "v8_route.rs"),
+            ):
+                with self.subTest(test_file=test_file):
+                    self.assertRegex(str(directory / test_file), pattern)
+                    self.assertNotRegex(str(directory / implementation), pattern)
+                    self.assertNotRegex(str(root / test_file), pattern)
+
+    def test_root_test_only_scope_rejects_modified_fixture_even_with_cfg_test(self) -> None:
+        with self.fixture("root", "test", collection=True) as (root, _, _):
+            commands = guard._root_coverage_commands()
+            directory = root / "crates/kdr-linter/src/bin/mathjax_consumer_facts"
+            test_file = directory / "macho_noso_tests_private.rs"
+            original = test_file.read_bytes()
+            test_file.write_bytes(original + b"\n// changed fixture\n")
+            with self.assertRaisesRegex(RuntimeError, "differs from its fixed content"):
+                guard._validate_root_test_only_scope(root, commands.ROOT_TEST_ONLY_SHA256)
+
     def test_coverage_collection_rejects_thresholds_clean_and_unfixed_output(self) -> None:
         for profile in (None, "dev", "krr-coverage-extra"):
             with self.subTest(profile=profile), self.fixture("performance-baseline", "test", collection=True) as (root, args, environment):
