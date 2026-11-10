@@ -89,9 +89,9 @@ fn render_tile_row(
             right: x.saturating_add(TILE_SIZE).min(state.frame.right),
             bottom: y.saturating_add(TILE_SIZE).min(state.frame.bottom),
         };
-        if let Some(copy) = coverage(content, state.frame).intersect(state.affected) {
-            render_tile(target, state, content, copy, scratch)?;
-        }
+        /* WHY: 両軸のtile_originsは影響範囲と交差するタイルだけを列挙する。 */
+        let copy = coverage(content, state.frame).overlap_bounds(state.affected);
+        render_tile(target, state, content, copy, scratch)?;
     }
     Ok(())
 }

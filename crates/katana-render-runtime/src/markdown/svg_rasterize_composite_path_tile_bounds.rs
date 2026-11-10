@@ -12,13 +12,17 @@ pub(super) struct Rect {
 
 impl Rect {
     pub(super) fn intersect(self, other: Self) -> Option<Self> {
-        let result = Self {
+        let result = self.overlap_bounds(other);
+        (result.left < result.right && result.top < result.bottom).then_some(result)
+    }
+
+    pub(super) fn overlap_bounds(self, other: Self) -> Self {
+        Self {
             left: self.left.max(other.left),
             top: self.top.max(other.top),
             right: self.right.min(other.right),
             bottom: self.bottom.min(other.bottom),
-        };
-        (result.left < result.right && result.top < result.bottom).then_some(result)
+        }
     }
 }
 

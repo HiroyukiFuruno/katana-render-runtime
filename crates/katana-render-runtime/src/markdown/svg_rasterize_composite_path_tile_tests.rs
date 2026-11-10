@@ -91,6 +91,30 @@ fn nested_crop_origins_accumulate_in_frame_pixels() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn affected_range_contains_the_last_pixel_at_maximum_frame_extent() {
+    let frame = Rect {
+        left: 0,
+        top: 0,
+        right: i32::MAX,
+        bottom: 1,
+    };
+    let start = frame.right - 1;
+    let (first, last) = tile_origins(start, frame.right, frame.right);
+    assert_eq!(first, last);
+    let tile = Rect {
+        left: first,
+        right: first.saturating_add(TILE_SIZE).min(frame.right),
+        ..frame
+    };
+    let area = Rect {
+        left: start,
+        ..frame
+    };
+    let copy = coverage(tile, frame).overlap_bounds(area);
+    assert_eq!((copy.left, copy.right), (start, frame.right));
+}
+
 struct FallbackText;
 
 impl super::super::super::TextRasterizer for FallbackText {
