@@ -97,6 +97,24 @@ fn execute(root: &Path) -> Result<std::process::Output, std::io::Error> {
 }
 
 #[test]
+fn native_width_cli_rejects_non_utf8_source_without_report()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = tempfile::tempdir()?;
+    copy_inputs(fixture.path())?;
+    let accepted = execute(fixture.path())?;
+    assert!(accepted.status.success());
+    fs::write(fixture.path().join(INPUTS[1]), [0xff])?;
+    let output = execute(fixture.path())?;
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr)?.trim(),
+        format!("invalid-utf8:{}", INPUTS[1])
+    );
+    Ok(())
+}
+
+#[test]
 fn native_width_cli_rejects_changed_format_contracts_without_report()
 -> Result<(), Box<dyn std::error::Error>> {
     let fixture = tempfile::tempdir()?;
