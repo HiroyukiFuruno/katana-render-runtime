@@ -2,6 +2,10 @@
 
 ## 現在の実行地点（2026-11-10、以下の過去結果と区別する）
 
+- [/] `da7e6fcf` の正式rootは6,176件成功・別15件skip、86,741/87,303行（99.3562649623%）、未カバー562行。前回567行から5減。差分は合字、グラデーション、SVG基線補正、Mermaidの文数、V8の文数で各1行。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-uhb71xva/safe-summary.json`）。同日時点でGitHub v0.4.24はDraft Release、対象branchのOpen PRなし。
+- [x] `5b27b525`・`d9da0cd6` は実HTMLテーブルの取得済み要素からスタイルを使い、SVGマーカーの終端は正規化済みセグメントを使う。foundation・AST・vendor来歴検査は実0。初回限定検査は成果物4,771,983,360B／上限4,726,095,872Bで起動前に実1。開発用profileのみを既存の排他付きcleanで整理し、保護35件を再検証、4,194,684,928Bでadmission実0。同じ差分の限定15件は実0（`tmp/quality/resumed-owner-r3509/coverage-svg-marker-table-cell-retry-y9iflvt8/safe-summary.json`、`tmp/quality/resumed-owner-r3509/coverage-marker-table-dev-clean-u33oqp07/`）。562行の正式値には未反映。
+- [x] `82915453` はCLIの証明付き描画で確定済み実行時パスを使い、成功時に同じパスを返す解決処理の再呼出を除いた。foundation・AST・実Mermaid描画、明示symlink、全種renderer選択の関連3件は実0（`tmp/quality/resumed-owner-r3509/coverage-cli-direct-renderer-exact-1_weye2n/safe-summary.json`）。同梱資源の候補は既存のASTが固定する読み込み形を変え、初回AST実101で拒否されたため取り下げた（`tmp/quality/resumed-owner-r3509/coverage-runtime-loader-cli-proof-exact-ahylmr5b/ast-exit.json`）。検査は変更していない。562行の正式値には未反映。
+
 - [/] `cbeb1620` の正式rootは6,174件成功・別15件skip、86,735/87,302行（99.3505303429%）、未カバー567行。前回577行から10減。差分はクリップ2行、射影・色変換・フォント照合・共有フォント・フォールバック各1行、SVG行補正3行。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-udb0a0lx/safe-summary.json`）。未カバー0と完全ゲートは未達。
 - [x] `fdc48832`・`6d784c3c` は文字ごとの縦ずれと実フォントの一時コピーの破損を拒否する回帰、および下位で確定したSVG色変換範囲の二重判定を整理。foundation・AST・関連8件は実0（`tmp/quality/resumed-owner-r3509/coverage-svg-row-and-component-boundaries-exact-nvi14yqo/safe-summary.json`）。`9a439a84`・`cbeb1620` は確認後に移動した実フォントを共有キャッシュへ登録しない回帰、SVG行補正の検証済み先頭spanの再利用。foundation・AST・関連7件は実0（`tmp/quality/resumed-owner-r3509/coverage-font-move-and-svg-span-exact-cg1pab1b/safe-summary.json`）。
 - [x] `9bbc450d`・`a2eacfe6` はSVG基線補正で検証済みの先頭字形を再利用し、Mermaidの静的検査で前段が保証する5文・6文の重複判定を除いた。複数行補正、フォールバックの拒否、文数異常を含む既存14件の結果と診断を維持。foundation・AST・限定14件は実0、ソース差分は前後一致（`tmp/quality/resumed-owner-r3509/coverage-svg-middle-and-mermaid-ast-exact-3tbbmuua/safe-summary.json`）。567行の正式値には未反映。
