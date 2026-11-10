@@ -77,6 +77,28 @@ fn mixed_fallback_glyph_ink_combines_translated_real_runs() -> Result<(), String
     Ok(())
 }
 
+#[test]
+fn trailing_primary_space_keeps_fallback_ink_bounds() -> Result<(), String> {
+    let (database, base, font) = fixture()?;
+    let runs = resolved_font_runs(&database, base, FAMILY, "日 ", WEIGHT, false);
+    assert_eq!(runs.len(), 2);
+    assert_ne!(runs[0].0, base);
+    assert_eq!((runs[1].0, runs[1].1.as_str()), (base, " "));
+    let first = cache::cached_svg_run(&database, runs[0].0, &runs[0].1, font)
+        .ok_or("fallback metrics missing")?;
+    let space = cache::cached_svg_run(&database, base, " ", font).ok_or("space metrics missing")?;
+    assert!(first.ink_bounds.is_some());
+    assert!(space.ink_bounds.is_none() && space.advance > 0.0);
+    let mut result = empty_svg_text_metrics(f32::NEG_INFINITY, f32::NEG_INFINITY);
+    assert!(
+        accumulate_svg_font_run_metrics(&database, base, FAMILY, "日 ", font, &mut result,)
+            .ok_or("mixed metrics missing")?
+    );
+    assert_eq!(result.ink_bounds, first.ink_bounds);
+    assert_eq!(result.advance, first.advance + space.advance);
+    Ok(())
+}
+
 fn translated_run_union(
     database: &Arc<Database>,
     runs: &[(ID, String)],

@@ -38,6 +38,26 @@ fn removed_face_rejects_fragment_shaping_after_valid_control() -> Result<(), Str
 }
 
 #[test]
+fn rtl_fragment_is_rejected_after_a_real_font_control() -> Result<(), String> {
+    let mut database = Database::new();
+    database.load_font_data(FONT.to_vec());
+    let face = database.faces().next().ok_or("Noto face missing")?.id;
+    assert_valid_layout(&database, face, face)?;
+    let rtl = "אבג";
+    let result = layout_for_face(
+        &database,
+        face,
+        face,
+        rtl,
+        svg_font_shape(),
+        &[rtl.to_owned()],
+    )
+    .map_err(|error| format!("{error:?}"))?;
+    assert!(result.is_none());
+    Ok(())
+}
+
+#[test]
 fn removed_primary_font_rejects_fallback_fragment_metrics() -> Result<(), String> {
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
     let path = directory.path().join("primary.ttf");
