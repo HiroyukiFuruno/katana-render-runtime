@@ -290,18 +290,17 @@ where
     P: FnMut(tiny_skia_path::Point, usize),
 {
             let idx = path.len() - 1;
-            match path.last().cloned() {
-                Some(Segment::MoveTo(p) | Segment::LineTo(p)) => {
+            match path[idx] {
+                Segment::MoveTo(p) | Segment::LineTo(p) => {
                     draw_marker(p, idx);
                 }
-                Some(Segment::CubicTo(_, _, p)) => {
+                Segment::CubicTo(_, _, p) => {
                     draw_marker(p, idx);
                 }
-                Some(Segment::Close) => {
+                Segment::Close => {
                     let p = get_subpath_start(path, idx);
                     draw_marker(p, idx);
                 }
-                _ => {}
             }
 }
 
@@ -432,18 +431,13 @@ fn middle_move_angle(path: &[Segment], idx: usize, previous: Segment) -> f32 {
 
 fn middle_close_angle(path: &[Segment], idx: usize, previous: Segment) -> f32 {
     match previous {
-        Segment::MoveTo(_) => 0.0,
+        Segment::MoveTo(_) | Segment::Close => 0.0,
         Segment::LineTo(p) => {
             let prev = get_prev_vertex(path, idx);
             let next = get_subpath_start(path, idx);
             calc_angle(prev.x, prev.y, p.x, p.y, p.x, p.y, next.x, next.y)
         }
         Segment::CubicTo(p1, p2, p) => middle_closed_curve_angle(path, idx, p1, p2, p),
-        _ => {
-            let prev = get_prev_vertex(path, idx);
-            let next = get_subpath_start(path, idx);
-            calc_line_angle(prev.x, prev.y, next.x, next.y)
-        }
     }
 }
 
