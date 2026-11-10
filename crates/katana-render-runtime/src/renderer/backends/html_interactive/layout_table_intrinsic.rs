@@ -249,24 +249,17 @@ mod tests {
     }
 
     pub(super) fn projected_target_cell_width(nodes: &[HtmlDocumentNode]) -> Result<f32, String> {
-        let cell = nodes
+        let (cell, style) = nodes
             .iter()
             .find_map(find_target_cell)
             .ok_or_else(|| "parsed table cell must be projected".to_string())?;
-        let HtmlDocumentNode::Element {
-            tag, attributes, ..
-        } = cell
-        else {
-            return Err("target cell projection must be an element".to_string());
-        };
-        let style = CssStyle::from_element(tag, attributes, &CssStyle::browser_default());
         if style.white_space != super::CssWhiteSpace::NoWrap {
             return Err("target cell must retain nowrap style".to_string());
         }
         Ok(TableIntrinsic::min_content_width(cell, &style))
     }
 
-    fn find_target_cell(node: &HtmlDocumentNode) -> Option<&HtmlDocumentNode> {
+    fn find_target_cell(node: &HtmlDocumentNode) -> Option<(&HtmlDocumentNode, CssStyle)> {
         match node {
             HtmlDocumentNode::Element {
                 tag,
@@ -279,7 +272,10 @@ mod tests {
                         .iter()
                         .any(|(name, value)| name == "id" && value == "target")
                 {
-                    return Some(node);
+                    return Some((
+                        node,
+                        CssStyle::from_element(tag, attributes, &CssStyle::browser_default()),
+                    ));
                 }
                 children.iter().find_map(find_target_cell)
             }
