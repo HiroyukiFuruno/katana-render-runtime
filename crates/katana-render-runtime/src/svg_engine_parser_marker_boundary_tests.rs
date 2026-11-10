@@ -65,3 +65,18 @@ fn trailing_move_receives_the_path_end_marker() -> Result<(), String> {
     assert!(actual.pixels().iter().any(|pixel| pixel.alpha() > 0));
     Ok(())
 }
+
+#[test]
+fn marker_with_unrepresentable_clip_leaves_the_stroked_path_visible() -> Result<(), String> {
+    let path = "M10 20 L30 20";
+    let marked = source(path, "marker-start='url(#m)'").replace(
+        "markerWidth='10' markerHeight='10' orient='auto' overflow='visible'",
+        "markerWidth='1e-39' markerHeight='10' viewBox='0 0 10 10' orient='auto'",
+    );
+    assert_eq!(marker_path_count(parse(&marked)?.root()), 0);
+    let actual = render_source(&marked)?;
+    let unmarked = render_source(&source(path, ""))?;
+    assert!(unmarked.pixels().iter().any(|pixel| pixel.alpha() > 0));
+    assert_eq!(actual.data(), unmarked.data());
+    Ok(())
+}
