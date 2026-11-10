@@ -9,14 +9,11 @@ pub(super) fn clip_plane(
     keep_greater: bool,
 ) -> Result<(), String> {
     output.clear();
-    if input.is_empty() {
-        return Ok(());
-    }
-    let signed_distance =
-        |point: Point| (point.0 - origin.0) * axis.0 + (point.1 - origin.1) * axis.1 - boundary;
     let Some(&previous_point) = input.last() else {
         return Ok(());
     };
+    let signed_distance =
+        |point: Point| (point.0 - origin.0) * axis.0 + (point.1 - origin.1) * axis.1 - boundary;
     clip_plane_edges(input, output, previous_point, signed_distance, keep_greater)
 }
 

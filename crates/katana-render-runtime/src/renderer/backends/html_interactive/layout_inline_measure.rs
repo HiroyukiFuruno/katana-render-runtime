@@ -13,19 +13,22 @@ impl InlineMeasurement {
         available: f32,
         style: &CssStyle,
     ) -> f32 {
-        if style.text_align == CssTextAlign::Start {
-            return x;
-        }
+        let center = match style.text_align {
+            CssTextAlign::Start => return x,
+            CssTextAlign::Center => true,
+            CssTextAlign::End => false,
+        };
         let width = nodes
             .iter()
             .filter(|node| !matches!(node, HtmlDocumentNode::Text(text) if text.trim().is_empty()))
             .map_while(|node| Self::node_width(node, style, available))
             .sum::<f32>()
             .min(available);
-        match style.text_align {
-            CssTextAlign::Start => x,
-            CssTextAlign::Center => x + (available - width).max(0.0) / 2.0,
-            CssTextAlign::End => x + (available - width).max(0.0),
+        let remaining = (available - width).max(0.0);
+        if center {
+            x + remaining / 2.0
+        } else {
+            x + remaining
         }
     }
 

@@ -146,10 +146,12 @@ fn resolve_column_width(
     intrinsic_flexible: f32,
 ) -> f32 {
     width.map_or_else(
-        || match (flexible, intrinsic_flexible > 0.0) {
-            (0, _) => minimum,
-            (_, true) => flexible_target * minimum / intrinsic_flexible,
-            (_, false) => flexible_target / flexible as f32,
+        || {
+            if intrinsic_flexible > 0.0 {
+                flexible_target * minimum / intrinsic_flexible
+            } else {
+                flexible_target / flexible as f32
+            }
         },
         |specified_width| specified_width.max(minimum),
     )
