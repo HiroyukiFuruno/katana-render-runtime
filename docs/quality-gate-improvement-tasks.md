@@ -1,8 +1,13 @@
 # 品質ゲート改善の作業台帳
 
-## 現在の実行地点（2026-11-09、以下の過去結果と区別する）
+## 現在の実行地点（2026-11-10、以下の過去結果と区別する）
 
-- [/] 11月10日の直近正式rootは `4d868279`、6,018/6,018成功・別15skip、86,958/87,755行（99.09178964161586%）、未カバー797行。前回の815行から18減、分母は20行増。ソース前後一致、収集実0、厳格閾値は `coverage-policy` で実1（`tmp/quality/resumed-owner-r3509/root-coverage-4d868279-rv4uu0j_/safe-summary.json`）。以降の限定回帰と正式結果を区別する。
+- [/] 最新の正式rootは `b49ef438`、86,985/87,660行（99.2299794661%）、未カバー675行。ソース前後一致、収集実0、厳格閾値は `coverage-policy` で実1（`tmp/quality/resumed-owner-r3509/root-coverage-after-profile-clean-rt76d3w3/safe-summary.json`）。現行HEADの完全ゲートと公開は未完。
+- [x] 古い計測バイナリが現行ソースの末尾を越える行を報告したため、保護対象を照合して既存のcoverage profileだけを整理し、上記の正式結果を取り直した。現行ソース末尾を越えるマッピングは `e0f8bcb3` で拒否。Nextestアーカイブの隔離回帰は `b90b0a25` で実測済み、正式収集への組み込みは未完。
+- [x] `9bea92ed` はSVGマーカーのクリップ変換を表現できないときに、元の線が残ることを画像で確認。関連5件、AST・整形が成功（`tmp/quality/resumed-owner-r3509/coverage-marker-clip-exact-155v3929/safe-summary.json`）。限定LLVMで前回0回だったエラー経路を通過。上記の正式未カバー行数は未更新。
+- [x] `570641f6` はmacOSの実可変フォントで補正量と描画準備済みglyphの一致を確認し、別種の参照先を持つSVGグラデーションは色停止点と全画素を対照と照合。静的検査・ASTと新規2件が成功。前回0回だった可変faceの補正経路を3回通過。グラデーションの限定測定では新規実行範囲0（`tmp/quality/resumed-owner-r3509/coverage-font-and-paint-exact-05b9tw77/safe-summary.json`）。
+
+- [/] 11月10日の先行正式rootは `4d868279`、6,018/6,018成功・別15skip、86,958/87,755行（99.09178964161586%）、未カバー797行。前回の815行から18減、分母は20行増。ソース前後一致、収集実0、厳格閾値は `coverage-policy` で実1（`tmp/quality/resumed-owner-r3509/root-coverage-4d868279-rv4uu0j_/safe-summary.json`）。
 
 - [x] `7b84e114` のMermaidを独立raw JSと製品PNGで正式比較し、117/117件が99以上、最低99.085711、R01/R02成立、実0、source前後一致（`tmp/quality/resumed-owner-r3509/mermaid-current-after-capacity-recovery-7h1_h288/comparison/receipt.json`）。先行の固定容量超過と再試行前拒否を原ログに保持。release/coverage生成物を保護照合して限定整理し、35参照とdebug CLIを保持して3.40GB/上限4.73GBで再開した。
 - [x] `854a559f` と `7b84e114` のMermaid上下ポート・HTMLフォント異常入力の回帰を統合。関連4件、静的/ASTが実0。限定LLVM計測で前回0回の経路を実通過（`tmp/quality/resumed-owner-r3509/mermaid-html-focused-coverage-b37nhilf/safe-summary.json`）。全体coverageの更新には使わない。
