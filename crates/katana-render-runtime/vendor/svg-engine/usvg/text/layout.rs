@@ -1955,10 +1955,8 @@ fn append_shaped_run(
     levels: &[unicode_bidi::Level],
     glyphs: &mut Vec<Glyph>,
 ) {
+    // visual_runs は非空の段落を非空の区間に分割する。
     let sub_text = &context.text[run.clone()];
-    if sub_text.is_empty() {
-        return;
-    }
     let ltr = levels[run.start].is_ltr();
     let direction = if ltr {
         svg_harfrust::Direction::LeftToRight
@@ -2256,9 +2254,8 @@ impl ResolvedFont {
 
     fn dominant_baseline_shift(&self, baseline: DominantBaseline, font_size: f32) -> f32 {
         let alignment = match baseline {
-            DominantBaseline::Auto => AlignmentBaseline::Auto,
+            DominantBaseline::Auto | DominantBaseline::NoChange => AlignmentBaseline::Auto,
             DominantBaseline::UseScript => AlignmentBaseline::Auto, // unsupported
-            DominantBaseline::NoChange => AlignmentBaseline::Auto,  // already resolved
             DominantBaseline::ResetSize => AlignmentBaseline::Auto, // unsupported
             DominantBaseline::Ideographic => AlignmentBaseline::Ideographic,
             DominantBaseline::Alphabetic => AlignmentBaseline::Alphabetic,
@@ -2304,8 +2301,7 @@ impl ResolvedFont {
     // and it's far more complex now. Not sure if anyone actually supports it.
     fn alignment_baseline_shift(&self, alignment: AlignmentBaseline, font_size: f32) -> f32 {
         match alignment {
-            AlignmentBaseline::Auto => 0.0,
-            AlignmentBaseline::Baseline => 0.0,
+            AlignmentBaseline::Auto | AlignmentBaseline::Baseline => 0.0,
             AlignmentBaseline::BeforeEdge | AlignmentBaseline::TextBeforeEdge => {
                 self.ascent(font_size)
             }
