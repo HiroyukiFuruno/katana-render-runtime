@@ -194,12 +194,15 @@ class NativeNextestRetryLibraryContractTests(unittest.TestCase):
         self.assertEqual((self.state / "passed-count").read_text(), passed)
         self.assertEqual((self.state / "failed-count").read_text(), failed)
 
-    def _coverage_report(self, stage: str) -> dict[str, object]:
+    def _coverage_report(self, stage: str, archive: Path | None = None) -> dict[str, object]:
         report_path = self.evidence / f"{stage}.json"
-        result = self._run([
+        arguments = [
             "llvm-cov", "report", "--workspace", "--profile", "krr-coverage", "--locked",
             "--json", "--output-path", str(report_path),
-        ], f"{stage}-command")
+        ]
+        if archive is not None:
+            arguments.extend(["--nextest-archive-file", str(archive)])
+        result = self._run(arguments, f"{stage}-command")
         self.assertEqual(result.returncode, 0, result.stderr)
         value = json.loads(report_path.read_text(encoding="utf-8"))
         if not isinstance(value, dict):
@@ -211,7 +214,7 @@ class NativeNextestRetryLibraryContractTests(unittest.TestCase):
         if not isinstance(data, list):
             self.fail("llvm-cov export has no data array")
         source_path = str(self.root / "src/lib.rs")
-        functions = self._reported_functions(data, source_path)
+        functions = self._reported_functions(data, source_path, "covered_only_by_passed_case")
         self.assertEqual(len(functions), 1, functions)
         count = functions[0].get("count")
         self.assertIsInstance(count, int)
@@ -223,7 +226,9 @@ class NativeNextestRetryLibraryContractTests(unittest.TestCase):
         report = self._coverage_report("retained-coverage")
         self.assertGreater(self._passed_only_function_count(report), 0)
 
-    def _reported_functions(self, data: list[object], source_path: str) -> list[dict[str, object]]:
+    def _reported_functions(
+        self, data: list[object], source_path: str, function_name: str,
+    ) -> list[dict[str, object]]:
         reported: list[dict[str, object]] = []
         for unit_value in data:
             if not isinstance(unit_value, dict):
@@ -232,11 +237,11 @@ class NativeNextestRetryLibraryContractTests(unittest.TestCase):
             functions = unit.get("functions")
             if not isinstance(functions, list):
                 continue
-            reported.extend(self._matching_functions(functions, source_path))
+            reported.extend(self._matching_functions(functions, source_path, function_name))
         return reported
 
     def _matching_functions(
-        self, functions: list[object], source_path: str,
+        self, functions: list[object], source_path: str, function_name: str,
     ) -> list[dict[str, object]]:
         matches: list[dict[str, object]] = []
         for function_value in functions:
@@ -244,7 +249,7 @@ class NativeNextestRetryLibraryContractTests(unittest.TestCase):
                 continue
             function = cast(dict[str, object], function_value)
             name, filenames = function.get("name"), function.get("filenames")
-            if (isinstance(name, str) and "covered_only_by_passed_case" in name
+            if (isinstance(name, str) and function_name in name
                     and isinstance(filenames, list) and source_path in filenames):
                 matches.append(function)
         return matches
@@ -301,6 +306,87 @@ class NativeNextestRetryLibraryContractTests(unittest.TestCase):
         repeated = self._coverage_report("repeated-after-profraw-clean-retry")
         self.assertEqual(after_retry.get("data"), repeated.get("data"))
         self.assertEqual((self.root / "Cargo.lock").read_bytes(), lock_bytes)
+
+    def _archive_fixture_with_cli(self) -> Path:
+        source = self.root / "src/lib.rs"
+        current = FIXTURE_SOURCE.replace("covered_only_by_passed_case", "current_only_by_passed_case")
+        self.assertEqual(len(current.splitlines()), len(FIXTURE_SOURCE.splitlines()))
+        source.write_text(current, encoding="utf-8")
+        (self.root / "src/main.rs").write_text(
+            'fn main() { println!("archived CLI"); }\n', encoding="utf-8",
+        )
+        tests = self.root / "tests"
+        tests.mkdir()
+        (tests / "cli.rs").write_text('''\
+#[test]
+fn executes_cli() {
+    let result = std::process::Command::new(env!("CARGO_BIN_EXE_native-nextest-retry-fixture"))
+        .output().unwrap();
+    assert!(result.status.success());
+    assert_eq!(result.stdout, b"archived CLI\\n");
+}
+''', encoding="utf-8")
+        archive = self.root / "current.tar.zst"
+        result = self._run([
+            "llvm-cov", "nextest-archive", "--workspace", "--all-targets", "--all-features",
+            "--locked", "--cargo-profile", "krr-coverage", "--archive-file", str(archive),
+        ], "archive-current")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return archive
+
+    def _run_and_retry_archive(self, archive: Path) -> None:
+        arguments = [
+            "llvm-cov", "nextest", "--archive-file", str(archive), "--no-report",
+            "--user-config-file", str(REPO / "scripts/release/nextest-local-user.toml"),
+            "--test-threads=1",
+        ]
+        first = self._run(arguments, "archive-first")
+        self.assertEqual(first.returncode, 100, first.stdout + first.stderr)
+        original_profiles = self._profile_files()
+        self.assertTrue(original_profiles)
+        retry = self._run([*arguments, "--extract-overwrite", "-R", self._run_id(first)], "archive-retry")
+        self.assertEqual(retry.returncode, 0, retry.stdout + retry.stderr)
+        self._assert_fixture_counts("1", "2")
+        profiles = self._profile_files()
+        self.assertTrue(original_profiles.keys() < profiles.keys())
+        self.assertEqual({key: profiles[key] for key in original_profiles}, original_profiles)
+
+    def test_archive_report_excludes_same_length_stale_binary_and_keeps_cli(self) -> None:
+        self._require_tools()
+        old = self._run([*self._nextest_arguments(None), "-E", "none()"], "compile-stale")
+        self.assertEqual(old.returncode, 4, old.stderr)
+        binaries = [self.cov_target / name for name in self._compiled_test_hashes()
+                    if name.suffix in {"", ".exe"}]
+        self.assertEqual(len(binaries), 1)
+        stale = binaries[0]
+        saved = self.root / f"native_nextest_retry_fixture-abcdef1234500000{stale.suffix}"
+        shutil.copy2(stale, saved)
+        archive = self._archive_fixture_with_cli()
+        self._run_and_retry_archive(archive)
+        shutil.copy2(saved, stale.with_name(saved.name))
+        direct = self._coverage_report("direct-object-selection")
+        selected = self._coverage_report("archive-object-selection", archive)
+        self._assert_archive_object_selection(direct, selected)
+
+    def _assert_archive_object_selection(
+        self, direct: dict[str, object], selected: dict[str, object],
+    ) -> None:
+        direct_data = direct.get("data")
+        selected_data = selected.get("data")
+        if not isinstance(direct_data, list) or not isinstance(selected_data, list):
+            self.fail("llvm-cov export has no data array")
+        source = str(self.root / "src/lib.rs")
+        stale_name = "covered_only_by_passed_case"
+        stale = self._reported_functions(direct_data, source, stale_name)
+        self.assertEqual([function["count"] for function in stale], [0])
+        self.assertFalse(self._reported_functions(selected_data, source, stale_name))
+        for filename, function_name in (
+            ("lib.rs", "current_only_by_passed_case"), ("main.rs", "main"),
+        ):
+            covered = self._reported_functions(
+                selected_data, str(self.root / "src" / filename), function_name,
+            )
+            self.assertIn(1, [function["count"] for function in covered])
 
 
 if __name__ == "__main__":
