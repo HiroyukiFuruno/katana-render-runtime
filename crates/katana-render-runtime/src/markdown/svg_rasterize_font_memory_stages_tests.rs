@@ -28,6 +28,26 @@ fn physical_font_stage_rejects_a_database_without_the_selected_family() {
 }
 
 #[test]
+fn font_memory_probe_rejects_a_real_face_without_sample_glyphs()
+-> Result<(), Box<dyn std::error::Error>> {
+    let bytes =
+        include_bytes!("../../../../tests/fixtures/fonts/han-kerning/NotoSansCJKjp-han14.otf");
+    let manager = FontMgr::new();
+    let typeface = manager
+        .new_from_data(Data::new_copy(bytes), Some(0))
+        .ok_or("Skia could not load the CJK subset")?;
+    assert_ne!(typeface.unichar_to_glyph('あ' as i32), 0);
+    let error = draw_first_glyph(&typeface)
+        .err()
+        .ok_or("font without sample glyphs was accepted")?;
+    assert_eq!(
+        error.to_string(),
+        "selected physical face did not resolve the sample glyphs"
+    );
+    Ok(())
+}
+
+#[test]
 fn selected_font_rejects_binary_backed_real_face() -> Result<(), Box<dyn std::error::Error>> {
     let source = selected_physical_font(&acquire_font_database())?;
     let mut database = Database::new();
