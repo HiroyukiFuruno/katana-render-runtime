@@ -86,22 +86,18 @@ fn script_entries(block: &syn::Block) -> Result<[syn::Expr; 2], String> {
 
 fn validate_script_order([first, second]: &[syn::Expr; 2]) -> Result<(), String> {
     validate_entry(first, "mathjax-runtime.min.js", None)?;
-    if validate_entry(
+    validate_entry(
         second,
         "render-mathjax.js",
         Some("katanaRunMathJaxRuntime({request_json});"),
-    )? != "katanaRunMathJaxRuntime({request_json});"
-    {
-        return Err("global-invocation:literal".into());
-    }
-    Ok(())
+    )
 }
 
 fn validate_entry(
     expression: &syn::Expr,
     expected_name: &str,
     expected_template: Option<&str>,
-) -> Result<String, String> {
+) -> Result<(), String> {
     let syn::Expr::Call(call) = expression else {
         return Err("script-order:entry".into());
     };
@@ -133,7 +129,7 @@ fn validate_entry_name(call: &syn::ExprCall, expected_name: &str) -> Result<(), 
 fn validate_entry_source(
     call: &syn::ExprCall,
     expected_template: Option<&str>,
-) -> Result<String, String> {
+) -> Result<(), String> {
     if let Some(expected_template) = expected_template {
         let syn::Expr::Macro(formatted) = &call.args[1] else {
             return Err("global-invocation:format".into());
@@ -143,13 +139,10 @@ fn validate_entry_source(
     if !matches!(&call.args[1], syn::Expr::Path(source) if source.path.is_ident("runtime_source")) {
         return Err("script-order:source".into());
     }
-    Ok(String::new())
+    Ok(())
 }
 
-fn validate_template(
-    formatted: &syn::ExprMacro,
-    expected_template: &str,
-) -> Result<String, String> {
+fn validate_template(formatted: &syn::ExprMacro, expected_template: &str) -> Result<(), String> {
     if path_name(&formatted.mac.path) != "format" {
         return Err("global-invocation:macro".into());
     }
@@ -168,7 +161,7 @@ fn validate_template(
     if template.value() != expected_template {
         return Err("global-invocation:template".into());
     }
-    Ok(template.value())
+    Ok(())
 }
 
 #[cfg(test)]
