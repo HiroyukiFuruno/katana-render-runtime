@@ -70,3 +70,6 @@ fn mixed_svg_faces_keep_the_largest_layout_ascent() {
 fn non_macos_svg_layout_ascent_keeps_existing_path() {
     assert_eq!(svg_dom_layout_ascent(None, 10.780273, 3.219727), None);
 }
+
+#[path = "svg_rasterize_text_shaping_svg_metrics_fallback_tests.rs"]
+mod fallback_tests;

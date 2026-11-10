@@ -76,6 +76,32 @@ fn original_and_shared_proof_reject_atomic_font_path_replacement() -> Result<(),
     Ok(())
 }
 
+#[test]
+fn atomic_font_replacement_invalidates_reusable_shared_candidates() -> Result<(), String> {
+    let copied = CopiedFont::new()?;
+    let request = crate::markdown::svg_rasterize::font::HtmlFontRequest::from_text(
+        "Helvetica",
+        "shared candidate",
+    );
+    let (mut database, mut proof) =
+        super::super::super::super::sources::build_known_html_font_db_with_shared_budget(
+            &request,
+            64 * 1024 * 1024,
+        );
+    proof.load(
+        &mut database,
+        &[copied.path.to_str().ok_or("nonUTF8 scratch path")?],
+    );
+    proof.capture_prefix(&database);
+    assert!(proof.current(&database));
+    assert!(!proof.reusable_shared_sources(&database).is_empty());
+
+    replace_font_inode(&copied)?;
+    assert!(!proof.current(&database));
+    assert!(proof.reusable_shared_sources(&database).is_empty());
+    Ok(())
+}
+
 fn assert_stale_proofs(
     original: &Arc<Database>,
     proof: &CreationProof,
