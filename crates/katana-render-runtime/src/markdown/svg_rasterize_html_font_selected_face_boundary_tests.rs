@@ -45,6 +45,49 @@ fn selected_binary_face_uses_original_id_without_mapping_alias() -> Result<(), S
 }
 
 #[test]
+fn selector_database_copy_on_write_invalidates_admission_but_keeps_real_glyphs()
+-> Result<(), String> {
+    let (database, proof, id) = binary_context_input(1)?;
+    let context =
+        Context::new(Arc::clone(&database), proof, "AB".into()).ok_or("binary context missing")?;
+    let attempt = context.begin().ok_or("attempt missing")?;
+    let valid = Arc::new(AtomicBool::new(true));
+    let selected = Arc::new(AtomicBool::new(false));
+    let mut options = mutating_selector_options(&database, id);
+    context.install(&mut options, Arc::clone(&valid), Arc::clone(&selected));
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><text id="run" y="20" font-family="Noto Sans">AB</text></svg>"#;
+    let tree = usvg::Tree::from_str(svg, &options).map_err(|error| error.to_string())?;
+    assert!(selected.load(Ordering::Relaxed));
+    assert!(!valid.load(Ordering::Relaxed));
+    assert_eq!(database.len(), 1);
+    let Some(usvg::Node::Text(text)) = tree.node_by_id("run") else {
+        return Err("selected text missing".into());
+    };
+    let glyphs: Vec<_> = text
+        .layouted()
+        .iter()
+        .flat_map(|span| &span.positioned_glyphs)
+        .collect();
+    assert_eq!(glyphs.len(), 2);
+    assert!(glyphs.iter().all(|glyph| glyph.font == id));
+    drop(attempt);
+    assert_state_empty(&context)?;
+    Ok(())
+}
+
+fn mutating_selector_options(database: &Arc<Database>, id: ID) -> usvg::Options<'static> {
+    let mut options = usvg::Options {
+        fontdb: Arc::clone(database),
+        ..usvg::Options::default()
+    };
+    options.font_resolver.select_font = Box::new(move |_, selected| {
+        Arc::make_mut(selected).load_font_data(BUNDLED_SANS_SERIF_FONT.to_vec());
+        Some(id)
+    });
+    options
+}
+
+#[test]
 fn selected_context_real_faces_admit_exact_capacity_and_reject_next() -> Result<(), String> {
     for count in [MAX_REGISTERED_FACES, MAX_REGISTERED_FACES + 1] {
         let (database, proof, _) = binary_context_input(count)?;
