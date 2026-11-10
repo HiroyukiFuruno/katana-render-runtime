@@ -212,3 +212,33 @@ document.addEventListener('keydown', event => {
     assert!(!session.focus_visible);
     Ok(())
 }
+
+#[test]
+fn focus_and_blur_propagate_active_element_bridge_exceptions() -> Result<(), String> {
+    for phase in ["focus", "blur"] {
+        let script = if phase == "focus" {
+            "globalThis.__krrSetFocusedNodeId = () => { throw new Error('active bridge failed'); };"
+        } else {
+            "document.getElementById('target').addEventListener('focus', () => { globalThis.__krrSetFocusedNodeId = () => { throw new Error('active bridge failed'); }; });"
+        };
+        let html = format!("<button id=target>Focus</button><script>{script}</script>");
+        let mut session = listener_error_session(&html).map_err(|error| error.to_string())?;
+        let node = session
+            .runtime
+            .node_for_element_id("target")
+            .ok_or("missing target")?;
+        let result = if phase == "focus" {
+            session.focus_node(node.0, true, false)
+        } else {
+            session
+                .focus_node(node.0, true, false)
+                .map_err(|error| error.to_string())?;
+            session.update_focus(false)
+        };
+        assert!(
+            matches!(result, Err(error) if error.to_string().contains("active bridge failed")),
+            "{phase}"
+        );
+    }
+    Ok(())
+}
