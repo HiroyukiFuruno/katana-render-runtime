@@ -1,6 +1,11 @@
 # 品質ゲート改善の作業台帳
 
-## 現在の実行地点（2026-11-10、以下の過去結果と区別する）
+## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
+
+- [ ] 正式カバレッジ100%・未カバー0を達成した後、挙動と既存テスト結果を維持し、読み込み・キャッシュ等の共通処理とレンダラーの責務境界を精査・整理する。小さい差分ごとに関連テストを回収し、整理後のソースで描画・性能・完全品質ゲートを再検証する。自己レビュー後にDraft PR、Codexレビューと指摘修正、3 OS CI、保護マージ、公開へ進む。
+- [x] `2da129e9` は同梱Noto Sansの1024字の実測で、全体を一括整形した幅よりも二分割後の丸め幅が小さい場合に分割描画を見送ることを確認。foundation・AST・関連7件は実0、`svg_rasterize_text_shaping_svg_fragments.rs:121` は限定LLVMで0→1（`tmp/quality/resumed-owner-r3509/coverage-svg-real-fragment-rounding-exact-yuswn7ok/safe-summary.json`）。
+- [x] `59c02586` はSVG textPathで中間spanの指定書体が存在しない場合に、両端の字形IDと位置が比較元と一致することを検証。foundation・AST・関連6件は実0、`vendor/svg-engine/usvg/text/layout.rs:934` は限定LLVMで0→1。両検証ともソース・binary一致と一時profile回収済み（`tmp/quality/resumed-owner-r3509/coverage-svg-path-missing-font-exact-u83kt2hq/safe-summary.json`）。
+- [/] `801b3633` の正式試行は既存ガードが対象使用中のPID 5464を検知し、準備段階実2・テスト未起動。固定容量内で、PIDの終了を確認済み。失敗ログを保全し、上記差分を取り込んだソースで再計測する（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-t05v347y/unit-test-exit.json`）。
 
 - [/] `eb63cfa3` の正式rootは6,176件成功・別15件skip、86,737/87,293行（99.3630646214%）、未カバー556行。前回562行から6減。差分はSVGマーカー4行、HTMLテーブルとCLI各1行。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-q6f084u0/safe-summary.json`）。
 - [x] `0ee8747b`・`ba7676fd` はmacOS同梱Zapf Dingbatsの実字形計測をV8から行い、高さが得られないとき `undefined` を返すことを確認。SVGセレクター置換では下位が保証した容量を再利用し、超過を拒否する既存回帰を維持。foundation・AST・関連8件は実0。従来未カバーの `diagram_svg_font_bridge.rs:76` の5計測区間が各0→1（`tmp/quality/resumed-owner-r3509/coverage-svg-symbol-xheight-selector-exact-212ps_f5/safe-summary.json`）。556行の正式値には未反映。
