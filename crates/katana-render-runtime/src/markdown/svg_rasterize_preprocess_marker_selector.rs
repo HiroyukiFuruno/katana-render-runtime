@@ -117,11 +117,8 @@ fn push_member(
     let remaining_source_size = output_size.checked_sub(range.len())?;
     let member_budget = max_output_bytes.checked_sub(remaining_source_size)?;
     let replacement = member::rewrite_member(raw, ids, member_budget)?;
-    let next_size = remaining_source_size.checked_add(replacement.len())?;
-    if next_size > max_output_bytes {
-        return None;
-    }
-    *output_size = next_size;
+    /* WHY: 置換結果はメンバーに割り当てた残容量以内に制限済み。 */
+    *output_size = remaining_source_size + replacement.len();
     replacements.push(MemberEdit { range, replacement });
     Some(())
 }
