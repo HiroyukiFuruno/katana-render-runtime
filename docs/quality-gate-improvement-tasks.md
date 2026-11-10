@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-10、以下の過去結果と区別する）
 
+- [x] `b3305499`・`5c206e1c` でSVGの塗り・線の `currentColor` と子要素の指定、同一物理フォントの対象外拡張子、読み取れないmacOSフォントaliasをキャッシュしないことを検証。foundation・AST・限定4件実0。限定LLVMで前回未実行だったCoreText候補選別1行とフォント読み取り失敗2行に到達。色継承はアサーション成功、対象の `style.rs:164,204` は0回。aliasは実システムファイルを変更せず、単体テストでファイルの子パスを参照して読めない状態を再現した。一時profile・export回収済み（`tmp/quality/resumed-owner-r3509/coverage-svg-paint-and-font-source-exact-kr2y55qu/safe-summary.json`）。製品コードと正式root結果は変更なし。
+- [/] HTMLスクロール幾何の候補を確認。`polygon_axes` は成功時に常に `Some`、空の配列はクリップ前に除外し、有限かつ符号が異なる距離の差は0にならない。DOMの座標は `f32` で保持されるため、`f64` の極値を直接注入してエラー伝播を通すテストは追加しなかった。除外や閾値は変更しない。
 - [x] `fed3a1de`・`ea951bad` で、引用符内のセミコロンと直後のCSS宣言、複数filter URLで循環対象のみの無効化、実フォントを使ったRTL断片のフォールバック計測拒否を確認。foundation・AST・限定3件実0。限定LLVMで前回未実行の `svg_rasterize_html_glyph_fallback_metrics.rs:20` に1回到達。SVGパーサーの対象行446・874は0回のまま。両ケースの正常な解析・無効化はアサーションで確認した。一時profile・export回収済み（`tmp/quality/resumed-owner-r3509/coverage-svg-parser-and-rtl-exact-jm63wle6/safe-summary.json`）。製品コードと正式root結果は変更なし。
 - [/] マーカーとシャドウのテキスト走査は `is_text()` により `text() == None` の分岐へ届かず、マーカーCSSの置換は前段で残り予算以内に制限するため直後の予算超過へ届かない。これらに人工入力を追加せず、検証条件は維持する。
 - [/] 最新の正式rootは `e862ef88`。6,144件成功・別に15件skip、86,745/87,362行（99.2937432751%）、未カバー617行。前回 `f5b5dc1a` の625行から8減、分母は同じ。差分はSVG循環参照1、Chromeフォント証明1、SVGテキスト・CSSの証明3、SVG計測API3。ソース前後一致・収集実0・厳格閾値 `coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-cm9yjhk3/safe-summary.json`）。製品コードは変更していない。完全ゲートと公開は未完。
