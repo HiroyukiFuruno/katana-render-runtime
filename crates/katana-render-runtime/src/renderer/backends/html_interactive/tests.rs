@@ -3,6 +3,7 @@ mod feature_diagnostic;
 mod full_scroll_diagnostic;
 mod inline_atomic_fragment;
 mod input_focus;
+mod input_pointer_diagnostics;
 mod input_pointer_frame;
 mod interaction;
 mod intersection_observer;
