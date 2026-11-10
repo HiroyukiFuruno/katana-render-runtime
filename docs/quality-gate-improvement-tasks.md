@@ -2,6 +2,10 @@
 
 ## 現在の実行地点（2026-11-10、以下の過去結果と区別する）
 
+- [/] `8425b927` の正式rootは6,166件成功・別に15件skip、86,760/87,362行（99.3109132117%）、未カバー602行。前回の608行から6減、分母は同じ。SVG参照2行、線形・放射グラデーション各1行、RTLを専用経路へ渡す条件と空白のink除外各1行。ソース前後一致・収集実0・`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-88fw3auz/safe-summary.json`）。製品コードは変更せず、GitHubのv0.4.24は未公開。
+- [x] `8425b927` で同梱フォントによる右から左へ読む文字列の整形経路と、日本語代替書体の後ろの空白がadvanceに加わる一方でink範囲を変えないことを確認。foundation・AST・関連3件は実0。`svg_fragment_run.rs:18`、`svg_metrics.rs:183` の未実行領域が到達し、一時profile回収済み（`tmp/quality/resumed-owner-r3509/coverage-svg-ink-and-rtl-exact-f5muy34p/safe-summary.json`）。
+- [ ] 100%達成の前提として、実入力では到達しないと証明済みの重複だけを等価に整理する順序が必要。例はSVG writerの既定属性の二重判定、照明要素を3種に限定した後の重複判定、HTMLの空slice二重判定。SVGは `text_style_survives_preserving_writer` と既定属性の省略、`filter_writer_preserves_renderable_semantics`、HTMLは `plane_clipping_clears_empty_output_and_rejects_non_finite_distance` で挙動を固定する。OSによって実行できる分岐は該当OSで検証。現段階の製品変更・閾値変更・検査除外はなし。到達できる回帰は順序の判断と独立に進める。
+
 - [x] `2095cc8c`、`9dd5e6c9`、`42f3b613` は実SVGで入れ子の `<use>` の正常・欠落・循環参照と、逆変換できない線形・放射グラデーションを検証。通常の変換と対照し、下地の画素が残ることを確認。初回ASTはテストファイル307行で失敗し、参照テストを専用モジュールへ移して既存循環ケースも再実行。最終foundation・AST・限定3件は実0。前回0回だった `svgtree/parse.rs:691–692` と `resvg/path.rs:124,143` は限定LLVMで各1回。ソース・binary前後一致、一時profile回収済み（`tmp/quality/resumed-owner-r3509/coverage-svg-missing-nested-use-exact-8bvya972/safe-summary.json`）。正式rootの608行は未更新。製品コードと公開条件は変更なし。
 - [/] 到達性の確認。`svg_rasterize_html_glyph_baseline.rs:76,125,163` は直前に同じ列挙値を除外。`:116,156` はmacOSのレイアウト測定が常に値を返し、他OSの値なしは既存テストで検証済み。`layout_scroll_extent_plane.rs:18` は同じ入力sliceの空を先に除外し、usvg `parser/filter.rs:1061` は照明要素を直前に3種に限定。実入力で検証できる箇所と区別し、除外や疑似入力による集計の穴埋めはしていない。
 
