@@ -144,12 +144,7 @@ pub(super) fn anchor_delta(layout: LayoutAnchor, font_size: f32, raster_scale: f
     let nominal_size = font_size * raster_scale;
     let effective_size = paint_size(font_size, layout.css_scale, raster_scale)?;
     let ratio = effective_size / nominal_size;
-    if !device_scale.is_finite()
-        || device_scale <= 0.0
-        || !nominal_size.is_finite()
-        || nominal_size <= 0.0
-        || !ratio.is_finite()
-    {
+    if !nominal_size.is_finite() || nominal_size <= 0.0 || !ratio.is_finite() {
         return None;
     }
     let width = f64::from(layout.width) * f64::from(layout.css_scale) * f64::from(ratio);
