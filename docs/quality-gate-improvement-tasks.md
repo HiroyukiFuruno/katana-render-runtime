@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-10、以下の過去結果と区別する）
 
+- [x] `f2fc5e9f` でSVGの直接・子孫循環参照が背景描画を変えないことと、マーカー既定のクリップを `overflow=visible` と比較して確認。foundation・AST・限定2件は実0。LLVM JSONで `svgtree/parse.rs:652` の未実行領域が2回に変化し、同691–692とマーカーのエラー伝播143は0回のまま。先行の限定テストも2件成功したが、LLVMのパス指定表示が0件だったため、出力全体を既存のJSON形式で取得し対象ファイルだけを照合。一時profile回収済み（`tmp/quality/resumed-owner-r3509/coverage-svg-document-boundary-export-0e8b2x_h/safe-summary.json`）。製品コードと正式root結果は変更なし。
 - [x] `13206cce` でChromeフォント証明の応答形式が不一致なら出力を作成せず、正しい形式では入力との紐付けを保持して出力することを検証。初回ASTでテスト関数長を検出し、fixture生成を分離後にfoundation・AST・限定1件が実0。前回未実行の `cli.rs:22` は限定LLVMで1回到達、実行前後のソースとbinaryは一致、一時profileは削除済み（`tmp/quality/resumed-owner-r3509/coverage-probe-response-exact-4lbsbv8j/safe-summary.json`）。製品コードと正式root結果は変更していない。
 - [/] 最新の正式rootは `f5b5dc1a`、6,136件成功・別に15件skip、86,737/87,362行（99.2845859756%）、未カバー625行。前回 `019e0076` の629行から4減、分母は同じ。Mermaid計測JSONの処理3行とKDRの入力ルート検証1行が新規到達。初回は使用中PIDの検知でclean実2・テスト未起動（`root-coverage-current-threads4-gp_8zdb8`）。PID終了確認後の再実行はソース前後一致・収集実0・厳格閾値 `coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-pkod6fgb/` の `safe-summary.json` と `test-and-policy-summary.json`）。完全ゲートと公開は未完。
 - [x] 同じ `7bab5f9b` の性能検証ハーネスは基準側1,163/1,163行、候補側1,207/1,207行で合格（`tmp/quality/resumed-owner-r3509/performance-coverage-current-7bab5f9b-6uohcty0/safe-summary.json`）。HTML表示性能は別判定。
