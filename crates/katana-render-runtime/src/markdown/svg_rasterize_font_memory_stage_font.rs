@@ -40,19 +40,13 @@ pub(super) fn selected_physical_font(
             face.weight == Weight::NORMAL && face.families.iter().any(|(name, _)| name == FAMILY)
         })
         .ok_or("selected family face missing from HTML font database")?;
-    let (source, index) = database
-        .face_source(face.id)
-        .ok_or("selected face source missing")?;
-    let path = match source {
-        Source::File(path) | Source::SharedFile(path, _) => path,
+    let path = match &face.source {
+        Source::File(path) | Source::SharedFile(path, _) => path.clone(),
         Source::Binary(_) => return Err("selected face is not file-backed".into()),
     };
-    let (bytes, loaded_index) = database
+    let (bytes, index) = database
         .with_face_data(face.id, |data, index| (data.to_vec(), index))
         .ok_or("selected physical face bytes unavailable")?;
-    if loaded_index != index {
-        return Err("font database face index changed while reading bytes".into());
-    }
     Ok(PhysicalFont { path, index, bytes })
 }
 
