@@ -133,7 +133,7 @@ fn layout_run(
         let metrics = metrics::measure_fragment(database, span, fragment, glyphs, font_shape)?;
         append_fragment_positions(glyphs, metrics, span, context, &mut positions)?;
     }
-    finish_run_layout(span, context, positions)
+    finish_run_layout(context, positions)
 }
 
 fn append_fragment_positions(
@@ -177,17 +177,9 @@ pub(super) fn advance_position(value: f32) -> Option<f32> {
     Some(snapped)
 }
 
-fn finish_run_layout(
-    span: &PreparedSpan,
-    context: &LayoutContext,
-    positions: Vec<Point>,
-) -> Option<RunLayout> {
-    if positions.len() != span.glyphs.len()
-        || !context.cursor.is_finite()
-        || super::super::anchor::trunc_layout_unit(context.cursor as f32).is_none()
-    {
-        return None;
-    }
+fn finish_run_layout(context: &LayoutContext, positions: Vec<Point>) -> Option<RunLayout> {
+    /* WHY: 全glyphの配置が済んだ後、終点が描画座標の範囲内か確認する。 */
+    super::super::anchor::trunc_layout_unit(context.cursor as f32)?;
     Some(RunLayout {
         css_scale: context.css_scale,
         paint_css_size: context.paint_css_size,
