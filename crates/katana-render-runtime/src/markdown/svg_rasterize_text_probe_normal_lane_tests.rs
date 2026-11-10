@@ -7,6 +7,16 @@ const ROOT_FQN: &str = "markdown::svg_rasterize::text";
 const FIXTURES: &str = "assets/test-fixtures/font-probes";
 const BOLD_FONT_WEIGHT: u16 = 700;
 const NORMAL_FONT_WEIGHT: u16 = 400;
+const RECURSIVE_PROBE: (&str, &str, &str) = (
+    "bbox_probe::recursive_probe::records_public_recursive_in_isolated_font_options",
+    "KRR_RECURSIVE_PROBE_SFNT_PATH",
+    "KRR_RECURSIVE_PROBE_JSON_PATH",
+);
+const HTML_PNG_PROBE: (&str, &str, &str) = (
+    "html_png_probe::records_html_raster_route_for_verified_native_svg",
+    "KRR_HTML_RASTER_PROBE_SVG_PATH",
+    "KRR_HTML_RASTER_PROBE_PNG_PATH",
+);
 
 #[cfg(target_os = "macos")]
 #[path = "svg_rasterize_html_probe_normal_lane_tests.rs"]
@@ -44,13 +54,8 @@ fn public_recursive_probe_runs_in_normal_lane() -> TestResult<()> {
     let directory = super::super::super::probe_test_support::TempProbeDirectory::create()?;
     let input = fixture("recursive-latin-crsv-normal.ttf")?;
     let output = directory.file("recursive.json");
-    run_probe(
-        "bbox_probe::recursive_probe::records_public_recursive_in_isolated_font_options",
-        &[
-            ("KRR_RECURSIVE_PROBE_SFNT_PATH", &input),
-            ("KRR_RECURSIVE_PROBE_JSON_PATH", &output),
-        ],
-    )?;
+    let (suffix, input_key, output_key) = RECURSIVE_PROBE;
+    run_probe(suffix, &[(input_key, &input), (output_key, &output)])?;
     let record = read_record(&output, "isolated-public-recursive-probe-r1")?;
     assert_eq!(
         record["sfnt_sha256"],
@@ -66,13 +71,8 @@ fn public_native_svg_probe_runs_in_normal_lane() -> TestResult<()> {
     let directory = super::super::super::probe_test_support::TempProbeDirectory::create()?;
     let input = fixture("native-class-ja-probe.svg")?;
     let output = directory.file("native.png");
-    run_probe(
-        "html_png_probe::records_html_raster_route_for_verified_native_svg",
-        &[
-            ("KRR_HTML_RASTER_PROBE_SVG_PATH", &input),
-            ("KRR_HTML_RASTER_PROBE_PNG_PATH", &output),
-        ],
-    )?;
+    let (suffix, input_key, output_key) = HTML_PNG_PROBE;
+    run_probe(suffix, &[(input_key, &input), (output_key, &output)])?;
     let svg = std::fs::read_to_string(input)?;
     assert!(svg.contains("<text") && !svg.contains("<foreignObject"));
     let pixels = image::load_from_memory(&std::fs::read(output)?)?.to_rgba8();
@@ -83,6 +83,24 @@ fn public_native_svg_probe_runs_in_normal_lane() -> TestResult<()> {
             .pixels()
             .any(|pixel| pixel.0 != pixels.get_pixel(0, 0).0)
     );
+    Ok(())
+}
+
+#[test]
+fn public_font_and_svg_probes_reject_relative_input_without_output() -> TestResult<()> {
+    let directory = super::super::super::probe_test_support::TempProbeDirectory::create()?;
+    let input = PathBuf::from("relative-probe-input");
+    let destination = directory.file("must-not-be-created");
+    for (suffix, input_key, output_key) in [RECURSIVE_PROBE, HTML_PNG_PROBE] {
+        let fqn = format!("{ROOT_FQN}::{suffix}");
+        let result = execute_probe(&fqn, &[(input_key, &input), (output_key, &destination)])?;
+        let stdout = std::str::from_utf8(&result.stdout)?;
+        let stderr = std::str::from_utf8(&result.stderr)?;
+        assert!(!result.status.success(), "{fqn}");
+        assert!(stdout.contains("0 passed; 1 failed; 0 ignored"), "{fqn}");
+        assert!(stderr.contains("absolute probe path required"), "{fqn}");
+        assert!(!destination.exists(), "{fqn}");
+    }
     Ok(())
 }
 
@@ -156,6 +174,12 @@ fn run_exact_probe(
     fqn: &str,
     environment: &[(&str, &PathBuf)],
 ) -> TestResult<std::process::Output> {
+    let output = execute_probe(fqn, environment)?;
+    validate_probe_output(fqn, &output)?;
+    Ok(output)
+}
+
+fn execute_probe(fqn: &str, environment: &[(&str, &PathBuf)]) -> TestResult<std::process::Output> {
     let mut command = crate::system::ProcessService::create_command(std::env::current_exe()?);
     command.args([
         "--ignored",
@@ -168,9 +192,7 @@ fn run_exact_probe(
     for (key, value) in environment {
         command.env(key, value);
     }
-    let output = command.output()?;
-    validate_probe_output(fqn, &output)?;
-    Ok(output)
+    Ok(command.output()?)
 }
 
 fn validate_probe_output(fqn: &str, output: &std::process::Output) -> TestResult<()> {
