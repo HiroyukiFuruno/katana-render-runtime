@@ -31,6 +31,16 @@ fn multiline_proof_rejects_unsupported_stylesheet() -> Result<(), String> {
 }
 
 #[test]
+fn multiline_proof_rejects_whitespace_only_source() -> Result<(), String> {
+    let candidate = source(
+        "<tspan x='0' dy='0'> </tspan><tspan x='0' dy='16.8'>  </tspan>",
+        "",
+        FONT_FAMILY,
+    );
+    assert_rejected_proof(MULTILINE, &candidate)
+}
+
+#[test]
 fn additional_proof_rejects_complex_hierarchy_and_descendant_style() -> Result<(), String> {
     for body in [
         "<tspan x='0' dy='0'><tspan>AB</tspan></tspan><tspan x='0' dy='16.8'>CD</tspan>",

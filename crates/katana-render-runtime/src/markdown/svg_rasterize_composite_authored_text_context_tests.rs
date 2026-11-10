@@ -96,6 +96,14 @@ fn nested_single_line_context_requires_unambiguous_authored_structure() -> Resul
 }
 
 #[test]
+fn surrounding_whitespace_cannot_prove_exact_authored_text() -> Result<(), String> {
+    let source = "<svg><text> \n<tspan dy='0'>Runtime</tspan>\n </text></svg>";
+    assert!(context_matches(INLINE_AUTHORED_SVG, LABEL)?);
+    assert!(!context_matches(source, LABEL)?);
+    Ok(())
+}
+
+#[test]
 fn css_styled_and_inline_authored_text_render_identically() -> Result<(), String> {
     let document = Document::parse(RENDERED_AUTHORED_SVG).map_err(|error| error.to_string())?;
     assert!(collect(&document).matches_text(LABEL));
@@ -201,6 +209,15 @@ fn malformed_keyframes_preludes_cannot_prove_authored_text_layout() -> Result<()
         );
         assert_eq!(context_matches(&source, LABEL)?, expected, "{prelude}");
     }
+    Ok(())
+}
+
+#[test]
+fn empty_keyframe_selector_cannot_prove_authored_text_layout() -> Result<(), String> {
+    let valid = r#"<svg><style>@keyframes motion { from { opacity: 1; } }</style><text><tspan dy="0">Runtime</tspan></text></svg>"#;
+    let empty = r#"<svg><style>@keyframes motion { { opacity: 1; } }</style><text><tspan dy="0">Runtime</tspan></text></svg>"#;
+    assert!(context_matches(valid, LABEL)?);
+    assert!(!context_matches(empty, LABEL)?);
     Ok(())
 }
 
