@@ -59,6 +59,22 @@ fn high_level_fragment_layout_preserves_selected_face_and_total_advance() -> Res
     assert_high_level_fragment_contract(&fragments)
 }
 
+#[test]
+fn real_long_text_rejects_fragments_when_rounded_width_underruns_whole_run() -> Result<(), String> {
+    const FRAGMENT_LENGTH: usize = 512;
+    let fragment = "H".repeat(FRAGMENT_LENGTH);
+    let full = fragment.repeat(2);
+    let whole = layout(&[&full])?.ok_or("full Noto Sans run missing")?;
+    let part = layout(&[&fragment])?.ok_or("partial Noto Sans run missing")?;
+    let width = part.metrics.advance;
+    assert!(!rounded_advances_cover_full(
+        &[width, width],
+        whole.metrics.advance
+    ));
+    assert!(layout(&[&fragment, &fragment])?.is_none());
+    Ok(())
+}
+
 fn svg_text_fragments() -> Vec<String> {
     SVG_TEXT_FRAGMENTS
         .iter()
