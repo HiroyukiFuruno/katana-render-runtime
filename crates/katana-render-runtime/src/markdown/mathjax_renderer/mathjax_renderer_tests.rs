@@ -120,6 +120,14 @@ fn loaded_mathjax_bundle_rejects_blank_input_and_renders_real_math() -> Result<(
     let rendered =
         MathJaxRendererOps::render_mathjax_with_loaded(&block, preset, false, &resource)?;
     assert!(rendered.contains("<svg"));
+    let bundled = MathJaxRendererOps::render_mathjax_with_origin(
+        &block,
+        Path::new("unused.js"),
+        preset,
+        false,
+        true,
+    )?;
+    assert_eq!(bundled, rendered);
     Ok(())
 }
 
