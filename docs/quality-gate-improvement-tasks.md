@@ -3,6 +3,8 @@
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
 - [ ] 正式カバレッジ100%・未カバー0を達成した後、挙動と既存テスト結果を維持し、読み込み・キャッシュ等の共通処理とレンダラーの責務境界を精査・整理する。小さい差分ごとに関連テストを回収し、整理後のソースで描画・性能・完全品質ゲートを再検証する。自己レビュー後にDraft PR、Codexレビューと指摘修正、3 OS CI、保護マージ、公開へ進む。
+- [/] `3b5d98dc` の正式rootは6,182件成功・別15件skip、86,709/87,245行（99.3856381455%）、未カバー536行。前回538行から2減。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-wdo1pn7n/safe-summary.json`）。
+- [x] `5e19fa1e` は実フォントを使い、空のPostScript名と複数faceが同名の場合の拒否を確認した（関連3件、`tmp/quality/resumed-owner-r3509/coverage-coretext-postscript-identity-exact-lfzgptdc/safe-summary.json`）。`7e8a7a06` は既存フォントから必要な表だけ欠落させ、句読点の幅・輪郭が取得不能な場合のフォールバックを確認した（関連3件、`tmp/quality/resumed-owner-r3509/coverage-han-font-table-metrics-exact-n15qqrrt/safe-summary.json`）。どちらもfoundation・AST成功、テストのみの差分。536行の正式値には未反映。
 - [/] `0152b2d4` の正式rootは6,182件成功・別15件skip、86,726/87,264行（99.3834800147%）、未カバー538行。前回539行から1減。差分はSVG分割描画の交差済みタイル。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-e_ciidxw/safe-summary.json`）。
 - [x] `0b7d6b0f` はusvgが正の有限値として保証した字形サイズの重複検査を除去し、可変フォント・複数行・代替書体を含む関連5件は実0（`tmp/quality/resumed-owner-r3509/coverage-svg-positive-glyph-size-exact-s5h32e3g/safe-summary.json`）。`b7360ffe` は合成検証で有効なPixmapを再変換せず、通常・太字の2件で既存と同じ画素比較を実施した（`tmp/quality/resumed-owner-r3509/coverage-svg-pixmap-composite-reference-exact-wlct61oq/safe-summary.json`）。いずれもfoundation・AST成功と差分の前後一致を確認し、538行の正式値には未反映。
 - [/] `bbe38614` の正式rootは6,181件成功・別15件skip、86,727/87,266行（99.3823482227%）、未カバー539行。前回543行から4減。実MathJax2行、透明SVGと字形順の補正各1行。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-bgh_ri_w/safe-summary.json`）。
