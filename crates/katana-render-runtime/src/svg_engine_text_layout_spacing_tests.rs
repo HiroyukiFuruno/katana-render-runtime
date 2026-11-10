@@ -40,6 +40,38 @@ fn positioned_glyphs(tree: &usvg::Tree) -> Result<&[usvg::layout::PositionedGlyp
 }
 
 #[test]
+fn text_length_on_ligature_tail_preserves_the_whole_cluster() -> Result<(), String> {
+    let reference = parse("", "f<tspan>i</tspan>")?;
+    let adjusted = parse(
+        "",
+        "f<tspan textLength='80' lengthAdjust='spacingAndGlyphs'>i</tspan>",
+    )?;
+    let chunk = text(&adjusted)?.chunks().first().ok_or("chunk missing")?;
+    assert_eq!(chunk.text(), "fi");
+    assert!(
+        chunk
+            .spans()
+            .iter()
+            .any(|span| span.start() == 1 && span.end() == 2)
+    );
+    let expected = single_glyph(&reference)?;
+    let actual = single_glyph(&adjusted)?;
+    for scalar in ["f", "i"] {
+        assert_ne!(expected.id, single_glyph(&parse("", scalar)?)?.id);
+    }
+    assert_eq!(actual.id, expected.id);
+    assert_eq!(actual.transform(), expected.transform());
+    Ok(())
+}
+
+fn single_glyph(tree: &usvg::Tree) -> Result<&usvg::layout::PositionedGlyph, String> {
+    let [glyph] = positioned_glyphs(tree)? else {
+        return Err("expected exactly one glyph".to_owned());
+    };
+    Ok(glyph)
+}
+
+#[test]
 fn letter_spacing_changes_distance_without_scaling_glyphs() -> Result<(), String> {
     let ordinary = parse("", "HH")?;
     let spaced = parse("letter-spacing='4'", "HH")?;
