@@ -5,11 +5,10 @@ use crate::diagram_source::DiagramSourceOps;
 pub(crate) use crate::diagram_source::MermaidMarkdownOps;
 use crate::file_ops::FileOps;
 use crate::reference_cmd::ReferenceCommand;
-#[cfg(test)]
-use katana_render_runtime::Renderer;
-use katana_render_runtime::{DiagramKind, RenderOutput};
-#[cfg(test)]
-use katana_render_runtime::{DrawioRenderer, MathJaxRenderer, MermaidRenderer, PlantUmlRenderer};
+use katana_render_runtime::{
+    DiagramKind, DrawioRenderer, MathJaxRenderer, MermaidRenderer, PlantUmlRenderer, RenderOutput,
+    Renderer,
+};
 use render_input::{DiagramRenderRequest, RenderInputFactory};
 use std::path::PathBuf;
 
@@ -85,7 +84,6 @@ impl DiagramCommand {
         }
     }
 
-    #[cfg(test)]
     fn renderer(&self, runtime_path: PathBuf) -> Box<dyn Renderer> {
         match self.kind {
             DiagramKind::Mermaid => Box::new(MermaidRenderer::with_runtime_path(runtime_path)),

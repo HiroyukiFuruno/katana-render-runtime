@@ -40,12 +40,7 @@ impl DiagramCommand {
         } else {
             path
         };
-        let (_, renderer) = RuntimePathResolver::resolve_renderer(
-            self.kind,
-            Some(path.clone()),
-            request.cache_dir.clone(),
-        )?;
-        Ok((path, renderer))
+        Ok((path.clone(), self.renderer(path)))
     }
 
     pub(super) fn attestation(
