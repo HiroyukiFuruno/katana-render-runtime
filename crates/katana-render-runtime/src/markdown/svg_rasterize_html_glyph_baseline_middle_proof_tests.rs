@@ -1,4 +1,7 @@
-use super::{FONT_FAMILY, LINE_ADVANCE, MULTILINE, MULTILINE_CHUNK_COUNT, fixture, source, text};
+use super::{
+    FONT_FAMILY, LINE_ADVANCE, MULTILINE, MULTILINE_CHUNK_COUNT, THREE_LINE_CHUNK_COUNT,
+    THREE_LINES, fixture, source, text,
+};
 use crate::markdown::svg_rasterize::{
     GeneratedClipProvenance,
     provenance::{self, AuthoredTextContext},
@@ -67,6 +70,22 @@ fn multiline_proof_rejects_text_and_origin_mismatch() -> Result<(), String> {
     ] {
         assert_rejected_proof(MULTILINE, &candidate)?;
     }
+    Ok(())
+}
+
+#[test]
+fn multiline_proof_rejects_the_same_text_split_into_a_different_number_of_lines()
+-> Result<(), String> {
+    let two_lines = MULTILINE.replace(">CD</tspan>", ">CDEF</tspan>");
+    let original = fixture(&two_lines, "")?;
+    let reshaped = fixture(THREE_LINES, "")?;
+    let original_text = text(&original)?;
+    let reshaped_text = text(&reshaped)?;
+    assert_eq!(original_text.chunks().len(), MULTILINE_CHUNK_COUNT);
+    assert_eq!(reshaped_text.chunks().len(), THREE_LINE_CHUNK_COUNT);
+    let proof = context(&source(&two_lines, "", FONT_FAMILY))?;
+    assert!(proof.matches_additional(original_text));
+    assert!(!proof.matches_additional(reshaped_text));
     Ok(())
 }
 

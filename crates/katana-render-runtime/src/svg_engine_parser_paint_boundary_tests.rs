@@ -139,6 +139,26 @@ fn invalid_pattern_size_uses_the_authored_fallback_color() -> Result<(), String>
 }
 
 #[test]
+fn subpixel_pattern_tile_does_not_suppress_an_unrelated_shape() -> Result<(), String> {
+    let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8">
+      <defs><pattern id="small" patternUnits="userSpaceOnUse" width="0.1" height="1"><rect width="0.1" height="1" fill="red"/></pattern></defs>
+      <rect id="patterned" width="4" height="8" fill="url(#small)"/>
+      <rect x="4" width="4" height="8" fill="blue"/></svg>"##;
+    let tree = parse_with_languages(source, &[])?;
+    let paint = path_by_id(&tree, "patterned")?
+        .fill()
+        .ok_or("subpixel pattern fill missing")?
+        .paint();
+    assert!(matches!(paint, usvg::Paint::Pattern(_)));
+    let pixels = rendered_svg(source)?;
+    assert_eq!(
+        pixel(&pixels, PATTERN_NEXT_SAMPLE_X, PAINT_SAMPLE_Y)?,
+        [0, 0, 255, 255]
+    );
+    Ok(())
+}
+
+#[test]
 fn pattern_with_wrong_type_href_keeps_its_own_children() -> Result<(), String> {
     let linked = rendered_svg(PATTERN_WRONG_TYPE_LINK_SVG)?;
     let control = rendered_svg(PATTERN_WITHOUT_LINK_SVG)?;
