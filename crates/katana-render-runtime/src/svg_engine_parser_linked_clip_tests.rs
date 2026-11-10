@@ -38,3 +38,23 @@ fn malformed_clip_transform_matches_upstream_invalid_transform_fixture() -> Resu
     assert_ne!(source, malformed);
     assert_same_visible_pixels(&malformed, source)
 }
+
+#[test]
+fn object_bbox_clip_on_zero_height_line_preserves_visible_sibling() -> Result<(), String> {
+    let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80">
+      <defs><clipPath id="clip" clipPathUnits="objectBoundingBox"><rect width="1" height="1"/></clipPath></defs>
+      <line x1="10" y1="20" x2="40" y2="20" stroke="red" stroke-width="4" clip-path="url(#clip)"/>
+      <rect x="60" y="10" width="10" height="10" fill="blue"/></svg>"##;
+    let control = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80"><rect x="60" y="10" width="10" height="10" fill="blue"/></svg>"#;
+    assert_same_visible_pixels(source, control)
+}
+
+#[test]
+fn object_bbox_mask_content_on_zero_height_line_preserves_visible_sibling() -> Result<(), String> {
+    let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80">
+      <defs><mask id="mask" maskUnits="userSpaceOnUse" maskContentUnits="objectBoundingBox" x="0" y="0" width="100" height="80"><rect width="1" height="1" fill="white"/></mask></defs>
+      <line x1="10" y1="20" x2="40" y2="20" stroke="red" stroke-width="4" mask="url(#mask)"/>
+      <rect x="60" y="10" width="10" height="10" fill="blue"/></svg>"##;
+    let control = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80"><rect x="60" y="10" width="10" height="10" fill="blue"/></svg>"#;
+    assert_same_visible_pixels(source, control)
+}

@@ -5,6 +5,9 @@ use super::bounds::map_bounds;
 use super::geometry::{Bounds, bounded_crop};
 use tiny_skia::{Color, Paint as TinyPaint, Pixmap, PixmapMut, Rect as TinyRect};
 
+#[path = "svg_rasterize_html_shadow_failure_tests.rs"]
+mod failure_tests;
+
 const CANVAS_SIZE: u32 = 200;
 const COLOR_CHANNELS: usize = 4;
 const CROP_TARGET_SIZE: u32 = 8;
@@ -144,29 +147,6 @@ fn render_srgb_fixture() -> Result<(Pixmap, u32), String> {
     )?;
     assert!(handled);
     Ok((target, calls))
-}
-
-#[test]
-fn shadow_source_paint_failure_preserves_destination() -> Result<(), String> {
-    const SOURCE_ERROR: &str = "shadow source renderer failed";
-    let tree = parse_shadow_svg(SRGB_SVG)?;
-    let group = find_group(&tree)?;
-    let mut target = Pixmap::new(CANVAS_SIZE, CANVAS_SIZE).ok_or("target allocation")?;
-    target.fill(color(BACKGROUND_GRAY));
-    let before = target.data().to_vec();
-    let error = HtmlShadowRasterizer::render(
-        group,
-        Transform::from_scale(2.0, 2.0),
-        &mut target.as_mut(),
-        &mut |transform, pixels| {
-            paint_blue_source(transform, pixels)?;
-            assert!(pixels.data_mut().iter().any(|byte| *byte != 0));
-            Err(SOURCE_ERROR.to_owned())
-        },
-    );
-    assert_eq!(error.err().as_deref(), Some(SOURCE_ERROR));
-    assert_eq!(target.data(), before.as_slice());
-    Ok(())
 }
 
 const SRGB_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
