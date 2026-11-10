@@ -31,20 +31,27 @@ pub(super) fn layout_supported_with_zero_first_dy(
     text.writing_mode() == usvg::WritingMode::LeftToRight
         && matches!(chunk.text_flow(), TextFlow::Linear)
         && alignment_dy_supported(dy)
-        && first_dy.is_finite()
         && (*first_dy != 0.0 || allow_zero_first_dy)
         && all_zero(text.dx())
         && all_zero(text.rotate())
         && chunk.spans().iter().all(source_span_has_default_spacing)
-        && layout_spans_supported(text.layouted(), first_span.font_size().get())
+        && supported_layout_first_glyph(text.layouted(), first_span.font_size().get()).is_some()
 }
 
-fn layout_spans_supported(spans: &[usvg::layout::Span], font_size: f32) -> bool {
-    spans.iter().any(|span| !span.positioned_glyphs.is_empty())
-        && spans.iter().all(|span| {
+fn supported_layout_first_glyph(
+    spans: &[usvg::layout::Span],
+    font_size: f32,
+) -> Option<&usvg::layout::PositionedGlyph> {
+    let first = spans
+        .iter()
+        .find_map(|span| span.positioned_glyphs.first())?;
+    spans
+        .iter()
+        .all(|span| {
             let glyphs = &span.positioned_glyphs;
             horizontal_glyphs(glyphs) && glyphs.iter().all(|glyph| glyph.font_size() == font_size)
         })
+        .then_some(first)
 }
 
 fn source_span_has_default_spacing(span: &usvg::TextSpan) -> bool {
@@ -70,8 +77,8 @@ pub(in crate::markdown::svg_rasterize::html_glyph::baseline) fn additional_middl
         && all_zero(text.dx())
         && all_zero(text.rotate())
         && additional_sources_supported(text, first)
-        && layout_spans_supported(text.layouted(), first.font_size().get())
-        && same_layout_face(text.layouted())
+        && supported_layout_first_glyph(text.layouted(), first.font_size().get())
+            .is_some_and(|glyph| same_layout_face(text.layouted(), glyph))
         && chunk_relative_positions_supported(text)
 }
 
@@ -105,12 +112,12 @@ fn no_decoration(span: &usvg::TextSpan) -> bool {
         && decoration.line_through().is_none()
 }
 
-fn same_layout_face(spans: &[usvg::layout::Span]) -> bool {
-    let mut glyphs = spans.iter().flat_map(|span| &span.positioned_glyphs);
-    let Some(first) = glyphs.next() else {
-        return false;
-    };
-    glyphs.all(|glyph| glyph.font == first.font)
+fn same_layout_face(spans: &[usvg::layout::Span], first: &usvg::layout::PositionedGlyph) -> bool {
+    spans
+        .iter()
+        .flat_map(|span| &span.positioned_glyphs)
+        .skip(1)
+        .all(|glyph| glyph.font == first.font)
 }
 
 fn chunk_relative_positions_supported(text: &usvg::Text) -> bool {
