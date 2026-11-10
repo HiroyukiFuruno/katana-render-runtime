@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-10、以下の過去結果と区別する）
 
+- [/] `569e6beb` の正式rootは6,162件成功・別に15件skip、86,754/87,362行（99.3040452371%）、未カバー608行。前回 `46368258` の613行から5減、分母は同じ。クリック診断、フォント差し替え、SVGベースライン、角丸の疑似クラス、計測キャッシュ上限が各1行。ソース前後一致・収集実0・`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-vnf1auxz/safe-summary.json`）。未カバーにはSVG writerの `Normal` / `Auto` を事前に除く3分岐など実入力では到達しない箇所も含む。到達可能なケースを補完し、到達不能の根拠を区別する。公開条件は維持し、HTML全体の再測定はリファクタリング後に実施する。
+
 - [x] `7ee966e7` で、実フォントを使う8件の計測キャッシュが満杯のとき、製品の `for_measured_text` でも9件目を登録しないことを検証。foundation・AST・限定1件は実0。`svg_rasterize_text_measurement_token.rs:113` は正式元データ0回、限定LLVMで1回。ソースとbinaryは実行前後で一致、一時profile回収済み（`tmp/quality/resumed-owner-r3509/coverage-measured-font-cap-exact-8o95k60j/safe-summary.json`）。製品コードと正式root結果は変更なし。
 
 - [x] `ce1cde36` で、静的SVGの `:hover` と `:focus` が通常の角丸指定を上書きしないことを検証。foundation・AST・限定1件は実0。`svg_rasterize_preprocess_geometry_support.rs:89` は正式元データ0回、限定LLVMで8回。ソースとbinaryは実行前後で一致、一時profile回収済み（`tmp/quality/resumed-owner-r3509/coverage-svg-static-pseudo-geometry-exact-3xq61dda/safe-summary.json`）。製品コードと正式root結果は変更なし。
