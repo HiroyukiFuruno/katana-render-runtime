@@ -1033,27 +1033,16 @@ fn convert_writing_mode(text_node: SvgNode) -> WritingMode {
 }
 
 fn path_length(path: &tiny_skia_path::Path) -> f64 {
-    let mut prev_mx = path.points()[0].x;
-    let mut prev_my = path.points()[0].y;
-    let mut prev_x = prev_mx;
-    let mut prev_y = prev_my;
+    let first = path.points()[0];
+    let mut previous = (first.x, first.y);
+    let mut start = previous;
 
     let mut length = 0.0;
     for seg in path.segments() {
-        if let tiny_skia_path::PathSegment::MoveTo(p) = seg {
-            prev_mx = p.x;
-            prev_my = p.y;
-            prev_x = p.x;
-            prev_y = p.y;
-            continue;
+        if let Some(curve) = path_segment_curve(seg, &mut previous, &mut start) {
+            length += curve.arclen(0.5);
+            previous = (curve.p3.x as f32, curve.p3.y as f32);
         }
-        let Some(curve) = path_segment_curve(seg, (prev_x, prev_y), (prev_mx, prev_my)) else {
-            continue;
-        };
-
-        length += curve.arclen(0.5);
-        prev_x = curve.p3.x as f32;
-        prev_y = curve.p3.y as f32;
     }
 
     length
@@ -1061,14 +1050,16 @@ fn path_length(path: &tiny_skia_path::Path) -> f64 {
 
 fn path_segment_curve(
     seg: tiny_skia_path::PathSegment,
-    previous: (f32, f32),
-    start: (f32, f32),
+    previous: &mut (f32, f32),
+    start: &mut (f32, f32),
 ) -> Option<kurbo::CubicBez> {
     match seg {
-        tiny_skia_path::PathSegment::MoveTo(_) => None,
-        tiny_skia_path::PathSegment::LineTo(p) => {
-            Some(create_curve_from_line(previous.0, previous.1, p.x, p.y))
+        tiny_skia_path::PathSegment::MoveTo(p) => {
+            *start = (p.x, p.y);
+            *previous = *start;
+            None
         }
+        tiny_skia_path::PathSegment::LineTo(p) => Some(create_curve_from_line(previous.0, previous.1, p.x, p.y)),
         tiny_skia_path::PathSegment::QuadTo(p1, p) => Some(
             kurbo::QuadBez::new(
                 kurbo::Point::new(previous.0 as f64, previous.1 as f64),
@@ -1083,9 +1074,7 @@ fn path_segment_curve(
             kurbo::Point::new(p2.x as f64, p2.y as f64),
             kurbo::Point::new(p.x as f64, p.y as f64),
         )),
-        tiny_skia_path::PathSegment::Close => Some(create_curve_from_line(
-            previous.0, previous.1, start.0, start.1,
-        )),
+        tiny_skia_path::PathSegment::Close => Some(create_curve_from_line(previous.0, previous.1, start.0, start.1)),
     }
 }
 
