@@ -64,6 +64,26 @@ fn cli_delegates_reference_commands_to_just() -> TestResult<()> {
 }
 
 #[test]
+#[cfg(unix)]
+fn cli_reference_update_reports_missing_just_without_output() -> TestResult<()> {
+    const MISSING_EXECUTABLE_ERRNO: i32 = 2;
+    let fixture = tempfile::tempdir()?;
+    let output = command()
+        .args(["mermaid", "reference-update", "--fixtures"])
+        .arg(fixture.path())
+        .current_dir(fixture.path())
+        .env("PATH", fixture.path())
+        .output()?;
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8(output.stderr)?
+            .contains(&std::io::Error::from_raw_os_error(MISSING_EXECUTABLE_ERRNO).to_string())
+    );
+    Ok(())
+}
+
+#[test]
 fn cli_plantuml_raw_fallback_logs_warning() -> TestResult<()> {
     let input = temp_file("cli-plantuml.puml");
     std::fs::write(&input, "@startuml\nAlice -> Bob: hello\n@enduml\n")?;
