@@ -132,6 +132,24 @@ fn treemap_control() -> String {
 }
 
 #[test]
+fn geometry_contract_rejects_missing_or_empty_treemap_value_style() -> Result<(), String> {
+    let svg = treemap_control();
+    GeometryContract::treemap(&svg)?;
+    let style = r#" style="font-size: 23px; fill: lightgrey""#;
+    let missing = svg.replacen(style, "", 1);
+    let empty = svg.replacen(style, r#" style="  ""#, 1);
+    assert_eq!(
+        GeometryContract::treemap(&missing),
+        Err("missing style".into())
+    );
+    assert_eq!(
+        GeometryContract::treemap(&empty),
+        Err("treemap value style missing".into())
+    );
+    Ok(())
+}
+
+#[test]
 fn geometry_contract_rejects_treemap_wrong_values_detached_labels_and_collapsed_leaf_boxes()
 -> Result<(), String> {
     let svg = treemap_control();
