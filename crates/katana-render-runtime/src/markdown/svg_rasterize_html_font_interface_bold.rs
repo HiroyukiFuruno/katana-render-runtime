@@ -46,7 +46,7 @@ pub(in crate::markdown::svg_rasterize) fn bold_alias_id(database: &Database) -> 
     (face.post_script_name == INTERFACE_BOLD_POSTSCRIPT
         && face.style == Style::Normal
         && interface_family(face)
-        && registered_interface_source(&face.source))
+        && native_face_source_path(&face.source).is_some())
     .then_some(face.id)
 }
 
@@ -66,7 +66,7 @@ pub(in crate::markdown::svg_rasterize) fn has_native_interface_candidate(
     bold_alias_id(database).is_some()
         || database.faces().any(|face| {
             face.post_script_name == INTERFACE_BOLD_POSTSCRIPT
-                && native_face_source(&face.source)
+                && native_face_source_path(&face.source).is_some()
                 && interface_family(face)
         })
 }
@@ -86,8 +86,7 @@ fn matching_native_faces<'a>(
             face.post_script_name == postscript
                 && face.style == Style::Normal
                 && interface_family(face)
-                && native_face_source(&face.source)
-                && source_path(&face.source)
+                && native_face_source_path(&face.source)
                     .and_then(|source| super::canonical_font_source_path(source).ok())
                     .is_some_and(|source| source == path)
         })
@@ -128,20 +127,11 @@ fn interface_family(face: &FaceInfo) -> bool {
     })
 }
 
-fn native_face_source(source: &Source) -> bool {
-    matches!(source, Source::File(path) | Source::SharedFile(path, _) if native_system_font_path(path))
-}
-
-fn registered_interface_source(source: &Source) -> bool {
+fn native_face_source_path(source: &Source) -> Option<&Path> {
     match source {
-        Source::File(path) | Source::SharedFile(path, _) => native_system_font_path(path),
-        Source::Binary(_) => false,
-    }
-}
-
-fn source_path(source: &Source) -> Option<&Path> {
-    match source {
-        Source::File(path) | Source::SharedFile(path, _) => Some(path),
+        Source::File(path) | Source::SharedFile(path, _) if native_system_font_path(path) => {
+            Some(path)
+        }
         _ => None,
     }
 }
