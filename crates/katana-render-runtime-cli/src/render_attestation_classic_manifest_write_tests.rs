@@ -7,6 +7,31 @@ use super::{
 use anyhow::{Context, ensure};
 
 #[test]
+fn capture_rejects_a_removed_script_after_successful_verification() -> anyhow::Result<()> {
+    let value = request_json(false);
+    let state = observe(|| {
+        request(&value, CLASSIC_PROGRAM_COUNT);
+        programs(&value, false);
+    })?;
+    state.validate(SOURCE)?;
+    let tempdir = unit_tempdir()?;
+    let capture = write_capture(tempdir.path(), state)?;
+    capture.verify()?;
+    std::fs::remove_file(tempdir.path().join("classic-script-00.js"))?;
+    let error = capture
+        .verify()
+        .err()
+        .context("missing script was accepted")?;
+    ensure!(
+        error
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound),
+        "unexpected missing script error: {error}"
+    );
+    Ok(())
+}
+
+#[test]
 fn existing_manifest_rejects_write_after_capture_programs_are_saved() -> anyhow::Result<()> {
     let value = request_json(false);
     let state = observe(|| {
