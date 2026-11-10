@@ -115,9 +115,6 @@ impl HtmlLayoutRenderer {
 
     fn render_inline_text(&mut self, text: &str, style: &CssStyle, inline: &mut InlineFlowState) {
         let normalized = normalized_inline_text(text, inline, style);
-        if normalized.is_empty() {
-            return;
-        }
         let text = normalized.as_str();
         let initial_x = inline.cursor_x;
         let initial_y = inline.y;

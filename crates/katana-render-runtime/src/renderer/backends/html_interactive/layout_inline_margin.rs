@@ -23,19 +23,22 @@ struct MarginRenderContext<'a> {
 
 pub(super) fn block_margins(node: &HtmlDocumentNode, inherited: &CssStyle) -> Option<BlockMargins> {
     let HtmlDocumentNode::Element {
-        tag, attributes, ..
+        tag,
+        attributes,
+        children,
+        ..
     } = node
     else {
         return None;
     };
     let style = CssStyle::from_element(tag, attributes, inherited);
-    block_margins_for_style(node, &style)
+    block_margins_for_style(children, &style)
 }
 
-fn block_margins_for_style(node: &HtmlDocumentNode, style: &CssStyle) -> Option<BlockMargins> {
-    let HtmlDocumentNode::Element { children, .. } = node else {
-        return None;
-    };
+fn block_margins_for_style(
+    children: &[HtmlDocumentNode],
+    style: &CssStyle,
+) -> Option<BlockMargins> {
     (matches!(
         style.display,
         Display::Block | Display::FlowRoot | Display::Flex | Display::Grid
@@ -164,22 +167,22 @@ fn remember_margin_state(
         return;
     }
     if let HtmlDocumentNode::Element {
-        tag, attributes, ..
+        tag,
+        attributes,
+        children,
+        ..
     } = &nodes[index]
     {
         let style = CssStyle::from_element(tag, attributes, inherited);
         if style.display == Display::None {
             return;
         }
-        if !had_inline_content && let Some(current) = block_margins_for_style(&nodes[index], &style)
-        {
-            *previous_block_bottom_margin = current.bottom;
-            *previous_block_collapsible = true;
+        if !had_inline_content && let Some(current) = block_margins_for_style(children, &style) {
+            (*previous_block_bottom_margin, *previous_block_collapsible) = (current.bottom, true);
             return;
         }
     }
-    *previous_block_bottom_margin = 0.0;
-    *previous_block_collapsible = false;
+    (*previous_block_bottom_margin, *previous_block_collapsible) = (0.0, false);
 }
 
 fn collapsed_margin(previous_bottom: f32, current_top: f32) -> f32 {

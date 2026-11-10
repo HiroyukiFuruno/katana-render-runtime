@@ -56,7 +56,7 @@ impl HtmlLayoutRenderer {
     ) -> String {
         let transformed = style.transformed_text(line);
         let feature_dx = font_feature_dx(&transformed, style);
-        let text_length = measured_length_markup(feature_dx.as_deref(), measured_width, line);
+        let text_length = measured_length_markup(feature_dx.as_deref(), measured_width);
         let (font_markup, content) = self
             .font_markup_cache
             .font_markup_at(&transformed, style, x);
@@ -77,8 +77,8 @@ impl HtmlLayoutRenderer {
     }
 }
 
-fn measured_length_markup(feature_dx: Option<&str>, width: f32, line: &str) -> String {
-    feature_dx.map_or_else(|| text_length(width, line), |_| String::new())
+fn measured_length_markup(feature_dx: Option<&str>, width: f32) -> String {
+    feature_dx.map_or_else(|| text_length(width), |_| String::new())
 }
 
 fn text_baseline_offset(line: &str, style: &CssStyle) -> f32 {
@@ -109,15 +109,11 @@ fn aligned_text_x_with_width(x: f32, width: f32, style: &CssStyle, measured_widt
     }
 }
 
-fn text_length(measured_width: f32, line: &str) -> String {
-    if line.is_empty() {
-        String::new()
-    } else {
-        format!(
-            " textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\"",
-            measured_width
-        )
-    }
+fn text_length(measured_width: f32) -> String {
+    format!(
+        " textLength=\"{}\" lengthAdjust=\"spacingAndGlyphs\"",
+        measured_width
+    )
 }
 
 fn font_weight(style: &CssStyle) -> String {
