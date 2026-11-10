@@ -204,3 +204,7 @@ mod family_case_tests;
 #[cfg(test)]
 #[path = "svg_rasterize_text_usvg_cmap_selector_mixed_tspan_tests.rs"]
 mod mixed_tspan_tests;
+
+#[cfg(test)]
+#[path = "svg_rasterize_text_usvg_cmap_selector_stock_fallback_tests.rs"]
+mod stock_fallback_tests;
