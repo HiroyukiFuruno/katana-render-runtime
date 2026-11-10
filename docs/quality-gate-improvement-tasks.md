@@ -2,6 +2,11 @@
 
 ## 現在の実行地点（2026-11-10、以下の過去結果と区別する）
 
+- [/] 最新指示で、到達不能と確認した重複判定の等価な整理だけを100%達成前に許可された。集計の除外と基準緩和は行わず、広い共通化・境界整理は100%達成後。`4c94efed` の正式rootは6,167件成功・別15件skip、86,744/87,329行（99.3301194334%）、未カバー585行。承認前602行→`cf5980a9` の595行→585行。分母の変化は重複した実装の整理で、ファイル別集計の変化は変更した箇所のみ。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-qzkmrp6z/safe-summary.json`）。
+- [x] `492053ee`・`cf5980a9` はHTML空入力・整列・列幅とSVG既定属性・光源の重複判定を整理。SVG移植先2ファイルの来歴を既存手順で更新し、foundation・AST・関連75件は実0。正式root `cf5980a9` は86,755/87,350行、未カバー595行（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-s87ffzmq/safe-summary.json`）。個別証跡は `tmp/quality/resumed-owner-r3509/coverage-proven-redundant-guards-exact-4ou97rs5/safe-summary.json`。
+- [x] `12f177cd`・`479e29d0`・`cc15559a` はHTML空白・余白、Hanging、SVGテキストパスの始点判定を整理し、関連18件成功。`7a529ac4`・`4c94efed` は軸の個別欠落と非有限値の拒否を維持したまま、成立済みの外側Optionとフォント上限の二重判定を整理し、関連15件成功。最終foundation・ASTは各実0（`tmp/quality/resumed-owner-r3509/coverage-proven-redundant-guards-second-exact-r9ob3fsl/safe-summary.json`、`tmp/quality/resumed-owner-r3509/coverage-proven-redundant-guards-third-exact-97_rijio/safe-summary.json`）。
+- [x] `ea96d77d`・`8b493531`・`e9437633` はクリップ境界をまたぐ有限距離、SVG合成演算の振り分け、固定RGBA指定済みJPEGの二重判定を整理し、複数の部分パスの回帰を追加。SVG来歴を更新し、foundation・AST・関連50件は実0。全合成モード、正常・破損画像、交点の非有限拒否を確認（`tmp/quality/resumed-owner-r3509/coverage-proven-redundant-guards-fourth-exact-8f9yxqw3/safe-summary.json`）。この差分の全体カバレッジは未集計。
+
 - [x] `b7820c9e` でSVG writerの既定の文字幅とベースライン3属性を明示しても、省略した入力と同じ出力になり、属性を出力しないことを固定。foundation・AST・関連2件は実0。手前の判定3箇所は各3回、到達不能な3分岐は各0回。製品コードを変更せず回帰を確立（`tmp/quality/resumed-owner-r3509/coverage-svg-writer-defaults-exact-z9dk20_e/safe-summary.json`）。
 - [/] 共有hook台帳が別作業1件で置換されていたため原本を管理外に保持し、直近の観測で確認した未完16項目を復元。過去の個別証跡は本台帳を参照。置換前のhook台帳44項目の完全な原本は回収できていない（`tmp/quality/resumed-owner-r3509/krr-shared-ledger-recovery-7607uqyv/`）。
 
