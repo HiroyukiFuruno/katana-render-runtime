@@ -114,15 +114,13 @@ fn css_baseline_target(
         ascent,
         -descent,
     )?;
-    if policy.kind == PolicyKind::Hanging {
-        /* WHY: Hanging fallbackはBlinkのpostprocessed ascentから補正し、origin snapはpaintで行う。 */
-        return Some(layout_ascent * HANGING_BASELINE_SHIFT_FACTOR);
-    }
-    let layout_descent = -descent.round();
     let baseline_from_top = match policy.kind {
         PolicyKind::Mathematical => ascent_from_top(layout_ascent),
-        PolicyKind::Central => central_from_top(layout_ascent, layout_descent),
-        PolicyKind::Hanging => return None,
+        PolicyKind::Central => central_from_top(layout_ascent, -descent.round()),
+        PolicyKind::Hanging => {
+            /* WHY: Hanging fallbackはBlinkのpostprocessed ascentから補正し、origin snapはpaintで行う。 */
+            return Some(layout_ascent * HANGING_BASELINE_SHIFT_FACTOR);
+        }
         PolicyKind::Middle | PolicyKind::AlignmentMiddle => return None,
     };
     /* WHY: line-topの丸めはCSS座標で行い、拡大前の半pixel丸めによるbaselineのずれを避ける。 */
