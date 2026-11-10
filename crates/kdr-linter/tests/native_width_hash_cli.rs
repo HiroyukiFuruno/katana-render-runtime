@@ -96,6 +96,13 @@ fn execute(root: &Path) -> Result<std::process::Output, std::io::Error> {
         .output()
 }
 
+fn rejected_diagnostic(root: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let output = execute(root)?;
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    Ok(String::from_utf8(output.stderr)?.trim().to_owned())
+}
+
 #[test]
 fn native_width_cli_rejects_non_utf8_source_without_report()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -104,13 +111,42 @@ fn native_width_cli_rejects_non_utf8_source_without_report()
     let accepted = execute(fixture.path())?;
     assert!(accepted.status.success());
     fs::write(fixture.path().join(INPUTS[1]), [0xff])?;
-    let output = execute(fixture.path())?;
-    assert_eq!(output.status.code(), Some(1));
-    assert!(output.stdout.is_empty());
     assert_eq!(
-        String::from_utf8(output.stderr)?.trim(),
+        rejected_diagnostic(fixture.path())?,
         format!("invalid-utf8:{}", INPUTS[1])
     );
+    Ok(())
+}
+
+#[test]
+fn native_width_cli_rejects_missing_source_and_invalid_rust_without_report()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = tempfile::tempdir()?;
+    copy_inputs(fixture.path())?;
+    assert!(execute(fixture.path())?.status.success());
+    let source = fixture.path().join(INPUTS[1]);
+    fs::write(&source, "fn incomplete(")?;
+    let syntax = rejected_diagnostic(fixture.path())?;
+    assert!(
+        syntax.starts_with(&format!("parse-source:{}:", INPUTS[1])),
+        "{syntax}"
+    );
+
+    fs::remove_file(source)?;
+    let missing = rejected_diagnostic(fixture.path())?;
+    assert!(
+        missing.starts_with(&format!("missing-source:{}:", INPUTS[1])),
+        "{missing}"
+    );
+    Ok(())
+}
+
+#[test]
+fn native_width_cli_rejects_a_nonexistent_root_without_report()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = tempfile::tempdir()?;
+    let error = rejected_diagnostic(&fixture.path().join("nonexistent"))?;
+    assert!(error.starts_with("invalid-root:"), "{error}");
     Ok(())
 }
 
@@ -145,10 +181,7 @@ fn reject_mutation(
     let original = fs::read_to_string(&path)?;
     assert_eq!(original.matches(before).count(), 1);
     fs::write(&path, original.replacen(before, after, 1))?;
-    let output = execute(root)?;
-    assert_eq!(output.status.code(), Some(1));
-    assert!(output.stdout.is_empty());
-    assert_eq!(String::from_utf8(output.stderr)?.trim(), expected);
+    assert_eq!(rejected_diagnostic(root)?, expected);
     fs::write(path, original)?;
     Ok(())
 }
