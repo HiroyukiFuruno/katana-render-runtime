@@ -49,8 +49,8 @@ fn convert_linear(node: SvgNode, state: &converter::State) -> Option<ServerOrCol
     let id = NonEmptyString::new(node.element_id().to_string())?;
 
     let stops = convert_stops(find_gradient_with_stops(node)?);
-    if stops.len() < 2 {
-        return stops_to_color(&stops);
+    if let [stop] = stops.as_slice() {
+        return Some(stop_to_color(stop));
     }
 
     let units = convert_units(node, AId::GradientUnits, Units::ObjectBoundingBox);
@@ -94,8 +94,8 @@ fn convert_radial(node: SvgNode, state: &converter::State) -> Option<ServerOrCol
     let id = NonEmptyString::new(node.element_id().to_string())?;
 
     let stops = convert_stops(find_gradient_with_stops(node)?);
-    if stops.len() < 2 {
-        return stops_to_color(&stops);
+    if let [stop] = stops.as_slice() {
+        return Some(stop_to_color(stop));
     }
 
     let units = convert_units(node, AId::GradientUnits, Units::ObjectBoundingBox);
@@ -611,14 +611,10 @@ fn resolve_filter_attr<'a, 'input: 'a>(node: SvgNode<'a, 'input>, aid: AId) -> S
     node
 }
 
-fn stops_to_color(stops: &[Stop]) -> Option<ServerOrColor> {
-    if stops.is_empty() {
-        None
-    } else {
-        Some(ServerOrColor::Color {
-            color: stops[0].color,
-            opacity: stops[0].opacity,
-        })
+fn stop_to_color(stop: &Stop) -> ServerOrColor {
+    ServerOrColor::Color {
+        color: stop.color,
+        opacity: stop.opacity,
     }
 }
 

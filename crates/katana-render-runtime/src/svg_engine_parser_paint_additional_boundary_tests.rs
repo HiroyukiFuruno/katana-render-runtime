@@ -91,3 +91,29 @@ fn gradients_with_local_stops_ignore_wrong_type_href() -> Result<(), String> {
     }
     Ok(())
 }
+
+#[test]
+fn single_stop_radial_gradient_preserves_color_and_opacity() -> Result<(), String> {
+    let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><defs><radialGradient id="single" color="#123456"><stop stop-color="currentColor" stop-opacity="0.5"/></radialGradient></defs><rect id="sample" width="8" height="8" fill="url(#single)"/></svg>"##;
+    let control = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="#123456" fill-opacity="0.5"/></svg>"##;
+    let tree = parse_with_languages(source, &[])?;
+    let fill = super::path_by_id(&tree, "sample")?
+        .fill()
+        .ok_or("single-stop radial fill missing")?;
+    let super::usvg::Paint::Color(color) = fill.paint() else {
+        return Err("single-stop radial gradient did not become a solid color".to_owned());
+    };
+    assert_eq!(
+        (color.red, color.green, color.blue),
+        GRADIENT_FALLBACK_COLOR
+    );
+    assert_eq!(fill.opacity().get(), 0.5);
+    let actual = rendered_svg(source)?;
+    let expected = rendered_svg(control)?;
+    assert_eq!(actual, expected);
+    assert_ne!(
+        pixel(&actual, CENTER_SAMPLE, CENTER_SAMPLE)?,
+        TRANSPARENT_PIXEL
+    );
+    Ok(())
+}
