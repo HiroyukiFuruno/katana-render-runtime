@@ -3,6 +3,13 @@ use super::{AttestationPaths, Fixture, RenderAttestation, unit_output};
 use crate::commands::DiagramInputFormat;
 use std::{fs, path::Path};
 
+const ATTESTATION_INPUT_FILES: &[&str] = &[
+    "runtime",
+    "request-source.mmd",
+    "render-input.json",
+    "raw-input.bin",
+];
+
 #[test]
 fn stale_read_and_existing_destinations_fail_without_overwrite() -> anyhow::Result<()> {
     let fixture = Fixture::new("original")?;
@@ -40,6 +47,34 @@ fn changed_render_input_snapshot_is_rejected() -> anyhow::Result<()> {
     assert!(attestation.complete(&input, &unit_output()).is_err());
     assert!(!fixture.output.exists());
     assert!(!fixture.receipt.exists());
+    Ok(())
+}
+
+#[test]
+fn missing_attestation_inputs_prevent_output_and_receipt() -> anyhow::Result<()> {
+    for &name in ATTESTATION_INPUT_FILES {
+        let fixture = Fixture::new("classDiagram")?;
+        let (attestation, input) = fixture.begin_with_captured_input("classDiagram")?;
+        let path = if name == "runtime" {
+            fixture.runtime.clone()
+        } else {
+            fixture.receipt.with_extension("artifacts").join(name)
+        };
+        fs::remove_file(path)?;
+        let error = attestation
+            .complete(&input, &unit_output())
+            .err()
+            .ok_or_else(|| anyhow::anyhow!("missing {name} was accepted"))?;
+        assert_eq!(
+            error
+                .downcast_ref::<std::io::Error>()
+                .map(|error| error.kind()),
+            Some(std::io::ErrorKind::NotFound),
+            "unexpected error for {name}: {error}"
+        );
+        assert!(!fixture.output.exists(), "output created for {name}");
+        assert!(!fixture.receipt.exists(), "receipt created for {name}");
+    }
     Ok(())
 }
 
