@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-10、以下の過去結果と区別する）
 
+- [x] `13206cce` でChromeフォント証明の応答形式が不一致なら出力を作成せず、正しい形式では入力との紐付けを保持して出力することを検証。初回ASTでテスト関数長を検出し、fixture生成を分離後にfoundation・AST・限定1件が実0。前回未実行の `cli.rs:22` は限定LLVMで1回到達、実行前後のソースとbinaryは一致、一時profileは削除済み（`tmp/quality/resumed-owner-r3509/coverage-probe-response-exact-4lbsbv8j/safe-summary.json`）。製品コードと正式root結果は変更していない。
 - [/] 最新の正式rootは `f5b5dc1a`、6,136件成功・別に15件skip、86,737/87,362行（99.2845859756%）、未カバー625行。前回 `019e0076` の629行から4減、分母は同じ。Mermaid計測JSONの処理3行とKDRの入力ルート検証1行が新規到達。初回は使用中PIDの検知でclean実2・テスト未起動（`root-coverage-current-threads4-gp_8zdb8`）。PID終了確認後の再実行はソース前後一致・収集実0・厳格閾値 `coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-pkod6fgb/` の `safe-summary.json` と `test-and-policy-summary.json`）。完全ゲートと公開は未完。
 - [x] 同じ `7bab5f9b` の性能検証ハーネスは基準側1,163/1,163行、候補側1,207/1,207行で合格（`tmp/quality/resumed-owner-r3509/performance-coverage-current-7bab5f9b-6uohcty0/safe-summary.json`）。HTML表示性能は別判定。
 - [x] `7591f2b3` で、存在確認後に消失した実フォントを再配置しても古い証明が復活しないことと、行の高さがゼロの実フォントを拒否することを回帰で確認。静的検査・AST・関連3件が成功。限定LLVMで前回未実行の製品コード3箇所を通過（`tmp/quality/resumed-owner-r3509/coverage-font-proof-and-endpoints-exact-ecxf702r/safe-summary.json`）。テストのみの変更で、正式rootは未更新。
