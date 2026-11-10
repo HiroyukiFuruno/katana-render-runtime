@@ -7,6 +7,7 @@ import hashlib
 import importlib
 import json
 import math
+import os
 import re
 import stat
 import subprocess
@@ -319,6 +320,44 @@ def _domain_command(root: Path, domain: str, report_name: str, threads: str) -> 
     return record
 
 
+def _validate_source_segments(segments: object, source: bytes, relative: Path) -> None:
+    ends_with_newline = source.endswith(b"\n")
+    last_line = source.count(b"\n") + int(bool(source) and not ends_with_newline)
+    for item in _array(segments, "root coverage source segments"):
+        segment = _array(item, "root coverage segment")
+        if len(segment) != 6:
+            raise CoverageResultError("invalid root coverage segment shape")
+        line, column, count, has_count, is_entry, is_gap = segment
+        if (type(line) is not int or line < 1 or type(column) is not int or column < 1
+                or type(count) is not int or count < 0
+                or any(type(flag) is not bool for flag in (has_count, is_entry, is_gap))):
+            raise CoverageResultError("invalid root coverage segment values")
+        # LLVM can end a region at column 1 of the empty line after a trailing newline.
+        eof_end = (ends_with_newline and line == last_line + 1 and column == 1 and count == 0
+                   and not has_count and not is_entry and not is_gap)
+        if line > last_line and not eof_end:
+            raise CoverageResultError(f"root coverage mapping exceeds current source: {relative}")
+
+
+def _validate_root_source_mappings(root: Path, report: object) -> None:
+    export = _object(report, "root llvm-cov report")
+    for item in _array(export.get("data"), "root report data"):
+        data = _object(item, "root report mapping")
+        files = _array(data.get("files"), "root coverage source files")
+        if not files:
+            raise CoverageResultError("root report has no source files")
+        for value in files:
+            file = _object(value, "root coverage source file")
+            filename = file.get("filename")
+            if not isinstance(filename, str) or not filename or "\0" in filename:
+                raise CoverageResultError("invalid root coverage source filename")
+            path = Path(os.path.normpath(root / filename))
+            if path == root or not path.is_relative_to(root):
+                raise CoverageResultError("root coverage source file is outside the checkout")
+            relative = path.relative_to(root)
+            _validate_source_segments(file.get("segments"), _read_repo_file(root, str(relative)), relative)
+
+
 def _report_record(root: Path, domain: str, threads: str, *, collection: bool = False) -> JsonObject:
     name = "root.json" if domain == "root" else f"{domain.removeprefix('performance-')}.json"
     relative = f"{REPORT_DIRECTORY}/{name}"
@@ -327,6 +366,8 @@ def _report_record(root: Path, domain: str, threads: str, *, collection: bool = 
         report = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise CoverageResultError(f"{domain} report is not valid JSON") from error
+    if domain == "root":
+        _validate_root_source_mappings(root, report)
     return {
         "reportName": name,
         "sha256": _sha256(raw),

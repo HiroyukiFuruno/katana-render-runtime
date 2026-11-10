@@ -18,12 +18,15 @@ def _fixture_report_path(root: Path, domain: str) -> Path:
 
 
 def write_fixture_report(root: Path, domain: str, count: int = 12, covered: int = 12,
-                         percent: float = 100.0) -> None:
+                         percent: float = 100.0, *,
+                         segments: list[list[object]] | None = None) -> None:
+    if segments is None:
+        segments = [[1, 1, 1, True, True, False], [2, 1, 0, False, False, False]]
     report = {
         "type": "llvm.coverage.json.export",
         "version": "2.0.1",
         "data": [{
-            "files": [{"filename": str(root / "private" / "source.rs")}],
+            "files": [{"filename": str(root / "private" / "source.rs"), "segments": segments}],
             "totals": {"lines": {"count": count, "covered": covered, "percent": percent}},
         }],
     }
@@ -44,6 +47,9 @@ def initialize_fixture_repository(root: Path) -> tuple[str, dict[str, str], dict
     test_only_source.parent.mkdir(parents=True, exist_ok=True)
     test_only_source.write_text("#![cfg(test)]\n", encoding="utf-8")
     (root / ".gitignore").write_text("tmp/\n", encoding="utf-8")
+    fixture_source = root / "private" / "source.rs"
+    fixture_source.parent.mkdir()
+    fixture_source.write_text("fn fixture() {}\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.name", "KRR coverage fixture"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.email", "coverage-fixture@example.invalid"], cwd=root, check=True)
@@ -217,6 +223,19 @@ class NativeCoverageResultTests(unittest.TestCase):
         self.verify_without_reports(manifest)
         with self.assertRaisesRegex(coverage_result.CoverageResultError, "unavailable"):
             self.verify(manifest)
+
+    def test_root_report_rejects_stale_source_segments_in_both_paths(self) -> None:
+        positions: tuple[list[object], ...] = (
+            [3, 1, 0, False, False, False],
+            [2, 1, 0, True, True, False],
+        )
+        for position in positions:
+            write_fixture_report(self.root, "root", segments=[[1, 1, 1, True, True, False], position])
+            for collection in (True, False):
+                with self.subTest(position=position, collection=collection), self.assertRaisesRegex(
+                    coverage_result.CoverageResultError, "coverage mapping exceeds current source",
+                ):
+                    coverage_result._report_record(self.root, "root", "2", collection=collection)
 
     def test_source_change_during_production_is_rejected(self) -> None:
         original = coverage_result._report_record
