@@ -10,6 +10,31 @@ const SFNT_DIRECTORY_OFFSET: usize = 12;
 const SFNT_RECORD_SIZE: usize = 16;
 const SFNT_TAG_SIZE: usize = 4;
 
+#[test]
+fn standalone_combining_mark_keeps_ink_without_zero_width_underline() -> TestResult<()> {
+    const ACCENT: &str = "\u{0301}";
+    let decorated = parse("text-decoration='underline'", ACCENT)?;
+    let reference = parse("", ACCENT)?;
+    let layout = text(&decorated)?.layouted().first().ok_or("span missing")?;
+    let [glyph] = layout.positioned_glyphs.as_slice() else {
+        return Err("expected a standalone combining glyph".into());
+    };
+    assert_ne!(glyph.id.0, 0);
+    assert!(layout.underline.is_none());
+    let pixels = raster(&decorated)?;
+    assert!(pixels.pixels().iter().any(|pixel| pixel.alpha() != 0));
+    assert_eq!(pixels.data(), raster(&reference)?.data());
+    Ok(())
+}
+
+fn raster(tree: &usvg::Tree) -> TestResult<tiny_skia::Pixmap> {
+    let size = tree.size().to_int_size();
+    let mut pixels =
+        tiny_skia::Pixmap::new(size.width(), size.height()).ok_or("pixmap allocation")?;
+    crate::svg_engine::resvg::render(tree, Transform::identity(), &mut pixels.as_mut());
+    Ok(pixels)
+}
+
 fn fixture() -> TestResult<(usvg::TextSpan, ResolvedFont)> {
     let tree = parse("text-decoration='underline'", "H")?;
     let span = text(&tree)?
