@@ -87,6 +87,65 @@ fn middle_shift_for_svg_scale(
 
 #[cfg(target_os = "macos")]
 #[test]
+fn middle_policy_uses_the_applied_variable_face_metrics() -> Result<(), String> {
+    let (tree, id) = variable_middle_tree()?;
+    let Some(Node::Text(text)) = tree.node_by_id("run") else {
+        return Err("variable middle text missing".into());
+    };
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    assert!(rasterizer.face_metadata(id)?.unsupported);
+    let face = rasterizer
+        .primary_variable_face(text, id)?
+        .ok_or("variable face missing")?;
+    let policy = super::super::super::uniform_policy(text).ok_or("middle policy missing")?;
+    let expected = shift(&rasterizer, id, &face.metadata(), policy, Some(&face))?
+        .filter(|value| value.is_finite())
+        .ok_or("variable middle shift missing")?;
+    let resolved = super::super::super::resolved_policy(&rasterizer, text)?
+        .and_then(|value| value.primary_shift)
+        .ok_or("resolved shift missing")?;
+    assert_eq!(resolved, expected);
+    let super::super::super::super::Prepared::Ready(spans) = rasterizer.prepare(text)? else {
+        return Err("variable middle text not prepared".into());
+    };
+    assert!(!spans.is_empty());
+    assert!(
+        spans
+            .iter()
+            .all(|span| span.font == id && span.baseline_shift == expected)
+    );
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn variable_middle_tree() -> Result<(resvg::usvg::Tree, resvg::usvg::fontdb::ID), String> {
+    use resvg::usvg::fontdb::{Database, Source};
+    use std::{path::PathBuf, sync::Arc};
+    let mut database = Database::new();
+    let id = *database
+        .load_font_source(Source::File(PathBuf::from(
+            "/System/Library/Fonts/SFNS.ttf",
+        )))
+        .first()
+        .ok_or("SFNS variable face unavailable")?;
+    let family = &database
+        .face(id)
+        .and_then(|face| face.families.first())
+        .ok_or("SFNS family missing")?
+        .0;
+    let svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg"><text id="run" x="0" y="20" dy="1" font-family="{family}" font-size="20" font-weight="700" dominant-baseline="middle">AB</text></svg>"#
+    );
+    let options = resvg::usvg::Options {
+        fontdb: Arc::new(database),
+        ..resvg::usvg::Options::default()
+    };
+    let tree = resvg::usvg::Tree::from_str(&svg, &options).map_err(|error| error.to_string())?;
+    Ok((tree, id))
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn middle_without_x_glyph_preserves_original_glyph_origin() -> Result<(), String> {
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
     let fixture = font_file_fixture::create(directory.path().join("han14.otf"), CJK_WITHOUT_X)

@@ -54,3 +54,22 @@ fn acyclic_paint_server_references_resolve_contents() -> Result<(), String> {
     }
     Ok(())
 }
+
+#[test]
+fn gradients_with_local_stops_ignore_wrong_type_href() -> Result<(), String> {
+    for tag in ["linearGradient", "radialGradient"] {
+        let source = format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><defs><pattern id="wrong" width="1" height="1"><rect width="1" height="1" fill="blue"/></pattern><{tag} id="gradient" href="#wrong"><stop stop-color="red"/><stop offset="1" stop-color="red"/></{tag}></defs><rect width="8" height="8" fill="url(#gradient) green"/></svg>"##
+        );
+        let control = source.replace(" href=\"#wrong\"", "");
+        assert_ne!(source, control);
+        let actual = rendered_svg(&source)?;
+        let expected = rendered_svg(&control)?;
+        assert_eq!(
+            pixel(&expected, CENTER_SAMPLE, CENTER_SAMPLE)?,
+            [255, 0, 0, 255]
+        );
+        assert_eq!(actual, expected, "{tag} local stops changed");
+    }
+    Ok(())
+}
