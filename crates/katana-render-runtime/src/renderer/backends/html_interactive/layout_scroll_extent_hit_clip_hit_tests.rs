@@ -51,6 +51,7 @@ fn zero_inactive_dimension_remains_visible_and_zero_active_is_empty() {
 #[test]
 fn non_finite_geometry_and_input_do_not_admit_hits() {
     let mut clip = clip((true, false), 100.0, 100.0);
+    assert!(!clip_contains_point(&clip, f32::MAX, -f32::MAX));
     assert!(!clip_contains_point(&clip, f32::NAN, 1.0));
     clip.transformed_corners[0].0 = f32::INFINITY;
     assert!(!clip_contains_point(&clip, 1.0, 1.0));

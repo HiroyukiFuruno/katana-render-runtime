@@ -1,6 +1,6 @@
 use super::axes::{polygon_axes, projection_bounds};
 use super::polygon::clip_polygon;
-use super::{OverflowClip, Point, RECT_CORNER_COUNT, non_finite_geometry};
+use super::{OverflowClip, Point, RECT_CORNER_COUNT};
 
 pub(in super::super) fn clip_contains_point(clip: &OverflowClip, x: f32, y: f32) -> bool {
     if !x.is_finite() || !y.is_finite() {
@@ -43,10 +43,8 @@ fn point_axis_position(
     polygon: &[Point; RECT_CORNER_COUNT],
 ) -> Result<Option<Point>, String> {
     let (minimum, maximum) = projection_bounds(polygon, origin, axis)?;
+    /* WHY: 座標は有限のf32から拡張され、軸は単位長なので、この射影はf64の範囲内に収まる。 */
     let position = (point.0 - origin.0) * axis.0 + (point.1 - origin.1) * axis.1;
-    if !position.is_finite() {
-        return Err(non_finite_geometry());
-    }
     Ok(
         (maximum > minimum && position >= minimum && position <= maximum)
             .then_some((position - minimum, maximum - minimum)),
