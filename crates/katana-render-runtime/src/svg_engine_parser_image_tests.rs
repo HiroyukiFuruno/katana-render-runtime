@@ -214,3 +214,42 @@ fn truncated_recognized_raster_does_not_paint(#[case] file: &str) -> TestResult 
     assert!(pixmap.data().iter().all(|value| *value == 0));
     Ok(())
 }
+
+#[test]
+fn interlaced_gif_with_zero_height_frame_keeps_visible_sibling() -> TestResult {
+    let bytes = zero_height_gif_frame()?;
+    let encoded = STANDARD.encode(&bytes);
+    let source = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'><image id='image' width='2' height='2' href='data:image/gif;base64,{encoded}'/><rect x='2' width='2' height='4' fill='blue'/></svg>"
+    );
+    let tree = usvg::Tree::from_str(&source, &usvg::Options::default())?;
+    assert!(tree.node_by_id("image").is_some());
+    let mut image = Pixmap::new(VIEWPORT, VIEWPORT).ok_or("pixmap unavailable")?;
+    resvg::render(&tree, Transform::identity(), &mut image.as_mut());
+    assert_eq!(image.pixel(0, 0).ok_or("image sample missing")?.alpha(), 0);
+    let blue = image.pixel(3, 1).ok_or("sibling sample missing")?;
+    assert_eq!(
+        (blue.red(), blue.green(), blue.blue(), blue.alpha()),
+        (0, 0, 255, 255)
+    );
+    Ok(())
+}
+
+fn zero_height_gif_frame() -> TestResult<Vec<u8>> {
+    const FRAME_DESCRIPTOR: usize = 405;
+    const FRAME_HEIGHT_OFFSET: usize = FRAME_DESCRIPTOR + 7;
+    const FRAME_HEIGHT_END: usize = FRAME_HEIGHT_OFFSET + std::mem::size_of::<u16>();
+    let mut bytes = std::fs::read(Path::new(RESOURCES).join("image.gif"))?;
+    assert_eq!(
+        &bytes[FRAME_DESCRIPTOR..FRAME_DESCRIPTOR + 10],
+        &[0x2c, 0, 0, 0, 0, 64, 0, 64, 0, 0x40]
+    );
+    bytes[FRAME_HEIGHT_OFFSET..FRAME_HEIGHT_END].copy_from_slice(&0_u16.to_le_bytes());
+    assert!(imagesize::blob_size(&bytes).is_ok());
+    let mut options = gif::DecodeOptions::new();
+    options.set_color_output(gif::ColorOutput::RGBA);
+    let mut decoder = options.read_info(bytes.as_slice())?;
+    let frame = decoder.read_next_frame()?.ok_or("GIF frame missing")?;
+    assert_eq!((frame.width, frame.height), (64, 0));
+    Ok(bytes)
+}

@@ -27,6 +27,74 @@ fn browser_system_font_aliases_select_the_registered_system_face()
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
+#[test]
+fn loaded_selector_defers_system_aliases_even_with_a_registered_face() -> Result<(), String> {
+    let database = system_alias_database()?;
+    for family in ["system-ui", "-apple-system", "BlinkMacSystemFont"] {
+        let font = requested_svg_font(&database, family)?;
+        assert_eq!(super::loaded_html_font(&font, &database), None, "{family}");
+        let mut selected_database = std::sync::Arc::clone(&database);
+        assert!(
+            super::html_font_selector()(&font, &mut selected_database).is_some(),
+            "{family}"
+        );
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn internal_interface_family_is_not_a_user_selectable_font() -> Result<(), String> {
+    const INTERNAL_INTERFACE_BOLD_FAMILY: &str = "__krr_internal_system_ui_interface_bold_700";
+    let mut database = Database::new();
+    let mut face = bundled_face()?;
+    face.families = vec![(
+        INTERNAL_INTERFACE_BOLD_FAMILY.to_owned(),
+        resvg::usvg::fontdb::Language::English_UnitedStates,
+    )];
+    database.push_face_info(face);
+    let database = std::sync::Arc::new(database);
+    let font = requested_svg_font(&database, INTERNAL_INTERFACE_BOLD_FAMILY)?;
+    assert_eq!(super::loaded_html_font(&font, &database), None);
+    let mut selected_database = std::sync::Arc::clone(&database);
+    assert_eq!(
+        super::html_font_selector()(&font, &mut selected_database),
+        None
+    );
+    Ok(())
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn requested_svg_font(
+    database: &std::sync::Arc<Database>,
+    family: &str,
+) -> Result<resvg::usvg::Font, String> {
+    let id = database.faces().next().ok_or("fixture face missing")?.id;
+    let mut options = resvg::usvg::Options {
+        fontdb: std::sync::Arc::clone(database),
+        ..resvg::usvg::Options::default()
+    };
+    options.font_resolver.select_font = Box::new(move |_, _| Some(id));
+    let svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg"><text id="run" y="20" font-family="{family}">AV</text></svg>"#
+    );
+    let tree = resvg::usvg::Tree::from_str(&svg, &options).map_err(|error| error.to_string())?;
+    let Some(resvg::usvg::Node::Text(text)) = tree.node_by_id("run") else {
+        return Err("fixture text missing".into());
+    };
+    let font = text
+        .chunks()
+        .first()
+        .and_then(|chunk| chunk.spans().first())
+        .map(|span| span.font().clone())
+        .ok_or("fixture font missing")?;
+    assert!(
+        matches!(font.families().first(), Some(resvg::usvg::FontFamily::Named(name)) if name.eq_ignore_ascii_case(family))
+    );
+    Ok(font)
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn system_alias_database() -> Result<std::sync::Arc<Database>, String> {
     let mut database = Database::new();
     for style in [Style::Normal, Style::Italic, Style::Oblique] {
