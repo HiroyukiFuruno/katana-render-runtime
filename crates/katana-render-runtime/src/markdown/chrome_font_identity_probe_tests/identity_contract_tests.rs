@@ -1,7 +1,11 @@
+use super::super::ResourceFile;
 use super::super::test_support::{
     TempDirectory, physical_font_fixture, shared_physical_font_fixture,
 };
-use super::{face_identity, physical_file, supported_font_path, unique_file_face};
+use super::{
+    FontResolutionCache, face_identity, physical_file, resolve_font_with_cache,
+    supported_font_path, unique_file_face,
+};
 use resvg::usvg::fontdb::{Database, Source};
 use std::fs;
 
@@ -71,6 +75,53 @@ fn physical_font_face_is_bound_to_the_real_file_bytes() -> Result<(), String> {
     assert_eq!(identity.path, canonical);
     assert_eq!(identity.file_sha256, digest);
     assert_eq!(identity.face_index, 0);
+    Ok(())
+}
+
+#[test]
+fn physical_face_handle_cannot_outlive_its_database_entry() -> Result<(), String> {
+    let (_temp, mut database, _) = physical_font_fixture()?;
+    let face = database
+        .faces()
+        .next()
+        .cloned()
+        .ok_or("fixture face missing")?;
+    let identity = face_identity(&database, &face)?;
+    database.remove_face(face.id);
+    assert_eq!(physical_file(&identity.path)?.1, identity.file_sha256);
+    assert_eq!(
+        face_identity(&database, &face).err().as_deref(),
+        Some("fontdb face bytes could not be read")
+    );
+    Ok(())
+}
+
+#[test]
+fn custom_font_resolution_requires_the_physical_resource_in_this_capture() -> Result<(), String> {
+    let (temp, resource_database, mut selected) = physical_font_fixture()?;
+    selected.is_custom_font = true;
+    let (body_path, bytes_sha256, _) = physical_file(&temp.path().join("physical-font.ttf"))?;
+    let system_database = Database::new();
+    let mut cache = FontResolutionCache::for_system_database(&system_database);
+    let mut resolve = |resources: &[ResourceFile]| {
+        resolve_font_with_cache(
+            &system_database,
+            &resource_database,
+            resources,
+            &selected,
+            &mut cache,
+        )
+    };
+    let captured = ResourceFile {
+        url: "https://probe.invalid/captured-font".to_owned(),
+        body_path: body_path.clone(),
+        bytes_sha256,
+    };
+    assert_eq!(resolve(&[captured])?.identity.path, body_path);
+    assert_eq!(
+        resolve(&[]).err().as_deref(),
+        Some("no exact physical face matched the CDP PostScript name")
+    );
     Ok(())
 }
 
