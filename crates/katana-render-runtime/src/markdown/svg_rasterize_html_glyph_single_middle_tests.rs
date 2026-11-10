@@ -114,16 +114,16 @@ fn start_end_and_one_glyph_keep_the_previous_alignment_lane() -> Result<(), Stri
 fn shifted_source_anchor_rejects_the_forward_origin_contract() -> Result<(), String> {
     let source = tree(&CASES[0], "middle", "")?;
     let mut spans = prepared(&source)?;
-    for span in &mut spans {
-        span.chunk_alignment = None;
-    }
-    assert!(super::eligibility::single_middle_input(text(&source)?, &spans).is_some());
+    assert_eq!(spans.len(), 1);
+    let span = &mut spans[0];
+    span.chunk_alignment = None;
+    assert!(super::eligibility::single_middle_input(text(&source)?, span).is_some());
     let shifted = Case {
         anchor_x: CASES[0].anchor_x + 1.0,
         ..CASES[0]
     };
     let shifted_source = tree(&shifted, "middle", "")?;
-    assert!(super::eligibility::single_middle_input(text(&shifted_source)?, &spans).is_none());
+    assert!(super::eligibility::single_middle_input(text(&shifted_source)?, span).is_none());
     Ok(())
 }
 

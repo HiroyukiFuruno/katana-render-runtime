@@ -32,11 +32,11 @@ pub(super) fn apply_single_middle(
     text: &usvg::Text,
     prepared: &mut [PreparedSpan],
 ) -> Result<bool, String> {
-    let Some(input) = eligibility::single_middle_input(text, prepared) else {
+    let [span] = prepared else {
         return Ok(false);
     };
-    let [span] = prepared else {
-        return Err("eligible single middle span count changed".to_owned());
+    let Some(input) = eligibility::single_middle_input(text, span) else {
+        return Ok(false);
     };
     let width =
         f64::from(input.layout.width) * f64::from(input.paint_css_size) / f64::from(span.font_size);

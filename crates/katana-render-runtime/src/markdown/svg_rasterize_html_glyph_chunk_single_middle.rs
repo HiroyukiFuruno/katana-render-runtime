@@ -10,12 +10,11 @@ pub(in super::super) struct SingleMiddleInput {
 
 pub(in super::super) fn single_middle_input(
     text: &usvg::Text,
-    prepared: &[PreparedSpan],
+    span: &PreparedSpan,
 ) -> Option<SingleMiddleInput> {
-    let [span] = prepared else { return None };
     let [chunk] = text.chunks() else { return None };
     let [source] = chunk.spans() else { return None };
-    let css_scale = anchor::run_origin_css_scale(text, prepared)?;
+    let css_scale = anchor::run_origin_css_scale(text, std::slice::from_ref(span))?;
     if !single_source_supported(chunk, source) {
         return None;
     }
