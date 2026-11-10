@@ -62,9 +62,6 @@ fn clip_edge(
     let current_inside = inside_plane(current_distance, keep_greater);
     if previous_inside != current_inside {
         let denominator = previous_distance - current_distance;
-        if denominator == 0.0 {
-            return Err(non_finite_geometry());
-        }
         let amount = previous_distance / denominator;
         let intersection = (
             previous.0 + (current.0 - previous.0) * amount,
