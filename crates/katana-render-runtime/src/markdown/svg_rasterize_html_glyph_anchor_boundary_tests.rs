@@ -20,6 +20,30 @@ fn layout_unit_and_paint_size_reject_unrepresentable_values() {
 }
 
 #[test]
+fn explicit_backward_glyph_position_rejects_the_ordered_anchor_shortcut() -> Result<(), String> {
+    let fixture = font_fixture("backward-anchor-boundary")?;
+    for (attributes, ordered) in [("x='50' y='20'", true), ("x='50' y='20' dx='0 -40'", false)] {
+        let tree = fixture_tree_with_content(&fixture, attributes, "AB")?;
+        let text = fixture_text(&tree)?;
+        let (chunk, _) = single_source(text)?;
+        let [span] = text.layouted() else {
+            return Err("expected one shaped glyph span".into());
+        };
+        let glyphs = &span.positioned_glyphs;
+        let [first, second] = glyphs.as_slice() else {
+            return Err("expected two positioned glyphs".into());
+        };
+        assert_eq!((first.text.as_str(), second.text.as_str()), ("A", "B"));
+        assert_eq!(first.transform().tx < second.transform().tx, ordered);
+        assert_eq!(
+            anchor::one_ordered_scalar_per_glyph(chunk.text(), glyphs),
+            ordered
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn decorated_single_and_multiple_glyph_runs_do_not_use_anchor_shortcuts() -> Result<(), String> {
     let fixture = font_fixture("decorated-anchor-boundary")?;
     for decoration in ["underline", "overline", "line-through"] {

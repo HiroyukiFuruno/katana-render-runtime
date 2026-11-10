@@ -46,6 +46,19 @@ fn invalid_modern_use_href_does_not_fall_back_to_legacy_reference(
     Ok(())
 }
 
+#[test]
+fn empty_clip_on_symbol_use_does_not_hide_visible_sibling() -> Result<(), String> {
+    let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><defs><clipPath id="empty"/><symbol id="shape" viewBox="0 0 200 200"><rect width="200" height="200" fill="red"/></symbol></defs><rect width="200" height="200" fill="blue"/><use href="#shape" width="200" height="200" clip-path="url(#empty)"/></svg>"##;
+    let tree = usvg::Tree::from_str(source, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    let unclipped = source.replace(" clip-path=\"url(#empty)\"", "");
+    let control = usvg::Tree::from_str(&unclipped, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    assert_eq!(render_sample(&tree)?, [0, 0, 255, 255]);
+    assert_eq!(render_sample(&control)?, [255, 0, 0, 255]);
+    Ok(())
+}
+
 fn fixture_path(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join(FIXTURE_ROOT)
