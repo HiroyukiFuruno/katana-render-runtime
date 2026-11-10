@@ -2,11 +2,13 @@
 
 ## 現在の実行地点（2026-11-10、以下の過去結果と区別する）
 
-- [/] 最新の正式rootは `7bab5f9b`、6,114件成功、別に15件skip、86,890/87,538行（99.2597500514%）、未カバー648行。前回の651行から3減、分母は同じ。ソース前後一致、収集実0、厳格閾値は `coverage-policy` で実1（`tmp/quality/resumed-owner-r3509/root-coverage-7bab5f9b-threads4-kk1915r6/safe-summary.json`）。現行HEADの完全ゲートと公開は未完。
+- [/] 最新の正式rootは `9c406141`、6,118件成功・別に15件skip、86,723/87,362行（99.2685607014%）、未カバー639行。前回 `7bab5f9b` の648行から9減。うち製品の新規到達4行、純テスト本体の分離に伴う失敗判定5行。集計対象の差176行は4ファイルのテスト分離に対応し、既存集計ルールは維持。ソース前後一致、収集実0、厳格閾値は `coverage-policy` で実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-o2bl6qa1/` の `safe-summary.json` と `test-and-policy-summary.json`）。完全ゲートと公開は未完。
 - [x] 同じ `7bab5f9b` の性能検証ハーネスは基準側1,163/1,163行、候補側1,207/1,207行で合格（`tmp/quality/resumed-owner-r3509/performance-coverage-current-7bab5f9b-6uohcty0/safe-summary.json`）。HTML表示性能は別判定。
 - [x] `7591f2b3` で、存在確認後に消失した実フォントを再配置しても古い証明が復活しないことと、行の高さがゼロの実フォントを拒否することを回帰で確認。静的検査・AST・関連3件が成功。限定LLVMで前回未実行の製品コード3箇所を通過（`tmp/quality/resumed-owner-r3509/coverage-font-proof-and-endpoints-exact-ecxf702r/safe-summary.json`）。テストのみの変更で、正式rootは未更新。
 - [x] `9868ab1d` でSVGのclip由来・文字寸法とHTMLの行高・hit判定の純テストを4ファイルへ分離。製品実装は移動前とbyte一致、テスト一覧5,745件は完全一致、対象15件は実0。初回のASTで既存リテラル3箇所、再試行で整形1箇所を検出し、同値の定数化と標準整形を適用。最終foundation・ASTは実0（`tmp/quality/resumed-owner-r3509/coverage-pure-module-boundary-verified-czz1y_pf/`）、限定実行の一時profile残0（`tmp/quality/resumed-owner-r3509/coverage-pure-module-boundary-exact-uh434o5_/safe-summary.json`）。計測ルール変更なし、正式rootは未更新。
-- [/] `7bab5f9b` の未カバー648行は277ファイルに分散。内訳にSVG vendor表示パス92行、renderer backends75行、Mermaid52行、Chrome font probe49行を含む。LLVMの同一行に実行済みと未実行のsegmentが共存するため、segment数は行数へ加算しない。Mach-O証明の検証間ファイル変更、V8の固定文字列生成、前段で保証済みのSVG glyph境界などは、安定した文書入力で通る処理と分ける。次の実入力候補は、通常のフォント選択でstyle・weight・stretchがすべて異なるフォントを避けるSVG fallbackで、同梱実フォントを使った選択結果の検証を優先する。
+- [/] `7bab5f9b` 時点の未カバー648行は277ファイルに分散。内訳にSVG vendor表示パス92行、renderer backends75行、Mermaid52行、Chrome font probe49行を含む。LLVMの同一行に実行済みと未実行のsegmentが共存するため、segment数は行数へ加算しない。Mach-O証明の検証間ファイル変更、V8の固定文字列生成、前段で保証済みのSVG glyph境界などは、安定した文書入力で通る処理と分ける。
+- [x] `691b5ef5`・`e974fe46`・`9c406141` で、実フォント2種のSVG fallback選択、HTMLの段組みと間隔、Mermaidハッシュ関数とSVG IDメソッドの欠落拒否を検証。静的検査・AST・限定3件が成功し、SVGの1箇所とCLIの2箇所で未実行segmentに到達。CLIの2箇所は正式集計の新規行数に加算されなかった（`tmp/quality/resumed-owner-r3509/coverage-fallback-style-cli-exact-lnfxu67d/safe-summary.json`）。
+- [ ] 次の実入力候補は、既存のMathJax bundle検証fixtureで `MathJaxRuntimeScripts::build` の欠落を独立に検証するケース。正式判定の実装範囲と閾値を維持する。
 - [x] `7a511d70` で承認済みのテスト専用補助3ファイルを個別パスとSHAで固定し、集計を分離した。`66bb6602` の正式結果は未カバー654行。先行の673行との差19行は、計測対象に残る実装9行の通過と、テスト専用ファイル由来の未実行10行。隣接する検証実装は全て計測対象（`tmp/quality/resumed-owner-r3509/root-coverage-66bb6602-eisvxf9w/scope-and-coverage-delta.json`）。
 - [x] `9d889c0a` は実フォントの逆順glyphでアンカー補正を拒否し、空clip付きsymbolが可視背景を隠さないことを対照と比較。限定2件・静的・AST実0、前回0回の3箇所を通過（`tmp/quality/resumed-owner-r3509/coverage-anchor-and-symbol-exact-vow7d5cq/safe-summary.json`）。正式集計は未更新。
 - [ ] 実入力で届かない分岐を実装の不変条件と照合。CLIのattestationでは明示済み `Some(path)` が選択エラー経路を通らない。HTMLの `polygon_axes` は外側が成功またはエラーで、内側の軸だけが欠落し得る。MathJaxのliteral比較は先行template検証が同じ値を要求する。これらの到達不能枝と、初回のruntime選択・非有限geometry・template不一致の実エラーを区別して扱う。計測条件を変えず、実入力で到達可能な未対応分岐の検証を先行する。
