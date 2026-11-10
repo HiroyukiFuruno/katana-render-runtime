@@ -2,7 +2,7 @@ use super::super::super::test_support::{TempDirectory, physical_font_fixture};
 use super::super::PhysicalFace;
 use super::{SelectedFont, resolve_font};
 use core_foundation::{base::CFType, dictionary::CFDictionary, string::CFString};
-use core_text::font_descriptor::new_from_attributes;
+use core_text::font_descriptor::{new_from_attributes, new_from_postscript_name};
 use resvg::usvg::fontdb::Database;
 use std::{fs, path::Path};
 
@@ -129,6 +129,50 @@ fn coretext_lookup_skips_descriptors_with_a_different_name() -> Result<(), Strin
     let path = identity.path.clone();
     let matches = super::resolve_file(&path, identity, "krr-unmatched-postscript-name")?;
     assert!(matches.is_empty());
+    Ok(())
+}
+
+#[test]
+fn coretext_binding_rejects_a_named_descriptor_without_a_physical_url() -> Result<(), String> {
+    let (_temp, database, _) = physical_font_fixture()?;
+    let face = database.faces().next().ok_or("font face missing")?;
+    let identity = super::super::face_identity(&database, face)?;
+    let name = "Krr-Unregistered-Descriptor-Without-A-Url";
+    let descriptor = new_from_postscript_name(&CFString::new(name));
+    assert_eq!(
+        super::verify_descriptor_binding(&descriptor, &identity.path, &identity, name)
+            .err()
+            .as_deref(),
+        Some("exact CoreText descriptor has no physical URL")
+    );
+    Ok(())
+}
+
+#[test]
+fn coretext_binding_rejects_a_descriptor_after_its_file_is_removed() -> Result<(), String> {
+    let (_temp, database, selected) = physical_font_fixture()?;
+    let face = database.faces().next().ok_or("font face missing")?;
+    let identity = super::super::face_identity(&database, face)?;
+    let descriptors = super::descriptors_from_url(&identity.path)?;
+    let descriptor = descriptors
+        .iter()
+        .next()
+        .ok_or("fixture descriptor missing")?;
+    let verify = || {
+        super::verify_descriptor_binding(
+            &descriptor,
+            &identity.path,
+            &identity,
+            &selected.post_script_name,
+        )
+    };
+    assert_eq!(Path::new(&verify()?), identity.path);
+    fs::remove_file(&identity.path).map_err(|error| error.to_string())?;
+    let error = verify().err().ok_or("removed descriptor URL accepted")?;
+    assert!(
+        error.starts_with("canonicalize CoreText descriptor URL:"),
+        "{error}"
+    );
     Ok(())
 }
 
