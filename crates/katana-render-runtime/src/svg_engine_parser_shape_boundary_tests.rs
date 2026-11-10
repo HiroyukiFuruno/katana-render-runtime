@@ -81,18 +81,25 @@ fn overflowing_offscreen_transform_preserves_visible_sibling() -> Result<(), Str
     let expected = parse_shape(control)?;
     assert!(actual.node_by_id("sample").is_some());
     assert!(actual.node_by_id("overflow").is_none());
-    let mut actual_image = tiny_skia::Pixmap::new(8, 8).ok_or("actual pixmap missing")?;
-    let mut expected_image = tiny_skia::Pixmap::new(8, 8).ok_or("expected pixmap missing")?;
-    super::super::resvg::render(
-        &actual,
-        tiny_skia::Transform::identity(),
-        &mut actual_image.as_mut(),
-    );
-    super::super::resvg::render(
-        &expected,
-        tiny_skia::Transform::identity(),
-        &mut expected_image.as_mut(),
-    );
+    assert_same_visible_shape_render(&actual, &expected)
+}
+
+#[test]
+fn offscreen_isolated_group_with_large_bounds_preserves_visible_sibling() -> Result<(), String> {
+    let source = "<g opacity='0.5'><rect id='offscreen' x='2147483392' width='512' height='4' fill='red'/></g><rect id='sample' width='4' height='4' fill='blue'/>";
+    let control = "<rect id='sample' width='4' height='4' fill='blue'/>";
+    let actual = parse_shape(source)?;
+    let expected = parse_shape(control)?;
+    assert!(actual.node_by_id("offscreen").is_some());
+    assert_same_visible_shape_render(&actual, &expected)
+}
+
+fn assert_same_visible_shape_render(
+    actual: &usvg::Tree,
+    expected: &usvg::Tree,
+) -> Result<(), String> {
+    let actual_image = render_shape(actual)?;
+    let expected_image = render_shape(expected)?;
     assert_eq!(actual_image.data(), expected_image.data());
     assert!(
         expected_image
@@ -101,4 +108,12 @@ fn overflowing_offscreen_transform_preserves_visible_sibling() -> Result<(), Str
             .any(|pixel| pixel.alpha() > 0)
     );
     Ok(())
+}
+
+fn render_shape(tree: &usvg::Tree) -> Result<tiny_skia::Pixmap, String> {
+    let size = tree.size().to_int_size();
+    let mut image =
+        tiny_skia::Pixmap::new(size.width(), size.height()).ok_or("shape pixmap missing")?;
+    super::super::resvg::render(tree, tiny_skia::Transform::identity(), &mut image.as_mut());
+    Ok(image)
 }

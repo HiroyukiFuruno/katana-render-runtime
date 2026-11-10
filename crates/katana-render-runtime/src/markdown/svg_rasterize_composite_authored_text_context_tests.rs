@@ -103,6 +103,30 @@ fn css_styled_and_inline_authored_text_render_identically() -> Result<(), String
 }
 
 #[test]
+fn single_line_proof_does_not_match_first_chunk_of_multiline_text() -> Result<(), String> {
+    const MULTILINE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="160" height="72">
+        <text id="candidate" x="2" y="16" font-size="16"><tspan>Runtime</tspan><tspan x="2" dy="20">Continuation</tspan></text>
+    </svg>"#;
+    let document = Document::parse(INLINE_AUTHORED_SVG).map_err(|error| error.to_string())?;
+    let context = collect(&document);
+    assert!(context.matches_text(LABEL));
+
+    let options = super::super::rasterizer_options();
+    let tree =
+        resvg::usvg::Tree::from_str(MULTILINE, &options).map_err(|error| error.to_string())?;
+    let Some(resvg::usvg::Node::Text(text)) = tree.node_by_id("candidate") else {
+        return Err("multiline text is missing".into());
+    };
+    let [first, second] = text.chunks() else {
+        return Err("multiline input did not produce two chunks".into());
+    };
+    assert_eq!(first.text(), LABEL);
+    assert_eq!(second.text(), "Continuation");
+    assert!(!context.matches(text));
+    Ok(())
+}
+
+#[test]
 fn inert_styles_preserve_nested_text_rendering() -> Result<(), String> {
     let candidate = INLINE_AUTHORED_SVG.replace(
         "<text ",
