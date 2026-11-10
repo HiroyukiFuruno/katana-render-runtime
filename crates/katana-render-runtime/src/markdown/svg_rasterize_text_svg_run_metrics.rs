@@ -95,11 +95,8 @@ pub(super) fn validate_shaping_size(size: f32) -> Option<()> {
 
 fn svg_run_line_metrics(instance: &harfrust::font::Font, size: f32) -> Option<(f32, f32)> {
     let line = instance.metrics().h_line()?;
-    let upem = instance.units_per_em();
-    if upem == 0 {
-        return None;
-    }
-    let scale = size / f32::from(upem);
+    /* WHY: Harfrustのフォントモデルは無効なunitsPerEmを1000へ正規化する。 */
+    let scale = size / f32::from(instance.units_per_em());
     let ascent = line.ascender.to_f32() * scale;
     let descent = -line.descender.to_f32() * scale;
     Some((ascent, descent))
