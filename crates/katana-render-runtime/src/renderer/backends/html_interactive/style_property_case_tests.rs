@@ -98,3 +98,42 @@ fn spaces_and_non_ascii_property_names_remain_unrecognized() {
     assert_eq!(style.color, before.color);
     assert_eq!(style.vertical_align, CssVerticalAlign::Bottom);
 }
+
+#[test]
+fn parsed_multicolumn_shorthand_and_gap_reach_layout_style() -> Result<(), String> {
+    use crate::renderer::backends::html_document::HtmlDocument;
+    let html = "<div id=columns style='columns: 3 80px; column-gap: 12px'>text</div>";
+    let document = HtmlDocument::parse(html);
+    let nodes = document.interactive_nodes_with_styles(&std::collections::HashMap::new());
+    let (tag, attributes) = find_columns_element(&nodes).ok_or("columns element missing")?;
+    let style = CssStyle::from_element(tag, attributes, &CssStyle::browser_default());
+    assert_eq!(style.column_count, Some(3));
+    assert_eq!(style.column_width, Some(80.0));
+    assert_eq!(style.column_gap, 12.0);
+    assert_eq!(style.flow_column_gap, Some(12.0));
+    Ok(())
+}
+
+fn find_columns_element(
+    nodes: &[crate::renderer::backends::html_document::HtmlDocumentNode],
+) -> Option<(&str, &[(String, String)])> {
+    use crate::renderer::backends::html_document::HtmlDocumentNode;
+    nodes.iter().find_map(|node| match node {
+        HtmlDocumentNode::Element {
+            tag,
+            attributes,
+            children,
+            ..
+        } => {
+            if attributes
+                .iter()
+                .any(|(name, value)| name == "id" && value == "columns")
+            {
+                Some((tag.as_str(), attributes.as_slice()))
+            } else {
+                find_columns_element(children)
+            }
+        }
+        HtmlDocumentNode::Text(_) => None,
+    })
+}
