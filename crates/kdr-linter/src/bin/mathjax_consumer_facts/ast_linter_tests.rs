@@ -1,5 +1,34 @@
 use super::test_support::{Fixture, repository_root};
 use super::*;
+
+#[test]
+fn default_materializer_rejects_disabled_renderer_implementation() -> Result<(), String> {
+    let root = crate::test_support::repository_root().map_err(|error| error.to_string())?;
+    let mut sources = RUST_INPUTS
+        .iter()
+        .map(|path| Ok((*path, crate::source::source(&root, path)?)))
+        .collect::<Result<std::collections::BTreeMap<_, _>, String>>()?;
+    assert_eq!(
+        crate::default_materialize::inspect_default_override(&sources, &mut Vec::new()),
+        Ok(())
+    );
+    let path = RUST_INPUTS[0];
+    let text = std::fs::read_to_string(root.join(path)).map_err(|error| error.to_string())?;
+    let before = "impl MathJaxRendererOps {";
+    assert_eq!(text.matches(before).count(), 1);
+    let changed = text.replacen(before, "#[cfg(any())]\nimpl MathJaxRendererOps {", 1);
+    sources
+        .get_mut(path)
+        .ok_or("missing MathJax renderer source")?
+        .ast = syn::parse_file(&changed).map_err(|error| error.to_string())?;
+    assert_eq!(
+        crate::default_materialize::inspect_default_override(&sources, &mut Vec::new())
+            .err()
+            .as_deref(),
+        Some("default-materializer:renderer-owner-context")
+    );
+    Ok(())
+}
 #[path = "ast_linter_test_support.rs"]
 mod support;
 use support::{
