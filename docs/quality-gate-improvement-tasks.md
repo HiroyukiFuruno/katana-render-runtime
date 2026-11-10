@@ -3,6 +3,8 @@
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
 - [ ] 正式カバレッジ100%・未カバー0を達成した後、挙動と既存テスト結果を維持し、読み込み・キャッシュ等の共通処理とレンダラーの責務境界を精査・整理する。小さい差分ごとに関連テストを回収し、整理後のソースで描画・性能・完全品質ゲートを再検証する。自己レビュー後にDraft PR、Codexレビューと指摘修正、3 OS CI、保護マージ、公開へ進む。
+- [/] `0152b2d4` の正式rootは6,182件成功・別15件skip、86,726/87,264行（99.3834800147%）、未カバー538行。前回539行から1減。差分はSVG分割描画の交差済みタイル。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-e_ciidxw/safe-summary.json`）。
+- [x] `0b7d6b0f` はusvgが正の有限値として保証した字形サイズの重複検査を除去し、可変フォント・複数行・代替書体を含む関連5件は実0（`tmp/quality/resumed-owner-r3509/coverage-svg-positive-glyph-size-exact-s5h32e3g/safe-summary.json`）。`b7360ffe` は合成検証で有効なPixmapを再変換せず、通常・太字の2件で既存と同じ画素比較を実施した（`tmp/quality/resumed-owner-r3509/coverage-svg-pixmap-composite-reference-exact-wlct61oq/safe-summary.json`）。いずれもfoundation・AST成功と差分の前後一致を確認し、538行の正式値には未反映。
 - [/] `bbe38614` の正式rootは6,181件成功・別15件skip、86,727/87,266行（99.3823482227%）、未カバー539行。前回543行から4減。実MathJax2行、透明SVGと字形順の補正各1行。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-bgh_ri_w/safe-summary.json`）。
 - [x] `c93ffaa5`・`58797fa4` はSVG分割描画で影響範囲との交差が保証済みのタイルを使い、文字の位置補正で下位が検証した倍率を再判定しない。全画素一致、座標上限の末尾画素、無効な倍率の拒否を含む関連12件、foundation・ASTは実0。一時profile回収とソース・binary前後一致を確認（`tmp/quality/resumed-owner-r3509/coverage-svg-anchor-scale-and-tile-exact-outxmo78/safe-summary.json`）。539行の正式値には未反映。
 - [ ] SVGの `<use>` が `<symbol>` を参照し幅がゼロの場合、SVG 2で要求される非描画と異なり、背後の青を赤いsymbolで覆う。実入力回帰は期待 `[0,0,255,255]` に対して実測 `[255,0,0,255]`、関連4件中3成功・再現1件失敗、実101。元ログと差分を保存し、正式計測の入力へは入れず、挙動を変える独立修正として最終描画検証の前に回収する（`tmp/quality/resumed-owner-r3509/coverage-svg-zero-symbol-viewport-exact-znk7aaa6/runtime-stdout.raw`、同 `reproducer.patch`）。[SVG 2のuse要素](https://www.w3.org/TR/SVG2/struct.html#UseElement)
