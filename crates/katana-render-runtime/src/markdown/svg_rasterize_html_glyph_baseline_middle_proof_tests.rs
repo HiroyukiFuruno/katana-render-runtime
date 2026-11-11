@@ -41,6 +41,17 @@ fn multiline_proof_rejects_whitespace_only_source() -> Result<(), String> {
 }
 
 #[test]
+fn multiline_proof_rejects_authored_text_between_tspans() -> Result<(), String> {
+    let mixed = MULTILINE.replacen("</tspan><tspan", "</tspan>outside<tspan", 1);
+    for (body, accepted) in [(MULTILINE, true), (mixed.as_str(), false)] {
+        let tree = fixture(body, "")?;
+        let proof = context(&source(body, "", FONT_FAMILY))?;
+        assert_eq!(proof.matches_additional(text(&tree)?), accepted);
+    }
+    Ok(())
+}
+
+#[test]
 fn additional_proof_rejects_complex_hierarchy_and_descendant_style() -> Result<(), String> {
     for body in [
         "<tspan x='0' dy='0'><tspan>AB</tspan></tspan><tspan x='0' dy='16.8'>CD</tspan>",
