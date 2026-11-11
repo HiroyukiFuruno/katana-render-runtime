@@ -75,22 +75,41 @@ fn bundled_non_cjk_font_missing_fullwidth_glyph_falls_back_to_other() -> Result<
 #[test]
 fn bundled_font_quote_width_controls_open_and_close_roles() -> Result<(), String> {
     let (font, metrics) = font_metrics()?;
-    let full = quote_is_fullwidth(&font, &metrics);
-    assert!(!full, "bundled Noto Sans quotes should remain proportional");
+    assert_quote_classes(&font, &metrics, HanClass::OpenNarrow, HanClass::CloseNarrow)
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn hiragino_sans_gb_classifies_fullwidth_quotes_by_open_and_close_roles() -> Result<(), String> {
+    let bytes = std::fs::read("/System/Library/Fonts/Hiragino Sans GB.ttc")
+        .map_err(|error| error.to_string())?;
+    let font = FontRef::from_index(&bytes, 0).map_err(|error| error.to_string())?;
+    let metrics = font.glyph_metrics(Size::unscaled(), LocationRef::default());
+    assert_quote_classes(&font, &metrics, HanClass::Open, HanClass::Close)
+}
+
+fn assert_quote_classes(
+    font: &FontRef<'_>,
+    metrics: &skrifa::metrics::GlyphMetrics<'_>,
+    opening: HanClass,
+    closing: HanClass,
+) -> Result<(), String> {
+    let full = quote_is_fullwidth(font, metrics);
+    assert_eq!(full, opening == HanClass::Open);
     let cases = [
-        ('‘', HanClass::OpenNarrow),
-        ('’', HanClass::CloseNarrow),
-        ('“', HanClass::OpenNarrow),
-        ('”', HanClass::CloseNarrow),
+        ('‘', opening),
+        ('’', closing),
+        ('“', opening),
+        ('”', closing),
     ];
 
     for (character, expected) in cases {
         let glyph = font
             .charmap()
             .map(character)
-            .ok_or("bundled font quote glyph unavailable")?;
+            .ok_or("font quote glyph unavailable")?;
         assert!(metrics.advance_width(glyph).is_some());
-        assert_eq!(classify(character, &font, &metrics, full), expected);
+        assert_eq!(classify(character, font, metrics, full), expected);
     }
     Ok(())
 }
