@@ -163,6 +163,9 @@ pub(super) use font_runs::html_text_font_runs;
 
 #[path = "svg_rasterize_text_harfrust.rs"]
 mod harfrust;
+#[cfg(test)]
+#[path = "svg_rasterize_text_shaping_test_font_data.rs"]
+mod test_font_data;
 #[cfg(target_os = "macos")]
 pub(in crate::markdown::svg_rasterize) use harfrust::eligible_immutable_system_path;
 pub(super) use harfrust::shape_run_character_metrics_with_trim;

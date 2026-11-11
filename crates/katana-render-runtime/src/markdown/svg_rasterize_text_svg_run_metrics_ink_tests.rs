@@ -1,7 +1,9 @@
 use super::{
     FontShape, shape_svg_run_metrics_with_face, svg_run_endpoints_with_face, validate_shaping_size,
 };
+use crate::markdown::svg_rasterize::text_shaping::test_font_data::font_with_empty_table;
 use resvg::usvg::fontdb::{Database, ID};
+use rustybuzz::ttf_parser::Tag;
 
 const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 const TEST_TEXT: &str = "Noto Sans";
@@ -12,8 +14,12 @@ const FIRST_VISIBLE_CSS_SIZE: f32 = 0.01;
 const FIRST_OVERSIZED_SHAPING_SIZE: f32 = 32_768.0;
 
 fn checked_in_font_face() -> Result<(Database, ID), String> {
+    font_face(FONT_BYTES.to_vec())
+}
+
+fn font_face(data: Vec<u8>) -> Result<(Database, ID), String> {
     let mut database = Database::new();
-    database.load_font_data(FONT_BYTES.to_vec());
+    database.load_font_data(data);
     let face = database
         .faces()
         .next()
@@ -140,6 +146,19 @@ fn ink_diagnostic_preserves_metrics_for_checked_in_font() -> Result<(), String> 
     /* WHY: counterは実測したHarfrust extents欠如数と一致させる。 */
     assert_eq!(ink.glyphs_without_extents, raw_missing);
     eprintln!("raw_harfrust_glyphs_without_extents={raw_missing}");
+    assert_missing_outline_is_reported(shape)
+}
+
+fn assert_missing_outline_is_reported(shape: FontShape) -> Result<(), String> {
+    let data = font_with_empty_table(FONT_BYTES, Tag::from_bytes(b"glyf"))?;
+    let (database, face) = font_face(data)?;
+    let (metrics, diagnostic) = shape_svg_run_metrics_with_face(&database, face, "N", shape, true)
+        .ok_or("font with missing outlines should retain line metrics")?;
+    let diagnostic = diagnostic.ok_or("missing-outline diagnostic unavailable")?;
+    assert!(metrics.advance > 0.0);
+    assert!(metrics.ink_bounds.is_none());
+    assert!(diagnostic.bounds.is_none());
+    assert_eq!(diagnostic.glyphs_without_extents, 1);
     Ok(())
 }
 

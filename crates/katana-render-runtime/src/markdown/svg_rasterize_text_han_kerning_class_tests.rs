@@ -1,6 +1,7 @@
 use super::{HanClass, classify, classify_bounds, quote_is_fullwidth};
+use crate::markdown::svg_rasterize::text_shaping::test_font_data::font_with_empty_table;
 use icu_properties::{CodePointMapData, props::GeneralCategory};
-use rustybuzz::ttf_parser::{RawFace, Tag};
+use rustybuzz::ttf_parser::Tag;
 use skrifa::{FontRef, MetadataProvider, instance::LocationRef, prelude::Size};
 
 const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
@@ -192,27 +193,10 @@ fn assert_invalid_font_tables() -> Result<(), String> {
         (Tag::from_bytes(b"maxp"), false),
         (Tag::from_bytes(b"glyf"), true),
     ] {
-        let font_bytes = font_with_empty_table(tag)?;
+        let font_bytes = font_with_empty_table(FONT_BYTES, tag)?;
         assert_unusable_punctuation_metrics(&font_bytes, has_advance)?;
     }
     Ok(())
-}
-
-fn font_with_empty_table(tag: Tag) -> Result<Vec<u8>, String> {
-    const SFNT_HEADER_BYTES: usize = 12;
-    const TABLE_RECORD_BYTES: usize = 16;
-    const TABLE_LENGTH_OFFSET: usize = 12;
-
-    let face = RawFace::parse(FONT_BYTES, 0).map_err(|error| format!("{error:?}"))?;
-    let index = face
-        .table_records
-        .into_iter()
-        .position(|table| table.tag == tag)
-        .ok_or("fixture table missing")?;
-    let length_offset = SFNT_HEADER_BYTES + index * TABLE_RECORD_BYTES + TABLE_LENGTH_OFFSET;
-    let mut data = FONT_BYTES.to_vec();
-    data[length_offset..length_offset + size_of::<u32>()].copy_from_slice(&0u32.to_be_bytes());
-    Ok(data)
 }
 
 fn assert_unusable_punctuation_metrics(data: &[u8], has_advance: bool) -> Result<(), String> {
