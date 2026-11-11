@@ -1,3 +1,4 @@
+use super::source_edits::direct_text_ranges;
 use std::ops::Range;
 
 use resvg::usvg::roxmltree::{Document, Node};
@@ -100,11 +101,7 @@ fn collect_style_text_edits(
     ids: &[String],
     edits: &mut Vec<SourceEdit>,
 ) -> bool {
-    for child in node.children().filter(|child| child.is_text()) {
-        let Some(text) = child.text() else {
-            continue;
-        };
-        let range = child.range();
+    for (range, text) in direct_text_ranges(node) {
         if text.len() > MAX_STYLE_BYTES || source.get(range.clone()) != Some(text) {
             continue;
         }

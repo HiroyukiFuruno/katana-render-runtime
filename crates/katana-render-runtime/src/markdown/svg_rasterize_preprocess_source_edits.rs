@@ -1,4 +1,13 @@
+use resvg::usvg::roxmltree::Node;
 use std::ops::Range;
+
+pub(super) fn direct_text_ranges<'doc, 'input: 'doc>(
+    node: Node<'doc, 'input>,
+) -> impl Iterator<Item = (Range<usize>, &'doc str)> {
+    node.children()
+        .filter(Node::is_text)
+        .filter_map(|child| child.text().map(|text| (child.range(), text)))
+}
 
 pub(super) struct SourceEdit {
     range: Range<usize>,

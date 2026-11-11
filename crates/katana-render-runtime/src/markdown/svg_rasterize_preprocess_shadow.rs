@@ -1,4 +1,4 @@
-use super::source_edits::{SourceEdit, apply_source_edits};
+use super::source_edits::{SourceEdit, apply_source_edits, direct_text_ranges};
 use std::ops::Range;
 
 use resvg::usvg::roxmltree::{Document, Node};
@@ -60,11 +60,7 @@ fn collect_style_attribute_edits(node: Node<'_, '_>, source: &str, edits: &mut V
 }
 
 fn collect_style_element_edits(node: Node<'_, '_>, source: &str, edits: &mut Vec<SourceEdit>) {
-    for child in node.children().filter(|child| child.is_text()) {
-        let Some(text) = child.text() else {
-            continue;
-        };
-        let range = child.range();
+    for (range, text) in direct_text_ranges(node) {
         if source.get(range.clone()) != Some(text) {
             continue;
         }

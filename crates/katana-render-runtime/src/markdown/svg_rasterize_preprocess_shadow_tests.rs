@@ -26,6 +26,20 @@ fn svg_css_shadow_normalizes_only_filter_rgba_colors() {
 }
 
 #[test]
+fn svg_preprocess_rewrites_stylesheet_text_and_preserves_xml_metadata() {
+    let metadata =
+        r#"<!-- [id$="end"] { filter: drop-shadow(0 1px rgba(1,2,3,.4)); } --><?note unchanged?>"#;
+    let source = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg"><style>.shape{{filter:drop-shadow(0 1px 1px rgba(1,2,3,.4))}}{metadata}[id$="end"]{{fill:red}}</style><rect id="actual-end" width="8" height="8"/></svg>"#
+    );
+    let output = SvgRasterizeOps::preprocess_for_rasterizer(&source);
+
+    assert!(output.contains("filter:drop-shadow(0 1px 1px #01020366)"));
+    assert!(output.contains(r#"[id="actual-end"]"#));
+    assert!(output.contains(metadata));
+}
+
+#[test]
 fn svg_css_shadow_keeps_mermaid_style_declarations_while_rewriting_filter() {
     let source = r#"<svg xmlns="http://www.w3.org/2000/svg"><style>.edgePath .path { stroke: #333; stroke-width: 2px; color: #b9b9b9; --mermaid-shadow: url("shadow.svg"); filter: drop-shadow(1px 2px 2px rgba(185,185,185,0.7)) !important; } .fallback { filter: drop-shadow(1px 2px 2px var(--tone, rgba(185,185,185,0.7))); }</style></svg>"#;
     let output = normalize_filter_shadow_colors(source);
