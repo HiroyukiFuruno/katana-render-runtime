@@ -940,9 +940,7 @@ pub(crate) fn process_paint(
     bbox: Rect,
     cache: &mut Cache,
 ) -> bool {
-    if paint.units() == Units::ObjectBoundingBox
-        || paint.content_units() == Units::ObjectBoundingBox
-    {
+    if let Some(box_paint) = BoundingBoxPaint::from_paint(paint) {
         let bbox = if has_context {
             let Some(bbox) = context_bbox else {
                 return false;
@@ -952,7 +950,7 @@ pub(crate) fn process_paint(
             bbox
         };
 
-        if paint.to_user_coordinates(bbox, cache).is_none() {
+        if box_paint.to_user_coordinates(bbox, cache).is_none() {
             return false;
         }
     }
@@ -985,9 +983,33 @@ fn process_text_decoration(style: &mut Option<TextDecorationStyle>, bbox: Rect, 
     }
 }
 
-impl Paint {
-    fn to_user_coordinates(&mut self, bbox: Rect, cache: &mut Cache) -> Option<()> {
-        let name = if matches!(self, Paint::Pattern(_)) {
+enum BoundingBoxPaint<'a> {
+    Linear(&'a mut Arc<LinearGradient>),
+    Radial(&'a mut Arc<RadialGradient>),
+    Pattern(&'a mut Arc<Pattern>),
+}
+
+impl<'a> BoundingBoxPaint<'a> {
+    fn from_paint(paint: &'a mut Paint) -> Option<Self> {
+        match paint {
+            Paint::LinearGradient(gradient) if gradient.units == Units::ObjectBoundingBox => {
+                Some(Self::Linear(gradient))
+            }
+            Paint::RadialGradient(gradient) if gradient.units == Units::ObjectBoundingBox => {
+                Some(Self::Radial(gradient))
+            }
+            Paint::Pattern(pattern)
+                if pattern.units == Units::ObjectBoundingBox
+                    || pattern.content_units == Units::ObjectBoundingBox =>
+            {
+                Some(Self::Pattern(pattern))
+            }
+            _ => None,
+        }
+    }
+
+    fn to_user_coordinates(self, bbox: Rect, cache: &mut Cache) -> Option<()> {
+        let name = if matches!(self, Self::Pattern(_)) {
             "Pattern"
         } else {
             "Gradient"
@@ -999,10 +1021,9 @@ impl Paint {
         // `Arc::get_mut()` allow us to modify some paint servers in-place.
         // This reduces the amount of cloning and preserves the original ID as well.
         match self {
-            Paint::Color(_) => {} // unreachable
-            Paint::LinearGradient(lg) => linear_to_user_coordinates(lg, bbox, cache),
-            Paint::RadialGradient(rg) => radial_to_user_coordinates(rg, bbox, cache),
-            Paint::Pattern(patt) => pattern_to_user_coordinates(patt, bbox, cache),
+            Self::Linear(lg) => linear_to_user_coordinates(lg, bbox, cache),
+            Self::Radial(rg) => radial_to_user_coordinates(rg, bbox, cache),
+            Self::Pattern(patt) => pattern_to_user_coordinates(patt, bbox, cache),
         }
 
         Some(())
@@ -1149,11 +1170,4 @@ impl Paint {
         }
     }
 
-    #[inline]
-    pub(crate) fn content_units(&self) -> Units {
-        match self {
-            Self::Pattern(patt) => patt.content_units,
-            _ => Units::UserSpaceOnUse,
-        }
-    }
 }
