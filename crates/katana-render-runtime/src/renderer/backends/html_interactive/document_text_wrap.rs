@@ -88,13 +88,12 @@ fn should_defer_unbreakable_line(
     if last_fitting_end(forced_line, &break_ends, initial_width, style).is_some() {
         return false;
     }
-    let Some(first_break_end) = break_ends.first().copied() else {
-        return false;
-    };
-    let first_segment =
-        forced_line[..first_break_end].trim_end_matches(layout_text::is_css_whitespace);
-    !first_segment.is_empty()
-        && text_width(first_segment, style) <= continuing_width + TEXT_FIT_EPSILON
+    break_ends.first().is_some_and(|&first_break_end| {
+        let first_segment =
+            forced_line[..first_break_end].trim_end_matches(layout_text::is_css_whitespace);
+        !first_segment.is_empty()
+            && text_width(first_segment, style) <= continuing_width + TEXT_FIT_EPSILON
+    })
 }
 
 fn explicit_text_lines(text: &str) -> Vec<String> {
