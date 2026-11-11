@@ -119,7 +119,10 @@ fn assert_alignment_ready(
     let Prepared::Ready(spans) = rasterizer.prepare(text)? else {
         return Err("static fixture was not prepared".to_string());
     };
-    assert_eq!(super::single_horizontal_alignment(text, &spans), Some(0.0));
+    let [span] = spans.as_slice() else {
+        return Err("static fixture did not produce exactly one prepared span".to_string());
+    };
+    assert_eq!(super::single_horizontal_alignment(text, span), Some(0.0));
     Ok(())
 }
 

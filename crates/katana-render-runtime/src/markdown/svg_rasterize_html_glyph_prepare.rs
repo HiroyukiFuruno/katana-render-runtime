@@ -41,15 +41,15 @@ impl HtmlGlyphRasterizer<'_> {
         if chunk::apply_single_middle(text, prepared)? {
             return Ok(());
         }
-        if let Some(anchor_x) = single_horizontal_alignment(text, prepared) {
-            let alignment = XAlignment {
+        if let [span] = prepared
+            && let Some(anchor_x) = single_horizontal_alignment(text, span)
+        {
+            span.x_alignment = Some(XAlignment {
                 anchor_x,
                 layout: anchor::layout_anchor(text),
-                origin_snap_css_scale: anchor::run_origin(text, prepared).map(|(scale, _)| scale),
-            };
-            if let Some(span) = prepared.first_mut() {
-                span.x_alignment = Some(alignment);
-            }
+                origin_snap_css_scale: anchor::run_origin(text, std::slice::from_ref(span))
+                    .map(|(scale, _)| scale),
+            });
             return Ok(());
         }
         if multi_chunk_alignment::apply(text, prepared) {
@@ -92,10 +92,11 @@ impl HtmlGlyphRasterizer<'_> {
             return Ok(false);
         }
         for run in runs::consecutive_runs(&span.positioned_glyphs) {
-            let Some(input) = self.prepare_run_inputs(span, color, opacity, &run)? else {
+            let glyphs = &span.positioned_glyphs[run.start..run.end];
+            let Some(input) = self.prepare_run_inputs(span, color, opacity, &run, glyphs)? else {
                 return Ok(false);
             };
-            let mut prepared_span = self.prepared_run(span, &run, input, policy);
+            let mut prepared_span = self.prepared_run(glyphs, input, policy);
             prepared_span.effects = effects.take();
             prepared.push(prepared_span);
         }
@@ -108,13 +109,13 @@ impl HtmlGlyphRasterizer<'_> {
         color: usvg::Color,
         opacity: u8,
         run: &runs::GlyphRun,
+        glyphs: &[usvg::layout::PositionedGlyph],
     ) -> Result<Option<SpanInput>, String> {
         let Some((face, variable_instance)) =
             self.ensure_run_face(span, run.font, run.font_size)?
         else {
             return Ok(None);
         };
-        let glyphs = &span.positioned_glyphs[run.start..run.end];
         /* WHY: usvgの字形サイズはNonZeroPositiveF32の元spanからそのまま渡る。 */
         let Some(glyph_ids) = glyph_ids(glyphs) else {
             return Ok(None);
@@ -132,8 +133,7 @@ impl HtmlGlyphRasterizer<'_> {
 
     fn prepared_run(
         &self,
-        span: &usvg::layout::Span,
-        run: &runs::GlyphRun,
+        glyphs: &[usvg::layout::PositionedGlyph],
         input: SpanInput,
         policy: Option<baseline::Policy>,
     ) -> PreparedSpan {
@@ -148,7 +148,7 @@ impl HtmlGlyphRasterizer<'_> {
                 input.opacity,
             ],
             font: input.font,
-            glyphs: span.positioned_glyphs[run.start..run.end].to_vec(),
+            glyphs: glyphs.to_vec(),
             glyph_ids: input.glyph_ids,
             upem: input.face.upem,
             font_size: input.font_size,

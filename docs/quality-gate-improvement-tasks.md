@@ -2,6 +2,12 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定2件中2件完了。関連99件、静的検査・ASTが一度のビルドで成功し、検査対象と作業ツリーの差分が実行前後で一致した（`tmp/quality/resumed-owner-r3509/coverage-svg-glyph-preparation-single-pass-exact-as6w4vov/safe-summary.json`）。
+  - [x] SVGの水平位置合わせで、検査済みの単一spanをそのまま更新し、空spanの再判定を除いた。
+  - [x] SVGの字形準備で、範囲検査済みの字形をID確認と描画準備の両方で共有した。
+
+- [/] 既存の正式計測`29afa689`を照合。正式JSONの未カバー398行に対し、同じ実行の`--show-missing-lines`には105ファイル・163行番号が出力された。使用版cargo-llvm-covは行番号一覧を出す際に同じ行に実行済みの領域がある場合、その行を一覧から落とす。次の対象は一覧とJSONの関数・領域を併用して選ぶ。正式集計の分母、合格条件、全体計測の順序は従来どおり。[cargo-llvm-cov 0.9.1の実装](https://raw.githubusercontent.com/taiki-e/cargo-llvm-cov/v0.9.1/src/json.rs)、[上流Issue #404](https://github.com/taiki-e/cargo-llvm-cov/issues/404)
+
 - 対応予定2件中2件完了。関連40件、静的検査・ASTが成功。初回はファイル長を超えたためフォント準備を独立させ、テストの参照先を修正した。成功した実行中に別担当範囲の性能検証Python 2ファイルが変わったため、対象差分のSHA一致と実終了コードで関連検証だけを確定した（`tmp/quality/resumed-owner-r3509/coverage-svg-font-instance-and-run-exact-9wmlehgc/scoped-source-evidence.json`）。
   - [x] SVGの文字列・分割文字列・行端点・x-heightで、サイズの妥当性検査と実フォントの準備を共通化した。
   - [x] SVG文字列と分割文字列で、同一フォントからの字形配置・幅・輪郭計測を共通化した。従来の例外文言と、フォント同一性を確認してから結果を返す順序を維持した。

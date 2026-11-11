@@ -1,11 +1,7 @@
 use super::PreparedSpan;
 use resvg::usvg;
 
-pub(super) fn single_horizontal_alignment(
-    text: &usvg::Text,
-    prepared: &[PreparedSpan],
-) -> Option<f32> {
-    let [span] = prepared else { return None };
+pub(super) fn single_horizontal_alignment(text: &usvg::Text, span: &PreparedSpan) -> Option<f32> {
     let [chunk] = text.chunks() else { return None };
     let [source_span] = chunk.spans() else {
         return None;
