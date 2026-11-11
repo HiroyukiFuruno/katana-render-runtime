@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [/] `1c66bd4f` の正式計測は6,210件成功・別15件skip、86,799/87,291行（99.4363680104%）、未カバー492行。キャッシュ検査の重複3分岐の削除により同ファイルが135/139行から136/136行になった。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-glje3_k2/safe-summary.json`）。
+- [x] `f159cf49` は本番で常にfalseだったフォーカス更新の描画引数を除き、button/linkの実クリック→Tabで同一focus・一度のイベント・一度の描画を確認。`92c4d774` は物理フォント照合の空Map重複判定を除き、空・一件・曖昧時の挙動を維持。関連32件・foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-focus-and-font-identity-exact-2a4_6qt5/safe-summary.json`）。492行の正式値には未反映。
 - [/] `1b6edd33` の正式計測は6,210件成功・別15件skip、86,798/87,294行（99.4318051642%）、未カバー496行。追加した3件は成功したが行数は前回から変化なし。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-p6hzwc0b/safe-summary.json`）。
 - [x] `72598708` はキャッシュ検査から、Rustテキストを `syn::parse_file` する2経路では生成されない不可視区切りの `Group` 3分岐を除いた。通常の括弧と不正入力の拒否を維持し、関連11件・foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-resource-cache-rust-source-groups-exact-z55q2_8i/safe-summary.json`）。正式値には未反映。
 - [/] `a03e0a9c` の正式計測は6,207件成功・別15件skip、86,798/87,294行（99.4318051642%）、未カバー496行。前回497行から、SVG switchの到達不能な重複判定の削除で1行減少。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-sgsabmj_/safe-summary.json`）。
