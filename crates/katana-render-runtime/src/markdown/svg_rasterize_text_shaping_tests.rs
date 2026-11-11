@@ -113,6 +113,46 @@ fn generic_families_and_feature_settings_cover_css_shaping_inputs() {
 }
 
 #[test]
+fn feature_settings_keep_valid_entries_around_invalid_tags() {
+    let features = harfrust_features(Some("'liga' 0, 'longer' 1, \"kern\" 1"));
+    assert_eq!(features.len(), 2);
+    assert_eq!(features[0].tag, harfrust::Tag::from_be_bytes(*b"liga"));
+    assert_eq!(features[0].value, 0);
+    assert_eq!(features[1].tag, harfrust::Tag::from_be_bytes(*b"kern"));
+    assert_eq!(features[1].value, 1);
+}
+
+#[test]
+fn feature_settings_ignore_invalid_values_and_default_omitted_values() {
+    let features = harfrust_features(Some("'kern' invalid, 'liga', 'palt' 2"));
+    assert_eq!(features.len(), 2);
+    assert_eq!(features[0].tag, harfrust::Tag::from_be_bytes(*b"liga"));
+    assert_eq!(features[0].value, 1);
+    assert_eq!(features[1].tag, harfrust::Tag::from_be_bytes(*b"palt"));
+    assert_eq!(features[1].value, 2);
+}
+
+#[test]
+fn han_feature_lookup_rejects_a_removed_font_face() -> Result<(), String> {
+    let mut database = (*bundled_font_db()).clone();
+    let face = matching_font_face(&database, "Noto Sans", 400, false)
+        .ok_or("bundled Noto Sans face must be available")?;
+    let lookup = |database: &usvg::fontdb::Database| {
+        features_for_face(
+            database,
+            face,
+            "漢・字",
+            Some("'kern' 0"),
+            super::TextSpacingTrim::SpaceAll,
+        )
+    };
+    assert!(lookup(&database).is_some());
+    database.remove_face(face);
+    assert!(lookup(&database).is_none());
+    Ok(())
+}
+
+#[test]
 fn production_feature_bridge_preserves_explicit_settings_and_skips_latin_tables()
 -> Result<(), String> {
     let database = html_font_db_for_text("Noto Sans", "plain ASCII");
