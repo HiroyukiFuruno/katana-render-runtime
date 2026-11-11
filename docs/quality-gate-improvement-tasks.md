@@ -3,6 +3,9 @@
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
 - [ ] 正式カバレッジ100%・未カバー0を達成した後、挙動と既存テスト結果を維持し、読み込み・キャッシュ等の共通処理とレンダラーの責務境界を精査・整理する。小さい差分ごとに関連テストを回収し、整理後のソースで描画・性能・完全品質ゲートを再検証する。自己レビュー後にDraft PR、Codexレビューと指摘修正、3 OS CI、保護マージ、公開へ進む。
+- [/] `50242579` の正式計測は6,199件成功・別15件skip、86,765/87,268行（99.4236146125%）、未カバー503行。前回505行からTTC/SFNTテーブル処理で2行減少。SVG矩形の無効境界とBinary/SharedFile診断は未実行だった計測区間に到達し、該当ファイルの未カバー行数は同じ。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-4jdk1bcl/safe-summary.json`）。
+- [x] `b7449d1e` でMathJaxスクリプト本体の文を1件に制約する判定を一度にし、空・複数文・マクロでない本体のエラーを維持した。
+- [x] `e564fee7`・`3acdeec0` で、参照なし画像を省いても有効PNGと兄弟図形が維持されることと、Noto Sans同士は一致しYellowtailとは一致しないことを確認。初回のSVGはIDのあるグループと子の画像ノードを取り違えたため検証条件を修正。再試行で関連6件・foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-mathjax-svg-reference-and-font-match-exact-oh1yfc6g/safe-summary.json`）。503行の正式値には未反映。
 - [/] `8918b7da` の正式計測は6,196件成功・別15件skip、86,728/87,233行（99.4210906423%）、未カバー505行。前回509行から、HTML固定位置、SVG寸法、SVGクリップ、フォント可変軸検証の各1行が減少。マーカーと曲線上文字は描画回帰に合格し、行数差分なし。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-mhbu_em3/safe-summary.json`）。
 - [x] `1c138d11` でTTCオフセット数とSFNTテーブル境界の計算から、32bitフィールドを64bitへ広げた後の到達不能な桁あふれ判定を削除。実ファイル境界と容量制限を維持し、オフセット一覧とface headerの欠落がそれぞれ読み込み前に拒否されることを確認した。
 - [x] `a07cdcdf`・`3519bc72` で、矩形の辺の計算結果が有限でなくても有効な兄弟図形の画素を維持することと、同じ実Noto SansのBinary/File/SharedFile診断の表示とフォント実体が対応することを確認。TTCを含む関連7件・foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-ttc-and-render-boundary-exact-a08kqfpo/safe-summary.json`）。505行の正式値には未反映。
