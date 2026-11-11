@@ -107,3 +107,20 @@ pub(super) fn svg_css_variable_fixture() -> String {
         &SVG_DOM_PLACEMENT_SCALE.to_string(),
     )
 }
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::mermaid_fixture_source;
+
+    #[test]
+    fn fixture_source_rejects_missing_and_unclosed_fences() {
+        assert_eq!(
+            mermaid_fixture_source("timeline\n  section History"),
+            Err("Timeline Mermaid fence missing".to_owned())
+        );
+        assert_eq!(
+            mermaid_fixture_source("~~~mermaid\ntimeline\n  section History"),
+            Err("Timeline Mermaid fence unclosed".to_owned())
+        );
+    }
+}
