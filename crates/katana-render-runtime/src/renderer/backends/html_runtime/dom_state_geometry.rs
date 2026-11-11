@@ -1,4 +1,7 @@
 use super::HtmlDomBridgeState;
+#[cfg(test)]
+use super::LayoutMetric;
+use super::LayoutMetricWithIntersection;
 use std::collections::HashMap;
 
 const TRIGONOMETRIC_ZERO_EPSILON: f32 = 0.000_001;
@@ -26,22 +29,24 @@ impl HtmlLayoutMetrics {
         self.scroll_y = scroll_offset.1;
     }
 
-    fn replace_boxes(&mut self, boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>) {
+    fn replace_boxes(&mut self, boxes: impl IntoIterator<Item = LayoutMetricWithIntersection>) {
         self.boxes = boxes
             .into_iter()
-            .map(|(node_id, x, y, width, height, rotation_degrees)| {
-                (
-                    node_id,
-                    HtmlLayoutBox {
-                        x,
-                        y,
-                        width,
-                        height,
-                        rotation_degrees,
-                        intersection_metadata: None,
-                    },
-                )
-            })
+            .map(
+                |((node_id, x, y, width, height, rotation_degrees), intersection_metadata)| {
+                    (
+                        node_id,
+                        HtmlLayoutBox {
+                            x,
+                            y,
+                            width,
+                            height,
+                            rotation_degrees,
+                            intersection_metadata,
+                        },
+                    )
+                },
+            )
             .collect();
     }
 }
@@ -63,9 +68,14 @@ impl HtmlDomBridgeState {
         viewport_width: f32,
         viewport_height: f32,
         scroll_y: f32,
-        boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>,
+        boxes: impl IntoIterator<Item = LayoutMetric>,
     ) {
-        self.set_layout_metrics_xy(viewport_width, viewport_height, (0.0, scroll_y), boxes);
+        self.set_layout_metrics_xy(
+            viewport_width,
+            viewport_height,
+            (0.0, scroll_y),
+            boxes.into_iter().map(|geometry| (geometry, None)),
+        );
     }
 
     pub(crate) fn set_layout_metrics_xy(
@@ -73,23 +83,11 @@ impl HtmlDomBridgeState {
         viewport_width: f32,
         viewport_height: f32,
         scroll_offset: (f32, f32),
-        boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>,
+        boxes: impl IntoIterator<Item = LayoutMetricWithIntersection>,
     ) {
         let mut metrics = self.layout_metrics.borrow_mut();
         metrics.update_viewport_and_scroll(viewport_width, viewport_height, scroll_offset);
         metrics.replace_boxes(boxes);
-    }
-
-    pub(crate) fn set_intersection_metadata(
-        &self,
-        metadata: impl IntoIterator<Item = (u64, String)>,
-    ) {
-        let mut metrics = self.layout_metrics.borrow_mut();
-        for (node_id, value) in metadata {
-            if let Some(layout_box) = metrics.boxes.get_mut(&node_id) {
-                layout_box.intersection_metadata = Some(value);
-            }
-        }
     }
 
     pub(super) fn layout_metrics_json(&self) -> String {
@@ -250,7 +248,7 @@ mod tests {
             320.0,
             240.0,
             (30.0, 80.0),
-            [(node_id, 100.0, 100.0, 40.0, 20.0, 0.0)],
+            [((node_id, 100.0, 100.0, 40.0, 20.0, 0.0), None)],
         );
 
         assert_eq!(

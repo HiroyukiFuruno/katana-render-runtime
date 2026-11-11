@@ -19,6 +19,9 @@ mod mutation;
 #[path = "dom_state_request.rs"]
 mod request;
 
+pub(super) type LayoutMetric = (u64, f32, f32, f32, f32, f32);
+pub(super) type LayoutMetricWithIntersection = (LayoutMetric, Option<String>);
+
 pub(super) struct HtmlDomBridgeState {
     pub(super) document: RefCell<HtmlDocument>,
     pub(super) error: RefCell<Option<String>>,

@@ -4,10 +4,12 @@ use super::super::script::{
 };
 use super::StaticHtmlRuntimeSession;
 use super::session_interaction::discarded_runtime_error;
-use crate::renderer::backends::html_runtime::dom_state::HtmlDomBridgeState;
+#[cfg(test)]
+use crate::renderer::backends::html_runtime::dom_state::LayoutMetric;
+use crate::renderer::backends::html_runtime::dom_state::{
+    HtmlDomBridgeState, LayoutMetricWithIntersection,
+};
 use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
-
-type LayoutMetric = (u64, f32, f32, f32, f32, f32);
 
 impl StaticHtmlRuntimeSession {
     #[cfg(test)]
@@ -16,32 +18,13 @@ impl StaticHtmlRuntimeSession {
         viewport_width: f32,
         viewport_height: f32,
         scroll_y: f32,
-        boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>,
-    ) -> Result<bool, HtmlRuntimeError> {
-        self.update_layout_metrics_with_intersection_metadata(
-            viewport_width,
-            viewport_height,
-            scroll_y,
-            boxes,
-            [],
-        )
-    }
-
-    #[cfg(test)]
-    pub(in crate::renderer::backends) fn update_layout_metrics_with_intersection_metadata(
-        &mut self,
-        viewport_width: f32,
-        viewport_height: f32,
-        scroll_y: f32,
-        boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>,
-        metadata: impl IntoIterator<Item = (u64, String)>,
+        boxes: impl IntoIterator<Item = LayoutMetric>,
     ) -> Result<bool, HtmlRuntimeError> {
         self.update_layout_metrics_xy_with_intersection_metadata(
             viewport_width,
             viewport_height,
             (0.0, scroll_y),
-            boxes,
-            metadata,
+            boxes.into_iter().map(|geometry| (geometry, None)),
         )
     }
 
@@ -50,15 +33,13 @@ impl StaticHtmlRuntimeSession {
         viewport_width: f32,
         viewport_height: f32,
         scroll_offset: (f32, f32),
-        boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>,
-        metadata: impl IntoIterator<Item = (u64, String)>,
+        boxes: impl IntoIterator<Item = LayoutMetricWithIntersection>,
     ) -> Result<bool, HtmlRuntimeError> {
         self.update_layout_metrics_from_boxes(
             viewport_width,
             viewport_height,
             scroll_offset,
             boxes.into_iter().collect(),
-            metadata.into_iter().collect(),
         )
     }
 
@@ -67,16 +48,9 @@ impl StaticHtmlRuntimeSession {
         viewport_width: f32,
         viewport_height: f32,
         scroll_offset: (f32, f32),
-        boxes: Vec<LayoutMetric>,
-        metadata: Vec<(u64, String)>,
+        boxes: Vec<LayoutMetricWithIntersection>,
     ) -> Result<bool, HtmlRuntimeError> {
-        self.set_layout_metrics(
-            viewport_width,
-            viewport_height,
-            scroll_offset,
-            boxes,
-            metadata,
-        )?;
+        self.set_layout_metrics(viewport_width, viewport_height, scroll_offset, boxes)?;
         let observer_work = self.has_intersection_observer_work();
         if matches!(observer_work, Err(HtmlRuntimeError::ExecutionTimeout)) {
             self.discard();
@@ -115,15 +89,13 @@ impl StaticHtmlRuntimeSession {
         viewport_width: f32,
         viewport_height: f32,
         scroll_offset: (f32, f32),
-        boxes: Vec<LayoutMetric>,
-        metadata: Vec<(u64, String)>,
+        boxes: Vec<LayoutMetricWithIntersection>,
     ) -> Result<(), HtmlRuntimeError> {
         let isolate = self.isolate.as_mut().ok_or_else(discarded_runtime_error)?;
         let state = isolate
             .get_slot::<HtmlDomBridgeState>()
             .ok_or_else(dom_state_unavailable_error)?;
         state.set_layout_metrics_xy(viewport_width, viewport_height, scroll_offset, boxes);
-        state.set_intersection_metadata(metadata);
         Ok(())
     }
 
@@ -289,16 +261,18 @@ mod tests {
     ) {
         assert!(
             session
-                .update_layout_metrics_with_intersection_metadata(
+                .update_layout_metrics_xy_with_intersection_metadata(
                     100.0,
                     100.0,
-                    0.0,
+                    (0.0, 0.0),
                     [
-                        (root, 0.0, 0.0, 100.0, 100.0, 0.0),
-                        (clip, 0.0, 0.0, 10.0, 10.0, 0.0),
-                        (target, 10.0, 0.0, 10.0, 10.0, 0.0),
+                        ((root, 0.0, 0.0, 100.0, 100.0, 0.0), None),
+                        ((clip, 0.0, 0.0, 10.0, 10.0, 0.0), None),
+                        (
+                            (target, 10.0, 0.0, 10.0, 10.0, 0.0),
+                            Some(root_clip_edge_contact_metadata(clip))
+                        ),
                     ],
-                    [(target, root_clip_edge_contact_metadata(clip))],
                 )
                 .is_ok(),
             "layout metrics must accept root clip metadata"

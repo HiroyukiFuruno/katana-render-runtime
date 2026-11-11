@@ -49,9 +49,11 @@ impl HtmlInteractiveSession {
                 (self.scroll_geometry.scroll_x, self.scroll_geometry.scroll_y),
                 boxes.iter().map(|element| {
                     let (x, y, width, height) = element.transformed_axis_aligned();
-                    (element.node_id, x, y, width, height, 0.0)
+                    (
+                        (element.node_id, x, y, width, height, 0.0),
+                        Some(intersection_metadata(element)),
+                    )
                 }),
-                boxes.iter().map(intersection_metadata),
             )
             .map_err(runtime_failure)
     }
