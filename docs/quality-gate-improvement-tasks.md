@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [/] `1b6edd33` の正式計測は6,210件成功・別15件skip、86,798/87,294行（99.4318051642%）、未カバー496行。追加した3件は成功したが行数は前回から変化なし。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-p6hzwc0b/safe-summary.json`）。
+- [x] `72598708` はキャッシュ検査から、Rustテキストを `syn::parse_file` する2経路では生成されない不可視区切りの `Group` 3分岐を除いた。通常の括弧と不正入力の拒否を維持し、関連11件・foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-resource-cache-rust-source-groups-exact-z55q2_8i/safe-summary.json`）。正式値には未反映。
 - [/] `a03e0a9c` の正式計測は6,207件成功・別15件skip、86,798/87,294行（99.4318051642%）、未カバー496行。前回497行から、SVG switchの到達不能な重複判定の削除で1行減少。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-sgsabmj_/safe-summary.json`）。
 - [x] `002e14fa`・`b1f2c9cc` で、実HTMLの文字入力・キーアップの例外伝播と、実フォントの破損拒否・復元後の回復を確認。初回の診断モジュール参照を修正し、限定3件・foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-input-keyup-and-font-metrics-exact-2rknwa3j/safe-summary.json`）。496行の正式値には未反映。
 - [ ] 正式カバレッジ100%・未カバー0を達成した後、挙動と既存テスト結果を維持し、読み込み・キャッシュ等の共通処理とレンダラーの責務境界を精査・整理する。小さい差分ごとに関連テストを回収し、整理後のソースで描画・性能・完全品質ゲートを再検証する。自己レビュー後にDraft PR、Codexレビューと指摘修正、3 OS CI、保護マージ、公開へ進む。
