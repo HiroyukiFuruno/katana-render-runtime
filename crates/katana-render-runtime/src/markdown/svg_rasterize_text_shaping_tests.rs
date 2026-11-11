@@ -49,6 +49,37 @@ fn removed_font_face_fails_without_using_stale_font_data() {
 }
 
 #[test]
+fn measured_text_recovers_when_registered_font_file_returns()
+-> Result<(), Box<dyn std::error::Error>> {
+    use std::sync::Arc;
+
+    let bytes = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("NotoSans-Regular.ttf");
+    std::fs::write(&path, bytes)?;
+    let mut database = usvg::fontdb::Database::new();
+    database.load_font_source(usvg::fontdb::Source::File(path.clone()));
+    let database = Arc::new(database);
+    assert!(matching_font_face(&database, "Noto Sans", 400, false).is_some());
+    let measure = || {
+        super::shaped_text_width_in_database_with_trim(
+            &database,
+            "Example",
+            "Noto Sans",
+            FontShape::new(16.0, 400, false),
+            0.0,
+            None,
+        )
+    };
+    std::fs::remove_file(&path)?;
+    assert_eq!(measure(), None);
+
+    std::fs::write(&path, bytes)?;
+    assert!(measure().is_some_and(|width| width.is_finite() && width > 0.0));
+    Ok(())
+}
+
+#[test]
 fn shaped_width_preserves_css_letter_spacing_and_empty_runs() -> Result<(), String> {
     let natural = super::shaped_text_width("AV", "Noto Sans", 16.0, 400, false, 0.0, None)
         .ok_or("natural run must shape")?;

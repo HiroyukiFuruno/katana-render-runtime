@@ -195,6 +195,9 @@ mod mermaid_classic_scripts_ast_linter_tests;
 #[path = "mathjax_consumer_facts/native_width_hash_tests.rs"]
 mod native_width_hash_ast_linter_tests;
 #[cfg(test)]
+#[path = "mathjax_consumer_facts/opaque_hash_tests.rs"]
+mod opaque_hash_tests;
+#[cfg(test)]
 #[path = "mathjax_consumer_facts/test_support.rs"]
 mod test_support;
 #[cfg(test)]

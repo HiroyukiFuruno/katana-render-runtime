@@ -250,15 +250,24 @@ mod tests {
     }
 
     #[test]
-    fn system_font_path_loader_registers_a_known_bundled_font() {
-        let font =
+    fn system_font_path_loader_recovers_when_a_discovered_file_appears()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let bundled =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/NotoSans-Regular.ttf");
+        let directory = tempfile::tempdir()?;
+        let font = directory.path().join("NotoSans-Regular.ttf");
         let mut database = usvg::fontdb::Database::new();
-
         let mut loaded_paths = BTreeSet::new();
-        load_system_font_paths(&mut database, [font], &mut loaded_paths);
 
-        assert!(database.faces().next().is_some());
+        load_system_font_paths(&mut database, [font.clone()], &mut loaded_paths);
+        assert_eq!(database.faces().count(), 0);
+        assert!(loaded_paths.is_empty());
+
+        std::fs::copy(bundled, &font)?;
+        load_system_font_paths(&mut database, [font.clone(), font], &mut loaded_paths);
+        assert_eq!(database.faces().count(), 1);
+        assert_eq!(loaded_paths.len(), 1);
+        Ok(())
     }
 
     #[test]
