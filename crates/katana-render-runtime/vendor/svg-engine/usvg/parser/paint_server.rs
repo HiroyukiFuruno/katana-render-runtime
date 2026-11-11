@@ -496,17 +496,14 @@ fn resolve_attr<'a, 'input: 'a>(node: SvgNode<'a, 'input>, name: AId) -> SvgNode
 
 fn resolve_lg_attr<'a, 'input: 'a>(node: SvgNode<'a, 'input>, name: AId) -> SvgNode<'a, 'input> {
     for link in node.href_iter() {
-        let tag_name = match link.tag_name() {
-            Some(v) => v,
-            None => return node,
-        };
-
-        if linear_gradient_attr_matches(name, tag_name) {
-            if link.has_attribute(name) {
-                return link;
-            }
-        } else {
+        if !link
+            .tag_name()
+            .is_some_and(|tag| linear_gradient_attr_matches(name, tag))
+        {
             break;
+        }
+        if link.has_attribute(name) {
+            return link;
         }
     }
 
@@ -533,17 +530,14 @@ fn linear_gradient_attr_matches(name: AId, tag_name: EId) -> bool {
 
 fn resolve_rg_attr<'a, 'input>(node: SvgNode<'a, 'input>, name: AId) -> SvgNode<'a, 'input> {
     for link in node.href_iter() {
-        let tag_name = match link.tag_name() {
-            Some(v) => v,
-            None => return node,
-        };
-
-        if radial_gradient_attr_matches(name, tag_name) {
-            if link.has_attribute(name) {
-                return link;
-            }
-        } else {
+        if !link
+            .tag_name()
+            .is_some_and(|tag| radial_gradient_attr_matches(name, tag))
+        {
             break;
+        }
+        if link.has_attribute(name) {
+            return link;
         }
     }
 
@@ -575,12 +569,7 @@ fn resolve_pattern_attr<'a, 'input: 'a>(
     name: AId,
 ) -> SvgNode<'a, 'input> {
     for link in node.href_iter() {
-        let tag_name = match link.tag_name() {
-            Some(v) => v,
-            None => return node,
-        };
-
-        if tag_name != EId::Pattern {
+        if link.tag_name() != Some(EId::Pattern) {
             break;
         }
 
@@ -594,12 +583,7 @@ fn resolve_pattern_attr<'a, 'input: 'a>(
 
 fn resolve_filter_attr<'a, 'input: 'a>(node: SvgNode<'a, 'input>, aid: AId) -> SvgNode<'a, 'input> {
     for link in node.href_iter() {
-        let tag_name = match link.tag_name() {
-            Some(v) => v,
-            None => return node,
-        };
-
-        if tag_name != EId::Filter {
+        if link.tag_name() != Some(EId::Filter) {
             break;
         }
 
