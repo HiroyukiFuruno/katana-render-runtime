@@ -197,13 +197,13 @@ mod tests {
     fn auto_line_break_does_not_split_slash_before_letters() {
         for text in ["https://alpha.example/path", "23/Jan/2024", "/src/main.rs"] {
             let ends = super::css_auto_linebreak_ends(text);
-            assert!(
-                !ends.iter().any(
-                    |&end| text.as_bytes().get(end.wrapping_sub(1)) == Some(&b'/')
-                        && text[end..].chars().next().is_some_and(is_css_letter)
-                ),
-                "{text:?}: {ends:?}"
-            );
+            let forbidden_ends = text
+                .match_indices('/')
+                .map(|(offset, slash)| offset + slash.len())
+                .filter(|&end| text[end..].chars().next().is_some_and(is_css_letter));
+            for end in forbidden_ends {
+                assert!(!ends.contains(&end), "{text:?}: {ends:?}");
+            }
         }
         assert!(!super::css_auto_linebreak_ends("https://documents").contains(&"https:/".len()));
     }

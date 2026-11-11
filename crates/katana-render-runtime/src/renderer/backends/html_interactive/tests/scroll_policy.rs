@@ -16,6 +16,19 @@ const OBSERVER_SCROLL_DOCUMENT: &str = r#"<body style="margin:0">
 const OBSERVER_SCROLL_DELTA: f32 = 300.0;
 
 #[test]
+fn overflowing_absolute_box_is_rejected_before_the_first_frame() -> TestResult {
+    let source = r#"<div style="position:absolute;left:3e38px;width:3e38px;height:4px;background:red"></div>"#;
+    let error = start(source)
+        .err()
+        .ok_or("overflowing layout unexpectedly produced a session")?;
+    assert!(
+        error.contains("scrollable overflow contains non-finite geometry"),
+        "{error}"
+    );
+    Ok(())
+}
+
+#[test]
 fn text_without_focused_input_preserves_dom_and_frame() -> TestResult {
     let mut session = start("<input id=field value=initial><p id=result>unchanged</p>")?;
     let before = session.runtime.snapshot().map_err(to_string)?;
