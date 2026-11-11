@@ -110,6 +110,57 @@ document.getElementById('button').addEventListener('click', () => {
 }
 
 #[test]
+fn input_pointer_focus_error_prevents_click_event() -> TestResult {
+    let html = r#"<input id="field"><p id="events"></p><script>
+const field = document.getElementById('field');
+const events = document.getElementById('events');
+field.addEventListener('focus', () => { events.textContent += 'focus|'; throw new Error('input focus failed'); });
+field.addEventListener('click', () => { events.textContent += 'click|'; });
+</script>"#;
+    let mut session = start(html)?;
+    let result = click_element(&mut session, "field");
+    assert_listener_failure(&mut session, result, "input focus failed", "focus|")
+}
+
+#[test]
+fn typed_input_change_error_prevents_following_focus_and_click() -> TestResult {
+    let html = r#"<input id="field"><button id="next">Next</button><p id="events"></p><script>
+const field = document.getElementById('field');
+const next = document.getElementById('next');
+const events = document.getElementById('events');
+field.addEventListener('change', () => { events.textContent += 'change|'; throw new Error('input change failed'); });
+field.addEventListener('blur', () => { events.textContent += 'blur|'; });
+next.addEventListener('focus', () => { events.textContent += 'focus|'; });
+next.addEventListener('click', () => { events.textContent += 'click|'; });
+</script>"#;
+    let mut session = start(html)?;
+    click_element(&mut session, "field")?;
+    session
+        .dispatch_input(HtmlBrowserInput::Text {
+            text: "typed".to_owned(),
+        })
+        .map_err(|error| error.to_string())?;
+    let result = click_element(&mut session, "next");
+    assert_listener_failure(&mut session, result, "input change failed", "change|")
+}
+
+fn assert_listener_failure(
+    session: &mut HtmlInteractiveSession,
+    result: TestResult,
+    message: &str,
+    expected_events: &str,
+) -> TestResult {
+    let error = result.err().ok_or("listener error was not propagated")?;
+    assert!(error.contains(message), "{error}");
+    let events = session
+        .runtime
+        .observe_feature_state("document.getElementById('events').textContent")
+        .map_err(|error| error.to_string())?;
+    assert_eq!(events, expected_events);
+    Ok(())
+}
+
+#[test]
 fn mismatched_pointer_release_does_not_render() -> TestResult {
     let mut session = start("<button id=first>First</button><button id=second>Second</button>")?;
     let first = element_id(&mut session, "first")?;
