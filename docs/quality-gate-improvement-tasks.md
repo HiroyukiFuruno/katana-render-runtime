@@ -2,6 +2,9 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [/] `8fe06291` の正式計測は6,247件成功・別15件skip、86,457/86,878行（99.5154124174%）、未カバー421行。前回422行からSVGの可変フォント描画診断で1行減。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-l37zfpj6/safe-summary.json`）。公開用カバレッジ判定は未達。
+- [x] `8fe06291` は実SFNSの通常ウェイトで得た描画情報へ同じフォントの太字Typefaceを渡すと描画診断が拒否し、通常ウェイトのTypefaceでは描画を記録することを確認した。初回のテストimport階層を修正後、foundation・AST・関連18件成功、テスト一覧は当該1件のみ増加（`tmp/quality/resumed-owner-r3509/coverage-svg-variation-wrong-instance-exact-qo8j231c/safe-summary.json`）。
+- [/] `8fe06291` のGitHub Actions固定参照14件は公式GitHub APIの最新版SHAと一致（`tmp/quality/resumed-owner-r3509/release-actions-official-freshness-u0fb6hci/projection.json`）。同HEADの標準依存最新性検査はRust lock解決で実1。Cargoのdry-runは9更新・1追加を提示し、ソース前後一致。既存の性能比較用保持対象4件（`crc32fast`、`flate2`、`smallvec`、`utf8_iter`）とその推移追加`utf_types`を区別し、残る5更新と保持契約・性能を照合する。`crc32fast`の候補は既存の確認済み1.5.4から1.5.5に変わっている（`tmp/quality/resumed-owner-r3509/release-dependency-freshness-s5yc2uaz/` と `tmp/quality/resumed-owner-r3509/release-cargo-update-dry-run-o3aqcthh/`）。依存差分は未採用。
 - [/] `e4e40311` の正式計測は6,246件成功・別15件skip、86,456/86,878行（99.5142613780%）、未カバー422行。前回の424行からSVG塗り回帰の分離で2行減り、資源ローダーの未カバー数は同じ。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-xpryqlos/safe-summary.json`）。公開用カバレッジ判定は未達。
 - [x] `e4e40311` はSVG塗り診断の純テストとテスト専用描画補助を既存形式の専用ファイルへ分離した。テスト一覧は一致し、実SVGの画素一致、入れ子クリップ、上限超過、失敗時の解放を含む関連4件とfoundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-svg-path-paint-isolation-exact-04bs6jkp/safe-summary.json`）。
 - [x] `3adae2dd` は資源ローダーの純テストを分離し、同梱3資源の共有と外部ファイル差し替え前の取得済み内容の保持を検証した。テスト一覧は一致し、関連2件とfoundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-runtime-resource-loader-isolation-exact-jfgeg_aj/safe-summary.json`）。初回のASTで検出した移動済みリテラル2件は同値の定数へ整理した。同梱資源を静的型で直接読む実装案は現行のMermaid資源取得AST契約が拒否したため戻した（`tmp/quality/resumed-owner-r3509/coverage-bundled-resource-static-exact-2rg0jnt0/ast-exit.json`）。
