@@ -179,3 +179,24 @@ fn lazy_font_rejects_missing_ttc_offset_and_face_header() -> Result<(), Box<dyn 
     std::fs::write(&path, &bytes)?;
     assert_lazy_directory_error(&path, ErrorKind::UnexpectedEof)
 }
+
+#[test]
+fn deleted_font_poisons_lazy_table_source_and_fresh_source_recovers()
+-> Result<(), Box<dyn std::error::Error>> {
+    use skrifa::raw::TableProvider;
+    use std::sync::atomic::Ordering;
+
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("font.ttf");
+    std::fs::write(&path, EMBEDDED_FONT_BYTES)?;
+    let stale = super::lazy_table::load(&path, 0)?;
+    std::fs::remove_file(&path)?;
+    assert!(stale.font.tables().name().is_err());
+    assert!(stale.poisoned.load(Ordering::Acquire));
+
+    std::fs::write(&path, EMBEDDED_FONT_BYTES)?;
+    let fresh = super::lazy_table::load(&path, 0)?;
+    assert!(fresh.font.tables().name().is_ok());
+    assert!(!fresh.poisoned.load(Ordering::Acquire));
+    Ok(())
+}
