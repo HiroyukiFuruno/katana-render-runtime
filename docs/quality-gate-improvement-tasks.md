@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] `svgtypes 0.16.2`の`ViewBox::from_str`から4成分の数値解析まで確認し、成功時に成立済みの有限値判定だけをMermaidの形状検証から除去した。実SVGの`NaN`と指数オーバーフローは従来のエラーで拒否する。フォント置換のテスト補助は、置換元と置換先それぞれがディレクトリの場合に選択済みの実フォントを保持することを確認。初回ASTのコメント形式指摘を修正し、foundation・AST・関連8件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-viewbox-and-font-io-exact-gs2qn3x0/safe-summary.json`）。全体計測への反映は未確認。
 - [x] 親に色指定のない実SVGのinline CSSで`color: inherit`を指定し、後続のstroke宣言と既定黒の`currentColor`が保持されることを確認。foundation・AST・関連3件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-inherited-initial-color-exact-xvjjmqcd/safe-summary.json`）。全体計測への反映は未確認。
 - [/] `6ea4d6c6` の正式producerによる中間計測は6,226件成功・別15件skip、86,941/87,399行（99.4759665442%）、未カバー458行。SVG参照の処理で3行、フォント置換の失敗処理で1行減。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-lf3b1u3c/safe-summary.json`）。
 - [x] SVGの子要素を経由するpattern・clipPath・feImage参照の実入力回帰を追加。循環ありでは循環を解いた入力と画素一致、循環なしでは塗り・クリップ・フィルターが維持されることを確認。foundation・AST・関連4件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-child-reference-exact-4q0p2z_j/safe-summary.json`）。全体計測への反映は未確認。
