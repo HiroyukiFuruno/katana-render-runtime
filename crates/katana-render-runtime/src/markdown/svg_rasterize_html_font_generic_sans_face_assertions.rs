@@ -176,7 +176,7 @@ pub(in super::super) fn diagnostic_face_report(
 
 #[cfg(test)]
 mod tests {
-    use super::{Database, Source, diagnostic_face_identity};
+    use super::{Database, ID, Source, assert_same_face_bytes, diagnostic_face_identity};
     use std::{path::PathBuf, sync::Arc};
 
     #[test]
@@ -210,6 +210,33 @@ mod tests {
 
     fn identity_fields(report: &serde_json::Value) -> [serde_json::Value; 3] {
         ["faceIndex", "postScriptName", "weight"].map(|key| report[key].clone())
+    }
+
+    #[test]
+    fn diagnostic_face_bytes_reject_distinct_real_fonts() -> Result<(), String> {
+        let (noto, noto_id) = real_font("assets/fonts/NotoSans-Regular.ttf")?;
+        let (same, same_id) = real_font("assets/fonts/NotoSans-Regular.ttf")?;
+        let (yellowtail, yellowtail_id) = real_font(
+            "../../tests/fixtures/svg-engine/upstream/resvg/tests/fonts/Yellowtail-Regular.ttf",
+        )?;
+        assert_same_face_bytes(&noto, noto_id, &same, same_id)?;
+        assert_eq!(
+            assert_same_face_bytes(&noto, noto_id, &yellowtail, yellowtail_id)
+                .err()
+                .as_deref(),
+            Some("real face bytes or source indices differ")
+        );
+        Ok(())
+    }
+
+    fn real_font(relative: &str) -> Result<(Database, ID), String> {
+        let mut database = Database::new();
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative);
+        let ids = database.load_font_source(Source::File(path));
+        let [id] = ids.as_slice() else {
+            return Err("expected one real font face".to_string());
+        };
+        Ok((database, *id))
     }
 
     fn inspect_source(source: Source, bytes: &[u8]) -> Result<serde_json::Value, String> {
