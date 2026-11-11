@@ -173,3 +173,55 @@ pub(in super::super) fn diagnostic_face_report(
         "lineMetricsAt16px": { "ascent": ascent, "descent": descent },
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Database, Source, diagnostic_face_identity};
+    use std::{path::PathBuf, sync::Arc};
+
+    #[test]
+    fn diagnostic_identity_distinguishes_real_font_source_kinds() -> Result<(), String> {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/NotoSans-Regular.ttf");
+        let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
+        let sources = [
+            Source::Binary(Arc::new(bytes.clone())),
+            Source::File(path.clone()),
+            Source::SharedFile(path.clone(), Arc::new(bytes.clone())),
+        ];
+        let expected = [
+            "<binary>".to_owned(),
+            path.display().to_string(),
+            path.display().to_string(),
+        ];
+        let mut reference = None;
+        for (source, expected_source) in sources.into_iter().zip(expected) {
+            let report = inspect_source(source, &bytes)?;
+            assert_eq!(report["source"].as_str(), Some(expected_source.as_str()));
+            let identity = identity_fields(&report);
+            if let Some(reference) = &reference {
+                assert_eq!(&identity, reference);
+            } else {
+                reference = Some(identity);
+            }
+        }
+        Ok(())
+    }
+
+    fn identity_fields(report: &serde_json::Value) -> [serde_json::Value; 3] {
+        ["faceIndex", "postScriptName", "weight"].map(|key| report[key].clone())
+    }
+
+    fn inspect_source(source: Source, bytes: &[u8]) -> Result<serde_json::Value, String> {
+        let mut database = Database::new();
+        let ids = database.load_font_source(source);
+        let [id] = ids.as_slice() else {
+            return Err("expected one Noto Sans face".to_string());
+        };
+        let face = database.face(*id).ok_or("font face missing")?;
+        let matches =
+            database.with_face_data(*id, |actual, index| actual == bytes && index == face.index);
+        assert_eq!(matches, Some(true));
+        diagnostic_face_identity(&database, *id)
+    }
+}
