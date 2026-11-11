@@ -134,6 +134,46 @@ fn current_helvetica_file_face_matches_coretext() -> Result<(), String> {
 }
 
 #[test]
+fn matching_file_font_respects_database_memo_registration() -> Result<(), String> {
+    use super::super::super::super::fallback_memo as memo;
+    let database = helvetica_file_database()?;
+    let id = normal_file_face(&database, HELVETICA_FAMILY).ok_or("Helvetica face missing")?;
+    let font = helvetica_coretext_font();
+    memo::with_validated_tree_parse(|| {
+        let generation = super::super::super::font_source_generation_uncached(&database, id);
+        assert!(super::super::super::memo_usable());
+        assert!(generation.durable_reusable());
+        assert!(matches(&database, id, &font));
+        assert_eq!(memo::physical_face_lookup(&database, id, &generation), None);
+        let mut options = resvg::usvg::Options::default();
+        memo::install(&mut options);
+        let mut selected = Arc::clone(&database);
+        (options.font_resolver.select_fallback)('魚', &[id], &mut selected);
+        assert!(Arc::ptr_eq(&database, &selected));
+        assert!(matches(&database, id, &font));
+        assert_eq!(
+            memo::physical_face_lookup(&database, id, &generation),
+            Some(true)
+        );
+    });
+    Ok(())
+}
+
+fn helvetica_file_database() -> Result<Arc<Database>, String> {
+    let original =
+        crate::markdown::svg_rasterize::font::html_font_db_for_text(HELVETICA_FAMILY, "A");
+    let original_id = normal_file_face(&original, HELVETICA_FAMILY).ok_or("Helvetica missing")?;
+    let Some(Source::File(path) | Source::SharedFile(path, _)) =
+        original.face_source(original_id).map(|source| source.0)
+    else {
+        return Err("Helvetica file missing".into());
+    };
+    let mut database = Database::new();
+    database.load_font_source(Source::File(path));
+    Ok(Arc::new(database))
+}
+
+#[test]
 fn moved_font_symlink_stops_matching_the_old_coretext_file_path()
 -> Result<(), Box<dyn std::error::Error>> {
     let database =
