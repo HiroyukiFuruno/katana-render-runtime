@@ -2,6 +2,9 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] `3af7ece6` はHTML永続テキスト幅キャッシュの純テスト3件を既存形式の専用ファイルに分離した。製品の幅計測は同一。初回のASTが製品ファイルの行数上限を検出し、Chrome比較専用の補助を既存テスト内へ移動した。最終foundation・AST成功、改名した3件以外のテスト一覧は一致、Chromeとの比較を含む関連4件成功（`tmp/quality/resumed-owner-r3509/coverage-html-persistent-width-tests-exact-fcdte9tn/safe-summary.json`）。
+- [x] `4b5f077d` は同梱Noto Sansの輪郭テーブルを空にしたフォントを実際に読み込み、有効なグリフIDが得られても描画画素が空なら初回描画の診断が拒否することを確認。foundation・AST・関連3件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-font-outline-empty-probe-exact-oxydgau7/safe-summary.json`）。
+- [x] `f1ea2f5b` はHTML描画結果ストアの純テスト4件を専用ファイルに分離し、FIFOを専用の一時ディレクトリに作成して終了時に回収するようにした。製品のストア実装とテスト一覧は同一。foundation・AST・関連4件成功（`tmp/quality/resumed-owner-r3509/coverage-html-artifact-fifo-unit-exact-dwqoi3zm/safe-summary.json`）。以上3件の全体計測への反映は未確認。
 - [x] `745a6167` は座標変換の対象判定で既存の塗り単位APIを再利用し、単色からも従来どおり単位を取得する。`910a522e` は実SVGでCSS描画サイズがゼロへ丸まる極小倍率に達して、文字のアンカーと縦位置を保持することを確認。foundation・AST・関連14件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-bbox-reuse-and-tiny-anchor-exact-vrw74tgu/safe-summary.json`）。全体計測への反映は未確認。
 - [/] `0dee520e` の正式計測は6,242件成功・別15件skip、86,718/87,150行（99.5043029260%）、未カバー432行。SVG角丸で1行減。中央補正は内部で1行減り呼出側のエラー伝播で1行増、塗りも変換で1行減り単位取得で1行増。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-udzym89w/safe-summary.json`）。
 - [x] `b7d14e4e` はSVG境界ボックス座標変換に対象の塗りだけを渡し、単色の再判定を除いた。線形・放射グラデーション、パターンの内容座標、ゼロ寸法、参照とマーカーを含む11件とfoundation・AST成功（`tmp/quality/resumed-owner-r3509/coverage-svg-object-bbox-paint-exact-fjm2wy9i/safe-summary.json`）。
