@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] `3022e07a`、`8205c2f4`、`4038cc9e`、`f7b86aea`で互換Rust依存、Bunの推移依存、ZenUML Core 4.13.2、PlantUML 1.2026.10を更新した。測定ハーネスの既存基準に必要な依存は保持し、更新処理は固定した依存範囲を事前・事後で照合して失敗時に元へ戻す。実レシピの更新成功と2回目のバイト一致を確認した（`tmp/quality/resumed-owner-r3509/release-harness-selective-update-check-fkw09aol/`）。
+- [/] `f7b86aea`の差分で標準依存最新性検査が成功（解決済み529依存と固定ランタイム資源）。静的検査・AST、資源42件、ZenUML・PlantUML実描画とフォントを含むRustの関連32件が成功し、検査時の差分SHAが一致した（`tmp/quality/resumed-owner-r3509/release-rust-assets-exact-mel95yig/safe-summary.json`）。旧ビルドによる容量閾値超過は、保護対象を確認してカバレッジ専用ビルドのみ整理して解消した（`tmp/quality/resumed-owner-r3509/release-root-coverage-profile-clean-ewyxrg9u/`）。更新後の全体カバレッジ・公開用の最終検査は未確定。
 - [/] `8fe06291` の正式計測は6,247件成功・別15件skip、86,457/86,878行（99.5154124174%）、未カバー421行。前回422行からSVGの可変フォント描画診断で1行減。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-l37zfpj6/safe-summary.json`）。公開用カバレッジ判定は未達。
 - [x] `8fe06291` は実SFNSの通常ウェイトで得た描画情報へ同じフォントの太字Typefaceを渡すと描画診断が拒否し、通常ウェイトのTypefaceでは描画を記録することを確認した。初回のテストimport階層を修正後、foundation・AST・関連18件成功、テスト一覧は当該1件のみ増加（`tmp/quality/resumed-owner-r3509/coverage-svg-variation-wrong-instance-exact-qo8j231c/safe-summary.json`）。
 - [/] `8fe06291` のGitHub Actions固定参照14件は公式GitHub APIの最新版SHAと一致（`tmp/quality/resumed-owner-r3509/release-actions-official-freshness-u0fb6hci/projection.json`）。同HEADの標準依存最新性検査はRust lock解決で実1。Cargoのdry-runは9更新・1追加を提示し、ソース前後一致。既存の性能比較用保持対象4件（`crc32fast`、`flate2`、`smallvec`、`utf8_iter`）とその推移追加`utf_types`を区別し、残る5更新と保持契約・性能を照合する。`crc32fast`の候補は既存の確認済み1.5.4から1.5.5に変わっている（`tmp/quality/resumed-owner-r3509/release-dependency-freshness-s5yc2uaz/` と `tmp/quality/resumed-owner-r3509/release-cargo-update-dry-run-o3aqcthh/`）。依存差分は未採用。
