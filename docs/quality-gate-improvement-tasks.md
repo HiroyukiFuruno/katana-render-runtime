@@ -2,6 +2,10 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定2件中2件完了。関連22件、静的検査・ASTが成功し、検査対象と作業ツリーの差分が実行前後で一致した（`tmp/quality/resumed-owner-r3509/coverage-html-svg-dimensions-single-pass-exact-ijg89vio/safe-summary.json`）。初回2回は既存排他により静的検査開始前に終了し、空きを確認して実行した。
+  - [x] HTML内SVGの幅測定で、解析済み幅を共有し、使わない高さの計算を除いた。
+  - [x] SVG高さの最低値を一度だけ適用し、幅属性が不正でもCSS幅が優先される実HTMLを回帰で確認した。
+
 - 対応予定2件中2件完了。関連99件、静的検査・ASTが一度のビルドで成功し、検査対象と作業ツリーの差分が実行前後で一致した（`tmp/quality/resumed-owner-r3509/coverage-svg-glyph-preparation-single-pass-exact-as6w4vov/safe-summary.json`）。
   - [x] SVGの水平位置合わせで、検査済みの単一spanをそのまま更新し、空spanの再判定を除いた。
   - [x] SVGの字形準備で、範囲検査済みの字形をID確認と描画準備の両方で共有した。

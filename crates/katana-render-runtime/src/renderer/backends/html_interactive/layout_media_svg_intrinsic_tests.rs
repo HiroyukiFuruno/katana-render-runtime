@@ -91,13 +91,16 @@ fn embedded_svg_auto_margins_position_the_resolved_width() -> TestResult {
 
 #[test]
 fn explicit_css_width_takes_priority_over_svg_width_attribute() -> TestResult {
-    let svg = NATURAL_SVG.replacen(
-        "width=\"80\" height=\"50\"",
-        "width=\"80\" height=\"50\" style=\"width:160px\"",
-        1,
-    );
-    /* WHY: SVG2 presentation属性のheightは、widthだけのCSS指定ではautoにならない。 */
-    assert_geometry(&capture_html(&svg, true), 160.0, 50.0)
+    for width in ["80", "invalid"] {
+        let svg = NATURAL_SVG.replacen(
+            "width=\"80\" height=\"50\"",
+            &format!("width=\"{width}\" height=\"50\" style=\"width:160px\""),
+            1,
+        );
+        /* WHY: SVG2 presentation属性のheightは、widthだけのCSS指定ではautoにならない。 */
+        assert_geometry(&capture_html(&svg, true), 160.0, 50.0)?;
+    }
+    Ok(())
 }
 
 #[test]

@@ -19,22 +19,25 @@ pub(super) fn intrinsic_svg_width(
     available_width: f32,
     style: &CssStyle,
 ) -> Option<f32> {
-    let explicit_width =
-        attribute(attributes, "width").and_then(|value| parse_svg_length(value, available_width));
+    let width_attribute = attribute(attributes, "width");
+    let explicit_width = width_attribute.and_then(|value| parse_svg_length(value, available_width));
     /* WHY: 百分率はintrinsic幅を持たず、auto flexの測定時に親幅へ展開すると循環する。 */
     if style.width.is_none()
         && explicit_width.is_some()
-        && attribute(attributes, "width").is_some_and(|value| value.trim().ends_with('%'))
+        && width_attribute.is_some_and(|value| value.trim().ends_with('%'))
     {
-        return Some(quantize_css_layout(used_svg_width(
+        return Some(used_svg_width(
             DEFAULT_INTRINSIC_SVG_WIDTH,
             available_width,
             style,
-        )));
+        ));
     }
     /* WHY: 投影済みSVGは子が空でも寸法を持つ。viewBoxだけの既存自然幅方針は変えない。 */
-    (style.width.is_some() || explicit_width.is_some())
-        .then(|| embedded_svg_size(attributes, available_width, style).0)
+    (style.width.is_some() || explicit_width.is_some()).then(|| {
+        let view_box = attribute(attributes, "viewbox").and_then(parse_view_box);
+        let natural_width = natural_svg_width(explicit_width, available_width, view_box);
+        used_svg_width(natural_width, available_width, style)
+    })
 }
 
 pub(super) fn embedded_svg_size(
@@ -43,8 +46,10 @@ pub(super) fn embedded_svg_size(
     style: &CssStyle,
 ) -> (f32, f32) {
     let view_box = attribute(attributes, "viewbox").and_then(parse_view_box);
-    let natural_width = natural_svg_width(attributes, available_width, view_box);
-    let width = quantize_css_layout(used_svg_width(natural_width, available_width, style));
+    let explicit_width =
+        attribute(attributes, "width").and_then(|value| parse_svg_length(value, available_width));
+    let natural_width = natural_svg_width(explicit_width, available_width, view_box);
+    let width = used_svg_width(natural_width, available_width, style);
     /* WHY: CSSのheight:autoはSVGの自然比率を使い、height属性より優先する。 */
     let height = if let Some(height) = style.height {
         height
@@ -54,8 +59,7 @@ pub(super) fn embedded_svg_size(
         attribute(attributes, "height")
             .and_then(|value| parse_svg_length(value, available_width))
             .unwrap_or_else(|| auto_svg_height(width, natural_width, view_box))
-    }
-    .max(CONTROL_HEIGHT);
+    };
     let height = quantize_css_layout(apply_svg_height_constraints(height, style));
     (width, height)
 }
@@ -69,12 +73,11 @@ fn apply_svg_height_constraints(height: f32, style: &CssStyle) -> f32 {
 }
 
 fn natural_svg_width(
-    attributes: &[(String, String)],
+    explicit_width: Option<f32>,
     available_width: f32,
     view_box: Option<ViewBox>,
 ) -> f32 {
-    attribute(attributes, "width")
-        .and_then(|value| parse_svg_length(value, available_width))
+    explicit_width
         .or_else(|| view_box.map(|(_, _, width, _)| width))
         .unwrap_or(available_width)
         .max(MIN_LAYOUT_WIDTH)
@@ -92,7 +95,7 @@ fn used_svg_width(natural_width: f32, available_width: f32, style: &CssStyle) ->
     let width = style
         .minimum_outer_width(available_width)
         .map_or(width, |minimum| width.max(minimum));
-    width.min(available_width).max(MIN_LAYOUT_WIDTH)
+    quantize_css_layout(width.min(available_width).max(MIN_LAYOUT_WIDTH))
 }
 
 fn auto_svg_height(width: f32, natural_width: f32, view_box: Option<ViewBox>) -> f32 {
