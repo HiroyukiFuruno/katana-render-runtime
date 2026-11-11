@@ -117,12 +117,11 @@ fn reserve(cache: &mut Cache, retained_bytes: usize) -> bool {
     if retained_bytes > MAX_RETAINED_BYTES {
         return false;
     }
-    while cache.entries.len() >= MAX_ENTRIES
-        || cache.retained_bytes.saturating_add(retained_bytes) > MAX_RETAINED_BYTES
+    /* WHY: 保持量はキュー内の合計で、空になるまでに上限以下の新規項目を格納できる。 */
+    while (cache.entries.len() >= MAX_ENTRIES
+        || cache.retained_bytes.saturating_add(retained_bytes) > MAX_RETAINED_BYTES)
+        && let Some(entry) = cache.entries.pop_front()
     {
-        let Some(entry) = cache.entries.pop_front() else {
-            return false;
-        };
         cache.retained_bytes -= entry.retained_bytes;
     }
     cache.retained_bytes += retained_bytes;
