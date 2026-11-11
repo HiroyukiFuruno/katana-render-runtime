@@ -25,6 +25,23 @@ fn throw_bridge_error(scope: &mut v8::PinScope, message: &str) {
     }
 }
 
+fn set_bridge_number_property(
+    scope: &mut v8::PinScope,
+    object: v8::Local<v8::Object>,
+    name: &str,
+    value: f64,
+    allocation_error: &'static str,
+    write_error: &'static str,
+) -> Result<(), &'static str> {
+    let key = v8::String::new(scope, name).ok_or(allocation_error)?;
+    let value = v8::Number::new(scope, value);
+    /* WHY: 結果辞書の値をprototype setterに奪わせず、書込み不能も検出する。 */
+    if object.create_data_property(scope, key.into(), value.into()) != Some(true) {
+        return Err(write_error);
+    }
+    Ok(())
+}
+
 pub(crate) struct DiagramRuntimeScript<'a> {
     pub(crate) name: &'static str,
     pub(crate) code: Cow<'a, str>,

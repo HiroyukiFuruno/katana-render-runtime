@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use super::diagram_bridge_registration::register_callback;
-use super::{DiagramTryCatchScope, throw_bridge_error};
+use super::{DiagramTryCatchScope, set_bridge_number_property, throw_bridge_error};
 use svgtypes::Transform;
 #[cfg(target_os = "macos")]
 #[path = "diagram_geometry_path_bounds.rs"]
@@ -174,14 +174,15 @@ fn set_number_property(
     property: &'static str,
     value: f64,
 ) -> Result<(), String> {
-    let name = v8::String::new(scope, property)
-        .ok_or_else(|| "SVG transformed bounds property allocation failed".to_string())?;
-    let value = v8::Number::new(scope, value);
-    /* WHY: 結果辞書の値をprototype setterに奪わせず、書込み不能も検出する。 */
-    if object.create_data_property(scope, name.into(), value.into()) != Some(true) {
-        return Err("SVG transformed bounds property write failed".to_string());
-    }
-    Ok(())
+    set_bridge_number_property(
+        scope,
+        object,
+        property,
+        value,
+        "SVG transformed bounds property allocation failed",
+        "SVG transformed bounds property write failed",
+    )
+    .map_err(str::to_owned)
 }
 
 #[cfg(test)]

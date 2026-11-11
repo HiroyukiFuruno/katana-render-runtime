@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- [x] SVG境界値と文字計測の数値をJavaScriptオブジェクトに書く処理を共通化。各エラー文言、凍結オブジェクトでの失敗と既存プロパティの保護を維持し、関連266件・静的検査・AST・テスト一覧一致を確認（`tmp/quality/resumed-owner-r3509/coverage-v8-bridge-number-property-exact-wb4nm_cz/safe-summary.json`）。
+- [/] `29afa689`の正式計測は6,260件成功・別15件skip、86,380/86,778行（99.5413584088%）、未カバー398行。前回408行から図のJavaScriptコールバック登録と境界結果の共通化で10行減。収集実0、ソース前後一致。公開用カバレッジ判定は未達（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-yhmqcvpv/safe-summary.json`）。
 - [x] SVGの座標変換・パス境界の戻り値生成と、図のJavaScriptブリッジが返す例外の生成を共通化した。エラー文言、無効な変換指定の恒等変換、プロトタイプ経由でない結果プロパティ生成を維持。初回のAST違反は明示的な分岐に直し、静的検査・AST・関連266件とテスト一覧の一致を確認（`tmp/quality/resumed-owner-r3509/coverage-v8-bridge-result-exact-t01f9kda/safe-summary.json`）。正式集計への反映は未確認。
 - [x] 図のJavaScriptコールバック登録で重複していた名前・関数の確保とグローバル登録を共通化。フォント側固有の登録値照合と各失敗時の文言を維持し、図のJavaScriptランタイムとMermaidの関連266件、静的検査・ASTが成功した（`tmp/quality/resumed-owner-r3509/coverage-v8-bridge-registration-exact-ng7dmq3m/safe-summary.json`）。正式集計への反映は未確認。
 - [/] `6221fb3c`の正式計測は6,260件成功・別15件skip、86,365/86,773行（99.5298076591%）、未カバー408行。前回411行から要素の描画経路、塗り・フィルターの参照探索、塗りの継承で各1行減。収集実0、ソース前後一致。公開用カバレッジ判定は未達（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-9aj9agcg/safe-summary.json`）。

@@ -1,6 +1,6 @@
 use super::diagram_bridge_registration::install_callback;
 use super::diagram_font_bridge::{font_measure_number, font_measure_request_with_size_policy};
-use super::{DiagramTryCatchScope, throw_bridge_error};
+use super::{DiagramTryCatchScope, set_bridge_number_property, throw_bridge_error};
 
 #[path = "diagram_svg_fragment_font_bridge.rs"]
 mod fragment;
@@ -154,12 +154,14 @@ fn set_svg_metric_property(
     name: &str,
     value: f64,
 ) -> Result<(), &'static str> {
-    let key = v8::String::new(scope, name).ok_or("SVG font metric key allocation failed")?;
-    let value = v8::Number::new(scope, value);
-    if object.create_data_property(scope, key.into(), value.into()) != Some(true) {
-        return Err("SVG font metric result allocation failed");
-    }
-    Ok(())
+    set_bridge_number_property(
+        scope,
+        object,
+        name,
+        value,
+        "SVG font metric key allocation failed",
+        "SVG font metric result allocation failed",
+    )
 }
 
 #[cfg(test)]
