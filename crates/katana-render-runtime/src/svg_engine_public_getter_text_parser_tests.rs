@@ -18,6 +18,9 @@ fn parse_svg(input: &str) -> Result<usvg::Tree, String> {
     usvg::Tree::from_str(input, &options).map_err(|error| error.to_string())
 }
 
+#[path = "svg_engine_public_getter_text_span_tests.rs"]
+mod text_span_tests;
+
 #[rstest]
 #[case::valid("font-family='Yellowtail'", usvg::FontFamily::Named("Yellowtail".into()))]
 #[case::invalid("font-family='Red/Black, sans-serif'", usvg::FontFamily::Named("Yellowtail".into()))]

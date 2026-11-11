@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] SVGテキストのspan位置は現在のchunk文字列のバイト長から取得するようにした。別に増分管理していた長さと、同じ末尾chunkの重複検索を除去。実SVGの複数バイト文字、span境界、座標によるchunk分割を確認し、関連74件と静的検査・AST・SVG由来検査4件が成功した（`tmp/quality/resumed-owner-r3509/coverage-svg-text-span-offset-exact-cti4c6gr/safe-summary.json`）。正式集計への反映は未確認。
+- [/] `d86c750f`の正式計測は6,252件成功・別15件skip、86,457/86,878行（99.5154124174%）、未カバー421行。Mach-O実CLIの追加2件により同ファイルで実行された関数実体は19→29件。行は別のテスト経由ですでに計測済みで、未カバー数は変わらなかった。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-wpkatwhn/safe-summary.json`）。
 - [x] Mach-O検査を実CLIから実行し、正規32/64ビット入力の証跡と、不正入力が混じった場合に途中の成功レポートを返さないことを確認。静的検査・AST・関連3件が成功。正規入力2件で実CLIバイナリの入力登録行を通過した（`tmp/quality/resumed-owner-r3509/coverage-macho-noso-cli-exact-ul8rzpve/safe-summary.json`、`tmp/quality/resumed-owner-r3509/coverage-macho-native-line-diagnostic-g7s0tv4b/lines-stdout.raw`）。全体計測への反映は未確認。
 - [/] `33aa42f4`の正式計測は6,250件成功・別15件skip、86,457/86,878行（99.5154124174%）、未カバー421行。追加3件は成功したが、正式集計の未カバー数は変わらなかった。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-r2nzvm8h/safe-summary.json`）。
 - [x] SVGのクリップでテキスト・コメント・非図形の子が実画素に影響しないことを内外2件で確認。上限を超えたマーカースタイルは原文を保持し、小さい別スタイルの置換・描画を維持することも確認した。静的検査・AST・関連11件が成功し、後者のサイズ上限分岐は単独の計測で実行を確認（`tmp/quality/resumed-owner-r3509/coverage-svg-clip-marker-boundary-exact-6s8x_0s9/safe-summary.json`、`tmp/quality/resumed-owner-r3509/coverage-marker-line-diagnostic-4qq0c0jl/lines-stdout.raw`）。全体計測への反映は未確認。

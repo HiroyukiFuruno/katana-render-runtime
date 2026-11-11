@@ -265,9 +265,9 @@
       "source": "crates/usvg/src/parser/text.rs",
       "destination": "usvg/parser/text.rs",
       "sourceSha256": "7c318e58e4ef0d401c5d342f0b37d86006b855b25c55410d4c65b5f8136c8249",
-      "transplantedSha256": "7ed361a39b052e43e18c2d00aed00b71872504c545b689ac750da189279aab90",
+      "transplantedSha256": "ec6b3c82788f55b6a61720ddae432c9730c6341644780ab2aa73f33e4ea7db36",
       "sourceBytes": 33408,
-      "transplantedBytes": 34882,
+      "transplantedBytes": 34399,
       "adaptations": {
         "cratePaths": 3,
         "enabledFeaturePredicates": {},

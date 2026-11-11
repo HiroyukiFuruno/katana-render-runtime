@@ -172,7 +172,6 @@ fn new_text(
 
 struct IterState {
     chars_count: usize,
-    chunk_bytes_count: usize,
     split_chunk: bool,
     text_flow: TextFlow,
     chunks: Vec<TextChunk>,
@@ -186,7 +185,6 @@ fn collect_text_chunks(
 ) -> Vec<TextChunk> {
     let mut iter_state = IterState {
         chars_count: 0,
-        chunk_bytes_count: 0,
         split_chunk: false,
         text_flow: TextFlow::Linear,
         chunks: Vec::new(),
@@ -362,32 +360,25 @@ fn append_text_characters(
 ) {
     let mut is_new_span = true;
     for c in child.text().chars() {
-        let char_len = c.len_utf8();
-
         let is_new_chunk = starts_text_chunk(pos_list, iter_state);
-
         iter_state.split_chunk = false;
 
-        if is_new_chunk {
-            start_text_chunk(c, span, anchor, pos_list, iter_state);
-        } else if is_new_span {
-            append_text_span(c, span, iter_state);
+        if !is_new_chunk && let Some(chunk) = iter_state.chunks.last_mut() {
+            append_to_text_chunk(c, span, is_new_span, chunk);
         } else {
-            extend_text_span(c, iter_state);
+            start_text_chunk(c, span, anchor, pos_list, iter_state);
         }
 
         is_new_span = false;
         iter_state.chars_count += 1;
-        iter_state.chunk_bytes_count += char_len;
     }
 }
 
 fn starts_text_chunk(pos_list: &[CharacterPosition], iter_state: &IterState) -> bool {
-    // 絶対座標、textPathの境界、または最初の文字でchunkを分ける。
+    // 絶対座標またはtextPathの境界でchunkを分ける。
     pos_list[iter_state.chars_count].x.is_some()
         || pos_list[iter_state.chars_count].y.is_some()
         || iter_state.split_chunk
-        || iter_state.chunks.is_empty()
 }
 
 fn start_text_chunk(
@@ -397,7 +388,6 @@ fn start_text_chunk(
     pos_list: &[CharacterPosition],
     iter_state: &mut IterState,
 ) {
-    iter_state.chunk_bytes_count = 0;
     let mut span = span.clone();
     span.start = 0;
     span.end = c.len_utf8();
@@ -411,23 +401,17 @@ fn start_text_chunk(
     });
 }
 
-fn append_text_span(c: char, span: &TextSpan, iter_state: &mut IterState) {
-    let mut span = span.clone();
-    span.start = iter_state.chunk_bytes_count;
-    span.end = iter_state.chunk_bytes_count + c.len_utf8();
-    if let Some(chunk) = iter_state.chunks.last_mut() {
-        chunk.text.push(c);
+fn append_to_text_chunk(c: char, span: &TextSpan, is_new_span: bool, chunk: &mut TextChunk) {
+    let start = chunk.text.len();
+    chunk.text.push(c);
+    let end = chunk.text.len();
+    if !is_new_span && let Some(span) = chunk.spans.last_mut() {
+        span.end = end;
+    } else {
+        let mut span = span.clone();
+        span.start = start;
+        span.end = end;
         chunk.spans.push(span);
-    }
-}
-
-fn extend_text_span(c: char, iter_state: &mut IterState) {
-    if let Some(chunk) = iter_state.chunks.last_mut() {
-        chunk.text.push(c);
-        if let Some(span) = chunk.spans.last_mut() {
-            debug_assert_ne!(span.end, 0);
-            span.end += c.len_utf8();
-        }
     }
 }
 
