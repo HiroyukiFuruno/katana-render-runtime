@@ -225,8 +225,8 @@ fn convert_paint_link(
     let (func_iri, fallback) = link;
             if let Some(link) = node.document().element_by_id(func_iri) {
                 let tag_name = link.tag_name().unwrap();
-                if tag_name.is_paint_server() {
-                    let resolved = paint_server::convert(link, state, cache);
+                if let Some(kind) = paint_server::PaintServerKind::from_element(tag_name) {
+                    let resolved = paint_server::convert(link, kind, state, cache);
                     paint_server_result(node, fallback, has_bbox, opacity, resolved)
                 } else {
                     log::warn!("'{}' cannot be used to {} a shape.", tag_name, aid);

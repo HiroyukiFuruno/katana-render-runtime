@@ -709,15 +709,6 @@ impl EId {
     pub fn is_gradient(&self) -> bool {
         matches!(self, EId::LinearGradient | EId::RadialGradient)
     }
-
-    /// Checks if this is a
-    /// [paint server element](https://www.w3.org/TR/SVG11/intro.html#TermPaint).
-    pub fn is_paint_server(&self) -> bool {
-        matches!(
-            self,
-            EId::LinearGradient | EId::RadialGradient | EId::Pattern
-        )
-    }
 }
 
 impl AId {

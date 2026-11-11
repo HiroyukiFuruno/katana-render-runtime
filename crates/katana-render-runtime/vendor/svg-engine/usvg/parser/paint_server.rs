@@ -17,8 +17,26 @@ pub(crate) enum ServerOrColor {
     Color { color: Color, opacity: Opacity },
 }
 
-pub(crate) fn convert(
+pub(super) enum PaintServerKind {
+    LinearGradient,
+    RadialGradient,
+    Pattern,
+}
+
+impl PaintServerKind {
+    pub(super) fn from_element(tag: EId) -> Option<Self> {
+        match tag {
+            EId::LinearGradient => Some(Self::LinearGradient),
+            EId::RadialGradient => Some(Self::RadialGradient),
+            EId::Pattern => Some(Self::Pattern),
+            _ => None,
+        }
+    }
+}
+
+pub(super) fn convert(
     node: SvgNode,
+    kind: PaintServerKind,
     state: &converter::State,
     cache: &mut converter::Cache,
 ) -> Option<ServerOrColor> {
@@ -27,12 +45,10 @@ pub(crate) fn convert(
         return Some(ServerOrColor::Server(paint.clone()));
     }
 
-    // Unwrap is safe, because we already checked for is_paint_server().
-    let paint = match node.tag_name().unwrap() {
-        EId::LinearGradient => convert_linear(node, state),
-        EId::RadialGradient => convert_radial(node, state),
-        EId::Pattern => convert_pattern(node, state, cache),
-        _ => unreachable!(),
+    let paint = match kind {
+        PaintServerKind::LinearGradient => convert_linear(node, state),
+        PaintServerKind::RadialGradient => convert_radial(node, state),
+        PaintServerKind::Pattern => convert_pattern(node, state, cache),
     };
 
     if let Some(ServerOrColor::Server(paint)) = &paint {

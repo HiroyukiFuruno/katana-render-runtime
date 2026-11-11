@@ -5,7 +5,7 @@ import { validateManifest } from "./svg-engine-provenance-manifest";
 import { METADATA, type Provenance, readProvenance } from "./svg-engine-provenance-schema";
 
 const VENDOR_RELATIVE = "crates/katana-render-runtime/vendor/svg-engine";
-const PROVENANCE_SHA256 = "889a12c34cce49ead06c4674a7fe071e0465b38772d2797b51ea00386e4defe8";
+const PROVENANCE_SHA256 = "6fc8773781028f9f9d61221b3264af2b605090164885973d7fa0aebd6951fbd1";
 const README_SHA256 = "0eb3c8eca056cf62fd51cda3471ca73bdf6d8e50bd6e989523d895d9c58e6a23";
 
 function fail(message: string): never {
