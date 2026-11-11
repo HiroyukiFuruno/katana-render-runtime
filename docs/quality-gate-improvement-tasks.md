@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [/] `2161f694`の正式計測は6,254件成功・別15件skip、86,434/86,851行（99.5198673590%）、未カバー417行。前回の421行から、SVGテキストの位置管理とSVGマーカーの閉じる辺で各2行減。差が出た対象ファイルはこの2件。収集実0、ソース前後一致。公開用カバレッジ判定は未達（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-ovieh6yp/safe-summary.json`）。
 - [x] SVGマーカーは閉じる命令を読み取る時点で既存のサブパス始点を保持し、閉じる辺の接線・終端の配置・直前頂点で共有する。始点を描画時に逆走して再取得する処理と、正規のパスでは到達しない始点なしの代替値を除去した。複数の閉じたサブパス、閉じた曲線、退化ケースを含む関連68件と静的検査・AST・SVG由来検査4件が成功（`tmp/quality/resumed-owner-r3509/coverage-svg-marker-closed-position-exact-t20m6dz1/safe-summary.json`）。正式集計への反映は未確認。
 - [x] SVGテキストのspan位置は現在のchunk文字列のバイト長から取得するようにした。別に増分管理していた長さと、同じ末尾chunkの重複検索を除去。実SVGの複数バイト文字、span境界、座標によるchunk分割を確認し、関連74件と静的検査・AST・SVG由来検査4件が成功した（`tmp/quality/resumed-owner-r3509/coverage-svg-text-span-offset-exact-cti4c6gr/safe-summary.json`）。正式集計への反映は未確認。
 - [/] `d86c750f`の正式計測は6,252件成功・別15件skip、86,457/86,878行（99.5154124174%）、未カバー421行。Mach-O実CLIの追加2件により同ファイルで実行された関数実体は19→29件。行は別のテスト経由ですでに計測済みで、未カバー数は変わらなかった。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-wpkatwhn/safe-summary.json`）。
