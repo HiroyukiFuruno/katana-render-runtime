@@ -4,6 +4,7 @@
 
 - [/] `b0818b84` の正式計測は6,210件成功・別15件skip、86,784/87,273行（99.4396892510%）、未カバー489行。物理フォント照合で2行、フォーカス更新で1行減少。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-6jdcnkay/safe-summary.json`）。
 - [x] `07c7486d` は正規化済みtextPath、塗りと線の2経路、tiny-skia-pathの非ゼロ矩形検証に重複する判定を除いた。関連42件・foundation・AST・取り込み元の来歴検証が成功（`tmp/quality/resumed-owner-r3509/coverage-svg-normalization-guards-exact-1u7yewjn/safe-summary.json`）。489行の正式値には未反映。
+- [x] `ec780132` はインライン要素の型判定を行計画と描画で共有した。初回の関数長違反は既存のスタイル判定に条件をまとめて解消。関連41件・foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-typed-inline-fragment-exact-x324t4jk/safe-summary.json`）。SVGの変更と合わせて次の全体計測で確認する。
 - [/] `1c66bd4f` の正式計測は6,210件成功・別15件skip、86,799/87,291行（99.4363680104%）、未カバー492行。キャッシュ検査の重複3分岐の削除により同ファイルが135/139行から136/136行になった。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-glje3_k2/safe-summary.json`）。
 - [x] `f159cf49` は本番で常にfalseだったフォーカス更新の描画引数を除き、button/linkの実クリック→Tabで同一focus・一度のイベント・一度の描画を確認。`92c4d774` は物理フォント照合の空Map重複判定を除き、空・一件・曖昧時の挙動を維持。関連32件・foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-focus-and-font-identity-exact-2a4_6qt5/safe-summary.json`）。492行の正式値には未反映。
 - [/] `1b6edd33` の正式計測は6,210件成功・別15件skip、86,798/87,294行（99.4318051642%）、未カバー496行。追加した3件は成功したが行数は前回から変化なし。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-p6hzwc0b/safe-summary.json`）。
