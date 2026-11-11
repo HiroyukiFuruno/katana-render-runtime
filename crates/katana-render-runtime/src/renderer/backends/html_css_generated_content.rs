@@ -88,6 +88,13 @@ mod tests {
     use super::{CssGeneratedContent, parse_generated_content};
 
     #[test]
+    fn generated_content_requires_a_nonempty_url() {
+        for source in ["", "url()", "url(  )", "url('')"] {
+            assert_eq!(parse_generated_content(source), None, "{source}");
+        }
+    }
+
+    #[test]
     fn generated_content_parses_strings_escapes_urls_and_suppression() {
         assert_eq!(
             parse_generated_content(r#""\2713 ready""#),
