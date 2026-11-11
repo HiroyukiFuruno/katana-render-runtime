@@ -5,6 +5,34 @@ use std::path::{Path, PathBuf};
 mod text_parser_tests;
 
 #[test]
+fn empty_cdata_text_is_omitted_without_hiding_the_visible_sibling() -> Result<(), String> {
+    let source = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="40"><text id="empty"><![CDATA[]]></text><text id="visible" font-family="Noto Sans" y="20">Visible</text></svg>"#;
+    let xml = usvg::roxmltree::Document::parse(source).map_err(|error| error.to_string())?;
+    let empty = xml
+        .root_element()
+        .first_element_child()
+        .ok_or("empty text element missing")?;
+    assert!(
+        empty
+            .first_child()
+            .is_some_and(|child| child.is_text() && child.text() == Some(""))
+    );
+    let options = usvg::Options {
+        fontdb: upstream_writer_font_database()?,
+        ..usvg::Options::default()
+    };
+    let tree = usvg::Tree::from_str(source, &options).map_err(|error| error.to_string())?;
+    assert!(tree.node_by_id("empty").is_none());
+    let actual: String = text_node(&tree, "visible")?
+        .chunks()
+        .iter()
+        .map(usvg::TextChunk::text)
+        .collect();
+    assert_eq!(actual, "Visible");
+    Ok(())
+}
+
+#[test]
 fn nested_group_uses_local_bounds_when_the_relative_transform_overflows() -> Result<(), String> {
     let source = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><g id="outer" transform="scale(.001)"><g id="inner" transform="scale(1e20 1)"><rect width="1e19" height="2"/></g></g></svg>"#;
     let tree = usvg::Tree::from_str(source, &usvg::Options::default())
