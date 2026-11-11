@@ -1,4 +1,5 @@
 use super::super::{HtmlGlyphRasterizer, html_glyph_variations, usvg};
+use crate::markdown::svg_rasterize::font_file_fixture::{FONT_BYTES, create};
 use resvg::usvg::{
     Options, Tree,
     fontdb::{Database, Source},
@@ -121,6 +122,30 @@ fn variation_resolution_rejects_invalid_size_and_missing_face() -> Result<(), St
         error,
         Some(format!("font face data unavailable for {id:?}"))
     );
+    Ok(())
+}
+
+#[test]
+fn variation_resolution_rejects_a_corrupted_file_and_recovers() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let fixture = create(directory.path().join("fixture.ttf"), FONT_BYTES)
+        .map_err(|error| error.to_string())?;
+    let resolve = || {
+        html_glyph_variations::resolve_design(
+            &fixture.database,
+            fixture.face_id,
+            &[],
+            usvg::FontOpticalSizing::None,
+            FONT_SIZE,
+        )
+    };
+    let expected = resolve()?;
+    let corrupt = b"bad font";
+    let parse_error = FontRef::new(corrupt).err().ok_or("invalid font parsed")?;
+    std::fs::write(&fixture.path, corrupt).map_err(|error| error.to_string())?;
+    assert_eq!(resolve().err(), Some(parse_error.to_string()));
+    std::fs::write(&fixture.path, FONT_BYTES).map_err(|error| error.to_string())?;
+    assert_eq!(resolve()?, expected);
     Ok(())
 }
 
