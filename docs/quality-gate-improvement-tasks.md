@@ -3,6 +3,10 @@
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
 - [ ] 正式カバレッジ100%・未カバー0を達成した後、挙動と既存テスト結果を維持し、読み込み・キャッシュ等の共通処理とレンダラーの責務境界を精査・整理する。小さい差分ごとに関連テストを回収し、整理後のソースで描画・性能・完全品質ゲートを再検証する。自己レビュー後にDraft PR、Codexレビューと指摘修正、3 OS CI、保護マージ、公開へ進む。
+- [/] `c31cde46` の正式計測は6,187件成功・別15件skip、86,721/87,232行（99.4142057960%）、未カバー511行。前回513行から減った2行は不採用のSVG原点診断フラグの削除。初回と再試行1回目は集計時の対象競合で実2。成功済みテスト記録を認証して再利用し、再試行2回目は集計実0・ソース前後一致・`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-laoeef5u/safe-summary.json`）。
+- [x] `73e0f12f` で、SVGフィルターの境界ボックス変換時に半径が横・縦それぞれで溢れても、元の画素が保持されることを実入力で検証。新規2件と描画変換時の既存1件、foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-svg-bbox-morphology-exact-wbm44y1t/safe-summary.json`）。511行の正式値には未反映。
+- [x] `672641d3` で、列数を指定しないHTMLが列幅100px・間隔10pxの2列に配置されることを実セッションの座標で検証。新規1件、既存複数列1件、foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-html-auto-column-width-exact-6x6ekh3m/safe-summary.json`）。511行の正式値には未反映。
+- [x] `fa4dd943` で、登録後に破損した実フォントを可変軸の解決時に拒否し、ファイルを復元すると同じ結果を得ることを確認。新規1件、関連既存2件、foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-font-variation-corruption-exact-_bbhhf9a/safe-summary.json`）。511行の正式値には未反映。
 - [/] `5e1f5d97` の正式計測は6,186件成功・別15件skip、86,712/87,225行（99.4118658641%）、未カバー513行。前回520行から7減。埋め込みSVGの走査で3行、フォント選択器の診断表示で3行、フォント検証補助の不正入力で1行減少。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-ci8fxgq9/safe-summary.json`）。
 - [x] `2f70d484` は比較で不採用になり参照元のない埋め込みSVGの診断フラグを削除。`925cab29` はlockfile・workspace・linter manifestの欠落とディレクトリへの置換を依存解析本体で拒否することを確認した。画素とスクロール位置の回帰を含む関連4件・foundation・AST成功（`tmp/quality/resumed-owner-r3509/coverage-retired-svg-origin-and-parser-io-exact-1bb09742/safe-summary.json`）。513行の正式値には未反映。
 - [x] `ab93092e` は取得済みフォント資源が欠落・非通常ファイルなら拒否することを確認。`ad7a15a3` は実フォントの一時コピーでcmap欠落・SFNT破損の拒否と復元後の再読取を確認した。書式・ASTの初回指摘を修正し、関連4件・foundation・AST成功。テスト一覧取得のprofile残存0（`tmp/quality/resumed-owner-r3509/coverage-font-file-io-exact-s6czz2zu/safe-summary.json`）。513行の正式値には未反映。
