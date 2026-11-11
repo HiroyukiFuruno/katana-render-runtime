@@ -2528,57 +2528,15 @@ def command(args: Sequence[str], *, text: bool = False, cwd: Path | None = None,
     return result
 
 
-class _GitBatchFile(NamedTuple):
-    path: Path
-    identity: tuple[int, int, int, int, int]
-    mode: int
-    sha256: str
-
-
-def _read_git_batch(record: _GitBatchFile) -> bytes:
-    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
-    with os.fdopen(os.open(record.path, flags), "rb") as handle:
-        before = os.fstat(handle.fileno())
-        gate.require(before.st_mode == record.mode and _file_identity(before) == record.identity,
-                     "cached Git batch identity changed")
-        data = handle.read()
-        after = os.fstat(handle.fileno())
-    current = record.path.lstat()
-    gate.require(after.st_mode == current.st_mode == record.mode
-                 and _file_identity(after) == _file_identity(current) == record.identity
-                 and hashlib.sha256(data).hexdigest() == record.sha256,
-                 "cached Git batch bytes changed")
-    return data
-
-
-def _make_git_query(log_directory: Path) -> gate.GitQuery:
-    batch_files: dict[tuple[str, tuple[str, ...], bytes], _GitBatchFile] = {}
-
+def _make_git_query(log_directory: Path, *, scratch_root: Path) -> gate.GitQuery:
     def execute(root: Path, args: Sequence[str], input_bytes: bytes | None,
-                text: bool, lifecycle_sink: Callable[[Path], None] | None = None) -> str | bytes:
+                text: bool, *, logs: Path = log_directory) -> str | bytes:
         completed = _measurement_command(["git", "--no-replace-objects", "-C", str(root), *args], role="tool-query",
-                                         log_directory=log_directory, cwd=root, input_bytes=input_bytes,
-                                         lifecycle_sink=lifecycle_sink)
+                                         log_directory=logs, cwd=root, input_bytes=input_bytes)
         if text:
             with io.TextIOWrapper(io.BytesIO(completed.stdout)) as stream:
                 return gate._text(stream.read(), "Git query stdout")
         return completed.stdout
-
-    def cached_cat_file_batch(root_path: str, args: tuple[str, ...], input_bytes: bytes) -> bytes:
-        key = (root_path, args, input_bytes)
-        if key in batch_files:
-            return _read_git_batch(batch_files[key])
-        lifecycle: list[Path] = []
-        result = execute(Path(root_path), args, input_bytes, False, lifecycle.append)
-        if not isinstance(result, bytes) or len(lifecycle) != 1:
-            raise ValueError("Git batch query has no single raw output record")
-        raw = lifecycle[0].with_name("stdout.raw")
-        identity = raw.lstat()
-        gate.require(stat.S_ISREG(identity.st_mode), "Git batch raw output is not a regular file")
-        # 大きいGit出力をRAMに保持せず、同一runが既に保存した原本を次回の照会に使う。
-        batch_files[key] = _GitBatchFile(raw, _file_identity(identity), identity.st_mode,
-                                         hashlib.sha256(result).hexdigest())
-        return result
 
     @lru_cache(maxsize=32)
     def cached_git_metadata(root_path: str, args: tuple[str, ...], text: bool) -> str | bytes:
@@ -2621,7 +2579,9 @@ def _make_git_query(log_directory: Path) -> gate.GitQuery:
             for object_id in object_ids
         )
         if argv == ("cat-file", "--batch") and stable_object_batch and input_bytes is not None and not text:
-            return cached_cat_file_batch(str(root.resolve()), argv, input_bytes)
+            # Git blob列は照合用の中間データ。再検証にはソースのSHAと正式なソース証跡を使う。
+            with transport_scratch.transport_workspace(scratch_root) as scratch:
+                return execute(root.resolve(), argv, input_bytes, text, logs=scratch)
         return execute(root, args, input_bytes, text)
 
     return query
@@ -2757,7 +2717,7 @@ def produce_candidate_build_proof(root: Path, output: Path, capacity_document: P
     gate.require(not lifecycle.exists() and not lifecycle.is_symlink(),
                  "fresh measurement lifecycle output required")
     os.environ["GIT_OPTIONAL_LOCKS"] = "0"
-    git_query = _make_git_query(lifecycle)
+    git_query = _make_git_query(lifecycle, scratch_root=root / "tmp")
     initial = source(root, git_query=git_query)
     _measurement_command(["just", "runtime-bundle-check"], cwd=root,
                          role="preflight", log_directory=lifecycle)
@@ -3834,7 +3794,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     resumed_accepted_ids: list[str] = []
     lifecycle = output.parent / f"{output.name}.lifecycle"
     gate.require(not lifecycle.exists(), "fresh measurement lifecycle output required")
-    git_query = _make_git_query(lifecycle)
+    git_query = _make_git_query(lifecycle, scratch_root=root / "tmp")
     if resume_batch is not None:
         resumed_receipt, resumed_bundle, resumed_attempts = load_closed_batch(
             resume_batch.resolve(), root, fixed_epoch=fixed_epoch, git_query=git_query,

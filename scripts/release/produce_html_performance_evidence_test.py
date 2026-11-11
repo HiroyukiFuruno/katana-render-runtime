@@ -347,7 +347,7 @@ class CatalogProducerOperationTest(unittest.TestCase):
                     producer.produce(root, output, catalog_manifest_path=root / "catalog",
                                      resume_batch=batch, fixed_epoch=origin)
             self.assertIs(caught.exception, marker)
-            make_query.assert_called_once_with(root / "tmp/output.lifecycle")
+            make_query.assert_called_once_with(root / "tmp/output.lifecycle", scratch_root=root / "tmp")
             load.assert_called_once_with(batch.resolve(), root, fixed_epoch=origin, git_query=query,
                                          memory_policy_version="html-memory-v4",
                                          accepted_condition_ids_sink=ANY)
@@ -4897,7 +4897,7 @@ class MeasurementLifecycleIntegrationTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertTrue(gate.read_json(records[0])["groupClosed"])
 
-    def test_immutable_git_batches_reuse_two_alternating_inputs(self) -> None:
+    def test_immutable_git_batches_do_not_retain_raw_output(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root, source_path = self.create_git_fixture(Path(temporary))
             first_oid = gate.git(root, "rev-parse", "HEAD:source.py").strip()
@@ -4905,7 +4905,7 @@ class MeasurementLifecycleIntegrationTests(unittest.TestCase):
             self.commit_git_fixture(root, "second source")
             second_oid = gate.git(root, "rev-parse", "HEAD:source.py").strip()
             self.assertNotEqual(first_oid, second_oid)
-            query = typed_producer._make_git_query(self.logs)
+            query = typed_producer._make_git_query(self.logs, scratch_root=self.logs.parent.resolve())
             argv = ("cat-file", "--batch")
             first_input, second_input = (oid.encode("ascii") + b"\n" for oid in (first_oid, second_oid))
             first = query(root, argv, first_input, False)
@@ -4914,23 +4914,17 @@ class MeasurementLifecycleIntegrationTests(unittest.TestCase):
             for payload, object_id, content in ((first, first_oid, b"value = 1\n"),
                                                 (second, second_oid, b"second source\n")):
                 self.assertEqual(payload, f"{object_id} blob {len(content)}\n".encode() + content + b"\n")
-            entries = list(self.logs.glob("tool-query-*"))
-            self.assertEqual(len(entries), 2)
-            for entry in entries:
-                self.assertTrue((entry / "lifecycle.json").is_file())
-                self.assertTrue((entry / "stdout.raw").is_file())
-                self.assertTrue((entry / "stderr.raw").is_file())
-            first_raw = next(entry / "stdout.raw" for entry in entries
-                             if (entry / "stdout.raw").read_bytes() == first)
-            first_raw.write_bytes(b"changed")
-            with self.assertRaisesRegex(ValueError, "cached Git batch identity changed"):
-                query(root, argv, first_input, False)
-            self.assertEqual(len(list(self.logs.glob("tool-query-*"))), 2)
+            scratch = self.logs.parent / "html-performance-transport-scratch"
+            self.assertFalse(self.logs.exists())
+            self.assertEqual(list(scratch.iterdir()), [])
+            with self.assertRaises(subprocess.CalledProcessError):
+                query(Path(temporary), argv, first_input, False)
+            self.assertEqual(list(scratch.iterdir()), [])
 
     def test_producer_git_query_reads_real_temporary_repository(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root, source_path = self.create_git_fixture(Path(temporary))
-            git_query = typed_producer._make_git_query(self.logs)
+            git_query = typed_producer._make_git_query(self.logs, scratch_root=self.logs.parent.resolve())
             snapshot = typed_producer.source(root, git_query=git_query)
             self.assertEqual(typed_producer.source(root, git_query=git_query), snapshot)
             self.assertEqual(snapshot["head"], gate.git(root, "rev-parse", "HEAD").strip())
@@ -4941,7 +4935,7 @@ class MeasurementLifecycleIntegrationTests(unittest.TestCase):
             cat_file_calls = [path for path in lifecycle_records
                               if gate._array(gate.read_json(path)["argv"], "Git argv")[-2:]
                               == ["cat-file", "--batch"]]
-            self.assertEqual(len(cat_file_calls), 1)
+            self.assertEqual(cat_file_calls, [])
             for path in lifecycle_records:
                 row = gate.read_json(path)
                 self.assertTrue(row["groupClosed"])
@@ -4954,7 +4948,7 @@ class MeasurementLifecycleIntegrationTests(unittest.TestCase):
             updated_cat_file_calls = [path for path in updated_lifecycles
                                       if gate._array(gate.read_json(path)["argv"], "Git argv")[-2:]
                                       == ["cat-file", "--batch"]]
-            self.assertEqual(len(updated_cat_file_calls), 2)
+            self.assertEqual(updated_cat_file_calls, [])
 
     def test_immutable_git_metadata_cache_uses_real_factory_and_git(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -4965,7 +4959,7 @@ class MeasurementLifecycleIntegrationTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(root), "add", "Cargo.lock"], check=True)
             self.commit_git_fixture(root, "add lock")
             first_head = gate.git(root, "rev-parse", "HEAD").strip()
-            query = typed_producer._make_git_query(self.logs)
+            query = typed_producer._make_git_query(self.logs, scratch_root=self.logs.parent.resolve())
 
             def calls() -> int:
                 return len(list(self.logs.glob("tool-query-*/lifecycle.json")))
@@ -5002,7 +4996,7 @@ class MeasurementLifecycleIntegrationTests(unittest.TestCase):
             repeated(("rev-parse", "--verify", "HEAD^{commit}"), text=True, cached=False)
             repeated(("status", "--porcelain=v1"), text=True, cached=False)
 
-            second_query = typed_producer._make_git_query(self.logs)
+            second_query = typed_producer._make_git_query(self.logs, scratch_root=self.logs.parent.resolve())
             repeated(show, text=False, cached=True, callback=second_query)
             other_parent = parent / "other"
             other_parent.mkdir()
@@ -5030,7 +5024,7 @@ class MeasurementLifecycleIntegrationTests(unittest.TestCase):
                 typed_producer.source(root, git_query=query)
             with self.assertRaisesRegex(ValueError, "Git replacement refs"):
                 typed_producer._live_checkout(root, self.logs)
-            fresh_query = typed_producer._make_git_query(self.logs)
+            fresh_query = typed_producer._make_git_query(self.logs, scratch_root=self.logs.parent.resolve())
             for callback in (query, fresh_query):
                 self.assertEqual(callback(root, ("ls-tree", "-r", "-z", first_head), None, False), first_tree)
                 self.assertEqual(callback(root, ("show", first_head + ":source.py"), None, False), b"value = 1\n")
@@ -5048,7 +5042,7 @@ class MeasurementLifecycleIntegrationTests(unittest.TestCase):
     def test_symbolic_cat_file_batch_input_is_never_cached(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root, source_path = self.create_git_fixture(Path(temporary))
-            query = typed_producer._make_git_query(self.logs)
+            query = typed_producer._make_git_query(self.logs, scratch_root=self.logs.parent.resolve())
             first = query(root, ("cat-file", "--batch"), b"HEAD\n", False)
             source_path.write_text("value = 2\n")
             self.commit_git_fixture(root, "updated fixture")

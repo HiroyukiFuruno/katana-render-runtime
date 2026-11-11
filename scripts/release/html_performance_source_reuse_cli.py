@@ -73,7 +73,8 @@ def _new_git_query(parent: Path) -> Iterator[gate.GitQuery]:
 
     # 照会ログの物理pinはこの認証中だけ使い、結果へ持ち出さない。
     with tempfile.TemporaryDirectory(prefix="source-reuse-git-", dir=parent) as directory:
-        yield _make_git_query(Path(directory))
+        scratch = Path(directory).resolve()
+        yield _make_git_query(scratch, scratch_root=scratch)
 
 
 def _validate(request: ReuseRequest, root: Path, *, git_query: gate.GitQuery,
