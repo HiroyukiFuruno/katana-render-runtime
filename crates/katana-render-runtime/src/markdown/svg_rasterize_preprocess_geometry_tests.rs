@@ -269,6 +269,13 @@ fn auto_removes_an_existing_geometry_attribute() {
 }
 
 #[test]
+fn auto_leaves_an_absent_geometry_attribute_absent() {
+    let source = r#"<svg xmlns="http://www.w3.org/2000/svg"><style>rect{rx:auto;ry:5px}</style><rect width="20" height="20"/></svg>"#;
+    let expected = source.replace("height=\"20\"/>", "height=\"20\" ry=\"5px\"/>");
+    assert_eq!(preprocess(source), expected);
+}
+
+#[test]
 fn interactive_pseudo_classes_do_not_override_static_svg_geometry() {
     let source = r#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><style>rect { rx: 4px; } rect:hover { rx: 12px; } rect:focus { rx: 15px; }</style><rect x="2" y="2" width="30" height="30"/></svg>"#;
     let actual = preprocess(source);
