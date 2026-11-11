@@ -1,6 +1,9 @@
 use rustybuzz::ttf_parser::{RawFace, Tag};
 
-pub(super) fn font_with_empty_table(font: &[u8], tag: Tag) -> Result<Vec<u8>, String> {
+pub(in crate::markdown::svg_rasterize) fn font_with_empty_table(
+    font: &[u8],
+    tag: Tag,
+) -> Result<Vec<u8>, String> {
     const TABLE_LENGTH_OFFSET: usize = 12;
     let length_offset = font_table_record_offset(font, tag)? + TABLE_LENGTH_OFFSET;
     let mut data = font.to_vec();

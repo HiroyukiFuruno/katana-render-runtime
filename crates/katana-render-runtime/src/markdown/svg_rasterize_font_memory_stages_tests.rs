@@ -48,6 +48,32 @@ fn font_memory_probe_rejects_a_real_face_without_sample_glyphs()
 }
 
 #[test]
+fn font_memory_probe_rejects_mapped_glyphs_without_outline_pixels()
+-> Result<(), Box<dyn std::error::Error>> {
+    use crate::markdown::svg_rasterize::text_shaping::test_font_data::font_with_empty_table;
+    use rustybuzz::ttf_parser::Tag;
+
+    let original = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
+    let font = font_with_empty_table(original, Tag::from_bytes(b"glyf"))?;
+    let typeface = FontMgr::new()
+        .new_from_data(Data::new_copy(&font), Some(0))
+        .ok_or("Skia could not load the font with empty outlines")?;
+    assert!(
+        SAMPLE
+            .chars()
+            .all(|character| typeface.unichar_to_glyph(character as i32) != 0)
+    );
+    let error = draw_first_glyph(&typeface)
+        .err()
+        .ok_or("font with empty outlines was accepted")?;
+    assert_eq!(
+        error.to_string(),
+        "first glyph draw produced an empty pixel buffer"
+    );
+    Ok(())
+}
+
+#[test]
 fn selected_font_rejects_binary_backed_real_face() -> Result<(), Box<dyn std::error::Error>> {
     let source = selected_physical_font(&acquire_font_database())?;
     let mut database = Database::new();
