@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定9件中9件完了。カスタムフォントのファイルエラー4経路、Mermaid Block図のviewBoxとtransformの欠落・不正4条件、HTMLスクロール座標テストの入力準備共通化1件を確認した。関連11テスト、静的検査、ASTが成功した（`tmp/quality/resumed-owner-r3509/release-coverage-font-block-scroll-jbu4gp_p/safe-summary.json`、`b8f5d9ad`・`169ad3a1`・`991e8b4c`）。フォント検証の補助3ファイルに残る失敗処理は、環境・入力エラーを伝えるため残した。正式カバレッジは最終フェーズで計測する。
 - 対応予定4件中4件完了。フォント候補の実ファイル消失、応答件数、Mermaidフィクスチャの区切り欠落、HTMLアンカーの重複ID解析を確認した。関連4テスト、静的検査、ASTが成功した（`tmp/quality/resumed-owner-r3509/release-coverage-edge-regressions-hj05iz7v/safe-summary.json`、`4168ed76`・`c105bd2f`・`56d5a25f`）。正式カバレッジは最終フェーズで計測する。
 - 最新の正式ルート計測 `76470bbe` は6,363テスト成功・15件スキップ、86,519/86,900行（99.5615650173%）、未カバー381行。7ファイルで7行減り、同梱資源のAST検査と書き込み制限のテスト補助3ファイルで15行増えた。収集は成功し、公開条件100%・未カバー0の判定は不合格。ソースと計測結果は判定前後で一致した。証跡は `tmp/quality/resumed-owner-r3509/root-coverage-release-post-regressions-zr6hfg99/` の `safe-summary.json`・`gap-summary.json`・`gap-delta.json`。
 - 増分への対応予定14条件中14条件を確認した。同梱資源のAST検査に実ソースの不正変形10条件を追加し、ファイルサイズ制限のテスト補助ではOSエラーを型のまま返し、既存の書き込み失敗4条件を再実行した。関連31テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-coverage-increase-recovery-b5xwwrni/safe-summary.json`、`9f37cb5a`・`11573737`）。正式カバレッジへの反映量は未計測。
