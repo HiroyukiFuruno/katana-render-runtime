@@ -105,3 +105,19 @@ fn loaded_renderer_requires_a_tail_call() -> Result<(), Box<dyn std::error::Erro
         ],
     )
 }
+
+#[test]
+fn render_bundle_rejects_changed_source_contracts() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = mathjax_fixture()?;
+    fixture.reject_unique_mutations(
+        RUST_INPUTS[1],
+        &[
+            ("let request_json = request.to_json_value().to_string();", "let extra = ();\n        let request_json = request.to_json_value().to_string();", "read-render-route:statement-count"),
+            ("MathJaxRuntimeScripts::build(mathjax_source, &request_json)", "OtherScripts::build(mathjax_source, &request_json)", "read-render-route:binding:scripts"),
+            ("DiagramV8Runtime::render(&scripts)", "OtherRuntime::render(&scripts)", "read-render-route:binding:output"),
+            ("match parse_response(&output)? {\n            MathJaxRuntimeResponse::Svg { svg } => Ok(svg),\n            MathJaxRuntimeResponse::Error { message } => Err(message),\n        }", "Ok(output)", "read-render-route:response-match"),
+            ("MathJaxRuntimeResponse::Error { message } => Err(message),", "", "read-render-route:response-arms"),
+            ("MathJaxRuntimeResponse::Svg { svg } => Ok(svg)", "MathJaxRuntimeResponse::Svg { svg: renamed } => Ok(svg)", "read-render-route:response-binding"),
+        ],
+    )
+}
