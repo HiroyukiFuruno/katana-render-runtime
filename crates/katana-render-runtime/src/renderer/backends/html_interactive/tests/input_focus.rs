@@ -5,6 +5,39 @@ const TAB: &str = "Tab";
 const SHIFT: &str = "Shift";
 
 #[test]
+fn pointer_to_keyboard_refocus_renders_visible_focus_for_each_control() -> TestResult {
+    for markup in [
+        "<button id=target>Focus</button>",
+        "<a id=target href='#target'>Focus</a>",
+    ] {
+        assert_refocus_visibility(markup)?;
+    }
+    Ok(())
+}
+
+fn assert_refocus_visibility(markup: &str) -> TestResult {
+    let html = format!(
+        "{markup}<p id=events></p><script>const target = document.getElementById('target'); const events = document.getElementById('events'); for (const type of ['focus','blur']) target.addEventListener(type, () => events.textContent += type + '|');</script>"
+    );
+    let mut session = start(&html)?;
+    let node = element_id(&mut session, "target")?;
+    click_element(&mut session, "target")?;
+    assert_eq!(session.focused_node, Some(node));
+    assert!(!session.keyboard_modality && !session.focus_visible);
+    let generation = session.generation;
+    press_key(&mut session, TAB)?;
+    assert_eq!(session.focused_node, Some(node));
+    assert!(session.keyboard_modality && session.focus_visible);
+    assert_eq!(session.generation, generation + 1);
+    let snapshot = session
+        .runtime
+        .snapshot()
+        .map_err(|error| error.to_string())?;
+    assert!(snapshot.contains(">focus|</p>"), "{snapshot}");
+    Ok(())
+}
+
+#[test]
 fn tab_order_and_shift_tab_update_focus_and_active_element() -> TestResult {
     let mut session = start(tab_order_fixture())?;
     let first = element_id(&mut session, "first")?;

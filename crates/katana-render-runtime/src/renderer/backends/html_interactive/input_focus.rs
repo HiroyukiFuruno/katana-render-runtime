@@ -23,7 +23,7 @@ impl HtmlInteractiveSession {
         &mut self,
         node_id: u64,
     ) -> Result<(), HtmlBrowserError> {
-        self.focus_node(node_id, true, false)?;
+        self.focus_node(node_id, true)?;
         self.input_values.entry(node_id).or_default();
         Ok(())
     }
@@ -32,32 +32,17 @@ impl HtmlInteractiveSession {
         self.blur_focused_node(false)
     }
 
-    fn focus_node(
-        &mut self,
-        node_id: u64,
-        pointer: bool,
-        render: bool,
-    ) -> Result<(), HtmlBrowserError> {
+    fn focus_node(&mut self, node_id: u64, pointer: bool) -> Result<(), HtmlBrowserError> {
         self.keyboard_modality = !pointer;
         if self.focused_node == Some(node_id) {
-            return self.refresh_focus_visibility(render);
+            self.focus_visible = self.keyboard_modality || self.focused_input.is_some();
+            return Ok(());
         }
-        self.blur_focused_node(render)?;
-        self.set_focused_node(node_id, render)
+        self.blur_focused_node(false)?;
+        self.set_focused_node(node_id)
     }
 
-    fn refresh_focus_visibility(&mut self, render: bool) -> Result<(), HtmlBrowserError> {
-        let focus_visible = self.keyboard_modality || self.focused_input.is_some();
-        if self.focus_visible != focus_visible {
-            self.focus_visible = focus_visible;
-            if render {
-                self.render_frame()?;
-            }
-        }
-        Ok(())
-    }
-
-    fn set_focused_node(&mut self, node_id: u64, render: bool) -> Result<(), HtmlBrowserError> {
+    fn set_focused_node(&mut self, node_id: u64) -> Result<(), HtmlBrowserError> {
         self.focused_node = Some(node_id);
         self.focused_input = self
             .runtime
@@ -72,7 +57,7 @@ impl HtmlInteractiveSession {
             HtmlRuntimeEvent::Focus {
                 target: HtmlNodeId(node_id),
             },
-            render,
+            false,
         )?;
         Ok(())
     }
@@ -98,7 +83,7 @@ impl HtmlInteractiveSession {
 
     pub(super) fn prepare_pointer_focus(&mut self, node_id: u64) -> Result<(), HtmlBrowserError> {
         if self.pointer_focusable_nodes.contains(&node_id) {
-            self.focus_node(node_id, true, false)?;
+            self.focus_node(node_id, true)?;
         } else {
             self.blur_focused_node(false)?;
         }

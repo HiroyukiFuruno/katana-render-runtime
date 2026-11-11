@@ -116,40 +116,6 @@ fn commit_focused_input_propagates_change_listener_errors() -> Result<(), String
 }
 
 #[test]
-fn pointer_to_keyboard_refocus_renders_visible_focus_for_each_control() -> Result<(), String> {
-    let controls = [
-        ("button", "<button id=target>Focus</button>"),
-        ("link", "<a id=target href=/next>Focus</a>"),
-    ];
-    for (kind, markup) in controls {
-        assert_refocus_visibility(kind, markup)?;
-    }
-    Ok(())
-}
-
-fn assert_refocus_visibility(kind: &str, markup: &str) -> Result<(), String> {
-    let mut session = listener_error_session(markup).map_err(|error| error.to_string())?;
-    let node = session
-        .runtime
-        .node_for_element_id("target")
-        .ok_or_else(|| format!("missing {kind}"))?;
-    session
-        .focus_node(node.0, true, true)
-        .map_err(|error| error.to_string())?;
-    assert!(!session.focus_visible, "pointer focus ring for {kind}");
-    let generation = session.generation;
-    session
-        .focus_node(node.0, false, true)
-        .map_err(|error| error.to_string())?;
-    assert!(session.focus_visible, "keyboard focus for {kind}");
-    assert_eq!(
-        session.latest_frame().map(|frame| frame.generation),
-        Some(generation + 1)
-    );
-    Ok(())
-}
-
-#[test]
 fn focus_listener_errors_propagate_for_pointer_and_keyboard_focus() -> Result<(), String> {
     for pointer in [true, false] {
         let html = "<button id=target>Focus</button><script>document.getElementById('target').addEventListener('focus', () => { throw new Error('focus failed'); });</script>";
@@ -158,7 +124,7 @@ fn focus_listener_errors_propagate_for_pointer_and_keyboard_focus() -> Result<()
             .runtime
             .node_for_element_id("target")
             .ok_or("missing focus target")?;
-        let result = session.focus_node(node.0, pointer, false);
+        let result = session.focus_node(node.0, pointer);
         assert!(matches!(result, Err(error) if error.to_string().contains("focus failed")));
     }
     Ok(())
@@ -202,7 +168,7 @@ document.addEventListener('keydown', event => {
         .node_for_element_id("target")
         .ok_or("missing focus target")?;
     session
-        .focus_node(node.0, false, false)
+        .focus_node(node.0, false)
         .map_err(|error| error.to_string())?;
     assert_eq!(session.focused_node, Some(node.0));
     session
@@ -228,10 +194,10 @@ fn focus_and_blur_propagate_active_element_bridge_exceptions() -> Result<(), Str
             .node_for_element_id("target")
             .ok_or("missing target")?;
         let result = if phase == "focus" {
-            session.focus_node(node.0, true, false)
+            session.focus_node(node.0, true)
         } else {
             session
-                .focus_node(node.0, true, false)
+                .focus_node(node.0, true)
                 .map_err(|error| error.to_string())?;
             session.update_focus(false)
         };

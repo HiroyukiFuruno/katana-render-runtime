@@ -66,7 +66,7 @@ impl HtmlInteractiveSession {
         if !prevented {
             let nodes = self.project_nodes()?;
             (self.tab_order, self.pointer_focusable_nodes) = super::focus_candidates(&nodes);
-            self.advance_tab_focus(false)?;
+            self.advance_tab_focus()?;
         }
         self.render_frame()
     }
@@ -86,12 +86,12 @@ impl HtmlInteractiveSession {
         Ok(prevented)
     }
 
-    fn advance_tab_focus(&mut self, render: bool) -> Result<(), HtmlBrowserError> {
+    fn advance_tab_focus(&mut self) -> Result<(), HtmlBrowserError> {
         let next =
             super::tab::next_candidate(&self.tab_order, self.focused_node, self.shift_pressed);
         match next {
-            Some(node_id) => self.focus_node(node_id, false, render),
-            None => self.blur_focused_node(render),
+            Some(node_id) => self.focus_node(node_id, false),
+            None => self.blur_focused_node(false),
         }
     }
 }
