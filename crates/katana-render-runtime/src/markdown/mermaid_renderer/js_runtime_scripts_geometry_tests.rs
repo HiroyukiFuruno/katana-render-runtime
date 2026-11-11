@@ -12,6 +12,22 @@ fn runtime_normalizes_requirement_viewbox_to_browser_bounds() -> Result<(), Stri
 }
 
 #[test]
+fn requirement_viewbox_resize_updates_existing_max_width_style() -> Result<(), String> {
+    let raw = r#"<svg aria-roledescription="requirement" viewBox="-8 -8 200 100" width="100%" style="max-width: 200px;"></svg>"#;
+    let attributes = expected_synthetic_root_attributes(raw)?;
+
+    assert_eq!(
+        attributes.get("viewBox").map(String::as_str),
+        Some("0 0 192 92")
+    );
+    assert_eq!(
+        attributes.get("style").map(String::as_str),
+        Some("max-width: 192px;")
+    );
+    Ok(())
+}
+
+#[test]
 fn runtime_preserves_fake_raw_class_geometry_and_generic_row_class() -> Result<(), String> {
     for (first, second, view_box, max_width) in [
         ("PreviewPane", "RenderedSection", "4 4 311.5 367", "311.5"),
