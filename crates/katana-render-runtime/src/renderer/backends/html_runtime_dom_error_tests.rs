@@ -48,3 +48,35 @@ fn assert_dom_bridge_errors(operations: &[&str]) {
         );
     }
 }
+
+const MUTATION_FAILURE_CASES: &[(&str, &str)] = &[
+    (
+        "document.createElement('bad name')",
+        "unsupported element name: bad name",
+    ),
+    (
+        "document.createElement('div').insertAdjacentText('beforebegin', 'x')",
+        "insertAdjacentHTML beforebegin requires a parent",
+    ),
+    (
+        "__krr_dom('setTextContent', '999999', 'x')",
+        "HTML node 999999 does not exist",
+    ),
+    (
+        "__krr_dom('appendChild', document.getElementById('target').__krrNodeId, '999999')",
+        "HTML node 999999 does not exist",
+    ),
+];
+
+#[test]
+fn javascript_dom_mutations_propagate_native_failures() {
+    for &(operation, expected) in MUTATION_FAILURE_CASES {
+        let output = HtmlRenderer.render(&HtmlRenderInput {
+            source: format!("<p id=target>Visible</p><script>{operation}</script>"),
+        });
+        assert!(
+            matches!(output, Err(HtmlRuntimeError::DomBridge(ref message)) if message == expected),
+            "unexpected result for {operation}: {output:?}"
+        );
+    }
+}
