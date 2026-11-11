@@ -1,3 +1,4 @@
+use super::super::super::pixmap_width;
 use tiny_skia::PixmapMut;
 
 const AA_MARGIN: f32 = 2.0;
@@ -26,18 +27,18 @@ impl Rect {
     }
 }
 
-pub(super) fn frame_bounds(size: (u32, u32)) -> Result<Rect, String> {
+pub(super) fn frame_bounds(size: (i32, u32)) -> Result<Rect, String> {
     Ok(Rect {
         left: 0,
         top: 0,
-        right: i32::try_from(size.0).map_err(|e| e.to_string())?,
+        right: size.0,
         bottom: i32::try_from(size.1).map_err(|e| e.to_string())?,
     })
 }
 
 pub(super) fn target_bounds(target: &PixmapMut<'_>, origin: (i32, i32)) -> Result<Rect, String> {
     let (left, top) = origin;
-    let width = i32::try_from(target.width()).map_err(|e| e.to_string())?;
+    let width = pixmap_width(target);
     let height = i32::try_from(target.height()).map_err(|e| e.to_string())?;
     Ok(Rect {
         left,

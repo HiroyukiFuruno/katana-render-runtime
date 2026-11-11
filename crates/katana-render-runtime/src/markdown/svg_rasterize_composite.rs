@@ -23,7 +23,12 @@ pub(crate) struct SvgCompositeRenderer;
 #[derive(Clone, Copy)]
 struct TileContext {
     origin: (i32, i32),
-    frame: (u32, u32),
+    frame: (i32, u32),
+}
+
+fn pixmap_width(pixmap: &tiny_skia::PixmapMut<'_>) -> i32 {
+    /* WHY: tiny-skiaは生成時にRGBAの行バイト数がi32に収まる幅だけを受け入れる。 */
+    pixmap.width() as i32
 }
 
 impl TileContext {
@@ -87,7 +92,7 @@ fn render_root_children(
     let needs_authored_clip_ids = SvgCompositeRenderer::needs_authored_clip_ids(tree);
     let origin = Some(TileContext {
         origin: (0, 0),
-        frame: (pixmap.width(), pixmap.height()),
+        frame: (pixmap_width(pixmap), pixmap.height()),
     });
     match text_rasterizer {
         Some(text_rasterizer) => render_children_at_origin(

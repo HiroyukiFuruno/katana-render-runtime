@@ -81,13 +81,13 @@ fn affected_range_selects_only_intersecting_coverage_tiles() {
 fn nested_crop_origins_accumulate_in_frame_pixels() -> Result<(), String> {
     let context = super::super::super::TileContext {
         origin: (0, 0),
-        frame: (WIDTH, HEIGHT),
+        frame: (WIDTH as i32, HEIGHT),
     };
     let outer = tiny_skia::IntRect::from_xywh(10, 20, 400, 100).ok_or("invalid outer crop")?;
     let inner = tiny_skia::IntRect::from_xywh(30, 5, 300, 80).ok_or("invalid inner crop")?;
     let nested = context.cropped(outer)?.cropped(inner)?;
     assert_eq!(nested.origin, (40, 25));
-    assert_eq!(nested.frame, (WIDTH, HEIGHT));
+    assert_eq!(nested.frame, (WIDTH as i32, HEIGHT));
     Ok(())
 }
 
@@ -208,7 +208,7 @@ fn curve_with_overflowing_transformed_bounds_uses_untiled_renderer() -> Result<(
 fn frame_context(x: i32) -> super::super::super::TileContext {
     super::super::super::TileContext {
         origin: (x, 0),
-        frame: (WIDTH, HEIGHT),
+        frame: (WIDTH as i32, HEIGHT),
     }
 }
 
