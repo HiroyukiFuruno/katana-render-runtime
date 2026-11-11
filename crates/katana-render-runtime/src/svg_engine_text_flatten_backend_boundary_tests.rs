@@ -87,6 +87,24 @@ fn bitmap_text_in_clip_does_not_expand_the_vector_clip_region() -> TestResult<()
         .map_err(|error| error.to_string())?,
     )?;
     assert_eq!(actual.data(), expected.data());
+    assert_bitmap_clip_roundtrip(&tree, &options, &expected)
+}
+
+fn assert_bitmap_clip_roundtrip(
+    tree: &usvg::Tree,
+    parser: &usvg::Options<'_>,
+    expected: &tiny_skia::Pixmap,
+) -> TestResult<()> {
+    for preserve_text in [false, true] {
+        let serialized = tree.to_string(&usvg::WriteOptions {
+            preserve_text,
+            ..usvg::WriteOptions::default()
+        });
+        assert_eq!(serialized.contains('😀'), preserve_text);
+        let reparsed =
+            usvg::Tree::from_str(&serialized, parser).map_err(|error| error.to_string())?;
+        assert_eq!(render_clip_fixture(&reparsed)?.data(), expected.data());
+    }
     Ok(())
 }
 
