@@ -62,7 +62,7 @@ UTF8_ITER_RETENTION_CHANGES = {
      UTF8_ITER_LATEST_COMPATIBLE_VERSION),
 }
 SINGLE_PACKAGE_RETENTION_CHANGES = {
-    ("Updating", "crc32fast", "1.5.3", "1.5.4"),
+    ("Updating", "crc32fast", "1.5.3", "1.5.5"),
     ("Updating", "flate2", "1.1.10", "1.1.11"),
     ("Updating", "smallvec", "1.16.4", "1.16.5"),
 }

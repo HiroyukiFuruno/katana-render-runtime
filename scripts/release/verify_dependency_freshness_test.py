@@ -1171,7 +1171,7 @@ target-build = "=3.0.0"
             "Locking 2 packages to latest compatible versions": False,
             "Locking 0 packages (Rust 1.95.0) to latest compatible version": True,
             "Locking 1 package to latest compatible version\n"
-            "    Updating crc32fast v1.5.3 -> v1.5.4": True,
+            "    Updating crc32fast v1.5.3 -> v1.5.5": True,
             "Locking 1 package to latest compatible version\n"
             "    Updating flate2 v1.1.10 -> v1.1.11": True,
             "Locking 1 package to latest compatible version\n"
@@ -1181,17 +1181,17 @@ target-build = "=3.0.0"
             ("Locking 4 packages to latest compatible versions\n"
              "    Adding utf_types v1.0.0\n"
              "    Updating utf8_iter v1.0.4 -> v1.1.0\n"
-             "    Updating crc32fast v1.5.3 -> v1.5.4\n"
+             "    Updating crc32fast v1.5.3 -> v1.5.5\n"
              "    Updating flate2 v1.1.10 -> v1.1.11"): True,
             "Locking 1 package to latest compatible version\n"
-            "    Updating crc32fast v1.5.3 -> v1.5.5": False,
+            "    Updating crc32fast v1.5.3 -> v1.5.6": False,
             "Locking 1 package to latest compatible version\n"
             "    Updating flate2 v1.1.10 -> v1.1.12": False,
             ("Locking 2 packages to latest compatible versions\n"
-             "    Updating crc32fast v1.5.3 -> v1.5.4\n"
+             "    Updating crc32fast v1.5.3 -> v1.5.5\n"
              "    Updating serde v1.0.0 -> v1.0.1"): False,
             ("Locking 2 packages to latest compatible versions\n"
-             "    Updating crc32fast v1.5.3 -> v1.5.4\n"
+             "    Updating crc32fast v1.5.3 -> v1.5.5\n"
              "    Updating utf8_iter v1.0.4 -> v1.1.0"): False,
             (
                 "Locking 2 packages to latest compatible versions\n"
