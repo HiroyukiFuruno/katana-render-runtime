@@ -55,6 +55,24 @@ fn finite_size_above_shaping_range_is_rejected_by_both_svg_font_callbacks() -> R
 }
 
 #[test]
+fn svg_font_bridge_recovers_after_rejecting_nul_text() -> Result<(), String> {
+    let script = r#"(() => {
+        const measure = text => globalThis.__katanaMeasureSvgTextMetrics(text, 'Noto Sans', 16, 400, false);
+        const advance = measure('AB').advance;
+        let rejected = false;
+        try { measure('A\u0000B'); }
+        catch (error) { rejected = error instanceof Error && error.message === 'SVG font metric measurement failed'; }
+        return Number.isFinite(advance) && advance > 0 && rejected && measure('AB').advance === advance;
+    })()"#;
+    let result = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
+        "bridge-svg-nul-recovery",
+        script,
+    )])?;
+    assert_eq!(result, "true");
+    Ok(())
+}
+
+#[test]
 fn finite_javascript_size_outside_f32_request_range_returns_undefined() -> Result<(), String> {
     let script = r#"(() => {
         const measure = globalThis.__katanaMeasureText;
