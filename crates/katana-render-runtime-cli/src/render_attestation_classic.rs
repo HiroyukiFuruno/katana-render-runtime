@@ -1,5 +1,5 @@
 use super::files::{FileRecord, sha256, write_new};
-use anyhow::{Context, ensure};
+use anyhow::ensure;
 use katana_render_runtime::RenderOutput;
 use serde_json::{Value, json};
 use std::path::Path;
@@ -49,8 +49,7 @@ pub(super) fn capture(
         .lock()
         .map_err(|_| anyhow::anyhow!("classic capture lock poisoned"))?;
     let state = std::mem::replace(&mut *guard, CaptureState::new());
-    state.validate(source)?;
-    Ok((output, write_capture(artifacts, state)?))
+    Ok((output, write_capture(artifacts, state, source)?))
 }
 
 fn write_record(path: &Path, bytes: &[u8]) -> anyhow::Result<FileRecord> {
@@ -63,8 +62,12 @@ fn write_record(path: &Path, bytes: &[u8]) -> anyhow::Result<FileRecord> {
     Ok(record)
 }
 
-fn write_capture(artifacts: &Path, state: CaptureState) -> anyhow::Result<ClassicCapture> {
-    let request = state.request.context("classic request missing")?;
+fn write_capture(
+    artifacts: &Path,
+    state: CaptureState,
+    source: &str,
+) -> anyhow::Result<ClassicCapture> {
+    let request = state.validate(source)?;
     let request = write_record(&artifacts.join("classic-request.json"), request.as_bytes())?;
     let mut records = vec![request];
     let mut programs = Vec::new();

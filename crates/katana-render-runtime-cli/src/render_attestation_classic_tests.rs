@@ -162,15 +162,7 @@ fn later_valid_event_does_not_clear_first_protocol_error() -> anyhow::Result<()>
 #[test]
 fn poisoned_capture_lock_discards_tracing_event() -> anyhow::Result<()> {
     let state = Arc::new(Mutex::new(CaptureState::new()));
-    let poison_target = Arc::clone(&state);
-    let poison = std::thread::spawn(move || {
-        let Ok(_guard) = poison_target.lock() else {
-            return;
-        };
-        std::panic::resume_unwind(Box::new("poison capture lock for regression"));
-    })
-    .join();
-    ensure!(poison.is_err(), "poisoning thread unexpectedly succeeded");
+    poison_capture_lock(&state)?;
 
     let subscriber = CaptureSubscriber {
         state: Arc::clone(&state),
@@ -186,6 +178,19 @@ fn poisoned_capture_lock_discards_tracing_event() -> anyhow::Result<()> {
         "event recorded through poisoned lock"
     );
     rejected(state, "not observed")
+}
+
+fn poison_capture_lock(state: &Arc<Mutex<CaptureState>>) -> anyhow::Result<()> {
+    let poison_target = Arc::clone(state);
+    let poison = std::thread::spawn(move || {
+        let Ok(_guard) = poison_target.lock() else {
+            return;
+        };
+        std::panic::resume_unwind(Box::new("poison capture lock for regression"));
+    })
+    .join();
+    ensure!(poison.is_err(), "poisoning thread unexpectedly succeeded");
+    Ok(())
 }
 
 #[test]
@@ -254,7 +259,6 @@ fn artifact_bytes_are_verified_and_existing_destinations_rejected() -> anyhow::R
         request(&value, 4);
         programs(&value, false);
     })?;
-    state.validate(SOURCE)?;
     verify_artifact_bytes_and_reject_existing_destination(&value, state)
 }
 
@@ -264,7 +268,7 @@ fn verify_artifact_bytes_and_reject_existing_destination(
 ) -> anyhow::Result<()> {
     let tempdir = unit_tempdir()?;
     let root = tempdir.path();
-    let capture = write_capture(root, state)?;
+    let capture = write_capture(root, state, SOURCE)?;
     capture.verify()?;
     ensure!(
         std::fs::read_to_string(root.join("classic-request.json"))? == value,
@@ -285,7 +289,7 @@ fn reject_changed_or_overwritten_artifacts(
         programs(value, false);
     })?;
     ensure!(
-        write_capture(root, state).is_err(),
+        write_capture(root, state, SOURCE).is_err(),
         "existing artifact overwritten"
     );
     Ok(())

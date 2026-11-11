@@ -113,7 +113,7 @@ impl CaptureState {
         Ok(())
     }
 
-    pub(super) fn validate(&self, source: &str) -> anyhow::Result<()> {
+    pub(super) fn validate(&self, source: &str) -> anyhow::Result<&str> {
         ensure!(
             self.error.is_none(),
             "classic capture rejected: {:?}",
@@ -132,15 +132,13 @@ impl CaptureState {
             self.scripts.iter().all(|script| script.completed),
             "classic evaluation incomplete"
         );
-        let last = self
-            .scripts
-            .last()
-            .context("classic render script missing")?;
         ensure!(
-            last.code == format!("katanaRunMermaidRuntime({request});"),
+            self.scripts.last().is_some_and(|last| {
+                last.code == format!("katanaRunMermaidRuntime({request});")
+            }),
             "classic request program differs"
         );
-        Ok(())
+        Ok(request)
     }
 
     fn validate_request(&self, request: &str, source: &str) -> anyhow::Result<()> {
