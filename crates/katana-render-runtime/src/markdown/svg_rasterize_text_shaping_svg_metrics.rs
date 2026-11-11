@@ -6,6 +6,12 @@ use crate::markdown::svg_rasterize::text_shaping::{
 
 const HARFRUST_SCALE: f32 = 65_536.0;
 
+#[cfg(any(target_os = "macos", test))]
+#[path = "svg_rasterize_text_shaping_svg_layout_ascent.rs"]
+mod layout_ascent;
+#[cfg(target_os = "macos")]
+pub(in crate::markdown::svg_rasterize) use layout_ascent::macos_svg_dom_layout_ascent;
+
 pub(in crate::markdown::svg_rasterize) fn shaped_svg_text_metrics(
     text: &str,
     family: &str,
@@ -128,38 +134,13 @@ pub(in crate::markdown::svg_rasterize) fn svg_dom_layout_ascent(
 ) -> Option<f32> {
     #[cfg(target_os = "macos")]
     {
-        let rounded_ascent = ascent.round();
-        let is_legacy_blink_family = face.is_some_and(|face| {
-            face.families
-                .iter()
-                .any(|(family, _)| is_legacy_blink_family_name(family))
-        });
-        Some(if is_legacy_blink_family {
-            rounded_ascent + chromium_legacy_ascent_adjustment(ascent, descent)
-        } else {
-            rounded_ascent
-        })
+        Some(macos_svg_dom_layout_ascent(face, ascent, descent))
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (face, ascent, descent);
         None
     }
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn is_legacy_blink_family_name(family: &str) -> bool {
-    matches!(family, "Times" | "Helvetica" | "Courier")
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn chromium_legacy_ascent_adjustment(ascent: f32, descent: f32) -> f32 {
-    const ASCENT_ADJUSTMENT_RATIO: f32 = 0.15;
-    const ASCENT_ROUNDING_BIAS: f32 = 0.5;
-    let rounded_ascent = ascent.round();
-    let rounded_descent = descent.round();
-    /* WHY: BlinkはmacOSのlegacy familyに総高の15%を加える。https://raw.githubusercontent.com/chromium/chromium/main/third_party/blink/renderer/platform/fonts/font_metrics.cc */
-    ((rounded_ascent + rounded_descent) * ASCENT_ADJUSTMENT_RATIO + ASCENT_ROUNDING_BIAS).floor()
 }
 
 fn translate_ink_bounds(bounds: Option<SvgInkBounds>, advance: f64) -> Option<SvgInkBounds> {

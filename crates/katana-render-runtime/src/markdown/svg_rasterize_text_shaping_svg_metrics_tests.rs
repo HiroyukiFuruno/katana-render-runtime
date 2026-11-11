@@ -1,7 +1,5 @@
-use super::{
-    chromium_legacy_ascent_adjustment, include_layout_ascent, is_legacy_blink_family_name,
-    translate_ink_bounds, union_ink_bounds,
-};
+use super::layout_ascent::{chromium_legacy_ascent_adjustment, is_legacy_blink_family_name};
+use super::{include_layout_ascent, translate_ink_bounds, union_ink_bounds};
 
 #[cfg(not(target_os = "macos"))]
 use super::svg_dom_layout_ascent;

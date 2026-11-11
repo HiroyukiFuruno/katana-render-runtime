@@ -175,6 +175,8 @@ mod svg_fragments;
 mod svg_metrics;
 pub(super) use svg_fragments::SvgTextFragmentLayout;
 pub(super) use svg_fragments::shaped_svg_fragment_layout;
+#[cfg(target_os = "macos")]
+pub(super) use svg_metrics::macos_svg_dom_layout_ascent;
 pub(super) use svg_metrics::svg_dom_layout_ascent;
 #[path = "svg_rasterize_text_shaping_x_height.rs"]
 mod svg_x_height;

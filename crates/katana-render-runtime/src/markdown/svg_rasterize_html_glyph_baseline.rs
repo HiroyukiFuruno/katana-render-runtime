@@ -103,11 +103,11 @@ fn css_baseline_target(
     let metric_scale = css_font_size / face.upem;
     let ascent = face.ascent * metric_scale;
     let descent = face.descent * metric_scale;
-    let layout_ascent = crate::markdown::svg_rasterize::text_shaping::svg_dom_layout_ascent(
+    let layout_ascent = crate::markdown::svg_rasterize::text_shaping::macos_svg_dom_layout_ascent(
         database.face(face_id),
         ascent,
         -descent,
-    )?;
+    );
     let baseline_from_top = match policy.kind {
         PolicyKind::Mathematical => ascent_from_top(layout_ascent),
         PolicyKind::Central => central_from_top(layout_ascent, -descent.round()),
@@ -137,13 +137,11 @@ fn legacy_glyph_shift(
     descent: f32,
     raw_shift: f32,
 ) -> f32 {
-    let Some(layout_ascent) = crate::markdown::svg_rasterize::text_shaping::svg_dom_layout_ascent(
+    let layout_ascent = crate::markdown::svg_rasterize::text_shaping::macos_svg_dom_layout_ascent(
         database.face(face_id),
         ascent,
         -descent,
-    ) else {
-        return 0.0;
-    };
+    );
     let layout_descent = -descent.round();
     let blink_shift = match policy.kind {
         PolicyKind::Mathematical => layout_ascent * HALF_METRIC,
