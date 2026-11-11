@@ -2,8 +2,9 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
-- [x] `f1e5793a` はSVGマーカーを塗りと線の間に描く場合、解析済みの順列から前後の処理を決める。塗り・線がないケースも維持し、重複した`markers`指定が既定順に戻る実SVG回帰を追加。foundation・AST・関連8件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-marker-paint-order-exact-3jj5hi36/safe-summary.json`）。全体計測への反映は未確認。
-- [x] `f51ed6d9` は埋め込み画像のSVG・PNG・JPEG・GIF・WebPの判定を1回にし、各デコーダーの警告と透明画素の扱いを維持した。foundation・AST、入出力と破損画像の関連回帰9件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-embedded-image-kind-exact-gvd8bn3t/safe-summary.json`）。全体計測への反映は未確認。
+- [/] `2f9f44a6` の正式計測は6,237件成功・別15件skip、86,952/87,398行（99.4896908396%）、未カバー446行。埋め込み画像とマーカー描画順で各1行減少。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-ozuav3f2/safe-summary.json`）。
+- [x] `f1e5793a` はSVGマーカーを塗りと線の間に描く場合、解析済みの順列から前後の処理を決める。塗り・線がないケースも維持し、重複した`markers`指定が既定順に戻る実SVG回帰を追加。foundation・AST・関連8件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-marker-paint-order-exact-3jj5hi36/safe-summary.json`）。
+- [x] `f51ed6d9` は埋め込み画像のSVG・PNG・JPEG・GIF・WebPの判定を1回にし、各デコーダーの警告と透明画素の扱いを維持した。foundation・AST、入出力と破損画像の関連回帰9件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-embedded-image-kind-exact-gvd8bn3t/safe-summary.json`）。
 - [/] `4bd9d582` の正式計測は6,236件成功・別15件skip、86,951/87,399行（99.4874083227%）、未カバー448行。PNGグリフ、Mermaid要件図比較、SVG角丸属性で各1行減少。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-0u1li9gf/safe-summary.json`）。
 - [x] SVG角丸属性は`rx`と`ry`だけを変更候補として直接構築し、文字列による設定で到達しない分岐を除いた。属性の追加・削除、セレクターの一致保護、元の値を保つ回帰8件とfoundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-svg-geometry-plan-exact-jebqyluf/safe-summary.json`）。
 - [x] SVGのPNGグリフで検査済み寸法から原点0の描画範囲を作るよう変更し、CBDTとsbixの実フォントで範囲とゼロ寸法の拒否を確認した。SVG engine移植済みソースの来歴は更新済み。Mermaid要件図の比較helperでstyleなしの入力が幅・高さの更新後もstyleを持たないことを確認。foundation・AST・関連7件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-png-bounds-and-mermaid-style-exact-f3hh3pzj/safe-summary.json`）。
