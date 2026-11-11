@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 最新の正式ルート計測 `7bbbd0a8` は6,300テスト成功・15件スキップ、86,435/86,808行（99.5703160999%）、未カバー373行。前回から11行減り、未カバー行が増えたファイルはない。収集は成功し、公開条件100%・未カバー0の判定は不合格。`tmp/quality/resumed-owner-r3509/root-coverage-release-reconciliation-wvebpbfe/` の `safe-summary.json`、`gap-summary.json`、`gap-delta.json` を次の対応の一次情報とする。
 - 計測再開の修正1件中1件完了。`a3723657`の全量計測は、追加したMach-Oケースが既存の固定SHA付きテスト専用ファイルを変更したため、開始前のfingerprint検査で停止した。ケースを既存の入力パステストへ移し、元のファイルを固定SHA `8c1893ff…` に復元した。関連2テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-macho-coverage-scope-jlz9c_w_/safe-summary.json`）。正式カバレッジの計測範囲と閾値は既存設定を用いる。
 - 対応予定1件中1件完了。HTMLの交差判定では座標と交差情報が同じ`ElementBox`の列から生成されていたため、1要素分をまとめて登録し、登録後の要素IDの再照合を除いた。同一IDが複数ある場合に最後の要素を採用する既存の順序、座標変換、JSON出力を維持した。スクロール、クリップ境界、回転、IntersectionObserverを含む関連79テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-html-intersection-metadata-_tv1o8j_/safe-summary.json`）。正式カバレッジ、HTML画像・性能の全量判定は最終フェーズで行う。
 - JavaScript依存の更新予定4件中4件完了。`@babel/parser`と`@babel/types`を8.1.2、推移依存の`@babel/helper-string-parser`を8.1.2、`glob`を14.0.5へ更新した。静的検査とランタイム資産テスト69件が成功。標準の`release-target-check`は更新前に`bun.lock`を拒否し、更新後は依存・資産529件の鮮度検査を通過した。必須祖先の検査も通過し、公開内容manifestの固定SHAとの不一致で止まった。最終候補を確定してから既存のmanifest更新手順で同期する（`tmp/quality/resumed-owner-r3509/release-bun-update-validation-5tq6yhia/safe-summary.json`）。GitHub Actionsの固定先14件を上流の安定版・対応refと照合し、すべて一致した。
@@ -13,7 +14,7 @@
 - 今回の対応予定は累計4件中4件完了。SVGフォント代替の診断設定に、丸め前の字送りを保持する設定と、対象入力でも代替を無効にする設定の2件を追加した。子プロセスでの設定と実行件数の検証を開始位置限定のテストと共通化し、関連22テスト・静的検査・ASTが成功（`tmp/quality/resumed-owner-r3509/release-svg-fallback-diagnostic-cpo6ymb4/safe-summary.json`）。この対応の進捗は修正予定件数で数え、正式カバレッジは最終フェーズで計測する。
 - 対応予定2件中2件完了。SVGの平行移動で影と元図形の実画素を検証し、拡大の回帰と描画の準備を共通化した。macOSのフォント代替では診断設定を子プロセスへ限定し、開始位置を保持し中央・末尾を拒否する既存入力を完全名で1件実行した。関連13テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-svg-shadow-and-anchor-kotoutyg/safe-summary.json`）。正式カバレッジは補完が一通り揃った段階で計測する。
 - 対応予定1件中1件完了。tiny-skiaがRGBAの行バイト数をi32で検査したうえで生成したpixmapについて、SVGタイル境界で同じ幅を再検査しない。高さの変換と原点への加算の検査は維持した。タイル・曲線・クリップ関連9テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-svg-tile-pixmap-width-zwi4kz25/safe-summary.json`）。変更後の正式カバレッジは未計測。
-- 最新の正式計測 `735490fa` は6,287テスト成功・15件スキップ、86,467/86,851行（99.5578634673%）、未カバー384行。収集は成功し、100%・未カバー0の公開条件は不合格（`tmp/quality/resumed-owner-r3509/root-coverage-release-checkpoint-threads4-ig9iyftn/safe-summary.json`）。同じディレクトリの`gap-summary.json`を次の対応の一次情報とする。
+- 前回の正式計測 `735490fa` は6,287テスト成功・15件スキップ、86,467/86,851行（99.5578634673%）、未カバー384行。収集は成功し、100%・未カバー0の公開条件は不合格（`tmp/quality/resumed-owner-r3509/root-coverage-release-checkpoint-threads4-ig9iyftn/safe-summary.json`）。
 
 - 対応予定2件中2件完了。HTML比較ツールで倍率2・指定48 CSS pxが実際には24 CSS pxとなり、別の領域をPNGにしていたことを回帰で再現した。ビューポートのscroll metricsで末尾を求め、入力差分を物理pxに変換して、前後への移動と末尾を実PNGで確認した。CSSプレビューでは右矢印の前後に異なる背景色のPNGを出力することを確認した。修正前は5テスト中1失敗、修正後は5テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-html-probe-scroll-output-grfmeu6r/safe-summary.json`）。正式カバレッジは未計測。
 
