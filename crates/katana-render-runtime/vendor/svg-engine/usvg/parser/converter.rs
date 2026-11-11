@@ -985,10 +985,8 @@ fn convert_path(
     cache: &mut Cache,
     parent: &mut Group,
 ) {
+    /* WHY: tiny-skiaのPathBuilderは要素が一つ以下のPathを生成しない。 */
     debug_assert!(tiny_skia_path.len() >= 2);
-    if tiny_skia_path.len() < 2 {
-        return;
-    }
     let prepared = prepare_path(node, &tiny_skia_path, state, cache, parent);
     let marker = path_markers(node, &tiny_skia_path, state, cache, parent, &prepared);
     let raw_paint_order = prepared.raw_paint_order;

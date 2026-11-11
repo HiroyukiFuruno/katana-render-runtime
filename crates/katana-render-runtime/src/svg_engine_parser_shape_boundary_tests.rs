@@ -74,6 +74,16 @@ fn polyline_and_polygon_without_points_are_skipped() -> Result<(), String> {
 }
 
 #[test]
+fn move_only_path_does_not_affect_a_visible_sibling() -> Result<(), String> {
+    let control = "<rect id='sample' width='4' height='4' fill='blue'/>";
+    let source = format!("<path id='move' d='M1 1' stroke='red'/>{control}");
+    let actual = parse_shape(&source)?;
+    let expected = parse_shape(control)?;
+    assert!(actual.node_by_id("move").is_none());
+    assert_same_visible_shape_render(&actual, &expected)
+}
+
+#[test]
 fn overflowing_offscreen_transform_preserves_visible_sibling() -> Result<(), String> {
     let source = "<g transform='scale(1e20)'><path id='overflow' d='M1e19 0 L2e19 1' stroke='red'/></g><rect id='sample' width='4' height='4' fill='blue'/>";
     let control = "<rect id='sample' width='4' height='4' fill='blue'/>";
