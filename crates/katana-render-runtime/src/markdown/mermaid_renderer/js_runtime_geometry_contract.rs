@@ -168,11 +168,11 @@ fn endpoints(node: Node<'_, '_>) -> Result<(Point, Point), String> {
             SimplePathSegment::ClosePath => (),
         }
     }
-    require(points.len() >= 2, "edge must have start and end")?;
-    let first = points[0];
-    let last = *points.last().ok_or("edge must have start and end")?;
-    require(!near(first, last), "edge must not collapse")?;
-    Ok((first, last))
+    let [first, .., last] = points.as_slice() else {
+        return Err("edge must have start and end".to_owned());
+    };
+    require(!near(*first, *last), "edge must not collapse")?;
+    Ok((*first, *last))
 }
 
 fn near(a: Point, b: Point) -> bool {
