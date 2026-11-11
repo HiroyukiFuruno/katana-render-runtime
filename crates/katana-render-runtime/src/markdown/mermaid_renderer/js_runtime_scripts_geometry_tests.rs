@@ -37,6 +37,17 @@ fn requirement_viewbox_oracle_rejects_an_ambiguous_fixture_style() {
 }
 
 #[test]
+fn requirement_viewbox_resize_does_not_add_missing_fixture_style() -> Result<(), String> {
+    let raw =
+        r#"<svg aria-roledescription="requirement" viewBox="-8 -8 200 100" width="100%"></svg>"#;
+    let attributes = expected_synthetic_root_attributes(raw)?;
+    assert_eq!(attributes.get("width").map(String::as_str), Some("192"));
+    assert_eq!(attributes.get("height").map(String::as_str), Some("92"));
+    assert!(!attributes.contains_key("style"));
+    Ok(())
+}
+
+#[test]
 fn runtime_preserves_fake_raw_class_geometry_and_generic_row_class() -> Result<(), String> {
     for (first, second, view_box, max_width) in [
         ("PreviewPane", "RenderedSection", "4 4 311.5 367", "311.5"),
