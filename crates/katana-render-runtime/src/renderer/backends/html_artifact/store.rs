@@ -167,6 +167,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn store_constructor_creates_missing_directories_and_preserves_a_conflicting_file()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let parent = directory.path().canonicalize()?;
+        let root = parent.join("missing").join("frames");
+        assert!(!root.exists());
+        let store = HtmlArtifactStore::new(&root, MAX_ARTIFACT_BYTES, true)?;
+        assert_eq!(store.root, root.canonicalize()?);
+        assert!(root.is_dir());
+
+        let occupied = parent.join("occupied");
+        let bytes = b"existing contents";
+        fs::write(&occupied, bytes)?;
+        assert!(matches!(
+            HtmlArtifactStore::new(&occupied, MAX_ARTIFACT_BYTES, true),
+            Err(HtmlArtifactError::Io(_))
+        ));
+        assert_eq!(fs::read(&occupied)?, bytes);
+        Ok(())
+    }
+
+    #[test]
     fn save_error_mapping_preserves_non_size_errors() {
         let error = HtmlArtifactError::InvalidKey;
         assert!(matches!(
