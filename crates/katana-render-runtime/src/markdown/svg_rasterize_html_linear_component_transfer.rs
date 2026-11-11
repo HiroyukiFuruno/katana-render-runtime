@@ -25,11 +25,8 @@ pub(super) fn render(
     let Some(spec) = transfer_spec(group, child_transform)? else {
         return Ok(false);
     };
-    let source = source_bounds(group, child_transform)?;
-    let Some(bounds) = intersect(spec.bounds, source) else {
-        return Ok(false);
-    };
-    let Some(crop) = super::super::html_shadow::bounded_crop(bounds, target)? else {
+    /* WHY: フィルターが1件のとき、レイヤー境界は spec で交差済みのフィルター領域。 */
+    let Some(crop) = super::super::html_shadow::bounded_crop(spec.bounds, target)? else {
         return Ok(false);
     };
     let source = render_source(group, child_transform, crop, provenance, text)?;
@@ -156,14 +153,6 @@ fn spec_bounds(
     let primitive_bounds =
         super::super::html_shadow::map_rect(primitive.rect().to_rect(), transform)?;
     Ok(intersect(filter_bounds, primitive_bounds))
-}
-
-fn source_bounds(
-    group: &usvg::Group,
-    transform: Transform,
-) -> Result<super::super::html_shadow::Bounds, String> {
-    let rect = group.layer_bounding_box().to_rect();
-    super::super::html_shadow::map_rect(rect, transform)
 }
 
 fn intersect(
