@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [/] `0b1e7d54` の正式producerによる中間計測は6,210件成功・別15件skip、86,787/87,272行（99.4442662022%）、未カバー485行。SVG paintで1行、textPathで2行、クリップ矩形で1行減少。HTMLインラインの未カバー行数は変化なし。収集実0、ソース前後一致。総合判定は100%到達後に実行する（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-1o3q626b/safe-summary.json`）。
+- [x] `bc098f76` はインライン行計画の現在行と確定済み行を分け、必ず存在する現在行の空判定を除いた。`bbac5701` は未対応CSS値をカスケードの勝者決定まで維持し、属性編集を確定値と解析元XMLに限定した。関連HTML41件・SVG25件・foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-inline-metrics-and-svg-cascade-exact-orygagmx/safe-summary.json`）。全体計測への反映を確認する。
 - [/] `b0818b84` の正式計測は6,210件成功・別15件skip、86,784/87,273行（99.4396892510%）、未カバー489行。物理フォント照合で2行、フォーカス更新で1行減少。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-6jdcnkay/safe-summary.json`）。
 - [x] `07c7486d` は正規化済みtextPath、塗りと線の2経路、tiny-skia-pathの非ゼロ矩形検証に重複する判定を除いた。関連42件・foundation・AST・取り込み元の来歴検証が成功（`tmp/quality/resumed-owner-r3509/coverage-svg-normalization-guards-exact-1u7yewjn/safe-summary.json`）。489行の正式値には未反映。
 - [x] `ec780132` はインライン要素の型判定を行計画と描画で共有した。初回の関数長違反は既存のスタイル判定に条件をまとめて解消。関連41件・foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-typed-inline-fragment-exact-x324t4jk/safe-summary.json`）。SVGの変更と合わせて次の全体計測で確認する。
