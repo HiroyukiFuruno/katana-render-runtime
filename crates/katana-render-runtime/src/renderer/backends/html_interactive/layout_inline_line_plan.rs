@@ -23,20 +23,21 @@ impl InlineLinePlan {
         width: f32,
     ) -> Self {
         let mut builder = LinePlanBuilder {
-            metrics: vec![InlineLineMetrics::default()],
+            completed_metrics: Vec::with_capacity(1),
+            current_metrics: InlineLineMetrics::default(),
             flow: InlineFlowState::new(0.0, 0.0, width),
             inherited: inherited.clone(),
         };
         builder.add_nodes(nodes, inherited, clickable);
+        builder.finish_line();
         let mut offsets = vec![0.0];
-        for metrics in &builder.metrics {
-            offsets.push(
-                offsets.last().copied().unwrap_or(0.0)
-                    + metrics.height().unwrap_or(inherited.line_height),
-            );
+        let mut offset = 0.0;
+        for metrics in &builder.completed_metrics {
+            offset += metrics.height().unwrap_or(inherited.line_height);
+            offsets.push(offset);
         }
         Self {
-            metrics: builder.metrics,
+            metrics: builder.completed_metrics,
             offsets,
         }
     }
@@ -51,12 +52,18 @@ impl InlineLinePlan {
 }
 
 struct LinePlanBuilder {
-    metrics: Vec<InlineLineMetrics>,
+    completed_metrics: Vec<InlineLineMetrics>,
+    current_metrics: InlineLineMetrics,
     flow: InlineFlowState,
     inherited: CssStyle,
 }
 
 impl LinePlanBuilder {
+    fn finish_line(&mut self) {
+        self.completed_metrics
+            .push(std::mem::take(&mut self.current_metrics));
+    }
+
     fn add_nodes(
         &mut self,
         nodes: &[HtmlDocumentNode],
@@ -95,13 +102,11 @@ impl LinePlanBuilder {
             return false;
         };
         if self.flow.has_items && self.flow.cursor_x + atomic.width > self.flow.width {
-            self.metrics.push(InlineLineMetrics::default());
+            self.finish_line();
             self.flow.cursor_x = 0.0;
         }
-        if let Some(metrics) = self.metrics.last_mut() {
-            metrics.add_text("strut", &self.inherited);
-            metrics.add_box(atomic.baseline, atomic.height);
-        }
+        self.current_metrics.add_text("strut", &self.inherited);
+        self.current_metrics.add_box(atomic.baseline, atomic.height);
         self.flow.cursor_x += atomic.width;
         self.flow.has_items = true;
         true
@@ -117,14 +122,12 @@ impl LinePlanBuilder {
         let lines = wrap_text_with_initial_width(&text, remaining, self.flow.width, style);
         for (index, line) in lines.iter().enumerate() {
             if index != 0 {
-                self.metrics.push(InlineLineMetrics::default());
+                self.finish_line();
             }
-            if let Some(metrics) = self.metrics.last_mut() {
-                if style.font_size < self.inherited.font_size {
-                    metrics.add_text(line, &self.inherited);
-                }
-                metrics.add_text(line, style);
+            if style.font_size < self.inherited.font_size {
+                self.current_metrics.add_text(line, &self.inherited);
             }
+            self.current_metrics.add_text(line, style);
         }
         self.advance_text(&text, &lines, remaining, style);
     }
