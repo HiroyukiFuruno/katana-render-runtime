@@ -15,10 +15,10 @@ pub(super) fn binary_font(
     let data_len = data.as_ref().as_ref().len();
     let key = CacheKey::Binary {
         identity: Arc::as_ptr(&data) as *const () as usize,
-        len: data.as_ref().as_ref().len(),
+        len: data_len,
         face_index,
     };
-    if data.as_ref().as_ref().len() > MAX_SOURCE_BYTES {
+    if data_len > MAX_SOURCE_BYTES {
         clear_cache();
         return Some(FontHandle {
             font: Font::new(data, face_index)?,

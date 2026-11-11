@@ -11,7 +11,8 @@ pub(super) mod immutable_mapping;
 mod lazy_table;
 #[path = "svg_rasterize_text_harfrust_face_cache_load.rs"]
 mod load;
-use entry::{CacheKey, FontHandle};
+use entry::CacheKey;
+pub(super) use entry::FontHandle;
 pub(super) use load::commit_file_font;
 
 const MAX_SOURCE_BYTES: usize = 64 * 1024 * 1024;
@@ -27,10 +28,14 @@ struct ActiveCache {
 }
 
 impl ActiveCache {
+    fn clear_slots(&mut self) {
+        self.entry = None;
+        self.spare = None;
+    }
+
     fn enter(&mut self) {
         if self.depth == 0 {
-            self.entry = None;
-            self.spare = None;
+            self.clear_slots();
         }
         self.depth += 1;
     }
@@ -38,8 +43,7 @@ impl ActiveCache {
     fn leave(&mut self) {
         self.depth = self.depth.saturating_sub(1);
         if self.depth == 0 {
-            self.entry = None;
-            self.spare = None;
+            self.clear_slots();
         }
     }
 }
@@ -58,8 +62,7 @@ fn cached_font(key: &CacheKey) -> Option<FontHandle> {
     ACTIVE_SCOPE.with(|scope| {
         let mut scope = scope.borrow_mut();
         if scope.depth == 0 {
-            scope.entry = None;
-            scope.spare = None;
+            scope.clear_slots();
             #[cfg(all(test, target_os = "macos"))]
             observation::count(observation::Metric::MetricsMiss);
             return None;
@@ -88,8 +91,7 @@ pub(super) fn admit_source_budget(incoming: usize) {
     ACTIVE_SCOPE.with(|scope| {
         let mut scope = scope.borrow_mut();
         if incoming > MAX_SOURCE_BYTES {
-            scope.entry = None;
-            scope.spare = None;
+            scope.clear_slots();
             return;
         }
         let available = MAX_SOURCE_BYTES - incoming;
@@ -122,19 +124,15 @@ fn cache_font(key: CacheKey, font: FontHandle) {
             return;
         }
         if font.retained_source_bytes > MAX_SOURCE_BYTES {
-            scope.entry = None;
-            scope.spare = None;
+            scope.clear_slots();
             return;
         }
-        if scope.entry.as_ref().is_some_and(|entry| entry.key == key) {
-            scope.spare = scope.spare.take().filter(|entry| {
-                entry.font.retained_source_bytes <= MAX_SOURCE_BYTES - font.retained_source_bytes
-            });
-            scope.entry = Some(Entry { key, font });
-            return;
-        }
+        let previous = if scope.entry.as_ref().is_some_and(|entry| entry.key == key) {
+            scope.spare.take()
+        } else {
+            scope.entry.take()
+        };
         /* WHY: libraryのtable/metrics共有を2face間で保ち、合計source上限は増やさない。 */
-        let previous = scope.entry.take();
         scope.spare = previous.filter(|entry| {
             entry.font.retained_source_bytes <= MAX_SOURCE_BYTES - font.retained_source_bytes
         });
@@ -145,11 +143,7 @@ fn cache_font(key: CacheKey, font: FontHandle) {
 pub(super) fn clear_cache() {
     #[cfg(all(test, target_os = "macos"))]
     let _observation = observation::Mutation::new(false);
-    ACTIVE_SCOPE.with(|scope| {
-        let mut scope = scope.borrow_mut();
-        scope.entry = None;
-        scope.spare = None;
-    });
+    ACTIVE_SCOPE.with(|scope| scope.borrow_mut().clear_slots());
 }
 
 pub(super) fn font_for_face(

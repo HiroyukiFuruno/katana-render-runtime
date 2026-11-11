@@ -2,6 +2,10 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定2件中2件完了。関連60件、静的検査・ASTが一度のビルドで成功（`tmp/quality/resumed-owner-r3509/coverage-harfrust-cache-and-metrics-exact-f6kofm88/safe-summary.json`）。
+  - [x] HarfRustのフォントキャッシュで破棄と容量付き入れ替えを共通化。実ファイルの交互利用・変更時の拒否と復旧・容量上限を確認した。
+  - [x] SVG文字計測で、文字メトリクスを返す前にフォントが同一であることを確認する共通経路を使う。文字ごとの幅・字詰めの回帰を確認した。
+
 - 対応予定2件中2件完了。同一ビルドで関連80件（HTML保存37件、SVG文字43件）と静的検査・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-artifact-and-glyph-spans-exact-qdwg4lgs/safe-summary.json`）。全体カバレッジは未カバー対応を一通り入れてから取得する。
   - [x] HTML保存データのシンボリックリンク検査とサイズ取得を一度に行い、容量ちょうどでの上書き・再読込を確認した。
   - [x] SVG文字の範囲検査と検査済み文字列の利用を一度の走査にまとめ、UTF-8境界と複数フォントを含む描画回帰を確認した。

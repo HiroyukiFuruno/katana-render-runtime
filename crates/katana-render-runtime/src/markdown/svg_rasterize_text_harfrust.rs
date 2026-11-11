@@ -93,11 +93,7 @@ pub(in crate::markdown::svg_rasterize) fn shape_run_character_metrics_with_trim(
     let face = face_cache::font_for_face(database, face_id)?;
     let features = features_for_face(database, face_id, text, font_feature_settings, font.trim)?;
     let glyphs = shape_font_with_features(&face, text, font, &features)?;
-    let metrics = collect_character_metrics(&glyphs, text, 1.0 / HARFRUST_SCALE);
-    if metrics.is_some() && !face_cache::commit_file_font(database, face_id, &face) {
-        return None;
-    }
-    metrics
+    committed_character_metrics(database, face_id, &face, &glyphs, text)
 }
 
 pub(super) fn shape_run_character_metrics_without_features(
@@ -111,11 +107,18 @@ pub(super) fn shape_run_character_metrics_without_features(
     }
     let face = face_cache::font_for_face(database, face_id)?;
     let glyphs = shape_font(&face, text, font, None)?;
-    let metrics = collect_character_metrics(&glyphs, text, 1.0 / HARFRUST_SCALE);
-    if metrics.is_some() && !face_cache::commit_file_font(database, face_id, &face) {
-        return None;
-    }
-    metrics
+    committed_character_metrics(database, face_id, &face, &glyphs, text)
+}
+
+fn committed_character_metrics(
+    database: &usvg::fontdb::Database,
+    face_id: usvg::fontdb::ID,
+    face: &face_cache::FontHandle,
+    glyphs: &harfrust::Buffer,
+    text: &str,
+) -> Option<Vec<(f32, f32)>> {
+    let metrics = collect_character_metrics(glyphs, text, 1.0 / HARFRUST_SCALE)?;
+    face_cache::commit_file_font(database, face_id, face).then_some(metrics)
 }
 
 fn shape_database_face(
