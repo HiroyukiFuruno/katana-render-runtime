@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [/] `5d3b108a` の正式producerによる中間計測は6,223件成功・別15件skip、86,914/87,376行（99.4712506867%）、未カバー462行。SVGの非表示末尾文字の判定で前回から1行減。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-fjj8sghs/safe-summary.json`）。
+- [x] 実フォントファイルの置換元がない場合と一時ファイルが既存の場合に、選択済みフォントと既存一時ファイルのバイト列が保持されることを確認。CSSの疑似要素に不正なSVGデータURLを指定すると、元のURLを持つ画像ノードが投影されることを確認した。foundation・AST・関連5件成功（`tmp/quality/resumed-owner-r3509/coverage-font-replacement-and-invalid-svg-url-exact-u8sefqse/safe-summary.json`）。全体計測への反映は未確認。
 - [x] 公開HTML APIのTabと文字入力で検索欄のDOM値・実画素更新、複数行入力欄のフォーカス・inputイベント・実画素更新を確認。SVGは非表示末尾文字の位置が保持される実入力を使い、`dy=0`は複数行補正へ進み、`dy=1`は拒否することを確認した。foundation・AST・関連7件成功（`tmp/quality/resumed-owner-r3509/coverage-public-focus-and-hidden-svg-exact-hwa5klxb/safe-summary.json`）。全体計測への反映は確認待ち。
 - [ ] R03 公開前に複数行入力欄のDOM値不一致を修正する。空の`textarea`にTabで移って`note`を入力し、`input`リスナーで`area.value === 'note'`を求めた実入力回帰は失敗した（`tmp/quality/resumed-owner-r3509/coverage-public-focus-and-hidden-svg-exact-agyeu3xs/safe-summary.json`）。入力の保存先は`session_snapshot.rs`の`set_value`が書く属性で、`html_document_form.rs`の`form_value`は本文を読む。上の限定回帰はイベント到達を証明するもので、`.value`の失敗は未解決。カバレッジ作業後に実入力の失敗を再現し、入力後の値と初期本文を区別して修正する。
 - [x] SVGの文字runはキャッシュ・部分再解決・非キャッシュのいずれも元の文字を順番に連結するため、同じ文字列の再比較を除去。各断片のface再選択と照合は維持。HTMLのinline SVGは同じCSS寸法と異なるviewBox比で、既定の縦横比と`none`の描画面積差を実画素で確認した。source-static-foundation・AST・関連11件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-fragment-and-html-aspect-exact-ix8gghmz/safe-summary.json`）。初回ASTの色定数指摘を修正。全体計測への反映は未確認。
