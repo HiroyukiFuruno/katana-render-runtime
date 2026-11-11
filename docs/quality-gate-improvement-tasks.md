@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定4件中4件完了。フォント候補の実ファイル消失、応答件数、Mermaidフィクスチャの区切り欠落、HTMLアンカーの重複ID解析を確認した。関連4テスト、静的検査、ASTが成功した（`tmp/quality/resumed-owner-r3509/release-coverage-edge-regressions-hj05iz7v/safe-summary.json`、`4168ed76`・`c105bd2f`・`56d5a25f`）。正式カバレッジは最終フェーズで計測する。
 - 最新の正式ルート計測 `76470bbe` は6,363テスト成功・15件スキップ、86,519/86,900行（99.5615650173%）、未カバー381行。7ファイルで7行減り、同梱資源のAST検査と書き込み制限のテスト補助3ファイルで15行増えた。収集は成功し、公開条件100%・未カバー0の判定は不合格。ソースと計測結果は判定前後で一致した。証跡は `tmp/quality/resumed-owner-r3509/root-coverage-release-post-regressions-zr6hfg99/` の `safe-summary.json`・`gap-summary.json`・`gap-delta.json`。
 - 増分への対応予定14条件中14条件を確認した。同梱資源のAST検査に実ソースの不正変形10条件を追加し、ファイルサイズ制限のテスト補助ではOSエラーを型のまま返し、既存の書き込み失敗4条件を再実行した。関連31テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-coverage-increase-recovery-b5xwwrni/safe-summary.json`、`9f37cb5a`・`11573737`）。正式カバレッジへの反映量は未計測。
 - 対応予定13条件中13条件完了。HTMLの実JavaScriptからDOMエラーが伝播する4条件、MathJax ASTの実ソース改変6条件、遅延フォントの削除・再作成1条件、Mermaid CLIの証跡検証とロック異常2条件を確認した。CLIは検証済みのリクエストを保存に使い、検証後の重複判定を除去した。自己レビューで書き込み済みスクリプトの順次解放に戻し、初回の関連29テストと、最終CLI差分の関連18テスト・静的検査・ASTが成功した（`tmp/quality/resumed-owner-r3509/release-dom-font-capture-contracts-0ocrvzpu/safe-summary.json`、`tmp/quality/resumed-owner-r3509/release-classic-capture-final-_uzr7vqq/safe-summary.json`）。変更は `8c480b6f`・`0d47814a`・`1134f657`・`38e4688f`。正式カバレッジと最終描画・性能の判定は最終フェーズで行う。
