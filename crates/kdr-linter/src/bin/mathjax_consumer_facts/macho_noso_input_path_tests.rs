@@ -18,6 +18,17 @@ fn input_rows_rejects_relative_noncanonical_and_duplicate_paths() -> Result<(), 
     Ok(())
 }
 
+#[test]
+fn input_rows_rejects_canonical_directory_path() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let path = directory
+        .path()
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    assert_regular_file_required(&manifest(&path, 0, &sha256(&[])));
+    Ok(())
+}
+
 fn duplicate_path_manifest(fixture: &Fixture) -> Value {
     let row = manifest(&fixture.path, fixture.bytes.len(), &fixture.digest)["files"][0].clone();
     json!({"schema": "krr-macho-noso-input/v1", "files": [row.clone(), row]})
@@ -28,12 +39,15 @@ fn assert_noncanonical_path_rejected(fixture: &Fixture) -> Result<(), String> {
     if !path.exists() || path.canonicalize().map_err(|error| error.to_string())? != fixture.path {
         return Err("noncanonical path must resolve to the existing fixture".to_owned());
     }
-    let manifest = manifest(&path, fixture.bytes.len(), &fixture.digest);
+    assert_regular_file_required(&manifest(&path, fixture.bytes.len(), &fixture.digest));
+    Ok(())
+}
+
+fn assert_regular_file_required(manifest: &Value) {
     assert_eq!(
-        input_rows(&manifest).err().as_deref(),
+        input_rows(manifest).err().as_deref(),
         Some("path is not a canonical regular file")
     );
-    Ok(())
 }
 
 fn path_manifest_rejected(manifest: &Value) -> bool {

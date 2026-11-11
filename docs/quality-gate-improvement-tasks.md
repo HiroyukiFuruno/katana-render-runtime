@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 計測再開の修正1件中1件完了。`a3723657`の全量計測は、追加したMach-Oケースが既存の固定SHA付きテスト専用ファイルを変更したため、開始前のfingerprint検査で停止した。ケースを既存の入力パステストへ移し、元のファイルを固定SHA `8c1893ff…` に復元した。関連2テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-macho-coverage-scope-jlz9c_w_/safe-summary.json`）。正式カバレッジの計測範囲と閾値は既存設定を用いる。
 - 対応予定1件中1件完了。HTMLの交差判定では座標と交差情報が同じ`ElementBox`の列から生成されていたため、1要素分をまとめて登録し、登録後の要素IDの再照合を除いた。同一IDが複数ある場合に最後の要素を採用する既存の順序、座標変換、JSON出力を維持した。スクロール、クリップ境界、回転、IntersectionObserverを含む関連79テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-html-intersection-metadata-_tv1o8j_/safe-summary.json`）。正式カバレッジ、HTML画像・性能の全量判定は最終フェーズで行う。
 - JavaScript依存の更新予定4件中4件完了。`@babel/parser`と`@babel/types`を8.1.2、推移依存の`@babel/helper-string-parser`を8.1.2、`glob`を14.0.5へ更新した。静的検査とランタイム資産テスト69件が成功。標準の`release-target-check`は更新前に`bun.lock`を拒否し、更新後は依存・資産529件の鮮度検査を通過した。必須祖先の検査も通過し、公開内容manifestの固定SHAとの不一致で止まった。最終候補を確定してから既存のmanifest更新手順で同期する（`tmp/quality/resumed-owner-r3509/release-bun-update-validation-5tq6yhia/safe-summary.json`）。GitHub Actionsの固定先14件を上流の安定版・対応refと照合し、すべて一致した。
 - 対応予定2件中2件完了。閉じ区切りのないMermaid frontmatterでは本文中の`zenuml`を図種として選択しないことを、通常のflowchart・空入力・日英ZenUMLとあわせて確認した。関連10テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-mermaid-unclosed-frontmatter-ku5nwn98/safe-summary.json`）。正式カバレッジと117図の採点は最終フェーズで行う。
