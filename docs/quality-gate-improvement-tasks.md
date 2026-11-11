@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定8件中8件完了。Mermaidランタイムの解決先が未作成／作成済みの場合、SVGの不正な主フォント・コレクションの別フェイス・再パック出力の拒否、自己参照マーカーの描画維持、HTMLのメディアクエリ代替と`nth-child`の位置判定を確認した。関連33テスト、静的検査、ASTが成功し、検査前後のソースは一致した（`tmp/quality/resumed-owner-r3509/release-renderer-eight-case-batch-g1_e1xda/safe-summary.json`）。変更は `adf3196f`・`2dbd537c`・`a948c77a`。正式カバレッジは最終フェーズで計測する。
 - 対応予定7件中7件完了。HTMLとMermaidの実ファイル書き込み制限テストを共通化し、Mermaidの診断出力が作成後の`EFBIG`を返して一時ファイルを回収すること、描画入口が異なる図種を拒否し空白だけの入力では空SVGを返すこと、HTML data URLがBase64のデコード後・パーセント形式のデコード前後の上限をそれぞれ守ることを確認した。macOSの関連41テスト、静的検査、ASTが成功し、検査前後のソースは一致した（`tmp/quality/resumed-owner-r3509/release-mermaid-html-seven-case-batch-z_j0si1k/safe-summary.json`）。変更は `141c3b4d`・`eca8df3b`・`12975489`。正式カバレッジは最終フェーズで計測し、実ファイル制限のLinux側は必須CIで確認する。
 - 対応予定1件中1件完了。HTML資源を実ファイルから読み込み、子プロセスだけにファイルサイズ制限をかけた。資源保存でファイル作成後に`EFBIG`が返り、空ファイルが残り、成功結果が返らないことを確認した。子はアサーションとLLVMプロファイル保存の前に制限を復元する。`nix`の`resource`はmacOS/Linuxの開発依存だけに追加し、通常の依存ツリーに含まれないことを確認。macOSの関連10テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-resource-audit-write-failure-gvd5yhpn/safe-summary.json`）。Linuxは必須CIで確認し、正式カバレッジは次の全量計測で判定する。
 - 対応予定1件中1件完了。Mermaid CLIの証跡作成で、実ファイルシステムのパス長制限により原本保存後の`request-source.mmd`だけが拒否される入力を追加した。`ENAMETOOLONG`が呼び出し元へ返り、原本が残り、描画出力と完了証跡が作成されないことを確認。macOSの関連6テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-cli-attestation-path-limit-r1k2xukd/safe-summary.json`）。Linux向け境界は必須CIで確認する。正式カバレッジは未再計測。
