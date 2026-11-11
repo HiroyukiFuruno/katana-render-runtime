@@ -109,6 +109,29 @@ mod tests {
     use crate::renderer::api::{RenderConfig, RenderContext, RenderPolicy};
 
     #[test]
+    fn rejects_non_mermaid_input_before_reading_runtime() {
+        let renderer = MermaidRenderer::with_runtime_path(PathBuf::from("missing-mermaid.min.js"));
+        let mut input = test_input();
+        input.kind = DiagramKind::PlantUml;
+
+        assert!(matches!(
+            renderer.render(&input),
+            Err(RenderError::UnsupportedKind)
+        ));
+    }
+
+    #[test]
+    fn whitespace_only_source_renders_empty_svg_without_runtime() -> Result<(), RenderError> {
+        let renderer = MermaidRenderer::with_runtime_path(PathBuf::from("missing-mermaid.min.js"));
+        let mut input = test_input();
+        input.source = " \n\t ".to_string();
+
+        let output = renderer.render(&input)?;
+        assert!(output.svg.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn resource_fingerprint_stays_stable_across_svg_instances_and_tracks_changes()
     -> Result<(), Box<dyn std::error::Error>> {
         let dir = tempfile::tempdir()?;
