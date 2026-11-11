@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -57,13 +58,10 @@ fn input_rows(manifest: &Value) -> Result<Vec<InputFile>, String> {
         return Err("input-manifest:empty-files".into());
     }
     let mut result = Vec::with_capacity(rows.len());
-    let mut unique = std::collections::BTreeSet::new();
+    let mut unique = BTreeSet::new();
     for row in rows {
         exact_keys(row, &["path", "size", "sha256"], "input-file")?;
-        let path = PathBuf::from(row["path"].as_str().ok_or("input-file:path")?);
-        if !path.is_absolute() || canonical_file(&path)? != path || !unique.insert(path.clone()) {
-            return Err("input-file:path-not-canonical-or-duplicate".into());
-        }
+        let path = input_path(row["path"].as_str().ok_or("input-file:path")?, &mut unique)?;
         let size = row["size"].as_u64().ok_or("input-file:size")?;
         let digest = row["sha256"].as_str().ok_or("input-file:sha256")?;
         if !is_sha256(digest) {
@@ -76,6 +74,19 @@ fn input_rows(manifest: &Value) -> Result<Vec<InputFile>, String> {
         });
     }
     Ok(result)
+}
+
+fn input_path(value: &str, unique: &mut BTreeSet<PathBuf>) -> Result<PathBuf, String> {
+    const INVALID_PATH: &str = "input-file:path-not-canonical-or-duplicate";
+    let path = PathBuf::from(value);
+    if !path.is_absolute() {
+        return Err(INVALID_PATH.into());
+    }
+    canonical_file(&path)?;
+    if !unique.insert(path.clone()) {
+        return Err(INVALID_PATH.into());
+    }
+    Ok(path)
 }
 
 fn inspect_file(path: PathBuf, expected_size: u64, expected_sha256: &str) -> Result<Value, String> {
@@ -96,9 +107,7 @@ fn inspect_file(path: PathBuf, expected_size: u64, expected_sha256: &str) -> Res
         return Err("input-file:sha256-changed".into());
     }
     let (format, records) = MachoNoso::records(&bytes)?;
-    if canonical_file(&path)? != path {
-        return Err("input-file:path-changed".into());
-    }
+    canonical_file(&path)?;
     Ok(
         json!({"path": path, "size": expected_size, "sha256": digest,
               "format": format, "nOso": records}),
