@@ -1,5 +1,40 @@
 pub(super) const RESOURCE_READER_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "pub(crate) fn read(\n        path: &Path,",
+        "pub(crate) fn renamed_read(\n        path: &Path,",
+        "missing-method:RuntimeResourceLoader::read",
+    ),
+    (
+        "fn read_bundled(bundled: BundledResource)",
+        "fn renamed_read_bundled(bundled: BundledResource)",
+        "missing-method:RuntimeResourceLoader::read_bundled",
+    ),
+    (
+        "match bundled {\n            Some(kind) => Self::read_bundled(kind).map(Cow::Borrowed),",
+        "match bundled {\n            Some(kind) => Self::read_bundled(kind).map(Cow::Borrowed),\n            Some(other) => other,",
+        "resource-loader:read-dispatch",
+    ),
+    (
+        "let source = match bundled {",
+        "let renamed = match bundled {",
+        "route-binding:source",
+    ),
+    (
+        "let source = match bundled {",
+        "let source = other; match bundled {",
+        "resource-loader:read-body",
+    ),
+    (
+        "let source = match bundled {\n            BundledResource::Mermaid => RuntimeAsset::mermaid()\n                .bytes()\n                .map_err(std::io::Error::other)?,\n            BundledResource::Drawio => RuntimeAsset::drawio()\n                .bytes()\n                .map_err(std::io::Error::other)?,\n            BundledResource::MathJax => {\n                return Ok(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                ));\n            }\n        };",
+        "let source = other;",
+        "resource-loader:read-dispatch",
+    ),
+    (
+        "return Ok(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                ));",
+        "return;",
+        "resource-loader:mathjax-source",
+    ),
+    (
         "BundledResource::MathJax",
         "BundledResource::Mermaid",
         "resource-loader:mathjax-role",

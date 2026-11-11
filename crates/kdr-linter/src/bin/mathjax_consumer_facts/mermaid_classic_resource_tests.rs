@@ -34,6 +34,21 @@ const LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
         "mermaid-resource-route:utf8",
     ),
     (
+        "std::str::from_utf8(source)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
+        "std::str::from_utf8(source).map_err(std::io::Error::other)",
+        "mermaid-resource-route:utf8",
+    ),
+    (
+        "std::str::from_utf8(source)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
+        "std::str::from_utf8(source)\n            .map_err(|failure| std::io::Error::new(std::io::ErrorKind::InvalidData, failure))",
+        "mermaid-resource-route:utf8",
+    ),
+    (
+        "std::str::from_utf8(source)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
+        "std::str::from_utf8(source)\n            .map_err(|error| std::io::Error::other(error))",
+        "mermaid-resource-route:utf8",
+    ),
+    (
         "BundledResource::Mermaid => RuntimeAsset::mermaid()\n                .bytes()\n                .map_err(std::io::Error::other)?,",
         "BundledResource::Mermaid => RuntimeAsset::mermaid()\n                .bytes()\n                .map_err(std::io::Error::other),",
         "mermaid-resource-route:bundled",
