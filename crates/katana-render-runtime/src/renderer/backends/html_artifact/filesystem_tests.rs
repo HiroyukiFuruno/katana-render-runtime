@@ -226,3 +226,52 @@ fn assert_special_file_is_ignored() -> Result<(), Box<dyn std::error::Error>> {
 fn assert_special_file_is_ignored() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
+
+#[test]
+fn atomic_write_preserves_existing_temp_and_destination() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let target = directory.path().join("frame.json");
+    let temp = target.with_extension(format!("tmp-{}", std::process::id()));
+    fs::write(&target, b"old frame")?;
+    fs::write(&temp, b"other writer")?;
+
+    assert!(matches!(
+        ArtifactFilesystem::write_atomic(&target, b"new frame"),
+        Err(HtmlArtifactError::Io(error)) if error.kind() == std::io::ErrorKind::AlreadyExists
+    ));
+    assert_eq!(fs::read(&target)?, b"old frame");
+    assert_eq!(fs::read(&temp)?, b"other writer");
+    Ok(())
+}
+
+#[test]
+fn quota_ignores_only_root_lock_and_counts_nested_lock() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let nested = directory.path().join("nested");
+    fs::create_dir(&nested)?;
+    fs::write(directory.path().join(".krr-artifact.lock"), b"root lock")?;
+    fs::write(nested.join(".krr-artifact.lock"), b"nested")?;
+    fs::write(nested.join("frame"), b"frame")?;
+
+    assert_eq!(ArtifactFilesystem::store_bytes(directory.path())?, 11);
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn lock_rejects_symlink_without_changing_target() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let target = directory.path().join("target");
+    let lock = directory.path().join(".krr-artifact.lock");
+    fs::write(&target, b"keep")?;
+    std::os::unix::fs::symlink(&target, &lock)?;
+
+    assert!(matches!(
+        StoreLock::acquire(directory.path()),
+        Err(HtmlArtifactError::SymlinkPath)
+    ));
+    assert_eq!(fs::read(&target)?, b"keep");
+    assert!(fs::symlink_metadata(&lock)?.file_type().is_symlink());
+    Ok(())
+}
