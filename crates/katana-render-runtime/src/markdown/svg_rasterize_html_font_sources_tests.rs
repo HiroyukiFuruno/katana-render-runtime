@@ -2,6 +2,7 @@ use super::{
     build_html_font_db, canonical_font_source_path, cjk_fallback_font_paths, load_font_paths,
     load_font_paths_once, paths_for_font_family,
 };
+use crate::markdown::svg_rasterize::font::BUNDLED_SANS_SERIF_FONT;
 use crate::markdown::svg_rasterize::font::html::request::HtmlFontRequest;
 use std::path::PathBuf;
 
@@ -207,18 +208,23 @@ fn load_font_paths_registers_existing_files_only() -> Result<(), std::io::Error>
 }
 
 #[test]
-fn load_font_paths_once_deduplicates_one_physical_source_with_aliases() -> Result<(), String> {
-    let existing = std::env::current_exe().map_err(|error| error.to_string())?;
-    let existing = existing.to_string_lossy().into_owned();
-    let alias = canonical_font_source_path(std::path::Path::new(&existing))
-        .map_err(|error| error.to_string())?;
+fn load_font_paths_once_deduplicates_one_physical_source_with_aliases() -> Result<(), std::io::Error>
+{
+    let directory = tempfile::tempdir()?;
+    let subdirectory = directory.path().join("sub");
+    std::fs::create_dir(&subdirectory)?;
+    let font_path = directory.path().join("font.ttf");
+    std::fs::write(&font_path, BUNDLED_SANS_SERIF_FONT)?;
+    let alias = subdirectory.join("..").join("font.ttf");
+    let font_path = font_path.to_string_lossy().into_owned();
     let alias = alias.to_string_lossy().into_owned();
-    let paths = [existing.as_str(), alias.as_str()];
+    let paths = [font_path.as_str(), alias.as_str()];
     let mut database = resvg::usvg::fontdb::Database::new();
     let mut loaded = std::collections::BTreeSet::new();
 
     assert_eq!(load_font_paths_once(&mut database, &paths, &mut loaded), 1);
     assert_eq!(loaded.len(), 1);
+    assert_eq!(database.faces().count(), 1);
     Ok(())
 }
 
