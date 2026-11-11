@@ -97,7 +97,7 @@ fn bounded_crop_rejects_outside_without_mutating_target() -> Result<(), String> 
 
 #[test]
 fn parsed_srgb_shadow_renders_source_and_shadow_at_scale() -> Result<(), String> {
-    let (target, calls) = render_srgb_fixture()?;
+    let (target, calls) = render_shadow_fixture(SRGB_SVG, Transform::from_scale(2.0, 2.0))?;
     assert_eq!(calls, 1);
     assert_eq!(
         pixel(&target, SOURCE_SAMPLE_X, SOURCE_SAMPLE_X)?,
@@ -111,6 +111,17 @@ fn parsed_srgb_shadow_renders_source_and_shadow_at_scale() -> Result<(), String>
         pixel(&target, OUTSIDE_SAMPLE, OUTSIDE_SAMPLE)?,
         BACKGROUND_GRAY
     );
+    Ok(())
+}
+
+#[test]
+fn authored_translation_renders_source_and_shadow_at_transformed_coordinates() -> Result<(), String>
+{
+    let svg = SRGB_SVG.replace("<g filter=", "<g transform=\"translate(10 5)\" filter=");
+    let (target, calls) = render_shadow_fixture(&svg, Transform::from_translate(10.0, 5.0))?;
+    assert_eq!(calls, 1);
+    assert_eq!(pixel(&target, 35, 25)?, SOURCE_BLUE);
+    assert_eq!(pixel(&target, 42, 25)?, SHADOW_RED);
     Ok(())
 }
 
@@ -128,8 +139,8 @@ fn color(bytes: [u8; COLOR_CHANNELS]) -> Color {
     Color::from_rgba8(red, green, blue, alpha)
 }
 
-fn render_srgb_fixture() -> Result<(Pixmap, u32), String> {
-    let tree = parse_shadow_svg(SRGB_SVG)?;
+fn render_shadow_fixture(svg: &str, transform: Transform) -> Result<(Pixmap, u32), String> {
+    let tree = parse_shadow_svg(svg)?;
     let group = find_group(&tree)?;
     let mut target =
         Pixmap::new(CANVAS_SIZE, CANVAS_SIZE).ok_or_else(|| "target allocation".to_owned())?;
@@ -139,12 +150,8 @@ fn render_srgb_fixture() -> Result<(Pixmap, u32), String> {
         calls += 1;
         paint_blue_source(transform, pixels)
     };
-    let handled = HtmlShadowRasterizer::render(
-        group,
-        Transform::from_scale(2.0, 2.0),
-        &mut target.as_mut(),
-        &mut renderer,
-    )?;
+    let handled =
+        HtmlShadowRasterizer::render(group, transform, &mut target.as_mut(), &mut renderer)?;
     assert!(handled);
     Ok((target, calls))
 }

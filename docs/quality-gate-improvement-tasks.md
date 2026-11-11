@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定2件中2件完了。SVGの平行移動で影と元図形の実画素を検証し、拡大の回帰と描画の準備を共通化した。macOSのフォント代替では診断設定を子プロセスへ限定し、開始位置を保持し中央・末尾を拒否する既存入力を完全名で1件実行した。関連13テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-svg-shadow-and-anchor-kotoutyg/safe-summary.json`）。正式カバレッジは補完が一通り揃った段階で計測する。
 - 対応予定1件中1件完了。tiny-skiaがRGBAの行バイト数をi32で検査したうえで生成したpixmapについて、SVGタイル境界で同じ幅を再検査しない。高さの変換と原点への加算の検査は維持した。タイル・曲線・クリップ関連9テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-svg-tile-pixmap-width-zwi4kz25/safe-summary.json`）。変更後の正式カバレッジは未計測。
 - 最新の正式計測 `735490fa` は6,287テスト成功・15件スキップ、86,467/86,851行（99.5578634673%）、未カバー384行。収集は成功し、100%・未カバー0の公開条件は不合格（`tmp/quality/resumed-owner-r3509/root-coverage-release-checkpoint-threads4-ig9iyftn/safe-summary.json`）。同じディレクトリの`gap-summary.json`を次の対応の一次情報とする。
 

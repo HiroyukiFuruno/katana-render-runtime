@@ -52,6 +52,29 @@ fn mixed_fallback_runs_preserve_start_middle_and_end_anchor_positions() -> Resul
 }
 
 #[cfg(target_os = "macos")]
+#[test]
+fn start_only_diagnostic_preserves_start_and_rejects_other_anchors()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (_, module) = module_path!()
+        .split_once("::")
+        .ok_or("test module missing")?;
+    let name =
+        format!("{module}::mixed_fallback_runs_preserve_start_middle_and_end_anchor_positions");
+    let output = crate::system::ProcessService::create_command(std::env::current_exe()?)
+        .args([name.as_str(), "--exact", "--color=never"])
+        .env("KRR_HTML_FEATURE_START_ONLY_FALLBACK_RUNS", "1")
+        .output()?;
+    let stdout = std::str::from_utf8(&output.stdout)?;
+    assert!(
+        output.status.success(),
+        "isolated fallback test failed: {stdout}"
+    );
+    let passed = format!("test {name} ... ok");
+    assert_eq!(stdout.lines().filter(|line| *line == passed).count(), 1);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
 fn assert_end_positions(
     positions: &[Vec<tiny_skia::Point>],
     middle: &Option<Vec<Vec<tiny_skia::Point>>>,
