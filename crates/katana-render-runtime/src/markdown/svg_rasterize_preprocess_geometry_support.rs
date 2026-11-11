@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Range;
 
 use resvg::usvg::roxmltree::{Document, Node};
 use simplecss::{AttributeOperator, Element, PseudoClass, Rule, StyleSheet};
@@ -92,12 +93,12 @@ impl Element for SvgElement<'_, '_, '_> {
 }
 
 pub(super) struct GeometryPlan {
-    pub(super) rx: Option<GeometryValue>,
-    pub(super) ry: Option<GeometryValue>,
+    pub(super) rx: Option<GeometryEdit>,
+    pub(super) ry: Option<GeometryEdit>,
 }
 
 impl GeometryPlan {
-    pub(super) fn value(&self, property: &str) -> Option<&GeometryValue> {
+    pub(super) fn value(&self, property: &str) -> Option<&GeometryEdit> {
         match property {
             "rx" => self.rx.as_ref(),
             "ry" => self.ry.as_ref(),
@@ -121,11 +122,16 @@ pub(super) enum CascadedGeometryValue {
     Unsupported,
 }
 
-impl GeometryValue {
+pub(super) enum GeometryEdit {
+    Set(String),
+    Remove(Range<usize>),
+}
+
+impl GeometryEdit {
     pub(super) fn as_attribute(&self) -> Option<&str> {
         match self {
-            Self::Length(value) => Some(value),
-            Self::Auto => None,
+            Self::Set(value) => Some(value),
+            Self::Remove(_) => None,
         }
     }
 }

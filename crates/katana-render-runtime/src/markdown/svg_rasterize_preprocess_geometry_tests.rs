@@ -206,6 +206,8 @@ fn negative_zero_is_materialized_as_nonnegative_zero() {
 fn geometry_attribute_selector_preserves_original_svg_bytes() {
     let source = r#"<svg xmlns="http://www.w3.org/2000/svg"><style>rect[rx="5"] { fill: red; } rect { rx: 12px; }</style><rect rx="5"/></svg>"#;
     assert_eq!(preprocess(source), source);
+    let auto = source.replace("12px", "auto");
+    assert_eq!(preprocess(&auto), auto);
 }
 
 #[test]

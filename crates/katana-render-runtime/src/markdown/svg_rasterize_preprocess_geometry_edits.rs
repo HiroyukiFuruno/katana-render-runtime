@@ -4,7 +4,7 @@ use std::ops::Range;
 use resvg::usvg::roxmltree::{Document, Node};
 
 use super::super::source_edits::{SourceEdit, apply_source_edits};
-use super::support::{GEOMETRY_PROPERTIES, GeometryPlan, GeometryValue, is_geometry_element};
+use super::support::{GEOMETRY_PROPERTIES, GeometryEdit, GeometryPlan, is_geometry_element};
 
 pub(super) fn apply_geometry_plans(
     document: &Document<'_>,
@@ -47,25 +47,21 @@ fn collect_attribute_edits(
 fn collect_property_edit(
     node: Node<'_, '_>,
     property: &str,
-    value: &GeometryValue,
+    value: &GeometryEdit,
     insertions: &mut String,
     edits: &mut Vec<SourceEdit>,
 ) {
-    match (node.attribute_node(property), value) {
-        (Some(attribute), GeometryValue::Length(value)) => {
-            push_edit(edits, attribute.range_value(), value.to_owned());
+    match value {
+        GeometryEdit::Set(value) => {
+            if let Some(attribute) = node.attribute_node(property) {
+                push_edit(edits, attribute.range_value(), value.to_owned());
+            } else {
+                insertions.push_str(&format!(" {property}=\"{value}\""));
+            }
         }
-        (Some(attribute), GeometryValue::Auto) => {
-            push_edit(
-                edits,
-                remove_preceding_space(attribute.range()),
-                String::new(),
-            );
+        GeometryEdit::Remove(range) => {
+            push_edit(edits, remove_preceding_space(range.clone()), String::new());
         }
-        (None, GeometryValue::Length(value)) => {
-            insertions.push_str(&format!(" {property}=\"{value}\""));
-        }
-        (None, GeometryValue::Auto) => {}
     }
 }
 

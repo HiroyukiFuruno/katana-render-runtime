@@ -11,8 +11,8 @@ mod geometry_values;
 mod support;
 
 use support::{
-    CascadeRank, CascadedGeometryValue, GeometryPlan, GeometryValue, SvgElement, Winner,
-    is_geometry_element,
+    CascadeRank, CascadedGeometryValue, GeometryEdit, GeometryPlan, GeometryValue, SvgElement,
+    Winner, is_geometry_element,
 };
 
 pub(super) fn materialize_geometry_properties(svg: String) -> String {
@@ -83,19 +83,24 @@ fn resolve_changed_property(
     node: Node<'_, '_>,
     property: &str,
     style_sheet: &StyleSheet<'_>,
-) -> Option<GeometryValue> {
-    let original = node.attribute(property);
+) -> Option<GeometryEdit> {
+    let attribute = node.attribute_node(property);
+    let original = attribute.map(|attribute| attribute.value());
     let mut winner = original.map(|value| Winner {
         rank: CascadeRank::presentation_attribute(),
         value: CascadedGeometryValue::Materialized(GeometryValue::Length(value.to_owned())),
     });
     consider_stylesheet_declarations(&mut winner, node, property, style_sheet);
     consider_inline_declarations(&mut winner, style_attribute(node), property);
-    let resolved = winner.and_then(|winner| match winner.value {
+    match winner?.value {
         CascadedGeometryValue::Unsupported => None,
-        CascadedGeometryValue::Materialized(value) => Some(value),
-    });
-    resolved.filter(|value| original != value.as_attribute())
+        CascadedGeometryValue::Materialized(GeometryValue::Length(value)) => {
+            (original != Some(value.as_str())).then_some(GeometryEdit::Set(value))
+        }
+        CascadedGeometryValue::Materialized(GeometryValue::Auto) => {
+            attribute.map(|attribute| GeometryEdit::Remove(attribute.range()))
+        }
+    }
 }
 
 pub(super) fn selector_matches_source_node(
