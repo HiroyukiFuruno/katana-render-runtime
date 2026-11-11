@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [/] `5e666726` の正式producerによる中間計測は6,232件成功・別15件skip、86,953/87,408行（99.4794526817%）、未カバー455行。前回とファイルごとの未カバー数は同じ。テキストパス・ストア・行メトリクスの回帰は実行済み。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-qcx1nrtf/safe-summary.json`）。次の入力選定には同runの`--show-missing-lines`出力（`tmp/quality/standalone-performance-coverage/root-nextest-attempts/3b1c7ace-0eb1-4592-9a4c-3917f7619c3e/report/stdout.raw`）で対象行を照合する。
 - [x] マスク内の実SVGのtextPathをテキスト保持書き出しで再解析し、参照するpathと非透明な描画画素を保持することを確認。既存の通常グループ回帰と検証手順を共通化し、foundation・AST・関連3件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-mask-text-path-writer-exact-68eg0ce2/safe-summary.json`）。
 - [x] HTMLの描画結果ストアが未作成の複数階層を作り、既存の通常ファイルを保存先として渡した場合は拒否して元のバイト列を保持することを確認。既存テストの時刻ベースの一時ディレクトリが並列実行で衝突し、初回は`StoreBusy`が1件発生した（`tmp/quality/resumed-owner-r3509/coverage-html-artifact-constructor-exact-ki4rw608/safe-summary.json`）。排他的に確保する一時ディレクトリへ変更し、foundation・AST・並列の関連7件成功（`tmp/quality/resumed-owner-r3509/coverage-html-artifact-constructor-exact-xnvev4er/safe-summary.json`）。今回の差分の全体計測への反映は未確認。
 - [x] Mermaid形状検証で2点以上の条件と両端の取得を1回のパターン照合で扱った。1点・同一点・不正パスの拒否と複数サブパスの端点を既存回帰で再確認。フォント行メトリクスは実際の異なる文字列を上限超過まで計測し、保持件数と再計測の結果を確認した。foundation・AST・関連7件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-endpoints-and-line-metric-cache-exact-q1wk53c5/safe-summary.json`）。全体計測への反映は未確認。
