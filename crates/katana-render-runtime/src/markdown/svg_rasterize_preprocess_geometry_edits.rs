@@ -7,10 +7,10 @@ use super::super::source_edits::{SourceEdit, apply_source_edits};
 use super::support::{GEOMETRY_PROPERTIES, GeometryPlan, GeometryValue, is_geometry_element};
 
 pub(super) fn apply_geometry_plans(
-    source: &str,
     document: &Document<'_>,
     plans: HashMap<usize, GeometryPlan>,
 ) -> Option<String> {
+    let source = document.input_text();
     let mut edits = Vec::new();
     for node in document
         .descendants()
@@ -35,7 +35,7 @@ fn collect_attribute_edits(
         let Some(value) = plan.value(property) else {
             continue;
         };
-        collect_property_edit(source, node, property, value, &mut insertions, edits);
+        collect_property_edit(node, property, value, &mut insertions, edits);
     }
     if !insertions.is_empty()
         && let Some(position) = opening_tag_end(source, node)
@@ -45,7 +45,6 @@ fn collect_attribute_edits(
 }
 
 fn collect_property_edit(
-    source: &str,
     node: Node<'_, '_>,
     property: &str,
     value: &GeometryValue,
@@ -59,28 +58,20 @@ fn collect_property_edit(
         (Some(attribute), GeometryValue::Auto) => {
             push_edit(
                 edits,
-                remove_preceding_space(source, attribute.range()),
+                remove_preceding_space(attribute.range()),
                 String::new(),
             );
         }
         (None, GeometryValue::Length(value)) => {
             insertions.push_str(&format!(" {property}=\"{value}\""));
         }
-        (None, GeometryValue::Auto) | (_, GeometryValue::Unsupported) => {}
+        (None, GeometryValue::Auto) => {}
     }
 }
 
-fn remove_preceding_space(source: &str, range: Range<usize>) -> Range<usize> {
-    let start = range.start.saturating_sub(1);
-    if source
-        .as_bytes()
-        .get(start)
-        .is_some_and(u8::is_ascii_whitespace)
-    {
-        start..range.end
-    } else {
-        range
-    }
+fn remove_preceding_space(range: Range<usize>) -> Range<usize> {
+    /* WHY: XMLの属性範囲は属性名から始まり、その直前は区切りの空白。 */
+    range.start.saturating_sub(1)..range.end
 }
 
 fn opening_tag_end(source: &str, node: Node<'_, '_>) -> Option<usize> {

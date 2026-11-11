@@ -1,15 +1,15 @@
 use std::str::FromStr;
 
-use super::support::GeometryValue;
+use super::support::{CascadedGeometryValue, GeometryValue};
 use svgtypes::Length;
 
-pub(super) fn parse_geometry_value(value: &str) -> Option<GeometryValue> {
+pub(super) fn parse_geometry_value(value: &str) -> Option<CascadedGeometryValue> {
     let value = value.trim();
     if value.eq_ignore_ascii_case("auto") {
-        return Some(GeometryValue::Auto);
+        return Some(CascadedGeometryValue::Materialized(GeometryValue::Auto));
     }
     let Ok(length) = Length::from_str(value) else {
-        return unsupported_css_value(value).then_some(GeometryValue::Unsupported);
+        return unsupported_css_value(value).then_some(CascadedGeometryValue::Unsupported);
     };
     if !length.number.is_finite() || length.number < 0.0 {
         return None;
@@ -19,7 +19,9 @@ pub(super) fn parse_geometry_value(value: &str) -> Option<GeometryValue> {
     } else {
         value
     };
-    Some(GeometryValue::Length(value.to_owned()))
+    Some(CascadedGeometryValue::Materialized(GeometryValue::Length(
+        value.to_owned(),
+    )))
 }
 
 fn unsupported_css_value(value: &str) -> bool {

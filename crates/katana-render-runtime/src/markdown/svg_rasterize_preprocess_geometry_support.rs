@@ -123,6 +123,10 @@ impl GeometryPlan {
 pub(super) enum GeometryValue {
     Length(String),
     Auto,
+}
+
+pub(super) enum CascadedGeometryValue {
+    Materialized(GeometryValue),
     Unsupported,
 }
 
@@ -130,14 +134,14 @@ impl GeometryValue {
     pub(super) fn as_attribute(&self) -> Option<&str> {
         match self {
             Self::Length(value) => Some(value),
-            Self::Auto | Self::Unsupported => None,
+            Self::Auto => None,
         }
     }
 }
 
 pub(super) struct Winner {
     pub(super) rank: CascadeRank,
-    pub(super) value: GeometryValue,
+    pub(super) value: CascadedGeometryValue,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

@@ -11,8 +11,8 @@ mod geometry_values;
 mod support;
 
 use support::{
-    CascadeRank, GEOMETRY_PROPERTIES, GeometryPlan, GeometryValue, SvgElement, Winner,
-    is_geometry_element,
+    CascadeRank, CascadedGeometryValue, GEOMETRY_PROPERTIES, GeometryPlan, GeometryValue,
+    SvgElement, Winner, is_geometry_element,
 };
 
 pub(super) fn materialize_geometry_properties(svg: String) -> String {
@@ -36,7 +36,7 @@ fn rewrite_geometry_properties(svg: &str) -> Option<String> {
     if plans.is_empty() || support::selectors_change_matches(&document, &style_sheet, &plans) {
         return None;
     }
-    edits::apply_geometry_plans(svg, &document, plans)
+    edits::apply_geometry_plans(&document, plans)
 }
 
 fn parse_style_sheets<'doc, 'input: 'doc>(
@@ -90,13 +90,13 @@ fn resolve_property(
 ) -> Option<GeometryValue> {
     let mut winner = node.attribute(property).map(|value| Winner {
         rank: CascadeRank::presentation_attribute(),
-        value: GeometryValue::Length(value.to_owned()),
+        value: CascadedGeometryValue::Materialized(GeometryValue::Length(value.to_owned())),
     });
     consider_stylesheet_declarations(&mut winner, node, property, style_sheet);
     consider_inline_declarations(&mut winner, style_attribute(node), property);
     winner.and_then(|winner| match winner.value {
-        GeometryValue::Unsupported => None,
-        value => Some(value),
+        CascadedGeometryValue::Unsupported => None,
+        CascadedGeometryValue::Materialized(value) => Some(value),
     })
 }
 
