@@ -140,3 +140,35 @@ pub(in super::super) fn check_aggregate_faces_and_metrics() -> Result<(), String
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Database, diagnostic_lf_coverage};
+    use resvg::usvg::fontdb::Source;
+
+    #[test]
+    fn font_coverage_counts_registered_face_with_missing_file() -> Result<(), String> {
+        let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+        let missing = directory.path().join("missing.ttf");
+        let retained = directory.path().join("retained.ttf");
+        let moved = directory.path().join("moved.ttf");
+        let bytes = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
+        std::fs::write(&missing, bytes).map_err(|error| error.to_string())?;
+        std::fs::write(&retained, bytes).map_err(|error| error.to_string())?;
+        let mut database = Database::new();
+        assert_eq!(
+            database
+                .load_font_source(Source::File(missing.clone()))
+                .len(),
+            1
+        );
+        assert_eq!(database.load_font_source(Source::File(retained)).len(), 1);
+        std::fs::rename(&missing, &moved).map_err(|error| error.to_string())?;
+        let (_, inspected, total) = diagnostic_lf_coverage(&database)?;
+        assert_eq!((inspected, total), (1, 2));
+        std::fs::rename(moved, missing).map_err(|error| error.to_string())?;
+        let (_, inspected, total) = diagnostic_lf_coverage(&database)?;
+        assert_eq!((inspected, total), (2, 2));
+        Ok(())
+    }
+}

@@ -176,7 +176,9 @@ pub(in super::super) fn diagnostic_face_report(
 
 #[cfg(test)]
 mod tests {
-    use super::{Database, ID, Source, assert_same_face_bytes, diagnostic_face_identity};
+    use super::{
+        Database, ID, Source, assert_same_face, assert_same_face_bytes, diagnostic_face_identity,
+    };
     use std::{path::PathBuf, sync::Arc};
 
     const NOTO_SANS: &str = "assets/fonts/NotoSans-Regular.ttf";
@@ -227,6 +229,28 @@ mod tests {
                 .err()
                 .as_deref(),
             Some("real face bytes or source indices differ")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn face_comparison_rejects_memory_backed_font_even_for_identical_bytes() -> Result<(), String> {
+        let path = font_path(NOTO_SANS);
+        let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
+        let (file, file_id) = single_face_database(Source::File(path));
+        let (memory, memory_id) = single_face_database(Source::Binary(Arc::new(bytes)));
+        assert_same_face_bytes(&file, file_id, &memory, memory_id)?;
+        assert_eq!(
+            assert_same_face(&memory, memory_id, &file, file_id)
+                .err()
+                .as_deref(),
+            Some("known face is not file-backed")
+        );
+        assert_eq!(
+            assert_same_face(&file, file_id, &memory, memory_id)
+                .err()
+                .as_deref(),
+            Some("eager face is not file-backed")
         );
         Ok(())
     }
