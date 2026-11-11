@@ -160,8 +160,8 @@ fn convert_paint(
 ) -> Option<(Paint, Option<ContextElement>)> {
     let paint = parse_svg_paint(value, aid)?;
     match paint {
-        svgtypes::Paint::None => None,
-        svgtypes::Paint::Inherit => None, // already resolved by svgtree
+        // 継承は属性ツリーで解決済み。
+        svgtypes::Paint::None | svgtypes::Paint::Inherit => None,
         svgtypes::Paint::ContextFill => context_fill(state),
         svgtypes::Paint::ContextStroke => context_stroke(state),
         svgtypes::Paint::CurrentColor => Some(color_paint(current_color(node), opacity)),

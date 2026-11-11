@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] SVG塗りの既に解決済みの継承値と無指定値が同じ結果を返す重複分岐を統合。明示的な継承、子の色指定、塗りの参照を含む関連62件と静的検査・AST・SVG由来検査4件が成功（`tmp/quality/resumed-owner-r3509/coverage-svg-paint-inherit-exact-am2zuwxd/safe-summary.json`）。正式集計への反映は未確認。
 - [x] 線形・放射グラデーション、パターン、フィルターが重複して持っていた属性参照の探索を共通化。実SVGで共通属性と色停止点は異種のグラデーションを通って継承し、座標の探索は異種の参照先で止まることを確認した。関連109件、静的検査・AST・SVG由来検査4件が成功（`tmp/quality/resumed-owner-r3509/coverage-svg-paint-attribute-chain-exact-ipid7a83/safe-summary.json`）。正式集計への反映は未確認。
 - [/] `c4e8a3f9`の正式計測は6,259件成功・別15件skip、86,430/86,841行（99.5267212492%）、未カバー411行。前回415行から入力パーサーで2行、テキスト空白処理とクリップの書き出しで各1行減。収集実0、ソース前後一致。公開用カバレッジ判定は未達（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-a42n47za/safe-summary.json`）。
 - [x] 通常SVGとSVGZを同じUTF-8検証へ合流させ、現行パーサーに生成元がない内部エラー値2つを除去。既存のXML制限と実際に返るエラーは維持した。通常SVGとSVGZの画素一致、両経路の不正UTF-8、破損gzipを含む関連50件、静的検査・AST・SVG由来検査4件が成功（`tmp/quality/resumed-owner-r3509/coverage-svg-input-encoding-exact-t19t0m7o/safe-summary.json`）。正式集計への反映は未確認。

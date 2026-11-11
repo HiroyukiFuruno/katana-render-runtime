@@ -187,9 +187,9 @@
       "source": "crates/usvg/src/parser/style.rs",
       "destination": "usvg/parser/style.rs",
       "sourceSha256": "d2b1f038f7f88f4f778b3a8534f701981e7e9eb7e26774b63df3b92e277f496d",
-      "transplantedSha256": "712f82ad72e2eb41d54fbde6d87e7172f91a5cefd52863bd1ce14f40b887f4f7",
+      "transplantedSha256": "78bb08fbbd48dfe5a0d74b5c5c6107637a9bb1175d6ccdd487257334bd591ccc",
       "sourceBytes": 9682,
-      "transplantedBytes": 10909,
+      "transplantedBytes": 10917,
       "adaptations": {
         "cratePaths": 2,
         "enabledFeaturePredicates": {},
