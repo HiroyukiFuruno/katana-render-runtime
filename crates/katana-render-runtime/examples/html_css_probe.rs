@@ -8,6 +8,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use url::Url;
 
+#[cfg(test)]
+#[path = "html_css_probe_tests.rs"]
+mod html_css_probe_tests;
+
 const VIEWPORT_WIDTH: u32 = 1230;
 const VIEWPORT_HEIGHT: u32 = 867;
 const SLIDE_COUNT: usize = 14;
