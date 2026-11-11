@@ -1,7 +1,10 @@
 use super::{assert_exit_one, run_cli, sha256};
 use serde_json::{Value, json};
 use std::ffi::OsString;
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 #[path = "../../src/bin/mathjax_consumer_facts/macho_noso_test_support.rs"]
 mod fixture;
@@ -10,11 +13,7 @@ use fixture::{Corruption, MachoNosoFixture};
 
 #[test]
 fn verified_macho_inputs_produce_a_complete_report() -> Result<(), String> {
-    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
-    let folder = directory
-        .path()
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
+    let (_directory, folder) = canonical_fixture_folder()?;
     let inputs = [
         write_thin_input(&folder.join("fixture32.o"), false)?,
         write_thin_input(&folder.join("fixture64.o"), true)?,
@@ -40,11 +39,7 @@ fn verified_macho_inputs_produce_a_complete_report() -> Result<(), String> {
 
 #[test]
 fn invalid_macho_never_emits_a_partial_success_report() -> Result<(), String> {
-    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
-    let folder = directory
-        .path()
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
+    let (_directory, folder) = canonical_fixture_folder()?;
     let valid = write_thin_input(&folder.join("valid.o"), true)?;
     let invalid = [
         MachoNosoFixture::thin_macho(true, Corruption::LoadCommandSize),
@@ -56,12 +51,39 @@ fn invalid_macho_never_emits_a_partial_success_report() -> Result<(), String> {
     for bytes in invalid {
         let rejected = write_input(&folder.join("rejected.o"), &bytes)?;
         let manifest = write_manifest(&folder, &[valid.clone(), rejected])?;
-        let result = run_cli(&manifest_arguments(&manifest))?;
-        assert_exit_one(&result, "corrupted Mach-O invocation")?;
-        assert!(result.stdout.is_empty());
-        assert!(!result.stderr.is_empty());
+        assert_rejected_manifest(&manifest, "corrupted Mach-O invocation")?;
     }
     Ok(())
+}
+
+#[test]
+fn stale_macho_digest_never_emits_a_partial_success_report() -> Result<(), String> {
+    let (_directory, folder) = canonical_fixture_folder()?;
+    let valid = write_thin_input(&folder.join("valid.o"), true)?;
+    let mut stale = write_thin_input(&folder.join("stale.o"), false)?;
+    stale["sha256"] = json!(sha256(b"outdated object file"));
+    let manifest = write_manifest(&folder, &[valid, stale])?;
+    let stderr = assert_rejected_manifest(&manifest, "stale Mach-O digest")?;
+    assert!(stderr.contains("input-file:sha256-changed"), "{stderr}");
+    Ok(())
+}
+
+fn canonical_fixture_folder() -> Result<(tempfile::TempDir, PathBuf), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let folder = directory
+        .path()
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    Ok((directory, folder))
+}
+
+fn assert_rejected_manifest(manifest: &Path, label: &str) -> Result<String, String> {
+    let result = run_cli(&manifest_arguments(manifest))?;
+    assert_exit_one(&result, label)?;
+    assert!(result.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&result.stderr).into_owned();
+    assert!(!stderr.is_empty());
+    Ok(stderr)
 }
 
 fn write_thin_input(path: &Path, is_64: bool) -> Result<Value, String> {
