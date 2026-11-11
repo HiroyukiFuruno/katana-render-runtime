@@ -1,21 +1,15 @@
 use super::super::super::tests::unit_output;
 use super::super::capture;
 use super::{
-    CLASSIC_PROGRAM_COUNT, SOURCE, observe, programs, request, request_json, unit_tempdir,
-    write_capture,
+    CLASSIC_PROGRAM_COUNT, CaptureState, SOURCE, observe, programs, request, request_json,
+    unit_tempdir, write_capture,
 };
 use anyhow::{Context, ensure};
 
 #[test]
 fn capture_rejects_a_removed_script_after_successful_verification() -> anyhow::Result<()> {
-    let value = request_json(false);
-    let state = observe(|| {
-        request(&value, CLASSIC_PROGRAM_COUNT);
-        programs(&value, false);
-    })?;
-    state.validate(SOURCE)?;
     let tempdir = unit_tempdir()?;
-    let capture = write_capture(tempdir.path(), state)?;
+    let capture = write_capture(tempdir.path(), validated_capture_state()?)?;
     capture.verify()?;
     std::fs::remove_file(tempdir.path().join("classic-script-00.js"))?;
     let error = capture
@@ -33,24 +27,13 @@ fn capture_rejects_a_removed_script_after_successful_verification() -> anyhow::R
 
 #[test]
 fn existing_manifest_rejects_write_after_capture_programs_are_saved() -> anyhow::Result<()> {
-    let value = request_json(false);
-    let state = observe(|| {
-        request(&value, CLASSIC_PROGRAM_COUNT);
-        programs(&value, false);
-    })?;
-    state.validate(SOURCE)?;
     let tempdir = unit_tempdir()?;
     let root = tempdir.path();
     std::fs::write(root.join("classic-capture.json"), b"reserved")?;
-    let error = write_capture(root, state)
+    let error = write_capture(root, validated_capture_state()?)
         .err()
         .context("existing manifest destination accepted")?;
-    ensure!(
-        error
-            .downcast_ref::<std::io::Error>()
-            .is_some_and(|error| error.kind() == std::io::ErrorKind::AlreadyExists),
-        "manifest write failed for an unexpected reason: {error}"
-    );
+    require_destination_collision(&error)?;
     ensure!(
         root.join("classic-script-03.js").exists(),
         "capture stopped before manifest write"
@@ -58,6 +41,71 @@ fn existing_manifest_rejects_write_after_capture_programs_are_saved() -> anyhow:
     ensure!(
         std::fs::read(root.join("classic-capture.json"))? == b"reserved",
         "existing manifest was overwritten"
+    );
+    Ok(())
+}
+
+#[test]
+fn existing_program_prevents_later_scripts_and_manifest_writes() -> anyhow::Result<()> {
+    let artifacts = unit_tempdir()?;
+    let root = artifacts.path();
+    let reserved = root.join("classic-script-01.js");
+    std::fs::write(&reserved, b"reserved")?;
+    let error = write_capture(root, validated_capture_state()?)
+        .err()
+        .context("existing script destination accepted")?;
+    require_destination_collision(&error)?;
+    ensure!(
+        std::fs::read(&reserved)? == b"reserved",
+        "existing script overwritten"
+    );
+    for (name, present) in [
+        ("classic-request.json", true),
+        ("classic-script-00.js", true),
+        ("classic-script-02.js", false),
+        ("classic-capture.json", false),
+    ] {
+        ensure!(
+            root.join(name).exists() == present,
+            "unexpected state for {name}"
+        );
+    }
+    Ok(())
+}
+
+fn require_destination_collision(error: &anyhow::Error) -> anyhow::Result<()> {
+    ensure!(
+        error
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| error.kind() == std::io::ErrorKind::AlreadyExists),
+        "unexpected write failure: {error}"
+    );
+    Ok(())
+}
+
+fn validated_capture_state() -> anyhow::Result<CaptureState> {
+    let value = request_json(false);
+    let state = observe(|| {
+        request(&value, CLASSIC_PROGRAM_COUNT);
+        programs(&value, false);
+    })?;
+    state.validate(SOURCE)?;
+    Ok(state)
+}
+
+#[test]
+fn capture_without_runtime_events_is_rejected_before_writing() -> anyhow::Result<()> {
+    let artifacts = unit_tempdir()?;
+    let error = capture(artifacts.path(), SOURCE, || Ok(unit_output()))
+        .err()
+        .context("capture accepted a render without runtime events")?;
+    ensure!(
+        error.to_string().contains("classic request not observed"),
+        "unexpected capture rejection: {error}"
+    );
+    ensure!(
+        std::fs::read_dir(artifacts.path())?.next().is_none(),
+        "capture wrote evidence without runtime events"
     );
     Ok(())
 }
