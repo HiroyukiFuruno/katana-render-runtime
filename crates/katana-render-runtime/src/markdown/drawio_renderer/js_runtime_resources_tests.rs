@@ -9,6 +9,9 @@ use super::{DrawioResourceCatalog, encoding_for_path, mime_type_for_path};
 use crate::markdown::runtime_asset_archive::RuntimeAssetArchive;
 use std::time::Instant;
 
+const FIRST_BUILTIN_GROUP: &DrawioResourceArchiveGroup =
+    &super::archive::DRAWIO_RESOURCE_ARCHIVE_GROUPS[0];
+
 #[test]
 fn builtin_selects_basic_stencil_shape_scripts_and_referenced_images() -> Result<(), String> {
     let source = r#"
@@ -55,6 +58,35 @@ fn invalid_resource_group_stops_before_brotli_decompression() {
     };
 
     assert!(group_bytes_for_test(&invalid_group).is_err());
+}
+
+#[test]
+fn truncated_builtin_group_is_rejected_during_decompression() -> Result<(), String> {
+    let truncated = DrawioResourceArchiveGroup {
+        compressed_length: FIRST_BUILTIN_GROUP.compressed_length - 1,
+        ..*FIRST_BUILTIN_GROUP
+    };
+    let error = group_bytes_for_test(&truncated)
+        .err()
+        .ok_or("truncated Draw.io group was accepted")?;
+    assert!(!error.contains("length mismatch"), "{error}");
+    Ok(())
+}
+
+#[test]
+fn builtin_group_rejects_inconsistent_uncompressed_length() -> Result<(), String> {
+    let wrong_length = DrawioResourceArchiveGroup {
+        uncompressed_length: FIRST_BUILTIN_GROUP.uncompressed_length + 1,
+        ..*FIRST_BUILTIN_GROUP
+    };
+    let error = group_bytes_for_test(&wrong_length)
+        .err()
+        .ok_or("incorrect Draw.io group length was accepted")?;
+    assert!(
+        error.contains("Draw.io resource archive length mismatch"),
+        "{error}"
+    );
+    Ok(())
 }
 
 #[test]
