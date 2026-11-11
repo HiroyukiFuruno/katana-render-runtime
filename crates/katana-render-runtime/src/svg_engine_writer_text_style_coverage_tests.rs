@@ -248,15 +248,31 @@ fn nested_group_text_path_definition_survives_writer_roundtrip() -> Result<(), S
       <g transform="translate(1 2)"><g opacity="0.9"><text font-family="Noto Sans" font-size="12">
       <textPath href="#curve" startOffset="10%">Nested path</textPath></text></g></g>
     </svg>"##;
-    let original = parse_writer_svg(input, "nested-group-text-path")?;
+    assert_text_path_roundtrip(input, "nested group text path")
+}
+
+#[test]
+fn mask_text_path_definition_survives_writer_roundtrip() -> Result<(), String> {
+    let input = r##"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60">
+      <defs><path id="curve" d="M5 35 C30 10 70 10 110 35"/>
+      <mask id="letters" maskUnits="userSpaceOnUse" x="0" y="0" width="120" height="60">
+      <text fill="white" font-family="Noto Sans" font-size="12"><textPath href="#curve">Masked</textPath></text>
+      </mask></defs><rect width="120" height="60" fill="red" mask="url(#letters)"/>
+    </svg>"##;
+    assert_text_path_roundtrip(input, "mask text path")
+}
+
+fn assert_text_path_roundtrip(input: &str, case: &str) -> Result<(), String> {
+    let original = parse_writer_svg(input, case)?;
     let options = usvg::WriteOptions {
         preserve_text: true,
         ..usvg::WriteOptions::default()
     };
     let serialized = original.to_string(&options);
     assert_text_path_definition(&serialized)?;
-    let reparsed = parse_writer_svg(&serialized, "nested-group-text-path-roundtrip")?;
-    assert_pixels_equal(&original, &reparsed, "nested group text path")?;
+    let reparsed = parse_writer_svg(&serialized, case)?;
+    let pixels = assert_pixels_equal(&original, &reparsed, case)?;
+    assert!(pixels.pixels().iter().any(|pixel| pixel.alpha() > 0));
     Ok(())
 }
 
