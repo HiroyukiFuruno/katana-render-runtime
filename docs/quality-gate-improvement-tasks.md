@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] SVGの文字runはキャッシュ・部分再解決・非キャッシュのいずれも元の文字を順番に連結するため、同じ文字列の再比較を除去。各断片のface再選択と照合は維持。HTMLのinline SVGは同じCSS寸法と異なるviewBox比で、既定の縦横比と`none`の描画面積差を実画素で確認した。source-static-foundation・AST・関連11件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-fragment-and-html-aspect-exact-ix8gghmz/safe-summary.json`）。初回ASTの色定数指摘を修正。全体計測への反映は未確認。
+- [/] `4c9f4e4b` の正式producerによる中間計測は6,220件成功・別15件skip、86,913/87,376行（99.4701062077%）、未カバー463行。HTMLの折り返し判定で1行減。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-yq44lij_/safe-summary.json`）。依存ファイル照合の遅延後、実テストと集計を完了した。
 - [x] 折り返しは、非空行の末尾を返すunicode-linebreak 0.1.5とKRRの末尾保持を確認し、先頭候補の判定をまとめた。入力後のblur/change回帰は通常の入力欄に複数行入力欄と検索欄を加え、4パターンずつ確認。source-static-foundation・AST・関連7件成功（`tmp/quality/resumed-owner-r3509/coverage-wrap-and-text-focus-exact-gu3gg613/safe-summary.json`）。全体計測への反映は未確認。
 - [/] `35b28cc1` の正式producerによる中間計測は6,220件成功・別15件skip、86,911/87,375行（99.4689556509%）、未カバー464行。Mach-O依存検査、CLIハッシュ経路、環境設定のテスト用境界で各1行減。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-864z4dtm/safe-summary.json`）。中断した前回runの終了コードは未取得のまま保持した。
 - [x] 実HTMLの`insertAdjacentText`でマークアップに見える文字列を文字として保持し、CSS幅指定の空`select`はラベルなしでクリック範囲を維持。実Notoフォントの`sub/../font.ttf`経由でも物理ファイルを1回だけ登録し、CLIで不正なハッシュ処理とCargo依存欠落を拒否した。source-static-foundation・ASTは再ビルド後に成功し、同一ソース・同一binaryで関連12件を実行して成功（`tmp/quality/resumed-owner-r3509/coverage-html-font-cli-exact-owner-retry-1xwwtawb/safe-summary.json`）。初回の空`select`自動幅の仮定58pxに対する実測1pxは保持し、Chromeとの照合は未実施。全体計測への反映は確認待ち。
