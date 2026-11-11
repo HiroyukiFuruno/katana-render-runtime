@@ -58,10 +58,10 @@ fn layout_in_database(
     let base = matching_font_face(database, family, font.weight, font.italic)
         .ok_or_else(|| error("SVG font face unavailable"))?;
     let runs = resolved_font_runs(database, base, family, text, font.weight, font.italic);
-    let [(face, run)] = runs.as_slice() else {
+    let [(face, _)] = runs.as_slice() else {
         return Ok(None);
     };
-    if run != text || !fragment_faces_match(database, base, *face, family, font, fragments) {
+    if !fragment_faces_match(database, base, *face, family, font, fragments) {
         return Ok(None);
     }
     layout_for_face(database, base, *face, text, font, fragments)
@@ -77,7 +77,7 @@ fn fragment_faces_match(
 ) -> bool {
     fragments.iter().all(|fragment| {
         let runs = resolved_font_runs(database, base, family, fragment, font.weight, font.italic);
-        matches!(runs.as_slice(), [(id, run)] if *id == face && run == fragment)
+        matches!(runs.as_slice(), [(id, _)] if *id == face)
     })
 }
 
