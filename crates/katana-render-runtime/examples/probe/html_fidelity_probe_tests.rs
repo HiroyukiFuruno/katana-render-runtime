@@ -2,6 +2,12 @@ use super::{ProbeOptions, ProbeResult};
 use std::{ffi::OsString, fs, path::Path};
 
 const PATH_ARGUMENT_COUNT: usize = 4;
+const SCROLL_FIXTURE: &str = r#"<!doctype html><style>
+html,body{margin:0;padding:0}div{height:48px}
+</style><div style="background:red"></div><div style="background:lime"></div><div style="background:blue"></div>"#;
+const PHYSICAL_WIDTH: u32 = 120;
+const PHYSICAL_HEIGHT: u32 = 80;
+const COLOR_SAMPLE: u32 = 8;
 
 fn rejected(
     result: ProbeResult<ProbeOptions>,
@@ -56,6 +62,57 @@ fn applies_defaults_when_scroll_positions_are_omitted() -> ProbeResult<()> {
     );
     assert_eq!(options.scroll_y, [0.0, 600.0, 1_800.0]);
     Ok(())
+}
+
+#[test]
+fn scaled_probe_captures_requested_css_scroll_positions_and_document_end() -> ProbeResult<()> {
+    let directory = tempfile::tempdir()?;
+    let input = directory.path().join("fixture.html");
+    let output = directory.path().join("frames");
+    fs::write(&input, SCROLL_FIXTURE)?;
+    let beyond_end = f32::MAX.to_string();
+    let positions = ["0", "48", "12", &beyond_end];
+    super::run(scroll_arguments(&input, &output, positions))?;
+
+    let colors = [
+        [255, 0, 0, 255],
+        [0, 255, 0, 255],
+        [255, 0, 0, 255],
+        [0, 0, 255, 255],
+    ];
+    for (scroll_y, color) in positions.into_iter().zip(colors) {
+        let image =
+            image::open(output.join(format!("120x80-scale-2-scroll-{scroll_y}.png")))?.into_rgba8();
+        assert_eq!(image.dimensions(), (PHYSICAL_WIDTH, PHYSICAL_HEIGHT));
+        assert_eq!(
+            image.get_pixel(COLOR_SAMPLE, COLOR_SAMPLE).0,
+            color,
+            "scroll {scroll_y}"
+        );
+    }
+    Ok(())
+}
+
+fn scroll_arguments<'a>(
+    input: &Path,
+    output: &Path,
+    positions: impl IntoIterator<Item = &'a str>,
+) -> Vec<OsString> {
+    let mut arguments = probe_paths(input, output).to_vec();
+    arguments.extend([
+        "--width".into(),
+        PHYSICAL_WIDTH.to_string().into(),
+        "--height".into(),
+        PHYSICAL_HEIGHT.to_string().into(),
+        "--scale".into(),
+        "2".into(),
+    ]);
+    arguments.extend(
+        positions
+            .into_iter()
+            .flat_map(|scroll| ["--scroll-y".into(), scroll.into()]),
+    );
+    arguments
 }
 
 #[test]

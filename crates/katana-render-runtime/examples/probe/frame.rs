@@ -7,14 +7,16 @@ pub(super) fn write_frame(
     session: &mut HtmlBrowserSession,
     scroll_y: f32,
 ) -> ProbeResult<()> {
-    let actual_scroll_y = session
-        .latest_frame()
-        .ok_or("HTML runtime did not produce a frame")?
-        .scroll_y;
-    if scroll_y != actual_scroll_y {
+    let (frame, metrics) = session
+        .latest_frame_with_metrics()
+        .ok_or("HTML runtime did not produce a frame with scroll metrics")?;
+    /* WHY: 検証位置はCSS px、利用側の入力差分はphysical pxで渡す。 */
+    let delta_y = (scroll_y.min(metrics.max_scroll_y()) - metrics.scroll_y)
+        * frame.viewport.device_scale_factor;
+    if delta_y != 0.0 {
         session.dispatch_input(katana_render_runtime::HtmlBrowserInput::Scroll {
             delta_x: 0.0,
-            delta_y: scroll_y - actual_scroll_y,
+            delta_y,
         })?;
     }
     let frame = session

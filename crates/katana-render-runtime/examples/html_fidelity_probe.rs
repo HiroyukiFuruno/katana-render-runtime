@@ -19,14 +19,14 @@ const USAGE: &str = "usage: html_fidelity_probe --input INPUT.html --output DIR 
 type ProbeResult<T> = Result<T, Box<dyn std::error::Error>>;
 
 pub(crate) fn main() {
-    if let Err(error) = run() {
+    if let Err(error) = run(env::args_os().skip(1)) {
         eprintln!("html fidelity probe failed: {error}");
         std::process::exit(1);
     }
 }
 
-fn run() -> ProbeResult<()> {
-    let options = ProbeOptions::parse(env::args_os().skip(1))?;
+fn run(arguments: impl IntoIterator<Item = std::ffi::OsString>) -> ProbeResult<()> {
+    let options = ProbeOptions::parse(arguments)?;
     let html = fs::read_to_string(&options.input)?;
     let origin =
         Url::from_file_path(options.input.canonicalize()?).map_err(|()| "invalid file origin")?;
