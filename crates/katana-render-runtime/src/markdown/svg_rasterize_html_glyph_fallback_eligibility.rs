@@ -27,8 +27,13 @@ fn source_supported(
 }
 
 fn chunk_supported(text: &usvg::Text, source: &super::sources::Chunk<'_>) -> bool {
+    #[cfg(test)]
+    if std::env::var("KRR_HTML_FEATURE_START_ONLY_FALLBACK_RUNS").as_deref() == Ok("1")
+        && source.chunk.anchor() != usvg::TextAnchor::Start
+    {
+        return false;
+    }
     source.source_spans.len() == source.layout_spans.len()
-        && anchor_supported(source.chunk.anchor())
         && super::super::alignment_positioning_supported_with_dy(text, source.chunk, source.dy)
         && super::source_spans::supported(source.chunk, source.layout_spans)
 }
@@ -106,17 +111,6 @@ fn prepared_run_supported(span: &PreparedSpan, font_size: f32) -> bool {
             .glyphs
             .iter()
             .all(|glyph| glyph.font == span.font && glyph.font_size() == span.font_size)
-}
-
-fn anchor_supported(anchor: usvg::TextAnchor) -> bool {
-    #[cfg(test)]
-    if std::env::var("KRR_HTML_FEATURE_START_ONLY_FALLBACK_RUNS").as_deref() == Ok("1") {
-        return anchor == usvg::TextAnchor::Start;
-    }
-    matches!(
-        anchor,
-        usvg::TextAnchor::Start | usvg::TextAnchor::Middle | usvg::TextAnchor::End
-    )
 }
 
 pub(super) fn glyph_ids_match_cmap(
