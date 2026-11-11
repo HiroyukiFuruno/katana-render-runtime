@@ -130,6 +130,69 @@ fn fake_bundle(label: &str) -> String {
     )
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn attested_render_propagates_request_source_path_too_long() -> anyhow::Result<()> {
+    #[cfg(target_os = "macos")]
+    const NAME_TOO_LONG: i32 = 63;
+    #[cfg(target_os = "linux")]
+    const NAME_TOO_LONG: i32 = 36;
+
+    let source = "graph TD; A-->B";
+    let fixture = InputFixture::new("input.mmd", source)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    let receipt = long_attestation_receipt(&fixture.root)?;
+    let artifacts = receipt.with_extension("artifacts");
+    let result = DiagramCommand::new(DiagramKind::Mermaid)
+        .run(attested_mermaid_action(&fixture, receipt.clone()));
+    let error = result
+        .err()
+        .ok_or_else(|| anyhow::anyhow!("request source path must exceed PATH_MAX"))?;
+    assert_eq!(
+        error
+            .downcast_ref::<std::io::Error>()
+            .and_then(std::io::Error::raw_os_error),
+        Some(NAME_TOO_LONG)
+    );
+    assert_eq!(
+        fs::read(artifacts.join("raw-input.bin"))?,
+        source.as_bytes()
+    );
+    assert!(!fixture.output.exists());
+    assert!(!receipt.exists());
+    Ok(())
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn long_attestation_receipt(root: &std::path::Path) -> anyhow::Result<PathBuf> {
+    #[cfg(target_os = "macos")]
+    const PATH_MAX: usize = 1024;
+    #[cfg(target_os = "linux")]
+    const PATH_MAX: usize = 4096;
+    const MAX_FIXTURE_COMPONENT_BYTES: usize = 200;
+
+    /* WHY: raw入力を保存できる長さに固定し、続くrequest-sourceだけを拒否させる。 */
+    let parent_length = PATH_MAX - 1 - "/attestation.artifacts/raw-input.bin".len();
+    let mut parent = root.to_path_buf();
+    while parent.as_os_str().len() < parent_length {
+        let remaining = parent_length - parent.as_os_str().len();
+        anyhow::ensure!(remaining >= 2, "cannot construct the required parent path");
+        let component = (remaining - 1).min(MAX_FIXTURE_COMPONENT_BYTES);
+        let component = component - usize::from(remaining - component - 1 == 1);
+        parent.push("d".repeat(component));
+        fs::create_dir(&parent)?;
+    }
+    assert_eq!(fs::canonicalize(&parent)?, parent);
+    let receipt = parent.join("attestation.json");
+    let artifacts = receipt.with_extension("artifacts");
+    assert_eq!(
+        artifacts.join("raw-input.bin").as_os_str().len(),
+        PATH_MAX - 1
+    );
+    assert!(artifacts.join("request-source.mmd").as_os_str().len() >= PATH_MAX);
+    Ok(receipt)
+}
+
 #[cfg(unix)]
 #[test]
 fn explicit_runtime_symlink_is_not_canonicalized_before_attestation() -> anyhow::Result<()> {
