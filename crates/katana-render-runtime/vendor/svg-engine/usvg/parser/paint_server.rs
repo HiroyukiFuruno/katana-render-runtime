@@ -991,16 +991,16 @@ enum BoundingBoxPaint<'a> {
 
 impl<'a> BoundingBoxPaint<'a> {
     fn from_paint(paint: &'a mut Paint) -> Option<Self> {
+        let uses_box_units = paint.units() == Units::ObjectBoundingBox;
         match paint {
-            Paint::LinearGradient(gradient) if gradient.units == Units::ObjectBoundingBox => {
+            Paint::LinearGradient(gradient) if uses_box_units => {
                 Some(Self::Linear(gradient))
             }
-            Paint::RadialGradient(gradient) if gradient.units == Units::ObjectBoundingBox => {
+            Paint::RadialGradient(gradient) if uses_box_units => {
                 Some(Self::Radial(gradient))
             }
             Paint::Pattern(pattern)
-                if pattern.units == Units::ObjectBoundingBox
-                    || pattern.content_units == Units::ObjectBoundingBox =>
+                if uses_box_units || pattern.content_units == Units::ObjectBoundingBox =>
             {
                 Some(Self::Pattern(pattern))
             }
@@ -1169,5 +1169,4 @@ impl Paint {
             Self::Pattern(patt) => patt.units,
         }
     }
-
 }
