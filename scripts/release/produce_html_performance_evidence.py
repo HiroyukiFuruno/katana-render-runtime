@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 import tempfile
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from functools import lru_cache
 from pathlib import Path
 from types import FrameType
@@ -30,6 +30,7 @@ import html_performance_inventory as inventory_ops
 import html_performance_host_load as host_load
 import html_performance_host_load_validation as load_validation
 import html_performance_reference as reference
+import html_performance_retained_runs as retained_runs
 import html_performance_epoch_reuse as epoch_reuse
 import html_performance_remote_evidence as remote_evidence
 import html_performance_transport_scratch as transport_scratch
@@ -4712,7 +4713,11 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path.cwd())
-    parser.add_argument("--output", type=Path, default=Path("tmp/html-performance-producer"))
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--managed-retention", action="store_true",
+                        help="keep the marked baseline and the latest sealed comparison")
+    parser.add_argument("--retention-baseline", type=Path,
+                        help="register a verified copy of the marked baseline in managed storage")
     parser.add_argument("--capacity-binding", type=Path)
     parser.add_argument("--capacity-binding-sha256")
     parser.add_argument("--catalog-plan", type=Path)
@@ -4740,6 +4745,14 @@ def main() -> None:
         help="produce a catalog-bound diagnostic bundle while retaining acceptance=false",
     )
     args = parser.parse_args()
+    comparison = not (args.candidate_build_only or args.diagnostic_only or args.same_binary_control is not None)
+    managed = args.managed_retention or (comparison and args.output is None
+                                         and os.environ.get("GITHUB_ACTIONS") != "true")
+    if managed and (not comparison or args.output is not None):
+        parser.error("managed retention requires a catalog comparison without --output")
+    if args.retention_baseline is not None and not managed:
+        parser.error("--retention-baseline requires managed retention")
+    unmanaged_output = (args.output or Path("tmp/html-performance-producer")).resolve()
     if args.condition_id is not None:
         if args.catalog_plan is None or args.same_binary_control is not None or args.candidate_build_only:
             parser.error("--condition-id requires catalog production")
@@ -4759,7 +4772,7 @@ def main() -> None:
         repo = args.repo.resolve()
         with candidate_build_locks(repo):
             result = produce_candidate_build_proof(
-                repo, args.output.resolve(), args.capacity_binding, args.capacity_binding_sha256,
+                repo, unmanaged_output, args.capacity_binding, args.capacity_binding_sha256,
             )
         print(json.dumps(result, sort_keys=True))
         return
@@ -4770,9 +4783,11 @@ def main() -> None:
     if (args.reference_parent_wrapper is None) != (args.reference_parent_wrapper_sha256 is None):
         parser.error("reference parent wrapper requires --reference-parent-wrapper-sha256")
     repo = args.repo.resolve()
-    arguments = (repo, args.output.resolve(), args.capacity_binding,
+    arguments = (args.capacity_binding,
                  args.capacity_binding_sha256,
                  args.catalog_plan.resolve() if args.catalog_plan is not None else None)
+    output = (retained_runs.managed_output(repo, baseline=args.retention_baseline)
+              if managed else nullcontext(unmanaged_output))
     batch_options: BatchOptions = {}
     if args.max_conditions is not None:
         batch_options["max_conditions"] = args.max_conditions
@@ -4799,27 +4814,27 @@ def main() -> None:
             "head": gate._text(raw_origin["head"], "origin head"),
             "workers": {role: gate._object(value, "origin worker") for role, value in raw_workers.items()},
         }
-        with candidate_build_locks(repo):
+        with candidate_build_locks(repo), output as destination:
             if args.same_binary_control is not None:
                 if (args.resume_batch is None or args.catalog_plan is not None
                         or args.same_binary_batch_sha256 is None):
                     parser.error("same-binary control requires a pinned batch and no catalog plan")
                 import html_performance_same_binary_diagnostic as diagnostic
-                diagnostic.run(repo, args.output.resolve(), args.resume_batch.resolve(),
+                diagnostic.run(repo, unmanaged_output, args.resume_batch.resolve(),
                                args.same_binary_batch_sha256, fixed_origin, args.same_binary_control)
                 return
             if args.same_binary_batch_sha256 is not None:
                 parser.error("same-binary batch SHA requires the diagnostic mode")
-            produce(*arguments, fixed_epoch=fixed_origin,
+            produce(repo, destination, *arguments, fixed_epoch=fixed_origin,
                     _allow_catalog_diagnostic=args.diagnostic_only, **batch_options)
         return
     if args.same_binary_control is not None or args.same_binary_batch_sha256 is not None:
         parser.error("same-binary control requires a fixed epoch origin")
-    with candidate_build_locks(repo):
+    with candidate_build_locks(repo), output as destination:
         if args.diagnostic_only:
-            produce(*arguments, _allow_catalog_diagnostic=True, **batch_options)
+            produce(repo, destination, *arguments, _allow_catalog_diagnostic=True, **batch_options)
         else:
-            produce(*arguments, **batch_options)
+            produce(repo, destination, *arguments, **batch_options)
 
 
 if __name__ == "__main__":

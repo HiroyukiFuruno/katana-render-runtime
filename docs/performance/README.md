@@ -22,7 +22,7 @@ JSONには全6段階の時間・ピークRSS・試行数・測定元コミット
 
 ## 一時的なピークと解放後の保持量
 
-一時的なメモリ増加を許容するユーザー指示を受け、新規公開の評価は`html-memory-v4`の全84条件を対象とする。旧v1・v2・v3の判定・履歴・原本は、それぞれの評価時点の結果として保持する。
+一時的なメモリ増加を許容するユーザー指示を受け、新規公開の評価は`html-memory-v4`の全84条件を対象とする。旧v1・v2・v3の判定は、それぞれの評価時点の履歴に残す。
 
 v4は中央値と尾部の増加を分ける。ピークRSSの中央値の増加は1MiB以内かつ5%以内、p95と最大値の増加は各8MiB以内かつ25%以内とし、全phaseで時間非劣化を要求する。中央値が小幅枠を超える場合は8MiB以内かつ25%以内に限り、同じphaseの25組で検証済みの速度改善を確認し、中央値で10%以上かつ1ms以上の短縮を要する。
 
@@ -35,6 +35,19 @@ v3のp95も通常量へ含める扱いでは、中央値の増加が小幅でも
 版付きの再評価は、元rawと保存版の判定を認証したうえで、同じ数値を要求版で別計算する。履歴recordには新評価と保持量証跡のdigest・条件数・繰り返し回数を保存する。旧recordは元の値で参照できる。
 
 ## 再利用と再計測
+
+`just html-performance-evidence-produce <catalog-manifest>` は、
+`tmp/html-performance-retained` の管理領域に、履歴で選んだ基準と最新の封印済み候補を保持する。
+既存基準を登録する場合は、Pythonの計測入口に `--retention-baseline <bundle-dir>` を渡す。
+履歴のmanifest SHAと全ファイルのSHAが一致する場合に登録する。
+候補の入れ替えと失敗した出力の整理は、空き容量に関係なく実行する。
+強制終了で残った出力は次回起動時に整理する。
+GitHub Actionsと明示的な `--output` 指定では、呼び出し側が出力先を管理する。
+
+別の環境では、バンドル一式を移し、信頼できる経路で取得した `bundle.json` のSHAを
+`python3 scripts/release/run_html_performance.py --bootstrap verify-portable --evidence-dir <bundle-dir> --trusted-manifest-sha256 <manifest-sha256>` に渡す。
+バンドルの整合性、84条件の計測値、比較・メモリの判定を再計算する。
+現行チェックアウトのソース適合性、実行来歴、画像の正式受入は従来の公開ゲートで検証する。
 
 非 SDK 計測依存を固定 parent と揃えるため、SDK 側を含め `smallvec 1.16.4` を維持する。
 `1.16.5` の変更は CI・整形とコメントであり、実行コードや依存宣言に差はない。将来の更新は個別に再評価する。[upstream 差分](https://github.com/smallvec/smallvec/compare/v1.16.4...v1.16.5)
