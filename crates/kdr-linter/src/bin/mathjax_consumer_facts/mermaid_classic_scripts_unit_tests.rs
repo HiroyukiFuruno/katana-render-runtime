@@ -146,3 +146,26 @@ fn realm_macro_requires_the_expected_name_and_arguments() -> Result<(), String> 
     assert!(super::macro_statement(None, "scope!(handle);").is_err());
     Ok(())
 }
+
+#[test]
+fn realm_macro_rejects_invalid_templates_and_missing_semicolon() -> Result<(), String> {
+    let valid =
+        syn::parse_str::<syn::Stmt>("scope!(handle);").map_err(|error| error.to_string())?;
+    for template in ["scope!(", "let scope = handle;"] {
+        assert_eq!(
+            super::macro_statement(Some(&valid), template)
+                .err()
+                .as_deref(),
+            Some("mermaid-classic-realm:scope-template")
+        );
+    }
+    let unterminated =
+        syn::parse_str::<syn::Stmt>("scope!{handle}").map_err(|error| error.to_string())?;
+    assert_eq!(
+        super::macro_statement(Some(&unterminated), "scope!(handle);")
+            .err()
+            .as_deref(),
+        Some("mermaid-classic-realm:scope-macro")
+    );
+    Ok(())
+}

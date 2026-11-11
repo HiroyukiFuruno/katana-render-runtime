@@ -25,20 +25,21 @@ pub(super) fn reject_materializer_implementation_changes(
     original: &Path,
     renderer: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    fixture.replace(
-        renderer,
-        "    fn materialize_at(path: PathBuf) -> Result<PathBuf, String> {\n        if Self::exists_with_same_bytes(&path)? {\n            return Ok(path);\n        }\n        let Some(parent) = path.parent() else {\n            return Err(\"MathJax generated runtime path has no parent\".to_string());\n        };\n        std::fs::create_dir_all(parent).map_err(runtime_asset_error)?;\n        std::fs::write(&path, MathJaxRuntimeScripts::runtime_source())\n            .map_err(runtime_asset_error)?;\n        Ok(path)\n    }",
-        "    fn materialize_at(_path: PathBuf) -> Result<PathBuf, String> {\n        Ok(PathBuf::from(\"not-the-generated-runtime.js\"))\n    }",
-    )?;
-    fixture.reject("default-materializer:materialize-signature")?;
-    fixture.restore_from(renderer, original)?;
-    fixture.replace(
-        renderer,
-        "    fn materialize_at(path: PathBuf) -> Result<PathBuf, String> {\n        if Self::exists_with_same_bytes(&path)? {\n            return Ok(path);\n        }\n        let Some(parent) = path.parent() else {\n            return Err(\"MathJax generated runtime path has no parent\".to_string());\n        };\n        std::fs::create_dir_all(parent).map_err(runtime_asset_error)?;\n        std::fs::write(&path, MathJaxRuntimeScripts::runtime_source())\n            .map_err(runtime_asset_error)?;\n        Ok(path)\n    }",
-        "    fn materialize_at(path: PathBuf) -> Result<PathBuf, String> {\n        Ok(PathBuf::from(\"fake.js\"))\n    }",
-    )?;
-    fixture.reject("default-materializer:statement-count")?;
-    fixture.restore_from(renderer, original)?;
+    const MATERIALIZE_AT: &str = "    fn materialize_at(path: PathBuf) -> Result<PathBuf, String> {\n        if Self::exists_with_same_bytes(&path)? {\n            return Ok(path);\n        }\n        let Some(parent) = path.parent() else {\n            return Err(\"MathJax generated runtime path has no parent\".to_string());\n        };\n        std::fs::create_dir_all(parent).map_err(runtime_asset_error)?;\n        std::fs::write(&path, MathJaxRuntimeScripts::runtime_source())\n            .map_err(runtime_asset_error)?;\n        Ok(path)\n    }";
+    for (replacement, expected) in [
+        (
+            "    fn materialize_at(_path: PathBuf) -> Result<PathBuf, String> {\n        Ok(PathBuf::from(\"not-the-generated-runtime.js\"))\n    }",
+            "default-materializer:materialize-signature",
+        ),
+        (
+            "    fn materialize_at(path: PathBuf) -> Result<PathBuf, String> {\n        Ok(PathBuf::from(\"fake.js\"))\n    }",
+            "default-materializer:statement-count",
+        ),
+    ] {
+        fixture.replace(renderer, MATERIALIZE_AT, replacement)?;
+        fixture.reject(expected)?;
+        fixture.restore_from(renderer, original)?;
+    }
     shared_readback::legacy_readback(fixture, renderer)?;
     fixture.replace(
         renderer,

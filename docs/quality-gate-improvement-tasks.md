@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- [x] MathJax AST検査の変異テストで重複した入力・適用・復元を共通化。MermaidのAST検査には壊れた検査テンプレートとセミコロン欠落を拒否するケースを追加。静的検査・AST・対象2件成功。実行後の確認スクリプトが実テスト名と一致しなかったため、生の終了コードと実テスト名から訂正した（`tmp/quality/resumed-owner-r3509/coverage-linter-realm-materializer-exact-lcc9bhcu/result-from-raw.json`）。正式計測は保留。
 - [x] macOSの実フォントで、同じ入力でも通常探索と限定探索のデータベースが混ざらず、両方を同じ探索方式で再利用できることを回帰へ追加。テスト一覧は当該1件のみ増加し、キャッシュの関連6件、静的検査・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-svg-font-discovery-mode-exact-yl5lvmvk/safe-summary.json`）。
 - [x] SVG変換の不正指定を恒等変換へ戻す処理を既存の書き方に復元。Clippyが推奨する短縮形はAST規則に抵触するため、両規則を維持する。静的検査・AST・回転・変換順・不正構文・境界値の関連4件が成功（`tmp/quality/resumed-owner-r3509/coverage-v8-transform-clippy-exact-hwx_k71c/safe-summary.json`）。次の正式計測は未カバー箇所の対応をまとめてから行う。
 - [x] SVG境界値と文字計測の数値をJavaScriptオブジェクトに書く処理を共通化。各エラー文言、凍結オブジェクトでの失敗と既存プロパティの保護を維持し、関連266件・静的検査・AST・テスト一覧一致を確認（`tmp/quality/resumed-owner-r3509/coverage-v8-bridge-number-property-exact-wb4nm_cz/safe-summary.json`）。
