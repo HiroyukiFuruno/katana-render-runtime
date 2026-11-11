@@ -3,6 +3,9 @@ use super::test_support::Fixture;
 
 #[path = "native_width_hash_contract_tests.rs"]
 mod contract_tests;
+#[path = "native_width_hash_input_shape_tests.rs"]
+mod input_shape_tests;
+use input_shape_tests::INPUT_SHAPE_MUTATIONS;
 
 const SVG_ID_SIGNATURE: &str = "fn svg_id(source: &str, preset: &DiagramColorPreset) -> String";
 const CACHE_SIGNATURE: &str = "fn cache_file_path_with_zenuml_key(\n        source: &str,\n        mermaid_js: &Path,\n        preset: &DiagramColorPreset,\n        mode: DiagramRuntimeMode,\n        zenuml_plugin_key: (&str, &str),\n    ) -> PathBuf";
@@ -53,68 +56,6 @@ const CACHE_SIGNATURE_MUTATIONS: &[(&str, &str)] = &[
     ),
     (") -> PathBuf", ") -> String"),
     (") -> PathBuf", ")"),
-];
-const INPUT_SHAPE_MUTATIONS: &[(usize, &str, &str, &str)] = &[
-    (
-        0,
-        "preset.background.hash(hasher);",
-        "let _background = preset.background;",
-        "hash-fields:order",
-    ),
-    (
-        1,
-        "DefaultHasher::new()",
-        "DefaultHasher::default()",
-        "svg-id-hash-route:hasher",
-    ),
-    (
-        1,
-        "format!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
-        "stringify!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
-        "svg-id-hash-route:output",
-    ),
-    (
-        1,
-        "format!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
-        "let _svg_id = format!(\"katana-mermaid-svg-{:016x}\", hasher.finish());",
-        "svg-id-hash-route:output",
-    ),
-    (
-        2,
-        ".join(\"katana_mermaid_cache\")\n            .join(format!(",
-        ".join(\"katana_mermaid_cache\")\n            .join(filename(",
-        "render-cache-hash-route:filename",
-    ),
-    (
-        2,
-        "std::env::temp_dir()\n            .join(\"katana_mermaid_cache\")",
-        "cache_directory()",
-        "render-cache-hash-route:path",
-    ),
-    (
-        2,
-        "format!(\n                \"{:016x}.{}\",\n                hasher.finish(),\n                mode.mermaid_cache_extension()\n            )",
-        "format!(\n                \"{:016x}.{}\",\n                hasher.to_string(),\n                mode.mermaid_cache_extension()\n            )",
-        "render-cache-hash-route:filename",
-    ),
-    (
-        2,
-        "hasher.finish(),\n                mode.mermaid_cache_extension()",
-        "hasher.finish(),\n                mode.to_string()",
-        "render-cache-hash-route:filename",
-    ),
-    (
-        2,
-        "mermaid_js.hash(&mut hasher);",
-        "source.hash(&mut hasher);",
-        "render-cache-hash-route:prefix:mermaid_js:method=hash,receiver=source,args=1",
-    ),
-    (
-        2,
-        "preset.dark_mode.hash(&mut hasher);",
-        "preset.light_mode.hash(&mut hasher);",
-        "render-cache-hash-route:dark-mode:method=hash,receiver=preset.light_mode,args=1",
-    ),
 ];
 
 #[test]
