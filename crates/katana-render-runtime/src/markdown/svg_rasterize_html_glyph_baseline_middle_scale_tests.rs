@@ -1,5 +1,5 @@
 use super::super::super::{Policy, PolicyKind};
-use super::super::{HtmlGlyphRasterizer, shift};
+use super::super::{HtmlGlyphRasterizer, MiddlePolicy, shift};
 use crate::markdown::svg_rasterize::font_file_fixture;
 use resvg::usvg::Node;
 
@@ -22,7 +22,7 @@ fn middle_shift_rejects_invalid_scales_with_a_valid_file_face() -> Result<(), St
             &rasterizer,
             fixture.face_id,
             &metadata,
-            middle_policy(scale),
+            MiddlePolicy::from_policy(middle_policy(scale)).ok_or("middle policy rejected")?,
             None,
         )
     };
@@ -82,6 +82,7 @@ fn middle_shift_for_svg_scale(
     assert_eq!(policy.css_scale, Some(scale));
     let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
     let metadata = rasterizer.face_metadata(fixture.face_id)?;
+    let policy = MiddlePolicy::from_policy(policy).ok_or("middle policy rejected")?;
     shift(&rasterizer, fixture.face_id, &metadata, policy, None)
 }
 
@@ -98,6 +99,7 @@ fn middle_policy_uses_the_applied_variable_face_metrics() -> Result<(), String> 
         .primary_variable_face(text, id)?
         .ok_or("variable face missing")?;
     let policy = super::super::super::uniform_policy(text).ok_or("middle policy missing")?;
+    let policy = MiddlePolicy::from_policy(policy).ok_or("middle policy rejected")?;
     let expected = shift(&rasterizer, id, &face.metadata(), policy, Some(&face))?
         .filter(|value| value.is_finite())
         .ok_or("variable middle shift missing")?;

@@ -1,4 +1,4 @@
-use super::Policy;
+use super::{Policy, PolicyKind};
 use crate::markdown::svg_rasterize::{
     html_glyph::{FaceMetadata, HtmlGlyphRasterizer, anchor, paint},
     text_shaping::svg_dom_layout_ascent,
@@ -17,11 +17,39 @@ pub(super) use eligibility::{
 const HALF_METRIC: f32 = 0.5;
 const USVG_X_HEIGHT_RATIO: f32 = 0.45;
 
+#[derive(Clone, Copy)]
+pub(super) struct MiddlePolicy {
+    font_size: f32,
+    css_scale: Option<f32>,
+    kind: MiddleKind,
+}
+
+#[derive(Clone, Copy)]
+enum MiddleKind {
+    Alignment,
+    Dominant,
+}
+
+impl MiddlePolicy {
+    pub(super) fn from_policy(policy: Policy) -> Option<Self> {
+        let kind = match policy.kind {
+            PolicyKind::AlignmentMiddle => MiddleKind::Alignment,
+            PolicyKind::Middle => MiddleKind::Dominant,
+            _ => return None,
+        };
+        Some(Self {
+            font_size: policy.font_size,
+            css_scale: policy.css_scale,
+            kind,
+        })
+    }
+}
+
 pub(super) fn shift(
     rasterizer: &HtmlGlyphRasterizer<'_>,
     id: ID,
     metadata: &FaceMetadata,
-    policy: Policy,
+    policy: MiddlePolicy,
     variable_face: Option<&super::CachedFace>,
 ) -> Result<Option<f32>, String> {
     let Some(scale) = policy.css_scale else {
@@ -64,7 +92,7 @@ fn shift_for_font(
     rasterizer: &HtmlGlyphRasterizer<'_>,
     id: ID,
     metadata: &FaceMetadata,
-    policy: Policy,
+    policy: MiddlePolicy,
     scale: f32,
     font: &Font,
 ) -> Option<f32> {
@@ -76,12 +104,11 @@ fn shift_for_font(
     let layout_ascent = svg_dom_layout_ascent(rasterizer.database.face(id), ascent, descent)?;
     /* WHY: alignment middleはx-height半分、dominant middleはCSS line-top丸めを再現する。 */
     let target_css = match policy.kind {
-        super::PolicyKind::AlignmentMiddle => x_height * HALF_METRIC,
-        super::PolicyKind::Middle => {
+        MiddleKind::Alignment => x_height * HALF_METRIC,
+        MiddleKind::Dominant => {
             let baseline_from_top = layout_ascent - x_height * HALF_METRIC;
             layout_ascent + (HALF_METRIC - baseline_from_top).floor()
         }
-        _ => return None,
     };
     let raw_shift = raw_units * policy.font_size / metadata.upem * HALF_METRIC;
     let correction = target_css / scale - raw_shift;

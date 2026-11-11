@@ -18,8 +18,8 @@ pub(in super::super) fn resolved_policy(
     else {
         return Ok(None);
     };
-    if super::is_middle(policy.kind) {
-        return resolve_middle_policy(rasterizer, text, policy);
+    if let Some(middle_policy) = middle::MiddlePolicy::from_policy(policy) {
+        return resolve_middle_policy(rasterizer, text, policy, middle_policy);
     }
     if policy.kind == super::PolicyKind::Hanging {
         return resolve_hanging_policy(rasterizer, text, policy);
@@ -65,6 +65,7 @@ fn resolve_middle_policy(
     rasterizer: &HtmlGlyphRasterizer<'_>,
     text: &usvg::Text,
     mut policy: Policy,
+    middle_policy: middle::MiddlePolicy,
 ) -> Result<Option<Policy>, String> {
     let Some((id, metadata, variable_face)) = primary_face_metadata(rasterizer, text)? else {
         return Ok(None);
@@ -72,7 +73,13 @@ fn resolve_middle_policy(
     if metadata.unsupported {
         return Ok(None);
     }
-    let Some(shift) = middle::shift(rasterizer, id, &metadata, policy, variable_face.as_ref())?
+    let Some(shift) = middle::shift(
+        rasterizer,
+        id,
+        &metadata,
+        middle_policy,
+        variable_face.as_ref(),
+    )?
     else {
         return Ok(None);
     };
