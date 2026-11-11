@@ -61,3 +61,31 @@ fn table_source(
         }
     })))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Ordering, load};
+    use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
+    use skrifa::raw::TableProvider;
+
+    #[test]
+    fn truncated_font_poisons_an_existing_lazy_table_source()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("font.ttf");
+        std::fs::write(&path, FONT_BYTES)?;
+        let baseline = load(&path, 0)?;
+        assert!(baseline.font.tables().name().is_ok());
+
+        let stale = load(&path, 0)?;
+        std::fs::write(&path, [])?;
+        assert!(stale.font.tables().name().is_err());
+        assert!(stale.poisoned.load(Ordering::Acquire));
+
+        std::fs::write(&path, FONT_BYTES)?;
+        let fresh = load(&path, 0)?;
+        assert!(fresh.font.tables().name().is_ok());
+        assert!(!fresh.poisoned.load(Ordering::Acquire));
+        Ok(())
+    }
+}
