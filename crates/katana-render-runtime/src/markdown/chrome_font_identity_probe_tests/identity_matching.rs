@@ -38,15 +38,11 @@ fn insert_matching_identity(
     Ok(())
 }
 
-pub(super) fn unique_identity(identities: IdentityMap) -> Result<PhysicalFace, String> {
-    match identities.len() {
-        0 => Err("no exact physical face matched the CDP PostScript name".to_string()),
-        1 => identities
-            .into_values()
-            .next()
-            .ok_or_else(|| "resolved font face disappeared".to_string()),
-        _ => Err("multiple physical file/face-index matches are ambiguous".to_string()),
+pub(super) fn unique_identity(identities: IdentityMap) -> Result<Option<PhysicalFace>, String> {
+    if identities.len() > 1 {
+        return Err("multiple physical file/face-index matches are ambiguous".to_string());
     }
+    Ok(identities.into_values().next())
 }
 
 pub(super) fn verify_physical_face(face: &PhysicalFace) -> Result<(), String> {

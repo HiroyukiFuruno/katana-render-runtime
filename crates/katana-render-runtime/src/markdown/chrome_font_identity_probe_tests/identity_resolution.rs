@@ -124,16 +124,16 @@ fn resolved_font(
     identities: IdentityMap,
     selected: &SelectedFont,
 ) -> Result<Option<ResolvedFont>, String> {
-    if identities.is_empty() {
+    let Some(identity) = unique_identity(identities)? else {
         return Ok(None);
-    }
+    };
     let method = if selected.is_custom_font {
         "captured Chrome resource response body"
     } else {
         "observed fontdb system-font inventory"
     };
     Ok(Some(ResolvedFont {
-        identity: unique_identity(identities)?,
+        identity,
         method,
         core_text_descriptor: None,
     }))
