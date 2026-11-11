@@ -1,3 +1,6 @@
+const SVG_ID_FORMAT: &str = "format!(\"katana-mermaid-svg-{:016x}\", hasher.finish())";
+const CACHE_FILENAME_JOIN: &str = ".join(\"katana_mermaid_cache\")\n            .join(format!(";
+
 pub(super) const INPUT_SHAPE_MUTATIONS: &[(usize, &str, &str, &str)] = &[
     (
         2,
@@ -19,20 +22,32 @@ pub(super) const INPUT_SHAPE_MUTATIONS: &[(usize, &str, &str, &str)] = &[
     ),
     (
         1,
-        "format!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
+        SVG_ID_FORMAT,
         "stringify!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
         "svg-id-hash-route:output",
     ),
     (
         1,
-        "format!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
+        SVG_ID_FORMAT,
         "let _svg_id = format!(\"katana-mermaid-svg-{:016x}\", hasher.finish());",
         "svg-id-hash-route:output",
     ),
     (
+        1,
+        SVG_ID_FORMAT,
+        "format!(\"katana-mermaid-svg-{:016x}\"; hasher.finish())",
+        "svg-id-hash-route:output",
+    ),
+    (
         2,
-        ".join(\"katana_mermaid_cache\")\n            .join(format!(",
+        CACHE_FILENAME_JOIN,
         ".join(\"katana_mermaid_cache\")\n            .join(filename(",
+        "render-cache-hash-route:filename",
+    ),
+    (
+        2,
+        CACHE_FILENAME_JOIN,
+        ".join(\"katana_mermaid_cache\")\n            .join(stringify!(",
         "render-cache-hash-route:filename",
     ),
     (

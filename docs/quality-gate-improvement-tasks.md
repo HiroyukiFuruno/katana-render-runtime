@@ -2,6 +2,12 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定3件中3件完了。標準静的検査・AST、関連Rust 30件が成功した（`tmp/quality/resumed-owner-r3509/release-input-and-oracle-boundaries-q55r6lfi/safe-summary.json`）。
+  - [x] 幅ゼロのPNGヘッダーを含む実HTMLで、画像要素のレイアウトに自然寸法が使われず、既定の枠へ戻ることを確認した。既存の画像・SVGテストで描画用の設定を共用した。
+  - [x] 公開HTML APIでフォーカス前に文字入力を送り、フレーム世代と全画素が変わらないことを確認した。
+  - [x] MermaidのSVG IDとキャッシュ名の生成を確認するAST検査に、壊れた書式引数と別のマクロを拒否するケースを追加した。
+- 直近の正式計測は `0fa04f2f`。6,275件成功、15件スキップ、86,471/86,858行（99.5544451864%）、未カバー387行。収集は成功し、同じMoon導線で再収集なしの100%・未カバー0判定は不合格だった（`tmp/quality/resumed-owner-r3509/root-coverage-final-phase-threads4-mmtl7z5u/safe-summary.json`、`tmp/quality/resumed-owner-r3509/root-coverage-final-phase-moon-policy-zbztkivy/safe-summary.json`）。上の変更を含めた正式値は未計測。
+
 - 対応予定4件中4件完了。標準静的検査・AST、関連Rust 99件、SVG来歴4件が成功した（`tmp/quality/resumed-owner-r3509/release-resize-font-zero-use-proof-ujm6eazw/safe-summary.json`）。最初は新しいフォント回帰1件の完全名が違い98件のみ実行されたため、実catalogで照合してその1件だけ同じソースで実行した。
   - [x] 利用側の公開APIで、複数行入力欄がリサイズ後もフォーカスと値を保持し、続けて入力した文字を新寸法のフレームへ反映することを確認。
   - [x] フォント観測の子プロセスへ不正なJSONを渡し、エラーを返して応答ファイルを作成しないことを確認。
