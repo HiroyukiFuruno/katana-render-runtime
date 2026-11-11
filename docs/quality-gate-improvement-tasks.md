@@ -2,6 +2,9 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [/] `32d51656` の正式計測は6,246件成功・別15件skip、86,587/87,011行（99.5127052901%）、未カバー424行。SVGマーカー・影・全角引用符で各1行減。フォントキャッシュは確認済みキーの再利用で分母が2行減り、未カバー数は同じ。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-ymeh_tqj/safe-summary.json`）。公開用カバレッジ判定は未達。
+- [x] `32d51656` はSVGのマーカー・影の前処理で、直接のXMLテキストノードと元範囲の取得を共通化した。両方のCSS変換と、間にあるXMLコメント・処理命令が同時に保持されることを実入力で確認。foundation・AST・関連65件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-direct-style-text-exact-vv_3ttas/safe-summary.json`）。
+- [/] 公開審査の実パーサーで`32d51656`までの1,143コミットを照合し、承認済み52件以外の参照欠落0、余剰対応表0。ローカル検査の`Refs`形式では73件に差があるが、公開審査では既存のIssue番号を認識する。公開済み履歴・作業履歴の変更や対応表の拡大は不要。PRと最新HEADへの対応表の固定はDraft後の公開工程に残る（`tmp/quality/resumed-owner-r3509/release-local-refs-reword-nu42n7b9/trusted-audit.json`）。
 - [x] `a0191a1f` はSVGフォントファイルのキャッシュ登録で確認済みのキーを再利用し、不変な`Option`への2回目の判定を除いた。foundation・AST成功、テスト一覧一致、実フォントの再利用・書換え・不正ファイルを含む関連32件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-font-cache-validated-key-exact-6whh_q0z/safe-summary.json`）。
 - [x] `c6aa3bc6` はmacOSの実Hiragino Sans GBで全角引用符4字の開き・閉じ分類を確認し、既存の比例幅Noto Sansと検査を共通化した。foundation・AST成功、既存一覧に1件追加、関連10件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-han-fullwidth-quote-exact-0mi4xnqt/safe-summary.json`）。両変更の全体計測への反映は未確認。
 - [/] `32cf6ae7` の正式計測は6,244件成功・別15件skip、86,585/87,012行（99.5092630901%）、未カバー427行。前回の432行から、SVG塗り単位・極小文字・空輪郭で各1行、HTML純テストの分離で2行減。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-1ra8ksw3/safe-summary.json`）。公開用カバレッジ判定は未達。
