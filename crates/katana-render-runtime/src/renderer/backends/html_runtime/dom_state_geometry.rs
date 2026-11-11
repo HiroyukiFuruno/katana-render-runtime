@@ -182,12 +182,16 @@ mod tests {
     use super::{HtmlDomBridgeState, json_number};
     use crate::renderer::backends::html_document::HtmlDocument;
 
-    fn geometry_fixture(scroll_y: f32, rotation_degrees: f32) -> (HtmlDomBridgeState, u64) {
+    fn geometry_document() -> (HtmlDomBridgeState, u64) {
         let state = HtmlDomBridgeState::new(HtmlDocument::parse("<p id=target>text</p>"));
         let target = state.document.borrow_mut().get_element_by_id("target");
         assert!(target.is_some());
         let mut node_ids = target.into_iter().collect::<Vec<_>>();
-        let node_id = node_ids.remove(0);
+        (state, node_ids.remove(0))
+    }
+
+    fn geometry_fixture(scroll_y: f32, rotation_degrees: f32) -> (HtmlDomBridgeState, u64) {
+        let (state, node_id) = geometry_document();
         state.set_layout_metrics(
             320.0,
             240.0,
@@ -237,13 +241,8 @@ mod tests {
     }
 
     #[test]
-    fn horizontal_scroll_is_applied_once_to_client_geometry_and_metrics() -> Result<(), String> {
-        let state = HtmlDomBridgeState::new(HtmlDocument::parse("<p id=target>text</p>"));
-        let target = state.document.borrow_mut().get_element_by_id("target");
-        let node_id = target
-            .into_iter()
-            .next()
-            .ok_or_else(|| "target node missing".to_string())?;
+    fn horizontal_scroll_is_applied_once_to_client_geometry_and_metrics() {
+        let (state, node_id) = geometry_document();
         state.set_layout_metrics_xy(
             320.0,
             240.0,
@@ -259,6 +258,5 @@ mod tests {
             state.bounding_client_rect_json(node_id),
             r#"{"x":70,"y":20,"width":40,"height":20,"top":20,"right":110,"bottom":40,"left":70}"#
         );
-        Ok(())
     }
 }
