@@ -5,8 +5,10 @@ use super::{
     static_library_metrics,
 };
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
+use crate::markdown::svg_rasterize::text_shaping::test_font_data::font_with_empty_table;
 use read_fonts::TableProvider;
 use resvg::usvg::fontdb::{Database, ID};
+use rustybuzz::ttf_parser::Tag;
 use std::path::PathBuf;
 
 type TestResult = Result<(), String>;
@@ -128,6 +130,33 @@ fn absent_os2_falls_back_to_full_parser_metrics() -> TestResult {
     assert!(static_library_metrics(&font, METRIC_TEST_SIZE).is_none());
     assert_eq!(metrics_from_font(&font, METRIC_TEST_SIZE), expected);
     Ok(())
+}
+
+#[test]
+fn malformed_os2_bypasses_cached_metrics_and_preserves_legacy_metrics() -> TestResult {
+    let bytes = font_with_empty_table(FONT_BYTES, Tag::from_bytes(b"OS/2"))?;
+    let direct = font(&bytes)?;
+    assert!(
+        direct
+            .tables()
+            .os2()
+            .is_err_and(|error| { !matches!(error, read_fonts::ReadError::TableIsMissing(_)) })
+    );
+    let expected = oracle(&bytes, METRIC_TEST_SIZE).ok_or("legacy line metrics missing")?;
+    let (database, id) = loaded_font(bytes)?;
+    SvgRasterizeOps::with_html_font_render_scope(|| {
+        assert_eq!(
+            cached_face_line_metrics(&database, id, METRIC_TEST_SIZE),
+            Ok(None)
+        );
+        assert_eq!(
+            diagnosed_cached_face_line_metrics(&database, id, METRIC_TEST_SIZE),
+            Ok(None)
+        );
+        let legacy = database.with_face_data(id, |data, _| oracle(data, METRIC_TEST_SIZE));
+        assert_eq!(legacy.flatten(), Some(expected));
+        Ok(())
+    })
 }
 
 fn remove_os2_record(bytes: &mut [u8]) -> TestResult {
