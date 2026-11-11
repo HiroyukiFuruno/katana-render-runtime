@@ -1,4 +1,4 @@
-use super::super::center_pixel;
+use super::super::{center_pixel, sample_path, usvg};
 use super::{
     GRADIENT_FALLBACK_COLOR, VIEWPORT, assert_solid_fill_color, parse_with_languages, pixel,
     rendered_svg,
@@ -12,6 +12,28 @@ const CENTER_SAMPLE: usize = VIEWPORT as usize / 2;
 
 const MIXED_UNITS: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><defs><pattern id="p" patternUnits="userSpaceOnUse" patternContentUnits="objectBoundingBox" width="4" height="4"><rect width="0.25" height="1" fill="#00ff00"/></pattern></defs><rect width="8" height="8" fill="url(#p)"/></svg>"##;
 const USER_UNITS: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><defs><pattern id="p" patternUnits="userSpaceOnUse" patternContentUnits="userSpaceOnUse" width="4" height="4"><rect width="2" height="8" fill="#00ff00"/></pattern></defs><rect width="8" height="8" fill="url(#p)"/></svg>"##;
+
+#[test]
+fn mixed_gradient_chain_inherits_shared_attributes_but_stops_coordinate_lookup()
+-> Result<(), String> {
+    let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8">
+      <defs><linearGradient id="base" x1="2" gradientUnits="userSpaceOnUse" spreadMethod="reflect">
+      <stop stop-color="blue"/><stop offset="1" stop-color="red"/></linearGradient>
+      <radialGradient id="bridge" href="#base"/>
+      <linearGradient id="alias" href="#bridge" x2="8"/></defs>
+      <rect id="sample" width="8" height="8" fill="url(#alias)"/></svg>"##;
+    let tree = parse_with_languages(source, &[])?;
+    let fill = sample_path(&tree)?.fill().ok_or("gradient fill missing")?;
+    let usvg::Paint::LinearGradient(gradient) = fill.paint() else {
+        return Err("linked fill is not a linear gradient".to_owned());
+    };
+    assert_eq!(gradient.x1(), 0.0);
+    assert_eq!(gradient.x2(), 8.0);
+    assert!(gradient.transform().is_identity());
+    assert_eq!(gradient.spread_method(), usvg::SpreadMethod::Reflect);
+    assert_eq!(gradient.stops().len(), 2);
+    Ok(())
+}
 
 #[test]
 fn singular_gradient_leaves_underlying_paint_visible() -> Result<(), String> {

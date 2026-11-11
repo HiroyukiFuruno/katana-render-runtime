@@ -159,9 +159,9 @@
       "source": "crates/usvg/src/parser/paint_server.rs",
       "destination": "usvg/parser/paint_server.rs",
       "sourceSha256": "d9ff7a1ad27634194bb4e26580f0ba4a59d215c605e0164bf79f6cc5ecd2f602",
-      "transplantedSha256": "65394c8675a3b2f9448f75e9a33494a3e693898997e331c1d189ee298c371c2a",
+      "transplantedSha256": "0a8c2adf978d7b0e596b50569f9a1391b1b3bd670ac502c56ba7039c915613af",
       "sourceBytes": 33432,
-      "transplantedBytes": 36994,
+      "transplantedBytes": 34629,
       "adaptations": {
         "cratePaths": 2,
         "enabledFeaturePredicates": {

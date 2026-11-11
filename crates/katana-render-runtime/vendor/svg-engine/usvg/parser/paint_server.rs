@@ -501,114 +501,32 @@ fn resolve_attr<'a, 'input: 'a>(node: SvgNode<'a, 'input>, name: AId) -> SvgNode
         return node;
     }
 
-    match node.tag_name().unwrap() {
-        EId::LinearGradient => resolve_lg_attr(node, name),
-        EId::RadialGradient => resolve_rg_attr(node, name),
-        EId::Pattern => resolve_pattern_attr(node, name),
-        EId::Filter => resolve_filter_attr(node, name),
-        _ => node,
-    }
-}
-
-fn resolve_lg_attr<'a, 'input: 'a>(node: SvgNode<'a, 'input>, name: AId) -> SvgNode<'a, 'input> {
+    let owner = node.tag_name();
     for link in node.href_iter() {
-        if !link
-            .tag_name()
-            .is_some_and(|tag| linear_gradient_attr_matches(name, tag))
-        {
+        if !accepts_reference_attribute(owner, name, link.tag_name()) {
             break;
         }
         if link.has_attribute(name) {
             return link;
         }
     }
-
     node
 }
 
-fn linear_gradient_attr_matches(name: AId, tag_name: EId) -> bool {
-        matches!((name, tag_name),
-            // Coordinates can be resolved only from
-            // ref element with the same type.
-              (AId::X1, EId::LinearGradient)
-            | (AId::Y1, EId::LinearGradient)
-            | (AId::X2, EId::LinearGradient)
-            | (AId::Y2, EId::LinearGradient)
-            // Other attributes can be resolved
-            // from any kind of gradient.
-            | (AId::GradientUnits, EId::LinearGradient)
-            | (AId::GradientUnits, EId::RadialGradient)
-            | (AId::SpreadMethod, EId::LinearGradient)
-            | (AId::SpreadMethod, EId::RadialGradient)
-            | (AId::GradientTransform, EId::LinearGradient)
-            | (AId::GradientTransform, EId::RadialGradient))
-}
+fn accepts_reference_attribute(owner: Option<EId>, name: AId, target: Option<EId>) -> bool {
+    use EId::{Filter, LinearGradient, Pattern, RadialGradient};
 
-fn resolve_rg_attr<'a, 'input>(node: SvgNode<'a, 'input>, name: AId) -> SvgNode<'a, 'input> {
-    for link in node.href_iter() {
-        if !link
-            .tag_name()
-            .is_some_and(|tag| radial_gradient_attr_matches(name, tag))
-        {
-            break;
-        }
-        if link.has_attribute(name) {
-            return link;
-        }
-    }
-
-    node
-}
-
-fn radial_gradient_attr_matches(name: AId, tag_name: EId) -> bool {
-        matches!((name, tag_name),
-            // Coordinates can be resolved only from
-            // ref element with the same type.
-              (AId::Cx, EId::RadialGradient)
-            | (AId::Cy, EId::RadialGradient)
-            | (AId::R,  EId::RadialGradient)
-            | (AId::Fx, EId::RadialGradient)
-            | (AId::Fy, EId::RadialGradient)
-            | (AId::Fr, EId::RadialGradient)
-            // Other attributes can be resolved
-            // from any kind of gradient.
-            | (AId::GradientUnits, EId::LinearGradient)
-            | (AId::GradientUnits, EId::RadialGradient)
-            | (AId::SpreadMethod, EId::LinearGradient)
-            | (AId::SpreadMethod, EId::RadialGradient)
-            | (AId::GradientTransform, EId::LinearGradient)
-            | (AId::GradientTransform, EId::RadialGradient))
-}
-
-fn resolve_pattern_attr<'a, 'input: 'a>(
-    node: SvgNode<'a, 'input>,
-    name: AId,
-) -> SvgNode<'a, 'input> {
-    for link in node.href_iter() {
-        if link.tag_name() != Some(EId::Pattern) {
-            break;
-        }
-
-        if link.has_attribute(name) {
-            return link;
-        }
-    }
-
-    node
-}
-
-fn resolve_filter_attr<'a, 'input: 'a>(node: SvgNode<'a, 'input>, aid: AId) -> SvgNode<'a, 'input> {
-    for link in node.href_iter() {
-        if link.tag_name() != Some(EId::Filter) {
-            break;
-        }
-
-        if link.has_attribute(aid) {
-            return link;
-        }
-    }
-
-    node
+    matches!(
+        (owner, name, target),
+        // 座標の継承は同じ種類のグラデーションに限る。
+        (Some(LinearGradient), AId::X1 | AId::Y1 | AId::X2 | AId::Y2, Some(LinearGradient))
+            | (Some(RadialGradient), AId::Cx | AId::Cy | AId::R | AId::Fx | AId::Fy | AId::Fr, Some(RadialGradient))
+            | (Some(LinearGradient | RadialGradient),
+               AId::GradientUnits | AId::SpreadMethod | AId::GradientTransform,
+               Some(LinearGradient | RadialGradient))
+            | (Some(Pattern), _, Some(Pattern))
+            | (Some(Filter), _, Some(Filter))
+    )
 }
 
 fn stop_to_color(stop: &Stop) -> ServerOrColor {
