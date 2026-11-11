@@ -89,11 +89,11 @@ fn source_supported(source: &usvg::TextSpan, content: &str) -> bool {
 }
 
 fn constant_baseline(span: &PreparedSpan) -> bool {
-    let Some(first) = span.glyphs.first() else {
-        return false;
-    };
-    let y = first.transform().ty;
-    span.glyphs.iter().all(|glyph| glyph.transform().ty == y)
+    /* WHY: 前段で非空と有限座標を確認済み。各グリフの変換は一度だけ計算する。 */
+    let mut baselines = span.glyphs.iter().map(|glyph| glyph.transform().ty);
+    baselines
+        .next()
+        .is_none_or(|first| baselines.all(|baseline| baseline == first))
 }
 
 pub(super) fn layout_matches(layout: &usvg::layout::Span, span: &PreparedSpan) -> bool {
