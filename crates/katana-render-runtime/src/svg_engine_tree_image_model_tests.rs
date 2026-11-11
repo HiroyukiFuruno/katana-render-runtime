@@ -5,6 +5,8 @@ use super::{MODEL_ORIGIN, parse_model_svg, text_node};
 
 const EMPTY_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"/>"#;
 const UNIT_IMAGE_SIZE: (f32, f32) = (1.0, 1.0);
+const PNG: &[u8] =
+    include_bytes!("../../../tests/fixtures/svg-engine/upstream/resvg/tests/resources/image.png");
 
 #[test]
 fn image_kind_debug_hides_payloads_for_each_variant() -> Result<(), String> {
@@ -27,20 +29,28 @@ fn image_kind_debug_hides_payloads_for_each_variant() -> Result<(), String> {
 fn tree_text_presence_descends_through_an_embedded_svg_image() -> Result<(), String> {
     let mut outer = parse_model_svg(EMPTY_SVG)?;
     assert!(!outer.has_text_nodes());
+    for kind in [
+        ImageKind::SVG(parse_model_svg(EMPTY_SVG)?),
+        ImageKind::PNG(Arc::new(PNG.to_vec())),
+    ] {
+        assert!(kind.actual_size().is_some());
+        outer.root.children.push(image_node("without-text", kind)?);
+        assert!(!outer.has_text_nodes());
+    }
     let mut nested = parse_model_svg(EMPTY_SVG)?;
     nested
         .root
         .children
         .push(text_node("nested-text", Transform::default())?);
     assert!(nested.has_text_nodes());
-    let image = svg_image_node("embedded", nested)?;
+    let image = image_node("embedded", ImageKind::SVG(nested))?;
     super::assert_node_identity_and_transform(&image, "embedded", MODEL_ORIGIN);
     outer.root.children.push(image);
     assert!(outer.has_text_nodes());
     Ok(())
 }
 
-fn svg_image_node(id: &str, tree: super::super::super::Tree) -> Result<Node, String> {
+fn image_node(id: &str, kind: ImageKind) -> Result<Node, String> {
     let size = Size::from_wh(UNIT_IMAGE_SIZE.0, UNIT_IMAGE_SIZE.1).ok_or("image size invalid")?;
     let bounds = NonZeroRect::from_xywh(
         MODEL_ORIGIN.0,
@@ -54,7 +64,7 @@ fn svg_image_node(id: &str, tree: super::super::super::Tree) -> Result<Node, Str
         visible: true,
         size,
         rendering_mode: ImageRendering::OptimizeQuality,
-        kind: ImageKind::SVG(tree),
+        kind,
         abs_transform: Transform::default(),
         abs_bounding_box: bounds,
     })))

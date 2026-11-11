@@ -38,6 +38,10 @@ fn assert_named_family_selects_fixture(family: usvg::FontFamily) -> TestResult<(
 
 #[test]
 fn default_selector_uses_registered_named_family() -> TestResult<()> {
+    assert_eq!(
+        format!("{:?}", usvg::FontResolver::default()),
+        "FontResolver { .. }"
+    );
     assert_named_family_selects_fixture(usvg::FontFamily::Named("Noto Sans".into()))
 }
 
