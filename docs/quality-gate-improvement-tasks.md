@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [/] `8746ed31` の正式producerによる中間計測は6,211件成功・別15件skip、86,780/87,260行（99.4499197800%）、未カバー480行。変換付きSVGクリップの実入力、ベースライン判定、単一フィルターの重複計算で各1行減少。収集実0、ソース前後一致、公開用総合判定は100%到達後（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-zppe429a/safe-summary.json`）。
+- [x] `426fcaca` は描画用テキストIDを既存の登録件数から生成し、拒否入力後もID1・2の連続性と実際の登録を確認。`d1e056f5` は実HelveticaのCoreText照合をselectorによるDB登録の前後で確認し、登録前の非保持と登録後の保持を検証。初回の空の基準フォント指定は実呼出しと同じ指定に修正し、HTML12件・CoreText9件・foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-html-provenance-and-coretext-memo-exact-e13zlcvv/safe-summary.json`）。全体計測への反映を確認する。
 - [/] `5bb9f822` の正式producerによる中間計測は6,210件成功・別15件skip、86,785/87,268行（99.4465325205%）、未カバー483行。HTML行計画とSVG属性編集で各1行減少。収集実0、ソース前後一致、公開用総合判定は100%到達後（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-9px5m243/safe-summary.json`）。
 - [x] `3f29b2d9` は単一フィルターで重複していた範囲交差を除き、`6b828cf2` は各グリフのベースライン変換を一度にした。`a17e14fa` は変換付きSVGクリップの隔離・全画素・隣接画素の実入力回帰を追加。テストのRGBA数値指摘を修正後、関連51件・foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-svg-clip-filter-baseline-exact-swzuk9u7/safe-summary.json`）。483行の全体値には未反映。
 - [/] `0b1e7d54` の正式producerによる中間計測は6,210件成功・別15件skip、86,787/87,272行（99.4442662022%）、未カバー485行。SVG paintで1行、textPathで2行、クリップ矩形で1行減少。HTMLインラインの未カバー行数は変化なし。収集実0、ソース前後一致。総合判定は100%到達後に実行する（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-1o3q626b/safe-summary.json`）。
