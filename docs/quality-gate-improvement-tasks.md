@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] 実SVGの`fi`合字で、文字区間が分かれて後半に字形が割り当てられないことと、分割しない入力との全画素一致を確認。Mach-O検査でcanonical判定後の同一比較を除き、相対・非正規・重複パスとサイズ・digest違いの拒否を確認。Mermaidブロック回帰は同じ描画結果を直接渡す。foundation・AST・関連11件が成功（`tmp/quality/resumed-owner-r3509/coverage-ligature-macho-and-block-exact-6esmffcq/safe-summary.json`）。全体計測への反映は確認待ち。
+- [/] `f78c5f1e` の正式producerによる中間計測は86,874/87,344行（99.4618977835%）、未カバー470行。フォント回帰の入出力エラー変換で5行、SVG参照判定で4行減り、Mermaidブロック回帰の早期返却で1行増えた。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-3cnhuw95/safe-summary.json`）。
 - [x] フォント回帰のファイル操作は元のエラーを保持し、Mermaidブロック回帰は描画エラー文字列を複製せず、両者の確認内容を維持。SVGのグラデーション・パターン・フィルター参照は、タグなしと非対応タグで同じ終了処理を使う。SVG取り込み元の版とライセンスを維持して対象ソースの来歴を更新。foundation・AST・関連10件が成功（`tmp/quality/resumed-owner-r3509/coverage-font-error-and-paint-link-exact-inegjfnt/safe-summary.json`）。全体計測への反映を確認する。
 - [/] `8e29b494` の正式producerによる中間計測は86,875/87,353行（99.4527949813%）、未カバー478行。SVGベースラインの重複判定と実フォントの描画トレースで計4行減ったが、新規回帰のファイル操作を文字列へ変換する処理で未カバー4行が増えた。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-4fznxfls/safe-summary.json`）。回帰の確認内容を保ち、入出力エラーを直接伝播する修正を関連検査で確認する。
 - [x] macOSのSVGベースライン計算から到達不能な2分岐を除去し、実フォントのファイル消失・復元、ファイル由来判定、メモリ上のフォントを使ったSVG描画トレースの回帰を追加。ASTのファイル行数超過を責務分離で解消し、フォントの期待SHA-256は同梱ファイルから別途取得した固定値に修正。foundation・AST・関連10件が成功（`tmp/quality/resumed-owner-r3509/coverage-font-sources-and-macos-baseline-exact-rz1alfx3/safe-summary.json`）。全体計測への反映を確認する。
