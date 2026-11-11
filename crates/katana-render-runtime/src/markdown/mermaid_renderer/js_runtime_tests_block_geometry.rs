@@ -29,18 +29,16 @@ fn runtime_normalizes_block_nbsp_arrow_width() -> Result<(), String> {
                 &mermaid_js,
                 DiagramColorPreset::dark(),
             )
-        });
+        })?;
 
-    assert_block_nbsp_arrow_svg(&rendered)?;
-    Ok(())
+    assert_block_nbsp_arrow_svg(&rendered)
 }
 
 fn block_nbsp_arrow_source() -> &'static str {
     "block-beta\ncolumns 1\n  db((\"DB\"))\n  blockArrowId6<[\"&nbsp;&nbsp;&nbsp;\"]>(down)\n  block:ID\n    A\n    B[\"A wide one in the middle\"]\n    C\n  end\n  space\n  D\n  ID --> D\n  C --> D\n  style B fill:#969,stroke:#333,stroke-width:4px"
 }
 
-fn assert_block_nbsp_arrow_svg(rendered: &Result<String, String>) -> Result<(), String> {
-    let svg = rendered.as_ref().map_err(ToString::to_string)?;
+fn assert_block_nbsp_arrow_svg(svg: &str) -> Result<(), String> {
     let document = SvgDocument::parse(svg).map_err(|error| error.to_string())?;
     let root = document.root_element();
     let block = layout::semantic_node(root, "-ID")?;
