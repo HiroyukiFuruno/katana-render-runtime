@@ -9,10 +9,10 @@ mod single_middle;
 #[path = "svg_rasterize_html_glyph_chunk_text.rs"]
 mod text;
 pub(super) use single_middle::single_middle_input;
-pub(in super::super) use text::ranges_cover_chunk;
+pub(in super::super) use text::ranges_match;
+use text::{printable_ascii, supported_ltr_text};
 #[cfg(test)]
-use text::span_content;
-use text::{printable_ascii, ranges_match, supported_ltr_text};
+use text::{ranges_cover_chunk, span_content};
 
 #[cfg(test)]
 #[path = "svg_rasterize_html_glyph_chunk_row_diagnostic.rs"]

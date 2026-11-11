@@ -30,7 +30,7 @@ fn chunk_supported(text: &usvg::Text, source: &super::sources::Chunk<'_>) -> boo
     source.source_spans.len() == source.layout_spans.len()
         && anchor_supported(source.chunk.anchor())
         && super::super::alignment_positioning_supported_with_dy(text, source.chunk, source.dy)
-        && super::source_spans::supported(source.chunk, source.source_spans, source.layout_spans)
+        && super::source_spans::supported(source.chunk, source.layout_spans)
 }
 
 fn prepared_runs_supported(

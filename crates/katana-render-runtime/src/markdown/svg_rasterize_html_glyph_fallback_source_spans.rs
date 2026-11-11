@@ -1,26 +1,16 @@
 use resvg::usvg;
 
-pub(super) fn supported(
-    chunk: &usvg::TextChunk,
-    source_spans: &[usvg::TextSpan],
-    layout_spans: &[usvg::layout::Span],
-) -> bool {
-    super::super::chunk::ranges_cover_chunk(chunk)
-        && source_spans
-            .iter()
-            .zip(layout_spans)
-            .all(|(source, layout)| source_layout_supported(chunk, source, layout))
+pub(super) fn supported(chunk: &usvg::TextChunk, layout_spans: &[usvg::layout::Span]) -> bool {
+    let pairs = chunk.spans().iter().zip(layout_spans);
+    super::super::chunk::ranges_match(chunk.text(), pairs, source_layout_supported)
         && same_baseline(layout_spans)
 }
 
 fn source_layout_supported(
-    chunk: &usvg::TextChunk,
     source: &usvg::TextSpan,
+    content: &str,
     layout: &usvg::layout::Span,
 ) -> bool {
-    let Some(content) = chunk.text().get(source.start()..source.end()) else {
-        return false;
-    };
     source_style_supported(source)
         && super::super::alignment_source_span_supported(source)
         && !layout.positioned_glyphs.is_empty()

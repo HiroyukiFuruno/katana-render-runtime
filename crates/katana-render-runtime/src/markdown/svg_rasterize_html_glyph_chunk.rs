@@ -6,7 +6,7 @@ use tiny_skia::{Point, Transform};
 mod eligibility;
 #[path = "svg_rasterize_html_glyph_chunk_metrics.rs"]
 mod metrics;
-pub(super) use eligibility::ranges_cover_chunk;
+pub(super) use eligibility::ranges_match;
 #[cfg(test)]
 pub(super) use eligibility::row_diagnostic;
 use metrics::{character_metrics, span_widths};

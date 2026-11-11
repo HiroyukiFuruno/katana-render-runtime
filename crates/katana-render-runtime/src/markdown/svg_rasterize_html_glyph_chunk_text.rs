@@ -11,12 +11,13 @@ pub(super) fn supported_ltr_text(text: &str) -> bool {
     })
 }
 
+#[cfg(test)]
 pub(in super::super::super) fn ranges_cover_chunk(chunk: &usvg::TextChunk) -> bool {
     let spans = chunk.spans().iter().zip(std::iter::repeat(()));
     ranges_match(chunk.text(), spans, |_, _, ()| true)
 }
 
-pub(super) fn ranges_match<'a, T>(
+pub(in super::super::super) fn ranges_match<'a, T>(
     text: &str,
     spans: impl Iterator<Item = (&'a usvg::TextSpan, T)>,
     mut matches: impl FnMut(&usvg::TextSpan, &str, T) -> bool,
