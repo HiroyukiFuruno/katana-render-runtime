@@ -136,6 +136,49 @@ fn resume_session_restores_saved_scroll_position() -> Result<(), Box<dyn std::er
 }
 
 #[test]
+fn resume_reports_scroll_listener_exception() -> Result<(), Box<dyn std::error::Error>> {
+    let html = r#"<style>html,body{margin:0}</style><button id="allow" style="width:100px;height:40px">Allow</button><div style="height:500px"></div><script>
+let allowed = false;
+document.getElementById('allow').addEventListener('click', () => { allowed = true; });
+window.addEventListener('scroll', () => { if (!allowed) throw new Error('resume scroll listener failed'); });
+</script>"#;
+    let source = HtmlBrowserSource::new(html, "https://example.test/scroll-error.html")?;
+    let viewport = HtmlBrowserViewport::new(320, 160, 1.0)?;
+    let provenance = provenance(&source, viewport)?;
+    let mut session = HtmlRuntime.open(source.clone(), viewport)?;
+    allow_and_scroll(&mut session)?;
+    let frame = session.latest_frame().ok_or("frame")?.clone();
+    assert!(frame.scroll_y > 0.0);
+    let artifact = HtmlFrameArtifact::new(provenance.clone(), frame)?;
+    session.close()?;
+    assert!(matches!(
+        artifact.resume_session(source, viewport, &provenance),
+        Err(HtmlArtifactError::Runtime(message)) if message.contains("resume scroll listener failed")
+    ));
+    Ok(())
+}
+
+fn allow_and_scroll(
+    session: &mut crate::HtmlBrowserSession,
+) -> Result<(), Box<dyn std::error::Error>> {
+    const BUTTON_POSITION: (f32, f32) = (10.0, 10.0);
+    const SAVED_SCROLL_DISTANCE: f32 = 120.0;
+    let (x, y) = BUTTON_POSITION;
+    for input in [
+        HtmlBrowserInput::PointerMove { x, y },
+        HtmlBrowserInput::PointerDown { x, y, button: 0 },
+        HtmlBrowserInput::PointerUp { x, y, button: 0 },
+        HtmlBrowserInput::Scroll {
+            delta_x: 0.0,
+            delta_y: SAVED_SCROLL_DISTANCE,
+        },
+    ] {
+        session.dispatch_input(input)?;
+    }
+    Ok(())
+}
+
+#[test]
 fn resume_session_reports_public_runtime_compile_error() -> Result<(), Box<dyn std::error::Error>> {
     let source = HtmlBrowserSource::new(
         "<script>if (</script>",

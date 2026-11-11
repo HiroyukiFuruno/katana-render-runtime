@@ -7,6 +7,13 @@ const HIDDEN_OVERFLOW_DOCUMENT: &str = r#"<body style="margin:0;overflow-y:hidde
 <script>window.addEventListener('scroll', () => {
   document.getElementById('result').textContent = 'scrolled';
 });</script></body>"#;
+const OBSERVER_SCROLL_DOCUMENT: &str = r#"<body style="margin:0">
+<div style="height:400px"></div><div id="target" style="height:40px">target</div>
+<script>new IntersectionObserver(entries => {
+  if (entries[0].isIntersecting) throw new Error('intersection callback failed');
+  document.getElementById('target').setAttribute('data-observer', 'waiting');
+}).observe(document.getElementById('target'));</script></body>"#;
+const OBSERVER_SCROLL_DELTA: f32 = 300.0;
 
 #[test]
 fn text_without_focused_input_preserves_dom_and_frame() -> TestResult {
@@ -45,6 +52,25 @@ fn hidden_viewport_overflow_rejects_host_scroll_and_skips_window_event() -> Test
         .map_err(to_string)?;
 
     assert_scroll_remains_blocked(&session, generation)?;
+    Ok(())
+}
+
+#[test]
+fn intersection_observer_exception_reaches_host_scroll_dispatch() -> TestResult {
+    let mut session = start(OBSERVER_SCROLL_DOCUMENT)?;
+    let initial = session.runtime.snapshot().map_err(to_string)?;
+    assert!(initial.contains("data-observer=\"waiting\""), "{initial}");
+    let error = session
+        .dispatch_input(HtmlBrowserInput::Scroll {
+            delta_x: 0.0,
+            delta_y: OBSERVER_SCROLL_DELTA,
+        })
+        .err()
+        .ok_or_else(|| "intersecting observer error was not propagated".to_string())?;
+    assert!(
+        error.to_string().contains("intersection callback failed"),
+        "{error}"
+    );
     Ok(())
 }
 
