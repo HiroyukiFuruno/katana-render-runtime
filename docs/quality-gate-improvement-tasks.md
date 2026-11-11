@@ -2,9 +2,10 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [/] `3deb17ff` の正式計測は6,242件成功・別15件skip、86,699/87,132行（99.5030528394%）、未カバー433行。SVG先頭子・空CDATA・相対変換・書き出しで各1行減。純テストの移動でSVG文字計測2行とHTML項目配置1行減。分母は純テスト264行とSVGの重複判定4行が減少。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-5yrd4_pa/safe-summary.json`）。
 - [x] `bcdac3dc` はSVGパーサーが空でないフォント候補を作るため、書き出し側の再判定を除いた。フォント指定を省いた実SVGで既定値の属性・非透明画素・再解析前後の画素一致を確認。 `0a3f4561` はXMLで空CDATAのテキストノードが存在することと、SVG解析後に空の項目だけが省かれることを確認。最終foundation・AST・関連7件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-writer-default-and-empty-cdata-exact-obltf01w/safe-summary.json`）。試行時のファイル長、使用中PID、テスト補助の戻り値型の失敗は各runに保持。
 - [x] `2830b11f` はSVG先頭子の文字種別を同じノードから一度だけ取得する。`e6225dfb` は入れ子グループの相対変換で局所座標だけがオーバーフローする実SVGを解析し、外側の境界が変換前の局所値を保持することを確認した。初回のASTが追加先の300行上限を検出し、既存getter回帰へ移動。最終foundation・AST・関連4件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-tree-text-and-transform-exact-h3uyhnod/safe-summary.json`）。
-- [x] `43a34c01` はSVG文字計測とHTML項目配置の純粋なテストだけを既存形式の専用ファイルへ移した。製品と共有診断の実装は同一。初回は新規2ファイルの未追跡でfoundation失敗、追加後にASTが既存リテラル9箇所を検出し、同値の定数化で修正した。最終foundation・AST成功、runtimeのテスト一覧5,860件は一致、対象9件成功（`tmp/quality/resumed-owner-r3509/coverage-pure-svg-text-and-flow-exact-wa7t0v9q/safe-summary.json`）。全体計測への反映は未確認。
+- [x] `43a34c01` はSVG文字計測とHTML項目配置の純粋なテストだけを既存形式の専用ファイルへ移した。製品と共有診断の実装は同一。初回は新規2ファイルの未追跡でfoundation失敗、追加後にASTが既存リテラル9箇所を検出し、同値の定数化で修正した。最終foundation・AST成功、runtimeのテスト一覧5,860件は一致、対象9件成功（`tmp/quality/resumed-owner-r3509/coverage-pure-svg-text-and-flow-exact-wa7t0v9q/safe-summary.json`）。
 - [/] `3b861dc7` の正式計測は6,239件成功・別15件skip、86,960/87,400行（99.4965675057%）、未カバー440行。SVG塗り参照、Skia参照、正規化済みフォント単位2行、HTML改行回帰、座標オーバーフローの各対象で合計6行減。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-3_ba3gwg/safe-summary.json`）。
 - [x] `c52b59c6` は保持済みのSkiaフォント参照を直接返し、取得に失敗しない箇所のエラー処理を除いた。生成・読み込み時のエラー処理は維持。可変フォント、TTC、文字位置、合成画素を含む11件とfoundation・AST成功（`tmp/quality/resumed-owner-r3509/coverage-svg-infallible-skia-typeface-exact-xs498iby/safe-summary.json`）。
 - [x] `0211114c` は左右端の加算が有限値を超える実HTMLを、初回フレーム発行前に座標エラーとして拒否することを確認。スラッシュ直後で改行してはならない位置は入力から算出し、結果に含まれないことを確認。関連4件とfoundation・AST成功（`tmp/quality/resumed-owner-r3509/coverage-html-overflow-and-slash-exact-xy1jb4md/safe-summary.json`）。
