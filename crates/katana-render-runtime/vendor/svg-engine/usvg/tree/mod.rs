@@ -1753,14 +1753,7 @@ fn has_text_nodes(root: &Group) -> bool {
 
         let mut has_text = false;
 
-        if let Node::Image(image) = node {
-            if let ImageKind::SVG(tree) = &image.kind {
-                if has_text_nodes(&tree.root) {
-                    has_text = true;
-                }
-            }
-        }
-
+        /* WHY: Image::subrootsも埋め込みSVGを列挙するため、同じtreeを二重走査しない。 */
         node.subroots(|subroot| has_text |= has_text_nodes(subroot));
 
         if has_text {
