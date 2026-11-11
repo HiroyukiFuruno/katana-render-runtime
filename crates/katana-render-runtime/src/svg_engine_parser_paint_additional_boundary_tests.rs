@@ -74,6 +74,68 @@ fn acyclic_paint_server_references_resolve_contents() -> Result<(), String> {
 }
 
 #[test]
+fn circular_svg_child_references_render_like_the_broken_cycle() -> Result<(), String> {
+    for (content, cyclic, detached) in [
+        (
+            r##"<defs><pattern id="a" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="url(#b)"/></pattern><pattern id="b" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="lime"/><rect width="8" height="8" fill="url(#a)"/></pattern></defs><rect width="8" height="8" fill="url(#a) lime"/>"##,
+            r##"height="8" fill="url(#a)"/>"##,
+            r#"height="8" fill="none"/>"#,
+        ),
+        (
+            r##"<defs><clipPath id="a"><rect width="8" height="8" clip-path="url(#b)"/></clipPath><clipPath id="b"><rect width="8" height="8" clip-path="url(#a)"/></clipPath></defs><rect width="8" height="8" fill="lime" clip-path="url(#a)"/>"##,
+            r##"height="8" clip-path="url(#a)"/>"##,
+            r#"height="8" clip-path="none"/>"#,
+        ),
+        (
+            r##"<defs><filter id="loop"><feImage href="#shape"/></filter></defs><rect id="shape" width="8" height="8" fill="lime" filter="url(#loop)"/>"##,
+            r##"filter="url(#loop)""##,
+            r#"filter="none""#,
+        ),
+    ] {
+        let source = svg_child_references_document(content);
+        let control = source.replace(cyclic, detached);
+        assert_ne!(source, control);
+        let actual = rendered_svg(&source)?;
+        let expected = rendered_svg(&control)?;
+        assert_eq!(pixel(&expected, CENTER_SAMPLE, CENTER_SAMPLE)?, GREEN_PIXEL);
+        assert_eq!(actual, expected, "circular reference {cyclic}");
+    }
+    Ok(())
+}
+
+#[test]
+fn svg_child_references_without_a_cycle_keep_their_effects() -> Result<(), String> {
+    for (content, expected_center) in [
+        (
+            r##"<defs><pattern id="a" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="url(#b)"/></pattern><pattern id="b" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="url(#c)"/></pattern><pattern id="c" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="lime"/></pattern></defs><rect width="8" height="8" fill="url(#a) red"/>"##,
+            GREEN_PIXEL,
+        ),
+        (
+            r##"<defs><clipPath id="a"><rect width="8" height="8" clip-path="url(#b)"/></clipPath><clipPath id="b"><rect width="8" height="8" clip-path="url(#c)"/></clipPath><clipPath id="c"><rect width="4" height="8"/></clipPath></defs><rect width="8" height="8" fill="lime" clip-path="url(#a)"/>"##,
+            TRANSPARENT_PIXEL,
+        ),
+        (
+            r##"<defs><filter id="image"><feImage href="#shape"/></filter><rect id="shape" width="8" height="8" fill="lime" filter="opacity(100%)"/></defs><rect width="8" height="8" fill="red" filter="url(#image)"/>"##,
+            GREEN_PIXEL,
+        ),
+    ] {
+        let source = svg_child_references_document(content);
+        let pixels = rendered_svg(&source)?;
+        assert_eq!(pixel(&pixels, 0, CENTER_SAMPLE)?, GREEN_PIXEL, "{content}");
+        assert_eq!(
+            pixel(&pixels, CENTER_SAMPLE, CENTER_SAMPLE)?,
+            expected_center,
+            "{content}"
+        );
+    }
+    Ok(())
+}
+
+fn svg_child_references_document(content: &str) -> String {
+    format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8">{content}</svg>"#)
+}
+
+#[test]
 fn gradients_with_local_stops_ignore_wrong_type_href() -> Result<(), String> {
     for tag in ["linearGradient", "radialGradient"] {
         let source = format!(
