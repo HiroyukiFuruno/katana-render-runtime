@@ -205,6 +205,43 @@ fn curve_with_overflowing_transformed_bounds_uses_untiled_renderer() -> Result<(
     Ok(())
 }
 
+#[test]
+fn offscreen_curve_leaves_translucent_backdrop_unchanged() -> Result<(), String> {
+    let tree = usvg::Tree::from_str(CURVE, &usvg::Options::default()).map_err(|e| e.to_string())?;
+    let mut pixels = canvas(WIDTH)?;
+    let original = pixels.data().to_vec();
+    assert!(super::super::render_if_supported_at_origin(
+        path(&tree)?,
+        Transform::from_translate(1000.0, 0.0),
+        &mut pixels.as_mut(),
+        Some(frame_context(0)),
+    )?);
+    assert_eq!(pixels.data(), original);
+    Ok(())
+}
+
+#[test]
+fn overflowing_tile_origin_returns_error_without_changing_pixels() -> Result<(), String> {
+    let tree = usvg::Tree::from_str(CURVE, &usvg::Options::default()).map_err(|e| e.to_string())?;
+    for origin in [(i32::MAX, 0), (0, i32::MAX)] {
+        let mut pixels = canvas(WIDTH)?;
+        let original = pixels.data().to_vec();
+        let context = super::super::super::TileContext {
+            origin,
+            frame: (WIDTH as i32, HEIGHT),
+        };
+        let result = super::super::render_if_supported_at_origin(
+            path(&tree)?,
+            Transform::identity(),
+            &mut pixels.as_mut(),
+            Some(context),
+        );
+        assert_eq!(result.err().as_deref(), Some("tile bounds overflow"));
+        assert_eq!(pixels.data(), original);
+    }
+    Ok(())
+}
+
 fn frame_context(x: i32) -> super::super::super::TileContext {
     super::super::super::TileContext {
         origin: (x, 0),

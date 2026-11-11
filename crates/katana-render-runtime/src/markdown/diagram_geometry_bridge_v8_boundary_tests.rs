@@ -22,6 +22,13 @@ const REQUESTS: &str = r#"(() => {
     }));
 })()"#;
 
+const TEST_BOUNDS: TransformedBox = TransformedBox {
+    x: 0.0,
+    y: 0.0,
+    width: 2.0,
+    height: 1.0,
+};
+
 #[test]
 fn real_v8_rejects_invalid_bounds_and_accepts_zero_height() -> Result<(), String> {
     let output = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
@@ -81,13 +88,7 @@ fn assert_throwing_setters(
             .is_some_and(|error| error.to_rust_string_lossy(scope).contains("width rejected"))
     );
     scope.reset();
-    let bounds = TransformedBox {
-        x: 0.0,
-        y: 0.0,
-        width: 2.0,
-        height: 1.0,
-    };
-    assert_eq!(set_box_properties(scope, object, bounds), expected);
+    assert_eq!(set_box_properties(scope, object, TEST_BOUNDS), expected);
     assert!(scope.has_caught());
     assert!(
         scope
@@ -96,6 +97,43 @@ fn assert_throwing_setters(
     );
     scope.reset();
 }
+
+#[test]
+fn v8_box_writer_reports_rejected_y_and_width_after_prior_fields() {
+    DiagramV8Runtime::ensure_initialized();
+    for field in ["y", "width"] {
+        DiagramV8Runtime::with_empty_try_catch(|scope| assert_box_field_write_fails(scope, field));
+    }
+}
+
+fn assert_box_field_write_fails(scope: &mut DiagramTryCatchScope<'_, '_, '_, '_>, field: &str) {
+    let source = format!(
+        "new Proxy({{}}, {{defineProperty(target, key, descriptor) {{ \
+         if (key === '{field}') throw new Error(key + ' rejected'); \
+         return Reflect.defineProperty(target, key, descriptor); }}}})"
+    );
+    let object = v8::String::new(scope, &source).and_then(|source| {
+        let name = v8::String::new(scope, "geometry-selective-property-rejection")?;
+        ScriptCompiler::compile_with_origin(scope, source, name)?
+            .run(scope)?
+            .to_object(scope)
+    });
+    assert!(object.is_some(), "selective setter fixture must run");
+    if let Some(object) = object {
+        assert_eq!(
+            set_box_properties(scope, object, TEST_BOUNDS)
+                .err()
+                .as_deref(),
+            Some("SVG transformed bounds property write failed"),
+        );
+        assert!(scope.exception().is_some_and(|error| {
+            error
+                .to_rust_string_lossy(scope)
+                .contains(&format!("{field} rejected"))
+        }));
+    }
+}
+
 #[test]
 fn geometry_bridge_rejects_throwing_registration_setter() {
     DiagramV8Runtime::ensure_initialized();
