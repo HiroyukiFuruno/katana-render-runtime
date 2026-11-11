@@ -4,6 +4,9 @@ use super::{
 };
 use resvg::usvg::{Options, Tree};
 use std::sync::Arc;
+use tiny_skia::{Pixmap, Transform};
+
+use crate::markdown::svg_rasterize::composite::TextRasterizer;
 
 type SpanMeasurement = (Vec<(f32, f32)>, f64);
 
@@ -19,6 +22,33 @@ fn tree(fixture: &font_file_fixture::FontFileFixture, rows: &str) -> Result<Tree
         },
     )
     .map_err(|error| error.to_string())
+}
+
+#[test]
+fn svg_ligature_renders_across_a_span_without_positioned_glyphs() -> Result<(), String> {
+    let fixture = font_fixture("ligature-empty-span")?;
+    let actual = tree(&fixture, "<tspan x='8' y='20'>f<tspan>i</tspan></tspan>")?;
+    let reference = tree(&fixture, "<tspan x='8' y='20'>fi</tspan>")?;
+    assert!(
+        fixture_text(&actual)?
+            .layouted()
+            .iter()
+            .any(|span| span.positioned_glyphs.is_empty())
+    );
+    let expected = render_fixture_text(&reference)?;
+    assert!(expected.pixels().iter().any(|pixel| pixel.alpha() != 0));
+    assert_eq!(render_fixture_text(&actual)?.data(), expected.data());
+    Ok(())
+}
+
+fn render_fixture_text(tree: &Tree) -> Result<Pixmap, String> {
+    const WIDTH: u32 = 64;
+    const HEIGHT: u32 = 32;
+    let text = fixture_text(tree)?;
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    let mut pixels = Pixmap::new(WIDTH, HEIGHT).ok_or("SVG text fixture surface missing")?;
+    assert!(rasterizer.render(text, Transform::identity(), &mut pixels.as_mut())?);
+    Ok(pixels)
 }
 
 #[test]
