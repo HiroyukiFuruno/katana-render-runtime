@@ -15,9 +15,7 @@ pub(in super::super) fn svg_run_x_height_with_face(
         .variations(font_variations(font))
         .build();
     let metrics = instance.metrics();
-    if metrics.units_per_em == 0 {
-        return None;
-    }
+    /* WHY: Harfrustが利用するread-fontsは無効なunitsPerEmを1000へ正規化する。 */
     let x_height = metrics
         .scaled(ScaleF32::from_ppem(font.size, metrics.units_per_em))
         .x_height()

@@ -22,6 +22,8 @@ const SFNT_ENTRY_SELECTOR_OFFSET: usize = SFNT_SEARCH_RANGE_OFFSET + SFNT_WORD_L
 const SFNT_RANGE_SHIFT_OFFSET: usize = SFNT_ENTRY_SELECTOR_OFFSET + SFNT_WORD_LENGTH;
 const METRIC_TEST_SIZE: f32 = 15.0;
 const METRIC_TEST_WEIGHT: u16 = 400;
+const HEAD_UNITS_PER_EM_OFFSET: usize = 18;
+const NORMALIZED_UNITS_PER_EM: u16 = 1000;
 const OS2_USE_TYPO_METRICS: u16 = 1 << 7;
 const OS2_TYPO_ASCENDER_OFFSET: usize = 68;
 const OS2_TYPO_DESCENDER_OFFSET: usize = 70;
@@ -45,6 +47,17 @@ fn absent_face_returns_no_metrics_for_both_readers() -> TestResult {
         );
         Ok(())
     })
+}
+
+#[test]
+fn read_fonts_normalizes_zero_units_per_em_from_a_font_header() -> TestResult {
+    let mut bytes = FONT_BYTES.to_vec();
+    set_word(&mut bytes, b"head", HEAD_UNITS_PER_EM_OFFSET, 0)?;
+    let parsed = font(&bytes)?;
+    let head = parsed.tables().head().map_err(|error| error.to_string())?;
+    assert_eq!(head.units_per_em(), 0);
+    assert_eq!(parsed.metrics().units_per_em, NORMALIZED_UNITS_PER_EM);
+    Ok(())
 }
 
 #[test]

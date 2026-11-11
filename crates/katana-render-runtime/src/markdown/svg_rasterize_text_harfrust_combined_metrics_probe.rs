@@ -85,9 +85,6 @@ pub(super) fn combined_run_with_hook(
 
 fn raw_cell(instance: &Font, face_id: ID, size: f32) -> Option<RawRunCell> {
     let metrics = instance.metrics();
-    if metrics.units_per_em == 0 {
-        return None;
-    }
     let line = metrics
         .scaled(ScaleF32::from_ppem(size, metrics.units_per_em))
         .h_line()?;
