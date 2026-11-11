@@ -63,3 +63,19 @@ fn write_malformed_manifest(fixture: &Fixture) -> Result<std::path::PathBuf, Str
     fs::write(&path, b"[").map_err(|error| error.to_string())?;
     Ok(path)
 }
+
+#[test]
+fn input_rows_rejects_canonical_directory_path() -> Result<(), String> {
+    let directory = tempdir().map_err(|error| error.to_string())?;
+    let path = directory
+        .path()
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let manifest = manifest(&path, 0, &sha256(&[]));
+
+    assert_eq!(
+        input_rows(&manifest).err().as_deref(),
+        Some("path is not a canonical regular file")
+    );
+    Ok(())
+}

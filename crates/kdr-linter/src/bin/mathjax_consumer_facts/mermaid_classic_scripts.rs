@@ -57,10 +57,8 @@ pub(super) fn run(root: &Path) -> Result<(), String> {
         Ok(value) => value,
         Err(error) => json!({"schema": SCHEMA, "status": "rejected", "errors": [error]}),
     };
-    println!(
-        "{}",
-        serde_json::to_string(&output).map_err(|error| error.to_string())?
-    );
+    let serialized = output.to_string();
+    println!("{serialized}");
     if output["status"] != "verified" {
         return Err("Mermaid classic source route rejected".into());
     }

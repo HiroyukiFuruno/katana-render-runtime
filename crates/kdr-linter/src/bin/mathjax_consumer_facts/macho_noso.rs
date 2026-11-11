@@ -29,17 +29,15 @@ impl MachoNoso {
         for row in rows {
             files.push(inspect_file(row.path, row.size, &row.sha256)?);
         }
-        println!(
-            "{}",
-            serde_json::to_string(&json!({
-                "schema": REPORT_SCHEMA,
-                "status": "verified",
-                "parser": parser,
-                "manifest": {"path": manifest_path, "sha256": manifest_sha256},
-                "files": files,
-            }))
-            .map_err(|error| error.to_string())?
-        );
+        let output = json!({
+            "schema": REPORT_SCHEMA,
+            "status": "verified",
+            "parser": parser,
+            "manifest": {"path": manifest_path, "sha256": manifest_sha256},
+            "files": files,
+        })
+        .to_string();
+        println!("{output}");
         Ok(())
     }
 

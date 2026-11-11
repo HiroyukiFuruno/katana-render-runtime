@@ -36,10 +36,8 @@ const CACHE_PREFIX: &[&str] = &[
 const CACHE_FILENAME_ARGUMENT_COUNT: usize = 3;
 pub(super) fn run(root: &Path) -> Result<(), String> {
     let report = inspect_root(root)?;
-    println!(
-        "{}",
-        serde_json::to_string(&report).map_err(|error| error.to_string())?
-    );
+    let output = report.to_string();
+    println!("{output}");
     Ok(())
 }
 
