@@ -90,6 +90,32 @@ fn replacement_io_failure_preserves_selected_font() -> Result<(), Box<dyn std::e
     Ok(())
 }
 
+#[test]
+fn replacement_rejects_directories_as_font_files() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let source_directory = directory.path().join("source.ttf");
+    let selected = directory.path().join("selected.ttf");
+    let bytes = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
+    std::fs::create_dir(&source_directory)?;
+    std::fs::write(&selected, bytes)?;
+    assert!(
+        fixture_support::replace_selected_font(&selected, &source_directory)
+            .is_err_and(|error| error.starts_with("copy local replacement bytes"))
+    );
+    assert_eq!(std::fs::read(&selected)?, bytes.as_slice());
+
+    let destination_directory = directory.path().join("destination.ttf");
+    std::fs::create_dir(&destination_directory)?;
+    let sentinel = destination_directory.join("keep.ttf");
+    std::fs::write(&sentinel, bytes)?;
+    assert!(
+        fixture_support::replace_selected_font(&destination_directory, &selected)
+            .is_err_and(|error| error.starts_with("replace local selected font"))
+    );
+    assert_eq!(std::fs::read(&sentinel)?, bytes.as_slice());
+    Ok(())
+}
+
 pub(in super::super) struct Scope {
     previous: Option<Fixture>,
 }
