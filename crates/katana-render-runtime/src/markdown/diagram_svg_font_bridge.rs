@@ -1,7 +1,6 @@
 use super::DiagramTryCatchScope;
-use super::diagram_font_bridge::{
-    font_measure_number, font_measure_request_with_size_policy, install_callback,
-};
+use super::diagram_bridge_registration::install_callback;
+use super::diagram_font_bridge::{font_measure_number, font_measure_request_with_size_policy};
 
 #[path = "diagram_svg_fragment_font_bridge.rs"]
 mod fragment;

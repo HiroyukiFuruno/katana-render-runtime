@@ -3,6 +3,8 @@ use std::sync::OnceLock;
 
 use crate::v8_script::ScriptCompiler;
 
+#[path = "diagram_bridge_registration.rs"]
+mod diagram_bridge_registration;
 #[path = "diagram_font_bridge.rs"]
 mod diagram_font_bridge;
 #[path = "diagram_geometry_bridge.rs"]

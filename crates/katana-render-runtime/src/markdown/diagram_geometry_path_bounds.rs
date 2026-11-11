@@ -1,17 +1,17 @@
-use super::{TransformedBox, set_box_properties, throw_transform_error};
+use super::{TransformedBox, register_callback, set_box_properties, throw_transform_error};
 
 pub(super) fn install(
     scope: &mut v8::PinScope,
     global: v8::Local<v8::Object>,
 ) -> Result<(), String> {
-    let name = v8::String::new(scope, "__katanaSvgPathBounds")
-        .ok_or_else(|| "SVG path bounds bridge name allocation failed".to_string())?;
-    let callback = v8::Function::new(scope, path_bounds_callback)
-        .ok_or_else(|| "SVG path bounds bridge callback allocation failed".to_string())?;
-    if global.set(scope, name.into(), callback.into()) != Some(true) {
-        return Err("SVG path bounds bridge registration failed".to_string());
-    }
-    Ok(())
+    register_callback(
+        scope,
+        global,
+        "__katanaSvgPathBounds",
+        path_bounds_callback,
+        "SVG path bounds",
+    )
+    .map(|_| ())
 }
 
 fn path_bounds_callback(

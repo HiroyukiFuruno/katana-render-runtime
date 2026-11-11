@@ -1,3 +1,4 @@
+use super::super::diagram_bridge_registration::register_callback;
 use super::super::diagram_font_bridge::font_measure_request_with_known_text;
 use super::{set_svg_metric_properties, throw_svg_metric_error};
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
@@ -8,14 +9,14 @@ pub(super) fn install(
     scope: &mut v8::PinScope,
     global: v8::Local<v8::Object>,
 ) -> Result<(), String> {
-    let name = v8::String::new(scope, "__katanaMeasureSvgFragmentLayout")
-        .ok_or_else(|| "SVG fragment bridge name allocation failed".to_string())?;
-    let callback = v8::Function::new(scope, callback)
-        .ok_or_else(|| "SVG fragment bridge callback allocation failed".to_string())?;
-    global
-        .set(scope, name.into(), callback.into())
-        .and_then(|success| success.then_some(()))
-        .ok_or_else(|| "SVG fragment bridge registration failed".to_string())
+    register_callback(
+        scope,
+        global,
+        "__katanaMeasureSvgFragmentLayout",
+        callback,
+        "SVG fragment",
+    )
+    .map(|_| ())
 }
 
 fn callback(

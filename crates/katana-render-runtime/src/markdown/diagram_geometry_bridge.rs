@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use super::DiagramTryCatchScope;
+use super::diagram_bridge_registration::register_callback;
 use svgtypes::Transform;
 #[cfg(target_os = "macos")]
 #[path = "diagram_geometry_path_bounds.rs"]
@@ -18,20 +19,20 @@ const BOUNDS_HEIGHT_INDEX: usize = 3;
 pub(super) fn install(scope: &mut DiagramTryCatchScope<'_, '_, '_, '_>) -> Result<(), String> {
     let context = scope.get_current_context();
     let global = context.global(scope);
-    let name = v8::String::new(scope, "__katanaTransformSvgBox")
-        .ok_or_else(|| "SVG transform bridge name allocation failed".to_string())?;
-    let callback = v8::Function::new(scope, transform_box_callback)
-        .ok_or_else(|| "SVG transform bridge callback allocation failed".to_string())?;
-    if global.set(scope, name.into(), callback.into()) != Some(true) {
-        return Err("SVG transform bridge registration failed".to_string());
-    }
-    let length_name = v8::String::new(scope, "__katanaSvgPathLength")
-        .ok_or_else(|| "SVG path length bridge name allocation failed".to_string())?;
-    let length_callback = v8::Function::new(scope, path_length::svg_path_length_callback)
-        .ok_or_else(|| "SVG path length bridge callback allocation failed".to_string())?;
-    if global.set(scope, length_name.into(), length_callback.into()) != Some(true) {
-        return Err("SVG path length bridge registration failed".to_string());
-    }
+    let _ = register_callback(
+        scope,
+        global,
+        "__katanaTransformSvgBox",
+        transform_box_callback,
+        "SVG transform",
+    )?;
+    let _ = register_callback(
+        scope,
+        global,
+        "__katanaSvgPathLength",
+        path_length::svg_path_length_callback,
+        "SVG path length",
+    )?;
     #[cfg(target_os = "macos")]
     path_bounds::install(scope, global)?;
     Ok(())
