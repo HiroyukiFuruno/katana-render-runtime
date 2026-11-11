@@ -2,6 +2,11 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定3件中3件完了。静的検査・AST、関連Rust 16件、検査登録Bun 693件が成功し、ソースの前後一致を確認した（`tmp/quality/resumed-owner-r3509/release-grid-macho-exact-jakxq5dr/safe-summary.json`）。登録テストのファイル全件は603秒だったため、以後の修正中は関連するケース名で絞り、全件は最終ゲートで確認する。
+  - [x] HTMLの2列グリッドで、同じ行は最も高い項目に揃い、別の行は独立した高さを保つことを確認。Flexの既存回帰と共通の測定fixtureを使った。
+  - [x] Mach-Oの検査CLIで、正しい入力の後に古いSHAの入力がある場合、SHA不一致を報告し、部分成功を出力しないことを確認した。
+  - [x] HTML性能ツールの追加モードと既存testモードの差分を確認し、検査登録が認証するSHAを更新した。Pythonの72テストがローカルとCIの登録判定に復帰した。
+
 - 最新指示に従い、作業中は予定した修正単位をまとめて関連テストの結果を確認する。正式カバレッジは最後のフェーズで計測し、進捗の分母はその作業で対応予定とした件数を使う。
 - 対応予定1件中1件完了。R03の複数行入力欄の現在値をDOM内で管理し、JavaScript・利用側からの文字入力・描画で共有した。初期本文と作者の属性を保持することを実HTMLから確認した。修正前は公開回帰1件が不合格（`tmp/quality/resumed-owner-r3509/release-r03-textarea-red-xth368lq/safe-summary.json`）。修正後は関連66件とASTが成功し、対象差分が前後一致した（`tmp/quality/resumed-owner-r3509/release-r03-textarea-green-6k0dr099/safe-summary.json`）。検証中に作業ツリーの別範囲が変わったため、完全品質ゲートの成功には含めない。
 - 対応予定1件中1件完了。SVGの代替フォント処理で、文字範囲の連続性を検査した時点の文字列を字形照合に渡し、同じ範囲の再取得を除いた。UTF-8境界、代替フォントの位置合わせ、非対応入力の拒否を含む関連43件と静的検査・ASTが成功し、ソースの前後一致を確認した（`tmp/quality/resumed-owner-r3509/coverage-svg-fallback-span-exact-1wtyidwf/safe-summary.json`）。
