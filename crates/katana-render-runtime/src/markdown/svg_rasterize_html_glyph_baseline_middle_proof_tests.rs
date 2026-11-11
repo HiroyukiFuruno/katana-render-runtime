@@ -52,6 +52,26 @@ fn multiline_proof_rejects_authored_text_between_tspans() -> Result<(), String> 
 }
 
 #[test]
+fn multiline_layout_rejects_nonzero_position_of_hidden_trailing_text() -> Result<(), String> {
+    for (hidden_dy, accepted) in [(0.0, true), (1.0, false)] {
+        let body = format!("{MULTILINE}<tspan display='none' dy='{hidden_dy}'>E</tspan>");
+        let tree = fixture(&body, "")?;
+        let text = text(&tree)?;
+        assert_eq!(text.chunks().len(), MULTILINE_CHUNK_COUNT);
+        let visible = text
+            .chunks()
+            .iter()
+            .map(|chunk| chunk.text())
+            .collect::<String>();
+        assert_eq!(visible, "ABCD");
+        assert_eq!(text.dy().len(), visible.chars().count() + 1);
+        assert_eq!(text.dy().last(), Some(&hidden_dy));
+        assert_eq!(super::additional_middle_layout_supported(text), accepted);
+    }
+    Ok(())
+}
+
+#[test]
 fn additional_proof_rejects_complex_hierarchy_and_descendant_style() -> Result<(), String> {
     for body in [
         "<tspan x='0' dy='0'><tspan>AB</tspan></tspan><tspan x='0' dy='16.8'>CD</tspan>",
