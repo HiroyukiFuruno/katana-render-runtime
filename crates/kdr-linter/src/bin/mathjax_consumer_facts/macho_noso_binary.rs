@@ -40,9 +40,11 @@ impl MachOReader {
     {
         let header = Mach::parse(bytes, ZERO_FILE_OFFSET)
             .map_err(|error| format!("macho-header:{error}"))?;
-        let endian = header
-            .endian()
-            .map_err(|error| format!("macho-endian:{error}"))?;
+        let endian = if header.is_big_endian() {
+            Endianness::Big
+        } else {
+            Endianness::Little
+        };
         let Some(table) = Self::read_symbol_table(header, endian, bytes)? else {
             return Ok(Vec::new());
         };

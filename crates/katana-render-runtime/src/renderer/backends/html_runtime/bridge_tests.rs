@@ -157,6 +157,11 @@ fn callback_operation_and_argument_coercion_stay_in_javascript_budget() -> Resul
     false,
     "OtherError"
 )]
+#[case::native_name_getter_throws(
+    "try { __krr_dom('unsupported'); } catch (error) { error.toString = () => 'name getter failure'; Object.defineProperty(error, 'name', { get() { throw new Error('name getter failure'); } }); throw error; }",
+    false,
+    "name getter failure"
+)]
 fn uncaught_bridge_and_javascript_errors_keep_distinct_types(
     #[case] source: &str,
     #[case] native: bool,

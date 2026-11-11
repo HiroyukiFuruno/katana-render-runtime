@@ -29,7 +29,36 @@ const CORRUPTED_FIXTURE_CASES: &[(bool, Corruption, &[&str])] = &[
 ];
 const INCOMPLETE_MAGIC_BYTES: usize = 3;
 const HEADER_TRUNCATION_BYTES: usize = 1;
+const SYMTAB_COMMAND_BYTES: usize = 24;
 const THIN_ONLY_ERROR: &str = "macho-kind:thin-32-or-64-required";
+
+#[test]
+fn reads_big_endian_thin_macho_symbols() -> Result<(), String> {
+    for (is_64, format) in [(false, "MachO32"), (true, "MachO64")] {
+        let mut bytes = MachoNosoFixture::thin_macho(is_64, Corruption::None);
+        let symbol_offset = header_bytes(is_64) + SYMTAB_COMMAND_BYTES;
+        for word in bytes[..symbol_offset + 4].chunks_exact_mut(4) {
+            word.reverse();
+        }
+        let (actual_format, records) = MachOReader::records(&bytes)?;
+        assert_eq!(actual_format, format);
+        assert_eq!(
+            records,
+            vec![serde_json::json!({"symbolIndex": 0, "name": "/tmp/krr-object.o"})]
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn rejects_invalid_magic() -> Result<(), String> {
+    for is_64 in [false, true] {
+        let mut bytes = MachoNosoFixture::thin_macho(is_64, Corruption::None);
+        bytes[..4].fill(0);
+        assert_error_prefix(&bytes, "macho-kind:")?;
+    }
+    Ok(())
+}
 
 #[test]
 fn rejects_truncated_symbol_command_and_oversized_command_region() -> Result<(), String> {
