@@ -1,7 +1,7 @@
 use super::super::AuthoredClipInfo;
 use super::super::tests::{FailingTextRasterizer, TEXT_RASTERIZER_FAILURE};
 use resvg::usvg::{Group, Node, Options, Tree};
-use tiny_skia::{IntRect, Pixmap, Transform};
+use tiny_skia::{Pixmap, Transform};
 
 const SIZE: u32 = 32;
 const NESTED_CLIP: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><defs><clipPath id="inner"><rect x="4" y="4" width="8" height="8"/></clipPath><clipPath id="outer" clip-path="url(#inner)"><rect width="16" height="16"/></clipPath></defs><g id="layer" clip-path="url(#outer)"><rect width="24" height="24" fill="#ff0000"/></g></svg>"##;
@@ -98,14 +98,11 @@ fn assert_invalid_clip_bounds_cases(cases: &[(Transform, &str)]) -> Result<(), S
 fn cropped_group_without_a_clip_leaves_the_target_unchanged() -> Result<(), String> {
     let tree = parse(PLAIN_GROUP)?;
     let mut pixmap = canvas()?;
-    let crop = IntRect::from_xywh(0, 0, SIZE, SIZE).ok_or("crop fixture is invalid")?;
-    super::render_cropped_group(
+    super::render_clipped_group(
         layer(&tree)?,
-        crop,
         Transform::identity(),
         &mut pixmap.as_mut(),
         &AuthoredClipInfo::default(),
-        None,
         None,
     )?;
     assert!(pixmap.data().iter().all(|byte| *byte == 0));

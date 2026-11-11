@@ -165,17 +165,14 @@ fn render_traversable_group(
     origin: Option<TileContext>,
 ) -> Result<(), String> {
     let child_transform = transform.pre_concat(group.transform());
-    let render_children = if generated_viewport_clip(group, authored_clip_info) {
-        layers::render_clipped_group_at_origin
-    } else if group.clip_path().is_none() {
-        render_children_at_origin
-    } else {
+    let clip = group.clip_path();
+    if clip.is_some_and(|clip| !is_generated_viewport_clip(clip, authored_clip_info)) {
         layers::render_existing_node(node, transform, pixmap);
         return Ok(());
-    };
-    render_children(
+    }
+    layers::render_group_with_viewport_clip(
         group,
-        child_transform,
+        (clip, child_transform),
         pixmap,
         authored_clip_info,
         text_rasterizer,

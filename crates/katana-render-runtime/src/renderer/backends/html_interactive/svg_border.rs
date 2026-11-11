@@ -103,13 +103,25 @@ mod tests {
 
     #[test]
     fn border_edge_without_color_or_positive_width_is_not_painted() {
-        let attributes = [("style".to_string(), "border-top-width: 2px".to_string())];
+        let svg = small_border_markup("border-top-width:2px");
+        assert!(svg.is_empty());
+    }
+
+    #[test]
+    fn colored_zero_width_edge_is_omitted_beside_visible_edge() {
+        let svg =
+            small_border_markup("border-top:0px solid #a01234;border-right:2px solid #203456");
+        assert_eq!(svg.matches("<line").count(), 1);
+        assert!(!svg.contains("#a01234"));
+        assert!(svg.contains("stroke=\"#203456\""));
+    }
+
+    fn small_border_markup(css: &str) -> String {
+        let attributes = [("style".to_string(), css.to_string())];
         let style = CssStyle::from_element("div", &attributes, &CssStyle::browser_default());
         let mut svg = String::new();
-
         append_border(&mut svg, 0.0, 0.0, 20.0, 10.0, &style);
-
-        assert!(svg.is_empty());
+        svg
     }
 
     #[test]

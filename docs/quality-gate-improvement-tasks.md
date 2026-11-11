@@ -2,6 +2,10 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定2件中2件完了。SVG合成79件・CSS境界線15件、静的検査・ASTが成功し、対象と作業ツリーの差分が前後一致した（`tmp/quality/resumed-owner-r3509/coverage-svg-clip-and-css-border-exact-tqyleyk1/safe-summary.json`）。初回ASTが関数長を検出したため、クリップと変換を同じ引数へまとめた。
+  - [x] SVG合成で、選択済みクリップを切り出し処理に渡し、クリップなしの再判定を除いた。入れ子、画面外、作者指定クリップ、描画失敗時の出力保持を確認した。
+  - [x] 幅ゼロの色付きCSS境界線が省略され、隣接する辺は描画されることを回帰で確認した。
+
 - 対応予定2件中2件完了。関連22件、静的検査・ASTが成功し、検査対象と作業ツリーの差分が実行前後で一致した（`tmp/quality/resumed-owner-r3509/coverage-html-svg-dimensions-single-pass-exact-ijg89vio/safe-summary.json`）。初回2回は既存排他により静的検査開始前に終了し、空きを確認して実行した。
   - [x] HTML内SVGの幅測定で、解析済み幅を共有し、使わない高さの計算を除いた。
   - [x] SVG高さの最低値を一度だけ適用し、幅属性が不正でもCSS幅が優先される実HTMLを回帰で確認した。

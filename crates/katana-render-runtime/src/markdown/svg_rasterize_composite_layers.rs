@@ -17,9 +17,12 @@ pub(super) fn render_clipped_group(
     authored_clip_info: &AuthoredClipInfo,
     text_rasterizer: Option<&dyn TextRasterizer>,
 ) -> Result<(), String> {
-    render_clipped_group_at_origin(
+    let Some(clip) = group.clip_path() else {
+        return Ok(());
+    };
+    render_group_with_viewport_clip(
         group,
-        transform,
+        (Some(clip), transform),
         pixmap,
         authored_clip_info,
         text_rasterizer,
@@ -27,21 +30,30 @@ pub(super) fn render_clipped_group(
     )
 }
 
-pub(super) fn render_clipped_group_at_origin(
+pub(super) fn render_group_with_viewport_clip(
     group: &usvg::Group,
-    transform: Transform,
+    (clip, transform): (Option<&usvg::ClipPath>, Transform),
     pixmap: &mut tiny_skia::PixmapMut<'_>,
     authored_clip_info: &AuthoredClipInfo,
     text_rasterizer: Option<&dyn TextRasterizer>,
     origin: Option<super::TileContext>,
 ) -> Result<(), String> {
+    let Some(clip) = clip else {
+        return render_children_at_origin(
+            group,
+            transform,
+            pixmap,
+            authored_clip_info,
+            text_rasterizer,
+            origin,
+        );
+    };
     let Some((crop, crop_transform)) = crop_context(group, transform, pixmap)? else {
         return Ok(());
     };
     render_cropped_group(
         group,
-        crop,
-        crop_transform,
+        (clip, crop, crop_transform),
         pixmap,
         authored_clip_info,
         text_rasterizer,
@@ -64,29 +76,25 @@ pub(super) fn crop_context(
 
 fn render_cropped_group(
     group: &usvg::Group,
-    crop: IntRect,
-    crop_transform: Transform,
+    (clip, rect, transform): (&usvg::ClipPath, IntRect, Transform),
     pixmap: &mut tiny_skia::PixmapMut<'_>,
     authored_clip_info: &AuthoredClipInfo,
     text_rasterizer: Option<&dyn TextRasterizer>,
     origin: Option<super::TileContext>,
 ) -> Result<(), String> {
-    let mut composited = crop_pixmap(pixmap, crop)?;
-    let Some(clip) = group.clip_path() else {
-        return Ok(());
-    };
+    let mut composited = crop_pixmap(pixmap, rect)?;
     #[cfg(all(test, target_os = "macos"))]
-    let _crop_scope = super::super::SvgRasterizeOps::enter_path_crop(crop);
-    let child_origin = origin.map(|context| context.cropped(crop)).transpose()?;
+    let _crop_scope = super::super::SvgRasterizeOps::enter_path_crop(rect);
+    let child_origin = origin.map(|context| context.cropped(rect)).transpose()?;
     render_children_at_origin(
         group,
-        crop_transform,
+        transform,
         &mut composited.as_mut(),
         authored_clip_info,
         text_rasterizer,
         child_origin,
     )?;
-    composite_clipped_crop(pixmap, crop, &composited, clip, crop_transform)
+    composite_clipped_crop(pixmap, rect, &composited, clip, transform)
 }
 
 fn composite_clipped_crop(
