@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [/] `32cf6ae7` の正式計測は6,244件成功・別15件skip、86,585/87,012行（99.5092630901%）、未カバー427行。前回の432行から、SVG塗り単位・極小文字・空輪郭で各1行、HTML純テストの分離で2行減。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-1ra8ksw3/safe-summary.json`）。公開用カバレッジ判定は未達。
 - [x] `3af7ece6` はHTML永続テキスト幅キャッシュの純テスト3件を既存形式の専用ファイルに分離した。製品の幅計測は同一。初回のASTが製品ファイルの行数上限を検出し、Chrome比較専用の補助を既存テスト内へ移動した。最終foundation・AST成功、改名した3件以外のテスト一覧は一致、Chromeとの比較を含む関連4件成功（`tmp/quality/resumed-owner-r3509/coverage-html-persistent-width-tests-exact-fcdte9tn/safe-summary.json`）。
 - [x] `4b5f077d` は同梱Noto Sansの輪郭テーブルを空にしたフォントを実際に読み込み、有効なグリフIDが得られても描画画素が空なら初回描画の診断が拒否することを確認。foundation・AST・関連3件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-font-outline-empty-probe-exact-oxydgau7/safe-summary.json`）。
 - [x] `f1ea2f5b` はHTML描画結果ストアの純テスト4件を専用ファイルに分離し、FIFOを専用の一時ディレクトリに作成して終了時に回収するようにした。製品のストア実装とテスト一覧は同一。foundation・AST・関連4件成功（`tmp/quality/resumed-owner-r3509/coverage-html-artifact-fifo-unit-exact-dwqoi3zm/safe-summary.json`）。以上3件の全体計測への反映は未確認。
