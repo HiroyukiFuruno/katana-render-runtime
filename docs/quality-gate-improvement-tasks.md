@@ -2,7 +2,10 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
-- [x] SVGのPNGグリフで検査済み寸法から原点0の描画範囲を作るよう変更し、CBDTとsbixの実フォントで範囲とゼロ寸法の拒否を確認した。SVG engine移植済みソースの来歴は更新済み。Mermaid要件図の比較helperでstyleなしの入力が幅・高さの更新後もstyleを持たないことを確認。foundation・AST・関連7件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-png-bounds-and-mermaid-style-exact-f3hh3pzj/safe-summary.json`）。全体計測への反映は未確認。
+- [x] `f51ed6d9` は埋め込み画像のSVG・PNG・JPEG・GIF・WebPの判定を1回にし、各デコーダーの警告と透明画素の扱いを維持した。foundation・AST、入出力と破損画像の関連回帰9件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-embedded-image-kind-exact-gvd8bn3t/safe-summary.json`）。全体計測への反映は未確認。
+- [/] `4bd9d582` の正式計測は6,236件成功・別15件skip、86,951/87,399行（99.4874083227%）、未カバー448行。PNGグリフ、Mermaid要件図比較、SVG角丸属性で各1行減少。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-0u1li9gf/safe-summary.json`）。
+- [x] SVG角丸属性は`rx`と`ry`だけを変更候補として直接構築し、文字列による設定で到達しない分岐を除いた。属性の追加・削除、セレクターの一致保護、元の値を保つ回帰8件とfoundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-svg-geometry-plan-exact-jebqyluf/safe-summary.json`）。
+- [x] SVGのPNGグリフで検査済み寸法から原点0の描画範囲を作るよう変更し、CBDTとsbixの実フォントで範囲とゼロ寸法の拒否を確認した。SVG engine移植済みソースの来歴は更新済み。Mermaid要件図の比較helperでstyleなしの入力が幅・高さの更新後もstyleを持たないことを確認。foundation・AST・関連7件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-png-bounds-and-mermaid-style-exact-f3hh3pzj/safe-summary.json`）。
 - [/] `e87b21c1` の正式producerによる中間計測は6,235件成功・別15件skip、86,953/87,404行（99.4840053087%）、未カバー451行。SVGの位置合わせ・文字装飾、CSS宣言キャッシュで各1行減。Mermaid比較用helperの拒否回帰は成功し、styleなし分岐はこの計測に残った。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-v8d3c1uc/safe-summary.json`）。
 - [x] SVG中央揃えの文字で、2グリフ以上を確認した位置合わせ結果から先頭グリフを再利用し、同じchunkのxも一度だけ取得する。CSS宣言キャッシュは保持量がキュー内の合計であることを確認し、空のキューで到達不能な拒否を削除した。大きすぎる項目の拒否、上限、古い項目から除く順序は既存回帰で確認。初回の非testビルドで旧helperの未使用を検出し、製品とテストで同じ先頭グリフ取得helperを使う形に修正。foundation・AST・関連14件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-glyph-origin-and-css-cache-exact-a72tomnf/safe-summary.json`）。全体計測への反映は未確認。
 - [x] usvgの装飾パスは生成元のspanと同じ可視性で作られ、KRRは不可視spanを装飾準備の前に拒否する。実入力で到達しない装飾パス側の重複判定だけを除去し、下線・線・クリップ・未対応の描画を回帰で確認。Mermaidの要件図比較helperは、幅以外のCSS宣言が混在したfixtureを拒否する負例を追加。foundation・AST・関連8件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-decoration-and-mermaid-oracle-exact-3sqsdot8/safe-summary.json`）。全体計測への反映は未確認。
