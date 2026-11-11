@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定1件中1件完了。HTML入力欄の幅計算をフォント計測側へ移し、macOSでは常に主フォントの丸めを使うため、非macOS専用の代替計算をmacOSのビルドに含めない。OS別の計算式と字形欠落時の挙動を維持した。macOSの関連8件、静的検査、ASTが成功し、Chrome照合済みのArial入力幅145pxを確認した（`tmp/quality/resumed-owner-r3509/release-input-font-platform-width-rd2qk2yn/safe-summary.json`）。Linux・Windowsの実行と正式カバレッジは最終検証で確認する。
+
 - 対応予定1件中1件完了。公開HTML APIで、ビューポートに応じて移動するフラグメントへリサイズ後も追従し、手動スクロール後は利用者の位置を保持することを、実画素とスクロール情報で確認した。公開consumer 5件・標準静的検査・ASTが成功（`tmp/quality/resumed-owner-r3509/release-html-public-fragment-resize-uwuzwb_0/verified-results.json`）。正式カバレッジは最終フェーズで計測する。
 
 - 対応予定2件。公開HTML APIのblock表示の`<br>`で、後続内容を含む高さが行高40px分増えることを確認。Chrome実測は201→241px、関連Rust 14件、静的・AST成功（`tmp/quality/resumed-owner-r3509/release-html-block-break-exact-kf89poas/`）。

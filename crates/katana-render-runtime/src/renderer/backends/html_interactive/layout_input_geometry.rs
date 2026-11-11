@@ -80,14 +80,7 @@ fn character_width_for_size(size: usize, style: &CssStyle) -> f32 {
         style.font_weight,
         style.italic,
     )
-    .map(|metrics| {
-        if metrics.average_from_primary_font {
-            let average = metrics.average.round();
-            (average * size as f32).ceil() + metrics.maximum.round() - average
-        } else {
-            (metrics.average * size as f32).ceil()
-        }
-    });
+    .map(|metrics| metrics.width_for_size(size));
     measured.unwrap_or_else(|| (representative * size as f32).ceil())
 }
 

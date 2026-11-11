@@ -7,9 +7,21 @@ const OS2_AVERAGE_CHAR_WIDTH_BYTES: std::ops::Range<usize> = 2..4;
 const HHEA_MAX_ADVANCE_BYTES: std::ops::Range<usize> = 10..12;
 
 pub(crate) struct InputCharacterMetrics {
-    pub(crate) average: f32,
-    pub(crate) maximum: f32,
-    pub(crate) average_from_primary_font: bool,
+    average: f32,
+    maximum: f32,
+    #[cfg(not(target_os = "macos"))]
+    average_from_primary_font: bool,
+}
+
+impl InputCharacterMetrics {
+    pub(crate) fn width_for_size(&self, size: usize) -> f32 {
+        #[cfg(not(target_os = "macos"))]
+        if !self.average_from_primary_font {
+            return (self.average * size as f32).ceil();
+        }
+        let average = self.average.round();
+        (average * size as f32).ceil() + self.maximum.round() - average
+    }
 }
 
 pub(in super::super) fn html_input_character_metrics(
@@ -41,7 +53,6 @@ fn character_metrics(face: &Face<'_>, scale: f32) -> Option<InputCharacterMetric
     Some(InputCharacterMetrics {
         average,
         maximum: f32::from(face.ascender()) * scale,
-        average_from_primary_font: true,
     })
 }
 
@@ -102,16 +113,9 @@ mod tests {
     #[test]
     fn arial_input_size_matches_independent_chrome_width() {
         assert!(
-            html_input_character_metrics("Arial", 13.333333, 400, false).is_some_and(|metrics| {
-                assert!(metrics.average_from_primary_font);
-                assert_eq!(
-                    (metrics.average.round() * 20.0).ceil() + metrics.maximum.round()
-                        - metrics.average.round(),
-                    145.0
-                );
-                true
-            }),
-            "Arial fixture input metrics must exist"
+            html_input_character_metrics("Arial", 13.333333, 400, false)
+                .is_some_and(|metrics| metrics.width_for_size(20) == 145.0),
+            "Arial fixture input width must match Chrome at 145px"
         );
     }
 }
