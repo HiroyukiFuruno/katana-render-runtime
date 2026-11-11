@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] SVGマーカーは閉じる命令を読み取る時点で既存のサブパス始点を保持し、閉じる辺の接線・終端の配置・直前頂点で共有する。始点を描画時に逆走して再取得する処理と、正規のパスでは到達しない始点なしの代替値を除去した。複数の閉じたサブパス、閉じた曲線、退化ケースを含む関連68件と静的検査・AST・SVG由来検査4件が成功（`tmp/quality/resumed-owner-r3509/coverage-svg-marker-closed-position-exact-t20m6dz1/safe-summary.json`）。正式集計への反映は未確認。
 - [x] SVGテキストのspan位置は現在のchunk文字列のバイト長から取得するようにした。別に増分管理していた長さと、同じ末尾chunkの重複検索を除去。実SVGの複数バイト文字、span境界、座標によるchunk分割を確認し、関連74件と静的検査・AST・SVG由来検査4件が成功した（`tmp/quality/resumed-owner-r3509/coverage-svg-text-span-offset-exact-cti4c6gr/safe-summary.json`）。正式集計への反映は未確認。
 - [/] `d86c750f`の正式計測は6,252件成功・別15件skip、86,457/86,878行（99.5154124174%）、未カバー421行。Mach-O実CLIの追加2件により同ファイルで実行された関数実体は19→29件。行は別のテスト経由ですでに計測済みで、未カバー数は変わらなかった。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-wpkatwhn/safe-summary.json`）。
 - [x] Mach-O検査を実CLIから実行し、正規32/64ビット入力の証跡と、不正入力が混じった場合に途中の成功レポートを返さないことを確認。静的検査・AST・関連3件が成功。正規入力2件で実CLIバイナリの入力登録行を通過した（`tmp/quality/resumed-owner-r3509/coverage-macho-noso-cli-exact-ul8rzpve/safe-summary.json`、`tmp/quality/resumed-owner-r3509/coverage-macho-native-line-diagnostic-g7s0tv4b/lines-stdout.raw`）。全体計測への反映は未確認。

@@ -42,6 +42,16 @@ fn zero_length_closed_subpath_end_marker_uses_its_own_vertex() -> Result<(), Str
 }
 
 #[test]
+fn end_marker_uses_the_start_and_tangent_of_the_last_closed_subpath() -> Result<(), String> {
+    let svg = source("M10 6 L25 6 Z M65 28 L45 28 Z", "marker-end='url(#m)'");
+    assert_eq!(marker_path_count(parse(&svg)?.root()), 1);
+    let image = render_source(&svg)?;
+    assert_red(&image, 68, 28)?;
+    assert_eq!(image.pixel(28, 6).ok_or("sample missing")?.alpha(), 0);
+    Ok(())
+}
+
+#[test]
 fn closed_empty_first_subpath_start_marker_has_zero_angle() -> Result<(), String> {
     let svg = source("M10 20 Z L30 20", "marker-start='url(#m)'");
     let tree = parse(&svg)?;
