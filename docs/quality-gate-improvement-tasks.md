@@ -3,6 +3,9 @@
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
 - [ ] 正式カバレッジ100%・未カバー0を達成した後、挙動と既存テスト結果を維持し、読み込み・キャッシュ等の共通処理とレンダラーの責務境界を精査・整理する。小さい差分ごとに関連テストを回収し、整理後のソースで描画・性能・完全品質ゲートを再検証する。自己レビュー後にDraft PR、Codexレビューと指摘修正、3 OS CI、保護マージ、公開へ進む。
+- [/] `6f322803` の正式計測は6,186件成功・別15件skip、86,712/87,232行（99.4038884813%）、未カバー520行。前回523行から3減。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-recotyqj/safe-summary.json`）。
+- [x] `9da8feb0` で空の埋め込みSVG・実PNG・文字を含む埋め込みSVGの文字有無判定を確認し、`e05b3a06` で同じ内部ツリーの二重走査を削除した。変更前後で同じ3件が実0、foundation・AST・vendor来歴検査も成功（`tmp/quality/resumed-owner-r3509/coverage-svg-embedded-text-regression-before-ny32ry3d/safe-summary.json`、`tmp/quality/resumed-owner-r3509/coverage-svg-embedded-text-regression-after-11j1ci_h/safe-summary.json`）。`4fac3945` は共通のフォント検証補助が破損データと存在しないテーブルを拒否することを確認し、関連1件・foundation・AST成功（`tmp/quality/resumed-owner-r3509/coverage-font-fixture-input-validation-exact-ay6s5zok/safe-summary.json`）。520行の正式値には未反映。
+- [x] テスト一覧取得だけで生成した未使用のprofile3件、6,394,312Bを使用中プロセスと保護参照への非該当を確認して削除。生catalogと実テスト結果を保持した（`tmp/quality/resumed-owner-r3509/catalog-profile-cleanup-upkqvnr0/receipt.json`）。
 - [x] `4f2c68b6` は資源キャッシュで世代の自己比較や比較の逆転を誤って採用したソースを静的検査が拒否する回帰を追加。既存の実ソースfixtureと判定を使い、関連3件・foundation・AST成功（`tmp/quality/resumed-owner-r3509/coverage-resource-cache-identity-mutations-exact-tjlan9w_/safe-summary.json`）。523行の正式値には未反映。
 - [/] `5123d7eb` の正式計測は6,185件成功・別15件skip、86,711/87,234行（99.4004631222%）、未カバー523行。前回526行から3減。SVGパスの最小長で1行、ベースラインの重複判定で2行減少。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-5t7hvtyh/safe-summary.json`）。
 - [x] `ad74c830` は存在するが壊れたOS/2表を持つ実フォントで、キャッシュ用の計測が結果を返さず従来の行計測で正常に処理できることを確認した。`bd67ee6d` はSVG文字で未指定の回転とゼロ回転が同じ挙動になることを利用して処理を整理した。既存のテキストパス回転・欠落font・ベースラインを含む関連6件、foundation・AST・vendor来歴検査が成功（`tmp/quality/resumed-owner-r3509/coverage-svg-font-metrics-and-rotation-exact-kgfxdg3a/safe-summary.json`）。523行の正式値には未反映。
