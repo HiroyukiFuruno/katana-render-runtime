@@ -21,6 +21,8 @@ const FILE_FONT_FAMILY: &str = "Trebuchet MS";
 
 #[path = "svg_rasterize_html_glyph_baseline_middle_proof_tests.rs"]
 mod proof;
+#[path = "svg_rasterize_html_glyph_baseline_middle_text_path_tests.rs"]
+mod text_path_tests;
 
 #[test]
 fn flat_middle_keeps_the_original_zero_baseline_correction() -> Result<(), String> {
