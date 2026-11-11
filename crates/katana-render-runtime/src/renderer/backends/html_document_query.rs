@@ -165,4 +165,15 @@ mod tests {
             Err("insertAdjacentHTML target is not an element".into())
         );
     }
+
+    #[test]
+    fn svg_tag_name_and_hidden_property_keep_namespace_semantics() -> Result<(), String> {
+        let mut document =
+            HtmlDocument::parse("<svg><linearGradient id=gradient hidden></linearGradient></svg>");
+        let gradient = document.get_element_by_id("gradient").ok_or("gradient")?;
+
+        assert_eq!(document.tag_name(gradient)?, "linearGradient");
+        assert_eq!(document.hidden_property(gradient)?, None);
+        Ok(())
+    }
 }
