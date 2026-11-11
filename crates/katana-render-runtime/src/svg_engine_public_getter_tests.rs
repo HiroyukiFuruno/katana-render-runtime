@@ -5,6 +5,23 @@ use std::path::{Path, PathBuf};
 mod text_parser_tests;
 
 #[test]
+fn nested_group_uses_local_bounds_when_the_relative_transform_overflows() -> Result<(), String> {
+    let source = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><g id="outer" transform="scale(.001)"><g id="inner" transform="scale(1e20 1)"><rect width="1e19" height="2"/></g></g></svg>"#;
+    let tree = usvg::Tree::from_str(source, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    let Some(usvg::Node::Group(outer)) = tree.node_by_id("outer") else {
+        return Err("outer SVG group missing".into());
+    };
+    let Some(usvg::Node::Group(inner)) = tree.node_by_id("inner") else {
+        return Err("inner SVG group missing".into());
+    };
+    let local = inner.bounding_box();
+    assert!(local.transform(inner.transform()).is_none());
+    assert_eq!(outer.bounding_box(), local);
+    Ok(())
+}
+
+#[test]
 fn text_path_getters_match_authored_offset_and_path() -> Result<(), String> {
     let tree = parse_fixture("text/textPath/startOffset=30.svg")?;
     let text = text_node(&tree, "text1")?;
