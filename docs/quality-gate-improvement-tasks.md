@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] 共有フォントのサイズ判定でファイルmetadataの元の長さを使い、必要なホスト長の範囲検査は維持。実SVGの複数行で、各行の`tspan`の間に直接文字がある場合は追加レイアウトの証明を拒否し、通常の2行は受理することを確認。foundation・AST・関連9件が成功（`tmp/quality/resumed-owner-r3509/coverage-font-metadata-and-authored-text-exact-2eo33kfd/safe-summary.json`）。全体計測への反映は確認待ち。
 - [x] 実SVGの`fi`合字で、文字区間が分かれて後半に字形が割り当てられないことと、分割しない入力との全画素一致を確認。Mach-O検査でcanonical判定後の同一比較を除き、相対・非正規・重複パスとサイズ・digest違いの拒否を確認。Mermaidブロック回帰は同じ描画結果を直接渡す。foundation・AST・関連11件が成功（`tmp/quality/resumed-owner-r3509/coverage-ligature-macho-and-block-exact-6esmffcq/safe-summary.json`）。全体計測への反映は確認待ち。
 - [/] `f78c5f1e` の正式producerによる中間計測は86,874/87,344行（99.4618977835%）、未カバー470行。フォント回帰の入出力エラー変換で5行、SVG参照判定で4行減り、Mermaidブロック回帰の早期返却で1行増えた。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-3cnhuw95/safe-summary.json`）。
 - [x] フォント回帰のファイル操作は元のエラーを保持し、Mermaidブロック回帰は描画エラー文字列を複製せず、両者の確認内容を維持。SVGのグラデーション・パターン・フィルター参照は、タグなしと非対応タグで同じ終了処理を使う。SVG取り込み元の版とライセンスを維持して対象ソースの来歴を更新。foundation・AST・関連10件が成功（`tmp/quality/resumed-owner-r3509/coverage-font-error-and-paint-link-exact-inegjfnt/safe-summary.json`）。全体計測への反映を確認する。
