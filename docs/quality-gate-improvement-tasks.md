@@ -2,6 +2,9 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定2件。公開HTML APIのblock表示の`<br>`で、後続内容を含む高さが行高40px分増えることを確認。Chrome実測は201→241px、関連Rust 14件、静的・AST成功（`tmp/quality/resumed-owner-r3509/release-html-block-break-exact-kf89poas/`）。
+- 公開対象manifest更新では、指定refを先に固定し、同じコミットから対象内容のSHAと検証用コミットを一緒に更新する。Rust/Pythonの既存検査は同じ宣言を読む。公開対象の祖先検査、内容照合、公開条件は維持する。
+
 - 対応予定2件中2件完了。両方とも標準静的検査・ASTが成功し、検査したソースの前後一致を確認した。
   - [x] HTMLのビューポートクリップとヒット判定で、変換済みの同じ四隅を重複して検査していた。座標変換と軸算出を共有し、座標を一度だけ検査する。関連45件成功（`tmp/quality/resumed-owner-r3509/release-clip-geometry-single-validation-qhbdgnu8/safe-summary.json`）。
   - [x] SVGでは字形と装飾の両方がないテキストはusvgが保持しない。装飾のみなら既存のフォールバックへ進み、字形があれば準備済みの描画が必ず1件以上になるため、描画側の空チェックを除いた。空文字・空白だけの実SVGを追加し、関連209件成功（`tmp/quality/resumed-owner-r3509/release-svg-glyph-nonempty-zssm2hg8/safe-summary.json`）。

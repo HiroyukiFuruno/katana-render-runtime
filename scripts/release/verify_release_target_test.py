@@ -25,7 +25,6 @@ REQUIRED_CANDIDATE_ANCESTORS = (
     VERIFY_RELEASE_TARGET.REQUIRED_RELEASE_CANDIDATE_ANCESTORS
 )
 # Git履歴fixtureは祖先・version・内容契約を検証し、完全品質の証跡には使わない。
-CURRENT_RELEASE_VALIDATION_SNAPSHOT = "2caeb9e97e0e423b418cf6947699af3f71555f60"
 REJECTED_STALE_V0424_VALIDATION_SNAPSHOT = "536658729364519837b50b10e1fb2ad8139ced1e"
 REJECTED_V0424_VALIDATION_SNAPSHOT = "db20e187c39e56589dadb2356da150bd3e820987"
 PUBLISHED_V0423_SNAPSHOT = "8654789f69d24401b8ae67036db1cdb3e7f4294e"
@@ -179,7 +178,7 @@ class VerifyReleaseTargetTests(unittest.TestCase):
 
     def test_current_release_validation_snapshot_passes_release_content_contract(self) -> None:
         result = self.run_check(
-            "v0.4.24", "v0.4.23", CURRENT_RELEASE_VALIDATION_SNAPSHOT
+            "v0.4.24", "v0.4.23", VERIFY_RELEASE_TARGET.RELEASE_VALIDATION_SNAPSHOT
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -379,14 +378,25 @@ class VerifyReleaseTargetTests(unittest.TestCase):
             result.stdout.strip(), VERIFY_RELEASE_TARGET.release_manifest_sha256("HEAD")
         )
 
-    def test_manifest_rewriter_replaces_only_a_valid_single_declaration(self) -> None:
-        source = 'before\nREQUIRED_RELEASE_MANIFEST_SHA256 = "' + ("0" * 64) + '"\nafter\n'
-        updated = VERIFY_RELEASE_TARGET.rewrite_required_release_manifest(source, "f" * 64)
-        self.assertIn('REQUIRED_RELEASE_MANIFEST_SHA256 = "' + ("f" * 64) + '"', updated)
+    def test_manifest_rewriter_updates_a_single_digest_and_snapshot(self) -> None:
+        digest = f'REQUIRED_RELEASE_MANIFEST_SHA256 = "{"0" * 64}"\n'
+        snapshot = f'RELEASE_VALIDATION_SNAPSHOT = "{"0" * 40}"\n'
+        source = f"before\n{digest}{snapshot}after\n"
+        rewrite = VERIFY_RELEASE_TARGET.rewrite_required_release_manifest
+        updated = rewrite(source, "f" * 64, "a" * 40)
+        self.assertEqual(updated, source.replace("0" * 64, "f" * 64).replace("0" * 40, "a" * 40))
         with self.assertRaises(ValueError):
-            VERIFY_RELEASE_TARGET.rewrite_required_release_manifest("before\n", "f" * 64)
+            rewrite(source + digest, "f" * 64, "a" * 40)
         with self.assertRaises(ValueError):
-            VERIFY_RELEASE_TARGET.rewrite_required_release_manifest(source, "F" * 64)
+            rewrite(source + snapshot, "f" * 64, "a" * 40)
+        with self.assertRaises(ValueError):
+            rewrite(digest, "f" * 64, "a" * 40)
+        with self.assertRaises(ValueError):
+            rewrite(snapshot, "f" * 64, "a" * 40)
+        with self.assertRaises(ValueError):
+            rewrite(source, "F" * 64, "a" * 40)
+        with self.assertRaises(ValueError):
+            rewrite(source, "f" * 64, "A" * 40)
 
     def test_manifest_update_rejects_a_head_without_the_required_source_commit(self) -> None:
         parent = self.source_git("rev-parse", f"{REQUIRED_RELEASE_COMMITS[0]}^")

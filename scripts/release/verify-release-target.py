@@ -215,7 +215,8 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0423_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "44546661716f5df7afb6f5522ba05732759b2f669f15d4acf6cf3fb636a03c81"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "73dd17323d0230147500e712c217f334f3eba47f5c3ee3d01ead0a831097f262"
+RELEASE_VALIDATION_SNAPSHOT = "23a210d262ce43038abd0d59f6219e6c995affbd"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
@@ -224,6 +225,9 @@ RELEASE_GATE_PATHS = frozenset(
 )
 REQUIRED_RELEASE_MANIFEST_PATTERN = re.compile(
     r'^REQUIRED_RELEASE_MANIFEST_SHA256 = "[0-9a-f]{64}"$', re.MULTILINE
+)
+RELEASE_VALIDATION_SNAPSHOT_PATTERN = re.compile(
+    r'^RELEASE_VALIDATION_SNAPSHOT = "[0-9a-f]{40}"$', re.MULTILINE
 )
 
 
@@ -317,14 +321,7 @@ def latest_remote_tag(remote: str) -> StableVersion | None:
     return max(versions) if versions else None
 
 
-def missing_required_commits(
-    head_ref: str,
-    required_commits: tuple[str, ...] = REQUIRED_RELEASE_CANDIDATE_ANCESTORS,
-) -> list[str]:
-    if not required_commits or any(
-        re.fullmatch(r"[0-9a-f]{40}", commit) is None for commit in required_commits
-    ):
-        return list(required_commits)
+def resolve_head_commit(head_ref: str) -> str | None:
     head = subprocess.run(
         ["git", "rev-parse", "--verify", "--end-of-options", f"{head_ref}^{{commit}}"],
         check=False,
@@ -337,6 +334,20 @@ def missing_required_commits(
         or not re.fullmatch(r"[0-9a-f]{40}", resolved_head)
         or (head.stdout and not head.stdout.endswith("\n"))
     ):
+        return None
+    return resolved_head
+
+
+def missing_required_commits(
+    head_ref: str,
+    required_commits: tuple[str, ...] = REQUIRED_RELEASE_CANDIDATE_ANCESTORS,
+) -> list[str]:
+    if not required_commits or any(
+        re.fullmatch(r"[0-9a-f]{40}", commit) is None for commit in required_commits
+    ):
+        return list(required_commits)
+    resolved_head = resolve_head_commit(head_ref)
+    if resolved_head is None:
         return list(required_commits)
     result = subprocess.run(
         ["git", "rev-list", "--end-of-options", *required_commits, f"^{resolved_head}"],
@@ -413,25 +424,32 @@ def release_tree_matches(
     return release_manifest_sha256(head_ref, release_base) == required_manifest_sha256
 
 
-def rewrite_required_release_manifest(source: str, manifest_sha256: str) -> str:
-    """Replace exactly one checked-in digest, rejecting malformed source."""
+def rewrite_required_release_manifest(source: str, manifest_sha256: str, snapshot: str) -> str:
+    """Update the digest and its immutable validation fixture together."""
     if not re.fullmatch(r"[0-9a-f]{64}", manifest_sha256):
         raise ValueError("release manifest digest must be 64 lowercase hexadecimal characters")
     replacement = f'REQUIRED_RELEASE_MANIFEST_SHA256 = "{manifest_sha256}"'
-    updated, replacements = REQUIRED_RELEASE_MANIFEST_PATTERN.subn(replacement, source, count=1)
+    if not re.fullmatch(r"[0-9a-f]{40}", snapshot):
+        raise ValueError("release validation snapshot must be a full lowercase commit ID")
+    updated, replacements = REQUIRED_RELEASE_MANIFEST_PATTERN.subn(replacement, source)
     if replacements != 1:
         raise ValueError("expected exactly one required release manifest declaration")
+    updated, replacements = RELEASE_VALIDATION_SNAPSHOT_PATTERN.subn(
+        f'RELEASE_VALIDATION_SNAPSHOT = "{snapshot}"', updated
+    )
+    if replacements != 1:
+        raise ValueError("expected exactly one release validation snapshot declaration")
     return updated
 
 
-def update_required_release_manifest(head_ref: str) -> str:
+def update_required_release_manifest(snapshot: str) -> str:
     """Synchronize the reviewed guard explicitly after release content changes."""
-    manifest_sha256 = release_manifest_sha256(head_ref)
+    manifest_sha256 = release_manifest_sha256(snapshot)
     if manifest_sha256 is None:
-        raise ValueError(f"could not calculate release manifest for {head_ref!r}")
+        raise ValueError(f"could not calculate release manifest for {snapshot!r}")
     script = Path(__file__).resolve()
     source = script.read_text(encoding="utf-8")
-    updated = rewrite_required_release_manifest(source, manifest_sha256)
+    updated = rewrite_required_release_manifest(source, manifest_sha256, snapshot)
     if updated != source:
         script.write_text(updated, encoding="utf-8")
     return manifest_sha256
@@ -452,10 +470,9 @@ def main() -> int:
         print(manifest_sha256)
         return 0
     if args.update_release_manifest:
-        missing_source_commits = missing_required_commits(
-            args.head_ref, REQUIRED_RELEASE_SOURCE_COMMITS
-        )
-        if target != required_target or missing_source_commits:
+        snapshot = resolve_head_commit(args.head_ref)
+        if (target != required_target or snapshot is None
+                or missing_required_commits(snapshot, REQUIRED_RELEASE_SOURCE_COMMITS)):
             print(
                 "Release target manifest update failed: target must be "
                 f"{required_target.tag()} and head must contain the required release source commit(s).",
@@ -463,7 +480,7 @@ def main() -> int:
             )
             return 1
         try:
-            manifest_sha256 = update_required_release_manifest(args.head_ref)
+            manifest_sha256 = update_required_release_manifest(snapshot)
         except ValueError as update_error:
             print(f"Release target manifest update failed: {update_error}", file=sys.stderr)
             return 1

@@ -923,20 +923,19 @@ fn release_target_check(
 }
 
 fn current_release_validation_snapshot(root: &Path) -> Result<String, Box<dyn std::error::Error>> {
-    let contract =
-        std::fs::read_to_string(root.join("scripts/release/verify_release_target_test.py"))?;
+    let contract = std::fs::read_to_string(root.join("scripts/release/verify-release-target.py"))?;
     let snapshot = parse_release_validation_snapshot(&contract)?;
     verify_release_validation_snapshot_commit(root, snapshot)?;
     Ok(snapshot.to_owned())
 }
 
 fn parse_release_validation_snapshot(contract: &str) -> Result<&str, Box<dyn std::error::Error>> {
-    const DECLARATION: &str = "CURRENT_RELEASE_VALIDATION_SNAPSHOT = ";
+    const DECLARATION: &str = "RELEASE_VALIDATION_SNAPSHOT = ";
     let declarations: Vec<_> = contract
         .lines()
         .filter(|line| {
-            line.trim_start()
-                .starts_with("CURRENT_RELEASE_VALIDATION_SNAPSHOT")
+            line.split_once('=')
+                .is_some_and(|(name, _)| name.trim() == "RELEASE_VALIDATION_SNAPSHOT")
         })
         .collect();
     if declarations.len() != 1 {
