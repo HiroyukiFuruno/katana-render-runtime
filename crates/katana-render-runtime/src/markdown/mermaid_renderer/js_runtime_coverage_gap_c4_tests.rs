@@ -25,6 +25,52 @@ fn c4_validator_reports_technology_assigned_to_wrong_node() {
 }
 
 #[test]
+fn c4_validator_rejects_names_swapped_between_nodes() -> Result<(), String> {
+    GeometryContract::dynamic(tests::C4, false)?;
+    let swapped = tests::C4
+        .replace(
+            "<g class=\"c4-name\"><text x=\"40\" y=\"20\">Single Page Application",
+            "<g class=\"c4-name\"><text x=\"40\" y=\"20\">TEMP_NODE_NAME",
+        )
+        .replace(
+            "<g class=\"c4-name\"><text x=\"40\" y=\"20\">API Application",
+            "<g class=\"c4-name\"><text x=\"40\" y=\"20\">Single Page Application",
+        )
+        .replace("TEMP_NODE_NAME", "API Application");
+    assert_eq!(
+        GeometryContract::dynamic(&swapped, false).err().as_deref(),
+        Some("C4 label belongs to wrong node")
+    );
+    Ok(())
+}
+
+#[test]
+fn c4_validator_rejects_duplicate_relationship_labels() -> Result<(), String> {
+    GeometryContract::dynamic(tests::C4, false)?;
+    let duplicated = tests::C4.replace("</svg>", "<text x=\"140\" y=\"70\">Uses</text></svg>");
+    assert_eq!(
+        GeometryContract::dynamic(&duplicated, false)
+            .err()
+            .as_deref(),
+        Some("semantic element must be unique")
+    );
+    Ok(())
+}
+
+#[test]
+fn c4_validator_requires_both_relationship_labels() -> Result<(), String> {
+    GeometryContract::dynamic(tests::C4, false)?;
+    let missing_protocol = tests::C4.replace("[JSON/HTTPS]", "[HTTP]");
+    assert_eq!(
+        GeometryContract::dynamic(&missing_protocol, false)
+            .err()
+            .as_deref(),
+        Some("semantic element must be unique")
+    );
+    Ok(())
+}
+
+#[test]
 fn c4_validator_reports_missing_rect_and_relation() {
     let rectless = tests::C4.replace(
         r#"<rect class="label-container" width="80" height="80"/>"#,
