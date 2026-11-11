@@ -3,6 +3,35 @@ use super::{
 };
 
 #[test]
+fn tiny_svg_scale_preserves_anchor_when_css_paint_size_rounds_to_zero() -> Result<(), String> {
+    let fixture = font_fixture("tiny-css-anchor-boundary")?;
+    let tree = fixture_tree_with_content(&fixture, "x='50' y='20' transform='scale(.0005)'", "A")?;
+    let text = fixture_text(&tree)?;
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    let Prepared::Ready(spans) = rasterizer.prepare(text)? else {
+        return Err("tiny text was not prepared".into());
+    };
+    let [span] = spans.as_slice() else {
+        return Err("expected one prepared span".into());
+    };
+    let [glyph] = span.glyphs.as_slice() else {
+        return Err("expected one positioned glyph".into());
+    };
+    let alignment = span.x_alignment.ok_or("text alignment missing")?;
+    let layout = alignment.layout.ok_or("layout anchor missing")?;
+    let scale = text.abs_transform().sx;
+    assert!(span.font_size * scale > 0.0);
+    assert_eq!(
+        anchor::paint_size(span.font_size, layout.css_scale, scale),
+        None
+    );
+    let transformed = super::super::paint::normalized_transform(span, glyph, scale);
+    assert_eq!(transformed.tx, alignment.anchor_x * scale);
+    assert_eq!(transformed.ty, glyph.transform().ty * scale);
+    Ok(())
+}
+
+#[test]
 fn layout_unit_and_paint_size_reject_unrepresentable_values() {
     for value in [
         f32::NAN,
