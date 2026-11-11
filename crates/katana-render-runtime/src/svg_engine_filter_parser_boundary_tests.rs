@@ -36,14 +36,50 @@ fn filter_functions_without_object_bounds_skip_only_the_empty_group_filter() -> 
 #[test]
 fn filter_children_skip_comments_and_non_primitive_elements() -> Result<(), String> {
     let tree = parse_filter("<!-- retained XML node --><feFlood/><rect width='1' height='1'/>")?;
-    let primitive = tree
-        .filters()
+    let kind = first_filter_kind(&tree)?;
+    assert_eq!(tree.filters()[0].primitives().len(), 1);
+    assert!(matches!(kind, usvg::filter::Kind::Flood(_)));
+    Ok(())
+}
+
+#[test]
+fn invalid_base64_image_keeps_unfiltered_content_visible() -> Result<(), String> {
+    const HREF: &str = "data:image/png;base64,A";
+    let url = data_url::DataUrl::process(HREF).map_err(|error| format!("{error:?}"))?;
+    assert!(url.decode_to_vec().is_err());
+    let source = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'><defs><filter id='f' {FILTER_REGION}><feImage href='{HREF}'/></filter></defs><image id='bad' width='1' height='1' href='{HREF}'/><rect width='8' height='8' filter='url(#f)'/><rect id='control' x='8' width='8' height='8'/></svg>"
+    );
+    let tree = parse_svg(&source)?;
+    assert!(tree.node_by_id("bad").is_none());
+    assert!(tree.node_by_id("control").is_some());
+    assert_transparent_flood(first_filter_kind(&tree)?);
+    Ok(())
+}
+
+#[test]
+fn specular_lighting_requires_a_light_source() -> Result<(), String> {
+    let invalid = parse_filter("<feSpecularLighting/>")?;
+    assert_transparent_flood(first_filter_kind(&invalid)?);
+    let valid =
+        parse_filter("<feSpecularLighting><fePointLight x='2' y='3' z='4'/></feSpecularLighting>")?;
+    assert!(matches!(
+        first_filter_kind(&valid)?,
+        usvg::filter::Kind::SpecularLighting(_)
+    ));
+    Ok(())
+}
+
+fn first_filter_kind(tree: &usvg::Tree) -> Result<&usvg::filter::Kind, String> {
+    tree.filters()
         .first()
         .and_then(|filter| filter.primitives().first())
-        .ok_or("flood primitive missing")?;
-    assert_eq!(tree.filters()[0].primitives().len(), 1);
-    assert!(matches!(primitive.kind(), usvg::filter::Kind::Flood(_)));
-    Ok(())
+        .map(usvg::filter::Primitive::kind)
+        .ok_or_else(|| "filter primitive missing".to_owned())
+}
+
+fn assert_transparent_flood(kind: &usvg::filter::Kind) {
+    assert!(matches!(kind, usvg::filter::Kind::Flood(flood) if flood.opacity().get() == 0.0));
 }
 
 #[rstest]
