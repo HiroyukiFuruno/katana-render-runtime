@@ -118,7 +118,7 @@ fn selected_option_text(options: &[(String, bool)]) -> String {
 mod tests {
     use super::super::HtmlInteractiveSession;
     use super::super::tests::test_error;
-    use super::{option_texts, selected_option_text};
+    use super::{SELECT_HEIGHT, option_texts, selected_option_text};
     use crate::renderer::backends::html_browser::{HtmlBrowserSource, HtmlBrowserViewport};
     use crate::renderer::backends::html_document::HtmlDocumentNode;
 
@@ -154,7 +154,8 @@ mod tests {
 <select id=explicit style="box-sizing:border-box;width:180px;height:44px">
   <optgroup label=Group><option>fallback</option><option selected>chosen</option></optgroup>
 </select>
-<select id=default><option>fallback</option><option>other</option></select>"#,
+<select id=default><option>fallback</option><option>other</option></select>
+<select id=empty style="box-sizing:border-box;width:80px"></select>"#,
             "https://example.test/select.html",
         )
         .map_err(test_error)?;
@@ -212,6 +213,28 @@ mod tests {
             .ok_or("explicit select hit target is missing".to_string())?;
         assert_hit_geometry(explicit_target, explicit);
         assert!(explicit_target.width > fallback.width);
+        Ok(())
+    }
+
+    #[test]
+    fn parsed_empty_select_keeps_click_geometry_without_a_label() -> Result<(), String> {
+        const EXPECTED_LABELS: usize = 2;
+        const AUTHORED_EMPTY_WIDTH: f32 = 80.0;
+        let mut session = parsed_select_session()?;
+        let layout = session.layout().map_err(test_error)?;
+        let id = select_node_id(&mut session, "empty")?;
+        let element = select_box(&session, id)?;
+        let target = layout
+            .hit_targets
+            .iter()
+            .find(|target| target.node_id == id)
+            .ok_or("empty select hit target is missing")?;
+        assert_eq!(
+            (element.width, element.height),
+            (AUTHORED_EMPTY_WIDTH, SELECT_HEIGHT)
+        );
+        assert_hit_geometry(target, element);
+        assert_eq!(layout.svg.matches("</text>").count(), EXPECTED_LABELS);
         Ok(())
     }
 
