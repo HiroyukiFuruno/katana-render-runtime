@@ -127,7 +127,7 @@ fn variable_face_tables_do_not_enter_static_line_metrics() -> TestResult {
     let font = font(&bytes)?;
     assert!(font.tables().fvar().is_ok());
     assert!(metrics_from_font(&font, METRIC_TEST_SIZE).is_none());
-    assert!(super::super::metrics_from_tables(font.tables(), METRIC_TEST_SIZE).is_none());
+    assert!(super::super::metrics_from_tables(font.tables(), METRIC_TEST_SIZE, || None).is_none());
     Ok(())
 }
 

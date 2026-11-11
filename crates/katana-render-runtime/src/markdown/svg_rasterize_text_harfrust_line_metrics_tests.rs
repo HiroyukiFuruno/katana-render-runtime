@@ -202,7 +202,7 @@ fn check_unsorted_os2_metrics(
         })
         .flatten()
         .ok_or("unguarded real font absent")?;
-    let unguarded = super::metrics_from_tables(font.tables(), size)
+    let unguarded = super::metrics_from_tables(font.tables(), size, || None)
         .ok_or("unguarded mandatory metrics absent")?;
     assert_eq!(unguarded, expected);
     Ok(())

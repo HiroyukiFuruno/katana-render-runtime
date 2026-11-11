@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- [x] SVG・HTMLの行メトリクスで、通常計測と診断付き計測の同一判定を共有し、HarfRustから従来パーサーへ切り替わる際の可変フォント判定の重複を除去。可変フォント・不正な実フォント・旧パーサーとの一致・HTMLベースラインを含む関連35件、静的検査・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-svg-html-line-metrics-shared-exact-8hj5si8z/safe-summary.json`）。正式計測は保留。
 - [x] MathJax AST検査の変異テストで重複した入力・適用・復元を共通化。MermaidのAST検査には壊れた検査テンプレートとセミコロン欠落を拒否するケースを追加。静的検査・AST・対象2件成功。実行後の確認スクリプトが実テスト名と一致しなかったため、生の終了コードと実テスト名から訂正した（`tmp/quality/resumed-owner-r3509/coverage-linter-realm-materializer-exact-lcc9bhcu/result-from-raw.json`）。正式計測は保留。
 - [x] macOSの実フォントで、同じ入力でも通常探索と限定探索のデータベースが混ざらず、両方を同じ探索方式で再利用できることを回帰へ追加。テスト一覧は当該1件のみ増加し、キャッシュの関連6件、静的検査・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-svg-font-discovery-mode-exact-yl5lvmvk/safe-summary.json`）。
 - [x] SVG変換の不正指定を恒等変換へ戻す処理を既存の書き方に復元。Clippyが推奨する短縮形はAST規則に抵触するため、両規則を維持する。静的検査・AST・回転・変換順・不正構文・境界値の関連4件が成功（`tmp/quality/resumed-owner-r3509/coverage-v8-transform-clippy-exact-hwx_k71c/safe-summary.json`）。次の正式計測は未カバー箇所の対応をまとめてから行う。

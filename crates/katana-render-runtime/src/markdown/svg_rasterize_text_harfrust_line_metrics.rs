@@ -16,9 +16,7 @@ pub(in super::super) fn cached_face_line_metrics(
     let Some(font) = font_for_face(database, id) else {
         return Ok(None);
     };
-    let metrics = sorted_blob_directory(database, id, &font)
-        .then(|| metrics_from_font(&font, size))
-        .flatten();
+    let metrics = checked_metrics(database, id, &font, size);
     if !commit_file_font(database, id, &font) {
         return Err(());
     }
@@ -56,10 +54,7 @@ fn checked_metrics(database: &Database, id: ID, font: &Font, size: f32) -> Optio
 }
 
 fn metrics_from_font(font: &Font, size: f32) -> Option<(f32, f32)> {
-    if !non_variable_tables(font.tables()) {
-        return None;
-    }
-    static_library_metrics(font, size).or_else(|| metrics_from_tables(font.tables(), size))
+    metrics_from_tables(font.tables(), size, || static_library_metrics(font, size))
 }
 
 fn static_library_metrics(font: &Font, size: f32) -> Option<(f32, f32)> {
@@ -108,12 +103,16 @@ fn sorted_blob_directory(database: &Database, id: ID, font: &Font) -> bool {
         .all(|pair| pair[0].tag() < pair[1].tag())
 }
 
-fn metrics_from_tables(tables: &Tables, size: f32) -> Option<(f32, f32)> {
+fn metrics_from_tables(
+    tables: &Tables,
+    size: f32,
+    preferred: impl FnOnce() -> Option<(f32, f32)>,
+) -> Option<(f32, f32)> {
     if !non_variable_tables(tables) {
         return None;
     }
-    let face = face_from_tables(tables)?;
-    Some(parsed_face_line_metrics(&face, size))
+    preferred()
+        .or_else(|| face_from_tables(tables).map(|face| parsed_face_line_metrics(&face, size)))
 }
 
 pub(in super::super) fn parsed_face_line_metrics(face: &Face<'_>, size: f32) -> (f32, f32) {

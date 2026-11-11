@@ -107,9 +107,7 @@ fn line_metrics_for_face(
 ) -> Option<(f32, f32)> {
     match super::harfrust::cached_face_line_metrics(database, id, size) {
         Ok(Some(metrics)) => Some(metrics),
-        Ok(None) => {
-            database.with_face_data(id, |data, index| face_line_metrics(data, index, size))?
-        }
+        Ok(None) => legacy_line_metrics(database, id, size),
         Err(()) => None,
     }
 }
@@ -137,14 +135,18 @@ fn diagnosed_line_metrics_for_face(database: &Database, id: ID, size: f32) -> Op
         Ok(None) => {
             detail.record_outcome(FaceMetricOutcome::Legacy);
             detail.measure(FaceMetricPhase::Legacy, || {
-                database.with_face_data(id, |data, index| face_line_metrics(data, index, size))
-            })?
+                legacy_line_metrics(database, id, size)
+            })
         }
         Err(()) => {
             detail.record_outcome(FaceMetricOutcome::Invalid);
             None
         }
     }
+}
+
+fn legacy_line_metrics(database: &Database, id: ID, size: f32) -> Option<(f32, f32)> {
+    database.with_face_data(id, |data, index| face_line_metrics(data, index, size))?
 }
 
 fn face_line_metrics(data: &[u8], index: u32, size: f32) -> Option<(f32, f32)> {
