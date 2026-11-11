@@ -3,6 +3,9 @@
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
 - [ ] 正式カバレッジ100%・未カバー0を達成した後、挙動と既存テスト結果を維持し、読み込み・キャッシュ等の共通処理とレンダラーの責務境界を精査・整理する。小さい差分ごとに関連テストを回収し、整理後のソースで描画・性能・完全品質ゲートを再検証する。自己レビュー後にDraft PR、Codexレビューと指摘修正、3 OS CI、保護マージ、公開へ進む。
+- [/] `0583859a` の正式計測は6,204件成功・別15件skip、86,783/87,280行（99.4305682860%）、未カバー497行。前回501行から、保存位置の復元エラーで1行、実フォント準備の共通化で3行減少。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-x1s264yb/safe-summary.json`）。
+- [x] `67a045e1`・`f5aa17b4` で、実クリックと入力の例外が後続のfocus/clickを止めることと、遅延フォントが実ファイルの切り詰めを検知して使用不能となり、復元後に新規読み込みできることを確認した。
+- [x] `758e69cc` はMermaidキャッシュを不安定なハッシュ初期化に変更した実Rust入力を拒否。初回ASTのファイル長指摘は入力形状のケース表を分離して解消。`6fef05e7` はSVG switchで正規化済み要素の重複判定を除き、コメント・テキスト混在でも既存の描画を維持。関連9件・foundation・AST・来歴検証が成功（`tmp/quality/resumed-owner-r3509/coverage-pointer-font-cache-and-svg-switch-exact-oh_xvdbf/safe-summary.json`）。497行の正式値には未反映。
 - [/] `8456dc1a` の正式計測は6,202件成功・別15件skip、86,782/87,283行（99.4260050640%）、未カバー501行。前回503行から画像のhref欠落、SVGのNUL拒否、MathJax本体判定で各1行減少、実フォント比較の準備処理で1行増加。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-l7kfipg4/safe-summary.json`）。
 - [x] `27b5b47a` で、実操作でスクロール位置を保存したHTMLを復元するときのwindow listener例外と、実スクロールで発生するIntersectionObserver例外の伝播を確認。初回の座標・距離の数値Lint指摘は名前付き定数で解消。
 - [x] `3f768e07` は同じ実フォントの読み込み元比較と異なるフォントの拒否で準備処理を共通化し、既存の比較条件を維持。`69d76f85` はSVGぼかしの行末処理で添字が行開始値より小さくならないことを確認し、到達不能な比較と未使用fieldを削除。関連17件・foundation・AST・来歴検証が成功（`tmp/quality/resumed-owner-r3509/coverage-scroll-artifact-font-fixture-and-blur-exact-y89s3czk/safe-summary.json`）。501行の正式値には未反映。
