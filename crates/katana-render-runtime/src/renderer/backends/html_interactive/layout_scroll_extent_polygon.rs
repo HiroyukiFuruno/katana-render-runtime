@@ -50,8 +50,7 @@ pub(in super::super) fn clip_viewport_polygon(
     if !viewport.iter().all(|(x, y)| x.is_finite() && y.is_finite()) {
         return Err(non_finite_geometry());
     }
-    let polygon = clip_polygon(clip)?;
-    let axes = polygon_axes(&polygon, clip.active_axes)?;
+    let (polygon, axes) = clip_polygon_axes(clip)?;
     let mut scratch = PolygonScratch {
         first: viewport.to_vec(),
         second: Vec::new(),
@@ -64,13 +63,24 @@ pub(in super::super) fn clip_viewport_polygon(
 }
 
 pub(super) fn clip_polygon(clip: &OverflowClip) -> Result<[Point; RECT_CORNER_COUNT], String> {
-    let polygon = clip
-        .transformed_corners
-        .map(|(x, y)| (f64::from(x), f64::from(y)));
+    let polygon = clip_corners(clip);
     if !polygon.iter().all(|(x, y)| x.is_finite() && y.is_finite()) {
         return Err(non_finite_geometry());
     }
     Ok(polygon)
+}
+
+pub(super) fn clip_polygon_axes(
+    clip: &OverflowClip,
+) -> Result<([Point; RECT_CORNER_COUNT], OwnerAxes), String> {
+    let polygon = clip_corners(clip);
+    let axes = polygon_axes(&polygon, clip.active_axes)?;
+    Ok((polygon, axes))
+}
+
+fn clip_corners(clip: &OverflowClip) -> [Point; RECT_CORNER_COUNT] {
+    clip.transformed_corners
+        .map(|(x, y)| (f64::from(x), f64::from(y)))
 }
 
 fn clip_axis_range(

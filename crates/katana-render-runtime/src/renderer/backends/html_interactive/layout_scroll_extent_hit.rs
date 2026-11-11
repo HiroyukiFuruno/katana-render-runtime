@@ -1,5 +1,5 @@
-use super::axes::{polygon_axes, projection_bounds};
-use super::polygon::clip_polygon;
+use super::axes::projection_bounds;
+use super::polygon::clip_polygon_axes;
 use super::{OverflowClip, Point, RECT_CORNER_COUNT};
 
 pub(in super::super) fn clip_contains_point(clip: &OverflowClip, x: f32, y: f32) -> bool {
@@ -16,8 +16,7 @@ fn clip_point_position(
     clip: &OverflowClip,
     point: Point,
 ) -> Result<Option<(Point, Point)>, String> {
-    let polygon = clip_polygon(clip)?;
-    let axes = polygon_axes(&polygon, clip.active_axes)?;
+    let (polygon, axes) = clip_polygon_axes(clip)?;
     let mut values = [(0.0, 0.0); 2];
     let active = [clip.active_axes.0, clip.active_axes.1];
     for (index, axis) in [axes.local_x, axes.local_y].into_iter().enumerate() {
