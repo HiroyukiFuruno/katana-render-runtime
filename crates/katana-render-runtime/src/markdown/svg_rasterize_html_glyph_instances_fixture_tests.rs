@@ -1,7 +1,7 @@
 use super::super::{HtmlGlyphRasterizer, html_glyph_variations, usvg};
 use crate::markdown::svg_rasterize::font_file_fixture::{FONT_BYTES, create};
 use resvg::usvg::{
-    Options, Tree,
+    FontVariation, Options, Tree,
     fontdb::{Database, Source},
 };
 use skrifa::{FontRef, MetadataProvider};
@@ -122,6 +122,28 @@ fn variation_resolution_rejects_invalid_size_and_missing_face() -> Result<(), St
         error,
         Some(format!("font face data unavailable for {id:?}"))
     );
+    Ok(())
+}
+
+#[test]
+fn variation_resolution_rejects_duplicate_and_nonfinite_axes() -> Result<(), String> {
+    let tree = fixture_tree(STATIC_FONT, None, 'A')?;
+    let (_, span, id) = target_span(&tree)?;
+    let duplicate = [FontVariation::new(*b"wght", 400.0); 2];
+    let nonfinite = [FontVariation::new(*b"wght", f32::INFINITY)];
+    for (variations, message) in [
+        (duplicate.as_slice(), "duplicate variation axis"),
+        (nonfinite.as_slice(), "non-finite variation value"),
+    ] {
+        let result = html_glyph_variations::resolve_design(
+            tree.fontdb(),
+            id,
+            variations,
+            span.font_optical_sizing,
+            FONT_SIZE,
+        );
+        assert!(result.is_err_and(|error| error.contains(message)));
+    }
     Ok(())
 }
 

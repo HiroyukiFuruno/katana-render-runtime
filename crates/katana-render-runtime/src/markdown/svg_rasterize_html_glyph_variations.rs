@@ -116,7 +116,6 @@ fn applied_variations(
     fontdb
         .with_face_data(face_id, |data, index| {
             let font = FontRef::from_index(data, index).map_err(|error| error.to_string())?;
-            validate_variations(face_id, variations)?;
             Ok(variations
                 .iter()
                 .filter(|variation| {
