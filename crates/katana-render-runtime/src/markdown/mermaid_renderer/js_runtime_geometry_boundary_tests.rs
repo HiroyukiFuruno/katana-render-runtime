@@ -96,3 +96,50 @@ fn closed_subpath_preserves_the_explicit_endpoints_of_the_full_path() -> Result<
     assert_eq!(endpoints(path)?, ([0.0, 0.0], [9.0, 7.0]));
     Ok(())
 }
+
+#[test]
+fn rectangles_reject_zero_and_negative_area() -> Result<(), String> {
+    for (width, height) in [("0", "5"), ("-1", "5"), ("5", "0"), ("5", "-1")] {
+        let source = format!("<svg><rect width='{width}' height='{height}'/></svg>");
+        let svg = element(&source)?;
+        let rect = first_element(&svg, "rect")?;
+        assert_eq!(
+            rectangle(rect),
+            Err("semantic rectangle must have area".into())
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn viewbox_containment_checks_both_axes_with_serialized_tolerance() -> Result<(), String> {
+    let svg = element("<svg viewBox='0 0 10 10'/>")?;
+    let root = svg.root_element();
+    assert!(view_contains(root, [-0.000009, 0.0, 10.000009, 10.000009]).is_ok());
+    assert!(view_contains(root, [0.0, -0.00002, 10.0, 10.0]).is_err());
+    assert!(view_contains(root, [0.0, 0.0, 10.0, 10.00002]).is_err());
+    Ok(())
+}
+
+#[test]
+fn hidden_ancestors_reject_global_geometry() -> Result<(), String> {
+    for visibility in ["display='none'", "visibility='hidden'", "opacity='0'"] {
+        let source = format!("<svg><g {visibility}><rect/></g></svg>");
+        let svg = element(&source)?;
+        let rect = first_element(&svg, "rect")?;
+        assert!(global(rect, [1.0, 2.0]).is_err(), "accepted {visibility}");
+    }
+    Ok(())
+}
+
+#[test]
+fn path_endpoints_apply_nested_transforms() -> Result<(), String> {
+    let svg = element(
+        "<svg><g transform='translate(10 20)'><path transform='scale(2 3)' d='M1 2 L4 5'/></g></svg>",
+    )?;
+    assert_eq!(
+        endpoints(first_element(&svg, "path")?)?,
+        ([12.0, 26.0], [18.0, 35.0])
+    );
+    Ok(())
+}
