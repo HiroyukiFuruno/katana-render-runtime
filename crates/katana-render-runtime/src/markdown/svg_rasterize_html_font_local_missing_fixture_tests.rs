@@ -61,6 +61,35 @@ fn local_missing_source_guard_accepts_binary_and_rejects_transient_shared_file()
     Ok(())
 }
 
+#[test]
+fn replacement_io_failure_preserves_selected_font() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let selected = directory.path().join("selected.ttf");
+    let replacement = directory.path().join("replacement.ttf");
+    let staging = selected.with_extension("admission-replacement");
+    let selected_bytes = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
+    let replacement_bytes = include_bytes!(
+        "../../../../tests/fixtures/svg-engine/upstream/resvg/tests/fonts/MPLUS1p-Regular.ttf"
+    );
+    std::fs::write(&selected, selected_bytes)?;
+    assert!(
+        fixture_support::replace_selected_font(&selected, &replacement)
+            .is_err_and(|error| error.starts_with("open copied public replacement font"))
+    );
+    assert_eq!(std::fs::read(&selected)?, selected_bytes.as_slice());
+    assert!(!staging.try_exists()?);
+
+    std::fs::write(&replacement, replacement_bytes)?;
+    std::fs::write(&staging, selected_bytes)?;
+    assert!(
+        fixture_support::replace_selected_font(&selected, &replacement)
+            .is_err_and(|error| error.starts_with("create local replacement staging file"))
+    );
+    assert_eq!(std::fs::read(&selected)?, selected_bytes.as_slice());
+    assert_eq!(std::fs::read(&staging)?, selected_bytes.as_slice());
+    Ok(())
+}
+
 pub(in super::super) struct Scope {
     previous: Option<Fixture>,
 }
