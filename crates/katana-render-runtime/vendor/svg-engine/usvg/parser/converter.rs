@@ -646,90 +646,71 @@ pub(crate) fn convert_children(
     }
 }
 
+enum ElementRoute {
+    Use,
+    Switch,
+    NestedSvg,
+    Grouped(GroupedElement),
+}
+
+enum GroupedElement {
+    Shape,
+    Image,
+    Text,
+    Children,
+}
+
+fn element_route(node: SvgNode) -> Option<ElementRoute> {
+    let child = match node.tag_name()? {
+        EId::Use => return Some(ElementRoute::Use),
+        EId::Switch => return Some(ElementRoute::Switch),
+        // 入れ子のSVGは自身でグループを作り、変換を一度だけ適用する。
+        EId::Svg if node.parent_element().is_some() => return Some(ElementRoute::NestedSvg),
+        EId::Rect | EId::Circle | EId::Ellipse | EId::Line
+        | EId::Polyline | EId::Polygon | EId::Path => GroupedElement::Shape,
+        EId::Image => GroupedElement::Image,
+        EId::Text => GroupedElement::Text,
+        EId::Svg | EId::G => GroupedElement::Children,
+        _ => return None,
+    };
+    Some(ElementRoute::Grouped(child))
+}
+
 #[inline(never)]
 pub(crate) fn convert_element(node: SvgNode, state: &State, cache: &mut Cache, parent: &mut Group) {
-    let tag_name = match node.tag_name() {
-        Some(v) => v,
-        None => return,
-    };
-
-    if !tag_name.is_graphic() && !matches!(tag_name, EId::G | EId::Switch | EId::Svg) {
+    let Some(route) = element_route(node) else {
         return;
-    }
-
+    };
     if !node.is_visible_element(state.opt) {
         return;
     }
 
-    if convert_special_element(tag_name, node, state, cache, parent) {
-        return;
-    }
-
-    if let Some(g) = convert_group(node, state, false, cache, parent, &|cache, g| {
-        convert_element_impl(tag_name, node, state, cache, g);
-    }) {
-        parent.children.push(Node::Group(Box::new(g)));
+    match route {
+        ElementRoute::Use => super::use_node::convert(node, state, cache, parent),
+        ElementRoute::Switch => {
+            super::switch::convert(node, state, cache, parent);
+        }
+        ElementRoute::NestedSvg => super::use_node::convert_svg(node, state, cache, parent),
+        ElementRoute::Grouped(child) => convert_grouped_element(child, node, state, cache, parent),
     }
 }
 
-fn convert_special_element(tag_name: EId, node: SvgNode, state: &State, cache: &mut Cache, parent: &mut Group) -> bool {
-    if tag_name == EId::Use {
-        super::use_node::convert(node, state, cache, parent);
-        return true;
-    }
-
-    if tag_name == EId::Switch {
-        super::switch::convert(node, state, cache, parent);
-        return true;
-    }
-
-    convert_nested_svg(tag_name, node, state, cache, parent)
-}
-
-// 入れ子のSVGは自身でグループを作るため、外側で重ねると変換が二重になる。
-fn convert_nested_svg(tag_name: EId, node: SvgNode, state: &State, cache: &mut Cache, parent: &mut Group) -> bool {
-    if tag_name == EId::Svg && node.parent_element().is_some() {
-        super::use_node::convert_svg(node, state, cache, parent);
-
-        return true;
-    }
-    false
-}
-
-#[inline(never)]
-fn convert_element_impl(
-    tag_name: EId,
+fn convert_grouped_element(
+    child: GroupedElement,
     node: SvgNode,
     state: &State,
     cache: &mut Cache,
     parent: &mut Group,
 ) {
-    match tag_name {
-        EId::Rect
-        | EId::Circle
-        | EId::Ellipse
-        | EId::Line
-        | EId::Polyline
-        | EId::Polygon
-        | EId::Path => convert_shape(node, state, cache, parent),
-        EId::Image => {
-            super::image::convert(node, state, cache, parent);
+    if let Some(g) = convert_group(node, state, false, cache, parent, &|cache, g| match child {
+        GroupedElement::Shape => convert_shape(node, state, cache, g),
+        GroupedElement::Image => {
+            super::image::convert(node, state, cache, g);
         }
-        EId::Text => {
-            {
-                super::text::convert(node, state, cache, parent);
-            }
-        }
-        EId::Svg => {
-            // Only the outermost `svg` reaches this point; nested `svg` elements are
-            // handled earlier in `convert_element`. The root `svg` itself is
-            // skipped and only its children are converted.
-            convert_children(node, state, cache, parent);
-        }
-        EId::G => {
-            convert_children(node, state, cache, parent);
-        }
-        _ => {}
+        GroupedElement::Text => super::text::convert(node, state, cache, g),
+        GroupedElement::Children => convert_children(node, state, cache, g),
+    }) {
+        parent.children.push(Node::Group(Box::new(g)));
     }
 }
 
