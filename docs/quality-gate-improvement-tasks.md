@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] SVG中央揃えの文字で、2グリフ以上を確認した位置合わせ結果から先頭グリフを再利用し、同じchunkのxも一度だけ取得する。CSS宣言キャッシュは保持量がキュー内の合計であることを確認し、空のキューで到達不能な拒否を削除した。大きすぎる項目の拒否、上限、古い項目から除く順序は既存回帰で確認。初回の非testビルドで旧helperの未使用を検出し、製品とテストで同じ先頭グリフ取得helperを使う形に修正。foundation・AST・関連14件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-glyph-origin-and-css-cache-exact-a72tomnf/safe-summary.json`）。全体計測への反映は未確認。
 - [x] usvgの装飾パスは生成元のspanと同じ可視性で作られ、KRRは不可視spanを装飾準備の前に拒否する。実入力で到達しない装飾パス側の重複判定だけを除去し、下線・線・クリップ・未対応の描画を回帰で確認。Mermaidの要件図比較helperは、幅以外のCSS宣言が混在したfixtureを拒否する負例を追加。foundation・AST・関連8件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-decoration-and-mermaid-oracle-exact-3sqsdot8/safe-summary.json`）。全体計測への反映は未確認。
 - [/] `456909d3` の正式producerによる中間計測は6,234件成功・別15件skip、86,946/87,400行（99.4805491991%）、未カバー454行。SVGフィルターの重複を整理して1行減。Mermaidの既存幅更新の正常系は成功し、未実行だった比較用helperの拒否分岐はこの計測に残った。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-07w96ut0/safe-summary.json`）。
 - [x] 正式未カバー行に基づき、SVGのグループfilterで未指定値を判定する重複を除去した。パーサー自身の未指定値処理、明示none、clipPath内の除外を維持し、SVG engine移植済みソースの来歴を更新。Mermaid要件図の比較用helperで既存max-widthの更新、SVGのCSS `rx:auto` で元からない属性を追加しないことを確認。foundation・AST・関連9件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-auto-filter-mermaid-requirement-exact-y8t8i0u3/safe-summary.json`）。同梱リソース経路の別案は既存AST契約に抵触したため差分を取り消した（初回AST実101は`tmp/quality/resumed-owner-r3509/coverage-svg-auto-mermaid-requirement-runtime-assets-exact-69ji6_l3/ast-exit.json`）。
