@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- [x] macOSの実フォントで、同じ入力でも通常探索と限定探索のデータベースが混ざらず、両方を同じ探索方式で再利用できることを回帰へ追加。テスト一覧は当該1件のみ増加し、キャッシュの関連6件、静的検査・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-svg-font-discovery-mode-exact-yl5lvmvk/safe-summary.json`）。
 - [x] SVG変換の不正指定を恒等変換へ戻す処理を既存の書き方に復元。Clippyが推奨する短縮形はAST規則に抵触するため、両規則を維持する。静的検査・AST・回転・変換順・不正構文・境界値の関連4件が成功（`tmp/quality/resumed-owner-r3509/coverage-v8-transform-clippy-exact-hwx_k71c/safe-summary.json`）。次の正式計測は未カバー箇所の対応をまとめてから行う。
 - [x] SVG境界値と文字計測の数値をJavaScriptオブジェクトに書く処理を共通化。各エラー文言、凍結オブジェクトでの失敗と既存プロパティの保護を維持し、関連266件・静的検査・AST・テスト一覧一致を確認（`tmp/quality/resumed-owner-r3509/coverage-v8-bridge-number-property-exact-wb4nm_cz/safe-summary.json`）。
 - [/] `29afa689`の正式計測は6,260件成功・別15件skip、86,380/86,778行（99.5413584088%）、未カバー398行。前回408行から図のJavaScriptコールバック登録と境界結果の共通化で10行減。収集実0、ソース前後一致。公開用カバレッジ判定は未達（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-yhmqcvpv/safe-summary.json`）。

@@ -183,6 +183,35 @@ fn different_requests_reuse_a_verified_mapping_and_lru_eviction_releases_it() ->
 
 #[cfg(target_os = "macos")]
 #[test]
+fn eager_and_known_discovery_keep_separate_cache_entries_for_the_same_text() {
+    let mut cache = HtmlFontDatabaseCache {
+        entries: VecDeque::new(),
+    };
+    let request = HtmlFontRequest::from_text("Helvetica", "漢");
+    let eager_key = DatabaseKey::eager(request.clone());
+    let known_key = DatabaseKey {
+        request,
+        discovery: super::super::DiscoveryMode::KnownOnly,
+    };
+
+    let eager = cache.get_mode(eager_key.clone());
+    let known = cache.get_mode(known_key.clone());
+
+    assert!(eager.proof.is_none());
+    assert!(!owned_shared_source(&known).is_empty());
+    assert!(!Arc::ptr_eq(&eager.database, &known.database));
+    assert!(Arc::ptr_eq(
+        &eager.database,
+        &cache.get_mode(eager_key).database
+    ));
+    assert!(Arc::ptr_eq(
+        &known.database,
+        &cache.get_mode(known_key).database
+    ));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn zero_budget_builder_keeps_file_sources_unseeded() -> Result<(), String> {
     SvgRasterizeOps::with_html_font_render_scope(|| {
         let request = HtmlFontRequest::from_text("Helvetica", "preload source");
