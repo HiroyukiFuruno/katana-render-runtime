@@ -3,6 +3,9 @@
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
 - [ ] 正式カバレッジ100%・未カバー0を達成した後、挙動と既存テスト結果を維持し、読み込み・キャッシュ等の共通処理とレンダラーの責務境界を精査・整理する。小さい差分ごとに関連テストを回収し、整理後のソースで描画・性能・完全品質ゲートを再検証する。自己レビュー後にDraft PR、Codexレビューと指摘修正、3 OS CI、保護マージ、公開へ進む。
+- [/] `8918b7da` の正式計測は6,196件成功・別15件skip、86,728/87,233行（99.4210906423%）、未カバー505行。前回509行から、HTML固定位置、SVG寸法、SVGクリップ、フォント可変軸検証の各1行が減少。マーカーと曲線上文字は描画回帰に合格し、行数差分なし。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-mhbu_em3/safe-summary.json`）。
+- [x] `1c138d11` でTTCオフセット数とSFNTテーブル境界の計算から、32bitフィールドを64bitへ広げた後の到達不能な桁あふれ判定を削除。実ファイル境界と容量制限を維持し、オフセット一覧とface headerの欠落がそれぞれ読み込み前に拒否されることを確認した。
+- [x] `a07cdcdf`・`3519bc72` で、矩形の辺の計算結果が有限でなくても有効な兄弟図形の画素を維持することと、同じ実Noto SansのBinary/File/SharedFile診断の表示とフォント実体が対応することを確認。TTCを含む関連7件・foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-ttc-and-render-boundary-exact-a08kqfpo/safe-summary.json`）。505行の正式値には未反映。
 - [/] `346a2d98` の正式再計測はテスト起動前に容量ガードの対象使用中判定で実2。検出した一時zshプロセスは終了済み。509行の前回値を維持し、新規の正式計測では対象作業場所で同時にコマンドを実行しない（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-jq4ztj3d`）。
 - [x] `89e683d9`・`3d352cb9`・`1aab017f` で、自動幅の入れ子flex内SVGの寸法と画素、特異なマーカー変換と通常描画の保持、曲線上文字を含む描画と中間基線補正の適用条件を確認。初回の名前なし定数とマーカー数の誤計上を修正し、関連描画テストは成功。正式行カバレッジへの反映は未確認。
 - [x] `c4ff350c` で可変軸の重複と非有限値を入口で拒否する回帰を追加し、検証済みの入力だけを受ける内部処理の重複チェックを削除。変更前に拒否テストが成功し、変更後も描画テストを含む関連9件とfoundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-svg-host-marker-textpath-and-font-input-exact-0ysunskm/safe-summary.json`）。正式行カバレッジへの反映は未確認。
