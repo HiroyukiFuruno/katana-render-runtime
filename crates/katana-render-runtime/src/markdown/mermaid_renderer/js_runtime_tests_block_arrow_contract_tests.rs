@@ -49,6 +49,22 @@ fn diagram_center_oracle_checks_the_viewbox_center(
 }
 
 #[rstest]
+#[case::missing_viewbox("<svg><g transform='translate(50 0)'/></svg>")]
+#[case::invalid_viewbox("<svg viewBox='invalid'><g transform='translate(50 0)'/></svg>")]
+#[case::missing_transform("<svg viewBox='0 0 100 40'><g/></svg>")]
+#[case::invalid_transform("<svg viewBox='0 0 100 40'><g transform='invalid'/></svg>")]
+fn diagram_center_oracle_rejects_invalid_geometry(#[case] svg: &str) -> TestResult {
+    let document = Document::parse(svg)?;
+    let root = document.root_element();
+    let arrow = root
+        .children()
+        .find(|node| node.is_element())
+        .ok_or("arrow missing")?;
+    assert!(assert_arrow_centered_in_diagram(root, arrow).is_err());
+    Ok(())
+}
+
+#[rstest]
 #[case::centered(-0.5, 1.0, true)]
 #[case::displaced(0.0, 1.0, false)]
 #[case::wrong_width(-0.5, 2.0, false)]
