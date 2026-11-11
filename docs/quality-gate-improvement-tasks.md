@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] macOSのSVGベースライン計算から到達不能な2分岐を除去し、実フォントのファイル消失・復元、ファイル由来判定、メモリ上のフォントを使ったSVG描画トレースの回帰を追加。ASTのファイル行数超過を責務分離で解消し、フォントの期待SHA-256は同梱ファイルから別途取得した固定値に修正。foundation・AST・関連10件が成功（`tmp/quality/resumed-owner-r3509/coverage-font-sources-and-macos-baseline-exact-rz1alfx3/safe-summary.json`）。全体計測への反映を確認する。
+- [/] `b38eb1ff` の正式producerによる中間計測は6,212件成功・別15件skip、86,779/87,257行（99.4521929473%）、未カバー478行。描画用テキストIDと実HelveticaのDB未登録時の回帰で各1行減少。収集実0、ソース前後一致、公開用総合判定は100%到達後（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-fieal652/safe-summary.json`）。
 - [/] `8746ed31` の正式producerによる中間計測は6,211件成功・別15件skip、86,780/87,260行（99.4499197800%）、未カバー480行。変換付きSVGクリップの実入力、ベースライン判定、単一フィルターの重複計算で各1行減少。収集実0、ソース前後一致、公開用総合判定は100%到達後（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-zppe429a/safe-summary.json`）。
 - [x] `426fcaca` は描画用テキストIDを既存の登録件数から生成し、拒否入力後もID1・2の連続性と実際の登録を確認。`d1e056f5` は実HelveticaのCoreText照合をselectorによるDB登録の前後で確認し、登録前の非保持と登録後の保持を検証。初回の空の基準フォント指定は実呼出しと同じ指定に修正し、HTML12件・CoreText9件・foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-html-provenance-and-coretext-memo-exact-e13zlcvv/safe-summary.json`）。全体計測への反映を確認する。
 - [/] `5bb9f822` の正式producerによる中間計測は6,210件成功・別15件skip、86,785/87,268行（99.4465325205%）、未カバー483行。HTML行計画とSVG属性編集で各1行減少。収集実0、ソース前後一致、公開用総合判定は100%到達後（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-9px5m243/safe-summary.json`）。
