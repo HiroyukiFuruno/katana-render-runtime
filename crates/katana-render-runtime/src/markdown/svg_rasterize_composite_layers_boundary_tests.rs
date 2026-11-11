@@ -49,11 +49,9 @@ fn clipped_group_rejects_empty_transforms_and_off_canvas_layers() -> Result<(), 
 
 #[test]
 fn clip_layer_integer_boundaries_fail_before_allocation() -> Result<(), String> {
-    let tree = parse(PLAIN_GROUP)?;
-    let mut pixmap = canvas()?;
     /* WHY: i32端でもf32の矩形幅を保ち、整数paddingのoverflowをallocation前に検証する。 */
     let oversized = u32::MAX as f32 / 4096.0;
-    let cases = [
+    assert_invalid_clip_bounds_cases(&[
         (
             Transform::from_translate(i32::MIN as f32, 0.0),
             "x coordinate overflow",
@@ -64,9 +62,30 @@ fn clip_layer_integer_boundaries_fail_before_allocation() -> Result<(), String> 
         ),
         (Transform::from_scale(oversized, 1.0), "width overflow"),
         (Transform::from_scale(1.0, oversized), "height overflow"),
-    ];
-    for (transform, expected) in cases {
-        let result = super::clipped_group_rect(layer(&tree)?, transform, &pixmap.as_mut());
+    ])
+}
+
+#[test]
+fn clip_layer_edges_that_overflow_intrect_fail_before_allocation() -> Result<(), String> {
+    let near_positive_limit = i32::MAX as f32 - 4096.0;
+    assert_invalid_clip_bounds_cases(&[
+        (
+            Transform::from_translate(near_positive_limit, 0.0),
+            "invalid SVG clip layer bounds",
+        ),
+        (
+            Transform::from_translate(0.0, near_positive_limit),
+            "invalid SVG clip layer bounds",
+        ),
+    ])
+}
+
+fn assert_invalid_clip_bounds_cases(cases: &[(Transform, &str)]) -> Result<(), String> {
+    let tree = parse(PLAIN_GROUP)?;
+    let layer = layer(&tree)?;
+    let mut pixmap = canvas()?;
+    for &(transform, expected) in cases {
+        let result = super::clipped_group_rect(layer, transform, &pixmap.as_mut());
         assert!(
             result.is_err_and(|error| error.contains(expected)),
             "{expected}"
