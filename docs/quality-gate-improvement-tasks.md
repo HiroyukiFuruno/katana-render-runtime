@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] `a0191a1f` はSVGフォントファイルのキャッシュ登録で確認済みのキーを再利用し、不変な`Option`への2回目の判定を除いた。foundation・AST成功、テスト一覧一致、実フォントの再利用・書換え・不正ファイルを含む関連32件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-font-cache-validated-key-exact-6whh_q0z/safe-summary.json`）。
+- [x] `c6aa3bc6` はmacOSの実Hiragino Sans GBで全角引用符4字の開き・閉じ分類を確認し、既存の比例幅Noto Sansと検査を共通化した。foundation・AST成功、既存一覧に1件追加、関連10件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-han-fullwidth-quote-exact-0mi4xnqt/safe-summary.json`）。両変更の全体計測への反映は未確認。
 - [/] `32cf6ae7` の正式計測は6,244件成功・別15件skip、86,585/87,012行（99.5092630901%）、未カバー427行。前回の432行から、SVG塗り単位・極小文字・空輪郭で各1行、HTML純テストの分離で2行減。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-1ra8ksw3/safe-summary.json`）。公開用カバレッジ判定は未達。
 - [x] `3af7ece6` はHTML永続テキスト幅キャッシュの純テスト3件を既存形式の専用ファイルに分離した。製品の幅計測は同一。初回のASTが製品ファイルの行数上限を検出し、Chrome比較専用の補助を既存テスト内へ移動した。最終foundation・AST成功、改名した3件以外のテスト一覧は一致、Chromeとの比較を含む関連4件成功（`tmp/quality/resumed-owner-r3509/coverage-html-persistent-width-tests-exact-fcdte9tn/safe-summary.json`）。
 - [x] `4b5f077d` は同梱Noto Sansの輪郭テーブルを空にしたフォントを実際に読み込み、有効なグリフIDが得られても描画画素が空なら初回描画の診断が拒否することを確認。foundation・AST・関連3件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-font-outline-empty-probe-exact-oxydgau7/safe-summary.json`）。
