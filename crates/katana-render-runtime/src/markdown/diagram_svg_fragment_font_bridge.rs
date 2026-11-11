@@ -2,7 +2,7 @@ use super::super::diagram_font_bridge::font_measure_request_with_known_text;
 use super::{set_svg_metric_properties, throw_svg_metric_error};
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
 
-const MAX_FRAGMENT_COUNT: usize = 4096;
+const MAX_FRAGMENT_COUNT: u32 = 4096;
 
 pub(super) fn install(
     scope: &mut v8::PinScope,
@@ -62,9 +62,9 @@ fn read_fragments(
     args: &v8::FunctionCallbackArguments,
 ) -> Option<Option<Vec<String>>> {
     let array = v8::Local::<v8::Array>::try_from(args.get(0)).ok()?;
-    let length = usize::try_from(array.length()).ok()?;
-    let mut fragments = (length <= MAX_FRAGMENT_COUNT).then(|| Vec::with_capacity(length));
-    for index in 0..array.length() {
+    let length = array.length();
+    let mut fragments = (length <= MAX_FRAGMENT_COUNT).then(|| Vec::with_capacity(length as usize));
+    for index in 0..length {
         let value = v8::Local::<v8::String>::try_from(array.get_index(scope, index)?).ok()?;
         if let Some(fragments) = &mut fragments {
             fragments.push(value.to_rust_string_lossy(scope));
@@ -80,8 +80,7 @@ fn set_advances(
 ) -> Result<(), &'static str> {
     let length = i32::try_from(advances.len()).map_err(|_| "SVG fragment result too large")?;
     let array = v8::Array::new(scope, length);
-    for (index, value) in advances.iter().enumerate() {
-        let index = u32::try_from(index).map_err(|_| "SVG fragment result too large")?;
+    for (index, value) in (0_u32..).zip(advances) {
         let number = v8::Number::new(scope, f64::from(*value));
         if array.set_index(scope, index, number.into()) != Some(true) {
             return Err("SVG fragment result allocation failed");
