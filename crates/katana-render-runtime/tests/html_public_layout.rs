@@ -102,6 +102,30 @@ fn public_table_whitespace_collapses_consistently_for_normal_and_nowrap()
     Ok(())
 }
 
+#[test]
+fn public_block_display_break_advances_following_content_by_line_height()
+-> Result<(), Box<dyn std::error::Error>> {
+    const BREAK_LINE_HEIGHT: f32 = 40.0;
+    let height = |content: &str| -> Result<f32, Box<dyn std::error::Error>> {
+        let document = format!(
+            "<body style='margin:0'><main style='line-height:{BREAK_LINE_HEIGHT}px'>{content}<div style='height:1px'></div><div style='height:200px'></div></main>"
+        );
+        let session = HtmlRuntime.open(
+            HtmlBrowserSource::new(document, "https://example.test/block-break.html")?,
+            viewport()?,
+        )?;
+        Ok(session
+            .latest_frame()
+            .ok_or("frame missing")?
+            .content_height)
+    };
+    assert_eq!(
+        height("<br style='display:block'>")?,
+        height("")? + BREAK_LINE_HEIGHT
+    );
+    Ok(())
+}
+
 fn open_table_cell(
     cell: &str,
 ) -> Result<katana_render_runtime::HtmlBrowserSession, Box<dyn std::error::Error>> {
