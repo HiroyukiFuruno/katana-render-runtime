@@ -87,12 +87,8 @@ fn ttc_face_offset(
 }
 
 fn ttc_offsets(file: &mut File, file_length: u64, count: u32) -> std::io::Result<Vec<u8>> {
-    let offsets_length = usize::try_from(
-        u64::from(count)
-            .checked_mul(TTC_FACE_OFFSET_BYTES)
-            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "TTC offset overflow"))?,
-    )
-    .map_err(|_| Error::new(ErrorKind::InvalidData, "TTC offset length overflow"))?;
+    let offsets_length = usize::try_from(u64::from(count) * TTC_FACE_OFFSET_BYTES)
+        .map_err(|_| Error::new(ErrorKind::InvalidData, "TTC offset length overflow"))?;
     read_at(file, file_length, TTC_DIRECTORY_OFFSET, offsets_length)
 }
 
@@ -150,10 +146,7 @@ fn insert_table_record(
         offset: u64::from(read_u32(&record[TABLE_OFFSET_FIELD..TABLE_LENGTH_FIELD])),
         length: read_u32(&record[TABLE_LENGTH_FIELD..TABLE_RECORD_BYTES]),
     };
-    let end = table
-        .offset
-        .checked_add(u64::from(table.length))
-        .ok_or_else(|| Error::new(ErrorKind::InvalidData, "table offset overflow"))?;
+    let end = table.offset + u64::from(table.length);
     /* WHY: 重複・重畳した table でも callback の累積確保量を bounded にする。 */
     *total_table_bytes = total_table_bytes
         .checked_add(u64::from(table.length))

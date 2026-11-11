@@ -3,6 +3,7 @@ use resvg::usvg::fontdb::{Database, Source};
 use std::path::{Path, PathBuf};
 
 const EMBEDDED_FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
+const SINGLE_FACE_TTC_HEADER: &[u8] = b"ttcf\0\x01\0\0\0\0\0\x01";
 
 fn temp_path(label: &str, extension: &str) -> PathBuf {
     let stamp = std::time::SystemTime::now()
@@ -161,4 +162,20 @@ fn assert_lazy_directory_error(
         .ok_or("invalid font directory was accepted")?;
     assert_eq!(error.kind(), kind);
     Ok(())
+}
+
+#[test]
+fn lazy_font_rejects_missing_ttc_offset_and_face_header() -> Result<(), Box<dyn std::error::Error>>
+{
+    use std::io::ErrorKind;
+
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("truncated.ttc");
+    let mut bytes = SINGLE_FACE_TTC_HEADER.to_vec();
+    std::fs::write(&path, &bytes)?;
+    assert_lazy_directory_error(&path, ErrorKind::UnexpectedEof)?;
+
+    bytes.extend_from_slice(&u32::MAX.to_be_bytes());
+    std::fs::write(&path, &bytes)?;
+    assert_lazy_directory_error(&path, ErrorKind::UnexpectedEof)
 }
