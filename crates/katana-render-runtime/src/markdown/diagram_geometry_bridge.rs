@@ -84,11 +84,10 @@ fn transformed_box(
     bounds: [f64; BOUNDS_COMPONENT_COUNT],
 ) -> Result<TransformedBox, String> {
     /* WHY: SVGの無効なtransform属性はブラウザと同じ恒等変換にし、bbox入力の検査は維持する。 */
-    let transform = match Transform::from_str(transform) {
-        Ok(transform) => transform,
-        Err(_) => Transform::default(),
-    };
-    TransformedBox::new(transform, bounds)
+    match Transform::from_str(transform) {
+        Ok(transform) => TransformedBox::new(transform, bounds),
+        Err(_) => TransformedBox::new(Transform::default(), bounds),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
