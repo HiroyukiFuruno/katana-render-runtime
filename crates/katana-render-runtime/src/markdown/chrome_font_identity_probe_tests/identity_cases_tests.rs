@@ -2,9 +2,9 @@ use super::super::{
     CaptureResult,
     identity::{
         FontResolutionCache, face_identity, load_resource_database, physical_file,
-        resolve_font_with_cache, unique_file_face,
+        resolve_font_with_cache, sha256, unique_file_face,
     },
-    test_support::{TempDirectory, probe_single_capture},
+    test_support::{TempDirectory, physical_font_fixture, probe_single_capture},
 };
 use super::{
     ResourceFile, SelectedFont, append_changed_byte, duplicate_face_resources, selected_from_face,
@@ -171,6 +171,30 @@ fn resource_database_rejects_invalid_path_contracts_before_loading() -> Result<(
             Some("resource must have a URL and absolute body path")
         );
     }
+    Ok(())
+}
+
+#[test]
+fn custom_resource_with_matching_sha_but_invalid_font_bytes_remains_unknown() -> Result<(), String>
+{
+    let (_fixture_temp, _database, mut selected) = physical_font_fixture()?;
+    selected.is_custom_font = true;
+    let temp = TempDirectory::new()?;
+    let body = b"not a font file";
+    let body_path = temp.path().join("captured-font.ttf");
+    fs::write(&body_path, body).map_err(|error| error.to_string())?;
+    let resource = ResourceFile {
+        url: "https://probe.invalid/captured-font".to_string(),
+        body_path,
+        bytes_sha256: sha256(body),
+    };
+
+    let capture = probe_single_capture("invalid-custom-font-bytes", selected, vec![resource])?;
+    assert_eq!(capture.status, "unknown");
+    assert!(capture.font_provenance.is_empty());
+    assert!(capture.unknown_reasons.iter().any(|reason| {
+        reason.contains("no exact physical face matched the CDP PostScript name")
+    }));
     Ok(())
 }
 

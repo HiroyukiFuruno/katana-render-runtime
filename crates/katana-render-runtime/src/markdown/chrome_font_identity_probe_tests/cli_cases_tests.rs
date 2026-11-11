@@ -44,6 +44,21 @@ fn probe_child_reports_missing_environment_and_unreadable_request() -> Result<()
 }
 
 #[test]
+fn probe_child_rejects_malformed_request_without_response() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let request = temp.path().join("malformed-request.json");
+    let output = temp.path().join("response.json");
+    std::fs::write(&request, b"{").map_err(|error| error.to_string())?;
+
+    assert_probe_failure(
+        &run_probe_with_optional_paths(Some(&request), Some(&output))?,
+        "parse request:",
+        &output,
+    );
+    Ok(())
+}
+
+#[test]
 fn probe_child_rejects_missing_response_parent() -> Result<(), String> {
     let temp = TempDirectory::new()?;
     let request = temp.path().join("request.json");
