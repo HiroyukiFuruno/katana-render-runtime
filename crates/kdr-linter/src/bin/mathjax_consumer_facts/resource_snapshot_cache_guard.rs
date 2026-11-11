@@ -100,7 +100,6 @@ fn valid_insert(insert: &syn::ExprMethodCall) -> bool {
 fn ungroup(expression: &Expr) -> &Expr {
     match expression {
         Expr::Paren(value) => ungroup(&value.expr),
-        Expr::Group(value) => ungroup(&value.expr),
         _ => expression,
     }
 }
@@ -145,7 +144,6 @@ fn valid_capacity_limit(expression: &Expr) -> bool {
 fn valid_usize_type(ty: &syn::Type) -> bool {
     match ty {
         syn::Type::Paren(value) => valid_usize_type(&value.elem),
-        syn::Type::Group(value) => valid_usize_type(&value.elem),
         syn::Type::Path(path) => path.path.is_ident("usize"),
         _ => false,
     }
@@ -177,7 +175,6 @@ fn method_call_without_attrs(expression: &Expr) -> Option<&syn::ExprMethodCall> 
     match expression {
         Expr::MethodCall(call) if call.attrs.is_empty() => Some(call),
         Expr::Paren(value) if value.attrs.is_empty() => method_call_without_attrs(&value.expr),
-        Expr::Group(value) if value.attrs.is_empty() => method_call_without_attrs(&value.expr),
         _ => None,
     }
 }
