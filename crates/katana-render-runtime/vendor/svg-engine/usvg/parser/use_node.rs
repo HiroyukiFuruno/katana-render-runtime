@@ -9,7 +9,7 @@ use super::svgtree::{AId, EId, SvgNode};
 use super::{converter, style};
 use crate::svg_engine::usvg::tree::ContextElement;
 use crate::svg_engine::usvg::{
-    ClipPath, Group, IsValidLength, Node, NonZeroRect, Path, Size, Transform, ViewBox,
+    ClipPath, Group, Node, NonZeroRect, Path, Size, Transform, ViewBox,
 };
 
 pub(crate) fn convert(
@@ -343,9 +343,6 @@ fn get_clip_rect(
     let x = use_node.convert_user_length(AId::X, state, Length::zero());
     let y = use_node.convert_user_length(AId::Y, state, Length::zero());
     let (width, height) = viewport_size(use_node, state);
-    if !width.is_valid_length() || !height.is_valid_length() {
-        return None;
-    }
     NonZeroRect::from_xywh(x, y, width, height)
 }
 

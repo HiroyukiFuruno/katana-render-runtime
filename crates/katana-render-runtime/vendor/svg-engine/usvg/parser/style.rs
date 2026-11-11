@@ -194,13 +194,11 @@ fn parse_svg_paint(value: &str, aid: AId) -> Option<svgtypes::Paint<'_>> {
                     value
                 );
                 svgtypes::Paint::Color(svgtypes::Color::black())
-            } else if aid == AId::Stroke {
+            } else {
                 log::warn!(
                     "Failed to parse stroke value: '{}'. Fallback to no stroke.",
                     value
                 );
-                return None;
-            } else {
                 return None;
             }
         }

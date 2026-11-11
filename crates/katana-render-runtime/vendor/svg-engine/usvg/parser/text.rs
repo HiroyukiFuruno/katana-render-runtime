@@ -206,7 +206,7 @@ fn collect_text_chunks_impl(
 ) {
     for child in parent.children() {
         if child.is_element() {
-            collect_element_chunks(parent, child, pos_list, state, cache, iter_state);
+            collect_element_chunks(child, pos_list, state, cache, iter_state);
             continue;
         }
 
@@ -432,7 +432,6 @@ fn extend_text_span(c: char, iter_state: &mut IterState) {
 }
 
 fn collect_element_chunks(
-    parent: SvgNode,
     child: SvgNode,
     pos_list: &[CharacterPosition],
     state: &converter::State,
@@ -440,11 +439,6 @@ fn collect_element_chunks(
     iter_state: &mut IterState,
 ) {
     if child.tag_name() == Some(EId::TextPath) {
-        if parent.tag_name() != Some(EId::Text) {
-            // `textPath` can be set only as a direct `text` element child.
-            iter_state.chars_count += count_chars(child);
-            return;
-        }
         match resolve_text_flow(child, state) {
             Some(v) => iter_state.text_flow = v,
             None => {
