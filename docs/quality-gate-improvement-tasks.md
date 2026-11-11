@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定3件中3件完了。HTMLプレビューの実行例で、クリック座標がコントロールから外れ、開閉前後のPNGが同一になることを再現した。座標とリンク領域を修正し、開閉・ボタン・入力で画素が変わる4枚のPNG、ナビゲーション、画像を内包するレポートを確認。HTML比較ツールの引数は正常・既定・不正値を検証し、macOSのPostScript名は63バイト・64バイト・禁止文字の境界を確認した。関連14テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-html-example-font-boundaries-gpb1j9hi/safe-summary.json`）。正式カバレッジは未計測。
+
 - 対応予定2件中2件完了。SVGフォント代替で全`TextAnchor`を許可する重複判定を除き、診断用の開始位置限定は維持した。SVG writerでは同じ曲線上のテキストを保持・アウトライン化の両方で再読込し、画素一致と空でない描画を確認した。関連57テスト、開始位置限定を指定した2テスト、静的検査・ASTが成功（`tmp/quality/resumed-owner-r3509/release-svg-anchor-writer-roundtrip-ld87gaq6/safe-summary.json`）。先行静的検査で新規ファイルの未登録を検出し、Gitのステージに追加して再実行した。正式カバレッジは未計測。
 
 - 対応予定1件中1件完了。HTML入力欄の幅計算をフォント計測側へ移し、macOSでは常に主フォントの丸めを使うため、非macOS専用の代替計算をmacOSのビルドに含めない。OS別の計算式と字形欠落時の挙動を維持した。macOSの関連8件、静的検査、ASTが成功し、Chrome照合済みのArial入力幅145pxを確認した（`tmp/quality/resumed-owner-r3509/release-input-font-platform-width-rd2qk2yn/safe-summary.json`）。Linux・Windowsの実行と正式カバレッジは最終検証で確認する。

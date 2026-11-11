@@ -35,6 +35,10 @@ fn normal_file_face(database: &Database, family: &str) -> Option<resvg::usvg::fo
 fn mac_roman_postscript_names_require_ascii() {
     let record = mac_roman_name(b"Helvetica-Bold");
     assert_eq!(postscript_name(record).as_deref(), Some("Helvetica-Bold"));
+    let maximum_length_name = postscript_name(mac_roman_name(&[b'A'; 63]));
+    assert_eq!(maximum_length_name.as_ref().map(String::len), Some(63));
+    assert!(maximum_length_name.is_some_and(|name| name.bytes().all(|byte| byte == b'A')));
+    assert_eq!(postscript_name(mac_roman_name(&[b'A'; 64])), None);
     for invalid in [
         mac_roman_name(b"\xff"),
         ttf_parser::name::Name {
@@ -42,6 +46,7 @@ fn mac_roman_postscript_names_require_ascii() {
             ..record
         },
         mac_roman_name(b"bad name"),
+        mac_roman_name(b"bad/name"),
     ] {
         assert_eq!(postscript_name(invalid), None);
     }
