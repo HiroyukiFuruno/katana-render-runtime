@@ -1,4 +1,7 @@
+const ORIGINAL_SCRIPT_VECTOR: &str = "vec![\n            DiagramRuntimeScript::borrowed(\"mathjax-runtime.min.js\", runtime_source),\n            DiagramRuntimeScript::owned(\n                \"render-mathjax.js\",\n                format!(\"katanaRunMathJaxRuntime({request_json});\"),\n            ),\n        ]";
+
 pub(super) const BUNDLE_STRUCTURE_MUTATIONS: &[(&str, &str, &str)] = &[
+    (ORIGINAL_SCRIPT_VECTOR, "", "script-order:body"),
     (
         "pub(super) fn build<'a>(",
         "pub(super) fn renamed_build<'a>(",
@@ -60,7 +63,7 @@ pub(super) const BUNDLE_STRUCTURE_MUTATIONS: &[(&str, &str, &str)] = &[
         "script-order:macro",
     ),
     (
-        "vec![\n            DiagramRuntimeScript::borrowed(\"mathjax-runtime.min.js\", runtime_source),\n            DiagramRuntimeScript::owned(\n                \"render-mathjax.js\",\n                format!(\"katanaRunMathJaxRuntime({request_json});\"),\n            ),\n        ]",
+        ORIGINAL_SCRIPT_VECTOR,
         "vec![DiagramRuntimeScript::borrowed(\"mathjax-runtime.min.js\", runtime_source); 2]",
         "script-order:array",
     ),
