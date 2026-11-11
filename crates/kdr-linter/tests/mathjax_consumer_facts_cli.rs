@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use tempfile::TempDir;
 
+#[path = "mathjax_consumer_facts_cli/macho_noso.rs"]
+mod macho_noso;
+
 #[derive(Clone, Copy)]
 enum FactsMode {
     Mathjax,
@@ -153,15 +156,19 @@ fn assert_input_hashes(mode: FactsMode, report: &Value, root: &Path) -> Result<(
         };
         let bytes = fs::read(&input)
             .map_err(|error| format!("{} input {path} is unreadable: {error}", mode.name()))?;
-        let actual = Sha256::digest(bytes)
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
+        let actual = sha256(&bytes);
         if actual != expected {
             return Err(format!("{} input hash differs for {path}", mode.name()));
         }
     }
     Ok(())
+}
+
+fn sha256(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn assert_common_report(mode: FactsMode, report: &Value, root: &Path) -> Result<(), String> {

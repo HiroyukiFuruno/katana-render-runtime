@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] Mach-O検査を実CLIから実行し、正規32/64ビット入力の証跡と、不正入力が混じった場合に途中の成功レポートを返さないことを確認。静的検査・AST・関連3件が成功。正規入力2件で実CLIバイナリの入力登録行を通過した（`tmp/quality/resumed-owner-r3509/coverage-macho-noso-cli-exact-ul8rzpve/safe-summary.json`、`tmp/quality/resumed-owner-r3509/coverage-macho-native-line-diagnostic-g7s0tv4b/lines-stdout.raw`）。全体計測への反映は未確認。
+- [/] `33aa42f4`の正式計測は6,250件成功・別15件skip、86,457/86,878行（99.5154124174%）、未カバー421行。追加3件は成功したが、正式集計の未カバー数は変わらなかった。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-r2nzvm8h/safe-summary.json`）。
 - [x] SVGのクリップでテキスト・コメント・非図形の子が実画素に影響しないことを内外2件で確認。上限を超えたマーカースタイルは原文を保持し、小さい別スタイルの置換・描画を維持することも確認した。静的検査・AST・関連11件が成功し、後者のサイズ上限分岐は単独の計測で実行を確認（`tmp/quality/resumed-owner-r3509/coverage-svg-clip-marker-boundary-exact-6s8x_0s9/safe-summary.json`、`tmp/quality/resumed-owner-r3509/coverage-marker-line-diagnostic-4qq0c0jl/lines-stdout.raw`）。全体計測への反映は未確認。
 - [/] 依存更新を含む `85b76f1d` の正式計測は6,247件成功・別15件skip、86,457/86,878行（99.5154124174%）、未カバー421行。更新前と行数が一致し、収集実0、ソース前後一致。公開用カバレッジ判定は未達（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-23s17yyj/safe-summary.json`）。
 - [x] `3022e07a`、`8205c2f4`、`4038cc9e`、`f7b86aea`で互換Rust依存、Bunの推移依存、ZenUML Core 4.13.2、PlantUML 1.2026.10を更新した。測定ハーネスの既存基準に必要な依存は保持し、更新処理は固定した依存範囲を事前・事後で照合して失敗時に元へ戻す。実レシピの更新成功と2回目のバイト一致を確認した（`tmp/quality/resumed-owner-r3509/release-harness-selective-update-check-fkw09aol/`）。
