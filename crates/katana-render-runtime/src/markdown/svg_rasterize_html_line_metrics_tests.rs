@@ -3,6 +3,59 @@ use super::{
     html_text_baseline, html_text_baseline_for_text,
 };
 
+const FILE_METRIC_SIZE: f32 = 16.0;
+const CORRUPTION_MASK: u8 = 0xff;
+
+#[test]
+fn malformed_file_is_rejected_by_legacy_line_metrics_and_recovers() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let bytes = super::super::font_file_fixture::FONT_BYTES;
+    let fixture = super::super::font_file_fixture::create(directory.path().join("font.ttf"), bytes)
+        .map_err(|error| error.to_string())?;
+    let valid = line_metric_pair(&fixture)
+        .0
+        .ok_or("valid font metrics missing")?;
+    assert_eq!(line_metric_pair(&fixture), (Some(valid), Some(valid)));
+    let mut malformed = bytes.to_vec();
+    malformed[0] ^= CORRUPTION_MASK;
+    std::fs::write(&fixture.path, &malformed).map_err(|error| error.to_string())?;
+    assert_malformed_file_rejected(&fixture, &malformed);
+    std::fs::write(&fixture.path, bytes).map_err(|error| error.to_string())?;
+    assert_eq!(line_metric_pair(&fixture), (Some(valid), Some(valid)));
+    Ok(())
+}
+
+fn line_metric_pair(
+    fixture: &super::super::font_file_fixture::FontFileFixture,
+) -> (Option<(f32, f32)>, Option<(f32, f32)>) {
+    (
+        super::line_metrics_for_face(&fixture.database, fixture.face_id, FILE_METRIC_SIZE),
+        super::diagnosed_line_metrics_for_face(
+            &fixture.database,
+            fixture.face_id,
+            FILE_METRIC_SIZE,
+        ),
+    )
+}
+
+fn assert_malformed_file_rejected(
+    fixture: &super::super::font_file_fixture::FontFileFixture,
+    malformed: &[u8],
+) {
+    let parsed = fixture
+        .database
+        .with_face_data(fixture.face_id, |data, index| {
+            assert_eq!(data, malformed);
+            rustybuzz::ttf_parser::Face::parse(data, index).is_ok()
+        });
+    assert_eq!(parsed, Some(false));
+    let mut scope = super::super::super::measurement_diagnostic::enter(true);
+    assert_eq!(line_metric_pair(fixture), (None, None));
+    let stats = scope.finish();
+    assert_eq!(stats.face_inner.bridge_none, 1);
+    assert_eq!(stats.face_inner.legacy_calls, 1);
+}
+
 #[test]
 fn system_font_baseline_uses_the_primary_font_strut() -> Result<(), String> {
     let family = "-apple-system, BlinkMacSystemFont, Hiragino Sans, sans-serif";
