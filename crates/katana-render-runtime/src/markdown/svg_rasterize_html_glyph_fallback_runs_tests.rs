@@ -159,6 +159,10 @@ mod capture_tests;
 mod anchor_tests;
 
 #[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_glyph_fallback_diagnostic_tests.rs"]
+mod diagnostic_tests;
+
+#[cfg(target_os = "macos")]
 #[path = "svg_rasterize_html_glyph_fallback_stock_paint_tests.rs"]
 mod stock_paint_tests;
 
