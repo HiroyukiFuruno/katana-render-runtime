@@ -5,11 +5,23 @@ fn snapshot_cache_rejects_discarded_cache_lookup() -> Result<(), Box<dyn std::er
     let fixture = mathjax_fixture()?;
     fixture.reject_unique_mutations(
         RUST_INPUTS[super::super::super::source::RESOURCE_BYTES_INPUT_INDEX],
-        &[(
-            ".filter(|snapshot| snapshot.identity == *identity)",
-            ".filter(|snapshot| snapshot.identity == *identity);",
-            "resource-loader:tail",
-        )],
+        &[
+            (
+                ".filter(|snapshot| snapshot.identity == *identity)",
+                ".filter(|snapshot| snapshot.identity == *identity);",
+                "resource-loader:tail",
+            ),
+            (
+                ".filter(|snapshot| snapshot.identity == *identity)",
+                ".filter(|snapshot| snapshot.identity == *(&snapshot.identity))",
+                "resource-loader:cache",
+            ),
+            (
+                ".filter(|snapshot| snapshot.identity == *identity)",
+                ".filter(|snapshot| snapshot.identity != *identity)",
+                "resource-loader:cache",
+            ),
+        ],
     )
 }
 
