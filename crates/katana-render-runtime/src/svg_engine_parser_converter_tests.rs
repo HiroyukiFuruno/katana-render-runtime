@@ -31,6 +31,7 @@ const WRONG_CLIP_TARGET_ORACLE_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000
 #[case::stroke_first("stroke markers fill", "red", "blue", &["stroke", "marker", "fill"][..])]
 #[case::no_fill("fill markers stroke", "none", "blue", &["marker", "stroke"][..])]
 #[case::no_stroke("stroke markers fill", "red", "none", &["marker", "fill"][..])]
+#[case::repeated_marker("markers markers stroke", "red", "blue", &["both", "marker"][..])]
 fn marker_paint_order_preserves_the_authored_sequence(
     #[case] order: &str,
     #[case] fill: &str,

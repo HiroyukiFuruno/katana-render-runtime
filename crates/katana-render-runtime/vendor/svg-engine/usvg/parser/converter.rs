@@ -1096,10 +1096,12 @@ fn append_ordered_path(path: Path, raw_paint_order: svgtypes::PaintOrder, marker
             parent.children.push(Node::Group(Box::new(markers_node)));
             parent.children.push(Node::Path(Box::new(path.clone())));
         }
-        ([first, PaintOrderKind::Markers, last], Some(markers_node)) => {
-            append_single_paint_path(first, &path, parent);
+        ([first, PaintOrderKind::Markers, _], Some(markers_node)) => {
+            // WHY: svgtypesの解析結果ではfill、stroke、markersが1回ずつ現れる。
+            let stroke_first = matches!(first, PaintOrderKind::Stroke);
+            append_single_paint_path(stroke_first, &path, parent);
             parent.children.push(Node::Group(Box::new(markers_node)));
-            append_single_paint_path(last, &path, parent);
+            append_single_paint_path(!stroke_first, &path, parent);
         }
         ([_, _, PaintOrderKind::Markers], Some(markers_node)) => {
             parent.children.push(Node::Path(Box::new(path.clone())));
@@ -1109,26 +1111,19 @@ fn append_ordered_path(path: Path, raw_paint_order: svgtypes::PaintOrder, marker
     }
 }
 
-fn append_single_paint_path(paint_order_kind: PaintOrderKind, path: &Path, parent: &mut Group) {
-    match paint_order_kind {
-        PaintOrderKind::Fill => {
-            if path.fill.is_some() {
-                let mut fill_path = path.clone();
-                fill_path.stroke = None;
-                fill_path.id = String::new();
-                parent.children.push(Node::Path(Box::new(fill_path)));
-            }
-        }
-        PaintOrderKind::Stroke => {
-            if path.stroke.is_some() {
-                let mut stroke_path = path.clone();
-                stroke_path.fill = None;
-                stroke_path.id = String::new();
-                parent.children.push(Node::Path(Box::new(stroke_path)));
-            }
-        }
-        _ => {}
+fn append_single_paint_path(stroke_only: bool, path: &Path, parent: &mut Group) {
+    let paint_exists = if stroke_only { path.stroke.is_some() } else { path.fill.is_some() };
+    if !paint_exists {
+        return;
     }
+    let mut single_paint_path = path.clone();
+    if stroke_only {
+        single_paint_path.fill = None;
+    } else {
+        single_paint_path.stroke = None;
+    }
+    single_paint_path.id = String::new();
+    parent.children.push(Node::Path(Box::new(single_paint_path)));
 }
 
 pub fn svg_paint_order_to_usvg(order: svgtypes::PaintOrder) -> PaintOrder {
