@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] 折り返しは、非空行の末尾を返すunicode-linebreak 0.1.5とKRRの末尾保持を確認し、先頭候補の判定をまとめた。入力後のblur/change回帰は通常の入力欄に複数行入力欄と検索欄を加え、4パターンずつ確認。source-static-foundation・AST・関連7件成功（`tmp/quality/resumed-owner-r3509/coverage-wrap-and-text-focus-exact-gu3gg613/safe-summary.json`）。全体計測への反映は未確認。
+- [/] `35b28cc1` の正式producerによる中間計測は6,220件成功・別15件skip、86,911/87,375行（99.4689556509%）、未カバー464行。Mach-O依存検査、CLIハッシュ経路、環境設定のテスト用境界で各1行減。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-864z4dtm/safe-summary.json`）。中断した前回runの終了コードは未取得のまま保持した。
 - [x] 実HTMLの`insertAdjacentText`でマークアップに見える文字列を文字として保持し、CSS幅指定の空`select`はラベルなしでクリック範囲を維持。実Notoフォントの`sub/../font.ttf`経由でも物理ファイルを1回だけ登録し、CLIで不正なハッシュ処理とCargo依存欠落を拒否した。source-static-foundation・ASTは再ビルド後に成功し、同一ソース・同一binaryで関連12件を実行して成功（`tmp/quality/resumed-owner-r3509/coverage-html-font-cli-exact-owner-retry-1xwwtawb/safe-summary.json`）。初回の空`select`自動幅の仮定58pxに対する実測1pxは保持し、Chromeとの照合は未実施。全体計測への反映は確認待ち。
 - [/] `61e05f27` の正式producerによる中間計測は86,883/87,350行（99.4653692044%）、未カバー467行。Mermaidブロック回帰・SVGの親テキスト判定・Mach-Oパス判定で各1行減り、合字とフォント長の変更は行数に差なし。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-0p0yun_j/safe-summary.json`）。
 - [x] 共有フォントのサイズ判定でファイルmetadataの元の長さを使い、必要なホスト長の範囲検査は維持。実SVGの複数行で、各行の`tspan`の間に直接文字がある場合は追加レイアウトの証明を拒否し、通常の2行は受理することを確認。foundation・AST・関連9件が成功（`tmp/quality/resumed-owner-r3509/coverage-font-metadata-and-authored-text-exact-2eo33kfd/safe-summary.json`）。全体計測への反映は確認待ち。
