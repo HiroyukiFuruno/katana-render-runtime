@@ -3,7 +3,7 @@
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
 - 対応予定3件中3件完了。Mach-Oでは`object` 0.41が検証済みヘッダのバイト順を必ず表せることを確認し、到達不能なエラーを削った。32/64ビットのビッグエンディアンでシンボルを読めることと不正magicの拒否を確認した。HTMLではDOM由来の例外の`name`取得自体がthrowする場合のJavaScript例外分類、PlantUMLでは改行付きのキャッシュパスがJARアクセス前に設定エラーになることを検証した。関連59テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-macho-endian-and-renderer-errors-gh_jd_mh/safe-summary.json`）。正式カバレッジは最終フェーズで計測する。
-- GitHubの`v0.4.24`は既存の未公開Draft（`publishedAt: null`）。リモートの同名tagと`release/v0.4.24`をheadにしたPRは見つからなかった。Draftにあるフォント観測ツールとmanifestは、最終公開前に出所と公開対象への適合を確認する。
+- GitHubの`v0.4.24`は既存の未公開Draft（`publishedAt: null`）。リモートの同名tagと`release/v0.4.24`をheadにしたPRは見つからなかった。Draftのフォント観測ツールはHTML性能CIのフォールバックが指定する資産ID `702068128`。GitHubが返したアーカイブとmanifestのSHA256はワークフローの固定値に一致した。実行ファイルの検証と最終公開対象との照合はリリース時に行う。
 - 対応予定4件中4件完了。Mach-O・Mermaid classic・native width hashの3検査CLIは、組み立て済み`serde_json::Value`を同じcompact serializerで文字列化し、行単位の出力を維持した。Mach-Oでは、正規化済みのディレクトリをマニフェストに指定して、パスの表記を通過した後の通常ファイル検査で拒否されることも確認した。関連72テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-facts-output-and-macho-path-5rbai38m/safe-summary.json`）。正式カバレッジは最終フェーズで計測する。
 - 対応予定3件中3件完了。実ファイルがまだ存在しないシステムフォント候補を無視し、同じ候補が現れたら重複なく登録することを確認した。登録済みフォントが消えた場合は字幅計測が失敗し、ファイル復元後は正の字幅を返すことも確認した。MathJax検証では設定入力の`Cargo.toml`が欠ける場合に欠落パスを返す。関連20テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-missing-font-and-mathjax-input-kgwp5wlq/safe-summary.json`）。正式カバレッジは最終フェーズで計測する。
 - 今回の対応予定は累計4件中4件完了。SVGフォント代替の診断設定に、丸め前の字送りを保持する設定と、対象入力でも代替を無効にする設定の2件を追加した。子プロセスでの設定と実行件数の検証を開始位置限定のテストと共通化し、関連22テスト・静的検査・ASTが成功（`tmp/quality/resumed-owner-r3509/release-svg-fallback-diagnostic-cpo6ymb4/safe-summary.json`）。この対応の進捗は修正予定件数で数え、正式カバレッジは最終フェーズで計測する。
