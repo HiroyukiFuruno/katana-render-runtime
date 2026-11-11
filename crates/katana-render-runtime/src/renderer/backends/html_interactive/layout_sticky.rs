@@ -181,4 +181,18 @@ mod tests {
         assert_eq!(renderer.sticky_x(&style, 120.0, 320.0), 120.0);
         assert_eq!(renderer.sticky_x(&style, 200.0, 320.0), 150.0);
     }
+
+    #[test]
+    fn sticky_right_uses_the_minimum_outer_width_when_width_is_auto() {
+        let attributes = [(
+            "style".to_owned(),
+            "position: sticky; right: 10px; min-width: 25%; padding: 0 5px".to_owned(),
+        )];
+        let style = CssStyle::from_element("div", &attributes, &CssStyle::browser_default());
+
+        assert_eq!(
+            renderer_with_scroll(30.0, 0.0).sticky_x(&style, 300.0, 160.0),
+            290.0
+        );
+    }
 }
