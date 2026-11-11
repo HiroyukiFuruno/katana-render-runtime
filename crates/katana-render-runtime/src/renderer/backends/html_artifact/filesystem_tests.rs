@@ -1,4 +1,71 @@
 use super::*;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use crate::system::file_size_limit_test_support::FileSizeLimitTest;
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn lock_write_failure_releases_owned_lock_for_retry() -> Result<(), String> {
+    FileSizeLimitTest::run_in_child(
+        module_path!(),
+        "lock_write_failure_releases_owned_lock_for_retry",
+        || {
+            let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+            let root = directory.path();
+            let result = FileSizeLimitTest::with_zero_limit(|| StoreLock::acquire(root))?;
+            assert_file_size_limit_error(result);
+            assert!(!root.join(".krr-artifact.lock").exists());
+            let retry = StoreLock::acquire(root).map_err(|error| error.to_string())?;
+            drop(retry);
+            assert!(!root.join(".krr-artifact.lock").exists());
+            Ok(())
+        },
+    )
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn atomic_write_failure_keeps_original_and_releases_temp_for_retry() -> Result<(), String> {
+    FileSizeLimitTest::run_in_child(
+        module_path!(),
+        "atomic_write_failure_keeps_original_and_releases_temp_for_retry",
+        assert_atomic_write_recovers,
+    )
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn assert_atomic_write_recovers() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let target = directory.path().join("frame.json");
+    let temp = target.with_extension(format!("tmp-{}", std::process::id()));
+    let original = b"original";
+    let replacement = b"replacement";
+    fs::write(&target, original).map_err(|error| error.to_string())?;
+    let result = FileSizeLimitTest::with_zero_limit(|| {
+        ArtifactFilesystem::write_atomic(&target, replacement)
+    })?;
+    assert_file_size_limit_error(result);
+    assert_eq!(
+        fs::read(&target).map_err(|error| error.to_string())?,
+        original
+    );
+    assert!(!temp.exists());
+    ArtifactFilesystem::write_atomic(&target, replacement).map_err(|error| error.to_string())?;
+    assert_eq!(
+        fs::read(&target).map_err(|error| error.to_string())?,
+        replacement
+    );
+    assert!(!temp.exists());
+    Ok(())
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn assert_file_size_limit_error<T>(result: Result<T, HtmlArtifactError>) {
+    assert!(matches!(
+        result,
+        Err(HtmlArtifactError::Io(error))
+            if error.raw_os_error() == FileSizeLimitTest::limit_error().raw_os_error()
+    ));
+}
 
 fn root(label: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let path = std::env::temp_dir().join(format!(
