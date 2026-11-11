@@ -94,6 +94,20 @@ fn coretext_rejects_changed_physical_identity_before_lookup() -> Result<(), Stri
 }
 
 #[test]
+fn coretext_rejects_a_candidate_removed_before_lookup() -> Result<(), String> {
+    let (_temp, database, selected) = physical_font_fixture()?;
+    let face = database.faces().next().ok_or("font face missing")?;
+    let identity = super::super::face_identity(&database, face)?;
+    let path = identity.path.clone();
+    fs::remove_file(&path).map_err(|error| error.to_string())?;
+    let error = super::resolve_file(&path, identity, &selected.post_script_name)
+        .err()
+        .ok_or("removed candidate must be rejected")?;
+    assert!(error.starts_with("canonicalize font:"), "{error}");
+    Ok(())
+}
+
+#[test]
 fn coretext_rejects_descriptor_postscript_name_mismatch() -> Result<(), String> {
     let (temp, _database, _selected) = physical_font_fixture()?;
     let path = temp.path().join("physical-font.ttf");

@@ -121,14 +121,10 @@ fn verified_single_capture(
     if response.schema != RESPONSE_SCHEMA || response.request_sha256 != request_sha256(request)? {
         return Err("font probe response schema or request binding differs".to_string());
     }
-    if response.captures.len() != 1 {
-        return Err("font probe response must contain one capture".to_string());
-    }
-    let capture = response
+    let [capture]: [CaptureResult; 1] = response
         .captures
-        .into_iter()
-        .next()
-        .ok_or("font probe capture response is missing")?;
+        .try_into()
+        .map_err(|_| "font probe response must contain one capture".to_string())?;
     if capture.condition_id != condition_id {
         return Err("font probe response condition differs".to_string());
     }
