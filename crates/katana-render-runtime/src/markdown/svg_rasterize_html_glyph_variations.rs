@@ -83,16 +83,11 @@ pub(super) fn normalized_coords(
                     .iter()
                     .map(|variation| (Tag::from_be_bytes(variation.tag), variation.value)),
             );
-            let coords = location
+            Ok(location
                 .coords()
                 .iter()
                 .map(|coord| coord.to_f32())
-                .collect::<Vec<_>>();
-            coords
-                .iter()
-                .all(|coord| coord.is_finite())
-                .then_some(coords)
-                .ok_or_else(|| format!("non-finite normalized coordinates for face {face_id:?}"))
+                .collect())
         })
         .ok_or_else(|| format!("font face data unavailable for {face_id:?}"))?
 }
