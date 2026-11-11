@@ -8,6 +8,9 @@ mod probe_frame;
 #[path = "probe/names.rs"]
 mod probe_names;
 use probe_names::ProbeNames;
+#[cfg(test)]
+#[path = "probe/html_fidelity_probe_tests.rs"]
+mod html_fidelity_probe_tests;
 const DEFAULT_WIDTH: u32 = 1_280;
 const DEFAULT_HEIGHT: u32 = 900;
 const DEFAULT_SCROLL_POSITIONS: [f32; 3] = [0.0, 600.0, 1_800.0];
