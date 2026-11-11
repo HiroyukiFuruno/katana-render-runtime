@@ -172,26 +172,14 @@ fn trim_text_nodes(text_elem_id: NodeId, xmlspace: XmlSpace, doc: &mut Document)
 }
 
 fn trim_single_text_node(node_id: NodeId, xmlspace: XmlSpace, doc: &mut Document) {
-    if xmlspace == XmlSpace::Default {
-        if let NodeKind::Text(ref mut text) = doc.nodes[node_id.get_usize()].kind {
-            match text.len() {
-                0 => {}
-                1 => {
-                    if text.as_bytes()[0] == b' ' {
-                        text.clear();
-                    }
-                }
-                _ => {
-                    let c1 = text.as_bytes()[0];
-                    let c2 = text.as_bytes()[text.len() - 1];
-                    if c1 == b' ' {
-                        text.remove_first_space();
-                    }
-                    if c2 == b' ' {
-                        text.remove_last_space();
-                    }
-                }
-            }
+    if xmlspace == XmlSpace::Default
+        && let NodeKind::Text(ref mut text) = doc.nodes[node_id.get_usize()].kind
+    {
+        if text.starts_with(' ') {
+            text.remove_first_space();
+        }
+        if text.ends_with(' ') {
+            text.remove_last_space();
         }
     }
 }

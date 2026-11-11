@@ -1,4 +1,20 @@
-use super::{parse_svg, text_node};
+use super::{assert_target_text, parse_svg, text_node};
+use rstest::rstest;
+
+#[rstest]
+#[case::default("default", " Aé ", "Aé")]
+#[case::preserved("preserve", " Aé ", " Aé ")]
+#[case::single_character("default", "A", "A")]
+fn single_svg_text_node_applies_xml_space_without_changing_characters(
+    #[case] space: &str,
+    #[case] content: &str,
+    #[case] expected: &str,
+) -> Result<(), String> {
+    let source = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='50'><text id='target' xml:space='{space}' font-family='Yellowtail'>{content}</text></svg>"
+    );
+    assert_target_text(&source, expected)
+}
 
 #[test]
 fn positioned_text_chunks_reset_span_byte_offsets_for_multibyte_text() -> Result<(), String> {

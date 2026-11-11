@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] SVGの単一テキストノードの空白処理を、先頭・末尾それぞれの実際の空白判定に統一。複数バイト文字、文字が1つだけの場合、`xml:space`の既定・保持を含む関連77件と静的検査・AST・SVG由来検査4件が成功（`tmp/quality/resumed-owner-r3509/coverage-svg-whitespace-single-exact-w8ykbesm/safe-summary.json`）。正式集計への反映は未確認。
 - [x] 同じビットマップ文字のクリップを、文字保持あり・なしでSVGへ書き出して再入力した。両方の画素がベクター矩形のみの正解と一致。静的検査・AST・関連52件が成功し、従来未到達の書き出し分岐`writer.rs:1097`をLLVMで1回確認した（`tmp/quality/resumed-owner-r3509/coverage-svg-bitmap-text-writer-exact-q64yenzn/safe-summary.json`、`tmp/quality/resumed-owner-r3509/coverage-svg-bitmap-writer-export-cd16i0kj/`）。正式集計への反映は未確認。
 - [/] `c1951cae`の正式計測は6,255件成功・別15件skip、86,436/86,851行（99.5221701535%）、未カバー415行。前回417行からSVGマーカーとビットマップ文字のクリップで各1行減。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-yw4x8zia/safe-summary.json`）。
 - [x] 同梱CBDTフォントでクリップ内の文字がビットマップになる実SVGを追加。ベクター矩形だけの正解と画素が一致し、従来未到達のビットマップを描かない分岐を実行した（LLVMの`clip.rs:56`で1回）。静的検査・AST・関連7件が成功（`tmp/quality/resumed-owner-r3509/coverage-svg-bitmap-text-clip-exact-hcnfrb5n/safe-summary.json`、`tmp/quality/resumed-owner-r3509/coverage-svg-bitmap-clip-export-wcot6920/`）。正式集計への反映は未確認。

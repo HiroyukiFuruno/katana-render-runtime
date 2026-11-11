@@ -239,9 +239,9 @@
       "source": "crates/usvg/src/parser/svgtree/text.rs",
       "destination": "usvg/parser/svgtree/text.rs",
       "sourceSha256": "418b73948d1a819a8f3bf09f0a7f3c139707080a8cc76ef863d7c79402b25a41",
-      "transplantedSha256": "2e6d7d62136654f29e3fc587721f8420c4eb662d05f35e71c21123ad5b4c4eb2",
+      "transplantedSha256": "c6d7066fa5a4a29cd608b5bab710a6aaf3bf2ab681ceefc35286976cc50c0094",
       "sourceBytes": 12133,
-      "transplantedBytes": 10785,
+      "transplantedBytes": 10351,
       "adaptations": {
         "cratePaths": 0,
         "enabledFeaturePredicates": {},
