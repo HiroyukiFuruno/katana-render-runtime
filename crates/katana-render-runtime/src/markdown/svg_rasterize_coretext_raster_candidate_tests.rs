@@ -100,7 +100,7 @@ fn with_skia_fixture<T>(
     let cached = rasterizer
         .ensure_face(id)?
         .ok_or("file typeface unavailable")?;
-    let typeface = cached.typeface.as_skia()?;
+    let typeface = cached.typeface.as_skia();
     let span = prepare_span(&database, id, typeface)?;
     action(&database, &rasterizer, id, typeface, &span)
 }

@@ -198,7 +198,7 @@ fn assert_middle_font_without_x(
     let metadata = rasterizer.face_metadata(id)?;
     assert!(!metadata.unsupported && super::super::raw_x_height(&metadata).is_some());
     let face = rasterizer.ensure_face(id)?.ok_or("CJK face missing")?;
-    let typeface = face.typeface.as_skia()?;
+    let typeface = face.typeface.as_skia();
     let font = super::super::paint::font_for_face(typeface, FONT_SIZE);
     assert_ne!(font.unichar_to_glyph('あ' as i32), 0);
     assert_eq!(font.unichar_to_glyph('x' as i32), 0);

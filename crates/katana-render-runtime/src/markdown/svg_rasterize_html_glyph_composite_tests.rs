@@ -128,7 +128,7 @@ fn draw_on(
         let face = rasterizer
             .ensure_face(span.font)?
             .ok_or("composite fixture face missing")?;
-        paint::draw_span(target.canvas(), span, face.typeface.as_skia()?, 1.0)?;
+        paint::draw_span(target.canvas(), span, face.typeface.as_skia(), 1.0)?;
     }
     Ok(())
 }

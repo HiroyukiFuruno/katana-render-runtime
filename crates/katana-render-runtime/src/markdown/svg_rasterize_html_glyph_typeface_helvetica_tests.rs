@@ -79,7 +79,7 @@ fn cached_source(
     let cached = rasterizer
         .ensure_face(id)?
         .ok_or("Helvetica file typeface unavailable")?;
-    let typeface = cached.typeface.as_skia()?;
+    let typeface = cached.typeface.as_skia();
     let Some((data, index)) = typeface.to_existing_font_data() else {
         return Err("Helvetica cached typeface source unavailable".to_string());
     };

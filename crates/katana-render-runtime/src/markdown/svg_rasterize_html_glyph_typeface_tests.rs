@@ -43,7 +43,7 @@ pub(super) fn compare_family_weight(
     let cached = rasterizer
         .ensure_face(id)?
         .ok_or("file typeface unavailable")?;
-    let typeface = cached.typeface.as_skia()?;
+    let typeface = cached.typeface.as_skia();
     let system = FontMgr::default()
         .legacy_make_typeface(Some(family), typeface.font_style())
         .ok_or("CoreText typeface unavailable")?;

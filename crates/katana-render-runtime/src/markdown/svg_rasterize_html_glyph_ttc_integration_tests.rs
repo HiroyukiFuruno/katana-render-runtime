@@ -31,7 +31,7 @@ fn verify_helvetica_face(
     if index == 0 {
         return Ok(false);
     }
-    let typeface = face.typeface.as_skia()?;
+    let typeface = face.typeface.as_skia();
     let Some((_, actual_index)) = typeface.to_existing_font_data() else {
         return Err("repacked Helvetica data is unavailable".to_string());
     };

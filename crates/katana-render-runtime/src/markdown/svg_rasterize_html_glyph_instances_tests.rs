@@ -110,7 +110,7 @@ fn assert_preserved_layout(span: &PreparedSpan, text: &usvg::Text) {
 fn assert_instance_readback(span: &PreparedSpan, weight: f32) -> Result<(), String> {
     let instance = instance(span)?;
     assert_eq!(axis(instance, WEIGHT_AXIS)?, weight);
-    let typeface = instance.face.typeface.as_skia()?;
+    let typeface = instance.face.typeface.as_skia();
     let readback = typeface
         .variation_design_position()
         .ok_or("readback missing")?;
@@ -138,8 +138,8 @@ fn optical_modes_and_sizes_reuse_only_the_same_applied_instance() -> Result<(), 
     assert_optical_modes(&tree, &auto, &none, &explicit)?;
     assert!(Rc::ptr_eq(instance(&none)?, instance(&resized)?));
     assert_ne!(
-        instance(&auto)?.face.typeface.as_skia()?.unique_id(),
-        instance(&explicit)?.face.typeface.as_skia()?.unique_id()
+        instance(&auto)?.face.typeface.as_skia().unique_id(),
+        instance(&explicit)?.face.typeface.as_skia().unique_id()
     );
     Ok(())
 }

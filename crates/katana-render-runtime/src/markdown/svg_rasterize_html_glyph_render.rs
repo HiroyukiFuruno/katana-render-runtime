@@ -91,7 +91,7 @@ impl HtmlGlyphRasterizer<'_> {
     ) -> Result<(), String> {
         for span in prepared {
             if let Some(instance) = &span.variable_instance {
-                let typeface = instance.face.typeface.as_skia()?;
+                let typeface = instance.face.typeface.as_skia();
                 surface::draw_span(skia_surface.canvas(), &span, typeface, raster_scale)?;
                 continue;
             }
@@ -101,7 +101,7 @@ impl HtmlGlyphRasterizer<'_> {
                     span.font
                 ));
             };
-            let typeface = face.typeface.as_skia()?;
+            let typeface = face.typeface.as_skia();
             surface::draw_span(skia_surface.canvas(), &span, typeface, raster_scale)?;
         }
         Ok(())

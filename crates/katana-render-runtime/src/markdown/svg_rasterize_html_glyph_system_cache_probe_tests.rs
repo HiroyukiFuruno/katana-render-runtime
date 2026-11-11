@@ -37,7 +37,7 @@ fn query_style(
     let cached = rasterizer
         .ensure_face(id)?
         .ok_or("selected file typeface unavailable")?;
-    let file = cached.typeface.as_skia()?;
+    let file = cached.typeface.as_skia();
     let selected = selected_source(database, rasterizer, id)?;
     let (system, repeated) = matched_typefaces(manager, file)?;
     let existing = source_observation(&system, &selected, false);

@@ -101,7 +101,7 @@ fn fresh_rasterizers(
             .ensure_face(id)?
             .ok_or("fresh file face unavailable")?;
         elapsed_ns += started.elapsed().as_nanos();
-        ids.push(prove_face(face.typeface.as_skia()?, bytes, index)?);
+        ids.push(prove_face(face.typeface.as_skia(), bytes, index)?);
     }
     Ok(path_profile(elapsed_ns, &ids, ITERATIONS))
 }
@@ -118,7 +118,7 @@ fn repeated_ensure_face(
         .ensure_face(id)?
         .ok_or("initial cached file face unavailable")?;
     let first_ns = first_started.elapsed().as_nanos();
-    ids.push(prove_face(first.typeface.as_skia()?, bytes, index)?);
+    ids.push(prove_face(first.typeface.as_skia(), bytes, index)?);
     let mut cached_ensure_total_ns = 0_u128;
     for _ in 1..ITERATIONS {
         let started = Instant::now();
@@ -126,7 +126,7 @@ fn repeated_ensure_face(
             .ensure_face(id)?
             .ok_or("cached file face unavailable")?;
         cached_ensure_total_ns += started.elapsed().as_nanos();
-        ids.push(prove_face(face.typeface.as_skia()?, bytes, index)?);
+        ids.push(prove_face(face.typeface.as_skia(), bytes, index)?);
     }
     Ok(json!({
         "ensure_calls": ITERATIONS,

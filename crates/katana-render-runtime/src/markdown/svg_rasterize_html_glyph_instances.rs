@@ -97,7 +97,7 @@ impl HtmlGlyphRasterizer<'_> {
         let Some(base) = self.variable_base(id)? else {
             return Ok(None);
         };
-        let (typeface, applied_axes) = instantiate(base.as_skia()?, design)?;
+        let (typeface, applied_axes) = instantiate(base.as_skia(), design)?;
         let actual_key = InstanceKey::new(id, &applied_axes)?;
         /* WHY: 要求値を適用済みと見なさず、実Typefaceの全axisをcacheとmetricsへ束縛する。 */
         if actual_key != requested_key {

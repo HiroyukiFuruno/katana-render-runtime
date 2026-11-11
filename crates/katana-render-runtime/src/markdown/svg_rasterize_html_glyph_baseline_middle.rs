@@ -54,10 +54,10 @@ fn font_for_shift(
     let Some(face) = face else {
         return Ok(None);
     };
-    let Ok(typeface) = face.typeface.as_skia() else {
-        return Ok(None);
-    };
-    Ok(Some(paint::font_for_face(typeface, css_size)))
+    Ok(Some(paint::font_for_face(
+        face.typeface.as_skia(),
+        css_size,
+    )))
 }
 
 fn shift_for_font(

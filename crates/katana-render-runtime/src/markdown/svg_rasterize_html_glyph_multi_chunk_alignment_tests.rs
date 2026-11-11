@@ -139,7 +139,7 @@ fn assert_painted_runs(
         let face = rasterizer
             .ensure_face(span.font)?
             .ok_or("fixture face missing")?;
-        paint::draw_span(surface.canvas(), span, face.typeface.as_skia()?, 1.0)?;
+        paint::draw_span(surface.canvas(), span, face.typeface.as_skia(), 1.0)?;
     }
     let snapshot = capture.snapshot();
     assert_eq!(snapshot.dropped, 0);

@@ -7,9 +7,9 @@ pub(super) enum CachedTypeface {
 }
 
 impl CachedTypeface {
-    pub(super) fn as_skia(&self) -> Result<&Typeface, String> {
+    pub(super) fn as_skia(&self) -> &Typeface {
         match self {
-            Self::Skia(typeface) => Ok(typeface),
+            Self::Skia(typeface) => typeface,
         }
     }
 }

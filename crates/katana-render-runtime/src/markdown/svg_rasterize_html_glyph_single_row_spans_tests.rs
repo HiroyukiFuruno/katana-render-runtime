@@ -64,7 +64,7 @@ fn assert_single_row_paint(
         paint::draw_span(
             surface.canvas(),
             span,
-            face.typeface.as_skia()?,
+            face.typeface.as_skia(),
             css * device_ratio,
         )?;
     }

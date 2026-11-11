@@ -87,5 +87,5 @@ fn draw_span(
     span: &PreparedSpan,
 ) -> Result<(), String> {
     let face = rasterizer.ensure_face(span.font)?.ok_or("face missing")?;
-    paint::draw_span(canvas, span, face.typeface.as_skia()?, 1.0)
+    paint::draw_span(canvas, span, face.typeface.as_skia(), 1.0)
 }

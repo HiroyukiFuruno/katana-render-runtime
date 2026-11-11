@@ -239,7 +239,7 @@ fn prepare_first_span(tree: &Tree) -> Result<(PreparedSpan, Typeface), String> {
     let face = rasterizer
         .ensure_face(span.font)?
         .ok_or("capture fixture face unavailable")?;
-    let typeface = face.typeface.as_skia()?.clone();
+    let typeface = face.typeface.as_skia().clone();
     Ok((span, typeface))
 }
 

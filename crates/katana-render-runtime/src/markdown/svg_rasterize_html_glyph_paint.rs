@@ -41,7 +41,7 @@ pub(super) fn draw_span(
 ) -> Result<(), String> {
     #[cfg(test)]
     if let Some(instance) = &span.variable_instance {
-        if instance.face.typeface.as_skia()?.unique_id() != typeface.unique_id() {
+        if instance.face.typeface.as_skia().unique_id() != typeface.unique_id() {
             return Err("variable paint typeface differs from the measured instance".into());
         }
         capture::record_instance(typeface, &instance.applied_axes);
