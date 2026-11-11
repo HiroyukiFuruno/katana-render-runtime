@@ -840,8 +840,11 @@ const __krrElementPrototype = {
   },
   set value(value) {
     const nodeId = this.__krrNodeId;
-    if (__krrNativeDom("tagName", nodeId) === "SELECT") {
+    const tagName = __krrNativeDom("tagName", nodeId);
+    if (tagName === "SELECT") {
       __krrNativeDom("setSelectValue", nodeId, String(value));
+    } else if (tagName === "TEXTAREA") {
+      __krrNativeDom("setTextControlValue", nodeId, String(value));
     } else {
       __krrNativeDom("setAttribute", nodeId, "value", String(value));
     }

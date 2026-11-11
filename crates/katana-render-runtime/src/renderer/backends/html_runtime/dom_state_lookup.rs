@@ -42,6 +42,7 @@ impl HtmlDomBridgeState {
             "appendChild" | "appendText" | "remove" | "insertAdjacentHTML"
             | "insertAdjacentText" => Some(self.mutate_tree(operation, arguments)),
             "setSelectValue" => Some(self.set_select_value(arguments)),
+            "setTextControlValue" => Some(self.set_text_control_value(arguments)),
             "setTextContent" | "setInnerHTML" => Some(self.mutate_content(operation, arguments)),
             "setAttribute" | "removeAttribute" => Some(self.set_attribute(operation, arguments)),
             "styleGet" | "styleSet" => Some(self.style(operation, arguments)),

@@ -59,6 +59,15 @@ impl HtmlDomBridgeState {
         Ok(DomValue::Undefined)
     }
 
+    pub(super) fn set_text_control_value(&self, arguments: &[String]) -> Result<DomValue, String> {
+        let node_id = node_id(argument(arguments, 0)?)?;
+        let value = argument(arguments, 1)?;
+        self.document
+            .borrow_mut()
+            .set_text_control_value(node_id, value)?;
+        Ok(DomValue::Undefined)
+    }
+
     pub(super) fn style(&self, operation: &str, arguments: &[String]) -> Result<DomValue, String> {
         let mut document = self.document.borrow_mut();
         match operation {

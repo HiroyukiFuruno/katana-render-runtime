@@ -95,7 +95,24 @@ impl StaticHtmlRuntimeSession {
         state
             .document
             .borrow_mut()
-            .set_attribute(node_id, "value", value)
+            .set_text_control_value(node_id, value)
+            .map_err(HtmlRuntimeError::DomBridge)
+    }
+
+    pub(in crate::renderer::backends) fn textarea_value(
+        &self,
+        node_id: u64,
+    ) -> Result<String, HtmlRuntimeError> {
+        let state = self
+            .isolate
+            .as_ref()
+            .ok_or_else(discarded_runtime_error)?
+            .get_slot::<HtmlDomBridgeState>()
+            .ok_or_else(dom_state_unavailable_error)?;
+        state
+            .document
+            .borrow()
+            .textarea_value(node_id)
             .map_err(HtmlRuntimeError::DomBridge)
     }
 

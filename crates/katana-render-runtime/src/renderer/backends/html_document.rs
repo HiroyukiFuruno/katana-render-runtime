@@ -40,6 +40,7 @@ pub(super) struct HtmlDocument {
     pub(super) later_body_onload_tokens: Vec<LaterBodyOnloadToken>,
     nodes: HashMap<u64, Handle>,
     node_ids: HashMap<usize, u64>,
+    textarea_values: HashMap<u64, String>,
     select_value_empty_overrides: std::collections::HashSet<u64>,
     next_node_id: u64,
     tree_revision: u64,

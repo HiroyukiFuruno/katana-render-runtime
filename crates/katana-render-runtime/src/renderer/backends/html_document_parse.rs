@@ -31,6 +31,7 @@ impl HtmlDocument {
             later_body_onload_tokens,
             nodes: HashMap::new(),
             node_ids: HashMap::new(),
+            textarea_values: Default::default(),
             select_value_empty_overrides: Default::default(),
             next_node_id: 1,
             tree_revision: 0,

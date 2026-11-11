@@ -2,6 +2,9 @@ use super::HtmlDocument;
 use crate::renderer::backends::html_dom_helpers::{attribute_value, text_content};
 use markup5ever_rcdom::{Handle, NodeData};
 
+#[path = "html_document_form_text.rs"]
+mod text_control;
+
 impl HtmlDocument {
     pub(crate) fn form_value(&self, node_id: u64) -> Result<Option<String>, String> {
         let node = self.node(node_id)?;
@@ -80,7 +83,7 @@ fn read_form_value(
     let value = match tag {
         "input" => input_value(document, node_id)?,
         "button" => document.attribute(node_id, "value")?,
-        "textarea" => Some(document.text_content(node_id)?),
+        "textarea" => Some(document.textarea_value(node_id)?),
         "option" => Some(option_property_value(node)),
         "select" => Some(select_document_value(document, node_id, node)),
         _ => return Ok(None),

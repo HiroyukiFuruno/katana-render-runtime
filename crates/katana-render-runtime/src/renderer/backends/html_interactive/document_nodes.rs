@@ -1,4 +1,5 @@
 use super::super::super::html_document::HtmlDocumentNode;
+use crate::renderer::backends::html_runtime::HtmlRuntimeError;
 use std::collections::HashMap;
 
 #[path = "document_table.rs"]
@@ -46,13 +47,19 @@ fn append_node_text(node: &HtmlDocumentNode, text: &mut String) {
 pub(in crate::renderer::backends::html_interactive) fn seed_input_values(
     nodes: &[HtmlDocumentNode],
     values: &mut HashMap<u64, String>,
-) {
+    textarea_value: &impl Fn(u64) -> Result<String, HtmlRuntimeError>,
+) -> Result<(), HtmlRuntimeError> {
     for node in nodes {
-        seed_node_input_value(node, values);
+        seed_node_input_value(node, values, textarea_value)?;
     }
+    Ok(())
 }
 
-fn seed_node_input_value(node: &HtmlDocumentNode, values: &mut HashMap<u64, String>) {
+fn seed_node_input_value(
+    node: &HtmlDocumentNode,
+    values: &mut HashMap<u64, String>,
+    textarea_value: &impl Fn(u64) -> Result<String, HtmlRuntimeError>,
+) -> Result<(), HtmlRuntimeError> {
     let HtmlDocumentNode::Element {
         node_id,
         tag,
@@ -60,12 +67,17 @@ fn seed_node_input_value(node: &HtmlDocumentNode, values: &mut HashMap<u64, Stri
         children,
     } = node
     else {
-        return;
+        return Ok(());
     };
     if is_input_tag(tag) && !values.contains_key(node_id) {
-        values.insert(*node_id, input_initial_value(attributes));
+        let value = if tag == "textarea" {
+            textarea_value(*node_id)?
+        } else {
+            input_initial_value(attributes)
+        };
+        values.insert(*node_id, value);
     }
-    seed_input_values(children, values);
+    seed_input_values(children, values, textarea_value)
 }
 
 pub(in crate::renderer::backends::html_interactive) fn is_input_tag(tag: &str) -> bool {

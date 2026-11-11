@@ -501,7 +501,7 @@ mod tests {
             ],
         )];
         let mut values = HashMap::new();
-        seed_input_values(&inputs, &mut values);
+        assert!(seed_input_values(&inputs, &mut values, &|_| Ok(String::new())).is_ok());
         assert_eq!(values.len(), 2);
         assert!(values.values().all(String::is_empty));
         assert!(is_input_tag("textarea"));

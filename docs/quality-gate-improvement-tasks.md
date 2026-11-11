@@ -3,6 +3,7 @@
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
 - 最新指示に従い、作業中は予定した修正単位をまとめて関連テストの結果を確認する。正式カバレッジは最後のフェーズで計測し、進捗の分母はその作業で対応予定とした件数を使う。
+- 対応予定1件中1件完了。R03の複数行入力欄の現在値をDOM内で管理し、JavaScript・利用側からの文字入力・描画で共有した。初期本文と作者の属性を保持することを実HTMLから確認した。修正前は公開回帰1件が不合格（`tmp/quality/resumed-owner-r3509/release-r03-textarea-red-xth368lq/safe-summary.json`）。修正後は関連66件とASTが成功し、対象差分が前後一致した（`tmp/quality/resumed-owner-r3509/release-r03-textarea-green-6k0dr099/safe-summary.json`）。検証中に作業ツリーの別範囲が変わったため、完全品質ゲートの成功には含めない。
 - 対応予定1件中1件完了。SVGの代替フォント処理で、文字範囲の連続性を検査した時点の文字列を字形照合に渡し、同じ範囲の再取得を除いた。UTF-8境界、代替フォントの位置合わせ、非対応入力の拒否を含む関連43件と静的検査・ASTが成功し、ソースの前後一致を確認した（`tmp/quality/resumed-owner-r3509/coverage-svg-fallback-span-exact-1wtyidwf/safe-summary.json`）。
 
 - 対応予定2件中2件完了。SVG合成79件・CSS境界線15件、静的検査・ASTが成功し、対象と作業ツリーの差分が前後一致した（`tmp/quality/resumed-owner-r3509/coverage-svg-clip-and-css-border-exact-tqyleyk1/safe-summary.json`）。初回ASTが関数長を検出したため、クリップと変換を同じ引数へまとめた。
@@ -118,7 +119,7 @@
 - [/] `5d3b108a` の正式producerによる中間計測は6,223件成功・別15件skip、86,914/87,376行（99.4712506867%）、未カバー462行。SVGの非表示末尾文字の判定で前回から1行減。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-fjj8sghs/safe-summary.json`）。
 - [x] 実フォントファイルの置換元がない場合と一時ファイルが既存の場合に、選択済みフォントと既存一時ファイルのバイト列が保持されることを確認。CSSの疑似要素に不正なSVGデータURLを指定すると、元のURLを持つ画像ノードが投影されることを確認した。foundation・AST・関連5件成功（`tmp/quality/resumed-owner-r3509/coverage-font-replacement-and-invalid-svg-url-exact-u8sefqse/safe-summary.json`）。全体計測への反映は未確認。
 - [x] 公開HTML APIのTabと文字入力で検索欄のDOM値・実画素更新、複数行入力欄のフォーカス・inputイベント・実画素更新を確認。SVGは非表示末尾文字の位置が保持される実入力を使い、`dy=0`は複数行補正へ進み、`dy=1`は拒否することを確認した。foundation・AST・関連7件成功（`tmp/quality/resumed-owner-r3509/coverage-public-focus-and-hidden-svg-exact-hwa5klxb/safe-summary.json`）。全体計測への反映は確認待ち。
-- [ ] R03 公開前に複数行入力欄のDOM値不一致を修正する。空の`textarea`にTabで移って`note`を入力し、`input`リスナーで`area.value === 'note'`を求めた実入力回帰は失敗した（`tmp/quality/resumed-owner-r3509/coverage-public-focus-and-hidden-svg-exact-agyeu3xs/safe-summary.json`）。入力の保存先は`session_snapshot.rs`の`set_value`が書く属性で、`html_document_form.rs`の`form_value`は本文を読む。上の限定回帰はイベント到達を証明するもので、`.value`の失敗は未解決。カバレッジ作業後に実入力の失敗を再現し、入力後の値と初期本文を区別して修正する。
+- [x] R03 複数行入力欄のDOM値不一致を修正。実HTMLでTab移動後に`note`を入力し、`input`リスナーの現在値と描画を確認した。上記の実行地点に修正前後の証跡を記録した。
 - [x] SVGの文字runはキャッシュ・部分再解決・非キャッシュのいずれも元の文字を順番に連結するため、同じ文字列の再比較を除去。各断片のface再選択と照合は維持。HTMLのinline SVGは同じCSS寸法と異なるviewBox比で、既定の縦横比と`none`の描画面積差を実画素で確認した。source-static-foundation・AST・関連11件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-fragment-and-html-aspect-exact-ix8gghmz/safe-summary.json`）。初回ASTの色定数指摘を修正。全体計測への反映は未確認。
 - [/] `4c9f4e4b` の正式producerによる中間計測は6,220件成功・別15件skip、86,913/87,376行（99.4701062077%）、未カバー463行。HTMLの折り返し判定で1行減。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-yq44lij_/safe-summary.json`）。依存ファイル照合の遅延後、実テストと集計を完了した。
 - [x] 折り返しは、非空行の末尾を返すunicode-linebreak 0.1.5とKRRの末尾保持を確認し、先頭候補の判定をまとめた。入力後のblur/change回帰は通常の入力欄に複数行入力欄と検索欄を加え、4パターンずつ確認。source-static-foundation・AST・関連7件成功（`tmp/quality/resumed-owner-r3509/coverage-wrap-and-text-focus-exact-gu3gg613/safe-summary.json`）。全体計測への反映は未確認。

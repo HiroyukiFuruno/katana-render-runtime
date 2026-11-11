@@ -25,15 +25,21 @@ const FOCUS_SOURCE: &str = r#"<!doctype html><html><body style="margin:0;backgro
 <div id=search-result style="position:absolute;left:240px;top:0;width:32px;height:32px;background:blue"></div>
 <input id=search type=search style="display:block;width:140px">
 <div id=area-result style="position:absolute;left:240px;top:40px;width:32px;height:32px;background:blue"></div>
-<textarea id=area style="display:block;width:140px"></textarea>
+<textarea id=area style="display:block;width:140px">initial</textarea>
 <script>
 const search = document.getElementById('search');
 search.addEventListener('input', () => {
   if (search.value === 'query') document.getElementById('search-result').style.background = 'red';
 });
 const area = document.getElementById('area');
+if (area.value !== 'initial') throw new Error('textarea initial value');
+area.value = '';
+if (area.value !== '' || area.textContent !== 'initial' || area.getAttribute('value') !== null) {
+  throw new Error('textarea value assignment changed the initial content');
+}
 area.addEventListener('input', (event) => {
-  if (event.target === area && document.activeElement === area) {
+  if (event.target === area && document.activeElement === area && area.value === 'note'
+      && area.textContent === 'initial' && area.getAttribute('value') === null) {
     document.getElementById('area-result').style.background = 'red';
   }
 });

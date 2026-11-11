@@ -60,8 +60,7 @@ impl HtmlInteractiveSession {
         nodes: &[HtmlDocumentNode],
         clickable_nodes: &HashSet<u64>,
     ) -> Result<LayoutResult, HtmlBrowserError> {
-        self.input_values.clear();
-        seed_input_values(nodes, &mut self.input_values);
+        self.refresh_input_values(nodes)?;
         let started = self.trace.start();
         let flow_before = self.flow_stats();
         let mut text_diagnostic = TextMeasurementDiagnosticScope::enter(self.trace.enabled());
@@ -81,6 +80,13 @@ impl HtmlInteractiveSession {
             (text_stats, svg_stats),
         );
         Ok(rendered)
+    }
+
+    fn refresh_input_values(&mut self, nodes: &[HtmlDocumentNode]) -> Result<(), HtmlBrowserError> {
+        let values = &mut self.state.input_values;
+        values.clear();
+        seed_input_values(nodes, values, &|id| self.runtime.textarea_value(id))
+            .map_err(runtime_failure)
     }
 
     fn flow_stats(&self) -> (usize, usize) {
