@@ -1,5 +1,34 @@
 use super::{DiagnosticOutput, workspace_tmp};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use crate::system::file_size_limit_test_support::FileSizeLimitTest;
 use std::{ffi::OsString, path::Path};
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn diagnostic_write_failure_cleans_owned_output() -> Result<(), String> {
+    FileSizeLimitTest::run_in_child(
+        module_path!(),
+        "diagnostic_write_failure_cleans_owned_output",
+        || {
+            let output = DiagnosticOutput::from_override(None)?;
+            let path = output.path.clone();
+            let write_result = FileSizeLimitTest::with_zero_limit(|| output.write(b"diagnostic"))?;
+            assert_eq!(
+                write_result,
+                Err(FileSizeLimitTest::limit_error().to_string())
+            );
+            assert_eq!(
+                std::fs::metadata(&path)
+                    .map_err(|error| error.to_string())?
+                    .len(),
+                0
+            );
+            drop(output);
+            assert!(!path.exists());
+            Ok(())
+        },
+    )
+}
 
 #[test]
 fn automatic_output_is_fresh_and_removed_on_drop() -> Result<(), String> {
