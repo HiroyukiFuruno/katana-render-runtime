@@ -179,10 +179,13 @@ mod tests {
     use super::{Database, ID, Source, assert_same_face_bytes, diagnostic_face_identity};
     use std::{path::PathBuf, sync::Arc};
 
+    const NOTO_SANS: &str = "assets/fonts/NotoSans-Regular.ttf";
+    const YELLOWTAIL: &str =
+        "../../tests/fixtures/svg-engine/upstream/resvg/tests/fonts/Yellowtail-Regular.ttf";
+
     #[test]
     fn diagnostic_identity_distinguishes_real_font_source_kinds() -> Result<(), String> {
-        let path =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/NotoSans-Regular.ttf");
+        let path = font_path(NOTO_SANS);
         let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
         let sources = [
             Source::Binary(Arc::new(bytes.clone())),
@@ -214,11 +217,10 @@ mod tests {
 
     #[test]
     fn diagnostic_face_bytes_reject_distinct_real_fonts() -> Result<(), String> {
-        let (noto, noto_id) = real_font("assets/fonts/NotoSans-Regular.ttf")?;
-        let (same, same_id) = real_font("assets/fonts/NotoSans-Regular.ttf")?;
-        let (yellowtail, yellowtail_id) = real_font(
-            "../../tests/fixtures/svg-engine/upstream/resvg/tests/fonts/Yellowtail-Regular.ttf",
-        )?;
+        let noto_source = Source::File(font_path(NOTO_SANS));
+        let (noto, noto_id) = single_face_database(noto_source.clone());
+        let (same, same_id) = single_face_database(noto_source);
+        let (yellowtail, yellowtail_id) = single_face_database(Source::File(font_path(YELLOWTAIL)));
         assert_same_face_bytes(&noto, noto_id, &same, same_id)?;
         assert_eq!(
             assert_same_face_bytes(&noto, noto_id, &yellowtail, yellowtail_id)
@@ -229,26 +231,23 @@ mod tests {
         Ok(())
     }
 
-    fn real_font(relative: &str) -> Result<(Database, ID), String> {
+    fn font_path(relative: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative)
+    }
+
+    fn single_face_database(source: Source) -> (Database, ID) {
         let mut database = Database::new();
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative);
-        let ids = database.load_font_source(Source::File(path));
-        let [id] = ids.as_slice() else {
-            return Err("expected one real font face".to_string());
-        };
-        Ok((database, *id))
+        let ids = database.load_font_source(source);
+        assert_eq!(ids.len(), 1, "expected one real font face");
+        (database, ids[0])
     }
 
     fn inspect_source(source: Source, bytes: &[u8]) -> Result<serde_json::Value, String> {
-        let mut database = Database::new();
-        let ids = database.load_font_source(source);
-        let [id] = ids.as_slice() else {
-            return Err("expected one Noto Sans face".to_string());
-        };
-        let face = database.face(*id).ok_or("font face missing")?;
+        let (database, id) = single_face_database(source);
+        let face = database.face(id).ok_or("font face missing")?;
         let matches =
-            database.with_face_data(*id, |actual, index| actual == bytes && index == face.index);
+            database.with_face_data(id, |actual, index| actual == bytes && index == face.index);
         assert_eq!(matches, Some(true));
-        diagnostic_face_identity(&database, *id)
+        diagnostic_face_identity(&database, id)
     }
 }
