@@ -1,4 +1,22 @@
-use super::{parse_with_languages, sample_path, usvg};
+use super::{CHANNEL_COUNT, center_pixel, parse_with_languages, sample_path, usvg};
+use rstest::rstest;
+
+#[rstest]
+#[case::inside_clip(4, [0, 0, 255, 255])]
+#[case::outside_clip(6, [0, 0, 0, 0])]
+fn clip_path_ignores_text_and_non_graphic_children(
+    #[case] clip_x: u32,
+    #[case] expected_pixel: [u8; CHANNEL_COUNT],
+) -> Result<(), String> {
+    let source = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8">
+      <defs><clipPath id="mask">ignored text<!-- ignored comment -->
+      <title>clip description</title><rect x="{clip_x}" y="4" width="2" height="4"/></clipPath></defs>
+      <rect width="8" height="8" fill="#0000ff" clip-path="url(#mask)"/></svg>"##
+    );
+    assert_eq!(center_pixel(&source, &[])?, expected_pixel);
+    Ok(())
+}
 
 fn parse_shape(shape: &str) -> Result<usvg::Tree, String> {
     let source =

@@ -43,3 +43,16 @@ fn marker_selector_six_digit_css_escape_matches_entity_pixels() {
         "expected visible opaque red pixels"
     );
 }
+
+#[test]
+fn oversized_marker_stylesheet_preserves_bytes_and_keeps_sibling_rewrites() {
+    let padding = "x".repeat(super::super::MAX_STYLE_BYTES);
+    let oversized = format!(r#"/*{padding}*/[id$="end"] {{ fill: #ff0000; }}"#);
+    let small = r#"[id$="blue"] { fill: #008000; }"#;
+    let exact = r#"[id="other-blue"] { fill: #008000; }"#;
+    let source = rect_svg(&format!("{oversized}</style><style>{small}"));
+    let reference = rect_svg(&format!("{oversized}</style><style>{exact}"));
+    assert!(source.len() < super::super::MAX_SVG_BYTES);
+    assert_eq!(normalize_marker_selectors(source.clone()), reference);
+    assert_equal_visible_pixels(&source, &reference, [0, 128, 0]);
+}
