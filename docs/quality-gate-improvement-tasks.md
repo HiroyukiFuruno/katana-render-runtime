@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] SVGの子要素を経由するpattern・clipPath・feImage参照の実入力回帰を追加。循環ありでは循環を解いた入力と画素一致、循環なしでは塗り・クリップ・フィルターが維持されることを確認。foundation・AST・関連4件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-child-reference-exact-4q0p2z_j/safe-summary.json`）。全体計測への反映は未確認。
 - [/] `5d3b108a` の正式producerによる中間計測は6,223件成功・別15件skip、86,914/87,376行（99.4712506867%）、未カバー462行。SVGの非表示末尾文字の判定で前回から1行減。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-fjj8sghs/safe-summary.json`）。
 - [x] 実フォントファイルの置換元がない場合と一時ファイルが既存の場合に、選択済みフォントと既存一時ファイルのバイト列が保持されることを確認。CSSの疑似要素に不正なSVGデータURLを指定すると、元のURLを持つ画像ノードが投影されることを確認した。foundation・AST・関連5件成功（`tmp/quality/resumed-owner-r3509/coverage-font-replacement-and-invalid-svg-url-exact-u8sefqse/safe-summary.json`）。全体計測への反映は未確認。
 - [x] 公開HTML APIのTabと文字入力で検索欄のDOM値・実画素更新、複数行入力欄のフォーカス・inputイベント・実画素更新を確認。SVGは非表示末尾文字の位置が保持される実入力を使い、`dy=0`は複数行補正へ進み、`dy=1`は拒否することを確認した。foundation・AST・関連7件成功（`tmp/quality/resumed-owner-r3509/coverage-public-focus-and-hidden-svg-exact-hwa5klxb/safe-summary.json`）。全体計測への反映は確認待ち。
