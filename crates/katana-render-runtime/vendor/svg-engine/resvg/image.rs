@@ -19,14 +19,7 @@ pub fn render_inner(
     #[allow(unused_variables)] rendering_mode: crate::svg_engine::usvg::ImageRendering,
     pixmap: &mut tiny_skia::PixmapMut,
 ) {
-    match image_kind {
-        crate::svg_engine::usvg::ImageKind::SVG(tree) => {
-            render_vector(tree, transform, pixmap);
-        }
-        _ => {
-            raster_images::render_raster(image_kind, transform, rendering_mode, pixmap);
-        }
-    }
+    raster_images::render_image(image_kind, transform, rendering_mode, pixmap);
 }
 
 fn render_vector(
@@ -53,9 +46,16 @@ mod raster_images {
     use std::io::Cursor;
     use crate::svg_engine::usvg::ImageRendering;
 
-    fn decode_raster(image: &crate::svg_engine::usvg::ImageKind) -> Option<tiny_skia::Pixmap> {
-        match image {
-            crate::svg_engine::usvg::ImageKind::SVG(_) => None,
+    pub(super) fn render_image(
+        image: &crate::svg_engine::usvg::ImageKind,
+        transform: tiny_skia::Transform,
+        rendering_mode: ImageRendering,
+        pixmap: &mut tiny_skia::PixmapMut,
+    ) -> Option<()> {
+        let raster = match image {
+            crate::svg_engine::usvg::ImageKind::SVG(tree) => {
+                return super::render_vector(tree, transform, pixmap);
+            }
             crate::svg_engine::usvg::ImageKind::JPEG(data) => {
                 decode_jpeg(data).log_none(|| log::warn!("Failed to decode a JPEG image."))
             }
@@ -68,7 +68,8 @@ mod raster_images {
             crate::svg_engine::usvg::ImageKind::WEBP(data) => {
                 decode_webp(data).log_none(|| log::warn!("Failed to decode a WebP image."))
             }
-        }
+        }?;
+        render_raster(&raster, transform, rendering_mode, pixmap)
     }
 
     fn decode_png(data: &[u8]) -> Option<tiny_skia::Pixmap> {
@@ -156,14 +157,12 @@ mod raster_images {
         }
     }
 
-    pub(crate) fn render_raster(
-        image: &crate::svg_engine::usvg::ImageKind,
+    fn render_raster(
+        raster: &tiny_skia::Pixmap,
         transform: tiny_skia::Transform,
         rendering_mode: crate::svg_engine::usvg::ImageRendering,
         pixmap: &mut tiny_skia::PixmapMut,
     ) -> Option<()> {
-        let raster = decode_raster(image)?;
-
         let rect = tiny_skia::Size::from_wh(raster.width() as f32, raster.height() as f32)?
             .to_rect(0.0, 0.0)?;
 
