@@ -5,7 +5,7 @@ use std::{ffi::OsString, path::Path};
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
-fn diagnostic_write_failure_cleans_owned_output() -> Result<(), String> {
+fn diagnostic_write_failure_cleans_owned_output() -> Result<(), Box<dyn std::error::Error>> {
     FileSizeLimitTest::run_in_child(
         module_path!(),
         "diagnostic_write_failure_cleans_owned_output",
@@ -17,12 +17,7 @@ fn diagnostic_write_failure_cleans_owned_output() -> Result<(), String> {
                 write_result,
                 Err(FileSizeLimitTest::limit_error().to_string())
             );
-            assert_eq!(
-                std::fs::metadata(&path)
-                    .map_err(|error| error.to_string())?
-                    .len(),
-                0
-            );
+            assert_eq!(std::fs::metadata(&path)?.len(), 0);
             drop(output);
             assert!(!path.exists());
             Ok(())

@@ -7,15 +7,14 @@ impl FileSizeLimitTest {
     pub(crate) fn run_in_child(
         module: &str,
         case: &str,
-        run: impl FnOnce() -> Result<(), String>,
-    ) -> Result<(), String> {
+        run: impl FnOnce() -> Result<(), Box<dyn std::error::Error>>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         const CHILD: &str = "KRR_FILE_SIZE_LIMIT_TEST_CHILD";
         if std::env::var(CHILD).as_deref() == Ok("1") {
             return run();
         }
-        let (_, module) = module.split_once("::").ok_or("test module missing")?;
-        let name = format!("{module}::{case}");
-        let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+        let name = Self::test_name(module, case);
+        let executable = std::env::current_exe()?;
         let output = ProcessService::create_command("/bin/sh")
             .args([
                 "-c",
@@ -25,30 +24,35 @@ impl FileSizeLimitTest {
             .arg(executable)
             .args(["--exact", name.as_str(), "--color=never"])
             .env(CHILD, "1")
-            .output()
-            .map_err(|error| error.to_string())?;
+            .output()?;
         Self::assert_child_passed(&name, &output);
         Ok(())
     }
 
+    fn test_name(module: &str, case: &str) -> String {
+        module
+            .split("::")
+            .skip(1)
+            .chain(std::iter::once(case))
+            .collect::<Vec<_>>()
+            .join("::")
+    }
+
     fn assert_child_passed(name: &str, output: &std::process::Output) {
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            output.status.success(),
-            "{stdout}\n{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stdout}\n{stderr}");
         let passed = format!("test {name} ... ok");
         assert_eq!(stdout.lines().filter(|line| *line == passed).count(), 1);
     }
 
-    pub(crate) fn with_zero_limit<T>(run: impl FnOnce() -> T) -> Result<T, String> {
+    pub(crate) fn with_zero_limit<T>(run: impl FnOnce() -> T) -> nix::Result<T> {
         let limit = Resource::RLIMIT_FSIZE;
-        let (soft, hard) = getrlimit(limit).map_err(|error| error.to_string())?;
-        setrlimit(limit, 0, hard).map_err(|error| error.to_string())?;
+        let (soft, hard) = getrlimit(limit)?;
+        setrlimit(limit, 0, hard)?;
         let result = run();
         /* WHY: LLVMのプロファイルを書き込めるよう、子プロセスが終了する前に制限を戻す。 */
-        setrlimit(limit, soft, hard).map_err(|error| error.to_string())?;
+        setrlimit(limit, soft, hard)?;
         Ok(result)
     }
 

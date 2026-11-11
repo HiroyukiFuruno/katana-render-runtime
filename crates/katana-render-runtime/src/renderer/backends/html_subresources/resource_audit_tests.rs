@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
-fn resource_body_write_failure_is_reported() -> Result<(), String> {
+fn resource_body_write_failure_is_reported() -> Result<(), Box<dyn std::error::Error>> {
     FileSizeLimitTest::run_in_child(
         module_path!(),
         "resource_body_write_failure_is_reported",
@@ -18,11 +18,11 @@ fn resource_body_write_failure_is_reported() -> Result<(), String> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn assert_resource_write_limit_error() -> Result<(), String> {
+fn assert_resource_write_limit_error() -> Result<(), Box<dyn std::error::Error>> {
     let fixture = LocalFixture::new()?;
     let source = fixture.root.join("source.bin");
     let output = fixture.root.join("bodies");
-    std::fs::write(&source, b"body").map_err(|error| error.to_string())?;
+    std::fs::write(&source, b"body")?;
     let url = url::Url::from_file_path(&source).map_err(|()| "invalid fixture path")?;
     let scope = ResourceAuditScope::start();
     transport::load_text(&url)?;
@@ -35,12 +35,7 @@ fn assert_resource_write_limit_error() -> Result<(), String> {
         format!("could not persist resource body: {expected}")
     );
     let body = output.join("resource-0000.bin");
-    assert_eq!(
-        std::fs::metadata(body)
-            .map_err(|error| error.to_string())?
-            .len(),
-        0
-    );
+    assert_eq!(std::fs::metadata(body)?.len(), 0);
     Ok(())
 }
 
