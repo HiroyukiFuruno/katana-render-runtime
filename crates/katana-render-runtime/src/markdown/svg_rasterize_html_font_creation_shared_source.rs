@@ -37,8 +37,8 @@ pub(super) fn shared_source(
 }
 
 fn eligible_file_length(path: &Path) -> Result<Option<usize>, ()> {
-    let length = usize::try_from(std::fs::metadata(path).map_err(|_| ())?.len()).map_err(|_| ())?;
-    let file_length = u64::try_from(length).map_err(|_| ())?;
+    let file_length = std::fs::metadata(path).map_err(|_| ())?.len();
+    let length = usize::try_from(file_length).map_err(|_| ())?;
     eligible_immutable_system_path(path, file_length)
         .map(|eligible| eligible.then_some(length))
         .map_err(|_| ())
