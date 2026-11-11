@@ -20,8 +20,6 @@ pub(crate) type ParsedHtmlDocument<'input> =
 #[derive(Clone, Default)]
 pub(crate) struct GeneratedHtmlTextProvenance {
     #[cfg(any(target_os = "macos", test))]
-    next_id: u64,
-    #[cfg(any(target_os = "macos", test))]
     entries: Vec<GeneratedHtmlTextEntry>,
 }
 
@@ -55,17 +53,13 @@ impl GeneratedHtmlTextProvenance {
         if start_tag.contains(" id=") {
             return markup;
         }
-        let Some(next_id) = self.next_id.checked_add(1) else {
-            return markup;
-        };
-        let id = format!("krr-html-text-{next_id}");
+        let id = format!("krr-html-text-{}", self.entries.len() + 1);
         let marked = format!("{start_tag} id=\"{id}\"{}", &markup[open_end..]);
-        self.register_marked_text(id, next_id, marked)
+        self.register_marked_text(id, marked)
     }
 
     #[cfg(any(target_os = "macos", test))]
-    fn register_marked_text(&mut self, id: String, next_id: u64, markup: String) -> String {
-        self.next_id = next_id;
+    fn register_marked_text(&mut self, id: String, markup: String) -> String {
         self.entries.push(GeneratedHtmlTextEntry {
             id,
             markup_sha256: sha256(markup.as_bytes()),
