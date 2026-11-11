@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use url::Url;
 
 #[cfg(test)]
-#[path = "html_css_probe_tests.rs"]
+#[path = "html_css_probe/tests.rs"]
 mod html_css_probe_tests;
 
 const VIEWPORT_WIDTH: u32 = 1230;
