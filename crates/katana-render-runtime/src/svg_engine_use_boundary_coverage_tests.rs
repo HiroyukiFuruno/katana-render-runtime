@@ -60,6 +60,42 @@ fn empty_clip_on_symbol_use_does_not_hide_visible_sibling() -> Result<(), String
 }
 
 #[rstest]
+#[case::symbol_width("symbol", "0", "200", false)]
+#[case::symbol_height("symbol", "200", "0", false)]
+#[case::svg_width("svg", "0", "200", false)]
+#[case::svg_height("svg", "200", "0", false)]
+#[case::group_width("g", "0", "200", true)]
+#[case::group_height("g", "200", "0", true)]
+fn zero_use_dimension_only_suppresses_viewport_references(
+    #[case] element: &str,
+    #[case] width: &str,
+    #[case] height: &str,
+    #[case] paints: bool,
+) -> Result<(), String> {
+    let viewbox = if element == "g" {
+        ""
+    } else {
+        " viewBox='0 0 200 200'"
+    };
+    let source = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><defs><{element} id='shape'{viewbox}><rect width='200' height='200' fill='red'/></{element}></defs><rect width='200' height='200' fill='blue'/><use href='#shape' width='{width}' height='{height}'/></svg>"
+    );
+    let control = source.replace(
+        &format!("width='{width}' height='{height}'/></svg>"),
+        "width='200' height='200'/></svg>",
+    );
+    let parse = |input: &str| {
+        usvg::Tree::from_str(input, &usvg::Options::default()).map_err(|error| error.to_string())
+    };
+    const RED: [u8; 4] = [255, 0, 0, 255];
+    const BLUE: [u8; 4] = [0, 0, 255, 255];
+    assert_eq!(render_sample(&parse(&control)?)?, RED);
+    let expected = if paints { RED } else { BLUE };
+    assert_eq!(render_sample(&parse(&source)?)?, expected);
+    Ok(())
+}
+
+#[rstest]
 #[case::percentage("50%", "75%")]
 #[case::physical_inches("1in", "2in")]
 fn symbol_use_width_resolves_units_before_clipping(

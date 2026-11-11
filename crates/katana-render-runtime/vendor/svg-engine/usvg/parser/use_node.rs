@@ -78,7 +78,7 @@ fn use_node_translation(node: SvgNode, state: &converter::State) -> Transform {
     Transform::default().pre_translate(x, y)
 }
 
-fn symbol_view_box(node: SvgNode, state: &converter::State) -> NonZeroRect {
+fn symbol_view_box(node: SvgNode, state: &converter::State) -> Option<NonZeroRect> {
     // symbol内の相対寸法は参照元useの寸法を基準にする。
     let def = Length::new(100.0, LengthUnit::Percent);
     let x = state.view_box.x();
@@ -93,7 +93,10 @@ fn symbol_view_box(node: SvgNode, state: &converter::State) -> NonZeroRect {
     } else {
         state.view_box.height()
     };
-    NonZeroRect::from_xywh(x, y, width, height).unwrap_or(state.view_box)
+    if width == 0.0 || height == 0.0 {
+        return None;
+    }
+    Some(NonZeroRect::from_xywh(x, y, width, height).unwrap_or(state.view_box))
 }
 
 fn convert_symbol(
@@ -105,11 +108,15 @@ fn convert_symbol(
     cache: &mut converter::Cache,
     parent: &mut Group,
 ) {
-    state.view_box = symbol_view_box(node, state);
-    if let Some(viewbox) = viewbox_transform(node, child, state) {
+    let Some(view_box) = symbol_view_box(node, state) else {
+        return;
+    };
+    state.view_box = view_box;
+    let viewport = use_node_size(node, state);
+    if let Some(viewbox) = viewbox_transform(child, viewport) {
         transform = transform.pre_concat(viewbox);
     }
-    if let Some(rect) = get_clip_rect(node, child, state) {
+    if let Some(rect) = get_clip_rect(node, child, state, viewport) {
         let mut group = clip_element(node, rect, original, state, cache);
         group.abs_transform = parent.abs_transform;
         populate_symbol_clip(node, child, transform, state, cache, &mut group);
@@ -200,6 +207,10 @@ pub(crate) fn convert_svg(
     cache: &mut converter::Cache,
     parent: &mut Group,
 ) {
+    let viewport = override_use_size(use_node_size(node, state), state);
+    if viewport.0 == 0.0 || viewport.1 == 0.0 {
+        return;
+    }
     // We require original transformation to setup 'clipPath'.
     let mut orig_ts = node.resolve_transform(AId::Transform, state);
     let mut new_ts = Transform::default();
@@ -208,13 +219,13 @@ pub(crate) fn convert_svg(
     let y = node.convert_user_length(AId::Y, state, Length::zero());
     new_ts = new_ts.pre_translate(x, y);
 
-    if let Some(ts) = viewbox_transform(node, node, state) {
+    if let Some(ts) = viewbox_transform(node, viewport) {
         new_ts = new_ts.pre_concat(ts);
     }
 
-    let new_state = nested_svg_state(node, x, y, state);
+    let new_state = nested_svg_state(node, x, y, state, viewport);
 
-    if let Some(clip_rect) = get_clip_rect(node, node, state) {
+    if let Some(clip_rect) = get_clip_rect(node, node, state, viewport) {
         let mut g = clip_element(node, clip_rect, orig_ts, state, cache);
         g.abs_transform = parent.abs_transform.pre_concat(orig_ts);
         convert_children(node, new_ts, &new_state, cache, false, &mut g);
@@ -231,13 +242,13 @@ fn nested_svg_state<'a>(
     x: f32,
     y: f32,
     state: &converter::State<'a>,
+    viewport: (f32, f32),
 ) -> converter::State<'a> {
     let mut nested = state.clone();
     nested.view_box = if let Some(view_box) = node.parse_viewbox() {
         view_box
     } else {
-        let (width, height) = use_node_size(node, state);
-        let (width, height) = override_use_size(width, height, state);
+        let (width, height) = viewport;
         NonZeroRect::from_xywh(x, y, width, height).unwrap_or(state.view_box)
     };
     nested
@@ -336,13 +347,14 @@ fn get_clip_rect(
     use_node: SvgNode,
     symbol_node: SvgNode,
     state: &converter::State,
+    viewport: (f32, f32),
 ) -> Option<NonZeroRect> {
     if !requires_clip_rect(use_node, symbol_node, state) {
         return None;
     }
     let x = use_node.convert_user_length(AId::X, state, Length::zero());
     let y = use_node.convert_user_length(AId::Y, state, Length::zero());
-    let (width, height) = viewport_size(use_node, state);
+    let (width, height) = viewport;
     NonZeroRect::from_xywh(x, y, width, height)
 }
 
@@ -376,13 +388,8 @@ fn use_node_size(node: SvgNode, state: &converter::State) -> (f32, f32) {
     (w, h)
 }
 
-fn viewbox_transform(
-    node: SvgNode,
-    linked: SvgNode,
-    state: &converter::State,
-) -> Option<Transform> {
-    let (w, h) = viewport_size(node, state);
-
+fn viewbox_transform(linked: SvgNode, viewport: (f32, f32)) -> Option<Transform> {
+    let (w, h) = viewport;
     let size = Size::from_wh(w, h)?;
     let rect = linked.parse_viewbox()?;
     let aspect = linked
@@ -393,16 +400,10 @@ fn viewbox_transform(
     Some(view_box.to_transform(size))
 }
 
-fn viewport_size(node: SvgNode, state: &converter::State) -> (f32, f32) {
-    let (width, height) = use_node_size(node, state);
-    if node.tag_name() == Some(EId::Svg) {
-        override_use_size(width, height, state)
-    } else {
-        (width, height)
-    }
-}
-
-fn override_use_size(width: f32, height: f32, state: &converter::State) -> (f32, f32) {
+fn override_use_size(
+    (width, height): (f32, f32),
+    state: &converter::State,
+) -> (f32, f32) {
     // useの各軸指定を、参照するSVGの対応する寸法へ適用する。
     (
         state.use_size.0.unwrap_or(width),

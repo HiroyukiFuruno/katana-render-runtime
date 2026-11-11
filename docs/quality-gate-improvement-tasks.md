@@ -2,6 +2,12 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定4件中4件完了。標準静的検査・AST、関連Rust 99件、SVG来歴4件が成功した（`tmp/quality/resumed-owner-r3509/release-resize-font-zero-use-proof-ujm6eazw/safe-summary.json`）。最初は新しいフォント回帰1件の完全名が違い98件のみ実行されたため、実catalogで照合してその1件だけ同じソースで実行した。
+  - [x] 利用側の公開APIで、複数行入力欄がリサイズ後もフォーカスと値を保持し、続けて入力した文字を新寸法のフレームへ反映することを確認。
+  - [x] フォント観測の子プロセスへ不正なJSONを渡し、エラーを返して応答ファイルを作成しないことを確認。
+  - [x] SHAが一致する破損フォントを実リクエストで渡し、フォントの同一性を証明できない結果と来歴なしになることを確認。
+  - [x] 幅または高さがゼロのSVG・symbol参照を描画しないよう修正。通常寸法とグループ参照も実画素で確認。
+
 - 対応予定3件中3件完了。静的検査・AST、関連Rust 16件、検査登録Bun 693件が成功し、ソースの前後一致を確認した（`tmp/quality/resumed-owner-r3509/release-grid-macho-exact-jakxq5dr/safe-summary.json`）。登録テストのファイル全件は603秒だったため、以後の修正中は関連するケース名で絞り、全件は最終ゲートで確認する。
   - [x] HTMLの2列グリッドで、同じ行は最も高い項目に揃い、別の行は独立した高さを保つことを確認。Flexの既存回帰と共通の測定fixtureを使った。
   - [x] Mach-Oの検査CLIで、正しい入力の後に古いSHAの入力がある場合、SHA不一致を報告し、部分成功を出力しないことを確認した。
@@ -200,7 +206,7 @@
 - [x] `0b7d6b0f` はusvgが正の有限値として保証した字形サイズの重複検査を除去し、可変フォント・複数行・代替書体を含む関連5件は実0（`tmp/quality/resumed-owner-r3509/coverage-svg-positive-glyph-size-exact-s5h32e3g/safe-summary.json`）。`b7360ffe` は合成検証で有効なPixmapを再変換せず、通常・太字の2件で既存と同じ画素比較を実施した（`tmp/quality/resumed-owner-r3509/coverage-svg-pixmap-composite-reference-exact-wlct61oq/safe-summary.json`）。いずれもfoundation・AST成功と差分の前後一致を確認し、538行の正式値には未反映。
 - [/] `bbe38614` の正式rootは6,181件成功・別15件skip、86,727/87,266行（99.3823482227%）、未カバー539行。前回543行から4減。実MathJax2行、透明SVGと字形順の補正各1行。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-bgh_ri_w/safe-summary.json`）。
 - [x] `c93ffaa5`・`58797fa4` はSVG分割描画で影響範囲との交差が保証済みのタイルを使い、文字の位置補正で下位が検証した倍率を再判定しない。全画素一致、座標上限の末尾画素、無効な倍率の拒否を含む関連12件、foundation・ASTは実0。一時profile回収とソース・binary前後一致を確認（`tmp/quality/resumed-owner-r3509/coverage-svg-anchor-scale-and-tile-exact-outxmo78/safe-summary.json`）。539行の正式値には未反映。
-- [ ] SVGの `<use>` が `<symbol>` を参照し幅がゼロの場合、SVG 2で要求される非描画と異なり、背後の青を赤いsymbolで覆う。実入力回帰は期待 `[0,0,255,255]` に対して実測 `[255,0,0,255]`、関連4件中3成功・再現1件失敗、実101。元ログと差分を保存し、正式計測の入力へは入れず、挙動を変える独立修正として最終描画検証の前に回収する（`tmp/quality/resumed-owner-r3509/coverage-svg-zero-symbol-viewport-exact-znk7aaa6/runtime-stdout.raw`、同 `reproducer.patch`）。[SVG 2のuse要素](https://www.w3.org/TR/SVG2/struct.html#UseElement)
+- [x] SVGの `<use>` が `<symbol>` を参照し幅がゼロの場合に、背後の青を赤いsymbolで覆う不具合を修正した。修正前の実入力は期待 `[0,0,255,255]` に対して実測 `[255,0,0,255]`、関連4件中3成功・再現1件失敗、実101。元ログと再現差分を保持した（`tmp/quality/resumed-owner-r3509/coverage-svg-zero-symbol-viewport-exact-znk7aaa6/runtime-stdout.raw`、同 `reproducer.patch`）。修正後は上記の実行地点に記録した。 [SVG 2のuse要素](https://www.w3.org/TR/SVG2/struct.html#UseElement)
 - [/] `32f186c7` の正式rootは6,180件成功・別15件skip、86,726/87,269行（99.3777859263%）、未カバー543行。前回548行から5減。可変フォント軸の構文処理2行、物理フォント計測・単一spanの中央揃え・MathJaxのAST検査各1行。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-vcerypsw/safe-summary.json`）。
 - [x] `5ed5c1e6`・`d20bfabf` は両方のpaintが透明な実SVGでカスタム描画と全体出力を確認し、同梱MathJaxの実数式出力が既存経路と一致することを確認。foundation・AST・関連6件実0。限定LLVMで `svg_rasterize_composite_path.rs:117` 0→2、`mathjax_renderer/js_runtime.rs:41` 3区間が各0→1、42行の先頭区間が0→1。他の区間は未到達。ソース・binary一致と一時profile回収済み（`tmp/quality/resumed-owner-r3509/coverage-svg-transparent-and-mathjax-bundle-exact-_8dj_tw4/safe-summary.json`）。`25b9bdc0` は同数を確認した文字と字形の対応付けを一度だけ行い、foundation・AST・関連6件実0（`tmp/quality/resumed-owner-r3509/coverage-svg-ordered-scalar-exact-s69h8ymv/safe-summary.json`）。543行の正式値には未反映。
 - [/] `e2ff6a10` の正式rootは6,180件成功・別15件skip、86,739/87,287行（99.3721860071%）、未カバー548行。前回556行から8減。内訳はSVG文字layout5行、x-heightのV8接続・セレクター置換容量・実長文の分割幅各1行。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-t40jyqe5/safe-summary.json`）。
