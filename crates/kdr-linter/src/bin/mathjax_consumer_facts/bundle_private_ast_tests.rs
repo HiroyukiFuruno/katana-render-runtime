@@ -15,11 +15,13 @@ fn generated_include_requires_exactly_one_runtime_constant() -> Result<(), Strin
 
 #[test]
 fn script_entries_reject_multistatement_and_nonmacro_bodies() -> Result<(), String> {
-    let multistatement = parsed_block("fn fixture() { let _value = 1; _value }", "fixture")?;
-    assert_eq!(
-        script_entries(&multistatement).err().as_deref(),
-        Some("script-order:body")
-    );
+    for source in ["fn fixture() {}", "fn fixture() { let _value = 1; _value }"] {
+        let body = parsed_block(source, "fixture")?;
+        assert_eq!(
+            script_entries(&body).err().as_deref(),
+            Some("script-order:body")
+        );
+    }
     let expression = parsed_block("fn fixture() { scripts }", "fixture")?;
     assert_eq!(
         script_entries(&expression).err().as_deref(),

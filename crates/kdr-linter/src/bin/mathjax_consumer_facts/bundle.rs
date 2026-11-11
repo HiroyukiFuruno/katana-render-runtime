@@ -61,14 +61,10 @@ fn require_runtime_source(source: &Source) -> Result<(), String> {
 }
 
 fn script_entries(block: &syn::Block) -> Result<[syn::Expr; 2], String> {
-    if block.stmts.len() != 1 {
+    let [statement] = block.stmts.as_slice() else {
         return Err("script-order:body".into());
-    }
-    let syn::Stmt::Expr(syn::Expr::Macro(array), _) = block
-        .stmts
-        .first()
-        .ok_or_else(|| "script-order:missing-vector".to_string())?
-    else {
+    };
+    let syn::Stmt::Expr(syn::Expr::Macro(array), _) = statement else {
         return Err("script-order:shape".into());
     };
     if path_name(&array.mac.path) != "vec" {
