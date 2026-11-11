@@ -18,8 +18,11 @@ const PERCENT_AUTO_HEIGHT: f32 = 189.859_38;
 
 #[test]
 fn natural_svg_keeps_attribute_dimensions_in_body_and_centered_flex() -> TestResult {
-    for flex in [false, true] {
-        let html = capture_html(NATURAL_SVG, flex);
+    for html in [
+        capture_html(NATURAL_SVG, false),
+        capture_html(NATURAL_SVG, true),
+        capture_auto_viewport_html(NATURAL_SVG),
+    ] {
         assert_geometry(&html, 80.0, 50.0)?;
         let pixels = capture_pixels(&html)?;
         let changed = pixels
