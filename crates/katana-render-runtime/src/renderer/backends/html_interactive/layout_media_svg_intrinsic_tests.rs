@@ -48,14 +48,13 @@ fn natural_svg_keeps_attribute_dimensions_in_body_and_centered_flex() -> TestRes
 fn percentage_svg_obeys_maximum_width_inside_centered_flex() -> TestResult {
     let html = capture_html(PERCENT_SVG, true);
     assert_geometry(&html, 600.406_25, 380.0)?;
-    let pixels = capture_pixels(&html)?;
-    let red = pixels
-        .chunks_exact(4)
-        .filter(|pixel| *pixel == [255, 0, 0, 255])
-        .count();
+    let red = aspect_ratio_tests::red_pixel_count(&html)?;
     assert!(red > 220_000, "percentage SVG lost visible area: {red}");
     Ok(())
 }
+
+#[path = "layout_media_svg_aspect_ratio_tests.rs"]
+mod aspect_ratio_tests;
 
 #[test]
 fn percentage_svg_uses_default_intrinsic_width_in_nested_auto_flex() -> TestResult {
