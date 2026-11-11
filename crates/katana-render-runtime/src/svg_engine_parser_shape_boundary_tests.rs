@@ -95,6 +95,23 @@ fn overflowing_offscreen_transform_preserves_visible_sibling() -> Result<(), Str
 }
 
 #[test]
+fn overflowing_rect_edges_preserve_visible_sibling() -> Result<(), String> {
+    const X: f32 = 3e38;
+    const WIDTH: f32 = 1e38;
+    let control = "<rect id='sample' width='4' height='4' fill='blue'/>";
+    let source = format!(
+        "<rect id='square' x='{X:e}' width='{WIDTH:e}' height='4' fill='red'/><rect id='round' x='{X:e}' width='{WIDTH:e}' height='4' rx='1' fill='red'/>{control}"
+    );
+    assert!(X.is_finite() && WIDTH.is_finite() && (X + WIDTH).is_infinite());
+    let actual = parse_shape(&source)?;
+    let expected = parse_shape(control)?;
+    assert!(actual.node_by_id("square").is_none());
+    assert!(actual.node_by_id("round").is_none());
+    assert!(actual.node_by_id("sample").is_some());
+    assert_same_visible_shape_render(&actual, &expected)
+}
+
+#[test]
 fn offscreen_isolated_group_with_large_bounds_preserves_visible_sibling() -> Result<(), String> {
     let source = "<g opacity='0.5'><rect id='offscreen' x='2147483392' width='512' height='4' fill='red'/></g><rect id='sample' width='4' height='4' fill='blue'/>";
     let control = "<rect id='sample' width='4' height='4' fill='blue'/>";
