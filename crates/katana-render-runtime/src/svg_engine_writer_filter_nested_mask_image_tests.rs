@@ -1,6 +1,50 @@
 use super::{assert_image_reference, assert_rendered_pixels, parse_writer_svg, writer_options};
 use crate::svg_engine::usvg;
 
+const REPEATED_IMAGE_REFERENCE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80">
+  <defs><g id="target"><rect width="40" height="40" fill="lime"/></g>
+    <filter id="linked" x="0" y="0" width="40" height="40" filterUnits="userSpaceOnUse">
+      <feImage href="#target" result="first"/>
+      <feImage href="#target" result="second"/>
+      <feBlend in="first" in2="second" mode="multiply"/>
+    </filter>
+  </defs><rect width="40" height="40" fill="red" filter="url(#linked)"/>
+</svg>"##;
+
+#[test]
+fn repeated_filter_image_writes_one_definition_and_preserves_both_references() -> Result<(), String>
+{
+    let case = "repeated filter image";
+    let original = parse_writer_svg(REPEATED_IMAGE_REFERENCE, case)?;
+    let serialized = original.to_string(&writer_options(case));
+    assert_repeated_reference(&serialized)?;
+    let reparsed = parse_writer_svg(&serialized, case)?;
+    assert_rendered_pixels(&original, &reparsed, case)
+}
+
+fn assert_repeated_reference(serialized: &str) -> Result<(), String> {
+    let document =
+        usvg::roxmltree::Document::parse(serialized).map_err(|error| error.to_string())?;
+    let mut references = document
+        .descendants()
+        .filter(|node| node.has_tag_name("feImage"))
+        .map(|node| node.attribute(("http://www.w3.org/1999/xlink", "href")));
+    let first = references
+        .next()
+        .flatten()
+        .ok_or("first feImage href missing")?;
+    assert_eq!(references.next(), Some(Some(first)));
+    assert_eq!(references.next(), None);
+    let target = first
+        .strip_prefix('#')
+        .ok_or("feImage target must be local")?;
+    let definitions = document
+        .descendants()
+        .filter(|node| node.attribute("id") == Some(target));
+    assert_eq!(definitions.count(), 1);
+    Ok(())
+}
+
 #[test]
 fn mask_reference_to_a_non_mask_element_discards_the_masked_element() -> Result<(), String> {
     assert_invalid_mask_discards_only_target(
