@@ -17,6 +17,9 @@ const OPAQUE_RGB: [u8; 3] = [20, 100, 200];
 const OPAQUE_RGB_WIDE: [u8; 6] = [20, 100, 200, 20, 100, 200];
 const SINGLE_PIXEL: (u32, u32) = (1, 1);
 const WIDE_PIXELS: (u32, u32) = (2, 1);
+const PNG_SIZE: f32 = 2.0;
+const BLUE_SAMPLE: (u32, u32) = (3, 1);
+const BLUE_RGBA: (u8, u8, u8, u8) = (0, 0, 255, 255);
 
 #[derive(Clone, Copy, Debug)]
 enum Format {
@@ -54,6 +57,42 @@ fn unsupported_bmp_is_not_mistaken_for_svg() -> TestResult {
     assert!(tree.node_by_id("unsupported").is_none());
     assert!(tree.node_by_id("control").is_some());
     Ok(())
+}
+
+#[test]
+fn image_without_href_preserves_png_and_visible_sibling() -> TestResult {
+    const MISSING: &str = "<image id='missing' width='2' height='2'/>";
+    let png = STANDARD.encode(std::fs::read(Path::new(RESOURCES).join("image.png"))?);
+    let source = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'>{MISSING}<image id='valid' width='2' height='2' href='data:image/png;base64,{png}'/><rect id='sibling' x='2' width='2' height='4' fill='blue'/></svg>"
+    );
+    let control = source.replace(MISSING, "");
+    let tree = usvg::Tree::from_str(&source, &usvg::Options::default())?;
+    let expected = usvg::Tree::from_str(&control, &usvg::Options::default())?;
+    assert!(tree.node_by_id("missing").is_none());
+    let valid = tree.node_by_id("valid").ok_or("valid PNG missing")?;
+    assert!(matches!(valid, usvg::Node::Group(group) if
+        matches!(group.children(), [usvg::Node::Image(image)] if matches_format(image.kind(), Format::Png))
+    ));
+    let bounds = valid.abs_bounding_box();
+    assert_eq!((bounds.width(), bounds.height()), (PNG_SIZE, PNG_SIZE));
+    assert!(tree.node_by_id("sibling").is_some());
+    let actual = render_test_image(&tree)?;
+    assert_eq!(actual.data(), render_test_image(&expected)?.data());
+    let blue = actual
+        .pixel(BLUE_SAMPLE.0, BLUE_SAMPLE.1)
+        .ok_or("sibling sample missing")?;
+    assert_eq!(
+        (blue.red(), blue.green(), blue.blue(), blue.alpha()),
+        BLUE_RGBA
+    );
+    Ok(())
+}
+
+fn render_test_image(tree: &usvg::Tree) -> TestResult<Pixmap> {
+    let mut pixmap = Pixmap::new(VIEWPORT, VIEWPORT).ok_or("pixmap unavailable")?;
+    resvg::render(tree, Transform::identity(), &mut pixmap.as_mut());
+    Ok(pixmap)
 }
 
 #[rstest]
