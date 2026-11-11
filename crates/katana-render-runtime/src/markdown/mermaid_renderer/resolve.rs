@@ -106,6 +106,23 @@ mod tests {
     }
 
     #[test]
+    fn find_mermaid_js_returns_path_only_after_file_exists()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("mermaid.js");
+        assert_eq!(
+            MermaidBinaryOps::find_mermaid_js_from(Ok(path.clone()))?,
+            None
+        );
+        std::fs::write(&path, "mermaid")?;
+        assert_eq!(
+            MermaidBinaryOps::find_mermaid_js_from(Ok(path.clone()))?,
+            Some(path)
+        );
+        Ok(())
+    }
+
+    #[test]
     fn env_mermaid_js_rejects_empty_override() {
         let result = MermaidBinaryOps::env_mermaid_js_from(Some(std::ffi::OsString::new()));
 
