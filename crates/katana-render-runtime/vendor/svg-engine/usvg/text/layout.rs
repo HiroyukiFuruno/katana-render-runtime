@@ -756,11 +756,10 @@ fn place_horizontal_clusters(
 
         cluster.transform = cluster.transform.pre_translate(x + shift_x, *shift_y);
 
-        if let Some(angle) = text.rotate.get(cp).cloned() {
-            if !angle.approx_zero_ulps(4) {
-                cluster.transform = cluster.transform.pre_rotate(angle);
-                cluster.has_relative_shift = true;
-            }
+        let angle = text.rotate.get(cp).copied().unwrap_or_default();
+        if !angle.approx_zero_ulps(4) {
+            cluster.transform = cluster.transform.pre_rotate(angle);
+            cluster.has_relative_shift = true;
         }
 
         x += cluster.advance;
@@ -919,10 +918,9 @@ fn apply_path_offsets(
             .transform
             .pre_translate(shift.x as f32, shift.y as f32);
     }
-    if let Some(angle) = placement.text.rotate.get(cp).cloned() {
-        if !angle.approx_zero_ulps(4) {
-            cluster.transform = cluster.transform.pre_rotate(angle);
-        }
+    let angle = placement.text.rotate.get(cp).copied().unwrap_or_default();
+    if !angle.approx_zero_ulps(4) {
+        cluster.transform = cluster.transform.pre_rotate(angle);
     }
 }
 
