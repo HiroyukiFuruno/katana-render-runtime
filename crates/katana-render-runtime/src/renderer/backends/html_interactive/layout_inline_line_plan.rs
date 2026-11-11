@@ -80,12 +80,10 @@ impl LinePlanBuilder {
             self.add_text(text, inherited);
             return true;
         }
-        let Some(style) = super::inline_flow_style(node, inherited, clickable) else {
+        let Some(fragment) = super::inline_flow_fragment(node, inherited, clickable) else {
             return self.add_atomic(node, inherited);
         };
-        if let HtmlDocumentNode::Element { children, .. } = node {
-            self.add_nodes(children, &style, clickable);
-        }
+        self.add_nodes(fragment.children, &fragment.style, clickable);
         true
     }
 

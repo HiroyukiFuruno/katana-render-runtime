@@ -206,7 +206,6 @@ fn inline_flow_wraps_then_flushes_before_a_block() {
     inline.cursor_x = 15.0;
     inline.bottom = 20.0;
 
-    renderer.render_inline_flow_children(&node, &style, DetailsContext::NONE, &mut inline);
     renderer.render_inline_node(&node, 10.0, &style, DetailsContext::NONE, &mut inline);
     assert_eq!(inline.y, 20.0);
     renderer.render_block_node(&node, &style, DetailsContext::NONE, &mut inline);

@@ -10,7 +10,7 @@ mod margin;
 #[path = "layout_inline_whitespace.rs"]
 pub(super) mod whitespace;
 use super::state::InlineFlowState;
-use super::{advance_inline_text, inline_flow_style};
+use super::{advance_inline_text, inline_flow_fragment};
 use whitespace::normalized_inline_text;
 
 impl HtmlLayoutRenderer {
@@ -51,8 +51,9 @@ impl HtmlLayoutRenderer {
     ) {
         if let HtmlDocumentNode::Text(text) = node {
             self.render_inline_text(text, inherited, inline);
-        } else if let Some(style) = inline_flow_style(node, inherited, &self.clickable_nodes) {
-            self.render_inline_flow_children(node, &style, details, inline);
+        } else if let Some(fragment) = inline_flow_fragment(node, inherited, &self.clickable_nodes)
+        {
+            self.render_inline_flow_children(&fragment, details, inline);
         } else if let Some(width) = InlineMeasurement::node_width(node, inherited, inline.width) {
             self.render_inline_node(node, width, inherited, details, inline);
         } else {
@@ -84,33 +85,33 @@ impl HtmlLayoutRenderer {
         true
     }
 
-    pub(super) fn render_inline_flow_children(
+    fn render_inline_flow_children(
         &mut self,
-        node: &HtmlDocumentNode,
-        style: &CssStyle,
+        fragment: &super::fragment::InlineFragment<'_>,
         details: DetailsContext,
         inline: &mut InlineFlowState,
     ) {
-        let HtmlDocumentNode::Element {
-            node_id, children, ..
-        } = node
-        else {
-            return;
-        };
+        let node_id = fragment.node_id;
         let element_box_index = self.start_element_box(
-            *node_id,
+            node_id,
             self.in_flow_positioning_context(),
             true,
-            self.positioning_origin_node_id(*node_id, CssPosition::Static),
+            self.positioning_origin_node_id(node_id, CssPosition::Static),
         );
         let (insertion_x, insertion_y) = (inline.cursor_x, inline.y);
-        self.ownership.inline_fragment_owners.push(*node_id);
-        for index in 0..children.len() {
-            self.render_inline_or_block_node(children, index, style, details, inline);
+        self.ownership.inline_fragment_owners.push(node_id);
+        for index in 0..fragment.children.len() {
+            self.render_inline_or_block_node(
+                fragment.children,
+                index,
+                &fragment.style,
+                details,
+                inline,
+            );
         }
         let popped_owner = self.ownership.inline_fragment_owners.pop();
-        debug_assert_eq!(popped_owner, Some(*node_id));
-        self.finish_inline_fragment_box(element_box_index, *node_id, insertion_x, insertion_y);
+        debug_assert_eq!(popped_owner, Some(node_id));
+        self.finish_inline_fragment_box(element_box_index, node_id, insertion_x, insertion_y);
     }
 
     fn render_inline_text(&mut self, text: &str, style: &CssStyle, inline: &mut InlineFlowState) {
