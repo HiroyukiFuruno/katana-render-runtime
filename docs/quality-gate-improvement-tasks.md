@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定1件中1件完了。HTML資源を実ファイルから読み込み、子プロセスだけにファイルサイズ制限をかけた。資源保存でファイル作成後に`EFBIG`が返り、空ファイルが残り、成功結果が返らないことを確認した。子はアサーションとLLVMプロファイル保存の前に制限を復元する。`nix`の`resource`はmacOS/Linuxの開発依存だけに追加し、通常の依存ツリーに含まれないことを確認。macOSの関連10テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-resource-audit-write-failure-gvd5yhpn/safe-summary.json`）。Linuxは必須CIで確認し、正式カバレッジは次の全量計測で判定する。
 - 対応予定1件中1件完了。Mermaid CLIの証跡作成で、実ファイルシステムのパス長制限により原本保存後の`request-source.mmd`だけが拒否される入力を追加した。`ENAMETOOLONG`が呼び出し元へ返り、原本が残り、描画出力と完了証跡が作成されないことを確認。macOSの関連6テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-cli-attestation-path-limit-r1k2xukd/safe-summary.json`）。Linux向け境界は必須CIで確認する。正式カバレッジは未再計測。
 - 最新の正式ルート計測 `7bbbd0a8` は6,300テスト成功・15件スキップ、86,435/86,808行（99.5703160999%）、未カバー373行。前回から11行減り、未カバー行が増えたファイルはない。収集は成功し、公開条件100%・未カバー0の判定は不合格。`tmp/quality/resumed-owner-r3509/root-coverage-release-reconciliation-wvebpbfe/` の `safe-summary.json`、`gap-summary.json`、`gap-delta.json` を次の対応の一次情報とする。
 - 計測再開の修正1件中1件完了。`a3723657`の全量計測は、追加したMach-Oケースが既存の固定SHA付きテスト専用ファイルを変更したため、開始前のfingerprint検査で停止した。ケースを既存の入力パステストへ移し、元のファイルを固定SHA `8c1893ff…` に復元した。関連2テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-macho-coverage-scope-jlz9c_w_/safe-summary.json`）。正式カバレッジの計測範囲と閾値は既存設定を用いる。

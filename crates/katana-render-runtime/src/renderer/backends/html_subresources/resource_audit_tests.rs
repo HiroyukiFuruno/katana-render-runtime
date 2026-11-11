@@ -5,6 +5,79 @@ use crate::renderer::backends::html_subresources::tests::support::{
 use crate::renderer::backends::html_subresources::transport;
 use std::path::PathBuf;
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn resource_body_write_failure_is_reported() -> Result<(), String> {
+    const CHILD: &str = "KRR_RESOURCE_AUDIT_FSIZE_CHILD";
+    if std::env::var(CHILD).as_deref() == Ok("1") {
+        return assert_resource_write_limit_error();
+    }
+    let (_, module) = module_path!()
+        .split_once("::")
+        .ok_or("test module missing")?;
+    let name = format!("{module}::resource_body_write_failure_is_reported");
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    let output = crate::system::ProcessService::create_command("/bin/sh")
+        .args(["-c", "trap '' XFSZ && exec \"$@\"", "resource-audit-child"])
+        .arg(executable)
+        .args(["--exact", name.as_str(), "--color=never"])
+        .env(CHILD, "1")
+        .output()
+        .map_err(|error| error.to_string())?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let passed = format!("test {name} ... ok");
+    assert_eq!(stdout.lines().filter(|line| *line == passed).count(), 1);
+    Ok(())
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn assert_resource_write_limit_error() -> Result<(), String> {
+    let fixture = LocalFixture::new()?;
+    let source = fixture.root.join("source.bin");
+    let output = fixture.root.join("bodies");
+    std::fs::write(&source, b"body").map_err(|error| error.to_string())?;
+    let url = url::Url::from_file_path(&source).map_err(|()| "invalid fixture path")?;
+    let scope = ResourceAuditScope::start();
+    transport::load_text(&url)?;
+    let error = finish_with_file_size_limit(scope, &output)
+        .err()
+        .ok_or("resource body write unexpectedly succeeded")?;
+    let expected = std::io::Error::from_raw_os_error(nix::errno::Errno::EFBIG as i32);
+    assert_eq!(
+        error,
+        format!("could not persist resource body: {expected}")
+    );
+    let body = output.join("resource-0000.bin");
+    assert_eq!(
+        std::fs::metadata(body)
+            .map_err(|error| error.to_string())?
+            .len(),
+        0
+    );
+    Ok(())
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn finish_with_file_size_limit(
+    scope: ResourceAuditScope,
+    output: &std::path::Path,
+) -> Result<super::Inventory, String> {
+    use nix::sys::resource::{Resource, getrlimit, setrlimit};
+
+    let limit = Resource::RLIMIT_FSIZE;
+    let (soft, hard) = getrlimit(limit).map_err(|error| error.to_string())?;
+    setrlimit(limit, 0, hard).map_err(|error| error.to_string())?;
+    let result = scope.finish(output);
+    /* WHY: 子の終了時にLLVMがプロファイルを書けるよう、確認より先に制限を戻す。 */
+    setrlimit(limit, soft, hard).map_err(|error| error.to_string())?;
+    result
+}
+
 #[test]
 fn existing_resource_body_is_rejected_without_replacement() -> Result<(), String> {
     let fixture = LocalFixture::new()?;
