@@ -2,6 +2,9 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] `b7d14e4e` はSVG境界ボックス座標変換に対象の塗りだけを渡し、単色の再判定を除いた。線形・放射グラデーション、パターンの内容座標、ゼロ寸法、参照とマーカーを含む11件とfoundation・AST成功（`tmp/quality/resumed-owner-r3509/coverage-svg-object-bbox-paint-exact-fjm2wy9i/safe-summary.json`）。
+- [x] `9f60594f` は中央ベースライン補正に該当する2種類の指定だけを渡し、補正の内部で再度種類を拒否する分岐を除いた。Chrome座標比較、可変・代替フォント、極小倍率を含む9件とfoundation・AST成功（`tmp/quality/resumed-owner-r3509/coverage-svg-middle-baseline-policy-exact-dnro99u5/safe-summary.json`）。
+- [x] `e0b029b2` はSVG角丸の既存属性がある場合にだけ削除を計画する。CSSセレクターが属性削除で変わる場合の原文保持を確認し、未指定属性、挿入、名前空間と不正XMLを含む11件とfoundation・AST成功（`tmp/quality/resumed-owner-r3509/coverage-svg-geometry-edit-operations-exact-4abyee8r/safe-summary.json`）。
 - [/] `3deb17ff` の正式計測は6,242件成功・別15件skip、86,699/87,132行（99.5030528394%）、未カバー433行。SVG先頭子・空CDATA・相対変換・書き出しで各1行減。純テストの移動でSVG文字計測2行とHTML項目配置1行減。分母は純テスト264行とSVGの重複判定4行が減少。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-5yrd4_pa/safe-summary.json`）。
 - [x] `bcdac3dc` はSVGパーサーが空でないフォント候補を作るため、書き出し側の再判定を除いた。フォント指定を省いた実SVGで既定値の属性・非透明画素・再解析前後の画素一致を確認。 `0a3f4561` はXMLで空CDATAのテキストノードが存在することと、SVG解析後に空の項目だけが省かれることを確認。最終foundation・AST・関連7件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-writer-default-and-empty-cdata-exact-obltf01w/safe-summary.json`）。試行時のファイル長、使用中PID、テスト補助の戻り値型の失敗は各runに保持。
 - [x] `2830b11f` はSVG先頭子の文字種別を同じノードから一度だけ取得する。`e6225dfb` は入れ子グループの相対変換で局所座標だけがオーバーフローする実SVGを解析し、外側の境界が変換前の局所値を保持することを確認した。初回のASTが追加先の300行上限を検出し、既存getter回帰へ移動。最終foundation・AST・関連4件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-tree-text-and-transform-exact-h3uyhnod/safe-summary.json`）。
