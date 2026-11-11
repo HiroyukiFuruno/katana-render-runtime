@@ -60,3 +60,33 @@ fn hidden_allows_the_boundary_offset_but_clip_rejects_any_offset() {
         Err(HtmlBrowserError::InvalidInputCoordinates)
     );
 }
+
+#[test]
+fn metrics_reject_invalid_viewport_before_computing_logical_dimensions() {
+    for viewport in [
+        HtmlBrowserViewport {
+            width: 0,
+            height: VIEWPORT_SIDE,
+            device_scale_factor: 1.0,
+        },
+        HtmlBrowserViewport {
+            width: VIEWPORT_SIDE,
+            height: VIEWPORT_SIDE,
+            device_scale_factor: 0.0,
+        },
+    ] {
+        let expected = viewport.validate();
+        assert!(expected.is_err());
+        assert_eq!(
+            HtmlBrowserScrollMetrics::new(
+                1,
+                viewport,
+                (CONTENT_SIDE, CONTENT_SIDE),
+                (0.0, 0.0),
+                (Policy::Auto, Policy::Auto),
+            )
+            .map(|_| ()),
+            expected
+        );
+    }
+}

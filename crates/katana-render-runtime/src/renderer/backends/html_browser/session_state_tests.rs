@@ -7,6 +7,34 @@ const TEST_VIEWPORT_HEIGHT: u32 = 120;
 const TEST_POINTER_COORDINATE: f32 = 20.0;
 
 #[test]
+fn session_creation_rejects_invalid_viewport_before_starting_runtime() -> TestResult {
+    let source = test_source("https://example.test/invalid-viewport.html")?;
+    let viewport = HtmlBrowserViewport {
+        width: 0,
+        height: TEST_VIEWPORT_HEIGHT,
+        device_scale_factor: 1.0,
+    };
+    assert!(matches!(
+        HtmlBrowserSession::new(source, viewport),
+        Err(HtmlBrowserError::InvalidViewport)
+    ));
+    Ok(())
+}
+
+#[test]
+fn session_creation_revalidates_mutated_source() -> TestResult {
+    let mut source = test_source("https://example.test/oversized.html")?;
+    let max = super::super::HTML_BROWSER_MAX_SOURCE_BYTES;
+    source.raw_html = "x".repeat(max + 1);
+    assert!(matches!(
+        HtmlBrowserSession::new(source, viewport(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT)?),
+        Err(HtmlBrowserError::SourceTooLarge { actual_bytes, max_bytes })
+            if actual_bytes == max + 1 && max_bytes == max
+    ));
+    Ok(())
+}
+
+#[test]
 fn session_rejects_invalid_input_and_out_of_order_internal_frames() -> TestResult {
     let mut session = HtmlBrowserSession::new(
         test_source("https://example.test/a.html")?,
@@ -140,6 +168,10 @@ fn assert_missing_runtime_and_closed_state(session: &mut HtmlBrowserSession) -> 
         .cloned()
         .ok_or_else(|| "initial frame must exist".to_string())?;
     session.interactive = None;
+    assert_eq!(
+        session.advance_time(std::time::Duration::from_millis(1)),
+        Err(HtmlBrowserError::RuntimeNotStarted)
+    );
     assert_eq!(
         session.dispatch_input(HtmlBrowserInput::Focus { focused: true }),
         Err(HtmlBrowserError::RuntimeNotStarted)
