@@ -18,6 +18,13 @@ const FILENAME_ALLOC_ERR: &str = "filename allocation failed";
 type DiagramTryCatchScope<'pin, 'scope, 'object, 'isolate> =
     v8::PinnedRef<'pin, v8::TryCatch<'scope, 'object, v8::HandleScope<'isolate>>>;
 
+fn throw_bridge_error(scope: &mut v8::PinScope, message: &str) {
+    if let Some(message) = v8::String::new(scope, message) {
+        let error = v8::Exception::error(scope, message);
+        scope.throw_exception(error);
+    }
+}
+
 pub(crate) struct DiagramRuntimeScript<'a> {
     pub(crate) name: &'static str,
     pub(crate) code: Cow<'a, str>,

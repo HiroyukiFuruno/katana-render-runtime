@@ -1,4 +1,4 @@
-use super::{TransformedBox, register_callback, set_box_properties, throw_transform_error};
+use super::{TransformedBox, register_callback, return_bounds, throw_bridge_error};
 
 pub(super) fn install(
     scope: &mut v8::PinScope,
@@ -21,16 +21,14 @@ fn path_bounds_callback(
 ) {
     let source = args.get(0).to_rust_string_lossy(scope);
     match path_bounds(&source) {
-        Ok(Some(bounds)) => {
-            let object = v8::Object::new(scope);
-            if set_box_properties(scope, object, bounds).is_ok() {
-                result.set(object.into());
-            } else {
-                throw_transform_error(scope, "SVG path bounds could not be returned");
-            }
-        }
+        Ok(Some(bounds)) => return_bounds(
+            scope,
+            &mut result,
+            bounds,
+            "SVG path bounds could not be returned",
+        ),
         Ok(None) => result.set(v8::null(scope).into()),
-        Err(message) => throw_transform_error(scope, message),
+        Err(message) => throw_bridge_error(scope, message),
     }
 }
 

@@ -1,6 +1,6 @@
-use super::DiagramTryCatchScope;
 use super::diagram_bridge_registration::install_callback;
 use super::diagram_font_bridge::{font_measure_number, font_measure_request_with_size_policy};
+use super::{DiagramTryCatchScope, throw_bridge_error};
 
 #[path = "diagram_svg_fragment_font_bridge.rs"]
 mod fragment;
@@ -43,13 +43,13 @@ fn svg_font_measure_callback(
     let metrics = match svg_font_metrics(scope, &args) {
         Ok(metrics) => metrics,
         Err(message) => {
-            throw_svg_metric_error(scope, message);
+            throw_bridge_error(scope, message);
             return;
         }
     };
     let object = v8::Object::new(scope);
     if let Err(message) = set_svg_metric_properties(scope, object, metrics) {
-        throw_svg_metric_error(scope, message);
+        throw_bridge_error(scope, message);
         return;
     }
     return_value.set(object.into());
@@ -61,7 +61,7 @@ fn svg_font_x_height_callback(
     mut return_value: v8::ReturnValue<v8::Value>,
 ) {
     let Some(request) = svg_font_x_height_request(scope, &args) else {
-        throw_svg_metric_error(scope, "Invalid SVG font x-height request");
+        throw_bridge_error(scope, "Invalid SVG font x-height request");
         return;
     };
     let measured = crate::markdown::svg_rasterize::SvgRasterizeOps::measure_svg_font_x_height(
@@ -73,7 +73,7 @@ fn svg_font_x_height_callback(
     match measured {
         Ok(Some(x_height)) => return_value.set(v8::Number::new(scope, f64::from(x_height)).into()),
         Ok(None) => return_value.set(v8::undefined(scope).into()),
-        Err(_) => throw_svg_metric_error(scope, "SVG font x-height measurement failed"),
+        Err(_) => throw_bridge_error(scope, "SVG font x-height measurement failed"),
     }
 }
 
@@ -160,13 +160,6 @@ fn set_svg_metric_property(
         return Err("SVG font metric result allocation failed");
     }
     Ok(())
-}
-
-fn throw_svg_metric_error(scope: &mut v8::PinScope, message: &str) {
-    if let Some(message) = v8::String::new(scope, message) {
-        let error = v8::Exception::error(scope, message);
-        scope.throw_exception(error);
-    }
 }
 
 #[cfg(test)]

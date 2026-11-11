@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- [x] SVGの座標変換・パス境界の戻り値生成と、図のJavaScriptブリッジが返す例外の生成を共通化した。エラー文言、無効な変換指定の恒等変換、プロトタイプ経由でない結果プロパティ生成を維持。初回のAST違反は明示的な分岐に直し、静的検査・AST・関連266件とテスト一覧の一致を確認（`tmp/quality/resumed-owner-r3509/coverage-v8-bridge-result-exact-t01f9kda/safe-summary.json`）。正式集計への反映は未確認。
 - [x] 図のJavaScriptコールバック登録で重複していた名前・関数の確保とグローバル登録を共通化。フォント側固有の登録値照合と各失敗時の文言を維持し、図のJavaScriptランタイムとMermaidの関連266件、静的検査・ASTが成功した（`tmp/quality/resumed-owner-r3509/coverage-v8-bridge-registration-exact-ng7dmq3m/safe-summary.json`）。正式集計への反映は未確認。
 - [/] `6221fb3c`の正式計測は6,260件成功・別15件skip、86,365/86,773行（99.5298076591%）、未カバー408行。前回411行から要素の描画経路、塗り・フィルターの参照探索、塗りの継承で各1行減。収集実0、ソース前後一致。公開用カバレッジ判定は未達（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-9aj9agcg/safe-summary.json`）。
 - [x] SVG要素を最初に直接描画・グループ経由の経路へ分類し、判定済みの要素種別を後段で再照合する処理を除去。入れ子SVGの変換は既存経路で一度だけ適用する。最初のコンパイルで検出した戻り値型2件を修正し、再試行でテスト一覧一致、入れ子viewBox・参照・switch・フィルターを含む関連120件、静的検査・AST・SVG由来検査4件が成功（`tmp/quality/resumed-owner-r3509/coverage-svg-element-route-exact-_3wp5zue/safe-summary.json`）。正式集計への反映は未確認。

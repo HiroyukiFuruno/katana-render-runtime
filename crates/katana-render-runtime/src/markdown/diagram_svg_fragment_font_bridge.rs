@@ -1,6 +1,6 @@
 use super::super::diagram_bridge_registration::register_callback;
 use super::super::diagram_font_bridge::font_measure_request_with_known_text;
-use super::{set_svg_metric_properties, throw_svg_metric_error};
+use super::{set_svg_metric_properties, throw_bridge_error};
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
 
 const MAX_FRAGMENT_COUNT: u32 = 4096;
@@ -27,7 +27,7 @@ fn callback(
     match measure(scope, &args) {
         Ok(Some(value)) => result.set(value.into()),
         Ok(None) => result.set(v8::null(scope).into()),
-        Err(message) => throw_svg_metric_error(scope, message),
+        Err(message) => throw_bridge_error(scope, message),
     }
 }
 

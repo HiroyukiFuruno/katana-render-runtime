@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
-use super::DiagramTryCatchScope;
 use super::diagram_bridge_registration::register_callback;
+use super::{DiagramTryCatchScope, throw_bridge_error};
 use svgtypes::Transform;
 #[cfg(target_os = "macos")]
 #[path = "diagram_geometry_path_bounds.rs"]
@@ -45,15 +45,27 @@ fn transform_box_callback(
 ) {
     let result = transform_box_request(scope, &args);
     match result {
-        Ok(bounds) => {
-            let object = v8::Object::new(scope);
-            if set_box_properties(scope, object, bounds).is_ok() {
-                return_value.set(object.into());
-            } else {
-                throw_transform_error(scope, "SVG transformed bounds could not be returned");
-            }
-        }
-        Err(message) => throw_transform_error(scope, &message),
+        Ok(bounds) => return_bounds(
+            scope,
+            &mut return_value,
+            bounds,
+            "SVG transformed bounds could not be returned",
+        ),
+        Err(message) => throw_bridge_error(scope, &message),
+    }
+}
+
+fn return_bounds(
+    scope: &mut v8::PinScope,
+    result: &mut v8::ReturnValue<v8::Value>,
+    bounds: TransformedBox,
+    error_message: &str,
+) {
+    let object = v8::Object::new(scope);
+    if set_box_properties(scope, object, bounds).is_ok() {
+        result.set(object.into());
+    } else {
+        throw_bridge_error(scope, error_message);
     }
 }
 
@@ -72,10 +84,11 @@ fn transformed_box(
     bounds: [f64; BOUNDS_COMPONENT_COUNT],
 ) -> Result<TransformedBox, String> {
     /* WHY: SVGの無効なtransform属性はブラウザと同じ恒等変換にし、bbox入力の検査は維持する。 */
-    match Transform::from_str(transform) {
-        Ok(transform) => TransformedBox::new(transform, bounds),
-        Err(_) => TransformedBox::new(Transform::default(), bounds),
-    }
+    let transform = match Transform::from_str(transform) {
+        Ok(transform) => transform,
+        Err(_) => Transform::default(),
+    };
+    TransformedBox::new(transform, bounds)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -169,13 +182,6 @@ fn set_number_property(
         return Err("SVG transformed bounds property write failed".to_string());
     }
     Ok(())
-}
-
-fn throw_transform_error(scope: &mut v8::PinScope, message: &str) {
-    if let Some(message) = v8::String::new(scope, message) {
-        let error = v8::Exception::error(scope, message);
-        scope.throw_exception(error);
-    }
 }
 
 #[cfg(test)]
