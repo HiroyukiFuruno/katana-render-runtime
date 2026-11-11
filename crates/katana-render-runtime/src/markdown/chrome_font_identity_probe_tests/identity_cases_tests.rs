@@ -10,7 +10,10 @@ use super::{
     ResourceFile, SelectedFont, append_changed_byte, duplicate_face_resources, selected_from_face,
 };
 use resvg::usvg::fontdb::Database;
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 pub(in super::super) fn observed_system_face_resolves_to_its_physical_file_and_index()
 -> Result<(), String> {
@@ -150,24 +153,37 @@ fn resource_database_rejects_invalid_path_contracts_before_loading() -> Result<(
     )
     .map_err(|error| error.to_string())?;
     let (_, digest, _) = physical_file(&absolute)?;
-    let empty_url = ResourceFile {
-        url: String::new(),
-        body_path: absolute.clone(),
-        bytes_sha256: digest.clone(),
-    };
-    assert_eq!(
-        load_resource_database(&[empty_url]).err().as_deref(),
-        Some("resource must have a URL and absolute body path")
-    );
-
-    let relative = ResourceFile {
-        url: "https://probe.invalid/font".to_string(),
-        body_path: PathBuf::from("relative-font.ttf"),
-        bytes_sha256: digest,
-    };
-    assert_eq!(
-        load_resource_database(&[relative]).err().as_deref(),
-        Some("resource must have a URL and absolute body path")
-    );
+    assert_unreadable_resource_body(temp.path(), &digest);
+    for (url, body_path) in [
+        ("", absolute),
+        (
+            "https://probe.invalid/font",
+            PathBuf::from("relative-font.ttf"),
+        ),
+    ] {
+        let resource = ResourceFile {
+            url: url.to_owned(),
+            body_path,
+            bytes_sha256: digest.clone(),
+        };
+        assert_eq!(
+            load_resource_database(&[resource]).err().as_deref(),
+            Some("resource must have a URL and absolute body path")
+        );
+    }
     Ok(())
+}
+
+fn assert_unreadable_resource_body(root: &Path, digest: &str) {
+    for (body_path, reason) in [
+        (root.join("missing.ttf"), "canonicalize font:"),
+        (root.to_path_buf(), "font source is not a regular file"),
+    ] {
+        let resource = ResourceFile {
+            url: "https://probe.invalid/font".to_string(),
+            body_path,
+            bytes_sha256: digest.to_owned(),
+        };
+        assert!(load_resource_database(&[resource]).is_err_and(|error| error.starts_with(reason)));
+    }
 }
