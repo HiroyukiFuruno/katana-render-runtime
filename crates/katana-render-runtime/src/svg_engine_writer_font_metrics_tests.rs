@@ -1,5 +1,5 @@
 use super::writer_coverage_tests::{assert_attribute, assert_pixels_equal};
-use super::{first_text, parse_writer_svg, usvg};
+use super::{first_text, parse_writer_svg, upstream_writer_font_database, usvg};
 
 const MPLUS_X_HEIGHT_UNITS: f32 = 520.0;
 const MPLUS_UNITS_PER_EM: f32 = 1000.0;
@@ -14,6 +14,24 @@ const YELLOWTAIL_FONT_SIZE: f32 = 20.0;
 const YELLOWTAIL_X_HEIGHT_FALLBACK_RATIO: f32 = 0.45;
 const MIDDLE_BASELINE_FRACTION: f32 = 0.5;
 const TEXT_LAYOUT_TOLERANCE: f32 = 0.0001;
+
+#[test]
+fn missing_font_family_is_written_with_the_parser_default() -> Result<(), String> {
+    const DEFAULT_FAMILY: &str = "Noto Sans";
+    let input = r#"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60"><text x="12" y="32" font-size="18">Text</text></svg>"#;
+    let options = usvg::Options {
+        font_family: DEFAULT_FAMILY.to_owned(),
+        fontdb: upstream_writer_font_database()?,
+        ..usvg::Options::default()
+    };
+    let original = usvg::Tree::from_str(input, &options).map_err(|error| error.to_string())?;
+    let serialized = original.to_string(&preserving_text_options());
+    assert_attribute(&serialized, "tspan", "font-family", DEFAULT_FAMILY)?;
+    let reparsed = parse_writer_svg(&serialized, "writer-default-font-family")?;
+    let pixels = assert_pixels_equal(&original, &reparsed, "default font family")?;
+    assert!(pixels.pixels().iter().any(|pixel| pixel.alpha() != 0));
+    Ok(())
+}
 
 #[test]
 fn writer_text_ex_uses_selected_font_glyph_x_height() -> Result<(), String> {

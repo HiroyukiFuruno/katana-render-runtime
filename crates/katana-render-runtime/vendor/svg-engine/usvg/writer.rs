@@ -1728,16 +1728,15 @@ fn write_span_font(span: &TextSpan, opt: &WriteOptions, xml: &mut XmlWriter) {
 }
 
 fn write_span_families(span: &TextSpan, opt: &WriteOptions, xml: &mut XmlWriter) {
-    if !span.font.families.is_empty() {
-        let families = span
-            .font
-            .families
-            .iter()
-            .map(|family| font_family_to_string(family, opt))
-            .collect::<Vec<_>>()
-            .join(", ");
-        xml.write_svg_attribute(AId::FontFamily, &families);
-    }
+    // WHY: SVGパーサーは空のfont-familyを既定のフォント名で補う。
+    let families = span
+        .font
+        .families
+        .iter()
+        .map(|family| font_family_to_string(family, opt))
+        .collect::<Vec<_>>()
+        .join(", ");
+    xml.write_svg_attribute(AId::FontFamily, &families);
 }
 
 fn font_family_to_string(font_family: &FontFamily, opt: &WriteOptions) -> String {
