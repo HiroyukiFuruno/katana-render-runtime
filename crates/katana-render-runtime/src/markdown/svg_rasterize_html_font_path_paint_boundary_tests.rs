@@ -1,5 +1,5 @@
 use super::super::{MAX_CAPTURED_RECORDS, with_actual_route};
-use super::{SvgRasterizeOps, render_test_svg};
+use super::{SvgRasterizeOps, tests::render_test_svg};
 use tiny_skia::IntRect;
 
 const SIZE: u32 = 32;
