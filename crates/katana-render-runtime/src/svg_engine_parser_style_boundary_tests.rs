@@ -104,3 +104,15 @@ fn inherited_current_color_uses_child_color_after_style_override() -> Result<(),
         if (color.red, color.green, color.blue) == (18, 52, 86)));
     Ok(())
 }
+
+#[test]
+fn inherited_initial_color_keeps_other_inline_paint_declarations() -> Result<(), String> {
+    let tree = parse_path("fill='currentColor' style='color: inherit; stroke: currentColor'")?;
+    let path = sample_path(&tree)?;
+    let fill = path.fill().ok_or("fill missing")?;
+    let stroke = path.stroke().ok_or("stroke missing")?;
+    for paint in [fill.paint(), stroke.paint()] {
+        assert!(matches!(paint, usvg::Paint::Color(color) if *color == usvg::Color::black()));
+    }
+    Ok(())
+}
