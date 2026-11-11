@@ -3,6 +3,8 @@
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
 - [ ] 正式カバレッジ100%・未カバー0を達成した後、挙動と既存テスト結果を維持し、読み込み・キャッシュ等の共通処理とレンダラーの責務境界を精査・整理する。小さい差分ごとに関連テストを回収し、整理後のソースで描画・性能・完全品質ゲートを再検証する。自己レビュー後にDraft PR、Codexレビューと指摘修正、3 OS CI、保護マージ、公開へ進む。
+- [/] `75d4acf4` の正式計測は6,182件成功・別15件skip、86,721/87,247行（99.3971139409%）、未カバー526行。前回530行から4減。代替字形の配置とSVG文字計測で5行減り、共通テスト補助で1行増加。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-qeo4ndb4/safe-summary.json`）。
+- [x] `d985b925` は不正なbase64の通常画像・フィルター画像、光源のない反射光フィルターをSVG入力で検証した。関連3件・foundation・AST成功（`tmp/quality/resumed-owner-r3509/coverage-svg-filter-invalid-inputs-exact-i6axrvid/safe-summary.json`）。526行の正式値には未反映。
 - [/] `24b89118` の正式計測は6,182件成功・別15件skip、86,715/87,245行（99.3925153304%）、未カバー530行。前回536行から6減。フォント名の照合で2行、字形の幅・輪郭が欠落した場合の処理で4行を確認した。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-9ldtbeh_/safe-summary.json`）。
 - [x] `6e8faa20`・`cd3c9d5d` はHarfrustによる単位の正規化と代替字形の個数・座標検証を呼び出し経路で照合し、重複判定を削除した。関連7件・foundation・AST成功（`tmp/quality/resumed-owner-r3509/coverage-svg-run-em-and-fallback-position-exact-8m7851ip/safe-summary.json`）。`64d79722` は輪郭表が空の実フォントで字幅を維持し、輪郭欠落を診断することを確認した。関連3件・foundation・AST成功（`tmp/quality/resumed-owner-r3509/coverage-svg-ink-missing-outline-exact-6iuogazo/safe-summary.json`）。いずれも530行の正式値には未反映。
 - [/] `3b5d98dc` の正式rootは6,182件成功・別15件skip、86,709/87,245行（99.3856381455%）、未カバー536行。前回538行から2減。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-wdo1pn7n/safe-summary.json`）。
