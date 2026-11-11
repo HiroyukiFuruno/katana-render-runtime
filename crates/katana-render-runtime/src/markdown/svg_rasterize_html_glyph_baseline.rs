@@ -63,9 +63,6 @@ fn metrics_shift(
     face: &FaceMetadata,
     policy: Policy,
 ) -> f32 {
-    if is_middle(policy.kind) {
-        return 0.0;
-    }
     let scale = policy.font_size / face.upem;
     let ascent = face.ascent * scale;
     let descent = face.descent * scale;
@@ -91,9 +88,6 @@ fn css_baseline_shift(
     policy: Policy,
     css_scale: f32,
 ) -> Option<f32> {
-    if is_middle(policy.kind) {
-        return None;
-    }
     let css_font_size = super::anchor::paint_size(policy.font_size, css_scale, css_scale)?;
     let target_css = css_baseline_target(database, face_id, face, policy, css_font_size)?;
     Some(target_css / css_scale)
@@ -143,9 +137,6 @@ fn legacy_glyph_shift(
     descent: f32,
     raw_shift: f32,
 ) -> f32 {
-    if is_middle(policy.kind) {
-        return 0.0;
-    }
     let Some(layout_ascent) = crate::markdown::svg_rasterize::text_shaping::svg_dom_layout_ascent(
         database.face(face_id),
         ascent,
@@ -157,8 +148,7 @@ fn legacy_glyph_shift(
     let blink_shift = match policy.kind {
         PolicyKind::Mathematical => layout_ascent * HALF_METRIC,
         PolicyKind::Central => (layout_ascent - layout_descent) * HALF_METRIC,
-        PolicyKind::Hanging => return 0.0,
-        PolicyKind::Middle | PolicyKind::AlignmentMiddle => return 0.0,
+        PolicyKind::Hanging | PolicyKind::Middle | PolicyKind::AlignmentMiddle => return 0.0,
     };
     blink_shift - raw_shift
 }
