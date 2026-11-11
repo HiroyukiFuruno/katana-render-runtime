@@ -1,3 +1,4 @@
+use super::data_url::MAX_PERCENT_ENCODED_DATA_URL_BYTES;
 use super::{
     MAX_BASE64_DATA_URL_BYTES, MAX_PERCENT_ENCODED_BASE64_DATA_URL_BYTES, MAX_SUBRESOURCE_BYTES,
     check_data_url_size, decode_data_url, decode_forgiving_base64, load_image_data_url, load_text,
@@ -222,6 +223,37 @@ fn base64_data_url_at_the_decoded_limit_is_accepted() {
             decode_data_url(url).ok().as_deref().map(<[u8]>::len),
             Some(MAX_SUBRESOURCE_BYTES as usize)
         );
+    });
+}
+
+#[test]
+fn unpadded_base64_data_url_decoded_overflow_is_rejected() {
+    let payload = "A".repeat(MAX_BASE64_DATA_URL_BYTES as usize);
+    assert_data_url_limit(
+        &format!("data:application/octet-stream;base64,{payload}"),
+        "decoded",
+    );
+}
+
+#[test]
+fn percent_encoded_data_url_encoded_overflow_is_rejected() {
+    let payload = "%41".repeat(MAX_PERCENT_ENCODED_DATA_URL_BYTES as usize / "%41".len() + 1);
+    assert_data_url_limit(&format!("data:text/plain,{payload}"), "encoded");
+}
+
+#[test]
+fn percent_encoded_data_url_decoded_overflow_is_rejected() {
+    let payload = "A".repeat(MAX_SUBRESOURCE_BYTES as usize);
+    assert_data_url_limit(&format!("data:text/plain,{payload}%41"), "decoded");
+}
+
+fn assert_data_url_limit(source: &str, representation: &str) {
+    with_url(source, |url| {
+        let expected = format!("{representation} payload exceeds");
+        assert!(matches!(
+            decode_data_url(url),
+            Err(error) if error.contains(&expected)
+        ));
     });
 }
 
