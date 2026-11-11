@@ -28,14 +28,8 @@ pub enum Error {
     /// Only UTF-8 content are supported.
     NotAnUtf8Str,
 
-    /// `svgz` feature is required to parse SVGZ data.
-    SvgzFeatureNotEnabled,
-
     /// Compressed SVG must use the GZip algorithm.
     MalformedGZip,
-
-    /// We do not allow SVG with more than 1_000_000 elements for security reasons.
-    ElementsLimitReached,
 
     /// SVG doesn't have a valid size.
     ///
@@ -60,14 +54,8 @@ impl std::fmt::Display for Error {
             Error::NotAnUtf8Str => {
                 write!(f, "provided data has not an UTF-8 encoding")
             }
-            Self::SvgzFeatureNotEnabled => {
-                write!(f, "enable svgz cargo feature to decode SVGZ data")
-            }
             Error::MalformedGZip => {
                 write!(f, "provided data has a malformed GZip content")
-            }
-            Error::ElementsLimitReached => {
-                write!(f, "the maximum number of SVG elements has been reached")
             }
             Error::InvalidSize => {
                 write!(f, "SVG has an invalid size")
@@ -100,16 +88,15 @@ impl crate::svg_engine::usvg::Tree {
     ///
     /// Can contain an SVG string or a gzip compressed data.
     pub fn from_data(data: &[u8], opt: &Options) -> Result<Self, Error> {
-        if data.starts_with(&[0x1f, 0x8b]) {
-            {
-                let data = decompress_svgz(data)?;
-                let text = std::str::from_utf8(&data).map_err(|_| Error::NotAnUtf8Str)?;
-                Self::from_str(text, opt)
-            }
+        let decompressed;
+        let bytes = if data.starts_with(&[0x1f, 0x8b]) {
+            decompressed = decompress_svgz(data)?;
+            decompressed.as_slice()
         } else {
-            let text = std::str::from_utf8(data).map_err(|_| Error::NotAnUtf8Str)?;
-            Self::from_str(text, opt)
-        }
+            data
+        };
+        let text = std::str::from_utf8(bytes).map_err(|_| Error::NotAnUtf8Str)?;
+        Self::from_str(text, opt)
     }
 
     /// Similar to the `from_data` method, except that it ignores all `image` elements linking to

@@ -127,9 +127,9 @@
       "source": "crates/usvg/src/parser/mod.rs",
       "destination": "usvg/parser/mod.rs",
       "sourceSha256": "ebf56fe3aeddfda8b230d947c00d53e0a9d0b3d90b03cf5032456311ccf4bd7c",
-      "transplantedSha256": "f56f3795de3d8d0a3767e1275fd6331810438c655e4ea981c46b02580ed90dce",
+      "transplantedSha256": "29bd6713b25284349ddb89a04b5f4b7e86c31749fc4d18157f4bcec363a010fd",
       "sourceBytes": 6283,
-      "transplantedBytes": 6412,
+      "transplantedBytes": 5870,
       "adaptations": {
         "cratePaths": 2,
         "enabledFeaturePredicates": {
