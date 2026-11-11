@@ -3,7 +3,7 @@ use crate::renderer::backends::{
     HtmlArtifactProvenance, HtmlBrowserFrame, HtmlBrowserOrigin, HtmlBrowserPixelFormat,
     HtmlBrowserSource, HtmlBrowserViewport, HtmlRuntime,
 };
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::PathBuf;
 
 const FINGERPRINT_HEX_LEN: usize = 64;
 #[cfg(unix)]
@@ -15,7 +15,7 @@ type ParentTocArtifact = (HtmlBrowserSource, HtmlBrowserViewport, HtmlFrameArtif
 
 #[test]
 fn real_store_roundtrip_missing_and_corrupt_paths() -> Result<(), Box<dyn std::error::Error>> {
-    let root = test_root()?;
+    let (root, _owner) = test_root()?;
     let artifact = test_artifact()?;
     let store = HtmlArtifactStore::new(&root, MAX_ARTIFACT_BYTES, true)?;
     assert!(store.load("missing", &artifact.provenance)?.is_none());
@@ -31,14 +31,13 @@ fn real_store_roundtrip_missing_and_corrupt_paths() -> Result<(), Box<dyn std::e
         store.load("frame", &artifact.provenance),
         Err(HtmlArtifactError::Corrupt)
     ));
-    std::fs::remove_dir_all(root)?;
     Ok(())
 }
 
 #[cfg(unix)]
 #[test]
 fn store_rejects_root_symlink_before_creating_target() -> Result<(), Box<dyn std::error::Error>> {
-    let parent = test_root()?;
+    let (parent, _owner) = test_root()?;
     let target = parent.join("target");
     let alias = parent.join("alias");
     std::os::unix::fs::symlink(&target, &alias)?;
@@ -49,14 +48,13 @@ fn store_rejects_root_symlink_before_creating_target() -> Result<(), Box<dyn std
     ));
     assert!(!target.exists());
 
-    std::fs::remove_dir_all(parent)?;
     Ok(())
 }
 
 #[test]
 fn nested_regular_files_count_toward_quota_and_preserve_old_artifact()
 -> Result<(), Box<dyn std::error::Error>> {
-    let root = test_root()?;
+    let (root, _owner) = test_root()?;
     let artifact = test_artifact()?;
     let bytes = serde_json::to_vec(&artifact)?;
     let store = HtmlArtifactStore::new(&root, bytes.len() as u64, true)?;
@@ -71,14 +69,13 @@ fn nested_regular_files_count_toward_quota_and_preserve_old_artifact()
     ));
     assert_eq!(store.load("frame", &artifact.provenance)?, Some(artifact));
 
-    std::fs::remove_dir_all(root)?;
     Ok(())
 }
 
 #[test]
 fn stale_runtime_artifact_is_a_miss_and_stale_expected_is_rejected()
 -> Result<(), Box<dyn std::error::Error>> {
-    let root = test_root()?;
+    let (root, _owner) = test_root()?;
     let artifact = test_artifact()?;
     let store = HtmlArtifactStore::new(&root, MAX_ARTIFACT_BYTES, true)?;
     let mut stale = artifact.clone();
@@ -98,13 +95,12 @@ fn stale_runtime_artifact_is_a_miss_and_stale_expected_is_rejected()
         Err(HtmlArtifactError::InvalidProvenance(_))
     ));
 
-    std::fs::remove_dir_all(root)?;
     Ok(())
 }
 
 #[test]
 fn root_replacement_is_rejected_before_artifact_io() -> Result<(), Box<dyn std::error::Error>> {
-    let root = test_root()?;
+    let (root, _owner) = test_root()?;
     let artifact = test_artifact()?;
     let store = HtmlArtifactStore::new(&root, MAX_ARTIFACT_BYTES, true)?;
     std::fs::remove_dir(&root)?;
@@ -119,15 +115,17 @@ fn root_replacement_is_rejected_before_artifact_io() -> Result<(), Box<dyn std::
         Err(HtmlArtifactError::Io(_))
     ));
 
-    std::fs::remove_file(root)?;
     Ok(())
 }
 
-fn test_root() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
-    let stamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-    let root = std::fs::canonicalize(std::env::temp_dir())?.join(format!("krr-store-real-{stamp}"));
-    std::fs::create_dir_all(&root)?;
-    Ok(root)
+fn test_root() -> std::io::Result<(PathBuf, tempfile::TempDir)> {
+    let parent = std::fs::canonicalize(std::env::temp_dir())?;
+    let owner = tempfile::Builder::new()
+        .prefix("krr-store-real-")
+        .tempdir_in(parent)?;
+    let root = owner.path().join("store");
+    std::fs::create_dir(&root)?;
+    Ok((root, owner))
 }
 
 fn test_artifact() -> Result<HtmlFrameArtifact, Box<dyn std::error::Error>> {
@@ -155,7 +153,7 @@ fn test_artifact() -> Result<HtmlFrameArtifact, Box<dyn std::error::Error>> {
 #[test]
 fn parent_toc_store_roundtrip_rejects_source_and_artifact_tampering()
 -> Result<(), Box<dyn std::error::Error>> {
-    let root = test_root()?;
+    let (root, _owner) = test_root()?;
     let (source, viewport, artifact) = parent_toc_artifact()?;
     let store = HtmlArtifactStore::new(&root, MAX_ARTIFACT_BYTES, true)?;
     store.save("parent-toc", &artifact)?;
@@ -167,7 +165,6 @@ fn parent_toc_store_roundtrip_rejects_source_and_artifact_tampering()
     assert_nonregular_store_entry_is_rejected(&root, &store, &artifact.provenance)?;
     #[cfg(unix)]
     assert_symlink_loop_is_rejected(&root, &store, &artifact)?;
-    std::fs::remove_dir_all(root)?;
     Ok(())
 }
 
