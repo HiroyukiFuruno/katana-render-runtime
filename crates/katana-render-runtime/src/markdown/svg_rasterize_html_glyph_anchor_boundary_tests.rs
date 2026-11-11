@@ -36,7 +36,7 @@ fn explicit_backward_glyph_position_rejects_the_ordered_anchor_shortcut() -> Res
         assert_eq!((first.text.as_str(), second.text.as_str()), ("A", "B"));
         assert_eq!(first.transform().tx < second.transform().tx, ordered);
         assert_eq!(
-            anchor::one_ordered_scalar_per_glyph(chunk.text(), glyphs),
+            anchor::first_ordered_scalar_glyph(chunk.text(), glyphs).is_some(),
             ordered
         );
     }
@@ -117,8 +117,8 @@ fn assert_decorated_run(
         text, chunk, source, span
     ));
     assert!(super::super::horizontal_glyphs(&span.glyphs));
-    assert!(anchor::one_ordered_scalar_per_glyph(content, &span.glyphs));
-    assert!(anchor::run_origin_css_scale(text, &spans).is_none());
+    assert!(anchor::first_ordered_scalar_glyph(content, &span.glyphs).is_some());
+    assert!(anchor::run_origin(text, &spans).is_none());
     Ok(())
 }
 
@@ -141,7 +141,7 @@ fn differently_painted_source_spans_reject_single_span_anchor_shortcuts() -> Res
         return Err("painted spans were not prepared".into());
     };
     assert_eq!(spans.len(), 2);
-    assert!(anchor::run_origin_css_scale(text, &spans[..1]).is_none());
+    assert!(anchor::run_origin(text, &spans[..1]).is_none());
     Ok(())
 }
 

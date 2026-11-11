@@ -122,10 +122,7 @@ fn assert_source_runs(text: &resvg::usvg::Text, spans: &[PreparedSpan]) {
     for (chunk, span) in text.chunks().iter().zip(spans) {
         assert_eq!(chunk.spans().len(), 1);
         assert_eq!(chunk.text().chars().count(), span.glyphs.len());
-        assert!(anchor::one_ordered_scalar_per_glyph(
-            chunk.text(),
-            &span.glyphs
-        ));
+        assert!(anchor::first_ordered_scalar_glyph(chunk.text(), &span.glyphs).is_some());
         assert!(span.glyph_ids.iter().all(|id| *id != 0));
         assert!(span.chunk_alignment.is_none());
     }

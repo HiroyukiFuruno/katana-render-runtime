@@ -194,10 +194,11 @@ fn assert_ligature_fixture(text: &resvg::usvg::Text, content: &str) {
         "ligature fixture did not reduce source glyph count"
     );
     assert!(
-        !super::super::super::anchor::one_ordered_scalar_per_glyph(
+        super::super::super::anchor::first_ordered_scalar_glyph(
             content,
             &text.layouted()[0].positioned_glyphs,
-        ),
+        )
+        .is_none(),
         "ligature fixture did not form a multi-scalar glyph"
     );
 }

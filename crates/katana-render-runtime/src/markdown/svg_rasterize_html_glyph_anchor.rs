@@ -42,7 +42,10 @@ pub(super) fn layout_anchor(text: &usvg::Text) -> Option<LayoutAnchor> {
     })
 }
 
-pub(super) fn run_origin_css_scale(text: &usvg::Text, prepared: &[PreparedSpan]) -> Option<f32> {
+pub(super) fn run_origin<'a>(
+    text: &usvg::Text,
+    prepared: &'a [PreparedSpan],
+) -> Option<(f32, &'a usvg::layout::PositionedGlyph)> {
     let [span] = prepared else { return None };
     let [chunk] = text.chunks() else { return None };
     let [source_span] = chunk.spans() else {
@@ -61,17 +64,16 @@ pub(super) fn run_origin_css_scale(text: &usvg::Text, prepared: &[PreparedSpan])
     {
         return None;
     }
-    if !one_ordered_scalar_per_glyph(chunk.text(), &span.glyphs) {
-        return None;
-    }
-    uniform_css_scale(text.abs_transform())
+    let first = first_ordered_scalar_glyph(chunk.text(), &span.glyphs)?;
+    Some((uniform_css_scale(text.abs_transform())?, first))
 }
 
-pub(super) fn one_ordered_scalar_per_glyph(
+pub(super) fn first_ordered_scalar_glyph<'a>(
     text: &str,
-    glyphs: &[usvg::layout::PositionedGlyph],
-) -> bool {
-    glyphs.len() >= 2 && nonempty_ordered_scalar_per_glyph(text, glyphs)
+    glyphs: &'a [usvg::layout::PositionedGlyph],
+) -> Option<&'a usvg::layout::PositionedGlyph> {
+    let [first, _, ..] = glyphs else { return None };
+    nonempty_ordered_scalar_per_glyph(text, glyphs).then_some(first)
 }
 
 pub(super) fn nonempty_ordered_scalar_per_glyph(

@@ -14,18 +14,19 @@ pub(in super::super) fn single_middle_input(
 ) -> Option<SingleMiddleInput> {
     let [chunk] = text.chunks() else { return None };
     let [source] = chunk.spans() else { return None };
-    let css_scale = anchor::run_origin_css_scale(text, std::slice::from_ref(span))?;
+    let (css_scale, first) = anchor::run_origin(text, std::slice::from_ref(span))?;
     if !single_source_supported(chunk, source) {
         return None;
     }
-    let layout = single_middle_layout(text, chunk, span, css_scale)?;
+    let anchor_x = chunk.x()?;
+    let layout = single_middle_layout(text, chunk, first, anchor_x, css_scale)?;
     let paint_css_size = anchor::paint_size(span.font_size, css_scale, css_scale)?;
     if paint_css_size == span.font_size * css_scale {
         return None;
     }
     Some(SingleMiddleInput {
         layout,
-        anchor_x: chunk.x()?,
+        anchor_x,
         paint_css_size,
     })
 }
@@ -33,12 +34,12 @@ pub(in super::super) fn single_middle_input(
 fn single_middle_layout(
     text: &usvg::Text,
     chunk: &usvg::TextChunk,
-    span: &PreparedSpan,
+    first: &usvg::layout::PositionedGlyph,
+    anchor_x: f32,
     css_scale: f32,
 ) -> Option<anchor::LayoutAnchor> {
     let width = text.bounding_box().width();
-    let anchor_x = chunk.x()?;
-    advance_bounds_match_origin(span, width, anchor_x).then_some(anchor::LayoutAnchor {
+    advance_bounds_match_origin(first, width, anchor_x).then_some(anchor::LayoutAnchor {
         width,
         anchor: chunk.anchor(),
         css_scale,
@@ -68,10 +69,11 @@ fn single_font_variations_supported(font: &usvg::Font) -> bool {
         && italic.value == 1.0
 }
 
-fn advance_bounds_match_origin(span: &PreparedSpan, width: f32, anchor_x: f32) -> bool {
-    let Some(first) = span.glyphs.first() else {
-        return false;
-    };
+fn advance_bounds_match_origin(
+    first: &usvg::layout::PositionedGlyph,
+    width: f32,
+    anchor_x: f32,
+) -> bool {
     /* WHY: bboxをadvance幅として使う前に、元のmiddle penとの前方向の整合を確認する。 */
     width.is_finite()
         && width > 0.0

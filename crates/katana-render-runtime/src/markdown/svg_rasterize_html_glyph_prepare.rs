@@ -45,7 +45,7 @@ impl HtmlGlyphRasterizer<'_> {
             let alignment = XAlignment {
                 anchor_x,
                 layout: anchor::layout_anchor(text),
-                origin_snap_css_scale: anchor::run_origin_css_scale(text, prepared),
+                origin_snap_css_scale: anchor::run_origin(text, prepared).map(|(scale, _)| scale),
             };
             if let Some(span) = prepared.first_mut() {
                 span.x_alignment = Some(alignment);
