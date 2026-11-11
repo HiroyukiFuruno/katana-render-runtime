@@ -92,7 +92,7 @@ fn switch_skips_unsupported_features_and_selects_a_supported_child() -> Result<(
 #[test]
 fn switch_skips_required_extensions_and_uses_the_next_supported_child() -> Result<(), String> {
     let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8">
-      <switch><rect width="8" height="8" requiredExtensions="urn:extension" fill="#ff0000"/>
+      <switch>ignored text<!-- ignored comment --><rect width="8" height="8" requiredExtensions="urn:extension" fill="#ff0000"/>
       <rect width="8" height="8" fill="#0000ff"/></switch></svg>"##;
     assert_eq!(center_pixel(source, &[])?, [0, 0, 255, 255]);
     Ok(())

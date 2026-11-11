@@ -59,10 +59,6 @@ pub(crate) fn convert(
 }
 
 pub(crate) fn is_condition_passed(node: SvgNode, opt: &Options) -> bool {
-    if !node.is_element() {
-        return false;
-    }
-
     if node.has_attribute(AId::RequiredExtensions) {
         return false;
     }
