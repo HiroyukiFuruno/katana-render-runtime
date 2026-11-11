@@ -196,6 +196,8 @@ fn assert_invalid_font_tables() -> Result<(), String> {
         let font_bytes = font_with_empty_table(FONT_BYTES, tag)?;
         assert_unusable_punctuation_metrics(&font_bytes, has_advance)?;
     }
+    assert!(font_with_empty_table(b"invalid-font", Tag::from_bytes(b"glyf")).is_err());
+    assert!(font_with_empty_table(FONT_BYTES, Tag::from_bytes(b"NONE")).is_err());
     Ok(())
 }
 
