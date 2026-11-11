@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] 実HTMLの`insertAdjacentText`でマークアップに見える文字列を文字として保持し、CSS幅指定の空`select`はラベルなしでクリック範囲を維持。実Notoフォントの`sub/../font.ttf`経由でも物理ファイルを1回だけ登録し、CLIで不正なハッシュ処理とCargo依存欠落を拒否した。source-static-foundation・ASTは再ビルド後に成功し、同一ソース・同一binaryで関連12件を実行して成功（`tmp/quality/resumed-owner-r3509/coverage-html-font-cli-exact-owner-retry-1xwwtawb/safe-summary.json`）。初回の空`select`自動幅の仮定58pxに対する実測1pxは保持し、Chromeとの照合は未実施。全体計測への反映は確認待ち。
+- [/] `61e05f27` の正式producerによる中間計測は86,883/87,350行（99.4653692044%）、未カバー467行。Mermaidブロック回帰・SVGの親テキスト判定・Mach-Oパス判定で各1行減り、合字とフォント長の変更は行数に差なし。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-0p0yun_j/safe-summary.json`）。
 - [x] 共有フォントのサイズ判定でファイルmetadataの元の長さを使い、必要なホスト長の範囲検査は維持。実SVGの複数行で、各行の`tspan`の間に直接文字がある場合は追加レイアウトの証明を拒否し、通常の2行は受理することを確認。foundation・AST・関連9件が成功（`tmp/quality/resumed-owner-r3509/coverage-font-metadata-and-authored-text-exact-2eo33kfd/safe-summary.json`）。全体計測への反映は確認待ち。
 - [x] 実SVGの`fi`合字で、文字区間が分かれて後半に字形が割り当てられないことと、分割しない入力との全画素一致を確認。Mach-O検査でcanonical判定後の同一比較を除き、相対・非正規・重複パスとサイズ・digest違いの拒否を確認。Mermaidブロック回帰は同じ描画結果を直接渡す。foundation・AST・関連11件が成功（`tmp/quality/resumed-owner-r3509/coverage-ligature-macho-and-block-exact-6esmffcq/safe-summary.json`）。全体計測への反映は確認待ち。
 - [/] `f78c5f1e` の正式producerによる中間計測は86,874/87,344行（99.4618977835%）、未カバー470行。フォント回帰の入出力エラー変換で5行、SVG参照判定で4行減り、Mermaidブロック回帰の早期返却で1行増えた。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-3cnhuw95/safe-summary.json`）。
