@@ -1,4 +1,4 @@
-use super::super::{materializer, materializer_body, source};
+use super::super::{default_route, materializer, materializer_body, source};
 use std::path::Path;
 
 const EXISTING_GUARD_INDEX: usize = 0;
@@ -151,6 +151,36 @@ fn default_install_path_rejects_invalid_shapes() -> Result<(), String> {
                 .as_deref(),
             Some(expected)
         );
+    }
+    Ok(())
+}
+
+#[test]
+fn default_install_path_rejects_non_call_and_wrong_constructor() -> Result<(), String> {
+    let install_path = "std::env::temp_dir().join(\"katana-render-runtime\").join(\"generated\").join(\"mathjax-runtime.min.js\")";
+    for expression in [
+        "install_path".to_string(),
+        format!("Some::new({install_path})"),
+    ] {
+        let block = source::parsed_block(&format!("fn route() {{ {expression} }}"), "route")?;
+        assert_eq!(
+            default_route::require_default_install_path(&block)
+                .err()
+                .as_deref(),
+            Some("default-materialize:install-path"),
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn default_install_path_rejects_wrong_join_order_and_root() -> Result<(), String> {
+    for expression in [
+        "std::env::temp_dir().join(\"generated\").join(\"katana-render-runtime\").join(\"mathjax-runtime.min.js\")",
+        "std::env::current_dir().join(\"katana-render-runtime\").join(\"generated\").join(\"mathjax-runtime.min.js\")",
+    ] {
+        let block = source::parsed_block(&format!("fn route() {{ Some({expression}) }}"), "route")?;
+        assert!(default_route::require_default_install_path(&block).is_err());
     }
     Ok(())
 }

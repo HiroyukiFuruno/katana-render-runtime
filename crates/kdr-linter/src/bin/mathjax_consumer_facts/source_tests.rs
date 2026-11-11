@@ -9,6 +9,12 @@ const WORKSPACE: &str = "[workspace]\n[workspace.dependencies]\nsyn = { version 
 const LINTER: &str = "[dependencies]\nsyn = { workspace = true }\n";
 const LOCK: &str = "[[package]]\nname = \"syn\"\nversion = \"3.0.9\"\n";
 
+#[test]
+fn parsed_block_rejects_missing_function_and_invalid_rust() {
+    assert!(super::parsed_block("fn present() {}", "missing").is_err());
+    assert!(super::parsed_block("fn broken( {}", "broken").is_err());
+}
+
 struct ParserPinCase {
     workspace: &'static str,
     linter: &'static str,
