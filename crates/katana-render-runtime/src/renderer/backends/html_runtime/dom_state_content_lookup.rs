@@ -93,7 +93,7 @@ fn lookup_attribute(
     }
     let node = node_id(argument(arguments, 0)?)?;
     match operation {
-        "anchorHash" => lookup_anchor_hash(document, arguments),
+        "anchorHash" => lookup_anchor_hash(document, node, arguments),
         "getAttribute" => Ok(document
             .attribute(node, argument(arguments, 1)?)?
             .map(DomValue::String)
@@ -109,9 +109,9 @@ fn lookup_attribute(
 
 fn lookup_anchor_hash(
     document: &crate::renderer::backends::html_document::HtmlDocument,
+    node: u64,
     arguments: &[String],
 ) -> Result<DomValue, String> {
-    let node = node_id(argument(arguments, 0)?)?;
     if !matches!(document.tag_name(node)?.as_str(), "A" | "AREA") {
         return Ok(DomValue::Undefined);
     }
