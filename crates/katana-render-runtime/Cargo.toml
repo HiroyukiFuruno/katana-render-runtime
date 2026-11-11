@@ -24,8 +24,8 @@ include = [
     "vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js.sha256",
     "vendor/mermaid/12.3.0-krr.pr6823.1/LICENSE",
     "vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js.sha256",
-    "vendor/plantuml/1.2026.9/plantuml.jar.sha256",
-    "vendor/zenuml-core/4.13.1/zenuml.js.sha256",
+    "vendor/plantuml/1.2026.10/plantuml.jar.sha256",
+    "vendor/zenuml-core/4.13.2/zenuml.js.sha256",
     "src/markdown/generated/zenuml-runtime-assets.bin.br",
     "src/markdown/drawio_renderer/generated/drawio-resources.bin.br",
 ]
@@ -88,7 +88,7 @@ skrifa = "^0.49"
 log = "0.4"
 rustybuzz = { workspace = true }
 harfrust = { workspace = true }
-read-fonts = { version = "=0.46.0", default-features = false }
+read-fonts = { version = "=0.47.0", default-features = false }
 icu_properties = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -118,7 +118,7 @@ skia-safe = { version = "=0.156.0", default-features = false, features = ["binar
 fontique = { version = "=0.12.0", default-features = false, features = ["std"] }
 objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std", "CFString", "CFURL"] }
 objc2-core-text = { version = "=0.3.2", default-features = false, features = ["CTFont", "CTFontDescriptor", "CTFontTraits"] }
-write-fonts = { version = "0.55", default-features = false, features = ["read"] }
+write-fonts = { version = "0.56", default-features = false, features = ["read"] }
 
 [build-dependencies]
 brotli-decompressor = { workspace = true }

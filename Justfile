@@ -52,9 +52,9 @@ HTML_PERFORMANCE_NUMPY_VERSION := "2.5.4"
 HTML_PERFORMANCE_SCIPY_ENV := "KRR_HTML_PERFORMANCE_SCIPY_VERSION=" + HTML_PERFORMANCE_SCIPY_VERSION
 HTML_PERFORMANCE_TYPING_PATH := "scripts/release/typings"
 HTML_PERFORMANCE_PYTHON_REQUIREMENTS := REPO_ROOT + "/scripts/release/html-performance-requirements.lock"
-ZENUML_CORE_JS_VERSION := "4.13.1"
-PLANTUML_JAR_VERSION := "1.2026.9"
-PLANTUML_JAR_CHECKSUM := "1dbb847646f0f440595fecd5f991e902aae47dc3391a01f64bab548089241a46"
+ZENUML_CORE_JS_VERSION := "4.13.2"
+PLANTUML_JAR_VERSION := "1.2026.10"
+PLANTUML_JAR_CHECKSUM := "fb9e2711a860400317106bcbeb37f57595e7d1803af3b9d7892241fa3d2bddb8"
 MERMAID_JS := env_var_or_default("MERMAID_JS", "crates/katana-render-runtime/vendor/mermaid/" + MERMAID_JS_VERSION + "/mermaid.min.js")
 MERMAID_ZENUML_JS := env_var_or_default("MERMAID_ZENUML_JS", "crates/katana-render-runtime/vendor/mermaid-zenuml/" + MERMAID_ZENUML_JS_VERSION + "/mermaid-zenuml.min.js")
 DRAWIO_JS := env_var_or_default("DRAWIO_JS", "crates/katana-render-runtime/vendor/drawio/" + DRAWIO_JS_VERSION + "/drawio.min.js")

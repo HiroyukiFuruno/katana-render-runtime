@@ -89,8 +89,8 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
   {
     kind: "zenuml-core",
     displayName: "ZenUML Core",
-    version: "4.13.1",
-    checksum: "4ffaa8cca9fd0042e4e32f4677934ce36fe55b1aec25e32419f396376ef8b767",
+    version: "4.13.2",
+    checksum: "4397c0f857b241ca210e8df66e7cf15d2bb2c0628b5dc39ca1f4d59473d5dfc5",
     fileName: "zenuml.js",
     rustVersionConst: "ZENUML_CORE_JS_VERSION",
     rustChecksumConst: "ZENUML_CORE_JS_CHECKSUM",
@@ -133,8 +133,8 @@ const DEFINITIONS: RuntimeAssetDefinition[] = [
   {
     kind: "plantuml",
     displayName: "PlantUML JAR",
-    version: "1.2026.9",
-    checksum: "1dbb847646f0f440595fecd5f991e902aae47dc3391a01f64bab548089241a46",
+    version: "1.2026.10",
+    checksum: "fb9e2711a860400317106bcbeb37f57595e7d1803af3b9d7892241fa3d2bddb8",
     fileName: "plantuml.jar",
     rustVersionConst: "PLANTUML_JAR_VERSION",
     rustChecksumConst: "PLANTUML_JAR_CHECKSUM",

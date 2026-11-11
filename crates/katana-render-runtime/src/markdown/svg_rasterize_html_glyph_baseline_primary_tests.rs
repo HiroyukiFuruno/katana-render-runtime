@@ -1,8 +1,10 @@
 use super::{has_known_missing_base_table, usvg};
 use crate::markdown::svg_rasterize::{font_file_fixture, html_glyph::HtmlGlyphRasterizer};
-use read_fonts::{FontRef, TableProvider, types::Tag};
 use rstest::rstest;
-use skrifa::MetadataProvider;
+use skrifa::{
+    MetadataProvider,
+    raw::{FontRef, TableProvider, types::Tag},
+};
 use std::sync::Arc;
 
 const NOTO: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");

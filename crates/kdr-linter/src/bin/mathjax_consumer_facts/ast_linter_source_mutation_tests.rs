@@ -32,7 +32,11 @@ pub(in super::super) fn reject_parser_pin_change(
     fixture: &Fixture,
     repository: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    fixture.replace("Cargo.lock", "version = \"3.0.9\"", "version = \"3.99.0\"")?;
+    fixture.replace(
+        "Cargo.lock",
+        "name = \"syn\"\nversion = \"3.",
+        "name = \"syn\"\nversion = \"999.",
+    )?;
     fixture.reject("parser-pin:build-input-drift")?;
     fixture.restore_from("Cargo.lock", &repository.join("Cargo.lock"))?;
     fixture.replace(

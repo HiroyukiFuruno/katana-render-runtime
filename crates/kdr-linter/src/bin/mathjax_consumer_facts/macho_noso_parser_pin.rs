@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-const OBJECT_VERSION: &str = "0.40.0";
+const OBJECT_VERSION: &str = "0.41.0";
 const SHA256_HEX_LENGTH: usize = 64;
 const OBJECT_FEATURE_COUNT: usize = 2;
 

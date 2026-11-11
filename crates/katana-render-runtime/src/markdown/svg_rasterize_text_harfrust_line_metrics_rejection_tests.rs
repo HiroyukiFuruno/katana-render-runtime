@@ -6,9 +6,9 @@ use super::{
 };
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
 use crate::markdown::svg_rasterize::text_shaping::test_font_data::font_with_empty_table;
-use read_fonts::TableProvider;
 use resvg::usvg::fontdb::{Database, ID};
 use rustybuzz::ttf_parser::Tag;
+use skrifa::raw::{ReadError, TableProvider};
 use std::path::PathBuf;
 
 type TestResult = Result<(), String>;
@@ -153,7 +153,7 @@ fn malformed_os2_bypasses_cached_metrics_and_preserves_legacy_metrics() -> TestR
         direct
             .tables()
             .os2()
-            .is_err_and(|error| { !matches!(error, read_fonts::ReadError::TableIsMissing(_)) })
+            .is_err_and(|error| { !matches!(error, ReadError::TableIsMissing(_)) })
     );
     let expected = oracle(&bytes, METRIC_TEST_SIZE).ok_or("legacy line metrics missing")?;
     let (database, id) = loaded_font(bytes)?;

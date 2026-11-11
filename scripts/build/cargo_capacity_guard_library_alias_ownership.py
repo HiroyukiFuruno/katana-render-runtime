@@ -57,7 +57,7 @@ def _macho_noso_records(value: object, expected: Sequence[Path], manifest_pin: d
                          and report["status"] == "verified", "compact Mach-O facts status differs")
     parser = native_guard.exact(report["parser"], {"crate", "version", "checksum", "features"},
                                 "compact Mach-O parser pin")
-    native_guard.require(parser == {"crate": "object", "version": "0.40.0",
+    native_guard.require(parser == {"crate": "object", "version": "0.41.0",
                          "checksum": parser["checksum"], "features": ["read", "std"]}
                          and isinstance(parser["checksum"], str)
                          and len(parser["checksum"]) == 64

@@ -3,7 +3,7 @@ use serde_json::json;
 
 const VALID_WORKSPACE: &str = r#"
     [workspace.dependencies]
-    object = { version = "0.40.0", default-features = false, features = ["read", "std"] }
+    object = { version = "0.41.0", default-features = false, features = ["read", "std"] }
 "#;
 const VALID_LINTER: &str = r#"
     [dependencies]
@@ -13,7 +13,7 @@ const VALID_CHECKSUM: &str = "0123456789abcdef0123456789abcdef0123456789abcdef01
 
 fn valid_lock() -> Result<toml::Value, String> {
     toml::from_str(&format!(
-        "[[package]]\nname = \"object\"\nversion = \"0.40.0\"\nchecksum = \"{VALID_CHECKSUM}\"\n"
+        "[[package]]\nname = \"object\"\nversion = \"0.41.0\"\nchecksum = \"{VALID_CHECKSUM}\"\n"
     ))
     .map_err(|error| error.to_string())
 }
@@ -26,7 +26,7 @@ fn parsed(source: &str) -> Result<toml::Value, String> {
 fn read_returns_the_pinned_object_contract() -> Result<(), String> {
     let report = ParserPin::read()?;
     assert_eq!(report["crate"], "object");
-    assert_eq!(report["version"], "0.40.0");
+    assert_eq!(report["version"], "0.41.0");
     assert_eq!(report["features"], json!(["read", "std"]));
     assert_eq!(
         report["checksum"].as_str().map(str::len),
@@ -61,10 +61,10 @@ fn rejects_missing_and_ambiguous_lock_entries() -> Result<(), String> {
     );
     for source in [
         format!(
-            "[[package]]\nname = \"other\"\nversion = \"0.40.0\"\nchecksum = \"{VALID_CHECKSUM}\"\n"
+            "[[package]]\nname = \"other\"\nversion = \"0.41.0\"\nchecksum = \"{VALID_CHECKSUM}\"\n"
         ),
         format!(
-            "[[package]]\nname = \"object\"\nversion = \"0.40.0\"\nchecksum = \"{VALID_CHECKSUM}\"\n[[package]]\nname = \"object\"\nversion = \"0.40.0\"\nchecksum = \"{VALID_CHECKSUM}\"\n"
+            "[[package]]\nname = \"object\"\nversion = \"0.41.0\"\nchecksum = \"{VALID_CHECKSUM}\"\n[[package]]\nname = \"object\"\nversion = \"0.41.0\"\nchecksum = \"{VALID_CHECKSUM}\"\n"
         ),
     ] {
         let lock = parsed(&source)?;
@@ -78,7 +78,7 @@ fn rejects_missing_package_catalog_and_incomplete_package_entries() -> Result<()
     for source in [
         "metadata = 1",
         "package = [\"not-a-table\"]",
-        "[[package]]\nversion = \"0.40.0\"",
+        "[[package]]\nversion = \"0.41.0\"",
         "[[package]]\nname = \"object\"",
     ] {
         assert!(ParserPin::locked_object_checksum(&parsed(source)?).is_err());
@@ -120,10 +120,10 @@ fn rejects_incomplete_object_dependency_fields() -> Result<(), String> {
     let linter = parsed(VALID_LINTER)?;
     for dependency in [
         "object = { default-features = false, features = [\"read\", \"std\"] }",
-        "object = { version = \"0.40.0\", default-features = false }",
-        "object = { version = \"0.40.0\", default-features = false, features = [\"read\", \"read\"] }",
-        "object = { version = \"0.40.0\", default-features = false, features = [\"std\", \"std\"] }",
-        "object = \"0.40.0\"",
+        "object = { version = \"0.41.0\", default-features = false }",
+        "object = { version = \"0.41.0\", default-features = false, features = [\"read\", \"read\"] }",
+        "object = { version = \"0.41.0\", default-features = false, features = [\"std\", \"std\"] }",
+        "object = \"0.41.0\"",
     ] {
         let workspace = parsed(&format!("[workspace.dependencies]\n{dependency}\n"))?;
         assert!(ParserPin::validate_object_dependency(&workspace, &linter).is_err());
