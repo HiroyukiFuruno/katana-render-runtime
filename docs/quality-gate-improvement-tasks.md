@@ -2,6 +2,9 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [/] `e4e40311` の正式計測は6,246件成功・別15件skip、86,456/86,878行（99.5142613780%）、未カバー422行。前回の424行からSVG塗り回帰の分離で2行減り、資源ローダーの未カバー数は同じ。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-xpryqlos/safe-summary.json`）。公開用カバレッジ判定は未達。
+- [x] `e4e40311` はSVG塗り診断の純テストとテスト専用描画補助を既存形式の専用ファイルへ分離した。テスト一覧は一致し、実SVGの画素一致、入れ子クリップ、上限超過、失敗時の解放を含む関連4件とfoundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-svg-path-paint-isolation-exact-04bs6jkp/safe-summary.json`）。
+- [x] `3adae2dd` は資源ローダーの純テストを分離し、同梱3資源の共有と外部ファイル差し替え前の取得済み内容の保持を検証した。テスト一覧は一致し、関連2件とfoundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-runtime-resource-loader-isolation-exact-jfgeg_aj/safe-summary.json`）。初回のASTで検出した移動済みリテラル2件は同値の定数へ整理した。同梱資源を静的型で直接読む実装案は現行のMermaid資源取得AST契約が拒否したため戻した（`tmp/quality/resumed-owner-r3509/coverage-bundled-resource-static-exact-2rg0jnt0/ast-exit.json`）。
 - [/] `32d51656` の正式計測は6,246件成功・別15件skip、86,587/87,011行（99.5127052901%）、未カバー424行。SVGマーカー・影・全角引用符で各1行減。フォントキャッシュは確認済みキーの再利用で分母が2行減り、未カバー数は同じ。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-ymeh_tqj/safe-summary.json`）。公開用カバレッジ判定は未達。
 - [x] `32d51656` はSVGのマーカー・影の前処理で、直接のXMLテキストノードと元範囲の取得を共通化した。両方のCSS変換と、間にあるXMLコメント・処理命令が同時に保持されることを実入力で確認。foundation・AST・関連65件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-direct-style-text-exact-vv_3ttas/safe-summary.json`）。
 - [/] 公開審査の実パーサーで`32d51656`までの1,143コミットを照合し、承認済み52件以外の参照欠落0、余剰対応表0。ローカル検査の`Refs`形式では73件に差があるが、公開審査では既存のIssue番号を認識する。公開済み履歴・作業履歴の変更や対応表の拡大は不要。PRと最新HEADへの対応表の固定はDraft後の公開工程に残る（`tmp/quality/resumed-owner-r3509/release-local-refs-reword-nu42n7b9/trusted-audit.json`）。
