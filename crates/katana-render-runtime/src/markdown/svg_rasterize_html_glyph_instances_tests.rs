@@ -15,6 +15,7 @@ const REGULAR_WEIGHT: f32 = 400.0;
 const BOLD_WEIGHT: f32 = 700.0;
 const WEIGHT_AXIS: Tag = Tag::from_be_bytes(*b"wght");
 const OPTICAL_AXIS: Tag = Tag::from_be_bytes(*b"opsz");
+const REGULAR_AND_BOLD_SVG: &str = r#"<text id="regular" x="10" y="30" font-weight="400">Tea Shop</text><text id="bold" x="10" y="60" font-weight="700">Tea Shop</text>"#;
 
 #[path = "svg_rasterize_html_glyph_tracking_tests.rs"]
 mod tracking;
@@ -80,9 +81,7 @@ fn axis(instance: &VariableInstance, tag: Tag) -> Result<f32, String> {
 
 #[test]
 fn variable_regular_and_bold_share_physical_face_without_changing_layout() -> Result<(), String> {
-    let tree = variable_tree(
-        r#"<text id="regular" x="10" y="30" font-weight="400">Tea Shop</text><text id="bold" x="10" y="60" font-weight="700">Tea Shop</text>"#,
-    )?;
+    let tree = variable_tree(REGULAR_AND_BOLD_SVG)?;
     let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
     let mut font_ids = Vec::new();
     for (id, weight) in [("regular", 400.0), ("bold", 700.0)] {

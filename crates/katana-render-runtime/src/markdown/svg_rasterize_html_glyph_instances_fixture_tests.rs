@@ -1,4 +1,5 @@
 use super::super::{HtmlGlyphRasterizer, html_glyph_variations, usvg};
+use super::{HEIGHT, REGULAR_AND_BOLD_SVG, WIDTH, instance, prepared, text, variable_tree};
 use crate::markdown::svg_rasterize::font_file_fixture::{FONT_BYTES, create};
 use resvg::usvg::{
     FontVariation, Options, Tree,
@@ -72,6 +73,33 @@ fn target_span(
         .ok_or("variable fixture glyph missing")?
         .font;
     Ok((text, span, id))
+}
+
+#[test]
+fn variable_paint_rejects_another_instance_of_the_same_font() -> Result<(), String> {
+    use super::super::super::paint::{PaintCaptureScope, draw_span};
+
+    let tree = variable_tree(REGULAR_AND_BOLD_SVG)?;
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    let regular = prepared(&rasterizer, text(&tree, "regular")?)?;
+    let bold = prepared(&rasterizer, text(&tree, "bold")?)?;
+    assert_eq!(regular.font, bold.font);
+    let regular_face = instance(&regular)?.face.typeface.as_skia();
+    let bold_face = instance(&bold)?.face.typeface.as_skia();
+    assert_ne!(regular_face.unique_id(), bold_face.unique_id());
+
+    let mut surface = skia_safe::surfaces::raster_n32_premul((WIDTH as i32, HEIGHT as i32))
+        .ok_or("variable paint surface unavailable")?;
+    let capture = PaintCaptureScope::enter();
+    let result = draw_span(surface.canvas(), &regular, bold_face, 1.0);
+    assert_eq!(
+        result,
+        Err("variable paint typeface differs from the measured instance".into())
+    );
+    assert!(capture.snapshot().events.is_empty());
+    draw_span(surface.canvas(), &regular, regular_face, 1.0)?;
+    assert_eq!(capture.snapshot().events.len(), 1);
+    Ok(())
 }
 
 #[test]
