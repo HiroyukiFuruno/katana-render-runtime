@@ -18,9 +18,11 @@ const TARGET_Y: f32 = 325.0;
 const CHANNELS: usize = 4;
 const BLUE: [u8; CHANNELS] = [0, 0, 255, 255];
 const RED: [u8; CHANNELS] = [255, 0, 0, 255];
+const GREEN: [u8; CHANNELS] = [0, 128, 0, 255];
 const SOURCE: &str = r#"<!doctype html><html><body style="margin:0;overflow:scroll;background:white"><button style="position:absolute;left:420px;top:320px;width:40px;height:40px;border:0;background:blue" onclick="this.style.background='red'"></button><div style="width:800px;height:600px"></div></body></html>"#;
 const FOCUS_MARKER_X: u32 = 248;
-const FOCUS_CASES: [(&str, u32); 2] = [("query", 8), ("note", 48)];
+const TEXTAREA_MARKER_Y: u32 = 48;
+const FOCUS_CASES: [(&str, u32); 2] = [("query", 8), ("note", TEXTAREA_MARKER_Y)];
 const FOCUS_SOURCE: &str = r#"<!doctype html><html><body style="margin:0;background:white">
 <div id=search-result style="position:absolute;left:240px;top:0;width:32px;height:32px;background:blue"></div>
 <input id=search type=search style="display:block;width:140px">
@@ -42,6 +44,10 @@ area.addEventListener('input', (event) => {
       && area.textContent === 'initial' && area.getAttribute('value') === null) {
     document.getElementById('area-result').style.background = 'red';
   }
+  if (event.target === area && document.activeElement === area && area.value === 'note!'
+      && area.textContent === 'initial' && area.getAttribute('value') === null) {
+    document.getElementById('area-result').style.background = 'green';
+  }
 });
 </script>
 </body></html>"#;
@@ -56,6 +62,32 @@ fn public_runtime_preserves_xy_input_and_state_across_resize() -> TestResult {
 
 #[test]
 fn public_runtime_tabs_from_search_to_textarea_and_dispatches_input() -> TestResult {
+    typed_focus_session()?;
+    Ok(())
+}
+
+#[test]
+fn public_runtime_preserves_typed_textarea_focus_and_value_across_resize() -> TestResult {
+    let mut session = typed_focus_session()?;
+    let resized = HtmlBrowserViewport::new(400, 300, 1.0)?;
+    session.resize(resized)?;
+    let frame = session.latest_frame().ok_or("resized frame missing")?;
+    assert_eq!(frame.viewport, resized);
+    assert_eq!(
+        frame.pixels.len(),
+        resized.width as usize * resized.height as usize * CHANNELS
+    );
+    assert_eq!(pixel(frame, FOCUS_MARKER_X, TEXTAREA_MARKER_Y)?, RED);
+
+    session.dispatch_input(HtmlBrowserInput::Text { text: "!".into() })?;
+    let frame = session
+        .latest_frame()
+        .ok_or("continued typing frame missing")?;
+    assert_eq!(pixel(frame, FOCUS_MARKER_X, TEXTAREA_MARKER_Y)?, GREEN);
+    Ok(())
+}
+
+fn typed_focus_session() -> TestResult<HtmlBrowserSession> {
     let source = HtmlBrowserSource::new(FOCUS_SOURCE, "https://example.test/focus.html")?;
     let viewport = HtmlBrowserViewport::new(WIDTH, HEIGHT, 1.0)?;
     let mut session = HtmlRuntime.open(source, viewport)?;
@@ -67,7 +99,7 @@ fn public_runtime_tabs_from_search_to_textarea_and_dispatches_input() -> TestRes
         let frame = session.latest_frame().ok_or("typed frame missing")?;
         assert_eq!(pixel(frame, FOCUS_MARKER_X, marker_y)?, RED, "typed {text}");
     }
-    Ok(())
+    Ok(session)
 }
 
 fn exercise_public_session(scale: f32) -> TestResult {
