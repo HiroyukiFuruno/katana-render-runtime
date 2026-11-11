@@ -367,39 +367,37 @@ fn middle_vertex_angle(path: &[Segment], idx: usize) -> f32 {
     let previous = path[idx];
     match path[idx + 1] {
         Segment::MoveTo(_) => middle_move_angle(path, idx, previous),
-        Segment::LineTo(point) => middle_line_angle(path, idx, previous, point),
-        Segment::CubicTo(control, _, point) => middle_curve_angle(path, idx, previous, control, point),
+        Segment::LineTo(point) => middle_outgoing_angle(path, idx, previous, point, None),
+        Segment::CubicTo(control, _, point) => {
+            middle_outgoing_angle(path, idx, previous, point, Some(control))
+        }
         Segment::Close(next) => middle_close_angle(path, idx, previous, next),
     }
 }
 
-fn middle_line_angle(path: &[Segment], idx: usize, previous: Segment, point: Point) -> f32 {
-    match previous {
-        Segment::MoveTo(pm) => calc_line_angle(pm.x, pm.y, point.x, point.y),
-        Segment::LineTo(p1) => {
-            let prev = get_prev_vertex(path, idx);
-            calc_angle(prev.x, prev.y, p1.x, p1.y, p1.x, p1.y, point.x, point.y)
+fn middle_outgoing_angle(
+    path: &[Segment],
+    idx: usize,
+    previous: Segment,
+    end: Point,
+    control: Option<Point>,
+) -> f32 {
+    let tangent_point = control.unwrap_or(end);
+    match (previous, control) {
+        (Segment::MoveTo(p), _) => calc_line_angle(p.x, p.y, tangent_point.x, tangent_point.y),
+        (Segment::LineTo(p), None) => {
+            let start = get_prev_vertex(path, idx);
+            calc_angle(start.x, start.y, p.x, p.y, p.x, p.y, end.x, end.y)
         }
-        Segment::CubicTo(_, p2, p) => {
-            let prev = get_prev_vertex(path, idx);
-            calc_curves_angle(prev.x, prev.y, p2.x, p2.y, p.x, p.y, point.x, point.y, point.x, point.y)
+        (Segment::LineTo(p), Some(control)) => {
+            let start = get_prev_vertex(path, idx);
+            calc_curves_angle(start.x, start.y, start.x, start.y, p.x, p.y, control.x, control.y, end.x, end.y)
         }
-        Segment::Close(_) => 0.0,
-    }
-}
-
-fn middle_curve_angle(path: &[Segment], idx: usize, previous: Segment, control: Point, point: Point) -> f32 {
-    match previous {
-        Segment::MoveTo(pm) => calc_line_angle(pm.x, pm.y, control.x, control.y),
-        Segment::LineTo(pl) => {
-            let prev = get_prev_vertex(path, idx);
-            calc_curves_angle(prev.x, prev.y, prev.x, prev.y, pl.x, pl.y, control.x, control.y, point.x, point.y)
+        (Segment::CubicTo(_, incoming, p), _) => {
+            let start = get_prev_vertex(path, idx);
+            calc_curves_angle(start.x, start.y, incoming.x, incoming.y, p.x, p.y, tangent_point.x, tangent_point.y, end.x, end.y)
         }
-        Segment::CubicTo(_, p2, p) => {
-            let prev = get_prev_vertex(path, idx);
-            calc_curves_angle(prev.x, prev.y, p2.x, p2.y, p.x, p.y, control.x, control.y, point.x, point.y)
-        }
-        Segment::Close(_) => 0.0,
+        (Segment::Close(_), _) => 0.0,
     }
 }
 

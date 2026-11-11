@@ -101,9 +101,9 @@
       "source": "crates/usvg/src/parser/marker.rs",
       "destination": "usvg/parser/marker.rs",
       "sourceSha256": "d52e892d9654a07789f489bf4df1bca1eab52b12ed03a4d14a052ddb821ce264",
-      "transplantedSha256": "ecdb8f35a57005dd97af8a186c5c1485388fb9a98abfe42d173dc384096a1209",
+      "transplantedSha256": "43699ec5e4ca9478b963b25b5793af4c0dcd1b79c8018c361c525e5157dc75cf",
       "sourceBytes": 15621,
-      "transplantedBytes": 17197,
+      "transplantedBytes": 16960,
       "adaptations": {
         "cratePaths": 1,
         "enabledFeaturePredicates": {},
