@@ -3,6 +3,9 @@
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
 - [ ] 正式カバレッジ100%・未カバー0を達成した後、挙動と既存テスト結果を維持し、読み込み・キャッシュ等の共通処理とレンダラーの責務境界を精査・整理する。小さい差分ごとに関連テストを回収し、整理後のソースで描画・性能・完全品質ゲートを再検証する。自己レビュー後にDraft PR、Codexレビューと指摘修正、3 OS CI、保護マージ、公開へ進む。
+- [/] `830d2457` の正式計測は6,191件成功・別15件skip、86,723/87,232行（99.4164985326%）、未カバー509行。前回511行から、列幅のみのHTMLレイアウトと破損したフォントの可変軸解決で各1行減少。SVG半径の2ケースは成功、行数の差分なし。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-z45vykfi/safe-summary.json`）。
+- [x] `4dabe35b`・`b5e0e637` で、幅autoのHTML固定位置計算が指定された最小外幅を使うことと、SVGクリップ矩形の右・下端が整数上限を超える場合に描画用領域を確保せず拒否することを確認。関連5件、foundation・ASTが成功。初回の関数長超過はケース分離と共通準備処理で修正（`tmp/quality/resumed-owner-r3509/coverage-sticky-width-and-clip-end-exact-sjmlib8u/safe-summary.json`）。509行の正式値には未反映。
+- [x] `359b3f17` でテスト専用フォント検証の到達不能な再判定を削除。skrifa 0.49.0 の `NormalizedCoord` は `F2Dot14` で、font-types 0.12.7 は16bit固定小数点の値を有限のf32に変換する。入力側の不正値・重複軸の拒否は維持し、関連6件、foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-font-fixed-point-normalized-exact-gpepom7f/safe-summary.json`）。509行の正式値には未反映。
 - [/] `c31cde46` の正式計測は6,187件成功・別15件skip、86,721/87,232行（99.4142057960%）、未カバー511行。前回513行から減った2行は不採用のSVG原点診断フラグの削除。初回と再試行1回目は集計時の対象競合で実2。成功済みテスト記録を認証して再利用し、再試行2回目は集計実0・ソース前後一致・`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-laoeef5u/safe-summary.json`）。
 - [x] `73e0f12f` で、SVGフィルターの境界ボックス変換時に半径が横・縦それぞれで溢れても、元の画素が保持されることを実入力で検証。新規2件と描画変換時の既存1件、foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-svg-bbox-morphology-exact-wbm44y1t/safe-summary.json`）。511行の正式値には未反映。
 - [x] `672641d3` で、列数を指定しないHTMLが列幅100px・間隔10pxの2列に配置されることを実セッションの座標で検証。新規1件、既存複数列1件、foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-html-auto-column-width-exact-6x6ekh3m/safe-summary.json`）。511行の正式値には未反映。
