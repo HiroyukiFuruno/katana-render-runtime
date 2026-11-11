@@ -249,7 +249,7 @@ class ComparisonAggregate(TypedDict):
     comparison: dict[str, dict[str, float]]
 
 VIEWPORTS = ((1280, 900), (960, 720), (620, 900))
-LOCK_SHA = "524f5cc9b082c0028867b5b7512c8f7a90137bc1d8b5aecbee46389c7cf145f5"
+LOCK_SHA = "7efdb06fdfe274217237a1a5b0524bdab637b6caf49eaf5b9c4becafc603e0aa"
 SOURCE_KEYS = ("inventoryDigest", "head", "index", "files", "trackedPaths", "untrackedPaths", "missingTrackedPaths")
 ENDPOINT_FLAGS = ("sourceBeforeEqualsEnd", "inputsBeforeEqualsEnd", "registryBeforeEqualsEnd", "cacheBeforeEqualsEnd", "cacheUnionBeforeEqualsEnd", "cacheUnionScopeRestored", "configBeforeEqualsEnd", "preferenceBeforeEqualsEnd", "toolContextBeforeEqualsEnd")
 HARNESS_ROOT = "scripts/html/performance-harness/"

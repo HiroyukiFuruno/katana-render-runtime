@@ -9,6 +9,7 @@ import re
 import shlex
 import subprocess
 import sys
+from collections import Counter
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import NamedTuple
@@ -18,6 +19,7 @@ from html_performance_harness_dependency_closure import (
     _harness_closure,
     _raw_packages,
     load_pinned_parent_lock,
+    verify_harness_closure,
     verify_utf8_iter_retention,
 )
 
@@ -55,8 +57,23 @@ def parse_cargo_command(value: str) -> list[str]:
     return command
 
 
-def update_command(cargo: Sequence[str]) -> list[str]:
-    return [*cargo, "update", "--manifest-path", str(HARNESS_MANIFEST)]
+def sdk_update_packages(parent_lock: bytes, harness_lock: bytes) -> list[str]:
+    verify_harness_closure(parent_lock, harness_lock, hashlib.sha256(parent_lock).hexdigest())
+    protected = _harness_closure(parent_lock)[2]
+    packages = _raw_packages(harness_lock)
+    candidates = sorted(f"{name}@{version}" for name, version, source in packages.keys() - protected.keys()
+                        if source is not None)
+    all_specs = Counter(f"{name}@{version}" for name, version, _ in packages)
+    if any(all_specs[package] != 1 for package in candidates):
+        raise ValueError("SDK dependency package specification is ambiguous")
+    return candidates
+
+
+def update_command(cargo: Sequence[str], packages: Sequence[str]) -> list[str]:
+    if not packages:
+        raise ValueError("SDK dependency update requires explicit packages")
+    selection = [argument for package in packages for argument in ("--package", package)]
+    return [*cargo, "update", "--manifest-path", str(HARNESS_MANIFEST), *selection]
 
 
 def retention_plan(parent_lock: bytes) -> list[RetainedPackage]:
@@ -123,21 +140,31 @@ def sync_lock_pin(root: Path, digest: str) -> None:
 def run_update(cargo: Sequence[str], root: Path = ROOT, runner: CommandRunner = subprocess.run) -> str:
     parent_lock = load_pinned_parent_lock(root)
     plan = retention_plan(parent_lock)
-    for package in plan:
-        runner(retention_command(cargo, ROOT_MANIFEST, package), cwd=root, check=True)
-    runner(update_command(cargo), cwd=root, check=True)
-    for package in plan:
-        runner(retention_command(cargo, HARNESS_MANIFEST, package), cwd=root, check=True)
     root_lock_path = root / ROOT_MANIFEST.with_name("Cargo.lock")
     harness_lock_path = root / HARNESS_MANIFEST.with_name("Cargo.lock")
-    _require_regular(root_lock_path, "root lock")
-    _require_regular(harness_lock_path, "harness lock")
-    root_lock, harness_lock = root_lock_path.read_bytes(), harness_lock_path.read_bytes()
-    verify_retained_packages(parent_lock, (root_lock, harness_lock), plan)
-    verify_utf8_iter_retention(root_lock, harness_lock, parent_lock)
-    digest = lock_sha(root)
-    sync_lock_pin(root, digest)
-    return digest
+    gate_path = root / GATE
+    originals: dict[Path, bytes] = {}
+    for path, label in ((root_lock_path, "root lock"), (harness_lock_path, "harness lock"),
+                        (gate_path, "performance gate")):
+        _require_regular(path, label)
+        originals[path] = path.read_bytes()
+    packages = sdk_update_packages(parent_lock, originals[harness_lock_path])
+    try:
+        for package in plan:
+            runner(retention_command(cargo, ROOT_MANIFEST, package), cwd=root, check=True)
+        if packages:
+            runner(update_command(cargo, packages), cwd=root, check=True)
+        root_lock, harness_lock = root_lock_path.read_bytes(), harness_lock_path.read_bytes()
+        verify_retained_packages(parent_lock, (root_lock, harness_lock), plan)
+        verify_utf8_iter_retention(root_lock, harness_lock, parent_lock)
+        digest = lock_sha(root)
+        sync_lock_pin(root, digest)
+        return digest
+    except (OSError, ValueError, subprocess.CalledProcessError, KeyboardInterrupt):
+        for path, contents in originals.items():
+            if not path.exists() or path.read_bytes() != contents:
+                path.write_bytes(contents)
+        raise
 
 
 def main(argv: Sequence[str] | None = None) -> int:

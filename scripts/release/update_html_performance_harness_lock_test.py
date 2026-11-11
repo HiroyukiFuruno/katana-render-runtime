@@ -24,7 +24,12 @@ class UpdateHtmlPerformanceHarnessLockTest(unittest.TestCase):
         registry = "registry+https://github.com/rust-lang/crates.io-index"
         return (
             'version = 4\n[[package]]\nname = "krr-html-performance-harness"\n'
-            'version = "0.1.0"\ndependencies = ["utf8_iter", "crc32fast", "flate2", "smallvec"]\n'
+            'version = "0.1.0"\n'
+            'dependencies = ["utf8_iter", "crc32fast", "flate2", "smallvec", "katana-render-runtime"]\n'
+            '[[package]]\nname = "katana-render-runtime"\nversion = "0.4.24"\n'
+            'dependencies = ["sdk-only", "flate2"]\n'
+            f'[[package]]\nname = "sdk-only"\nversion = "1.0.0"\nsource = "{registry}"\n'
+            f'checksum = "{"f" * 64}"\n'
             f'[[package]]\nname = "utf8_iter"\nversion = "1.0.4"\nsource = "{registry}"\n'
             f'checksum = "{"a" * 64}"\n'
             f'[[package]]\nname = "crc32fast"\nversion = "1.5.3"\nsource = "{registry}"\n'
@@ -40,8 +45,8 @@ class UpdateHtmlPerformanceHarnessLockTest(unittest.TestCase):
         root = Path(tempfile.mkdtemp())
         harness = root / MODULE.HARNESS_MANIFEST.parent
         harness.mkdir(parents=True)
-        (harness / "Cargo.lock").write_bytes(b"lock\n")
-        (root / "Cargo.lock").write_bytes(b"root lock\n")
+        (harness / "Cargo.lock").write_bytes(UpdateHtmlPerformanceHarnessLockTest.retained_parent())
+        (root / "Cargo.lock").write_bytes(UpdateHtmlPerformanceHarnessLockTest.retained_parent())
         gate = root / MODULE.GATE
         gate.parent.mkdir(parents=True)
         gate.write_text('LOCK_SHA = "' + "0" * 64 + '"\n', encoding="utf-8")
@@ -54,9 +59,18 @@ class UpdateHtmlPerformanceHarnessLockTest(unittest.TestCase):
 
     def test_update_command_uses_harness_manifest_once(self) -> None:
         self.assertEqual(
-            MODULE.update_command(["rtk", "cargo"]),
-            ["rtk", "cargo", "update", "--manifest-path", str(MODULE.HARNESS_MANIFEST)],
+            MODULE.update_command(["rtk", "cargo"], ["sdk-only@1.0.0"]),
+            ["rtk", "cargo", "update", "--manifest-path", str(MODULE.HARNESS_MANIFEST),
+             "--package", "sdk-only@1.0.0"],
         )
+        with self.assertRaisesRegex(ValueError, "requires explicit packages"):
+            MODULE.update_command(["cargo"], [])
+
+    def test_harness_update_targets_sdk_dependencies_and_rejects_parent_drift(self) -> None:
+        parent = self.retained_parent()
+        self.assertEqual(MODULE.sdk_update_packages(parent, parent), ["sdk-only@1.0.0"])
+        with self.assertRaisesRegex(ValueError, "closure differs"):
+            MODULE.sdk_update_packages(parent, parent.replace(b'"1.5.3"', b'"1.5.5"'))
 
     def test_retention_command_targets_the_requested_manifest_and_exact_version(self) -> None:
         package = MODULE.RetainedPackage("utf8_iter", "1.0.4", "reason")
@@ -153,8 +167,7 @@ class UpdateHtmlPerformanceHarnessLockTest(unittest.TestCase):
         commands = [call.args[0] for call in runner.call_args_list]
         self.assertEqual(commands, [
             *[MODULE.retention_command(["rtk", "cargo"], MODULE.ROOT_MANIFEST, item) for item in plan],
-            MODULE.update_command(["rtk", "cargo"]),
-            *[MODULE.retention_command(["rtk", "cargo"], MODULE.HARNESS_MANIFEST, item) for item in plan],
+            MODULE.update_command(["rtk", "cargo"], ["sdk-only@1.0.0"]),
         ])
         self.assertEqual(runner.call_args.kwargs, {"cwd": root, "check": True})
         verify.assert_called_once_with(
@@ -170,12 +183,23 @@ class UpdateHtmlPerformanceHarnessLockTest(unittest.TestCase):
     def test_run_update_does_not_sync_pin_when_retention_validation_fails(self) -> None:
         root, gate = self.keep_fixture()
         before = gate.read_text(encoding="utf-8")
-        runner = Mock(return_value=subprocess.CompletedProcess([], 0))
-        with patch.object(MODULE, "load_pinned_parent_lock", return_value=self.retained_parent()), \
-             patch.object(MODULE, "verify_retained_packages"):
-            with patch.object(MODULE, "verify_utf8_iter_retention", side_effect=ValueError("closure differs")):
-                with self.assertRaisesRegex(ValueError, "closure differs"):
-                    MODULE.run_update(["rtk", "cargo"], root, runner)
+        parent = self.retained_parent()
+        root_lock = root / "Cargo.lock"
+        harness_lock = root / MODULE.HARNESS_MANIFEST.with_name("Cargo.lock")
+
+        def drift(argv: list[str], *, cwd: Path, check: bool) -> subprocess.CompletedProcess[bytes]:
+            self.assertEqual(cwd, root)
+            self.assertTrue(check)
+            if "sdk-only@1.0.0" in argv:
+                root_lock.write_bytes(parent.replace(b'"1.0.0"', b'"1.0.1"'))
+                harness_lock.write_bytes(parent.replace(b'"1.5.3"', b'"1.5.5"'))
+            return subprocess.CompletedProcess(argv, 0)
+
+        with patch.object(MODULE, "load_pinned_parent_lock", return_value=parent):
+            with self.assertRaisesRegex(ValueError, "retain immutable crc32fast"):
+                MODULE.run_update(["rtk", "cargo"], root, drift)
+        self.assertEqual(root_lock.read_bytes(), parent)
+        self.assertEqual(harness_lock.read_bytes(), parent)
         self.assertEqual(gate.read_text(encoding="utf-8"), before)
 
     def test_run_update_preserves_pin_when_cargo_fails(self) -> None:
