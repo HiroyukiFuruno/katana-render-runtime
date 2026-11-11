@@ -102,3 +102,7 @@ fn verify_changed_body(fixture: &CliFixture, request: &ProbeRequest) -> Result<(
     assert!(!capture.unknown_reasons.is_empty());
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "custom_tests.rs"]
+mod tests;
