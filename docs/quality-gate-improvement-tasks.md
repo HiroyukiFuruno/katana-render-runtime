@@ -2,10 +2,12 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] `43a34c01` はSVG文字計測とHTML項目配置の純粋なテストだけを既存形式の専用ファイルへ移した。製品と共有診断の実装は同一。初回は新規2ファイルの未追跡でfoundation失敗、追加後にASTが既存リテラル9箇所を検出し、同値の定数化で修正した。最終foundation・AST成功、runtimeのテスト一覧5,860件は一致、対象9件成功（`tmp/quality/resumed-owner-r3509/coverage-pure-svg-text-and-flow-exact-wa7t0v9q/safe-summary.json`）。全体計測への反映は未確認。
+- [/] `3b861dc7` の正式計測は6,239件成功・別15件skip、86,960/87,400行（99.4965675057%）、未カバー440行。SVG塗り参照、Skia参照、正規化済みフォント単位2行、HTML改行回帰、座標オーバーフローの各対象で合計6行減。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-3_ba3gwg/safe-summary.json`）。
 - [x] `c52b59c6` は保持済みのSkiaフォント参照を直接返し、取得に失敗しない箇所のエラー処理を除いた。生成・読み込み時のエラー処理は維持。可変フォント、TTC、文字位置、合成画素を含む11件とfoundation・AST成功（`tmp/quality/resumed-owner-r3509/coverage-svg-infallible-skia-typeface-exact-xs498iby/safe-summary.json`）。
 - [x] `0211114c` は左右端の加算が有限値を超える実HTMLを、初回フレーム発行前に座標エラーとして拒否することを確認。スラッシュ直後で改行してはならない位置は入力から算出し、結果に含まれないことを確認。関連4件とfoundation・AST成功（`tmp/quality/resumed-owner-r3509/coverage-html-overflow-and-slash-exact-xy1jb4md/safe-summary.json`）。
 - [x] `d925d98b` は参照先のグラデーション・パターン種別を検査済みの型で変換へ渡し、到達しない再判定を除いた。参照先の種類・画素・不正参照の代替色を検証する8件とfoundation・AST成功（`tmp/quality/resumed-owner-r3509/coverage-svg-validated-paint-kind-exact-8a0gsg_q/safe-summary.json`）。
-- [x] `6ef8121b` はHarfrustが使うread-fonts 0.46.0の正規化済みunitsPerEmを使い、SVGのx-heightと複合行メトリクスprobeで到達しないゼロ判定を除いた。既存フォントのヘッダーを0にした実バイト列で、ヘッダー値0とメトリクス値1000を確認した。foundation・AST・関連9件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-font-normalized-units-exact-2ywx0ikt/safe-summary.json`）。全体計測への反映は未確認。
+- [x] `6ef8121b` はHarfrustが使うread-fonts 0.46.0の正規化済みunitsPerEmを使い、SVGのx-heightと複合行メトリクスprobeで到達しないゼロ判定を除いた。既存フォントのヘッダーを0にした実バイト列で、ヘッダー値0とメトリクス値1000を確認した。foundation・AST・関連9件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-font-normalized-units-exact-2ywx0ikt/safe-summary.json`）。
 - [/] `2f9f44a6` の正式計測は6,237件成功・別15件skip、86,952/87,398行（99.4896908396%）、未カバー446行。埋め込み画像とマーカー描画順で各1行減少。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-ozuav3f2/safe-summary.json`）。
 - [x] `f1e5793a` はSVGマーカーを塗りと線の間に描く場合、解析済みの順列から前後の処理を決める。塗り・線がないケースも維持し、重複した`markers`指定が既定順に戻る実SVG回帰を追加。foundation・AST・関連8件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-marker-paint-order-exact-3jj5hi36/safe-summary.json`）。
 - [x] `f51ed6d9` は埋め込み画像のSVG・PNG・JPEG・GIF・WebPの判定を1回にし、各デコーダーの警告と透明画素の扱いを維持した。foundation・AST、入出力と破損画像の関連回帰9件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-embedded-image-kind-exact-gvd8bn3t/safe-summary.json`）。
