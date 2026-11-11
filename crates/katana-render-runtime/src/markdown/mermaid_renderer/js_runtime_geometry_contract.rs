@@ -61,15 +61,10 @@ fn document(svg: &str) -> Result<Document<'_>, String> {
     let doc = Document::parse(svg).map_err(|error| error.to_string())?;
     let root = doc.root_element();
     require(root.tag_name().name() == "svg", "SVG root required")?;
-    let view: ViewBox = attr(root, "viewBox")?
-        .parse()
-        .map_err(|error: svgtypes::ViewBoxError| error.to_string())?;
-    require(
-        [view.x, view.y, view.w, view.h]
-            .iter()
-            .all(|value| value.is_finite()),
-        "finite viewBox required",
-    )?;
+    /* WHY: svgtypesが4成分の非有限値と、幅・高さの非正値を構文解析で拒否する。 */
+    attr(root, "viewBox")?
+        .parse::<ViewBox>()
+        .map_err(|error| error.to_string())?;
     Ok(doc)
 }
 

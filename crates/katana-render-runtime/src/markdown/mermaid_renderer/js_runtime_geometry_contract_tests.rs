@@ -1,5 +1,17 @@
 use super::*;
 
+#[test]
+fn geometry_contract_rejects_nonfinite_svg_viewbox() {
+    for view_box in ["0 0 NaN 100", "1e309 0 100 100", "0 0 100 -1e309"] {
+        let svg = format!(r#"<svg viewBox="{view_box}"><rect width="10" height="10"/></svg>"#);
+        assert_eq!(
+            document(&svg).err().as_deref(),
+            Some("viewBox contains an invalid number"),
+            "{view_box}"
+        );
+    }
+}
+
 pub(super) const ARCH: &str = r#"<svg viewBox="-20 -20 400 200"><g class="architecture-services"><g id="id-service-a" class="architecture-service"><g transform="translate(40,70)"><text>A</text></g><svg width="80" height="80" viewBox="0 0 80 80"/></g><g id="id-service-b" class="architecture-service" transform="translate(200,0)"><g transform="translate(40,70)"><text>B</text></g><svg width="80" height="80" viewBox="0 0 80 80"/></g></g><g class="architecture-edges"><path class="edge" id="id-L_a_b_0" d="M80 40L200 40"/></g><g class="architecture-groups"><rect id="id-group-app" x="-10" y="-10" width="300" height="100"/><text>Group</text></g></svg>"#;
 pub(super) const C4: &str = r#"<svg viewBox="0 0 300 100"><text x="0" y="0">Dynamic diagram for API Application</text><g class="node c4-container" id="id-spa"><rect class="label-container" width="80" height="80"/><g class="c4-name"><text x="40" y="20">Single Page Application</text></g><g class="c4-type"><text x="40" y="35">javascript and react</text></g></g><g transform="translate(200,0)"><g class="node c4-container" id="id-api"><rect class="label-container" width="80" height="80"/><g class="c4-name"><text x="40" y="20">API Application</text></g><g class="c4-type"><text x="40" y="35">Java and Spring Boot</text></g></g></g><line x1="80" y1="40" x2="200" y2="40" marker-end="url(#arrow)"/><text x="140" y="40">1: Uses</text><text x="140" y="55">[JSON/HTTPS]</text></svg>"#;
 const TREEMAP_SOURCE_VALUES: &[(&str, i32)] = &[
