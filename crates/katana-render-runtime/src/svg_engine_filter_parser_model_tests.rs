@@ -211,6 +211,41 @@ fn assert_overflow_preconditions(candidate: &usvg::Tree) -> Result<(), String> {
     Ok(())
 }
 
+#[rstest]
+#[case::overflow_x("2e38 1")]
+#[case::overflow_y("1 2e38")]
+fn overflowing_object_bounding_box_radius_preserves_source_pixels(
+    #[case] radius: &str,
+) -> Result<(), String> {
+    let candidate = object_bounding_box_morphology(radius)?;
+    let kind = candidate
+        .filters()
+        .first()
+        .and_then(|filter| filter.primitives().first())
+        .map(usvg::filter::Primitive::kind);
+    let Some(usvg::filter::Kind::Morphology(morphology)) = kind else {
+        return Err("morphology primitive missing".to_owned());
+    };
+    assert_eq!(morphology.radius_x().get(), 0.0);
+    assert_eq!(morphology.radius_y().get(), 0.0);
+    let control = object_bounding_box_morphology("0")?;
+    let expected = render(&control)?;
+    assert!(expected.data().iter().any(|channel| *channel != 0));
+    assert_eq!(render(&candidate)?.data(), expected.data());
+    Ok(())
+}
+
+fn object_bounding_box_morphology(radius: &str) -> Result<usvg::Tree, String> {
+    let svg = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+        <defs><filter id="f" filterUnits="userSpaceOnUse" primitiveUnits="objectBoundingBox"
+          x="0" y="0" width="16" height="16"><feMorphology radius="{radius}"/></filter></defs>
+        <rect x="2" y="2" width="10" height="10" fill="red" filter="url(#f)"/>
+        </svg>"##
+    );
+    usvg::Tree::from_str(&svg, &usvg::Options::default()).map_err(|error| error.to_string())
+}
+
 #[test]
 fn zero_object_bounding_box_offset_subregion_drops_only_filtered_shape() -> Result<(), String> {
     let parse = |primitive_width: &str| {
