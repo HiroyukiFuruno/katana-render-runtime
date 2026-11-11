@@ -5,6 +5,9 @@ use crate::renderer::backends::html_browser::{
 };
 use crate::renderer::backends::html_document::HtmlDocumentNode;
 
+#[path = "rendering_multicolumn_width_tests.rs"]
+mod multicolumn_width_tests;
+
 macro_rules! two_card_document {
     ($main_style:literal, $card_style:literal) => {
         concat!(
