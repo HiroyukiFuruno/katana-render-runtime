@@ -11,8 +11,8 @@ mod geometry_values;
 mod support;
 
 use support::{
-    CascadeRank, CascadedGeometryValue, GEOMETRY_PROPERTIES, GeometryPlan, GeometryValue,
-    SvgElement, Winner, is_geometry_element,
+    CascadeRank, CascadedGeometryValue, GeometryPlan, GeometryValue, SvgElement, Winner,
+    is_geometry_element,
 };
 
 pub(super) fn materialize_geometry_properties(svg: String) -> String {
@@ -68,14 +68,10 @@ fn collect_geometry_plans(
         .descendants()
         .filter(|node| is_geometry_element(*node))
     {
-        let mut plan = GeometryPlan::default();
-        for property in GEOMETRY_PROPERTIES {
-            if let Some(value) = resolve_property(node, property, style_sheet)
-                && node.attribute(property) != value.as_attribute()
-            {
-                plan.set_value(property, value);
-            }
-        }
+        let plan = GeometryPlan {
+            rx: resolve_changed_property(node, "rx", style_sheet),
+            ry: resolve_changed_property(node, "ry", style_sheet),
+        };
         if !plan.is_empty() {
             plans.insert(node.range().start, plan);
         }
@@ -83,21 +79,23 @@ fn collect_geometry_plans(
     plans
 }
 
-fn resolve_property(
+fn resolve_changed_property(
     node: Node<'_, '_>,
     property: &str,
     style_sheet: &StyleSheet<'_>,
 ) -> Option<GeometryValue> {
-    let mut winner = node.attribute(property).map(|value| Winner {
+    let original = node.attribute(property);
+    let mut winner = original.map(|value| Winner {
         rank: CascadeRank::presentation_attribute(),
         value: CascadedGeometryValue::Materialized(GeometryValue::Length(value.to_owned())),
     });
     consider_stylesheet_declarations(&mut winner, node, property, style_sheet);
     consider_inline_declarations(&mut winner, style_attribute(node), property);
-    winner.and_then(|winner| match winner.value {
+    let resolved = winner.and_then(|winner| match winner.value {
         CascadedGeometryValue::Unsupported => None,
         CascadedGeometryValue::Materialized(value) => Some(value),
-    })
+    });
+    resolved.filter(|value| original != value.as_attribute())
 }
 
 pub(super) fn selector_matches_source_node(

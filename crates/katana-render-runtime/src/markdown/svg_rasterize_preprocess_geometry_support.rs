@@ -91,7 +91,6 @@ impl Element for SvgElement<'_, '_, '_> {
     }
 }
 
-#[derive(Default)]
 pub(super) struct GeometryPlan {
     pub(super) rx: Option<GeometryValue>,
     pub(super) ry: Option<GeometryValue>,
@@ -103,14 +102,6 @@ impl GeometryPlan {
             "rx" => self.rx.as_ref(),
             "ry" => self.ry.as_ref(),
             _ => None,
-        }
-    }
-
-    pub(super) fn set_value(&mut self, property: &str, value: GeometryValue) {
-        match property {
-            "rx" => self.rx = Some(value),
-            "ry" => self.ry = Some(value),
-            _ => {}
         }
     }
 
