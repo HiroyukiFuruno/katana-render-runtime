@@ -2,7 +2,7 @@ use super::{CachedFace, CachedTypeface, HtmlGlyphRasterizer};
 use crate::markdown::svg_rasterize::html_glyph_variations;
 use resvg::usvg::{self, FontVariation, fontdb::ID};
 use skia_safe::Typeface;
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, path::PathBuf, rc::Rc};
 
 #[path = "svg_rasterize_html_glyph_instance_typeface.rs"]
 mod typeface;
@@ -65,9 +65,9 @@ impl HtmlGlyphRasterizer<'_> {
         id: ID,
         font_size: f32,
     ) -> Result<Option<Rc<VariableInstance>>, String> {
-        if self.face_file(id)?.is_none() {
+        let Some(file) = self.face_file(id)? else {
             return Ok(None);
-        }
+        };
         let (_, design) = html_glyph_variations::resolve_design(
             self.database,
             id,
@@ -82,7 +82,7 @@ impl HtmlGlyphRasterizer<'_> {
         if let Some(instance) = self.variable_faces.borrow().instances.get(&requested_key) {
             return Ok(Some(instance.clone()));
         }
-        self.create_variable_instance(id, &design, requested_key)
+        self.create_variable_instance(id, &design, requested_key, file)
     }
 
     fn create_variable_instance(
@@ -90,11 +90,12 @@ impl HtmlGlyphRasterizer<'_> {
         id: ID,
         design: &[FontVariation],
         requested_key: InstanceKey,
+        file: (PathBuf, u32),
     ) -> Result<Option<Rc<VariableInstance>>, String> {
         if self.face_metadata_at(id, Some(design))?.unsupported {
             return Ok(None);
         }
-        let Some(base) = self.variable_base(id)? else {
+        let Some(base) = self.variable_base(id, file)? else {
             return Ok(None);
         };
         let (typeface, applied_axes) = instantiate(base.as_skia(), design)?;
@@ -135,15 +136,15 @@ impl HtmlGlyphRasterizer<'_> {
         Ok(instance)
     }
 
-    fn variable_base(&self, id: ID) -> Result<Option<CachedTypeface>, String> {
+    fn variable_base(
+        &self,
+        id: ID,
+        (path, index): (PathBuf, u32),
+    ) -> Result<Option<CachedTypeface>, String> {
         if let Some(base) = self.variable_faces.borrow().bases.get(&id) {
             return Ok(Some(base.clone()));
         }
-        let Some((path, index)) = self.face_file(id)? else {
-            return Ok(None);
-        };
-        let data = self.map_face_data(id, &path)?;
-        let Some(base) = self.create_backend_face(&data, index)? else {
+        let Some(base) = self.load_file_typeface(id, &path, index)? else {
             return Ok(None);
         };
         self.variable_faces

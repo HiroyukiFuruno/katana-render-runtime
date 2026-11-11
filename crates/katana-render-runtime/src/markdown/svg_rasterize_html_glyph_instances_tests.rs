@@ -266,7 +266,6 @@ fn variable_base_is_unavailable_for_binary_only_face_data() -> Result<(), String
     assert_eq!(span.positioned_glyphs[0].font, id);
     assert!(rasterizer.face_file(id)?.is_none());
     assert!(rasterizer.variable_instance(span, id, FONT_SIZE)?.is_none());
-    assert!(rasterizer.variable_base(id)?.is_none());
     Ok(())
 }
 

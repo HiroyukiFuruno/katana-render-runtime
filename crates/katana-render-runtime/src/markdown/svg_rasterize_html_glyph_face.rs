@@ -20,8 +20,7 @@ impl HtmlGlyphRasterizer<'_> {
             self.faces.borrow_mut().insert(id, None);
             return Ok(None);
         }
-        let data = self.map_face_data(id, &path)?;
-        let Some(typeface) = self.create_backend_face(&data, index)? else {
+        let Some(typeface) = self.load_file_typeface(id, &path, index)? else {
             self.faces.borrow_mut().insert(id, None);
             return Ok(None);
         };
@@ -34,6 +33,16 @@ impl HtmlGlyphRasterizer<'_> {
         };
         self.faces.borrow_mut().insert(id, Some(face.clone()));
         Ok(Some(face))
+    }
+
+    pub(super) fn load_file_typeface(
+        &self,
+        id: usvg::fontdb::ID,
+        path: &Path,
+        index: u32,
+    ) -> Result<Option<CachedTypeface>, String> {
+        let data = self.map_face_data(id, path)?;
+        self.create_backend_face(&data, index)
     }
 
     pub(super) fn create_backend_face(
