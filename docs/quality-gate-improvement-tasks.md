@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [x] `745a6167` は座標変換の対象判定で既存の塗り単位APIを再利用し、単色からも従来どおり単位を取得する。`910a522e` は実SVGでCSS描画サイズがゼロへ丸まる極小倍率に達して、文字のアンカーと縦位置を保持することを確認。foundation・AST・関連14件成功（`tmp/quality/resumed-owner-r3509/coverage-svg-bbox-reuse-and-tiny-anchor-exact-vrw74tgu/safe-summary.json`）。全体計測への反映は未確認。
+- [/] `0dee520e` の正式計測は6,242件成功・別15件skip、86,718/87,150行（99.5043029260%）、未カバー432行。SVG角丸で1行減。中央補正は内部で1行減り呼出側のエラー伝播で1行増、塗りも変換で1行減り単位取得で1行増。収集実0、ソース前後一致（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-udzym89w/safe-summary.json`）。
 - [x] `b7d14e4e` はSVG境界ボックス座標変換に対象の塗りだけを渡し、単色の再判定を除いた。線形・放射グラデーション、パターンの内容座標、ゼロ寸法、参照とマーカーを含む11件とfoundation・AST成功（`tmp/quality/resumed-owner-r3509/coverage-svg-object-bbox-paint-exact-fjm2wy9i/safe-summary.json`）。
 - [x] `9f60594f` は中央ベースライン補正に該当する2種類の指定だけを渡し、補正の内部で再度種類を拒否する分岐を除いた。Chrome座標比較、可変・代替フォント、極小倍率を含む9件とfoundation・AST成功（`tmp/quality/resumed-owner-r3509/coverage-svg-middle-baseline-policy-exact-dnro99u5/safe-summary.json`）。
 - [x] `e0b029b2` はSVG角丸の既存属性がある場合にだけ削除を計画する。CSSセレクターが属性削除で変わる場合の原文保持を確認し、未指定属性、挿入、名前空間と不正XMLを含む11件とfoundation・AST成功（`tmp/quality/resumed-owner-r3509/coverage-svg-geometry-edit-operations-exact-4abyee8r/safe-summary.json`）。
