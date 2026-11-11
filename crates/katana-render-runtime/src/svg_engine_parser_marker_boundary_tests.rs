@@ -95,3 +95,30 @@ fn default_marker_overflow_clips_to_marker_viewport() -> Result<(), String> {
     assert!(clipped_pixel.red() <= clipped_pixel.green());
     Ok(())
 }
+
+#[test]
+fn singular_marker_context_transform_preserves_other_paint() -> Result<(), String> {
+    let singular = context_gradient_marker("matrix(1 1 1 1 0 0)", "marker-end='url(#m)'");
+    let invertible = context_gradient_marker("matrix(1 0 0 1 0 0)", "marker-end='url(#m)'");
+    let unmarked = context_gradient_marker("matrix(1 1 1 1 0 0)", "");
+    assert_eq!(marker_path_count(parse(&invertible)?.root()), 1);
+    let actual = render_source(&singular)?;
+    let control = render_source(&invertible)?;
+    let plain = render_source(&unmarked)?;
+    assert_eq!(actual.data(), plain.data());
+    assert_ne!(control.data(), plain.data());
+    for image in [&actual, &control, &plain] {
+        let pixel = image.pixel(21, 2).ok_or("green sibling sample missing")?;
+        assert_eq!(
+            (pixel.red(), pixel.green(), pixel.blue(), pixel.alpha()),
+            (0, 255, 0, 255)
+        );
+    }
+    Ok(())
+}
+
+fn context_gradient_marker(transform: &str, marker: &str) -> String {
+    format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='16'><defs><linearGradient id='p' gradientUnits='userSpaceOnUse' x1='0' y1='0' x2='24' y2='0'><stop stop-color='red'/><stop offset='1' stop-color='blue'/></linearGradient><marker id='m' markerUnits='userSpaceOnUse' markerWidth='8' markerHeight='8' overflow='visible'><rect width='6' height='6' fill='context-stroke' transform='{transform}'/></marker></defs><path id='route' d='M4 8 L12 8' fill='none' stroke='url(#p)' {marker}/><rect id='sibling' x='20' y='1' width='3' height='3' fill='#00ff00'/></svg>"
+    )
+}
