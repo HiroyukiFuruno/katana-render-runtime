@@ -135,7 +135,6 @@ impl BlurLineSpec {
 }
 
 struct BlurLine {
-    first_index: usize,
     last_index: usize,
     target: usize,
     left: usize,
@@ -159,7 +158,7 @@ impl BlurLine {
         let green = spec.radius_next * (first.g as isize);
         let blue = spec.radius_next * (first.b as isize);
         let alpha = spec.radius_next * (first.a as isize);
-        Self { first_index, last_index, target, left, right, first, last, red, green, blue, alpha }
+        Self { last_index, target, left, right, first, last, red, green, blue, alpha }
     }
 
     fn write(&mut self, added: RGBA8, removed: RGBA8, spec: &BlurLineSpec, frontbuf: &mut ImageRefMut) {
@@ -224,7 +223,7 @@ fn blur_middle(line: &mut BlurLine, spec: &BlurLineSpec, backbuf: &ImageRefMut, 
 
 fn blur_trailing_edge(line: &mut BlurLine, spec: &BlurLineSpec, backbuf: &ImageRefMut, frontbuf: &mut ImageRefMut) {
     for _ in 0..cmp::min(spec.length - spec.radius - 1, spec.radius) {
-        let bb = if line.left < line.first_index { line.first } else { backbuf.data[line.left] };
+        let bb = backbuf.data[line.left];
         line.left += spec.step;
         line.write(line.last, bb, spec, frontbuf);
     }
