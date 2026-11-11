@@ -20,18 +20,31 @@ const BLUR_CHANGE_CASES: [(&str, &[&str], &str); 4] = [
     ("typed-text", &["typed"], ">changed<"),
     ("typed-then-empty", &["typed", ""], ">changed<"),
 ];
-const BLUR_CHANGE_HTML: &str = r#"<input id=target><p id=result>initial</p><script>
-document.getElementById('target').addEventListener('change', () => {
-  document.getElementById('result').textContent = 'changed';
-});</script>"#;
+const BLUR_CHANGE_CONTROLS: [(&str, &str); 3] = [
+    ("text", "<input id=target>"),
+    ("textarea", "<textarea id=target></textarea>"),
+    ("search", "<input id=target type=search>"),
+];
 
 #[test]
 fn blur_dispatches_change_only_after_text_changes_value() -> Result<(), String> {
-    for (case, texts, expected) in BLUR_CHANGE_CASES {
-        let session = blur_input_session(BLUR_CHANGE_HTML, texts)?;
-        assert_blur_result(&session, expected, case)?;
+    for (control, markup) in BLUR_CHANGE_CONTROLS {
+        let html = blur_change_html(markup);
+        for (case, texts, expected) in BLUR_CHANGE_CASES {
+            let session = blur_input_session(&html, texts)?;
+            assert_blur_result(&session, expected, &format!("{control}-{case}"))?;
+        }
     }
     Ok(())
+}
+
+fn blur_change_html(control_markup: &str) -> String {
+    format!(
+        r#"{control_markup}<p id=result>initial</p><script>
+document.getElementById('target').addEventListener('change', () => {{
+  document.getElementById('result').textContent = 'changed';
+}});</script>"#
+    )
 }
 
 fn blur_input_session(html: &str, texts: &[&str]) -> Result<HtmlInteractiveSession, String> {
