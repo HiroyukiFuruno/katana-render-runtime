@@ -20,6 +20,9 @@ const BLUE: [u8; CHANNELS] = [0, 0, 255, 255];
 const RED: [u8; CHANNELS] = [255, 0, 0, 255];
 const GREEN: [u8; CHANNELS] = [0, 128, 0, 255];
 const SOURCE: &str = r#"<!doctype html><html><body style="margin:0;overflow:scroll;background:white"><button style="position:absolute;left:420px;top:320px;width:40px;height:40px;border:0;background:blue" onclick="this.style.background='red'"></button><div style="width:800px;height:600px"></div></body></html>"#;
+const FRAGMENT_SOURCE: &str = r#"<!doctype html><html><body style="margin:0;background:white">
+<div style="height:100vh"></div><div id="target" style="width:32px;height:32px;background:blue"></div>
+<div style="height:800px"></div></body></html>"#;
 const FOCUS_MARKER_X: u32 = 248;
 const TEXTAREA_MARKER_Y: u32 = 48;
 const FOCUS_CASES: [(&str, u32); 2] = [("query", 8), ("note", TEXTAREA_MARKER_Y)];
@@ -57,6 +60,46 @@ fn public_runtime_preserves_xy_input_and_state_across_resize() -> TestResult {
     for scale in SCALE_FACTORS {
         exercise_public_session(scale)?;
     }
+    Ok(())
+}
+
+#[test]
+fn public_runtime_realigns_fragment_on_resize_until_explicit_scroll() -> TestResult {
+    let source =
+        HtmlBrowserSource::new(FRAGMENT_SOURCE, "https://example.test/scroll.html#target")?;
+    let viewport = HtmlBrowserViewport::new(WIDTH, HEIGHT, 1.0)?;
+    let mut session = HtmlRuntime.open(source, viewport)?;
+    assert_fragment_frame(&session, viewport)?;
+
+    let resized = HtmlBrowserViewport::new(WIDTH, 320, 1.0)?;
+    session.resize(resized)?;
+    assert_fragment_frame(&session, resized)?;
+
+    session.dispatch_input(HtmlBrowserInput::Scroll {
+        delta_x: 0.0,
+        delta_y: -40.0,
+    })?;
+    let final_viewport = HtmlBrowserViewport::new(WIDTH, 400, 1.0)?;
+    session.resize(final_viewport)?;
+    let (frame, metrics) = session
+        .latest_frame_with_metrics()
+        .ok_or("final frame missing")?;
+    assert_eq!(frame.viewport, final_viewport);
+    assert_eq!(metrics.scroll_y, resized.logical_height() - 40.0);
+    Ok(())
+}
+
+fn assert_fragment_frame(
+    session: &HtmlBrowserSession,
+    viewport: HtmlBrowserViewport,
+) -> TestResult {
+    let (frame, metrics) = session
+        .latest_frame_with_metrics()
+        .ok_or("fragment frame missing")?;
+    assert_eq!(frame.viewport, viewport);
+    assert_eq!(frame.generation, metrics.generation);
+    assert_eq!(metrics.scroll_y, viewport.logical_height());
+    assert_eq!(pixel(frame, 8, 8)?, BLUE);
     Ok(())
 }
 
