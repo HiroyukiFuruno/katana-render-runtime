@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
+- [/] `5bb9f822` の正式producerによる中間計測は6,210件成功・別15件skip、86,785/87,268行（99.4465325205%）、未カバー483行。HTML行計画とSVG属性編集で各1行減少。収集実0、ソース前後一致、公開用総合判定は100%到達後（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-9px5m243/safe-summary.json`）。
+- [x] `3f29b2d9` は単一フィルターで重複していた範囲交差を除き、`6b828cf2` は各グリフのベースライン変換を一度にした。`a17e14fa` は変換付きSVGクリップの隔離・全画素・隣接画素の実入力回帰を追加。テストのRGBA数値指摘を修正後、関連51件・foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-svg-clip-filter-baseline-exact-swzuk9u7/safe-summary.json`）。483行の全体値には未反映。
 - [/] `0b1e7d54` の正式producerによる中間計測は6,210件成功・別15件skip、86,787/87,272行（99.4442662022%）、未カバー485行。SVG paintで1行、textPathで2行、クリップ矩形で1行減少。HTMLインラインの未カバー行数は変化なし。収集実0、ソース前後一致。総合判定は100%到達後に実行する（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-1o3q626b/safe-summary.json`）。
 - [x] `bc098f76` はインライン行計画の現在行と確定済み行を分け、必ず存在する現在行の空判定を除いた。`bbac5701` は未対応CSS値をカスケードの勝者決定まで維持し、属性編集を確定値と解析元XMLに限定した。関連HTML41件・SVG25件・foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-inline-metrics-and-svg-cascade-exact-orygagmx/safe-summary.json`）。全体計測への反映を確認する。
 - [/] `b0818b84` の正式計測は6,210件成功・別15件skip、86,784/87,273行（99.4396892510%）、未カバー489行。物理フォント照合で2行、フォーカス更新で1行減少。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-6jdcnkay/safe-summary.json`）。
