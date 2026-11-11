@@ -6,11 +6,11 @@ use katana_render_runtime::{
 };
 
 const ACCORDION_X: f32 = 250.0;
-const ACCORDION_Y: f32 = 378.0;
+const ACCORDION_Y: f32 = 214.0;
 const ACTION_X: f32 = 175.0;
-const ACTION_Y: f32 = 500.0;
-const FORM_X: f32 = 175.0;
-const FORM_Y: f32 = 620.0;
+const ACTION_Y: f32 = 274.0;
+const FORM_X: f32 = 460.0;
+const FORM_Y: f32 = 274.0;
 const CLICK_INPUT_COUNT: usize = 3;
 const LINK_PROBE_X: f32 = 24.0;
 const LINK_PROBE_Y: f32 = 24.0;
@@ -123,7 +123,7 @@ fn type_and_capture(
 }
 
 fn link_probe_html() -> &'static str {
-    r#"<!doctype html><style>html,body,a{margin:0;width:100%;height:100%;display:block}</style><a href="linked-page.html">Open linked page</a>"#
+    r#"<!doctype html><style>html,body{margin:0}a{display:block;width:160px;height:48px}</style><a href="linked-page.html">Open linked page</a>"#
 }
 
 fn click(session: &mut HtmlBrowserSession, x: f32, y: f32) -> AppResult<()> {
