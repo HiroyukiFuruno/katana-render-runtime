@@ -28,6 +28,15 @@ fn requirement_viewbox_resize_updates_existing_max_width_style() -> Result<(), S
 }
 
 #[test]
+fn requirement_viewbox_oracle_rejects_an_ambiguous_fixture_style() {
+    let raw = r#"<svg aria-roledescription="requirement" viewBox="-8 -8 200 100" width="100%" style="max-width: 200px; color: red;"></svg>"#;
+    assert_eq!(
+        expected_synthetic_root_attributes(raw).err().as_deref(),
+        Some("fixture style is not an isolated max-width property")
+    );
+}
+
+#[test]
 fn runtime_preserves_fake_raw_class_geometry_and_generic_row_class() -> Result<(), String> {
     for (first, second, view_box, max_width) in [
         ("PreviewPane", "RenderedSection", "4 4 311.5 367", "311.5"),
