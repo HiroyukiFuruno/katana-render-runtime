@@ -13,6 +13,8 @@ pub(super) use line_metrics::{
     cached_face_line_metrics, diagnosed_cached_face_line_metrics, parsed_face_line_metrics,
 };
 
+#[path = "svg_rasterize_text_svg_font_instance.rs"]
+mod svg_font_instance;
 #[path = "svg_rasterize_text_svg_run_metrics.rs"]
 mod svg_run_metrics;
 #[path = "svg_rasterize_text_svg_x_height.rs"]

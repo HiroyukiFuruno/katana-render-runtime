@@ -1,5 +1,6 @@
 use super::super::features::features_for_face;
-use super::{FontShape, HARFRUST_SCALE, face_cache, font_variations, shape_buffer_with_features};
+use super::svg_font_instance::svg_font_instance;
+use super::{FontShape, HARFRUST_SCALE, face_cache, shape_buffer_with_features};
 use resvg::usvg;
 
 #[path = "svg_rasterize_text_svg_fragment_run.rs"]
@@ -26,6 +27,12 @@ pub(crate) struct SvgRunInkDiagnostic {
     pub(crate) glyphs_without_extents: usize,
 }
 
+struct MeasuredSvgRun {
+    metrics: SvgTextRunMetrics,
+    ink: SvgRunInkDiagnostic,
+    glyphs: harfrust::Buffer,
+}
+
 pub(in super::super) fn shape_svg_run_metrics_with_face(
     database: &usvg::fontdb::Database,
     face_id: usvg::fontdb::ID,
@@ -33,26 +40,36 @@ pub(in super::super) fn shape_svg_run_metrics_with_face(
     font: FontShape,
     include_ink_diagnostic: bool,
 ) -> Option<(SvgTextRunMetrics, Option<SvgRunInkDiagnostic>)> {
-    validate_shaping_size(font.size)?;
-    let face = face_cache::font_for_face(database, face_id)?;
-    let instance = face
-        .instance_builder()
-        .variations(font_variations(font))
-        .build();
-    let (ascent, descent) = svg_run_line_metrics(&instance, font.size)?;
-    /* WHY: default属性のSVG runのみ対象とし、同一instanceのshapeを一度だけ行う。 */
-    let features = features_for_face(database, face_id, text, None, font.trim)?;
-    let glyphs = shape_buffer_with_features(&instance, text, font, &features)?;
-    let metrics = svg_text_run_metrics(&glyphs, ascent, descent)?;
-    let ink = svg_run_ink_diagnostic(&instance, &glyphs, font.size);
-    let metrics = SvgTextRunMetrics {
-        layout_ascent: None,
-        ink_bounds: ink.bounds,
-        ..metrics
-    };
+    let (face, instance) = svg_font_instance(database, face_id, font).ok()?;
+    let run = measure_svg_run(database, face_id, text, font, &instance).ok()?;
     /* WHY: metricsとshape取得後もsource世代の一致を確認してから結果を公開する。 */
     face_cache::commit_file_font(database, face_id, &face)
-        .then_some((metrics, include_ink_diagnostic.then_some(ink)))
+        .then_some((run.metrics, include_ink_diagnostic.then_some(run.ink)))
+}
+
+fn measure_svg_run(
+    database: &usvg::fontdb::Database,
+    face_id: usvg::fontdb::ID,
+    text: &str,
+    font: FontShape,
+    instance: &harfrust::font::Font,
+) -> Result<MeasuredSvgRun, &'static str> {
+    let (ascent, descent) =
+        svg_run_line_metrics(instance, font.size).ok_or("SVG font line metrics unavailable")?;
+    /* WHY: 同一instanceでshapeと輪郭計測を一度ずつ行う。 */
+    let features = features_for_face(database, face_id, text, None, font.trim)
+        .ok_or("SVG font features unavailable")?;
+    let glyphs = shape_buffer_with_features(instance, text, font, &features)
+        .ok_or("SVG font shaping failed")?;
+    let mut metrics =
+        svg_text_run_metrics(&glyphs, ascent, descent).ok_or("invalid SVG run metrics")?;
+    let ink = svg_run_ink_diagnostic(instance, &glyphs, font.size);
+    metrics.ink_bounds = ink.bounds;
+    Ok(MeasuredSvgRun {
+        metrics,
+        ink,
+        glyphs,
+    })
 }
 
 fn svg_text_run_metrics(
@@ -80,19 +97,6 @@ fn svg_text_run_metrics(
     })
 }
 
-pub(super) fn validate_shaping_size(size: f32) -> Option<()> {
-    let shaping_scale = size * HARFRUST_SCALE;
-    if !size.is_finite()
-        || size <= 0.0
-        || !shaping_scale.is_finite()
-        || f64::from(shaping_scale) > f64::from(i32::MAX)
-        || shaping_scale as i32 == 0
-    {
-        return None;
-    }
-    Some(())
-}
-
 fn svg_run_line_metrics(instance: &harfrust::font::Font, size: f32) -> Option<(f32, f32)> {
     let line = instance.metrics().h_line()?;
     /* WHY: Harfrustのフォントモデルは無効なunitsPerEmを1000へ正規化する。 */
@@ -107,12 +111,7 @@ pub(in super::super) fn svg_run_endpoints_with_face(
     face_id: usvg::fontdb::ID,
     font: FontShape,
 ) -> Option<(f32, f32)> {
-    validate_shaping_size(font.size)?;
-    let face = face_cache::font_for_face(database, face_id)?;
-    let instance = face
-        .instance_builder()
-        .variations(font_variations(font))
-        .build();
+    let (face, instance) = svg_font_instance(database, face_id, font).ok()?;
     let (ascent, descent) = svg_run_line_metrics(&instance, font.size)?;
     if ![ascent, descent].into_iter().all(f32::is_finite) || ascent + descent <= 0.0 {
         return None;

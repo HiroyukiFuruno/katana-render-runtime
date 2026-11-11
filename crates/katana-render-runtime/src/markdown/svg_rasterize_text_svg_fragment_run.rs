@@ -1,8 +1,5 @@
-use super::super::super::features::features_for_face;
 use super::{
-    FontShape, HARFRUST_SCALE, SvgTextRunMetrics, face_cache, font_variations,
-    shape_buffer_with_features, svg_run_ink_diagnostic, svg_run_line_metrics, svg_text_run_metrics,
-    validate_shaping_size,
+    FontShape, HARFRUST_SCALE, SvgTextRunMetrics, face_cache, measure_svg_run, svg_font_instance,
 };
 use resvg::usvg;
 
@@ -17,45 +14,13 @@ pub(in crate::markdown::svg_rasterize) fn shape_fragment_run(
     if !super::super::is_left_to_right(text) {
         return Ok(None);
     }
-    validate_shaping_size(font.size).ok_or("invalid SVG shaping size")?;
-    let face = face_cache::font_for_face(database, face_id).ok_or("SVG font face unavailable")?;
-    let instance = face
-        .instance_builder()
-        .variations(font_variations(font))
-        .build();
-    let result = measure_instance(database, face_id, text, font, &instance)?;
+    let (face, instance) = svg_font_instance(database, face_id, font)?;
+    let run = measure_svg_run(database, face_id, text, font, &instance)?;
+    let advances = ordered_scalar_advances(text, &run.glyphs, &instance, font.size);
     if !face_cache::commit_file_font(database, face_id, &face) {
         return Err("SVG font source changed during shaping".into());
     }
-    Ok(result)
-}
-
-fn measure_instance(
-    database: &usvg::fontdb::Database,
-    face_id: usvg::fontdb::ID,
-    text: &str,
-    font: FontShape,
-    instance: &harfrust::font::Font,
-) -> Result<Option<FragmentRun>, String> {
-    let (ascent, descent) =
-        svg_run_line_metrics(instance, font.size).ok_or("SVG font line metrics unavailable")?;
-    let features = features_for_face(database, face_id, text, None, font.trim)
-        .ok_or("SVG font features unavailable")?;
-    let glyphs = shape_buffer_with_features(instance, text, font, &features)
-        .ok_or("SVG font shaping failed")?;
-    let metrics =
-        svg_text_run_metrics(&glyphs, ascent, descent).ok_or("invalid SVG run metrics")?;
-    let ink = svg_run_ink_diagnostic(instance, &glyphs, font.size);
-    let advances = ordered_scalar_advances(text, &glyphs, instance, font.size);
-    Ok(advances.map(|advances| {
-        (
-            SvgTextRunMetrics {
-                ink_bounds: ink.bounds,
-                ..metrics
-            },
-            advances,
-        )
-    }))
+    Ok(advances.map(|advances| (run.metrics, advances)))
 }
 
 fn ordered_scalar_advances(

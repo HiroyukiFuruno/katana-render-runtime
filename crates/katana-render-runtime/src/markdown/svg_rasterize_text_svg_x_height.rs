@@ -1,5 +1,5 @@
-use super::svg_run_metrics::validate_shaping_size;
-use super::{FontShape, face_cache, font_variations};
+use super::svg_font_instance::svg_font_instance;
+use super::{FontShape, face_cache};
 use harfrust::font::metrics::ScaleF32;
 use resvg::usvg;
 
@@ -8,12 +8,7 @@ pub(in super::super) fn svg_run_x_height_with_face(
     face_id: usvg::fontdb::ID,
     font: FontShape,
 ) -> Option<Option<f32>> {
-    validate_shaping_size(font.size)?;
-    let face = face_cache::font_for_face(database, face_id)?;
-    let instance = face
-        .instance_builder()
-        .variations(font_variations(font))
-        .build();
+    let (face, instance) = svg_font_instance(database, face_id, font).ok()?;
     let metrics = instance.metrics();
     /* WHY: Harfrustが利用するread-fontsは無効なunitsPerEmを1000へ正規化する。 */
     let x_height = metrics

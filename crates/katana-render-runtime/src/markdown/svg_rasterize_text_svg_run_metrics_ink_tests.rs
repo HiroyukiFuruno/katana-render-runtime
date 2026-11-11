@@ -1,6 +1,6 @@
-use super::{
-    FontShape, shape_svg_run_metrics_with_face, svg_run_endpoints_with_face, validate_shaping_size,
-};
+use super::super::font_variations;
+use super::super::svg_font_instance::validate_shaping_size;
+use super::{FontShape, shape_svg_run_metrics_with_face, svg_run_endpoints_with_face};
 use crate::markdown::svg_rasterize::text_shaping::test_font_data::font_with_empty_table;
 use resvg::usvg::fontdb::{Database, ID};
 use rustybuzz::ttf_parser::Tag;
@@ -167,7 +167,7 @@ fn raw_harfrust_glyphs_without_extents(text: &str, shape: FontShape) -> Result<u
         .ok_or("raw Noto Sans face could not be parsed")?;
     let instance = face
         .instance_builder()
-        .variations(super::font_variations(shape))
+        .variations(font_variations(shape))
         .build();
     let shaper = harfrust::ShaperFont::new(&instance)
         .with_scale((shape.size * super::HARFRUST_SCALE) as i32);
