@@ -50,10 +50,8 @@ fn prepare_paths<const N: usize>(
     paths: [Option<&usvg::Path>; N],
 ) -> Result<Option<Vec<DecorationPath>>, String> {
     let mut result = Vec::new();
+    /* WHY: usvgは装飾の可視性をspanから設定し、準備側は不可視spanを先に除外する。 */
     for node in paths.into_iter().flatten() {
-        if !node.is_visible() {
-            continue;
-        }
         let Some(prepared) = path::prepare_path(node)? else {
             return Ok(None);
         };
