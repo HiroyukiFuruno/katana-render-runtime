@@ -130,3 +130,16 @@ fn rejects_incomplete_object_dependency_fields() -> Result<(), String> {
     }
     Ok(())
 }
+
+#[test]
+fn rejects_missing_workspace_object_even_when_linter_inherits_it() -> Result<(), String> {
+    let workspace = parsed("[workspace.dependencies]\nserde = \"1\"\n")?;
+    let linter = parsed(VALID_LINTER)?;
+    assert_eq!(
+        ParserPin::validate_object_dependency(&workspace, &linter)
+            .err()
+            .as_deref(),
+        Some("parser-pin:workspace-object")
+    );
+    Ok(())
+}

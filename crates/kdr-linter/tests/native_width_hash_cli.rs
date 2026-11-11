@@ -46,6 +46,24 @@ const MUTATIONS: &[(&str, &str, &str, &str)] = &[
     ),
     (
         INPUTS[0],
+        "preset.arrow.hash(hasher);",
+        "preset.arrow.hash(hasher);\n    let _ = ();",
+        "hash-fields:signature-or-count",
+    ),
+    (
+        INPUTS[1],
+        "format!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
+        "stringify!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
+        "svg-id-hash-route:output",
+    ),
+    (
+        INPUTS[2],
+        "preset.dark_mode.hash(&mut hasher);",
+        "preset.dark_mode.hash(&mut hasher);\n        let _ = ();",
+        "render-cache-hash-route:statement-count",
+    ),
+    (
+        INPUTS[0],
         "use std::hash::{Hash, Hasher};",
         "use std::hash::Hash;",
         "hash-fields:imports",
