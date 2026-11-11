@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- [/] `6221fb3c`の正式計測は6,260件成功・別15件skip、86,365/86,773行（99.5298076591%）、未カバー408行。前回411行から要素の描画経路、塗り・フィルターの参照探索、塗りの継承で各1行減。収集実0、ソース前後一致。公開用カバレッジ判定は未達（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-9aj9agcg/safe-summary.json`）。
 - [x] SVG要素を最初に直接描画・グループ経由の経路へ分類し、判定済みの要素種別を後段で再照合する処理を除去。入れ子SVGの変換は既存経路で一度だけ適用する。最初のコンパイルで検出した戻り値型2件を修正し、再試行でテスト一覧一致、入れ子viewBox・参照・switch・フィルターを含む関連120件、静的検査・AST・SVG由来検査4件が成功（`tmp/quality/resumed-owner-r3509/coverage-svg-element-route-exact-_3wp5zue/safe-summary.json`）。正式集計への反映は未確認。
 
 - [x] SVG塗りの既に解決済みの継承値と無指定値が同じ結果を返す重複分岐を統合。明示的な継承、子の色指定、塗りの参照を含む関連62件と静的検査・AST・SVG由来検査4件が成功（`tmp/quality/resumed-owner-r3509/coverage-svg-paint-inherit-exact-am2zuwxd/safe-summary.json`）。正式集計への反映は未確認。
