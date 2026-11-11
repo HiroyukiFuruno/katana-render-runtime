@@ -12,16 +12,34 @@ pub(super) fn supported_ltr_text(text: &str) -> bool {
 }
 
 pub(in super::super::super) fn ranges_cover_chunk(chunk: &usvg::TextChunk) -> bool {
+    let spans = chunk.spans().iter().zip(std::iter::repeat(()));
+    ranges_match(chunk.text(), spans, |_, _, ()| true)
+}
+
+pub(super) fn ranges_match<'a, T>(
+    text: &str,
+    spans: impl Iterator<Item = (&'a usvg::TextSpan, T)>,
+    mut matches: impl FnMut(&usvg::TextSpan, &str, T) -> bool,
+) -> bool {
     let mut end = 0;
-    for span in chunk.spans() {
-        if span.start() != end || !valid_span_range(chunk.text(), span.start(), span.end()) {
+    for (span, value) in spans {
+        if span.start() != end {
+            return false;
+        }
+        let Some(content) = span_content(text, span.start(), span.end()) else {
+            return false;
+        };
+        if !matches(span, content, value) {
             return false;
         }
         end = span.end();
     }
-    end == chunk.text().len()
+    end == text.len()
 }
 
-pub(super) fn valid_span_range(text: &str, start: usize, end: usize) -> bool {
-    start < end && text.get(start..end).is_some()
+pub(super) fn span_content(text: &str, start: usize, end: usize) -> Option<&str> {
+    if start >= end {
+        return None;
+    }
+    text.get(start..end)
 }

@@ -2,6 +2,10 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定2件中2件完了。同一ビルドで関連80件（HTML保存37件、SVG文字43件）と静的検査・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-artifact-and-glyph-spans-exact-qdwg4lgs/safe-summary.json`）。全体カバレッジは未カバー対応を一通り入れてから取得する。
+  - [x] HTML保存データのシンボリックリンク検査とサイズ取得を一度に行い、容量ちょうどでの上書き・再読込を確認した。
+  - [x] SVG文字の範囲検査と検査済み文字列の利用を一度の走査にまとめ、UTF-8境界と複数フォントを含む描画回帰を確認した。
+
 - [x] 同じ図形を参照する2つのSVGフィルター画像を、定義1件・参照2件で書き出し、再入力時の画素が一致することを回帰へ追加。テスト一覧は当該1件のみ増加し、対象4件・静的検査・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-svg-writer-repeated-image-exact-s4ih9950/safe-summary.json`）。正式計測は保留。
 - [x] SVG・HTMLの行メトリクスで、通常計測と診断付き計測の同一判定を共有し、HarfRustから従来パーサーへ切り替わる際の可変フォント判定の重複を除去。可変フォント・不正な実フォント・旧パーサーとの一致・HTMLベースラインを含む関連35件、静的検査・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-svg-html-line-metrics-shared-exact-8hj5si8z/safe-summary.json`）。正式計測は保留。
 - [x] MathJax AST検査の変異テストで重複した入力・適用・復元を共通化。MermaidのAST検査には壊れた検査テンプレートとセミコロン欠落を拒否するケースを追加。静的検査・AST・対象2件成功。実行後の確認スクリプトが実テスト名と一致しなかったため、生の終了コードと実テスト名から訂正した（`tmp/quality/resumed-owner-r3509/coverage-linter-realm-materializer-exact-lcc9bhcu/result-from-raw.json`）。正式計測は保留。

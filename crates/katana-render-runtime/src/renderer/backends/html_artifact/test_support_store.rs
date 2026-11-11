@@ -15,6 +15,8 @@ pub(in super::super) fn assert_store_capacity_and_clear(
     let quota_root = root("quota")?;
     let store = HtmlArtifactStore::new(&quota_root, bytes.len() as u64, true)?;
     store.save("first", artifact)?;
+    store.save("first", artifact)?;
+    assert!(store.load("first", &artifact.provenance)?.is_some());
     let limited = HtmlArtifactStore::new(&quota_root, bytes.len() as u64 - 1, true)?;
     assert!(matches!(
         limited.save("too-small", artifact),

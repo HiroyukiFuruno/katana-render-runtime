@@ -1,6 +1,6 @@
 use super::{
-    PreparedSpan, chunk_input, chunk_supported, first_supported_spans, glyphs_supported, row_input,
-    row_inputs, rows_supported, source_supported,
+    PreparedSpan, chunk_input, chunk_supported, first_supported_spans, glyphs_supported,
+    ranges_cover_chunk, row_input, row_inputs, rows_supported, source_supported,
 };
 use resvg::usvg;
 
@@ -40,7 +40,7 @@ fn diagnostic_row(
 ) -> serde_json::Value {
     serde_json::json!({
         "sourceCount": chunk.spans().len(), "text": chunk.text(), "anchor": format!("{:?}", chunk.anchor()),
-        "chunkSupported": spans.map(|spans| chunk_supported(chunk, spans)),
+        "chunkSupported": spans.map(|spans| chunk_supported(chunk, spans) && ranges_cover_chunk(chunk)),
         "spansSupported": spans.map(|spans| first_supported_spans(chunk, spans).is_some()),
         "chunkInput": spans.map(|spans| chunk_input(text, chunk, spans).is_some()),
         "cssScale": super::super::anchor::uniform_css_scale(text.abs_transform()),
@@ -65,7 +65,7 @@ fn diagnostic_spans(
             "sameSize": spans.first().map(|first| span.font_size == first.font_size),
             "sameBaseline": spans.first().map(|first| span.baseline_shift == first.baseline_shift),
             "sourceSupported": source_supported(source),
-            "glyphsSupported": glyphs_supported(chunk, source, span),
+            "glyphsSupported": chunk.text().get(source.start()..source.end()).is_some_and(|content| glyphs_supported(content, span)),
             "xAlignment": span.x_alignment.is_some(), "chunkAlignment": span.chunk_alignment.is_some(),
         })
     }).collect::<Vec<_>>())

@@ -52,12 +52,10 @@ impl HtmlArtifactStore {
             .encode_with_limit(limit)
             .map_err(|error| map_save_error(error, self.capacity))?;
         let _lock = StoreLock::acquire(&self.root)?;
-        let path = self.path_for(key)?;
-        let existing = match fs::metadata(&path) {
-            Ok(meta) => meta.len(),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
-            Err(error) => return Err(error.into()),
-        };
+        let path = self.artifact_path(key);
+        let existing = ArtifactFilesystem::metadata_without_symlink(&path)?
+            .as_ref()
+            .map_or(0, fs::Metadata::len);
         let total = ArtifactFilesystem::store_bytes(&self.root)?
             .saturating_sub(existing)
             .saturating_add(bytes.len() as u64);
@@ -125,9 +123,13 @@ impl HtmlArtifactStore {
     }
     fn path_for(&self, key: &str) -> Result<PathBuf, HtmlArtifactError> {
         validate_key(key)?;
-        let path = self.root.join(format!("{key}{FILE_SUFFIX}"));
+        let path = self.artifact_path(key);
         ArtifactFilesystem::reject_symlink(&path)?;
         Ok(path)
+    }
+
+    fn artifact_path(&self, key: &str) -> PathBuf {
+        self.root.join(format!("{key}{FILE_SUFFIX}"))
     }
 }
 

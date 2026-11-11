@@ -68,19 +68,27 @@ impl ArtifactFilesystem {
     pub(crate) fn reject_ancestor_symlink(path: &Path) -> Result<(), HtmlArtifactError> {
         let mut current = path.to_path_buf();
         while let Some(parent) = current.parent() {
-            if is_symlink(parent)? {
-                return Err(HtmlArtifactError::SymlinkPath);
-            }
+            Self::reject_symlink(parent)?;
             current = parent.to_path_buf();
         }
         Ok(())
     }
 
     pub(crate) fn reject_symlink(path: &Path) -> Result<(), HtmlArtifactError> {
-        if is_symlink(path)? {
-            return Err(HtmlArtifactError::SymlinkPath);
+        Self::metadata_without_symlink(path).map(|_| ())
+    }
+
+    pub(crate) fn metadata_without_symlink(
+        path: &Path,
+    ) -> Result<Option<fs::Metadata>, HtmlArtifactError> {
+        match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                Err(HtmlArtifactError::SymlinkPath)
+            }
+            Ok(metadata) => Ok(Some(metadata)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.into()),
         }
-        Ok(())
     }
 }
 
@@ -134,14 +142,6 @@ fn sum_entry(
         Ok(metadata.len())
     } else {
         Ok(0)
-    }
-}
-
-fn is_symlink(path: &Path) -> Result<bool, HtmlArtifactError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) => Ok(metadata.file_type().is_symlink()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error.into()),
     }
 }
 

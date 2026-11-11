@@ -11,8 +11,8 @@ mod text;
 pub(super) use single_middle::single_middle_input;
 pub(in super::super) use text::ranges_cover_chunk;
 #[cfg(test)]
-use text::valid_span_range;
-use text::{printable_ascii, supported_ltr_text};
+use text::span_content;
+use text::{printable_ascii, ranges_match, supported_ltr_text};
 
 #[cfg(test)]
 #[path = "svg_rasterize_html_glyph_chunk_row_diagnostic.rs"]
@@ -134,7 +134,6 @@ fn chunk_supported(chunk: &usvg::TextChunk, prepared: &[PreparedSpan]) -> bool {
         )
         && matches!(chunk.text_flow(), usvg::TextFlow::Linear)
         && supported_ltr_text(chunk.text())
-        && ranges_cover_chunk(chunk)
 }
 
 fn first_supported_spans<'a, 'b>(
@@ -143,13 +142,14 @@ fn first_supported_spans<'a, 'b>(
 ) -> Option<(&'a usvg::TextSpan, &'b PreparedSpan)> {
     let first = prepared.first()?;
     let first_source = chunk.spans().first()?;
-    let supported = chunk.spans().iter().zip(prepared).all(|(source, span)| {
+    let pairs = chunk.spans().iter().zip(prepared);
+    let supported = ranges_match(chunk.text(), pairs, |source, content, span| {
         source_supported(source)
             && source.font() == first_source.font()
             && span.font == first.font
             && span.font_size == first.font_size
             && span.baseline_shift == first.baseline_shift
-            && glyphs_supported(chunk, source, span)
+            && glyphs_supported(content, span)
     });
     supported.then_some((first_source, first))
 }
@@ -174,10 +174,7 @@ fn standard_font_variation(font: &usvg::Font) -> bool {
     axis.tag == *b"wght" && axis.value == f32::from(font.weight())
 }
 
-fn glyphs_supported(chunk: &usvg::TextChunk, source: &usvg::TextSpan, span: &PreparedSpan) -> bool {
-    let Some(content) = chunk.text().get(source.start()..source.end()) else {
-        return false;
-    };
+fn glyphs_supported(content: &str, span: &PreparedSpan) -> bool {
     super::super::horizontal_glyphs(&span.glyphs)
         && anchor::nonempty_ordered_scalar_per_glyph(content, &span.glyphs)
         && span.x_alignment.is_none()
