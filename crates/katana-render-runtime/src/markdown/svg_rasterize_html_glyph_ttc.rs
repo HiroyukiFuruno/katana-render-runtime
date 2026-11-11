@@ -140,7 +140,10 @@ mod verification_tests;
 #[cfg(test)]
 mod tests {
     use super::super::font_file_fixture;
-    use super::{HEAD_CHECKSUM_RANGE, repack_face, table_bytes_equal};
+    use super::{
+        HEAD_CHECKSUM_RANGE, create_physical_typeface, repack_face, table_bytes_equal, verify_face,
+    };
+    use skia_safe::{Data, FontMgr};
     use write_fonts::types::Tag;
 
     #[test]
@@ -153,6 +156,30 @@ mod tests {
         let mut bytes = font_file_fixture::FONT_BYTES.to_vec();
         bytes[0] ^= 0xff;
         assert!(repack_face(&bytes, 0).is_err());
+    }
+
+    #[test]
+    fn missing_primary_face_returns_none() {
+        let data = Data::new_copy(b"not a font");
+        assert!(matches!(
+            create_physical_typeface(&data, 0, &FontMgr::default()),
+            Ok(None)
+        ));
+    }
+
+    #[test]
+    fn missing_collection_face_reports_repack_error() {
+        let data = Data::new_copy(b"not a font");
+        let result = create_physical_typeface(&data, 1, &FontMgr::default());
+        assert!(matches!(result, Err(error) if error.contains("TTC face 1 cannot be read")));
+    }
+
+    #[test]
+    fn rejects_corrupt_repacked_output() {
+        let result = verify_face(font_file_fixture::FONT_BYTES, 0, b"not a font");
+        assert!(
+            matches!(result, Err(error) if error.contains("repacked SFNT verification failed"))
+        );
     }
 
     #[test]
