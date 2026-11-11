@@ -1,6 +1,6 @@
 use super::{
-    clear_html_line_metrics_cache, html_line_metrics, html_line_metrics_cache_len,
-    html_text_baseline, html_text_baseline_for_text,
+    MAX_LINE_METRIC_CACHE, clear_html_line_metrics_cache, html_line_metrics,
+    html_line_metrics_cache_len, html_text_baseline, html_text_baseline_for_text,
 };
 
 const FILE_METRIC_SIZE: f32 = 16.0;
@@ -113,6 +113,28 @@ fn line_metrics_cache_clear_discards_previous_entries() -> Result<(), String> {
     html_line_metrics("日本語", family, 13.0, 400, false)
         .ok_or_else(|| "missing line metrics after clear".to_string())?;
     assert_eq!(html_line_metrics_cache_len(), 1);
+    Ok(())
+}
+
+#[test]
+fn line_metrics_cache_keeps_its_limit_for_distinct_labels() -> Result<(), String> {
+    clear_html_line_metrics_cache();
+    let measure = |text: &str| {
+        html_line_metrics(text, "Noto Sans, sans-serif", FILE_METRIC_SIZE, 400, false)
+            .ok_or_else(|| format!("missing line metrics for {text}"))
+    };
+    let first = "catalog item";
+    let expected = measure(first)?;
+    for index in 0..MAX_LINE_METRIC_CACHE {
+        measure(&format!("catalog item {index}"))?;
+        assert_eq!(
+            html_line_metrics_cache_len(),
+            (index + 2).min(MAX_LINE_METRIC_CACHE)
+        );
+    }
+    assert_eq!(measure(first)?, expected);
+    assert_eq!(html_line_metrics_cache_len(), MAX_LINE_METRIC_CACHE);
+    clear_html_line_metrics_cache();
     Ok(())
 }
 
