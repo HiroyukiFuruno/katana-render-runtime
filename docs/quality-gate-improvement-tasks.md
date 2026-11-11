@@ -3,6 +3,9 @@
 ## 現在の実行地点（2026-11-11、以下の過去結果と区別する）
 
 - [ ] 正式カバレッジ100%・未カバー0を達成した後、挙動と既存テスト結果を維持し、読み込み・キャッシュ等の共通処理とレンダラーの責務境界を精査・整理する。小さい差分ごとに関連テストを回収し、整理後のソースで描画・性能・完全品質ゲートを再検証する。自己レビュー後にDraft PR、Codexレビューと指摘修正、3 OS CI、保護マージ、公開へ進む。
+- [/] `a18a5870` の正式収集は、固定されたテスト専用ファイルの内容が変わったため、テスト起動前にキャッシュキー検査で実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-4wotvd21`）。`b47d4c2e` で固定ファイルを既定SHA-256と一致する内容に戻し、空の本体の検証を計測対象のMathJax変異テストに移した。既存のキャッシュキー検査は再試行で実0。除外対象と合格条件は維持。
+- [x] `5d18e170` でV8の入力配列は上限内でのみusizeへ変換し、出力配列はi32長を検証してからu32添字で書くようにした。MathJaxとV8の範囲・型・配列書込エラーを含む関連6件、foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-fixed-mathjax-pin-and-fragment-index-exact-k7jnjcsc/safe-summary.json`）。503行の正式値には未反映。
+- [x] `822862f7` で、実Noto Sansを使うSVG文字計測がNUL入り入力を明示的に拒否し、後続の正常入力に元と同じadvanceを返すことをV8から確認。関連3件、foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-svg-font-nul-recovery-exact-r4agi0aj/safe-summary.json`）。503行の正式値には未反映。
 - [/] `50242579` の正式計測は6,199件成功・別15件skip、86,765/87,268行（99.4236146125%）、未カバー503行。前回505行からTTC/SFNTテーブル処理で2行減少。SVG矩形の無効境界とBinary/SharedFile診断は未実行だった計測区間に到達し、該当ファイルの未カバー行数は同じ。収集実0、ソース前後一致、`coverage-policy` 実1（`tmp/quality/resumed-owner-r3509/root-coverage-current-threads4-4jdk1bcl/safe-summary.json`）。
 - [x] `b7449d1e` でMathJaxスクリプト本体の文を1件に制約する判定を一度にし、空・複数文・マクロでない本体のエラーを維持した。
 - [x] `e564fee7`・`3acdeec0` で、参照なし画像を省いても有効PNGと兄弟図形が維持されることと、Noto Sans同士は一致しYellowtailとは一致しないことを確認。初回のSVGはIDのあるグループと子の画像ノードを取り違えたため検証条件を修正。再試行で関連6件・foundation・ASTが成功（`tmp/quality/resumed-owner-r3509/coverage-mathjax-svg-reference-and-font-match-exact-oh1yfc6g/safe-summary.json`）。503行の正式値には未反映。
