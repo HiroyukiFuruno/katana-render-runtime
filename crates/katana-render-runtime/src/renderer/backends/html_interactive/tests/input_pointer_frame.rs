@@ -144,6 +144,49 @@ next.addEventListener('click', () => { events.textContent += 'click|'; });
     assert_listener_failure(&mut session, result, "input change failed", "change|")
 }
 
+#[test]
+fn input_listener_error_keeps_typed_dom_value() -> TestResult {
+    let html = r#"<input id="field"><p id="events"></p><script>
+const field = document.getElementById('field');
+const events = document.getElementById('events');
+field.addEventListener('input', () => { events.textContent += 'input|'; throw new Error('input listener failed'); });
+</script>"#;
+    let mut session = start(html)?;
+    click_element(&mut session, "field")?;
+    let result = session
+        .dispatch_input(HtmlBrowserInput::Text {
+            text: "typed".to_owned(),
+        })
+        .map_err(|error| error.to_string());
+    assert_listener_failure(&mut session, result, "input listener failed", "input|")?;
+    let value = session
+        .runtime
+        .observe_feature_state("document.getElementById('field').value")
+        .map_err(|error| error.to_string())?;
+    assert_eq!(value, "typed");
+    Ok(())
+}
+
+#[test]
+fn keyup_listener_error_keeps_event_without_rendering() -> TestResult {
+    let html = r#"<input id="field"><p id="events"></p><script>
+const field = document.getElementById('field');
+const events = document.getElementById('events');
+field.addEventListener('keyup', () => { events.textContent += 'keyup|'; throw new Error('keyup listener failed'); });
+</script>"#;
+    let mut session = start(html)?;
+    click_element(&mut session, "field")?;
+    let generation = session.generation;
+    let result = session
+        .dispatch_input(HtmlBrowserInput::KeyUp {
+            key: "A".to_owned(),
+        })
+        .map_err(|error| error.to_string());
+    assert_listener_failure(&mut session, result, "keyup listener failed", "keyup|")?;
+    assert_eq!(session.generation, generation);
+    Ok(())
+}
+
 fn assert_listener_failure(
     session: &mut HtmlInteractiveSession,
     result: TestResult,
