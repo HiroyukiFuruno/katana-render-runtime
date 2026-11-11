@@ -18,9 +18,7 @@ impl TextRasterizer for HtmlGlyphRasterizer<'_> {
             Prepared::Unsupported => return Ok(false),
             Prepared::Ready(value) => value,
         };
-        if prepared.is_empty() {
-            return Ok(true);
-        }
+        /* WHY: usvgは字形も装飾もないTextを保持しない。装飾だけの場合はprepareで既存経路へ戻る。 */
         let full_transform = transform.pre_concat(text.flattened().transform());
         self.render_prepared(prepared, text, full_transform, pixmap)
     }

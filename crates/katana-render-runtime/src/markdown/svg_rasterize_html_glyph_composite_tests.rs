@@ -44,6 +44,18 @@ fn opaque_regular_glyph_composite_matches_direct_skia() -> Result<(), String> {
     compare_compositing(&LIGHT_REGULAR)
 }
 
+#[test]
+fn empty_and_whitespace_only_text_never_reach_the_glyph_rasterizer() -> Result<(), String> {
+    for text in ["", " "] {
+        let tree = fixture_tree(&Fixture {
+            text,
+            ..LIGHT_REGULAR
+        })?;
+        assert!(tree.node_by_id("run").is_none(), "{text:?}");
+    }
+    Ok(())
+}
+
 fn compare_compositing(fixture: &Fixture) -> Result<(), String> {
     let tree = fixture_tree(fixture)?;
     let Some(Node::Text(text)) = tree.node_by_id("run") else {

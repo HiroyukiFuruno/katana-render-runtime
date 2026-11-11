@@ -2,6 +2,10 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定2件中2件完了。両方とも標準静的検査・ASTが成功し、検査したソースの前後一致を確認した。
+  - [x] HTMLのビューポートクリップとヒット判定で、変換済みの同じ四隅を重複して検査していた。座標変換と軸算出を共有し、座標を一度だけ検査する。関連45件成功（`tmp/quality/resumed-owner-r3509/release-clip-geometry-single-validation-qhbdgnu8/safe-summary.json`）。
+  - [x] SVGでは字形と装飾の両方がないテキストはusvgが保持しない。装飾のみなら既存のフォールバックへ進み、字形があれば準備済みの描画が必ず1件以上になるため、描画側の空チェックを除いた。空文字・空白だけの実SVGを追加し、関連209件成功（`tmp/quality/resumed-owner-r3509/release-svg-glyph-nonempty-zssm2hg8/safe-summary.json`）。
+
 - 対応予定3件中3件完了。標準静的検査・AST、関連Rust 30件が成功した（`tmp/quality/resumed-owner-r3509/release-input-and-oracle-boundaries-q55r6lfi/safe-summary.json`）。
   - [x] 幅ゼロのPNGヘッダーを含む実HTMLで、画像要素のレイアウトに自然寸法が使われず、既定の枠へ戻ることを確認した。既存の画像・SVGテストで描画用の設定を共用した。
   - [x] 公開HTML APIでフォーカス前に文字入力を送り、フレーム世代と全画素が変わらないことを確認した。
