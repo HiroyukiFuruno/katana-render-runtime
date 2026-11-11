@@ -19,40 +19,41 @@ const TEXT_SVG_HEIGHT: u32 = 48;
 
 #[test]
 fn image_without_a_source_does_not_emit_svg_image_content() -> TestResult {
-    let viewport = HtmlBrowserViewport::new(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT, 1.0)
-        .map_err(|error| error.to_string())?;
-    let nodes = vec![HtmlDocumentNode::Element {
-        node_id: 1,
-        tag: "img".to_string(),
-        attributes: Vec::new(),
-        children: Vec::new(),
-    }];
-    let layout = HtmlLayoutRenderer::render(&nodes, viewport, 0.0, &HashMap::new(), None)?;
-
-    assert!(!layout.svg.contains("<image"));
+    let svg = render_media_svg(&[media_element("img", Vec::new())])?;
+    assert!(!svg.contains("<image"));
     Ok(())
 }
 
 #[test]
 fn data_png_uses_natural_dimensions_instead_of_the_default_image_box() -> TestResult {
-    let viewport = HtmlBrowserViewport::new(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT, 1.0)
-        .map_err(|error| error.to_string())?;
-    let nodes = vec![HtmlDocumentNode::Element {
-        node_id: 1,
-        tag: "img".to_string(),
-        attributes: vec![(
-            "src".to_string(),
-            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=".to_string(),
-        )],
-        children: Vec::new(),
-    }];
-    let layout = HtmlLayoutRenderer::render(&nodes, viewport, 0.0, &HashMap::new(), None)?;
+    let image = media_element("img", vec![(
+        "src".to_string(),
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=".to_string(),
+    )]);
+    let svg = render_media_svg(&[image])?;
+    assert!(svg.contains(r#"width="1" height="1""#), "{svg}");
+    Ok(())
+}
 
-    assert!(
-        layout.svg.contains(r#"width="1" height="1""#),
-        "{}",
-        layout.svg
+#[test]
+fn html_image_with_zero_png_intrinsic_dimension_uses_default_box() -> TestResult {
+    use base64::Engine as _;
+
+    let header = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR\0\0\0\0\0\0\0\x01";
+    let source = format!(
+        "<div style=\"width:160px\"><img src=\"data:image/png;base64,{}\"></div>",
+        base64::engine::general_purpose::STANDARD.encode(header)
     );
+    let document = crate::renderer::backends::html_document::HtmlDocument::parse(&source);
+    let nodes = document.interactive_nodes_with_styles(&HashMap::new());
+    let markup = render_media_svg(&nodes)?;
+    let svg = roxmltree::Document::parse(&markup).map_err(|error| error.to_string())?;
+    let image = svg
+        .descendants()
+        .find(|node| node.has_tag_name("image"))
+        .ok_or("image missing from layout")?;
+    assert_eq!(image.attribute("width"), Some("160"));
+    assert_eq!(image.attribute("height"), Some("160"));
     Ok(())
 }
 
@@ -81,18 +82,24 @@ fn data_png_preserves_natural_ratio_under_width_and_height_constraints() {
 
 #[test]
 fn embedded_svg_without_serialized_markup_does_not_emit_svg_content() -> TestResult {
+    let svg = render_media_svg(&[media_element("svg", Vec::new())])?;
+    assert_eq!(svg.matches("<svg").count(), 1);
+    Ok(())
+}
+
+fn render_media_svg(nodes: &[HtmlDocumentNode]) -> TestResult<String> {
     let viewport = HtmlBrowserViewport::new(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT, 1.0)
         .map_err(|error| error.to_string())?;
-    let nodes = vec![HtmlDocumentNode::Element {
-        node_id: 1,
-        tag: "svg".to_string(),
-        attributes: Vec::new(),
-        children: Vec::new(),
-    }];
-    let layout = HtmlLayoutRenderer::render(&nodes, viewport, 0.0, &HashMap::new(), None)?;
+    Ok(HtmlLayoutRenderer::render(nodes, viewport, 0.0, &HashMap::new(), None)?.svg)
+}
 
-    assert_eq!(layout.svg.matches("<svg").count(), 1);
-    Ok(())
+fn media_element(tag: &str, attributes: Vec<(String, String)>) -> HtmlDocumentNode {
+    HtmlDocumentNode::Element {
+        node_id: 1,
+        tag: tag.to_string(),
+        attributes,
+        children: Vec::new(),
+    }
 }
 
 #[test]

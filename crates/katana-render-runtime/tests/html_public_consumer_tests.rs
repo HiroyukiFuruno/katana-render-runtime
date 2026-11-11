@@ -67,6 +67,28 @@ fn public_runtime_tabs_from_search_to_textarea_and_dispatches_input() -> TestRes
 }
 
 #[test]
+fn public_runtime_ignores_text_input_without_a_focused_control() -> TestResult {
+    let mut session = open_focus_session()?;
+    let initial = session.latest_frame().ok_or("initial frame missing")?;
+    let initial_generation = initial.generation;
+    let initial_pixels = initial.pixels.clone();
+
+    session.dispatch_input(HtmlBrowserInput::Text {
+        text: "query".into(),
+    })?;
+
+    let frame = session
+        .latest_frame()
+        .ok_or("frame missing after ignored input")?;
+    assert_eq!(frame.generation, initial_generation);
+    assert!(
+        frame.pixels == initial_pixels,
+        "unfocused input changed the frame"
+    );
+    Ok(())
+}
+
+#[test]
 fn public_runtime_preserves_typed_textarea_focus_and_value_across_resize() -> TestResult {
     let mut session = typed_focus_session()?;
     let resized = HtmlBrowserViewport::new(400, 300, 1.0)?;
@@ -88,9 +110,7 @@ fn public_runtime_preserves_typed_textarea_focus_and_value_across_resize() -> Te
 }
 
 fn typed_focus_session() -> TestResult<HtmlBrowserSession> {
-    let source = HtmlBrowserSource::new(FOCUS_SOURCE, "https://example.test/focus.html")?;
-    let viewport = HtmlBrowserViewport::new(WIDTH, HEIGHT, 1.0)?;
-    let mut session = HtmlRuntime.open(source, viewport)?;
+    let mut session = open_focus_session()?;
     for (text, marker_y) in FOCUS_CASES {
         let before = session.latest_frame().ok_or("initial frame missing")?;
         assert_eq!(pixel(before, FOCUS_MARKER_X, marker_y)?, BLUE);
@@ -100,6 +120,12 @@ fn typed_focus_session() -> TestResult<HtmlBrowserSession> {
         assert_eq!(pixel(frame, FOCUS_MARKER_X, marker_y)?, RED, "typed {text}");
     }
     Ok(session)
+}
+
+fn open_focus_session() -> TestResult<HtmlBrowserSession> {
+    let source = HtmlBrowserSource::new(FOCUS_SOURCE, "https://example.test/focus.html")?;
+    let viewport = HtmlBrowserViewport::new(WIDTH, HEIGHT, 1.0)?;
+    Ok(HtmlRuntime.open(source, viewport)?)
 }
 
 fn exercise_public_session(scale: f32) -> TestResult {
