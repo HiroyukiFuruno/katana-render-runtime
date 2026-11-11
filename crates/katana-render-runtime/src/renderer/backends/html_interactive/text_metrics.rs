@@ -171,27 +171,6 @@ fn insert_bounded_measurement(
     cache.insert(key, width);
 }
 
-#[cfg(test)]
-fn measured_text_width(text: &str, style: &CssStyle) -> f32 {
-    measured_text_width_with_status(text, style).0
-}
-
-#[cfg(test)]
-fn measured_text_width_with_status(text: &str, style: &CssStyle) -> (f32, bool) {
-    match SvgRasterizeOps::measure_html_text_with_cache_status(
-        text,
-        &style.font_family,
-        style.font_size,
-        style.font_weight,
-        style.italic,
-        style.letter_spacing,
-        style.font_feature_settings.as_deref(),
-    ) {
-        Ok(result) => result,
-        Err(_) => (heuristic_text_width(text, style), false),
-    }
-}
-
 fn heuristic_text_width(text: &str, style: &CssStyle) -> f32 {
     let spacing = text.chars().count().saturating_sub(1) as f32 * style.letter_spacing;
     text_display_columns(text) as f32 * style.font_size * style.text_character_width_factor()
@@ -199,72 +178,33 @@ fn heuristic_text_width(text: &str, style: &CssStyle) -> f32 {
 }
 
 #[cfg(test)]
+#[path = "text_metrics_persistent_tests.rs"]
+mod persistent_tests;
+
+#[cfg(test)]
 mod tests {
     use super::{
-        MAX_CACHED_MEASUREMENTS, PERSISTENT_TEXT_WIDTH_CACHE, TEXT_WIDTH_CACHE,
-        TextMeasurementCacheScope, TextMeasurementKey, heuristic_text_width,
-        insert_bounded_measurement, measured_text_width, text_width,
+        MAX_CACHED_MEASUREMENTS, TEXT_WIDTH_CACHE, TextMeasurementCacheScope, TextMeasurementKey,
+        heuristic_text_width, insert_bounded_measurement, text_width,
     };
-    #[cfg(not(target_os = "windows"))]
-    use super::{persistent::PersistentTextWidthCache, persistent::PersistentTextWidthKey};
-    #[cfg(not(target_os = "windows"))]
-    use crate::markdown::svg_rasterize::HtmlTextMeasurementTokenKey;
-    use crate::markdown::svg_rasterize::{HtmlTextMeasurementToken, SvgRasterizeOps};
+    use crate::markdown::svg_rasterize::SvgRasterizeOps;
     use crate::renderer::backends::html_interactive::style::CssStyle;
     use std::collections::HashMap;
 
-    fn platform_token(
-        text: &str,
-        family: &str,
-    ) -> Result<Option<HtmlTextMeasurementToken>, String> {
-        let (token, usable) = SvgRasterizeOps::with_html_font_render_scope(|| {
-            let token = SvgRasterizeOps::html_text_measurement_token(text, family);
-            let usable = token.as_ref().is_some_and(|token| token.is_usable());
-            (token, usable)
-        });
-        #[cfg(target_os = "windows")]
-        {
-            if token.is_some() || usable {
-                return Err("Windows token policy requires no durable token".to_string());
-            }
-            return Ok(None);
+    #[cfg(target_os = "macos")]
+    fn measured_text_width(text: &str, style: &CssStyle) -> f32 {
+        match SvgRasterizeOps::measure_html_text_with_cache_status(
+            text,
+            &style.font_family,
+            style.font_size,
+            style.font_weight,
+            style.italic,
+            style.letter_spacing,
+            style.font_feature_settings.as_deref(),
+        ) {
+            Ok((width, _)) => width,
+            Err(_) => heuristic_text_width(text, style),
         }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let token = token.ok_or("render scope token missing".to_string())?;
-            if !usable {
-                return Err("render scope token is not usable".to_string());
-            }
-            Ok(Some(token))
-        }
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    fn render_frame_width(text: &str, style: &CssStyle) -> f32 {
-        SvgRasterizeOps::with_html_font_render_scope(|| {
-            let _scope = TextMeasurementCacheScope::enter();
-            text_width(text, style)
-        })
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    fn build_bounded_cache(
-        token_key: HtmlTextMeasurementTokenKey,
-        style: &CssStyle,
-    ) -> Result<(PersistentTextWidthCache, PersistentTextWidthKey), String> {
-        let mut cache = PersistentTextWidthCache::default();
-        let mut last = None;
-        for index in 0..=MAX_CACHED_MEASUREMENTS {
-            let text = format!("persistent-bound-{index}");
-            let key = PersistentTextWidthKey::new(
-                TextMeasurementKey::new(&text, style),
-                token_key.clone(),
-            );
-            last = Some(key.clone());
-            cache.insert(key, index as f32);
-        }
-        last.map(|key| (cache, key))
-            .ok_or("bounded cache did not receive a key".to_string())
     }
 
     #[test]
@@ -336,84 +276,6 @@ mod tests {
         );
         let (_, shaped) = fallback.map_err(fallback_measurement_error)?;
         assert!(!shaped);
-        Ok(())
-    }
-
-    #[test]
-    fn persistent_width_reuse_requires_render_scope_and_survives_frame_scope() -> Result<(), String>
-    {
-        let style = CssStyle::browser_default();
-        let text = "persistent width scope probe";
-        PERSISTENT_TEXT_WIDTH_CACHE.with(|cache| cache.borrow_mut().clear_for_test());
-        let outside = text_width(text, &style);
-        assert!(outside > 0.0);
-        PERSISTENT_TEXT_WIDTH_CACHE.with(|cache| assert_eq!(cache.borrow().len(), 0));
-
-        let token = platform_token(text, &style.font_family)?;
-        #[cfg(target_os = "windows")]
-        {
-            assert!(
-                token.is_none(),
-                "Windows token policy requires no durable token"
-            );
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let token = token.ok_or("render scope token missing")?;
-            let first = render_frame_width(text, &style);
-            PERSISTENT_TEXT_WIDTH_CACHE.with(|cache| assert_eq!(cache.borrow().len(), 1));
-            let second = render_frame_width(text, &style);
-            assert_eq!(first, second);
-            PERSISTENT_TEXT_WIDTH_CACHE.with(|cache| assert_eq!(cache.borrow().len(), 1));
-            assert!(!token.is_usable());
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn persistent_width_cache_is_bounded_and_updates_existing_keys() -> Result<(), String> {
-        let style = CssStyle::browser_default();
-        let token = platform_token("persistent-bound-token", &style.font_family)?;
-        #[cfg(target_os = "windows")]
-        {
-            assert!(
-                token.is_none(),
-                "Windows token policy requires no durable token"
-            );
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let token = token.ok_or("render scope token missing")?;
-            let (mut cache, last) = build_bounded_cache(token.key(), &style)?;
-            assert_eq!(cache.len(), MAX_CACHED_MEASUREMENTS);
-            cache.insert(last.clone(), 99.0);
-            assert_eq!(cache.len(), MAX_CACHED_MEASUREMENTS);
-            assert_eq!(cache.get(&last), Some(99.0));
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn measurement_token_key_tracks_proof_identity() -> Result<(), String> {
-        let style = CssStyle::browser_default();
-        let first = platform_token("token identity A", &style.font_family)?;
-        #[cfg(target_os = "windows")]
-        {
-            assert!(
-                first.is_none(),
-                "Windows token policy requires no durable token"
-            );
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let first = first.ok_or("render scope token missing")?;
-            let same = platform_token("token identity B", &style.font_family)?
-                .ok_or("same-request token missing")?;
-            let other = platform_token("token identity A", "Noto Sans")?
-                .ok_or("alternate-request token missing")?;
-            assert_eq!(first.key(), same.key());
-            assert_ne!(first.key(), other.key());
-        }
         Ok(())
     }
 
