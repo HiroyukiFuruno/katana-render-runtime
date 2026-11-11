@@ -933,19 +933,10 @@ fn group_filters(
     bbox: Option<NonZeroRect>,
     cache: &mut Cache,
 ) -> Option<Vec<Arc<filter::Filter>>> {
-    let mut filters = Vec::new();
-    if state.parent_clip_path.is_none() {
-        if node.attribute(AId::Filter) == Some("none") {
-            // Do nothing.
-        } else if node.has_attribute(AId::Filter) {
-            if let Ok(f) = super::filter::convert(node, state, bbox, cache) {
-                filters = f;
-            } else {
-                return None;
-            }
-        }
+    if state.parent_clip_path.is_some() || node.attribute(AId::Filter) == Some("none") {
+        return Some(Vec::new());
     }
-    Some(filters)
+    super::filter::convert(node, state, bbox, cache).ok()
 }
 
 fn group_required(
