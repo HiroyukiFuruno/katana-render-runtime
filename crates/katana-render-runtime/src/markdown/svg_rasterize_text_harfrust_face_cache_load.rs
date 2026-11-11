@@ -127,7 +127,7 @@ pub(in super::super) fn commit_file_font(
     face_id: resvg::usvg::fontdb::ID,
     font: &FontHandle,
 ) -> bool {
-    let Some(CacheKey::File { generation, .. }) = font.key.as_ref() else {
+    let Some(key @ CacheKey::File { generation, .. }) = font.key.as_ref() else {
         return true;
     };
     if !generation.reusable() || !font.clean(database, face_id) {
@@ -138,8 +138,6 @@ pub(in super::super) fn commit_file_font(
         clear_cache();
         return true;
     }
-    if let Some(key) = font.key.clone() {
-        cache_font(key, font.clone());
-    }
+    cache_font(key.clone(), font.clone());
     true
 }
