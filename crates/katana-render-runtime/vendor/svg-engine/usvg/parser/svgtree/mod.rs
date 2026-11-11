@@ -383,11 +383,8 @@ impl<'a, 'input: 'a> SvgNode<'a, 'input> {
     #[inline]
     pub fn text(&self) -> &'a str {
         match self.d.kind {
-            NodeKind::Element { .. } => match self.first_child() {
-                Some(child) if child.is_text() => match self.doc.nodes[child.id.get_usize()].kind {
-                    NodeKind::Text(ref text) => text,
-                    _ => "",
-                },
+            NodeKind::Element { .. } => match self.first_child().map(|child| &child.d.kind) {
+                Some(NodeKind::Text(text)) => text,
                 _ => "",
             },
             NodeKind::Text(ref text) => text,
