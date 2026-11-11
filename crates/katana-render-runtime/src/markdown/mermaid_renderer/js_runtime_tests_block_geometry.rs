@@ -29,9 +29,9 @@ fn runtime_normalizes_block_nbsp_arrow_width() -> Result<(), String> {
                 &mermaid_js,
                 DiagramColorPreset::dark(),
             )
-        })?;
+        });
 
-    assert_block_nbsp_arrow_svg(&rendered)
+    rendered.and_then(|svg| assert_block_nbsp_arrow_svg(&svg))
 }
 
 fn block_nbsp_arrow_source() -> &'static str {
