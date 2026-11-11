@@ -82,6 +82,32 @@ fn normalized_observation_rejects_duplicate_and_nonfinite_axes() -> Result<(), S
 }
 
 #[test]
+fn design_coordinates_reject_invalid_variations_on_a_static_font() -> Result<(), String> {
+    let (database, face_id) = bundled_face()?;
+    let cases = [
+        (
+            vec![FontVariation::new(*b"wght", 400.0); 2],
+            "duplicate variation axis",
+        ),
+        (
+            vec![FontVariation::new(*b"wght", f32::NAN)],
+            "non-finite variation value",
+        ),
+    ];
+    for (variations, expected) in cases {
+        let result = super::variations::applied_design_coordinates(&database, face_id, &variations);
+        assert!(result.is_err_and(|error| error.contains(expected)));
+    }
+    Ok(())
+}
+
+#[test]
+fn observation_inputs_reject_a_later_nonfinite_font_size() {
+    let result = super::variations::validate_observation_inputs(&[], &[16.0, f32::INFINITY]);
+    assert_eq!(result, Err("non-finite font size"));
+}
+
+#[test]
 fn normalized_observation_rejects_a_removed_real_face() -> Result<(), String> {
     let (mut database, face_id) = bundled_face()?;
     database.remove_face(face_id);
