@@ -62,8 +62,14 @@ fn require_load(file: &syn::File) -> Result<(), String> {
     let Expr::If(branch) = local(&load.block, 0, "source")? else {
         return Err("resource-loader:source".into());
     };
-    if !matches!(branch.cond.as_ref(), Expr::MethodCall(value)
-        if value.method == "is_some" && value.args.is_empty() && ident(&value.receiver, "bundled"))
+    if !matches!(branch.cond.as_ref(), Expr::Let(value)
+        if ident(&value.expr, "bundled")
+            && matches!(value.pat.as_ref(), syn::Pat::TupleStruct(pattern)
+                if super::super::source::path_name(&pattern.path) == "Some"
+                    && pattern.elems.len() == 1
+                    && matches!(&pattern.elems[0], syn::Pat::Ident(name)
+                        if name.ident == "kind" && name.by_ref.is_none()
+                            && name.mutability.is_none() && name.subpat.is_none())))
     {
         return Err("resource-loader:source".into());
     }
@@ -96,13 +102,11 @@ fn require_load_branches(branch: &syn::ExprIf) -> Result<(), String> {
         return Err("resource-loader:source".into());
     };
     if file_branch.block.stmts.len() != FILE_LOAD_STATEMENTS
-        || !super::super::syntax::call_expr_path(
-            local(&file_branch.block, 0, "snapshot")?,
-            "ResourceBytes::snapshot",
-            &["path"],
-        )
-        || !matches!(method_call(local(&file_branch.block, 1, "text")?), Some(text)
-            if text.method == "text_handle" && text.args.is_empty() && ident(&text.receiver, "snapshot"))
+        || !matches!(local(&file_branch.block, 0, "snapshot")?, Expr::Try(value)
+            if super::super::syntax::call_expr_path(&value.expr, "ResourceBytes::snapshot", &["path"]))
+        || !matches!(local(&file_branch.block, 1, "text")?, Expr::Try(value)
+            if matches!(value.expr.as_ref(), Expr::MethodCall(text)
+                if text.method == "text_handle" && text.args.is_empty() && ident(&text.receiver, "snapshot")))
         || !matches!(tail(&file_branch.block)?, Expr::Struct(value)
             if super::super::source::path_name(&value.path) == "ResourceSource::File"
                 && value.rest.is_none() && value.fields.len() == 2
@@ -115,43 +119,13 @@ fn require_load_branches(branch: &syn::ExprIf) -> Result<(), String> {
 }
 
 fn require_static_branch(block: &Block) -> Result<(), String> {
-    let [Stmt::Expr(Expr::Match(value), None)] = block.stmts.as_slice() else {
+    let [Stmt::Expr(Expr::Call(source), None)] = block.stmts.as_slice() else {
         return Err("resource-loader:source".into());
     };
-    if !super::super::syntax::call_expr_path(&value.expr, "Self::read", &["path", "bundled"])
-        || value.arms.len() != 2
-        || !super::super::syntax::call_expr_path(
-            &value.arms[0].body,
-            "ResourceSource::Static",
-            &["text"],
-        )
-        || !matches!(&value.arms[0].pat, syn::Pat::TupleStruct(pattern)
-            if super::super::source::path_name(&pattern.path) == "Cow::Borrowed"
-                && matches!(pattern.elems.first(), Some(syn::Pat::Ident(name)) if name.ident == "text"))
-        || !matches!(&value.arms[1].pat, syn::Pat::TupleStruct(pattern)
-            if super::super::source::path_name(&pattern.path) == "Cow::Owned"
-                && pattern.elems.len() == 1 && matches!(&pattern.elems[0], syn::Pat::Wild(_)))
-    {
-        return Err("resource-loader:source".into());
-    }
-    require_owned_rejection(&value.arms[1].body)
-}
-
-fn require_owned_rejection(expression: &Expr) -> Result<(), String> {
-    let returned = match expression {
-        Expr::Return(value) => value,
-        Expr::Block(block) => match block.block.stmts.as_slice() {
-            [Stmt::Expr(Expr::Return(value), Some(_))] => value,
-            _ => return Err("resource-loader:source".into()),
-        },
-        _ => return Err("resource-loader:source".into()),
-    };
-    if !matches!(returned.expr.as_deref(), Some(Expr::Call(error))
-        if ident(&error.func, "Err") && error.args.len() == 1
-            && matches!(call(&error.args[0]), Some(other)
-                if ident(&other.func, "std::io::Error::other") && other.args.len() == 1
-                    && matches!(&other.args[0], Expr::Lit(value)
-                        if matches!(&value.lit, syn::Lit::Str(text) if text.value() == "bundled resource is not static"))))
+    if !ident(&source.func, "ResourceSource::Static")
+        || source.args.len() != 1
+        || !matches!(&source.args[0], Expr::Try(value)
+            if super::super::syntax::call_expr_path(&value.expr, "Self::read_bundled", &["kind"]))
     {
         return Err("resource-loader:source".into());
     }

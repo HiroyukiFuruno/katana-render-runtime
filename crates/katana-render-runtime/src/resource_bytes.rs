@@ -66,6 +66,7 @@ impl ResourceSnapshot {
                 .collect()
         })
     }
+    #[cfg(test)]
     pub(crate) fn text(&self) -> std::io::Result<&str> {
         match &self.content {
             ResourceContent::Text(text) => Ok(text.as_str()),
@@ -173,6 +174,7 @@ impl ResourceBytes {
         Ok(bytes)
     }
 
+    #[cfg(test)]
     pub(crate) fn read_text(path: &Path) -> std::io::Result<String> {
         Self::snapshot(path)?.text().map(str::to_owned)
     }

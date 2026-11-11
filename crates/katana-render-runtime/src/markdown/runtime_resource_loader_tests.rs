@@ -1,4 +1,5 @@
 use super::{BundledResource, RuntimeResourceLoader};
+use std::borrow::Cow;
 
 const CONCURRENT_READERS: usize = 4;
 const INVALID_UTF8: [u8; 1] = [0xff];
@@ -14,6 +15,7 @@ fn bundled_resources_share_the_same_immutable_source() -> std::io::Result<()> {
     ] {
         let first = RuntimeResourceLoader::read(&path, Some(kind))?;
         let second = RuntimeResourceLoader::read(&path, Some(kind))?;
+        assert!(matches!(&first, Cow::Borrowed(_)));
         assert_eq!(first.as_ptr(), second.as_ptr());
         assert_eq!(first, second);
         let loaded = RuntimeResourceLoader::load(&path, Some(kind))?;
@@ -41,8 +43,8 @@ fn external_resources_reflect_replacement_removal_and_invalid_utf8() -> std::io:
 fn check_updates(path: &std::path::Path, replacement: &std::path::Path) -> std::io::Result<()> {
     std::fs::write(path, "first")?;
     assert!(matches!(
-        RuntimeResourceLoader::read_file(path).as_deref(),
-        Ok("first")
+        RuntimeResourceLoader::read(path, None)?,
+        Cow::Owned(text) if text == "first"
     ));
     let first = RuntimeResourceLoader::load(path, None)?;
     let repeated = RuntimeResourceLoader::load(path, None)?;
@@ -83,14 +85,13 @@ fn check_parallel_reads(path: &std::path::Path) {
 
 fn check_read_failures(path: &std::path::Path) -> std::io::Result<()> {
     std::fs::write(path, INVALID_UTF8)?;
-    assert!(
-        RuntimeResourceLoader::read_file(path)
-            .is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidData)
-    );
+    assert_external_load_error(path, std::io::ErrorKind::InvalidData);
     std::fs::remove_file(path)?;
-    assert!(
-        RuntimeResourceLoader::read_file(path)
-            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
-    );
+    assert_external_load_error(path, std::io::ErrorKind::NotFound);
     Ok(())
+}
+
+fn assert_external_load_error(path: &std::path::Path, kind: std::io::ErrorKind) {
+    assert!(RuntimeResourceLoader::read_file(path).is_err_and(|error| error.kind() == kind));
+    assert!(RuntimeResourceLoader::load(path, None).is_err_and(|error| error.kind() == kind));
 }

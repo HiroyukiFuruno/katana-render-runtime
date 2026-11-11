@@ -1,7 +1,7 @@
 pub(super) const RESOURCE_READER_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[
     (
-        "Some(BundledResource::MathJax)",
-        "Some(_)",
+        "BundledResource::MathJax",
+        "BundledResource::Mermaid",
         "resource-loader:mathjax-role",
     ),
     (
@@ -10,11 +10,15 @@ pub(super) const RESOURCE_READER_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[
         "resource-loader:mathjax-source",
     ),
     (
-        "return Ok(Cow::Borrowed",
-        "return Err(Cow::Borrowed",
+        "return Ok(include_str!(",
+        "return Err(include_str!(",
         "resource-loader:mathjax-source",
     ),
-    ("None => return", "None =>", "resource-loader:external-role"),
+    (
+        "None => Self::read_file(path).map(Cow::Owned),",
+        "Some(_) => Self::read_file(path).map(Cow::Owned),",
+        "resource-loader:external-role",
+    ),
     (
         ".map(Cow::Owned),",
         ".map(other),",
@@ -31,18 +35,18 @@ pub(super) const RESOURCE_READER_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[
         "resource-loader:read-dispatch",
     ),
     (
-        "return Ok(Cow::Borrowed(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                )));",
+        "return Ok(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                ));",
         "return other;",
         "resource-loader:mathjax-source",
     ),
     (
-        "return Ok(Cow::Borrowed(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                )));",
+        "return Ok(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                ));",
         "return Ok(other);",
         "resource-loader:mathjax-source",
     ),
     (
-        "return Ok(Cow::Borrowed(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                )));",
-        "return Ok(Cow::Borrowed(other));",
+        "return Ok(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                ));",
+        "return Ok(other);",
         "resource-loader:mathjax-source",
     ),
     (

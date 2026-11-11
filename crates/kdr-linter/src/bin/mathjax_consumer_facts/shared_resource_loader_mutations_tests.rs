@@ -5,14 +5,9 @@ pub(in super::super) const SHARED_RESOURCE_LOADER_MUTATIONS: &[(&str, &str, &str
         "resource-loader:accessors",
     ),
     (
-        "let source = if bundled.is_some() {",
-        "let extra = ();\n        let source = if bundled.is_some() {",
+        "let source = if let Some(kind) = bundled {",
+        "let extra = ();\n        let source = if let Some(kind) = bundled {",
         "resource-loader:load-body",
-    ),
-    (
-        "match Self::read(path, bundled)? {\n                Cow::Borrowed(text) => ResourceSource::Static(text),\n                Cow::Owned(_) => {\n                    return Err(std::io::Error::other(\"bundled resource is not static\"));\n                }\n            }",
-        "Self::read(path, bundled)?",
-        "resource-loader:source",
     ),
     (
         "match &self.source {\n            ResourceSource::Static(text) => text,\n            ResourceSource::File { text, .. } => text.as_str(),\n        }",
@@ -35,7 +30,7 @@ pub(in super::super) const SHARED_RESOURCE_LOADER_MUTATIONS: &[(&str, &str, &str
         "resource-loader:tail",
     ),
     (
-        "let source = if bundled.is_some() {\n            match Self::read(path, bundled)? {\n                Cow::Borrowed(text) => ResourceSource::Static(text),\n                Cow::Owned(_) => {\n                    return Err(std::io::Error::other(\"bundled resource is not static\"));\n                }\n            }\n        } else {\n            let snapshot = ResourceBytes::snapshot(path)?;\n            let text = snapshot.text_handle()?;\n            ResourceSource::File { snapshot, text }\n        };",
+        "let source = if let Some(kind) = bundled {\n            ResourceSource::Static(Self::read_bundled(kind)?)\n        } else {\n            let snapshot = ResourceBytes::snapshot(path)?;\n            let text = snapshot.text_handle()?;\n            ResourceSource::File { snapshot, text }\n        };",
         "let source = ResourceSource::Static(\"\");",
         "resource-loader:source",
     ),
@@ -50,18 +45,18 @@ pub(in super::super) const SHARED_RESOURCE_LOADER_MUTATIONS: &[(&str, &str, &str
         "resource-loader:source",
     ),
     (
-        "if bundled.is_some() {",
-        "if bundled.is_none() {",
+        "if let Some(kind) = bundled {",
+        "if let Some(_kind) = bundled {",
         "resource-loader:source",
     ),
     (
-        "Cow::Borrowed(text) => ResourceSource::Static(text)",
-        "Cow::Borrowed(text) => ResourceSource::Static(other)",
+        "ResourceSource::Static(Self::read_bundled(kind)?)",
+        "ResourceSource::File { snapshot, text }",
         "resource-loader:source",
     ),
     (
-        "bundled resource is not static",
-        "different error",
+        "ResourceSource::Static(Self::read_bundled(kind)?)",
+        "ResourceSource::Static(Self::read_bundled(BundledResource::Drawio)?)",
         "resource-loader:source",
     ),
     (
@@ -85,8 +80,8 @@ pub(in super::super) const SHARED_RESOURCE_LOADER_MUTATIONS: &[(&str, &str, &str
         "resource-loader:accessors",
     ),
     (
-        "None => return Self::read_file(path).map(Cow::Owned)",
-        "None => return Self::read_file(other).map(Cow::Owned)",
+        "None => Self::read_file(path).map(Cow::Owned),",
+        "None => Self::read_file(other).map(Cow::Owned),",
         "resource-loader:external-role",
     ),
     (
@@ -107,11 +102,6 @@ pub(in super::super) const SHARED_RESOURCE_LOADER_MUTATIONS: &[(&str, &str, &str
     (
         "ResourceSource::File { snapshot, text }",
         "ResourceSource::File { snapshot, text: other }",
-        "resource-loader:source",
-    ),
-    (
-        "Cow::Borrowed(text) => ResourceSource::Static(text),",
-        "Cow::Borrowed(other) => ResourceSource::Static(text),",
         "resource-loader:source",
     ),
 ];

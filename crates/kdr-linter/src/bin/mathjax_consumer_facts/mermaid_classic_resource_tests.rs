@@ -14,28 +14,28 @@ const RESOURCE_BYTES_INDEX: usize = 9;
 
 const LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
-        "Some(BundledResource::Mermaid) => RuntimeAsset::mermaid()\n                .bytes()\n                .map_err(std::io::Error::other)?,",
-        "Some(BundledResource::Mermaid) => other?,",
+        "BundledResource::Mermaid => RuntimeAsset::mermaid()\n                .bytes()\n                .map_err(std::io::Error::other)?,",
+        "BundledResource::Mermaid => other?,",
         "mermaid-resource-route:bundled",
     ),
     (
-        "std::str::from_utf8(source)\n            .map(Cow::Borrowed)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
+        "std::str::from_utf8(source)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
         "source",
         "mermaid-resource-route:utf8",
     ),
     (
-        "std::str::from_utf8(source)\n            .map(Cow::Borrowed)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
-        "std::str::from_utf8(source).map(Cow::Borrowed).map(|error| error)",
+        "std::str::from_utf8(source)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
+        "std::str::from_utf8(source)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))",
         "mermaid-resource-route:utf8",
     ),
     (
-        "std::str::from_utf8(source)\n            .map(Cow::Borrowed)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
+        "std::str::from_utf8(source)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
         "source.map_err(|error| error)",
         "mermaid-resource-route:utf8",
     ),
     (
-        "Some(BundledResource::Mermaid) => RuntimeAsset::mermaid()\n                .bytes()\n                .map_err(std::io::Error::other)?,",
-        "Some(BundledResource::Mermaid) => RuntimeAsset::mermaid()\n                .bytes()\n                .map_err(std::io::Error::other),",
+        "BundledResource::Mermaid => RuntimeAsset::mermaid()\n                .bytes()\n                .map_err(std::io::Error::other)?,",
+        "BundledResource::Mermaid => RuntimeAsset::mermaid()\n                .bytes()\n                .map_err(std::io::Error::other),",
         "mermaid-resource-route:bundled",
     ),
     (
@@ -44,8 +44,8 @@ const LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
         "resource-loader:read-dispatch",
     ),
     (
-        "None => return Self::read_file(path).map(Cow::Owned)",
-        "ref None => return Self::read_file(path).map(Cow::Owned)",
+        "None => Self::read_file(path).map(Cow::Owned),",
+        "ref None => Self::read_file(path).map(Cow::Owned),",
         "mermaid-resource-route:external",
     ),
     (
@@ -56,7 +56,7 @@ const LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
         ".map(Cow::Borrowed)",
         ".map(Cow::Owned)",
-        "mermaid-resource-route:utf8",
+        "resource-loader:read-dispatch",
     ),
     (
         "RuntimeAsset::mermaid()",
@@ -64,8 +64,8 @@ const LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
         "mermaid-resource-route:bundled",
     ),
     (
-        "Some(BundledResource::Mermaid) => RuntimeAsset::mermaid()",
-        "Some(BundledResource::Drawio) => RuntimeAsset::mermaid()",
+        "BundledResource::Mermaid => RuntimeAsset::mermaid()",
+        "BundledResource::Drawio => RuntimeAsset::mermaid()",
         "mermaid-resource-route:bundled",
     ),
 ];
@@ -250,8 +250,8 @@ const LOADER_PRIORITY_CASES: &[LoaderPriorityCase] = &[
     LoaderPriorityCase {
         replacements: [
             (
-                "None => return Self::read_file(path).map(Cow::Owned)",
-                "ref None => return Self::read_file(path).map(Cow::Owned)",
+                "None => Self::read_file(path).map(Cow::Owned),",
+                "ref None => Self::read_file(path).map(Cow::Owned),",
             ),
             TERMINATED_TAIL,
         ],

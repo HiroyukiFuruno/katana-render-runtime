@@ -1,4 +1,4 @@
-use super::{require_load_branches, require_load_result, require_owned_rejection};
+use super::{require_load_branches, require_load_result, require_static_branch};
 
 fn assert_rejected<T: syn::parse::Parse>(
     sources: &[&str],
@@ -44,19 +44,47 @@ fn loader_rejects_missing_or_conditional_file_branch() -> Result<(), Box<dyn std
 }
 
 #[test]
-fn bundled_owned_resource_must_return_the_precise_error() -> Result<(), Box<dyn std::error::Error>>
-{
+fn bundled_branch_requires_typed_helper_and_error_propagation()
+-> Result<(), Box<dyn std::error::Error>> {
     assert_rejected(
         &[
-            "Err(std::io::Error::other(\"bundled resource is not static\"))",
-            "return Err(std::io::Error::other(\"different error\"))",
-            "{ let result = Err(std::io::Error::other(\"bundled resource is not static\")); result }",
+            "{ ResourceSource::Static(Self::read_bundled(other)?) }",
+            "{ ResourceSource::Static(Self::read(kind)?) }",
+            "{ ResourceSource::Static(Self::read_bundled(kind)) }",
+            "{ ResourceSource::Static(Self::read_bundled(kind)?, other) }",
         ],
-        require_owned_rejection,
+        require_static_branch,
         "resource-loader:source",
     )?;
-    let valid =
-        syn::parse_str("return Err(std::io::Error::other(\"bundled resource is not static\"))")?;
-    assert!(require_owned_rejection(&valid).is_ok());
+    let valid = syn::parse_str("{ ResourceSource::Static(Self::read_bundled(kind)?) }")?;
+    assert!(require_static_branch(&valid).is_ok());
+    Ok(())
+}
+
+#[test]
+fn loader_requires_exact_bundled_binding_and_file_operations()
+-> Result<(), Box<dyn std::error::Error>> {
+    let canonical = "if let Some(kind) = bundled { ResourceSource::Static(Self::read_bundled(kind)?) } else { let snapshot = ResourceBytes::snapshot(path)?; let text = snapshot.text_handle()?; ResourceSource::File { snapshot, text } }";
+    let validate = |source: &str| -> Result<(), Box<dyn std::error::Error>> {
+        let file = syn::parse_str(&format!(
+            "impl RuntimeResourceLoader {{ fn load() {{ let source = {source}; Ok(LoadedResource {{ source }}) }} }}"
+        ))?;
+        assert!(super::require_load(&file).is_err());
+        Ok(())
+    };
+    for replacement in [
+        canonical.replace("Some(kind) = bundled", "Some(kind) = other"),
+        canonical.replace("Some(kind) = bundled", "Some(other) = bundled"),
+        canonical.replace("snapshot(path)?", "snapshot(other)?"),
+        canonical.replace("snapshot(path)?", "snapshot(path)"),
+        canonical.replace("snapshot.text_handle()?", "snapshot.text_handle()"),
+        canonical.replace("snapshot.text_handle()?", "other.text_handle()?"),
+    ] {
+        validate(&replacement)?;
+    }
+    let file = syn::parse_str(&format!(
+        "impl RuntimeResourceLoader {{ fn load() {{ let source = {canonical}; Ok(LoadedResource {{ source }}) }} }}"
+    ))?;
+    assert!(super::require_load(&file).is_ok());
     Ok(())
 }

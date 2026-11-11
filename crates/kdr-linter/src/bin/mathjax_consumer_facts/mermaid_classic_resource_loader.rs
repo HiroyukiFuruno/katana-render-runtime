@@ -1,5 +1,6 @@
+use super::super::bundle::ResourceReader;
 use super::super::consumer::require_direct_call;
-use super::super::source::{Source, ident};
+use super::super::source::Source;
 use syn::Expr;
 
 const ERROR: &str = "mermaid-resource-route";
@@ -11,36 +12,21 @@ pub(super) fn inspect(source: &Source) -> Result<(), String> {
 
 fn inspect_read(verified: super::super::bundle::ValidatedResourceRead<'_>) -> Result<(), String> {
     super::scripts::parameters(&verified.read.sig, &["path", "bundled"])?;
+    super::scripts::parameters(&verified.bundled_read.sig, &["bundled"])?;
     inspect_bundled(verified.bundled)?;
     inspect_external(
         verified.external,
         verified.external_map,
-        super::tail(&verified.read.block)?,
+        super::tail(&verified.bundled_read.block)?,
     )
 }
 
 fn inspect_bundled(first: &syn::Arm) -> Result<(), String> {
-    if !matches!(&first.pat, syn::Pat::TupleStruct(value)
-        if super::super::source::path_name(&value.path) == "Some"
-            && value.elems.len() == 1 && matches!(&value.elems[0], syn::Pat::Path(path)
-                if super::super::source::path_name(&path.path) == "BundledResource::Mermaid"))
-    {
-        return Err(format!("{ERROR}:bundled"));
-    }
-    let Expr::Try(value) = first.body.as_ref() else {
-        return Err(format!("{ERROR}:bundled"));
-    };
-    let Expr::MethodCall(mapped) = value.expr.as_ref() else {
-        return Err(format!("{ERROR}:bundled"));
-    };
-    if mapped.method != "map_err"
-        || mapped.args.len() != 1
-        || !ident(&mapped.args[0], "std::io::Error::other")
-        || !matches!(mapped.receiver.as_ref(), Expr::MethodCall(bytes)
-            if bytes.method == "bytes" && bytes.args.is_empty()
-                && matches!(bytes.receiver.as_ref(), Expr::Call(call)
-                    if ident(&call.func, "RuntimeAsset::mermaid") && call.args.is_empty()))
-    {
+    if !ResourceReader::archive_arm_matches(
+        first,
+        "BundledResource::Mermaid",
+        "RuntimeAsset::mermaid",
+    ) {
         return Err(format!("{ERROR}:bundled"));
     }
     Ok(())
@@ -68,12 +54,20 @@ fn inspect_utf8(tail: &Expr) -> Result<(), String> {
     if errors.method != "map_err" || errors.args.len() != 1 {
         return Err(format!("{ERROR}:utf8"));
     }
-    let Expr::MethodCall(borrow) = errors.receiver.as_ref() else {
+    let Expr::Closure(closure) = &errors.args[0] else {
         return Err(format!("{ERROR}:utf8"));
     };
-    if borrow.method != "map" || borrow.args.len() != 1 || !ident(&borrow.args[0], "Cow::Borrowed")
+    if closure.inputs.len() != 1
+        || !matches!(&closure.inputs[0], syn::Pat::Ident(value)
+            if value.ident == "error" && value.by_ref.is_none() && value.mutability.is_none()
+                && value.subpat.is_none())
+        || !super::super::syntax::call_expr_path(
+            &closure.body,
+            "std::io::Error::new",
+            &["std::io::ErrorKind::InvalidData", "error"],
+        )
     {
         return Err(format!("{ERROR}:utf8"));
     }
-    require_direct_call(&borrow.receiver, "std::str::from_utf8", &["source"], ERROR)
+    require_direct_call(&errors.receiver, "std::str::from_utf8", &["source"], ERROR)
 }

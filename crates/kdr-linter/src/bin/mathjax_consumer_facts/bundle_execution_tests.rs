@@ -11,18 +11,23 @@ use bundle_structure_mutations::BUNDLE_STRUCTURE_MUTATIONS;
 
 const MATHJAX_RESOURCE_LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
+        "RuntimeAsset::drawio()",
+        "RuntimeAsset::mermaid()",
+        "resource-loader:drawio-source",
+    ),
+    (
         "diagram_runtime/generated/mathjax-runtime.min.js",
         "other.js",
         "resource-loader:mathjax-source",
     ),
     (
-        "Some(BundledResource::MathJax) => {",
-        "Some(BundledResource::Drawio) => {",
+        "BundledResource::MathJax => {",
+        "BundledResource::Drawio => {",
         "resource-loader:mathjax-role",
     ),
     (
-        "return Ok(Cow::Borrowed(include_str!(",
-        "return Ok(Cow::Owned(include_str!(",
+        "return Ok(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                ));",
+        "return Ok(other);",
         "resource-loader:mathjax-source",
     ),
 ];

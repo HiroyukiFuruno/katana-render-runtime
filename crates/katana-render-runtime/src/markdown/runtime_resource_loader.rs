@@ -1,7 +1,9 @@
 use crate::markdown::runtime_assets::RuntimeAsset;
 use crate::markdown::{DiagramBlock, DiagramResult};
 use crate::resource_bytes::{ResourceBytes, ResourceSnapshot};
-use std::{borrow::Cow, path::Path, sync::Arc};
+#[cfg(test)]
+use std::borrow::Cow;
+use std::{path::Path, sync::Arc};
 
 #[derive(Clone, Copy)]
 pub(crate) enum BundledResource {
@@ -70,13 +72,8 @@ impl RuntimeResourceLoader {
         path: &Path,
         bundled: Option<BundledResource>,
     ) -> std::io::Result<LoadedResource> {
-        let source = if bundled.is_some() {
-            match Self::read(path, bundled)? {
-                Cow::Borrowed(text) => ResourceSource::Static(text),
-                Cow::Owned(_) => {
-                    return Err(std::io::Error::other("bundled resource is not static"));
-                }
-            }
+        let source = if let Some(kind) = bundled {
+            ResourceSource::Static(Self::read_bundled(kind)?)
         } else {
             let snapshot = ResourceBytes::snapshot(path)?;
             let text = snapshot.text_handle()?;
@@ -85,30 +82,37 @@ impl RuntimeResourceLoader {
         Ok(LoadedResource { source })
     }
 
+    #[cfg(test)]
     pub(crate) fn read_file(path: &Path) -> std::io::Result<String> {
         crate::resource_bytes::ResourceBytes::read_text(path)
     }
 
+    #[cfg(test)]
     pub(crate) fn read(
         path: &Path,
         bundled: Option<BundledResource>,
     ) -> std::io::Result<Cow<'static, str>> {
+        match bundled {
+            Some(kind) => Self::read_bundled(kind).map(Cow::Borrowed),
+            None => Self::read_file(path).map(Cow::Owned),
+        }
+    }
+
+    fn read_bundled(bundled: BundledResource) -> std::io::Result<&'static str> {
         let source = match bundled {
-            Some(BundledResource::Mermaid) => RuntimeAsset::mermaid()
+            BundledResource::Mermaid => RuntimeAsset::mermaid()
                 .bytes()
                 .map_err(std::io::Error::other)?,
-            Some(BundledResource::Drawio) => RuntimeAsset::drawio()
+            BundledResource::Drawio => RuntimeAsset::drawio()
                 .bytes()
                 .map_err(std::io::Error::other)?,
-            Some(BundledResource::MathJax) => {
-                return Ok(Cow::Borrowed(include_str!(
+            BundledResource::MathJax => {
+                return Ok(include_str!(
                     "diagram_runtime/generated/mathjax-runtime.min.js"
-                )));
+                ));
             }
-            None => return Self::read_file(path).map(Cow::Owned),
         };
         std::str::from_utf8(source)
-            .map(Cow::Borrowed)
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
     }
 }

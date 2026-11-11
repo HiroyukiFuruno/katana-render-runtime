@@ -58,17 +58,38 @@ fn render_request_and_response_call_bindings_are_checked() -> Result<(), Box<dyn
     )
 }
 
+const SHARED_READER_DISPATCH_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "        match bundled {",
+        "        match other {",
+        "resource-loader:read-dispatch",
+    ),
+    (
+        "Some(kind) => Self::read_bundled(kind).map(Cow::Borrowed),",
+        "",
+        "resource-loader:read-dispatch",
+    ),
+    (
+        "Some(kind) => Self::read_bundled(kind).map(Cow::Borrowed),",
+        "Some(kind) => Self::read_file(path).map(Cow::Borrowed),",
+        "resource-loader:read-dispatch",
+    ),
+    (
+        "None => Self::read_file(path).map(Cow::Owned),",
+        "Some(_) => Self::read_file(path).map(Cow::Owned),",
+        "resource-loader:external-role",
+    ),
+    (
+        "None => Self::read_file(path).map(Cow::Owned),",
+        "None => other,",
+        "resource-loader:external-role",
+    ),
+];
+
 #[test]
 fn shared_reader_rejects_invalid_dispatch_shapes() -> Result<(), Box<dyn std::error::Error>> {
     let fixture = mathjax_fixture()?;
-    fixture.reject_unique_mutations(RUST_INPUTS[9], &[
-        ("let source = match bundled {\n            Some(BundledResource::Mermaid) => RuntimeAsset::mermaid()\n                .bytes()\n                .map_err(std::io::Error::other)?,\n            Some(BundledResource::Drawio) => RuntimeAsset::drawio()\n                .bytes()\n                .map_err(std::io::Error::other)?,\n            Some(BundledResource::MathJax) => {\n                return Ok(Cow::Borrowed(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                )));\n            }\n            None => return Self::read_file(path).map(Cow::Owned),\n        };", "let source = other;", "resource-loader:read-dispatch"),
-        ("Some(BundledResource::Drawio) => RuntimeAsset::drawio()\n                .bytes()\n                .map_err(std::io::Error::other)?,", "", "resource-loader:read-dispatch"),
-        ("Some(BundledResource::MathJax) => {\n                return Ok(Cow::Borrowed(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                )));\n            }", "Some(BundledResource::MathJax) => other,", "resource-loader:mathjax-source"),
-        ("Some(BundledResource::MathJax) => {\n                return Ok(Cow::Borrowed(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                )));\n            }", "Some(BundledResource::MathJax) => { other },", "resource-loader:mathjax-source"),
-        ("None => return Self::read_file(path).map(Cow::Owned)", "_ => return Self::read_file(path).map(Cow::Owned)", "resource-loader:external-role"),
-        ("None => return Self::read_file(path).map(Cow::Owned)", "None => return other", "resource-loader:external-role"),
-    ])
+    fixture.reject_unique_mutations(RUST_INPUTS[9], SHARED_READER_DISPATCH_MUTATIONS)
 }
 
 #[test]
