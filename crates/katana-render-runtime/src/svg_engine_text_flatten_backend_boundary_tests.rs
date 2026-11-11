@@ -65,6 +65,63 @@ fn backend_has_glyph(
 }
 
 #[test]
+fn bitmap_text_in_clip_does_not_expand_the_vector_clip_region() -> TestResult<()> {
+    let options = bitmap_clip_options()?;
+    let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">
+      <defs><clipPath id="clip"><rect x="1" y="1" width="4" height="4"/>
+      <text x="12" y="24" font-size="16">😀</text></clipPath></defs>
+      <rect width="32" height="32" fill="blue" clip-path="url(#clip)"/></svg>"##;
+    let tree = usvg::Tree::from_str(source, &options).map_err(|error| error.to_string())?;
+    let clip = tree.clip_paths().first().ok_or("clip path missing")?;
+    assert!(
+        contains_bitmap(clip.root()),
+        "clip fixture did not produce a bitmap"
+    );
+    let actual = render_clip_fixture(&tree)?;
+    let expected = render_clip_fixture(
+        &usvg::Tree::from_str(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">
+          <rect x="1" y="1" width="4" height="4" fill="blue"/></svg>"#,
+            &options,
+        )
+        .map_err(|error| error.to_string())?,
+    )?;
+    assert_eq!(actual.data(), expected.data());
+    Ok(())
+}
+
+fn bitmap_clip_options() -> TestResult<usvg::Options<'static>> {
+    let (fontdb, face_id) = fixture_database(CBDT_FONT)?;
+    let family = fontdb
+        .face(face_id)
+        .and_then(|face| face.families.first())
+        .ok_or("bitmap font family missing")?
+        .0
+        .clone();
+    Ok(usvg::Options {
+        fontdb,
+        font_family: family,
+        ..usvg::Options::default()
+    })
+}
+
+fn contains_bitmap(group: &usvg::Group) -> bool {
+    group.children().iter().any(|node| match node {
+        usvg::Node::Image(image) => matches!(image.kind(), usvg::ImageKind::PNG(_)),
+        usvg::Node::Text(text) => contains_bitmap(text.flattened()),
+        usvg::Node::Group(group) => contains_bitmap(group),
+        usvg::Node::Path(_) => false,
+    })
+}
+
+fn render_clip_fixture(tree: &usvg::Tree) -> TestResult<tiny_skia::Pixmap> {
+    let size = tree.size().to_int_size();
+    let mut pixmap = tiny_skia::Pixmap::new(size.width(), size.height()).ok_or("pixmap missing")?;
+    crate::svg_engine::resvg::render(tree, tiny_skia::Transform::identity(), &mut pixmap.as_mut());
+    Ok(pixmap)
+}
+
+#[test]
 fn shared_svg_document_selects_the_requested_glyph_node() -> TestResult<()> {
     let (database, face) = fixture_database(SHARED_SVG_FONT)?;
     for (character, expected_id) in [('🌓', "glyph1"), ('🥳', "glyph2")] {
