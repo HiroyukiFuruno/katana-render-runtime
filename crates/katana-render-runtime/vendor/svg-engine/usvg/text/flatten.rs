@@ -388,19 +388,15 @@ fn png_bitmap_image(
 }
 
 fn png_glyph_image(image: &BitmapGlyph<'_>, data: &[u8]) -> Option<Image> {
+    let size = Size::from_wh(image.width as f32, image.height as f32)?;
     Some(Image {
         id: String::new(),
         visible: true,
-        size: Size::from_wh(image.width as f32, image.height as f32)?,
+        size,
         rendering_mode: ImageRendering::OptimizeQuality,
         kind: ImageKind::PNG(Arc::new(data.to_vec())),
         abs_transform: Transform::default(),
-        abs_bounding_box: NonZeroRect::from_xywh(
-            0.0,
-            0.0,
-            image.width as f32,
-            image.height as f32,
-        )?,
+        abs_bounding_box: size.to_non_zero_rect(0.0, 0.0),
     })
 }
 

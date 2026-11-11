@@ -35,7 +35,7 @@ fn assert_png_glyph_zero_dimensions_rejected(bytes: &[u8], character: char) -> R
     let BitmapData::Png(data) = &bitmap.data else {
         return Err("bitmap fixture glyph is not PNG data".to_owned());
     };
-    assert!(png_glyph_image(&bitmap, data).is_some());
+    assert_png_glyph_bounds(&bitmap, data)?;
     for (width, height) in [
         (ZERO_DIMENSION, bitmap.height),
         (bitmap.width, ZERO_DIMENSION),
@@ -47,5 +47,14 @@ fn assert_png_glyph_zero_dimensions_rejected(bytes: &[u8], character: char) -> R
         };
         assert!(png_glyph_image(&invalid, data).is_none());
     }
+    Ok(())
+}
+
+fn assert_png_glyph_bounds(bitmap: &BitmapGlyph<'_>, data: &[u8]) -> Result<(), String> {
+    let image = png_glyph_image(bitmap, data).ok_or("valid bitmap image missing")?;
+    let bounds = image.abs_bounding_box;
+    assert_eq!((bounds.x(), bounds.y()), (0.0, 0.0));
+    assert_eq!(bounds.width(), bitmap.width as f32);
+    assert_eq!(bounds.height(), bitmap.height as f32);
     Ok(())
 }
