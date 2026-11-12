@@ -803,15 +803,10 @@ fn has_text_paths(parent: &Group) -> bool {
             if has_text_paths(group) {
                 return true;
             }
-        } else if let Node::Text(text) = node {
-            for chunk in &text.chunks {
-                if let TextFlow::Path(text_path) = &chunk.text_flow {
-                    let path = text_path_element(text_path);
-                    if path.is_some() {
-                        return true;
-                    }
-                }
-            }
+        } else if let Node::Text(text) = node
+            && text.chunks.iter().any(|chunk| matches!(chunk.text_flow, TextFlow::Path(_)))
+        {
+            return true;
         }
         let mut need_path = false;
         node.subroots(|subroot| {
@@ -834,10 +829,7 @@ fn write_text_path_paths(parent: &Group, opt: &WriteOptions, xml: &mut XmlWriter
         } else if let Node::Text(text) = node {
             for chunk in &text.chunks {
                 if let TextFlow::Path(text_path) = &chunk.text_flow {
-                    let path = text_path_element(text_path);
-                    if let Some(path) = &path {
-                        write_path(path, false, Transform::default(), None, opt, xml);
-                    }
+                    write_text_path_definition(text_path, opt, xml);
                 }
             }
         }
@@ -846,17 +838,13 @@ fn write_text_path_paths(parent: &Group, opt: &WriteOptions, xml: &mut XmlWriter
     }
 }
 
-fn text_path_element(text_path: &TextPath) -> Option<Path> {
-    Path::new(
-        text_path.id().to_string(),
-        true,
-        None,
-        None,
-        PaintOrder::default(),
-        ShapeRendering::default(),
-        text_path.path.clone(),
-        Transform::default(),
-    )
+fn write_text_path_definition(text_path: &TextPath, opt: &WriteOptions, xml: &mut XmlWriter) {
+    /* WHY: 参照定義は描画境界を必要とせず、境界計算が溢れても有限な座標を保持する。 */
+    xml.start_svg_element(EId::Path);
+    xml.write_id_attribute(text_path.id(), opt);
+    xml.write_svg_attribute(AId::Fill, "none");
+    write_path_data(text_path.path(), opt, xml);
+    xml.end_element();
 }
 
 fn write_elements(parent: &Group, is_clip_path: bool, opt: &WriteOptions, xml: &mut XmlWriter) {
@@ -1461,13 +1449,13 @@ fn write_path(
 
     xml.write_transform(AId::Transform, path_transform, opt);
 
-    write_path_data(path, opt, xml);
+    write_path_data(&path.data, opt, xml);
     xml.end_element();
 }
 
-fn write_path_data(path: &Path, opt: &WriteOptions, xml: &mut XmlWriter) {
+fn write_path_data(data: &tiny_skia_path::Path, opt: &WriteOptions, xml: &mut XmlWriter) {
     xml.write_attribute_raw("d", |buf| {
-        for seg in path.data.segments() {
+        for seg in data.segments() {
             write_path_segment(seg, buf, opt.coordinates_precision);
         }
 

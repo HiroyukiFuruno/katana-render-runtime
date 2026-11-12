@@ -427,9 +427,9 @@
       "source": "crates/usvg/src/writer.rs",
       "destination": "usvg/writer.rs",
       "sourceSha256": "bf6d90456d56f0becbb0682c76354a6228419f2dbc61c031e4d408687cad40cb",
-      "transplantedSha256": "e373859f21334bcd954ba2768d2b56ea705cd46a71ae95bbb51f1ee2aae68e0d",
+      "transplantedSha256": "ce1164f0811e4efd84e4f4d6d8a1f8d28f7c92585ed798ce17796602a653e323",
       "sourceBytes": 58954,
-      "transplantedBytes": 60039,
+      "transplantedBytes": 59868,
       "adaptations": {
         "cratePaths": 2,
         "enabledFeaturePredicates": {},

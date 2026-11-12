@@ -1,6 +1,33 @@
 use super::{assert_pixels_equal, parse_writer_svg, usvg};
 
 #[test]
+fn preserved_text_path_with_extreme_finite_coordinates_keeps_its_definition() -> Result<(), String>
+{
+    let input = r##"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60">
+      <defs><path id="extreme" d="M1.8e38 10 Q1.8e38 90 1.8e38 30"/>
+        <path id="visible" d="M5 35 H110"/></defs>
+      <text id="label" font-family="Noto Sans" font-size="12"><textPath href="#extreme">A</textPath><textPath href="#visible">Visible</textPath></text>
+    </svg>"##;
+    let case = "extreme finite text path";
+    let original = parse_writer_svg(input, case)?;
+    let Some(usvg::Node::Text(text)) = original.node_by_id("label") else {
+        return Err("text path fixture was discarded".to_owned());
+    };
+    let paths: Vec<_> = text
+        .chunks()
+        .iter()
+        .filter_map(|chunk| match chunk.text_flow() {
+            usvg::TextFlow::Path(path) => Some(path),
+            usvg::TextFlow::Linear => None,
+        })
+        .collect();
+    assert_eq!(paths.len(), 2);
+    assert!(paths[0].path().compute_tight_bounds().is_none());
+    assert!(paths[1].path().compute_tight_bounds().is_some());
+    assert_text_path_roundtrip(input, case, true)
+}
+
+#[test]
 fn nested_group_text_path_definition_survives_writer_roundtrip() -> Result<(), String> {
     let input = r##"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60">
       <defs><path id="curve" d="M5 35 C30 10 70 10 110 35"/></defs>
