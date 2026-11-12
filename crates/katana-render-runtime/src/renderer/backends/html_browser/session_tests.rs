@@ -10,11 +10,7 @@ const TEST_POINTER_COORDINATE: f32 = 20.0;
 
 #[test]
 fn session_starts_an_in_process_runtime_with_an_initial_frame() -> TestResult {
-    let mut session = HtmlBrowserSession::new(
-        test_source("https://example.test/a.html")?,
-        viewport(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT)?,
-    )
-    .map_err(|error| error.to_string())?;
+    let mut session = start_session("https://example.test/a.html")?;
 
     assert_eq!(session.state(), HtmlBrowserSessionState::Active);
     assert!(session.has_in_process_runtime());
@@ -32,11 +28,7 @@ fn session_starts_an_in_process_runtime_with_an_initial_frame() -> TestResult {
 
 #[test]
 fn session_navigates_by_replacing_its_in_process_runtime() -> TestResult {
-    let mut session = HtmlBrowserSession::new(
-        test_source("https://example.test/a.html")?,
-        viewport(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT)?,
-    )
-    .map_err(|error| error.to_string())?;
+    let mut session = start_session("https://example.test/a.html")?;
     let _ = session.take_frame_update();
 
     session
@@ -61,11 +53,7 @@ fn session_navigates_by_replacing_its_in_process_runtime() -> TestResult {
 
 #[test]
 fn closed_session_rejects_runtime_operations() -> TestResult {
-    let mut session = HtmlBrowserSession::new(
-        test_source("https://example.test/a.html")?,
-        viewport(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT)?,
-    )
-    .map_err(|error| error.to_string())?;
+    let mut session = start_session("https://example.test/a.html")?;
     session.close().map_err(|error| error.to_string())?;
 
     assert_eq!(session.state(), HtmlBrowserSessionState::Closed);
@@ -74,16 +62,20 @@ fn closed_session_rejects_runtime_operations() -> TestResult {
         session.refresh_frame(),
         Err(HtmlBrowserError::SessionClosed)
     );
+    assert_eq!(
+        super::shared_input_test_support::dispatch_primary_click(
+            &mut session,
+            TEST_POINTER_COORDINATE,
+        )
+        .err(),
+        Some(HtmlBrowserError::SessionClosed.to_string())
+    );
     Ok(())
 }
 
 #[test]
 fn session_exposes_debug_refresh_resize_and_navigation_contracts() -> TestResult {
-    let mut session = HtmlBrowserSession::new(
-        test_source("https://example.test/docs/index.html")?,
-        viewport(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT)?,
-    )
-    .map_err(|error| error.to_string())?;
+    let mut session = start_session("https://example.test/docs/index.html")?;
     assert_session_identity(&session)?;
     refresh_and_resize(&mut session)?;
     dispatch_non_navigating_pointer(&mut session)?;
@@ -92,11 +84,7 @@ fn session_exposes_debug_refresh_resize_and_navigation_contracts() -> TestResult
 
 #[test]
 fn session_rejects_invalid_source_missing_runtime_and_invalid_frames() -> TestResult {
-    let mut session = HtmlBrowserSession::new(
-        test_source("https://example.test/a.html")?,
-        viewport(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT)?,
-    )
-    .map_err(|error| error.to_string())?;
+    let mut session = start_session("https://example.test/a.html")?;
     assert_invalid_navigation_is_rejected(&mut session)?;
     assert_frame_invariants(&mut session)?;
     assert_missing_runtime_is_rejected(&mut session)?;
@@ -105,11 +93,7 @@ fn session_rejects_invalid_source_missing_runtime_and_invalid_frames() -> TestRe
 
 #[test]
 fn session_close_rejects_every_public_runtime_operation() -> TestResult {
-    let mut session = HtmlBrowserSession::new(
-        test_source("https://example.test/a.html")?,
-        viewport(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT)?,
-    )
-    .map_err(|error| error.to_string())?;
+    let mut session = start_session("https://example.test/a.html")?;
     session.close().map_err(|error| error.to_string())?;
 
     assert_eq!(
@@ -136,11 +120,7 @@ fn session_close_rejects_every_public_runtime_operation() -> TestResult {
 
 #[test]
 fn session_reports_runtime_start_failure_during_navigation() -> TestResult {
-    let mut session = HtmlBrowserSession::new(
-        test_source("https://example.test/a.html")?,
-        viewport(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT)?,
-    )
-    .map_err(|error| error.to_string())?;
+    let mut session = start_session("https://example.test/a.html")?;
     let source =
         HtmlBrowserSource::new("<script>const = ;</script>", "https://example.test/b.html")
             .map_err(|error| error.to_string())?;
@@ -285,6 +265,14 @@ fn assert_missing_runtime_is_rejected(session: &mut HtmlBrowserSession) -> TestR
         Err(HtmlBrowserError::RuntimeNotStarted)
     );
     Ok(())
+}
+
+fn start_session(origin: &str) -> TestResult<HtmlBrowserSession> {
+    HtmlBrowserSession::new(
+        test_source(origin)?,
+        viewport(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT)?,
+    )
+    .map_err(|error| error.to_string())
 }
 
 pub(super) fn test_source(origin: &str) -> TestResult<HtmlBrowserSource> {
