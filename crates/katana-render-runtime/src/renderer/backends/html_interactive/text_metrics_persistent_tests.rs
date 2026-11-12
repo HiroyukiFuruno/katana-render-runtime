@@ -3,7 +3,7 @@ use super::{
     MAX_CACHED_MEASUREMENTS, TextMeasurementCacheScope, TextMeasurementKey,
     persistent::{PersistentTextWidthCache, PersistentTextWidthKey},
 };
-use super::{PERSISTENT_TEXT_WIDTH_CACHE, text_width};
+use super::{PERSISTENT_TEXT_WIDTH_CACHE, heuristic_text_width, text_width};
 #[cfg(not(target_os = "windows"))]
 use crate::markdown::svg_rasterize::HtmlTextMeasurementTokenKey;
 use crate::markdown::svg_rasterize::{HtmlTextMeasurementToken, SvgRasterizeOps};
@@ -89,6 +89,28 @@ fn persistent_width_reuse_requires_render_scope_and_survives_frame_scope() -> Re
         assert!(!token.is_usable());
     }
     Ok(())
+}
+
+#[test]
+fn unsupported_xml_character_keeps_heuristic_width_out_of_persistent_cache() {
+    let mut style = CssStyle::browser_default();
+    style.font_family = "Definitely Missing Font".to_string();
+    let text = "\u{1}";
+    let measured = SvgRasterizeOps::measure_html_text_with_cache_status(
+        text,
+        &style.font_family,
+        style.font_size,
+        style.font_weight,
+        style.italic,
+        style.letter_spacing,
+        style.font_feature_settings.as_deref(),
+    );
+    assert!(measured.is_err(), "{measured:?}");
+    PERSISTENT_TEXT_WIDTH_CACHE.with(|cache| cache.borrow_mut().clear_for_test());
+    SvgRasterizeOps::with_html_font_render_scope(|| {
+        assert_eq!(text_width(text, &style), heuristic_text_width(text, &style));
+    });
+    PERSISTENT_TEXT_WIDTH_CACHE.with(|cache| assert_eq!(cache.borrow().len(), 0));
 }
 
 #[test]
