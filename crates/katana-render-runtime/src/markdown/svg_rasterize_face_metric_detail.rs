@@ -126,4 +126,23 @@ mod tests {
         assert_eq!(stats.face_inner.bridge_none, 1);
         assert_eq!(stats.face_inner.acquire_calls, 0);
     }
+
+    #[test]
+    fn invalid_face_outcomes_are_counted_only_during_the_measurement() {
+        let mut outer = super::super::enter(true);
+        let scope = FaceMetricScope::new(true);
+        scope.record_outcome(FaceMetricOutcome::Invalid);
+        let measured = outer.finish().face_inner;
+        assert_eq!(measured.bridge_err, 1);
+        assert_eq!(measured.bridge_some, 0);
+        assert_eq!(measured.bridge_none, 0);
+
+        assert_eq!(
+            scope.measure(FaceMetricPhase::Tables, || TEST_VALUE),
+            TEST_VALUE
+        );
+        scope.record_outcome(FaceMetricOutcome::Invalid);
+        let mut next = super::super::enter(true);
+        assert_eq!(next.finish(), Stats::default());
+    }
 }
