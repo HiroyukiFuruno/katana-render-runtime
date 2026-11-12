@@ -161,3 +161,46 @@ fn disjoint_filter_and_primitive_regions_decline_transfer_without_drawing() -> R
     assert_eq!(target.data(), before);
     Ok(())
 }
+
+#[test]
+fn component_transfer_rejects_overflow_in_either_region_without_painting() -> Result<(), String> {
+    let cases = [("40", "0", "1", true), ("1", "4", "5", false)];
+    for (filter_width, primitive_x, primitive_width, filter_overflows) in cases {
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><defs><filter id="f" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse" x="0" y="0" width="{filter_width}" height="10" color-interpolation-filters="sRGB"><feComponentTransfer x="{primitive_x}" y="0" width="{primitive_width}" height="5">{}</feComponentTransfer></filter></defs><g filter="url(#f)"><rect width="30" height="30"/></g></svg>"#,
+            super::LINEAR_FUNCTIONS
+        );
+        assert_transfer_region_overflow(&parse(&svg)?, filter_overflows)?;
+    }
+    Ok(())
+}
+
+fn assert_transfer_region_overflow(tree: &Tree, filter_overflows: bool) -> Result<(), String> {
+    let group = filtered_group(tree)?;
+    let filter = transfer::supported_filter(group).ok_or("filter missing")?;
+    let (primitive, _) = transfer::supported_primitive(filter).ok_or("primitive missing")?;
+    let transform = Transform::from_scale(f32::MAX, 1.0);
+    let filter_transform = transfer::FilterTransform::new(transform).ok_or("invalid scale")?;
+    let map_rect = super::super::super::super::html_shadow::map_rect;
+    assert_eq!(
+        map_rect(filter.rect().to_rect(), filter_transform).is_err(),
+        filter_overflows
+    );
+    assert_eq!(
+        map_rect(primitive.rect().to_rect(), filter_transform).is_err(),
+        !filter_overflows
+    );
+    let mut target = Pixmap::new(super::SIZE, super::SIZE).ok_or("transfer canvas missing")?;
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    let result = transfer::render(
+        group,
+        transform,
+        &mut target.as_mut(),
+        &super::AuthoredClipInfo::default(),
+        &rasterizer,
+    );
+    const ERROR: &str = "drop-shadow transformed bounds are non-finite";
+    assert_eq!(result.err().as_deref(), Some(ERROR));
+    assert!(target.data().iter().all(|byte| *byte == 0));
+    Ok(())
+}
