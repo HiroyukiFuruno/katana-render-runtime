@@ -101,4 +101,15 @@ mod boundary_tests {
         assert_eq!(normalize_filter_shadow_colors(source), source);
         assert_eq!(SvgRasterizeOps::preprocess_for_rasterizer(source), source);
     }
+
+    #[test]
+    fn shadow_preprocess_preserves_source_when_either_trigger_is_absent() {
+        for source in [
+            r##"<svg xmlns="http://www.w3.org/2000/svg"><rect style="filter:drop-shadow(1px 2px #0008)"/></svg>"##,
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><rect style="fill:rgba(0,0,0,.5)"/></svg>"#,
+        ] {
+            assert_eq!(normalize_filter_shadow_colors(source), source);
+            assert_eq!(SvgRasterizeOps::preprocess_for_rasterizer(source), source);
+        }
+    }
 }
