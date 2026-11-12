@@ -1,3 +1,6 @@
+use super::super::{
+    DiagramColorPreset, MermaidJsRuntimeOps, RuntimeAsset, block_nbsp_arrow_source,
+};
 use super::{
     assert_arrow_centered_in_diagram, assert_arrow_centered_on_label, assert_block_arrow_width,
     block_arrow_dom_width,
@@ -6,6 +9,47 @@ use resvg::usvg::roxmltree::Document;
 use rstest::rstest;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+#[test]
+fn rendered_block_rejects_unmeasurable_font_sizes() -> TestResult {
+    let asset = RuntimeAsset::mermaid();
+    let path = asset.materialize_at(asset.materialized_path())?;
+    let svg =
+        MermaidJsRuntimeOps::render(block_nbsp_arrow_source(), &path, DiagramColorPreset::dark())?;
+    let document = Document::parse(&svg)?;
+    assert!(block_arrow_dom_width(document.root_element())? > 0.0);
+    let range = stylesheet_font_size_range(&document)?;
+    for invalid in ["-1", "1e100"] {
+        let mut changed = svg.clone();
+        changed.replace_range(range.clone(), invalid);
+        let parsed = Document::parse(&changed)?;
+        assert_eq!(
+            block_arrow_dom_width(parsed.root_element())
+                .err()
+                .as_deref(),
+            Some("Failed to rasterize SVG: SVG font metrics unavailable")
+        );
+    }
+    Ok(())
+}
+
+fn stylesheet_font_size_range(
+    document: &Document<'_>,
+) -> Result<std::ops::Range<usize>, Box<dyn std::error::Error>> {
+    let style = document
+        .descendants()
+        .find(|node| node.has_tag_name("style"))
+        .and_then(|node| node.children().find(|child| child.is_text()))
+        .ok_or("stylesheet text missing")?;
+    let content = style.text().ok_or("stylesheet text missing")?;
+    let start = content.find("font-size:").ok_or("font size missing")? + "font-size:".len();
+    let end = start
+        + content[start..]
+            .find("px;")
+            .ok_or("font size unit missing")?;
+    let offset = style.range().start;
+    Ok(offset + start..offset + end)
+}
 
 #[test]
 fn width_oracle_rejects_a_polygon_that_differs_from_measured_text() -> TestResult {

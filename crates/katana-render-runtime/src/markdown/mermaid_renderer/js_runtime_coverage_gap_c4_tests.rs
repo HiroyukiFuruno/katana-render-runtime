@@ -197,6 +197,45 @@ fn c4_deployment_rejects_missing_parent_labels() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn c4_deployment_rejects_missing_outer_rectangle() -> Result<(), String> {
+    let svg = validated_deployment_svg()?;
+    let changed = remove_non_mobile_rectangles(&svg)?;
+    assert_eq!(
+        GeometryContract::deployment(&changed).err().as_deref(),
+        Some("deployment parent geometry missing")
+    );
+    Ok(())
+}
+
+fn remove_non_mobile_rectangles(svg: &str) -> Result<String, String> {
+    let document = Document::parse(svg).map_err(|error| error.to_string())?;
+    let mobile = document
+        .descendants()
+        .find(|node| {
+            node.attribute("id")
+                .is_some_and(|id| id.ends_with("-mobile"))
+        })
+        .ok_or("mobile container missing")?;
+    let inner = mobile
+        .children()
+        .find(|node| node.has_tag_name("rect"))
+        .ok_or("mobile rectangle missing")?;
+    let ranges: Vec<_> = document
+        .descendants()
+        .filter(|node| node.has_tag_name("rect") && *node != inner)
+        .map(|node| node.range())
+        .collect();
+    if ranges.is_empty() {
+        return Err("outer rectangles missing from valid SVG".to_owned());
+    }
+    let mut changed = svg.to_owned();
+    for range in ranges.into_iter().rev() {
+        changed.replace_range(range, "");
+    }
+    Ok(changed)
+}
+
 fn validated_deployment_svg() -> Result<String, String> {
     let svg = render_mermaid_svg(C4_DEPLOYMENT_SOURCE)?;
     GeometryContract::deployment(&svg)?;
