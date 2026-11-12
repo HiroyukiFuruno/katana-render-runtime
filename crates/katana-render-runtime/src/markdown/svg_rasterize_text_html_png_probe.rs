@@ -52,6 +52,27 @@ fn html_raster_contract_encodes_a_self_contained_svg_to_fresh_png() -> ProbeResu
     Ok(())
 }
 
+#[test]
+fn png_encoder_returns_a_typed_error_for_zero_sized_raster() {
+    let raster = super::super::RasterizedSvg {
+        width: 0,
+        height: 0,
+        display_width: 0.0,
+        display_height: 0.0,
+        rgba: Vec::new(),
+    };
+
+    assert!(
+        encode_png(&raster).is_err_and(|error| {
+            matches!(
+                error.downcast_ref::<image::ImageError>(),
+                Some(image::ImageError::IoError(_))
+            )
+        }),
+        "expected the PNG writer to reject zero dimensions"
+    );
+}
+
 fn required_path(name: &str) -> ProbeResult<PathBuf> {
     let path = std::env::var_os(name)
         .map(PathBuf::from)
