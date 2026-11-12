@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- SVGルートにviewBoxがない場合、幅・高さを百分率から変換した結果は読み取られず、寸法は従来どおりSVG属性から解決されていた。未使用の変換だけを除き、viewBoxの補完条件を維持した。viewBoxあり・なしの6条件、静的基盤、ASTが成功し、検査前後のソースは一致（`1a0cf472`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-root-dimensions-9wh4mdi9/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - 最新の正式計測は `ce74a7ac` の86,765/87,012行、99.716131%、未カバー247行（253行から6行減。CoreTextのファイルURL4行、識別子1行、SVG字形の座標1行、増加なし）。Rust実行対象6,456件すべて成功、別に15件skip。Moonの収集実0、ソース前後一致、同じ環境で証跡を検証し再収集なし、100%判定のみ実1（`tmp/quality/resumed-owner-r3509/root-coverage-after-coretext-and-layout-boundaries-jk32e8w5/formal-coverage-summary.json`）。実行ログの集計でskip 15件を確認した。
 - CoreFoundationの `CFNumberGetValue` は精度を失う整数変換を拒否するため、整数変換後に同じ値を浮動小数点で再検査していた到達不能な拒否を除去した。整数・浮動小数点で表したu32両端、既存の不正識別子、実SVGのX・Y座標超過を確認。関連7件、静的基盤、ASTが成功し、ソース前後一致（`4b5d188e`、`tmp/quality/resumed-owner-r3509/release-coverage-coretext-identifier-and-x-ib0nqdhp/safe-summary.json`）。正式値は未再計測。
 - CoreTextが空パスとNULを含むパスをファイルURLへ変換できない場合と、実SVGの縦方向オフセットがLayoutUnitの上限を超える場合の回帰を追加した。既存正常系を含む予定6件すべて、静的基盤、ASTが成功。ソース前後一致（`4d760985`、`tmp/quality/resumed-owner-r3509/release-coverage-coretext-and-svg-coordinate-irxxv9sk/safe-summary.json`）。正式カバレッジへの反映は次の一括計測で確認する。
