@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 予定2条件中2条件を確認。実Block SVGの `viewBox` 欠落と、同梱静的フォントがCoreTextで可変軸を持たないことを検証。Mermaidの図形検証では、不変のDOM上で行っていた `viewBox` の二重解析を除き、入口で確認した範囲を各図種の既存判定へ渡す。無効な入力の拒否と境界許容差は関連テストで維持。関連47テスト・静的基盤・AST成功、前後ソース一致（`60f3ef32`、`a790dffb`、`7515adc7`、`tmp/quality/resumed-owner-r3509/release-coverage-validated-viewbox-mukj0_rg/safe-summary.json`）。CoreTextの欠落分岐に実際に入ったかと、全体の未カバー行の減少は正式計測で判定する。フォント描画キャッシュとメモリ予算の残候補は、実入力で決定的に再現できる経路が見つかるまで未対応として追跡する。
 - 正式未カバー箇所を対象とする予定8条件中8条件を確認。実フォント3条件、Chrome検証資源2条件、実Block/C4 SVGの異常3条件。ASTの関数長指摘を修正後、関連7テスト、静的基盤、AST、ソース前後一致が成功（`943dea96`、`139b7c60`、`tmp/quality/resumed-owner-r3509/release-coverage-font-mermaid-real-paths-ok69sb8n/safe-summary.json`）。未カバー行の減少は次回の正式計測で判定する。
 - カバレッジを優先。最新の正式計測は `7f94d105` の86,787/87,074行、99.670395%、未カバー287行。前回の307行から15ファイルで計20行減り、未カバーの増加なし。全6,433テスト成功、別に15件skip。計測前後のソース一致、収集実0、正式集計の不変を確認。合否は `coverage-policy` で実1、公開条件の100%に未達（`tmp/quality/resumed-owner-r3509/root-coverage-after-real-fixtures-f9x_1s1j/{safe-summary,gap-summary,gap-delta}.json`）。
 - 対応予定8条件中8条件を確認。実フォントの選択2条件と共有SVG文書の破損2条件、書込み・既存ファイル衝突2条件、実V8観測の文字・サイズの拒否2条件。既存対照を含む関連9テスト、静的基盤、AST、ソース前後一致が成功（`271bc652`、`d961027a`、`7f94d105`、`tmp/quality/resumed-owner-r3509/release-coverage-font-fixture-contracts-nk4lx946/safe-summary.json`）。先行19条件と合わせて今回の正式計測へ反映した。
