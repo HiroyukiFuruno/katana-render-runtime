@@ -110,7 +110,7 @@ pub(super) fn svg_css_variable_fixture() -> String {
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use super::mermaid_fixture_source;
+    use super::{mermaid_fixture_source, svg_view_box};
 
     #[test]
     fn fixture_source_rejects_missing_and_unclosed_fences() {
@@ -121,6 +121,23 @@ mod tests {
         assert_eq!(
             mermaid_fixture_source("~~~mermaid\ntimeline\n  section History"),
             Err("Timeline Mermaid fence unclosed".to_owned())
+        );
+    }
+
+    #[test]
+    fn view_box_parser_rejects_malformed_svg_and_invalid_dimensions() {
+        for svg in [
+            "<svg",
+            "<svg/>",
+            "<svg viewBox='0 0 invalid 20'/>",
+            "<svg viewBox='0 0 10'/>",
+            "<svg viewBox='0 0 10 20 30'/>",
+        ] {
+            assert!(svg_view_box(svg).is_err(), "accepted {svg}");
+        }
+        assert_eq!(
+            svg_view_box("<svg viewBox='0 0 10 20'/>"),
+            Ok([0.0, 0.0, 10.0, 20.0])
         );
     }
 }
