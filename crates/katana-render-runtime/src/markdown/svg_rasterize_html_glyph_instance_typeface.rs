@@ -32,8 +32,8 @@ fn physical_collection_index(base: &Typeface) -> Result<usize, String> {
         .to_existing_font_data()
         .ok_or("Skia variable base physical font data unavailable")?;
     /* WHY: Skia setter内部のsigned index変換がpanicしない範囲を先に確認する。 */
-    let index = i32::try_from(index).map_err(|_| "Skia collection index exceeds signed range")?;
-    usize::try_from(index).map_err(|_| "Skia collection index exceeds host range".to_owned())
+    i32::try_from(index).map_err(|_| "Skia collection index exceeds signed range")?;
+    Ok(index as usize)
 }
 
 fn applied_coordinates(typeface: &Typeface) -> Result<Vec<FontVariation>, String> {
