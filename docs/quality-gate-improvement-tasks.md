@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 1×1の物理ビューポートに極小の正の倍率を指定し、描画対象がない実HTMLで論理寸法が無限大の場合に、初回フレーム確定から公開APIへ `InvalidViewport` が伝播する回帰を追加した。関連3件、静的基盤、ASTが成功し、ソース前後一致（`81b2f274`、`tmp/quality/resumed-owner-r3509/release-coverage-html-logical-viewport-overflow-_35w6a0f/safe-summary.json`）。最初の入力ではボックスの非有限座標を先に検出して失敗したため、その結果も別runに保持した。正式カバレッジへの反映は未計測。
 - HTMLセッション起動の実入力を8193×1とし、ラスタ描画上限で生じる8192×1との差を、起動APIが型付きエラーとして返すことを確認した。関連2件、静的基盤、ASTが成功し、ソース前後一致（`048ab7d4`、`tmp/quality/resumed-owner-r3509/release-coverage-html-viewport-raster-error-2h5pctw5/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - tiny-skia-pathのPathは先頭のMoveToとその点を保証するため、SVGマーカー描画で変換済みセグメントの先頭種別を再判定する処理を除いた。始点・中間点・終点の既存8件、静的基盤、ASTが成功し、ソース前後一致（`8a72c1d2`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-marker-start-p_rynj5e/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - 実SVGの幅がゼロの場合、字形監査が描画失敗を返し、その直後の有効なSVGでは字形証跡を収集できることを回帰で確認した。Chromeのフォント証跡では、同じバイト列から計算済みのSHAを再利用し、fontdb側との照合を維持した。関連8件、静的基盤、ASTが成功し、ソース前後一致（`14b59645`、`tmp/quality/resumed-owner-r3509/release-coverage-glyph-audit-and-identity-snc3qoi6/safe-summary.json`）。正式カバレッジへの反映は未計測。
