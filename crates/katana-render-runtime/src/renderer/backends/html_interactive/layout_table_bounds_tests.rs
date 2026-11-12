@@ -46,12 +46,14 @@ fn table_bounds_helpers_report_missing_and_unpainted_elements() -> Result<(), St
         assert_table_union(&layout, group, &[]).err().as_deref(),
         Some("table union has no members")
     );
-    assert_eq!(
-        assert_table_union(&layout, group, &[visible, unpainted])
-            .err()
-            .as_deref(),
-        Some(expected.as_str())
-    );
+    for (union, members) in [
+        (unpainted, &[visible][..]),
+        (group, &[unpainted][..]),
+        (group, &[visible, unpainted][..]),
+    ] {
+        let error = assert_table_union(&layout, union, members).err();
+        assert_eq!(error.as_deref(), Some(expected.as_str()));
+    }
     Ok(())
 }
 

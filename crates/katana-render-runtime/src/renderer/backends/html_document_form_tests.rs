@@ -10,7 +10,11 @@ const MISSING_NODE_ID: u64 = 999;
 
 #[test]
 fn form_value_reports_unknown_node_ids() {
-    let document = HtmlDocument::parse(FORM_DEFAULTS);
+    let mut document = HtmlDocument::parse(FORM_DEFAULTS);
+    assert_eq!(
+        node_id(&mut document, "missing"),
+        Err("missing HTML element #missing".to_string())
+    );
     assert_eq!(
         document.form_value(MISSING_NODE_ID),
         Err(format!("HTML node {MISSING_NODE_ID} does not exist"))

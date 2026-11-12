@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn unequal_colored_rounded_border_paths_parse_as_svg() -> Result<(), String> {
+    fn unequal_colored_rounded_border_paths_parse_as_svg() {
         let attributes = [(
             "style".to_string(),
             "border-top:1px solid #e2e8f0;border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;border-left:4px solid #1e40af;border-radius:8px".to_string(),
@@ -153,9 +153,12 @@ mod tests {
         let svg = format!(
             r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 240">{paths}</svg>"#
         );
-        resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default())
-            .map(|_| ())
-            .map_err(|error| error.to_string())
+        let parsed = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default());
+        assert!(
+            parsed.is_ok(),
+            "invalid rounded border SVG: {:?}",
+            parsed.err()
+        );
     }
 
     #[test]
