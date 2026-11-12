@@ -31,6 +31,45 @@ struct Fixture {
     mutation_error: Option<String>,
 }
 
+#[test]
+fn local_fixture_rejects_removed_real_font() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let font = directory.path().join("NotoSans-Regular.ttf");
+    let bytes = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
+    std::fs::write(&font, bytes).map_err(|error| error.to_string())?;
+    let mut database = Database::new();
+    assert!(
+        !database
+            .load_font_source(Source::File(font.clone()))
+            .is_empty()
+    );
+    let missing = directory.path().join("missing.ttf");
+    let mutation = Mutation::Missing(missing);
+    fixture_support::validate_fixture(&database, &mutation)?;
+    std::fs::remove_file(&font).map_err(|error| error.to_string())?;
+    assert!(
+        fixture_support::validate_fixture(&database, &mutation)
+            .is_err_and(|error| error.starts_with("canonicalize local font source:"))
+    );
+    Ok(())
+}
+
+#[test]
+fn local_fixture_rejects_paths_without_existing_parent() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let no_parent = fixture_support::canonical_parent(std::path::Path::new(""));
+    assert_eq!(
+        no_parent.err().as_deref(),
+        Some("local fixture has no parent directory")
+    );
+    let absent_parent = directory.path().join("absent").join("font.ttf");
+    assert!(
+        fixture_support::canonical_parent(&absent_parent)
+            .is_err_and(|error| error.starts_with("canonicalize local fixture root:"))
+    );
+    Ok(())
+}
+
 thread_local! {
     static ACTIVE: RefCell<Option<Fixture>> = const { RefCell::new(None) };
 }

@@ -14,6 +14,23 @@ fn selected_face_rejects_an_unshared_file_source() -> Result<(), String> {
 }
 
 #[test]
+fn selected_face_requires_an_active_attempt_for_real_font() -> Result<(), String> {
+    let fixture = Fixture::new()?;
+    let mut database = fixture.database();
+    crate::markdown::svg_rasterize::SvgRasterizeOps::with_html_font_render_scope(|| {
+        assert_eq!(
+            fixture.select(&mut database, fixture.a).err().as_deref(),
+            Some("selected mapping rejected")
+        );
+    });
+    assert_eq!(
+        database.faces().count(),
+        fixture.context.original.faces().count()
+    );
+    Ok(())
+}
+
+#[test]
 fn missing_font_and_ttc_faces_report_their_specific_errors() -> Result<(), String> {
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
     let missing = directory.path().join("missing.ttf");
