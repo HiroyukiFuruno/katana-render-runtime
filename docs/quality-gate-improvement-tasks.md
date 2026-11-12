@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 最新の正式計測は `6094c164` の86,754/87,023行、99.690886%、未カバー269行（283行から14行減、6ファイルで改善、増加なし）。正式対象6,444テスト成功、別に15件skip。収集実0、前後ソース一致、正式集計不変。100%条件でpolicy実1（`tmp/quality/resumed-owner-r3509/root-coverage-after-font-and-artifact-qxhho8vq/{safe-summary,gap-summary,gap-delta,explicit-uncovered-line-list}.json`）。物理行一覧は131行で据え置き。HTML保存の型別エラー分類は正式集計で解消した。
+- 正式計測後、実C4 Deploymentのタイトル欠落とviewBox外への移動の予定2条件中2条件を確認。既存の親ラベルと外側矩形を含む関連3テスト、静的基盤、ASTが成功し、前後ソース一致（`44d666e9`、`tmp/quality/resumed-owner-r3509/release-coverage-c4-deployment-title-68gj40u3/safe-summary.json`）。この追加分の正式カバレッジは未計測。GitHub上はv0.4.24のDraft Releaseのみで、公開日時は空、release branchをheadとするPRは0件と確認した。
 - フォント検証の予定4条件中4条件を確認。実フォントファイルの消失、親を持たないパス、親の未作成、選択処理の開始前を検証した。HTML成果物保存のサイズ超過とシリアライズエラーの分類は、入力型に依存しない同じ処理を非ジェネリック関数へ共通化した。関連6テスト、静的基盤、AST成功、ソース前後一致（`b4a63d38`、`b8e7c5f5`、`tmp/quality/resumed-owner-r3509/release-coverage-font-paths-and-encoding-tvi8rt0t/safe-summary.json`）。現行版の正式値は未再計測。
 - 正式計測 `27ad4c45` の集計は283行、producerが表示した物理行の一覧は131行。ソース上の行表示と、ジェネリック関数の具体型別の集計では対象の単位が異なる。たとえば `encoding.rs` の候補行には実行回数4があり、個別型ではもう一方の分岐が未実行だった。以後、物理行一覧と生JSONの具体型別regionを照合して回帰対象を決める。元の正式判定は保持（`tmp/quality/resumed-owner-r3509/root-coverage-after-performance-retention-gnmvl8h5/explicit-uncovered-line-list.json`）。
 - 予定3条件中3条件を確認。実フォントテーブルのoffset加算超過、ファイル終端越え、開いた後の切り詰めを拒否。正常読取りの対照と切り詰め後のキャッシュ無効化・復旧も既存回帰で確認。テスト本体は既存規約の `*_tests.rs` に置き、フォント読取りとテーブル範囲の検証は従来どおり計測対象。関連2テスト・静的基盤・AST成功、ソース前後一致（`e552b69a`、`tmp/quality/resumed-owner-r3509/release-coverage-lazy-font-table-50ybqfpl/safe-summary.json`）。正式値は未カバー283行のまま未再計測。
