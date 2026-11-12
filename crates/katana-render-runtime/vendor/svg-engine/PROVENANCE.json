@@ -75,9 +75,9 @@
       "source": "crates/usvg/src/parser/filter.rs",
       "destination": "usvg/parser/filter.rs",
       "sourceSha256": "b3c9485b5abf41ce9d7a7a711cff27a307260b4496bc0518ef43d37f9d73a74b",
-      "transplantedSha256": "9e21befeced6b46514c4f2312fba7d7fbdbbb84eebfbbe593ac3b55d5e2490c3",
+      "transplantedSha256": "d7968a6f716d7ef752aa767e8a686ba3b4259846388f022eeee30a7b48dcb335",
       "sourceBytes": 42587,
-      "transplantedBytes": 44276,
+      "transplantedBytes": 44374,
       "adaptations": {
         "cratePaths": 3,
         "enabledFeaturePredicates": {},
@@ -371,9 +371,9 @@
       "source": "crates/usvg/src/tree/filter.rs",
       "destination": "usvg/tree/filter.rs",
       "sourceSha256": "99ae02862d62de80d800c5bed3b6d2cc5207f32c4bee61237482e87a1c3fe41b",
-      "transplantedSha256": "76b7ba8e51cc1ae61c57199c9995b27518e57bcc6903adf362f60139e69f5c4a",
+      "transplantedSha256": "91121b09a039e41ff1ced06ded7db41cda9abbce474d206c11117fafb748d66d",
       "sourceBytes": 24297,
-      "transplantedBytes": 24558,
+      "transplantedBytes": 24547,
       "adaptations": {
         "cratePaths": 1,
         "enabledFeaturePredicates": {},

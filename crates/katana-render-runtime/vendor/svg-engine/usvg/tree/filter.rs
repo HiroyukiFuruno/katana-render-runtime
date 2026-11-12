@@ -678,7 +678,7 @@ pub struct Image {
 
 impl Image {
     pub(crate) fn first_child(&self) -> &super::Node {
-        /* WHY: 外部画像は子の追加に成功した場合だけ生成し、内部参照も空rootを拒否する。 */
+        /* WHY: 外部画像は恒等変換のrootへ子を追加し、内部参照も空rootを拒否する。 */
         &self.root.children[0]
     }
 

@@ -925,6 +925,7 @@ fn convert_external_image(
     let aspect: AspectRatio = fe.attribute(AId::PreserveAspectRatio).unwrap_or_default();
 
     let mut root = Group::empty();
+    /* WHY: 新規rootの絶対変換は恒等で、convert_innerは子の追加まで進む。 */
     super::image::convert_inner(
         img_data,
         cache.gen_image_id().take(),
@@ -935,7 +936,7 @@ fn convert_external_image(
         filter_subregion.translate_to(0.0, 0.0)?,
         cache,
         &mut root,
-    )?;
+    );
     root.calculate_bounding_boxes();
 
     Some(Kind::Image(Image { root }))
