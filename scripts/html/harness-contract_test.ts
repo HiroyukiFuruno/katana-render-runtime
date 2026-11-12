@@ -3636,6 +3636,7 @@ COVERAGE_MAX_UNCOVERED_LINES := env_var_or_default("COVERAGE_MAX_UNCOVERED_LINES
 COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX := "(^|[/\\\\])scripts[/\\\\]html[/\\\\]performance-harness[/\\\\]src[/\\\\]([^/\\\\]+[/\\\\])*[^/\\\\]+(_tests|_test_support)\\.rs$"
 ${runtimeRecipes.join("\n")}
 native-coverage-cache-key producer:
+    just plantuml-install >&2
     CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-key --producer {{quote(producer)}} --moon-fingerprint
 root-test-and-coverage: plantuml-install
     CARGO={{quote(CARGO)}} CARGO_BUILD_JOBS={{quote(JOBS)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"

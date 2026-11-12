@@ -4503,6 +4503,12 @@ test.each([
   ],
   [
     "native-coverage-cache-key",
+    "just plantuml-install >&2",
+    "just plantuml-install",
+    "cache-key PlantUML output must stay off stdout",
+  ],
+  [
+    "native-coverage-cache-key",
     "CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} ",
     "",
     "cache-key environment mismatch",

@@ -1247,7 +1247,12 @@ katana-render-runtime = { workspace = true }
         self.assertIn('"vendor/drawio/{{DRAWIO_JS_VERSION}}/LICENSE"', release_recipe)
 
     def run_plantuml_install(
-        self, failures: int, expected_checksum: str, observed_checksum: str
+        self,
+        failures: int,
+        expected_checksum: str,
+        *,
+        payload: str = "fixture",
+        cached_bytes: bytes | None = None,
     ) -> tuple[subprocess.CompletedProcess[str], Path, int]:
         root = Path(__file__).parents[2]
         temp = tempfile.TemporaryDirectory()
@@ -1267,20 +1272,17 @@ katana-render-runtime = { workspace = true }
             'printf \'%s\\n\' "$count" > "$attempts"\n'
             f'if [ "$count" -le {failures} ]; then exit 22; fi\n'
             'while [ "$#" -gt 0 ]; do\n'
-            '  if [ "$1" = "--output" ]; then printf \'fixture\' > "$2"; exit 0; fi\n'
+            f'  if [ "$1" = "--output" ]; then printf %s {shlex.quote(payload)} > "$2"; exit 0; fi\n'
             "  shift\n"
             "done\n"
             "exit 64\n",
             encoding="utf-8",
         )
-        sha256sum = fake_bin / "sha256sum"
-        sha256sum.write_text(
-            f"#!/usr/bin/env bash\nprintf '%s  %s\\n' '{observed_checksum}' \"$1\"\n",
-            encoding="utf-8",
-        )
         curl.chmod(0o755)
-        sha256sum.chmod(0o755)
         output = temp_path / "cache" / "plantuml.jar"
+        if cached_bytes is not None:
+            output.parent.mkdir()
+            output.write_bytes(cached_bytes)
         environment = os.environ | {
             "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
             "KRR_PLANTUML_DOWNLOAD_RETRY_DELAY_SECONDS": "0",
@@ -1301,40 +1303,49 @@ katana-render-runtime = { workspace = true }
             capture_output=True,
             check=False,
         )
-        return completed, output, int(attempts.read_text(encoding="utf-8"))
+        count = int(attempts.read_text(encoding="utf-8")) if attempts.exists() else 0
+        self.assertEqual(list(output.parent.glob("plantuml.jar.*")), [])
+        return completed, output, count
 
     def test_plantuml_install_recovers_from_a_transient_http_failure(self) -> None:
         completed, output, attempts = self.run_plantuml_install(
             failures=1,
             expected_checksum=PLANTUML_FIXTURE_SHA256,
-            observed_checksum=PLANTUML_FIXTURE_SHA256,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(attempts, 2)
         self.assertEqual(output.read_text(encoding="utf-8"), "fixture")
-        self.assertFalse(output.with_suffix(".jar.tmp").exists())
 
     def test_plantuml_install_fails_closed_after_bounded_retries(self) -> None:
         completed, output, attempts = self.run_plantuml_install(
             failures=3,
             expected_checksum=PLANTUML_FIXTURE_SHA256,
-            observed_checksum=PLANTUML_FIXTURE_SHA256,
         )
         self.assertNotEqual(completed.returncode, 0)
         self.assertEqual(attempts, 3)
         self.assertFalse(output.exists())
-        self.assertFalse(output.with_suffix(".jar.tmp").exists())
 
     def test_plantuml_install_keeps_checksum_validation_after_recovery(self) -> None:
         completed, output, attempts = self.run_plantuml_install(
             failures=1,
             expected_checksum=PLANTUML_FIXTURE_SHA256,
-            observed_checksum="0" * 64,
+            payload="corrupt",
         )
         self.assertNotEqual(completed.returncode, 0)
         self.assertEqual(attempts, 2)
         self.assertFalse(output.exists())
-        self.assertFalse(output.with_suffix(".jar.tmp").exists())
+
+    def test_plantuml_install_reuses_only_a_checksum_verified_jar(self) -> None:
+        for cached_bytes, expected_attempts in ((b"fixture", 0), (b"corrupt", 1)):
+            with self.subTest(cached_bytes=cached_bytes):
+                completed, output, attempts = self.run_plantuml_install(
+                    failures=0,
+                    expected_checksum=PLANTUML_FIXTURE_SHA256,
+                    cached_bytes=cached_bytes,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertEqual(attempts, expected_attempts)
+                self.assertEqual(output.read_bytes(), b"fixture")
 
 
 if __name__ == "__main__":

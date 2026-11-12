@@ -1631,6 +1631,7 @@ function performanceRecipeCommands(): Record<string, string[]> {
   const deny = PERFORMANCE_CLIPPY_DENY.map((name) => `-D ${name}`).join(" ");
   return {
     "native-coverage-cache-key": [
+      "just plantuml-install >&2",
       'CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-key --producer {{quote(producer)}} --moon-fingerprint',
     ],
     [PERFORMANCE_RECIPES.format]: [

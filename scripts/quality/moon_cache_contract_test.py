@@ -263,6 +263,7 @@ def validate_root_test_coverage_contract(declared: dict[str, object]) -> None:
         1
     ].split("\n\n", 1)[0]
     assert cache_key_recipe.splitlines() == [
+        "    just plantuml-install >&2",
         '    CARGO={{quote(CARGO)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_coverage_result_cli.py --repo "{{REPO_ROOT}}" local-key --producer {{quote(producer)}} --moon-fingerprint',
     ]
     assert (
