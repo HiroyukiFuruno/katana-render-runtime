@@ -102,9 +102,7 @@ pub(super) fn effect_bounds(
 ) -> Result<Option<Bounds>, String> {
     let filter = surface::make_skia_filter(spec, transform, None)?;
     let source_rect = SkRect::from_ltrb(source.left, source.top, source.right, source.bottom);
-    if !filter.can_compute_fast_bounds() {
-        return Ok(None);
-    }
+    /* WHY: cropなしDropShadowのぼかし・SrcIn・移動・合成はすべて透明黒を保つ。 */
     let effect = surface::skia_bounds(filter.compute_fast_bounds(source_rect))?;
     let filter = bounds::map_bounds(spec.filter_bounds, transform)?;
     let primitive = bounds::map_bounds(spec.primitive_bounds, transform)?;

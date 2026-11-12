@@ -96,6 +96,27 @@ fn bounded_crop_rejects_outside_without_mutating_target() -> Result<(), String> 
 }
 
 #[test]
+fn parsed_shadow_supports_fast_bounds_with_blur_and_transparent_color() -> Result<(), String> {
+    for (deviation, opacity) in [("0", "1"), ("3", "1"), ("3", "0")] {
+        let svg = SRGB_SVG
+            .replace(
+                "stdDeviation=\"0\"",
+                &format!("stdDeviation=\"{deviation}\""),
+            )
+            .replace(
+                "flood-opacity=\"1\"",
+                &format!("flood-opacity=\"{opacity}\""),
+            );
+        let tree = parse_shadow_svg(&svg)?;
+        let spec = super::geometry::shadow_spec(find_group(&tree)?)?
+            .ok_or("authored drop shadow not recognized")?;
+        let filter = super::surface::make_skia_filter(spec, Transform::identity(), None)?;
+        assert!(filter.can_compute_fast_bounds(), "{deviation}, {opacity}");
+    }
+    Ok(())
+}
+
+#[test]
 fn parsed_srgb_shadow_renders_source_and_shadow_at_scale() -> Result<(), String> {
     let (target, calls) = render_shadow_fixture(SRGB_SVG, Transform::from_scale(2.0, 2.0))?;
     assert_eq!(calls, 1);
