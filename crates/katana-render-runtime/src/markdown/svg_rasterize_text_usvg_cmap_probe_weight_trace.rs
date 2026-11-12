@@ -37,6 +37,73 @@ fn layout_trace_rejects_a_non_text_target_in_a_valid_svg() {
 }
 
 #[test]
+fn poisoned_trace_records_do_not_change_real_font_selection_or_fallback() -> Result<(), String> {
+    let mut options = resvg::usvg::Options {
+        fontdb: Arc::new(fallback_trace_database()),
+        ..resvg::usvg::Options::default()
+    };
+    let selected = Records::default();
+    let fallback = Records::default();
+    selectors::install(&mut options, Arc::clone(&selected), Arc::clone(&fallback));
+    let control = parse_fallback_trace(&options)?;
+    for records in [&selected, &fallback] {
+        assert!(
+            !records
+                .lock()
+                .map_err(|error| error.to_string())?
+                .is_empty()
+        );
+        poison_trace_records(records)?;
+    }
+    let candidate = parse_fallback_trace(&options)?;
+    let write = resvg::usvg::WriteOptions::default();
+    assert_eq!(candidate.to_string(&write), control.to_string(&write));
+    Ok(())
+}
+
+fn fallback_trace_database() -> resvg::usvg::fontdb::Database {
+    const CJK: &[u8] =
+        include_bytes!("../../../../tests/fixtures/fonts/han-kerning/NotoSansCJKjp-han14.otf");
+    let mut database = resvg::usvg::fontdb::Database::new();
+    database.load_font_data(super::super::FONT_BYTES.to_vec());
+    database.load_font_data(CJK.to_vec());
+    database
+}
+
+fn parse_fallback_trace(
+    options: &resvg::usvg::Options<'static>,
+) -> Result<resvg::usvg::Tree, String> {
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="80" height="32"><text id="weight-runs" x="0" y="20" font-family="Noto Sans">Aあ</text></svg>"#;
+    let tree = crate::markdown::svg_rasterize::text_shaping::with_validated_tree_parse(|| {
+        resvg::usvg::Tree::from_str(svg, options)
+    })
+    .map_err(|error| error.to_string())?;
+    let Some(resvg::usvg::Node::Text(text)) = tree.node_by_id("weight-runs") else {
+        return Err("fallback trace text missing".into());
+    };
+    let faces = text
+        .layouted()
+        .iter()
+        .flat_map(|span| &span.positioned_glyphs)
+        .map(|glyph| glyph.font)
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(faces.len(), 2);
+    Ok(tree)
+}
+
+fn poison_trace_records(records: &Records) -> Result<(), String> {
+    let worker_records = Arc::clone(records);
+    let result = std::thread::spawn(move || -> Result<(), String> {
+        let _guard = worker_records.lock().map_err(|error| error.to_string())?;
+        std::panic::resume_unwind(Box::new("trace recorder interrupted"))
+    })
+    .join();
+    assert!(result.is_err());
+    assert!(records.is_poisoned());
+    Ok(())
+}
+
+#[test]
 fn layout_trace_preserves_binary_and_shared_font_sources() -> Result<(), String> {
     use resvg::usvg::fontdb::Source;
 
