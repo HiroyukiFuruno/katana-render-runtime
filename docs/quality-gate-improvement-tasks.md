@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定8条件中8条件完了。同梱フォントで解析した実SVGの文字範囲を正順で受理し、逆順と元テキスト不一致を拒否する3条件。実Mermaid描画で取得した継承CJKの観測に対し、family・text・weight・width欠落とwidth範囲外を拒否する5条件。初回は検証対象ファイルの固定ハッシュ不一致、次回は関数行数上限で先行検査が停止。実トレース経路を自己レビューして対象1ファイルのハッシュを同期し、文字範囲の検証を共通化した。最終差分の関連2テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-coverage-glyph-mermaid-5o2o36g3/safe-summary.json`、`5de05547`・`20b887db`）。正式カバレッジは最終フェーズで計測する。
 - 対応予定3条件中3条件完了。実HTMLセッションの終了後に再開用操作がエラーになる条件1件、SVGの `feImage` の参照属性欠落と空グループ参照をそれぞれ書き出し・再読み込みする条件2件を確認した。初回は空グループ参照が書き出されないという誤った期待により1/2テスト成功。最終確認では、書き出しに残った参照が一意に解決し、往復の画素が一致することを検証した。既存の複数参照回帰を含む関連3テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-coverage-artifact-svg-9pnzziht/safe-summary.json`、`73d03c92`・`ae00b7b3`）。正式カバレッジは最終フェーズで計測する。
 - 対応予定7条件中7条件完了。SVGの文字幅の過不足・負値・NaNの4条件、ネイティブDOM例外を継承した別オブジェクトの分類1条件、実共有フォントの計数と計測終了後の漏れ防止2条件を確認した。初回はV8例外メッセージの期待が違い19/20テスト成功。修正後の再起動では固定容量に対し7,457,705,984 bytesで拒否。保護対象27件と排他を確認してrelease/devビルド成果物を標準Cargoのプロファイル指定で整理し、3,714,752,512 bytesに回復（`tmp/quality/resumed-owner-r3509/release-fragments-capacity-clean-f7oszf2o/safe-summary.json`）。最終差分の関連20テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-coverage-fragments-bridge-f_n8pca8/safe-summary.json`、`48e8d2d2`・`eed03c6b`・`25a2521c`）。正式カバレッジは最終フェーズで計測する。
 - HTML性能のmanaged実行PID 34072は終了し、最終バンドルは残っていない。終了コードは未取得。観測したのは1条件目の途中報告4件と、25%上限を超えたCPU稼働率のみ。正式判定は0/84条件。容量bindingの生成・物理参照の受理を測定の合格に含めない。
