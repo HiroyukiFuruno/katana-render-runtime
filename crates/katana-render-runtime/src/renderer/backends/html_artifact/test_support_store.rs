@@ -131,3 +131,29 @@ pub(in super::super) fn assert_explicit_lock_recovery(
     fs::remove_dir(root.join(".krr-artifact.lock"))?;
     Ok(())
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::{HtmlArtifactStore, assert_dangling_symlink_is_rejected};
+    use std::fs;
+
+    #[test]
+    fn dangling_symlink_fixture_preserves_an_existing_file()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let root = temp.path().canonicalize()?;
+        let store = HtmlArtifactStore::new(&root, 1_000_000, true)?;
+        let artifact = super::super::artifact()?;
+        let existing = root.join("dangling.krr-frame.json");
+        fs::write(&existing, b"existing")?;
+        let error = assert_dangling_symlink_is_rejected(&root, &store, &artifact.provenance)
+            .err()
+            .ok_or("existing file was replaced")?;
+        let io_error = error
+            .downcast_ref::<std::io::Error>()
+            .ok_or("expected IO error")?;
+        assert_eq!(io_error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(existing)?, b"existing");
+        Ok(())
+    }
+}

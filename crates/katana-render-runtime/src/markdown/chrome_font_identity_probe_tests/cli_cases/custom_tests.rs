@@ -48,3 +48,28 @@ fn custom_font_probe_propagates_rejection_of_empty_condition_id() -> Result<(), 
     assert!(!fixture.temp.path().join("changed-response.json").exists());
     Ok(())
 }
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn custom_font_body_write_reports_real_file_size_limit() -> Result<(), Box<dyn std::error::Error>> {
+    use crate::system::file_size_limit_test_support::FileSizeLimitTest;
+
+    FileSizeLimitTest::run_in_child(
+        module_path!(),
+        "custom_font_body_write_reports_real_file_size_limit",
+        || {
+            let fixture = CliFixture::new()?;
+            let path = copy_font_response(&fixture)?;
+            assert!(fs::metadata(&path)?.len() > 0);
+            let result = FileSizeLimitTest::with_zero_limit(|| append_changed_byte(&path))?;
+            let error = result
+                .err()
+                .ok_or("custom font write unexpectedly succeeded")?;
+            assert!(
+                error.contains(&FileSizeLimitTest::limit_error().to_string()),
+                "{error}"
+            );
+            Ok(())
+        },
+    )
+}
