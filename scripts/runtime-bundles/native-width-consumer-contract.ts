@@ -6,7 +6,7 @@ export const NATIVE_WIDTH_CONSUMER_PINS = {
     "0a429cafcd569dc8c1ed993141ef394d0ee10717fe2883f2583af5b7e14232fd",
   [`${directory}js_runtime.rs`]: "6beaa9a5f1b2d52c87d4e34ab55e78ee2a00b57c8a992da3082ab5459300b28a",
   [`${directory}js_runtime_native_width_tests.rs`]:
-    "fc4bc1f529ab42eb8e8433137940c9c2f3750a16ef2b8a4adfb6be56bd15793a",
+    "d48f9a98dcd1b4f1dcdd0ad38c2a10580859d0d13d3c3e5dd1110dfb6cae1315",
   [`${directory}js_runtime_native_width_c4_description_tests.rs`]:
     "b5a7e3e5ffb73a22ad6df961f46ad915debb6590d4b7c984a4ceb9e8aa62e6e2",
   [`${directory}js_runtime_native_width_c4_tests.rs`]:

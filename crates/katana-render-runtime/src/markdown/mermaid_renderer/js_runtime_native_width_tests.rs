@@ -223,7 +223,32 @@ fn native_noto_and_inherited_cjk_probes_match_rust_boundary() -> Result<(), Stri
         SvgRasterizeOps::measure_html_text("AV", "Noto Sans", 16.0, 400, false, 0.0, None)
             .map_err(|error| format!("Noto boundary failed: {error:?}"))?;
     assert_eq!(width, rounded_width(expected));
-    assert_inherited_cjk(result.probes.get("inherited").ok_or("CJK probe missing")?)
+    let inherited = result.probes.get("inherited").ok_or("CJK probe missing")?;
+    assert_inherited_cjk(inherited)?;
+    assert_inherited_cjk_corruptions(inherited);
+    Ok(())
+}
+
+fn assert_inherited_cjk_corruptions(inherited: &Value) {
+    for (field, expected) in [
+        ("family", "family missing"),
+        ("text", "text missing"),
+        ("weight", "weight missing"),
+        ("width", "finite SVG number missing"),
+    ] {
+        let mut changed = inherited.clone();
+        changed[field] = Value::Null;
+        assert_eq!(
+            assert_inherited_cjk(&changed).err().as_deref(),
+            Some(expected)
+        );
+    }
+    let mut overflow = inherited.clone();
+    overflow["width"] = serde_json::json!(f64::MAX);
+    assert_eq!(
+        assert_inherited_cjk(&overflow).err().as_deref(),
+        Some("SVG number exceeds f32 range")
+    );
 }
 
 #[test]
