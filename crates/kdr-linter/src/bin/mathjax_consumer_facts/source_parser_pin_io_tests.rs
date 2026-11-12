@@ -10,6 +10,16 @@ fn parser_pin_propagates_fixture_file_io_errors() -> Result<(), Box<dyn std::err
     Ok(())
 }
 
+#[test]
+fn parser_pin_read_rejects_lock_without_package_entries() -> Result<(), Box<dyn std::error::Error>>
+{
+    let fixture = Fixture::copy_mathjax_inputs(INPUT_PATHS)?;
+    fs::write(fixture.root().join("Cargo.lock"), "[metadata]\n")?;
+    let error = fixture.inspect_parser_pin().err().ok_or("lock accepted")?;
+    assert_eq!(error.to_string(), "parser-pin:lock-packages");
+    Ok(())
+}
+
 fn assert_file_io_errors(name: &str) -> Result<(), Box<dyn std::error::Error>> {
     let fixture = Fixture::copy_mathjax_inputs(INPUT_PATHS)?;
     let file = fixture.root().join(name);

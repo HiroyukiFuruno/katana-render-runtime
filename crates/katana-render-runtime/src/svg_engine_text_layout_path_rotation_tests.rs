@@ -2,6 +2,19 @@ use super::path_support::path_text_with_content;
 use super::{near, path_support::path_text, text, usvg};
 
 #[test]
+fn path_text_rejects_unescaped_xml_text() -> Result<(), String> {
+    let valid = path_text_with_content(0, "A &amp; B")?;
+    assert!(path_glyphs(text(&valid)?).any(|(value, _, _)| value == "A"));
+    for malformed in ["A & B", "A < B"] {
+        assert!(
+            path_text_with_content(0, malformed).is_err(),
+            "invalid XML accepted: {malformed}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn rotation_is_applied_to_a_glyph_following_a_horizontal_path() -> Result<(), String> {
     let base = path_text(0)?;
     let rotated = path_text(90)?;
