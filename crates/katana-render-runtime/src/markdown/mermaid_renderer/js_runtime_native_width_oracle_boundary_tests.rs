@@ -110,6 +110,27 @@ fn raw_v8_svg_call_rejects_missing_text_and_family() -> Result<(), String> {
 }
 
 #[test]
+fn raw_v8_svg_call_rejects_unmeasurable_text_and_size() -> Result<(), String> {
+    let calls = actual_v8_calls("native-width-oracle-invalid-measurement")?;
+    let index = calls
+        .iter()
+        .position(|call| call["kind"] == "svg")
+        .ok_or("raw V8 SVG call missing")?;
+    for (argument, value) in [(0, json!("A\u{0}V")), (2, json!(-1))] {
+        let mut changed = calls.clone();
+        changed[index]["args"][argument] = value;
+        let error = assert_bridge_widths_match_rust(&changed)
+            .err()
+            .ok_or("invalid SVG text measurement was accepted")?;
+        assert!(
+            error.starts_with("SVG boundary reference failed:"),
+            "{error}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn raw_v8_svg_call_rejects_kind_arguments_width_and_metric_corruption() -> Result<(), String> {
     let calls = actual_v8_calls("native-width-oracle-boundary.js")?;
     let svg_index = calls
