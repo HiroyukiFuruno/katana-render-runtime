@@ -6,6 +6,12 @@ static TEMP_FILE: AtomicUsize = AtomicUsize::new(0);
 const FILES: CmapFileFixture = CmapFileFixture::new("krr-cmap-storage", &TEMP_FILE);
 
 #[test]
+fn file_backed_cmap_fixture_rejects_an_invalid_destination() {
+    let files = CmapFileFixture::new("krr-cmap-invalid\0path", &TEMP_FILE);
+    assert!(files.bundled_database().is_err());
+}
+
+#[test]
 fn cache_rejects_an_oversized_cmap_entry() -> Result<(), String> {
     let (database, id, _guard) = FILES.bundled_database()?;
     let generation = super::super::super::file_generation::file_source_stamp(&database, id).2;
