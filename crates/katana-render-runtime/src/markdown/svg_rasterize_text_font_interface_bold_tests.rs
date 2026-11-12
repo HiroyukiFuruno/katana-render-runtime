@@ -71,10 +71,8 @@ fn missing_alias_glyph_requires_non_interface_fallback() -> Result<(), String> {
         Some(alias)
     );
     let character = alias_character(&database, alias, false)?;
-    let attributes = super::fallback_attributes(super::INTERFACE_BOLD_WEIGHT, false);
-    let mut probe = |id, glyph| super::probe_font_has_char(&database, id, glyph);
     assert_eq!(
-        super::requested_preflight(&database, base, character, attributes, &mut probe),
+        requested_interface_preflight(&database, base, character),
         Ok(true)
     );
     assert_real_non_interface_fallback(&database, base, character);
@@ -99,10 +97,8 @@ fn unreadable_alias_disables_requested_fallback_and_caching() -> Result<(), Stri
         Some(alias)
     );
     assert_eq!(super::probe_font_has_char(&database, alias, 'A'), None);
-    let attributes = super::fallback_attributes(super::INTERFACE_BOLD_WEIGHT, false);
-    let mut probe = |id, glyph| super::probe_font_has_char(&database, id, glyph);
     assert_eq!(
-        super::requested_preflight(&database, base, 'A', attributes, &mut probe),
+        requested_interface_preflight(&database, base, 'A'),
         Err((None, false))
     );
     assert_eq!(
@@ -110,6 +106,16 @@ fn unreadable_alias_disables_requested_fallback_and_caching() -> Result<(), Stri
         (None, false)
     );
     Ok(())
+}
+
+fn requested_interface_preflight(
+    database: &Database,
+    base: ID,
+    character: char,
+) -> Result<bool, (Option<ID>, bool)> {
+    let attributes = super::fallback_attributes(INTERFACE_BOLD_WEIGHT, false);
+    let mut probe = |id, glyph| super::probe_font_has_char(database, id, glyph);
+    super::requested_preflight(database, base, character, attributes, &mut probe)
 }
 
 fn assert_real_non_interface_fallback(database: &Database, base: ID, character: char) {

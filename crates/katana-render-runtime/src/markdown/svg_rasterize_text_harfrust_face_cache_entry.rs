@@ -315,6 +315,9 @@ mod budget_tests {
             std::fs::metadata(&fixture.0)?.len(),
             u64::from(SMALL_FILE_BYTES)
         );
-        assert_bounded_fallback(&database, face, &fixture.0)
+        assert_bounded_fallback(&database, face, &fixture.0)?;
+        std::fs::remove_file(&fixture.0)?;
+        assert!(full_file_font(&database, face).is_none());
+        Ok(())
     }
 }
