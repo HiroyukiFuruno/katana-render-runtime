@@ -124,8 +124,7 @@ mod tests {
             "<style>*, *::before, *::after { margin: 0; padding: 0; }</style><p>Reset</p>",
         );
         let nodes = document.interactive_nodes_with_styles(&HashMap::new());
-        let style = find_style_attribute(&nodes, "body")
-            .ok_or_else(|| "missing body styles".to_string())?;
+        let style = find_style_attribute(&nodes, "body").ok_or("missing body styles")?;
         assert!(style.contains("margin-left: 0"), "{style}");
         assert!(!style.contains("8px"), "{style}");
         Ok(())

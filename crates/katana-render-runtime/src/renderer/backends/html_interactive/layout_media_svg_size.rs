@@ -256,8 +256,6 @@ mod tests {
             HtmlBrowserViewport::new(JOURNEY_CAPTURE_WIDTH, JOURNEY_CAPTURE_HEIGHT, 1.0)?;
         let layout = HtmlLayoutRenderer::render(&nodes, viewport, 0.0, &HashMap::new(), None)?;
         let root = Element::parse(layout.svg.as_bytes())?;
-        find_svg(&root)
-            .cloned()
-            .ok_or_else(|| "missing journey SVG".into())
+        Ok(find_svg(&root).ok_or("missing journey SVG")?.clone())
     }
 }

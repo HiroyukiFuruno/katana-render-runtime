@@ -86,7 +86,8 @@ mod tests {
     }
 
     #[test]
-    fn fractional_box_paint_matches_chrome_rows_at_multiple_device_scales() -> Result<(), String> {
+    fn fractional_box_paint_matches_chrome_rows_at_multiple_device_scales()
+    -> Result<(), Box<dyn std::error::Error>> {
         let mut style = CssStyle::browser_default();
         style.background = Some("black".to_string());
         let painted = box_svg(0, 3.09375, 5.578125, 8.90625, 2.0, &style);
@@ -94,8 +95,8 @@ mod tests {
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="white"/>{painted}</svg>"#
         );
         for scale in [1.0, 1.5, 2.0] {
-            let image = crate::markdown::svg_rasterize::SvgRasterizeOps::rasterize_svg(&svg, scale)
-                .map_err(|error| error.to_string())?;
+            let image =
+                crate::markdown::svg_rasterize::SvgRasterizeOps::rasterize_svg(&svg, scale)?;
             let x = (5.0 * scale) as u32;
             for y in 0..image.height {
                 let start = ((y * image.width + x) * 4) as usize;
