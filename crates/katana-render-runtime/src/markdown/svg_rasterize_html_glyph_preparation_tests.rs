@@ -106,6 +106,80 @@ fn malformed_typeface_is_rejected_without_poisoning_font_manager() -> Result<(),
     Ok(())
 }
 
+const OUT_OF_RANGE_GLYPH: u32 = 70_000;
+
+#[test]
+fn glyph_outside_skia_id_range_rejects_the_run_without_partial_paint() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let fixture = font_file_fixture::create(directory.path().join("font.ttf"), &wide_cmap_font()?)
+        .map_err(|error| error.to_string())?;
+    let (tree, count) =
+        parse_text_content(fixture.database.clone(), "Noto Sans", 400, false, "AB", "")?;
+    assert_eq!(count, 2);
+    let Some(Node::Text(text)) = tree.node_by_id("run") else {
+        return Err("fixture text node missing".to_owned());
+    };
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    assert!(rasterizer.ensure_face(fixture.face_id)?.is_some());
+    assert!(
+        text.layouted()
+            .iter()
+            .flat_map(|span| &span.positioned_glyphs)
+            .any(|glyph| glyph.id.0 == OUT_OF_RANGE_GLYPH)
+    );
+    let mut pixmap =
+        Pixmap::new(FIXTURE_WIDTH, FIXTURE_HEIGHT).ok_or("pixmap allocation failed")?;
+    assert_unsupported(&rasterizer, text, &mut pixmap)
+}
+
+fn wide_cmap_font() -> Result<Vec<u8>, String> {
+    use write_fonts::{
+        FontBuilder,
+        read::{FontRef, TableProvider},
+        types::Tag,
+    };
+    let original =
+        FontRef::new(font_file_fixture::FONT_BYTES).map_err(|error| error.to_string())?;
+    let valid = original
+        .cmap()
+        .map_err(|error| error.to_string())?
+        .map_codepoint('B')
+        .ok_or("control glyph missing")?;
+    let cmap = cmap_with_wide_glyph(valid.to_u32());
+    let mut builder = FontBuilder::new();
+    builder.add_raw(Tag::new(b"cmap"), &cmap);
+    Ok(builder.copy_missing_tables(original).build())
+}
+
+fn cmap_with_wide_glyph(control: u32) -> Vec<u8> {
+    const WINDOWS_PLATFORM_ID: u16 = 3;
+    const FULL_UNICODE_ENCODING_ID: u16 = 10;
+    const FORMAT_12: u16 = 12;
+    const SUBTABLE_OFFSET: u32 = 12;
+    const FORMAT_12_LENGTH: u32 = 40;
+    /* WHY: Format 12の32ビットのglyph IDを使い、Skiaへ渡す直前の境界を検証する。 */
+    let mut cmap = [0, 1, WINDOWS_PLATFORM_ID, FULL_UNICODE_ENCODING_ID]
+        .into_iter()
+        .flat_map(u16::to_be_bytes)
+        .collect::<Vec<_>>();
+    cmap.extend(SUBTABLE_OFFSET.to_be_bytes());
+    cmap.extend([FORMAT_12, 0].into_iter().flat_map(u16::to_be_bytes));
+    cmap.extend(
+        [FORMAT_12_LENGTH, 0, 2]
+            .into_iter()
+            .flat_map(u32::to_be_bytes),
+    );
+    for (character, glyph) in [('A', OUT_OF_RANGE_GLYPH), ('B', control)] {
+        let codepoint = u32::from(character);
+        cmap.extend(
+            [codepoint, codepoint, glyph]
+                .into_iter()
+                .flat_map(u32::to_be_bytes),
+        );
+    }
+    cmap
+}
+
 #[test]
 fn real_file_glyph_runs_reuse_cached_face_without_changing_pixels() -> Result<(), String> {
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
