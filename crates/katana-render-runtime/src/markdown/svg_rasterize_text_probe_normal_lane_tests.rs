@@ -92,15 +92,56 @@ fn public_font_and_svg_probes_reject_relative_input_without_output() -> TestResu
     let input = PathBuf::from("relative-probe-input");
     let destination = directory.file("must-not-be-created");
     for (suffix, input_key, output_key) in [RECURSIVE_PROBE, HTML_PNG_PROBE] {
-        let fqn = format!("{ROOT_FQN}::{suffix}");
-        let result = execute_probe(&fqn, &[(input_key, &input), (output_key, &destination)])?;
-        let stdout = std::str::from_utf8(&result.stdout)?;
-        let stderr = std::str::from_utf8(&result.stderr)?;
-        assert!(!result.status.success(), "{fqn}");
-        assert!(stdout.contains("0 passed; 1 failed; 0 ignored"), "{fqn}");
-        assert!(stderr.contains("absolute probe path required"), "{fqn}");
-        assert!(!destination.exists(), "{fqn}");
+        assert_probe_rejected(
+            suffix,
+            &[(input_key, &input), (output_key, &destination)],
+            "absolute probe path required",
+        )?;
+        assert!(!destination.exists(), "{suffix}");
     }
+    Ok(())
+}
+
+#[test]
+fn public_recursive_probe_rejects_missing_font_and_existing_output() -> TestResult<()> {
+    let directory = super::super::super::probe_test_support::TempProbeDirectory::create()?;
+    let missing = directory.file("missing.ttf");
+    let output = directory.file("recursive.json");
+    let (suffix, input_key, output_key) = RECURSIVE_PROBE;
+    assert_probe_rejected(
+        suffix,
+        &[(input_key, &missing), (output_key, &output)],
+        "NotFound",
+    )?;
+    assert!(!output.exists());
+
+    let font = fixture("recursive-latin-crsv-normal.ttf")?;
+    let previous = b"previous observation";
+    std::fs::write(&output, previous)?;
+    assert_probe_rejected(
+        suffix,
+        &[(input_key, &font), (output_key, &output)],
+        "AlreadyExists",
+    )?;
+    assert_eq!(std::fs::read(output)?, previous);
+    Ok(())
+}
+
+fn assert_probe_rejected(
+    suffix: &str,
+    environment: &[(&str, &PathBuf)],
+    expected: &str,
+) -> TestResult<()> {
+    let fqn = format!("{ROOT_FQN}::{suffix}");
+    let result = execute_probe(&fqn, environment)?;
+    let stdout = std::str::from_utf8(&result.stdout)?;
+    let stderr = std::str::from_utf8(&result.stderr)?;
+    assert!(!result.status.success(), "{fqn}");
+    assert!(
+        stdout.contains("0 passed; 1 failed; 0 ignored"),
+        "{fqn}: {stdout}"
+    );
+    assert!(stderr.contains(expected), "{fqn}: {stderr}");
     Ok(())
 }
 
