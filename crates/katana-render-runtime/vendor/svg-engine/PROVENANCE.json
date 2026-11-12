@@ -306,9 +306,9 @@
       "source": "crates/usvg/src/text/colr.rs",
       "destination": "usvg/text/colr.rs",
       "sourceSha256": "51ce8d6ec262cde94276f9748ab256217dfd14d10ec0b4b8447bcf18548beb42",
-      "transplantedSha256": "177d55d6ae906cc4520ef9ec9b2f3b70d1c1b84420878e78d33eb48a4d6b8488",
+      "transplantedSha256": "2d1bfae43dc8b0050cd470259fae406b9ce0101f1bc424f34d6718fd099ea033",
       "sourceBytes": 19989,
-      "transplantedBytes": 20020,
+      "transplantedBytes": 20183,
       "adaptations": {
         "cratePaths": 1,
         "enabledFeaturePredicates": {},

@@ -1,6 +1,11 @@
 use super::super::{Builder, GlyphPainter};
 use super::{FONT_BYTES, finish, font, painter, solid_brush};
-use skrifa::{GlyphId, MetadataProvider, color::ColorPainter, outline::OutlinePen};
+use skrifa::{
+    GlyphId, MetadataProvider,
+    color::{Brush, ColorPainter, ColorStop, Extend, Transform},
+    outline::OutlinePen,
+    raw::types::Point,
+};
 use xmlwriter::XmlWriter;
 
 const VALID_OUTLINE_GLYPH: u32 = 9;
@@ -33,6 +38,50 @@ fn assert_glyph_metadata(font: &skrifa::FontRef<'static>) -> Result<(), String> 
         return Err("fixture metadata must contain the selected outline glyph".to_owned());
     }
     Ok(())
+}
+
+#[test]
+fn singular_colr_outline_retains_finite_gradient_transform() -> Result<(), String> {
+    let font = font()?;
+    assert_glyph_metadata(&font)?;
+    let mut svg = super::writer();
+    let mut path = String::new();
+    let mut painter = painter(&font, &mut svg, &mut path);
+    painter.push_transform(Transform {
+        xx: 0.0,
+        dx: 5.0,
+        ..Transform::default()
+    });
+    painter.fill_glyph(GlyphId::new(VALID_OUTLINE_GLYPH), None, linear_brush());
+    painter.pop_transform();
+    let output = finish(svg);
+    assert!(output.contains("gradientTransform=\"matrix(0 0 0 1 5 0)\""));
+    assert!(output.contains("fill=\"url(#lg1)\""));
+    assert!(!output.contains("NaN"));
+    Ok(())
+}
+
+fn linear_brush() -> Brush<'static> {
+    Brush::LinearGradient {
+        p0: Point { x: 0.0, y: 0.0 },
+        p1: Point {
+            x: GLYPH_X_MAX,
+            y: 0.0,
+        },
+        color_stops: &[
+            ColorStop {
+                offset: 0.0,
+                palette_index: u16::MAX,
+                alpha: 1.0,
+            },
+            ColorStop {
+                offset: 1.0,
+                palette_index: u16::MAX,
+                alpha: 0.0,
+            },
+        ],
+        extend: Extend::Pad,
+    }
 }
 
 fn assert_independent_outline_bounds(bounds: Option<tiny_skia_path::Rect>) -> Result<(), String> {

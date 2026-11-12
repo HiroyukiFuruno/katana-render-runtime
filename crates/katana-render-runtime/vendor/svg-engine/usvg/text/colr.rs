@@ -263,8 +263,10 @@ fn paint_transform(outline_transform: Transform, transform: Transform) -> Transf
     let outline_transform = skrifa_to_tsp_transform(outline_transform);
     let gradient_transform = skrifa_to_tsp_transform(transform);
 
+    /* WHY: 軸のscaleがゼロでも逆変換がSomeを返すため、非有限成分を拒否する。 */
     let gradient_transform = outline_transform
         .invert()
+        .filter(tiny_skia_path::Transform::is_finite)
         .log_none(|| log::warn!("Failed to calculate transform for gradient in glyph."))
         .unwrap_or_default()
         .pre_concat(gradient_transform);
