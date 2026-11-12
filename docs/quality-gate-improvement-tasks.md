@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- SVG字形クラスタの生成に使ったテキスト範囲を字間と単語間隔の処理でも使い、同じoffsetへの再検索を除いた。生成される最後のクラスタの扱いと、縦書き補正・字間・単語間隔の適用順を維持した。複数範囲にまたがる字間と単語間隔を含む関連12件、静的基盤、ASTが成功し、ソース前後一致（`69a41c4f`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-span-spacing-k31ic1io/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - 最新の正式計測は `3eb5dd21` の86,741/86,985行、99.719492%、未カバー244行（247行から3行減。実HTMLセッションの初回フレーム確定2行、SVG字形監査1行）。全ファイルの未カバー増加なし。Rust実行対象6,460件が全件成功、別に15件skip。Moonの収集実0、ソース前後一致、同じ環境のゲートが証跡を認証し再収集なし、100%条件だけ不合格（`tmp/quality/resumed-owner-r3509/root-coverage-after-svg-and-html-viewport-batch-hjbibx5v/safe-summary.json`）。
 - 1×1の物理ビューポートに極小の正の倍率を指定し、描画対象がない実HTMLで論理寸法が無限大の場合に、初回フレーム確定から公開APIへ `InvalidViewport` が伝播する回帰を追加した。関連3件、静的基盤、ASTが成功し、ソース前後一致（`81b2f274`、`tmp/quality/resumed-owner-r3509/release-coverage-html-logical-viewport-overflow-_35w6a0f/safe-summary.json`）。最初の入力ではボックスの非有限座標を先に検出して失敗したため、その結果も別runに保持した。
 - HTMLセッション起動の実入力を8193×1とし、ラスタ描画上限で生じる8192×1との差を、起動APIが型付きエラーとして返すことを確認した。関連2件、静的基盤、ASTが成功し、ソース前後一致（`048ab7d4`、`tmp/quality/resumed-owner-r3509/release-coverage-html-viewport-raster-error-2h5pctw5/safe-summary.json`）。
