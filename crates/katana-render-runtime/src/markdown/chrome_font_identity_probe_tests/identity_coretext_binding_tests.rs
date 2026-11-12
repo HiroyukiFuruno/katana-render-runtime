@@ -124,6 +124,17 @@ fn coretext_rejects_descriptor_postscript_name_mismatch() -> Result<(), String> 
 }
 
 #[test]
+fn coretext_lookup_rejects_paths_that_cannot_form_a_file_url() {
+    for invalid in ["", "/tmp/krr-invalid\0font.ttf"] {
+        let result = super::descriptors_from_url(Path::new(invalid));
+        assert!(matches!(
+            result,
+            Err(error) if error == "CoreText candidate path could not be represented as a file URL"
+        ));
+    }
+}
+
+#[test]
 fn coretext_lookup_rejects_a_missing_font_file() -> Result<(), String> {
     let temp = TempDirectory::new()?;
     let path = temp.path().join("missing.ttf");

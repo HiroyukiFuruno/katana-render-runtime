@@ -128,6 +128,16 @@ fn shifted_source_anchor_rejects_the_forward_origin_contract() -> Result<(), Str
 }
 
 #[test]
+fn single_middle_rejects_y_origin_beyond_layout_unit_range() -> Result<(), String> {
+    let source = tree(&CASES[0], "middle", "dy='40000000'")?;
+    let text = text(&source)?;
+    assert_eq!(text.dy().first(), Some(&40_000_000.0));
+    let result = HtmlGlyphRasterizer::new(source.fontdb()).prepare(text);
+    assert!(matches!(result, Err(error) if error == "chunk Y origin exceeds LayoutUnit"));
+    Ok(())
+}
+
+#[test]
 fn explicit_offsets_spacing_and_nonstandard_features_remain_ineligible() -> Result<(), String> {
     for attributes in [
         "dx='1'",
