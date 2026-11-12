@@ -47,13 +47,10 @@ impl Write for BoundedWriter {
                 "HTML artifact encoding limit exceeded",
             ));
         }
-        let required = self.bytes.len().saturating_add(bytes.len());
+        let required = self.bytes.len() + bytes.len();
         let geometric = self.bytes.capacity().saturating_mul(2);
         let target = geometric.max(required).min(self.limit);
-        let additional = target.saturating_sub(self.bytes.len());
-        if additional > 0 {
-            self.bytes.reserve_exact(additional);
-        }
+        self.bytes.reserve_exact(target - self.bytes.len());
         self.bytes.extend_from_slice(bytes);
         Ok(bytes.len())
     }
