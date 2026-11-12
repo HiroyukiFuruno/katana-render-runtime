@@ -1,8 +1,10 @@
 use super::{FONT_FAMILY, MULTILINE, additional_middle_layout_supported, fixture, source, text};
 use crate::markdown::svg_rasterize::{
-    composite::SvgCompositeRenderer, html_glyph::HtmlGlyphRasterizer, provenance::AuthoredClipInfo,
+    composite::SvgCompositeRenderer, font_file_fixture, html_glyph::HtmlGlyphRasterizer,
+    provenance::AuthoredClipInfo,
 };
 use resvg::usvg::{Options, TextFlow, Tree};
+use std::sync::Arc;
 use tiny_skia::{Pixmap, Transform};
 
 const SVG_WIDTH: u32 = 120;
@@ -11,7 +13,11 @@ const VISIBLE_TEXT_ROWS: [(u32, u32); 2] = [(10, 30), (50, 70)];
 
 #[test]
 fn middle_multichunk_text_path_is_excluded_and_remains_visible() -> Result<(), String> {
-    let tree = text_path_fixture()?;
+    let font = fixture("AB", "")?;
+    let tree = text_path_fixture(
+        "<tspan x='0' dy='0'>AB</tspan><textPath href='#curve'>CD</textPath>",
+        Arc::clone(font.fontdb()),
+    )?;
     let run = text(&tree)?;
     let chunks = run.chunks();
     assert!(chunks.len() >= 2);
@@ -36,8 +42,46 @@ fn middle_multichunk_text_path_is_excluded_and_remains_visible() -> Result<(), S
     assert_visible(&tree)
 }
 
-fn text_path_fixture() -> Result<Tree, String> {
-    let body = "<tspan x='0' dy='0'>AB</tspan><textPath href='#curve'>CD</textPath>";
+#[test]
+fn single_text_path_keeps_glyphs_off_the_horizontal_alignment_path() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let font = font_file_fixture::create(
+        directory.path().join("Noto.ttf"),
+        font_file_fixture::FONT_BYTES,
+    )
+    .map_err(|error| error.to_string())?;
+    let tree = text_path_fixture(
+        "<textPath href='#curve'>CD</textPath>",
+        Arc::new(font.database.clone()),
+    )?;
+    let run = text(&tree)?;
+    let [chunk] = run.chunks() else {
+        return Err("expected one shaped text chunk".into());
+    };
+    assert!(matches!(chunk.text_flow(), TextFlow::Path(_)));
+    assert_no_single_alignment(&tree)
+}
+
+fn assert_no_single_alignment(tree: &Tree) -> Result<(), String> {
+    let run = text(tree)?;
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    let prepared = rasterizer.prepare(run)?;
+    let crate::markdown::svg_rasterize::html_glyph::Prepared::Ready(spans) = prepared else {
+        return Err("fixture did not prepare its glyphs".into());
+    };
+    let span = spans.first().ok_or("fixture produced no glyph spans")?;
+    assert!(
+        crate::markdown::svg_rasterize::html_glyph::single_horizontal_alignment(run, span)
+            .is_none()
+    );
+    assert!(span.x_alignment.is_none());
+    Ok(())
+}
+
+fn text_path_fixture(
+    body: &str,
+    fontdb: Arc<resvg::usvg::fontdb::Database>,
+) -> Result<Tree, String> {
     let svg = source(body, "", FONT_FAMILY)
         .replace(
             "<svg xmlns=",
@@ -47,9 +91,8 @@ fn text_path_fixture() -> Result<Tree, String> {
             "<text id='run'",
             "<defs><path id='curve' d='M0 60 H100'/></defs><text id='run'",
         );
-    let font_fixture = fixture("AB", "")?;
     let options = Options {
-        fontdb: font_fixture.fontdb().clone(),
+        fontdb,
         ..Options::default()
     };
     Tree::from_str(&svg, &options).map_err(|error| error.to_string())
