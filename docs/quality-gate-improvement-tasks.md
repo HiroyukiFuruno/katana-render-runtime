@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 正式未カバー箇所を対象とする予定8条件中8条件を確認。実フォント3条件、Chrome検証資源2条件、実Block/C4 SVGの異常3条件。ASTの関数長指摘を修正後、関連7テスト、静的基盤、AST、ソース前後一致が成功（`943dea96`、`139b7c60`、`tmp/quality/resumed-owner-r3509/release-coverage-font-mermaid-real-paths-ok69sb8n/safe-summary.json`）。未カバー行の減少は次回の正式計測で判定する。
 - カバレッジを優先。最新の正式計測は `7f94d105` の86,787/87,074行、99.670395%、未カバー287行。前回の307行から15ファイルで計20行減り、未カバーの増加なし。全6,433テスト成功、別に15件skip。計測前後のソース一致、収集実0、正式集計の不変を確認。合否は `coverage-policy` で実1、公開条件の100%に未達（`tmp/quality/resumed-owner-r3509/root-coverage-after-real-fixtures-f9x_1s1j/{safe-summary,gap-summary,gap-delta}.json`）。
 - 対応予定8条件中8条件を確認。実フォントの選択2条件と共有SVG文書の破損2条件、書込み・既存ファイル衝突2条件、実V8観測の文字・サイズの拒否2条件。既存対照を含む関連9テスト、静的基盤、AST、ソース前後一致が成功（`271bc652`、`d961027a`、`7f94d105`、`tmp/quality/resumed-owner-r3509/release-coverage-font-fixture-contracts-nk4lx946/safe-summary.json`）。先行19条件と合わせて今回の正式計測へ反映した。
 - 次の候補は正式287行から抽出した関数別マップと照合する。162ファイル中161ファイルで正式件数と一致。残るlazy font parseは別途照合する（`tmp/quality/resumed-owner-r3509/coverage-formal-gap-map-6q3ix1ox/function-line-candidates.json`）。実フォント破損・消失、Chrome検証補助の衝突・来歴、実Block/C4図の異常入力を候補にした（`tmp/quality/resumed-owner-r3509/coverage-formal-gap-map-1v6moo07/next-coverage-cases.md`）。
