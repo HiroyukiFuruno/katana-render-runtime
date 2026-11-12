@@ -1609,11 +1609,9 @@ fn resolved_font_identity(
     font: &skrifa::FontRef<'_>,
     metrics: &skrifa::metrics::Metrics,
 ) -> Option<(NonZeroU16, bool)> {
-    // Reject fonts with an out-of-range unitsPerEm, like `ttf-parser` did.
-    if !(16..=16384).contains(&metrics.units_per_em) {
-        return None;
-    }
-    let units_per_em = NonZeroU16::new(metrics.units_per_em)?;
+    /* WHY: ttf-parserと同じunitsPerEm範囲を維持する。 */
+    let units_per_em =
+        NonZeroU16::new(metrics.units_per_em).filter(|value| (16..=16384).contains(&value.get()))?;
     /* WHY: opszの有無は同じfaceで既に取得したSkrifa metadataから保持する。 */
     let has_optical_sizing_axis = font
         .axes()
