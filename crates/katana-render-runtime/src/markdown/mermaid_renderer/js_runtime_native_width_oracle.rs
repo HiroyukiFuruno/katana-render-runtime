@@ -163,8 +163,31 @@ pub(super) fn rounded_width(width: f32) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::assert_inherited_cjk;
+    use super::super::oracle_boundary_tests::actual_v8_calls;
+    use super::{assert_bridge_widths_match_rust, assert_inherited_cjk};
     use serde_json::{Value, json};
+
+    #[test]
+    fn raw_v8_html_width_calls_reject_unmeasurable_text() -> Result<(), String> {
+        let calls = actual_v8_calls("native-width-oracle-invalid-html-text.js")?;
+        for (kind, expected) in [
+            ("css", "CSS boundary reference failed:"),
+            ("canvas", "Canvas boundary reference failed:"),
+        ] {
+            let mut corrupted = calls.clone();
+            let row = corrupted
+                .iter_mut()
+                .find(|call| call["kind"] == kind)
+                .ok_or_else(|| format!("raw V8 {kind} call missing"))?;
+            row["args"][0] = json!("\0");
+            row["args"][1] = json!("");
+            let error = assert_bridge_widths_match_rust(&corrupted)
+                .err()
+                .ok_or_else(|| format!("unmeasurable {kind} text was accepted"))?;
+            assert!(error.starts_with(expected), "{error}");
+        }
+        Ok(())
+    }
 
     #[test]
     fn inherited_cjk_probe_rejects_missing_metadata_and_invalid_width() {
