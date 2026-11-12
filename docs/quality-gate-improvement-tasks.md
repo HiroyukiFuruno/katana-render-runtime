@@ -3,6 +3,8 @@
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
 - カバレッジを優先。最新の正式計測は `74212319` の86,640/86,969行、99.621704%、未カバー329行。直前の正式計測から12行減り、公開条件の100%には未達（`tmp/quality/resumed-owner-r3509/root-coverage-after-focused-regressions-8ndvm8nx/{safe-summary,gap-summary,gap-delta}.json`）。
+- 対応予定12条件中12条件を確認。フォント検証3条件（子プローブの要求拒否、共有フォント消失、正しい物理パスでの誤った名前）、描画関連7条件（フォント消失1、HTML要素・グリッドの欠落4、不正な境界指定2）、リソース2条件（Mermaid同梱描画、SVG画像検証の入力欠落）。既存のフォールバックと描画トレースの回帰も実行し、関連15テスト・静的基盤・ASTが成功（`tmp/quality/resumed-owner-r3509/release-coverage-chrome-physical-failures-wovacbt2/safe-summary.json`、`release-coverage-font-render-contracts-wvt_g1vi/safe-summary.json`、`release-coverage-runtime-fixture-resolution-xiztpmra/safe-summary.json`）。トレース順序は維持してエントリ検索を共通化し、対象1ファイルの検証用ハッシュを同期した。全体カバレッジは未再計測。
+- 保存済み正式レポートの関数別情報から未カバー候補を抽出し、182ファイル中180ファイルで正式件数と照合した（`tmp/quality/resumed-owner-r3509/coverage-function-gap-map-tekfmijp/function-line-candidates.json`）。一致しなかったlazy font parseとtree renderの2ファイルは、個別の候補を正式値と扱わず別途確認する。
 - 対応予定9条件中9条件完了。SVGの文字送り6条件、Chromeフォント検証CLIの空の条件IDの拒否1条件、UTF-8エラー変換のメソッド名と引数の異常2条件を確認。初回のAST検査でテストファイルの上限超過を検出し、文字送りを既存のアンカーテストへ移した。最終差分の関連3テスト・静的基盤・ASTが成功（`tmp/quality/resumed-owner-r3509/release-coverage-anchor-probe-loader-nj6zg7o3/safe-summary.json`、`f7396e71`・`874c8b2c`）。正式値の更新は未計測。
 - 対応予定4条件中4条件完了。SVG比較で入力側・出力側の途中で切れたXML、ルート属性取得時の途中で切れたXML、数値でない子要素の座標を拒否することを確認。関連2テスト・静的基盤・ASTが成功（`tmp/quality/resumed-owner-r3509/release-coverage-svg-comparison-invalid-9hqywg9a/safe-summary.json`、`3964f309`）。正式値の更新は未計測。
 
