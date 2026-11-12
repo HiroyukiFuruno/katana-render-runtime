@@ -85,6 +85,10 @@ fn static_font_descriptor_rejects_a_different_postscript_name() -> Result<(), St
         Some("CTFont and URL-bound descriptor PostScript names differ")
     );
     assert!(super::coordinates(&descriptor)?.is_empty());
+    match super::axes(&descriptor) {
+        Ok(axes) => assert!(axes.is_empty()),
+        Err(error) => assert_eq!(error, "CoreText returned no variation-axis inventory"),
+    }
     Ok(())
 }
 
