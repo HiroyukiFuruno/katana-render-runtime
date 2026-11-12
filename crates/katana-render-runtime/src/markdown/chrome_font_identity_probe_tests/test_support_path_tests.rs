@@ -2,7 +2,7 @@ use super::super::{
     CaptureRequest, ProbeRequest, ProbeResponse, REQUEST_SCHEMA, RESPONSE_SCHEMA, ResourceFile,
 };
 use super::{TempDirectory, request_sha256, run_probe_child, verified_single_capture};
-use std::ffi::OsString;
+use std::{ffi::OsString, fs};
 
 const CONDITION: &str = "non-utf8-path";
 
@@ -60,5 +60,24 @@ fn non_utf8_resource_path_rejects_request_json_without_starting_probe() -> Resul
             .err()
             .is_some_and(|error| error.starts_with("serialize request:"))
     );
+    Ok(())
+}
+
+#[test]
+fn probe_child_rejects_a_successful_process_that_selected_no_test() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let resource_path = temp.path().join("captured-font.body");
+    fs::write(&resource_path, b"font response").map_err(|error| error.to_string())?;
+    let request = request_with_resource(resource_path);
+    let output = temp.path().join("missing-response.json");
+    let error = run_probe_child(&request, &output, "krr::no_such_probe_test")
+        .err()
+        .ok_or("a child with no matching test was accepted")?;
+    assert!(error.starts_with("read response:"));
+    assert!(!output.exists());
+    let written =
+        fs::read(output.with_extension("request.json")).map_err(|error| error.to_string())?;
+    let expected = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
+    assert_eq!(written, expected);
     Ok(())
 }
