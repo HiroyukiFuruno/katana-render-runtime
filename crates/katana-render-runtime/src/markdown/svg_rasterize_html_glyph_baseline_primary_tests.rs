@@ -1,3 +1,4 @@
+use super::super::policy::uniform_policy_with_context;
 use super::{has_known_missing_base_table, usvg};
 use crate::markdown::svg_rasterize::{font_file_fixture, html_glyph::HtmlGlyphRasterizer};
 use rstest::rstest;
@@ -53,7 +54,7 @@ fn mixed_real_font_spans_decline_a_single_primary_face() -> Result<(), String> {
     };
     assert_ne!(sans.font(), cjk.font());
     assert_eq!(text.layouted().len(), 2);
-    assert!(super::uniform_policy_with_context(text, false, false).is_some());
+    assert!(uniform_policy_with_context(text, false, false).is_some());
     let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
     assert!(super::resolved_policy(&rasterizer, text)?.is_none());
     Ok(())
@@ -105,7 +106,7 @@ fn assert_primary_face_boundary(
     let Some(usvg::Node::Text(text)) = tree.node_by_id("run") else {
         return Err("baseline fixture text missing".into());
     };
-    assert!(super::uniform_policy_with_context(text, false, false).is_some());
+    assert!(uniform_policy_with_context(text, false, false).is_some());
     let empty = usvg::fontdb::Database::new();
     let missing = HtmlGlyphRasterizer::new(&empty);
     assert!(
@@ -127,7 +128,7 @@ fn middle_baseline_declines_unsupported_variable_color_face() -> Result<(), Stri
     let Some(usvg::Node::Text(text)) = tree.node_by_id("run") else {
         return Err("color text missing".into());
     };
-    assert!(super::uniform_policy_with_context(text, false, false).is_some());
+    assert!(uniform_policy_with_context(text, false, false).is_some());
     let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
     assert!(rasterizer.face_metadata(id)?.unsupported);
     assert!(rasterizer.primary_variable_face(text, id)?.is_none());

@@ -18,6 +18,15 @@ pub(super) fn uniform_policy_with_context(
     nested_text_context: bool,
     additional_text_context: bool,
 ) -> Option<Policy> {
+    uniform_policy_and_primary_span(text, nested_text_context, additional_text_context)
+        .map(|(policy, _)| policy)
+}
+
+pub(super) fn uniform_policy_and_primary_span(
+    text: &usvg::Text,
+    nested_text_context: bool,
+    additional_text_context: bool,
+) -> Option<(Policy, &usvg::TextSpan)> {
     if text.writing_mode() != usvg::WritingMode::LeftToRight {
         return None;
     }
@@ -27,7 +36,7 @@ pub(super) fn uniform_policy_with_context(
             || (additional_text_context && middle::additional_middle_layout_supported(text)));
     let nested_middle_supported =
         css_scale.is_some() && nested_text_context && middle::nested_layout_supported(text);
-    let mut policy = None;
+    let mut candidate = None;
     for chunk in text.chunks() {
         if !matches!(chunk.text_flow(), TextFlow::Linear) {
             return None;
@@ -35,13 +44,13 @@ pub(super) fn uniform_policy_with_context(
         for span in chunk.spans() {
             let current =
                 policy_for_span(span, css_scale, middle_supported, nested_middle_supported)?;
-            if policy.is_some_and(|value| !same_policy(value, current)) {
+            if candidate.is_some_and(|(policy, _)| !same_policy(policy, current)) {
                 return None;
             }
-            policy = Some(current);
+            candidate.get_or_insert((current, span));
         }
     }
-    policy
+    candidate
 }
 
 fn policy_for_span(

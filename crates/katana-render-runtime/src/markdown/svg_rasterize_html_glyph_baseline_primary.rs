@@ -1,4 +1,4 @@
-use super::{Policy, metrics_shift, middle, policy::uniform_policy_with_context};
+use super::{Policy, metrics_shift, middle, policy::uniform_policy_and_primary_span};
 use crate::markdown::svg_rasterize::{
     html_glyph::HtmlGlyphRasterizer, text_shaping::loaded_html_font,
 };
@@ -13,18 +13,18 @@ pub(in super::super) fn resolved_policy(
 ) -> Result<Option<Policy>, String> {
     let nested_text_context = rasterizer.has_authored_nested_text_context(text);
     let additional_text_context = rasterizer.has_authored_additional_text_context(text);
-    let Some(mut policy) =
-        uniform_policy_with_context(text, nested_text_context, additional_text_context)
+    let Some((mut policy, primary_span)) =
+        uniform_policy_and_primary_span(text, nested_text_context, additional_text_context)
     else {
         return Ok(None);
     };
     if let Some(middle_policy) = middle::MiddlePolicy::from_policy(policy) {
-        return resolve_middle_policy(rasterizer, text, policy, middle_policy);
+        return resolve_middle_policy(rasterizer, text, primary_span, policy, middle_policy);
     }
     if policy.kind == super::PolicyKind::Hanging {
-        return resolve_hanging_policy(rasterizer, text, policy);
+        return resolve_hanging_policy(rasterizer, text, primary_span, policy);
     }
-    let Some((id, metadata, _)) = primary_face_metadata(rasterizer, text)? else {
+    let Some((id, metadata, _)) = primary_face_metadata(rasterizer, text, primary_span)? else {
         return Ok(Some(policy));
     };
     if !metadata.unsupported {
@@ -37,9 +37,10 @@ pub(in super::super) fn resolved_policy(
 fn resolve_hanging_policy(
     rasterizer: &HtmlGlyphRasterizer<'_>,
     text: &usvg::Text,
+    primary_span: &usvg::TextSpan,
     mut policy: Policy,
 ) -> Result<Option<Policy>, String> {
-    let Some((id, metadata, _)) = primary_face_metadata(rasterizer, text)? else {
+    let Some((id, metadata, _)) = primary_face_metadata(rasterizer, text, primary_span)? else {
         return Ok(None);
     };
     if metadata.unsupported || !has_known_missing_base_table(rasterizer.database, id) {
@@ -64,10 +65,13 @@ fn has_known_missing_base_table(database: &usvg::fontdb::Database, id: usvg::fon
 fn resolve_middle_policy(
     rasterizer: &HtmlGlyphRasterizer<'_>,
     text: &usvg::Text,
+    primary_span: &usvg::TextSpan,
     mut policy: Policy,
     middle_policy: middle::MiddlePolicy,
 ) -> Result<Option<Policy>, String> {
-    let Some((id, metadata, variable_face)) = primary_face_metadata(rasterizer, text)? else {
+    let Some((id, metadata, variable_face)) =
+        primary_face_metadata(rasterizer, text, primary_span)?
+    else {
         return Ok(None);
     };
     if metadata.unsupported {
@@ -96,15 +100,14 @@ type PrimaryFace = (
 fn primary_face_metadata(
     rasterizer: &HtmlGlyphRasterizer<'_>,
     text: &usvg::Text,
+    primary_span: &usvg::TextSpan,
 ) -> Result<Option<PrimaryFace>, String> {
-    let mut spans = text.chunks().iter().flat_map(|chunk| chunk.spans());
-    let Some(first) = spans.next() else {
-        return Ok(None);
-    };
-    if spans.any(|span| span.font() != first.font()) {
+    let font = primary_span.font();
+    let mut other_spans = text.chunks().iter().flat_map(|chunk| chunk.spans()).skip(1);
+    if other_spans.any(|span| span.font() != font) {
         return Ok(None);
     }
-    let Some(id) = loaded_html_font(first.font(), rasterizer.database) else {
+    let Some(id) = loaded_html_font(font, rasterizer.database) else {
         return Ok(None);
     };
     let metadata = rasterizer.face_metadata(id)?;
