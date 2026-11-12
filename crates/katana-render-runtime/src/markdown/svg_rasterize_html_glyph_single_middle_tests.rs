@@ -138,6 +138,20 @@ fn single_middle_rejects_y_origin_beyond_layout_unit_range() -> Result<(), Strin
 }
 
 #[test]
+fn single_middle_rejects_x_origin_beyond_layout_unit_range() -> Result<(), String> {
+    let case = Case {
+        anchor_x: -40_000_000.0,
+        ..CASES[0]
+    };
+    let source = tree(&case, "middle", "")?;
+    let text = text(&source)?;
+    assert_eq!(text.chunks()[0].x(), Some(case.anchor_x));
+    let result = HtmlGlyphRasterizer::new(source.fontdb()).prepare(text);
+    assert!(matches!(result, Err(error) if error == "chunk X origin exceeds LayoutUnit"));
+    Ok(())
+}
+
+#[test]
 fn explicit_offsets_spacing_and_nonstandard_features_remain_ineligible() -> Result<(), String> {
     for attributes in [
         "dx='1'",

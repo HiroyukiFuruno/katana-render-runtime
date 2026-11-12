@@ -1,6 +1,6 @@
 use super::{
     AXIS_DEFAULT_ATTRIBUTE, AXIS_IDENTIFIER_ATTRIBUTE, AXIS_MAXIMUM_ATTRIBUTE,
-    AXIS_MINIMUM_ATTRIBUTE, parse_axes,
+    AXIS_MINIMUM_ATTRIBUTE, number_to_identifier, parse_axes,
 };
 use core_foundation::{
     array::CFArray,
@@ -48,6 +48,18 @@ const MALFORMED_AXIS_CASES: [(AxisCase, Option<&str>); 7] = [
     (AxisCase::NegativeIdentifier, Some(OUT_OF_RANGE_ID_ERROR)),
     (AxisCase::OverflowIdentifier, Some(OUT_OF_RANGE_ID_ERROR)),
 ];
+
+#[test]
+fn axis_identifier_preserves_u32_endpoints_in_both_cfnumber_encodings() {
+    for identifier in [u32::MIN, u32::MAX] {
+        for number in [
+            CFNumber::from(i64::from(identifier)),
+            CFNumber::from(f64::from(identifier)),
+        ] {
+            assert_eq!(number_to_identifier(&number), Ok(identifier));
+        }
+    }
+}
 
 #[test]
 fn parse_axes_rejects_malformed_real_corefoundation_dictionaries() {

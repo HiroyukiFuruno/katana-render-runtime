@@ -59,18 +59,12 @@ fn validate_axis_bounds(minimum: f64, maximum: f64, default: f64) -> Result<(), 
 }
 
 pub(super) fn number_to_identifier(number: &CFNumber) -> Result<u32, String> {
+    /* WHY: CFNumberGetValueは値が変わる整数変換を失敗として返す。 */
     let integer = number
         .to_i64()
         .ok_or_else(|| "CoreText returned an invalid variation identifier".to_string())?;
-    let identifier = u32::try_from(integer)
-        .map_err(|_| "CoreText returned an out-of-range variation identifier".to_string())?;
-    let exact = number
-        .to_f64()
-        .is_some_and(|value| value.is_finite() && value == f64::from(identifier));
-    if !exact {
-        return Err("CoreText variation identifier is not an exact u32".to_string());
-    }
-    Ok(identifier)
+    u32::try_from(integer)
+        .map_err(|_| "CoreText returned an out-of-range variation identifier".to_string())
 }
 
 fn number_attribute(
