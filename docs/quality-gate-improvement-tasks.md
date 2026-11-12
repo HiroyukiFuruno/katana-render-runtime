@@ -2,7 +2,8 @@
 
 ## 現在の実行地点（2026-11-13、以下の過去結果と区別する）
 
-- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み19件、一部対応1件、未対応105件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0005.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み21件、一部対応1件、未対応103件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0006.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- SVGの属性挿入を解析済み要素の範囲に限定し、引用符内の `>` を含む通常タグ・自己閉鎖タグの回帰を確認した。実フィルター付きノードに描画時の非可逆変換を適用し、既存画素を保持する回帰も追加した。関連7件・ASTは成功し、検査前後のソース一致を確認した（`0a3c8b37`、`a3489288`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-geometry-and-singular-filter-hnfwy9m8/safe-summary.json`）。
 - 今回の2件は、SVG内蔵フォントの文書と字形範囲を、従来のバイト取得と同じ二分探索で選んだレコードから一度に読む整理と、HTMLフローのテスト補助の固定エラー変換の整理。実TwitterColorEmojiのSVG字形と非透明画素、共有文書と不正文書、グリッド計測の正常・異常を検証した。固定容量閾値の超過は保護参照を照合してdevプロファイルだけを整理（`release-coverage-clean-dev-profile-1sw_9qcn/safe-summary.json`）。テストのフォントDB参照型を修正後、関連7件・AST・SVG engine由来検査に成功（`9a48261e`、`a42659a9`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-font-document-and-flow-fixed-d1cbydee/safe-summary.json`）。
 - 今回の5件は、フォント検証fixtureの親ディレクトリ欠落時の回帰と、HTMLのCSS・埋め込みSVG寸法・画素比較、SVG文字パスの回帰で、元のエラー型または固定メッセージを直接伝える整理。既存の成功時の判定、SVG構文拒否、文字パス回転と欠落フォント後の座標検証を維持し、関連8件・AST成功（`82f73374`、`6cb61df8`、`abe6074e`、`tmp/quality/resumed-owner-r3509/release-coverage-fixture-error-contracts-pndvac5i/safe-summary.json`）。
 - 今回の3件は、実フォントの登録後破損・消失時の軸値取得、通常HTML要素の `hidden`、`maxp` を欠く実フォントの遅延読み込み。遅延読み込みは修正前に不正フォントを受理することを再現し、既存テーブル一覧で拒否するよう修正した。関連10件・AST成功（`3ce14c18`、`e9e3ea6b`、`c1a32aa9`、`tmp/quality/resumed-owner-r3509/release-coverage-font-file-and-dom-state-5ln2hh9p/tests-stderr.raw`、`tmp/quality/resumed-owner-r3509/release-coverage-font-file-and-dom-state-fixed-uxb7svrl/safe-summary.json`）。
