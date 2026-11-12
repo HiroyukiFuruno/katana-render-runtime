@@ -1,0 +1,49 @@
+use super::super::{build, shared_sources::SharedBytes};
+use crate::markdown::svg_rasterize::font_file_fixture::{FONT_BYTES, create};
+use resvg::usvg::fontdb::{Database, Source};
+use std::{collections::BTreeMap, sync::Arc};
+
+#[test]
+fn transient_build_rejects_missing_stamp_and_unknown_prefix_face() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let fixture =
+        create(directory.path().join("font.ttf"), FONT_BYTES).map_err(|error| error.to_string())?;
+    let prefix: Vec<_> = fixture.database.faces().cloned().collect();
+    let empty = BTreeMap::new();
+    let owners = BTreeMap::new();
+    assert!(build(&fixture.database, &[], &empty, &owners).is_some());
+    assert!(build(&fixture.database, &prefix, &empty, &owners).is_none());
+
+    let mut removed = fixture.database.clone();
+    removed.remove_face(fixture.face_id);
+    assert!(build(&removed, &prefix, &empty, &owners).is_none());
+    Ok(())
+}
+
+#[test]
+fn transient_build_preserves_binary_and_requires_owned_shared_mapping() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let path = directory.path().join("font.ttf");
+    std::fs::write(&path, FONT_BYTES).map_err(|error| error.to_string())?;
+    let data: SharedBytes = Arc::new(FONT_BYTES.to_vec());
+    let mut original = Database::new();
+    original.load_font_source(Source::Binary(Arc::clone(&data)));
+    original.load_font_source(Source::SharedFile(path.clone(), Arc::clone(&data)));
+    assert_eq!(original.len(), 2);
+    let prefix: Vec<_> = original.faces().cloned().collect();
+    assert!(build(&original, &prefix, &BTreeMap::new(), &BTreeMap::new()).is_none());
+    let identity = Arc::as_ptr(&data) as *const () as usize;
+    let owned = BTreeMap::from([(path, identity)]);
+    let (fresh, remapped) = build(&original, &prefix, &BTreeMap::new(), &owned)
+        .ok_or("owned shared source rejected")?;
+    assert_eq!(remapped.len(), prefix.len());
+    assert!(
+        fresh
+            .faces()
+            .any(|face| matches!(face.source, Source::Binary(_)))
+    );
+    assert!(fresh.faces().any(
+        |face| matches!(&face.source, Source::SharedFile(_, bytes) if Arc::ptr_eq(bytes, &data))
+    ));
+    Ok(())
+}

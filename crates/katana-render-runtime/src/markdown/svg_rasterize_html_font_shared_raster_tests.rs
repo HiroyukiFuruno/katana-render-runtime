@@ -145,6 +145,8 @@ fn transient_prefix_cannot_admit_removed_face_or_expand_original_prefix() -> Res
 mod tree_tests;
 #[path = "svg_rasterize_html_font_shared_ttc_tests.rs"]
 mod ttc_tests;
+#[path = "svg_rasterize_html_font_shared_raster_boundary_tests.rs"]
+mod boundary_tests;
 
 type ProvenShared = (Arc<Database>, Arc<CreationProof>);
 type MappingWeak = std::sync::Weak<dyn AsRef<[u8]> + Send + Sync>;
