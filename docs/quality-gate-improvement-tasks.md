@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- SVGの外部・内部 `feImage` が空rootを持たない生成経路を確認し、出力で子を改めて確認する重複分岐を除いた。COLRでは実フォントの輪郭に軸scaleゼロを指定し、逆変換が非有限になってグラデーションの出力が崩れることを再現した。逆変換の有限性を検証し、既存の代替処理を適用した。修正前は34成功・該当1失敗、修正後は同じ35件が成功。静的基盤・AST・SVG engine由来検査も成功（`891a72d7`、`58f63d7e`、`tmp/quality/resumed-owner-r3509/release-coverage-feimage-colr-gradient-aoh28gci/tests-stderr.raw`、`tmp/quality/resumed-owner-r3509/release-coverage-feimage-colr-finite-74amha8x/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - 実システムフォントの事前長が実測と食い違うときに、共有mappingから別経路へ退避せず拒否し、正しい長さでは同じフォントを読み込めることを検証した。関連4件、静的基盤、ASTが成功（`4e445316`、`tmp/quality/resumed-owner-r3509/release-coverage-immutable-mapping-no-fallback-kysd2ue_/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - 中央揃えの単一chunk・複数chunk判定で、usvgの生成元が文字位置と最初のspanを必須とすることを確認し、生成保証と重複する判定を除いた。単一行、複数行、文字パス、フォールバックを含む関連8件、静的基盤、ASTが成功（`0992e06e`、`tmp/quality/resumed-owner-r3509/release-coverage-middle-chunk-invariants-4vw_mbzy/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - 最新の正式計測は `500df373` の86,789/87,006行、99.750592%、未カバー217行（221行から4行減、増加ファイルなし）。幅ゼロ字形、クリップ合成、Mermaid観測、フォールバックspanで各1行減少した。対象6,483件が成功、別に15件skip。収集・認証・ソース前後一致は成功し、100%条件で不合格（`tmp/quality/resumed-owner-r3509/root-coverage-after-mask-observer-and-source-span-tw1k0f0z/{safe-summary,coverage-file-delta}.json`）。
