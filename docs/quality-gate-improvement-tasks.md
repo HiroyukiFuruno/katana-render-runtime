@@ -2,7 +2,8 @@
 
 ## 現在の実行地点（2026-11-13、以下の過去結果と区別する）
 
-- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み57件、一部対応14件、未対応54件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0021.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み59件、一部対応17件、未対応49件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0022.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- 空のフォント名が探索枠を消費せず、実CoreText descriptorの名前欠落・不正なvariation属性を拒否することを確認した。同一物理フォントを指すリンクと、HTMLの開始時に不正なorigin・viewportを受け取った際のエラー伝播および計測スコープの解放は一部対応。保存済み一覧で対象を選び直し、再ビルド後のAST・対象12件・現行catalog照合・ソース前後一致を確認した（`e24a99b1`、`0d3ec805`、`2757f11b`、`b44865f9`、`tmp/quality/resumed-owner-r3509/release-coverage-font-descriptor-and-html-open-8q18eh47/safe-summary.json`）。
 - 実フォント診断3経路のスレッド分離と、SVGの先行点がない弧を確認した。Skiaの短い画素バッファと実フォントfixtureのコピー・置換エラーは一部対応。開始前に既存テスト実行ファイルが消失していたため、保存済み一覧で対象を選び、再ビルド後のAST・対象16件・現行catalog照合・ソース前後一致を確認した（`f9600de2`、`e2ee7940`、`49031131`、`89bbd833`、`tmp/quality/resumed-owner-r3509/release-coverage-thread-isolation-and-arc-yqkjk1vd/safe-summary.json`）。
 - フォント計測では無効な結果の集計とスコープ終了後の分離を検証した。描画監査は記録先が失われた場合も実SVGの画素を保ち、次の監査で記録を再開することを確認した。共有フォントのSVG解析エラーとパスデータ欠落時の隣接図形維持は一部対応。AST・対象13件・実catalog照合・ソース前後一致が成功（`c48c753c`、`8442f473`、`d924f302`、`1f225803`、`tmp/quality/resumed-owner-r3509/release-coverage-path-and-audit-imq4hmkm/safe-summary.json`）。
 - CoreTextの物理候補件数の重複判定を除き、実フォント候補の0件・1件・複数件と、既存のindex・世代拒否を確認した。実PNG writerによるゼロ寸法の拒否も確認した。共有フォントのstamp・削除済みface・所有権と、SVG書体のunitsPerEmの上下限外は一部対応。初回のテスト関数長違反を修正し、ASTと対象13件、実catalog照合、ソース前後一致を確認した（`70c1eefd`、`c5a83138`、`b8f065fa`、`20c72bda`、`tmp/quality/resumed-owner-r3509/release-coverage-font-candidates-and-png-a5kc5oqx/safe-summary.json`）。
