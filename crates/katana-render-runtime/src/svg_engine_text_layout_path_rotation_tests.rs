@@ -1,8 +1,8 @@
 use super::path_support::path_text_with_content;
-use super::{near, path_support::path_text, text, usvg};
+use super::{TestResult, near, path_support::path_text, text, usvg};
 
 #[test]
-fn path_text_rejects_unescaped_xml_text() -> Result<(), String> {
+fn path_text_rejects_unescaped_xml_text() -> TestResult<()> {
     let valid = path_text_with_content(0, "A &amp; B")?;
     assert!(path_glyphs(text(&valid)?).any(|(value, _, _)| value == "A"));
     for malformed in ["A & B", "A < B"] {
@@ -15,7 +15,7 @@ fn path_text_rejects_unescaped_xml_text() -> Result<(), String> {
 }
 
 #[test]
-fn rotation_is_applied_to_a_glyph_following_a_horizontal_path() -> Result<(), String> {
+fn rotation_is_applied_to_a_glyph_following_a_horizontal_path() -> TestResult<()> {
     let base = path_text(0)?;
     let rotated = path_text(90)?;
     let mut glyphs = Vec::new();
@@ -25,12 +25,12 @@ fn rotation_is_applied_to_a_glyph_following_a_horizontal_path() -> Result<(), St
         assert!(matches!(chunk.text_flow(), usvg::TextFlow::Path(_)));
         let span = node.layouted().first().ok_or("layout span missing")?;
         let [glyph] = span.positioned_glyphs.as_slice() else {
-            return Err("expected one path glyph".to_owned());
+            return Err("expected one path glyph".into());
         };
         glyphs.push(glyph);
     }
     let [original, adjusted] = glyphs.as_slice() else {
-        return Err("expected both path glyphs".to_owned());
+        return Err("expected both path glyphs".into());
     };
     assert_eq!(original.text, "H");
     assert_eq!(adjusted.text, original.text);
@@ -46,8 +46,7 @@ fn rotation_is_applied_to_a_glyph_following_a_horizontal_path() -> Result<(), St
 }
 
 #[test]
-fn path_text_preserves_surviving_glyph_positions_when_a_span_font_is_missing() -> Result<(), String>
-{
+fn path_text_preserves_surviving_glyph_positions_when_a_span_font_is_missing() -> TestResult<()> {
     let available = path_text_with_content(0, "ABC")?;
     let missing = path_text_with_content(
         0,
