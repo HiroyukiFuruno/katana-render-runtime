@@ -10,6 +10,8 @@ use std::{
     },
 };
 
+#[path = "svg_rasterize_text_shaping_cache_during_generation_tests.rs"]
+mod during_generation_tests;
 #[path = "svg_rasterize_text_shaping_cache_unavailable_generation_tests.rs"]
 mod unavailable_generation_tests;
 
