@@ -154,3 +154,7 @@ fn read_response(response_path: &Path) -> Result<ProbeResponse, String> {
 #[cfg(test)]
 #[path = "test_support_contract_tests.rs"]
 mod contract_tests;
+
+#[cfg(test)]
+#[path = "test_support_path_tests.rs"]
+mod path_tests;
