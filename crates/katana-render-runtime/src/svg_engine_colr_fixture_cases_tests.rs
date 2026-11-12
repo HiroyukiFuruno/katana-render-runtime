@@ -91,12 +91,28 @@ fn colr_fixture_rejects_glyph_without_unicode_mapping() -> Result<(), String> {
     verify_static_font_manifest()?;
     let (valid, _) = fixture_tree(MAPPED_GLYPH_ID, "mapped-glyph-control")?;
     assert!(valid.size().width() > 0.0 && valid.size().height() > 0.0);
-    let Err(error) = fixture_tree(u32::MAX, "unmapped-glyph") else {
-        return Err("unmapped glyph unexpectedly built a tree".to_owned());
+    let Err(error) = verify_standard_case("unmapped-glyph", u32::MAX, RADIAL_GRADIENT) else {
+        return Err("unmapped glyph unexpectedly passed the COLR roundtrip".to_owned());
     };
     assert_eq!(
         error,
         format!("COLR glyph {} has no Unicode mapping", u32::MAX)
+    );
+    Ok(())
+}
+
+#[test]
+fn colr_roundtrip_rejects_a_missing_paint_semantic() -> Result<(), String> {
+    const GLYPH: u32 = 96;
+    const CASE: &str = "missing-colr-semantic";
+    const MISSING_SEMANTIC: &str = "unsupported-fixture-paint";
+    verify_static_font_manifest()?;
+    verify_standard_case(CASE, GLYPH, RADIAL_GRADIENT)?;
+    assert_eq!(
+        verify_standard_case(CASE, GLYPH, MISSING_SEMANTIC).err(),
+        Some(format!(
+            "{CASE} lost COLR paint semantic {MISSING_SEMANTIC}"
+        ))
     );
     Ok(())
 }
