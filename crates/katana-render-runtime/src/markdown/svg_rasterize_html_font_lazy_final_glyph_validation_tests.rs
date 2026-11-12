@@ -169,6 +169,27 @@ fn replace_audit_text_transform(group: &mut Group, transform: Transform) -> bool
 }
 
 #[test]
+fn final_glyph_recording_without_capture_does_not_leak_into_the_next_scope() -> Result<(), String> {
+    use crate::markdown::svg_rasterize::SvgRasterizeOps;
+
+    let tree = bundled_tree()?;
+    let source = tree.to_string(&resvg::usvg::WriteOptions {
+        preserve_text: true,
+        ..Default::default()
+    });
+    audit::record(&tree, &source, 1);
+    let (_, capture) =
+        SvgRasterizeOps::with_actual_font_source_audit(|| audit::record(&tree, &source, 2))
+            .map_err(|error| error.to_string())?;
+    let trees = capture["finalGlyphTrees"]
+        .as_array()
+        .ok_or("glyph trees missing")?;
+    assert_eq!(trees.len(), 1);
+    assert_eq!(trees[0]["paintCall"].as_u64(), Some(2));
+    Ok(())
+}
+
+#[test]
 fn final_glyph_capture_truncates_faces_and_stops_at_capacity() -> Result<(), String> {
     use crate::markdown::svg_rasterize::SvgRasterizeOps;
 
