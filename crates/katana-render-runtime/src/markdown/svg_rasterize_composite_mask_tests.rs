@@ -1,5 +1,4 @@
 use super::mask::composite_crop_with_mask;
-use super::mask::composite_with_mask;
 use crate::{HtmlBrowserSession, HtmlBrowserSource, HtmlBrowserViewport};
 
 #[path = "svg_rasterize_composite_mask_aa_control_tests.rs"]
@@ -24,11 +23,12 @@ const FRACTIONAL_BACKDROP: [u8; 4] = [30, 30, 30, 255];
 
 #[test]
 fn identical_sources_preserve_every_mask_coverage() -> Result<(), String> {
+    let crop = full_canvas_crop()?;
     for color in [FRACTIONAL_BACKDROP, PARTIAL_SOURCE] {
         let source = solid_pixmap(color)?;
         for coverage in 0..=MASK_MAX {
             let mut actual = source.clone();
-            composite_with_mask(&mut actual, &source, &mask_for(coverage)?)?;
+            composite_crop_with_mask(&mut actual.as_mut(), crop, &source, &mask_for(coverage)?)?;
             assert_pixel(&actual, color, coverage)?;
         }
     }
@@ -37,11 +37,12 @@ fn identical_sources_preserve_every_mask_coverage() -> Result<(), String> {
 
 #[test]
 fn distinct_premultiplied_source_matches_single_round_formula() -> Result<(), String> {
+    let crop = full_canvas_crop()?;
     let source = solid_pixmap(OPAQUE_SOURCE)?;
     let backdrop = solid_pixmap(OPAQUE_BACKDROP)?;
     for coverage in 0..=MASK_MAX {
         let mut actual = backdrop.clone();
-        composite_with_mask(&mut actual, &source, &mask_for(coverage)?)?;
+        composite_crop_with_mask(&mut actual.as_mut(), crop, &source, &mask_for(coverage)?)?;
         let expected = expected_pixel(OPAQUE_BACKDROP, OPAQUE_SOURCE, coverage);
         assert_pixel(&actual, expected, coverage)?;
     }
@@ -50,11 +51,12 @@ fn distinct_premultiplied_source_matches_single_round_formula() -> Result<(), St
 
 #[test]
 fn transparent_premultiplied_source_matches_formula_at_all_coverages() -> Result<(), String> {
+    let crop = full_canvas_crop()?;
     let source = solid_pixmap(PARTIAL_SOURCE)?;
     let backdrop = solid_pixmap(PARTIAL_BACKDROP)?;
     for coverage in 0..=MASK_MAX {
         let mut actual = backdrop.clone();
-        composite_with_mask(&mut actual, &source, &mask_for(coverage)?)?;
+        composite_crop_with_mask(&mut actual.as_mut(), crop, &source, &mask_for(coverage)?)?;
         let expected = expected_pixel(PARTIAL_BACKDROP, PARTIAL_SOURCE, coverage);
         assert_pixel(&actual, expected, coverage)?;
     }
@@ -67,13 +69,18 @@ fn mismatched_dimensions_are_rejected_without_pixel_changes() -> Result<(), Stri
     let before = backdrop.data().to_vec();
     let short = tiny_skia::Pixmap::new(WIDTH - 1, HEIGHT).ok_or("failed short pixmap")?;
     let mask = mask_for(MIDPOINT)?;
-    if composite_with_mask(&mut backdrop, &short, &mask).is_ok() {
+    if composite_crop_with_mask(&mut backdrop.as_mut(), full_canvas_crop()?, &short, &mask).is_ok()
+    {
         return Err("mismatched dimensions unexpectedly accepted".to_string());
     }
     if backdrop.data() != before {
         return Err("dimension error changed backdrop".to_string());
     }
     Ok(())
+}
+
+fn full_canvas_crop() -> Result<tiny_skia::IntRect, String> {
+    tiny_skia::IntRect::from_xywh(0, 0, WIDTH, HEIGHT).ok_or("invalid full canvas fixture".into())
 }
 
 #[test]

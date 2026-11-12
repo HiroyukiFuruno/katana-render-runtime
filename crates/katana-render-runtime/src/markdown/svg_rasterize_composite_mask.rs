@@ -4,18 +4,6 @@ const RGBA_CHANNELS: usize = 4;
 const MASK_MAX: u32 = 255;
 const ROUNDING_BIAS: u32 = 127;
 
-#[cfg(test)]
-pub(super) fn composite_with_mask(
-    pixmap: &mut Pixmap,
-    source: &Pixmap,
-    mask: &Mask,
-) -> Result<(), String> {
-    let crop = IntRect::from_xywh(0, 0, pixmap.width(), pixmap.height())
-        .ok_or_else(|| "invalid SVG clip composite bounds".to_string())?;
-    let mut pixmap_mut = pixmap.as_mut();
-    composite_crop_with_mask(&mut pixmap_mut, crop, source, mask)
-}
-
 pub(super) fn composite_crop_with_mask(
     pixmap: &mut PixmapMut<'_>,
     crop: IntRect,
