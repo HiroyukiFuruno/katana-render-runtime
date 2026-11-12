@@ -1,7 +1,36 @@
 use super::super as transfer;
+use super::super::super::tests::{FailingTextRasterizer, TEXT_RASTERIZER_FAILURE};
 use crate::markdown::svg_rasterize::html_glyph::HtmlGlyphRasterizer;
 use resvg::usvg::{Group, Node, Tree, filter::TransferFunction};
 use tiny_skia::{Pixmap, Transform};
+
+#[test]
+fn component_transfer_discards_partial_layer_when_text_rendering_fails() -> Result<(), String> {
+    let svg =
+        super::component_transfer_svg(super::LINEAR_FUNCTIONS, super::FILTER_REGION, "", "", "")
+            .replace(
+                "<text id=",
+                "<rect width='10' height='10' fill='red'/><text id=",
+            );
+    let tree = parse(&svg)?;
+    let group = filtered_group(&tree)?;
+    assert!(matches!(group.children().first(), Some(Node::Path(_))));
+    let mut target = Pixmap::new(super::SIZE, super::SIZE).ok_or("transfer canvas missing")?;
+    target.fill(tiny_skia::Color::WHITE);
+    let before = target.data().to_vec();
+    let rasterizer = FailingTextRasterizer::default();
+    let result = transfer::render(
+        group,
+        Transform::identity(),
+        &mut target.as_mut(),
+        &super::AuthoredClipInfo::default(),
+        &rasterizer,
+    );
+    assert_eq!(result.err().as_deref(), Some(TEXT_RASTERIZER_FAILURE));
+    assert_eq!(rasterizer.calls(), 1);
+    assert_eq!(target.data(), before);
+    Ok(())
+}
 
 fn identity_transfer_spec(group: &Group) -> Result<Option<transfer::TransferSpec>, String> {
     let identity = transfer::FilterTransform::new(Transform::identity())
