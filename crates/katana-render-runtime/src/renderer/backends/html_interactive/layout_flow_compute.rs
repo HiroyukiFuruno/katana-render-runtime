@@ -31,46 +31,43 @@ fn row_heights(
     measurements: &[(taffy::tree::NodeId, CssStyle, f32)],
     use_computed_auto_height: bool,
 ) -> Result<Vec<f32>, String> {
-    let mut heights = Vec::with_capacity(measurements.len());
-    for (node, _, _) in measurements {
-        let row_y = tree.layout(*node).map_err(layout_error)?.location.y;
-        heights.push(row_height(
-            tree,
-            measurements,
-            row_y,
-            use_computed_auto_height,
-        )?);
-    }
-    Ok(heights)
+    let items = measurements
+        .iter()
+        .map(|(node, _, height)| row_item(tree, *node, *height, use_computed_auto_height))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(items
+        .iter()
+        .map(|(row_y, _)| row_height(&items, *row_y))
+        .collect())
 }
 
-fn row_height(
+fn row_item(
     tree: &TaffyTree<()>,
-    measurements: &[(taffy::tree::NodeId, CssStyle, f32)],
-    row_y: f32,
+    node: taffy::tree::NodeId,
+    measured_height: f32,
     use_computed_auto_height: bool,
-) -> Result<f32, String> {
-    let mut row_height = 0.0_f32;
-    for (candidate, _, measured_height) in measurements {
-        let candidate_layout = tree.layout(*candidate).map_err(layout_error)?;
-        let candidate_y = candidate_layout.location.y;
-        if (candidate_y - row_y).abs() <= FLOW_ROW_Y_EPSILON {
-            let height = if use_computed_auto_height
-                && tree
-                    .style(*candidate)
-                    .map_err(layout_error)?
-                    .size
-                    .height
-                    .is_auto()
-            {
-                candidate_layout.size.height.max(*measured_height)
-            } else {
-                *measured_height
-            };
-            row_height = row_height.max(height);
-        }
-    }
-    Ok(row_height)
+) -> Result<(f32, f32), String> {
+    let layout = tree.layout(node).map_err(layout_error)?;
+    let height = if use_computed_auto_height
+        && tree
+            .style(node)
+            .map_err(layout_error)?
+            .size
+            .height
+            .is_auto()
+    {
+        layout.size.height.max(measured_height)
+    } else {
+        measured_height
+    };
+    Ok((layout.location.y, height))
+}
+
+fn row_height(items: &[(f32, f32)], row_y: f32) -> f32 {
+    items
+        .iter()
+        .filter(|(candidate_y, _)| (*candidate_y - row_y).abs() <= FLOW_ROW_Y_EPSILON)
+        .fold(0.0, |height, (_, candidate)| height.max(*candidate))
 }
 
 fn stretches_children(parent: &CssStyle) -> bool {
