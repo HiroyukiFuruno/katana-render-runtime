@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-13、以下の過去結果と区別する）
 
+- フォント境界の予定2件中2件を確認。同梱フォント2種を使い、診断記録用のロックがpoison状態でも通常選択・フォールバック後の描画形状が変わらないことと、異なるフォントのspanが混在する場合に単一フォントで基準線を補正しないことを検証した。関連7件・静的基盤・ASTが成功（`604a8574`、`69b32fa2`、`tmp/quality/resumed-owner-r3509/release-coverage-font-trace-and-baseline-xxn1l1by/safe-summary.json`）。正式カバレッジへの反映は未計測。CoreTextのファイル世代変更・予期しないURL形式とTaffy内部のノード不整合は、決定的な実入力を確定できず引き続き未対応。
 - 未カバー箇所から選んだ実装・回帰の予定2件中2件を確認。実V8に終了要求を送り、URL更新がタイムアウトを返してisolateとcontextを破棄することを検証した。clipPathは正規化時に直下のテキストやコメントが除かれることを確認し、描画可能な要素の選別を1回にまとめた。内外の画素、objectBoundingBox、参照先の異常、markerを含む関連7件・静的基盤・AST・SVG engine由来検査が成功（`4b79dc8f`、`0bd6e46e`、`tmp/quality/resumed-owner-r3509/release-coverage-clip-and-url-boundaries-2gaa5aql/safe-summary.json`）。正式カバレッジへの反映は未計測。Skiaの割り当て失敗、実フォントの取得中の世代変更、Skiaの実適用軸不一致は、決定的に再現する入力を確定できておらず引き続き未対応。
 - 未カバー箇所から選んだ予定2件中2件を確認。実SVGの2行のうち1行に解決できないフォントを含め、解決済みの2 runは描画可能だが、単純な複数行の原点補正は適用されないことを検証した。usvgの位置配列が各chunkの文字を包含する生成保証も照合し、存在しない位置をゼロとみなす重複処理を除いた。関連7件・静的基盤・ASTが成功（`c2c662c1`、`tmp/quality/resumed-owner-r3509/release-coverage-chunk-source-contracts-ldwgvdrx/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - SVGの文字パス書き出しで、有限な座標のパスでも境界計算が溢れると参照先の定義が消えることを再現した。解析済み座標から定義を書き出し、通常のパスと共存するときも参照・描画を保持する。修正前は関連4件中1件失敗、修正後は4件成功、静的基盤・AST・SVG engine由来検査も成功（`828917f3`、`tmp/quality/resumed-owner-r3509/release-coverage-extreme-text-path-p8f3rtc7/tests-stderr.raw`、`tmp/quality/resumed-owner-r3509/release-coverage-extreme-text-path-fixed-7uj_ax15/safe-summary.json`）。正式カバレッジへの反映は未計測。
