@@ -1,4 +1,5 @@
-use super::decode_fixture;
+use super::{decode_fixture, install_trace};
+use crate::markdown::diagram_js_runtime::DiagramRuntimeScript;
 use serde_json::{Value, json};
 
 const SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg"/>"#;
@@ -12,6 +13,32 @@ const REQUIRED_ARRAYS: &[(&str, &str)] = &[
         "C4 description observations are missing",
     ),
 ];
+
+#[test]
+fn native_width_targets_preserve_escaped_strings_and_order() -> Result<(), String> {
+    let mut scripts = vec![DiagramRuntimeScript::borrowed(
+        "render-mermaid.js",
+        "render();",
+    )];
+    let targets = [("a\"b", "line\n\\雪"), ("second", "")];
+    install_trace(&mut scripts, &targets)?;
+    let target_script = scripts
+        .iter()
+        .find(|script| script.name == "native-width-targets.js")
+        .ok_or("target script missing")?;
+    let json = target_script
+        .code
+        .strip_prefix("globalThis.__krrTraceTargets = ")
+        .and_then(|code| code.strip_suffix(';'))
+        .ok_or("unexpected target script")?;
+    let decoded: Vec<(String, String)> =
+        serde_json::from_str(json).map_err(|error| error.to_string())?;
+    assert_eq!(
+        decoded,
+        targets.map(|(selector, text)| (selector.to_owned(), text.to_owned()))
+    );
+    Ok(())
+}
 
 fn recorded_fixture() -> Value {
     json!({

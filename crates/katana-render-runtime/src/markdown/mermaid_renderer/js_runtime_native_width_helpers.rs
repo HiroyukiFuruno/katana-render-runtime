@@ -23,7 +23,7 @@ fn render_fixture_with_targets(
 ) -> Result<MeasurementFixture, String> {
     let mermaid = RuntimeAsset::mermaid();
     let path = mermaid.materialize_at(mermaid.materialized_path())?;
-    let bundle = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let bundle = super::super::read_mermaid_bundle(&path)?;
     let diagram = MermaidDiagramType::from_source(source);
     let mut scripts = MermaidRuntimeScripts::build(&bundle, &request(source, diagram), diagram);
     install_trace(&mut scripts, targets)?;
@@ -43,7 +43,7 @@ fn install_trace(
         .iter()
         .position(|script| script.name == "render-mermaid.js")
         .ok_or("Mermaid render entrypoint missing")?;
-    let targets = serde_json::to_string(targets).map_err(|error| error.to_string())?;
+    let targets = serde_json::json!(targets);
     let prelude = [
         DiagramRuntimeScript::borrowed(
             "native-width-trace.js",
