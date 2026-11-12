@@ -144,6 +144,34 @@ pub(in super::super) fn changed_custom_resource_bytes_are_rejected() -> Result<(
 }
 
 #[test]
+fn loaded_custom_resource_keeps_verified_bytes_and_rejects_later_file_changes() -> Result<(), String>
+{
+    let (temp, _, fixture_face) = physical_font_fixture()?;
+    let body_path = temp.path().join("physical-font.ttf");
+    let (_, digest, _) = physical_file(&body_path)?;
+    let resource = ResourceFile {
+        url: "https://probe.invalid/font".to_owned(),
+        body_path: body_path.clone(),
+        bytes_sha256: digest.clone(),
+    };
+    let database = load_resource_database(&[resource])?;
+    let face = database.faces().next().ok_or("captured font has no face")?;
+    assert_eq!(face.post_script_name, fixture_face.post_script_name);
+    assert_eq!(face_identity(&database, face)?.file_sha256, digest);
+
+    append_changed_byte(&body_path)?;
+    assert_eq!(
+        database.with_face_data(face.id, |data, _| sha256(data)),
+        Some(digest)
+    );
+    assert_eq!(
+        face_identity(&database, face).err().as_deref(),
+        Some("shared font bytes differ from the physical file")
+    );
+    Ok(())
+}
+
+#[test]
 fn resource_database_rejects_invalid_path_contracts_before_loading() -> Result<(), String> {
     let temp = TempDirectory::new()?;
     let absolute = temp.path().join("resource.ttf");
