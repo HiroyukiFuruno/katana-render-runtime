@@ -128,3 +128,81 @@ fn text_crop_rejects_zero_canvas_and_unrepresentable_transformed_bounds() -> Res
     assert!(crop(huge, OFFSCREEN_WIDTH, OFFSCREEN_HEIGHT).is_none());
     Ok(())
 }
+
+#[test]
+fn vertical_glyph_outline_has_crop_only_when_stroked() -> Result<(), String> {
+    use crate::markdown::svg_rasterize::font_file_fixture;
+
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let font = font_file_fixture::create(
+        directory.path().join("VerticalOutline.ttf"),
+        &font_with_vertical_outline()?,
+    )
+    .map_err(|error| error.to_string())?;
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40"><text id="run" x="8" y="20" font-family="Noto Sans" font-size="16" fill="none" stroke="black" stroke-width="2">A</text></svg>"#;
+    let tree = font.parse_svg(svg).map_err(|error| error.to_string())?;
+    let Some(Node::Text(text)) = tree.node_by_id("run") else {
+        return Err("stroked glyph is missing".to_owned());
+    };
+    let crop = |include_stroke| {
+        super::text_crop(
+            text,
+            Transform::identity(),
+            OFFSCREEN_WIDTH,
+            OFFSCREEN_HEIGHT,
+            (0.0, 0.0),
+            include_stroke,
+        )
+    };
+    assert!(text.flattened().bounding_box().is_empty());
+    assert!(crop(false).is_none());
+    assert!(crop(true).is_some());
+    Ok(())
+}
+
+fn font_with_vertical_outline() -> Result<Vec<u8>, String> {
+    use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
+    use write_fonts::{
+        FontBuilder,
+        read::{FontRef, TableProvider},
+        types::Tag,
+    };
+
+    const GLYF: Tag = Tag::new(b"glyf");
+    /* WHY: 点 (100, 0) と (100, 600) を閉じ、幅ゼロのTrueType輪郭を作る。 */
+    const VERTICAL_OUTLINE: &[u8] = &[
+        0, 1, 0, 100, 0, 0, 0, 100, 2, 88, 0, 1, 0, 0, 0x33, 0x11, 100, 2, 88,
+    ];
+    let original = FontRef::new(FONT_BYTES).map_err(|error| error.to_string())?;
+    let range = outline_range(&original, 'A')?;
+    let mut outlines = original
+        .data_for_tag(GLYF)
+        .ok_or("glyf missing")?
+        .as_bytes()
+        .to_vec();
+    let slot = outlines.get_mut(range).ok_or("glyph slot missing")?;
+    assert!(VERTICAL_OUTLINE.len() <= slot.len());
+    slot.fill(0);
+    slot[..VERTICAL_OUTLINE.len()].copy_from_slice(VERTICAL_OUTLINE);
+    let mut builder = FontBuilder::new();
+    builder.add_raw(GLYF, &outlines);
+    Ok(builder.copy_missing_tables(original).build())
+}
+
+fn outline_range(
+    font: &write_fonts::read::FontRef<'_>,
+    character: char,
+) -> Result<std::ops::Range<usize>, String> {
+    use write_fonts::read::TableProvider;
+
+    let index = font
+        .cmap()
+        .map_err(|error| error.to_string())?
+        .map_codepoint(character)
+        .ok_or("character mapping missing")?
+        .to_u32() as usize;
+    let loca = font.loca(None).map_err(|error| error.to_string())?;
+    let start = loca.get_raw(index).ok_or("glyph start missing")? as usize;
+    let end = loca.get_raw(index + 1).ok_or("glyph end missing")? as usize;
+    Ok(start..end)
+}
