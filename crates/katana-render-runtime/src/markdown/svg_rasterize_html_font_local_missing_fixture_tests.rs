@@ -70,6 +70,22 @@ fn local_fixture_rejects_paths_without_existing_parent() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn transient_font_fixture_requires_an_existing_directory() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let absent = directory.path().join("not-created");
+    let expected = std::fs::metadata(&absent)
+        .err()
+        .ok_or("fixture directory must be absent")?;
+    assert_eq!(expected.kind(), std::io::ErrorKind::NotFound);
+    assert_eq!(
+        source_fixture::transient_database(&absent).err().as_deref(),
+        Some(expected.to_string().as_str())
+    );
+    assert!(!absent.exists());
+    Ok(())
+}
+
 thread_local! {
     static ACTIVE: RefCell<Option<Fixture>> = const { RefCell::new(None) };
 }
