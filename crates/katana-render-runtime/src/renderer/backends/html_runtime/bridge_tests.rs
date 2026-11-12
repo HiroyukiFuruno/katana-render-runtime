@@ -4,6 +4,7 @@ use crate::renderer::backends::html_document::HtmlDocument;
 use crate::renderer::backends::html_runtime::script::HtmlTryCatchScope;
 use crate::renderer::backends::html_runtime::script::check_bridge_error;
 use crate::renderer::backends::html_runtime::script::{evaluate_value, install_dom_bridge};
+use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 use rstest::rstest;
 
 macro_rules! with_v8_context {
@@ -195,6 +196,38 @@ fn ordinary_thrown_object_does_not_run_name_getter_during_classification() -> Re
 fn ordinary_proxy_does_not_run_name_trap_during_classification() -> Result<(), String> {
     let source = "let trapUsed = false; throw new Proxy({ toString() { return trapUsed ? 'proxy after trap' : 'ordinary proxy'; } }, { get(target, property, receiver) { if (property === 'name') { trapUsed = true; throw new Error('name trap was run'); } return Reflect.get(target, property, receiver); } });";
     assert_ordinary_exception_summary(source, "ordinary proxy")
+}
+
+#[test]
+fn rethrown_native_error_after_bridge_error_is_consumed_remains_javascript()
+-> Result<(), HtmlRuntimeError> {
+    with_v8_context!(
+        isolate,
+        scope,
+        [],
+        [isolate.set_slot(HtmlDomBridgeState::new(HtmlDocument::parse("<p>Test</p>")));],
+        {
+            install_dom_bridge(scope, "about:blank")?;
+            evaluate_value(
+                scope,
+                "capture-native-error",
+                "globalThis.savedError = undefined; try { __krr_dom('unsupported'); } catch (error) { savedError = error; }",
+            )?;
+            assert!(matches!(
+                check_bridge_error(scope),
+                Err(HtmlRuntimeError::DomBridge(message))
+                    if message == "unsupported DOM operation: unsupported"
+            ));
+            let result = evaluate_value(scope, "rethrow-consumed-error", "throw savedError;");
+            assert!(matches!(
+                result,
+                Err(HtmlRuntimeError::JavaScriptException(message))
+                    if message.contains("unsupported DOM operation: unsupported")
+            ));
+            assert!(check_bridge_error(scope).is_ok());
+            Ok(())
+        },
+    )
 }
 
 fn assert_ordinary_exception_summary(source: &str, expected: &str) -> Result<(), String> {
