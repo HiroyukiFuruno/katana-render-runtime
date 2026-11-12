@@ -2,6 +2,10 @@ use super::geometry::{Bounds, Crop, ShadowSpec};
 use skia_safe::{self, AlphaType, ColorType, ImageInfo, Paint, Rect as SkRect};
 use tiny_skia::{Pixmap, PixmapMut, PixmapPaint, Transform};
 
+#[cfg(test)]
+#[path = "svg_rasterize_html_shadow_surface_tests.rs"]
+mod tests;
+
 pub(super) fn apply_color_filter(
     source: &Pixmap,
     color_filter: skia_safe::ColorFilter,
