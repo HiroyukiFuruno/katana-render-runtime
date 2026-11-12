@@ -123,6 +123,15 @@ fn embedded_raster_decodes_and_roundtrips_through_writer(
 }
 
 #[test]
+fn embedded_raster_roundtrip_rejects_missing_fixture() {
+    const MISSING: &str = "nonexistent-raster-roundtrip-fixture.svg";
+    let result = assert_embedded_raster_roundtrip(MISSING, RasterFormat::Jpeg);
+    assert!(
+        result.is_err_and(|error| error.starts_with("failed reading ") && error.contains(MISSING))
+    );
+}
+
+#[test]
 fn hidden_embedded_image_does_not_paint() -> Result<(), String> {
     let input = inline_png_svg()?.replace(
         "<image id=\"rgba\"",
