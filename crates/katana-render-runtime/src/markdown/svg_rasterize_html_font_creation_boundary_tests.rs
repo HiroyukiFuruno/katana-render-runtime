@@ -105,7 +105,11 @@ fn selected_proof_binary_keeps_backing_and_rejects_id_outside_prefix() -> Result
     let selected = proof
         .selected_shared_face(&database, id, &mut sources, None, None)
         .ok_or("real binary face rejected")?;
-    assert_eq!(selected.id, id);
+    assert!(
+        database
+            .face(id)
+            .is_some_and(|face| super::super::same_face(&selected, face))
+    );
     assert!(super::super::same_source(&selected.source, &source));
     assert!(!super::super::same_source(
         &selected.source,

@@ -1,6 +1,6 @@
 use super::super::shared_raster::shared_sources::{SharedBytes, SharedSourceSeed, SharedSources};
 use super::CreationProof;
-use resvg::usvg::fontdb::{Database, ID, Source};
+use resvg::usvg::fontdb::{Database, FaceInfo, ID, Source};
 use std::{path::Path, sync::Arc};
 
 impl CreationProof {
@@ -35,7 +35,11 @@ impl CreationProof {
     }
 
     pub(in super::super) fn contains(&self, id: ID) -> bool {
-        self.prefix.iter().any(|face| face.id == id)
+        self.prefix_face(id).is_some()
+    }
+
+    pub(super) fn prefix_face(&self, id: ID) -> Option<&FaceInfo> {
+        self.prefix.iter().find(|face| face.id == id)
     }
 
     pub(in super::super) fn owns_immutable_source(&self, path: &Path, data: &SharedBytes) -> bool {

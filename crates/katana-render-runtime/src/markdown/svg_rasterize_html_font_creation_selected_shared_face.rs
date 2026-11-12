@@ -38,10 +38,12 @@ impl CreationProof {
         admission: Option<&super::super::admission::Admission<'_>>,
     ) -> Option<FaceInfo> {
         /* WHY: 全 File は attempt 入口・出口で検証し、mapping は既存 get の path 前後検証で封印する。 */
-        if !self.contains(id) || !self.selected_acquisition_current(database, id, admission) {
+        let prefix_face = self.prefix_face(id)?;
+        if !self.selected_acquisition_current(database, id, admission) {
             return None;
         }
-        let mut face = database.face(id)?.clone();
+        /* WHY: prefixの照合はsourceの物理identityを含むので、確認済みのfaceをそのまま使える。 */
+        let mut face = prefix_face.clone();
         match &face.source {
             Source::File(path) => {
                 face.source = self.selected_file_source(path, sources, reused)?;
