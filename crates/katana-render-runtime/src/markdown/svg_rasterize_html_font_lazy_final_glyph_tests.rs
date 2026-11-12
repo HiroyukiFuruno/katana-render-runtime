@@ -78,6 +78,22 @@ fn repeated_glyph_text_keeps_ambiguous_source_span_attribution() -> Result<(), S
     Ok(())
 }
 
+#[test]
+fn invalid_svg_dimensions_fail_glyph_audit_and_allow_next_render() -> Result<(), String> {
+    let invalid = r#"<svg xmlns="http://www.w3.org/2000/svg" width="0" height="24"><text x="1" y="20">A</text></svg>"#;
+    let expected = format!("Failed to parse SVG: {}", resvg::usvg::Error::InvalidSize);
+    let error = audit_svg(invalid)
+        .err()
+        .ok_or("zero-width SVG unexpectedly produced glyph evidence")?;
+    assert_eq!(error, expected);
+    let audit = audit_svg(&svg_with_repeated_glyph_text())?;
+    assert_eq!(
+        root_tree(&audit)?["textSpans"].as_array().map(Vec::len),
+        Some(2)
+    );
+    Ok(())
+}
+
 fn assert_glyph_cap(tree: &serde_json::Value) -> Result<(), String> {
     let spans = tree["textSpans"]
         .as_array()

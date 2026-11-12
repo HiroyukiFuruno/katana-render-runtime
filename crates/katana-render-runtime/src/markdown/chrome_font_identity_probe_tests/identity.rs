@@ -101,11 +101,11 @@ fn face_path(face: &FaceInfo) -> Result<PathBuf, String> {
 
 pub(super) fn face_identity(database: &Database, face: &FaceInfo) -> Result<PhysicalFace, String> {
     let source_path = face_path(face)?;
-    let (path, file_sha256, disk_bytes) = physical_file(&source_path)?;
+    let (path, file_sha256, _) = physical_file(&source_path)?;
     let backing_sha = database
         .with_face_data(face.id, |data, _| sha256(data))
         .ok_or_else(|| "fontdb face bytes could not be read".to_string())?;
-    if backing_sha != file_sha256 || sha256(&disk_bytes) != file_sha256 {
+    if backing_sha != file_sha256 {
         return Err("fontdb face bytes differ from the physical file".to_string());
     }
     Ok(PhysicalFace {
