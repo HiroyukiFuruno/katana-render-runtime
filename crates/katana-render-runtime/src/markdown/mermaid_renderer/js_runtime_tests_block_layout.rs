@@ -90,6 +90,20 @@ fn native_html_text_advance(root: SvgNode<'_, '_>, text: &str) -> Result<f32, St
     .map_err(|error| error.to_string())
 }
 
+#[test]
+fn native_block_label_measurement_propagates_svg_parse_errors()
+-> Result<(), Box<dyn std::error::Error>> {
+    let document = resvg::usvg::roxmltree::Document::parse(
+        "<svg><style>font-family:;font-size:16px;</style></svg>",
+    )?;
+    let root = document.root_element();
+    let error = native_html_text_advance(root, "\0")
+        .err()
+        .ok_or("invalid XML text unexpectedly measured")?;
+    assert!(error.starts_with("Failed to parse SVG:"), "{error}");
+    Ok(())
+}
+
 pub(super) fn stylesheet_font<'a, 'input>(
     root: SvgNode<'a, 'input>,
 ) -> Result<(&'a str, f32), String> {

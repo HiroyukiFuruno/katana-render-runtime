@@ -35,6 +35,39 @@ fn init_test_logger() {
     });
 }
 
+#[cfg(test)]
+mod logger_tests {
+    const LOGGER_CHILD: &str = "KRR_SVG_TEST_LOGGER_CHILD";
+    const TEST_CASE: &str = "svg_engine::logger_tests::accepts_an_existing_warn_logger";
+
+    #[test]
+    fn accepts_an_existing_warn_logger() -> Result<(), Box<dyn std::error::Error>> {
+        /* WHY: プロセス全体のロガーを並行テストと共有しない。 */
+        if std::env::var(LOGGER_CHILD).as_deref() == Ok("1") {
+            env_logger::Builder::new()
+                .filter_level(log::LevelFilter::Warn)
+                .try_init()?;
+            super::init_test_logger();
+            return Ok(());
+        }
+
+        let output = crate::system::ProcessService::create_command(std::env::current_exe()?)
+            .args(["--exact", TEST_CASE, "--color=never"])
+            .env(LOGGER_CHILD, "1")
+            .output()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stdout}\n{stderr}");
+        let passed = format!("test {TEST_CASE} ... ok");
+        assert_eq!(
+            stdout.lines().filter(|line| *line == passed).count(),
+            1,
+            "{stdout}"
+        );
+        Ok(())
+    }
+}
+
 #[rustfmt::skip]
 #[path = "../vendor/svg-engine/resvg/lib.rs"]
 pub(crate) mod resvg;
