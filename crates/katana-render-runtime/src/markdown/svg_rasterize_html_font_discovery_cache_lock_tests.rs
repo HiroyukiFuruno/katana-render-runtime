@@ -1,3 +1,4 @@
+use super::super::raster_observer;
 use super::{
     Arc, DatabaseKey, DiscoveryMode, HtmlFontRequest, html_font_cache, known_for,
     measured_database, measured_known, usvg,
@@ -12,6 +13,7 @@ const MISSING_PROOF_CASE: &str = "markdown::svg_rasterize::font::html::discovery
 const FONT_FAMILY: &str = "Arial";
 const FONT_TEXT: &str = "ABC";
 const FONT_WEIGHT: u16 = 400;
+const FONT_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"><text x="2" y="24" font-family="Arial" font-size="16">ABC</text></svg>"#;
 
 #[test]
 fn known_font_lookup_and_measurement_recover_from_poisoned_lock()
@@ -53,9 +55,30 @@ fn known_cache_entry_without_proof_falls_back_to_eager_discovery()
         let measured = SvgRasterizeOps::with_html_font_render_scope(|| {
             measured_database(FONT_FAMILY, FONT_TEXT, FONT_WEIGHT, false)
         });
-        assert_eq!(measured.key, DatabaseKey::eager(request));
+        assert_eq!(measured.key, DatabaseKey::eager(request.clone()));
         assert!(Arc::ptr_eq(&measured.database, &eager));
+        verify_raster_fallback(&request)?;
     }
+    Ok(())
+}
+
+fn verify_raster_fallback(request: &HtmlFontRequest) -> Result<(), String> {
+    assert_eq!(&HtmlFontRequest::from_markup(FONT_SVG), request);
+    let observer = raster_observer::Scope::enter();
+    let image =
+        SvgRasterizeOps::rasterize_html_svg(FONT_SVG, 1.0).map_err(|error| error.to_string())?;
+    assert!(image.rgba.chunks_exact(4).any(|pixel| pixel[3] != 0));
+    let events = observer.snapshot().events;
+    assert!(
+        events
+            .iter()
+            .any(|event| event["reason"] == "known_for_unavailable")
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| { event["stage"] == "eager_parse_result" && event["success"] == true })
+    );
     Ok(())
 }
 
