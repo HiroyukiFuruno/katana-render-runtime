@@ -4,15 +4,15 @@ use katana_render_runtime::DiagramKind;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-struct InputFixture {
+pub(super) struct InputFixture {
     _directory: TempDir,
-    root: PathBuf,
-    input: PathBuf,
-    output: PathBuf,
+    pub(super) root: PathBuf,
+    pub(super) input: PathBuf,
+    pub(super) output: PathBuf,
 }
 
 impl InputFixture {
-    fn new(file_name: &str, source: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub(super) fn new(file_name: &str, source: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let directory = TempDir::new()?;
         let root = directory.path().canonicalize()?;
         let input = root.join(file_name);
