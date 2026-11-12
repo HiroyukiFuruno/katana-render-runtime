@@ -1,4 +1,4 @@
-use super::super::{MAX_CAPTURED_RECORDS, with_actual_route};
+use super::super::{ACTIVE, MAX_CAPTURED_RECORDS, with_actual_route};
 use super::{SvgRasterizeOps, tests::render_test_svg};
 use tiny_skia::IntRect;
 
@@ -71,5 +71,25 @@ fn overflowing_real_crop_scopes_suppress_records_and_restore() -> Result<(), Str
     assert!(capture.crop_stack.is_empty());
     assert_eq!(capture.crop_overflow, 0);
     assert!(SvgRasterizeOps::enter_path_crop(crop()?).is_none());
+    Ok(())
+}
+
+#[test]
+fn missing_path_capture_preserves_real_svg_pixels_and_recovers() -> Result<(), String> {
+    let input = svg([FILL_PATH]);
+    let crop = crop()?;
+    let ordinary = render_test_svg(&input, SIZE)?;
+    let (rendered, missing) = with_actual_route(|| {
+        let guard = SvgRasterizeOps::enter_path_crop(crop).ok_or("crop scope missing")?;
+        ACTIVE.with(|active| active.take());
+        drop(guard);
+        assert!(SvgRasterizeOps::enter_path_crop(crop).is_none());
+        render_test_svg(&input, SIZE)
+    });
+    assert_eq!(ordinary.data(), rendered?.data());
+    assert!(missing.path_paints.is_empty());
+    let (rendered, next) = with_actual_route(|| render_test_svg(&input, SIZE));
+    assert_eq!(ordinary.data(), rendered?.data());
+    assert_eq!(next.path_paints.len(), 1);
     Ok(())
 }
