@@ -8,6 +8,8 @@ const SAMPLE: (u32, u32) = (100, 50);
 const RGBA_CHANNELS: usize = 4;
 const CLIPPED_GREEN: [u8; RGBA_CHANNELS] = [0, 128, 0, 255];
 const EMPTY_PIXEL: [u8; RGBA_CHANNELS] = [0, 0, 0, 0];
+const BLUE_PIXEL: [u8; RGBA_CHANNELS] = [0, 0, 255, 255];
+const RED_PIXEL: [u8; RGBA_CHANNELS] = [255, 0, 0, 255];
 const FIXTURE_ROOT: &str =
     "../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/masking/clipPath";
 
@@ -37,25 +39,35 @@ fn invalid_modern_use_href_does_not_fall_back_to_legacy_reference(
     );
     let legacy_only = source.replace(&format!(" href=\"{modern}\""), "");
     assert_ne!(source, legacy_only);
-    let actual = usvg::Tree::from_str(&source, &usvg::Options::default())
-        .map_err(|error| error.to_string())?;
-    let control = usvg::Tree::from_str(&legacy_only, &usvg::Options::default())
-        .map_err(|error| error.to_string())?;
-    assert_eq!(render_sample(&actual)?, [0, 0, 255, 255]);
-    assert_eq!(render_sample(&control)?, [255, 0, 0, 255]);
-    Ok(())
+    assert_blue_background_with_red_control(&source, &legacy_only)
+}
+
+#[rstest]
+#[case::missing("")]
+#[case::foreign_namespace("foreign:href='#shape'")]
+fn use_without_supported_href_keeps_the_visible_background(
+    #[case] reference: &str,
+) -> Result<(), String> {
+    let source = format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' xmlns:foreign='urn:foreign' width='200' height='200'><defs><rect id='shape' width='200' height='200' fill='red'/></defs><rect width='200' height='200' fill='blue'/><use {reference}/></svg>"
+    );
+    let control = source.replace(&format!("<use {reference}/>"), "<use href='#shape'/>");
+    assert_blue_background_with_red_control(&source, &control)
 }
 
 #[test]
 fn empty_clip_on_symbol_use_does_not_hide_visible_sibling() -> Result<(), String> {
     let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><defs><clipPath id="empty"/><symbol id="shape" viewBox="0 0 200 200"><rect width="200" height="200" fill="red"/></symbol></defs><rect width="200" height="200" fill="blue"/><use href="#shape" width="200" height="200" clip-path="url(#empty)"/></svg>"##;
-    let tree = usvg::Tree::from_str(source, &usvg::Options::default())
-        .map_err(|error| error.to_string())?;
     let unclipped = source.replace(" clip-path=\"url(#empty)\"", "");
-    let control = usvg::Tree::from_str(&unclipped, &usvg::Options::default())
-        .map_err(|error| error.to_string())?;
-    assert_eq!(render_sample(&tree)?, [0, 0, 255, 255]);
-    assert_eq!(render_sample(&control)?, [255, 0, 0, 255]);
+    assert_blue_background_with_red_control(source, &unclipped)
+}
+
+fn assert_blue_background_with_red_control(source: &str, control: &str) -> Result<(), String> {
+    for (svg, expected) in [(source, BLUE_PIXEL), (control, RED_PIXEL)] {
+        let tree = usvg::Tree::from_str(svg, &usvg::Options::default())
+            .map_err(|error| error.to_string())?;
+        assert_eq!(render_sample(&tree)?, expected);
+    }
     Ok(())
 }
 
