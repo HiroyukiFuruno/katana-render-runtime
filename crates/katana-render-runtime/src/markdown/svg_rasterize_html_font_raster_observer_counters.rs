@@ -167,3 +167,23 @@ impl Counters {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Counters, Metric, NAMES};
+
+    #[test]
+    fn diagnostic_metric_overflow_rejects_an_incomplete_capture() {
+        let mut counters = Counters::default();
+        let metric = Metric::KnownParse;
+        let index = metric as usize;
+        counters.values[index] = u64::MAX - 1;
+        for (overflow, complete) in [(false, true), (true, false)] {
+            counters.bump(metric);
+            let report = counters.json();
+            assert_eq!(report["counts"][NAMES[index]].as_u64(), Some(u64::MAX));
+            assert_eq!(report["overflow"], overflow);
+            assert_eq!(counters.complete(), complete);
+        }
+    }
+}

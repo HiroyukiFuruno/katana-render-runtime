@@ -153,3 +153,43 @@ impl Work {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{CacheState, Work};
+
+    #[test]
+    fn diagnostic_frame_count_overflow_rejects_an_incomplete_capture() {
+        let mut work = Work {
+            frame: u64::MAX - 1,
+            endpoints: u64::MAX - 1,
+            ..Work::default()
+        };
+        for (overflow, complete) in [(false, true), (true, false)] {
+            let previous = work.begin_frame();
+            work.end_frame(CacheState::default(), previous);
+            let report = work.json();
+            assert_eq!(report["frameAttempts"].as_u64(), Some(u64::MAX));
+            assert_eq!(report["frameEndpoints"].as_u64(), Some(u64::MAX));
+            assert_eq!(report["overflow"], overflow);
+            assert_eq!(work.complete(), complete);
+        }
+    }
+
+    #[test]
+    fn diagnostic_frame_retaining_cache_invalidates_the_capture() {
+        let mut work = Work::default();
+        let open = CacheState {
+            depth: 1,
+            ..CacheState::default()
+        };
+        for (state, endpoints) in [(open, 1), (CacheState::default(), 2)] {
+            let previous = work.begin_frame();
+            work.end_frame(state, previous);
+            let report = work.json();
+            assert_eq!(report["frameEndpoints"].as_u64(), Some(endpoints));
+            assert_eq!(report["badFrameEndpoints"].as_u64(), Some(1));
+            assert!(!work.complete());
+        }
+    }
+}
