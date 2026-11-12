@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 実COLRフォントで範囲外パレット色が前景色に戻ることと、空の変換スタックをpopしても座標変換が変わらないことを確認した。フォント診断ではカウンター上限を超えた記録と、フレーム終了時にキャッシュが残った記録を拒否し、次の正常フレームでも後者の失敗を上書きしないことを確認した。関連8件、静的基盤、ASTが成功、ソース前後一致（`e4335a4a`、`81e34501`、`tmp/quality/resumed-owner-r3509/release-coverage-colr-and-observer-boundaries-ti7rwl95/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - 最新の正式計測は `1dc5cb73` の86,733/86,973行、99.724052%、未カバー240行（241行から1行減）。SVG字形とMermaid Canvasで各1行減り、Mermaidの文字幅検証ではCSS側のエラーへ到達した一方で新テストの失敗報告が2行増え、ファイル全体で1行増えた。実行対象6,467件すべて成功、別に15件skip。収集と証跡認証は成功し、100%条件で不合格（`tmp/quality/resumed-owner-r3509/root-coverage-after-runtime-and-glyph-regressions-28broyyy/{safe-summary,coverage-file-delta}.json`）。失敗報告を直接アサーションに修正し、関連3件、静的基盤、ASTが成功（`9265d700`、`tmp/quality/resumed-owner-r3509/release-coverage-mermaid-html-width-assertions-1xe5axoy/safe-summary.json`）。この修正の正式カバレッジへの反映は未計測。
 - Mermaidの実V8トレースを用い、CSSとCanvasの計測不能な文字入力を検証側がエラーとして拒否することを確認した。関連3件、静的基盤、ASTが成功、ソース前後一致（`85a5a956`、`tmp/quality/resumed-owner-r3509/release-coverage-mermaid-html-width-errors-mynex788/safe-summary.json`）。
 - 外部MathJaxの読込失敗と実HTMLのDOM引数不足が呼び出し元へ伝播すること、実フォントの破損した字形からCOLRの塗りを出さないことを確認した。関連6件、静的基盤、ASTが成功、ソース前後一致（`e8b12189`、`11ef9ff4`、`tmp/quality/resumed-owner-r3509/release-coverage-runtime-error-propagation-ki_4m7x1/safe-summary.json`）。
