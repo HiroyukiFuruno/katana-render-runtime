@@ -1,5 +1,10 @@
 use super::{RESPONSE_SCHEMA, probe::probe};
-use std::{env, fs, fs::OpenOptions, io::Write, path::PathBuf};
+use std::{
+    env, fs,
+    fs::OpenOptions,
+    io::{BufWriter, Write},
+    path::PathBuf,
+};
 
 pub(super) fn run() -> Result<(), String> {
     let request_path = env::var_os("KRR_CHROME_FONT_IDENTITY_REQUEST")
@@ -21,15 +26,14 @@ fn write_fresh_response(
     if response.schema != RESPONSE_SCHEMA {
         return Err("response schema is inconsistent".to_string());
     }
-    let response_bytes = serde_json::to_vec_pretty(response)
-        .map_err(|error| format!("serialize response: {error}"))?;
-    let mut output = OpenOptions::new()
+    let output = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&output_path)
         .map_err(|error| format!("create fresh response without overwriting: {error}"))?;
-    output
-        .write_all(&response_bytes)
+    let mut output = BufWriter::new(output);
+    serde_json::to_writer_pretty(&mut output, response)
+        .and_then(|()| output.flush().map_err(serde_json::Error::io))
         .map_err(|error| format!("write response: {error}"))
 }
 

@@ -21,9 +21,8 @@ fn probe_response_writer_rejects_an_inconsistent_schema_without_writing() -> Res
     response.schema = RESPONSE_SCHEMA.to_owned();
     write_fresh_response(output.clone(), &response)?;
     let bytes = fs::read(output).map_err(|error| error.to_string())?;
-    let saved: ProbeResponse = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
-    assert_eq!(saved.schema, RESPONSE_SCHEMA);
-    assert_eq!(saved.request_sha256, response.request_sha256);
+    let expected = serde_json::to_vec_pretty(&response).map_err(|error| error.to_string())?;
+    assert_eq!(bytes, expected);
     Ok(())
 }
 

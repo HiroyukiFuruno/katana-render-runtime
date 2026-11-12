@@ -79,11 +79,12 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn nonfont_resource_writer_rejects_existing_directory() -> Result<(), String> {
+    fn nonfont_resource_writer_rejects_existing_directory() -> Result<(), Box<dyn std::error::Error>>
+    {
         let temp = TempDirectory::new()?;
         let digest = super::super::super::identity::sha256(b"captured image response body");
         let path = temp.path().join(format!("1-{digest}.body"));
-        fs::create_dir(&path).map_err(|error| error.to_string())?;
+        fs::create_dir(&path)?;
         let error = write_nonfont_resource(temp.path())
             .err()
             .ok_or("resource directory was overwritten")?;

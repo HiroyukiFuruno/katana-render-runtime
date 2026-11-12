@@ -34,8 +34,9 @@ fn duplicate_face_resources(
     let second_path = temp
         .path()
         .join(format!("copy-{}", file_name.to_string_lossy()));
-    fs::copy(source_path, &first_path).map_err(|error| error.to_string())?;
-    fs::copy(source_path, &second_path).map_err(|error| error.to_string())?;
+    for path in [&first_path, &second_path] {
+        fs::copy(source_path, path).map_err(|error| error.to_string())?;
+    }
     let (_, digest, _) = physical_file(&first_path)?;
     let resources = vec![
         resource("https://probe.invalid/font-a", first_path, digest.clone()),
