@@ -136,6 +136,24 @@ fn coretext_lookup_rejects_a_missing_font_file() -> Result<(), String> {
 }
 
 #[test]
+fn coretext_rejects_a_non_font_candidate_with_matching_physical_identity() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let path = temp.path().join("not-a-font.ttf");
+    fs::write(&path, b"not a font").map_err(|error| error.to_string())?;
+    let (canonical, file_sha256, _) = super::super::physical_file(&path)?;
+    let identity = PhysicalFace {
+        path: canonical.clone(),
+        face_index: 0,
+        file_sha256,
+    };
+    match super::resolve_file(&canonical, identity, "unmatched-font") {
+        Err(error) => assert_eq!(error, "CoreText URL descriptor lookup returned null"),
+        Ok(matches) => assert!(matches.is_empty()),
+    }
+    Ok(())
+}
+
+#[test]
 fn coretext_lookup_skips_descriptors_with_a_different_name() -> Result<(), String> {
     let (_temp, database, _) = physical_font_fixture()?;
     let face = database.faces().next().ok_or("font face missing")?;
