@@ -2,7 +2,8 @@
 
 ## 現在の実行地点（2026-11-13、以下の過去結果と区別する）
 
-- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み39件、一部対応1件、未対応85件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0012.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み41件、一部対応1件、未対応83件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0013.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- Mermaidフォント観測のJSON入出力を一つのエラー変換にまとめ、実V8から返る必須項目欠落を確認した。C4診断では既存の正常な幅測定に加え、型が違うJSONと途中で切れた配列を拒否する。初回は型不一致を構文エラーと期待したケースが実100だったため入力を分け、修正後のAST・対象7件・実catalog照合・ソース前後一致を確認した（`ff12ef64`、`c26b196c`、`tmp/quality/resumed-owner-r3509/release-coverage-mermaid-native-diagnostic-json-9dkz8e0t/safe-summary.json`）。
 - 組み込みMathJaxのテスト経路で生成済み資源を直接参照し、既存の外部ファイル試験は所有する一時ディレクトリで実行するよう変更した。実MathJaxの組み込み・読込済み出力一致、Mermaid文字幅測定でのSVG解析エラー、隔離した既存Warnロガーとの共存を確認した。AST・関連9件・実catalog照合・ソース前後一致が成功（`83708866`、`c471de09`、`tmp/quality/resumed-owner-r3509/release-coverage-mathjax-block-and-logger-hggf_8c9/safe-summary.json`）。
 - SVGタイルの符号付き高さ検査を共通化し、i32の境界と実タイルの画素・cropを検証した。Mermaid診断出力は一時ルートの実ファイル衝突・親欠落、フォント検証は複製元不在・非UTF-8を追加確認した。ASTと関連11件は実0。初回集計はNextestの空白付き連番で9件を取りこぼしたため、原ログを保持し、実argv・両stream・終了コード・catalogから11件を再集計した（`e3fb4a25`、`3328d4f2`、`2c76a52f`、`tmp/quality/resumed-owner-r3509/release-coverage-tile-and-owned-io-result-5inayhza/safe-summary.json`）。
 - SVGフォントの2件を確認した。APFSで実フォントのファイル世代を保存し、遅延読み取り失敗の前後で再利用候補の判定が変わることを確認。実SVGの字形に使われていない登録済みフォントを指定すると、該当face ID付きの診断になることも確認した。初回のコールバック所有権エラーを参照渡しに修正し、AST・関連6件・実catalog照合・ソース前後一致が成功した（`c1abcc94`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-font-cache-eligibility-4sq0aom6/safe-summary.json`）。
