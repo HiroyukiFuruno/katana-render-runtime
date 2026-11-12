@@ -122,10 +122,7 @@ fn external_renderers_report_the_missing_resource_for_each_kind()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let missing = directory.path().join("missing-runtime.js");
-    for (kind, source) in renderer_resource_cases()
-        .into_iter()
-        .chain([(DiagramKind::Mermaid, "graph TD\nA-->B")])
-    {
+    for (kind, source) in renderer_resource_cases() {
         assert_missing_resource_at_resolved_path(kind, source, &missing)?;
     }
     Ok(())
@@ -232,14 +229,16 @@ fn javascript_override_cases() -> impl Iterator<Item = (DiagramKind, &'static st
     .into_iter()
 }
 
-fn renderer_resource_cases() -> [(DiagramKind, &'static str); 2] {
+fn renderer_resource_cases() -> impl Iterator<Item = (DiagramKind, &'static str)> {
     [
+        (DiagramKind::Mermaid, "graph TD\nA-->B"),
         (DiagramKind::MathJax, "x + 1"),
         (
             DiagramKind::Drawio,
             r#"<mxGraphModel><root><mxCell id="cell" value="Label" style="text;html=1;" vertex="1"><mxGeometry x="0" y="0" width="80" height="30" as="geometry"/></mxCell></root></mxGraphModel>"#,
         ),
     ]
+    .into_iter()
 }
 
 fn renderer_input(kind: DiagramKind, source: &str) -> RenderInput {
