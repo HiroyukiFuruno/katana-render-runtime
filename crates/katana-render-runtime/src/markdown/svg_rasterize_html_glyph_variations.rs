@@ -128,3 +128,34 @@ fn applied_variations(
         })
         .ok_or_else(|| format!("font face data unavailable for {face_id:?}"))?
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{applied_variations, normalized_coords};
+    use crate::markdown::svg_rasterize::font_file_fixture::{FONT_BYTES, create};
+
+    #[test]
+    fn variation_queries_distinguish_damaged_and_missing_registered_font()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let fixture = create(directory.path().join("variation-input.ttf"), FONT_BYTES)?;
+        let applied = || applied_variations(&fixture.database, fixture.face_id, &[]);
+        let normalized = || normalized_coords(&fixture.database, fixture.face_id, &[]);
+        assert!(applied()?.is_empty());
+        assert!(normalized()?.is_empty());
+
+        let truncated = &FONT_BYTES[..std::mem::size_of::<u32>()];
+        std::fs::write(&fixture.path, truncated)?;
+        let parse_error = skrifa::FontRef::from_index(truncated, 0)
+            .err()
+            .ok_or("truncated fixture must fail font parsing")?;
+        assert_eq!(applied().err(), Some(parse_error.to_string()));
+        assert_eq!(normalized().err(), Some(parse_error.to_string()));
+
+        std::fs::remove_file(&fixture.path)?;
+        let missing = format!("font face data unavailable for {:?}", fixture.face_id);
+        assert_eq!(applied().err().as_deref(), Some(missing.as_str()));
+        assert_eq!(normalized().err().as_deref(), Some(missing.as_str()));
+        Ok(())
+    }
+}
