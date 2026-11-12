@@ -40,6 +40,50 @@ fn unknown_face_is_not_treated_as_known_missing_base() {
 }
 
 #[test]
+fn mixed_real_font_spans_decline_a_single_primary_face() -> Result<(), String> {
+    let tree = mixed_font_hanging_tree()?;
+    let Some(usvg::Node::Text(text)) = tree.node_by_id("run") else {
+        return Err("mixed-font fixture text missing".into());
+    };
+    let [chunk] = text.chunks() else {
+        return Err("mixed-font fixture must be one chunk".into());
+    };
+    let [sans, cjk] = chunk.spans() else {
+        return Err("mixed-font fixture must contain two authored spans".into());
+    };
+    assert_ne!(sans.font(), cjk.font());
+    assert_eq!(text.layouted().len(), 2);
+    assert!(super::uniform_policy_with_context(text, false, false).is_some());
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    assert!(super::resolved_policy(&rasterizer, text)?.is_none());
+    Ok(())
+}
+
+fn mixed_font_hanging_tree() -> Result<usvg::Tree, String> {
+    let mut database = usvg::fontdb::Database::new();
+    database.load_font_data(NOTO.to_vec());
+    database.load_font_data(CJK.to_vec());
+    let cjk_family = database
+        .faces()
+        .last()
+        .and_then(|face| face.families.first())
+        .ok_or("Noto Sans CJK family missing")?
+        .0
+        .as_str();
+    let svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg"><text id="run" font-family="Noto Sans" font-size="20" dominant-baseline="hanging"><tspan>AB</tspan><tspan font-family="{cjk_family}">あ</tspan></text></svg>"#
+    );
+    usvg::Tree::from_str(
+        &svg,
+        &usvg::Options {
+            fontdb: Arc::new(database),
+            ..usvg::Options::default()
+        },
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[test]
 fn hanging_and_middle_reject_unavailable_primary_face() -> Result<(), String> {
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
     let fixture = font_file_fixture::create(directory.path().join("NotoSans-Regular.ttf"), NOTO)
