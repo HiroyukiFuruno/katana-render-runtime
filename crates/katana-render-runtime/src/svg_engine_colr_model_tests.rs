@@ -187,13 +187,35 @@ fn transform_stack_restores_each_parent_matrix() -> Result<(), String> {
     painter.push_transform(PARENT_TRANSFORM);
     painter.push_transform(NESTED_TRANSFORM);
     painter.pop_transform();
-    if painter.transform != PARENT_TRANSFORM {
-        return Err("popping nested transform must restore its parent".to_owned());
+    assert_eq!(painter.transform, PARENT_TRANSFORM);
+    for _ in 0..2 {
+        painter.pop_transform();
+        assert_eq!(painter.transform, Transform::default());
+        assert!(painter.transforms_stack.is_empty());
     }
-    painter.pop_transform();
-    if painter.transform != Transform::default() || !painter.transforms_stack.is_empty() {
-        return Err("popping parent transform must restore the initial state".to_owned());
-    }
+    Ok(())
+}
+
+#[test]
+fn palette_entry_outside_real_font_palette_uses_foreground() -> Result<(), String> {
+    use skrifa::MetadataProvider;
+    let font = font()?;
+    let palettes = font.color_palettes();
+    let index = u16::MAX - 1;
+    assert!(palettes.get(0).is_some_and(|palette| {
+        let colors = palette.colors();
+        !colors.is_empty() && colors.get(usize::from(index)).is_none()
+    }));
+    let mut svg = writer();
+    let mut path = String::new();
+    let mut painter = painter(&font, &mut svg, &mut path);
+    painter.push_clip_box(box_bounds(0.0, 0.0, 10.0, 10.0));
+    painter.fill(Brush::Solid {
+        palette_index: index,
+        alpha: 1.0,
+    });
+    painter.pop_clip();
+    assert!(finish(svg).contains("fill=\"rgb(17, 34, 51)\""));
     Ok(())
 }
 
