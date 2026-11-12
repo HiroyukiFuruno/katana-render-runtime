@@ -93,6 +93,27 @@ fn static_font_descriptor_rejects_a_different_postscript_name() -> Result<(), St
 }
 
 #[test]
+fn coretext_descriptor_rejects_missing_name_and_nondictionary_coordinates() {
+    use core_text::font_descriptor::new_from_attributes;
+
+    let attributes = CFDictionary::from_CFType_pairs(&[(
+        super::variation_attribute_key(),
+        CFString::new("not a variation dictionary").as_CFType(),
+    )]);
+    let descriptor = new_from_attributes(&attributes);
+    assert_eq!(
+        super::descriptor_postscript_name(&descriptor)
+            .err()
+            .as_deref(),
+        Some("exact CoreText descriptor has no PostScript name")
+    );
+    assert_eq!(
+        super::coordinates(&descriptor).err().as_deref(),
+        Some("CoreText variation coordinates are not a dictionary")
+    );
+}
+
+#[test]
 fn coretext_resolve_rejects_a_family_without_the_selected_postscript_name() -> Result<(), String> {
     let (_temp, database, mut selected) =
         super::super::super::super::test_support::physical_font_fixture()?;
