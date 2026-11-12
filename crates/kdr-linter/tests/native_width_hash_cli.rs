@@ -2,6 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[path = "support/native_width_hash_shape_mutations.rs"]
+mod shape_mutations;
+
 const INPUTS: [&str; 3] = [
     "crates/katana-render-runtime/src/markdown/mermaid_renderer/mod.rs",
     "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime.rs",
@@ -267,7 +270,7 @@ fn native_width_cli_rejects_changed_format_contracts_without_report()
     assert!(accepted.status.success());
     let report: serde_json::Value = serde_json::from_slice(&accepted.stdout)?;
     assert_eq!(report["status"], "verified");
-    for &(input, before, after, expected) in MUTATIONS {
+    for &(input, before, after, expected) in MUTATIONS.iter().chain(shape_mutations::MUTATIONS) {
         reject_mutation(
             fixture.path().join(input),
             fixture.path(),
