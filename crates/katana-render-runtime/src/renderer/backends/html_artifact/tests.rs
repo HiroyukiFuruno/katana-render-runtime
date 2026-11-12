@@ -18,6 +18,9 @@ use test_support::{
 const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const C: &str = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+const SAVE_TEST_WIDTH: u32 = 320;
+const SAVE_TEST_HEIGHT: u32 = 160;
+const SAVE_TEST_STORE_CAPACITY: u64 = 8_000_000;
 
 #[test]
 fn provenance_and_frame_mutations_are_rejected() -> Result<(), Box<dyn std::error::Error>> {
@@ -252,4 +255,38 @@ fn artifact_child() -> Result<(), Box<dyn std::error::Error>> {
     session.close()?;
     let _ = fs::remove_dir_all(root);
     Ok(())
+}
+
+#[rstest::rstest]
+#[case::invalid_provenance(true)]
+#[case::disabled_store(false)]
+fn saving_interactive_frame_rejects_invalid_provenance_and_disabled_store(
+    #[case] enabled: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let temp = tempfile::tempdir()?;
+    let source = HtmlBrowserSource::new(html(), "https://example.test/child.html")?;
+    let viewport = HtmlBrowserViewport::new(SAVE_TEST_WIDTH, SAVE_TEST_HEIGHT, 1.0)?;
+    let mut provenance = provenance(&source, viewport)?;
+    let mut session = HtmlRuntime.open(source, viewport)?;
+    let initial = session.latest_frame().ok_or("frame")?.clone();
+    let root = temp.path().canonicalize()?;
+    let store = HtmlArtifactStore::new(&root, SAVE_TEST_STORE_CAPACITY, enabled)?;
+    if enabled {
+        provenance.source_sha256 = "invalid".into();
+    }
+    let generation = initial.generation;
+    let error = save_initial_and_updated(&store, &provenance, &mut session, initial)
+        .err()
+        .ok_or("unexpectedly saved the initial frame")?;
+    assert!(matches!(
+        (enabled, error.downcast_ref()),
+        (true, Some(HtmlArtifactError::InvalidProvenance(_)))
+            | (false, Some(HtmlArtifactError::Disabled))
+    ));
+    assert!(!temp.path().join("child.krr-frame.json").exists());
+    assert_eq!(
+        session.latest_frame().ok_or("frame")?.generation,
+        generation
+    );
+    session.close().map_err(Into::into)
 }
