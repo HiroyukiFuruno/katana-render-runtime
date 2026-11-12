@@ -127,6 +127,11 @@ fn callback_operation_and_argument_coercion_stay_in_javascript_budget() -> Resul
     false,
     "ordinary"
 )]
+#[case::object_inheriting_native_error(
+    "try { __krr_dom('unsupported'); } catch (native) { throw Object.create(native); }",
+    false,
+    "undefined"
+)]
 #[case::rethrow_native(
     "try { __krr_dom('unsupported'); } catch (native) { throw native; }",
     true,
