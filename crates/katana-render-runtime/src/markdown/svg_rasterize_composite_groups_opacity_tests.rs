@@ -21,6 +21,16 @@ struct ActualHtmlText<'a> {
     handled: Cell<bool>,
 }
 
+impl<'a> ActualHtmlText<'a> {
+    fn new(database: &'a usvg::fontdb::Database) -> Self {
+        Self {
+            inner: HtmlGlyphRasterizer::new(database),
+            calls: Cell::new(0),
+            handled: Cell::new(false),
+        }
+    }
+}
+
 impl TextRasterizer for ActualHtmlText<'_> {
     fn render(
         &self,
@@ -139,11 +149,7 @@ fn render_text(
 fn render_source(svg: &str) -> Result<RenderedText, String> {
     let options = font::html_rasterizer_options(svg);
     let tree = usvg::Tree::from_str(svg, &options).map_err(|error| error.to_string())?;
-    let rasterizer = ActualHtmlText {
-        inner: HtmlGlyphRasterizer::new(tree.fontdb()),
-        calls: Cell::new(0),
-        handled: Cell::new(false),
-    };
+    let rasterizer = ActualHtmlText::new(tree.fontdb());
     let mut pixmap = Pixmap::new(WIDTH, HEIGHT).ok_or("pixmap allocation failed")?;
     pixmap.fill(Color::WHITE);
     SvgCompositeRenderer::render_with_text(

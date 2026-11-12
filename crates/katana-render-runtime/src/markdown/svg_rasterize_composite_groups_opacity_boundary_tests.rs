@@ -16,6 +16,30 @@ fn offscreen_opacity_group_has_no_crop_or_text_work() -> Result<(), String> {
 }
 
 #[test]
+fn overflowing_opacity_layer_bounds_leave_the_destination_unchanged() -> Result<(), String> {
+    let svg = opacity_svg(FADED_OPACITY, None, None, false, true);
+    let options = super::super::super::super::font::html_rasterizer_options(&svg);
+    let tree = usvg::Tree::from_str(&svg, &options).map_err(|error| error.to_string())?;
+    let mut pixmap = Pixmap::new(super::WIDTH, super::HEIGHT).ok_or("pixmap allocation failed")?;
+    pixmap.fill(Color::WHITE);
+    let rasterizer = super::ActualHtmlText::new(tree.fontdb());
+    let result = SvgCompositeRenderer::render_with_text(
+        &tree,
+        Transform::from_scale(u32::MAX as f32, 1.0),
+        &mut pixmap.as_mut(),
+        &AuthoredClipInfo::default(),
+        Some(&rasterizer),
+    );
+    assert_eq!(
+        result.err().as_deref(),
+        Some("SVG clip layer width overflow")
+    );
+    assert_eq!(rasterizer.calls.get(), 0);
+    assert_white(&pixmap);
+    Ok(())
+}
+
+#[test]
 fn text_rasterizer_error_propagates_without_compositing_group_shapes() -> Result<(), String> {
     let svg = opacity_svg(FADED_OPACITY, None, None, false, true);
     let options = super::super::super::super::font::html_rasterizer_options(&svg);
