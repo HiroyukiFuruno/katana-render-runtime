@@ -1,13 +1,47 @@
 use super::*;
 #[path = "svg_rasterize_html_font_admitted_attempt_test_support.rs"]
 mod test_support;
-use test_support::{assert_fixture_escape, assert_publication_barrier, receipt};
+use test_support::{
+    assert_fixture_escape, assert_publication_barrier, receipt, write_missing_font,
+};
+
+#[test]
+fn late_font_write_reports_a_directory_at_the_destination() -> Result<(), String> {
+    let fixture = Fixture::new()?;
+    let destination = fixture.root.join("absent.ttf");
+    std::fs::create_dir(&destination).map_err(|error| error.to_string())?;
+    let expected = std::fs::write(&destination, b"")
+        .err()
+        .ok_or("directory unexpectedly accepted a file write")?
+        .to_string();
+    assert_eq!(write_missing_font(&fixture), Err(expected));
+    assert!(destination.is_dir());
+    Ok(())
+}
+
+#[test]
+fn admission_receipt_rejects_unknown_face_and_stale_font_source() -> Result<(), String> {
+    let fixture = Fixture::new()?;
+    assert_eq!(
+        receipt(&fixture, ID::dummy()).err().as_deref(),
+        Some("original face missing")
+    );
+    SvgRasterizeOps::with_html_font_render_scope(|| receipt(&fixture, fixture.a).map(drop))?;
+    write_missing_font(&fixture)?;
+    assert_eq!(
+        SvgRasterizeOps::with_html_font_render_scope(|| receipt(&fixture, fixture.a).map(drop))
+            .err()
+            .as_deref(),
+        Some("admission rejected")
+    );
+    Ok(())
+}
 
 #[test]
 fn selected_font_copy_failure_preserves_the_original_file() -> Result<(), String> {
     let fixture = Fixture::new()?;
-    let original = std::fs::read(fixture.root.join("noto.ttf"))
-        .map_err(|error| error.to_string())?;
+    let original =
+        std::fs::read(fixture.root.join("noto.ttf")).map_err(|error| error.to_string())?;
     std::fs::remove_file(fixture.root.join("arial.ttf")).map_err(|error| error.to_string())?;
 
     let error = test_support::replace_font_file(&fixture)

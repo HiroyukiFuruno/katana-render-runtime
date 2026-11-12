@@ -89,7 +89,7 @@ fn run_selected_replacement(fixture: &Fixture) -> Result<(), String> {
     Ok(())
 }
 
-fn write_missing_font(fixture: &Fixture) -> Result<(), String> {
+pub(super) fn write_missing_font(fixture: &Fixture) -> Result<(), String> {
     std::fs::write(
         fixture.root.join("absent.ttf"),
         crate::markdown::svg_rasterize::font::BUNDLED_SANS_SERIF_FONT,
