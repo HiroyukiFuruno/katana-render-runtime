@@ -3,6 +3,20 @@ use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
 use skrifa::raw::TableProvider;
 use std::io::ErrorKind;
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn lazy_font_table_read_reports_a_non_seekable_source() -> Result<(), Box<dyn std::error::Error>> {
+    let (reader, _writer) = nix::unistd::pipe()?;
+    let mut file = std::fs::File::from(reader);
+    let file_length = file.metadata()?.len();
+    let result = super::io::read_at(&mut file, file_length, 0, 0);
+    assert_eq!(
+        result.err().and_then(|error| error.raw_os_error()),
+        Some(nix::errno::Errno::ESPIPE as i32)
+    );
+    Ok(())
+}
+
 #[test]
 fn truncated_font_poisons_an_existing_lazy_table_source() -> Result<(), Box<dyn std::error::Error>>
 {
