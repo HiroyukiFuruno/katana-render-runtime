@@ -59,3 +59,28 @@ fn click(session: &mut HtmlBrowserSession, x: f32, y: f32) {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::exercise_resumed_interactions;
+    use crate::renderer::backends::html_artifact::{
+        HtmlBrowserSource, HtmlBrowserViewport, HtmlRuntime,
+    };
+
+    #[test]
+    fn resumed_interactions_reject_a_closed_session() -> Result<(), Box<dyn std::error::Error>> {
+        let source = HtmlBrowserSource::new(
+            super::super::html(),
+            "https://example.test/closed-interaction.html",
+        )?;
+        let viewport = HtmlBrowserViewport::new(320, 160, 1.0)?;
+        let mut session = HtmlRuntime.open(source, viewport)?;
+        assert!(session.latest_frame().is_some());
+        session.close()?;
+        let error = exercise_resumed_interactions(&mut session)
+            .err()
+            .ok_or("closed session was accepted")?;
+        assert_eq!(error.to_string(), "form");
+        Ok(())
+    }
+}
