@@ -106,13 +106,15 @@ fn inline_flex_baseline(text: &str, style: &CssStyle) -> Option<f32> {
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use super::{CssStyle, HtmlDocumentNode, inline_flex_metrics};
+    use super::{CssStyle, HtmlDocumentNode, InlineMeasurement, inline_flex_metrics};
+
+    const AVAILABLE_WIDTH: f32 = 200.0;
 
     #[test]
     fn fixed_height_flex_baselines_follow_chrome_cross_alignment() -> Result<(), String> {
         for (alignment, expected_baseline) in [("start", 13.0), ("center", 26.0), ("end", 39.0)] {
-            let node = fixed_height_text_flex(alignment);
-            let metrics = inline_flex_metrics(&node, &CssStyle::browser_default(), 200.0)
+            let node = fixed_height_text_flex(alignment, "Arial");
+            let metrics = inline_flex_metrics(&node, &CssStyle::browser_default(), AVAILABLE_WIDTH)
                 .ok_or_else(|| "text inline flex must have baseline metrics".to_string())?;
             assert_eq!(metrics.height, 46.0);
             assert_eq!(metrics.baseline, expected_baseline, "{alignment}");
@@ -120,14 +122,22 @@ mod tests {
         Ok(())
     }
 
-    fn fixed_height_text_flex(alignment: &str) -> HtmlDocumentNode {
+    #[test]
+    fn reserved_internal_font_family_falls_back_from_atomic_baseline() {
+        let node = fixed_height_text_flex("center", "__krr_internal_system_ui_interface_bold_700");
+        let inherited = CssStyle::browser_default();
+        assert!(InlineMeasurement::node_width(&node, &inherited, AVAILABLE_WIDTH).is_some());
+        assert!(inline_flex_metrics(&node, &inherited, AVAILABLE_WIDTH).is_none());
+    }
+
+    fn fixed_height_text_flex(alignment: &str, family: &str) -> HtmlDocumentNode {
         HtmlDocumentNode::Element {
             node_id: 1,
             tag: "span".to_string(),
             attributes: vec![(
                 "style".to_string(),
                 format!(
-                    "display:inline-flex;height:40px;border:1px solid;padding:2px 8px;font-family:Arial;font-size:10px;line-height:14px;align-items:{alignment}"
+                    "display:inline-flex;height:40px;border:1px solid;padding:2px 8px;font-family:{family};font-size:10px;line-height:14px;align-items:{alignment}"
                 ),
             )],
             children: vec![HtmlDocumentNode::Text("Alpha".to_string())],
