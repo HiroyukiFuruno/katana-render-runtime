@@ -2042,12 +2042,17 @@ fn percentage_width_reflows_against_resized_viewport() -> TestResult {
 
 #[test]
 fn raster_dimension_mismatch_is_a_typed_runtime_failure() -> TestResult {
-    let session = start("<p>frame</p>")?;
+    let source = HtmlBrowserSource::new(
+        "<body style='margin:0'></body>",
+        "https://example.test/docs/index.html",
+    )
+    .map_err(to_string)?;
+    let viewport = HtmlBrowserViewport::new(8193, 1, 1.0).map_err(to_string)?;
 
     assert!(matches!(
-        session.validate_raster_dimensions(319, 240),
-        Err(crate::renderer::backends::html_browser::HtmlBrowserError::RuntimeFailure { error })
-            if error.contains("319x240") && error.contains("320x240")
+        super::super::HtmlInteractiveSession::start(source, viewport),
+        Err(HtmlBrowserError::RuntimeFailure { error })
+            if error == "interactive raster dimensions are 8192x1, expected 8193x1"
     ));
     Ok(())
 }
