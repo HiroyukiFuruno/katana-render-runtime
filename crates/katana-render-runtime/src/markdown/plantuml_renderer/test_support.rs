@@ -19,32 +19,21 @@ pub(super) fn env_guard() -> Result<MutexGuard<'static, ()>, String> {
 #[cfg(test)]
 mod lock_tests {
     use super::env_guard;
+    use crate::system::ProcessService;
     use std::panic::{catch_unwind, resume_unwind};
 
     const CHILD_CASE: &str = "KRR_PLANTUML_ENV_LOCK_TEST_CHILD";
     const CASE_NAME: &str = "markdown::plantuml_renderer::test_support::lock_tests::poisoned_environment_lock_is_reported_in_isolated_child";
-    const CHILD_ARGS: [&str; 3] = ["--exact", CASE_NAME, "--test-threads=1"];
 
     #[test]
     fn poisoned_environment_lock_is_reported_in_isolated_child()
     -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(child) = std::env::var_os(CHILD_CASE) {
-            assert_eq!(child, CASE_NAME);
-            assert!(std::env::args().skip(1).eq(CHILD_ARGS));
-            assert_poison_reported();
-            return Ok(());
-        }
-
         /* WHY: 共有ロックのpoisonをこの子プロセスだけに閉じ込める。 */
-        let output = crate::system::ProcessService::create_command(std::env::current_exe()?)
-            .args(CHILD_ARGS)
-            .env(CHILD_CASE, CASE_NAME)
-            .output()?;
-        let stdout = std::str::from_utf8(&output.stdout)?;
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(output.status.success(), "{stdout}\n{stderr}");
-        assert!(stdout.contains("test result: ok. 1 passed;"), "{stdout}");
-        assert!(env_guard().is_ok());
+        if ProcessService::enter_isolated_test_child(CHILD_CASE, CASE_NAME)? {
+            assert_poison_reported();
+        } else {
+            assert!(env_guard().is_ok());
+        }
         Ok(())
     }
 

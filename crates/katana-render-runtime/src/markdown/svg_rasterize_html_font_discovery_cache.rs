@@ -139,3 +139,47 @@ pub(in crate::markdown::svg_rasterize) fn measured_database(
 #[cfg(test)]
 #[path = "svg_rasterize_html_font_discovery_cache_tests.rs"]
 mod tests;
+
+#[cfg(all(test, target_os = "macos"))]
+mod lock_tests {
+    use super::{Arc, HtmlFontRequest, html_font_cache, known_for, measured_known};
+    use crate::markdown::svg_rasterize::SvgRasterizeOps;
+    use crate::system::ProcessService;
+    use std::panic::{catch_unwind, resume_unwind};
+
+    const CHILD_CASE: &str = "KRR_HTML_FONT_DISCOVERY_LOCK_TEST_CHILD";
+    const CASE_NAME: &str = "markdown::svg_rasterize::font::html::discovery_cache::lock_tests::known_font_lookup_and_measurement_recover_from_poisoned_lock";
+    const FONT_FAMILY: &str = "Arial";
+    const FONT_TEXT: &str = "ABC";
+    const FONT_WEIGHT: u16 = 400;
+
+    #[test]
+    fn known_font_lookup_and_measurement_recover_from_poisoned_lock()
+    -> Result<(), Box<dyn std::error::Error>> {
+        if ProcessService::enter_isolated_test_child(CHILD_CASE, CASE_NAME)? {
+            verify_recovery()?;
+        } else {
+            assert!(!html_font_cache().is_poisoned());
+        }
+        Ok(())
+    }
+
+    fn verify_recovery() -> Result<(), String> {
+        let cache = html_font_cache();
+        let interrupted = catch_unwind(|| -> Result<(), String> {
+            let _guard = cache.lock().map_err(|error| error.to_string())?;
+            resume_unwind(Box::new("interrupt isolated HTML font cache access"))
+        });
+        assert!(interrupted.is_err() && cache.is_poisoned());
+
+        let request = HtmlFontRequest::from_text(FONT_FAMILY, FONT_TEXT);
+        let known = known_for(&request).ok_or("known font lookup failed after lock error")?;
+        assert!(known.proof.current(&known.database));
+        let measured = SvgRasterizeOps::with_html_font_render_scope(|| {
+            measured_known(&request, FONT_FAMILY, FONT_TEXT, FONT_WEIGHT, false)
+        })
+        .ok_or("known font measurement failed after lock error")?;
+        assert!(Arc::ptr_eq(&known.database, &measured.database));
+        Ok(())
+    }
+}
