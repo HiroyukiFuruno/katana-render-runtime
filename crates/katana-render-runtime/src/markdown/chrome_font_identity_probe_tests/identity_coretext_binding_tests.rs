@@ -181,7 +181,7 @@ fn coretext_binding_rejects_a_named_descriptor_without_a_physical_url() -> Resul
 }
 
 #[test]
-fn coretext_binding_rejects_a_descriptor_after_its_file_is_removed() -> Result<(), String> {
+fn coretext_binding_requires_matching_name_and_existing_file() -> Result<(), String> {
     let (_temp, database, selected) = physical_font_fixture()?;
     let face = database.faces().next().ok_or("font face missing")?;
     let identity = super::super::face_identity(&database, face)?;
@@ -190,17 +190,18 @@ fn coretext_binding_rejects_a_descriptor_after_its_file_is_removed() -> Result<(
         .iter()
         .next()
         .ok_or("fixture descriptor missing")?;
-    let verify = || {
-        super::verify_descriptor_binding(
-            &descriptor,
-            &identity.path,
-            &identity,
-            &selected.post_script_name,
-        )
-    };
-    assert_eq!(Path::new(&verify()?), identity.path);
+    let verify =
+        |name| super::verify_descriptor_binding(&descriptor, &identity.path, &identity, name);
+    let expected_name = selected.post_script_name.as_str();
+    assert_eq!(Path::new(&verify(expected_name)?), identity.path);
+    assert_eq!(
+        verify("krr-unmatched-postscript-name").err().as_deref(),
+        Some(NAME_MISMATCH_ERROR)
+    );
     fs::remove_file(&identity.path).map_err(|error| error.to_string())?;
-    let error = verify().err().ok_or("removed descriptor URL accepted")?;
+    let error = verify(expected_name)
+        .err()
+        .ok_or("removed descriptor URL accepted")?;
     assert!(
         error.starts_with("canonicalize CoreText descriptor URL:"),
         "{error}"

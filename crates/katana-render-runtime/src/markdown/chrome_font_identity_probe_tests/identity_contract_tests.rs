@@ -154,6 +154,16 @@ fn shared_file_identity_requires_matching_physical_bytes() -> Result<(), String>
     Ok(())
 }
 
+#[test]
+fn unique_shared_font_is_rejected_after_its_file_is_removed() -> Result<(), String> {
+    let (temp, database, _) = shared_physical_font_fixture(false)?;
+    let path = temp.path().join("physical-font.ttf");
+    assert!(unique_file_face(&database).is_some());
+    fs::remove_file(&path).map_err(|error| error.to_string())?;
+    assert!(unique_file_face(&database).is_none());
+    Ok(())
+}
+
 fn assert_shared_file_identity_case(
     temp: &TempDirectory,
     database: &Database,

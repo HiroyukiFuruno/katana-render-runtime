@@ -1,7 +1,10 @@
 use super::super::{
     CaptureRequest, ProbeRequest, ProbeResponse, REQUEST_SCHEMA, RESPONSE_SCHEMA, ResourceFile,
 };
-use super::{TempDirectory, request_sha256, run_probe_child, verified_single_capture};
+use super::{
+    TempDirectory, physical_font_fixture, probe_single_capture, request_sha256, run_probe_child,
+    verified_single_capture,
+};
 use std::{ffi::OsString, fs};
 
 const CONDITION: &str = "non-utf8-path";
@@ -79,5 +82,15 @@ fn probe_child_rejects_a_successful_process_that_selected_no_test() -> Result<()
         fs::read(output.with_extension("request.json")).map_err(|error| error.to_string())?;
     let expected = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
     assert_eq!(written, expected);
+    Ok(())
+}
+
+#[test]
+fn single_capture_propagates_a_real_probe_child_validation_failure() -> Result<(), String> {
+    let (_temp, _database, selected) = physical_font_fixture()?;
+    let error = probe_single_capture("", selected, Vec::new())
+        .err()
+        .ok_or("empty condition ID was accepted")?;
+    assert!(error.starts_with("ignored font probe failed with status Some("));
     Ok(())
 }
