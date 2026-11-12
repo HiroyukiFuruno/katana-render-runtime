@@ -19,10 +19,16 @@ pub(super) fn change_name_table(bytes: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 pub(in super::super) fn font_with_only(tag: Tag) -> Result<Vec<u8>, String> {
-    let font = ReadFontRef::from_index(FONT_BYTES, 0).map_err(|error| format!("{error:?}"))?;
-    let data = font.data_for_tag(tag).ok_or("source table missing")?;
+    font_with_tables(FONT_BYTES, &[tag])
+}
+
+pub(in super::super) fn font_with_tables(bytes: &[u8], tags: &[Tag]) -> Result<Vec<u8>, String> {
+    let font = ReadFontRef::from_index(bytes, 0).map_err(|error| format!("{error:?}"))?;
     let mut builder = FontBuilder::new();
-    builder.add_raw(tag, data.as_bytes());
+    for &tag in tags {
+        let data = font.data_for_tag(tag).ok_or("source table missing")?;
+        builder.add_raw(tag, data.as_bytes());
+    }
     Ok(builder.build())
 }
 

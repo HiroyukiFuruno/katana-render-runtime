@@ -8,6 +8,9 @@ use resvg::usvg::{
 use skrifa::{FontRef, MetadataProvider};
 use std::{path::PathBuf, sync::Arc};
 
+#[path = "svg_rasterize_html_glyph_instances_unusable_base_tests.rs"]
+mod unusable_base;
+
 const FONT_SIZE: f32 = 20.0;
 const STATIC_FONT: &str = "assets/fonts/NotoSans-Regular.ttf";
 const COLR_VARIABLE: &str = "../../tests/fixtures/svg-engine/colr-public-fonts/colr_1_variable.ttf";
