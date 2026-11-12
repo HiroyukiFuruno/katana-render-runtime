@@ -122,3 +122,29 @@ fn explicit_path_outside_workspace_tmp_is_rejected() -> Result<(), String> {
     assert!(output.write(b"diagnostic").is_err());
     Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn symlinked_output_parent_is_checked_after_resolution() -> Result<(), String> {
+    let directory = owned_output_directory("raw-geometry-symlink-parent-")?;
+    let outside = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let inside = directory.path().join("inside");
+    std::fs::create_dir(&inside).map_err(|error| error.to_string())?;
+    let inside_link = directory.path().join("inside-link");
+    let outside_link = directory.path().join("outside-link");
+    std::os::unix::fs::symlink(&inside, &inside_link).map_err(|error| error.to_string())?;
+    std::os::unix::fs::symlink(outside.path(), &outside_link).map_err(|error| error.to_string())?;
+    let allowed = DiagnosticOutput::from_override(Some(inside_link.join("result.json").into()))?;
+    allowed.write(b"diagnostic")?;
+    assert_eq!(
+        std::fs::read(inside.join("result.json")).map_err(|error| error.to_string())?,
+        b"diagnostic"
+    );
+    let rejected = DiagnosticOutput::from_override(Some(outside_link.join("result.json").into()))?;
+    assert_eq!(
+        rejected.write(b"diagnostic"),
+        Err("diagnostic output must be under workspace tmp".to_owned())
+    );
+    assert!(!outside.path().join("result.json").exists());
+    Ok(())
+}

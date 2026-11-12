@@ -21,6 +21,34 @@ fn architecture_validator_reports_collapsed_real_source_edge() -> Result<(), Str
 }
 
 #[test]
+fn architecture_validator_rejects_unknown_ports_and_edge_endpoints() -> Result<(), String> {
+    tests::architecture_pair(tests::ARCH)?;
+    for sides in [('X', 'L'), ('R', 'X')] {
+        let error = GeometryContract::architecture(
+            tests::ARCH,
+            &[("a", "A"), ("b", "B")],
+            &[("a", "b", sides.0, sides.1)],
+            ("app", "Group"),
+        )
+        .err();
+        assert_eq!(error.as_deref(), Some("unknown source port"));
+    }
+    let svg = tests::ARCH.replace("id-L_a_b_0", "id-L_a_missing_0");
+    assert_eq!(
+        GeometryContract::architecture(
+            &svg,
+            &[("a", "A"), ("b", "B")],
+            &[("a", "missing", 'R', 'L')],
+            ("app", "Group"),
+        )
+        .err()
+        .as_deref(),
+        Some("edge source/target missing")
+    );
+    Ok(())
+}
+
+#[test]
 fn architecture_validator_requires_the_service_inventory_and_unique_group() -> Result<(), String> {
     tests::architecture_pair(tests::ARCH)?;
     for (before, after, expected) in [
