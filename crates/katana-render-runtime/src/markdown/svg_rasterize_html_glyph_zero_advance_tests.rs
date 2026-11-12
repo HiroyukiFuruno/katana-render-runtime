@@ -1,7 +1,9 @@
+use super::super::super::eligibility::eligible_source;
 use super::super::{html_font_db_for_text, noto_face_ids, tree_with_database};
 use super::{FontShape, NORMAL_FONT_WEIGHT, PreparedSpan, ScriptFragment, Tree, layout, metrics};
 use super::{assert_prepared_fallback, prepare_text, text};
 use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
+use rstest::rstest;
 use std::{path::Path, sync::Arc};
 use write_fonts::{
     FontBuilder,
@@ -9,22 +11,28 @@ use write_fonts::{
     types::Tag,
 };
 
-const CONTENT: &str = "A日本";
 const FAMILY: &str = "Noto Sans";
 
-#[test]
-fn fallback_run_with_a_real_zero_advance_glyph_keeps_original_positions() -> Result<(), String> {
+#[rstest]
+#[case::leading("A日本", false)]
+#[case::trailing("日本A", true)]
+fn fallback_run_with_a_real_zero_advance_glyph_keeps_original_positions(
+    #[case] content: &str,
+    #[case] zero_reaches_positioning: bool,
+) -> Result<(), String> {
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
     for (name, bytes, expected) in [
         ("normal.ttf", FONT_BYTES.to_vec(), true),
         ("zero.ttf", with_zero_advance()?, false),
     ] {
-        let tree = fallback_tree(&directory.path().join(name), &bytes)?;
+        let tree = fallback_tree(&directory.path().join(name), &bytes, content)?;
         let source = text(&tree)?;
-        let spans = prepare_text(&tree, source, CONTENT)?;
-        assert_prepared_fallback(&spans, CONTENT);
+        let spans = prepare_text(&tree, source, content)?;
+        assert_prepared_fallback(&spans, content);
         let advance = latin_advance(&tree, &spans)?;
         assert_eq!(advance > 0.0, expected, "{name}: {advance}");
+        let admitted = eligible_source(source, &spans).is_some();
+        assert_eq!(admitted, expected || zero_reaches_positioning);
         assert_eq!(
             layout(tree.fontdb(), source, &spans)?.is_some(),
             expected,
@@ -38,9 +46,9 @@ fn fallback_run_with_a_real_zero_advance_glyph_keeps_original_positions() -> Res
     Ok(())
 }
 
-fn fallback_tree(path: &Path, bytes: &[u8]) -> Result<Tree, String> {
+fn fallback_tree(path: &Path, bytes: &[u8], content: &str) -> Result<Tree, String> {
     std::fs::write(path, bytes).map_err(|error| error.to_string())?;
-    let mut database = html_font_db_for_text(FAMILY, CONTENT);
+    let mut database = html_font_db_for_text(FAMILY, content);
     let existing = noto_face_ids(&database);
     let writable = Arc::make_mut(&mut database);
     for face in existing {
@@ -49,7 +57,7 @@ fn fallback_tree(path: &Path, bytes: &[u8]) -> Result<Tree, String> {
     writable
         .load_font_file(path)
         .map_err(|error| error.to_string())?;
-    tree_with_database(CONTENT, "", FAMILY, database)
+    tree_with_database(content, "", FAMILY, database)
 }
 
 fn latin_advance(tree: &Tree, spans: &[PreparedSpan]) -> Result<f32, String> {
