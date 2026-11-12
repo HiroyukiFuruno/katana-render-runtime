@@ -170,21 +170,22 @@ mod tests {
     #[test]
     fn raw_v8_html_width_calls_reject_unmeasurable_text() -> Result<(), String> {
         let calls = actual_v8_calls("native-width-oracle-invalid-html-text.js")?;
-        for (kind, expected) in [
-            ("css", "CSS boundary reference failed:"),
-            ("canvas", "Canvas boundary reference failed:"),
+        for (index, kind, expected) in [
+            (0, "css", "CSS boundary reference failed:"),
+            (2, "canvas", "Canvas boundary reference failed:"),
         ] {
             let mut corrupted = calls.clone();
-            let row = corrupted
-                .iter_mut()
-                .find(|call| call["kind"] == kind)
-                .ok_or_else(|| format!("raw V8 {kind} call missing"))?;
+            let row = &mut corrupted[index];
+            assert_eq!(row["kind"], kind);
             row["args"][0] = json!("\0");
             row["args"][1] = json!("");
-            let error = assert_bridge_widths_match_rust(&corrupted)
-                .err()
-                .ok_or_else(|| format!("unmeasurable {kind} text was accepted"))?;
-            assert!(error.starts_with(expected), "{error}");
+            let error = assert_bridge_widths_match_rust(&corrupted).err();
+            assert!(
+                error
+                    .as_deref()
+                    .is_some_and(|error| error.starts_with(expected)),
+                "{kind}: {error:?}"
+            );
         }
         Ok(())
     }
