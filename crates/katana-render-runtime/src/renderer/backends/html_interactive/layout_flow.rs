@@ -65,7 +65,6 @@ mod tests {
     use super::super::style::CssStyle;
     use super::super::types::{DetailsContext, LayoutContext};
     use super::Display;
-    use super::compute::layout_error;
     use crate::renderer::backends::html_browser::HtmlBrowserViewport;
     use crate::renderer::backends::html_document::HtmlDocumentNode;
     use std::collections::HashMap;
@@ -95,7 +94,6 @@ mod tests {
             ),
             Ok(9.0)
         );
-        assert_eq!(layout_error("boom"), "CSS flow layout failed: boom");
     }
 
     fn assert_empty_flow_position(renderer: &mut HtmlLayoutRenderer, style: &CssStyle, y: f32) {

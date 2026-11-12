@@ -71,10 +71,10 @@ fn row_height(items: &[(f32, f32)], row_y: f32) -> f32 {
 }
 
 fn stretches_children(parent: &CssStyle) -> bool {
-    matches!(
-        parent.align_items,
-        None | Some(taffy::style::AlignItems::STRETCH | taffy::style::AlignItems::NORMAL)
-    )
+    use taffy::style::AlignItems;
+
+    let alignment = parent.align_items.unwrap_or(AlignItems::NORMAL);
+    alignment == AlignItems::NORMAL || alignment == AlignItems::STRETCH
 }
 
 fn is_flex_row(parent: &CssStyle) -> bool {

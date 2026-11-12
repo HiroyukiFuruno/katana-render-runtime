@@ -11,12 +11,16 @@ fn wrapped_flex_stretches_each_line_independently() -> Result<(), String> {
     parent.display = Display::Flex;
     parent.flex_wrap = FlexWrap::Wrap;
     parent.gap = 12.0;
-    assert_flow_stretch(
-        &parent,
-        542.0,
-        265.0,
-        &[(106.6, 106.6), (90.0, 106.6), (81.8, 81.8)],
-    )
+    for alignment in [None, Some(AlignItems::NORMAL), Some(AlignItems::STRETCH)] {
+        parent.align_items = alignment;
+        assert_flow_stretch(
+            &parent,
+            542.0,
+            265.0,
+            &[(106.6, 106.6), (90.0, 106.6), (81.8, 81.8)],
+        )?;
+    }
+    Ok(())
 }
 
 #[test]
@@ -48,6 +52,19 @@ fn centered_flex_preserves_each_items_height() -> Result<(), String> {
     assert_eq!(short_item.size.height, 20.0);
     assert_eq!(short_item.location.y, 10.0);
     assert_eq!(flow_stretch_heights(&tree, &parent, &measurements)?, None);
+    Ok(())
+}
+
+#[test]
+fn layout_error_preserves_the_taffy_child_index_error() -> Result<(), String> {
+    let mut tree = TaffyTree::<()>::new();
+    let (node, _, _) = measure_item(&mut tree, 40.0, 20.0)?;
+    assert_eq!(
+        tree.child_at_index(node, 0).map_err(super::layout_error),
+        Err(format!(
+            "CSS flow layout failed: Index (is 0) should be < child_count (0) for parent node {node:?}"
+        ))
+    );
     Ok(())
 }
 
