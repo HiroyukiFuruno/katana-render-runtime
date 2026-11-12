@@ -7,7 +7,7 @@ use crate::markdown::{
 #[path = "js_runtime_native_font_observer_data.rs"]
 mod observation_data;
 
-use observation_data::FontObservationEnvelope;
+use observation_data::decode_observations;
 
 const NATIVE_FONT_OBSERVER: &str = r#"(() => {
   const limit = 512;
@@ -181,11 +181,7 @@ pub(in super::super) fn render_with_native_font_observations(
     drop(scripts.pop());
     scripts.push(observation_driver(&request_json));
     let envelope = DiagramV8Runtime::render(&scripts)?;
-    let observed: FontObservationEnvelope =
-        serde_json::from_str(&envelope).map_err(|error| error.to_string())?;
-    let diagnostic =
-        serde_json::to_string(&observed.observations()).map_err(|error| error.to_string())?;
-    Ok((observed.svg, diagnostic))
+    decode_observations(&envelope)
 }
 
 fn observation_driver(request_json: &str) -> DiagramRuntimeScript<'static> {
@@ -197,23 +193,43 @@ fn observation_driver(request_json: &str) -> DiagramRuntimeScript<'static> {
 
 #[cfg(test)]
 mod tests {
-    use super::{DiagramColorPreset, render_with_native_font_observations};
+    use super::{
+        DiagramColorPreset, DiagramRuntimeScript, DiagramV8Runtime, decode_observations,
+        render_with_native_font_observations,
+    };
 
     #[test]
-    fn native_font_observer_propagates_invalid_mermaid_source() -> Result<(), String> {
-        let (svg, observations) = render_with_native_font_observations(
+    fn native_font_observer_propagates_invalid_mermaid_source() {
+        let rendered = render_with_native_font_observations(
             "flowchart LR\n  A --> B",
             DiagramColorPreset::dark(),
-        )?;
-        assert!(svg.contains("<svg"));
-        assert!(serde_json::from_str::<serde_json::Value>(&observations).is_ok());
-        let error = render_with_native_font_observations(
+        );
+        let error = rendered.as_ref().err();
+        assert!(
+            matches!(&rendered, Ok((svg, observations)) if svg.contains("<svg")
+                && serde_json::from_str::<serde_json::Value>(observations).is_ok()),
+            "{error:?}"
+        );
+        let rejected = render_with_native_font_observations(
             "flowchart LR\n  A -->",
             DiagramColorPreset::dark(),
-        )
-        .err()
-        .ok_or("invalid flowchart unexpectedly rendered")?;
-        assert!(!error.trim().is_empty());
+        );
+        assert!(rejected.is_err_and(|error| !error.trim().is_empty()));
+    }
+
+    #[test]
+    fn native_font_observer_rejects_incomplete_v8_envelopes() -> Result<(), String> {
+        let envelope = DiagramV8Runtime::render(&[DiagramRuntimeScript::borrowed(
+            "font-observer-incomplete-envelope.js",
+            r#"JSON.stringify({svg: '<svg/>'});"#,
+        )])?;
+        let error = decode_observations(&envelope).err();
+        assert!(
+            error
+                .as_deref()
+                .is_some_and(|error| error.contains("missing field `xHeightObservations`")),
+            "{error:?}"
+        );
         Ok(())
     }
 }

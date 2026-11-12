@@ -96,3 +96,12 @@ impl FontObservationEnvelope {
         }
     }
 }
+
+pub(super) fn decode_observations(envelope: &str) -> Result<(String, String), String> {
+    serde_json::from_str::<FontObservationEnvelope>(envelope)
+        .and_then(|observed| {
+            let diagnostic = serde_json::to_string(&observed.observations())?;
+            Ok((observed.svg, diagnostic))
+        })
+        .map_err(|error| error.to_string())
+}
