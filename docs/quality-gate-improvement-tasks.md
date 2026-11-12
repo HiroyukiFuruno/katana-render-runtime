@@ -2,7 +2,8 @@
 
 ## 現在の実行地点（2026-11-13、以下の過去結果と区別する）
 
-- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み60件、一部対応21件、未対応44件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0028.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み60件、一部対応23件、未対応42件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0029.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- SVGの影と色変換で、失敗を返さないクロップ判定と影の設定組み立てから不要なエラー伝播を除いた。実SVGの非有限パラメーターと座標のオーバーフローを描画前に拒否し、描画先が不変であることを確認した。関連24件、AST、ソース前後一致、実catalog照合が成功（`d6050512`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-filter-boundaries-26xuhjvp/safe-summary.json`）。影と色変換は一部対応。
 - 不正なMermaid入力の描画エラーをフォント監査付きの計測でも返し、その後の正常入力を描画できることを実V8で確認した。関連28件、AST、ソース前後一致、実catalog照合が成功（`49aef2d0`、`tmp/quality/resumed-owner-r3509/release-coverage-mermaid-audit-error-72wrcdc1/safe-summary.json`）。幅計測のテスト補助は一部対応。
 - Chromeフォント検証はSHA照合済みのデータを直接登録するようにした。旧レポートで唯一未到達だった再読込エラー経路を、同一パスの再読込をなくすことで解消した。実ファイルの変更・不正フォント・重複パスを含む対象8件、AST、ソース前後一致、実catalog照合が成功（`85316a1a`、`tmp/quality/resumed-owner-r3509/release-coverage-captured-font-snapshot-i1ptrf39/safe-summary.json`）。
 - SVG字形監査のデータでルートがない、埋め込みだけがある、またはテキストIDに図形がある場合に検査が失敗することを確認した。新規2件を含む関連6件、AST、ソース前後一致、実catalog照合が成功した（`59998620`、`tmp/quality/resumed-owner-r3509/release-coverage-glyph-audit-evidence-ayj16ct4/safe-summary.json`）。監査のテスト補助は一部対応。
