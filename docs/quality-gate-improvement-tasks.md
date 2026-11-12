@@ -2,7 +2,8 @@
 
 ## 現在の実行地点（2026-11-13、以下の過去結果と区別する）
 
-- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み59件、一部対応22件、未対応44件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0026.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み60件、一部対応21件、未対応44件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0027.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- Chromeフォント検証はSHA照合済みのデータを直接登録するようにした。旧レポートで唯一未到達だった再読込エラー経路を、同一パスの再読込をなくすことで解消した。実ファイルの変更・不正フォント・重複パスを含む対象8件、AST、ソース前後一致、実catalog照合が成功（`85316a1a`、`tmp/quality/resumed-owner-r3509/release-coverage-captured-font-snapshot-i1ptrf39/safe-summary.json`）。
 - SVG字形監査のデータでルートがない、埋め込みだけがある、またはテキストIDに図形がある場合に検査が失敗することを確認した。新規2件を含む関連6件、AST、ソース前後一致、実catalog照合が成功した（`59998620`、`tmp/quality/resumed-owner-r3509/release-coverage-glyph-audit-evidence-ayj16ct4/safe-summary.json`）。監査のテスト補助は一部対応。
 - SVG基準線の選定で確認済みの主spanを引き継ぎ、後段の重複した空判定を除いた。フォールバックや混在書体を含む既存50件、AST、ソース前後一致、実catalog照合を確認した（`d12463c5`、`tmp/quality/resumed-owner-r3509/release-coverage-uniform-baseline-span-xrp3v306/safe-summary.json`）。同ファイルは一部対応。旧計測の未到達行と既存回帰の照合は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/reviewed-missing-line-routes.md` に記録した。
 - 不正UTF-8の外部Mermaidランタイムが公開描画経路で読み込みエラーとなることを確認した。通常の欠損・同梱ランタイムの回帰を含む対象4件とASTが成功した（`0b74f07c`、`tmp/quality/resumed-owner-r3509/release-coverage-invalid-mermaid-resource-y6ail90o/safe-summary.json`）。共有読み込み処理は一部対応。
