@@ -220,3 +220,26 @@ fn identity_cases_reject_missing_font_inputs() -> Result<(), String> {
     assert!(append_changed_byte(&missing).is_err());
     Ok(())
 }
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn changed_font_write_reports_real_file_size_limit() -> Result<(), Box<dyn std::error::Error>> {
+    use crate::system::file_size_limit_test_support::FileSizeLimitTest;
+
+    FileSizeLimitTest::run_in_child(
+        module_path!(),
+        "changed_font_write_reports_real_file_size_limit",
+        || {
+            let (temp, _, _) = physical_font_fixture()?;
+            let path = temp.path().join("physical-font.ttf");
+            assert!(fs::metadata(&path)?.len() > 0);
+            let result = FileSizeLimitTest::with_zero_limit(|| append_changed_byte(&path))?;
+            let error = result.err().ok_or("font write unexpectedly succeeded")?;
+            assert!(
+                error.contains(&FileSizeLimitTest::limit_error().to_string()),
+                "{error}"
+            );
+            Ok(())
+        },
+    )
+}

@@ -53,6 +53,19 @@ fn coretext_single_font_validation_rejects_a_nonzero_real_face_index() {
     );
 }
 
+#[test]
+fn coretext_single_font_validation_rejects_a_truncated_real_font() -> Result<(), String> {
+    let (temp, _, _) = physical_font_fixture()?;
+    let bytes =
+        fs::read(temp.path().join("physical-font.ttf")).map_err(|error| error.to_string())?;
+    super::verify_single_font_data(&bytes, 0)?;
+    let error = super::verify_single_font_data(&bytes[..4], 0)
+        .err()
+        .ok_or("truncated font unexpectedly succeeded")?;
+    assert!(error.starts_with("parse CoreText candidate font file:"));
+    Ok(())
+}
+
 fn physical_candidate() -> Result<(TempDirectory, PhysicalFace), String> {
     let (temp, database, selected) = physical_font_fixture()?;
     let candidate = candidate_files(&database, &selected)?

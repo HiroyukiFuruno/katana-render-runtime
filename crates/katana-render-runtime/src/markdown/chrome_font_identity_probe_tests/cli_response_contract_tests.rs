@@ -39,3 +39,28 @@ fn response_fixture() -> Result<ProbeResponse, String> {
     let request_bytes = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
     probe(&request_bytes)
 }
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn response_writer_reports_real_file_size_limit() -> Result<(), Box<dyn std::error::Error>> {
+    use crate::system::file_size_limit_test_support::FileSizeLimitTest;
+
+    FileSizeLimitTest::run_in_child(
+        module_path!(),
+        "response_writer_reports_real_file_size_limit",
+        || {
+            let temp = TempDirectory::new()?;
+            let output = temp.path().join("response.json");
+            let response = response_fixture()?;
+            let result = FileSizeLimitTest::with_zero_limit(|| {
+                write_fresh_response(output.clone(), &response)
+            })?;
+            let error = result
+                .err()
+                .ok_or("response write unexpectedly succeeded")?;
+            assert!(error.starts_with("write response:"), "{error}");
+            assert!(output.is_file());
+            Ok(())
+        },
+    )
+}
