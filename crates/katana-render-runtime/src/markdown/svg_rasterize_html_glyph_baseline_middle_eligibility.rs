@@ -1,8 +1,6 @@
 use super::super::super::{alignment_dy_supported, all_zero, anchor, horizontal_glyphs};
 use resvg::usvg::{self, TextFlow};
 
-const MIN_ADDITIONAL_CHUNKS: usize = 2;
-
 pub(in crate::markdown::svg_rasterize::html_glyph::baseline) fn layout_supported(
     text: &usvg::Text,
 ) -> bool {
@@ -22,16 +20,13 @@ pub(super) fn layout_supported_with_zero_first_dy(
 ) -> bool {
     let [chunk] = text.chunks() else { return false };
     let dy = text.dy();
-    let Some(first_dy) = dy.first() else {
-        return false;
-    };
-    let Some(first_span) = chunk.spans().first() else {
-        return false;
-    };
+    /* WHY: usvgは最初の文字の座標とspanを伴う場合だけchunkを作る。 */
+    let first_dy = dy[0];
+    let first_span = &chunk.spans()[0];
     text.writing_mode() == usvg::WritingMode::LeftToRight
         && matches!(chunk.text_flow(), TextFlow::Linear)
         && alignment_dy_supported(dy)
-        && (*first_dy != 0.0 || allow_zero_first_dy)
+        && (first_dy != 0.0 || allow_zero_first_dy)
         && all_zero(text.dx())
         && all_zero(text.rotate())
         && chunk.spans().iter().all(source_span_has_default_spacing)
@@ -61,16 +56,10 @@ fn source_span_has_default_spacing(span: &usvg::TextSpan) -> bool {
 pub(in crate::markdown::svg_rasterize::html_glyph::baseline) fn additional_middle_layout_supported(
     text: &usvg::Text,
 ) -> bool {
-    if text.chunks().len() < MIN_ADDITIONAL_CHUNKS {
-        return false;
-    }
-    let Some(first) = text
-        .chunks()
-        .first()
-        .and_then(|chunk| chunk.spans().first())
-    else {
+    let [first_chunk, _, ..] = text.chunks() else {
         return false;
     };
+    let first = &first_chunk.spans()[0];
     /* WHY: 従来の単一行経路は保ち、明示複数行だけを同じ主font補正へ渡す。 */
     anchor::uniform_css_scale(text.abs_transform()).is_some()
         && text.writing_mode() == usvg::WritingMode::LeftToRight
