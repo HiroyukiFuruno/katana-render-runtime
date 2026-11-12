@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 外部MathJaxの読込失敗と実HTMLのDOM引数不足が呼び出し元へ伝播すること、実フォントの破損した字形からCOLRの塗りを出さないことを確認した。関連6件、静的基盤、ASTが成功、ソース前後一致（`e8b12189`、`11ef9ff4`、`tmp/quality/resumed-owner-r3509/release-coverage-runtime-error-propagation-ki_4m7x1/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - 同梱フォントから1ビットの埋め込み字形を持つfixtureを生成し、実SVGで未対応のマスク字形を塗らず兄弟図形を保持することを確認した。Skrifaが1ビットマスクを返すことを検査し、同じSVGをPNG字形で描く対照を置いた。関連4件、静的基盤、ASTが成功、ソース前後一致（`8d602a3b`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-bitmap-mask-vz14dvzv/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - 最新の正式計測は `32814b34` の86,710/86,951行、99.722832%、未カバー241行（244行から3行減。SVGマーカー2行、CSS入れ子上限1行）。全ファイルの未カバー増加なし。Rust実行対象6,463件すべて成功、別に15件skip。Moonの収集実0、ソース前後一致、同じ環境のゲートで証跡を認証し再収集なし、100%条件のみ不合格（`tmp/quality/resumed-owner-r3509/root-coverage-after-svg-bounds-markers-and-parser-awuh35d6/safe-summary.json`）。
 - CSSの入れ子制限を超えた実SVGで前後の有効なstroke/fill宣言を保持することと、実HTMLのスクリプトから不正なノードIDを渡した3種類の位置問い合わせが型付きDOMエラーを返すことを確認した。関連6件、静的基盤、ASTが成功、ソース前後一致（`55590b85`、`b463147b`、`tmp/quality/resumed-owner-r3509/release-coverage-parser-boundary-inputs-5hedii18/safe-summary.json`）。
