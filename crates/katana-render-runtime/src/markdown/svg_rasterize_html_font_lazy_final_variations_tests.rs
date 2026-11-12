@@ -108,11 +108,34 @@ fn observation_inputs_reject_a_later_nonfinite_font_size() {
 }
 
 #[test]
-fn normalized_observation_rejects_a_removed_real_face() -> Result<(), String> {
+fn variation_observers_reject_a_removed_real_face() -> Result<(), String> {
     let (mut database, face_id) = bundled_face()?;
     database.remove_face(face_id);
-    let result = super::variations::normalized_coords(&database, face_id, &[]);
-    assert!(result.is_err_and(|error| error.contains("font face data unavailable")));
+    let normalized = super::variations::normalized_coords(&database, face_id, &[]);
+    let design = super::variations::applied_design_coordinates(&database, face_id, &[]);
+    for error in [normalized.err(), design.err()] {
+        assert!(error.is_some_and(|error| error.contains("font face data unavailable")));
+    }
+    Ok(())
+}
+
+#[test]
+fn design_coordinates_reject_a_file_truncated_after_registration() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let fixture = crate::markdown::svg_rasterize::font_file_fixture::create(
+        directory.path().join("registered.ttf"),
+        FONT_BYTES,
+    )
+    .map_err(|error| error.to_string())?;
+    let coordinates =
+        || super::variations::applied_design_coordinates(&fixture.database, fixture.face_id, &[]);
+    assert!(coordinates()?.is_empty());
+    let truncated = &FONT_BYTES[..std::mem::size_of::<u32>()];
+    std::fs::write(&fixture.path, truncated).map_err(|error| error.to_string())?;
+    let expected = skrifa::FontRef::from_index(truncated, 0)
+        .err()
+        .ok_or("truncated fixture must fail font parsing")?;
+    assert_eq!(coordinates(), Err(expected.to_string()));
     Ok(())
 }
 
