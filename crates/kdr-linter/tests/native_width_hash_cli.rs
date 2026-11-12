@@ -22,6 +22,36 @@ const MUTATIONS: &[(&str, &str, &str, &str)] = &[
     ),
     (
         INPUTS[1],
+        "        \"mermaid-svg-id-v1\".hash(&mut hasher);\n",
+        "",
+        "svg-id-hash-route:statement-count",
+    ),
+    (
+        INPUTS[1],
+        "let mut hasher = DefaultHasher::new();",
+        "let mut hasher = DefaultHasher::default();",
+        "svg-id-hash-route:hasher",
+    ),
+    (
+        INPUTS[1],
+        "\"mermaid-svg-id-v1\".hash(&mut hasher);",
+        "\"mermaid-svg-id-v1\".hash(&mut DefaultHasher::new());",
+        "svg-id-hash-route:domain",
+    ),
+    (
+        INPUTS[1],
+        "super::hash_mermaid_source_and_preset(&mut hasher, source, preset);",
+        "super::hash_mermaid_source_and_preset(&mut hasher, source.trim(), preset);",
+        "svg-id-hash-route:shared-fields",
+    ),
+    (
+        INPUTS[1],
+        "format!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
+        "hasher.finish().to_string()",
+        "svg-id-hash-route:output",
+    ),
+    (
+        INPUTS[1],
         "format!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
         "format!(\"katana-mermaid-svg-{:016x}\" hasher.finish())",
         "svg-id-hash-route:output",
