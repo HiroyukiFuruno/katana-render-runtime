@@ -79,6 +79,20 @@ enum MarkerKind {
     End,
 }
 
+#[derive(Clone, Copy)]
+enum MarkerVertex {
+    Start,
+    Middle(usize, MiddleSegment),
+    End,
+}
+
+#[derive(Clone, Copy)]
+enum MiddleSegment {
+    Move(Point),
+    Line(Point),
+    Cubic(Point, Point, Point),
+}
+
 enum MarkerOrientation {
     Auto,
     AutoStartReverse,
@@ -107,12 +121,12 @@ fn resolve(
     let clip_path = marker_clip(marker_node, rect, view_box_ts, cache)?;
     let segments = marker_segments(path);
     let placement = MarkerPlacement { rect, view_box_ts, stroke_scale, clip_path };
-    let mut draw_marker = |p, idx| {
-        draw_one_marker(marker_node, state, cache, parent, &placement, &segments, (p, idx));
+    let mut draw_marker = |point, vertex| {
+        draw_one_marker(marker_node, state, cache, parent, &placement, &segments, (point, vertex));
     };
     match marker_kind {
         // Path は先頭に MoveTo を持つため、最初の点をそのまま使える。
-        MarkerKind::Start => draw_marker(path.points()[0], 0),
+        MarkerKind::Start => draw_marker(path.points()[0], MarkerVertex::Start),
         MarkerKind::Middle => draw_middle_markers(&segments, &mut draw_marker),
         MarkerKind::End => draw_end_marker(&segments, &mut draw_marker),
     }
@@ -196,15 +210,15 @@ fn marker_transform(
     marker_node: SvgNode,
     placement: &MarkerPlacement,
     segments: &[Segment],
-    position: (Point, usize),
+    position: (Point, MarkerVertex),
 ) -> Transform {
-    let (p, idx) = position;
+    let (p, vertex) = position;
     let mut ts = Transform::from_translate(p.x, p.y);
     let angle = match convert_orientation(marker_node) {
-        MarkerOrientation::AutoStartReverse if idx == 0 => {
-            (calc_vertex_angle(segments, idx) + 180.0) % 360.0
+        MarkerOrientation::AutoStartReverse if matches!(vertex, MarkerVertex::Start) => {
+            (first_vertex_angle(segments) + 180.0) % 360.0
         }
-        MarkerOrientation::Auto | MarkerOrientation::AutoStartReverse => calc_vertex_angle(segments, idx),
+        MarkerOrientation::Auto | MarkerOrientation::AutoStartReverse => calc_vertex_angle(segments, vertex),
         MarkerOrientation::Angle(angle) => angle,
     };
     if !angle.approx_zero_ulps(4) {
@@ -222,7 +236,7 @@ fn draw_one_marker(
     parent: &mut Group,
     placement: &MarkerPlacement,
     segments: &[Segment],
-    position: (Point, usize),
+    position: (Point, MarkerVertex),
 ) {
     let ts = marker_transform(marker_node, placement, segments, position);
     let mut g = Group {
@@ -253,45 +267,35 @@ fn stroke_scale(
 
 fn draw_middle_markers<P>(path: &[Segment], draw_marker: &mut P)
 where
-    P: FnMut(tiny_skia_path::Point, usize),
+    P: FnMut(Point, MarkerVertex),
 {
-            let total = path.len() - 1;
-            let mut i = 1;
-            while i < total {
-                let p = match path[i] {
-                    Segment::MoveTo(p) => p,
-                    Segment::LineTo(p) => p,
-                    Segment::CubicTo(_, _, p) => p,
-                    _ => {
-                        i += 1;
-                        continue;
-                    }
-                };
-
-                draw_marker(p, i);
-
-                i += 1;
-            }
+    for (index, segment) in path.iter().copied().enumerate().take(path.len() - 1).skip(1) {
+        let (point, segment) = match segment {
+            Segment::MoveTo(point) => (point, MiddleSegment::Move(point)),
+            Segment::LineTo(point) => (point, MiddleSegment::Line(point)),
+            Segment::CubicTo(first, second, point) => (point, MiddleSegment::Cubic(first, second, point)),
+            Segment::Close(_) => continue,
+        };
+        draw_marker(point, MarkerVertex::Middle(index, segment));
+    }
 }
 
 fn draw_end_marker<P>(path: &[Segment], draw_marker: &mut P)
 where
-    P: FnMut(tiny_skia_path::Point, usize),
+    P: FnMut(Point, MarkerVertex),
 {
     let idx = path.len() - 1;
     let p = match path[idx] {
         Segment::MoveTo(p) | Segment::LineTo(p) | Segment::CubicTo(_, _, p) | Segment::Close(p) => p,
     };
-    draw_marker(p, idx);
+    draw_marker(p, MarkerVertex::End);
 }
 
-fn calc_vertex_angle(path: &[Segment], idx: usize) -> f32 {
-    if idx == 0 {
-        first_vertex_angle(path)
-    } else if idx == path.len() - 1 {
-        last_vertex_angle(path, idx)
-    } else {
-        middle_vertex_angle(path, idx)
+fn calc_vertex_angle(path: &[Segment], vertex: MarkerVertex) -> f32 {
+    match vertex {
+        MarkerVertex::Start => first_vertex_angle(path),
+        MarkerVertex::Middle(index, segment) => middle_vertex_angle(path, index, segment),
+        MarkerVertex::End => last_vertex_angle(path, path.len() - 1),
     }
 }
 
@@ -352,8 +356,7 @@ fn last_closed_curve_angle(path: &[Segment], idx: usize, p2: Point, p: Point, ne
     )
 }
 
-fn middle_vertex_angle(path: &[Segment], idx: usize) -> f32 {
-    let previous = path[idx];
+fn middle_vertex_angle(path: &[Segment], idx: usize, previous: MiddleSegment) -> f32 {
     match path[idx + 1] {
         Segment::MoveTo(_) => middle_move_angle(path, idx, previous),
         Segment::LineTo(point) => middle_outgoing_angle(path, idx, previous, point, None),
@@ -367,36 +370,35 @@ fn middle_vertex_angle(path: &[Segment], idx: usize) -> f32 {
 fn middle_outgoing_angle(
     path: &[Segment],
     idx: usize,
-    previous: Segment,
+    previous: MiddleSegment,
     end: Point,
     control: Option<Point>,
 ) -> f32 {
     let tangent_point = control.unwrap_or(end);
     match (previous, control) {
-        (Segment::MoveTo(p), _) => calc_line_angle(p.x, p.y, tangent_point.x, tangent_point.y),
-        (Segment::LineTo(p), None) => {
+        (MiddleSegment::Move(p), _) => calc_line_angle(p.x, p.y, tangent_point.x, tangent_point.y),
+        (MiddleSegment::Line(p), None) => {
             let start = get_prev_vertex(path, idx);
             calc_angle(start.x, start.y, p.x, p.y, p.x, p.y, end.x, end.y)
         }
-        (Segment::LineTo(p), Some(control)) => {
+        (MiddleSegment::Line(p), Some(control)) => {
             let start = get_prev_vertex(path, idx);
             calc_curves_angle(start.x, start.y, start.x, start.y, p.x, p.y, control.x, control.y, end.x, end.y)
         }
-        (Segment::CubicTo(_, incoming, p), _) => {
+        (MiddleSegment::Cubic(_, incoming, p), _) => {
             let start = get_prev_vertex(path, idx);
             calc_curves_angle(start.x, start.y, incoming.x, incoming.y, p.x, p.y, tangent_point.x, tangent_point.y, end.x, end.y)
         }
-        (Segment::Close(_), _) => 0.0,
     }
 }
 
-fn middle_move_angle(path: &[Segment], idx: usize, previous: Segment) -> f32 {
+fn middle_move_angle(path: &[Segment], idx: usize, previous: MiddleSegment) -> f32 {
     match previous {
-        Segment::LineTo(p) => {
+        MiddleSegment::Line(p) => {
             let prev = get_prev_vertex(path, idx);
             calc_line_angle(prev.x, prev.y, p.x, p.y)
         }
-        Segment::CubicTo(_, p2, p) => {
+        MiddleSegment::Cubic(_, p2, p) => {
             if p.x.approx_eq_ulps(&p2.x, 4) && p.y.approx_eq_ulps(&p2.y, 4) {
                 let prev = get_prev_vertex(path, idx);
                 calc_line_angle(prev.x, prev.y, p.x, p.y)
@@ -404,18 +406,18 @@ fn middle_move_angle(path: &[Segment], idx: usize, previous: Segment) -> f32 {
                 calc_line_angle(p2.x, p2.y, p.x, p.y)
             }
         }
-        _ => 0.0,
+        MiddleSegment::Move(_) => 0.0,
     }
 }
 
-fn middle_close_angle(path: &[Segment], idx: usize, previous: Segment, next: Point) -> f32 {
+fn middle_close_angle(path: &[Segment], idx: usize, previous: MiddleSegment, next: Point) -> f32 {
     match previous {
-        Segment::MoveTo(_) | Segment::Close(_) => 0.0,
-        Segment::LineTo(p) => {
+        MiddleSegment::Move(_) => 0.0,
+        MiddleSegment::Line(p) => {
             let prev = get_prev_vertex(path, idx);
             calc_angle(prev.x, prev.y, p.x, p.y, p.x, p.y, next.x, next.y)
         }
-        Segment::CubicTo(p1, p2, p) => middle_closed_curve_angle(path, idx, p1, p2, p, next),
+        MiddleSegment::Cubic(p1, p2, p) => middle_closed_curve_angle(path, idx, p1, p2, p, next),
     }
 }
 
