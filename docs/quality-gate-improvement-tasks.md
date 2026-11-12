@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- フォント検証の予定4条件中4条件を確認。実フォントファイルの消失、親を持たないパス、親の未作成、選択処理の開始前を検証した。HTML成果物保存のサイズ超過とシリアライズエラーの分類は、入力型に依存しない同じ処理を非ジェネリック関数へ共通化した。関連6テスト、静的基盤、AST成功、ソース前後一致（`b4a63d38`、`b8e7c5f5`、`tmp/quality/resumed-owner-r3509/release-coverage-font-paths-and-encoding-tvi8rt0t/safe-summary.json`）。現行版の正式値は未再計測。
+- 正式計測 `27ad4c45` の集計は283行、producerが表示した物理行の一覧は131行。ソース上の行表示と、ジェネリック関数の具体型別の集計では対象の単位が異なる。たとえば `encoding.rs` の候補行には実行回数4があり、個別型ではもう一方の分岐が未実行だった。以後、物理行一覧と生JSONの具体型別regionを照合して回帰対象を決める。元の正式判定は保持（`tmp/quality/resumed-owner-r3509/root-coverage-after-performance-retention-gnmvl8h5/explicit-uncovered-line-list.json`）。
 - 予定3条件中3条件を確認。実フォントテーブルのoffset加算超過、ファイル終端越え、開いた後の切り詰めを拒否。正常読取りの対照と切り詰め後のキャッシュ無効化・復旧も既存回帰で確認。テスト本体は既存規約の `*_tests.rs` に置き、フォント読取りとテーブル範囲の検証は従来どおり計測対象。関連2テスト・静的基盤・AST成功、ソース前後一致（`e552b69a`、`tmp/quality/resumed-owner-r3509/release-coverage-lazy-font-table-50ybqfpl/safe-summary.json`）。正式値は未カバー283行のまま未再計測。
 - 最新の正式計測は `27ad4c45` の86,836/87,119行、99.675157%、未カバー283行。前回から既存の未カバー8行が減り、新規回帰が混在したファイルで4行増えた。全6,439テスト成功、別に15件skip。収集実0・ソース前後一致・集計不変、100%条件でpolicy実1（`tmp/quality/resumed-owner-r3509/root-coverage-after-performance-retention-gnmvl8h5/{safe-summary,gap-summary,gap-delta-normalized-paths}.json`）。
 - 上記の回帰ケースを既存命名のテスト専用ファイルに分離し、実フォントfixtureの生成・検証補助は計測対象に残した。Mermaid CLIは証跡なしの通常入口で正常出力・親欠落・出力先がディレクトリの予定3条件を確認。移動した4テストを含む関連5テスト、静的基盤、ASTが成功し、ソース前後一致（`281d16ed`、`025d3485`、`tmp/quality/resumed-owner-r3509/release-coverage-face-tests-and-cli-v_hv1lqs/safe-summary.json`）。CLIのWindowsの実行結果と正式カバレッジへの差分は未確認。
