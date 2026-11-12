@@ -2,6 +2,7 @@ use super::Mode;
 use crate::markdown::svg_rasterize::text_shaping;
 use resvg::usvg::fontdb::{FaceInfo, Source};
 use std::{
+    borrow::Cow,
     path::PathBuf,
     sync::{Arc, Weak},
 };
@@ -66,25 +67,20 @@ fn source_metadata(source: &Source) -> (String, Option<PathBuf>, Option<ByteWeak
 }
 fn audited_source(face: &FaceInfo) -> Option<(Option<String>, Option<String>)> {
     use sha2::{Digest, Sha256};
-    let path = match &face.source {
-        Source::File(path) | Source::SharedFile(path, _) => path,
+    let (path, shared_bytes) = match &face.source {
+        Source::File(path) => (path, None),
+        Source::SharedFile(path, data) => (path, Some(data.as_ref().as_ref())),
         Source::Binary(_) => return None,
     };
     let before = text_shaping::stamp_path_uncached(path).ok()?;
-    let (_, bytes) = source_bytes(&face.source)?;
+    let bytes = match shared_bytes {
+        Some(bytes) => Cow::Borrowed(bytes),
+        None => Cow::Owned(std::fs::read(path).ok()?),
+    };
     let sha = Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
     let after = text_shaping::stamp_path_uncached(path).ok()?;
     (before == after).then(|| (Some(format!("{before:?}")), Some(sha)))
-}
-fn source_bytes(source: &Source) -> Option<(Option<PathBuf>, Vec<u8>)> {
-    match source {
-        Source::File(path) => Some((Some(path.clone()), std::fs::read(path).ok()?)),
-        Source::SharedFile(path, data) => {
-            Some((Some(path.clone()), data.as_ref().as_ref().to_vec()))
-        }
-        Source::Binary(data) => Some((None, data.as_ref().as_ref().to_vec())),
-    }
 }
