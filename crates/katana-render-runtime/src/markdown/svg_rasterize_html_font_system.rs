@@ -321,9 +321,11 @@ mod tests {
             .collect::<Vec<_>>();
         families.push("krr-font-0".to_string());
 
-        let requested = requested_system_font_families(families.iter().map(String::as_str));
+        let request = std::iter::once("").chain(families.iter().map(String::as_str));
+        let requested = requested_system_font_families(request);
 
         assert_eq!(requested.len(), MAX_SYSTEM_FONT_FAMILIES_PER_REQUEST);
+        assert!(!requested.contains(""));
         assert!(requested.contains("krr-font-0"));
         assert!(
             !requested
