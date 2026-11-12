@@ -4,6 +4,25 @@ use resvg::usvg::fontdb::{Database, Source};
 use std::{collections::BTreeMap, sync::Arc};
 
 #[test]
+fn html_render_reports_malformed_svg_parse_error() -> Result<(), String> {
+    let svg = "<svg";
+    let options = crate::markdown::svg_rasterize::font::html::html_rasterizer_options(svg);
+    let compatible =
+        crate::markdown::svg_rasterize::SvgRasterizeOps::preprocess_for_rasterizer(svg);
+    let expected = match resvg::usvg::Tree::from_str(&compatible, &options) {
+        Ok(_) => return Err("malformed SVG unexpectedly parsed".to_string()),
+        Err(error) => error.to_string(),
+    };
+    let actual = match super::super::render_html_with_options(svg, &options) {
+        Ok(_) => return Err("malformed SVG unexpectedly rendered".to_string()),
+        Err(error) => error,
+    };
+    assert!(!expected.is_empty());
+    assert_eq!(actual, expected);
+    Ok(())
+}
+
+#[test]
 fn transient_build_rejects_missing_stamp_and_unknown_prefix_face() -> Result<(), String> {
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
     let fixture =
