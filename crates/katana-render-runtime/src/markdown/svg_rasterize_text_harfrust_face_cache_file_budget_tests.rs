@@ -1,4 +1,46 @@
+use super::super::{ACTIVE_SCOPE, cache_font, entry};
 use super::*;
+use crate::markdown::svg_rasterize::font_file_fixture;
+
+#[test]
+fn oversize_lazy_file_cannot_displace_the_cache_budget() -> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let fixture = font_file_fixture::create(root.path().join("grown.ttf"), super::FONT_BYTES)?;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&fixture.path)?
+        .set_len(super::MAX_SOURCE_BYTES as u64 + 1)?;
+    let _scope = FontFaceCacheScope::enter();
+    let (key, font) = load_grown_lazy_font(&fixture)?;
+    assert!(font.retained_source_bytes > super::MAX_SOURCE_BYTES);
+    let (database, id) = super::binary_database()?;
+    let _retained = font_for_face(&database, id).ok_or("cached binary font missing")?;
+    assert!(ACTIVE_SCOPE.with(|cache| cache.borrow().entry.is_some()));
+    cache_font(key, font);
+    assert_all_handles_cleared();
+    Ok(())
+}
+
+fn load_grown_lazy_font(
+    fixture: &font_file_fixture::FontFileFixture,
+) -> Result<(entry::CacheKey, FontHandle), Box<dyn std::error::Error>> {
+    let generation = font_source_generation(&fixture.database, fixture.face_id);
+    let key = entry::CacheKey::File {
+        path: fixture.path.clone(),
+        generation: generation.clone(),
+        face_index: 0,
+    };
+    let font = entry::lazy_file_font(
+        &fixture.database,
+        fixture.face_id,
+        &fixture.path,
+        0,
+        key.clone(),
+        generation,
+    )?
+    .ok_or("grown lazy font missing")?;
+    Ok((key, font))
+}
 
 #[test]
 fn two_large_real_file_faces_evict_before_exceeding_single_source_budget()
