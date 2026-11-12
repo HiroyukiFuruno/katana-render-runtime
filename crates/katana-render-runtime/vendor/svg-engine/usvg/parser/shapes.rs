@@ -351,3 +351,25 @@ fn append_svg_arc(builder: &mut tiny_skia_path::PathBuilder, svg_arc: &kurbo::Sv
             }
         }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::PathBuilderExt;
+
+    #[test]
+    fn arc_to_on_empty_path_is_ignored_and_arc_after_move_to_builds_geometry()
+    -> Result<(), String> {
+        let mut empty_builder = tiny_skia_path::PathBuilder::new();
+        empty_builder.arc_to(10.0, 10.0, 0.0, false, true, 20.0, 20.0);
+        assert!(empty_builder.last_point().is_none());
+        assert!(empty_builder.finish().is_none());
+
+        let mut builder = tiny_skia_path::PathBuilder::new();
+        builder.move_to(10.0, 10.0);
+        builder.arc_to(10.0, 10.0, 0.0, false, true, 20.0, 20.0);
+
+        let path = builder.finish().ok_or("arc after MoveTo did not build a path")?;
+        assert!(path.len() > 1, "arc after MoveTo should add geometry");
+        Ok(())
+    }
+}
