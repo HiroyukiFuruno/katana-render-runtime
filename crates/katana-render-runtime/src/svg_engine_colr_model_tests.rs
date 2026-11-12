@@ -46,7 +46,7 @@ fn writer() -> XmlWriter {
 }
 
 fn painter<'a>(
-    font: &'a FontRef<'static>,
+    font: &'a FontRef<'a>,
     svg: &'a mut XmlWriter,
     path_buf: &'a mut String,
 ) -> GlyphPainter<'a> {

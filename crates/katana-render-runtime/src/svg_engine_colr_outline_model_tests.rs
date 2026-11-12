@@ -1,5 +1,5 @@
 use super::super::{Builder, GlyphPainter};
-use super::{finish, font, painter, solid_brush};
+use super::{FONT_BYTES, finish, font, painter, solid_brush};
 use skrifa::{GlyphId, MetadataProvider, color::ColorPainter, outline::OutlinePen};
 use xmlwriter::XmlWriter;
 
@@ -92,6 +92,72 @@ fn real_font_outline_and_missing_glyph_have_distinct_clip_results() -> Result<()
         return Err("missing glyph clip must suppress fill output".to_owned());
     }
     Ok(())
+}
+
+#[test]
+fn malformed_glyf_outline_produces_an_empty_colr_clip() -> Result<(), String> {
+    let bytes = font_with_truncated_outline_coordinates()?;
+    let font = skrifa::FontRef::new(&bytes).map_err(|error| error.to_string())?;
+    let glyph = GlyphId::new(VALID_OUTLINE_GLYPH);
+    let mut svg = super::writer();
+    let mut path = String::new();
+    assert_malformed_outline_draw(&font, glyph, &mut path)?;
+    let mut painter = painter(&font, &mut svg, &mut path);
+    painter.push_clip_glyph(glyph);
+    assert_missing_glyph_clip(&painter)?;
+    painter.fill(solid_brush());
+    painter.pop_clip();
+    assert!(!finish(svg).contains("fill=\"rgb(17, 34, 51)\""));
+    Ok(())
+}
+
+fn assert_malformed_outline_draw(
+    font: &skrifa::FontRef<'_>,
+    glyph: GlyphId,
+    path: &mut String,
+) -> Result<(), String> {
+    use skrifa::{
+        instance::{LocationRef, Size},
+        outline::DrawSettings,
+    };
+    let outline = font
+        .outline_glyphs()
+        .get(glyph)
+        .ok_or("outline metadata missing")?;
+    assert!(
+        outline
+            .draw(
+                DrawSettings::unhinted(Size::unscaled(), LocationRef::default()),
+                &mut Builder::new(path)
+            )
+            .is_err()
+    );
+    Ok(())
+}
+
+fn font_with_truncated_outline_coordinates() -> Result<Vec<u8>, String> {
+    use rustybuzz::ttf_parser::{RawFace, Tag};
+    use skrifa::raw::TableProvider;
+    const FLAGS_OFFSET: usize = 14;
+    const ORIGINAL_FLAGS: [u8; 4] = [0x37, 0x11, 0x21, 0x11];
+    let raw = RawFace::parse(FONT_BYTES, 0).map_err(|error| format!("{error:?}"))?;
+    let glyf = raw
+        .table_records
+        .into_iter()
+        .find(|table| table.tag == Tag::from_bytes(b"glyf"))
+        .ok_or("glyf table missing")?;
+    let offset = font()?
+        .loca(None)
+        .map_err(|error| error.to_string())?
+        .get_raw(VALID_OUTLINE_GLYPH as usize)
+        .ok_or("glyph offset missing")?;
+    let start = glyf.offset as usize + offset as usize + FLAGS_OFFSET;
+    let mut bytes = FONT_BYTES.to_vec();
+    let flags = &mut bytes[start..start + ORIGINAL_FLAGS.len()];
+    assert_eq!(flags, &ORIGINAL_FLAGS);
+    /* WHY: すべての点に長い座標を要求させ、実際の字形データより多くの座標を読もうとする。 */
+    flags.fill(0);
+    Ok(bytes)
 }
 
 #[test]
