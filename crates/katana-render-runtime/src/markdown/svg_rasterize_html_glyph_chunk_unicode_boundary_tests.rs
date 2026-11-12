@@ -26,26 +26,26 @@ fn real_svg_span_ranges_reject_reordering_and_mismatched_text() -> Result<(), St
     };
     let chunk = text.chunks().first().ok_or("SVG chunk missing")?;
     let spans = chunk.spans();
-    assert_eq!(spans.len(), 2);
-    assert!(accepts_span_ranges(chunk.text(), spans.iter()));
-    assert!(!accepts_span_ranges(chunk.text(), spans.iter().take(1)));
-    assert!(!accepts_span_ranges(chunk.text(), spans.iter().rev()));
-    assert!(!accepts_span_ranges("A", spans.iter()));
-    assert_rejected_span_stops_matching(chunk);
+    let [first, second] = spans else {
+        return Err("expected two SVG spans".into());
+    };
+    assert!(accepts_span_ranges(chunk.text(), &[first, second], false));
+    assert!(!accepts_span_ranges(chunk.text(), &[first], false));
+    assert!(!accepts_span_ranges(chunk.text(), &[second, first], false));
+    assert!(!accepts_span_ranges("A", &[first, second], false));
+    assert!(!accepts_span_ranges(chunk.text(), &[first, second], true));
     Ok(())
 }
 
-fn assert_rejected_span_stops_matching(chunk: &usvg::TextChunk) {
+fn accepts_span_ranges(text: &str, spans: &[&usvg::TextSpan], ascii_only: bool) -> bool {
     let mut matched = Vec::new();
-    let spans = chunk.spans().iter().zip(std::iter::repeat(()));
-    let accepted = ranges_match(chunk.text(), spans, |_, content, ()| {
+    let spans = spans.iter().copied().zip(std::iter::repeat(()));
+    let accepted = ranges_match(text, spans, |_, content, ()| {
         matched.push(content.to_owned());
-        content.is_ascii()
+        !ascii_only || content.is_ascii()
     });
-    assert!(!accepted);
-    assert_eq!(matched, ["é"]);
-}
-
-fn accepts_span_ranges<'a>(text: &str, spans: impl Iterator<Item = &'a usvg::TextSpan>) -> bool {
-    ranges_match(text, spans.zip(std::iter::repeat(())), |_, _, ()| true)
+    if ascii_only {
+        assert_eq!(matched, ["é"]);
+    }
+    accepted
 }
