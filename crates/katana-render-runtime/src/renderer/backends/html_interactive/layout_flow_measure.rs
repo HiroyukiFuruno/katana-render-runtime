@@ -254,7 +254,7 @@ mod tests {
         let node = nodes
             .iter()
             .find_map(|node| find_tag(node, "p"))
-            .ok_or("parsed section must be projected".to_string())?;
+            .ok_or("parsed section must be projected")?;
         let style = item_style(node, &CssStyle::browser_default(), 48.0, 1);
         assert!(
             is_layout_item(node),
@@ -269,14 +269,14 @@ mod tests {
         let grid = nodes
             .iter()
             .find_map(|node| find_tag(node, "section"))
-            .ok_or_else(|| "parsed grid section missing".to_string())?;
-        let child = find_tag(grid, "p").ok_or_else(|| "parsed grid item missing".to_string())?;
+            .ok_or("parsed grid section missing")?;
+        let child = find_tag(grid, "p").ok_or("parsed grid item missing")?;
         let parent_style = item_style(grid, &CssStyle::browser_default(), 80.0, 1);
         let child_style = item_style(child, &parent_style, 80.0, 1);
         let width = measured_widths(&[child], &[child_style], 80.0, &parent_style)
             .first()
             .copied()
-            .ok_or_else(|| "parsed grid item width missing".to_string())?;
+            .ok_or("parsed grid item width missing")?;
         Ok((width, parent_style.align_items))
     }
 
