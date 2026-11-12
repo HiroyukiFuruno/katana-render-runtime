@@ -48,6 +48,34 @@ fn missing_invalid_and_nonfinite_dimensions_are_rejected() -> Result<(), String>
 }
 
 #[test]
+fn rectangles_reject_invalid_origin_and_missing_height() -> Result<(), String> {
+    for (attributes, expected) in [
+        ("x='invalid' width='2' height='5'", "invalid float literal"),
+        ("y='NaN' width='2' height='5'", "non-finite geometry"),
+        ("width='2'", "missing height"),
+    ] {
+        let markup = format!("<svg><rect {attributes}/></svg>");
+        let svg = element(&markup)?;
+        let error = rectangle(first_element(&svg, "rect")?)
+            .err()
+            .ok_or("invalid rectangle accepted")?;
+        assert!(error.contains(expected), "unexpected error: {error}");
+    }
+    Ok(())
+}
+
+#[test]
+fn label_box_without_text_and_path_without_data_are_rejected() -> Result<(), String> {
+    let svg = element("<svg><g><rect width='2' height='2'/></g><path/></svg>")?;
+    assert_eq!(
+        label_in_box(first_element(&svg, "g")?, [0.0, 0.0, 2.0, 2.0]),
+        Err("associated text element required".into())
+    );
+    assert!(endpoints(first_element(&svg, "path")?).is_err());
+    Ok(())
+}
+
+#[test]
 fn invalid_transform_and_overflow_do_not_produce_geometry() -> Result<(), String> {
     for transform in ["translate(invalid)", "matrix(1e308 0 0 1e308 0 0)"] {
         let svg = format!("<svg><g transform='{transform}'><rect/></g></svg>");
