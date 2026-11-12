@@ -1,6 +1,7 @@
 use super::INPUTS;
 
 const SVG_ID: &str = INPUTS[1];
+const CACHE: &str = INPUTS[2];
 const HASHER_STATEMENT: &str = "let mut hasher = DefaultHasher::new();";
 const DOMAIN_STATEMENT: &str = "\"mermaid-svg-id-v1\".hash(&mut hasher);";
 const SHARED_HASH_CALL: &str =
@@ -66,5 +67,35 @@ pub(super) const MUTATIONS: &[(&str, &str, &str, &str)] = &[
         "format!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
         "format!(\"katana-mermaid-svg-{:016x}\", 0_u64)",
         "svg-id-hash-route:output",
+    ),
+    (
+        INPUTS[0],
+        "preset.background.hash(hasher);\n    preset.text.hash(hasher);",
+        "preset.text.hash(hasher);\n    preset.background.hash(hasher);",
+        "hash-fields:order:method=hash,receiver=preset.text,args=1",
+    ),
+    (
+        CACHE,
+        "mode.mermaid_cache_profile().hash(&mut hasher);",
+        "mode.mermaid_cache_extension().hash(&mut hasher);",
+        "render-cache-hash-route:prefix:mode.mermaid_cache_profile:method=hash,receiver=,args=1",
+    ),
+    (
+        CACHE,
+        "                hasher.finish(),",
+        "                0_u64,",
+        "render-cache-hash-route:filename",
+    ),
+    (
+        CACHE,
+        "                mode.mermaid_cache_extension()",
+        "                mode.mermaid_cache_profile()",
+        "render-cache-hash-route:filename",
+    ),
+    (
+        CACHE,
+        "std::env::temp_dir()\n            .join(\"katana_mermaid_cache\")",
+        "std::env::current_dir().unwrap().join(\"katana_mermaid_cache\")",
+        "render-cache-hash-route:path",
     ),
 ];
