@@ -95,7 +95,29 @@ fn maximum_character_width(face: &Face<'_>, scale: f32) -> Option<f32> {
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use super::html_input_character_metrics;
+    use super::{Face, Tag, character_metrics, html_input_character_metrics};
+    use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
+
+    #[test]
+    fn input_metrics_reject_a_real_font_without_x_glyph_or_advance()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let original = Face::parse(FONT_BYTES, 0).map_err(|_| "bundled font is invalid")?;
+        assert!(character_metrics(&original, 1.0).is_some());
+
+        let subset = super::super::fallback::font_with_only_b_cmap(FONT_BYTES)?;
+        let face = Face::parse(&subset, 0).map_err(|_| "subset font is invalid")?;
+        assert!(face.glyph_index('B').is_some());
+        assert!(character_metrics(&face, 1.0).is_none());
+
+        let without_advance = super::super::test_font_data::font_with_empty_table(
+            FONT_BYTES,
+            Tag::from_bytes(b"hmtx"),
+        )?;
+        let face = Face::parse(&without_advance, 0).map_err(|_| "fixture font is invalid")?;
+        assert!(face.glyph_index('x').is_some());
+        assert!(character_metrics(&face, 1.0).is_none());
+        Ok(())
+    }
 
     #[test]
     fn fractional_font_size_uses_chrome_font_cache_precision() {
