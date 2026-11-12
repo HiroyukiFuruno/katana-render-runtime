@@ -111,17 +111,70 @@ fn shared_font_seed_with_wrong_length_fails_closed() -> Result<(), String> {
     })
 }
 
+#[test]
+fn shared_seed_reuse_ignores_a_removed_fallback_face() -> Result<(), String> {
+    SvgRasterizeOps::with_html_font_render_scope(|| {
+        let request = HtmlFontRequest::from_text("Helvetica, Arial", "shared fallback");
+        let (original, proof) = super::super::sources::build_known_html_font_db_with_shared_budget(
+            &request,
+            SHARED_BUDGET_BYTES,
+        );
+        let seeds = proof.reusable_shared_sources(&original);
+        let [primary, fallback, ..] = seeds.as_slice() else {
+            return Err("two physical shared font seeds are required".to_owned());
+        };
+        let (mut proof, mut database) = load_seed_without_budget(primary)?;
+        proof.capture_prefix(&database);
+        load_seed(&mut proof, &mut database, fallback)?;
+        assert_eq!(proof.reusable_shared_sources(&database).len(), 2);
+
+        remove_fallback_seed_faces(&proof, &mut database, fallback);
+
+        assert!(proof.current(&database));
+        let remaining = proof.reusable_shared_sources(&database);
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].0, primary.0);
+        Ok(())
+    })
+}
+
+fn remove_fallback_seed_faces(
+    proof: &CreationProof,
+    database: &mut Database,
+    seed: &SharedSourceSeed,
+) {
+    let ids = database
+        .faces()
+        .filter(|face| matches!(&face.source, Source::SharedFile(path, _) if path == &seed.0))
+        .map(|face| face.id)
+        .collect::<Vec<_>>();
+    assert!(!ids.is_empty());
+    for id in ids {
+        assert!(!proof.contains(id));
+        database.remove_face(id);
+    }
+}
+
 fn load_seed_without_budget(seed: &SharedSourceSeed) -> Result<(CreationProof, Database), String> {
-    let mut sources = SharedSources::with_seeds(std::slice::from_ref(seed));
     let mut proof = CreationProof::default();
     let mut database = Database::new();
+    load_seed(&mut proof, &mut database, seed)?;
+    Ok((proof, database))
+}
+
+fn load_seed(
+    proof: &mut CreationProof,
+    database: &mut Database,
+    seed: &SharedSourceSeed,
+) -> Result<(), String> {
+    let mut sources = SharedSources::with_seeds(std::slice::from_ref(seed));
     let mut remaining = 0;
     proof.load_shared(
-        &mut database,
+        database,
         &[seed.0.to_str().ok_or("system font path is not UTF-8")?],
         &mut sources,
         &mut remaining,
     );
     assert_eq!(remaining, 0);
-    Ok((proof, database))
+    Ok(())
 }
