@@ -24,8 +24,8 @@ pub(super) fn polygon_axes(
         corners[BOTTOM_LEFT_CORNER].0 - corners[0].0,
         corners[BOTTOM_LEFT_CORNER].1 - corners[0].1,
     );
-    let local_x = active_axis_normal(active_axes.0, local_y_edge, local_x_edge)?;
-    let local_y = active_axis_normal(active_axes.1, local_x_edge, local_y_edge)?;
+    let local_x = active_axis_normal(active_axes.0, local_y_edge, local_x_edge);
+    let local_y = active_axis_normal(active_axes.1, local_x_edge, local_y_edge);
     Ok(OwnerAxes {
         origin: corners[0],
         local_x,
@@ -33,18 +33,13 @@ pub(super) fn polygon_axes(
     })
 }
 
-fn active_axis_normal(
-    active: bool,
-    perpendicular_edge: Point,
-    edge: Point,
-) -> Result<Option<Point>, String> {
+fn active_axis_normal(active: bool, perpendicular_edge: Point, edge: Point) -> Option<Point> {
     if !active {
-        return Ok(None);
+        return None;
     }
-    let Some(normal) = perpendicular_unit(perpendicular_edge).or_else(|| unit_vector(edge)) else {
-        return Ok(None);
-    };
-    Ok(Some(orient_normal(normal, edge)))
+    perpendicular_unit(perpendicular_edge)
+        .or_else(|| unit_vector(edge))
+        .map(|normal| orient_normal(normal, edge))
 }
 
 fn perpendicular_unit(vector: Point) -> Option<Point> {
