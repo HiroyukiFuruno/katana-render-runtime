@@ -36,6 +36,14 @@ fn transient_build_rejects_missing_stamp_and_unknown_prefix_face() -> Result<(),
     let mut removed = fixture.database.clone();
     removed.remove_face(fixture.face_id);
     assert!(build(&removed, &prefix, &empty, &owners).is_none());
+
+    let stamp = crate::markdown::svg_rasterize::text_shaping::stamp_path_uncached(&fixture.path)
+        .map_err(|_| "font fixture stamp failed")?;
+    assert!(stamp.durable_reusable());
+    let stamps = BTreeMap::from([(fixture.path.clone(), stamp)]);
+    assert!(build(&fixture.database, &prefix, &stamps, &owners).is_some());
+    std::fs::remove_file(&fixture.path).map_err(|error| error.to_string())?;
+    assert!(build(&fixture.database, &prefix, &stamps, &owners).is_none());
     Ok(())
 }
 
