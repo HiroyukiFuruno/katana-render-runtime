@@ -200,6 +200,7 @@ fn assert_two_chunk_snapping(tree: &resvg::usvg::Tree, expected: bool) -> Result
     };
     assert_eq!(spans.len(), 2);
     for span in &spans {
+        assert!(super::super::single_horizontal_alignment(text, span).is_none());
         assert_eq!(
             span.x_alignment
                 .is_some_and(|alignment| alignment.origin_snap_css_scale.is_some()),
@@ -207,4 +208,41 @@ fn assert_two_chunk_snapping(tree: &resvg::usvg::Tree, expected: bool) -> Result
         );
     }
     Ok(())
+}
+
+#[test]
+fn single_horizontal_alignment_rejects_a_rotated_shaped_glyph() -> Result<(), String> {
+    let fixture = font_fixture("rotated-shaped-glyph")?;
+    let plain = fixture_tree_with_content(&fixture, "x='50' y='30'", "AB")?;
+    let rotated = fixture_tree_with_content(&fixture, "x='50' y='30' rotate='15'", "AB")?;
+    let text = fixture_text(&plain)?;
+    let rasterizer = HtmlGlyphRasterizer::new(plain.fontdb());
+    let Prepared::Ready(mut spans) = rasterizer.prepare(text)? else {
+        return Err("plain SVG did not prepare".into());
+    };
+    let [span] = spans.as_mut_slice() else {
+        return Err("expected one prepared span".into());
+    };
+    assert_eq!(
+        super::super::single_horizontal_alignment(text, span),
+        Some(50.0)
+    );
+    span.glyphs = rotated_glyphs(&rotated)?;
+    assert!(!super::super::horizontal_glyphs(&span.glyphs));
+    assert!(super::super::single_horizontal_alignment(text, span).is_none());
+    Ok(())
+}
+
+fn rotated_glyphs(
+    tree: &resvg::usvg::Tree,
+) -> Result<Vec<resvg::usvg::layout::PositionedGlyph>, String> {
+    let [span] = fixture_text(tree)?.layouted() else {
+        return Err("expected one rotated glyph span".into());
+    };
+    assert!(
+        span.positioned_glyphs
+            .iter()
+            .any(|glyph| glyph.transform().kx != 0.0)
+    );
+    Ok(span.positioned_glyphs.clone())
 }
