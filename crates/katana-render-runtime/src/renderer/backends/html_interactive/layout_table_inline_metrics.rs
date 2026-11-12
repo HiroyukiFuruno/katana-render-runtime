@@ -232,26 +232,20 @@ mod tests {
     }
 
     #[test]
-    fn public_table_trailing_text_has_rendered_geometry() -> Result<(), String> {
+    fn public_table_trailing_text_has_rendered_geometry() {
         let document = HtmlDocument::parse(
             "<table style=\"width:106px\"><tr><td style=\"font-family:monospace;font-size:16px;line-height:20px;padding:5px 0;border:1px solid #123456;background:#fedcba\">alpha beta gamma</td></tr></table>",
         );
         let nodes = document.interactive_nodes_with_styles(&HashMap::new());
-        let viewport =
-            HtmlBrowserViewport::new(320, 160, 1.0).map_err(|error| error.to_string())?;
-        let layout = HtmlLayoutRenderer::render(&nodes, viewport, 0.0, &HashMap::new(), None)?;
+        let rendered = HtmlBrowserViewport::new(320, 160, 1.0).map(|viewport| {
+            HtmlLayoutRenderer::render(&nodes, viewport, 0.0, &HashMap::new(), None)
+                .map(|layout| layout.svg)
+        });
         assert!(
-            layout
-                .svg
-                .contains(r##"<rect x="10" y="10" width="102" height="52" fill="#fedcba"/>"##),
-            "{}",
-            layout.svg
+            matches!(&rendered, Ok(Ok(svg)) if svg
+                .contains(r##"<rect x="10" y="10" width="102" height="52" fill="#fedcba"/>"##)
+                && svg.contains("alpha") && svg.contains("gamma")),
+            "{rendered:?}"
         );
-        assert!(
-            layout.svg.contains("alpha") && layout.svg.contains("gamma"),
-            "{}",
-            layout.svg
-        );
-        Ok(())
     }
 }
