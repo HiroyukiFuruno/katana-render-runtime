@@ -43,6 +43,29 @@ fn resolve_mathjax_js_rejects_empty_env_and_missing_bundled_path() {
 }
 
 #[test]
+fn external_mathjax_render_reports_unreadable_runtime_paths() -> std::io::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let missing = directory.path().join("mathjax.js");
+    let block = DiagramBlock {
+        kind: DiagramKind::MathJax,
+        source: "x".to_string(),
+    };
+    for (path, expected) in [
+        (directory.path(), "could not be read"),
+        (missing.as_path(), "not installed"),
+    ] {
+        let result = MathJaxRendererOps::render_mathjax_with_runtime_path(
+            &block,
+            path,
+            DiagramColorPreset::current(),
+            false,
+        );
+        assert!(matches!(result, Err(error) if error.contains(expected)));
+    }
+    Ok(())
+}
+
+#[test]
 fn generated_runtime_materializes_reuses_and_replaces_files() {
     let path = test_path("lifecycle.js");
     let (first, second, third) = materialize_runtime_lifecycle(&path);

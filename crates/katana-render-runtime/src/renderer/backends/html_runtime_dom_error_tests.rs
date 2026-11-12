@@ -78,6 +78,17 @@ const DOM_FAILURE_CASES: &[(&str, &str)] = &[
         "__krr_dom('intersectionMetadata', 'not-a-node')",
         "invalid HTML node id: not-a-node",
     ),
+    ("__krr_dom('boundingClientRect')", "missing DOM argument 0"),
+    ("__krr_dom('layoutBoxPresent')", "missing DOM argument 0"),
+    (
+        "__krr_dom('intersectionMetadata')",
+        "missing DOM argument 0",
+    ),
+    ("__krr_dom('eventPath')", "missing DOM argument 0"),
+    (
+        "__krr_dom('closest', document.getElementById('target').__krrNodeId)",
+        "missing DOM argument 1",
+    ),
 ];
 
 #[test]
