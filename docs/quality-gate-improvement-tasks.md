@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- Moonのカバレッジキー生成より先にPlantUMLを準備し、取得ログはstderrへ送る。既存JARをチェックサム照合後に再利用し、再取得の一時ファイルは実行ごとに分離・回収する。コールド・再試行・破損・取得失敗の契約回帰と静的基盤が成功（`c35e6e5d`、`tmp/quality/resumed-owner-r3509/release-coverage-plantuml-key-preflight-koo3elr7/safe-summary.json`）。過去の照合失敗時にJARが欠落していたかは未確定で、Moon経由の正式な全体収集は未再実行。
+- 上記のBun契約一括でMermaid実測トレースの固定ハッシュの重複による1件の失敗を確認した。検査対象ファイルの一覧・順序・固定ハッシュの照合を維持し、既存の正式定義を参照する形へ変更。静的基盤と、元の失敗を含む限定9件が成功（`5165d861`、`tmp/quality/resumed-owner-r3509/release-coverage-width-test-canonical-pins-ga473anu/safe-summary.json`）。変更後の一括再実行は未実施。
 - 混在ウェイトのフォント監査で、対象IDを持つ矩形が実SVGに含まれる場合の拒否を確認した。実フォント由来・日本語ウェイトの対照を含む関連3テスト、静的基盤、ASTが成功。ソース前後一致（`0d400e62`、`tmp/quality/resumed-owner-r3509/release-coverage-weight-trace-target-ifeu54jz/verified-case-summary.json`）。正式カバレッジの更新は未計測。
 - Moon経由のprobe照合エラーを再調査。Justfileが `CARGO_BUILD_JOBS` を全レシピへ同じ `JOBS` からexportするため、キー生成行に個別指定がないこと自体は環境差の根拠にならない。元の失敗ログではroot開始前にPlantUMLをインストールしている。キー生成前のJARの有無は未取得で、原因の確定にはcold cacheでの再現が必要。
 - 最新の正式計測は `296f8613` の86,757/87,015行、99.703499%、未カバー258行（264行から6行減、4ファイルで改善、増加なし）。正式対象6,451テスト成功、別に15件skip。収集実0、前後ソース一致、集計不変。100%条件でpolicy実1。検証用SFNTパス、Arialの由来、実SVGの監査対象、断片整形で改善し、物理行一覧は126→121行（`tmp/quality/resumed-owner-r3509/root-coverage-after-real-font-fragments-nsl4wabo/{safe-summary,gap-summary,gap-delta,explicit-uncovered-line-list}.json`）。
