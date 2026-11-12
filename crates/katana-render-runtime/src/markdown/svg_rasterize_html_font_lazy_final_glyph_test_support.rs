@@ -47,6 +47,35 @@ fn glyph_audit_fixture_requires_a_font_family() {
 }
 
 #[test]
+fn glyph_audit_fixture_rejects_a_shape_in_place_of_text() -> Result<(), String> {
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="24"><rect id="audit-run" width="16" height="12"/></svg>"#;
+    let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    assert!(matches!(
+        tree.node_by_id("audit-run"),
+        Some(resvg::usvg::Node::Path(_))
+    ));
+    assert_eq!(
+        text_span(&tree).err().as_deref(),
+        Some("font audit fixture text is missing")
+    );
+    Ok(())
+}
+
+#[test]
+fn glyph_audit_root_lookup_rejects_missing_or_embedded_only_trees() {
+    for audit in [
+        serde_json::json!({}),
+        serde_json::json!({"finalGlyphTrees": [{"treePath": "root/image[0]"}]}),
+    ] {
+        assert_eq!(
+            root_tree(&audit).err().as_deref(),
+            Some("root glyph tree evidence is absent")
+        );
+    }
+}
+
+#[test]
 fn face_observation_reports_missing_glyph_size_for_another_real_face() -> Result<(), String> {
     let (mut database, first_face) = super::variations_tests::bundled_face()?;
     let second_face = *database
