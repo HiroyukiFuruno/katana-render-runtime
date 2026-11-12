@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 実フォントの `head` だけを持つ一時SFNTで、Skrifaがメタデータを読めてもSkiaがTypefaceを生成できない場合に、描画用フォントを利用可能として保持しないことを確認した。元の実フォントを復元すると新しいラスタライザーで再び読み込める。関連4件、静的基盤、ASTが成功（`1a024f06`、`tmp/quality/resumed-owner-r3509/release-coverage-readable-metadata-unusable-typeface-zkbgw6wl/safe-summary.json`）。正式カバレッジへの反映は未計測。
+- 実可変フォントで組み立てたSVGのフォントを `head` と `fvar` だけのSFNTへ差し替え、軸情報が読めても描画用のベースと可変インスタンスを保持しないことを確認した。関連6件、静的基盤、ASTが成功（`22a22fdf`、`tmp/quality/resumed-owner-r3509/release-coverage-variable-font-unusable-base-7yj5eqyl/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - OSの実パイプを使い、フォントテーブル読込がシーク不能エラーを保持して返すことを確認した。関連4件、静的基盤、ASTが成功し、ソース前後一致（`0c437f05`、`tmp/quality/resumed-owner-r3509/release-coverage-nonseekable-font-table-y2zh__tk/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - 最新の正式計測は `b8c2447c` の86,780/87,008行、99.737955%、未カバー228行（233行から5行減、増加ファイルなし）。フォント選択・試行終了3行、診断イベント欠落1行、文字幅計算中のフォント差し替え1行。実行対象6,475件がすべて成功、別に15件skip。収集と証跡認証、ソース前後一致は成功し、100%条件で不合格（`tmp/quality/resumed-owner-r3509/root-coverage-after-font-cache-failures-mmb5bu9s/{safe-summary,coverage-file-delta}.json`）。
 - 共有フォントの実バイトを最初に読む時点で一時フォントファイルを原子的に置換し、文字幅キャッシュが世代変更を検出して幅を返さず、次の呼び出しで計測と保存ができることを確認した。テスト用の共有バイト実装で置換時点を固定し、実際のファイル操作とシェーパーを使う。関連4件、静的基盤、ASTが成功、ソース前後一致（`53119afc`、`tmp/quality/resumed-owner-r3509/release-coverage-shared-font-replaced-during-shaping-wyadi0n_/safe-summary.json`）。
