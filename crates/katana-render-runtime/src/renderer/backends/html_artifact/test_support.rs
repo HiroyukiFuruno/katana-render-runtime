@@ -65,17 +65,44 @@ pub(super) fn provenance(
 pub(super) fn artifact() -> Result<HtmlFrameArtifact, Box<dyn std::error::Error>> {
     let source = source()?;
     let viewport = HtmlBrowserViewport::new(1, 1, 1.0)?;
+    artifact_with_pixels(provenance(&source, viewport)?, vec![0; 4])
+}
+
+fn artifact_with_pixels(
+    provenance: HtmlArtifactProvenance,
+    pixels: Vec<u8>,
+) -> Result<HtmlFrameArtifact, Box<dyn std::error::Error>> {
     let frame = HtmlBrowserFrame::new(
         1,
-        source.origin.clone(),
-        viewport,
+        provenance.origin.clone(),
+        provenance.viewport,
         HtmlBrowserPixelFormat::Rgba8,
-        vec![0; 4],
+        pixels,
     )?;
-    Ok(HtmlFrameArtifact::new(
-        provenance(&source, viewport)?,
-        frame,
-    )?)
+    HtmlFrameArtifact::new(provenance, frame).map_err(Into::into)
+}
+
+#[test]
+fn artifact_fixture_rejects_short_pixels_and_missing_font_fingerprint()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = source()?;
+    let viewport = HtmlBrowserViewport::new(1, 1, 1.0)?;
+    let mut provenance = provenance(&source, viewport)?;
+    let short = artifact_with_pixels(provenance.clone(), vec![0; 3]).err();
+    assert!(matches!(
+        short.as_deref().and_then(|error| error.downcast_ref()),
+        Some(HtmlBrowserError::InvalidFrameBufferSize {
+            actual_bytes: 3,
+            expected_bytes: 4,
+        })
+    ));
+    provenance.font_content_fingerprint.clear();
+    let invalid = artifact_with_pixels(provenance, vec![0; 4]).err();
+    assert!(matches!(
+        invalid.as_deref().and_then(|error| error.downcast_ref()),
+        Some(HtmlArtifactError::FingerprintMissing)
+    ));
+    Ok(())
 }
 pub(super) fn root(label: &str) -> io::Result<(tempfile::TempDir, PathBuf)> {
     let directory = tempfile::Builder::new()
