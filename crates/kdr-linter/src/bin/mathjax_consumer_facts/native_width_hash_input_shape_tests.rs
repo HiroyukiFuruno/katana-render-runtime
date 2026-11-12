@@ -23,6 +23,12 @@ pub(super) const INPUT_SHAPE_MUTATIONS: &[(usize, &str, &str, &str)] = &[
     (
         1,
         SVG_ID_FORMAT,
+        "String::from(\"fixed-svg-id\")",
+        "svg-id-hash-route:output",
+    ),
+    (
+        1,
+        SVG_ID_FORMAT,
         "stringify!(\"katana-mermaid-svg-{:016x}\", hasher.finish())",
         "svg-id-hash-route:output",
     ),
@@ -73,6 +79,12 @@ pub(super) const INPUT_SHAPE_MUTATIONS: &[(usize, &str, &str, &str)] = &[
         "mermaid_js.hash(&mut hasher);",
         "source.hash(&mut hasher);",
         "render-cache-hash-route:prefix:mermaid_js:method=hash,receiver=source,args=1",
+    ),
+    (
+        2,
+        "preset.dark_mode.hash(&mut hasher);",
+        "let _ = preset.dark_mode;",
+        "render-cache-hash-route:dark-mode",
     ),
     (
         2,
