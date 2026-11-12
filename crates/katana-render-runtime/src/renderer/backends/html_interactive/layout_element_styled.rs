@@ -157,21 +157,45 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn missing_and_hidden_elements_fail_bounds_lookup() -> Result<(), String> {
+        let html = "<main><div id=visible>shown</div><div id=hidden style='display:none'>hidden</div></main>";
+        let mut document = HtmlDocument::parse(html);
+        let visible = required_element_id(&mut document, "visible")?;
+        let hidden = required_element_id(&mut document, "hidden")?;
+        let layout = render_document(&document)?;
+        assert!(element_box(&layout, visible).is_ok());
+        assert_eq!(
+            required_element_id(&mut document, "missing")
+                .err()
+                .as_deref(),
+            Some("missing element missing")
+        );
+        assert_eq!(
+            element_box(&layout, hidden).err().as_deref(),
+            Some(format!("missing element box for node {hidden}").as_str())
+        );
+        Ok(())
+    }
+
     fn render_margin_fixture() -> Result<(LayoutResult, u64, u64, u64), String> {
         let html = "<style>html,body{margin:0}</style><main style='margin:0'><div id=positive style='margin-top:17px'>Positive</div><div id=negative style='margin-top:-7px'>Negative</div><div id=duplicate style='margin-top:11px;padding-top:1px'><div id=duplicate style='margin-top:13px'>Nested</div></div></main>";
         let mut document = HtmlDocument::parse(html);
         let positive_id = required_element_id(&mut document, "positive")?;
         let negative_id = required_element_id(&mut document, "negative")?;
         let duplicate_id = required_element_id(&mut document, "duplicate")?;
+        let layout = render_document(&document)?;
+        Ok((layout, positive_id, negative_id, duplicate_id))
+    }
+
+    fn render_document(document: &HtmlDocument) -> Result<LayoutResult, String> {
         let nodes = document.interactive_nodes_with_styles(&HashMap::new());
         let viewport = HtmlBrowserViewport {
             width: ANCHOR_VIEWPORT_WIDTH,
             height: ANCHOR_VIEWPORT_HEIGHT,
             device_scale_factor: ANCHOR_VIEWPORT_SCALE,
         };
-        let layout =
-            HtmlLayoutRenderer::render(&nodes, viewport, ANCHOR_SCROLL_Y, &HashMap::new(), None)?;
-        Ok((layout, positive_id, negative_id, duplicate_id))
+        HtmlLayoutRenderer::render(&nodes, viewport, ANCHOR_SCROLL_Y, &HashMap::new(), None)
     }
 
     fn required_element_id(document: &mut HtmlDocument, id: &str) -> Result<u64, String> {

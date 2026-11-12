@@ -155,13 +155,17 @@ mod tests {
     #[test]
     fn invalid_border_shorthands_preserve_existing_state() {
         let mut style = CssStyle::browser_default();
-        style.border_style = CssBorderStyle::Solid;
+        style.apply_border_style("solid dashed dotted none");
         style.border_width = 3.0;
 
-        style.apply_border_style("solid dashed dotted none extra");
-
-        assert_eq!(style.border_style, CssBorderStyle::Solid);
-        assert_eq!(style.border_width, 3.0);
+        for invalid in ["unsupported", "solid dashed dotted none hidden"] {
+            style.apply_border_style(invalid);
+            assert_eq!(style.border_style, CssBorderStyle::Solid);
+            assert_eq!(style.border_width, 3.0);
+            assert_eq!(style.border_right_style, Some(CssBorderStyle::Dashed));
+            assert_eq!(style.border_bottom_style, Some(CssBorderStyle::Dotted));
+            assert_eq!(style.border_left_style, Some(CssBorderStyle::None));
+        }
     }
 
     #[test]

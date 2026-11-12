@@ -324,6 +324,19 @@ mod tests {
     }
 
     #[test]
+    fn parsed_grid_measurement_rejects_missing_section_and_item() {
+        for (html, expected) in [
+            ("<main><p>item</p></main>", "parsed grid section missing"),
+            (
+                "<section style='display:grid'><div>item</div></section>",
+                "parsed grid item missing",
+            ),
+        ] {
+            assert_eq!(parsed_grid_width(html).err().as_deref(), Some(expected));
+        }
+    }
+
+    #[test]
     fn aligned_column_flex_items_fit_the_available_cross_axis() {
         let text = HtmlDocumentNode::Text("a long unbroken cross-axis item".to_string());
         let inherited = CssStyle::browser_default();
