@@ -32,6 +32,37 @@ fn component_transfer_discards_partial_layer_when_text_rendering_fails() -> Resu
     Ok(())
 }
 
+#[test]
+fn empty_component_transfer_layer_fails_before_rendering_children() -> Result<(), String> {
+    use crate::markdown::svg_rasterize::html_shadow::Crop;
+
+    let svg =
+        super::component_transfer_svg(super::LINEAR_FUNCTIONS, super::FILTER_REGION, "", "", "");
+    let tree = parse(&svg)?;
+    let group = filtered_group(&tree)?;
+    let rasterizer = FailingTextRasterizer::default();
+    for (right, bottom) in [(0, 1), (1, 0)] {
+        let result = transfer::render_source(
+            group,
+            Transform::identity(),
+            Crop {
+                left: 0,
+                top: 0,
+                right,
+                bottom,
+            },
+            &super::AuthoredClipInfo::default(),
+            &rasterizer,
+        );
+        assert_eq!(
+            result.err().as_deref(),
+            Some("component-transfer source allocation failed")
+        );
+    }
+    assert_eq!(rasterizer.calls(), 0);
+    Ok(())
+}
+
 fn identity_transfer_spec(group: &Group) -> Result<Option<transfer::TransferSpec>, String> {
     let identity = transfer::FilterTransform::new(Transform::identity())
         .ok_or("identity transform rejected")?;
@@ -47,6 +78,23 @@ fn component_transfer_rejects_nonfinite_linear_coefficients() {
         }
     }
     assert_eq!(transfer::linear(&TransferFunction::Identity), Ok(None));
+}
+
+#[test]
+fn svg_component_transfer_rejects_coefficients_outside_f32_range() -> Result<(), String> {
+    const ORIGINAL_COEFFICIENTS: &str = "slope=\"1.2\" intercept=\"0\"";
+    const ERROR: &str = "non-finite component-transfer function";
+    for attributes in [
+        r#"slope="1e39" intercept="0""#,
+        r#"slope="1.2" intercept="-1e39""#,
+    ] {
+        let functions = super::LINEAR_FUNCTIONS.replacen(ORIGINAL_COEFFICIENTS, attributes, 1);
+        let svg = super::component_transfer_svg(&functions, super::FILTER_REGION, "", "", "");
+        let tree = parse(&svg)?;
+        let group = filtered_group(&tree)?;
+        assert_eq!(identity_transfer_spec(group).err().as_deref(), Some(ERROR));
+    }
+    Ok(())
 }
 
 #[test]
