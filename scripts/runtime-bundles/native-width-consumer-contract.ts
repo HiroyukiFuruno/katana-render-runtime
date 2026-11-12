@@ -14,7 +14,7 @@ export const NATIVE_WIDTH_CONSUMER_PINS = {
   [`${directory}js_runtime_native_width_ishikawa_tests.rs`]:
     "8d818595edc6750bafbead131fef9beea1987a9995a0a2613cabf1b2de3d5a9f",
   [`${directory}js_runtime_native_width_oracle_boundary_tests.rs`]:
-    "f4375e4ca17e4d1931efbf21020b7b48bf06079ed9ae00de3ea160d31683731f",
+    "22f29e7f067f77e3c6e9d564a73a62be6daa0639105647fc2509526e84b8f565",
   [`${directory}js_runtime_native_width_trace.js`]:
     "80953163facdebd8d765bb26923f838873043eb673eacf40963c64c0233ffd0e",
   [`${directory}js_runtime_native_width_bbox_trace.js`]:

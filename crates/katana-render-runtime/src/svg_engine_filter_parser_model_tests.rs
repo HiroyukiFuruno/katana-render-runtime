@@ -57,6 +57,11 @@ fn missing_transfer_values_preserve_identity(
     let expected = render(&reference)?;
     assert!(expected.data().iter().any(|channel| *channel != 0));
     assert_eq!(actual.data(), expected.data());
+    let serialized = candidate.to_string(&usvg::WriteOptions::default());
+    let reparsed = usvg::Tree::from_str(&serialized, &usvg::Options::default())
+        .map_err(|error| error.to_string())?;
+    assert_empty_transfer(&reparsed, channel, kind)?;
+    assert_eq!(render(&reparsed)?.data(), expected.data());
     Ok(())
 }
 

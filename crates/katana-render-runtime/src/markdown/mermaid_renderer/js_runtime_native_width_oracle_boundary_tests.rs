@@ -96,6 +96,24 @@ fn raw_v8_svg_call_rejects_kind_arguments_width_and_metric_corruption() -> Resul
         .position(|call| call["kind"] == "svg")
         .ok_or("raw V8 SVG call missing")?;
     assert_svg_corruptions_rejected(&calls, svg_index);
+    let mut no_metrics = calls.clone();
+    no_metrics[svg_index]
+        .as_object_mut()
+        .ok_or("raw V8 SVG call is not an object")?
+        .remove("metrics")
+        .ok_or("raw V8 SVG metrics missing before mutation")?;
+    assert_eq!(
+        assert_bridge_widths_match_rust(&no_metrics)
+            .err()
+            .as_deref(),
+        Some("SVG metrics missing")
+    );
+    let mut overflow = calls;
+    overflow[svg_index]["width"] = json!(f64::MAX);
+    assert_eq!(
+        assert_bridge_widths_match_rust(&overflow).err().as_deref(),
+        Some("SVG number exceeds f32 range")
+    );
     Ok(())
 }
 
