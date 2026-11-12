@@ -43,17 +43,21 @@ fn filter_children_skip_comments_and_non_primitive_elements() -> Result<(), Stri
 }
 
 #[test]
-fn invalid_base64_image_keeps_unfiltered_content_visible() -> Result<(), String> {
-    const HREF: &str = "data:image/png;base64,A";
-    let url = data_url::DataUrl::process(HREF).map_err(|error| format!("{error:?}"))?;
-    assert!(url.decode_to_vec().is_err());
-    let source = format!(
-        "<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'><defs><filter id='f' {FILTER_REGION}><feImage href='{HREF}'/></filter></defs><image id='bad' width='1' height='1' href='{HREF}'/><rect width='8' height='8' filter='url(#f)'/><rect id='control' x='8' width='8' height='8'/></svg>"
-    );
-    let tree = parse_svg(&source)?;
-    assert!(tree.node_by_id("bad").is_none());
-    assert!(tree.node_by_id("control").is_some());
-    assert_transparent_flood(first_filter_kind(&tree)?);
+fn invalid_embedded_image_keeps_unfiltered_content_visible() -> Result<(), String> {
+    for (href, valid_base64) in [
+        ("data:image/png;base64,A", false),
+        ("data:image/png;base64,iVBORw0KGgo=", true),
+    ] {
+        let url = data_url::DataUrl::process(href).map_err(|error| format!("{error:?}"))?;
+        assert_eq!(url.decode_to_vec().is_ok(), valid_base64);
+        let source = format!(
+            "<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'><defs><filter id='f' {FILTER_REGION}><feImage href='{href}'/></filter></defs><image id='bad' width='1' height='1' href='{href}'/><rect width='8' height='8' filter='url(#f)'/><rect id='control' x='8' width='8' height='8'/></svg>"
+        );
+        let tree = parse_svg(&source)?;
+        assert!(tree.node_by_id("bad").is_none());
+        assert!(tree.node_by_id("control").is_some());
+        assert_transparent_flood(first_filter_kind(&tree)?);
+    }
     Ok(())
 }
 
