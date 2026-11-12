@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定4条件中4条件完了。`display:none` の表セル・見出しセル・行・行グループが列幅計算・描画・境界記録へ渡っていたため、CSSの表示値の解釈を共有し、表要素の収集時に除外した。修正前は4条件すべてで描画SVGが、要素を取り除いた対照と不一致（同時に別ファイルの変更も検知したため全体証跡には不採用）。修正後は4条件すべてで対照とSVGが一致し、非表示要素の境界も欠落することを確認。関連12テスト、整形・重複・ASTが成功（`tmp/quality/resumed-owner-r3509/release-hidden-table-q661om2h/safe-summary.json`、`24706606`）。全体の静的検査は別途変更中のHTML性能スクリプトの固定ハッシュ不一致で停止した。最終Chrome比較・性能・正式カバレッジは未確認。
 - 対応予定11条件中11条件完了。終了済みHTMLセッションの操作5条件、HTML表の要素・境界欠落4条件、実描画gitGraphの矢印パス異常2条件を検証した。正式計測 `76470bbe` の未カバー191ファイル中177ファイルはこの対応着手時点でソースが同一。保存済みJSONの関数領域と現行ソースで候補を照合した。初回の表テストは `display:none` セルにも内部の境界が存在し失敗したため、境界欠落を検証する入力に描画対象外のtemplateを使った。`display:none` の実画素は未検証。別のHTML描画検証の排他解放後、最終差分の関連6テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-coverage-session-table-git-zxhbxklz/safe-summary.json`、`a7c18d70`・`c4441dec`・`fa680ccd`）。正式カバレッジは最終フェーズで計測する。
 - 対応予定8件中8件完了。SVGの矩形座標・寸法、ラベルとパスの欠落5条件、実HTMLセッションからのフレーム保存拒否2条件、Mermaidハッシュ検査の引数件数の二重判定1件を確認した。初回はASTの関数長と数値リテラル、次回はSVG文字列の借用寿命で停止し、修正後に関連8テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-coverage-geometry-artifact-hash-j7ka0dq5/safe-summary.json`、`2561f22e`・`c4241e46`・`6a83235f`）。正式カバレッジは最終フェーズで計測する。
 - 対応予定10件中10件完了。フォントCLIの不正JSON3条件、Mermaid Architectureの不正な接続口・接続先3条件、診断出力のシンボリックリンク2条件、ASCIIのフォント名変換と容量制限付きHTML書き込みの到達不能分岐の整理2件を確認した。診断出力の外側は独立した一時ディレクトリを使い、拒否時にファイルが作成されないことも確認した。macOSの関連11テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-coverage-font-architecture-encoding-kgdzr1tn/safe-summary.json`、`14509b2b`・`8a815b85`・`da2e4e3d`・`e97fa77e`）。正式カバレッジは最終フェーズで計測する。
