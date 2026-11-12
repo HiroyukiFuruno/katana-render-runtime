@@ -78,6 +78,7 @@ fn assert_select_values(state: &HtmlDomBridgeState) -> Result<(), String> {
 
 fn assert_hidden_values(state: &HtmlDomBridgeState) -> Result<(), String> {
     assert_lookup_string(state, "hidden", &element_id(state, "concealed")?, "1");
+    assert_lookup_string(state, "hidden", &element_id(state, "plain")?, "0");
     assert!(matches!(
         state.lookup("hidden", &[element_id(state, "gradient")?]),
         Ok(DomValue::Undefined)
