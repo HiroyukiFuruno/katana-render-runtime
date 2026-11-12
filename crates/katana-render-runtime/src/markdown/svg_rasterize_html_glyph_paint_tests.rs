@@ -237,6 +237,22 @@ fn run_origin_snap_leaves_invalid_device_scales_unchanged() {
     }
 }
 
+#[test]
+fn run_origin_snap_handles_empty_and_nonfinite_positions() {
+    let span = origin_snap_span(1.0);
+    apply_run_origin_snap(&span, &mut [], 1.0);
+    for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        let mut x_invalid = [SkiaPoint::new(value, RUN_ORIGIN_INPUT_X)];
+        let mut y_invalid = [SkiaPoint::new(RUN_ORIGIN_INPUT_X, value)];
+        apply_run_origin_snap(&span, &mut x_invalid, 1.0);
+        apply_run_origin_snap(&span, &mut y_invalid, 1.0);
+        assert_eq!(x_invalid[0].x.to_bits(), value.to_bits());
+        assert_eq!(y_invalid[0].y.to_bits(), value.to_bits());
+        assert_eq!(x_invalid[0].y, RUN_ORIGIN_SNAPPED_X);
+        assert_eq!(y_invalid[0].x, RUN_ORIGIN_SNAPPED_X);
+    }
+}
+
 fn origin_snap_span(css_scale: f32) -> PreparedSpan {
     trial_span(Some(XAlignment {
         anchor_x: 0.0,
