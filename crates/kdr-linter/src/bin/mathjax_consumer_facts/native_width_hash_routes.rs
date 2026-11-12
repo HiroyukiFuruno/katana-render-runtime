@@ -6,7 +6,6 @@ use super::ast::{
 use super::source::{self, Source};
 use syn::{Expr, Stmt};
 
-const HASH_FIELD_PARAMETER_COUNT: usize = 3;
 const SVG_ID_STATEMENT_COUNT: usize = 4;
 const SVG_DOMAIN_STATEMENT: usize = 1;
 const SVG_SHARED_FIELDS_STATEMENT: usize = 2;
@@ -21,9 +20,7 @@ const RENDER_CACHE_PATH_STATEMENT: usize = 8;
 pub(super) fn validate_hash_fields(source: &Source) -> Result<(), String> {
     let function = source::free_function(&source.ast, "hash_mermaid_source_and_preset")?;
     super::require_hash_signature(function)?;
-    if function.sig.inputs.len() != HASH_FIELD_PARAMETER_COUNT
-        || function.block.stmts.len() != HASH_FIELDS.len()
-    {
+    if function.block.stmts.len() != HASH_FIELDS.len() {
         return Err("hash-fields:signature-or-count".into());
     }
     for (statement, field) in function.block.stmts.iter().zip(HASH_FIELDS) {
