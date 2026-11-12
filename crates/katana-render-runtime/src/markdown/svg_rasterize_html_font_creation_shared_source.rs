@@ -79,3 +79,25 @@ fn new_source(
         newly_mapped: true,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{SharedSources, new_source, shared_source, stamp_path_uncached};
+    use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
+
+    #[test]
+    fn removed_font_fails_both_shared_metadata_and_mapping() -> Result<(), String> {
+        let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+        let path = directory.path().join("font.ttf");
+        std::fs::write(&path, FONT_BYTES).map_err(|error| error.to_string())?;
+        let stamp = stamp_path_uncached(&path).map_err(|_| "font stamp failed")?;
+        assert!(stamp.durable_reusable());
+        std::fs::remove_file(&path).map_err(|error| error.to_string())?;
+
+        let mut sources = SharedSources::default();
+        let length = FONT_BYTES.len();
+        assert!(shared_source(&path, Some(&stamp), &mut sources, length).is_err());
+        assert!(new_source(&path, &stamp, &mut sources, length, length).is_err());
+        Ok(())
+    }
+}
