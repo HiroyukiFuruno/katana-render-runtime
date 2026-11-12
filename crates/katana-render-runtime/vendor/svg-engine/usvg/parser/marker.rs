@@ -107,9 +107,15 @@ fn resolve(
     let clip_path = marker_clip(marker_node, rect, view_box_ts, cache)?;
     let segments = marker_segments(path);
     let placement = MarkerPlacement { rect, view_box_ts, stroke_scale, clip_path };
-    draw_markers(&segments, marker_kind, |p, idx| {
+    let mut draw_marker = |p, idx| {
         draw_one_marker(marker_node, state, cache, parent, &placement, &segments, (p, idx));
-    });
+    };
+    match marker_kind {
+        // Path は先頭に MoveTo を持つため、最初の点をそのまま使える。
+        MarkerKind::Start => draw_marker(path.points()[0], 0),
+        MarkerKind::Middle => draw_middle_markers(&segments, &mut draw_marker),
+        MarkerKind::End => draw_end_marker(&segments, &mut draw_marker),
+    }
     Some(())
 }
 
@@ -244,21 +250,6 @@ fn stroke_scale(
     match marker_node.attribute(AId::MarkerUnits) {
         Some("userSpaceOnUse") => NonZeroPositiveF32::new(1.0),
         _ => path_node.resolve_valid_length(AId::StrokeWidth, state, 1.0),
-    }
-}
-
-fn draw_markers<P>(path: &[Segment], kind: MarkerKind, mut draw_marker: P)
-where
-    P: FnMut(tiny_skia_path::Point, usize),
-{
-    match kind {
-        MarkerKind::Start => {
-            if let Some(Segment::MoveTo(p)) = path.first().cloned() {
-                draw_marker(p, 0);
-            }
-        }
-        MarkerKind::Middle => draw_middle_markers(path, &mut draw_marker),
-        MarkerKind::End => draw_end_marker(path, &mut draw_marker),
     }
 }
 
