@@ -34,7 +34,19 @@ fn rendered_block_rejects_invalid_geometry_and_xml() -> Result<(), String> {
     let changed = svg.replacen("</svg>", "</sv", 1);
     assert_ne!(changed, svg);
     assert!(assert_block_nbsp_arrow_svg(&changed).is_err());
+    assert_missing_view_box(&svg)?;
     Ok(())
+}
+
+fn assert_missing_view_box(svg: &str) -> Result<(), String> {
+    let document = Document::parse(svg).map_err(|error| error.to_string())?;
+    let attribute = document
+        .root_element()
+        .attribute_node("viewBox")
+        .ok_or("rendered Block viewBox missing")?;
+    let mut changed = svg.to_owned();
+    changed.replace_range(attribute.range(), "");
+    assert_bounds_error(&changed, "missing SVG viewBox")
 }
 
 fn assert_bounds_error(svg: &str, expected: &str) -> Result<(), String> {
