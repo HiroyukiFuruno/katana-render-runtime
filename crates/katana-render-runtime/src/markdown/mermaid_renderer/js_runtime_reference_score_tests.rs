@@ -2,7 +2,7 @@ use super::{MermaidJsRuntimeOps, geometry_contract};
 use crate::markdown::color_preset::DiagramColorPreset;
 use crate::markdown::runtime_assets::RuntimeAsset;
 
-const GIT_GRAPH_SOURCE: &str = "gitGraph
+pub(super) const GIT_GRAPH_SOURCE: &str = "gitGraph
     commit id: \"base\"
     branch feature
     checkout feature

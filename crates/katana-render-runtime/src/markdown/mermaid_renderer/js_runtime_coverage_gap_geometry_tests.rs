@@ -4,3 +4,5 @@ mod architecture;
 mod boundary;
 #[path = "js_runtime_coverage_gap_c4_tests.rs"]
 mod c4;
+#[path = "js_runtime_coverage_gap_git_tests.rs"]
+mod git;
