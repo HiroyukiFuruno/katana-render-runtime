@@ -193,11 +193,10 @@ fn write_filter_images(
 ) {
     for fe in &filter.primitives {
         if let filter::Kind::Image(ref img) = fe.kind {
-            if let Some(child) = img.root().children.first() {
-                if !written.iter().any(|id| id == child.id()) {
-                    write_element(child, false, opt, xml);
-                    written.push(child.id().to_string());
-                }
+            let child = img.first_child();
+            if !written.iter().any(|id| id == child.id()) {
+                write_element(child, false, opt, xml);
+                written.push(child.id().to_string());
             }
         }
     }
@@ -450,10 +449,9 @@ fn write_filter_image(
 ) {
     xml.start_svg_element(EId::FeImage);
     xml.write_filter_primitive_attrs(filter.rect(), fe);
-    if let Some(child) = img.root.children.first() {
-        let prefix = opt.id_prefix.as_deref().unwrap_or_default();
-        xml.write_attribute_fmt("xlink:href", format_args!("#{}{}", prefix, child.id()));
-    }
+    let child = img.first_child();
+    let prefix = opt.id_prefix.as_deref().unwrap_or_default();
+    xml.write_attribute_fmt("xlink:href", format_args!("#{}{}", prefix, child.id()));
 
     xml.write_svg_attribute(AId::Result, &fe.result);
     xml.end_element();

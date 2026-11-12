@@ -935,7 +935,7 @@ fn convert_external_image(
         filter_subregion.translate_to(0.0, 0.0)?,
         cache,
         &mut root,
-    );
+    )?;
     root.calculate_bounding_boxes();
 
     Some(Kind::Image(Image { root }))
