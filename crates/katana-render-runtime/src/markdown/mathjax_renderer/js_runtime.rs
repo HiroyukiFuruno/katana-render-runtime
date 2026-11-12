@@ -2,12 +2,10 @@ use super::js_runtime_scripts::MathJaxRuntimeScripts;
 use crate::markdown::color_preset::DiagramColorPreset;
 use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
 #[cfg(test)]
-use crate::markdown::runtime_resource_loader::{
-    BundledResource, RuntimeResourceLoader as runtime_resource_loader,
-};
+use crate::markdown::runtime_resource_loader::RuntimeResourceLoader as runtime_resource_loader;
 use serde::Deserialize;
 #[cfg(test)]
-use std::path::Path;
+use std::{borrow::Cow, path::Path};
 
 pub(super) struct MathJaxJsRuntimeOps;
 
@@ -38,10 +36,9 @@ impl MathJaxJsRuntimeOps {
         bundled: bool,
     ) -> Result<String, String> {
         let mathjax_source = if bundled {
-            runtime_resource_loader::read(mathjax_js, Some(BundledResource::MathJax))
-                .map_err(|error| error.to_string())?
+            Cow::Borrowed(MathJaxRuntimeScripts::runtime_source())
         } else {
-            runtime_source_from(mathjax_js)?.into()
+            Cow::Owned(runtime_source_from(mathjax_js)?)
         };
         Self::render_bundle(source, &mathjax_source, preset, display)
     }
@@ -114,33 +111,23 @@ mod tests {
     use super::MathJaxJsRuntimeOps;
     use super::{MathJaxRuntimeResponse, parse_response, runtime_source_from};
     use crate::markdown::color_preset::DiagramColorPreset;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    static TEMP_ID: AtomicUsize = AtomicUsize::new(0);
 
     #[test]
-    fn runtime_source_reports_non_file_read_errors() {
-        let path = std::env::temp_dir().join(format!(
-            "krr-mathjax-runtime-directory-{}",
-            std::process::id()
-        ));
-        assert!(std::fs::create_dir_all(&path).is_ok());
-
-        let result = runtime_source_from(&path);
+    fn runtime_source_reports_non_file_read_errors() -> std::io::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let result = runtime_source_from(directory.path());
 
         assert!(matches!(result, Err(error) if error.contains("could not be read")));
+        Ok(())
     }
 
     #[test]
-    fn runtime_source_reports_missing_assets() {
-        let path = std::env::temp_dir().join(format!(
-            "krr-mathjax-runtime-missing-{}",
-            std::process::id()
-        ));
-
-        let result = runtime_source_from(&path);
+    fn runtime_source_reports_missing_assets() -> std::io::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let result = runtime_source_from(&directory.path().join("missing.js"));
 
         assert!(matches!(result, Err(error) if error.contains("not installed")));
+        Ok(())
     }
 
     #[test]
@@ -159,8 +146,9 @@ mod tests {
     }
 
     #[test]
-    fn render_propagates_runtime_and_response_contract_errors() {
-        let path = runtime_path("contract-errors.js");
+    fn render_propagates_runtime_and_response_contract_errors() -> std::io::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("contract-errors.js");
         let preset = DiagramColorPreset::current();
 
         assert!(
@@ -185,11 +173,13 @@ mod tests {
             matches!(invalid_response, Err(message) if message.contains("Invalid MathJax runtime response"))
         );
         assert!(matches!(runtime_failure, Err(message) if message.contains("runtime failure")));
+        Ok(())
     }
 
     #[test]
-    fn render_returns_svg_and_runtime_reported_errors() {
-        let path = runtime_path("runtime-responses.js");
+    fn render_returns_svg_and_runtime_reported_errors() -> std::io::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("runtime-responses.js");
         let preset = DiagramColorPreset::current();
 
         assert!(
@@ -210,13 +200,6 @@ mod tests {
 
         assert!(matches!(svg, Ok(value) if value == "<svg/>"));
         assert!(matches!(error, Err(message) if message == "bad math"));
-    }
-
-    fn runtime_path(name: &str) -> std::path::PathBuf {
-        let id = TEMP_ID.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!(
-            "krr-mathjax-runtime-{name}-{}-{id}",
-            std::process::id()
-        ))
+        Ok(())
     }
 }
