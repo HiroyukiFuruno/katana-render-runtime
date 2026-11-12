@@ -93,3 +93,23 @@ fn include_span(range: Option<Span>, span: Span) -> Result<Span, String> {
             .ok_or_else(|| "mermaid-scripts:include-span".into()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Spanned, include_span};
+
+    #[test]
+    fn include_span_rejects_constants_from_different_sources() -> Result<(), syn::Error> {
+        let runtime: syn::ItemConst =
+            syn::parse_str(r#"const MERMAID_RUNTIME: &str = include_str!("mermaid.js");"#)?;
+        let plugin: syn::ItemConst =
+            syn::parse_str(r#"const MERMAID_ZENUML_RUNTIME: &str = include_str!("zenuml.js");"#)?;
+        assert_eq!(
+            include_span(Some(runtime.span()), plugin.span())
+                .err()
+                .as_deref(),
+            Some("mermaid-scripts:include-span")
+        );
+        Ok(())
+    }
+}
