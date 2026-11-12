@@ -40,6 +40,28 @@ fn recursive_observer_uses_checked_in_font_in_isolated_database() -> ProbeResult
     Ok(())
 }
 
+#[test]
+fn recursive_observer_rejects_missing_and_non_text_svg_nodes() -> ProbeResult<()> {
+    for (svg, expected) in [
+        (
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect id="other" width="20" height="20"/></svg>"#,
+            "text node missing",
+        ),
+        (
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect id="krr-text-measure" width="20" height="20"/></svg>"#,
+            "expected text node",
+        ),
+    ] {
+        let (options, face) = noto_options(svg)?;
+        let tree = usvg::Tree::from_str(svg, &options)?;
+        let error = super::observe_tree(&tree, "Noto", NORMAL_FONT_WEIGHT, face)
+            .err()
+            .ok_or("invalid probe node was accepted")?;
+        assert_eq!(error.to_string(), expected);
+    }
+    Ok(())
+}
+
 const NON_ALIAS_NOTO_FAMILY: &str = "Noto Sans";
 const NON_ALIAS_NOTO_TEXT: &str = "Noto";
 

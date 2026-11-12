@@ -244,6 +244,28 @@ fn fallback_selection_rejects_a_base_face_missing_from_the_database() {
 }
 
 #[test]
+fn fallback_probe_rejects_an_excluded_real_font_face() -> Result<(), String> {
+    let mut database = Database::new();
+    database.load_font_data(FONT_BYTES.to_vec());
+    let face = database
+        .faces()
+        .next()
+        .cloned()
+        .ok_or("font face missing")?;
+    let id = face.id;
+    let database = std::sync::Arc::new(database);
+    assert_eq!(
+        super::fallback_probe(&database, &face, &[], id, 'A'),
+        Some(true)
+    );
+    assert_eq!(
+        super::fallback_probe(&database, &face, &[id], id, 'A'),
+        Some(false)
+    );
+    Ok(())
+}
+
+#[test]
 fn fallback_attribute_comparison_preserves_usvg_conjunction_semantics() -> Result<(), String> {
     let base = bundled_face()?;
 
