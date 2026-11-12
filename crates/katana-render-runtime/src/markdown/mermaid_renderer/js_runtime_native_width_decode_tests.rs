@@ -40,6 +40,16 @@ fn native_width_targets_preserve_escaped_strings_and_order() -> Result<(), Strin
     Ok(())
 }
 
+#[test]
+fn native_width_trace_rejects_missing_render_entrypoint() {
+    let mut scripts = vec![DiagramRuntimeScript::borrowed("other.js", "render();")];
+    assert_eq!(
+        install_trace(&mut scripts, &[]).err().as_deref(),
+        Some("Mermaid render entrypoint missing")
+    );
+    assert_eq!(scripts.len(), 1);
+}
+
 fn recorded_fixture() -> Value {
     json!({
         "calls": [{"text": "A", "width": OBSERVED_WIDTH}],
