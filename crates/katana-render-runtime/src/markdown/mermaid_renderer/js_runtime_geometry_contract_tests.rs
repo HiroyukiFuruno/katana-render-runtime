@@ -134,7 +134,7 @@ fn geometry_contract_accepts_c4_vertical_edges_and_rejects_interior_endpoint() -
     Ok(())
 }
 
-fn treemap_control() -> String {
+pub(super) fn treemap_control() -> String {
     let mut svg = r#"<svg viewBox="0 0 220 100"><text>Runtime cost</text>"#.to_owned();
     for (index, (label, value)) in TREEMAP_SOURCE_VALUES.iter().enumerate() {
         svg.push_str(&format!(r#"<g class="treemapLeafGroup" transform="translate({},0)"><rect class="treemapLeaf" width="50" height="80"/><text class="treemapLabel" x="25" y="20">{label}</text><text class="treemapValue" x="25" y="35" style="font-size: 23px; fill: lightgrey">{value}</text></g>"#,index*55));

@@ -21,6 +21,17 @@ fn architecture_validator_reports_collapsed_real_source_edge() -> Result<(), Str
 }
 
 #[test]
+fn architecture_validator_rejects_missing_service_identity() -> Result<(), String> {
+    tests::architecture_pair(tests::ARCH)?;
+    let svg = tests::ARCH.replace("id-service-b", "id-service-unknown");
+    assert_eq!(
+        tests::architecture_pair(&svg).err().as_deref(),
+        Some("semantic element must be unique")
+    );
+    Ok(())
+}
+
+#[test]
 fn architecture_validator_rejects_unknown_ports_and_edge_endpoints() -> Result<(), String> {
     tests::architecture_pair(tests::ARCH)?;
     for sides in [('X', 'L'), ('R', 'X')] {
