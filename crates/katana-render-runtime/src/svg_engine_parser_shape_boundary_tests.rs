@@ -91,13 +91,16 @@ fn polyline_and_polygon_without_points_are_skipped() -> Result<(), String> {
     Ok(())
 }
 
-#[test]
-fn move_only_path_does_not_affect_a_visible_sibling() -> Result<(), String> {
+#[rstest]
+#[case::move_only("<path id='ignored' d='M1 1' stroke='red'/>")]
+#[case::missing_data("<path id='ignored' stroke='red'/>")]
+fn incomplete_path_does_not_affect_a_visible_sibling(#[case] path: &str) -> Result<(), String> {
     let control = "<rect id='sample' width='4' height='4' fill='blue'/>";
-    let source = format!("<path id='move' d='M1 1' stroke='red'/>{control}");
+    let source = format!("{path}{control}");
     let actual = parse_shape(&source)?;
     let expected = parse_shape(control)?;
-    assert!(actual.node_by_id("move").is_none());
+    assert!(actual.node_by_id("ignored").is_none());
+    assert!(actual.node_by_id("sample").is_some());
     assert_same_visible_shape_render(&actual, &expected)
 }
 
