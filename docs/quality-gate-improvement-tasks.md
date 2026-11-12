@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 最新の正式計測は `296f8613` の86,757/87,015行、99.703499%、未カバー258行（264行から6行減、4ファイルで改善、増加なし）。正式対象6,451テスト成功、別に15件skip。収集実0、前後ソース一致、集計不変。100%条件でpolicy実1。検証用SFNTパス、Arialの由来、実SVGの監査対象、断片整形で改善し、物理行一覧は126→121行（`tmp/quality/resumed-owner-r3509/root-coverage-after-real-font-fragments-nsl4wabo/{safe-summary,gap-summary,gap-delta,explicit-uncovered-line-list}.json`）。
+- 実フォントを使い、全文と断片の選択フェイス不一致1条件、断片の文字数過不足2条件を内部の整形境界で検証した。正常入力も同じ実フォントで確認。関連4テスト、静的基盤、AST成功、ソース前後一致（`296f8613`、`tmp/quality/resumed-owner-r3509/release-coverage-real-font-fragments-hdh4e0c1/safe-summary.json`）。
 - 実Arialのメモリ登録の拒否と実ファイル登録の受理、実SVGのフォント監査で対象IDが欠落・非テキストとなる場合の拒否を、予定4条件中4条件で確認した。関連4テスト・静的基盤・AST成功、ソース前後一致（`18bee6ec`、`34288d79`、`tmp/quality/resumed-owner-r3509/release-coverage-font-fixture-input-o9rj74ai/safe-summary.json`）。この追加分の正式カバレッジは未計測。
 - 検証用SFNTの実ファイル絶対パス受理・相対指定拒否の予定2条件を確認。既存の環境変数入口から値を渡す形にし、テストはグローバル環境を変更しない。関連4テスト・静的基盤・AST成功、ソース前後一致（`9a5e865f`、`tmp/quality/resumed-owner-r3509/release-coverage-recursive-font-path-1v3limbh/safe-summary.json`）。正式カバレッジは未再計測。
 - Moon 2.6.5の隔離フィクスチャで、fingerprintとtask本体の環境を変数名で照合。自動と強制色の2条件で、実行側に追加された変数は既存の揮発扱い12名のみ。共通変数の値の差は検出しなかった。実値・probe原本の表示や更新を行わず、実KRRで発生した照合エラーの原因は未確定（`tmp/quality/resumed-owner-r3509/moon-native-fingerprint-context-qw8xulf2/environment-key-comparison.json`）。
