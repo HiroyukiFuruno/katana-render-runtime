@@ -57,8 +57,12 @@ fn c4_legacy_platform_face_adds_layout_ascent_without_changing_natural_metrics()
 #[test]
 fn mixed_svg_faces_keep_the_largest_layout_ascent() {
     let mut ascent = None;
+    include_layout_ascent(&mut ascent, None);
+    assert_eq!(ascent, None);
     include_layout_ascent(&mut ascent, Some(13.0));
     include_layout_ascent(&mut ascent, Some(30.0));
+    include_layout_ascent(&mut ascent, None);
+    assert_eq!(ascent, Some(30.0));
     include_layout_ascent(&mut ascent, Some(10.0));
     assert_eq!(ascent, Some(30.0));
 }
