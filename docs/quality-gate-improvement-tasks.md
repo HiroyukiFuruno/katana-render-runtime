@@ -2,7 +2,8 @@
 
 ## 現在の実行地点（2026-11-13、以下の過去結果と区別する）
 
-- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み61件、一部対応27件、未対応37件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0033.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み61件、一部対応29件、未対応35件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0034.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- COLRの必須描画要素、未知の書体名、共有フォント再構築時の実ファイル消失を拒否することを確認した。実フォントの正常対照を含む関連9件、AST、ソースと実行ファイルの前後一致が成功（`d18234b4`、`c9b9e366`、`4d63584f`、`tmp/quality/resumed-owner-r3509/release-coverage-colr-and-font-failure-boundaries-csql37kn/safe-summary.json`）。3ファイルは一部対応。
 - 実フォントを一時領域で削除し、共有ソースのメタデータ取得とマッピングが拒否されることを確認した。Skiaの書体インデックスの重複した範囲検査を除き、実可変書体の生成・軸読戻し・描画を確認した。関連7件、AST、ソースと実行ファイルの前後一致が成功（`9aeb5324`、`fe8e6ab9`、`tmp/quality/resumed-owner-r3509/release-coverage-font-mapping-and-collection-index-fypmvt7f/safe-summary.json`）。2ファイルは一部対応。
 - 照合済みの書体情報を共有フォント取得で使い、同じ情報の再取得を除いた。MathJax CLIはコンパクトなJSONを直接出力する。実CLIの成功・拒否と、書体の属性・データの同一性を含む関連9件、AST、ソースと3実行ファイルの前後一致を確認した（`7624bfb4`、`70356f4c`、`tmp/quality/resumed-owner-r3509/release-coverage-selected-font-and-cli-report-4_0vvnk1/safe-summary.json`）。MathJax CLIのファイルは対応済み、共有フォント取得は一部対応。
 - データベースから除いた実フォールバック書体を再利用候補から外し、MathJaxのハッシュ対象が欠落すると検証に失敗して復元後に回復することを確認した。2実行ファイルを同じビルドで一覧化し、新規2件を含む関連6件、AST、ソースと実行ファイルの前後一致を確認（`df5475d0`、`ce79bf25`、`tmp/quality/resumed-owner-r3509/release-coverage-font-seed-and-opaque-input-c71thnlb/safe-summary.json`）。2ファイルは一部対応。
