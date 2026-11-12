@@ -110,6 +110,27 @@ fn cropped_group_without_a_clip_leaves_the_target_unchanged() -> Result<(), Stri
 }
 
 #[test]
+fn crop_pixmap_preserves_svg_pixels_at_the_crop_origin() -> Result<(), String> {
+    let tree = parse(PLAIN_GROUP)?;
+    let group = layer(&tree)?;
+    let mut pixmap = canvas()?;
+    let transform = Transform::from_translate(8.0, 9.0);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    let crop = super::clipped_group_rect(group, transform, &pixmap.as_mut())?
+        .ok_or("SVG fixture should intersect the canvas")?;
+
+    let cropped = super::crop_pixmap(&pixmap.as_mut(), crop)?;
+    assert!(crop.x() > 0 && crop.y() > 0);
+    let source_pixel = pixmap.pixel(8, 9);
+    assert!(source_pixel.is_some_and(|pixel| pixel.alpha() > 0));
+    assert_eq!(
+        cropped.pixel(8 - crop.x() as u32, 9 - crop.y() as u32),
+        source_pixel
+    );
+    Ok(())
+}
+
+#[test]
 fn clip_mask_rejects_zero_dimensions() -> Result<(), String> {
     let tree = parse(NESTED_CLIP)?;
     let clip = layer(&tree)?
