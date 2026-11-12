@@ -159,8 +159,7 @@ fn c4_validator_rejects_relation_without_target_coordinate() -> Result<(), Strin
 
 #[test]
 fn c4_deployment_rejects_a_real_label_displaced_from_its_parent() -> Result<(), String> {
-    let svg = render_mermaid_svg(C4_DEPLOYMENT_SOURCE)?;
-    GeometryContract::deployment(&svg)?;
+    let svg = validated_deployment_svg()?;
     let document = Document::parse(&svg).map_err(|error| error.to_string())?;
     let label = document
         .descendants()
@@ -177,4 +176,29 @@ fn c4_deployment_rejects_a_real_label_displaced_from_its_parent() -> Result<(), 
         Some("deployment labels detached from parent")
     );
     Ok(())
+}
+
+#[test]
+fn c4_deployment_rejects_missing_parent_labels() -> Result<(), String> {
+    let svg = validated_deployment_svg()?;
+    let document = Document::parse(&svg).map_err(|error| error.to_string())?;
+    for expected in ["Customer's mobile device", "[Apple iOS or Android]"] {
+        let label = document
+            .descendants()
+            .find(|node| node.has_tag_name("text") && text(*node) == expected)
+            .ok_or("deployment label missing from original")?;
+        let mut changed = svg.clone();
+        changed.replace_range(label.range(), "");
+        assert_eq!(
+            GeometryContract::deployment(&changed).err().as_deref(),
+            Some("semantic element must be unique")
+        );
+    }
+    Ok(())
+}
+
+fn validated_deployment_svg() -> Result<String, String> {
+    let svg = render_mermaid_svg(C4_DEPLOYMENT_SOURCE)?;
+    GeometryContract::deployment(&svg)?;
+    Ok(svg)
 }

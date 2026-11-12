@@ -160,3 +160,36 @@ pub(super) fn call_weight(call: &Value) -> Option<u64> {
 pub(super) fn rounded_width(width: f32) -> f64 {
     (f64::from(width) * WIDTH_ROUNDING_SCALE).ceil() / WIDTH_ROUNDING_SCALE
 }
+
+#[cfg(test)]
+mod tests {
+    use super::assert_inherited_cjk;
+    use serde_json::{Value, json};
+
+    #[test]
+    fn inherited_cjk_probe_rejects_missing_metadata_and_invalid_width() {
+        let valid = json!({
+            "family": "Noto Sans", "text": "日本語", "weight": 700,
+            "kind": "svg", "width": 1.0
+        });
+        for (key, expected) in [
+            ("family", "family missing"),
+            ("text", "text missing"),
+            ("weight", "weight missing"),
+            ("width", "finite SVG number missing"),
+        ] {
+            let mut probe = valid.clone();
+            probe[key] = Value::Null;
+            assert_eq!(
+                assert_inherited_cjk(&probe).err().as_deref(),
+                Some(expected)
+            );
+        }
+        let mut probe = valid;
+        probe["width"] = json!(1e100);
+        assert_eq!(
+            assert_inherited_cjk(&probe).err().as_deref(),
+            Some("SVG number exceeds f32 range")
+        );
+    }
+}
