@@ -37,10 +37,8 @@ fn collect_chunk<'a>(
     layout_offset: &mut usize,
     character_offset: &mut usize,
 ) -> Option<Chunk<'a>> {
+    /* WHY: usvgは最初のspanを伴ってchunkを作り、公開APIでspanを取り除けない。 */
     let source_spans = chunk.spans();
-    if source_spans.is_empty() {
-        return None;
-    }
     let layout_end = (*layout_offset).checked_add(source_spans.len())?;
     let character_end = (*character_offset).checked_add(chunk.text().chars().count())?;
     let layout_spans = text.layouted().get(*layout_offset..layout_end)?;
