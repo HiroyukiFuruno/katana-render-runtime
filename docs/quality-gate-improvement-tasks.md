@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- CoreTextが空パスとNULを含むパスをファイルURLへ変換できない場合と、実SVGの縦方向オフセットがLayoutUnitの上限を超える場合の回帰を追加した。既存正常系を含む予定6件すべて、静的基盤、ASTが成功。ソース前後一致（`4d760985`、`tmp/quality/resumed-owner-r3509/release-coverage-coretext-and-svg-coordinate-irxxv9sk/safe-summary.json`）。正式カバレッジへの反映は次の一括計測で確認する。
 - 最新の正式計測は `abace489` の86,767/87,020行、99.709262%、未カバー253行（258行から5行減。固定フォントの描画4行、フォント監査1行、増加なし）。更新後のツール実体でMoonから収集し、Rust実行対象6,452件が全件成功、環境依存等のskipは別に15件。収集実0、ソース前後一致、証跡をMoon内で検証し再収集なし、100%判定のみ実1。外から直接実行した判定は実行環境digestが異なり拒否され、同じMoon実行環境で再検証して認証した（`tmp/quality/resumed-owner-r3509/root-coverage-moon-policy-cqmw1h8u/formal-coverage-summary.json`、収集は `root-coverage-after-prepared-glyph-face-current-tools-86xigi_0`）。
 - 描画準備が必ず確保する固定フォントをそのまま描画まで保持し、同じキャッシュを引き直す到達不能な失敗経路を除去した。可変フォントの描画は従来どおり。CoreText単独の診断もSkiaフォントを要求しない。関連16件、静的基盤、ASTが成功（`4596be15`、`tmp/quality/resumed-owner-r3509/release-coverage-prepared-glyph-face-3wfcxzmk/verified-case-summary.json`）。
 - Moonから収集を起動できた。初回は6452件中、HTML要件書の初回表示・終了1件が既存60秒制限で失敗し、他6451件の結果と再試行チェックポイントを保存した（`root-coverage-after-prepared-glyph-face-moon-wm8m2kpu`）。最初の再試行は資源digest変化で開始前に拒否（`root-coverage-after-prepared-glyph-face-retry-8185nkgz`）。同一実行ファイルで当該1件は7.282秒で成功（`release-html-requirements-timeout-exact-0m4zv8df`）。次のMoon再試行はチェックポイントを受理し、当該1件のみ再実行して成功、レポート生成も成功したが、確定前の資源digestが変化して拒否された。診断値は未カバー253行で、正式値は258行のまま（`root-coverage-after-prepared-glyph-face-stable-retry-8ayib4ob/unsealed-report-projection.json`）。
