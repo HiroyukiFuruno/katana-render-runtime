@@ -22,6 +22,45 @@ fn repeated_filter_image_writes_one_definition_and_preserves_both_references() -
     assert_rendered_pixels(&original, &reparsed, case)
 }
 
+#[test]
+fn invalid_filter_images_roundtrip_without_dangling_references() -> Result<(), String> {
+    for image in ["<feImage/>", "<feImage href='#empty'/>"] {
+        let input = format!(
+            "<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'><defs><g id='empty'/><filter id='f'>{image}</filter></defs><rect width='80' height='80' fill='blue'/><rect width='40' height='40' fill='red' filter='url(#f)'/></svg>"
+        );
+        let original = parse_writer_svg(&input, "invalid feImage")?;
+        let serialized = original.to_string(&writer_options("invalid feImage"));
+        assert_filter_image_targets_resolve(&serialized)?;
+        let reparsed = parse_writer_svg(&serialized, "invalid feImage roundtrip")?;
+        assert_rendered_pixels(&original, &reparsed, "invalid feImage")?;
+    }
+    Ok(())
+}
+
+fn assert_filter_image_targets_resolve(serialized: &str) -> Result<(), String> {
+    let document =
+        usvg::roxmltree::Document::parse(serialized).map_err(|error| error.to_string())?;
+    for image in document
+        .descendants()
+        .filter(|node| node.has_tag_name("feImage"))
+    {
+        let target = image
+            .attribute(("http://www.w3.org/1999/xlink", "href"))
+            .and_then(|href| href.strip_prefix('#'))
+            .filter(|target| !target.is_empty())
+            .ok_or("serialized feImage has no local target")?;
+        assert_eq!(
+            document
+                .descendants()
+                .filter(|node| node.attribute("id") == Some(target))
+                .count(),
+            1,
+            "serialized feImage target {target:?} must resolve to one node"
+        );
+    }
+    Ok(())
+}
+
 fn assert_repeated_reference(serialized: &str) -> Result<(), String> {
     let document =
         usvg::roxmltree::Document::parse(serialized).map_err(|error| error.to_string())?;
