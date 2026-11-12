@@ -86,6 +86,32 @@ fn assert_appearance_during_scope(
 }
 
 #[test]
+fn real_arial_fixture_requires_a_file_backed_face() -> Result<(), Box<dyn std::error::Error>> {
+    use resvg::usvg::fontdb::Source;
+
+    let copied = OwnedFontCopy::from_real_arial()?;
+    let mut database = Database::new();
+    database.load_font_data(std::fs::read(&copied.path)?);
+    assert!(database.faces().any(|face| {
+        face.families
+            .iter()
+            .any(|(family, _)| family.eq_ignore_ascii_case("Arial"))
+    }));
+    assert!(super::fixture::file_arial_path(&database).is_none());
+
+    assert!(
+        !database
+            .load_font_source(Source::File(copied.path.clone()))
+            .is_empty()
+    );
+    assert_eq!(
+        super::fixture::file_arial_path(&database),
+        Some(copied.path.as_path())
+    );
+    Ok(())
+}
+
+#[test]
 fn atomic_file_replacement_at_admission_exit_retries_without_old_proof() -> Result<(), String> {
     let (database, proof, copied) = super::copied_arial_database()?;
     let selected = admitted(

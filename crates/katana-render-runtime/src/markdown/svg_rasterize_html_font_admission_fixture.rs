@@ -1,6 +1,9 @@
 use super::{CreationProof, Database, HtmlFontRequest, REGULAR_TEXT, sources};
 use resvg::usvg::fontdb::{ID, Language, Source, Stretch, Style, Weight};
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tempfile::TempDir;
 
 pub(super) struct OwnedFontCopy {
@@ -30,19 +33,7 @@ impl OwnedFontCopy {
     pub(super) fn from_real_arial() -> Result<Self, String> {
         let request = HtmlFontRequest::from_text("Arial", REGULAR_TEXT);
         let (database, _) = sources::build_known_html_font_db(&request);
-        let source = database
-            .faces()
-            .find_map(|face| {
-                face.families
-                    .iter()
-                    .any(|(name, _)| name.eq_ignore_ascii_case("Arial"))
-                    .then(|| face.source.clone())
-                    .and_then(|source| match source {
-                        Source::File(path) => Some(path),
-                        _ => None,
-                    })
-            })
-            .ok_or_else(|| "no real Arial File face".to_string())?;
+        let source = file_arial_path(&database).ok_or("no real Arial File face")?;
         let tempdir = tempfile::tempdir().map_err(|error| error.to_string())?;
         let directory = tempdir.path().to_path_buf();
         let copied = Self {
@@ -53,6 +44,18 @@ impl OwnedFontCopy {
         std::fs::copy(source, &copied.path).map_err(|error| error.to_string())?;
         Ok(copied)
     }
+}
+
+pub(super) fn file_arial_path(database: &Database) -> Option<&Path> {
+    database.faces().find_map(|face| {
+        let Source::File(path) = &face.source else {
+            return None;
+        };
+        face.families
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("Arial"))
+            .then_some(path.as_path())
+    })
 }
 
 pub(super) fn copied_arial_database()
