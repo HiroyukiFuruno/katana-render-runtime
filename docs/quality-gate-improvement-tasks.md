@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- CSSの入れ子制限を超えた実SVGで前後の有効なstroke/fill宣言を保持することと、実HTMLのスクリプトから不正なノードIDを渡した3種類の位置問い合わせが型付きDOMエラーを返すことを確認した。関連6件、静的基盤、ASTが成功、ソース前後一致（`55590b85`、`b463147b`、`tmp/quality/resumed-owner-r3509/release-coverage-parser-boundary-inputs-5hedii18/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - 中間マーカーの選別後は閉じる命令が渡らないことを型で表現し、向きの計算に残っていた到達不能な分岐を除いた。描画順・始点反転・閉じたサブパスの向きを含む既存12件、静的基盤、ASTが成功、ソース前後一致（`d6d15072`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-marker-middle-segment-3763w3is/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - SVGの背景、マーカー・画像・入れ子の表示領域のクリップでは、確定済みの矩形境界をそのままパスの境界に使い、同じ矩形の再計算と失敗分岐を除いた。画像のsliceで領域内だけを塗る新規回帰を含む関連10件、静的基盤、ASTが成功、ソース前後一致（`2167b7b0`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-rectangle-bounds-867j_xtk/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - SVG字形クラスタの生成に使ったテキスト範囲を字間と単語間隔の処理でも使い、同じoffsetへの再検索を除いた。生成される最後のクラスタの扱いと、縦書き補正・字間・単語間隔の適用順を維持した。複数範囲にまたがる字間と単語間隔を含む関連12件、静的基盤、ASTが成功し、ソース前後一致（`69a41c4f`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-span-spacing-k31ic1io/safe-summary.json`）。正式カバレッジへの反映は未計測。
