@@ -12,7 +12,7 @@ pub(in super::super) fn assert_store_capacity_and_clear(
     artifact: &HtmlFrameArtifact,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = artifact.encode_with_limit(MAX_ARTIFACT_BYTES)?;
-    let quota_root = root("quota")?;
+    let (_directory, quota_root) = root("quota")?;
     let store = HtmlArtifactStore::new(&quota_root, bytes.len() as u64, true)?;
     store.save("first", artifact)?;
     store.save("first", artifact)?;
@@ -37,7 +37,7 @@ pub(in super::super) fn assert_store_capacity_and_clear(
 }
 
 fn assert_disabled_store(artifact: &HtmlFrameArtifact) -> Result<(), Box<dyn std::error::Error>> {
-    let disabled_root = root("disabled")?;
+    let (_directory, disabled_root) = root("disabled")?;
     let disabled = HtmlArtifactStore::new(&disabled_root, DISABLED_STORE_CAPACITY, false)?;
     assert!(!disabled_root.exists());
     assert!(matches!(

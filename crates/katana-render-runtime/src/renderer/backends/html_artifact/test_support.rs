@@ -4,7 +4,7 @@ use super::super::{
 };
 use super::{A, B, C};
 use crate::{HtmlBrowserError, HtmlBrowserFrame, HtmlBrowserOrigin, HtmlBrowserPixelFormat};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{io, path::PathBuf};
 
 #[path = "test_support_interaction.rs"]
 mod interaction;
@@ -77,11 +77,12 @@ pub(super) fn artifact() -> Result<HtmlFrameArtifact, Box<dyn std::error::Error>
         frame,
     )?)
 }
-pub(super) fn root(label: &str) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
-    Ok(std::fs::canonicalize(std::env::temp_dir())?.join(format!(
-        "krr-artifact-{label}-{}",
-        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
-    )))
+pub(super) fn root(label: &str) -> io::Result<(tempfile::TempDir, PathBuf)> {
+    let directory = tempfile::Builder::new()
+        .prefix(&format!("krr-artifact-{label}-"))
+        .tempdir()?;
+    let store = directory.path().canonicalize()?.join("store");
+    Ok((directory, store))
 }
 pub(super) fn html() -> &'static str {
     r#"<!doctype html><style>html,body{margin:0}body{min-height:600px;font:16px sans-serif}button,input{display:block;margin:8px;width:180px;height:28px}a{position:absolute;top:120px;left:8px;width:180px;height:28px}</style><button id="action">Run action</button><input id="entry"><p id="output">idle</p><a href="next.html">Next page</a><script>const o=document.querySelector('#output');document.querySelector('#action').addEventListener('click',()=>o.textContent='clicked');document.querySelector('#entry').addEventListener('input',e=>o.textContent=e.target.value);</script>"#

@@ -4,7 +4,7 @@ use super::{
     HtmlBrowserSource, HtmlBrowserViewport, HtmlFrameArtifact, HtmlRuntime,
 };
 use crate::{HtmlBrowserFrame, HtmlBrowserPixelFormat};
-use std::{fs, process::Command};
+use std::process::Command;
 
 #[path = "test_support.rs"]
 mod test_support;
@@ -77,7 +77,7 @@ fn encode_store_and_resume_reject_invalid_contract_inputs() -> Result<(), Box<dy
         artifact.encode_with_limit(1),
         Err(HtmlArtifactError::ArtifactTooLarge)
     ));
-    let root = root("invalid-contract")?;
+    let (_directory, root) = root("invalid-contract")?;
     let store = HtmlArtifactStore::new(&root, MAX_ARTIFACT_BYTES, true)?;
     assert!(matches!(
         store.save("../escape", &artifact),
@@ -88,7 +88,6 @@ fn encode_store_and_resume_reject_invalid_contract_inputs() -> Result<(), Box<dy
         Err(HtmlArtifactError::InvalidKey)
     ));
     assert_invalid_resume_provenance(&artifact)?;
-    fs::remove_dir_all(root)?;
     Ok(())
 }
 
@@ -208,7 +207,7 @@ fn resume_session_reports_public_runtime_compile_error() -> Result<(), Box<dyn s
 
 #[test]
 fn store_hit_miss_corrupt_and_explicit_lock_recovery() -> Result<(), Box<dyn std::error::Error>> {
-    let root = root("store")?;
+    let (_directory, root) = root("store")?;
     let store = HtmlArtifactStore::new(&root, 1_000_000, true)?;
     let artifact = artifact()?;
     let expected = artifact.provenance.clone();
@@ -216,7 +215,6 @@ fn store_hit_miss_corrupt_and_explicit_lock_recovery() -> Result<(), Box<dyn std
     assert_hit_miss_and_corrupt(&root, &store, &expected)?;
     assert_dangling_symlink_is_rejected(&root, &store, &expected)?;
     assert_explicit_lock_recovery(&root, &store, &artifact)?;
-    let _ = fs::remove_dir_all(root);
     Ok(())
 }
 
@@ -238,7 +236,7 @@ fn artifact_child() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var_os("KRR_HTML_ARTIFACT_CHILD").is_none() {
         return Ok(());
     }
-    let root = root("child")?;
+    let (_directory, root) = root("child")?;
     let store = HtmlArtifactStore::new(&root, 8_000_000, true)?;
     let source = HtmlBrowserSource::new(html(), "https://example.test/child.html")?;
     let viewport = HtmlBrowserViewport::new(320, 160, 1.0)?;
@@ -253,7 +251,6 @@ fn artifact_child() -> Result<(), Box<dyn std::error::Error>> {
     exercise_resumed_interactions(&mut resumed)?;
     resumed.close()?;
     session.close()?;
-    let _ = fs::remove_dir_all(root);
     Ok(())
 }
 

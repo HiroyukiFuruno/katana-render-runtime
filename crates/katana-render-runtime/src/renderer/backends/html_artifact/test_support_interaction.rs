@@ -63,20 +63,17 @@ fn click(session: &mut HtmlBrowserSession, x: f32, y: f32) {
 #[cfg(test)]
 mod tests {
     use super::{exercise_resumed_interactions, save_initial_and_updated};
-    use crate::HtmlBrowserFrame;
     use crate::renderer::backends::html_artifact::types::MAX_ARTIFACT_BYTES;
     use crate::renderer::backends::html_artifact::{
         HtmlArtifactError, HtmlArtifactProvenance, HtmlArtifactStore, HtmlBrowserSource,
         HtmlBrowserViewport, HtmlFrameArtifact, HtmlRuntime,
     };
+    use crate::{HtmlBrowserError, HtmlBrowserFrame};
     use std::path::Path;
 
     #[test]
     fn resumed_interactions_reject_a_closed_session() -> Result<(), Box<dyn std::error::Error>> {
-        let source = HtmlBrowserSource::new(
-            super::super::html(),
-            "https://example.test/closed-interaction.html",
-        )?;
+        let source = super::super::source()?;
         let viewport = HtmlBrowserViewport::new(320, 160, 1.0)?;
         let mut session = HtmlRuntime.open(source, viewport)?;
         assert!(session.latest_frame().is_some());
@@ -128,10 +125,10 @@ mod tests {
         HtmlArtifactStore::new(root, capacity, true)
     }
 
-    fn quota_source() -> Result<HtmlBrowserSource, Box<dyn std::error::Error>> {
-        Ok(HtmlBrowserSource::new(
+    fn quota_source() -> Result<HtmlBrowserSource, HtmlBrowserError> {
+        HtmlBrowserSource::new(
             "<style>body{margin:0;background:black}button{position:absolute;left:0;top:0;width:80px;height:50px}</style><button onclick=\"document.body.style.background='white'\">Change</button>",
             "https://example.test/quota.html",
-        )?)
+        )
     }
 }
