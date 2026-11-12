@@ -1,10 +1,17 @@
 use super::HtmlGlyphRasterizer;
+use crate::markdown::svg_rasterize::composite::TextRasterizer;
 use crate::markdown::svg_rasterize::font_file_fixture;
 use crate::markdown::svg_rasterize::physical_font_face::verification_support::font_with_only;
+use resvg::usvg;
 use resvg::usvg::fontdb::{Database, ID, Source};
 use std::path::Path;
 use std::sync::Arc;
+use tiny_skia::{Pixmap, Transform};
 use write_fonts::types::Tag;
+
+const SHARED_FONT_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"><text id="run" x="1" y="24" font-family="Noto Sans" font-size="16">AV</text></svg>"#;
+const SHARED_FONT_WIDTH: u32 = 64;
+const SHARED_FONT_HEIGHT: u32 = 32;
 
 fn shared_font_fixture() -> Result<(tempfile::TempDir, Database, ID), String> {
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
@@ -39,17 +46,52 @@ fn assert_shared_font_recovers(
     expected: &str,
 ) -> Result<(), String> {
     let (directory, database, id) = shared_font_fixture()?;
+    let tree = parse_shared_font_svg(database)?;
+    let Some(usvg::Node::Text(text)) = tree.node_by_id("run") else {
+        return Err("shared fixture SVG text missing".into());
+    };
     let path = directory.path().join("font.ttf");
     change(&path).map_err(|error| error.to_string())?;
-    let rasterizer = HtmlGlyphRasterizer::new(&database);
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
     assert!(
         rasterizer
             .ensure_face(id)
             .is_err_and(|error| error.contains(expected))
     );
+    let mut pixmap = assert_shared_font_render_error(&tree, text, expected)?;
     std::fs::write(&path, font_file_fixture::FONT_BYTES).map_err(|error| error.to_string())?;
     assert!(rasterizer.ensure_face(id)?.is_some());
+    assert!(rasterizer.render(text, Transform::identity(), &mut pixmap.as_mut())?);
+    assert!(pixmap.data().iter().any(|&byte| byte != 0));
     Ok(())
+}
+
+fn parse_shared_font_svg(database: Database) -> Result<usvg::Tree, String> {
+    usvg::Tree::from_str(
+        SHARED_FONT_SVG,
+        &usvg::Options {
+            fontdb: Arc::new(database),
+            ..usvg::Options::default()
+        },
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn assert_shared_font_render_error(
+    tree: &usvg::Tree,
+    text: &usvg::Text,
+    expected: &str,
+) -> Result<Pixmap, String> {
+    let mut pixmap =
+        Pixmap::new(SHARED_FONT_WIDTH, SHARED_FONT_HEIGHT).ok_or("shared font pixmap missing")?;
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    let result = rasterizer.render(text, Transform::identity(), &mut pixmap.as_mut());
+    assert!(
+        result.as_ref().is_err_and(|error| error.contains(expected)),
+        "{result:?}"
+    );
+    assert!(pixmap.data().iter().all(|&byte| byte == 0));
+    Ok(pixmap)
 }
 
 #[test]
