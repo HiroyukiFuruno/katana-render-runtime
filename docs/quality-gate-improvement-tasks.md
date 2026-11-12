@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定4件中4件完了。実在する不正フォントをCoreTextが拒否する経路、cmap検証用ファイルの不正な保存先、SVG `<use>` の参照欠落と別名前空間の2条件を確認した。SVGは有効な参照との画素比較を既存ケースと共通化した。初回は重複検査、次回はASTの色定数で止まり、修正後は関連12テスト、静的検査、ASTが成功した（`tmp/quality/resumed-owner-r3509/release-coverage-font-svg-use-irme9bxh/safe-summary.json`、`e78eb593`・`0a0e423c`・`241c9277`）。正式カバレッジは最終フェーズで計測する。
 - 対応予定2件中2件完了。HTMLのクリップ軸で発生しないエラー伝播を型から除き、Mermaid同梱資源のAST検査では検証済みのリテラルを再利用した。有限・退化・非有限の座標と不正資源パスの拒否を含む関連7テスト、静的検査、ASTが成功した（`tmp/quality/resumed-owner-r3509/release-coverage-axis-literal-g_ljx3fm/safe-summary.json`、`7310d7a7`・`e6887d60`）。SVG writerと照明の二重判定は `cf5980a9` で対応済み。CLIの出力パスも現行コードは一度だけ取り出して検証し、時点が異なるファイル検証は保持する。正式カバレッジは最終フェーズで計測する。
 - 対応予定3件中3件完了。HTML表で対象IDが行にしか存在しない場合の検知、SVGで測定できない制御文字の代替幅と永続キャッシュ非登録、所有要素が欠落したクリック対象の拒否を確認した。最後の検証はテスト内の重複判定を製品側の実処理に置き換え、所有要素がある場合も確認した。関連9テスト、静的検査、ASTが成功した（`tmp/quality/resumed-owner-r3509/release-coverage-html-layout-boundaries-35cz6nbi/safe-summary.json`、`8d010a79`・`fbeaa79c`・`e7fb05a4`）。Taffy、SVG描画・解析の失敗伝播は、実入力での再現や重複を確認できず、保持した。正式カバレッジは最終フェーズで計測する。
 - 対応予定9件中9件完了。カスタムフォントのファイルエラー4経路、Mermaid Block図のviewBoxとtransformの欠落・不正4条件、HTMLスクロール座標テストの入力準備共通化1件を確認した。関連11テスト、静的検査、ASTが成功した（`tmp/quality/resumed-owner-r3509/release-coverage-font-block-scroll-jbu4gp_p/safe-summary.json`、`b8f5d9ad`・`169ad3a1`・`991e8b4c`）。フォント検証の補助3ファイルに残る失敗処理は、環境・入力エラーを伝えるため残した。正式カバレッジは最終フェーズで計測する。
