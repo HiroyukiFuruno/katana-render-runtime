@@ -55,6 +55,39 @@ fn table_bounds_helpers_report_missing_and_unpainted_elements() -> Result<(), St
     Ok(())
 }
 
+#[rstest::rstest]
+#[case::cell(
+    "<td id='omitted' style='display:none;width:200px;background:red'>Omitted</td>",
+    "",
+    ""
+)]
+#[case::header("<th id='omitted' class='hide'>Omitted</th>", "", "")]
+#[case::row("", "<tr id='omitted' class='hide'><td>Omitted</td></tr>", "")]
+#[case::group(
+    "",
+    "",
+    "<tbody id='omitted' class='hide'><tr><td>Omitted</td></tr></tbody>"
+)]
+fn display_none_table_parts_do_not_change_rendering(
+    #[case] cell: &str,
+    #[case] row: &str,
+    #[case] group: &str,
+) -> Result<(), String> {
+    let source = table_with_optional_parts(cell, row, group);
+    let reference = render_table_html(&table_with_optional_parts("", "", ""))?;
+    let actual = render_table_html(&source)?;
+    assert_eq!(actual.svg, reference.svg);
+    let mut document = HtmlDocument::parse(&source);
+    assert!(table_bounds(&actual, table_element_id(&mut document, "omitted")?).is_err());
+    Ok(())
+}
+
+fn table_with_optional_parts(cell: &str, row: &str, group: &str) -> String {
+    format!(
+        "<style>.hide {{ display:none }}</style><table style='width:240px'><tbody><tr>{cell}<td>A</td><td>B</td></tr>{row}</tbody>{group}</table>"
+    )
+}
+
 fn assert_nonempty_elements_have_bounds(
     layout: &super::super::super::types::LayoutResult,
     ids: &[u64],

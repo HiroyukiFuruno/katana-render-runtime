@@ -1,4 +1,5 @@
 use super::super::super::super::html_document::HtmlDocumentNode;
+use crate::renderer::backends::html_interactive::style::CssStyle;
 
 #[derive(Debug, Clone)]
 pub(in crate::renderer::backends::html_interactive) struct TableCell {
@@ -66,6 +67,9 @@ fn visit_table_node(
     else {
         return;
     };
+    if CssStyle::element_has_display_none(attributes) {
+        return;
+    }
     if append_table_row(tag, row_group, *node_id, attributes, children, rows) {
         return;
     }
@@ -133,7 +137,7 @@ fn table_cell(
     else {
         return None;
     };
-    (tag == "th" || tag == "td").then(|| TableCell {
+    is_visible_cell(tag, attributes).then(|| TableCell {
         tag: tag.clone(),
         attributes: attributes.clone(),
         row_attributes: row_attributes.to_vec(),
@@ -146,4 +150,8 @@ fn table_cell(
         }),
         children: children.clone(),
     })
+}
+
+fn is_visible_cell(tag: &str, attributes: &[(String, String)]) -> bool {
+    matches!(tag, "th" | "td") && !CssStyle::element_has_display_none(attributes)
 }
