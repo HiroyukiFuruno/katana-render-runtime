@@ -73,14 +73,14 @@ fn ttc_face_offset(
     }
     let count = read_u32(&header[TTC_FACE_COUNT_OFFSET..SFNT_HEADER_BYTES]);
     let offsets = ttc_offsets(file, file_length, count)?;
-    if count == 0 || face_index >= count {
+    if face_index >= count {
         return Err(Error::new(
             ErrorKind::InvalidData,
             "TTC face index out of range",
         ));
     }
-    let start = usize::try_from(u64::from(face_index) * TTC_FACE_OFFSET_BYTES)
-        .map_err(|_| Error::new(ErrorKind::InvalidData, "TTC face offset overflow"))?;
+    /* WHY: 読み込み済みのオフセット配列内に収まることを、件数とインデックスの検査で保証している。 */
+    let start = face_index as usize * TTC_FACE_OFFSET_BYTES as usize;
     Ok(u64::from(read_u32(
         &offsets[start..start + TABLE_TAG_BYTES],
     )))

@@ -11,10 +11,7 @@ pub(super) fn read_at(
     length: usize,
 ) -> std::io::Result<Vec<u8>> {
     let end = offset
-        .checked_add(
-            u64::try_from(length)
-                .map_err(|_| Error::new(ErrorKind::InvalidInput, "length overflow"))?,
-        )
+        .checked_add(length as u64)
         .ok_or_else(|| Error::new(ErrorKind::InvalidData, "offset overflow"))?;
     if end > file_length {
         return Err(Error::new(ErrorKind::UnexpectedEof, "table exceeds file"));
@@ -36,7 +33,6 @@ pub(super) fn read_table(
         crate::markdown::svg_rasterize::font::observation::Metric::LazyTableOpenAttempt,
     );
     let mut file = File::open(path)?;
-    let length = usize::try_from(table_length)
-        .map_err(|_| Error::new(ErrorKind::InvalidData, "table length does not fit usize"))?;
+    let length = table_length as usize;
     read_at(&mut file, file_length, offset, length)
 }
