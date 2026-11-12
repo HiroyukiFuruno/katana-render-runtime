@@ -93,10 +93,12 @@ mod natural_tests;
 #[cfg(test)]
 mod boundary_tests {
     use super::normalize_filter_shadow_colors;
+    use crate::markdown::svg_rasterize::SvgRasterizeOps;
 
     #[test]
     fn malformed_shadow_xml_preserves_original_source() {
         let source = "<svg><style>g{filter:drop-shadow(1px 2px rgba(0,0,0,.5))}</svg>";
         assert_eq!(normalize_filter_shadow_colors(source), source);
+        assert_eq!(SvgRasterizeOps::preprocess_for_rasterizer(source), source);
     }
 }

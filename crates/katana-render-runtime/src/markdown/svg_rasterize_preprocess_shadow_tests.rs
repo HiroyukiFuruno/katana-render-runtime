@@ -57,7 +57,7 @@ fn malformed_inline_declaration_preserves_the_entire_shadow_style() {
     let invalid = shadow_svg(&format!("{style}; broken"), "");
 
     assert!(normalize_filter_shadow_colors(valid).contains("#B9B9B9B3"));
-    assert_eq!(normalize_filter_shadow_colors(&invalid), invalid);
+    assert_eq!(normalize_filter_shadow_colors(invalid.as_str()), invalid);
 }
 
 #[test]
