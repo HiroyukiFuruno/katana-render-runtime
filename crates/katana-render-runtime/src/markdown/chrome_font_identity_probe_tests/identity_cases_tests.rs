@@ -211,3 +211,12 @@ fn assert_unreadable_resource_body(root: &Path, digest: &str) {
         assert!(load_resource_database(&[resource]).is_err_and(|error| error.starts_with(reason)));
     }
 }
+
+#[test]
+fn identity_cases_reject_missing_font_inputs() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let missing = temp.path().join("missing-font.ttf");
+    assert!(duplicate_face_resources(&missing).is_err());
+    assert!(append_changed_byte(&missing).is_err());
+    Ok(())
+}

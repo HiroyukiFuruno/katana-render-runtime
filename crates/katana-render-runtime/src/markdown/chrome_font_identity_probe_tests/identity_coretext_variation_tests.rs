@@ -89,6 +89,29 @@ fn static_font_descriptor_rejects_a_different_postscript_name() -> Result<(), St
 }
 
 #[test]
+fn coretext_evidence_rejects_a_missing_file_after_descriptor_lookup() -> Result<(), String> {
+    let temp = super::super::super::super::test_support::TempDirectory::new()?;
+    let path = temp.path().join("variable.ttf");
+    let bytes = include_bytes!(
+        "../../../../../tests/fixtures/svg-engine/upstream/resvg/tests/fonts/RobotoFlex.subset.ttf"
+    );
+    std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
+    let descriptors = super::super::descriptors_from_url(&path)?;
+    let path_str = path.to_str().ok_or("fixture path is not UTF-8")?;
+    let descriptor = descriptors
+        .iter()
+        .find(|descriptor| super::evidence(path_str, descriptor).is_ok())
+        .ok_or("variable font has no verifiable descriptor")?;
+    let missing = temp.path().join("missing.ttf");
+    let missing_str = missing.to_str().ok_or("missing path is not UTF-8")?;
+    let error = super::evidence(missing_str, &descriptor)
+        .err()
+        .ok_or("missing evidence file was accepted")?;
+    assert!(error.starts_with("canonicalize CoreText evidence URL:"));
+    Ok(())
+}
+
+#[test]
 fn coordinate_pairs_parse_real_corefoundation_values_and_reject_bad_types() {
     let cases = [
         (CoordinateEntry::Valid, None),
