@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定3件中3件完了。HTML表で対象IDが行にしか存在しない場合の検知、SVGで測定できない制御文字の代替幅と永続キャッシュ非登録、所有要素が欠落したクリック対象の拒否を確認した。最後の検証はテスト内の重複判定を製品側の実処理に置き換え、所有要素がある場合も確認した。関連9テスト、静的検査、ASTが成功した（`tmp/quality/resumed-owner-r3509/release-coverage-html-layout-boundaries-35cz6nbi/safe-summary.json`、`8d010a79`・`fbeaa79c`・`e7fb05a4`）。Taffy、SVG描画・解析の失敗伝播は、実入力での再現や重複を確認できず、保持した。正式カバレッジは最終フェーズで計測する。
 - 対応予定9件中9件完了。カスタムフォントのファイルエラー4経路、Mermaid Block図のviewBoxとtransformの欠落・不正4条件、HTMLスクロール座標テストの入力準備共通化1件を確認した。関連11テスト、静的検査、ASTが成功した（`tmp/quality/resumed-owner-r3509/release-coverage-font-block-scroll-jbu4gp_p/safe-summary.json`、`b8f5d9ad`・`169ad3a1`・`991e8b4c`）。フォント検証の補助3ファイルに残る失敗処理は、環境・入力エラーを伝えるため残した。正式カバレッジは最終フェーズで計測する。
 - 対応予定4件中4件完了。フォント候補の実ファイル消失、応答件数、Mermaidフィクスチャの区切り欠落、HTMLアンカーの重複ID解析を確認した。関連4テスト、静的検査、ASTが成功した（`tmp/quality/resumed-owner-r3509/release-coverage-edge-regressions-hj05iz7v/safe-summary.json`、`4168ed76`・`c105bd2f`・`56d5a25f`）。正式カバレッジは最終フェーズで計測する。
 - 最新の正式ルート計測 `76470bbe` は6,363テスト成功・15件スキップ、86,519/86,900行（99.5615650173%）、未カバー381行。7ファイルで7行減り、同梱資源のAST検査と書き込み制限のテスト補助3ファイルで15行増えた。収集は成功し、公開条件100%・未カバー0の判定は不合格。ソースと計測結果は判定前後で一致した。証跡は `tmp/quality/resumed-owner-r3509/root-coverage-release-post-regressions-zr6hfg99/` の `safe-summary.json`・`gap-summary.json`・`gap-delta.json`。
