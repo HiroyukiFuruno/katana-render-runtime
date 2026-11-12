@@ -1,4 +1,5 @@
 use crate::markdown::svg_rasterize::font::bundled_font_db;
+use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
 use resvg::usvg::fontdb::{Database, Source};
 use std::path::PathBuf;
 use std::sync::{
@@ -35,7 +36,7 @@ impl CmapFileFixture {
     pub(super) fn bundled_database(
         &self,
     ) -> Result<(Arc<Database>, resvg::usvg::fontdb::ID, TempFile), String> {
-        self.database(&bundled_bytes()?)
+        self.database(FONT_BYTES)
     }
 
     pub(super) fn database(
@@ -54,12 +55,4 @@ impl CmapFileFixture {
         let id = database.push_face_info(face);
         Ok((Arc::new(database), id, TempFile(source)))
     }
-}
-
-pub(super) fn bundled_bytes() -> Result<Vec<u8>, String> {
-    let database = bundled_font_db();
-    let face = database.faces().next().ok_or("bundled face missing")?;
-    database
-        .with_face_data(face.id, |data, _| data.to_vec())
-        .ok_or_else(|| "bundled bytes missing".to_string())
 }

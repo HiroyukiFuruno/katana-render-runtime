@@ -1,4 +1,4 @@
-use super::super::file_test_support::{CmapFileFixture, bundled_bytes};
+use super::super::file_test_support::CmapFileFixture;
 use super::{Cache, MAX_CACHE_BYTES, MAX_CACHE_ENTRIES, MAX_ENTRY_BYTES};
 use std::sync::{Arc, atomic::AtomicUsize};
 
@@ -51,8 +51,7 @@ fn cache_enforces_entry_and_byte_limits() -> Result<(), String> {
 
 #[test]
 fn cache_purges_dropped_databases_and_removes_a_face() -> Result<(), String> {
-    let bytes = bundled_bytes()?;
-    let (database, id, _guard) = FILES.database(&bytes)?;
+    let (database, id, _guard) = FILES.bundled_database()?;
     let generation = super::super::super::file_generation::file_source_stamp(&database, id).2;
     let mut cache = Cache::default();
     cache.insert(&database, id, 0, generation, Arc::from([1_u8, 2, 3]));
@@ -66,7 +65,7 @@ fn cache_purges_dropped_databases_and_removes_a_face() -> Result<(), String> {
         Arc::from([1_u8]),
     );
     drop(database);
-    let (other, other_id, _other_guard) = FILES.database(&bytes)?;
+    let (other, other_id, _other_guard) = FILES.bundled_database()?;
     let generation = super::super::super::file_generation::file_source_stamp(&other, other_id).2;
     assert!(cache.lookup(&other, other_id, 0, &generation).is_none());
     assert!(cache.entries.is_empty());

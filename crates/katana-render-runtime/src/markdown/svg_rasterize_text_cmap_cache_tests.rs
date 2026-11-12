@@ -5,9 +5,9 @@ mod cmap_test_support;
 use cmap_test_support::{font_with_only_b_cmap, rewrite_with_same_modified_time};
 
 use super::file_test_support::CmapFileFixture;
-#[cfg(windows)]
-use super::file_test_support::bundled_bytes;
 use super::{ProbeResult, probe_file};
+#[cfg(windows)]
+use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
 #[cfg(unix)]
 use resvg::usvg::fontdb::Database;
 use std::sync::atomic::AtomicUsize;
@@ -114,9 +114,9 @@ fn unavailable_generation_invalidates_existing_durable_cmap_entry() -> Result<()
 #[cfg(windows)]
 #[test]
 fn same_length_same_modified_file_rewrite_does_not_reuse_cached_cmap() -> TestResult {
-    let original = bundled_bytes()?;
-    let replacement = font_with_only_b_cmap(&original)?;
-    let (database, id, guard) = FILES.database(&original)?;
+    let original = FONT_BYTES;
+    let replacement = font_with_only_b_cmap(original)?;
+    let (database, id, guard) = FILES.database(original)?;
     let before = super::super::file_generation::file_source_stamp(&database, id).2;
     assert!(!before.durable_reusable());
     assert!(matches!(
