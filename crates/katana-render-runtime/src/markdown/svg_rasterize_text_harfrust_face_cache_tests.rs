@@ -159,6 +159,26 @@ fn oversize_binary_source_is_not_retained() -> Result<(), String> {
 }
 
 #[test]
+fn malformed_oversize_binary_source_clears_warm_entry_and_allows_reload() -> Result<(), String> {
+    let (mut database, id) = binary_database()?;
+    let mut invalid = database.face(id).ok_or("control face missing")?.clone();
+    invalid.source = Source::Binary(Arc::new(vec![0_u8; MAX_SOURCE_BYTES + 1]));
+    let invalid = database.push_face_info(invalid);
+    let _scope = FontFaceCacheScope::enter();
+
+    assert!(font_for_face(&database, id).is_some());
+    assert!(super::ACTIVE_SCOPE.with(|cache| cache.borrow().entry.is_some()));
+    assert!(font_for_face(&database, invalid).is_none());
+    assert!(super::ACTIVE_SCOPE.with(|cache| {
+        let cache = cache.borrow();
+        cache.entry.is_none() && cache.spare.is_none()
+    }));
+    assert!(font_for_face(&database, id).is_some());
+    assert!(super::ACTIVE_SCOPE.with(|cache| cache.borrow().entry.is_some()));
+    Ok(())
+}
+
+#[test]
 fn nested_scopes_share_the_active_face_entry_and_cleanup() -> Result<(), String> {
     let (database, face) = binary_database()?;
     let outer = FontFaceCacheScope::enter();
