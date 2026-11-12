@@ -177,19 +177,22 @@ pub(in super::super) fn render_with_native_font_observations(
         1,
         DiagramRuntimeScript::borrowed("native-font-observer", NATIVE_FONT_OBSERVER),
     );
-    let driver = format!(
-        "(async () => {{ const svg = await katanaRunMermaidRuntime({request_json}); return JSON.stringify({{svg, xHeightObservations: globalThis.__katanaFontXHeightObservations, svgMetricObservations: globalThis.__katanaSvgFontMetricObservations, bboxObservations: globalThis.__katanaSvgBBoxObservations, innerHtmlObservations: globalThis.__katanaInnerHtmlObservations}}); }})();"
-    );
-    let last = scripts
-        .last_mut()
-        .ok_or_else(|| "Mermaid runtime scripts missing".to_owned())?;
-    *last = DiagramRuntimeScript::owned("native-font-observer-result", driver);
+    /* WHY: buildは末尾に描画入口を必ず追加するため、観測用の入口に差し替える。 */
+    drop(scripts.pop());
+    scripts.push(observation_driver(&request_json));
     let envelope = DiagramV8Runtime::render(&scripts)?;
     let observed: FontObservationEnvelope =
         serde_json::from_str(&envelope).map_err(|error| error.to_string())?;
     let diagnostic =
         serde_json::to_string(&observed.observations()).map_err(|error| error.to_string())?;
     Ok((observed.svg, diagnostic))
+}
+
+fn observation_driver(request_json: &str) -> DiagramRuntimeScript<'static> {
+    let driver = format!(
+        "(async () => {{ const svg = await katanaRunMermaidRuntime({request_json}); return JSON.stringify({{svg, xHeightObservations: globalThis.__katanaFontXHeightObservations, svgMetricObservations: globalThis.__katanaSvgFontMetricObservations, bboxObservations: globalThis.__katanaSvgBBoxObservations, innerHtmlObservations: globalThis.__katanaInnerHtmlObservations}}); }})();"
+    );
+    DiagramRuntimeScript::owned("native-font-observer-result", driver)
 }
 
 #[cfg(test)]
