@@ -5,6 +5,9 @@ use crate::markdown::svg_rasterize::text_shaping::FontShape;
 use resvg::usvg::Tree;
 use std::collections::HashSet;
 
+#[path = "svg_rasterize_html_glyph_zero_advance_tests.rs"]
+mod zero_advance;
+
 const REJECTION_CASE_COUNT: usize = 4;
 const NORMAL_FONT_WEIGHT: u16 = 400;
 
