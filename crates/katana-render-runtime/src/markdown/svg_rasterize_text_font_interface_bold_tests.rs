@@ -56,6 +56,11 @@ fn system_ui_bold_fallback_keeps_registered_alias_after_shared_file_conversion()
     let (selected, cacheable) = select_font_fallback(&database, base, '日', INTERFACE_BOLD_WEIGHT);
     assert_selected_alias(&database, base, alias, selected);
     assert!(cacheable);
+    let character = alias_character(&database, alias, true)?;
+    assert_eq!(
+        requested_interface_preflight(&database, base, character, INTERFACE_BOLD_WEIGHT),
+        Err((Some(alias), true))
+    );
     Ok(())
 }
 
@@ -72,7 +77,7 @@ fn missing_alias_glyph_requires_non_interface_fallback() -> Result<(), String> {
     );
     let character = alias_character(&database, alias, false)?;
     assert_eq!(
-        requested_interface_preflight(&database, base, character),
+        requested_interface_preflight(&database, base, character, INTERFACE_BOLD_WEIGHT),
         Ok(true)
     );
     assert_real_non_interface_fallback(&database, base, character);
@@ -98,7 +103,7 @@ fn unreadable_alias_disables_requested_fallback_and_caching() -> Result<(), Stri
     );
     assert_eq!(super::probe_font_has_char(&database, alias, 'A'), None);
     assert_eq!(
-        requested_interface_preflight(&database, base, 'A'),
+        requested_interface_preflight(&database, base, 'A', INTERFACE_BOLD_WEIGHT),
         Err((None, false))
     );
     assert_eq!(
@@ -112,8 +117,9 @@ fn requested_interface_preflight(
     database: &Database,
     base: ID,
     character: char,
+    weight: u16,
 ) -> Result<bool, (Option<ID>, bool)> {
-    let attributes = super::fallback_attributes(INTERFACE_BOLD_WEIGHT, false);
+    let attributes = super::fallback_attributes(weight, false);
     let mut probe = |id, glyph| super::probe_font_has_char(database, id, glyph);
     super::requested_preflight(database, base, character, attributes, &mut probe)
 }
@@ -150,6 +156,10 @@ fn normal_weight_interface_fallback_uses_regular_selection() -> Result<(), Strin
     let (mut database, base, alias) = test_support::shared_file_alias_fixture()?;
     retain_primary_and_alias(&mut database, base, alias);
     let character = alias_character(&database, alias, true)?;
+    assert_eq!(
+        requested_interface_preflight(&database, base, character, NORMAL_WEIGHT),
+        Ok(false)
+    );
     let expected = super::matching_fallback_regular(
         &database,
         base,

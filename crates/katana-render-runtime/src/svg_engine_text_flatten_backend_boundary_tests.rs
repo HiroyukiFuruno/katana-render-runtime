@@ -152,6 +152,38 @@ fn shared_svg_document_selects_the_requested_glyph_node() -> TestResult<()> {
     Ok(())
 }
 
+#[test]
+fn shared_svg_font_rejects_a_missing_glyph_id_and_malformed_document() -> TestResult<()> {
+    const ORIGINAL_ID: &[u8] = br#"id="glyph1""#;
+    const UNKNOWN_ID: &[u8] = br#"id="glyphX""#;
+    let mut matches = SHARED_SVG_FONT
+        .windows(ORIGINAL_ID.len())
+        .enumerate()
+        .filter(|(_, bytes)| *bytes == ORIGINAL_ID);
+    let (id_offset, _) = matches.next().ok_or("fixture glyph1 marker missing")?;
+    assert!(matches.next().is_none());
+    let mut missing = SHARED_SVG_FONT.to_vec();
+    missing[id_offset..id_offset + ORIGINAL_ID.len()].copy_from_slice(UNKNOWN_ID);
+    assert_shared_svg_rejection(&missing, Some("glyph2"))?;
+    let mut malformed = SHARED_SVG_FONT.to_vec();
+    let root_offset = malformed[..id_offset]
+        .windows(b"<svg".len())
+        .rposition(|bytes| bytes == b"<svg")
+        .ok_or("fixture SVG root missing")?;
+    malformed[root_offset] = b'!';
+    assert_shared_svg_rejection(&malformed, None)
+}
+
+fn assert_shared_svg_rejection(bytes: &[u8], sibling: Option<&str>) -> TestResult<()> {
+    let (database, face) = fixture_database(bytes)?;
+    let requested = fixture_glyph(bytes, TestGlyph::Character('🌓'))?;
+    assert!(FlattenDatabaseExt::svg(database.as_ref(), face, requested).is_none());
+    let other = fixture_glyph(bytes, TestGlyph::Character('🥳'))?;
+    let node = FlattenDatabaseExt::svg(database.as_ref(), face, other);
+    assert_eq!(node.as_ref().map(usvg::Node::id), sibling);
+    Ok(())
+}
+
 #[rstest]
 #[case::outline(FONT, TestGlyph::Character('A'), Backend::Outline)]
 #[case::svg(SVG_FONT, TestGlyph::Character('😀'), Backend::Svg)]
