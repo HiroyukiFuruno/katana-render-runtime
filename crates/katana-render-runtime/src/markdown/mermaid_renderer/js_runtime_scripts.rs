@@ -184,10 +184,13 @@ JSON.stringify(rows);
         ];
         SvgRasterizeOps::with_html_font_render_scope(|| {
             let rendered = DiagramV8Runtime::render(&scripts)?;
-            let rows: Vec<serde_json::Value> =
-                serde_json::from_str(&rendered).map_err(|error| error.to_string())?;
+            let rows = decode_c4_native_width_response(&rendered)?;
             assert_c4_native_width_rows(cases, &rows)
         })
+    }
+
+    fn decode_c4_native_width_response(response: &str) -> Result<Vec<serde_json::Value>, String> {
+        serde_json::from_str(response).map_err(|error| error.to_string())
     }
 
     fn c4_native_width_probe(cases: &[(&str, &str, f32)]) -> String {
@@ -206,6 +209,28 @@ JSON.stringify(rows);
             .is_finite()
             .then_some(native)
             .ok_or_else(|| "SVG number exceeds f32 range".into())
+    }
+
+    #[test]
+    fn c4_native_width_response_rejects_malformed_v8_json() -> Result<(), String> {
+        for (script, expected) in [
+            ("'{}'", "invalid type: map, expected a sequence"),
+            ("'['", "EOF while parsing"),
+        ] {
+            let scripts = [DiagramRuntimeScript::borrowed(
+                "malformed-c4-response.js",
+                script,
+            )];
+            let response = DiagramV8Runtime::render(&scripts)?;
+            let error = decode_c4_native_width_response(&response).err();
+            assert!(
+                error
+                    .as_deref()
+                    .is_some_and(|error| error.starts_with(expected)),
+                "{error:?}"
+            );
+        }
+        Ok(())
     }
 
     fn assert_state_case(
