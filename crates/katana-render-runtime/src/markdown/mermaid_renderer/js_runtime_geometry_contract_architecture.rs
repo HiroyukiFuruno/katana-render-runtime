@@ -2,6 +2,7 @@ use super::*;
 
 fn service<'a>(
     root: Node<'a, 'a>,
+    viewport: Bounds,
     name: &str,
     expected: &str,
 ) -> Result<(Node<'a, 'a>, Bounds), String> {
@@ -16,7 +17,7 @@ fn service<'a>(
     )?;
     let icon = unique(node.descendants().filter(|item| item.has_tag_name("svg")))?;
     let bounds = rectangle(icon)?;
-    view_contains(root, bounds)?;
+    view_contains(viewport, bounds)?;
     label_in_box(node, bounds)?;
     Ok((node, bounds))
 }
@@ -64,6 +65,7 @@ fn relation(
 
 fn group_bounds(
     root: Node<'_, '_>,
+    viewport: Bounds,
     nodes: &[(String, Bounds)],
     group: (&str, &str),
 ) -> Result<(), String> {
@@ -73,7 +75,7 @@ fn group_bounds(
             .filter(|item| item.attribute("id").is_some_and(|id| id.ends_with(&suffix))),
     )?;
     let outer = rectangle(container)?;
-    view_contains(root, outer)?;
+    view_contains(viewport, outer)?;
     for (_, bounds) in nodes {
         require(
             contains(outer, [bounds[0], bounds[1]])
@@ -92,6 +94,7 @@ fn group_bounds(
 
 fn service_inventory(
     root: Node<'_, '_>,
+    viewport: Bounds,
     services: &[(&str, &str)],
 ) -> Result<Vec<(String, Bounds)>, String> {
     require(
@@ -103,7 +106,7 @@ fn service_inventory(
     )?;
     let nodes = services
         .iter()
-        .map(|(id, label)| service(root, id, label).map(|(_, b)| (id.to_string(), b)))
+        .map(|(id, label)| service(root, viewport, id, label).map(|(_, b)| (id.to_string(), b)))
         .collect::<Result<Vec<_>, _>>()?;
     for (index, (_, a)) in nodes.iter().enumerate() {
         for (_, b) in &nodes[index + 1..] {
@@ -120,9 +123,9 @@ impl GeometryContract {
         edges: &[(&str, &str, char, char)],
         group: (&str, &str),
     ) -> Result<(), String> {
-        let doc = document(svg)?;
+        let (doc, viewport) = document(svg)?;
         let root = doc.root_element();
-        let nodes = service_inventory(root, services)?;
+        let nodes = service_inventory(root, viewport, services)?;
         require(
             root.descendants()
                 .filter(|item| class(*item, "edge"))
@@ -133,13 +136,13 @@ impl GeometryContract {
         for (source, target, a, b) in edges {
             relation(root, source, target, (*a, *b), &nodes)?;
         }
-        group_bounds(root, &nodes, group)
+        group_bounds(root, viewport, &nodes, group)
     }
 
     pub(crate) fn icons(svg: &str) -> Result<(), String> {
-        let doc = document(svg)?;
+        let (doc, viewport) = document(svg)?;
         let root = doc.root_element();
-        let (database, _) = service(root, "db", "Database")?;
+        let (database, _) = service(root, viewport, "db", "Database")?;
         require(
             database.descendants().any(|node| {
                 node.attribute("rx") == Some("20") && node.attribute("ry") == Some("7.14")
@@ -147,7 +150,7 @@ impl GeometryContract {
             "database source icon lost",
         )?;
         for name in ["disk1", "disk2"] {
-            let (disk, _) = service(root, name, "Storage")?;
+            let (disk, _) = service(root, viewport, name, "Storage")?;
             require(
                 disk.descendants().any(|node| {
                     node.attribute("d")

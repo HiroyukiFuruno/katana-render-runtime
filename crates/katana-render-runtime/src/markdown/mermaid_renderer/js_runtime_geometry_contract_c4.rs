@@ -2,6 +2,7 @@ use super::*;
 
 fn container<'a>(
     root: Node<'a, 'a>,
+    viewport: Bounds,
     name: &str,
     label: &str,
     technology: &str,
@@ -23,7 +24,7 @@ fn container<'a>(
     )?;
     let bounds = rectangle(rect)?;
     label_in_box(node, bounds)?;
-    view_contains(root, bounds)?;
+    view_contains(viewport, bounds)?;
     Ok(bounds)
 }
 
@@ -87,27 +88,31 @@ fn dynamic_labels(japanese: bool) -> [&'static str; DYNAMIC_LABEL_COUNT] {
     }
 }
 
-fn dynamic_title(root: Node<'_, '_>, japanese: bool) -> Result<(), String> {
+fn dynamic_title(root: Node<'_, '_>, viewport: Bounds, japanese: bool) -> Result<(), String> {
     let expected = if japanese {
         "APIアプリケーションのダイナミック図"
     } else {
         "Dynamic diagram for API Application"
     };
-    source_title(root, expected)
+    source_title(root, viewport, expected)
 }
 
-pub(super) fn source_title(root: Node<'_, '_>, expected: &str) -> Result<(), String> {
+pub(super) fn source_title(
+    root: Node<'_, '_>,
+    viewport: Bounds,
+    expected: &str,
+) -> Result<(), String> {
     let title = unique(
         root.descendants()
             .filter(|node| node.has_tag_name("text") && text(*node) == expected),
     )?;
     let anchor = label_anchor(title)?;
-    view_contains(root, [anchor[0], anchor[1], anchor[0], anchor[1]])
+    view_contains(viewport, [anchor[0], anchor[1], anchor[0], anchor[1]])
 }
 
 impl GeometryContract {
     pub(crate) fn dynamic(svg: &str, japanese: bool) -> Result<(), String> {
-        let doc = document(svg)?;
+        let (doc, viewport) = document(svg)?;
         let root = doc.root_element();
         require(
             root.descendants()
@@ -116,10 +121,10 @@ impl GeometryContract {
                 == 2,
             "C4 node inventory changed",
         )?;
-        dynamic_title(root, japanese)?;
+        dynamic_title(root, viewport, japanese)?;
         let [spa, api, label, spa_technology, api_technology] = dynamic_labels(japanese);
-        let a = container(root, "spa", spa, spa_technology)?;
-        let b = container(root, "api", api, api_technology)?;
+        let a = container(root, viewport, "spa", spa, spa_technology)?;
+        let b = container(root, viewport, "api", api, api_technology)?;
         require(
             a[RIGHT_BOUND_INDEX] < b[0],
             "source nodes overlap or collapse",
@@ -128,17 +133,21 @@ impl GeometryContract {
     }
 
     pub(crate) fn deployment(svg: &str) -> Result<(), String> {
-        let doc = document(svg)?;
+        let (doc, viewport) = document(svg)?;
         let root = doc.root_element();
-        source_title(root, "Deployment diagram for Internet Banking System")?;
-        let inner = container(root, "mobile", "Mobile App", "Xamarin")?;
+        source_title(
+            root,
+            viewport,
+            "Deployment diagram for Internet Banking System",
+        )?;
+        let inner = container(root, viewport, "mobile", "Mobile App", "Xamarin")?;
         let (label, technology) = Self::deployment_labels(root)?;
         let outer = Self::deployment_parent(root, inner)?;
         require(
             contains(outer, label_anchor(label)?) && contains(outer, label_anchor(technology)?),
             "deployment labels detached from parent",
         )?;
-        view_contains(root, outer)
+        view_contains(viewport, outer)
     }
 
     fn deployment_labels<'a>(root: Node<'a, 'a>) -> Result<(Node<'a, 'a>, Node<'a, 'a>), String> {

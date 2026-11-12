@@ -107,8 +107,10 @@ fn malformed_paths_missing_viewbox_and_empty_labels_are_rejected() -> Result<(),
         ([0.0, 0.0], [1.0, 1.0])
     );
     let parsed = element("<svg><g><text/></g></svg>")?;
-    let root = parsed.root_element();
-    assert!(view_contains(root, [0.0, 0.0, 1.0, 1.0]).is_err());
+    assert_eq!(
+        document("<svg><g><text/></g></svg>").err().as_deref(),
+        Some("missing viewBox")
+    );
     let group = first_element(&parsed, "g")?;
     assert_eq!(
         label_in_box(group, [0.0, 0.0, 1.0, 1.0]),
@@ -141,11 +143,10 @@ fn rectangles_reject_zero_and_negative_area() -> Result<(), String> {
 
 #[test]
 fn viewbox_containment_checks_both_axes_with_serialized_tolerance() -> Result<(), String> {
-    let svg = element("<svg viewBox='0 0 10 10'/>")?;
-    let root = svg.root_element();
-    assert!(view_contains(root, [-0.000009, 0.0, 10.000009, 10.000009]).is_ok());
-    assert!(view_contains(root, [0.0, -0.00002, 10.0, 10.0]).is_err());
-    assert!(view_contains(root, [0.0, 0.0, 10.0, 10.00002]).is_err());
+    let (_, viewport) = document("<svg viewBox='0 0 10 10'/>")?;
+    assert!(view_contains(viewport, [-0.000009, 0.0, 10.000009, 10.000009]).is_ok());
+    assert!(view_contains(viewport, [0.0, -0.00002, 10.0, 10.0]).is_err());
+    assert!(view_contains(viewport, [0.0, 0.0, 10.0, 10.00002]).is_err());
     Ok(())
 }
 

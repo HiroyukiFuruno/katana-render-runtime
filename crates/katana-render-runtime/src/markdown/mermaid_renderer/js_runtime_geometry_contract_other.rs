@@ -3,7 +3,7 @@ use super::*;
 #[path = "js_runtime_geometry_contract_other_treemap.rs"]
 mod treemap;
 
-fn commit<'a>(root: Node<'a, 'a>, name: &str) -> Result<Point, String> {
+fn commit<'a>(root: Node<'a, 'a>, viewport: Bounds, name: &str) -> Result<Point, String> {
     let node = unique(root.descendants().filter(|item| {
         item.has_tag_name("circle")
             && class(*item, "commit")
@@ -23,12 +23,13 @@ fn commit<'a>(root: Node<'a, 'a>, name: &str) -> Result<Point, String> {
         .prev_sibling_element()
         .filter(|rect| class(*rect, "commit-label-bkg"))
         .ok_or("commit label paired background missing")?;
+    let bounds = rectangle(rect)?;
     require(
-        contains(rectangle(rect)?, label_anchor(label)?),
+        contains(bounds, label_anchor(label)?),
         "commit label detached from own background",
     )?;
-    view_contains(root, rectangle(rect)?)?;
-    nearest_commit(root, rectangle(rect)?, point)?;
+    view_contains(viewport, bounds)?;
+    nearest_commit(root, bounds, point)?;
     Ok(point)
 }
 
@@ -83,10 +84,10 @@ const EXPECTED_GIT_RELATION_COUNT: usize = 3;
 
 impl GeometryContract {
     pub(crate) fn git_graph(svg: &str) -> Result<(), String> {
-        let doc = document(svg)?;
+        let (doc, viewport) = document(svg)?;
         let root = doc.root_element();
-        let base = commit(root, "base")?;
-        let feature = commit(root, "rust-js")?;
+        let base = commit(root, viewport, "base")?;
+        let feature = commit(root, viewport, "rust-js")?;
         require(!near(base, feature), "commit bullets collapsed")?;
         let bullets = root
             .descendants()
@@ -101,13 +102,13 @@ impl GeometryContract {
             bullets.len() == EXPECTED_GIT_COMMIT_COUNT,
             "git commit inventory changed",
         )?;
-        Self::git_edges(root, &bullets)?;
+        Self::git_edges(root, viewport, &bullets)?;
         git_source_relations(root, &bullets, base, feature)
     }
 
-    fn git_edges(root: Node<'_, '_>, bullets: &[Point]) -> Result<(), String> {
+    fn git_edges(root: Node<'_, '_>, viewport: Bounds, bullets: &[Point]) -> Result<(), String> {
         for point in bullets {
-            view_contains(root, [point[0], point[1], point[0], point[1]])?;
+            view_contains(viewport, [point[0], point[1], point[0], point[1]])?;
         }
         let paths: Vec<_> = root
             .descendants()

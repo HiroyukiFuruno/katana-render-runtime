@@ -57,15 +57,15 @@ fn unique<'a>(nodes: impl Iterator<Item = Node<'a, 'a>>) -> Result<Node<'a, 'a>,
     Ok(found[0])
 }
 
-fn document(svg: &str) -> Result<Document<'_>, String> {
+fn document(svg: &str) -> Result<(Document<'_>, Bounds), String> {
     let doc = Document::parse(svg).map_err(|error| error.to_string())?;
     let root = doc.root_element();
     require(root.tag_name().name() == "svg", "SVG root required")?;
     /* WHY: svgtypesが4成分の非有限値と、幅・高さの非正値を構文解析で拒否する。 */
-    attr(root, "viewBox")?
+    let view = attr(root, "viewBox")?
         .parse::<ViewBox>()
         .map_err(|error| error.to_string())?;
-    Ok(doc)
+    Ok((doc, [view.x, view.y, view.x + view.w, view.y + view.h]))
 }
 
 fn visible(node: Node<'_, '_>) -> Result<(), String> {
@@ -134,11 +134,7 @@ fn contains(bounds: Bounds, point: Point) -> bool {
         && point[1] <= bounds[BOTTOM_BOUND_INDEX] + SERIALIZED_TOLERANCE
 }
 
-fn view_contains(root: Node<'_, '_>, bounds: Bounds) -> Result<(), String> {
-    let view: ViewBox = attr(root, "viewBox")?
-        .parse()
-        .map_err(|error: svgtypes::ViewBoxError| error.to_string())?;
-    let outer = [view.x, view.y, view.x + view.w, view.y + view.h];
+fn view_contains(outer: Bounds, bounds: Bounds) -> Result<(), String> {
     require(
         contains(outer, [bounds[0], bounds[1]])
             && contains(

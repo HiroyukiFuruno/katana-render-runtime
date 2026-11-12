@@ -3,7 +3,12 @@ use super::*;
 const EXPECTED_TREEMAP_LEAF_COUNT: usize = 4;
 
 impl GeometryContract {
-    fn leaf(root: Node<'_, '_>, name: &str, value: &str) -> Result<Bounds, String> {
+    fn leaf(
+        root: Node<'_, '_>,
+        viewport: Bounds,
+        name: &str,
+        value: &str,
+    ) -> Result<Bounds, String> {
         let node = unique(root.descendants().filter(|item| {
             class(*item, "treemapLeafGroup")
                 && item
@@ -21,14 +26,14 @@ impl GeometryContract {
         )?;
         let style = attr(amount, "style")?;
         require(!style.trim().is_empty(), "treemap value style missing")?;
-        view_contains(root, bounds)?;
+        view_contains(viewport, bounds)?;
         Ok(bounds)
     }
 
     pub(crate) fn treemap(svg: &str) -> Result<(), String> {
-        let doc = document(svg)?;
+        let (doc, viewport) = document(svg)?;
         let root = doc.root_element();
-        c4::source_title(root, "Runtime cost")?;
+        c4::source_title(root, viewport, "Runtime cost")?;
         require(
             root.descendants()
                 .filter(|item| class(*item, "treemapLeafGroup"))
@@ -44,7 +49,7 @@ impl GeometryContract {
         ];
         let bounds = TREEMAP_EXPECTED_VALUES
             .iter()
-            .map(|(name, value)| Self::leaf(root, name, value))
+            .map(|(name, value)| Self::leaf(root, viewport, name, value))
             .collect::<Result<Vec<_>, _>>()?;
         Self::assert_treemap_leaves_do_not_overlap(&bounds)
     }
