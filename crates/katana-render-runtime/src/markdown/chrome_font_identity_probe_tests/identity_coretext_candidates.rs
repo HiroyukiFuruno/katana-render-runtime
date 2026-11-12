@@ -71,15 +71,12 @@ fn insert_physical_identity(
 }
 
 fn unique_candidate_face(faces: BTreeMap<u32, PhysicalFace>) -> Result<PhysicalFace, String> {
-    if faces.len() != 1 {
+    let mut faces = faces.into_iter();
+    let (Some((face_index, identity)), None) = (faces.next(), faces.next()) else {
         return Err(
             "selected family has ambiguous physical face indices in a font file".to_string(),
         );
-    }
-    let (face_index, identity) = faces
-        .into_iter()
-        .next()
-        .ok_or_else(|| "selected family physical face disappeared".to_string())?;
+    };
     if face_index != 0 {
         return Err("CoreText URL descriptors cannot prove nonzero face index".into());
     }

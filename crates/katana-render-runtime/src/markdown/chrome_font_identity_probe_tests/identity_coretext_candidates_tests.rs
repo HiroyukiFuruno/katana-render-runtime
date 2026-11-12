@@ -77,13 +77,12 @@ fn physical_candidate() -> Result<(TempDirectory, PhysicalFace), String> {
 
 #[test]
 fn coretext_candidate_index_requires_one_zero_index() -> Result<(), String> {
+    const AMBIGUOUS: &str = "selected family has ambiguous physical face indices in a font file";
     let (_temp, candidate) = physical_candidate()?;
     for (indices, expected_error) in [
         (&[0_u32][..], None),
-        (
-            &[0_u32, 1][..],
-            Some("selected family has ambiguous physical face indices in a font file"),
-        ),
+        (&[][..], Some(AMBIGUOUS)),
+        (&[0_u32, 1][..], Some(AMBIGUOUS)),
         (
             &[1_u32][..],
             Some("CoreText URL descriptors cannot prove nonzero face index"),
