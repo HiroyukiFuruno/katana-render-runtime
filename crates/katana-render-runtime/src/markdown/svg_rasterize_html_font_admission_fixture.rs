@@ -34,15 +34,22 @@ impl OwnedFontCopy {
         let request = HtmlFontRequest::from_text("Arial", REGULAR_TEXT);
         let (database, _) = sources::build_known_html_font_db(&request);
         let source = file_arial_path(&database).ok_or("no real Arial File face")?;
-        let tempdir = tempfile::tempdir().map_err(|error| error.to_string())?;
-        let directory = tempdir.path().to_path_buf();
-        let copied = Self {
-            path: directory.join("Arial.ttf"),
-            directory,
-            _tempdir: tempdir,
-        };
-        std::fs::copy(source, &copied.path).map_err(|error| error.to_string())?;
-        Ok(copied)
+        Self::copy_from(source)
+    }
+
+    pub(super) fn copy_from(source: &Path) -> Result<Self, String> {
+        tempfile::tempdir()
+            .and_then(|tempdir| {
+                let directory = tempdir.path().to_path_buf();
+                let copied = Self {
+                    path: directory.join("Arial.ttf"),
+                    directory,
+                    _tempdir: tempdir,
+                };
+                std::fs::copy(source, &copied.path)?;
+                Ok(copied)
+            })
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -61,15 +68,17 @@ pub(super) fn file_arial_path(database: &Database) -> Option<&Path> {
 pub(super) fn copied_arial_database()
 -> Result<(Arc<Database>, CreationProof, OwnedFontCopy), String> {
     let copied = OwnedFontCopy::from_real_arial()?;
-    let path = copied
-        .path
-        .to_str()
-        .ok_or_else(|| "owned Arial path is not UTF-8".to_string())?;
+    let path = font_path_utf8(&copied.path)?;
     let mut database = Database::new();
     let mut proof = CreationProof::default();
     proof.load(&mut database, &[path]);
     proof.capture_prefix(&database);
     Ok((Arc::new(database), proof, copied))
+}
+
+pub(super) fn font_path_utf8(path: &Path) -> Result<&str, String> {
+    path.to_str()
+        .ok_or_else(|| "owned Arial path is not UTF-8".to_string())
 }
 
 type FamilyNames = Vec<(String, Language)>;

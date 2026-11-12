@@ -6,6 +6,33 @@ use super::{
 
 const REGULAR_FONT_WEIGHT: u16 = 400;
 
+#[test]
+fn owned_font_copy_rejects_a_missing_source() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let source = directory.path().join("absent.ttf");
+    let expected = std::fs::copy(&source, directory.path().join("destination.ttf"))
+        .err()
+        .ok_or("missing source unexpectedly copied")?;
+    assert_eq!(expected.kind(), std::io::ErrorKind::NotFound);
+    assert_eq!(
+        OwnedFontCopy::copy_from(&source).err(),
+        Some(expected.to_string())
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_owned_font_path_is_rejected() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let path = std::path::PathBuf::from(std::ffi::OsString::from_vec(b"font-\xff.ttf".to_vec()));
+    assert_eq!(
+        super::fixture::font_path_utf8(&path),
+        Err("owned Arial path is not UTF-8".to_string())
+    );
+}
+
 fn with_absent_path(
     copied: &OwnedFontCopy,
 ) -> Result<(Arc<Database>, CreationProof, std::path::PathBuf), String> {
