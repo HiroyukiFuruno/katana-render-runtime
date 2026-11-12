@@ -358,12 +358,12 @@ fn last_closed_curve_angle(path: &[Segment], idx: usize, p2: Point, p: Point, ne
 
 fn middle_vertex_angle(path: &[Segment], idx: usize, previous: MiddleSegment) -> f32 {
     match path[idx + 1] {
-        Segment::MoveTo(_) => middle_move_angle(path, idx, previous),
+        Segment::MoveTo(_) => middle_break_angle(path, idx, previous, None),
         Segment::LineTo(point) => middle_outgoing_angle(path, idx, previous, point, None),
         Segment::CubicTo(control, _, point) => {
             middle_outgoing_angle(path, idx, previous, point, Some(control))
         }
-        Segment::Close(next) => middle_close_angle(path, idx, previous, next),
+        Segment::Close(next) => middle_break_angle(path, idx, previous, Some(next)),
     }
 }
 
@@ -392,13 +392,18 @@ fn middle_outgoing_angle(
     }
 }
 
-fn middle_move_angle(path: &[Segment], idx: usize, previous: MiddleSegment) -> f32 {
-    match previous {
-        MiddleSegment::Line(p) => {
+fn middle_break_angle(path: &[Segment], idx: usize, previous: MiddleSegment, close: Option<Point>) -> f32 {
+    match (previous, close) {
+        (MiddleSegment::Move(_), _) => 0.0,
+        (MiddleSegment::Line(p), None) => {
             let prev = get_prev_vertex(path, idx);
             calc_line_angle(prev.x, prev.y, p.x, p.y)
         }
-        MiddleSegment::Cubic(_, p2, p) => {
+        (MiddleSegment::Line(p), Some(next)) => {
+            let prev = get_prev_vertex(path, idx);
+            calc_angle(prev.x, prev.y, p.x, p.y, p.x, p.y, next.x, next.y)
+        }
+        (MiddleSegment::Cubic(_, p2, p), None) => {
             if p.x.approx_eq_ulps(&p2.x, 4) && p.y.approx_eq_ulps(&p2.y, 4) {
                 let prev = get_prev_vertex(path, idx);
                 calc_line_angle(prev.x, prev.y, p.x, p.y)
@@ -406,18 +411,9 @@ fn middle_move_angle(path: &[Segment], idx: usize, previous: MiddleSegment) -> f
                 calc_line_angle(p2.x, p2.y, p.x, p.y)
             }
         }
-        MiddleSegment::Move(_) => 0.0,
-    }
-}
-
-fn middle_close_angle(path: &[Segment], idx: usize, previous: MiddleSegment, next: Point) -> f32 {
-    match previous {
-        MiddleSegment::Move(_) => 0.0,
-        MiddleSegment::Line(p) => {
-            let prev = get_prev_vertex(path, idx);
-            calc_angle(prev.x, prev.y, p.x, p.y, p.x, p.y, next.x, next.y)
+        (MiddleSegment::Cubic(p1, p2, p), Some(next)) => {
+            middle_closed_curve_angle(path, idx, p1, p2, p, next)
         }
-        MiddleSegment::Cubic(p1, p2, p) => middle_closed_curve_angle(path, idx, p1, p2, p, next),
     }
 }
 

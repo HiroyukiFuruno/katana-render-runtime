@@ -77,6 +77,20 @@ fn trailing_move_receives_the_path_end_marker() -> Result<(), String> {
 }
 
 #[test]
+fn consecutive_moves_do_not_add_an_intermediate_marker() -> Result<(), String> {
+    let markers = "marker-mid='url(#m)'";
+    let actual = source("M10 20 L30 20 M40 20 M50 20 L65 20", markers);
+    let expected = source("M10 20 L30 20 M50 20 L65 20", markers);
+    assert_eq!(marker_path_count(parse(&actual)?.root()), 2);
+    let actual = render_source(&actual)?;
+    let expected = render_source(&expected)?;
+    assert_eq!(actual.data(), expected.data());
+    assert_red(&actual, 53, 20)?;
+    assert_eq!(actual.pixel(43, 20).ok_or("sample missing")?.alpha(), 0);
+    Ok(())
+}
+
+#[test]
 fn marker_with_unrepresentable_clip_leaves_the_stroked_path_visible() -> Result<(), String> {
     let path = "M10 20 L30 20";
     let marked = source(path, "marker-start='url(#m)'").replace(
