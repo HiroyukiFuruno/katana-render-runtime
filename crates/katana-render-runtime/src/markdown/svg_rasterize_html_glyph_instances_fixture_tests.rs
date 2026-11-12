@@ -190,12 +190,17 @@ fn variation_resolution_rejects_a_corrupted_file_and_recovers() -> Result<(), St
         )
     };
     let expected = resolve()?;
+    let normalized =
+        || html_glyph_variations::normalized_coords(&fixture.database, fixture.face_id, &[]);
+    let expected_normalized = normalized()?;
     let corrupt = b"bad font";
     let parse_error = FontRef::new(corrupt).err().ok_or("invalid font parsed")?;
     std::fs::write(&fixture.path, corrupt).map_err(|error| error.to_string())?;
     assert_eq!(resolve().err(), Some(parse_error.to_string()));
+    assert_eq!(normalized().err(), Some(parse_error.to_string()));
     std::fs::write(&fixture.path, FONT_BYTES).map_err(|error| error.to_string())?;
     assert_eq!(resolve()?, expected);
+    assert_eq!(normalized()?, expected_normalized);
     Ok(())
 }
 

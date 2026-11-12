@@ -256,6 +256,11 @@ fn face_metadata_rejects_memory_backed_font() -> Result<(), String> {
         .err()
         .ok_or_else(|| "memory-backed face must not report a file path".to_owned())?;
     assert_eq!(error, "selected face is not File-backed");
+    database.remove_face(id);
+    assert_eq!(
+        face_metadata(&database, id).err().as_deref(),
+        Some("selected face disappeared")
+    );
     Ok(())
 }
 

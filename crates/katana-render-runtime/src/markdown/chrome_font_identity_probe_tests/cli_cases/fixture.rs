@@ -71,3 +71,24 @@ pub(super) fn selected_font(
         is_custom_font,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::write_nonfont_resource;
+    use crate::markdown::chrome_font_identity_probe_tests::test_support::TempDirectory;
+    use std::fs;
+
+    #[test]
+    fn nonfont_resource_writer_rejects_existing_directory() -> Result<(), String> {
+        let temp = TempDirectory::new()?;
+        let digest = super::super::super::identity::sha256(b"captured image response body");
+        let path = temp.path().join(format!("1-{digest}.body"));
+        fs::create_dir(&path).map_err(|error| error.to_string())?;
+        let error = write_nonfont_resource(temp.path())
+            .err()
+            .ok_or("resource directory was overwritten")?;
+        assert!(error.starts_with("write nonfont response body:"));
+        assert!(path.is_dir());
+        Ok(())
+    }
+}

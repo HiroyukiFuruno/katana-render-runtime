@@ -255,6 +255,24 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn real_file_metrics_report_disappearance_and_recovery() -> Result<(), String> {
+        let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+        let path = directory.path().join("NotoSans-Regular.ttf");
+        let bytes = std::fs::read(font_path(NOTO_SANS)).map_err(|error| error.to_string())?;
+        std::fs::write(&path, &bytes).map_err(|error| error.to_string())?;
+        let (database, id) = single_face_database(Source::File(path.clone()));
+        let expected = super::metrics(&database, id)?;
+        std::fs::remove_file(&path).map_err(|error| error.to_string())?;
+        assert_eq!(
+            super::metrics(&database, id).err().as_deref(),
+            Some("real face metrics missing")
+        );
+        std::fs::write(&path, &bytes).map_err(|error| error.to_string())?;
+        assert_eq!(super::metrics(&database, id)?, expected);
+        Ok(())
+    }
+
     fn font_path(relative: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative)
     }

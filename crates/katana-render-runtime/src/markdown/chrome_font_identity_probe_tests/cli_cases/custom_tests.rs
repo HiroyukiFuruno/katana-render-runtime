@@ -1,5 +1,6 @@
 use super::{
-    CliFixture, append_changed_byte, copy_font_response, custom_font_request, verify_changed_body,
+    CliFixture, append_changed_byte, assert_custom_provenance, copy_font_response,
+    custom_font_request, verify_changed_body,
 };
 use crate::markdown::chrome_font_identity_probe_tests::identity::physical_file;
 use std::fs;
@@ -46,6 +47,23 @@ fn custom_font_probe_propagates_rejection_of_empty_condition_id() -> Result<(), 
         .ok_or("invalid custom request was accepted")?;
     assert!(error.starts_with("ignored font probe failed with status Some("));
     assert!(!fixture.temp.path().join("changed-response.json").exists());
+    Ok(())
+}
+
+#[test]
+fn custom_provenance_rejects_a_removed_captured_font() -> Result<(), String> {
+    let fixture = CliFixture::new()?;
+    let path = copy_font_response(&fixture)?;
+    let request = custom_font_request(&fixture, &path)?;
+    let response = fixture.run_request("before-removal.json", &request)?;
+    let capture = response.captures.first().ok_or("capture missing")?;
+    assert_eq!(capture.status, "resolved");
+    assert_custom_provenance(capture, &path)?;
+    fs::remove_file(&path).map_err(|error| error.to_string())?;
+    let error = assert_custom_provenance(capture, &path)
+        .err()
+        .ok_or("removed captured font was accepted")?;
+    assert!(error.starts_with("canonicalize custom response:"));
     Ok(())
 }
 
