@@ -114,6 +114,47 @@ fn public_phases_reject_operations_after_real_session_closes() -> Result<(), Str
     Ok(())
 }
 
+#[test]
+fn public_open_phases_propagate_source_and_viewport_errors() -> Result<(), String> {
+    let malformed_origin = || {
+        HtmlBrowserSource::new(FIXTURE, "/missing-scheme.html").map_err(|error| error.to_string())
+    };
+    let source_error = malformed_origin()
+        .err()
+        .ok_or("relative origin was accepted")?;
+    assert_open_phase_error(&malformed_origin, fixture_viewport()?, &source_error);
+
+    let source = || {
+        HtmlBrowserSource::new("<html></html>", "https://example.test/fixture.html")
+            .map_err(|error| error.to_string())
+    };
+    let viewport = HtmlBrowserViewport::new(8193, 1, 1.0).map_err(|error| error.to_string())?;
+    let open_error = crate::HtmlRuntime
+        .open(source()?, viewport)
+        .err()
+        .ok_or("viewport beyond the raster width was accepted")?
+        .to_string();
+    assert_open_phase_error(&source, viewport, &open_error);
+    Ok(())
+}
+
+fn assert_open_phase_error(
+    source: &impl Fn() -> Result<HtmlBrowserSource, String>,
+    viewport: HtmlBrowserViewport,
+    expected: &str,
+) {
+    assert_eq!(
+        phases::cold_open(source, viewport).err().as_deref(),
+        Some(expected)
+    );
+    assert!(!raster_observer::enabled());
+    assert_eq!(
+        phases::warm_open(source, viewport).err().as_deref(),
+        Some(expected)
+    );
+    assert!(!raster_observer::enabled());
+}
+
 fn face_identity(face: &FaceInfo) -> serde_json::Value {
     let (kind, path) = match &face.source {
         Source::Binary(_) => ("Binary", None),
