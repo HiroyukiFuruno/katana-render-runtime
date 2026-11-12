@@ -175,13 +175,15 @@ mod tests {
     use super::{LayoutAnchor, anchor_delta, anchor_delta_or_zero, paint_size};
     use resvg::usvg::TextAnchor;
 
+    const MIDDLE_LAYOUT: LayoutAnchor = LayoutAnchor {
+        width: 31.130_86,
+        anchor: TextAnchor::Middle,
+        css_scale: 1.0,
+    };
+
     #[test]
     fn anchor_rounding_matches_layout_unit_middle_start_and_end() {
-        let layout = LayoutAnchor {
-            width: 31.130_86,
-            anchor: TextAnchor::Middle,
-            css_scale: 1.0,
-        };
+        let layout = MIDDLE_LAYOUT;
         assert_eq!(anchor_delta(layout, 14.0, 1.0), Some(-0.0048828125));
         assert_eq!(anchor_delta_or_zero(Some(layout), 14.0, 1.0), -0.0048828125);
         for (anchor, expected) in [
@@ -200,9 +202,8 @@ mod tests {
     fn ratio_adjusted_anchor_width_scales_with_device_ratio() -> Result<(), &'static str> {
         let css_scale = 0.999_974_55_f32;
         let layout = LayoutAnchor {
-            width: 31.130_86,
-            anchor: TextAnchor::Middle,
             css_scale,
+            ..MIDDLE_LAYOUT
         };
         let at_dpr_one =
             anchor_delta(layout, 14.0, css_scale).ok_or("DPR 1 anchor delta missing")?;
@@ -223,13 +224,26 @@ mod tests {
     #[test]
     fn invalid_scale_keeps_trial_ineligible() {
         let layout = LayoutAnchor {
-            width: 31.130_86,
-            anchor: TextAnchor::Middle,
             css_scale: f32::NAN,
+            ..MIDDLE_LAYOUT
         };
         assert_eq!(anchor_delta(layout, 14.0, 1.0), None);
         assert_eq!(anchor_delta_or_zero(None, 14.0, 2.0), 0.0);
         assert_eq!(anchor_delta_or_zero(Some(layout), 14.0, 1.0), 0.0);
         assert_eq!(paint_size(14.0, f32::NAN, 2.0), None);
+    }
+
+    #[test]
+    fn anchor_skips_nominal_overflow_even_when_rounded_paint_size_is_finite() {
+        let layout = MIDDLE_LAYOUT;
+        let font_size = 14.001;
+        let raster_scale = f32::MAX / 14.0005;
+        assert!((font_size * raster_scale).is_infinite());
+        assert!(paint_size(font_size, layout.css_scale, raster_scale).is_some_and(f32::is_finite));
+        assert_eq!(anchor_delta(layout, font_size, raster_scale), None);
+        assert_eq!(
+            anchor_delta_or_zero(Some(layout), font_size, raster_scale),
+            0.0
+        );
     }
 }
