@@ -216,6 +216,8 @@ fn synthetic_geometry_helpers_reject_malformed_inputs() -> Result<(), String> {
 
 #[test]
 fn synthetic_svg_geometry_parsers_reject_malformed_components() {
+    let svg = r#"<svg viewBox="0 0 10 10"><text x="invalid">label</text></svg>"#;
+    assert!(vary_synthetic_geometry(svg).is_err());
     assert!(parse_synthetic_translate("translate(nope, 2)").is_err());
     assert_eq!(
         parse_synthetic_translate("translate(1)").err().as_deref(),
@@ -242,6 +244,12 @@ fn c4_metrics_reject_non_numeric_and_f32_overflow_values() {
 
 #[test]
 fn synthetic_svg_root_namespace_contract_rejects_changes() {
+    let valid = "<svg/>";
+    let truncated = "<svg";
+    for (raw, rendered) in [(truncated, valid), (valid, truncated)] {
+        assert!(assert_synthetic_root_namespace_is_preserved(raw, rendered).is_err());
+    }
+    assert!(synthetic_root_attributes(truncated).is_err());
     assert_eq!(
         synthetic_root_attributes(r#"<svg xmlns="urn:unsupported"/>"#)
             .err()
