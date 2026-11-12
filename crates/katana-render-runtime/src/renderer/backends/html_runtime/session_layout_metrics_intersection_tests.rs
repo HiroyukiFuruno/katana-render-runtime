@@ -124,6 +124,26 @@ fn window_scroll_timeout_discards_session_and_rejects_later_url_update()
     Ok(())
 }
 
+#[test]
+fn v8_termination_during_url_update_discards_the_runtime() -> Result<(), HtmlRuntimeError> {
+    let mut session = start("<p>Page remains in the same session</p>");
+    let next_url = "https://example.test/next";
+    session.update_document_url(next_url)?;
+    let handle = session
+        .isolate
+        .as_ref()
+        .ok_or_else(|| HtmlRuntimeError::DomBridge("fixture isolate missing".to_owned()))?
+        .thread_safe_handle();
+    assert!(handle.terminate_execution());
+    assert_eq!(
+        session.update_document_url("https://example.test/terminated"),
+        Err(HtmlRuntimeError::ExecutionTimeout)
+    );
+    assert!(session.isolate.is_none());
+    assert!(session.context.is_none());
+    Ok(())
+}
+
 fn observed_target_boxes(
     visible: u64,
     hidden: u64,
