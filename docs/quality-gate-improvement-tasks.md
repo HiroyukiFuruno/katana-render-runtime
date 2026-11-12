@@ -2,6 +2,8 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 最新の正式計測は `27ad4c45` の86,836/87,119行、99.675157%、未カバー283行。前回から既存の未カバー8行が減り、新規回帰が混在したファイルで4行増えた。全6,439テスト成功、別に15件skip。収集実0・ソース前後一致・集計不変、100%条件でpolicy実1（`tmp/quality/resumed-owner-r3509/root-coverage-after-performance-retention-gnmvl8h5/{safe-summary,gap-summary,gap-delta-normalized-paths}.json`）。
+- 上記の回帰ケースを既存命名のテスト専用ファイルに分離し、実フォントfixtureの生成・検証補助は計測対象に残した。Mermaid CLIは証跡なしの通常入口で正常出力・親欠落・出力先がディレクトリの予定3条件を確認。移動した4テストを含む関連5テスト、静的基盤、ASTが成功し、ソース前後一致（`281d16ed`、`025d3485`、`tmp/quality/resumed-owner-r3509/release-coverage-face-tests-and-cli-v_hv1lqs/safe-summary.json`）。CLIのWindowsの実行結果と正式カバレッジへの差分は未確認。
 - `528a08c9` の正式全体計測は、静的基盤・AST成功後、計測中のHTML性能検証ファイル変更を正規ソース照合で検出して実1。今回分の正式集計は生成されず、未カバー287行が直近確定値（`tmp/quality/resumed-owner-r3509/root-coverage-after-viewbox-07rg4esv/safe-summary.json`）。別のCoreText回帰は、実静的フォントを可変フォントとして拒否する予定1条件中1条件がテスト本体で成功し、`b789bca4` にコミットした。同実行でもHTML性能検証の編集により全ソース一致は不成立。個別の結果として保持し、正式計測は編集が完了したソースで行う（`tmp/quality/resumed-owner-r3509/release-coverage-coretext-static-file-i1qwgwic/safe-summary.json`）。
 - 予定2条件中2条件を確認。実Block SVGの `viewBox` 欠落と、同梱静的フォントがCoreTextで可変軸を持たないことを検証。Mermaidの図形検証では、不変のDOM上で行っていた `viewBox` の二重解析を除き、入口で確認した範囲を各図種の既存判定へ渡す。無効な入力の拒否と境界許容差は関連テストで維持。関連47テスト・静的基盤・AST成功、前後ソース一致（`60f3ef32`、`a790dffb`、`7515adc7`、`tmp/quality/resumed-owner-r3509/release-coverage-validated-viewbox-mukj0_rg/safe-summary.json`）。CoreTextの欠落分岐に実際に入ったかと、全体の未カバー行の減少は正式計測で判定する。フォント描画キャッシュとメモリ予算の残候補は、実入力で決定的に再現できる経路が見つかるまで未対応として追跡する。
 - 正式未カバー箇所を対象とする予定8条件中8条件を確認。実フォント3条件、Chrome検証資源2条件、実Block/C4 SVGの異常3条件。ASTの関数長指摘を修正後、関連7テスト、静的基盤、AST、ソース前後一致が成功（`943dea96`、`139b7c60`、`tmp/quality/resumed-owner-r3509/release-coverage-font-mermaid-real-paths-ok69sb8n/safe-summary.json`）。未カバー行の減少は次回の正式計測で判定する。
