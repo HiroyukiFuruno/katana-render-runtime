@@ -64,12 +64,7 @@ impl HtmlInteractiveSession {
         let document_y = y / scale + self.scroll_geometry.scroll_y;
         self.hit_targets.iter().rev().find(|target| {
             contains(*target, x, document_y)
-                && self
-                    .element_boxes
-                    .iter()
-                    .rev()
-                    .find(|element| element.node_id == target.node_id)
-                    .is_some_and(|element| visible_through_overflow_clips(element, x, document_y))
+                && hit_owner_is_visible(&self.element_boxes, target.node_id, x, document_y)
         })
     }
 
@@ -158,6 +153,14 @@ fn contains(target: &impl BoxGeometry, x: f32, y: f32) -> bool {
         && y <= target.y() + target.height()
 }
 
+fn hit_owner_is_visible(element_boxes: &[ElementBox], node_id: u64, x: f32, y: f32) -> bool {
+    element_boxes
+        .iter()
+        .rev()
+        .find(|element| element.node_id == node_id)
+        .is_some_and(|element| visible_through_overflow_clips(element, x, y))
+}
+
 fn visible_through_overflow_clips(element: &ElementBox, x: f32, y: f32) -> bool {
     element
         .overflow_clips
@@ -191,7 +194,7 @@ mod document_scroll_tests {
 
 #[cfg(test)]
 mod overflow_clip_hit_tests {
-    use super::visible_through_overflow_clips;
+    use super::{hit_owner_is_visible, visible_through_overflow_clips};
     use crate::renderer::backends::html_interactive::types::{
         ElementBox, ElementPositioningContext, OverflowClip,
     };
@@ -227,10 +230,9 @@ mod overflow_clip_hit_tests {
 
     #[test]
     fn hit_target_without_owner_element_is_rejected() {
-        let owner: Option<&ElementBox> = None;
-        assert!(
-            !owner.is_some_and(|element| { visible_through_overflow_clips(element, 20.0, 20.0) })
-        );
+        let elements = [element_with_clip(None)];
+        assert!(hit_owner_is_visible(&elements, 1, 20.0, 20.0));
+        assert!(!hit_owner_is_visible(&elements, 2, 20.0, 20.0));
     }
 
     #[test]
