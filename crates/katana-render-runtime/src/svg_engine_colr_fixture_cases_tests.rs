@@ -98,7 +98,23 @@ fn colr_fixture_rejects_glyph_without_unicode_mapping() -> Result<(), String> {
         error,
         format!("COLR glyph {} has no Unicode mapping", u32::MAX)
     );
+    assert_eq!(
+        verify_unclipped_glyph(u32::MAX),
+        Err(format!("COLR glyph {} has no Unicode mapping", u32::MAX))
+    );
     Ok(())
+}
+
+#[test]
+fn colr_fixture_rejects_mapped_glyph_without_vector_paths() {
+    /* WHY: 同梱フォントのU+FE001はUnicodeに対応するが、輪郭とCOLRの描画を持たない。 */
+    const MAPPED_PATHLESS_GLYPH_ID: u32 = 1;
+    assert_eq!(
+        verify_unclipped_glyph(MAPPED_PATHLESS_GLYPH_ID),
+        Err(format!(
+            "glyph-{MAPPED_PATHLESS_GLYPH_ID}-without-clip-box did not produce vector paths"
+        ))
+    );
 }
 
 #[test]
