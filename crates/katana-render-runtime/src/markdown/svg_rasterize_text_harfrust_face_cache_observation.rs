@@ -60,7 +60,7 @@ pub(in crate::markdown::svg_rasterize) fn source_get(path: &Path, stamp: &FileSt
     });
 }
 
-fn eligible(entry: &Entry, path: &Path, stamp: &FileStamp) -> bool {
+pub(super) fn eligible(entry: &Entry, path: &Path, stamp: &FileStamp) -> bool {
     matches!(&entry.key, CacheKey::File { path: cached, generation, .. }
         if cached == path && generation.diagnostic_matches_stamp(stamp))
         && !entry

@@ -37,6 +37,35 @@ pub(super) fn text_span(
     Ok((text, span))
 }
 
+#[test]
+fn face_observation_reports_missing_glyph_size_for_another_real_face() -> Result<(), String> {
+    let (mut database, first_face) = super::variations_tests::bundled_face()?;
+    let second_face = *database
+        .load_font_source(resvg::usvg::fontdb::Source::Binary(std::sync::Arc::new(
+            crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES.to_vec(),
+        )))
+        .first()
+        .ok_or("second bundled font face did not load")?;
+    assert_ne!(first_face, second_face);
+    let tree = font_tree(database)?;
+    let (_, span) = text_span(&tree)?;
+    let glyph = span
+        .positioned_glyphs
+        .first()
+        .ok_or("fixture glyph missing")?;
+    let other_face = [first_face, second_face]
+        .into_iter()
+        .find(|id| span.positioned_glyphs.iter().all(|glyph| glyph.font != *id))
+        .ok_or("fixture span uses both faces")?;
+    assert!(tree.fontdb().face(other_face).is_some());
+    let result = super::variations::face_observation(tree.fontdb(), span, other_face, glyph);
+    assert_eq!(
+        result.err(),
+        Some(format!("missing glyph font size for face {other_face:?}"))
+    );
+    Ok(())
+}
+
 pub(super) fn svg_with_many_text_spans() -> String {
     let spans = (0..=MAX_FINAL_GLYPH_RECORDS)
         .map(|index| {

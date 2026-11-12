@@ -35,9 +35,13 @@ fn changed_generation_then_poison(path: &Path, database: &Database, face: ID) ->
     assert!(!std::ptr::eq(old.metrics(), fresh.metrics()));
     assert_eq!(old.metrics(), fresh.metrics());
     assert_file_retention(database, face, &fresh);
+    #[cfg(target_os = "macos")]
+    let observe_poisoned_owner = observe_owner_before_removal(path)?;
+    #[cfg(not(target_os = "macos"))]
+    let observe_poisoned_owner = || {};
     std::fs::remove_file(path)?;
     SvgRasterizeOps::with_html_font_render_scope(|| {
-        check_actual_lazy_poison(database, face, &fresh)
+        check_actual_lazy_poison(database, face, &fresh, &observe_poisoned_owner)
     })?;
     Ok(())
 }
@@ -55,6 +59,7 @@ fn check_actual_lazy_poison(
     database: &Database,
     face: ID,
     fresh: &FontHandle,
+    observe_poisoned_owner: &impl Fn(),
 ) -> Result<(), String> {
     /* WHY: metricsで未読のpost tableを実際に取得させ、flag注入ではなくIO失敗を観測する。 */
     let _ = fresh.style_metrics();
@@ -65,8 +70,33 @@ fn check_actual_lazy_poison(
             .ok_or("real lazy poison flag missing")?
             .load(Ordering::Acquire)
     );
+    observe_poisoned_owner();
     assert!(!commit_file_font(database, face, fresh));
     assert_all_handles_cleared();
     assert!(font_for_face(database, face).is_none());
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn observe_owner_before_removal(path: &Path) -> Result<impl Fn() + '_, String> {
+    use crate::markdown::svg_rasterize::text_shaping::stamp_path_uncached;
+
+    let stamp = stamp_path_uncached(path).map_err(|()| "fixture stamp unavailable")?;
+    assert_diagnostic_owner(path, &stamp, stamp.durable_reusable());
+    Ok(move || assert_diagnostic_owner(path, &stamp, false))
+}
+
+#[cfg(target_os = "macos")]
+fn assert_diagnostic_owner(
+    path: &Path,
+    stamp: &crate::markdown::svg_rasterize::text_shaping::FileStamp,
+    expected: bool,
+) {
+    use super::super::super::observation::eligible;
+
+    ACTIVE_SCOPE.with(|cache| {
+        let cache = cache.borrow();
+        let mut entries = cache.entry.iter().chain(cache.spare.iter());
+        assert_eq!(entries.any(|entry| eligible(entry, path, stamp)), expected);
+    });
 }
