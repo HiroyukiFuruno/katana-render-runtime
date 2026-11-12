@@ -177,6 +177,35 @@ fn shared_svg_font_rejects_a_missing_glyph_id_and_malformed_document() -> TestRe
     assert_shared_svg_rejection(&malformed, None)
 }
 
+#[test]
+fn svg_in_ot_emoji_flattens_and_renders_through_the_text_route() -> TestResult<()> {
+    let options = bitmap_options(SVG_FONT)?;
+    let source = r#"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">
+      <text id="emoji" x="4" y="48" font-size="40">😀</text>
+    </svg>"#;
+    let tree = usvg::Tree::from_str(source, &options)?;
+    let Some(usvg::Node::Text(text)) = tree.node_by_id("emoji") else {
+        return Err("SVG font text node missing".into());
+    };
+    let glyph = text
+        .layouted()
+        .iter()
+        .flat_map(|span| span.positioned_glyphs.iter())
+        .next()
+        .ok_or("SVG font glyph was not shaped")?;
+    assert!(FlattenDatabaseExt::svg(tree.fontdb().as_ref(), glyph.font, glyph.id).is_some());
+    assert!(
+        text.flattened()
+            .children()
+            .iter()
+            .any(|node| matches!(node, usvg::Node::Group(_)))
+    );
+
+    let pixmap = render_clip_fixture(&tree)?;
+    assert!(pixmap.pixels().iter().any(|pixel| pixel.alpha() != 0));
+    Ok(())
+}
+
 fn assert_shared_svg_rejection(bytes: &[u8], sibling: Option<&str>) -> TestResult<()> {
     let (database, face) = fixture_database(bytes)?;
     let requested = fixture_glyph(bytes, TestGlyph::Character('🌓'))?;

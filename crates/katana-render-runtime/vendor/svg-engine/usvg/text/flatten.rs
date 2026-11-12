@@ -1,8 +1,8 @@
 // Copyright 2022 the Resvg Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use std::mem;
 use std::sync::Arc;
+use std::{cmp::Ordering, mem};
 
 use crate::svg_engine::usvg::GlyphId;
 use fontdb::{Database, ID};
@@ -402,22 +402,39 @@ fn png_glyph_image(image: &BitmapGlyph<'_>, data: &[u8]) -> Option<Image> {
 
 fn svg_glyph(font: &skrifa::FontRef<'_>, glyph_id: GlyphId) -> Option<Node> {
     let svg_table = font.svg().ok()?;
-    let image_data = svg_table.glyph_data(glyph_id.into())?;
-    let tree = Tree::from_data(image_data, &Options::default()).ok()?;
-    // 1glyphの文書はroot全体を、共有文書は対象IDのnodeを使う。
     let document_list = svg_table.svg_document_list().ok()?;
-    let doc_record = document_list.document_records().iter().find(|record| {
-        (record.start_glyph_id.get().to_u32()..=record.end_glyph_id.get().to_u32())
-            .contains(&glyph_id.0)
-    })?;
-    let node = if doc_record.start_glyph_id == doc_record.end_glyph_id {
-        Node::Group(Box::new(tree.root))
+    let records = document_list.document_records();
+    /* WHY: glyph_dataと同じ探索で選んだレコードから、文書バイトとglyph範囲の両方を得る。 */
+    let index = records
+        .binary_search_by(|record| {
+            if record.start_glyph_id.get().to_u32() > glyph_id.0 {
+                Ordering::Greater
+            } else if record.end_glyph_id.get().to_u32() < glyph_id.0 {
+                Ordering::Less
+            } else {
+                Ordering::Equal
+            }
+        })
+        .ok()?;
+    let doc_record = &records[index];
+    let start = doc_record.svg_doc_offset();
+    let end = start.checked_add(doc_record.svg_doc_length())?;
+    let image_data = document_list
+        .offset_data()
+        .as_bytes()
+        .get(start as usize..end as usize)?;
+    let tree = Tree::from_data(image_data, &Options::default()).ok()?;
+    svg_document_glyph(tree, glyph_id, doc_record.start_glyph_id == doc_record.end_glyph_id)
+}
+
+fn svg_document_glyph(tree: Tree, glyph_id: GlyphId, single_glyph: bool) -> Option<Node> {
+    if single_glyph {
+        Some(Node::Group(Box::new(tree.root)))
     } else {
         tree.node_by_id(&format!("glyph{}", glyph_id.0))
             .log_none(|| log::warn!("Failed to find SVG glyph node for glyph {}", glyph_id.0))
-            .cloned()?
-    };
-    Some(node)
+            .cloned()
+    }
 }
 
 fn colr_glyph(
