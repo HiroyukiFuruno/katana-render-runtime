@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 対応予定10件中10件完了。フォントCLIの不正JSON3条件、Mermaid Architectureの不正な接続口・接続先3条件、診断出力のシンボリックリンク2条件、ASCIIのフォント名変換と容量制限付きHTML書き込みの到達不能分岐の整理2件を確認した。診断出力の外側は独立した一時ディレクトリを使い、拒否時にファイルが作成されないことも確認した。macOSの関連11テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-coverage-font-architecture-encoding-kgdzr1tn/safe-summary.json`、`14509b2b`・`8a815b85`・`da2e4e3d`・`e97fa77e`）。正式カバレッジは最終フェーズで計測する。
 - 対応予定10件中10件完了。非UTF-8の資源パスを含むフォント要求の拒否3経路、Mermaid描画観測に渡す構文不正とSVG viewBoxの異常5種類、SVGフィルターの検証済み種別を再判定する重複の整理1件を確認した。ファイルシステムによる非UTF-8名の許容差を避け、シリアライズ前のパスで検証した。macOSの関連16テスト、静的検査、ASTが成功（`tmp/quality/resumed-owner-r3509/release-coverage-observer-transfer-27299c12/safe-summary.json`、`2c892003`・`f100c66c`・`e940bfea`）。Windows側は必須CI、正式カバレッジは最終フェーズで確認する。
 - 対応予定10条件中10条件完了。フォントの複製・読取・CoreText証跡ファイルの欠落3条件、Mermaid幅データの必須4項目欠落・数値範囲超過5条件、実描画C4の親ラベル欠落2条件を確認した。初回は固定ハッシュ対象の変更で静的検査が止まり、追加テストを検証関数の隣へ移して固定対象を元の内容に復元した。最終差分で関連8テスト、静的検査、ASTが成功した（`tmp/quality/resumed-owner-r3509/release-coverage-c4-font-boundaries-4ezoxtgb/safe-summary.json`、`981ef7ba`・`89c2f317`）。正式カバレッジは最終フェーズで計測する。
 - 対応予定4件中4件完了。実在する不正フォントをCoreTextが拒否する経路、cmap検証用ファイルの不正な保存先、SVG `<use>` の参照欠落と別名前空間の2条件を確認した。SVGは有効な参照との画素比較を既存ケースと共通化した。初回は重複検査、次回はASTの色定数で止まり、修正後は関連12テスト、静的検査、ASTが成功した（`tmp/quality/resumed-owner-r3509/release-coverage-font-svg-use-irme9bxh/safe-summary.json`、`e78eb593`・`0a0e423c`・`241c9277`）。正式カバレッジは最終フェーズで計測する。
