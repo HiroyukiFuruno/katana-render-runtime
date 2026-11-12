@@ -1,6 +1,9 @@
 use super::{TestResult, usvg};
 use std::sync::Arc;
 
+#[path = "svg_engine_text_layout_zero_height_tests.rs"]
+mod zero_height_tests;
+
 pub(super) fn fixture_database(
     bytes: &[u8],
 ) -> TestResult<(Arc<usvg::fontdb::Database>, usvg::fontdb::ID)> {
