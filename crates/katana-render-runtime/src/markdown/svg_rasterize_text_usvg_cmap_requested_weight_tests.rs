@@ -135,6 +135,13 @@ fn assert_uncached_requested_selection(
             expected_face(weight)?,
             "uncached weight {weight}"
         );
+        assert!(matches!(face.source, usvg::fontdb::Source::File(_)));
+        assert!(!super::super::super::font::memo_usable());
+        let retry = selector(span.font(), '注', &[base, chosen], &mut database);
+        assert!(
+            retry.is_some_and(|face| face != base && face != chosen),
+            "{retry:?}"
+        );
     }
     Ok(())
 }
