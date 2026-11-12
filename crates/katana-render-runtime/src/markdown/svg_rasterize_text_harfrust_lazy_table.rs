@@ -32,10 +32,13 @@ pub(super) fn load(path: &Path, face_index: u32) -> std::io::Result<LazyFont> {
             .sum::<u64>(),
     ) as usize;
     super::admit_source_budget(retained_source_bytes);
-    let path = PathBuf::from(path);
     let poisoned = Arc::new(AtomicBool::new(false));
-    let source = table_source(path, directory, Arc::clone(&poisoned));
-    let font = Font::new(source, face_index)
+    /* WHY: TableFunctionの構築時には字形数を持つmaxpの有無が検査されない。 */
+    let font = directory
+        .tables
+        .contains_key(b"maxp")
+        .then(|| table_source(PathBuf::from(path), directory, Arc::clone(&poisoned)))
+        .and_then(|source| Font::new(source, face_index))
         .ok_or_else(|| Error::new(ErrorKind::InvalidData, "invalid lazy font"))?;
     Ok(LazyFont {
         font,

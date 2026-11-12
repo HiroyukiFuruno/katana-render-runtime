@@ -1,5 +1,7 @@
 use super::{Ordering, load};
 use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
+use crate::markdown::svg_rasterize::text_shaping::test_font_data::font_with_renamed_table;
+use rustybuzz::ttf_parser::Tag;
 use skrifa::raw::TableProvider;
 use std::io::ErrorKind;
 
@@ -35,6 +37,26 @@ fn truncated_font_poisons_an_existing_lazy_table_source() -> Result<(), Box<dyn 
     let fresh = load(&path, 0)?;
     assert!(fresh.font.tables().name().is_ok());
     assert!(!fresh.poisoned.load(Ordering::Acquire));
+    Ok(())
+}
+
+#[test]
+fn lazy_font_rejects_a_real_sfnt_missing_its_maxp_table() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("font-without-maxp.ttf");
+    let bytes = font_with_renamed_table(
+        FONT_BYTES,
+        Tag::from_bytes(b"maxp"),
+        Tag::from_bytes(b"xmax"),
+    )?;
+    std::fs::write(&path, bytes)?;
+
+    let error = load(&path, 0)
+        .err()
+        .ok_or("font without maxp was accepted")?;
+    assert_eq!(error.kind(), ErrorKind::InvalidData);
+    assert_eq!(error.to_string(), "invalid lazy font");
     Ok(())
 }
 
