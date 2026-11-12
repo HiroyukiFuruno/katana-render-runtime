@@ -162,10 +162,7 @@ fn print_report(root: &Path) -> Result<(), String> {
             "errors": [error]
         }),
     };
-    println!(
-        "{}",
-        serde_json::to_string(&output).map_err(|error| error.to_string())?
-    );
+    println!("{output}");
     if output["status"] != "verified" {
         return Err("MathJax static route rejected".into());
     }
