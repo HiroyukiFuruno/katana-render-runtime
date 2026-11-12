@@ -22,6 +22,23 @@ fn session_creation_rejects_invalid_viewport_before_starting_runtime() -> TestRe
 }
 
 #[test]
+fn session_creation_rejects_overflowing_logical_viewport() -> TestResult {
+    let source =
+        HtmlBrowserSource::new("<style>html{display:none}</style>", "https://example.test/")
+            .map_err(|error| error.to_string())?;
+    let viewport = HtmlBrowserViewport::new(1, 1, f32::MIN_POSITIVE / 16.0)
+        .map_err(|error| error.to_string())?;
+    assert!(viewport.logical_width().is_infinite());
+    assert!(viewport.logical_height().is_infinite());
+    let result = HtmlBrowserSession::new(source, viewport);
+    assert!(
+        matches!(result, Err(HtmlBrowserError::InvalidViewport)),
+        "{result:?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn session_creation_revalidates_mutated_source() -> TestResult {
     let mut source = test_source("https://example.test/oversized.html")?;
     let max = super::super::HTML_BROWSER_MAX_SOURCE_BYTES;
