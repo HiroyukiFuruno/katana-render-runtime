@@ -13,6 +13,30 @@ const ZERO_TRANSFORM_COMPONENT: f32 = 0.0;
 const IDENTITY_TRANSFORM_COMPONENT: f32 = 1.0;
 
 #[test]
+fn audit_text_span_rejects_missing_or_nontext_id_in_real_svg() -> Result<(), String> {
+    let reference = bundled_tree()?;
+    assert!(!text_span(&reference)?.1.positioned_glyphs.is_empty());
+    let options = resvg::usvg::Options {
+        font_family: "Noto Sans".to_owned(),
+        fontdb: Arc::clone(reference.fontdb()),
+        ..Default::default()
+    };
+    for body in [
+        "<text id='other' y='20'>AV</text>",
+        "<rect id='audit-run' width='4' height='4'/><text y='20'>AV</text>",
+    ] {
+        let svg =
+            format!("<svg xmlns='http://www.w3.org/2000/svg' width='64' height='32'>{body}</svg>");
+        let tree = Tree::from_str(&svg, &options).map_err(|error| error.to_string())?;
+        assert_eq!(
+            text_span(&tree).err().as_deref(),
+            Some("font audit fixture text is missing")
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn final_glyph_recording_rejects_a_removed_real_font_source() -> Result<(), String> {
     let tree = bundled_tree()?;
     let (_, span) = text_span(&tree)?;
