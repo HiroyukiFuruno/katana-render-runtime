@@ -704,14 +704,9 @@ pub(crate) fn convert_clip_path_elements(
     parent: &mut Group,
 ) {
     for node in clip_node.children() {
-        let tag_name = match node.tag_name() {
-            Some(v) => v,
-            None => continue,
-        };
-
-        if !tag_name.is_graphic() {
+        let Some(tag_name) = node.tag_name().filter(|tag| tag.is_graphic()) else {
             continue;
-        }
+        };
 
         if !node.is_visible_element(state.opt) {
             continue;
