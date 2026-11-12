@@ -99,6 +99,15 @@ mod tests {
     use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
 
     #[test]
+    fn input_metrics_decline_a_font_family_that_cannot_be_resolved() {
+        assert!(html_input_character_metrics("Noto Sans", 16.0, 400, false).is_some());
+        assert!(
+            html_input_character_metrics("KRR Unavailable Input Font 7f91", 16.0, 400, false)
+                .is_none()
+        );
+    }
+
+    #[test]
     fn input_metrics_reject_a_real_font_without_x_glyph_or_advance()
     -> Result<(), Box<dyn std::error::Error>> {
         let original = Face::parse(FONT_BYTES, 0).map_err(|_| "bundled font is invalid")?;
