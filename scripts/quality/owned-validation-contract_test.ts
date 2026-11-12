@@ -27,6 +27,7 @@ import {
   generatedRuntimeRustAssetInputPaths,
   generatedRuntimeRustAssetPaths,
 } from "../runtime-assets/runtime-package-asset-compressor";
+import { NATIVE_WIDTH_CONSUMER_PINS } from "../runtime-bundles/native-width-consumer-contract";
 import { changedCompilerInputRead } from "./compiler-input-test-helper";
 import {
   MATHJAX_ABI,
@@ -3170,40 +3171,19 @@ test("actual Rust native width test trace remains mandatory with isolated strict
     consumerVerified: true,
     typeProfileVerified: true,
   });
-  expect(report.nativeWidthTrace.consumerSources).toEqual([
-    {
-      path: `${nativeWidthTraceDirectory}/js_runtime.rs`,
-      sha256: "6beaa9a5f1b2d52c87d4e34ab55e78ee2a00b57c8a992da3082ab5459300b28a",
-    },
-    {
-      path: `${nativeWidthTraceDirectory}/js_runtime_native_width_tests.rs`,
-      sha256: "fc4bc1f529ab42eb8e8433137940c9c2f3750a16ef2b8a4adfb6be56bd15793a",
-    },
-    {
-      path: `${nativeWidthTraceDirectory}/js_runtime_native_width_c4_description_tests.rs`,
-      sha256: "b5a7e3e5ffb73a22ad6df961f46ad915debb6590d4b7c984a4ceb9e8aa62e6e2",
-    },
-    {
-      path: `${nativeWidthTraceDirectory}/js_runtime_native_width_c4_tests.rs`,
-      sha256: "28610a5998405703b5a07c6c1023efbf4e3315b2eb5d93b56ad043f8dcef2ead",
-    },
-    {
-      path: `${nativeWidthTraceDirectory}/js_runtime_native_width_ishikawa_tests.rs`,
-      sha256: "8d818595edc6750bafbead131fef9beea1987a9995a0a2613cabf1b2de3d5a9f",
-    },
-    {
-      path: `${nativeWidthTraceDirectory}/js_runtime_native_width_helpers.rs`,
-      sha256: "0a429cafcd569dc8c1ed993141ef394d0ee10717fe2883f2583af5b7e14232fd",
-    },
-    {
-      path: nativeWidthBBoxTracePath,
-      sha256: "e2aae9c8755431d6a5a0c92c7816b273fc204fb4f8f845cf1eae57574b929d4b",
-    },
-    {
-      path: `${nativeWidthTraceDirectory}/js_runtime_native_width_oracle_boundary_tests.rs`,
-      sha256: "f4375e4ca17e4d1931efbf21020b7b48bf06079ed9ae00de3ea160d31683731f",
-    },
-  ]);
+  const consumerPaths = [
+    `${nativeWidthTraceDirectory}/js_runtime.rs`,
+    `${nativeWidthTraceDirectory}/js_runtime_native_width_tests.rs`,
+    `${nativeWidthTraceDirectory}/js_runtime_native_width_c4_description_tests.rs`,
+    `${nativeWidthTraceDirectory}/js_runtime_native_width_c4_tests.rs`,
+    `${nativeWidthTraceDirectory}/js_runtime_native_width_ishikawa_tests.rs`,
+    `${nativeWidthTraceDirectory}/js_runtime_native_width_helpers.rs`,
+    nativeWidthBBoxTracePath,
+    `${nativeWidthTraceDirectory}/js_runtime_native_width_oracle_boundary_tests.rs`,
+  ] as const;
+  expect(report.nativeWidthTrace.consumerSources).toEqual(
+    consumerPaths.map((path) => ({ path, sha256: NATIVE_WIDTH_CONSUMER_PINS[path] })),
+  );
   expect(report.javascriptTypeCoverage.mandatoryPaths).toContain(nativeWidthTracePath);
   expect(report.javascriptTypeCoverage.mandatoryPaths).toContain(nativeWidthBBoxTracePath);
   expect(report.javascriptTypeCoverage.deferredProductPaths).not.toContain(nativeWidthTracePath);
