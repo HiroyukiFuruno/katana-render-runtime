@@ -257,10 +257,13 @@ fn missing_geometry_attribute_is_added_for_rect_and_ellipse() {
 }
 
 #[test]
-fn geometry_attribute_is_inserted_before_a_regular_opening_tag_end() {
-    let source = r#"<svg xmlns="http://www.w3.org/2000/svg"><style>rect{rx:6px}</style><rect data-label="a>b"><title>shape</title></rect></svg>"#;
-    let expected = source.replace("data-label=\"a>b\">", "data-label=\"a>b\" rx=\"6px\">");
-    assert_eq!(preprocess(source), expected);
+fn geometry_attribute_is_inserted_after_quoted_values_in_both_tag_forms() {
+    let attributes = "data-label='形>状' data-detail=\"'>'\"";
+    let source = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg"><style>rect{{rx:6px}}</style><title>形状</title><rect {attributes}><title>shape</title></rect><rect {attributes}/></svg>"#
+    );
+    let expected = source.replace(attributes, &format!("{attributes} rx=\"6px\""));
+    assert_eq!(preprocess(&source), expected);
 }
 
 #[test]

@@ -71,25 +71,20 @@ fn remove_preceding_space(range: Range<usize>) -> Range<usize> {
 }
 
 fn opening_tag_end(source: &str, node: Node<'_, '_>) -> Option<usize> {
-    let start = node.range().start;
+    /* WHY: 要素の範囲は同じDocumentが解析した元のバイト列を指す。 */
+    let range = node.range();
     let bytes = source.as_bytes();
     let mut quote = None;
-    for (offset, byte) in bytes.get(start..)?.iter().enumerate() {
+    let offset = bytes[range.clone()].iter().position(|&byte| {
         match (quote, byte) {
-            (Some(current), value) if current == *value => quote = None,
-            (None, b'\'' | b'"') => quote = Some(*byte),
-            (None, b'>') => {
-                let end = start + offset;
-                return Some(if bytes.get(end.saturating_sub(1)) == Some(&b'/') {
-                    end - 1
-                } else {
-                    end
-                });
-            }
+            (Some(current), value) if current == value => quote = None,
+            (None, b'\'' | b'"') => quote = Some(byte),
             _ => {}
         }
-    }
-    None
+        quote.is_none() && byte == b'>'
+    })?;
+    let end = range.start + offset;
+    Some(end - usize::from(bytes[end - 1] == b'/'))
 }
 
 fn push_edit(edits: &mut Vec<SourceEdit>, range: Range<usize>, replacement: String) {
