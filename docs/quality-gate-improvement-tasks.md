@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 共有フォントの実バイトを最初に読む時点で一時フォントファイルを原子的に置換し、文字幅キャッシュが世代変更を検出して幅を返さず、次の呼び出しで計測と保存ができることを確認した。テスト用の共有バイト実装で置換時点を固定し、実際のファイル操作とシェーパーを使う。関連4件、静的基盤、ASTが成功、ソース前後一致（`53119afc`、`tmp/quality/resumed-owner-r3509/release-coverage-shared-font-replaced-during-shaping-wyadi0n_/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - 実SVGのフォント選択でロック保持中の中断を再現し、選択を無効にして試行の状態を解放することを確認した。実HTMLセッションから作った正常なフォント診断記録も、イベント欠落を示す値を加えると拒否することを確認した。初回ASTでテストファイルの300行上限を検出し、中断テストを責務単位で分離。関連6件、静的基盤、ASTが成功し、ソース前後一致（`72681982`、`66c65ba5`、`tmp/quality/resumed-owner-r3509/release-coverage-font-admission-and-dropped-events-cpg2j_zt/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - 最新の正式計測は `b0f9e880` の86,775/87,008行、99.732209%、未カバー233行（240行から7行減、増加ファイルなし）。SVGマーカー1行、Mermaid文字幅検証2行、フォント診断3行、実フォント除外後の選択1行。実行対象6,472件すべて成功、別に15件skip。収集と証跡認証、ソース前後一致は成功し、100%条件で不合格（`tmp/quality/resumed-owner-r3509/root-coverage-after-colr-font-and-marker-np3yf6u9/{safe-summary,coverage-file-delta}.json`）。
 - SVG中間マーカーの移動・閉鎖境界で、重複していた角度判定を同じ関数へ集約した。tiny-skiaの `move_to` が連続移動を上書きする実装と、SVGの連続移動を正規化した対照に対するマーカー数・画素の一致を確認。関連10件、静的基盤、ASTが成功、ソース前後一致（`6b123e31`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-marker-subpath-break-78ure_bu/safe-summary.json`）。初回は取り込み元の検査でローカル変更のSHA不一致を検出したため、上流元のSHAを維持したまま変更対象のファイルと由来台帳のSHAを更新して再検査した。
