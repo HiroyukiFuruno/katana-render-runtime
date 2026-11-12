@@ -15,21 +15,22 @@ pub(super) fn font_with_only_b_cmap(font: &[u8]) -> Result<Vec<u8>, String> {
         .glyph_index('B')
         .ok_or("B glyph missing")?
         .0;
-    rewrite_cmap(font, record, offset, head, b_cmap(glyph))
+    let mut changed = font.to_vec();
+    rewrite_cmap(&mut changed, record, offset, head, &b_cmap(glyph))?;
+    Ok(changed)
 }
 
 fn rewrite_cmap(
-    font: &[u8],
+    changed: &mut [u8],
     record: usize,
     offset: usize,
     head: usize,
-    cmap: Vec<u8>,
-) -> Result<Vec<u8>, String> {
-    let mut changed = font.to_vec();
-    changed[offset..offset + cmap.len()].copy_from_slice(&cmap);
+    cmap: &[u8],
+) -> Result<(), String> {
+    changed[offset..offset + cmap.len()].copy_from_slice(cmap);
     changed[record + SFNT_TABLE_CHECKSUM_OFFSET
         ..record + SFNT_TABLE_CHECKSUM_OFFSET + SFNT_CHECKSUM_WORD_BYTES]
-        .copy_from_slice(&sfnt_checksum(&cmap).to_be_bytes());
+        .copy_from_slice(&sfnt_checksum(cmap).to_be_bytes());
     let cmap_len = u32::try_from(cmap.len())
         .map_err(|_| "cmap too large")?
         .to_be_bytes();
@@ -39,14 +40,11 @@ fn rewrite_cmap(
     changed[head + HEAD_CHECKSUM_ADJUSTMENT_OFFSET
         ..head + HEAD_CHECKSUM_ADJUSTMENT_OFFSET + SFNT_CHECKSUM_WORD_BYTES]
         .fill(0);
-    let adjustment = SFNT_CHECKSUM_MAGIC.wrapping_sub(sfnt_checksum(&changed));
+    let adjustment = SFNT_CHECKSUM_MAGIC.wrapping_sub(sfnt_checksum(changed));
     changed[head + HEAD_CHECKSUM_ADJUSTMENT_OFFSET
         ..head + HEAD_CHECKSUM_ADJUSTMENT_OFFSET + SFNT_CHECKSUM_WORD_BYTES]
         .copy_from_slice(&adjustment.to_be_bytes());
-    if changed.len() != font.len() {
-        return Err("cmap rewrite changed font length".into());
-    }
-    Ok(changed)
+    Ok(())
 }
 
 pub(super) fn rewrite_with_same_modified_time(
