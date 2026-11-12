@@ -181,7 +181,7 @@ fn compare_raster_pixels(
     let upem = cached
         .units_per_em()
         .ok_or("Helvetica units-per-em unavailable")? as f32;
-    let span = super::prepare_pixel_span(text, id, upem)?;
+    let span = super::prepare_pixel_span(text, id, upem, cached)?;
     let cached_pixels = super::draw_pixels(&span, cached)?;
     let repacked_pixels = super::draw_pixels(&span, repacked)?;
     let delta = super::pixel_difference(&cached_pixels, &repacked_pixels);

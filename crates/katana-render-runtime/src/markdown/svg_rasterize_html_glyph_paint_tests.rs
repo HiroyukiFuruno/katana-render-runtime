@@ -265,6 +265,7 @@ fn trial_span(alignment: Option<XAlignment>) -> PreparedSpan {
     PreparedSpan {
         fill: TEST_FILL,
         font: resvg::usvg::fontdb::ID::default(),
+        typeface: super::super::CachedTypeface::Skia(skia_safe::Font::default().typeface()),
         glyphs: Vec::new(),
         glyph_ids: Vec::new(),
         upem: TEST_FONT_UNITS_PER_EM,

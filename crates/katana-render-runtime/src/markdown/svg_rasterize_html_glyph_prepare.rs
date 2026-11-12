@@ -151,6 +151,7 @@ impl HtmlGlyphRasterizer<'_> {
             glyphs: glyphs.to_vec(),
             glyph_ids: input.glyph_ids,
             upem: input.face.upem,
+            typeface: input.face.typeface,
             font_size: input.font_size,
             baseline_shift,
             x_alignment: None,

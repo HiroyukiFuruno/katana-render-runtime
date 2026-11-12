@@ -152,7 +152,7 @@ fn glyph_pixel_delta(
     let Some(Node::Text(text)) = tree.node_by_id("run") else {
         return Err("pixel fixture text missing".to_string());
     };
-    let prepared = prepare_pixel_span(text, id, upem)?;
+    let prepared = prepare_pixel_span(text, id, upem, file)?;
     let file_pixels = draw_pixels(&prepared, file)?;
     let system_pixels = draw_pixels(&prepared, system)?;
     Ok(pixel_difference(&file_pixels, &system_pixels))
@@ -181,21 +181,17 @@ pub(super) fn prepare_pixel_span(
     text: &resvg::usvg::Text,
     id: ID,
     upem: f32,
+    typeface: &skia_safe::Typeface,
 ) -> Result<PreparedSpan, String> {
-    let span = text
-        .layouted()
-        .first()
-        .ok_or("pixel fixture span missing")?;
-    let glyph_ids = span
-        .positioned_glyphs
-        .iter()
-        .map(|glyph| u16::try_from(glyph.id.0).map_err(|_| "glyph id overflow".to_string()))
-        .collect::<Result<Vec<_>, _>>()?;
+    let [span, ..] = text.layouted() else {
+        return Err("pixel fixture span missing".into());
+    };
     Ok(PreparedSpan {
         fill: [0, 0, 0, OPAQUE_ALPHA],
         font: id,
+        typeface: super::CachedTypeface::Skia(typeface.clone()),
         glyphs: span.positioned_glyphs.clone(),
-        glyph_ids,
+        glyph_ids: pixel_glyph_ids(&span.positioned_glyphs)?,
         upem,
         font_size: SAMPLE_FONT_SIZE,
         baseline_shift: 0.0,
@@ -205,6 +201,13 @@ pub(super) fn prepare_pixel_span(
         effects: None,
         variable_instance: None,
     })
+}
+
+fn pixel_glyph_ids(glyphs: &[resvg::usvg::layout::PositionedGlyph]) -> Result<Vec<u16>, String> {
+    glyphs
+        .iter()
+        .map(|glyph| u16::try_from(glyph.id.0).map_err(|_| "glyph id overflow".to_string()))
+        .collect()
 }
 
 pub(super) fn draw_pixels(

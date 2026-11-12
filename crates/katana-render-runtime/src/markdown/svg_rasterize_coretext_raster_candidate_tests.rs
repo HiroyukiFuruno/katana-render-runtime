@@ -28,7 +28,7 @@ fn physical_trebuchet_coretext_and_skia_raster_paths_are_observed() -> Result<()
         let skia_render_ns = skia_start.elapsed().as_nanos();
         let (font_bytes, index) = physical_bytes(database, rasterizer, id)?;
         let coretext_start = Instant::now();
-        let coretext_pixels = render_coretext(&font_bytes, index, span)?;
+        let coretext_pixels = render_coretext(&font_bytes, index, &span.glyph_ids, &span.glyphs)?;
         let coretext_render_ns = coretext_start.elapsed().as_nanos();
         assert_glyph_contract(span, typeface, &skia_pixels, &coretext_pixels)?;
         save_probe_images(&skia_pixels, &coretext_pixels)?;
@@ -50,19 +50,21 @@ fn coretext_only_uses_fontdb_bytes_and_usvg_glyph_ids() -> Result<(), String> {
     let _ = rasterizer.face_file(id)?;
     let (font_bytes, index) = database_face_bytes(&database, id)?;
     let face = FontRef::from_index(&font_bytes, 0).map_err(|_| "physical font parse failed")?;
-    let upem = face
-        .head()
-        .map_err(|_| "physical font head unavailable")?
-        .units_per_em();
-    let span = prepare_span_from_upem(&database, id, upem as f32)?;
+    face.head().map_err(|_| "physical font head unavailable")?;
+    let tree = super::parse_pixel_tree(&database, FAMILY, Weight::NORMAL)?;
+    let text = pixel_fixture_text(&tree)?;
+    let [span, ..] = text.layouted() else {
+        return Err("pixel fixture span missing".into());
+    };
+    let glyph_ids = super::pixel_glyph_ids(&span.positioned_glyphs)?;
     let started = Instant::now();
-    let pixels = render_coretext(&font_bytes, 0, &span)?;
+    let pixels = render_coretext(&font_bytes, 0, &glyph_ids, &span.positioned_glyphs)?;
     let elapsed_ns = started.elapsed().as_nanos();
     assert_pixels("CoreText-only", &pixels)?;
     eprintln!(
         "coretext-only family={FAMILY} bytes={} face_index={index} glyphs={} render_ns={elapsed_ns} total_ns={}",
         font_bytes.len(),
-        span.glyph_ids.len(),
+        glyph_ids.len(),
         total_started.elapsed().as_nanos()
     );
     Ok(())
@@ -113,19 +115,15 @@ fn prepare_span(
     let upem = typeface
         .units_per_em()
         .ok_or("physical typeface units-per-em unavailable")? as f32;
-    prepare_span_from_upem(database, id, upem)
+    let tree = super::parse_pixel_tree(database, FAMILY, Weight::NORMAL)?;
+    super::prepare_pixel_span(pixel_fixture_text(&tree)?, id, upem, typeface)
 }
 
-fn prepare_span_from_upem(
-    database: &Database,
-    id: resvg::usvg::fontdb::ID,
-    upem: f32,
-) -> Result<super::super::PreparedSpan, String> {
-    let tree = super::parse_pixel_tree(database, FAMILY, Weight::NORMAL)?;
-    let Some(resvg::usvg::Node::Text(text)) = tree.node_by_id("run") else {
-        return Err("Trebuchet pixel fixture text missing".to_string());
-    };
-    super::prepare_pixel_span(text, id, upem)
+fn pixel_fixture_text(tree: &resvg::usvg::Tree) -> Result<&resvg::usvg::Text, String> {
+    match tree.node_by_id("run") {
+        Some(resvg::usvg::Node::Text(text)) => Ok(text),
+        _ => Err("Trebuchet pixel fixture text missing".to_string()),
+    }
 }
 fn physical_bytes(
     database: &Database,
@@ -159,7 +157,8 @@ fn database_face_bytes(
 fn render_coretext(
     bytes: &[u8],
     index: u32,
-    span: &super::super::PreparedSpan,
+    glyph_ids: &[u16],
+    glyphs: &[resvg::usvg::layout::PositionedGlyph],
 ) -> Result<Vec<u8>, String> {
     if index != 0 {
         return Err("CoreText candidate requires a single-face source".to_string());
@@ -168,9 +167,8 @@ fn render_coretext(
     let cgfont = CGFont::from_data_provider(provider).map_err(|_| "CGFont creation failed")?;
     let font = new_from_CGFont(&cgfont, FONT_SIZE);
     let mut context = bitmap_context();
-    let glyphs = span.glyph_ids.clone();
-    let positions = glyph_positions(span);
-    font.draw_glyphs(&glyphs, &positions, context.clone());
+    let positions = glyph_positions(glyphs);
+    font.draw_glyphs(glyph_ids, &positions, context.clone());
     Ok(context.data().to_vec())
 }
 
@@ -195,8 +193,8 @@ fn bitmap_context() -> CGContext {
     context
 }
 
-fn glyph_positions(span: &super::super::PreparedSpan) -> Vec<CGPoint> {
-    span.glyphs
+fn glyph_positions(glyphs: &[resvg::usvg::layout::PositionedGlyph]) -> Vec<CGPoint> {
+    glyphs
         .iter()
         .map(|glyph| {
             let transform = glyph.transform();

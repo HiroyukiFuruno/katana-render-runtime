@@ -93,13 +93,7 @@ impl HtmlGlyphRasterizer<'_> {
                 surface::draw_span(skia_surface.canvas(), &span, typeface, raster_scale)?;
                 continue;
             }
-            let Some(face) = self.ensure_face(span.font)? else {
-                return Err(format!(
-                    "cached SVG font face {:?} became unavailable",
-                    span.font
-                ));
-            };
-            let typeface = face.typeface.as_skia();
+            let typeface = span.typeface.as_skia();
             surface::draw_span(skia_surface.canvas(), &span, typeface, raster_scale)?;
         }
         Ok(())

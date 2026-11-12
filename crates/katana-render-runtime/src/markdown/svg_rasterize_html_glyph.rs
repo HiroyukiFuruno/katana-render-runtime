@@ -161,6 +161,7 @@ struct XAlignment {
 struct PreparedSpan {
     fill: [u8; RGBA_CHANNELS],
     font: usvg::fontdb::ID,
+    typeface: CachedTypeface,
     glyphs: Vec<usvg::layout::PositionedGlyph>,
     glyph_ids: Vec<u16>,
     upem: f32,
