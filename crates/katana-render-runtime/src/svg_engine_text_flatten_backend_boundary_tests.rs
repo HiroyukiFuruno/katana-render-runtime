@@ -66,7 +66,7 @@ fn backend_has_glyph(
 
 #[test]
 fn bitmap_text_in_clip_does_not_expand_the_vector_clip_region() -> TestResult<()> {
-    let options = bitmap_clip_options()?;
+    let options = bitmap_options(CBDT_FONT)?;
     let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">
       <defs><clipPath id="clip"><rect x="1" y="1" width="4" height="4"/>
       <text x="12" y="24" font-size="16">😀</text></clipPath></defs>
@@ -108,8 +108,8 @@ fn assert_bitmap_clip_roundtrip(
     Ok(())
 }
 
-fn bitmap_clip_options() -> TestResult<usvg::Options<'static>> {
-    let (fontdb, face_id) = fixture_database(CBDT_FONT)?;
+fn bitmap_options(bytes: &[u8]) -> TestResult<usvg::Options<'static>> {
+    let (fontdb, face_id) = fixture_database(bytes)?;
     let family = fontdb
         .face(face_id)
         .and_then(|face| face.families.first())
@@ -122,6 +122,9 @@ fn bitmap_clip_options() -> TestResult<usvg::Options<'static>> {
         ..usvg::Options::default()
     })
 }
+
+#[path = "svg_engine_text_bitmap_mask_tests.rs"]
+mod bitmap_mask_tests;
 
 fn contains_bitmap(group: &usvg::Group) -> bool {
     group.children().iter().any(|node| match node {
