@@ -160,13 +160,18 @@ fn root_background_color_adds_only_a_solid_background_path(
     Ok(())
 }
 
-#[test]
-fn percentage_root_without_viewbox_uses_the_default_viewport() -> Result<(), String> {
-    let source = r#"<svg xmlns="http://www.w3.org/2000/svg" width="50%" height="25%"></svg>"#;
-    let tree = usvg::Tree::from_str(source, &usvg::Options::default())
+#[rstest]
+#[case::both_axes(r#"width="50%" height="25%""#, (50.0, 25.0))]
+#[case::percentage_width(r#"width="50%" height="32""#, (50.0, 32.0))]
+#[case::percentage_height(r#"width="64" height="25%""#, (64.0, 25.0))]
+fn percentage_root_without_viewbox_uses_the_default_viewport(
+    #[case] attributes: &str,
+    #[case] expected: (f32, f32),
+) -> Result<(), String> {
+    let source = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" {attributes}></svg>"#);
+    let tree = usvg::Tree::from_str(&source, &usvg::Options::default())
         .map_err(|error| error.to_string())?;
-    assert_eq!(tree.size().width(), 50.0);
-    assert_eq!(tree.size().height(), 25.0);
+    assert_eq!((tree.size().width(), tree.size().height()), expected);
     assert!(tree.root().children().is_empty());
     Ok(())
 }

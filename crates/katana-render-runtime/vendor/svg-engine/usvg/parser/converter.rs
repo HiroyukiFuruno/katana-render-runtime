@@ -551,10 +551,11 @@ fn resolve_svg_size(
     let default_view_box = NonZeroRect::from_xywh(0.0, 0.0, 100.0, 100.0).unwrap();
     let mut state = root_state(default_view_box, opt, shared_fontdb);
     let def = Length::new(100.0, Unit::Percent);
-    let mut width: Length = svg.attribute(AId::Width).unwrap_or(def);
-    let mut height: Length = svg.attribute(AId::Height).unwrap_or(def);
+    let width: Length = svg.attribute(AId::Width).unwrap_or(def);
+    let height: Length = svg.attribute(AId::Height).unwrap_or(def);
     let view_box = svg.parse_viewbox();
-    let restore_viewbox = resolve_fallback_size(&mut width, &mut height, view_box, &state);
+    let restore_viewbox =
+        view_box.is_none() && (width.unit == Unit::Percent || height.unit == Unit::Percent);
     let size = if let Some(vbox) = view_box {
         state.view_box = vbox;
         size_with_view_box(svg, &state, vbox, width, height, def)
@@ -565,31 +566,6 @@ fn resolve_svg_size(
         )
     };
     (size.ok_or(Error::InvalidSize), restore_viewbox)
-}
-
-fn resolve_fallback_size(
-    width: &mut Length,
-    height: &mut Length,
-    view_box: Option<NonZeroRect>,
-    state: &State,
-) -> bool {
-    if (width.unit == Unit::Percent || height.unit == Unit::Percent) && view_box.is_none() {
-        if width.unit == Unit::Percent {
-            *width = Length::new(
-                (width.number / 100.0) * state.opt.default_size.width() as f64,
-                Unit::None,
-            );
-        }
-        if height.unit == Unit::Percent {
-            *height = Length::new(
-                (height.number / 100.0) * state.opt.default_size.height() as f64,
-                Unit::None,
-            );
-        }
-        true
-    } else {
-        false
-    }
 }
 
 fn size_with_view_box(
