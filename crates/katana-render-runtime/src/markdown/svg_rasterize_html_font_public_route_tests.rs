@@ -12,6 +12,12 @@ const FIXTURE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../tests/fixtures/html/interaction-fidelity.html"
 ));
+const FIXTURE_WIDTH: u32 = 1280;
+const FIXTURE_HEIGHT: u32 = 900;
+
+fn fixture_viewport() -> Result<HtmlBrowserViewport, String> {
+    HtmlBrowserViewport::new(FIXTURE_WIDTH, FIXTURE_HEIGHT, 1.0).map_err(|e| e.to_string())
+}
 
 fn pixel_sha(pixels: &[u8]) -> String {
     Sha256::digest(pixels)
@@ -64,7 +70,7 @@ fn route_events(events: &[serde_json::Value]) -> (BTreeMap<String, usize>, Vec<s
 
 #[test]
 fn public_fixture_five_phases_observe_raster_font_routes() -> Result<(), String> {
-    let viewport = HtmlBrowserViewport::new(1280, 900, 1.0).map_err(|e| e.to_string())?;
+    let viewport = fixture_viewport()?;
     let origin = format!(
         "file:///krr-performance/{}.html",
         pixel_sha(FIXTURE.as_bytes())
@@ -79,6 +85,32 @@ fn public_fixture_five_phases_observe_raster_font_routes() -> Result<(), String>
     phases::post_operation(&mut session)?;
     phases::close_control(&mut session, "final_close")?;
     assert_eq!(session.state(), HtmlBrowserSessionState::Closed);
+    Ok(())
+}
+
+#[test]
+fn public_phases_reject_operations_after_real_session_closes() -> Result<(), String> {
+    let viewport = fixture_viewport()?;
+    let source = HtmlBrowserSource::new(FIXTURE, "https://example.test/fixture.html")
+        .map_err(|e| e.to_string())?;
+    let mut session = crate::HtmlRuntime
+        .open(source, viewport)
+        .map_err(|e| e.to_string())?;
+    session.close().map_err(|e| e.to_string())?;
+    assert!(phases::re_display(&mut session).is_err());
+    assert_eq!(
+        phases::max_scroll(&session, viewport).err().as_deref(),
+        Some("initial frame missing")
+    );
+    assert_eq!(
+        phases::full_y(&mut session, 1.0).err().as_deref(),
+        Some("scroll frame missing")
+    );
+    assert_eq!(
+        phases::post_operation(&mut session).err().as_deref(),
+        Some("operation frame missing")
+    );
+    assert!(phases::scroll_top_control(&mut session, 1.0).is_err());
     Ok(())
 }
 
