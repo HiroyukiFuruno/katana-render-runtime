@@ -97,7 +97,7 @@ fn write_missing_font(fixture: &Fixture) -> Result<(), String> {
     .map_err(|error| error.to_string())
 }
 
-fn replace_font_file(fixture: &Fixture) -> Result<(), String> {
+pub(super) fn replace_font_file(fixture: &Fixture) -> Result<(), String> {
     let replacement = fixture.root.join("replacement.ttf");
     std::fs::copy(fixture.root.join("arial.ttf"), &replacement)
         .map_err(|error| error.to_string())?;

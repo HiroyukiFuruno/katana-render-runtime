@@ -77,6 +77,47 @@ fn absent_destination_preserves_the_file_write_error() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn failed_real_font_copy_preserves_error_and_tempdir_cleanup() -> Result<(), String> {
+    for (destination, source, earlier_file) in [
+        (
+            "arial.ttf",
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "noto.ttf",
+        ),
+        (
+            "helvetica.ttc",
+            "/System/Library/Fonts/Helvetica.ttc",
+            "arial.ttf",
+        ),
+    ] {
+        assert_real_font_copy_failure(destination, source, earlier_file)?;
+    }
+    Ok(())
+}
+
+fn assert_real_font_copy_failure(
+    destination: &str,
+    source: &str,
+    earlier_file: &str,
+) -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let root = directory.path().join("fixture");
+    std::fs::create_dir_all(root.join(destination)).map_err(|error| error.to_string())?;
+    let expected = std::fs::copy(source, root.join(destination))
+        .err()
+        .ok_or("unexpected real-font copy success")?
+        .to_string();
+    assert_eq!(write_real_fonts(&root).err().as_deref(), Some(expected.as_str()));
+    assert!(root.join("noto.ttf").is_file());
+    if earlier_file == "arial.ttf" {
+        assert!(root.join(earlier_file).is_file());
+    }
+    drop(directory);
+    assert!(!root.exists());
+    Ok(())
+}
+
 #[cfg(unix)]
 #[test]
 fn non_utf8_font_path_is_rejected_before_loading() -> Result<(), String> {

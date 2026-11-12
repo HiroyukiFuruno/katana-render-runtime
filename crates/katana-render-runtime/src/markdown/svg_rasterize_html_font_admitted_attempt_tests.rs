@@ -4,6 +4,40 @@ mod test_support;
 use test_support::{assert_fixture_escape, assert_publication_barrier, receipt};
 
 #[test]
+fn selected_font_copy_failure_preserves_the_original_file() -> Result<(), String> {
+    let fixture = Fixture::new()?;
+    let original = std::fs::read(fixture.root.join("noto.ttf"))
+        .map_err(|error| error.to_string())?;
+    std::fs::remove_file(fixture.root.join("arial.ttf")).map_err(|error| error.to_string())?;
+
+    let error = test_support::replace_font_file(&fixture)
+        .err()
+        .ok_or("missing Arial source unexpectedly copied")?;
+    assert!(!error.is_empty());
+    assert_eq!(
+        std::fs::read(fixture.root.join("noto.ttf")).map_err(|error| error.to_string())?,
+        original
+    );
+    assert!(!fixture.root.join("replacement.ttf").exists());
+    Ok(())
+}
+
+#[test]
+fn selected_font_rename_failure_preserves_copied_replacement() -> Result<(), String> {
+    let fixture = Fixture::new()?;
+    std::fs::remove_file(fixture.root.join("noto.ttf")).map_err(|error| error.to_string())?;
+    std::fs::create_dir(fixture.root.join("noto.ttf")).map_err(|error| error.to_string())?;
+
+    let error = test_support::replace_font_file(&fixture)
+        .err()
+        .ok_or("directory destination unexpectedly accepted replacement")?;
+    assert!(!error.is_empty());
+    assert!(fixture.root.join("replacement.ttf").is_file());
+    assert!(fixture.root.join("noto.ttf").is_dir());
+    Ok(())
+}
+
+#[test]
 fn admitted_local_missing_scope_rejects_existing_path_without_mutation() -> Result<(), String> {
     let fixture = Fixture::new()?;
     let missing = fixture.root.join("absent.ttf");
