@@ -165,6 +165,23 @@ fn coretext_lookup_skips_descriptors_with_a_different_name() -> Result<(), Strin
 }
 
 #[test]
+fn coretext_rejects_static_font_without_variable_weight_evidence() -> Result<(), String> {
+    let (_temp, database, selected) = physical_font_fixture()?;
+    let face = database.faces().next().ok_or("font face missing")?;
+    let identity = super::super::face_identity(&database, face)?;
+    let path = identity.path.clone();
+    let error = super::resolve_file(&path, identity, &selected.post_script_name)
+        .err()
+        .ok_or("static font was accepted as a variable instance")?;
+    assert!(matches!(
+        error.as_str(),
+        "CoreText returned no variation-axis inventory"
+            | "exact CoreText descriptor exposes no variable weight axis"
+    ));
+    Ok(())
+}
+
+#[test]
 fn coretext_binding_rejects_a_named_descriptor_without_a_physical_url() -> Result<(), String> {
     let (_temp, database, _) = physical_font_fixture()?;
     let face = database.faces().next().ok_or("font face missing")?;
