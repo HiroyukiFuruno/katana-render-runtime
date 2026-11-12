@@ -2,7 +2,8 @@
 
 ## 現在の実行地点（2026-11-13、以下の過去結果と区別する）
 
-- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み48件、一部対応5件、未対応72件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0017.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み49件、一部対応9件、未対応67件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0018.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- 実SVGを監査範囲の外と内で記録し、次の監査に記録が漏れないことを確認した。CoreTextの軸属性欠落と書体名不一致、V8での任意プロパティ書き込み拒否、入力欄計測での実フォントの字形と字送り欠落も確認した。この4ファイルは残り一部対応。初回のASTファイル長超過をテストの配置修正で解消し、AST・対象13件・実catalog照合・ソース前後一致を確認した（`ea5dfb88`、`5e93f374`、`95d0aa1d`、`2d7e8127`、`tmp/quality/resumed-owner-r3509/release-coverage-font-axis-and-metrics-4jl3t8dc/safe-summary.json`）。
 - 上限を超えた実フォントを遅延読込し、キャッシュ投入時に両スロットが空になることを検証した。Mermaid幅診断は描画入口が欠けたscript列の拒否、SVGはクリップなし、透明な文字グループ、非表示パスの画素を確認した。Mermaid幅診断とSVGの未確認箇所は残件。初回のテストのimport不足を修正し、ASTと対象13件、実catalog照合、ソース前後一致を確認した（`cbd1a4aa`、`f0481ea6`、`acf738ed`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-guards-and-native-width-51qacn7d/safe-summary.json`）。
 - HTMLフローの4ファイルでは、対象のエラー伝播を調査した。同じTaffy treeが管理するNodeIdを使用する。削除済みIDを渡すとTaffy 0.15.1内部でpanicし、対象のエラー伝播を確認できないため、この4件の完了判定は保留した。
 - SVGフォントの表読み込みではサポート対象で失敗しない整数変換を整理し、cmap回帰は組み込みフォントの既存fixtureを共有した。実TTCの複数face・無効なindexと実SVGの切り抜き位置も検証した。TTCディレクトリと合成レイヤーは一部対応。初回のコメント規約違反とテスト内の旧変数参照を修正し、AST・関連12件・実catalog照合・ソース前後一致を確認した（`f6add6ac`、`698ec1d0`、`fe23e4d9`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-table-and-cmap-0q6bng67/safe-summary.json`）。
