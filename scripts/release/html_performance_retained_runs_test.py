@@ -105,6 +105,42 @@ class RetainedRunsTest(unittest.TestCase):
             )))
             self.assertEqual(list(self.namespace.iterdir()), [candidate.parent])
 
+    def test_reference_retirement_resumes_only_after_selection_changes(self) -> None:
+        old = self.root / "tmp/quality/owner/previous/measurement/bundle"
+        old_payload = old / "payload/0/stdout.raw"
+        old_payload.parent.mkdir(parents=True)
+        old_payload.write_bytes(b"old")
+        old_manifest = old / "bundle.json"
+        old_manifest.write_text(json.dumps({
+            "schema": "krr-html-performance-release-bundle-v1",
+            "attempts": [{}] * 84,
+            "files": [{"relativePath": "payload/0/stdout.raw", "originalPath": str(old_payload),
+                       "sha256": gate.sha256(old_payload)}],
+        }))
+        old_sha = gate.sha256(old_manifest)
+        self.mark(old_sha)
+        new = self.root / "tmp/replacement/bundle.json"
+        new.parent.mkdir()
+        new.write_text(json.dumps({"schema": "krr-html-performance-release-bundle-v1",
+                                   "attempts": [{}] * 84, "files": []}))
+        new_sha = gate.sha256(new)
+        retention.stage_reference_change(self.root, new, new_sha)
+        retention.reconcile_reference(self.root)
+        self.assertEqual(gate.sha256(old_manifest), old_sha)
+        self.assertEqual(old_payload.read_bytes(), b"old")
+
+        retention.stage_reference_change(self.root, new, new_sha)
+        self.mark(new_sha)
+        missing = new.rename(new.with_suffix(".saved"))
+        with self.assertRaisesRegex(ValueError, "replacement reference is missing"):
+            retention.reconcile_reference(self.root)
+        self.assertEqual(gate.sha256(old_manifest), old_sha)
+        missing.rename(new)
+        with retention.managed_output(self.root):
+            self.assertFalse(old.exists())
+        self.assertEqual(retention.reconcile_reference(self.root), new_sha)
+        self.assertEqual(gate.sha256(new), new_sha)
+
     def test_incomplete_previous_run_is_swept_without_touching_foreign_directory(self) -> None:
         self.namespace.mkdir(parents=True)
         stale = self.namespace / ("run-" + "0" * 32)

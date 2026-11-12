@@ -406,6 +406,7 @@ class PromotionAtomicityTest(unittest.TestCase):
                 bundle_path = root / "bundle"
                 bundle_path.mkdir()
                 (bundle_path / "bundle.json").write_text("{}", encoding="utf8")
+                candidate["bundleManifestSha256"] = gate.sha256(bundle_path / "bundle.json")
                 (root / "tmp").mkdir()
                 request = root / "tmp/request.json"
                 request.write_bytes(b"request")

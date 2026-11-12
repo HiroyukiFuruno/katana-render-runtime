@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import stat
 from pathlib import Path
 
@@ -45,6 +46,56 @@ def _stdout_rows(manifest: Path) -> list[tuple[Path, Path]] | None:
     return rows
 
 
+def _reserved_paths() -> tuple[Path, ...]:
+    references = os.environ.get("CARGO_CAPACITY_PROTECTED_REFS")
+    if references is None:
+        return ()
+    from cargo_capacity_guard import collect_protected_references
+
+    return tuple(Path(path).resolve() for path in collect_protected_references([], references))
+
+
+def retire_bundles(root: Path, active: str, retired: str, replacement: Path) -> bool:
+    """Called under the producer locks after the active reference has changed."""
+    obsolete = [path for path in _legacy_manifests(root / "tmp")
+                if retired != active and gate.sha256(path) == retired]
+    if not obsolete:
+        return True
+    if not _physical_file(replacement) or gate.sha256(replacement) != active:
+        return False
+    current = gate.Bundle(replacement.parent)
+    gate.require(len(gate._objects(current.manifest.get("attempts"), "reference attempts")) == 84,
+                 "replacement reference must contain all 84 conditions")
+    reserved = _reserved_paths()
+    completed = True
+    for manifest in obsolete:
+        bundle = manifest.parent
+        if replacement.is_relative_to(bundle) or any(
+            path.is_relative_to(bundle) or bundle.is_relative_to(path) for path in reserved
+        ):
+            completed = False
+            continue
+        if _stdout_rows(manifest) is None:
+            continue
+        payload = bundle / "payload"
+        receipt = bundle / "producer-verification.json"
+        if any(path not in (manifest, payload, receipt) for path in bundle.iterdir()):
+            completed = False
+            continue
+        if receipt.exists() and not _physical_file(receipt):
+            completed = False
+            continue
+        if payload.exists():
+            gate.require(payload.is_dir() and payload.resolve(strict=True) == payload,
+                         "legacy bundle payload is not physical")
+            shutil.rmtree(payload)
+        # manifestを最後まで残すと、途中で中断しても次回に同じSHAで特定できる。
+        receipt.unlink(missing_ok=True)
+        manifest.unlink()
+        bundle.rmdir()
+    return completed
+
+
 def prune(root: Path, active: str, candidate: Path, *, apply: bool) -> tuple[int, int]:
     """Called under the producer locks. The candidate must already be sealed."""
     tmp = root / "tmp"
@@ -55,11 +106,7 @@ def prune(root: Path, active: str, candidate: Path, *, apply: bool) -> tuple[int
     if retained is None:
         raise ValueError("retained candidate is not an HTML measurement")
     protected = {path for pair in retained for path in pair}
-    reserved: tuple[Path, ...] = ()
-    if (references := os.environ.get("CARGO_CAPACITY_PROTECTED_REFS")) is not None:
-        from cargo_capacity_guard import collect_protected_references
-
-        reserved = tuple(Path(path).resolve() for path in collect_protected_references([], references))
+    reserved = _reserved_paths()
     pending: set[Path] = set()
     for manifest in manifests:
         is_active = gate.sha256(manifest) == active

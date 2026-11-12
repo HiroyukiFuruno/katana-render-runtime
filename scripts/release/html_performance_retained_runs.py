@@ -1,6 +1,8 @@
 """Retention for producer-owned HTML performance runs."""
 from __future__ import annotations
 
+import json
+import os
 import re
 import shutil
 import stat
@@ -17,6 +19,7 @@ _HISTORY = "docs/performance/html-performance-history.json"
 _MANIFEST = "measurement/bundle/bundle.json"
 _RECEIPT = "measurement/batch-receipt.json"
 _CANDIDATE = "candidate.sha256"
+_RETIREMENT = "reference-retirement.json"
 
 
 def _directory(path: Path) -> None:
@@ -122,17 +125,70 @@ def _current_candidate(root: Path, active: str) -> Path:
     return manifests[0]
 
 
+def _finish_retirement(root: Path, namespace: Path, active: str) -> None:
+    from html_performance_legacy_stdout import retire_bundles
+
+    marker = namespace / _RETIREMENT
+    if not _regular(marker):
+        return
+    pending = gate.read_json(marker)
+    replacement_sha = gate._text(pending.get("replacementSha256"), "replacement reference SHA")
+    retired = gate._text(pending.get("retiredSha256"), "retired reference SHA")
+    gate.digest(replacement_sha)
+    gate.digest(retired)
+    replacement = Path(gate._text(pending.get("replacement"), "replacement manifest"))
+    if replacement_sha != active:
+        marker.unlink()
+        return
+    gate.require(_regular(replacement) and gate.sha256(replacement) == active,
+                 "selected replacement reference is missing or changed")
+    if retire_bundles(root, active, retired, replacement):
+        marker.unlink()
+
+
+def stage_reference_change(root: Path, replacement: Path, replacement_sha: str) -> None:
+    """Record the old SHA before updating history so the next run can resume cleanup."""
+    namespace = root / "tmp" / _NAMESPACE
+    namespace.mkdir(mode=0o700, exist_ok=True)
+    _directory(namespace)
+    active = _active_manifest(root)
+    _finish_retirement(root, namespace, active)
+    marker = namespace / _RETIREMENT
+    gate.require(not marker.exists() and not marker.is_symlink(), "previous reference retirement is pending")
+    temporary = marker.with_suffix(".tmp")
+    temporary.unlink(missing_ok=True)
+    try:
+        with temporary.open("x", encoding="utf8") as output:
+            json.dump({"retiredSha256": active, "replacementSha256": replacement_sha,
+                       "replacement": str(replacement)}, output)
+            output.flush()
+            os.fsync(output.fileno())
+        temporary.replace(marker)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def reconcile_reference(root: Path) -> str:
+    """Remove superseded baselines after the verified replacement is selected."""
+    active = _active_manifest(root)
+    namespace = root / "tmp" / _NAMESPACE
+    if namespace.exists():
+        _directory(namespace)
+        _finish_retirement(root, namespace, active)
+        _prune(namespace, active)
+    return active
+
+
 @contextmanager
 def managed_output(root: Path, *, baseline: Path | None = None) -> Iterator[Path]:
     """Called under the producer lock; an interrupted run is swept on the next entry."""
-    active = _active_manifest(root)
     tmp = root / "tmp"
     tmp.mkdir(exist_ok=True)
     _directory(tmp)
     namespace = tmp / _NAMESPACE
     namespace.mkdir(mode=0o700, exist_ok=True)
     _directory(namespace)
-    _prune(namespace, active)
+    active = reconcile_reference(root)
     if baseline is not None:
         _register_baseline(namespace, baseline, active)
     run = namespace / f"run-{uuid.uuid4().hex}"

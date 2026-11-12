@@ -14,6 +14,7 @@ from typing import Never, NamedTuple
 
 import html_performance_paired_stats as statistics
 import html_performance_python_identity as python_identity
+import html_performance_retained_runs as retention
 import html_performance_source_reuse_cli as reuse
 import run_html_performance as runner
 import verify_html_performance_evidence as gate
@@ -251,7 +252,15 @@ def _record(bundle: gate.Bundle, result: gate.JsonObject, phases: gate.JsonObjec
 def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, *,
             reuse_request: Path | None = None) -> PromotionResult:
     """正式な84条件の結果を履歴へ追加し、有意改善時だけ現行基準を更新する。"""
+    from produce_html_performance_evidence import candidate_build_locks
+
     root = root.resolve(strict=True)
+    with candidate_build_locks(root):
+        return _promote(directory, root, evidence_directory, run_id, reuse_request=reuse_request)
+
+
+def _promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, *,
+             reuse_request: Path | None) -> PromotionResult:
     execution_environment = dict(os.environ)
     runtime_identity = _runtime_identity(root)
     directory = directory.resolve(strict=True)
@@ -346,7 +355,11 @@ def promote(directory: Path, root: Path, evidence_directory: Path, run_id: str, 
         gate.require(_verified_reuse(reuse_request, root, directory, manifest_sha, request_sha) == eligibility,
                      "performance reuse changed before update")
     gate.require(dict(os.environ) == execution_environment, "promotion environment changed before update")
+    if improvement:
+        retention.stage_reference_change(root, directory / "bundle.json", manifest_sha)
     _atomic_history_update(root, history_path, before, after, head)
+    if improvement:
+        retention.reconcile_reference(root)
     return PromotionResult(gate._text(record["id"], "new reference id"),
                            "promoted" if improvement else "recorded")
 
