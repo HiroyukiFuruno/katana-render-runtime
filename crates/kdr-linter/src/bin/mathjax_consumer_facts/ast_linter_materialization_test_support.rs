@@ -125,28 +125,36 @@ pub(in super::super) fn mathjax_fixture() -> Result<Fixture, Box<dyn std::error:
     Fixture::copy_mathjax_inputs(&input_paths)
 }
 
+const DEFAULT_MATERIALIZATION_ROUTE_MUTATIONS: &[(&str, &str, &str)] = &[
+    (
+        "MathJaxGeneratedRuntimeAsset::materialize_at(path)",
+        "if false { MathJaxGeneratedRuntimeAsset::materialize_at(path) } else { Err(\"x\".to_string()) }",
+        "default-materialize:callee:MathJaxGeneratedRuntimeAsset::materialize_at",
+    ),
+    (
+        ".join(\"mathjax-runtime.min.js\")",
+        ".join(\"forged.js\")",
+        "default-materialize:install-path-join",
+    ),
+    (
+        ".join(\"generated\")",
+        ".join(\"forged-generated\")",
+        "default-materialize:install-path-join",
+    ),
+    (
+        ".join(\"katana-render-runtime\")",
+        ".join(\"forged-runtime\")",
+        "default-materialize:install-path-join",
+    ),
+];
+
 pub(in super::super) fn reject_default_materialization_changes(
     fixture: &Fixture,
     repository: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let renderer = RUST_INPUTS[MATHJAX_RENDERER_INDEX];
     let original = repository.join(renderer);
-    fixture.replace(
-            renderer,
-            "MathJaxGeneratedRuntimeAsset::materialize_at(path)",
-            "if false { MathJaxGeneratedRuntimeAsset::materialize_at(path) } else { Err(\"x\".to_string()) }",
-        )?;
-    fixture.reject("default-materialize:callee:MathJaxGeneratedRuntimeAsset::materialize_at")?;
-    fixture.restore_from(renderer, &original)?;
-
-    fixture.replace(
-        renderer,
-        ".join(\"mathjax-runtime.min.js\")",
-        ".join(\"forged.js\")",
-    )?;
-    fixture.reject("default-materialize:install-path-join")?;
-    fixture.restore_from(renderer, &original)?;
-    join_mutations::reject_install_path_join_mutations(fixture, &original, renderer)?;
+    fixture.reject_unique_mutations(renderer, DEFAULT_MATERIALIZATION_ROUTE_MUTATIONS)?;
     join_mutations::reject_materializer_implementation_changes(fixture, &original, renderer)?;
     reject_default_materialization_shape_changes(fixture, &original, renderer)?;
     Ok(())
