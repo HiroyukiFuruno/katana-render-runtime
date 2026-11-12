@@ -292,13 +292,10 @@ fn prepare_layout_clusters(
     fontdb: &mut Arc<fontdb::Database>,
     char_offset: usize,
 ) -> Option<(Vec<GlyphCluster>, (f32, f32))> {
-    let mut clusters = process_chunk(chunk, fonts_cache, resolver, fontdb);
+    let mut clusters = process_chunk(chunk, fonts_cache, resolver, fontdb, text_node.writing_mode);
     if clusters.is_empty() {
         return None;
     }
-    apply_writing_mode(text_node.writing_mode, &mut clusters);
-    apply_letter_spacing(chunk, &mut clusters);
-    apply_word_spacing(chunk, &mut clusters);
     apply_length_adjust(chunk, &mut clusters);
     let curr_pos = resolve_clusters_positions(
         text_node,
@@ -1153,9 +1150,10 @@ fn process_chunk(
     fonts_cache: &FontsCache,
     resolver: &FontResolver,
     fontdb: &mut Arc<fontdb::Database>,
+    writing_mode: WritingMode,
 ) -> Vec<GlyphCluster> {
     let glyphs = shape_chunk_glyphs(chunk, fonts_cache, resolver, fontdb);
-    glyphs_to_clusters(chunk, &glyphs)
+    glyphs_to_clusters(chunk, &glyphs, writing_mode)
 }
 
 fn shape_chunk_glyphs(
@@ -1259,17 +1257,31 @@ fn resize_glyph_cluster(
     }
 }
 
-fn glyphs_to_clusters(chunk: &TextChunk, glyphs: &[Glyph]) -> Vec<GlyphCluster> {
-    // Convert glyphs to clusters.
+fn glyphs_to_clusters(
+    chunk: &TextChunk,
+    glyphs: &[Glyph],
+    writing_mode: WritingMode,
+) -> Vec<GlyphCluster> {
+    let has_letter_spacing = chunk.spans.iter().any(|span| !span.letter_spacing.approx_zero_ulps(4));
+    let has_word_spacing = chunk.spans.iter().any(|span| !span.word_spacing.approx_zero_ulps(4));
+    // 字形クラスタの生成と間隔調整で同じspanを使う。末尾は生成可能なクラスタで判定する。
+    let mut selected = GlyphClusters::new(glyphs)
+        .filter_map(|(range, offset)| chunk_span_at(chunk, offset).map(|span| (range, span)))
+        .peekable();
     let mut clusters = Vec::new();
-    for (range, byte_idx) in GlyphClusters::new(glyphs) {
-        if let Some(span) = chunk_span_at(chunk, byte_idx) {
-            clusters.push(form_glyph_clusters(
-                &glyphs[range],
-                &chunk.text,
-                span.font_size.get(),
-            ));
+    while let Some((range, span)) = selected.next() {
+        let mut cluster = form_glyph_clusters(&glyphs[range], &chunk.text, span.font_size.get());
+        if writing_mode == WritingMode::TopToBottom {
+            apply_vertical_orientation(&mut cluster);
         }
+        if has_letter_spacing && script_supports_letter_spacing(cluster.codepoint.script()) {
+            apply_cluster_letter_spacing(&mut cluster, span, selected.peek().is_some());
+        }
+        if has_word_spacing && is_word_separator_characters(cluster.codepoint) {
+            // 単語間隔は字間の負送り補正後に適用し、負の送り幅も許容する。
+            cluster.advance += span.word_spacing;
+        }
+        clusters.push(cluster);
     }
 
     clusters
@@ -1357,23 +1369,15 @@ fn scale_span_clusters(
 
 /// Rotates clusters according to
 /// [Unicode Vertical_Orientation Property](https://www.unicode.org/reports/tr50/tr50-19.html).
-fn apply_writing_mode(writing_mode: WritingMode, clusters: &mut [GlyphCluster]) {
-    if writing_mode != WritingMode::TopToBottom {
-        return;
-    }
-
-    for cluster in clusters {
-        let orientation = unicode_vo::char_orientation(cluster.codepoint);
-        if orientation == unicode_vo::Orientation::Upright {
-            orient_upright_cluster(cluster);
-        } else {
-            // Could not find a spec that explains this,
-            // but this is how other applications are shifting the "rotated" characters
-            // in the top-to-bottom mode.
-            cluster.transform = cluster
-                .transform
-                .pre_translate(0.0, (cluster.ascent + cluster.descent) / 2.0);
-        }
+fn apply_vertical_orientation(cluster: &mut GlyphCluster) {
+    let orientation = unicode_vo::char_orientation(cluster.codepoint);
+    if orientation == unicode_vo::Orientation::Upright {
+        orient_upright_cluster(cluster);
+    } else {
+        // 回転する字形をベースライン間の中央へ移す。
+        cluster.transform = cluster
+            .transform
+            .pre_translate(0.0, (cluster.ascent + cluster.descent) / 2.0);
     }
 }
 
@@ -1390,34 +1394,6 @@ fn orient_upright_cluster(cluster: &mut GlyphCluster) {
     cluster.descent = -cluster.width / 2.0;
 }
 
-/// Applies the `letter-spacing` property to a text chunk clusters.
-///
-/// [In the CSS spec](https://www.w3.org/TR/css-text-3/#letter-spacing-property).
-fn apply_letter_spacing(chunk: &TextChunk, clusters: &mut [GlyphCluster]) {
-    // At least one span should have a non-zero spacing.
-    if !chunk
-        .spans
-        .iter()
-        .any(|span| !span.letter_spacing.approx_zero_ulps(4))
-    {
-        return;
-    }
-
-    let num_clusters = clusters.len();
-    for (i, cluster) in clusters.iter_mut().enumerate() {
-        // Spacing must be applied only to characters that belongs to the script
-        // that supports spacing.
-        // We are checking only the first code point, since it should be enough.
-        // https://www.w3.org/TR/css-text-3/#cursive-tracking
-        let script = cluster.codepoint.script();
-        if script_supports_letter_spacing(script) {
-            if let Some(span) = chunk_span_at(chunk, cluster.byte_idx) {
-                apply_cluster_letter_spacing(cluster, span, i != num_clusters - 1);
-            }
-        }
-    }
-}
-
 fn apply_cluster_letter_spacing(cluster: &mut GlyphCluster, span: &TextSpan, has_next: bool) {
     // 末尾の間隔は境界矩形と配置に影響させない。
     if has_next {
@@ -1428,33 +1404,6 @@ fn apply_cluster_letter_spacing(cluster: &mut GlyphCluster, span: &TextSpan, has
         cluster.width = 0.0;
         cluster.advance = 0.0;
         cluster.glyphs = vec![];
-    }
-}
-
-/// Applies the `word-spacing` property to a text chunk clusters.
-///
-/// [In the CSS spec](https://www.w3.org/TR/css-text-3/#propdef-word-spacing).
-fn apply_word_spacing(chunk: &TextChunk, clusters: &mut [GlyphCluster]) {
-    // At least one span should have a non-zero spacing.
-    if !chunk
-        .spans
-        .iter()
-        .any(|span| !span.word_spacing.approx_zero_ulps(4))
-    {
-        return;
-    }
-
-    for cluster in clusters {
-        if is_word_separator_characters(cluster.codepoint) {
-            if let Some(span) = chunk_span_at(chunk, cluster.byte_idx) {
-                // Technically, word spacing 'should be applied half on each
-                // side of the character', but it doesn't affect us in any way,
-                // so we are ignoring this.
-                cluster.advance += span.word_spacing;
-
-                // After word spacing, `advance` can be negative.
-            }
-        }
     }
 }
 

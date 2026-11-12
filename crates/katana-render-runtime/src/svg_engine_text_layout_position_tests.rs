@@ -85,3 +85,32 @@ fn rotation_and_relative_position_transform_a_single_glyph() -> Result<(), Strin
     near(offset.ty - original.ty, SHIFT_Y);
     Ok(())
 }
+
+#[test]
+fn letter_and_word_spacing_follow_the_glyph_span() -> Result<(), String> {
+    let attributes = "style='font-kerning:none' xml:space='preserve'";
+    let before = parse(attributes, "H<tspan> H</tspan>H")?;
+    let after = parse(
+        attributes,
+        "H<tspan letter-spacing='4' word-spacing='6'> H</tspan>H",
+    )?;
+    let glyph_positions = |tree| -> Result<Vec<_>, String> {
+        Ok(text(tree)?
+            .layouted()
+            .iter()
+            .flat_map(|span| &span.positioned_glyphs)
+            .map(|glyph| (glyph.id, glyph.transform().tx))
+            .collect())
+    };
+    let original = glyph_positions(&before)?;
+    let spaced = glyph_positions(&after)?;
+    assert_eq!(original.len(), 4);
+    assert_eq!(spaced.len(), original.len());
+    for (((id_before, x_before), (id_after, x_after)), expected) in
+        original.into_iter().zip(spaced).zip([0.0, 0.0, 10.0, 14.0])
+    {
+        assert_eq!(id_after, id_before);
+        near(x_after - x_before, expected);
+    }
+    Ok(())
+}
