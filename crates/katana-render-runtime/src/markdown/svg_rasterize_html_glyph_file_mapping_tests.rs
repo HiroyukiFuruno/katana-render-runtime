@@ -1,8 +1,10 @@
 use super::HtmlGlyphRasterizer;
 use crate::markdown::svg_rasterize::font_file_fixture;
+use crate::markdown::svg_rasterize::physical_font_face::verification_support::font_with_only;
 use resvg::usvg::fontdb::{Database, ID, Source};
 use std::path::Path;
 use std::sync::Arc;
+use write_fonts::types::Tag;
 
 fn shared_font_fixture() -> Result<(tempfile::TempDir, Database, ID), String> {
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
@@ -68,6 +70,32 @@ fn registered_file_font_corruption_rejects_metadata_and_recovers() -> Result<(),
     std::fs::write(&fixture.path, font_file_fixture::FONT_BYTES)
         .map_err(|error| error.to_string())?;
     assert!(rasterizer.ensure_face(fixture.face_id)?.is_some());
+    Ok(())
+}
+
+#[test]
+fn file_font_with_readable_metadata_but_no_typeface_is_not_cached_as_usable() -> Result<(), String>
+{
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let fixture = font_file_fixture::create(
+        directory.path().join("font.ttf"),
+        font_file_fixture::FONT_BYTES,
+    )
+    .map_err(|error| error.to_string())?;
+    let header = font_with_only(Tag::new(b"head"))?;
+    std::fs::write(&fixture.path, &header).map_err(|error| error.to_string())?;
+    let rasterizer = HtmlGlyphRasterizer::new(&fixture.database);
+    let metadata = rasterizer.face_metadata(fixture.face_id)?;
+    assert!(metadata.upem > 0.0 && !metadata.unsupported);
+    assert!(rasterizer.ensure_face(fixture.face_id)?.is_none());
+    std::fs::write(&fixture.path, font_file_fixture::FONT_BYTES)
+        .map_err(|error| error.to_string())?;
+    assert!(rasterizer.ensure_face(fixture.face_id)?.is_none());
+    assert!(
+        HtmlGlyphRasterizer::new(&fixture.database)
+            .ensure_face(fixture.face_id)?
+            .is_some()
+    );
     Ok(())
 }
 

@@ -18,7 +18,7 @@ pub(super) fn change_name_table(bytes: &[u8]) -> Result<Vec<u8>, String> {
     Ok(changed)
 }
 
-pub(super) fn font_with_only(tag: Tag) -> Result<Vec<u8>, String> {
+pub(in super::super) fn font_with_only(tag: Tag) -> Result<Vec<u8>, String> {
     let font = ReadFontRef::from_index(FONT_BYTES, 0).map_err(|error| format!("{error:?}"))?;
     let data = font.data_for_tag(tag).ok_or("source table missing")?;
     let mut builder = FontBuilder::new();

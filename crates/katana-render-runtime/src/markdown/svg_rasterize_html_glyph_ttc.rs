@@ -131,7 +131,7 @@ fn table_bytes_equal(tag: Tag, source: &[u8], output: &[u8]) -> bool {
 
 #[cfg(test)]
 #[path = "svg_rasterize_html_glyph_ttc_verification_support.rs"]
-mod verification_support;
+pub(super) mod verification_support;
 
 #[cfg(test)]
 #[path = "svg_rasterize_html_glyph_ttc_verification_tests.rs"]
