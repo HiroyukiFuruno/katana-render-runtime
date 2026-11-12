@@ -1,4 +1,6 @@
-use super::{CliFixture, append_changed_byte, copy_font_response, custom_font_request};
+use super::{
+    CliFixture, append_changed_byte, copy_font_response, custom_font_request, verify_changed_body,
+};
 use crate::markdown::chrome_font_identity_probe_tests::identity::physical_file;
 use std::fs;
 
@@ -30,5 +32,19 @@ fn custom_font_rejects_a_directory_as_the_response_body() -> Result<(), String> 
         .ok_or("directory response body must be rejected")?;
     assert!(error.starts_with("write font response body:"));
     assert!(response_path.is_dir());
+    Ok(())
+}
+
+#[test]
+fn custom_font_probe_propagates_rejection_of_empty_condition_id() -> Result<(), String> {
+    let fixture = CliFixture::new()?;
+    let path = copy_font_response(&fixture)?;
+    let mut request = custom_font_request(&fixture, &path)?;
+    request.captures[0].condition_id.clear();
+    let error = verify_changed_body(&fixture, &request)
+        .err()
+        .ok_or("invalid custom request was accepted")?;
+    assert!(error.starts_with("ignored font probe failed with status Some("));
+    assert!(!fixture.temp.path().join("changed-response.json").exists());
     Ok(())
 }

@@ -3,6 +3,21 @@ use super::super::layout;
 use super::{TITLE, assert_run_layout_metrics, text, tree};
 use std::collections::HashSet;
 
+#[test]
+fn fallback_anchor_rejects_invalid_advances_before_positioning() {
+    use super::super::anchors;
+    use resvg::usvg::TextAnchor;
+
+    let mut layouts = [];
+    for advance in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(anchors::apply(TextAnchor::Middle, advance, &mut layouts).is_none());
+    }
+    assert_eq!(
+        anchors::apply(TextAnchor::Middle, 12.0, &mut layouts),
+        Some(())
+    );
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn single_source_span_fallback_runs_use_each_face_and_quantized_metrics() -> Result<(), String> {
