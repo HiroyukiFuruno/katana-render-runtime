@@ -22,12 +22,22 @@ fn selected_face_requires_an_active_attempt_for_real_font() -> Result<(), String
             fixture.select(&mut database, fixture.a).err().as_deref(),
             Some("selected mapping rejected")
         );
-    });
-    assert_eq!(
-        database.faces().count(),
-        fixture.context.original.faces().count()
-    );
-    Ok(())
+        assert_eq!(
+            database.faces().count(),
+            fixture.context.original.faces().count()
+        );
+        assert!(!fixture.context.finish(&database));
+
+        let attempt = fixture
+            .context
+            .begin()
+            .ok_or("real font attempt rejected")?;
+        fixture.select(&mut database, fixture.a)?;
+        assert!(fixture.context.finish(&database));
+        drop(attempt);
+        assert!(!fixture.context.finish(&database));
+        Ok(())
+    })
 }
 
 #[test]
