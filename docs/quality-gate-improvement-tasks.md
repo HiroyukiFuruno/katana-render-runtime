@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 実フォントのcmapを用いてSkiaの範囲外の字形IDを生成し、通常のフォント読込に成功しても対象runを部分描画せずに拒否することを確認した。別の実フォントではhmtxの送り幅をゼロにした字形を日本語フォールバックと並べ、正の送り幅を持つ対照では位置補正が有効であり、ゼロの場合は元の配置を維持することを確認した。関連7件、静的基盤、ASTが成功し、ソース前後一致（`32ca9d01`、`8bb11b11`、`tmp/quality/resumed-owner-r3509/release-coverage-glyph-id-and-zero-advance-nehz6s0m/safe-summary.json`）。初回のfixture生成は依存ライブラリの有効featureと借用期間を見直し、同じ条件を維持して修正した。正式カバレッジへの反映は未計測。
 - tiny-skia-path 0.12.0のPathが全点の有限性を保証し、Skia 0.156.0のPathBuilderが変換なしで座標を保持することを確認して、変換後の重複チェックとそれだけに必要なエラー伝播を除いた。極端な有限座標の二次曲線と三次曲線で、点列と偶奇塗り規則を比較した。文字アンカーでは描画用に丸めたサイズが有限でも公称サイズがオーバーフローする場合の補正拒否を検証した。関連13件、静的基盤、ASTが成功し、ソース前後一致（`83a9a359`、`61be929d`、`tmp/quality/resumed-owner-r3509/release-coverage-finite-path-and-anchor-overflow-c6tfr8ky/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - 最新の正式計測は `a914d3e4` の86,788/87,012行、99.742564%、未カバー224行（228行から4行減、増加ファイルなし）。通常フォントの拒否2行、可変フォントのベース拒否2行。シーク不能の回帰は通過したが、正式レポートの未カバー行数はそのファイルで変化なし。実行対象6,478件がすべて成功、別に15件skip。収集と証跡認証、ソース前後一致は成功し、100%条件で不合格（`tmp/quality/resumed-owner-r3509/root-coverage-after-unusable-fonts-e20s4dyb/{safe-summary,coverage-file-delta}.json`）。
 - 実フォントの `head` だけを持つ一時SFNTで、Skrifaがメタデータを読めてもSkiaがTypefaceを生成できない場合に、描画用フォントを利用可能として保持しないことを確認した。元の実フォントを復元すると新しいラスタライザーで再び読み込める。関連4件、静的基盤、ASTが成功（`1a024f06`、`tmp/quality/resumed-owner-r3509/release-coverage-readable-metadata-unusable-typeface-zkbgw6wl/safe-summary.json`）。
