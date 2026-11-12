@@ -11,6 +11,7 @@ mod mermaid_classic_resource_edge_mutations;
 mod mermaid_render_shape_mutations;
 
 const RESOURCE_BYTES_INDEX: usize = 9;
+const UTF8_ERROR_MAPPING: &str = "std::str::from_utf8(source)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))";
 
 const LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
     (
@@ -18,33 +19,39 @@ const LOADER_MUTATIONS: &[(&str, &str, &str)] = &[
         "BundledResource::Mermaid => other?,",
         "mermaid-resource-route:bundled",
     ),
+    (UTF8_ERROR_MAPPING, "source", "mermaid-resource-route:utf8"),
     (
-        "std::str::from_utf8(source)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
-        "source",
-        "mermaid-resource-route:utf8",
-    ),
-    (
-        "std::str::from_utf8(source)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
+        UTF8_ERROR_MAPPING,
         "std::str::from_utf8(source)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))",
         "mermaid-resource-route:utf8",
     ),
     (
-        "std::str::from_utf8(source)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
+        UTF8_ERROR_MAPPING,
         "source.map_err(|error| error)",
         "mermaid-resource-route:utf8",
     ),
     (
-        "std::str::from_utf8(source)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
+        UTF8_ERROR_MAPPING,
         "std::str::from_utf8(source).map_err(std::io::Error::other)",
         "mermaid-resource-route:utf8",
     ),
     (
-        "std::str::from_utf8(source)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
+        UTF8_ERROR_MAPPING,
+        "std::str::from_utf8(source).map(|value| value)",
+        "mermaid-resource-route:utf8",
+    ),
+    (
+        UTF8_ERROR_MAPPING,
+        "std::str::from_utf8(source).map_err()",
+        "mermaid-resource-route:utf8",
+    ),
+    (
+        UTF8_ERROR_MAPPING,
         "std::str::from_utf8(source)\n            .map_err(|failure| std::io::Error::new(std::io::ErrorKind::InvalidData, failure))",
         "mermaid-resource-route:utf8",
     ),
     (
-        "std::str::from_utf8(source)\n            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))",
+        UTF8_ERROR_MAPPING,
         "std::str::from_utf8(source)\n            .map_err(|error| std::io::Error::other(error))",
         "mermaid-resource-route:utf8",
     ),
