@@ -32,20 +32,24 @@ pub(super) fn frame_bounds(size: (i32, u32)) -> Result<Rect, String> {
         left: 0,
         top: 0,
         right: size.0,
-        bottom: i32::try_from(size.1).map_err(|e| e.to_string())?,
+        bottom: checked_height(size.1)?,
     })
 }
 
 pub(super) fn target_bounds(target: &PixmapMut<'_>, origin: (i32, i32)) -> Result<Rect, String> {
     let (left, top) = origin;
     let width = pixmap_width(target);
-    let height = i32::try_from(target.height()).map_err(|e| e.to_string())?;
+    let height = checked_height(target.height())?;
     Ok(Rect {
         left,
         top,
         right: left.checked_add(width).ok_or("tile bounds overflow")?,
         bottom: top.checked_add(height).ok_or("tile bounds overflow")?,
     })
+}
+
+fn checked_height(height: u32) -> Result<i32, String> {
+    i32::try_from(height).map_err(|error| error.to_string())
 }
 
 pub(super) fn path_bounds(bounds: tiny_skia::Rect, origin: (i32, i32)) -> Rect {

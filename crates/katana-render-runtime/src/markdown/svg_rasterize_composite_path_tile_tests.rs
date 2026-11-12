@@ -242,6 +242,21 @@ fn overflowing_tile_origin_returns_error_without_changing_pixels() -> Result<(),
     Ok(())
 }
 
+#[test]
+fn tile_frame_rejects_height_outside_signed_coordinates() -> Result<(), String> {
+    let max_height = i32::MAX as u32;
+    assert_eq!(super::frame_bounds((1, max_height))?.bottom, i32::MAX);
+    let too_tall = max_height + 1;
+    let expected = i32::try_from(too_tall)
+        .err()
+        .ok_or("oversized frame height must fail conversion")?;
+    assert_eq!(
+        super::frame_bounds((1, too_tall)).err(),
+        Some(expected.to_string())
+    );
+    Ok(())
+}
+
 fn frame_context(x: i32) -> super::super::super::TileContext {
     super::super::super::TileContext {
         origin: (x, 0),
