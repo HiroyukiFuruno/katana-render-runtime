@@ -3,6 +3,42 @@ const CACHE_FILENAME_JOIN: &str = ".join(\"katana_mermaid_cache\")\n            
 
 pub(super) const INPUT_SHAPE_MUTATIONS: &[(usize, &str, &str, &str)] = &[
     (
+        0,
+        "fn hash_mermaid_source_and_preset<H: Hasher>(",
+        "fn relocated_hash_mermaid_source_and_preset<H: Hasher>(",
+        "missing-function:hash_mermaid_source_and_preset",
+    ),
+    (
+        1,
+        "fn svg_id(source: &str, preset: &DiagramColorPreset) -> String",
+        "fn alternate_svg_id(source: &str, preset: &DiagramColorPreset) -> String",
+        "missing-method:MermaidRenderRequest::svg_id",
+    ),
+    (
+        2,
+        "fn cache_file_path_with_zenuml_key(",
+        "fn alternate_cache_file_path_with_zenuml_key(",
+        "missing-method:MermaidRenderOps::cache_file_path_with_zenuml_key",
+    ),
+    (
+        2,
+        "super::hash_mermaid_source_and_preset(&mut hasher, source, preset);",
+        "super::hash_mermaid_source_and_preset(&mut hasher, source.trim(), preset);",
+        "render-cache-hash-route:shared-fields",
+    ),
+    (
+        1,
+        SVG_ID_FORMAT,
+        "format!(\"katana-mermaid-svg-{:016x}\", 17_u64)",
+        "svg-id-hash-route:output",
+    ),
+    (
+        2,
+        "                \"{:016x}.{}\",\n                hasher.finish(),",
+        "                \"{:016x}.{}\" hasher.finish(),",
+        "render-cache-hash-route:filename",
+    ),
+    (
         2,
         "let mut hasher = DefaultHasher::new();",
         "let mut hasher = { use std::hash::BuildHasher; std::collections::hash_map::RandomState::new().build_hasher() };",
