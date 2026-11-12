@@ -80,6 +80,37 @@ fn malformed_fill_and_stroke_fall_back_independently() -> Result<(), String> {
 }
 
 #[test]
+fn inline_style_recovers_after_exceeding_css_nesting_limit() -> Result<(), String> {
+    const NESTED_BLOCKS: usize = 80;
+    let nested = format!(
+        "rgb({}0{})",
+        "(".repeat(NESTED_BLOCKS),
+        ")".repeat(NESTED_BLOCKS)
+    );
+    let mut parser = cssparser::Parser::new(&nested);
+    let error = crate::css_parser_shared::CssParserShared::consume_nested(&mut parser)
+        .err()
+        .ok_or("CSS fixture did not exceed the nesting limit")?;
+    assert_eq!(
+        error.kind,
+        cssparser::ParseErrorKind::Basic(cssparser::BasicParseErrorKind::TooManyNestedBlocks)
+    );
+    let tree = parse_path(&format!("style='stroke:red;fill:{nested};fill:blue'"))?;
+    let path = sample_path(&tree)?;
+    let fill = path
+        .fill()
+        .ok_or("fill after invalid declaration missing")?;
+    let stroke = path
+        .stroke()
+        .ok_or("stroke before invalid declaration missing")?;
+    assert!(matches!(fill.paint(), usvg::Paint::Color(color)
+        if (color.red, color.green, color.blue) == (0, 0, 255)));
+    assert!(matches!(stroke.paint(), usvg::Paint::Color(color)
+        if (color.red, color.green, color.blue) == (255, 0, 0)));
+    Ok(())
+}
+
+#[test]
 fn current_color_resolves_independently_for_fill_and_stroke() -> Result<(), String> {
     let tree = parse_path("color='#123456' fill='currentColor' stroke='currentColor'")?;
     let path = sample_path(&tree)?;
