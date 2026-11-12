@@ -1,5 +1,7 @@
+use super::INTERFACE_BOLD_WEIGHT;
 use super::matching_font_face;
 use crate::markdown::svg_rasterize::font::html_font_db_for_text;
+use resvg::usvg::fontdb::{Database, ID, Source};
 
 #[path = "svg_rasterize_text_font_interface_bold_test_support.rs"]
 mod test_support;
@@ -51,10 +53,7 @@ fn explicit_native_interface_uses_coretext_bold_without_system_ui_primary() -> R
 fn system_ui_bold_fallback_keeps_registered_alias_after_shared_file_conversion()
 -> Result<(), String> {
     let (database, base, alias) = test_support::shared_file_alias_fixture()?;
-    let (selected, cacheable) =
-        super::matching_fallback_with_probe(&database, base, '日', 700, false, |id, character| {
-            Some(super::font_has_char(&database, id, character))
-        });
+    let (selected, cacheable) = select_font_fallback(&database, base, '日', INTERFACE_BOLD_WEIGHT);
     assert_selected_alias(&database, base, alias, selected);
     assert!(cacheable);
     Ok(())
@@ -84,8 +83,6 @@ fn missing_alias_glyph_requires_non_interface_fallback() -> Result<(), String> {
 
 #[test]
 fn unreadable_alias_disables_requested_fallback_and_caching() -> Result<(), String> {
-    use resvg::usvg::fontdb::Source;
-
     let (mut database, base, alias) = test_support::shared_file_alias_fixture()?;
     let mut face = database
         .face(alias)
@@ -108,22 +105,15 @@ fn unreadable_alias_disables_requested_fallback_and_caching() -> Result<(), Stri
         super::requested_preflight(&database, base, 'A', attributes, &mut probe),
         Err((None, false))
     );
+    assert_eq!(
+        select_font_fallback(&database, base, 'A', INTERFACE_BOLD_WEIGHT),
+        (None, false)
+    );
     Ok(())
 }
 
-fn assert_real_non_interface_fallback(
-    database: &resvg::usvg::fontdb::Database,
-    base: resvg::usvg::fontdb::ID,
-    character: char,
-) {
-    let (selected, _) = super::matching_fallback_with_probe(
-        database,
-        base,
-        character,
-        super::INTERFACE_BOLD_WEIGHT,
-        false,
-        |id, glyph| super::probe_font_has_char(database, id, glyph),
-    );
+fn assert_real_non_interface_fallback(database: &Database, base: ID, character: char) {
+    let (selected, _) = select_font_fallback(database, base, character, INTERFACE_BOLD_WEIGHT);
     if let Some(id) = selected {
         assert!(
             !database
@@ -135,6 +125,38 @@ fn assert_real_non_interface_fallback(
             Some(true)
         );
     }
+}
+
+fn select_font_fallback(
+    database: &Database,
+    base: ID,
+    character: char,
+    weight: u16,
+) -> (Option<ID>, bool) {
+    super::matching_fallback_with_probe(database, base, character, weight, false, |id, glyph| {
+        super::probe_font_has_char(database, id, glyph)
+    })
+}
+
+#[test]
+fn normal_weight_interface_fallback_uses_regular_selection() -> Result<(), String> {
+    const NORMAL_WEIGHT: u16 = 400;
+    let (mut database, base, alias) = test_support::shared_file_alias_fixture()?;
+    retain_primary_and_alias(&mut database, base, alias);
+    let character = alias_character(&database, alias, true)?;
+    let expected = super::matching_fallback_regular(
+        &database,
+        base,
+        character,
+        super::fallback_attributes(NORMAL_WEIGHT, false),
+        false,
+        |id, glyph| super::probe_font_has_char(&database, id, glyph),
+    );
+    assert_eq!(
+        select_font_fallback(&database, base, character, NORMAL_WEIGHT),
+        expected
+    );
+    Ok(())
 }
 
 #[test]
@@ -168,15 +190,8 @@ fn duplicate_native_bold_alias_disables_ambiguous_fallback_and_cache() -> Result
     let (mut database, base, alias) = test_support::shared_file_alias_fixture()?;
     retain_primary_and_alias(&mut database, base, alias);
     let character = alias_character(&database, alias, true)?;
-    let select = |database: &resvg::usvg::fontdb::Database| {
-        super::matching_fallback_with_probe(
-            database,
-            base,
-            character,
-            super::INTERFACE_BOLD_WEIGHT,
-            false,
-            |id, glyph| super::probe_font_has_char(database, id, glyph),
-        )
+    let select = |database: &Database| {
+        select_font_fallback(database, base, character, INTERFACE_BOLD_WEIGHT)
     };
     assert_eq!(select(&database), (Some(alias), true));
     let duplicate = database

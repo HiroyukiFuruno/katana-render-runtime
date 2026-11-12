@@ -142,6 +142,7 @@ fn render_clip_fixture(tree: &usvg::Tree) -> TestResult<tiny_skia::Pixmap> {
 #[test]
 fn shared_svg_document_selects_the_requested_glyph_node() -> TestResult<()> {
     let (database, face) = fixture_database(SHARED_SVG_FONT)?;
+    assert!(FlattenDatabaseExt::svg(database.as_ref(), face, usvg::GlyphId(0)).is_none());
     for (character, expected_id) in [('🌓', "glyph1"), ('🥳', "glyph2")] {
         let glyph = fixture_glyph(SHARED_SVG_FONT, TestGlyph::Character(character))?;
         let node = FlattenDatabaseExt::svg(database.as_ref(), face, glyph)
