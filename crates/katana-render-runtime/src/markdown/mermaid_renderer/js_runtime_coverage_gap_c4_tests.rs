@@ -158,35 +158,42 @@ fn c4_validator_rejects_relation_without_target_coordinate() -> Result<(), Strin
 }
 
 #[test]
-fn c4_deployment_rejects_a_real_label_displaced_from_its_parent() -> Result<(), String> {
+fn c4_deployment_rejects_displaced_real_labels() -> Result<(), String> {
     let svg = validated_deployment_svg()?;
     let document = Document::parse(&svg).map_err(|error| error.to_string())?;
-    let label = document
-        .descendants()
-        .find(|node| node.has_tag_name("text") && text(*node) == "[Apple iOS or Android]")
-        .ok_or("deployment technology label missing")?;
-    let position = label
-        .attribute_node("x")
-        .ok_or("label x position missing")?;
-    let range = position.range_value();
-    let mut displaced = svg.clone();
-    displaced.replace_range(range, "1000000");
-    assert_eq!(
-        GeometryContract::deployment(&displaced).err().as_deref(),
-        Some("deployment labels detached from parent")
-    );
+    for (name, error) in [
+        (
+            "[Apple iOS or Android]",
+            "deployment labels detached from parent",
+        ),
+        (DEPLOYMENT_TITLE, "semantic geometry outside viewBox"),
+    ] {
+        let position = deployment_label(&document, name)?
+            .attribute_node("x")
+            .ok_or("label x position missing")?;
+        let mut displaced = svg.clone();
+        displaced.replace_range(position.range_value(), "1000000");
+        assert_eq!(
+            GeometryContract::deployment(&displaced).err().as_deref(),
+            Some(error),
+            "{name}"
+        );
+    }
     Ok(())
 }
 
+const DEPLOYMENT_TITLE: &str = "Deployment diagram for Internet Banking System";
+
 #[test]
-fn c4_deployment_rejects_missing_parent_labels() -> Result<(), String> {
+fn c4_deployment_rejects_missing_real_labels() -> Result<(), String> {
     let svg = validated_deployment_svg()?;
     let document = Document::parse(&svg).map_err(|error| error.to_string())?;
-    for expected in ["Customer's mobile device", "[Apple iOS or Android]"] {
-        let label = document
-            .descendants()
-            .find(|node| node.has_tag_name("text") && text(*node) == expected)
-            .ok_or("deployment label missing from original")?;
+    for expected in [
+        "Customer's mobile device",
+        "[Apple iOS or Android]",
+        DEPLOYMENT_TITLE,
+    ] {
+        let label = deployment_label(&document, expected)?;
         let mut changed = svg.clone();
         changed.replace_range(label.range(), "");
         assert_eq!(
@@ -195,6 +202,16 @@ fn c4_deployment_rejects_missing_parent_labels() -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+fn deployment_label<'a, 'input>(
+    document: &'a Document<'input>,
+    expected: &str,
+) -> Result<resvg::usvg::roxmltree::Node<'a, 'input>, String> {
+    document
+        .descendants()
+        .find(|node| node.has_tag_name("text") && text(*node) == expected)
+        .ok_or_else(|| format!("deployment label missing from original: {expected}"))
 }
 
 #[test]
