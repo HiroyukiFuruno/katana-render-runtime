@@ -43,12 +43,15 @@ const ARCHITECTURE_BETA_FIXTURE_MARKDOWN: &str =
 
 #[test]
 fn native_width_capture_propagates_invalid_mermaid_render_error() -> Result<(), String> {
-    let control = render_fixture(FLOWCHART_SOURCE)?;
-    assert!(control.svg.contains("<svg"));
-    let error = render_fixture("flowchart LR\n  A -->")
+    let invalid = "flowchart LR\n  A -->";
+    let error = render_fixture(invalid)
         .err()
         .ok_or("invalid flowchart unexpectedly rendered")?;
     assert!(!error.trim().is_empty());
+    assert_eq!(render_fixture_with_font_audit(invalid).err(), Some(error));
+
+    let (control, _) = render_fixture_with_font_audit(FLOWCHART_SOURCE)?;
+    assert!(control.svg.contains("<svg"));
     Ok(())
 }
 
