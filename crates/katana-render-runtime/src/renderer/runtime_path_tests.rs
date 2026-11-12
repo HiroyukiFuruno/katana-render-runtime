@@ -129,6 +129,24 @@ fn external_renderers_report_the_missing_resource_for_each_kind()
 }
 
 #[test]
+fn malformed_external_mermaid_bundle_reports_a_read_error() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("mermaid.js");
+    std::fs::write(&path, [0xff])?;
+    let kind = DiagramKind::Mermaid;
+    let (_, renderer) = RuntimePathResolver::resolve_renderer(kind, Some(path), None)?;
+
+    let result = renderer.render(&renderer_input(kind, "graph TD\nA-->B"));
+
+    assert!(matches!(
+        result,
+        Err(RenderError::Runtime(message)) if message.starts_with("Failed to read Mermaid.js bundle:")
+    ));
+    Ok(())
+}
+
+#[test]
 fn empty_javascript_overrides_are_rejected_for_each_runtime()
 -> Result<(), Box<dyn std::error::Error>> {
     for (kind, variable) in javascript_override_cases() {
