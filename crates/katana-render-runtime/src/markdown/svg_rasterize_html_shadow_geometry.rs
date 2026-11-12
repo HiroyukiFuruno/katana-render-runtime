@@ -30,18 +30,18 @@ pub(super) fn shadow_spec(group: &Group) -> Result<Option<ShadowSpec>, String> {
     let Some(shadow) = supported_shadow(primitive)? else {
         return Ok(None);
     };
-    Ok(Some(build_shadow_spec(shadow, filter, primitive)?))
+    Ok(Some(build_shadow_spec(shadow, filter, primitive)))
 }
 
 fn build_shadow_spec(
     shadow: &filter::DropShadow,
     filter: &filter::Filter,
     primitive: &filter::Primitive,
-) -> Result<ShadowSpec, String> {
+) -> ShadowSpec {
     let color = shadow.color();
     let filter_bounds = filter.rect().to_rect();
     let primitive_bounds = primitive.rect().to_rect();
-    Ok(ShadowSpec {
+    ShadowSpec {
         dx: shadow.dx(),
         dy: shadow.dy(),
         sigma_x: shadow.std_dev_x().get(),
@@ -54,7 +54,7 @@ fn build_shadow_spec(
         ),
         filter_bounds: bounds::rect_bounds(filter_bounds),
         primitive_bounds: bounds::rect_bounds(primitive_bounds),
-    })
+    }
 }
 
 fn group_is_supported(group: &Group) -> bool {

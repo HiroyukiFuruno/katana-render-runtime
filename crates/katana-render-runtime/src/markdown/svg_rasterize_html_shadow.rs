@@ -58,7 +58,7 @@ impl HtmlShadowRasterizer {
         let Some(effect) = geometry::effect_bounds(source, spec, child_transform)? else {
             return Ok(false);
         };
-        let Some(crop) = geometry::bounded_crop(effect, target)? else {
+        let Some(crop) = geometry::bounded_crop(effect, target) else {
             return Ok(false);
         };
         let source_pixmap = render_source(crop, child_transform, source_renderer)?;

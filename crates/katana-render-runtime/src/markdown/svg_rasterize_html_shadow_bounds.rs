@@ -48,7 +48,7 @@ pub(in crate::markdown::svg_rasterize) fn map_rect(
 pub(in crate::markdown::svg_rasterize) fn bounded_crop(
     effect: Bounds,
     target: &PixmapMut<'_>,
-) -> Result<Option<Crop>, String> {
+) -> Option<Crop> {
     let crop = Crop {
         left: effect.left.floor() as i32,
         top: effect.top.floor() as i32,
@@ -62,9 +62,9 @@ pub(in crate::markdown::svg_rasterize) fn bounded_crop(
         || crop.left >= crop.right
         || crop.top >= crop.bottom
     {
-        return Ok(None);
+        return None;
     }
-    Ok(Some(crop))
+    Some(crop)
 }
 
 pub(in crate::markdown::svg_rasterize) fn map_bounds(

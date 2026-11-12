@@ -26,7 +26,7 @@ pub(super) fn render(
         return Ok(false);
     };
     /* WHY: フィルターが1件のとき、レイヤー境界は spec で交差済みのフィルター領域。 */
-    let Some(crop) = super::super::html_shadow::bounded_crop(spec.bounds, target)? else {
+    let Some(crop) = super::super::html_shadow::bounded_crop(spec.bounds, target) else {
         return Ok(false);
     };
     let source = render_source(group, child_transform, crop, provenance, text)?;

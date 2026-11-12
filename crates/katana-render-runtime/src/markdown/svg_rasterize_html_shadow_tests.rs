@@ -88,8 +88,7 @@ fn bounded_crop_rejects_outside_without_mutating_target() -> Result<(), String> 
             bottom: CROP_EDGE,
         },
         &target.as_mut(),
-    )
-    .map_err(|_| "crop check failed".to_owned())?;
+    );
     assert!(crop.is_none());
     assert_eq!(target.data(), before.as_slice());
     Ok(())
