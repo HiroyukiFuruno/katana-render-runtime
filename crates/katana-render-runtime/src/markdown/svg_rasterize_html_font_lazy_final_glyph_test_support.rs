@@ -38,6 +38,15 @@ pub(super) fn text_span(
 }
 
 #[test]
+fn glyph_audit_fixture_requires_a_font_family() {
+    let database = resvg::usvg::fontdb::Database::new();
+    assert_eq!(
+        font_tree(database).err().as_deref(),
+        Some("fixture database has no font family")
+    );
+}
+
+#[test]
 fn face_observation_reports_missing_glyph_size_for_another_real_face() -> Result<(), String> {
     let (mut database, first_face) = super::variations_tests::bundled_face()?;
     let second_face = *database

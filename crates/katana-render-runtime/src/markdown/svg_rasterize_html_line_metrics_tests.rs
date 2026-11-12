@@ -7,6 +7,19 @@ const FILE_METRIC_SIZE: f32 = 16.0;
 const CORRUPTION_MASK: u8 = 0xff;
 
 #[test]
+fn missing_face_source_returns_no_line_metrics() {
+    let mut database = resvg::usvg::fontdb::Database::new();
+    database.load_font_data(crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES.to_vec());
+    let missing_face = resvg::usvg::fontdb::ID::dummy();
+
+    assert_eq!(database.len(), 1);
+    assert!(super::line_metrics_for_face(&database, missing_face, FILE_METRIC_SIZE).is_none());
+    assert!(
+        super::diagnosed_line_metrics_for_face(&database, missing_face, FILE_METRIC_SIZE).is_none()
+    );
+}
+
+#[test]
 fn malformed_file_is_rejected_by_legacy_line_metrics_and_recovers() -> Result<(), String> {
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
     let bytes = super::super::font_file_fixture::FONT_BYTES;

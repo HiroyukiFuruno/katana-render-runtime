@@ -99,4 +99,16 @@ mod tests {
         clear_primary_baseline_cache();
         PRIMARY_BASELINE_CACHE.with(|cache| assert_eq!(cache.borrow().capacity(), 0));
     }
+
+    #[test]
+    fn missing_primary_font_does_not_cache_a_baseline_and_recovers() {
+        clear_primary_baseline_cache();
+        assert_eq!(
+            primary_baseline("KRR Font Family Missing 8f0c254a", 12.0, 400, false, 18.0,),
+            None
+        );
+        PRIMARY_BASELINE_CACHE.with(|cache| assert!(cache.borrow().is_empty()));
+
+        assert!(primary_baseline("sans-serif", 12.0, 400, false, 18.0).is_some_and(f32::is_finite));
+    }
 }
