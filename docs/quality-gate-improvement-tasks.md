@@ -2,10 +2,11 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
-- CSSの入れ子制限を超えた実SVGで前後の有効なstroke/fill宣言を保持することと、実HTMLのスクリプトから不正なノードIDを渡した3種類の位置問い合わせが型付きDOMエラーを返すことを確認した。関連6件、静的基盤、ASTが成功、ソース前後一致（`55590b85`、`b463147b`、`tmp/quality/resumed-owner-r3509/release-coverage-parser-boundary-inputs-5hedii18/safe-summary.json`）。正式カバレッジへの反映は未計測。
-- 中間マーカーの選別後は閉じる命令が渡らないことを型で表現し、向きの計算に残っていた到達不能な分岐を除いた。描画順・始点反転・閉じたサブパスの向きを含む既存12件、静的基盤、ASTが成功、ソース前後一致（`d6d15072`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-marker-middle-segment-3763w3is/safe-summary.json`）。正式カバレッジへの反映は未計測。
-- SVGの背景、マーカー・画像・入れ子の表示領域のクリップでは、確定済みの矩形境界をそのままパスの境界に使い、同じ矩形の再計算と失敗分岐を除いた。画像のsliceで領域内だけを塗る新規回帰を含む関連10件、静的基盤、ASTが成功、ソース前後一致（`2167b7b0`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-rectangle-bounds-867j_xtk/safe-summary.json`）。正式カバレッジへの反映は未計測。
-- SVG字形クラスタの生成に使ったテキスト範囲を字間と単語間隔の処理でも使い、同じoffsetへの再検索を除いた。生成される最後のクラスタの扱いと、縦書き補正・字間・単語間隔の適用順を維持した。複数範囲にまたがる字間と単語間隔を含む関連12件、静的基盤、ASTが成功し、ソース前後一致（`69a41c4f`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-span-spacing-k31ic1io/safe-summary.json`）。正式カバレッジへの反映は未計測。
+- 最新の正式計測は `32814b34` の86,710/86,951行、99.722832%、未カバー241行（244行から3行減。SVGマーカー2行、CSS入れ子上限1行）。全ファイルの未カバー増加なし。Rust実行対象6,463件すべて成功、別に15件skip。Moonの収集実0、ソース前後一致、同じ環境のゲートで証跡を認証し再収集なし、100%条件のみ不合格（`tmp/quality/resumed-owner-r3509/root-coverage-after-svg-bounds-markers-and-parser-awuh35d6/safe-summary.json`）。
+- CSSの入れ子制限を超えた実SVGで前後の有効なstroke/fill宣言を保持することと、実HTMLのスクリプトから不正なノードIDを渡した3種類の位置問い合わせが型付きDOMエラーを返すことを確認した。関連6件、静的基盤、ASTが成功、ソース前後一致（`55590b85`、`b463147b`、`tmp/quality/resumed-owner-r3509/release-coverage-parser-boundary-inputs-5hedii18/safe-summary.json`）。
+- 中間マーカーの選別後は閉じる命令が渡らないことを型で表現し、向きの計算に残っていた到達不能な分岐を除いた。描画順・始点反転・閉じたサブパスの向きを含む既存12件、静的基盤、ASTが成功、ソース前後一致（`d6d15072`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-marker-middle-segment-3763w3is/safe-summary.json`）。
+- SVGの背景、マーカー・画像・入れ子の表示領域のクリップでは、確定済みの矩形境界をそのままパスの境界に使い、同じ矩形の再計算と失敗分岐を除いた。画像のsliceで領域内だけを塗る新規回帰を含む関連10件、静的基盤、ASTが成功、ソース前後一致（`2167b7b0`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-rectangle-bounds-867j_xtk/safe-summary.json`）。
+- SVG字形クラスタの生成に使ったテキスト範囲を字間と単語間隔の処理でも使い、同じoffsetへの再検索を除いた。生成される最後のクラスタの扱いと、縦書き補正・字間・単語間隔の適用順を維持した。複数範囲にまたがる字間と単語間隔を含む関連12件、静的基盤、ASTが成功し、ソース前後一致（`69a41c4f`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-span-spacing-k31ic1io/safe-summary.json`）。
 - 最新の正式計測は `3eb5dd21` の86,741/86,985行、99.719492%、未カバー244行（247行から3行減。実HTMLセッションの初回フレーム確定2行、SVG字形監査1行）。全ファイルの未カバー増加なし。Rust実行対象6,460件が全件成功、別に15件skip。Moonの収集実0、ソース前後一致、同じ環境のゲートが証跡を認証し再収集なし、100%条件だけ不合格（`tmp/quality/resumed-owner-r3509/root-coverage-after-svg-and-html-viewport-batch-hjbibx5v/safe-summary.json`）。
 - 1×1の物理ビューポートに極小の正の倍率を指定し、描画対象がない実HTMLで論理寸法が無限大の場合に、初回フレーム確定から公開APIへ `InvalidViewport` が伝播する回帰を追加した。関連3件、静的基盤、ASTが成功し、ソース前後一致（`81b2f274`、`tmp/quality/resumed-owner-r3509/release-coverage-html-logical-viewport-overflow-_35w6a0f/safe-summary.json`）。最初の入力ではボックスの非有限座標を先に検出して失敗したため、その結果も別runに保持した。
 - HTMLセッション起動の実入力を8193×1とし、ラスタ描画上限で生じる8192×1との差を、起動APIが型付きエラーとして返すことを確認した。関連2件、静的基盤、ASTが成功し、ソース前後一致（`048ab7d4`、`tmp/quality/resumed-owner-r3509/release-coverage-html-viewport-raster-error-2h5pctw5/safe-summary.json`）。
