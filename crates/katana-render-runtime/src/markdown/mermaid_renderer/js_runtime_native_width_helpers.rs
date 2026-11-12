@@ -26,8 +26,7 @@ fn render_fixture_with_targets(
     let bundle = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
     let diagram = MermaidDiagramType::from_source(source);
     let mut scripts = MermaidRuntimeScripts::build(&bundle, &request(source, diagram), diagram);
-    insert_trace(&mut scripts)?;
-    install_targets_and_capture(&mut scripts, targets)?;
+    install_trace(&mut scripts, targets)?;
     scripts.push(DiagramRuntimeScript::owned(
         "native-width-result.js",
         result_script().into(),
@@ -36,7 +35,7 @@ fn render_fixture_with_targets(
     decode_fixture(&output)
 }
 
-fn install_targets_and_capture(
+fn install_trace(
     scripts: &mut Vec<DiagramRuntimeScript<'_>>,
     targets: &[(&str, &str)],
 ) -> Result<(), String> {
@@ -45,20 +44,32 @@ fn install_targets_and_capture(
         .position(|script| script.name == "render-mermaid.js")
         .ok_or("Mermaid render entrypoint missing")?;
     let targets = serde_json::to_string(targets).map_err(|error| error.to_string())?;
-    scripts.insert(
-        index,
+    let prelude = [
+        DiagramRuntimeScript::borrowed(
+            "native-width-trace.js",
+            include_str!("js_runtime_native_width_trace.js"),
+        ),
+        DiagramRuntimeScript::borrowed(
+            "native-width-bbox-trace.js",
+            include_str!("js_runtime_native_width_bbox_trace.js"),
+        ),
         DiagramRuntimeScript::owned(
             "native-width-targets.js",
             format!("globalThis.__krrTraceTargets = {targets};"),
         ),
-    );
-    let entry = &mut scripts[index + 1];
+    ];
+    let entry_index = index + prelude.len();
+    drop(scripts.splice(index..index, prelude));
+    capture_rendered_svg(&mut scripts[entry_index]);
+    Ok(())
+}
+
+fn capture_rendered_svg(entry: &mut DiagramRuntimeScript<'_>) {
     entry.code = format!(
         "Promise.resolve({}).then(svg => {{ globalThis.__krrRenderedSvg = svg; return svg; }})",
         entry.code.trim_end_matches(';')
     )
     .into();
-    Ok(())
 }
 
 pub(super) fn render_fixture_with_font_audit(
@@ -131,28 +142,6 @@ fn request(source: &str, diagram: MermaidDiagramType) -> String {
         "stroke": "#fff", "arrow": "#fff", "diagramType": diagram.request_value(),
     })
     .to_string()
-}
-
-fn insert_trace(scripts: &mut Vec<DiagramRuntimeScript<'_>>) -> Result<(), String> {
-    let index = scripts
-        .iter()
-        .position(|script| script.name == "render-mermaid.js")
-        .ok_or("Mermaid render entrypoint missing")?;
-    scripts.insert(
-        index,
-        DiagramRuntimeScript::borrowed(
-            "native-width-trace.js",
-            include_str!("js_runtime_native_width_trace.js"),
-        ),
-    );
-    scripts.insert(
-        index + 1,
-        DiagramRuntimeScript::borrowed(
-            "native-width-bbox-trace.js",
-            include_str!("js_runtime_native_width_bbox_trace.js"),
-        ),
-    );
-    Ok(())
 }
 
 fn result_script() -> &'static str {
