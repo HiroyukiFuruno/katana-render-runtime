@@ -6,6 +6,29 @@ use std::sync::Arc;
 const TEXT: &str = "Open linked page";
 const SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="260" height="60"><rect width="260" height="60" fill="white"/><text x="4" y="34" font-family="Arial" font-size="16">Open linked page</text></svg>"#;
 
+#[test]
+fn shared_font_raster_reports_malformed_svg_before_rendering() {
+    let result = super::render_html_with_options("<svg", &resvg::usvg::Options::default());
+    assert!(result.is_err_and(|message| !message.is_empty()));
+}
+
+#[test]
+fn shared_database_build_rejects_a_prefix_face_removed_from_the_source() -> Result<(), String> {
+    let mut database = Database::new();
+    database.load_font_data(crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES.to_vec());
+    let prefix = database.faces().cloned().collect::<Vec<_>>();
+    let [face] = prefix.as_slice() else {
+        return Err("expected one face from the bundled font".into());
+    };
+    let (fresh, remapped) =
+        super::build(&database, &prefix, &Default::default(), &Default::default())
+            .ok_or("valid face prefix rejected")?;
+    assert_eq!(fresh.len(), remapped.len());
+    database.remove_face(face.id);
+    assert!(super::build(&database, &prefix, &Default::default(), &Default::default()).is_none());
+    Ok(())
+}
+
 fn original() -> (Arc<Database>, CreationProof) {
     let request = HtmlFontRequest::from_text("Arial", TEXT);
     let (database, proof) = sources::build_known_html_font_db(&request);
@@ -141,12 +164,12 @@ fn transient_prefix_cannot_admit_removed_face_or_expand_original_prefix() -> Res
     })
 }
 
+#[path = "svg_rasterize_html_font_shared_raster_boundary_tests.rs"]
+mod boundary_tests;
 #[path = "svg_rasterize_html_font_shared_tree_tests.rs"]
 mod tree_tests;
 #[path = "svg_rasterize_html_font_shared_ttc_tests.rs"]
 mod ttc_tests;
-#[path = "svg_rasterize_html_font_shared_raster_boundary_tests.rs"]
-mod boundary_tests;
 
 type ProvenShared = (Arc<Database>, Arc<CreationProof>);
 type MappingWeak = std::sync::Weak<dyn AsRef<[u8]> + Send + Sync>;
