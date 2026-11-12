@@ -25,6 +25,36 @@ fn parsed_table_rows_and_groups_keep_painted_element_bounds() -> Result<(), Stri
     Ok(())
 }
 
+#[test]
+fn table_bounds_helpers_report_missing_and_unpainted_elements() -> Result<(), String> {
+    let html = "<table><tbody id='group'><tr><td id='visible'>A</td></tr></tbody></table><template id='unpainted'>B</template>";
+    let mut document = HtmlDocument::parse(html);
+    let group = table_element_id(&mut document, "group")?;
+    let visible = table_element_id(&mut document, "visible")?;
+    let unpainted = table_element_id(&mut document, "unpainted")?;
+    let layout = render_table_html(html)?;
+    assert_eq!(
+        table_element_id(&mut document, "missing").err().as_deref(),
+        Some("fixture element #missing is missing")
+    );
+    let expected = format!("table element bounds for node {unpainted} are missing");
+    assert_eq!(
+        table_bounds(&layout, unpainted).err().as_deref(),
+        Some(expected.as_str())
+    );
+    assert_eq!(
+        assert_table_union(&layout, group, &[]).err().as_deref(),
+        Some("table union has no members")
+    );
+    assert_eq!(
+        assert_table_union(&layout, group, &[visible, unpainted])
+            .err()
+            .as_deref(),
+        Some(expected.as_str())
+    );
+    Ok(())
+}
+
 fn assert_nonempty_elements_have_bounds(
     layout: &super::super::super::types::LayoutResult,
     ids: &[u64],
