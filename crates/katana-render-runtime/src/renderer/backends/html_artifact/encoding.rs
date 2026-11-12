@@ -48,9 +48,11 @@ impl Write for BoundedWriter {
             ));
         }
         let required = self.bytes.len() + bytes.len();
-        let geometric = self.bytes.capacity().saturating_mul(2);
-        let target = geometric.max(required).min(self.limit);
-        self.bytes.reserve_exact(target - self.bytes.len());
+        let capacity = self.bytes.capacity();
+        if required > capacity {
+            let target = capacity.saturating_mul(2).max(required).min(self.limit);
+            self.bytes.reserve_exact(target - self.bytes.len());
+        }
         self.bytes.extend_from_slice(bytes);
         Ok(bytes.len())
     }
@@ -84,7 +86,12 @@ mod tests {
         assert!(writer.write(&[]).is_ok());
         assert_eq!(writer.bytes.capacity(), 0);
         for byte in b"small writes" {
+            let capacity = writer.bytes.capacity();
+            let has_spare_capacity = writer.bytes.len() < capacity;
             assert!(writer.write_all(std::slice::from_ref(byte)).is_ok());
+            if has_spare_capacity {
+                assert_eq!(writer.bytes.capacity(), capacity);
+            }
             assert!(writer.bytes.capacity() <= 17);
         }
         assert_eq!(writer.into_inner(), b"small writes");
