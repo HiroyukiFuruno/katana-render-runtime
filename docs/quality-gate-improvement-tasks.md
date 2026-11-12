@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- Mermaidの観測では常に末尾へ追加される描画入口を観測用へ差し替え、到達不能な空スクリプト判定を除いた。フォールバック配置ではusvgの唯一のchunk生成元が最初のspanを必須とし、その後もspanを削除しないことを確認して空span判定を除いた。実V8の正常・異常入力、Ishikawa marker、ZenUML順序、複数span・行の配置を含む関連12件、静的基盤、ASTが成功（`e7436541`、`7eec93d9`、`tmp/quality/resumed-owner-r3509/release-coverage-observer-and-source-span-f05_xbvj/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - クリップ合成テストを既存の製品処理へ直接接続し、4×3の固定fixtureに対する寸法の重複判定を除去した。半透明を含む全マスク値、寸法不一致、範囲外crop、入れ子clipを含む関連8件と静的基盤、ASTが成功（`c087db34`、`tmp/quality/resumed-owner-r3509/release-coverage-mask-direct-crop-lkeoe8h3/safe-summary.json`）。正式カバレッジへの反映は未計測。CSS・CanvasのV8計測失敗ケースは既存テストと同じ条件だったため、追加差分とpin更新を取り消した。
 - 実フォントの字形を幅ゼロの輪郭へ置換し、塗りの描画範囲は空でも線を含めると範囲を確保できることを確認した。関連4件、静的基盤、ASTが成功（`8087ccc6`、`tmp/quality/resumed-owner-r3509/release-coverage-vertical-glyph-outline-32xa4w8h/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - 最新の正式計測は `c3ed78eb` の86,799/87,020行、99.746035%、未カバー221行（224行から3行減、増加ファイルなし）。対象6,482件が成功、別に15件skip。収集と証跡認証、ソース前後一致は成功し、100%条件で不合格（`tmp/quality/resumed-owner-r3509/root-coverage-after-glyph-and-geometry-boundaries-9beou6hv/{safe-summary,coverage-file-delta}.json`）。
