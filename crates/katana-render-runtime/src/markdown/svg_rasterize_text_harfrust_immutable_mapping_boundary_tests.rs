@@ -1,6 +1,7 @@
 use super as mapping;
 use super::super::super::super::font::FontSourceGeneration;
 use super::super::FontFaceCacheScope;
+use super::super::entry::load_file_font;
 use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
 use resvg::usvg::fontdb::{Database, ID, Source};
 use std::{
@@ -20,26 +21,51 @@ struct SystemFont {
 }
 
 impl SystemFont {
+    fn cache_key(&self, generation: &FontSourceGeneration) -> mapping::CacheKey {
+        mapping::CacheKey::File {
+            path: self.path.clone(),
+            generation: generation.clone(),
+            face_index: self.index,
+        }
+    }
+
     fn load(
         &self,
         length: u64,
         generation: FontSourceGeneration,
     ) -> Result<Option<mapping::FontHandle>, String> {
-        let key = mapping::CacheKey::File {
-            path: self.path.clone(),
-            generation: generation.clone(),
-            face_index: self.index,
-        };
         mapping::try_load(
             &self.database,
             self.face,
             &self.path,
             self.index,
-            key,
+            self.cache_key(&generation),
             generation,
             length,
         )
     }
+}
+
+#[test]
+fn immutable_mapping_error_prevents_fallback_to_lazy_file() -> Result<(), String> {
+    let source = system_font()?;
+    let _scope = FontFaceCacheScope::enter();
+    let generation = mapping::font_source_generation_uncached(&source.database, source.face);
+    let load = |length| {
+        load_file_font(
+            &source.database,
+            source.face,
+            &source.path,
+            source.index,
+            source.cache_key(&generation),
+            generation.clone(),
+            length,
+        )
+    };
+    assert!(load(source.length + 1).is_none());
+    let valid = load(source.length).ok_or("current system font mapping missing")?;
+    assert!(valid.clean(&source.database, source.face));
+    Ok(())
 }
 
 #[test]
