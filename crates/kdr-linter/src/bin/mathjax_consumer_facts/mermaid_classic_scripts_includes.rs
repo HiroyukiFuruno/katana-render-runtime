@@ -48,10 +48,11 @@ fn source_identity(constant: &syn::ItemConst, name: &str, expected: &str) -> Res
     if name == "MERMAID_ZENUML_RUNTIME" {
         plugin_identity(&args[0], expected)
     } else {
-        if literal(&args[0])? != expected {
+        let path = literal(&args[0])?;
+        if path != expected {
             return Err("mermaid-scripts:include-path".into());
         }
-        Ok(json!({"kind": "include-relative", "path": literal(&args[0])?}))
+        Ok(json!({"kind": "include-relative", "path": path}))
     }
 }
 
