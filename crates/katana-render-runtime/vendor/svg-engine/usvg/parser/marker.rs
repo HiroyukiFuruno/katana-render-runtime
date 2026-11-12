@@ -144,9 +144,7 @@ fn marker_clip(
     }
     let clip_rect = rect.size().to_non_zero_rect(0.0, 0.0).transform(view_box_ts.invert()?)?;
     let mut clip_path = ClipPath::empty(cache.gen_clip_path_id());
-    let mut path = Path::new_simple(Arc::new(tiny_skia_path::PathBuilder::from_rect(
-        clip_rect.to_rect(),
-    )))?;
+    let mut path = Path::from_rect(clip_rect);
     path.fill = Some(Fill::default());
     path.rendering_mode = ShapeRendering::CrispEdges;
     clip_path.root.children.push(Node::Path(Box::new(path)));

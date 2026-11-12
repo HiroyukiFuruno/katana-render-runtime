@@ -1,9 +1,28 @@
+use base64::{Engine, engine::general_purpose::STANDARD};
 use rstest::rstest;
-use tiny_skia::Transform;
+use tiny_skia::{Pixmap, Transform};
 
-use super::usvg;
+use super::{resvg, usvg};
 
 const EXPECTED_COMPONENTS: usize = 3;
+
+#[test]
+fn slice_image_paints_only_inside_its_viewport() -> Result<(), String> {
+    let image = STANDARD.encode(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="2"><rect width="4" height="2" fill="red"/></svg>"#,
+    );
+    let svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"><image x="4" y="6" width="3" height="3" preserveAspectRatio="xMidYMid slice" href="data:image/svg+xml;base64,{image}"/></svg>"#
+    );
+    let tree =
+        usvg::Tree::from_str(&svg, &usvg::Options::default()).map_err(|error| error.to_string())?;
+    let mut pixmap = Pixmap::new(12, 12).ok_or("pixmap allocation failed")?;
+    resvg::render(&tree, Transform::identity(), &mut pixmap.as_mut());
+    for (x, alpha) in [(3, 0), (4, 255), (6, 255), (7, 0)] {
+        assert_eq!(pixmap.pixel(x, 7).map(|pixel| pixel.alpha()), Some(alpha));
+    }
+    Ok(())
+}
 
 #[rstest]
 #[case::en_c4_container(1272, 886, 1248, "861.1719", "861.1848754882812", [0.9999849, 12.00942, 81.99894])]

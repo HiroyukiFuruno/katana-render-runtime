@@ -307,10 +307,7 @@ fn slice_image_group(mut g: Group, rect: NonZeroRect, cache: &mut converter::Cac
 }
 
 fn image_slice_clip(rect: NonZeroRect, cache: &mut converter::Cache) -> ClipPath {
-    let mut path = Path::new_simple(Arc::new(tiny_skia_path::PathBuilder::from_rect(
-        rect.to_rect(),
-    )))
-    .unwrap();
+    let mut path = Path::from_rect(rect);
     path.fill = Some(crate::svg_engine::usvg::Fill::default());
     let mut clip = ClipPath::empty(cache.gen_clip_path_id());
     clip.root.children.push(Node::Path(Box::new(path)));

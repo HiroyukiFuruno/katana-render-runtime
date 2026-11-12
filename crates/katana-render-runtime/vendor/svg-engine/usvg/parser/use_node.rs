@@ -301,10 +301,7 @@ fn clip_element(
 fn clip_path_for_rect(clip_rect: NonZeroRect, cache: &mut converter::Cache) -> ClipPath {
     let mut clip_path = ClipPath::empty(cache.gen_clip_path_id());
 
-    let mut path = Path::new_simple(Arc::new(tiny_skia_path::PathBuilder::from_rect(
-        clip_rect.to_rect(),
-    )))
-    .unwrap();
+    let mut path = Path::from_rect(clip_rect);
     path.fill = Some(crate::svg_engine::usvg::Fill::default());
     clip_path.root.children.push(Node::Path(Box::new(path)));
     clip_path.root.calculate_bounding_boxes();

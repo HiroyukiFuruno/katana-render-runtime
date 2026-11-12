@@ -1318,17 +1318,23 @@ fn path_absolute_bounds(
 }
 
 impl Path {
-    pub(crate) fn new_simple(data: Arc<tiny_skia_path::Path>) -> Option<Self> {
-        Self::new(
-            String::new(),
-            true,
-            None,
-            None,
-            PaintOrder::default(),
-            ShapeRendering::default(),
-            data,
-            Transform::default(),
-        )
+    pub(crate) fn from_rect(bounds: NonZeroRect) -> Self {
+        // 矩形の境界は確定済み。変換・ストロークのないパスでは全境界が一致する。
+        let bounds = bounds.to_rect();
+        Self {
+            id: String::new(),
+            visible: true,
+            fill: None,
+            stroke: None,
+            paint_order: PaintOrder::default(),
+            rendering_mode: ShapeRendering::default(),
+            data: Arc::new(tiny_skia_path::PathBuilder::from_rect(bounds)),
+            abs_transform: Transform::default(),
+            bounding_box: bounds,
+            abs_bounding_box: bounds,
+            stroke_bounding_box: bounds,
+            abs_stroke_bounding_box: bounds,
+        }
     }
 
     pub(crate) fn new(

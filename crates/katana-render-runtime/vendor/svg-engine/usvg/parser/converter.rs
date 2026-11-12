@@ -12,7 +12,6 @@ use crate::svg_engine::usvg::{FontVariation, GlyphId};
 use fontdb::Database;
 use fontdb::ID;
 use svgtypes::{Length, LengthUnit as Unit, PaintOrderKind, TransformOrigin};
-use tiny_skia_path::PathBuilder;
 
 use super::svgtree::{self, AId, EId, FromValue, SvgNode};
 use super::units::{self, convert_length};
@@ -490,9 +489,8 @@ fn append_svg_root_group(
 ) {
     let mut g = Group::empty();
     if let Some(background_color) = background_color {
-        if let Some(path) = background_path(background_color, view_box.rect.to_rect()) {
-            g.children.push(Node::Path(Box::new(path)));
-        }
+        let path = background_path(background_color, view_box.rect);
+        g.children.push(Node::Path(Box::new(path)));
     }
     g.transform = root_ts;
     g.abs_transform = root_ts;
@@ -524,23 +522,21 @@ fn finish_svg_tree(tree: &mut Tree, mut cache: Cache, restore_viewbox: bool) {
     }
 }
 
-fn background_path(background_color: svgtypes::Color, area: Rect) -> Option<Path> {
-    let path = PathBuilder::from_rect(area);
-
+fn background_path(background_color: svgtypes::Color, area: NonZeroRect) -> Path {
     let fill = Fill {
         paint: Paint::Color(Color::new_rgb(
             background_color.red,
             background_color.green,
             background_color.blue,
         )),
-        opacity: NormalizedF32::new(background_color.alpha as f32 / 255.0)?,
+        opacity: NormalizedF32::new_clamped(background_color.alpha as f32 / 255.0),
         ..Default::default()
     };
 
-    let mut path = Path::new_simple(Arc::new(path))?;
+    let mut path = Path::from_rect(area);
     path.fill = Some(fill);
 
-    Some(path)
+    path
 }
 
 fn resolve_svg_size(
