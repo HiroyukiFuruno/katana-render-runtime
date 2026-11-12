@@ -154,6 +154,53 @@ fn shared_file_identity_requires_matching_physical_bytes() -> Result<(), String>
     Ok(())
 }
 
+#[cfg(unix)]
+#[test]
+fn physical_file_identity_canonicalizes_a_symlink_to_the_captured_font() -> Result<(), String> {
+    let (_temp, target, alias) = linked_font_fixture()?;
+    let mut database = Database::new();
+    database
+        .load_font_file(&alias)
+        .map_err(|error| error.to_string())?;
+    let face = database.faces().next().ok_or("fixture face missing")?;
+
+    let identity = face_identity(&database, face)?;
+    assert_eq!(
+        identity.path,
+        fs::canonicalize(&target).map_err(|error| error.to_string())?
+    );
+    assert_eq!(identity.file_sha256, super::sha256(FONT_BYTES));
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn resource_database_rejects_symlink_aliases_of_one_physical_font() -> Result<(), String> {
+    let (_temp, target, alias) = linked_font_fixture()?;
+    let digest = super::sha256(FONT_BYTES);
+    let resources = [target, alias].map(|body_path| ResourceFile {
+        url: "https://probe.invalid/font".to_owned(),
+        body_path,
+        bytes_sha256: digest.clone(),
+    });
+
+    assert_eq!(
+        super::load_resource_database(&resources).err().as_deref(),
+        Some("duplicate physical font resource path")
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+fn linked_font_fixture() -> Result<(TempDirectory, std::path::PathBuf, std::path::PathBuf), String>
+{
+    let (temp, _, _) = physical_font_fixture()?;
+    let target = temp.path().join("physical-font.ttf");
+    let alias = temp.path().join("font-alias.ttf");
+    std::os::unix::fs::symlink(&target, &alias).map_err(|error| error.to_string())?;
+    Ok((temp, target, alias))
+}
+
 #[test]
 fn unique_shared_font_is_rejected_after_its_file_is_removed() -> Result<(), String> {
     let (temp, database, _) = shared_physical_font_fixture(false)?;
