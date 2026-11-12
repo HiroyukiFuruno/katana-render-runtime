@@ -747,9 +747,15 @@ html-performance-evidence-produce catalog_manifest:
     @set -euo pipefail; \
       manifest={{quote(catalog_manifest)}}; \
       if [[ ! -f "$manifest" || -L "$manifest" ]]; then echo "catalog stage90 capture manifest is missing or not a regular file: $manifest" >&2; exit 2; fi; \
-      binding_path="{{REPO_ROOT}}/tmp/html-performance-capacity/binding.json"; \
-      binding_sha256="$(python3 scripts/build/initialize_ci_capacity_state.py --root "{{REPO_ROOT}}" --interaction-report "{{REPO_ROOT}}/tmp/html-interaction-suite/krr.json")"; \
-      {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap produce --repo "{{REPO_ROOT}}" --capacity-binding "$binding_path" --capacity-binding-sha256 "$binding_sha256" --catalog-plan "$manifest"
+      report_path="{{REPO_ROOT}}/tmp/html-interaction-suite/krr.json"; \
+      if [[ "${GITHUB_ACTIONS:-}" == true ]]; then \
+        binding_path="{{REPO_ROOT}}/tmp/html-performance-capacity/binding.json"; \
+        binding_sha256="$(python3 scripts/build/initialize_ci_capacity_state.py --root "{{REPO_ROOT}}" --interaction-report "$report_path")"; \
+        capacity_args=(--capacity-binding "$binding_path" --capacity-binding-sha256 "$binding_sha256"); \
+      else \
+        capacity_args=(--interaction-report "$report_path"); \
+      fi; \
+      {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap produce --repo "{{REPO_ROOT}}" "${capacity_args[@]}" --catalog-plan "$manifest"
 
 # HTML受入れとは独立にcandidate build proofだけを生成・検証する。
 html-performance-candidate-build-proof output capacity_binding capacity_binding_sha256:

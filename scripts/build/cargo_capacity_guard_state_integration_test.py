@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 import cargo_capacity_guard as guard
 import cargo_capacity_guard_native_cli_observation as observation
 import cargo_capacity_guard_state as capacity_state
+from initialize_ci_capacity_state import write_html_performance_binding
 
 if TYPE_CHECKING:
     import produce_html_performance_evidence as typed_producer
@@ -276,6 +277,30 @@ class CapacityStateIntegrationTest(unittest.TestCase):
         self.assertNotEqual(collision.returncode, 0)
         self.assertEqual(sentinel.read_bytes(), b"preserve")
 
+    def test_managed_bindings_use_current_report_without_replacing_prior_files(self) -> None:
+        initialized = self.run_initializer(CI="true", GITHUB_ACTIONS="true")
+        self.assertEqual(initialized.returncode, 0, initialized.stderr)
+        original_state = self.bootstrap_state_path.read_bytes()
+        report = self.root / "tmp/html-interaction-suite/krr.json"
+        report.parent.mkdir()
+        snapshots = []
+        for i in range(2):
+            directory = self.root / "tmp/html-performance-retained" / f"run-{i}" / "capacity"
+            directory.parent.mkdir(parents=True)
+            report.write_bytes(f"interaction report {i}".encode())
+            digest = write_html_performance_binding(str(self.root), report, directory=directory)
+            binding = directory / "binding.json"
+            registry = directory / "protected-refs.json"
+            self.assert_physical_interaction_record(report, registry)
+            self.assert_binding_roundtrip(report, binding, registry, digest)
+            snapshots.append((binding, binding.read_bytes(), digest))
+        self.assertEqual(self.bootstrap_state_path.read_bytes(), original_state)
+        for path, payload, _digest in snapshots:
+            self.assertEqual(path.read_bytes(), payload)
+        prior_binding, _payload, prior_digest = snapshots[0]
+        with self.assertRaisesRegex(RuntimeError, "pinned file changed"):
+            typed_producer.load_capacity_binding(self.root, prior_binding, prior_digest)
+
     def write_recipe_python_shim(
         self, launcher: Path, script: Path, initializer_exit: int = 0
     ) -> None:
@@ -294,10 +319,12 @@ class CapacityStateIntegrationTest(unittest.TestCase):
             "    expected = [\n"
             "        'scripts/release/run_html_performance.py', '--bootstrap', 'produce',\n"
             "        '--repo', root,\n"
-            "        '--capacity-binding', str(Path(root) / 'tmp/html-performance-capacity/binding.json'),\n"
-            "        '--capacity-binding-sha256', 'a' * 64,\n"
-            "        '--catalog-plan', os.environ['KRR_TEST_MANIFEST'],\n"
             "    ]\n"
+            "    if os.environ['GITHUB_ACTIONS'] == 'true':\n"
+            "        expected += ['--capacity-binding', str(Path(root) / 'tmp/html-performance-capacity/binding.json'),\n"
+            "                     '--capacity-binding-sha256', 'a' * 64]\n"
+            "    else: expected += ['--interaction-report', os.environ['KRR_TEST_REPORT']]\n"
+            "    expected += ['--catalog-plan', os.environ['KRR_TEST_MANIFEST']]\n"
             "    if args != expected: raise SystemExit('producer argv differs')\n"
             "    Path(os.environ['KRR_TEST_CAPTURE']).write_text(json.dumps(args))\n"
             "    raise SystemExit(0)\n"
@@ -313,7 +340,7 @@ class CapacityStateIntegrationTest(unittest.TestCase):
         launcher.chmod(0o755)
 
     def run_performance_recipe(
-        self, initializer_exit: int = 0, *, manifest_exists: bool = True
+        self, initializer_exit: int = 0, *, manifest_exists: bool = True, github_actions: bool = True,
     ) -> tuple[subprocess.CompletedProcess[str], list[str] | None]:
         justfile = Path(__file__).resolve().parents[2] / "Justfile"
         fake_bin = self.root / "fake bin with spaces"
@@ -335,6 +362,7 @@ class CapacityStateIntegrationTest(unittest.TestCase):
         environment["KRR_TEST_REPORT"] = str(report)
         environment["KRR_TEST_CAPTURE"] = str(capture)
         environment["KRR_TEST_MANIFEST"] = str(manifest)
+        environment["GITHUB_ACTIONS"] = "true" if github_actions else "false"
         just_executable = shutil.which("just")
         if just_executable is None:
             raise FileNotFoundError("just executable was not found")
@@ -410,6 +438,11 @@ class CapacityStateIntegrationTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("catalog stage90 capture manifest is missing", result.stderr)
         self.assertIsNone(forwarded)
+
+    def test_local_performance_recipe_lets_managed_producer_bind_the_report(self) -> None:
+        result, forwarded = self.run_performance_recipe(initializer_exit=1, github_actions=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNotNone(forwarded)
 
     def test_performance_recipe_stops_if_initializer_fails(self) -> None:
         result, forwarded = self.run_performance_recipe(initializer_exit=1)

@@ -99,9 +99,13 @@ def _protected_report_identity(report_path: Path) -> dict[str, object]:
 
 
 def _write_performance_binding(root: Path, state_path: Path,
-                                protected_report: dict[str, object]) -> str:
+                                protected_report: dict[str, object], *,
+                                directory: Path | None = None) -> str:
     temporary = _validate_tmp(root)
-    binding_directory = temporary / "html-performance-capacity"
+    binding_directory = directory or temporary / "html-performance-capacity"
+    if (not binding_directory.is_relative_to(temporary)
+            or binding_directory.parent.resolve(strict=True) != binding_directory.parent):
+        raise RuntimeError("capacity binding directory is not canonical repository temporary storage")
     binding_directory.mkdir()
     registry_path = binding_directory / "protected-refs.json"
     binding_path = binding_directory / "binding.json"
@@ -127,7 +131,8 @@ def _write_performance_binding(root: Path, state_path: Path,
     return digest
 
 
-def write_html_performance_binding(root_argument: str, report_argument: Path) -> str:
+def write_html_performance_binding(root_argument: str, report_argument: Path, *,
+                                   directory: Path | None = None) -> str:
     root = Path(root_argument)
     expected_report = root / "tmp/html-interaction-suite/krr.json"
     if report_argument != expected_report:
@@ -135,7 +140,8 @@ def write_html_performance_binding(root_argument: str, report_argument: Path) ->
     state_path = root / "tmp/.cargo-capacity-guard.json"
     if not _existing_state(state_path, root, root / "target"):
         raise RuntimeError("current-run capacity state is missing")
-    return _write_performance_binding(root, state_path, _protected_report_identity(report_argument))
+    return _write_performance_binding(root, state_path, _protected_report_identity(report_argument),
+                                      directory=directory)
 
 
 def main() -> int:

@@ -4720,6 +4720,8 @@ def main() -> None:
                         help="register a verified copy of the marked baseline in managed storage")
     parser.add_argument("--capacity-binding", type=Path)
     parser.add_argument("--capacity-binding-sha256")
+    parser.add_argument("--interaction-report", type=Path,
+                        help="bind the canonical interaction report within the managed run")
     parser.add_argument("--catalog-plan", type=Path)
     parser.add_argument(
         "--max-conditions", type=int,
@@ -4752,6 +4754,9 @@ def main() -> None:
         parser.error("managed retention requires a catalog comparison without --output")
     if args.retention_baseline is not None and not managed:
         parser.error("--retention-baseline requires managed retention")
+    if args.interaction_report is not None and (not managed or args.capacity_binding is not None
+                                               or args.capacity_binding_sha256 is not None):
+        parser.error("--interaction-report requires managed retention without an explicit capacity binding")
     unmanaged_output = (args.output or Path("tmp/html-performance-producer")).resolve()
     if args.condition_id is not None:
         if args.catalog_plan is None or args.same_binary_control is not None or args.candidate_build_only:
@@ -4783,9 +4788,16 @@ def main() -> None:
     if (args.reference_parent_wrapper is None) != (args.reference_parent_wrapper_sha256 is None):
         parser.error("reference parent wrapper requires --reference-parent-wrapper-sha256")
     repo = args.repo.resolve()
-    arguments = (args.capacity_binding,
-                 args.capacity_binding_sha256,
-                 args.catalog_plan.resolve() if args.catalog_plan is not None else None)
+    catalog_plan = args.catalog_plan.resolve() if args.catalog_plan is not None else None
+
+    def arguments(destination: Path) -> tuple[Path | None, str | None, Path | None]:
+        if args.interaction_report is None:
+            return args.capacity_binding, args.capacity_binding_sha256, catalog_plan
+        from initialize_ci_capacity_state import write_html_performance_binding
+
+        directory = destination.parent / "capacity"
+        checksum = write_html_performance_binding(str(repo), args.interaction_report, directory=directory)
+        return directory / "binding.json", checksum, catalog_plan
     output = (retained_runs.managed_output(repo, baseline=args.retention_baseline)
               if managed else nullcontext(unmanaged_output))
     batch_options: BatchOptions = {}
@@ -4825,16 +4837,16 @@ def main() -> None:
                 return
             if args.same_binary_batch_sha256 is not None:
                 parser.error("same-binary batch SHA requires the diagnostic mode")
-            produce(repo, destination, *arguments, fixed_epoch=fixed_origin,
+            produce(repo, destination, *arguments(destination), fixed_epoch=fixed_origin,
                     _allow_catalog_diagnostic=args.diagnostic_only, **batch_options)
         return
     if args.same_binary_control is not None or args.same_binary_batch_sha256 is not None:
         parser.error("same-binary control requires a fixed epoch origin")
     with candidate_build_locks(repo), output as destination:
         if args.diagnostic_only:
-            produce(repo, destination, *arguments, _allow_catalog_diagnostic=True, **batch_options)
+            produce(repo, destination, *arguments(destination), _allow_catalog_diagnostic=True, **batch_options)
         else:
-            produce(repo, destination, *arguments, **batch_options)
+            produce(repo, destination, *arguments(destination), **batch_options)
 
 
 if __name__ == "__main__":
