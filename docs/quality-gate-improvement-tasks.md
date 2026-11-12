@@ -2,7 +2,8 @@
 
 ## 現在の実行地点（2026-11-13、以下の過去結果と区別する）
 
-- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み43件、一部対応2件、未対応80件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0014.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み45件、一部対応3件、未対応77件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0015.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- HTMLフレームfixtureで画素不足とフォント指紋欠落、実フォント共有fixtureでBinary-backedと読み込み元消失の拒否を確認した。Mermaid幅診断はbundle読込を共通化し、引用符・改行・日本語・順序と英語／日本語C4の実描画を確認。macOSのフォント監査エラー変換は残り一部対応。AST・対象12件・実catalog照合・ソース前後一致が成功（`4333b8ba`、`d07b5a00`、`47709320`、`tmp/quality/resumed-owner-r3509/release-coverage-artifact-font-and-width-fixtures-r67t8whg/safe-summary.json`）。
 - HTMLフレームの保存・再開テストは所有する一時ディレクトリへ移し、閉じたセッションと容量超過の確認を維持した。表は実描画の折り返しとSVGの矩形を直接検査する。DOMは消費済み例外の再送出を実V8で確認したが、確保失敗などが残り一部対応。初回ASTの関数長・禁止メソッドを修正し、AST・対象12件・実catalog照合・ソース前後一致を確認（`99a70ee9`、`bc997955`、`bd00b85a`、`tmp/quality/resumed-owner-r3509/release-coverage-html-artifact-table-and-bridge-kat5yx0v/safe-summary.json`）。
 - Mermaidフォント観測のJSON入出力を一つのエラー変換にまとめ、実V8から返る必須項目欠落を確認した。C4診断では既存の正常な幅測定に加え、型が違うJSONと途中で切れた配列を拒否する。初回は型不一致を構文エラーと期待したケースが実100だったため入力を分け、修正後のAST・対象7件・実catalog照合・ソース前後一致を確認した（`ff12ef64`、`c26b196c`、`tmp/quality/resumed-owner-r3509/release-coverage-mermaid-native-diagnostic-json-9dkz8e0t/safe-summary.json`）。
 - 組み込みMathJaxのテスト経路で生成済み資源を直接参照し、既存の外部ファイル試験は所有する一時ディレクトリで実行するよう変更した。実MathJaxの組み込み・読込済み出力一致、Mermaid文字幅測定でのSVG解析エラー、隔離した既存Warnロガーとの共存を確認した。AST・関連9件・実catalog照合・ソース前後一致が成功（`83708866`、`c471de09`、`tmp/quality/resumed-owner-r3509/release-coverage-mathjax-block-and-logger-hggf_8c9/safe-summary.json`）。
