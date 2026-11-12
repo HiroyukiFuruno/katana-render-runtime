@@ -3,6 +3,12 @@ use crate::markdown::svg_rasterize::html_glyph::HtmlGlyphRasterizer;
 use resvg::usvg::{Group, Node, Tree, filter::TransferFunction};
 use tiny_skia::{Pixmap, Transform};
 
+fn identity_transfer_spec(group: &Group) -> Result<Option<transfer::TransferSpec>, String> {
+    let identity = transfer::FilterTransform::new(Transform::identity())
+        .ok_or("identity transform rejected")?;
+    transfer::transfer_spec(group, identity)
+}
+
 #[test]
 fn component_transfer_rejects_nonfinite_linear_coefficients() {
     for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
@@ -23,7 +29,7 @@ fn component_transfer_rejects_non_linear_green_and_blue_channels() -> Result<(),
         );
         let svg = super::component_transfer_svg(&functions, super::FILTER_REGION, "", "", "");
         let tree = parse(&svg)?;
-        assert!(transfer::transfer_spec(filtered_group(&tree)?, Transform::identity())?.is_none());
+        assert!(identity_transfer_spec(filtered_group(&tree)?)?.is_none());
     }
     Ok(())
 }
@@ -38,7 +44,7 @@ fn component_transfer_declines_unsupported_inputs_and_primitive_shapes() -> Resu
     for primitive in cases {
         let svg = filtered_svg(primitive);
         let tree = parse(&svg)?;
-        assert!(transfer::transfer_spec(filtered_group(&tree)?, Transform::identity())?.is_none());
+        assert!(identity_transfer_spec(filtered_group(&tree)?)?.is_none());
     }
     Ok(())
 }
@@ -141,7 +147,7 @@ fn disjoint_filter_and_primitive_regions_decline_transfer_without_drawing() -> R
     };
     assert!(filter.rect().right() < primitive.rect().x());
     assert!(filter.rect().bottom() < primitive.rect().y());
-    assert!(transfer::transfer_spec(group, Transform::identity())?.is_none());
+    assert!(identity_transfer_spec(group)?.is_none());
     let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
     let mut target = Pixmap::new(super::SIZE, super::SIZE).ok_or("transfer canvas missing")?;
     let before = target.data().to_vec();

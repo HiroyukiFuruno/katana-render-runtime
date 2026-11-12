@@ -16,7 +16,7 @@ mod surface;
 #[path = "svg_rasterize_html_shadow_tests.rs"]
 mod tests;
 
-pub(super) use bounds::{Bounds, Crop, bounded_crop, map_rect, supported_transform};
+pub(super) use bounds::{Bounds, Crop, FilterTransform, bounded_crop, map_rect};
 
 pub(super) type ShadowSourceRenderer<'a> =
     dyn FnMut(Transform, &mut PixmapMut<'_>) -> Result<(), String> + 'a;
@@ -46,16 +46,16 @@ impl HtmlShadowRasterizer {
         target: &mut PixmapMut<'_>,
         source_renderer: &mut ShadowSourceRenderer<'_>,
     ) -> Result<bool, String> {
-        if !geometry::supported_transform(child_transform) {
+        let Some(transform) = FilterTransform::new(child_transform) else {
             return Ok(false);
-        }
+        };
         let Some(spec) = geometry::shadow_spec(group)? else {
             return Ok(false);
         };
-        let Some(source) = geometry::source_bounds(group, child_transform)? else {
+        let Some(source) = geometry::source_bounds(group, transform)? else {
             return Ok(false);
         };
-        let Some(effect) = geometry::effect_bounds(source, spec, child_transform)? else {
+        let Some(effect) = geometry::effect_bounds(source, spec, transform)? else {
             return Ok(false);
         };
         let Some(crop) = geometry::bounded_crop(effect, target) else {

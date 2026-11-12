@@ -1,8 +1,8 @@
 use super::Transform;
 
-use super::HtmlShadowRasterizer;
 use super::bounds::map_bounds;
 use super::geometry::{Bounds, bounded_crop};
+use super::{FilterTransform, HtmlShadowRasterizer};
 use tiny_skia::{Color, Paint as TinyPaint, Pixmap, PixmapMut, Rect as TinyRect};
 
 #[path = "svg_rasterize_html_shadow_failure_tests.rs"]
@@ -28,27 +28,23 @@ const SHADOW_RED: [u8; 4] = [255, 0, 0, 255];
 const BACKGROUND_GRAY: [u8; 4] = [128, 128, 128, 255];
 
 #[test]
-fn shadow_bounds_reject_unsupported_and_overflowing_transforms() {
+fn shadow_bounds_reject_unsupported_and_overflowing_transforms() -> Result<(), String> {
     let bounds = Bounds {
         left: SOURCE_X,
         top: SOURCE_X,
         right: SOURCE_X + SOURCE_SIZE,
         bottom: SOURCE_X + SOURCE_SIZE,
     };
-    assert!(map_bounds(bounds, Transform::identity()).is_ok());
-    let cases = [
-        (
-            Transform::from_rotate(30.0),
-            "drop-shadow transform is not positive scale and translation",
-        ),
-        (
-            Transform::from_scale(f32::MAX, UNIT_SCALE),
-            "drop-shadow transformed bounds are non-finite",
-        ),
-    ];
-    for (transform, expected) in cases {
-        assert!(map_bounds(bounds, transform).is_err_and(|error| error == expected));
-    }
+    let identity = FilterTransform::new(Transform::identity()).ok_or("identity rejected")?;
+    assert!(map_bounds(bounds, identity).is_ok());
+    assert!(FilterTransform::new(Transform::from_rotate(30.0)).is_none());
+    let large = FilterTransform::new(Transform::from_scale(f32::MAX, UNIT_SCALE))
+        .ok_or("finite scale rejected")?;
+    assert_eq!(
+        map_bounds(bounds, large).err().as_deref(),
+        Some("drop-shadow transformed bounds are non-finite")
+    );
+    Ok(())
 }
 
 #[test]

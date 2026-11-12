@@ -1,7 +1,6 @@
-pub(super) use super::bounds::{Bounds, Crop, bounded_crop, supported_transform};
+pub(super) use super::bounds::{Bounds, Crop, bounded_crop};
 
-use super::Transform;
-use super::bounds;
+use super::bounds::{self, FilterTransform};
 use super::surface;
 use resvg::usvg::{BlendMode, Group, filter};
 use skia_safe::{Color4f, Rect as SkRect};
@@ -87,7 +86,10 @@ fn supported_shadow(primitive: &filter::Primitive) -> Result<Option<&filter::Dro
     Ok(Some(shadow))
 }
 
-pub(super) fn source_bounds(group: &Group, transform: Transform) -> Result<Option<Bounds>, String> {
+pub(super) fn source_bounds(
+    group: &Group,
+    transform: FilterTransform,
+) -> Result<Option<Bounds>, String> {
     let bounds = bounds::map_rect(group.stroke_bounding_box(), transform)?;
     if bounds.left >= bounds.right || bounds.top >= bounds.bottom {
         return Ok(None);
@@ -98,9 +100,9 @@ pub(super) fn source_bounds(group: &Group, transform: Transform) -> Result<Optio
 pub(super) fn effect_bounds(
     source: Bounds,
     spec: ShadowSpec,
-    transform: Transform,
+    transform: FilterTransform,
 ) -> Result<Option<Bounds>, String> {
-    let filter = surface::make_skia_filter(spec, transform, None)?;
+    let filter = surface::make_skia_filter(spec, transform.raw(), None)?;
     let source_rect = SkRect::from_ltrb(source.left, source.top, source.right, source.bottom);
     /* WHY: cropなしDropShadowのぼかし・SrcIn・移動・合成はすべて透明黒を保つ。 */
     let effect = surface::skia_bounds(filter.compute_fast_bounds(source_rect))?;

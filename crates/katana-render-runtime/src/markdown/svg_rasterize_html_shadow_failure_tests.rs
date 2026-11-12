@@ -49,6 +49,19 @@ fn overflowing_source_bounds_are_rejected_before_paint() -> Result<(), String> {
     )
 }
 
+#[test]
+fn overflowing_filter_region_is_rejected_before_paint() -> Result<(), String> {
+    let svg = SRGB_SVG.replace(
+        r#"id="s" x="0" y="0" width="100""#,
+        r#"id="s" filterUnits="userSpaceOnUse" x="0" y="0" width="1e38""#,
+    );
+    assert_shadow_error_before_paint(
+        &svg,
+        Transform::from_scale(4.0, 1.0),
+        "drop-shadow transformed bounds are non-finite",
+    )
+}
+
 fn assert_shadow_error_before_paint(
     svg: &str,
     transform: Transform,

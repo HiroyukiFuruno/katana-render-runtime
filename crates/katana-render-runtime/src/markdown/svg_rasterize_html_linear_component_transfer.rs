@@ -1,3 +1,4 @@
+use super::super::html_shadow::FilterTransform;
 use super::{AuthoredClipInfo, TextRasterizer};
 use resvg::usvg::{self, BlendMode, filter};
 use tiny_skia::{Pixmap, PixmapMut, Transform};
@@ -19,10 +20,10 @@ pub(super) fn render(
     provenance: &AuthoredClipInfo,
     text: &dyn TextRasterizer,
 ) -> Result<bool, String> {
-    if !super::super::html_shadow::supported_transform(child_transform) {
+    let Some(transform) = FilterTransform::new(child_transform) else {
         return Ok(false);
-    }
-    let Some(spec) = transfer_spec(group, child_transform)? else {
+    };
+    let Some(spec) = transfer_spec(group, transform)? else {
         return Ok(false);
     };
     /* WHY: フィルターが1件のとき、レイヤー境界は spec で交差済みのフィルター領域。 */
@@ -38,7 +39,7 @@ pub(super) fn render(
 
 fn transfer_spec(
     group: &usvg::Group,
-    transform: Transform,
+    transform: FilterTransform,
 ) -> Result<Option<TransferSpec>, String> {
     let Some(filter) = supported_filter(group) else {
         return Ok(None);
@@ -146,7 +147,7 @@ fn linear(function: &filter::TransferFunction) -> Result<Option<(f32, f32)>, Str
 fn spec_bounds(
     filter: &filter::Filter,
     primitive: &filter::Primitive,
-    transform: Transform,
+    transform: FilterTransform,
 ) -> Result<Option<super::super::html_shadow::Bounds>, String> {
     let filter_bounds = super::super::html_shadow::map_rect(filter.rect().to_rect(), transform)?;
     let primitive_bounds =

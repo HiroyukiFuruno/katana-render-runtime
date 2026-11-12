@@ -4,6 +4,19 @@ use tiny_skia::{PixmapMut, Point, Transform};
 const BBOX_CORNER_COUNT: usize = 4;
 
 #[derive(Clone, Copy)]
+pub(in crate::markdown::svg_rasterize) struct FilterTransform(Transform);
+
+impl FilterTransform {
+    pub(in crate::markdown::svg_rasterize) fn new(transform: Transform) -> Option<Self> {
+        supported_transform(transform).then_some(Self(transform))
+    }
+
+    pub(in crate::markdown::svg_rasterize) fn raw(self) -> Transform {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy)]
 pub(in crate::markdown::svg_rasterize) struct Bounds {
     pub(in crate::markdown::svg_rasterize) left: f32,
     pub(in crate::markdown::svg_rasterize) top: f32,
@@ -40,7 +53,7 @@ pub(in crate::markdown::svg_rasterize) fn rect_bounds(rect: Rect) -> Bounds {
 
 pub(in crate::markdown::svg_rasterize) fn map_rect(
     rect: Rect,
-    transform: Transform,
+    transform: FilterTransform,
 ) -> Result<Bounds, String> {
     map_bounds(rect_bounds(rect), transform)
 }
@@ -69,18 +82,15 @@ pub(in crate::markdown::svg_rasterize) fn bounded_crop(
 
 pub(in crate::markdown::svg_rasterize) fn map_bounds(
     bounds: Bounds,
-    transform: Transform,
+    transform: FilterTransform,
 ) -> Result<Bounds, String> {
-    if !supported_transform(transform) {
-        return Err("drop-shadow transform is not positive scale and translation".to_owned());
-    }
     let mut points: [Point; BBOX_CORNER_COUNT] = [
         Point::from_xy(bounds.left, bounds.top),
         Point::from_xy(bounds.right, bounds.top),
         Point::from_xy(bounds.left, bounds.bottom),
         Point::from_xy(bounds.right, bounds.bottom),
     ];
-    transform.map_points(&mut points);
+    transform.raw().map_points(&mut points);
     bounds_from_points(&points)
 }
 
@@ -120,7 +130,7 @@ fn validate_bounds(bounds: Bounds) -> Result<Bounds, String> {
     }
 }
 
-pub(in crate::markdown::svg_rasterize) fn supported_transform(transform: Transform) -> bool {
+fn supported_transform(transform: Transform) -> bool {
     transform.sx.is_finite()
         && transform.sy.is_finite()
         && transform.tx.is_finite()
