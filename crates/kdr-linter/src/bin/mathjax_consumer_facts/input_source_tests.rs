@@ -33,6 +33,21 @@ fn mathjax_consumer_facts_ast_linter_rejects_parser_pin_and_generated_include_dr
 }
 
 #[test]
+fn mathjax_consumer_facts_rejects_a_missing_opaque_input() -> Result<(), Box<dyn std::error::Error>>
+{
+    const RESOURCE: &str = "scripts/runtime-bundles/runtime-bundle-definitions.ts";
+    let fixture = mathjax_fixture()?;
+    assert_eq!(inspect_root(fixture.root())?["status"], "verified");
+
+    fs::remove_file(fixture.root().join(RESOURCE))?;
+    fixture.reject(&format!("missing-source:{RESOURCE}:"))?;
+
+    fixture.restore(RESOURCE)?;
+    assert_eq!(inspect_root(fixture.root())?["status"], "verified");
+    Ok(())
+}
+
+#[test]
 fn render_request_and_response_call_bindings_are_checked() -> Result<(), Box<dyn std::error::Error>>
 {
     let fixture = mathjax_fixture()?;
