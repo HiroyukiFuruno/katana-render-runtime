@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 実SVGの計測対象ID欠落・非text要素、実フォント候補の除外、Rust ASTのSVG IDハッシュ・dark-modeハッシュ欠落の予定5条件を確認。フォント置換は固定長スライス上の更新にし、長さ変更が起こらない構造にした。macOSで関連4テスト・静的基盤・ASTが成功し、ソース前後一致。限定実行の選択一覧に含めた1件はWindows専用でmacOSでは未実行とソースで確認した（`d1e13e6a`、`a6a38702`、`d67ed00a`、`tmp/quality/resumed-owner-r3509/release-coverage-cmap-and-native-ast-e5zmng2v/{safe-summary,case-selection-correction}.json`）。正式カバレッジへの差分とWindows専用テストの実結果は未確認。
 - フォント監査では、唯一の呼び出し元が先にBinaryを拒否していたため、同一Sourceの再判定と到達不能なBinary分岐を除いた。Fileの読み取りとSharedFileの共有バイトから同じSHAを生成し、前後の物理stampを照合する。実フォント選択では開始前・実行中・終了後の確定可否を確認。関連5テスト・静的基盤・ASTが成功し、ソース前後一致（`92c0638c`、`fffabfa6`、`tmp/quality/resumed-owner-r3509/release-coverage-font-audit-lifecycle-2zehre_5/safe-summary.json`）。この追加分の正式カバレッジは未計測。
 - 最新の正式計測は `6094c164` の86,754/87,023行、99.690886%、未カバー269行（283行から14行減、6ファイルで改善、増加なし）。正式対象6,444テスト成功、別に15件skip。収集実0、前後ソース一致、正式集計不変。100%条件でpolicy実1（`tmp/quality/resumed-owner-r3509/root-coverage-after-font-and-artifact-qxhho8vq/{safe-summary,gap-summary,gap-delta,explicit-uncovered-line-list}.json`）。物理行一覧は131行で据え置き。HTML保存の型別エラー分類は正式集計で解消した。
 - 正式計測後、実C4 Deploymentのタイトル欠落とviewBox外への移動の予定2条件中2条件を確認。既存の親ラベルと外側矩形を含む関連3テスト、静的基盤、ASTが成功し、前後ソース一致（`44d666e9`、`tmp/quality/resumed-owner-r3509/release-coverage-c4-deployment-title-68gj40u3/safe-summary.json`）。この追加分の正式カバレッジは未計測。GitHub上はv0.4.24のDraft Releaseのみで、公開日時は空、release branchをheadとするPRは0件と確認した。
