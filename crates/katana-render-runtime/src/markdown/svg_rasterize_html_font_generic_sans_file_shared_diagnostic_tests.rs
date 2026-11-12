@@ -125,6 +125,18 @@ fn print_arm(pair: usize, fixture_sha: &str, arm: &Arm) -> Result<(), String> {
     Ok(())
 }
 #[test]
+fn diagnostic_rejects_an_otherwise_valid_file_arm_with_a_dropped_event() -> Result<(), String> {
+    let mut arm = session(SourceRoute::File, Mode::Measure)?;
+    validate_arm(&arm)?;
+    arm.observer_dropped = 1;
+    assert_eq!(
+        validate_arm(&arm).err().as_deref(),
+        Some("existing raster observer dropped events")
+    );
+    Ok(())
+}
+
+#[test]
 fn diagnose_real_interaction_file_vs_sharedfile_stage_costs() -> Result<(), String> {
     let fixture_sha = Sha256::digest(FIXTURE.as_bytes())
         .iter()
