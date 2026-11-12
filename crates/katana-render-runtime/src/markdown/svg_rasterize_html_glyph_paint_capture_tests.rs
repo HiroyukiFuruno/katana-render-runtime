@@ -126,6 +126,9 @@ fn paint_capture_scope_restores_nested_state_and_does_not_leak() -> Result<(), S
 }
 
 fn assert_nested_scope_restoration(font: &Font, outer: &PaintCaptureScope) {
+    std::thread::scope(|threads| {
+        threads.spawn(|| assert_eq!(outer.snapshot().report_value()["status"], "empty"));
+    });
     let inner = PaintCaptureScope::enter();
     record_test_event(font, 2.0);
     assert_eq!(inner.snapshot().events.len(), 1);

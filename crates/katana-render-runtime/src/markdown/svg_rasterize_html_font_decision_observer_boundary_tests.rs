@@ -89,6 +89,9 @@ fn assert_bounded_records(records: &[Decision], selected: &MeasuredDatabase) {
 }
 
 fn assert_nested_restoration(observer: &Scope, selected: &MeasuredDatabase) {
+    std::thread::scope(|threads| {
+        threads.spawn(|| assert!(observer.records().is_empty()));
+    });
     let inner = Scope::enter();
     assert!(inner.records().is_empty());
     record(selected, FAMILY, "inner-only", WEIGHT, false);

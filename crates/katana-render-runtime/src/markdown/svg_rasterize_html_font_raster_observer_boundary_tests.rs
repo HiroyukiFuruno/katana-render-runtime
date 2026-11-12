@@ -60,6 +60,13 @@ fn assert_real_face_events(snapshot: &super::Snapshot, id: ID) {
 }
 
 fn assert_nested_restoration(observer: &Scope, database: &Database, id: ID) {
+    std::thread::scope(|threads| {
+        threads.spawn(|| {
+            super::record_work("isolated-font", BUNDLED_SANS_SERIF_FONT);
+            let snapshot = observer.snapshot();
+            assert!(snapshot.events.is_empty() && snapshot.complete());
+        });
+    });
     let inner = Scope::enter();
     admission_result(database, Some(id), Some(id));
     assert_eq!(inner.snapshot().events.len(), 1);
