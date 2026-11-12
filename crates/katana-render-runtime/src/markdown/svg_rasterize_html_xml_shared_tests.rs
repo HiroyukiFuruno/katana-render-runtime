@@ -92,6 +92,61 @@ fn shared_xml_invalid_source_keeps_usvg_error_before_routing() -> Result<(), Str
     assert_parse_error(shared_render(svg, &registered_provenance()), &expected)
 }
 
+#[test]
+fn shared_xml_invalid_size_propagates_known_parse_error_without_eager_retry() -> Result<(), String>
+{
+    use super::super::{lazy_diagnostic, raster_observer};
+
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"><text font-family="Noto Sans">ABC</text></svg>"#;
+    let document = usvg::roxmltree::Document::parse(svg);
+    assert!(document.is_ok());
+    assert_eq!(decoded_ascii(&document).as_deref(), Some("ABC"));
+    let expected = super::eager(svg, svg)
+        .err()
+        .ok_or("zero-sized SVG unexpectedly parsed")?
+        .to_string();
+    let scope = raster_observer::Scope::enter();
+    let (actual, capture) = lazy_diagnostic::with_route(
+        lazy_diagnostic::SourceRoute::File,
+        lazy_diagnostic::Mode::Audit,
+        || parse_with_document(svg, svg, &document),
+    );
+    assert_eq!(
+        actual
+            .err()
+            .ok_or("known parse unexpectedly succeeded")?
+            .to_string(),
+        expected
+    );
+    assert!(capture.errors.is_empty());
+    assert_known_parse_failed_without_eager_retry(&scope.snapshot());
+    Ok(())
+}
+
+fn assert_known_parse_failed_without_eager_retry(
+    snapshot: &super::super::raster_observer::Snapshot,
+) {
+    assert!(snapshot.complete());
+    assert!(
+        snapshot
+            .events
+            .iter()
+            .any(|event| event["stage"] == "prepare" && event["success"] == true)
+    );
+    assert!(
+        snapshot
+            .events
+            .iter()
+            .any(|event| { event["stage"] == "known_parse_result" && event["success"] == false })
+    );
+    assert!(
+        !snapshot
+            .events
+            .iter()
+            .any(|event| event["stage"] == "eager_parse_attempt")
+    );
+}
+
 fn assert_parse_error<T>(
     actual: Result<T, SvgRasterizeError>,
     expected: &str,
