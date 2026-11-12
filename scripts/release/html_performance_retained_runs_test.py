@@ -33,7 +33,8 @@ class RetainedRunsTest(unittest.TestCase):
     def seal(self, output: Path, head: str) -> str:
         manifest = output / "bundle/bundle.json"
         manifest.parent.mkdir(parents=True)
-        manifest.write_text(json.dumps({"head": head}))
+        manifest.write_text(json.dumps({"head": head, "schema": "krr-html-performance-release-bundle-v1",
+                                        "attempts": [{"condition": "condition"}], "files": []}))
         checksum = gate.sha256(manifest)
         (output / "batch-receipt.json").write_text(json.dumps({
             "schema": "krr-html-performance-batch-receipt-v2",
@@ -67,6 +68,42 @@ class RetainedRunsTest(unittest.TestCase):
         with retention.managed_output(self.root) as replacement:
             self.seal(replacement, "replacement")
         self.assertEqual(set(self.namespace.iterdir()), {candidate.parent, replacement.parent})
+
+    def test_successive_managed_runs_prune_only_superseded_legacy_stdout(self) -> None:
+        legacy = self.root / "tmp/quality/owner"
+
+        def old_bundle(name: str, *, measurement: bool = True) -> tuple[Path, Path, Path]:
+            directory = legacy / name / "measurement"
+            payload = directory / "bundle/payload/0/stdout.raw"
+            payload.parent.mkdir(parents=True)
+            payload.write_bytes(b"raw")
+            original = directory.with_name("measurement.lifecycle") / "tool-query-1/stdout.raw"
+            original.parent.mkdir(parents=True)
+            original.write_bytes(b"raw")
+            manifest = directory / "bundle/bundle.json"
+            manifest.write_text(json.dumps({
+                "schema": "krr-html-performance-release-bundle-v1",
+                "attempts": [{}] if measurement else [],
+                "files": [{"relativePath": "payload/0/stdout.raw", "originalPath": str(original)}],
+            }))
+            return manifest, payload, original
+
+        active, baseline_copy, baseline_original = old_bundle("active")
+        self.mark(gate.sha256(active))
+        _, unrelated_copy, unrelated_original = old_bundle("build-only", measurement=False)
+        for index in range(3):
+            manifest, payload, original = old_bundle(f"superseded-{index}")
+            unbundled = original.parent.parent / "unbundled/stdout.raw"
+            unbundled.parent.mkdir()
+            unbundled.write_bytes(b"raw")
+            with retention.managed_output(self.root) as candidate:
+                self.seal(candidate, str(index))
+            self.assertTrue(manifest.is_file())
+            self.assertFalse(any(path.exists() for path in (payload, original, unbundled)))
+            self.assertTrue(all(p.is_file() for p in (
+                baseline_copy, baseline_original, unrelated_copy, unrelated_original,
+            )))
+            self.assertEqual(list(self.namespace.iterdir()), [candidate.parent])
 
     def test_incomplete_previous_run_is_swept_without_touching_foreign_directory(self) -> None:
         self.namespace.mkdir(parents=True)

@@ -107,6 +107,21 @@ def _register_baseline(namespace: Path, source: Path, active: str) -> None:
         raise
 
 
+def _current_candidate(root: Path, active: str) -> Path:
+    manifests = []
+    for run in (root / "tmp" / _NAMESPACE).iterdir():
+        if not _RUN.fullmatch(run.name) or not _regular(run / _MANIFEST):
+            continue
+        manifest, marker = run / _MANIFEST, run / _CANDIDATE
+        checksum = gate.sha256(manifest)
+        if (checksum != active and _regular(marker) and marker.read_bytes() == checksum.encode("ascii")
+                and _sealed_candidate(run, checksum)):
+            manifests.append(manifest)
+    if len(manifests) != 1:
+        raise ValueError("legacy cleanup requires exactly one retained sealed candidate")
+    return manifests[0]
+
+
 @contextmanager
 def managed_output(root: Path, *, baseline: Path | None = None) -> Iterator[Path]:
     """Called under the producer lock; an interrupted run is swept on the next entry."""
@@ -126,3 +141,7 @@ def managed_output(root: Path, *, baseline: Path | None = None) -> Iterator[Path
         yield run / "measurement"
     finally:
         _prune(namespace, active, newest=run)
+        if _regular(run / _CANDIDATE):
+            from html_performance_legacy_stdout import prune
+
+            prune(root, active, run / _MANIFEST, apply=True)
