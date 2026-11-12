@@ -2,7 +2,8 @@ use super::super::font_file_fixture::FONT_BYTES;
 use super::{
     ReadFontRef, TableProvider, Tag, repack_face, validate_metrics,
     verification_support::{
-        change_name_table, font_with_changed_table_byte, font_with_only, truncated_name_font,
+        change_name_table, font_with_changed_table_byte, font_with_only, font_with_tables,
+        truncated_name_font,
     },
     verify_face,
 };
@@ -68,6 +69,15 @@ fn fixture_mutator_rejects_invalid_font_missing_name_and_bad_offset() -> Result<
     let truncated = truncated_name_font()?;
     assert!(change_name_table(&[0]).is_err());
     assert!(font_with_only(Tag::new(b"zzzz")).is_err());
+    let truncated_header = &FONT_BYTES[..1];
+    let expected = ReadFontRef::from_index(truncated_header, 0)
+        .err()
+        .map(|error| format!("{error:?}"));
+    assert!(expected.is_some());
+    assert_eq!(
+        font_with_tables(truncated_header, &[Tag::new(b"head")]).err(),
+        expected
+    );
     for (font, expected) in [
         (missing.as_slice(), "name table missing"),
         (truncated.as_slice(), "name table offset invalid"),

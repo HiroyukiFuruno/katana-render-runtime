@@ -35,15 +35,10 @@ fn observe(text: &str, weight: u16) -> ProbeResult<Value> {
     let options = html_rasterizer_options(&svg);
     super::super::text_shaping::with_validated_tree_parse(|| {
         let tree = usvg::Tree::from_str(&svg, &options)?;
-        let node = tree
-            .node_by_id("krr-text-measure")
-            .ok_or("text node missing")?;
+        let (node, text_node) = text_node(&tree)?;
         let bbox = node.abs_bounding_box();
         assert!(bbox.width().is_finite() && bbox.width() > 0.0);
         assert!(bbox.height().is_finite() && bbox.height() > 0.0);
-        let usvg::Node::Text(text_node) = node else {
-            return Err("expected text node".into());
-        };
         let spans = observe_spans(text_node, tree.fontdb())?;
         let missing = missing_glyph_count(&spans)?;
         Ok(
@@ -54,6 +49,16 @@ fn observe(text: &str, weight: u16) -> ProbeResult<Value> {
             "spans": spans}),
         )
     })
+}
+
+fn text_node(tree: &usvg::Tree) -> ProbeResult<(&usvg::Node, &usvg::Text)> {
+    let node = tree
+        .node_by_id("krr-text-measure")
+        .ok_or("text node missing")?;
+    let usvg::Node::Text(text) = node else {
+        return Err("expected text node".into());
+    };
+    Ok((node, text))
 }
 
 fn probe_svg(text: &str, weight: u16) -> String {

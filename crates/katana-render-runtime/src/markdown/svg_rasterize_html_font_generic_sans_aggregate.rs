@@ -143,8 +143,19 @@ pub(in super::super) fn check_aggregate_faces_and_metrics() -> Result<(), String
 
 #[cfg(test)]
 mod tests {
-    use super::{Database, diagnostic_lf_coverage};
+    use super::{Database, diagnostic_lf_coverage, diagnostic_resolved_runs};
     use resvg::usvg::fontdb::Source;
+    use std::sync::Arc;
+
+    #[test]
+    fn aggregate_font_probe_rejects_a_database_without_a_base_face() {
+        let database = Arc::new(Database::new());
+        let result = diagnostic_resolved_runs(&database, "Arial", "Example");
+        assert_eq!(
+            result.err().as_deref(),
+            Some("could not resolve the diagnostic base face and runs")
+        );
+    }
 
     #[test]
     fn font_coverage_counts_registered_face_with_missing_file()

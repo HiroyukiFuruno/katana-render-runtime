@@ -8,6 +8,40 @@ const CLOCK_ERROR: &str = "audit mode clock/drop contract failed";
 const OWNER_ERROR: &str =
     "SharedFile transient database or byte owner missing or survived close/drop";
 
+mod tree_parse_samples_tests {
+    use super::super::super::support::tree_parse_samples;
+
+    #[test]
+    fn accepts_zero_and_ignores_unrelated_events() {
+        let events = [
+            serde_json::json!({"stage":"other","treeParseNs":-1}),
+            serde_json::json!({"stage":"known_parse_result","treeParseNs":0}),
+        ];
+
+        assert_eq!(tree_parse_samples(&events), Ok(vec![0]));
+    }
+
+    #[test]
+    fn rejects_non_unsigned_tree_parse_samples() {
+        for invalid in [
+            serde_json::Value::Null,
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!("1"),
+        ] {
+            let events = [serde_json::json!({
+                "stage":"known_parse_result",
+                "treeParseNs":invalid,
+            })];
+
+            assert_eq!(
+                tree_parse_samples(&events).err().as_deref(),
+                Some("treeParseNs is not a nonnegative integer")
+            );
+        }
+    }
+}
+
 fn reject_timing_mutations(actual: &Arm) -> Result<(), String> {
     let mut measured = cloned_arm(actual);
     measured.capture.stages = vec![

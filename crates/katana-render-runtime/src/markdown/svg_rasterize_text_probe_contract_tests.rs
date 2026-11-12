@@ -54,10 +54,12 @@ fn recursive_observer_rejects_missing_and_non_text_svg_nodes() -> ProbeResult<()
     ] {
         let (options, face) = noto_options(svg)?;
         let tree = usvg::Tree::from_str(svg, &options)?;
-        let error = super::observe_tree(&tree, "Noto", NORMAL_FONT_WEIGHT, face)
-            .err()
-            .ok_or("invalid probe node was accepted")?;
-        assert_eq!(error.to_string(), expected);
+        let bbox = super::super::text_node(&tree).map(|_| ());
+        let recursive = super::observe_tree(&tree, "Noto", NORMAL_FONT_WEIGHT, face).map(|_| ());
+        for result in [bbox, recursive] {
+            let error = result.err().ok_or("invalid probe node was accepted")?;
+            assert_eq!(error.to_string(), expected);
+        }
     }
     Ok(())
 }
