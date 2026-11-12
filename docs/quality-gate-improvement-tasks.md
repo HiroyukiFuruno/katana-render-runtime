@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-13、以下の過去結果と区別する）
 
+- 未カバー箇所から選んだ予定2件中2件を確認。実SVGの2行のうち1行に解決できないフォントを含め、解決済みの2 runは描画可能だが、単純な複数行の原点補正は適用されないことを検証した。usvgの位置配列が各chunkの文字を包含する生成保証も照合し、存在しない位置をゼロとみなす重複処理を除いた。関連7件・静的基盤・ASTが成功（`c2c662c1`、`tmp/quality/resumed-owner-r3509/release-coverage-chunk-source-contracts-ldwgvdrx/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - SVGの文字パス書き出しで、有限な座標のパスでも境界計算が溢れると参照先の定義が消えることを再現した。解析済み座標から定義を書き出し、通常のパスと共存するときも参照・描画を保持する。修正前は関連4件中1件失敗、修正後は4件成功、静的基盤・AST・SVG engine由来検査も成功（`828917f3`、`tmp/quality/resumed-owner-r3509/release-coverage-extreme-text-path-p8f3rtc7/tests-stderr.raw`、`tmp/quality/resumed-owner-r3509/release-coverage-extreme-text-path-fixed-7uj_ax15/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - 最新の正式計測は `d808211c` の86,767/86,971行、99.765439%、未カバー204行（212行から8行減）。外部 `feImage` 1行、フォントキャッシュ4行、送り幅ゼロ字形の配置2行、ドロップシャドウ1行が減少。収集・認証・ソース前後一致は成功し、100%条件で不合格（`tmp/quality/resumed-owner-r3509/root-coverage-after-font-budget-shadow-and-zero-advance-7q_1n8ar/{safe-summary,coverage-file-delta}.json`）。
 - 実フォントの送り幅ゼロ字形を末尾にも置き、先頭で字形座標が重なる対照と異なり、配置補正の入口まで到達して元の位置を保持することを確認した。cropなしDropShadowはSkiaのBlur・SrcIn・移動・MergeまたはSrcOver合成が透明黒を保つことを確認し、重複するfast-bounds判定を除いた。実SVGのぼかしあり・なしと透明色、通常の描画・エラーを含む関連12件、静的基盤、ASTが成功（`bae46184`、`6ef1ceb2`、`tmp/quality/resumed-owner-r3509/release-coverage-zero-advance-and-shadow-bounds-g6hyl1pe/safe-summary.json`）。正式計測に反映済み。
