@@ -88,7 +88,7 @@ fn postscript_name(item: ttf_parser::name::Name<'_>) -> Option<String> {
         && item.encoding_id == 0
         && item.name.is_ascii()
     {
-        std::str::from_utf8(item.name).ok()?.to_owned()
+        String::from_utf8_lossy(item.name).into_owned()
     } else {
         return None;
     };
