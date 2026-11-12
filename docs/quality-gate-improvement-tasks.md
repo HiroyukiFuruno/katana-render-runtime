@@ -2,6 +2,9 @@
 
 ## 現在の実行地点（2026-11-12、以下の過去結果と区別する）
 
+- 描画準備が必ず確保する固定フォントをそのまま描画まで保持し、同じキャッシュを引き直す到達不能な失敗経路を除去した。可変フォントの描画は従来どおり。CoreText単独の診断もSkiaフォントを要求しない。関連16件、静的基盤、ASTが成功（`4596be15`、`tmp/quality/resumed-owner-r3509/release-coverage-prepared-glyph-face-3wfcxzmk/verified-case-summary.json`）。
+- Moonから収集を起動できた。初回は6452件中、HTML要件書の初回表示・終了1件が既存60秒制限で失敗し、他6451件の結果と再試行チェックポイントを保存した（`root-coverage-after-prepared-glyph-face-moon-wm8m2kpu`）。最初の再試行は資源digest変化で開始前に拒否（`root-coverage-after-prepared-glyph-face-retry-8185nkgz`）。同一実行ファイルで当該1件は7.282秒で成功（`release-html-requirements-timeout-exact-0m4zv8df`）。次のMoon再試行はチェックポイントを受理し、当該1件のみ再実行して成功、レポート生成も成功したが、確定前の資源digestが変化して拒否された。診断値は未カバー253行で、正式値は258行のまま（`root-coverage-after-prepared-glyph-face-stable-retry-8ayib4ob/unsealed-report-projection.json`）。
+- 上記の確定前後に変わった資源群はツール本体のみで、フォント・依存・環境の観測差はない。RTK本体の更新時刻が拒否された収集中に含まれる。更新後の資源digestは独立6回で一致（`root-coverage-resource-drift-j1xygh67`、`root-coverage-resource-drift-recheck-mn66phj0`）。既存チェックポイントを新しいツール実体に付け替えず、現行環境で正式収集する。各証跡は `tmp/quality/resumed-owner-r3509/` 配下。
 - Moonのカバレッジキー生成より先にPlantUMLを準備し、取得ログはstderrへ送る。既存JARをチェックサム照合後に再利用し、再取得の一時ファイルは実行ごとに分離・回収する。コールド・再試行・破損・取得失敗の契約回帰と静的基盤が成功（`c35e6e5d`、`tmp/quality/resumed-owner-r3509/release-coverage-plantuml-key-preflight-koo3elr7/safe-summary.json`）。過去の照合失敗時にJARが欠落していたかは未確定で、Moon経由の正式な全体収集は未再実行。
 - 上記のBun契約一括でMermaid実測トレースの固定ハッシュの重複による1件の失敗を確認した。検査対象ファイルの一覧・順序・固定ハッシュの照合を維持し、既存の正式定義を参照する形へ変更。静的基盤と、元の失敗を含む限定9件が成功（`5165d861`、`tmp/quality/resumed-owner-r3509/release-coverage-width-test-canonical-pins-ga473anu/safe-summary.json`）。変更後の一括再実行は未実施。
 - 混在ウェイトのフォント監査で、対象IDを持つ矩形が実SVGに含まれる場合の拒否を確認した。実フォント由来・日本語ウェイトの対照を含む関連3テスト、静的基盤、ASTが成功。ソース前後一致（`0d400e62`、`tmp/quality/resumed-owner-r3509/release-coverage-weight-trace-target-ifeu54jz/verified-case-summary.json`）。正式カバレッジの更新は未計測。
