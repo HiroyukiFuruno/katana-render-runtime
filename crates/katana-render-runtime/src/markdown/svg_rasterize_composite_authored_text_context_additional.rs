@@ -25,15 +25,13 @@ impl AdditionalTextProof {
         }
         let mut offset = 0;
         self.chunks.iter().zip(text.chunks()).all(|(proof, chunk)| {
-            let dy = match text.dy().get(offset) {
-                Some(value) => *value,
-                None => 0.0,
-            };
+            /* WHY: usvgはchunkへ追加する各文字に対応する位置からdyを生成する。 */
+            let dy = text.dy().get(offset).copied();
             offset += chunk.text().chars().count();
             proof.text == chunk.text()
                 && proof.x == chunk.x()
                 && proof.y == chunk.y()
-                && proof.dy == dy
+                && dy == Some(proof.dy)
         })
     }
 }

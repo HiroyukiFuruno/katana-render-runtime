@@ -72,6 +72,30 @@ fn multiple_chunk_origin_snap_rejects_non_simple_positioning_and_decoration() ->
     Ok(())
 }
 
+#[test]
+fn multiple_chunk_origin_snap_rejects_a_chunk_with_an_unresolved_span() -> Result<(), String> {
+    let fixture = font_fixture("unresolved-span")?;
+    let content = "<tspan x='75.02' y='40.503'>A<tspan font-family='KrrMissingFixtureFont'>B</tspan></tspan>\
+                   <tspan x='95.02' y='60.503'>North</tspan>";
+    let tree = fixture_tree_with_content(&fixture, "", content)?;
+    let text = fixture_text(&tree)?;
+    let [first, second] = text.chunks() else {
+        return Err("fixture must produce two source chunks".into());
+    };
+    assert_eq!(first.text(), "AB");
+    assert_eq!(first.spans().len(), 2);
+    assert_eq!(second.text(), "North");
+    assert_eq!(text.layouted().len(), CHUNK_COUNT);
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    let Prepared::Ready(mut spans) = rasterizer.prepare(text)? else {
+        return Err("remaining spans must be renderable".into());
+    };
+    assert_eq!(spans.len(), CHUNK_COUNT);
+    assert!(!super::multi_chunk_alignment::apply(text, &mut spans));
+    assert!(spans.iter().all(|span| span.x_alignment.is_none()));
+    Ok(())
+}
+
 /* WHY: nested-row診断回帰から既存fixture組立helperを共有し、入力条件の複製を避ける。 */
 pub(in crate::markdown::svg_rasterize::html_glyph) fn font_fixture(
     name: &str,
