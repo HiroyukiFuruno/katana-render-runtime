@@ -176,6 +176,10 @@ fn different_requests_reuse_a_verified_mapping_and_lru_eviction_releases_it() ->
     };
     let released = first_request_weak_sources(&mut cache)?;
     second_request_reuses_a_source(&mut cache, &released)?;
+    assert!(within_mapping_budget(
+        cache.entries.iter().map(|(_, value)| value),
+        super::cache_build::MAX_CACHED_IMMUTABLE_FONT_BYTES,
+    ));
     evict_seeded_entries(&mut cache);
     assert!(released.iter().all(|(_, weak)| weak.upgrade().is_none()));
     Ok(())
