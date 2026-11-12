@@ -93,6 +93,22 @@ fn static_font_descriptor_rejects_a_different_postscript_name() -> Result<(), St
 }
 
 #[test]
+fn coretext_resolve_rejects_a_family_without_the_selected_postscript_name() -> Result<(), String> {
+    let (_temp, database, mut selected) =
+        super::super::super::super::test_support::physical_font_fixture()?;
+    selected.post_script_name = "krr-unmatched-postscript-name".to_string();
+    assert_eq!(
+        super::super::resolve_font(&database, &selected)
+            .err()
+            .as_deref(),
+        Some(
+            "no exact URL-bound CoreText descriptor matched the CDP PostScript name and exposed a variable instance"
+        )
+    );
+    Ok(())
+}
+
+#[test]
 fn coretext_evidence_rejects_a_missing_file_after_descriptor_lookup() -> Result<(), String> {
     let temp = super::super::super::super::test_support::TempDirectory::new()?;
     let path = temp.path().join("variable.ttf");

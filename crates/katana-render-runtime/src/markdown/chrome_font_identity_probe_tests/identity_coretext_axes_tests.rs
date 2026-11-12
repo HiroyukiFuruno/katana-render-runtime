@@ -71,6 +71,35 @@ fn parse_axes_rejects_malformed_real_corefoundation_dictionaries() {
 }
 
 #[test]
+fn parse_axes_rejects_each_missing_required_axis_attribute() {
+    let attributes = [
+        (AXIS_IDENTIFIER_ATTRIBUTE, AXIS_IDENTIFIER),
+        (AXIS_MINIMUM_ATTRIBUTE, WEIGHT_AXIS_MINIMUM),
+        (AXIS_MAXIMUM_ATTRIBUTE, WEIGHT_AXIS_MAXIMUM),
+        (AXIS_DEFAULT_ATTRIBUTE, WEIGHT_AXIS_DEFAULT),
+    ];
+    for missing in [
+        AXIS_IDENTIFIER_ATTRIBUTE,
+        AXIS_MINIMUM_ATTRIBUTE,
+        AXIS_MAXIMUM_ATTRIBUTE,
+        AXIS_DEFAULT_ATTRIBUTE,
+    ] {
+        let pairs = attributes
+            .iter()
+            .filter(|(name, _)| *name != missing)
+            .map(|(name, value)| (CFString::new(name), number(*value)))
+            .collect::<Vec<_>>();
+        let axes = CFArray::from_CFTypes(&[CFDictionary::from_CFType_pairs(&pairs)]);
+        assert_eq!(
+            parse_axes(&axes).err(),
+            Some(format!(
+                "CoreText variation axis is missing numeric {missing}"
+            ))
+        );
+    }
+}
+
+#[test]
 fn parse_axes_sorts_valid_real_corefoundation_dictionaries() -> Result<(), String> {
     let dictionaries = [
         axis_dictionary(200.0, 0.0, Some(number(1.0)), 0.5),
