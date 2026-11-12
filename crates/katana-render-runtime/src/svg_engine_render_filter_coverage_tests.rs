@@ -31,6 +31,33 @@ fn cropped_filter_region_offsets_only_pixels_inside_the_region() -> Result<(), S
 }
 
 #[test]
+fn singular_filtered_group_does_not_hide_visible_sibling() -> Result<(), String> {
+    const FILTERED: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8">
+          <defs><filter id="blur"><feGaussianBlur stdDeviation="1"/></filter></defs>
+          <g id="effect" filter="url(#blur)">
+            <rect width="8" height="8" fill="red"/>
+          </g>
+        </svg>"#;
+    const SIBLING: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8">
+          <rect width="4" height="4" fill="blue"/>
+        </svg>"#;
+    let tree = parse_source(Path::new("singular-filter.svg"), FILTERED.as_bytes())?;
+    let effect = tree.node_by_id("effect").ok_or("filter group missing")?;
+    let crate::svg_engine::usvg::Node::Group(group) = effect else {
+        return Err("filter fixture is not a group".into());
+    };
+    assert!(group.should_isolate() && !group.filters().is_empty());
+    let mut actual = render_svg(SIBLING)?;
+    let expected = actual.data().to_vec();
+    let singular = tiny_skia::Transform::from_row(1.0, 1.0, 1.0, 1.0, 0.0, 0.0);
+    assert!(singular.invert().is_none());
+    crate::svg_engine::resvg::render_node(effect, singular, &mut actual.as_mut())
+        .ok_or("filter fixture must have nonempty bounds")?;
+    assert_eq!(actual.data(), expected);
+    Ok(())
+}
+
+#[test]
 fn filter_color_space_changes_blurred_edge_samples() -> Result<(), String> {
     const FILTER: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="12" height="8">
       <defs><filter id="f" color-interpolation-filters="COLOR_SPACE">
