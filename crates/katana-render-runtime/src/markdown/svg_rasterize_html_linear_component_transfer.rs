@@ -43,10 +43,10 @@ fn transfer_spec(
     let Some(filter) = supported_filter(group) else {
         return Ok(None);
     };
-    let Some(primitive) = supported_primitive(filter)? else {
+    let Some((primitive, transfer)) = supported_primitive(filter) else {
         return Ok(None);
     };
-    let Some(matrix) = transfer_matrix(primitive)? else {
+    let Some(matrix) = transfer_matrix(transfer)? else {
         return Ok(None);
     };
     let Some(bounds) = spec_bounds(filter, primitive, transform)? else {
@@ -70,28 +70,27 @@ fn supported_filter(group: &usvg::Group) -> Option<&filter::Filter> {
     Some(filter)
 }
 
-fn supported_primitive(filter: &filter::Filter) -> Result<Option<&filter::Primitive>, String> {
+fn supported_primitive(
+    filter: &filter::Filter,
+) -> Option<(&filter::Primitive, &filter::ComponentTransfer)> {
     let [primitive] = filter.primitives() else {
-        return Ok(None);
+        return None;
     };
     if primitive.color_interpolation() != filter::ColorInterpolation::SRGB {
-        return Ok(None);
+        return None;
     }
     let filter::Kind::ComponentTransfer(transfer) = primitive.kind() else {
-        return Ok(None);
+        return None;
     };
     if transfer.input() != &filter::Input::SourceGraphic {
-        return Ok(None);
+        return None;
     }
-    Ok(Some(primitive))
+    Some((primitive, transfer))
 }
 
 fn transfer_matrix(
-    primitive: &filter::Primitive,
+    transfer: &filter::ComponentTransfer,
 ) -> Result<Option<[f32; MATRIX_ELEMENT_COUNT]>, String> {
-    let filter::Kind::ComponentTransfer(transfer) = primitive.kind() else {
-        return Ok(None);
-    };
     let Some(red) = linear(transfer.func_r())? else {
         return Ok(None);
     };

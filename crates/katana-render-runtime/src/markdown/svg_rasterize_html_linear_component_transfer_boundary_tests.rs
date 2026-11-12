@@ -44,7 +44,7 @@ fn component_transfer_declines_unsupported_inputs_and_primitive_shapes() -> Resu
 }
 
 #[test]
-fn component_transfer_rejects_unfiltered_group_and_non_transfer_matrix() -> Result<(), String> {
+fn component_transfer_rejects_unfiltered_group_and_non_transfer_primitive() -> Result<(), String> {
     let unfiltered = parse(
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="5" height="5"/></svg>"#,
     )?;
@@ -53,10 +53,7 @@ fn component_transfer_rejects_unfiltered_group_and_non_transfer_matrix() -> Resu
     let tree = parse(&filtered_svg(r#"<feGaussianBlur stdDeviation="1"/>"#))?;
     let filter =
         transfer::supported_filter(filtered_group(&tree)?).ok_or("filter fixture missing")?;
-    let [primitive] = filter.primitives() else {
-        return Err("expected one primitive".to_owned());
-    };
-    assert!(transfer::transfer_matrix(primitive)?.is_none());
+    assert!(transfer::supported_primitive(filter).is_none());
     Ok(())
 }
 
