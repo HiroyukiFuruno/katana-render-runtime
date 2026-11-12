@@ -184,6 +184,27 @@ fn run_rejects_invalid_manifest_schema_and_file_size() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(unix)]
+#[test]
+fn run_rejects_unreadable_manifest_and_macho_file() -> Result<(), Box<dyn std::error::Error>> {
+    use std::{fs, io::ErrorKind, os::unix::fs::PermissionsExt};
+
+    const NO_FILE_ACCESS: u32 = 0o000;
+    let fixture = write_fixture()?;
+    let manifest_path = write_verified_manifest(&fixture)?;
+    for path in [&manifest_path, &fixture.path] {
+        let original = fs::metadata(path)?.permissions();
+        fs::set_permissions(path, fs::Permissions::from_mode(NO_FILE_ACCESS))?;
+        let expected = fs::read(path);
+        let actual = MachoNoso::run(&manifest_path);
+        fs::set_permissions(path, original)?;
+        let denied = expected.err().ok_or("fixture remained readable")?;
+        assert_eq!(denied.kind(), ErrorKind::PermissionDenied);
+        assert_eq!(actual, Err(denied.to_string()));
+    }
+    Ok(())
+}
+
 fn assert_verified_manifest_runs(fixture: &super::Fixture) -> Result<(), String> {
     let manifest_path = write_verified_manifest(fixture)?;
     MachoNoso::run(&manifest_path)
