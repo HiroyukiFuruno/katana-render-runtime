@@ -15,6 +15,21 @@ pub(super) const RESOURCE_READER_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[
         "resource-loader:read-dispatch",
     ),
     (
+        "match bundled {\n            Some(kind) =>",
+        "let _audit = ();\n        match bundled {\n            Some(kind) =>",
+        "resource-loader:read-body",
+    ),
+    (
+        "Some(kind) => Self::read_bundled(kind).map(Cow::Borrowed),",
+        "Some(ref kind) => Self::read_bundled(kind).map(Cow::Borrowed),",
+        "resource-loader:read-dispatch",
+    ),
+    (
+        "Some(kind) => Self::read_bundled(kind).map(Cow::Borrowed),",
+        "Some(kind) => { Self::read_bundled(kind).map(Cow::Borrowed) },",
+        "resource-loader:read-dispatch",
+    ),
+    (
         "let source = match bundled {",
         "let renamed = match bundled {",
         "route-binding:source",
@@ -80,8 +95,18 @@ pub(super) const RESOURCE_READER_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[
         "resource-loader:mathjax-source",
     ),
     (
-        "return Ok(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                ));",
-        "return Ok(other);",
+        "BundledResource::MathJax => {",
+        "_ => unreachable!(),\n            BundledResource::MathJax => {",
+        "resource-loader:read-dispatch",
+    ),
+    (
+        "BundledResource::MathJax => {\n                return Ok(include_str!(\n                    \"diagram_runtime/generated/mathjax-runtime.min.js\"\n                ));\n            }",
+        "BundledResource::MathJax => other",
+        "resource-loader:mathjax-source",
+    ),
+    (
+        "BundledResource::MathJax => {\n                return Ok(include_str!(",
+        "BundledResource::MathJax => {\n                let _audit = ();\n                return Ok(include_str!(",
         "resource-loader:mathjax-source",
     ),
     (
