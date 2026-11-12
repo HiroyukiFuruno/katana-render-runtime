@@ -77,6 +77,34 @@ fn shared_font_audit_records_physical_identity_without_retaining_bytes() -> Resu
     Ok(())
 }
 
+#[test]
+fn removed_font_file_keeps_glyph_count_but_loses_verified_identity() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let path = directory.path().join("NotoSans-Regular.ttf");
+    std::fs::write(&path, FONT_BYTES).map_err(|error| error.to_string())?;
+    let (tree, id) = font_tree(Source::File(path.clone()))?;
+    let counts = actual_glyph_counts(&tree)?;
+    assert_eq!(counts, BTreeMap::from([(id, 2)]));
+    let before = super::resolve(&tree, "root", 4, &counts);
+    assert!(before.errors.is_empty());
+    assert_eq!(before.faces[0].identity, "physical_verified");
+
+    std::fs::remove_file(&path).map_err(|error| error.to_string())?;
+    let after = super::resolve(&tree, "root", 4, &counts);
+    let [face] = after.faces.as_slice() else {
+        return Err("expected one face after removal".into());
+    };
+    assert_eq!(face.glyph_count, before.faces[0].glyph_count);
+    assert_eq!(face.identity, "unknown");
+    let source = face.source.as_ref().ok_or("measured source missing")?;
+    assert_eq!(source.path.as_ref(), Some(&path));
+    assert!(source.stamp.is_none() && source.bytes_sha256.is_none());
+    assert!(after.owners.is_empty());
+    assert_eq!(after.errors.len(), 1);
+    assert_eq!(after.errors[0].face_id, Some(id.to_string()));
+    Ok(())
+}
+
 fn actual_glyph_counts(tree: &Tree) -> Result<BTreeMap<ID, u64>, String> {
     let Some(resvg::usvg::Node::Text(text)) = tree.node_by_id("audit-text") else {
         return Err("audit SVG text missing".into());
