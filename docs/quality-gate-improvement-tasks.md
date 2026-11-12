@@ -2,7 +2,8 @@
 
 ## 現在の実行地点（2026-11-13、以下の過去結果と区別する）
 
-- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み27件、一部対応1件、未対応97件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0008.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み31件、一部対応1件、未対応93件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0009.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- SVGフォント診断の4件を確認した。空のfontdb、切り詰めた実フォント、SVG文字計測IDの欠落・同じIDの矩形、測定イベントの無効な時間値を回帰へ追加した。初回のASTファイル長違反は測定イベントのケースを既存の境界テストへ移して解消。修正後のAST・関連8件・実catalog照合・ソース前後一致が成功した（`24e1ba2e`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-font-diagnostic-rejection-qqguqldn/safe-summary.json`）。
 - フォント検証CLIのJSON出力と、同じ実フォントを2経路へ複製する処理を共通化した。出力バイトの一致、書き込み上限・相対パス・既存出力の拒否、複数の実ファイルに同じ字形が存在する場合の曖昧判定、既存ディレクトリへの出力拒否を確認した。関連7件・AST・ソース前後一致が成功（`32fedd1a`、`tmp/quality/resumed-owner-r3509/release-coverage-font-probe-response-and-fixture-qni42r7y/safe-summary.json`）。正式レポートから残件の行候補を抽出し、件数が一致した候補を記録した（`tmp/quality/resumed-owner-r3509/release-coverage-pending-region-map-2txfogiy/candidate-lines.json`）。
 - HTMLフォームの不存在ID、表の集計対象・先頭・途中の境界欠落を既存の実HTML回帰へ追加した。角丸枠線のSVG解析は失敗時のエラー表示を保持したまま、テスト内の文字列変換を直接の検証に置き換えた。初回のAST関数長違反を修正し、修正後のAST・関連7件・ソース前後一致を確認した（`1857d815`、`tmp/quality/resumed-owner-r3509/release-coverage-html-table-form-border-ykgsl753/safe-summary.json`）。
 - SVGの属性挿入を解析済み要素の範囲に限定し、引用符内の `>` を含む通常タグ・自己閉鎖タグの回帰を確認した。実フィルター付きノードに描画時の非可逆変換を適用し、既存画素を保持する回帰も追加した。関連7件・ASTは成功し、検査前後のソース一致を確認した（`0a3c8b37`、`a3489288`、`tmp/quality/resumed-owner-r3509/release-coverage-svg-geometry-and-singular-filter-hnfwy9m8/safe-summary.json`）。
