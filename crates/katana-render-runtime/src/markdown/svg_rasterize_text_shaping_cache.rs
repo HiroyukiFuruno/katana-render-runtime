@@ -20,7 +20,7 @@ mod generation;
 
 #[cfg(test)]
 #[path = "svg_rasterize_text_shaping_cache_generation_tests.rs"]
-mod generation_tests;
+pub(super) mod generation_tests;
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 struct ShapedRunKey {

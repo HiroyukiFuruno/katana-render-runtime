@@ -9,10 +9,11 @@ use std::{
     },
 };
 
-struct ReplacedWhileReading {
-    path: PathBuf,
-    replacement: PathBuf,
-    armed: AtomicBool,
+pub(in crate::markdown::svg_rasterize::text_shaping) struct ReplacedWhileReading {
+    pub(in crate::markdown::svg_rasterize::text_shaping) path: PathBuf,
+    pub(in crate::markdown::svg_rasterize::text_shaping) replacement: PathBuf,
+    pub(in crate::markdown::svg_rasterize::text_shaping) armed: AtomicBool,
+    pub(in crate::markdown::svg_rasterize::text_shaping) bytes: Vec<u8>,
 }
 
 impl AsRef<[u8]> for ReplacedWhileReading {
@@ -20,7 +21,7 @@ impl AsRef<[u8]> for ReplacedWhileReading {
         if self.armed.swap(false, Ordering::Relaxed) {
             assert!(fs::rename(&self.replacement, &self.path).is_ok());
         }
-        FONT_BYTES
+        &self.bytes
     }
 }
 
@@ -32,6 +33,7 @@ fn shared_font_replaced_during_shaping_does_not_publish_stale_width()
         path: directory.path().join("font.ttf"),
         replacement: directory.path().join("replacement.ttf"),
         armed: AtomicBool::new(false),
+        bytes: FONT_BYTES.to_vec(),
     });
     fs::write(&source.path, FONT_BYTES)?;
     fs::write(&source.replacement, [FONT_BYTES, &[0]].concat())?;

@@ -217,6 +217,47 @@ fn coretext_font_from_memory_has_no_file_identity() -> Result<(), String> {
 }
 
 #[test]
+fn coretext_match_rejects_a_font_replaced_during_face_read() -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let (database, id, source) = replaceable_helvetica(directory.path())?;
+    let font = helvetica_coretext_font();
+    assert!(matches(&database, id, &font));
+    source.armed.store(true, Ordering::Relaxed);
+    assert!(!matches(&database, id, &font));
+    assert!(!source.replacement.exists());
+    assert!(!same_file(&font, &source.path));
+    Ok(())
+}
+
+use crate::markdown::svg_rasterize::text_shaping::cache::generation_tests::during_generation_tests::ReplacedWhileReading;
+
+type ReplaceableFace = (Database, resvg::usvg::fontdb::ID, Arc<ReplacedWhileReading>);
+
+fn replaceable_helvetica(directory: &std::path::Path) -> Result<ReplaceableFace, String> {
+    let original = helvetica_file_database()?;
+    let id = normal_file_face(&original, HELVETICA_FAMILY).ok_or("Helvetica missing")?;
+    let mut face = original.face(id).ok_or("Helvetica face missing")?.clone();
+    let Source::File(path) = &face.source else {
+        return Err("expected a physical Helvetica source".into());
+    };
+    let source = Arc::new(ReplacedWhileReading {
+        path: directory.join("Helvetica.ttc"),
+        replacement: directory.join("replacement.ttf"),
+        armed: Default::default(),
+        bytes: std::fs::read(path).map_err(|error| error.to_string())?,
+    });
+    std::os::unix::fs::symlink(path, &source.path).map_err(|error| error.to_string())?;
+    std::fs::write(&source.replacement, FONT).map_err(|error| error.to_string())?;
+    let data = Arc::clone(&source);
+    face.source = Source::SharedFile(source.path.clone(), data);
+    let mut database = Database::new();
+    let id = database.push_face_info(face);
+    Ok((database, id, source))
+}
+
+#[test]
 fn bundled_noto_file_face_does_not_match_helvetica_coretext() -> Result<(), String> {
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
     let path = directory.path().join("NotoSans-Regular.ttf");
