@@ -59,6 +59,33 @@ fn probe_child_rejects_malformed_request_without_response() -> Result<(), String
 }
 
 #[test]
+fn probe_child_rejects_invalid_json_contracts_without_response() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let cases: [(&[u8], &str); 3] = [
+        (
+            br#"{"schema":"krr-chrome-font-identity-request-v1","captures":[{"conditionId":"same","selectedFonts":[],"resourceFiles":[]},{"conditionId":"same","selectedFonts":[],"resourceFiles":[]}]}"#,
+            "capture condition IDs must be non-empty and unique",
+        ),
+        (
+            br#"{"schema":"krr-chrome-font-identity-request-v1","captures":[],"unexpected":true}"#,
+            "parse request:",
+        ),
+        (
+            br#"{"schema":"krr-chrome-font-identity-request-v1","captures":[{"conditionId":1,"selectedFonts":[],"resourceFiles":[]}]}"#,
+            "parse request:",
+        ),
+    ];
+    for (index, (bytes, expected)) in cases.into_iter().enumerate() {
+        let request = temp.path().join(format!("request-{index}.json"));
+        let output = temp.path().join(format!("response-{index}.json"));
+        std::fs::write(&request, bytes).map_err(|error| error.to_string())?;
+        let result = run_probe_with_optional_paths(Some(&request), Some(&output))?;
+        assert_probe_failure(&result, expected, &output);
+    }
+    Ok(())
+}
+
+#[test]
 fn probe_child_rejects_missing_response_parent() -> Result<(), String> {
     let temp = TempDirectory::new()?;
     let request = temp.path().join("request.json");
