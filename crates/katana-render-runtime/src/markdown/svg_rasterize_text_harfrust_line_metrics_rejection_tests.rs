@@ -1,4 +1,6 @@
-use super::super::super::{FontShape, svg_run_endpoints_with_face, svg_run_x_height_with_face};
+use super::super::super::{
+    FontShape, shape_fragment_run, svg_run_endpoints_with_face, svg_run_x_height_with_face,
+};
 use super::{
     FONT_BYTES, HHEA_ASCENDER_OFFSET, OS2_FS_SELECTION_OFFSET, cached_face_line_metrics,
     diagnosed_cached_face_line_metrics, font, metrics_from_font, oracle, set_word,
@@ -87,6 +89,22 @@ fn negative_os2_x_height_is_rejected_for_a_parseable_font() -> TestResult {
 
 #[test]
 fn equal_line_endpoints_are_rejected_for_a_parseable_font() -> TestResult {
+    let shape = FontShape::new(METRIC_TEST_SIZE, METRIC_TEST_WEIGHT, false);
+    let (control, control_id) = loaded_font(FONT_BYTES.to_vec())?;
+    assert!(svg_run_endpoints_with_face(&control, control_id, shape).is_some());
+    assert!(shape_fragment_run(&control, control_id, "AV", shape)?.is_some());
+    let (database, id) = loaded_font(font_with_zero_line_endpoints()?)?;
+    assert_eq!(svg_run_endpoints_with_face(&database, id, shape), None);
+    assert_eq!(
+        shape_fragment_run(&database, id, "AV", shape)
+            .err()
+            .as_deref(),
+        Some("invalid SVG run metrics")
+    );
+    Ok(())
+}
+
+fn font_with_zero_line_endpoints() -> Result<Vec<u8>, String> {
     let mut bytes = FONT_BYTES.to_vec();
     set_word(
         &mut bytes,
@@ -104,13 +122,7 @@ fn equal_line_endpoints_are_rejected_for_a_parseable_font() -> TestResult {
         .ok_or("fixture metrics missing")?;
     assert_eq!(line.ascender.to_f32(), 0.0);
     assert_eq!(line.descender, line.ascender);
-
-    let shape = FontShape::new(METRIC_TEST_SIZE, METRIC_TEST_WEIGHT, false);
-    let (control, control_id) = loaded_font(FONT_BYTES.to_vec())?;
-    assert!(svg_run_endpoints_with_face(&control, control_id, shape).is_some());
-    let (database, id) = loaded_font(bytes)?;
-    assert_eq!(svg_run_endpoints_with_face(&database, id, shape), None);
-    Ok(())
+    Ok(bytes)
 }
 
 fn loaded_font(bytes: Vec<u8>) -> Result<(Database, ID), String> {
