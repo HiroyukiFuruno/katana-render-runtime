@@ -22,45 +22,32 @@ pub(super) fn has_decorations(span: &usvg::layout::Span) -> bool {
     span.underline.is_some() || span.overline.is_some() || span.line_through.is_some()
 }
 
-pub(super) fn prepare(span: &usvg::layout::Span) -> Result<Option<Effects>, String> {
+pub(super) fn prepare(span: &usvg::layout::Span) -> Option<Effects> {
     let stroke = match &span.stroke {
-        Some(stroke) if stroke.dasharray().is_some() => return Ok(None),
-        stroke => {
-            match path::style::stroke(stroke.as_ref(), usvg::ShapeRendering::GeometricPrecision) {
-                Some(paint) => paint,
-                None => return Ok(None),
-            }
-        }
+        Some(stroke) if stroke.dasharray().is_some() => return None,
+        stroke => path::style::stroke(stroke.as_ref(), usvg::ShapeRendering::GeometricPrecision)?,
     };
-    let Some(before) = prepare_paths([span.overline.as_ref(), span.underline.as_ref()])? else {
-        return Ok(None);
-    };
-    let Some(after) = prepare_paths([span.line_through.as_ref()])? else {
-        return Ok(None);
-    };
-    Ok(Some(Effects {
+    let before = prepare_paths([span.overline.as_ref(), span.underline.as_ref()])?;
+    let after = prepare_paths([span.line_through.as_ref()])?;
+    Some(Effects {
         before,
         after,
         stroke,
         order: span.paint_order,
-    }))
+    })
 }
 
-fn prepare_paths<const N: usize>(
-    paths: [Option<&usvg::Path>; N],
-) -> Result<Option<Vec<DecorationPath>>, String> {
+fn prepare_paths<const N: usize>(paths: [Option<&usvg::Path>; N]) -> Option<Vec<DecorationPath>> {
     let mut result = Vec::new();
     /* WHY: usvgは装飾の可視性をspanから設定し、準備側は不可視spanを先に除外する。 */
     for node in paths.into_iter().flatten() {
-        let Some(prepared) = path::prepare_path(node)? else {
-            return Ok(None);
-        };
+        let prepared = path::prepare_path(node)?;
         result.push(DecorationPath {
             path: prepared,
             order: node.paint_order(),
         });
     }
-    Ok(Some(result))
+    Some(result)
 }
 
 pub(super) fn draw_before(canvas: &Canvas, effects: &Effects, scale: f32) {

@@ -51,7 +51,7 @@ fn assert_dash_matches_direct_control(
 }
 
 fn render_direct_control(path: &usvg::Path, transform: Transform) -> Result<Pixmap, String> {
-    let converted = geometry::convert(path.data(), path.fill().map(|fill| fill.rule()))?;
+    let converted = geometry::convert(path.data(), path.fill().map(|fill| fill.rule()));
     let fill = style::fill(path.fill(), path.rendering_mode())
         .ok_or_else(|| "dash control rejected fill".to_owned())?;
     let stroke = dash_stroke(path)?;

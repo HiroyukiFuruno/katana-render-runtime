@@ -82,7 +82,7 @@ fn render_direct_paint(path: &usvg::Path, expected: VisiblePaint) -> Result<Pixm
     }
     .and_then(|paint| paint)
     .ok_or_else(|| "visible paint was not available for control".to_owned())?;
-    let converted = geometry::convert(path.data(), path.fill().map(|fill| fill.rule()))?;
+    let converted = geometry::convert(path.data(), path.fill().map(|fill| fill.rule()));
     let mut rendered = allocate_pixmap()?;
     let dimensions = (rendered.width() as i32, rendered.height() as i32);
     let info = ImageInfo::new(dimensions, ColorType::RGBA8888, AlphaType::Premul, None);

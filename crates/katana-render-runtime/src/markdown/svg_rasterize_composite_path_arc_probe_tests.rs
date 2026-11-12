@@ -33,7 +33,7 @@ fn run_probe(request: &Request) -> Result<(), String> {
         return Err("drawable path is not visible".to_owned());
     }
     validate_path_data(node, &data)?;
-    let mut prepared = super::prepare_path(node)?.ok_or("unsupported paint")?;
+    let mut prepared = super::prepare_path(node).ok_or("unsupported paint")?;
     let cubic_path = prepared.path.clone();
     let mut conic = skia_safe::Path::from_svg(data.trim()).ok_or("Skia SVG parse failed")?;
     conic = conic.with_fill_type(prepared.path.fill_type());

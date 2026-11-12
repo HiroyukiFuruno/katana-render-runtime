@@ -4,7 +4,7 @@ use skia_safe::{Path, PathBuilder, PathFillType, Point};
 pub(super) fn convert(
     source: &usvg::tiny_skia_path::Path,
     fill_rule: Option<usvg::FillRule>,
-) -> Result<Path, String> {
+) -> Path {
     let fill_type = match fill_rule.unwrap_or(usvg::FillRule::NonZero) {
         usvg::FillRule::NonZero => PathFillType::Winding,
         usvg::FillRule::EvenOdd => PathFillType::EvenOdd,
@@ -13,12 +13,8 @@ pub(super) fn convert(
     for segment in source.segments() {
         append_segment(&mut builder, segment);
     }
-    let path = builder.detach();
-    if path.is_finite() {
-        Ok(path)
-    } else {
-        Err("Skia SVG path contains non-finite geometry".to_owned())
-    }
+    /* WHY: tiny-skia-pathのPathが検証済みの有限座標を、変換せずにSkiaへ渡す。 */
+    builder.detach()
 }
 
 fn append_segment(builder: &mut PathBuilder, segment: usvg::tiny_skia_path::PathSegment) {
@@ -43,4 +39,31 @@ fn append_segment(builder: &mut PathBuilder, segment: usvg::tiny_skia_path::Path
 
 fn skia_point(point: usvg::tiny_skia_path::Point) -> Point {
     Point::new(point.x, point.y)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{convert, usvg};
+
+    #[test]
+    fn skia_path_copies_large_finite_curve_points_without_conversion_error() -> Result<(), String> {
+        let extent = f32::MAX / 4.0;
+        let mut builder = usvg::tiny_skia_path::PathBuilder::new();
+        builder.move_to(-extent, 0.0);
+        builder.quad_to(0.0, extent, extent, 0.0);
+        builder.cubic_to(extent, -extent, 0.0, -extent, -extent, 0.0);
+        builder.close();
+        let source = builder.finish().ok_or("finite source path missing")?;
+        let converted = convert(&source, Some(usvg::FillRule::EvenOdd));
+        assert!(converted.is_finite());
+        assert_eq!(converted.fill_type(), skia_safe::PathFillType::EvenOdd);
+        assert!(
+            source
+                .points()
+                .iter()
+                .map(|point| (point.x, point.y))
+                .eq(converted.points().iter().map(|point| (point.x, point.y)))
+        );
+        Ok(())
+    }
 }

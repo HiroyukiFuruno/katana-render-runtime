@@ -272,7 +272,7 @@ fn translucent_decoration_paths_decline_native_text_without_painting() -> Result
         }
         .ok_or("decoration path missing")?;
         assert_eq!(path.fill().map(|fill| fill.opacity().get()), Some(0.5));
-        assert!(super::decorations::prepare(span)?.is_none());
+        assert!(super::decorations::prepare(span).is_none());
         assert_tree_rejected(&tree)?;
     }
     Ok(())

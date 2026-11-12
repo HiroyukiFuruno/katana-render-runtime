@@ -77,7 +77,7 @@ fn render_skia_fill(
     paint: &skia_safe::Paint,
     backdrop: &Pixmap,
 ) -> Result<Pixmap, String> {
-    let converted = geometry::convert(path.data(), path.fill().map(|fill| fill.rule()))?;
+    let converted = geometry::convert(path.data(), path.fill().map(|fill| fill.rule()));
     let mut rendered = backdrop.clone();
     let dimensions = (SIZE as i32, SIZE as i32);
     let info = skia_safe::ImageInfo::new(

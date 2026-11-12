@@ -38,7 +38,7 @@ pub(super) fn render_if_supported_at_origin(
     if !transform_is_finite(transform) {
         return Ok(false);
     }
-    let Some(prepared) = prepare_path(node)? else {
+    let Some(prepared) = prepare_path(node) else {
         return Ok(false);
     };
     #[cfg(all(test, target_os = "macos"))]
@@ -104,20 +104,14 @@ pub(in crate::markdown::svg_rasterize) struct PreparedPath {
     stroke: Option<Paint>,
 }
 
-pub(in crate::markdown::svg_rasterize) fn prepare_path(
-    node: &usvg::Path,
-) -> Result<Option<PreparedPath>, String> {
-    let Some(fill) = style::fill(node.fill(), node.rendering_mode()) else {
-        return Ok(None);
-    };
-    let Some(stroke) = style::stroke(node.stroke(), node.rendering_mode()) else {
-        return Ok(None);
-    };
+pub(in crate::markdown::svg_rasterize) fn prepare_path(node: &usvg::Path) -> Option<PreparedPath> {
+    let fill = style::fill(node.fill(), node.rendering_mode())?;
+    let stroke = style::stroke(node.stroke(), node.rendering_mode())?;
     if fill.is_none() && stroke.is_none() {
-        return Ok(None);
+        return None;
     }
-    let path = geometry::convert(node.data(), node.fill().map(|value| value.rule()))?;
-    Ok(Some(PreparedPath { path, fill, stroke }))
+    let path = geometry::convert(node.data(), node.fill().map(|value| value.rule()));
+    Some(PreparedPath { path, fill, stroke })
 }
 
 pub(in crate::markdown::svg_rasterize) fn draw_path(

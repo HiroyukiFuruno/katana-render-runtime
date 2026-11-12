@@ -82,7 +82,7 @@ impl HtmlGlyphRasterizer<'_> {
         if !span_supported(span) {
             return Ok(false);
         }
-        let Some(mut effects) = prepare_effects(span)? else {
+        let Some(mut effects) = prepare_effects(span) else {
             return Ok(false);
         };
         let Some((color, opacity)) = solid_fill(span) else {
@@ -167,13 +167,11 @@ fn effects_runs_supported(span: &usvg::layout::Span, has_effects: bool) -> bool 
     !has_effects || runs::consecutive_runs(&span.positioned_glyphs).count() == 1
 }
 
-fn prepare_effects(
-    span: &usvg::layout::Span,
-) -> Result<Option<Option<Box<decorations::Effects>>>, String> {
+fn prepare_effects(span: &usvg::layout::Span) -> Option<Option<Box<decorations::Effects>>> {
     if !decorations::has_effects(span) {
-        return Ok(Some(None));
+        return Some(None);
     }
-    Ok(decorations::prepare(span)?.map(|effects| Some(Box::new(effects))))
+    decorations::prepare(span).map(|effects| Some(Box::new(effects)))
 }
 
 fn glyph_ids(glyphs: &[usvg::layout::PositionedGlyph]) -> Option<Vec<u16>> {
