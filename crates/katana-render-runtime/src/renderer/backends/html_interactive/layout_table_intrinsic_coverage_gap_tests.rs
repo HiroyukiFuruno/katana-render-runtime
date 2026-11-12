@@ -14,6 +14,17 @@ fn parsed_target_cell_without_nowrap_reports_the_specific_contract_error() {
 }
 
 #[test]
+fn parsed_table_with_target_on_wrong_element_rejects_missing_target_cell() {
+    let document = HtmlDocument::parse("<table><tr id=target><td>content</td></tr></table>");
+    let nodes = document.interactive_nodes_with_styles(&HashMap::new());
+
+    assert_eq!(
+        projected_target_cell_width(&nodes),
+        Err("parsed table cell must be projected".to_string())
+    );
+}
+
+#[test]
 fn parsed_nowrap_inline_br_keeps_nested_line_widths_separate() -> Result<(), String> {
     let width = parsed_nowrap_width("<span>AA<br><small>BBBBB</small></span>")?;
     let no_break = parsed_nowrap_width("<span>AABBBBB</span>")?;
