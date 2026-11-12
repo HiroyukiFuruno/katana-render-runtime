@@ -7,14 +7,16 @@ pub(super) fn to_vec_bounded<T: Serialize>(
     limit: u64,
 ) -> Result<Vec<u8>, HtmlArtifactError> {
     let mut writer = BoundedWriter::new(limit);
-    serde_json::to_writer(&mut writer, value).map_err(|error| {
-        if error.is_io() {
-            HtmlArtifactError::ArtifactTooLarge
-        } else {
-            HtmlArtifactError::Serialization(error)
-        }
-    })?;
+    serde_json::to_writer(&mut writer, value).map_err(encoding_error)?;
     Ok(writer.into_inner())
+}
+
+fn encoding_error(error: serde_json::Error) -> HtmlArtifactError {
+    if error.is_io() {
+        HtmlArtifactError::ArtifactTooLarge
+    } else {
+        HtmlArtifactError::Serialization(error)
+    }
 }
 
 struct BoundedWriter {
