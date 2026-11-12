@@ -2,6 +2,7 @@
 
 ## 現在の実行地点（2026-11-13、以下の過去結果と区別する）
 
+- 実フォントの送り幅ゼロ字形を末尾にも置き、先頭で字形座標が重なる対照と異なり、配置補正の入口まで到達して元の位置を保持することを確認した。cropなしDropShadowはSkiaのBlur・SrcIn・移動・MergeまたはSrcOver合成が透明黒を保つことを確認し、重複するfast-bounds判定を除いた。実SVGのぼかしあり・なしと透明色、通常の描画・エラーを含む関連12件、静的基盤、ASTが成功（`bae46184`、`6ef1ceb2`、`tmp/quality/resumed-owner-r3509/release-coverage-zero-advance-and-shadow-bounds-g6hyl1pe/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - 外部 `feImage` の恒等変換が子追加を保証することを再照合し、前回追加した到達不能な失敗伝播を除いた。フォントキャッシュは新規mappingを残予算内に制限し、検証済みseedが既存Arcだけを再利用するため、候補生成後の重複集計と再構築を除いた。既存キャッシュ経路で共有後の容量制限を検証した。関連41件、静的基盤、AST、SVG engine由来検査が成功（`e6b1dc3c`、`5179335a`、`tmp/quality/resumed-owner-r3509/release-coverage-font-admission-and-feimage-xmw93z3d/safe-summary.json`）。正式カバレッジへの反映は未計測。
 - 最新の正式計測は `80ca7e72` の86,789/87,001行、99.756325%、未カバー212行（217行から5行減）。中央揃え3行、COLR・SVG writer・フォント読み込み各1行減、外部 `feImage` の失敗伝播1行増。対象6,485件が成功、別に15件skip。収集・認証・ソース前後一致は成功し、100%条件で不合格（`tmp/quality/resumed-owner-r3509/root-coverage-after-colr-filter-and-font-boundaries-omxbkctt/{safe-summary,coverage-file-delta}.json`）。
 - SVGの外部・内部 `feImage` が空rootを持たない生成経路を確認し、出力で子を改めて確認する重複分岐を除いた。COLRでは実フォントの輪郭に軸scaleゼロを指定し、逆変換が非有限になってグラデーションの出力が崩れることを再現した。逆変換の有限性を検証し、既存の代替処理を適用した。修正前は34成功・該当1失敗、修正後は同じ35件が成功。静的基盤・AST・SVG engine由来検査も成功（`891a72d7`、`58f63d7e`、`tmp/quality/resumed-owner-r3509/release-coverage-feimage-colr-gradient-aoh28gci/tests-stderr.raw`、`tmp/quality/resumed-owner-r3509/release-coverage-feimage-colr-finite-74amha8x/safe-summary.json`）。正式計測に反映済み。
