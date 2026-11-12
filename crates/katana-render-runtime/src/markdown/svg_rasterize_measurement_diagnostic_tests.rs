@@ -84,6 +84,30 @@ fn line_detail_drop_records_faces_and_closes_early_return_phase() {
 }
 
 #[test]
+fn shared_real_font_detail_is_recorded_and_late_drop_does_not_leak() -> Result<(), String> {
+    use resvg::usvg::fontdb::{Database, Source};
+    use std::{path::PathBuf, sync::Arc};
+
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/NotoSans-Regular.ttf");
+    let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
+    let source = Source::SharedFile(path, Arc::new(bytes));
+    let mut database = Database::new();
+    assert!(!database.load_font_source(source.clone()).is_empty());
+    let mut scope = enter(true);
+    let mut detail = line_metrics_detail(true).ok_or("enabled detail scope")?;
+    detail.record_face_source(&source);
+    drop(detail);
+    assert_eq!(scope.finish().line_metric_face_shared_calls, 1);
+    let mut scope = enter(true);
+    let detail = line_metrics_detail(true).ok_or("enabled detail scope")?;
+    assert_eq!(scope.finish(), Stats::default());
+    drop(detail);
+    let mut next = enter(true);
+    assert_eq!(next.finish(), Stats::default());
+    Ok(())
+}
+
+#[test]
 fn enabled_scope_records_misses_without_a_clock() {
     let mut scope = enter(true);
     assert!(line_start().is_some());
