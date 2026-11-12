@@ -38,6 +38,21 @@ fn automatic_output_is_fresh_and_removed_on_drop() -> Result<(), String> {
 }
 
 #[test]
+fn automatic_output_rejects_a_file_at_the_temporary_root() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = owned_output_directory("raw-geometry-blocked-tmp-")?;
+    let occupied = directory.path().join("tmp");
+    std::fs::write(&occupied, b"existing")?;
+    let expected = std::fs::create_dir_all(&occupied)
+        .err()
+        .ok_or("existing file accepted as a directory")?;
+    let error = DiagnosticOutput::in_workspace_tmp(&occupied).err();
+    assert_eq!(error, Some(expected.to_string()));
+    assert_eq!(std::fs::read(occupied)?, b"existing");
+    Ok(())
+}
+
+#[test]
 fn explicit_output_is_exclusive_and_remains_on_drop() -> Result<(), String> {
     let directory = owned_output_directory("raw-geometry-override-")?;
     let path = directory.path().join("result.json");

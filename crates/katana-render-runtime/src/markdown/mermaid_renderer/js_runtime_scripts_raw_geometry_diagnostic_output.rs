@@ -23,11 +23,16 @@ impl DiagnosticOutput {
             }
             return Ok(Self { path, _owner: None });
         }
-        let tmp = workspace_tmp()?;
-        std::fs::create_dir_all(&tmp).map_err(|error| error.to_string())?;
-        let owner = tempfile::Builder::new()
-            .prefix("raw-geometry-diagnostic-")
-            .tempdir_in(tmp)
+        Self::in_workspace_tmp(&workspace_tmp()?)
+    }
+
+    fn in_workspace_tmp(tmp: &Path) -> Result<Self, String> {
+        let owner = std::fs::create_dir_all(tmp)
+            .and_then(|()| {
+                tempfile::Builder::new()
+                    .prefix("raw-geometry-diagnostic-")
+                    .tempdir_in(tmp)
+            })
             .map_err(|error| error.to_string())?;
         let path = owner.path().join("diagnostic.json");
         Ok(Self {
@@ -40,12 +45,9 @@ impl DiagnosticOutput {
         let parent = self
             .path
             .parent()
-            .ok_or("diagnostic output parent is missing")?
-            .canonicalize()
-            .map_err(|error| error.to_string())?;
-        let tmp = workspace_tmp()?
-            .canonicalize()
-            .map_err(|error| error.to_string())?;
+            .ok_or("diagnostic output parent is missing")?;
+        let parent = canonical_path(parent)?;
+        let tmp = canonical_path(&workspace_tmp()?)?;
         if !parent.starts_with(&tmp) {
             return Err("diagnostic output must be under workspace tmp".to_owned());
         }
@@ -61,6 +63,10 @@ impl DiagnosticOutput {
             .map_err(|error| error.to_string())?;
         file.write_all(bytes).map_err(|error| error.to_string())
     }
+}
+
+fn canonical_path(path: &Path) -> Result<PathBuf, String> {
+    path.canonicalize().map_err(|error| error.to_string())
 }
 
 fn workspace_tmp() -> Result<PathBuf, String> {
