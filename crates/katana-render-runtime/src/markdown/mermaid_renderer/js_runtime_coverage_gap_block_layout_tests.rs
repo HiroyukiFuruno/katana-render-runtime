@@ -1,7 +1,41 @@
-use super::super::layout;
+use super::super::{
+    DiagramColorPreset, MermaidJsRuntimeOps, RuntimeAsset, assert_block_nbsp_arrow_svg,
+    block_nbsp_arrow_source, layout,
+};
 use resvg::usvg::roxmltree::Document;
 
 const BLOCK: &str = r#"<svg viewBox="0 0 300 100"><g class="node" id="id-ID"><rect class="label-container" x="0" y="0" width="250" height="80"/></g><g class="node" id="id-A"><rect class="label-container" x="10" y="10" width="30" height="20"/></g><g class="node" id="id-B"><rect class="label-container" x="100" y="10" width="30" height="20"/></g><g class="node" id="id-C"><rect class="label-container" x="190" y="10" width="30" height="20"/></g></svg>"#;
+
+#[test]
+fn rendered_block_rejects_invalid_geometry_and_xml() -> Result<(), String> {
+    let asset = RuntimeAsset::mermaid();
+    let path = asset.materialize_at(asset.materialized_path())?;
+    let svg =
+        MermaidJsRuntimeOps::render(block_nbsp_arrow_source(), &path, DiagramColorPreset::dark())?;
+    assert_block_nbsp_arrow_svg(&svg)?;
+    let document = Document::parse(&svg).map_err(|error| error.to_string())?;
+    let block = layout::semantic_node(document.root_element(), "-ID")?;
+    let rect = layout::label_rectangle(block)?;
+    for name in ["x", "transform"] {
+        let mut changed = svg.clone();
+        if let Some(attribute) = rect.attribute_node(name) {
+            changed.replace_range(attribute.range_value(), "invalid");
+        } else {
+            changed.insert_str(
+                rect.range().start + "<rect".len(),
+                &format!(" {name}=\"invalid\""),
+            );
+        }
+        assert!(
+            assert_block_nbsp_arrow_svg(&changed).is_err(),
+            "accepted {name}"
+        );
+    }
+    let changed = svg.replacen("</svg>", "</sv", 1);
+    assert_ne!(changed, svg);
+    assert!(assert_block_nbsp_arrow_svg(&changed).is_err());
+    Ok(())
+}
 
 fn assert_bounds_error(svg: &str, expected: &str) -> Result<(), String> {
     let document = Document::parse(svg).map_err(|error| error.to_string())?;

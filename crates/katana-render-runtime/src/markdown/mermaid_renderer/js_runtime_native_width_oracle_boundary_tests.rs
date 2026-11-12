@@ -89,6 +89,27 @@ fn raw_v8_css_call_rejects_kind_arguments_and_width_corruption() -> Result<(), S
 }
 
 #[test]
+fn raw_v8_svg_call_rejects_missing_text_and_family() -> Result<(), String> {
+    let calls = actual_v8_calls("native-width-oracle-missing-text")?;
+    let index = calls
+        .iter()
+        .position(|call| call["kind"] == "svg")
+        .ok_or("raw V8 SVG call missing")?;
+    for (argument, expected) in [
+        (0, "text argument 0 missing"),
+        (1, "text argument 1 missing"),
+    ] {
+        let mut changed = calls.clone();
+        changed[index]["args"][argument] = Value::Null;
+        assert_eq!(
+            assert_bridge_widths_match_rust(&changed).err().as_deref(),
+            Some(expected)
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn raw_v8_svg_call_rejects_kind_arguments_width_and_metric_corruption() -> Result<(), String> {
     let calls = actual_v8_calls("native-width-oracle-boundary.js")?;
     let svg_index = calls
