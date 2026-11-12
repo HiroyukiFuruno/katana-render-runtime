@@ -6,6 +6,22 @@ type ProbeResult<T> = Result<T, Box<dyn std::error::Error>>;
 type FreshWriter = fn(&Path, &[u8]) -> ProbeResult<()>;
 
 #[test]
+fn recursive_sfnt_setting_requires_an_absolute_real_font_path() -> ProbeResult<()> {
+    let relative = Path::new("assets/fonts/NotoSans-Regular.ttf");
+    let absolute = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative);
+    assert!(absolute.is_file());
+    let resolve = super::probe_test_support::recursive_sfnt_path_from;
+    assert_eq!(resolve(Some(absolute.clone().into_os_string()))?, absolute);
+    assert_eq!(
+        resolve(Some(relative.as_os_str().to_owned()))
+            .err()
+            .as_deref(),
+        Some("public SFNT path must be absolute")
+    );
+    Ok(())
+}
+
+#[test]
 fn shared_file_source_records_real_path_and_face_index() -> ProbeResult<()> {
     let directory = super::probe_test_support::TempProbeDirectory::create()?;
     let path = directory.file("shared-noto.ttf");
