@@ -204,6 +204,22 @@ fn invalid_fragments_rtl_and_ligatures_are_rejected() -> Result<(), String> {
 }
 
 #[test]
+fn fragment_advances_reject_incomplete_or_invalid_scalar_widths() {
+    let fragments = ["é".to_owned(), "A".to_owned()];
+    let invalid: &[&[f32]] = &[&[1.0], &[1.0, 1.0, 1.0], &[-1.0, 1.0], &[1.0, f32::NAN]];
+    for widths in invalid {
+        assert!(
+            fragment_advances(&fragments, widths).is_none(),
+            "{widths:?}"
+        );
+    }
+    assert_eq!(
+        fragment_advances(&fragments, &[1.0, 1.0]),
+        Some(vec![1.0, 1.0])
+    );
+}
+
+#[test]
 fn invalid_font_sizes_are_rejected() -> Result<(), String> {
     for size in [
         0.0,

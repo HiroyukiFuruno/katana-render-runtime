@@ -141,18 +141,18 @@ fn ink_inside_advance(metrics: &SvgTextRunMetrics) -> bool {
 }
 
 fn fragment_advances(fragments: &[String], characters: &[f32]) -> Option<Vec<f32>> {
-    let mut offset = 0_usize;
+    let mut remaining = characters;
     let mut result = Vec::with_capacity(fragments.len());
     for fragment in fragments {
-        let end = offset.checked_add(fragment.chars().count())?;
-        let advance = characters.get(offset..end)?.iter().sum::<f32>();
+        let (advances, rest) = remaining.split_at_checked(fragment.chars().count())?;
+        let advance = advances.iter().sum::<f32>();
         if !advance.is_finite() || advance < 0.0 {
             return None;
         }
         result.push(advance);
-        offset = end;
+        remaining = rest;
     }
-    (offset == characters.len()).then_some(result)
+    remaining.is_empty().then_some(result)
 }
 
 fn error(message: &str) -> SvgRasterizeError {
