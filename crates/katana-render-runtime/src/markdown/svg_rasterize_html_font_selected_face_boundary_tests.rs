@@ -2,6 +2,7 @@ use super::*;
 use crate::markdown::svg_rasterize::font::BUNDLED_SANS_SERIF_FONT;
 
 type ContextInput = (Arc<Database>, Arc<CreationProof>, ID);
+const BINARY_FIXTURE_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg"><text id="run" y="20" font-family="Noto Sans">AB</text></svg>"#;
 
 fn binary_context_input(count: usize) -> Result<ContextInput, String> {
     let mut parsed = Database::new();
@@ -55,8 +56,8 @@ fn selector_database_copy_on_write_invalidates_admission_but_keeps_real_glyphs()
     let selected = Arc::new(AtomicBool::new(false));
     let mut options = mutating_selector_options(&database, id);
     context.install(&mut options, Arc::clone(&valid), Arc::clone(&selected));
-    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><text id="run" y="20" font-family="Noto Sans">AB</text></svg>"#;
-    let tree = usvg::Tree::from_str(svg, &options).map_err(|error| error.to_string())?;
+    let tree =
+        usvg::Tree::from_str(BINARY_FIXTURE_SVG, &options).map_err(|error| error.to_string())?;
     assert!(selected.load(Ordering::Relaxed));
     assert!(!valid.load(Ordering::Relaxed));
     assert_eq!(database.len(), 1);
@@ -86,6 +87,9 @@ fn mutating_selector_options(database: &Arc<Database>, id: ID) -> usvg::Options<
     });
     options
 }
+
+#[path = "svg_rasterize_html_font_selected_face_poison_tests.rs"]
+mod poison;
 
 #[test]
 fn selected_context_real_faces_admit_exact_capacity_and_reject_next() -> Result<(), String> {
