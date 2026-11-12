@@ -110,6 +110,24 @@ fn cropped_group_without_a_clip_leaves_the_target_unchanged() -> Result<(), Stri
 }
 
 #[test]
+fn viewport_clip_renderer_draws_children_when_no_clip_is_present() -> Result<(), String> {
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><g id="layer"><rect x="4" y="5" width="8" height="9" fill="red"/></g></svg>"#;
+    let tree = parse(svg)?;
+    let mut pixmap = canvas()?;
+    super::render_group_with_viewport_clip(
+        layer(&tree)?,
+        (None, Transform::identity()),
+        &mut pixmap.as_mut(),
+        &AuthoredClipInfo::default(),
+        None,
+        None,
+    )?;
+    assert_eq!(pixmap.pixel(6, 7).map(|pixel| pixel.alpha()), Some(255));
+    assert_eq!(pixmap.pixel(2, 2).map(|pixel| pixel.alpha()), Some(0));
+    Ok(())
+}
+
+#[test]
 fn crop_pixmap_preserves_svg_pixels_at_the_crop_origin() -> Result<(), String> {
     let tree = parse(PLAIN_GROUP)?;
     let group = layer(&tree)?;

@@ -57,6 +57,20 @@ fn nested_opacity_groups_apply_each_level_once() -> Result<(), String> {
 }
 
 #[test]
+fn zero_opacity_text_group_leaves_the_destination_unchanged() -> Result<(), String> {
+    let rendered = render_text(0.0, None, None)?;
+    assert!(rendered.calls > 0 && rendered.handled);
+    assert!(
+        rendered
+            .pixmap
+            .data()
+            .chunks_exact(RGBA_CHANNELS)
+            .all(|pixel| pixel == [255, 255, 255, 255])
+    );
+    Ok(())
+}
+
+#[test]
 fn opacity_group_transform_is_applied_once() -> Result<(), String> {
     let original = render_text(FADED_OPACITY, None, None)?;
     let transform = format!("translate({TRANSLATE_X} {TRANSLATE_Y})");
