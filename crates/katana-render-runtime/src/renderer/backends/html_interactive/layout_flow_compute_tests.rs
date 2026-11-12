@@ -2,6 +2,7 @@ use super::{CssStyle, Display, TaffyTree, compute_flow_layout, flow_stretch_heig
 use crate::renderer::backends::html_interactive::style::CssGridTrack;
 use taffy::geometry::Size;
 use taffy::prelude::{FlexWrap, Style};
+use taffy::style::AlignItems;
 use taffy::style_helpers::length;
 
 #[test]
@@ -29,6 +30,25 @@ fn grid_stretches_items_to_the_tallest_item_in_each_row() -> Result<(), String> 
         40.0,
         &[(20.0, 40.0), (40.0, 40.0), (10.0, 10.0)],
     )
+}
+
+#[test]
+fn centered_flex_preserves_each_items_height() -> Result<(), String> {
+    let mut parent = CssStyle::browser_default();
+    parent.display = Display::Flex;
+    parent.align_items = Some(AlignItems::CENTER);
+    let mut tree = TaffyTree::<()>::new();
+    let measurements = [
+        measure_item(&mut tree, 40.0, 20.0)?,
+        measure_item(&mut tree, 40.0, 40.0)?,
+    ];
+    let nodes = measurements.each_ref().map(|(node, _, _)| *node);
+    compute_flow_layout(&mut tree, &nodes, &parent, 100.0, None)?;
+    let short_item = tree.layout(nodes[0]).map_err(super::layout_error)?;
+    assert_eq!(short_item.size.height, 20.0);
+    assert_eq!(short_item.location.y, 10.0);
+    assert_eq!(flow_stretch_heights(&tree, &parent, &measurements)?, None);
+    Ok(())
 }
 
 fn assert_flow_stretch(
