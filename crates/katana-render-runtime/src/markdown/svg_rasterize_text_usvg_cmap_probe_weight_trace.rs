@@ -25,6 +25,18 @@ pub(super) fn run() -> Result<serde_json::Value, String> {
 }
 
 #[test]
+fn layout_trace_rejects_a_non_text_target_in_a_valid_svg() {
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="80" height="32"><rect id="weight-runs" width="20" height="16"/></svg>"#;
+    let options = resvg::usvg::Options::default();
+    let records = || Arc::new(std::sync::Mutex::new(Vec::new()));
+
+    assert_eq!(
+        spans::capture(svg, &options, records(), records()),
+        Err("mixed-weight SVG text node missing".into())
+    );
+}
+
+#[test]
 fn layout_trace_preserves_binary_and_shared_font_sources() -> Result<(), String> {
     use resvg::usvg::fontdb::Source;
 
