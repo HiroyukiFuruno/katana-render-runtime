@@ -2,7 +2,9 @@
 
 ## 現在の実行地点（2026-11-13、以下の過去結果と区別する）
 
-- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み59件、一部対応21件、未対応45件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0023.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- カバレッジ対応の全体予定を、既存の認証済み `d808211c` レポートで未対応箇所がある125ファイルに固定した。全対象箇所の回帰追加または到達不能な重複判定の整理と、関連テスト成功をファイル単位の完了条件とする。最新の対応済み59件、一部対応22件、未対応44件。ファイル別の対応一覧と根拠は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/tasks-0025.json`。以後はこの全予定に対する完了数を報告し、全体の正式計測は実装を一通り終えた後にまとめて行う。
+- SVG基準線の選定で確認済みの主spanを引き継ぎ、後段の重複した空判定を除いた。フォールバックや混在書体を含む既存50件、AST、ソース前後一致、実catalog照合を確認した（`d12463c5`、`tmp/quality/resumed-owner-r3509/release-coverage-uniform-baseline-span-xrp3v306/safe-summary.json`）。同ファイルは一部対応。旧計測の未到達行と既存回帰の照合は `tmp/quality/resumed-owner-r3509/coverage-implementation-plan-9th_2spr/reviewed-missing-line-routes.md` に記録した。
+- 不正UTF-8の外部Mermaidランタイムが公開描画経路で読み込みエラーとなることを確認した。通常の欠損・同梱ランタイムの回帰を含む対象4件とASTが成功した（`0b74f07c`、`tmp/quality/resumed-owner-r3509/release-coverage-invalid-mermaid-resource-y6ail90o/safe-summary.json`）。共有読み込み処理は一部対応。
 - 実フォントの書き込み失敗・受付の失効、監査fixtureのfamily欠落、行メトリクス未取得、基準フォント再登録後の回復、共有フォントSVGの寸法エラーを検証した。共有target消失による初回のコンパイル失敗後、隔離ビルドでAST・対象12件・現行catalog照合・ソース前後一致が成功した（`63a6dede`、`b5ece455`、`d63e905e`、`tmp/quality/resumed-owner-r3509/release-coverage-font-metric-leased-hv0811b6/safe-summary.json`）。いずれも該当ファイルは一部対応。
 - 空のフォント名が探索枠を消費せず、実CoreText descriptorの名前欠落・不正なvariation属性を拒否することを確認した。同一物理フォントを指すリンクと、HTMLの開始時に不正なorigin・viewportを受け取った際のエラー伝播および計測スコープの解放は一部対応。保存済み一覧で対象を選び直し、再ビルド後のAST・対象12件・現行catalog照合・ソース前後一致を確認した（`e24a99b1`、`0d3ec805`、`2757f11b`、`b44865f9`、`tmp/quality/resumed-owner-r3509/release-coverage-font-descriptor-and-html-open-8q18eh47/safe-summary.json`）。
 - 実フォント診断3経路のスレッド分離と、SVGの先行点がない弧を確認した。Skiaの短い画素バッファと実フォントfixtureのコピー・置換エラーは一部対応。開始前に既存テスト実行ファイルが消失していたため、保存済み一覧で対象を選び、再ビルド後のAST・対象16件・現行catalog照合・ソース前後一致を確認した（`f9600de2`、`e2ee7940`、`49031131`、`89bbd833`、`tmp/quality/resumed-owner-r3509/release-coverage-thread-isolation-and-arc-yqkjk1vd/safe-summary.json`）。
