@@ -5,7 +5,12 @@ import { fileURLToPath } from "node:url";
 import type { BrowserHandle } from "./official-renderer-types";
 import { physicalFileIdentity } from "./raster-comparison-binding";
 import type { JsonInput, JsonObject } from "./raster-json-input";
-import type { RasterEndpoint, RasterFileIdentity, RasterRole } from "./raster-production-binding";
+import {
+  type RasterEndpoint,
+  type RasterFileIdentity,
+  type RasterRole,
+  sameRasterFileIdentity,
+} from "./raster-production-binding";
 
 export interface BrowserObservationRequest {
   role: RasterRole;
@@ -76,7 +81,7 @@ export async function observeActualBrowserIdentity(
   const version = browser.version();
   if (version === "") throw new Error("Actual browser version is missing");
   const identity = physicalFileIdentity(measured.argv[0] as string);
-  if (identity.canonical !== fs.realpathSync(measured.osExecutablePath))
+  if (!sameBrowserExecutable(identity, measured.osExecutablePath))
     throw new Error(
       `Actual OS browser executable and argv differ: ${JSON.stringify(browserMismatchProjection(identity, measured.osExecutablePath, measured.argv.length))}`,
     );
@@ -110,6 +115,16 @@ export async function observeActualBrowserIdentity(
     parentChain: measured.parentChain,
     argv: measured.argv,
   };
+}
+
+export function sameBrowserExecutable(argvIdentity: RasterFileIdentity, osExecutablePath: string) {
+  const osIdentity = physicalFileIdentity(fs.realpathSync(osExecutablePath));
+  // macOSの実行パス表記とargvが異なっても、同じ実ファイルの証跡を照合する。
+  return sameRasterFileIdentity(argvIdentity, {
+    ...osIdentity,
+    path: argvIdentity.path,
+    canonical: argvIdentity.canonical,
+  });
 }
 
 export function browserMismatchProjection(

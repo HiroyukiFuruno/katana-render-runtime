@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   browserMismatchProjection,
   parseOwnedBrowserMeasurement,
+  sameBrowserExecutable,
   uniqueOwnBrowserPid,
 } from "./raster-browser-observation";
 import {
@@ -155,6 +156,20 @@ function runOfficialSeedCli(
     ...extraArgs,
   ]);
 }
+test("browser executable matching accepts the same inode and rejects a byte-identical copy", () => {
+  const directory = fs.mkdtempSync(path.join(root, "browser-executable-"));
+  const argvPath = path.join(directory, "argv-browser"),
+    osPath = path.join(directory, "os-browser"),
+    copyPath = path.join(directory, "copy-browser");
+  fs.writeFileSync(argvPath, "same bytes");
+  fs.linkSync(argvPath, osPath);
+  fs.copyFileSync(argvPath, copyPath);
+  const identity = physicalFileIdentity(argvPath);
+  expect(identity.canonical).not.toBe(fs.realpathSync(osPath));
+  expect(sameBrowserExecutable(identity, osPath)).toBe(true);
+  expect(sameBrowserExecutable(identity, copyPath)).toBe(false);
+});
+
 test("browser mismatch projection exposes only fixed comparisons", () => {
   const directory = fs.mkdtempSync(path.join(root, "browser-identity-"));
   const first = path.join(directory, "first"),
