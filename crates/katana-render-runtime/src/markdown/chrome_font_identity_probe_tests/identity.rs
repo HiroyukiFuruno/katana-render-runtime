@@ -70,17 +70,26 @@ pub(super) fn supported_font_path(path: &Path) -> bool {
 pub(super) fn physical_file(path: &Path) -> Result<(PathBuf, String, Vec<u8>), String> {
     let canonical =
         fs::canonicalize(path).map_err(|error| format!("canonicalize font: {error}"))?;
-    let metadata = fs::metadata(&canonical).map_err(|error| format!("stat font: {error}"))?;
+    let metadata = font_metadata(&canonical, "stat")?;
     if !metadata.is_file() {
         return Err("font source is not a regular file".to_string());
     }
     let bytes = fs::read(&canonical).map_err(|error| format!("read font: {error}"))?;
-    let after = fs::metadata(&canonical).map_err(|error| format!("restat font: {error}"))?;
+    verify_read_generation(&canonical, &metadata)?;
+    let digest = sha256(&bytes);
+    Ok((canonical, digest, bytes))
+}
+
+fn verify_read_generation(path: &Path, metadata: &fs::Metadata) -> Result<(), String> {
+    let after = font_metadata(path, "restat")?;
     if metadata.len() != after.len() || metadata.modified().ok() != after.modified().ok() {
         return Err("font file changed while hashing".to_string());
     }
-    let digest = sha256(&bytes);
-    Ok((canonical, digest, bytes))
+    Ok(())
+}
+
+fn font_metadata(path: &Path, operation: &str) -> Result<fs::Metadata, String> {
+    fs::metadata(path).map_err(|error| format!("{operation} font: {error}"))
 }
 
 fn face_path(face: &FaceInfo) -> Result<PathBuf, String> {
@@ -140,3 +149,7 @@ pub(super) fn unique_file_face(database: &Database) -> Option<(PathBuf, FaceInfo
 #[cfg(test)]
 #[path = "identity_contract_tests.rs"]
 mod contract_tests;
+
+#[cfg(test)]
+#[path = "identity_physical_read_tests.rs"]
+mod physical_read_tests;
