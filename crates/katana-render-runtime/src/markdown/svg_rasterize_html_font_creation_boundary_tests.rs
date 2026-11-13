@@ -136,11 +136,13 @@ fn selected_proof_shared_source_input_and_wrong_reuse_kind_fail_closed() -> Resu
     proof.capture_prefix(&database);
     let mut sources = SharedSources::default();
     assert!(proof.current(&database));
+    assert!(proof.selected_current(&database));
     assert!(
         proof
             .selected_shared_face(&database, id, &mut sources, None, None)
             .is_none()
     );
+    assert!(proof.transient(&Arc::new(database)).is_none());
     assert_wrong_file_reuse(&fixture, &mut sources)?;
     fixture.cleanup()?;
     Ok(())
