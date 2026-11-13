@@ -11,6 +11,8 @@ use tempfile::tempdir;
 mod contract_tests;
 #[path = "macho_noso_input_path_tests.rs"]
 mod input_path_tests;
+#[path = "macho_noso_read_path_tests.rs"]
+mod read_path_tests;
 
 struct Fixture {
     _directory: tempfile::TempDir,

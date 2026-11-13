@@ -93,8 +93,7 @@ fn inspect_file(path: PathBuf, expected_size: u64, expected_sha256: &str) -> Res
         return Err("input-file:size-or-type-changed".into());
     }
     let bytes = fs::read(&path).map_err(|error| error.to_string())?;
-    let after = fs::metadata(&path).map_err(|error| error.to_string())?;
-    validate_read(&before, &after, bytes.len(), expected_size)?;
+    validate_read_at_path(&path, &before, bytes.len(), expected_size)?;
     let digest = sha256(&bytes);
     if digest != expected_sha256 {
         return Err("input-file:sha256-changed".into());
@@ -105,6 +104,16 @@ fn inspect_file(path: PathBuf, expected_size: u64, expected_sha256: &str) -> Res
         json!({"path": path, "size": expected_size, "sha256": digest,
               "format": format, "nOso": records}),
     )
+}
+
+fn validate_read_at_path(
+    path: &Path,
+    before: &fs::Metadata,
+    bytes_read: usize,
+    expected_size: u64,
+) -> Result<(), String> {
+    let after = fs::metadata(path).map_err(|error| error.to_string())?;
+    validate_read(before, &after, bytes_read, expected_size)
 }
 
 fn validate_read(
