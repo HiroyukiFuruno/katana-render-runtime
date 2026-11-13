@@ -99,9 +99,9 @@ fn assert_throwing_setters(
 }
 
 #[test]
-fn v8_box_writer_reports_rejected_y_and_width_after_prior_fields() {
+fn v8_box_writer_reports_rejected_properties_after_prior_fields() {
     DiagramV8Runtime::ensure_initialized();
-    for field in ["y", "width"] {
+    for field in ["y", "width", "height"] {
         DiagramV8Runtime::with_empty_try_catch(|scope| assert_box_field_write_fails(scope, field));
     }
 }
