@@ -127,6 +127,19 @@ fn public_recursive_probe_rejects_missing_font_and_existing_output() -> TestResu
     Ok(())
 }
 
+#[test]
+fn public_recursive_probe_requires_both_paths() -> TestResult<()> {
+    let directory = super::super::super::probe_test_support::TempProbeDirectory::create()?;
+    let input = fixture("recursive-latin-crsv-normal.ttf")?;
+    let output = directory.file("recursive.json");
+    let (suffix, input_key, output_key) = RECURSIVE_PROBE;
+    for provided_path in [(input_key, &input), (output_key, &output)] {
+        assert_probe_rejected(suffix, &[provided_path], "probe path missing")?;
+    }
+    assert!(!output.exists());
+    Ok(())
+}
+
 fn assert_probe_rejected(
     suffix: &str,
     environment: &[(&str, &PathBuf)],
@@ -230,6 +243,8 @@ fn execute_probe(fqn: &str, environment: &[(&str, &PathBuf)]) -> TestResult<std:
         "--quiet",
         "--nocapture",
     ]);
+    command.env_remove(RECURSIVE_PROBE.1);
+    command.env_remove(RECURSIVE_PROBE.2);
     for (key, value) in environment {
         command.env(key, value);
     }
