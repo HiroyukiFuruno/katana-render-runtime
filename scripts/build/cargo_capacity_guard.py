@@ -1761,11 +1761,16 @@ def _coverage_visit_stamp(path: Path, target: Path,
 
 def coverage_cleanup_preflight(root: Path, target: Path, selected: Path,
                                protected_refs: list[str]) -> None:
-    references = {Path(name): _coverage_stamp(Path(name), regular=True) for name in protected_refs}
-    protected = {value[:2] for value in references.values()}
     # 公式0.9.1のworkspace cleanとrunの暗黙cleanはmetadata targetの共有出力も消す。
     footprint = (selected, target / "llvm-cov/html", target / "llvm-cov/text", target / "ui",
                  target / "tests/trybuild", target / "tests/target")
+    _coverage_cleanup_preflight(root, target, footprint, protected_refs)
+
+
+def _coverage_cleanup_preflight(root: Path, target: Path, footprint: tuple[Path, ...],
+                                protected_refs: list[str]) -> None:
+    references = {Path(name): _coverage_stamp(Path(name), regular=True) for name in protected_refs}
+    protected = {value[:2] for value in references.values()}
     aliases: dict[Path, tuple[int, ...]] = {}
     for reference in references:
         if any(reference == path or path in reference.parents for path in footprint):
@@ -1807,6 +1812,49 @@ def coverage_cleanup_preflight(root: Path, target: Path, selected: Path,
     for reference, value in references.items():
         if _coverage_stamp(reference, regular=True) != value:
             raise RuntimeError("coverage protected consumer changed before execution")
+
+
+def _retire_coverage_report_siblings(
+    root: Path, target: Path, cargo: list[str], protected_refs: list[str],
+    retained_profiles: tuple[Path, ...], threshold: int,
+) -> list[str]:
+    # rootの計測profileとレポート・receiptは保持する。閉じたprofileの回収はCargoに委譲する。
+    domains = (
+        ("llvm-cov-performance-baseline", "krr-coverage", "scripts/html/performance-harness/Cargo.toml"),
+        ("llvm-cov-performance-candidate", "krr-coverage", "scripts/html/performance-harness/Cargo.toml"),
+        ("", "dev", "Cargo.toml"),
+    )
+    removed: list[str] = []
+    for directory, profile, manifest in domains:
+        used = size_bytes(target)
+        if used is None:
+            raise RuntimeError("cannot measure aggregate coverage size before profile cleanup")
+        if used <= threshold:
+            break
+        parent = target / directory
+        selected = parent / ("debug" if profile == "dev" else profile)
+        if not selected.exists() and not selected.is_symlink():
+            continue
+        if any(selected == retained or selected in retained.parents or retained in selected.parents
+               for retained in retained_profiles):
+            continue
+        _coverage_cleanup_preflight(root, target, (selected,), protected_refs)
+        args = [*cargo, "clean", "--target-dir", str(parent), "--profile", profile,
+                "--manifest-path", str(root / manifest), "--locked"]
+        plan = subprocess.run([*args, "--dry-run", "--verbose"], cwd=root, check=False,
+                              capture_output=True, text=True)
+        lines = plan.stdout.splitlines()
+        paths = [Path(line) for line in lines]
+        if (plan.returncode or not paths or paths[-1] != selected or len(set(paths)) != len(paths)
+                or any(str(path) != line or not path.is_relative_to(selected) or ".." in path.parts
+                       for path, line in zip(paths, lines, strict=True))):
+            raise RuntimeError("closed coverage profile clean plan differs from its fixed directory")
+        _coverage_cleanup_preflight(root, target, (selected,), protected_refs)
+        if (subprocess.run(args, cwd=root, check=False, stdout=sys.stderr).returncode
+                or selected.exists() or selected.is_symlink()):
+            raise RuntimeError("closed coverage profile cleanup failed")
+        removed.append(str(selected.relative_to(target)))
+    return removed
 
 
 def coverage_tool_version(root: Path, command: list[str]) -> JsonObject:
@@ -2188,6 +2236,26 @@ def run(args: argparse.Namespace) -> int:
                     and report.get("cleanup_attempts")
                 ):
                     removed = ["finite artifact eviction"]
+        if (retained_root_report and not args.dry_run
+                and report.get("cleanup_status") == "failed"
+                and isinstance(finite := report.get("finite_cleanup"), dict)
+                and finite.get("error") == "insufficient closed inactive artifact capacity; active profiles retained"
+                and finite.get("deleted_files") == 0 and finite.get("staged_paths") == []
+                and finite.get("invalidated_profiles") == []):
+            # 通常の選択的回収で足りない場合だけ、終了済みの兄弟profileへ範囲を広げる。
+            cargo = args.command[:args.command.index("llvm-cov")]
+            validate_build_executable(root, args.command)
+            before_state = state_identity(state_path)
+            if expected_state_sha256 is not None:
+                load_state(state_path, expected_state_sha256)
+            threshold = int(_number(report["threshold_bytes"], "threshold bytes"))
+            removed = _retire_coverage_report_siblings(
+                root, target, cargo, protected_refs, retained_profiles, threshold,
+            )
+            if state_identity(state_path) != before_state:
+                raise RuntimeError("capacity state changed during closed coverage profile cleanup")
+            if removed:
+                record_cleanup_result(report, target, 0, "closed coverage profile cleanup", False)
         if "cleanup_status" not in report:
             report["post_clean_bytes"] = None
             report["actual_removed_bytes"] = 0

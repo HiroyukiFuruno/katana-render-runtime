@@ -4351,6 +4351,73 @@ class CoverageDomainUnitTests(unittest.TestCase):
                     self.assertEqual(bytes.fromhex(evidence['stdout_hex']), b"cargo-llvm-cov 0.9.1\n")
                     self.assertEqual(bytes.fromhex(evidence['stderr_hex']), b"tool-raw\n")
 
+    def test_root_report_recovers_a_closed_profile_after_finite_eviction_shortfall(self) -> None:
+        with self.fixture("root", "test", collection=True) as (root, args, environment):
+            target = root / "target"
+            retained = target / "llvm-cov-target/krr-coverage"
+            retained.mkdir(parents=True)
+            artifact = retained / "coverage-profile"
+            artifact.write_bytes(b"root evidence")
+            args.retain_profile = [str(retained)]
+            output = root / "tmp/quality/standalone-performance-coverage"
+            output.mkdir(parents=True)
+            args.command = ["cargo", *guard._root_coverage_commands().report_arguments(root)]
+            measured = {"metric_available": True, "baseline_bytes": 100, "current_bytes": 300,
+                        "threshold_bytes": 200, "over_capacity": True}
+            failure = {"error": "insufficient closed inactive artifact capacity; active profiles retained",
+                       "deleted_files": 0, "staged_paths": [], "invalidated_profiles": []}
+            with patch.object(guard, "inspect", return_value=measured), \
+                    patch.object(guard, "evict_artifacts", return_value=(1, failure)), \
+                    patch.object(guard, "size_bytes", side_effect=[300, 300, 300, 150, 150]), \
+                    patch.object(guard, "validate_build_executable"), \
+                    patch.object(guard, "_retire_coverage_report_siblings",
+                                 return_value=["llvm-cov-performance-candidate/krr-coverage"]) as retire:
+                self.assertEqual(self.execute(root, args, environment), 0)
+            retire.assert_called_once_with(root, target, ["cargo"], args.protected_ref, (retained,), 200)
+            report = json.loads(self.output.getvalue())
+            self.assertEqual(report["post_clean_bytes"], 150)
+            self.assertEqual(report["removed"], ["llvm-cov-performance-candidate/krr-coverage"])
+            self.assertEqual(artifact.read_bytes(), b"root evidence")
+
+    def test_root_report_cleanup_stops_at_threshold_and_checks_aliases(self) -> None:
+        with self.fixture("root", "test", collection=True) as (root, args, _environment):
+            target = root / "target"
+            selected = target / "llvm-cov-performance-baseline/krr-coverage"
+            selected.mkdir(parents=True)
+            artifact = selected / "output"
+            reference = Path(args.protected_ref[0])
+            os.link(reference, artifact)
+            with patch.object(guard, "busy_processes", return_value=[]), \
+                    patch.object(guard, "size_bytes", return_value=300), \
+                    patch.object(subprocess, "run") as child:
+                with self.assertRaisesRegex(RuntimeError, "protected consumer inode"):
+                    guard._retire_coverage_report_siblings(root, target, ["cargo"], [str(reference)], (), 200)
+                child.assert_not_called()
+            self.assertEqual(artifact.stat().st_ino, reference.stat().st_ino)
+            with patch.object(guard, "size_bytes", return_value=200), \
+                    patch.object(subprocess, "run") as child:
+                self.assertEqual(
+                    guard._retire_coverage_report_siblings(root, target, ["cargo"], [str(reference)], (), 200),
+                    [],
+                )
+                child.assert_not_called()
+
+    def test_root_report_cleanup_rejects_a_cargo_plan_outside_the_profile(self) -> None:
+        with self.fixture("root", "test", collection=True) as (root, args, _environment):
+            target = root / "target"
+            selected = target / "llvm-cov-performance-baseline/krr-coverage"
+            selected.mkdir(parents=True)
+            reference = Path(args.protected_ref[0])
+            plan = subprocess.CompletedProcess([], 0, stdout=f"{reference}\n{selected}\n")
+            with patch.object(guard, "busy_processes", return_value=[]), \
+                    patch.object(guard, "size_bytes", return_value=300), \
+                    patch.object(subprocess, "run", return_value=plan) as child:
+                with self.assertRaisesRegex(RuntimeError, "clean plan differs"):
+                    guard._retire_coverage_report_siblings(root, target, ["cargo"], [str(reference)], (), 200)
+                self.assertEqual(child.call_count, 1)
+            self.assertTrue(selected.is_dir())
+            self.assertTrue(reference.is_file())
+
     def test_root_profile_only_clean_is_exact_and_domain_scoped(self) -> None:
         with self.fixture(domain="root", action="clean") as (root, args, environment):
             args.command.append("--profraw-only")
