@@ -1,9 +1,15 @@
 use super::super::file_test_support::CmapFileFixture;
 use super::{Cache, MAX_CACHE_BYTES, MAX_CACHE_ENTRIES, MAX_ENTRY_BYTES};
+use resvg::usvg::fontdb::{Database, ID};
 use std::sync::{Arc, atomic::AtomicUsize};
 
 static TEMP_FILE: AtomicUsize = AtomicUsize::new(0);
 const FILES: CmapFileFixture = CmapFileFixture::new("krr-cmap-storage", &TEMP_FILE);
+
+fn insert_for_file(cache: &mut Cache, database: &Arc<Database>, id: ID, bytes: Arc<[u8]>) {
+    let generation = super::super::super::file_generation::file_source_stamp(database, id).2;
+    cache.insert(database, id, 0, generation, bytes);
+}
 
 #[test]
 fn file_backed_cmap_fixture_rejects_an_invalid_destination() {
@@ -14,13 +20,11 @@ fn file_backed_cmap_fixture_rejects_an_invalid_destination() {
 #[test]
 fn cache_rejects_an_oversized_cmap_entry() -> Result<(), String> {
     let (database, id, _guard) = FILES.bundled_database()?;
-    let generation = super::super::super::file_generation::file_source_stamp(&database, id).2;
     let mut cache = Cache::default();
-    cache.insert(
+    insert_for_file(
+        &mut cache,
         &database,
         id,
-        0,
-        generation,
         Arc::from(vec![0; MAX_ENTRY_BYTES + 1]),
     );
     assert!(cache.entries.is_empty());
@@ -52,18 +56,11 @@ fn cache_enforces_entry_and_byte_limits() -> Result<(), String> {
 #[test]
 fn cache_purges_dropped_databases_and_removes_a_face() -> Result<(), String> {
     let (database, id, _guard) = FILES.bundled_database()?;
-    let generation = super::super::super::file_generation::file_source_stamp(&database, id).2;
     let mut cache = Cache::default();
-    cache.insert(&database, id, 0, generation, Arc::from([1_u8, 2, 3]));
+    insert_for_file(&mut cache, &database, id, Arc::from([1_u8, 2, 3]));
     cache.remove_face(&database, id);
     assert!(cache.entries.is_empty());
-    cache.insert(
-        &database,
-        id,
-        0,
-        super::super::super::file_generation::file_source_stamp(&database, id).2,
-        Arc::from([1_u8]),
-    );
+    insert_for_file(&mut cache, &database, id, Arc::from([1_u8]));
     drop(database);
     let (other, other_id, _other_guard) = FILES.bundled_database()?;
     let generation = super::super::super::file_generation::file_source_stamp(&other, other_id).2;

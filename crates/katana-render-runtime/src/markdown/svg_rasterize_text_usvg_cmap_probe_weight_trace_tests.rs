@@ -32,13 +32,7 @@ fn layout_trace_propagates_the_svg_parse_error() -> Result<(), String> {
 
 #[test]
 fn layout_trace_reports_a_failed_record_read_for_either_selector() -> Result<(), String> {
-    let mut options = resvg::usvg::Options {
-        fontdb: Arc::new(fallback_trace_database()),
-        ..resvg::usvg::Options::default()
-    };
-    let selected = Records::default();
-    let fallback = Records::default();
-    selectors::install(&mut options, Arc::clone(&selected), Arc::clone(&fallback));
+    let (options, selected, fallback) = fallback_trace_fixture();
     let capture = || {
         spans::capture(
             FALLBACK_TRACE_SVG,
@@ -62,13 +56,7 @@ fn layout_trace_reports_a_failed_record_read_for_either_selector() -> Result<(),
 
 #[test]
 fn poisoned_trace_records_do_not_change_real_font_selection_or_fallback() -> Result<(), String> {
-    let mut options = resvg::usvg::Options {
-        fontdb: Arc::new(fallback_trace_database()),
-        ..resvg::usvg::Options::default()
-    };
-    let selected = Records::default();
-    let fallback = Records::default();
-    selectors::install(&mut options, Arc::clone(&selected), Arc::clone(&fallback));
+    let (options, selected, fallback) = fallback_trace_fixture();
     let control = parse_fallback_trace(&options)?;
     for records in [&selected, &fallback] {
         assert!(
@@ -83,6 +71,17 @@ fn poisoned_trace_records_do_not_change_real_font_selection_or_fallback() -> Res
     let write = resvg::usvg::WriteOptions::default();
     assert_eq!(candidate.to_string(&write), control.to_string(&write));
     Ok(())
+}
+
+fn fallback_trace_fixture() -> (resvg::usvg::Options<'static>, Records, Records) {
+    let mut options = resvg::usvg::Options {
+        fontdb: Arc::new(fallback_trace_database()),
+        ..resvg::usvg::Options::default()
+    };
+    let selected = Records::default();
+    let fallback = Records::default();
+    selectors::install(&mut options, Arc::clone(&selected), Arc::clone(&fallback));
+    (options, selected, fallback)
 }
 
 fn fallback_trace_database() -> resvg::usvg::fontdb::Database {
