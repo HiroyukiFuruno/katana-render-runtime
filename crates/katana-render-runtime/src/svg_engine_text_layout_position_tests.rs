@@ -102,6 +102,29 @@ fn extreme_horizontal_shift_drops_only_the_unrepresentable_text(
 }
 
 #[test]
+fn missing_font_chunk_preserves_the_following_character_rotation() -> Result<(), String> {
+    let actual = parse(
+        "rotate='0 90'",
+        "<tspan x='20' font-family='UnavailableFixtureFamily'>A</tspan><tspan x='20' y='50'>B</tspan>",
+    )?;
+    let expected = parse("rotate='90'", "B")?;
+    let transform = |tree| -> Result<_, String> {
+        let glyphs: Vec<_> = text(tree)?
+            .layouted()
+            .iter()
+            .flat_map(|span| &span.positioned_glyphs)
+            .collect();
+        let [glyph] = glyphs.as_slice() else {
+            return Err("expected only the glyph for B".into());
+        };
+        assert_eq!(glyph.text, "B");
+        Ok(glyph.transform())
+    };
+    assert_eq!(transform(&actual)?, transform(&expected)?);
+    Ok(())
+}
+
+#[test]
 fn letter_and_word_spacing_follow_the_glyph_span() -> Result<(), String> {
     let attributes = "style='font-kerning:none' xml:space='preserve'";
     let before = parse(attributes, "H<tspan> H</tspan>H")?;

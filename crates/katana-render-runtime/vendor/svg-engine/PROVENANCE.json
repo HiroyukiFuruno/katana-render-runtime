@@ -332,9 +332,9 @@
       "source": "crates/usvg/src/text/layout.rs",
       "destination": "usvg/text/layout.rs",
       "sourceSha256": "355f6c97d4abbe31d01d3e12498396ae04f738ed63587f95e9a98e3d306d36eb",
-      "transplantedSha256": "6d459d8d4614f78fdf18f6d4802d29e75a693d88797c3afe64fef3efb7391870",
+      "transplantedSha256": "d987c1c0f9f8c17504454b12c08ca5ccb5b9ef9bb9a3e0b4135469f990d9b13b",
       "sourceBytes": 68205,
-      "transplantedBytes": 73717,
+      "transplantedBytes": 73834,
       "adaptations": {
         "cratePaths": 13,
         "enabledFeaturePredicates": {},

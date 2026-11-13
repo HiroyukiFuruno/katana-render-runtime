@@ -241,6 +241,8 @@ fn layout_chunk(
         fontdb,
         state.char_offset,
     );
+    // 字形が得られないchunkも、後続の位置指定に使う文字オフセットを進める。
+    state.char_offset += chunk.text.chars().count();
     if let Some((clusters, mut curr_pos)) = prepared {
         let text_ts = chunk_text_transform(text_node.writing_mode, &chunk.text_flow, x, y);
         let context = SpanLayoutContext {
@@ -253,10 +255,7 @@ fn layout_chunk(
             y,
         };
         layout_chunk_spans(&context, &mut state.bbox, &mut state.spans);
-        state.char_offset += chunk.text.chars().count();
         finish_chunk_position(state, &context, &mut curr_pos);
-    } else {
-        state.char_offset += chunk.text.chars().count();
     }
 }
 
