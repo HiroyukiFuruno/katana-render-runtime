@@ -96,12 +96,11 @@ pub(super) fn render_fixture_targets_with_font_audit(
 ) -> Result<(MeasurementFixture, Value), String> {
     #[cfg(target_os = "macos")]
     {
-        let (result, audit) =
+        complete_font_audit(
             crate::markdown::svg_rasterize::SvgRasterizeOps::with_actual_font_source_audit(|| {
                 render_fixture_with_targets(source, targets)
-            })
-            .map_err(|error| error.to_string())?;
-        Ok((result?, audit))
+            }),
+        )
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -114,6 +113,14 @@ pub(super) fn render_fixture_targets_with_font_audit(
             }),
         ))
     }
+}
+
+#[cfg(target_os = "macos")]
+fn complete_font_audit(
+    captured: Result<(Result<MeasurementFixture, String>, Value), serde_json::Error>,
+) -> Result<(MeasurementFixture, Value), String> {
+    let (fixture, audit) = captured.map_err(|error| error.to_string())?;
+    Ok((fixture?, audit))
 }
 
 fn decode_fixture(output: &str) -> Result<MeasurementFixture, String> {

@@ -14,6 +14,22 @@ const REQUIRED_ARRAYS: &[(&str, &str)] = &[
     ),
 ];
 
+#[cfg(target_os = "macos")]
+#[test]
+fn native_width_fixture_rejects_unserializable_font_audit_metadata() -> Result<(), String> {
+    use std::os::unix::ffi::OsStringExt;
+
+    let invalid_path =
+        std::path::PathBuf::from(std::ffi::OsString::from_vec(b"font-\xff.ttf".to_vec()));
+    let captured = serde_json::to_value(invalid_path)
+        .map(|audit| (decode_fixture(&recorded_fixture().to_string()), audit));
+    assert_eq!(
+        super::complete_font_audit(captured).err().as_deref(),
+        Some("path contains invalid UTF-8 characters")
+    );
+    Ok(())
+}
+
 #[test]
 fn native_width_fixture_reports_an_unreadable_bundle_before_rendering()
 -> Result<(), Box<dyn std::error::Error>> {
