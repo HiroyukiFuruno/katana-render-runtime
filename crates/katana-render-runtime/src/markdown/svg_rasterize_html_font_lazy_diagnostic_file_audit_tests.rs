@@ -160,6 +160,32 @@ fn assert_file_audit_owners(capture: &Capture, owner: &Weak<Database>) {
 }
 
 #[test]
+fn measured_routes_record_the_stage_for_the_selected_font_source() -> Result<(), String> {
+    let file = AuditFile::new()?;
+    let (database, proof, _) = file.input()?;
+    for (route, expected_stage) in [
+        (SourceRoute::File, "file_cached_db_proof"),
+        (SourceRoute::SharedFile, "shared_transient_proof"),
+    ] {
+        let (selection, capture) = with_route(route, Mode::Measure, || {
+            super::super::select_database(&database, Arc::clone(&proof))
+        });
+        let (selected, selected_proof) = selection.ok_or("font route setup failed")?;
+        assert!(selected_proof.current(&selected));
+        assert_eq!(
+            capture
+                .stages
+                .iter()
+                .map(|stage| stage.0)
+                .collect::<Vec<_>>(),
+            [expected_stage]
+        );
+        assert!(capture.errors.is_empty());
+    }
+    Ok(())
+}
+
+#[test]
 fn lazy_audit_records_real_file_digest_and_ignores_missing_local_id() -> Result<(), String> {
     let file = AuditFile::new()?;
     let (database, proof, id) = file.input()?;
