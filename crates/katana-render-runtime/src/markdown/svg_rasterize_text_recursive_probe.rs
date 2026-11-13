@@ -102,7 +102,7 @@ fn isolated_options(svg: &str, bytes: &[u8]) -> ProbeResult<Isolated> {
     let mut database = base.as_ref().clone();
     let loaded = database.load_font_source(usvg::fontdb::Source::Binary(Arc::new(bytes.to_vec())));
     assert_eq!(loaded.len(), 1, "expected one SFNT face");
-    let id = *loaded.first().ok_or("Recursive SFNT face unavailable")?;
+    let id = loaded[0];
     let face = database.face(id).ok_or("Recursive metadata unavailable")?;
     assert_eq!(face.post_script_name, "RecursiveSansLinearLight-Regular");
     assert_eq!(face.weight.0, 300, "unexpected static/default font weight");

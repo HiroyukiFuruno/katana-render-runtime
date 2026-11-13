@@ -26,6 +26,9 @@ mod html_probe_normal_lane_tests;
 #[path = "svg_rasterize_tree_probe_normal_lane_tests.rs"]
 mod tree_probe_normal_lane_tests;
 
+#[path = "svg_rasterize_text_probe_input_tests.rs"]
+mod input_tests;
+
 #[cfg(target_os = "macos")]
 fn sha256(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
