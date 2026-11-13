@@ -100,43 +100,26 @@ fn html_line_metrics_uncached(
     metrics
 }
 
-fn line_metrics_for_face(
-    database: &resvg::usvg::fontdb::Database,
-    id: resvg::usvg::fontdb::ID,
-    size: f32,
-) -> Option<(f32, f32)> {
-    resolve_face_line_metrics(
-        super::harfrust::cached_face_line_metrics(database, id, size),
-        || legacy_line_metrics(database, id, size),
-        None,
-    )
-}
-
 fn observed_line_metrics_for_face(
     database: &Database,
     id: ID,
     size: f32,
     detail_enabled: bool,
 ) -> Option<(f32, f32)> {
-    if detail_enabled {
-        diagnosed_line_metrics_for_face(database, id, size)
+    let detail = detail_enabled.then(|| FaceMetricScope::new(true));
+    let measured = if detail_enabled {
+        super::harfrust::diagnosed_cached_face_line_metrics(database, id, size)
     } else {
-        line_metrics_for_face(database, id, size)
-    }
-}
-
-fn diagnosed_line_metrics_for_face(database: &Database, id: ID, size: f32) -> Option<(f32, f32)> {
-    let detail = FaceMetricScope::new(true);
-    resolve_face_line_metrics(
-        super::harfrust::diagnosed_cached_face_line_metrics(database, id, size),
-        || legacy_line_metrics(database, id, size),
-        Some(&detail),
-    )
+        super::harfrust::cached_face_line_metrics(database, id, size)
+    };
+    resolve_face_line_metrics(measured, database, id, size, detail.as_ref())
 }
 
 fn resolve_face_line_metrics(
     measured: Result<Option<(f32, f32)>, ()>,
-    legacy: impl FnOnce() -> Option<(f32, f32)>,
+    database: &Database,
+    id: ID,
+    size: f32,
     detail: Option<&FaceMetricScope>,
 ) -> Option<(f32, f32)> {
     if let Some(detail) = detail {
@@ -147,6 +130,7 @@ fn resolve_face_line_metrics(
         });
     }
     /* WHY: 世代の検証に失敗した値は破棄し、別の読み取り結果で置き換えない。 */
+    let legacy = || legacy_line_metrics(database, id, size);
     match measured.ok()? {
         Some(metrics) => Some(metrics),
         None => match detail {
