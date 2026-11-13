@@ -1,3 +1,4 @@
+use super::super::probe_test_support::required_path;
 use super::{ProbeResult, Value, json, usvg};
 use std::sync::{
     Arc,
@@ -149,16 +150,6 @@ fn assert_recursive_glyphs(spans: &[Value], id: usvg::fontdb::ID) -> ProbeResult
     }
     assert!(count > 0, "Latin glyph records empty");
     Ok(())
-}
-
-fn required_path(name: &str) -> ProbeResult<std::path::PathBuf> {
-    let path = std::env::var_os(name)
-        .map(std::path::PathBuf::from)
-        .ok_or("probe path missing")?;
-    if !path.is_absolute() {
-        return Err("absolute probe path required".into());
-    }
-    Ok(path)
 }
 
 #[path = "svg_rasterize_text_probe_contract_tests.rs"]

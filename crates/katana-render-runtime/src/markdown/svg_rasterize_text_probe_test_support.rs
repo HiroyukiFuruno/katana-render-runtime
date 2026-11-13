@@ -8,6 +8,16 @@ pub(crate) struct TempProbeDirectory {
     _owner: tempfile::TempDir,
 }
 
+pub(super) fn required_path(name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let path = std::env::var_os(name)
+        .map(PathBuf::from)
+        .ok_or("probe path missing")?;
+    if !path.is_absolute() {
+        return Err("absolute probe path required".into());
+    }
+    Ok(path)
+}
+
 pub(in crate::markdown::svg_rasterize) fn recursive_sfnt_path() -> Result<PathBuf, String> {
     recursive_sfnt_path_from(std::env::var_os("KRR_RECURSIVE_PROBE_SFNT_PATH"))
 }

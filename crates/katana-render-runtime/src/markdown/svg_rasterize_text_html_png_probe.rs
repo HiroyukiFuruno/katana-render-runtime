@@ -1,6 +1,6 @@
+use super::probe_test_support::required_path;
 use image::ImageEncoder;
 use sha2::{Digest, Sha256};
-use std::path::PathBuf;
 
 type ProbeResult<T> = Result<T, Box<dyn std::error::Error>>;
 const RGBA_CHANNEL_COUNT: usize = 4;
@@ -71,16 +71,6 @@ fn png_encoder_returns_a_typed_error_for_zero_sized_raster() {
         }),
         "expected the PNG writer to reject zero dimensions"
     );
-}
-
-fn required_path(name: &str) -> ProbeResult<PathBuf> {
-    let path = std::env::var_os(name)
-        .map(PathBuf::from)
-        .ok_or("probe path missing")?;
-    if !path.is_absolute() {
-        return Err("absolute probe path required".into());
-    }
-    Ok(path)
 }
 
 fn encode_png(raster: &super::super::RasterizedSvg) -> ProbeResult<Vec<u8>> {
