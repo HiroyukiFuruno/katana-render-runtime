@@ -15,7 +15,7 @@ pub(super) fn cold_open(
     observe_open(&input, viewport);
     let session = HtmlRuntime
         .open(input, viewport)
-        .map_err(|e| e.to_string())?;
+        .map_err(browser_error_message)?;
     record_phase("cold_open", &session, &observer)?;
     drop(observer);
     Ok(session)
@@ -30,7 +30,7 @@ pub(super) fn warm_open(
     observe_open(&input, viewport);
     let mut warm = HtmlRuntime
         .open(input, viewport)
-        .map_err(|e| e.to_string())?;
+        .map_err(browser_error_message)?;
     record_phase("warm_open", &warm, &observer)?;
     close_control(&mut warm, "warm_close")?;
     assert_eq!(warm.state(), HtmlBrowserSessionState::Closed);
@@ -40,7 +40,7 @@ pub(super) fn warm_open(
 pub(super) fn re_display(session: &mut HtmlBrowserSession) -> Result<(), String> {
     let observer = raster_observer::Scope::enter();
     raster_observer::work_value("refresh", serde_json::json!({"action": "refresh_frame"}));
-    session.refresh_frame().map_err(|e| e.to_string())?;
+    session.refresh_frame().map_err(browser_error_message)?;
     record_phase("re_display", session, &observer)
 }
 
@@ -122,7 +122,7 @@ fn observe_open(source: &HtmlBrowserSource, viewport: HtmlBrowserViewport) {
 
 fn dispatch(session: &mut HtmlBrowserSession, input: HtmlBrowserInput) -> Result<(), String> {
     raster_observer::work_value("action", serde_json::json!({"input": &input}));
-    session.dispatch_input(input).map_err(|e| e.to_string())
+    session.dispatch_input(input).map_err(browser_error_message)
 }
 
 pub(super) fn scroll_top_control(
@@ -146,7 +146,7 @@ pub(super) fn scroll_top_control(
 pub(super) fn close_control(session: &mut HtmlBrowserSession, control: &str) -> Result<(), String> {
     let observer = raster_observer::Scope::enter();
     raster_observer::work_value("close", serde_json::json!({"control": control}));
-    session.close().map_err(|e| e.to_string())?;
+    session.close().map_err(browser_error_message)?;
     let snapshot = observer.snapshot();
     println!(
         "KRR_PUBLIC_FIXTURE_FONT_CONTROL {}",
@@ -154,4 +154,8 @@ pub(super) fn close_control(session: &mut HtmlBrowserSession, control: &str) -> 
     );
     assert!(snapshot.complete(), "close control must be complete");
     Ok(())
+}
+
+fn browser_error_message(error: crate::HtmlBrowserError) -> String {
+    error.to_string()
 }
