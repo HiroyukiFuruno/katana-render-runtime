@@ -95,6 +95,7 @@ fn maximum_character_width(face: &Face<'_>, scale: f32) -> Option<f32> {
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
+    use super::super::test_font_data::font_with_empty_table;
     use super::{Face, Tag, character_metrics, html_input_character_metrics};
     use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
 
@@ -118,10 +119,7 @@ mod tests {
         assert!(face.glyph_index('B').is_some());
         assert!(character_metrics(&face, 1.0).is_none());
 
-        let without_advance = super::super::test_font_data::font_with_empty_table(
-            FONT_BYTES,
-            Tag::from_bytes(b"hmtx"),
-        )?;
+        let without_advance = font_with_empty_table(FONT_BYTES, Tag::from_bytes(b"hmtx"))?;
         let face = Face::parse(&without_advance, 0).map_err(|_| "fixture font is invalid")?;
         assert!(face.glyph_index('x').is_some());
         assert!(character_metrics(&face, 1.0).is_none());
