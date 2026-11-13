@@ -1,4 +1,4 @@
-use super::{decode_fixture, install_trace};
+use super::{decode_fixture, install_trace, render_fixture};
 use crate::markdown::diagram_js_runtime::DiagramRuntimeScript;
 use serde_json::{Value, json};
 
@@ -13,6 +13,15 @@ const REQUIRED_ARRAYS: &[(&str, &str)] = &[
         "C4 description observations are missing",
     ),
 ];
+
+#[test]
+fn native_width_fixture_propagates_the_real_mermaid_parse_error() -> Result<(), String> {
+    let error = render_fixture("classDiagram\n    class {")
+        .err()
+        .ok_or("invalid Mermaid source unexpectedly rendered")?;
+    assert!(error.contains("Parse error"), "{error}");
+    Ok(())
+}
 
 #[test]
 fn native_width_targets_preserve_escaped_strings_and_order() -> Result<(), String> {
