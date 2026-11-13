@@ -56,6 +56,43 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn transient_publication_rejects_font_changed_after_database_build() -> Result<(), String> {
+    let fixture = Fixture::new()?;
+    let (proof, database) = fixture.load()?;
+    assert!(proof.selected_current(&database));
+    let (transient, prefix) = super::super::shared_raster::build(
+        &database,
+        &proof.prefix,
+        &proof.stamps,
+        &proof.immutable_shared,
+    )
+    .ok_or("transient database build failed")?;
+    assert!(
+        proof
+            .finish_transient(&database, transient.clone(), prefix.clone())
+            .is_some()
+    );
+
+    replace_present_font(&fixture)?;
+    assert!(!proof.selected_current(&database));
+    assert!(
+        proof
+            .finish_transient(&database, transient, prefix)
+            .is_none()
+    );
+    fixture.cleanup()?;
+    Ok(())
+}
+
+fn replace_present_font(fixture: &Fixture) -> Result<(), String> {
+    let replacement = fixture.root.join("replacement.ttf");
+    let mut changed = font::BUNDLED_SANS_SERIF_FONT.to_vec();
+    changed.push(0);
+    std::fs::write(&replacement, changed).map_err(|error| error.to_string())?;
+    std::fs::rename(replacement, &fixture.present).map_err(|error| error.to_string())
+}
+
+#[test]
 fn original_arc_prefix_seal_hits_exact_database_without_retaining_owner() -> Result<(), String> {
     let fixture = Fixture::new()?;
     let (proof, database) = fixture.load()?;

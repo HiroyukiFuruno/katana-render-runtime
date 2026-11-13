@@ -149,6 +149,15 @@ impl CreationProof {
             &self.stamps,
             &self.immutable_shared,
         )?;
+        self.finish_transient(database, transient, prefix)
+    }
+
+    fn finish_transient(
+        &self,
+        database: &Arc<Database>,
+        transient: Database,
+        prefix: Vec<resvg::usvg::fontdb::FaceInfo>,
+    ) -> Option<(Arc<Database>, Arc<Self>)> {
         if !self.selected_current(database) {
             return None;
         }
