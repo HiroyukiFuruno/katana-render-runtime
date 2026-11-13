@@ -31,23 +31,28 @@ pub(in super::super) fn select_database(
     let Some(route) = super::ROUTE.with(Cell::get) else {
         return proof.transient(db);
     };
-    if matches!(MODE.with(Cell::get), Mode::Audit) && !proof.current(db) {
-        error("CreationProof invalid before route setup");
-        return None;
-    }
+    audit_database(db, &proof, "CreationProof invalid before route setup")?;
     let started = matches!(MODE.with(Cell::get), Mode::Measure).then(Instant::now);
     let (selected_db, selected_proof) = select_route(db, proof, route)?;
     if let Some(started) = started {
         stage(route_stage(route), started.elapsed().as_nanos());
     }
-    if matches!(MODE.with(Cell::get), Mode::Audit) && !selected_proof.current(&selected_db) {
-        error("CreationProof invalid after route setup");
-        return None;
-    }
+    audit_database(
+        &selected_db,
+        &selected_proof,
+        "CreationProof invalid after route setup",
+    )?;
     update(1, |capture| {
         capture.database_owners.push(Arc::downgrade(&selected_db))
     });
     Some((selected_db, selected_proof))
+}
+fn audit_database(db: &Database, proof: &CreationProof, message: &'static str) -> Option<()> {
+    if matches!(MODE.with(Cell::get), Mode::Audit) && !proof.current(db) {
+        error(message);
+        return None;
+    }
+    Some(())
 }
 fn select_route(
     db: &Arc<Database>,
