@@ -68,6 +68,20 @@ fn stale_macho_digest_never_emits_a_partial_success_report() -> Result<(), Strin
     Ok(())
 }
 
+#[test]
+fn stale_macho_size_never_emits_a_partial_success_report() -> Result<(), String> {
+    let (_directory, folder) = canonical_fixture_folder()?;
+    let valid = write_thin_input(&folder.join("valid.o"), true)?;
+    let path = folder.join("stale-size.o");
+    let stale = write_thin_input(&path, false)?;
+    fs::write(&path, MachoNosoFixture::thin_macho(true, Corruption::None))
+        .map_err(|error| error.to_string())?;
+    let manifest = write_manifest(&folder, &[valid, stale])?;
+    let stderr = assert_rejected_manifest(&manifest, "stale Mach-O size")?;
+    assert!(stderr.contains("input-file:size-or-type-changed"), "{stderr}");
+    Ok(())
+}
+
 fn canonical_fixture_folder() -> Result<(tempfile::TempDir, PathBuf), String> {
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
     let folder = directory
