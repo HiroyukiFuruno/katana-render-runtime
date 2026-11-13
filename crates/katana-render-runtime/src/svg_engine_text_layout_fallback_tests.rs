@@ -65,6 +65,34 @@ fn shape_with_font(
 }
 
 #[test]
+fn removed_font_file_produces_no_glyphs_after_face_resolution() -> TestResult<()> {
+    let file = tempfile::NamedTempFile::new()?;
+    std::fs::write(file.path(), PRIMARY)?;
+    let mut database = usvg::fontdb::Database::new();
+    database.load_font_file(file.path())?;
+    let id = database.faces().next().ok_or("font file has no face")?.id;
+    let font = database
+        .load_font(id, &[])
+        .ok_or("font cannot be resolved")?;
+    file.close()?;
+    let mut database = Arc::new(database);
+    assert!(database.face(id).is_some());
+    let glyphs = usvg::layout::shape_text(
+        "A",
+        Arc::new(font),
+        false,
+        false,
+        &requested_font()?,
+        FONT_SIZE,
+        usvg::FontOpticalSizing::Auto,
+        &usvg::FontResolver::default(),
+        &mut database,
+    );
+    assert!(glyphs.is_empty());
+    Ok(())
+}
+
+#[test]
 fn fallback_replaces_differently_shaped_indic_clusters() -> TestResult<()> {
     crate::svg_engine::init_test_logger();
     let text = "\u{0915}\u{094d}\u{0937}";
