@@ -76,9 +76,11 @@ fn render_prepared_path(
 ) -> Result<(), String> {
     let dimensions = (pixmap.width() as i32, pixmap.height() as i32);
     let info = ImageInfo::new(dimensions, ColorType::RGBA8888, AlphaType::Premul, None);
-    let mut surface =
-        skia_safe::surfaces::wrap_pixels(&info, pixmap.data_mut(), info.min_row_bytes(), None)
-            .ok_or_else(|| "Skia SVG path surface creation failed".to_owned())?;
+    let mut surface = super::super::render::wrap_skia_surface(
+        &info,
+        pixmap.data_mut(),
+        "Skia SVG path surface creation failed",
+    )?;
     let matrix = skia_matrix(transform);
     surface.canvas().set_matrix(&M44::from(&matrix));
     draw_path(surface.canvas(), prepared, order);

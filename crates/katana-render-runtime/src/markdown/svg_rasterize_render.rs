@@ -4,6 +4,15 @@ use super::{
 use resvg::usvg;
 use tiny_skia::Pixmap;
 
+pub(super) fn wrap_skia_surface<'pixels>(
+    info: &skia_safe::ImageInfo,
+    pixels: &'pixels mut [u8],
+    error: &str,
+) -> Result<skia_safe::Borrows<'pixels, skia_safe::Surface>, String> {
+    skia_safe::surfaces::wrap_pixels(info, pixels, info.min_row_bytes(), None)
+        .ok_or_else(|| error.to_owned())
+}
+
 pub(super) struct RasterTarget {
     pub(super) display_width: f32,
     pub(super) display_height: f32,

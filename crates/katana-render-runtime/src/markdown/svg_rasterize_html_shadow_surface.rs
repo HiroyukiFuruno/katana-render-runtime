@@ -92,8 +92,7 @@ fn wrap_filter_surface<'a>(
     info: &ImageInfo,
     pixels: &'a mut [u8],
 ) -> Result<skia_safe::Borrows<'a, skia_safe::Surface>, String> {
-    skia_safe::surfaces::wrap_pixels(info, pixels, Some(info.min_row_bytes()), None)
-        .ok_or_else(|| "drop-shadow surface creation failed".to_owned())
+    super::super::render::wrap_skia_surface(info, pixels, "drop-shadow surface creation failed")
 }
 
 pub(super) fn copy_source_over(target: &mut PixmapMut<'_>, source: &Pixmap, left: i32, top: i32) {
