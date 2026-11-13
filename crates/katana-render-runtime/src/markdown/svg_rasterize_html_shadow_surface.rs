@@ -32,9 +32,7 @@ fn apply_filter_paint(
 ) -> Result<Pixmap, String> {
     let dimensions = (source.width() as i32, source.height() as i32);
     let info = ImageInfo::new(dimensions, ColorType::RGBA8888, AlphaType::Premul, None);
-    let data = skia_safe::Data::new_copy(source.data());
-    let image = skia_safe::images::raster_from_data(&info, data, info.min_row_bytes())
-        .ok_or_else(|| format!("{label} source image creation failed"))?;
+    let image = filter_source_image(&info, source.data(), label)?;
     /* WHY: Skia画像は元画素のコピーを保持する。出力には元の領域を透明に戻して使う。 */
     source.data_mut().fill(0);
     let mut surface = wrap_filter_surface(&info, source.data_mut())?;
@@ -48,6 +46,16 @@ fn apply_filter_paint(
     surface.canvas().draw_image(image, (0, 0), Some(&paint));
     drop(surface);
     Ok(source)
+}
+
+fn filter_source_image(
+    info: &ImageInfo,
+    pixels: &[u8],
+    label: &str,
+) -> Result<skia_safe::Image, String> {
+    let data = skia_safe::Data::new_copy(pixels);
+    skia_safe::images::raster_from_data(info, data, info.min_row_bytes())
+        .ok_or_else(|| format!("{label} source image creation failed"))
 }
 
 pub(super) fn make_skia_filter(

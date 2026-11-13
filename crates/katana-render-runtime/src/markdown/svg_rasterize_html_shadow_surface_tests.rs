@@ -24,6 +24,12 @@ fn filter_surface_rejects_short_buffer_and_wraps_valid_pixels() -> Result<(), St
     let info = ImageInfo::new((2, 2), ColorType::RGBA8888, AlphaType::Premul, None);
     let mut short = [0_u8; 15];
     assert_eq!(
+        super::filter_source_image(&info, &short, "drop-shadow")
+            .err()
+            .as_deref(),
+        Some("drop-shadow source image creation failed")
+    );
+    assert_eq!(
         wrap_filter_surface(&info, &mut short).err().as_deref(),
         Some("drop-shadow surface creation failed")
     );
