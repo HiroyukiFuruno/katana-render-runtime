@@ -275,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn recognized_markup_lookup_propagates_missing_node_error() {
+    fn content_lookup_propagates_node_errors() {
         let document = HtmlDocument::parse("<main id=root><p>text</p></main>");
         let arguments = ["999".to_string()];
 
@@ -283,5 +283,14 @@ mod tests {
             lookup_markup(&document, "textContent", &arguments),
             Err(error) if error == "HTML node 999 does not exist"
         ));
+        for (arguments, expected) in [
+            (vec![], "missing DOM argument 0"),
+            (vec!["invalid".to_string()], "invalid HTML node id: invalid"),
+        ] {
+            assert!(matches!(
+                lookup_attribute(&document, "tagName", &arguments),
+                Err(error) if error == expected
+            ));
+        }
     }
 }
