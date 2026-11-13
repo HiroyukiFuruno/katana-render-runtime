@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_text_harfrust_nondurable_filesystem_tests.rs"]
+mod nondurable_filesystem_tests;
+
 #[cfg(unix)]
 #[test]
 fn populated_spare_file_mutation_rejects_and_retries_without_old_handles()
