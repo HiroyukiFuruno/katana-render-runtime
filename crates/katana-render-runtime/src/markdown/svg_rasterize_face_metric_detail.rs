@@ -50,6 +50,11 @@ impl FaceMetricScope {
     ) -> T {
         let started = self.enabled.then(Instant::now);
         let result = body();
+        self.record_elapsed(phase, started);
+        result
+    }
+
+    fn record_elapsed(&self, phase: FaceMetricPhase, started: Option<Instant>) {
         if let Some(started) = started {
             let elapsed = started
                 .elapsed()
@@ -62,7 +67,6 @@ impl FaceMetricScope {
                 }
             });
         }
-        result
     }
 
     pub(in super::super) fn record_outcome(&self, outcome: FaceMetricOutcome) {

@@ -117,16 +117,19 @@ pub(super) fn record(event: impl FnOnce() -> serde_json::Value) {
             snapshot.dropped += 1;
             return;
         }
-        let event = event();
-        if event.to_string().len() > MAX_EVENT_JSON_BYTES {
-            snapshot.dropped += 1;
-            return;
-        }
-        if let Some(bytes) = hooks::route(&event) {
-            snapshot.work.record("route", &bytes);
-        }
-        snapshot.events.push(event);
+        store_event(snapshot, event());
     });
+}
+
+fn store_event(snapshot: &mut Snapshot, event: serde_json::Value) {
+    if event.to_string().len() > MAX_EVENT_JSON_BYTES {
+        snapshot.dropped += 1;
+        return;
+    }
+    if let Some(bytes) = hooks::route(&event) {
+        snapshot.work.record("route", &bytes);
+    }
+    snapshot.events.push(event);
 }
 
 #[derive(Default)]
