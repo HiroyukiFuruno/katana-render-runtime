@@ -51,6 +51,35 @@ fn stale_diagnostic_database()
     Ok(result)
 }
 
+#[test]
+fn unowned_shared_font_cannot_be_used_for_diagnostic_svg_parse()
+-> Result<(), Box<dyn std::error::Error>> {
+    use super::super::{lazy_diagnostic, proof::CreationProof};
+    use std::sync::Arc;
+
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("font.ttf");
+    let bytes = crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
+    std::fs::write(&path, bytes)?;
+    let mut database = usvg::fontdb::Database::new();
+    let source = usvg::fontdb::Source::SharedFile(path, Arc::new(bytes));
+    let ids = database.load_font_source(source);
+    assert_eq!(ids.len(), 1);
+    let mut proof = CreationProof::default();
+    proof.capture_prefix(&database);
+    let input =
+        lazy_diagnostic::validate_file_fixture_database(Arc::new(database), Arc::new(proof));
+    assert!(input.is_some(), "valid metadata should reach route setup");
+
+    let (options, _) = lazy_diagnostic::with_route(
+        lazy_diagnostic::SourceRoute::SharedFile,
+        lazy_diagnostic::Mode::Audit,
+        || super::diagnostic::prepare_file_options(input, "ABC".to_owned()),
+    );
+    assert!(options.is_none(), "route accepted backing it did not own");
+    Ok(())
+}
+
 fn assert_stale_diagnostic_fallback(snapshot: &super::super::raster_observer::Snapshot) {
     let events = &snapshot.events;
     assert!(
