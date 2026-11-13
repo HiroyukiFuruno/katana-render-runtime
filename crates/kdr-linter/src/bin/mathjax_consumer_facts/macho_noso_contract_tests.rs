@@ -1,5 +1,6 @@
 use super::super::{
     MachoNoso, canonical_file, exact_keys, input_rows, inspect_file, is_sha256, sha256,
+    validate_read,
 };
 use super::{
     invalid_path_inputs, manifest, write_fixture, write_malformed_manifest, write_verified_manifest,
@@ -9,6 +10,44 @@ use serde_json::{Value, json};
 const SIZE_DRIFT_BYTES: usize = 1;
 const INVALID_MANIFEST_COUNT: usize = 4;
 const EXAMPLE_SHA256: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+#[test]
+fn read_validation_rejects_metadata_drift_and_incomplete_bytes()
+-> Result<(), Box<dyn std::error::Error>> {
+    use std::{
+        fs,
+        time::{Duration, UNIX_EPOCH},
+    };
+
+    let fixture = write_fixture()?;
+    let file = fs::OpenOptions::new().write(true).open(&fixture.path)?;
+    let before = file.metadata()?;
+    let size = fixture.bytes.len();
+    assert!(validate_read(&before, &before, size, before.len()).is_ok());
+    file.set_modified(UNIX_EPOCH + Duration::from_secs(1_000_000_000))?;
+    let time_changed = file.metadata()?;
+    assert_eq!(before.len(), time_changed.len());
+    assert_ne!(before.modified()?, time_changed.modified()?);
+    file.set_len(before.len() + 1)?;
+    let size_changed = file.metadata()?;
+    for (after, bytes_read) in [
+        (&time_changed, size),
+        (&size_changed, size),
+        (&before, size - 1),
+    ] {
+        assert_changed_read(&before, after, bytes_read);
+    }
+    Ok(())
+}
+
+fn assert_changed_read(before: &std::fs::Metadata, after: &std::fs::Metadata, bytes_read: usize) {
+    assert_eq!(
+        validate_read(before, after, bytes_read, before.len())
+            .err()
+            .as_deref(),
+        Some("input-file:changed-during-read")
+    );
+}
 
 #[test]
 fn input_rows_accepts_canonical_file_and_rejects_schema_shapes() -> Result<(), String> {

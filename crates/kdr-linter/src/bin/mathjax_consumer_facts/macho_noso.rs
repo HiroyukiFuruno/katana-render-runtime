@@ -94,12 +94,7 @@ fn inspect_file(path: PathBuf, expected_size: u64, expected_sha256: &str) -> Res
     }
     let bytes = fs::read(&path).map_err(|error| error.to_string())?;
     let after = fs::metadata(&path).map_err(|error| error.to_string())?;
-    if before.len() != after.len()
-        || before.modified().ok() != after.modified().ok()
-        || u64::try_from(bytes.len()).ok() != Some(expected_size)
-    {
-        return Err("input-file:changed-during-read".into());
-    }
+    validate_read(&before, &after, bytes.len(), expected_size)?;
     let digest = sha256(&bytes);
     if digest != expected_sha256 {
         return Err("input-file:sha256-changed".into());
@@ -110,6 +105,21 @@ fn inspect_file(path: PathBuf, expected_size: u64, expected_sha256: &str) -> Res
         json!({"path": path, "size": expected_size, "sha256": digest,
               "format": format, "nOso": records}),
     )
+}
+
+fn validate_read(
+    before: &fs::Metadata,
+    after: &fs::Metadata,
+    bytes_read: usize,
+    expected_size: u64,
+) -> Result<(), String> {
+    if before.len() != after.len()
+        || before.modified().ok() != after.modified().ok()
+        || u64::try_from(bytes_read).ok() != Some(expected_size)
+    {
+        return Err("input-file:changed-during-read".into());
+    }
+    Ok(())
 }
 
 fn exact_keys(value: &Value, expected: &[&str], label: &str) -> Result<(), String> {
