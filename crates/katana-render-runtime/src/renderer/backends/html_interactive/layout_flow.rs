@@ -55,7 +55,7 @@ impl HtmlLayoutRenderer {
         let root = compute_flow_layout(&mut tree, &nodes, style, width, available_height)?;
         self.remeasure_flow_heights(&mut tree, &nodes, &items, layout, list_mode)?;
         compute_root_layout(&mut tree, root, width, available_height)?;
-        self.paint_flow_items(&tree, &nodes, &items, layout, list_markers)
+        Ok(self.paint_flow_items(&tree, &nodes, &items, layout, list_markers))
     }
 }
 

@@ -90,11 +90,11 @@ impl HtmlLayoutRenderer {
         items: &[&HtmlDocumentNode],
         layout_context: LayoutContext<'_>,
         ordered_list: Option<bool>,
-    ) -> Result<f32, String> {
+    ) -> f32 {
         let (x, y) = (layout_context.x, layout_context.y);
         let mut bottom = y;
         for (index, (node, item)) in nodes.iter().zip(items).enumerate() {
-            let layout = tree.layout(*node).map_err(layout_error)?;
+            let layout = tree.unrounded_layout(*node);
             let marker = ListItemMarker::for_index(ordered_list, index);
             let item_bottom = self.render_flow_node_with_list_marker(
                 item,
@@ -110,7 +110,7 @@ impl HtmlLayoutRenderer {
             );
             bottom = bottom.max(item_bottom);
         }
-        Ok(bottom)
+        bottom
     }
 }
 
