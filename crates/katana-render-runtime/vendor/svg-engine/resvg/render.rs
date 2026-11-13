@@ -226,6 +226,26 @@ pub fn convert_blend_mode(mode: crate::svg_engine::usvg::BlendMode) -> tiny_skia
 #[cfg(test)]
 mod tests {
 
+    #[test]
+    fn oversized_isolated_layer_leaves_the_destination_unchanged() -> Result<(), String> {
+        use crate::svg_engine::usvg::{Options, Tree};
+        use tiny_skia::{Color, IntRect, Pixmap, Transform};
+
+        let svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><g opacity='.5'><rect width='8' height='8'/></g></svg>";
+        let tree = Tree::from_str(svg, &Options::default()).map_err(|error| error.to_string())?;
+        let context = super::Context {
+            max_bbox: IntRect::from_xywh(0, 0, 600_000_000, 8).ok_or("invalid test bounds")?,
+        };
+        let mut image = Pixmap::new(8, 8).ok_or("pixmap unavailable")?;
+        image.fill(Color::from_rgba8(0, 0, 255, 255));
+        let expected = image.data().to_vec();
+        // WHY: tiny-skia は行のバイト数を i32 で表せない領域を、確保前に拒否する。
+        let transform = Transform::from_scale(75_000_000.0, 1.0);
+        super::render_nodes(tree.root(), &context, transform, &mut image.as_mut());
+        assert_eq!(image.data(), expected);
+        Ok(())
+    }
+
     // Derived from https://github.com/servo/servo/issues/42258.
     #[test]
     fn filter_bbox_outside_int_rect() {

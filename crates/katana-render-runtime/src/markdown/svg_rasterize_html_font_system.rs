@@ -341,4 +341,11 @@ mod tests {
 
         assert!(database.faces().next().is_none());
     }
+
+    #[test]
+    fn empty_requested_families_leave_database_unchanged() {
+        let mut database = usvg::fontdb::Database::new();
+        load_requested_system_font_families(&mut database, ["", ""]);
+        assert_eq!(database.faces().count(), 0);
+    }
 }

@@ -58,6 +58,25 @@ fn singular_filtered_group_does_not_hide_visible_sibling() -> Result<(), String>
 }
 
 #[test]
+fn isolated_group_outside_integer_bounds_leaves_existing_pixels_untouched() -> Result<(), String> {
+    let tree = parse_source(
+        Path::new("isolated-group-overflow.svg"),
+        b"<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><g id='isolated' opacity='.5'><rect width='8' height='8' fill='red'/></g></svg>",
+    )?;
+    let group = tree
+        .node_by_id("isolated")
+        .ok_or("isolated group missing")?;
+    let mut image = tiny_skia::Pixmap::new(8, 8).ok_or("pixmap unavailable")?;
+    image.fill(tiny_skia::Color::from_rgba8(0, 0, 255, 255));
+    let expected = image.data().to_vec();
+    let outside = tiny_skia::Transform::from_scale(300_000_000.0, 1.0);
+    crate::svg_engine::resvg::render_node(group, outside, &mut image.as_mut())
+        .ok_or("isolated group bounds missing")?;
+    assert_eq!(image.data(), expected);
+    Ok(())
+}
+
+#[test]
 fn filter_color_space_changes_blurred_edge_samples() -> Result<(), String> {
     const FILTER: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="12" height="8">
       <defs><filter id="f" color-interpolation-filters="COLOR_SPACE">

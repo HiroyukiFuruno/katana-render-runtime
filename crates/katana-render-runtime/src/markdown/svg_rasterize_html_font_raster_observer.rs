@@ -162,3 +162,27 @@ impl TreeParseTiming {
 #[cfg(test)]
 #[path = "svg_rasterize_html_font_raster_observer_boundary_tests.rs"]
 mod boundary_tests;
+
+#[cfg(test)]
+mod parse_timing_tests {
+    use super::{Scope, TreeParseTiming};
+
+    #[test]
+    fn tree_parse_records_success_and_failure_only_with_active_observer() {
+        let timing = TreeParseTiming::default();
+        let options = resvg::usvg::Options::default();
+        let valid = "<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>";
+        assert!(timing.tree(valid, &options).is_ok());
+        assert_eq!(timing.elapsed_ns.get(), 0);
+
+        let observer = Scope::enter();
+        assert!(timing.tree(valid, &options).is_ok());
+        assert!(timing.tree("<svg", &options).is_err());
+        let snapshot = observer.snapshot();
+        assert_eq!(
+            snapshot.operation_counters()["operations"]["counts"]["known_parse"],
+            2
+        );
+        assert!(snapshot.complete());
+    }
+}
