@@ -4121,11 +4121,11 @@ test.each([
   const snapshot = localCoverageMoonFixture();
   const id = RUNTIME_QUALITY_LEAVES[0][0];
   changeMoon(snapshot, (tasks) => {
-    const aggregate = tasks["runtime-asset-script-test"];
+    const final = tasks["runtime-unused-script-regression"];
     const leaf = tasks[`${id}-producer`];
-    if (!aggregate || !leaf) throw new Error("runtime quality fixture missing");
+    if (!final || !leaf) throw new Error("runtime quality fixture missing");
     if (mutation === "missing leaf")
-      aggregate.deps = aggregate.deps?.filter((dep) => dep !== `${id}-producer`);
+      final.deps = final.deps?.filter((dep) => dep !== `${id}-producer`);
     else if (mutation === "missing dependency") leaf.deps = [];
     else if (mutation === "wrong cache") leaf.options = { ...leaf.options, cache: true };
     else if (mutation === "changed inputs") leaf.inputs = ["**/*.ts"];

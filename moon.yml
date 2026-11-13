@@ -170,8 +170,6 @@ tasks:
     deps:
       - runtime-asset-script-other
       - runtime-unused-script-regression
-      - runtime-quality-owned-source-inventory-producer
-      - runtime-quality-owned-validation-contract-producer
     inputs: *quality-inputs
 
   runtime-classic-generation-evidence:
@@ -193,7 +191,10 @@ tasks:
 
   runtime-unused-script-regression:
     command: ['just', 'runtime-unused-script-final-verify-run']
-    deps: ['runtime-classic-generation-evidence']
+    # 全プロファイルのロックを取るため、並列の個別検査が終わってから実行する。
+    deps:
+      - runtime-quality-owned-source-inventory-producer
+      - runtime-quality-owned-validation-contract-producer
     inputs: *quality-inputs
     options:
       cache: false

@@ -4420,11 +4420,7 @@ function moonCoverageGraphVerified(
     assetAggregate === undefined ||
     assetAggregate.leaf !== "runtime-asset-script-aggregate-run" ||
     assetAggregate.deps.join("\0") !==
-      [
-        "runtime-asset-script-other",
-        "runtime-unused-script-regression",
-        ...RUNTIME_QUALITY_LEAVES.map(([id]) => `${id}-producer`),
-      ].join("\0")
+      ["runtime-asset-script-other", "runtime-unused-script-regression"].join("\0")
   )
     errors.push("moon asset script aggregate differs");
 }
@@ -4450,7 +4446,7 @@ function moonRuntimeUnusedGraphVerified(
   moonRuntimeQualityProfilesVerified(tasks, recipes, errors);
   const final = tasks.get("runtime-unused-script-regression");
   if (
-    final?.deps.join("\0") !== "runtime-classic-generation-evidence" ||
+    final?.deps.join("\0") !== RUNTIME_QUALITY_LEAVES.map(([id]) => `${id}-producer`).join("\0") ||
     final.command.join("\0") !== "just\0runtime-unused-script-final-verify-run" ||
     final.options.cache !== false
   )

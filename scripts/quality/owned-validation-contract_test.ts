@@ -5399,7 +5399,8 @@ test.each([
   ["runtime-unused-mathjax-producer", "runtime-unused-tool-fingerprint-producer"],
   ["runtime-unused-native-width-producer", "runtime-unused-mathjax-producer"],
   ["runtime-unused-rust-classic-producer", "runtime-unused-native-width-producer"],
-  ["runtime-unused-script-regression", "runtime-classic-generation-evidence"],
+  ["runtime-unused-script-regression", "runtime-quality-owned-source-inventory-producer"],
+  ["runtime-unused-script-regression", "runtime-quality-owned-validation-contract-producer"],
 ] as const)(
   "Moon runtime asset leaf %s requires its shared predecessor",
   (taskName, dependency) => {

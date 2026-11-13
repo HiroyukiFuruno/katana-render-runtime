@@ -209,22 +209,21 @@ class MoonOwnerAstContractTests(unittest.TestCase):
             [
                 "runtime-asset-script-other",
                 "runtime-unused-script-regression",
-                "runtime-quality-owned-source-inventory-producer",
-                "runtime-quality-owned-validation-contract-producer",
             ],
         )
         self.assertEqual(
             tasks["runtime-asset-script-test"]["deps"],
             [
                 "runtime-asset-script-other",
-                "runtime-quality-owned-source-inventory-producer",
-                "runtime-quality-owned-validation-contract-producer",
                 "runtime-unused-script-regression",
             ],
         )
         self.assertEqual(
             tasks["runtime-unused-script-regression"]["deps"],
-            ["runtime-classic-generation-evidence"],
+            [
+                "runtime-quality-owned-source-inventory-producer",
+                "runtime-quality-owned-validation-contract-producer",
+            ],
         )
         module, _ = self.scheduler_owner_phases()
         self.assertEqual(
@@ -312,6 +311,9 @@ class MoonOwnerAstContractTests(unittest.TestCase):
         second = phases.index("runtime-quality-owned-validation-contract-producer")
         phases[first], phases[second] = phases[second], phases[first]
         self.assertIs(module.scheduler_success_order_valid(phases), True)
+        final = phases.index("runtime-unused-script-regression")
+        phases[second], phases[final] = phases[final], phases[second]
+        self.assertIs(module.scheduler_success_order_valid(phases), False)
 
     def test_foundation_format_cannot_follow_host_preparation(self) -> None:
         module, phases = self.scheduler_owner_phases()

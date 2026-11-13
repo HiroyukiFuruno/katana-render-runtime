@@ -49,13 +49,14 @@ SCHEDULER_DEPENDENCIES: dict[str, list[str]] = {
     "runtime-asset-script-test": [
         "runtime-asset-script-other",
         "runtime-unused-script-regression",
+    ],
+    "runtime-unused-script-regression": [
         "runtime-quality-owned-source-inventory-producer",
         "runtime-quality-owned-validation-contract-producer",
     ],
     "runtime-quality-owned-source-inventory-producer": ["runtime-classic-generation-evidence"],
     "runtime-quality-owned-validation-contract-producer": ["runtime-classic-generation-evidence"],
     "runtime-asset-script-other": ["runtime-classic-generation-evidence"],
-    "runtime-unused-script-regression": ["runtime-classic-generation-evidence"],
     "runtime-classic-generation-evidence": ["runtime-asset-script-preflight"],
     "runtime-asset-script-preflight": ["mathjax-owned-evidence"],
     "mathjax-owned-evidence": ["static", "rust-facts-host-prebuild"],
@@ -129,9 +130,9 @@ SCHEDULER_EVENT_PHASES = (
     "runtime-asset-script-preflight",
     "runtime-classic-generation-evidence",
     "runtime-asset-script-other",
-    "runtime-unused-script-regression",
     "runtime-quality-owned-source-inventory-producer",
     "runtime-quality-owned-validation-contract-producer",
+    "runtime-unused-script-regression",
     "runtime-asset-script-test",
     "unit-test",
 )
@@ -344,7 +345,7 @@ def production_task_input_binding(
     assert runtime_preflight.get("deps") == ["mathjax-owned-evidence"]
     assert classic_evidence.get("deps") == ["runtime-asset-script-preflight"]
     assert runtime_other.get("deps") == ["runtime-classic-generation-evidence"]
-    assert runtime_unused.get("deps") == ["runtime-classic-generation-evidence"]
+    assert runtime_unused.get("deps") == SCHEDULER_DEPENDENCIES["runtime-unused-script-regression"]
     assert runtime_unused.get("command") == [
         "just",
         "runtime-unused-script-final-verify-run",
@@ -409,12 +410,7 @@ def production_task_input_binding(
         ]
     assert verify_run_count == len(RUNTIME_UNUSED_LEAF_IDS) == 7
     assert legacy_run_count == 0
-    assert runtime_aggregate.get("deps") == [
-        "runtime-asset-script-other",
-        "runtime-unused-script-regression",
-        "runtime-quality-owned-source-inventory-producer",
-        "runtime-quality-owned-validation-contract-producer",
-    ]
+    assert runtime_aggregate.get("deps") == SCHEDULER_DEPENDENCIES["runtime-asset-script-test"]
     for name, raw in declared.items():
         task = moon_json_object(raw)
         assert task.get("inputs") == DIRECT_INPUTS, (
@@ -611,7 +607,7 @@ def scheduler_success_order_valid(phases: list[str]) -> bool:
         and all(
             positions["runtime-classic-generation-evidence"]
             < positions[f"{leaf}-producer"]
-            < positions["runtime-asset-script-test"]
+            < positions["runtime-unused-script-regression"]
             for leaf in RUNTIME_QUALITY_LEAF_IDS
         )
         and positions["runtime-asset-script-test"] < positions["unit-test"]
