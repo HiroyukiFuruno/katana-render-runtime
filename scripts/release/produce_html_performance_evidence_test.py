@@ -1072,12 +1072,17 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
     def test_selected_condition_budget_boundaries(self) -> None:
         for count, seconds in ((0, 1200), (9, 1200), (10, 2400), (18, 2400),
                                (19, 3600), (27, 3600), (28, 3600), (57, 3600), (84, 3600)):
-            with self.subTest(count=count):
+            with self.subTest(count=count), patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}):
                 self.assertEqual(producer._batch_deadline(100.0, True, count), 100.0 + seconds)
         self.assertIsNone(producer._batch_deadline(100.0, False, 0))
         for count in (-1, 85, True):
             with self.subTest(invalid=count), self.assertRaises(ValueError):
                 producer._batch_deadline(100.0, True, count)
+
+    def test_ci_full_catalog_uses_workflow_deadline_and_partial_runs_keep_their_budget(self) -> None:
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}):
+            self.assertIsNone(producer._batch_deadline(100.0, True, 84))
+            self.assertEqual(producer._batch_deadline(100.0, True, 83), 3700.0)
 
     def test_batch_selection_rejects_invalid_inventory_and_limit(self) -> None:
         rows: list[gate.JsonObject] = [{"condition_id": str(index)} for index in range(12)]
