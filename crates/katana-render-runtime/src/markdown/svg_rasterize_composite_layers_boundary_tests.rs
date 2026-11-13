@@ -8,6 +8,20 @@ const NESTED_CLIP: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="32"
 const PLAIN_GROUP: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="4096"><g id="layer" opacity="0.5"><rect width="4096" height="4096"/></g></svg>"#;
 
 #[test]
+fn invalid_layer_dimensions_are_rejected_before_painting() {
+    let mut called = false;
+    let result = super::render_layer((0, SIZE), "invalid SVG layer dimensions", &mut |_| {
+        called = true;
+        Ok(())
+    });
+    assert_eq!(
+        result.err().as_deref(),
+        Some("invalid SVG layer dimensions")
+    );
+    assert!(!called);
+}
+
+#[test]
 fn nested_authored_clip_masks_intersect_in_the_real_render_path() -> Result<(), String> {
     let tree = parse(NESTED_CLIP)?;
     let group = layer(&tree)?;

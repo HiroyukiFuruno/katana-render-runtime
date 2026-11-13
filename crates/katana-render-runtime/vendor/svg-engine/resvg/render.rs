@@ -227,35 +227,47 @@ pub fn convert_blend_mode(mode: crate::svg_engine::usvg::BlendMode) -> tiny_skia
 mod tests {
 
     #[test]
-    fn oversized_isolated_layer_leaves_the_destination_unchanged() -> Result<(), String> {
-        use crate::svg_engine::usvg::{Options, Tree};
-        use tiny_skia::{Color, IntRect, Pixmap, Transform};
+    fn oversized_isolated_layer_leaves_the_destination_unchanged()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use tiny_skia::{IntRect, Transform};
 
-        let svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><g id='oversized' opacity='.5'><rect width='8' height='8'/></g></svg>";
-        let tree = Tree::from_str(svg, &Options::default()).map_err(|error| error.to_string())?;
-        let Some(crate::svg_engine::usvg::Node::Group(group)) = tree.node_by_id("oversized") else {
-            return Err("isolated group missing".to_string());
-        };
+        let tree = oversized_layer_tree()?;
+        let group = tree
+            .node_by_id("oversized")
+            .and_then(|node| match node {
+                crate::svg_engine::usvg::Node::Group(group) => Some(group.as_ref()),
+                _ => None,
+            })
+            .ok_or("isolated group missing")?;
         let context = super::Context {
             max_bbox: IntRect::from_xywh(0, 0, 600_000_000, 8).ok_or("invalid test bounds")?,
         };
-        let mut image = Pixmap::new(8, 8).ok_or("pixmap unavailable")?;
-        image.fill(Color::from_rgba8(0, 0, 255, 255));
+        let mut image = blue_layer_fixture().ok_or("pixmap unavailable")?;
         let expected = image.data().to_vec();
         // WHY: tiny-skia は行のバイト数を i32 で表せない領域を、確保前に拒否する。
         let transform = Transform::from_scale(75_000_000.0, 1.0);
-        let bbox = group
+        let bounds = group
             .layer_bounding_box()
             .transform(transform)
-            .ok_or("invalid layer bbox")?;
-        let bounds =
-            super::layer_bbox(group, &context, bbox).ok_or("invalid integer layer bbox")?;
+            .and_then(|bbox| super::layer_bbox(group, &context, bbox))
+            .ok_or("invalid integer layer bbox")?;
         assert!(bounds.width() > i32::MAX as u32 / 4);
         assert!(super::render_layer(group, &context, transform).is_none());
         assert!(super::render_group(group, &context, transform, &mut image.as_mut()).is_none());
         super::render_nodes(tree.root(), &context, transform, &mut image.as_mut());
         assert_eq!(image.data(), expected);
         Ok(())
+    }
+
+    fn oversized_layer_tree() -> Result<crate::svg_engine::usvg::Tree, crate::svg_engine::usvg::Error> {
+        let svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><g id='oversized' opacity='.5'><rect width='8' height='8'/></g></svg>";
+        crate::svg_engine::usvg::Tree::from_str(svg, &crate::svg_engine::usvg::Options::default())
+    }
+
+    fn blue_layer_fixture() -> Option<tiny_skia::Pixmap> {
+        let mut image = tiny_skia::Pixmap::new(8, 8)?;
+        image.fill(tiny_skia::Color::from_rgba8(0, 0, 255, 255));
+        Some(image)
     }
 
     // Derived from https://github.com/servo/servo/issues/42258.
