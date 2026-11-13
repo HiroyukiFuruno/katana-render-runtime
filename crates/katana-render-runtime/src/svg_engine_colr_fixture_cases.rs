@@ -9,7 +9,7 @@ use skrifa::{
     color::ColorGlyphFormat,
     instance::{LocationRef, Size},
 };
-use std::{fs, sync::Arc};
+use std::{fs, path::Path, sync::Arc};
 
 #[path = "svg_engine_colr_radial_tests.rs"]
 mod radial_tests;
@@ -63,10 +63,17 @@ fn fixture_tree(
     glyph_id: u32,
     case: &str,
 ) -> Result<(usvg::Tree, Arc<usvg::fontdb::Database>), String> {
-    let path = fixture_path(STATIC_FONT);
-    let bytes = fs::read(&path).map_err(|error| error.to_string())?;
+    fixture_tree_at(&fixture_path(STATIC_FONT), glyph_id, case)
+}
+
+fn fixture_tree_at(
+    path: &Path,
+    glyph_id: u32,
+    case: &str,
+) -> Result<(usvg::Tree, Arc<usvg::fontdb::Database>), String> {
+    let bytes = fs::read(path).map_err(|error| error.to_string())?;
     let character = unicode_for_glyph(&bytes, glyph_id)?;
-    let database = fixture_font_database(&path)?;
+    let database = fixture_font_database(path)?;
     let svg = glyph_svg(&database, character, case)?;
     let tree = parse_fixture_svg(&svg, database.clone(), case)?;
     Ok((tree, database))

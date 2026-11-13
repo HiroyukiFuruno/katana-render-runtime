@@ -133,6 +133,25 @@ fn colr_roundtrip_rejects_a_missing_paint_semantic() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn colr_fixture_rejects_a_missing_or_damaged_font() -> Result<(), Box<dyn std::error::Error>> {
+    const GLYPH: u32 = 96;
+    const CASE: &str = "invalid-colr-fixture";
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("fixture.ttf");
+    let expected = std::fs::read(&path).err().ok_or("fixture exists")?;
+    assert_eq!(
+        super::fixture_tree_at(&path, GLYPH, CASE).err(),
+        Some(expected.to_string())
+    );
+    std::fs::write(&path, b"incomplete sfnt")?;
+    assert!(
+        super::fixture_tree_at(&path, GLYPH, CASE)
+            .is_err_and(|error| error.starts_with("invalid COLR font:"))
+    );
+    Ok(())
+}
+
 fn verify_cases(cases: impl Iterator<Item = PaintCase>) -> Result<(), String> {
     verify_static_font_manifest()?;
     for (glyph_id, semantic) in cases {
