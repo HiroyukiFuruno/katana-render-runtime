@@ -78,7 +78,10 @@ fn stale_macho_size_never_emits_a_partial_success_report() -> Result<(), String>
         .map_err(|error| error.to_string())?;
     let manifest = write_manifest(&folder, &[valid, stale])?;
     let stderr = assert_rejected_manifest(&manifest, "stale Mach-O size")?;
-    assert!(stderr.contains("input-file:size-or-type-changed"), "{stderr}");
+    assert!(
+        stderr.contains("input-file:size-or-type-changed"),
+        "{stderr}"
+    );
     Ok(())
 }
 

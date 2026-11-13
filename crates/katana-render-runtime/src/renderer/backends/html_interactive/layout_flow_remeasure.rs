@@ -73,7 +73,11 @@ impl HtmlLayoutRenderer {
     ) -> Result<Vec<FlowMeasurement>, String> {
         let mut measurements = Vec::with_capacity(nodes.len());
         for (node, item) in nodes.iter().zip(items) {
-            let width = tree.unrounded_layout(*node).size.width.max(MIN_LAYOUT_WIDTH);
+            let width = tree
+                .unrounded_layout(*node)
+                .size
+                .width
+                .max(MIN_LAYOUT_WIDTH);
             let height = self.measure_flow_item_height(
                 item,
                 width,

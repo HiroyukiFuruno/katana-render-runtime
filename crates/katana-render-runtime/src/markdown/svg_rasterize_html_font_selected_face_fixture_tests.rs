@@ -108,7 +108,10 @@ fn assert_real_font_copy_failure(
         .err()
         .ok_or("unexpected real-font copy success")?
         .to_string();
-    assert_eq!(write_real_fonts(&root).err().as_deref(), Some(expected.as_str()));
+    assert_eq!(
+        write_real_fonts(&root).err().as_deref(),
+        Some(expected.as_str())
+    );
     assert!(root.join("noto.ttf").is_file());
     if earlier_file == "arial.ttf" {
         assert!(root.join(earlier_file).is_file());
