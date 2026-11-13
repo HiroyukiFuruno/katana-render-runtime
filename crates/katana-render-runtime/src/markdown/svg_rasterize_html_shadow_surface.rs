@@ -7,14 +7,14 @@ use tiny_skia::{Pixmap, PixmapMut, PixmapPaint, Transform};
 mod tests;
 
 pub(super) fn apply_color_filter(
-    source: &Pixmap,
+    source: Pixmap,
     color_filter: skia_safe::ColorFilter,
 ) -> Result<Pixmap, String> {
     apply_filter_paint(source, None, Some(color_filter), "color-filter")
 }
 
 pub(super) fn apply_skia_shadow(
-    source: &Pixmap,
+    source: Pixmap,
     spec: ShadowSpec,
     transform: Transform,
     crop: Crop,
@@ -25,7 +25,7 @@ pub(super) fn apply_skia_shadow(
 }
 
 fn apply_filter_paint(
-    source: &Pixmap,
+    mut source: Pixmap,
     image_filter: Option<skia_safe::ImageFilter>,
     color_filter: Option<skia_safe::ColorFilter>,
     label: &str,
@@ -35,9 +35,9 @@ fn apply_filter_paint(
     let data = skia_safe::Data::new_copy(source.data());
     let image = skia_safe::images::raster_from_data(&info, data, info.min_row_bytes())
         .ok_or_else(|| format!("{label} source image creation failed"))?;
-    let mut filtered = Pixmap::new(source.width(), source.height())
-        .ok_or_else(|| format!("{label} result allocation failed"))?;
-    let mut surface = wrap_filter_surface(&info, filtered.data_mut())?;
+    /* WHY: Skia画像は元画素のコピーを保持する。出力には元の領域を透明に戻して使う。 */
+    source.data_mut().fill(0);
+    let mut surface = wrap_filter_surface(&info, source.data_mut())?;
     let mut paint = Paint::default();
     if let Some(filter) = image_filter {
         paint.set_image_filter(filter);
@@ -47,7 +47,7 @@ fn apply_filter_paint(
     }
     surface.canvas().draw_image(image, (0, 0), Some(&paint));
     drop(surface);
-    Ok(filtered)
+    Ok(source)
 }
 
 pub(super) fn make_skia_filter(

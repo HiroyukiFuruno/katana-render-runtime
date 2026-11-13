@@ -32,7 +32,7 @@ pub(super) fn render(
     };
     let source = render_source(group, child_transform, crop, provenance, text)?;
     let filter = skia_safe::color_filters::matrix_row_major(&spec.matrix, None);
-    let filtered = super::super::html_shadow::apply_color_filter(&source, filter)?;
+    let filtered = super::super::html_shadow::apply_color_filter(source, filter)?;
     super::super::html_shadow::copy_source_over(target, &filtered, crop.left, crop.top);
     Ok(true)
 }

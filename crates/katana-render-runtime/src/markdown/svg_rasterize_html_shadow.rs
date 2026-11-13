@@ -24,7 +24,7 @@ pub(super) type ShadowSourceRenderer<'a> =
 pub(super) struct HtmlShadowRasterizer;
 
 pub(super) fn apply_color_filter(
-    source: &tiny_skia::Pixmap,
+    source: tiny_skia::Pixmap,
     filter: skia_safe::ColorFilter,
 ) -> Result<tiny_skia::Pixmap, String> {
     surface::apply_color_filter(source, filter)
@@ -62,7 +62,7 @@ impl HtmlShadowRasterizer {
             return Ok(false);
         };
         let source_pixmap = render_source(crop, child_transform, source_renderer)?;
-        let filtered = surface::apply_skia_shadow(&source_pixmap, spec, child_transform, crop)?;
+        let filtered = surface::apply_skia_shadow(source_pixmap, spec, child_transform, crop)?;
         surface::copy_source_over(target, &filtered, crop.left, crop.top);
         Ok(true)
     }
