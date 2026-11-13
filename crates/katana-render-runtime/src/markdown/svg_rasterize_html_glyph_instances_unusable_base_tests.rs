@@ -35,3 +35,20 @@ fn readable_axes_without_a_renderable_base_do_not_create_a_variable_instance() -
     assert!(cache.instances.is_empty());
     Ok(())
 }
+
+#[test]
+fn variable_instance_rejects_invalid_size_before_caching_a_typeface() -> Result<(), String> {
+    const VARIABLE_FONT: &str =
+        "../../tests/fixtures/svg-engine/upstream/resvg/tests/fonts/RobotoFlex.subset.ttf";
+    let tree = super::fixture_tree(VARIABLE_FONT, Some("'wght' 700"), 'A')?;
+    let (_, span, id) = super::target_span(&tree)?;
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    assert!(rasterizer.face_file(id)?.is_some());
+    let error = rasterizer.variable_instance(span, id, 0.0).err();
+    assert_eq!(
+        error,
+        Some(format!("invalid variation font size for face {id:?}"))
+    );
+    assert!(rasterizer.variable_faces.borrow().instances.is_empty());
+    Ok(())
+}
