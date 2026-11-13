@@ -177,7 +177,49 @@ fn lazy_font_rejects_missing_ttc_offset_and_face_header() -> Result<(), Box<dyn 
 
     bytes.extend_from_slice(&u32::MAX.to_be_bytes());
     std::fs::write(&path, &bytes)?;
-    assert_lazy_directory_error(&path, ErrorKind::UnexpectedEof)
+    assert_lazy_directory_error(&path, ErrorKind::UnexpectedEof)?;
+
+    let mut header = SINGLE_FACE_TTC_HEADER.to_vec();
+    header[8..].copy_from_slice(&u32::MAX.to_be_bytes());
+    std::fs::write(&path, &header)?;
+    let expected = if usize::BITS == 32 {
+        ErrorKind::InvalidData
+    } else {
+        ErrorKind::UnexpectedEof
+    };
+    assert_lazy_directory_error(&path, expected)
+}
+
+#[test]
+fn lazy_font_rejects_invalid_sfnt_header_index_and_table_range()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("malformed.ttf");
+    std::fs::write(&path, EMBEDDED_FONT_BYTES)?;
+    let error = super::lazy_table::load(&path, 1)
+        .err()
+        .ok_or("non-TTC file accepted a second face")?;
+    assert_eq!(error.to_string(), "non-TTC face index out of range");
+    let mut bytes = EMBEDDED_FONT_BYTES.to_vec();
+    bytes[..4].copy_from_slice(b"fake");
+    assert_sfnt_error(&path, &bytes, "unsupported SFNT flavor")?;
+    bytes[..4].copy_from_slice(&EMBEDDED_FONT_BYTES[..4]);
+    bytes[20..24].copy_from_slice(&u32::MAX.to_be_bytes());
+    assert_sfnt_error(&path, &bytes, "invalid SFNT table directory")
+}
+
+fn assert_sfnt_error(
+    path: &Path,
+    bytes: &[u8],
+    expected: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::write(path, bytes)?;
+    let error = super::lazy_table::load(path, 0)
+        .err()
+        .ok_or("malformed SFNT directory accepted")?;
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert_eq!(error.to_string(), expected);
+    Ok(())
 }
 
 #[test]
