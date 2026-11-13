@@ -5,6 +5,70 @@ use crate::markdown::svg_rasterize::{
 use resvg::usvg;
 
 const DTD_SVG: &str = r#"<!DOCTYPE svg><svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="red"/></svg>"#;
+const DIAGNOSTIC_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"><text x="2" y="24" font-family="Noto Sans">ABC</text></svg>"#;
+
+#[test]
+fn stale_diagnostic_font_falls_back_to_the_normal_svg_tree()
+-> Result<(), Box<dyn std::error::Error>> {
+    use super::super::raster_observer;
+
+    let stale = stale_diagnostic_database()?;
+    let document = usvg::roxmltree::Document::parse(DIAGNOSTIC_SVG);
+    let text = decoded_ascii(&document).ok_or("expected ASCII fixture")?;
+    let expected = super::eager(DIAGNOSTIC_SVG, DIAGNOSTIC_SVG)?;
+    let observer = raster_observer::Scope::enter();
+    let options = super::diagnostic::prepare_file_options(stale, text);
+    let tree = super::parse_with_options(DIAGNOSTIC_SVG, DIAGNOSTIC_SVG, options)?;
+    let output = usvg::WriteOptions::default();
+    assert_eq!(tree.to_string(&output), expected.to_string(&output));
+    assert_stale_diagnostic_fallback(&observer.snapshot());
+    Ok(())
+}
+
+fn stale_diagnostic_database()
+-> Result<Option<super::super::discovery::KnownCacheValue>, Box<dyn std::error::Error>> {
+    use super::super::{lazy_diagnostic, proof::CreationProof};
+    use std::sync::Arc;
+
+    let directory = tempfile::tempdir()?;
+    let font_path = directory.path().join("font.ttf");
+    std::fs::write(
+        &font_path,
+        crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES,
+    )?;
+    let mut database = usvg::fontdb::Database::new();
+    let mut proof = CreationProof::default();
+    proof.load(
+        &mut database,
+        &[font_path.to_str().ok_or("invalid font path")?],
+    );
+    proof.capture_prefix(&database);
+    assert!(!database.is_empty() && proof.current(&database));
+    std::fs::remove_file(font_path)?;
+    let result =
+        lazy_diagnostic::validate_file_fixture_database(Arc::new(database), Arc::new(proof));
+    assert!(result.is_none());
+    Ok(result)
+}
+
+fn assert_stale_diagnostic_fallback(snapshot: &super::super::raster_observer::Snapshot) {
+    let events = &snapshot.events;
+    assert!(
+        events
+            .iter()
+            .any(|event| event["reason"] == "known_for_unavailable")
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| event["route"] == "eager_prepare_unavailable")
+    );
+    assert!(
+        events
+            .iter()
+            .all(|event| event["stage"] != "known_parse_attempt")
+    );
+}
 
 fn registered_provenance() -> GeneratedHtmlTextProvenance {
     let mut provenance = GeneratedHtmlTextProvenance::default();

@@ -11,6 +11,8 @@ mod routes;
 #[path = "svg_rasterize_html_font_lazy_diagnostic_sources.rs"]
 mod sources;
 use resvg::usvg::fontdb::{Database, ID};
+#[cfg(test)]
+pub(super) use routes::validate_file_fixture_database;
 pub(super) use routes::{file_fixture_database, record_selected_face, select_database};
 pub(super) use sources::FaceSource;
 use std::{

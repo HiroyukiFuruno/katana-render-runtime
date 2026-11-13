@@ -1,6 +1,10 @@
 use super::super::super::{html_text_provenance::ParsedHtmlDocument, text_shaping};
 use super::{HtmlFontRequest, discovery_cache, html_rasterizer_options};
 use resvg::usvg;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 #[path = "svg_rasterize_html_font_selected_face.rs"]
 mod selected_face;
 #[path = "svg_rasterize_html_font_lazy_selectors.rs"]
@@ -9,10 +13,6 @@ use selectors::{install, install_fallback, selector_admitted};
 #[path = "svg_rasterize_html_font_lazy_attempt.rs"]
 mod attempt;
 use attempt::known_tree;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
 
 #[cfg(test)]
 pub(in crate::markdown::svg_rasterize) fn parse(
@@ -26,7 +26,6 @@ fn parse_document<'input>(
     svg: &'input str,
     markup: &str,
 ) -> Result<(usvg::Tree, ParsedHtmlDocument<'input>), usvg::Error> {
-    /* WHY: 同じ入力の ASCII 判定と provenance 検証で XML 解析を共有し、失敗順序は変えない。 */
     let document = usvg::roxmltree::Document::parse(svg);
     let tree = parse_with_document(svg, markup, &document)?;
     Ok((tree, document))
@@ -37,7 +36,15 @@ fn parse_with_document(
     markup: &str,
     document: &ParsedHtmlDocument<'_>,
 ) -> Result<usvg::Tree, usvg::Error> {
-    let Some((options, valid, selected, context)) = prepare(document, markup) else {
+    parse_with_options(svg, markup, prepare(document, markup))
+}
+
+fn parse_with_options(
+    svg: &str,
+    markup: &str,
+    options: Option<KnownOptions>,
+) -> Result<usvg::Tree, usvg::Error> {
+    let Some((options, valid, selected, context)) = options else {
         #[cfg(test)]
         super::raster_observer::prepare_unavailable();
         return eager(svg, markup);
@@ -184,6 +191,7 @@ mod diagnostic {
         GeneratedClipProvenance, GeneratedHtmlTextProvenance, RasterizedSvg, SvgRasterizeError,
         SvgRasterizeOps,
     };
+    use super::super::discovery::KnownCacheValue;
     use super::super::{lazy_diagnostic, raster_observer};
     use super::{
         HtmlFontRequest, KnownOptions, ParsedHtmlDocument, install, parse_document, prepared_ascii,
@@ -227,9 +235,17 @@ mod diagnostic {
     ) -> Option<KnownOptions> {
         let request = HtmlFontRequest::from_markup(markup);
         let text = prepared_ascii(document)?;
-        let Some(value) = lazy_diagnostic::measure("file_fixture_database_build", || {
+        let value = lazy_diagnostic::measure("file_fixture_database_build", || {
             lazy_diagnostic::file_fixture_database(&request)
-        }) else {
+        });
+        prepare_file_options(value, text)
+    }
+
+    pub(super) fn prepare_file_options(
+        value: Option<KnownCacheValue>,
+        text: String,
+    ) -> Option<KnownOptions> {
+        let Some(value) = value else {
             raster_observer::prepare_known_unavailable();
             return None;
         };
