@@ -19,6 +19,38 @@ const OUTER_FILL_SAMPLE: (u32, u32) = (10, 10);
 const EVEN_ODD_HOLE_SAMPLE: (u32, u32) = (30, 30);
 
 #[test]
+fn path_paint_rejects_a_short_surface_before_changing_pixels() -> Result<(), String> {
+    const RGBA_BYTES: usize = 4;
+    let svg = svg_with_path(SQUARE_PATH, r#"fill="red""#);
+    let tree =
+        usvg::Tree::from_str(&svg, &usvg::Options::default()).map_err(|error| error.to_string())?;
+    let Some(usvg::Node::Path(node)) = tree.root().children().first() else {
+        return Err("SVG path fixture missing".into());
+    };
+    let prepared = super::prepare_path(node).ok_or("SVG path fixture unsupported")?;
+    let dimensions = (SIZE as i32, SIZE as i32);
+    let mut pixels = vec![0; SIZE as usize * SIZE as usize * RGBA_BYTES];
+    let short_len = pixels.len() - 1;
+    let paint = |bytes: &mut [u8]| {
+        super::paint_path_pixels(
+            dimensions,
+            bytes,
+            &prepared,
+            Transform::identity(),
+            node.paint_order(),
+        )
+    };
+    assert_eq!(
+        paint(&mut pixels[..short_len]).err().as_deref(),
+        Some("Skia SVG path surface creation failed")
+    );
+    assert!(pixels.iter().all(|&byte| byte == 0));
+    paint(&mut pixels)?;
+    assert!(pixels.iter().any(|&byte| byte != 0));
+    Ok(())
+}
+
+#[test]
 fn opaque_fill_rule_is_preserved_with_and_without_stroke() -> Result<(), String> {
     for attributes in [
         "fill=\"#ff0000\" fill-rule=\"evenodd\" stroke=\"#0000ff\" stroke-width=\"2\"",

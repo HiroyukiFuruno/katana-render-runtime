@@ -75,10 +75,20 @@ fn render_prepared_path(
     order: usvg::PaintOrder,
 ) -> Result<(), String> {
     let dimensions = (pixmap.width() as i32, pixmap.height() as i32);
+    paint_path_pixels(dimensions, pixmap.data_mut(), prepared, transform, order)
+}
+
+fn paint_path_pixels(
+    dimensions: (i32, i32),
+    pixels: &mut [u8],
+    prepared: &PreparedPath,
+    transform: Transform,
+    order: usvg::PaintOrder,
+) -> Result<(), String> {
     let info = ImageInfo::new(dimensions, ColorType::RGBA8888, AlphaType::Premul, None);
     let mut surface = super::super::render::wrap_skia_surface(
         &info,
-        pixmap.data_mut(),
+        pixels,
         "Skia SVG path surface creation failed",
     )?;
     let matrix = skia_matrix(transform);
