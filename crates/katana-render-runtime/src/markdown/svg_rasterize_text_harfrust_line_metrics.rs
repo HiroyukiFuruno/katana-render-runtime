@@ -1,5 +1,5 @@
 use super::super::super::measurement_diagnostic::{FaceMetricPhase, FaceMetricScope};
-use super::face_cache::{commit_file_font, font_for_face};
+use super::face_cache::{FontHandle, commit_file_font, font_for_face};
 use harfrust::font::{Font, Source, Tables};
 use read_fonts::{FontRef, ReadError, TableProvider};
 use resvg::usvg::fontdb::{Database, ID};
@@ -17,10 +17,7 @@ pub(in super::super) fn cached_face_line_metrics(
         return Ok(None);
     };
     let metrics = checked_metrics(database, id, &font, size);
-    if !commit_file_font(database, id, &font) {
-        return Err(());
-    }
-    Ok(metrics)
+    commit_metrics(database, id, &font, metrics)
 }
 
 pub(in super::super) fn diagnosed_cached_face_line_metrics(
@@ -39,12 +36,20 @@ pub(in super::super) fn diagnosed_cached_face_line_metrics(
     let metrics = detail.measure(FaceMetricPhase::Tables, || {
         checked_metrics(database, id, &font, size)
     });
-    if !detail.measure(FaceMetricPhase::Commit, || {
-        commit_file_font(database, id, &font)
-    }) {
-        return Err(());
-    }
-    Ok(metrics)
+    detail.measure(FaceMetricPhase::Commit, || {
+        commit_metrics(database, id, &font, metrics)
+    })
+}
+
+fn commit_metrics(
+    database: &Database,
+    id: ID,
+    font: &FontHandle,
+    metrics: Option<(f32, f32)>,
+) -> Result<Option<(f32, f32)>, ()> {
+    commit_file_font(database, id, font)
+        .then_some(metrics)
+        .ok_or(())
 }
 
 fn checked_metrics(database: &Database, id: ID, font: &Font, size: f32) -> Option<(f32, f32)> {
@@ -161,3 +166,7 @@ mod tests;
 #[cfg(test)]
 #[path = "svg_rasterize_text_harfrust_line_metrics_fastpath_tests.rs"]
 mod fastpath_tests;
+
+#[cfg(test)]
+#[path = "svg_rasterize_text_harfrust_line_metrics_commit_tests.rs"]
+mod commit_tests;
