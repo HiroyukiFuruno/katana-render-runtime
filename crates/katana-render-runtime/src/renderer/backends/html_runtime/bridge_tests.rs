@@ -199,6 +199,35 @@ fn ordinary_proxy_does_not_run_name_trap_during_classification() -> Result<(), S
 }
 
 #[test]
+fn invalid_native_marker_does_not_consume_the_pending_dom_error() -> Result<(), String> {
+    with_v8_context!(
+        isolate,
+        scope,
+        [],
+        [isolate.set_slot(HtmlDomBridgeState::new(HtmlDocument::parse("<p>Test</p>")));],
+        {
+            install_dom_bridge(scope, "about:blank").map_err(|error| error.to_string())?;
+            let error = evaluate_value(
+                scope,
+                "capture-native-marker",
+                "try { __krr_dom('unsupported'); } catch (error) { globalThis.savedError = error; } savedError;",
+            )
+            .map_err(|error| error.to_string())?;
+            let object = v8::Local::<v8::Object>::try_from(error)
+                .map_err(|_| "native exception is not an object")?;
+            let key = super::native_dom_error_key(scope).ok_or("native marker key missing")?;
+            let invalid = v8::Boolean::new(scope, true);
+            assert_eq!(object.set_private(scope, key, invalid.into()), Some(true));
+
+            let error = evaluate_value(scope, "throw-invalid-native-marker", "throw savedError;");
+            assert!(matches!(error, Err(HtmlRuntimeError::JavaScriptException(_))));
+            assert!(matches!(check_bridge_error(scope), Err(HtmlRuntimeError::DomBridge(_))));
+            Ok(())
+        }
+    )
+}
+
+#[test]
 fn rethrown_native_error_after_bridge_error_is_consumed_remains_javascript()
 -> Result<(), HtmlRuntimeError> {
     with_v8_context!(
