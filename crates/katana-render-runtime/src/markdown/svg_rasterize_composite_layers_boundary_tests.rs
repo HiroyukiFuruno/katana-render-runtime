@@ -92,6 +92,19 @@ fn clip_layer_integer_boundaries_fail_before_allocation() -> Result<(), String> 
 }
 
 #[test]
+fn canvas_geometry_rejects_dimensions_outside_signed_coordinates() {
+    let max_coordinate = i32::MAX as u32;
+    for (width, height) in [(1, max_coordinate), (max_coordinate, 1)] {
+        let bounds = super::canvas_rect(width, height);
+        assert!(bounds.is_ok_and(|rect| rect.width() == width && rect.height() == height));
+    }
+    for (width, height) in [(1, max_coordinate + 1), (max_coordinate + 1, 1)] {
+        let bounds = super::canvas_rect(width, height);
+        assert_eq!(bounds.err().as_deref(), Some("invalid SVG canvas bounds"));
+    }
+}
+
+#[test]
 fn clip_layer_edges_that_overflow_intrect_fail_before_allocation() -> Result<(), String> {
     let near_positive_limit = i32::MAX as f32 - 4096.0;
     assert_invalid_clip_bounds_cases(&[

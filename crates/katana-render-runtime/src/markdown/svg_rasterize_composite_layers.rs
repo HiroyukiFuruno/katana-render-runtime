@@ -140,9 +140,12 @@ pub(super) fn clipped_group_rect(
         .ok_or_else(|| "SVG clip layer height overflow".to_string())?;
     let layer = IntRect::from_xywh(x, y, width, height)
         .ok_or_else(|| "invalid SVG clip layer bounds".to_string())?;
-    let canvas = IntRect::from_xywh(0, 0, pixmap.width(), pixmap.height())
-        .ok_or_else(|| "invalid SVG canvas bounds".to_string())?;
+    let canvas = canvas_rect(pixmap.width(), pixmap.height())?;
     Ok(layer.intersect(&canvas))
+}
+
+fn canvas_rect(width: u32, height: u32) -> Result<IntRect, String> {
+    IntRect::from_xywh(0, 0, width, height).ok_or_else(|| "invalid SVG canvas bounds".to_owned())
 }
 
 fn crop_pixmap(pixmap: &tiny_skia::PixmapMut<'_>, crop: IntRect) -> Result<Pixmap, String> {
