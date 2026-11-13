@@ -29,13 +29,15 @@ class SourceReuseTest(unittest.TestCase):
     def test_parse5_cohort_requires_exact_pair_and_same_binary_scope(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         measured_head = reuse.SAME_BINARY_REVIEWED_BASE
+        parse5_update = "6d2e83a2458f6fd297972ecb82ee22d359a4eab1"
         eligible_head = "a" * 40
         names = ("package.json", "bun.lock", "Cargo.lock")
         old_bytes = {name: (b"cargo" if name == "Cargo.lock" else
                      subprocess.check_output(["git", "-C", str(repository), "show",
                                               measured_head + ":" + name])) for name in names}
-        new_bytes = {name: (b"cargo" if name == "Cargo.lock" else (repository / name).read_bytes())
-                     for name in names}
+        new_bytes = {name: (b"cargo" if name == "Cargo.lock" else
+                     subprocess.check_output(["git", "-C", str(repository), "show",
+                                              parse5_update + ":" + name])) for name in names}
         def record(value: bytes) -> tuple[str, int]:
             return hashlib.sha256(value).hexdigest(), len(value)
         measured = {name: record(value) for name, value in old_bytes.items()}
