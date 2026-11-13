@@ -1,6 +1,6 @@
 use super::super::raster_observer;
 use super::{
-    Arc, DatabaseKey, DiscoveryMode, HtmlFontRequest, html_font_cache, known_for,
+    Arc, CacheValue, DatabaseKey, DiscoveryMode, HtmlFontRequest, html_font_cache, known_for,
     measured_database, measured_known, usvg,
 };
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
@@ -10,6 +10,7 @@ use std::panic::{catch_unwind, resume_unwind};
 const CHILD_CASE: &str = "KRR_HTML_FONT_DISCOVERY_LOCK_TEST_CHILD";
 const CASE_NAME: &str = "markdown::svg_rasterize::font::html::discovery_cache::lock_tests::known_font_lookup_and_measurement_recover_from_poisoned_lock";
 const MISSING_PROOF_CASE: &str = "markdown::svg_rasterize::font::html::discovery_cache::lock_tests::known_cache_entry_without_proof_falls_back_to_eager_discovery";
+const FILE_METRICS_CASE: &str = "markdown::svg_rasterize::font::html::discovery_cache::lock_tests::html_input_and_baseline_recover_after_registered_font_damage";
 const FONT_FAMILY: &str = "Arial";
 const FONT_TEXT: &str = "ABC";
 const FONT_WEIGHT: u16 = 400;
@@ -98,4 +99,60 @@ fn cache_eager_value_under_known_key(
     /* WHY: 通常探索の実データが検証済みのキーに入っても、計測は未検証として扱う。 */
     cache.entries.push_back((known_key, eager));
     Ok(database)
+}
+
+#[test]
+fn html_input_and_baseline_recover_after_registered_font_damage()
+-> Result<(), Box<dyn std::error::Error>> {
+    if ProcessService::enter_isolated_test_child(CHILD_CASE, FILE_METRICS_CASE)? {
+        check_registered_font_metrics()?;
+    }
+    Ok(())
+}
+
+fn check_registered_font_metrics() -> Result<(), Box<dyn std::error::Error>> {
+    use crate::markdown::svg_rasterize::font_file_fixture::{FONT_BYTES, create};
+
+    let directory = tempfile::tempdir()?;
+    let fixture = create(directory.path().join("NotoSans-Regular.ttf"), FONT_BYTES)?;
+    let family = "Noto Sans";
+    let key = DatabaseKey::eager(HtmlFontRequest::from_text(family, "x0"));
+    let value = CacheValue {
+        database: Arc::new(fixture.database.clone()),
+        proof: None,
+    };
+    html_font_cache()
+        .lock()
+        .map_err(|error| error.to_string())?
+        .entries
+        .push_back((key, value));
+
+    std::fs::remove_file(&fixture.path)?;
+    assert_eq!(registered_font_metrics(family), (None, None));
+    std::fs::write(&fixture.path, b"invalid font")?;
+    assert_eq!(registered_font_metrics(family), (None, None));
+    std::fs::write(&fixture.path, FONT_BYTES)?;
+    let (baseline, input_width) = registered_font_metrics(family);
+    assert!(baseline.is_some_and(f32::is_finite));
+    assert!(input_width.is_some_and(|width| width.is_finite() && width > 0.0));
+    Ok(())
+}
+
+fn registered_font_metrics(family: &str) -> (Option<f32>, Option<f32>) {
+    const SIZE: f32 = 16.0;
+    const LINE_HEIGHT: f32 = 20.0;
+    const INPUT_SIZE: usize = 8;
+    let baseline = SvgRasterizeOps::html_text_baseline_for_text(
+        "",
+        family,
+        SIZE,
+        FONT_WEIGHT,
+        false,
+        LINE_HEIGHT,
+        false,
+    );
+    let input_width =
+        SvgRasterizeOps::html_input_character_metrics(family, SIZE, FONT_WEIGHT, false)
+            .map(|metrics| metrics.width_for_size(INPUT_SIZE));
+    (baseline, input_width)
 }
