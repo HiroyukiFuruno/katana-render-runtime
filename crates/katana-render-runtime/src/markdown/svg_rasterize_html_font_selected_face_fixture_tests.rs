@@ -78,6 +78,17 @@ fn absent_destination_preserves_the_file_write_error() -> Result<(), String> {
 }
 
 #[test]
+fn fixture_creation_rejects_a_file_as_the_temporary_parent() -> Result<(), String> {
+    let parent = tempfile::NamedTempFile::new().map_err(|error| error.to_string())?;
+    let error = Fixture::new_in(parent.path())
+        .err()
+        .ok_or("fixture creation accepted a file as a directory")?;
+    assert!(error.contains(parent.path().to_string_lossy().as_ref()));
+    assert!(parent.path().is_file());
+    Ok(())
+}
+
+#[test]
 fn failed_real_font_copy_preserves_error_and_tempdir_cleanup() -> Result<(), String> {
     for (destination, source, earlier_file) in [
         (

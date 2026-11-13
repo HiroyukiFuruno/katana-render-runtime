@@ -8,7 +8,7 @@ use resvg::usvg::{
     fontdb::{Database, FaceInfo, ID, Source},
 };
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Weak},
 };
 use tempfile::TempDir;
@@ -29,7 +29,11 @@ pub(super) struct Fixture {
 
 impl Fixture {
     pub(super) fn new() -> Result<Self, String> {
-        let tempdir = tempfile::tempdir().map_err(|error| error.to_string())?;
+        Self::new_in(&std::env::temp_dir())
+    }
+
+    fn new_in(parent: &Path) -> Result<Self, String> {
+        let tempdir = tempfile::tempdir_in(parent).map_err(|error| error.to_string())?;
         Self::load(tempdir.path().to_path_buf(), tempdir)
     }
 
