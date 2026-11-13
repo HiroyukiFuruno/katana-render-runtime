@@ -60,9 +60,13 @@ pub(super) fn shared_physical_font_fixture(
 
 impl TempDirectory {
     pub(super) fn new() -> Result<Self, String> {
+        Self::new_in(&std::env::temp_dir())
+    }
+
+    fn new_in(parent: &Path) -> Result<Self, String> {
         tempfile::Builder::new()
             .prefix("krr-chrome-font-identity-")
-            .tempdir()
+            .tempdir_in(parent)
             .map(Self)
             .map_err(|error| format!("create temp directory: {error}"))
     }

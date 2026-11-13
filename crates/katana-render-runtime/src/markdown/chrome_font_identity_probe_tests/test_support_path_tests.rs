@@ -10,6 +10,17 @@ use std::{ffi::OsString, fs};
 const CONDITION: &str = "non-utf8-path";
 
 #[test]
+fn temporary_probe_directory_rejects_a_file_as_parent() -> Result<(), String> {
+    let parent = tempfile::NamedTempFile::new().map_err(|error| error.to_string())?;
+    let error = TempDirectory::new_in(parent.path())
+        .err()
+        .ok_or("temporary probe directory accepted a file as parent")?;
+    assert!(error.starts_with("create temp directory:"));
+    assert!(parent.path().is_file());
+    Ok(())
+}
+
+#[test]
 fn physical_font_fixture_rejects_a_directory_and_an_unparseable_font() -> Result<(), String> {
     let temp = TempDirectory::new()?;
     let path = temp.path().join("malformed.ttf");
