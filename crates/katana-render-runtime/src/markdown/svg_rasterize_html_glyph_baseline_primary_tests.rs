@@ -123,8 +123,16 @@ fn assert_primary_face_boundary(
 }
 
 #[test]
-fn middle_baseline_declines_unsupported_variable_color_face() -> Result<(), String> {
-    let (tree, id) = variable_color_middle_tree()?;
+fn variable_color_face_does_not_apply_an_unavailable_primary_baseline_shift() -> Result<(), String>
+{
+    for baseline in ["middle", "central", "hanging"] {
+        assert_unsupported_variable_color_baseline(baseline)?;
+    }
+    Ok(())
+}
+
+fn assert_unsupported_variable_color_baseline(baseline: &str) -> Result<(), String> {
+    let (tree, id) = variable_color_baseline_tree(baseline)?;
     let Some(usvg::Node::Text(text)) = tree.node_by_id("run") else {
         return Err("color text missing".into());
     };
@@ -132,11 +140,18 @@ fn middle_baseline_declines_unsupported_variable_color_face() -> Result<(), Stri
     let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
     assert!(rasterizer.face_metadata(id)?.unsupported);
     assert!(rasterizer.primary_variable_face(text, id)?.is_none());
-    assert!(super::resolved_policy(&rasterizer, text)?.is_none());
+    let policy = super::resolved_policy(&rasterizer, text)?;
+    if baseline == "central" {
+        let policy = policy.ok_or("central baseline policy missing")?;
+        assert_eq!(policy.kind, super::super::PolicyKind::Central);
+        assert_eq!(policy.primary_shift, None);
+    } else {
+        assert!(policy.is_none(), "{baseline}");
+    }
     Ok(())
 }
 
-fn variable_color_middle_tree() -> Result<(usvg::Tree, usvg::fontdb::ID), String> {
+fn variable_color_baseline_tree(baseline: &str) -> Result<(usvg::Tree, usvg::fontdb::ID), String> {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/fixtures/svg-engine/colr-public-fonts/colr_1_variable.ttf");
     let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
@@ -152,7 +167,7 @@ fn variable_color_middle_tree() -> Result<(usvg::Tree, usvg::fontdb::ID), String
         .ok_or("color family missing")?
         .0;
     let svg = format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg"><text id="run" x="0" y="20" dy="1" font-family="{family}" font-size="20" dominant-baseline="middle" font-variation-settings="'SWPS' 10">{character}</text></svg>"#
+        r#"<svg xmlns="http://www.w3.org/2000/svg"><text id="run" x="0" y="20" dy="1" font-family="{family}" font-size="20" dominant-baseline="{baseline}" font-variation-settings="'SWPS' 10">{character}</text></svg>"#
     );
     let tree = usvg::Tree::from_str(
         &svg,
