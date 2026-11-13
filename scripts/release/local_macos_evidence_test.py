@@ -129,6 +129,7 @@ def collector_binding_patches() -> AbstractContextManager[object]:
         EVIDENCE,
         download_trusted_just=Mock(return_value=fake_just),
         download_trusted_bun=Mock(return_value=fake_bun),
+        download_trusted_nextest=Mock(return_value=Path("/fixture/cargo-nextest")),
         command_binding=Mock(return_value=EVIDENCE.CommandBinding(
             "/bin", {}, {}, RUST_COMPONENT_DIGESTS, fixture_host_tool_proof(),
         )),
@@ -416,9 +417,10 @@ def valid_comment() -> dict[str, object]:
                         BUN_BINARY_SHA256 if name == "bun"
                         else fixture_host_tool_proof().graphviz_files[fixture_host_tool_proof().dot_path].value if name == "dot"
                         else fixture_host_tool_proof().java_files["bin/java"].value if name == "java"
+                        else EVIDENCE.NEXTEST_BINARY_SHA256 if name == "cargo-nextest"
                         else RUST_EXECUTABLE_DIGESTS.get(name, "c" * 64),
                     ]
-                    for name in ("just", "cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt", "bun", "dot", "bash", "python3", "java", "git", "source_git", "sw_vers", "uname")
+                    for name in ("just", "cargo", "cargo-nextest", "rustc", "cargo-clippy", "clippy-driver", "rustfmt", "bun", "dot", "bash", "python3", "java", "git", "source_git", "sw_vers", "uname")
                 },
                 "rust_components": RUST_COMPONENT_DIGESTS,
                 "host_tool_provenance": EVIDENCE.TOOL_PROVENANCE.serialized_host_tool_proof(fixture_host_tool_proof()),
@@ -490,6 +492,19 @@ def snapshots(
 
 
 class LocalMacosEvidenceTest(unittest.TestCase):
+    def test_nextest_binding_is_required_and_official(self) -> None:
+        payload = json.loads(comment_body(valid_comment()).split("\n", 1)[1])
+        tools = payload["tools"]
+        binding = json.loads(tools["command_binding"])
+        for replacement in (None, "0" * 64):
+            modified = json.loads(json.dumps(binding))
+            if replacement is None:
+                del modified["executables"]["cargo-nextest"]
+            else:
+                modified["executables"]["cargo-nextest"][1] = replacement
+            with self.subTest(replacement=replacement), self.assertRaises(EVIDENCE.EvidenceError):
+                EVIDENCE.validate_pinned_tools({**tools, "command_binding": json.dumps(modified)})
+
     def setUp(self) -> None:
         patcher = patch.object(EVIDENCE, "fetch_stable_manifest_versions", return_value=STABLE_RUST)
         patcher.start()
@@ -550,6 +565,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                     side_effect=[{"PATH": "/bin"}, {"PATH": "/bin"}],
                 ),
                 patch.object(EVIDENCE, "download_trusted_just", return_value=just),
+                patch.object(EVIDENCE, "download_trusted_nextest", return_value=Path("/fixture/cargo-nextest")),
                 patch.object(
                     EVIDENCE, "download_trusted_bun", return_value=fixture_bun_binding(),
                 ),
@@ -575,7 +591,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             ))
             command_binding_mock.assert_called_once_with(
                 {"PATH": "/bin"}, just, BUN_BINARY_SHA256, fixture_rust_proof(),
-                fixture_host_tool_proof(),
+                fixture_host_tool_proof(), Path("/fixture/cargo-nextest"),
             )
 
     def test_accepts_current_owner_proof_bound_to_base_head_workflow_and_full_scope(self) -> None:
@@ -2283,6 +2299,12 @@ class TrustedJustTest(unittest.TestCase):
                 fixture_host_tool_proof().identities,
                 str(dot_path),
             )
+            nextest_path = root / "cargo-nextest"
+            nextest_path.write_bytes(b"nextest fixture")
+            nextest_path.chmod(0o755)
+            nextest_patcher = patch.object(EVIDENCE, "NEXTEST_BINARY_SHA256", EVIDENCE.sha256_bytes(nextest_path.read_bytes()))
+            nextest_patcher.start()
+            self.addCleanup(nextest_patcher.stop)
             parent_environment = {"RUSTUP_HOME": str(rustup_home), "PATH": str(brew_bin)}
             python_tool = root / "python/bin/python3"
             python_tool.parent.mkdir(parents=True)
@@ -2350,12 +2372,12 @@ class TrustedJustTest(unittest.TestCase):
 
             with command_binding_patches(account, homebrew, java_root, select_executable, select_java_home):
                 with self.assertRaises(EVIDENCE.EvidenceError):
-                    EVIDENCE.command_binding(parent_environment, just, BUN_BINARY_SHA256, rust_proof, host_proof)
+                    EVIDENCE.command_binding(parent_environment, just, BUN_BINARY_SHA256, rust_proof, host_proof, nextest_path)
                 self.assertFalse(install_marker.exists(), "an unauthenticated Homebrew bootstrap must not run")
                 shutil.rmtree(just_dir.parent / "trusted-commands")
                 dot_path.write_bytes(official_dot)
                 dot_path.chmod(0o755)
-                binding = EVIDENCE.command_binding(parent_environment, just, BUN_BINARY_SHA256, rust_proof, host_proof)
+                binding = EVIDENCE.command_binding(parent_environment, just, BUN_BINARY_SHA256, rust_proof, host_proof, nextest_path)
                 graphviz_library.write_bytes(b"tampered-graphviz-library")
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "authenticated artifact"):
                     EVIDENCE.assert_command_binding(binding, just)
@@ -2384,7 +2406,7 @@ class TrustedJustTest(unittest.TestCase):
                     just.asset_url, just.asset_sha256, just.binary_sha256,
                 )
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "official Bun release"):
-                    EVIDENCE.command_binding(parent_environment, alternate_just, BUN_BINARY_SHA256, rust_proof, fixture_host_tool_proof())
+                    EVIDENCE.command_binding(parent_environment, alternate_just, BUN_BINARY_SHA256, rust_proof, fixture_host_tool_proof(), nextest_path)
                 (brew_bin / "bun").write_bytes(BUN_BINARY)
                 wrapper_version = original_run(
                     (str(brew_bin / "bun"), "--version"), capture_output=True, text=True, check=False,
@@ -2465,7 +2487,7 @@ class TrustedJustTest(unittest.TestCase):
             with command_binding_patches(account, homebrew, java_root, select_executable, select_java_home):
                 with self.assertRaises(EVIDENCE.EvidenceError):
                     EVIDENCE.command_binding(
-                        parent_environment, provisioned_just, BUN_BINARY_SHA256, rust_proof, host_proof,
+                        parent_environment, provisioned_just, BUN_BINARY_SHA256, rust_proof, host_proof, nextest_path,
                     )
             self.assertFalse(install_marker.exists(), "missing Graphviz must not run Homebrew")
 
@@ -2476,7 +2498,7 @@ class TrustedJustTest(unittest.TestCase):
             invalid_just = fixture_just("invalid-dot-inputs")
             with command_binding_patches(account, homebrew, java_root, select_executable, select_java_home):
                 with self.assertRaises(EVIDENCE.EvidenceError):
-                    EVIDENCE.command_binding(parent_environment, invalid_just, BUN_BINARY_SHA256, rust_proof, host_proof)
+                    EVIDENCE.command_binding(parent_environment, invalid_just, BUN_BINARY_SHA256, rust_proof, host_proof, nextest_path)
             self.assertFalse(install_marker.exists())
 
             dot_path.unlink()
@@ -2484,7 +2506,7 @@ class TrustedJustTest(unittest.TestCase):
             broken_just = fixture_just("broken-dot-inputs")
             with command_binding_patches(account, homebrew, java_root, select_executable, select_java_home):
                 with self.assertRaises(EVIDENCE.EvidenceError):
-                    EVIDENCE.command_binding(parent_environment, broken_just, BUN_BINARY_SHA256, rust_proof, host_proof)
+                    EVIDENCE.command_binding(parent_environment, broken_just, BUN_BINARY_SHA256, rust_proof, host_proof, nextest_path)
             self.assertFalse(install_marker.exists())
 
             self.assertFalse(install_marker.exists())
