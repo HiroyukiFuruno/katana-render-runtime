@@ -48,6 +48,32 @@ fn clipped_group_rejects_empty_transforms_and_off_canvas_layers() -> Result<(), 
 }
 
 #[test]
+fn clipped_group_rejects_tile_origin_overflow_without_painting() -> Result<(), String> {
+    let tree = parse(NESTED_CLIP)?;
+    let group = layer(&tree)?;
+    let clip = group.clip_path().ok_or("nested clip fixture is missing")?;
+    let transform = Transform::from_translate(8.0, 9.0);
+    let mut pixmap = canvas()?;
+    let before = pixmap.data().to_vec();
+    for origin in [(i32::MAX, 0), (0, i32::MAX)] {
+        let result = super::render_group_with_viewport_clip(
+            group,
+            (Some(clip), transform),
+            &mut pixmap.as_mut(),
+            &AuthoredClipInfo::default(),
+            None,
+            Some(super::super::TileContext {
+                origin,
+                frame: (SIZE as i32, SIZE),
+            }),
+        );
+        assert_eq!(result.err().as_deref(), Some("SVG crop origin overflow"));
+        assert_eq!(pixmap.data(), before);
+    }
+    Ok(())
+}
+
+#[test]
 fn clip_layer_integer_boundaries_fail_before_allocation() -> Result<(), String> {
     /* WHY: i32端でもf32の矩形幅を保ち、整数paddingのoverflowをallocation前に検証する。 */
     let oversized = u32::MAX as f32 / 4096.0;
