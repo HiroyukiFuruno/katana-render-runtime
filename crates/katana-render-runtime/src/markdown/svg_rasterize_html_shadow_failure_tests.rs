@@ -60,6 +60,25 @@ fn overflowing_object_bbox_shadow_offset_is_rejected_before_paint() -> Result<()
 }
 
 #[test]
+fn scaling_finite_shadow_parameters_past_float_range_is_rejected_before_paint() -> Result<(), String>
+{
+    for (original, overflow) in [
+        (r#"dx="4""#, r#"dx="1e38""#),
+        (r#"stdDeviation="0""#, r#"stdDeviation="1e38 0""#),
+    ] {
+        let svg = SRGB_SVG.replace(original, overflow);
+        let tree = parse_shadow_svg(&svg)?;
+        assert!(super::super::geometry::shadow_spec(find_group(&tree)?)?.is_some());
+        assert_shadow_error_before_paint(
+            &svg,
+            Transform::from_scale(4.0, 1.0),
+            "drop-shadow scaled parameters are non-finite",
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
 fn overflowing_source_bounds_are_rejected_before_paint() -> Result<(), String> {
     assert_shadow_error_before_paint(
         SRGB_SVG,

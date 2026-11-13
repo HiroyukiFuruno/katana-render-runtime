@@ -55,12 +55,21 @@ pub(super) fn make_skia_filter(
     transform: Transform,
     dimensions: Option<(i32, i32)>,
 ) -> Result<skia_safe::ImageFilter, String> {
+    let offset = (spec.dx * transform.sx, spec.dy * transform.sy);
+    let sigma = (spec.sigma_x * transform.sx, spec.sigma_y * transform.sy);
+    /* WHY: Skiaの合成フィルターは無効な子の生成に失敗しても、残りのグラフを返し得る。 */
+    if [offset.0, offset.1, sigma.0, sigma.1]
+        .iter()
+        .any(|value| !value.is_finite())
+    {
+        return Err("drop-shadow scaled parameters are non-finite".to_owned());
+    }
     let crop = dimensions
         .map(|(width, height)| SkRect::from_xywh(0.0, 0.0, width as f32, height as f32))
         .map(skia_safe::image_filters::CropRect::from);
     skia_safe::image_filters::drop_shadow(
-        (spec.dx * transform.sx, spec.dy * transform.sy),
-        (spec.sigma_x * transform.sx, spec.sigma_y * transform.sy),
+        offset,
+        sigma,
         spec.color,
         skia_safe::ColorSpace::new_srgb(),
         None,
