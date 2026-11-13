@@ -112,6 +112,10 @@ impl RuntimeResourceLoader {
                 ));
             }
         };
+        Self::bundled_script_text(source)
+    }
+
+    fn bundled_script_text(source: &[u8]) -> std::io::Result<&str> {
         std::str::from_utf8(source)
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
     }

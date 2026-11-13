@@ -30,6 +30,14 @@ fn bundled_resources_share_the_same_immutable_source() -> std::io::Result<()> {
 }
 
 #[test]
+fn bundled_script_text_rejects_invalid_utf8() {
+    assert!(
+        RuntimeResourceLoader::bundled_script_text(&INVALID_UTF8)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidData)
+    );
+}
+
+#[test]
 fn external_resources_reflect_replacement_removal_and_invalid_utf8() -> std::io::Result<()> {
     let dir = tempfile::tempdir()?;
     for extension in ["js", "svg", "xml"] {

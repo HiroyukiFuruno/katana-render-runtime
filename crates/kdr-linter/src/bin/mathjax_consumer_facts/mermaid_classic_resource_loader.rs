@@ -7,17 +7,27 @@ const ERROR: &str = "mermaid-resource-route";
 pub(super) fn inspect(source: &Source) -> Result<(), String> {
     let read =
         super::super::call_binding::ResourceLoaderGuard::require_resource_loader(&source.ast)?;
-    inspect_read(read)
+    inspect_read(read)?;
+    let decode =
+        super::super::source::method(&source.ast, "RuntimeResourceLoader", "bundled_script_text")?;
+    super::scripts::parameters(&decode.sig, &["source"])?;
+    let [syn::Stmt::Expr(tail, None)] = decode.block.stmts.as_slice() else {
+        return Err(format!("{ERROR}:utf8"));
+    };
+    inspect_utf8(tail)
 }
 
 fn inspect_read(verified: super::super::bundle::ValidatedResourceRead<'_>) -> Result<(), String> {
     super::scripts::parameters(&verified.read.sig, &["path", "bundled"])?;
     super::scripts::parameters(&verified.bundled_read.sig, &["bundled"])?;
     inspect_bundled(verified.bundled)?;
-    inspect_external(
-        verified.external,
-        verified.external_map,
-        super::tail(&verified.bundled_read.block)?,
+    let bundled_tail = super::tail(&verified.bundled_read.block)?;
+    inspect_external(verified.external, verified.external_map)?;
+    require_direct_call(
+        bundled_tail,
+        "Self::bundled_script_text",
+        &["source"],
+        ERROR,
     )
 }
 
@@ -32,19 +42,14 @@ fn inspect_bundled(first: &syn::Arm) -> Result<(), String> {
     Ok(())
 }
 
-fn inspect_external(
-    arm: &syn::Arm,
-    mapped: &syn::ExprMethodCall,
-    tail: &Expr,
-) -> Result<(), String> {
+fn inspect_external(arm: &syn::Arm, mapped: &syn::ExprMethodCall) -> Result<(), String> {
     if !matches!(&arm.pat, syn::Pat::Ident(value)
         if value.ident == "None" && value.by_ref.is_none() && value.mutability.is_none()
             && value.subpat.is_none())
     {
         return Err(format!("{ERROR}:external"));
     }
-    require_direct_call(&mapped.receiver, "Self::read_file", &["path"], ERROR)?;
-    inspect_utf8(tail)
+    require_direct_call(&mapped.receiver, "Self::read_file", &["path"], ERROR)
 }
 
 fn inspect_utf8(tail: &Expr) -> Result<(), String> {
