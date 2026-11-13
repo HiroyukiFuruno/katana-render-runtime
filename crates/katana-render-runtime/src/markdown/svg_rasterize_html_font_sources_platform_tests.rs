@@ -75,6 +75,26 @@ fn coretext_interface_family_selects_w4_regular_and_w6_bold() -> Result<(), Stri
 
 #[cfg(target_os = "macos")]
 #[test]
+fn coretext_interface_identity_rejects_a_font_without_a_file_url() -> Result<(), String> {
+    use core_foundation::base::TCFType;
+    use core_graphics::{data_provider::CGDataProvider, font::CGFont};
+    use objc2_core_text::CTFont;
+    use std::sync::Arc;
+
+    let data = CGDataProvider::from_buffer(Arc::new(BUNDLED_SANS_SERIF_FONT.to_vec()));
+    let graphics = CGFont::from_data_provider(data).map_err(|_| "CGFont creation failed")?;
+    let font = core_text::font::new_from_CGFont(&graphics, 12.0);
+    /* WHY: CTFontの所有者が生存する間だけ、同じCoreTextオブジェクトを借用する。 */
+    let font = unsafe { &*font.as_concrete_TypeRef().cast::<CTFont>() };
+    let descriptor = unsafe { font.font_descriptor() };
+    assert!(unsafe { descriptor.attribute(objc2_core_text::kCTFontNameAttribute) }.is_some());
+    assert!(unsafe { descriptor.attribute(objc2_core_text::kCTFontURLAttribute) }.is_none());
+    assert!(super::interface_bold::coretext_face_identity(font).is_none());
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn known_system_ui_database_binds_bold_alias_to_coretext_physical_face() -> Result<(), String> {
     use crate::markdown::svg_rasterize::font::HtmlFontRequest;
 
