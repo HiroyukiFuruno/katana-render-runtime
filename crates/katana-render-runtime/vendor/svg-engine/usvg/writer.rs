@@ -843,6 +843,7 @@ fn write_text_path_definition(text_path: &TextPath, opt: &WriteOptions, xml: &mu
     xml.start_svg_element(EId::Path);
     xml.write_id_attribute(text_path.id(), opt);
     xml.write_svg_attribute(AId::Fill, "none");
+    xml.write_svg_attribute(AId::Stroke, "none");
     write_path_data(text_path.path(), opt, xml);
     xml.end_element();
 }
