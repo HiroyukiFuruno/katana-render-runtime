@@ -88,7 +88,7 @@ fn input_path(value: &str, unique: &mut BTreeSet<PathBuf>) -> Result<PathBuf, St
 }
 
 fn inspect_file(path: PathBuf, expected_size: u64, expected_sha256: &str) -> Result<Value, String> {
-    let before = fs::metadata(&path).map_err(|error| error.to_string())?;
+    let before = read_metadata(&path)?;
     if !before.is_file() || before.len() != expected_size {
         return Err("input-file:size-or-type-changed".into());
     }
@@ -112,7 +112,7 @@ fn validate_read_at_path(
     bytes_read: usize,
     expected_size: u64,
 ) -> Result<(), String> {
-    let after = fs::metadata(path).map_err(|error| error.to_string())?;
+    let after = read_metadata(path)?;
     validate_read(before, &after, bytes_read, expected_size)
 }
 
@@ -141,14 +141,14 @@ fn exact_keys(value: &Value, expected: &[&str], label: &str) -> Result<(), Strin
 
 fn canonical_file(path: &Path) -> Result<PathBuf, String> {
     let canonical = path.canonicalize().map_err(|error| error.to_string())?;
-    if canonical != path
-        || !fs::metadata(path)
-            .map_err(|error| error.to_string())?
-            .is_file()
-    {
+    if canonical != path || !read_metadata(path)?.is_file() {
         return Err("path is not a canonical regular file".into());
     }
     Ok(canonical)
+}
+
+fn read_metadata(path: &Path) -> Result<fs::Metadata, String> {
+    fs::metadata(path).map_err(|error| error.to_string())
 }
 
 fn sha256(bytes: &[u8]) -> String {
