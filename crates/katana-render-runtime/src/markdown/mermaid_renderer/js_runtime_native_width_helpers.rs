@@ -4,6 +4,7 @@ use super::super::super::{
 use crate::markdown::diagram_js_runtime::{DiagramRuntimeScript, DiagramV8Runtime};
 use crate::markdown::runtime_resource_loader::{BundledResource, RuntimeResourceLoader};
 use serde_json::Value;
+use std::path::Path;
 
 pub(super) struct MeasurementFixture {
     pub(super) calls: Vec<Value>,
@@ -21,10 +22,22 @@ fn render_fixture_with_targets(
     source: &str,
     targets: &[(&str, &str)],
 ) -> Result<MeasurementFixture, String> {
-    let bundle = RuntimeResourceLoader::read_bundled(BundledResource::Mermaid)
-        .map_err(|error| format!("Failed to read Mermaid.js bundle: {error}"))?;
+    render_fixture_from_bundle(source, targets, None)
+}
+
+fn render_fixture_from_bundle(
+    source: &str,
+    targets: &[(&str, &str)],
+    external_bundle: Option<&Path>,
+) -> Result<MeasurementFixture, String> {
+    let bundle = match external_bundle {
+        Some(path) => RuntimeResourceLoader::load(path, None),
+        None => RuntimeResourceLoader::load(Path::new(""), Some(BundledResource::Mermaid)),
+    }
+    .map_err(|error| format!("Failed to read Mermaid.js bundle: {error}"))?;
     let diagram = MermaidDiagramType::from_source(source);
-    let mut scripts = MermaidRuntimeScripts::build(bundle, &request(source, diagram), diagram);
+    let mut scripts =
+        MermaidRuntimeScripts::build(bundle.text(), &request(source, diagram), diagram);
     install_trace(&mut scripts, targets)?;
     scripts.push(DiagramRuntimeScript::owned(
         "native-width-result.js",

@@ -1,4 +1,4 @@
-use super::{decode_fixture, install_trace, render_fixture};
+use super::{decode_fixture, install_trace, render_fixture, render_fixture_from_bundle};
 use crate::markdown::diagram_js_runtime::DiagramRuntimeScript;
 use serde_json::{Value, json};
 
@@ -13,6 +13,27 @@ const REQUIRED_ARRAYS: &[(&str, &str)] = &[
         "C4 description observations are missing",
     ),
 ];
+
+#[test]
+fn native_width_fixture_reports_an_unreadable_bundle_before_rendering()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = tempfile::tempdir()?;
+    let bundle = fixture.path().join("mermaid.js");
+    let source = "flowchart LR\n A --> B";
+    for bytes in [None, Some([0xff])] {
+        if let Some(bytes) = bytes {
+            std::fs::write(&bundle, bytes)?;
+        }
+        let error = render_fixture_from_bundle(source, &[], Some(&bundle))
+            .err()
+            .ok_or("unreadable Mermaid bundle accepted")?;
+        assert!(
+            error.starts_with("Failed to read Mermaid.js bundle: "),
+            "{error}"
+        );
+    }
+    Ok(())
+}
 
 #[test]
 fn native_width_fixture_propagates_the_real_mermaid_parse_error() -> Result<(), String> {
