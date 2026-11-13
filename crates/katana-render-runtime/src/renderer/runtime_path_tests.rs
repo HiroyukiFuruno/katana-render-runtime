@@ -20,6 +20,31 @@ fn explicit_runtime_path_wins_at_surface_boundary() -> Result<(), Box<dyn std::e
 }
 
 #[test]
+fn explicit_invalid_utf8_runtime_reports_bundle_read_failure()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("invalid.js");
+    std::fs::write(&path, [0xff])?;
+    for (kind, source, expected) in [
+        (
+            DiagramKind::Mermaid,
+            "graph TD; A-->B",
+            "Failed to read Mermaid.js bundle",
+        ),
+        (
+            DiagramKind::Drawio,
+            "<mxGraphModel/>",
+            "Failed to read Draw.io JavaScript bundle",
+        ),
+    ] {
+        let (_, renderer) = RuntimePathResolver::resolve_renderer(kind, Some(path.clone()), None)?;
+        assert!(matches!(renderer.render(&renderer_input(kind, source)),
+            Err(RenderError::Runtime(message)) if message.starts_with(expected)));
+    }
+    Ok(())
+}
+
+#[test]
 fn plantuml_cache_dir_can_be_overridden_at_api_boundary() -> Result<(), Box<dyn std::error::Error>>
 {
     let kind = DiagramKind::PlantUml;
