@@ -1,8 +1,7 @@
 use super::{custom, fixture, local, mixed_empty, response_reuse, unknown};
 use crate::markdown::chrome_font_identity_probe_tests::test_support::{
-    TempDirectory, run_ignored_test,
+    TempDirectory, probe_command, run_ignored_test,
 };
-use crate::system::ProcessService;
 use std::{path::Path, process::Output};
 
 pub(in super::super) fn ignored_probe_cli_writes_strict_response_file_and_refuses_reuse()
@@ -108,9 +107,7 @@ fn run_probe_with_optional_paths(
     request: Option<&Path>,
     response: Option<&Path>,
 ) -> Result<Output, String> {
-    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-    let mut command = ProcessService::create_command(executable);
-    command.args(["--ignored", "--exact", super::PROBE_TEST, "--nocapture"]);
+    let mut command = probe_command(super::PROBE_TEST)?;
     for (name, path) in [
         ("KRR_CHROME_FONT_IDENTITY_REQUEST", request),
         ("KRR_CHROME_FONT_IDENTITY_OUTPUT", response),

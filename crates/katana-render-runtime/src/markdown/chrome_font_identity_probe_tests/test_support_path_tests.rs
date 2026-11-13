@@ -10,6 +10,23 @@ use std::{ffi::OsString, fs};
 const CONDITION: &str = "non-utf8-path";
 
 #[test]
+fn probe_command_preserves_executable_resolution_failure() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let unresolved = temp.path().join("missing-probe").canonicalize();
+    let expected = unresolved
+        .as_ref()
+        .err()
+        .ok_or("missing probe executable resolved")?;
+    assert_eq!(expected.kind(), std::io::ErrorKind::NotFound);
+    let expected = format!("resolve current test executable: {expected}");
+    assert_eq!(
+        super::probe_command_for_executable(unresolved, super::PROBE_TEST).err(),
+        Some(expected)
+    );
+    Ok(())
+}
+
+#[test]
 fn temporary_probe_directory_rejects_a_file_as_parent() -> Result<(), String> {
     let parent = tempfile::NamedTempFile::new().map_err(|error| error.to_string())?;
     let error = TempDirectory::new_in(parent.path())

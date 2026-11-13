@@ -1,5 +1,5 @@
 use super::super::test_support::{
-    PROBE_TEST, TempDirectory, physical_font_fixture, read_response, run_probe_child,
+    PROBE_TEST, TempDirectory, physical_font_fixture, probe_command, read_response, run_probe_child,
 };
 use super::super::{
     CaptureRequest, CaptureResult, ProbeRequest, ProbeResponse, REQUEST_SCHEMA, RESPONSE_SCHEMA,
@@ -27,17 +27,13 @@ fn request() -> ProbeRequest {
 
 #[test]
 fn font_probe_child_rejects_relative_response_paths() -> Result<(), String> {
-    use crate::system::ProcessService;
-
     let temp = TempDirectory::new()?;
     let request_path = temp.path().join("request.json");
     let output_path = "relative-response.json";
     let bytes = serde_json::to_vec(&request()).map_err(|error| error.to_string())?;
     fs::write(&request_path, bytes).map_err(|error| error.to_string())?;
-    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-    let result = ProcessService::create_command(executable)
+    let result = probe_command(PROBE_TEST)?
         .current_dir(temp.path())
-        .args(["--ignored", "--exact", PROBE_TEST, "--nocapture"])
         .env("KRR_CHROME_FONT_IDENTITY_REQUEST", request_path)
         .env("KRR_CHROME_FONT_IDENTITY_OUTPUT", output_path)
         .output()

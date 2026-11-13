@@ -4,7 +4,13 @@ use super::{
 };
 use crate::system::ProcessService;
 use resvg::usvg::fontdb::{Database, Source};
-use std::{fs, io::Write, path::Path, process::Output, sync::Arc};
+use std::{
+    fs,
+    io::{self, Write},
+    path::{Path, PathBuf},
+    process::{Command, Output},
+    sync::Arc,
+};
 
 pub(super) const PROBE_TEST: &str =
     "markdown::chrome_font_identity_probe_tests::chrome_font_identity_probe_cli";
@@ -151,14 +157,26 @@ pub(super) fn run_ignored_test(
     response_path: &Path,
     test_name: &str,
 ) -> Result<Output, String> {
-    let executable = std::env::current_exe()
-        .map_err(|error| format!("resolve current test executable: {error}"))?;
-    ProcessService::create_command(executable)
-        .args(["--ignored", "--exact", test_name, "--nocapture"])
+    probe_command(test_name)?
         .env("KRR_CHROME_FONT_IDENTITY_REQUEST", request_path)
         .env("KRR_CHROME_FONT_IDENTITY_OUTPUT", response_path)
         .output()
         .map_err(|error| format!("run ignored font probe: {error}"))
+}
+
+pub(super) fn probe_command(test_name: &str) -> Result<Command, String> {
+    probe_command_for_executable(std::env::current_exe(), test_name)
+}
+
+fn probe_command_for_executable(
+    executable: io::Result<PathBuf>,
+    test_name: &str,
+) -> Result<Command, String> {
+    let executable =
+        executable.map_err(|error| format!("resolve current test executable: {error}"))?;
+    let mut command = ProcessService::create_command(executable);
+    command.args(["--ignored", "--exact", test_name, "--nocapture"]);
+    Ok(command)
 }
 
 fn read_response(response_path: &Path) -> Result<ProbeResponse, String> {
