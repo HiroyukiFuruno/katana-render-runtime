@@ -93,7 +93,7 @@ const reportSchema = z.strictObject({
   status: z.literal("verified"),
   parser: z.strictObject({
     crate: z.literal("syn"),
-    resolvedVersion: z.literal("3.0.9"),
+    resolvedVersion: z.literal("3.0.10"),
     features: z.tuple([z.literal("full"), z.literal("visit")]),
     spanLocations: z.literal(true),
   }),

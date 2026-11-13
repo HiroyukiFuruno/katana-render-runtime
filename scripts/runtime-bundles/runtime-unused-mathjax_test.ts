@@ -41,7 +41,7 @@ test("the guarded Rust facts route binds the live parser, facts, and input inven
     status: "verified",
     parser: {
       crate: "syn",
-      resolvedVersion: "3.0.9",
+      resolvedVersion: "3.0.10",
       features: ["full", "visit"],
       spanLocations: true,
     },
@@ -178,7 +178,7 @@ test("Rust facts reject stale or failed guarded-tool metadata", () => {
   Reflect.set(failed, "status", "failed");
   expect(() => validateMathJaxRustFacts(root, failed)).toThrow();
   const staleParser = structuredClone(rustFacts);
-  Reflect.set(staleParser.parser, "resolvedVersion", "3.0.8");
+  Reflect.set(staleParser.parser, "resolvedVersion", "3.0.9");
   expect(() => validateMathJaxRustFacts(root, staleParser)).toThrow();
 });
 

@@ -2601,7 +2601,7 @@ function emptyParserBodyOnloadBinding(inputs: string[]): OwnedValidationReport["
   };
 }
 const MATHJAX_EVIDENCE_CONSUMER_AST_SHA256 =
-  "a285f1fe5bb863217729fdc47f300986ac299faaf56651f5d65944bf775e2f73";
+  "c38467b320bc7b87eac6aee27510cd22e2c44559256da536b6c15f6f9a7f2fbf";
 function mathJaxEvidenceConsumerVerified(source: string): boolean {
   if (swcVersion !== REVIEWED_SWC_VERSION) return false;
   try {

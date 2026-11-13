@@ -195,7 +195,7 @@ const mathJaxRustFactsSchema = z.strictObject({
   parser: z.strictObject({
     crate: z.literal("syn"),
     features: z.tuple([z.literal("full"), z.literal("visit")]),
-    resolvedVersion: z.literal("3.0.9"),
+    resolvedVersion: z.literal("3.0.10"),
     spanLocations: z.literal(true),
   }),
   schema: z.literal(MATHJAX_RUST_FACTS_SCHEMA),
