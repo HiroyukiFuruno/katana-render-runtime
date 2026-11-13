@@ -19,7 +19,7 @@ impl HtmlLayoutRenderer {
         list_mode: bool,
     ) -> Result<(), String> {
         let measurements = self.measure_flow_items(tree, nodes, items, layout, list_mode)?;
-        let stretch_heights = flow_stretch_heights(tree, layout.style, &measurements)?;
+        let stretch_heights = flow_stretch_heights(tree, layout.style, &measurements);
         self.apply_flow_item_heights(tree, measurements, &stretch_heights)
     }
 

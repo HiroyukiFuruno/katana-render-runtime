@@ -1,4 +1,5 @@
 use super::{CssStyle, Display, TaffyTree, compute_flow_layout, flow_stretch_heights};
+use crate::renderer::backends::html_interactive::layout_flow_measure::leaf_style_for_flow;
 use crate::renderer::backends::html_interactive::style::CssGridTrack;
 use taffy::geometry::Size;
 use taffy::prelude::{FlexWrap, Style};
@@ -42,6 +43,7 @@ fn centered_flex_preserves_each_items_height() -> Result<(), String> {
     parent.display = Display::Flex;
     parent.align_items = Some(AlignItems::CENTER);
     let mut tree = TaffyTree::<()>::new();
+    tree.disable_rounding();
     let measurements = [
         measure_item(&mut tree, 40.0, 20.0)?,
         measure_item(&mut tree, 40.0, 40.0)?,
@@ -51,7 +53,31 @@ fn centered_flex_preserves_each_items_height() -> Result<(), String> {
     let short_item = tree.layout(nodes[0]).map_err(super::layout_error)?;
     assert_eq!(short_item.size.height, 20.0);
     assert_eq!(short_item.location.y, 10.0);
-    assert_eq!(flow_stretch_heights(&tree, &parent, &measurements)?, None);
+    assert_eq!(flow_stretch_heights(&tree, &parent, &measurements), None);
+    Ok(())
+}
+
+#[test]
+fn auto_height_uses_fractional_computed_height_for_flex_stretch() -> Result<(), String> {
+    let mut parent = CssStyle::browser_default();
+    parent.display = Display::Flex;
+    let child = CssStyle::browser_default();
+    let mut tree = TaffyTree::<()>::new();
+    tree.disable_rounding();
+    let node = tree
+        .new_leaf(leaf_style_for_flow(
+            child.clone(),
+            40.0,
+            20.0,
+            100.0,
+            &parent,
+        ))
+        .map_err(super::layout_error)?;
+    compute_flow_layout(&mut tree, &[node], &parent, 100.0, Some(40.25))?;
+    assert_eq!(
+        flow_stretch_heights(&tree, &parent, &[(node, child, 20.0)]),
+        Some(vec![40.25])
+    );
     Ok(())
 }
 
@@ -75,6 +101,7 @@ fn assert_flow_stretch(
     heights: &[(f32, f32)],
 ) -> Result<(), String> {
     let mut tree = TaffyTree::<()>::new();
+    tree.disable_rounding();
     let measurements = heights
         .iter()
         .map(|&(height, _)| measure_item(&mut tree, item_width, height))
@@ -86,7 +113,7 @@ fn assert_flow_stretch(
     let expected = heights.iter().map(|&(_, height)| height).collect();
     compute_flow_layout(&mut tree, &nodes, parent, available_width, None)?;
     assert_eq!(
-        flow_stretch_heights(&tree, parent, &measurements)?,
+        flow_stretch_heights(&tree, parent, &measurements),
         Some(expected)
     );
     Ok(())
@@ -106,5 +133,7 @@ fn measure_item(
             ..Style::default()
         })
         .map_err(super::layout_error)?;
-    Ok((node, CssStyle::browser_default(), height))
+    let mut css = CssStyle::browser_default();
+    css.height = Some(height);
+    Ok((node, css, height))
 }

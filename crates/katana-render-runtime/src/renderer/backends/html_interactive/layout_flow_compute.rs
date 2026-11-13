@@ -13,32 +13,39 @@ pub(super) fn flow_stretch_heights(
     tree: &TaffyTree<()>,
     parent: &CssStyle,
     measurements: &[(taffy::tree::NodeId, CssStyle, f32)],
-) -> Result<Option<Vec<f32>>, String> {
+) -> Option<Vec<f32>> {
     if !stretches_children(parent) {
-        return Ok(None);
+        return None;
     }
     if parent.display == Display::Flex && is_flex_row(parent) {
-        return row_heights(tree, measurements, true).map(Some);
+        return Some(row_heights(tree, measurements, true));
     }
     if parent.display != Display::Grid {
-        return Ok(None);
+        return None;
     }
-    row_heights(tree, measurements, false).map(Some)
+    Some(row_heights(tree, measurements, false))
 }
 
 fn row_heights(
     tree: &TaffyTree<()>,
     measurements: &[(taffy::tree::NodeId, CssStyle, f32)],
     use_computed_auto_height: bool,
-) -> Result<Vec<f32>, String> {
+) -> Vec<f32> {
     let items = measurements
         .iter()
-        .map(|(node, _, height)| row_item(tree, *node, *height, use_computed_auto_height))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(items
+        .map(|(node, css, height)| {
+            row_item(
+                tree,
+                *node,
+                *height,
+                use_computed_auto_height && css.height.is_none(),
+            )
+        })
+        .collect::<Vec<_>>();
+    items
         .iter()
         .map(|(row_y, _)| row_height(&items, *row_y))
-        .collect())
+        .collect()
 }
 
 fn row_item(
@@ -46,21 +53,15 @@ fn row_item(
     node: taffy::tree::NodeId,
     measured_height: f32,
     use_computed_auto_height: bool,
-) -> Result<(f32, f32), String> {
-    let layout = tree.layout(node).map_err(layout_error)?;
-    let height = if use_computed_auto_height
-        && tree
-            .style(node)
-            .map_err(layout_error)?
-            .size
-            .height
-            .is_auto()
-    {
+) -> (f32, f32) {
+    /* WHY: フローは丸めを無効にした同じ木で作成・測定したノードを渡す。 */
+    let layout = tree.unrounded_layout(node);
+    let height = if use_computed_auto_height {
         layout.size.height.max(measured_height)
     } else {
         measured_height
     };
-    Ok((layout.location.y, height))
+    (layout.location.y, height)
 }
 
 fn row_height(items: &[(f32, f32)], row_y: f32) -> f32 {
