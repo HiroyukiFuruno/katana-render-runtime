@@ -236,13 +236,12 @@ mod tests {
         let database = bundled_font_db();
         let face_id = super::matching_font_face(&database, "noto sans", 700, false)
             .ok_or("bundled family must match case-insensitively")?;
-        let face = database
-            .face(face_id)
-            .ok_or_else(|| "matched face is missing from the database".to_owned())?;
         assert!(
-            face.families
+            database.face(face_id).is_some_and(|face| face
+                .families
                 .iter()
-                .any(|(family, _)| family.eq_ignore_ascii_case("noto sans"))
+                .any(|(family, _)| family.eq_ignore_ascii_case("noto sans"))),
+            "the selected face must belong to Noto Sans"
         );
         Ok(())
     }
