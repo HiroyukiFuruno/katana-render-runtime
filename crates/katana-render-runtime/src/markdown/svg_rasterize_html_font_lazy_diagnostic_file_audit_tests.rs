@@ -206,3 +206,28 @@ fn lazy_audit_stale_file_rejects_route_before_setup() -> Result<(), String> {
     assert!(owner.upgrade().is_none());
     Ok(())
 }
+
+#[test]
+fn lazy_audit_rejects_a_file_removed_after_route_selection() -> Result<(), String> {
+    let file = AuditFile::new()?;
+    let (database, proof, id) = file.input()?;
+    let (selected, capture) = with_route(SourceRoute::File, Mode::Audit, || {
+        let (selected, _) = super::super::select_database(&database, proof)
+            .ok_or("valid File audit route rejected")?;
+        std::fs::remove_file(&file.0).map_err(|error| error.to_string())?;
+        record_selected_face(&selected, Some(id));
+        Ok::<_, String>(selected)
+    });
+    assert!(Arc::ptr_eq(&selected?, &database));
+    assert_eq!(
+        capture.errors,
+        ["selected font source could not be audited"]
+    );
+    assert_eq!(capture.database_owners.len(), 1);
+    assert!(capture.faces.is_empty());
+    assert!(capture.selected_database_owners.is_empty());
+    assert!(capture.shared_byte_owners.is_empty());
+    assert_eq!(capture.dropped, 0);
+    assert!(!active());
+    Ok(())
+}
