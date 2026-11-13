@@ -113,7 +113,7 @@ mod tests {
         for (alignment, expected_baseline) in [("start", 13.0), ("center", 26.0), ("end", 39.0)] {
             let node = fixed_height_text_flex(alignment, "Arial");
             let metrics = inline_flex_metrics(&node, &CssStyle::browser_default(), AVAILABLE_WIDTH)
-                .ok_or_else(|| "text inline flex must have baseline metrics".to_string())?;
+                .ok_or("text inline flex must have baseline metrics")?;
             assert_eq!(metrics.height, 46.0);
             assert_eq!(metrics.baseline, expected_baseline, "{alignment}");
         }

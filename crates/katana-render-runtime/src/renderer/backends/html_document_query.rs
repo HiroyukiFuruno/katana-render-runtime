@@ -176,6 +176,10 @@ mod tests {
     fn element_only_dom_operations_reject_document_root() {
         let mut document = HtmlDocument::parse("<p>Original</p>");
         assert_eq!(
+            document.anchor_href_attribute(1),
+            Err("tagName target is not an element".into())
+        );
+        assert_eq!(
             document.tag_name(1),
             Err("tagName target is not an element".into())
         );
@@ -187,16 +191,26 @@ mod tests {
             document.insert_adjacent_html(1, "beforeend", "<b>text</b>"),
             Err("insertAdjacentHTML target is not an element".into())
         );
+        assert_eq!(
+            document.anchor_href_attribute(9999),
+            Err("HTML node 9999 does not exist".into())
+        );
     }
 
     #[test]
     fn svg_tag_name_and_hidden_property_keep_namespace_semantics() -> Result<(), String> {
-        let mut document =
-            HtmlDocument::parse("<svg><linearGradient id=gradient hidden></linearGradient></svg>");
+        let mut document = HtmlDocument::parse(
+            "<svg><linearGradient id=gradient hidden></linearGradient><a id=svg-anchor href='#target'></a></svg>",
+        );
         let gradient = document.get_element_by_id("gradient").ok_or("gradient")?;
+        let anchor = document
+            .get_element_by_id("svg-anchor")
+            .ok_or("svg anchor")?;
 
         assert_eq!(document.tag_name(gradient)?, "linearGradient");
         assert_eq!(document.hidden_property(gradient)?, None);
+        assert_eq!(document.tag_name(anchor)?, "a");
+        assert_eq!(document.anchor_href_attribute(anchor)?, None);
         Ok(())
     }
 }
