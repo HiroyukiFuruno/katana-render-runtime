@@ -1,4 +1,4 @@
-use super::super::{LINEAR_GRADIENT, RADIAL_GRADIENT};
+use super::super::{LINEAR_GRADIENT, RADIAL_GRADIENT, STATIC_FONT, fixture_path};
 use super::{
     clip_box_bounds, fixture_tree, verify_standard_case, verify_static_font_manifest,
     verify_unclipped_glyph, with_static_font,
@@ -142,12 +142,24 @@ fn colr_fixture_rejects_a_missing_or_damaged_font() -> Result<(), Box<dyn std::e
     let expected = std::fs::read(&path).err().ok_or("fixture exists")?;
     assert_eq!(
         super::fixture_tree_at(&path, GLYPH, CASE).err(),
+        Some(expected.to_string()),
+    );
+    assert_eq!(
+        with_static_font(&path, |_| Ok(())).err(),
         Some(expected.to_string())
     );
     std::fs::write(&path, b"incomplete sfnt")?;
     assert!(
         super::fixture_tree_at(&path, GLYPH, CASE)
             .is_err_and(|error| error.starts_with("invalid COLR font:"))
+    );
+    let bytes = std::fs::read(&path)?;
+    let expected = skrifa::FontRef::new(&bytes)
+        .err()
+        .ok_or("fixture was valid")?;
+    assert_eq!(
+        with_static_font(&path, |_| Ok(())).err(),
+        Some(expected.to_string())
     );
     Ok(())
 }
@@ -162,7 +174,7 @@ fn verify_cases(cases: impl Iterator<Item = PaintCase>) -> Result<(), String> {
 }
 
 fn verify_clip_box_metadata() -> Result<(), String> {
-    with_static_font(|font| {
+    with_static_font(&fixture_path(STATIC_FONT), |font| {
         for expected in EXPECTED_CLIP_BOXES {
             let actual = clip_box_bounds(font, expected.glyph_id)
                 .ok_or_else(|| format!("glyph {} has no COLR clip box", expected.glyph_id))?;

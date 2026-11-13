@@ -24,9 +24,10 @@ fn verify_static_font_manifest() -> Result<(), String> {
 }
 
 fn with_static_font<T>(
+    path: &Path,
     callback: impl FnOnce(&FontRef<'_>) -> Result<T, String>,
 ) -> Result<T, String> {
-    let bytes = fs::read(fixture_path(STATIC_FONT)).map_err(|error| error.to_string())?;
+    let bytes = fs::read(path).map_err(|error| error.to_string())?;
     let font = FontRef::new(&bytes).map_err(|error| error.to_string())?;
     callback(&font)
 }
