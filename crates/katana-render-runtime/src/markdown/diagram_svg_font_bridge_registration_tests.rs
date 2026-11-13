@@ -53,6 +53,32 @@ fn font_bridge_reports_throwing_registration_getter() {
     }
 }
 
+#[test]
+fn font_bridge_rejects_a_setter_that_accepts_but_discards_the_callback() {
+    DiagramV8Runtime::ensure_initialized();
+    DiagramV8Runtime::with_empty_try_catch(|scope| {
+        let (property, expected) = REGISTRATIONS[0];
+        let source = format!(
+            "Object.defineProperty(globalThis, '{property}', {{\
+             set(value) {{ globalThis.callbackKind = typeof value; }}, \
+             get() {{ return 'unchanged'; }}, configurable: true}});"
+        );
+        assert!(configure(scope, &source));
+        assert_eq!(
+            super::super::super::diagram_font_bridge::install(scope),
+            Err(expected.to_owned())
+        );
+        assert!(!scope.has_caught());
+        assert!(configure(
+            scope,
+            &format!(
+                "if (globalThis.callbackKind !== 'function' || globalThis.{property} !== 'unchanged') \
+                 throw new Error('setter did not discard the callback');"
+            )
+        ));
+    });
+}
+
 fn assert_accessor_registration_rejected(
     property: &str,
     expected: &str,
