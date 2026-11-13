@@ -175,11 +175,13 @@ fn selected_proof_rejects_a_file_replaced_before_acquisition() -> Result<(), Str
     let (proof, database) = fixture.load()?;
     let id = database.faces().next().ok_or("real file face missing")?.id;
     let mut sources = SharedSources::default();
-    assert!(
-        proof
-            .selected_shared_face(&database, id, &mut sources, None, None)
-            .is_some()
-    );
+    let selected = proof
+        .selected_shared_face(&database, id, &mut sources, None, None)
+        .ok_or("real file face rejected")?;
+    let reused = proof
+        .selected_shared_face(&database, id, &mut sources, Some(&selected.source), None)
+        .ok_or("current shared source rejected")?;
+    assert!(super::super::same_face(&reused, &selected));
     let replacement = fixture.root.join("new-font.ttf");
     std::fs::write(&replacement, font::BUNDLED_SANS_SERIF_FONT)
         .map_err(|error| error.to_string())?;
@@ -188,7 +190,7 @@ fn selected_proof_rejects_a_file_replaced_before_acquisition() -> Result<(), Str
     assert!(!proof.current(&database));
     assert!(
         proof
-            .selected_shared_face(&database, id, &mut sources, None, None)
+            .selected_shared_face(&database, id, &mut sources, Some(&selected.source), None)
             .is_none()
     );
     fixture.cleanup()?;
