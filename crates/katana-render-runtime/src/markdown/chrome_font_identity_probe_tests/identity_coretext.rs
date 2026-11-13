@@ -38,10 +38,11 @@ fn resolve_file(
     identity: PhysicalFace,
     selected_postscript_name: &str,
 ) -> Result<Vec<ResolvedFont>, String> {
-    let (before_path, before_sha, _) = physical_file(path)?;
-    if before_path != identity.path || before_sha != identity.file_sha256 {
-        return Err("physical candidate changed before CoreText descriptor lookup".to_string());
-    }
+    verify_candidate_identity(
+        path,
+        &identity,
+        "physical candidate changed before CoreText descriptor lookup",
+    )?;
     let descriptors = descriptors_from_url(path)?;
     let mut matches = Vec::new();
     for descriptor in &descriptors {
@@ -55,11 +56,28 @@ fn resolve_file(
             selected_postscript_name,
         )?);
     }
-    let (after_path, after_sha, _) = physical_file(path)?;
-    if after_path != identity.path || after_sha != identity.file_sha256 {
-        return Err("physical font changed during CoreText descriptor lookup".to_string());
-    }
+    verify_candidate_after_lookup(path, &identity)?;
     Ok(matches)
+}
+
+fn verify_candidate_after_lookup(path: &Path, identity: &PhysicalFace) -> Result<(), String> {
+    verify_candidate_identity(
+        path,
+        identity,
+        "physical font changed during CoreText descriptor lookup",
+    )
+}
+
+fn verify_candidate_identity(
+    path: &Path,
+    identity: &PhysicalFace,
+    mismatch_error: &str,
+) -> Result<(), String> {
+    let (actual_path, digest, _) = physical_file(path)?;
+    if actual_path != identity.path || digest != identity.file_sha256 {
+        return Err(mismatch_error.to_owned());
+    }
+    Ok(())
 }
 
 fn descriptors_from_url(path: &Path) -> Result<CFArray<CTFontDescriptor>, String> {
@@ -103,6 +121,10 @@ fn verify_descriptor_binding(
         .ok_or_else(|| "exact CoreText descriptor has no physical URL".to_string())?;
     verify_descriptor_path(&descriptor_path, query_path, identity)?;
     verify_descriptor_name(descriptor, selected_postscript_name)?;
+    descriptor_path_text(&descriptor_path)
+}
+
+fn descriptor_path_text(descriptor_path: &Path) -> Result<String, String> {
     descriptor_path
         .to_str()
         .map(str::to_owned)
@@ -136,3 +158,7 @@ fn verify_descriptor_name(
 #[cfg(test)]
 #[path = "identity_coretext_binding_tests.rs"]
 mod binding_tests;
+
+#[cfg(test)]
+#[path = "identity_coretext_lookup_consistency_tests.rs"]
+mod lookup_consistency_tests;
