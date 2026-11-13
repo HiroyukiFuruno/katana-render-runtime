@@ -2,6 +2,11 @@ use crate::markdown::svg_rasterize::SvgRasterizeOps;
 
 use super::MAX_FINAL_GLYPH_RECORDS;
 
+type AuditRaster = Result<
+    crate::markdown::svg_rasterize::RasterizedSvg,
+    crate::markdown::svg_rasterize::SvgRasterizeError,
+>;
+
 pub(super) const PRIMARY_TEST_FONT_SIZE: usize = 16;
 pub(super) const ALTERNATE_TEST_FONT_SIZE: usize = 17;
 const FONT_AUDIT_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"><text id="audit-run" x="1" y="24" font-size="16">AV</text></svg>"#;
@@ -146,12 +151,37 @@ pub(super) fn svg_with_repeated_glyph_text() -> String {
 }
 
 pub(super) fn audit_svg(svg: &str) -> Result<serde_json::Value, String> {
-    let (render, audit) = SvgRasterizeOps::with_actual_font_source_audit(|| {
-        SvgRasterizeOps::rasterize_html_svg(svg, 1.0)
-    })
-    .map_err(|error| error.to_string())?;
+    let (render, audit) = audit_render(&mut || SvgRasterizeOps::rasterize_html_svg(svg, 1.0))?;
     render.map_err(|error| error.to_string())?;
     Ok(audit)
+}
+
+fn audit_render(
+    operation: &mut dyn FnMut() -> AuditRaster,
+) -> Result<(AuditRaster, serde_json::Value), String> {
+    SvgRasterizeOps::with_actual_font_source_audit(operation).map_err(|error| error.to_string())
+}
+
+#[cfg(unix)]
+#[test]
+fn glyph_audit_reports_non_utf8_source_metadata() -> Result<(), String> {
+    use std::os::unix::ffi::OsStringExt;
+
+    let path = std::path::PathBuf::from(std::ffi::OsString::from_vec(b"font-\xff.ttf".to_vec()));
+    let mut database = resvg::usvg::fontdb::Database::new();
+    let bytes = crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
+    let source = resvg::usvg::fontdb::Source::SharedFile(path, std::sync::Arc::new(bytes));
+    let ids = database.load_font_source(source);
+    assert_eq!(ids.len(), 1);
+    let result = audit_render(&mut || {
+        super::super::record_actual_selected_face(&database, ids.first().copied());
+        SvgRasterizeOps::rasterize_html_svg(FONT_AUDIT_SVG, 1.0)
+    });
+    assert_eq!(
+        result.err().as_deref(),
+        Some("path contains invalid UTF-8 characters")
+    );
+    Ok(())
 }
 
 pub(super) fn root_tree(audit: &serde_json::Value) -> Result<&serde_json::Value, String> {
