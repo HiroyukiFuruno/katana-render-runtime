@@ -71,6 +71,21 @@ fn parse_axes_rejects_malformed_real_corefoundation_dictionaries() {
 }
 
 #[test]
+fn parse_axes_rejects_a_maximum_that_corefoundation_cannot_convert() {
+    let maximum = CFNumber::from(i64::MIN + 1);
+    let axes = CFArray::from_CFTypes(&[axis_dictionary(
+        AXIS_IDENTIFIER,
+        WEIGHT_AXIS_MINIMUM,
+        Some(maximum.as_CFType()),
+        WEIGHT_AXIS_DEFAULT,
+    )]);
+    assert_eq!(
+        parse_axes(&axes).err().as_deref(),
+        Some("CoreText returned an invalid variation-axis maximum")
+    );
+}
+
+#[test]
 fn parse_axes_rejects_each_missing_required_axis_attribute() {
     let attributes = [
         (AXIS_IDENTIFIER_ATTRIBUTE, AXIS_IDENTIFIER),
