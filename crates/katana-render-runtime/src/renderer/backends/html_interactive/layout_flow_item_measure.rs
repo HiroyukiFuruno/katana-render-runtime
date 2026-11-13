@@ -31,17 +31,26 @@ impl HtmlLayoutRenderer {
         {
             return Ok(height);
         }
-        let height = self.measure_uncached_flow_node_height(
+        let measured = self.measure_uncached_flow_node_height(
             node,
             width,
             inherited,
             details,
             list_item_container,
-        )?;
-        if let Some(key) = cache_key {
-            self.flow_measurements.borrow_mut().insert(key, height);
-        }
-        Ok(height)
+        );
+        self.cache_measured_flow_height(cache_key, measured)
+    }
+
+    pub(super) fn cache_measured_flow_height(
+        &self,
+        key: Option<FlowMeasurementKey>,
+        measured: Result<f32, String>,
+    ) -> Result<f32, String> {
+        measured.inspect(|&height| {
+            if let Some(key) = key {
+                self.flow_measurements.borrow_mut().insert(key, height);
+            }
+        })
     }
 
     fn measure_uncached_flow_node_height(

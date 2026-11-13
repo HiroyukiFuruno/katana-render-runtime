@@ -1,3 +1,4 @@
+use super::super::layout_measurement_cache::FlowMeasurementKey;
 use super::super::types::DetailsContext;
 use super::HtmlLayoutRenderer;
 use super::{CssStyle, HtmlDocumentNode};
@@ -10,6 +11,28 @@ const TEST_VIEWPORT: HtmlBrowserViewport = HtmlBrowserViewport {
     height: 240,
     device_scale_factor: 1.0,
 };
+
+#[test]
+fn a_failed_flow_measurement_does_not_cache_a_height() -> Result<(), String> {
+    let renderer = test_renderer();
+    let key = FlowMeasurementKey::new(LIST_ITEM_NODE_ID, 144.0, true);
+    let error = "nested layout failed".to_owned();
+    assert_eq!(
+        renderer.cache_measured_flow_height(Some(key), Err(error.clone())),
+        Err(error)
+    );
+    assert_eq!(renderer.flow_measurements.borrow_mut().get(key), None);
+    let height = 42.0;
+    assert_eq!(
+        renderer.cache_measured_flow_height(Some(key), Ok(height))?,
+        height
+    );
+    assert_eq!(
+        renderer.flow_measurements.borrow_mut().get(key),
+        Some(height)
+    );
+    Ok(())
+}
 
 #[test]
 fn nested_flow_measurements_are_reused_within_one_frame() -> Result<(), String> {
