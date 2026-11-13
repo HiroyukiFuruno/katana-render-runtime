@@ -30,7 +30,7 @@ import {
   verifyOfficialStrictExternalInputs,
   verifyUnusedSources,
 } from "./runtime-unused-contexts";
-import { generatedEntrypointRead } from "./runtime-unused-entrypoint-owner";
+import { entrypointReads } from "./runtime-unused-entrypoint-owner";
 import {
   auditMathJaxOwnedSource,
   inspectMathJaxModule,
@@ -1021,6 +1021,7 @@ function queryGateStage(
     actual = gateQuerySchema.parse(JSON.parse(output));
   fs.writeFileSync(path.join(directory, "query-result.json"), output, { flag: "wx" });
   if (actual.rows.length !== targets.length) throw new Error("missing actual semantic query row");
+  const readEntrypoint = entrypointReads(root, context, stage);
   actual.rows.forEach((actualRow, index) => {
     const target = targets[index];
     if (actualRow.symbol !== target?.row.candidate?.symbol)
@@ -1029,7 +1030,7 @@ function queryGateStage(
       try {
         return sharedUnusedSemanticPoint(context, stage, read.start, read.end);
       } catch {
-        return generatedEntrypointRead(root, context, stage, read.start, read.end);
+        return readEntrypoint(read.start, read.end);
       }
     });
   });

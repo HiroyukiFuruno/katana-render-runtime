@@ -20,7 +20,7 @@ import {
 } from "./runtime-unused-contexts";
 import {
   entrypointOwnerPaths,
-  generatedEntrypointRead,
+  entrypointReads,
   readEntrypointOwner,
 } from "./runtime-unused-entrypoint-owner";
 import {
@@ -183,6 +183,7 @@ function actualGeneratedFixture() {
     "katanaPrepareMermaidSource",
     "katanaNormalizeMermaidSvg",
   ];
+  const readEntrypoint = entrypointReads(root, context, "normalized");
   const diagnostics: UnusedDiagnostic[] = [];
   const candidates = symbols.map((symbol, diagnosticIndex) => {
     const node = nodes.find(
@@ -222,7 +223,7 @@ function actualGeneratedFixture() {
           try {
             return [sharedUnusedSemanticPoint(context, "normalized", start, end)];
           } catch {
-            return [generatedEntrypointRead(root, context, "normalized", start, end)];
+            return [readEntrypoint(start, end)];
           }
         },
       );
@@ -339,13 +340,11 @@ test("generated caller outside current entrypoint range fails closed", () => {
     declaration = item.manifest.candidates[0]?.bindings[0]?.declaration;
   if (!declaration) throw new Error("missing actual generated declaration");
   expect(() =>
-    generatedEntrypointRead(
+    entrypointReads(
       root,
       item.context,
       "normalized",
-      declaration.generatedStart,
-      declaration.generatedEnd,
-    ),
+    )(declaration.generatedStart, declaration.generatedEnd),
   ).toThrow("outside entrypoint range");
 });
 

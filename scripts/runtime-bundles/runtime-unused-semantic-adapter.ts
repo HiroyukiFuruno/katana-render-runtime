@@ -10,7 +10,7 @@ import { type RuntimeUnusedContext, readUnusedPhysicalSource } from "./runtime-u
 import {
   type EntrypointOwner,
   entrypointOwnerPaths,
-  generatedEntrypointRead,
+  entrypointReads,
   generatedEntrypointReadSchema,
   readEntrypointOwner,
 } from "./runtime-unused-entrypoint-owner";
@@ -91,6 +91,7 @@ export type SharedUnusedSemanticManifest = z.infer<typeof sharedUnusedSemanticMa
 type SemanticGroup = {
   code: string;
   nodes: ReturnType<typeof browserAstNodes>;
+  readEntrypoint: ReturnType<typeof entrypointReads>;
   owner: EntrypointOwner | null;
   vmOwner: ReturnType<typeof inspectSequenceVmOwner> | null;
   targets: {
@@ -179,13 +180,12 @@ export function sharedUnusedSemanticPoint(
 }
 
 function verifyPoint(
-  root: string,
   context: RuntimeUnusedContext,
   stage: "assembled" | "normalized",
   binding: z.infer<typeof readPoint>,
   symbol: string,
   category: string,
-  nodes: ReturnType<typeof browserAstNodes>,
+  group: SemanticGroup,
 ) {
   const code = stage === "assembled" ? context.origin.assembled : context.origin.provenance.code;
   if (
@@ -196,7 +196,7 @@ function verifyPoint(
   const utf16 = (at: number) =>
     new TextDecoder("utf-8", { fatal: true }).decode(Buffer.from(code).subarray(0, at - 1)).length;
   if (
-    !nodes.some(
+    !group.nodes.some(
       ({ node }) =>
         node.type === "Identifier" &&
         node.value === symbol &&
@@ -208,9 +208,8 @@ function verifyPoint(
     throw new Error("missing exact SWC identifier");
   if (binding.kind === "generated-entrypoint") {
     if (
-      JSON.stringify(
-        generatedEntrypointRead(root, context, stage, binding.generatedStart, binding.generatedEnd),
-      ) !== JSON.stringify(binding)
+      JSON.stringify(group.readEntrypoint(binding.generatedStart, binding.generatedEnd)) !==
+      JSON.stringify(binding)
     )
       throw new Error("changed generated entrypoint owner/span");
     return;
@@ -423,7 +422,6 @@ function executeSemanticGroup(
 }
 
 function registerGroupTarget(
-  root: string,
   context: RuntimeUnusedContext,
   binding: SharedUnusedSemanticManifest["candidates"][number]["bindings"][number],
   symbol: string,
@@ -431,7 +429,7 @@ function registerGroupTarget(
   group: SemanticGroup,
 ) {
   for (const selected of [binding.declaration, ...binding.reads])
-    verifyPoint(root, context, binding.stage, selected, symbol, category, group.nodes);
+    verifyPoint(context, binding.stage, selected, symbol, category, group);
   for (const selected of binding.reads) {
     if (selected.kind !== "generated-entrypoint") continue;
     if (group.owner && JSON.stringify(group.owner) !== JSON.stringify(selected.owner))
@@ -522,6 +520,7 @@ export function inspectSharedUnusedSemantics(
       const group = groups.get(key) ?? {
         code,
         nodes: browserAstNodes(parseSync(code, { syntax: "ecmascript" })),
+        readEntrypoint: entrypointReads(root, context, binding.stage),
         owner: null,
         vmOwner:
           context.origin instanceof BrowserUnusedOrigin &&
@@ -531,14 +530,7 @@ export function inspectSharedUnusedSemantics(
         targets: [],
       };
       groups.set(key, group);
-      return registerGroupTarget(
-        root,
-        context,
-        binding,
-        candidate.symbol,
-        diagnostic.category,
-        group,
-      );
+      return registerGroupTarget(context, binding, candidate.symbol, diagnostic.category, group);
     });
     return {
       diagnosticIndex: candidate.diagnosticIndex,

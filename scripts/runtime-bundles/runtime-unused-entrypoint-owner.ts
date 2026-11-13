@@ -483,12 +483,10 @@ export function readEntrypointOwner(root: string): EntrypointOwner {
   });
 }
 
-export function generatedEntrypointRead(
+function prepareEntrypointRead(
   root: string,
   context: RuntimeUnusedContext,
   stage: "assembled" | "normalized",
-  generatedStart: number,
-  generatedEnd: number,
 ) {
   if (
     !(context.origin instanceof RuntimeUnusedOrigin) ||
@@ -526,11 +524,34 @@ export function generatedEntrypointRead(
           new Map([["@runtime/assembled", new Lines(assembled)]]),
         )
       : null;
+  return { owner, entry, table };
+}
+
+export function entrypointReads(
+  root: string,
+  context: RuntimeUnusedContext,
+  stage: "assembled" | "normalized",
+) {
+  let prepared: ReturnType<typeof prepareEntrypointRead> | undefined;
+  return (generatedStart: number, generatedEnd: number) => {
+    prepared ??= prepareEntrypointRead(root, context, stage);
+    const { owner, entry, table } = prepared;
+    return readEntrypointSpan(owner, entry.assembledRange, table, generatedStart, generatedEnd);
+  };
+}
+
+function readEntrypointSpan(
+  owner: EntrypointOwner,
+  range: { start: number; end: number },
+  table: ReturnType<typeof mapIndex> | null,
+  generatedStart: number,
+  generatedEnd: number,
+) {
   const start = table?.get(generatedStart)?.offset ?? generatedStart;
   if (
     generatedStart >= generatedEnd ||
-    start < entry.assembledRange.start ||
-    start + generatedEnd - generatedStart > entry.assembledRange.end
+    start < range.start ||
+    start + generatedEnd - generatedStart > range.end
   )
     throw new Error("generated read outside entrypoint range");
   for (let at = generatedStart; at < generatedEnd; at++) {
@@ -546,8 +567,8 @@ export function generatedEntrypointRead(
     rawSourcePath: null,
     generatedStart,
     generatedEnd,
-    entryValueStart: start - entry.assembledRange.start,
-    entryValueEnd: start - entry.assembledRange.start + generatedEnd - generatedStart,
+    entryValueStart: start - range.start,
+    entryValueEnd: start - range.start + generatedEnd - generatedStart,
     generatedValueSha256: owner.generatedValueSha256,
     owner,
   });
