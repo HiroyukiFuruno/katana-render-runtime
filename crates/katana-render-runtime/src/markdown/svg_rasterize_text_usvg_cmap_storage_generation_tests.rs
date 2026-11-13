@@ -255,7 +255,8 @@ fn rewrite_preserves_bytes_and_modified_time() -> Result<(), Box<dyn std::error:
 fn rewrite_missing_file_returns_not_found() -> Result<(), Box<dyn std::error::Error>> {
     let fixture = file_database(FONT_BYTES)?;
     let path = &fixture.file.0;
-    std::fs::remove_file(path)?;
+    case_bodies::remove_font_file(path)?;
+    case_bodies::assert_missing_font_removal(path)?;
     let error = rewrite_with_same_modified_time(path, b"replacement")
         .err()
         .ok_or("missing rewrite unexpectedly succeeded")?;

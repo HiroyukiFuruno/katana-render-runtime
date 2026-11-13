@@ -4,13 +4,26 @@ pub(super) fn unavailable_generation_rejects_global_cmap_storage() -> Result<(),
     let _lock = begin()?;
     let _reset = CacheResetOnDrop;
     let fixture = file_database(FONT_BYTES)?;
-    std::fs::remove_file(&fixture.file.0).map_err(|error| error.to_string())?;
+    remove_font_file(&fixture.file.0)?;
     let database = &fixture.database;
     let id = fixture.file_id;
     let generation = generation(database, id);
     assert!(!generation.durable_reusable());
     assert_legacy_entry_is_removed(database, id, generation.clone())?;
     assert_insert_is_not_persisted(database, id, generation)?;
+    Ok(())
+}
+
+pub(super) fn remove_font_file(path: &std::path::Path) -> Result<(), String> {
+    std::fs::remove_file(path).map_err(|error| error.to_string())
+}
+
+pub(super) fn assert_missing_font_removal(path: &std::path::Path) -> Result<(), String> {
+    let expected = std::fs::metadata(path)
+        .err()
+        .ok_or("removed font metadata unexpectedly available")?;
+    assert_eq!(expected.kind(), std::io::ErrorKind::NotFound);
+    assert_eq!(remove_font_file(path), Err(expected.to_string()));
     Ok(())
 }
 
