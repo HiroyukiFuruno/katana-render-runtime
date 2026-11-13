@@ -1,6 +1,7 @@
 use super::super::style::{CssStyle, CssVerticalAlign};
 use super::{
-    Cache, MAX_ENTRIES, MAX_RETAINED_BYTES, MAX_SOURCE_BYTES, Scope, get_or_parse, reserve,
+    Cache, MAX_ENTRIES, MAX_RETAINED_BYTES, MAX_SOURCE_BYTES, Scope, get_or_parse, parse_uncached,
+    retain,
 };
 use std::mem::size_of;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
@@ -9,12 +10,20 @@ use std::sync::Arc;
 type DeclarationSignature = Vec<(String, String, bool)>;
 
 #[test]
-fn reserve_rejects_one_entry_over_the_retained_limit_without_mutation() {
+fn oversized_entry_does_not_evict_a_cached_declaration() {
     let mut cache = Cache::default();
-
-    assert!(!reserve(&mut cache, MAX_RETAINED_BYTES + 1));
-    assert!(cache.entries.is_empty());
-    assert_eq!(cache.retained_bytes, 0);
+    let small = "color:red;";
+    let declarations = parse_uncached(small);
+    retain(&mut cache, small.to_owned(), &declarations);
+    let before = cache.retained_bytes;
+    let source = format!("--large:{};", "x".repeat(MAX_RETAINED_BYTES));
+    let oversized = parse_uncached(&source);
+    assert_eq!(oversized.len(), 1);
+    retain(&mut cache, source, &oversized);
+    assert_eq!(cache.retained_bytes, before);
+    assert_eq!(cache.entries.len(), 1);
+    assert_eq!(cache.entries[0].source, small);
+    assert!(Arc::ptr_eq(&cache.entries[0].declarations, &declarations));
 }
 
 #[test]
@@ -61,7 +70,7 @@ fn nested_scope_unwind_restores_outer_cache() {
 
 #[test]
 fn enter_if_absent_reuses_outer_cache_arc() {
-    let outer = Scope::enter();
+    let outer = Scope::enter_if_absent();
     let source = "color: green;";
     let outer_value = get_or_parse(source);
     let borrowed = Scope::enter_if_absent();
@@ -71,6 +80,8 @@ fn enter_if_absent_reuses_outer_cache_arc() {
     let restored = get_or_parse(source);
     assert!(Arc::ptr_eq(&outer_value, &restored));
     drop(outer);
+    let uncached = get_or_parse(source);
+    assert!(!Arc::ptr_eq(&outer_value, &uncached));
 }
 
 #[test]

@@ -78,16 +78,7 @@ pub(super) fn get_or_parse(source: &str) -> Arc<[CssDeclaration]> {
             return declarations;
         }
         let declarations = parse_uncached(source);
-        let source = source.to_string();
-        let retained_bytes = retained_bytes(&source, &declarations);
-        if !reserve(cache, retained_bytes) {
-            return declarations;
-        }
-        cache.entries.push_back(Entry {
-            source,
-            declarations: Arc::clone(&declarations),
-            retained_bytes,
-        });
+        retain(cache, source.to_owned(), &declarations);
         declarations
     })
 }
@@ -113,9 +104,10 @@ fn retained_bytes(source: &String, declarations: &[CssDeclaration]) -> usize {
             .sum::<usize>()
 }
 
-fn reserve(cache: &mut Cache, retained_bytes: usize) -> bool {
+fn retain(cache: &mut Cache, source: String, declarations: &Arc<[CssDeclaration]>) {
+    let retained_bytes = retained_bytes(&source, declarations);
     if retained_bytes > MAX_RETAINED_BYTES {
-        return false;
+        return;
     }
     /* WHY: 保持量はキュー内の合計で、空になるまでに上限以下の新規項目を格納できる。 */
     while (cache.entries.len() >= MAX_ENTRIES
@@ -125,5 +117,9 @@ fn reserve(cache: &mut Cache, retained_bytes: usize) -> bool {
         cache.retained_bytes -= entry.retained_bytes;
     }
     cache.retained_bytes += retained_bytes;
-    true
+    cache.entries.push_back(Entry {
+        source,
+        declarations: Arc::clone(declarations),
+        retained_bytes,
+    });
 }
