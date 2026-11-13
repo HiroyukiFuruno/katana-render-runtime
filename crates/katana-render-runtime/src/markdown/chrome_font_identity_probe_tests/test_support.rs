@@ -4,7 +4,7 @@ use super::{
 };
 use crate::system::ProcessService;
 use resvg::usvg::fontdb::{Database, Source};
-use std::{fs, path::Path, process::Output, sync::Arc};
+use std::{fs, io::Write, path::Path, process::Output, sync::Arc};
 
 pub(super) const PROBE_TEST: &str =
     "markdown::chrome_font_identity_probe_tests::chrome_font_identity_probe_cli";
@@ -78,7 +78,12 @@ pub(super) fn run_probe_child(
     }
     let request_bytes =
         serde_json::to_vec(request).map_err(|error| format!("serialize request: {error}"))?;
-    fs::write(&request_path, &request_bytes).map_err(|error| format!("write request: {error}"))?;
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&request_path)
+        .and_then(|mut request_file| request_file.write_all(&request_bytes))
+        .map_err(|error| format!("write request: {error}"))?;
     let output = run_ignored_test(&request_path, response_path, test_name)?;
     if !output.status.success() {
         return Err(format!(

@@ -85,6 +85,29 @@ fn probe_child_rejects_a_successful_process_that_selected_no_test() -> Result<()
     Ok(())
 }
 
+#[cfg(unix)]
+#[test]
+fn probe_child_does_not_write_through_a_dangling_request_link() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let output = temp.path().join("response.json");
+    let request_path = output.with_extension("request.json");
+    let target = temp.path().join("uncreated-request.json");
+    std::os::unix::fs::symlink(&target, &request_path).map_err(|error| error.to_string())?;
+
+    let request = request_with_resource(temp.path().join("font.body"));
+    let error = run_probe_child(&request, &output, super::PROBE_TEST)
+        .err()
+        .ok_or("probe accepted a dangling request link")?;
+    assert!(error.starts_with("write request:"));
+    assert!(!target.exists());
+    assert!(!output.exists());
+    assert_eq!(
+        fs::read_link(request_path).map_err(|error| error.to_string())?,
+        target
+    );
+    Ok(())
+}
+
 #[test]
 fn single_capture_propagates_a_real_probe_child_validation_failure() -> Result<(), String> {
     let (_temp, _database, selected) = physical_font_fixture()?;
