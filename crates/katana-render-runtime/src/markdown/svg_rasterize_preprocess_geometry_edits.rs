@@ -32,9 +32,8 @@ fn collect_attribute_edits(node: Node<'_, '_>, plan: &GeometryPlan, edits: &mut 
         };
         collect_property_edit(node, property, value, &mut insertions, edits);
     }
-    if !insertions.is_empty()
-        && let Some(position) = opening_tag_end(node)
-    {
+    if !insertions.is_empty() {
+        let position = opening_tag_end(node);
         push_edit(edits, position..position, insertions);
     }
 }
@@ -65,21 +64,22 @@ fn remove_preceding_space(range: Range<usize>) -> Range<usize> {
     range.start.saturating_sub(1)..range.end
 }
 
-fn opening_tag_end(node: Node<'_, '_>) -> Option<usize> {
-    /* WHY: 要素の範囲は同じDocumentが解析した元のバイト列を指す。 */
+fn opening_tag_end(node: Node<'_, '_>) -> usize {
+    /* WHY: パーサーが確定した要素範囲は > で終わる。子を持つ形式ではそれより前に開始タグが閉じる。 */
     let range = node.range();
     let bytes = node.document().input_text().as_bytes();
+    let last = range.end - 1;
     let mut quote = None;
-    let offset = bytes[range.clone()].iter().position(|&byte| {
+    let offset = bytes[range.start..last].iter().position(|&byte| {
         match (quote, byte) {
             (Some(current), value) if current == value => quote = None,
             (None, b'\'' | b'"') => quote = Some(byte),
             _ => {}
         }
         quote.is_none() && byte == b'>'
-    })?;
-    let end = range.start + offset;
-    Some(end - usize::from(bytes[end - 1] == b'/'))
+    });
+    let end = offset.map_or(last, |offset| range.start + offset);
+    end - usize::from(bytes[end - 1] == b'/')
 }
 
 fn push_edit(edits: &mut Vec<SourceEdit>, range: Range<usize>, replacement: String) {

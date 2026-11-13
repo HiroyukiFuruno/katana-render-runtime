@@ -1,6 +1,6 @@
-use super::layers::{render_existing_node, render_layer};
+use super::layers::render_existing_node;
 use resvg::usvg;
-use tiny_skia::{IntRect, Mask, MaskType, Pixmap, PixmapMut, Transform};
+use tiny_skia::{Color, IntRect, Mask, MaskType, Pixmap, PixmapMut, Transform};
 
 const RGBA_CHANNELS: usize = 4;
 const MASK_MAX: u32 = 255;
@@ -85,42 +85,25 @@ pub(super) fn clip_mask(
     width: u32,
     height: u32,
 ) -> Result<Mask, String> {
-    render_mask(
-        clip,
-        transform,
-        (width, height),
-        "failed to allocate cropped SVG clip pixmap",
-    )
+    let mut pixels = Pixmap::new(width, height)
+        .ok_or_else(|| "failed to allocate cropped SVG clip pixmap".to_string())?;
+    Ok(render_mask(clip, transform, &mut pixels))
 }
 
-fn render_mask(
-    clip: &usvg::ClipPath,
-    transform: Transform,
-    dimensions: (u32, u32),
-    allocation_error: &str,
-) -> Result<Mask, String> {
-    let clip_pixels = render_layer(dimensions, allocation_error, &mut |pixels| {
-        render_clip_path(clip, transform, pixels)
-    })?;
-    Ok(Mask::from_pixmap(clip_pixels.as_ref(), MaskType::Alpha))
-}
-
-fn render_clip_path(
-    clip: &usvg::ClipPath,
-    transform: Transform,
-    pixmap: &mut PixmapMut<'_>,
-) -> Result<(), String> {
+fn render_mask(clip: &usvg::ClipPath, transform: Transform, pixels: &mut Pixmap) -> Mask {
+    /* WHY: 全階層が同じ寸法なので、確保済みの領域を深い階層から再利用する。 */
+    let nested = clip
+        .clip_path()
+        .map(|nested| render_mask(nested, transform, pixels));
+    pixels.fill(Color::TRANSPARENT);
     let node = usvg::Node::Group(Box::new(clip.root().clone()));
-    render_existing_node(&node, transform.pre_concat(clip.transform()), pixmap);
-
-    if let Some(nested) = clip.clip_path() {
-        let nested_mask = render_mask(
-            nested,
-            transform,
-            (pixmap.width(), pixmap.height()),
-            "failed to allocate nested SVG clip pixmap",
-        )?;
-        pixmap.apply_mask(&nested_mask);
+    render_existing_node(
+        &node,
+        transform.pre_concat(clip.transform()),
+        &mut pixels.as_mut(),
+    );
+    if let Some(nested) = nested {
+        pixels.apply_mask(&nested);
     }
-    Ok(())
+    Mask::from_pixmap(pixels.as_ref(), MaskType::Alpha)
 }
