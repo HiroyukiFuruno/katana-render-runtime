@@ -2,6 +2,8 @@ use super::*;
 use crate::markdown::svg_rasterize::RasterizedSvg;
 use crate::markdown::svg_rasterize::font::html::admission;
 
+const PUBLICATION_BARRIER_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="30"><text y="20" font-family="Arial">AB</text></svg>"#;
+
 pub(super) fn receipt(fixture: &Fixture, id: ID) -> Result<admission::Admission<'_>, String> {
     let face = fixture
         .context
@@ -142,17 +144,36 @@ pub(super) fn assert_publication_barrier(
     mapped: bool,
 ) -> Result<(), String> {
     let observer = raster_observer::Scope::enter();
-    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="30"><text y="20" font-family="Arial">AB</text></svg>"#;
-    let actual =
-        SvgRasterizeOps::rasterize_html_svg(svg, 1.0).map_err(|error| error.to_string())?;
+    let actual = render_publication_fixture(PUBLICATION_BARRIER_SVG)?;
     injection.mutation_result()?;
     assert!(injection.mutated());
     if mapped {
         assert!(injection.mappings_released());
     }
     assert_route_contract(&observer.snapshot());
-    assert_same_pixels(svg, &actual)?;
+    assert_same_pixels(PUBLICATION_BARRIER_SVG, &actual)?;
     assert_state_empty(&fixture.context)
+}
+
+fn render_publication_fixture(svg: &str) -> Result<RasterizedSvg, String> {
+    SvgRasterizeOps::rasterize_html_svg(svg, 1.0).map_err(|error| error.to_string())
+}
+
+#[test]
+fn publication_barrier_fixture_rejects_an_incomplete_document() -> Result<(), String> {
+    let svg = PUBLICATION_BARRIER_SVG.trim_end_matches("</svg>");
+    let expected = SvgRasterizeOps::rasterize_html_svg(svg, 1.0)
+        .err()
+        .ok_or("incomplete SVG unexpectedly rasterized")?;
+    assert!(matches!(
+        expected,
+        crate::markdown::svg_rasterize::SvgRasterizeError::ParseFailed(_)
+    ));
+    assert_eq!(
+        render_publication_fixture(svg).err(),
+        Some(expected.to_string())
+    );
+    Ok(())
 }
 
 pub(super) fn assert_fixture_escape(
