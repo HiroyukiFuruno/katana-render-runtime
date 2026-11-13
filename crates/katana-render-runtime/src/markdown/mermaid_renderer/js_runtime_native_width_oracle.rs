@@ -58,14 +58,14 @@ fn assert_css_call(call: ParsedCall<'_>) -> Result<(), String> {
 }
 
 fn assert_svg_call(call: &Value, parsed: ParsedCall<'_>) -> Result<(), String> {
-    let expected = SvgRasterizeOps::measure_svg_text_metrics(
+    let expected = measure_svg_reference(
         parsed.text,
         parsed.family,
         parsed.size,
         parsed.weight,
         parsed.italic,
-    )
-    .map_err(|error| format!("SVG boundary reference failed: {error:?}"))?;
+        "SVG boundary reference",
+    )?;
     let metrics = call.get("metrics").ok_or("SVG metrics missing")?;
     assert_svg_metrics(metrics, &expected, &parsed)?;
     assert_eq!(
@@ -77,6 +77,18 @@ fn assert_svg_call(call: &Value, parsed: ParsedCall<'_>) -> Result<(), String> {
         parsed.weight
     );
     Ok(())
+}
+
+fn measure_svg_reference(
+    text: &str,
+    family: &str,
+    size: f32,
+    weight: u16,
+    italic: bool,
+    context: &str,
+) -> Result<crate::markdown::svg_rasterize::SvgTextRunMetrics, String> {
+    SvgRasterizeOps::measure_svg_text_metrics(text, family, size, weight, italic)
+        .map_err(|error| format!("{context} failed: {error:?}"))
 }
 
 fn assert_svg_metrics(
@@ -130,16 +142,15 @@ pub(super) fn assert_inherited_cjk(probe: &Value) -> Result<(), String> {
     let width = raw_svg_number(probe.get("width"))?;
     assert_eq!((family, weight, text), ("Noto Sans", 700, "日本語"));
     assert_eq!(probe.get("kind").and_then(Value::as_str), Some("svg"));
-    let expected = SvgRasterizeOps::measure_svg_text_metrics(
+    measure_svg_reference(
         text,
         family,
         INHERITED_SVG_FONT_SIZE_PX,
         weight,
         false,
+        "inherited SVG boundary",
     )
-    .map_err(|error| format!("inherited SVG boundary failed: {error:?}"))?;
-    assert_eq!(width, expected.advance);
-    Ok(())
+    .map(|expected| assert_eq!(width, expected.advance))
 }
 
 pub(super) fn call_text(call: &Value) -> &str {
@@ -168,11 +179,10 @@ mod tests {
     use serde_json::{Value, json};
 
     #[test]
-    fn raw_v8_width_calls_reject_unmeasurable_text() -> Result<(), String> {
-        let calls = actual_v8_calls("native-width-oracle-invalid-text.js")?;
+    fn raw_v8_html_width_calls_reject_unmeasurable_text() -> Result<(), String> {
+        let calls = actual_v8_calls("native-width-oracle-invalid-html-text.js")?;
         for (index, kind, expected) in [
             (0, "css", "CSS boundary reference failed:"),
-            (1, "svg", "SVG boundary reference failed:"),
             (2, "canvas", "Canvas boundary reference failed:"),
         ] {
             let mut corrupted = calls.clone();
