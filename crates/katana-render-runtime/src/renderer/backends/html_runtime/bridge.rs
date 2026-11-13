@@ -58,18 +58,20 @@ fn set_bridge_error(
     return_value: &mut v8::ReturnValue<v8::Value>,
     error: String,
 ) {
-    let Some(state) = scope.get_slot::<HtmlDomBridgeState>() else {
-        return_value.set(v8::undefined(scope).into());
-        return;
-    };
+    let value = bridge_exception(scope, error).unwrap_or_else(|| v8::undefined(scope).into());
+    return_value.set(value);
+}
+
+fn bridge_exception<'scope>(
+    scope: &mut v8::PinScope<'scope, '_>,
+    error: String,
+) -> Option<v8::Local<'scope, v8::Value>> {
+    let state = scope.get_slot::<HtmlDomBridgeState>()?;
     let _previous_error = state.error.replace(Some(error.clone()));
-    let Some(message) = v8::String::new(scope, &error) else {
-        return_value.set(v8::undefined(scope).into());
-        return;
-    };
+    let message = v8::String::new(scope, &error)?;
     let exception = v8::Exception::error(scope, message);
     mark_native_dom_error(scope, exception, message);
-    return_value.set(scope.throw_exception(exception));
+    Some(scope.throw_exception(exception))
 }
 
 fn native_dom_error_key<'scope>(
@@ -92,9 +94,11 @@ fn mark_native_dom_error<'scope>(
     exception: v8::Local<'scope, v8::Value>,
     message: v8::Local<'scope, v8::String>,
 ) {
-    let (Some((property, name)), Some(object)) =
-        (native_dom_error_name(scope), exception.to_object(scope))
-    else {
+    /* WHY: 通常はV8が生成したError。プリミティブの変換で別の例外を発生させない。 */
+    let (Some((property, name)), Ok(object)) = (
+        native_dom_error_name(scope),
+        v8::Local::<v8::Object>::try_from(exception),
+    ) else {
         return;
     };
     let _named = object.define_own_property(

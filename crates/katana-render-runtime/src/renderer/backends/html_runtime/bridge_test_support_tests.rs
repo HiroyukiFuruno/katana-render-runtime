@@ -6,6 +6,17 @@ use super::{
     evaluate_value, install_dom_bridge,
 };
 
+#[test]
+fn marking_a_primitive_as_a_native_error_does_not_throw() -> Result<(), String> {
+    with_v8_context!(isolate, scope, [], [], {
+        let message = v8::String::new(scope, "native error").ok_or("message unavailable")?;
+        let primitive = v8::null(scope).into();
+        super::super::mark_native_dom_error(scope, primitive, message);
+        assert!(!scope.has_caught());
+    });
+    Ok(())
+}
+
 pub(super) fn call_unsupported_dom_callback(
     scope: &mut HtmlTryCatchScope<'_, '_, '_, '_>,
 ) -> Result<(bool, Option<String>), String> {
