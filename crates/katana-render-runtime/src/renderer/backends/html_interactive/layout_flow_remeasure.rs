@@ -20,15 +20,16 @@ impl HtmlLayoutRenderer {
     ) -> Result<(), String> {
         let measurements = self.measure_flow_items(tree, nodes, items, layout, list_mode)?;
         let stretch_heights = flow_stretch_heights(tree, layout.style, &measurements);
-        self.apply_flow_item_heights(tree, measurements, &stretch_heights)
+        self.apply_flow_item_heights(tree, measurements, stretch_heights.as_deref())
+            .map_err(layout_error)
     }
 
     fn apply_flow_item_heights(
         &self,
         tree: &mut TaffyTree<()>,
         measurements: Vec<FlowMeasurement>,
-        stretch_heights: &Option<Vec<f32>>,
-    ) -> Result<(), String> {
+        stretch_heights: Option<&[f32]>,
+    ) -> taffy::TaffyResult<()> {
         for (index, (node, css_style, measured_height)) in measurements.into_iter().enumerate() {
             self.apply_flow_item_height(
                 tree,
@@ -48,19 +49,17 @@ impl HtmlLayoutRenderer {
         node: taffy::tree::NodeId,
         css_style: &CssStyle,
         measured_height: f32,
-        stretch_heights: &Option<Vec<f32>>,
+        stretch_heights: Option<&[f32]>,
         index: usize,
-    ) -> Result<(), String> {
+    ) -> taffy::TaffyResult<()> {
         let height = if css_style.height.is_none() {
-            stretch_heights
-                .as_ref()
-                .map_or(measured_height, |values| values[index])
+            stretch_heights.map_or(measured_height, |values| values[index])
         } else {
             measured_height
         };
-        let mut style = tree.style(node).map_err(layout_error)?.clone();
+        let mut style = tree.style(node)?.clone();
         assign_leaf_height(&mut style, css_style, height);
-        tree.set_style(node, style).map_err(layout_error)
+        tree.set_style(node, style)
     }
 
     fn measure_flow_items(
