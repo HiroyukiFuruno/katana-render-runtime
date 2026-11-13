@@ -218,3 +218,35 @@ fn assert_wrong_file_reuse(fixture: &Fixture, sources: &mut SharedSources) -> Re
     assert!(proof.current(&database));
     Ok(())
 }
+
+#[test]
+fn selected_proof_rejects_stale_shared_bytes_within_stamp_batch() -> Result<(), String> {
+    use crate::markdown::svg_rasterize::text_shaping::with_render_scoped_stamp_batch;
+
+    let fixture = Fixture::new()?;
+    let (proof, database) = fixture.load()?;
+    let id = database.faces().next().ok_or("real file face missing")?.id;
+    let mut sources = SharedSources::default();
+    let selected = proof
+        .selected_shared_face(&database, id, &mut sources, None, None)
+        .ok_or("initial shared source rejected")?;
+    let replacement = fixture.root.join("replacement.ttf");
+    std::fs::write(&replacement, font::BUNDLED_SANS_SERIF_FONT)
+        .map_err(|error| error.to_string())?;
+    let mut attempts = 0;
+    with_render_scoped_stamp_batch(|| {
+        attempts += 1;
+        if attempts == 1 {
+            assert!(proof.current(&database));
+            std::fs::rename(&replacement, &fixture.present).map_err(|error| error.to_string())?;
+            assert!(proof.current(&database));
+        }
+        let reused =
+            proof.selected_shared_face(&database, id, &mut sources, Some(&selected.source), None);
+        assert!(reused.is_none());
+        Ok::<(), String>(())
+    })?;
+    assert_eq!(attempts, 2);
+    assert!(!proof.current(&database));
+    fixture.cleanup()
+}
