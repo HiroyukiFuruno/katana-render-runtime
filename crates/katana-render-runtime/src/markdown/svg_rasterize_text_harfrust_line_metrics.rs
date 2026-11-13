@@ -1,9 +1,9 @@
 use super::super::super::measurement_diagnostic::{FaceMetricPhase, FaceMetricScope};
 use super::face_cache::{commit_file_font, font_for_face};
 use harfrust::font::{Font, Source, Tables};
+use read_fonts::{FontRef, ReadError, TableProvider};
 use resvg::usvg::fontdb::{Database, ID};
 use rustybuzz::ttf_parser::{Face, RawFaceTables};
-use skrifa::raw::{FontRef, ReadError, TableProvider};
 
 pub(in super::super) fn cached_face_line_metrics(
     database: &Database,

@@ -183,7 +183,7 @@ fn lazy_font_rejects_missing_ttc_offset_and_face_header() -> Result<(), Box<dyn 
 #[test]
 fn deleted_font_poisons_lazy_table_source_and_fresh_source_recovers()
 -> Result<(), Box<dyn std::error::Error>> {
-    use skrifa::raw::TableProvider;
+    use read_fonts::TableProvider;
     use std::sync::atomic::Ordering;
 
     let directory = tempfile::tempdir()?;

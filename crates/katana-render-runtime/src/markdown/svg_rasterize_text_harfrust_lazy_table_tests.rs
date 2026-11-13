@@ -1,8 +1,8 @@
 use super::{Ordering, load};
 use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
 use crate::markdown::svg_rasterize::text_shaping::test_font_data::font_with_renamed_table;
+use read_fonts::TableProvider;
 use rustybuzz::ttf_parser::Tag;
-use skrifa::raw::TableProvider;
 use std::io::ErrorKind;
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]

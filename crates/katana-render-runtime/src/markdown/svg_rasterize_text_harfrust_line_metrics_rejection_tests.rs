@@ -8,9 +8,9 @@ use super::{
 };
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
 use crate::markdown::svg_rasterize::text_shaping::test_font_data::font_with_empty_table;
+use read_fonts::{ReadError, TableProvider};
 use resvg::usvg::fontdb::{Database, ID};
 use rustybuzz::ttf_parser::Tag;
-use skrifa::raw::{ReadError, TableProvider};
 use std::path::PathBuf;
 
 type TestResult = Result<(), String>;
