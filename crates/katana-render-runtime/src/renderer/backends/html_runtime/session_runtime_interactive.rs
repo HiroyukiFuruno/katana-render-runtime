@@ -2,11 +2,11 @@ use crate::renderer::backends::html_document::HtmlDocumentScript;
 use crate::renderer::backends::html_runtime::script::{
     DOM_CONTENT_LOADED_DISPATCH, ParserBodyOnloadInstaller, WINDOW_LOAD_DISPATCH,
     body_onload_source_payload, check_bridge_error, evaluate, evaluate_and_wait_for_promise,
-    evaluate_value, install_dom_bridge, perform_microtask_checkpoint,
+    install_dom_bridge, perform_microtask_checkpoint,
 };
 use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 
-use super::StaticHtmlRuntime;
+use super::{StaticHtmlRuntime, session_timer_pump::pump_timers};
 
 type InteractiveScriptEvaluator<'a> = dyn FnMut(&str, &str) -> Result<(), HtmlRuntimeError> + 'a;
 
@@ -55,7 +55,11 @@ impl StaticHtmlRuntime {
             evaluate(scope, name, script)
         }
         .and_then(|()| perform_microtask_checkpoint(scope))
-        .and_then(|()| check_bridge_error(scope))
+        .and_then(|()| check_bridge_error(scope))?;
+        if name == "krr-html-dom-content-loaded" {
+            pump_timers(scope, 0.0)?;
+        }
+        Ok(())
     }
 
     pub(super) fn run_inline_interactive_scripts(
@@ -123,10 +127,9 @@ impl StaticHtmlRuntime {
         document_url: &str,
         evaluate: &mut InteractiveScriptEvaluator<'_>,
     ) -> Result<(), HtmlRuntimeError> {
-        let dom_content_loaded =
-            format!("{DOM_CONTENT_LOADED_DISPATCH};globalThis.__krrRunTimers?.()");
+        let dom_content_loaded = DOM_CONTENT_LOADED_DISPATCH;
         Self::accept_interactive_script_result(
-            evaluate("krr-html-dom-content-loaded", &dom_content_loaded),
+            evaluate("krr-html-dom-content-loaded", dom_content_loaded),
             document_url,
             "krr-html-dom-content-loaded",
         )?;
@@ -159,140 +162,6 @@ impl StaticHtmlRuntime {
     }
 }
 
-impl super::StaticHtmlRuntimeSession {
-    pub(crate) fn advance_timers(&mut self, elapsed_ms: f64) -> Result<bool, HtmlRuntimeError> {
-        let isolate = self
-            .isolate
-            .as_mut()
-            .ok_or_else(super::session_interaction::discarded_runtime_error)?;
-        let context = self
-            .context
-            .as_ref()
-            .ok_or_else(super::session_interaction::discarded_runtime_error)?;
-        v8::scope!(let handle_scope, isolate);
-        let context = v8::Local::new(handle_scope, context);
-        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
-        v8::tc_scope!(let scope, &mut **context_scope);
-        let elapsed = if elapsed_ms.is_finite() {
-            elapsed_ms.max(0.0)
-        } else {
-            0.0
-        };
-        let ran = evaluate_value(
-            scope,
-            "krr-html-timer-pump",
-            &format!("globalThis.__krrRunTimers?.({elapsed});"),
-        )?
-        .is_true();
-        perform_microtask_checkpoint(scope)?;
-        check_bridge_error(scope)?;
-        Ok(ran)
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::StaticHtmlRuntime;
-    use crate::renderer::backends::html_document::HtmlDocumentScript;
-
-    #[test]
-    fn inline_scripts_install_body_onload_at_source_order() -> Result<(), String> {
-        let scripts = vec![
-            HtmlDocumentScript::Source("first()".to_string()),
-            HtmlDocumentScript::Source("second()".to_string()),
-        ];
-        let mut calls = Vec::new();
-        StaticHtmlRuntime::run_inline_interactive_scripts(
-            "https://example.test/index.html",
-            &scripts,
-            Some(1),
-            Some("onload()"),
-            &mut |name, source| {
-                calls.push((name.to_string(), source.to_string()));
-                Ok(())
-            },
-        )
-        .map_err(test_error)?;
-        assert_eq!(
-            calls,
-            vec![
-                ("inline-script".to_string(), "first()".to_string()),
-                (
-                    "krr-html-body-onload".to_string(),
-                    "\"onload()\"".to_string()
-                ),
-                ("inline-script".to_string(), "second()".to_string()),
-            ]
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn lifecycle_scripts_are_dispatched_in_dom_load_order() -> Result<(), String> {
-        let mut names = Vec::new();
-        StaticHtmlRuntime::run_interactive_lifecycle_scripts(
-            "https://example.test/index.html",
-            &mut |name, _source| {
-                names.push(name.to_string());
-                Ok(())
-            },
-        )
-        .map_err(test_error)?;
-        assert_eq!(
-            names,
-            vec![
-                "krr-html-dom-content-loaded".to_string(),
-                "krr-html-window-load".to_string()
-            ]
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn timer_advance_normalizes_non_finite_elapsed_input() -> Result<(), String> {
-        let mut session = StaticHtmlRuntime
-            .start("<main>timer boundary</main>")
-            .map_err(test_error)?;
-        assert!(!session.advance_timers(f64::NAN).map_err(test_error)?);
-        Ok(())
-    }
-
-    #[test]
-    fn timer_exception_propagates_as_typed_runtime_error() -> Result<(), String> {
-        let mut session = StaticHtmlRuntime
-            .start("<script>setTimeout(() => { throw new Error('timer failure') }, 1)</script>")
-            .map_err(test_error)?;
-        let error = session
-            .advance_timers(1.0)
-            .err()
-            .ok_or("timer exception must propagate")?;
-        assert!(matches!(
-            error,
-            super::HtmlRuntimeError::JavaScriptException(_)
-        ));
-        Ok(())
-    }
-
-    fn test_error(error: super::HtmlRuntimeError) -> String {
-        error.to_string()
-    }
-
-    #[test]
-    fn test_error_preserves_real_runtime_failure() -> Result<(), String> {
-        let mut session = StaticHtmlRuntime
-            .start(
-                "<script>setTimeout(() => { throw new Error('typed-runtime-error') }, 1)</script>",
-            )
-            .map_err(test_error)?;
-        let error = session
-            .advance_timers(1.0)
-            .err()
-            .ok_or("script error missing")?;
-        assert!(matches!(
-            &error,
-            super::HtmlRuntimeError::JavaScriptException(_)
-        ));
-        assert!(test_error(error).contains("typed-runtime-error"));
-        Ok(())
-    }
-}
+#[path = "session_runtime_interactive_tests.rs"]
+mod tests;

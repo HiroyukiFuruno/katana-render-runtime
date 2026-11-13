@@ -27,6 +27,8 @@ mod session_runtime_interactive;
 mod session_runtime_static;
 #[path = "session_snapshot.rs"]
 mod session_snapshot;
+#[path = "session_timer_pump.rs"]
+mod session_timer_pump;
 
 type HtmlNodeIds = HashSet<u64>;
 

@@ -103,27 +103,23 @@ globalThis.clearTimeout = (id) => {
 };
 globalThis.__krrRunTimers = (elapsed = 0) => {
   __krrTimerClock += Math.max(0, Number(elapsed) || 0);
-  let ran = false;
-  while (true) {
-    let index = -1;
-    for (let candidate = 0; candidate < __krrTimerQueue.length; candidate += 1) {
-      const timer = __krrTimerQueue[candidate];
-      if (timer.due > __krrTimerClock) continue;
-      const selected = __krrTimerQueue[index];
-      if (
-        index < 0 ||
-        timer.due < selected.due ||
-        (timer.due === selected.due && timer.id < selected.id)
-      ) {
-        index = candidate;
-      }
+  let index = -1;
+  for (let candidate = 0; candidate < __krrTimerQueue.length; candidate += 1) {
+    const timer = __krrTimerQueue[candidate];
+    if (timer.due > __krrTimerClock) continue;
+    const selected = __krrTimerQueue[index];
+    if (
+      index < 0 ||
+      timer.due < selected.due ||
+      (timer.due === selected.due && timer.id < selected.id)
+    ) {
+      index = candidate;
     }
-    if (index < 0) break;
-    const [timer] = __krrTimerQueue.splice(index, 1);
-    ran = true;
-    timer.callback(...timer.args);
   }
-  return ran;
+  if (index < 0) return false;
+  const [timer] = __krrTimerQueue.splice(index, 1);
+  timer.callback(...timer.args);
+  return true;
 };
 class __KrrEvent {
   constructor(...args) {

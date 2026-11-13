@@ -464,6 +464,8 @@ test("timerは登録順に関係なく期限順、同一期限では登録順に
   install.setTimeout(() => order.push("earlier"), 5);
   install.setTimeout(() => order.push("same-deadline-first"), 5);
   install.run(25);
+  install.run();
+  install.run();
   expect(order).toEqual(["earlier", "same-deadline-first", "later"]);
 });
 
@@ -481,6 +483,7 @@ test("timer callback can cancel a due sibling and enqueue immediate work", () =>
     install.setTimeout(() => order.push("reentrant"), 0);
   }, 0);
   cancelled = install.setTimeout(() => order.push("cancelled"), 0);
+  install.run();
   install.run();
   expect(order).toEqual(["first", "reentrant"]);
 });

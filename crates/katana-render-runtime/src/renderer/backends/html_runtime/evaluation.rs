@@ -24,15 +24,30 @@ pub(super) fn evaluate_value<'scope>(
     result
 }
 
-fn evaluate_value_unbounded<'scope>(
+pub(super) fn evaluate_value_unbounded<'scope>(
     scope: &mut HtmlTryCatchScope<'scope, '_, '_, '_>,
     name: &str,
     code: &str,
 ) -> Result<v8::Local<'scope, v8::Value>, HtmlRuntimeError> {
+    let script = compile_unbounded(scope, name, code)?;
+    run_unbounded(scope, script)
+}
+
+pub(super) fn compile_unbounded<'scope>(
+    scope: &mut HtmlTryCatchScope<'scope, '_, '_, '_>,
+    name: &str,
+    code: &str,
+) -> Result<v8::Local<'scope, v8::Script>, HtmlRuntimeError> {
     let source = v8::String::new(scope, code).ok_or_else(source_allocation_error)?;
     let origin_name = v8::String::new(scope, name).ok_or_else(filename_allocation_error)?;
-    let script = ScriptCompiler::compile_with_origin(scope, source, origin_name)
-        .ok_or_else(|| HtmlRuntimeError::JavaScriptCompile(exception_message(scope)))?;
+    ScriptCompiler::compile_with_origin(scope, source, origin_name)
+        .ok_or_else(|| HtmlRuntimeError::JavaScriptCompile(exception_message(scope)))
+}
+
+pub(super) fn run_unbounded<'scope>(
+    scope: &mut HtmlTryCatchScope<'scope, '_, '_, '_>,
+    script: v8::Local<'scope, v8::Script>,
+) -> Result<v8::Local<'scope, v8::Value>, HtmlRuntimeError> {
     script
         .run(scope)
         .ok_or_else(|| script_execution_error(scope))
