@@ -33,15 +33,26 @@ impl HtmlFrameArtifact {
         let mut session = HtmlRuntime
             .open(source, viewport)
             .map_err(|error| HtmlArtifactError::Runtime(error.to_string()))?;
-        if self.frame.scroll_y > 0.0 {
+        self.restore_vertical_scroll(&mut session)?;
+        Ok(session)
+    }
+
+    fn restore_vertical_scroll(
+        &self,
+        session: &mut HtmlBrowserSession,
+    ) -> Result<(), HtmlArtifactError> {
+        let initial_scroll_y = session.latest_frame().map_or(0.0, |frame| frame.scroll_y);
+        let delta_y =
+            (self.frame.scroll_y - initial_scroll_y) * session.viewport().device_scale_factor;
+        if delta_y != 0.0 {
             session
                 .dispatch_input(HtmlBrowserInput::Scroll {
                     delta_x: 0.0,
-                    delta_y: self.frame.scroll_y,
+                    delta_y,
                 })
                 .map_err(|error| HtmlArtifactError::Runtime(error.to_string()))?;
         }
-        Ok(session)
+        Ok(())
     }
 }
 

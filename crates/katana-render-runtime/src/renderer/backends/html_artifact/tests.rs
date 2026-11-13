@@ -6,6 +6,8 @@ use super::{
 use crate::{HtmlBrowserFrame, HtmlBrowserPixelFormat};
 use std::process::Command;
 
+#[path = "tests_scroll_restore.rs"]
+mod scroll_restore;
 #[path = "test_support.rs"]
 mod test_support;
 use test_support::{
@@ -110,30 +112,6 @@ fn contract_rejects_source_runtime_capacity_and_clear() -> Result<(), Box<dyn st
         Err(HtmlArtifactError::ProvenanceMismatch)
     ));
     assert_store_capacity_and_clear(&artifact)?;
-    Ok(())
-}
-
-#[test]
-fn resume_session_restores_saved_scroll_position() -> Result<(), Box<dyn std::error::Error>> {
-    let source = HtmlBrowserSource::new(
-        "<div style='height:500px'>library reservation details</div>",
-        "https://example.test/scroll.html",
-    )?;
-    let viewport = HtmlBrowserViewport::new(320, 160, 1.0)?;
-    let provenance = provenance(&source, viewport)?;
-    let mut session = HtmlRuntime.open(source.clone(), viewport)?;
-    session.dispatch_input(HtmlBrowserInput::Scroll {
-        delta_x: 0.0,
-        delta_y: 120.0,
-    })?;
-    let frame = session.latest_frame().ok_or("frame")?.clone();
-    assert!(frame.scroll_y > 0.0);
-    let artifact = HtmlFrameArtifact::new(provenance.clone(), frame)?;
-    session.close()?;
-
-    let mut resumed = artifact.resume_session(source, viewport, &provenance)?;
-    assert!(resumed.latest_frame().ok_or("resumed frame")?.scroll_y > 0.0);
-    resumed.close()?;
     Ok(())
 }
 
