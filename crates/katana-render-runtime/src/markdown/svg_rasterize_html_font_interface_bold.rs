@@ -17,7 +17,10 @@ pub(in crate::markdown::svg_rasterize) fn register_interface_bold(
     if !has_native_interface_candidate(database) {
         return None;
     }
-    register_coretext_identity(database, coretext_bold_identity()?)
+    register_coretext_identity(
+        database,
+        coretext_interface_identity(objc2_core_text::CTFontUIFontType::EmphasizedSystem)?,
+    )
 }
 
 pub(super) fn register_coretext_identity(
@@ -146,18 +149,16 @@ fn native_system_font_path(path: &Path) -> bool {
     path.to_string_lossy().starts_with("/System/Library/Fonts/")
 }
 
-fn coretext_bold_identity() -> Option<(String, PathBuf, bool)> {
+pub(super) fn coretext_interface_identity(
+    kind: objc2_core_text::CTFontUIFontType,
+) -> Option<(String, PathBuf, bool)> {
     use objc2_core_foundation::{CFRange, CFString};
-    use objc2_core_text::{CTFont, CTFontUIFontType};
+    use objc2_core_text::CTFont;
 
     let language = CFString::from_str("ja");
     /* WHY: CoreTextへ公開API指定のUI font種別・日本語language・定数point sizeを渡す。 */
     let base = unsafe {
-        CTFont::new_ui_font_for_language(
-            CTFontUIFontType::EmphasizedSystem,
-            CORETEXT_INTERFACE_POINT_SIZE,
-            Some(&language),
-        )
+        CTFont::new_ui_font_for_language(kind, CORETEXT_INTERFACE_POINT_SIZE, Some(&language))
     }?;
     let sample = CFString::from_str(INTERFACE_SAMPLE);
     let range = CFRange {

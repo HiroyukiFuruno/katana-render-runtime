@@ -75,6 +75,16 @@ fn coretext_interface_family_selects_w4_regular_and_w6_bold() -> Result<(), Stri
 
 #[cfg(target_os = "macos")]
 #[test]
+fn coretext_interface_identity_propagates_no_font_for_the_no_font_selector() {
+    use super::interface_bold::coretext_interface_identity;
+    use objc2_core_text::CTFontUIFontType;
+
+    assert!(coretext_interface_identity(CTFontUIFontType::None).is_none());
+    assert!(coretext_interface_identity(CTFontUIFontType::EmphasizedSystem).is_some());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn coretext_regular_interface_identity_cannot_register_a_bold_alias() -> Result<(), String> {
     use super::interface_bold::{coretext_face_identity, register_coretext_identity};
 
