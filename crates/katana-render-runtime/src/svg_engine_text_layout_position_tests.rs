@@ -87,6 +87,17 @@ fn rotation_and_relative_position_transform_a_single_glyph() -> Result<(), Strin
 }
 
 #[test]
+fn extreme_relative_shift_drops_only_the_unrepresentable_text() -> Result<(), String> {
+    let tree = parse(
+        "",
+        "<tspan id='unrepresentable' dx='1e30'>A</tspan><tspan x='20' y='50'>B</tspan>",
+    )?;
+    let expected = parse("", "B")?;
+    assert_eq!(text(&tree)?.bounding_box(), text(&expected)?.bounding_box());
+    Ok(())
+}
+
+#[test]
 fn letter_and_word_spacing_follow_the_glyph_span() -> Result<(), String> {
     let attributes = "style='font-kerning:none' xml:space='preserve'";
     let before = parse(attributes, "H<tspan> H</tspan>H")?;
