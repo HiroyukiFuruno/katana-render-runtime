@@ -1,7 +1,17 @@
 use super::super::html_css_selector::CssSelector;
 use super::super::html_dom_helpers::attribute_value;
 use super::{HtmlDocument, form, selector};
+use html5ever::QualName;
 use markup5ever_rcdom::{Handle, NodeData};
+
+fn dom_tag_name(name: &QualName) -> String {
+    let local: &str = name.local.as_ref();
+    if form::is_html_element(name) {
+        local.to_ascii_uppercase()
+    } else {
+        local.to_owned()
+    }
+}
 
 impl HtmlDocument {
     pub(crate) fn anchor_href_attribute(
@@ -12,13 +22,7 @@ impl HtmlDocument {
         let NodeData::Element { name, attrs, .. } = &node.data else {
             return Err("tagName target is not an element".to_string());
         };
-        let tag_name = name.local.to_string();
-        let tag_name = if form::is_html_element(name) {
-            tag_name.to_ascii_uppercase()
-        } else {
-            tag_name
-        };
-        if !matches!(tag_name.as_str(), "A" | "AREA") {
+        if !matches!(dom_tag_name(name).as_str(), "A" | "AREA") {
             return Ok(None);
         }
         Ok(Some(
@@ -29,14 +33,7 @@ impl HtmlDocument {
     pub(crate) fn tag_name(&self, node_id: u64) -> Result<String, String> {
         let node = self.node(node_id)?;
         match &node.data {
-            markup5ever_rcdom::NodeData::Element { name, .. } => {
-                let local_name = name.local.to_string();
-                if form::is_html_element(name) {
-                    Ok(local_name.to_ascii_uppercase())
-                } else {
-                    Ok(local_name)
-                }
-            }
+            NodeData::Element { name, .. } => Ok(dom_tag_name(name)),
             _ => Err("tagName target is not an element".to_string()),
         }
     }
