@@ -79,16 +79,22 @@ fn native_dom_error_key<'scope>(
     Some(v8::Private::for_api(scope, Some(name)))
 }
 
+fn native_dom_error_name<'scope>(
+    scope: &mut v8::PinScope<'scope, '_>,
+) -> Option<(v8::Local<'scope, v8::String>, v8::Local<'scope, v8::String>)> {
+    let property = v8::String::new(scope, "name")?;
+    let name = v8::String::new(scope, NATIVE_DOM_ERROR_NAME)?;
+    Some((property, name))
+}
+
 fn mark_native_dom_error<'scope>(
     scope: &mut v8::PinScope<'scope, '_>,
     exception: v8::Local<'scope, v8::Value>,
     message: v8::Local<'scope, v8::String>,
 ) {
-    let (Some(property), Some(name), Some(object)) = (
-        v8::String::new(scope, "name"),
-        v8::String::new(scope, NATIVE_DOM_ERROR_NAME),
-        exception.to_object(scope),
-    ) else {
+    let (Some((property, name)), Some(object)) =
+        (native_dom_error_name(scope), exception.to_object(scope))
+    else {
         return;
     };
     let _named = object.define_own_property(
@@ -111,8 +117,7 @@ pub(super) fn uncaught_dom_error(
     let key = native_dom_error_key(scope)?;
     /* WHY: 非公開の印を先に調べ、通常例外のname getterを実行しない。 */
     let message = v8::Local::<v8::String>::try_from(exception.get_private(scope, key)?).ok()?;
-    let property = v8::String::new(scope, "name")?;
-    let expected = v8::String::new(scope, NATIVE_DOM_ERROR_NAME)?;
+    let (property, expected) = native_dom_error_name(scope)?;
     let name = exception.get(scope, property.into())?;
     if !name.strict_equals(expected.into()) {
         return None;
