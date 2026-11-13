@@ -19,17 +19,12 @@ pub(super) fn apply_geometry_plans(
         let Some(plan) = plans.get(&node.range().start) else {
             continue;
         };
-        collect_attribute_edits(source, node, plan, &mut edits);
+        collect_attribute_edits(node, plan, &mut edits);
     }
     (!edits.is_empty()).then(|| apply_source_edits(source, edits, true))
 }
 
-fn collect_attribute_edits(
-    source: &str,
-    node: Node<'_, '_>,
-    plan: &GeometryPlan,
-    edits: &mut Vec<SourceEdit>,
-) {
+fn collect_attribute_edits(node: Node<'_, '_>, plan: &GeometryPlan, edits: &mut Vec<SourceEdit>) {
     let mut insertions = String::new();
     for property in GEOMETRY_PROPERTIES {
         let Some(value) = plan.value(property) else {
@@ -38,7 +33,7 @@ fn collect_attribute_edits(
         collect_property_edit(node, property, value, &mut insertions, edits);
     }
     if !insertions.is_empty()
-        && let Some(position) = opening_tag_end(source, node)
+        && let Some(position) = opening_tag_end(node)
     {
         push_edit(edits, position..position, insertions);
     }
@@ -70,10 +65,10 @@ fn remove_preceding_space(range: Range<usize>) -> Range<usize> {
     range.start.saturating_sub(1)..range.end
 }
 
-fn opening_tag_end(source: &str, node: Node<'_, '_>) -> Option<usize> {
+fn opening_tag_end(node: Node<'_, '_>) -> Option<usize> {
     /* WHY: 要素の範囲は同じDocumentが解析した元のバイト列を指す。 */
     let range = node.range();
-    let bytes = source.as_bytes();
+    let bytes = node.document().input_text().as_bytes();
     let mut quote = None;
     let offset = bytes[range.clone()].iter().position(|&byte| {
         match (quote, byte) {
