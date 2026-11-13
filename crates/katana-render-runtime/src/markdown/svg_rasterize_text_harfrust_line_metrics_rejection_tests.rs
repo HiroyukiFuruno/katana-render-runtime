@@ -135,18 +135,35 @@ fn loaded_font(bytes: Vec<u8>) -> Result<(Database, ID), String> {
 #[test]
 fn variable_face_tables_do_not_enter_static_line_metrics() -> TestResult {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(VARIABLE_FONT);
-    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
-    let font = font(&bytes)?;
-    assert!(font.tables().fvar().is_ok());
-    assert!(metrics_from_font(&font, METRIC_TEST_SIZE).is_none());
-    assert!(super::super::metrics_from_tables(font.tables(), METRIC_TEST_SIZE, || None).is_none());
+    let mut bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+    assert_variable_face_rejects_static_metrics(&bytes, b"fvar")?;
+    remove_sfnt_record(&mut bytes, b"fvar")?;
+    assert_variable_face_rejects_static_metrics(&bytes, b"avar")?;
+    remove_sfnt_record(&mut bytes, b"avar")?;
+    assert_variable_face_rejects_static_metrics(&bytes, b"MVAR")
+}
+
+fn assert_variable_face_rejects_static_metrics(
+    bytes: &[u8],
+    remaining: &[u8; SFNT_TAG_LENGTH],
+) -> TestResult {
+    let parsed = font(bytes)?;
+    let tables = parsed.tables();
+    assert_eq!(tables.fvar().is_ok(), remaining == b"fvar");
+    assert_eq!(tables.avar().is_ok(), remaining != b"MVAR");
+    assert!(tables.mvar().is_ok());
+    assert!(metrics_from_font(&parsed, METRIC_TEST_SIZE).is_none());
+    assert!(
+        super::super::metrics_from_tables(tables, METRIC_TEST_SIZE, || Some((1.0, 1.0))).is_none(),
+        "remaining table: {remaining:?}"
+    );
     Ok(())
 }
 
 #[test]
 fn absent_os2_falls_back_to_full_parser_metrics() -> TestResult {
     let mut bytes = FONT_BYTES.to_vec();
-    remove_os2_record(&mut bytes)?;
+    remove_sfnt_record(&mut bytes, b"OS/2")?;
     set_word(&mut bytes, b"hhea", HHEA_ASCENDER_OFFSET, 0)?;
     let font = font(&bytes)?;
     assert!(font.tables().os2().is_err());
@@ -184,12 +201,12 @@ fn malformed_os2_bypasses_cached_metrics_and_preserves_legacy_metrics() -> TestR
     })
 }
 
-fn remove_os2_record(bytes: &mut [u8]) -> TestResult {
+fn remove_sfnt_record(bytes: &mut [u8], tag: &[u8; SFNT_TAG_LENGTH]) -> TestResult {
     let mut records = sfnt_records(bytes)?;
     let original_count = records.len();
-    records.retain(|record| &record[..SFNT_TAG_LENGTH] != b"OS/2");
+    records.retain(|record| &record[..SFNT_TAG_LENGTH] != tag);
     if records.len() == original_count {
-        return Err("OS/2 directory record missing".into());
+        return Err(format!("SFNT directory record {tag:?} missing"));
     }
     rewrite_sfnt_directory(bytes, &records)
 }
