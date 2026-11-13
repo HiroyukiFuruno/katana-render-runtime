@@ -664,9 +664,9 @@
       "source": "crates/resvg/src/render.rs",
       "destination": "resvg/render.rs",
       "sourceSha256": "09907a79e6a25ba284805dffe0d23edc3348d1cf07539696df9a09fc9825eafb",
-      "transplantedSha256": "2d589933771bf6ae10edaa65e0a396c80248c5a0fd6808e944f68318e51c0d8b",
+      "transplantedSha256": "6586dbc87581099de866fa3fcdabd09219be66edb79a1aaf1cd2918bb8dda6b3",
       "sourceBytes": 7345,
-      "transplantedBytes": 9796,
+      "transplantedBytes": 11315,
       "adaptations": {
         "cratePaths": 9,
         "enabledFeaturePredicates": {},
