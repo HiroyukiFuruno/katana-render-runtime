@@ -155,3 +155,24 @@ fn host_active_for_test(
         .is_some_and(|state| state.host_io_active().load(Ordering::SeqCst));
     return_value.set(v8::Boolean::new(scope, active).into());
 }
+
+#[test]
+fn successful_dom_callback_mutates_the_element_and_returns_undefined() -> Result<(), String> {
+    with_v8_context!(
+        isolate,
+        scope,
+        [],
+        [isolate.set_slot(HtmlDomBridgeState::new(HtmlDocument::parse("<button id=action>Run</button>")));],
+        {
+            install_dom_bridge(scope, "about:blank").map_err(|error| error.to_string())?;
+            let result = evaluate_value(
+                scope,
+                "successful-native-attribute-mutation",
+                "(() => { const id = __krr_dom('getElementById', 'action'); const result = __krr_dom('setAttribute', id, 'title', 'Updated'); return result === undefined && document.getElementById('action').getAttribute('title') === 'Updated'; })()",
+            )
+            .map_err(|error| error.to_string())?;
+            assert!(result.is_true());
+            check_bridge_error(scope).map_err(|error| error.to_string())
+        }
+    )
+}
