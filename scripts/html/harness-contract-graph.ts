@@ -1481,7 +1481,7 @@ function reviewedFixtureVariables(
     if (
       declarations.length !== 1 ||
       !declaration ||
-      canonicalNativeUnitAstDigest(declaration) !== digest
+      canonicalNativeUnitAstDigest(declaration, [], true) !== digest
     )
       return undefined;
     selected.push(declaration);
@@ -1498,7 +1498,7 @@ function semanticFixtureImports(
   if (context?.name !== "scripts/runtime-bundles/runtime-unused-semantic-adapter_test.ts")
     return result;
   const units = {
-    physicalOwnerFixture: "e3d2a4f5238eb3e2c932bdc6286b5c67cbc8056b1211f523ae575e2a458d730e",
+    physicalOwnerFixture: "41a421c765d72a5c35bcfc563ae27d1e2abd9f1dcbad53ff0fbae12595e16626",
     actualPhysicalFactory: "c0a4404adce42c06263c954f434b64834ab03e3d2ba088b6adae40975323011a",
   };
   const nodes = astNodes(module),

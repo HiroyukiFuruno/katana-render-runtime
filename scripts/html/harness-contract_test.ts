@@ -6347,6 +6347,14 @@ describe("finite standard gate process and scratch import bindings", () => {
     );
     expect(references(gate)).toContain("!execute-local:runtime-unused-semantic-node.ts");
   });
+  test("binds the scratch import after an offset shift and rejects a different fixture source", () => {
+    const source = read(adapterTest);
+    const shifted = `\n${source}`;
+    expect(references(adapterTest, shifted)).not.toContain("!unresolved-import");
+    const changed = shifted.replace("...raw.keys()", "...raw.values()");
+    expect(changed).not.toBe(shifted);
+    expect(references(adapterTest, changed)).toContain("!unresolved-import");
+  });
   test("accepts the reviewed MathJax preflight sources and rejects changed routes", () => {
     const cli = "scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts";
     const inputs = "scripts/runtime-bundles/runtime-mathjax-audit-evidence-inputs.ts";
