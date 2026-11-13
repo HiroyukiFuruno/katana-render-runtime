@@ -115,6 +115,32 @@ fn public_phases_reject_operations_after_real_session_closes() -> Result<(), Str
 }
 
 #[test]
+fn public_full_scroll_preserves_script_failure_and_releases_observer() -> Result<(), String> {
+    let source = HtmlBrowserSource::new(
+        r#"<body style="height: 2400px">
+        <div id="marker" style="position:absolute; top:1000px; height:40px">Marker</div>
+        <script>
+        new IntersectionObserver((entries) => {
+            if (entries.some((entry) => entry.isIntersecting)) {
+                throw new Error("font-route scroll observer failed");
+            }
+        }).observe(document.getElementById("marker"));
+        </script>"#,
+        "https://example.test/font-route-scroll-error.html",
+    )
+    .map_err(|error| error.to_string())?;
+    let viewport = fixture_viewport()?;
+    let mut session =
+        HtmlBrowserSession::new(source, viewport).map_err(|error| error.to_string())?;
+    let max_scroll = phases::max_scroll(&session, viewport)?;
+    assert!(max_scroll > 0.0);
+    let result = phases::full_y(&mut session, max_scroll);
+    assert!(result.is_err_and(|error| error.contains("font-route scroll observer failed")));
+    assert!(!raster_observer::enabled());
+    session.close().map_err(|error| error.to_string())
+}
+
+#[test]
 fn public_open_phases_propagate_source_and_viewport_errors() -> Result<(), String> {
     let malformed_origin = || {
         HtmlBrowserSource::new(FIXTURE, "/missing-scheme.html").map_err(|error| error.to_string())
