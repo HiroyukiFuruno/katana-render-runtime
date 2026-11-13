@@ -232,13 +232,7 @@ mod tests {
         use tiny_skia::{IntRect, Transform};
 
         let tree = oversized_layer_tree()?;
-        let group = tree
-            .node_by_id("oversized")
-            .and_then(|node| match node {
-                crate::svg_engine::usvg::Node::Group(group) => Some(group.as_ref()),
-                _ => None,
-            })
-            .ok_or("isolated group missing")?;
+        let group = fixture_group(&tree, "oversized").ok_or("isolated group missing")?;
         let context = super::Context {
             max_bbox: IntRect::from_xywh(0, 0, 600_000_000, 8).ok_or("invalid test bounds")?,
         };
@@ -259,8 +253,29 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn isolated_layer_fixture_requires_a_group() -> Result<(), crate::svg_engine::usvg::Error> {
+        let tree = oversized_layer_tree()?;
+        assert!(matches!(
+            tree.node_by_id("shape"),
+            Some(crate::svg_engine::usvg::Node::Path(_))
+        ));
+        assert!(fixture_group(&tree, "shape").is_none());
+        Ok(())
+    }
+
+    fn fixture_group<'a>(
+        tree: &'a crate::svg_engine::usvg::Tree,
+        id: &str,
+    ) -> Option<&'a crate::svg_engine::usvg::Group> {
+        tree.node_by_id(id).and_then(|node| match node {
+            crate::svg_engine::usvg::Node::Group(group) => Some(group.as_ref()),
+            _ => None,
+        })
+    }
+
     fn oversized_layer_tree() -> Result<crate::svg_engine::usvg::Tree, crate::svg_engine::usvg::Error> {
-        let svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><g id='oversized' opacity='.5'><rect width='8' height='8'/></g></svg>";
+        let svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><g id='oversized' opacity='.5'><rect id='shape' width='8' height='8'/></g></svg>";
         crate::svg_engine::usvg::Tree::from_str(svg, &crate::svg_engine::usvg::Options::default())
     }
 
