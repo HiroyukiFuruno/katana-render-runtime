@@ -259,12 +259,21 @@ mod tests {
         let mut database = usvg::fontdb::Database::new();
         let mut loaded_paths = BTreeSet::new();
 
-        load_system_font_paths(&mut database, [font.clone()], &mut loaded_paths);
+        load_system_font_paths(
+            &mut database,
+            BTreeSet::from([font.clone()]),
+            &mut loaded_paths,
+        );
         assert_eq!(database.faces().count(), 0);
         assert!(loaded_paths.is_empty());
 
         std::fs::copy(bundled, &font)?;
-        load_system_font_paths(&mut database, [font.clone(), font], &mut loaded_paths);
+        load_system_font_paths(
+            &mut database,
+            BTreeSet::from([font.clone()]),
+            &mut loaded_paths,
+        );
+        load_system_font_paths(&mut database, BTreeSet::from([font]), &mut loaded_paths);
         assert_eq!(database.faces().count(), 1);
         assert_eq!(loaded_paths.len(), 1);
         Ok(())

@@ -73,8 +73,8 @@ fn glyph_audit_fixture_rejects_malformed_svg_with_a_real_font() -> Result<(), St
 #[test]
 fn glyph_audit_fixture_rejects_a_shape_in_place_of_text() -> Result<(), String> {
     let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="24"><rect id="audit-run" width="16" height="12"/></svg>"#;
-    let tree = resvg::usvg::Tree::from_str(svg, &resvg::usvg::Options::default())
-        .map_err(|error| error.to_string())?;
+    let (database, _) = super::variations_tests::bundled_face()?;
+    let tree = parse_font_tree(svg, database)?;
     assert!(matches!(
         tree.node_by_id("audit-run"),
         Some(resvg::usvg::Node::Path(_))
