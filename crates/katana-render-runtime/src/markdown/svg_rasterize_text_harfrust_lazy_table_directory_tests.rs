@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 
 const EMBEDDED_FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 const SINGLE_FACE_TTC_HEADER: &[u8] = b"ttcf\0\x01\0\0\0\0\0\x01";
+const FIRST_SFNT_TABLE_OFFSET: std::ops::Range<usize> = 20..24;
+const FIRST_SFNT_TABLE_LENGTH: std::ops::Range<usize> = 24..28;
 
 fn temp_path(label: &str, extension: &str) -> PathBuf {
     let stamp = std::time::SystemTime::now()
@@ -204,8 +206,25 @@ fn lazy_font_rejects_invalid_sfnt_header_index_and_table_range()
     bytes[..4].copy_from_slice(b"fake");
     assert_sfnt_error(&path, &bytes, "unsupported SFNT flavor")?;
     bytes[..4].copy_from_slice(&EMBEDDED_FONT_BYTES[..4]);
-    bytes[20..24].copy_from_slice(&u32::MAX.to_be_bytes());
+    bytes[FIRST_SFNT_TABLE_OFFSET].copy_from_slice(&u32::MAX.to_be_bytes());
     assert_sfnt_error(&path, &bytes, "invalid SFNT table directory")
+}
+
+#[test]
+fn lazy_font_rejects_in_bounds_table_that_exceeds_memory_budget()
+-> Result<(), Box<dyn std::error::Error>> {
+    const OVERSIZED_LENGTH: u32 = 64 * 1024 * 1024 + 1;
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("oversized-table.ttf");
+    let mut bytes = EMBEDDED_FONT_BYTES.to_vec();
+    let offset = u32::from_be_bytes(bytes[FIRST_SFNT_TABLE_OFFSET].try_into()?);
+    bytes[FIRST_SFNT_TABLE_LENGTH].copy_from_slice(&OVERSIZED_LENGTH.to_be_bytes());
+    std::fs::write(&path, bytes)?;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)?
+        .set_len(u64::from(offset) + u64::from(OVERSIZED_LENGTH))?;
+    assert_lazy_directory_error(&path, std::io::ErrorKind::OutOfMemory)
 }
 
 fn assert_sfnt_error(
