@@ -11,10 +11,8 @@ pub(super) fn register_callback<'scope>(
     ),
     String,
 > {
-    let name = v8::String::new(scope, name)
-        .ok_or_else(|| format!("{label} bridge name allocation failed"))?;
-    let callback = v8::Function::new(scope, callback)
-        .ok_or_else(|| format!("{label} bridge callback allocation failed"))?;
+    let name = require_bridge_handle(v8::String::new(scope, name), label, "name")?;
+    let callback = require_bridge_handle(v8::Function::new(scope, callback), label, "callback")?;
     if global.set(scope, name.into(), callback.into()) != Some(true) {
         return Err(registration_error(label));
     }
@@ -41,4 +39,29 @@ pub(super) fn install_callback(
 
 fn registration_error(label: &str) -> String {
     format!("{label} bridge registration failed")
+}
+
+fn require_bridge_handle<T>(handle: Option<T>, label: &str, kind: &str) -> Result<T, String> {
+    handle.ok_or_else(|| format!("{label} bridge {kind} allocation failed"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::require_bridge_handle;
+
+    #[test]
+    fn missing_bridge_handles_preserve_the_failed_operation() {
+        for (kind, expected) in [
+            ("name", "SVG path length bridge name allocation failed"),
+            (
+                "callback",
+                "SVG path length bridge callback allocation failed",
+            ),
+        ] {
+            assert_eq!(
+                require_bridge_handle::<()>(None, "SVG path length", kind),
+                Err(expected.to_owned()),
+            );
+        }
+    }
 }
