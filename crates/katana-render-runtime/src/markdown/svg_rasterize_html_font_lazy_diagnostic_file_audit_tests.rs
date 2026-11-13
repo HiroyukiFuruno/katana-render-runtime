@@ -208,6 +208,23 @@ fn lazy_audit_stale_file_rejects_route_before_setup() -> Result<(), String> {
 }
 
 #[test]
+fn diagnostic_file_fixture_rejects_replaced_font_without_retaining_database() -> Result<(), String>
+{
+    let file = AuditFile::new()?;
+    let (database, proof, _) = file.input()?;
+    let validate = super::super::routes::validate_file_fixture_database;
+    let owner = Arc::downgrade(&database);
+    let valid = validate(Arc::clone(&database), Arc::clone(&proof))
+        .ok_or("unchanged diagnostic database rejected")?;
+    assert!(Arc::ptr_eq(&valid.database, &database));
+    drop(valid);
+    std::fs::write(&file.0, b"replaced font").map_err(|error| error.to_string())?;
+    assert!(validate(database, proof).is_none());
+    assert!(owner.upgrade().is_none());
+    Ok(())
+}
+
+#[test]
 fn lazy_audit_rejects_a_file_removed_after_route_selection() -> Result<(), String> {
     let file = AuditFile::new()?;
     let (database, proof, id) = file.input()?;

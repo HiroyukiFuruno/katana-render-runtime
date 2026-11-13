@@ -12,11 +12,16 @@ pub(in super::super) fn file_fixture_database(
 ) -> Option<KnownCacheValue> {
     /* WHY: 保存形式の対照は実Fileから構築し、製品cacheのSharedFileをFileと偽って計測しない。 */
     let (database, proof) = font_sources::build_known_html_font_db(request);
-    let database = Arc::new(database);
-    proof.current(&database).then_some(KnownCacheValue {
-        database,
-        proof: Arc::new(proof),
-    })
+    validate_file_fixture_database(Arc::new(database), Arc::new(proof))
+}
+
+pub(in super::super) fn validate_file_fixture_database(
+    database: Arc<Database>,
+    proof: Arc<CreationProof>,
+) -> Option<KnownCacheValue> {
+    proof
+        .current(&database)
+        .then_some(KnownCacheValue { database, proof })
 }
 
 pub(in super::super) fn select_database(
