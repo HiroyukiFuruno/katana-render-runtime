@@ -38,17 +38,15 @@ pub(super) fn inline_flex_metrics(
         return None;
     }
     style.resolve_text_line_height(children);
-    text_flex_metrics(node, children, &style, inherited, available)
+    text_flex_metrics(children, &style, available)
 }
 
 fn text_flex_metrics(
-    node: &HtmlDocumentNode,
     children: &[HtmlDocumentNode],
     style: &CssStyle,
-    inherited: &CssStyle,
     available: f32,
 ) -> Option<AtomicLineMetrics> {
-    let width = InlineMeasurement::node_width(node, inherited, available)?;
+    let width = InlineMeasurement::inline_element_width(children, style, available);
     let text = node_text(children);
     let lines = wrap_text_with_style(
         &text,

@@ -1,8 +1,31 @@
 use super::super::html_css_selector::CssSelector;
+use super::super::html_dom_helpers::attribute_value;
 use super::{HtmlDocument, form, selector};
 use markup5ever_rcdom::{Handle, NodeData};
 
 impl HtmlDocument {
+    pub(crate) fn anchor_href_attribute(
+        &self,
+        node_id: u64,
+    ) -> Result<Option<Option<String>>, String> {
+        let node = self.node(node_id)?;
+        let NodeData::Element { name, attrs, .. } = &node.data else {
+            return Err("tagName target is not an element".to_string());
+        };
+        let tag_name = name.local.to_string();
+        let tag_name = if form::is_html_element(name) {
+            tag_name.to_ascii_uppercase()
+        } else {
+            tag_name
+        };
+        if !matches!(tag_name.as_str(), "A" | "AREA") {
+            return Ok(None);
+        }
+        Ok(Some(
+            attribute_value(&attrs.borrow(), "href").map(ToOwned::to_owned),
+        ))
+    }
+
     pub(crate) fn tag_name(&self, node_id: u64) -> Result<String, String> {
         let node = self.node(node_id)?;
         match &node.data {

@@ -112,10 +112,9 @@ fn lookup_anchor_hash(
     node: u64,
     arguments: &[String],
 ) -> Result<DomValue, String> {
-    if !matches!(document.tag_name(node)?.as_str(), "A" | "AREA") {
+    let Some(href) = document.anchor_href_attribute(node)? else {
         return Ok(DomValue::Undefined);
-    }
-    let href = document.attribute(node, "href")?;
+    };
     let Some(href) = href else {
         return Ok(DomValue::String(String::new()));
     };

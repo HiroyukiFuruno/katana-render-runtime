@@ -60,14 +60,20 @@ impl InlineMeasurement {
         if !style.inline_block || style.display == taffy::style::Display::None {
             return None;
         }
+        Some(Self::inline_element_width(children, &style, available))
+    }
+
+    pub(super) fn inline_element_width(
+        children: &[HtmlDocumentNode],
+        style: &CssStyle,
+        available: f32,
+    ) -> f32 {
         let available_box =
             (available - style.margin_left - style.margin_right).max(MIN_LAYOUT_WIDTH);
-        let box_width = Self::content_box_width(children, &style, available_box);
-        Some(
-            (box_width + style.margin_left + style.margin_right)
-                .min(available)
-                .max(MIN_LAYOUT_WIDTH),
-        )
+        let box_width = Self::content_box_width(children, style, available_box);
+        (box_width + style.margin_left + style.margin_right)
+            .min(available)
+            .max(MIN_LAYOUT_WIDTH)
     }
 
     pub(in crate::renderer::backends::html_interactive) fn content_box_width(
