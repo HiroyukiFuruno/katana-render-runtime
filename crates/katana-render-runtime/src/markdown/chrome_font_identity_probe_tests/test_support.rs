@@ -26,17 +26,14 @@ fn write_physical_font(path: &Path, bytes: &[u8]) -> Result<(Database, SelectedF
     database
         .load_font_file(path)
         .map_err(|error| error.to_string())?;
-    let face = database
+    /* WHY: fontdbはファミリー名を読み取れたfaceだけを登録する。 */
+    let (face, family_name) = database
         .faces()
         .next()
+        .and_then(|face| face.families.first().map(|(name, _)| (face, name)))
         .ok_or("fontdb did not load the font")?;
-    let family_name = face
-        .families
-        .first()
-        .map(|(family, _)| family.clone())
-        .ok_or("bundled font has no family name")?;
     let selected = SelectedFont {
-        family_name,
+        family_name: family_name.clone(),
         post_script_name: face.post_script_name.clone(),
         glyph_count: 1,
         is_custom_font: false,
