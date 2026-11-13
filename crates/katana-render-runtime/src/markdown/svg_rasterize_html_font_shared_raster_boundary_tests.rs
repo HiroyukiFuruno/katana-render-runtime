@@ -4,6 +4,27 @@ use resvg::usvg::fontdb::{Database, Source};
 use std::{collections::BTreeMap, sync::Arc};
 
 #[test]
+fn shared_font_raster_propagates_error_after_successful_svg_parse() -> Result<(), String> {
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+        <defs><filter id="s" filterUnits="userSpaceOnUse" primitiveUnits="objectBoundingBox" x="0" y="0" width="20" height="20" color-interpolation-filters="sRGB">
+            <feDropShadow dx="1e38" dy="0" stdDeviation="0"/>
+        </filter></defs>
+        <g filter="url(#s)"><rect width="10" height="10" fill="blue"/></g>
+        <text x="1" y="16" font-family="Noto Sans">A</text>
+    </svg>"##;
+    let mut options = resvg::usvg::Options::default();
+    options.fontdb_mut().load_font_data(FONT_BYTES.to_vec());
+    let parsed = resvg::usvg::Tree::from_str(svg, &options).map_err(|error| error.to_string())?;
+    assert!(!parsed.root().children().is_empty());
+    let result = super::super::render_html_with_options(svg, &options);
+    assert_eq!(
+        result.err().as_deref(),
+        Some("Failed to rasterize SVG: drop-shadow contains a non-finite parameter")
+    );
+    Ok(())
+}
+
+#[test]
 fn html_render_reports_malformed_svg_parse_error() -> Result<(), String> {
     let svg = "<svg";
     let options = crate::markdown::svg_rasterize::font::html::html_rasterizer_options(svg);
