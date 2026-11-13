@@ -234,6 +234,22 @@ fn lazy_audit_stale_file_rejects_route_before_setup() -> Result<(), String> {
 }
 
 #[test]
+fn lazy_audit_does_not_record_a_selection_that_became_stale() -> Result<(), String> {
+    let file = AuditFile::new()?;
+    let (database, proof, _) = file.input()?;
+    assert!(proof.current(&database));
+    std::fs::write(&file.0, b"replacement after selection").map_err(|error| error.to_string())?;
+
+    let (selected, capture) = with_route(SourceRoute::File, Mode::Audit, || {
+        super::super::routes::record_database_selection((database, proof))
+    });
+    assert!(selected.is_none());
+    assert_eq!(capture.errors, ["CreationProof invalid after route setup"]);
+    assert_no_captured_records(&capture);
+    Ok(())
+}
+
+#[test]
 fn diagnostic_file_fixture_rejects_replaced_font_without_retaining_database() -> Result<(), String>
 {
     let file = AuditFile::new()?;

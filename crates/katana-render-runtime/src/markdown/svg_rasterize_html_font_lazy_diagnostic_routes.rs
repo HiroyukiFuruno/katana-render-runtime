@@ -33,19 +33,27 @@ pub(in super::super) fn select_database(
     };
     audit_database(db, &proof, "CreationProof invalid before route setup")?;
     let started = matches!(MODE.with(Cell::get), Mode::Measure).then(Instant::now);
-    let (selected_db, selected_proof) = select_route(db, proof, route)?;
+    let selected = select_route(db, proof, route)?;
     if let Some(started) = started {
         stage(route_stage(route), started.elapsed().as_nanos());
     }
+    record_database_selection(selected)
+}
+
+pub(super) fn record_database_selection(
+    selected: (Arc<Database>, Arc<CreationProof>),
+) -> Option<(Arc<Database>, Arc<CreationProof>)> {
     audit_database(
-        &selected_db,
-        &selected_proof,
+        &selected.0,
+        &selected.1,
         "CreationProof invalid after route setup",
-    )?;
-    update(1, |capture| {
-        capture.database_owners.push(Arc::downgrade(&selected_db))
-    });
-    Some((selected_db, selected_proof))
+    )
+    .map(|()| {
+        update(1, |capture| {
+            capture.database_owners.push(Arc::downgrade(&selected.0));
+        });
+        selected
+    })
 }
 fn audit_database(db: &Database, proof: &CreationProof, message: &'static str) -> Option<()> {
     if matches!(MODE.with(Cell::get), Mode::Audit) && !proof.current(db) {
