@@ -46,38 +46,31 @@ impl HtmlShadowRasterizer {
         target: &mut PixmapMut<'_>,
         source_renderer: &mut ShadowSourceRenderer<'_>,
     ) -> Result<bool, String> {
-        let Some(transform) = FilterTransform::new(child_transform) else {
+        let Some((spec, crop)) = geometry::shadow_crop(group, child_transform, target)? else {
             return Ok(false);
         };
-        let Some(spec) = geometry::shadow_spec(group)? else {
-            return Ok(false);
-        };
-        let Some(source) = geometry::source_bounds(group, transform)? else {
-            return Ok(false);
-        };
-        let Some(effect) = geometry::effect_bounds(source, spec, transform)? else {
-            return Ok(false);
-        };
-        let Some(crop) = geometry::bounded_crop(effect, target) else {
-            return Ok(false);
-        };
-        let source_pixmap = render_source(crop, child_transform, source_renderer)?;
+        let source_pixmap = render_filter_source(
+            crop,
+            child_transform,
+            "drop-shadow source allocation failed",
+            source_renderer,
+        )?;
         let filtered = surface::apply_skia_shadow(source_pixmap, spec, child_transform, crop)?;
         surface::copy_source_over(target, &filtered, crop.left, crop.top);
         Ok(true)
     }
 }
 
-fn render_source(
+pub(super) fn render_filter_source(
     crop: geometry::Crop,
-    child_transform: Transform,
-    source_renderer: &mut ShadowSourceRenderer<'_>,
+    transform: Transform,
+    allocation_error: &str,
+    paint_source: &mut ShadowSourceRenderer<'_>,
 ) -> Result<tiny_skia::Pixmap, String> {
     let mut source_pixmap = tiny_skia::Pixmap::new(crop.width(), crop.height())
-        .ok_or_else(|| "drop-shadow source allocation failed".to_owned())?;
-    let local = Transform::from_translate(-(crop.left as f32), -(crop.top as f32))
-        .pre_concat(child_transform);
-    let mut source_target = source_pixmap.as_mut();
-    source_renderer(local, &mut source_target)?;
+        .ok_or_else(|| allocation_error.to_owned())?;
+    let local =
+        Transform::from_translate(-(crop.left as f32), -(crop.top as f32)).pre_concat(transform);
+    paint_source(local, &mut source_pixmap.as_mut())?;
     Ok(source_pixmap)
 }

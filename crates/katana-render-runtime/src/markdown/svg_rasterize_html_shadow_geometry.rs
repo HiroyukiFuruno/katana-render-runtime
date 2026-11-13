@@ -4,6 +4,7 @@ use super::bounds::{self, FilterTransform};
 use super::surface;
 use resvg::usvg::{BlendMode, Group, filter};
 use skia_safe::{Color4f, Rect as SkRect};
+use tiny_skia::{PixmapMut, Transform};
 
 #[derive(Clone, Copy)]
 pub(super) struct ShadowSpec {
@@ -14,6 +15,26 @@ pub(super) struct ShadowSpec {
     pub(super) color: Color4f,
     pub(super) filter_bounds: Bounds,
     pub(super) primitive_bounds: Bounds,
+}
+
+pub(super) fn shadow_crop(
+    group: &Group,
+    transform: Transform,
+    target: &PixmapMut<'_>,
+) -> Result<Option<(ShadowSpec, Crop)>, String> {
+    let Some(transform) = FilterTransform::new(transform) else {
+        return Ok(None);
+    };
+    let Some(spec) = shadow_spec(group)? else {
+        return Ok(None);
+    };
+    let Some(source) = source_bounds(group, transform)? else {
+        return Ok(None);
+    };
+    let Some(effect) = effect_bounds(source, spec, transform)? else {
+        return Ok(None);
+    };
+    Ok(bounded_crop(effect, target).map(|crop| (spec, crop)))
 }
 
 pub(super) fn shadow_spec(group: &Group) -> Result<Option<ShadowSpec>, String> {

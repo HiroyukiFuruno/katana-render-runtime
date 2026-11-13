@@ -175,12 +175,14 @@ fn render_source(
     provenance: &AuthoredClipInfo,
     text: &dyn TextRasterizer,
 ) -> Result<Pixmap, String> {
-    let mut source = Pixmap::new(crop.width(), crop.height())
-        .ok_or_else(|| "component-transfer source allocation failed".to_owned())?;
-    let local =
-        Transform::from_translate(-(crop.left as f32), -(crop.top as f32)).pre_concat(transform);
-    super::render_children_with_text(group, local, &mut source.as_mut(), provenance, Some(text))?;
-    Ok(source)
+    super::super::html_shadow::render_filter_source(
+        crop,
+        transform,
+        "component-transfer source allocation failed",
+        &mut |local, source| {
+            super::render_children_with_text(group, local, source, provenance, Some(text))
+        },
+    )
 }
 #[cfg(test)]
 #[path = "svg_rasterize_html_linear_component_transfer_tests.rs"]
