@@ -17,7 +17,13 @@ pub(in crate::markdown::svg_rasterize) fn register_interface_bold(
     if !has_native_interface_candidate(database) {
         return None;
     }
-    let (postscript, path, bold) = coretext_bold_identity()?;
+    register_coretext_identity(database, coretext_bold_identity()?)
+}
+
+pub(super) fn register_coretext_identity(
+    database: &mut Database,
+    (postscript, path, bold): (String, PathBuf, bool),
+) -> Option<ID> {
     if postscript != INTERFACE_BOLD_POSTSCRIPT || !bold || !native_system_font_path(&path) {
         return None;
     }

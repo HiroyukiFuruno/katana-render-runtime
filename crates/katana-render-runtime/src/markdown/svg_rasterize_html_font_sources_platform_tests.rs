@@ -75,6 +75,24 @@ fn coretext_interface_family_selects_w4_regular_and_w6_bold() -> Result<(), Stri
 
 #[cfg(target_os = "macos")]
 #[test]
+fn coretext_regular_interface_identity_cannot_register_a_bold_alias() -> Result<(), String> {
+    use super::interface_bold::{coretext_face_identity, register_coretext_identity};
+
+    let mut database = resvg::usvg::fontdb::Database::new();
+    super::load_font_paths(&mut database, super::SYSTEM_CJK_FONT_PATHS);
+    let (regular, bold) = japanese_ui_font_pair()?;
+    let regular = coretext_face_identity(&regular).ok_or("CoreText regular identity missing")?;
+    let bold = coretext_face_identity(&bold).ok_or("CoreText bold identity missing")?;
+    let face_count = database.len();
+    assert!(register_coretext_identity(&mut database, regular).is_none());
+    assert_eq!(database.len(), face_count);
+    let alias = register_coretext_identity(&mut database, bold).ok_or("CoreText bold rejected")?;
+    assert_eq!(bold_alias_id(&database), Some(alias));
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
 fn coretext_interface_identity_rejects_a_font_without_a_file_url() -> Result<(), String> {
     use core_foundation::base::TCFType;
     use core_graphics::{data_provider::CGDataProvider, font::CGFont};
