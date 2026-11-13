@@ -4,6 +4,25 @@ use super::{
 };
 
 #[test]
+fn skia_rejects_reversed_crop_for_a_parsed_shadow() -> Result<(), String> {
+    let tree = parse_shadow_svg(SRGB_SVG)?;
+    let spec = super::super::geometry::shadow_spec(find_group(&tree)?)?
+        .ok_or("fixture drop shadow missing")?;
+    for dimensions in [(-1, 8), (8, -1)] {
+        assert_eq!(
+            super::super::surface::make_skia_filter(spec, Transform::identity(), Some(dimensions))
+                .err()
+                .as_deref(),
+            Some("drop-shadow filter creation failed")
+        );
+    }
+    assert!(
+        super::super::surface::make_skia_filter(spec, Transform::identity(), Some((8, 8))).is_ok()
+    );
+    Ok(())
+}
+
+#[test]
 fn shadow_source_paint_failure_preserves_destination() -> Result<(), String> {
     const SOURCE_ERROR: &str = "shadow source renderer failed";
     let tree = parse_shadow_svg(SRGB_SVG)?;
