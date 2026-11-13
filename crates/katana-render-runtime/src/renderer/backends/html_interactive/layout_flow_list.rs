@@ -25,11 +25,16 @@ impl HtmlLayoutRenderer {
         &self,
         item: &HtmlDocumentNode,
         width: f32,
-        inherited: &CssStyle,
-        details: DetailsContext,
+        layout: LayoutContext<'_>,
         list_mode: bool,
     ) -> Result<f32, String> {
-        self.measure_flow_node_height_with_list_mode(item, width, inherited, details, list_mode)
+        self.measure_flow_node_height_with_list_mode(
+            item,
+            width,
+            layout.style,
+            layout.details,
+            list_mode,
+        )
     }
 
     pub(super) fn build_flow_nodes(
@@ -66,21 +71,17 @@ impl HtmlLayoutRenderer {
         layout: LayoutContext<'_>,
         list_mode: bool,
     ) -> Result<taffy::tree::NodeId, String> {
-        let height = self.measure_flow_item_height(
-            item,
-            measure_width,
-            layout.style,
-            layout.details,
-            list_mode,
-        )?;
-        tree.new_leaf(leaf_style_for_flow(
-            item_style,
-            measure_width,
-            height,
-            layout.width,
-            layout.style,
-        ))
-        .map_err(layout_error)
+        self.measure_flow_item_height(item, measure_width, layout, list_mode)
+            .and_then(|height| {
+                tree.new_leaf(leaf_style_for_flow(
+                    item_style,
+                    measure_width,
+                    height,
+                    layout.width,
+                    layout.style,
+                ))
+                .map_err(layout_error)
+            })
     }
 
     pub(super) fn paint_flow_items(

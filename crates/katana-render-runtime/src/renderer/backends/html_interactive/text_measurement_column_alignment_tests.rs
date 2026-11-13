@@ -5,6 +5,22 @@ use super::{
 use crate::renderer::backends::html_interactive::types::LayoutResult;
 
 #[test]
+fn parsed_flex_list_keeps_markers_for_direct_items() -> Result<(), String> {
+    let nodes = parsed_nodes("<ol style='display:flex'><li>A</li><li>B</li></ol>");
+    let layout = HtmlLayoutRenderer::render(
+        &nodes,
+        natural_layout_viewport(),
+        NO_SCROLL_Y,
+        &HashMap::new(),
+        None,
+    )?;
+    for content in [">1.<", ">2.<", ">A<", ">B<"] {
+        assert!(layout.svg.contains(content), "missing {content}");
+    }
+    Ok(())
+}
+
+#[test]
 fn parsed_column_stretch_and_center_keep_expected_cross_widths() {
     assert_column_alignment_width("stretch", true);
     assert_column_alignment_width("normal", true);

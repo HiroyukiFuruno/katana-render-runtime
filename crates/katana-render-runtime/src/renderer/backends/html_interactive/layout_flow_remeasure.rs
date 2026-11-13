@@ -18,10 +18,12 @@ impl HtmlLayoutRenderer {
         layout: LayoutContext<'_>,
         list_mode: bool,
     ) -> Result<(), String> {
-        let measurements = self.measure_flow_items(tree, nodes, items, layout, list_mode)?;
-        let stretch_heights = flow_stretch_heights(tree, layout.style, &measurements);
-        self.apply_flow_item_heights(tree, measurements, stretch_heights.as_deref())
-            .map_err(layout_error)
+        self.measure_flow_items(tree, nodes, items, layout, list_mode)
+            .and_then(|measurements| {
+                let stretch_heights = flow_stretch_heights(tree, layout.style, &measurements);
+                self.apply_flow_item_heights(tree, measurements, stretch_heights.as_deref())
+                    .map_err(layout_error)
+            })
     }
 
     fn apply_flow_item_heights(
@@ -30,17 +32,18 @@ impl HtmlLayoutRenderer {
         measurements: Vec<FlowMeasurement>,
         stretch_heights: Option<&[f32]>,
     ) -> taffy::TaffyResult<()> {
-        for (index, (node, css_style, measured_height)) in measurements.into_iter().enumerate() {
-            self.apply_flow_item_height(
-                tree,
-                node,
-                &css_style,
-                measured_height,
-                stretch_heights,
-                index,
-            )?;
-        }
-        Ok(())
+        measurements.into_iter().enumerate().try_for_each(
+            |(index, (node, css_style, measured_height))| {
+                self.apply_flow_item_height(
+                    tree,
+                    node,
+                    &css_style,
+                    measured_height,
+                    stretch_heights,
+                    index,
+                )
+            },
+        )
     }
 
     fn apply_flow_item_height(
@@ -57,9 +60,10 @@ impl HtmlLayoutRenderer {
         } else {
             measured_height
         };
-        let mut style = tree.style(node)?.clone();
-        assign_leaf_height(&mut style, css_style, height);
-        tree.set_style(node, style)
+        tree.style(node).cloned().and_then(|mut style| {
+            assign_leaf_height(&mut style, css_style, height);
+            tree.set_style(node, style)
+        })
     }
 
     fn measure_flow_items(
@@ -70,23 +74,17 @@ impl HtmlLayoutRenderer {
         layout: LayoutContext<'_>,
         list_mode: bool,
     ) -> Result<Vec<FlowMeasurement>, String> {
-        let mut measurements = Vec::with_capacity(nodes.len());
-        for (node, item) in nodes.iter().zip(items) {
-            let width = tree
-                .unrounded_layout(*node)
-                .size
-                .width
-                .max(MIN_LAYOUT_WIDTH);
-            let height = self.measure_flow_item_height(
-                item,
-                width,
-                layout.style,
-                layout.details,
-                list_mode,
-            )?;
-            let css_style = item_style(item, layout.style, layout.width, items.len());
-            measurements.push((*node, css_style, height));
-        }
-        Ok(measurements)
+        nodes
+            .iter()
+            .zip(items)
+            .map(|(&node, item)| {
+                let width = tree.unrounded_layout(node).size.width.max(MIN_LAYOUT_WIDTH);
+                self.measure_flow_item_height(item, width, layout, list_mode)
+                    .map(|height| {
+                        let css_style = item_style(item, layout.style, layout.width, items.len());
+                        (node, css_style, height)
+                    })
+            })
+            .collect()
     }
 }
