@@ -1,7 +1,7 @@
 use super::super::composite::TextRasterizer;
 use super::{HtmlGlyphRasterizer, Prepared, PreparedSpan, surface};
 use resvg::usvg;
-use skia_safe::{AlphaType, Borrows, Canvas, ColorType, ImageInfo, Surface, surfaces};
+use skia_safe::{AlphaType, Borrows, Canvas, ColorType, ImageInfo, Surface};
 use tiny_skia::{PixmapMut, Transform};
 
 impl TextRasterizer for HtmlGlyphRasterizer<'_> {
@@ -109,8 +109,11 @@ pub(super) fn wrap_pixmap<'a>(
         AlphaType::Premul,
         None,
     );
-    surfaces::wrap_pixels(&info, pixmap.data_mut(), info.min_row_bytes(), None)
-        .ok_or_else(|| "Skia text surface allocation failed".to_string())
+    super::super::render::wrap_skia_surface(
+        &info,
+        pixmap.data_mut(),
+        "Skia text surface allocation failed",
+    )
 }
 
 fn clip_crop(canvas: &Canvas, crop: &surface::Crop) {
