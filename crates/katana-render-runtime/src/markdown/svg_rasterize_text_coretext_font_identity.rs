@@ -1,4 +1,4 @@
-use objc2_core_foundation::CFURL;
+use objc2_core_foundation::{CFRetained, CFType, CFURL};
 use objc2_core_text::{CTFont, kCTFontURLAttribute};
 use resvg::usvg::fontdb::{Database, ID, Source};
 use rustybuzz::ttf_parser::{self, name_id};
@@ -39,13 +39,8 @@ pub(super) fn matches(database: &Database, id: ID, font: &CTFont) -> bool {
 fn same_file(font: &CTFont, path: &std::path::Path) -> bool {
     /* WHY: CoreText descriptor が指す file と DB source の物理 path を照合する。 */
     let descriptor = unsafe { font.font_descriptor() };
-    let Some(url) = (unsafe { descriptor.attribute(kCTFontURLAttribute) }) else {
-        return false;
-    };
-    let Ok(url) = url.downcast::<CFURL>() else {
-        return false;
-    };
-    let Some(coretext_path) = url.to_file_path() else {
+    let attribute = unsafe { descriptor.attribute(kCTFontURLAttribute) };
+    let Some(coretext_path) = file_path_from_url_attribute(attribute) else {
         return false;
     };
     match (
@@ -55,6 +50,12 @@ fn same_file(font: &CTFont, path: &std::path::Path) -> bool {
         (Ok(left), Ok(right)) => left == right,
         _ => false,
     }
+}
+
+fn file_path_from_url_attribute(
+    attribute: Option<CFRetained<CFType>>,
+) -> Option<std::path::PathBuf> {
+    attribute?.downcast::<CFURL>().ok()?.to_file_path()
 }
 
 fn unique_postscript_index(bytes: &[u8], name: &str) -> Option<u32> {

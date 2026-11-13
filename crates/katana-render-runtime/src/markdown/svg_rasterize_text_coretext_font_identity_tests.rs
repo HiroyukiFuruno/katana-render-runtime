@@ -13,6 +13,11 @@ const SFNT_HEADER_BYTES: usize = 12;
 const FONT_SIZE: f64 = 16.0;
 const HELVETICA_FAMILY: &str = "Helvetica";
 
+#[path = "svg_rasterize_text_coretext_font_identity_name_tests.rs"]
+mod name_tests;
+#[path = "svg_rasterize_text_coretext_font_identity_url_tests.rs"]
+mod url_tests;
+
 fn helvetica_coretext_font() -> objc2_core_foundation::CFRetained<CTFont> {
     /* WHY: 各source対照で同じCoreText要求を再利用し、差をfontdb faceだけに限定する。 */
     let name = CFString::from_str(HELVETICA_FAMILY);
@@ -79,38 +84,6 @@ fn bundled_font_postscript_identity_rejects_missing_name_and_truncated_font() ->
 }
 
 #[test]
-fn bundled_font_without_postscript_records_has_no_unique_identity() -> Result<(), String> {
-    let expected_name = "NotoSans-Regular";
-    assert_eq!(unique_postscript_index(FONT, expected_name), Some(0));
-    let mut font = FONT.to_vec();
-    let table_count = u16::from_be_bytes([font[4], font[5]]) as usize;
-    let name_offset = (0..table_count)
-        .map(|index| SFNT_HEADER_BYTES + index * 16)
-        .find(|&offset| &font[offset..offset + 4] == b"name")
-        .ok_or("name table missing")?;
-    let offset = u32::from_be_bytes(
-        font[name_offset + 8..name_offset + 12]
-            .try_into()
-            .map_err(|_| "invalid name table offset")?,
-    ) as usize;
-    let count = u16::from_be_bytes([font[offset + 2], font[offset + 3]]) as usize;
-    let mut removed = 0;
-    for index in 0..count {
-        let name_id_offset = offset + 6 + index * 12 + 6;
-        if u16::from_be_bytes([font[name_id_offset], font[name_id_offset + 1]])
-            == name_id::POST_SCRIPT_NAME
-        {
-            font[name_id_offset..name_id_offset + 2].copy_from_slice(&0u16.to_be_bytes());
-            removed += 1;
-        }
-    }
-    assert!(removed > 0);
-    assert!(ttf_parser::Face::parse(&font, 0).is_ok());
-    assert_eq!(unique_postscript_index(&font, expected_name), None);
-    Ok(())
-}
-
-#[test]
 fn binary_and_removed_font_faces_cannot_match_coretext() -> Result<(), String> {
     let font = helvetica_coretext_font();
     let mut database = Database::new();
@@ -160,6 +133,7 @@ fn matching_file_font_respects_database_memo_registration() -> Result<(), String
             memo::physical_face_lookup(&database, id, &generation),
             Some(true)
         );
+        assert!(matches(&database, id, &font));
     });
     Ok(())
 }
