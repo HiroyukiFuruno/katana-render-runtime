@@ -1,6 +1,6 @@
 use super::{AuthoredClipInfo, TextRasterizer, mask, render_children_at_origin};
 use resvg::{render_node, usvg};
-use tiny_skia::{BlendMode, IntRect, Pixmap, PixmapPaint, Transform};
+use tiny_skia::{BlendMode, IntRect, Pixmap, PixmapMut, PixmapPaint, Transform};
 
 const LAYER_EDGE_PADDING: i32 = 2;
 const LAYER_SIZE_PADDING: u32 = 4;
@@ -108,8 +108,14 @@ fn composite_clipped_crop(
     mask::composite_crop_with_mask(pixmap, crop, composited, &mask)
 }
 
-pub(super) fn allocate_pixmap(width: u32, height: u32, error: &str) -> Result<Pixmap, String> {
-    Pixmap::new(width, height).ok_or_else(|| error.to_owned())
+pub(super) fn render_layer(
+    (width, height): (u32, u32),
+    error: &str,
+    paint: &mut dyn FnMut(&mut PixmapMut<'_>) -> Result<(), String>,
+) -> Result<Pixmap, String> {
+    let mut layer = Pixmap::new(width, height).ok_or_else(|| error.to_owned())?;
+    paint(&mut layer.as_mut())?;
+    Ok(layer)
 }
 
 pub(super) fn clipped_group_rect(
@@ -140,24 +146,25 @@ pub(super) fn clipped_group_rect(
 }
 
 fn crop_pixmap(pixmap: &tiny_skia::PixmapMut<'_>, crop: IntRect) -> Result<Pixmap, String> {
-    let mut cropped = allocate_pixmap(
-        crop.width(),
-        crop.height(),
+    render_layer(
+        (crop.width(), crop.height()),
         "failed to allocate cropped SVG compositing pixmap",
-    )?;
-    let paint = PixmapPaint {
-        blend_mode: BlendMode::Source,
-        ..PixmapPaint::default()
-    };
-    cropped.draw_pixmap(
-        -crop.x(),
-        -crop.y(),
-        pixmap.as_ref(),
-        &paint,
-        Transform::identity(),
-        None,
-    );
-    Ok(cropped)
+        &mut |cropped| {
+            let paint = PixmapPaint {
+                blend_mode: BlendMode::Source,
+                ..PixmapPaint::default()
+            };
+            cropped.draw_pixmap(
+                -crop.x(),
+                -crop.y(),
+                pixmap.as_ref(),
+                &paint,
+                Transform::identity(),
+                None,
+            );
+            Ok(())
+        },
+    )
 }
 
 pub(super) fn render_existing_node(

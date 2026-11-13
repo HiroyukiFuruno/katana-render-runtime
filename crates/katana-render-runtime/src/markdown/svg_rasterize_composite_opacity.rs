@@ -32,17 +32,18 @@ pub(super) fn render(
     let Some((crop, crop_transform)) = layers::crop_context(group, group_transform, pixmap)? else {
         return Ok(());
     };
-    let mut layer = layers::allocate_pixmap(
-        crop.width(),
-        crop.height(),
+    let layer = layers::render_layer(
+        (crop.width(), crop.height()),
         "failed to allocate SVG opacity layer",
-    )?;
-    render_children_with_text(
-        group,
-        crop_transform,
-        &mut layer.as_mut(),
-        authored_clip_info,
-        Some(text_rasterizer),
+        &mut |layer| {
+            render_children_with_text(
+                group,
+                crop_transform,
+                layer,
+                authored_clip_info,
+                Some(text_rasterizer),
+            )
+        },
     )?;
     composite_layer(pixmap, crop, &layer, group.opacity().get());
     Ok(())

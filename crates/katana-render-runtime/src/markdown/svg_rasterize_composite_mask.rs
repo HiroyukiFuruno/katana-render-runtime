@@ -1,4 +1,4 @@
-use super::layers::{allocate_pixmap, render_existing_node};
+use super::layers::{render_existing_node, render_layer};
 use resvg::usvg;
 use tiny_skia::{IntRect, Mask, MaskType, Pixmap, PixmapMut, Transform};
 
@@ -85,31 +85,28 @@ pub(super) fn clip_mask(
     width: u32,
     height: u32,
 ) -> Result<Mask, String> {
-    let mut clip_pixels =
-        allocate_pixmap(width, height, "failed to allocate cropped SVG clip pixmap")?;
-    render_clip_path(clip, transform, &mut clip_pixels)?;
+    let clip_pixels = render_layer(
+        (width, height),
+        "failed to allocate cropped SVG clip pixmap",
+        &mut |pixels| render_clip_path(clip, transform, pixels),
+    )?;
     Ok(Mask::from_pixmap(clip_pixels.as_ref(), MaskType::Alpha))
 }
 
 fn render_clip_path(
     clip: &usvg::ClipPath,
     transform: Transform,
-    pixmap: &mut Pixmap,
+    pixmap: &mut PixmapMut<'_>,
 ) -> Result<(), String> {
     let node = usvg::Node::Group(Box::new(clip.root().clone()));
-    render_existing_node(
-        &node,
-        transform.pre_concat(clip.transform()),
-        &mut pixmap.as_mut(),
-    );
+    render_existing_node(&node, transform.pre_concat(clip.transform()), pixmap);
 
     if let Some(nested) = clip.clip_path() {
-        let mut nested_pixels = allocate_pixmap(
-            pixmap.width(),
-            pixmap.height(),
+        let nested_pixels = render_layer(
+            (pixmap.width(), pixmap.height()),
             "failed to allocate nested SVG clip pixmap",
+            &mut |pixels| render_clip_path(nested, transform, pixels),
         )?;
-        render_clip_path(nested, transform, &mut nested_pixels)?;
         let nested_mask = Mask::from_pixmap(nested_pixels.as_ref(), MaskType::Alpha);
         pixmap.apply_mask(&nested_mask);
     }
