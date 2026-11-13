@@ -87,7 +87,12 @@ fn ttc_face_offset(
 }
 
 fn ttc_offsets(file: &mut File, file_length: u64, count: u32) -> std::io::Result<Vec<u8>> {
-    let offsets_length = usize::try_from(u64::from(count) * TTC_FACE_OFFSET_BYTES)
+    let length = u64::from(count) * TTC_FACE_OFFSET_BYTES;
+    /* WHY: 64ビットではu32の面数と4バイト幅の積がusizeに収まる。 */
+    #[cfg(target_pointer_width = "64")]
+    let offsets_length = length as usize;
+    #[cfg(not(target_pointer_width = "64"))]
+    let offsets_length = usize::try_from(length)
         .map_err(|_| Error::new(ErrorKind::InvalidData, "TTC offset length overflow"))?;
     read_at(file, file_length, TTC_DIRECTORY_OFFSET, offsets_length)
 }
