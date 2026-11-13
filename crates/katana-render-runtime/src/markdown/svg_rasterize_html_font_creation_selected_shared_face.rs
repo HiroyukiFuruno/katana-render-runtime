@@ -1,4 +1,5 @@
 use super::super::super::super::text_shaping::{observe_path_stamp, stamp_path_uncached};
+use super::super::shared_raster::shared_sources::{SharedSources, validate_acquired_source};
 use super::CreationProof;
 use resvg::usvg::fontdb::{Database, FaceInfo, ID, Source};
 use std::{path::PathBuf, sync::Arc};
@@ -7,7 +8,7 @@ impl CreationProof {
     fn selected_file_source(
         &self,
         path: &PathBuf,
-        sources: &mut super::super::shared_raster::shared_sources::SharedSources,
+        sources: &mut SharedSources,
         reused: Option<&Source>,
     ) -> Option<Source> {
         let stamp = self.stamps.get(path)?;
@@ -17,11 +18,7 @@ impl CreationProof {
                 if !stamp.durable_reusable() || stamp_path_uncached(path).as_ref() != Ok(stamp) {
                     return None;
                 }
-                let data = Arc::clone(data);
-                if stamp_path_uncached(path).as_ref() != Ok(stamp) {
-                    return None;
-                }
-                data
+                validate_acquired_source(path, stamp, Arc::clone(data))?
             }
             Some(_) => return None,
             None => sources.get(path, stamp)?,
@@ -33,7 +30,7 @@ impl CreationProof {
         &self,
         database: &Database,
         id: ID,
-        sources: &mut super::super::shared_raster::shared_sources::SharedSources,
+        sources: &mut SharedSources,
         reused: Option<&Source>,
         admission: Option<&super::super::admission::Admission<'_>>,
     ) -> Option<FaceInfo> {

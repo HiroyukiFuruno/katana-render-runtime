@@ -77,6 +77,22 @@ fn original_and_shared_proof_reject_atomic_font_path_replacement() -> Result<(),
 }
 
 #[test]
+fn acquired_font_bytes_are_rejected_if_the_path_changes_before_validation() -> Result<(), String> {
+    let copied = CopiedFont::new()?;
+    let stamp = stamp_path_uncached(&copied.path).map_err(|_| "old stamp failed")?;
+    let data = SharedSources::default()
+        .get(&copied.path, &stamp)
+        .ok_or("font mapping failed")?;
+    let validate = |data| super::super::validate_acquired_source(&copied.path, &stamp, data);
+    assert!(validate(Arc::clone(&data)).is_some());
+    replace_font_inode(&copied)?;
+    let owner = Arc::downgrade(&data);
+    assert!(validate(data).is_none());
+    assert!(owner.upgrade().is_none());
+    Ok(())
+}
+
+#[test]
 fn atomic_font_replacement_invalidates_reusable_shared_candidates() -> Result<(), String> {
     let copied = CopiedFont::new()?;
     let request = crate::markdown::svg_rasterize::font::HtmlFontRequest::from_text(

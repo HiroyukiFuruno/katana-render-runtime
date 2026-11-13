@@ -64,8 +64,16 @@ impl SharedSources {
                 super::super::raster_observer::Metric::SourceFirstLoadSuccess,
             );
         }
-        (stamp_path_uncached(path).as_ref() == Ok(stamp)).then_some(data)
+        validate_acquired_source(path, stamp, data)
     }
+}
+
+pub(in super::super) fn validate_acquired_source(
+    path: &Path,
+    stamp: &FileStamp,
+    data: SharedBytes,
+) -> Option<SharedBytes> {
+    (stamp_path_uncached(path).as_ref() == Ok(stamp)).then_some(data)
 }
 
 #[cfg(test)]
