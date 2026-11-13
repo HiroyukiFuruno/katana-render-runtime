@@ -25,6 +25,20 @@ fn throw_bridge_error(scope: &mut v8::PinScope, message: &str) {
     }
 }
 
+fn completed_bridge_object<'scope>(
+    scope: &mut v8::PinScope<'scope, '_>,
+    object: v8::Local<'scope, v8::Object>,
+    written: Result<(), &'static str>,
+) -> Option<v8::Local<'scope, v8::Object>> {
+    match written {
+        Ok(()) => Some(object),
+        Err(message) => {
+            throw_bridge_error(scope, message);
+            None
+        }
+    }
+}
+
 fn set_bridge_number_property(
     scope: &mut v8::PinScope,
     object: v8::Local<v8::Object>,

@@ -109,6 +109,25 @@ fn frozen_v8_object_rejects_metric_property_write() {
     });
 }
 
+#[test]
+fn rejected_metric_dictionary_throws_and_cannot_be_returned() {
+    DiagramV8Runtime::ensure_initialized();
+    DiagramV8Runtime::with_empty_try_catch(|scope| {
+        let object = v8::Object::new(scope);
+        assert_eq!(
+            object.set_integrity_level(scope, v8::IntegrityLevel::Frozen),
+            Some(true)
+        );
+        let written = super::set_svg_metric_properties(scope, object, metric_fixture(true));
+        assert!(super::completed_bridge_object(scope, object, written).is_none());
+        assert!(scope.exception().is_some_and(|error| {
+            error
+                .to_rust_string_lossy(scope)
+                .contains("SVG font metric result allocation failed")
+        }));
+    });
+}
+
 fn assert_frozen_write_rejected(scope: &mut v8::PinScope<'_, '_>, initial_advance: Option<f64>) {
     let object = v8::Object::new(scope);
     let key = v8::String::new(scope, "advance");

@@ -1,7 +1,9 @@
 use std::str::FromStr;
 
 use super::diagram_bridge_registration::register_callback;
-use super::{DiagramTryCatchScope, set_bridge_number_property, throw_bridge_error};
+use super::{
+    DiagramTryCatchScope, completed_bridge_object, set_bridge_number_property, throw_bridge_error,
+};
 use svgtypes::Transform;
 #[cfg(target_os = "macos")]
 #[path = "diagram_geometry_path_bounds.rs"]
@@ -59,13 +61,12 @@ fn return_bounds(
     scope: &mut v8::PinScope,
     result: &mut v8::ReturnValue<v8::Value>,
     bounds: TransformedBox,
-    error_message: &str,
+    error_message: &'static str,
 ) {
     let object = v8::Object::new(scope);
-    if set_box_properties(scope, object, bounds).is_ok() {
+    let written = set_box_properties(scope, object, bounds).map_err(|_| error_message);
+    if let Some(object) = completed_bridge_object(scope, object, written) {
         result.set(object.into());
-    } else {
-        throw_bridge_error(scope, error_message);
     }
 }
 
