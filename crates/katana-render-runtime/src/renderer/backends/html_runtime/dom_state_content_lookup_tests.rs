@@ -128,7 +128,11 @@ fn content_lookup_propagates_node_errors() {
             Err(error) if error == expected
         ));
     }
-    let state = HtmlDomBridgeState::new(document);
+}
+
+#[test]
+fn anchor_hash_propagates_an_unknown_node() {
+    let state = anchor_hash_state();
     assert!(matches!(
         state.dispatch(
             "anchorHash",
