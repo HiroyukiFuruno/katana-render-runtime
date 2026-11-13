@@ -64,6 +64,16 @@ fn recursive_observer_rejects_missing_and_non_text_svg_nodes() -> ProbeResult<()
     Ok(())
 }
 
+#[test]
+fn recursive_observer_propagates_svg_parse_failure_with_the_real_font() -> ProbeResult<()> {
+    let font =
+        include_bytes!("../../assets/test-fixtures/font-probes/recursive-latin-crsv-normal.ttf");
+    let result = super::observe_svg("<svg", "Animal", NORMAL_FONT_WEIGHT, font);
+    let error = result.err().ok_or("malformed probe SVG was accepted")?;
+    assert!(error.downcast_ref::<usvg::Error>().is_some(), "{error}");
+    Ok(())
+}
+
 const NON_ALIAS_NOTO_FAMILY: &str = "Noto Sans";
 const NON_ALIAS_NOTO_TEXT: &str = "Noto";
 

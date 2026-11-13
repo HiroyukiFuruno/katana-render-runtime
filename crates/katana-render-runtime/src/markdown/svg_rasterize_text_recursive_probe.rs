@@ -39,10 +39,14 @@ fn records_public_recursive_in_isolated_font_options() -> ProbeResult<()> {
 
 fn observe(text: &str, weight: u16, bytes: &[u8]) -> ProbeResult<Value> {
     let svg = super::probe_svg(text, weight);
-    let (options, recursive, selected, base) = isolated_options(&svg, bytes)?;
+    observe_svg(&svg, text, weight, bytes)
+}
+
+fn observe_svg(svg: &str, text: &str, weight: u16, bytes: &[u8]) -> ProbeResult<Value> {
+    let (options, recursive, selected, base) = isolated_options(svg, bytes)?;
     let count = base.faces().count();
     let mut record = super::super::super::text_shaping::with_validated_tree_parse(|| {
-        let tree = usvg::Tree::from_str(&svg, &options)?;
+        let tree = usvg::Tree::from_str(svg, &options)?;
         let mut record = observe_tree(&tree, text, weight, recursive)?;
         record["tree_database_shared_with_probe_options"] =
             json!(Arc::ptr_eq(&options.fontdb, tree.fontdb()));
