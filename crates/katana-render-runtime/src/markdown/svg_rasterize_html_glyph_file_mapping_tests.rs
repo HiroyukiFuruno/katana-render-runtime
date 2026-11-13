@@ -1,6 +1,7 @@
 use super::HtmlGlyphRasterizer;
 use crate::markdown::svg_rasterize::composite::TextRasterizer;
 use crate::markdown::svg_rasterize::font_file_fixture;
+use crate::markdown::svg_rasterize::html_glyph::baseline::resolved_policy;
 use crate::markdown::svg_rasterize::physical_font_face::verification_support::font_with_only;
 use resvg::usvg;
 use resvg::usvg::fontdb::{Database, ID, Source};
@@ -46,7 +47,7 @@ fn assert_shared_font_recovers(
     expected: &str,
 ) -> Result<(), String> {
     let (directory, database, id) = shared_font_fixture()?;
-    let tree = parse_shared_font_svg(database)?;
+    let tree = parse_shared_font_svg(SHARED_FONT_SVG, database)?;
     let Some(usvg::Node::Text(text)) = tree.node_by_id("run") else {
         return Err("shared fixture SVG text missing".into());
     };
@@ -66,9 +67,30 @@ fn assert_shared_font_recovers(
     Ok(())
 }
 
-fn parse_shared_font_svg(database: Database) -> Result<usvg::Tree, String> {
+#[test]
+fn middle_baseline_rejects_a_replaced_shared_font_and_recovers() -> Result<(), String> {
+    let (directory, database, id) = shared_font_fixture()?;
+    let svg = SHARED_FONT_SVG.replace("<text ", r#"<text dominant-baseline="middle" dy="1" "#);
+    let tree = parse_shared_font_svg(&svg, database)?;
+    let Some(usvg::Node::Text(text)) = tree.node_by_id("run") else {
+        return Err("shared baseline fixture text missing".into());
+    };
+    let path = directory.path().join("font.ttf");
+    let mut changed = font_file_fixture::FONT_BYTES.to_vec();
+    changed.push(0);
+    std::fs::write(&path, changed).map_err(|error| error.to_string())?;
+    let rasterizer = HtmlGlyphRasterizer::new(tree.fontdb());
+    assert!(!rasterizer.face_metadata(id)?.unsupported);
+    let result = resolved_policy(&rasterizer, text);
+    assert!(result.is_err_and(|error| error.contains("differs from parsed face")));
+    std::fs::write(&path, font_file_fixture::FONT_BYTES).map_err(|error| error.to_string())?;
+    assert!(resolved_policy(&rasterizer, text)?.is_some());
+    Ok(())
+}
+
+fn parse_shared_font_svg(svg: &str, database: Database) -> Result<usvg::Tree, String> {
     usvg::Tree::from_str(
-        SHARED_FONT_SVG,
+        svg,
         &usvg::Options {
             fontdb: Arc::new(database),
             ..usvg::Options::default()
