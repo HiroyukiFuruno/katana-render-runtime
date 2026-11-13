@@ -64,6 +64,25 @@ fn shape_with_font(
     ))
 }
 
+fn glyph_boundaries(glyphs: &[usvg::layout::Glyph]) -> Vec<usize> {
+    glyphs.iter().map(|glyph| glyph.byte_idx.value()).collect()
+}
+
+fn assert_fallback_glyphs(
+    actual: &[usvg::layout::Glyph],
+    expected: &[usvg::layout::Glyph],
+    fallback_id: usvg::fontdb::ID,
+) {
+    assert_eq!(actual.len(), expected.len());
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert_ne!(expected.id.0, 0);
+        assert_eq!(actual.id.0, expected.id.0);
+        assert_eq!(actual.text, expected.text);
+        assert_eq!(actual.byte_idx.value(), expected.byte_idx.value());
+        assert_eq!(actual.font.id, fallback_id);
+    }
+}
+
 #[test]
 fn removed_font_file_produces_no_glyphs_after_face_resolution() -> TestResult<()> {
     let file = tempfile::NamedTempFile::new()?;
@@ -103,24 +122,11 @@ fn fallback_replaces_differently_shaped_indic_clusters() -> TestResult<()> {
     };
     let primary = shape_with_font(text, database.clone(), primary_id, &resolver)?;
     let expected = shape_with_font(text, database, fallback_id, &resolver)?;
-    let boundaries = |glyphs: &[usvg::layout::Glyph]| {
-        glyphs
-            .iter()
-            .map(|glyph| glyph.byte_idx.value())
-            .collect::<Vec<_>>()
-    };
-    assert_ne!(boundaries(&primary), boundaries(&expected));
+    assert_ne!(glyph_boundaries(&primary), glyph_boundaries(&expected));
     assert!(primary.iter().any(|glyph| glyph.id.0 == 0));
     assert!(!expected.is_empty());
     let (actual, _, fallback_id) = shape(text)?;
-    assert_eq!(actual.len(), expected.len());
-    for (actual, expected) in actual.iter().zip(&expected) {
-        assert_ne!(expected.id.0, 0);
-        assert_eq!(actual.id.0, expected.id.0);
-        assert_eq!(actual.text, expected.text);
-        assert_eq!(actual.byte_idx.value(), expected.byte_idx.value());
-        assert_eq!(actual.font.id, fallback_id);
-    }
+    assert_fallback_glyphs(&actual, &expected, fallback_id);
     Ok(())
 }
 

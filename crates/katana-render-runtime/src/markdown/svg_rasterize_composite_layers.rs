@@ -5,6 +5,8 @@ use tiny_skia::{BlendMode, IntRect, Pixmap, PixmapMut, PixmapPaint, Transform};
 const LAYER_EDGE_PADDING: i32 = 2;
 const LAYER_SIZE_PADDING: u32 = 4;
 
+type LayerPainter<'a> = dyn FnMut(&mut PixmapMut<'_>) -> Result<(), String> + 'a;
+
 #[cfg(test)]
 #[path = "svg_rasterize_composite_layers_boundary_tests.rs"]
 mod boundary_tests;
@@ -111,7 +113,7 @@ fn composite_clipped_crop(
 pub(super) fn render_layer(
     (width, height): (u32, u32),
     error: &str,
-    paint: &mut dyn FnMut(&mut PixmapMut<'_>) -> Result<(), String>,
+    paint: &mut LayerPainter<'_>,
 ) -> Result<Pixmap, String> {
     let mut layer = Pixmap::new(width, height).ok_or_else(|| error.to_owned())?;
     paint(&mut layer.as_mut())?;

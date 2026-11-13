@@ -6,6 +6,9 @@ use super::{
 const FILE_METRIC_SIZE: f32 = 16.0;
 const CORRUPTION_MASK: u8 = 0xff;
 
+type FaceLineMetrics = Option<(f32, f32)>;
+type ObservedFaceLineMetricPair = (FaceLineMetrics, FaceLineMetrics);
+
 #[test]
 fn rejected_face_metrics_never_read_the_legacy_font() -> Result<(), String> {
     use super::super::super::measurement_diagnostic::{self, FaceMetricScope};
@@ -68,7 +71,7 @@ fn malformed_file_is_rejected_by_legacy_line_metrics_and_recovers() -> Result<()
 
 fn line_metric_pair(
     fixture: &super::super::font_file_fixture::FontFileFixture,
-) -> (Option<(f32, f32)>, Option<(f32, f32)>) {
+) -> ObservedFaceLineMetricPair {
     let read = |detail| {
         super::observed_line_metrics_for_face(
             &fixture.database,

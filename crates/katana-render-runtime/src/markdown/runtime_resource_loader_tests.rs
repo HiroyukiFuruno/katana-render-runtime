@@ -64,6 +64,13 @@ fn check_updates(path: &std::path::Path, replacement: &std::path::Path) -> std::
     ));
     let changed = RuntimeResourceLoader::load(path, None)?;
     assert_ne!(first.digest(), changed.digest());
+    check_replacement(path, replacement)?;
+    assert_eq!(first.text(), "first");
+    assert_eq!(changed.text(), "second");
+    Ok(())
+}
+
+fn check_replacement(path: &std::path::Path, replacement: &std::path::Path) -> std::io::Result<()> {
     std::fs::write(replacement, "replacement")?;
     #[cfg(windows)]
     std::fs::remove_file(path)?;
@@ -73,8 +80,6 @@ fn check_updates(path: &std::path::Path, replacement: &std::path::Path) -> std::
         Ok("replacement")
     ));
     check_parallel_reads(path);
-    assert_eq!(first.text(), "first");
-    assert_eq!(changed.text(), "second");
     Ok(())
 }
 

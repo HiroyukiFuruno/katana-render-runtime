@@ -1,16 +1,15 @@
+type RegisteredCallback<'scope> = (
+    v8::Local<'scope, v8::String>,
+    v8::Local<'scope, v8::Function>,
+);
+
 pub(super) fn register_callback<'scope>(
     scope: &mut v8::PinScope<'scope, '_>,
     global: v8::Local<v8::Object>,
     name: &str,
     callback: impl v8::MapFnTo<v8::FunctionCallback>,
     label: &str,
-) -> Result<
-    (
-        v8::Local<'scope, v8::String>,
-        v8::Local<'scope, v8::Function>,
-    ),
-    String,
-> {
+) -> Result<RegisteredCallback<'scope>, String> {
     let name = require_bridge_handle(v8::String::new(scope, name), label, "name")?;
     let callback = require_bridge_handle(v8::Function::new(scope, callback), label, "callback")?;
     if global.set(scope, name.into(), callback.into()) != Some(true) {

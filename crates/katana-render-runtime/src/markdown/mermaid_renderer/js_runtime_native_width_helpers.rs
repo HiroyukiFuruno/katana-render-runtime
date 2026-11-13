@@ -116,9 +116,10 @@ pub(super) fn render_fixture_targets_with_font_audit(
 }
 
 #[cfg(target_os = "macos")]
-fn complete_font_audit(
-    captured: Result<(Result<MeasurementFixture, String>, Value), serde_json::Error>,
-) -> Result<(MeasurementFixture, Value), String> {
+type CapturedFontAudit = Result<(Result<MeasurementFixture, String>, Value), serde_json::Error>;
+
+#[cfg(target_os = "macos")]
+fn complete_font_audit(captured: CapturedFontAudit) -> Result<(MeasurementFixture, Value), String> {
     let (fixture, audit) = captured.map_err(|error| error.to_string())?;
     Ok((fixture?, audit))
 }

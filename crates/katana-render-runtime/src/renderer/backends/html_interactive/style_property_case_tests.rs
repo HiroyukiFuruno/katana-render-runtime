@@ -1,6 +1,9 @@
 use super::{CssStyle, CssVerticalAlign, normalized_property_name};
 use std::borrow::Cow;
 
+type HtmlNodeAttributes = [(String, String)];
+type ElementTagAndAttributes<'a> = (&'a str, &'a HtmlNodeAttributes);
+
 #[test]
 fn property_name_helper_matches_ascii_case_oracle_and_borrowing() {
     for input in [
@@ -116,7 +119,7 @@ fn parsed_multicolumn_shorthand_and_gap_reach_layout_style() -> Result<(), Strin
 
 fn find_columns_element(
     nodes: &[crate::renderer::backends::html_document::HtmlDocumentNode],
-) -> Option<(&str, &[(String, String)])> {
+) -> Option<ElementTagAndAttributes<'_>> {
     use crate::renderer::backends::html_document::HtmlDocumentNode;
     nodes.iter().find_map(|node| match node {
         HtmlDocumentNode::Element {

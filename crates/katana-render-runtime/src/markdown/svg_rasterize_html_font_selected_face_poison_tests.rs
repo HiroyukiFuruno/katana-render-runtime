@@ -32,7 +32,7 @@ fn poisoned_selected_face_attempt_rejects_svg_admission_and_clears_state() -> Re
 fn poison_attempt_mutex(context: &Context) {
     let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _state = context.state.lock().unwrap_or_else(PoisonError::into_inner);
-        std::panic::panic_any("selected face attempt interrupted while locked");
+        std::panic::resume_unwind(Box::new("selected face attempt interrupted while locked"));
     }));
     assert!(unwind.is_err());
     assert!(context.state.is_poisoned());

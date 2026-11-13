@@ -17,7 +17,6 @@ const OPAQUE_RGB: [u8; 3] = [20, 100, 200];
 const OPAQUE_RGB_WIDE: [u8; 6] = [20, 100, 200, 20, 100, 200];
 const SINGLE_PIXEL: (u32, u32) = (1, 1);
 const WIDE_PIXELS: (u32, u32) = (2, 1);
-const PNG_SIZE: f32 = 2.0;
 const BLUE_SAMPLE: (u32, u32) = (3, 1);
 const BLUE_RGBA: (u8, u8, u8, u8) = (0, 0, 255, 255);
 
@@ -39,6 +38,34 @@ fn matches_format(kind: &usvg::ImageKind, format: Format) -> bool {
             | (usvg::ImageKind::WEBP(_), Format::Webp)
             | (usvg::ImageKind::SVG(_), Format::Svg)
     )
+}
+
+fn assert_png_image(tree: &usvg::Tree) -> TestResult {
+    const PNG_SIZE: f32 = 2.0;
+    let valid = tree.node_by_id("valid").ok_or("valid PNG missing")?;
+    assert!(matches!(valid, usvg::Node::Group(group) if
+        matches!(group.children(), [usvg::Node::Image(image)] if matches_format(image.kind(), Format::Png))
+    ));
+    let bounds = valid.abs_bounding_box();
+    assert_eq!((bounds.width(), bounds.height()), (PNG_SIZE, PNG_SIZE));
+    Ok(())
+}
+
+fn assert_render_matches_with_blue_sibling(tree: &usvg::Tree, expected: &usvg::Tree) -> TestResult {
+    let actual = render_test_image(tree)?;
+    assert_eq!(actual.data(), render_test_image(expected)?.data());
+    assert_blue_sibling(&actual)
+}
+
+fn assert_blue_sibling(image: &Pixmap) -> TestResult {
+    let blue = image
+        .pixel(BLUE_SAMPLE.0, BLUE_SAMPLE.1)
+        .ok_or("sibling sample missing")?;
+    assert_eq!(
+        (blue.red(), blue.green(), blue.blue(), blue.alpha()),
+        BLUE_RGBA
+    );
+    Ok(())
 }
 
 #[test]
@@ -66,27 +93,12 @@ fn image_without_href_preserves_png_and_visible_sibling() -> TestResult {
     let source = format!(
         "<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'>{MISSING}<image id='valid' width='2' height='2' href='data:image/png;base64,{png}'/><rect id='sibling' x='2' width='2' height='4' fill='blue'/></svg>"
     );
-    let control = source.replace(MISSING, "");
     let tree = usvg::Tree::from_str(&source, &usvg::Options::default())?;
-    let expected = usvg::Tree::from_str(&control, &usvg::Options::default())?;
+    let expected = usvg::Tree::from_str(&source.replace(MISSING, ""), &usvg::Options::default())?;
     assert!(tree.node_by_id("missing").is_none());
-    let valid = tree.node_by_id("valid").ok_or("valid PNG missing")?;
-    assert!(matches!(valid, usvg::Node::Group(group) if
-        matches!(group.children(), [usvg::Node::Image(image)] if matches_format(image.kind(), Format::Png))
-    ));
-    let bounds = valid.abs_bounding_box();
-    assert_eq!((bounds.width(), bounds.height()), (PNG_SIZE, PNG_SIZE));
+    assert_png_image(&tree)?;
     assert!(tree.node_by_id("sibling").is_some());
-    let actual = render_test_image(&tree)?;
-    assert_eq!(actual.data(), render_test_image(&expected)?.data());
-    let blue = actual
-        .pixel(BLUE_SAMPLE.0, BLUE_SAMPLE.1)
-        .ok_or("sibling sample missing")?;
-    assert_eq!(
-        (blue.red(), blue.green(), blue.blue(), blue.alpha()),
-        BLUE_RGBA
-    );
-    Ok(())
+    assert_render_matches_with_blue_sibling(&tree, &expected)
 }
 
 fn render_test_image(tree: &usvg::Tree) -> TestResult<Pixmap> {
@@ -263,15 +275,9 @@ fn interlaced_gif_with_zero_height_frame_keeps_visible_sibling() -> TestResult {
     );
     let tree = usvg::Tree::from_str(&source, &usvg::Options::default())?;
     assert!(tree.node_by_id("image").is_some());
-    let mut image = Pixmap::new(VIEWPORT, VIEWPORT).ok_or("pixmap unavailable")?;
-    resvg::render(&tree, Transform::identity(), &mut image.as_mut());
+    let image = render_test_image(&tree)?;
     assert_eq!(image.pixel(0, 0).ok_or("image sample missing")?.alpha(), 0);
-    let blue = image.pixel(3, 1).ok_or("sibling sample missing")?;
-    assert_eq!(
-        (blue.red(), blue.green(), blue.blue(), blue.alpha()),
-        (0, 0, 255, 255)
-    );
-    Ok(())
+    assert_blue_sibling(&image)
 }
 
 fn zero_height_gif_frame() -> TestResult<Vec<u8>> {

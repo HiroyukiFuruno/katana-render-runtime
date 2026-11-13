@@ -57,7 +57,7 @@ fn reports_the_read_error_when_a_regular_font_is_unreadable()
     let (temp, _, _) = physical_font_fixture()?;
     let path = temp.path().join(FONT_FILENAME);
     let original = fs::metadata(&path)?.permissions();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0))?;
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000))?;
     let result = super::physical_file(&path);
     fs::set_permissions(&path, original)?;
     assert!(result.is_err_and(|error| error.starts_with("read font:")));
