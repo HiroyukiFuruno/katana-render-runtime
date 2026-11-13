@@ -45,6 +45,22 @@ fn physical_font_fixture_rejects_a_directory_and_an_unparseable_font() -> Result
     Ok(())
 }
 
+#[test]
+fn physical_font_load_reports_a_missing_file_without_creating_it() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let missing = temp.path().join("missing.ttf");
+    let expected = fs::File::open(&missing)
+        .err()
+        .ok_or("missing font file opened")?;
+    assert_eq!(expected.kind(), std::io::ErrorKind::NotFound);
+    assert_eq!(
+        super::load_physical_font(&missing).err(),
+        Some(expected.to_string())
+    );
+    assert!(!missing.exists());
+    Ok(())
+}
+
 #[cfg(unix)]
 fn non_utf8_name() -> OsString {
     use std::os::unix::ffi::OsStringExt;

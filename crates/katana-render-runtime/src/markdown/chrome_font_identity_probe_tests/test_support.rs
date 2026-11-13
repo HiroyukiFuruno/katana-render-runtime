@@ -22,6 +22,10 @@ pub(super) fn physical_font_fixture() -> Result<(TempDirectory, Database, Select
 
 fn write_physical_font(path: &Path, bytes: &[u8]) -> Result<(Database, SelectedFont), String> {
     fs::write(path, bytes).map_err(|error| error.to_string())?;
+    load_physical_font(path)
+}
+
+fn load_physical_font(path: &Path) -> Result<(Database, SelectedFont), String> {
     let mut database = Database::new();
     database
         .load_font_file(path)
