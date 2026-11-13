@@ -86,10 +86,11 @@ mod tests {
     use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
 
     #[test]
-    fn mapped_font_rejects_inconsistent_length_and_missing_file() -> Result<(), String> {
-        let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    fn mapped_font_rejects_inconsistent_length_and_missing_file()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
         let path = directory.path().join("font.ttf");
-        std::fs::write(&path, FONT_BYTES).map_err(|error| error.to_string())?;
+        std::fs::write(&path, FONT_BYTES)?;
         let stamp = stamp_path_uncached(&path).map_err(|_| "font stamp failed")?;
         assert!(stamp.durable_reusable());
         let length = FONT_BYTES.len();
@@ -100,7 +101,7 @@ mod tests {
         );
         assert!(new_source(&path, &stamp, &mut sources, length - 1, length).is_err());
         drop(sources);
-        std::fs::remove_file(&path).map_err(|error| error.to_string())?;
+        std::fs::remove_file(&path)?;
 
         let mut sources = SharedSources::default();
         assert!(shared_source(&path, Some(&stamp), &mut sources, length).is_err());

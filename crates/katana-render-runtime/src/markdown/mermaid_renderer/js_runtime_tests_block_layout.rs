@@ -93,9 +93,8 @@ fn native_html_text_advance(root: SvgNode<'_, '_>, text: &str) -> Result<f32, St
 #[test]
 fn native_block_label_measurement_propagates_svg_parse_errors()
 -> Result<(), Box<dyn std::error::Error>> {
-    let document = resvg::usvg::roxmltree::Document::parse(
-        "<svg><style>font-family:;font-size:16px;</style></svg>",
-    )?;
+    let source = "<svg><style>font-family:;font-size:16px;</style></svg>";
+    let document = resvg::usvg::roxmltree::Document::parse(source)?;
     let root = document.root_element();
     let error = native_html_text_advance(root, "\0")
         .err()

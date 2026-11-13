@@ -63,12 +63,12 @@ fn png_encoder_returns_a_typed_error_for_zero_sized_raster() {
     };
 
     let result = encode_png(&raster);
-    let error = result.as_ref().err();
+    let error = result
+        .as_ref()
+        .err()
+        .and_then(|error| error.downcast_ref::<image::ImageError>());
     assert!(
-        matches!(
-            error.and_then(|error| error.downcast_ref::<image::ImageError>()),
-            Some(image::ImageError::IoError(_))
-        ),
+        matches!(error, Some(image::ImageError::IoError(_))),
         "expected the PNG writer to reject zero dimensions"
     );
 }

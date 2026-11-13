@@ -30,21 +30,23 @@ mod lock_tests {
     -> Result<(), Box<dyn std::error::Error>> {
         /* WHY: 共有ロックのpoisonをこの子プロセスだけに閉じ込める。 */
         if ProcessService::enter_isolated_test_child(CHILD_CASE, CASE_NAME)? {
-            assert_poison_reported();
+            assert_poison_reported()?;
         } else {
             assert!(env_guard().is_ok());
         }
         Ok(())
     }
 
-    fn assert_poison_reported() {
-        let interrupted = catch_unwind(|| -> Result<(), String> {
-            let _guard = env_guard()?;
+    fn assert_poison_reported() -> Result<(), String> {
+        let guard = env_guard()?;
+        let interrupted = catch_unwind(move || {
+            let _guard = guard;
             resume_unwind(Box::new(
                 "interrupt isolated PlantUML environment operation",
             ))
         });
         assert!(interrupted.is_err());
         assert!(env_guard().is_err_and(|error| error.contains("poisoned lock")));
+        Ok(())
     }
 }

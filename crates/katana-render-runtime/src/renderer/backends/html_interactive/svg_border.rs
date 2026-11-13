@@ -154,11 +154,7 @@ mod tests {
             r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 240">{paths}</svg>"#
         );
         let parsed = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default());
-        assert!(
-            parsed.is_ok(),
-            "invalid rounded border SVG: {:?}",
-            parsed.err()
-        );
+        assert!(parsed.is_ok(), "invalid rounded border SVG: {parsed:?}");
     }
 
     #[test]
