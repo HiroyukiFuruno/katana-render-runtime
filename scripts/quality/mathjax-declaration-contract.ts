@@ -9,7 +9,7 @@ export const MATHJAX_DECL_PROFILE = "scripts/quality/tsconfig-owned-native-mathj
 export const MATHJAX_PROVENANCE = "scripts/quality/mathjax-declaration-provenance.json";
 // 資源はrender_bundleへ借用するが、リクエスト直列化とMathJax入口のABI境界は維持する。
 const MATHJAX_RUST_REQUEST_SHA256 =
-  "5bd9b779ededb624dc0f0bcd49881888569c7858a9268be35d0762912870948f";
+  "51a88f81c92076dc82ae41aaead41741b84128885f0ff74acc01e2684ba2f807";
 const MATHJAX_RUST_SCRIPTS_SHA256 =
   "cd24a56b27e96d0050eedd814ecce3fa973f480852247f358e5b99d1a4c43e10";
 export const MATHJAX_RUNTIME =
