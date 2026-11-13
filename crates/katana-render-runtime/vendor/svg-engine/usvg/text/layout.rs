@@ -532,9 +532,9 @@ fn convert_span(
         push_cluster_bbox(cluster, &mut bboxes_builder);
     }
 
-    let mut bboxes = bboxes_builder.finish()?;
-    bboxes = bboxes.transform(text_ts)?;
-    let bbox = bboxes.compute_tight_bounds()?.to_non_zero_rect()?;
+    let bboxes = bboxes_builder.finish()?.transform(text_ts)?;
+    // 矩形の直線だけを追加するため、変換済みの点の境界がそのままタイト境界になる。
+    let bbox = bboxes.bounds().to_non_zero_rect()?;
 
     Some((span_clusters, bbox))
 }

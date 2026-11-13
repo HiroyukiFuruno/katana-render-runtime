@@ -86,11 +86,15 @@ fn rotation_and_relative_position_transform_a_single_glyph() -> Result<(), Strin
     Ok(())
 }
 
-#[test]
-fn extreme_relative_shift_drops_only_the_unrepresentable_text() -> Result<(), String> {
+#[rstest]
+#[case::relative("dx")]
+#[case::absolute("x")]
+fn extreme_horizontal_shift_drops_only_the_unrepresentable_text(
+    #[case] coordinate: &str,
+) -> Result<(), String> {
     let tree = parse(
         "",
-        "<tspan id='unrepresentable' dx='1e30'>A</tspan><tspan x='20' y='50'>B</tspan>",
+        &format!("<tspan {coordinate}='1e30'>A</tspan><tspan x='20' y='50'>B</tspan>"),
     )?;
     let expected = parse("", "B")?;
     assert_eq!(text(&tree)?.bounding_box(), text(&expected)?.bounding_box());
