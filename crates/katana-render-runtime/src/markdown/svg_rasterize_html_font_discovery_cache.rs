@@ -48,6 +48,15 @@ fn copy_value(value: &CacheValue) -> CacheValue {
 }
 
 #[cfg(target_os = "macos")]
+pub(super) fn observe_known_font(value: Option<KnownCacheValue>) -> Option<KnownCacheValue> {
+    #[cfg(test)]
+    if value.is_none() {
+        super::raster_observer::prepare_known_unavailable();
+    }
+    value
+}
+
+#[cfg(target_os = "macos")]
 pub(super) fn known_for(request: &HtmlFontRequest) -> Option<KnownCacheValue> {
     let mut cache = html_font_cache()
         .lock()

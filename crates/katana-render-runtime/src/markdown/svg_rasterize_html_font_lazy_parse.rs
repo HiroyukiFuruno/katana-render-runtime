@@ -139,11 +139,7 @@ fn prepare(document: &ParsedHtmlDocument<'_>, markup: &str) -> Option<KnownOptio
     }
     let request = HtmlFontRequest::from_markup(markup);
     let text = prepared_ascii(document)?;
-    let Some(value) = discovery_cache::known_for(&request) else {
-        #[cfg(test)]
-        super::raster_observer::prepare_known_unavailable();
-        return None;
-    };
+    let value = discovery_cache::observe_known_font(discovery_cache::known_for(&request))?;
     let proof = value.proof;
     let context = selected_face::Context::new(value.database, proof, text)?;
     let database = Arc::clone(&context.original);
@@ -192,7 +188,7 @@ mod diagnostic {
         SvgRasterizeOps,
     };
     use super::super::discovery::KnownCacheValue;
-    use super::super::{lazy_diagnostic, raster_observer};
+    use super::super::{discovery_cache, lazy_diagnostic, raster_observer};
     use super::{
         HtmlFontRequest, KnownOptions, ParsedHtmlDocument, install, parse_document, prepared_ascii,
         text_shaping,
@@ -245,10 +241,7 @@ mod diagnostic {
         value: Option<KnownCacheValue>,
         text: String,
     ) -> Option<KnownOptions> {
-        let Some(value) = value else {
-            raster_observer::prepare_known_unavailable();
-            return None;
-        };
+        let value = discovery_cache::observe_known_font(value)?;
         let proof = value.proof;
         let (database, proof) = lazy_diagnostic::select_database(&value.database, proof)?;
         Some(finish_options(database, proof, text))
