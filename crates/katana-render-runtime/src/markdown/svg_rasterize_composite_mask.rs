@@ -85,11 +85,23 @@ pub(super) fn clip_mask(
     width: u32,
     height: u32,
 ) -> Result<Mask, String> {
-    let clip_pixels = render_layer(
+    render_mask(
+        clip,
+        transform,
         (width, height),
         "failed to allocate cropped SVG clip pixmap",
-        &mut |pixels| render_clip_path(clip, transform, pixels),
-    )?;
+    )
+}
+
+fn render_mask(
+    clip: &usvg::ClipPath,
+    transform: Transform,
+    dimensions: (u32, u32),
+    allocation_error: &str,
+) -> Result<Mask, String> {
+    let clip_pixels = render_layer(dimensions, allocation_error, &mut |pixels| {
+        render_clip_path(clip, transform, pixels)
+    })?;
     Ok(Mask::from_pixmap(clip_pixels.as_ref(), MaskType::Alpha))
 }
 
@@ -102,12 +114,12 @@ fn render_clip_path(
     render_existing_node(&node, transform.pre_concat(clip.transform()), pixmap);
 
     if let Some(nested) = clip.clip_path() {
-        let nested_pixels = render_layer(
+        let nested_mask = render_mask(
+            nested,
+            transform,
             (pixmap.width(), pixmap.height()),
             "failed to allocate nested SVG clip pixmap",
-            &mut |pixels| render_clip_path(nested, transform, pixels),
         )?;
-        let nested_mask = Mask::from_pixmap(nested_pixels.as_ref(), MaskType::Alpha);
         pixmap.apply_mask(&nested_mask);
     }
     Ok(())
