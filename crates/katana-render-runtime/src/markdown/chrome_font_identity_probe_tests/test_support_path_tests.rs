@@ -85,6 +85,26 @@ fn probe_child_rejects_a_successful_process_that_selected_no_test() -> Result<()
     Ok(())
 }
 
+#[test]
+fn probe_child_reports_a_process_launch_error_without_a_response()
+-> Result<(), Box<dyn std::error::Error>> {
+    let temp = TempDirectory::new()?;
+    let resource_path = temp.path().join("captured-font.body");
+    fs::write(&resource_path, b"font response")?;
+    let request = request_with_resource(resource_path);
+    let output = temp.path().join("response.json");
+    let error = run_probe_child(&request, &output, "invalid\0test-name")
+        .err()
+        .ok_or("the process accepted an argument containing NUL")?;
+    assert!(error.starts_with("run ignored font probe:"), "{error}");
+    assert_eq!(
+        fs::read(output.with_extension("request.json"))?,
+        serde_json::to_vec(&request)?
+    );
+    assert!(!output.exists());
+    Ok(())
+}
+
 #[cfg(unix)]
 #[test]
 fn probe_child_does_not_write_through_a_dangling_request_link() -> Result<(), String> {
