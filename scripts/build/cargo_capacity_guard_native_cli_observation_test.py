@@ -19,6 +19,19 @@ import cargo_capacity_guard_native_cli_observation as observation
 from cargo_capacity_guard import JsonObject, _array, _object, _text, inspect
 
 
+def fixture_rtk() -> Path:
+    # WHY: シェルの起動設定ではなくRTK自身が子プロセスへ渡す環境を検証する。
+    for directory in os.get_exec_path():
+        candidate = shutil.which("rtk", path=directory)
+        if candidate is None:
+            continue
+        executable = Path(candidate).resolve(strict=True)
+        with executable.open("rb") as stream:
+            if stream.read(2) != b"#!":
+                return executable
+    raise AssertionError("native RTK fixture provenance unavailable")
+
+
 class Fixture:
     def __init__(self, directory: Path, action: str = "") -> None:
         directory = directory.resolve()
@@ -73,14 +86,14 @@ class Fixture:
         rustc_launcher = self.tools / "rustc"
         cargo_launcher.symlink_to(rustup)
         rustc_launcher.symlink_to(rustup)
-        rtk = shutil.which("rtk")
-        if rtk is None:
-            raise AssertionError("RTK fixture provenance unavailable")
-        self.command = [str(Path(rtk).resolve()), "proxy", "cargo", *observation.BUILD_FLAGS]
+        self.rtk = fixture_rtk()
+        proxy = self.tools / "rtk"
+        proxy.symlink_to(self.rtk)
+        self.command = [str(proxy), "proxy", "cargo", *observation.BUILD_FLAGS]
         self.protected = self.root / "tmp/protected.bin"
         self.protected.write_bytes(b"protected")
         self.environment = {
-            "PATH": str(self.tools) + os.pathsep + str(Path(rtk).resolve().parent) + os.pathsep + os.defpath,
+            "PATH": os.pathsep.join((str(self.tools), os.defpath)),
             "HOME": str(self.home),
             "RUSTFLAGS": "-D warnings", "LC_CTYPE": "UTF-8", "CARGO_TARGET_DIR": str(self.target),
             "CARGO_CAPACITY_PROTECTED_REFS": json.dumps([str(self.protected)]),
@@ -126,10 +139,7 @@ class Fixture:
         stderr = self.attempt / "metadata.stderr.raw"
         stderr.write_bytes(b"")
         probe = self.attempt / "metadata-observation.json"
-        rtk = shutil.which("rtk")
-        if rtk is None:
-            raise AssertionError("RTK fixture provenance unavailable")
-        self.write_json(probe, {"argv": [str(Path(rtk).resolve()), "proxy", str(cargo_launcher), "metadata", "--frozen",
+        self.write_json(probe, {"argv": [str(self.rtk), "proxy", str(cargo_launcher), "metadata", "--frozen",
                                        "--format-version", "1", "--no-deps", "--manifest-path", str(self.root / "Cargo.toml")],
             "stdout": observation.file_record(metadata), "stderr": observation.file_record(stderr),
             "label": "probe-1-cargo-metadata", "cwd": str(self.root), "attemptToken": self.nonce,
@@ -186,6 +196,7 @@ class Fixture:
             raise AssertionError("RTK fixture provenance unavailable")
         source_path = Path(source).resolve(strict=True)
         isolated = self.tools / "rtk"
+        isolated.unlink()
         shutil.copyfile(source_path, isolated)
         isolated.chmod(0o700)
         if isolated.read_bytes() != source_path.read_bytes():
