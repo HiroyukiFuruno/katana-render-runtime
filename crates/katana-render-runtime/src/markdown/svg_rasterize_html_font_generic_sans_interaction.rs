@@ -23,12 +23,15 @@ mod frame_tests;
 pub(in super::super) fn interaction_session() -> Result<crate::HtmlBrowserSession, String> {
     let source =
         crate::HtmlBrowserSource::new(FIXTURE, "https://example.test/interaction-fidelity.html")
-            .map_err(|error| error.to_string())?;
+            .map_err(browser_error_message)?;
     let viewport = crate::HtmlBrowserViewport::new(VIEWPORT_WIDTH, VIEWPORT_HEIGHT, 1.0)
-        .map_err(|error| error.to_string())?;
-    crate::HtmlBrowserSession::new(source, viewport).map_err(|error| error.to_string())
+        .map_err(browser_error_message)?;
+    crate::HtmlBrowserSession::new(source, viewport).map_err(browser_error_message)
 }
 
+fn browser_error_message(error: crate::HtmlBrowserError) -> String {
+    error.to_string()
+}
 fn initial_generic_decision(
     records: &[decision_observer::Decision],
 ) -> Result<&decision_observer::Decision, String> {
@@ -76,14 +79,9 @@ fn frame_pixel_sha(frame: &crate::HtmlBrowserFrame) -> String {
 pub(in super::super) fn initial_frame_sha(
     frame: &crate::HtmlBrowserFrame,
 ) -> Result<String, String> {
-    let expected_bytes = (frame.viewport.width as usize)
-        .checked_mul(frame.viewport.height as usize)
-        .and_then(|pixels| pixels.checked_mul(RGBA_CHANNELS))
-        .ok_or("initial fixture frame dimensions overflow")?;
-    if frame.viewport.width == 0
-        || frame.viewport.height == 0
-        || frame.pixels.len() != expected_bytes
-    {
+    let expected_bytes =
+        expected_frame_bytes(frame).ok_or("initial fixture frame dimensions overflow")?;
+    if !has_frame_dimensions(frame, expected_bytes) {
         return Err("initial fixture frame has invalid RGBA dimensions".to_string());
     }
     Ok(frame_pixel_sha(frame))
@@ -120,18 +118,23 @@ pub(in super::super) fn print_initial_frame(
 }
 
 fn validate_raster_frame(frame: &crate::HtmlBrowserFrame) -> Result<(), String> {
-    let expected_bytes = (frame.viewport.width as usize)
-        .checked_mul(frame.viewport.height as usize)
-        .and_then(|pixels| pixels.checked_mul(RGBA_CHANNELS))
-        .ok_or("frame dimensions overflow")?;
-    if frame.viewport.width == 0
-        || frame.viewport.height == 0
-        || frame.pixels.len() != expected_bytes
+    let expected_bytes = expected_frame_bytes(frame).ok_or("frame dimensions overflow")?;
+    if !has_frame_dimensions(frame, expected_bytes)
         || frame.pixel_format != crate::HtmlBrowserPixelFormat::Rgba8
     {
         return Err("fixture frame is not valid RGBA8888".to_string());
     }
     Ok(())
+}
+
+fn expected_frame_bytes(frame: &crate::HtmlBrowserFrame) -> Option<usize> {
+    (frame.viewport.width as usize)
+        .checked_mul(frame.viewport.height as usize)
+        .and_then(|pixels| pixels.checked_mul(RGBA_CHANNELS))
+}
+
+fn has_frame_dimensions(frame: &crate::HtmlBrowserFrame, expected_bytes: usize) -> bool {
+    frame.viewport.width != 0 && frame.viewport.height != 0 && frame.pixels.len() == expected_bytes
 }
 
 fn print_raster_phase(
@@ -186,5 +189,5 @@ pub(in super::super) fn check_initial_generic_fixture() -> Result<(), String> {
         .upgrade()
         .ok_or("generic selected database was released")?;
     assert_initial_generic_face(&database, decision, &eager)?;
-    session.close().map_err(|error| error.to_string())
+    session.close().map_err(browser_error_message)
 }

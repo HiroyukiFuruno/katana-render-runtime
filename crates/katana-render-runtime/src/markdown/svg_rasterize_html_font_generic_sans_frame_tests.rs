@@ -9,6 +9,16 @@ const MISSING_GENERIC_DECISION_ERROR: &str =
     "actual initial link layout did not record the fixture generic family";
 
 #[test]
+fn frame_diagnostic_preserves_invalid_viewport_message() -> Result<(), String> {
+    let invalid = crate::HtmlBrowserViewport::new(0, 1, 1.0)
+        .err()
+        .ok_or("zero-width viewport was accepted")?;
+    let expected = invalid.to_string();
+    assert_eq!(super::browser_error_message(invalid), expected);
+    Ok(())
+}
+
+#[test]
 fn closed_interaction_cannot_record_raster_phase() -> Result<(), String> {
     let mut session = interaction_session()?;
     assert!(session.latest_frame().is_some());
