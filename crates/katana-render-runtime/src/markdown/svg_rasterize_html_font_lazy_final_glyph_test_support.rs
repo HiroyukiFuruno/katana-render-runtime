@@ -4,8 +4,16 @@ use super::MAX_FINAL_GLYPH_RECORDS;
 
 pub(super) const PRIMARY_TEST_FONT_SIZE: usize = 16;
 pub(super) const ALTERNATE_TEST_FONT_SIZE: usize = 17;
+const FONT_AUDIT_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"><text id="audit-run" x="1" y="24" font-size="16">AV</text></svg>"#;
 
 pub(super) fn font_tree(
+    database: resvg::usvg::fontdb::Database,
+) -> Result<resvg::usvg::Tree, String> {
+    parse_font_tree(FONT_AUDIT_SVG, database)
+}
+
+fn parse_font_tree(
+    svg: &str,
     database: resvg::usvg::fontdb::Database,
 ) -> Result<resvg::usvg::Tree, String> {
     let family = database
@@ -17,11 +25,7 @@ pub(super) fn font_tree(
         fontdb: std::sync::Arc::new(database),
         ..Default::default()
     };
-    resvg::usvg::Tree::from_str(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"><text id="audit-run" x="1" y="24" font-size="16">AV</text></svg>"#,
-        &options,
-    )
-    .map_err(|error| error.to_string())
+    resvg::usvg::Tree::from_str(svg, &options).map_err(|error| error.to_string())
 }
 
 pub(super) fn text_span(
@@ -44,6 +48,21 @@ fn glyph_audit_fixture_requires_a_font_family() {
         font_tree(database).err().as_deref(),
         Some("fixture database has no font family")
     );
+}
+
+#[test]
+fn glyph_audit_fixture_rejects_malformed_svg_with_a_real_font() -> Result<(), String> {
+    let (database, _) = super::variations_tests::bundled_face()?;
+    let invalid = "<svg";
+    let expected = resvg::usvg::Tree::from_str(invalid, &resvg::usvg::Options::default())
+        .err()
+        .ok_or("malformed SVG parsed")?;
+    assert_eq!(
+        parse_font_tree(invalid, database).err(),
+        Some(expected.to_string())
+    );
+    assert!(audit_svg(invalid).is_err());
+    Ok(())
 }
 
 #[test]
