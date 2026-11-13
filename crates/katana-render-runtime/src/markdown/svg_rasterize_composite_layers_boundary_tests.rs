@@ -181,7 +181,7 @@ fn clip_mask_rejects_zero_dimensions() -> Result<(), String> {
         .clip_path()
         .ok_or("nested clip fixture is missing")?;
     for (width, height) in [(0, SIZE), (SIZE, 0)] {
-        let result = super::clip_mask(clip, Transform::identity(), width, height);
+        let result = super::mask::clip_mask(clip, Transform::identity(), width, height);
         assert!(result.is_err_and(|error| error.contains("allocate cropped SVG clip pixmap")));
     }
     Ok(())

@@ -1,6 +1,6 @@
 use super::{AuthoredClipInfo, TextRasterizer, mask, render_children_at_origin};
 use resvg::{render_node, usvg};
-use tiny_skia::{BlendMode, IntRect, Mask, MaskType, Pixmap, PixmapPaint, Transform};
+use tiny_skia::{BlendMode, IntRect, Pixmap, PixmapPaint, Transform};
 
 const LAYER_EDGE_PADDING: i32 = 2;
 const LAYER_SIZE_PADDING: u32 = 4;
@@ -104,20 +104,12 @@ fn composite_clipped_crop(
     clip: &usvg::ClipPath,
     transform: Transform,
 ) -> Result<(), String> {
-    let mask = clip_mask(clip, transform, composited.width(), composited.height())?;
+    let mask = mask::clip_mask(clip, transform, composited.width(), composited.height())?;
     mask::composite_crop_with_mask(pixmap, crop, composited, &mask)
 }
 
-fn clip_mask(
-    clip: &usvg::ClipPath,
-    transform: Transform,
-    width: u32,
-    height: u32,
-) -> Result<Mask, String> {
-    let mut clip_pixels = Pixmap::new(width, height)
-        .ok_or_else(|| "failed to allocate cropped SVG clip pixmap".to_string())?;
-    render_clip_path(clip, transform, &mut clip_pixels)?;
-    Ok(Mask::from_pixmap(clip_pixels.as_ref(), MaskType::Alpha))
+pub(super) fn allocate_pixmap(width: u32, height: u32, error: &str) -> Result<Pixmap, String> {
+    Pixmap::new(width, height).ok_or_else(|| error.to_owned())
 }
 
 pub(super) fn clipped_group_rect(
@@ -148,8 +140,11 @@ pub(super) fn clipped_group_rect(
 }
 
 fn crop_pixmap(pixmap: &tiny_skia::PixmapMut<'_>, crop: IntRect) -> Result<Pixmap, String> {
-    let mut cropped = Pixmap::new(crop.width(), crop.height())
-        .ok_or_else(|| "failed to allocate cropped SVG compositing pixmap".to_string())?;
+    let mut cropped = allocate_pixmap(
+        crop.width(),
+        crop.height(),
+        "failed to allocate cropped SVG compositing pixmap",
+    )?;
     let paint = PixmapPaint {
         blend_mode: BlendMode::Source,
         ..PixmapPaint::default()
@@ -163,28 +158,6 @@ fn crop_pixmap(pixmap: &tiny_skia::PixmapMut<'_>, crop: IntRect) -> Result<Pixma
         None,
     );
     Ok(cropped)
-}
-
-fn render_clip_path(
-    clip: &usvg::ClipPath,
-    transform: Transform,
-    pixmap: &mut Pixmap,
-) -> Result<(), String> {
-    let node = usvg::Node::Group(Box::new(clip.root().clone()));
-    render_existing_node(
-        &node,
-        transform.pre_concat(clip.transform()),
-        &mut pixmap.as_mut(),
-    );
-
-    if let Some(nested) = clip.clip_path() {
-        let mut nested_pixels = Pixmap::new(pixmap.width(), pixmap.height())
-            .ok_or_else(|| "failed to allocate nested SVG clip pixmap".to_string())?;
-        render_clip_path(nested, transform, &mut nested_pixels)?;
-        let nested_mask = Mask::from_pixmap(nested_pixels.as_ref(), MaskType::Alpha);
-        pixmap.apply_mask(&nested_mask);
-    }
-    Ok(())
 }
 
 pub(super) fn render_existing_node(

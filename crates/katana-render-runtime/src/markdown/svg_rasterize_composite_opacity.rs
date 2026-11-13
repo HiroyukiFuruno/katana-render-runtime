@@ -32,8 +32,11 @@ pub(super) fn render(
     let Some((crop, crop_transform)) = layers::crop_context(group, group_transform, pixmap)? else {
         return Ok(());
     };
-    let mut layer = Pixmap::new(crop.width(), crop.height())
-        .ok_or_else(|| "failed to allocate SVG opacity layer".to_string())?;
+    let mut layer = layers::allocate_pixmap(
+        crop.width(),
+        crop.height(),
+        "failed to allocate SVG opacity layer",
+    )?;
     render_children_with_text(
         group,
         crop_transform,
