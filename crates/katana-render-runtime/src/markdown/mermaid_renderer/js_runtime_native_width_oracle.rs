@@ -168,10 +168,11 @@ mod tests {
     use serde_json::{Value, json};
 
     #[test]
-    fn raw_v8_html_width_calls_reject_unmeasurable_text() -> Result<(), String> {
-        let calls = actual_v8_calls("native-width-oracle-invalid-html-text.js")?;
+    fn raw_v8_width_calls_reject_unmeasurable_text() -> Result<(), String> {
+        let calls = actual_v8_calls("native-width-oracle-invalid-text.js")?;
         for (index, kind, expected) in [
             (0, "css", "CSS boundary reference failed:"),
+            (1, "svg", "SVG boundary reference failed:"),
             (2, "canvas", "Canvas boundary reference failed:"),
         ] {
             let mut corrupted = calls.clone();
