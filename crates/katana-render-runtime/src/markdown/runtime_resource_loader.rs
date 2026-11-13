@@ -98,7 +98,7 @@ impl RuntimeResourceLoader {
         }
     }
 
-    fn read_bundled(bundled: BundledResource) -> std::io::Result<&'static str> {
+    pub(super) fn read_bundled(bundled: BundledResource) -> std::io::Result<&'static str> {
         let source = match bundled {
             BundledResource::Mermaid => RuntimeAsset::mermaid()
                 .bytes()
