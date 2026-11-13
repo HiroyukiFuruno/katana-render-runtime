@@ -7,6 +7,30 @@ const FILE_METRIC_SIZE: f32 = 16.0;
 const CORRUPTION_MASK: u8 = 0xff;
 
 #[test]
+fn rejected_face_metrics_never_read_the_legacy_font() {
+    use super::super::super::measurement_diagnostic::{self, FaceMetricScope};
+
+    let mut observation = measurement_diagnostic::enter(true);
+    let detail = FaceMetricScope::new(true);
+    for detail in [None, Some(&detail)] {
+        let mut fallback_called = false;
+        let result = super::resolve_face_line_metrics(
+            Err(()),
+            || {
+                fallback_called = true;
+                Some((12.0, 4.0))
+            },
+            detail,
+        );
+        assert_eq!(result, None);
+        assert!(!fallback_called);
+    }
+    let stats = observation.finish().face_inner;
+    assert_eq!(stats.bridge_err, 1);
+    assert_eq!(stats.legacy_calls, 0);
+}
+
+#[test]
 fn missing_face_source_returns_no_line_metrics() {
     let mut database = resvg::usvg::fontdb::Database::new();
     database.load_font_data(crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES.to_vec());

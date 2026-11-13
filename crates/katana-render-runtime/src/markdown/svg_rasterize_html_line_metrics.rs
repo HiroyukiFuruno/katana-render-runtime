@@ -105,11 +105,11 @@ fn line_metrics_for_face(
     id: resvg::usvg::fontdb::ID,
     size: f32,
 ) -> Option<(f32, f32)> {
-    match super::harfrust::cached_face_line_metrics(database, id, size) {
-        Ok(Some(metrics)) => Some(metrics),
-        Ok(None) => legacy_line_metrics(database, id, size),
-        Err(()) => None,
-    }
+    resolve_face_line_metrics(
+        super::harfrust::cached_face_line_metrics(database, id, size),
+        || legacy_line_metrics(database, id, size),
+        None,
+    )
 }
 
 fn observed_line_metrics_for_face(
@@ -127,21 +127,32 @@ fn observed_line_metrics_for_face(
 
 fn diagnosed_line_metrics_for_face(database: &Database, id: ID, size: f32) -> Option<(f32, f32)> {
     let detail = FaceMetricScope::new(true);
-    match super::harfrust::diagnosed_cached_face_line_metrics(database, id, size) {
-        Ok(Some(metrics)) => {
-            detail.record_outcome(FaceMetricOutcome::Bridge);
-            Some(metrics)
-        }
-        Ok(None) => {
-            detail.record_outcome(FaceMetricOutcome::Legacy);
-            detail.measure(FaceMetricPhase::Legacy, || {
-                legacy_line_metrics(database, id, size)
-            })
-        }
-        Err(()) => {
-            detail.record_outcome(FaceMetricOutcome::Invalid);
-            None
-        }
+    resolve_face_line_metrics(
+        super::harfrust::diagnosed_cached_face_line_metrics(database, id, size),
+        || legacy_line_metrics(database, id, size),
+        Some(&detail),
+    )
+}
+
+fn resolve_face_line_metrics(
+    measured: Result<Option<(f32, f32)>, ()>,
+    legacy: impl FnOnce() -> Option<(f32, f32)>,
+    detail: Option<&FaceMetricScope>,
+) -> Option<(f32, f32)> {
+    if let Some(detail) = detail {
+        detail.record_outcome(match measured {
+            Ok(Some(_)) => FaceMetricOutcome::Bridge,
+            Ok(None) => FaceMetricOutcome::Legacy,
+            Err(()) => FaceMetricOutcome::Invalid,
+        });
+    }
+    /* WHY: 世代の検証に失敗した値は破棄し、別の読み取り結果で置き換えない。 */
+    match measured.ok()? {
+        Some(metrics) => Some(metrics),
+        None => match detail {
+            Some(detail) => detail.measure(FaceMetricPhase::Legacy, legacy),
+            None => legacy(),
+        },
     }
 }
 
