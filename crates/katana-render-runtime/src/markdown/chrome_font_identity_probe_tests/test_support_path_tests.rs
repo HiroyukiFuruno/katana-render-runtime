@@ -9,6 +9,31 @@ use std::{ffi::OsString, fs};
 
 const CONDITION: &str = "non-utf8-path";
 
+#[test]
+fn physical_font_fixture_rejects_a_directory_and_an_unparseable_font() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let path = temp.path().join("malformed.ttf");
+    let malformed = b"invalid sfnt";
+    let expected_io = fs::write(temp.path(), malformed)
+        .err()
+        .ok_or("directory write unexpectedly succeeded")?;
+    assert_eq!(
+        super::write_physical_font(temp.path(), malformed).err(),
+        Some(expected_io.to_string())
+    );
+    assert_eq!(
+        super::write_physical_font(&path, malformed)
+            .err()
+            .as_deref(),
+        Some("fontdb did not load the font")
+    );
+    assert_eq!(
+        fs::read(path).map_err(|error| error.to_string())?,
+        malformed
+    );
+    Ok(())
+}
+
 #[cfg(unix)]
 fn non_utf8_name() -> OsString {
     use std::os::unix::ffi::OsStringExt;

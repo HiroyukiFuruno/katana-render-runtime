@@ -15,11 +15,16 @@ const PHYSICAL_FONT_BYTES: &[u8] = include_bytes!("../../../assets/fonts/NotoSan
 
 pub(super) fn physical_font_fixture() -> Result<(TempDirectory, Database, SelectedFont), String> {
     let temp = TempDirectory::new()?;
-    let path = temp.path().join("physical-font.ttf");
-    fs::write(&path, PHYSICAL_FONT_BYTES).map_err(|error| error.to_string())?;
+    let (database, selected) =
+        write_physical_font(&temp.path().join("physical-font.ttf"), PHYSICAL_FONT_BYTES)?;
+    Ok((temp, database, selected))
+}
+
+fn write_physical_font(path: &Path, bytes: &[u8]) -> Result<(Database, SelectedFont), String> {
+    fs::write(path, bytes).map_err(|error| error.to_string())?;
     let mut database = Database::new();
     database
-        .load_font_file(&path)
+        .load_font_file(path)
         .map_err(|error| error.to_string())?;
     let face = database
         .faces()
@@ -36,7 +41,7 @@ pub(super) fn physical_font_fixture() -> Result<(TempDirectory, Database, Select
         glyph_count: 1,
         is_custom_font: false,
     };
-    Ok((temp, database, selected))
+    Ok((database, selected))
 }
 
 pub(super) fn shared_physical_font_fixture(
