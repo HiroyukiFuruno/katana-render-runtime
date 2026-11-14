@@ -29,20 +29,22 @@ class ZeroScrollPolicyTransitionTest(unittest.TestCase):
     def test_exact_program_changes_are_required(self) -> None:
         path = "scripts/release/html_performance_memory_policy.py"
         names = (path, reuse.ZERO_SCROLL_SELF)
+        release = "scripts/release/verify-release-target.py"
         body = Path(reuse.__file__).read_bytes()
         self_record = (hashlib.sha256(body).hexdigest(), len(body))
-        measured = dict.fromkeys(names, ("0" * 64, 1))
-        candidate = {path: ("1" * 64, 2), reuse.ZERO_SCROLL_SELF: self_record}
-        modes = dict.fromkeys(names, "100644")
+        measured = dict.fromkeys((*names, release), ("0" * 64, 1))
+        candidate = {path: ("1" * 64, 2), reuse.ZERO_SCROLL_SELF: self_record, release: ("2" * 64, 3)}
+        modes = {**dict.fromkeys(names, "100644"), release: "100755"}
         with patch.object(reuse, "ZERO_SCROLL_REVIEWED_FILES", {path: candidate[path]}):
             def check(current: reuse.Records, new_modes: dict[str, str] = modes,
                       head: str = reuse.ZERO_SCROLL_MEASURED_HEAD) -> set[str]:
                 return reuse._zero_scroll_policy_changes(head, current, measured, modes, new_modes)
 
-            self.assertEqual(check(candidate), set(names))
+            self.assertEqual(check(candidate), {*names, release})
             self.assertFalse(check({**candidate, path: ("2" * 64, 2)}))
             self.assertFalse(check({**candidate, "Cargo.lock": ("2" * 64, 2)}))
             self.assertFalse(check(candidate, {**modes, path: "100755"}))
+            self.assertFalse(check(candidate, {**modes, release: "100644"}))
             self.assertFalse(check(candidate, head="a" * 40))
 
 

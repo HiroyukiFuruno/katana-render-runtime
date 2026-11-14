@@ -66,12 +66,12 @@ ZERO_SCROLL_REVIEWED_FILES: dict[str, tuple[str, int]] = {
     "scripts/release/html_performance_promotion.py": ("0e94b79d89cbcf77986acbc6804793360d145e0ac7825c98d88229878944b612", 24136),
     "scripts/release/html_performance_promotion_test.py": ("b8b05eff50b0494769b6bcc364c5dbae17012530ee12a197cfee6d40f332b53c", 37193),
     "scripts/release/html_performance_reference.py": ("72c2b3bdd0c4a5082372ccb5eab2e2aac54f0baceb48e270f1acff30d8de4c66", 27632),
-    "scripts/release/html_performance_reference_test.py": ("8a1e0b9e4e58e37cf23972af3da2d09ee57dbd71334718533f69f688a4918617", 30296),
+    "scripts/release/html_performance_reference_test.py": ("24b4f1fa2844198d2f1b46b4e7657f59dfccbcc30ed9340d6233c9a539e5b2d9", 29316),
     "scripts/release/html_performance_remote_admission.py": ("b991746d218c400600319eb04e554d7e9ce9649ccdc4513867786d59065d64e0", 3636),
     "scripts/release/html_performance_retention_collection.py": ("3f9d954237d9aa2442323c1ab768988dd13d81a46175549c9590dec94a17da0e", 2668),
     "scripts/release/html_performance_source_reuse_cli.py": ("a5f252f573074a16b4edb77682911889f3b3c883de9c851e47aab88cc469cf14", 12033),
     "scripts/release/html_performance_source_reuse_cli_test.py": ("dc20f190b59dca037fb87dc56038dca5805a95c0744713dd5891ed2fd044e784", 18868),
-    "scripts/release/html_performance_source_reuse_test.py": ("12a31560e7851134f0cebb34fbf3f2a93c35aa83f07b378c08775da2a6eeda7a", 71986),
+    "scripts/release/html_performance_source_reuse_test.py": ("b934604c65cdd694d23aa74794b643d21dede7cebb7466b823bedef4d2c60ea2", 72190),
     "scripts/release/local_html_performance_evidence.py": ("5cce6fb5e8eba67965e10ba1be82a336f5a4fc298a1df52425d7fc6f2c1d71f3", 17553),
     "scripts/release/local_html_performance_evidence_test.py": ("e44bb5a569b64022bfc9e2c7ccb567efd44cabc16fe70cc3c488d3c07b04c721", 18654),
     "scripts/html/performance-history.ts": ("f52e9655c15905b7dedd1854bb3a4f1c955bbe2c175b27b70320264382249a8e", 7650),
@@ -108,7 +108,8 @@ def _zero_scroll_policy_changes(
             or any(current.get(path) != value for path, value in ZERO_SCROLL_REVIEWED_FILES.items())):
         return set()
     release_changes = changed & RELEASE_ONLY_PROGRAMS
-    if any(old_modes.get(path) != "100644" or new_modes.get(path) != "100644"
+    if any(old_modes.get(path) not in {"100644", "100755"}
+           or new_modes.get(path) != old_modes.get(path)
            for path in release_changes):
         return set()
     return approved | release_changes

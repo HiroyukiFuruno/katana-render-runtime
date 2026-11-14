@@ -238,13 +238,13 @@ class ActiveReferenceTest(unittest.TestCase):
                 Path("/fixture"), "b" * 40, self.history_query(unknown),
             )
 
-    def test_v4_reference_accepts_mixed_legacy_history_and_rejects_bad_counts(self) -> None:
+    def check_reference_accepts_mixed_legacy_history(self, version: str) -> None:
         history = self.history()
         history["schema"] = "krr-html-performance-history-v2"
-        history["activeReferenceSelectionNote"] = "V4 assessment with legacy records retained"
+        history["activeReferenceSelectionNote"] = "Retain legacy records"
         records = history["records"]
         assert isinstance(records, list) and isinstance(records[0], dict)
-        records[0]["memoryPolicy"] = self.memory_policy_v4()
+        records[0]["memoryPolicy"] = {**self.memory_policy_v4(), "version": version}
         legacy = dict(records[0])
         legacy["id"] = "legacy"
         legacy.pop("memoryPolicy")
@@ -261,28 +261,10 @@ class ActiveReferenceTest(unittest.TestCase):
                     Path("/fixture"), "b" * 40, self.history_query(malformed),
                 )
 
-    def test_v5_reference_accepts_mixed_legacy_history_and_rejects_bad_counts(self) -> None:
-        history = self.history()
-        history["schema"] = "krr-html-performance-history-v2"
-        history["activeReferenceSelectionNote"] = "V4 assessment with legacy records retained"
-        records = history["records"]
-        assert isinstance(records, list) and isinstance(records[0], dict)
-        records[0]["memoryPolicy"] = {**self.memory_policy_v4(), "version": "html-memory-v5"}
-        legacy = dict(records[0])
-        legacy["id"] = "legacy"
-        legacy.pop("memoryPolicy")
-        records.append(legacy)
-        selected = reference.active_reference_at_commit(
-            Path("/fixture"), "b" * 40, self.history_query(history),
-        )
-        self.assertEqual(selected.record_id if selected else None, "first")
-        for field in ("candidateConditions", "acceptedConditions"):
-            malformed = json.loads(json.dumps(history))
-            malformed["records"][0]["memoryPolicy"][field] = 83
-            with self.subTest(field=field), self.assertRaises(ValueError):
-                reference.active_reference_at_commit(
-                    Path("/fixture"), "b" * 40, self.history_query(malformed),
-                )
+    def test_reference_accepts_mixed_legacy_history_and_rejects_bad_counts(self) -> None:
+        for version in ("html-memory-v4", "html-memory-v5"):
+            with self.subTest(version=version):
+                self.check_reference_accepts_mixed_legacy_history(version)
 
     def test_history_wrapper_binds_selected_candidate_and_rejects_role_or_pin_changes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
