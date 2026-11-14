@@ -66,7 +66,8 @@ impl RenderOutputFactory {
         runtime: RuntimeDescriptor,
     ) -> RenderOutput {
         tracing::warn!("{}", warning);
-        Self::from_raw_output(
+        let warning_key = format!("warning:{warning}");
+        let output = Self::from_raw_output(
             input,
             Self::raw_code_block(&source),
             runtime,
@@ -74,7 +75,8 @@ impl RenderOutputFactory {
                 warnings: vec![warning],
                 errors: Vec::new(),
             },
-        )
+        );
+        Self::bind_resource(output, Some(&warning_key))
     }
 
     fn from_raw_output(
