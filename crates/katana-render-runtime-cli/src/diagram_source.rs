@@ -26,11 +26,8 @@ impl MermaidMarkdownOps {
         let mut lines: Vec<&str> = Vec::new();
         let mut fence: Option<(&'static str, u8, usize)> = None;
         for line in source.lines() {
-            if fence.is_none() {
-                fence = Self::starts_block(line, languages);
-                continue;
-            }
             let Some((language, marker, marker_count)) = fence else {
+                fence = Self::starts_block(line, languages);
                 continue;
             };
             if Self::ends_block(line, marker, marker_count) {
