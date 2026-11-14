@@ -39,7 +39,7 @@ jobs:
 
       - name: Install Java runtime
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
-        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: "21"
@@ -82,7 +82,7 @@ jobs:
 
       - name: Install just
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
-        uses: taiki-e/install-action@66f567e72f7d264686a8d5f09f38f0829b4feb80 # just
+        uses: taiki-e/install-action@645c854f3e001c226422fc9dbfc33f80e593932b # just
 
       - name: Install capacity cleanup tool
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
@@ -90,11 +90,11 @@ jobs:
 
       - name: Install cargo-llvm-cov
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
-        uses: taiki-e/install-action@3f7c3597aa4e6da3f315e128de702ce61e7b2877 # cargo-llvm-cov
+        uses: taiki-e/install-action@9299c56f1fb893650f348425bb02c3acf492ebd2 # cargo-llvm-cov
 
       - name: Install cargo-nextest
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        uses: taiki-e/install-action@4a76afe23f9e08d2d9550fb56e556444e8611d21 # v2.90.4
         with:
           tool: cargo-nextest@0.9.148
 
