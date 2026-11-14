@@ -3,8 +3,11 @@ use katana_render_runtime::DiagramKind;
 
 #[test]
 fn extracts_mermaid_fence_from_markdown() {
-    let source = "# Title\n\n~~~mermaid\ngraph TD; A-->B\n~~~\n".to_string();
-    assert_eq!(MermaidMarkdownOps::extract(source), "graph TD; A-->B");
+    let source = "# Title\n\n~~mermaid\n~~~mermaid\ngraph TD; A-->B\n~~~\n".to_string();
+    assert_eq!(
+        DiagramSourceOps::prepare(DiagramKind::Mermaid, source),
+        "graph TD; A-->B"
+    );
 }
 
 #[test]
@@ -103,4 +106,33 @@ fn extracts_plantuml_fence_from_markdown() {
         DiagramSourceOps::prepare(DiagramKind::PlantUml, source),
         "@startuml\nAlice -> Bob: hello\n@enduml"
     );
+}
+
+#[test]
+fn skips_diagrams_inside_a_displayed_code_sample() {
+    let example = concat!(
+        "~~~~text\n",
+        "```mermaid\ngraph TD; Example-->Hidden\n```\n",
+        "```plantuml\n@startuml\nExample --> Hidden\n@enduml\n```\n",
+        "~~~~\n",
+    );
+    let document = format!(
+        "{example}\n```mermaid\ngraph TD; Actual-->Shown\n```\n\n\
+         ~~~plantuml\n@startuml\nActual --> Shown\n@enduml\n~~~\n"
+    );
+    assert_eq!(
+        MermaidMarkdownOps::extract(document.clone()),
+        "graph TD; Actual-->Shown"
+    );
+    assert_eq!(
+        DiagramSourceOps::prepare(DiagramKind::PlantUml, document),
+        "@startuml\nActual --> Shown\n@enduml"
+    );
+    assert_eq!(MermaidMarkdownOps::extract(example.to_owned()), example);
+}
+
+#[test]
+fn skips_diagrams_inside_an_unlabelled_code_sample() {
+    let source = "````\n```mermaid\ngraph TD; A-->B\n```\n````\n".to_owned();
+    assert_eq!(MermaidMarkdownOps::extract(source.clone()), source);
 }

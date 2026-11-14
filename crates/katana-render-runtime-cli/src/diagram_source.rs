@@ -17,6 +17,12 @@ impl DiagramSourceOps {
 
 pub(crate) struct MermaidMarkdownOps;
 
+struct MarkdownFence {
+    language: Option<&'static str>,
+    marker: u8,
+    length: usize,
+}
+
 impl MermaidMarkdownOps {
     pub(crate) fn extract(source: String) -> String {
         Self::extract_for_languages(source, &["mermaid", "zenuml"])
@@ -24,47 +30,54 @@ impl MermaidMarkdownOps {
 
     pub(crate) fn extract_for_languages(source: String, languages: &[&'static str]) -> String {
         let mut lines: Vec<&str> = Vec::new();
-        let mut fence: Option<(&'static str, u8, usize)> = None;
+        let mut fence: Option<MarkdownFence> = None;
         for line in source.lines() {
-            let Some((language, marker, marker_count)) = fence else {
+            let Some(open) = &fence else {
                 fence = Self::starts_block(line, languages);
                 continue;
             };
-            if Self::ends_block(line, marker, marker_count) {
-                let content = lines.join("\n");
-                return if language == "zenuml" {
-                    format!("zenuml\n{content}")
-                } else {
-                    content
-                };
+            if Self::ends_block(line, open.marker, open.length) {
+                if let Some(language) = open.language {
+                    return Self::format_block(language, &lines);
+                }
+                fence = None;
+            } else if open.language.is_some() {
+                lines.push(line);
             }
-            lines.push(line);
         }
         source
     }
 
-    fn starts_block(line: &str, languages: &[&'static str]) -> Option<(&'static str, u8, usize)> {
-        let trimmed = line.trim();
-        Self::language_of(trimmed, b'`', languages)
-            .or_else(|| Self::language_of(trimmed, b'~', languages))
+    fn format_block(language: &str, lines: &[&str]) -> String {
+        let content = lines.join("\n");
+        if language == "zenuml" {
+            format!("zenuml\n{content}")
+        } else {
+            content
+        }
     }
 
-    fn language_of(
-        line: &str,
-        marker: u8,
-        languages: &[&'static str],
-    ) -> Option<(&'static str, u8, usize)> {
+    fn starts_block(line: &str, languages: &[&'static str]) -> Option<MarkdownFence> {
+        let line = line.trim();
         let bytes = line.as_bytes();
-        let marker_count = bytes.iter().take_while(|it| **it == marker).count();
-        if marker_count < MIN_MARKDOWN_FENCE_MARKERS {
+        let marker = *bytes.first()?;
+        if !matches!(marker, b'`' | b'~') {
             return None;
         }
-        let language = line[marker_count..].split_whitespace().next()?;
-        languages
-            .iter()
-            .copied()
-            .find(|it| *it == language)
-            .map(|language| (language, marker, marker_count))
+        let length = bytes.iter().take_while(|it| **it == marker).count();
+        if length < MIN_MARKDOWN_FENCE_MARKERS {
+            return None;
+        }
+        let info = &line[length..];
+        let tag = info.split_whitespace().next();
+        Some(MarkdownFence {
+            language: languages
+                .iter()
+                .copied()
+                .find(|language| Some(*language) == tag),
+            marker,
+            length,
+        })
     }
 
     fn ends_block(line: &str, marker: u8, min_count: usize) -> bool {
