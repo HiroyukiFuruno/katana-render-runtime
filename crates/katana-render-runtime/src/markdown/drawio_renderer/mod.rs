@@ -8,6 +8,7 @@ pub use types::DrawioRendererOps;
 
 use crate::markdown::color_preset::DiagramColorPreset;
 use crate::markdown::runtime_assets::{DRAWIO_DOWNLOAD_URL, RuntimeAsset};
+use crate::markdown::runtime_resource_loader::{BundledResource, RuntimeResourceLoader};
 use crate::markdown::{DiagramBlock, DiagramResult};
 use js_runtime::DrawioJsRuntimeOps;
 use std::path::PathBuf;
@@ -24,7 +25,7 @@ impl DrawioRendererOps {
         )
     }
 
-    fn resolve_drawio_js_with_env(
+    pub(crate) fn resolve_drawio_js_with_env(
         env_value: Option<std::ffi::OsString>,
         home_path: Option<PathBuf>,
     ) -> Result<PathBuf, String> {
@@ -66,7 +67,16 @@ impl DrawioRendererOps {
         drawio_js: &std::path::Path,
         preset: &DiagramColorPreset,
     ) -> DiagramResult {
-        if !drawio_js.exists() {
+        Self::render_drawio_with_origin(block, drawio_js, preset, false)
+    }
+
+    pub(crate) fn render_drawio_with_origin(
+        block: &DiagramBlock,
+        drawio_js: &std::path::Path,
+        preset: &DiagramColorPreset,
+        bundled: bool,
+    ) -> DiagramResult {
+        if !bundled && !drawio_js.exists() {
             return DiagramResult::NotInstalled {
                 kind: "Draw.io".to_string(),
                 download_url: DRAWIO_DOWNLOAD_URL.to_string(),
@@ -74,7 +84,20 @@ impl DrawioRendererOps {
             };
         }
 
-        match DrawioJsRuntimeOps::render(&block.source, drawio_js, preset) {
+        match RuntimeResourceLoader::load(drawio_js, bundled.then_some(BundledResource::Drawio)) {
+            Ok(resource) => Self::render_drawio_with_loaded(block, preset, &resource),
+            Err(error) => DiagramResult::Err {
+                source: block.source.clone(),
+                error: format!("Failed to read Draw.io JavaScript bundle: {error}"),
+            },
+        }
+    }
+    pub(crate) fn render_drawio_with_loaded(
+        block: &DiagramBlock,
+        preset: &DiagramColorPreset,
+        resource: &crate::markdown::runtime_resource_loader::LoadedResource,
+    ) -> DiagramResult {
+        match DrawioJsRuntimeOps::render_bundle(&block.source, resource.text(), preset) {
             Ok(svg) => DiagramResult::Ok(svg),
             Err(error) => DiagramResult::Err {
                 source: block.source.clone(),

@@ -29,6 +29,7 @@ class KatanaNode {
     this.attributes = [];
     this.attributeMap = {};
     this.style = new KatanaStyle();
+    this.style.ownerNode = this;
     this.dataset = {};
     this._textContent = "";
     this.className = "";
@@ -124,6 +125,9 @@ class KatanaNode {
   }
   removeAttribute(name) {
     const normalized = String(name);
+    if (normalized === "style") {
+      katanaReplaceStyleCssText(this.style, "", false);
+    }
     delete this.attributeMap[normalized];
     this.attributes = this.attributes.filter((attribute) => attribute.name !== normalized);
   }

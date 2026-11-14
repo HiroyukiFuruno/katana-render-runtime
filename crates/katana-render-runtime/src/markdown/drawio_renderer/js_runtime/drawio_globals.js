@@ -40,7 +40,7 @@ globalThis.atob = katanaDrawioAtob;
 const KATANA_DRAWIO_DETERMINISTIC_NOW = Date.parse("2026-01-01T00:00:00.000Z");
 const katanaDrawioOriginalDate = globalThis.Date;
 globalThis.Date = new Proxy(katanaDrawioOriginalDate, {
-  apply(target, thisArg) {
+  apply(target, _thisArg) {
     return Reflect.construct(target, [KATANA_DRAWIO_DETERMINISTIC_NOW]).toString();
   },
   construct(target, args, newTarget) {

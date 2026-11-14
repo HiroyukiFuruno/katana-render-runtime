@@ -2,14 +2,15 @@ use super::super::html_document::HtmlDocumentNode;
 use super::constants::MIN_LAYOUT_WIDTH;
 use super::layout_grid_measure::grid_track_widths;
 use super::style::{CssLength, CssStyle};
-use taffy::geometry::Size;
+use taffy::geometry::{Rect, Size};
 use taffy::prelude::{Display, Style};
 use taffy::style_helpers::{auto, length};
 
+#[path = "layout_flow_cross_size.rs"]
+mod cross_size;
 #[path = "layout_intrinsic.rs"]
 mod intrinsic;
 
-use intrinsic::intrinsic_layout_width;
 pub(super) use intrinsic::{intrinsic_text_width, is_layout_item, min_content_text_width};
 
 pub(super) fn leaf_style(style: CssStyle, width: f32, height: f32, available_width: f32) -> Style {
@@ -19,6 +20,8 @@ pub(super) fn leaf_style(style: CssStyle, width: f32, height: f32, available_wid
             width: length(width),
             height: length(height),
         },
+        padding: leaf_padding(&style),
+        border: leaf_border(&style),
         min_size: Size {
             width: style
                 .minimum_outer_width(available_width)
@@ -35,6 +38,48 @@ pub(super) fn leaf_style(style: CssStyle, width: f32, height: f32, available_wid
             None => auto(),
         },
         ..Style::default()
+    }
+}
+
+pub(super) fn leaf_style_for_flow(
+    style: CssStyle,
+    width: f32,
+    height: f32,
+    available_width: f32,
+    parent: &CssStyle,
+) -> Style {
+    let auto_height = style.height.is_none()
+        && parent.display == Display::Flex
+        && matches!(
+            parent.flex_direction,
+            taffy::style::FlexDirection::Row | taffy::style::FlexDirection::RowReverse
+        )
+        && matches!(
+            parent.align_items,
+            None | Some(taffy::style::AlignItems::STRETCH | taffy::style::AlignItems::NORMAL)
+        );
+    let mut leaf = leaf_style(style, width, height, available_width);
+    if auto_height {
+        leaf.size.height = auto();
+    }
+    leaf
+}
+
+fn leaf_padding(style: &CssStyle) -> Rect<taffy::style::LengthPercentage> {
+    Rect {
+        left: length(style.padding_left),
+        right: length(style.padding_right),
+        top: length(style.padding_top),
+        bottom: length(style.padding_bottom),
+    }
+}
+
+fn leaf_border(style: &CssStyle) -> Rect<taffy::style::LengthPercentage> {
+    Rect {
+        left: length(style.border_left_width()),
+        right: length(style.border_right_width()),
+        top: length(style.border_top_width()),
+        bottom: length(style.border_bottom_width()),
     }
 }
 
@@ -60,8 +105,15 @@ pub(super) fn item_style(
 ) -> CssStyle {
     match node {
         HtmlDocumentNode::Element {
-            tag, attributes, ..
-        } => CssStyle::from_element(tag, attributes, inherited),
+            tag,
+            attributes,
+            children,
+            ..
+        } => {
+            let mut style = CssStyle::from_element(tag, attributes, inherited);
+            style.resolve_text_line_height(children);
+            style
+        }
         HtmlDocumentNode::Text(_) => inherited.inherited_text_style(),
     }
 }
@@ -73,10 +125,10 @@ pub(super) fn measured_widths(
     parent: &CssStyle,
 ) -> Vec<f32> {
     if stretches_flex_columns(parent) {
-        return stretched_column_widths(styles, width);
+        return cross_size::stretched_column_widths(styles, width);
     }
     if parent.display != Display::Grid {
-        return non_grid_measured_widths(nodes, styles, width);
+        return cross_size::non_grid_measured_widths(nodes, styles, width, parent);
     }
 
     let track_widths = grid_track_widths(nodes, styles, width, parent);
@@ -88,7 +140,7 @@ pub(super) fn measured_widths(
                 .explicit_width(width)
                 .unwrap_or(track_widths[index % track_widths.len()])
                 .min(width);
-            enforce_min_width(style, measured, width).max(MIN_LAYOUT_WIDTH)
+            cross_size::enforce_min_width(style, measured, width).max(MIN_LAYOUT_WIDTH)
         })
         .collect()
 }
@@ -101,48 +153,35 @@ fn stretches_flex_columns(style: &CssStyle) -> bool {
         )
         && matches!(
             style.align_items,
-            None | Some(taffy::style::AlignItems::STRETCH)
+            None | Some(taffy::style::AlignItems::STRETCH | taffy::style::AlignItems::NORMAL)
         )
 }
 
-fn stretched_column_widths(styles: &[CssStyle], width: f32) -> Vec<f32> {
-    styles
-        .iter()
-        .map(|style| enforce_min_width(style, style.explicit_width(width).unwrap_or(width), width))
-        .map(|measured| measured.min(width).max(MIN_LAYOUT_WIDTH))
-        .collect()
+#[cfg(test)]
+fn find_tag<'a>(node: &'a HtmlDocumentNode, expected: &str) -> Option<&'a HtmlDocumentNode> {
+    match node {
+        HtmlDocumentNode::Element { tag, children, .. } => {
+            if tag == expected {
+                return Some(node);
+            }
+            children.iter().find_map(|child| find_tag(child, expected))
+        }
+        HtmlDocumentNode::Text(_) => None,
+    }
 }
 
-fn non_grid_measured_widths(
-    nodes: &[&HtmlDocumentNode],
-    styles: &[CssStyle],
-    width: f32,
-) -> Vec<f32> {
-    nodes
-        .iter()
-        .zip(styles)
-        .map(|(node, style)| {
-            let measured = style
-                .explicit_width(width)
-                .unwrap_or_else(|| intrinsic_layout_width(node, style, width));
-            enforce_min_width(style, measured, width)
-        })
-        .map(|measured| measured.min(width).max(MIN_LAYOUT_WIDTH))
-        .collect()
-}
-
-fn enforce_min_width(style: &CssStyle, measured: f32, available: f32) -> f32 {
-    style
-        .minimum_outer_width(available)
-        .map_or(measured, |minimum| measured.max(minimum))
-}
+#[cfg(test)]
+#[path = "tests/html_flex_cross_size.rs"]
+mod html_flex_cross_size;
 
 #[cfg(test)]
 mod tests {
     use super::super::style::{CssGridTrack, CssGridTrackBreadth};
+    use super::intrinsic::intrinsic_layout_width;
     use super::{CssLength, CssStyle, Display, intrinsic_text_width, is_layout_item};
-    use super::{item_style, measured_widths};
-    use crate::renderer::backends::html_document::HtmlDocumentNode;
+    use super::{find_tag, item_style, measured_widths};
+    use crate::renderer::backends::html_document::{HtmlDocument, HtmlDocumentNode};
+    use std::collections::HashMap;
 
     #[test]
     fn flow_helpers_ignore_formatting_whitespace_and_measure_text() {
@@ -160,9 +199,92 @@ mod tests {
     }
 
     #[test]
+    fn parsed_inline_content_uses_real_projection_for_intrinsic_measurement() -> Result<(), String>
+    {
+        let short = projected_width("<section><p>本文</p></section>")?;
+        let long = projected_width("<section><p>案件概要と長い説明</p></section>")?;
+        assert!(long > short, "long={long}, short={short}");
+        Ok(())
+    }
+
+    #[test]
+    fn parsed_whitespace_and_inline_child_keep_layout_content() -> Result<(), String> {
+        let empty = projected_width("<section><p> \n </p></section>")?;
+        let collapsed = projected_width("<section><p> 本文 </p></section>")?;
+        let repeated = projected_width("<section><p> \n 本文 \n </p></section>")?;
+        let plain = projected_width("<section><p>本文</p></section>")?;
+        let inline = projected_width("<section><p><span>本文</span></p></section>")?;
+        assert_eq!(empty, 0.0);
+        assert!(collapsed > empty);
+        assert!((repeated - collapsed).abs() <= f32::EPSILON);
+        assert!(
+            (inline - plain).abs() <= f32::EPSILON,
+            "inline={inline}, plain={plain}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parsed_column_flex_nonstretch_clamps_cross_size() -> Result<(), String> {
+        let document = HtmlDocument::parse(
+            "<section style=\"display:flex;flex-direction:column;align-items:flex-start\">section prefix<div>unrelated text</div><p id=target>an unbroken cross-axis item with intrinsic width</p></section>",
+        );
+        let nodes = document.interactive_nodes_with_styles(&HashMap::new());
+        let section = nodes
+            .iter()
+            .find_map(|node| find_tag(node, "section"))
+            .ok_or("section projection missing")?;
+        let paragraph = find_tag(section, "p").ok_or("paragraph projection missing")?;
+        let inherited = CssStyle::browser_default();
+        let container = item_style(section, &inherited, 40.0, 1);
+        let child = item_style(paragraph, &container, 40.0, 1);
+        let items = [paragraph];
+        let styles = [child];
+        assert_eq!(measured_widths(&items, &styles, 40.0, &container), [40.0]);
+
+        let mut block = container;
+        block.display = Display::Block;
+        assert!(measured_widths(&items, &styles, 40.0, &block)[0] > 40.0);
+        Ok(())
+    }
+
+    fn projected_width(markup: &str) -> Result<f32, String> {
+        let document = HtmlDocument::parse(markup);
+        let nodes = document.interactive_nodes_with_styles(&HashMap::new());
+        let node = nodes
+            .iter()
+            .find_map(|node| find_tag(node, "p"))
+            .ok_or("parsed section must be projected")?;
+        let style = item_style(node, &CssStyle::browser_default(), 48.0, 1);
+        assert!(
+            is_layout_item(node),
+            "a projected paragraph is a layout item"
+        );
+        Ok(intrinsic_layout_width(node, &style, 48.0))
+    }
+
+    fn parsed_grid_width(markup: &str) -> Result<(f32, Option<taffy::style::AlignItems>), String> {
+        let document = HtmlDocument::parse(markup);
+        let nodes = document.interactive_nodes_with_styles(&HashMap::new());
+        let grid = nodes
+            .iter()
+            .find_map(|node| find_tag(node, "section"))
+            .ok_or("parsed grid section missing")?;
+        let child = find_tag(grid, "p").ok_or("parsed grid item missing")?;
+        let parent_style = item_style(grid, &CssStyle::browser_default(), 80.0, 1);
+        let child_style = item_style(child, &parent_style, 80.0, 1);
+        let width = measured_widths(&[child], &[child_style], 80.0, &parent_style)
+            .first()
+            .copied()
+            .ok_or("parsed grid item width missing")?;
+        Ok((width, parent_style.align_items))
+    }
+
+    #[test]
     fn text_and_grid_items_receive_deterministic_measurements() {
         let text = HtmlDocumentNode::Text("item".to_string());
-        let inherited = CssStyle::browser_default();
+        let mut inherited = CssStyle::browser_default();
+        inherited.font_family = "Noto Sans, sans-serif".to_string();
         let text_style = item_style(&text, &inherited, 100.0, 2);
         assert_eq!(text_style.width, None);
 
@@ -182,6 +304,55 @@ mod tests {
             measured_widths(&items, &styles, 100.0, &column),
             [100.0, 100.0]
         );
+    }
+
+    #[test]
+    fn parsed_grid_normal_matches_omission_for_fixed_and_auto_tracks() -> Result<(), String> {
+        for track in ["80px", "auto"] {
+            let omitted = parsed_grid_width(&format!(
+                "<section style='display:grid;grid-template-columns:{track};width:80px'><p>an intrinsic grid item</p></section>"
+            ))?;
+            let normal = parsed_grid_width(&format!(
+                "<section style='display:grid;grid-template-columns:{track};align-items:normal;width:80px'><p>an intrinsic grid item</p></section>"
+            ))?;
+
+            assert_eq!(omitted.1, None);
+            assert_eq!(normal.1, Some(taffy::style::AlignItems::NORMAL));
+            assert_eq!(normal.0, omitted.0, "track={track}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn parsed_grid_measurement_rejects_missing_section_and_item() {
+        for (html, expected) in [
+            ("<main><p>item</p></main>", "parsed grid section missing"),
+            (
+                "<section style='display:grid'><div>item</div></section>",
+                "parsed grid item missing",
+            ),
+        ] {
+            assert_eq!(parsed_grid_width(html).err().as_deref(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn aligned_column_flex_items_fit_the_available_cross_axis() {
+        let text = HtmlDocumentNode::Text("a long unbroken cross-axis item".to_string());
+        let inherited = CssStyle::browser_default();
+        let mut column = inherited.clone();
+        column.display = Display::Flex;
+        column.align_items = Some(taffy::style::AlignItems::START);
+        for direction in [
+            taffy::style::FlexDirection::Column,
+            taffy::style::FlexDirection::ColumnReverse,
+        ] {
+            column.flex_direction = direction;
+            assert_eq!(
+                measured_widths(&[&text], std::slice::from_ref(&inherited), 40.0, &column),
+                [40.0]
+            );
+        }
     }
 
     #[test]
@@ -234,11 +405,51 @@ mod tests {
         let mut pixels = CssStyle::browser_default();
         pixels.flex_basis = Some(CssLength::Px(24.0));
         pixels.border_width = 1.0;
+        pixels.apply("border-style", "solid");
         let leaf = super::leaf_style(pixels, 80.0, 20.0, 200.0);
         assert_eq!(leaf.flex_basis, taffy::style_helpers::length(26.0_f32));
 
         let leaf = super::leaf_style(CssStyle::browser_default(), 80.0, 20.0, 200.0);
         assert_eq!(leaf.flex_basis, taffy::style_helpers::auto());
+    }
+
+    #[test]
+    fn padded_flex_shrink_matches_independent_chrome_measurement() -> Result<(), String> {
+        use taffy::prelude::{TaffyMaxContent, TaffyTree};
+        let mut tree: TaffyTree<()> = TaffyTree::new();
+        let plain = super::leaf_style(CssStyle::browser_default(), 720.0, 20.0, 640.0);
+        let first = tree.new_leaf(plain).map_err(test_error)?;
+        let mut badge = CssStyle::browser_default();
+        badge.padding_left = 10.0;
+        badge.padding_right = 10.0;
+        let second = tree
+            .new_leaf(super::leaf_style(badge, 80.0, 20.0, 640.0))
+            .map_err(test_error)?;
+        let root = tree
+            .new_with_children(padded_flex_parent(), &[first, second])
+            .map_err(test_error)?;
+        tree.disable_rounding();
+        tree.compute_layout(root, taffy::geometry::Size::MAX_CONTENT)
+            .map_err(test_error)?;
+        let width = tree.layout(second).map_err(test_error)?.size.width;
+        assert!((width - 65.84375).abs() <= 1.0 / 64.0, "width {width}");
+        Ok(())
+    }
+
+    fn padded_flex_parent() -> taffy::Style {
+        let defaults: taffy::Style = taffy::Style::default();
+        taffy::Style {
+            display: Display::Flex,
+            size: taffy::geometry::Size {
+                width: taffy::style_helpers::length(640.0_f32),
+                ..defaults.size
+            },
+            gap: taffy::geometry::Size {
+                width: taffy::style_helpers::length(24.0_f32),
+                ..defaults.gap
+            },
+            ..defaults
+        }
     }
 
     #[test]
@@ -249,6 +460,18 @@ mod tests {
         column.display = Display::Flex;
         column.flex_direction = taffy::style::FlexDirection::Column;
         column.align_items = Some(taffy::style::AlignItems::STRETCH);
+
+        assert_eq!(measured_widths(&[&text], &styles, 120.0, &column), [120.0]);
+    }
+
+    #[test]
+    fn flex_start_column_shrink_to_fit_is_clamped_to_available_width() {
+        let text = HtmlDocumentNode::Text("a deliberately long intrinsic flex item".to_string());
+        let styles = [CssStyle::browser_default()];
+        let mut column = CssStyle::browser_default();
+        column.display = Display::Flex;
+        column.flex_direction = taffy::style::FlexDirection::Column;
+        column.align_items = Some(taffy::style::AlignItems::FLEX_START);
 
         assert_eq!(measured_widths(&[&text], &styles, 120.0, &column), [120.0]);
     }
@@ -347,5 +570,33 @@ mod tests {
             measured_widths(&items[..1], &styles[..1], 200.0, &grid),
             [200.0]
         );
+    }
+
+    fn test_error(error: taffy::TaffyError) -> String {
+        error.to_string()
+    }
+
+    #[test]
+    fn test_error_preserves_real_taffy_child_failure() -> Result<(), String> {
+        let mut tree: taffy::TaffyTree<()> = taffy::TaffyTree::new();
+        let parent = tree.new_leaf(taffy::Style::default()).map_err(test_error)?;
+        let error = tree
+            .child_at_index(parent, 0)
+            .err()
+            .ok_or("child failure missing")?;
+        assert!(matches!(
+            &error,
+            taffy::TaffyError::ChildIndexOutOfBounds {
+                child_index: 0,
+                child_count: 0,
+                ..
+            }
+        ));
+        assert_eq!(test_error(error.clone()), error.to_string());
+        assert_eq!(
+            projected_width("<div>no paragraph</div>").err(),
+            Some("parsed section must be projected".to_string())
+        );
+        Ok(())
     }
 }

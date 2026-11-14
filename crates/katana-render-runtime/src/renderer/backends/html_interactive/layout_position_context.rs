@@ -53,17 +53,17 @@ impl HtmlLayoutRenderer {
     }
 
     fn document_containing_block(&self) -> ContainingBlock {
-        self.default_containing_block(0.0)
+        self.default_containing_block(0.0, 0.0)
     }
 
     fn viewport_containing_block(&self) -> ContainingBlock {
-        self.default_containing_block(self.scroll_y)
+        self.default_containing_block(self.scroll_x, self.scroll_y)
     }
 
-    fn default_containing_block(&self, y: f32) -> ContainingBlock {
+    fn default_containing_block(&self, x: f32, y: f32) -> ContainingBlock {
         ContainingBlock {
             owner_node_id: None,
-            x: 0.0,
+            x,
             y,
             width: self.viewport_width,
             height: self.viewport_height,

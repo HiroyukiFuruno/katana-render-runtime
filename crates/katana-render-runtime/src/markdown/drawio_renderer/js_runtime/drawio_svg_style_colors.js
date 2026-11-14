@@ -90,11 +90,9 @@ function katanaDrawioShouldPreserveImplicitHtmlTextContentColor(element, color) 
 
 function katanaDrawioSourceStyleUsesDarkHtmlTextBackground(element) {
   const style = katanaDrawioSourceStyleForElement(element);
-  return [
-    style.has("text"),
-    style.get("shape") === "text",
-    style.get("fillColor") === "none",
-  ].some(Boolean);
+  return [style.has("text"), style.get("shape") === "text", style.get("fillColor") === "none"].some(
+    Boolean,
+  );
 }
 
 function katanaDrawioResolvedTextColor(color) {

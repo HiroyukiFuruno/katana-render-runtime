@@ -1,0 +1,264 @@
+use super::super::super::html_browser::HtmlBrowserInput;
+use super::super::HtmlInteractiveSession;
+use super::support::{TestResult, click_element, start};
+
+#[test]
+fn pointer_actions_render_one_frame_for_each_control_kind() -> TestResult {
+    let html = r#"<button id="button">Button</button>
+<input id="check" type="checkbox"><details id="details"><summary id="summary">More</summary><p>Body</p></details>
+<input id="field"><p id="events"></p><script>
+const events = document.getElementById('events');
+document.getElementById('summary').addEventListener('click', () => events.textContent += 'click|');
+document.getElementById('details').addEventListener('toggle', () => events.textContent += 'toggle|');
+</script>"#;
+    let mut session = start(html)?;
+
+    for target in ["button", "check", "summary", "field"] {
+        let generation = session.generation;
+        click_element(&mut session, target)?;
+        assert_eq!(session.generation, generation + 1, "#{target}");
+    }
+    assert!(session.focused_input.is_some());
+    assert!(session.focus_visible);
+    let state = session
+        .runtime
+        .observe_feature_state(
+            "({events: document.getElementById('events').textContent, open: document.getElementById('details').open})",
+        )
+        .map_err(|error| error.to_string())?;
+    assert_eq!(state["events"], "click|toggle|");
+    assert_eq!(state["open"], true);
+    Ok(())
+}
+
+#[test]
+fn repeated_pointer_activation_keeps_same_focus_without_refiring_focus_events() -> TestResult {
+    let html = r#"<button id="button">Button</button><p id="events"></p>
+<script>document.addEventListener('focus', event => {
+  document.getElementById('events').textContent += `focus:${event.target.id}|`;
+}, true);
+document.addEventListener('blur', event => {
+  document.getElementById('events').textContent += `blur:${event.target.id}|`;
+}, true);</script>"#;
+    let mut session = start(html)?;
+    click_element(&mut session, "button")?;
+    let generation = session.generation;
+
+    click_element(&mut session, "button")?;
+
+    assert_eq!(session.generation, generation + 1);
+    let events = session
+        .runtime
+        .observe_feature_state("document.getElementById('events').textContent")
+        .map_err(|error| error.to_string())?;
+    assert_eq!(events, "focus:button|");
+    Ok(())
+}
+
+#[test]
+fn pointer_transition_commits_dirty_input_before_focus_and_click_in_one_frame() -> TestResult {
+    let html = r#"<input id="field"><button id="next">Next</button><p id="events"></p>
+<script>
+const events = document.getElementById('events');
+document.getElementById('field').addEventListener('change', () => events.textContent += 'change|');
+document.getElementById('field').addEventListener('blur', () => events.textContent += 'blur|');
+document.getElementById('next').addEventListener('focus', () => events.textContent += 'focus|');
+document.getElementById('next').addEventListener('click', () => events.textContent += 'click|');
+</script>"#;
+    let mut session = start(html)?;
+    click_element(&mut session, "field")?;
+    let field = element_id(&mut session, "field")?;
+    session.dirty_inputs.insert(field);
+    let generation = session.generation;
+
+    click_element(&mut session, "next")?;
+
+    assert_eq!(session.generation, generation + 1);
+    let next = element_id(&mut session, "next")?;
+    assert_eq!(session.focused_node, Some(next));
+    let events = session
+        .runtime
+        .observe_feature_state("document.getElementById('events').textContent")
+        .map_err(|error| error.to_string())?;
+    assert_eq!(events, "change|blur|focus|click|");
+    Ok(())
+}
+
+#[test]
+fn pointer_click_listener_error_propagates_without_a_second_frame() -> TestResult {
+    let html = r#"<button id="button">Button</button><script>
+document.getElementById('button').addEventListener('click', () => {
+  document.getElementById('button').textContent = 'Updated';
+  throw new Error('click failed');
+});</script>"#;
+    let mut session = start(html)?;
+    let generation = session.generation;
+    let result = click_element(&mut session, "button");
+
+    let error = result
+        .err()
+        .ok_or_else(|| "click error was not propagated".to_string())?;
+    assert!(error.contains("click failed"), "{error}");
+    assert_eq!(session.generation, generation);
+    assert_eq!(session.pressed_target, None);
+    let button_text = session
+        .runtime
+        .observe_feature_state("document.getElementById('button').textContent")
+        .map_err(|error| error.to_string())?;
+    assert_eq!(button_text, "Updated");
+    Ok(())
+}
+
+#[test]
+fn input_pointer_focus_error_prevents_click_event() -> TestResult {
+    let html = r#"<input id="field"><p id="events"></p><script>
+const field = document.getElementById('field');
+const events = document.getElementById('events');
+field.addEventListener('focus', () => { events.textContent += 'focus|'; throw new Error('input focus failed'); });
+field.addEventListener('click', () => { events.textContent += 'click|'; });
+</script>"#;
+    let mut session = start(html)?;
+    let result = click_element(&mut session, "field");
+    assert_listener_failure(&mut session, result, "input focus failed", "focus|")
+}
+
+#[test]
+fn typed_input_change_error_prevents_following_focus_and_click() -> TestResult {
+    let html = r#"<input id="field"><button id="next">Next</button><p id="events"></p><script>
+const field = document.getElementById('field');
+const next = document.getElementById('next');
+const events = document.getElementById('events');
+field.addEventListener('change', () => { events.textContent += 'change|'; throw new Error('input change failed'); });
+field.addEventListener('blur', () => { events.textContent += 'blur|'; });
+next.addEventListener('focus', () => { events.textContent += 'focus|'; });
+next.addEventListener('click', () => { events.textContent += 'click|'; });
+</script>"#;
+    let mut session = start(html)?;
+    click_element(&mut session, "field")?;
+    session
+        .dispatch_input(HtmlBrowserInput::Text {
+            text: "typed".to_owned(),
+        })
+        .map_err(|error| error.to_string())?;
+    let result = click_element(&mut session, "next");
+    assert_listener_failure(&mut session, result, "input change failed", "change|")
+}
+
+#[test]
+fn input_listener_error_keeps_typed_dom_value() -> TestResult {
+    let html = r#"<input id="field"><p id="events"></p><script>
+const field = document.getElementById('field');
+const events = document.getElementById('events');
+field.addEventListener('input', () => { events.textContent += 'input|'; throw new Error('input listener failed'); });
+</script>"#;
+    let mut session = start(html)?;
+    click_element(&mut session, "field")?;
+    let result = session
+        .dispatch_input(HtmlBrowserInput::Text {
+            text: "typed".to_owned(),
+        })
+        .map_err(|error| error.to_string());
+    assert_listener_failure(&mut session, result, "input listener failed", "input|")?;
+    let value = session
+        .runtime
+        .observe_feature_state("document.getElementById('field').value")
+        .map_err(|error| error.to_string())?;
+    assert_eq!(value, "typed");
+    Ok(())
+}
+
+#[test]
+fn keyup_listener_error_keeps_event_without_rendering() -> TestResult {
+    let html = r#"<input id="field"><p id="events"></p><script>
+const field = document.getElementById('field');
+const events = document.getElementById('events');
+field.addEventListener('keyup', () => { events.textContent += 'keyup|'; throw new Error('keyup listener failed'); });
+</script>"#;
+    let mut session = start(html)?;
+    click_element(&mut session, "field")?;
+    let generation = session.generation;
+    let result = session
+        .dispatch_input(HtmlBrowserInput::KeyUp {
+            key: "A".to_owned(),
+        })
+        .map_err(|error| error.to_string());
+    assert_listener_failure(&mut session, result, "keyup listener failed", "keyup|")?;
+    assert_eq!(session.generation, generation);
+    Ok(())
+}
+
+fn assert_listener_failure(
+    session: &mut HtmlInteractiveSession,
+    result: TestResult,
+    message: &str,
+    expected_events: &str,
+) -> TestResult {
+    let error = result.err().ok_or("listener error was not propagated")?;
+    assert!(error.contains(message), "{error}");
+    let events = session
+        .runtime
+        .observe_feature_state("document.getElementById('events').textContent")
+        .map_err(|error| error.to_string())?;
+    assert_eq!(events, expected_events);
+    Ok(())
+}
+
+#[test]
+fn mismatched_pointer_release_does_not_render() -> TestResult {
+    let mut session = start("<button id=first>First</button><button id=second>Second</button>")?;
+    let first = element_id(&mut session, "first")?;
+    let second = element_id(&mut session, "second")?;
+    let target = session
+        .hit_targets
+        .iter()
+        .find(|target| target.node_id == second)
+        .cloned()
+        .ok_or_else(|| "missing second button hit target".to_string())?;
+    session.pressed_target = Some(first);
+    let generation = session.generation;
+
+    session
+        .dispatch_input(HtmlBrowserInput::PointerUp {
+            x: target.x + 1.0,
+            y: target.y + 1.0 - session.scroll_geometry.scroll_y,
+            button: 0,
+        })
+        .map_err(|error| error.to_string())?;
+
+    assert_eq!(session.generation, generation);
+    Ok(())
+}
+
+#[test]
+fn blank_pointer_activation_blurs_once() -> TestResult {
+    let mut session = start("<input id=field>")?;
+    click_element(&mut session, "field")?;
+    let generation = session.generation;
+
+    session
+        .dispatch_input(HtmlBrowserInput::PointerDown {
+            x: 319.0,
+            y: 239.0,
+            button: 0,
+        })
+        .map_err(|error| error.to_string())?;
+    session
+        .dispatch_input(HtmlBrowserInput::PointerUp {
+            x: 319.0,
+            y: 239.0,
+            button: 0,
+        })
+        .map_err(|error| error.to_string())?;
+
+    assert_eq!(session.generation, generation + 1);
+    assert_eq!(session.focused_node, None);
+    Ok(())
+}
+
+fn element_id(session: &mut HtmlInteractiveSession, id: &str) -> TestResult<u64> {
+    session
+        .runtime
+        .node_for_element_id(id)
+        .map(|node| node.0)
+        .ok_or_else(|| format!("missing focus element #{id}"))
+}

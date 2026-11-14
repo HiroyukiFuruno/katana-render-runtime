@@ -1,8 +1,8 @@
-use super::MermaidJsRuntimeOps;
+use super::{MermaidJsRuntimeOps, geometry_contract};
 use crate::markdown::color_preset::DiagramColorPreset;
 use crate::markdown::runtime_assets::RuntimeAsset;
 
-const GIT_GRAPH_SOURCE: &str = "gitGraph
+pub(super) const GIT_GRAPH_SOURCE: &str = "gitGraph
     commit id: \"base\"
     branch feature
     checkout feature
@@ -22,13 +22,13 @@ const C4_DYNAMIC_SOURCE_JA: &str = "C4Dynamic
     Container(api, \"APIアプリケーション\", \"Java と Spring Boot\")
     Rel(spa, api, \"利用する\", \"JSON/HTTPS\")";
 
-const C4_DEPLOYMENT_SOURCE: &str = "C4Deployment
+pub(super) const C4_DEPLOYMENT_SOURCE: &str = "C4Deployment
     title Deployment diagram for Internet Banking System
     Deployment_Node(mob, \"Customer's mobile device\", \"Apple iOS or Android\") {
         Container(mobile, \"Mobile App\", \"Xamarin\")
     }";
 
-const ARCHITECTURE_SERVICE_ICONS_SOURCE: &str = "architecture-beta
+pub(super) const ARCHITECTURE_SERVICE_ICONS_SOURCE: &str = "architecture-beta
     group api(cloud)[API]
 
     service db(database)[Database] in api
@@ -56,139 +56,132 @@ const ARCHITECTURE_SIMPLE_JA_SOURCE: &str = "architecture-beta
     markdown:R -- L:renderer
     renderer:R -- L:svg";
 
+const GIT_FONT_OBSERVER: &str = r#"(() => {
+      const native = globalThis.__katanaMeasureSvgTextMetrics;
+      if (typeof native !== 'function') throw new Error('real SVG metric bridge required');
+      const mainFamilies = [];
+      globalThis.__katanaMeasureSvgTextMetrics = (text, family, size, weight, italic) => {
+        const result = native(text, family, size, weight, italic);
+        if (text === 'main') mainFamilies.push(family);
+        return result;
+      };
+      const run = globalThis.katanaRunMermaidRuntime;
+      globalThis.katanaRunMermaidRuntime = async (request) => {
+        const svg = await run(request);
+        if (mainFamilies.length === 0 || mainFamilies.some((family) =>
+          family !== 'Noto Sans' && family !== '"Noto Sans"')) {
+          throw new Error('Git configured family did not reach real native measurement: ' + JSON.stringify(mainFamilies));
+        }
+        return svg;
+      };
+    })();"#;
+
 #[test]
-fn runtime_normalizes_git_graph_browser_bounds() {
+fn runtime_normalizes_git_graph_browser_bounds() -> Result<(), String> {
     let rendered = render_mermaid_svg(GIT_GRAPH_SOURCE);
-    assert_svg_contains(
-        &rendered,
-        r#"viewBox="-114.078125 -21.5 272.078125 161.97125244140625""#,
-    );
-    assert_svg_contains(&rendered, r#"style="max-width: 272.078125px;""#);
+    let svg = rendered.as_ref().map_err(|error| error.to_owned())?;
+    geometry_contract::GeometryContract::git_graph(svg)?;
+    Ok(())
 }
 
 #[test]
-fn runtime_normalizes_c4_dynamic_browser_bounds() {
+fn runtime_normalizes_c4_dynamic_browser_bounds() -> Result<(), String> {
     let rendered = render_mermaid_svg(C4_DYNAMIC_SOURCE);
-    assert_svg_contains(&rendered, r#"viewBox="0 -70 832 412""#);
+    let svg = rendered.as_ref().map_err(|error| error.to_owned())?;
+    geometry_contract::GeometryContract::dynamic(svg, false)?;
+    Ok(())
 }
 
 #[test]
-fn runtime_normalizes_c4_dynamic_relation_positions() {
+fn runtime_normalizes_c4_dynamic_relation_positions() -> Result<(), String> {
     let rendered = render_mermaid_svg(C4_DYNAMIC_SOURCE);
-    assert_svg_contains(
-        &rendered,
-        r#"<line x1="366" y1="200.998008" x2="466" y2="200.865751""#,
-    );
-    assert_svg_contains(&rendered, r#"<text x="438" y="200.931879""#);
-    assert_svg_contains(&rendered, r#"<text x="457.5" y="217.931879""#);
-    assert_svg_contains(&rendered, r#"transform="translate(258, 202.625366)""#);
-    assert_svg_contains(
-        &rendered,
-        r#"x="-108" y="-35.625366" width="216" height="71.250732421875""#,
-    );
-    assert_svg_contains(&rendered, ">Single</tspan>");
-    assert_svg_contains(&rendered, "> Page</tspan>");
-    assert_svg_contains(&rendered, "> Application</tspan>");
-    assert_svg_contains(&rendered, "> Java</tspan>");
-    assert_svg_contains(&rendered, "> Spring</tspan>");
-    assert_svg_contains(&rendered, "> Boot]</tspan>");
+    let svg = rendered.as_ref().map_err(|error| error.to_owned())?;
+    geometry_contract::GeometryContract::dynamic(svg, false)?;
+    Ok(())
 }
 
 #[test]
-fn runtime_normalizes_c4_dynamic_relation_positions_ja_x_offsets() {
+fn runtime_normalizes_c4_dynamic_relation_positions_ja_x_offsets() -> Result<(), String> {
     let rendered = render_mermaid_svg(C4_DYNAMIC_SOURCE_JA);
-    assert_svg_contains(&rendered, r#"transform="translate(258, 210.325366)""#);
-    assert_svg_contains(&rendered, r#"width="216" height="86.650732421875""#);
-    assert_svg_contains(&rendered, r#"transform="translate(574, 202.625366)""#);
-    assert_svg_contains(&rendered, "x1=\"368\"");
-    assert_svg_contains(&rendered, "x2=\"468\"");
-    assert_svg_contains(&rendered, r#"<text x="448" y="204.781879""#);
-    assert_svg_contains(&rendered, r#"<text x="459.5" y="221.781879""#);
-    assert_svg_contains(&rendered, "シングルページアプリケー");
-    assert_svg_contains(&rendered, ">ション</tspan>");
-    assert_svg_contains(&rendered, "> JavaScript</tspan>");
-    assert_svg_contains(&rendered, "> React]</tspan>");
-    assert_svg_contains(&rendered, r#"<text x="166" y="20""#);
-    assert_svg_contains(&rendered, "APIアプリケーションのダイナミック図");
-    assert_svg_contains(&rendered, "APIアプリケーション");
-    assert_svg_contains(&rendered, "> Spring</tspan>");
-    assert_svg_contains(&rendered, "> Boot]</tspan>");
+    let svg = rendered.as_ref().map_err(|error| error.to_owned())?;
+    geometry_contract::GeometryContract::dynamic(svg, true)?;
+    Ok(())
 }
 
 #[test]
-fn runtime_normalizes_c4_deployment_browser_position_corrections() {
+fn runtime_normalizes_c4_deployment_browser_position_corrections() -> Result<(), String> {
     let rendered = render_mermaid_svg(C4_DEPLOYMENT_SOURCE);
-    assert_svg_contains(&rendered, r#"<rect x="150" y="122""#);
-    assert_svg_contains(&rendered, r#"<text x="308" y="130""#);
-    assert_svg_contains(&rendered, r#"<text x="308" y="153""#);
-    assert_svg_contains(&rendered, r#"transform="translate(308, 259.625366)""#);
-    assert_svg_contains(&rendered, ">Mobile</tspan>");
-    assert_svg_contains(&rendered, "> App</tspan>");
-    assert_svg_contains(&rendered, ">[Container:</tspan>");
-    assert_svg_contains(&rendered, "> Xamarin]</tspan>");
+    let svg = rendered.as_ref().map_err(|error| error.to_owned())?;
+    geometry_contract::GeometryContract::deployment(svg)?;
+    Ok(())
 }
 
 #[test]
-fn runtime_restores_architecture_service_icons_from_source_types() {
+fn runtime_restores_architecture_service_icons_from_source_types() -> Result<(), String> {
     let rendered = render_mermaid_svg(ARCHITECTURE_SERVICE_ICONS_SOURCE);
+    let svg = rendered.as_ref().map_err(|error| error.to_owned())?;
+    geometry_contract::GeometryContract::architecture(
+        svg,
+        &[
+            ("db", "Database"),
+            ("disk1", "Storage"),
+            ("disk2", "Storage"),
+            ("server", "Server"),
+        ],
+        &[
+            ("db", "server", 'L', 'R'),
+            ("disk1", "server", 'T', 'B'),
+            ("disk2", "db", 'T', 'B'),
+        ],
+        ("api", "API"),
+    )?;
+    geometry_contract::GeometryContract::icons(svg)?;
     assert_svg_contains(&rendered, r#"rx="20" ry="7.14""#);
     assert_svg_contains(&rendered, "l-4.83,13.22");
-    assert_svg_contains(
-        &rendered,
-        r#"viewBox="-183.41357421875 -165.96131896972656 446.8271484375 462.922607421875""#,
-    );
+    Ok(())
 }
 
 #[test]
-fn runtime_normalizes_architecture_simple_renderer_coordinates_en() {
+fn runtime_normalizes_architecture_simple_renderer_coordinates_en() -> Result<(), String> {
     let rendered = render_mermaid_svg(ARCHITECTURE_SIMPLE_EN_SOURCE);
-    assert_svg_contains(
-        &rendered,
-        r#"viewBox="-282.6865234375 -65.5 647.373046875 262""#,
-    );
-    assert_svg_contains(
-        &rendered,
-        r#"transform="translate(-200.43652784647549,17)""#,
-    );
-    assert_svg_contains(&rendered, r#"transform="translate(0.25,17)""#);
-    assert_svg_contains(&rendered, r#"transform="translate(200.93652784647549,17)""#);
-    assert_svg_contains(&rendered, r#"<rect id="katana-mermaid-svg-"#);
-    assert_svg_contains(&rendered, r#"class="text-outer-tspan row""#);
-    assert_svg_contains(
-        &rendered,
-        r#"<path d="M -120.43652784647549,57 L -60.09326392323774,57 L0.25,57 ""#,
-    );
-    assert_svg_contains(
-        &rendered,
-        r#"<path d="M 80.25,57 L 140.59326392323774,57 L200.93652784647549,57 ""#,
-    );
+    let svg = rendered.as_ref().map_err(|error| error.to_owned())?;
+    geometry_contract::GeometryContract::architecture(
+        svg,
+        &[
+            ("markdown", "Markdown"),
+            ("renderer", "Renderer"),
+            ("svg", "SVG cache"),
+        ],
+        &[
+            ("markdown", "renderer", 'R', 'L'),
+            ("renderer", "svg", 'R', 'L'),
+        ],
+        ("app", "KatanA"),
+    )?;
+    Ok(())
 }
 
 #[test]
-fn runtime_normalizes_architecture_simple_renderer_coordinates_ja() {
+fn runtime_normalizes_architecture_simple_renderer_coordinates_ja() -> Result<(), String> {
     let rendered = render_mermaid_svg(ARCHITECTURE_SIMPLE_JA_SOURCE);
-    assert_svg_contains(
-        &rendered,
-        r#"viewBox="-283.1865234375 -65.5 646.373046875 262""#,
-    );
-    assert_svg_contains(
-        &rendered,
-        r#"transform="translate(-200.68652784647549,17)""#,
-    );
-    assert_svg_contains(&rendered, r#"transform="translate(0,17)""#);
-    assert_svg_contains(&rendered, r#"transform="translate(200.68652784647549,17)""#);
-    assert_svg_contains(&rendered, r#"class="text-outer-tspan row""#);
-    assert_svg_contains(
-        &rendered,
-        r#"<path d="M -120.68652784647549,57 L -60.34326392323774,57 L0,57 ""#,
-    );
-    assert_svg_contains(
-        &rendered,
-        r#"<path d="M 80,57 L 140.34326392323774,57 L200.68652784647549,57 ""#,
-    );
+    let svg = rendered.as_ref().map_err(|error| error.to_owned())?;
+    geometry_contract::GeometryContract::architecture(
+        svg,
+        &[
+            ("markdown", "Markdown"),
+            ("renderer", "レンダラー"),
+            ("svg", "SVGキャッシュ"),
+        ],
+        &[
+            ("markdown", "renderer", 'R', 'L'),
+            ("renderer", "svg", 'R', 'L'),
+        ],
+        ("app", "KatanA"),
+    )?;
+    Ok(())
 }
 
-fn render_mermaid_svg(source: &str) -> Result<String, String> {
+pub(super) fn render_mermaid_svg(source: &str) -> Result<String, String> {
     let mermaid = RuntimeAsset::mermaid();
     mermaid
         .materialize_at(mermaid.materialized_path())
@@ -197,9 +190,102 @@ fn render_mermaid_svg(source: &str) -> Result<String, String> {
         })
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn real_timeline_ex_title_matches_independent_official_view_box() -> Result<(), String> {
+    let source = mermaid_fixture_source(oracle::TIMELINE_MARKDOWN)?;
+    let (actual, observations) = native_font_observer::render_with_native_font_observations(
+        &source,
+        DiagramColorPreset::dark(),
+    )?;
+    let result = assert_view_box_matches(
+        &actual,
+        oracle::TIMELINE_RAW_VIEW_BOX,
+        oracle::TIMELINE_RAW_SOURCE_SHA256,
+    );
+    result.map_err(|error| format!("{error}; native font observations: {observations}"))
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn raw_view_box_comparison_rejects_non_finite_components_and_geometry_drift() -> Result<(), String>
+{
+    let expected = [0.0, 0.0, 10.0, 20.0];
+    let source = oracle::TIMELINE_RAW_SOURCE_SHA256;
+    let svg = |component: &str| format!(r#"<svg viewBox="0 0 {component} 20"/>"#);
+    assert_view_box_matches(&svg("10.01"), expected, source)?;
+    for component in ["10.25", "NaN", "inf"] {
+        let error = assert_view_box_matches(&svg(component), expected, source)
+            .err()
+            .ok_or_else(|| format!("invalid viewBox component {component} was accepted"))?;
+        assert!(error.contains("component 2 differs") && error.contains(source));
+    }
+    let mut invalid_reference = expected;
+    invalid_reference[2] = f64::NAN;
+    assert!(assert_view_box_matches(&svg("10"), invalid_reference, source).is_err());
+    Ok(())
+}
+
 fn assert_svg_contains(rendered: &Result<String, String>, expected: &str) {
     assert!(
         rendered.as_ref().is_ok_and(|svg| svg.contains(expected)),
         "missing {expected:?} in {rendered:?}"
     );
 }
+
+#[test]
+fn real_git_graph_resolves_configured_css_font_before_native_measurement() -> Result<(), String> {
+    use crate::markdown::diagram_js_runtime::{DiagramRuntimeScript, DiagramV8Runtime};
+
+    let source = format!(
+        "%%{{init: {{\"themeVariables\": {{\"fontFamily\": \"Noto Sans\"}}}}}}%%\n{GIT_GRAPH_SOURCE}"
+    );
+    let asset = RuntimeAsset::mermaid();
+    let path = asset.materialize_at(asset.materialized_path())?;
+    let bundle = super::read_mermaid_bundle(&path)?;
+    let request = super::MermaidRenderRequest::new(&source, DiagramColorPreset::dark());
+    let request_json = request.to_json_value().to_string();
+    let mut scripts =
+        super::MermaidRuntimeScripts::build(&bundle, &request_json, request.diagram_type);
+    let observer = GIT_FONT_OBSERVER;
+    scripts.insert(
+        1,
+        DiagramRuntimeScript::borrowed("git-configured-font-boundary", observer),
+    );
+    let svg = DiagramV8Runtime::render(&scripts)?;
+    geometry_contract::GeometryContract::git_graph(&svg)
+}
+
+#[test]
+fn real_svg_text_css_font_variable_scope_reaches_native_metrics() -> Result<(), String> {
+    use crate::markdown::diagram_js_runtime::{DiagramRuntimeScript, DiagramV8Runtime};
+
+    let asset = RuntimeAsset::mermaid();
+    let path = asset.materialize_at(asset.materialized_path())?;
+    let bundle = super::read_mermaid_bundle(&path)?;
+    let request = super::MermaidRenderRequest::new(GIT_GRAPH_SOURCE, DiagramColorPreset::dark());
+    let request_json = request.to_json_value().to_string();
+    let mut scripts =
+        super::MermaidRuntimeScripts::build(&bundle, &request_json, request.diagram_type);
+    let fixture = oracle::svg_css_variable_fixture();
+    scripts.insert(
+        1,
+        DiagramRuntimeScript::borrowed("svg-css-font-variable-native-boundary", &fixture),
+    );
+    let svg = DiagramV8Runtime::render(&scripts)?;
+    geometry_contract::GeometryContract::git_graph(&svg)
+}
+
+#[path = "js_runtime_reference_score_geometry_boundary_tests.rs"]
+mod geometry_boundary_tests;
+#[cfg(target_os = "macos")]
+#[path = "js_runtime_native_font_observer.rs"]
+mod native_font_observer;
+#[path = "js_runtime_reference_score_oracle.rs"]
+mod oracle;
+pub(super) use oracle::SVG_DOM_PLACEMENT_SCALE;
+
+#[cfg(target_os = "macos")]
+pub(super) use native_font_observer::render_with_native_font_observations;
+#[cfg(target_os = "macos")]
+pub(super) use oracle::{assert_view_box_matches, mermaid_fixture_source};

@@ -1,4 +1,4 @@
-use super::super::control_style::input_style;
+use super::super::control_style::{input_style, ua_control_style};
 use super::super::layout::HtmlLayoutRenderer;
 use super::super::style::CssStyle;
 use super::super::svg::escape_xml;
@@ -22,9 +22,10 @@ impl HtmlLayoutRenderer {
         if super::is_checkbox(attributes) {
             return self.render_checkbox(node_id, attributes, x, y, width, style);
         }
-        let geometry = input_geometry(x, y, width, style);
+        let control_style = ua_control_style(style);
+        let geometry = input_geometry(x, y, width, attributes, &control_style);
         let value = super::values::input_value(self, node_id, attributes);
-        let style = input_style(style, self.focused_input == Some(node_id));
+        let style = input_style(&control_style, self.focused_input == Some(node_id));
         self.paint_input_control(node_id, attributes, &value, geometry, &style);
         geometry.y + geometry.height + style.margin_bottom
     }
@@ -154,6 +155,7 @@ impl HtmlLayoutRenderer {
 mod tests {
     use super::{HtmlLayoutRenderer, InputGeometry};
     use crate::renderer::backends::html_browser::HtmlBrowserViewport;
+    use crate::renderer::backends::html_interactive::tests::first_text_x;
     use crate::renderer::backends::html_interactive::{
         constants::INPUT_TEXT_LEFT_PADDING,
         style::{CssStyle, CssTextAlign},
@@ -229,15 +231,5 @@ mod tests {
             padded_x >= default_x,
             "default_x={default_x}, padded_x={padded_x}"
         );
-    }
-
-    fn first_text_x(svg: &str) -> Option<f32> {
-        svg.lines()
-            .find(|line| line.contains("<text"))
-            .and_then(|line| {
-                let start = line.find(" x=\"")? + 4;
-                let suffix = line[start..].find('"')?;
-                line[start..start + suffix].parse::<f32>().ok()
-            })
     }
 }

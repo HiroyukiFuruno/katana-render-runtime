@@ -78,7 +78,7 @@ impl Drop for DisabledBatchScope {
     }
 }
 
-pub(in super::super) fn with_validated_stamp_batch<T>(mut operation: impl FnMut() -> T) -> T {
+pub(in super::super) fn with_render_scoped_stamp_batch<T>(mut operation: impl FnMut() -> T) -> T {
     let scope = BatchScope::enter();
     let result = operation();
     if scope.finish() {
@@ -88,6 +88,18 @@ pub(in super::super) fn with_validated_stamp_batch<T>(mut operation: impl FnMut(
     let result = operation();
     drop(disabled);
     result
+}
+
+pub(in super::super) fn with_reusable_stamp_batch<T>(mut operation: impl FnMut() -> T) -> T {
+    if ACTIVE_BATCH.with(|active| active.borrow().is_some()) {
+        operation()
+    } else {
+        with_render_scoped_stamp_batch(operation)
+    }
+}
+
+pub(in super::super) fn with_validated_stamp_batch<T>(operation: impl FnMut() -> T) -> T {
+    with_render_scoped_stamp_batch(operation)
 }
 
 pub(super) fn cached_stamp(path: &Path) -> Option<FileStamp> {

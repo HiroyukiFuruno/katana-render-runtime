@@ -8,9 +8,10 @@ import errno
 import http.client
 import io
 import json
+import importlib.util
+from pathlib import Path
 import os
 import re
-import socket
 import subprocess
 import sys
 import zipfile
@@ -18,6 +19,12 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 from urllib import error, parse, request
+
+
+_POLICY_SPEC = importlib.util.spec_from_file_location("html_fidelity_policy", Path(__file__).with_name("html_fidelity_policy.py"))
+assert _POLICY_SPEC and _POLICY_SPEC.loader
+HTML_POLICY = importlib.util.module_from_spec(_POLICY_SPEC)
+_POLICY_SPEC.loader.exec_module(HTML_POLICY)
 
 
 class EvidenceError(RuntimeError):
@@ -59,6 +66,7 @@ REQUIRED_STEPS = (
     "Run automation contract tests",
     "Run runtime package asset check",
     "Run coverage",
+    "Compare HTML against Google Chrome for authorized release phase",
 )
 
 
@@ -264,13 +272,17 @@ def _read_all_workflow_runs(
     all_runs = list(first_runs)
     for page in range(2, pages + 1):
         path = _workflow_runs_path(repository, workflow, head_sha, page)
+
+        def validate_page(snapshot: JsonValue, page_number: int = page) -> None:
+            _validate_workflow_run_snapshot(
+                snapshot, repository, pull_request, base_sha, head_sha, workflow, page_number
+            )
+
         payload = _require_dict(
             _read_ci_snapshot_twice(
                 fetch,
                 path,
-                lambda snapshot: _validate_workflow_run_snapshot(
-                    snapshot, repository, pull_request, base_sha, head_sha, workflow, page
-                ),
+                validate_page,
             ),
             "workflow runs",
         )
@@ -310,6 +322,7 @@ def _verify_immutable_base_evidence(
     run: dict[str, JsonValue],
     base_sha: str,
     head_sha: str,
+    html_policy: dict[str, object],
 ) -> None:
     """Require CI-produced, run-bound base evidence instead of mutable PR relations."""
     run_id = run.get("id")
@@ -374,12 +387,13 @@ def _verify_immutable_base_evidence(
         raise EvidenceError("CI immutable base evidence payload is malformed") from exc
     if (
         not isinstance(evidence, dict)
-        or set(evidence) != {"base_sha", "head_sha", "run_attempt", "run_id", "schema"}
-        or evidence.get("schema") != 1
+        or set(evidence) != {"base_sha", "head_sha", "run_attempt", "run_id", "schema", "html_fidelity"}
+        or evidence.get("schema") != 2
         or evidence.get("run_id") != run_id
         or evidence.get("run_attempt") != run_attempt
         or evidence.get("base_sha") != base_sha
         or evidence.get("head_sha") != head_sha
+        or evidence.get("html_fidelity") != html_policy
     ):
         raise EvidenceError("CI immutable base evidence does not match the current generation")
 
@@ -471,9 +485,9 @@ def _verify_run_binding(
     return run
 
 
-def _verify_jobs(
-    jobs_payload: dict[str, JsonValue], run_id: int, required_steps: tuple[str, ...]
-) -> None:
+def _bound_ubuntu_job(
+    jobs_payload: dict[str, JsonValue], run_id: int
+) -> dict[str, JsonValue]:
     total = jobs_payload.get("total_count")
     jobs = jobs_payload.get("jobs")
     if type(total) is not int or total < 0 or not isinstance(jobs, list) or total != len(jobs):
@@ -484,6 +498,13 @@ def _verify_jobs(
     job = _require_dict(candidates[0], "Ubuntu CI job")
     if job.get("run_id") != run_id:
         raise EvidenceError("Ubuntu CI job is bound to another workflow run")
+    return job
+
+
+def _verify_jobs(
+    jobs_payload: dict[str, JsonValue], run_id: int, required_steps: tuple[str, ...]
+) -> None:
+    job = _bound_ubuntu_job(jobs_payload, run_id)
     _require_completed_success(job, "Ubuntu CI job")
     steps = job.get("steps")
     if not isinstance(steps, list):
@@ -504,16 +525,7 @@ def _verify_jobs(
 def _validate_jobs_snapshot(payload: JsonValue, run_id: int, required_steps: tuple[str, ...]) -> None:
     """Validate immutable job bindings while permitting CI state to advance."""
     jobs_payload = _require_dict(payload, "workflow jobs")
-    total = jobs_payload.get("total_count")
-    jobs = jobs_payload.get("jobs")
-    if type(total) is not int or total < 0 or not isinstance(jobs, list) or total != len(jobs):
-        raise EvidenceError("CI job page is incomplete or paginated")
-    candidates = [job for job in jobs if isinstance(job, dict) and job.get("name") == JOB_NAME]
-    if len(candidates) != 1:
-        raise EvidenceError("expected exactly one Ubuntu CI job")
-    job = _require_dict(candidates[0], "Ubuntu CI job")
-    if job.get("run_id") != run_id:
-        raise EvidenceError("Ubuntu CI job is bound to another workflow run")
+    job = _bound_ubuntu_job(jobs_payload, run_id)
     steps = job.get("steps")
     if not isinstance(steps, list):
         raise EvidenceError("Ubuntu CI job steps are missing")
@@ -533,8 +545,11 @@ def verify_quality_evidence(
     head_sha: str,
     head_ref: str,
     workflow: str = WORKFLOW_PATH,
+    html_policy: dict[str, object] | None = None,
 ) -> dict[str, str]:
     _validate_inputs(repository, pull_request, base_sha, head_sha, head_ref)
+    if html_policy is None:
+        html_policy = HTML_POLICY.select_html_policy(head_ref.removeprefix("release/v"), head_ref)
     pull_path = f"repos/{repository}/pulls/{pull_request}"
     pull = _read_pull_snapshot_twice(
         fetch, pull_path, repository, pull_request, base_sha, head_sha, head_ref
@@ -548,7 +563,7 @@ def verify_quality_evidence(
         workflow,
     )
     _verify_immutable_base_evidence(
-        fetch, artifact_fetch, repository, runs, base_sha, head_sha
+        fetch, artifact_fetch, repository, runs, base_sha, head_sha, html_policy
     )
     run_id = runs["id"]
     jobs_path = f"repos/{repository}/actions/runs/{run_id}/jobs?per_page=100&page=1"
@@ -580,7 +595,7 @@ def verify_quality_evidence(
 
 def _is_retryable_url_error(exc: error.URLError) -> bool:
     reason = exc.reason
-    if isinstance(reason, (socket.timeout, TimeoutError, ConnectionError)):
+    if isinstance(reason, (TimeoutError, ConnectionError)):
         return True
     return isinstance(reason, OSError) and reason.errno in RETRYABLE_SOCKET_ERRNOS
 
@@ -614,7 +629,6 @@ def _api_fetch(path: str) -> JsonValue:
         http.client.IncompleteRead,
         http.client.RemoteDisconnected,
         ConnectionError,
-        socket.timeout,
         TimeoutError,
     ) as exc:
         raise EvidencePendingError("GitHub API transport was interrupted") from exc
@@ -637,8 +651,10 @@ def _api_download(url: str) -> bytes:
         if _is_retryable_url_error(exc):
             raise EvidencePendingError("CI immutable base evidence transport is temporarily unavailable") from exc
         raise EvidenceError("CI immutable base evidence transport failed") from exc
-    except (http.client.IncompleteRead, http.client.RemoteDisconnected, ConnectionError, socket.timeout, TimeoutError) as exc:
+    except (http.client.IncompleteRead, http.client.RemoteDisconnected, ConnectionError, TimeoutError) as exc:
         raise EvidencePendingError("CI immutable base evidence transport was interrupted") from exc
+    if not isinstance(data, bytes):
+        raise EvidenceError("CI immutable base evidence response is not bytes")
     if len(data) > MAX_IMMUTABLE_BASE_EVIDENCE_ARCHIVE_BYTES:
         raise EvidenceError("CI immutable base evidence archive is too large")
     return data
@@ -664,6 +680,8 @@ def main() -> int:
     try:
         if args.head_ref is None:
             raise EvidenceError("expected release head ref is required")
+        HTML_POLICY.assert_head_source_binding(args.head_sha)
+        selection = HTML_POLICY.select_html_policy(HTML_POLICY.workspace_version(), args.head_ref)
         evidence = verify_quality_evidence(
             _api_fetch,
             _api_download,
@@ -673,11 +691,12 @@ def main() -> int:
             head_sha=args.head_sha,
             head_ref=args.head_ref,
             workflow=args.workflow,
+            html_policy=selection,
         )
     except EvidencePendingError as exc:
         print(f"CI quality evidence verification is pending: {exc}", file=sys.stderr)
         return PENDING_EVIDENCE_EXIT
-    except EvidenceError as exc:
+    except (EvidenceError, ValueError, OSError, subprocess.CalledProcessError) as exc:
         print(f"CI quality evidence verification failed: {exc}", file=sys.stderr)
         return 1
     print(json.dumps({"status": "verified", **evidence}, sort_keys=True))

@@ -1,0 +1,1126 @@
+from __future__ import annotations
+
+import hashlib
+import subprocess
+import tempfile
+import unittest
+from collections.abc import Sequence
+from pathlib import Path
+from unittest.mock import patch
+
+import html_performance_source_reuse as reuse
+import verify_html_performance_evidence as evidence
+from html_performance_source_reuse import validate_reuse_source
+from verify_html_performance_evidence import LOCK_SHA, _v3_authenticate_programs, _verified_reuse_context, committed_records
+
+
+def git(root: Path, *args: str) -> str:
+    return subprocess.check_output(["git", "-C", str(root), *args], text=True)
+
+
+def historical_reuse_endpoint(root: Path, path: str) -> bytes:
+    if path == "scripts/release/html_performance_source_reuse_test.py":
+        return subprocess.check_output(["git", "-C", str(root), "show",
+                                        reuse.SAME_BINARY_REVIEWED_BASE + ":" + path])
+    return (root / path).read_bytes()
+
+
+class ZeroScrollPolicyTransitionTest(unittest.TestCase):
+    def test_exact_program_changes_are_required(self) -> None:
+        path = "scripts/release/html_performance_memory_policy.py"
+        names = (path, reuse.ZERO_SCROLL_SELF)
+        release = "scripts/release/verify-release-target.py"
+        body = Path(reuse.__file__).read_bytes()
+        self_record = (hashlib.sha256(body).hexdigest(), len(body))
+        measured = dict.fromkeys((*names, release), ("0" * 64, 1))
+        candidate = {path: ("1" * 64, 2), reuse.ZERO_SCROLL_SELF: self_record, release: ("2" * 64, 3)}
+        modes = {**dict.fromkeys(names, "100644"), release: "100755"}
+        with patch.object(reuse, "ZERO_SCROLL_REVIEWED_FILES", {path: candidate[path]}):
+            def check(current: reuse.Records, new_modes: dict[str, str] = modes,
+                      head: str = reuse.ZERO_SCROLL_MEASURED_HEAD) -> set[str]:
+                return reuse._zero_scroll_policy_changes(head, current, measured, modes, new_modes)
+
+            self.assertEqual(check(candidate), {*names, release})
+            self.assertFalse(check({**candidate, path: ("2" * 64, 2)}))
+            self.assertFalse(check({**candidate, "Cargo.lock": ("2" * 64, 2)}))
+            self.assertFalse(check(candidate, {**modes, path: "100755"}))
+            self.assertFalse(check(candidate, {**modes, release: "100644"}))
+            self.assertFalse(check(candidate, head="a" * 40))
+
+
+class SourceReuseTest(unittest.TestCase):
+    def test_parse5_cohort_requires_exact_pair_and_same_binary_scope(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        measured_head = reuse.SAME_BINARY_REVIEWED_BASE
+        parse5_update = "6d2e83a2458f6fd297972ecb82ee22d359a4eab1"
+        eligible_head = "a" * 40
+        names = ("package.json", "bun.lock", "Cargo.lock")
+        old_bytes = {name: (b"cargo" if name == "Cargo.lock" else
+                     subprocess.check_output(["git", "-C", str(repository), "show",
+                                              measured_head + ":" + name])) for name in names}
+        new_bytes = {name: (b"cargo" if name == "Cargo.lock" else
+                     subprocess.check_output(["git", "-C", str(repository), "show",
+                                              parse5_update + ":" + name])) for name in names}
+        def record(value: bytes) -> tuple[str, int]:
+            return hashlib.sha256(value).hexdigest(), len(value)
+        measured = {name: record(value) for name, value in old_bytes.items()}
+        current = {name: record(value) for name, value in new_bytes.items()}
+        old_modes = {name: "100644" for name in names}
+        new_modes = dict(old_modes)
+        def text_query(args: Sequence[str]) -> str:
+            if args[0] == "rev-parse":
+                return eligible_head
+            if args[0] == "merge-base":
+                return measured_head
+            if args[0] == "status":
+                return ""
+            raise AssertionError(args)
+        def bytes_query(args: Sequence[str]) -> bytes:
+            if args[0] == "show":
+                return old_bytes[args[1].split(":", 1)[1]]
+            if args[0] == "ls-tree":
+                modes = old_modes if args[-1] == measured_head else new_modes
+                return b"".join(f"{mode} blob {'0' * 40}\t{name}\0".encode()
+                                for name, mode in sorted(modes.items()))
+            raise AssertionError(args)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            for name, data in new_bytes.items():
+                (root / name).write_bytes(data)
+            def check(*, enabled: bool = True) -> reuse.SourceReuseContext:
+                return validate_reuse_source(root, measured_head, current, measured, text_query, bytes_query,
+                                             same_binary_rust=enabled)
+            self.assertEqual(set(check().changed_paths), {"package.json", "bun.lock"})
+            with self.assertRaises(ValueError):
+                check(enabled=False)
+            self.assertFalse(reuse._reviewed_parse5_cohort(
+                root, "b" * 40, current, measured, old_modes, new_modes, bytes_query))
+            for name in ("package.json", "bun.lock"):
+                original = new_bytes[name]
+                invalid = [old_bytes[name], original + b" "]
+                if name == "bun.lock":
+                    invalid.extend((original.replace(b'"entities": "^9.0.0"', b'"entities": "^8.0.0"'),
+                                    original.replace(b"sha512-EcR/6W", b"sha512-FcR/6W")))
+                for changed in invalid:
+                    with self.subTest(path=name, changed=changed == old_bytes[name]):
+                        (root / name).write_bytes(changed)
+                        current[name] = record(changed)
+                        with self.assertRaises(ValueError):
+                            check()
+                (root / name).write_bytes(original)
+                current[name] = record(original)
+                new_modes[name] = "100755"
+                with self.assertRaises(ValueError):
+                    check()
+                new_modes[name] = "100644"
+            current["Cargo.lock"] = record(b"changed")
+            with self.assertRaises(ValueError):
+                check()
+            current["Cargo.lock"] = measured["Cargo.lock"]
+            new_modes["extra/Cargo.lock"] = "100644"
+            current["extra/Cargo.lock"] = record(b"new")
+            with self.assertRaises(ValueError):
+                check()
+
+    def test_same_binary_source_scope_and_real_git_membership(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            paths = {
+                "crates/katana-render-runtime/src/old.rs": b"old",
+                "crates/katana-render-runtime/src/deleted.rs": b"deleted",
+                "crates/katana-render-runtime/vendor/svg-engine/usvg/writer.rs": b"vendor",
+                "crates/katana-render-runtime/vendor/svg-engine/PROVENANCE.json": b"metadata",
+                "crates/katana-render-runtime/build.rs": b"build",
+                "Cargo.lock": b"lock",
+                "tests/fixtures/input.html": b"input",
+            }
+            for name, data in paths.items():
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            git(root, "init", "-q")
+            git(root, "add", ".")
+            git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+                "commit", "-qm", "old")
+            old = git(root, "rev-parse", "HEAD").strip()
+            (root / "crates/katana-render-runtime/src/old.rs").write_bytes(b"changed")
+            (root / "crates/katana-render-runtime/src/deleted.rs").unlink()
+            (root / "crates/katana-render-runtime/src/new.rs").write_bytes(b"new")
+            git(root, "add", "-A")
+            git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+                "commit", "-qm", "new")
+            current = git(root, "rev-parse", "HEAD").strip()
+            measured = committed_records(root, old)
+            live = committed_records(root, current)
+            def text_query(args: Sequence[str]) -> str:
+                return git(root, *args)
+            def bytes_query(args: Sequence[str]) -> bytes:
+                return subprocess.check_output(["git", "-C", str(root), *args])
+            def check(*, same_binary: bool = True) -> reuse.SourceReuseContext:
+                return validate_reuse_source(root, old, live, measured, text_query, bytes_query,
+                                             same_binary_rust=same_binary)
+            self.assertTrue(check().artifact_equivalence)
+            with self.assertRaises(ValueError):
+                check(same_binary=False)
+            (root / "Cargo.lock").write_bytes(b"dirty")
+            with self.assertRaises(ValueError):
+                check()
+            (root / "Cargo.lock").write_bytes(b"lock")
+            vendor = root / "crates/katana-render-runtime/vendor/svg-engine/usvg/writer.rs"
+            vendor.write_bytes(b"changed")
+            git(root, "add", str(vendor))
+            git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+                "commit", "-qm", "unsynchronised vendor")
+            live = committed_records(root, git(root, "rev-parse", "HEAD").strip())
+            with self.assertRaisesRegex(ValueError, "provenance cohort differs"):
+                check()
+            vendor.write_bytes(b"vendor")
+            git(root, "add", str(vendor))
+            git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+                "commit", "-qm", "restore vendor")
+            live = committed_records(root, git(root, "rev-parse", "HEAD").strip())
+            for name in ("Cargo.lock", "crates/katana-render-runtime/build.rs",
+                         "tests/fixtures/input.html",
+                         "crates/katana-render-runtime/vendor/svg-engine/PROVENANCE.json"):
+                path = root / name
+                original = path.read_bytes()
+                path.write_bytes(original + b"changed")
+                git(root, "add", name)
+                git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+                    "commit", "-qm", "unsafe")
+                live = committed_records(root, git(root, "rev-parse", "HEAD").strip())
+                with self.subTest(path=name), self.assertRaises(ValueError):
+                    check()
+                path.write_bytes(original)
+                git(root, "add", name)
+                git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+                    "commit", "-qm", "restore")
+                live = committed_records(root, git(root, "rev-parse", "HEAD").strip())
+            (root / "crates/katana-render-runtime/src/new.rs").chmod(0o755)
+            git(root, "update-index", "--chmod=+x", "crates/katana-render-runtime/src/new.rs")
+            git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+                "commit", "-qm", "unsafe mode")
+            live = committed_records(root, git(root, "rev-parse", "HEAD").strip())
+            with self.assertRaises(ValueError):
+                check()
+
+    def test_svg_provenance_cohort_is_exact_and_keeps_licenses_and_inventory(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        base = reuse.SAME_BINARY_REVIEWED_BASE
+        measured = committed_records(repository, base)
+        tree = subprocess.check_output(["git", "-C", str(repository), "ls-tree", "-r", "-z", base])
+        modes = reuse._modes(tree)
+        current = dict(measured)
+        prefix = "crates/katana-render-runtime/vendor/svg-engine/"
+        current[prefix + "PROVENANCE.json"] = (
+            "07c779270618a9c2d0133367f247abf09bf2227b83b8af8bca3e64bc1fa9e145", 28884)
+        current[prefix + "usvg/writer.rs"] = (
+            "c73e39790272815346f2640bf582e17e0768db002da2b54f0c74f8c6e19f88ec", 60490)
+        current[prefix + "resvg/filter/component_transfer.rs"] = (
+            "734564bd09c8a77fae2f04104bcaeee6117e329ccb8bfa3040ae91829500857b", 2373)
+        program = "scripts/runtime-assets/svg-engine-provenance.ts"
+        current[program] = ("f57f6244c0b4557592b0a2b2eaca20ca0906d27deff4c20796e6025b9def57a5", 5233)
+        self.assertTrue(reuse.reviewed_svg_provenance_change(measured, current, modes, modes))
+        for path in (prefix + "PROVENANCE.json", prefix + "usvg/writer.rs",
+                     prefix + "resvg/filter/component_transfer.rs", prefix + "LICENSE-MIT",
+                     prefix + "README.md", program):
+            with self.subTest(path=path):
+                changed = {**current, path: ("0" * 64, current[path][1])}
+                self.assertFalse(reuse.reviewed_svg_provenance_change(measured, changed, modes, modes))
+                self.assertFalse(reuse.reviewed_svg_provenance_change(
+                    measured, current, modes, {**modes, path: "100755"}))
+        added = {**current, prefix + "usvg/unknown.rs": ("0" * 64, 1)}
+        self.assertFalse(reuse.reviewed_svg_provenance_change(measured, added, modes, modes))
+
+    def test_v4_authenticates_fixed_historical_base_without_live_self_alias(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        path = "scripts/release/html_performance_source_reuse.py"
+        old = subprocess.check_output(["git", "-C", str(repository), "show",
+                                       "a39bd810784a70c3bd34013256a437ad7239c9bd:" + path])
+        base = subprocess.check_output(["git", "-C", str(repository), "show",
+                                        reuse.SAME_BINARY_REVIEWED_BASE + ":" + path])
+        self.assertTrue(reuse.v4_reassessment_program_change(
+            path, old, base, old_mode="100644", new_mode="100644"))
+        self.assertFalse(reuse.v4_reassessment_program_change(
+            path, old, base + b" ", old_mode="100644", new_mode="100644"))
+
+    # 承認済み移行の正例を現行checkerの変更から分離する。
+    reviewed_program_migration_head = "9d26f49139f2a073ddd699fd415c9760d214e84f"
+
+    def test_reviewed_program_migration_is_exact_and_mode_bound(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        for path in ("scripts/release/publish-crates.sh",
+                     "scripts/release/publish_crates_test.py",
+                     "scripts/hooks/run_locked_command.py",
+                     "scripts/hooks/run_locked_command_test.py",
+                     "scripts/build/cargo_capacity_guard.py",
+                     "scripts/build/cargo_capacity_guard_test.py",
+                     "scripts/build/cargo_capacity_guard_state_integration_test.py",
+                     "scripts/release/native_coverage_result.py",
+                     "scripts/release/native_coverage_result_test.py",
+                     "scripts/release/native_nextest_coverage_commands.py",
+                     "scripts/release/native_nextest_root_coverage_test.py",
+                     "scripts/release/html_performance_remote_evidence.py",
+                     "scripts/release/produce_html_performance_evidence.py",
+                     "scripts/release/produce_html_performance_evidence_test.py",
+                     "scripts/release/html_performance_host_load_validation.py",
+                     "scripts/release/html_performance_host_load_validation_test.py"):
+            with self.subTest(path=path):
+                old = subprocess.check_output(["git", "-C", str(repository), "show",
+                                               reuse.SAME_BINARY_REVIEWED_BASE + ":" + path])
+                current = subprocess.check_output(["git", "-C", str(repository), "show",
+                                                   self.reviewed_program_migration_head + ":" + path])
+                self.assertTrue(reuse.reviewed_same_binary_migration(
+                    path, old, current, old_mode="100644", new_mode="100644"))
+                self.assertFalse(reuse.reviewed_same_binary_migration(
+                    path, old + b" ", current, old_mode="100644", new_mode="100644"))
+                self.assertFalse(reuse.reviewed_same_binary_migration(
+                    path, old, current + b" ", old_mode="100644", new_mode="100644"))
+                for old_mode, new_mode in (("100755", "100644"), ("100644", "100755"),
+                                           (None, "100644"), ("100644", None)):
+                    self.assertFalse(reuse.reviewed_same_binary_migration(
+                        path, old, current, old_mode=old_mode, new_mode=new_mode))
+
+    def test_reviewed_program_membership_accepts_only_fixed_coverage_test(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        base, live = reuse.SAME_BINARY_REVIEWED_BASE, "d" * 40
+        self_path = "scripts/release/html_performance_source_reuse.py"
+        addition = "scripts/build/cargo_capacity_guard_root_scope_test.py"
+        old = subprocess.check_output(["git", "-C", str(repository), "show", base + ":" + self_path])
+        current, added = (
+            subprocess.check_output(["git", "-C", str(repository), "show",
+                                     self.reviewed_program_migration_head + ":" + path])
+            for path in (self_path, addition)
+        )
+        def record(data: bytes) -> tuple[str, int]:
+            return hashlib.sha256(data).hexdigest(), len(data)
+        base_records = {self_path: record(old)}
+        def authenticate(candidate: dict[str, tuple[str, int]], *, mode: str = "100644",
+                         actual: dict[str, tuple[str, int]] | None = None) -> object:
+            def tree(records: dict[str, tuple[str, int]]) -> bytes:
+                return b"".join(f"{mode if path == addition else '100644'} blob {'0' * 40}\t{path}\0".encode()
+                                for path in records)
+            def git_bytes(_root: Path, arguments: tuple[str, ...], **_kwargs: object) -> bytes:
+                if arguments[0] == "ls-tree":
+                    return tree(base_records if arguments[-1] == base else candidate)
+                if arguments[0] == "show":
+                    return old if arguments[1].startswith(base + ":") else current
+                raise AssertionError("unexpected Git query")
+            def items(records: dict[str, tuple[str, int]]) -> tuple[tuple[str, str, int], ...]:
+                return tuple((path, sha, size) for path, (sha, size) in sorted(records.items()))
+            with (patch.object(evidence, "committed_records", side_effect=lambda _root, head, **_kwargs:
+                               base_records if head == base else actual if actual is not None else candidate),
+                  patch.object(evidence, "_git_output", side_effect=git_bytes),
+                  patch.object(evidence, "git", return_value=base)):
+                return evidence._v3_authenticate_programs(repository, base, items(base_records),
+                    ((live, items(candidate)),), git_query=None, memory_policy_version="html-memory-v4")
+        live_records = {self_path: record(current), addition: record(added)}
+        self.assertTrue(authenticate(live_records))
+        self.assertTrue(authenticate({self_path: record(current)}))
+        for candidate in ({**live_records, addition: record(added + b" ")},
+                          {**live_records, addition: (record(added)[0], len(added) + 1)},
+                          {self_path: record(current), addition + ".unknown": record(added)},
+                          {addition: record(added)}):
+            with self.subTest(candidate=candidate), self.assertRaises(ValueError):
+                authenticate(candidate)
+        with self.assertRaises(ValueError):
+            authenticate(live_records, mode="100755")
+        with self.assertRaises(ValueError):
+            authenticate(live_records, actual={self_path: record(current)})
+
+    def test_selector_program_migration_reauthenticates_fixed_epoch(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        base, live = reuse.SAME_BINARY_REVIEWED_BASE, "d" * 40
+        paths = ("scripts/release/html_performance_source_reuse.py",
+                 "scripts/release/produce_html_performance_evidence.py",
+                 "scripts/release/produce_html_performance_evidence_test.py",
+                 "scripts/release/html_performance_host_load_validation.py",
+                 "scripts/release/html_performance_host_load_validation_test.py")
+        old = {path: subprocess.check_output(["git", "-C", str(repository), "show", base + ":" + path])
+               for path in paths}
+        current = {path: subprocess.check_output(["git", "-C", str(repository), "show",
+                                                  self.reviewed_program_migration_head + ":" + path])
+                   for path in paths}
+
+        def records(blobs: dict[str, bytes]) -> dict[str, tuple[str, int]]:
+            return {path: (hashlib.sha256(data).hexdigest(), len(data)) for path, data in blobs.items()}
+
+        def tree() -> bytes:
+            return b"".join(f"100644 blob {'0' * 40}\t{path}\0".encode() for path in paths)
+
+        def git_bytes(_root: Path, arguments: tuple[str, ...], **_kwargs: object) -> bytes:
+            if arguments[0] == "ls-tree":
+                return tree()
+            if arguments[0] == "show":
+                head, path = arguments[1].split(":", 1)
+                return (old if head == base else current)[path]
+            raise AssertionError("unexpected Git query")
+
+        base_records, live_records = records(old), records(current)
+        items = tuple((path, sha, size) for path, (sha, size) in sorted(base_records.items()))
+        live_items = tuple((path, sha, size) for path, (sha, size) in sorted(live_records.items()))
+        with (patch.object(evidence, "committed_records",
+                           side_effect=lambda _root, head, **_kwargs:
+                           base_records if head == base else live_records),
+              patch.object(evidence, "_git_output", side_effect=git_bytes),
+              patch.object(evidence, "git", return_value=base)):
+            self.assertEqual(evidence._v3_authenticate_programs(
+                repository, base, items, ((live, live_items),), git_query=None,
+                memory_policy_version="html-memory-v4"), items)
+
+    def test_historical_self_and_migrations_are_exact(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        histories = ("6d2e83a2458f6fd297972ecb82ee22d359a4eab1",
+                     "5d80409466a6edfec480516d7c0bb1e7969b7ae9",
+                     "be3ef664076b9e52db78da63a10964b93cf4d48b")
+        paths = ("scripts/release/html_performance_source_reuse.py",
+                 "scripts/release/html_performance_source_reuse_test.py",
+                 "scripts/release/html_performance_source_reuse_cli.py",
+                 "scripts/release/html_performance_source_reuse_cli_test.py",
+                 "scripts/release/verify_html_performance_evidence_test.py",
+                 "scripts/release/verify_html_performance_evidence.py")
+        for head in histories:
+            for path in paths:
+                with self.subTest(head=head, path=path):
+                    base = subprocess.check_output(["git", "-C", str(repository), "show",
+                                                    reuse.SAME_BINARY_REVIEWED_BASE + ":" + path])
+                    historical = subprocess.check_output(["git", "-C", str(repository), "show",
+                                                          head + ":" + path])
+                    def check(before: bytes, after: bytes, mode: str = "100644",
+                              current_path: str = path) -> bool:
+                        return reuse.reviewed_same_binary_migration(
+                            current_path, before, after, old_mode="100644", new_mode=mode)
+                    self.assertTrue(check(base, historical))
+                    self.assertFalse(check(base + b" ", historical))
+                    self.assertFalse(check(base, historical + b" "))
+                    self.assertFalse(check(base, historical, "100755"))
+                    if path.endswith("html_performance_source_reuse.py"):
+                        self.assertFalse(reuse.reviewed_same_binary_self(historical))
+                        self.assertTrue(reuse.reviewed_same_binary_self(historical, allow_historical=True))
+                        self.assertFalse(reuse.reviewed_same_binary_self(
+                            historical + b"\n# unknown\n", allow_historical=True))
+                        self.assertFalse(reuse.reviewed_same_binary_self(
+                            historical + b'\nSELF_MODULE_CANONICAL_SHA256 = "' + b"0" * 64 + b'"\n',
+                            allow_historical=True))
+                        self.assertFalse(reuse.reviewed_same_binary_self(
+                            historical.replace(b"SELF_MODULE_CANONICAL_SHA256", b"UNKNOWN_CONSTANT", 1),
+                            allow_historical=True))
+
+    def test_reviewed_self_rejects_body_constant_duplicate_and_mode_changes(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        path = "scripts/release/html_performance_source_reuse.py"
+        old = subprocess.check_output(["git", "-C", str(repository), "show",
+                                       reuse.SAME_BINARY_REVIEWED_BASE + ":" + path])
+        current = subprocess.check_output(["git", "-C", str(repository), "show",
+                                           self.reviewed_program_migration_head + ":" + path])
+        def check(data: bytes, mode: str = "100644") -> bool:
+            return reuse.reviewed_same_binary_migration(path, old, data,
+                                                        old_mode="100644", new_mode=mode)
+        self.assertTrue(check(current))
+        self.assertFalse(check(current + b"\n# unknown\n"))
+        pin_key = b'SELF_MODULE_CANONICAL_SHA256 = "'
+        self.assertIn(pin_key, current)
+        self.assertFalse(check(current.replace(pin_key, pin_key + b"f", 1)))
+        self.assertFalse(check(current + b'\nSELF_MODULE_CANONICAL_SHA256 = "' + b"0" * 64 + b'"\n'))
+        self.assertFalse(check(current, "100755"))
+        self.assertFalse(reuse.reviewed_same_binary_migration(path, old + b" ", current,
+                                                              old_mode="100644", new_mode="100644"))
+
+    def test_fixed_epoch_authenticates_programs_at_the_same_commit(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        head = git(root, "rev-parse", "HEAD").strip()
+        records = committed_records(root, head)
+        programs = tuple(
+            (path, digest, size) for path, (digest, size) in sorted(records.items())
+            if path.startswith("scripts/") or path == "Justfile"
+        )
+        with patch.object(reuse, "reviewed_same_binary_migration",
+                          side_effect=AssertionError("same commit needs no program migration")):
+            self.assertEqual(evidence._v3_authenticate_programs(
+                root, head, programs, ((head, programs),), git_query=None,
+                memory_policy_version="html-memory-v4",
+            ), programs)
+            path, digest, size = programs[0]
+            forged = ((path, digest, size + 1), *programs[1:])
+            for endpoint in (programs[1:], forged):
+                with self.assertRaisesRegex(ValueError, "live program source differs from Git"):
+                    evidence._v3_authenticate_programs(
+                        root, head, programs, ((head, endpoint),), git_query=None,
+                        memory_policy_version="html-memory-v4",
+                    )
+
+    def test_fixed_epoch_accepts_exact_historical_controller_program(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        base = reuse.SAME_BINARY_REVIEWED_BASE
+        history = "6d2e83a2458f6fd297972ecb82ee22d359a4eab1"
+        paths = ("scripts/release/html_performance_source_reuse.py",
+                 "scripts/release/html_performance_source_reuse_test.py")
+        def blobs(head: str) -> dict[str, bytes]:
+            return {path: subprocess.check_output(
+                ["git", "-C", str(repository), "show", head + ":" + path]) for path in paths}
+        old, current = blobs(base), blobs(history)
+        def records(values: dict[str, bytes]) -> dict[str, tuple[str, int]]:
+            return {path: (hashlib.sha256(data).hexdigest(), len(data)) for path, data in values.items()}
+        old_records, historical_records = records(old), records(current)
+        tree = b"".join(f"100644 blob {'0' * 40}\t{path}\0".encode() for path in paths)
+        def git_bytes(_root: Path, arguments: tuple[str, ...], **_kwargs: object) -> bytes:
+            if arguments[0] == "ls-tree":
+                return tree
+            if arguments[0] == "show":
+                head, path = arguments[1].split(":", 1)
+                return (old if head == base else current)[path]
+            raise AssertionError("unexpected Git query")
+        items = tuple((path, sha, size) for path, (sha, size) in sorted(old_records.items()))
+        history_items = tuple((path, sha, size) for path, (sha, size) in sorted(historical_records.items()))
+        with (patch.object(evidence, "committed_records", side_effect=lambda _root, head, **_kwargs:
+                           old_records if head == base else historical_records),
+              patch.object(evidence, "_git_output", side_effect=git_bytes),
+              patch.object(evidence, "git", return_value=base)):
+            self.assertEqual(evidence._v3_authenticate_programs(
+                repository, base, items, ((history, history_items),), git_query=None,
+                memory_policy_version="html-memory-v4"), items)
+
+    def test_test_only_cohort_requires_exact_records_modes_and_anchors(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        head = "d5ca9a64"
+        target = "faf85d7c12770fb41154ce548347de5c408025d7"
+        names = git(root, "diff", "--name-only", head, target, "--", "crates").splitlines()
+        self.assertEqual(len(names), 20)
+        measured = committed_records(root, head)
+        tree = subprocess.check_output(["git", "-C", str(root), "ls-tree", "-r", "-z", head])
+        old_modes = reuse._modes(tree)
+        target_tree = subprocess.check_output(["git", "-C", str(root), "ls-tree", "-r", "-z", target])
+        target_modes = reuse._modes(target_tree)
+        current, new_modes = dict(measured), dict(old_modes)
+        for name in names:
+            data = subprocess.check_output(["git", "-C", str(root), "show", target + ":" + name])
+            current[name] = (hashlib.sha256(data).hexdigest(), len(data))
+            new_modes[name] = target_modes[name]
+        cached: dict[str, bytes] = {}
+        def git_bytes(args: Sequence[str]) -> bytes:
+            if args[1] not in cached:
+                cached[args[1]] = subprocess.check_output(["git", "-C", str(root), *args])
+            return cached[args[1]]
+        def check(records: reuse.Records, modes: dict[str, str], *, allow: bool = True) -> tuple[set[str], set[str]]:
+            return reuse._specific_source_changes(root, head, records, measured, old_modes, modes,
+                                                  git_bytes, allow_test_changes=allow)
+        target_cache: dict[str, bytes] = {}
+        def target_bytes(path: Path) -> bytes:
+            name = str(path.relative_to(root))
+            if name not in target_cache:
+                target_cache[name] = subprocess.check_output(["git", "-C", str(root), "show", target + ":" + name])
+            return target_cache[name]
+        with patch.object(Path, "read_bytes", autospec=True, side_effect=target_bytes):
+            approved, added = check(current, new_modes)
+            self.assertEqual(approved, set(names))
+            self.assertEqual(added, set(names) - measured.keys())
+            self.assertEqual(len(added), 7)
+            with self.assertRaises(ValueError):
+                check(current, new_modes, allow=False)
+            for name in names:
+                with self.subTest(path=name):
+                    with self.assertRaises(ValueError):
+                        check({**current, name: ("0" * 64, current[name][1])}, new_modes)
+                    with self.assertRaises(ValueError):
+                        check(current, {**new_modes, name: "100755"})
+                    missing = dict(current)
+                    missing.pop(name)
+                    with self.assertRaises(ValueError):
+                        check(missing, new_modes)
+            anchor = "crates/kdr-linter/src/bin/mathjax_consumer_facts.rs"
+            with self.assertRaises(ValueError):
+                check({**current, anchor: ("0" * 64, current[anchor][1])}, new_modes)
+            with self.assertRaises(ValueError):
+                check(current, {**new_modes, anchor: "100755"})
+
+    def test_just_launcher_cohort_actual_git_endpoints(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        target = "a2fab616"
+        paths = git(root, "diff", "--name-only", "d5ca9a64", target, "--", "Justfile", "scripts").splitlines()
+        self.assertEqual(len(paths), 19)
+        for head in ("d5ca9a64", "5cac0ae4"):
+            old_items = tuple((path, checksum, size) for path, (checksum, size)
+                              in sorted(committed_records(root, head).items())
+                              if path.startswith("scripts/") or path == "Justfile")
+            new_items = tuple((path, checksum, size) for path, (checksum, size)
+                              in sorted(committed_records(root, target).items())
+                              if path.startswith("scripts/") or path == "Justfile")
+            self.assertEqual(_v3_authenticate_programs(root, head, old_items, ((target, new_items),),
+                             git_query=None), old_items)
+            for path in paths:
+                old = subprocess.check_output(["git", "-C", str(root), "show", head + ":" + path])
+                new = subprocess.check_output(["git", "-C", str(root), "show", target + ":" + path])
+                before = (hashlib.sha256(old).hexdigest(), len(old))
+                after = (hashlib.sha256(new).hexdigest(), len(new))
+                old_mode = git(root, "ls-tree", head, "--", path).split()[0]
+                new_mode = git(root, "ls-tree", target, "--", path).split()[0]
+                with self.subTest(head=head, path=path):
+                    self.assertTrue(reuse.validation_cohort_change(path, before, after, old_mode, new_mode))
+                    self.assertFalse(reuse.validation_cohort_change(path, before,
+                                     (hashlib.sha256(new + b" ").hexdigest(), len(new) + 1), old_mode, new_mode))
+                    self.assertFalse(reuse.validation_cohort_change(path, before, after, old_mode, "100755"))
+                    self.assertFalse(reuse.validation_cohort_change(path, before, None, old_mode, None))
+        for name in ("html_performance_source_reuse.py", "html_performance_source_reuse_test.py"):
+            path = "scripts/release/" + name
+            old = subprocess.check_output(["git", "-C", str(root), "show", "d5ca9a64:" + path])
+            new = historical_reuse_endpoint(root, path)
+            before = (hashlib.sha256(old).hexdigest(), len(old))
+            after = (hashlib.sha256(new).hexdigest(), len(new))
+            self.assertTrue(reuse.validation_cohort_change(path, before, after, "100644", "100644"))
+            self.assertFalse(reuse.validation_cohort_change(path, before, after, "100644", "100755"))
+            self.assertFalse(reuse.validation_cohort_change(path, before,
+                             (hashlib.sha256(new + b" ").hexdigest(), len(new) + 1), "100644", "100644"))
+            if name == "html_performance_source_reuse_test.py":
+                live = (root / path).read_bytes()
+                self.assertFalse(reuse.validation_cohort_change(
+                    path, before, (hashlib.sha256(live).hexdigest(), len(live)), "100644", "100644"))
+            if name == "html_performance_source_reuse.py":
+                self.assertTrue(reuse.known_auth_program_change(path, old, new))
+                self.assertFalse(reuse.known_auth_program_change(path, old + b" ", new))
+
+    def test_promotion_environment_transition_is_exact(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        for name in ("html_performance_promotion.py", "html_performance_promotion_test.py"):
+            path = "scripts/release/" + name
+            new = subprocess.check_output(["git", "-C", str(root), "show",
+                                           "5f889a3e217a72806c1561aaa311e79a685761e3:" + path])
+            current = (hashlib.sha256(new).hexdigest(), len(new))
+            live = (root / path).read_bytes()
+            live_record = (hashlib.sha256(live).hexdigest(), len(live))
+            for head in ("a476765c", "e1bc9abd"):
+                old = subprocess.check_output(["git", "-C", str(root), "show", head + ":" + path])
+                previous = (hashlib.sha256(old).hexdigest(), len(old))
+                mode = git(root, "ls-tree", head, "--", path).split()[0]
+                unknown = (hashlib.sha256(new + b" ").hexdigest(), len(new) + 1)
+                with self.subTest(path=path, head=head):
+                    self.assertTrue(reuse.validation_cohort_change(path, previous, current, mode, "100644"))
+                    self.assertFalse(reuse.validation_cohort_change(path, previous, unknown, mode, "100644"))
+                    self.assertFalse(reuse.validation_cohort_change(path, previous, current, mode, "100755"))
+                    self.assertFalse(reuse.validation_cohort_change(path, previous, live_record, mode, "100644"))
+        for name in ("html_performance_source_reuse.py", "html_performance_source_reuse_test.py"):
+            path = "scripts/release/" + name
+            old = subprocess.check_output(["git", "-C", str(root), "show", "e1bc9abd:" + path])
+            new = historical_reuse_endpoint(root, path)
+            previous = (hashlib.sha256(old).hexdigest(), len(old))
+            current = (hashlib.sha256(new).hexdigest(), len(new))
+            self.assertTrue(reuse.validation_cohort_change(path, previous, current, "100644", "100644"))
+            self.assertFalse(reuse.validation_cohort_change(path, previous, current, "100644", "100755"))
+            if name == "html_performance_source_reuse_test.py":
+                live = (root / path).read_bytes()
+                self.assertFalse(reuse.validation_cohort_change(
+                    path, previous, (hashlib.sha256(live).hexdigest(), len(live)), "100644", "100644"))
+
+    def test_format_cohort_from_current_sdk_source_is_exact(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        head = "a476765c"
+        lock = "scripts/html/performance-harness/Cargo.lock"
+        old_lock = subprocess.check_output(["git", "-C", str(root), "show", head + ":" + lock])
+        self.assertEqual(hashlib.sha256(old_lock).hexdigest(),
+                         "dc865c759e8b6493cc01bf7311309fb4dfb60e41db792abf5a288bb51d20dd9d")
+        self.assertEqual(hashlib.sha256((root / lock).read_bytes()).hexdigest(), LOCK_SHA)
+        names = ("html_performance_source_reuse.py", "html_performance_source_reuse_test.py",
+                 "html_performance_epoch_reuse.py", "html_performance_epoch_reuse_test.py")
+        for name in names:
+            path = "scripts/release/" + name
+            old = subprocess.check_output(["git", "-C", str(root), "show", head + ":" + path])
+            new = historical_reuse_endpoint(root, path)
+            before = (hashlib.sha256(old).hexdigest(), len(old))
+            after = (hashlib.sha256(new).hexdigest(), len(new))
+            with self.subTest(path=path):
+                self.assertTrue(reuse.validation_cohort_change(path, before, after, "100644", "100644"))
+                self.assertFalse(reuse.validation_cohort_change(path, before, after, "100644", "100755"))
+                if name == "html_performance_source_reuse_test.py":
+                    live = (root / path).read_bytes()
+                    self.assertFalse(reuse.validation_cohort_change(
+                        path, before, (hashlib.sha256(live).hexdigest(), len(live)), "100644", "100644"))
+
+    def test_reviewed_drawio_format_transition_is_exact(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        path = "scripts/drawio/candidate-svg-rasterize.ts"
+        old = subprocess.check_output(["git", "-C", str(root), "show", "637cd465:" + path])
+        new = (root / path).read_bytes()
+        previous = (hashlib.sha256(old).hexdigest(), len(old))
+        current = (hashlib.sha256(new).hexdigest(), len(new))
+        unknown = (hashlib.sha256(new + b" ").hexdigest(), len(new) + 1)
+        self.assertTrue(reuse.validation_cohort_change(path, None, previous, None, "100644"))
+        self.assertTrue(reuse.validation_cohort_change(path, None, current, None, "100644"))
+        self.assertTrue(reuse.validation_cohort_change(path, previous, current, "100644", "100644"))
+        self.assertFalse(reuse.validation_cohort_change(path, previous, unknown, "100644", "100644"))
+        self.assertFalse(reuse.validation_cohort_change(path, previous, current, "100644", "100755"))
+        self.assertFalse(reuse.validation_cohort_change(path, previous, None, "100644", None))
+
+    def test_reviewed_producer_cohort_reaches_budget_epoch(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        for name in ("produce_html_performance_evidence.py", "produce_html_performance_evidence_test.py"):
+            path = "scripts/release/" + name
+            current = subprocess.check_output(["git", "-C", str(root), "show", "189281be:" + path])
+            new_record = (hashlib.sha256(current).hexdigest(), len(current))
+            new_mode = git(root, "ls-tree", "189281be", "--", path).split()[0]
+            for head in ("70c3981a0df4f3a3833b4833bb78248a08602ee3", "9e88ede8", "a476765c"):
+                old = subprocess.check_output(["git", "-C", str(root), "show", head + ":" + path])
+                old_record = (hashlib.sha256(old).hexdigest(), len(old))
+                old_mode = git(root, "ls-tree", head, "--", path).split()[0]
+                unknown = (hashlib.sha256(current + b" ").hexdigest(), len(current) + 1)
+                with self.subTest(path=path, head=head):
+                    self.assertTrue(reuse.validation_cohort_change(path, old_record, new_record, old_mode, new_mode))
+                    self.assertFalse(reuse.validation_cohort_change(path, old_record, unknown, old_mode, new_mode))
+                    self.assertFalse(reuse.validation_cohort_change(path, old_record, new_record, old_mode, "100755"))
+
+    def test_cpu_validation_cohort_and_current_auth_module(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        for name in ("html_performance_host_load_validation.py", "html_performance_host_load_validation_test.py",
+                     "html_performance_source_reuse.py", "html_performance_source_reuse_test.py"):
+            path = "scripts/release/" + name
+            old = subprocess.check_output(["git", "-C", str(root), "show", "a476765c:" + path])
+            endpoint = reuse.SAME_BINARY_REVIEWED_BASE if name.startswith("html_performance_source_reuse") else "189281be"
+            current = subprocess.check_output(["git", "-C", str(root), "show", endpoint + ":" + path])
+            old_record = (hashlib.sha256(old).hexdigest(), len(old))
+            new_record = (hashlib.sha256(current).hexdigest(), len(current))
+            unknown = (hashlib.sha256(current + b" ").hexdigest(), len(current) + 1)
+            with self.subTest(path=path):
+                self.assertTrue(reuse.validation_cohort_change(path, old_record, new_record, "100644", "100644"))
+                self.assertFalse(reuse.validation_cohort_change(path, old_record, unknown, "100644", "100644"))
+                self.assertFalse(reuse.validation_cohort_change(path, old_record, new_record, "100644", "100755"))
+                if name == "html_performance_source_reuse_test.py":
+                    live = (root / path).read_bytes()
+                    live_record = (hashlib.sha256(live).hexdigest(), len(live))
+                    self.assertFalse(reuse.validation_cohort_change(path, old_record, live_record, "100644", "100644"))
+                if name == "html_performance_source_reuse.py":
+                    self.assertTrue(reuse.known_auth_program_change(path, old, current))
+                    self.assertFalse(reuse.known_auth_program_change(path, old, current + b" "))
+
+    def test_historical_validation_cohort_auth_module_is_retained(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        path = "scripts/release/html_performance_source_reuse.py"
+        heads = ("70c3981a0df4f3a3833b4833bb78248a08602ee3", "3469ac28", "7d8c4c0ed9bb6ea4fb0efe3f0ab232db40a9976c")
+        blobs = [subprocess.check_output(["git", "-C", str(root), "show", head + ":" + path])
+                 for head in heads]
+        records = [(hashlib.sha256(blob).hexdigest(), len(blob)) for blob in blobs]
+        modes = [git(root, "ls-tree", head, "--", path).split()[0] for head in heads]
+        for index in (1, 2):
+            self.assertTrue(reuse.validation_cohort_change(path, records[0], records[index], modes[0], modes[index]))
+            self.assertFalse(reuse.validation_cohort_change(path, records[0],
+                             (hashlib.sha256(blobs[index] + b" ").hexdigest(), len(blobs[index]) + 1),
+                             modes[0], modes[index]))
+            self.assertFalse(reuse.validation_cohort_change(path, records[0], records[index], modes[0], "100755"))
+
+    def test_historical_validation_cohort_actual_git_endpoints(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        old_head = "70c3981a0df4f3a3833b4833bb78248a08602ee3"
+        new_head = git(root, "rev-parse", "3469ac28").strip()
+        prior_head = "7d8c4c0ed9bb6ea4fb0efe3f0ab232db40a9976c"
+        def items(head: str) -> tuple[tuple[str, str, int], ...]:
+            records = committed_records(root, head)
+            return tuple((path, checksum, size) for path, (checksum, size) in sorted(records.items())
+                         if path.startswith("scripts/") or path == "Justfile")
+        old_items = items(old_head)
+        self.assertEqual(_v3_authenticate_programs(root, old_head, old_items,
+                         ((new_head, items(new_head)), (prior_head, items(prior_head))),
+                         git_query=None), old_items)
+
+    def test_reviewed_fact_cache_program_changes_are_exact(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        old_head = "3469ac28"
+        new_head = "4d7dabbbfb8f848fcadf2b3ce1c5b6e83789747a"
+        for name in ("verify_html_performance_evidence.py", "verify_html_performance_evidence_test.py"):
+            path = "scripts/release/" + name
+            blobs = [subprocess.check_output(["git", "-C", str(root), "show", head + ":" + path])
+                     for head in (old_head, new_head)]
+            records = [(hashlib.sha256(blob).hexdigest(), len(blob)) for blob in blobs]
+            modes = [git(root, "ls-tree", head, "--", path).split()[0] for head in (old_head, new_head)]
+            with self.subTest(path=path):
+                self.assertTrue(reuse.validation_cohort_change(path, records[0], records[1], modes[0], modes[1]))
+                self.assertFalse(reuse.validation_cohort_change(path, records[0],
+                                 (hashlib.sha256(blobs[1] + b" ").hexdigest(), len(blobs[1]) + 1), modes[0], modes[1]))
+                self.assertFalse(reuse.validation_cohort_change(path, records[0], records[1], modes[0], "100755"))
+        path = "scripts/release/html_performance_source_reuse.py"
+        old = subprocess.check_output(["git", "-C", str(root), "show", old_head + ":" + path])
+        current = (root / path).read_bytes()
+        self.assertTrue(reuse.known_auth_program_change(path, old, current))
+        self.assertFalse(reuse.known_auth_program_change(path, old + b" ", current))
+        self.assertFalse(reuse.known_auth_program_change(path, old, current + b" "))
+        test_path = "scripts/release/html_performance_source_reuse_test.py"
+        test_old = subprocess.check_output(["git", "-C", str(root), "show", "7d8c4c0ed9bb6ea4fb0efe3f0ab232db40a9976c:" + test_path])
+        test_new = historical_reuse_endpoint(root, test_path)
+        old_record = (hashlib.sha256(test_old).hexdigest(), len(test_old))
+        new_record = (hashlib.sha256(test_new).hexdigest(), len(test_new))
+        self.assertTrue(reuse.validation_cohort_change(test_path, old_record, new_record, "100644", "100644"))
+        self.assertFalse(reuse.validation_cohort_change(test_path, old_record, new_record, "100644", "100755"))
+        live = (root / test_path).read_bytes()
+        self.assertFalse(reuse.validation_cohort_change(
+            test_path, old_record, (hashlib.sha256(live).hexdigest(), len(live)), "100644", "100644"))
+
+    def test_release_only_program_changes_preserve_membership_and_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            names = sorted(reuse.RELEASE_ONLY_PROGRAMS)
+            names.append("scripts/release/worker.py")
+            old = {name: (hashlib.sha256(b"old").hexdigest(), 3) for name in names}
+            current = dict(old)
+            for name in names:
+                file = root / name
+                file.parent.mkdir(parents=True, exist_ok=True)
+                data = b"new" if name in reuse.RELEASE_ONLY_PROGRAMS else b"old"
+                file.write_bytes(data)
+                current[name] = (hashlib.sha256(data).hexdigest(), len(data))
+            modes = {name: "100644" for name in names}
+            def tree(selected: dict[str, str]) -> bytes:
+                return b"".join(f"{mode} blob abc\t{name}\0".encode()
+                                for name, mode in selected.items())
+            def text(args: Sequence[str]) -> str:
+                return "old" if args[0] == "merge-base" else "new" if args[0] == "rev-parse" else ""
+            def validate(records: reuse.Records, new_modes: dict[str, str]) -> reuse.SourceReuseContext:
+                return validate_reuse_source(root, "old", records, old, text,
+                    lambda args: tree(modes if args[-1] == "old" else new_modes),
+                    program_records=old, program_modes=modes)
+            self.assertEqual(set(validate(current, modes).changed_paths), reuse.RELEASE_ONLY_PROGRAMS)
+            worker = "scripts/release/worker.py"
+            with self.assertRaisesRegex(ValueError, "current measurement program differs"):
+                validate({**current, worker: ("0" * 64, 3)}, modes)
+            removed = dict(current)
+            removed.pop(names[0])
+            with self.assertRaises(ValueError):
+                validate(removed, modes)
+            with self.assertRaisesRegex(ValueError, "current measurement program differs"):
+                validate(current, {**modes, names[0]: "100755"})
+
+    def test_real_git_rejects_rename_mode_and_unrelated_source(self) -> None:
+        for change in ("rename", "mode", "source"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                history = root / "docs/performance/html-performance-history.json"
+                history.parent.mkdir(parents=True)
+                history.write_text("before")
+                source = root / "source.rs"
+                source.write_text("before")
+                git(root, "init", "-q")
+                git(root, "add", ".")
+                git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+                    "commit", "-qm", "before")
+                before = git(root, "rev-parse", "HEAD").strip()
+                if change == "rename":
+                    git(root, "mv", "docs/performance/html-performance-history.json",
+                        "docs/performance/README.md")
+                elif change == "mode":
+                    history.chmod(0o755)
+                    git(root, "update-index", "--chmod=+x", "docs/performance/html-performance-history.json")
+                else:
+                    source.write_text("after")
+                    git(root, "add", ".")
+                git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+                    "commit", "-qm", "after")
+                with self.assertRaises(ValueError):
+                    _verified_reuse_context(root, before, git_query=None)
+
+    def test_document_only_change_is_admitted_and_preserves_measured_head(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            history = "docs/performance/html-performance-history.json"
+            (root / history).parent.mkdir(parents=True)
+            (root / history).write_bytes(b"new")
+            old = {history: (hashlib.sha256(b"old").hexdigest(), 3)}
+            current = {history: (hashlib.sha256(b"new").hexdigest(), 3)}
+            tree = b"100644 blob abc\t" + history.encode() + b"\0"
+            def text(args: Sequence[str]) -> str:
+                return "old" if args[0] == "merge-base" else "new" if args[0] == "rev-parse" else ""
+            context = validate_reuse_source(root, "old", current, old, text, lambda _args: tree)
+            self.assertEqual((context.measured_head, context.eligible_head), ("old", "new"))
+            self.assertEqual(context.changed_paths, (history,))
+
+    def test_rejects_non_document_dirty_nonancestor_and_mode_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            path = "src.rs"
+            (root / path).write_bytes(b"new")
+            old = {path: (hashlib.sha256(b"old").hexdigest(), 3)}
+            current = {path: (hashlib.sha256(b"new").hexdigest(), 3)}
+            tree = b"100644 blob abc\tsrc.rs\0"
+            def text(args: Sequence[str]) -> str:
+                return "old" if args[0] == "merge-base" else "new" if args[0] == "rev-parse" else ""
+            with self.assertRaises(ValueError):
+                validate_reuse_source(root, "old", current, old, text, lambda _args: tree)
+            for bad_text in (
+                lambda args: "other" if args[0] == "merge-base" else text(args),
+                lambda args: " M src.rs" if args[0] == "status" else text(args),
+            ):
+                with self.assertRaises(ValueError):
+                    validate_reuse_source(root, "old", current, current, bad_text, lambda _args: tree)
+            def changed_mode(args: Sequence[str]) -> bytes:
+                return tree if args[-1] == "old" else b"100755 blob abc\tsrc.rs\0"
+            with self.assertRaises(ValueError):
+                validate_reuse_source(root, "old", current, current, text, changed_mode)
+            with self.assertRaises(ValueError):
+                validate_reuse_source(root, "old", {}, current, text, lambda _args: tree)
+            (root / path).write_bytes(b"tampered")
+            with self.assertRaises(ValueError):
+                validate_reuse_source(root, "old", current, current, text, lambda _args: tree)
+
+    def test_artifact_candidate_requires_test_connections_and_rejects_worker_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            parent = reuse.TEST_PARENT
+            test = reuse.TEST_ROOT + "svg_engine_text_layout_spacing_tests.rs"
+            sources = {
+                parent: '#[cfg(test)]\n#[path = "svg_engine_parser_boundary_tests.rs"]\nmod parser_boundary_tests;\n'
+                        '#[cfg(test)]\n#[path = "svg_engine_filter_parser_model_tests.rs"]\nmod filter_parser_model_tests;\n',
+                test: "old test",
+                reuse.TEST_ROOT + "svg_engine_filter_parser_model_tests.rs": '#[path = "svg_engine_filter_parser_boundary_tests.rs"]\nmod parser_boundary_tests;',
+                reuse.TEST_ROOT + "svg_engine_text_model_tests.rs": '#[path = "svg_engine_text_layout_matrix_tests.rs"]\nmod layout_matrix_tests;',
+                reuse.TEST_ROOT + "svg_engine_text_layout_matrix_tests.rs": '#[path = "svg_engine_text_layout_spacing_tests.rs"]\nmod spacing_tests;',
+                "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/text.rs": '#[cfg(test)]\ncrate::svg_engine::owned_svg_model_tests!("../../../../src/svg_engine_text_model_tests.rs");',
+                reuse.TEST_ROOT + "lib.rs": "root lib",
+                "crates/katana-render-runtime/vendor/svg-engine/usvg/lib.rs": "usvg lib",
+                "crates/katana-render-runtime/vendor/svg-engine/usvg/tree/mod.rs": "tree mod",
+                "scripts/release/worker.py": "worker",
+            }
+            current = {**sources, parent: sources[parent] + reuse.TEST_LOGGER, test: "new test"}
+            def record(value: str) -> tuple[str, int]:
+                raw = value.encode()
+                return hashlib.sha256(raw).hexdigest(), len(raw)
+            for path, value in current.items():
+                target = root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(value)
+            tree = b"".join(b"100644 blob abc\t" + path.encode() + b"\0" for path in current)
+            def text(args: Sequence[str]) -> str:
+                if args[0] == "show":
+                    return sources[parent]
+                return "old" if args[0] == "merge-base" else "new" if args[0] == "rev-parse" else ""
+            old_records = {path: record(value) for path, value in sources.items()}
+            current_records = {path: record(value) for path, value in current.items()}
+            def validate(records: reuse.Records, allow: bool) -> reuse.SourceReuseContext:
+                return validate_reuse_source(root, "old", records, old_records, text,
+                                             lambda _args: tree, allow_test_changes=allow)
+            anchor_paths = (set(sources) - {parent, test, "scripts/release/worker.py"})
+            anchors = {path: record(sources[path])[0] for path in anchor_paths}
+            with patch.object(reuse, "TEST_ANCHOR_SHA", anchors), \
+                 patch.object(reuse, "TEST_PARENT_SHA", {record(sources[parent])[0]}):
+                self.assertTrue(validate(current_records, True).artifact_equivalence)
+                with self.assertRaises(ValueError):
+                    validate(current_records, False)
+                worker = root / "scripts/release/worker.py"
+                worker.write_text("changed")
+                changed = {**current_records, "scripts/release/worker.py": record("changed")}
+                with self.assertRaises(ValueError):
+                    validate(changed, True)
+                worker.write_text("worker")
+                for injected in ("production change", '/* #[cfg(test)] mod fake; */',
+                                 'const FAKE: &str = "#[cfg(test)] mod fake;";'):
+                    mutated = current[parent] + injected
+                    (root / parent).write_text(mutated)
+                    changed = {**current_records, parent: record(mutated)}
+                    with self.subTest(injected=injected), self.assertRaises(ValueError):
+                        validate(changed, True)
+                (root / parent).write_text(current[parent])
+                for forged in ("// " + sources[parent], sources[parent].replace("#[cfg(test)]\n", "")):
+                    old_records[parent] = record(forged)
+                    with self.subTest(forged=forged), self.assertRaises(ValueError):
+                        validate(current_records, True)
+
+
+
+def _reviewed_resource_reuse_test(repository: Path, child: str) -> bytes:
+    # 証跡の再利用で承認した当時のテストを、現在の編集から分離する。
+    revision = "22f54a4365f4ddd2c8091592de3c10e2f1c07165"
+    return subprocess.check_output(["git", "-C", str(repository), "show", revision + ":" + child])
+
+
+class HtmlReleaseReuseTest(unittest.TestCase):
+    def fixture(self, root: Path, case: str) -> tuple[str, str]:
+        repository = Path(__file__).resolve().parents[2]
+        baseline = "b9cf37535ba374b62fee4e889f9c58f58f1ab8dc"
+        parent = "crates/katana-render-runtime/src/renderer/backends/html_interactive/session.rs"
+        child = "crates/katana-render-runtime/src/renderer/backends/html_interactive/session_resource_reuse_tests.rs"
+        document = "docs/release.md"
+        def original(path: str) -> bytes:
+            return subprocess.check_output(["git", "-C", str(repository), "show", baseline + ":" + path])
+        def write(path: str, content: bytes) -> None:
+            target = root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+        previous_parent = original(parent)
+        previous_document = original(document)
+        child_bytes = _reviewed_resource_reuse_test(repository, child)
+        suffix = b'\n#[cfg(test)]\n#[path = "session_resource_reuse_tests.rs"]\nmod resource_reuse_tests;\n'
+        removed_line = b'- \x60Test and Build (macos-15-intel, mac-x64)\x60\n'
+        write(parent, previous_parent)
+        write(document, previous_document)
+        write("other.rs", b"unchanged")
+        if case == "existing_child":
+            write(child, child_bytes)
+        git(root, "init", "-q")
+        git(root, "add", ".")
+        git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+            "commit", "-qm", "baseline")
+        measured_head = git(root, "rev-parse", "HEAD").strip()
+        if case != "doc_only":
+            if case != "child_only":
+                effective_suffix = suffix
+                if case == "bad_cfg":
+                    effective_suffix = suffix.replace(b"cfg(test)", b"cfg(not(test))")
+                if case == "wrong_module":
+                    effective_suffix = suffix.replace(b"mod resource_reuse_tests;", b"mod other;")
+                if case == "duplicate":
+                    effective_suffix += suffix
+                if case == "parent_body":
+                    effective_suffix += b"fn injected() {}\n"
+                write(parent, previous_parent + effective_suffix)
+            if case != "parent_only":
+                write(child, child_bytes + (b" " if case == "bad_child" else b""))
+        if case != "html_only":
+            changed_document = previous_document.replace(removed_line, b"", 1)
+            if case == "doc_extra":
+                changed_document += b" "
+            write(document, changed_document)
+        if case == "unknown_add":
+            write("other2.rs", b"unexpected")
+        if case == "unknown_remove":
+            (root / "other.rs").unlink()
+        if case in {"new_mode", "doc_mode"}:
+            (root / (child if case == "new_mode" else document)).chmod(0o755)
+        git(root, "add", "-A")
+        if case in {"new_mode", "doc_mode"}:
+            git(root, "update-index", "--chmod=+x", child if case == "new_mode" else document)
+        git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid",
+            "commit", "-qm", "candidate")
+        if case in {"new_mode", "doc_mode"}:
+            path = child if case == "new_mode" else document
+            self.assertTrue(git(root, "ls-tree", "HEAD", "--", path).startswith("100755 blob "))
+        return measured_head, git(root, "rev-parse", "HEAD").strip()
+
+    def test_exact_html_and_document_changes_are_independently_accepted(self) -> None:
+        for case in ("both", "html_only", "doc_only"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                measured, current = self.fixture(root, case)
+                result = _verified_reuse_context(root, measured, git_query=None, allow_test_changes=True)
+                if not isinstance(result, reuse.SourceReuseContext):
+                    raise AssertionError("source reuse context differs")
+                self.assertEqual((result.measured_head, result.eligible_head), (measured, current))
+                self.assertEqual(result.artifact_equivalence, case != "doc_only")
+
+    def test_unknown_html_document_membership_and_mode_are_rejected(self) -> None:
+        cases = ("parent_only", "child_only", "bad_cfg", "wrong_module", "duplicate", "parent_body",
+                 "bad_child", "doc_extra", "unknown_add", "unknown_remove", "new_mode", "doc_mode",
+                 "existing_child")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                measured, _ = self.fixture(root, case)
+                messages = {"new_mode": "HTML test membership or mode differs",
+                            "doc_mode": "release document delta differs"}
+                rejection = (self.assertRaisesRegex(ValueError, messages[case]) if case in messages
+                             else self.assertRaises(ValueError))
+                with rejection:
+                    _verified_reuse_context(root, measured, git_query=None, allow_test_changes=True)
+
+
+class ReleaseToolingReuseTest(unittest.TestCase):
+    tooling = (".github/workflows/release-preflight.yml", ".github/workflows/release.yml",
+               ".github/workflows/test-and-build.yml", "package.json", "bun.lock", "biome.json")
+
+    def fixture(self, root: Path, selected: tuple[str, ...], case: str = "valid") -> str:
+        repository = Path(__file__).resolve().parents[2]
+        baseline = "b9cf37535ba374b62fee4e889f9c58f58f1ab8dc"
+        parent = "crates/katana-render-runtime/src/renderer/backends/html_interactive/session.rs"
+        child = "crates/katana-render-runtime/src/renderer/backends/html_interactive/session_resource_reuse_tests.rs"
+        document = "docs/release.md"
+        for path in self.tooling:
+            target = root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            old = subprocess.check_output(["git", "-C", str(repository), "show", baseline + ":" + path])
+            target.write_bytes(old + (b" " if case == "old_bytes" and path == selected[0] else b""))
+            if case == "old_missing" and path == selected[0]:
+                target.unlink()
+        if case == "combined":
+            for path in (parent, document):
+                target = root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(subprocess.check_output(["git", "-C", str(repository), "show", baseline + ":" + path]))
+        if case == "old_mode":
+            (root / selected[0]).chmod(0o755)
+        git(root, "init", "-q")
+        git(root, "add", ".")
+        if case == "old_mode":
+            git(root, "update-index", "--chmod=+x", selected[0])
+        git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid", "commit", "-qm", "old")
+        measured = git(root, "rev-parse", "HEAD").strip()
+        if case == "old_mode":
+            self.assertTrue(git(root, "ls-tree", measured, "--", selected[0]).startswith("100755 blob "))
+            (root / selected[0]).chmod(0o644)
+        if case == "combined":
+            (root / parent).write_bytes((root / parent).read_bytes() +
+                b'\n#[cfg(test)]\n#[path = "session_resource_reuse_tests.rs"]\nmod resource_reuse_tests;\n')
+            (root / child).write_bytes(_reviewed_resource_reuse_test(repository, child))
+            (root / document).write_bytes((root / document).read_bytes().replace(
+                b'- `Test and Build (macos-15-intel, mac-x64)`\n', b"", 1))
+        for path in selected:
+            target = root / path
+            if case == "removed" and path == selected[0]:
+                target.unlink()
+            else:
+                if path not in {"package.json", "bun.lock"} or case != "live_dependencies":
+                    value = subprocess.check_output([
+                        "git", "-C", str(repository), "show", "137f5ce40ece72685970ccbf2932659c4626c51d:" + path,
+                    ])
+                else:
+                    value = (repository / path).read_bytes()
+                target.write_bytes(value + (b" " if case == "new_bytes" and path == selected[0] else b""))
+        if case == "unknown":
+            (root / ".github/workflows/unknown.yml").write_text("unexpected\n")
+        if case == "new_mode":
+            (root / selected[0]).chmod(0o755)
+        git(root, "add", "-A")
+        if case == "new_mode":
+            git(root, "update-index", "--chmod=+x", selected[0])
+        git(root, "-c", "user.name=Unit", "-c", "user.email=unit@example.invalid", "commit", "-qm", "new")
+        if case == "new_mode":
+            self.assertTrue(git(root, "ls-tree", "HEAD", "--", selected[0]).startswith("100755 blob "))
+        if case == "dirty":
+            (root / selected[0]).write_bytes(b"uncommitted")
+        return measured
+
+    def test_exact_tooling_pairs_are_independently_accepted(self) -> None:
+        for selected in (*((path,) for path in self.tooling), self.tooling):
+            with self.subTest(selected=selected), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                measured = self.fixture(root, selected)
+                result = _verified_reuse_context(root, measured, git_query=None, allow_test_changes=True)
+                if not isinstance(result, reuse.SourceReuseContext):
+                    raise AssertionError("source reuse context differs")
+                self.assertEqual(result.eligible_head, git(root, "rev-parse", "HEAD").strip())
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            measured = self.fixture(root, self.tooling, "combined")
+            _verified_reuse_context(root, measured, git_query=None, allow_test_changes=True)
+
+    def test_unknown_bytes_membership_mode_and_dirty_source_are_rejected(self) -> None:
+        for path in self.tooling:
+            for case in ("old_bytes", "new_bytes", "old_mode", "new_mode", "old_missing", "removed", "dirty"):
+                with self.subTest(path=path, case=case), tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary).resolve()
+                    measured = self.fixture(root, (path,), case)
+                    if case != "dirty":
+                        self.assertEqual(git(root, "status", "--porcelain=v1"), "")
+                    rejection = (self.assertRaisesRegex(ValueError, "release tooling membership or mode differs")
+                                 if case in {"old_mode", "new_mode"} else self.assertRaises(ValueError))
+                    with rejection:
+                        _verified_reuse_context(root, measured, git_query=None, allow_test_changes=True)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            measured = self.fixture(root, self.tooling, "unknown")
+            self.assertEqual(git(root, "status", "--porcelain=v1"), "")
+            with self.assertRaises(ValueError):
+                _verified_reuse_context(root, measured, git_query=None, allow_test_changes=True)
+
+    def test_unreviewed_live_dependency_deltas_are_rejected(self) -> None:
+        for path in ("package.json", "bun.lock"):
+            with self.subTest(path=path), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                measured = self.fixture(root, (path,), "live_dependencies")
+                with self.assertRaisesRegex(ValueError, "release tooling source delta differs"):
+                    _verified_reuse_context(root, measured, git_query=None, allow_test_changes=True)
+
+
+if __name__ == "__main__":
+    unittest.main()

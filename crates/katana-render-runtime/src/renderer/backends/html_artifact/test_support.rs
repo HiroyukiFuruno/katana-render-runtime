@@ -1,0 +1,116 @@
+use super::super::{
+    HtmlArtifactError, HtmlArtifactProvenance, HtmlBrowserSource, HtmlBrowserViewport,
+    HtmlFrameArtifact,
+};
+use super::{A, B, C};
+use crate::{HtmlBrowserError, HtmlBrowserFrame, HtmlBrowserOrigin, HtmlBrowserPixelFormat};
+use std::{io, path::PathBuf};
+
+#[path = "test_support_interaction.rs"]
+mod interaction;
+#[path = "test_support_store.rs"]
+mod store;
+
+pub(super) use interaction::{exercise_resumed_interactions, save_initial_and_updated};
+pub(super) use store::{
+    assert_dangling_symlink_is_rejected, assert_explicit_lock_recovery,
+    assert_hit_miss_and_corrupt, assert_stale_temp_is_preserved, assert_store_capacity_and_clear,
+};
+
+pub(super) fn assert_other_origin_rejected(
+    viewport: HtmlBrowserViewport,
+    provenance: HtmlArtifactProvenance,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let other = HtmlBrowserOrigin::parse("https://example.test/other.html")?;
+    let frame = HtmlBrowserFrame::new(
+        1,
+        other,
+        viewport,
+        HtmlBrowserPixelFormat::Rgba8,
+        vec![0; 16],
+    );
+    assert!(
+        frame.is_ok_and(|frame| matches!(
+            HtmlFrameArtifact::new(provenance, frame),
+            Err(HtmlArtifactError::ProvenanceMismatch)
+        )),
+        "valid foreign-origin frame must be rejected by artifact provenance"
+    );
+    Ok(())
+}
+
+pub(super) fn assert_invalid_resume_provenance(
+    artifact: &HtmlFrameArtifact,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = source()?;
+    let viewport = HtmlBrowserViewport::new(1, 1, 1.0)?;
+    let mut invalid = artifact.provenance.clone();
+    invalid.source_sha256 = "invalid".into();
+    assert!(matches!(
+        artifact.resume_session(source, viewport, &invalid),
+        Err(HtmlArtifactError::InvalidProvenance(_))
+    ));
+    Ok(())
+}
+
+pub(super) fn source() -> Result<HtmlBrowserSource, HtmlBrowserError> {
+    HtmlBrowserSource::new("<p>safe</p>", "https://example.test/a.html")
+}
+pub(super) fn provenance(
+    source: &HtmlBrowserSource,
+    viewport: HtmlBrowserViewport,
+) -> Result<HtmlArtifactProvenance, HtmlArtifactError> {
+    HtmlArtifactProvenance::for_source(source, viewport, A, B, C)
+}
+pub(super) fn artifact() -> Result<HtmlFrameArtifact, Box<dyn std::error::Error>> {
+    let source = source()?;
+    let viewport = HtmlBrowserViewport::new(1, 1, 1.0)?;
+    artifact_with_pixels(provenance(&source, viewport)?, vec![0; 4])
+}
+
+fn artifact_with_pixels(
+    provenance: HtmlArtifactProvenance,
+    pixels: Vec<u8>,
+) -> Result<HtmlFrameArtifact, Box<dyn std::error::Error>> {
+    let frame = HtmlBrowserFrame::new(
+        1,
+        provenance.origin.clone(),
+        provenance.viewport,
+        HtmlBrowserPixelFormat::Rgba8,
+        pixels,
+    )?;
+    HtmlFrameArtifact::new(provenance, frame).map_err(Into::into)
+}
+
+#[test]
+fn artifact_fixture_rejects_short_pixels_and_missing_font_fingerprint()
+-> Result<(), Box<dyn std::error::Error>> {
+    let source = source()?;
+    let viewport = HtmlBrowserViewport::new(1, 1, 1.0)?;
+    let mut provenance = provenance(&source, viewport)?;
+    let short = artifact_with_pixels(provenance.clone(), vec![0; 3]).err();
+    assert!(matches!(
+        short.as_deref().and_then(|error| error.downcast_ref()),
+        Some(HtmlBrowserError::InvalidFrameBufferSize {
+            actual_bytes: 3,
+            expected_bytes: 4,
+        })
+    ));
+    provenance.font_content_fingerprint.clear();
+    let invalid = artifact_with_pixels(provenance, vec![0; 4]).err();
+    assert!(matches!(
+        invalid.as_deref().and_then(|error| error.downcast_ref()),
+        Some(HtmlArtifactError::FingerprintMissing)
+    ));
+    Ok(())
+}
+pub(super) fn root(label: &str) -> io::Result<(tempfile::TempDir, PathBuf)> {
+    let directory = tempfile::Builder::new()
+        .prefix(&format!("krr-artifact-{label}-"))
+        .tempdir()?;
+    let store = directory.path().canonicalize()?.join("store");
+    Ok((directory, store))
+}
+pub(super) fn html() -> &'static str {
+    r#"<!doctype html><style>html,body{margin:0}body{min-height:600px;font:16px sans-serif}button,input{display:block;margin:8px;width:180px;height:28px}a{position:absolute;top:120px;left:8px;width:180px;height:28px}</style><button id="action">Run action</button><input id="entry"><p id="output">idle</p><a href="next.html">Next page</a><script>const o=document.querySelector('#output');document.querySelector('#action').addEventListener('click',()=>o.textContent='clicked');document.querySelector('#entry').addEventListener('input',e=>o.textContent=e.target.value);</script>"#
+}

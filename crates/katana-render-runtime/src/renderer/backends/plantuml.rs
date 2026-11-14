@@ -99,16 +99,18 @@ mod tests {
         assert!(PlantUmlRenderer::available_themes().contains(&"cyborg"));
     }
 
-    #[test]
-    fn invalid_plantuml_config_returns_runtime_error() {
+    #[rstest::rstest]
+    #[case::theme("plantuml_theme", "bad theme")]
+    #[case::cache_path("plantuml_cache_dir", "/tmp/krr\ncache")]
+    fn invalid_config_is_rejected_before_runtime_access(#[case] field: &str, #[case] value: &str) {
         let renderer = PlantUmlRenderer::with_runtime_path("missing-plantuml.jar".into());
-        let result = renderer.render(&input(serde_json::json!({
-            "plantuml_theme": "bad theme",
-        })));
+        let result = renderer.render(&input(serde_json::json!({ (field): value })));
 
         assert!(matches!(
             result,
-            Err(RenderError::Runtime(error)) if error.contains("invalid PlantUML config")
+            Err(RenderError::Runtime(error))
+                if error.contains("invalid PlantUML config")
+                    && error.contains(field)
         ));
     }
 

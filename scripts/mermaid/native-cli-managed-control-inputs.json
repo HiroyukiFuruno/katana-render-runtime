@@ -1,0 +1,32 @@
+{
+  "schema": "krr-native-cli-managed-control-inputs-v1",
+  "control": [
+    "Justfile",
+    "scripts/build/cargo_capacity_guard.py",
+    "scripts/build/cargo_capacity_guard_lock.py",
+    "scripts/build/cargo_capacity_guard_debug_object_ownership.py",
+    "scripts/build/cargo_capacity_guard_native_cli_observation.py",
+    "scripts/build/cargo_capacity_guard_build_script_ownership.py",
+    "scripts/build/cargo_capacity_guard_selected_cache_ownership.py",
+    "scripts/build/cargo_capacity_guard_library_alias_ownership.py",
+    "scripts/build/cargo_capacity_guard_different_flags_ownership.py",
+    "scripts/mermaid/produce_native_cli_build_receipt.py",
+    "scripts/mermaid/native_cli_build_bindings.py",
+    "scripts/mermaid/native-build-receipt.ts",
+    "scripts/mermaid/native-cli-managed-build.ts",
+    "scripts/mermaid/native-cli-managed-build-schema.ts",
+    "scripts/mermaid/native-cli-managed-input-schema.ts",
+    "scripts/mermaid/native-cli-managed-inputs.ts",
+    "scripts/mermaid/native-cli-managed-control-inputs.json",
+    "scripts/mermaid/native-cli-managed-process.ts",
+    "scripts/mermaid/native-cli-managed-cargo.ts",
+    "scripts/mermaid/native-cli-managed-json.ts",
+    "scripts/mermaid/native-cli-managed-raw-fd.ts",
+    "scripts/runtime-bundles/runtime-rust-facts-host.ts",
+    "scripts/runtime-bundles/runtime-rust-facts-host-protocol.ts",
+    "scripts/runtime-bundles/runtime-rust-facts-host-inputs.ts",
+    "scripts/release/produce_html_performance_evidence.py",
+    "scripts/release/verify_html_performance_evidence.py",
+    "scripts/release/toml_loader.py"
+  ]
+}

@@ -6,11 +6,23 @@ export interface Fixture extends RenderFixture {
   fileName: string;
   filePath: string;
   markdown: string;
+  originalFenceSource?: string;
+  canonicalSource?: string;
+  fenceLanguage?: MermaidFenceLanguage;
   fenceEnd: number;
 }
 
 interface MermaidBlockResult {
   source: string;
+  originalSource: string;
+  canonicalSource: string;
+  language: MermaidFenceLanguage;
+  end: number;
+}
+
+interface MarkdownLine {
+  text: string;
+  separator: string;
   end: number;
 }
 
@@ -42,6 +54,9 @@ export class FixtureRepository {
       title: MarkdownTitle.extract(markdown, fileName),
       markdown,
       source: block.source,
+      originalFenceSource: block.originalSource,
+      canonicalSource: block.canonicalSource,
+      fenceLanguage: block.language,
       fenceEnd: block.end,
     };
   }
@@ -49,35 +64,72 @@ export class FixtureRepository {
 
 const MermaidBlock = {
   extract(markdown: string, filePath: string): MermaidBlockResult {
-    const pattern = /(^|\n)(`{3,}|~{3,})(mermaid|zenuml)[^\n]*\n([\s\S]*?)\n\2[ \t]*(?=\n|$)/m;
-    const match = pattern.exec(markdown);
-    if (!match) {
-      throw new Error(`Mermaid block not found: ${filePath}`);
+    let language: MermaidFenceLanguage | undefined;
+    const content: MarkdownLine[] = [];
+    for (const line of markdownLines(markdown)) {
+      if (language === undefined) {
+        language = MermaidBlock.openingLanguage(line.text);
+        continue;
+      }
+      if (MermaidBlock.isClosing(line.text)) {
+        const canonicalBody = content.map((entry) => entry.text).join("\n");
+        const originalSource = content
+          .map(
+            (entry, index) => `${entry.text}${index + 1 < content.length ? entry.separator : ""}`,
+          )
+          .join("");
+        return {
+          source: MermaidBlock.source(language, originalSource),
+          originalSource,
+          canonicalSource: language === "zenuml" ? `zenuml\n${canonicalBody}` : canonicalBody,
+          language,
+          end: line.end,
+        };
+      }
+      content.push(line);
     }
-    return {
-      source: MermaidBlock.source(match),
-      end: match.index + match[0].length,
-    };
+    throw new Error(`Mermaid block not found: ${filePath}`);
   },
 
-  source(match: RegExpExecArray): string {
-    const language = MermaidBlock.language(match);
-    const source = match.at(4);
-    if (source === undefined) {
-      throw new Error("Mermaid block body was not captured");
-    }
-    const trimmed = source.trim();
+  source(language: MermaidFenceLanguage, originalSource: string): string {
+    const trimmed = originalSource.trim();
     return language === "zenuml" ? `zenuml\n${trimmed}` : trimmed;
   },
 
-  language(match: RegExpExecArray): MermaidFenceLanguage {
-    const value = match.at(3);
-    if (value === "mermaid" || value === "zenuml") {
-      return value;
-    }
-    throw new Error("Mermaid block language was not captured");
+  openingLanguage(line: string): MermaidFenceLanguage | undefined {
+    const trimmed = line.trim();
+    const marker = trimmed[0];
+    if (marker !== "`" && marker !== "~") return undefined;
+    const markerCount = trimmed.match(marker === "`" ? /^`+/ : /^~+/)?.[0].length ?? 0;
+    if (markerCount < 3) return undefined;
+    const language = trimmed.slice(markerCount).trim().split(/\s+/)[0];
+    return language === "mermaid" || language === "zenuml" ? language : undefined;
+  },
+
+  isClosing(line: string): boolean {
+    const trimmed = line.trim();
+    return trimmed === "```" || trimmed === "~~~";
   },
 };
+
+function markdownLines(markdown: string): MarkdownLine[] {
+  const result: MarkdownLine[] = [];
+  let start = 0;
+  while (start < markdown.length) {
+    const newline = markdown.indexOf("\n", start);
+    const rawEnd = newline < 0 ? markdown.length : newline;
+    const raw = markdown.slice(start, rawEnd);
+    const carriageReturn = newline >= 0 && raw.endsWith("\r");
+    result.push({
+      text: carriageReturn ? raw.slice(0, -1) : raw,
+      separator: newline < 0 ? "" : carriageReturn ? "\r\n" : "\n",
+      end: newline < 0 ? rawEnd : newline + 1,
+    });
+    if (newline < 0) break;
+    start = newline + 1;
+  }
+  return result;
+}
 
 const MarkdownTitle = {
   extract(markdown: string, fileName: string): string {

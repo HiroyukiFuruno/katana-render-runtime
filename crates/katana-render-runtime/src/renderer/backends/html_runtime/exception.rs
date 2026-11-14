@@ -15,7 +15,7 @@ pub(super) fn exception_message(scope: &mut HtmlTryCatchScope<'_, '_, '_, '_>) -
 fn exception_location(scope: &mut HtmlTryCatchScope<'_, '_, '_, '_>, summary: String) -> String {
     let context = scope.message().and_then(|message| {
         let line = message.get_line_number(scope)?;
-        let column = message.get_start_column() + 1;
+        let column = one_based_column(message.get_start_column())?;
         let resource = message
             .get_script_resource_name(scope)
             .map(|value| value.to_rust_string_lossy(scope))
@@ -34,6 +34,10 @@ fn exception_location(scope: &mut HtmlTryCatchScope<'_, '_, '_, '_>, summary: St
         .unwrap_or(summary)
 }
 
+fn one_based_column(start_column: usize) -> Option<usize> {
+    start_column.checked_add(1)
+}
+
 fn unknown_v8_exception_message() -> String {
     "unknown V8 exception".to_string()
 }
@@ -45,12 +49,14 @@ mod tests {
     #[test]
     fn exception_message_reports_empty_try_catch() {
         crate::markdown::diagram_js_runtime::DiagramV8Runtime::ensure_initialized();
-        let mut isolate = v8::Isolate::new(Default::default());
-        v8::scope!(let handle_scope, &mut isolate);
-        let context = v8::Context::new(handle_scope, Default::default());
-        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
-        v8::tc_scope!(let scope, &mut **context_scope);
+        crate::markdown::diagram_js_runtime::DiagramV8Runtime::with_empty_try_catch(|scope| {
+            assert_eq!(exception_message(scope), "unknown V8 exception");
+        });
+    }
 
-        assert_eq!(exception_message(scope), "unknown V8 exception");
+    #[test]
+    fn one_based_column_handles_zero_and_overflow_sentinel() {
+        assert_eq!(one_based_column(0), Some(1));
+        assert_eq!(one_based_column(usize::MAX), None);
     }
 }

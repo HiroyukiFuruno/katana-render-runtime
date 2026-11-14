@@ -1,4 +1,6 @@
-import { parse } from "acorn";
+import { getLineInfo, parse } from "acorn";
+import MagicString from "magic-string";
+import type { RuntimeNormalizationProvenance } from "./runtime-source-provenance";
 
 interface AcornIdentifier {
   readonly name: string;
@@ -32,6 +34,26 @@ export class RuntimeScriptNormalizer {
       sourceType: "script",
     }) as AcornProgram;
     return this.removeRanges(source, this.duplicateFunctionRanges(program));
+  }
+
+  withProvenance(source: string): RuntimeNormalizationProvenance {
+    const program = parse(source, { ecmaVersion: "latest", sourceType: "script" }) as AcornProgram;
+    const ranges = this.duplicateFunctionRanges(program);
+    const mapped = new MagicString(source);
+    for (const range of [...ranges].sort((left, right) => right.start - left.start)) {
+      mapped.overwrite(range.start, range.end, "\n");
+    }
+    return {
+      code: mapped.toString(),
+      map: mapped
+        .generateMap({ source: "@runtime/assembled", hires: true, includeContent: true })
+        .toString(),
+      removedRanges: ranges.map((range) => ({
+        ...range,
+        startPosition: getLineInfo(source, range.start),
+        endPosition: getLineInfo(source, range.end),
+      })),
+    };
   }
 
   private duplicateFunctionRanges(program: AcornProgram): SourceRange[] {

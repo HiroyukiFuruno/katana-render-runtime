@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>架空資料整理サービス — 要件定義書 v2.0</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
+      font-size: 14px;
+      color: #1a1a1a;
+      line-height: 1.7;
+      background: #f1f5f9;
+    }
+
+    /* ===== Layout ===== */
+    .app { display: flex; align-items: flex-start; }
+    .sidebar {
+      width: 232px;
+      flex-shrink: 0;
+      background: #0f172a;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 20px 0 40px;
+    }
+    .main { flex: 1; min-width: 0; padding: 36px 44px; }
+    .content-wrap { max-width: 1000px; }
+
+    /* ===== Sidebar ===== */
+    .toc-logo {
+      padding: 0 18px 18px;
+      border-bottom: 1px solid #1e293b;
+      margin-bottom: 14px;
+    }
+    .toc-logo-title { font-size: 0.76em; font-weight: 700; color: #94a3b8; line-height: 1.5; }
+    .toc-logo-sub { font-size: 0.68em; color: #475569; margin-top: 2px; }
+    .toc-ch {
+      padding: 10px 18px 4px;
+      font-size: 0.63em;
+      font-weight: 700;
+      color: #334155;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .toc-item {
+      display: block;
+      padding: 5px 18px;
+      font-size: 0.76em;
+      color: #94a3b8;
+      text-decoration: none;
+      border-left: 2px solid transparent;
+      transition: all 0.15s;
+      line-height: 1.4;
+    }
+    .toc-item:hover { color: #e2e8f0; background: #1e293b; }
+    .toc-item.active { color: #38bdf8; border-left-color: #38bdf8; background: #1e293b; }
+    .toc-item.sub { padding-left: 30px; font-size: 0.72em; color: #64748b; }
+    .toc-item.sub.active { color: #7dd3fc; }
+
+    /* ===== Doc Header ===== */
+    .doc-header {
+      background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
+      color: #fff;
+      padding: 30px 34px;
+      border-radius: 10px;
+      margin-bottom: 28px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.14);
+    }
+    .doc-header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+    .doc-header h1 { font-size: 1.45em; font-weight: 800; margin-bottom: 4px; }
+    .doc-header .subtitle { font-size: 0.87em; color: #93c5fd; }
+    .doc-badges { display: flex; gap: 8px; flex-wrap: wrap; align-self: flex-start; padding-top: 4px; }
+    .doc-badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 6px;
+      padding: 4px 14px;
+      font-size: 0.82em;
+      font-weight: 700;
+      color: #e2e8f0;
+      white-space: nowrap;
+    }
+    .doc-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 20px;
+      font-size: 0.80em;
+      color: #93c5fd;
+      border-top: 1px solid rgba(255,255,255,0.12);
+      padding-top: 12px;
+    }
+
+    /* ===== Chapter heading ===== */
+    .chapter-heading {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      margin-top: 44px;
+    }
+    .chapter-heading:first-of-type { margin-top: 0; }
+    .chapter-num {
+      background: #1e293b;
+      color: #fff;
+      font-size: 0.71em;
+      font-weight: 700;
+      padding: 4px 12px;
+      border-radius: 6px;
+      white-space: nowrap;
+    }
+    .chapter-title { font-size: 1.12em; font-weight: 800; color: #0f172a; }
+    .chapter-divider { flex: 1; height: 2px; background: linear-gradient(to right, #1e293b, transparent); }
+
+    /* ===== Section heading ===== */
+    .section { margin-bottom: 26px; }
+    .section-heading {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.94em;
+      font-weight: 700;
+      color: #1e293b;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 8px;
+      margin-bottom: 14px;
+    }
+    .sec-icon {
+      color: #fff;
+      font-size: 0.7em;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+    .ic-navy  { background: #1e40af; }
+    .ic-green { background: #15803d; }
+    .ic-slate { background: #475569; }
+    .ic-amber { background: #b45309; }
+    .ic-purple{ background: #7c3aed; }
+    .ic-rose  { background: #be123c; }
+
+    /* ===== Overview box ===== */
+    .overview-box {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-left: 4px solid #1e40af;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+      font-size: 0.87em;
+      color: #374151;
+    }
+    .overview-box p { margin-bottom: 7px; }
+    .overview-box p:last-child { margin-bottom: 0; }
+
+    /* ===== PoC metrics ===== */
+    .poc-label {
+      font-size: 0.78em;
+      font-weight: 700;
+      color: #64748b;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .poc-lbadge {
+      background: #64748b;
+      color: #fff;
+      font-size: 0.78em;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .poc-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .poc-card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 14px 10px;
+      text-align: center;
+    }
+    .poc-val { font-size: 1.3em; font-weight: 800; color: #1e40af; display: block; }
+    .poc-sub { font-size: 0.71em; color: #64748b; margin-top: 4px; line-height: 1.4; }
+
+    /* ===== Functional groups ===== */
+    .func-group {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+    .func-group-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 16px;
+    }
+    .fg1 { background: #dbeafe; border-bottom: 1px solid #bfdbfe; }
+    .fg2 { background: #dcfce7; border-bottom: 1px solid #bbf7d0; }
+    .fg3 { background: #fef3c7; border-bottom: 1px solid #fde68a; }
+    .fg4 { background: #f3e8ff; border-bottom: 1px solid #e9d5ff; }
+    .grp-badge {
+      font-size: 0.73em;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 20px;
+      color: #fff;
+      white-space: nowrap;
+    }
+    .fg1 .grp-badge { background: #1d4ed8; }
+    .fg2 .grp-badge { background: #16a34a; }
+    .fg3 .grp-badge { background: #d97706; }
+    .fg4 .grp-badge { background: #7c3aed; }
+    .grp-title { font-size: 0.88em; font-weight: 700; color: #1e293b; }
+    .func-group-body { padding: 12px 16px; }
+    .grp-summary {
+      font-size: 0.83em;
+      color: #374151;
+      background: #f8fafc;
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-bottom: 10px;
+    }
+
+    /* ===== Tables ===== */
+    .tbl {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.84em;
+      background: #fff;
+    }
+    .tbl th {
+      background: #f1f5f9;
+      color: #475569;
+      font-weight: 700;
+      text-align: left;
+      padding: 8px 12px;
+      border: 1px solid #e2e8f0;
+    }
+    .tbl td {
+      padding: 9px 12px;
+      border: 1px solid #e2e8f0;
+      vertical-align: top;
+    }
+    .tbl tr:hover td { background: #f8fafc; }
+    .fn { font-weight: 700; color: #1e40af; white-space: nowrap; }
+    .fnm { font-weight: 600; color: #1e293b; }
+    .req-cat { font-weight: 700; color: #1e293b; }
+    .req-status { white-space: nowrap; text-align: center; }
+
+    /* ===== Status badges ===== */
+    .confirmed, .tbd, .buffer {
+      display: inline-flex;
+      align-items: center;
+      font-size: 0.71em;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 12px;
+      white-space: nowrap;
+    }
+    .confirmed { background: #dcfce7; border: 1px solid #86efac; color: #166534; }
+    .tbd       { background: #fef3c7; border: 1px solid #fcd34d; color: #92400e; }
+    .buffer    { background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; }
+    .risk-ref  {
+      display: inline-flex;
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      color: #475569;
+      font-size: 0.69em;
+      padding: 1px 6px;
+      border-radius: 8px;
+      white-space: nowrap;
+    }
+
+    /* ===== Out of scope ===== */
+    .oos {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 14px 18px;
+    }
+    .oos-title { font-size: 0.81em; font-weight: 700; color: #64748b; margin-bottom: 8px; }
+    .oos-tags { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
+    .oos-tags li {
+      background: #f1f5f9;
+      color: #64748b;
+      font-size: 0.79em;
+      padding: 4px 12px;
+      border-radius: 20px;
+      border: 1px solid #e2e8f0;
+    }
+
+    /* ===== Hearing ===== */
+    .hearing {
+      background: #fff;
+      border: 1px solid #fbbf24;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+    .hearing-head {
+      background: #fef3c7;
+      border-bottom: 1px solid #fde68a;
+      padding: 9px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .h-badge {
+      background: #d97706;
+      color: #fff;
+      font-size: 0.68em;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+    .h-title { font-size: 0.86em; font-weight: 700; color: #92400e; flex: 1; }
+    .h-id { font-size: 0.73em; color: #b45309; }
+    .hearing-body { padding: 11px 16px; }
+    .h-q { font-size: 0.84em; color: #374151; margin-bottom: 8px; }
+    .h-ans {
+      background: #fffbeb;
+      border: 1px dashed #fcd34d;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 0.81em;
+      color: #78350f;
+      min-height: 30px;
+    }
+    .h-ans.ok { border: 1px solid #86efac; background: #f0fdf4; color: #166534; }
+
+    /* ===== TBD block ===== */
+    .tbd-block {
+      background: #fffbeb;
+      border: 1px solid #fcd34d;
+      border-radius: 8px;
+      padding: 11px 15px;
+      margin-top: 10px;
+    }
+    .tbd-block-title { font-size: 0.79em; font-weight: 700; color: #92400e; margin-bottom: 6px; }
+    .tbd-list { list-style: none; font-size: 0.81em; color: #78350f; }
+    .tbd-list li {
+      padding: 3px 0;
+      border-bottom: 1px dashed #fde68a;
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+    }
+    .tbd-list li:last-child { border-bottom: none; }
+    .tbd-list li::before { content: "▸"; color: #d97706; flex-shrink: 0; }
+    .tbd-list li.buf { color: #9a3412; }
+
+    /* ===== Note & Legend ===== */
+    .note-block {
+      background: #f0f9ff;
+      border: 1px solid #bae6fd;
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 0.81em;
+      color: #0c4a6e;
+      margin-top: 10px;
+    }
+    .legend-bar {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 11px 16px;
+      margin-bottom: 18px;
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      font-size: 0.79em;
+      align-items: center;
+    }
+    .legend-title { font-weight: 700; color: #475569; }
+
+    /* ===== Policy box ===== */
+    .policy-box {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    .policy-head {
+      background: #0f172a;
+      color: #94a3b8;
+      font-size: 0.68em;
+      font-weight: 700;
+      padding: 7px 16px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .policy-body { padding: 12px 16px; }
+    .policy-item {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      padding: 8px 0;
+      border-bottom: 1px solid #f1f5f9;
+      font-size: 0.84em;
+    }
+    .policy-item:last-child { border-bottom: none; padding-bottom: 0; }
+    .policy-key { font-weight: 700; color: #1e293b; white-space: nowrap; min-width: 152px; }
+    .policy-val { color: #374151; flex: 1; }
+
+    /* ===== Footer ===== */
+    .footer {
+      margin-top: 48px;
+      padding-top: 14px;
+      border-top: 1px solid #e2e8f0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.74em;
+      color: #94a3b8;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    /* ===== Responsive ===== */
+    @media (max-width: 800px) {
+      .app { flex-direction: column; }
+      .sidebar { width: 100%; height: auto; position: static; }
+      .main { padding: 20px 16px; }
+      .poc-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    /* ===== Print ===== */
+    @media print {
+      body { background: #fff; }
+      .sidebar { display: none; }
+      .main { padding: 16px; }
+      .func-group, .hearing, .section { break-inside: avoid; }
+    }
+    @page { margin: 18mm; }
+  </style>
+</head>
+<body>
+<div class="app">
+
+<!-- 検証用構造コメント -->
+<nav class="sidebar" id="sidebar">
+  <div class="toc-logo">
+    <div class="toc-logo-title">架空資料整理サービス<br>要件定義書</div>
+    <div class="toc-logo-sub">v2.0 — 2025-02-14</div>
+  </div>
+
+  <div class="toc-ch">Chapter 1</div>
+  <a href="#ch1" class="toc-item">機能要件</a>
+  <a href="#s11" class="toc-item sub">システム概要</a>
+  <a href="#s12" class="toc-item sub">検証実績</a>
+  <a href="#s13" class="toc-item sub">機能要件一覧</a>
+  <a href="#s14" class="toc-item sub">スコープ外</a>
+  <a href="#s15" class="toc-item sub">未確定事項</a>
+
+  <div class="toc-ch">Chapter 2</div>
+  <a href="#ch2" class="toc-item">非機能要件</a>
+  <a href="#s21" class="toc-item sub">設計方針</a>
+  <a href="#s22" class="toc-item sub">セキュリティ</a>
+  <a href="#s23" class="toc-item sub">パフォーマンス</a>
+  <a href="#s24" class="toc-item sub">ログ・データ保存</a>
+  <a href="#s25" class="toc-item sub">ファイル入力・UX</a>
+  <a href="#s26" class="toc-item sub">処理方式要件</a>
+  <a href="#s27" class="toc-item sub">可用性・保守性</a>
+  <a href="#s28" class="toc-item sub">TBD サマリー</a>
+
+  <div class="toc-ch">管理</div>
+  <a href="#changelog" class="toc-item">変更履歴</a>
+</nav>
+
+<!-- 検証用構造コメント -->
+<main class="main">
+<div class="content-wrap">
+
+  <!-- 検証用構造コメント -->
+  <div class="doc-header">
+    <div class="doc-header-top">
+      <div>
+        <h1>要件定義書</h1>
+        <div class="subtitle">架空資料整理サービス — 検証用サンプル</div>
+      </div>
+      <div class="doc-badges">
+        <span class="doc-badge">v2.0</span>
+        <span class="doc-badge">架空の検証資料</span>
+      </div>
+    </div>
+    <div class="doc-meta">
+      <span>確認先: サンプル資料チーム</span>
+      <span>検証期間: 2025-02-01 〜 2025-05-30</span>
+      <span>作成日: 2025-02-14</span>
+      <span>作成者: 検証資料チーム</span>
+    </div>
+  </div>
+
+  <!-- 検証用構造コメント -->
+  <div id="ch1">
+    <div class="chapter-heading">
+      <span class="chapter-num">Chapter 1</span>
+      <span class="chapter-title">機能要件</span>
+      <div class="chapter-divider"></div>
+    </div>
+  </div>
+
+  <!-- 検証用構造コメント -->
+  <div class="section" id="s11">
+    <div class="section-heading">
+      <span class="sec-icon ic-navy">1.1</span>
+      システム概要・目的
+    </div>
+    <div class="overview-box">
+      <p>資料整理サービスは、登録された資料の分類と保管場所を一覧にまとめ、利用者が必要な情報を見つける作業を<strong>分かりやすく案内</strong>する架空の業務ツールです。</p>
+      <p>登録内容の公開前には資料の概要と公開範囲を確認し、<strong>確認担当が公開の可否を決定</strong>します。資料の登録から確認までを同じ手順で進められることを目的とします。</p>
+      <p>検証対象は下表の機能です。分類、検索、履歴表示などを順に確認し、試用担当が使う入力例を更新します。</p>
+      <p><strong>利用想定フロー：</strong>資料を受け取った登録担当が、資料名、分類、保管場所を登録します。確認担当は一覧から新しい資料を選び、公開範囲を確認します。試用には一日五件程度の架空資料を用います。</p>
+    </div>
+  </div>
+
+  <!-- 検証用構造コメント -->
+  <div class="section" id="s12">
+    <div class="section-heading">
+      <span class="sec-icon ic-navy">1.2</span>
+      検証実績
+    </div>
+    <div class="poc-label">
+      <span class="poc-lbadge">検証実績</span>
+      架空データを使って確認した登録・検索・表示の検証例
+    </div>
+    <div class="poc-grid">
+      <div class="poc-card">
+        <span class="poc-val">96%</span>
+        <div class="poc-sub">分類候補の確認率<br>（検証例: 24/25件）</div>
+      </div>
+      <div class="poc-card">
+        <span class="poc-val">¥6,400</span>
+        <div class="poc-sub">検証環境の月額例<br>（250件 / 月）</div>
+      </div>
+      <div class="poc-card">
+        <span class="poc-val">4.2秒</span>
+        <div class="poc-sub">一覧表示の確認時間<br>（架空データ・中央値）</div>
+      </div>
+      <div class="poc-card">
+        <span class="poc-val" style="font-size:0.9em;">Local Index v2</span>
+        <div class="poc-sub">検証用の検索方式<br>（分類と資料名を照合）</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 検証用構造コメント -->
+  <div class="section" id="s13">
+    <div class="section-heading">
+      <span class="sec-icon ic-navy">1.3</span>
+      機能要件一覧（検証対象）
+    </div>
+
+    <!-- 検証用構造コメント -->
+    <div class="func-group">
+      <div class="func-group-head fg1">
+        <span class="grp-badge">基盤</span>
+        <span class="grp-title">資料情報の登録</span>
+      </div>
+      <div class="func-group-body">
+        <div class="grp-summary"><strong>概要：</strong>資料名、分類、保管場所を登録し、確認担当が同じ一覧から内容を参照できる状態にします。</div>
+        <table class="tbl">
+          <thead><tr><th style="width:6%">No.</th><th style="width:28%">機能名</th><th>概要・要件</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="fn">①</td>
+              <td class="fnm">資料登録</td>
+              <td>資料名、分類、保管場所、担当者を入力して保存し、登録完了を表示する。</td>
+            </tr>
+            <tr>
+              <td class="fn">②</td>
+              <td class="fnm">資料検索<br><small>（一覧検索）</small></td>
+              <td>資料の分類と公開状態を組み合わせて候補を絞り込み、<strong>選択した条件を画面に保持</strong>します。一覧の件数と現在のページを示し、資料の詳細を閉じた後も同じ検索結果へ戻れるようにします。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 検証用構造コメント -->
+    <div class="func-group">
+      <div class="func-group-head fg2">
+        <span class="grp-badge">ビューア</span>
+        <span class="grp-title">資料確認画面</span>
+      </div>
+      <div class="func-group-body">
+        <div class="grp-summary"><strong>概要：</strong>登録内容を同じ順序で表示し、修正前後の値を確認できること。</div>
+        <table class="tbl">
+          <thead><tr><th style="width:6%">No.</th><th style="width:28%">機能名</th><th>概要・要件</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="fn">③</td>
+              <td class="fnm">詳細表示</td>
+              <td>選択した資料の識別情報、分類、保管場所、担当者を確認できる。</td>
+            </tr>
+            <tr>
+              <td class="fn">④</td>
+              <td class="fnm">履歴表示</td>
+              <td>更新日時と変更担当者を時系列に表示し、確認済みの状態を記録する。</td>
+            </tr>
+            <tr>
+              <td class="fn">⑤</td>
+              <td class="fnm">案内表示</td>
+              <td>入力不足や保存失敗がある場合は、原因と修正方法を画面上部に知らせる。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 検証用構造コメント -->
+    <div class="func-group">
+      <div class="func-group-head fg3">
+        <span class="grp-badge">画面改修</span>
+        <span class="grp-title">資料一覧と登録画面の改善</span>
+      </div>
+      <div class="func-group-body">
+        <div class="grp-summary"><strong>概要：</strong>登録、検索、確認の画面をつなぎ、試用担当が作業の続きから操作できる流れを整えます。</div>
+        <table class="tbl">
+          <thead><tr><th style="width:6%">No.</th><th style="width:28%">機能名</th><th>概要・要件</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="fn">⑥</td>
+              <td class="fnm">分類の選択と &amp; 保管場所の入力</td>
+              <td>資料の分類と保管場所を一つの登録画面で入力します。保存する前に確認欄を示し、入力漏れがあれば該当欄へ戻れるようにします。</td>
+            </tr>
+            <tr>
+              <td class="fn">⑦</td>
+              <td class="fnm">入力内容の再利用<br><small>（同じ分類の資料）</small></td>
+              <td>同じ分類の資料を続けて登録する場合は、分類の選択を保持します。資料名と識別番号は引き継がず、新しい値を入力して確認します。</td>
+            </tr>
+            <tr>
+              <td class="fn">⑧</td>
+              <td class="fnm">確認状態の更新<br><small>（資料ごとの確認）</small></td>
+              <td>選んだ資料だけの確認状態を更新します。一覧に同じ分類の資料が並んでいても、対象外の資料の状態は変更しないようにします。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 検証用構造コメント -->
+    <div class="func-group">
+      <div class="func-group-head fg4">
+        <span class="grp-badge">既存改善</span>
+        <span class="grp-title">試用結果を反映する改善</span>
+      </div>
+      <div class="func-group-body">
+        <div class="grp-summary"><strong>概要：</strong>試用担当が確認した案内文や入力規則を見直し、登録内容を確認しやすい画面へ改善します。</div>
+        <table class="tbl">
+          <thead><tr><th style="width:6%">No.</th><th style="width:22%">機能名</th><th style="width:18%">対象グループ</th><th>概要・要件</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="fn">⑨</td>
+              <td class="fnm">分類名の入力規則<br><small>（入力欄の改善）</small></td>
+              <td>登録担当共通</td>
+              <td>分類名の前後にある空白を取り除き、選択候補と同じ名称で保存します。未登録の分類を入力した場合は、確認担当への案内を表示します。</td>
+            </tr>
+            <tr>
+              <td class="fn">⑩</td>
+              <td class="fnm">保管場所の選択候補</td>
+              <td>編集担当</td>
+              <td>保管場所の候補を表示名の順に並べ、使用しない場所を選択対象から外します。既存資料の保管場所は、確認してから個別に更新します。</td>
+            </tr>
+            <tr>
+              <td class="fn">⑪</td>
+              <td class="fnm">更新履歴の説明文</td>
+              <td>確認担当</td>
+              <td>履歴に登録、分類変更、公開状態の更新を区別して記録します。更新理由の説明は短い文で表示し、詳細画面から確認できるようにします。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 検証用構造コメント -->
+  <div class="section" id="s14">
+    <div class="section-heading">
+      <span class="sec-icon ic-slate">1.4</span>
+      今回スコープ外の機能
+    </div>
+    <div class="oos">
+      <p class="oos-title">次の機能は今回の検証範囲に含めず、試用後の改善候補として扱います。</p>
+      <ul class="oos-tags">
+        <li>お気に入り資料の共有</li>
+        <li>一覧の表示順の保存</li>
+        <li>複数の版の比較画面</li>
+      </ul>
+    </div>
+    <p style="font-size:0.79em; color:#64748b; margin-top:10px;">
+      改善候補は試用結果を見て優先順位を整理します。対象へ追加する場合は、必要な画面と確認項目を記録し、検証用の作業一覧を更新します。
+    </p>
+  </div>
+
+  <!-- 検証用構造コメント -->
+  <div class="section" id="s15">
+    <div class="section-heading">
+      <span class="sec-icon ic-amber">1.5</span>
+      未確定事項（確認継続中）
+    </div>
+    <p style="font-size:0.83em; color:#374151; margin-bottom:12px;">
+      次の項目は入力例を用いて確認します。整理した結果を、対応する章の要件へ反映します。
+    </p>
+
+    <div class="hearing">
+      <div class="hearing-head">
+        <span class="h-badge">確認中</span>
+        <span class="h-title">一覧の表示件数・ページ移動</span>
+      </div>
+      <div class="hearing-body">
+        <p class="h-q">一覧の表示件数を四十件へ変更した場合のページ移動と、検索条件を保持する操作を確認します。試用担当が読みやすい件数を選ぶための比較例を用意します。<br>※検証例では、一ページを二十件とした場合も併せて比較します。</p>
+        <div class="h-ans">表示件数とページ移動の確認結果は、画面の読みやすさと応答時間を整理したうえで、2.3 パフォーマンス要件へ反映します。</div>
+      </div>
+    </div>
+
+    <div class="hearing">
+      <div class="hearing-head">
+        <span class="h-badge">確認中</span>
+        <span class="h-title">入力資料の分類・保管場所・検索精度の整理</span>
+      </div>
+      <div class="hearing-body">
+        <p class="h-q">資料の分類方法、保管場所、検索時の候補表示がどのように連動するかを整理しています。利用者が迷わず登録できる入力条件を確認し、操作案内へ反映します。</p>
+        <div class="h-ans">分類名、保管場所、公開範囲の必須・推奨・任意項目を試行結果から整理し、確定後に処理方式要件へ反映します。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 検証用構造コメント -->
+  <div id="ch2">
+    <div class="chapter-heading">
+      <span class="chapter-num">Chapter 2</span>
+      <span class="chapter-title">非機能要件</span>
+      <div class="chapter-divider"></div>
+    </div>
+  </div>
+
+  <!-- 検証用構造コメント -->
+  <div class="legend-bar">
+    <span class="legend-title">ステータス凡例：</span>
+    <span><span class="confirmed">確定</span> — 方針・仕様が決定済み</span>
+    <span><span class="tbd">TBD / 要確認</span> — 検討・ヒアリングが必要</span>
+    <span><span class="buffer">バッファ / DevOps</span> — メインスコープ外・継続管理</span>
+  </div>
+
+  <!-- 検証用構造コメント -->
+  <div class="section" id="s21">
+    <div class="section-heading">
+      <span class="sec-icon ic-navy">2.1</span>
+      設計方針（資料分類・保管場所・役割権限）
+    </div>
+    <div class="policy-box">
+      <div class="policy-head">アーキテクチャ方針</div>
+      <div class="policy-body">
+        <div class="policy-item">
+          <div class="policy-key">資料分類と保管場所</div>
+          <div class="policy-val">登録資料は用途別の分類と保管場所を必ず持つ<strong>分類・保管場所を基準にした単一資料庫設計</strong>とする。分類の追加や保管場所の再編は管理画面から行い、既存資料の所在を失わない。</div>
+        </div>
+        <div class="policy-item">
+          <div class="policy-key">DB拡張性（record_id・分類候補整合性）</div>
+          <div class="policy-val">将来的な分類追加と保管場所の統合に備え、DB設計時に <code>record_id</code> を資料単位の識別子として保持する。分類候補と保管場所の組み合わせは登録時に検証し、不整合を保存しない。</div>
+        </div>
+        <div class="policy-item">
+          <div class="policy-key">役割権限</div>
+          <div class="policy-val">閲覧・編集・確認の役割を分け、資料の公開範囲と操作権限を明示する。<strong>閲覧者・編集者・確認者の三役割</strong>を定義する。閲覧者は参照、編集者は登録と修正、確認者は公開可否の確認を行う。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 検証用構造コメント -->
+  <div class="section" id="s22">
+    <div class="section-heading">
+      <span class="sec-icon ic-green">2.2</span>
+      セキュリティ要件
+    </div>
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th style="width:22%">項目</th>
+          <th style="width:65%">要件内容</th>
+          <th style="width:13%">ステータス</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="req-cat">認証方式</td>
+          <td>ローカル利用者台帳による認証を採用する。利用者ごとの役割と所属する資料庫を確認し、許可された操作だけを開始できるようにする。</td>
+          <td class="req-status"><span class="confirmed">確定</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">画面アクセス制御</td>
+          <td>閲覧者・編集者・確認者の役割ごとに画面と操作を切り替える。編集画面では登録と修正、確認画面では公開前の差戻しを扱う。</td>
+          <td class="req-status"><span class="confirmed">確定</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">公開資料の閲覧範囲</td>
+          <td>公開範囲が「共有」の資料は、<strong>閲覧権限を持つ利用者が共通で参照できる</strong>設計とする。限定範囲の資料は指定した保管場所の利用者だけが閲覧できる。</td>
+          <td class="req-status"><span class="confirmed">確定</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">データ通信</td>
+          <td>資料と判定情報は許可されたローカル保管領域で扱い、外部サービスや外部APIへ送信しない。保存時のアクセス記録を残す。</td>
+          <td class="req-status"><span class="confirmed">確定</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 検証用構造コメント -->
+  <div class="section" id="s23">
+    <div class="section-heading">
+      <span class="sec-icon ic-navy">2.3</span>
+      パフォーマンス・スループット要件
+    </div>
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th style="width:22%">項目</th>
+          <th style="width:65%">要件内容</th>
+          <th style="width:13%">ステータス</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="req-cat">資料一覧の表示件数</td>
+          <td>分類と保管場所を指定した検索では、一覧を一ページ<strong>40件まで表示</strong>する。ページ移動後も現在の分類条件と公開範囲を保持する。</td>
+          <td class="req-status"><span class="confirmed">確定</span><br><small style="color:#64748b; font-size:0.85em;">一覧表示を基準とする</small></td>
+        </tr>
+        <tr>
+          <td class="req-cat">検索応答時間</td>
+          <td>分類・保管場所・識別prefixを組み合わせた検索結果は、通常時に</td>
+          <td class="req-status"><span class="confirmed">2秒以内</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">で表示する。</td>
+          <td>同時利用者数<strong>最大3名程度</strong>が同時に登録、編集、確認を行う場合でも、一覧更新の競合と待ち時間を管理する。</td>
+          <td class="req-status"><span class="confirmed">確定</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">月間処理件数と運用費</td>
+          <td>月間の資料登録と更新は<strong>250件程度</strong>を想定する。ローカル運用に必要な初期費用と保守費用の試算は、月額</td>
+          <td class="req-status"><span class="confirmed">約6,400円</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">を目安とする。</td>
+          <td>TBD</td>
+          <td class="req-status"><span class="tbd">運用量の増加時に必要な保管容量と費用の見直し条件は未定。設計フェーズで確定する。</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="tbd-block">
+      <div class="tbd-block-title">TBD — 確認中の事項</div>
+      <ul class="tbd-list">
+        <li>検索応答時間の測定条件と保管容量の上限</li>
+        <li>利用者数や資料件数が増えた場合の費用見直し条件</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 検証用構造コメント -->
+  <div class="section" id="s24">
+    <div class="section-heading">
+      <span class="sec-icon ic-slate">2.4</span>
+      ログ・データ保存要件
+    </div>
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th style="width:22%">項目</th>
+          <th style="width:65%">要件内容</th>
+          <th style="width:13%">ステータス</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="req-cat">登録・変更ログの保存期間</td>
+          <td>資料の登録、分類変更、保管場所変更、公開範囲変更の履歴を保存する。保存期間は運用監査の方針を確認した上で決定する。</td>
+          <td class="req-status"><span class="tbd">TBD</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">過去履歴の参照</td>
+          <td>確認画面から資料の変更履歴と公開状態の推移を参照できる。差分には変更者の役割と変更理由を表示する。</td>
+          <td class="req-status"><span class="tbd">確定</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">判定結果の閲覧範囲</td>
+          <td>分類候補と保管場所の<strong>整合性確認結果を役割に応じて閲覧可能</strong>とする。確認者は公開前の警告を確認し、閲覧者は確定した情報だけを参照する。</td>
+          <td class="req-status"><span class="confirmed">確定</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="tbd-block">
+      <div class="tbd-block-title">TBD — 確認中の事項</div>
+      <ul class="tbd-list">
+        <li>変更履歴の保存期間と監査用出力形式</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 検証用構造コメント -->
+  <div class="section" id="s25">
+    <div class="section-heading">
+      <span class="sec-icon ic-amber">2.5</span>
+      ファイル入力・UX要件
+    </div>
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th style="width:22%">項目</th>
+          <th style="width:65%">要件内容</th>
+          <th style="width:13%">ステータス</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="req-cat">対応一覧ファイル形式</td>
+          <td>資料一覧として対応する形式は<strong>CSV / JSON（UTF-8）</strong>。項目名、分類、保管場所、公開範囲を読み取り、空欄がある場合は登録前に不足項目を案内する。</td>
+          <td class="req-status"><span class="confirmed">確定</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">一覧項目と入力案内</td>
+          <td>分類、保管場所、公開範囲、説明欄を入力項目とする。必須欄の空欄は該当行と項目名を示し、修正後に再検証できるようにする。</td>
+          <td class="req-status"><span class="tbd">確定</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">分類選択の必須化</td>
+          <td>資料分類の選択は登録時の必須項目とする。候補が未登録の場合は仮分類として保存せず、管理者へ候補追加を案内する。</td>
+          <td class="req-status"><span class="tbd">確定</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">識別prefixの自動付与</td>
+          <td>分類ごとに定めた識別prefixをrecord_idへ付与する。prefixの重複と分類不一致を登録時に検出し、利用者へ修正内容を案内する。</td>
+          <td class="req-status"><span class="tbd">確定</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">写真資料の入力</td>
+          <td>写真を伴う資料は一覧テンプレートの写真列と保管場所列を追加して登録する。画像ファイル名は分類prefixと資料識別子を含む統一形式にし、参照先を追跡できるようにする。</td>
+          <td class="req-status"><span class="buffer">確定</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="tbd-block">
+      <div class="tbd-block-title">TBD — 確認中の事項</div>
+      <ul class="tbd-list">
+        <li>写真列の必須条件と、保管場所ごとのファイル名規則</li>
+        <li>分類候補を追加する管理画面と、候補不一致時の案内文</li>
+        <li>CSV / JSONテンプレートの配布方法と更新手順</li>
+        <li class="buf">写真資料の参照権限と保管場所移動時の扱い</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 検証用構造コメント -->
+  <div class="section" id="s26">
+    <div class="section-heading">
+      <span class="sec-icon ic-purple">2.6</span>
+      処理方式要件
+    </div>
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th style="width:22%">項目</th>
+          <th style="width:65%">要件内容</th>
+          <th style="width:13%">ステータス</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="req-cat">採用方式</td>
+          <td><strong>ローカル索引 Local Index v2</strong>を採用する。分類、保管場所、識別prefix、公開範囲を索引化し、AI・推論処理・外部APIに依存せず検索候補を生成する。</td>
+          <td class="req-status"><span class="confirmed">確定</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">索引更新の競合対策<br>（登録 / 編集）</td>
+          <td>同時に複数の利用者が登録や編集を行う場合に備え、索引更新の順序を記録し、<strong>ローカルキューと再試行機構</strong>一時的な競合は自動再試行せず、担当者確認後に対象データを手動で再受付する。</td>
+          <td class="req-status"><span class="confirmed">確定</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">索引更新のタイムアウト値</td>
+          <td>一つの索引更新に対するタイムアウト値は設計フェーズで決定する。資料件数と保管場所の構成を踏まえて適切な値を設定する。</td>
+          <td class="req-status"><span class="tbd">TBD</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">索引容量管理・アラート</td>
+          <td>索引の容量と更新失敗を監視し、運用アラートを設定する。<strong>環境変数（設定ファイル）として定義</strong>し、運用開始後の利用状況に応じて調整する。初期値は開発チームが設定する。</td>
+          <td class="req-status"><span class="confirmed">確定</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">写真のない資料の取り扱い</td>
+          <td>写真が必須の分類で画像が存在しない場合、<strong>不足情報として処理対象外</strong>にする。利用者へ写真列の追加とファイル名の確認を促す。</td>
+          <td class="req-status"><span class="confirmed">確定</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">写真のみ入力時の登録</td>
+          <td>一覧に説明が付いていない資料も仮登録できるようにします。公開前には編集担当が分類と概要を追加し、確認済みの資料だけを検索対象に含めます。この機能は後続の改善枠で扱います。</td>
+          <td class="req-status"><span class="buffer">後続の改善枠</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">登録項目の入力規則</td>
+          <td>資料名、分類、公開範囲の組合せごとに登録可否を整理します。入力例とエラー時の案内をまとめた手引きを作成し、架空サービスの試用担当が確認します。</td>
+          <td class="req-status"><span class="tbd">確認中</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">同名資料の版管理</td>
+          <td>同じ資料名でも改訂番号が異なる場合は、それぞれを<strong>別の版として保存</strong>します。2025-02-14に検証用方針を整理しました。複数の版をまとめて比較する画面は、次の改善候補として管理します。</td>
+          <td class="req-status"><span class="confirmed">整理済み</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="tbd-block">
+      <div class="tbd-block-title">TBD — 確認中の事項</div>
+      <ul class="tbd-list">
+        <li>一覧取得の応答上限を、検証用データの件数を変えて測定する</li>
+        <li class="buf">説明のない資料を仮登録する際の表示と確認手順を整理する（担当: 登録担当・運用担当）</li>
+        <li>登録項目の組合せごとの入力例をまとめる（担当: 登録担当・編集担当）</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 検証用構造コメント -->
+  <div class="section" id="s27">
+    <div class="section-heading">
+      <span class="sec-icon ic-rose">2.7</span>
+      可用性・保守性
+    </div>
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th style="width:22%">項目</th>
+          <th style="width:65%">要件内容</th>
+          <th style="width:13%">ステータス</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="req-cat">検証環境の更新方法</td>
+          <td>検証用の画面は<strong>承認済みの配布ファイル</strong>を確認環境へ反映します。2025-02-07に手順を整理しました。更新担当が版番号と確認項目を照合した後、試用担当へ変更内容を案内します。</td>
+          <td class="req-status"><span class="confirmed">整理済み</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">試用担当向け確認画面</td>
+          <td>資料一覧と登録手順を試すための架空環境を用意します。表示するURLの例は <code>https://documents.example.invalid/preview/</code>です。ここに示したアドレスは説明用であり、実在するサービスや組織の環境には接続しません。更新手順も検証用の記録で管理します。</td>
+          <td class="req-status"><span class="confirmed">整理済み</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">変更内容の確認方法</td>
+          <td>登録規則や公開範囲を変更する際は、<strong>対象画面と入力例を照合</strong>します。2025-02に架空の確認手順を整理しました。確認担当は登録、検索、版管理の順で変更内容を見て、結果を記録します。</td>
+          <td class="req-status"><span class="confirmed">整理済み</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">月次点検の実施方法</td>
+          <td>月に一度、資料一覧と登録画面が利用できることを確認します。点検対象と記録方法は試用期間中に整理し、架空の運用手引きへ反映します。</td>
+          <td class="req-status"><span class="tbd">確認中</span></td>
+        </tr>
+        <tr>
+          <td class="req-cat">問い合わせと画面保守</td>
+          <td>表示の不整合が見つかった場合は、資料の識別番号と操作手順を窓口へ知らせます。受付後の担当振り分けと回答方法は、試用担当との確認で決めます。</td>
+          <td class="req-status"><span class="tbd">確認中</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="tbd-block">
+      <div class="tbd-block-title">TBD — 確認中の事項</div>
+      <ul class="tbd-list">
+        <li>月次点検の対象画面と記録項目を整理する（担当: 運用担当）</li>
+        <li>問い合わせの受付方法と担当振り分けを決める（担当: 運用担当）</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 検証用構造コメント -->
+  <div class="section" id="s28">
+    <div class="section-heading">
+      <span class="sec-icon ic-slate">2.8</span>
+      TBD サマリー — 未定事項一覧
+    </div>
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th style="width:6%">No.</th>
+          <th style="width:32%">事項</th>
+          <th style="width:46%">確認方法</th>
+          <th style="width:16%">担当</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>資料の版履歴を保持する期間</td>
+          <td>試用担当と保存例を確認</td>
+          <td>運用担当</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>一覧取得で案内を表示する待ち時間</td>
+          <td>検証用データで測定</td>
+          <td>設計担当</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>一覧の表示件数を変更した場合のページ移動</td>
+          <td>画面の操作例を比較</td>
+          <td>運用担当</td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>資料名と概要の入力文字数</td>
+          <td>入力例を用いて確認</td>
+          <td>登録担当</td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>分類候補の並び順と未分類の表示</td>
+          <td>試用画面で確認</td>
+          <td>画面担当</td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>資料一覧の並び替え候補</td>
+          <td>利用場面を整理して決定</td>
+          <td>設計担当</td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>更新内容の確認待ち時間</td>
+          <td>確認手順を試して設定</td>
+          <td>登録担当</td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>版管理と分類の入力例をまとめた手引き</td>
+          <td>検証担当が例を作成</td>
+          <td>編集担当・登録担当</td>
+        </tr>
+        <tr>
+          <td>9</td>
+          <td>月次点検と問い合わせの記録方法</td>
+          <td>試用期間中に整理</td>
+          <td>運用担当</td>
+        </tr>
+        <tr style="color:#9a3412; background:#fff7ed;">
+          <td>10</td>
+          <td>資料の表示順を保存する機能（後続改善）</td>
+          <td>試用結果を見て改善候補へ追加</td>
+          <td>画面担当</td>
+        </tr>
+        <tr style="color:#9a3412; background:#fff7ed;">
+          <td>11</td>
+          <td>概要がない資料の仮登録手順（後続改善）</td>
+          <td>登録例を確認して改善候補へ追加</td>
+          <td>登録担当・運用担当</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="note-block">
+      確認中の項目は、架空データを使った試用の結果を見ながら順に整理します。色付きの行は後続の改善候補を表しています。<br>
+      試用担当への確認は、隔週の打合せ（水曜 10:00〜10:30）または質問&amp;一覧を使って行い、確認結果を同じ記録へ追記します。
+    </div>
+  </div>
+
+  <!-- 検証用構造コメント -->
+  <div id="changelog" class="section">
+    <div class="section-heading">
+      <span class="section-num">管理</span>
+      <span class="section-title">変更履歴</span>
+    </div>
+    <p style="margin-bottom:14px;color:#475569;font-size:0.88em;">検証用文書の版番号と変更点を記録します。内容を更新した場合は、確認した日付と対象の章を履歴へ記入します。</p>
+    <table style="width:100%;border-collapse:collapse;font-size:0.88em;">
+      <thead>
+        <tr style="background:#0f172a;color:#e2e8f0;">
+          <th style="padding:10px 14px;text-align:left;width:70px;white-space:nowrap;">Ver.</th>
+          <th style="padding:10px 14px;text-align:left;width:110px;white-space:nowrap;">日付</th>
+          <th style="padding:10px 14px;text-align:left;width:140px;white-space:nowrap;">変更者</th>
+          <th style="padding:10px 14px;text-align:left;">変更内容</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #e2e8f0;">
+          <td style="padding:10px 14px;font-weight:700;color:#0f172a;vertical-align:top;">v2.0</td>
+          <td style="padding:10px 14px;vertical-align:top;white-space:nowrap;">2025-02-14</td>
+          <td style="padding:10px 14px;vertical-align:top;">検証資料チーム</td>
+          <td style="padding:10px 14px;">架空の要件を整理</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="margin-top:12px;padding:12px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:0.82em;color:#64748b;">
+      <strong>履歴を更新する手順：</strong>
+      履歴表の <code>&lt;tbody&gt;</code> に新しい <code>&lt;tr&gt;</code> を追加して記録します。
+      版番号の例は <code>v2.1</code>、<code>v3.0</code> です。表示文言だけの変更は小さい番号を進め、章の構成を見直した場合は大きい番号を進めます。
+    </div>
+  </div>
+
+  <!-- 検証用構造コメント -->
+  <div class="footer">
+    <div>架空資料整理サービス 要件定義書 v2.0 — 2025-02-14 作成 — 検証資料チーム</div>
+    <div>架空資料・検証専用</div>
+  </div>
+
+</div><!-- 検証用構造コメント -->
+</main>
+
+</div><!-- 検証用構造コメント -->
+
+<script>
+  const sections = document.querySelectorAll('[id]');
+  const links = document.querySelectorAll('.toc-item');
+
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        const id = e.target.id;
+        links.forEach(l => {
+          l.classList.remove('active');
+          if (l.getAttribute('href') === '#' + id) l.classList.add('active');
+        });
+      }
+    });
+  }, { rootMargin: '-10% 0% -75% 0%', threshold: 0 });
+
+  sections.forEach(s => obs.observe(s));
+</script>
+</body>
+</html>

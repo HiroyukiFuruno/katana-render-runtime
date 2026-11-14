@@ -24,6 +24,10 @@ impl InlineFragment {
 }
 
 impl ElementBox {
+    pub(in super::super) fn clips_overflow(&self) -> bool {
+        self.overflow_clip_axes.0 || self.overflow_clip_axes.1
+    }
+
     pub(crate) fn rectangle_corners(
         x: f32,
         y: f32,
@@ -151,7 +155,7 @@ mod tests {
             participates_in_flow: true,
             ancestor_node_ids: Vec::new(),
             overflow_clips: vec![OverflowClip::new(2, 10.0, 0.0, 20.0, 10.0, 0.0, 0.0)],
-            clips_overflow: false,
+            overflow_clip_axes: (false, false),
             padding_edge: OverflowClip::new(1, 0.0, 0.0, 10.0, 20.0, 0.0, 0.0),
             inline_fragments: Vec::new(),
         }

@@ -1,4 +1,5 @@
 use super::DrawioJsRuntimeOps;
+use super::page_crop_test_support::create_rect_group_js;
 use crate::markdown::color_preset::DiagramColorPreset;
 
 #[test]
@@ -155,7 +156,8 @@ fn fake_bundle_with_wrapped_html_fallback_text() -> &'static str {
     FAKE_BUNDLE_WITH_WRAPPED_HTML_FALLBACK_TEXT
 }
 
-const FAKE_BUNDLE_WITH_WIDE_PAGE_BOUNDS: &str = r#"
+const FAKE_BUNDLE_WITH_WIDE_PAGE_BOUNDS: &str = concat!(
+    r#"
 function Graph() {}
 const Editor = {
   convertHtmlToText(value) {
@@ -178,20 +180,13 @@ GraphViewer.createViewerForElement = function createViewerForElement(_container,
     },
   });
 };
-function createRectGroup(id, x, y, width, height) {
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  group.setAttribute("data-cell-id", id);
-  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  rect.setAttribute("x", String(x));
-  rect.setAttribute("y", String(y));
-  rect.setAttribute("width", String(width));
-  rect.setAttribute("height", String(height));
-  group.appendChild(rect);
-  return group;
-}
-"#;
+"#,
+    create_rect_group_js!(),
+    r#""#
+);
 
-const FAKE_BUNDLE_WITH_WRAPPED_HTML_FALLBACK_TEXT: &str = r#"
+const FAKE_BUNDLE_WITH_WRAPPED_HTML_FALLBACK_TEXT: &str = concat!(
+    r#"
 function Graph() {}
 const Editor = {
   convertHtmlToText(value) {
@@ -230,20 +225,13 @@ function createWrappedTextGroup(id) {
   group.appendChild(text);
   return group;
 }
-function createRectGroup(id, x, y, width, height) {
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  group.setAttribute("data-cell-id", id);
-  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  rect.setAttribute("x", String(x));
-  rect.setAttribute("y", String(y));
-  rect.setAttribute("width", String(width));
-  rect.setAttribute("height", String(height));
-  group.appendChild(rect);
-  return group;
-}
-"#;
+"#,
+    create_rect_group_js!(),
+    r#""#
+);
 
-const FAKE_BUNDLE_WITH_EMPTY_RELATIVE_ANCHOR: &str = r#"
+const FAKE_BUNDLE_WITH_EMPTY_RELATIVE_ANCHOR: &str = concat!(
+    r#"
 function Graph() {}
 const Editor = {
   convertHtmlToText(value) {
@@ -274,15 +262,7 @@ GraphViewer.createViewerForElement = function createViewerForElement(_container,
     },
   });
 };
-function createRectGroup(id, x, y, width, height) {
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  group.setAttribute("data-cell-id", id);
-  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  rect.setAttribute("x", String(x));
-  rect.setAttribute("y", String(y));
-  rect.setAttribute("width", String(width));
-  rect.setAttribute("height", String(height));
-  group.appendChild(rect);
-  return group;
-}
-"#;
+"#,
+    create_rect_group_js!(),
+    r#""#
+);

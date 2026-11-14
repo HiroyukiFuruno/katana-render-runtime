@@ -14,7 +14,7 @@ import tarfile
 import tomllib
 from collections.abc import Callable, Sequence
 from pathlib import Path, PurePosixPath
-from typing import Union
+from typing import TypedDict
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -22,8 +22,13 @@ ASSET_CRATE = "katana-render-runtime-assets"
 RUNTIME_CRATE = "katana-render-runtime"
 REGISTRY_SOURCE = "registry+https://github.com/rust-lang/crates.io-index"
 CommandRunner = Callable[
-    ..., Union[subprocess.CompletedProcess[bytes], subprocess.CompletedProcess[str]]
+    ..., subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]
 ]
+
+
+class VendorManifest(TypedDict):
+    files: dict[str, str]
+    package: str
 
 
 def sha256_bytes(content: bytes) -> str:
@@ -109,7 +114,7 @@ def verify_asset_lock_entry(lock_path: Path, archive: Path, version: str) -> str
     return archive_sha
 
 
-def _read_owned_vendor_manifest(destination: Path) -> dict[str, object] | None:
+def _read_owned_vendor_manifest(destination: Path) -> VendorManifest | None:
     if not destination.exists():
         return None
     if destination.is_symlink() or not destination.is_dir():
@@ -143,6 +148,7 @@ def _read_owned_vendor_manifest(destination: Path) -> dict[str, object] | None:
             "existing vendor directory has files outside its checksum manifest: "
             f"{destination}"
         )
+    checked_files: dict[str, str] = {}
     for relative, expected in manifest["files"].items():
         relative_path = PurePosixPath(relative)
         try:
@@ -152,7 +158,8 @@ def _read_owned_vendor_manifest(destination: Path) -> dict[str, object] | None:
         path = destination.joinpath(*relative_path.parts)
         if not isinstance(expected, str) or sha256_bytes(path.read_bytes()) != expected:
             raise ValueError(f"existing vendor file does not match its checksum manifest: {path}")
-    return manifest
+        checked_files[relative] = expected
+    return {"files": checked_files, "package": manifest["package"]}
 
 
 def stage_asset_archive(archive: Path, destination: Path, version: str) -> str:

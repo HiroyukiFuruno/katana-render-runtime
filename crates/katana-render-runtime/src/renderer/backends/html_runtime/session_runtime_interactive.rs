@@ -6,7 +6,7 @@ use crate::renderer::backends::html_runtime::script::{
 };
 use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 
-use super::StaticHtmlRuntime;
+use super::{StaticHtmlRuntime, session_timer_pump::pump_timers};
 
 type InteractiveScriptEvaluator<'a> = dyn FnMut(&str, &str) -> Result<(), HtmlRuntimeError> + 'a;
 
@@ -18,25 +18,24 @@ impl StaticHtmlRuntime {
         body_onload_source: Option<&str>,
         document_url: &str,
     ) -> Result<v8::Global<v8::Context>, HtmlRuntimeError> {
-        v8::scope!(let handle_scope, isolate);
-        let context = v8::Context::new(handle_scope, Default::default());
-        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
-        let installer = {
-            v8::tc_scope!(let scope, &mut **context_scope);
-            install_dom_bridge(scope, document_url)?
-        };
-        let mut evaluate = |name: &str, script: &str| -> Result<(), HtmlRuntimeError> {
-            Self::evaluate_interactive_script(context_scope, name, script, &installer)
-        };
-        Self::run_inline_interactive_scripts(
-            document_url,
-            scripts,
-            body_onload_script_index,
-            body_onload_source,
-            &mut evaluate,
-        )?;
-        Self::run_interactive_lifecycle_scripts(document_url, &mut evaluate)?;
-        Ok(v8::Global::new(context_scope, context))
+        Self::with_new_context(isolate, |context_scope, context| {
+            let installer = {
+                v8::tc_scope!(let scope, &mut **context_scope);
+                install_dom_bridge(scope, document_url)?
+            };
+            let mut evaluate = |name: &str, script: &str| -> Result<(), HtmlRuntimeError> {
+                Self::evaluate_interactive_script(context_scope, name, script, &installer)
+            };
+            Self::run_inline_interactive_scripts(
+                document_url,
+                scripts,
+                body_onload_script_index,
+                body_onload_source,
+                &mut evaluate,
+            )?;
+            Self::run_interactive_lifecycle_scripts(document_url, &mut evaluate)?;
+            Ok(v8::Global::new(context_scope, context))
+        })
     }
 
     fn evaluate_interactive_script(
@@ -56,7 +55,11 @@ impl StaticHtmlRuntime {
             evaluate(scope, name, script)
         }
         .and_then(|()| perform_microtask_checkpoint(scope))
-        .and_then(|()| check_bridge_error(scope))
+        .and_then(|()| check_bridge_error(scope))?;
+        if name == "krr-html-dom-content-loaded" {
+            pump_timers(scope, 0.0)?;
+        }
+        Ok(())
     }
 
     pub(super) fn run_inline_interactive_scripts(
@@ -124,8 +127,9 @@ impl StaticHtmlRuntime {
         document_url: &str,
         evaluate: &mut InteractiveScriptEvaluator<'_>,
     ) -> Result<(), HtmlRuntimeError> {
+        let dom_content_loaded = DOM_CONTENT_LOADED_DISPATCH;
         Self::accept_interactive_script_result(
-            evaluate("krr-html-dom-content-loaded", DOM_CONTENT_LOADED_DISPATCH),
+            evaluate("krr-html-dom-content-loaded", dom_content_loaded),
             document_url,
             "krr-html-dom-content-loaded",
         )?;
@@ -157,3 +161,7 @@ impl StaticHtmlRuntime {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "session_runtime_interactive_tests.rs"]
+mod tests;

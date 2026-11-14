@@ -28,32 +28,23 @@ fn assert_rendered_contains(rendered: &Result<String, String>, needle: &str) {
 }
 
 fn fake_bundle() -> &'static str {
-    FAKE_BUNDLE
+    static BUNDLE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BUNDLE
+        .get_or_init(|| {
+            super::test_support::fake_html_label_bundle(
+                "400",
+                "220",
+                FAKE_BUNDLE_BODY,
+                FAKE_BUNDLE_AFTER_CALLBACK,
+            )
+        })
+        .as_str()
 }
 
-const FAKE_BUNDLE: &str = r#"
-function Graph() {}
-const Editor = {
-  convertHtmlToText(value) {
-    return String(value);
-  },
-};
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "400");
-  svg.setAttribute("height", "220");
-  svg.setAttribute("viewBox", "0 0 400 220");
-  svg.appendChild(createImageGroup("image", 100, 40, 80, 42));
-  callback({
-    graph: {
-      getSvg() {
-        return svg;
-      },
-    },
-  });
-};
-function createImageGroup(id, x, y, width, height) {
+const FAKE_BUNDLE_BODY: &str = r#"  svg.appendChild(createImageGroup("image", 100, 40, 80, 42));
+"#;
+
+const FAKE_BUNDLE_AFTER_CALLBACK: &str = r#"function createImageGroup(id, x, y, width, height) {
   const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
   group.setAttribute("data-cell-id", id);
   const image = document.createElementNS("http://www.w3.org/2000/svg", "image");

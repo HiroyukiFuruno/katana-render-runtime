@@ -15,14 +15,14 @@ CIの動作保証対象はLinux x64、Windows x64、macOS Apple Siliconとする
 
 ローカル検査を実施する場合だけ、以下でCIと同じmacOS検査範囲を実行し、成功後に既存GitHub認証でPRへ添付する。未実施ならこの操作は不要で、Ready後のApple Silicon CIが検査する。
 
-証跡collectorは `/opt/homebrew/bin/bun` を検証し、Bun `1.4.2` を要求する。Homebrew管理のBunがない場合は [BunのHomebrew手順](https://bun.sh/docs/installation)に沿って準備し、選択済みHomebrewとBunのversionを確認する。
+証跡collectorは `/opt/homebrew/bin/bun` を検証し、Bun `1.4.3` を要求する。Homebrew管理のBunがない場合は [BunのHomebrew手順](https://bun.sh/docs/installation)に沿って準備し、選択済みHomebrewとBunのversionを確認する。
 
 ```bash
 rtk proxy /opt/homebrew/bin/brew install oven-sh/bun/bun
 rtk proxy /opt/homebrew/bin/bun --version
 ```
 
-version出力は `1.4.2` が必要。公式installerが配置する `~/.bun/bin/bun` はcollectorの信頼済みHomebrew root外にあるため、証跡には使えない。Bunのversionを合わせられない場合は証跡を省略し、Apple Silicon CIで検査する。
+version出力は `1.4.3` が必要。公式installerが配置する `~/.bun/bin/bun` はcollectorの信頼済みHomebrew root外にあるため、証跡には使えない。Bunのversionを合わせられない場合は証跡を省略し、Apple Silicon CIで検査する。
 
 ```bash
 rtk proxy python3 scripts/release/local_macos_evidence.py --repo HiroyukiFuruno/katana-render-runtime --pr 105 --publish
@@ -90,6 +90,10 @@ FAIL 時の指摘は `tmp/local-review/last-review.json`、対応入力は `last
 
 同じローカルユーザーが書き込める evidence なので、これを署名済みレビューや敵対的な改竄への認証として扱わない。
 JSON 整形式や CLI 終了コード0も意味的な正しさの根拠にはしない。独立 review と完全品質ゲートは維持する。
+
+### Native CLI観測の安全な表示
+
+`observe_native_cli_command` の保存JSONにはargv・作業環境・lifecycleが含まれるため、全体を表示しない。必要な場合は `python3 scripts/release/native_cli_observation_view.py <observation.json>` を使い、終了値・PID・時刻・stdout/stderrのパスとSHA/サイズだけを確認する。コマンド引数、環境値、lifecycle、生ログ内容は表示しない。観測・artifactの未知fieldは拒否し、lifecycleは型だけ確認して内容を読まず出力もしない。
 
 ## 軽量検査と影響試験の選択
 

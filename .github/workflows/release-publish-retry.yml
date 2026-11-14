@@ -9,7 +9,9 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: write
+  pull-requests: read
 
 env:
   CARGO_INCREMENTAL: 0
@@ -34,9 +36,15 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
+
+      - name: Install Python analysis tools
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.0"
+          enable-cache: true
 
       - name: Verify immutable release source
         env:
@@ -48,8 +56,38 @@ jobs:
           cd release-source
           bash ../release-tools/scripts/release/verify-version.sh "${RELEASE_TAG}"
 
+      - name: Verify completed merged release context
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.version }}
+        run: |
+          python3 release-tools/scripts/release/verify_completed_release_context.py \
+            --repo release-source --head "$(git --no-replace-objects -C release-source rev-parse HEAD)" \
+            --version "${RELEASE_TAG}"
+
+      - name: Acquire completed exact-tag CI and paired performance evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          KRR_HTML_PERFORMANCE_SCIPY_VERSION=1.18.1
+          python3 release-tools/scripts/release/run_html_performance.py --bootstrap verify
+          --repo "$GITHUB_WORKSPACE/release-source"
+          --evidence-dir "$GITHUB_WORKSPACE/release-source/tmp/html-performance-release-evidence"
+          --acquire
+
+      - name: Reverify acquired completed generation before retry publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.version }}
+        run: |
+          python3 release-tools/scripts/release/verify_completed_release_context.py \
+            --repo release-source --head "$(git --no-replace-objects -C release-source rev-parse HEAD)" \
+            --version "${RELEASE_TAG}" \
+            --acquisition-receipt release-source/tmp/html-performance-release-evidence/acquisition.json
+
       - name: Publish crates.io from release tag
         env:
+          GH_TOKEN: ${{ github.token }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           cd release-source

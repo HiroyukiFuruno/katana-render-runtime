@@ -1,0 +1,250 @@
+{
+  "schema": "krr-html-performance-history-v1",
+  "activeReferenceRecordId": "html84-a6b21479-html84-a6b21479-all",
+  "activeReferenceSelectionNote": "正式な同一条件の比較で有意な改善と非劣化を確認。",
+  "records": [
+    {
+      "id": "html84-ea855b56-r6628",
+      "sourceCommit": "ea855b56b4c6733d3617e74da58133f4a10e68a8",
+      "verificationCompletedAtUtc": "2026-11-01T14:25:52.356452Z",
+      "bundleManifestSha256": "a824b5e21d2529c5d4926825aa8c99c2417323b5ae45286132d3e5f686ec3e71",
+      "referenceBuild": {
+        "schema": "krr-html-performance-reference-build-pins-v1",
+        "buildArtifactSchema": "krr-html-performance-build-artifact-v3",
+        "buildArtifactSha256": "d281c02cddc4e63b8157e5aa3ef184bb135af76227de4e871578301c521169b9",
+        "sourceSnapshotSha256": "1cbce71d24c99c93ab4410637ce7f0814d552a339238239df402ead247373544",
+        "binarySha256": "ed3de7cbf0558d0bdd012c3a75b600c1211e042718e65faad124ffedff6dd789",
+        "lockSha256": "7385aab6e8da1bd7f1a3c55346522c6e8b4ed0815677d22617184134af51dd20",
+        "cargoExecutableSha256": "7672ead309d505577c018fff2cafb3433601f073e38cbe87359ac1f7b944bbf5",
+        "rustcExecutableSha256": "210df6794001b73ec3d453878707fa1e0bdcb63c427024a6e6574bbe5615a4da",
+        "contextBeforeSha256": "fbaed6a9f6a177cba28391230a23a5b8797215ea801b5fcd214d7f16f9781588"
+      },
+      "scope": {
+        "catalog": "catalog-stage90",
+        "candidateConditions": 84,
+        "pairedConditions": 72,
+        "candidateOnlyConditions": 12,
+        "trialsPerConditionPerPhase": 25,
+        "candidateSamplesPerPhase": 2100,
+        "candidateAndBaselineSamplesPerPhase": 3900,
+        "phaseRecords": 23400,
+        "checks": 1680,
+        "aggregation": "candidate samples pooled across all 84 conditions; no-op phases included"
+      },
+      "measuredAcceptance": {
+        "verifierRun": "R6628",
+        "verifierExitCode": 0,
+        "performanceNonregression": true,
+        "htmlMinimumScore": 92.14438,
+        "htmlScoreThreshold": 90,
+        "outputFontIdentityEquivalence": "established"
+      },
+      "candidatePhaseStatistics": {
+        "cold_open": {
+          "maxSampleSeconds": 0.104136167,
+          "medianSeconds": 0.0699949585,
+          "p95Seconds": 0.08889632019999999,
+          "maxPeakRssBytes": 43384832
+        },
+        "full_y": {
+          "maxSampleSeconds": 0.026736,
+          "medianSeconds": 5e-7,
+          "p95Seconds": 0.017747746149999983,
+          "maxPeakRssBytes": 55558144
+        },
+        "post_operation": {
+          "maxSampleSeconds": 0.0950575,
+          "medianSeconds": 0.0174421665,
+          "p95Seconds": 0.04570622885,
+          "maxPeakRssBytes": 57720832
+        },
+        "re_display": {
+          "maxSampleSeconds": 0.043863833,
+          "medianSeconds": 0.012756416500000001,
+          "p95Seconds": 0.02438474795,
+          "maxPeakRssBytes": 55558144
+        },
+        "same_session_resize": {
+          "maxSampleSeconds": 0.036037041,
+          "medianSeconds": 0.0127871455,
+          "p95Seconds": 0.024399262799999998,
+          "maxPeakRssBytes": 57982976
+        },
+        "warm_open": {
+          "maxSampleSeconds": 0.039832667,
+          "medianSeconds": 0.0157700835,
+          "p95Seconds": 0.02740534555,
+          "maxPeakRssBytes": 53788672
+        }
+      },
+      "evidence": {
+        "summaryRun": "R6630",
+        "summarySha256": "7ffbae0c2c4ad42db42a3d13413ca2863a7d7d041e9505bd6387af132f9c67d2",
+        "verifierStdoutSha256": "f489490e9533fa6838028003a89ed9755fe3eb7be72c531a2fe8e652e742b177"
+      },
+      "reuseStatus": "historical-result; current-source eligibility must be verified separately"
+    },
+    {
+      "id": "html84-ff2bb09f-html84-ff2bb09f-isolated",
+      "sourceCommit": "ff2bb09f8ab5d3d8083fdb72484c823b56a29d5b",
+      "verificationCompletedAtUtc": "2026-11-06T11:36:21.671274Z",
+      "bundleManifestSha256": "3ef481655dd1dbcc1fad5c54205d49a0d40800b66fa513640e31d079c375d419",
+      "referenceBuild": {
+        "schema": "krr-html-performance-reference-build-pins-v1",
+        "buildArtifactSchema": "krr-html-performance-build-artifact-v3",
+        "buildArtifactSha256": "314f11b2198358e7b100842ef1d72147c4458af4ec414d14bb7122599a3f9004",
+        "sourceSnapshotSha256": "9e2b346158cf2e607d2204806c9127657c275a58b58fe269c99fef1e3020e583",
+        "binarySha256": "745eee16e868b35ed815443d25cb278cddbd7525f5ad2a04c07bf085a1885a13",
+        "lockSha256": "dc865c759e8b6493cc01bf7311309fb4dfb60e41db792abf5a288bb51d20dd9d",
+        "cargoExecutableSha256": "7672ead309d505577c018fff2cafb3433601f073e38cbe87359ac1f7b944bbf5",
+        "rustcExecutableSha256": "210df6794001b73ec3d453878707fa1e0bdcb63c427024a6e6574bbe5615a4da",
+        "contextBeforeSha256": "e732f578d70392920daccb9a56881712905dcf790fe98ddb6667bee7750b8fc0"
+      },
+      "scope": {
+        "catalog": "catalog-stage90",
+        "candidateConditions": 84,
+        "pairedConditions": 84,
+        "candidateOnlyConditions": 0,
+        "trialsPerConditionPerPhase": 25,
+        "candidateSamplesPerPhase": 2100,
+        "candidateAndBaselineSamplesPerPhase": 4200,
+        "phaseRecords": 25200,
+        "checks": 1680,
+        "aggregation": "candidate samples pooled across all 84 conditions; no-op phases included"
+      },
+      "measuredAcceptance": {
+        "verifierRun": "html84-ff2bb09f-isolated",
+        "verifierExitCode": 0,
+        "performanceNonregression": true,
+        "htmlMinimumScore": 92.14438,
+        "htmlScoreThreshold": 90,
+        "outputFontIdentityEquivalence": "established"
+      },
+      "candidatePhaseStatistics": {
+        "cold_open": {
+          "maxSampleSeconds": 0.160946542,
+          "medianSeconds": 0.07497610399999999,
+          "p95Seconds": 0.11070457884999998,
+          "maxPeakRssBytes": 43548672
+        },
+        "warm_open": {
+          "maxSampleSeconds": 0.034069166,
+          "medianSeconds": 0.016571854,
+          "p95Seconds": 0.0286213816,
+          "maxPeakRssBytes": 53788672
+        },
+        "re_display": {
+          "maxSampleSeconds": 0.030330709,
+          "medianSeconds": 0.013344209,
+          "p95Seconds": 0.0249648979,
+          "maxPeakRssBytes": 53968896
+        },
+        "full_y": {
+          "maxSampleSeconds": 0.02726425,
+          "medianSeconds": 5e-7,
+          "p95Seconds": 0.018368799699999994,
+          "maxPeakRssBytes": 53968896
+        },
+        "post_operation": {
+          "maxSampleSeconds": 0.15835925,
+          "medianSeconds": 0.0180570415,
+          "p95Seconds": 0.047214237799999996,
+          "maxPeakRssBytes": 54099968
+        },
+        "same_session_resize": {
+          "maxSampleSeconds": 0.029831875,
+          "medianSeconds": 0.01347475,
+          "p95Seconds": 0.025167831249999998,
+          "maxPeakRssBytes": 54132736
+        }
+      },
+      "evidence": {
+        "summaryRun": "html84-ff2bb09f-isolated",
+        "summarySha256": "77baa3619195d2171ce3cd73947056dc66967fb6d8ecac4a21df507f06946812",
+        "verifierStdoutSha256": "8df2dd6c6c95182eb3e70557f0b82fe64bf86717ca4deee935be6f365ae3c51e"
+      },
+      "reuseStatus": "historical-result; current-source eligibility must be verified separately"
+    },
+    {
+      "id": "html84-a6b21479-html84-a6b21479-all",
+      "sourceCommit": "a6b21479204f13feb41eeb3e668c97b0781ab7e0",
+      "verificationCompletedAtUtc": "2026-11-06T20:05:07.714750Z",
+      "bundleManifestSha256": "8d7edc3d5bd0e3c78264ad401b870d981138a03fe4ee81a0dd6ce8ab4ab10ef9",
+      "referenceBuild": {
+        "schema": "krr-html-performance-reference-build-pins-v1",
+        "buildArtifactSchema": "krr-html-performance-build-artifact-v3",
+        "buildArtifactSha256": "642c9147519596b307866752232441ee5e9f0082200424df7901576ffade6270",
+        "sourceSnapshotSha256": "a9dc91b10f51a808aebbe0fc5682dcfbc58a86e15e1939c511013d0e78312437",
+        "binarySha256": "179c5d81fedc8bc3b09640b43e429258c625839436100b1d9741fdd249a491ef",
+        "lockSha256": "dc865c759e8b6493cc01bf7311309fb4dfb60e41db792abf5a288bb51d20dd9d",
+        "cargoExecutableSha256": "7672ead309d505577c018fff2cafb3433601f073e38cbe87359ac1f7b944bbf5",
+        "rustcExecutableSha256": "210df6794001b73ec3d453878707fa1e0bdcb63c427024a6e6574bbe5615a4da",
+        "contextBeforeSha256": "cacf32dd3d78a81fb08cc35a0ebe85e4e281fa1fa81958fe1e4c89415da8ab02"
+      },
+      "scope": {
+        "catalog": "catalog-stage90",
+        "candidateConditions": 84,
+        "pairedConditions": 84,
+        "candidateOnlyConditions": 0,
+        "trialsPerConditionPerPhase": 25,
+        "candidateSamplesPerPhase": 2100,
+        "candidateAndBaselineSamplesPerPhase": 4200,
+        "phaseRecords": 25200,
+        "checks": 1680,
+        "aggregation": "candidate samples pooled across all 84 conditions; no-op phases included"
+      },
+      "measuredAcceptance": {
+        "verifierRun": "html84-a6b21479-all",
+        "verifierExitCode": 0,
+        "performanceNonregression": true,
+        "htmlMinimumScore": 92.14438,
+        "htmlScoreThreshold": 90,
+        "outputFontIdentityEquivalence": "established"
+      },
+      "candidatePhaseStatistics": {
+        "cold_open": {
+          "maxSampleSeconds": 0.163105833,
+          "medianSeconds": 0.07639177050000001,
+          "p95Seconds": 0.11050852530000001,
+          "maxPeakRssBytes": 43450368
+        },
+        "warm_open": {
+          "maxSampleSeconds": 0.05325775,
+          "medianSeconds": 0.016958646,
+          "p95Seconds": 0.028643642,
+          "maxPeakRssBytes": 53739520
+        },
+        "re_display": {
+          "maxSampleSeconds": 0.062077166,
+          "medianSeconds": 0.0134124795,
+          "p95Seconds": 0.0251301351,
+          "maxPeakRssBytes": 53919744
+        },
+        "full_y": {
+          "maxSampleSeconds": 0.046331833,
+          "medianSeconds": 5e-7,
+          "p95Seconds": 0.01805963785,
+          "maxPeakRssBytes": 53919744
+        },
+        "post_operation": {
+          "maxSampleSeconds": 0.094161541,
+          "medianSeconds": 0.018423000000000002,
+          "p95Seconds": 0.049535368399999995,
+          "maxPeakRssBytes": 54083584
+        },
+        "same_session_resize": {
+          "maxSampleSeconds": 0.059889459,
+          "medianSeconds": 0.0135529165,
+          "p95Seconds": 0.025362052099999997,
+          "maxPeakRssBytes": 54083584
+        }
+      },
+      "evidence": {
+        "summaryRun": "html84-a6b21479-all",
+        "summarySha256": "d516ae4563e7c76be2fc0ed23ebdd2e18ebb4bfdf1928d1df3480835f85bf409",
+        "verifierStdoutSha256": "82b65330b163eae63497a2fc7b042b9e3e306ef84b0316b6c13c1fb0a99e29f7"
+      },
+      "reuseStatus": "historical-result; current-source eligibility must be verified separately"
+    }
+  ]
+}

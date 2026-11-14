@@ -5,7 +5,7 @@ const BYTE_INVERSION_MASK: u8 = 0xff;
 
 #[test]
 fn weak_file_stamp_is_not_memoized_and_disables_memo_without_retry() -> TestResult<()> {
-    let fixture = FontFileFixture::create()?;
+    let fixture = super::font_file_fixture()?;
     let original = stamp_path_uncached(&fixture.path).map_err(|_| "fixture stamp unavailable")?;
     let original_contents = fs::read(&fixture.path)?;
     let mut weak = original.clone();
@@ -51,8 +51,8 @@ fn replace_and_validate_changed_contents(
 
 #[test]
 fn durable_stamp_collected_before_weak_stamp_is_still_validated() -> TestResult<()> {
-    let durable = FontFileFixture::create()?;
-    let weak = FontFileFixture::create()?;
+    let durable = super::font_file_fixture()?;
+    let weak = super::font_file_fixture()?;
     if !super::super::super::file_stamp_durable_reusable(&durable.path) {
         return Ok(());
     }

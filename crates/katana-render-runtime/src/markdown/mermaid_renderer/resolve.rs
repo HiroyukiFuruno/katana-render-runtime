@@ -15,7 +15,7 @@ impl MermaidBinaryOps {
         )
     }
 
-    fn resolve_mermaid_js_with_env(
+    pub(crate) fn resolve_mermaid_js_with_env(
         env_value: Option<std::ffi::OsString>,
         home_path: Option<PathBuf>,
     ) -> Result<PathBuf, String> {
@@ -103,6 +103,23 @@ mod tests {
         let result = MermaidBinaryOps::find_mermaid_js_from(Err("boom".to_string()));
 
         assert!(matches!(result, Err(error) if error == "boom"));
+    }
+
+    #[test]
+    fn find_mermaid_js_returns_path_only_after_file_exists()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("mermaid.js");
+        assert_eq!(
+            MermaidBinaryOps::find_mermaid_js_from(Ok(path.clone()))?,
+            None
+        );
+        std::fs::write(&path, "mermaid")?;
+        assert_eq!(
+            MermaidBinaryOps::find_mermaid_js_from(Ok(path.clone()))?,
+            Some(path)
+        );
+        Ok(())
     }
 
     #[test]

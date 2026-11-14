@@ -1,40 +1,15 @@
+use super::text_spacing_trim::CssTextSpacingTrim;
 use taffy::style::{AlignItems, Display, FlexDirection, FlexWrap, JustifyContent};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(in crate::renderer::backends::html_interactive) enum CssLength {
-    Px(f32),
-    Percent(f32),
-}
+#[path = "style_border_style.rs"]
+mod border_style;
+pub(in crate::renderer::backends::html_interactive) use border_style::CssBorderStyle;
 
-impl Default for CssLength {
-    fn default() -> Self {
-        Self::Px(0.0)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(in crate::renderer::backends::html_interactive) enum CssGridTrack {
-    Length(f32),
-    Percent(f32),
-    Fraction(f32),
-    Auto,
-    MinContent,
-    MaxContent,
-    MinMax {
-        min: CssGridTrackBreadth,
-        max: CssGridTrackBreadth,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(in crate::renderer::backends::html_interactive) enum CssGridTrackBreadth {
-    Length(f32),
-    Percent(f32),
-    Fraction(f32),
-    Auto,
-    MinContent,
-    MaxContent,
-}
+#[path = "style_value_types.rs"]
+mod value_types;
+pub(in crate::renderer::backends::html_interactive) use value_types::{
+    CssGridTrack, CssGridTrackBreadth, CssLength,
+};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(in crate::renderer::backends::html_interactive) enum CssBoxSizing {
@@ -51,11 +26,30 @@ pub(in crate::renderer::backends::html_interactive) enum CssOverflow {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(in crate::renderer::backends::html_interactive) enum CssOverflowAxis {
+    #[default]
+    Visible,
+    Clip,
+    Hidden,
+    Auto,
+    Scroll,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(in crate::renderer::backends::html_interactive) enum CssTextAlign {
     #[default]
     Start,
     Center,
     End,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(in crate::renderer::backends::html_interactive) enum CssVerticalAlign {
+    #[default]
+    Baseline,
+    Top,
+    Middle,
+    Bottom,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -108,11 +102,17 @@ pub(in crate::renderer::backends::html_interactive) struct CssStyle {
     pub(in crate::renderer::backends::html_interactive) box_shadow: Option<CssBoxShadow>,
     pub(in crate::renderer::backends::html_interactive) opacity: f32,
     pub(in crate::renderer::backends::html_interactive) border: Option<String>,
+    pub(in crate::renderer::backends::html_interactive) border_style: CssBorderStyle,
+    pub(in crate::renderer::backends::html_interactive) border_top_style: Option<CssBorderStyle>,
+    pub(in crate::renderer::backends::html_interactive) border_right_style: Option<CssBorderStyle>,
+    pub(in crate::renderer::backends::html_interactive) border_bottom_style: Option<CssBorderStyle>,
+    pub(in crate::renderer::backends::html_interactive) border_left_style: Option<CssBorderStyle>,
     pub(in crate::renderer::backends::html_interactive) border_width: f32,
     pub(in crate::renderer::backends::html_interactive) border_top_width: Option<f32>,
     pub(in crate::renderer::backends::html_interactive) border_right_width: Option<f32>,
     pub(in crate::renderer::backends::html_interactive) border_bottom_width: Option<f32>,
     pub(in crate::renderer::backends::html_interactive) border_left_width: Option<f32>,
+    pub(in crate::renderer::backends::html_interactive) border_collapse: bool,
     pub(in crate::renderer::backends::html_interactive) border_top_color: Option<String>,
     pub(in crate::renderer::backends::html_interactive) border_right_color: Option<String>,
     pub(in crate::renderer::backends::html_interactive) border_bottom_color: Option<String>,
@@ -120,13 +120,19 @@ pub(in crate::renderer::backends::html_interactive) struct CssStyle {
     pub(in crate::renderer::backends::html_interactive) border_radius: CssLength,
     pub(in crate::renderer::backends::html_interactive) box_sizing: CssBoxSizing,
     pub(in crate::renderer::backends::html_interactive) overflow: CssOverflow,
+    pub(in crate::renderer::backends::html_interactive) overflow_x: CssOverflowAxis,
+    pub(in crate::renderer::backends::html_interactive) overflow_y: CssOverflowAxis,
     pub(in crate::renderer::backends::html_interactive) font_size: f32,
     pub(in crate::renderer::backends::html_interactive) line_height: f32,
     pub(in crate::renderer::backends::html_interactive) line_height_factor: Option<f32>,
+    pub(in crate::renderer::backends::html_interactive) normal_line_height: bool,
+    pub(in crate::renderer::backends::html_interactive) text_baseline_offset: Option<f32>,
     pub(in crate::renderer::backends::html_interactive) font_family: String,
     pub(in crate::renderer::backends::html_interactive) font_feature_settings: Option<String>,
+    pub(in crate::renderer::backends::html_interactive) text_spacing_trim: CssTextSpacingTrim,
     pub(in crate::renderer::backends::html_interactive) italic: bool,
     pub(in crate::renderer::backends::html_interactive) text_align: CssTextAlign,
+    pub(in crate::renderer::backends::html_interactive) vertical_align: CssVerticalAlign,
     pub(in crate::renderer::backends::html_interactive) text_transform: CssTextTransform,
     pub(in crate::renderer::backends::html_interactive) white_space: CssWhiteSpace,
     pub(in crate::renderer::backends::html_interactive) list_style_none: bool,
@@ -149,6 +155,7 @@ pub(in crate::renderer::backends::html_interactive) struct CssStyle {
     pub(in crate::renderer::backends::html_interactive) min_width: Option<CssLength>,
     pub(in crate::renderer::backends::html_interactive) max_width: Option<CssLength>,
     pub(in crate::renderer::backends::html_interactive) height: Option<f32>,
+    pub(in crate::renderer::backends::html_interactive) explicit_height_auto: bool,
     pub(in crate::renderer::backends::html_interactive) max_height: Option<f32>,
     pub(in crate::renderer::backends::html_interactive) percentage_height_basis: Option<f32>,
     pub(in crate::renderer::backends::html_interactive) position: CssPosition,
@@ -168,6 +175,8 @@ pub(in crate::renderer::backends::html_interactive) struct CssStyle {
     pub(in crate::renderer::backends::html_interactive) inline_block: bool,
     pub(in crate::renderer::backends::html_interactive) inline_atomic: bool,
     pub(in crate::renderer::backends::html_interactive) gap: f32,
+    pub(in crate::renderer::backends::html_interactive) row_gap: Option<f32>,
+    pub(in crate::renderer::backends::html_interactive) flow_column_gap: Option<f32>,
     pub(in crate::renderer::backends::html_interactive) flex_direction: FlexDirection,
     pub(in crate::renderer::backends::html_interactive) flex_wrap: FlexWrap,
     pub(in crate::renderer::backends::html_interactive) flex_grow: f32,
@@ -176,8 +185,16 @@ pub(in crate::renderer::backends::html_interactive) struct CssStyle {
     pub(in crate::renderer::backends::html_interactive) align_items: Option<AlignItems>,
     pub(in crate::renderer::backends::html_interactive) justify_content: Option<JustifyContent>,
     pub(in crate::renderer::backends::html_interactive) grid_template_columns: Vec<CssGridTrack>,
+    pub(in crate::renderer::backends::html_interactive) column_count: Option<usize>,
+    pub(in crate::renderer::backends::html_interactive) column_width: Option<f32>,
+    pub(in crate::renderer::backends::html_interactive) column_gap: f32,
+    pub(in crate::renderer::backends::html_interactive) break_inside_avoid: bool,
     pub(in crate::renderer::backends::html_interactive) explicit_color: bool,
+    pub(in crate::renderer::backends::html_interactive) explicit_typography: bool,
     pub(in crate::renderer::backends::html_interactive) explicit_background: bool,
+    pub(in crate::renderer::backends::html_interactive) explicit_padding: bool,
+    pub(in crate::renderer::backends::html_interactive) explicit_border: bool,
+    pub(in crate::renderer::backends::html_interactive) explicit_width: bool,
     pub(in crate::renderer::backends::html_interactive) viewport_width: f32,
     pub(in crate::renderer::backends::html_interactive) viewport_height: f32,
 }

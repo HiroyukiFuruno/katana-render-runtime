@@ -1,10 +1,48 @@
+#[cfg(test)]
+pub(super) use super::font_file_fixture;
+
+#[cfg(target_os = "macos")]
+pub(super) use font::{FileStamp, observe_path_stamp, stamp_path_uncached};
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_text_known_admission_bridge.rs"]
+mod known_admission;
+#[cfg(target_os = "macos")]
+pub(super) use known_admission::{
+    matching as known_matching, names as known_family_names, observe_all as known_observe_all,
+    supports as known_supports, usable as known_memo_usable,
+};
+#[path = "svg_rasterize_html_input_metrics.rs"]
+mod input_metrics;
+pub(crate) use input_metrics::InputCharacterMetrics;
+pub(super) use input_metrics::html_input_character_metrics;
+
+#[path = "svg_rasterize_text_dx.rs"]
+mod dx;
+#[cfg(test)]
+pub(super) use dx::shaped_html_text_dx;
+pub(super) use dx::shaped_html_text_dx_with_trim;
+
+#[path = "svg_rasterize_text_features.rs"]
+mod features;
+pub(crate) use features::TextSpacingTrim;
+
+#[path = "svg_rasterize_html_line_metrics.rs"]
+mod line_metrics;
+pub(super) use line_metrics::{
+    clear_html_line_metrics_cache, html_line_metrics, html_text_baseline_for_text,
+};
+
 #[path = "svg_rasterize_text_fallback_memo.rs"]
 mod fallback_memo;
 #[path = "svg_rasterize_text_usvg_cmap.rs"]
 mod usvg_cmap;
 
-use super::font::html_font_db_for_text;
+pub(super) use super::font::HtmlFontRequest;
+pub(super) use super::font::html_font_db_for_measured_text;
 use resvg::usvg;
+#[path = "svg_rasterize_text_variations.rs"]
+mod variations;
+pub(in crate::markdown::svg_rasterize) use variations::{FontShape, effective_html_font_size};
 
 #[path = "svg_rasterize_text_shaping_cache.rs"]
 mod cache;
@@ -12,21 +50,32 @@ mod cache;
 mod fallback;
 #[path = "svg_rasterize_text_font.rs"]
 mod font;
+use font::{FontSourceGeneration, font_source_generation};
+#[path = "svg_rasterize_text_measurement_token.rs"]
+mod measurement_token;
 #[path = "svg_rasterize_text_weight.rs"]
 mod weight;
+pub(crate) use measurement_token::{HtmlTextMeasurementToken, HtmlTextMeasurementTokenKey};
 
-use cache::cached_shaped_run;
-use fallback::html_font_runs;
+use cache::cached_shaped_run_with_trim;
+pub(crate) use harfrust::SvgTextRunMetrics;
+#[path = "svg_rasterize_text_family_runs.rs"]
+mod family_runs;
+#[path = "svg_rasterize_text_family_scope_cache.rs"]
+mod family_scope_cache;
 pub(super) use fallback_memo::{install as install_html_fallback_memo, with_validated_tree_parse};
+use family_runs::resolved_font_runs;
 use font::matching_font_face;
+#[cfg(test)]
+pub(super) use tests::diagnostic_resolved_font_runs;
 pub(super) use usvg_cmap::install as install_html_font_resolver;
+pub(super) use usvg_cmap::loaded_html_font;
 
-struct TextDxState {
-    values: Vec<f32>,
-    cumulative_advance_delta: f32,
-    current_shift: f32,
-}
+#[path = "svg_rasterize_text_shaping_scope.rs"]
+mod scope;
+pub(super) use scope::{with_font_face_cache_scope, with_render_scoped_stamp_batch};
 
+#[cfg(test)]
 pub(super) fn shaped_text_width(
     text: &str,
     font_family: &str,
@@ -36,284 +85,115 @@ pub(super) fn shaped_text_width(
     letter_spacing: f32,
     font_feature_settings: Option<&str>,
 ) -> Option<f32> {
-    let database = html_font_db_for_text(font_family, text);
-    let base_face_id = matching_font_face(&database, font_family, font_weight, italic)?;
-    let mut advance = 0.0;
-    for (face_id, run) in html_font_runs(&database, base_face_id, text, font_weight, italic) {
-        advance += cached_shaped_run(&database, face_id, &run, font_size, font_feature_settings)?;
-    }
+    shaped_text_width_with_trim(
+        text,
+        font_family,
+        FontShape::new(font_size, font_weight, italic),
+        letter_spacing,
+        font_feature_settings,
+    )
+}
+
+pub(super) fn shaped_text_width_with_trim(
+    text: &str,
+    font_family: &str,
+    font: FontShape,
+    letter_spacing: f32,
+    font_feature_settings: Option<&str>,
+) -> Option<f32> {
+    let database = html_font_db_for_measured_text(font_family, text, font.weight, font.italic);
+    shaped_text_width_in_database_with_trim(
+        &database,
+        text,
+        font_family,
+        font,
+        letter_spacing,
+        font_feature_settings,
+    )
+}
+
+pub(super) fn shaped_text_width_in_database_with_trim(
+    database: &std::sync::Arc<usvg::fontdb::Database>,
+    text: &str,
+    font_family: &str,
+    font: FontShape,
+    letter_spacing: f32,
+    font_feature_settings: Option<&str>,
+) -> Option<f32> {
+    let base_face_id = matching_font_face(database, font_family, font.weight, font.italic)?;
+    let advance = shaped_runs_advance(
+        database,
+        base_face_id,
+        font_family,
+        text,
+        font,
+        font_feature_settings,
+    )?;
     let spacing = text.chars().count().saturating_sub(1) as f32 * letter_spacing;
     Some(advance + spacing)
 }
 
-pub(super) fn shaped_html_text_dx(
-    text: &str,
+fn shaped_runs_advance(
+    database: &std::sync::Arc<usvg::fontdb::Database>,
+    base_face_id: usvg::fontdb::ID,
     font_family: &str,
-    font_size: f32,
-    font_weight: u16,
-    italic: bool,
-    font_feature_settings: Option<&str>,
-) -> Option<Vec<f32>> {
-    font_feature_settings?;
-    let database = html_font_db_for_text(font_family, text);
-    let base_face_id = matching_font_face(&database, font_family, font_weight, italic)?;
-    let mut state = TextDxState::new(text.chars().count());
-    for (face_id, run) in html_font_runs(&database, base_face_id, text, font_weight, italic) {
-        state.append_run(&database, face_id, &run, font_size, font_feature_settings)?;
-    }
-    state.finish()
-}
-
-impl TextDxState {
-    fn new(capacity: usize) -> Self {
-        Self {
-            values: Vec::with_capacity(capacity),
-            cumulative_advance_delta: 0.0,
-            current_shift: 0.0,
-        }
-    }
-
-    fn append_run(
-        &mut self,
-        database: &usvg::fontdb::Database,
-        face_id: usvg::fontdb::ID,
-        run: &str,
-        font_size: f32,
-        font_feature_settings: Option<&str>,
-    ) -> Option<()> {
-        let natural = shape_run_character_metrics(database, face_id, run, font_size, None)?;
-        let featured =
-            shape_run_character_metrics(database, face_id, run, font_size, font_feature_settings)?;
-        for (natural, featured) in natural.into_iter().zip(featured) {
-            let desired_shift = self.cumulative_advance_delta + featured.1 - natural.1;
-            self.values.push(desired_shift - self.current_shift);
-            self.current_shift = desired_shift;
-            self.cumulative_advance_delta += featured.0 - natural.0;
-        }
-        Some(())
-    }
-
-    fn finish(self) -> Option<Vec<f32>> {
-        self.values
-            .iter()
-            .any(|value| value.abs() > f32::EPSILON)
-            .then_some(self.values)
-    }
-}
-
-fn shape_text_with_face(
-    database: &usvg::fontdb::Database,
-    face_id: usvg::fontdb::ID,
     text: &str,
-    font_size: f32,
+    shape: FontShape,
     font_feature_settings: Option<&str>,
 ) -> Option<f32> {
-    database
-        .with_face_data(face_id, |data, face_index| {
-            let face = rustybuzz::Face::from_slice(data, face_index)?;
-            let mut buffer = rustybuzz::UnicodeBuffer::new();
-            buffer.push_str(text);
-            buffer.guess_segment_properties();
-            let glyphs =
-                rustybuzz::shape(&face, &rustybuzz_features(font_feature_settings), buffer);
-            let advance = glyphs
-                .glyph_positions()
-                .iter()
-                .map(|position| position.x_advance as f32)
-                .sum::<f32>();
-            Some(advance * font_size / face.units_per_em() as f32)
-        })
-        .flatten()
-}
-
-fn shape_run_character_metrics(
-    database: &usvg::fontdb::Database,
-    face_id: usvg::fontdb::ID,
-    text: &str,
-    font_size: f32,
-    font_feature_settings: Option<&str>,
-) -> Option<Vec<(f32, f32)>> {
-    database
-        .with_face_data(face_id, |data, face_index| {
-            shape_face_character_metrics(data, face_index, text, font_size, font_feature_settings)
-        })
-        .flatten()
-}
-
-fn shape_face_character_metrics(
-    data: &[u8],
-    face_index: u32,
-    text: &str,
-    font_size: f32,
-    font_feature_settings: Option<&str>,
-) -> Option<Vec<(f32, f32)>> {
-    let face = rustybuzz::Face::from_slice(data, face_index)?;
-    let scale = font_size / face.units_per_em() as f32;
-    let mut buffer = rustybuzz::UnicodeBuffer::new();
-    buffer.push_str(text);
-    buffer.guess_segment_properties();
-    if buffer.direction() != rustybuzz::Direction::LeftToRight {
-        return None;
+    let runs = resolved_font_runs(
+        database,
+        base_face_id,
+        font_family,
+        text,
+        shape.weight,
+        shape.italic,
+    );
+    #[cfg(all(test, target_os = "macos"))]
+    for (face_id, _) in &runs {
+        super::font::record_actual_selected_face(database, Some(*face_id));
     }
-    let glyphs = rustybuzz::shape(&face, &rustybuzz_features(font_feature_settings), buffer);
-    collect_character_metrics(&glyphs, text, scale)
+    advance_runs(database, runs, shape, font_feature_settings)
 }
 
-fn collect_character_metrics(
-    glyphs: &rustybuzz::GlyphBuffer,
-    text: &str,
-    scale: f32,
-) -> Option<Vec<(f32, f32)>> {
-    let character_starts = text
-        .char_indices()
-        .map(|(index, _)| index)
-        .collect::<Vec<_>>();
-    let mut metrics = vec![(0.0, 0.0); character_starts.len()];
-    let mut seen = vec![false; character_starts.len()];
-    for (info, position) in glyphs.glyph_infos().iter().zip(glyphs.glyph_positions()) {
-        let character_index = character_starts
-            .binary_search(&(info.cluster as usize))
-            .ok()?;
-        metrics[character_index].0 += position.x_advance as f32 * scale;
-        if !seen[character_index] {
-            metrics[character_index].1 = position.x_offset as f32 * scale;
-            seen[character_index] = true;
-        }
-    }
-    seen.into_iter().all(|seen| seen).then_some(metrics)
-}
+#[path = "svg_rasterize_text_shaping_font_runs.rs"]
+mod font_runs;
+use font_runs::advance_runs;
+pub(super) use font_runs::html_text_font_runs;
 
-fn rustybuzz_features(settings: Option<&str>) -> Vec<rustybuzz::Feature> {
-    settings
-        .into_iter()
-        .flat_map(|settings| settings.split(','))
-        .filter_map(|setting| {
-            let mut parts = setting.split_whitespace();
-            let tag = parts.next()?.trim_matches(['\'', '"']);
-            let value = parts.next().unwrap_or("1");
-            format!("{tag}={value}").parse().ok()
-        })
-        .collect()
-}
+#[path = "svg_rasterize_text_harfrust.rs"]
+mod harfrust;
+#[cfg(test)]
+#[path = "svg_rasterize_text_shaping_test_font_data.rs"]
+pub(super) mod test_font_data;
+#[cfg(target_os = "macos")]
+pub(in crate::markdown::svg_rasterize) use harfrust::eligible_immutable_system_path;
+pub(super) use harfrust::shape_run_character_metrics_with_trim;
+#[path = "svg_rasterize_text_shaping_svg_fragments.rs"]
+mod svg_fragments;
+#[path = "svg_rasterize_text_shaping_svg_metrics.rs"]
+mod svg_metrics;
+pub(super) use svg_fragments::SvgTextFragmentLayout;
+pub(super) use svg_fragments::shaped_svg_fragment_layout;
+#[cfg(target_os = "macos")]
+pub(super) use svg_metrics::macos_svg_dom_layout_ascent;
+pub(super) use svg_metrics::svg_dom_layout_ascent;
+#[path = "svg_rasterize_text_shaping_x_height.rs"]
+mod svg_x_height;
+pub(super) use svg_metrics::shaped_svg_text_metrics;
+pub(super) use svg_x_height::shaped_svg_font_x_height;
 
 #[cfg(test)]
-mod tests {
-    use super::font::{
-        font_has_char, font_runs, fontdb_family, matching_fallback_face, matching_font_face,
-    };
-    use super::{
-        collect_character_metrics, rustybuzz_features, shape_face_character_metrics,
-        shape_text_with_face, shaped_html_text_dx,
-    };
-    use crate::markdown::svg_rasterize::font::{bundled_font_db, html_font_db_for_text};
-    use resvg::usvg;
+pub(super) use super::font::html_font_db_for_text;
 
-    #[test]
-    fn html_text_measurement_uses_per_character_font_fallback() {
-        let database = html_font_db_for_text("Noto Sans", "A日本B");
-        let used_fallback =
-            matching_font_face(&database, "Noto Sans", 400, false).and_then(|base| {
-                matching_fallback_face(&database, base, '日', 400, false).map(|fallback| {
-                    !font_has_char(&database, base, '日')
-                        && font_has_char(&database, fallback, '日')
-                        && font_runs(&database, base, "A日本B").len() == 3
-                })
-            });
-        assert_eq!(used_fallback, Some(true));
+#[cfg(test)]
+#[path = "svg_rasterize_text_shaping_tests.rs"]
+mod tests;
 
-        let bundled_database = bundled_font_db();
-        let bundled_only = matching_font_face(&bundled_database, "Noto Sans", 400, false)
-            .is_some_and(|base| {
-                matching_fallback_face(&bundled_database, base, '日', 400, false).is_none()
-                    && font_runs(&bundled_database, base, "A日本B").len() == 1
-            });
-        assert!(bundled_only);
-    }
+#[cfg(all(test, target_os = "macos"))]
+pub(super) use measurement_token::with_selection_for_coverage;
 
-    #[test]
-    fn removed_font_face_fails_without_using_stale_font_data() {
-        let mut database = (*bundled_font_db()).clone();
-        let face_id = matching_font_face(&database, "Noto Sans", 400, false);
-        assert!(face_id.is_some(), "bundled Noto Sans must be available");
-        let removed_face_is_rejected = face_id.is_some_and(|face_id| {
-            database.remove_face(face_id);
-            matching_fallback_face(&database, face_id, '日', 400, false).is_none()
-                && !font_has_char(&database, face_id, 'A')
-                && shape_text_with_face(&database, face_id, "A", 16.0, None).is_none()
-        });
-        assert!(removed_face_is_rejected);
-    }
-
-    #[test]
-    fn generic_families_and_feature_settings_cover_css_shaping_inputs() {
-        assert!(matches!(
-            fontdb_family("serif"),
-            usvg::fontdb::Family::Serif
-        ));
-        assert!(matches!(
-            fontdb_family("cursive"),
-            usvg::fontdb::Family::Cursive
-        ));
-        assert!(matches!(
-            fontdb_family("fantasy"),
-            usvg::fontdb::Family::Fantasy
-        ));
-        assert!(rustybuzz_features(None).is_empty());
-        assert_eq!(rustybuzz_features(Some("'liga', 'kern' 0")).len(), 2);
-    }
-
-    #[test]
-    fn shaped_dx_applies_palt_without_expanding_text_nodes() {
-        let dx = shaped_html_text_dx(
-            "（JSC 案件）",
-            "\"Noto Sans JP\", \"Hiragino Sans\", \"Yu Gothic\", sans-serif",
-            48.0,
-            700,
-            false,
-            Some(r#""palt" 1"#),
-        );
-        assert!(
-            dx.as_ref().is_some_and(|dx| {
-                dx.len() == "（JSC 案件）".chars().count() && dx[0] < 0.0
-            })
-        );
-    }
-
-    #[test]
-    fn character_metrics_reject_right_to_left_runs() {
-        let database = html_font_db_for_text("Noto Sans", "مرحبا");
-        let metrics = matching_font_face(&database, "Noto Sans", 400, false)
-            .and_then(|face_id| {
-                database.with_face_data(face_id, |data, face_index| {
-                    shape_face_character_metrics(data, face_index, "مرحبا", 16.0, None)
-                })
-            })
-            .flatten();
-
-        assert!(metrics.is_none());
-    }
-
-    #[test]
-    fn character_metrics_reuses_first_offset_for_multi_glyph_cluster() {
-        let database = bundled_font_db();
-        let metrics = matching_font_face(&database, "Noto Sans", 400, false).and_then(|face_id| {
-            database
-                .with_face_data(face_id, |data, face_index| {
-                    rustybuzz::Face::from_slice(data, face_index).and_then(|face| {
-                        let mut buffer = rustybuzz::UnicodeBuffer::new();
-                        buffer.add('a', 0);
-                        buffer.add('b', 0);
-                        let glyphs = rustybuzz::shape(&face, &[], buffer);
-                        let glyph_count = glyphs.glyph_infos().len();
-                        collect_character_metrics(&glyphs, "a", 1.0)
-                            .map(|metrics| (glyph_count, metrics))
-                    })
-                })
-                .flatten()
-        });
-
-        assert!(metrics.is_some_and(|(glyph_count, metrics)| {
-            glyph_count > 1 && metrics.len() == 1 && metrics[0].0 > 0.0
-        }));
-    }
-}
+#[cfg(all(test, target_os = "macos"))]
+pub(in crate::markdown::svg_rasterize) use harfrust::face_cache::observation::{
+    source_get as observe_source_cache_get, state as font_cache_observation_state,
+};

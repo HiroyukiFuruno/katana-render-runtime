@@ -2,27 +2,46 @@ use super::js_runtime_resources::{DrawioResource, DrawioResourceCatalog};
 use super::js_runtime_scripts::DrawioRuntimeScripts;
 use crate::markdown::color_preset::DiagramColorPreset;
 use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
-
-type RuntimeBundleCache = Mutex<HashMap<PathBuf, Arc<str>>>;
-type RuntimeBundleGuard<'a> = MutexGuard<'a, HashMap<PathBuf, Arc<str>>>;
-
-static BUNDLE_CACHE: OnceLock<RuntimeBundleCache> = OnceLock::new();
+#[cfg(test)]
+use crate::markdown::runtime_resource_loader::{
+    BundledResource, RuntimeResourceLoader as runtime_resource_loader,
+};
+#[cfg(test)]
+use std::path::Path;
 
 pub(super) struct DrawioJsRuntimeOps;
 
 impl DrawioJsRuntimeOps {
+    #[cfg(test)]
     pub(super) fn render(
         source: &str,
         drawio_js: &Path,
         preset: &DiagramColorPreset,
     ) -> Result<String, String> {
-        let bundle = read_drawio_bundle(drawio_js)?;
+        Self::render_with_origin(source, drawio_js, preset, false)
+    }
+
+    #[cfg(test)]
+    pub(super) fn render_with_origin(
+        source: &str,
+        drawio_js: &Path,
+        preset: &DiagramColorPreset,
+        bundled: bool,
+    ) -> Result<String, String> {
+        let bundle =
+            runtime_resource_loader::read(drawio_js, bundled.then_some(BundledResource::Drawio))
+                .map_err(|error| format!("Failed to read Draw.io JavaScript bundle: {error}"))?;
+        Self::render_bundle(source, &bundle, preset)
+    }
+
+    pub(super) fn render_bundle(
+        source: &str,
+        bundle: &str,
+        preset: &DiagramColorPreset,
+    ) -> Result<String, String> {
         let request = DrawioRenderRequest::new(source, preset)?;
         let request_json = request.to_json_value().to_string();
-        let scripts = DrawioRuntimeScripts::build(&bundle, &request_json);
+        let scripts = DrawioRuntimeScripts::build(bundle, &request_json);
         let svg = DiagramV8Runtime::render(&scripts)?;
         rendered_svg(svg)
     }
@@ -65,37 +84,10 @@ fn resource_json(resource: &DrawioResource) -> serde_json::Value {
     })
 }
 
-fn read_drawio_bundle(drawio_js: &Path) -> Result<Arc<str>, String> {
-    let cache = BUNDLE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    read_drawio_bundle_with_cache(drawio_js, cache)
-}
-
-fn read_drawio_bundle_with_cache(
-    drawio_js: &Path,
-    cache: &RuntimeBundleCache,
-) -> Result<Arc<str>, String> {
-    let path = drawio_js.to_path_buf();
-    let mut bundles = lock_cache(cache)?;
-    if let Some(bundle) = bundles.get(&path) {
-        return Ok(bundle.clone());
-    }
-
-    let bundle = match std::fs::read_to_string(drawio_js) {
-        Ok(bundle) => bundle,
-        Err(error) => {
-            return Err(format!("Failed to read Draw.io JavaScript bundle: {error}"));
-        }
-    };
-    let bundle = Arc::<str>::from(bundle);
-    bundles.insert(path, bundle.clone());
-    Ok(bundle)
-}
-
-fn lock_cache(cache: &RuntimeBundleCache) -> Result<RuntimeBundleGuard<'_>, String> {
-    match cache.lock() {
-        Ok(cache) => Ok(cache),
-        Err(error) => Err(error.to_string()),
-    }
+#[cfg(test)]
+fn read_drawio_bundle(drawio_js: &Path) -> Result<String, String> {
+    runtime_resource_loader::read_file(drawio_js)
+        .map_err(|error| format!("Failed to read Draw.io JavaScript bundle: {error}"))
 }
 
 fn ensure_svg(svg: &str) -> Result<(), String> {

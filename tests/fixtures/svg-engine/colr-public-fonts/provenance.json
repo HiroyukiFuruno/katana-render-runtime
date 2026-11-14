@@ -1,0 +1,29 @@
+{
+  "schema": "krr-svg-colr-test-fonts-v1",
+  "sourcePackage": "ttf-parser",
+  "sourceVersion": "0.25.1",
+  "sourceRepository": "https://github.com/harfbuzz/ttf-parser",
+  "sourceCommit": "56c33b910b03ca152f78363ec471c5dfd97c3069",
+  "originalProject": "https://github.com/googlefonts/color-fonts",
+  "license": "Apache-2.0",
+  "files": [
+    {
+      "path": "colr_1.ttf",
+      "sourcePath": "tests/fonts/colr_1.ttf",
+      "sha256": "0441303144c314d46ee12cf9742f1dd3fcbcb42700e7c51dba7b1b689c1dd1d7",
+      "bytes": 21568
+    },
+    {
+      "path": "colr_1_variable.ttf",
+      "sourcePath": "tests/fonts/colr_1_variable.ttf",
+      "sha256": "1e861480ba54c411af09d600e9b0ecf8deb15b8c2929589ac5a84f2038332c18",
+      "bytes": 53096
+    },
+    {
+      "path": "LICENSE",
+      "sourcePath": "tests/fonts/colr_1_LICENSE",
+      "sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+      "bytes": 11357
+    }
+  ]
+}

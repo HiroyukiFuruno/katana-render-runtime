@@ -1,0 +1,295 @@
+use super::super::ResourceFile;
+use super::super::test_support::{
+    TempDirectory, physical_font_fixture, shared_physical_font_fixture,
+};
+use super::{
+    FontResolutionCache, face_identity, physical_file, resolve_font_with_cache,
+    supported_font_path, unique_file_face,
+};
+use resvg::usvg::fontdb::{Database, Source};
+use std::fs;
+
+const FONT_BYTES: &[u8] = include_bytes!("../../../assets/fonts/NotoSans-Regular.ttf");
+const MEMORY_ONLY_ERROR: &str = "font face is memory-only, not physically attributable";
+const NON_FILE_ERROR: &str = "font source is not a regular file";
+const SHARED_FILE_CASES: [(&str, bool, Option<&str>); 2] = [
+    ("matching bytes", false, None),
+    (
+        "different backing bytes",
+        true,
+        Some("shared font bytes differ from the physical file"),
+    ),
+];
+const FONT_PATH_CASES: [(&str, bool); 6] = [
+    ("font.ttf", true),
+    ("font.OTF", true),
+    ("font.ttc", true),
+    ("font.otc", true),
+    ("font.woff2", false),
+    ("font", false),
+];
+
+#[test]
+fn supported_font_path_matches_supported_extensions_case_insensitively() {
+    for (path, expected) in FONT_PATH_CASES {
+        assert_eq!(
+            supported_font_path(std::path::Path::new(path)),
+            expected,
+            "{path}"
+        );
+    }
+}
+
+#[test]
+fn physical_file_rejects_an_existing_directory() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    assert_eq!(
+        physical_file(temp.path()).err().as_deref(),
+        Some(NON_FILE_ERROR)
+    );
+    Ok(())
+}
+
+#[test]
+fn physical_file_rejects_a_missing_path_before_metadata() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let missing = temp.path().join("missing-font.ttf");
+    let error = physical_file(&missing)
+        .err()
+        .ok_or("missing physical font unexpectedly succeeded")?;
+    assert!(error.starts_with("canonicalize font:"));
+    Ok(())
+}
+
+#[test]
+fn physical_font_face_is_bound_to_the_real_file_bytes() -> Result<(), String> {
+    let (temp, database, _) = physical_font_fixture()?;
+    let path = temp.path().join("physical-font.ttf");
+    let face = database
+        .faces()
+        .next()
+        .ok_or("fontdb did not load the font")?;
+
+    let identity = face_identity(&database, face)?;
+    let (canonical, digest, _) = physical_file(&path)?;
+    assert_eq!(identity.path, canonical);
+    assert_eq!(identity.file_sha256, digest);
+    assert_eq!(identity.face_index, 0);
+    Ok(())
+}
+
+#[test]
+fn physical_face_handle_cannot_outlive_its_database_entry() -> Result<(), String> {
+    let (_temp, mut database, _) = physical_font_fixture()?;
+    let face = database
+        .faces()
+        .next()
+        .cloned()
+        .ok_or("fixture face missing")?;
+    let identity = face_identity(&database, &face)?;
+    database.remove_face(face.id);
+    assert_eq!(physical_file(&identity.path)?.1, identity.file_sha256);
+    assert_eq!(
+        face_identity(&database, &face).err().as_deref(),
+        Some("fontdb face bytes could not be read")
+    );
+    Ok(())
+}
+
+#[test]
+fn custom_font_resolution_requires_the_physical_resource_in_this_capture() -> Result<(), String> {
+    let (temp, resource_database, mut selected) = physical_font_fixture()?;
+    selected.is_custom_font = true;
+    let (body_path, bytes_sha256, _) = physical_file(&temp.path().join("physical-font.ttf"))?;
+    let system_database = Database::new();
+    let mut cache = FontResolutionCache::for_system_database(&system_database);
+    let mut resolve = |resources: &[ResourceFile]| {
+        resolve_font_with_cache(
+            &system_database,
+            &resource_database,
+            resources,
+            &selected,
+            &mut cache,
+        )
+    };
+    let captured = ResourceFile {
+        url: "https://probe.invalid/captured-font".to_owned(),
+        body_path: body_path.clone(),
+        bytes_sha256,
+    };
+    assert_eq!(resolve(&[captured])?.identity.path, body_path);
+    assert_eq!(
+        resolve(&[]).err().as_deref(),
+        Some("no exact physical face matched the CDP PostScript name")
+    );
+    Ok(())
+}
+
+#[test]
+fn mismatched_face_source_cannot_attest_different_physical_bytes() -> Result<(), String> {
+    let (temp, database, _) = physical_font_fixture()?;
+    let mut face = database
+        .faces()
+        .next()
+        .cloned()
+        .ok_or("fontdb did not load the font")?;
+    let other_path = temp.path().join("other-physical-font.ttf");
+    let mut other_bytes = FONT_BYTES.to_vec();
+    other_bytes.push(0);
+    fs::write(&other_path, other_bytes).map_err(|error| error.to_string())?;
+    face.source = Source::File(other_path);
+    assert_eq!(
+        face_identity(&database, &face).err().as_deref(),
+        Some("fontdb face bytes differ from the physical file")
+    );
+    Ok(())
+}
+
+#[test]
+fn shared_file_identity_requires_matching_physical_bytes() -> Result<(), String> {
+    for (case, append_byte, expected_error) in SHARED_FILE_CASES {
+        let (temp, database, source_bytes) = shared_physical_font_fixture(append_byte)?;
+        assert_shared_file_identity_case(&temp, &database, &source_bytes, case, expected_error)?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn physical_file_identity_canonicalizes_a_symlink_to_the_captured_font() -> Result<(), String> {
+    let (_temp, target, alias) = linked_font_fixture()?;
+    let mut database = Database::new();
+    database
+        .load_font_file(&alias)
+        .map_err(|error| error.to_string())?;
+    let face = database.faces().next().ok_or("fixture face missing")?;
+
+    let identity = face_identity(&database, face)?;
+    assert_eq!(
+        identity.path,
+        fs::canonicalize(&target).map_err(|error| error.to_string())?
+    );
+    assert_eq!(identity.file_sha256, super::sha256(FONT_BYTES));
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn resource_database_rejects_symlink_aliases_of_one_physical_font() -> Result<(), String> {
+    let (_temp, target, alias) = linked_font_fixture()?;
+    let digest = super::sha256(FONT_BYTES);
+    let resources = [target, alias].map(|body_path| ResourceFile {
+        url: "https://probe.invalid/font".to_owned(),
+        body_path,
+        bytes_sha256: digest.clone(),
+    });
+
+    assert_eq!(
+        super::load_resource_database(&resources).err().as_deref(),
+        Some("duplicate physical font resource path")
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+fn linked_font_fixture() -> Result<(TempDirectory, std::path::PathBuf, std::path::PathBuf), String>
+{
+    let (temp, _, _) = physical_font_fixture()?;
+    let target = temp.path().join("physical-font.ttf");
+    let alias = temp.path().join("font-alias.ttf");
+    std::os::unix::fs::symlink(&target, &alias).map_err(|error| error.to_string())?;
+    Ok((temp, target, alias))
+}
+
+#[test]
+fn unique_shared_font_is_rejected_after_its_file_is_removed() -> Result<(), String> {
+    let (temp, database, _) = shared_physical_font_fixture(false)?;
+    let path = temp.path().join("physical-font.ttf");
+    assert!(unique_file_face(&database).is_some());
+    fs::remove_file(&path).map_err(|error| error.to_string())?;
+    assert!(unique_file_face(&database).is_none());
+    Ok(())
+}
+
+fn assert_shared_file_identity_case(
+    temp: &TempDirectory,
+    database: &Database,
+    source_bytes: &[u8],
+    case: &str,
+    expected_error: Option<&str>,
+) -> Result<(), String> {
+    let path = temp.path().join("physical-font.ttf");
+    let face = database
+        .faces()
+        .next()
+        .ok_or("SharedFile face is missing")?;
+    let Source::SharedFile(source_path, backing_bytes) = &face.source else {
+        return Err("fontdb did not retain the SharedFile source".to_string());
+    };
+    assert_eq!(source_path, &path, "{case}");
+    assert_eq!(backing_bytes.as_ref().as_ref(), source_bytes, "{case}");
+
+    let result = face_identity(database, face);
+    if let Some(expected_error) = expected_error {
+        assert_eq!(result.err().as_deref(), Some(expected_error), "{case}");
+    } else {
+        let identity = result?;
+        let (canonical, digest, _) = physical_file(&path)?;
+        assert_eq!(identity.path, canonical, "{case}");
+        assert_eq!(identity.file_sha256, digest, "{case}");
+        assert_eq!(identity.face_index, 0, "{case}");
+    }
+    Ok(())
+}
+
+#[test]
+fn binary_font_has_no_physical_identity_or_unique_file_face() -> Result<(), String> {
+    let mut database = Database::new();
+    database.load_font_data(FONT_BYTES.to_vec());
+    let face = database
+        .faces()
+        .next()
+        .ok_or("bundled font has no parsed face")?;
+
+    assert_eq!(
+        face_identity(&database, face).err().as_deref(),
+        Some(MEMORY_ONLY_ERROR)
+    );
+    assert!(unique_file_face(&database).is_none());
+    Ok(())
+}
+
+#[test]
+fn repeated_postscript_name_is_not_a_unique_physical_face() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let first_path = temp.path().join("first-copy.ttf");
+    let second_path = temp.path().join("second-copy.ttf");
+    fs::write(&first_path, FONT_BYTES).map_err(|error| error.to_string())?;
+    fs::write(&second_path, FONT_BYTES).map_err(|error| error.to_string())?;
+    let mut database = Database::new();
+    database
+        .load_font_file(&first_path)
+        .map_err(|error| error.to_string())?;
+    database
+        .load_font_file(&second_path)
+        .map_err(|error| error.to_string())?;
+
+    assert_eq!(database.faces().count(), 2);
+    assert!(unique_file_face(&database).is_none());
+    Ok(())
+}
+
+#[test]
+fn fontdb_face_with_unsupported_extension_is_not_a_unique_file_face() -> Result<(), String> {
+    let temp = TempDirectory::new()?;
+    let path = temp.path().join("physical-font.bin");
+    fs::write(&path, FONT_BYTES).map_err(|error| error.to_string())?;
+    let mut database = Database::new();
+    database
+        .load_font_file(&path)
+        .map_err(|error| error.to_string())?;
+
+    assert_eq!(database.faces().count(), 1);
+    assert!(unique_file_face(&database).is_none());
+    Ok(())
+}

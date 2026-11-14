@@ -27,7 +27,7 @@ impl HtmlLayoutRenderer {
             participates_in_flow,
             ancestor_node_ids: self.ancestor_node_ids(positioning_context),
             overflow_clips: Vec::new(),
-            clips_overflow: false,
+            overflow_clip_axes: (false, false),
             padding_edge: OverflowClip::new(node_id, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
             inline_fragments: Vec::new(),
         });
@@ -56,6 +56,7 @@ impl HtmlLayoutRenderer {
         let (x, width) = horizontal_box_geometry(layout.x, layout.width, layout.style);
         let y = layout.y + layout.style.margin_top;
         let height = (bottom - y - layout.style.margin_bottom).max(0.0);
+        let overflow_clip_axes = self.element_overflow_clip_axes(node_id, layout.style);
         let element_box = &mut self.element_boxes[index];
         debug_assert_eq!(element_box.node_id, node_id);
         element_box.x = x;
@@ -63,12 +64,13 @@ impl HtmlLayoutRenderer {
         element_box.width = width;
         element_box.height = height;
         element_box.transformed_corners = ElementBox::rectangle_corners(x, y, width, height);
-        element_box.clips_overflow = layout.style.clips_overflow();
-        element_box.padding_edge = padding_edge(node_id, x, y, width, height, layout.style);
+        element_box.overflow_clip_axes = overflow_clip_axes;
+        element_box.padding_edge = padding_edge(node_id, x, y, width, height, layout.style)
+            .with_active_axes(overflow_clip_axes);
     }
 }
 
-fn padding_edge(
+pub(in crate::renderer::backends::html_interactive) fn padding_edge(
     node_id: u64,
     x: f32,
     y: f32,

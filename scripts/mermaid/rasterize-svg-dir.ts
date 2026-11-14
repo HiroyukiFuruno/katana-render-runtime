@@ -1,24 +1,84 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { DiagramTheme, type DiagramThemeName } from "./diagram_theme";
+import { type Fixture, FixtureRepository } from "./diagram_update_fixtures";
+import { fileSha256, parseJsonValue, publishMermaidPair, sha256 } from "./mermaid-pair-manifest";
+import {
+  requireNativeRenderInventory,
+  type VerifiedNativeRenderBinding,
+} from "./native-render-provenance";
+import {
+  assertReferenceScope,
+  type OfficialReferenceMode,
+  referenceMode,
+} from "./official-reference-mode";
 import { PlaywrightLoader } from "./official-renderer";
 import type { BrowserHandle, FontReadyDocument, PageHandle } from "./official-renderer-types";
+import {
+  assignStrictSvg,
+  closeCaptureObservation,
+  observeCaptureSnapshot,
+  prepareStrictSvgCapture,
+  resizeSvgCapture,
+} from "./raster-capture-observation";
+import { RasterProductionSession } from "./raster-production-session";
 import { SvgSourceFonts } from "./rasterize_svg_fonts";
 import { SvgRasterizeInput } from "./rasterize_svg_input";
+import { waitForStrictSvgExternalImages } from "./strict-svg-external-images";
 
-interface CliParsedOptions {
+export interface CliParsedOptions {
   inputDir: string;
   outputDir: string;
   theme: DiagramThemeName;
+  fixturesDir?: string;
+  fixtureGlob?: string;
+  nativeBindingsPath?: string;
+  referenceMode: OfficialReferenceMode;
+  referenceScope: "formal" | "diagnostic";
+  rasterSession?: RasterProductionSession;
+  rasterSessionConfigPath?: string;
+  rasterSessionConfigSha256?: string;
 }
 
 const CliOptions = {
   parse(argv: string[]): CliParsedOptions {
     CliOptions.exitIfHelp(argv);
+    const mode = referenceMode(CliOptions.get(argv, "--reference-mode", "strictVendorOriginal"));
+    const scope = CliOptions.get(argv, "--reference-scope", "formal");
+    if (scope !== "formal" && scope !== "diagnostic") {
+      throw new Error(`Unsupported reference scope: ${scope}`);
+    }
+    assertReferenceScope(mode, scope);
+    const fixturesDir = CliOptions.getOptional(argv, "--fixtures-dir");
+    const fixtureGlob = CliOptions.getOptional(argv, "--fixture-glob");
+    if ((fixturesDir === undefined) !== (fixtureGlob === undefined)) {
+      throw new Error("Fixture source binding requires both --fixtures-dir and --fixture-glob");
+    }
+    if (mode === "strictVendorOriginal" && fixturesDir === undefined) {
+      throw new Error("Strict rasterization requires --fixtures-dir and --fixture-glob");
+    }
+    const inputDir = path.resolve(CliOptions.get(argv, "--input", "tmp/mermaid-sample-official"));
+    const nativeBindingsPath = CliOptions.getOptional(argv, "--native-bindings");
+    if (mode === "strictVendorOriginal" && nativeBindingsPath !== undefined) {
+      throw new Error("Strict native render bindings must be beside the input SVG files");
+    }
     return {
-      inputDir: path.resolve(CliOptions.get(argv, "--input", "tmp/mermaid-sample-official")),
+      inputDir,
       outputDir: path.resolve(CliOptions.get(argv, "--output", "tmp/mermaid-sample-browser")),
       theme: DiagramTheme.parse(CliOptions.get(argv, "--theme", "dark")).name,
+      ...(fixturesDir === undefined ? {} : { fixturesDir: path.resolve(fixturesDir) }),
+      ...(fixtureGlob === undefined ? {} : { fixtureGlob }),
+      ...(nativeBindingsPath === undefined
+        ? mode === "strictVendorOriginal"
+          ? { nativeBindingsPath: path.join(inputDir, "render-bindings.json") }
+          : {}
+        : { nativeBindingsPath: path.resolve(nativeBindingsPath) }),
+      referenceMode: mode,
+      referenceScope: scope,
+      rasterSessionConfigPath: CliOptions.get(argv, "--raster-session-config", ""),
+      rasterSessionConfigSha256: CliOptions.get(argv, "--raster-session-config-sha", ""),
     };
   },
 
@@ -27,10 +87,15 @@ const CliOptions = {
     return index >= 0 ? (argv.at(index + 1) ?? fallback) : fallback;
   },
 
+  getOptional(argv: string[], name: string): string | undefined {
+    const index = argv.indexOf(name);
+    return index < 0 ? undefined : argv.at(index + 1);
+  },
+
   exitIfHelp(argv: string[]) {
     if (argv.includes("--help")) {
       console.log(
-        "Usage: bun run scripts/mermaid/rasterize-svg-dir.ts --input DIR --output DIR [--theme dark|light]",
+        "Usage: bun run scripts/mermaid/rasterize-svg-dir.ts --input DIR --output DIR [--theme dark|light] [--reference-mode strictVendorOriginal|legacyNormalized] [--reference-scope formal|diagnostic] [--fixtures-dir DIR --fixture-glob GLOB]",
       );
       process.exit(0);
     }
@@ -52,9 +117,10 @@ class SvgFixtureRepository {
   }
 }
 
-class SvgBrowserRasterizer {
+export class SvgBrowserRasterizer {
   private browser: BrowserHandle | null = null;
   private theme: DiagramTheme;
+  private nativeBindings = new Map<string, VerifiedNativeRenderBinding>();
 
   constructor(private options: CliParsedOptions) {
     this.theme = DiagramTheme.parse(options.theme);
@@ -62,70 +128,388 @@ class SvgBrowserRasterizer {
 
   async run() {
     this.prepareOutputDir();
+    if (this.options.referenceMode === "strictVendorOriginal") {
+      if (this.options.rasterSession === undefined) {
+        if (!this.options.rasterSessionConfigPath || !this.options.rasterSessionConfigSha256)
+          throw new Error(
+            "Strict candidate raster producer requires external session config path and SHA",
+          );
+        this.options.rasterSession = RasterProductionSession.fromPinnedConfig(
+          this.options.rasterSessionConfigPath,
+          this.options.rasterSessionConfigSha256,
+        );
+      }
+      const fixtures = this.loadFixtures(),
+        repository = new SvgFixtureRepository(this.options.inputDir);
+      this.validateInputInventory(repository.list(), fixtures);
+      const inventory = [...fixtures.values()]
+        .filter((fixture) => (fixture.originalFenceSource ?? "").trim() !== "")
+        .map((fixture) => fixture.slug)
+        .sort();
+      this.requireRasterSession().requireReady("candidate", this.options.outputDir, inventory);
+      for (const fixture of fixtures.values())
+        this.requireRasterSession().pinInput(
+          path.resolve(fixture.filePath),
+          Buffer.from(fixture.markdown),
+        );
+      if (this.options.nativeBindingsPath === undefined)
+        throw new Error("Strict native binding is missing");
+      this.requireRasterSession().pinInput(
+        path.resolve(this.options.nativeBindingsPath),
+        fs.readFileSync(this.options.nativeBindingsPath),
+      );
+      this.requireRasterSession().pinAssets(
+        this.runtimeAssetPaths().map((filePath) => ({
+          path: filePath,
+          sha256: fileSha256(filePath),
+        })),
+      );
+    }
     await this.start();
     try {
       await this.rasterizeAll(new SvgFixtureRepository(this.options.inputDir));
     } finally {
       await this.stop();
     }
+    if (this.options.referenceMode === "strictVendorOriginal") this.requireRasterSession().finish();
   }
 
   private prepareOutputDir() {
-    fs.rmSync(this.options.outputDir, { recursive: true, force: true });
+    if (this.options.referenceMode === "strictVendorOriginal") {
+      if (
+        fs.existsSync(this.options.outputDir) &&
+        fs.readdirSync(this.options.outputDir).length > 0
+      ) {
+        throw new Error(
+          `Strict rasterization requires a fresh output directory: ${this.options.outputDir}`,
+        );
+      }
+    } else {
+      fs.rmSync(this.options.outputDir, { recursive: true, force: true });
+    }
     fs.mkdirSync(this.options.outputDir, { recursive: true });
   }
 
   private async start() {
     const { chromium } = await new PlaywrightLoader().load();
     this.browser = await chromium.launch({ headless: true });
-  }
-
-  private async stop() {
-    await this.browser?.close();
-  }
-
-  private async rasterizeAll(repository: SvgFixtureRepository) {
-    for (const fileName of repository.list()) {
-      const svg = repository.read(fileName);
-      const input = new SvgRasterizeInput(svg);
-      if (!input.shouldRasterize()) {
-        console.log(`skipped ${fileName}`);
-        continue;
+    if (this.options.referenceMode === "strictVendorOriginal") {
+      try {
+        await this.requireRasterSession().observeBrowserBefore(this.browser);
+      } catch (error) {
+        await this.browser.close();
+        throw error;
       }
-      await this.rasterize(fileName, input.browserInnerHtml());
     }
   }
 
-  private async rasterize(fileName: string, svg: string) {
+  private async stop() {
+    if (this.browser === null) return;
+    try {
+      if (this.options.referenceMode === "strictVendorOriginal")
+        await this.requireRasterSession().observeBrowserEnd(this.browser);
+    } finally {
+      await this.browser.close();
+      if (this.options.referenceMode === "strictVendorOriginal")
+        this.requireRasterSession().markBrowserClosed();
+    }
+  }
+
+  private async rasterizeAll(repository: SvgFixtureRepository) {
+    const fixtureMap = this.loadFixtures();
+    const inputFiles = repository.list();
+    this.validateInputInventory(inputFiles, fixtureMap);
+    if (this.options.referenceMode === "strictVendorOriginal") {
+      if (this.options.nativeBindingsPath === undefined) {
+        throw new Error("Strict rasterization has no native render binding receipt");
+      }
+      this.nativeBindings = requireNativeRenderInventory(
+        this.options.nativeBindingsPath,
+        [...fixtureMap.values()],
+        this.options.inputDir,
+      );
+    }
+    for (const fileName of inputFiles) {
+      await this.rasterizeInputFile(repository, fileName, fixtureMap);
+    }
+  }
+
+  private validateInputInventory(inputFiles: string[], fixtureMap: Map<string, Fixture>) {
+    if (this.options.referenceMode !== "strictVendorOriginal") return;
+    const expectedFiles = [...fixtureMap.values()]
+      .filter((fixture) => (fixture.originalFenceSource ?? "").trim() !== "")
+      .map((fixture) => `${fixture.slug}.svg`);
+    const missing = expectedFiles.filter((fileName) => !inputFiles.includes(fileName));
+    const unexpected = inputFiles.filter(
+      (fileName) => !fixtureMap.has(path.basename(fileName, ".svg")),
+    );
+    if (missing.length > 0 || unexpected.length > 0) {
+      throw new Error(
+        `Strict rasterization SVG inventory mismatch; missing=${missing.join(",")}; unexpected=${unexpected.join(",")}`,
+      );
+    }
+  }
+
+  private async rasterizeInputFile(
+    repository: SvgFixtureRepository,
+    fileName: string,
+    fixtureMap: Map<string, Fixture>,
+  ) {
+    const svg = repository.read(fileName);
+    if (this.options.referenceMode === "strictVendorOriginal") {
+      this.requireRasterSession().pinInput(
+        path.resolve(this.options.inputDir, fileName),
+        Buffer.from(svg),
+      );
+    }
+    const fixture = fixtureMap.get(path.basename(fileName, ".svg"));
+    if (fixture !== undefined && (fixture.originalFenceSource ?? "").trim() === "") {
+      console.log(`skipped empty fixture ${fixture.slug}`);
+      return;
+    }
+    if (this.options.referenceMode === "strictVendorOriginal" && fixture === undefined) {
+      throw new Error(`Strict rasterization has no source fixture for ${fileName}`);
+    }
+    const input = new SvgRasterizeInput(svg);
+    if (!input.shouldRasterize()) {
+      if (this.options.referenceMode === "strictVendorOriginal") {
+        throw new Error(`Strict rasterization input is not SVG: ${fileName}`);
+      }
+      console.log(`skipped ${fileName}`);
+      return;
+    }
+    const renderedSvgInput =
+      this.options.referenceMode === "strictVendorOriginal" ? svg : input.browserInnerHtml();
+    await this.rasterize(fileName, svg, renderedSvgInput, fixture);
+  }
+
+  private loadFixtures(): Map<string, Fixture> {
+    if (this.options.fixturesDir === undefined || this.options.fixtureGlob === undefined) {
+      return new Map();
+    }
+    const fixtures = new FixtureRepository(this.options.fixturesDir)
+      .list()
+      .filter((fixture) => matchesFixtureGlob(fixture.fileName, this.options.fixtureGlob ?? ""));
+    if (fixtures.length === 0) throw new Error("Strict rasterization fixture inventory is empty");
+    return new Map(fixtures.map((fixture) => [fixture.slug, fixture]));
+  }
+
+  private async rasterize(
+    fileName: string,
+    sourceSvg: string,
+    renderedSvgInput: string,
+    fixture: Fixture | undefined,
+  ) {
     const page = await this.currentBrowser().newPage({
       viewport: { width: 1520, height: 845 },
       deviceScaleFactor: 1,
     });
     try {
       await page.setContent(this.baseHtml(), { waitUntil: "load" });
-      await this.capture(page, fileName, svg);
+      await this.capture(page, fileName, sourceSvg, renderedSvgInput, fixture);
       console.log(`rasterized ${fileName}`);
     } finally {
       await page.close();
     }
   }
 
-  private async capture(page: PageHandle, fileName: string, svg: string) {
-    await this.installSourceFonts(page, svg);
-    await page.evaluate(
-      (input) => {
-        const diagramElement = document.getElementById("diagram") as HTMLElement;
-        diagramElement.innerHTML = input.svg;
-      },
-      { svg },
+  private async capture(
+    page: PageHandle,
+    fileName: string,
+    sourceSvg: string,
+    svg: string,
+    fixture: Fixture | undefined,
+  ) {
+    const preparedViewport =
+      this.options.referenceMode === "strictVendorOriginal"
+        ? await prepareStrictSvgCapture(page, svg)
+        : null;
+    if (this.options.referenceMode !== "strictVendorOriginal") {
+      await this.installSourceFonts(page, sourceSvg);
+    }
+    const loadedSvg =
+      this.options.referenceMode === "strictVendorOriginal"
+        ? await assignStrictSvg(page, svg)
+        : null;
+    if (loadedSvg === null) {
+      await page.evaluate((value) => {
+        const diagramElement = document.getElementById("diagram");
+        if (diagramElement === null) throw new Error("Missing diagram container");
+        diagramElement.innerHTML = value;
+      }, svg);
+    }
+    await resizeSvgCapture(
+      page,
+      this.options.referenceMode === "strictVendorOriginal",
+      "strictViewBox",
     );
-    await SvgCaptureSizer.resize(page);
     await SvgExternalImages.waitUntilReady(page);
     await page.evaluate(() => (document as FontReadyDocument).fonts.ready);
-    await page.locator("#capture").screenshot({
-      path: path.join(this.options.outputDir, fileName.replace(/\.svg$/, ".png")),
-      omitBackground: false,
-    });
+    const attemptDir = fs.mkdtempSync(
+      path.join(
+        this.options.outputDir,
+        `.capture-${path.basename(fileName, ".svg")}-${randomUUID()}-`,
+      ),
+    );
+    const pngPath = path.join(attemptDir, `${path.basename(fileName, ".svg")}.png`);
+    let published = false;
+    try {
+      const strict = this.options.referenceMode === "strictVendorOriginal";
+      const before = strict ? await observeCaptureSnapshot(page) : null;
+      const screenshot = await page.locator("#capture").screenshot({
+        path: pngPath,
+        omitBackground: false,
+      });
+      const after = strict ? await observeCaptureSnapshot(page) : null;
+      const sourceSvgBytes = Buffer.from(sourceSvg, "utf8");
+      const usedSvg = Buffer.from(svg, "utf8");
+      const assetPaths = this.runtimeAssetPaths();
+      const runtimeAssets = assetPaths.map((assetPath) => ({
+        path: path.relative(process.cwd(), assetPath),
+        sha256: fileSha256(assetPath),
+      }));
+      const config = this.pairConfig(fixture, svg, preparedViewport);
+      const provenanceDocument = { config, runtimeAssets };
+      const serializedProvenance = Buffer.from(JSON.stringify(provenanceDocument));
+      const manifest = publishMermaidPair({
+        directory: this.options.outputDir,
+        attemptDirectory: attemptDir,
+        slug: path.basename(fileName, ".svg"),
+        role: "candidate",
+        sourceSvg: sourceSvgBytes,
+        renderedSvg: usedSvg,
+        png: screenshot,
+        provenance: {
+          path: "embedded:rasterize-svg-dir",
+          sha256: sha256(serializedProvenance),
+          document: provenanceDocument,
+        },
+        config,
+        runtimeAssets,
+      });
+      if (strict) {
+        if (
+          before === null ||
+          after === null ||
+          loadedSvg === null ||
+          fixture?.canonicalSource === undefined
+        )
+          throw new Error("Actual candidate capture/source observation missing");
+        this.requireRasterSession().recordPublishedPair({
+          manifest,
+          sourceSvg: sourceSvgBytes,
+          renderedSvg: usedSvg,
+          screenshot,
+          attemptPng: fs.readFileSync(pngPath),
+          publishedPng: fs.readFileSync(path.join(this.options.outputDir, `${fixture.slug}.png`)),
+          capture: closeCaptureObservation(sourceSvgBytes, loadedSvg, before, after),
+          rawSvgSha256: sha256(sourceSvgBytes),
+          canonicalSourceSha256: sha256(Buffer.from(fixture.canonicalSource)),
+        });
+      }
+      published = true;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "unclassified rasterization failure";
+      throw new Error(`Rasterization failed; attempt retained at ${attemptDir}: ${detail}`);
+    } finally {
+      if (published) fs.rmSync(attemptDir, { recursive: true, force: true });
+    }
+  }
+
+  private runtimeAssetPaths(): string[] {
+    const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+    return [
+      path.join(scriptDir, "rasterize-svg-dir.ts"),
+      path.join(scriptDir, "rasterize_svg_input.ts"),
+      path.join(scriptDir, "rasterize_svg_fonts.ts"),
+      path.join(scriptDir, "diagram_theme.ts"),
+      path.join(scriptDir, "official-renderer.ts"),
+      path.join(scriptDir, "official-reference-mode.ts"),
+      path.join(scriptDir, "strict-svg-external-images.ts"),
+      path.join(scriptDir, "native-render-provenance.ts"),
+      path.join(scriptDir, "diagram_update_fixtures.ts"),
+      path.resolve("package.json"),
+      path.resolve("bun.lock"),
+    ];
+  }
+
+  private requireRasterSession() {
+    if (this.options.rasterSession === undefined)
+      throw new Error("Strict candidate producer requires externally orchestrated raster session");
+    return this.options.rasterSession;
+  }
+
+  private nativeBinding(fixture: Fixture | undefined): VerifiedNativeRenderBinding {
+    if (fixture === undefined) throw new Error("Strict native render binding requires a fixture");
+    const binding = this.nativeBindings.get(fixture.slug);
+    if (binding === undefined)
+      throw new Error(`Strict native render binding is missing ${fixture.slug}`);
+    return binding;
+  }
+
+  private nativeBindingConfig(fixture: Fixture | undefined) {
+    const binding = this.nativeBinding(fixture);
+    return {
+      nativeRenderBindingsSha256: binding.receiptSha256,
+      nativeRenderBinarySha256: binding.receipt.binarySha256After,
+      nativeSourceParserSha256: binding.receipt.sourceParserSha256After,
+      nativeInputMarkdownSha256: binding.row.inputMarkdownSha256,
+      nativeOutputSvgSha256: binding.row.outputSvgSha256,
+    };
+  }
+
+  private pairConfig(
+    fixture: Fixture | undefined,
+    svg: string,
+    preparedViewport: { width: number; height: number } | null,
+  ) {
+    const playwrightPackage = parseJsonValue(
+      fs.readFileSync(path.resolve("node_modules/playwright/package.json"), "utf8"),
+      "Playwright package metadata",
+    );
+    if (
+      typeof playwrightPackage !== "object" ||
+      playwrightPackage === null ||
+      Array.isArray(playwrightPackage)
+    ) {
+      throw new Error("Playwright package metadata is not an object");
+    }
+    const playwrightVersion = playwrightPackage.version;
+    if (typeof playwrightVersion !== "string") {
+      throw new Error("Playwright package metadata has no version");
+    }
+    const strict = this.options.referenceMode === "strictVendorOriginal";
+    const nativeBindingConfig = strict ? this.nativeBindingConfig(fixture) : {};
+    return {
+      theme: this.theme.name,
+      viewport: { ...(preparedViewport ?? { width: 1520, height: 845 }), deviceScaleFactor: 1 },
+      initialViewport: { width: 1520, height: 845, deviceScaleFactor: 1 },
+      captureResize: strict
+        ? "raw-svg-viewbox-viewport-before-assignment-v1"
+        : "svg-viewbox-or-dimensions-ceil-plus-24px-padding-v1",
+      sourceFontUrls: strict ? [] : SvgSourceFonts.urls(svg),
+      externalImageWaitPolicy: strict
+        ? "svg-image-load-decode-positive-dimensions-and-frame-v2"
+        : null,
+      nodeVersion: process.version,
+      bunVersion: process.versions.bun ?? null,
+      playwrightVersion,
+      referenceMode: this.options.referenceMode,
+      referenceScope: this.options.referenceScope,
+      originalFenceLanguage: fixture?.fenceLanguage ?? null,
+      originalFenceSourceSha256:
+        fixture?.originalFenceSource === undefined
+          ? null
+          : sha256(Buffer.from(fixture.originalFenceSource, "utf8")),
+      canonicalSourceSha256:
+        fixture?.canonicalSource === undefined
+          ? null
+          : sha256(Buffer.from(fixture.canonicalSource, "utf8")),
+      sourceAdapterPolicy:
+        fixture?.fenceLanguage === "zenuml" ? "zenuml-prefix-v1" : "mermaid-fence-lines-v1",
+      sourceMarkdownSha256: fixture === undefined ? null : fileSha256(fixture.filePath),
+      ...nativeBindingConfig,
+    };
   }
 
   private installSourceFonts(page: PageHandle, svg: string): Promise<void> {
@@ -154,70 +538,35 @@ class SvgBrowserRasterizer {
   }
 
   private baseHtml() {
-    return `<!doctype html><html><head><meta charset="utf-8"><style>
-html,body{margin:0;background:${this.theme.canvasBackground};color:${this.theme.text};color-scheme:${this.theme.colorScheme()};font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-#capture{display:flex;align-items:center;justify-content:center;overflow:hidden;padding:12px;box-sizing:border-box;background:${this.theme.canvasBackground}}
-#diagram{max-width:100%;max-height:100%;display:flex;align-items:center;justify-content:center}
-#diagram svg{max-width:100%;max-height:100%}
-</style></head><body><div id="capture"><div id="diagram"></div></div></body></html>`;
+    return rasterCaptureHtml(this.theme);
   }
 }
 
-const SvgCaptureSizer = {
-  resize(page: PageHandle): Promise<void> {
-    return page.evaluate(() => {
-      const svgElement = document.querySelector("#diagram svg") as SVGSVGElement;
-      const viewBox = String(svgElement.getAttribute("viewBox"))
-        .split(/\s+/)
-        .map((value) => Number(value));
-      const dimensionAt = (values: number[], index: number): number => {
-        const value = values.at(index);
-        if (value === undefined || !Number.isFinite(value)) {
-          throw new Error("SVG viewBox is invalid");
-        }
-        return value;
-      };
-      const width = Math.ceil(dimensionAt(viewBox, 2));
-      const height = Math.ceil(dimensionAt(viewBox, 3));
-      svgElement.setAttribute("width", String(width));
-      svgElement.setAttribute("height", String(height));
-      svgElement.style.maxWidth = `${width}px`;
-      const capture = document.getElementById("capture") as HTMLElement;
-      capture.style.width = `${width + 24}px`;
-      capture.style.height = `${height + 24}px`;
-    });
-  },
-};
+export function rasterCaptureHtml(theme: DiagramTheme): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;background:${theme.canvasBackground};color:${theme.text};color-scheme:${theme.colorScheme()};font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+#capture{display:flex;align-items:center;justify-content:center;overflow:hidden;padding:12px;box-sizing:border-box;background:${theme.canvasBackground}}
+#diagram{max-width:100%;max-height:100%;display:flex;align-items:center;justify-content:center}
+#diagram svg{max-width:100%;max-height:100%}
+</style></head><body><div id="capture"><div id="diagram"></div></div></body></html>`;
+}
+
+function matchesFixtureGlob(fileName: string, glob: string): boolean {
+  const escaped = glob
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  return new RegExp(`^${escaped}$`).test(fileName);
+}
 
 const SvgExternalImages = {
   waitUntilReady(page: PageHandle): Promise<void> {
-    return page.evaluate(async () => {
-      const xlinkNamespace = "http://www.w3.org/1999/xlink";
-      const urls = Array.from(document.querySelectorAll("#diagram image"))
-        .map(
-          (image) =>
-            image.getAttribute("href") ??
-            image.getAttributeNS(xlinkNamespace, "href") ??
-            image.getAttribute("xlink:href"),
-        )
-        .filter((url): url is string => url !== null && url.length > 0);
-      await Promise.all(
-        [...new Set(urls)].map(
-          (url) =>
-            new Promise<void>((resolve) => {
-              const image = new Image();
-              image.addEventListener("load", () => resolve(), { once: true });
-              image.addEventListener("error", () => resolve(), { once: true });
-              image.src = url;
-            }),
-        ),
-      );
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    });
+    return waitForStrictSvgExternalImages(page);
   },
 };
 
-new SvgBrowserRasterizer(CliOptions.parse(process.argv.slice(2))).run().catch((error: Error) => {
-  console.error(error.message);
-  process.exit(1);
-});
+if (import.meta.main)
+  new SvgBrowserRasterizer(CliOptions.parse(process.argv.slice(2))).run().catch((error: Error) => {
+    console.error(error.message);
+    process.exit(1);
+  });

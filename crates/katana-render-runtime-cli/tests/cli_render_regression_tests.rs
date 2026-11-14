@@ -29,8 +29,15 @@ impl Drop for TempFixture {
 
 fn write_mermaid_input(root: &TempFixture) -> std::io::Result<PathBuf> {
     let input = root.path("diagram.mmd");
-    std::fs::write(&input, "graph TD; A-->B")?;
+    std::fs::write(&input, mermaid_fixture_source(root))?;
     Ok(input)
+}
+
+fn mermaid_fixture_source(root: &TempFixture) -> String {
+    format!(
+        "graph TD; A-->B\n%% fixture-{}",
+        root.root.file_name().unwrap_or_default().to_string_lossy()
+    )
 }
 
 fn run_mermaid_render(
@@ -104,5 +111,159 @@ fn missing_mermaid_input_is_reported_by_public_cli() -> Result<(), Box<dyn std::
 
     assert!(!result.status.success());
     assert!(String::from_utf8(result.stderr)?.contains("failed to read"));
+    Ok(())
+}
+
+fn assert_attestation_contract(
+    receipt_path: &Path,
+    source: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let receipt: serde_json::Value = serde_json::from_slice(&std::fs::read(receipt_path)?)?;
+    assert_attestation_metadata(&receipt, source)?;
+    assert_runtime_binding(&receipt)?;
+    assert_attested_input(receipt_path, source)?;
+    Ok(())
+}
+
+fn assert_attestation_metadata(
+    receipt: &serde_json::Value,
+    source: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    assert_eq!(receipt["schema"], "katana-native-render-attestation-v1");
+    assert_eq!(receipt["status"], "output-written");
+    assert_eq!(receipt["attemptToken"], "coverage-contract");
+    assert_eq!(receipt["actualRenderInput"]["source"], source);
+    assert_eq!(receipt["actualExit"], serde_json::Value::Null);
+    assert_eq!(receipt["accepted"], false);
+    assert_eq!(receipt["requiresExternalExitEvidence"], true);
+    Ok(())
+}
+
+fn assert_runtime_binding(receipt: &serde_json::Value) -> Result<(), Box<dyn std::error::Error>> {
+    let runtime_path = receipt["runtime"]["path"]
+        .as_str()
+        .ok_or("attested runtime path missing")?;
+    assert_eq!(
+        std::fs::canonicalize(runtime_path)?,
+        Path::new(runtime_path)
+    );
+    assert_eq!(
+        receipt["bindingsBefore"]["runtime"],
+        receipt["bindingsAfter"]["runtime"]
+    );
+    Ok(())
+}
+
+fn assert_attested_input(
+    receipt_path: &Path,
+    source: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let artifacts = receipt_path.with_extension("artifacts");
+    assert_eq!(
+        std::fs::read(artifacts.join("raw-input.bin"))?,
+        source.as_bytes()
+    );
+    Ok(())
+}
+
+#[test]
+fn render_attestation_records_successful_public_cli_render()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = TempFixture::new()?;
+    let input = std::fs::canonicalize(write_mermaid_input(&fixture)?)?;
+    let canonical_root = std::fs::canonicalize(&fixture.root)?;
+    let output = canonical_root.join("diagram.svg");
+    let receipt_path = canonical_root.join("render-attestation.json");
+    render_and_validate_attestation(&input, &output, &receipt_path)?;
+    let runtime_path = receipt_path_runtime(&receipt_path)?;
+    let runtime_alias = noncanonical_alias(&runtime_path)?;
+    assert_runtime_alias_rejected(&input, &canonical_root, &runtime_alias, false)?;
+    assert_runtime_alias_rejected(&input, &canonical_root, &runtime_alias, true)?;
+    Ok(())
+}
+
+fn render_and_validate_attestation(
+    input: &Path,
+    output: &Path,
+    receipt_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let temp_root = output
+        .parent()
+        .ok_or("attestation output parent is missing")?;
+    let result = Command::new(env!("CARGO_BIN_EXE_krr"))
+        .env_remove("MERMAID_JS")
+        .env("TMPDIR", temp_root)
+        .env("TMP", temp_root)
+        .env("TEMP", temp_root)
+        .args(["mermaid", "render", "--input"])
+        .arg(input)
+        .arg("--output")
+        .arg(output)
+        .arg("--render-attestation")
+        .arg(receipt_path)
+        .args(["--attempt-token", "coverage-contract"])
+        .output()?;
+    assert!(result.status.success(), "{:?}", result);
+    assert!(std::fs::read_to_string(output)?.contains("<svg"));
+    let source = std::fs::read_to_string(input)?;
+    assert_attestation_contract(receipt_path, &source)
+}
+
+fn noncanonical_alias(path: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let runtime_path = PathBuf::from(path);
+    let runtime_parent = runtime_path.parent().ok_or("runtime parent missing")?;
+    let alias = runtime_parent
+        .join("..")
+        .join(
+            runtime_parent
+                .file_name()
+                .ok_or("runtime parent name missing")?,
+        )
+        .join(runtime_path.file_name().ok_or("runtime filename missing")?);
+    assert_ne!(alias, runtime_path);
+    assert_eq!(std::fs::canonicalize(&alias)?, runtime_path);
+    Ok(alias)
+}
+
+fn receipt_path_runtime(receipt_path: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let receipt: serde_json::Value = serde_json::from_slice(&std::fs::read(receipt_path)?)?;
+    receipt["runtime"]["path"]
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| "attested runtime path missing".into())
+}
+
+fn assert_runtime_alias_rejected(
+    input: &Path,
+    root: &Path,
+    runtime_alias: &Path,
+    environment_override: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let label = if environment_override {
+        "environment"
+    } else {
+        "cli"
+    };
+    let output_path = root.join(format!("runtime-alias-{label}.svg"));
+    let receipt_path = root.join(format!("runtime-alias-{label}.json"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_krr"));
+    command
+        .env_remove("MERMAID_JS")
+        .args(["mermaid", "render", "--input"])
+        .arg(input)
+        .arg("--output")
+        .arg(&output_path)
+        .arg("--render-attestation")
+        .arg(&receipt_path)
+        .args(["--attempt-token", "coverage-contract"]);
+    if environment_override {
+        command.env("MERMAID_JS", runtime_alias);
+    } else {
+        command.arg("--runtime").arg(runtime_alias);
+    }
+    let result = command.output()?;
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("attestation path must be canonical"));
+    assert!(!output_path.exists() && !receipt_path.exists());
     Ok(())
 }

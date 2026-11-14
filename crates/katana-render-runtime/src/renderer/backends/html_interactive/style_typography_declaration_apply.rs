@@ -2,18 +2,20 @@ use crate::renderer::backends::html_interactive::style::value::{
     css_font_size, css_font_weight, css_resolved_px, split_top_level_whitespace,
 };
 use crate::renderer::backends::html_interactive::style::{
-    CssStyle, CssTextAlign, CssTextTransform, CssWhiteSpace,
+    normalized_property_name, CssStyle, CssTextAlign, CssTextSpacingTrim, CssTextTransform,
+    CssWhiteSpace,
 };
 use crate::renderer::backends::html_interactive::style::style_typography_declaration::typography_parser::FontShorthandParser;
 
 impl CssStyle {
     pub(crate) fn apply_typography_property(&mut self, name: &str, value: &str) -> bool {
-        match name.to_ascii_lowercase().as_str() {
+        match normalized_property_name(name).as_ref() {
             "font" => self.apply_font_shorthand(value),
             "font-size" => self.apply_font_size(value),
             "font-weight" => self.apply_font_weight(value),
             "font-family" => self.apply_font_family(value),
             "font-feature-settings" => self.apply_font_feature_settings(value),
+            "text-spacing-trim" => self.apply_text_spacing_trim(value),
             "font-style" => self.apply_font_style(value),
             "text-decoration" => {
                 self.underline = value.contains("underline");
@@ -29,6 +31,7 @@ impl CssStyle {
     }
 
     fn apply_font_size(&mut self, value: &str) {
+        self.explicit_typography = true;
         self.font_size = css_font_size(
             value,
             self.font_size,
@@ -77,6 +80,7 @@ impl CssStyle {
     fn apply_font_family(&mut self, value: &str) {
         let family = value.trim();
         if !family.is_empty() {
+            self.explicit_typography = true;
             self.font_family = family.to_string();
         }
     }
@@ -89,6 +93,16 @@ impl CssStyle {
             } else {
                 Some(settings.to_string())
             };
+    }
+
+    fn apply_text_spacing_trim(&mut self, value: &str) {
+        self.text_spacing_trim = match value.trim().to_ascii_lowercase().as_str() {
+            "normal" => CssTextSpacingTrim::Normal,
+            "space-all" => CssTextSpacingTrim::SpaceAll,
+            "initial" => CssTextSpacingTrim::Normal,
+            "inherit" | "unset" => self.text_spacing_trim,
+            _ => self.text_spacing_trim,
+        };
     }
 
     fn apply_text_align(&mut self, value: &str) {
@@ -180,5 +194,14 @@ mod tests {
             original
         );
         assert!(FontShorthandParser::style(&["invalid"], style.font_weight).is_none());
+    }
+
+    #[test]
+    fn invalid_text_spacing_trim_preserves_the_previous_valid_assignment() {
+        let mut style = CssStyle::browser_default();
+        assert!(style.apply_typography_property("text-spacing-trim", "space-all"));
+        let previous = style.text_spacing_trim;
+        assert!(style.apply_typography_property("text-spacing-trim", "unsupported"));
+        assert_eq!(style.text_spacing_trim, previous);
     }
 }

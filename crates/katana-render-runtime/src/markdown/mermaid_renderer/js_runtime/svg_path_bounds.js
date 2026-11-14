@@ -167,7 +167,9 @@ function katanaReadPathPointGroup(parser, relative, pointCount) {
   const origin = { x: parser.x, y: parser.y };
   Array.from({ length: pointCount })
     .map(() => katanaReadPathPointFromOrigin(parser, relative, origin))
-    .forEach((point) => katanaSetPathPoint(parser, point));
+    .forEach((point) => {
+      katanaSetPathPoint(parser, point);
+    });
 }
 
 function katanaReadPathPointFromOrigin(parser, relative, origin) {

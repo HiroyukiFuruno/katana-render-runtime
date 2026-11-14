@@ -100,9 +100,22 @@ impl HtmlSubresourcePolicy {
 
     fn allows_navigation(&self, reference: &str, url: &Url) -> bool {
         if self.origin.scheme() == "file" {
-            return relative_file_reference(reference) && self.allows_local_navigation(url);
+            return relative_file_reference(reference)
+                && (self.is_same_document_fragment(reference, url)
+                    || self.allows_local_navigation(url));
         }
         url.scheme() != "data" && self.allows_same_origin(reference, url)
+    }
+
+    fn is_same_document_fragment(&self, reference: &str, url: &Url) -> bool {
+        if !reference.starts_with('#') || url.fragment().is_none() {
+            return false;
+        }
+        let mut current = self.origin.clone();
+        let mut target = url.clone();
+        current.set_fragment(None);
+        target.set_fragment(None);
+        current == target
     }
 
     fn allows_same_origin(&self, reference: &str, url: &Url) -> bool {

@@ -1,6 +1,7 @@
 use super::document_scripts::load_scripts;
 use super::{HtmlDocumentResources, HtmlSubresourceLoader};
 use crate::renderer::backends::html_document::HtmlDocument;
+pub(super) use crate::renderer::backends::html_dom_helpers::text_content;
 use html5ever::{Attribute, QualName};
 use markup5ever_rcdom::{Handle, NodeData};
 use std::collections::HashMap;
@@ -165,13 +166,6 @@ fn remove_attribute(node: &Handle, expected: &str) {
         .retain(|attribute| !attribute.name.local.as_str().eq_ignore_ascii_case(expected));
 }
 
-pub(super) fn text_content(node: &Handle) -> String {
-    match &node.data {
-        NodeData::Text { contents } => contents.borrow().to_string(),
-        _ => node.children.borrow().iter().map(text_content).collect(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -187,6 +181,19 @@ mod tests {
         assert!(result.is_ok());
         let mut values = result.into_iter().collect::<Vec<_>>();
         values.remove(0)
+    }
+
+    fn for_each_image_node(
+        document: &mut HtmlDocument,
+        mut inspect: impl FnMut(&markup5ever_rcdom::Handle),
+    ) {
+        let image = document.get_element_by_id("image");
+        assert!(image.is_some());
+        image.iter().for_each(|image| {
+            let node = document.node(*image);
+            assert!(node.is_ok());
+            node.iter().for_each(&mut inspect);
+        });
     }
 
     #[test]
@@ -279,17 +286,11 @@ mod tests {
 
         load_document_resources(&loader, &mut document);
 
-        let image = document.get_element_by_id("image");
-        assert!(image.is_some());
-        image.iter().for_each(|image| {
-            let node = document.node(*image);
-            assert!(node.is_ok());
-            node.iter().for_each(|node| {
-                assert_eq!(
-                    attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE).as_deref(),
-                    Some("load")
-                );
-            });
+        for_each_image_node(&mut document, |node| {
+            assert_eq!(
+                attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE).as_deref(),
+                Some("load")
+            );
         });
     }
 
@@ -297,19 +298,12 @@ mod tests {
     fn existing_prevalidated_marker_is_updated_by_attribute_helper() {
         let mut document =
             HtmlDocument::parse(r#"<img id=image data-krr-prevalidated-image-event="error">"#);
-        let image = document.get_element_by_id("image");
-
-        assert!(image.is_some());
-        image.iter().for_each(|image| {
-            let node = document.node(*image);
-            assert!(node.is_ok());
-            node.iter().for_each(|node| {
-                set_or_append_attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE, "load");
-                assert_eq!(
-                    attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE).as_deref(),
-                    Some("load")
-                );
-            });
+        for_each_image_node(&mut document, |node| {
+            set_or_append_attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE, "load");
+            assert_eq!(
+                attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE).as_deref(),
+                Some("load")
+            );
         });
     }
 
@@ -324,17 +318,11 @@ mod tests {
 
         load_document_resources(&loader, &mut document);
 
-        let image = document.get_element_by_id("image");
-        assert!(image.is_some());
-        image.iter().for_each(|image| {
-            let node = document.node(*image);
-            assert!(node.is_ok());
-            node.iter().for_each(|node| {
-                assert_eq!(
-                    attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE).as_deref(),
-                    Some("error")
-                );
-            });
+        for_each_image_node(&mut document, |node| {
+            assert_eq!(
+                attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE).as_deref(),
+                Some("error")
+            );
         });
     }
 
@@ -349,14 +337,8 @@ mod tests {
 
         load_document_resources(&loader, &mut document);
 
-        let image = document.get_element_by_id("image");
-        assert!(image.is_some());
-        image.iter().for_each(|image| {
-            let node = document.node(*image);
-            assert!(node.is_ok());
-            node.iter().for_each(|node| {
-                assert_eq!(attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE), None);
-            });
+        for_each_image_node(&mut document, |node| {
+            assert_eq!(attribute(node, PREVALIDATED_IMAGE_EVENT_ATTRIBUTE), None);
         });
     }
 }

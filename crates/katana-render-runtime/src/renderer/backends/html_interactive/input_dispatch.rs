@@ -16,9 +16,12 @@ impl HtmlInteractiveSession {
             HtmlBrowserInput::PointerMove { x, y } => self.update_hover(x, y)?,
             HtmlBrowserInput::KeyDown { key } => self.dispatch_key_down(key)?,
             HtmlBrowserInput::KeyUp { key } => self.dispatch_key_up(key)?,
-            HtmlBrowserInput::PointerDown { x, y, button } => self.press_target(x, y, button),
+            HtmlBrowserInput::PointerDown { x, y, button } => {
+                self.keyboard_modality = false;
+                self.press_target(x, y, button);
+            }
             HtmlBrowserInput::PointerUp { x, y, button } => self.release_target(x, y, button)?,
-            HtmlBrowserInput::Scroll { delta_y, .. } => self.scroll(delta_y)?,
+            HtmlBrowserInput::Scroll { delta_x, delta_y } => self.scroll(delta_x, delta_y)?,
             HtmlBrowserInput::Text { text } => self.append_text(&text)?,
         }
         Ok(())
@@ -54,41 +57,13 @@ impl HtmlInteractiveSession {
     }
 
     fn release_target(&mut self, x: f32, y: f32, button: u8) -> Result<(), HtmlBrowserError> {
-        if button == LEFT_MOUSE_BUTTON {
-            self.activate_target_at(x, y)?;
-        }
+        let result = if button == LEFT_MOUSE_BUTTON {
+            self.activate_target_at(x, y)
+        } else {
+            Ok(())
+        };
         self.pressed_target = None;
-        Ok(())
-    }
-
-    fn scroll(&mut self, delta_y: f32) -> Result<(), HtmlBrowserError> {
-        self.resize_anchor = None;
-        let logical_delta = delta_y / self.viewport.device_scale_factor;
-        let next_scroll = (self.scroll_y + logical_delta).clamp(0.0, self.max_scroll());
-        if next_scroll == self.scroll_y {
-            return Ok(());
-        }
-        self.scroll_y = next_scroll;
-        self.refresh_scroll_layout()?;
-        if self.sync_intersection_geometry_from_current_layout()? {
-            /* WHY: Observer callbacks can mutate the DOM. The scroll listener
-             * must observe the resulting geometry, not the preceding layout. */
-            self.refresh_scroll_layout()?;
-            self.scroll_y = self.scroll_y.min(self.max_scroll());
-            self.sync_intersection_geometry_from_current_layout()?;
-        }
-        self.runtime
-            .dispatch_window_scroll()
-            .map_err(runtime_failure)?;
-        self.render_frame()
-    }
-
-    fn refresh_scroll_layout(&mut self) -> Result<(), HtmlBrowserError> {
-        let layout = self.layout()?;
-        self.hit_targets = layout.hit_targets;
-        self.element_boxes = layout.element_boxes;
-        self.content_height = layout.content_height;
-        Ok(())
+        result
     }
 
     fn activate_target_at(&mut self, x: f32, y: f32) -> Result<(), HtmlBrowserError> {
@@ -101,28 +76,37 @@ impl HtmlInteractiveSession {
             "HTML pointer up hit-test"
         );
         let Some(target) = hit else {
-            if self.pressed_target.is_none() {
-                self.blur_focused_input()?;
+            if self.pressed_target.is_none() && self.focused_node.is_some() {
+                let blur = self.blur_focused_node_without_frame();
+                return self.finish_pointer_update(blur);
             }
             return Ok(());
         };
         if self.pressed_target != Some(target.node_id) {
             return Ok(());
         }
-        if !matches!(target.kind, HitTargetKind::Input) {
-            self.blur_focused_input()?;
-        }
-        self.activate_target(&target)
+        let action = self.activate_target(&target);
+        self.finish_pointer_update(action)
     }
 
     fn activate_target(&mut self, target: &HitTarget) -> Result<(), HtmlBrowserError> {
         match target.kind {
-            HitTargetKind::Checkbox => self.toggle_checkbox(target.node_id),
-            HitTargetKind::Input => self.focus_input(target.node_id),
+            HitTargetKind::Checkbox => {
+                self.prepare_pointer_focus(target.node_id)?;
+                self.toggle_checkbox(target.node_id)
+            }
+            HitTargetKind::Input => {
+                self.focus_input_without_frame(target.node_id)?;
+                self.dispatch_click(target.node_id)
+            }
             HitTargetKind::Summary { details_node_id } => {
+                self.prepare_pointer_focus(target.node_id)?;
                 self.toggle_details(target.node_id, details_node_id)
             }
-            HitTargetKind::Click => self.dispatch_click(target.node_id),
+            HitTargetKind::Click => {
+                self.prepare_pointer_focus(target.node_id)?;
+                self.dispatch_click(target.node_id)
+            }
         }
     }
 
@@ -149,12 +133,13 @@ impl HtmlInteractiveSession {
         let Some(node_id) = self.focused_input else {
             return Ok(());
         };
-        let value = self.input_values.entry(node_id).or_default();
+        let (state, runtime) = (&mut self.state, &mut self.runtime);
+        let value = state.input_values.entry(node_id).or_default();
         value.push_str(text);
-        self.dirty_inputs.insert(node_id);
-        self.runtime
-            .set_value(node_id, value)
-            .map_err(runtime_failure)?;
+        if !text.is_empty() {
+            state.dirty_inputs.insert(node_id);
+        }
+        runtime.set_value(node_id, value).map_err(runtime_failure)?;
         self.dispatch_runtime_event(HtmlRuntimeEvent::Input {
             target: HtmlNodeId(node_id),
         })
@@ -168,13 +153,16 @@ impl HtmlInteractiveSession {
             })
             .map_err(runtime_failure)?;
         self.accept_navigation(dispatch)?;
-        self.render_frame()
+        Ok(())
     }
 
     fn dispatch_toggle(&mut self, node_id: u64) -> Result<(), HtmlBrowserError> {
-        self.dispatch_runtime_event(HtmlRuntimeEvent::Toggle {
-            target: HtmlNodeId(node_id),
-        })
+        self.runtime
+            .dispatch(HtmlRuntimeEvent::Toggle {
+                target: HtmlNodeId(node_id),
+            })
+            .map_err(runtime_failure)?;
+        Ok(())
     }
 
     pub(crate) fn dispatch_runtime_event(
@@ -182,6 +170,14 @@ impl HtmlInteractiveSession {
         event: HtmlRuntimeEvent,
     ) -> Result<(), HtmlBrowserError> {
         self.runtime.dispatch(event).map_err(runtime_failure)?;
+        self.render_frame()
+    }
+
+    fn finish_pointer_update(
+        &mut self,
+        result: Result<(), HtmlBrowserError>,
+    ) -> Result<(), HtmlBrowserError> {
+        result?;
         self.render_frame()
     }
 }

@@ -60,6 +60,20 @@ if (failures.length) {
 }
 
 #[test]
+fn insert_adjacent_text_keeps_markup_like_input_as_text() {
+    let output = render(
+        r#"<section id=host>before</section><script>
+document.getElementById('host').insertAdjacentText('beforeend', '<b>literal</b>');
+</script>"#,
+    );
+
+    assert!(
+        matches!(&output, Ok(output) if output.contains("<section id=\"host\">before&lt;b&gt;literal&lt;/b&gt;</section>") && !output.contains("<b>literal</b>")),
+        "{output:?}"
+    );
+}
+
+#[test]
 fn reports_empty_list_for_unsupported_selector_on_element_scope_contract() {
     let output = render(
         r#"<section id=scope><a id=first class=link href="/first">First</a><a id=last class=link href="/last">Last</a></section><script>

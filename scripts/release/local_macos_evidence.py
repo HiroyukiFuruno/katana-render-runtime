@@ -18,22 +18,26 @@ import tarfile
 import tempfile
 import time
 import zipfile
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, NamedTuple
+from types import ModuleType
+from typing import Any, NamedTuple
 from urllib import error, parse, request
 
 import local_macos_tool_provenance as TOOL_PROVENANCE
 
 try:
-    import tomllib
+    import tomllib as _tomllib
 except ModuleNotFoundError:
-    tomllib = None
+    tomllib: ModuleType | None = None
+else:
+    tomllib = _tomllib
 
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/test-and-build.yml"
-SUPPORTED_WORKFLOW_SHA256 = "768c0c48fcb06863ba5c10f6fb52e2b4b180f49a0a4766aa0b38956b5bac743e"
+SUPPORTED_WORKFLOW_SHA256 = "b57c3bc900aac33f9d794f8e7522902f20faa9d940b78fb12289bbe41ce9b638"
 SCHEMA = 1
 FRESHNESS_SECONDS = 24 * 60 * 60
 MARKER = "<!-- krr-local-macos-evidence:v1 -->"
@@ -86,6 +90,20 @@ SCOPE_PARAMETERS = {
     "BUN_INSTALL_CACHE_DIR": "<fresh-empty-directory-per-collection>",
     "TEST_THREADS": "1",
 }
+LINT_CHILD_ENVIRONMENT_POLICY = {
+    "unset": (
+        "CARGO_BUILD_TARGET", "CARGO_BUILD_RUSTFLAGS", "CARGO_BUILD_RUSTC",
+        "CARGO_BUILD_RUSTC_WRAPPER", "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+        "CARGO_ENCODED_RUSTFLAGS", "CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER",
+        "RUSTC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER",
+    ),
+    "CARGO_TARGET_DIR": "<repository>/target",
+    "RUSTFLAGS": "-D warnings",
+}
+NEXTEST_URL = ("https://github.com/nextest-rs/nextest/releases/download/"
+               "cargo-nextest-0.9.148/cargo-nextest-0.9.148-universal-apple-darwin.tar.gz")
+NEXTEST_ARCHIVE_SHA256 = "6c23b7fb4ca82c571fc8dfedbab45bfa773d45918f933170c85d21cd7f4b852b"
+NEXTEST_BINARY_SHA256 = "aac4a0d9109efcfb4d83ec729c6e3204d5c15bf16ff554b5ee4476f6c5f60b37"
 JAVA_VENDOR = "Eclipse Adoptium"
 COMMAND_PATH_POLICY = "isolated-bound-symlinks-plus-os-system-directories-v2"
 SYSTEM_COMMAND_PATH = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
@@ -121,8 +139,8 @@ MAX_JUST_BINARY_BYTES = 32 * 1024 * 1024
 MAX_JUST_ARCHIVE_ENTRIES = 128
 MAX_JUST_ARCHIVE_CONTENT_BYTES = 16 * 1024 * 1024
 BUN_RELEASE_REPOSITORY = "oven-sh/bun"
-BUN_RELEASE_TAG = "bun-v1.4.2"
-BUN_VERSION = "1.4.2"
+BUN_RELEASE_TAG = "bun-v1.4.4"
+BUN_VERSION = "1.4.4"
 BUN_ASSET_NAME = "bun-darwin-aarch64.zip"
 MAX_BUN_ASSET_BYTES = 32 * 1024 * 1024
 MAX_BUN_BINARY_BYTES = 80 * 1024 * 1024
@@ -140,7 +158,10 @@ MAC_WORKFLOW_STEP_COMMANDS: dict[str, tuple[str, ...]] = {
     "Cache Rust build outputs": (),
     "Install Bun": (),
     "Install JavaScript dependencies": ("bun-install",),
+    "Install cargo-nextest": (),
     "Install just": (),
+    "Install Chrome for the macOS official producer browser test": (),
+    "Run macOS official producer browser test": (),
     "Rebuild V8 static archive on macOS arm64": ("rebuild-v8", "build-cli"),
     "Check Rust types": ("rust-check",),
     "Check formatting": ("format",),
@@ -233,9 +254,23 @@ def verify_installed_host_tools(
 def scope_digest(workflow_sha: str | None = None) -> str:
     body = {
         "schema": SCHEMA, "commands": COMMANDS, "environment": SCOPE_PARAMETERS,
+        "command_environment_policy": {"lint": LINT_CHILD_ENVIRONMENT_POLICY},
         "workflow_sha256": workflow_sha or workflow_digest(),
     }
     return sha256_bytes(canonical(body))
+
+
+def command_environment_for(command_id: str, base: dict[str, str]) -> dict[str, str]:
+    known_commands = {name for name, _argv in COMMANDS}
+    if command_id not in known_commands:
+        raise EvidenceError(f"unknown local evidence command: {command_id}")
+    environment = dict(base)
+    if command_id == "lint":
+        for name in LINT_CHILD_ENVIRONMENT_POLICY["unset"]:
+            environment.pop(name, None)
+        environment["CARGO_TARGET_DIR"] = str(ROOT / "target")
+        environment["RUSTFLAGS"] = "-D warnings"
+    return environment
 
 
 def read_comments_api(token: str, repository: str, number: int) -> list[Any]:
@@ -401,7 +436,7 @@ def java_home_from_settings(output: str) -> str:
 
 
 def java_vendor_from_settings(output: str) -> str:
-    vendors = re.findall(r"(?m)^\s*java\.vendor\s*=\s*(.*?)\s*$", output)
+    vendors: list[str] = re.findall(r"(?m)^\s*java\.vendor\s*=\s*(.*?)\s*$", output)
     if vendors != [JAVA_VENDOR]:
         raise EvidenceError("local proof requires Temurin (Eclipse Adoptium), matching the macOS CI setup")
     return vendors[0]
@@ -477,7 +512,7 @@ def assert_private_command_directory(directory: Path, expected_aliases: set[str]
 def command_binding(
     environment: dict[str, str], just_binding: JustBinding,
     bun_binary_sha256: str, rust_proof: RustComponentProof,
-    host_tool_proof: TOOL_PROVENANCE.HostToolProof,
+    host_tool_proof: TOOL_PROVENANCE.HostToolProof, nextest_path: Path,
 ) -> CommandBinding:
     home = account_home()
     brew_root = HOMEBREW_ROOT.resolve(strict=True)
@@ -532,6 +567,7 @@ def command_binding(
     executables = {
         "just": (str(just_binding.path.resolve(strict=True)), just_binding.binary_sha256),
         "cargo": (str(rust_paths["cargo"]), sha256_bytes(rust_paths["cargo"].read_bytes())),
+        "cargo-nextest": (str(nextest_path), NEXTEST_BINARY_SHA256),
         "rustc": (str(rust_paths["rustc"]), sha256_bytes(rust_paths["rustc"].read_bytes())),
         "cargo-clippy": (str(rust_paths["cargo-clippy"]), sha256_bytes(rust_paths["cargo-clippy"].read_bytes())),
         "clippy-driver": (str(rust_paths["clippy-driver"]), sha256_bytes(rust_paths["clippy-driver"].read_bytes())),
@@ -689,11 +725,14 @@ def canonical_owner(repo_payload: Any, repository: str) -> str:
     if not isinstance(repo_payload, dict):
         raise EvidenceError("repository API response is invalid")
     owner = repo_payload.get("owner")
-    if not isinstance(owner, dict) or not isinstance(owner.get("login"), str) or not owner["login"].strip():
+    if not isinstance(owner, dict):
+        raise EvidenceError("repository owner is invalid")
+    login = owner.get("login")
+    if not isinstance(login, str) or not login.strip():
         raise EvidenceError("repository owner is invalid")
     if repo_payload.get("full_name", "").lower() != repository.lower():
         raise EvidenceError("repository identity changed")
-    return owner["login"]
+    return login
 
 
 def base_is_merged(compare_payload: Any, base_sha: str) -> bool:
@@ -843,7 +882,7 @@ def download_trusted_just(
         req = request.Request(asset_url, headers={"Accept": "application/octet-stream", "User-Agent": "katana-render-runtime-local-macos-evidence"})
         with request.urlopen(req, timeout=60) as response:
             final_url = response.geturl()
-            final_host = request.urlparse(final_url).hostname
+            final_host = parse.urlparse(final_url).hostname
             if final_host not in {"github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"}:
                 raise EvidenceError("official just asset redirected to an untrusted host")
             archive = response.read(MAX_JUST_ASSET_BYTES + 1)
@@ -952,7 +991,7 @@ def download_bun_asset(metadata: dict[str, str]) -> bytes:
             headers={"Accept": "application/octet-stream", "User-Agent": "katana-render-runtime-local-macos-evidence"},
         )
         with request.urlopen(req, timeout=60) as response:
-            final_host = request.urlparse(response.geturl()).hostname
+            final_host = parse.urlparse(response.geturl()).hostname
             if final_host not in {
                 "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com",
             }:
@@ -962,7 +1001,7 @@ def download_bun_asset(metadata: dict[str, str]) -> bytes:
         raise
     except (error.URLError, error.HTTPError, TimeoutError, OSError) as exc:
         raise EvidenceError("official Bun asset download failed") from exc
-    if len(archive) > MAX_BUN_ASSET_BYTES:
+    if not isinstance(archive, bytes) or len(archive) > MAX_BUN_ASSET_BYTES:
         raise EvidenceError("official Bun asset exceeds its size limit")
     return archive
 
@@ -983,6 +1022,43 @@ def assert_official_bun_binary(path: Path, expected_sha256: str) -> None:
         raise EvidenceError("Homebrew Bun binary is unavailable") from exc
 
 
+def materialize_trusted_nextest(archive: bytes, destination: Path) -> Path:
+    if len(archive) > 32 * 1024 * 1024 or sha256_bytes(archive) != NEXTEST_ARCHIVE_SHA256:
+        raise EvidenceError("official nextest archive digest is invalid")
+    try:
+        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as bundle:
+            members = bundle.getmembers()
+            if (len(members) != 1 or members[0].name != "cargo-nextest"
+                    or not members[0].isfile() or not 0 < members[0].size <= 64 * 1024 * 1024):
+                raise EvidenceError("official nextest archive entries are invalid")
+            stream = bundle.extractfile(members[0])
+            if stream is None:
+                raise EvidenceError("official nextest binary is missing")
+            binary = stream.read(64 * 1024 * 1024 + 1)
+            if len(binary) != members[0].size or sha256_bytes(binary) != NEXTEST_BINARY_SHA256:
+                raise EvidenceError("official nextest binary digest is invalid")
+    except (OSError, tarfile.TarError) as exc:
+        raise EvidenceError("official nextest archive is invalid") from exc
+    directory = destination / "trusted-nextest"
+    directory.mkdir(mode=0o700)
+    executable = directory / "cargo-nextest"
+    executable.write_bytes(binary)
+    executable.chmod(0o700)
+    return executable.resolve(strict=True)
+
+
+def download_trusted_nextest(destination: Path) -> Path:
+    try:
+        req = request.Request(NEXTEST_URL, headers={"Accept": "application/octet-stream", "User-Agent": "katana-render-runtime-local-macos-evidence"})
+        with request.urlopen(req, timeout=60) as response:
+            if parse.urlparse(response.geturl()).hostname not in {"github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"}:
+                raise EvidenceError("official nextest asset redirected to an untrusted host")
+            archive = response.read(32 * 1024 * 1024 + 1)
+    except (error.URLError, error.HTTPError, TimeoutError, OSError) as exc:
+        raise EvidenceError("official nextest asset download failed") from exc
+    return materialize_trusted_nextest(archive, destination)
+
+
 def prepare_command_environment(
     token: str, isolated_inputs_dir: Path, cargo_target_dir: Path, cargo_home: Path,
     bun_cache_dir: Path,
@@ -991,10 +1067,11 @@ def prepare_command_environment(
         bootstrap = command_environment(cargo_target_dir, cargo_home, bun_cache_dir)
         just_binding = download_trusted_just(token, isolated_inputs_dir, bootstrap)
         bun_binding = download_trusted_bun(token)
+        nextest_path = download_trusted_nextest(isolated_inputs_dir)
         rust_proof = fetch_official_rust_component_proof()
         host_tool_proof = fetch_official_host_tool_proof(macos_product_version())
         binding = command_binding(
-            bootstrap, just_binding, bun_binding.binary_sha256, rust_proof, host_tool_proof,
+            bootstrap, just_binding, bun_binding.binary_sha256, rust_proof, host_tool_proof, nextest_path,
         )
         environment = command_environment(cargo_target_dir, cargo_home, bun_cache_dir, binding, just_binding)
         return bootstrap, just_binding, bun_binding, binding, environment
@@ -1024,6 +1101,8 @@ def assert_command_binding(binding: CommandBinding, just_binding: JustBinding) -
     verify_installed_host_tools(
         binding.host_tool_proof, Path(binding.executables["java"][0]).parent.parent,
     )
+    if os.path.lexists(rust_root / "bin/cargo-nextest"):
+        raise EvidenceError("Rust toolchain contains a shadowing cargo-nextest")
     expected_directory = just_binding.path.parent.parent / "trusted-commands"
     expected_path = os.pathsep.join((str(expected_directory), *SYSTEM_COMMAND_PATH))
     if binding.path != expected_path:
@@ -1031,6 +1110,7 @@ def assert_command_binding(binding: CommandBinding, just_binding: JustBinding) -
     assert_private_command_directory(expected_directory, set(binding.executables) - {"source_git"})
     for name, (raw_path, expected_hash) in binding.executables.items():
         path = Path(raw_path)
+        effective: str | None
         try:
             if name == "source_git":
                 effective = str(path)
@@ -1175,7 +1255,7 @@ def validate_pinned_tools(versions: Any) -> None:
     if not isinstance(java_home, str) or not Path(java_home).is_absolute():
         raise EvidenceError("local proof requires a validated absolute Java home")
     if versions.get("bun") != BUN_VERSION:
-        raise EvidenceError("local proof requires Bun 1.4.2, matching the macOS CI setup")
+        raise EvidenceError("local proof requires Bun 1.4.4, matching the macOS CI setup")
     if (
         versions.get("bun_release") != BUN_RELEASE_TAG
         or versions.get("bun_asset") != BUN_ASSET_NAME
@@ -1209,7 +1289,7 @@ def validate_pinned_tools(versions: Any) -> None:
     except json.JSONDecodeError:
         command = None
     required_executables = {
-        "just", "cargo", "rustc", "cargo-clippy", "clippy-driver", "rustfmt", "bun",
+        "just", "cargo", "cargo-nextest", "rustc", "cargo-clippy", "clippy-driver", "rustfmt", "bun",
         "dot", "bash", "python3", "java", "git", "source_git", "sw_vers", "uname",
     }
     if (not isinstance(command, dict) or set(command) != {
@@ -1293,6 +1373,8 @@ def validate_pinned_tools(versions: Any) -> None:
             raise EvidenceError(f"shared command executable identity is invalid: {name}")
     if command["executables"]["just"][0] != just_path:
         raise EvidenceError("shared command binding does not identify the authenticated just executable")
+    if command["executables"]["cargo-nextest"][1] != NEXTEST_BINARY_SHA256:
+        raise EvidenceError("shared command binding does not identify the official nextest binary")
     if command["executables"]["bun"][1] != versions["bun_binary_sha256"]:
         raise EvidenceError("shared command binding does not identify the authenticated Bun binary")
     expected_commands = Path(just_path).parent.parent / "trusted-commands"
@@ -1423,7 +1505,7 @@ def download_rust_component(component: RustComponent) -> bytes:
             archive = response.read(MAX_RUST_COMPONENT_ARCHIVE_BYTES + 1)
     except (error.URLError, error.HTTPError, TimeoutError, OSError) as exc:
         raise EvidenceError("official Rust component archive is unavailable") from exc
-    if (not archive or len(archive) > MAX_RUST_COMPONENT_ARCHIVE_BYTES
+    if (not isinstance(archive, bytes) or not archive or len(archive) > MAX_RUST_COMPONENT_ARCHIVE_BYTES
             or sha256_bytes(archive) != component.xz_sha256):
         raise EvidenceError("official Rust component archive digest is invalid")
     return archive
@@ -1460,7 +1542,7 @@ def derive_rust_component_proof(
             raise EvidenceError("official Rust component archive digest is invalid")
         try:
             with tarfile.open(fileobj=io.BytesIO(archive), mode="r:xz") as bundle:
-                members = []
+                members: list[tarfile.TarInfo] = []
                 for member in bundle:
                     if len(members) >= MAX_RUST_COMPONENT_ENTRIES:
                         raise EvidenceError("official Rust component entry count is invalid")
@@ -1540,10 +1622,10 @@ def derive_rust_component_proof(
         }))
     executable_hashes = {}
     for name, path in RUST_EXECUTABLE_PATHS.items():
-        identity = all_files.get(path)
-        if identity is None or identity[0] == 0:
+        executable_identity = all_files.get(path)
+        if executable_identity is None or executable_identity[0] == 0:
             raise EvidenceError(f"official Rust archives are missing executable {name}")
-        executable_hashes[name] = identity[1]
+        executable_hashes[name] = executable_identity[1]
     return RustComponentProof(all_files, component_digests, executable_hashes)
 
 
@@ -1786,7 +1868,11 @@ def verify_from_api(
             return False
         if fetch is None:
             token = os.environ.get("GH_TOKEN") or gh_token()
-            fetch = lambda path: api_request(token, "GET", path)
+
+            def fetch_api(path: str) -> Any:
+                return api_request(token, "GET", path)
+
+            fetch = fetch_api
         pr_path = f"repos/{repository}/pulls/{number}"
         repo_path = f"repos/{repository}"
         comments_base = f"repos/{repository}/issues/{number}/comments?per_page=100&page="
@@ -1931,6 +2017,8 @@ def collect(repository: str, number: int, publish: bool) -> int:
     )
 
     def run_command(command_id: str, argv_template: tuple[str, ...]) -> None:
+        if os.path.lexists(cargo_home / "bin/cargo-nextest"):
+            raise EvidenceError("isolated Cargo home contains a shadowing cargo-nextest")
         assert_command_binding(binding, just_binding)
         argv = bind_command(
             tuple(part.format(plantuml_output=smoke_output) for part in argv_template), just_binding
@@ -1942,8 +2030,13 @@ def collect(repository: str, number: int, publish: bool) -> int:
                 argv, 0, "", "Preinstalled Graphviz matches the official bottle and runtime closure.\n",
             )
         else:
-            result = subprocess.run(argv, cwd=ROOT, env=command_env, text=True, capture_output=True)
+            result = subprocess.run(
+                argv, cwd=ROOT, env=command_environment_for(command_id, command_env),
+                text=True, capture_output=True,
+            )
         assert_command_binding(binding, just_binding)
+        if os.path.lexists(cargo_home / "bin/cargo-nextest"):
+            raise EvidenceError("isolated Cargo home contains a shadowing cargo-nextest")
         duration = int((time.monotonic() - start) * 1000)
         output = result.stdout + result.stderr
         if command_id == "plantuml-render" and result.returncode == 0:

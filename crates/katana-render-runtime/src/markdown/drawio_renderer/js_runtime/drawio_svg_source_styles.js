@@ -71,12 +71,6 @@ function katanaDrawioSourceStyleForElement(element) {
   return KATANA_DRAWIO_SOURCE_CELL_STYLE_CACHE.get(katanaDrawioElementCellId(element)) ?? new Map();
 }
 
-function katanaDrawioHasSourceShadowStyle() {
-  return Array.from(KATANA_DRAWIO_SOURCE_CELL_STYLE_CACHE.values()).some(
-    katanaDrawioSourceStyleHasShadow,
-  );
-}
-
 function katanaDrawioSourceStyleHasShadow(style) {
   return [
     katanaDrawioSourceStyleExplicitShadow(style),
@@ -98,11 +92,11 @@ function katanaDrawioSourceStyleNamedShadow(style) {
 function katanaDrawioSourceCellStyleMap() {
   return new Map(
     [
-      ...Array.from(katanaDrawioSourceStyleRequestSource().matchAll(/<mxCell\b([^>]*)>/g))
-        .map(katanaDrawioSourceCellStyleEntry),
+      ...Array.from(katanaDrawioSourceStyleRequestSource().matchAll(/<mxCell\b([^>]*)>/g)).map(
+        katanaDrawioSourceCellStyleEntry,
+      ),
       ...katanaDrawioSourceObjectCellStyleEntries(),
-    ]
-      .filter((entry) => entry[0]),
+    ].filter((entry) => entry[0]),
   );
 }
 
@@ -130,10 +124,7 @@ function katanaDrawioSourceObjectCellStyleEntries() {
 function katanaDrawioSourceObjectCellStyleEntry(match) {
   const objectAttributes = katanaDrawioSourceStyleXmlAttributes(match[1]);
   const cellAttributes = katanaDrawioSourceStyleXmlAttributes(match[2]);
-  return [
-    katanaDrawioSourceCellId(objectAttributes),
-    katanaDrawioSourceCellStyle(cellAttributes),
-  ];
+  return [katanaDrawioSourceCellId(objectAttributes), katanaDrawioSourceCellStyle(cellAttributes)];
 }
 
 function katanaDrawioSourceCellStyleEntry(match) {

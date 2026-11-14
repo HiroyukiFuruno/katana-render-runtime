@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import contextlib
-import builtins
 import importlib.util
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from typing import Any, TypedDict
+from urllib.request import Request
 from unittest.mock import patch
 
 MODULE_PATH = Path(__file__).with_name("verify_dependency_freshness.py")
@@ -21,7 +23,94 @@ sys.modules[MODULE_SPEC.name] = freshness
 MODULE_SPEC.loader.exec_module(freshness)
 
 
+class MetadataDependency(TypedDict, total=False):
+    name: str
+    rename: str | None
+    pkg: str
+    req: str
+    source: str
+    kind: str | None
+    target: str | None
+    dep_kinds: list[dict[str, str | None]]
+
+
+class MetadataPackage(TypedDict, total=False):
+    id: str
+    name: str
+    version: str
+    source: str | None
+    manifest_path: str
+    dependencies: list[MetadataDependency]
+
+
+class MetadataNode(TypedDict):
+    id: str
+    deps: list[MetadataDependency]
+
+
+class MetadataResolve(TypedDict):
+    nodes: list[MetadataNode]
+
+
+class CargoMetadata(TypedDict):
+    workspace_members: list[str]
+    packages: list[MetadataPackage]
+    resolve: MetadataResolve
+
+
+def load_fallback_without_toml(module_name: str) -> ModuleType:
+    fallback_spec = importlib.util.spec_from_file_location(module_name, MODULE_PATH)
+    assert fallback_spec is not None and fallback_spec.loader is not None
+    fallback = importlib.util.module_from_spec(fallback_spec)
+    prior_module = sys.modules.get(module_name)
+    sys.modules[module_name] = fallback
+    original_resolver = importlib.import_module
+
+    def reject_toml(name: str, package: str | None = None) -> ModuleType:
+        if name in {"tomllib", "tomli"}:
+            raise ModuleNotFoundError(name=name)
+        return original_resolver(name, package)
+
+    try:
+        with patch.object(importlib, "import_module", reject_toml):
+            fallback_spec.loader.exec_module(fallback)
+    finally:
+        if prior_module is None:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = prior_module
+    return fallback
+
+
 class DependencyFreshnessTest(unittest.TestCase):
+    @staticmethod
+    def runtime_catalog_source(
+        version: str = "1.0.0",
+        source: str = "",
+        *,
+        reverse_properties: bool = False,
+    ) -> str:
+        properties = [
+            'kind: "mermaid"',
+            'displayName: "Mermaid.js"',
+            f'version: "{version}"',
+            'checksum: "0123456789abcdef"',
+            'fileName: "mermaid.min.js"',
+            'rustVersionConst: "MERMAID_JS_VERSION"',
+            'rustChecksumConst: "MERMAID_JS_CHECKSUM"',
+            'rustDownloadConst: "MERMAID_DOWNLOAD_URL"',
+            'latestUrl: "https://example.test/runtime"',
+            'releasePageUrl: (value: string) => `https://example.test/${value}`',
+            'downloadUrl: (value: string) => `https://example.test/${value}`',
+        ]
+        if source:
+            properties.insert(-2, source)
+        if reverse_properties:
+            properties.reverse()
+        return "const DEFINITIONS: RuntimeAssetDefinition[] = [{\n" + ",\n".join(
+            f"  {property}" for property in properties
+        ) + "\n}];\n"
+
     def test_fetch_authenticates_only_exact_github_api_origin(self) -> None:
         seen_headers: list[dict[str, str]] = []
 
@@ -29,7 +118,7 @@ class DependencyFreshnessTest(unittest.TestCase):
             status = 200
 
         class Opener:
-            def open(self, req: object, timeout: int) -> Response:
+            def open(self, req: Request, timeout: int) -> Response:
                 seen_headers.append(dict(req.header_items()))
                 return Response(b"{}")
 
@@ -52,7 +141,7 @@ class DependencyFreshnessTest(unittest.TestCase):
             status = 200
 
         class Opener:
-            def open(self, req: object, timeout: int) -> Response:
+            def open(self, req: Request, timeout: int) -> Response:
                 self.headers = dict(req.header_items())
                 return Response(b"{}")
 
@@ -77,7 +166,7 @@ class DependencyFreshnessTest(unittest.TestCase):
             status = 200
 
         class Opener:
-            def open(self, req: object, timeout: int) -> Response:
+            def open(self, req: Request, timeout: int) -> Response:
                 self.headers = dict(req.header_items())
                 return Response(b"{}")
 
@@ -104,19 +193,7 @@ class DependencyFreshnessTest(unittest.TestCase):
 
     def test_python310_fallback_reads_single_quoted_alternate_registry_dependency(self) -> None:
         fallback_name = "verify_dependency_freshness_py310_fallback"
-        fallback_spec = importlib.util.spec_from_file_location(fallback_name, MODULE_PATH)
-        assert fallback_spec is not None and fallback_spec.loader is not None
-        fallback = importlib.util.module_from_spec(fallback_spec)
-        sys.modules[fallback_name] = fallback
-        original_import = builtins.__import__
-
-        def reject_toml(name: str, *args: object, **kwargs: object) -> object:
-            if name in {"tomllib", "tomli"}:
-                raise ModuleNotFoundError(name)
-            return original_import(name, *args, **kwargs)
-
-        with patch.object(builtins, "__import__", reject_toml):
-            fallback_spec.loader.exec_module(fallback)
+        fallback = load_fallback_without_toml(fallback_name)
         (self.root / "Cargo.toml").write_text(
             "[workspace]\nmembers = [\"crates/renderer\"]\n"
             "[workspace.dependencies]\n"
@@ -130,19 +207,7 @@ class DependencyFreshnessTest(unittest.TestCase):
 
     def test_python310_fallback_reads_multiline_virtual_workspace_dependencies(self) -> None:
         fallback_name = "verify_dependency_freshness_virtual_workspace_fallback"
-        fallback_spec = importlib.util.spec_from_file_location(fallback_name, MODULE_PATH)
-        assert fallback_spec is not None and fallback_spec.loader is not None
-        fallback = importlib.util.module_from_spec(fallback_spec)
-        sys.modules[fallback_name] = fallback
-        original_import = builtins.__import__
-
-        def reject_toml(name: str, *args: object, **kwargs: object) -> object:
-            if name in {"tomllib", "tomli"}:
-                raise ModuleNotFoundError(name)
-            return original_import(name, *args, **kwargs)
-
-        with patch.object(builtins, "__import__", reject_toml):
-            fallback_spec.loader.exec_module(fallback)
+        fallback = load_fallback_without_toml(fallback_name)
         (self.root / "Cargo.toml").write_text(
             "[workspace]\nmembers = [\"crates/renderer\"]\n"
             "[workspace.dependencies]\n"
@@ -160,9 +225,20 @@ class DependencyFreshnessTest(unittest.TestCase):
             [("serde", "1.0.0"), ("serde_json", "2.0.0")],
         )
 
+    def test_forced_fallback_restores_existing_module_binding_and_paths(self) -> None:
+        name = "verify_dependency_freshness_existing_fallback"
+        existing = ModuleType(name)
+        before = sys.path.copy()
+        with patch.dict(sys.modules, {name: existing}):
+            fallback = load_fallback_without_toml(name)
+            self.assertIs(sys.modules[name], existing)
+        self.assertIsNot(fallback, existing)
+        self.assertEqual(sys.path, before)
+
     def test_semver_prerelease_precedence(self) -> None:
         versions = ["1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11", "1.0.0-rc.1", "1.0.0"]
-        for older, newer in zip(versions, versions[1:]):
+        for index in range(len(versions) - 1):
+            older, newer = versions[index], versions[index + 1]
             with self.subTest(older=older, newer=newer):
                 self.assertLess(freshness.Version.parse(older), freshness.Version.parse(newer))
         self.assertLess(freshness.Version.parse("1.0.0-99"), freshness.Version.parse("1.0.0-A"))
@@ -224,7 +300,7 @@ class DependencyFreshnessTest(unittest.TestCase):
         (self.root / "package.json").write_text(json.dumps({"devDependencies": {"example": "1.0.0"}}), encoding="utf-8")
         (self.root / "bun.lock").write_text(json.dumps({"packages": {"example": ["example@1.0.0", "", {}]}}), encoding="utf-8")
         (self.root / "scripts/runtime-assets/runtime-asset-common.ts").write_text(
-            'const assets = [{ kind: "mermaid", version: "1.0.0", latestUrl: "https://example.test/runtime" }];\n',
+            self.runtime_catalog_source(),
             encoding="utf-8",
         )
 
@@ -232,7 +308,7 @@ class DependencyFreshnessTest(unittest.TestCase):
         self.temporary_directory.cleanup()
 
     @staticmethod
-    def metadata_for_direct_serde(version: str = "1.0.0") -> dict[str, object]:
+    def metadata_for_direct_serde(version: str = "1.0.0") -> CargoMetadata:
         member_id = "path+file:///workspace/crates/renderer#renderer@0.1.0"
         serde_id = f"registry+https://github.com/rust-lang/crates.io-index#serde@{version}"
         return {
@@ -247,7 +323,7 @@ class DependencyFreshnessTest(unittest.TestCase):
     def run_check(
         self,
         responses: dict[str, object],
-        metadata: dict[str, object] | None = None,
+        metadata: CargoMetadata | None = None,
         rust_fresh: bool = True,
         javascript_fresh: bool = True,
     ) -> tuple[int, str, str]:
@@ -261,6 +337,7 @@ class DependencyFreshnessTest(unittest.TestCase):
         with (
             patch.object(freshness, "fetch", fake_fetch),
             patch.object(freshness, "cargo_metadata", return_value=metadata or self.metadata_for_direct_serde()),
+            patch.object(freshness, "verify_current_utf8_iter_retention"),
             patch.object(freshness, "rust_lock_is_latest_compatible", return_value=rust_fresh),
             patch.object(freshness, "js_lock_is_latest_compatible", return_value=javascript_fresh),
             contextlib.redirect_stdout(stdout),
@@ -280,15 +357,123 @@ class DependencyFreshnessTest(unittest.TestCase):
     def test_clean_resolved_dependencies_and_runtime_assets_pass(self) -> None:
         result, stdout, stderr = self.run_check(self.clean_responses())
         self.assertEqual(result, 0, stderr)
-        self.assertIn("passed (3 resolved dependencies and pinned runtime assets)", stdout)
+        self.assertIn(
+            "utf8_iter 1.0.4 is retained to preserve the immutable HTML performance parent closure",
+            stdout,
+        )
+
+    def test_ast_lint_hold_requires_exact_workspace_owner_and_candidate(self) -> None:
+        manifest = self.root / "crates/kdr-linter/Cargo.toml"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text('[package]\nname = "kdr-linter"\nversion = "0.1.0"\n'
+                            '[dependencies]\nkatana-ast-lint = { workspace = true }\n', encoding="utf-8")
+        (self.root / "Cargo.toml").write_text(
+            '[workspace]\nmembers = ["crates/kdr-linter"]\n'
+            '[workspace.dependencies]\nkatana-ast-lint = "=0.5.3"\n', encoding="utf-8")
+        registry = "registry+https://github.com/rust-lang/crates.io-index"
+        owner_id, lint_id = "owner", registry + "#katana-ast-lint@0.5.3"
+        metadata: CargoMetadata = {
+            "workspace_members": [owner_id],
+            "packages": [
+                {"id": owner_id, "name": "kdr-linter", "source": None, "manifest_path": str(manifest),
+                 "dependencies": [{"name": "katana-ast-lint", "rename": None, "kind": None,
+                                   "target": None, "req": "=0.5.3", "source": registry}]},
+                {"id": lint_id, "name": "katana-ast-lint", "version": "0.5.3", "source": registry},
+            ],
+            "resolve": {"nodes": [{"id": owner_id, "deps": [{"name": "katana_ast_lint", "pkg": lint_id,
+                                  "dep_kinds": [{"kind": None, "target": None}]}]}]},
+        }
+
+        def held() -> bool:
+            packages = freshness.rust_manifest_dependencies(self.root, metadata=metadata)
+            return not freshness.is_stale(next(p for p in packages if p.name == "katana-ast-lint"), "0.5.4")
+
+        self.assertTrue(held())
+        package = next(p for p in freshness.rust_manifest_dependencies(self.root, metadata=metadata)
+                       if p.name == "katana-ast-lint")
+        self.assertFalse(freshness.is_stale(package, "0.5.5"))
+        self.assertTrue(freshness.is_stale(package, "0.5.6"))
+        direct: Any = metadata["packages"][0]["dependencies"][0]
+        for field, value in [("rename", "other"), ("kind", "dev"), ("target", "cfg(unix)"),
+                             ("req", "^0.5.3"), ("source", "git+https://example.test/lint")]:
+            original = direct[field]
+            direct[field] = value
+            self.assertFalse(held(), field)
+            direct[field] = original
+        resolved: Any = metadata["packages"][1]
+        for field, value in [("version", "0.5.4"), ("source", "git+https://example.test/lint")]:
+            original = resolved[field]
+            resolved[field] = value
+            self.assertFalse(held(), field)
+            resolved[field] = original
+        edge: Any = metadata["resolve"]["nodes"][0]["deps"][0]
+        edge["dep_kinds"] = [{"kind": "dev", "target": None}]
+        self.assertFalse(held())
+        edge["dep_kinds"] = [{"kind": None, "target": None}]
+        metadata["packages"][0]["manifest_path"] = str(self.root / "other/Cargo.toml")
+        self.assertFalse(held())
+        metadata["packages"][0]["manifest_path"] = str(manifest)
+        metadata["packages"][0]["name"] = "other"
+        self.assertFalse(held())
+
+    def test_skia_hold_is_scoped_to_verified_macos_dependency_and_known_version(self) -> None:
+        manifest = self.root / "crates/katana-render-runtime/Cargo.toml"
+        manifest.parent.mkdir(parents=True)
+        declaration = 'skia-safe = { version = "=0.156.0", default-features = false, features = ["binary-cache", "pdf"] }\n'
+        manifest.write_text('[package]\nname = "katana-render-runtime"\nversion = "0.1.0"\n'
+                            '[target.\'cfg(target_os = "macos")\'.dependencies]\n' + declaration,
+                            encoding="utf-8")
+        registry = "registry+https://github.com/rust-lang/crates.io-index"
+        target = 'cfg(target_os = "macos")'
+        runtime_id = "runtime"
+        skia_id = registry + "#skia-safe@0.156.0"
+        metadata: CargoMetadata = {
+            "workspace_members": [runtime_id],
+            "packages": [
+                {"id": runtime_id, "name": "katana-render-runtime", "manifest_path": str(manifest),
+                 "dependencies": [{"name": "skia-safe", "rename": None, "kind": None,
+                                   "target": target, "req": "=0.156.0", "source": registry}]},
+                {"id": skia_id, "name": "skia-safe", "version": "0.156.0", "source": registry},
+            ],
+            "resolve": {"nodes": [{"id": runtime_id, "deps": [{"name": "skia_safe", "pkg": skia_id,
+                          "dep_kinds": [{"kind": None, "target": target}]}]}]},
+        }
+
+        def skia_packages() -> list[Any]:
+            return [p for p in freshness.rust_manifest_dependencies(self.root, metadata=metadata)
+                    if p.name == "skia-safe"]
+
+        package = skia_packages()[0]
+        self.assertTrue(package.skia_hold_candidate)
+        self.assertFalse(freshness.is_stale(package, "0.157.0"))
+        self.assertTrue(freshness.is_stale(package, "0.157.1"))
+
+        other = self.root / "crates/other/Cargo.toml"
+        other.parent.mkdir(parents=True)
+        other.write_text('[package]\nname = "other"\nversion = "0.1.0"\n[dependencies]\n' + declaration,
+                         encoding="utf-8")
+        candidates = skia_packages()
+        self.assertEqual(len(candidates), 2)
+        self.assertEqual(sum(freshness.is_stale(p, "0.157.0") for p in candidates), 1)
+
+        metadata["packages"][1]["source"] = "git+https://example.test/skia"
+        self.assertTrue(all(freshness.is_stale(p, "0.157.0") for p in skia_packages()))
+        metadata["packages"][1]["source"] = registry
+        metadata["resolve"]["nodes"][0]["deps"][0]["dep_kinds"] = [{"kind": None, "target": None}]
+        self.assertTrue(all(freshness.is_stale(p, "0.157.0") for p in skia_packages()))
+        metadata["resolve"]["nodes"][0]["deps"][0]["dep_kinds"] = [{"kind": None, "target": target}]
+        manifest.write_text(manifest.read_text(encoding="utf-8").replace('"=0.156.0"', '"=0.155.0"'),
+                            encoding="utf-8")
+        self.assertTrue(all(freshness.is_stale(p, "0.157.0") for p in skia_packages()))
 
     @staticmethod
-    def metadata_for_krr_usvg_skrifa(root: Path) -> dict[str, object]:
+    def metadata_for_krr_usvg_skrifa(
+        root: Path,
+    ) -> CargoMetadata:
         registry = "registry+https://github.com/rust-lang/crates.io-index"
         runtime_id = "path+file:///workspace/crates/katana-render-runtime#katana-render-runtime@0.1.0"
-        resvg_id = f"{registry}#resvg@0.48.1"
-        usvg_id = f"{registry}#usvg@0.48.1"
-        skrifa_id = f"{registry}#skrifa@0.44.0"
+        skrifa_id = f"{registry}#skrifa@0.49.0"
+        harfrust_id = f"{registry}#harfrust@0.12.0"
         return {
             "workspace_members": [runtime_id],
             "packages": [
@@ -299,34 +484,30 @@ class DependencyFreshnessTest(unittest.TestCase):
                     "source": None,
                     "manifest_path": str(root / "crates/katana-render-runtime/Cargo.toml"),
                     "dependencies": [
-                        {"name": "resvg", "source": registry, "req": "^0.48", "kind": None},
-                        {"name": "skrifa", "source": registry, "req": "^0.44", "kind": None},
-                    ],
-                },
-                {
-                    "id": resvg_id,
-                    "name": "resvg",
-                    "version": "0.48.1",
-                    "source": registry,
-                    "manifest_path": "/registry/resvg/Cargo.toml",
-                    "dependencies": [{"name": "usvg", "source": registry, "req": "^0.48", "kind": None}],
-                },
-                {
-                    "id": usvg_id,
-                    "name": "usvg",
-                    "version": "0.48.1",
-                    "source": registry,
-                    "manifest_path": "/registry/usvg/Cargo.toml",
-                    "dependencies": [
-                        {"name": "skrifa", "source": registry, "req": "^0.44", "kind": None}
+                        {"name": "skrifa", "source": registry, "req": "^0.49", "kind": None},
+                        {
+                            "name": "harfrust",
+                            "rename": "svg_harfrust",
+                            "source": registry,
+                            "req": "^0.12.0",
+                            "kind": None,
+                        },
                     ],
                 },
                 {
                     "id": skrifa_id,
                     "name": "skrifa",
-                    "version": "0.44.0",
+                    "version": "0.49.0",
                     "source": registry,
                     "manifest_path": "/registry/skrifa/Cargo.toml",
+                    "dependencies": [],
+                },
+                {
+                    "id": harfrust_id,
+                    "name": "harfrust",
+                    "version": "0.12.0",
+                    "source": registry,
+                    "manifest_path": "/registry/harfrust/Cargo.toml",
                     "dependencies": [],
                 },
             ],
@@ -335,17 +516,13 @@ class DependencyFreshnessTest(unittest.TestCase):
                     {
                         "id": runtime_id,
                         "deps": [
-                            {"name": "resvg", "pkg": resvg_id, "dep_kinds": [{"kind": None}]},
                             {"name": "skrifa", "pkg": skrifa_id, "dep_kinds": [{"kind": None}]},
+                            {
+                                "name": "svg_harfrust",
+                                "pkg": harfrust_id,
+                                "dep_kinds": [{"kind": None}],
+                            },
                         ],
-                    },
-                    {
-                        "id": resvg_id,
-                        "deps": [{"name": "usvg", "pkg": usvg_id, "dep_kinds": [{"kind": None}]}],
-                    },
-                    {
-                        "id": usvg_id,
-                        "deps": [{"name": "skrifa", "pkg": skrifa_id, "dep_kinds": [{"kind": None}]}],
                     },
                     {"id": skrifa_id, "deps": []},
                 ]
@@ -353,7 +530,7 @@ class DependencyFreshnessTest(unittest.TestCase):
         }
 
     def test_verified_krr_pair_skips_only_its_direct_skrifa_requirement(self) -> None:
-        krr_manifest = self.write_krr_skrifa_manifest("0.44")
+        krr_manifest = self.write_krr_skrifa_manifest("0.49")
         other_manifest = self.root / "crates/other/Cargo.toml"
         other_manifest.parent.mkdir(parents=True)
         other_manifest.write_text(
@@ -378,12 +555,29 @@ class DependencyFreshnessTest(unittest.TestCase):
             [("serde", "1.0.0", None), ("skrifa", "0.44.0", "="), ("usvg", "0.48.1", "=")],
         )
 
-    def write_krr_skrifa_manifest(self, requirement: str) -> Path:
+    def write_krr_skrifa_manifest(self, requirement: str, harfrust_requirement: str = "^0.12.0") -> Path:
         krr_manifest = self.root / "crates/katana-render-runtime/Cargo.toml"
-        krr_manifest.parent.mkdir(parents=True)
+        krr_manifest.parent.mkdir(parents=True, exist_ok=True)
         krr_manifest.write_text(
             '[package]\nname = "katana-render-runtime"\nversion = "0.1.0"\n'
-            f'[dependencies]\nskrifa = "{requirement}"\n',
+            f'[dependencies]\nskrifa = "{requirement}"\n'
+            f'svg_harfrust = {{ package = "harfrust", version = "{harfrust_requirement}" }}\n',
+            encoding="utf-8",
+        )
+        engine = self.root / "crates/katana-render-runtime/vendor/svg-engine"
+        (engine / "usvg").mkdir(parents=True, exist_ok=True)
+        (engine / "resvg").mkdir(parents=True, exist_ok=True)
+        (engine / "usvg/lib.rs").write_text("pub struct EmbeddedUsvg;\n", encoding="utf-8")
+        (engine / "resvg/lib.rs").write_text("pub struct EmbeddedResvg;\n", encoding="utf-8")
+        (engine / "PROVENANCE.json").write_text(
+            json.dumps(
+                {
+                    "schema": "krr-svg-engine-source-provenance-v1",
+                    "sourceCommit": "c01f0165059e472f45472cccddc573d32c13548a",
+                    "licenseExpression": "Apache-2.0 OR MIT",
+                    "sourceFileCount": 48,
+                }
+            ),
             encoding="utf-8",
         )
         return krr_manifest
@@ -391,58 +585,139 @@ class DependencyFreshnessTest(unittest.TestCase):
     def test_non_krr_fixture_does_not_require_a_skrifa_pair(self) -> None:
         self.assertIsNone(freshness.verified_krr_usvg_skrifa_manifest(self.root, self.metadata_for_direct_serde()))
 
-    def test_krr_pair_resolution_mismatch_fails_closed(self) -> None:
-        self.write_krr_skrifa_manifest("0.44")
+    def test_embedded_skrifa_resolution_mismatch_fails_closed(self) -> None:
+        self.write_krr_skrifa_manifest("0.49")
         metadata = self.metadata_for_krr_usvg_skrifa(self.root)
         old_id = "registry+https://github.com/rust-lang/crates.io-index#skrifa@0.48.0"
         metadata["packages"].append(
             {"id": old_id, "name": "skrifa", "version": "0.48.0", "source": "registry+https://github.com/rust-lang/crates.io-index"}
         )
         metadata["resolve"]["nodes"].append({"id": old_id, "deps": []})
-        metadata["resolve"]["nodes"][0]["deps"][1]["pkg"] = old_id
-        with self.assertRaisesRegex(ValueError, "different package versions"):
+        metadata["resolve"]["nodes"][0]["deps"][0]["pkg"] = old_id
+        with self.assertRaisesRegex(ValueError, "not compatible"):
             freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
 
-    def test_krr_pair_missing_or_ambiguous_usvg_fails_closed(self) -> None:
-        self.write_krr_skrifa_manifest("0.44")
+    def test_embedded_source_missing_fails_closed(self) -> None:
+        self.write_krr_skrifa_manifest("0.49")
         metadata = self.metadata_for_krr_usvg_skrifa(self.root)
-        metadata["resolve"]["nodes"][1]["deps"] = []
-        with self.assertRaisesRegex(ValueError, "expected one resolved usvg"):
+        (self.root / "crates/katana-render-runtime/vendor/svg-engine/usvg/lib.rs").unlink()
+        with self.assertRaisesRegex(ValueError, "source is missing"):
             freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
 
-        metadata = self.metadata_for_krr_usvg_skrifa(self.root)
-        extra_id = "registry+https://github.com/rust-lang/crates.io-index#usvg@0.49.0"
-        metadata["packages"].append(
-            {"id": extra_id, "name": "usvg", "version": "0.49.0", "source": "registry+https://github.com/rust-lang/crates.io-index"}
+    def test_embedded_provenance_corruption_fails_closed(self) -> None:
+        self.write_krr_skrifa_manifest("0.49")
+        provenance = self.root / "crates/katana-render-runtime/vendor/svg-engine/PROVENANCE.json"
+        provenance.write_text(
+            json.dumps(
+                {
+                    "schema": "krr-svg-engine-source-provenance-v1",
+                    "sourceCommit": "unexpected",
+                    "licenseExpression": "Apache-2.0 OR MIT",
+                    "sourceFileCount": 48,
+                }
+            ),
+            encoding="utf-8",
         )
-        metadata["resolve"]["nodes"].append({"id": extra_id, "deps": []})
-        metadata["resolve"]["nodes"][1]["deps"].append(
-            {"name": "usvg", "pkg": extra_id, "dep_kinds": [{"kind": None}]}
-        )
-        with self.assertRaisesRegex(ValueError, "expected one resolved usvg"):
-            freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
+        with self.assertRaisesRegex(ValueError, "unexpected source commit"):
+            freshness.verified_krr_usvg_skrifa_manifest(
+                self.root, self.metadata_for_krr_usvg_skrifa(self.root)
+            )
 
-    def test_krr_pair_requirement_and_registry_mismatch_fail_closed(self) -> None:
-        self.write_krr_skrifa_manifest("0.44")
+    def test_embedded_skrifa_requirement_and_old_dependency_fail_closed(self) -> None:
+        self.write_krr_skrifa_manifest("0.49")
         metadata = self.metadata_for_krr_usvg_skrifa(self.root)
-        metadata["packages"][0]["dependencies"][1]["req"] = "^0.48"
+        metadata["packages"][0]["dependencies"][0]["req"] = "^0.48"
         with self.assertRaisesRegex(ValueError, "KRR direct skrifa requirement"):
             freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
+        self.write_krr_skrifa_manifest("0.49")
+        (self.root / "crates/katana-render-runtime/Cargo.toml").write_text(
+            '[package]\nname = "katana-render-runtime"\nversion = "0.1.0"\n'
+            '[dependencies]\nskrifa = "^0.49"\nusvg = { path = "../usvg" }\n',
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "external resvg/usvg"):
+            freshness.verified_krr_usvg_skrifa_manifest(self.root, self.metadata_for_krr_usvg_skrifa(self.root))
 
+    def test_embedded_harfrust_alias_contract_rejects_invalid_shape(self) -> None:
+        cases = (
+            (
+                "requirement",
+                lambda metadata: metadata["packages"][0]["dependencies"][1].__setitem__("req", "^0.13"),
+                "alias requirement",
+            ),
+            (
+                "metadata-shape",
+                lambda metadata: metadata["packages"][0]["dependencies"][1].__setitem__("name", "wrong-package"),
+                "direct normal SVG HarfRust alias",
+            ),
+            ("package", lambda metadata: self._rewrite_alias_manifest_package("wrong-package"), "alias"),
+            (
+                "resolved-version",
+                lambda metadata: self._rewrite_harfrust_package(metadata, "0.13.0"),
+                "0.12 API",
+            ),
+            (
+                "registry",
+                lambda metadata: self._rewrite_harfrust_package(
+                    metadata, "0.12.0", "git+https://example.test/harfrust"
+                ),
+                "approved registry",
+            ),
+            (
+                "edge",
+                lambda metadata: metadata["resolve"]["nodes"][0]["deps"][1].__setitem__("pkg", "missing"),
+                "resolved KRR SVG HarfRust alias",
+            ),
+            ("missing", lambda metadata: self._remove_alias_manifest(), "alias"),
+        )
+        for _, mutate, message in cases:
+            with self.subTest(message=message):
+                self.write_krr_skrifa_manifest("0.49")
+                metadata = self.metadata_for_krr_usvg_skrifa(self.root)
+                mutate(metadata)
+                with self.assertRaisesRegex(ValueError, message):
+                    freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
+
+        self.write_krr_skrifa_manifest("0.49", harfrust_requirement="^0.13")
+        with self.assertRaisesRegex(ValueError, "alias requirement"):
+            freshness.verified_krr_usvg_skrifa_manifest(
+                self.root, self.metadata_for_krr_usvg_skrifa(self.root)
+            )
+
+        self.write_krr_skrifa_manifest("0.49", harfrust_requirement="^0.12.99")
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            freshness.verified_krr_usvg_skrifa_manifest(
+                self.root, self.metadata_for_krr_usvg_skrifa(self.root)
+            )
+
+        self.write_krr_skrifa_manifest("0.49", harfrust_requirement="^0.12.99")
         metadata = self.metadata_for_krr_usvg_skrifa(self.root)
-        metadata["packages"][0]["dependencies"][1]["source"] = "registry+https://private.example/index"
-        with self.assertRaisesRegex(ValueError, "KRR's skrifa dependency uses a different registry"):
+        metadata["packages"][0]["dependencies"][1]["req"] = "^0.12.99"
+        with self.assertRaisesRegex(ValueError, "0.12 API"):
             freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
 
-        metadata = self.metadata_for_krr_usvg_skrifa(self.root)
-        metadata["packages"][2]["dependencies"][0]["source"] = "registry+https://private.example/index"
-        with self.assertRaisesRegex(ValueError, "different registry"):
-            freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
+    def _rewrite_alias_manifest_package(self, package: str) -> None:
+        manifest = self.root / "crates/katana-render-runtime/Cargo.toml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace('package = "harfrust"', f'package = "{package}"'),
+            encoding="utf-8",
+        )
 
-        metadata = self.metadata_for_krr_usvg_skrifa(self.root)
-        metadata["packages"][2]["dependencies"] = []
-        with self.assertRaisesRegex(ValueError, "expected one normal registry skrifa dependency"):
-            freshness.verified_krr_usvg_skrifa_manifest(self.root, metadata)
+    def _remove_alias_manifest(self) -> None:
+        manifest = self.root / "crates/katana-render-runtime/Cargo.toml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace(
+                'svg_harfrust = { package = "harfrust", version = "^0.12.0" }\n', ""
+            ),
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _rewrite_harfrust_package(metadata: CargoMetadata, version: str, source: str | None = None) -> None:
+        package = next(package for package in metadata["packages"] if package["name"] == "harfrust")
+        package["version"] = version
+        if source is not None:
+            package["source"] = source
 
     def test_stale_direct_rust_manifest_dependency_rejects_release(self) -> None:
         (self.root / "Cargo.toml").write_text(
@@ -895,6 +1170,56 @@ target-build = "=3.0.0"
             "Locking 1 package to latest compatible version": False,
             "Locking 2 packages to latest compatible versions": False,
             "Locking 0 packages (Rust 1.95.0) to latest compatible version": True,
+            "Locking 1 package to latest compatible version\n"
+            "    Updating crc32fast v1.5.3 -> v1.5.5": True,
+            "Locking 1 package to latest compatible version\n"
+            "    Updating flate2 v1.1.10 -> v1.1.11": True,
+            "Locking 1 package to latest compatible version\n"
+            "    Updating smallvec v1.16.4 -> v1.16.5": True,
+            "Locking 1 package to latest compatible version\n"
+            "    Updating smallvec v1.16.4 -> v1.16.6": False,
+            ("Locking 4 packages to latest compatible versions\n"
+             "    Adding utf_types v1.0.0\n"
+             "    Updating utf8_iter v1.0.4 -> v1.1.0\n"
+             "    Updating crc32fast v1.5.3 -> v1.5.5\n"
+             "    Updating flate2 v1.1.10 -> v1.1.11"): True,
+            "Locking 1 package to latest compatible version\n"
+            "    Updating crc32fast v1.5.3 -> v1.5.6": False,
+            "Locking 1 package to latest compatible version\n"
+            "    Updating flate2 v1.1.10 -> v1.1.12": False,
+            ("Locking 2 packages to latest compatible versions\n"
+             "    Updating crc32fast v1.5.3 -> v1.5.5\n"
+             "    Updating serde v1.0.0 -> v1.0.1"): False,
+            ("Locking 2 packages to latest compatible versions\n"
+             "    Updating crc32fast v1.5.3 -> v1.5.5\n"
+             "    Updating utf8_iter v1.0.4 -> v1.1.0"): False,
+            (
+                "Locking 2 packages to latest compatible versions\n"
+                "    Adding utf_types v1.0.0\n"
+                "    Updating utf8_iter v1.0.4 -> v1.1.0"
+            ): True,
+            (
+                "    Updating crates.io index\n"
+                "Locking 2 packages to latest compatible versions\n"
+                "    Updating utf8_iter v1.0.4 -> v1.1.0\n"
+                "    Adding utf_types v1.0.0"
+            ): True,
+            (
+                "Locking 2 packages to latest compatible versions\n"
+                "    Adding utf_types v1.0.0\n"
+                "    Updating serde v1.0.0 -> v1.0.1"
+            ): False,
+            (
+                "Locking 2 packages to latest compatible versions\n"
+                "    Adding utf_types v1.0.0\n"
+                "    Updating utf8_iter v1.0.4 -> v1.1.0\n"
+                "    Updating serde v1.0.0 -> v1.0.1"
+            ): False,
+            (
+                "Locking 2 packages to latest compatible versions\n"
+                "    Adding utf_types v1.0.0 (unknown output format)\n"
+                "    Updating utf8_iter v1.0.4 -> v1.1.0"
+            ): False,
         }
         for cargo_output, expected in cases.items():
             with self.subTest(cargo_output=cargo_output), patch.object(
@@ -903,6 +1228,49 @@ target-build = "=3.0.0"
                 return_value=SimpleNamespace(returncode=0, stdout=cargo_output, stderr=""),
             ):
                 self.assertEqual(freshness.rust_lock_is_latest_compatible(self.root), expected)
+
+    def test_shared_dependency_retention_rejects_changed_root_or_harness_record(self) -> None:
+        registry = "registry+https://github.com/rust-lang/crates.io-index"
+        parent = (
+            'version = 4\n[[package]]\nname = "krr-html-performance-harness"\n'
+            'version = "0.1.0"\ndependencies = ["utf8_iter", "crc32fast", "flate2", "smallvec"]\n'
+            f'[[package]]\nname = "utf8_iter"\nversion = "1.0.4"\nsource = "{registry}"\n'
+            f'checksum = "{"a" * 64}"\n'
+            f'[[package]]\nname = "crc32fast"\nversion = "1.5.3"\nsource = "{registry}"\n'
+            f'checksum = "{"b" * 64}"\n'
+            f'[[package]]\nname = "flate2"\nversion = "1.1.10"\nsource = "{registry}"\n'
+            f'checksum = "{"d" * 64}"\n'
+            f'[[package]]\nname = "smallvec"\nversion = "1.16.4"\nsource = "{registry}"\n'
+            f'checksum = "{"e" * 64}"\n'
+        ).encode()
+        root_lock = self.root / "Cargo.lock"
+        harness_lock = self.root / "scripts/html/performance-harness/Cargo.lock"
+        harness_lock.parent.mkdir(parents=True)
+        with (patch.object(freshness, "load_pinned_parent_lock", return_value=parent),
+              patch.object(freshness, "verify_utf8_iter_retention")):
+            for lock in (root_lock, harness_lock):
+                lock.write_bytes(parent)
+            freshness.verify_current_utf8_iter_retention(self.root)
+            for package, checksum in (("crc32fast", b"b"), ("flate2", b"d"), ("smallvec", b"e")):
+                changed = parent.replace(checksum * 64, b"c" * 64)
+                for lock in (root_lock, harness_lock):
+                    with self.subTest(package=package, lock=lock):
+                        lock.write_bytes(changed)
+                        with self.assertRaisesRegex(ValueError, f"retain immutable {package}"):
+                            freshness.verify_current_utf8_iter_retention(self.root)
+                        lock.write_bytes(parent)
+
+    def test_dependency_freshness_reports_invalid_utf8_iter_retention(self) -> None:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch.object(freshness, "verify_current_utf8_iter_retention",
+                         side_effect=ValueError("root Cargo.lock does not retain the immutable utf8_iter package")),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            result = freshness.main([str(self.root)])
+        self.assertEqual(result, 1)
+        self.assertIn("utf8_iter package", stderr.getvalue())
 
     def test_cargo_update_dry_run_forces_plain_output_when_workflow_enables_color(self) -> None:
         completed = SimpleNamespace(
@@ -1004,11 +1372,80 @@ target-build = "=3.0.0"
 
     def test_runtime_asset_catalog_properties_are_order_independent(self) -> None:
         (self.root / "scripts/runtime-assets/runtime-asset-common.ts").write_text(
-            'const assets = [\n  {\n    latestUrl: "https://example.test/runtime",\n    version: "1.0.0",\n    kind: "mermaid",\n  },\n];\n',
+            self.runtime_catalog_source(reverse_properties=True),
             encoding="utf-8",
         )
         result, _, stderr = self.run_check(self.clean_responses())
         self.assertEqual(result, 0, stderr)
+
+    def test_runtime_asset_patched_upstream_uses_upstream_version(self) -> None:
+        (self.root / "scripts/runtime-assets/runtime-asset-common.ts").write_text(
+            self.runtime_catalog_source(
+                "12.2.0-krr.pr6823.1",
+                'source: { kind: "patched-upstream", upstreamVersion: "12.2.0", immutableUrl: "https://example.test/patched", provenancePath: "scripts/runtime-assets/mermaid.provenance.json" }',
+            ),
+            encoding="utf-8",
+        )
+        packages = freshness.runtime_assets(self.root)
+        self.assertEqual(len(packages), 1)
+        self.assertEqual(packages[0].current, "12.2.0")
+        self.assertEqual(packages[0].name, "mermaid|https://example.test/runtime")
+
+    def test_runtime_asset_catalog_is_parsed_without_execution(self) -> None:
+        catalog = self.root / "scripts/runtime-assets/runtime-asset-common.ts"
+        catalog.write_text(
+            self.runtime_catalog_source() + 'throw new Error("catalog source must not execute");\n',
+            encoding="utf-8",
+        )
+        packages = freshness.runtime_assets(self.root)
+        self.assertEqual([package.current for package in packages], ["1.0.0"])
+
+    def test_runtime_asset_cli_boundary_rejects_invalid_json_payloads(self) -> None:
+        invalid_outputs = (
+            "not json",
+            "{}",
+            "[]",
+            '[{"kind":"mermaid","kind":"drawio","version":"1.0.0","latestUrl":"https://example.test/runtime"}]',
+            '[{"kind":"mermaid","version":"1.0.0","latestUrl":"https://example.test/runtime","extra":true}]',
+            '[{"kind":"mermaid","version":"1.0.0"}]',
+            '[{"kind":"mermaid","version":"1.0.0","latestUrl":" "}]',
+            '[{"kind":"mermaid","version":1,"latestUrl":"https://example.test/runtime"}]',
+            '[{"kind":"mermaid","version":"1.0.0","latestUrl":"https://example.test/runtime"},{"kind":"mermaid","version":"1.0.0","latestUrl":"https://example.test/runtime"}]',
+        )
+        for output in invalid_outputs:
+            with self.subTest(output=output):
+                completed = subprocess.CompletedProcess([], 0, output, "")
+                with patch.object(freshness.subprocess, "run", return_value=completed):
+                    with self.assertRaises(ValueError):
+                        freshness.runtime_assets(self.root)
+
+    def test_runtime_asset_cli_failure_is_not_hidden(self) -> None:
+        completed = subprocess.CompletedProcess([], 7, "", "AST parsing failed")
+        with patch.object(freshness.subprocess, "run", return_value=completed) as run:
+            with self.assertRaisesRegex(ValueError, "exited with 7: AST parsing failed"):
+                freshness.runtime_assets(self.root)
+        arguments = run.call_args.args[0]
+        self.assertEqual(arguments[0:2], ["bun", "run"])
+        self.assertEqual(Path(arguments[2]), freshness.RUNTIME_CATALOG_CLI.resolve())
+        self.assertEqual(arguments[3:], ["--freshness-catalog", str((self.root / freshness.RUNTIME_CATALOG).resolve())])
+        self.assertEqual(run.call_args.kwargs["cwd"], freshness.RUNTIME_CATALOG_CLI.resolve().parents[2])
+
+    def test_runtime_asset_cli_start_failure_is_fail_closed(self) -> None:
+        with patch.object(freshness.subprocess, "run", side_effect=OSError("bun unavailable")):
+            with self.assertRaisesRegex(ValueError, "AST CLI failed to start"):
+                freshness.runtime_assets(self.root)
+
+    def test_runtime_asset_cli_timeout_fails_closed(self) -> None:
+        with patch.object(
+            freshness.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(["bun", "run"], timeout=120),
+        ):
+            result, _, stderr = self.run_check(self.clean_responses())
+        self.assertEqual(result, 1)
+        self.assertIn("failed closed", stderr)
+        self.assertIn("timed out", stderr)
+        self.assertNotIn("Traceback", stderr)
 
     def test_transport_failure_is_fail_closed(self) -> None:
         responses = self.clean_responses()

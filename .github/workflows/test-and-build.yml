@@ -12,6 +12,8 @@ on:
       - "bun.lock"
       - "biome.json"
       - "tsconfig.json"
+      - "moon.yml"
+      - ".moon/**"
       - ".codex/**"
       - ".agents/**"
       - ".agent/**"
@@ -28,12 +30,14 @@ on:
   pull_request:
     branches: [master]
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
+  actions: read
   contents: read
   issues: read
   pull-requests: read
@@ -44,14 +48,42 @@ env:
   TEST_THREADS: "1"
 
 jobs:
+  static-quality:
+    name: Source quality checks
+    if: >-
+      github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - name: Install JavaScript dependencies
+        run: bun install --frozen-lockfile
+      - name: Install Python analysis tools
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.0"
+          enable-cache: true
+      - name: Install just
+        uses: taiki-e/install-action@66f567e72f7d264686a8d5f09f38f0829b4feb80 # just
+      - name: Install ShellCheck 0.11.0
+        run: |
+          curl --fail --location --output "$RUNNER_TEMP/shellcheck.tar.xz" https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
+          tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/shellcheck-v0.11.0/shellcheck" --version | grep -Fx 'version: 0.11.0'
+          echo "$RUNNER_TEMP/shellcheck-v0.11.0" >> "$GITHUB_PATH"
+      - name: Verify validation registration before scheduling checks
+        run: bun scripts/html/harness-contract-cli.ts
+      - name: Run independent source checks
+        run: bun run moon --concurrency 3 exec krr:source-static --on-failure continue --no-actions
+
   test:
     name: Test and Build
+    needs: static-quality
     if: >-
-      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
-      (github.event_name != 'push' || (
-        !startsWith(github.event.head_commit.message, 'Merge pull request ') &&
-        !contains(github.event.head_commit.message, '(#')
-      ))
+      github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       fail-fast: false
       matrix:
@@ -63,6 +95,12 @@ jobs:
           - os: windows-latest
             platform: win64
     runs-on: ${{ matrix.os }}
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+      issues: read
+      pull-requests: read
     steps:
       - name: Prepare Windows Git checkout
         if: matrix.os == 'windows-latest'
@@ -94,41 +132,71 @@ jobs:
 
       - name: Install Java runtime
         if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v5.1.0
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: "21"
 
       - name: Install Rust toolchain
         if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
           components: clippy, rustfmt, llvm-tools-preview
 
       - name: Cache Rust build outputs
         if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
-        uses: Swatinem/rust-cache@v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: ci-v2-${{ matrix.os }}-stable-default
 
       - name: Install Bun
-        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
-        uses: oven-sh/setup-bun@v2
+        if: matrix.os != 'windows-latest'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
 
       - name: Install JavaScript dependencies
-        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: matrix.os != 'windows-latest'
         run: bun install --frozen-lockfile
+
+      - name: Install Python analysis tools
+        if: matrix.os == 'ubuntu-latest'
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.0"
+          enable-cache: true
 
       - name: Install cargo-llvm-cov
         if: matrix.os == 'ubuntu-latest'
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-llvm-cov@0.9.1
+
+      - name: Install cargo-nextest
+        if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-nextest@0.9.148
 
       - name: Install just
-        if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
-        uses: taiki-e/install-action@just
+        uses: taiki-e/install-action@66f567e72f7d264686a8d5f09f38f0829b4feb80 # just
+
+      - name: Install Chrome for the macOS official producer browser test
+        if: matrix.platform == 'mac-arm64'
+        run: bunx playwright install chrome
+
+      - name: Install capacity cleanup tool
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo install cargo-sweep --version 0.8.0 --locked
+
+      - name: Check formatting
+        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        run: just fmt-check
+
+      - name: Run Windows format check
+        if: matrix.os == 'windows-latest'
+        run: just fmt-check
 
       # 正常なUbuntu Rustキャッシュを使い、V8 archive欠落時だけv8を再生成する。
       - name: Repair cached V8 archive on Ubuntu
@@ -139,6 +207,30 @@ jobs:
               cargo clean --target-dir "$target_dir" -p v8
             fi
           done
+
+      - name: Initialize fixed capacity reference
+        if: matrix.os == 'ubuntu-latest'
+        run: python3 scripts/build/initialize_ci_capacity_state.py --root "$PWD"
+
+      - name: Check Rust types
+        if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        run: cargo check --workspace --locked
+
+      - name: Run linter
+        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        run: just lint
+
+      - name: Run AST linter
+        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        run: just ast-lint
+
+      - name: Check dependency boundary
+        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        run: just dependency-leak
+
+      - name: Run macOS official producer browser test
+        if: matrix.platform == 'mac-arm64'
+        run: just macos-browser-contract-test
 
       # rust-cache は target を復元しても rusty_v8 の静的アーカイブを復元しない場合がある。
       # macOS のリンク実行前に v8 を再構築して、公式アーカイブの取得とリンクを保証する。
@@ -155,25 +247,10 @@ jobs:
           cargo clean -p v8
           cargo build -p katana-render-runtime-cli --locked
 
-      - name: Check Rust types
-        if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
-        run: cargo check --workspace --locked
 
-      - name: Check formatting
-        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
-        run: just fmt-check
 
-      - name: Run Windows format check
-        if: matrix.os == 'windows-latest'
-        run: cargo fmt --all -- --check
 
-      - name: Run linter
-        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
-        run: just lint
 
-      - name: Run AST linter
-        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
-        run: just ast-lint
 
       - name: Check runtime bundle sync
         if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
@@ -214,9 +291,6 @@ jobs:
             throw "PlantUML smoke output did not contain SVG"
           }
 
-      - name: Check dependency boundary
-        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
-        run: just dependency-leak
 
       - name: Check TypeScript formatting and lint
         if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
@@ -238,6 +312,26 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: just plantuml-runtime-package-check
 
+      - name: Install Google Chrome for independent HTML reference
+        if: matrix.os == 'ubuntu-latest'
+        run: bunx playwright install --with-deps chrome
+
+      - name: Install pinned ImageMagick for HTML comparison
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          IMAGEMAGICK_DIR: ${{ runner.temp }}/imagemagick
+        run: |
+          mkdir -p "$IMAGEMAGICK_DIR"
+          cd "$IMAGEMAGICK_DIR"
+          curl --fail --location --retry 3 --output imagemagick.AppImage https://github.com/ImageMagick/ImageMagick/releases/download/7.1.2-33/ImageMagick-7.1.2-33-gcc-x86_64.AppImage
+          printf '%s  %s\n' af598b07ab4dd8b8123623602dc9fc69d5e32185a36fd3739795a0deb02c1fb7 imagemagick.AppImage | sha256sum --check
+          chmod +x imagemagick.AppImage
+          ./imagemagick.AppImage --appimage-extract > /dev/null
+          mkdir -p bin
+          ln -s ../squashfs-root/AppRun bin/magick
+          echo "$IMAGEMAGICK_DIR/bin" >> "$GITHUB_PATH"
+          bin/magick -version
+
       - name: Run runtime asset script tests
         if: matrix.os == 'ubuntu-latest'
         timeout-minutes: 15
@@ -246,7 +340,57 @@ jobs:
       - name: Run automation contract tests
         if: matrix.os == 'ubuntu-latest'
         timeout-minutes: 15
-        run: just automation-contract-test
+        run: just check-contracts
+
+      - name: Select authorized HTML release phase
+        id: html_policy
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          python3 scripts/release/html_fidelity_policy.py > "$RUNNER_TEMP/html-fidelity-policy.json"
+          python3 - <<'PY_PHASE'
+          import json, os
+          from pathlib import Path
+          policy = json.loads((Path(os.environ["RUNNER_TEMP"]) / "html-fidelity-policy.json").read_text())
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"phase={policy['phase']}\n")
+          PY_PHASE
+
+      - name: Compare HTML against Google Chrome for authorized release phase
+        if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 15
+        run: just html-release-fidelity-check
+
+      - name: Compare HTML interactions against Google Chrome
+        if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 15
+        run: just html-interaction-check
+
+      - name: Upload independent HTML comparison evidence
+        if: matrix.os == 'ubuntu-latest' && steps.html_policy.outputs.phase == 'final' && always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: html-chrome-fidelity
+          path: tmp/html-chrome-fidelity-suite
+          if-no-files-found: error
+
+      - name: Upload interim HTML comparison evidence
+        if: matrix.os == 'ubuntu-latest' && steps.html_policy.outputs.phase == 'interim' && always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: html-chrome-fidelity-interim-v0.4.24
+          path: |
+            tmp/html-fidelity/interim
+            tmp/html-fidelity/dynamic-interim
+            tmp/html-fidelity/input-state-interim
+          if-no-files-found: error
+
+      - name: Upload HTML interaction evidence
+        if: matrix.os == 'ubuntu-latest' && always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: html-chrome-interactions
+          path: tmp/html-interaction-suite
+          if-no-files-found: error
 
       - name: Run Windows review process tree tests
         if: matrix.os == 'windows-latest'
@@ -264,10 +408,121 @@ jobs:
           df -h .
           du -sh target 2>/dev/null || true
 
+      - name: Collect trusted Linux coverage context
+        id: native_coverage_context
+        if: matrix.os == 'ubuntu-latest' && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'))
+        continue-on-error: true
+        env:
+          CARGO_INCREMENTAL: '0'
+          CARGO_TERM_COLOR: always
+          GITHUB_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          RUSTFLAGS: -D warnings
+          TEST_THREADS: '1'
+        run: |
+          context="$RUNNER_TEMP/native-coverage-context.json"
+          python3 scripts/release/native_coverage_result_cli.py --repo "$PWD" collect-context > "$context"
+          key="$(python3 scripts/release/native_coverage_result_cli.py --repo "$PWD" cache-key --context "$context" | python3 -c 'import json,sys; print(json.load(sys.stdin)["key"])')"
+          echo "context=$context" >> "$GITHUB_OUTPUT"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+
+      - name: Restore exact trusted Linux coverage result
+        id: native_coverage_cache_restore
+        if: steps.native_coverage_context.outcome == 'success'
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tmp/quality/native-coverage-cache/manifest.json
+          key: ${{ steps.native_coverage_context.outputs.key }}
+
+      - name: Verify trusted Linux coverage result
+        id: native_coverage_cache_verify
+        if: steps.native_coverage_context.outcome == 'success' && steps.native_coverage_cache_restore.outputs.cache-hit == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/release/native_coverage_reuse.py verify-cache \
+            --repo "$PWD" \
+            --manifest tmp/quality/native-coverage-cache/manifest.json \
+            --context "${{ steps.native_coverage_context.outputs.context }}" \
+            --repository "${{ github.repository }}" \
+            --tested-sha "${{ github.sha }}" \
+            --workflow-sha "${{ github.workflow_sha }}" \
+            --source-ref "${{ github.ref }}"
+          echo 'verified=true' >> "$GITHUB_OUTPUT"
+
+      - name: Report reused Linux coverage result
+        if: steps.native_coverage_cache_verify.outputs.verified == 'true'
+        run: echo 'Verified native coverage result reused; no fresh coverage run was performed.'
+
       - name: Run coverage
-        if: matrix.os == 'ubuntu-latest'
+        id: coverage
+        if: matrix.os == 'ubuntu-latest' && steps.native_coverage_cache_verify.outputs.verified != 'true'
         timeout-minutes: 45
         run: just coverage
+
+      - name: Prepare fresh-only coverage attestation seed
+        id: native_coverage_seed
+        if: >-
+          always() && matrix.os == 'ubuntu-latest' &&
+          ((github.event_name == 'push' && github.ref == 'refs/heads/master') ||
+          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'))
+        continue-on-error: true
+        env:
+          CARGO_INCREMENTAL: '0'
+          CARGO_TERM_COLOR: always
+          GITHUB_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          RUSTFLAGS: -D warnings
+          TEST_THREADS: '1'
+        run: |
+          seed="$RUNNER_TEMP/native-coverage-seed"
+          mkdir -p "$seed"
+          printf '{"schema":"krr-native-test-coverage-seed-v1","fresh":false,"runId":"%s","runAttempt":"%s"}\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$seed/status.json"
+          if [[ "${{ steps.native_coverage_cache_verify.outputs.verified }}" == 'true' || \
+                "${{ steps.native_coverage_context.outcome }}" != 'success' || \
+                "${{ steps.coverage.outcome }}" != 'success' ]]; then
+            exit 0
+          fi
+          post_context="$RUNNER_TEMP/native-coverage-post-context.json"
+          if ! python3 scripts/release/native_coverage_result_cli.py --repo "$PWD" collect-context > "$post_context"; then
+            exit 0
+          fi
+          if ! cmp -s "${{ steps.native_coverage_context.outputs.context }}" "$post_context"; then
+            exit 0
+          fi
+          output_root="tmp/quality/native-coverage-cache/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$(dirname "$output_root")"
+          mkdir "$output_root"
+          manifest="$output_root/manifest.json"
+          key_file="$output_root/cache-key.txt"
+          python3 scripts/release/native_coverage_result_cli.py --repo "$PWD" create \
+            --context "$post_context" --output "$manifest"
+          printf '%s\n' '${{ steps.native_coverage_context.outputs.key }}' > "$key_file"
+          verify_status="$RUNNER_TEMP/native-coverage-verify-status.json"
+          printf '{"schema":"krr-native-test-coverage-seed-v1","fresh":true,"runId":"%s","runAttempt":"%s"}\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$verify_status"
+          python3 scripts/release/native_coverage_reuse.py verify-seed \
+            --repo "$PWD" --manifest "$manifest" \
+            --context "$post_context" \
+            --cache-key "$key_file" --status "$verify_status" \
+            --tested-sha "${{ github.sha }}" --workflow-sha "${{ github.workflow_sha }}" \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT"
+          cp "$manifest" "$seed/manifest.json"
+          cp "$post_context" "$seed/context.json"
+          cp "$key_file" "$seed/cache-key.txt"
+          printf '{"schema":"krr-native-test-coverage-seed-v1","fresh":true,"runId":"%s","runAttempt":"%s"}\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$seed/status.json"
+
+      - name: Upload sanitized coverage seed for master signing
+        if: always() && matrix.os == 'ubuntu-latest' && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'))
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-coverage-seed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-coverage-seed
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Diagnose coverage failure
         if: matrix.os == 'ubuntu-latest' && (failure() || cancelled())
@@ -300,10 +555,14 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          from scripts.release.html_fidelity_policy import assert_head_source_binding, select_html_policy, workspace_version
           from pathlib import Path
 
+          assert_head_source_binding(os.environ["PR_HEAD_SHA"])
+          selection = select_html_policy(workspace_version(), os.environ["GITHUB_HEAD_REF"])
           payload = {
-              "schema": 1,
+              "schema": 2,
+              "html_fidelity": selection,
               "run_id": int(os.environ["RUN_ID"]),
               "run_attempt": int(os.environ["RUN_ATTEMPT"]),
               "base_sha": os.environ["PR_BASE_SHA"],
@@ -316,9 +575,305 @@ jobs:
 
       - name: Upload immutable PR base evidence
         if: github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest' && success()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-quality-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ci-quality-evidence.json
           if-no-files-found: error
           retention-days: 7
+
+  sign-native-coverage-cache:
+    name: Sign fresh Linux native coverage cache entry
+    needs: [test, paired-performance]
+    if: needs.test.result == 'success' && needs.paired-performance.result == 'success' && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'))
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Download same-run coverage seed
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: native-coverage-seed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-coverage-seed
+
+      - name: Verify fresh-only coverage seed
+        id: native_coverage_seed_verify
+        continue-on-error: true
+        env:
+          CARGO_INCREMENTAL: '0'
+          CARGO_TERM_COLOR: always
+          GITHUB_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          RUSTFLAGS: -D warnings
+          TEST_THREADS: '1'
+        run: |
+          python3 scripts/release/native_coverage_reuse.py verify-seed \
+            --repo "$PWD" \
+            --manifest "$RUNNER_TEMP/native-coverage-seed/manifest.json" \
+            --context "$RUNNER_TEMP/native-coverage-seed/context.json" \
+            --cache-key "$RUNNER_TEMP/native-coverage-seed/cache-key.txt" \
+            --status "$RUNNER_TEMP/native-coverage-seed/status.json" \
+            --cache-output tmp/quality/native-coverage-cache/manifest.json \
+            --tested-sha "${{ github.sha }}" --workflow-sha "${{ github.workflow_sha }}" \
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT"
+          key="$(cat "$RUNNER_TEMP/native-coverage-seed/cache-key.txt")"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo 'eligible=true' >> "$GITHUB_OUTPUT"
+
+      - name: Attest fresh coverage manifest
+        id: native_coverage_attest
+        if: steps.native_coverage_seed_verify.outputs.eligible == 'true'
+        continue-on-error: true
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: tmp/quality/native-coverage-cache/manifest.json
+
+      - name: Save immutable exact-key coverage result
+        if: steps.native_coverage_seed_verify.outputs.eligible == 'true' && steps.native_coverage_attest.outcome == 'success'
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: tmp/quality/native-coverage-cache/manifest.json
+          key: ${{ steps.native_coverage_seed_verify.outputs.key }}
+
+  paired-performance:
+    name: Native paired HTML time and RSS nonregression
+    needs: test
+    if: >-
+      github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: macos-15
+    timeout-minutes: 360
+    permissions:
+      actions: read
+      attestations: write
+      contents: read
+      id-token: write
+      issues: read
+      pull-requests: read
+    steps:
+      - name: Checkout exact measurement source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Record actual source HEAD
+        id: source
+        run: echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify optional local HTML performance evidence
+        id: html_local_proof
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/release/local_html_performance_evidence.py --verify
+          --repository "${{ github.repository }}"
+          --pr "${{ github.event.pull_request.number }}"
+          --base "${{ github.event.pull_request.base.sha }}"
+          --head "${{ github.event.pull_request.head.sha }}"
+
+      - name: Report local HTML performance evidence
+        if: steps.html_local_proof.outcome == 'success' && steps.html_local_proof.outputs.reuse == 'true'
+        run: echo 'HTML performance reused from verified maintainer evidence.'
+
+      - name: Install Rust toolchain
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+
+      - name: Install just
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        uses: taiki-e/install-action@66f567e72f7d264686a8d5f09f38f0829b4feb80 # just
+
+      - name: Install Bun
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Install JavaScript dependencies
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Set up Python 3.13
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+
+      - name: Download and verify font observer
+        id: font_observer
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          observer_work="$(mktemp -d "${RUNNER_TEMP}/krr-font-observer.XXXXXXXX")"
+          observer_work="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve(strict=True))' "$observer_work")"
+          archive="$observer_work/observer.tar.gz"
+          gh api -H 'Accept: application/octet-stream' \
+            "repos/${GITHUB_REPOSITORY}/releases/assets/702068128" > "$archive"
+          python3 scripts/release/html_performance_observer_unpack.py \
+            --archive "$archive" \
+            --archive-sha256 92102a2dad3ef4c5f50e5581c7f12a2c7b4e291ee3c3a2804299690811e8a86f \
+            --manifest-sha256 74594a04e993c89f969d6b02c42a84fe4a787d818a0bd339d7d96445380ba6dc \
+            --executable-sha256 031c93c5e822ffd8d22121bb41ed139fb6fcc4e96f6aa1f43ea31ec36fb9242c \
+            --output-dir "$observer_work/observer"
+          echo "executable=$observer_work/observer/headless_shell" >> "$GITHUB_OUTPUT"
+
+      - name: Install Python analysis tools
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.0"
+          enable-cache: true
+
+      - name: Initialize fixed capacity reference before interaction Cargo
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        run: python3 scripts/build/initialize_ci_capacity_state.py --root "$PWD"
+
+      - name: Verify real interaction state for measurement fixture
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        run: just browser-install html-interaction-check
+
+      - name: Capture all 84 HTML catalog conditions
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        id: html84
+        run: |
+          output_root="tmp/html-performance-stage90/${{ github.run_id }}-${{ github.run_attempt }}"
+          manifest="$output_root/captures/catalog-stage90-captures.json"
+          just html-performance-catalog-captures "$output_root" '' '' \
+            "${{ steps.font_observer.outputs.executable }}" \
+            031c93c5e822ffd8d22121bb41ed139fb6fcc4e96f6aa1f43ea31ec36fb9242c true
+          echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
+
+      - name: Measure all 84 catalog conditions against baseline
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        run: just html-performance-evidence-produce "${{ steps.html84.outputs.manifest }}"
+
+      - name: Upload immutable source and run bound paired evidence
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        id: paired_performance_upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: html-performance-paired-${{ steps.source.outputs.head }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tmp/html-performance-producer/bundle
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Attest immutable paired performance artifact
+        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: html-performance-paired-${{ steps.source.outputs.head }}-${{ github.run_id }}-${{ github.run_attempt }}
+          subject-digest: sha256:${{ steps.paired_performance_upload.outputs.artifact-digest }}
+
+      - name: Upload failed measurement diagnostics
+        if: failure() && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: html-performance-diagnostics-${{ steps.source.outputs.head }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            tmp/html-performance-producer/*/*.json
+            tmp/html-performance-producer/*/reports/*.json
+          if-no-files-found: warn
+
+  preflight:
+    name: preflight
+    needs: [test, paired-performance]
+    if: >-
+      needs.test.result == 'success' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.head_ref, 'release/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Install Java runtime
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Linux runtime test prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk graphviz
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: clippy, rustfmt, llvm-tools-preview
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: release-preflight-ubuntu-stable-all-features
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Install JavaScript dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Python analysis tools
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.13.0"
+          enable-cache: true
+
+      - name: Install just
+        uses: taiki-e/install-action@66f567e72f7d264686a8d5f09f38f0829b4feb80 # just
+
+      - name: Install capacity cleanup tool
+        run: cargo install cargo-sweep --version 0.8.0 --locked
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-llvm-cov@0.9.1
+
+      - name: Acquire completed producer from this CI generation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          KRR_HTML_PERFORMANCE_SCIPY_VERSION=1.18.1
+          python3 scripts/release/run_html_performance.py --bootstrap verify --acquire-current-producer
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          bash scripts/release/resolve-release-version.sh \
+            "${{ github.event_name }}" \
+            "${{ inputs.version }}" \
+            "${{ github.head_ref }}"
+
+      - name: Release preflight checks
+        timeout-minutes: 45
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: just VERSION="${{ steps.version.outputs.version }}" release-preflight-check

@@ -1,6 +1,4 @@
-use super::constants::CONTROL_HEIGHT;
 use super::layout::{ContainingBlock, HtmlLayoutRenderer};
-use super::layout_input::is_checkbox;
 use super::style::{CssPosition, CssStyle};
 use super::types::{ElementRenderContext, LayoutContext};
 
@@ -13,8 +11,10 @@ fn horizontal_position(containing: ContainingBlock, style: &CssStyle, static_x: 
     let left = style.inset_left;
     let right = style.inset_right;
     let width = match (left, right) {
-        (Some(left), Some(right)) => (containing.width - left - right).max(0.0),
-        _ => style.box_width(containing.width).min(containing.width),
+        (Some(left), Some(right)) if style.width.is_none() => {
+            style.box_width((containing.width - left - right).max(0.0))
+        }
+        _ => style.box_width(containing.width),
     };
     let x = left.map_or_else(
         || {
@@ -58,7 +58,7 @@ fn vertical_height(
     auto_count: usize,
 ) -> Option<f32> {
     match (top, bottom, explicit_height, auto_count == 0) {
-        (Some(top), Some(bottom), None, true) => Some((container_height - top - bottom).max(0.0)),
+        (Some(top), Some(bottom), None, _) => Some((container_height - top - bottom).max(0.0)),
         _ => explicit_height,
     }
 }
@@ -114,10 +114,6 @@ impl HtmlLayoutRenderer {
         layout: LayoutContext<'_>,
         style: &mut CssStyle,
     ) -> f32 {
-        if element.tag == "input" && is_checkbox(element.attributes) && style.height.is_none() {
-            let outer_height = style.explicit_width(layout.width).unwrap_or(CONTROL_HEIGHT);
-            style.assign_outer_height(outer_height);
-        }
         let (x, y, width) = self.positioned_geometry(style, (layout.x, layout.y));
         self.render_styled_element(
             element,
@@ -239,5 +235,48 @@ mod tests {
 
         renderer.pop_containing_block();
         assert!(renderer.ownership.containing_blocks.is_empty());
+    }
+
+    #[test]
+    fn absolute_explicit_width_overflows_and_max_width_still_applies() {
+        let mut containing = containing_block();
+        containing.width = 45.0;
+        let fixed = CssStyle::from_attributes(
+            &[("style".to_string(), "width:60px".to_string())],
+            &CssStyle::browser_default(),
+        );
+        let bounded = CssStyle::from_attributes(
+            &[("style".to_string(), "width:60px;max-width:50px".to_string())],
+            &CssStyle::browser_default(),
+        );
+
+        assert_eq!(horizontal_position(containing, &fixed, 35.0), (35.0, 60.0));
+        assert_eq!(
+            horizontal_position(containing, &bounded, 35.0),
+            (35.0, 50.0)
+        );
+    }
+
+    #[test]
+    fn absolute_two_insets_stretch_auto_width_but_explicit_width_keeps_ltr_left() {
+        let mut containing = containing_block();
+        containing.width = 45.0;
+        let fixed = CssStyle::from_attributes(
+            &[(
+                "style".to_string(),
+                "width:60px;left:5px;right:10px".to_string(),
+            )],
+            &CssStyle::browser_default(),
+        );
+        let automatic = CssStyle::from_attributes(
+            &[("style".to_string(), "left:5px;right:10px".to_string())],
+            &CssStyle::browser_default(),
+        );
+
+        assert_eq!(horizontal_position(containing, &fixed, 35.0), (15.0, 60.0));
+        assert_eq!(
+            horizontal_position(containing, &automatic, 35.0),
+            (15.0, 30.0)
+        );
     }
 }

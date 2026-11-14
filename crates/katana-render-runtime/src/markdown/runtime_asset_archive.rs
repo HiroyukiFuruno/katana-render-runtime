@@ -2,6 +2,17 @@ use std::{io::Read, sync::OnceLock};
 
 const BROTLI_BUFFER_SIZE: usize = 4096;
 
+pub(super) static MERMAID_RUNTIME_ASSET_BYTES: OnceLock<Result<Vec<u8>, String>> = OnceLock::new();
+pub(super) static DRAWIO_RUNTIME_ASSET_BYTES: OnceLock<Result<Vec<u8>, String>> = OnceLock::new();
+#[cfg(test)]
+pub(super) static ZENUML_RUNTIME_ASSET_BYTES: OnceLock<Result<Vec<u8>, String>> = OnceLock::new();
+
+#[cfg(test)]
+pub(super) const ZENUML_RUNTIME_ASSET_ARCHIVE: &[u8] =
+    include_bytes!("generated/zenuml-runtime-assets.bin.br");
+#[cfg(test)]
+include!("generated/zenuml-runtime-assets-index.rs");
+
 #[derive(Clone, Copy)]
 pub(crate) enum RuntimeAssetSource {
     Brotli {

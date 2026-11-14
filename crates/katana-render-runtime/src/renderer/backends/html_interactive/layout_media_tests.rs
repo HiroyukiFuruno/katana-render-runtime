@@ -1,6 +1,7 @@
 use super::super::layout::HtmlLayoutRenderer;
 use super::{
-    embedded_svg_size, image_box_size, parse_svg_length, parse_view_box, position_embedded_svg,
+    embedded_svg_size, image_box_size, inherit_svg_text_style, parse_svg_length, parse_view_box,
+    position_embedded_svg,
 };
 use crate::renderer::backends::html_browser::HtmlBrowserViewport;
 use crate::renderer::backends::html_document::HtmlDocumentNode;
@@ -13,43 +14,46 @@ use std::collections::HashMap;
 type TestResult<T = ()> = Result<T, String>;
 const TEST_VIEWPORT_WIDTH: u32 = 320;
 const TEST_VIEWPORT_HEIGHT: u32 = 240;
+const TEXT_SVG_WIDTH: u32 = 160;
+const TEXT_SVG_HEIGHT: u32 = 48;
 
 #[test]
 fn image_without_a_source_does_not_emit_svg_image_content() -> TestResult {
-    let viewport = HtmlBrowserViewport::new(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT, 1.0)
-        .map_err(|error| error.to_string())?;
-    let nodes = vec![HtmlDocumentNode::Element {
-        node_id: 1,
-        tag: "img".to_string(),
-        attributes: Vec::new(),
-        children: Vec::new(),
-    }];
-    let layout = HtmlLayoutRenderer::render(&nodes, viewport, 0.0, &HashMap::new(), None)?;
-
-    assert!(!layout.svg.contains("<image"));
+    let svg = render_media_svg(&[media_element("img", Vec::new())])?;
+    assert!(!svg.contains("<image"));
     Ok(())
 }
 
 #[test]
 fn data_png_uses_natural_dimensions_instead_of_the_default_image_box() -> TestResult {
-    let viewport = HtmlBrowserViewport::new(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT, 1.0)
-        .map_err(|error| error.to_string())?;
-    let nodes = vec![HtmlDocumentNode::Element {
-        node_id: 1,
-        tag: "img".to_string(),
-        attributes: vec![(
-            "src".to_string(),
-            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=".to_string(),
-        )],
-        children: Vec::new(),
-    }];
-    let layout = HtmlLayoutRenderer::render(&nodes, viewport, 0.0, &HashMap::new(), None)?;
+    let image = media_element("img", vec![(
+        "src".to_string(),
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=".to_string(),
+    )]);
+    let svg = render_media_svg(&[image])?;
+    assert!(svg.contains(r#"width="1" height="1""#), "{svg}");
+    Ok(())
+}
 
-    assert!(
-        layout.svg.contains(r#"width="1" height="1""#),
-        "{}",
-        layout.svg
+#[test]
+fn html_image_with_zero_png_intrinsic_dimension_uses_default_box() -> TestResult {
+    use base64::Engine as _;
+
+    let header = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR\0\0\0\0\0\0\0\x01";
+    let source = format!(
+        "<div style=\"width:160px\"><img src=\"data:image/png;base64,{}\"></div>",
+        base64::engine::general_purpose::STANDARD.encode(header)
     );
+    let document = crate::renderer::backends::html_document::HtmlDocument::parse(&source);
+    let nodes = document.interactive_nodes_with_styles(&HashMap::new());
+    let markup = render_media_svg(&nodes)?;
+    let svg = roxmltree::Document::parse(&markup).map_err(|error| error.to_string())?;
+    let image = svg
+        .descendants()
+        .find(|node| node.has_tag_name("image"))
+        .ok_or("image missing from layout")?;
+    assert_eq!(image.attribute("width"), Some("160"));
+    assert_eq!(image.attribute("height"), Some("160"));
     Ok(())
 }
 
@@ -78,22 +82,28 @@ fn data_png_preserves_natural_ratio_under_width_and_height_constraints() {
 
 #[test]
 fn embedded_svg_without_serialized_markup_does_not_emit_svg_content() -> TestResult {
-    let viewport = HtmlBrowserViewport::new(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT, 1.0)
-        .map_err(|error| error.to_string())?;
-    let nodes = vec![HtmlDocumentNode::Element {
-        node_id: 1,
-        tag: "svg".to_string(),
-        attributes: Vec::new(),
-        children: Vec::new(),
-    }];
-    let layout = HtmlLayoutRenderer::render(&nodes, viewport, 0.0, &HashMap::new(), None)?;
-
-    assert_eq!(layout.svg.matches("<svg").count(), 1);
+    let svg = render_media_svg(&[media_element("svg", Vec::new())])?;
+    assert_eq!(svg.matches("<svg").count(), 1);
     Ok(())
 }
 
+fn render_media_svg(nodes: &[HtmlDocumentNode]) -> TestResult<String> {
+    let viewport = HtmlBrowserViewport::new(TEST_VIEWPORT_WIDTH, TEST_VIEWPORT_HEIGHT, 1.0)
+        .map_err(|error| error.to_string())?;
+    Ok(HtmlLayoutRenderer::render(nodes, viewport, 0.0, &HashMap::new(), None)?.svg)
+}
+
+fn media_element(tag: &str, attributes: Vec<(String, String)>) -> HtmlDocumentNode {
+    HtmlDocumentNode::Element {
+        node_id: 1,
+        tag: tag.to_string(),
+        attributes,
+        children: Vec::new(),
+    }
+}
+
 #[test]
-fn embedded_svg_sizing_preserves_view_box_ratio_and_css_constraints() {
+fn embedded_svg_sizing_keeps_explicit_height_when_width_is_constrained() {
     let attributes = vec![
         ("width".to_string(), "400".to_string()),
         ("height".to_string(), "200".to_string()),
@@ -106,6 +116,29 @@ fn embedded_svg_sizing_preserves_view_box_ratio_and_css_constraints() {
         &unconstrained,
     );
 
+    assert_eq!(
+        embedded_svg_size(&attributes, 300.0, &unconstrained),
+        (300.0, 200.0)
+    );
+    /* WHY: SVG2のheight属性はpresentation hintであり、max-widthでは変更されない。 */
+    assert_eq!(
+        embedded_svg_size(&attributes, 300.0, &constrained),
+        (120.0, 200.0)
+    );
+}
+
+#[test]
+fn embedded_svg_auto_height_preserves_view_box_ratio_and_css_constraints() {
+    let unconstrained =
+        crate::renderer::backends::html_interactive::style::CssStyle::browser_default();
+    let constrained = crate::renderer::backends::html_interactive::style::CssStyle::from_attributes(
+        &[("style".to_string(), "max-width: 120px".to_string())],
+        &unconstrained,
+    );
+    let attributes = vec![
+        ("width".to_string(), "400".to_string()),
+        ("viewbox".to_string(), "0 0 400 200".to_string()),
+    ];
     assert_eq!(
         embedded_svg_size(&attributes, 300.0, &unconstrained),
         (300.0, 150.0)
@@ -140,4 +173,119 @@ fn embedded_svg_parsers_and_positioning_reject_invalid_dimensions() {
         position_embedded_svg(&markup, 1.0, 2.0, 30.0, 40.0),
         "<svg x=\"1\" y=\"2\" width=\"30\" height=\"40\"></svg>"
     );
+}
+
+#[test]
+fn embedded_svg_inherits_parent_font_without_rewriting_explicit_child_font() -> TestResult {
+    let mut style = crate::renderer::backends::html_interactive::style::CssStyle::browser_default();
+    style.font_family = "Noto Sans, sans-serif".to_string();
+    style.font_size = 18.0;
+    style.font_weight = 700;
+    style.italic = true;
+    let markup = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{TEXT_SVG_WIDTH}" height="{TEXT_SVG_HEIGHT}"><text x="4" y="24">Parent</text><text x="4" y="44" font-family="monospace">Child</text></svg>"#
+    );
+
+    let wrapped = inherit_svg_text_style(&markup, &style);
+    assert_inherited_font_attributes(&wrapped)?;
+    assert!(wrapped.contains(markup.as_str()));
+    assert!(wrapped.contains(r#"font-family="monospace""#));
+    let document = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{TEXT_SVG_WIDTH}" height="{TEXT_SVG_HEIGHT}">{wrapped}</svg>"#
+    );
+    let raster =
+        crate::markdown::svg_rasterize::SvgRasterizeOps::rasterize_html_svg(&document, 1.0)
+            .map_err(|error| error.to_string())?;
+    assert!(raster.rgba.chunks_exact(4).any(|pixel| pixel[3] != 0));
+    Ok(())
+}
+
+fn assert_inherited_font_attributes(markup: &str) -> TestResult {
+    let wrapper = xmltree::Element::parse(markup.as_bytes()).map_err(|error| error.to_string())?;
+    assert_eq!(wrapper.name, "g");
+    for (attribute, expected) in [
+        ("font-family", "Noto Sans, sans-serif"),
+        ("font-size", "18"),
+        ("font-weight", "700"),
+        ("font-style", "italic"),
+    ] {
+        assert_eq!(
+            wrapper.attributes.get(attribute).map(String::as_str),
+            Some(expected)
+        );
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn embedded_svg_layout_uses_inherited_and_explicit_faces() -> TestResult {
+    let mut style = crate::renderer::backends::html_interactive::style::CssStyle::browser_default();
+    style.font_family = "Helvetica".to_string();
+    style.font_size = 18.0;
+    style.font_weight = 700;
+    style.italic = true;
+    let markup = r#"<svg xmlns="http://www.w3.org/2000/svg" width="160" height="48"><text id="parent" x="4" y="24">Parent</text><text id="child" x="4" y="44" font-family="Times New Roman" font-size="12" font-weight="400" font-style="normal">Child</text></svg>"#;
+    let wrapped = inherit_svg_text_style(markup, &style);
+    let document = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="160" height="48">{wrapped}</svg>"#
+    );
+    let database = system_font_database();
+    let options = resvg::usvg::Options {
+        fontdb: std::sync::Arc::new(database),
+        ..resvg::usvg::Options::default()
+    };
+    let tree =
+        resvg::usvg::Tree::from_str(&document, &options).map_err(|error| error.to_string())?;
+    let parent = positioned_face(tree.node_by_id("parent"), &tree)?;
+    let child = positioned_face(tree.node_by_id("child"), &tree)?;
+    assert_eq!(parent.font_size, 18.0);
+    assert_eq!(parent.weight, 700);
+    assert_eq!(parent.style, resvg::usvg::FontStyle::Italic);
+    assert_eq!(child.font_size, 12.0);
+    assert_eq!(child.weight, 400);
+    assert_eq!(child.style, resvg::usvg::FontStyle::Normal);
+    assert_ne!(parent.post_script_name, child.post_script_name);
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn system_font_database() -> resvg::usvg::fontdb::Database {
+    let mut database = resvg::usvg::fontdb::Database::new();
+    database.load_system_fonts();
+    database
+}
+
+#[cfg(target_os = "macos")]
+struct PositionedFace {
+    post_script_name: String,
+    font_size: f32,
+    weight: u16,
+    style: resvg::usvg::FontStyle,
+}
+
+#[cfg(target_os = "macos")]
+fn positioned_face(
+    node: Option<&resvg::usvg::Node>,
+    tree: &resvg::usvg::Tree,
+) -> TestResult<PositionedFace> {
+    let Some(resvg::usvg::Node::Text(text)) = node else {
+        return Err("expected text node".to_string());
+    };
+    let glyph = text
+        .layouted()
+        .iter()
+        .flat_map(|span| span.positioned_glyphs.iter())
+        .next()
+        .ok_or("expected positioned glyph")?;
+    let face = tree
+        .fontdb()
+        .face(glyph.font)
+        .ok_or("expected selected font face")?;
+    Ok(PositionedFace {
+        post_script_name: face.post_script_name.clone(),
+        font_size: glyph.font_size(),
+        weight: face.weight.0,
+        style: face.style.into(),
+    })
 }

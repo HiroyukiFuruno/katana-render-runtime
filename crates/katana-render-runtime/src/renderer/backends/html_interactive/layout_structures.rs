@@ -4,6 +4,10 @@ use super::layout::HtmlLayoutRenderer;
 use super::style::CssStyle;
 use super::svg::escape_xml;
 use super::types::{DetailsContext, LayoutContext};
+use taffy::prelude::Display;
+
+#[path = "layout_structures_flow.rs"]
+mod flow;
 
 impl HtmlLayoutRenderer {
     pub(super) fn render_rule(&mut self, x: f32, y: f32, width: f32, style: &CssStyle) -> f32 {
@@ -30,10 +34,36 @@ impl HtmlLayoutRenderer {
         if style.list_style_none {
             return self.render_container(children, x, y, width, style, DetailsContext::NONE);
         }
-        let current = y + style.margin_top;
-        let x = x + style.margin_left;
-        let width = (width - style.margin_left - style.margin_right).max(MIN_LAYOUT_WIDTH);
-        self.render_list_children(children, x, current, width, style, ordered) + style.margin_bottom
+        if matches!(style.display, Display::Grid | Display::Flex) {
+            return self.render_list_container(
+                children,
+                LayoutContext::new(x, y, width, style, DetailsContext::NONE),
+                ordered,
+            );
+        }
+        self.render_block_list(
+            children,
+            LayoutContext::new(x, y, width, style, DetailsContext::NONE),
+            ordered,
+        )
+    }
+
+    fn render_block_list(
+        &mut self,
+        children: &[HtmlDocumentNode],
+        layout: LayoutContext<'_>,
+        ordered: bool,
+    ) -> f32 {
+        let style = layout.style;
+        let current = layout.y + style.margin_top + style.padding_top + style.border_top_width();
+        let x = layout.x + style.margin_left + style.padding_left + style.border_left_width()
+            - LIST_MARKER_WIDTH;
+        let outer = layout.width - style.margin_left - style.margin_right;
+        let width = (style.content_width(outer) + LIST_MARKER_WIDTH).max(MIN_LAYOUT_WIDTH);
+        self.render_list_children(children, x, current, width, style, ordered)
+            + style.padding_bottom
+            + style.border_bottom_width()
+            + style.margin_bottom
     }
 
     fn render_list_children(
@@ -48,7 +78,8 @@ impl HtmlLayoutRenderer {
         let mut index = 1usize;
         for child in children {
             if let Some((attributes, items)) = list_item(child) {
-                let item_style = CssStyle::from_element("li", attributes, style);
+                let mut item_style = CssStyle::from_element("li", attributes, style);
+                item_style.resolve_text_line_height(items);
                 current = self.render_list_item_contents(
                     items,
                     x,
@@ -116,16 +147,6 @@ impl HtmlLayoutRenderer {
         }
         LIST_MARKER_WIDTH
     }
-
-    fn paint_list_marker(&mut self, ordered: bool, index: usize, x: f32, y: f32, style: &CssStyle) {
-        self.paint_text_lines(
-            &[list_marker(ordered, index)],
-            x,
-            LIST_MARKER_WIDTH,
-            y + style.font_size,
-            style,
-        );
-    }
 }
 
 fn accept_list_flow_result(
@@ -152,14 +173,6 @@ fn list_item(node: &HtmlDocumentNode) -> Option<ListItem<'_>> {
         return None;
     };
     (tag == "li").then_some((attributes, children))
-}
-
-fn list_marker(ordered: bool, index: usize) -> String {
-    if ordered {
-        format!("{index}.")
-    } else {
-        "•".to_string()
-    }
 }
 
 #[cfg(test)]
@@ -211,6 +224,22 @@ mod tests {
         assert!(!renderer.svg.contains("•"));
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn list_items_resolve_normal_height_for_their_actual_fonts() {
+        let mut style = CssStyle::browser_default();
+        style.font_family = "-apple-system, Hiragino Sans, sans-serif".to_string();
+        let nodes = [HtmlDocumentNode::Element {
+            node_id: 1,
+            tag: "li".to_string(),
+            attributes: Vec::new(),
+            children: vec![HtmlDocumentNode::Text("日本語".to_string())],
+        }];
+        let mut renderer = HtmlLayoutRenderer::new(viewport(), 0.0, &HashMap::new(), None);
+        let bottom = renderer.render_list(&nodes, 0.0, 0.0, 160.0, &style, true);
+        assert_eq!(bottom, 24.0);
+    }
+
     #[test]
     fn marker_width_is_zero_when_list_style_is_none() {
         let mut style = CssStyle::browser_default();
@@ -245,5 +274,43 @@ mod tests {
         renderer.render_list(&nodes, 0.0, 0.0, 160.0, &style, false);
         assert!(renderer.svg.contains(">•<"));
         assert!(renderer.svg.contains(">item<"));
+    }
+
+    #[test]
+    fn outside_marker_advances_and_gap_align_for_digit_counts_and_bullets() {
+        let style = CssStyle::browser_default();
+        let mut renderer = HtmlLayoutRenderer::new(viewport(), 0.0, &HashMap::new(), None);
+        let gutter_x = 40.0;
+        let marker_gap = super::super::text_metrics::text_width(" ", &style);
+
+        for (ordered, index, marker) in [
+            (true, 9, "9."),
+            (true, 10, "10."),
+            (true, 100, "100."),
+            (false, 1, "•"),
+        ] {
+            let marker_advance = super::super::text_metrics::text_width(marker, &style);
+            let expected_x = gutter_x + super::LIST_MARKER_WIDTH - marker_gap - marker_advance;
+            let start = renderer.svg.len();
+
+            renderer.paint_list_marker(ordered, index, gutter_x, 0.0, &style);
+
+            let painted = &renderer.svg[start..];
+            assert!(painted.contains(&format!(">{marker}</text>")), "{painted}");
+            assert!(
+                painted_text_x(painted)
+                    .is_some_and(|actual_x| (actual_x - expected_x).abs() < 0.001),
+                "{painted}"
+            );
+        }
+    }
+
+    fn painted_text_x(svg: &str) -> Option<f32> {
+        svg.split_once("<text x=\"")?
+            .1
+            .split_once('"')?
+            .0
+            .parse()
+            .ok()
     }
 }

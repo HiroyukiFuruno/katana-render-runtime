@@ -33,48 +33,55 @@ function katanaContentBoxWithPadding(minX, minY, maxX, maxY, padding) {
 
 function katanaScannedBoxes(svg) {
   const boxes = [];
-  const offsets = [[0, 0]];
+  const transforms = [""];
   const tags = svg.matchAll(/<\/?([a-zA-Z][\w:-]*)([^>]*)>/g);
   for (const match of tags) {
-    katanaScanSvgTag(svg, match, offsets, boxes);
+    katanaScanSvgTag(svg, match, transforms, boxes);
   }
   return boxes;
 }
 
-function katanaScanSvgTag(svg, match, offsets, boxes) {
+function katanaScanSvgTag(svg, match, transforms, boxes) {
   const tag = katanaScannedTag(match);
   if (tag.fullTag.startsWith("</")) {
-    katanaPopScannedOffset(tag.name, offsets);
+    katanaPopScannedTransform(tag.name, transforms);
     return;
   }
-  katanaScanOpeningTag(svg, tag, offsets, boxes, match.index);
+  katanaScanOpeningTag(svg, tag, transforms, boxes, match.index);
 }
 
 function katanaScannedTag(match) {
   return { fullTag: match[0], name: match[1].toLowerCase(), attributes: match[2] ?? "" };
 }
 
-function katanaPopScannedOffset(tagName, offsets) {
+function katanaPopScannedTransform(tagName, transforms) {
   if (katanaIsOffsetContainer(tagName)) {
-    offsets.pop();
+    transforms.pop();
   }
 }
 
-function katanaScanOpeningTag(svg, tag, offsets, boxes, index) {
-  const offset = katanaNestedOffset(offsets[offsets.length - 1] ?? [0, 0], tag.attributes);
-  katanaPushOptionalBox(boxes, katanaOpeningTextBox(svg, tag, offset, index));
-  katanaPushOptionalBox(boxes, katanaTagBox(tag.name, tag.attributes, offset));
-  katanaPushScannedOffset(tag.name, offsets, offset);
+function katanaScanOpeningTag(svg, tag, transforms, boxes, index) {
+  const transform = katanaNestedTransform(transforms[transforms.length - 1] ?? "", tag.attributes);
+  katanaPushOptionalBox(boxes, katanaOpeningTextBox(svg, tag, transform, index));
+  katanaPushOptionalBox(boxes, katanaTagBox(tag.name, tag.attributes, transform));
+  katanaPushScannedTransform(tag.name, transforms, transform);
 }
 
-function katanaNestedOffset(parentOffset, attributes) {
-  const ownOffset = katanaTranslate(attributes);
-  return [parentOffset[0] + ownOffset[0], parentOffset[1] + ownOffset[1]];
+function katanaNestedTransform(parentTransform, attributes) {
+  const ownTransform = katanaAttrText(attributes, "transform") ?? "";
+  if (!parentTransform || !ownTransform) return parentTransform || ownTransform;
+  const parentTranslation = katanaSimpleSvgTranslation(parentTransform);
+  const ownTranslation = katanaSimpleSvgTranslation(ownTransform);
+  if (parentTranslation && ownTranslation) {
+    return `translate(${parentTranslation[0] + ownTranslation[0]} ${parentTranslation[1] + ownTranslation[1]})`;
+  }
+  return `${parentTransform} ${ownTransform}`;
 }
 
-function katanaOpeningTextBox(svg, tag, offset, index) {
+function katanaOpeningTextBox(svg, tag, transform, index) {
   if (tag.name === "text") {
-    return katanaSvgTextBox(svg, index + tag.fullTag.length, tag.attributes, offset);
+    const box = katanaSvgTextBox(svg, index + tag.fullTag.length, tag.attributes, [0, 0]);
+    return katanaTransformBounds(box, transform);
   }
   return null;
 }
@@ -85,9 +92,9 @@ function katanaPushOptionalBox(boxes, box) {
   }
 }
 
-function katanaPushScannedOffset(tagName, offsets, offset) {
+function katanaPushScannedTransform(tagName, transforms, transform) {
   if (katanaIsOffsetContainer(tagName)) {
-    offsets.push(offset);
+    transforms.push(transform);
   }
 }
 
@@ -95,8 +102,14 @@ function katanaIsOffsetContainer(tagName) {
   return ["g", "svg"].includes(tagName);
 }
 
-function katanaTagBox(tagName, tag, offset) {
-  return (KATANA_TAG_BOXES[tagName] ?? katanaNullBox)(tag, offset);
+function katanaTagBox(tagName, tag, transform) {
+  const box = (KATANA_TAG_BOXES[tagName] ?? katanaNullBox)(tag, [0, 0]);
+  return katanaTransformBounds(box, transform);
+}
+
+function katanaTransformBounds(box, transform) {
+  if (!box || !transform) return box;
+  return katanaTransformSvgBounds(box, transform);
 }
 
 const KATANA_TAG_BOXES = {

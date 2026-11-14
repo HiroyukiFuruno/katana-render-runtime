@@ -4,12 +4,12 @@
 
 | runtime | version | file | sha256 |
 | --- | --- | --- | --- |
-| Mermaid.js | 12.1.0 | `crates/katana-render-runtime/vendor/mermaid/12.1.0/mermaid.min.js` | `6484afc32872a3aa16cac9a76ba1816a1ed4cc870a6593cc2e17757750f518b2` |
+| Mermaid.js | 12.3.0-krr.pr6823.1 (upstream 12.3.0) | `crates/katana-render-runtime/vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js` | `2c1ab92dfbd9149c5eec9c1f9c18999063b1721ad7868163ea3f4fe4e9231eaf` |
 | Mermaid ZenUML | 1.0.1 | `crates/katana-render-runtime/vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js` | `f75662869d22aac58870e52370fe4c46b89b9710bf4b03df93b3227b5e18e730` |
-| Draw.io | 32.0.2 | `crates/katana-render-runtime/vendor/drawio/32.0.2/drawio.min.js` | `21c390edd6aff2aa527596c0cddb90a3059dc40f39104c0df85790252608dcca` |
+| Draw.io | 32.6.10 | `crates/katana-render-runtime/vendor/drawio/32.6.10/drawio.min.js` | `c5ca831069b3a2cb4129f8581f807cb1c7d6a6b0c541b89976cc91c32df5a067` |
 | MathJax | 4.1.3 | `crates/katana-render-runtime/vendor/mathjax/4.1.3/tex-svg.js` | `23c036deccc0f2374834a47e4032e452419f3ac027bf17e17c104e2746b19f4c` |
-| ZenUML Core | 4.4.1 | `crates/katana-render-runtime/vendor/zenuml-core/4.4.1/zenuml.js` | `9b0465fca4a804ab19965296f6567fd8cd9f797eee0af6c2daf7472b0191cd53` |
-| PlantUML | 1.2026.8 | `crates/katana-render-runtime/vendor/plantuml/1.2026.8/plantuml.jar.sha256` | `1057dd8b346bed26a48ffebe6054e16fc785dda7c91f37f6c19030a4aab8a942` |
+| ZenUML Core | 4.13.2 | `crates/katana-render-runtime/vendor/zenuml-core/4.13.2/zenuml.js` | `4397c0f857b241ca210e8df66e7cf15d2bb2c0628b5dc39ca1f4d59473d5dfc5` |
+| PlantUML | 1.2026.10 | `crates/katana-render-runtime/vendor/plantuml/1.2026.10/plantuml.jar.sha256` | `fb9e2711a860400317106bcbeb37f57595e7d1803af3b9d7892241fa3d2bddb8` |
 
 MathJax は公式配布の JavaScript asset を repository 上で checksum 管理し、実行に使う自己完結 bundle は
 `crates/katana-render-runtime/src/markdown/diagram_runtime/generated/runtime-bundles.sha256`
@@ -33,9 +33,11 @@ MathJax は公式配布の JavaScript asset を repository 上で checksum 管�
 just depends-update-all
 ```
 
-`depends-update-all` は Rust・JavaScript 依存を breaking change を含めて更新し、Mermaid.js、ZenUML、Draw.io、MathJax、PlantUML の各最新リリースを取り込む。必要な基準画像、リソース、生成 bundle を更新し、比較と品質ゲートまで実行する。
+`depends-update-all` は Rust・JavaScript 依存を breaking change を含めて更新する。Mermaid.js の patched asset は upstream version を npm latest と比較するだけで、通常の CDN 更新による置換を拒否する。Mermaid の候補再生成は、追跡済みの patch・provenance・build recipe と固定 SHA を使う明示的な採用手順で行う。必要な基準画像、リソース、生成 bundle を更新し、比較と品質ゲートまで実行する。
 
-TypeScript を含む JavaScript 依存は、`bun update --latest` が解決する最新互換版を維持する。更新ターゲットで特定の旧版へ戻す固定は設けず、型検査で互換性を確認する。
+Mermaid.js `12.3.0-krr.pr6823.1` は Mermaid `12.3.0` に PR6823 の Sankey lexer patch を適用した KRR 管理 asset であり、公式 npm/CDN `12.3.0` の bytes ではない。取得 URL は tag 上の raw GitHub path に固定し、tag 公開時に取得 bytes と上記 SHA の一致を検証する。再現情報は `scripts/runtime-assets/mermaid-12.3.0-krr.pr6823.1.provenance.json`、patch と recipe は既存の `mermaid-12.2.0-krr.pr6823.1` のものを使用する。
+
+TypeScript を含む JavaScript 依存は、`bun update --latest '!@moonrepo/*'` が解決する最新互換版を維持する。Moon CLI と platform package は `package.json` の固定版に `bun.lock` と `.moon/workspace.yml` を合わせ、型検査で他依存の互換性を確認する。
 
 ## Mermaid version 更新時の score 回復 tips
 

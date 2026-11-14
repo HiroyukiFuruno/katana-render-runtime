@@ -11,26 +11,29 @@ import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Union
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
-    try:
-        import tomli as tomllib  # type: ignore[no-redef]
-    except ModuleNotFoundError:
-        parser_root = str(Path(__file__).resolve().parent)
-        if parser_root not in sys.path:
-            sys.path.insert(0, parser_root)
-        from _tomli import _parser as tomllib  # type: ignore[no-redef]
-
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
+_loader_root = str(ROOT / "scripts" / "release")
+sys.path.insert(0, _loader_root)
+try:
+    from toml_loader import load_toml_parser
+finally:
+    sys.path.remove(_loader_root)
+
+_expected_loader = (ROOT / "scripts" / "release" / "toml_loader.py").resolve()
+if any(Path(origin).resolve() != _expected_loader for origin in (sys.modules["toml_loader"].__file__ or "", load_toml_parser.__code__.co_filename)):
+    raise ImportError("loaded TOML helper is outside the owned release directory")
+tomllib = load_toml_parser()
+
 MANIFEST = ROOT / "crates/katana-render-runtime/Cargo.toml"
 RUNTIME_PACKAGE = "katana-render-runtime"
 USVG_PACKAGE = "usvg"
+RESVG_PACKAGE_NAMES = frozenset(("resvg", "katana-resvg"))
+USVG_PACKAGE_NAMES = frozenset(("usvg", "katana-usvg"))
 SKRIFA_PACKAGE = "skrifa"
-CommandRunner = Callable[..., Union[subprocess.CompletedProcess[bytes], subprocess.CompletedProcess[str]]]
+# Python 3.9 でも型 alias の評価時に PEP 604 の演算を実行しない。
+CommandRunner = Callable[..., "subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]"]
 
 
 def parse_cargo_command(value: str) -> list[str]:
@@ -100,6 +103,62 @@ def _resolve_edges(node: Mapping[str, Any], package_name: str) -> set[str]:
     return targets
 
 
+def _single_dependency_id(
+    nodes: Mapping[str, Mapping[str, Any]],
+    node_id: str,
+    dependency_name: str,
+) -> str:
+    node = nodes.get(node_id)
+    if node is None:
+        raise ValueError(f"cargo metadata is missing dependency node {node_id}")
+    targets = _resolve_edges(node, dependency_name)
+    if len(targets) != 1:
+        raise ValueError(f"expected one resolved {dependency_name} package, found {len(targets)}")
+    return next(iter(targets))
+
+
+def _validate_renderer_package(
+    packages: Mapping[str, Mapping[str, Any]],
+    package_id: str,
+    package_names: frozenset[str],
+    label: str,
+) -> Mapping[str, Any]:
+    package = packages.get(package_id)
+    if package is None:
+        raise ValueError(f"cargo metadata is missing resolved {label} package {package_id}")
+    if package.get("name") not in package_names:
+        raise ValueError(f"resolved {label} package has an unexpected name")
+    source = package.get("source")
+    if not isinstance(source, str) or not source.startswith("registry+"):
+        raise ValueError(f"resolved {label} package is not from a registry")
+    return package
+
+
+def _validate_reachable_graph(
+    packages: Mapping[str, Mapping[str, Any]],
+    nodes: Mapping[str, Mapping[str, Any]],
+    root_id: str,
+) -> None:
+    reachable: set[str] = set()
+    pending = [root_id]
+    while pending:
+        package_id = pending.pop()
+        if package_id in reachable:
+            continue
+        if package_id not in packages or package_id not in nodes:
+            raise ValueError(f"cargo metadata resolution is missing package node {package_id}")
+        reachable.add(package_id)
+        dependencies = nodes[package_id].get("deps")
+        if not isinstance(dependencies, list):
+            raise ValueError("cargo metadata resolve node is missing dependency edges")
+        for edge_value in dependencies:
+            edge = _mapping(edge_value, "resolve dependency edge")
+            target = edge.get("pkg")
+            if not isinstance(target, str):
+                raise ValueError("cargo metadata dependency edge has an invalid package id")
+            pending.append(target)
+
+
 def select_usvg_package(
     metadata: Mapping[str, Any],
 ) -> tuple[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any], Mapping[str, Mapping[str, Any]]]:
@@ -119,38 +178,15 @@ def select_usvg_package(
     if len(runtime_ids) != 1:
         raise ValueError(f"expected one workspace {RUNTIME_PACKAGE} package, found {len(runtime_ids)}")
 
-    reachable: set[str] = set()
-    pending = [runtime_ids[0]]
-    while pending:
-        package_id = pending.pop()
-        if package_id in reachable:
-            continue
-        if package_id not in packages or package_id not in nodes:
-            raise ValueError(f"cargo metadata resolution is missing package node {package_id}")
-        reachable.add(package_id)
-        dependencies = nodes[package_id].get("deps")
-        if not isinstance(dependencies, list):
-            raise ValueError("cargo metadata resolve node is missing dependency edges")
-        for edge_value in dependencies:
-            edge = _mapping(edge_value, "resolve dependency edge")
-            target = edge.get("pkg")
-            if not isinstance(target, str):
-                raise ValueError("cargo metadata dependency edge has an invalid package id")
-            pending.append(target)
-
-    usvg_ids = [
-        package_id
-        for package_id in reachable
-        if packages[package_id].get("name") == USVG_PACKAGE
-    ]
-    if len(usvg_ids) != 1:
-        raise ValueError(f"expected one resolved {USVG_PACKAGE} package reachable from KRR, found {len(usvg_ids)}")
-    usvg_id = usvg_ids[0]
-    usvg = packages[usvg_id]
-    source = usvg.get("source")
-    if not isinstance(source, str) or not source.startswith("registry+"):
-        raise ValueError("selected usvg package is not from a registry")
-    return packages[runtime_ids[0]], nodes[runtime_ids[0]], usvg, nodes
+    runtime_id = runtime_ids[0]
+    runtime = packages[runtime_id]
+    runtime_node = nodes[runtime_id]
+    _validate_reachable_graph(packages, nodes, runtime_id)
+    resvg_id = _single_dependency_id(nodes, runtime_id, "resvg")
+    _validate_renderer_package(packages, resvg_id, RESVG_PACKAGE_NAMES, "resvg")
+    usvg_id = _single_dependency_id(nodes, resvg_id, USVG_PACKAGE)
+    usvg = _validate_renderer_package(packages, usvg_id, USVG_PACKAGE_NAMES, USVG_PACKAGE)
+    return runtime, runtime_node, usvg, nodes
 
 
 def skrifa_requirement(usvg: Mapping[str, Any]) -> str:
@@ -211,6 +247,8 @@ def sync_manifest_text(contents: str, requirement: str) -> tuple[str, bool]:
         manifest = tomllib.loads(contents)
     except tomllib.TOMLDecodeError as error:
         raise ValueError(f"cannot parse KRR Cargo.toml: {error}") from error
+    if not isinstance(manifest, dict) or not all(isinstance(key, str) for key in manifest):
+        raise ValueError("KRR Cargo.toml must be a table with string keys")
     dependencies = manifest.get("dependencies")
     if not isinstance(dependencies, dict) or not isinstance(dependencies.get(SKRIFA_PACKAGE), str):
         raise ValueError("KRR direct skrifa dependency must be a string requirement")

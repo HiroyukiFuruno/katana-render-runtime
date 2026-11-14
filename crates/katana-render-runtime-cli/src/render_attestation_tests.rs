@@ -1,0 +1,161 @@
+use super::{AttestationPaths, RenderAttestation};
+use crate::commands::DiagramInputFormat;
+use crate::diagram_cmd::RenderInputFactory;
+use katana_render_runtime::{
+    DiagramKind, RenderDiagnostics, RenderOutput, RendererProfile, RuntimeVersion,
+};
+use std::fs;
+use std::path::PathBuf;
+use tempfile::TempDir;
+
+struct Fixture {
+    _tempdir: TempDir,
+    root: PathBuf,
+    input: PathBuf,
+    runtime: PathBuf,
+    output: PathBuf,
+    receipt: PathBuf,
+}
+
+impl Fixture {
+    fn new(source: &str) -> anyhow::Result<Self> {
+        let parent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tmp/html-fidelity/frame-capacity-independent-review-r1/native-input-svg-attestation-implementation-r1/unit-artifacts");
+        fs::create_dir_all(&parent)?;
+        let parent = fs::canonicalize(parent)?;
+        let tempdir = TempDir::new_in(parent)?;
+        let root = tempdir.path().to_path_buf();
+        let fixture = Self {
+            _tempdir: tempdir,
+            input: root.join("input.mmd"),
+            runtime: root.join("runtime.js"),
+            output: root.join("output.svg"),
+            receipt: root.join("attestation.json"),
+            root,
+        };
+        fs::write(&fixture.input, source)?;
+        fs::write(&fixture.runtime, b"unit contract runtime placeholder")?;
+        Ok(fixture)
+    }
+
+    fn begin(&self, source: &str) -> anyhow::Result<RenderAttestation> {
+        self.begin_with_format(source, DiagramInputFormat::DiagramSource, "contract-test")
+    }
+
+    fn begin_with_captured_input(
+        &self,
+        source: &str,
+    ) -> anyhow::Result<(RenderAttestation, katana_render_runtime::RenderInput)> {
+        let attestation = self.begin(source)?;
+        let input = RenderInputFactory::create(
+            DiagramKind::Mermaid,
+            source.into(),
+            serde_json::Value::Null,
+        );
+        attestation.capture_input(&input)?;
+        Ok((attestation, input))
+    }
+
+    fn begin_with_format(
+        &self,
+        source: &str,
+        format: DiagramInputFormat,
+        token: &str,
+    ) -> anyhow::Result<RenderAttestation> {
+        RenderAttestation::begin(
+            AttestationPaths {
+                input: &self.input,
+                output: Some(&self.output),
+                runtime: &self.runtime,
+                receipt: &self.receipt,
+            },
+            Some(token),
+            format,
+            source.as_bytes(),
+        )
+    }
+}
+
+pub(super) fn unit_output() -> RenderOutput {
+    RenderOutput {
+        svg: "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>unit contract output</text></svg>"
+            .into(),
+        width: 1.0,
+        height: 1.0,
+        view_box: "0 0 1 1".into(),
+        runtime: RuntimeVersion {
+            name: "unit-placeholder".into(),
+            version: "0".into(),
+            checksum: None,
+        },
+        profile: RendererProfile {
+            id: "unit-contract".into(),
+            description: None,
+        },
+        diagnostics: RenderDiagnostics {
+            warnings: Vec::new(),
+            errors: Vec::new(),
+        },
+        cache_fingerprint: "unit-contract".into(),
+    }
+}
+
+#[test]
+fn receipt_binds_actual_input_output_files_and_needs_external_exit() -> anyhow::Result<()> {
+    let source = "\nclassDiagram\r\n class 動物  \r\n";
+    let fixture = Fixture::new(source)?;
+    let (attestation, input) = fixture.begin_with_captured_input(source)?;
+    attestation.complete(&input, &unit_output())?;
+    let receipt: serde_json::Value = serde_json::from_slice(&fs::read(&fixture.receipt)?)?;
+    assert_receipt_identity(&receipt, source);
+    assert_artifact_hashes(&receipt)?;
+    assert_eq!(fs::read(&fixture.output)?, unit_output().svg.as_bytes());
+    assert_eq!(
+        fs::read(
+            fixture
+                .receipt
+                .with_extension("artifacts")
+                .join("raw-input.bin")
+        )?,
+        source.as_bytes()
+    );
+    Ok(())
+}
+
+fn assert_receipt_identity(receipt: &serde_json::Value, source: &str) {
+    assert_eq!(receipt["schema"], "katana-native-render-attestation-v1");
+    assert_eq!(receipt["actualRenderInput"]["source"], source);
+    assert_eq!(
+        receipt["actualRenderInput"]["config"]["vendor_config"],
+        serde_json::Value::Null
+    );
+    assert_eq!(receipt["pid"], std::process::id());
+    assert_eq!(receipt["attemptToken"], "contract-test");
+    assert_eq!(receipt["actualExit"], serde_json::Value::Null);
+    assert_eq!(receipt["accepted"], false);
+    assert_eq!(receipt["requiresExternalExitEvidence"], true);
+    assert_eq!(receipt["bindingsBefore"], receipt["bindingsAfter"]);
+}
+
+fn assert_artifact_hashes(receipt: &serde_json::Value) -> anyhow::Result<()> {
+    for key in ["rawInput", "renderSource", "renderInput", "output"] {
+        let record = &receipt["artifacts"][key];
+        let path = record["path"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("missing artifact path"))?;
+        assert_eq!(record["sha256"], super::sha256(&fs::read(path)?));
+    }
+    Ok(())
+}
+
+#[test]
+fn sha256_matches_standard_known_answer() {
+    assert_eq!(
+        super::sha256(b"abc"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+}
+
+#[path = "render_attestation_option_tests.rs"]
+mod option_tests;
+#[path = "render_attestation_rejection_tests.rs"]
+mod rejection_tests;

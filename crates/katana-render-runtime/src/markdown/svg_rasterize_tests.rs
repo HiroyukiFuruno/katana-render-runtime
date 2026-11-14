@@ -27,10 +27,12 @@ fn rasterize_svg_returns_pixels_for_simple_svg() {
 #[test]
 fn rasterize_svg_renders_text_with_the_bundled_font() -> Result<(), String> {
     let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="96" height="32"><rect width="96" height="32" fill="#fff"/><text x="4" y="24" font-family="Noto Sans, sans-serif" font-size="20" fill="#14532d">KRR</text></svg>"##;
+    let compatible_svg = SvgRasterizeOps::preprocess_for_rasterizer(svg);
     let options = rasterizer_options_with_font_db(bundled_font_db());
-    let tree = usvg::Tree::from_str(svg, &options).map_err(|error| error.to_string())?;
+    let tree =
+        usvg::Tree::from_str(&compatible_svg, &options).map_err(|error| error.to_string())?;
     let image = RasterTarget::new(tree.size(), 1.0)
-        .render(&tree)
+        .render(&tree, &compatible_svg, &Default::default())
         .map_err(|error| error.to_string())?;
 
     assert!(
@@ -64,6 +66,34 @@ fn rasterize_svg_renders_distinct_japanese_glyphs_with_system_font_fallback() ->
         distinct_cells >= 4,
         "Japanese glyph cells collapsed to repeated missing-glyph boxes"
     );
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn html_svg_keeps_both_lines_of_authored_middle_baseline_text() -> Result<(), String> {
+    const WIDTH: usize = 96;
+    const HEIGHT: u32 = 64;
+    let svg = concat!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="96" height="64">"#,
+        r#"<text x="12" y="20" font-family="Noto Sans" font-size="14" dominant-baseline="middle">"#,
+        r#"<tspan x="12" dy="0">AB</tspan><tspan x="12" dy="24">CD</tspan>"#,
+        "</text></svg>",
+    );
+    let options = html_rasterizer_options(svg);
+    let tree = usvg::Tree::from_str(svg, &options).map_err(|error| error.to_string())?;
+    assert!(super::html_glyph::has_nested_middle_candidate(&tree));
+
+    let image = SvgRasterizeOps::rasterize_html_svg(svg, 1.0).map_err(|error| error.to_string())?;
+    assert_eq!((image.width as usize, image.height), (WIDTH, HEIGHT));
+    let rows = image
+        .rgba
+        .as_chunks::<RGBA_CHANNELS>()
+        .0
+        .chunks_exact(WIDTH);
+    let row_has_ink = |pixels: &[[u8; RGBA_CHANNELS]]| pixels.iter().any(|pixel| pixel[3] != 0);
+    assert!(rows.clone().take(32).any(row_has_ink));
+    assert!(rows.skip(32).any(row_has_ink));
     Ok(())
 }
 
@@ -225,7 +255,8 @@ fn render_zenuml_test_svg() -> Result<String, ()> {
 #[test]
 fn raster_target_reports_pixmap_allocation_failure() {
     let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>"##;
-    let tree = resvg::usvg::Tree::from_str(svg, &rasterizer_options());
+    let compatible_svg = SvgRasterizeOps::preprocess_for_rasterizer(svg);
+    let tree = resvg::usvg::Tree::from_str(&compatible_svg, &rasterizer_options());
     let target = RasterTarget {
         display_width: 1.0,
         display_height: 1.0,
@@ -234,5 +265,9 @@ fn raster_target_reports_pixmap_allocation_failure() {
         height: 0,
     };
 
-    assert!(tree.as_ref().is_ok_and(|it| target.render(it).is_err()));
+    assert!(tree.as_ref().is_ok_and(|it| {
+        target
+            .render(it, &compatible_svg, &Default::default())
+            .is_err()
+    }));
 }

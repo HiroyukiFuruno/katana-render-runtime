@@ -4,11 +4,19 @@ use super::support::{
     has_open_details, input_value, start, to_string,
 };
 use crate::renderer::backends::html_browser::{
-    HtmlBrowserError, HtmlBrowserInput, HtmlBrowserSource, HtmlBrowserViewport,
+    HtmlBrowserError, HtmlBrowserInput, HtmlBrowserOrigin, HtmlBrowserSource, HtmlBrowserViewport,
 };
+
+#[path = "interaction_svg_current_color.rs"]
+mod svg_current_color;
 
 const NO_HORIZONTAL_SCROLL: f32 = 0.0;
 const UNIT_SCROLL_DELTA: f32 = 1.0;
+const TOC_VIEWPORT_WIDTH: u32 = 1280;
+const TOC_VIEWPORT_HEIGHT: u32 = 900;
+const TOC_FIRST_Y: f32 = 34.0;
+const TOC_SECOND_Y: f32 = 70.0;
+const TOC_THIRD_Y: f32 = 106.0;
 const STICKY_FRAGMENT_DOCUMENT: &str = r#"<style>
 html, body { margin: 0; }
 .app { display: flex; align-items: flex-start; }
@@ -32,6 +40,10 @@ main { margin-left: 80px; }
 </style>
 <aside class=sidebar>TOC</aside>
 <main><div class=spacer></div><section id=s15 class=target>Target</section><div class=tail></div></main>"#;
+const ANCHOR_HASH_DOCUMENT: &str = "<a id=relative href='guide#part%20one'>Relative</a><a id=absolute href='https://other.test/page#target'>Absolute</a><a id=empty href=''>Empty</a><a id=missing>Missing</a><area id=area href='#map'><div id=plain href='#ignored'></div>";
+const ANCHOR_HASH_SCRIPT: &str = "({relative:document.querySelector('#relative').hash,absolute:document.querySelector('#absolute').hash,empty:document.querySelector('#empty').hash,missing:document.querySelector('#missing').hash,area:document.querySelector('#area').hash,plainType:typeof document.querySelector('#plain').hash})";
+const NAVIGATION_DOCUMENT: &str =
+    include_str!("../../../../../../../tests/fixtures/html/aspects/navigation.html");
 
 #[test]
 fn button_click_runs_v8_handler_and_repaints() -> TestResult {
@@ -372,17 +384,7 @@ fn attribute_selectors_dataset_and_input_toggle_events_repaint_the_dom() -> Test
 
 #[test]
 fn focused_input_dispatches_keyboard_text_change_and_blur_in_order() -> TestResult {
-    let mut session = start(
-        r#"<input id=field><p id=status></p><script>
-const field = document.getElementById('field');
-const status = document.getElementById('status');
-for (const type of ['focus', 'keydown', 'keyup', 'input', 'change', 'blur']) {
-  field.addEventListener(type, (event) => {
-    status.textContent += `${event.type}${event.key ? ':' + event.key : ''}|`;
-  });
-}
-</script>"#,
-    )?;
+    let mut session = focus_event_session("<input id=field>")?;
 
     click_element(&mut session, "field")?;
     click_element(&mut session, "field")?;
@@ -454,17 +456,7 @@ fn focused_input_is_blurred_on_blank_pointer_activation_and_text_stops_after_foc
 }
 
 fn blank_blur_session() -> TestResult<super::super::HtmlInteractiveSession> {
-    start(
-        r#"<input id=field value=initial><p id=status></p><script>
-const field = document.getElementById('field');
-const status = document.getElementById('status');
-for (const type of ['focus', 'keydown', 'keyup', 'input', 'change', 'blur']) {
-  field.addEventListener(type, (event) => {
-    status.textContent += `${event.type}${event.key ? ':' + event.key : ''}|`;
-  });
-}
-</script>"#,
-    )
+    focus_event_session("<input id=field value=initial>")
 }
 
 fn dispatch_dirty_input(session: &mut super::super::HtmlInteractiveSession) -> TestResult {
@@ -627,6 +619,191 @@ fn relative_link_navigation_preserves_the_target_fragment() -> TestResult {
 }
 
 #[test]
+fn anchor_hash_resolves_href_against_the_current_document_location() -> TestResult {
+    let mut session = start(ANCHOR_HASH_DOCUMENT)?;
+    let initial = session
+        .runtime
+        .observe_feature_state(ANCHOR_HASH_SCRIPT)
+        .map_err(to_string)?;
+    assert_eq!(initial, anchor_hash_expected());
+
+    let origin = HtmlBrowserOrigin::parse("https://example.test/docs/index.html#current")
+        .map_err(to_string)?;
+    session
+        .apply_fragment_navigation(origin)
+        .map_err(to_string)?;
+    let after_location_change = session
+        .runtime
+        .observe_feature_state("document.querySelector('#empty').hash")
+        .map_err(to_string)?;
+    assert_eq!(after_location_change, "");
+    Ok(())
+}
+
+#[test]
+fn navigation_all_toc_links_composes_anchor_hash_and_target_lookup() -> TestResult {
+    let mut session = start(NAVIGATION_DOCUMENT)?;
+    let state = session
+        .runtime
+        .observe_feature_state(
+            "({links:[...document.querySelectorAll('.toc-item[href^=\"#\"]')].map(a=>({hash:a.hash,text:a.textContent,target:document.querySelector(a.hash)?.textContent||\"\"}))})",
+        )
+        .map_err(to_string)?;
+    assert_eq!(
+        state,
+        serde_json::json!({
+            "links": [
+                {"hash":"#a","text":"第一節","target":"第一節上位項目の架空本文。"},
+                {"hash":"#b","text":"第二節","target":"第二節中間位置の架空本文。"},
+                {"hash":"#c","text":"第三節","target":"第三節最下部の架空本文。"}
+            ]
+        })
+    );
+    Ok(())
+}
+
+#[test]
+fn nonexistent_file_origin_navigates_all_toc_fragments_without_host_navigation() -> TestResult {
+    let origin = "file:///__krr_missing_fragment_origin__/index.html";
+    assert!(!std::path::Path::new("/__krr_missing_fragment_origin__").exists());
+    let source = HtmlBrowserSource::new(NAVIGATION_DOCUMENT, origin).map_err(to_string)?;
+    let viewport = HtmlBrowserViewport::new(TOC_VIEWPORT_WIDTH, TOC_VIEWPORT_HEIGHT, 1.0)
+        .map_err(to_string)?;
+    let mut session =
+        super::super::HtmlInteractiveSession::start(source, viewport).map_err(to_string)?;
+    for (y, fragment) in [
+        (TOC_FIRST_Y, "#a"),
+        (TOC_SECOND_Y, "#b"),
+        (TOC_THIRD_Y, "#c"),
+    ] {
+        assert_toc_fragment(&mut session, origin, y, fragment)?;
+    }
+    Ok(())
+}
+
+fn assert_toc_fragment(
+    session: &mut super::super::HtmlInteractiveSession,
+    origin: &str,
+    y: f32,
+    fragment: &str,
+) -> TestResult {
+    let expected_scroll = toc_expected_scroll(session, fragment)?;
+    dispatch_toc_click(session, y)?;
+    let hash = session
+        .runtime
+        .observe_feature_state("location.hash")
+        .map_err(to_string)?;
+    assert_eq!(hash, serde_json::json!(fragment));
+    assert_eq!(
+        session.source.origin.as_str(),
+        format!("{origin}{fragment}")
+    );
+    assert!(session.take_navigation().is_none());
+    assert_eq!(session.scroll_geometry.scroll_y, expected_scroll);
+    if fragment != "#a" {
+        assert!(expected_scroll > 0.0, "{fragment} must scroll");
+    }
+    Ok(())
+}
+
+fn toc_expected_scroll(
+    session: &mut super::super::HtmlInteractiveSession,
+    fragment: &str,
+) -> TestResult<f32> {
+    let position = session
+        .layout()
+        .map_err(to_string)?
+        .anchor_positions
+        .get(&fragment[1..])
+        .copied()
+        .ok_or_else(|| format!("missing anchor {fragment}"))?;
+    Ok(position.round().clamp(0.0, session.max_scroll()))
+}
+
+fn dispatch_toc_click(session: &mut super::super::HtmlInteractiveSession, y: f32) -> TestResult {
+    const TOC_X: f32 = 106.0;
+    for input in [
+        HtmlBrowserInput::PointerMove { x: TOC_X, y },
+        HtmlBrowserInput::PointerDown {
+            x: TOC_X,
+            y,
+            button: 0,
+        },
+        HtmlBrowserInput::PointerUp {
+            x: TOC_X,
+            y,
+            button: 0,
+        },
+    ] {
+        session.dispatch_input(input).map_err(to_string)?;
+    }
+    Ok(())
+}
+
+fn anchor_hash_expected() -> serde_json::Value {
+    serde_json::json!({
+        "relative":"#part%20one",
+        "absolute":"#target",
+        "empty":"",
+        "missing":"",
+        "area":"#map",
+        "plainType":"undefined"
+    })
+}
+
+#[test]
+fn rejected_runtime_url_update_preserves_a_usable_document_and_location() -> TestResult {
+    let mut session = start(&fragment_document())?;
+    let before = session
+        .runtime
+        .observe_feature_state("location.href")
+        .map_err(to_string)?;
+    assert!(session.runtime.update_document_url("not a URL").is_err());
+    assert_eq!(
+        session
+            .runtime
+            .observe_feature_state("location.href")
+            .map_err(to_string)?,
+        before
+    );
+    navigate_fragment(&mut session, "target")?;
+    assert_eq!(
+        session
+            .runtime
+            .observe_feature_state("location.hash")
+            .map_err(to_string)?,
+        "#target"
+    );
+    Ok(())
+}
+
+#[test]
+fn fragment_navigation_updates_saved_location_without_replacing_it() -> TestResult {
+    let html = format!(
+        "{}<script>globalThis.savedLocation = location;</script>",
+        fragment_document()
+    );
+    let mut session = start(&html)?;
+    for fragment in ["#target", "#%74arget", "#missing", ""] {
+        let href = format!("https://example.test/docs/index.html{fragment}");
+        let origin = HtmlBrowserOrigin::parse(&href).map_err(to_string)?;
+        session
+            .apply_fragment_navigation(origin)
+            .map_err(to_string)?;
+        let state = session.runtime.observe_feature_state(
+            "({same:location===savedLocation,documentSame:document.location===savedLocation,hash:savedLocation.hash,href:savedLocation.href})",
+        ).map_err(to_string)?;
+        assert_eq!(
+            state,
+            serde_json::json!({
+                "same":true,"documentSame":true,"hash":fragment,"href":href
+            })
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn same_document_fragment_scrolls_without_host_navigation_or_runtime_reset() -> TestResult {
     let mut session = start(&fragment_document())?;
     click_element(&mut session, "mutate")?;
@@ -637,7 +814,7 @@ fn same_document_fragment_scrolls_without_host_navigation_or_runtime_reset() -> 
         session.source.origin.as_str(),
         "https://example.test/docs/index.html#%74arget"
     );
-    assert!(session.scroll_y > 0.0);
+    assert!(session.scroll_geometry.scroll_y > 0.0);
     assert!(
         session
             .runtime
@@ -653,6 +830,67 @@ fn same_document_fragment_scrolls_without_host_navigation_or_runtime_reset() -> 
 }
 
 #[test]
+fn fragment_navigation_rounds_existing_anchor_and_preserves_missing_anchor_scroll() -> TestResult {
+    let source = HtmlBrowserSource::new(
+        "<style>html,body{margin:0}</style><div style='height:229.25px'></div><section id=target style='height:1px'></section><div style='height:45.65625px'></div><section id=target2 style='height:1px'></section><div style='height:1000px'></div>",
+        "https://example.test/docs/index.html",
+    )
+    .map_err(to_string)?;
+    let viewport = HtmlBrowserViewport::new(320, 240, 1.0).map_err(to_string)?;
+    let mut session =
+        super::super::HtmlInteractiveSession::start(source.clone(), viewport).map_err(to_string)?;
+    let raw_position = session.layout().map_err(to_string)?.anchor_positions["target"];
+    let second_position = session.layout().map_err(to_string)?.anchor_positions["target2"];
+    assert!((raw_position - 229.25).abs() < 0.001);
+    assert!((second_position - 275.90625).abs() < 0.001);
+
+    navigate_fragment(&mut session, "target")?;
+    assert_eq!(session.scroll_geometry.scroll_y, 229.0);
+
+    session
+        .resize(HtmlBrowserViewport::new(320, 240, 1.0).map_err(to_string)?)
+        .map_err(to_string)?;
+    assert_eq!(session.scroll_geometry.scroll_y, raw_position);
+
+    navigate_fragment(&mut session, "target2")?;
+    assert_eq!(session.scroll_geometry.scroll_y, 276.0);
+
+    assert_missing_fragment_preserves_fractional_scroll(&mut session)?;
+
+    assert_clamped_fragment(&source)?;
+    Ok(())
+}
+
+fn assert_missing_fragment_preserves_fractional_scroll(
+    session: &mut super::super::HtmlInteractiveSession,
+) -> TestResult {
+    session.scroll_geometry.scroll_y = 123.75;
+    let before_missing = session.scroll_geometry.scroll_y;
+    navigate_fragment(session, "missing")?;
+    assert_eq!(session.scroll_geometry.scroll_y, before_missing);
+    Ok(())
+}
+
+fn assert_clamped_fragment(source: &HtmlBrowserSource) -> TestResult {
+    let viewport = HtmlBrowserViewport::new(320, 2_000, 1.0).map_err(to_string)?;
+    let mut session =
+        super::super::HtmlInteractiveSession::start(source.clone(), viewport).map_err(to_string)?;
+    navigate_fragment(&mut session, "target2")?;
+    assert_eq!(session.scroll_geometry.scroll_y, 0.0);
+    Ok(())
+}
+
+fn navigate_fragment(
+    session: &mut super::super::HtmlInteractiveSession,
+    fragment: &str,
+) -> TestResult {
+    let origin =
+        HtmlBrowserOrigin::parse(format!("https://example.test/docs/index.html#{fragment}"))
+            .map_err(to_string)?;
+    session.apply_fragment_navigation(origin).map_err(to_string)
+}
+
+#[test]
 fn initial_document_fragment_scrolls_before_the_first_public_frame() -> TestResult {
     let source = HtmlBrowserSource::new(
         initial_fragment_document(),
@@ -664,7 +902,7 @@ fn initial_document_fragment_scrolls_before_the_first_public_frame() -> TestResu
     let mut session =
         super::super::HtmlInteractiveSession::start(source, viewport).map_err(to_string)?;
 
-    assert!(session.scroll_y > 0.0);
+    assert!(session.scroll_geometry.scroll_y > 0.0);
     assert!(session.take_navigation().is_none());
     assert!(
         session
@@ -696,12 +934,32 @@ fn assert_fragment_keeps_sticky_sidebar(html: &str) -> TestResult {
     let session =
         super::super::HtmlInteractiveSession::start(source, viewport).map_err(to_string)?;
 
-    assert!(session.scroll_y > 0.0);
+    assert!(session.scroll_geometry.scroll_y > 0.0);
     let frame = session.latest_frame().ok_or("missing sticky frame")?;
     assert!(
         frame_matching_rgb_pixels(frame, [15, 23, 42]) >= 80 * 200,
         "sticky sidebar disappeared after fragment scroll: scroll_y={}",
-        session.scroll_y
+        session.scroll_geometry.scroll_y
+    );
+    Ok(())
+}
+
+#[test]
+fn anonymized_fixture_keeps_sticky_sidebar_after_fragment_navigation() -> TestResult {
+    let html =
+        include_str!("../../../../../../../tests/fixtures/html/anonymized-requirements.html");
+    let session = large_sticky_session(
+        html,
+        "https://example.test/docs/anonymized-requirements.html#s15",
+    )?;
+    let frame = session
+        .latest_frame()
+        .ok_or("missing anonymized sticky frame")?;
+    let sidebar_pixels = frame_matching_rgb_pixels(frame, [15, 23, 42]);
+    assert!(
+        sidebar_pixels >= 100_000,
+        "anonymized sticky sidebar disappeared after fragment scroll: scroll_y={}, sidebar_pixels={sidebar_pixels}",
+        session.scroll_geometry.scroll_y
     );
     Ok(())
 }
@@ -714,13 +972,7 @@ fn external_fragment_keeps_sticky_sidebar_in_the_viewport() -> TestResult {
     let mut origin = url::Url::from_file_path(&path)
         .map_err(|()| format!("fixture path cannot be converted to a file URL: {path}"))?;
     origin.set_fragment(Some("s15"));
-    let source = HtmlBrowserSource::new(&html, origin.as_str()).map_err(to_string)?;
-    let viewport = HtmlBrowserViewport::new(1_440, 900, 1.0).map_err(to_string)?;
-
-    let session =
-        super::super::HtmlInteractiveSession::start(source, viewport).map_err(to_string)?;
-
-    assert!(session.scroll_y > 0.0);
+    let session = large_sticky_session(&html, origin.as_str())?;
     let frame = session
         .latest_frame()
         .ok_or("missing external sticky frame")?;
@@ -728,7 +980,7 @@ fn external_fragment_keeps_sticky_sidebar_in_the_viewport() -> TestResult {
     assert!(
         sidebar_pixels >= 100_000,
         "external sticky sidebar disappeared after fragment scroll: scroll_y={}, sidebar_pixels={sidebar_pixels}",
-        session.scroll_y
+        session.scroll_geometry.scroll_y
     );
     Ok(())
 }
@@ -843,7 +1095,7 @@ fn initial_fragment_document() -> String {
 fn same_document_fragment_removal_scrolls_to_top_without_host_navigation() -> TestResult {
     let mut session = start(&fragment_document())?;
     click_element(&mut session, "jump")?;
-    assert!(session.scroll_y > 0.0);
+    assert!(session.scroll_geometry.scroll_y > 0.0);
 
     click_element(&mut session, "top")?;
 
@@ -852,7 +1104,7 @@ fn same_document_fragment_removal_scrolls_to_top_without_host_navigation() -> Te
         session.source.origin.as_str(),
         "https://example.test/docs/index.html"
     );
-    assert_eq!(session.scroll_y, 0.0);
+    assert_eq!(session.scroll_geometry.scroll_y, 0.0);
     Ok(())
 }
 
@@ -873,14 +1125,14 @@ fn same_url_without_a_fragment_remains_a_main_document_navigation() -> TestResul
 fn missing_fragment_keeps_scroll_and_legacy_named_anchor_is_supported() -> TestResult {
     let mut session = start(&fragment_document())?;
     click_element(&mut session, "jump")?;
-    let target_scroll = session.scroll_y;
+    let target_scroll = session.scroll_geometry.scroll_y;
 
     click_element(&mut session, "missing-link")?;
-    assert_eq!(session.scroll_y, target_scroll);
+    assert_eq!(session.scroll_geometry.scroll_y, target_scroll);
     assert!(session.take_navigation().is_none());
 
     click_element(&mut session, "legacy-jump")?;
-    assert!(session.scroll_y > 0.0);
+    assert!(session.scroll_geometry.scroll_y > 0.0);
     assert_eq!(
         session.source.origin.as_str(),
         "https://example.test/docs/index.html#legacy"
@@ -1042,7 +1294,7 @@ fn move_pointer_to_element(
     session
         .dispatch_input(HtmlBrowserInput::PointerMove {
             x: element.x + element.width / 2.0,
-            y: element.y + element.height / 2.0 - session.scroll_y,
+            y: element.y + element.height / 2.0 - session.scroll_geometry.scroll_y,
         })
         .map_err(to_string)
 }
@@ -1068,10 +1320,10 @@ fn passive_text_events() -> [HtmlBrowserInput; 5] {
         HtmlBrowserInput::Focus { focused: true },
         HtmlBrowserInput::PointerMove { x: 4.0, y: 4.0 },
         HtmlBrowserInput::KeyDown {
-            key: "Tab".to_string(),
+            key: "Escape".to_string(),
         },
         HtmlBrowserInput::KeyUp {
-            key: "Tab".to_string(),
+            key: "Escape".to_string(),
         },
         HtmlBrowserInput::Text {
             text: " ignored".to_string(),
@@ -1300,4 +1552,33 @@ fn assert_event_input_snapshot(session: &super::super::HtmlInteractiveSession) -
 
 fn long_document() -> &'static str {
     "<p>one</p><p>two</p><p>three</p><p>four</p><p>five</p><p>six</p><p>seven</p><p>eight</p><p>nine</p><p>ten</p><p>eleven</p>"
+}
+
+fn focus_event_session(input_markup: &str) -> TestResult<super::super::HtmlInteractiveSession> {
+    let html = format!(
+        "{input_markup}{}",
+        r#"<p id=status></p><script>
+const field = document.getElementById('field');
+const status = document.getElementById('status');
+for (const type of ['focus', 'keydown', 'keyup', 'input', 'change', 'blur']) {
+  field.addEventListener(type, (event) => {
+    status.textContent += `${event.type}${event.key ? ':' + event.key : ''}|`;
+  });
+}
+</script>"#,
+    );
+    start(&html)
+}
+
+fn large_sticky_session(
+    html: &str,
+    origin: &str,
+) -> TestResult<super::super::HtmlInteractiveSession> {
+    let source = HtmlBrowserSource::new(html, origin).map_err(to_string)?;
+    let viewport = HtmlBrowserViewport::new(1_440, 900, 1.0).map_err(to_string)?;
+    let session =
+        super::super::HtmlInteractiveSession::start(source, viewport).map_err(to_string)?;
+
+    assert!(session.scroll_geometry.scroll_y > 0.0);
+    Ok(session)
 }

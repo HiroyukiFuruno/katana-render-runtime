@@ -82,7 +82,9 @@ function katanaStorage() {
       return Object.keys(values).length;
     },
     clear() {
-      Object.keys(values).forEach((key) => delete values[key]);
+      Object.keys(values).forEach((key) => {
+        delete values[key];
+      });
     },
     getItem(key) {
       return values[String(key)] ?? null;

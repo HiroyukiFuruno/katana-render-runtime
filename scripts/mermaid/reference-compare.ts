@@ -1,33 +1,111 @@
 import fs from "node:fs";
+import path from "node:path";
+import { CLASS_REFERENCE_TARGETS, validateScoredClassReferencePair } from "./class-reference-gate";
 import { CliOptions, type CliParsedOptions } from "./reference_compare_options";
-import { MagickOps } from "./reference_image_ops";
+import { prepareReferenceImageOps } from "./reference_image_ops";
 import { ReferencePairRepository } from "./reference_pair_repository";
 import { ReferenceCompareReport } from "./reference_report";
 import { type ReferenceScoreRow, ReferenceScorer, ReferenceScores } from "./reference_score";
 import type { ReferenceScoreBaseline } from "./reference_score_policy";
+import { scorePaintProjectedReferenceTargets } from "./reference_svg_geometry_scoring";
 
 class ReferenceCompare {
   constructor(private options: CliParsedOptions) {}
 
-  run() {
-    const pairs = new ReferencePairRepository(this.options).list();
-    const magick = new MagickOps(
-      this.options.outputDir,
-      this.options.katanaCrop,
-      this.options.theme,
-    );
-    magick.prepare();
-
+  async run() {
+    this.validateTargetClassReferenceSvgs();
+    const repository = new ReferencePairRepository(this.options);
+    const inventory = repository.inventory();
+    const pairs = repository.list(inventory);
+    this.assertFreshStrictOutput();
+    const magick = prepareReferenceImageOps(this.options);
     const normalized = pairs.map((pair) => magick.renderPair(pair));
+    const projectedReference =
+      this.options.referenceMode === "strictVendorOriginal" &&
+      this.options.referenceScope === "formal"
+        ? await scorePaintProjectedReferenceTargets(
+            pairs,
+            this.options.outputDir,
+            this.options.theme,
+            magick,
+          )
+        : null;
     const baselines = this.options.baselineScoresPath
       ? this.loadBaselines(this.options.baselineScoresPath)
       : [];
-    const scores = new ReferenceScorer(magick, this.options.minScore, baselines).score(normalized);
+    const scores = new ReferenceScorer(magick, this.options.minScore, baselines).score(
+      normalized,
+      projectedReference?.scores,
+      projectedReference !== null,
+    );
     const contactSheet = magick.renderContactSheet(normalized.map((it) => it.pairImagePath));
 
-    new ReferenceCompareReport(this.options.outputDir).write(pairs, scores, contactSheet);
+    repository.assertRasterInputsUnchanged();
+    new ReferenceCompareReport(this.options.outputDir).write(pairs, scores, contactSheet, {
+      mode: this.options.referenceMode ?? "legacyNormalized",
+      scope: this.options.referenceScope ?? "diagnostic",
+      expectedSlugCount: inventory.expected.length,
+      emptySlugCount: inventory.skippedEmpty.length,
+      scoreThreshold: this.options.minScore,
+      formalAccepted: false,
+      independentGold: false,
+      scoreSemantics:
+        projectedReference === null ? "rgb-v1" : "rgb-v1+paint-projected-reference-v1",
+      ...(projectedReference === null
+        ? {}
+        : {
+            paintProjectedReferenceEvidence: {
+              path: path.basename(projectedReference.evidencePath),
+              sha256: projectedReference.evidenceSha256,
+            },
+          }),
+    });
+    fs.writeFileSync(
+      path.join(this.options.outputDir, "fixture-inventory.json"),
+      `${JSON.stringify(inventory, null, 2)}\n`,
+      "utf8",
+    );
+    for (const skipped of inventory.skippedEmpty) {
+      console.log(`skipped empty fixture ${skipped.slug}: ${skipped.reason}`);
+    }
+    repository.assertRasterInputsUnchanged();
     this.printSummary(scores, contactSheet);
     process.exitCode = this.exitCode(scores);
+  }
+
+  private assertFreshStrictOutput() {
+    if (
+      this.options.referenceMode === "strictVendorOriginal" &&
+      fs.existsSync(this.options.outputDir) &&
+      fs.readdirSync(this.options.outputDir).length > 0
+    ) {
+      throw new Error(
+        `Strict reference comparison requires a fresh output directory: ${this.options.outputDir}`,
+      );
+    }
+  }
+
+  private validateTargetClassReferenceSvgs() {
+    for (const target of CLASS_REFERENCE_TARGETS) {
+      const officialPngPath = path.join(this.options.officialDir, `${target.slug}.png`);
+      if (!fs.existsSync(officialPngPath)) continue;
+      const candidatePngPath = path.join(this.options.katanaDir, `${target.slug}.png`);
+      if (!fs.existsSync(candidatePngPath)) {
+        throw new Error(`class reference gate rejected ${target.slug}: missing candidate PNG`);
+      }
+      const officialSvgPath = path.join(this.options.officialDir, `${target.slug}.svg`);
+      const candidateSvgPath = path.join(
+        this.options.katanaSvgDir ?? this.options.katanaDir,
+        `${target.slug}.svg`,
+      );
+      const officialSvg = fs.existsSync(officialSvgPath)
+        ? fs.readFileSync(officialSvgPath, "utf8")
+        : null;
+      const candidateSvg = fs.existsSync(candidateSvgPath)
+        ? fs.readFileSync(candidateSvgPath, "utf8")
+        : null;
+      validateScoredClassReferencePair(target.slug, officialSvg, candidateSvg);
+    }
   }
 
   private printSummary(scores: ReferenceScoreRow[], contactSheet: string) {
@@ -108,4 +186,7 @@ class BaselineScoreEntry {
   }
 }
 
-new ReferenceCompare(CliOptions.parse(process.argv.slice(2))).run();
+new ReferenceCompare(CliOptions.parse(process.argv.slice(2))).run().catch((error: Error) => {
+  console.error(error.message);
+  process.exitCode = 1;
+});

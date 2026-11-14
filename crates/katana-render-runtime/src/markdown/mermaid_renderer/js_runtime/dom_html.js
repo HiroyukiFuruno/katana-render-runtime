@@ -1,6 +1,7 @@
-function parseInnerHtml(source, xmlMode = false) {
+function parseInnerHtml(source, xmlMode = false, contextNamespace = null, contextLocalName = null) {
   const root = {
-    localName: "#root",
+    localName: contextLocalName ?? "#root",
+    namespaceURI: contextNamespace,
     children: [],
     appendChild(child) {
       this.children.push(child);
@@ -16,7 +17,9 @@ function parseInnerHtml(source, xmlMode = false) {
 }
 
 function katanaHtmlWithoutComments(source) {
-  return String(source).replace(/<!-->/g, "").replace(/<!--[\s\S]*?-->/g, "");
+  return String(source)
+    .replace(/<!-->/g, "")
+    .replace(/<!--[\s\S]*?-->/g, "");
 }
 
 function appendHtmlToken(stack, match, xmlMode) {
@@ -36,7 +39,8 @@ function appendHtmlTag(stack, match, xmlMode) {
 }
 
 function appendHtmlStartTag(stack, match, xmlMode) {
-  const node = new KatanaNode(match[1], katanaHtmlNamespace(xmlMode));
+  const parent = stack[stack.length - 1];
+  const node = new KatanaNode(match[1], katanaHtmlNamespace(xmlMode, parent, match[1]));
   node.ownerDocument = document;
   parseAttributes(match[2]).forEach(([name, value]) => {
     node.setAttribute(name, value);
@@ -45,9 +49,17 @@ function appendHtmlStartTag(stack, match, xmlMode) {
   pushHtmlElementIfOpen(stack, node, match[0], match[1]);
 }
 
-function katanaHtmlNamespace(xmlMode) {
-  return xmlMode ? "katana-xml" : KATANA_HTML_NAMESPACE;
+function katanaHtmlNamespace(xmlMode, parent, tagName) {
+  if (xmlMode) return "katana-xml";
+  const normalizedTagName = String(tagName).toLowerCase();
+  if (normalizedTagName === "svg") return KATANA_SVG_NAMESPACE;
+  if (parent?.namespaceURI === KATANA_SVG_NAMESPACE) {
+    return parent.localName === "foreignobject" ? KATANA_HTML_NAMESPACE : KATANA_SVG_NAMESPACE;
+  }
+  return KATANA_HTML_NAMESPACE;
 }
+
+const KATANA_SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
 function pushHtmlElementIfOpen(stack, node, fullTag, tagName) {
   if (katanaIsOpenHtmlTag(fullTag, tagName)) {
@@ -87,44 +99,38 @@ function parseAttributes(source) {
 }
 
 function decodeHtmlEntities(value) {
-  if (globalThis.__katanaMermaidDiagramType === "block") {
-    return katanaDecodeHtmlEntitiesForBlock(value);
-  }
-  const decoded = String(value)
-    .replace(/&amp;nbsp;/g, "\u00A0")
-    .replace(/&nbsp;/g, "\u00A0")
-    .replace(/&#xa;/gi, "\n")
-    .replace(/&#10;/g, "\n")
-    .replace(/&#160;/g, "\u00A0")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-  return katanaDecodeRemainingHtmlEntities(decoded);
+  return katanaDecodeRemainingHtmlEntities(value);
 }
 
 function katanaDecodeRemainingHtmlEntities(value) {
-  return String(value)
-    .replace(/&#x([0-9a-f]+);/gi, (_match, codePoint) => {
-      return katanaHtmlCodePoint(codePoint, 16, _match);
-    })
-    .replace(/&#([0-9]+);/g, (_match, codePoint) => {
-      return katanaHtmlCodePoint(codePoint, 10, _match);
-    })
-    .replace(/&([a-z][a-z0-9]+);/gi, (match, name) => {
-      return KATANA_HTML_NAMED_ENTITIES[name] ?? match;
-    });
+  return String(value).replace(
+    /&(?:#x([0-9a-f]+)|#([0-9]+)|([a-z][a-z0-9]+));/gi,
+    (match, hexCodePoint, decimalCodePoint, name) => {
+      if (hexCodePoint !== undefined) {
+        return katanaHtmlCodePoint(hexCodePoint, 16, match);
+      }
+      if (decimalCodePoint !== undefined) {
+        return katanaHtmlCodePoint(decimalCodePoint, 10, match);
+      }
+      return Object.hasOwn(KATANA_HTML_NAMED_ENTITIES, name)
+        ? KATANA_HTML_NAMED_ENTITIES[name]
+        : match;
+    },
+  );
 }
 
 function katanaHtmlCodePoint(value, radix, fallback) {
   const codePoint = Number.parseInt(value, radix);
-  return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10FFFF
+  return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
     ? String.fromCodePoint(codePoint)
     : fallback;
 }
 
 const KATANA_HTML_NAMED_ENTITIES = {
+  amp: "&",
+  gt: ">",
+  lt: "<",
+  quot: '"',
   Igrave: "\u00CC",
   Ugrave: "\u00D9",
   Zeta: "\u0396",
@@ -168,18 +174,6 @@ const KATANA_HTML_NAMED_ENTITIES = {
   xi: "\u03BE",
   zwnj: "\u200C",
 };
-
-function katanaDecodeHtmlEntitiesForBlock(value) {
-  return String(value)
-    .replace(/&amp;nbsp;/g, "&nbsp;")
-    .replace(/&#xa;/gi, "\n")
-    .replace(/&#10;/g, "\n")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-}
 
 class KatanaTextNode extends KatanaNode {
   constructor(value) {

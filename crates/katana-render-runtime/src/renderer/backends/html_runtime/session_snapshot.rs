@@ -6,6 +6,25 @@ use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 use std::collections::HashSet;
 
 impl StaticHtmlRuntimeSession {
+    pub(crate) fn update_document_url(&mut self, url: &str) -> Result<(), HtmlRuntimeError> {
+        let result = self.run_document_url_update(url);
+        if matches!(result, Err(HtmlRuntimeError::ExecutionTimeout)) {
+            self.discard();
+        }
+        result
+    }
+
+    fn run_document_url_update(&mut self, url: &str) -> Result<(), HtmlRuntimeError> {
+        let (Some(isolate), Some(context)) = (&mut self.isolate, &self.context) else {
+            return Err(discarded_runtime_error());
+        };
+        v8::scope!(let handle_scope, isolate);
+        let context = v8::Local::new(handle_scope, context);
+        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
+        v8::tc_scope!(let scope, &mut **context_scope);
+        super::super::script::update_location(scope, url)
+    }
+
     pub(crate) fn snapshot(&self) -> Result<String, HtmlRuntimeError> {
         self.isolate
             .as_ref()
@@ -27,21 +46,16 @@ impl StaticHtmlRuntimeSession {
         &self,
         viewport_width: f32,
     ) -> Result<Vec<HtmlDocumentNode>, HtmlRuntimeError> {
-        self.interactive_nodes_at_width_with_hover(viewport_width, &HashSet::new())
+        let no_nodes = HashSet::new();
+        self.interactive_nodes_at_width_with_focus(viewport_width, &no_nodes, &no_nodes, &no_nodes)
     }
 
-    pub(in crate::renderer::backends) fn interactive_nodes_at_width_with_hover(
+    pub(in crate::renderer::backends) fn interactive_nodes_at_width_with_focus(
         &self,
         viewport_width: f32,
         hovered_nodes: &HtmlNodeIds,
-    ) -> Result<Vec<HtmlDocumentNode>, HtmlRuntimeError> {
-        self.interactive_nodes_with_hover(viewport_width, hovered_nodes)
-    }
-
-    fn interactive_nodes_with_hover(
-        &self,
-        viewport_width: f32,
-        hovered_nodes: &HtmlNodeIds,
+        focused_nodes: &HtmlNodeIds,
+        focus_visible_nodes: &HtmlNodeIds,
     ) -> Result<Vec<HtmlDocumentNode>, HtmlRuntimeError> {
         let state = self
             .isolate
@@ -52,10 +66,12 @@ impl StaticHtmlRuntimeSession {
         Ok(state
             .document
             .borrow()
-            .interactive_nodes_with_styles_at_width_and_hover(
+            .interactive_nodes_with_styles_at_width_and_focus(
                 &self.external_stylesheets,
                 viewport_width,
                 hovered_nodes,
+                focused_nodes,
+                focus_visible_nodes,
             ))
     }
 
@@ -79,7 +95,24 @@ impl StaticHtmlRuntimeSession {
         state
             .document
             .borrow_mut()
-            .set_attribute(node_id, "value", value)
+            .set_text_control_value(node_id, value)
+            .map_err(HtmlRuntimeError::DomBridge)
+    }
+
+    pub(in crate::renderer::backends) fn textarea_value(
+        &self,
+        node_id: u64,
+    ) -> Result<String, HtmlRuntimeError> {
+        let state = self
+            .isolate
+            .as_ref()
+            .ok_or_else(discarded_runtime_error)?
+            .get_slot::<HtmlDomBridgeState>()
+            .ok_or_else(dom_state_unavailable_error)?;
+        state
+            .document
+            .borrow()
+            .textarea_value(node_id)
             .map_err(HtmlRuntimeError::DomBridge)
     }
 

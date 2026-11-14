@@ -4,23 +4,44 @@ use std::{collections::BTreeSet, path::PathBuf};
 /* WHY: 任意のHTMLが大量のfamilyを指定しても、同期したfontconfig探索は描画ごとに1回・有限件にする。 */
 const MAX_SYSTEM_FONT_FAMILIES_PER_REQUEST: usize = 16;
 
+#[cfg(test)]
 pub(super) fn load_requested_system_font_families<'a>(
     database: &mut usvg::fontdb::Database,
     families: impl IntoIterator<Item = &'a str>,
+) {
+    let mut loaded_paths = BTreeSet::new();
+    load_requested_system_font_families_once(database, families, &mut loaded_paths);
+}
+
+pub(super) fn load_requested_system_font_families_once<'a>(
+    database: &mut usvg::fontdb::Database,
+    families: impl IntoIterator<Item = &'a str>,
+    loaded_paths: &mut BTreeSet<PathBuf>,
 ) {
     let families = requested_system_font_families(families);
     if families.is_empty() {
         return;
     }
-    load_system_font_paths(database, requested_system_font_paths(&families));
+    load_system_font_paths(
+        database,
+        requested_system_font_paths(&families),
+        loaded_paths,
+    );
 }
 
 fn load_system_font_paths(
     database: &mut usvg::fontdb::Database,
     paths: impl IntoIterator<Item = PathBuf>,
+    loaded_paths: &mut BTreeSet<PathBuf>,
 ) {
     for path in paths {
-        database.load_font_source(usvg::fontdb::Source::File(path));
+        let should_load = match super::sources::canonical_font_source_path(&path) {
+            Ok(identity) => loaded_paths.insert(identity),
+            Err(_) => true,
+        };
+        if should_load {
+            database.load_font_source(usvg::fontdb::Source::File(path));
+        }
     }
 }
 
@@ -154,6 +175,7 @@ mod tests {
     };
     use resvg::usvg;
     use std::{
+        collections::BTreeSet,
         path::PathBuf,
         process::{ExitStatus, Output},
     };
@@ -228,14 +250,33 @@ mod tests {
     }
 
     #[test]
-    fn system_font_path_loader_registers_a_known_bundled_font() {
-        let font =
+    fn system_font_path_loader_recovers_when_a_discovered_file_appears()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let bundled =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/NotoSans-Regular.ttf");
+        let directory = tempfile::tempdir()?;
+        let font = directory.path().join("NotoSans-Regular.ttf");
         let mut database = usvg::fontdb::Database::new();
+        let mut loaded_paths = BTreeSet::new();
 
-        load_system_font_paths(&mut database, [font]);
+        load_system_font_paths(
+            &mut database,
+            BTreeSet::from([font.clone()]),
+            &mut loaded_paths,
+        );
+        assert_eq!(database.faces().count(), 0);
+        assert!(loaded_paths.is_empty());
 
-        assert!(database.faces().next().is_some());
+        std::fs::copy(bundled, &font)?;
+        load_system_font_paths(
+            &mut database,
+            BTreeSet::from([font.clone()]),
+            &mut loaded_paths,
+        );
+        load_system_font_paths(&mut database, BTreeSet::from([font]), &mut loaded_paths);
+        assert_eq!(database.faces().count(), 1);
+        assert_eq!(loaded_paths.len(), 1);
+        Ok(())
     }
 
     #[test]
@@ -289,9 +330,11 @@ mod tests {
             .collect::<Vec<_>>();
         families.push("krr-font-0".to_string());
 
-        let requested = requested_system_font_families(families.iter().map(String::as_str));
+        let request = std::iter::once("").chain(families.iter().map(String::as_str));
+        let requested = requested_system_font_families(request);
 
         assert_eq!(requested.len(), MAX_SYSTEM_FONT_FAMILIES_PER_REQUEST);
+        assert!(!requested.contains(""));
         assert!(requested.contains("krr-font-0"));
         assert!(
             !requested
@@ -306,5 +349,12 @@ mod tests {
         load_requested_system_font_families(&mut database, ["krr-family-that-cannot-exist-7f0b"]);
 
         assert!(database.faces().next().is_none());
+    }
+
+    #[test]
+    fn empty_requested_families_leave_database_unchanged() {
+        let mut database = usvg::fontdb::Database::new();
+        load_requested_system_font_families(&mut database, ["", ""]);
+        assert_eq!(database.faces().count(), 0);
     }
 }

@@ -21,7 +21,7 @@ pub(super) fn html_font_runs(
     requested_weight: u16,
     requested_italic: bool,
 ) -> Vec<(usvg::fontdb::ID, String)> {
-    super::font::with_validated_stamp_batch(|| {
+    super::font::with_reusable_stamp_batch(|| {
         html_font_runs_without_stamp_batch(
             database,
             base_face_id,
@@ -126,8 +126,51 @@ fn resolve_html_fallback_face(
 }
 
 #[cfg(test)]
+#[path = "svg_rasterize_text_font_fixture_support.rs"]
+pub(super) mod test_support;
+#[cfg(test)]
+use test_support::{b_cmap, sfnt_checksum};
+
+#[cfg(test)]
+pub(super) fn font_with_only_b_cmap(font: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let (record, offset) = table_record(font, b"cmap")?;
+    let (_, head) = table_record(font, b"head")?;
+    let glyph = rustybuzz::ttf_parser::Face::parse(font, 0)
+        .map_err(|_| "font invalid")?
+        .glyph_index('B')
+        .ok_or("B glyph missing")?
+        .0;
+    let cmap = b_cmap(glyph);
+    let mut changed = font.to_vec();
+    changed[offset..offset + cmap.len()].copy_from_slice(&cmap);
+    changed[record + 4..record + 8].copy_from_slice(&sfnt_checksum(&cmap).to_be_bytes());
+    changed[record + 12..record + 16].copy_from_slice(&(cmap.len() as u32).to_be_bytes());
+    changed[head + 8..head + 12].fill(0);
+    let adjustment = 0xB1B0_AFBA_u32.wrapping_sub(sfnt_checksum(&changed));
+    changed[head + 8..head + 12].copy_from_slice(&adjustment.to_be_bytes());
+    Ok(changed)
+}
+
+#[cfg(test)]
+pub(super) fn table_record(
+    font: &[u8],
+    tag: &[u8; 4],
+) -> Result<(usize, usize), Box<dyn std::error::Error>> {
+    let table_count = u16::from_be_bytes(font[4..6].try_into()?) as usize;
+    for index in 0..table_count {
+        let record = 12 + index * 16;
+        let offset = u32::from_be_bytes(font[record + 8..record + 12].try_into()?) as usize;
+        if &font[record..record + 4] == tag {
+            return Ok((record, offset));
+        }
+    }
+    Err("font table missing".into())
+}
+
+#[cfg(test)]
 mod tests {
     use super::super::font::{font_has_char, font_source_generation, matching_font_face};
+    use super::test_support::write_file_with_new_modified_time;
     use super::{
         HtmlFallbackKey, MAX_FILE_DEPENDENCIES, cached_html_face,
         fallback_cache::{
@@ -135,7 +178,7 @@ mod tests {
             MAX_CACHED_HTML_FALLBACK_FACES, insert_existing_html_face, insert_html_face,
         },
         fallback_generation::HtmlFallbackSelection,
-        html_font_runs,
+        font_with_only_b_cmap, html_font_runs, table_record,
     };
     use crate::markdown::svg_rasterize::font::{bundled_font_db, html_font_db_for_text};
     use resvg::usvg;
@@ -396,22 +439,32 @@ mod tests {
         Ok((path.clone(), TempFontFile(path)))
     }
 
-    fn write_file_with_new_modified_time(
+    fn three_face_file_database(
+        face: usvg::fontdb::FaceInfo,
+        third_face_bytes: &[u8],
+        unsupported_bytes: &[u8],
         path: &std::path::Path,
-        bytes: &[u8],
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let before = std::fs::metadata(path)?;
-        let replacement_len = u64::try_from(bytes.len())?;
-        assert_eq!(before.len(), replacement_len);
-        let before_modified = before.modified()?;
-        std::fs::write(path, bytes)?;
-        let modified = before_modified + std::time::Duration::from_secs(1);
-        std::fs::OpenOptions::new()
-            .write(true)
-            .open(path)?
-            .set_times(std::fs::FileTimes::new().set_modified(modified))?;
-        assert_ne!(std::fs::metadata(path)?.modified()?, before_modified);
-        Ok(())
+        third_face_weight: Option<usvg::fontdb::Weight>,
+    ) -> (
+        Arc<usvg::fontdb::Database>,
+        usvg::fontdb::ID,
+        usvg::fontdb::ID,
+        usvg::fontdb::ID,
+    ) {
+        let mut base_face = face.clone();
+        base_face.source = usvg::fontdb::Source::Binary(Arc::new(unsupported_bytes.to_vec()));
+        let mut file_face = face.clone();
+        file_face.source = usvg::fontdb::Source::File(path.to_path_buf());
+        let mut third_face = face;
+        third_face.source = usvg::fontdb::Source::Binary(Arc::new(third_face_bytes.to_vec()));
+        if let Some(weight) = third_face_weight {
+            third_face.weight = weight;
+        }
+        let mut database = usvg::fontdb::Database::new();
+        let base = database.push_face_info(base_face);
+        let file = database.push_face_info(file_face);
+        let third = database.push_face_info(third_face);
+        (Arc::new(database), base, file, third)
     }
 
     fn fallback_file_database(
@@ -425,17 +478,7 @@ mod tests {
         usvg::fontdb::ID,
         usvg::fontdb::ID,
     ) {
-        let mut base_face = face.clone();
-        base_face.source = usvg::fontdb::Source::Binary(Arc::new(unsupported_bytes.to_vec()));
-        let mut selected_face = face.clone();
-        selected_face.source = usvg::fontdb::Source::File(path.to_path_buf());
-        let mut stable_face = face;
-        stable_face.source = usvg::fontdb::Source::Binary(Arc::new(bytes.to_vec()));
-        let mut database = usvg::fontdb::Database::new();
-        let base = database.push_face_info(base_face);
-        let selected = database.push_face_info(selected_face);
-        let stable = database.push_face_info(stable_face);
-        (Arc::new(database), base, selected, stable)
+        three_face_file_database(face, bytes, unsupported_bytes, path, None)
     }
 
     fn base_file_database(
@@ -468,74 +511,25 @@ mod tests {
         usvg::fontdb::ID,
         usvg::fontdb::ID,
     ) {
-        let mut base_face = face.clone();
-        base_face.source = usvg::fontdb::Source::Binary(Arc::new(unsupported.to_vec()));
-        let mut better_face = face.clone();
-        better_face.source = usvg::fontdb::Source::File(path.to_path_buf());
-        let mut lower_face = face;
-        lower_face.source = usvg::fontdb::Source::Binary(Arc::new(original.to_vec()));
-        lower_face.weight = usvg::fontdb::Weight(700);
-        let mut database = usvg::fontdb::Database::new();
-        let base = database.push_face_info(base_face);
-        let better = database.push_face_info(better_face);
-        let lower = database.push_face_info(lower_face);
-        (Arc::new(database), base, better, lower)
+        three_face_file_database(
+            face,
+            original,
+            unsupported,
+            path,
+            Some(usvg::fontdb::Weight(700)),
+        )
     }
 
-    fn font_with_only_b_cmap(font: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        let (record, offset) = table_record(font, b"cmap")?;
-        let (_, head) = table_record(font, b"head")?;
-        let glyph = rustybuzz::ttf_parser::Face::parse(font, 0)
-            .map_err(|_| "font invalid")?
-            .glyph_index('B')
-            .ok_or("B glyph missing")?
-            .0;
-        let cmap = b_cmap(glyph);
-        let mut changed = font.to_vec();
-        changed[offset..offset + cmap.len()].copy_from_slice(&cmap);
-        changed[record + 4..record + 8].copy_from_slice(&sfnt_checksum(&cmap).to_be_bytes());
-        changed[record + 12..record + 16].copy_from_slice(&(cmap.len() as u32).to_be_bytes());
-        changed[head + 8..head + 12].fill(0);
-        let adjustment = 0xB1B0_AFBA_u32.wrapping_sub(sfnt_checksum(&changed));
-        changed[head + 8..head + 12].copy_from_slice(&adjustment.to_be_bytes());
-        Ok(changed)
-    }
-
-    fn table_record(
-        font: &[u8],
-        tag: &[u8; 4],
-    ) -> Result<(usize, usize), Box<dyn std::error::Error>> {
-        let table_count = u16::from_be_bytes(font[4..6].try_into()?) as usize;
-        for index in 0..table_count {
-            let record = 12 + index * 16;
-            let offset = u32::from_be_bytes(font[record + 8..record + 12].try_into()?) as usize;
-            if &font[record..record + 4] == tag {
-                return Ok((record, offset));
-            }
-        }
-        Err("font table missing".into())
-    }
-
-    fn b_cmap(glyph: u16) -> Vec<u8> {
-        let mut cmap = Vec::with_capacity(40);
-        cmap.extend_from_slice(&[0, 0, 0, 1, 0, 3, 0, 10, 0, 0, 0, 12]);
-        cmap.extend_from_slice(&12_u16.to_be_bytes());
-        cmap.extend_from_slice(&0_u16.to_be_bytes());
-        cmap.extend_from_slice(&28_u32.to_be_bytes());
-        cmap.extend_from_slice(&0_u32.to_be_bytes());
-        cmap.extend_from_slice(&1_u32.to_be_bytes());
-        cmap.extend_from_slice(&u32::from('B').to_be_bytes());
-        cmap.extend_from_slice(&u32::from('B').to_be_bytes());
-        cmap.extend_from_slice(&u32::from(glyph).to_be_bytes());
-        cmap
-    }
-
-    fn sfnt_checksum(bytes: &[u8]) -> u32 {
-        bytes.chunks(4).fold(0_u32, |sum, chunk| {
-            let mut word = [0; 4];
-            word[..chunk.len()].copy_from_slice(chunk);
-            sum.wrapping_add(u32::from_be_bytes(word))
-        })
+    fn assert_cached_html_face(
+        database: &Arc<usvg::fontdb::Database>,
+        base: usvg::fontdb::ID,
+        expected: usvg::fontdb::ID,
+        render_faces: &mut HashMap<HtmlFallbackKey, usvg::fontdb::ID>,
+    ) {
+        assert_eq!(
+            cached_html_face(database, base, 'A', 400, false, render_faces),
+            expected
+        );
     }
 
     type RecoveryFixture = (
@@ -574,20 +568,11 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let (database, base, fallback, bytes, path) = recovery_fixture(true)?;
         let mut render_faces = HashMap::new();
-        assert_eq!(
-            cached_html_face(&database, base, 'A', 400, false, &mut render_faces),
-            fallback
-        );
+        assert_cached_html_face(&database, base, fallback, &mut render_faces);
         assert_eq!(render_faces.len(), 1);
-        assert_eq!(
-            cached_html_face(&database, base, 'A', 400, false, &mut render_faces),
-            fallback
-        );
+        assert_cached_html_face(&database, base, fallback, &mut render_faces);
         std::fs::write(&path, bytes)?;
-        assert_eq!(
-            cached_html_face(&database, base, 'A', 400, false, &mut render_faces),
-            fallback
-        );
+        assert_cached_html_face(&database, base, fallback, &mut render_faces);
         let mut next_render_faces = HashMap::new();
         let recovered = cached_html_face(&database, base, 'A', 400, false, &mut next_render_faces);
         std::fs::remove_file(path)?;
@@ -602,16 +587,10 @@ mod tests {
         let (database, candidate, fallback, bytes, path) = recovery_fixture(false)?;
         let base = database.faces().next().ok_or("base missing")?.id;
         let mut render_faces = HashMap::new();
-        assert_eq!(
-            cached_html_face(&database, base, 'A', 400, false, &mut render_faces),
-            fallback
-        );
+        assert_cached_html_face(&database, base, fallback, &mut render_faces);
         assert_eq!(render_faces.len(), 1);
         std::fs::write(&path, bytes)?;
-        assert_eq!(
-            cached_html_face(&database, base, 'A', 400, false, &mut render_faces),
-            fallback
-        );
+        assert_cached_html_face(&database, base, fallback, &mut render_faces);
         let mut next_render_faces = HashMap::new();
         let recovered = cached_html_face(&database, base, 'A', 400, false, &mut next_render_faces);
         std::fs::remove_file(path)?;

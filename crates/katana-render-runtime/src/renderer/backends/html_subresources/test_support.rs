@@ -6,9 +6,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use url::Url;
 
-pub(super) type TestResult<T = ()> = Result<T, String>;
+pub(in crate::renderer::backends::html_subresources) type TestResult<T = ()> = Result<T, String>;
 type RequestLog = Arc<Mutex<Vec<String>>>;
-type ResourceServer = std::thread::JoinHandle<std::io::Result<()>>;
+pub(in crate::renderer::backends::html_subresources) type ResourceServer =
+    std::thread::JoinHandle<std::io::Result<()>>;
 type LocalResourceServer = (String, RequestLog, ResourceServer);
 
 static NEXT_FIXTURE_ID: AtomicUsize = AtomicUsize::new(0);
@@ -35,6 +36,27 @@ pub(super) fn local_resource_server() -> TestResult<LocalResourceServer> {
     let recorded = Arc::clone(&requests);
     let server = std::thread::spawn(move || serve_resources(listener, &recorded));
     Ok((format!("http://{address}"), requests, server))
+}
+
+pub(in crate::renderer::backends::html_subresources) fn one_response_server(
+    content_type: &'static str,
+    body: &'static [u8],
+) -> TestResult<(String, ResourceServer)> {
+    let listener = TcpListener::bind("127.0.0.1:0").map_err(to_string)?;
+    let address = listener.local_addr().map_err(to_string)?;
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept()?;
+        let _path = request_path(&mut stream)?;
+        let header = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        stream.write_all(header.as_bytes())?;
+        stream.write_all(body)?;
+        stream.flush()?;
+        stream.shutdown(Shutdown::Write)
+    });
+    Ok((format!("http://{address}/image.svg"), server))
 }
 
 pub(super) fn delayed_dynamic_server() -> TestResult<(String, ResourceServer)> {
@@ -108,12 +130,12 @@ fn write_response(stream: &mut std::net::TcpStream, body: &[u8]) -> std::io::Res
     stream.shutdown(Shutdown::Write)
 }
 
-pub(super) struct LocalFixture {
-    pub(super) root: PathBuf,
+pub(in crate::renderer::backends::html_subresources) struct LocalFixture {
+    pub(in crate::renderer::backends::html_subresources) root: PathBuf,
 }
 
 impl LocalFixture {
-    pub(super) fn new() -> TestResult<Self> {
+    pub(in crate::renderer::backends::html_subresources) fn new() -> TestResult<Self> {
         let root = temp_root();
         std::fs::create_dir_all(&root).map_err(to_string)?;
         std::fs::write(

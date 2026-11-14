@@ -1,0 +1,7 @@
+{
+  "schema": "krr-mermaid-native-frame-capture-config-v1",
+  "theme": "dark",
+  "frameSizeSource": "candidate-png",
+  "scale": 1,
+  "scrollY": 0
+}

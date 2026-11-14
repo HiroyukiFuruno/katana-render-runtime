@@ -7,13 +7,15 @@ pub(in crate::renderer::backends::html_interactive::style) fn css_relative_px(
 ) -> Option<f32> {
     let value = value.trim();
     let parsed = if let Some(value) = value.strip_suffix("rem") {
-        css_scalar(value).map(|value| value * DEFAULT_FONT_SIZE)
+        css_scalar(value).map(|value| value * f64::from(DEFAULT_FONT_SIZE))
     } else if let Some(value) = value.strip_suffix("em") {
-        css_scalar(value).map(|value| value * em_base)
+        css_scalar(value).map(|value| value * f64::from(em_base))
     } else {
         css_scalar(value.strip_suffix("px").unwrap_or(value))
     }?;
-    (signed || parsed >= 0.0).then_some(parsed)
+    /* WHY: CSS数値をdoubleで解決してからfloatへ変換し、相対単位の早期丸めを避ける。 */
+    let parsed = parsed as f32;
+    (parsed.is_finite() && (signed || parsed >= 0.0)).then_some(parsed)
 }
 
 pub(in crate::renderer::backends::html_interactive::style) fn css_resolved_px(
@@ -80,7 +82,9 @@ fn css_viewport_px(value: &str, viewport_width: f32, viewport_height: f32) -> Op
     ];
     for (suffix, basis) in viewport {
         if let Some(value) = value.strip_suffix(suffix) {
-            return css_scalar(value).map(|value| basis * value / 100.0);
+            return css_scalar(value)
+                .map(|value| (f64::from(basis) * value / 100.0) as f32)
+                .filter(|value| value.is_finite());
         }
     }
     None
@@ -150,40 +154,14 @@ pub(in crate::renderer::backends::html_interactive::style) fn split_top_level_wh
     parts
 }
 
-fn css_scalar(value: &str) -> Option<f32> {
+fn css_scalar(value: &str) -> Option<f64> {
     value
         .trim()
-        .parse::<f32>()
+        .parse::<f64>()
         .ok()
         .filter(|value| value.is_finite())
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{css_resolved_px, split_top_level_commas, split_top_level_whitespace};
-
-    #[test]
-    fn math_function_rejects_unresolvable_nested_values() {
-        assert!(css_resolved_px("min(1px, invalid)", 16.0, 100.0, 50.0, false).is_none());
-    }
-
-    #[test]
-    fn top_level_comma_split_rejects_empty_and_unbalanced_arguments() {
-        assert!(split_top_level_commas(", 1px").is_none());
-        assert!(split_top_level_commas("min(1px, 2px").is_none());
-        assert!(split_top_level_commas("1px,").is_none());
-    }
-
-    #[test]
-    fn top_level_whitespace_split_preserves_nested_parentheses() {
-        assert_eq!(
-            split_top_level_whitespace("calc(1px + 2px) 3px"),
-            vec!["calc(1px + 2px)", "3px"]
-        );
-    }
-
-    #[test]
-    fn top_level_whitespace_split_returns_final_token_without_trailing_whitespace() {
-        assert_eq!(split_top_level_whitespace("  5px  "), vec!["5px"]);
-    }
-}
+#[path = "style_math_value_tests.rs"]
+mod tests;

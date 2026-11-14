@@ -1,3 +1,27 @@
+use super::super::page_crop_test_support::create_rect_group_js;
+
+macro_rules! sketch_stack_layout_js {
+    ($content:literal) => {
+        concat!(
+            r#"
+function Graph() {}
+const Editor = { convertHtmlToText(value) { return String(value); } };
+function GraphViewer() {}
+GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("width", "800px");
+  svg.setAttribute("height", "700px");
+  svg.setAttribute("viewBox", "0 0 800 700");
+"#,
+            $content,
+            r#"  callback({ graph: { getSvg() { return svg; } } });
+};
+"#,
+            create_rect_group_js!(),
+        )
+    };
+}
+
 pub(super) fn sketch_bundle_with_top_level_shape() -> String {
     sketch_stack_layout_bundle().replace(
         "  svg.appendChild(createRectGroup(\"column-c\", 361, 1, 180, 440));",
@@ -20,45 +44,17 @@ pub(super) fn sketch_bundle_with_outside_child() -> String {
 }
 
 pub(super) fn sketch_stack_layout_bundle() -> &'static str {
-    r#"
-function Graph() {}
-const Editor = { convertHtmlToText(value) { return String(value); } };
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "800px");
-  svg.setAttribute("height", "700px");
-  svg.setAttribute("viewBox", "0 0 800 700");
-  svg.appendChild(createRectGroup("board", 1, 1, 540, 440));
+    sketch_stack_layout_js!(
+        r#"  svg.appendChild(createRectGroup("board", 1, 1, 540, 440));
   svg.appendChild(createRectGroup("column-a", 1, 1, 180, 440));
   svg.appendChild(createRectGroup("column-b", 181, 1, 180, 440));
   svg.appendChild(createRectGroup("column-c", 361, 1, 180, 440));
-  callback({ graph: { getSvg() { return svg; } } });
-};
-function createRectGroup(id, x, y, width, height) {
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  group.setAttribute("data-cell-id", id);
-  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  rect.setAttribute("x", String(x));
-  rect.setAttribute("y", String(y));
-  rect.setAttribute("width", String(width));
-  rect.setAttribute("height", String(height));
-  group.appendChild(rect);
-  return group;
-}
 "#
+    )
 }
 
-const SKETCH_STACK_LAYOUT_ACTUAL_SHAPE_BUNDLE: &str = r##"
-function Graph() {}
-const Editor = { convertHtmlToText(value) { return String(value); } };
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "800px");
-  svg.setAttribute("height", "700px");
-  svg.setAttribute("viewBox", "0 0 800 700");
-  const board = document.createElementNS("http://www.w3.org/2000/svg", "g");
+const SKETCH_STACK_LAYOUT_ACTUAL_SHAPE_BUNDLE: &str = sketch_stack_layout_js!(
+    r##"  const board = document.createElementNS("http://www.w3.org/2000/svg", "g");
   board.setAttribute("data-cell-id", "board");
   const headerHitRegion = document.createElementNS("http://www.w3.org/2000/svg", "path");
   headerHitRegion.setAttribute("d", "M 2 1 H 542 V 29 H 2 Z");
@@ -75,20 +71,8 @@ GraphViewer.createViewerForElement = function createViewerForElement(_container,
   svg.appendChild(createRectGroup("column-a", 2, 1, 180, 440));
   svg.appendChild(createRectGroup("column-b", 182, 1, 180, 440));
   svg.appendChild(createRectGroup("column-c", 362, 1, 180, 440));
-  callback({ graph: { getSvg() { return svg; } } });
-};
-function createRectGroup(id, x, y, width, height) {
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  group.setAttribute("data-cell-id", id);
-  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  rect.setAttribute("x", String(x));
-  rect.setAttribute("y", String(y));
-  rect.setAttribute("width", String(width));
-  rect.setAttribute("height", String(height));
-  group.appendChild(rect);
-  return group;
-}
-"##;
+"##
+);
 
 pub(super) fn sketch_stack_layout_actual_shape_bundle() -> &'static str {
     SKETCH_STACK_LAYOUT_ACTUAL_SHAPE_BUNDLE

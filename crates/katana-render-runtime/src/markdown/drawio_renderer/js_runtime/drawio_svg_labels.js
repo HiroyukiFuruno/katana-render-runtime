@@ -154,14 +154,18 @@ function katanaDrawioBottomLabelPosition(box, entry, _lines, fontSize) {
 }
 
 function katanaDrawioRightLabelPosition(box, entry, lines, fontSize) {
-  const x = box.x + box.width + 2 + katanaDrawioSpacing(entry.style, "spacingLeft") -
+  const x =
+    box.x +
+    box.width +
+    2 +
+    katanaDrawioSpacing(entry.style, "spacingLeft") -
     katanaDrawioAppliedLeftPadding() * 2;
   return katanaDrawioTextPosition(x, katanaDrawioCenteredTextY(box, lines, fontSize), "start");
 }
 
 function katanaDrawioLeftLabelPosition(box, entry, lines, fontSize) {
-  const x = box.x - 2 - katanaDrawioSpacing(entry.style, "spacingRight") -
-    katanaDrawioAppliedLeftPadding();
+  const x =
+    box.x - 2 - katanaDrawioSpacing(entry.style, "spacingRight") - katanaDrawioAppliedLeftPadding();
   return katanaDrawioTextPosition(x, katanaDrawioCenteredTextY(box, lines, fontSize), "end");
 }
 

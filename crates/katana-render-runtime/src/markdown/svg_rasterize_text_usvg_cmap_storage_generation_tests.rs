@@ -1,8 +1,13 @@
+#[path = "svg_rasterize_text_cmap_test_support.rs"]
+mod cmap_test_support;
+use cmap_test_support::{font_with_only_b_cmap, rewrite_with_same_modified_time};
+
 use super::super::super::super::font::FontSourceGeneration;
 use super::{CacheResetOnDrop, begin};
 use super::{FONT_BYTES, cache, entry, generation, insert, lookup, mapping};
 use resvg::usvg::fontdb::Source;
 use resvg::usvg::fontdb::{Database, ID};
+use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -21,6 +26,19 @@ impl Drop for TestFontFile {
     }
 }
 
+fn create_test_font_file(path: std::path::PathBuf, bytes: &[u8]) -> Result<TestFontFile, String> {
+    let mut output = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|error| error.to_string())?;
+    let file = TestFontFile(path);
+    let result = output.write_all(bytes);
+    drop(output);
+    result.map_err(|error| error.to_string())?;
+    Ok(file)
+}
+
 fn file_database(bytes: &[u8]) -> Result<FileDatabase, String> {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     let path = std::env::temp_dir().join(format!(
@@ -28,10 +46,10 @@ fn file_database(bytes: &[u8]) -> Result<FileDatabase, String> {
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
-    std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
+    let file = create_test_font_file(path, bytes)?;
     let mut database = Database::new();
     database.load_font_data(FONT_BYTES.to_vec());
-    database.load_font_source(Source::File(path.clone()));
+    database.load_font_source(Source::File(file.0.clone()));
     let database = Arc::new(database);
     let ids = database.faces().map(|face| face.id).collect::<Vec<_>>();
     let base_id = *ids.first().ok_or("base font face missing")?;
@@ -43,23 +61,17 @@ fn file_database(bytes: &[u8]) -> Result<FileDatabase, String> {
         database,
         base_id,
         file_id,
-        file: TestFontFile(path),
+        file,
     })
 }
 
 #[test]
 fn unavailable_generation_rejects_global_cmap_storage() -> Result<(), String> {
-    let _lock = begin()?;
-    let _reset = CacheResetOnDrop;
-    let fixture = file_database(FONT_BYTES)?;
-    std::fs::remove_file(&fixture.file.0).map_err(|error| error.to_string())?;
-    let database = &fixture.database;
-    let id = fixture.file_id;
-    let generation = generation(database, id);
-    assert!(!generation.durable_reusable());
-    assert_legacy_entry_is_removed(database, id, generation.clone())?;
-    assert_insert_is_not_persisted(database, id, generation)?;
-    Ok(())
+    const CASE: &str = "markdown::svg_rasterize::text_shaping::usvg_cmap::storage::tests::generation_tests::unavailable_generation_rejects_global_cmap_storage";
+    if !super::global_child::run_parent_or_allow_child(CASE)? {
+        return Ok(());
+    }
+    case_bodies::unavailable_generation_rejects_global_cmap_storage()
 }
 
 fn assert_legacy_entry_is_removed(
@@ -118,28 +130,20 @@ fn assert_insert_is_not_persisted(
 #[cfg(windows)]
 #[test]
 fn weak_file_generation_never_enters_or_reuses_global_cmap_storage() -> Result<(), String> {
-    let _lock = begin()?;
-    let _reset = CacheResetOnDrop;
-    let fixture = file_database(FONT_BYTES)?;
-    let generation = generation(&fixture.database, fixture.file_id);
-    assert!(generation.reusable());
-    assert!(!generation.durable_reusable());
-    assert_insert_is_not_persisted(&fixture.database, fixture.file_id, generation.clone())?;
-    assert!(
-        lookup(&fixture.database, fixture.file_id, 0, &generation)
-            .map_err(|_| "cache lookup failed")?
-            .is_none()
-    );
-    Ok(())
+    const CASE: &str = "markdown::svg_rasterize::text_shaping::usvg_cmap::storage::tests::generation_tests::weak_file_generation_never_enters_or_reuses_global_cmap_storage";
+    if !super::global_child::run_parent_or_allow_child(CASE)? {
+        return Ok(());
+    }
+    case_bodies::weak_file_generation_never_enters_or_reuses_global_cmap_storage()
 }
 
 #[test]
 fn same_length_same_modified_rewrite_reprobes_without_stale_cmap_result() -> Result<(), String> {
-    let _lock = begin()?;
-    let _reset = CacheResetOnDrop;
-    let replacement = font_with_only_b_cmap(FONT_BYTES)?;
-    let fixture = file_database(FONT_BYTES)?;
-    verify_rewrite_reprobes(&fixture, &replacement)
+    const CASE: &str = "markdown::svg_rasterize::text_shaping::usvg_cmap::storage::tests::generation_tests::same_length_same_modified_rewrite_reprobes_without_stale_cmap_result";
+    if !super::global_child::run_parent_or_allow_child(CASE)? {
+        return Ok(());
+    }
+    case_bodies::same_length_same_modified_rewrite_reprobes_without_stale_cmap_result()
 }
 
 fn verify_rewrite_reprobes(fixture: &FileDatabase, replacement: &[u8]) -> Result<(), String> {
@@ -206,27 +210,59 @@ fn rewrite_same_modified_time(path: &std::path::Path, bytes: &[u8]) -> Result<()
     if u64::try_from(bytes.len()).map_err(|error| error.to_string())? != original_len {
         return Err("rewrite changed font length".into());
     }
-    let modified = std::fs::metadata(path)
-        .map_err(|error| error.to_string())?
-        .modified()
-        .map_err(|error| error.to_string())?;
-    std::fs::write(path, bytes).map_err(|error| error.to_string())?;
-    std::fs::OpenOptions::new()
-        .write(true)
-        .open(path)
-        .map_err(|error| error.to_string())?
-        .set_times(std::fs::FileTimes::new().set_modified(modified))
-        .map_err(|error| error.to_string())
+    rewrite_with_same_modified_time(path, bytes).map_err(|error| error.to_string())
 }
 
-fn font_with_only_b_cmap(font: &[u8]) -> Result<Vec<u8>, String> {
-    let (record, offset, head) = cmap_directory(font)?;
-    let glyph = rustybuzz::ttf_parser::Face::parse(font, 0)
-        .map_err(|_| "font invalid")?
-        .glyph_index('B')
-        .ok_or("B glyph missing")?
-        .0;
-    rewrite_cmap(font, record, offset, head, b_cmap(glyph))
+#[test]
+fn existing_font_file_is_preserved_until_owner_cleanup() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = file_database(FONT_BYTES)?;
+    let path = fixture.file.0.clone();
+    let original = std::fs::read(&path)?;
+    let expected = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .err()
+        .ok_or("exclusive create unexpectedly succeeded")?;
+    assert_eq!(expected.kind(), std::io::ErrorKind::AlreadyExists);
+    let actual = create_test_font_file(path.clone(), b"replacement")
+        .err()
+        .ok_or("existing fixture unexpectedly replaced")?;
+    assert_eq!(actual, expected.to_string());
+    assert_eq!(std::fs::read(&path)?, original);
+    drop(fixture);
+    assert!(!path.exists());
+    Ok(())
+}
+
+#[test]
+fn rewrite_preserves_bytes_and_modified_time() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = file_database(FONT_BYTES)?;
+    let path = &fixture.file.0;
+    let original = std::fs::read(path)?;
+    let modified = std::fs::metadata(path)?.modified()?;
+    let mut replacement = original.clone();
+    replacement[0] ^= 1;
+    rewrite_with_same_modified_time(path, &replacement)?;
+    assert_ne!(original, replacement);
+    assert_eq!(original.len(), replacement.len());
+    assert_eq!(std::fs::read(path)?, replacement);
+    assert_eq!(std::fs::metadata(path)?.modified()?, modified);
+    Ok(())
+}
+
+#[test]
+fn rewrite_missing_file_returns_not_found() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = file_database(FONT_BYTES)?;
+    let path = &fixture.file.0;
+    case_bodies::remove_font_file(path)?;
+    case_bodies::assert_missing_font_removal(path)?;
+    let error = rewrite_with_same_modified_time(path, b"replacement")
+        .err()
+        .ok_or("missing rewrite unexpectedly succeeded")?;
+    assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    assert!(!path.exists());
+    Ok(())
 }
 
 fn cmap_directory(font: &[u8]) -> Result<(usize, usize, usize), String> {
@@ -254,45 +290,5 @@ fn cmap_directory(font: &[u8]) -> Result<(usize, usize, usize), String> {
     Ok((record, offset, head.ok_or("head table missing")?))
 }
 
-fn rewrite_cmap(
-    font: &[u8],
-    record: usize,
-    offset: usize,
-    head: usize,
-    cmap: Vec<u8>,
-) -> Result<Vec<u8>, String> {
-    let mut changed = font.to_vec();
-    changed[offset..offset + cmap.len()].copy_from_slice(&cmap);
-    changed[record + 4..record + 8].copy_from_slice(&sfnt_checksum(&cmap).to_be_bytes());
-    changed[record + 12..record + 16]
-        .copy_from_slice(&(u32::try_from(cmap.len()).map_err(|_| "cmap too large")?).to_be_bytes());
-    changed[head + 8..head + 12].fill(0);
-    let adjustment = 0xB1B0_AFBA_u32.wrapping_sub(sfnt_checksum(&changed));
-    changed[head + 8..head + 12].copy_from_slice(&adjustment.to_be_bytes());
-    if changed.len() != font.len() {
-        return Err("cmap rewrite changed font length".into());
-    }
-    Ok(changed)
-}
-
-fn b_cmap(glyph: u16) -> Vec<u8> {
-    let mut cmap = Vec::with_capacity(40);
-    cmap.extend_from_slice(&[0, 0, 0, 1, 0, 3, 0, 10, 0, 0, 0, 12]);
-    cmap.extend_from_slice(&12_u16.to_be_bytes());
-    cmap.extend_from_slice(&0_u16.to_be_bytes());
-    cmap.extend_from_slice(&28_u32.to_be_bytes());
-    cmap.extend_from_slice(&0_u32.to_be_bytes());
-    cmap.extend_from_slice(&1_u32.to_be_bytes());
-    cmap.extend_from_slice(&u32::from('B').to_be_bytes());
-    cmap.extend_from_slice(&u32::from('B').to_be_bytes());
-    cmap.extend_from_slice(&u32::from(glyph).to_be_bytes());
-    cmap
-}
-
-fn sfnt_checksum(bytes: &[u8]) -> u32 {
-    bytes.chunks(4).fold(0_u32, |sum, chunk| {
-        let mut word = [0; 4];
-        word[..chunk.len()].copy_from_slice(chunk);
-        sum.wrapping_add(u32::from_be_bytes(word))
-    })
-}
+#[path = "svg_rasterize_text_usvg_cmap_storage_generation_case_bodies.rs"]
+mod case_bodies;

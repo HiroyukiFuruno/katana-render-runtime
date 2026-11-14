@@ -16,6 +16,7 @@ pub(super) fn select_inline_declarations(
             u16::MAX,
             usize::MAX,
             declaration_order,
+            true,
         );
     }
 }
@@ -40,6 +41,7 @@ impl StaticCss {
                 specificity,
                 rule_order,
                 declaration_order,
+                !rule.user_agent,
             );
         }
     }

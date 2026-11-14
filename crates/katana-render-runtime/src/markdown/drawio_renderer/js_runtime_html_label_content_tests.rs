@@ -1,4 +1,5 @@
 use super::DrawioJsRuntimeOps;
+use super::test_support::{assert_render_contains, assert_render_not_contains, temp_runtime_path};
 use crate::markdown::color_preset::DiagramColorPreset;
 
 #[test]
@@ -150,63 +151,31 @@ fn fake_bundle_keeps_complete_native_multiline_html_label() {
     assert_render_contains(&rendered, "First line<br/>Second line");
 }
 
-fn temp_runtime_path(prefix: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("{prefix}-{}.js", std::process::id()))
-}
-
-fn assert_render_contains(rendered: &Result<String, String>, marker: &str) {
-    assert!(
-        rendered.as_ref().is_ok_and(|svg| svg.contains(marker)),
-        "{rendered:?}"
-    );
-}
-
-fn assert_render_not_contains(rendered: &Result<String, String>, marker: &str) {
-    assert!(
-        rendered.as_ref().is_ok_and(|svg| !svg.contains(marker)),
-        "{rendered:?}"
-    );
-}
-
 fn fake_bundle() -> &'static str {
-    FAKE_BUNDLE
+    static BUNDLE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BUNDLE
+        .get_or_init(|| {
+            let marker = "  group.appendChild(shape);\n";
+            let group_tail = super::html_label_tests::FAKE_BUNDLE_TAIL;
+            assert_eq!(group_tail.matches(marker).count(), 1);
+            let group_tail =
+                group_tail.replacen(marker, &format!("{FAKE_GROUP_TEXT_STYLE}{marker}"), 1);
+            let body = [super::html_label_tests::FAKE_BUNDLE_BODY, FAKE_BUNDLE_BODY].concat();
+            let tail = [FAKE_BUNDLE_AFTER_CALLBACK, &group_tail].concat();
+            super::test_support::fake_html_label_bundle("960", "720", &body, &tail)
+        })
+        .as_str()
 }
 
-const FAKE_BUNDLE: &str = r#"
-function Graph() {}
-const Editor = {
-  convertHtmlToText(value) {
-    return String(value);
-  },
-};
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "960");
-  svg.setAttribute("height", "720");
-  svg.setAttribute("viewBox", "0 0 960 720");
-  svg.appendChild(createGroup("right", 34, 145, 312, 95));
-  svg.appendChild(createGroup("left", 536, 265, 330, 95));
-  svg.appendChild(createGroup("text", 10, 10, 100, 40));
-  svg.appendChild(createGroup("card", 100, 100, 140, 80));
-  svg.appendChild(createGroup("actor", 0, 0, 30, 60));
-  svg.appendChild(createGroup("math", 250, 100, 220, 120));
-  svg.appendChild(createGroup("package", 100, 0, 450, 280));
-  svg.appendChild(createGroup("topcard", 100, 100, 140, 80));
+const FAKE_BUNDLE_BODY: &str = r#"  svg.appendChild(createGroup("topcard", 100, 100, 140, 80));
   svg.appendChild(createGroup("middlecard", 300, 100, 140, 80));
   svg.appendChild(createGroup("bottomcard", 500, 100, 140, 80));
   svg.appendChild(createGroup("m11_note", 540, 600, 380, 90));
   svg.appendChild(createOverflowFillGroup());
   svg.appendChild(createCompleteNativeLabelGroup());
-  callback({
-    graph: {
-      getSvg() {
-        return svg;
-      },
-    },
-  });
-};
-function createCompleteNativeLabelGroup() {
+"#;
+
+const FAKE_BUNDLE_AFTER_CALLBACK: &str = r#"function createCompleteNativeLabelGroup() {
   const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
   group.setAttribute("data-cell-id", "complete");
   const shape = document.createElementNS("http://www.w3.org/2000/svg", "rect");
@@ -242,33 +211,12 @@ function createOverflowFillGroup() {
   group.appendChild(foreignObject);
   return group;
 }
-function createGroup(id, x, y, width, height) {
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  group.setAttribute("data-cell-id", id);
-  const shape = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  rect.setAttribute("x", String(x));
-  rect.setAttribute("y", String(y));
-  rect.setAttribute("width", String(width));
-  rect.setAttribute("height", String(height));
-  shape.appendChild(rect);
-  const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-  text.textContent = id;
-  if (["topcard", "middlecard", "bottomcard", "m11_note"].includes(id)) {
+"#;
+
+const FAKE_GROUP_TEXT_STYLE: &str = r#"  if (["topcard", "middlecard", "bottomcard", "m11_note"].includes(id)) {
     text.setAttribute("x", String(x + width / 2));
     text.setAttribute("y", "180");
     text.setAttribute("font-size", id === "m11_note" ? "10px" : "12px");
     text.setAttribute("text-anchor", "middle");
   }
-  group.appendChild(shape);
-  if (id === "math") {
-    const foreignObject = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
-    const div = document.createElement("div");
-    div.textContent = "$$A_{m,n} =";
-    foreignObject.appendChild(div);
-    group.appendChild(foreignObject);
-  }
-  group.appendChild(text);
-  return group;
-}
 "#;

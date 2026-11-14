@@ -1,13 +1,12 @@
+import { MERMAID_RUNTIME_ENTRYPOINT } from "#mermaid/runtime_entrypoint";
 import { SharedDomFragments } from "#shared/dom_fragments";
 import {
   RuntimeBundleDefinition,
   type RuntimeFragment,
   RuntimeFragmentFactory,
 } from "#shared/runtime_bundle";
-import { MERMAID_RUNTIME_ENTRYPOINT } from "#mermaid/runtime_entrypoint";
 
-const MERMAID_JS_RUNTIME =
-  "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime";
+const MERMAID_JS_RUNTIME = "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime";
 
 export const MermaidRuntimeBundleDefinition = {
   create(): RuntimeBundleDefinition {
@@ -51,19 +50,9 @@ function mermaidRuntimeFragments(): RuntimeFragment[] {
       "svg-block-fixture-layout-fixes.js",
       `${MERMAID_JS_RUNTIME}/svg_block_fixture_layout_fixes.js`,
     ),
-    RuntimeFragmentFactory.verbatim("svg-er-layout.js", `${MERMAID_JS_RUNTIME}/svg_er_layout.js`),
-    RuntimeFragmentFactory.verbatim("svg-er-fixes.js", `${MERMAID_JS_RUNTIME}/svg_er_fixes.js`),
     RuntimeFragmentFactory.verbatim(
       "svg-er-fixture-layout-fixes.js",
       `${MERMAID_JS_RUNTIME}/svg_er_fixture_layout_fixes.js`,
-    ),
-    RuntimeFragmentFactory.verbatim(
-      "svg-er-viewbox-fixes.js",
-      `${MERMAID_JS_RUNTIME}/svg_er_viewbox_fixes.js`,
-    ),
-    RuntimeFragmentFactory.verbatim(
-      "svg-class-layout-fixes.js",
-      `${MERMAID_JS_RUNTIME}/svg_class_layout_fixes.js`,
     ),
     RuntimeFragmentFactory.verbatim(
       "svg-class-fixes.js",
@@ -90,28 +79,12 @@ function mermaidRuntimeFragments(): RuntimeFragment[] {
       `${MERMAID_JS_RUNTIME}/svg_review_fixes.js`,
     ),
     RuntimeFragmentFactory.verbatim(
-      "svg-review-ishikawa-fixes.js",
-      `${MERMAID_JS_RUNTIME}/svg_review_ishikawa_fixes.js`,
-    ),
-    RuntimeFragmentFactory.verbatim(
       "svg-review-venn-fixes.js",
       `${MERMAID_JS_RUNTIME}/svg_review_venn_fixes.js`,
     ),
     RuntimeFragmentFactory.verbatim(
       "svg-review-treemap-fixes.js",
       `${MERMAID_JS_RUNTIME}/svg_review_treemap_fixes.js`,
-    ),
-    RuntimeFragmentFactory.verbatim(
-      "svg-kanban-text.js",
-      `${MERMAID_JS_RUNTIME}/svg_kanban_text.js`,
-    ),
-    RuntimeFragmentFactory.verbatim(
-      "svg-kanban-viewbox.js",
-      `${MERMAID_JS_RUNTIME}/svg_kanban_viewbox.js`,
-    ),
-    RuntimeFragmentFactory.verbatim(
-      "svg-kanban-label-layout.js",
-      `${MERMAID_JS_RUNTIME}/svg_kanban_label_layout.js`,
     ),
     RuntimeFragmentFactory.verbatim(
       "svg-kanban-fixes.js",

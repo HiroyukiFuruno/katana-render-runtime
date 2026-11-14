@@ -1,5 +1,9 @@
 use super::request::HtmlFontRequest;
 
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_html_font_public_route_tests.rs"]
+mod public_routes;
+
 #[test]
 fn decodes_xml_entities_before_removing_font_family_quotes() {
     let markup = r#"<text font-family="&apos;DejaVu Sans&apos;, sans-serif">text</text>"#;

@@ -1,3 +1,5 @@
+pub struct SvgRasterizeOps;
+
 #[derive(Debug, Clone)]
 pub struct RasterizedSvg {
     pub width: u32,
@@ -13,4 +15,10 @@ pub enum SvgRasterizeError {
     ParseFailed(String),
     #[error("Failed to rasterize SVG: {0}")]
     RasterizeFailed(String),
+}
+
+impl SvgRasterizeError {
+    pub(super) fn parse_failed(error: impl ToString) -> Self {
+        Self::ParseFailed(error.to_string())
+    }
 }

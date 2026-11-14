@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "defaultPhase": "final",
+  "interimRelease": {
+    "version": "0.4.24",
+    "phase": "interim",
+    "threshold": 90,
+    "authorization": "https://github.com/HiroyukiFuruno/katana-render-runtime/issues/109"
+  }
+}

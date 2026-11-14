@@ -82,37 +82,19 @@ fn cache_test_guard() -> Result<
 
 #[test]
 fn corrupt_cached_sfnt_is_removed_after_real_file_probe() -> Result<(), String> {
-    let (_lock, _reset) = cache_test_guard()?;
-    let file = file_database()?;
-    let mut saved_generation = None;
-    let result = with_validated_scope(|| {
-        let generation =
-            super::super::super::font::font_source_generation(&file.database, file.face_id);
-        saved_generation = Some(generation.clone());
-        if !super::super::storage::insert(
-            &file.database,
-            file.face_id,
-            file.face_index,
-            generation,
-            CORRUPTED_CMAP_SFNT_BYTES.to_vec(),
-            font_mapping(file.face_index).map_err(|_| ())?,
-        ) {
-            return Err(());
-        }
-        super::has_char(&file.database, file.face_id, 'A')
-    });
-    let generation = saved_generation.ok_or("file generation was not observed")?;
-    assert_eq!(result, Err(()));
-    assert!(
-        super::super::storage::lookup(&file.database, file.face_id, file.face_index, &generation,)
-            .map_err(|_| "cmap cache lock poisoned")?
-            .is_none()
-    );
-    Ok(())
+    const CASE: &str = "markdown::svg_rasterize::text_shaping::usvg_cmap::probe::tests::corrupt_cached_sfnt_is_removed_after_real_file_probe";
+    if !super::super::storage::tests::global_child::run_parent_or_allow_child(CASE)? {
+        return Ok(());
+    }
+    corrupt_cached_sfnt_is_removed_after_real_file_probe_body()
 }
 
 #[test]
 fn poisoned_cache_preserves_real_file_probe_policy() -> Result<(), String> {
+    const CASE: &str = "markdown::svg_rasterize::text_shaping::usvg_cmap::probe::tests::poisoned_cache_preserves_real_file_probe_policy";
+    if !super::super::storage::tests::global_child::run_parent_or_allow_child(CASE)? {
+        return Ok(());
+    }
     let (_lock, _reset) = cache_test_guard()?;
     let file = file_database()?;
     let generation =
@@ -137,6 +119,10 @@ fn poisoned_cache_preserves_real_file_probe_policy() -> Result<(), String> {
 
 #[test]
 fn file_probe_is_rejected_outside_validated_batch() -> Result<(), String> {
+    const CASE: &str = "markdown::svg_rasterize::text_shaping::usvg_cmap::probe::tests::file_probe_is_rejected_outside_validated_batch";
+    if !super::super::storage::tests::global_child::run_parent_or_allow_child(CASE)? {
+        return Ok(());
+    }
     let (_lock, _reset) = cache_test_guard()?;
     let file = file_database()?;
     assert_eq!(super::has_char(&file.database, file.face_id, 'A'), Err(()));
@@ -243,6 +229,10 @@ fn stale_excluded_base_face_does_not_fall_back_to_bundled_face() -> Result<(), S
 
 #[test]
 fn missing_character_in_remaining_bundled_face_returns_none() -> Result<(), String> {
+    const CASE: &str = "markdown::svg_rasterize::text_shaping::usvg_cmap::probe::tests::missing_character_in_remaining_bundled_face_returns_none";
+    if !super::super::storage::tests::global_child::run_parent_or_allow_child(CASE)? {
+        return Ok(());
+    }
     let (_lock, _reset) = cache_test_guard()?;
     let first_font = TempFont::write(FONT_BYTES)?;
     let second_font = TempFont::write(FONT_BYTES)?;
@@ -271,3 +261,38 @@ fn missing_character_in_remaining_bundled_face_returns_none() -> Result<(), Stri
 
 #[path = "svg_rasterize_text_usvg_cmap_probe_selector_tests.rs"]
 mod selector_tests;
+
+#[path = "svg_rasterize_text_usvg_cmap_probe_file_io_tests.rs"]
+mod file_io_tests;
+#[path = "svg_rasterize_text_usvg_cmap_probe_weight_tests.rs"]
+mod weight_tests;
+
+fn corrupt_cached_sfnt_is_removed_after_real_file_probe_body() -> Result<(), String> {
+    let (_lock, _reset) = cache_test_guard()?;
+    let file = file_database()?;
+    let mut saved_generation = None;
+    let result = with_validated_scope(|| {
+        let generation =
+            super::super::super::font::font_source_generation(&file.database, file.face_id);
+        saved_generation = Some(generation.clone());
+        if !super::super::storage::insert(
+            &file.database,
+            file.face_id,
+            file.face_index,
+            generation,
+            CORRUPTED_CMAP_SFNT_BYTES.to_vec(),
+            font_mapping(file.face_index).map_err(|_| ())?,
+        ) {
+            return Err(());
+        }
+        super::has_char(&file.database, file.face_id, 'A')
+    });
+    let generation = saved_generation.ok_or("file generation was not observed")?;
+    assert_eq!(result, Err(()));
+    assert!(
+        super::super::storage::lookup(&file.database, file.face_id, file.face_index, &generation,)
+            .map_err(|_| "cmap cache lock poisoned")?
+            .is_none()
+    );
+    Ok(())
+}

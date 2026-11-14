@@ -8,7 +8,29 @@ use super::super::types::{
 };
 use super::StaticHtmlRuntimeSession;
 
+#[path = "session_interaction_focus.rs"]
+mod focus;
+
 impl StaticHtmlRuntimeSession {
+    pub(crate) fn set_active_element(
+        &mut self,
+        node_id: Option<u64>,
+    ) -> Result<(), HtmlRuntimeError> {
+        let isolate = self.isolate.as_mut().ok_or_else(discarded_runtime_error)?;
+        let context = self.context.as_ref().ok_or_else(discarded_runtime_error)?;
+        v8::scope!(let handle_scope, isolate);
+        let context = v8::Local::new(handle_scope, context);
+        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
+        v8::tc_scope!(let scope, &mut **context_scope);
+        let node = node_id.map_or_else(|| "null".to_string(), |id| format!("\"{id}\""));
+        super::super::script::evaluate_value(
+            scope,
+            "krr-html-set-active-element",
+            &format!("__krrSetFocusedNodeId({node})"),
+        )?;
+        Ok(())
+    }
+
     pub(crate) fn body_node(&mut self) -> Option<HtmlNodeId> {
         self.isolate
             .as_mut()?
@@ -34,6 +56,14 @@ impl StaticHtmlRuntimeSession {
         &mut self,
         event: HtmlRuntimeEvent,
     ) -> Result<HtmlRuntimeDispatch, HtmlRuntimeError> {
+        self.dispatch_with_default_prevented(event)
+            .map(|(dispatch, _)| dispatch)
+    }
+
+    pub(crate) fn dispatch_with_default_prevented(
+        &mut self,
+        event: HtmlRuntimeEvent,
+    ) -> Result<(HtmlRuntimeDispatch, bool), HtmlRuntimeError> {
         let result = self.run_event(event);
         if matches!(result, Err(HtmlRuntimeError::ExecutionTimeout)) {
             self.discard();
@@ -70,11 +100,11 @@ impl StaticHtmlRuntimeSession {
     fn run_event(
         &mut self,
         event: HtmlRuntimeEvent,
-    ) -> Result<HtmlRuntimeDispatch, HtmlRuntimeError> {
+    ) -> Result<(HtmlRuntimeDispatch, bool), HtmlRuntimeError> {
         let kind = event.kind();
         let target = event.target();
         let key = event.key();
-        let navigation = {
+        let (navigation, default_prevented) = {
             let isolate = self.isolate.as_mut().ok_or_else(discarded_runtime_error)?;
             let context = self.context.as_ref().ok_or_else(discarded_runtime_error)?;
             v8::scope!(let handle_scope, isolate);
@@ -83,10 +113,13 @@ impl StaticHtmlRuntimeSession {
             v8::tc_scope!(let scope, &mut **context_scope);
             dispatch_event(scope, target.0, kind, key)?
         };
-        Ok(HtmlRuntimeDispatch {
-            content: self.snapshot()?,
-            navigation,
-        })
+        Ok((
+            HtmlRuntimeDispatch {
+                content: self.snapshot()?,
+                navigation,
+            },
+            default_prevented,
+        ))
     }
 
     fn run_window_event(
@@ -123,24 +156,22 @@ fn dispatch_event(
     node_id: u64,
     kind: HtmlRuntimeEventKind,
     key: Option<&str>,
-) -> Result<Option<HtmlNavigationIntent>, HtmlRuntimeError> {
+) -> Result<(Option<HtmlNavigationIntent>, bool), HtmlRuntimeError> {
     let event = event(scope, node_id, kind.as_str(), key)?;
     check_bridge_error(scope)?;
-    if kind == HtmlRuntimeEventKind::Click {
-        navigation_intent(scope, node_id, event)
+    let default_prevented = event_default_prevented(scope, event)?;
+    let navigation = if kind == HtmlRuntimeEventKind::Click && !default_prevented {
+        navigation_intent(scope, node_id)?
     } else {
-        Ok(None)
-    }
+        None
+    };
+    Ok((navigation, default_prevented))
 }
 
 fn navigation_intent(
     scope: &mut HtmlTryCatchScope<'_, '_, '_, '_>,
     node_id: u64,
-    event: v8::Local<v8::Object>,
 ) -> Result<Option<HtmlNavigationIntent>, HtmlRuntimeError> {
-    if event_default_prevented(scope, event)? {
-        return Ok(None);
-    }
     scope
         .get_slot::<HtmlDomBridgeState>()
         .ok_or_else(dom_state_unavailable_error)?

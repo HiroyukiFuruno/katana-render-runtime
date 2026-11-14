@@ -1,14 +1,28 @@
 use super::super::html_document::HtmlDocumentNode;
-use super::document::attribute;
 use super::layout::HtmlLayoutRenderer;
-use super::layout_container::horizontal_box_geometry;
+use super::layout_flow::ListItemMarker;
 use super::style::{CssPosition, CssStyle};
-use super::types::{
-    DetailsContext, ElementBox, ElementRenderContext, HitTarget, HitTargetKind, LayoutContext,
-};
+use super::types::{DetailsContext, ElementRenderContext, LayoutContext};
+
+pub(super) struct ElementPaintScope {
+    paint_start: usize,
+    element_box_start: usize,
+    records_inline_fragments: bool,
+    deferred_paint_start: Option<usize>,
+    auto_clip_paint_order: Option<u64>,
+}
 
 #[path = "layout_element_box.rs"]
 mod element_box;
+#[path = "layout_element_hit.rs"]
+mod hit;
+#[path = "layout_element_margin.rs"]
+mod margin;
+#[path = "layout_element_styled.rs"]
+mod styled;
+
+pub(super) use element_box::padding_edge;
+pub(super) use styled::render_styled_list_item_for_measurement;
 
 impl HtmlLayoutRenderer {
     pub(super) fn render_node(
@@ -44,152 +58,124 @@ impl HtmlLayoutRenderer {
         element: ElementRenderContext<'_>,
         layout: LayoutContext<'_>,
     ) -> f32 {
-        let mut style = CssStyle::from_element(element.tag, element.attributes, layout.style);
-        let paint_start = self.svg.len();
-        let element_box_start = self.element_boxes.len();
-        let records_inline_fragments = style.inline_block && !style.inline_atomic;
-        self.ownership.rendering_elements.push(element.node_id);
-        if records_inline_fragments {
-            self.ownership.inline_fragment_owners.push(element.node_id);
-        }
+        let mut style = self.element_style(element, layout.style);
+        self.enter_collapsible_margins(element, layout.style, &mut style);
+        let scope = self.begin_element_paint_scope(element.node_id, &style);
         let bottom = self.render_positioned_or_flow_element(element, layout, &mut style);
-        if records_inline_fragments {
-            debug_assert_eq!(
-                self.ownership.inline_fragment_owners.pop(),
-                Some(element.node_id)
-            );
-        }
-        debug_assert_eq!(
-            self.ownership.rendering_elements.pop(),
-            Some(element.node_id)
-        );
-        self.finish_element_paint(paint_start, element_box_start, element.node_id, &style);
+        self.finish_element_paint_scope(scope, element.node_id, &style);
+        self.ownership.trailing_child_margins.pop();
+        self.ownership.leading_child_margins.pop();
         bottom
+    }
+
+    pub(super) fn begin_element_paint_scope(
+        &mut self,
+        node_id: u64,
+        style: &CssStyle,
+    ) -> ElementPaintScope {
+        let deferred_paint_start = self.begin_stacking_paint_context(node_id, style);
+        let auto_clip_paint_order = if deferred_paint_start.is_none() {
+            self.reserve_auto_clip_paint_order(style)
+        } else {
+            None
+        };
+        ElementPaintScope {
+            auto_clip_paint_order,
+            deferred_paint_start,
+            paint_start: self.svg.len(),
+            element_box_start: self.element_boxes.len(),
+            records_inline_fragments: self.enter_element_owner(node_id, style),
+        }
+    }
+
+    pub(super) fn finish_element_paint_scope(
+        &mut self,
+        scope: ElementPaintScope,
+        node_id: u64,
+        style: &CssStyle,
+    ) {
+        self.capture_stacking_context_children();
+        let context = self.take_stacking_paint_context(node_id, scope.deferred_paint_start);
+        if scope.records_inline_fragments {
+            let popped_owner = self.ownership.inline_fragment_owners.pop();
+            debug_assert_eq!(popped_owner, Some(node_id));
+        }
+        let popped_owner = self.ownership.rendering_elements.pop();
+        debug_assert_eq!(popped_owner, Some(node_id));
+        self.finish_element_paint(scope, node_id, style, context);
+    }
+
+    fn enter_element_owner(&mut self, node_id: u64, style: &CssStyle) -> bool {
+        let records_inline_fragments = style.inline_block && !style.inline_atomic;
+        self.ownership.rendering_elements.push(node_id);
+        if records_inline_fragments {
+            self.ownership.inline_fragment_owners.push(node_id);
+        }
+        records_inline_fragments
+    }
+
+    fn element_style(&self, element: ElementRenderContext<'_>, inherited: &CssStyle) -> CssStyle {
+        let mut style = CssStyle::from_element(element.tag, element.attributes, inherited);
+        style.resolve_text_line_height(element.children);
+        style
     }
 
     fn finish_element_paint(
         &mut self,
-        paint_start: usize,
-        element_box_start: usize,
+        scope: ElementPaintScope,
         node_id: u64,
         style: &CssStyle,
+        context: Option<super::layout::StackingPaintContext>,
     ) {
-        self.rotate_element_range(
-            paint_start,
-            element_box_start,
-            node_id,
-            style.rotation_degrees,
-        );
-        if style.opacity < 1.0 {
-            self.wrap_painted_range(paint_start, style.opacity);
-        }
-        if style.position != CssPosition::Static
-            && let Some(z_index) = style.z_index
-        {
-            self.defer_painted_range(paint_start, z_index);
-        }
-    }
-
-    fn rotate_element_range(
-        &mut self,
-        paint_start: usize,
-        element_box_start: usize,
-        node_id: u64,
-        rotation_degrees: f32,
-    ) {
-        if rotation_degrees == 0.0 {
+        if let Some(context) = context {
+            self.finish_context_paint(
+                scope.paint_start,
+                scope.element_box_start,
+                node_id,
+                style,
+                context,
+            );
             return;
         }
-        let Some((center_x, center_y)) =
-            ElementBox::center_after(&self.element_boxes, element_box_start, node_id)
-        else {
-            return;
-        };
-        self.wrap_rotated_range(
-            paint_start,
-            rotation_degrees,
-            center_x,
-            center_y - self.scroll_y,
-        );
-        for element_box in &mut self.element_boxes[element_box_start..] {
-            element_box.rotate_about(rotation_degrees, center_x, center_y);
-        }
+        self.defer_auto_clip_paint(scope.paint_start, node_id, scope.auto_clip_paint_order);
     }
     pub(super) fn render_styled_element(
         &mut self,
         element: ElementRenderContext<'_>,
         layout: LayoutContext<'_>,
     ) -> f32 {
-        if layout.style.display == taffy::style::Display::None {
-            return layout.y;
-        }
-        let positioning_context = self.element_positioning_context(layout.style.position);
-        let positioning_origin_node_id =
-            self.positioning_origin_node_id(element.node_id, layout.style.position);
-        let element_box_index = self.start_element_box(
-            element.node_id,
-            positioning_context,
-            layout.style.position != CssPosition::Absolute
-                && layout.style.position != CssPosition::Fixed,
-            positioning_origin_node_id,
-        );
-        let target_index = self.start_click_target(element);
-        self.record_anchor(element, layout.y);
-        let bottom = self.render_tag(element, layout);
-        self.finish_element_box(element_box_index, element.node_id, layout, bottom);
-        if let Some(index) = target_index {
-            self.finish_click_target(index, element.node_id, layout, bottom);
-        }
-        bottom
+        styled::render_styled_element(self, element, layout)
     }
 
-    fn start_click_target(&mut self, element: ElementRenderContext<'_>) -> Option<usize> {
-        let clickable = self.clickable_nodes.contains(&element.node_id)
-            || attribute(element.attributes, "onclick").is_some();
-        clickable.then(|| {
-            let index = self.hit_targets.len();
-            self.hit_targets.push(HitTarget {
-                node_id: element.node_id,
-                x: 0.0,
-                y: 0.0,
-                width: 0.0,
-                height: 0.0,
-                kind: HitTargetKind::Click,
-            });
-            index
-        })
-    }
-
-    fn finish_click_target(
+    pub(super) fn render_styled_list_item_element(
         &mut self,
-        index: usize,
-        node_id: u64,
+        element: ElementRenderContext<'_>,
         layout: LayoutContext<'_>,
-        bottom: f32,
-    ) {
-        let (x, width) = horizontal_box_geometry(layout.x, layout.width, layout.style);
-        let y = layout.y + layout.style.margin_top;
-        self.hit_targets[index] = HitTarget {
-            node_id,
-            x,
-            y,
-            width,
-            height: (bottom - y - layout.style.margin_bottom).max(0.0),
-            kind: HitTargetKind::Click,
-        };
-    }
-
-    fn record_anchor(&mut self, element: ElementRenderContext<'_>, y: f32) {
-        let anchor = attribute(element.attributes, "id").or_else(|| {
-            (element.tag == "a")
-                .then(|| attribute(element.attributes, "name"))
-                .flatten()
-        });
-        if let Some(anchor) = anchor.filter(|anchor| !anchor.is_empty()) {
-            self.anchor_positions.entry(anchor.to_string()).or_insert(y);
-        }
+        marker: ListItemMarker,
+    ) -> f32 {
+        styled::render_styled_list_item_element(self, element, layout, marker)
     }
 }
+
+#[path = "layout_stacking_context_tests.rs"]
+#[cfg(test)]
+mod stacking_context_tests;
+
+#[path = "layout_deferred_clip_tests.rs"]
+#[cfg(test)]
+mod deferred_clip_tests;
+
+#[path = "layout_paint_context_boundary_tests.rs"]
+#[cfg(test)]
+mod paint_context_boundary_tests;
+
+#[path = "layout_auto_clip_tests.rs"]
+#[cfg(test)]
+mod auto_clip_tests;
+
+#[path = "layout_auto_clip_parent_tests.rs"]
+#[cfg(test)]
+mod auto_clip_parent_tests;
 
 #[cfg(test)]
 mod tests {
@@ -229,6 +215,20 @@ mod tests {
             render_test_layout(&[])
                 .is_ok_and(|layout| !positioned_overflow_target_matches(&layout))
         );
+    }
+
+    #[test]
+    fn release_flow_siblings_do_not_inherit_clips_or_leave_owner_stacks() {
+        let root = sibling_flow_with_inline_child_and_clip();
+        let mut renderer = test_renderer();
+        let style = CssStyle::browser_default();
+
+        renderer.render_node(&root, 0.0, 0.0, 320.0, &style, DetailsContext::NONE);
+
+        assert!(renderer.ownership.rendering_elements.is_empty());
+        assert!(renderer.ownership.inline_fragment_owners.is_empty());
+        let sibling = renderer.element_boxes.iter().find(|item| item.node_id == 3);
+        assert!(sibling.is_some_and(|item| item.overflow_clips.is_empty()));
     }
 
     fn positioned_overflow_target_matches(layout: &LayoutResult) -> bool {
@@ -329,14 +329,6 @@ mod tests {
     }
 
     #[test]
-    fn absent_rotated_element_box_leaves_paint_unchanged() {
-        let mut renderer = test_renderer();
-        let paint_start = renderer.svg.len();
-        renderer.rotate_element_range(paint_start, 0, 1, HALF_TURN_DEGREES);
-        assert_eq!(renderer.svg.len(), paint_start);
-    }
-
-    #[test]
     fn half_turn_rotation_removes_sine_noise() {
         let mut element_box = test_element_box();
         element_box.rotate_about(HALF_TURN_DEGREES, TEST_BOX_CENTER_X, TEST_BOX_CENTER_Y);
@@ -415,7 +407,7 @@ mod tests {
             participates_in_flow: true,
             ancestor_node_ids: Vec::new(),
             overflow_clips: Vec::new(),
-            clips_overflow: false,
+            overflow_clip_axes: (false, false),
             padding_edge: test_box_padding_edge(),
             inline_fragments: Vec::new(),
         }
@@ -470,6 +462,30 @@ mod tests {
                 children: Vec::new(),
             }],
         }]
+    }
+
+    fn sibling_flow_with_inline_child_and_clip() -> HtmlDocumentNode {
+        styled_element(
+            1,
+            "position: relative; width: 100px; height: 100px",
+            vec![
+                styled_element(
+                    2,
+                    "width: 80px; height: 20px; overflow: hidden",
+                    vec![HtmlDocumentNode::Element {
+                        node_id: 4,
+                        tag: "span".to_string(),
+                        attributes: Vec::new(),
+                        children: vec![HtmlDocumentNode::Text("inline".to_string())],
+                    }],
+                ),
+                styled_element(
+                    3,
+                    "position: absolute; top: 0; width: 20px; height: 20px",
+                    Vec::new(),
+                ),
+            ],
+        )
     }
 
     fn absolute_target_with_unrelated_overflow_clip_nodes() -> Vec<HtmlDocumentNode> {

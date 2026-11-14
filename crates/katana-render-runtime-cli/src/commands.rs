@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use katana_render_runtime::PlantUmlThemeCatalog;
 use std::path::PathBuf;
 
@@ -49,6 +49,8 @@ pub(crate) enum DiagramAction {
         theme_mode: Option<ThemeModeArg>,
         #[arg(long = "cache-dir")]
         cache_dir: Option<PathBuf>,
+        #[command(flatten)]
+        source_options: DiagramSourceOptions,
     },
     ReferenceUpdate {
         #[arg(long)]
@@ -64,6 +66,32 @@ pub(crate) enum DiagramAction {
         #[arg(long)]
         fixtures: PathBuf,
     },
+}
+
+#[derive(Debug, Default, Args)]
+pub(crate) struct DiagramSourceOptions {
+    #[arg(long, value_enum, default_value = "auto")]
+    pub(crate) input_format: DiagramInputFormat,
+    #[arg(long, requires_all = ["output", "attempt_token"])]
+    pub(crate) render_attestation: Option<PathBuf>,
+    #[arg(long, requires = "render_attestation")]
+    pub(crate) attempt_token: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum DiagramInputFormat {
+    #[default]
+    Auto,
+    DiagramSource,
+}
+
+impl DiagramInputFormat {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::DiagramSource => "diagram-source",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

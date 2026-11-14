@@ -1,5 +1,6 @@
 [package]
 name = "katana-render-runtime"
+autotests = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,16 +12,20 @@ include = [
     "Cargo.toml",
     "build.rs",
     "assets/fonts/**",
+    "assets/test-fixtures/font-probes/**",
     "src/**/*.rs",
+    "vendor/svg-engine/**",
     "src/renderer/backends/html_runtime/*.js",
     "src/markdown/diagram_runtime/generated/*.js",
     "src/markdown/diagram_runtime/generated/*.sha256",
-    "vendor/drawio/32.0.2/drawio.min.js.sha256",
-    "vendor/mermaid/12.1.0/mermaid.min.js.br",
-    "vendor/mermaid/12.1.0/mermaid.min.js.sha256",
+    "vendor/drawio/32.6.10/drawio.min.js.sha256",
+    "vendor/drawio/32.6.10/LICENSE",
+    "vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js.br",
+    "vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js.sha256",
+    "vendor/mermaid/12.3.0-krr.pr6823.1/LICENSE",
     "vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js.sha256",
-    "vendor/plantuml/1.2026.8/plantuml.jar.sha256",
-    "vendor/zenuml-core/4.4.1/zenuml.js.sha256",
+    "vendor/plantuml/1.2026.10/plantuml.jar.sha256",
+    "vendor/zenuml-core/4.13.2/zenuml.js.sha256",
     "src/markdown/generated/zenuml-runtime-assets.bin.br",
     "src/markdown/drawio_renderer/generated/drawio-resources.bin.br",
 ]
@@ -28,7 +33,28 @@ include = [
 [lib]
 path = "src/lib.rs"
 
+[[test]]
+name = "drawio_katana_transfer"
+path = "tests/drawio_katana_transfer.rs"
+
+[[test]]
+name = "drawio_official_transfer"
+path = "tests/drawio_official_transfer.rs"
+
+[[test]]
+name = "mermaid_katana_transfer"
+path = "tests/mermaid_katana_transfer.rs"
+
+[[test]]
+name = "plantuml_renderer"
+path = "tests/plantuml_renderer.rs"
+
+[[test]]
+name = "non_env_integration"
+path = "tests/non_env_integration.rs"
+
 [dependencies]
+moka = { workspace = true }
 katana-render-runtime-assets = { workspace = true }
 anyhow = { workspace = true }
 base64 = { workspace = true }
@@ -40,10 +66,30 @@ html5ever = { workspace = true }
 markup5ever = { workspace = true }
 tendril = { workspace = true }
 xml5ever = { workspace = true }
-resvg = { workspace = true }
-skrifa = "0.44"
+bytemuck = "1.25"
+data-url = "0.3"
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+fontdb = { version = "0.24", default-features = false, features = ["fs", "fontconfig", "memmap"] }
+gif = "0.14.2"
+image-webp = "0.2.4"
+imagesize = "0.15"
+rgb = "0.8"
+roxmltree = "0.21.2"
+siphasher = "1"
+strict-num = "0.2.0"
+svg_harfrust = { package = "harfrust", version = "0.12.0" }
+tiny-skia-path = "0.12"
+unicode-bidi = "0.3"
+unicode-script = "0.5"
+unicode-vo = "0.1"
+xmlwriter = "0.1"
+zune-jpeg = "0.5.15"
+skrifa = "^0.49"
 log = "0.4"
 rustybuzz = { workspace = true }
+harfrust = { workspace = true }
+read-fonts = { version = "=0.47.0", default-features = false }
+icu_properties = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -57,13 +103,37 @@ xmltree = { workspace = true }
 percent-encoding = { workspace = true }
 taffy = { workspace = true }
 cssparser = { workspace = true }
+kurbo = "=0.13.1"
+simplecss = "=0.2.2"
+svgtypes = "=0.16.2"
 unicode-linebreak = { workspace = true }
 unicode-width = { workspace = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
-nix = { version = "0.31.3", default-features = false, features = ["fs"] }
+nix = { version = "0.31.3", default-features = false, features = ["fs", "mount"] }
+
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dev-dependencies]
+nix = { version = "0.31.3", default-features = false, features = ["resource"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# 公開済みCPU SDKの最小構成に合わせ、ローカルSkia改変や独自SDKへ依存しない。
+skia-safe = { version = "=0.156.0", default-features = false, features = ["binary-cache", "pdf"] }
+fontique = { version = "=0.13.0", default-features = false, features = ["std"] }
+objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std", "CFString", "CFURL"] }
+objc2-core-text = { version = "=0.3.2", default-features = false, features = ["CTFont", "CTFontDescriptor", "CTFontTraits"] }
+write-fonts = { version = "0.56", default-features = false, features = ["read"] }
 
 [build-dependencies]
 brotli-decompressor = { workspace = true }
 
 [dev-dependencies]
+env_logger = { version = "=0.11.11", default-features = false }
+imageproc = { version = "0.27.0", default-features = false }
+rstest = { version = "0.28.0", default-features = false }
+tempfile = { workspace = true }
+xml = "=1.4.0"
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+core-graphics = "=0.25.0"
+core-foundation = "=0.10.1"
+core-text = "=22.0.0"

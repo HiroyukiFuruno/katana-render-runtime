@@ -1,10 +1,26 @@
 #[cfg(test)]
+use super::constants::MIN_LAYOUT_WIDTH;
+#[cfg(test)]
 use super::constants::TEXT_CHARACTER_WIDTH_FACTOR;
-use super::constants::{LAYOUT_FLOAT_EPSILON, MIN_LAYOUT_WIDTH};
+#[cfg(test)]
 use super::style::{CssStyle, CssWhiteSpace};
+#[cfg(test)]
 use super::text_metrics::text_width;
+#[cfg(test)]
 use unicode_linebreak::linebreaks;
 use unicode_width::UnicodeWidthStr;
+
+#[path = "document_line_break.rs"]
+mod line_break;
+#[path = "document_text_wrap.rs"]
+mod text_wrap;
+
+pub(super) use line_break::css_auto_linebreak_ends;
+#[cfg(test)]
+use line_break::{is_css_letter, suppress_slash_letter_breaks};
+#[cfg(test)]
+use text_wrap::{TEXT_FIT_EPSILON, take_styled_line};
+pub(super) use text_wrap::{wrap_text_with_initial_width, wrap_text_with_style};
 
 #[path = "document_nodes.rs"]
 mod nodes;
@@ -86,91 +102,6 @@ fn push_wrapped_line(line: String, lines: &mut Vec<String>) {
     lines.push(line.trim_end().to_string());
 }
 
-pub(super) fn wrap_text_with_style(text: &str, width: f32, style: &CssStyle) -> Vec<String> {
-    wrap_text_with_initial_width(text, width, width, style)
-}
-
-pub(super) fn wrap_text_with_initial_width(
-    text: &str,
-    initial_width: f32,
-    continuing_width: f32,
-    style: &CssStyle,
-) -> Vec<String> {
-    if text.is_empty() {
-        return vec![String::new()];
-    }
-    if style.white_space == CssWhiteSpace::NoWrap {
-        return text
-            .split('\n')
-            .map(|line| line.trim_end().to_string())
-            .collect();
-    }
-    let mut lines = Vec::new();
-    let mut remaining = text;
-    let mut width = initial_width.max(MIN_LAYOUT_WIDTH);
-    while !remaining.is_empty() {
-        let (line, consumed) = take_styled_line(remaining, width, style);
-        lines.push(line);
-        remaining = &remaining[consumed..];
-        width = continuing_width.max(MIN_LAYOUT_WIDTH);
-    }
-    if text.ends_with('\n') {
-        lines.push(String::new());
-    }
-    lines
-}
-
-fn take_styled_line(text: &str, width: f32, style: &CssStyle) -> (String, usize) {
-    if text.starts_with('\n') {
-        return (String::new(), 1);
-    }
-    let forced_end = text.find('\n').unwrap_or(text.len());
-    let forced_line = &text[..forced_end];
-    let trimmed_line = forced_line.trim_end();
-    if text_width(trimmed_line, style) <= width + LAYOUT_FLOAT_EPSILON {
-        let consumed = forced_end + usize::from(forced_end < text.len());
-        return (trimmed_line.to_string(), consumed);
-    }
-    let break_ends = linebreaks(forced_line)
-        .map(|(segment_end, _)| segment_end)
-        .collect::<Vec<_>>();
-    let mut fitted_end = last_fitting_end(forced_line, &break_ends, width, style).unwrap_or(0);
-    if fitted_end == 0 {
-        fitted_end = fitted_character_end(forced_line, width, style);
-    }
-    (forced_line[..fitted_end].trim_end().to_string(), fitted_end)
-}
-
-fn fitted_character_end(text: &str, width: f32, style: &CssStyle) -> usize {
-    let character_ends = text
-        .char_indices()
-        .map(|(index, character)| index + character.len_utf8())
-        .collect::<Vec<_>>();
-    last_fitting_end(text, &character_ends, width, style)
-        .unwrap_or_else(|| character_ends.first().copied().unwrap_or(0))
-}
-
-fn last_fitting_end(
-    text: &str,
-    candidate_ends: &[usize],
-    width: f32,
-    style: &CssStyle,
-) -> Option<usize> {
-    let mut low = 0;
-    let mut high = candidate_ends.len();
-    while low < high {
-        let middle = low + (high - low) / 2;
-        let end = candidate_ends[middle];
-        let fits = text_width(text[..end].trim_end(), style) <= width + LAYOUT_FLOAT_EPSILON;
-        if fits {
-            low = middle + 1;
-        } else {
-            high = middle;
-        }
-    }
-    low.checked_sub(1).map(|index| candidate_ends[index])
-}
-
 pub(super) fn text_display_columns(text: &str) -> usize {
     UnicodeWidthStr::width(text)
 }
@@ -237,6 +168,67 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
+    fn text_overflow_smaller_than_one_pixel_still_wraps() {
+        let style = CssStyle::browser_default();
+        let width = text_width("資料", &style) - 0.5;
+        assert_eq!(wrap_text_with_style("資料", width, &style), ["資", "料"]);
+    }
+
+    #[test]
+    fn auto_kana_breaks_match_chrome_without_breaking_joiner_controls() {
+        let style = CssStyle::browser_default();
+        let width = text_width("レビュ", &style) + TEXT_FIT_EPSILON;
+        assert_eq!(
+            wrap_text_with_style("レビュー中", width, &style),
+            ["レビュ", "ー中"]
+        );
+        assert_eq!(
+            super::css_auto_linebreak_ends("レ\u{2060}ュ"),
+            ["レ\u{2060}ュ".len()]
+        );
+        assert!(!super::css_auto_linebreak_ends("日本、").contains(&"日本".len()));
+        assert_eq!(
+            super::css_auto_linebreak_ends("日本"),
+            ["日".len(), "日本".len()]
+        );
+    }
+
+    #[test]
+    fn auto_line_break_does_not_split_slash_before_letters() {
+        for text in ["https://alpha.example/path", "23/Jan/2024", "/src/main.rs"] {
+            let ends = super::css_auto_linebreak_ends(text);
+            let forbidden_ends = text
+                .match_indices('/')
+                .map(|(offset, slash)| offset + slash.len())
+                .filter(|&end| text[end..].chars().next().is_some_and(is_css_letter));
+            for end in forbidden_ends {
+                assert!(!ends.contains(&end), "{text:?}: {ends:?}");
+            }
+        }
+        assert!(!super::css_auto_linebreak_ends("https://documents").contains(&"https:/".len()));
+    }
+
+    #[test]
+    fn slash_breaks_before_non_letters_and_forced_lines_remain_available() {
+        assert_eq!(super::suppress_slash_letter_breaks("a/1", vec![2]), [2]);
+        let style = CssStyle::browser_default();
+        let width = text_width("https://alpha.example/path", &style) + TEXT_FIT_EPSILON;
+        assert_eq!(
+            wrap_text_with_initial_width(
+                "https://alpha.example/path",
+                text_width("https://", &style) + TEXT_FIT_EPSILON,
+                width,
+                &style
+            ),
+            ["", "https://alpha.example/path"]
+        );
+        assert_eq!(
+            wrap_text_with_initial_width("https://alpha\nbeta", width, width, &style),
+            ["https://alpha", "beta"]
+        );
+    }
+
+    #[test]
     fn structural_helpers_preserve_rows_text_and_empty_input_defaults() {
         assert_table_rows_preserve_cells();
         assert_input_defaults_are_seeded();
@@ -290,13 +282,21 @@ mod tests {
         style.letter_spacing = 0.42842;
         style.font_weight = 700;
         style.font_feature_settings = Some(r#""palt" 1"#.to_string());
-        let title = "LibreChat fork to MCP Hub to Code Sandbox in three layers architecture";
+        let title =
+            "Fictional archive service records documents and classifications for public browsing";
 
         assert_eq!(
-            wrap_text_with_style(title, 1230.0, &style),
+            wrap_text_with_style(
+                title,
+                text_width(
+                    "Fictional archive service records documents and classifications",
+                    &style
+                ) + 0.5,
+                &style
+            ),
             [
-                "LibreChat fork to MCP Hub to Code Sandbox in three layers",
-                "architecture"
+                "Fictional archive service records documents and classifications",
+                "for public browsing"
             ]
         );
         assert_eq!(wrap_text_with_style("abcdef", 1.0, &style).len(), 6);
@@ -334,6 +334,48 @@ mod tests {
     }
 
     #[test]
+    fn first_unbreakable_token_moves_to_continuing_line_without_character_split() {
+        let style = CssStyle::browser_default();
+        let initial_width = text_width("v", &style) + TEXT_FIT_EPSILON;
+        let continuing_width = text_width("v3.0", &style) + TEXT_FIT_EPSILON;
+
+        assert_eq!(
+            wrap_text_with_initial_width("v3.0", initial_width, continuing_width, &style),
+            ["", "v3.0"]
+        );
+    }
+
+    #[test]
+    fn first_unbreakable_token_defers_even_when_following_words_need_another_line() {
+        let style = CssStyle::browser_default();
+        let initial_width = text_width("v", &style) + TEXT_FIT_EPSILON;
+        let continuing_width = text_width("v3.0 remaining", &style) + TEXT_FIT_EPSILON;
+
+        assert_eq!(
+            wrap_text_with_initial_width(
+                "v3.0 remaining words",
+                initial_width,
+                continuing_width,
+                &style
+            ),
+            ["", "v3.0 remaining", "words"]
+        );
+    }
+
+    #[test]
+    fn leading_nbsp_keeps_the_nonbreaking_token_together_on_continuing_line() {
+        let style = CssStyle::browser_default();
+        let text = "\u{00a0}v3.0";
+        let initial_width = text_width("v", &style) + TEXT_FIT_EPSILON;
+        let continuing_width = text_width(text, &style) + TEXT_FIT_EPSILON;
+
+        assert_eq!(
+            wrap_text_with_initial_width(text, initial_width, continuing_width, &style),
+            ["", text]
+        );
+    }
+
+    #[test]
     fn mixed_japanese_latin_palt_wrap_uses_selected_face_metrics() {
         let mut style = CssStyle::browser_default();
         style.font_family =
@@ -342,8 +384,8 @@ mod tests {
         style.font_weight = 400;
         style.line_height = 33.0;
         style.font_feature_settings = Some(r#""palt" 1"#.to_string());
-        let text = "比較したマネージド Kubernetes 構成に対し、ECS Fargate は ARM64（Graviton）対応を含め運用負荷・コスト効率で有利だった";
-        let first_line = "比較したマネージド Kubernetes";
+        let text = "架空の資料整理サービスでは、Local Index v2 による分類候補を確認し、担当者が登録内容と公開範囲を決定する";
+        let first_line = "架空の資料整理サービスでは、";
         let measured = text_width(first_line, &style);
         let lines = wrap_text_with_style(text, measured + 0.5, &style);
 
@@ -362,17 +404,16 @@ mod tests {
         style.font_weight = 400;
         style.line_height = 33.0;
         style.font_feature_settings = Some(r#""palt" 1"#.to_string());
-        let text = "比較したマネージド Kubernetes 構成に対し、ECS Fargate は ARM64（Graviton）対応を含め運用負荷・コスト効率で有利だった";
+        let text = "架空の資料整理サービスでは、Local Index v2 による分類候補を確認し、担当者が登録内容と公開範囲を決定する";
 
-        assert!((text_width("比較したマネージド Kubernetes", &style) - 287.703_13).abs() < 0.75);
+        assert!((text_width("架空の資料整理サービスでは、", &style) - 261.265_63).abs() < 0.75);
         assert_eq!(
             wrap_text_with_style(text, 288.671_88, &style),
             [
-                "比較したマネージド Kubernetes",
-                "構成に対し、ECS Fargate は",
-                "ARM64（Graviton）対応を含め",
-                "運用負荷・コスト効率で有利だっ",
-                "た",
+                "架空の資料整理サービスでは、",
+                "Local Index v2 による分類候補",
+                "を確認し、担当者が登録内容と公",
+                "開範囲を決定する",
             ]
         );
     }
@@ -389,6 +430,13 @@ mod tests {
         assert_eq!(
             wrap_text_with_style("first\nsecond", 1.0, &style),
             ["first", "second"]
+        );
+        assert_eq!(wrap_text_with_style("\n", 1.0, &style), [""]);
+        assert_eq!(wrap_text_with_style("first\n", 1.0, &style), ["first"]);
+        assert_eq!(wrap_text_with_style("\n\n", 1.0, &style), ["", ""]);
+        assert_eq!(
+            wrap_text_with_style("first\u{00a0} \t", 1.0, &style),
+            ["first\u{00a0}"]
         );
     }
 
@@ -453,7 +501,7 @@ mod tests {
             ],
         )];
         let mut values = HashMap::new();
-        seed_input_values(&inputs, &mut values);
+        assert!(seed_input_values(&inputs, &mut values, &|_| Ok(String::new())).is_ok());
         assert_eq!(values.len(), 2);
         assert!(values.values().all(String::is_empty));
         assert!(is_input_tag("textarea"));

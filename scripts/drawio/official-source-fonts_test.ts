@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { runInNewContext } from "node:vm";
-import type { PageHandle } from "../mermaid/official-renderer-types";
+import type { LocatorHandle, PageHandle } from "../mermaid/official-renderer-types";
 import { OfficialDrawioSourceFonts } from "./official-source-fonts";
 
 const rockSalt = "https://fonts.googleapis.com/css?family=Rock+Salt";
@@ -39,8 +39,12 @@ class FontPage implements PageHandle {
   async setContent(): Promise<void> {}
   async addScriptTag(): Promise<undefined> {}
   async close(): Promise<void> {}
-  locator() {
-    return { screenshot: async (): Promise<undefined> => undefined };
+  locator(): LocatorHandle {
+    return {
+      screenshot: async () => {
+        throw new Error("Source-font unit tests must not capture a screenshot");
+      },
+    };
   }
 }
 

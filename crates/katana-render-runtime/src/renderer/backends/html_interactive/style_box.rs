@@ -1,5 +1,4 @@
-use super::super::constants::BORDER_RADIUS_CORNER_COUNT;
-use super::{CssBoxSizing, CssOverflow, CssStyle};
+use super::{CssBoxSizing, CssOverflowAxis, CssStyle};
 
 impl CssStyle {
     pub(in super::super) fn explicit_width(&self, available: f32) -> Option<f32> {
@@ -54,23 +53,59 @@ impl CssStyle {
     }
 
     pub(in super::super) fn clips_overflow(&self) -> bool {
-        self.overflow == CssOverflow::Clip
+        let (x, y) = self.computed_overflow_axes();
+        [x, y]
+            .into_iter()
+            .any(|axis| axis != CssOverflowAxis::Visible)
+    }
+
+    pub(in super::super) fn specified_overflow_axes(&self) -> (CssOverflowAxis, CssOverflowAxis) {
+        (self.overflow_x, self.overflow_y)
+    }
+
+    pub(in super::super) fn computed_overflow_axes(&self) -> (CssOverflowAxis, CssOverflowAxis) {
+        fn computed_axis(axis: CssOverflowAxis, other: CssOverflowAxis) -> CssOverflowAxis {
+            match (axis, other) {
+                (CssOverflowAxis::Visible, other)
+                    if !matches!(other, CssOverflowAxis::Visible | CssOverflowAxis::Clip) =>
+                {
+                    CssOverflowAxis::Auto
+                }
+                (CssOverflowAxis::Clip, other)
+                    if !matches!(other, CssOverflowAxis::Visible | CssOverflowAxis::Clip) =>
+                {
+                    CssOverflowAxis::Hidden
+                }
+                _ => axis,
+            }
+        }
+
+        let (x, y) = self.specified_overflow_axes();
+        let computed = (computed_axis(x, y), computed_axis(y, x));
+        if self.overflow == super::CssOverflow::Clip
+            && computed == (CssOverflowAxis::Visible, CssOverflowAxis::Visible)
+        {
+            /* WHY: 旧来の内部呼び出しがlegacy fieldだけを直接設定する経路を維持する。 */
+            (CssOverflowAxis::Clip, CssOverflowAxis::Clip)
+        } else {
+            computed
+        }
     }
 
     pub(in super::super) fn border_top_width(&self) -> f32 {
-        self.border_top_width.unwrap_or(self.border_width)
+        self.used_border_width(self.border_top_style, self.border_top_width)
     }
 
     pub(in super::super) fn border_right_width(&self) -> f32 {
-        self.border_right_width.unwrap_or(self.border_width)
+        self.used_border_width(self.border_right_style, self.border_right_width)
     }
 
     pub(in super::super) fn border_bottom_width(&self) -> f32 {
-        self.border_bottom_width.unwrap_or(self.border_width)
+        self.used_border_width(self.border_bottom_style, self.border_bottom_width)
     }
 
     pub(in super::super) fn border_left_width(&self) -> f32 {
-        self.border_left_width.unwrap_or(self.border_width)
+        self.used_border_width(self.border_left_style, self.border_left_width)
     }
 
     pub(in super::super) fn border_top_color(&self) -> Option<&str> {
@@ -94,7 +129,8 @@ impl CssStyle {
     }
 
     pub(in super::super) fn has_border_edge_overrides(&self) -> bool {
-        self.border_top_width.is_some()
+        self.border.is_some()
+            || self.border_top_width.is_some()
             || self.border_right_width.is_some()
             || self.border_bottom_width.is_some()
             || self.border_left_width.is_some()
@@ -102,42 +138,6 @@ impl CssStyle {
             || self.border_right_color.is_some()
             || self.border_bottom_color.is_some()
             || self.border_left_color.is_some()
-    }
-
-    pub(in super::super) fn has_any_border(&self) -> bool {
-        self.border_top_color().is_some()
-            || self.border_right_color().is_some()
-            || self.border_bottom_color().is_some()
-            || self.border_left_color().is_some()
-    }
-
-    pub(in super::super) fn resolved_border_radius(&self, width: f32, height: f32) -> (f32, f32) {
-        let (horizontal, vertical) = match self.border_radius {
-            super::CssLength::Px(value) => (value, value),
-            super::CssLength::Percent(factor) => (width * factor, height * factor),
-        };
-        (
-            horizontal.min(width / 2.0).max(0.0),
-            vertical.min(height / 2.0).max(0.0),
-        )
-    }
-
-    pub(in super::super) fn resolved_inner_border_radii(
-        &self,
-        width: f32,
-        height: f32,
-    ) -> [(f32, f32); BORDER_RADIUS_CORNER_COUNT] {
-        let (horizontal, vertical) = self.resolved_border_radius(width, height);
-        let left = self.border_left_width();
-        let right = self.border_right_width();
-        let top = self.border_top_width();
-        let bottom = self.border_bottom_width();
-        [
-            ((horizontal - left).max(0.0), (vertical - top).max(0.0)),
-            ((horizontal - right).max(0.0), (vertical - top).max(0.0)),
-            ((horizontal - right).max(0.0), (vertical - bottom).max(0.0)),
-            ((horizontal - left).max(0.0), (vertical - bottom).max(0.0)),
-        ]
     }
 
     pub(in super::super) fn assign_outer_width(&mut self, outer_width: f32) {
@@ -173,6 +173,10 @@ impl CssStyle {
         content_width + self.horizontal_non_content()
     }
 
+    pub(in super::super) fn intrinsic_outer_height(&self, content_height: f32) -> f32 {
+        content_height + self.vertical_non_content()
+    }
+
     pub(in super::super) fn flex_basis_outer_width(&self, css_basis: f32) -> f32 {
         self.outer_width(css_basis)
             .max(self.horizontal_non_content())
@@ -197,6 +201,15 @@ impl CssStyle {
 mod tests {
     use super::super::CssLength;
     use super::CssStyle;
+
+    #[test]
+    fn oversized_absolute_radius_scales_both_axes_while_percentage_stays_elliptical() {
+        let mut style = CssStyle::browser_default();
+        style.border_radius = CssLength::Px(999.0);
+        assert_eq!(style.resolved_border_radius(80.0, 26.0), (13.0, 13.0));
+        style.border_radius = CssLength::Percent(0.5);
+        assert_eq!(style.resolved_border_radius(80.0, 26.0), (40.0, 13.0));
+    }
 
     #[test]
     fn explicit_and_automatic_widths_are_clamped_by_min_width() {

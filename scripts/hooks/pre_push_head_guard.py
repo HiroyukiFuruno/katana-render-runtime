@@ -273,7 +273,7 @@ def _assert_checkout_matches_head(repository: Path, reviewed_head: str) -> None:
 
     compare_executable_mode = _supports_worktree_executable_mode(repository)
     tracked_contents: dict[str, bytes] = {}
-    for name, (expected_mode, object_id) in tree.items():
+    for name, (expected_mode, _object_id) in tree.items():
         path = repository / name
         try:
             actual_mode = path.lstat().st_mode

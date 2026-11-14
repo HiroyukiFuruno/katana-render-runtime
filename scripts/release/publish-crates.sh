@@ -2,6 +2,13 @@
 set -euo pipefail
 
 version="$(bash "$(dirname "$0")/verify-version.sh" "${1:-}" | awk -F= '$1 == "version_bare" { print $2 }')"
+repo_root="$(pwd -P)"
+head_sha="$(git --no-replace-objects -C "${repo_root}" rev-parse --verify HEAD)"
+python3 "${repo_root}/scripts/release/verify_completed_release_context.py" \
+  --repo "${repo_root}" \
+  --head "${head_sha}" \
+  --version "${version}" \
+  --acquisition-receipt "${repo_root}/tmp/html-performance-release-evidence/acquisition.json"
 
 if [[ -z "${CARGO_REGISTRY_TOKEN:-}" ]]; then
   echo "CARGO_REGISTRY_TOKEN is required." >&2

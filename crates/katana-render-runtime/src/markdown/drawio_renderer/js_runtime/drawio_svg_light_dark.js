@@ -56,9 +56,7 @@ function katanaDrawioNamedLightDarkStyleColor(element, light, dark) {
   if (key === "white|#000000") {
     return katanaDrawioExplicitNamedWhiteSourceColor(element) ? "#121212" : "#000000";
   }
-  return (
-    KATANA_DRAWIO_NAMED_LIGHT_DARK_COLORS.get(key) ?? ""
-  );
+  return KATANA_DRAWIO_NAMED_LIGHT_DARK_COLORS.get(key) ?? "";
 }
 
 function katanaDrawioExplicitNamedWhiteSourceColor(element) {
@@ -68,9 +66,7 @@ function katanaDrawioExplicitNamedWhiteSourceColor(element) {
     .includes("white");
 }
 
-const KATANA_DRAWIO_NAMED_LIGHT_DARK_COLORS = new Map([
-  ["black|#000000", "#ededed"],
-]);
+const KATANA_DRAWIO_NAMED_LIGHT_DARK_COLORS = new Map([["black|#000000", "#ededed"]]);
 
 function katanaDrawioLightDarkDarkStyleColor(dark) {
   const value = String(dark).trim();

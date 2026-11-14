@@ -1,82 +1,30 @@
-use super::{DiagramCommand, DiagramSourceOps, MermaidMarkdownOps, RenderInputFactory};
+use super::{DiagramCommand, RenderInputFactory};
 use crate::commands::{DiagramAction, ThemeModeArg};
 use katana_render_runtime::DiagramKind;
+use std::path::PathBuf;
+use tempfile::TempDir;
 
-#[test]
-fn extracts_mermaid_fence_from_markdown() {
-    let source = "# Title\n\n~~~mermaid\ngraph TD; A-->B\n~~~\n".to_string();
-    assert_eq!(MermaidMarkdownOps::extract(source), "graph TD; A-->B");
+pub(super) struct InputFixture {
+    _directory: TempDir,
+    pub(super) root: PathBuf,
+    pub(super) input: PathBuf,
+    pub(super) output: PathBuf,
 }
 
-#[test]
-fn extracts_zenuml_fence_and_prepends_zenuml_keyword() {
-    let source = "~~~zenuml\ntitle Flow\nA.method()\n~~~\n".to_string();
-    assert_eq!(
-        MermaidMarkdownOps::extract(source),
-        "zenuml\ntitle Flow\nA.method()"
-    );
-}
-
-#[test]
-fn extracts_zenuml_direct_fence_from_committed_fixture() {
-    let fixture =
-        include_str!("../../../tests/fixtures/mermaid/en/29-zenuml-direct.md").to_string();
-    let extracted = MermaidMarkdownOps::extract(fixture);
-    assert!(
-        extracted.starts_with("zenuml\n"),
-        "extracted source should start with 'zenuml\\n', got: {extracted:?}"
-    );
-}
-
-#[test]
-fn extracts_mermaid_fence_with_info_string_attributes() {
-    let source = "``` mermaid title=\"flow\"\ngraph TD; A-->B\n```\n".to_string();
-    assert_eq!(MermaidMarkdownOps::extract(source), "graph TD; A-->B");
-}
-
-#[test]
-fn extracts_mermaid_fence_when_language_has_attributes() {
-    let source = "```mermaid title=flow\ngraph TD; A-->B\n```\n".to_string();
-    assert_eq!(MermaidMarkdownOps::extract(source), "graph TD; A-->B");
-}
-
-#[test]
-fn keeps_source_when_mermaid_fence_is_not_closed() {
-    let source = "```mermaid\ngraph TD; A-->B".to_string();
-    assert_eq!(MermaidMarkdownOps::extract(source.clone()), source);
-}
-
-#[test]
-fn unknown_fence_language_passes_through_as_source() {
-    let source = "```javascript\nconsole.log('hi')\n```\n".to_string();
-    assert_eq!(MermaidMarkdownOps::extract(source.clone()), source);
-}
-
-#[test]
-fn drawio_source_passes_through() {
-    let source = "<mxGraphModel />".to_string();
-    assert_eq!(
-        DiagramSourceOps::prepare(DiagramKind::Drawio, source.clone()),
-        source
-    );
-}
-
-#[test]
-fn mathjax_source_passes_through() {
-    let source = "x^2".to_string();
-    assert_eq!(
-        DiagramSourceOps::prepare(DiagramKind::MathJax, source.clone()),
-        source
-    );
-}
-
-#[test]
-fn extracts_plantuml_fence_from_markdown() {
-    let source = "```plantuml\n@startuml\nAlice -> Bob: hello\n@enduml\n```\n".to_string();
-    assert_eq!(
-        DiagramSourceOps::prepare(DiagramKind::PlantUml, source),
-        "@startuml\nAlice -> Bob: hello\n@enduml"
-    );
+impl InputFixture {
+    pub(super) fn new(file_name: &str, source: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let directory = TempDir::new()?;
+        let root = directory.path().canonicalize()?;
+        let input = root.join(file_name);
+        let output = root.join("output.svg");
+        std::fs::write(&input, source)?;
+        Ok(Self {
+            _directory: directory,
+            root,
+            input,
+            output,
+        })
+    }
 }
 
 #[test]
@@ -139,18 +87,13 @@ fn non_plantuml_rejects_theme_options() {
 }
 
 #[test]
-fn runtime_option_validation_and_renderer_selection_cover_all_kinds() {
+fn runtime_option_validation_rejects_conflicting_plantuml_options() {
     let conflict = DiagramCommand::validate_runtime_options(
         DiagramKind::PlantUml,
         Some(&"runtime.jar".into()),
         Some(&"cache".into()),
     );
     let accepted = DiagramCommand::validate_runtime_options(DiagramKind::Mermaid, None, None);
-    let _mermaid = DiagramCommand::new(DiagramKind::Mermaid).renderer("mermaid.js".into());
-    let _drawio = DiagramCommand::new(DiagramKind::Drawio).renderer("drawio.js".into());
-    let _plantuml = DiagramCommand::new(DiagramKind::PlantUml).renderer("plantuml.jar".into());
-    let _mathjax = DiagramCommand::new(DiagramKind::MathJax).renderer("mathjax.js".into());
-
     assert!(conflict.is_err());
     assert!(accepted.is_ok());
 }
@@ -158,6 +101,7 @@ fn runtime_option_validation_and_renderer_selection_cover_all_kinds() {
 #[test]
 fn plantuml_render_rejects_runtime_and_cache_conflict_before_reading_input() {
     let result = DiagramCommand::new(DiagramKind::PlantUml).run(DiagramAction::Render {
+        source_options: crate::commands::DiagramSourceOptions::default(),
         input: "input-is-not-read.puml".into(),
         output: None,
         runtime: Some("runtime.jar".into()),
@@ -175,10 +119,10 @@ fn plantuml_render_rejects_runtime_and_cache_conflict_before_reading_input() {
 #[test]
 fn render_rejects_theme_options_for_non_plantuml_after_reading_input()
 -> Result<(), Box<dyn std::error::Error>> {
-    let input = std::env::temp_dir().join(format!("krr-cli-mermaid-{}.mmd", std::process::id()));
-    std::fs::write(&input, "graph TD; A --> B")?;
+    let fixture = InputFixture::new("input.mmd", "graph TD; A --> B")?;
     let result = DiagramCommand::new(DiagramKind::Mermaid).run(DiagramAction::Render {
-        input: input.clone(),
+        source_options: crate::commands::DiagramSourceOptions::default(),
+        input: fixture.input.clone(),
         output: None,
         runtime: Some("runtime.js".into()),
         theme: Some("not-supported".to_string()),
@@ -187,7 +131,6 @@ fn render_rejects_theme_options_for_non_plantuml_after_reading_input()
         cache_dir: None,
     });
 
-    std::fs::remove_file(input)?;
     assert!(
         matches!(result, Err(error) if error.to_string().contains("currently supported only for plantuml"))
     );
@@ -205,13 +148,33 @@ fn vendor_config_is_null_without_plantuml_options() -> Result<(), Box<dyn std::e
 #[test]
 fn plantuml_render_reaches_config_validation_after_input_loading()
 -> Result<(), Box<dyn std::error::Error>> {
-    let input = std::env::temp_dir().join(format!("krr-cli-plantuml-{}.puml", std::process::id()));
-    std::fs::write(&input, "@startuml\nAlice -> Bob\n@enduml")?;
+    let fixture = InputFixture::new("input.puml", "@startuml\nAlice -> Bob\n@enduml")?;
     let result = DiagramCommand::new(DiagramKind::PlantUml).run(DiagramAction::Render {
-        input,
+        source_options: crate::commands::DiagramSourceOptions::default(),
+        input: fixture.input.clone(),
         output: None,
-        runtime: Some("missing-plantuml.jar".into()),
+        runtime: Some(fixture.root.join("missing-plantuml.jar")),
         theme: Some("bad theme".to_string()),
+        theme_from: None,
+        theme_mode: None,
+        cache_dir: None,
+    });
+
+    assert!(result.is_err());
+    Ok(())
+}
+
+fn assert_missing_runtime_render(
+    kind: DiagramKind,
+    fixture: InputFixture,
+    runtime_name: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let result = DiagramCommand::new(kind).run(DiagramAction::Render {
+        source_options: crate::commands::DiagramSourceOptions::default(),
+        input: fixture.input.clone(),
+        output: Some(fixture.output.clone()),
+        runtime: Some(fixture.root.join(runtime_name)),
+        theme: None,
         theme_from: None,
         theme_mode: None,
         cache_dir: None,
@@ -223,44 +186,22 @@ fn plantuml_render_reaches_config_validation_after_input_loading()
 
 #[test]
 fn mermaid_render_reports_missing_runtime() -> Result<(), Box<dyn std::error::Error>> {
-    let input = std::env::temp_dir().join(format!("krr-cli-mmd-{}.md", std::process::id()));
-    let output = std::env::temp_dir().join(format!("krr-cli-mmd-{}.svg", std::process::id()));
-    let runtime = std::env::temp_dir().join("missing-krr-mermaid-runtime.js");
-
-    std::fs::write(&input, "```mermaid\ngraph TD; A-->B\n```\n")?;
-    let result = DiagramCommand::new(DiagramKind::Mermaid).run(DiagramAction::Render {
-        input: input.clone(),
-        output: Some(output),
-        runtime: Some(runtime),
-        theme: None,
-        theme_from: None,
-        theme_mode: None,
-        cache_dir: None,
-    });
-
-    assert!(result.is_err());
-    std::fs::remove_file(input)?;
-    Ok(())
+    let fixture = InputFixture::new("input.md", "```mermaid\ngraph TD; A-->B\n```\n")?;
+    assert_missing_runtime_render(
+        DiagramKind::Mermaid,
+        fixture,
+        "missing-krr-mermaid-runtime.js",
+    )
 }
 
 #[test]
 fn drawio_render_reports_missing_runtime() -> Result<(), Box<dyn std::error::Error>> {
-    let input = std::env::temp_dir().join(format!("krr-cli-drawio-{}.drawio", std::process::id()));
-    let output = std::env::temp_dir().join(format!("krr-cli-drawio-{}.svg", std::process::id()));
-    let runtime = std::env::temp_dir().join("missing-krr-drawio-runtime.js");
-
-    std::fs::write(&input, "<mxGraphModel />")?;
-    let result = DiagramCommand::new(DiagramKind::Drawio).run(DiagramAction::Render {
-        input: input.clone(),
-        output: Some(output),
-        runtime: Some(runtime),
-        theme: None,
-        theme_from: None,
-        theme_mode: None,
-        cache_dir: None,
-    });
-
-    assert!(result.is_err());
-    std::fs::remove_file(input)?;
-    Ok(())
+    let fixture = InputFixture::new("input.drawio", "<mxGraphModel />")?;
+    assert_missing_runtime_render(
+        DiagramKind::Drawio,
+        fixture,
+        "missing-krr-drawio-runtime.js",
+    )
 }
+#[path = "diagram_cmd_attestation_tests.rs"]
+mod attestation_tests;

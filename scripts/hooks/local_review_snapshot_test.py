@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -28,7 +30,9 @@ class RepositoryOriginIdentityTest(unittest.TestCase):
             "html_url": f"https://github.com/{repository}/issues/105",
         }
 
-    def command_for_origin(self, origin: str, api_calls: list[list[str]]):
+    def command_for_origin(
+        self, origin: str, api_calls: list[list[str]]
+    ) -> Callable[[list[str], Path, bytes | None], str]:
         def fake_command(arguments: list[str], root: Path, input_bytes: bytes | None = None) -> str:
             if arguments == ["git", "remote", "get-url", "origin"]:
                 return origin
@@ -65,8 +69,8 @@ class RepositoryOriginIdentityTest(unittest.TestCase):
             raise AssertionError(f"unexpected executable: {arguments}")
 
         with patch.dict("os.environ", {"GH_HOST": "enterprise.example"}), \
-                patch.object(local_review_state.shutil, "which", return_value="/test-bin/rtk"), \
-                patch.object(local_review_state.subprocess, "run", side_effect=fake_run):
+                patch.object(shutil, "which", return_value="/test-bin/rtk"), \
+                patch.object(subprocess, "run", side_effect=fake_run):
             result = issue_context(Path("."), [105])
 
         api_arguments, api_options = invocations[-1]
@@ -75,7 +79,10 @@ class RepositoryOriginIdentityTest(unittest.TestCase):
             ["/test-bin/rtk", "proxy", "gh", "api", "--hostname", "github.com",
              f"repos/{CANONICAL_REPOSITORY}/issues/105"],
         )
-        self.assertEqual(api_options["env"]["GH_HOST"], "enterprise.example")
+        api_environment = api_options["env"]
+        if not isinstance(api_environment, dict):
+            raise AssertionError("subprocess environment must be a mapping")
+        self.assertEqual(api_environment.get("GH_HOST"), "enterprise.example")
         self.assertEqual(result[0]["html_url"], f"https://github.com/{CANONICAL_REPOSITORY}/issues/105")
 
     def test_non_github_and_different_repository_origins_are_rejected(self) -> None:

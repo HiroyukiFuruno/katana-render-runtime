@@ -10,13 +10,7 @@ fn dispatches_click_listeners_and_honors_prevent_default() -> TestResult {
             "<a id=link href=\"/next\">Open</a><script>const link = document.getElementById('link'); link.addEventListener('click', (event) => { event.preventDefault(); link.textContent = 'Handled'; link.style.color = 'green'; });</script>",
         )
         .map_err(|error| format!("HTML runtime session must start: {error}"))?;
-    let link = session
-        .node_for_element_id("link")
-        .ok_or_else(|| "link must have a stable node id".to_string())?;
-
-    let dispatch = session
-        .dispatch(HtmlRuntimeEvent::Click { target: link })
-        .map_err(|error| format!("click must dispatch: {error}"))?;
+    let dispatch = dispatch_click(&mut session)?;
 
     assert!(dispatch.content.contains("Handled"), "{}", dispatch.content);
     assert!(
@@ -71,18 +65,23 @@ fn dispatch_focus_events(session: &mut StaticHtmlRuntimeSession, field: HtmlNode
     Ok(())
 }
 
+fn dispatch_click(
+    session: &mut StaticHtmlRuntimeSession,
+) -> TestResult<super::html_runtime::HtmlRuntimeDispatch> {
+    let link = session
+        .node_for_element_id("link")
+        .ok_or_else(|| "link must have a stable node id".to_string())?;
+    session
+        .dispatch(HtmlRuntimeEvent::Click { target: link })
+        .map_err(|error| format!("click must dispatch: {error}"))
+}
+
 #[test]
 fn dispatches_inline_onclick_and_returns_link_navigation_intent() -> TestResult {
     let mut session = StaticHtmlRuntime
         .start("<a id=link href=\"/next\" onclick=\"this.textContent = 'Clicked'\">Open</a>")
         .map_err(|error| format!("HTML runtime session must start: {error}"))?;
-    let link = session
-        .node_for_element_id("link")
-        .ok_or_else(|| "link must have a stable node id".to_string())?;
-
-    let dispatch = session
-        .dispatch(HtmlRuntimeEvent::Click { target: link })
-        .map_err(|error| format!("click must dispatch: {error}"))?;
+    let dispatch = dispatch_click(&mut session)?;
 
     assert!(dispatch.content.contains("Clicked"), "{}", dispatch.content);
     assert_eq!(

@@ -10,6 +10,9 @@ struct HostOperationGuard {
     was_active: bool,
 }
 
+const NATIVE_DOM_ERROR_NAME: &str = "KrrNativeDomError";
+const NATIVE_DOM_ERROR_PRIVATE_KEY: &str = "KatanA#NativeDomBridgeError";
+
 impl HostOperationGuard {
     fn enter(active: Arc<AtomicBool>) -> Self {
         let was_active = active.swap(true, Ordering::SeqCst);
@@ -55,10 +58,80 @@ fn set_bridge_error(
     return_value: &mut v8::ReturnValue<v8::Value>,
     error: String,
 ) {
-    if let Some(state) = scope.get_slot::<HtmlDomBridgeState>() {
-        let _previous_error = state.error.replace(Some(error));
+    let value = bridge_exception(scope, error).unwrap_or_else(|| v8::undefined(scope).into());
+    return_value.set(value);
+}
+
+fn bridge_exception<'scope>(
+    scope: &mut v8::PinScope<'scope, '_>,
+    error: String,
+) -> Option<v8::Local<'scope, v8::Value>> {
+    let state = scope.get_slot::<HtmlDomBridgeState>()?;
+    let _previous_error = state.error.replace(Some(error.clone()));
+    let message = v8::String::new(scope, &error)?;
+    let exception = v8::Exception::error(scope, message);
+    mark_native_dom_error(scope, exception, message);
+    Some(scope.throw_exception(exception))
+}
+
+fn native_dom_error_key<'scope>(
+    scope: &mut v8::PinScope<'scope, '_>,
+) -> Option<v8::Local<'scope, v8::Private>> {
+    let name = v8::String::new(scope, NATIVE_DOM_ERROR_PRIVATE_KEY)?;
+    Some(v8::Private::for_api(scope, Some(name)))
+}
+
+fn native_dom_error_name<'scope>(
+    scope: &mut v8::PinScope<'scope, '_>,
+) -> Option<(v8::Local<'scope, v8::String>, v8::Local<'scope, v8::String>)> {
+    let property = v8::String::new(scope, "name")?;
+    let name = v8::String::new(scope, NATIVE_DOM_ERROR_NAME)?;
+    Some((property, name))
+}
+
+fn mark_native_dom_error<'scope>(
+    scope: &mut v8::PinScope<'scope, '_>,
+    exception: v8::Local<'scope, v8::Value>,
+    message: v8::Local<'scope, v8::String>,
+) {
+    /* WHY: 通常はV8が生成したError。プリミティブの変換で別の例外を発生させない。 */
+    let (Some((property, name)), Ok(object)) = (
+        native_dom_error_name(scope),
+        v8::Local::<v8::Object>::try_from(exception),
+    ) else {
+        return;
+    };
+    let _named = object.define_own_property(
+        scope,
+        property.into(),
+        name.into(),
+        v8::PropertyAttribute::NONE,
+    );
+    if let Some(key) = native_dom_error_key(scope) {
+        /* WHY: 印の設定に失敗しても例外はthrowし、非公開の印を確認できない例外はJS例外に留める。 */
+        let _marked = object.set_private(scope, key, message.into());
     }
-    return_value.set(v8::undefined(scope).into());
+}
+
+pub(super) fn uncaught_dom_error(
+    scope: &mut super::script::HtmlTryCatchScope<'_, '_, '_, '_>,
+) -> Option<String> {
+    /* WHY: プリミティブ例外を変換して、元の例外を別のTypeErrorで上書きしない。 */
+    let exception = v8::Local::<v8::Object>::try_from(scope.exception()?).ok()?;
+    let key = native_dom_error_key(scope)?;
+    /* WHY: 非公開の印を先に調べ、通常例外のname getterを実行しない。 */
+    let message = v8::Local::<v8::String>::try_from(exception.get_private(scope, key)?).ok()?;
+    let (property, expected) = native_dom_error_name(scope)?;
+    let name = exception.get(scope, property.into())?;
+    if !name.strict_equals(expected.into()) {
+        return None;
+    }
+    /* WHY: 元の文言は後続エラーやJSのmessage変更と独立して保持する。 */
+    let message = message.to_rust_string_lossy(scope);
+    scope
+        .get_slot::<HtmlDomBridgeState>()
+        .and_then(|state| state.error.borrow_mut().take())
+        .map(|_| message)
 }
 
 fn dom_value<'scope>(
@@ -94,137 +167,5 @@ fn node_id_array<'scope>(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
-    use crate::renderer::backends::html_document::HtmlDocument;
-    use crate::renderer::backends::html_runtime::script::{evaluate_value, install_dom_bridge};
-
-    #[test]
-    fn missing_dom_state_error_preserves_contract_message() {
-        assert_eq!(MISSING_DOM_STATE_ERROR, "HTML DOM state is unavailable");
-    }
-
-    #[test]
-    fn dom_callback_stores_unsupported_operation_error() -> Result<(), String> {
-        DiagramV8Runtime::ensure_initialized();
-        let state = HtmlDomBridgeState::new(HtmlDocument::parse("<button id=action>Run</button>"));
-        let mut isolate = v8::Isolate::new(Default::default());
-        isolate.set_slot(state);
-
-        v8::scope!(let handle_scope, &mut isolate);
-        let context = v8::Context::new(handle_scope, Default::default());
-        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
-        v8::tc_scope!(let scope, &mut **context_scope);
-
-        let callback = v8::Function::new(scope, dom_callback)
-            .ok_or("callback allocation failed".to_string())?;
-        let operation: v8::Local<v8::Value> = v8::String::new(scope, "unsupported")
-            .ok_or("operation allocation failed".to_string())?
-            .into();
-        let receiver = v8::undefined(scope).into();
-        let returned = callback.call(scope, receiver, &[operation]);
-        assert!(returned.is_some_and(|value| value.is_undefined()));
-
-        let error = scope
-            .get_slot::<HtmlDomBridgeState>()
-            .and_then(|state| state.error.borrow().clone());
-        assert_eq!(
-            error,
-            Some("unsupported DOM operation: unsupported".to_string())
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn dom_callback_without_state_returns_undefined() -> Result<(), String> {
-        DiagramV8Runtime::ensure_initialized();
-
-        let mut isolate = v8::Isolate::new(Default::default());
-        v8::scope!(let handle_scope, &mut isolate);
-        let context = v8::Context::new(handle_scope, Default::default());
-        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
-        v8::tc_scope!(let scope, &mut **context_scope);
-
-        let callback = v8::Function::new(scope, dom_callback)
-            .ok_or("callback allocation failed".to_string())?;
-        let operation: v8::Local<v8::Value> = v8::String::new(scope, "unsupported")
-            .ok_or("operation allocation failed".to_string())?
-            .into();
-        let receiver = v8::undefined(scope).into();
-        let returned = callback.call(scope, receiver, &[operation]);
-        assert!(returned.is_some_and(|value| value.is_undefined()));
-        Ok(())
-    }
-
-    #[test]
-    fn callback_operation_and_argument_coercion_stay_in_javascript_budget() -> Result<(), String> {
-        for expression in [
-            "__krr_dom({toString(){active = __krr_host_active(); return 'unsupported';}})",
-            "__krr_dom('unsupported', {toString(){active = __krr_host_active(); return 'arg';}})",
-        ] {
-            assert_callback_coercion(expression, false)?;
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn callback_coercion_cannot_use_host_timeout_allowance() -> Result<(), String> {
-        for expression in [
-            "__krr_dom({toString(){const end = Date.now() + 750; while(Date.now() < end) {} return 'unsupported';}})",
-            "__krr_dom('unsupported', {toString(){const end = Date.now() + 750; while(Date.now() < end) {} return 'arg';}})",
-        ] {
-            assert_callback_coercion(expression, true)?;
-        }
-        Ok(())
-    }
-
-    fn assert_callback_coercion(expression: &str, expect_timeout: bool) -> Result<(), String> {
-        DiagramV8Runtime::ensure_initialized();
-        let mut isolate = v8::Isolate::new(Default::default());
-        isolate.set_slot(HtmlDomBridgeState::new(HtmlDocument::parse("<p>Test</p>")));
-        v8::scope!(let handle_scope, &mut isolate);
-        let context = v8::Context::new(handle_scope, Default::default());
-        let context_scope = &mut v8::ContextScope::new(handle_scope, context);
-        v8::tc_scope!(let scope, &mut **context_scope);
-        assert!(install_dom_bridge(scope, "about:blank").is_ok());
-        install_host_activity_probe(scope)?;
-        let source = format!("let active = true; {expression}; active");
-        let result = evaluate_value(scope, "bridge-coercion-budget", &source);
-        let timed_out = matches!(
-            result,
-            Err(super::super::types::HtmlRuntimeError::ExecutionTimeout)
-        );
-        assert_eq!(timed_out, expect_timeout, "{result:?}");
-        if !expect_timeout {
-            assert!(result.is_ok_and(|value| value.is_false()));
-        }
-        assert!(
-            scope
-                .get_slot::<HtmlDomBridgeState>()
-                .is_some_and(|state| !state.host_io_active().load(Ordering::SeqCst))
-        );
-        Ok(())
-    }
-
-    fn install_host_activity_probe(scope: &mut v8::PinScope) -> Result<(), String> {
-        let name = v8::String::new(scope, "__krr_host_active").ok_or("name allocation failed")?;
-        let callback =
-            v8::Function::new(scope, host_active_for_test).ok_or("function allocation failed")?;
-        let context = scope.get_current_context();
-        let global = context.global(scope);
-        assert_eq!(global.set(scope, name.into(), callback.into()), Some(true));
-        Ok(())
-    }
-
-    fn host_active_for_test(
-        scope: &mut v8::PinScope,
-        _args: v8::FunctionCallbackArguments,
-        mut return_value: v8::ReturnValue<v8::Value>,
-    ) {
-        let active = scope
-            .get_slot::<HtmlDomBridgeState>()
-            .is_some_and(|state| state.host_io_active().load(Ordering::SeqCst));
-        return_value.set(v8::Boolean::new(scope, active).into());
-    }
-}
+#[path = "bridge_tests.rs"]
+mod tests;

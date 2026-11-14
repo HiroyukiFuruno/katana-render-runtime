@@ -1,4 +1,4 @@
-use super::super::style::CssBoxSizing;
+use super::super::style::{CssBorderStyle, CssBoxSizing};
 use super::{CssStyle, input_geometry, is_checkbox};
 
 #[test]
@@ -8,6 +8,7 @@ fn auto_height_input_includes_line_height_padding_and_border() {
     style.padding_top = 16.0;
     style.padding_bottom = 16.0;
     style.border_width = 1.0;
+    style.border_style = CssBorderStyle::Solid;
 
     let geometry = input_geometry(0.0, 0.0, 300.0, &style);
 

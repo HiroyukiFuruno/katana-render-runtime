@@ -1,17 +1,15 @@
-use crate::commands::{DiagramAction, ThemeModeArg};
-use crate::diagram_source::DiagramSourceOps;
-#[cfg(test)]
-pub(crate) use crate::diagram_source::MermaidMarkdownOps;
+use crate::commands::{DiagramAction, DiagramInputFormat};
 use crate::file_ops::FileOps;
 use crate::reference_cmd::ReferenceCommand;
-use katana_render_runtime::{
-    DiagramKind, DrawioRenderer, MathJaxRenderer, MermaidRenderer, PlantUmlRenderer, RenderInput,
-    RenderOutput, Renderer, RuntimePathResolver,
-};
-use render_input::RenderInputFactory;
+use katana_render_runtime::{DiagramKind, RenderOutput};
+use render_input::{DiagramRenderRequest, RenderInputFactory};
 use std::path::PathBuf;
 
+#[path = "render_attestation.rs"]
+mod render_attestation;
 mod render_input;
+#[path = "diagram_cmd_render_setup.rs"]
+mod render_setup;
 
 pub(crate) struct DiagramCommand {
     kind: DiagramKind,
@@ -32,6 +30,7 @@ impl DiagramCommand {
                 theme_from,
                 theme_mode,
                 cache_dir,
+                source_options,
             } => self.render(DiagramRenderRequest {
                 input_path: input,
                 output_path: output,
@@ -40,10 +39,9 @@ impl DiagramCommand {
                 theme_from,
                 theme_mode,
                 cache_dir,
+                source_options,
             }),
-            DiagramAction::ReferenceUpdate { fixtures } => {
-                ReferenceCommand::update(self.kind, fixtures)
-            }
+            DiagramAction::ReferenceUpdate { fixtures } => self.update_reference(fixtures),
             DiagramAction::Compare {
                 fixtures,
                 min_score,
@@ -52,72 +50,30 @@ impl DiagramCommand {
         }
     }
 
+    fn update_reference(self, fixtures: PathBuf) -> anyhow::Result<()> {
+        ReferenceCommand::update(self.kind, fixtures)
+    }
+
     fn render(self, request: DiagramRenderRequest) -> anyhow::Result<()> {
-        let runtime_path = self.resolve_runtime_path(&request)?;
-        let source = Self::read_source(&request.input_path)?;
+        self.validate_input_options(&request)?;
+        let (runtime_path, renderer) = self.prepare_runtime(&request)?;
+        let source = FileOps::read_to_string(&request.input_path)?;
+        let mut attestation = Self::attestation(&request, &runtime_path, &source)?;
         let vendor_config = Self::vendor_config(self.kind, &request)?;
-        let source = DiagramSourceOps::prepare(self.kind, source);
+        let source = Self::prepare_source(self.kind, source, request.source_options.input_format);
         let input = RenderInputFactory::create(self.kind, source, vendor_config);
-        let output = self.render_with_runtime(runtime_path, &input)?;
-        Self::write_render_output(request.output_path, &output)
-    }
-
-    fn resolve_runtime_path(&self, request: &DiagramRenderRequest) -> anyhow::Result<PathBuf> {
-        Self::validate_runtime_options(
-            self.kind,
-            request.runtime.as_ref(),
-            request.cache_dir.as_ref(),
-        )?;
-        let runtime_path = RuntimePathResolver::resolve_with_plantuml_cache_dir(
-            self.kind,
-            request.runtime.clone(),
-            request.cache_dir.clone(),
-        )?;
-        Ok(runtime_path)
-    }
-
-    fn read_source(input_path: &PathBuf) -> anyhow::Result<String> {
-        FileOps::read_to_string(input_path)
-    }
-
-    fn vendor_config(
-        kind: DiagramKind,
-        request: &DiagramRenderRequest,
-    ) -> anyhow::Result<serde_json::Value> {
-        RenderInputFactory::vendor_config(
-            kind,
-            request.theme.clone(),
-            request.theme_from.clone(),
-            request.theme_mode,
-            request.cache_dir.clone(),
-        )
-    }
-
-    fn render_with_runtime(
-        &self,
-        runtime_path: PathBuf,
-        input: &RenderInput,
-    ) -> anyhow::Result<RenderOutput> {
-        Ok(self.renderer(runtime_path).render(input)?)
-    }
-
-    fn validate_runtime_options(
-        kind: DiagramKind,
-        runtime: Option<&PathBuf>,
-        cache_dir: Option<&PathBuf>,
-    ) -> anyhow::Result<()> {
-        if kind == DiagramKind::PlantUml && runtime.is_some() && cache_dir.is_some() {
-            anyhow::bail!("--runtime and --cache-dir cannot be used together for plantuml");
+        if let Some(attestation) = &attestation {
+            attestation.capture_input(&input)?;
         }
-        Ok(())
-    }
-
-    fn renderer(&self, runtime_path: PathBuf) -> Box<dyn Renderer> {
-        match self.kind {
-            DiagramKind::Mermaid => Box::new(MermaidRenderer::with_runtime_path(runtime_path)),
-            DiagramKind::Drawio => Box::new(DrawioRenderer::with_runtime_path(runtime_path)),
-            DiagramKind::PlantUml => Box::new(PlantUmlRenderer::with_runtime_path(runtime_path)),
-            DiagramKind::MathJax => Box::new(MathJaxRenderer::with_runtime_path(runtime_path)),
+        let output = match &mut attestation {
+            Some(attestation) => attestation.capture_render(&input.source, || {
+                renderer.render(&input).map_err(anyhow::Error::from)
+            })?,
+            None => renderer.render(&input).map_err(anyhow::Error::from)?,
+        };
+        match attestation {
+            Some(attestation) => attestation.complete(&input, &output),
+            None => Self::write_render_output(request.output_path, &output),
         }
     }
 
@@ -136,16 +92,6 @@ impl DiagramCommand {
             }
         }
     }
-}
-
-struct DiagramRenderRequest {
-    input_path: PathBuf,
-    output_path: Option<PathBuf>,
-    runtime: Option<PathBuf>,
-    theme: Option<String>,
-    theme_from: Option<String>,
-    theme_mode: Option<ThemeModeArg>,
-    cache_dir: Option<PathBuf>,
 }
 
 #[cfg(test)]

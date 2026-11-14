@@ -37,7 +37,7 @@ function katanaLayoutTextChildren(node) {
 }
 
 function katanaIsHiddenLayoutNode(node) {
-  return [!node, KATANA_HIDDEN_LAYOUT_TAGS.has(node?.localName)].includes(true);
+  return !node || KATANA_HIDDEN_LAYOUT_TAGS.has(node.localName) || katanaIsDisplayNone(node);
 }
 
 function katanaNodeValue(value) {
@@ -83,14 +83,49 @@ function katanaUnionBox(boxes) {
 }
 
 function katanaVisibleChildBoxes(node) {
-  return (node.children ?? [])
-    .filter((child) => !KATANA_HIDDEN_LAYOUT_TAGS.has(child.localName))
-    .map((child) => {
-      const box = child.getBBox();
-      const offset = katanaNodeTranslate(child);
-      return katanaBox(box.x + offset[0], box.y + offset[1], box.width, box.height);
-    })
-    .filter(katanaHasArea);
+  const children = node.children ?? [];
+  return children.flatMap((child) => {
+    if (KATANA_HIDDEN_LAYOUT_TAGS.has(child.localName) || katanaIsDisplayNone(child)) {
+      return [];
+    }
+    const box = child.getBBox();
+    if (!katanaHasArea(box) && !katanaHasDegenerateGeometry(child)) {
+      return [];
+    }
+    return [katanaTransformChildBox(child, box)];
+  });
+}
+
+function katanaIsDisplayNone(node) {
+  const inlineDisplay = node?.style?.getPropertyValue?.("display") ?? node?.style?.display ?? "";
+  const display = String(inlineDisplay || node?.getAttribute?.("display") || "")
+    .trim()
+    .toLowerCase();
+  return display === "none";
+}
+
+function katanaHasDegenerateGeometry(node, positionedTextGroupDepth = 0) {
+  if (!node || KATANA_HIDDEN_LAYOUT_TAGS.has(node.localName) || katanaIsDisplayNone(node)) {
+    return false;
+  }
+  if (["text", "tspan"].includes(node.localName)) {
+    // Chromeの空文字点は自身または1段のg経由まで親bboxへ伝播する。
+    return (
+      katanaLayoutTextContent(node).trim().length > 0 ||
+      (positionedTextGroupDepth <= 1 && katanaHasPositionedSvgText(node))
+    );
+  }
+  if (node.localName === "line") {
+    return true;
+  }
+  if (node.localName === "path" && String(node.getAttribute?.("d") ?? "").trim()) {
+    return true;
+  }
+  const nextPositionedTextGroupDepth =
+    node.localName === "g" ? positionedTextGroupDepth + 1 : positionedTextGroupDepth;
+  return (node.children ?? []).some((child) =>
+    katanaHasDegenerateGeometry(child, nextPositionedTextGroupDepth),
+  );
 }
 
 function katanaMeasuredBox(node) {
@@ -109,6 +144,9 @@ function katanaVisibleMeasuredBox(node) {
 }
 
 function katanaExplicitMeasuredBox(node) {
+  if (katanaIsRoundSvgShape(node)) {
+    return null;
+  }
   const attrs = katanaBoxAttributes(node);
   if ([attrs.width > 0, attrs.height > 0].includes(true)) {
     return katanaBox(attrs.x, attrs.y, attrs.width, attrs.height);
@@ -199,7 +237,24 @@ function katanaRoundShapeBox(node) {
   const cy = katanaNumberAttrOrDefault(node, "cy", 0);
   const rx = katanaRoundRadius(node, "rx");
   const ry = katanaRoundRadius(node, "ry");
-  return katanaBox(cx - rx, cy - ry, rx * 2, ry * 2);
+  // ブラウザのSVGLength/RectFは演算前からfloat32なので、最後だけの丸めでは辺がずれる。
+  const fx = Math.fround(cx),
+    fy = Math.fround(cy),
+    frx = Math.fround(rx),
+    fry = Math.fround(ry);
+  if (
+    node.namespaceURI !== "http://www.w3.org/2000/svg" ||
+    rx < 0 ||
+    ry < 0 ||
+    ![fx, fy, frx, fry].every(Number.isFinite)
+  )
+    return katanaBox(cx - rx, cy - ry, rx * 2, ry * 2);
+  return katanaBox(
+    Math.fround(fx - frx),
+    Math.fround(fy - fry),
+    Math.fround(frx * 2),
+    Math.fround(fry * 2),
+  );
 }
 
 function katanaRoundRadius(node, name) {
@@ -210,12 +265,16 @@ function katanaIsRoundSvgShape(node) {
   return ["circle", "ellipse"].includes(node.localName);
 }
 
-function katanaNodeTranslate(node) {
-  const match = katanaTransformValue(node).match(/translate\(([-\d.]+)[,\s]+([-\d.]+)\)/);
-  if (match) {
-    return [Number(match[1]), Number(match[2])];
+function katanaTransformChildBox(node, box) {
+  const transform = katanaTransformValue(node).trim();
+  if (!transform) return box;
+  const translation = katanaSimpleSvgTranslation(transform);
+  if (translation) {
+    return katanaBox(box.x + translation[0], box.y + translation[1], box.width, box.height);
   }
-  return [0, 0];
+  const transformed = katanaTransformSvgBox(transform, box.x, box.y, box.width, box.height);
+  if (!transformed) throw new Error("SVG child transform returned no bounds");
+  return katanaBox(transformed.x, transformed.y, transformed.width, transformed.height);
 }
 
 function katanaTransformValue(node) {

@@ -1,29 +1,17 @@
-use crate::markdown::runtime_asset_archive::RuntimeAssetSource;
+#[cfg(test)]
+pub(super) use crate::markdown::runtime_asset_archive::ZENUML_RUNTIME_ASSETS_UNCOMPRESSED_LENGTH;
+use crate::markdown::runtime_asset_archive::{self, RuntimeAssetSource};
 use std::{
     path::{Path, PathBuf},
-    sync::{
-        OnceLock,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 static RUNTIME_ASSET_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
-static MERMAID_RUNTIME_ASSET_BYTES: OnceLock<Result<Vec<u8>, String>> = OnceLock::new();
-static DRAWIO_RUNTIME_ASSET_BYTES: OnceLock<Result<Vec<u8>, String>> = OnceLock::new();
-#[cfg(test)]
-static ZENUML_RUNTIME_ASSET_BYTES: OnceLock<Result<Vec<u8>, String>> = OnceLock::new();
 
-#[cfg(test)]
-const ZENUML_RUNTIME_ASSET_ARCHIVE: &[u8] =
-    include_bytes!("generated/zenuml-runtime-assets.bin.br");
-#[cfg(test)]
-include!("generated/zenuml-runtime-assets-index.rs");
-
-pub const MERMAID_JS_VERSION: &str = "12.1.0";
+pub const MERMAID_JS_VERSION: &str = "12.3.0-krr.pr6823.1";
 pub const MERMAID_JS_CHECKSUM: &str =
-    "6484afc32872a3aa16cac9a76ba1816a1ed4cc870a6593cc2e17757750f518b2";
-pub const MERMAID_DOWNLOAD_URL: &str =
-    "https://cdn.jsdelivr.net/npm/mermaid@12.1.0/dist/mermaid.min.js";
+    "2c1ab92dfbd9149c5eec9c1f9c18999063b1721ad7868163ea3f4fe4e9231eaf";
+pub const MERMAID_DOWNLOAD_URL: &str = "https://raw.githubusercontent.com/HiroyukiFuruno/katana-render-runtime/v0.4.24/crates/katana-render-runtime/vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js";
 
 pub const MERMAID_ZENUML_JS_VERSION: &str = "1.0.1";
 pub const MERMAID_ZENUML_JS_CHECKSUM: &str =
@@ -31,16 +19,16 @@ pub const MERMAID_ZENUML_JS_CHECKSUM: &str =
 pub const MERMAID_ZENUML_DOWNLOAD_URL: &str =
     "https://cdn.jsdelivr.net/npm/@mermaid-js/mermaid-zenuml@1.0.1/dist/mermaid-zenuml.min.js";
 
-pub const ZENUML_CORE_JS_VERSION: &str = "4.4.1";
+pub const ZENUML_CORE_JS_VERSION: &str = "4.13.2";
 pub const ZENUML_CORE_JS_CHECKSUM: &str =
-    "9b0465fca4a804ab19965296f6567fd8cd9f797eee0af6c2daf7472b0191cd53";
+    "4397c0f857b241ca210e8df66e7cf15d2bb2c0628b5dc39ca1f4d59473d5dfc5";
 pub const ZENUML_CORE_DOWNLOAD_URL: &str =
-    "https://cdn.jsdelivr.net/npm/@zenuml/core@4.4.1/dist/zenuml.js";
+    "https://cdn.jsdelivr.net/npm/@zenuml/core@4.13.2/dist/zenuml.js";
 
-pub const DRAWIO_JS_VERSION: &str = "32.0.2";
+pub const DRAWIO_JS_VERSION: &str = "32.6.10";
 pub const DRAWIO_JS_CHECKSUM: &str =
-    "21c390edd6aff2aa527596c0cddb90a3059dc40f39104c0df85790252608dcca";
-pub const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases/tag/v32.0.2";
+    "c5ca831069b3a2cb4129f8581f807cb1c7d6a6b0c541b89976cc91c32df5a067";
+pub const DRAWIO_DOWNLOAD_URL: &str = "https://github.com/jgraph/drawio/releases/tag/v32.6.10";
 
 pub const MATHJAX_JS_VERSION: &str = "4.1.3";
 pub const MATHJAX_JS_CHECKSUM: &str =
@@ -55,14 +43,25 @@ pub(crate) struct RuntimeAsset {
 }
 
 impl RuntimeAsset {
+    pub(super) fn exists_with_matching_bytes(
+        path: &Path,
+        matches: impl FnOnce(&[u8]) -> Result<bool, String>,
+    ) -> Result<bool, String> {
+        match std::fs::read(path) {
+            Ok(existing) => matches(&existing),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
     pub(crate) fn mermaid() -> Self {
         Self {
             kind: "mermaid",
             version: MERMAID_JS_VERSION,
             filename: "mermaid.min.js",
             source: RuntimeAssetSource::Brotli {
-                bytes: include_bytes!("../../vendor/mermaid/12.1.0/mermaid.min.js.br"),
-                cache: &MERMAID_RUNTIME_ASSET_BYTES,
+                bytes: include_bytes!("../../vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js.br"),
+                cache: &runtime_asset_archive::MERMAID_RUNTIME_ASSET_BYTES,
             },
         }
     }
@@ -74,7 +73,7 @@ impl RuntimeAsset {
             filename: "drawio.min.js",
             source: RuntimeAssetSource::Brotli {
                 bytes: katana_render_runtime_assets::DRAWIO_RUNTIME_BROTLI,
-                cache: &DRAWIO_RUNTIME_ASSET_BYTES,
+                cache: &runtime_asset_archive::DRAWIO_RUNTIME_ASSET_BYTES,
             },
         }
     }
@@ -86,10 +85,10 @@ impl RuntimeAsset {
             version: MERMAID_ZENUML_JS_VERSION,
             filename: "mermaid-zenuml.min.js",
             source: RuntimeAssetSource::BrotliRange {
-                bytes: ZENUML_RUNTIME_ASSET_ARCHIVE,
-                cache: &ZENUML_RUNTIME_ASSET_BYTES,
-                start: MERMAID_ZENUML_ASSET_OFFSET,
-                length: MERMAID_ZENUML_ASSET_LENGTH,
+                bytes: runtime_asset_archive::ZENUML_RUNTIME_ASSET_ARCHIVE,
+                cache: &runtime_asset_archive::ZENUML_RUNTIME_ASSET_BYTES,
+                start: runtime_asset_archive::MERMAID_ZENUML_ASSET_OFFSET,
+                length: runtime_asset_archive::MERMAID_ZENUML_ASSET_LENGTH,
                 archive_length: ZENUML_RUNTIME_ASSETS_UNCOMPRESSED_LENGTH,
             },
         }
@@ -102,10 +101,10 @@ impl RuntimeAsset {
             version: ZENUML_CORE_JS_VERSION,
             filename: "zenuml.js",
             source: RuntimeAssetSource::BrotliRange {
-                bytes: ZENUML_RUNTIME_ASSET_ARCHIVE,
-                cache: &ZENUML_RUNTIME_ASSET_BYTES,
-                start: ZENUML_CORE_ASSET_OFFSET,
-                length: ZENUML_CORE_ASSET_LENGTH,
+                bytes: runtime_asset_archive::ZENUML_RUNTIME_ASSET_ARCHIVE,
+                cache: &runtime_asset_archive::ZENUML_RUNTIME_ASSET_BYTES,
+                start: runtime_asset_archive::ZENUML_CORE_ASSET_OFFSET,
+                length: runtime_asset_archive::ZENUML_CORE_ASSET_LENGTH,
                 archive_length: ZENUML_RUNTIME_ASSETS_UNCOMPRESSED_LENGTH,
             },
         }
@@ -175,11 +174,7 @@ impl RuntimeAsset {
     }
 
     fn exists_with_same_bytes(&self, path: &Path) -> Result<bool, String> {
-        match std::fs::read(path) {
-            Ok(existing) => Ok(existing == self.bytes()?),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(error) => Err(runtime_asset_error(error)),
-        }
+        Self::exists_with_matching_bytes(path, |existing| Ok(existing == self.bytes()?))
     }
 }
 

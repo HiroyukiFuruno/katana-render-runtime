@@ -1,5 +1,5 @@
+use super::super::super::font_file_fixture::{self as shared_font_file_fixture, FontFileFixture};
 use super::*;
-use resvg::usvg::fontdb::{Database, Source};
 use std::{
     path::PathBuf,
     sync::atomic::{AtomicUsize, Ordering},
@@ -9,35 +9,8 @@ const BUNDLED_SANS_SERIF_FONT: &[u8] = include_bytes!("../../assets/fonts/NotoSa
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 static TEMP_FIXTURE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-struct FontFileFixture {
-    database: Database,
-    face_id: resvg::usvg::fontdb::ID,
-    path: PathBuf,
-}
-
-impl FontFileFixture {
-    fn create() -> TestResult<Self> {
-        let path = temp_path("font", "ttf");
-        std::fs::write(&path, BUNDLED_SANS_SERIF_FONT)?;
-        let mut database = Database::new();
-        database.load_font_source(Source::File(path.clone()));
-        let face_id = database
-            .faces()
-            .next()
-            .ok_or("fixture font did not load")?
-            .id;
-        Ok(Self {
-            database,
-            face_id,
-            path,
-        })
-    }
-}
-
-impl Drop for FontFileFixture {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-    }
+fn font_file_fixture() -> TestResult<FontFileFixture> {
+    shared_font_file_fixture::create(temp_path("font", "ttf"), BUNDLED_SANS_SERIF_FONT)
 }
 
 struct TempDirectory(PathBuf);
@@ -71,7 +44,7 @@ fn fixture_stamp(fixture: &FontFileFixture) -> Option<FileStamp> {
 
 #[test]
 fn changed_durable_file_invalidates_batch_and_retry_uses_new_stamp() -> TestResult<()> {
-    let fixture = FontFileFixture::create()?;
+    let fixture = font_file_fixture()?;
     let fixture_is_durable = super::super::file_stamp_durable_reusable(&fixture.path);
     let mut calls = 0;
     let mut write_result = Ok(());
@@ -91,7 +64,7 @@ fn changed_durable_file_invalidates_batch_and_retry_uses_new_stamp() -> TestResu
 
 #[test]
 fn deleted_file_retries_durable_batch_and_keeps_weak_batch_uncached() -> TestResult<()> {
-    let fixture = FontFileFixture::create()?;
+    let fixture = font_file_fixture()?;
     let fixture_is_durable = super::super::file_stamp_durable_reusable(&fixture.path);
     let observation = delete_file_during_batch(&fixture)?;
     assert_eq!(fixture_stamp(&fixture), None);
@@ -148,7 +121,7 @@ fn assert_deleted_file_result(observation: DeletedFileObservation, fixture_is_du
 
 #[test]
 fn file_change_between_scopes_uses_the_new_stamp() -> TestResult<()> {
-    let fixture = FontFileFixture::create()?;
+    let fixture = font_file_fixture()?;
     let before = with_validated_stamp_batch(|| fixture_stamp(&fixture));
     std::fs::write(&fixture.path, b"new generation bytes")?;
     let after = with_validated_stamp_batch(|| fixture_stamp(&fixture));
@@ -159,8 +132,8 @@ fn file_change_between_scopes_uses_the_new_stamp() -> TestResult<()> {
 
 #[test]
 fn nested_scope_skips_memo_and_preserves_outer_snapshot() -> TestResult<()> {
-    let outer = FontFileFixture::create()?;
-    let inner = FontFileFixture::create()?;
+    let outer = font_file_fixture()?;
+    let inner = font_file_fixture()?;
     let outer_is_durable = super::super::file_stamp_durable_reusable(&outer.path);
     let mut calls = 0;
     let result = with_validated_stamp_batch(|| {
@@ -170,6 +143,20 @@ fn nested_scope_skips_memo_and_preserves_outer_snapshot() -> TestResult<()> {
     assert_eq!(calls, 1);
     assert_nested_scope_expectations(&result, outer_is_durable);
     assert!(cached_stamp(&inner.path).is_none());
+    Ok(())
+}
+
+#[test]
+fn render_scope_reuses_stamps_and_releases_them_after_close() -> TestResult<()> {
+    let fixture = font_file_fixture()?;
+    let observed = with_render_scoped_stamp_batch(|| {
+        let first = fixture_stamp(&fixture);
+        let reused = with_reusable_stamp_batch(|| fixture_stamp(&fixture));
+        (first, reused, cached_stamp(&fixture.path).is_some())
+    });
+    assert_eq!(observed.0, observed.1);
+    assert!(observed.2);
+    assert!(cached_stamp(&fixture.path).is_none());
     Ok(())
 }
 
@@ -205,7 +192,7 @@ fn assert_nested_scope_expectations(result: &NestedScopeSnapshot, outer_is_durab
 
 #[test]
 fn panic_unwind_restores_batch_tls_for_nested_and_top_level_scopes() -> TestResult<()> {
-    let fixture = FontFileFixture::create()?;
+    let fixture = font_file_fixture()?;
     let fixture_is_durable = super::super::file_stamp_durable_reusable(&fixture.path);
     let mut calls = 0;
     let completed = with_validated_stamp_batch(|| {
@@ -235,7 +222,7 @@ fn panic_unwind_restores_batch_tls_for_nested_and_top_level_scopes() -> TestResu
 
 #[test]
 fn unavailable_file_within_scope_retries_without_memo() -> TestResult<()> {
-    let fixture = FontFileFixture::create()?;
+    let fixture = font_file_fixture()?;
     std::fs::remove_file(&fixture.path)?;
     let mut calls = 0;
     let result = with_validated_stamp_batch(|| {
@@ -264,7 +251,7 @@ fn missing_batch_state_never_accepts_memoized_result() {
 
 #[test]
 fn duplicate_path_retains_stamp_only_on_durable_filesystems() -> TestResult<()> {
-    let fixture = FontFileFixture::create()?;
+    let fixture = font_file_fixture()?;
     let mut calls = 0;
     let result = with_validated_stamp_batch(|| {
         calls += 1;

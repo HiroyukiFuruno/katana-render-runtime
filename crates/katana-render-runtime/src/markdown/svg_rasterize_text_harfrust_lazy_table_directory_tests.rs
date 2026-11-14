@@ -1,0 +1,263 @@
+use super::{FontFaceCacheScope, font_for_face};
+use resvg::usvg::fontdb::{Database, Source};
+use std::path::{Path, PathBuf};
+
+const EMBEDDED_FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
+const SINGLE_FACE_TTC_HEADER: &[u8] = b"ttcf\0\x01\0\0\0\0\0\x01";
+const FIRST_SFNT_TABLE_OFFSET: std::ops::Range<usize> = 20..24;
+const FIRST_SFNT_TABLE_LENGTH: std::ops::Range<usize> = 24..28;
+
+fn temp_path(label: &str, extension: &str) -> PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    std::env::temp_dir().join(format!(
+        "krr-lazy-directory-{label}-{}-{stamp}.{extension}",
+        std::process::id()
+    ))
+}
+
+fn database_with_replaced_file(
+    valid_source: Source,
+    source_index: u32,
+    replacement: &Path,
+    requested_index: u32,
+) -> Result<(Database, resvg::usvg::fontdb::ID), String> {
+    let mut source_database = Database::new();
+    match valid_source {
+        Source::File(path) => {
+            source_database.load_font_source(Source::File(path));
+        }
+        Source::Binary(data) => {
+            source_database.load_font_data(data.as_ref().as_ref().to_vec());
+        }
+        Source::SharedFile(_, _) => return Err("shared source is not a draft input".to_string()),
+    }
+    let mut info = source_database
+        .faces()
+        .find(|face| face.index == source_index)
+        .cloned()
+        .ok_or_else(|| format!("source face {source_index} missing"))?;
+    info.source = Source::File(replacement.to_path_buf());
+    info.index = requested_index;
+    let mut database = Database::new();
+    let face = database.push_face_info(info);
+    Ok((database, face))
+}
+
+fn assert_rejected(database: &Database, face: resvg::usvg::fontdb::ID) {
+    let _scope = FontFaceCacheScope::enter();
+    assert!(font_for_face(database, face).is_none());
+    assert!(super::ACTIVE_SCOPE.with(|cache| cache.borrow().entry.is_none()));
+}
+
+#[cfg(target_os = "macos")]
+fn real_ttc_bytes() -> Result<Vec<u8>, String> {
+    let source = Path::new("/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc");
+    if !source.exists() {
+        return Err("expected Hiragino W3 TTC path".to_string());
+    }
+    std::fs::read(source).map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn ttc_database(
+    path: &Path,
+    requested_index: u32,
+) -> Result<(Database, resvg::usvg::fontdb::ID), String> {
+    database_with_replaced_file(
+        Source::File(Path::new("/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc").to_path_buf()),
+        0,
+        path,
+        requested_index,
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn assert_rejected_ttc_directory_case(
+    label: &str,
+    range: std::ops::Range<usize>,
+    replacement: &[u8],
+    requested_index: u32,
+) -> Result<(), String> {
+    let path = temp_path(label, "ttc");
+    let mut bytes = real_ttc_bytes()?;
+    bytes[range].copy_from_slice(replacement);
+    std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
+    let (database, face) = ttc_database(&path, requested_index)?;
+    assert_rejected(&database, face);
+    std::fs::remove_file(path).map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn unsupported_ttc_version_is_rejected_without_cache_entry() -> Result<(), String> {
+    assert_rejected_ttc_directory_case("bad-version", 4..8, &[0, 3, 0, 0], 0)
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn zero_ttc_face_count_is_rejected_without_cache_entry() -> Result<(), String> {
+    assert_rejected_ttc_directory_case("zero-count", 8..12, &[0, 0, 0, 0], 0)
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn out_of_range_ttc_face_index_is_rejected_without_cache_entry() -> Result<(), String> {
+    assert_rejected_ttc_directory_case("bad-index", 8..12, &[0, 0, 0, 1], 1)
+}
+
+fn embedded_sfnt_database(path: &Path) -> Result<(Database, resvg::usvg::fontdb::ID), String> {
+    database_with_replaced_file(
+        Source::Binary(std::sync::Arc::new(EMBEDDED_FONT_BYTES.to_vec())),
+        0,
+        path,
+        0,
+    )
+}
+
+#[test]
+fn empty_sfnt_directory_is_rejected_without_cache_entry() -> Result<(), String> {
+    let path = temp_path("empty-sfnt", "ttf");
+    std::fs::write(&path, [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+        .map_err(|error| error.to_string())?;
+    let (database, face) = embedded_sfnt_database(&path)?;
+    assert_rejected(&database, face);
+    std::fs::remove_file(path).map_err(|error| error.to_string())
+}
+
+#[test]
+fn truncated_sfnt_table_records_are_rejected_without_cache_entry() -> Result<(), String> {
+    let path = temp_path("truncated-record", "ttf");
+    std::fs::write(
+        &path,
+        [0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    )
+    .map_err(|error| error.to_string())?;
+    let (database, face) = embedded_sfnt_database(&path)?;
+    assert_rejected(&database, face);
+    std::fs::remove_file(path).map_err(|error| error.to_string())
+}
+
+#[test]
+fn lazy_font_reports_missing_and_truncated_files_before_loading_tables()
+-> Result<(), Box<dyn std::error::Error>> {
+    use std::io::ErrorKind;
+
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("NotoSans-Regular.ttf");
+    assert_lazy_directory_error(&path, ErrorKind::NotFound)?;
+    std::fs::write(&path, &EMBEDDED_FONT_BYTES[..11])?;
+    assert_lazy_directory_error(&path, ErrorKind::UnexpectedEof)?;
+    std::fs::write(&path, EMBEDDED_FONT_BYTES)?;
+    let font = super::lazy_table::load(&path, 0)?;
+    assert!(font.font.units_per_em() > 0);
+    Ok(())
+}
+
+fn assert_lazy_directory_error(
+    path: &Path,
+    kind: std::io::ErrorKind,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let error = super::lazy_table::load(path, 0)
+        .err()
+        .ok_or("invalid font directory was accepted")?;
+    assert_eq!(error.kind(), kind);
+    Ok(())
+}
+
+#[test]
+fn lazy_font_rejects_missing_ttc_offset_and_face_header() -> Result<(), Box<dyn std::error::Error>>
+{
+    use std::io::ErrorKind;
+
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("truncated.ttc");
+    let mut bytes = SINGLE_FACE_TTC_HEADER.to_vec();
+    std::fs::write(&path, &bytes)?;
+    assert_lazy_directory_error(&path, ErrorKind::UnexpectedEof)?;
+
+    bytes.extend_from_slice(&u32::MAX.to_be_bytes());
+    std::fs::write(&path, &bytes)?;
+    assert_lazy_directory_error(&path, ErrorKind::UnexpectedEof)?;
+
+    let mut header = SINGLE_FACE_TTC_HEADER.to_vec();
+    header[8..].copy_from_slice(&u32::MAX.to_be_bytes());
+    std::fs::write(&path, &header)?;
+    let expected = if usize::BITS == 32 {
+        ErrorKind::InvalidData
+    } else {
+        ErrorKind::UnexpectedEof
+    };
+    assert_lazy_directory_error(&path, expected)
+}
+
+#[test]
+fn lazy_font_rejects_invalid_sfnt_header_index_and_table_range()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("malformed.ttf");
+    std::fs::write(&path, EMBEDDED_FONT_BYTES)?;
+    let error = super::lazy_table::load(&path, 1)
+        .err()
+        .ok_or("non-TTC file accepted a second face")?;
+    assert_eq!(error.to_string(), "non-TTC face index out of range");
+    let mut bytes = EMBEDDED_FONT_BYTES.to_vec();
+    bytes[..4].copy_from_slice(b"fake");
+    assert_sfnt_error(&path, &bytes, "unsupported SFNT flavor")?;
+    bytes[..4].copy_from_slice(&EMBEDDED_FONT_BYTES[..4]);
+    bytes[FIRST_SFNT_TABLE_OFFSET].copy_from_slice(&u32::MAX.to_be_bytes());
+    assert_sfnt_error(&path, &bytes, "invalid SFNT table directory")
+}
+
+#[test]
+fn lazy_font_rejects_in_bounds_table_that_exceeds_memory_budget()
+-> Result<(), Box<dyn std::error::Error>> {
+    const OVERSIZED_LENGTH: u32 = 64 * 1024 * 1024 + 1;
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("oversized-table.ttf");
+    let mut bytes = EMBEDDED_FONT_BYTES.to_vec();
+    let offset = u32::from_be_bytes(bytes[FIRST_SFNT_TABLE_OFFSET].try_into()?);
+    bytes[FIRST_SFNT_TABLE_LENGTH].copy_from_slice(&OVERSIZED_LENGTH.to_be_bytes());
+    std::fs::write(&path, bytes)?;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)?
+        .set_len(u64::from(offset) + u64::from(OVERSIZED_LENGTH))?;
+    assert_lazy_directory_error(&path, std::io::ErrorKind::OutOfMemory)
+}
+
+fn assert_sfnt_error(
+    path: &Path,
+    bytes: &[u8],
+    expected: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::write(path, bytes)?;
+    let error = super::lazy_table::load(path, 0)
+        .err()
+        .ok_or("malformed SFNT directory accepted")?;
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert_eq!(error.to_string(), expected);
+    Ok(())
+}
+
+#[test]
+fn deleted_font_poisons_lazy_table_source_and_fresh_source_recovers()
+-> Result<(), Box<dyn std::error::Error>> {
+    use read_fonts::TableProvider;
+    use std::sync::atomic::Ordering;
+
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("font.ttf");
+    std::fs::write(&path, EMBEDDED_FONT_BYTES)?;
+    let stale = super::lazy_table::load(&path, 0)?;
+    std::fs::remove_file(&path)?;
+    assert!(stale.font.tables().name().is_err());
+    assert!(stale.poisoned.load(Ordering::Acquire));
+
+    std::fs::write(&path, EMBEDDED_FONT_BYTES)?;
+    let fresh = super::lazy_table::load(&path, 0)?;
+    assert!(fresh.font.tables().name().is_ok());
+    assert!(!fresh.poisoned.load(Ordering::Acquire));
+    Ok(())
+}

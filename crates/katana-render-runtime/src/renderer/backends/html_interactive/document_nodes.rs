@@ -1,57 +1,10 @@
 use super::super::super::html_document::HtmlDocumentNode;
+use crate::renderer::backends::html_runtime::HtmlRuntimeError;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
-pub(in crate::renderer::backends::html_interactive) struct TableCell {
-    pub(in crate::renderer::backends::html_interactive) tag: String,
-    pub(in crate::renderer::backends::html_interactive) attributes: Vec<(String, String)>,
-    pub(in crate::renderer::backends::html_interactive) children: Vec<HtmlDocumentNode>,
-}
-
-pub(in crate::renderer::backends::html_interactive) fn table_rows(
-    nodes: &[HtmlDocumentNode],
-) -> Vec<Vec<TableCell>> {
-    let mut rows = Vec::new();
-    collect_table_rows(nodes, &mut rows);
-    rows
-}
-
-fn collect_table_rows(nodes: &[HtmlDocumentNode], rows: &mut Vec<Vec<TableCell>>) {
-    for node in nodes {
-        let HtmlDocumentNode::Element { tag, children, .. } = node else {
-            continue;
-        };
-        if tag == "tr" {
-            push_table_row(children, rows);
-            continue;
-        }
-        collect_table_rows(children, rows);
-    }
-}
-
-fn push_table_row(children: &[HtmlDocumentNode], rows: &mut Vec<Vec<TableCell>>) {
-    let cells = children.iter().filter_map(table_cell).collect::<Vec<_>>();
-    if !cells.is_empty() {
-        rows.push(cells);
-    }
-}
-
-fn table_cell(node: &HtmlDocumentNode) -> Option<TableCell> {
-    let HtmlDocumentNode::Element {
-        tag,
-        attributes,
-        children,
-        ..
-    } = node
-    else {
-        return None;
-    };
-    (tag == "th" || tag == "td").then(|| TableCell {
-        tag: tag.clone(),
-        attributes: attributes.clone(),
-        children: children.clone(),
-    })
-}
+#[path = "document_table.rs"]
+mod table;
+pub(in crate::renderer::backends::html_interactive) use table::{TableCell, table_rows};
 
 pub(in crate::renderer::backends::html_interactive) fn attribute<'a>(
     attributes: &'a [(String, String)],
@@ -94,13 +47,19 @@ fn append_node_text(node: &HtmlDocumentNode, text: &mut String) {
 pub(in crate::renderer::backends::html_interactive) fn seed_input_values(
     nodes: &[HtmlDocumentNode],
     values: &mut HashMap<u64, String>,
-) {
+    textarea_value: &impl Fn(u64) -> Result<String, HtmlRuntimeError>,
+) -> Result<(), HtmlRuntimeError> {
     for node in nodes {
-        seed_node_input_value(node, values);
+        seed_node_input_value(node, values, textarea_value)?;
     }
+    Ok(())
 }
 
-fn seed_node_input_value(node: &HtmlDocumentNode, values: &mut HashMap<u64, String>) {
+fn seed_node_input_value(
+    node: &HtmlDocumentNode,
+    values: &mut HashMap<u64, String>,
+    textarea_value: &impl Fn(u64) -> Result<String, HtmlRuntimeError>,
+) -> Result<(), HtmlRuntimeError> {
     let HtmlDocumentNode::Element {
         node_id,
         tag,
@@ -108,12 +67,17 @@ fn seed_node_input_value(node: &HtmlDocumentNode, values: &mut HashMap<u64, Stri
         children,
     } = node
     else {
-        return;
+        return Ok(());
     };
     if is_input_tag(tag) && !values.contains_key(node_id) {
-        values.insert(*node_id, input_initial_value(attributes));
+        let value = if tag == "textarea" {
+            textarea_value(*node_id)?
+        } else {
+            input_initial_value(attributes)
+        };
+        values.insert(*node_id, value);
     }
-    seed_input_values(children, values);
+    seed_input_values(children, values, textarea_value)
 }
 
 pub(in crate::renderer::backends::html_interactive) fn is_input_tag(tag: &str) -> bool {

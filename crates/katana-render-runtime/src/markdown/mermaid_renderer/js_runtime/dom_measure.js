@@ -1,5 +1,9 @@
 function katanaMeasuredBoxAccurate(node) {
-  if (KATANA_HIDDEN_LAYOUT_TAGS.has(node.localName)) {
+  // Native SVGはdisplay:noneのgだけ子のintrinsic bboxを返すため、gは再帰計測へ進める。
+  if (
+    KATANA_HIDDEN_LAYOUT_TAGS.has(node.localName) ||
+    (katanaIsDisplayNone(node) && node.localName !== "g")
+  ) {
     return katanaBox(0, 0, 0, 0);
   }
   return katanaVisibleMeasuredBoxAccurate(node);
@@ -16,7 +20,11 @@ function katanaVisibleMeasuredBoxAccurate(node) {
 }
 
 function katanaTextElementMeasuredBox(node) {
-  if (node.localName === "text") {
+  // Native class の tspan も自身の font と子 run を解決し、他図の owner 補正は維持する。
+  if (
+    node.localName === "text" ||
+    (node.localName === "tspan" && katanaCanMergeNativeTextOwners())
+  ) {
     return katanaTextElementBox(node);
   }
   return null;
@@ -34,9 +42,23 @@ function katanaDirectMeasuredBox(node) {
 }
 
 function katanaChildTextBox(node) {
-  const childBox = katanaUnionBox(katanaVisibleChildBoxes(node));
+  const childBoxes = katanaVisibleChildBoxes(node);
+  const childBox = katanaUnionBox(childBoxes);
+  if (katanaIsMermaidClassDiagram() && (node.children ?? []).length > 0) {
+    return childBox;
+  }
   const text = katanaMeasuredNodeText(node, childBox);
-  return katanaUnionBox([childBox, katanaOptionalTextBox(node, text)].filter(katanaHasArea));
+  const boxes = [katanaOptionalTextBox(node, text)];
+  if (katanaHasArea(childBox) || childBoxes.length > 0) {
+    boxes.push(childBox);
+  }
+  return katanaUnionBox(
+    boxes.filter((box) => katanaHasArea(box) || (box === childBox && childBoxes.length > 0)),
+  );
+}
+
+function katanaIsMermaidClassDiagram() {
+  return ["class", "classdiagram"].includes(globalThis.__katanaMermaidDiagramType);
 }
 
 function katanaOptionalTextBox(node, text) {
@@ -57,17 +79,6 @@ function katanaSvgPathBox(node) {
     return katanaSvgParsedPathBox(pathData) ?? katanaOptionalNumberListBox(pathData);
   }
   return null;
-}
-
-function katanaSvgParsedPathBox(pathData) {
-  if (!pathData) {
-    return null;
-  }
-  const bounds = katanaParsedSerializedPathDataBox(pathData);
-  if (!bounds) {
-    return null;
-  }
-  return katanaBox(bounds[0], bounds[1], bounds[2] - bounds[0], bounds[3] - bounds[1]);
 }
 
 function katanaSvgPointsBox(node) {
@@ -123,9 +134,10 @@ function katanaTextLineValues(node, text, lines) {
 }
 
 function katanaTextLineBox(node, line, index) {
+  if (line.parts?.[0]?.font) return katanaPositionedTextLineBox(line);
   const x = katanaLineValueOrDefault(line.x, katanaNumberAttrOrDefault(node, "x", 0));
   const y = katanaLineValueOrDefault(line.y, katanaTextLineFallbackY(node, index));
-  return katanaAnchoredTextNodeBox(line.node ?? node, line.text, x, y);
+  return katanaAnchoredTextNodeBox(line.node ?? node, line.text, x, y, line.parts);
 }
 
 function katanaLineValueOrDefault(value, fallback) {
@@ -149,6 +161,13 @@ function katanaTextFragmentBox(node) {
   return katanaBox(0, 0, 0, 0);
 }
 
+function katanaHasPositionedSvgText(node) {
+  if (!node || !["text", "tspan"].includes(node.localName)) {
+    return false;
+  }
+  return ["x", "y", "dx", "dy"].some((name) => node.getAttribute?.(name) !== null);
+}
+
 function katanaTextFragmentParent(node) {
   return node.parentNode ?? node;
 }
@@ -158,5 +177,13 @@ function katanaFragmentText(node) {
 }
 
 KatanaNode.prototype.getBBox = function getBBox() {
-  return katanaMeasuredBoxAccurate(this);
+  const box = katanaMeasuredBoxAccurate(this);
+  // WHY: ChromiumのSVGRectTearOffはgfx::RectFのfloat4成分を返す。
+  if (this.namespaceURI !== KATANA_SVG_NAMESPACE) return box;
+  return katanaBox(
+    Math.fround(box.x),
+    Math.fround(box.y),
+    Math.fround(box.width),
+    Math.fround(box.height),
+  );
 };

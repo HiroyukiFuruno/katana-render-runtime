@@ -2,65 +2,80 @@ use super::super::super::html_document::HtmlDocumentNode;
 use super::super::layout_flow_measure::is_layout_item;
 use super::super::layout_grid_track::taffy_grid_track;
 use super::super::style::CssStyle;
+use super::super::text_measurement_diagnostic::{record_taffy_timing, start_taffy_timing};
 use taffy::geometry::Size;
 use taffy::prelude::{AvailableSpace, Display, Style, TaffyTree};
 use taffy::style_helpers::{auto, length};
 
-const GRID_ROW_Y_EPSILON: f32 = 0.01;
+const FLOW_ROW_Y_EPSILON: f32 = 0.01;
 
 pub(super) fn flow_stretch_heights(
     tree: &TaffyTree<()>,
     parent: &CssStyle,
     measurements: &[(taffy::tree::NodeId, CssStyle, f32)],
-) -> Result<Option<Vec<f32>>, String> {
+) -> Option<Vec<f32>> {
     if !stretches_children(parent) {
-        return Ok(None);
+        return None;
     }
     if parent.display == Display::Flex && is_flex_row(parent) {
-        let height = measurements
-            .iter()
-            .map(|(_, _, height)| *height)
-            .fold(0.0, f32::max);
-        return Ok(Some(vec![height; measurements.len()]));
+        return Some(row_heights(tree, measurements, true));
     }
     if parent.display != Display::Grid {
-        return Ok(None);
+        return None;
     }
-    grid_row_heights(tree, measurements).map(Some)
+    Some(row_heights(tree, measurements, false))
 }
 
-fn grid_row_heights(
+fn row_heights(
     tree: &TaffyTree<()>,
     measurements: &[(taffy::tree::NodeId, CssStyle, f32)],
-) -> Result<Vec<f32>, String> {
-    let mut heights = Vec::with_capacity(measurements.len());
-    for (node, _, _) in measurements {
-        let row_y = tree.layout(*node).map_err(layout_error)?.location.y;
-        heights.push(grid_row_height(tree, measurements, row_y)?);
-    }
-    Ok(heights)
+    use_computed_auto_height: bool,
+) -> Vec<f32> {
+    let items = measurements
+        .iter()
+        .map(|(node, css, height)| {
+            row_item(
+                tree,
+                *node,
+                *height,
+                use_computed_auto_height && css.height.is_none(),
+            )
+        })
+        .collect::<Vec<_>>();
+    items
+        .iter()
+        .map(|(row_y, _)| row_height(&items, *row_y))
+        .collect()
 }
 
-fn grid_row_height(
+fn row_item(
     tree: &TaffyTree<()>,
-    measurements: &[(taffy::tree::NodeId, CssStyle, f32)],
-    row_y: f32,
-) -> Result<f32, String> {
-    let mut row_height = 0.0_f32;
-    for (candidate, _, measured_height) in measurements {
-        let candidate_y = tree.layout(*candidate).map_err(layout_error)?.location.y;
-        if (candidate_y - row_y).abs() <= GRID_ROW_Y_EPSILON {
-            row_height = row_height.max(*measured_height);
-        }
-    }
-    Ok(row_height)
+    node: taffy::tree::NodeId,
+    measured_height: f32,
+    use_computed_auto_height: bool,
+) -> (f32, f32) {
+    /* WHY: フローは丸めを無効にした同じ木で作成・測定したノードを渡す。 */
+    let layout = tree.unrounded_layout(node);
+    let height = if use_computed_auto_height {
+        layout.size.height.max(measured_height)
+    } else {
+        measured_height
+    };
+    (layout.location.y, height)
+}
+
+fn row_height(items: &[(f32, f32)], row_y: f32) -> f32 {
+    items
+        .iter()
+        .filter(|(candidate_y, _)| (*candidate_y - row_y).abs() <= FLOW_ROW_Y_EPSILON)
+        .fold(0.0, |height, (_, candidate)| height.max(*candidate))
 }
 
 fn stretches_children(parent: &CssStyle) -> bool {
-    matches!(
-        parent.align_items,
-        None | Some(taffy::style::AlignItems::STRETCH)
-    )
+    use taffy::style::AlignItems;
+
+    let alignment = parent.align_items.unwrap_or(AlignItems::NORMAL);
+    alignment == AlignItems::NORMAL || alignment == AlignItems::STRETCH
 }
 
 fn is_flex_row(parent: &CssStyle) -> bool {
@@ -102,6 +117,18 @@ pub(super) fn compute_root_layout(
     width: f32,
     height: Option<f32>,
 ) -> Result<(), String> {
+    let started = start_taffy_timing();
+    let result = compute_root_layout_body(tree, root, width, height);
+    record_taffy_timing(started);
+    result
+}
+
+fn compute_root_layout_body(
+    tree: &mut TaffyTree<()>,
+    root: taffy::tree::NodeId,
+    width: f32,
+    height: Option<f32>,
+) -> Result<(), String> {
     tree.compute_layout(
         root,
         Size {
@@ -120,27 +147,40 @@ fn flow_style(style: &CssStyle, width: f32, height: Option<f32>) -> Style {
             height: height.map_or_else(auto, length),
         },
         gap: Size {
-            width: length(style.gap),
-            height: length(style.gap),
+            width: length(style.flow_column_gap.unwrap_or(style.gap)),
+            height: length(style.row_gap.unwrap_or(style.gap)),
         },
         flex_direction: style.flex_direction,
         flex_wrap: style.flex_wrap,
-        align_items: style.align_items,
-        justify_content: style.justify_content,
+        align_items: style
+            .align_items
+            .unwrap_or(taffy::style::AlignItems::NORMAL),
+        justify_content: style
+            .justify_content
+            .unwrap_or(taffy::style::JustifyContent::NORMAL),
         ..Style::default()
     };
-    if style.display == Display::Grid {
-        layout.grid_template_columns = style
-            .grid_template_columns
-            .iter()
-            .copied()
-            .map(taffy_grid_track)
-            .map(Into::into)
-            .collect();
-    }
+    apply_flow_grid_columns(&mut layout, style);
     layout
+}
+
+fn apply_flow_grid_columns(layout: &mut Style, style: &CssStyle) {
+    if style.display != Display::Grid {
+        return;
+    }
+    layout.grid_template_columns = style
+        .grid_template_columns
+        .iter()
+        .copied()
+        .map(taffy_grid_track)
+        .map(Into::into)
+        .collect();
 }
 
 pub(super) fn layout_error(error: impl ToString) -> String {
     format!("CSS flow layout failed: {}", error.to_string())
 }
+
+#[cfg(test)]
+#[path = "layout_flow_compute_tests.rs"]
+mod tests;
