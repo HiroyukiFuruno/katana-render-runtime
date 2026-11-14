@@ -44,22 +44,6 @@
       },
       "fragmentSha256": "660aacabf0c54455a27a3a732d5054106c2d82cb153f821c427b253e6af22d75",
       "reason": "Q15 low-benefit process wrapper clone: exactly 25 lines and 138 tokens across two separately distributed crates. Sharing through the existing runtime dependency would require a new public command-creation API; a new distributed crate would add package, dependency, and release overhead disproportionate to this small wrapper. The current 10 call sites are within the existing two distributed crates (two production consumers plus test subprocesses); test assertion repetition is not exempted. Reassess if a third distributed crate needs this wrapper or an independent public API requirement arises."
-    },
-    {
-      "first": {
-        "path": "crates/katana-render-runtime/src/markdown/svg_rasterize_preprocess_marker_stylesheet.rs",
-        "sha256": "3f5dd67bb7ce869f6e772202dbe34499554fd5605ef990ebc5626f04474b0f2a",
-        "start": {"line": 149, "column": 52, "position": 4547},
-        "end": {"line": 167, "column": 56, "position": 5008}
-      },
-      "second": {
-        "path": "crates/katana-render-runtime/src/markdown/svg_rasterize_preprocess_shadow_stylesheet.rs",
-        "sha256": "0376f64345da6fb7df0d9baee884907ba8a5264535ff9d356cab68c7f44c1db0",
-        "start": {"line": 57, "column": 52, "position": 1492},
-        "end": {"line": 75, "column": 56, "position": 1953}
-      },
-      "fragmentSha256": "3ddc3a9e89c490c80c63b4ef7935cb45a4baca9de93225a037fcbb463dca6c5d",
-      "reason": "Required cssparser 0.38.0 AtRuleParser adapter scaffold: its associated types and method signatures have no equivalent local wrapper, and the default methods reject these at-rules. The exact 19-line/108-token fragment contains only the required declarations/signatures and delegation to the existing shared consume_nested helper; the distinct parse_block bodies begin after this fragment and remain subject to duplication checks and tests. Reassess if the trait or these adapters change."
     }
   ]
 }
