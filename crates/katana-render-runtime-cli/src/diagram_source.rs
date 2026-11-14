@@ -24,15 +24,18 @@ impl MermaidMarkdownOps {
 
     pub(crate) fn extract_for_languages(source: String, languages: &[&'static str]) -> String {
         let mut lines: Vec<&str> = Vec::new();
-        let mut block_lang: Option<&'static str> = None;
+        let mut fence: Option<(&'static str, u8, usize)> = None;
         for line in source.lines() {
-            if block_lang.is_none() {
-                block_lang = Self::starts_block(line, languages);
+            if fence.is_none() {
+                fence = Self::starts_block(line, languages);
                 continue;
             }
-            if Self::ends_block(line) {
+            let Some((language, marker, marker_count)) = fence else {
+                continue;
+            };
+            if Self::ends_block(line, marker, marker_count) {
                 let content = lines.join("\n");
-                return if block_lang == Some("zenuml") {
+                return if language == "zenuml" {
                     format!("zenuml\n{content}")
                 } else {
                     content
@@ -43,24 +46,33 @@ impl MermaidMarkdownOps {
         source
     }
 
-    fn starts_block(line: &str, languages: &[&'static str]) -> Option<&'static str> {
+    fn starts_block(line: &str, languages: &[&'static str]) -> Option<(&'static str, u8, usize)> {
         let trimmed = line.trim();
         Self::language_of(trimmed, b'`', languages)
             .or_else(|| Self::language_of(trimmed, b'~', languages))
     }
 
-    fn language_of(line: &str, marker: u8, languages: &[&'static str]) -> Option<&'static str> {
+    fn language_of(
+        line: &str,
+        marker: u8,
+        languages: &[&'static str],
+    ) -> Option<(&'static str, u8, usize)> {
         let bytes = line.as_bytes();
         let marker_count = bytes.iter().take_while(|it| **it == marker).count();
         if marker_count < MIN_MARKDOWN_FENCE_MARKERS {
             return None;
         }
         let language = line[marker_count..].split_whitespace().next()?;
-        languages.iter().copied().find(|it| *it == language)
+        languages
+            .iter()
+            .copied()
+            .find(|it| *it == language)
+            .map(|language| (language, marker, marker_count))
     }
 
-    fn ends_block(line: &str) -> bool {
-        matches!(line.trim(), "```" | "~~~")
+    fn ends_block(line: &str, marker: u8, min_count: usize) -> bool {
+        let bytes = line.trim().as_bytes();
+        bytes.len() >= min_count && bytes.iter().all(|byte| *byte == marker)
     }
 }
 
@@ -71,3 +83,7 @@ impl PlantUmlMarkdownOps {
         MermaidMarkdownOps::extract_for_languages(source, &["plantuml"])
     }
 }
+
+#[cfg(test)]
+#[path = "diagram_source_tests.rs"]
+mod tests;

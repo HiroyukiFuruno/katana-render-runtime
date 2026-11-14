@@ -40,7 +40,7 @@ impl DiagramCommand {
         } else {
             path
         };
-        Ok((path.clone(), self.renderer(path)))
+        RuntimePathResolver::resolve_renderer(self.kind, Some(path), None).map_err(Into::into)
     }
 
     pub(super) fn attestation(

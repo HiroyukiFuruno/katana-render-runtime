@@ -1,4 +1,4 @@
-use super::{DiagramCommand, DiagramSourceOps, MermaidMarkdownOps, RenderInputFactory};
+use super::{DiagramCommand, RenderInputFactory};
 use crate::commands::{DiagramAction, ThemeModeArg};
 use katana_render_runtime::DiagramKind;
 use std::path::PathBuf;
@@ -25,83 +25,6 @@ impl InputFixture {
             output,
         })
     }
-}
-
-#[test]
-fn extracts_mermaid_fence_from_markdown() {
-    let source = "# Title\n\n~~~mermaid\ngraph TD; A-->B\n~~~\n".to_string();
-    assert_eq!(MermaidMarkdownOps::extract(source), "graph TD; A-->B");
-}
-
-#[test]
-fn extracts_zenuml_fence_and_prepends_zenuml_keyword() {
-    let source = "~~~zenuml\ntitle Flow\nA.method()\n~~~\n".to_string();
-    assert_eq!(
-        MermaidMarkdownOps::extract(source),
-        "zenuml\ntitle Flow\nA.method()"
-    );
-}
-
-#[test]
-fn extracts_zenuml_direct_fence_from_committed_fixture() {
-    let fixture =
-        include_str!("../../../tests/fixtures/mermaid/en/29-zenuml-direct.md").to_string();
-    let extracted = MermaidMarkdownOps::extract(fixture);
-    assert!(
-        extracted.starts_with("zenuml\n"),
-        "extracted source should start with 'zenuml\\n', got: {extracted:?}"
-    );
-}
-
-#[test]
-fn extracts_mermaid_fence_with_info_string_attributes() {
-    let source = "``` mermaid title=\"flow\"\ngraph TD; A-->B\n```\n".to_string();
-    assert_eq!(MermaidMarkdownOps::extract(source), "graph TD; A-->B");
-}
-
-#[test]
-fn extracts_mermaid_fence_when_language_has_attributes() {
-    let source = "```mermaid title=flow\ngraph TD; A-->B\n```\n".to_string();
-    assert_eq!(MermaidMarkdownOps::extract(source), "graph TD; A-->B");
-}
-
-#[test]
-fn keeps_source_when_mermaid_fence_is_not_closed() {
-    let source = "```mermaid\ngraph TD; A-->B".to_string();
-    assert_eq!(MermaidMarkdownOps::extract(source.clone()), source);
-}
-
-#[test]
-fn unknown_fence_language_passes_through_as_source() {
-    let source = "```javascript\nconsole.log('hi')\n```\n".to_string();
-    assert_eq!(MermaidMarkdownOps::extract(source.clone()), source);
-}
-
-#[test]
-fn drawio_source_passes_through() {
-    let source = "<mxGraphModel />".to_string();
-    assert_eq!(
-        DiagramSourceOps::prepare(DiagramKind::Drawio, source.clone()),
-        source
-    );
-}
-
-#[test]
-fn mathjax_source_passes_through() {
-    let source = "x^2".to_string();
-    assert_eq!(
-        DiagramSourceOps::prepare(DiagramKind::MathJax, source.clone()),
-        source
-    );
-}
-
-#[test]
-fn extracts_plantuml_fence_from_markdown() {
-    let source = "```plantuml\n@startuml\nAlice -> Bob: hello\n@enduml\n```\n".to_string();
-    assert_eq!(
-        DiagramSourceOps::prepare(DiagramKind::PlantUml, source),
-        "@startuml\nAlice -> Bob: hello\n@enduml"
-    );
 }
 
 #[test]
@@ -164,18 +87,13 @@ fn non_plantuml_rejects_theme_options() {
 }
 
 #[test]
-fn runtime_option_validation_and_renderer_selection_cover_all_kinds() {
+fn runtime_option_validation_rejects_conflicting_plantuml_options() {
     let conflict = DiagramCommand::validate_runtime_options(
         DiagramKind::PlantUml,
         Some(&"runtime.jar".into()),
         Some(&"cache".into()),
     );
     let accepted = DiagramCommand::validate_runtime_options(DiagramKind::Mermaid, None, None);
-    let _mermaid = DiagramCommand::new(DiagramKind::Mermaid).renderer("mermaid.js".into());
-    let _drawio = DiagramCommand::new(DiagramKind::Drawio).renderer("drawio.js".into());
-    let _plantuml = DiagramCommand::new(DiagramKind::PlantUml).renderer("plantuml.jar".into());
-    let _mathjax = DiagramCommand::new(DiagramKind::MathJax).renderer("mathjax.js".into());
-
     assert!(conflict.is_err());
     assert!(accepted.is_ok());
 }
