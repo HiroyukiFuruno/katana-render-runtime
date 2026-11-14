@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use super::{consume_nested, is_nested_token};
+use crate::css_parser_shared::CssParserShared;
 use cssparser::{ParseError, Parser, Token};
 use svgtypes::Color;
 
@@ -23,7 +23,9 @@ pub(super) fn scan_filter_value(
         match token {
             Token::Function(name) => scan_function(input, start, &name, inside_drop_shadow, edits)?,
             Token::Comma => commas += 1,
-            token if is_nested_token(&token) => input.parse_nested_block(consume_nested)?,
+            token if CssParserShared::is_nested_token(&token) => {
+                input.parse_nested_block(CssParserShared::consume_nested)?;
+            }
             _ => {}
         }
     }

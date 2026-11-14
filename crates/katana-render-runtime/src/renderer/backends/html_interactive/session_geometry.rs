@@ -11,6 +11,14 @@ mod positioning;
 use intersection::intersection_metadata;
 
 impl HtmlInteractiveSession {
+    pub(super) fn store_layout_geometry(&mut self, layout: LayoutResult) {
+        self.hit_targets = layout.hit_targets;
+        self.element_boxes = layout.element_boxes;
+        self.scroll_geometry.content_height = layout.content_height;
+        self.scroll_geometry.content_width = layout.content_width;
+        self.scroll_geometry.viewport_overflow = layout.viewport_overflow;
+    }
+
     pub(super) fn update_scroll(&mut self, render: &LayoutResult) -> bool {
         let previous = (self.scroll_geometry.scroll_x, self.scroll_geometry.scroll_y);
         self.scroll_geometry.scroll_x = self.scroll_geometry.scroll_x.clamp(
@@ -59,9 +67,7 @@ impl HtmlInteractiveSession {
     }
 
     pub(super) fn hit_target_at(&self, x: f32, y: f32) -> Option<&HitTarget> {
-        let scale = self.viewport.device_scale_factor;
-        let x = x / scale + self.scroll_geometry.scroll_x;
-        let document_y = y / scale + self.scroll_geometry.scroll_y;
+        let (x, document_y) = self.document_point(x, y);
         self.hit_targets.iter().rev().find(|target| {
             contains(*target, x, document_y)
                 && hit_owner_is_visible(&self.element_boxes, target.node_id, x, document_y)
@@ -69,13 +75,19 @@ impl HtmlInteractiveSession {
     }
 
     pub(super) fn element_at(&self, x: f32, y: f32) -> Option<&ElementBox> {
-        let scale = self.viewport.device_scale_factor;
-        let x = x / scale + self.scroll_geometry.scroll_x;
-        let document_y = y / scale + self.scroll_geometry.scroll_y;
+        let (x, document_y) = self.document_point(x, y);
         self.element_boxes.iter().rev().find(|element| {
             contains(*element, x, document_y)
                 && visible_through_overflow_clips(element, x, document_y)
         })
+    }
+
+    fn document_point(&self, x: f32, y: f32) -> (f32, f32) {
+        let scale = self.viewport.device_scale_factor;
+        (
+            x / scale + self.scroll_geometry.scroll_x,
+            y / scale + self.scroll_geometry.scroll_y,
+        )
     }
 
     pub(super) fn max_scroll(&self) -> f32 {

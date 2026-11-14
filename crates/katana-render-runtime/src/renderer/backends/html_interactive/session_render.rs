@@ -134,11 +134,7 @@ impl HtmlInteractiveSession {
             self.latest_frame.as_ref(),
             &self.source,
         );
-        self.hit_targets = render.hit_targets;
-        self.element_boxes = render.element_boxes;
-        self.scroll_geometry.content_height = render.content_height;
-        self.scroll_geometry.content_width = render.content_width;
-        self.scroll_geometry.viewport_overflow = render.viewport_overflow;
+        self.store_layout_geometry(render);
         Ok(())
     }
 

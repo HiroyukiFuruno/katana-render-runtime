@@ -48,6 +48,41 @@ impl RenderOutputFactory {
         runtime: RuntimeDescriptor,
     ) -> RenderOutput {
         tracing::warn!("{}", error);
+        Self::from_raw_output(
+            input,
+            source,
+            runtime,
+            RenderDiagnostics {
+                warnings: Vec::new(),
+                errors: vec![error],
+            },
+        )
+    }
+
+    fn from_raw_code(
+        input: &RenderInput,
+        source: String,
+        warning: String,
+        runtime: RuntimeDescriptor,
+    ) -> RenderOutput {
+        tracing::warn!("{}", warning);
+        Self::from_raw_output(
+            input,
+            Self::raw_code_block(&source),
+            runtime,
+            RenderDiagnostics {
+                warnings: vec![warning],
+                errors: Vec::new(),
+            },
+        )
+    }
+
+    fn from_raw_output(
+        input: &RenderInput,
+        source: String,
+        runtime: RuntimeDescriptor,
+        diagnostics: RenderDiagnostics,
+    ) -> RenderOutput {
         RenderOutput {
             cache_fingerprint: CacheFingerprintOps::render(
                 input,
@@ -60,36 +95,7 @@ impl RenderOutputFactory {
             view_box: String::new(),
             runtime: Self::runtime(runtime),
             profile: Self::profile(runtime),
-            diagnostics: RenderDiagnostics {
-                warnings: Vec::new(),
-                errors: vec![error],
-            },
-        }
-    }
-
-    fn from_raw_code(
-        input: &RenderInput,
-        source: String,
-        warning: String,
-        runtime: RuntimeDescriptor,
-    ) -> RenderOutput {
-        tracing::warn!("{}", warning);
-        RenderOutput {
-            cache_fingerprint: CacheFingerprintOps::render(
-                input,
-                runtime.version,
-                runtime.checksum,
-            ),
-            svg: Self::raw_code_block(&source),
-            width: 0.0,
-            height: 0.0,
-            view_box: String::new(),
-            runtime: Self::runtime(runtime),
-            profile: Self::profile(runtime),
-            diagnostics: RenderDiagnostics {
-                warnings: vec![warning],
-                errors: Vec::new(),
-            },
+            diagnostics,
         }
     }
 

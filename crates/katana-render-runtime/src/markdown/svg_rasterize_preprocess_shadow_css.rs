@@ -2,8 +2,10 @@ use std::ops::Range;
 
 use cssparser::{
     AtRuleParser, CowRcStr, DeclarationParser, ParseError, Parser, ParserState,
-    QualifiedRuleParser, RuleBodyItemParser, RuleBodyParser, Token,
+    QualifiedRuleParser, RuleBodyItemParser, RuleBodyParser,
 };
+
+use crate::css_parser_shared::CssParserShared;
 
 #[path = "svg_rasterize_preprocess_shadow_stylesheet.rs"]
 mod stylesheet;
@@ -58,7 +60,7 @@ impl<'i> DeclarationParser<'i> for FilterDeclarationParser<'_> {
         if name.eq_ignore_ascii_case("filter") {
             scan_filter_value(input, false, self.edits)?;
         } else {
-            consume_nested(input)?;
+            CssParserShared::consume_nested(input)?;
         }
         Ok(())
     }
@@ -84,24 +86,4 @@ impl RuleBodyItemParser<'_, (), ()> for FilterDeclarationParser<'_> {
     fn parse_qualified(&self) -> bool {
         false
     }
-}
-
-pub(super) fn consume_nested(input: &mut Parser<'_>) -> Result<(), ParseError<()>> {
-    while !input.is_exhausted() {
-        let token = input.next_including_whitespace_and_comments()?.clone();
-        if is_nested_token(&token) {
-            input.parse_nested_block(consume_nested)?;
-        }
-    }
-    Ok(())
-}
-
-fn is_nested_token(token: &Token<'_>) -> bool {
-    matches!(
-        token,
-        Token::Function(_)
-            | Token::ParenthesisBlock
-            | Token::SquareBracketBlock
-            | Token::CurlyBracketBlock
-    )
 }

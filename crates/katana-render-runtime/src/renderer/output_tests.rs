@@ -1,7 +1,9 @@
 use super::RenderOutputFactory;
 use super::RuntimeDescriptor;
 use crate::markdown::DiagramResult;
-use crate::renderer::api::{DiagramKind, RenderConfig, RenderContext, RenderInput, RenderPolicy};
+use crate::renderer::api::{
+    DiagramKind, RenderConfig, RenderContext, RenderInput, RenderOutput, RenderPolicy,
+};
 
 #[test]
 fn output_factory_maps_svg_dimensions_to_public_output() {
@@ -73,6 +75,45 @@ fn output_factory_maps_raw_code_fallback_to_diagnostics() {
         Ok(it) if it.svg.starts_with("```plantuml")
             && it.diagnostics.warnings[0].contains("plantuml-runtime-unavailable")
     ));
+}
+
+#[test]
+fn raw_outputs_preserve_format_diagnostics_and_fingerprint() -> Result<(), String> {
+    let input = input();
+    let runtime = RuntimeDescriptor::plantuml();
+    let raw_string = RenderOutputFactory::from_raw_string(
+        &input,
+        "source\n".to_string(),
+        "error".to_string(),
+        runtime,
+    );
+    let raw_code = RenderOutputFactory::from_diagram_result(
+        &input,
+        DiagramResult::RawCode {
+            source: "source\n".to_string(),
+            warning: "warning".to_string(),
+        },
+        runtime,
+    )
+    .map_err(|error| error.to_string())?;
+
+    assert_eq!(raw_string.svg, "source\n");
+    assert_eq!(raw_code.svg, "```plantuml\nsource\n```");
+    assert_eq!(raw_string.diagnostics.errors, ["error"]);
+    assert!(raw_string.diagnostics.warnings.is_empty());
+    assert_eq!(raw_code.diagnostics.warnings, ["warning"]);
+    assert!(raw_code.diagnostics.errors.is_empty());
+    assert_raw_metadata_matches(&raw_string, &raw_code);
+    Ok(())
+}
+
+fn assert_raw_metadata_matches(raw_string: &RenderOutput, raw_code: &RenderOutput) {
+    assert_eq!(raw_string.cache_fingerprint, raw_code.cache_fingerprint);
+    assert_eq!((raw_string.width, raw_string.height), (0.0, 0.0));
+    assert_eq!((raw_code.width, raw_code.height), (0.0, 0.0));
+    assert!(raw_string.view_box.is_empty() && raw_code.view_box.is_empty());
+    assert_eq!(raw_string.runtime.checksum, raw_code.runtime.checksum);
+    assert_eq!(raw_string.profile.id, raw_code.profile.id);
 }
 
 #[test]

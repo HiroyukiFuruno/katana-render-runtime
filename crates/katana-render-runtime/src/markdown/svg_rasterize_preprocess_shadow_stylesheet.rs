@@ -4,7 +4,8 @@ use cssparser::{
     AtRuleParser, CowRcStr, ParseError, Parser, ParserState, QualifiedRuleParser, StyleSheetParser,
 };
 
-use super::{consume_nested, parse_declaration_block};
+use super::parse_declaration_block;
+use crate::css_parser_shared::CssParserShared;
 
 pub(super) fn parse(source: &str) -> Option<Vec<Range<usize>>> {
     let mut input = Parser::new(source);
@@ -39,7 +40,7 @@ impl<'i> QualifiedRuleParser<'i> for FilterStylesheetParser<'_> {
         &mut self,
         input: &mut Parser<'i>,
     ) -> Result<Self::Prelude, ParseError<Self::Error>> {
-        consume_nested(input)?;
+        CssParserShared::consume_nested(input)?;
         Ok(())
     }
 
@@ -64,7 +65,7 @@ impl<'i> AtRuleParser<'i> for FilterStylesheetParser<'_> {
         _name: CowRcStr<'i>,
         input: &mut Parser<'i>,
     ) -> Result<Self::Prelude, ParseError<Self::Error>> {
-        consume_nested(input)
+        CssParserShared::consume_nested(input)
     }
 
     fn parse_block(

@@ -49,11 +49,7 @@ impl HtmlInteractiveSession {
 
     fn refresh_scroll_layout(&mut self) -> Result<(), HtmlBrowserError> {
         let layout = self.layout()?;
-        self.hit_targets = layout.hit_targets;
-        self.element_boxes = layout.element_boxes;
-        self.scroll_geometry.content_height = layout.content_height;
-        self.scroll_geometry.content_width = layout.content_width;
-        self.scroll_geometry.viewport_overflow = layout.viewport_overflow;
+        self.store_layout_geometry(layout);
         Ok(())
     }
 }
