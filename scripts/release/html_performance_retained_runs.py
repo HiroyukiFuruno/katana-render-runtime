@@ -57,6 +57,39 @@ def _sealed_candidate(run: Path, checksum: str) -> bool:
     return bool(completed) and bundle == {"path": str(run / _MANIFEST), "sha256": checksum}
 
 
+def _candidate_dependencies(namespace: Path, candidate: Path) -> set[Path]:
+    receipt = gate.read_json(candidate / _RECEIPT)
+    completed = gate._array(receipt.get("completeConditionIds"), "completed conditions")
+    conditions = receipt.get("conditionIds")
+    bundle = gate.Bundle(candidate / "measurement/bundle")
+    if (receipt.get("formalAccepted") is True and isinstance(conditions, list)
+            and len(conditions) == 84 and len(set(conditions)) == 84 and completed == conditions):
+        from html_performance_remote_evidence import validate_producer_verification_receipt
+
+        try:
+            validate_producer_verification_receipt(bundle.directory, gate._text(receipt.get("head"), "batch HEAD"))
+        except (ValueError, OSError, KeyError, TypeError):
+            pass
+        else:
+            return set()
+    dependencies: set[Path] = set()
+    for original, (_, checksum) in bundle.files.items():
+        path = Path(original)
+        if not path.is_relative_to(namespace):
+            continue
+        relative = path.relative_to(namespace)
+        gate.require(len(relative.parts) > 1 and _RUN.fullmatch(relative.parts[0]) is not None,
+                     "invalid managed dependency path")
+        run = namespace / relative.parts[0]
+        if not run.exists() and not run.is_symlink():
+            continue
+        _directory(run)
+        gate.require(_regular(path) and gate.sha256(path) == checksum,
+                     "managed dependency missing or changed")
+        dependencies.add(run)
+    return dependencies
+
+
 def _prune(namespace: Path, active: str, *, newest: Path | None = None) -> None:
     runs = [run for run in namespace.iterdir() if _RUN.fullmatch(run.name)]
     marked: list[Path] = []
@@ -81,8 +114,13 @@ def _prune(namespace: Path, active: str, *, newest: Path | None = None) -> None:
         candidates, key=lambda run: ((run / _RECEIPT).stat().st_mtime_ns, run.name), default=None,
     )
     baseline = min(marked, default=None)
+    try:
+        dependencies = _candidate_dependencies(namespace, candidate) if candidate is not None else set()
+    except (ValueError, OSError, KeyError, TypeError):
+        # 参照が壊れている場合は安全に削除対象を特定できない。
+        return
     for run in runs:
-        if run not in (baseline, candidate):
+        if run not in (baseline, candidate) and run not in dependencies:
             shutil.rmtree(run)
 
 

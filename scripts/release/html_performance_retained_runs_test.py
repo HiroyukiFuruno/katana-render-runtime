@@ -69,6 +69,87 @@ class RetainedRunsTest(unittest.TestCase):
             self.seal(replacement, "replacement")
         self.assertEqual(set(self.namespace.iterdir()), {candidate.parent, replacement.parent})
 
+    def test_resume_keeps_originals_until_formally_complete(self) -> None:
+        with retention.managed_output(self.root) as baseline:
+            self.mark(self.seal(baseline, "baseline"))
+
+        def seal_with_originals(output: Path, originals: list[Path], *, final: bool = False) -> Path:
+            payload = output / "original"
+            payload.parent.mkdir(parents=True, exist_ok=True)
+            payload.write_bytes(str(output).encode())
+            originals = [*originals, payload]
+            bundle = output / "bundle"
+            bundle.mkdir()
+            rows = []
+            for index, original in enumerate(originals):
+                copy = bundle / str(index)
+                copy.write_bytes(original.read_bytes())
+                rows.append({"originalPath": str(original), "relativePath": str(index),
+                             "sha256": gate.sha256(original)})
+            manifest = bundle / "bundle.json"
+            manifest.write_text(json.dumps({"schema": "krr-html-performance-release-bundle-v1",
+                                            "head": "head", "attempts": [{}] * (84 if final else 1),
+                                            "files": rows}))
+            ids = [str(index) for index in range(84 if final else len(originals))]
+            (output / "batch-receipt.json").write_text(json.dumps({
+                "schema": "krr-html-performance-batch-receipt-v2", "status": "closed",
+                "head": "head",
+                "conditionIds": ids, "completeConditionIds": ids, "formalAccepted": final,
+                "bundle": {"path": str(manifest), "sha256": gate.sha256(manifest)},
+            }))
+            return payload
+
+        originals: list[Path] = []
+        identities: list[int] = []
+        runs: list[Path] = []
+        for _ in range(3):
+            with retention.managed_output(self.root) as output:
+                original = seal_with_originals(output, originals)
+            originals.append(original)
+            identities.append(original.stat().st_ino)
+            runs.append(output.parent)
+            self.assertEqual([path.stat().st_ino for path in originals], identities)
+            self.assertEqual(set(self.namespace.iterdir()), {baseline.parent, *runs})
+        displaced = self.root / "displaced"
+        runs[0].rename(displaced)
+        retention.reconcile_reference(self.root)
+        self.assertTrue(all(run.is_dir() for run in runs[1:]))
+        displaced.rename(runs[0])
+        with retention.managed_output(self.root) as final:
+            seal_with_originals(final, originals, final=True)
+        self.assertEqual(set(self.namespace.iterdir()), {baseline.parent, *runs, final.parent})
+        producer.write_formal_verification_receipt(final / "bundle", "head", {
+            "head": "head", "conditions": 84, "candidateConditions": 84, "checks": 1680,
+            "htmlStage90": {"acceptance": True, "fontIdentityEquivalence": "established"},
+            "performanceNonregression": True,
+        })
+        retention.reconcile_reference(self.root)
+        self.assertEqual(set(self.namespace.iterdir()), {baseline.parent, final.parent})
+
+    def test_missing_or_changed_original_refuses_pruning(self) -> None:
+        with retention.managed_output(self.root) as first:
+            self.seal(first, "first")
+            original = first / "original"
+            original.write_bytes(b"original")
+        with retention.managed_output(self.root) as second:
+            self.seal(second, "second")
+            bundle = second / "bundle"
+            copy = bundle / "copy"
+            copy.write_bytes(original.read_bytes())
+            manifest = bundle / "bundle.json"
+            manifest.write_text(json.dumps({"schema": "krr-html-performance-release-bundle-v1",
+                "files": [{"originalPath": str(original), "relativePath": "copy",
+                           "sha256": gate.sha256(copy)}]}))
+            receipt = gate.read_json(second / "batch-receipt.json")
+            receipt["bundle"] = {"path": str(manifest), "sha256": gate.sha256(manifest)}
+            (second / "batch-receipt.json").write_text(json.dumps(receipt))
+            original.write_bytes(b"changed")
+        self.assertTrue(first.is_dir())
+        self.assertTrue(second.is_dir())
+        with retention.managed_output(self.root) as fresh:
+            self.seal(fresh, "fresh")
+        self.assertEqual(set(self.namespace.iterdir()), {fresh.parent})
+
     def test_successive_managed_runs_prune_only_superseded_legacy_stdout(self) -> None:
         legacy = self.root / "tmp/quality/owner"
 
