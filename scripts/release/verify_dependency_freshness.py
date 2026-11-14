@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -35,7 +36,9 @@ sys.path.insert(0, _loader_root)
 try:
     from html_performance_harness_dependency_closure import (
         RETAINED_UTF8_ITER_VERSION,
+        _harness_closure,
         load_pinned_parent_lock,
+        verify_harness_closure,
         verify_utf8_iter_retention,
     )
     from update_html_performance_harness_lock import retention_plan, verify_retained_packages
@@ -747,6 +750,18 @@ def _verified_ast_lint_hold(root: Path, metadata: dict[str, object]) -> bool:
             and resolved[0].get("version") == "0.5.3" and resolved[0].get("source") == registry)
 
 
+def _verified_harness_nix_retention(root: Path) -> bool:
+    lock = root / "scripts/html/performance-harness/Cargo.lock"
+    if lock.is_symlink() or not lock.is_file():
+        raise ValueError("HTML performance harness Cargo.lock is unavailable")
+    parent = load_pinned_parent_lock(root)
+    current = lock.read_bytes()
+    verify_harness_closure(parent, current, hashlib.sha256(parent).hexdigest())
+    _, roots, _ = _harness_closure(current)
+    nix = [item for item in roots if item[0] == "nix"]
+    return nix == [("nix", "0.31.3", "registry+https://github.com/rust-lang/crates.io-index")]
+
+
 def rust_manifest_dependencies(root: Path, coupled_skrifa_manifest: Path | None = None,
                                metadata: dict[str, object] | None = None) -> list[Package]:
     """Return direct registry requirements updated by ``cargo upgrade``."""
@@ -775,6 +790,12 @@ def rust_manifest_dependencies(root: Path, coupled_skrifa_manifest: Path | None 
             for declared_name, declaration in dependencies.items():
                 if not isinstance(declared_name, str):
                     raise ValueError(f"invalid Rust dependency name in {manifest}")
+                if (manifest == root / "scripts/html/performance-harness/Cargo.toml"
+                        and scope == "dependencies" and declared_name == "nix"
+                        and declaration == {"version": "0.31.3", "default-features": False,
+                                            "features": ["resource"]}
+                        and _verified_harness_nix_retention(root)):
+                    continue
                 if (
                     coupled_manifest is not None
                     and manifest.resolve() == coupled_manifest

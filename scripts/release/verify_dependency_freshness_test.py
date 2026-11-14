@@ -1229,6 +1229,44 @@ target-build = "=3.0.0"
             ):
                 self.assertEqual(freshness.rust_lock_is_latest_compatible(self.root), expected)
 
+    def test_harness_nix_retention_requires_matching_immutable_closure(self) -> None:
+        harness = self.root / "scripts/html/performance-harness"
+        harness.mkdir(parents=True)
+        (harness / "Cargo.toml").write_text(
+            '[dependencies]\nnix = { version = "0.31.3", default-features = false, features = ["resource"] }\n')
+        product = self.root / "crates/product/Cargo.toml"
+        product.parent.mkdir(parents=True)
+        product.write_text('[dependencies]\nnix = "0.31.3"\n')
+        registry = "registry+https://github.com/rust-lang/crates.io-index"
+        parent = (
+            'version = 4\n[[package]]\nname = "krr-html-performance-harness"\n'
+            'version = "0.1.0"\ndependencies = ["nix"]\n'
+            f'[[package]]\nname = "nix"\nversion = "0.31.3"\nsource = "{registry}"\n'
+            f'checksum = "{"a" * 64}"\n'
+        ).encode()
+        lock = harness / "Cargo.lock"
+        lock.write_bytes(parent)
+        with patch.object(freshness, "load_pinned_parent_lock", return_value=parent):
+            packages = freshness.rust_manifest_dependencies(self.root)
+            nix = [package for package in packages if package.name == "nix"]
+            self.assertEqual(len(nix), 1)
+            self.assertTrue(freshness.is_stale(nix[0], "0.32.0"))
+            product.unlink()
+            self.assertFalse(any(package.name == "nix" for package in freshness.rust_manifest_dependencies(self.root)))
+            lock.write_bytes(parent.replace(b"a" * 64, b"b" * 64))
+            with self.assertRaisesRegex(ValueError, "closure differs"):
+                freshness.rust_manifest_dependencies(self.root)
+            lock.unlink()
+            with self.assertRaisesRegex(ValueError, "Cargo.lock is unavailable"):
+                freshness.rust_manifest_dependencies(self.root)
+
+        changed = parent.replace(b'0.31.3', b'0.31.2')
+        lock.write_bytes(changed)
+        with patch.object(freshness, "load_pinned_parent_lock", return_value=changed):
+            nix = [package for package in freshness.rust_manifest_dependencies(self.root) if package.name == "nix"]
+            self.assertEqual(len(nix), 1)
+            self.assertTrue(freshness.is_stale(nix[0], "0.32.0"))
+
     def test_shared_dependency_retention_rejects_changed_root_or_harness_record(self) -> None:
         registry = "registry+https://github.com/rust-lang/crates.io-index"
         parent = (
