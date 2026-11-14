@@ -2047,6 +2047,13 @@ _ProgramCache = Callable[[str, str, _ProgramItems, _ProgramEndpoints, str | None
 _PROGRAM_CACHES: weakref.WeakKeyDictionary[types.FunctionType, _ProgramCache] = weakref.WeakKeyDictionary()
 
 
+def _matches_ancestor(root: Path, ancestor: str, head: str, *, git_query: GitQuery | None) -> bool:
+    try:
+        return git(root, "merge-base", ancestor, head, git_query=git_query).strip() == ancestor
+    except subprocess.CalledProcessError:
+        return False
+
+
 def _v3_authenticate_programs(root: Path, head: str, items: _ProgramItems,
                               endpoints: _ProgramEndpoints, *, git_query: GitQuery | None,
                               memory_policy_version: str | None = None) -> _ProgramItems:
@@ -2080,8 +2087,7 @@ def _v3_authenticate_programs(root: Path, head: str, items: _ProgramItems,
             continue
         live_data = _git_output(root, ("show", live_head + ":" + self_path), git_query=git_query)
         if (isinstance(live_data, bytes) and is_zero_scroll_transition_program(live_data)
-                and git(root, "merge-base", ZERO_SCROLL_MEASURED_HEAD, live_head,
-                        git_query=git_query).strip() == ZERO_SCROLL_MEASURED_HEAD):
+                and _matches_ancestor(root, ZERO_SCROLL_MEASURED_HEAD, live_head, git_query=git_query)):
             old_records = committed_records(root, ZERO_SCROLL_MEASURED_HEAD, git_query=git_query)
             live_records = committed_records(root, live_head, git_query=git_query)
             old_tree = _git_output(root, ("ls-tree", "-r", "-z", ZERO_SCROLL_MEASURED_HEAD), git_query=git_query)
@@ -2100,12 +2106,10 @@ def _v3_authenticate_programs(root: Path, head: str, items: _ProgramItems,
         try:
             base_data = _git_output(root, ("show", SAME_BINARY_REVIEWED_BASE + ":" + self_path),
                                     git_query=git_query)
-            base_ancestor = (git(root, "merge-base", SAME_BINARY_REVIEWED_BASE, live_head,
-                                 git_query=git_query).strip() == SAME_BINARY_REVIEWED_BASE)
         except subprocess.CalledProcessError:
-            base_ancestor = False
             base_data = None
-        if not base_ancestor or base_data == live_data:
+        if (base_data is None or base_data == live_data
+                or not _matches_ancestor(root, SAME_BINARY_REVIEWED_BASE, live_head, git_query=git_query)):
             pending.append((live_head, live_items))
             continue
         require(isinstance(base_data, bytes) and isinstance(live_data, bytes)
