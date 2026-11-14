@@ -287,8 +287,11 @@ class SourceReuseTest(unittest.TestCase):
         self_path = "scripts/release/html_performance_source_reuse.py"
         addition = "scripts/build/cargo_capacity_guard_root_scope_test.py"
         old = subprocess.check_output(["git", "-C", str(repository), "show", base + ":" + self_path])
-        current = (repository / self_path).read_bytes()
-        added = (repository / addition).read_bytes()
+        current, added = (
+            subprocess.check_output(["git", "-C", str(repository), "show",
+                                     self.reviewed_program_migration_head + ":" + path])
+            for path in (self_path, addition)
+        )
         def record(data: bytes) -> tuple[str, int]:
             return hashlib.sha256(data).hexdigest(), len(data)
         base_records = {self_path: record(old)}
@@ -408,13 +411,16 @@ class SourceReuseTest(unittest.TestCase):
         path = "scripts/release/html_performance_source_reuse.py"
         old = subprocess.check_output(["git", "-C", str(repository), "show",
                                        reuse.SAME_BINARY_REVIEWED_BASE + ":" + path])
-        current = (repository / path).read_bytes()
+        current = subprocess.check_output(["git", "-C", str(repository), "show",
+                                           self.reviewed_program_migration_head + ":" + path])
         def check(data: bytes, mode: str = "100644") -> bool:
             return reuse.reviewed_same_binary_migration(path, old, data,
                                                         old_mode="100644", new_mode=mode)
         self.assertTrue(check(current))
         self.assertFalse(check(current + b"\n# unknown\n"))
-        self.assertFalse(check(current.replace(reuse.SELF_MODULE_CANONICAL_SHA256.encode(), b"f" * 64, 1)))
+        pin_key = b'SELF_MODULE_CANONICAL_SHA256 = "'
+        self.assertIn(pin_key, current)
+        self.assertFalse(check(current.replace(pin_key, pin_key + b"f", 1)))
         self.assertFalse(check(current + b'\nSELF_MODULE_CANONICAL_SHA256 = "' + b"0" * 64 + b'"\n'))
         self.assertFalse(check(current, "100755"))
         self.assertFalse(reuse.reviewed_same_binary_migration(path, old + b" ", current,

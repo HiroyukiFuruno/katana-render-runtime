@@ -4423,6 +4423,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         result = _condition_result(measurement_policy)
         if row["catalog"]:
             result["catalogCondition"] = expected["catalogCondition"]
+            import html_performance_memory_evidence as memory_evidence
             import html_performance_retention_collection as retention_collection
 
             worker_environment = _performance_worker_environment(
@@ -4437,7 +4438,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 )
                 expected["memoryRetentionRef"] = retention_pin
                 retention_transport_pins.extend(retention_refs)
-                result["memoryPolicy"] = retention_collection.policy(
+                result["memoryPolicy"] = memory_evidence.evaluate_retention_record(
                     reports, cast(gate.JsonObject, expected), result,
                     policy_version=memory_policy.CURRENT_ACCEPTANCE_POLICY_VERSION,
                 )

@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import html_performance_memory_evidence as memory
+import html_performance_memory_policy as memory_policy
 import html_performance_retention_capture as capture
 import html_performance_retention_collection as collection
 import html_performance_retention_evidence as evidence
@@ -57,7 +58,7 @@ class RetentionCollectionAdapterTests(unittest.TestCase):
             with patch.object(memory, "evaluate_paired") as paired, \
                  patch.object(memory, "evaluate_candidate_only") as candidate_only:
                 with self.assertRaisesRegex(ValueError, "retention observation changed"):
-                    collection.policy([], expected, {"comparisonStatus": "paired"})
+                    memory.evaluate_retention_record([], expected, {"comparisonStatus": "paired"})
             paired.assert_not_called()
             candidate_only.assert_not_called()
 
@@ -75,12 +76,12 @@ class RetentionCollectionAdapterTests(unittest.TestCase):
             candidate_policy: gate.JsonObject = {"policyPass": True}
             with patch.object(memory, "evaluate_paired", return_value=paired_policy) as paired, \
                  patch.object(memory, "evaluate_candidate_only", return_value=candidate_policy) as candidate_only:
-                self.assertIs(collection.policy(reports, expected, paired_result), paired_policy)
-                self.assertIs(collection.policy(reports, expected, candidate_result), candidate_policy)
+                self.assertIs(memory.evaluate_retention_record(reports, expected, paired_result), paired_policy)
+                self.assertIs(memory.evaluate_retention_record(reports, expected, candidate_result), candidate_policy)
 
             retained = [100.0, 110.0]
-            paired.assert_called_once_with(reports, expected, retained)
-            candidate_only.assert_called_once_with(reports[:1], expected, retained)
+            paired.assert_called_once_with(reports, expected, retained, policy_version=memory_policy.POLICY_VERSION)
+            candidate_only.assert_called_once_with(reports[:1], expected, retained, policy_version=memory_policy.POLICY_VERSION)
 
 
 if __name__ == "__main__":

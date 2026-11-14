@@ -17,6 +17,23 @@ import html_performance_memory_policy as memory
 import verify_html_performance_evidence as gate
 
 
+def evaluate_retention_record(
+    reports: list[Path], expected: gate.JsonObject, result: gate.JsonObject,
+    *, policy_version: str = memory.POLICY_VERSION,
+) -> gate.JsonObject:
+    """Compute the provisional value that the final validator must reproduce."""
+    reference = gate._object(expected["memoryRetentionRef"], "retention reference")
+    path = Path(gate._text(reference["path"], "retention path"))
+    gate.require(gate.sha256(path) == reference["sha256"], "retention observation changed")
+    record = gate.read_json(path)
+    retained = [gate._number(value, "retained RSS")
+                for value in gate._array(record["retainedRssBytes"], "retained RSS samples")]
+    if result.get("comparisonStatus") == "nonComparable":
+        candidates = [path for path in reports if path.name.startswith("candidate-")]
+        return evaluate_candidate_only(candidates, expected, retained, policy_version=policy_version)
+    return evaluate_paired(reports, expected, retained, policy_version=policy_version)
+
+
 def _validated_samples(reports: Mapping[int, gate.JsonObject]) -> list[gate.JsonObject]:
     samples: list[gate.JsonObject] = []
     for pair in range(5):
