@@ -66,10 +66,10 @@ fn observe(events: impl FnOnce()) -> anyhow::Result<CaptureState> {
         state: Arc::clone(&state),
     };
     tracing::subscriber::with_default(subscriber, events);
-    Arc::try_unwrap(state)
-        .map_err(|_| anyhow::anyhow!("protocol subscriber escaped"))?
-        .into_inner()
-        .map_err(|_| anyhow::anyhow!("protocol lock poisoned"))
+    let mut captured = state
+        .lock()
+        .map_err(|_| anyhow::anyhow!("protocol lock poisoned"))?;
+    Ok(std::mem::replace(&mut *captured, CaptureState::new()))
 }
 
 fn rejected(state: CaptureState, reason: &str) -> anyhow::Result<()> {
@@ -169,15 +169,17 @@ fn poisoned_capture_lock_discards_tracing_event() -> anyhow::Result<()> {
     };
     let value = request_json(false);
     tracing::subscriber::with_default(subscriber, || request(&value, 4));
-    let state = Arc::try_unwrap(state)
-        .map_err(|_| anyhow::anyhow!("poisoned subscriber escaped"))?
-        .into_inner()
+    let mut state = state
+        .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     ensure!(
         state.request.is_none(),
         "event recorded through poisoned lock"
     );
-    rejected(state, "not observed")
+    rejected(
+        std::mem::replace(&mut *state, CaptureState::new()),
+        "not observed",
+    )
 }
 
 fn poison_capture_lock(state: &Arc<Mutex<CaptureState>>) -> anyhow::Result<()> {
