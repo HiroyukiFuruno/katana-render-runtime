@@ -698,7 +698,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "3d7a428b40c8480fc5d458371cb84da4485f807bf35d99f63feeff5baf3cd830"
+SELF_MODULE_CANONICAL_SHA256 = "4536796c3d859c8a1309d0f91745fa4e42370825d5610fdcde87587775bfda8c"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":
