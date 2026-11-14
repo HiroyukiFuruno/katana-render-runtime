@@ -15,6 +15,7 @@ from pathlib import Path
 import native_coverage_local_anchor as anchor
 import runtime_script_definitions_inputs as definitions
 import runtime_script_identity as identity_collector
+import runtime_script_interrupt as interrupt
 import runtime_script_junit_outputs as junit_outputs
 import runtime_script_producer as producer_runner
 import runtime_script_profiles as profiles
@@ -341,7 +342,7 @@ def ensure_current(repo: Path, producer: str = PRODUCER) -> dict[str, object]:
     return report
 
 
-def main(argv: list[str] | None = None) -> int:
+def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "operation", choices=("key", "validate", "validate-all", "ensure-all", "run", "ensure")
@@ -364,10 +365,17 @@ def main(argv: list[str] | None = None) -> int:
         else:
             report = operations[args.operation](args.repo)
     except (result.RuntimeScriptResultError, producer_runner.RuntimeScriptProducerError, OSError, ValueError) as error:
+        interrupt.raise_if_interrupted()
         print(str(error), file=sys.stderr)
         return 1
+    interrupt.raise_if_interrupted()
     print(json.dumps(report, sort_keys=True, separators=(",", ":")))
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    with interrupt.interruptible():
+        return _main(argv)
 
 
 if __name__ == "__main__":

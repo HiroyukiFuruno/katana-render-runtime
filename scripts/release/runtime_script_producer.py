@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 import native_coverage_local_anchor as anchor
+import runtime_script_interrupt as interrupt
 import runtime_script_junit as junit
 import runtime_script_junit_outputs as junit_outputs
 import runtime_script_junit_publish as junit_publish
@@ -153,6 +154,7 @@ def run_runtime_script(
         identity_sha256 = result.build_identity(producer, input_sha256)
     except result.RuntimeScriptResultError as error:
         raise RuntimeScriptProducerError(str(error)) from error
+    interrupt.raise_if_interrupted()
     lease_path, lease_device, lease_inode = _lease(repo, producer)
     try:
         epoch = anchor.prepare(repo, producer, identity_sha256)
@@ -178,6 +180,7 @@ def run_runtime_script(
     reaped = True
     try:
         for index, argv in enumerate(recipe.commands, start=1):
+            interrupt.raise_if_interrupted()
             expected = _expected_files(argv, producer)
             actual_argv = (*argv, "--reporter=junit", "--reporter-outfile", plan.paths[index - 1])
             _write_exclusive(
@@ -201,7 +204,7 @@ def run_runtime_script(
                 raise RuntimeScriptProducerError("Bun producer could not start") from error
             try:
                 reaped = False
-                actual_exit = child.wait()
+                actual_exit = interrupt.wait_for_child(child)
                 reaped = True
             finally:
                 stdout.close()
@@ -210,6 +213,7 @@ def run_runtime_script(
                 raw_directory / f"group-{index:03}-exit.txt",
                 f"{actual_exit}\n".encode(),
             )
+            interrupt.raise_if_interrupted()
             if actual_exit is None:
                 raise RuntimeScriptProducerError("Bun producer exit status is unavailable")
             process_exit = actual_exit
@@ -225,9 +229,11 @@ def run_runtime_script(
                     raise RuntimeScriptProducerError(str(error)) from error
         if process_exit != 0:
             raise RuntimeScriptProducerError(f"Bun producer failed with exit {process_exit}")
+        interrupt.raise_if_interrupted()
         reports = tuple(junit_publish.publish_current_reports(repo, plan, process_exit))
         receipt = result.make_receipt(producer, identity_sha256, epoch, list(reports), process_exit)
         receipt_path = repo / result.RECEIPT_DIRECTORY / f"{producer}.json"
+        interrupt.raise_if_interrupted()
         result.commit_receipt(repo, producer, identity_sha256, epoch, receipt_path, receipt)
         return RuntimeScriptRun(
             producer,

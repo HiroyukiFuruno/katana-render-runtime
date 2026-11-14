@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -16,6 +20,57 @@ import runtime_script_result_verify as result_verify
 
 
 class RuntimeScriptProducerTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "posix", "SIGTERM requires POSIX signal delivery")
+    def test_sigterm_reaps_child_and_releases_profile_lease(self) -> None:
+        with self._repo() as directory:
+            repo = Path(directory).resolve()
+            fixture = repo / "scripts/runtime-bundles/one_test.ts"
+            fixture.write_text(
+                'import { test } from "bun:test";\n'
+                'test("wait", async () => {\n'
+                '  process.on("SIGTERM", () => {});\n'
+                '  await Bun.write("child-ready", String(process.pid));\n'
+                '  setInterval(() => {}, 1000);\n'
+                '  await new Promise(() => {});\n'
+                '}, 60000);\n', encoding="utf-8"
+            )
+            script = (
+                "from pathlib import Path\n"
+                "import runtime_script_interrupt as interrupt\n"
+                "import runtime_script_producer as producer\n"
+                "import runtime_script_recipe as recipe\n"
+                "import sys\n"
+                "with interrupt.interruptible():\n"
+                " producer.run_runtime_script(Path(sys.argv[1]), "
+                "'runtime-unused-script-regression', 'b' * 64, "
+                "recipe.RuntimeScriptRecipe('run', 'a' * 64, (("
+                "'bun', 'test', '--path-ignore-patterns', 'tmp/**', "
+                "'./scripts/runtime-bundles/one_test.ts'),)))\n"
+            )
+            child = subprocess.Popen(
+                [sys.executable, "-c", script, str(repo)], cwd=Path(__file__).parent
+            )
+            try:
+                marker = repo / "child-ready"
+                deadline = time.monotonic() + 15
+                while not marker.exists() and child.poll() is None and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue(marker.exists(), "Bun child did not start")
+                bun_pid = int(marker.read_text())
+                child.send_signal(signal.SIGTERM)
+                self.assertEqual(child.wait(timeout=15), 128 + signal.SIGTERM)
+                lease = repo / "tmp/quality/runtime-script-results/.runtime-unused-script-regression.lease"
+                self.assertFalse(lease.exists())
+                exits = list((lease.parent / "raw").glob("run-*/group-001-exit.txt"))
+                self.assertEqual(len(exits), 1)
+                self.assertEqual(int(exits[0].read_text()), -signal.SIGKILL)
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(bun_pid, 0)
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                    child.wait()
+
     def _repo(self) -> tempfile.TemporaryDirectory[str]:
         temporary = tempfile.TemporaryDirectory()
         subprocess.run(["git", "init", "--quiet"], cwd=temporary.name, check=True)
