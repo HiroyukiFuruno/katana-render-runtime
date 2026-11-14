@@ -57,21 +57,22 @@ def _sealed_candidate(run: Path, checksum: str) -> bool:
     return bool(completed) and bundle == {"path": str(run / _MANIFEST), "sha256": checksum}
 
 
-def _candidate_dependencies(namespace: Path, candidate: Path) -> set[Path]:
+def _formal_candidate(candidate: Path) -> bool:
     receipt = gate.read_json(candidate / _RECEIPT)
     completed = gate._array(receipt.get("completeConditionIds"), "completed conditions")
     conditions = receipt.get("conditionIds")
-    bundle = gate.Bundle(candidate / "measurement/bundle")
     if (receipt.get("formalAccepted") is True and isinstance(conditions, list)
-            and len(conditions) == 84 and len(set(conditions)) == 84 and completed == conditions):
+            and len(conditions) == 84 and len(set(conditions)) == 84 and completed == conditions
+            and _regular(candidate / "measurement/bundle/producer-verification.json")):
         from html_performance_remote_evidence import validate_producer_verification_receipt
+        validate_producer_verification_receipt(candidate / "measurement/bundle",
+                                               gate._text(receipt.get("head"), "batch HEAD"))
+        return True
+    return False
 
-        try:
-            validate_producer_verification_receipt(bundle.directory, gate._text(receipt.get("head"), "batch HEAD"))
-        except (ValueError, OSError, KeyError, TypeError):
-            pass
-        else:
-            return set()
+
+def _candidate_dependencies(namespace: Path, candidate: Path) -> set[Path]:
+    bundle = gate.Bundle(candidate / "measurement/bundle")
     dependencies: set[Path] = set()
     for original, (_, checksum) in bundle.files.items():
         path = Path(original)
@@ -90,7 +91,18 @@ def _candidate_dependencies(namespace: Path, candidate: Path) -> set[Path]:
     return dependencies
 
 
-def _prune(namespace: Path, active: str, *, newest: Path | None = None) -> None:
+def _prune(namespace: Path, active: str, *, newest: Path | None = None) -> Path | None:
+    from cargo_capacity_guard import collect_protected_references
+
+    reserved: set[Path] = set()
+    for raw in collect_protected_references([], os.environ.get("CARGO_CAPACITY_PROTECTED_REFS")):
+        path = Path(raw)
+        resolved = path.resolve(strict=True)
+        reserved.update((path, resolved))
+
+    def protected(path: Path) -> bool:
+        return any(ref.is_relative_to(path) or path.is_relative_to(ref) for ref in reserved)
+
     runs = [run for run in namespace.iterdir() if _RUN.fullmatch(run.name)]
     marked: list[Path] = []
     candidates: list[Path] = []
@@ -102,10 +114,11 @@ def _prune(namespace: Path, active: str, *, newest: Path | None = None) -> None:
         checksum = gate.sha256(manifest)
         marker = run / _CANDIDATE
         if checksum == active:
-            marker.unlink(missing_ok=True)
+            if not protected(marker):
+                marker.unlink(missing_ok=True)
             marked.append(run)
         elif _sealed_candidate(run, checksum):
-            if run == newest:
+            if run == newest and not protected(marker):
                 with marker.open("x", encoding="ascii") as output:
                     output.write(checksum)
             if _regular(marker) and marker.read_bytes() == checksum.encode("ascii"):
@@ -115,13 +128,21 @@ def _prune(namespace: Path, active: str, *, newest: Path | None = None) -> None:
     )
     baseline = min(marked, default=None)
     try:
-        dependencies = _candidate_dependencies(namespace, candidate) if candidate is not None else set()
+        formal_candidates = [run for run in candidates if _formal_candidate(run)]
+        formal = max(formal_candidates, key=lambda run: ((run / _RECEIPT).stat().st_mtime_ns, run.name),
+                     default=None)
+        dependencies = (_candidate_dependencies(namespace, candidate)
+                        if candidate is not None and candidate != formal else set())
     except (ValueError, OSError, KeyError, TypeError):
         # 参照が壊れている場合は安全に削除対象を特定できない。
-        return
+        return None
     for run in runs:
-        if run not in (baseline, candidate) and run not in dependencies:
+        if (run not in (baseline, candidate, formal) and run not in dependencies
+                and not protected(run)):
             shutil.rmtree(run)
+    if formal is None or formal == candidate:
+        return candidate
+    return None
 
 
 def _register_baseline(namespace: Path, source: Path, active: str) -> None:
@@ -234,8 +255,8 @@ def managed_output(root: Path, *, baseline: Path | None = None) -> Iterator[Path
     try:
         yield run / "measurement"
     finally:
-        _prune(namespace, active, newest=run)
-        if _regular(run / _CANDIDATE):
+        candidate = _prune(namespace, active, newest=run)
+        if candidate == run and _regular(run / _CANDIDATE):
             from html_performance_legacy_stdout import prune
 
             prune(root, active, run / _MANIFEST, apply=True)

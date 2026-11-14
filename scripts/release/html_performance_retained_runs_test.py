@@ -69,6 +69,75 @@ class RetainedRunsTest(unittest.TestCase):
             self.seal(replacement, "replacement")
         self.assertEqual(set(self.namespace.iterdir()), {candidate.parent, replacement.parent})
 
+    def test_cleanup_preserves_reserved_proof_and_reclaims_unreserved_runs(self) -> None:
+        with retention.managed_output(self.root) as output:
+            self.seal(output, "reserved")
+            proof = output / "proof"
+            proof.write_bytes(b"protected")
+        original = proof.stat()
+        with patch.dict(os.environ, {"CARGO_CAPACITY_PROTECTED_REFS": json.dumps([str(proof)])}):
+            with retention.managed_output(self.root) as older:
+                self.seal(older, "superseded")
+            with retention.managed_output(self.root) as current:
+                self.seal(current, "current")
+        self.assertEqual(proof.stat(), original)
+        self.assertEqual(proof.read_bytes(), b"protected")
+        self.assertFalse(older.parent.exists())
+        self.assertTrue(current.parent.is_dir())
+
+    def test_cleanup_rejects_absent_or_invalid_protected_reference_before_removal(self) -> None:
+        self.namespace.mkdir(parents=True)
+        interrupted = self.namespace / ("run-" + "f" * 32)
+        interrupted.mkdir()
+        for value in (json.dumps([str(interrupted / "missing")]), "invalid JSON"):
+            with self.subTest(value=value):
+                with patch.dict(os.environ, {"CARGO_CAPACITY_PROTECTED_REFS": value}):
+                    with self.assertRaises((FileNotFoundError, RuntimeError)):
+                        retention.reconcile_reference(self.root)
+                self.assertTrue(interrupted.is_dir())
+    def test_formal_candidate_survives_partial_and_failure_until_successor_verified(self) -> None:
+        with retention.managed_output(self.root) as baseline:
+            self.mark(self.seal(baseline, "baseline"))
+
+        def formal(output: Path, head: str) -> None:
+            bundle = output / "bundle"
+            bundle.mkdir(parents=True)
+            manifest = bundle / "bundle.json"
+            manifest.write_text(json.dumps({"schema": "krr-html-performance-release-bundle-v1",
+                                            "head": head, "attempts": [{}] * 84, "files": []}))
+            ids = list(map(str, range(84)))
+            (output / "batch-receipt.json").write_text(json.dumps({
+                "schema": "krr-html-performance-batch-receipt-v2", "status": "closed", "head": head,
+                "conditionIds": ids, "completeConditionIds": ids, "formalAccepted": True,
+                "bundle": {"path": str(manifest), "sha256": gate.sha256(manifest)},
+            }))
+
+        def verify(output: Path, head: str) -> None:
+            producer.write_formal_verification_receipt(output / "bundle", head, {
+                "head": head, "conditions": 84, "candidateConditions": 84, "checks": 1680,
+                "htmlStage90": {"acceptance": True, "fontIdentityEquivalence": "established"},
+                "performanceNonregression": True,
+            })
+
+        with retention.managed_output(self.root) as old:
+            formal(old, "old")
+        verify(old, "old")
+        identity = (old / "bundle/bundle.json").stat().st_ino
+        with retention.managed_output(self.root) as partial:
+            self.seal(partial, "partial")
+        self.assertEqual((old / "bundle/bundle.json").stat().st_ino, identity)
+        with self.assertRaises(RuntimeError):
+            with retention.managed_output(self.root):
+                raise RuntimeError("interrupted")
+        self.assertTrue(old.exists())
+        self.assertTrue(partial.exists())
+        with retention.managed_output(self.root) as successor:
+            formal(successor, "new")
+        self.assertTrue(old.exists())
+        verify(successor, "new")
+        retention.reconcile_reference(self.root)
+        self.assertEqual(set(self.namespace.iterdir()), {baseline.parent, successor.parent})
+
     def test_resume_keeps_originals_until_formally_complete(self) -> None:
         with retention.managed_output(self.root) as baseline:
             self.mark(self.seal(baseline, "baseline"))
