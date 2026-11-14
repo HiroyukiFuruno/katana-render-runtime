@@ -135,6 +135,13 @@ function addV4Record(history: PerformanceHistory): PerformanceHistoryRecord {
   return record;
 }
 
+function addV5Record(history: PerformanceHistory): PerformanceHistoryRecord {
+  const record = addV4Record(history);
+  record.id = "html-memory-v5-record";
+  record.memoryPolicy = { ...validMemoryPolicyV4(record), version: "html-memory-v5" };
+  return record;
+}
+
 function runHistoryCli(args: string[]): ReturnType<typeof Bun.spawnSync> {
   return Bun.spawnSync(["bun", path.join(import.meta.dir, "performance-history-cli.ts"), ...args], {
     cwd: root,
@@ -280,6 +287,13 @@ test("rejects malformed or incomplete v3 memory policy evidence", () => {
 
 test("rejects malformed or incomplete v4 memory policy evidence", () => {
   expectInvalidMemoryPolicyChanges(addV4Record);
+});
+
+test("accepts v5 evidence and rejects incomplete condition coverage", () => {
+  const history = fixture();
+  const record = addV5Record(history);
+  expect(parsePerformanceHistory(history).records.at(-1)).toEqual(record);
+  expectInvalidMemoryPolicyChanges(addV5Record);
 });
 
 test("rejects a reference that does not meet its recorded acceptance", () => {

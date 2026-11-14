@@ -27,6 +27,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 
 import verify_html_performance_evidence as gate
 import html_performance_inventory as inventory_ops
+import html_performance_memory_policy as memory_policy
 import html_performance_host_load as host_load
 import html_performance_host_load_validation as load_validation
 import html_performance_reference as reference
@@ -1164,7 +1165,7 @@ def load_closed_batch(
             accepted_attempts.append(attempt)
             if accepted_condition_ids_sink is not None:
                 accepted_condition_ids_sink.append(_attempt_condition_id(bundle, attempt))
-    if memory_policy_version != "html-memory-v4":
+    if memory_policy_version not in memory_policy.REASSESSMENT_POLICY_VERSIONS:
         attempts = accepted_attempts
     _verify_completed_host_load(bundle, root, attempts, git_query=git_query)
     if shared_source is not None and shared_before is not None:
@@ -1324,7 +1325,8 @@ def _verify_and_seal_catalog_batch(
                      "fixed epoch requires final current-build verification")
         if batch_failure is None and formal_ready:
             verified = (gate._verify_catalog_diagnostic(bundle, root, git_query=git_query) if diagnostic else
-                        gate.verify(bundle, root, git_query=git_query, memory_policy_version="html-memory-v4"))
+                        gate.verify(bundle, root, git_query=git_query,
+                                    memory_policy_version=memory_policy.CURRENT_ACCEPTANCE_POLICY_VERSION))
             tracked_seal()
             return verified
 
@@ -1345,7 +1347,8 @@ def _verify_and_seal_catalog_batch(
                                  == "krr-html-performance-source-epoch-v3", "legacy epoch attempt cannot be sealed")
                 gate.validate_attempt(
                     current_bundle, root, dict(attempt), git_query=git_query,
-                    validated_builds=validated_builds, memory_policy_version="html-memory-v4",
+                    validated_builds=validated_builds,
+                    memory_policy_version=memory_policy.CURRENT_ACCEPTANCE_POLICY_VERSION,
                 )
                 completed_attempts.append(attempt)
         _verify_completed_host_load(current_bundle, root, completed_attempts, git_query=git_query)
@@ -1986,11 +1989,11 @@ def _batch_policy_accepted(
     non_comparable_ids: set[str] = set()
     for result in results:
         policy = gate._object(result.get("policy"), "condition policy")
-        memory_policy = result.get("memoryPolicy")
-        if memory_policy is not None:
-            memory = gate._object(memory_policy, "memory policy")
+        saved_memory = result.get("memoryPolicy")
+        if saved_memory is not None:
+            memory = gate._object(saved_memory, "memory policy")
             retention = gate._object(memory.get("retention"), "retention policy")
-            if (memory.get("version") not in ("html-memory-v2", "html-memory-v3", "html-memory-v4")
+            if (memory.get("version") not in memory_policy.SUPPORTED_POLICY_VERSIONS
                     or retention.get("retention_allowed") is not True
                     or (result.get("comparisonStatus") == "paired"
                         and memory.get("policyPass") is not True)):
@@ -2013,7 +2016,7 @@ def _batch_policy_accepted(
             non_comparable_ids.add(condition_id)
             continue
         if (result.get("comparisonStatus") != "paired" or policy.get("status") is not None
-                or (memory_policy is None and policy.get("policyPass") is not True)):
+                or (saved_memory is None and policy.get("policyPass") is not True)):
             return False
     if len(results) == 84:
         return (not non_comparable_ids
@@ -3802,7 +3805,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     if resume_batch is not None:
         resumed_receipt, resumed_bundle, resumed_attempts = load_closed_batch(
             resume_batch.resolve(), root, fixed_epoch=fixed_epoch, git_query=git_query,
-            memory_policy_version="html-memory-v4",
+            memory_policy_version=memory_policy.CURRENT_ACCEPTANCE_POLICY_VERSION,
             accepted_condition_ids_sink=resumed_accepted_ids,
         )
         _require_cpu_busy_resume(resumed_bundle, resumed_attempts)
@@ -4436,6 +4439,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 retention_transport_pins.extend(retention_refs)
                 result["memoryPolicy"] = retention_collection.policy(
                     reports, cast(gate.JsonObject, expected), result,
+                    policy_version=memory_policy.CURRENT_ACCEPTANCE_POLICY_VERSION,
                 )
             except BaseException as error:
                 if not batch_mode:
@@ -4645,7 +4649,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
                 gate._require_v2_memory_policy(
                     current_bundle, attempt_expected, result, paths,
                     non_comparable=result.get("comparisonStatus") == "nonComparable",
-                    policy_version="html-memory-v4", policy_sink=evaluated,
+                    policy_version=memory_policy.CURRENT_ACCEPTANCE_POLICY_VERSION, policy_sink=evaluated,
                     assessment_sink=reassessments, allow_rejected=True,
                 )
                 gate.require(len(evaluated) == 1, "memory policy evaluation is missing")
@@ -4669,7 +4673,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             ),
             "phaseRecords": _saved_phase_record_count(comparison_results),
             "batchFailure": type(batch_failure).__name__ if batch_failure else None,
-            "memoryPolicyVersion": "html-memory-v4",
+            "memoryPolicyVersion": memory_policy.CURRENT_ACCEPTANCE_POLICY_VERSION,
             "memoryPolicyAssessments": reassessments,
         }
         if catalog_manifest_path is not None:

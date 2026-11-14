@@ -159,7 +159,7 @@ class ActiveReferenceTest(unittest.TestCase):
             )
 
         invalid_policy_values: tuple[tuple[str, object], ...] = (
-            ("version", "html-memory-v5"),
+            ("version", "html-memory-v6"),
             ("policySha256", "A" * 64),
             ("retentionEvidenceSha256", "bad"),
             ("candidateConditions", 83),
@@ -245,6 +245,29 @@ class ActiveReferenceTest(unittest.TestCase):
         records = history["records"]
         assert isinstance(records, list) and isinstance(records[0], dict)
         records[0]["memoryPolicy"] = self.memory_policy_v4()
+        legacy = dict(records[0])
+        legacy["id"] = "legacy"
+        legacy.pop("memoryPolicy")
+        records.append(legacy)
+        selected = reference.active_reference_at_commit(
+            Path("/fixture"), "b" * 40, self.history_query(history),
+        )
+        self.assertEqual(selected.record_id if selected else None, "first")
+        for field in ("candidateConditions", "acceptedConditions"):
+            malformed = json.loads(json.dumps(history))
+            malformed["records"][0]["memoryPolicy"][field] = 83
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                reference.active_reference_at_commit(
+                    Path("/fixture"), "b" * 40, self.history_query(malformed),
+                )
+
+    def test_v5_reference_accepts_mixed_legacy_history_and_rejects_bad_counts(self) -> None:
+        history = self.history()
+        history["schema"] = "krr-html-performance-history-v2"
+        history["activeReferenceSelectionNote"] = "V4 assessment with legacy records retained"
+        records = history["records"]
+        assert isinstance(records, list) and isinstance(records[0], dict)
+        records[0]["memoryPolicy"] = {**self.memory_policy_v4(), "version": "html-memory-v5"}
         legacy = dict(records[0])
         legacy["id"] = "legacy"
         legacy.pop("memoryPolicy")

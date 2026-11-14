@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Never, NamedTuple
 
+import html_performance_memory_evidence as memory_evidence
+import html_performance_memory_policy as memory_policy
 import html_performance_paired_stats as statistics
 import html_performance_python_identity as python_identity
 import html_performance_retained_runs as retention
@@ -64,19 +66,18 @@ def _measure(bundle: gate.Bundle, result: gate.JsonObject) -> tuple[bool, gate.J
         expected = bundle.json(attempt["expected"])
         pins = gate._objects(expected["reportPins"], "promotion report pins")
         grouped = gate._group_reports([bundle.file(pin) for pin in pins], expected)
+        baseline_samples = memory_evidence._validated_samples(grouped["baseline"])
+        candidate_samples = memory_evidence._validated_samples(grouped["candidate"])
+        no_scroll = (result.get("memoryPolicyVersion") == memory_policy.ZERO_SCROLL_POLICY_VERSION
+                     and memory_evidence._proven_no_scroll(baseline_samples)
+                     and memory_evidence._proven_no_scroll(candidate_samples))
         for phase in gate.PHASES:
+            no_scroll_phase = no_scroll and phase == "full_y"
+            baseline_values = memory_evidence._phase_values(baseline_samples, phase, no_scroll=no_scroll_phase)
+            candidate_values = memory_evidence._phase_values(candidate_samples, phase, no_scroll=no_scroll_phase)
             for index in range(2):
-                samples = {
-                    arm: [gate._phase_sample(sample, phase)[index]
-                          for pair in range(5)
-                          for sample in gate._objects(grouped[arm][pair]["samples"], "samples")]
-                    for arm in ("baseline", "candidate")
-                }
-                baseline, candidate = samples["baseline"], samples["candidate"]
-                memory_policy_version = result.get("memoryPolicyVersion")
-                if index == 0 or memory_policy_version not in (
-                    "html-memory-v2", "html-memory-v3", "html-memory-v4",
-                ):
+                baseline, candidate = baseline_values[index], candidate_values[index]
+                if index == 0 or result.get("memoryPolicyVersion") not in memory_policy.SUPPORTED_POLICY_VERSIONS:
                     improvement |= _compare(baseline, candidate)
                 else:
                     rss_nonregression &= not statistics.evaluate_paired_regression(
@@ -106,7 +107,7 @@ def _verified_reuse(request: Path, root: Path, directory: Path, manifest_sha: st
     result = reuse.verify_reuse_request(
         request, root, expected_measured_dir=directory,
         expected_measured_manifest_sha256=manifest_sha, expected_request_sha256=request_sha,
-        memory_policy_version="html-memory-v4",
+        memory_policy_version="html-memory-v5",
     )
     gate.require(result.get("reuseEligibility") is True, "performance reuse is not eligible")
     return result
@@ -123,8 +124,8 @@ def improvement_established(directory: Path, root: Path, *, reuse_request: Path 
                    if reuse_request is not None and request_sha is not None else None)
     result = (gate._object(eligibility.get("measuredResult"), "reused measured result")
               if eligibility is not None else
-              gate.verify(directory, root, memory_policy_version="html-memory-v4"))
-    gate._require_cli_memory_v4(result, reused=False)
+              gate.verify(directory, root, memory_policy_version="html-memory-v5"))
+    gate._require_cli_memory_v5(result, reused=False)
     gate.require(gate.sha256(directory / "bundle.json") == manifest_sha,
                  "promotion bundle changed during verification")
     improvement, _ = _measure(gate.Bundle(directory), result)
@@ -184,14 +185,16 @@ def _memory_policy_record(bundle: gate.Bundle, result: gate.JsonObject) -> gate.
             "candidateConditions": 84, "acceptedConditions": 84,
             "warmupCycles": 5, "measuredCycles": 25,
         }}
-    gate.require(version in ("html-memory-v3", "html-memory-v4"), "promotion memory policy version differs")
+    gate.require(version in ("html-memory-v3", "html-memory-v4", "html-memory-v5"), "promotion memory policy version differs")
     assessments = gate._objects(result["memoryPolicyAssessments"], "memory policy assessments")
     gate.require(len(assessments) == 84, "memory policy assessment count differs")
     fields = {"conditionId", "version", "policySha256", "retentionSha256",
               "originalPolicyVersion", "originalPolicySha256"}
     original_versions = (("html-memory-v2", "html-memory-v3")
                          if version == "html-memory-v3" else
-                         ("html-memory-v2", "html-memory-v3", "html-memory-v4"))
+                         ("html-memory-v2", "html-memory-v3", "html-memory-v4")
+                         if version == "html-memory-v4" else
+                         ("html-memory-v2", "html-memory-v3", "html-memory-v4", "html-memory-v5"))
     condition_ids: list[str] = []
     for assessment in assessments:
         gate.require(set(assessment) == fields
@@ -298,7 +301,7 @@ def _promote(directory: Path, root: Path, evidence_directory: Path, run_id: str,
     stderr_path = evidence_directory / "verifier.stderr"
     argv = [sys.executable, str(root / "scripts/release/verify_html_performance_evidence.py"),
             "--repo", str(root), "--evidence-dir", str(directory),
-            "--require-memory-policy-v4"]
+            "--require-memory-policy-v5"]
     if reuse_request is not None:
         argv.extend(["--reuse-request", str(reuse_request)])
     with (evidence_directory / "command.json").open("x", encoding="utf8") as command:
@@ -317,7 +320,7 @@ def _promote(directory: Path, root: Path, evidence_directory: Path, run_id: str,
     if eligibility is not None:
         gate.require(verified == eligibility, "performance reuse verification differs")
         verified = gate._object(verified.get("measuredResult"), "reused measured result")
-    gate._require_cli_memory_v4(verified, reused=False)
+    gate._require_cli_memory_v5(verified, reused=False)
     bundle = gate.Bundle(directory)
     improvement, phases = _measure(bundle, verified)
     gate.require(dict(os.environ) == execution_environment, "promotion environment changed during comparison")

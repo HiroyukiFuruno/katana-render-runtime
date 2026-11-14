@@ -142,17 +142,17 @@ def _validate_memory_policy(record: dict[str, object], scope: dict[str, object],
     if not isinstance(policy, dict) or set(policy) != fields:
         raise ValueError("memory policy metadata is invalid")
     version = policy.get("version")
-    _require(version in ("html-memory-v2", "html-memory-v3", "html-memory-v4"), "memory policy version differs")
+    _require(version in ("html-memory-v2", "html-memory-v3", "html-memory-v4", "html-memory-v5"), "memory policy version differs")
     _sha(policy.get("policySha256"), "memory policy SHA256")
     _sha(policy.get("retentionEvidenceSha256"), "retention evidence SHA256")
     candidate_conditions = policy.get("candidateConditions")
     accepted_conditions = policy.get("acceptedConditions")
     _require(type(candidate_conditions) is int and candidate_conditions > 0
              and candidate_conditions == scope.get("candidateConditions")
-             and (version not in ("html-memory-v3", "html-memory-v4") or candidate_conditions == 84),
+             and (version not in ("html-memory-v3", "html-memory-v4", "html-memory-v5") or candidate_conditions == 84),
              "memory policy candidate conditions differ from scope")
     _require(type(accepted_conditions) is int and accepted_conditions == candidate_conditions
-             and (version not in ("html-memory-v3", "html-memory-v4") or accepted_conditions == 84),
+             and (version not in ("html-memory-v3", "html-memory-v4", "html-memory-v5") or accepted_conditions == 84),
              "memory policy accepted conditions differ")
     _require(type(policy.get("warmupCycles")) is int and policy.get("warmupCycles") == 5
              and type(policy.get("measuredCycles")) is int and policy.get("measuredCycles") == 25,

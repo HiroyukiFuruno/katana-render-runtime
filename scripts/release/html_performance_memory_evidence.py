@@ -17,20 +17,29 @@ import html_performance_memory_policy as memory
 import verify_html_performance_evidence as gate
 
 
-def _samples(reports: Mapping[int, gate.JsonObject], phase: str) -> tuple[list[float], list[float]]:
-    elapsed: list[float] = []
-    rss: list[float] = []
+def _validated_samples(reports: Mapping[int, gate.JsonObject]) -> list[gate.JsonObject]:
+    samples: list[gate.JsonObject] = []
     for pair in range(5):
         report = reports[pair]
         gate.require(report.get("measurement_executed") is True
                      and type(report.get("pair_index")) is int
                      and type(report.get("sample_count")) is int,
                      "report execution or pair metadata is invalid")
-        for sample in gate._objects(report["samples"], "report samples"):
-            duration, peak = gate._phase_sample(sample, phase)
-            elapsed.append(duration)
-            rss.append(peak)
-    return elapsed, rss
+        samples.extend(gate._objects(report["samples"], "report samples"))
+    return samples
+
+
+def _proven_no_scroll(samples: Sequence[gate.JsonObject]) -> bool:
+    return all(gate._is_proven_zero_scroll_full_y(
+        sample, gate._object(gate._object(sample["phases"], "phases")["full_y"], "full-Y phase"),
+    ) for sample in samples)
+
+
+def _phase_values(samples: Sequence[gate.JsonObject], phase: str, *,
+                  no_scroll: bool) -> tuple[list[float], list[float]]:
+    measured = [gate._phase_sample(sample, phase) for sample in samples]
+    times, peaks = zip(*measured, strict=True)
+    return [0.0] * len(times) if no_scroll else list(times), list(peaks)
 
 
 def evaluate_paired(
@@ -42,11 +51,16 @@ def evaluate_paired(
     grouped = gate._group_reports(report_paths, expected_object)
     aggregate = gate._aggregate_grouped_reports(grouped, expected_object)
     gate.require(aggregate["measurement_executed"] is True, "actual measurements absent")
+    baseline = _validated_samples(grouped["baseline"])
+    candidate = _validated_samples(grouped["candidate"])
+    no_scroll = (policy_version == memory.ZERO_SCROLL_POLICY_VERSION
+                 and _proven_no_scroll(baseline) and _proven_no_scroll(candidate))
     phases: dict[str, object] = {}
     accepted = True
     for phase in gate.PHASES:
-        base_time, base_rss = _samples(grouped["baseline"], phase)
-        candidate_time, candidate_rss = _samples(grouped["candidate"], phase)
+        no_scroll_phase = no_scroll and phase == "full_y"
+        base_time, base_rss = _phase_values(baseline, phase, no_scroll=no_scroll_phase)
+        candidate_time, candidate_rss = _phase_values(candidate, phase, no_scroll=no_scroll_phase)
         result = memory.evaluate_peak_phase(base_rss, candidate_rss, base_time, candidate_time,
                                             policy_version=policy_version)
         phases[phase] = asdict(result)

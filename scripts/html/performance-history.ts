@@ -31,10 +31,14 @@ const memoryPolicyV3 = memoryPolicyV2.extend({
 const memoryPolicyV4 = memoryPolicyV2.extend({
   version: z.literal("html-memory-v4"),
 });
+const memoryPolicyV5 = memoryPolicyV2.extend({
+  version: z.literal("html-memory-v5"),
+});
 const memoryPolicy = z.discriminatedUnion("version", [
   memoryPolicyV2,
   memoryPolicyV3,
   memoryPolicyV4,
+  memoryPolicyV5,
 ]);
 const seconds = z.number().finite().nonnegative();
 const phase = z
@@ -121,15 +125,14 @@ const record = z
         });
       }
       if (
-        (entry.memoryPolicy.version === "html-memory-v3" ||
-          entry.memoryPolicy.version === "html-memory-v4") &&
+        entry.memoryPolicy.version !== "html-memory-v2" &&
         (entry.memoryPolicy.candidateConditions !== 84 ||
           entry.memoryPolicy.acceptedConditions !== 84)
       ) {
         context.addIssue({
           code: "custom",
           path: ["memoryPolicy", "candidateConditions"],
-          message: "v3 memory policy must cover all 84 conditions",
+          message: "memory policy must cover all 84 conditions",
         });
       }
       if (!entry.measuredAcceptance.performanceNonregression) {

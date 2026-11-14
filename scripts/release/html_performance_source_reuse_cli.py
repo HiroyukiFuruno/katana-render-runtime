@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TypedDict
 
 import verify_html_performance_evidence as gate
+from html_performance_memory_policy import REASSESSMENT_POLICY_VERSIONS, PREVIOUS_POLICY_VERSION
 
 SCHEMA = "krr-html-performance-source-reuse-request-v1"
 ELIGIBILITY_SCHEMA = "krr-html-performance-source-reuse-eligibility-v2"
@@ -155,7 +156,8 @@ def verify_reuse_request(request_path: Path, root: Path, *,
         original_version = None
         if has_eligibility and isinstance(eligibility, dict):
             measured = eligibility.get("measuredResult")
-            if isinstance(measured, dict) and measured.get("memoryPolicyVersion") in ("html-memory-v3", "html-memory-v4"):
+            accepted_versions = (PREVIOUS_POLICY_VERSION, *REASSESSMENT_POLICY_VERSIONS)
+            if isinstance(measured, dict) and measured.get("memoryPolicyVersion") in accepted_versions:
                 original_version = measured["memoryPolicyVersion"]
                 if not isinstance(original_version, str):
                     raise ValueError("invalid stored memory policy version")
@@ -214,8 +216,10 @@ def main() -> int:
     parser.add_argument("--current-build-artifact-sha256", required=True)
     parser.add_argument("--request-output", type=Path, required=True)
     policy_group = parser.add_mutually_exclusive_group()
-    policy_group.add_argument("--require-memory-policy-v3", action="store_true")
-    policy_group.add_argument("--require-memory-policy-v4", action="store_true")
+    for number in (3, 4, 5):
+        version = f"html-memory-v{number}"
+        policy_group.add_argument(f"--require-memory-policy-v{number}",
+                                  action="store_const", const=version, dest="memory_policy_version")
     args = parser.parse_args()
     request: ReuseRequest = {
         "schema": SCHEMA, "measuredDir": args.measured_dir,
@@ -227,7 +231,7 @@ def main() -> int:
     }
     try:
         result = create_request(request, args.request_output, args.repo,
-                                memory_policy_version="html-memory-v4" if args.require_memory_policy_v4 else "html-memory-v3" if args.require_memory_policy_v3 else None)
+                                memory_policy_version=args.memory_policy_version)
         print(json.dumps(result, sort_keys=True))
         return 0
     except (OSError, ValueError, KeyError) as error:

@@ -221,6 +221,21 @@ class ReuseRequestTest(unittest.TestCase):
         self.assertEqual(verify.call_args_list[0].kwargs["memory_policy_version"], "html-memory-v3")
         self.assertEqual(verify.call_args_list[1].kwargs["memory_policy_version"], "html-memory-v4")
 
+    def test_v5_reassessment_revalidates_original_v4_first(self) -> None:
+        original = {"measuredHead": "old", "eligibleHead": "new",
+                    "reuseKind": "test-source-artifact-equivalence-v1",
+                    "measuredResult": {"memoryPolicyVersion": "html-memory-v4"}}
+        reassessed = {**original, "measuredResult": {"memoryPolicyVersion": "html-memory-v5"}}
+        with patch.object(gate, "verify_source_reuse", return_value=original):
+            cli.create_request(self.request, self.output, self.root, memory_policy_version="html-memory-v5")
+        before = self.output.read_bytes()
+        with patch.object(gate, "verify_source_reuse", side_effect=[original, reassessed]) as verify:
+            self.assertEqual(cli.verify_reuse_request(
+                self.output, self.root, memory_policy_version="html-memory-v5"), reassessed)
+        self.assertEqual(self.output.read_bytes(), before)
+        self.assertEqual(verify.call_args_list[0].kwargs["memory_policy_version"], "html-memory-v4")
+        self.assertEqual(verify.call_args_list[1].kwargs["memory_policy_version"], "html-memory-v5")
+
     def test_same_policy_reuses_one_validation_and_different_policy_reuses_query(self) -> None:
         v3 = {"measuredHead": "old", "eligibleHead": "new",
               "reuseKind": "binary-bound-product-source-equivalence-v1",

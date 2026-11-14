@@ -56,6 +56,63 @@ RELEASE_ONLY_PROGRAMS = frozenset({
     "scripts/release/verify_release_target_test.py",
 })
 
+# 計測済みHEADから、計測プログラム自体に触れない評価移行だけを認証する。
+ZERO_SCROLL_MEASURED_HEAD = "6e627a410f03ae014578a4c6c572b326d0c8edee"
+ZERO_SCROLL_REVIEWED_FILES: dict[str, tuple[str, int]] = {
+    "Justfile": ("0425ddbc52bc8d3e92d18bff2efa31c2742b9ad7fa73d7b48eb3c147074aec7e", 87249),
+    "scripts/release/html_performance_memory_evidence.py": ("c6bad54819e93485e8c39e942c7653d654359ff5ca36472be86d67ec4ac1ef90", 6209),
+    "scripts/release/html_performance_memory_evidence_test.py": ("64c8240bc0f1d372c20423833fba70605622164640438fbd33a00d3d7d1d00a7", 10373),
+    "scripts/release/html_performance_memory_policy.py": ("ce2a5ce213f31d3993182bc78b04e647baf83fd95afae67cfd3021fbf4cbd3ac", 7772),
+    "scripts/release/html_performance_promotion.py": ("0e94b79d89cbcf77986acbc6804793360d145e0ac7825c98d88229878944b612", 24136),
+    "scripts/release/html_performance_promotion_test.py": ("b8b05eff50b0494769b6bcc364c5dbae17012530ee12a197cfee6d40f332b53c", 37193),
+    "scripts/release/html_performance_reference.py": ("72c2b3bdd0c4a5082372ccb5eab2e2aac54f0baceb48e270f1acff30d8de4c66", 27632),
+    "scripts/release/html_performance_reference_test.py": ("8a1e0b9e4e58e37cf23972af3da2d09ee57dbd71334718533f69f688a4918617", 30296),
+    "scripts/release/html_performance_remote_admission.py": ("b991746d218c400600319eb04e554d7e9ce9649ccdc4513867786d59065d64e0", 3636),
+    "scripts/release/html_performance_retention_collection.py": ("3f9d954237d9aa2442323c1ab768988dd13d81a46175549c9590dec94a17da0e", 2668),
+    "scripts/release/html_performance_source_reuse_cli.py": ("a5f252f573074a16b4edb77682911889f3b3c883de9c851e47aab88cc469cf14", 12033),
+    "scripts/release/html_performance_source_reuse_cli_test.py": ("dc20f190b59dca037fb87dc56038dca5805a95c0744713dd5891ed2fd044e784", 18868),
+    "scripts/release/html_performance_source_reuse_test.py": ("12a31560e7851134f0cebb34fbf3f2a93c35aa83f07b378c08775da2a6eeda7a", 71986),
+    "scripts/release/local_html_performance_evidence.py": ("5cce6fb5e8eba67965e10ba1be82a336f5a4fc298a1df52425d7fc6f2c1d71f3", 17553),
+    "scripts/release/local_html_performance_evidence_test.py": ("e44bb5a569b64022bfc9e2c7ccb567efd44cabc16fe70cc3c488d3c07b04c721", 18654),
+    "scripts/html/performance-history.ts": ("f52e9655c15905b7dedd1854bb3a4f1c955bbe2c175b27b70320264382249a8e", 7650),
+    "scripts/html/performance-history_test.ts": ("b1d4b4513e4d70a65249b31a4dcaf422a58bf6a0241ff53015ee883671e418f8", 13609),
+    "scripts/release/produce_html_performance_evidence.py": ("3d5f1ea31349e7633771dd25e7c9e89659323423cf5f8ccd84406fb8468df577", 274605),
+    "scripts/release/produce_html_performance_evidence_test.py": ("cd522b01503fb9a32ec3ce99882207293f4d13f23b526fc2ff755217b68d116b", 330386),
+    "scripts/release/verify_html_performance_evidence.py": ("e2c1d411847fb1b908233a1dadfc036d1b4ea83c6c219e403ae737f52b7fddd8", 280925),
+    "scripts/release/verify_html_performance_evidence_test.py": ("87ba739d12ee9d6a847fef93d8c4de53184a3d341924f542ffa45f8c73ceaf18", 316406),
+}
+ZERO_SCROLL_SELF = "scripts/release/html_performance_source_reuse.py"
+
+
+def is_zero_scroll_transition_program(source: bytes) -> bool:
+    return (b"ZERO_SCROLL_MEASURED_HEAD" in source
+            and reviewed_same_binary_self(source))
+
+
+def _zero_scroll_policy_changes(
+    measured_head: str, current: Records, measured: Records,
+    old_modes: Mapping[str, str], new_modes: Mapping[str, str],
+) -> set[str]:
+    if measured_head != ZERO_SCROLL_MEASURED_HEAD or not ZERO_SCROLL_REVIEWED_FILES:
+        return set()
+    approved = set(ZERO_SCROLL_REVIEWED_FILES) | {ZERO_SCROLL_SELF}
+    changed = {path for path in set(current) | set(measured) if measured.get(path) != current.get(path)}
+    if changed - ALLOWED - RELEASE_ONLY_PROGRAMS != approved:
+        return set()
+    if any(old_modes.get(path) != "100644" or new_modes.get(path) != "100644"
+           for path in approved):
+        return set()
+    body = Path(__file__).read_bytes()
+    self_record = (hashlib.sha256(body).hexdigest(), len(body))
+    if (current.get(ZERO_SCROLL_SELF) != self_record
+            or any(current.get(path) != value for path, value in ZERO_SCROLL_REVIEWED_FILES.items())):
+        return set()
+    release_changes = changed & RELEASE_ONLY_PROGRAMS
+    if any(old_modes.get(path) != "100644" or new_modes.get(path) != "100644"
+           for path in release_changes):
+        return set()
+    return approved | release_changes
+
 # WHY: 固定epoch後の検証専用cohortを実Git blob単位で限定する。
 VALIDATION_COHORT_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/drawio/candidate-svg-rasterize.ts": ("22b874614043742c806cbdb77862f37212480e4201eb0aad4a940cfba74bedda", 3621),
@@ -638,7 +695,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "ded22671818bda6a5321d1abb38d129ed8cf135c0320b28956cee2f969cefb81"
+SELF_MODULE_CANONICAL_SHA256 = "3d7a428b40c8480fc5d458371cb84da4485f807bf35d99f63feeff5baf3cd830"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":
@@ -682,6 +739,8 @@ def reviewed_same_binary_self(current: bytes, *, allow_historical: bool = False)
     match = matches[0]
     declared = match.group(1).decode("ascii")
     historical = {
+        "d8bb47141e9ffa6fc1c405dadd6011823cadcbe8355903223251faf50442e7e2":
+            "ded22671818bda6a5321d1abb38d129ed8cf135c0320b28956cee2f969cefb81",
         "90adfdc15b010fd330301c94b464f46dbfa5e823e1805118d66736cc898a545b":
             "e74539aa42a84ded142f4659dd8cef84f731a5da3f6e92b178987417f49dc960",
         "cc8ea5b99cd1afb2d9a7270775a97ff7ab326a9daee3562906e06ac724c9199f":
@@ -1020,7 +1079,8 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
                           git_bytes: GitBytes, *, allow_test_changes: bool = False,
                           program_records: Mapping[str, tuple[str, int]] | None = None,
                           program_modes: Mapping[str, str] | None = None,
-                          same_binary_rust: bool = False) -> SourceReuseContext:
+                          same_binary_rust: bool = False,
+                          allow_zero_scroll_reassessment: bool = False) -> SourceReuseContext:
     eligible = git_text(("rev-parse", "HEAD")).strip()
     if git_text(("merge-base", measured_head, eligible)).strip() != measured_head:
         raise ValueError("measured HEAD is not an ancestor")
@@ -1069,6 +1129,9 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
         root, measured_head, current, measured, old_modes, new_modes, git_bytes,
         allow_test_changes=allow_test_changes, same_binary_rust=same_binary_rust,
     )
+    reassessment_changes = (_zero_scroll_policy_changes(
+        measured_head, current, measured, old_modes, new_modes,
+    ) if allow_zero_scroll_reassessment else set())
     def binary_rust_path(path: str) -> bool:
         parts = path.split("/")
         product = len(parts) >= 4 and parts[0] == "crates" and parts[2] == "src"
@@ -1099,7 +1162,9 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
     changed = tuple(sorted(path for path in set(current) | set(measured)
                            if current.get(path) != measured.get(path)
                            or old_modes.get(path) != new_modes.get(path)))
-    program_changes = {path for path in changed if program_records is not None and is_program(path)}
+    program_changes = reassessment_changes | {
+        path for path in changed if program_records is not None and is_program(path)
+    }
     test_changes = set(changed) - ALLOWED - program_changes - approved_changes - rust_changes - metadata_changes
     if test_changes:
         if not allow_test_changes or not test_changes <= TEST_PATHS | {TEST_PARENT}:

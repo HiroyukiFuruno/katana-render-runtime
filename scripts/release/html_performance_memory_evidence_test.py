@@ -54,6 +54,58 @@ class MemoryEvidenceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "actual measurements absent"):
             evidence.evaluate_paired(self.paths, self.expected, self.retained)
 
+    def test_no_scroll_bookkeeping_is_not_render_time(self) -> None:
+        self.set_full_y_comparison()
+        saved = {path: path.read_bytes() for path in self.paths}
+        legacy = evidence.evaluate_paired(self.paths, self.expected, self.retained)
+        corrected = evidence.evaluate_paired(
+            self.paths, self.expected, self.retained, policy_version=policy.ZERO_SCROLL_POLICY_VERSION,
+        )
+        self.assertFalse(legacy["policyPass"])
+        self.assertTrue(corrected["policyPass"])
+        self.assertEqual(legacy["aggregate"], corrected["aggregate"])
+        self.assertEqual(legacy["v1Policy"], corrected["v1Policy"])
+        self.assertEqual(saved, {path: path.read_bytes() for path in self.paths})
+
+    def test_no_scroll_policy_still_rejects_actual_scroll_regression(self) -> None:
+        self.set_full_y_comparison()
+        path = next(path for path in self.paths if path.name == "candidate-0.json")
+        report = gate.read_json(path)
+        sample = gate._objects(report["samples"], "samples")[0]
+        full_y = gate._object(gate._object(sample["phases"], "phases")["full_y"], "full-Y phase")
+        full_y.update(scroll_steps=1, max_scroll=1, final_scroll_y=1, max_frame_elapsed_ms=0.000583)
+        gate._object(full_y["frame"], "full-Y frame")["scroll_y"] = 1
+        path.write_text(json.dumps(report))
+        result = evidence.evaluate_paired(
+            self.paths, self.expected, self.retained, policy_version=policy.ZERO_SCROLL_POLICY_VERSION,
+        )
+        self.assertFalse(result["policyPass"])
+
+    def test_no_scroll_policy_still_rejects_retained_memory_growth(self) -> None:
+        self.set_full_y_comparison()
+        retained = [40 * policy.MIB] * 15 + [52 * policy.MIB] * 10
+        result = evidence.evaluate_paired(
+            self.paths, self.expected, retained, policy_version=policy.ZERO_SCROLL_POLICY_VERSION,
+        )
+        self.assertFalse(result["policyPass"])
+
+    def set_full_y_comparison(self) -> None:
+        _, expected, _, _, _ = self.fixture._noncomparable_baseline_fixture("memory")
+        self.add_catalog_identity(self.paths, expected)
+        for path in self.paths:
+            report = gate.read_json(path)
+            candidate = path.name.startswith("candidate-")
+            for sample in gate._objects(report["samples"], "samples"):
+                phases = gate._object(sample["phases"], "phases")
+                full_y = gate._object(phases["full_y"], "full-Y phase")
+                full_y.update(actual_bottom=True, scroll_steps=0, max_scroll=0,
+                              final_scroll_y=0, max_frame_elapsed_ms=0)
+                full_y["elapsed_ms"] = 0.000583 if candidate else 0.000500
+                frame = gate._object(full_y["frame"], "full-Y frame")
+                viewport = gate._object(sample["viewport"], "viewport")
+                frame.update(scroll_y=0, content_height=viewport["height"], viewport=viewport)
+            path.write_text(json.dumps(report))
+
     def test_v1_rss_failure_can_have_separate_v2_small_peak_result(self) -> None:
         for path in self.paths:
             if path.name.startswith("candidate-"):
@@ -67,12 +119,11 @@ class MemoryEvidenceTest(unittest.TestCase):
         self.assertTrue(result["policyPass"])
         self.assertFalse(result["formalAccepted"])
 
-    def candidate_fixture(self) -> list[Path]:
-        _, self.expected, _, _, _ = self.fixture._noncomparable_baseline_fixture("memory")
-        identity = gate._object(self.expected["catalogCondition"], "catalog")
-        reference = gate._object(self.expected["operationEvidenceRef"], "operation evidence")
-        candidates = [path for path in self.paths if path.name.startswith("candidate-")]
-        for path in candidates:
+    def add_catalog_identity(self, paths: list[Path], catalog_expected: gate.JsonObject) -> None:
+        identity = gate._object(catalog_expected["catalogCondition"], "catalog")
+        reference = gate._object(catalog_expected["operationEvidenceRef"], "operation evidence")
+        self.expected.update(catalogCondition=identity, operationEvidenceRef=reference)
+        for path in paths:
             report = gate.read_json(path)
             report.update(
                 condition_id=identity["condition_id"], case_id=identity["case_id"],
@@ -87,6 +138,11 @@ class MemoryEvidenceTest(unittest.TestCase):
                     "operation_evidence_sha256": reference["sha256"],
                 }
             path.write_text(json.dumps(report))
+
+    def candidate_fixture(self) -> list[Path]:
+        _, self.expected, _, _, _ = self.fixture._noncomparable_baseline_fixture("memory")
+        candidates = [path for path in self.paths if path.name.startswith("candidate-")]
+        self.add_catalog_identity(candidates, self.expected)
         return candidates
 
     def test_candidate_only_never_accepts_an_absent_baseline(self) -> None:

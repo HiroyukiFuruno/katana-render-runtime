@@ -1775,6 +1775,7 @@ def _source_for_validation(root: Path, before: JsonObject, *, git_query: GitQuer
 
 def _verified_reuse_context(root: Path, measured_head: str, *, git_query: GitQuery | None,
                             allow_test_changes: bool = False,
+                            memory_policy_version: str | None = None,
                             program_records: SourceRecords | None = None,
                             program_modes: Mapping[str, str] | None = None,
                             same_binary_rust: bool = False) -> object:
@@ -1791,6 +1792,12 @@ def _verified_reuse_context(root: Path, measured_head: str, *, git_query: GitQue
     current = committed_records(root, eligible, git_query=git_query)
     measured = committed_records(root, measured_head, git_query=git_query)
     if program_records is None and program_modes is None:
+        from html_performance_memory_policy import REASSESSMENT_POLICY_VERSIONS
+
+        if memory_policy_version in REASSESSMENT_POLICY_VERSIONS:
+            return validate_reuse_source(root, measured_head, current, measured, text_query,
+                                         bytes_query, allow_test_changes=allow_test_changes,
+                                         allow_zero_scroll_reassessment=True)
         return validate_reuse_source(root, measured_head, current, measured,
                                      text_query, bytes_query, allow_test_changes=allow_test_changes)
     return validate_reuse_source(root, measured_head, current, measured, text_query, bytes_query,
@@ -2062,6 +2069,7 @@ def _v3_authenticate_programs(root: Path, head: str, items: _ProgramItems,
     # WHY: 固定 epoch から既存認証を維持し、今回の移行だけ別に固定する。
     from html_performance_source_reuse import (
         SAME_BINARY_REVIEWED_ADDITIONS, SAME_BINARY_REVIEWED_BASE,
+        ZERO_SCROLL_MEASURED_HEAD, is_zero_scroll_transition_program, _zero_scroll_policy_changes,
         reviewed_same_binary_migration, reviewed_same_binary_self,
     )
     pending = []
@@ -2071,6 +2079,24 @@ def _v3_authenticate_programs(root: Path, head: str, items: _ProgramItems,
             pending.append((live_head, live_items))
             continue
         live_data = _git_output(root, ("show", live_head + ":" + self_path), git_query=git_query)
+        if (isinstance(live_data, bytes) and is_zero_scroll_transition_program(live_data)
+                and git(root, "merge-base", ZERO_SCROLL_MEASURED_HEAD, live_head,
+                        git_query=git_query).strip() == ZERO_SCROLL_MEASURED_HEAD):
+            old_records = committed_records(root, ZERO_SCROLL_MEASURED_HEAD, git_query=git_query)
+            live_records = committed_records(root, live_head, git_query=git_query)
+            old_tree = _git_output(root, ("ls-tree", "-r", "-z", ZERO_SCROLL_MEASURED_HEAD), git_query=git_query)
+            new_tree = _git_output(root, ("ls-tree", "-r", "-z", live_head), git_query=git_query)
+            if (isinstance(old_tree, bytes) and isinstance(new_tree, bytes)
+                    and _zero_scroll_policy_changes(ZERO_SCROLL_MEASURED_HEAD, live_records, old_records,
+                                                    _modes(old_tree), _modes(new_tree))):
+                require(live_items == tuple((name, *value) for name, value in sorted(live_records.items())
+                                            if name.startswith("scripts/") or name == "Justfile"),
+                        "reassessment program evidence differs from Git")
+                prior_items = tuple((name, *value) for name, value in sorted(old_records.items())
+                                    if name.startswith("scripts/") or name == "Justfile")
+                _v3_authenticate_programs(root, head, items, ((ZERO_SCROLL_MEASURED_HEAD, prior_items),),
+                                          git_query=git_query, memory_policy_version=memory_policy_version)
+                continue
         try:
             base_data = _git_output(root, ("show", SAME_BINARY_REVIEWED_BASE + ":" + self_path),
                                     git_query=git_query)
@@ -2161,13 +2187,13 @@ def _v3_authenticate_programs(root: Path, head: str, items: _ProgramItems,
             require(isinstance(old_blob, bytes) and isinstance(new_blob, bytes)
                     and (path == "scripts/release/produce_html_performance_evidence.py"
                          and cache_only_collector_change(old_blob, new_blob)
-                         or (memory_policy_version not in ("html-memory-v3", "html-memory-v4")
+                         or (memory_policy_version not in ("html-memory-v3", "html-memory-v4", "html-memory-v5")
                              and known_auth_program_change(path, old_blob, new_blob))
-                         or memory_policy_version in ("html-memory-v3", "html-memory-v4")
+                         or memory_policy_version in ("html-memory-v3", "html-memory-v4", "html-memory-v5")
                          and (v3_reassessment_program_change(
                              path, old_blob, new_blob, old_mode=modes.get(path),
                              new_mode=live_modes.get(path))
-                              or memory_policy_version == "html-memory-v4"
+                              or memory_policy_version in ("html-memory-v4", "html-memory-v5")
                               and v4_reassessment_program_change(
                                   path, old_blob, new_blob, old_mode=modes.get(path),
                                   new_mode=live_modes.get(path)))),
@@ -3860,7 +3886,8 @@ def _verify_impl(directory: Path, root: Path, *, git_query: GitQuery | None = No
             memory_policy_version=memory_policy_version)
             if first_is_v3 else _verified_reuse_context(
                 root, reuse_context.measured_head, git_query=git_query,
-                allow_test_changes=reuse_context.artifact_equivalence))
+                allow_test_changes=reuse_context.artifact_equivalence,
+                **_memory_policy_kwargs(memory_policy_version)))
         require(bundle.manifest["head"] == reuse_context.measured_head
                 and head == reuse_context.eligible_head
                 and checked_context == reuse_context, "reuse HEAD or source differs")
@@ -4173,7 +4200,8 @@ def _verify_source_reuse_impl(directory: Path, root: Path, measured_manifest_sha
             return _same_binary_v3_reuse_context(bundle, root, first, bundle.json(attempts[0]["result"]),
                                                  current_build, git_query=git_query,
                                                  memory_policy_version=memory_policy_version)
-        return _verified_reuse_context(root, measured_head, git_query=git_query, allow_test_changes=True)
+        return _verified_reuse_context(root, measured_head, git_query=git_query, allow_test_changes=True,
+                                       **_memory_policy_kwargs(memory_policy_version))
     context = source_context()
     measured = _verify(directory, root, git_query=git_query, require_catalog=True,
                        reuse_context=context,
@@ -4205,7 +4233,7 @@ def _verify_source_reuse_impl(directory: Path, root: Path, measured_manifest_sha
     from html_performance_source_reuse import SourceReuseContext
     if not isinstance(context, SourceReuseContext):
         raise ValueError("invalid source reuse context")
-    if context.artifact_equivalence or has_v3:
+    if context.artifact_equivalence or context.program_equivalence or has_v3:
         for key in ("buildEnvironmentSha256", "toolVersions", "cargoConfigPins",
                     "cargoLauncher", "rustcLauncher", "guardPython"):
             require(old_build[key] == new_build[key], "measured and current build differ: " + key)
@@ -4374,7 +4402,8 @@ def acquire(directory: Path, root: Path, repository: str, current_producer: bool
                 "kind": "owner-local-html-performance", "head": head, "runId": run["id"],
                 "runAttempt": run["run_attempt"],
             }))
-            return {"head": head, "kind": "owner-local-html-performance", "conditions": 84}
+            return {"head": head, "kind": "owner-local-html-performance", "conditions": 84,
+                    "memoryPolicyVersion": "html-memory-v5"}
     elif (pr_binding := _completed_pr_binding(run, repository, head)) is not None:
         number, base = pr_binding
         from local_html_performance_evidence import verify_from_api
@@ -4393,7 +4422,8 @@ def acquire(directory: Path, root: Path, repository: str, current_producer: bool
                 "kind": "owner-local-html-performance", "head": head, "runId": run_id,
                 "runAttempt": attempt,
             }))
-            return {"head": head, "kind": "owner-local-html-performance", "conditions": 84}
+            return {"head": head, "kind": "owner-local-html-performance", "conditions": 84,
+                    "memoryPolicyVersion": "html-memory-v5"}
     artifact_snapshot = api(f"repos/{repository}/actions/runs/{run['id']}/artifacts?per_page=100")
     artifacts = _objects(artifact_snapshot["artifacts"], "CI artifacts")
     require(artifact_snapshot["total_count"] == len(artifacts), "incomplete artifact page")
@@ -4429,30 +4459,34 @@ def _require_cli_memory_v2(result: JsonObject, *, reused: bool) -> None:
             "HTML performance requires v2 retained memory for all 84 conditions")
 
 
-def _require_cli_memory_v3(result: JsonObject, *, reused: bool) -> None:
-    from html_performance_memory_policy import PREVIOUS_POLICY_VERSION
-
+def _require_cli_retained_memory(result: JsonObject, version: str, *, reused: bool) -> None:
     if reused:
         require(result.get("reuseEligibility") is True, "performance reuse is not eligible")
         result = _object(result.get("measuredResult"), "reused measured result")
-    require(result.get("memoryPolicyVersion") == PREVIOUS_POLICY_VERSION
+    require(result.get("memoryPolicyVersion") == version
             and type(result.get("retainedMemoryConditions")) is int
             and result.get("retainedMemoryConditions") == 84
             and len(_array(result.get("memoryPolicyAssessments"), "memory assessments")) == 84,
-            "HTML performance requires v3 retained memory for all 84 conditions")
+            f"HTML performance requires {version.removeprefix('html-memory-')} retained memory "
+            "for all 84 conditions")
+
+
+def _require_cli_memory_v3(result: JsonObject, *, reused: bool) -> None:
+    from html_performance_memory_policy import PREVIOUS_POLICY_VERSION
+
+    _require_cli_retained_memory(result, PREVIOUS_POLICY_VERSION, reused=reused)
 
 
 def _require_cli_memory_v4(result: JsonObject, *, reused: bool) -> None:
     from html_performance_memory_policy import POLICY_VERSION
 
-    if reused:
-        require(result.get("reuseEligibility") is True, "performance reuse is not eligible")
-        result = _object(result.get("measuredResult"), "reused measured result")
-    require(result.get("memoryPolicyVersion") == POLICY_VERSION
-            and type(result.get("retainedMemoryConditions")) is int
-            and result.get("retainedMemoryConditions") == 84
-            and len(_array(result.get("memoryPolicyAssessments"), "memory assessments")) == 84,
-            "HTML performance requires v4 retained memory for all 84 conditions")
+    _require_cli_retained_memory(result, POLICY_VERSION, reused=reused)
+
+
+def _require_cli_memory_v5(result: JsonObject, *, reused: bool) -> None:
+    from html_performance_memory_policy import ZERO_SCROLL_POLICY_VERSION
+
+    _require_cli_retained_memory(result, ZERO_SCROLL_POLICY_VERSION, reused=reused)
 
 
 def _verify_reuse_request_with_policy(
@@ -4462,10 +4496,12 @@ def _verify_reuse_request_with_policy(
     require_memory_policy_v2: bool,
     require_memory_policy_v3: bool,
     require_memory_policy_v4: bool,
+    require_memory_policy_v5: bool = False,
 ) -> JsonObject:
     from html_performance_source_reuse_cli import verify_reuse_request
 
-    version = ("html-memory-v4" if require_memory_policy_v4 else
+    version = ("html-memory-v5" if require_memory_policy_v5 else
+               "html-memory-v4" if require_memory_policy_v4 else
                "html-memory-v3" if require_memory_policy_v3 else None)
     result = verify_reuse_request(
         request_path, root, **_memory_policy_kwargs(version),
@@ -4476,6 +4512,8 @@ def _verify_reuse_request_with_policy(
         _require_cli_memory_v3(result, reused=True)
     if require_memory_policy_v4:
         _require_cli_memory_v4(result, reused=True)
+    if require_memory_policy_v5:
+        _require_cli_memory_v5(result, reused=True)
     return result
 
 
@@ -4490,9 +4528,8 @@ def main() -> int:
     parser.add_argument("--build-artifact-sha256")
     parser.add_argument("--bundle-manifest-sha256")
     parser.add_argument("--reuse-request", type=Path)
-    parser.add_argument("--require-memory-policy-v2", action="store_true")
-    parser.add_argument("--require-memory-policy-v3", action="store_true")
-    parser.add_argument("--require-memory-policy-v4", action="store_true")
+    for number in (2, 3, 4, 5):
+        parser.add_argument(f"--require-memory-policy-v{number}", action="store_true")
     parser.add_argument(
         "--diagnostic-only",
         action="store_true",
@@ -4501,13 +4538,15 @@ def main() -> int:
     args = parser.parse_args()
     try:
         require(not (args.acquire and args.acquire_current_producer), "ambiguous acquisition mode")
-        require(sum((args.require_memory_policy_v2, args.require_memory_policy_v3, args.require_memory_policy_v4)) <= 1,
-                "memory policy versions cannot be combined")
-        require(not ((args.require_memory_policy_v2 or args.require_memory_policy_v3 or args.require_memory_policy_v4) and (
+        selected = [number for number in (2, 3, 4, 5)
+                    if getattr(args, f"require_memory_policy_v{number}")]
+        require(len(selected) <= 1, "memory policy versions cannot be combined")
+        explicit_policy = bool(selected)
+        require(not (explicit_policy and (
             args.acquire or args.acquire_current_producer or args.diagnostic_only
             or args.candidate_build_proof is not None or args.build_artifact_sha256 is not None
             or args.bundle_manifest_sha256 is not None)),
-            "v2 memory policy requires formal verification, not acquisition or diagnostics")
+            "explicit memory policy requires formal verification, not acquisition or diagnostics")
         require(not (args.reuse_request is not None and (
             args.acquire or args.acquire_current_producer or args.diagnostic_only
             or args.candidate_build_proof is not None or args.build_artifact_sha256 is not None
@@ -4526,6 +4565,7 @@ def main() -> int:
                 require_memory_policy_v2=args.require_memory_policy_v2,
                 require_memory_policy_v3=args.require_memory_policy_v3,
                 require_memory_policy_v4=args.require_memory_policy_v4,
+                require_memory_policy_v5=args.require_memory_policy_v5,
             )
             print(json.dumps(result, sort_keys=True))
             return 0
@@ -4559,29 +4599,40 @@ def main() -> int:
                         require_memory_policy_v2=args.require_memory_policy_v2,
                         require_memory_policy_v3=args.require_memory_policy_v3,
                         require_memory_policy_v4=args.require_memory_policy_v4,
+                        require_memory_policy_v5=args.require_memory_policy_v5,
                     )
                     print(json.dumps(result, sort_keys=True))
                     return 0
             acquisition = args.evidence_dir / "acquisition.json"
             if acquisition.exists() or acquisition.is_symlink():
-                require(not (args.require_memory_policy_v2 or args.require_memory_policy_v3 or args.require_memory_policy_v4),
-                        "v2 memory policy cannot be checked by acquisition")
+                require(not explicit_policy or args.require_memory_policy_v5,
+                        "explicit memory policy cannot be checked by acquisition")
                 current_producer = (os.environ.get("GITHUB_JOB") == "preflight"
                                     and os.environ.get("GITHUB_EVENT_NAME") == "pull_request")
                 with tempfile.TemporaryDirectory(prefix="krr-html-performance-revalidate-") as temporary:
                     result = acquire(Path(temporary).resolve() / "evidence", args.repo,
                                      args.repository, current_producer)
+                if args.require_memory_policy_v5:
+                    if result.get("kind") == "owner-local-html-performance":
+                        require(result.get("memoryPolicyVersion") == "html-memory-v5"
+                                and result.get("conditions") == 84,
+                                "acquired maintainer evidence requires v5 and all 84 conditions")
+                    else:
+                        _require_cli_memory_v5(result, reused=False)
                 print(json.dumps(result, sort_keys=True))
                 return 0
+        version = f"html-memory-v{selected[0]}" if selected and selected[0] >= 3 else None
         result = (_verify_catalog_diagnostic(args.evidence_dir, args.repo)
                   if args.diagnostic_only else verify(args.evidence_dir, args.repo,
-                      **_memory_policy_kwargs("html-memory-v4" if args.require_memory_policy_v4 else "html-memory-v3" if args.require_memory_policy_v3 else None)))
+                      **_memory_policy_kwargs(version)))
         if args.require_memory_policy_v2:
             _require_cli_memory_v2(result, reused=False)
         if args.require_memory_policy_v3:
             _require_cli_memory_v3(result, reused=False)
         if args.require_memory_policy_v4:
             _require_cli_memory_v4(result, reused=False)
+        if args.require_memory_policy_v5:
+            _require_cli_memory_v5(result, reused=False)
         print(json.dumps(result, sort_keys=True))
         return 0
     except (ValueError, KeyError, TypeError, OSError, subprocess.CalledProcessError, zipfile.BadZipFile) as error:

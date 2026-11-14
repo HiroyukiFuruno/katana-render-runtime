@@ -4077,21 +4077,25 @@ class PerformanceEvidenceTest(unittest.TestCase):
                     non_comparable=False,
                 )
 
-    def test_v4_reassesses_v3_without_mutating_saved_policy(self) -> None:
+    def test_successor_policy_reassesses_without_mutating_saved_policy(self) -> None:
         retained = [100.0] * 25
         expected, _ = self.memory_policy_fixture(retained)
-        saved = memory_evidence.evaluate_paired(
-            self.report_paths[0], expected, retained, policy_version="html-memory-v3")
-        original = copy.deepcopy(saved)
         reader = RetentionReaderModule("html_performance_retention_evidence")
         reader.read_retained_rss = Mock(return_value=retained)
-        evaluated: list[JsonObject] = []
-        with patch.dict(sys.modules, {"html_performance_retention_evidence": reader}):
-            self.assertTrue(gate._require_v2_memory_policy(
-                gate.Bundle(self.bundle), expected, {"memoryPolicy": saved}, self.report_paths[0],
-                non_comparable=False, policy_version="html-memory-v4", policy_sink=evaluated))
-        self.assertEqual(saved, original)
-        self.assertEqual(evaluated[0]["version"], "html-memory-v4")
+        for previous, successor in ((3, 4), (4, 5)):
+            previous_version = f"html-memory-v{previous}"
+            successor_version = f"html-memory-v{successor}"
+            saved = memory_evidence.evaluate_paired(
+                self.report_paths[0], expected, retained, policy_version=previous_version)
+            original = copy.deepcopy(saved)
+            evaluated: list[JsonObject] = []
+            with (self.subTest(previous=previous, successor=successor),
+                  patch.dict(sys.modules, {"html_performance_retention_evidence": reader})):
+                self.assertTrue(gate._require_v2_memory_policy(
+                    gate.Bundle(self.bundle), expected, {"memoryPolicy": saved}, self.report_paths[0],
+                    non_comparable=False, policy_version=successor_version, policy_sink=evaluated))
+                self.assertEqual(saved, original)
+                self.assertEqual(evaluated[0]["version"], successor_version)
 
     def test_v3_reassesses_authenticated_v2_without_changing_original(self) -> None:
         from html_performance_memory_policy import LEGACY_POLICY_VERSION, PREVIOUS_POLICY_VERSION
@@ -4756,6 +4760,7 @@ class PerformanceAcquisitionTest(unittest.TestCase):
         build: JsonObject = {"binarySha256": candidate["binary_sha256"],
                              "sourceSnapshotSha256": candidate["source_snapshot_sha256"]}
         result: JsonObject = {"head": self.fixture.head, "performanceNonregression": True,
+                              "memoryPolicyVersion": "html-memory-v5",
                               "htmlStage90": {"acceptance": True, "fontIdentityEquivalence": "established"}}
         with patch.object(attestation, "verify_remote_attestation"), \
              patch.object(remote_evidence, "extract_remote_transport"), \
@@ -4769,6 +4774,7 @@ class PerformanceAcquisitionTest(unittest.TestCase):
                 self.repository, {}, "artifact", self.fixture.head)
             self.assertEqual(verified, result)
             self.assertIsInstance(verify.call_args.kwargs["remote_context"], remote_admission.RemoteEvidenceContext)
+            self.assertEqual(verify.call_args.kwargs["memory_policy_version"], "html-memory-v5")
             verify.return_value = {**result, "head": "b" * 40}
             with self.assertRaisesRegex(ValueError, "remote formal result differs"):
                 remote_admission.verify_authenticated_remote(
@@ -5143,6 +5149,23 @@ class PerformanceAcquisitionTest(unittest.TestCase):
 
 
 class PerformanceJsonBoundaryTest(unittest.TestCase):
+    def test_acquired_v5_evidence_is_revalidated_at_release_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            (root / "acquisition.json").write_text("{}")
+            argv = ["verify_html_performance_evidence.py", "--repo", str(root),
+                    "--evidence-dir", str(root), "--require-memory-policy-v5"]
+            attestation: JsonObject = {"kind": "owner-local-html-performance", "conditions": 84,
+                                       "memoryPolicyVersion": "html-memory-v5"}
+            for result, status in ((attestation, 0), ({**attestation, "conditions": 83}, 1),
+                                   ({**attestation, "memoryPolicyVersion": "html-memory-v4"}, 1)):
+                with (self.subTest(result=result), patch.object(gate.sys, "argv", argv),
+                      patch.object(gate.sys, "stdout", io.StringIO()),
+                      patch.object(gate.sys, "stderr", io.StringIO()),
+                      patch.object(gate, "acquire", return_value=result) as acquire):
+                    self.assertEqual(gate.main(), status)
+                    self.assertNotEqual(acquire.call_args.args[0], root)
+
     def test_cached_acquisition_is_reauthenticated_before_formal_gate_reuse(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -5335,17 +5358,18 @@ class MemoryPolicyCliTest(unittest.TestCase):
         self.assertEqual(self.verify_cli(valid, "--require-memory-policy-v2",
                                          "--require-memory-policy-v3"), 1)
 
-    def test_v4_requirement_needs_all_assessments(self) -> None:
-        valid: JsonObject = {"memoryPolicyVersion": "html-memory-v4",
-                             "retainedMemoryConditions": 84,
-                             "memoryPolicyAssessments": [{} for _ in range(84)]}
-        self.assertEqual(self.verify_cli(valid, "--require-memory-policy-v4"), 0)
-        for result in ({}, {**valid, "retainedMemoryConditions": 83},
-                       {**valid, "memoryPolicyVersion": "html-memory-v3"}):
-            with self.subTest(result=result):
-                self.assertEqual(self.verify_cli(result, "--require-memory-policy-v4"), 1)
-        self.assertEqual(self.verify_cli(valid, "--require-memory-policy-v3",
-                                         "--require-memory-policy-v4"), 1)
+    def test_v4_and_v5_require_all_assessments(self) -> None:
+        for version in (4, 5):
+            flag = f"--require-memory-policy-v{version}"
+            valid: JsonObject = {"memoryPolicyVersion": f"html-memory-v{version}",
+                                 "retainedMemoryConditions": 84,
+                                 "memoryPolicyAssessments": [{} for _ in range(84)]}
+            self.assertEqual(self.verify_cli(valid, flag), 0)
+            for result in ({}, {**valid, "retainedMemoryConditions": 83},
+                           {**valid, "memoryPolicyVersion": f"html-memory-v{version - 1}"}):
+                with self.subTest(version=version, result=result):
+                    self.assertEqual(self.verify_cli(result, flag), 1)
+            self.assertEqual(self.verify_cli(valid, "--require-memory-policy-v3", flag), 1)
 
     def test_v2_rejects_diagnostic_build_and_acquisition_modes(self) -> None:
         for arguments in (("--diagnostic-only",), ("--acquire",),

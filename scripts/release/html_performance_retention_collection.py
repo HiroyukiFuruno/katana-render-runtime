@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import html_performance_memory_evidence as memory
+from html_performance_memory_policy import POLICY_VERSION
 import html_performance_retention_capture as capture
 import html_performance_retention_evidence as evidence
 import verify_html_performance_evidence as gate
@@ -36,6 +37,7 @@ def collect(
 
 def policy(
     reports: list[Path], expected: gate.JsonObject, result: gate.JsonObject,
+    *, policy_version: str = POLICY_VERSION,
 ) -> gate.JsonObject:
     """Compute the provisional value that the final validator must reproduce."""
     reference = gate._object(expected["memoryRetentionRef"], "retention reference")
@@ -46,5 +48,5 @@ def policy(
                 for value in gate._array(record["retainedRssBytes"], "retained RSS samples")]
     if result.get("comparisonStatus") == "nonComparable":
         candidates = [path for path in reports if path.name.startswith("candidate-")]
-        return memory.evaluate_candidate_only(candidates, expected, retained)
-    return memory.evaluate_paired(reports, expected, retained)
+        return memory.evaluate_candidate_only(candidates, expected, retained, policy_version=policy_version)
+    return memory.evaluate_paired(reports, expected, retained, policy_version=policy_version)

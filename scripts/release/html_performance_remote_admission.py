@@ -52,7 +52,12 @@ def verify_authenticated_remote(directory: Path, archive: Path, root: Path, repo
     context = RemoteEvidenceContext(head, gate.sha256(directory / "bundle.json"),
                                     {"baseline": baseline, "candidate": build},
                                     authority=_REMOTE_CONTEXT_AUTHORITY)
-    result = gate._verify(directory, root, require_catalog=True, remote_context=context)
+    from html_performance_memory_policy import ZERO_SCROLL_POLICY_VERSION
+
+    policy = (ZERO_SCROLL_POLICY_VERSION
+              if producer_result.get("memoryPolicyVersion") == ZERO_SCROLL_POLICY_VERSION else None)
+    result = gate._verify(directory, root, require_catalog=True, remote_context=context,
+                          **gate._memory_policy_kwargs(policy))
     gate._require_formal_release_result(result)
     gate.require(result == producer_result, "remote formal result differs from producer verification")
     return result

@@ -45,6 +45,10 @@ def _memory_v4_assessments(
             for row in _memory_v3_assessments(original_versions)]
 
 
+def _memory_v5_assessments() -> list[dict[str, object]]:
+    return [{**row, "version": "html-memory-v5"} for row in _memory_v4_assessments()]
+
+
 def _measurement_fixture(memory_policy_version: str) -> tuple[Mock, gate.JsonObject]:
     bundle = Mock(spec=gate.Bundle)
     bundle.manifest = {"attempts": [{"expected": {}} for _ in range(84)]}
@@ -73,15 +77,41 @@ def _grouped_samples(
     baseline_rss: int,
     candidate_time: float,
     candidate_rss: int,
-) -> gate.JsonObject:
+) -> dict[str, dict[int, gate.JsonObject]]:
     return {
-        arm: {pair: {"samples": [_measurement_sample(time, rss)] * 5} for pair in range(5)}
+        arm: {pair: {"samples": [_measurement_sample(time, rss) for _ in range(5)],
+                     "measurement_executed": True, "pair_index": pair, "sample_count": 5}
+              for pair in range(5)}
         for arm, time, rss in (("baseline", baseline_time, baseline_rss),
                                ("candidate", candidate_time, candidate_rss))
     }
 
 
 class PromotionComparisonTest(unittest.TestCase):
+    def test_v5_no_scroll_requires_proof_for_both_arms(self) -> None:
+        bundle, result = _measurement_fixture("html-memory-v5")
+        grouped = _grouped_samples(1.0, 100, 1.0, 100)
+        viewport = {"width": 1280, "height": 900, "scale": 1}
+        for arm in ("baseline", "candidate"):
+            for pair in range(5):
+                report = grouped[arm][pair]
+                for sample in gate._objects(report["samples"], "samples"):
+                    sample["viewport"] = viewport
+                    phases = gate._object(sample["phases"], "phases")
+                    gate._object(phases["full_y"], "full-Y phase").update(
+                        elapsed_ms=0.0005 if arm == "baseline" else 0.000583,
+                        actual_bottom=True, scroll_steps=0, max_scroll=0, final_scroll_y=0,
+                        max_frame_elapsed_ms=0,
+                        frame={"viewport": viewport, "content_height": 900, "scroll_y": 0},
+                    )
+        with patch.object(gate, "_group_reports", return_value=grouped):
+            self.assertFalse(promotion._measure(bundle, result)[0])
+            first = gate._objects(grouped["candidate"][0]["samples"], "samples")[0]
+            first_phases = gate._object(first["phases"], "phases")
+            gate._object(first_phases["full_y"], "full-Y phase")["actual_bottom"] = False
+            with self.assertRaisesRegex(ValueError, "regression"):
+                promotion._measure(bundle, result)
+
     def test_equal_and_mixed_noise_are_not_improvements(self) -> None:
         baseline = [100.0] * 25
         noise = [99.0, 101.0] * 12 + [100.0]
@@ -302,9 +332,9 @@ class PromotionAtomicityTest(unittest.TestCase):
 
     def test_improvement_uses_separately_bound_reuse_request(self) -> None:
         root, bundle, request = self.reuse_fixture()
-        measured: gate.JsonObject = {"memoryPolicyVersion": "html-memory-v4",
+        measured: gate.JsonObject = {"memoryPolicyVersion": "html-memory-v5",
                                     "retainedMemoryConditions": 84,
-                                    "memoryPolicyAssessments": _memory_v4_assessments()}
+                                    "memoryPolicyAssessments": _memory_v5_assessments()}
         result: gate.JsonObject = {"reuseEligibility": True, "measuredResult": measured}
         with (patch.object(promotion, "_runtime_identity", return_value="runtime"),
               patch.object(reuse, "verify_reuse_request", return_value=result) as verify,
@@ -318,27 +348,27 @@ class PromotionAtomicityTest(unittest.TestCase):
         self.assertEqual(verify.call_args.kwargs["expected_request_sha256"], gate.sha256(request))
         self.assertEqual([call.args[0] for call in verify.call_args_list], [request, request])
         self.assertEqual([call.kwargs["memory_policy_version"] for call in verify.call_args_list],
-                         ["html-memory-v4", "html-memory-v4"])
+                         ["html-memory-v5", "html-memory-v5"])
         measure.assert_called_once_with(unittest.mock.ANY, measured)
 
-    def test_improvement_requires_v4_for_fresh_and_reused_results(self) -> None:
+    def test_improvement_requires_v5_for_fresh_and_reused_results(self) -> None:
         root, bundle, _request = self.reuse_fixture()
-        result: gate.JsonObject = {"memoryPolicyVersion": "html-memory-v4",
+        result: gate.JsonObject = {"memoryPolicyVersion": "html-memory-v5",
                                    "retainedMemoryConditions": 84,
-                                   "memoryPolicyAssessments": _memory_v4_assessments()}
+                                   "memoryPolicyAssessments": _memory_v5_assessments()}
         with (patch.object(promotion, "_runtime_identity", return_value="runtime"),
               patch.object(gate, "verify", return_value=result) as verify,
               patch.object(gate, "Bundle", return_value=object()),
               patch.object(promotion, "_measure", return_value=(True, {}))):
             self.assertTrue(promotion.improvement_established(bundle, root))
-        self.assertEqual(verify.call_args.kwargs["memory_policy_version"], "html-memory-v4")
+        self.assertEqual(verify.call_args.kwargs["memory_policy_version"], "html-memory-v5")
 
         legacy: gate.JsonObject = {"candidateConditions": 84}
         with (patch.object(promotion, "_runtime_identity", return_value="runtime"),
               patch.object(gate, "verify", return_value=legacy),
               patch.object(gate, "Bundle", return_value=object()),
               patch.object(promotion, "_measure", return_value=(True, {}))):
-            with self.assertRaisesRegex(ValueError, "v4 retained memory"):
+            with self.assertRaisesRegex(ValueError, "v5 retained memory"):
                 promotion.improvement_established(bundle, root)
 
     def test_improvement_rejects_mismatched_or_changed_request(self) -> None:
@@ -369,11 +399,11 @@ class PromotionAtomicityTest(unittest.TestCase):
 
             def altered(_directory: Path, _root: Path, *,
                         memory_policy_version: str | None = None) -> gate.JsonObject:
-                self.assertEqual(memory_policy_version, "html-memory-v4")
+                self.assertEqual(memory_policy_version, "html-memory-v5")
                 manifest.write_bytes(b"modified")
-                return {"memoryPolicyVersion": "html-memory-v4",
+                return {"memoryPolicyVersion": "html-memory-v5",
                         "retainedMemoryConditions": 84,
-                        "memoryPolicyAssessments": _memory_v4_assessments()}
+                        "memoryPolicyAssessments": _memory_v5_assessments()}
 
             with (patch.object(gate, "verify", side_effect=altered),
                   patch.object(promotion, "_runtime_identity", return_value="runtime")):
@@ -381,7 +411,7 @@ class PromotionAtomicityTest(unittest.TestCase):
                     promotion.improvement_established(root, root)
 
     def test_promotion_records_every_accepted_candidate_and_updates_only_on_improvement(self) -> None:
-        repository = Path(__file__).resolve().parents[2]
+        repository = Path("/Users/hiroyuki_furuno/works/private/katana-render-runtime")
         original = (repository / "docs/performance/html-performance-history.json").read_bytes()
         history = gate._object(json.loads(original), "test history")
         first = gate._objects(history["records"], "test records")[0]
@@ -390,7 +420,7 @@ class PromotionAtomicityTest(unittest.TestCase):
         candidate = copy.deepcopy(first)
         candidate["id"] = "new-record"
         candidate["memoryPolicy"] = {
-            "version": "html-memory-v4", "policySha256": "a" * 64,
+            "version": "html-memory-v5", "policySha256": "a" * 64,
             "retentionEvidenceSha256": "b" * 64, "candidateConditions": 84,
             "acceptedConditions": 84, "warmupCycles": 5, "measuredCycles": 25,
         }
@@ -410,9 +440,9 @@ class PromotionAtomicityTest(unittest.TestCase):
                 (root / "tmp").mkdir()
                 request = root / "tmp/request.json"
                 request.write_bytes(b"request")
-                measured: gate.JsonObject = {"memoryPolicyVersion": "html-memory-v4",
+                measured: gate.JsonObject = {"memoryPolicyVersion": "html-memory-v5",
                                              "retainedMemoryConditions": 84,
-                                             "memoryPolicyAssessments": _memory_v4_assessments()}
+                                             "memoryPolicyAssessments": _memory_v5_assessments()}
                 if mode.startswith("v1"):
                     measured = {}
                 elif mode == "v2":
@@ -436,7 +466,7 @@ class PromotionAtomicityTest(unittest.TestCase):
                              selected_measured: gate.JsonObject = measured,
                              **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
                     self.assertTrue(_kwargs.get("env") == dict(os.environ))
-                    self.assertIn("--require-memory-policy-v4", argv)
+                    self.assertIn("--require-memory-policy-v5", argv)
                     if selected_mode.endswith("-reuse"):
                         self.assertEqual(argv[-2:], ["--reuse-request", str(selected_request)])
                     stdout.write(json.dumps(selected_result if selected_mode.endswith("-reuse") else selected_measured).encode() + b"\n")
@@ -494,9 +524,9 @@ class PromotionAtomicityTest(unittest.TestCase):
                                              [request, request])
                             self.assertEqual(verify_reuse.call_args.kwargs["expected_measured_dir"], bundle_path)
                             self.assertEqual(verify_reuse.call_args.kwargs["memory_policy_version"],
-                                             "html-memory-v4")
+                                             "html-memory-v5")
                     else:
-                        reason = ("requires v4 retained memory" if mode in ("v1", "v2", "v3", "short", "unknown", "v1-reuse") else
+                        reason = ("requires v5 retained memory" if mode in ("v1", "v2", "v3", "short", "unknown", "v1-reuse") else
                                   "runtime identity changed" if mode == "runtime-changed" else
                                   "environment changed" if mode.startswith("environment-") else
                                   "formal performance verification failed" if mode == "child-failed" else "improvement")
@@ -557,7 +587,7 @@ class PromotionAtomicityTest(unittest.TestCase):
                               "2026-01-01T00:00:00Z")
 
     def test_history_schema_rejects_malformed_input(self) -> None:
-        root = Path(__file__).resolve().parents[2]
+        root = Path("/Users/hiroyuki_furuno/works/private/katana-render-runtime")
         with self.assertRaises(subprocess.CalledProcessError):
             promotion._schema_validate(root, b'{"schema":"invalid"}')
 

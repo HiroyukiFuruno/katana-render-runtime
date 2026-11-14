@@ -349,7 +349,7 @@ class CatalogProducerOperationTest(unittest.TestCase):
             self.assertIs(caught.exception, marker)
             make_query.assert_called_once_with(root / "tmp/output.lifecycle", scratch_root=root / "tmp")
             load.assert_called_once_with(batch.resolve(), root, fixed_epoch=origin, git_query=query,
-                                         memory_policy_version="html-memory-v4",
+                                         memory_policy_version="html-memory-v5",
                                          accepted_condition_ids_sink=ANY)
             self.assertIs(verify.call_args.kwargs["git_query"], query)
 
@@ -1931,7 +1931,7 @@ class HtmlPerformanceBatchUnitTests(unittest.TestCase):
 
         self.assertEqual(events, ["verify", "seal"])
         verify.assert_called_once_with(self.root / "bundle", self.root, git_query=None,
-                                       memory_policy_version="html-memory-v4")
+                                       memory_policy_version="html-memory-v5")
         validate.assert_not_called()
 
     def test_fixed_epoch_does_not_claim_formal_acceptance_without_current_build(self) -> None:

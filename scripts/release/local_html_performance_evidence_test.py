@@ -26,6 +26,7 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
             "bundle_manifest_sha256": "d" * 64, "result_sha256": "e" * 64,
             "conditions": 84, "candidate_conditions": 84, "checks": 1680,
             "formal_pass": True, "platform": "macos-arm64", "os_version": "27.2",
+            "memory_policy_version": "html-memory-v5",
             "tools": {"python": "3.13.0", "scipy": "1.18.1", "runtime_sha256": "f" * 64}}
         self.comment: dict[str, object] = {"body": proof.MARKER + "\n" + json.dumps(self.payload),
                         "user": {"login": "owner"}, "author_association": "OWNER",
@@ -40,6 +41,7 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
         for key, bad in (("head_sha", "f" * 40), ("base_sha", "f" * 40),
                          ("conditions", 83), ("candidate_conditions", 83),
                          ("checks", 1), ("formal_pass", False), ("scope_sha256", "0" * 64), ("os_version", "invalid"),
+                         ("memory_policy_version", "html-memory-v4"),
                          ("tools", {"python": "3", "scipy": "wrong", "runtime_sha256": "f" * 64})):
             payload = {**self.payload, key: bad}
             comment = {**self.comment, "body": proof.MARKER + "\n" + json.dumps(payload)}
@@ -98,7 +100,7 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
     def test_paired_workflow_falls_back_when_local_evidence_is_missing(self) -> None:
         from pathlib import Path
         from local_macos_workflow_contract_test import workflow_job, workflow_steps
-        workflow = (Path(__file__).parents[2] / ".github/workflows/test-and-build.yml").read_text()
+        workflow = (Path("/Users/hiroyuki_furuno/works/private/katana-render-runtime") / ".github/workflows/test-and-build.yml").read_text()
         steps = {step.get("name"): step for step in workflow_steps(workflow_job(workflow, "paired-performance"))}
         self.assertEqual(steps["Verify optional local HTML performance evidence"].get("continue-on-error"), "true")
         expected = "steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'"
@@ -130,15 +132,15 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "failed"):
                 proof.collect("owner/repo", 3, Path("/unused"))
             verifier.assert_called_once_with(Path("/unused"), mac.ROOT,
-                                              memory_policy_version="html-memory-v4")
+                                              memory_policy_version="html-memory-v5")
             self.assertTrue(all(call.args[1] != "POST" for call in api.call_args_list))
 
-    def test_collector_requires_v4_for_fresh_and_rejects_legacy_results(self) -> None:
+    def test_collector_requires_v5_for_fresh_and_rejects_legacy_results(self) -> None:
         from contextlib import ExitStack
         from pathlib import Path
         formal: dict[str, object] = {
             "head": "c" * 40, "conditions": 84, "candidateConditions": 84,
-            "checks": 1680, "memoryPolicyVersion": "html-memory-v4",
+            "checks": 1680, "memoryPolicyVersion": "html-memory-v5",
             "retainedMemoryConditions": 84, "memoryPolicyAssessments": [{}] * 84,
         }
         with ExitStack() as stack:
@@ -163,21 +165,21 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
             stack.enter_context(patch.object(proof, "require_measurement_host"))
             stack.enter_context(patch.object(importlib.metadata, "version", return_value="1.18.1"))
             verify = stack.enter_context(patch.object(gate, "verify", return_value=formal))
-            require_v4 = stack.enter_context(patch.object(
-                gate, "_require_cli_memory_v4", wraps=gate._require_cli_memory_v4))
+            require_v5 = stack.enter_context(patch.object(
+                gate, "_require_cli_memory_v5", wraps=gate._require_cli_memory_v5))
             proof.collect("owner/repo", 3, Path("/unused"))
             verify.assert_called_once_with(Path("/unused"), mac.ROOT,
-                                           memory_policy_version="html-memory-v4")
-            require_v4.assert_called_once_with(formal, reused=False)
+                                           memory_policy_version="html-memory-v5")
+            require_v5.assert_called_once_with(formal, reused=False)
 
-        with self.assertRaisesRegex(ValueError, "v4 retained memory"):
-            gate._require_cli_memory_v4({}, reused=False)
+        with self.assertRaisesRegex(ValueError, "v5 retained memory"):
+            gate._require_cli_memory_v5({}, reused=False)
         legacy: gate.JsonObject = {
             "memoryPolicyVersion": "html-memory-v3", "retainedMemoryConditions": 84,
             "memoryPolicyAssessments": [{}] * 84,
         }
-        with self.assertRaisesRegex(ValueError, "v4 retained memory"):
-            gate._require_cli_memory_v4(legacy, reused=False)
+        with self.assertRaisesRegex(ValueError, "v5 retained memory"):
+            gate._require_cli_memory_v5(legacy, reused=False)
 
     def test_reuse_projection_binds_measured_result_and_eligibility(self) -> None:
         from contextlib import ExitStack
@@ -186,7 +188,7 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
         old, head = "a" * 40, "c" * 40
         formal: dict[str, object] = {"head": old, "conditions": 84,
                                       "candidateConditions": 84, "checks": 1680,
-                                      "memoryPolicyVersion": "html-memory-v4",
+                                      "memoryPolicyVersion": "html-memory-v5",
                                       "retainedMemoryConditions": 84,
                                       "memoryPolicyAssessments": [{}] * 84}
         reused: dict[str, object] = {"measuredHead": old, "eligibleHead": head,
@@ -208,8 +210,8 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
             digest = stack.enter_context(patch.object(gate, "sha256", return_value="f" * 64))
             stack.enter_context(patch.object(gate, "Bundle", return_value=unittest.mock.Mock(manifest={"head": old})))
             stack.enter_context(patch.object(gate, "_require_formal_release_result"))
-            require_v4 = stack.enter_context(patch.object(
-                gate, "_require_cli_memory_v4", wraps=gate._require_cli_memory_v4))
+            require_v5 = stack.enter_context(patch.object(
+                gate, "_require_cli_memory_v5", wraps=gate._require_cli_memory_v5))
             stack.enter_context(patch.object(proof, "require_measurement_host"))
             stack.enter_context(patch.object(proof, "installed_identity", return_value="d" * 64))
             stack.enter_context(patch.object(importlib.metadata, "version", return_value="1.18.1"))
@@ -221,8 +223,8 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
             verify.assert_called_with(request, mac.ROOT, expected_measured_dir=measured,
                                       expected_measured_manifest_sha256="f" * 64,
                                       expected_request_sha256="f" * 64,
-                                      memory_policy_version="html-memory-v4")
-            require_v4.assert_called_with(formal, reused=False)
+                                      memory_policy_version="html-memory-v5")
+            require_v5.assert_called_with(formal, reused=False)
             reused["reuseKind"] = "program-source-artifact-equivalence-v1"
             self.assertEqual(proof.collect("owner/repo", 3, measured, request)["verification_kind"],
                              "program-source-artifact-equivalence-v1")
