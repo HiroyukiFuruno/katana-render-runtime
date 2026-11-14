@@ -28,6 +28,7 @@ DIRECT_INPUTS: list[str] = [
     "!**/.ruff_cache/**",
     "!**/.mypy_cache/**",
     "!**/.pytest_cache/**",
+    "!**/__pycache__/**",
     "!/tests/fixtures/quality-cache/.moon/cache/**",
     "!/tests/fixtures/quality-cache/.outputs/**",
 ]
@@ -552,7 +553,7 @@ def direct_input_run_record(
         name.startswith(excluded)
         or any(
             f"/{cache}/" in f"/{name}"
-            for cache in (".ruff_cache", ".mypy_cache", ".pytest_cache")
+            for cache in (".ruff_cache", ".mypy_cache", ".pytest_cache", "__pycache__")
         )
         for name in inputs
     ), f"{label}: generated inputs entered Moon hashing"
@@ -969,6 +970,7 @@ def main() -> int:
             "ruff cache": workspace_dir / ".ruff_cache/entry",
             "nested mypy cache": workspace_dir / "scripts/.mypy_cache/entry",
             "pytest cache": workspace_dir / "tests/.pytest_cache/entry",
+            "Python bytecode": workspace_dir / "scripts/release/__pycache__/verify.cpython-314.pyc",
             "nested fixture Moon cache": workspace_dir
             / "tests/fixtures/quality-cache/.moon/cache/entry",
             "coverage LCOV temp": workspace_dir

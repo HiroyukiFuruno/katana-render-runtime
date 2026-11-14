@@ -4879,6 +4879,7 @@ test("runtime bundle named entry binds the one cache-enabled fingerprint leaf", 
     "!**/.ruff_cache/**",
     "!**/.mypy_cache/**",
     "!**/.pytest_cache/**",
+    "!**/__pycache__/**",
     "!/tests/fixtures/quality-cache/.moon/cache/**",
     "!/tests/fixtures/quality-cache/.outputs/**",
   ]);
@@ -4905,6 +4906,7 @@ test("runtime bundle named entry binds the one cache-enabled fingerprint leaf", 
   ).toThrow("runtime bundle cache inputs changed");
   const ledgerExclusion = "!/docs/quality-gate-improvement-tasks.md";
   const outputExclusion = "!/tests/fixtures/quality-cache/.outputs/**";
+  const bytecodeExclusion = "!**/__pycache__/**";
   const invalidInputProjections = [
     MOON_QUALITY_INPUTS.filter((input) => input !== ledgerExclusion),
     [
@@ -4913,6 +4915,7 @@ test("runtime bundle named entry binds the one cache-enabled fingerprint leaf", 
       ...MOON_QUALITY_INPUTS.slice(1).filter((input) => input !== ledgerExclusion),
     ],
     MOON_QUALITY_INPUTS.filter((input) => input !== outputExclusion),
+    MOON_QUALITY_INPUTS.filter((input) => input !== bytecodeExclusion),
   ];
   for (const inputs of invalidInputProjections) {
     runtimeTask.inputs = inputs;

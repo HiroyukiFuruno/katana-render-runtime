@@ -8,6 +8,7 @@ export const MOON_QUALITY_INPUTS = [
   "!**/.ruff_cache/**",
   "!**/.mypy_cache/**",
   "!**/.pytest_cache/**",
+  "!**/__pycache__/**",
   "!/tests/fixtures/quality-cache/.moon/cache/**",
   "!/tests/fixtures/quality-cache/.outputs/**",
 ] as const;
