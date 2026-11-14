@@ -1,5 +1,4 @@
 use crate::commands::{DiagramAction, DiagramInputFormat};
-#[cfg(test)]
 use crate::file_ops::FileOps;
 use crate::reference_cmd::ReferenceCommand;
 use katana_render_runtime::{DiagramKind, RenderOutput};
