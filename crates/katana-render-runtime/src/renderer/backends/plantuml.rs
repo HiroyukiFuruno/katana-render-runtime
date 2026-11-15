@@ -90,6 +90,7 @@ mod tests {
     use crate::renderer::api::{
         DiagramKind, RenderConfig, RenderContext, RenderError, RenderInput, RenderPolicy, Renderer,
     };
+    use crate::system::ProcessService;
 
     #[test]
     fn cache_constructor_and_theme_catalog_are_available() {
@@ -117,11 +118,10 @@ mod tests {
     #[test]
     fn same_renderer_recovers_from_missing_jar_in_real_jvm()
     -> Result<(), Box<dyn std::error::Error>> {
+        const CHILD: &str = "KRR_PLANTUML_RECOVERY_CHILD";
         const CASE_NAME: &str = "renderer::backends::plantuml::tests::same_renderer_recovers_from_missing_jar_in_real_jvm";
-        if !crate::system::ProcessService::enter_isolated_test_child(
-            "KRR_PLANTUML_RECOVERY_CHILD",
-            CASE_NAME,
-        )? {
+        let in_child = ProcessService::enter_isolated_test_child(CHILD, CASE_NAME)?;
+        if !in_child {
             return Ok(());
         }
         let fixture = tempfile::tempdir()?;
