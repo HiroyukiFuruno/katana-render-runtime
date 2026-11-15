@@ -114,6 +114,37 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn same_renderer_recovers_from_missing_jar_in_real_jvm()
+    -> Result<(), Box<dyn std::error::Error>> {
+        const CASE_NAME: &str = "renderer::backends::plantuml::tests::same_renderer_recovers_from_missing_jar_in_real_jvm";
+        if !crate::system::ProcessService::enter_isolated_test_child(
+            "KRR_PLANTUML_RECOVERY_CHILD",
+            CASE_NAME,
+        )? {
+            return Ok(());
+        }
+        let fixture = tempfile::tempdir()?;
+        let jar_path = fixture.path().join("plantuml.jar");
+        let renderer = PlantUmlRenderer::with_runtime_path(jar_path.clone());
+        let input = input(serde_json::Value::Null);
+        let warning = renderer.render(&input)?;
+        assert_eq!(warning.diagnostics.warnings.len(), 1);
+        assert!(warning.diagnostics.warnings[0].contains("plantuml.jar was not found"));
+        assert!(warning.svg.starts_with("```plantuml"));
+        std::fs::copy(super::PlantUmlRendererOps::default_jar_path(), &jar_path)?;
+        let recovered = renderer.render(&input)?;
+        assert!(recovered.svg.contains("<svg") && recovered.svg.contains("Alice"));
+        assert!(recovered.width > 0.0 && recovered.height > 0.0);
+        assert!(recovered.diagnostics.warnings.is_empty());
+        assert_ne!(warning.cache_fingerprint, recovered.cache_fingerprint);
+        assert_eq!(
+            recovered.cache_fingerprint,
+            renderer.render(&input)?.cache_fingerprint
+        );
+        Ok(())
+    }
+
     fn input(vendor_config: serde_json::Value) -> RenderInput {
         RenderInput {
             kind: DiagramKind::PlantUml,

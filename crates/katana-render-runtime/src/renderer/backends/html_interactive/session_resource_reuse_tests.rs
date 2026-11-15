@@ -197,3 +197,58 @@ fn assert_retained_resources_after_resize_and_scroll(
     );
     Ok(())
 }
+
+#[test]
+fn resize_keeps_external_script_and_iframe_until_reopen() -> TestResult {
+    let fixture = tempfile::tempdir()?;
+    let root = fixture.path();
+    let html =
+        r#"<!doctype html><iframe id=frame src=frame.html></iframe><script src=app.js></script>"#;
+    let origin =
+        url::Url::from_file_path(root.join("index.html")).map_err(|()| "invalid fixture origin")?;
+    let source = HtmlBrowserSource::new(html, origin.as_str())?;
+    let initial = HtmlBrowserViewport::new(100, 80, 1.0)?;
+    let resized = HtmlBrowserViewport::new(120, 80, 1.0)?;
+
+    write_external_resources(root, "first")?;
+    let mut session = HtmlInteractiveSession::start(source.clone(), initial)?;
+    assert_external_resource_versions(&mut session, "first")?;
+
+    write_external_resources(root, "second")?;
+    let retained_audit = ResourceAuditScope::start();
+    session.resize(resized)?;
+    assert_external_resource_versions(&mut session, "first")?;
+    let retained = audit(retained_audit, root, "external-retained-audit")?;
+    assert!(retained.complete, "{}", retained.reason);
+    assert_eq!(retained.requests.as_array().map(Vec::len), Some(0));
+
+    let mut fresh = HtmlInteractiveSession::start(source, resized)?;
+    assert_external_resource_versions(&mut fresh, "second")
+}
+
+fn write_external_resources(root: &Path, version: &str) -> TestResult {
+    std::fs::write(
+        root.join("app.js"),
+        format!("window.externalVersion = '{version}';"),
+    )?;
+    std::fs::write(
+        root.join("frame.html"),
+        format!("<p id=frame-version>{version}</p>"),
+    )?;
+    Ok(())
+}
+
+fn assert_external_resource_versions(
+    session: &mut HtmlInteractiveSession,
+    expected: &str,
+) -> TestResult {
+    let script_version = session
+        .runtime
+        .observe_feature_state("window.externalVersion")?;
+    assert_eq!(script_version, expected);
+    let frame_version = session.runtime.observe_feature_state(
+        "document.getElementById('frame').contentDocument.getElementById('frame-version').textContent",
+    )?;
+    assert_eq!(frame_version, expected);
+    Ok(())
+}
