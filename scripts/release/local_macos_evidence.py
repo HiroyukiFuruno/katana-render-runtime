@@ -37,7 +37,7 @@ else:
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/test-and-build.yml"
-SUPPORTED_WORKFLOW_SHA256 = "3079f7d72844b4d7f5c0bcb6308a552715302b3840b205fb51f19e139da22c50"
+SUPPORTED_WORKFLOW_SHA256 = "010f13ba94f941836c1ce116ce6c9ff10fa026b10a8eefe109ccacf8debb907b"
 SCHEMA = 1
 FRESHNESS_SECONDS = 24 * 60 * 60
 MARKER = "<!-- krr-local-macos-evidence:v1 -->"
