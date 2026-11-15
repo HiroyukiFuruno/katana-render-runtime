@@ -1704,6 +1704,8 @@ class DriverContractTest(unittest.TestCase):
             (root / "Cargo.toml").write_text('[package]\nversion = "0.4.22"\n')
             hooks = root / "scripts" / "hooks"
             hooks.mkdir(parents=True)
+            for dependency in ("local_review_state.py", "release_self_review_gate.py"):
+                shutil.copyfile(repository / "scripts/hooks" / dependency, hooks / dependency)
             cache_script = root / "scripts" / "plantuml" / "cache-dir.sh"
             cache_script.parent.mkdir()
             cache_script.write_text((repository / "scripts/plantuml/cache-dir.sh").read_text())
@@ -2838,7 +2840,10 @@ class DriverContractTest(unittest.TestCase):
         justfile = (root / "Justfile").read_text()
         section = justfile.split("\ncheck:\n", 1)[1].split("\n\n", 1)[0]
         self.assertNotIn("scripts/hooks/local_review.py", section)
-        self.assertIn("run_parallel_checks.py", section)
+        self.assertLess(
+            section.index("release_self_review_gate.py"),
+            section.index("run_parallel_checks.py"),
+        )
         local_review_section = justfile.split("\nlocal-review:\n", 1)[1].split("\n\n", 1)[0]
         self.assertIn("scripts/hooks/local_review.py", local_review_section)
 

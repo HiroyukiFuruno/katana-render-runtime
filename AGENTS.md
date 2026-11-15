@@ -137,6 +137,7 @@
 
 ## PR Review Gate
 
+- Codex が `release/*` で完全品質ゲートを起動する前に、ソースを変更する残作業と自己レビューの指摘を片付ける。セッション作業台帳の `pre-pr-self-review` に、`state: done`、`reviewed_head`（現在のコミット）、`pending_fixes: []`（残る修正なし）を記録する。`just check` と、それを呼ぶ pre-push はこの記録と作業ツリーを先に確認する。修正やコミットの変更後は差分の自己レビューを先にやり直す。
 - Pull Request は必ず Draft として作成する。Ready PR を直接作成してはならない。
 - 初回AIレビューは Draft の `@codex review` で行う。Draft作成前と指摘修正時は自己レビュー・必要な静的検査・関連回帰を行い、ローカルHigh reviewを重複実行しない。必要時だけ `just local-review` を明示する。`just check` と pre-push は標準品質laneを維持する。
 - Draftではremoteの完全CIを実行せず、`ready_for_review` とReady後のpushで必須CIを実行する。DraftのSKIPを品質検証成功として再利用しない。

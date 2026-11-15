@@ -598,6 +598,7 @@ draft-review: check
 # work stay in one lane because they share build/cache outputs.
 # 指摘修正ごとの重複を避け、AIレビューは専用targetから明示実行する。
 check:
+    @python3 scripts/hooks/release_self_review_gate.py
     @export COVERAGE_MIN_LINES={{quote(COVERAGE_MIN_LINES)}} COVERAGE_MAX_UNCOVERED_LINES={{quote(COVERAGE_MAX_UNCOVERED_LINES)}} \
       TEST_THREADS={{quote(TEST_THREADS)}} RUSTFLAGS={{quote(RUSTFLAGS)}} CARGO={{quote(CARGO)}} JOBS={{quote(JOBS)}} CHECK_JOBS={{quote(CHECK_JOBS)}}; \
       python3 scripts/hooks/run_parallel_checks.py --jobs "$CHECK_JOBS"
