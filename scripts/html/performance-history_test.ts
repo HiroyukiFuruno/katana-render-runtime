@@ -220,9 +220,6 @@ test("rejects malformed or internally inconsistent history", () => {
     (history) => {
       firstRecord(history).candidatePhaseStatistics.cold_open.maxPeakRssBytes = 1.5;
     },
-    (history) => {
-      firstRecord(history).memoryPolicy = validMemoryPolicy(firstRecord(history));
-    },
   ];
   for (const change of changes) {
     const history = fixture();
@@ -230,6 +227,19 @@ test("rejects malformed or internally inconsistent history", () => {
     expect(() => parsePerformanceHistory(history)).toThrow();
   }
   expect(() => parsePerformanceHistory({ ...fixture(), extra: true })).toThrow();
+});
+
+test("rejects memory policy evidence in a v1 history", () => {
+  const history = fixture();
+  const legacy = firstRecord(history);
+  delete legacy.memoryPolicy;
+  history.schema = "krr-html-performance-history-v1";
+  history.records = [legacy];
+  history.activeReferenceRecordId = legacy.id;
+  expect(parsePerformanceHistory(history)).toEqual(history);
+
+  legacy.memoryPolicy = validMemoryPolicy(legacy);
+  expect(() => parsePerformanceHistory(history)).toThrow();
 });
 
 test("accepts v2 policy evidence alongside unchanged v1 records", () => {
