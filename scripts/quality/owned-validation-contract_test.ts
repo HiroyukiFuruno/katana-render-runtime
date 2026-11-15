@@ -1241,17 +1241,17 @@ test.each([
   ["runner", `just ${playwrightMacosRecipe}`, "just browser-contract-test"],
   [
     "Windows just availability",
-    "      - name: Install just\n        uses: taiki-e/install-action@645c854f3e001c226422fc9dbfc33f80e593932b # just\n\n      - name: Install Chrome for the macOS official producer browser test",
-    "      - name: Install just\n        if: matrix.os != 'windows-latest'\n        uses: taiki-e/install-action@645c854f3e001c226422fc9dbfc33f80e593932b # just\n\n      - name: Install Chrome for the macOS official producer browser test",
+    "      - name: Install just\n        uses: taiki-e/install-action@4ccefd7d26b61bbb81f4ff01165e8a6880a1bd59 # just\n\n      - name: Install Chrome for the macOS official producer browser test",
+    "      - name: Install just\n        if: matrix.os != 'windows-latest'\n        uses: taiki-e/install-action@4ccefd7d26b61bbb81f4ff01165e8a6880a1bd59 # just\n\n      - name: Install Chrome for the macOS official producer browser test",
   ],
   [
     "unreviewed just SHA",
-    "uses: taiki-e/install-action@645c854f3e001c226422fc9dbfc33f80e593932b # just\n\n      - name: Install Chrome",
+    "uses: taiki-e/install-action@4ccefd7d26b61bbb81f4ff01165e8a6880a1bd59 # just\n\n      - name: Install Chrome",
     "uses: taiki-e/install-action@0000000000000000000000000000000000000000 # just\n\n      - name: Install Chrome",
   ],
   [
     "unpinned just action",
-    "uses: taiki-e/install-action@645c854f3e001c226422fc9dbfc33f80e593932b # just\n\n      - name: Install Chrome",
+    "uses: taiki-e/install-action@4ccefd7d26b61bbb81f4ff01165e8a6880a1bd59 # just\n\n      - name: Install Chrome",
     "uses: taiki-e/install-action@just # just\n\n      - name: Install Chrome",
   ],
   [
