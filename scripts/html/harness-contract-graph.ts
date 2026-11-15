@@ -862,7 +862,11 @@ function astNodes(value: unknown): Record<string, unknown>[] {
     const node = object(value);
     if (!node) return;
     nodes.push(node);
-    for (const child of Object.values(node)) visit(child);
+    for (const key in node) {
+      if (!Object.hasOwn(node, key)) continue;
+      const child = node[key];
+      if (child !== null && typeof child === "object") visit(child);
+    }
   };
   visit(value);
   return nodes;
@@ -3810,7 +3814,11 @@ function sourceCodeFromModule(
     if (["ImportDeclaration", "TsTypeQuery"].includes(String(node.type))) return;
     if (escaped(node, parent, grandparent)) result.push("!unresolved-executable");
     if (node.type === "CallExpression") result.push(...referencesForCall(node));
-    for (const child of Object.values(node)) visit(child, node, parent);
+    for (const key in node) {
+      if (!Object.hasOwn(node, key)) continue;
+      const child = node[key];
+      if (child !== null && typeof child === "object") visit(child, node, parent);
+    }
   };
   visit(module);
   return result;
