@@ -1,5 +1,5 @@
 {
-  "schema": "krr-html-performance-history-v1",
+  "schema": "krr-html-performance-history-v2",
   "activeReferenceRecordId": "html84-a6b21479-html84-a6b21479-all",
   "activeReferenceSelectionNote": "正式な同一条件の比較で有意な改善と非劣化を確認。",
   "records": [
@@ -48,7 +48,7 @@
         },
         "full_y": {
           "maxSampleSeconds": 0.026736,
-          "medianSeconds": 5e-7,
+          "medianSeconds": 5e-07,
           "p95Seconds": 0.017747746149999983,
           "maxPeakRssBytes": 55558144
         },
@@ -141,7 +141,7 @@
         },
         "full_y": {
           "maxSampleSeconds": 0.02726425,
-          "medianSeconds": 5e-7,
+          "medianSeconds": 5e-07,
           "p95Seconds": 0.018368799699999994,
           "maxPeakRssBytes": 53968896
         },
@@ -222,7 +222,7 @@
         },
         "full_y": {
           "maxSampleSeconds": 0.046331833,
-          "medianSeconds": 5e-7,
+          "medianSeconds": 5e-07,
           "p95Seconds": 0.01805963785,
           "maxPeakRssBytes": 53919744
         },
@@ -245,6 +245,96 @@
         "verifierStdoutSha256": "82b65330b163eae63497a2fc7b042b9e3e306ef84b0316b6c13c1fb0a99e29f7"
       },
       "reuseStatus": "historical-result; current-source eligibility must be verified separately"
+    },
+    {
+      "id": "html84-f818d19a-release-f818d19a-history-restored-e2g76tmt",
+      "sourceCommit": "f818d19af86302ed0790830034f7d007c80aeb4f",
+      "verificationCompletedAtUtc": "2026-11-15T17:25:45.282930Z",
+      "bundleManifestSha256": "84543c2b3b9391024221eca23106fed97fa576d98ff51a2ec8db1cd07907fb82",
+      "referenceBuild": {
+        "schema": "krr-html-performance-reference-build-pins-v1",
+        "buildArtifactSchema": "krr-html-performance-build-artifact-v3",
+        "buildArtifactSha256": "82587f09e556bde8ad049246e79f4010d0bc99d7bea95e9e45cd496ce6163cc5",
+        "sourceSnapshotSha256": "d168d37fc38b5cf28f2d89928a9f29b632ba507b7789daccfcb1e16790771cd9",
+        "binarySha256": "bca3bc69510097f1260dc1949458211a4b33e514f49078acb04874be7e9d0d32",
+        "lockSha256": "9bd29d6c505bb89d5aaa08617b87290442a87447511290c09f2a13af00c63fb7",
+        "cargoExecutableSha256": "7672ead309d505577c018fff2cafb3433601f073e38cbe87359ac1f7b944bbf5",
+        "rustcExecutableSha256": "210df6794001b73ec3d453878707fa1e0bdcb63c427024a6e6574bbe5615a4da",
+        "contextBeforeSha256": "26302abbb62233d512f9c6b23a6bb4ba61c8b0b8b6086b162d9528e3f2d9f023"
+      },
+      "scope": {
+        "catalog": "catalog-stage90",
+        "candidateConditions": 84,
+        "pairedConditions": 84,
+        "candidateOnlyConditions": 0,
+        "trialsPerConditionPerPhase": 25,
+        "candidateSamplesPerPhase": 2100,
+        "candidateAndBaselineSamplesPerPhase": 4200,
+        "phaseRecords": 25200,
+        "checks": 1680,
+        "aggregation": "candidate samples pooled across all 84 conditions; no-op phases included"
+      },
+      "measuredAcceptance": {
+        "verifierRun": "release-f818d19a-history-restored-e2g76tmt",
+        "verifierExitCode": 0,
+        "performanceNonregression": true,
+        "htmlMinimumScore": 92.14438,
+        "htmlScoreThreshold": 90,
+        "outputFontIdentityEquivalence": "established"
+      },
+      "candidatePhaseStatistics": {
+        "cold_open": {
+          "maxSampleSeconds": 0.193241083,
+          "medianSeconds": 0.0802917915,
+          "p95Seconds": 0.11730208125,
+          "maxPeakRssBytes": 43859968
+        },
+        "warm_open": {
+          "maxSampleSeconds": 0.036214083,
+          "medianSeconds": 0.017115707999999997,
+          "p95Seconds": 0.029520418750000003,
+          "maxPeakRssBytes": 54804480
+        },
+        "re_display": {
+          "maxSampleSeconds": 0.030736292,
+          "medianSeconds": 0.013686145499999998,
+          "p95Seconds": 0.02593797085,
+          "maxPeakRssBytes": 55590912
+        },
+        "full_y": {
+          "maxSampleSeconds": 0.044041667,
+          "medianSeconds": 0.0,
+          "p95Seconds": 0.019695245499999993,
+          "maxPeakRssBytes": 55590912
+        },
+        "post_operation": {
+          "maxSampleSeconds": 0.104290042,
+          "medianSeconds": 0.018909541499999998,
+          "p95Seconds": 0.051725197599999995,
+          "maxPeakRssBytes": 56098816
+        },
+        "same_session_resize": {
+          "maxSampleSeconds": 0.030797167,
+          "medianSeconds": 0.013848834,
+          "p95Seconds": 0.02597406455,
+          "maxPeakRssBytes": 56115200
+        }
+      },
+      "evidence": {
+        "summaryRun": "release-f818d19a-history-restored-e2g76tmt",
+        "summarySha256": "6b288d091185a2f7190e27c6e306dc1e8d6c15e6cde1c3c8dbfe295480542a26",
+        "verifierStdoutSha256": "8e0cba21ec426793104297ebc3ae100bb3a7b1ac02afa5eabcf291797a6a6ac8"
+      },
+      "reuseStatus": "historical-result; current-source eligibility must be verified separately",
+      "memoryPolicy": {
+        "version": "html-memory-v5",
+        "policySha256": "16cae89fbb4ecdbcdd404eca6ce3e74285abbe9452ef46c8cb97deece6300cf3",
+        "retentionEvidenceSha256": "e287cc32689300d8985795346fd58e0b3627cf10a006c9293ae2b14db3be913a",
+        "candidateConditions": 84,
+        "acceptedConditions": 84,
+        "warmupCycles": 5,
+        "measuredCycles": 25
+      }
     }
   ]
 }
