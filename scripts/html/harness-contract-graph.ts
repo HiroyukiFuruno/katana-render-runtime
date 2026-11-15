@@ -852,6 +852,23 @@ interface DomainProcessRoute {
   nativeFrameCall?: Record<string, unknown>;
 }
 
+function visitAstChildren(
+  node: Record<string, unknown>,
+  visit: (
+    value: unknown,
+    parent?: Record<string, unknown>,
+    grandparent?: Record<string, unknown>,
+  ) => void,
+  parent?: Record<string, unknown>,
+  grandparent?: Record<string, unknown>,
+): void {
+  for (const key in node) {
+    if (!Object.hasOwn(node, key)) continue;
+    const child = node[key];
+    if (child !== null && typeof child === "object") visit(child, parent, grandparent);
+  }
+}
+
 function astNodes(value: unknown): Record<string, unknown>[] {
   const nodes: Record<string, unknown>[] = [];
   const visit = (value: unknown): void => {
@@ -862,11 +879,7 @@ function astNodes(value: unknown): Record<string, unknown>[] {
     const node = object(value);
     if (!node) return;
     nodes.push(node);
-    for (const key in node) {
-      if (!Object.hasOwn(node, key)) continue;
-      const child = node[key];
-      if (child !== null && typeof child === "object") visit(child);
-    }
+    visitAstChildren(node, visit);
   };
   visit(value);
   return nodes;
@@ -3814,11 +3827,7 @@ function sourceCodeFromModule(
     if (["ImportDeclaration", "TsTypeQuery"].includes(String(node.type))) return;
     if (escaped(node, parent, grandparent)) result.push("!unresolved-executable");
     if (node.type === "CallExpression") result.push(...referencesForCall(node));
-    for (const key in node) {
-      if (!Object.hasOwn(node, key)) continue;
-      const child = node[key];
-      if (child !== null && typeof child === "object") visit(child, node, parent);
-    }
+    visitAstChildren(node, visit, node, parent);
   };
   visit(module);
   return result;
