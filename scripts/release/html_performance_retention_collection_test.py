@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from functools import partial
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,6 +18,41 @@ from produce_html_performance_evidence import FilePin
 
 
 class RetentionCollectionAdapterTests(unittest.TestCase):
+    def test_retention_diagnostic_is_requested_only_for_rejected_retention(self) -> None:
+        for accepted in (True, False, None):
+            with self.subTest(accepted=accepted):
+                result: gate.JsonObject = {"memoryPolicy": {"retention": {"retention_allowed": accepted}}}
+                self.assertEqual(collection.needs_diagnostic(result), accepted is False)
+
+    def test_extended_capture_uses_the_same_input_and_reports_the_late_growth(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary).resolve()
+            expected: gate.JsonObject = {
+                "viewport": {"width": 800, "height": 600, "scale": 1},
+                "catalogCondition": {"condition_id": "fixture/static/800x600@1"},
+            }
+            observed = capture.RetentionCapture(folder / "retention-diagnostic", folder / "lifecycle.json", {})
+            diagnose = partial(
+                collection.diagnose, folder, expected, binary=folder / "renderer", fixture=folder / "case.html",
+                plan=folder / "plan.json", root=folder, environment={"MODE": "test"},
+            )
+            with patch.object(capture, "capture", return_value=observed) as capture_call, \
+                 patch.object(evidence, "read_diagnostic_rss", return_value=list(range(100, 200))):
+                result = diagnose()
+
+            self.assertEqual(capture_call.call_args.args[0], [
+                str(folder / "renderer"), "--retention-diagnostic", str(folder / "case.html"),
+                str(folder / "unused-retention-output.json"), str(folder / "plan.json"), "800", "600", "1",
+            ])
+            self.assertEqual(capture_call.call_args.kwargs["output"], folder / "retention-diagnostic")
+            self.assertEqual(result["rssMedianBytes"], {"25": 122, "50": 147, "100": 197})
+            self.assertEqual(result["rssGrowthAfter50Bytes"], 50)
+
+            with patch.object(capture, "capture", side_effect=RuntimeError):
+                self.assertEqual(diagnose(), {
+                    "conditionId": "fixture/static/800x600@1", "status": "error", "errorType": "RuntimeError",
+                })
+
     def test_collect_uses_constructed_argv_and_attaches_capture_and_transport(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary).resolve()

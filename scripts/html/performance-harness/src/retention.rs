@@ -4,9 +4,34 @@ use super::{hex_digest, measure_one, options::parse_options, HtmlBrowserViewport
 
 const WARMUP_CYCLES: usize = 5;
 const MEASUREMENT_CYCLES: usize = 25;
+const DIAGNOSTIC_CYCLES: usize = 100;
 const SAMPLES_PER_PAIR: usize = 5;
 
-pub(super) fn run() -> Result<(), Box<dyn std::error::Error>> {
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Mode {
+    Standard,
+    Diagnostic,
+}
+
+pub(super) fn mode(argument: Option<&std::ffi::OsStr>) -> Option<Mode> {
+    match argument.and_then(std::ffi::OsStr::to_str) {
+        Some("--retention") => Some(Mode::Standard),
+        Some("--retention-diagnostic") => Some(Mode::Diagnostic),
+        _ => None,
+    }
+}
+
+impl Mode {
+    fn total_cycles(&self) -> usize {
+        WARMUP_CYCLES
+            + match self {
+                Self::Standard => MEASUREMENT_CYCLES,
+                Self::Diagnostic => DIAGNOSTIC_CYCLES,
+            }
+    }
+}
+
+pub(super) fn run(mode: Mode) -> Result<(), Box<dyn std::error::Error>> {
     let options = parse_options(std::env::args_os().skip(2))?;
     let html = std::fs::read(&options.input)?;
     let source_hash = hex_digest(&html);
@@ -15,7 +40,7 @@ pub(super) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let stdout = io::stdout();
     let mut input = stdin.lock();
     let mut output = stdout.lock();
-    for cycle in 0..(WARMUP_CYCLES + MEASUREMENT_CYCLES) {
+    for cycle in 0..mode.total_cycles() {
         let sample = measure_one(
             &html,
             &source_hash,

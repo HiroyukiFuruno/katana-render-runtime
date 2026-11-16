@@ -107,8 +107,8 @@ fn measure_sample_worker(
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "candidate")]
-    if env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--retention")) {
-        return retention::run();
+    if let Some(mode) = retention::mode(env::args_os().nth(1).as_deref()) {
+        return retention::run(mode);
     }
     #[cfg(feature = "candidate")]
     if env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--input")) {

@@ -4368,6 +4368,7 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
     checkpoint_pins: list[FilePin] = []
     worker_attempt_pins: list[FilePin] = []
     retention_transport_pins: list[FilePin] = []
+    retention_diagnostics: list[gate.JsonObject] = []
     for row in measurement_rows:
         try:
             _require_batch_budget(batch_deadline)
@@ -4450,6 +4451,13 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
         checkpoint_pins.append(write_condition_checkpoint(folder, expected, result, manifest_data))
         expected_all.append((folder, expected, result, manifest_pin))
         completed_rows.append(row)
+        if row["catalog"] and retention_collection.needs_diagnostic(result):
+            diagnostic = retention_collection.diagnose(
+                folder, cast(gate.JsonObject, expected), binary=binaries["candidate"],
+                fixture=fixture, plan=plan_path, root=root, environment=worker_environment,
+            )
+            retention_diagnostics.append(diagnostic)
+            print(json.dumps({"retentionDiagnostic": diagnostic}), file=sys.stderr, flush=True)
     after_context = (context(root, target, input_paths, lifecycle, git_query=git_query)
                      if fixed_epoch is None else
                      context(root, target, input_paths, lifecycle, git_query=git_query,
@@ -4677,6 +4685,8 @@ def produce(root: Path, output: Path, capacity_document: Path | None = None,
             "memoryPolicyVersion": memory_policy.CURRENT_ACCEPTANCE_POLICY_VERSION,
             "memoryPolicyAssessments": reassessments,
         }
+        if retention_diagnostics:
+            summary["retentionDiagnostics"] = retention_diagnostics
         if catalog_manifest_path is not None:
             def seal_batch_receipt(*, failed: bool = False) -> FilePin:
                 nonlocal seal_started

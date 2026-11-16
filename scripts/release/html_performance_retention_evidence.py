@@ -46,12 +46,12 @@ def _validate_sample(expected: gate.JsonObject, cycle: int, raw: bytes, plan: ga
     gate.validate_measurement_sample(sample, expected, plan, candidate=True)
 
 
-def _metrics(path: Path, pid: int) -> list[int]:
+def _metrics(path: Path, pid: int, *, total_cycles: int = capture_domain.TOTAL_CYCLES) -> list[int]:
     rows: list[int] = []
     identity: float | None = None
     previous = -1
     with path.open("rb") as stream:
-        for cycle in range(capture_domain.TOTAL_CYCLES):
+        for cycle in range(total_cycles):
             line = stream.readline(capture_domain.MAX_LINE_BYTES + 1)
             gate.require(bool(line) and len(line) <= capture_domain.MAX_LINE_BYTES and line.endswith(b"\n"),
                          "retention memory row missing or too large")
@@ -76,6 +76,19 @@ def _metrics(path: Path, pid: int) -> list[int]:
                 rows.append(rss)
         gate.require(not stream.read(1), "extra retention memory row")
     return rows
+
+
+def read_diagnostic_rss(capture: capture_domain.RetentionCapture) -> list[int]:
+    lifecycle = gate.read_json(capture.lifecycle)
+    identity = gate._object(lifecycle.get("identity"), "diagnostic retention identity")
+    argv = gate._array(lifecycle.get("argv"), "diagnostic retention argv")
+    gate.require(len(argv) == 8 and argv[1] == "--retention-diagnostic"
+                 and lifecycle.get("runtimeExecution") == capture.runtime_execution,
+                 "diagnostic retention lifecycle differs")
+    return _metrics(
+        capture.directory / "memory.jsonl", gate._integer(identity.get("pid"), "diagnostic retention PID"),
+        total_cycles=capture_domain.WARMUP_CYCLES + capture_domain.DIAGNOSTIC_MEASUREMENT_CYCLES,
+    )
 
 
 def _pin(path: Path) -> gate.JsonObject:

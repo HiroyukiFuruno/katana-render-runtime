@@ -17,6 +17,7 @@ import verify_html_performance_evidence as gate
 
 WARMUP_CYCLES = 5
 MEASUREMENT_CYCLES = 25
+DIAGNOSTIC_MEASUREMENT_CYCLES = 100
 TOTAL_CYCLES = WARMUP_CYCLES + MEASUREMENT_CYCLES
 MAX_LINE_BYTES = 8 * 1024 * 1024
 
@@ -28,9 +29,13 @@ class RetentionCapture(NamedTuple):
 
 
 class _Interaction:
-    def __init__(self, metrics: Path, validate_sample: Callable[[int, bytes], None]) -> None:
+    def __init__(self, metrics: Path, validate_sample: Callable[[int, bytes], None],
+                 total_cycles: int = TOTAL_CYCLES) -> None:
+        gate.require(total_cycles in (TOTAL_CYCLES, WARMUP_CYCLES + DIAGNOSTIC_MEASUREMENT_CYCLES),
+                     "retention cycle count differs")
         self.metrics = metrics
         self.validate_sample = validate_sample
+        self.total_cycles = total_cycles
         self.offset = 0
         self.cycle = 0
         self.waiting_ready = False
@@ -52,12 +57,12 @@ class _Interaction:
                 self._line(process, line, deadline)
                 self.offset = stream.tell()
         if process.poll() is not None:
-            gate.require(self.cycle == TOTAL_CYCLES and not self.waiting_ready
+            gate.require(self.cycle == self.total_cycles and not self.waiting_ready
                          and self.offset == path.stat().st_size,
                          "retention protocol incomplete")
 
     def _line(self, process: subprocess.Popen[bytes], line: bytes, deadline: float) -> None:
-        gate.require(self.cycle < TOTAL_CYCLES, "extra retention protocol record")
+        gate.require(self.cycle < self.total_cycles, "extra retention protocol record")
         sample_prefix = f"SAMPLE {self.cycle} ".encode("ascii")
         if not self.waiting_ready:
             gate.require(line.startswith(sample_prefix), "retention sample order differs")
@@ -105,6 +110,11 @@ def capture(argv: Sequence[str], *, cwd: Path, env: Mapping[str, str], output: P
     gate.require(bool(argv) and all(isinstance(item, str) and item for item in argv),
                  "retention argv differs")
     args = list(argv)
+    gate.require(args.count("--retention-diagnostic") <= 1
+                 and not ("--retention-diagnostic" in args and "--retention" in args),
+                 "retention mode differs")
+    total_cycles = (WARMUP_CYCLES + DIAGNOSTIC_MEASUREMENT_CYCLES
+                    if "--retention-diagnostic" in args else TOTAL_CYCLES)
     output.mkdir(mode=0o700, parents=False, exist_ok=False)
     with (output / "command.json").open("xb") as stream:
         stream.write(json.dumps({"argv": args, "kind": "retention-observation"},
@@ -112,14 +122,14 @@ def capture(argv: Sequence[str], *, cwd: Path, env: Mapping[str, str], output: P
     metrics = output / "memory.jsonl"
     with metrics.open("xb"):
         pass
-    interaction = _Interaction(metrics, validate_sample)
+    interaction = _Interaction(metrics, validate_sample, total_cycles)
     lifecycle: list[Path] = []
     runtime: list[gate.JsonObject] = []
     result = producer._measurement_command(args, role="worker", log_directory=output,
         cwd=cwd, env=env, lifecycle_sink=lifecycle.append,
         runtime_execution_sink=runtime.append, interaction=interaction,
         native_attempt_token=secrets.token_hex(32))
-    gate.require(result.returncode == 0 and interaction.cycle == TOTAL_CYCLES
+    gate.require(result.returncode == 0 and interaction.cycle == total_cycles
                  and len(lifecycle) == 1 and len(runtime) == 1
                  and "observationErrorType" not in runtime[0],
                  "retention capture incomplete")

@@ -36,6 +36,24 @@ class RetentionEvidenceTest(unittest.TestCase):
     def test_metrics_keep_only_measured_cycles(self) -> None:
         self.assertEqual(evidence._metrics(self.write_rows(self.rows), 123), list(range(1005, 1030)))
 
+    def test_diagnostic_requires_a_diagnostic_process_and_all_100_measurements(self) -> None:
+        lifecycle = self.root / "lifecycle.json"
+        observed = capture.RetentionCapture(self.root, lifecycle, {})
+        argv = ["worker", "--retention-diagnostic", "fixture", "unused", "plan", "800", "600", "1"]
+        launch = {"identity": {"pid": 123}, "runtimeExecution": {}, "argv": argv}
+        lifecycle.write_text(json.dumps(launch))
+        additional = [{**self.rows[-1], "cycle": cycle, "rss": 1000 + cycle, "monotonicNs": 10000 + cycle}
+                      for cycle in range(30, 105)]
+        self.write_rows([*self.rows, *additional])
+        self.assertEqual(evidence.read_diagnostic_rss(observed), list(range(1005, 1105)))
+        self.write_rows([*self.rows, *additional[:-1]])
+        with self.assertRaisesRegex(ValueError, "row missing"):
+            evidence.read_diagnostic_rss(observed)
+        argv[1] = "--retention"
+        lifecycle.write_text(json.dumps(launch))
+        with self.assertRaisesRegex(ValueError, "lifecycle differs"):
+            evidence.read_diagnostic_rss(observed)
+
     def test_metrics_reject_mutations_and_missing_or_extra_rows(self) -> None:
         mutations: tuple[tuple[str, object], ...] = (
             ("cycle", 6), ("warmup", True), ("pid", 999), ("createTime", 101.0),

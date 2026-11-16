@@ -17,7 +17,12 @@ import json, sys, time
 mode = sys.argv[1]
 if mode == "stalled":
     time.sleep(30)
-for cycle in range(30):
+cycles = 105 if "--retention-diagnostic" in sys.argv else 30
+if mode == "missing":
+    cycles -= 1
+elif mode == "extra":
+    cycles += 1
+for cycle in range(cycles):
     if mode == "incomplete":
         sys.stdout.write("SAMPLE 0 ")
         sys.stdout.flush()
@@ -43,8 +48,11 @@ class RetentionCaptureTest(unittest.TestCase):
         self.assertEqual(json.loads(raw), {"sample": cycle % 5})
         self.seen.append(cycle)
 
-    def capture(self, mode: str, name: str) -> retention.RetentionCapture:
-        return retention.capture([self.python, "-c", _PROBE, mode], cwd=self.root,
+    def capture(self, mode: str, name: str, *, diagnostic: bool = False) -> retention.RetentionCapture:
+        argv = [self.python, "-c", _PROBE, mode]
+        if diagnostic:
+            argv.append("--retention-diagnostic")
+        return retention.capture(argv, cwd=self.root,
                                  env=self.env, output=self.root / name,
                                  validate_sample=self.validate_sample)
 
@@ -60,6 +68,18 @@ class RetentionCaptureTest(unittest.TestCase):
         self.assertTrue(lifecycle["groupClosed"] and lifecycle["rawFdsClosed"])
         self.assertEqual(lifecycle["identity"]["pid"], records[0]["pid"])
         self.assertNotIn("observationErrorType", result.runtime_execution)
+
+    def test_diagnostic_records_all_105_cycles(self) -> None:
+        result = self.capture("normal", "diagnostic", diagnostic=True)
+        records = [json.loads(line) for line in (result.directory / "memory.jsonl").read_bytes().splitlines()]
+        self.assertEqual(self.seen, list(range(105)))
+        self.assertEqual([record["cycle"] for record in records], list(range(105)))
+        self.assertEqual([record["warmup"] for record in records], [True] * 5 + [False] * 100)
+
+    def test_diagnostic_rejects_missing_and_extra_cycles(self) -> None:
+        for mode in ("missing", "extra"):
+            with self.subTest(mode=mode), self.assertRaises(ValueError):
+                self.capture(mode, mode, diagnostic=True)
 
     def test_malformed_or_incomplete_barrier_closes_worker_and_keeps_raw(self) -> None:
         for mode in ("wrong", "incomplete"):
