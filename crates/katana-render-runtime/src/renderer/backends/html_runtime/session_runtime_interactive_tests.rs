@@ -124,7 +124,26 @@ fn timer_microtasks_share_the_execution_budget() -> Result<(), String> {
         session.advance_timers(1.0),
         Err(super::HtmlRuntimeError::ExecutionTimeout)
     ));
+    assert_runtime_discarded(&session);
     Ok(())
+}
+
+#[test]
+fn focus_update_timeout_discards_the_runtime() -> Result<(), String> {
+    let mut session = StaticHtmlRuntime
+        .start("<script>globalThis.__krrSetFocusedNodeId = () => { for (;;) {} };</script>")
+        .map_err(test_error)?;
+    assert!(matches!(
+        session.set_active_element(None),
+        Err(super::HtmlRuntimeError::ExecutionTimeout)
+    ));
+    assert_runtime_discarded(&session);
+    Ok(())
+}
+
+fn assert_runtime_discarded(session: &super::super::StaticHtmlRuntimeSession) {
+    assert!(session.context.is_none());
+    assert!(session.isolate.is_none());
 }
 
 #[test]

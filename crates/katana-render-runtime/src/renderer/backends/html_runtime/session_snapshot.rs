@@ -8,10 +8,7 @@ use std::collections::HashSet;
 impl StaticHtmlRuntimeSession {
     pub(crate) fn update_document_url(&mut self, url: &str) -> Result<(), HtmlRuntimeError> {
         let result = self.run_document_url_update(url);
-        if matches!(result, Err(HtmlRuntimeError::ExecutionTimeout)) {
-            self.discard();
-        }
-        result
+        self.discard_on_timeout(result)
     }
 
     fn run_document_url_update(&mut self, url: &str) -> Result<(), HtmlRuntimeError> {

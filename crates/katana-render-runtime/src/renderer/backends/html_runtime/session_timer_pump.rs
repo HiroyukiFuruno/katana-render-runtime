@@ -7,6 +7,11 @@ use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 
 impl super::StaticHtmlRuntimeSession {
     pub(crate) fn advance_timers(&mut self, elapsed_ms: f64) -> Result<bool, HtmlRuntimeError> {
+        let result = self.run_timers(elapsed_ms);
+        self.discard_on_timeout(result)
+    }
+
+    fn run_timers(&mut self, elapsed_ms: f64) -> Result<bool, HtmlRuntimeError> {
         let isolate = self
             .isolate
             .as_mut()

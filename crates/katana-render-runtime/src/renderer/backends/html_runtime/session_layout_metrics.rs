@@ -52,18 +52,12 @@ impl StaticHtmlRuntimeSession {
     ) -> Result<bool, HtmlRuntimeError> {
         self.set_layout_metrics(viewport_width, viewport_height, scroll_offset, boxes)?;
         let observer_work = self.has_intersection_observer_work();
-        if matches!(observer_work, Err(HtmlRuntimeError::ExecutionTimeout)) {
-            self.discard();
-        }
-        if !observer_work? {
+        if !self.discard_on_timeout(observer_work)? {
             return Ok(false);
         }
         let before = self.snapshot()?;
         let refresh_result = self.refresh_intersection_observers();
-        if matches!(refresh_result, Err(HtmlRuntimeError::ExecutionTimeout)) {
-            self.discard();
-        }
-        refresh_result?;
+        self.discard_on_timeout(refresh_result)?;
         self.snapshot_changed(&before)
     }
 

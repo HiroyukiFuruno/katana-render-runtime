@@ -16,6 +16,11 @@ impl StaticHtmlRuntimeSession {
         &mut self,
         node_id: Option<u64>,
     ) -> Result<(), HtmlRuntimeError> {
+        let result = self.run_active_element_update(node_id);
+        self.discard_on_timeout(result)
+    }
+
+    fn run_active_element_update(&mut self, node_id: Option<u64>) -> Result<(), HtmlRuntimeError> {
         let isolate = self.isolate.as_mut().ok_or_else(discarded_runtime_error)?;
         let context = self.context.as_ref().ok_or_else(discarded_runtime_error)?;
         v8::scope!(let handle_scope, isolate);
@@ -65,20 +70,14 @@ impl StaticHtmlRuntimeSession {
         event: HtmlRuntimeEvent,
     ) -> Result<(HtmlRuntimeDispatch, bool), HtmlRuntimeError> {
         let result = self.run_event(event);
-        if matches!(result, Err(HtmlRuntimeError::ExecutionTimeout)) {
-            self.discard();
-        }
-        result
+        self.discard_on_timeout(result)
     }
 
     pub(crate) fn dispatch_window_scroll(
         &mut self,
     ) -> Result<HtmlRuntimeDispatch, HtmlRuntimeError> {
         let result = self.run_window_event(HtmlRuntimeEventKind::Scroll);
-        if matches!(result, Err(HtmlRuntimeError::ExecutionTimeout)) {
-            self.discard();
-        }
-        result
+        self.discard_on_timeout(result)
     }
 
     pub(in crate::renderer::backends) fn node_path(
@@ -141,9 +140,16 @@ impl StaticHtmlRuntimeSession {
         })
     }
 
-    pub(super) fn discard(&mut self) {
-        self.context.take();
-        self.isolate.take();
+    pub(super) fn discard_on_timeout<T>(
+        &mut self,
+        result: Result<T, HtmlRuntimeError>,
+    ) -> Result<T, HtmlRuntimeError> {
+        if matches!(result, Err(HtmlRuntimeError::ExecutionTimeout)) {
+            /* WHY: isolateを破棄する前に、そこに属するGlobal参照を解放する。 */
+            self.context.take();
+            self.isolate.take();
+        }
+        result
     }
 }
 
