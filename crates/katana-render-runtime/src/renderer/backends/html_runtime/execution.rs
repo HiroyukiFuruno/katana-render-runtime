@@ -92,13 +92,14 @@ fn completion_received(
     execution_remaining: Duration,
     host_io_remaining: Duration,
 ) -> bool {
-    wait_for_completion
-        .recv_timeout(
+    !matches!(
+        wait_for_completion.recv_timeout(
             Duration::from_millis(1)
                 .min(execution_remaining)
                 .min(host_io_remaining),
-        )
-        .is_ok()
+        ),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    )
 }
 
 fn account_elapsed_budget(
@@ -125,6 +126,24 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, mpsc};
     use std::time::Duration;
+
+    #[test]
+    fn cancelled_owner_releases_watchdog_without_terminating_execution() {
+        let (owner, receiver) = mpsc::channel();
+        drop(owner);
+        let timed_out = Arc::new(AtomicBool::new(false));
+
+        wait_for_timeout(
+            receiver,
+            Arc::new(AtomicBool::new(false)),
+            Arc::clone(&timed_out),
+            Duration::from_millis(5),
+            Duration::from_millis(5),
+            || {},
+        );
+
+        assert!(!timed_out.load(Ordering::SeqCst));
+    }
 
     #[test]
     fn host_io_pause_has_a_separate_finite_budget() {
