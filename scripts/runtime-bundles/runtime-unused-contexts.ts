@@ -827,7 +827,7 @@ const nativeWidthDiagramRuntime = "crates/katana-render-runtime/src/markdown/dia
 const nativeWidthDiagramProjectionSha256 =
   "7c8f590e31555dba41d4536163fce4a68cf73cd5686ecd79ae2a917451811752";
 const nativeWidthV8ScriptSha256 =
-  "5ebae43ec806441146dca8edca9a8b9b04b3d259ea0dfb966827f7bee90464dc";
+  "b315e536cd2bb168380d032f6bea1298f58c6b7197608e087536fa0feded1a8f";
 const nativeWidthV8Import = "use crate::v8_script::ScriptCompiler;";
 const nativeWidthV8CompileCall = "v8::Script::compile(scope, source, Some(&origin))";
 const nativeWidthV8CompilerCall = "ScriptCompiler::compile_with_origin(scope, source, origin_name)";
