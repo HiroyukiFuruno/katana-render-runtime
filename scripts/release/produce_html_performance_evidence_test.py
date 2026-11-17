@@ -4115,7 +4115,7 @@ class CapacityBindingUnitTests(unittest.TestCase):
         return typed_producer.load_capacity_binding(self.root, self.document, gate.sha256(self.document))
 
     def invoke(self, arm: str = "baseline", mutation: Callable[[], object] | None = None,
-               guard_exit: int = 0) -> None:
+               guard_exit: int = 0, admission_exit: int = 0) -> None:
         binding = self.binding()
         def execute(argv: list[str], *, cwd: Path, env: dict[str, str], role: typed_producer.MeasurementRole, log_directory: Path,
                     check: bool = True, lifecycle_sink: Callable[[Path], None] | None = None) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
@@ -4128,6 +4128,10 @@ class CapacityBindingUnitTests(unittest.TestCase):
             if argv[-1] == "-vV":
                 tool = "cargo" if Path(argv[0]) == self.cargo else "rustc"
                 return subprocess.CompletedProcess(argv, 0, stdout=f"{tool} 1.90.0\n".encode(), stderr=b"")
+            if argv[-1] == "--require-capacity":
+                if check and admission_exit:
+                    raise subprocess.CalledProcessError(admission_exit, argv)
+                return subprocess.CompletedProcess(argv, admission_exit, stdout=b"", stderr=b"")
             if lifecycle_sink is not None:
                 log_directory.mkdir(parents=True, exist_ok=True)
                 lifecycle = log_directory / "build-lifecycle.json"
@@ -4409,6 +4413,25 @@ class CapacityBindingUnitTests(unittest.TestCase):
             self.invoke(mutation=lambda: self.registry.write_bytes(b"changed registry"))
         self.assertEqual(len(self.commands), 3)
 
+    def test_canonical_build_admission_retains_pins_and_stops_cargo_when_rejected(self) -> None:
+        canonical = self.root / "tmp/.cargo-capacity-guard.json"
+        canonical.parent.mkdir(exist_ok=True)
+        canonical.write_bytes(self.state.read_bytes())
+        self.state = canonical
+        self.rebind()
+        with self.assertRaises(subprocess.CalledProcessError) as rejected:
+            self.invoke(admission_exit=1)
+        self.assertEqual(rejected.exception.returncode, 1)
+        self.assertEqual(len(self.commands), 4)
+        rejected_admission = self.commands.pop()
+        self.assertFalse((self.root / "tmp/builds/baseline").exists())
+        self.commands.clear()
+        self.invoke()
+        admission, build = self.commands[3:5]
+        expected = build[:build.index("--")]
+        expected[expected.index("--target-dir")] = "--target"
+        self.assertEqual(admission, [*expected, "--require-capacity"])
+        self.assertEqual(admission, rejected_admission)
 
     def expected(self, arm: str = "baseline") -> typed_producer.ExpectedBuild:
         with patch.object(gate, "LOCK_SHA", self.lock_sha):

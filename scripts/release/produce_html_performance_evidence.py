@@ -568,6 +568,14 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
     guard_python = _guard_python_pin()
     argv = gate.guarded_build_argv(root, harness, cargo_tool.launcher, arm, binding.state, binding.state_sha256,
                                    references, [str(profile) for profile in retained])
+    if binding.state == root / "tmp/.cargo-capacity-guard.json":
+        # WHY: 先行ビルドで容量が増えても、固定上限まで整理してから次のCargoを起動する。
+        admission = argv[:argv.index("--")]
+        admission[admission.index("--target-dir")] = "--target"
+        _measurement_command([*admission, "--require-capacity"], cwd=root, env=environment,
+                             role="preflight", log_directory=lifecycle_logs)
+        load_capacity_binding(root, binding.document, binding.document_sha256)
+        validate_required("capacity/manifest source changed during build admission")
     output.mkdir(parents=True, exist_ok=False)
     build_lifecycle: list[Path] = []
     result = _measurement_command(argv, cwd=root, env=environment, check=False, role="build",
