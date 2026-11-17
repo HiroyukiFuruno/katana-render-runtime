@@ -127,6 +127,10 @@ mod tests {
     use std::sync::{Arc, mpsc};
     use std::time::Duration;
 
+    fn record_termination(terminated: Arc<AtomicBool>) -> impl Fn() + Send + 'static {
+        move || terminated.store(true, Ordering::SeqCst)
+    }
+
     #[test]
     fn watchdog_thread_failure_returns_execution_timeout() {
         let (completion, receiver) = mpsc::channel();
@@ -150,6 +154,7 @@ mod tests {
         let (owner, receiver) = mpsc::channel();
         drop(owner);
         let timed_out = Arc::new(AtomicBool::new(false));
+        let did_terminate = Arc::new(AtomicBool::new(false));
 
         wait_for_timeout(
             receiver,
@@ -157,10 +162,11 @@ mod tests {
             Arc::clone(&timed_out),
             Duration::from_millis(5),
             Duration::from_millis(5),
-            || {},
+            record_termination(Arc::clone(&did_terminate)),
         );
 
         assert!(!timed_out.load(Ordering::SeqCst));
+        assert!(!did_terminate.load(Ordering::SeqCst));
     }
 
     #[test]
@@ -168,7 +174,6 @@ mod tests {
         let active = Arc::new(AtomicBool::new(true));
         let timed_out = Arc::new(AtomicBool::new(false));
         let did_terminate = Arc::new(AtomicBool::new(false));
-        let terminated = Arc::clone(&did_terminate);
         let (_completion, receiver) = mpsc::channel();
 
         wait_for_timeout(
@@ -177,7 +182,7 @@ mod tests {
             Arc::clone(&timed_out),
             Duration::from_secs(1),
             Duration::from_millis(20),
-            move || terminated.store(true, Ordering::SeqCst),
+            record_termination(Arc::clone(&did_terminate)),
         );
 
         assert!(timed_out.load(Ordering::SeqCst));
