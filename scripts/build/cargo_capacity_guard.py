@@ -1297,6 +1297,8 @@ def _coverage_nextest_retry_selection(root: Path, target: Path, words: list[str]
 class _RootCoverageCommands(Protocol):
     ROOT_TEST_ONLY_SHA256: dict[str, str]
 
+    def clean_arguments(self) -> list[str]: ...
+    def nextest_arguments(self, repo: Path, threads: str, parent: str | None) -> list[str]: ...
     def report_arguments(self, repo: Path) -> list[str]: ...
     def root_coverage_ignore_regex(self, repo: Path) -> str: ...
 
@@ -1814,7 +1816,7 @@ def _coverage_cleanup_preflight(root: Path, target: Path, footprint: tuple[Path,
             raise RuntimeError("coverage protected consumer changed before execution")
 
 
-def _retire_coverage_report_siblings(
+def _retire_root_coverage_siblings(
     root: Path, target: Path, cargo: list[str], protected_refs: list[str],
     retained_profiles: tuple[Path, ...], threshold: int,
 ) -> list[str]:
@@ -1824,6 +1826,7 @@ def _retire_coverage_report_siblings(
         ("llvm-cov-performance-candidate", "krr-coverage", "scripts/html/performance-harness/Cargo.toml"),
         ("", "dev", "Cargo.toml"),
     )
+    protected_paths = tuple(Path(name) for name in protected_refs)
     removed: list[str] = []
     for directory, profile, manifest in domains:
         used = size_bytes(target)
@@ -1837,6 +1840,8 @@ def _retire_coverage_report_siblings(
             continue
         if any(selected == retained or selected in retained.parents or retained in selected.parents
                for retained in retained_profiles):
+            continue
+        if any(reference == selected or reference.is_relative_to(selected) for reference in protected_paths):
             continue
         _coverage_cleanup_preflight(root, target, (selected,), protected_refs)
         args = [*cargo, "clean", "--target-dir", str(parent), "--profile", profile,
@@ -2125,11 +2130,13 @@ def run(args: argparse.Namespace) -> int:
             coverage is not None and coverage[0] == "report"
             or coverage_diagnostic_inputs is not None and coverage_diagnostic_inputs[0] == "report"
         )
-        retained_root_report = (
-            coverage is not None and coverage_collection and coverage_value == "root"
-            and coverage[0] == "report" and coverage[1] / "krr-coverage" in retained_profiles
+        retained_root_collection = (
+            coverage is not None and coverage_value == "root"
+            and coverage[1] / "krr-coverage" in retained_profiles
+            and (coverage_collection or _unwrap_cargo(args.command)[1:]
+                 == _root_coverage_commands().clean_arguments())
         )
-        if report["over_capacity"] and coverage_report and not retained_root_report:
+        if report["over_capacity"] and coverage_report and not retained_root_collection:
             # WHY: rootの計測profile全体を保持できないreportは閉包を保てないため、cleanupせず拒否する。
             report["clean_skipped"] = "coverage-artifacts-retained"
         elif report["over_capacity"]:
@@ -2236,7 +2243,7 @@ def run(args: argparse.Namespace) -> int:
                     and report.get("cleanup_attempts")
                 ):
                     removed = ["finite artifact eviction"]
-        if (retained_root_report and not args.dry_run
+        if (retained_root_collection and not args.dry_run
                 and report.get("cleanup_status") == "failed"
                 and isinstance(finite := report.get("finite_cleanup"), dict)
                 and finite.get("error") == "insufficient closed inactive artifact capacity; active profiles retained"
@@ -2249,7 +2256,7 @@ def run(args: argparse.Namespace) -> int:
             if expected_state_sha256 is not None:
                 load_state(state_path, expected_state_sha256)
             threshold = int(_number(report["threshold_bytes"], "threshold bytes"))
-            removed = _retire_coverage_report_siblings(
+            removed = _retire_root_coverage_siblings(
                 root, target, cargo, protected_refs, retained_profiles, threshold,
             )
             if state_identity(state_path) != before_state:

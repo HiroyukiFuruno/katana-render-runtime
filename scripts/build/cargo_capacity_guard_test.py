@@ -4351,7 +4351,13 @@ class CoverageDomainUnitTests(unittest.TestCase):
                     self.assertEqual(bytes.fromhex(evidence['stdout_hex']), b"cargo-llvm-cov 0.9.1\n")
                     self.assertEqual(bytes.fromhex(evidence['stderr_hex']), b"tool-raw\n")
 
-    def test_root_report_recovers_a_closed_profile_after_finite_eviction_shortfall(self) -> None:
+    def test_root_coverage_recovers_a_closed_profile_after_finite_eviction_shortfall(self) -> None:
+        for action in ("clean", "nextest", "report"):
+            for remaining_bytes in (150, 250):
+                with self.subTest(action=action, remaining_bytes=remaining_bytes):
+                    self._assert_root_coverage_recovers_closed_profile(action, remaining_bytes)
+
+    def _assert_root_coverage_recovers_closed_profile(self, action: str, remaining_bytes: int) -> None:
         with self.fixture("root", "test", collection=True) as (root, args, environment):
             target = root / "target"
             retained = target / "llvm-cov-target/krr-coverage"
@@ -4361,23 +4367,76 @@ class CoverageDomainUnitTests(unittest.TestCase):
             args.retain_profile = [str(retained)]
             output = root / "tmp/quality/standalone-performance-coverage"
             output.mkdir(parents=True)
-            args.command = ["cargo", *guard._root_coverage_commands().report_arguments(root)]
+            if action == "clean":
+                args.coverage_collection_domain = None
+                args.coverage_domain = "root"
+                args.command = ["cargo", *guard._root_coverage_commands().clean_arguments()]
+            elif action == "report":
+                args.command = ["cargo", *guard._root_coverage_commands().report_arguments(root)]
+            else:
+                configuration = root / "scripts/release/nextest-local-user.toml"
+                configuration.parent.mkdir(parents=True)
+                configuration.write_text("[nextest]\n")
+                args.command = ["cargo", *guard._root_coverage_commands().nextest_arguments(root, "1", None)]
+                environment["NEXTEST_STATE_DIR"] = str(target / "nextest-root-state")
+                environment["LLVM_PROFILE_FILE_NAME"] = "krr-nextest-retry-123e4567-e89b-42d3-a456-426614174000-%4m.profraw"
             measured = {"metric_available": True, "baseline_bytes": 100, "current_bytes": 300,
                         "threshold_bytes": 200, "over_capacity": True}
             failure = {"error": "insufficient closed inactive artifact capacity; active profiles retained",
                        "deleted_files": 0, "staged_paths": [], "invalidated_profiles": []}
+            admitted = remaining_bytes <= measured["threshold_bytes"]
             with patch.object(guard, "inspect", return_value=measured), \
                     patch.object(guard, "evict_artifacts", return_value=(1, failure)), \
-                    patch.object(guard, "size_bytes", side_effect=[300, 300, 300, 150, 150]), \
+                    patch.object(guard, "size_bytes", side_effect=[300, 300, 300, remaining_bytes, remaining_bytes]), \
                     patch.object(guard, "validate_build_executable"), \
-                    patch.object(guard, "_retire_coverage_report_siblings",
+                    patch.object(guard, "nextest_tool_version"), \
+                    patch.object(guard, "_retire_root_coverage_siblings",
                                  return_value=["llvm-cov-performance-candidate/krr-coverage"]) as retire:
-                self.assertEqual(self.execute(root, args, environment), 0)
+                self.assertEqual(self.execute(root, args, environment), 0 if admitted else 1)
             retire.assert_called_once_with(root, target, ["cargo"], args.protected_ref, (retained,), 200)
             report = json.loads(self.output.getvalue())
-            self.assertEqual(report["post_clean_bytes"], 150)
+            self.assertEqual(report["post_clean_bytes"], remaining_bytes)
             self.assertEqual(report["removed"], ["llvm-cov-performance-candidate/krr-coverage"])
+            self.assertEqual(args.command in self.calls, admitted)
             self.assertEqual(artifact.read_bytes(), b"root evidence")
+
+    def test_root_coverage_cleanup_tries_next_profile_after_protected_path(self) -> None:
+        for protect_candidate in (False, True):
+            with self.subTest(protect_candidate=protect_candidate), self.fixture() as (root, args, _):
+                self._assert_root_cleanup_skips_protected_profiles(root, args, protect_candidate)
+
+    def _assert_root_cleanup_skips_protected_profiles(
+        self, root: Path, args: argparse.Namespace, protect_candidate: bool,
+    ) -> None:
+        target = root / "target"
+        baseline = target / "llvm-cov-performance-baseline/krr-coverage"
+        candidate = target / "llvm-cov-performance-candidate/krr-coverage"
+        reference = baseline / "consumer"
+        next_reference = candidate / "consumer"
+        for path in (reference, next_reference):
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"consumer")
+        protected = [*args.protected_ref, str(reference)]
+        if protect_candidate:
+            protected.append(str(next_reference))
+        stamp = reference.stat()
+
+        def cargo(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            self.assertIn(str(candidate.parent), command)
+            if "--dry-run" in command:
+                return subprocess.CompletedProcess(command, 0, stdout=f"{next_reference}\n{candidate}\n")
+            next_reference.unlink()
+            candidate.rmdir()
+            return subprocess.CompletedProcess(command, 0)
+
+        with patch.object(guard, "busy_processes", return_value=[]), \
+                patch.object(guard, "size_bytes", side_effect=lambda _: 300 if candidate.exists() else 150), \
+                patch.object(subprocess, "run", side_effect=cargo) as child:
+            removed = guard._retire_root_coverage_siblings(root, target, ["cargo"], protected, (), 200)
+        self.assertEqual(removed, [] if protect_candidate else [str(candidate.relative_to(target))])
+        self.assertEqual(child.call_count, 0 if protect_candidate else 2)
+        self.assertEqual(reference.stat(), stamp)
+        self.assertEqual(next_reference.exists(), protect_candidate)
 
     def test_root_report_cleanup_stops_at_threshold_and_checks_aliases(self) -> None:
         with self.fixture("root", "test", collection=True) as (root, args, _environment):
@@ -4391,13 +4450,13 @@ class CoverageDomainUnitTests(unittest.TestCase):
                     patch.object(guard, "size_bytes", return_value=300), \
                     patch.object(subprocess, "run") as child:
                 with self.assertRaisesRegex(RuntimeError, "protected consumer inode"):
-                    guard._retire_coverage_report_siblings(root, target, ["cargo"], [str(reference)], (), 200)
+                    guard._retire_root_coverage_siblings(root, target, ["cargo"], [str(reference)], (), 200)
                 child.assert_not_called()
             self.assertEqual(artifact.stat().st_ino, reference.stat().st_ino)
             with patch.object(guard, "size_bytes", return_value=200), \
                     patch.object(subprocess, "run") as child:
                 self.assertEqual(
-                    guard._retire_coverage_report_siblings(root, target, ["cargo"], [str(reference)], (), 200),
+                    guard._retire_root_coverage_siblings(root, target, ["cargo"], [str(reference)], (), 200),
                     [],
                 )
                 child.assert_not_called()
@@ -4413,7 +4472,7 @@ class CoverageDomainUnitTests(unittest.TestCase):
                     patch.object(guard, "size_bytes", return_value=300), \
                     patch.object(subprocess, "run", return_value=plan) as child:
                 with self.assertRaisesRegex(RuntimeError, "clean plan differs"):
-                    guard._retire_coverage_report_siblings(root, target, ["cargo"], [str(reference)], (), 200)
+                    guard._retire_root_coverage_siblings(root, target, ["cargo"], [str(reference)], (), 200)
                 self.assertEqual(child.call_count, 1)
             self.assertTrue(selected.is_dir())
             self.assertTrue(reference.is_file())
