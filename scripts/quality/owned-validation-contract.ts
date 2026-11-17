@@ -232,6 +232,7 @@ const RUNTIME_ASSET_OTHER_RECIPE = "runtime-asset-script-other-run";
 const SVG_ENGINE_PROVENANCE_TEST_COMMAND =
   "bun test --path-ignore-patterns 'tmp/**' ./scripts/runtime-assets/svg-engine-provenance_test.ts";
 const SVG_ENGINE_VENDOR_ROOT = "crates/katana-render-runtime/vendor/svg-engine";
+const PRIVATE_V8_VENDOR_ROOT = "crates/katana-render-runtime/vendor/private-v8/";
 const RUNTIME_ASSET_AGGREGATE_RECIPE = "runtime-asset-script-aggregate-run";
 const RUNTIME_UNUSED_REGRESSION = "runtime-unused-script-regression";
 const RUNTIME_UNUSED_REGRESSION_RECIPE = "runtime-unused-script-regression-run";
@@ -4946,6 +4947,8 @@ function maintainedSources(
       return false;
     }
     if (generated.has(file)) return false;
+    // WHY: KRRに一時同梱したrusty_v8のRustファイルはKRRと一緒にコンパイルする。
+    if (name.startsWith(PRIVATE_V8_VENDOR_ROOT) && name.endsWith(".rs")) return true;
     if (
       !name
         .split("/")

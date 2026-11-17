@@ -3356,6 +3356,21 @@ test("a separate Rust workspace remains an explicit missing registration", () =>
   track(root);
   expect(codes(root)).toContain("rust-workspace-scope-missing:scripts/performance/src/main.rs");
 });
+test("KRR keeps the temporary rusty_v8 Rust sources in the validation inventory", () => {
+  const root = fixture();
+  const rustCount = inspectOwnedValidationContract(root).languageCounts.rust;
+  const binding = "crates/katana-render-runtime/vendor/private-v8/src/binding.rs";
+  const other = "crates/katana-render-runtime/vendor/private-v8-other/src/binding.rs";
+  for (const name of [binding, other]) write(root, name, "fn binding() {}\n");
+  track(root);
+  const report = inspectOwnedValidationContract(root);
+  const unbound = report.issues
+    .filter((issue) => issue.code === "unbound-excluded-source")
+    .map((issue) => issue.path);
+  expect(unbound).not.toContain(binding);
+  expect(unbound).toContain(other);
+  expect(report.languageCounts.rust).toBe(rustCount + 2);
+});
 test.each(["unbound", "valid", "tampered"] as const)(
   "generated/vendor owned code is %s",
   (state) => {
