@@ -122,10 +122,28 @@ fn account_elapsed_budget(
 
 #[cfg(test)]
 mod tests {
-    use super::wait_for_timeout;
+    use super::{ExecutionBudget, HtmlRuntimeError, wait_for_timeout};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, mpsc};
     use std::time::Duration;
+
+    #[test]
+    fn watchdog_thread_failure_returns_execution_timeout() {
+        let (completion, receiver) = mpsc::channel();
+        let budget = ExecutionBudget {
+            completion,
+            timed_out: Arc::new(AtomicBool::new(false)),
+            timer: std::thread::spawn(move || {
+                let _ = receiver.recv();
+                std::panic::resume_unwind(Box::new("watchdog failure"));
+            }),
+        };
+
+        assert!(matches!(
+            budget.finish(),
+            Err(HtmlRuntimeError::ExecutionTimeout)
+        ));
+    }
 
     #[test]
     fn cancelled_owner_releases_watchdog_without_terminating_execution() {
