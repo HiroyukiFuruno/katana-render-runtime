@@ -36,6 +36,13 @@ impl StaticHtmlRuntimeSession {
         scroll_offset: (f32, f32),
         boxes: impl IntoIterator<Item = LayoutMetricWithIntersection>,
     ) -> Result<bool, HtmlRuntimeError> {
+        if self.scriptless_document.is_some() {
+            #[cfg(test)]
+            if let Some(observer) = &mut self.scriptless_observer {
+                observer.record_geometry(viewport_width, viewport_height, scroll_offset, boxes);
+            }
+            return Ok(false);
+        }
         self.update_layout_metrics_from_boxes(
             viewport_width,
             viewport_height,
@@ -334,7 +341,7 @@ mod tests {
 
     #[test]
     fn layout_metrics_rejects_a_discarded_runtime() {
-        let mut session = start("<p>content</p>");
+        let mut session = start(SCRIPTED_CONTENT);
         session.isolate = None;
         let result = session.update_layout_metrics(320.0, 240.0, 0.0, []);
         assert!(matches!(result, Err(HtmlRuntimeError::DomBridge(_))));
@@ -342,7 +349,7 @@ mod tests {
 
     #[test]
     fn layout_metrics_rejects_a_runtime_without_context() {
-        let mut session = start("<p>content</p>");
+        let mut session = start(SCRIPTED_CONTENT);
         session.context = None;
         let result = session.update_layout_metrics(320.0, 240.0, 0.0, []);
         assert!(matches!(result, Err(HtmlRuntimeError::DomBridge(_))));
@@ -350,7 +357,7 @@ mod tests {
 
     #[test]
     fn snapshot_changed_surfaces_a_discarded_runtime() {
-        let mut session = start("<p>content</p>");
+        let mut session = start(SCRIPTED_CONTENT);
         session.isolate = None;
         let result = session.snapshot_changed("");
         assert!(matches!(result, Err(HtmlRuntimeError::DomBridge(_))));
@@ -358,11 +365,13 @@ mod tests {
 
     #[test]
     fn observer_work_rejects_a_discarded_runtime() {
-        let mut session = start("<p>content</p>");
+        let mut session = start(SCRIPTED_CONTENT);
         session.isolate = None;
         assert!(matches!(
             session.has_intersection_observer_work(),
             Err(HtmlRuntimeError::DomBridge(_))
         ));
     }
+
+    const SCRIPTED_CONTENT: &str = "<p>content</p><script>void 0</script>";
 }

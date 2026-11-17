@@ -1,18 +1,10 @@
-use super::super::super::dom_state::HtmlDomBridgeState;
+use super::super::super::script::{HtmlTryCatchScope, evaluate_value};
 use super::super::super::types::HtmlRuntimeError;
 use super::super::StaticHtmlRuntimeSession;
-use super::{discarded_runtime_error, dom_state_unavailable_error};
 
 impl StaticHtmlRuntimeSession {
     pub(crate) fn is_text_control(&self, node_id: u64) -> Result<bool, HtmlRuntimeError> {
-        let document = self
-            .isolate
-            .as_ref()
-            .ok_or_else(discarded_runtime_error)?
-            .get_slot::<HtmlDomBridgeState>()
-            .ok_or_else(dom_state_unavailable_error)?
-            .document
-            .borrow();
+        let document = self.dom_document()?.borrow();
         let tag = document
             .tag_name(node_id)
             .map_err(HtmlRuntimeError::DomBridge)?;
@@ -21,6 +13,19 @@ impl StaticHtmlRuntimeSession {
             .map_err(HtmlRuntimeError::DomBridge)?;
         Ok(is_text_control(&tag, input_type.as_deref()))
     }
+}
+
+pub(in super::super) fn set_focused_element(
+    scope: &mut HtmlTryCatchScope<'_, '_, '_, '_>,
+    node_id: Option<u64>,
+) -> Result<(), HtmlRuntimeError> {
+    let node = node_id.map_or_else(|| "null".to_string(), |id| format!("\"{id}\""));
+    evaluate_value(
+        scope,
+        "krr-html-set-active-element",
+        &format!("__krrSetFocusedNodeId({node})"),
+    )?;
+    Ok(())
 }
 
 const NON_TEXT_INPUT_TYPES: [&str; 10] = [

@@ -134,9 +134,11 @@ fn diagnostic_entrypoint_rejects_each_missing_required_environment() -> Result<(
 
 #[test]
 fn feature_node_query_and_missing_runtime_slots_fail_closed() -> Result<(), String> {
-    let source =
-        HtmlBrowserSource::new("<p id=state>ready</p>", "https://example.test/feature.html")
-            .map_err(test_error)?;
+    let source = HtmlBrowserSource::new(
+        "<p id=state>ready</p><script>void 0</script>",
+        "https://example.test/feature.html",
+    )
+    .map_err(test_error)?;
     let mut session = StaticHtmlRuntime
         .start_interactive(&source)
         .map_err(test_error)?;
@@ -160,6 +162,8 @@ fn assert_missing_runtime_slots(session: &mut super::StaticHtmlRuntimeSession) {
     let mut discarded = super::StaticHtmlRuntimeSession {
         context: None,
         isolate: None,
+        scriptless_document: None,
+        scriptless_observer: None,
         external_stylesheets: std::collections::HashMap::new(),
     };
     assert!(discarded.query_feature_node("#state").is_none());

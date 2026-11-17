@@ -49,11 +49,11 @@ impl StaticHtmlRuntime {
             body_onload_source.as_deref(),
             "about:blank",
         )?;
-        Ok(StaticHtmlRuntimeSession {
-            context: Some(context),
-            isolate: Some(isolate),
-            external_stylesheets: HashMap::new(),
-        })
+        Ok(StaticHtmlRuntimeSession::scripted(
+            context,
+            isolate,
+            HashMap::new(),
+        ))
     }
 
     #[cfg(test)]

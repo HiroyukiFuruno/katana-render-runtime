@@ -3,6 +3,8 @@ use super::super::html_document::HtmlDocument;
 use super::super::html_subresources::HtmlSubresourceLoader;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+#[cfg(test)]
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
@@ -22,8 +24,13 @@ mod request;
 pub(super) type LayoutMetric = (u64, f32, f32, f32, f32, f32);
 pub(super) type LayoutMetricWithIntersection = (LayoutMetric, Option<String>);
 
+#[cfg(not(test))]
+type DomDocument = RefCell<HtmlDocument>;
+#[cfg(test)]
+type DomDocument = Rc<RefCell<HtmlDocument>>;
+
 pub(super) struct HtmlDomBridgeState {
-    pub(super) document: RefCell<HtmlDocument>,
+    pub(super) document: DomDocument,
     pub(super) error: RefCell<Option<String>>,
     layout_metrics: RefCell<HtmlLayoutMetrics>,
     event_targets: RefCell<HashMap<String, HashSet<u64>>>,
@@ -33,26 +40,34 @@ pub(super) struct HtmlDomBridgeState {
 
 impl HtmlDomBridgeState {
     pub(super) fn new(document: HtmlDocument) -> Self {
-        Self {
-            document: RefCell::new(document),
-            error: RefCell::new(None),
-            layout_metrics: RefCell::new(HtmlLayoutMetrics::default()),
-            event_targets: RefCell::new(HashMap::new()),
-            resource_loader: None,
-            host_io_active: Arc::new(AtomicBool::new(false)),
-        }
+        Self::with_document(document_cell(document), None)
     }
 
     pub(super) fn new_interactive(
         document: HtmlDocument,
         resource_loader: HtmlSubresourceLoader,
     ) -> Self {
+        Self::with_document(document_cell(document), Some(resource_loader))
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_observed_document(
+        document: DomDocument,
+        resource_loader: HtmlSubresourceLoader,
+    ) -> Self {
+        Self::with_document(document, Some(resource_loader))
+    }
+
+    fn with_document(
+        document: DomDocument,
+        resource_loader: Option<HtmlSubresourceLoader>,
+    ) -> Self {
         Self {
-            document: RefCell::new(document),
+            document,
             error: RefCell::new(None),
             layout_metrics: RefCell::new(HtmlLayoutMetrics::default()),
             event_targets: RefCell::new(HashMap::new()),
-            resource_loader: Some(resource_loader),
+            resource_loader,
             host_io_active: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -60,6 +75,13 @@ impl HtmlDomBridgeState {
     pub(super) fn host_io_active(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.host_io_active)
     }
+}
+
+fn document_cell(document: HtmlDocument) -> DomDocument {
+    let document = RefCell::new(document);
+    #[cfg(test)]
+    let document = Rc::new(document);
+    document
 }
 
 pub(super) fn argument(arguments: &[String], index: usize) -> Result<&str, String> {

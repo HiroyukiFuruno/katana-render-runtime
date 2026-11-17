@@ -7,6 +7,9 @@ use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
 
 impl super::StaticHtmlRuntimeSession {
     pub(crate) fn advance_timers(&mut self, elapsed_ms: f64) -> Result<bool, HtmlRuntimeError> {
+        if self.scriptless_document.is_some() {
+            return Ok(false);
+        }
         let result = self.run_timers(elapsed_ms);
         self.discard_on_timeout(result)
     }

@@ -71,9 +71,13 @@ pub(super) fn update_location(
     )
 }
 
+pub(super) fn parse_document_url(document_url: &str) -> Result<url::Url, HtmlRuntimeError> {
+    url::Url::parse(document_url)
+        .map_err(|error| HtmlRuntimeError::DomBridge(format!("invalid document URL: {error}")))
+}
+
 fn location_value(document_url: &str) -> Result<serde_json::Value, HtmlRuntimeError> {
-    let parsed = url::Url::parse(document_url)
-        .map_err(|error| HtmlRuntimeError::DomBridge(format!("invalid document URL: {error}")))?;
+    let parsed = parse_document_url(document_url)?;
     Ok(serde_json::json!({
         "hash": parsed.fragment().map(|value| format!("#{value}")).unwrap_or_default(),
         "host": parsed.host_str().unwrap_or_default(),

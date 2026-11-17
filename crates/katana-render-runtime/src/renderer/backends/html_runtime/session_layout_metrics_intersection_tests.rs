@@ -126,7 +126,7 @@ fn window_scroll_timeout_discards_session_and_rejects_later_url_update()
 
 #[test]
 fn v8_termination_during_url_update_discards_the_runtime() -> Result<(), HtmlRuntimeError> {
-    let mut session = start("<p>Page remains in the same session</p>");
+    let mut session = start("<p>Page remains in the same session</p><script>void 0</script>");
     let next_url = "https://example.test/next";
     session.update_document_url(next_url)?;
     let handle = session

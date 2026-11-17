@@ -18,10 +18,8 @@ impl StaticHtmlRuntimeSession {
         &mut self,
         selector: &str,
     ) -> Option<crate::renderer::backends::html_runtime::types::HtmlNodeId> {
-        self.isolate
-            .as_mut()?
-            .get_slot::<crate::renderer::backends::html_runtime::dom_state::HtmlDomBridgeState>()?
-            .document
+        self.dom_document()
+            .ok()?
             .borrow_mut()
             .query_selector(selector)
             .map(crate::renderer::backends::html_runtime::types::HtmlNodeId)
@@ -31,8 +29,7 @@ impl StaticHtmlRuntimeSession {
         &mut self,
         expression: &str,
     ) -> Result<serde_json::Value, String> {
-        let isolate = self.isolate.as_mut().ok_or("missing runtime isolate")?;
-        let context = self.context.as_ref().ok_or("missing runtime context")?;
+        let (isolate, context) = self.observation_context()?;
         v8::scope!(let handle_scope, isolate);
         let context = v8::Local::new(handle_scope, context);
         let context_scope = &mut v8::ContextScope::new(handle_scope, context);
@@ -42,6 +39,19 @@ impl StaticHtmlRuntimeSession {
             .map_err(|error: HtmlRuntimeError| error.to_string())?;
         let value = result.to_string(scope).ok_or("state is not serializable")?;
         serde_json::from_str(&value.to_rust_string_lossy(scope)).map_err(test_error)
+    }
+
+    fn observation_context(
+        &mut self,
+    ) -> Result<(&mut v8::OwnedIsolate, &v8::Global<v8::Context>), String> {
+        if let (Some(document), Some(observer)) =
+            (&self.scriptless_document, &mut self.scriptless_observer)
+        {
+            return observer.prepare(document);
+        }
+        let isolate = self.isolate.as_mut().ok_or("missing runtime isolate")?;
+        let context = self.context.as_ref().ok_or("missing runtime context")?;
+        Ok((isolate, context))
     }
 }
 
