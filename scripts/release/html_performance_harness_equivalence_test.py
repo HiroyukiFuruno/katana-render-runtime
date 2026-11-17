@@ -9,6 +9,17 @@ from pathlib import Path
 import html_performance_harness_equivalence as equivalence
 
 
+def harness_sources(revision: str) -> dict[str, bytes]:
+    root = Path(__file__).resolve().parents[2]
+    paths = subprocess.check_output(
+        ["git", "--no-replace-objects", "ls-tree", "-r", "--name-only", revision,
+         "--", equivalence.ROOT], cwd=root, text=True,
+    ).splitlines()
+    return {path: subprocess.check_output(
+        ["git", "--no-replace-objects", "show", f"{revision}:{path}"], cwd=root,
+    ) for path in paths}
+
+
 class HarnessEquivalenceTest(unittest.TestCase):
     def setUp(self) -> None:
         old_main = ("mod provenance;\nuse provenance::{arm_name, hex_digest, provenance};\n"
@@ -55,18 +66,8 @@ class HarnessEquivalenceTest(unittest.TestCase):
         self.verify()
 
     def test_pinned_history_accepts_only_the_reviewed_retention_addition(self) -> None:
-        root = Path(__file__).resolve().parents[2]
-
-        def sources(revision: str) -> dict[str, bytes]:
-            paths = subprocess.check_output(
-                ["git", "--no-replace-objects", "ls-tree", "-r", "--name-only", revision,
-                 "--", equivalence.ROOT], cwd=root, text=True,
-            ).splitlines()
-            return {path: subprocess.check_output(
-                ["git", "--no-replace-objects", "show", f"{revision}:{path}"], cwd=root,
-            ) for path in paths}
-
-        self.old, self.current = sources("a6b21479"), sources("fe5b455bdc041a102b4eb9cc0d146380357efb33")
+        self.old = harness_sources("a6b21479")
+        self.current = harness_sources("fe5b455bdc041a102b4eb9cc0d146380357efb33")
         self.verify()
         for path in ("src/main.rs", "src/retention.rs", "src/retention_tests.rs",
                      "src/measurement.rs", "src/operations.rs", "tests/cli_execution.rs",
@@ -92,6 +93,25 @@ class HarnessEquivalenceTest(unittest.TestCase):
         self.current[equivalence.ROOT + "src/unknown.rs"] = b"unexpected"
         with self.assertRaises(ValueError):
             self.verify()
+
+    def test_pinned_history_accepts_only_the_reviewed_retention_diagnostic(self) -> None:
+        self.old = harness_sources("a6b21479")
+        self.current = harness_sources("e6f04044")
+        self.verify()
+        old_retention = harness_sources("fe5b455bdc041a102b4eb9cc0d146380357efb33")
+        for path, unexpected in (
+            (equivalence.MAIN, old_retention[equivalence.MAIN]),
+            (equivalence.RETENTION, self.current[equivalence.RETENTION].replace(
+                b"DIAGNOSTIC_CYCLES: usize = 100", b"DIAGNOSTIC_CYCLES: usize = 99")),
+            (equivalence.RETENTION_TEST, old_retention[equivalence.RETENTION_TEST]),
+        ):
+            with self.subTest(path=path):
+                previous = self.current[path]
+                self.assertNotEqual(previous, unexpected)
+                self.current[path] = unexpected
+                with self.assertRaises(ValueError):
+                    self.verify()
+                self.current[path] = previous
 
     def test_changed_driver_settings_timing_rss_and_unknown_modules_are_rejected(self) -> None:
         mutations = {

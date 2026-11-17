@@ -1,4 +1,4 @@
-"""Verify the narrowly defined RSS extraction in a historical measurement harness."""
+"""Verify reviewed source differences in a historical measurement harness."""
 from __future__ import annotations
 
 import hashlib
@@ -23,9 +23,19 @@ _RETENTION_FILES = {
     RETENTION_TEST: ("1cfaf55f43daebb04155b8c76a1cfabdd92821025cd9df7369a7cea96aa85b59", 357),
     RETENTION_CLI_TEST: ("964eaeb545a2d6392c66f49859c83386daff30d4ff783962a74c9115eddd8ab1", 4773),
 }
+_RETENTION_DIAGNOSTIC_FILES = {
+    **_RETENTION_FILES,
+    RETENTION: ("bc3455de26ceb5a690e4bf56eab6ccde053cef31fc3780b79e24f43ab0520c2b", 2195),
+    RETENTION_TEST: ("34b0ed15cd43124f4c466aa8fc1fb6a4c5c1cdcb446ba08062d951d38f47c376", 807),
+}
 _RETENTION_DISPATCH = ('    #[cfg(feature = "candidate")]\n'
                        '    if env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--retention")) {\n'
                        '        return retention::run();\n    }\n')
+_RETENTION_DIAGNOSTIC_DISPATCH = (
+    '    #[cfg(feature = "candidate")]\n'
+    '    if let Some(mode) = retention::mode(env::args_os().nth(1).as_deref()) {\n'
+    '        return retention::run(mode);\n    }\n'
+)
 _RETENTION_MODULE = ('#[cfg(feature = "candidate")]\n#[path = "retention.rs"]\nmod retention;\n\n')
 _RETENTION_TEST_MODULE = ('#[cfg(feature = "candidate")]\n'
                           '#[path = "cli_execution/retention_contract_tests.rs"]\n'
@@ -86,11 +96,17 @@ def _main_equivalent(old: bytes, current: bytes, rss: bytes) -> None:
 
 
 def _retention_equivalent(before: Records, after: Records, old_head: str, read: ReadBlob) -> None:
-    for path, expected in _RETENTION_FILES.items():
-        data = _checked_blob(read, "HEAD", path, after)
-        if (hashlib.sha256(data).hexdigest(), len(data)) != expected:
-            raise ValueError("harness retention source differs")
-    for path, additions in ((MAIN, (_RETENTION_DISPATCH, _RETENTION_MODULE)),
+    for path in _RETENTION_FILES:
+        _checked_blob(read, "HEAD", path, after)
+    files = {path: after[path] for path in _RETENTION_FILES}
+    # WHY: 通常の25回計測を保つ診断追加は、確認済みのソースと分岐の組だけを許可する。
+    if files == _RETENTION_FILES:
+        dispatch = _RETENTION_DISPATCH
+    elif files == _RETENTION_DIAGNOSTIC_FILES:
+        dispatch = _RETENTION_DIAGNOSTIC_DISPATCH
+    else:
+        raise ValueError("harness retention source differs")
+    for path, additions in ((MAIN, (dispatch, _RETENTION_MODULE)),
                             (CLI_TEST, (_RETENTION_TEST_MODULE,))):
         old = _checked_blob(read, old_head, path, before)
         current = _checked_blob(read, "HEAD", path, after).decode("utf8")
