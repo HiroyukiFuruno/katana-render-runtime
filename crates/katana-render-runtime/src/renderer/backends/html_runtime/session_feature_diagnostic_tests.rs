@@ -238,3 +238,5 @@ fn append_preserves_node_identity_and_literal_text_in_argument_order() {
         },
     );
 }
+
+use crate::private_v8 as v8;

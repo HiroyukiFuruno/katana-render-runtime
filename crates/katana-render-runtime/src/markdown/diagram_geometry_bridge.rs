@@ -188,3 +188,5 @@ fn set_number_property(
 #[cfg(test)]
 #[path = "diagram_geometry_bridge_tests.rs"]
 mod tests;
+
+use crate::private_v8 as v8;

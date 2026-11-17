@@ -282,3 +282,5 @@ fn real_v8_x_height_bridge_rejects_missing_family_measurements() -> Result<(), S
     );
     Ok(())
 }
+
+use crate::private_v8 as v8;

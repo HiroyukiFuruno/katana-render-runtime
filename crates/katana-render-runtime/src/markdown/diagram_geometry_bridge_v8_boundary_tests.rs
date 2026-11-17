@@ -177,3 +177,5 @@ fn assert_registration_setter_rejected(property: &str, expected: &str) {
         );
     });
 }
+
+use crate::private_v8 as v8;

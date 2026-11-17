@@ -22,3 +22,5 @@ impl ScriptCompiler {
         v8::Script::compile(scope, source, Some(&origin))
     }
 }
+
+use crate::private_v8 as v8;

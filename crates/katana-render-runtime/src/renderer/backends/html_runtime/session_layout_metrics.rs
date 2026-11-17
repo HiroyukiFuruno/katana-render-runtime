@@ -4,6 +4,7 @@ use super::super::script::{
 };
 use super::StaticHtmlRuntimeSession;
 use super::session_interaction::discarded_runtime_error;
+use crate::private_v8 as v8;
 #[cfg(test)]
 use crate::renderer::backends::html_runtime::dom_state::LayoutMetric;
 use crate::renderer::backends::html_runtime::dom_state::{

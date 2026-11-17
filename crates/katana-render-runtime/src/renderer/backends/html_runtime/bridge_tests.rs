@@ -281,3 +281,5 @@ fn callback_coercion_cannot_use_host_timeout_allowance() -> Result<(), String> {
     }
     Ok(())
 }
+
+use crate::private_v8 as v8;

@@ -45,3 +45,9 @@ pub use renderer::{
     RenderOutput, RenderPolicy, RenderThemeMode, RenderThemeSnapshot, Renderer, RendererProfile,
     RuntimePathResolver, RuntimeVersion,
 };
+
+extern crate temporal_capi;
+
+#[rustfmt::skip]
+#[path = "../vendor/private-v8/src/mod.rs"]
+mod private_v8;

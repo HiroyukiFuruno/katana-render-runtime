@@ -3,6 +3,7 @@ use super::exception::exception_message;
 use super::execution::ExecutionBudget;
 use super::script::HtmlTryCatchScope;
 use super::types::HtmlRuntimeError;
+use crate::private_v8 as v8;
 use crate::v8_script::ScriptCompiler;
 
 pub(super) fn evaluate(

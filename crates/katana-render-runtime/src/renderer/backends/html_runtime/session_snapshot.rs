@@ -1,5 +1,6 @@
 use super::session_interaction::discarded_runtime_error;
 use super::{HtmlNodeIds, StaticHtmlRuntimeSession};
+use crate::private_v8 as v8;
 use crate::renderer::backends::html_document::HtmlDocumentNode;
 use crate::renderer::backends::html_runtime::dom_state::HtmlDomBridgeState;
 use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
@@ -146,6 +147,7 @@ fn dom_state_unavailable_error() -> HtmlRuntimeError {
 mod tests {
     use super::StaticHtmlRuntimeSession;
     use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
+    use crate::private_v8 as v8;
     use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
     use std::collections::HashMap;
 

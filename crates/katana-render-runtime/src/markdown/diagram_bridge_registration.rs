@@ -1,3 +1,5 @@
+use crate::private_v8 as v8;
+
 type RegisteredCallback<'scope> = (
     v8::Local<'scope, v8::String>,
     v8::Local<'scope, v8::Function>,

@@ -199,24 +199,23 @@ fn v8_transform_callback_handles_boundary_case_table() -> Result<(), String> {
 }
 
 #[test]
-fn frozen_target_rejects_transformed_box_properties() {
+fn non_extensible_target_rejects_transformed_box_properties() {
     DiagramV8Runtime::ensure_initialized();
     DiagramV8Runtime::with_empty_try_catch(|scope| {
-        let object = v8::Object::new(scope);
-        assert_eq!(
-            object.set_integrity_level(scope, v8::IntegrityLevel::Frozen),
-            Some(true)
-        );
-        let bounds = super::TransformedBox {
-            x: 1.0,
-            y: 2.0,
-            width: 3.0,
-            height: 4.0,
-        };
-        assert_eq!(
-            super::set_box_properties(scope, object, bounds),
-            Err("SVG transformed bounds property write failed".to_owned())
-        );
+        for level in [v8::IntegrityLevel::Frozen, v8::IntegrityLevel::Sealed] {
+            let object = v8::Object::new(scope);
+            assert_eq!(object.set_integrity_level(scope, level), Some(true));
+            let bounds = super::TransformedBox {
+                x: 1.0,
+                y: 2.0,
+                width: 3.0,
+                height: 4.0,
+            };
+            assert_eq!(
+                super::set_box_properties(scope, object, bounds),
+                Err("SVG transformed bounds property write failed".to_owned())
+            );
+        }
     });
 }
 
@@ -231,3 +230,5 @@ fn assert_bounds(
     });
     assert!(matches, "unexpected transformed bounds: {actual:?}");
 }
+
+use crate::private_v8 as v8;

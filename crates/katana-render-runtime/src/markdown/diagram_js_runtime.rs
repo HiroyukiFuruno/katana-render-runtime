@@ -114,7 +114,7 @@ impl DiagramV8Runtime {
 
     pub(crate) fn ensure_initialized() {
         V8_INIT.get_or_init(|| {
-            let platform = v8::new_default_platform(0, false).make_shared();
+            let platform = v8::Platform::new(0, false).make_shared();
             v8::V8::initialize_platform(platform);
             v8::V8::initialize();
         });
@@ -188,3 +188,5 @@ fn required<T>(value: Option<T>, message: &'static str) -> Result<T, String> {
 #[cfg(test)]
 #[path = "diagram_js_runtime_tests.rs"]
 mod tests;
+
+use crate::private_v8 as v8;

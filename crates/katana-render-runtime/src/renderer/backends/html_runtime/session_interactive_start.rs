@@ -75,3 +75,5 @@ fn initialize_isolate(
     trace.finish(0, "v8_setup", started, &[]);
     isolate
 }
+
+use crate::private_v8 as v8;

@@ -19,3 +19,5 @@ pub(super) fn svg_path_length_callback(
         .unwrap_or(0.0);
     return_value.set(v8::Number::new(scope, length).into());
 }
+
+use crate::private_v8 as v8;

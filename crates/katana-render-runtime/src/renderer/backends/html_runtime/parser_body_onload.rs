@@ -1,4 +1,5 @@
 use super::{HtmlTryCatchScope, evaluate_value};
+use crate::private_v8 as v8;
 use crate::renderer::backends::html_runtime::exception::exception_message;
 use crate::renderer::backends::html_runtime::execution::ExecutionBudget;
 use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
@@ -54,10 +55,10 @@ impl ParserBodyOnloadInstaller {
             Some(source) => v8::String::new(scope, source)
                 .ok_or_else(source_allocation_error)?
                 .into(),
-            None => v8::undefined(scope).into(),
+            None => v8::Primitive::undefined(scope).into(),
         };
         let callback = v8::Local::new(scope, &self.callback);
-        let receiver = v8::undefined(scope).into();
+        let receiver = v8::Primitive::undefined(scope).into();
         let later = v8::Boolean::new(scope, later).into();
         let budget = ExecutionBudget::start(scope);
         let result = callback
@@ -107,7 +108,7 @@ mod tests {
         let context = v8::Context::new(handle_scope, Default::default());
         let context_scope = &mut v8::ContextScope::new(handle_scope, context);
         v8::tc_scope!(let scope, &mut **context_scope);
-        let undefined = v8::undefined(scope).into();
+        let undefined = v8::Primitive::undefined(scope).into();
         assert!(matches!(
             ParserBodyOnloadInstaller::from_callback_value(scope, undefined),
             Err(HtmlRuntimeError::DomBridge(message))

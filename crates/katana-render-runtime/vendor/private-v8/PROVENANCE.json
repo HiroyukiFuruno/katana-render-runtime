@@ -1,0 +1,48 @@
+{
+  "upstream": "https://github.com/denoland/rusty_v8",
+  "version": "152.2.0",
+  "cratesIoSourceSha256": "a10fe1a92da5c32c7c7f838ce36c0ccfcfd5edf0865b58bdde820aa64cea9888",
+  "sourcePatch": "https://github.com/denoland/rusty_v8/pull/2076",
+  "sourcePatchHead": "ce88d67fa7910adfe74b9d5a5696284111c0fe2d",
+  "integration": "Private module and native archive link in katana-render-runtime",
+  "nativeArchives": {
+    "aarch64-apple-darwin": {
+      "name": "librusty_v8_release_aarch64-apple-darwin.a.gz",
+      "digest": "sha256:a4a5484444ad4b5f10dc7bed141236dd9dbeabf2006d14520f19b935d4db4227",
+      "size": 40635999,
+      "browser_download_url": "https://github.com/denoland/rusty_v8/releases/download/v152.2.0/librusty_v8_release_aarch64-apple-darwin.a.gz"
+    },
+    "x86_64-unknown-linux-gnu": {
+      "name": "librusty_v8_release_x86_64-unknown-linux-gnu.a.gz",
+      "digest": "sha256:b6683e9afcb77fbd8cb2c3acf45d34d52029ab216b332522c95179c12f0fed3c",
+      "size": 39784686,
+      "browser_download_url": "https://github.com/denoland/rusty_v8/releases/download/v152.2.0/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz"
+    },
+    "x86_64-pc-windows-msvc": {
+      "name": "rusty_v8_release_x86_64-pc-windows-msvc.lib.gz",
+      "digest": "sha256:0b17ca072bae37dd4ff00e6014d2b413becb031c9342ee11cb8226a5881f62b2",
+      "size": 39957087,
+      "browser_download_url": "https://github.com/denoland/rusty_v8/releases/download/v152.2.0/rusty_v8_release_x86_64-pc-windows-msvc.lib.gz"
+    }
+  },
+  "nativeBindings": {
+    "aarch64-apple-darwin": {
+      "name": "src_binding_release_aarch64-apple-darwin.rs",
+      "digest": "sha256:b9d5652ebca515eb2bf4c2ee4a6551b2567117b5aa720f430d2032616dd7e3b5",
+      "size": 40056,
+      "browser_download_url": "https://github.com/denoland/rusty_v8/releases/download/v152.2.0/src_binding_release_aarch64-apple-darwin.rs"
+    },
+    "x86_64-unknown-linux-gnu": {
+      "name": "src_binding_release_x86_64-unknown-linux-gnu.rs",
+      "digest": "sha256:3e4d5fecdbe0f98a6017e69d7ca82519a77fb032c5eb5e4cdbecdd3e2ec519d5",
+      "size": 40045,
+      "browser_download_url": "https://github.com/denoland/rusty_v8/releases/download/v152.2.0/src_binding_release_x86_64-unknown-linux-gnu.rs"
+    },
+    "x86_64-pc-windows-msvc": {
+      "name": "src_binding_release_x86_64-pc-windows-msvc.rs",
+      "digest": "sha256:4fbdc0fbb831ff7b26962f0273d77a66fbc3bbb596fbe9e9022c0128f8c88099",
+      "size": 39869,
+      "browser_download_url": "https://github.com/denoland/rusty_v8/releases/download/v152.2.0/src_binding_release_x86_64-pc-windows-msvc.rs"
+    }
+  }
+}

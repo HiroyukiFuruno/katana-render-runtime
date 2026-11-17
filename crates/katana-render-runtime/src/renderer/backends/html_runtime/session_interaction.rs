@@ -187,3 +187,5 @@ fn navigation_intent(
         .map_err(HtmlRuntimeError::DomBridge)
         .map(|href| href.map(|href| HtmlNavigationIntent { href }))
 }
+
+use crate::private_v8 as v8;

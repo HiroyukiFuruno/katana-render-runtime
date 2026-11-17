@@ -198,13 +198,13 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: just fmt-check
 
-      # 正常なUbuntu Rustキャッシュを使い、V8 archive欠落時だけv8を再生成する。
+      # 正常なUbuntu Rustキャッシュを使い、V8 archive欠落時だけ描画ランタイムを再生成する。
       - name: Repair cached V8 archive on Ubuntu
         if: matrix.os == 'ubuntu-latest'
         run: |
           for target_dir in target target/llvm-cov-target; do
             if [ ! -s "$target_dir/debug/gn_out/obj/librusty_v8.a" ]; then
-              cargo clean --target-dir "$target_dir" -p v8
+              cargo clean --target-dir "$target_dir" -p katana-render-runtime
             fi
           done
 
@@ -233,18 +233,18 @@ jobs:
         run: just macos-browser-contract-test
 
       # rust-cache は target を復元しても rusty_v8 の静的アーカイブを復元しない場合がある。
-      # macOS のリンク実行前に v8 を再構築して、公式アーカイブの取得とリンクを保証する。
+      # macOS のリンク実行前に描画ランタイムを再構築し、公式アーカイブの取得とリンクを保証する。
       - name: Rebuild V8 static archive on macOS arm64
         if: startsWith(matrix.platform, 'mac-') && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: |
-          cargo clean -p v8
+          cargo clean -p katana-render-runtime
           cargo build -p katana-render-runtime-cli --locked
 
       - name: Rebuild V8 static archive on Windows
         if: matrix.platform == 'win64'
         shell: pwsh
         run: |
-          cargo clean -p v8
+          cargo clean -p katana-render-runtime
           cargo build -p katana-render-runtime-cli --locked
 
 

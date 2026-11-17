@@ -109,3 +109,5 @@ fn fragment_bridge_limit_falls_back_only_for_valid_requests() -> Result<(), Stri
     );
     Ok(())
 }
+
+use crate::private_v8 as v8;

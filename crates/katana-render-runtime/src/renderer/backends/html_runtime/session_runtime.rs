@@ -1,4 +1,5 @@
 use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
+use crate::private_v8 as v8;
 #[cfg(test)]
 use crate::renderer::backends::html_browser::HtmlBrowserSource;
 #[cfg(test)]
@@ -84,6 +85,7 @@ fn contains_lifecycle_handler(node: &Handle) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{DiagramV8Runtime, HtmlDocument, StaticHtmlRuntime};
+    use crate::private_v8 as v8;
     use crate::renderer::backends::HtmlBrowserSource;
     use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
     use crate::renderer::backends::html_runtime_lifecycle_tests::LATER_BODY_ONLOAD_CASES;

@@ -27,7 +27,7 @@ fn path_bounds_callback(
             bounds,
             "SVG path bounds could not be returned",
         ),
-        Ok(None) => result.set(v8::null(scope).into()),
+        Ok(None) => result.set(v8::Primitive::null(scope).into()),
         Err(message) => throw_bridge_error(scope, message),
     }
 }
@@ -50,3 +50,5 @@ fn path_bounds(source: &str) -> Result<Option<TransformedBox>, &'static str> {
         height: f64::from(bounds.height()),
     }))
 }
+
+use crate::private_v8 as v8;

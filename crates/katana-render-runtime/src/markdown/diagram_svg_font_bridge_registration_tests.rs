@@ -154,3 +154,5 @@ fn configure(scope: &mut DiagramTryCatchScope<'_, '_, '_, '_>, source: &str) -> 
         })
         .is_some()
 }
+
+use crate::private_v8 as v8;

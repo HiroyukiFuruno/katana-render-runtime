@@ -8,7 +8,7 @@ pub(super) fn measure_callback(
     mut return_value: v8::ReturnValue<v8::Value>,
 ) {
     let Some(request) = font_measure_request(scope, &args) else {
-        return_value.set(v8::undefined(scope).into());
+        return_value.set(v8::Primitive::undefined(scope).into());
         return;
     };
     let segments = if args.length() > CANVAS_MEASURE_SEGMENTS_ARG {
@@ -17,12 +17,12 @@ pub(super) fn measure_callback(
         Some(Vec::new())
     };
     let Some(segments) = segments else {
-        return_value.set(v8::undefined(scope).into());
+        return_value.set(v8::Primitive::undefined(scope).into());
         return;
     };
     match measure_width(&request, &segments) {
         Some(width) => return_value.set(v8::Number::new(scope, width).into()),
-        None => return_value.set(v8::undefined(scope).into()),
+        None => return_value.set(v8::Primitive::undefined(scope).into()),
     }
 }
 
@@ -64,3 +64,5 @@ fn measure_segments(
     }
     (segments.iter().map(String::as_str).collect::<String>() == text).then_some(segments)
 }
+
+use crate::private_v8 as v8;

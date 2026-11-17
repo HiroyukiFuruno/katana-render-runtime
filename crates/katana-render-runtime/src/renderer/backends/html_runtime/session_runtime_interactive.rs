@@ -165,3 +165,5 @@ impl StaticHtmlRuntime {
 #[cfg(test)]
 #[path = "session_runtime_interactive_tests.rs"]
 mod tests;
+
+use crate::private_v8 as v8;

@@ -42,3 +42,5 @@ fn rejecting_metric_object<'scope>(
         .run(scope)?
         .to_object(scope)
 }
+
+use crate::private_v8 as v8;

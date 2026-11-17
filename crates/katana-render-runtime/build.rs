@@ -1,3 +1,8 @@
+#[rustfmt::skip]
+#[path = "vendor/private-v8/build.rs"]
+mod private_v8_build;
+#[path = "src/system/process.rs"]
+mod system;
 use std::{env, fs, io, io::Read, path::PathBuf};
 
 const ARCHIVE: &[u8] = include_bytes!("src/markdown/generated/zenuml-runtime-assets.bin.br");
@@ -34,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(PathBuf::from)
         .ok_or_else(|| io::Error::other("OUT_DIR is not set"))?;
     fs::write(output_dir.join(OUTPUT_FILENAME), source)?;
-    Ok(())
+    private_v8_build::configure()
 }
 
 fn validate_archive_length(archive: &[u8]) -> io::Result<()> {

@@ -26,7 +26,7 @@ fn callback(
 ) {
     match measure(scope, &args) {
         Ok(Some(value)) => result.set(value.into()),
-        Ok(None) => result.set(v8::null(scope).into()),
+        Ok(None) => result.set(v8::Primitive::null(scope).into()),
         Err(message) => throw_bridge_error(scope, message),
     }
 }
@@ -97,3 +97,5 @@ fn set_advances(
 #[cfg(test)]
 #[path = "diagram_svg_fragment_font_bridge_tests.rs"]
 mod tests;
+
+use crate::private_v8 as v8;

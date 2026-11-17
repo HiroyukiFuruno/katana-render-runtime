@@ -43,7 +43,7 @@ fn font_measure_callback(
     mut return_value: v8::ReturnValue<v8::Value>,
 ) {
     let Some(request) = font_measure_request(scope, &args) else {
-        return_value.set(v8::undefined(scope).into());
+        return_value.set(v8::Primitive::undefined(scope).into());
         return;
     };
     let width = measure_font_text(&request, &request.text);
@@ -53,7 +53,7 @@ fn font_measure_callback(
                 (f64::from(width) * CSS_LAYOUT_SUBPIXEL_SCALE).ceil() / CSS_LAYOUT_SUBPIXEL_SCALE;
             return_value.set(v8::Number::new(scope, css_layout_width).into());
         }
-        _ => return_value.set(v8::undefined(scope).into()),
+        _ => return_value.set(v8::Primitive::undefined(scope).into()),
     }
 }
 
@@ -157,3 +157,5 @@ mod numeric_boundary_tests;
 #[cfg(test)]
 #[path = "diagram_font_bridge_x_height_tests.rs"]
 mod x_height_tests;
+
+use crate::private_v8 as v8;

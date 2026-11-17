@@ -10,7 +10,7 @@ use super::{
 fn marking_a_primitive_as_a_native_error_does_not_throw() -> Result<(), String> {
     with_v8_context!(isolate, scope, [], [], {
         let message = v8::String::new(scope, "native error").ok_or("message unavailable")?;
-        let primitive = v8::null(scope).into();
+        let primitive = v8::Primitive::null(scope).into();
         super::super::mark_native_dom_error(scope, primitive, message);
         assert!(!scope.has_caught());
     });
@@ -25,7 +25,7 @@ pub(super) fn call_unsupported_dom_callback(
     let operation: v8::Local<v8::Value> = v8::String::new(scope, "unsupported")
         .ok_or("operation allocation failed".to_string())?
         .into();
-    let receiver = v8::undefined(scope).into();
+    let receiver = v8::Primitive::undefined(scope).into();
     let returned = callback.call(scope, receiver, &[operation]);
     let exception_name = scope.exception().and_then(|exception| {
         let property = v8::String::new(scope, "name")?;
@@ -187,3 +187,5 @@ fn successful_dom_callback_mutates_the_element_and_returns_undefined() -> Result
         }
     )
 }
+
+use crate::private_v8 as v8;

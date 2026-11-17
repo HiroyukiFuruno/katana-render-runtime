@@ -52,7 +52,6 @@ harfrust = "0.16.0"
 sha2 = "0.11"
 tiny-skia = "0.12"
 ureq = { version = "3.5", default-features = false, features = ["rustls"] }
-v8 = "=152.2.0"
 html5ever = "0.40"
 markup5ever = "0.40"
 tendril = "0.5"

@@ -1,6 +1,7 @@
 use super::bridge::dom_callback;
 use super::dom_state::HtmlDomBridgeState;
 use super::types::HtmlRuntimeError;
+use crate::private_v8 as v8;
 
 pub(super) use super::evaluation::{evaluate, evaluate_value, perform_microtask_checkpoint};
 pub(super) use super::promise::evaluate_and_wait_for_promise;

@@ -75,3 +75,5 @@ fn finish_timer_task(
     }
     check_bridge_error(scope)
 }
+
+use crate::private_v8 as v8;

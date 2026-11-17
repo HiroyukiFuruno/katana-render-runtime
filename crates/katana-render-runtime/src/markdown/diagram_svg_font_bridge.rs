@@ -73,7 +73,7 @@ fn svg_font_x_height_callback(
     );
     match measured {
         Ok(Some(x_height)) => return_value.set(v8::Number::new(scope, f64::from(x_height)).into()),
-        Ok(None) => return_value.set(v8::undefined(scope).into()),
+        Ok(None) => return_value.set(v8::Primitive::undefined(scope).into()),
         Err(_) => throw_bridge_error(scope, "SVG font x-height measurement failed"),
     }
 }
@@ -168,3 +168,5 @@ fn set_svg_metric_property(
 #[cfg(test)]
 #[path = "diagram_svg_font_bridge_tests.rs"]
 mod tests;
+
+use crate::private_v8 as v8;

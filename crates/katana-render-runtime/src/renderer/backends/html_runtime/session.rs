@@ -58,3 +58,5 @@ impl StaticHtmlRuntime {
         execute(context_scope, context)
     }
 }
+
+use crate::private_v8 as v8;

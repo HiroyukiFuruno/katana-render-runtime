@@ -455,9 +455,9 @@ dependencies = [
 
 [[package]]
 name = "filetime"
-version = "0.2.29"
+version = "0.2.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
+checksum = "e1255e7a9f1902190d4c10a75f2f7f495d3d3ce13e9ba26e6c48683a0f4dbed7"
 dependencies = [
  "cfg-if",
  "libc",
@@ -1068,9 +1068,12 @@ dependencies = [
  "flate2",
  "fontdb",
  "fontique",
+ "fslock",
  "gif",
+ "gzip-header",
  "harfrust 0.12.0",
  "harfrust 0.16.0",
+ "home",
  "html5ever",
  "icu_properties",
  "image",
@@ -1082,10 +1085,12 @@ dependencies = [
  "kurbo",
  "log",
  "markup5ever",
+ "miniz_oxide 0.9.1",
  "moka",
  "nix 0.32.0",
  "objc2-core-foundation",
  "objc2-core-text",
+ "paste",
  "percent-encoding",
  "read-fonts 0.47.0",
  "rgb",
@@ -1101,6 +1106,7 @@ dependencies = [
  "strict-num 0.2.0",
  "svgtypes",
  "taffy 0.15.1",
+ "temporal_capi",
  "tendril",
  "thiserror",
  "tiny-skia",
@@ -1113,7 +1119,7 @@ dependencies = [
  "unicode-width",
  "ureq",
  "url",
- "v8",
+ "which 8.0.6",
  "write-fonts",
  "xml5ever",
  "xmltree",
@@ -2539,9 +2545,9 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
 name = "uuid"
-version = "1.29.2"
+version = "1.29.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bed99139f7dac9b5cfe5f17be4d66dc7079a34dee1d74bcc77217119240e267c"
+checksum = "3c14b15dffa2f4bd712103e857140aa04a4f2ff6e955c77d7eb8e53ee02a3b64"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
@@ -2562,7 +2568,7 @@ dependencies = [
  "miniz_oxide 0.8.9",
  "paste",
  "temporal_capi",
- "which",
+ "which 6.0.3",
 ]
 
 [[package]]
@@ -2668,6 +2674,15 @@ dependencies = [
  "home",
  "rustix 0.38.44",
  "winsafe",
+]
+
+[[package]]
+name = "which"
+version = "8.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bae2f2b2b816647a1cab1acc91f5bd20812d53cb344382635ec2181940c8034f"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

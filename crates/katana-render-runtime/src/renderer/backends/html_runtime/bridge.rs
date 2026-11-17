@@ -58,7 +58,8 @@ fn set_bridge_error(
     return_value: &mut v8::ReturnValue<v8::Value>,
     error: String,
 ) {
-    let value = bridge_exception(scope, error).unwrap_or_else(|| v8::undefined(scope).into());
+    let value =
+        bridge_exception(scope, error).unwrap_or_else(|| v8::Primitive::undefined(scope).into());
     return_value.set(value);
 }
 
@@ -139,14 +140,14 @@ fn dom_value<'scope>(
     value: DomValue,
 ) -> v8::Local<'scope, v8::Value> {
     match value {
-        DomValue::Undefined => v8::undefined(scope).into(),
-        DomValue::Null => v8::null(scope).into(),
+        DomValue::Undefined => v8::Primitive::undefined(scope).into(),
+        DomValue::Null => v8::Primitive::null(scope).into(),
         DomValue::String(value) => {
-            let undefined = v8::undefined(scope).into();
+            let undefined = v8::Primitive::undefined(scope).into();
             v8::String::new(scope, &value).map_or(undefined, |value| value.into())
         }
         DomValue::NodeId(value) => {
-            let undefined = v8::undefined(scope).into();
+            let undefined = v8::Primitive::undefined(scope).into();
             v8::String::new(scope, &value.to_string()).map_or(undefined, |value| value.into())
         }
         DomValue::NodeIds(values) => node_id_array(scope, &values).into(),
@@ -169,3 +170,5 @@ fn node_id_array<'scope>(
 #[cfg(test)]
 #[path = "bridge_tests.rs"]
 mod tests;
+
+use crate::private_v8 as v8;

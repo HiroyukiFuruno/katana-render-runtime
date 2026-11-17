@@ -1,3 +1,4 @@
+use crate::private_v8 as v8;
 use crate::renderer::backends::html_document::HtmlDocumentScript;
 use crate::renderer::backends::html_runtime::script::{
     DOM_CONTENT_LOADED_DISPATCH, HtmlTryCatchScope, ParserBodyOnloadInstaller,
