@@ -1,27 +1,9 @@
 /* Copyright 2019-2021 the Deno authors. All rights reserved. MIT license. */
 
-//! # Example
+//! V8 Rust bindings used by the KRR runtime.
 //!
-//! ```rust
-//! let platform = v8::Platform::new(0, false).make_shared();
-//! v8::V8::initialize_platform(platform);
-//! v8::V8::initialize();
-//!
-//! let isolate = &mut v8::Isolate::new(Default::default());
-//!
-//! let scope = std::pin::pin!(v8::HandleScope::new(isolate));
-//! let scope = &mut scope.init();
-//! let context = v8::Context::new(scope, Default::default());
-//! let scope = &mut v8::ContextScope::new(scope, context);
-//!
-//! let code = v8::String::new(scope, "'Hello' + ' World!'").unwrap();
-//! println!("javascript code: {}", code.to_rust_string_lossy(scope));
-//!
-//! let script = v8::Script::compile(scope, code, None).unwrap();
-//! let result = script.run(scope).unwrap();
-//! let result = result.to_string(scope).unwrap();
-//! println!("result: {}", result.to_rust_string_lossy(scope));
-//! ```
+//! Initialize the platform, enter an isolate and its context, then compile
+//! and run the script in the pinned handle scope.
 
 #![allow(clippy::missing_safety_doc)]
 /* WHY: 上流の修正版が公開されるまで、V8内部のコードスタイルと異常時の挙動を維持する。 */

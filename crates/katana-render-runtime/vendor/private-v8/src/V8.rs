@@ -67,15 +67,8 @@ impl V8 {
   /// This matters most for embedders that build a thread pool up front and
   /// then create isolates on its workers:
   ///
-  /// ```no_run
-  /// // The pool inherits access to the key.
-  /// v8::V8::initialize_platform(
-  ///   v8::Platform::new(0, false).make_shared(),
-  /// );
-  /// v8::V8::initialize();
-  /// let pool = std::thread::spawn(|| { /* may enter an isolate */ });
-  /// # let _ = pool;
-  /// ```
+  /// Initialize the V8 platform and V8 before creating the worker threads
+  /// that may enter an isolate.
   ///
   /// Creating the pool first compiles and runs, and fails only once a worker
   /// first executes JavaScript. V8 states the same requirement internally, in

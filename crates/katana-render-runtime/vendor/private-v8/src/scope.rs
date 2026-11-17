@@ -1,4 +1,4 @@
-#![doc = include_str!("scope/scope_module.md")]
+//! V8ハンドルとコンテキストの生存期間を管理する内部スコープ。
 use crate::private_v8::{
   Context, FunctionCallbackInfo, Isolate, Local,
   Message, Object, OwnedIsolate, PromiseRejectMessage,

@@ -28,15 +28,8 @@ macro_rules! callback_scope {
 #[cfg(test)]
 pub(crate) use callback_scope;
 
-/// Creates a pinned `HandleScope` and binds `&mut PinScope` to `$scope`.
-///
-/// ```rust
-/// # let platform = v8::Platform::new(0, false).make_shared();
-/// # v8::V8::initialize_platform(platform);
-/// # v8::V8::initialize();
-/// # let isolate = &mut v8::Isolate::new(Default::default());
-/// v8::scope!(let scope, isolate);
-/// ```
+/// Creates a pinned `HandleScope` for an initialized isolate and binds
+/// `&mut PinScope` to `$scope`.
 #[allow(unused_macros)]
 macro_rules! scope {
   ($scope: ident, $param: expr $(,)?) => {
