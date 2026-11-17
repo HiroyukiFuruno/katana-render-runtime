@@ -5,8 +5,8 @@ import {
   prepareReferenceImageOps,
   renderAndScoreReferencePairs,
 } from "../mermaid/reference_image_ops";
-import { ReferencePairRepository } from "../mermaid/reference_pair_repository";
 import { ReferenceCompareReport, ReferenceCompareReportLabels } from "../mermaid/reference_report";
+import { DrawioReferencePairRepository } from "./reference-pairs";
 import {
   type DrawioReferenceScoreBaseline,
   type DrawioReferenceScoreRow,
@@ -53,7 +53,7 @@ class ReferenceCompare {
   constructor(private options: CliParsedOptions) {}
 
   run() {
-    const pairs = new ReferencePairRepository(this.options).list();
+    const pairs = new DrawioReferencePairRepository(this.options).list();
     const magick = prepareReferenceImageOps(this.options);
 
     const { normalized, scores } = renderAndScoreReferencePairs(
