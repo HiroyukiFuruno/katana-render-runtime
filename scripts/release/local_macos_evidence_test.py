@@ -600,14 +600,19 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             fetch=snapshots(valid_comment()), now=NOW, expected_workflow_digest="d" * 64,
         ))
 
-    def test_old_workflow_and_bun_proofs_are_not_reused(self) -> None:
+    def test_old_workflow_bun_and_build_commands_are_not_reused(self) -> None:
         good = valid_comment()
         payload = json.loads(comment_body(good).split("\n", 1)[1])
-        old_workflow = "704c54e3656210ed96791ab28f996ca4cf2c2299c0591082fb7ee812e6d0de73"
+        old_workflow = "010f13ba94f941836c1ce116ce6c9ff10fa026b10a8eefe109ccacf8debb907b"
         old_scope = {**payload, "workflow_sha256": old_workflow,
                      "scope_sha256": EVIDENCE.scope_digest(old_workflow)}
         old_bun = {**payload, "tools": {**payload["tools"], "bun": "1.4.3"}}
-        for stale in (old_scope, old_bun):
+        old_commands = {**payload, "commands": [
+            {**command, "argv": ["cargo", "clean", "-p", "v8"]}
+            if command["id"] == "rebuild-v8" else command
+            for command in payload["commands"]
+        ]}
+        for stale in (old_scope, old_bun, old_commands):
             comment = {**good, "body": EVIDENCE.MARKER + "\n" + json.dumps(stale)}
             self.assertFalse(EVIDENCE.verify_from_api(
                 REPOSITORY, 7, expected_base=BASE, expected_head=HEAD,

@@ -445,7 +445,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn(
             'if [ ! -s "$target_dir/debug/gn_out/obj/librusty_v8.a" ]', script
         )
-        self.assertIn('cargo clean --target-dir "$target_dir" -p v8', script)
+        self.assertIn('cargo clean --target-dir "$target_dir" -p katana-render-runtime', script)
         self.assertNotIn("rm -rf", repair)
         self.assertLess(
             self.ci.index("Repair cached V8 archive on Ubuntu"),
@@ -456,20 +456,14 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self,
     ) -> None:
         script = self.workflow_script(self.ci, "Repair cached V8 archive on Ubuntu")
+        debug_cleanup = ["clean --target-dir target -p katana-render-runtime"]
+        coverage_cleanup = ["clean --target-dir target/llvm-cov-target -p katana-render-runtime"]
         cases: tuple[tuple[str | None, str | None, list[str]], ...] = (
             (None, None, []),
-            ("target", None, ["clean --target-dir target -p v8"]),
-            (
-                "target/llvm-cov-target",
-                None,
-                ["clean --target-dir target/llvm-cov-target -p v8"],
-            ),
-            (
-                None,
-                "target/llvm-cov-target",
-                ["clean --target-dir target/llvm-cov-target -p v8"],
-            ),
-            (None, "target", ["clean --target-dir target -p v8"]),
+            ("target", None, debug_cleanup),
+            ("target/llvm-cov-target", None, coverage_cleanup),
+            (None, "target/llvm-cov-target", coverage_cleanup),
+            (None, "target", debug_cleanup),
         )
         for missing_target, empty_target, expected_calls in cases:
             with self.subTest(missing_target=missing_target, empty_target=empty_target):

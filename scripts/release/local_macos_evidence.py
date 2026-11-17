@@ -37,7 +37,7 @@ else:
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/test-and-build.yml"
-SUPPORTED_WORKFLOW_SHA256 = "010f13ba94f941836c1ce116ce6c9ff10fa026b10a8eefe109ccacf8debb907b"
+SUPPORTED_WORKFLOW_SHA256 = "951967556058f38556ff04ceaaed3fdf1b57dad015ad893ee2b3ab42b7c5a0ac"
 SCHEMA = 1
 FRESHNESS_SECONDS = 24 * 60 * 60
 MARKER = "<!-- krr-local-macos-evidence:v1 -->"
@@ -48,7 +48,7 @@ COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("bun-install", ("bun", "install", "--frozen-lockfile")),
     ("graphviz-install", ("brew", "install", "graphviz")),
     ("plantuml-install", ("just", "plantuml-install")),
-    ("rebuild-v8", ("cargo", "clean", "-p", "v8")),
+    ("rebuild-v8", ("cargo", "clean", "-p", "katana-render-runtime")),
     ("build-cli", ("cargo", "build", "-p", "katana-render-runtime-cli", "--locked")),
     ("rust-check", ("cargo", "check", "--workspace", "--locked")),
     ("format", ("just", "fmt-check")),

@@ -853,7 +853,7 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
         self.assertIn(f"if: {platform_condition}", setup)
         if windows:
             self.assertIn("shell: pwsh", setup)
-        self.assertIn("cargo clean -p v8", setup)
+        self.assertIn("cargo clean -p katana-render-runtime", setup)
         self.assertIn("cargo build -p katana-render-runtime-cli --locked", setup)
 
         type_check = workflow.index("- name: Check Rust types")
