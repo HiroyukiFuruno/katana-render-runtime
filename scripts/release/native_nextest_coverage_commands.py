@@ -8,6 +8,8 @@ import uuid
 
 REPORT_DIRECTORY = Path("tmp/quality/standalone-performance-coverage")
 
+# WHY: 公式v8へ戻すまでの同梱バインディングと専用ビルドアダプターだけを集計から外す（#121）。
+TEMPORARY_V8_SOURCE_DIRECTORY = "crates/katana-render-runtime/vendor/private-v8"
 ROOT_TEST_ONLY_DIRECTORY = "crates/kdr-linter/src/bin/mathjax_consumer_facts"
 ROOT_TEST_ONLY_SHA256 = {
     f"{ROOT_TEST_ONLY_DIRECTORY}/ast_linter_materialization_test_support.rs": "8d9b27537ce69f676b815a55a14c904613dd7f8aeabdb2adb116d12abfd855d3",
@@ -27,7 +29,9 @@ def root_coverage_ignore_regex(repo: Path) -> str:
             parts = (parts[0].removesuffix(path.anchor[-1:]), *parts[1:])
         return r"[/\\]".join(re.escape(part) for part in parts)
 
-    return "^(" + "|".join(escaped_path(repo / path) for path in ROOT_TEST_ONLY_SHA256) + ")$"
+    test_only = [escaped_path(repo / path) for path in ROOT_TEST_ONLY_SHA256]
+    temporary_v8 = escaped_path(repo / TEMPORARY_V8_SOURCE_DIRECTORY) + r"[/\\](?:[^/\\]+[/\\])*[^/\\]+\.rs"
+    return "^(" + "|".join([*test_only, temporary_v8]) + ")$"
 
 
 def clean_arguments() -> list[str]:

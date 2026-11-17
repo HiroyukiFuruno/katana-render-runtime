@@ -42,6 +42,21 @@ class RootCoverageTestOnlyScopeTests(unittest.TestCase):
         known = next(iter(self.scope.ROOT_TEST_ONLY_SHA256))
         self.assertIsNone(re.fullmatch(pattern, str(self.root.parent / "elsewhere" / known)))
 
+    def test_only_temporary_private_v8_rust_sources_are_excluded(self) -> None:
+        pattern = self.scope.root_coverage_ignore_regex(self.root)
+        runtime = self.root / "crates/katana-render-runtime"
+        vendor = runtime / "vendor/private-v8"
+        for path in (vendor / "src/scope/pin.rs", vendor / "build.rs",
+                     vendor / "build-support/prebuilt_artifact.rs"):
+            with self.subTest(path=path):
+                self.assertIsNotNone(re.fullmatch(pattern, str(path)))
+                self.assertIsNotNone(re.fullmatch(pattern, path.as_posix().replace("/", "\\")))
+        for path in (runtime / "vendor/private-v8-other/src/lib.rs", vendor / "PROVENANCE.json",
+                     runtime / "src/v8_script.rs", runtime / "build.rs",
+                     self.root.parent / "elsewhere" / vendor.relative_to(self.root) / "src/mod.rs"):
+            with self.subTest(path=path):
+                self.assertIsNone(re.fullmatch(pattern, str(path)))
+
     def test_changed_bytes_and_helper_are_rejected(self) -> None:
         relative = next(iter(self.scope.ROOT_TEST_ONLY_SHA256))
         path = self.root / relative
