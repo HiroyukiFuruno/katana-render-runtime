@@ -4524,7 +4524,7 @@ def _verify_reuse_request_with_policy(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path.cwd())
-    parser.add_argument("--evidence-dir", type=Path, default=Path("tmp/html-performance-release-evidence"))
+    parser.add_argument("--evidence-dir", type=Path)
     parser.add_argument("--acquire", action="store_true")
     parser.add_argument("--acquire-current-producer", action="store_true")
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""))
@@ -4540,6 +4540,8 @@ def main() -> int:
         help="verify a catalog-bound diagnostic bundle while retaining acceptance=false",
     )
     args = parser.parse_args()
+    if args.evidence_dir is None:
+        args.evidence_dir = args.repo.resolve() / "tmp/html-performance-release-evidence"
     try:
         require(not (args.acquire and args.acquire_current_producer), "ambiguous acquisition mode")
         selected = [number for number in (2, 3, 4, 5)

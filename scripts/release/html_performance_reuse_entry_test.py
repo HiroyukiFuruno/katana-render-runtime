@@ -40,6 +40,20 @@ class ReuseEntryTest(unittest.TestCase):
         guard.start()
         self.addCleanup(guard.stop)
 
+    def test_default_evidence_dir_reads_a_canonical_reuse_request_under_the_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            request = root / "tmp/html-performance-release-evidence/reuse-request.json"
+            request.parent.mkdir(parents=True)
+            request.write_text("{}", encoding="utf-8")
+            with (patch("sys.argv", ["verify-html-performance", "--repo", str(root),
+                                     "--require-memory-policy-v5"]),
+                  patch.object(gate, "_verify_reuse_request_with_policy", return_value={}) as verify):
+                self.assertEqual(gate.main(), 0)
+            verify.assert_called_once_with(request, root, require_memory_policy_v2=False,
+                                           require_memory_policy_v3=False, require_memory_policy_v4=False,
+                                           require_memory_policy_v5=True)
+
     def test_program_source_reuse_requires_current_binary_and_environment(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
