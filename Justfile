@@ -50,6 +50,9 @@ MATHJAX_JS_VERSION := "4.1.3"
 HTML_PERFORMANCE_SCIPY_VERSION := "1.18.1"
 HTML_PERFORMANCE_NUMPY_VERSION := "2.5.4"
 HTML_PERFORMANCE_SCIPY_ENV := "KRR_HTML_PERFORMANCE_SCIPY_VERSION=" + HTML_PERFORMANCE_SCIPY_VERSION
+HTML_PERFORMANCE_REPLAY_PATH := env_var_or_default("KRR_HTML_PERFORMANCE_REPLAY_ENVIRONMENT_PATH", "")
+HTML_PERFORMANCE_REPLAY_SHA256 := env_var_or_default("KRR_HTML_PERFORMANCE_REPLAY_ENVIRONMENT_SHA256", "")
+HTML_PERFORMANCE_REPLAY_ARGS := if HTML_PERFORMANCE_REPLAY_PATH + HTML_PERFORMANCE_REPLAY_SHA256 == "" { "" } else { "--replay-launch-environment " + quote(HTML_PERFORMANCE_REPLAY_PATH) + " --replay-launch-environment-sha256 " + quote(HTML_PERFORMANCE_REPLAY_SHA256) + " " }
 HTML_PERFORMANCE_TYPING_PATH := "scripts/release/typings"
 HTML_PERFORMANCE_PYTHON_REQUIREMENTS := REPO_ROOT + "/scripts/release/html-performance-requirements.lock"
 ZENUML_CORE_JS_VERSION := "4.13.2"
@@ -690,7 +693,7 @@ release-openspec-archive:
 
 # 同一sourceの時間と保持メモリを再検証し、v5の全84条件を要求する。
 html-performance-nonregression-check:
-    {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap verify --require-memory-policy-v5
+    {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap {{HTML_PERFORMANCE_REPLAY_ARGS}}verify --require-memory-policy-v5
 
 # Git管理されたHTML性能履歴から現行基準または指定recordを表示する。
 html-performance-history record_id='':
