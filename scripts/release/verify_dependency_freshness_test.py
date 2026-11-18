@@ -1166,17 +1166,19 @@ target-build = "=3.0.0"
     def test_frozen_rollup_retention_requires_exact_inputs_and_release_version(self) -> None:
         current = (b"current manifest", b"current lock")
         proposed = (b"proposed manifest", b"proposed lock")
-        digests = tuple(tuple(hashlib.sha256(data).hexdigest() for data in files)
-                        for files in (current, proposed))
+        current_hashes, proposed_hashes = (
+            tuple(hashlib.sha256(data).hexdigest() for data in files) for files in (current, proposed)
+        )
         manifest = self.root / "Cargo.toml"
         manifest.write_text('[workspace.package]\nversion = "0.4.24"\n', encoding="utf-8")
-        with patch.object(freshness, "V0424_FROZEN_BUN_RESOLUTION", digests):
+        with (patch.object(freshness, "V0424_FROZEN_BUN_CURRENT", current_hashes),
+              patch.object(freshness, "V0424_REVIEWED_BUN_PROPOSALS", {proposed_hashes: "4.68.7"})):
             check = freshness._reviewed_frozen_rollup_resolution
-            self.assertTrue(check(self.root, current, proposed))
-            self.assertFalse(check(self.root, current, (proposed[0], b"different proposed lock")))
-            self.assertFalse(check(self.root, (b"different current manifest", current[1]), proposed))
+            self.assertEqual(check(self.root, current, proposed), "4.68.7")
+            self.assertIsNone(check(self.root, current, (proposed[0], b"different proposed lock")))
+            self.assertIsNone(check(self.root, (b"different current manifest", current[1]), proposed))
             manifest.write_text('[workspace.package]\nversion = "0.4.25"\n', encoding="utf-8")
-            self.assertFalse(check(self.root, current, proposed))
+            self.assertIsNone(check(self.root, current, proposed))
 
     def test_cargo_update_dry_run_distinguishes_zero_singular_and_plural_updates(self) -> None:
         cases = {

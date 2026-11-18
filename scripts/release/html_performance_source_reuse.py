@@ -141,11 +141,11 @@ VALIDATION_COHORT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, int]]] = 
 FROZEN_RELEASE_PREFLIGHT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, int]]] = {
     "scripts/release/verify_dependency_freshness.py": (
         ("0b16e432a30e4cba011e4b6ce51d87868909a76b3160c13e19ab172d0c07398f", 60302),
-        ("e52b80ebd70dcf06493412e1416c7e9a22dbb30ddec801ea41d02df793576e3d", 61647),
+        ("3a54486d56b24b9d2be27c5f36a8c0f158a184123967167ed271f02e47584b0b", 62039),
     ),
     "scripts/release/verify_dependency_freshness_test.py": (
         ("1f722913d873e65b6116a0bac56731c0efdedcdcea17cd582d40f05ecdf252e5", 76536),
-        ("46dbb34cf72b13cc4d3dce0a04fa440c9c06cecf760eee23eea89a8d286375f8", 77733),
+        ("61ed9bc6f1451dec2f0b2f02fe6865b70dc364d37894f56b06297b231f97326b", 77870),
     ),
     "scripts/release/html_performance_source_reuse_test.py": (
         ("056f2a9087dc2d353d984d6d5b03fb11e5d9afcc8a0702902f6bd32feaee7420", 72516),
@@ -161,7 +161,7 @@ FROZEN_RELEASE_PREFLIGHT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, in
     ),
     "Justfile": (
         ("ffc9f8dec7c6e6dbf2748d99aca8c894156b2aa31f99bee28d0809e4cf90fd4d", 87389),
-        ("498e2f4125016df8aa7d5b06e2ee3837faead076414e7af4dcc11414fcc8a543", 87906),
+        ("03c3749c366a3bbc349690c5854123a47a8dd6da5f5c8b630e91402447382ce3", 87906),
     ),
     "scripts/release/test_packaged_runtime.py": (
         ("8cd9fb8aebca4a26926f9dcae9ea1793270afa8096f3c60aad3b99d39258dcc1", 11685),
@@ -743,7 +743,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "a3b55d289b4c9702399afd3ca328523d0ef389fc0546fab4da82b2b1075ab15b"
+SELF_MODULE_CANONICAL_SHA256 = "817943a59d46a8fa0a4d2751b89c62d127b05b757e15f1bae195f02df9feb63f"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":

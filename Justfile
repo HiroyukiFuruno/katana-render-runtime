@@ -663,7 +663,7 @@ release-target-manifest-update:
     python3 scripts/release/verify-release-target.py --target-version "{{VERSION}}" --head-ref HEAD --update-release-manifest
 
 # 未公開のworkspace依存を含め、Cargoの検証を通した配布packageを揃える。
-release-verify: html-performance-nonregression-check release-target-check
+release-verify: release-target-check html-performance-nonregression-check
     bash scripts/release/verify-version.sh "{{VERSION}}"
     bash scripts/release/verify-internal-dependencies.sh "{{VERSION}}"
     {{CARGO}} package -p katana-render-runtime-assets -p katana-render-runtime -p katana-render-runtime-cli --locked --allow-dirty
