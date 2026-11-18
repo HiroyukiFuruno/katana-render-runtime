@@ -74,12 +74,6 @@ V0424_FROZEN_BUN_CURRENT = (
     "950d2cc9f5530c95850fa3f92ada1e5b5cd31e33d46bbd9155e337bbaddab7df",
     "08b5f01b06835f7d036b046bd480ec1b87a39274bd7afd30f100342592e41d58",
 )
-V0424_REVIEWED_BUN_PROPOSALS: dict[tuple[str, ...], str] = {
-    ("74bdc642679dbab96f0349042b2c4eaea711842f745062bd0b5f56a7723aac11",
-     "f6cb11f963be546e8689e9165a8562be0ea8c0fa12eb02cc2af77320640cf787"): "4.68.6",
-    ("d282ace4900f214b86e8c1e3e559eecfeb01d5e5e2784208c1d7f61b66049c68",
-     "4deff7eaaa44051696b93a414c3b345509fcd9b0d1fd2f53acddcda4fc3ca948"): "4.68.7",
-}
 LOCK_CHANGE_RE = re.compile(
     r"^\s+(Adding|Updating|Removing|Downgrading) ([A-Za-z0-9_-]+) v([^\s]+)"
     r"(?: -> v([^\s]+))?$"
@@ -1025,23 +1019,23 @@ def js_packages(root: Path) -> list[Package]:
     return packages
 
 
-def _reviewed_frozen_rollup_resolution(root: Path, current: tuple[bytes, ...],
-                                       proposed: tuple[bytes, ...]) -> str | None:
+def _is_verified_frozen_js_resolution(root: Path, current: tuple[bytes, ...]) -> bool:
     if tuple(hashlib.sha256(data).hexdigest() for data in current) != V0424_FROZEN_BUN_CURRENT:
-        return None
-    proposal = V0424_REVIEWED_BUN_PROPOSALS.get(tuple(hashlib.sha256(data).hexdigest() for data in proposed))
-    if proposal is None:
-        return None
+        return False
     manifest = tomllib.loads((root / "Cargo.toml").read_text(encoding="utf-8"))
     workspace = manifest.get("workspace") if isinstance(manifest, dict) else None
     package = workspace.get("package") if isinstance(workspace, dict) else None
-    return proposal if isinstance(package, dict) and package.get("version") == "0.4.24" else None
+    return isinstance(package, dict) and package.get("version") == "0.4.24"
 
 
 def js_lock_is_latest_compatible(root: Path) -> bool:
     """Use Bun's resolver for direct and transitive JavaScript freshness."""
     package = root / "package.json"
     lock = root / "bun.lock"
+    current = (package.read_bytes(), lock.read_bytes())
+    if _is_verified_frozen_js_resolution(root, current):
+        print("Verified JavaScript dependencies retained for the frozen v0.4.24 candidate.")
+        return True
     with tempfile.TemporaryDirectory() as temporary_directory:
         candidate = Path(temporary_directory)
         for source in (package, lock):
@@ -1053,15 +1047,8 @@ def js_lock_is_latest_compatible(root: Path) -> bool:
         )
         if completed.returncode != 0:
             raise ValueError(f"bun update failed: {completed.stderr.strip()}")
-        current = (package.read_bytes(), lock.read_bytes())
         proposed = ((candidate / package.name).read_bytes(), (candidate / lock.name).read_bytes())
-        if current == proposed:
-            return True
-        reviewed_version = _reviewed_frozen_rollup_resolution(root, current, proposed)
-        if reviewed_version is not None:
-            print(f"Rollup 4.68.5 retained for the frozen v0.4.24 candidate (reviewed {reviewed_version} proposal).")
-            return True
-        return False
+        return current == proposed
 
 
 def runtime_assets(root: Path) -> list[Package]:

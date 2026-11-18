@@ -1,5 +1,13 @@
 # 品質ゲート改善の作業台帳
 
+## 公開候補の現在地点（2026-11-19）
+
+- [x] `4c2403ba` の完全ローカル品質ゲートと通常pushが成功し、Draft PR #120のHEADと一致した。製品87,821/87,821行、性能基盤baseline 1,163/1,163行・candidate 1,218/1,218行で100%。原ログは `tmp/quality/resumed-owner-r3509/release-4c2403ba-clean-launch-normal-push-qtqemgtc/push/`。成功したソース以後の変更は次の候補として扱う。
+- [x] 同HEADでHTML性能の全84条件を正式に再検証した。同じ実行ファイルに束縛されたv5原結果を再利用し、元結果を書き換えていない。原ログは `tmp/quality/resumed-owner-r3509/release-4c2403ba-evidence-and-package-85z3nvge/reuse/`。
+- [/] 配布前検査は、フリーズ後に公開されたsource-map-js 1.2.3の提案を理由に停止した。検証済みのpackage.json・bun.lockの完全SHAと版0.4.24を照合し、同じ候補がregistryの変化だけで失効し続ける処理を修正する。現依存と製品実装は固定したまま進める。直近の配布アーカイブ検査成功は `09d1ddd6` の3 crate・6,284件成功、別14件skip。
+- [/] 公開保護の限定修正を実装した。元52件を保持した過去109コミットのIssue対応、候補限定の#121継続、実Codex返信の有限対応を検証中。bootstrap 152テスト、cycle 22テストは成功し、実PRの未解決P0/P1は0件。旧要求の完了を現HEADのレビューへ転用しない。証跡は `tmp/quality/resumed-owner-r3509/release-4c2403ba-global-admission-repair-ppb0iwnz/`。ユーザーは3点の確認待ちが不要と指示した。
+- [ ] 固定依存の検査修正を関連テストと自己レビューで確定し、次の候補を凍結する。現候補の完全ゲート・配布前検査、Draftの最新HEADレビューと各指摘対応、Ready、必須3 OS CI、保護merge、3 crateとGitHub Release公開、#108/#109整理、後始末を完了する。現在は未公開。
+
 ## HTMLの繰り返し描画と保持メモリ
 
 - [/] 半透明装飾の1280×900で、同じビルドを25回測定すると常駐メモリが49.97 MiBから58.84 MiBへ増加し、現行の8 MiB上限を超えた。依存関係の更新との因果関係は未確定。

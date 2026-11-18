@@ -141,11 +141,11 @@ VALIDATION_COHORT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, int]]] = 
 FROZEN_RELEASE_PREFLIGHT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, int]]] = {
     "scripts/release/verify_dependency_freshness.py": (
         ("0b16e432a30e4cba011e4b6ce51d87868909a76b3160c13e19ab172d0c07398f", 60302),
-        ("3a54486d56b24b9d2be27c5f36a8c0f158a184123967167ed271f02e47584b0b", 62039),
+        ("d180612a8b10468e3d27518d9e51990e73b957d85e226295cb840947936b5fa5", 61265),
     ),
     "scripts/release/verify_dependency_freshness_test.py": (
         ("1f722913d873e65b6116a0bac56731c0efdedcdcea17cd582d40f05ecdf252e5", 76536),
-        ("61ed9bc6f1451dec2f0b2f02fe6865b70dc364d37894f56b06297b231f97326b", 77870),
+        ("c758f6b3ea1b81d11d71f3e1861343d120a560e82974ee561f2a405bc6a10c9c", 78232),
     ),
     "scripts/release/html_performance_source_reuse_test.py": (
         ("056f2a9087dc2d353d984d6d5b03fb11e5d9afcc8a0702902f6bd32feaee7420", 72516),
@@ -759,7 +759,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "d94560a435c7b5dd04870576c6fc48a8cff0ca7d1f84d3690c6b6b706a84b7b6"
+SELF_MODULE_CANONICAL_SHA256 = "56e7c64378ef26cbae040e53fbbdb117b4ba3cb77e5ad69b5a1d60a5868fec1d"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":
