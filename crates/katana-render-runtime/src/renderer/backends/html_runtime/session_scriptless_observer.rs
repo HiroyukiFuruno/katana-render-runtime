@@ -117,8 +117,8 @@ impl ObserverJavascript {
                     scope,
                     "krr-html-observed-ready-state",
                     "__krrDocumentReadyState = 'complete';",
-                )?;
-                Ok(v8::Global::new(scope, context))
+                )
+                .map(|()| v8::Global::new(scope, context))
             })?;
         Ok(Self { context, isolate })
     }

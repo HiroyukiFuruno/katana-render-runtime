@@ -80,6 +80,41 @@ fn scriptless_observation_keeps_the_real_session_in_sync() -> Result<(), String>
     Ok(())
 }
 
+#[test]
+fn scriptless_observation_reports_an_invalid_initial_url() -> Result<(), String> {
+    let mut session = start("<p>Plain</p>")?;
+    let observer = session
+        .scriptless_observer
+        .as_mut()
+        .ok_or("missing observer")?;
+    "invalid URL".clone_into(&mut observer.document_url);
+
+    let result = session.observe_feature_state("document.readyState");
+    assert!(matches!(result, Err(message) if message.contains("invalid document URL")));
+    assert!(session.isolate.is_none());
+    Ok(())
+}
+
+#[test]
+fn scriptless_observation_reports_a_focus_synchronization_failure() -> Result<(), String> {
+    let mut session = start("<p>Plain</p>")?;
+    assert_eq!(
+        session.observe_feature_state("document.readyState")?,
+        serde_json::json!("complete")
+    );
+    let replace =
+        "(globalThis.__krrSetFocusedNodeId = () => { throw new Error('focus sync'); }, true)";
+    assert_eq!(
+        session.observe_feature_state(replace)?,
+        serde_json::json!(true)
+    );
+
+    let result = session.observe_feature_state("document.readyState");
+    assert!(matches!(result, Err(message) if message.contains("focus sync")));
+    assert!(session.isolate.is_none());
+    Ok(())
+}
+
 fn start(html: &str) -> Result<StaticHtmlRuntimeSession, String> {
     let source =
         HtmlBrowserSource::new(html, "https://example.test/document").map_err(test_error)?;
