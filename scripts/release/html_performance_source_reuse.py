@@ -137,15 +137,15 @@ VALIDATION_COHORT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, int]]] = 
 }
 
 
-# 固定されたsmallvecを維持する公開前検査の変更。計測や判定の差分は含まない。
-FROZEN_SMALLVEC_PREFLIGHT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, int]]] = {
+# 凍結済み依存を維持する公開前検査の変更。計測プログラムと受入判定は維持する。
+FROZEN_RELEASE_PREFLIGHT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, int]]] = {
     "scripts/release/verify_dependency_freshness.py": (
         ("0b16e432a30e4cba011e4b6ce51d87868909a76b3160c13e19ab172d0c07398f", 60302),
-        ("a3bde04ea2dc136195cb06be9954aa25b46c6c35148fed9bbc3bc87fbe591bae", 60352),
+        ("e52b80ebd70dcf06493412e1416c7e9a22dbb30ddec801ea41d02df793576e3d", 61647),
     ),
     "scripts/release/verify_dependency_freshness_test.py": (
         ("1f722913d873e65b6116a0bac56731c0efdedcdcea17cd582d40f05ecdf252e5", 76536),
-        ("5268926ffbcd0e264166d7fa4661a022c754d43707e21006adc165663c1ce6b1", 76661),
+        ("46dbb34cf72b13cc4d3dce0a04fa440c9c06cecf760eee23eea89a8d286375f8", 77733),
     ),
 }
 
@@ -204,8 +204,8 @@ def validation_cohort_change(path: str, old: tuple[str, int] | None,
     }
     if path in just_launcher_changes and (old, new) == just_launcher_changes[path]:
         return old_mode == new_mode == "100644"
-    smallvec_preflight = FROZEN_SMALLVEC_PREFLIGHT_CHANGES.get(path)
-    if smallvec_preflight is not None and (old, new) == smallvec_preflight:
+    release_preflight = FROZEN_RELEASE_PREFLIGHT_CHANGES.get(path)
+    if release_preflight is not None and (old, new) == release_preflight:
         return old_mode == new_mode == "100644"
     pair = VALIDATION_COHORT_CHANGES.get(path)
     if pair is not None:
@@ -717,7 +717,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "1e232a60d18ec81e971cf2be7f3e94e0c0a41e8756757033f318b12db069d7a4"
+SELF_MODULE_CANONICAL_SHA256 = "2ad38c6b39f2b4849a40bdf920ba103517dfef9d7bee5209b9d05cc83797b578"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":

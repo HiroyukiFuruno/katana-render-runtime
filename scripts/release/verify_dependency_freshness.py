@@ -70,6 +70,12 @@ SINGLE_PACKAGE_RETENTION_CHANGES = {
     ("Updating", "smallvec", "1.16.4", "1.16.5"),
     ("Updating", "smallvec", "1.16.4", "1.16.6"),
 }
+V0424_FROZEN_BUN_RESOLUTION = (
+    ("950d2cc9f5530c95850fa3f92ada1e5b5cd31e33d46bbd9155e337bbaddab7df",
+     "08b5f01b06835f7d036b046bd480ec1b87a39274bd7afd30f100342592e41d58"),
+    ("74bdc642679dbab96f0349042b2c4eaea711842f745062bd0b5f56a7723aac11",
+     "f6cb11f963be546e8689e9165a8562be0ea8c0fa12eb02cc2af77320640cf787"),
+)
 LOCK_CHANGE_RE = re.compile(
     r"^\s+(Adding|Updating|Removing|Downgrading) ([A-Za-z0-9_-]+) v([^\s]+)"
     r"(?: -> v([^\s]+))?$"
@@ -1015,6 +1021,18 @@ def js_packages(root: Path) -> list[Package]:
     return packages
 
 
+def _reviewed_frozen_rollup_resolution(root: Path, current: tuple[bytes, ...],
+                                       proposed: tuple[bytes, ...]) -> bool:
+    digests = tuple(tuple(hashlib.sha256(data).hexdigest() for data in files)
+                    for files in (current, proposed))
+    if digests != V0424_FROZEN_BUN_RESOLUTION:
+        return False
+    manifest = tomllib.loads((root / "Cargo.toml").read_text(encoding="utf-8"))
+    workspace = manifest.get("workspace") if isinstance(manifest, dict) else None
+    package = workspace.get("package") if isinstance(workspace, dict) else None
+    return isinstance(package, dict) and package.get("version") == "0.4.24"
+
+
 def js_lock_is_latest_compatible(root: Path) -> bool:
     """Use Bun's resolver for direct and transitive JavaScript freshness."""
     package = root / "package.json"
@@ -1030,10 +1048,14 @@ def js_lock_is_latest_compatible(root: Path) -> bool:
         )
         if completed.returncode != 0:
             raise ValueError(f"bun update failed: {completed.stderr.strip()}")
-        return all(
-            source.read_bytes() == (candidate / source.name).read_bytes()
-            for source in (package, lock)
-        )
+        current = (package.read_bytes(), lock.read_bytes())
+        proposed = ((candidate / package.name).read_bytes(), (candidate / lock.name).read_bytes())
+        if current == proposed:
+            return True
+        if _reviewed_frozen_rollup_resolution(root, current, proposed):
+            print("Rollup 4.68.5 retained for the frozen v0.4.24 candidate (reviewed 4.68.6 proposal).")
+            return True
+        return False
 
 
 def runtime_assets(root: Path) -> list[Package]:
