@@ -343,6 +343,7 @@ runtime-asset-script-other-run:
     bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/reference_score_test.ts ./scripts/drawio/official-runtime-determinism_test.ts ./scripts/drawio/official-source-fonts_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/svg_capture_test.ts ./scripts/drawio/full_compare_inventory_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/svg_capture_browser_test.ts
+    bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/reference-pairs_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/html/reference-capture_test.ts ./scripts/html/fidelity-suite_test.ts ./scripts/html/scroll-coverage_test.ts ./scripts/html/performance-history_test.ts ./scripts/html/toc-fidelity_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/html/interaction-suite_test.ts
     bun test --path-ignore-patterns 'tmp/**' ./scripts/html/visual-state-fidelity_test.ts ./scripts/html/dynamic-fidelity_test.ts ./scripts/html/interim-feature-results_test.ts

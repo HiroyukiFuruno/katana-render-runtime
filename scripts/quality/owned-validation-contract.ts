@@ -4271,9 +4271,9 @@ function normalizeNativeWidthTestCommand(lines: string[]): string[] | undefined 
 }
 
 function reviewedRuntimeAssetTestCommandsWithoutClassic(lines: string[]): string[] | undefined {
-  const withoutDrawioCapture = removeReviewedDrawioCaptureCommands(lines);
-  if (!withoutDrawioCapture) return undefined;
-  const normalized = normalizeNativeWidthTestCommand(withoutDrawioCapture);
+  const withoutDrawioTests = removeReviewedDrawioTestCommands(lines);
+  if (!withoutDrawioTests) return undefined;
+  const normalized = normalizeNativeWidthTestCommand(withoutDrawioTests);
   if (!normalized) return undefined;
   const withoutAudit = removeTerminalRecipeCommand(normalized, MATHJAX_UNUSED_AUDIT_COMMAND);
   if (!withoutAudit) return undefined;
@@ -4290,15 +4290,18 @@ function reviewedRuntimeAssetTestCommandsWithoutClassic(lines: string[]): string
     ? withoutReviewedTests
     : undefined;
 }
-function removeReviewedDrawioCaptureCommands(lines: string[]): string[] | undefined {
+function removeReviewedDrawioTestCommands(lines: string[]): string[] | undefined {
   const anchor =
     "bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/reference_score_test.ts ./scripts/drawio/official-runtime-determinism_test.ts ./scripts/drawio/official-source-fonts_test.ts";
   const commands = [
     "bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/svg_capture_test.ts ./scripts/drawio/full_compare_inventory_test.ts",
     "bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/svg_capture_browser_test.ts",
+    "bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/reference-pairs_test.ts",
   ];
   const matches = lines.flatMap((line, index) =>
-    /\.\/scripts\/drawio\/(?:svg_capture(?:_browser)?|full_compare_inventory)_test\.ts/.test(line)
+    /\.\/scripts\/drawio\/(?:svg_capture(?:_browser)?|full_compare_inventory|reference-pairs)_test\.ts/.test(
+      line,
+    )
       ? [index]
       : [],
   );

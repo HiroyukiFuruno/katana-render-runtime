@@ -1924,7 +1924,7 @@ test.each([
   );
 });
 
-test.each(["valid", "duplicate", "partial", "changed"] as const)(
+test.each(["valid", "duplicate", "partial", "changed", "missing-pairs"] as const)(
   "Draw.io capture registration accepts only the reviewed command block: %s",
   (variant) => {
     const root = parserFixture();
@@ -1936,6 +1936,10 @@ test.each(["valid", "duplicate", "partial", "changed"] as const)(
       duplicate: `${original}\n${command}`,
       partial: original.replace(command, ""),
       changed: original.replace(command, `${command} --only`),
+      "missing-pairs": original.replace(
+        "bun test --path-ignore-patterns 'tmp/**' ./scripts/drawio/reference-pairs_test.ts",
+        "",
+      ),
     };
     recipes(root, { "runtime-asset-script-other-run": changes[variant] });
     track(root);
