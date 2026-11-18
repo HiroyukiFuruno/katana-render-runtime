@@ -48,7 +48,7 @@
         },
         "full_y": {
           "maxSampleSeconds": 0.026736,
-          "medianSeconds": 5e-7,
+          "medianSeconds": 5e-07,
           "p95Seconds": 0.017747746149999983,
           "maxPeakRssBytes": 55558144
         },
@@ -141,7 +141,7 @@
         },
         "full_y": {
           "maxSampleSeconds": 0.02726425,
-          "medianSeconds": 5e-7,
+          "medianSeconds": 5e-07,
           "p95Seconds": 0.018368799699999994,
           "maxPeakRssBytes": 53968896
         },
@@ -222,7 +222,7 @@
         },
         "full_y": {
           "maxSampleSeconds": 0.046331833,
-          "medianSeconds": 5e-7,
+          "medianSeconds": 5e-07,
           "p95Seconds": 0.01805963785,
           "maxPeakRssBytes": 53919744
         },
@@ -330,6 +330,96 @@
         "version": "html-memory-v5",
         "policySha256": "16cae89fbb4ecdbcdd404eca6ce3e74285abbe9452ef46c8cb97deece6300cf3",
         "retentionEvidenceSha256": "e287cc32689300d8985795346fd58e0b3627cf10a006c9293ae2b14db3be913a",
+        "candidateConditions": 84,
+        "acceptedConditions": 84,
+        "warmupCycles": 5,
+        "measuredCycles": 25
+      }
+    },
+    {
+      "id": "html84-e4786001-release-e4786001-html-performance-ovcsmmoh",
+      "sourceCommit": "e4786001a20561a557f1ab5e67cf2ebc01c72672",
+      "verificationCompletedAtUtc": "2026-11-18T03:14:51.239660Z",
+      "bundleManifestSha256": "9539b006f78592bc56e6319c45acdd5244d6a5b094d0cb1f706d354f67db9139",
+      "referenceBuild": {
+        "schema": "krr-html-performance-reference-build-pins-v1",
+        "buildArtifactSchema": "krr-html-performance-build-artifact-v3",
+        "buildArtifactSha256": "4e72cf17b8a89f79f02c429237339c5ac07632965feb5e1c90a1e8c6ef554cbe",
+        "sourceSnapshotSha256": "191bd0327a393bd69ca33421ee25ba82cb362cd1d2ab25f189fe2e6be9905ee0",
+        "binarySha256": "357eb13d874ec33fc362edeec81dba94f661ed415184fcafe654547725c0038b",
+        "lockSha256": "e563ba46f7f13551270df06ff45772fe3f827c515ae0a48395eb3926b9bf7373",
+        "cargoExecutableSha256": "7672ead309d505577c018fff2cafb3433601f073e38cbe87359ac1f7b944bbf5",
+        "rustcExecutableSha256": "210df6794001b73ec3d453878707fa1e0bdcb63c427024a6e6574bbe5615a4da",
+        "contextBeforeSha256": "c67223fad01e930a2c9ddaa78a162f95335cd754489b299b84c3bb498570cfed"
+      },
+      "scope": {
+        "catalog": "catalog-stage90",
+        "candidateConditions": 84,
+        "pairedConditions": 84,
+        "candidateOnlyConditions": 0,
+        "trialsPerConditionPerPhase": 25,
+        "candidateSamplesPerPhase": 2100,
+        "candidateAndBaselineSamplesPerPhase": 4200,
+        "phaseRecords": 25200,
+        "checks": 1680,
+        "aggregation": "candidate samples pooled across all 84 conditions; no-op phases included"
+      },
+      "measuredAcceptance": {
+        "verifierRun": "release-e4786001-html-performance-ovcsmmoh",
+        "verifierExitCode": 0,
+        "performanceNonregression": true,
+        "htmlMinimumScore": 92.14438,
+        "htmlScoreThreshold": 90,
+        "outputFontIdentityEquivalence": "established"
+      },
+      "candidatePhaseStatistics": {
+        "cold_open": {
+          "maxSampleSeconds": 0.19936025,
+          "medianSeconds": 0.07191529149999999,
+          "p95Seconds": 0.111094842,
+          "maxPeakRssBytes": 43040768
+        },
+        "warm_open": {
+          "maxSampleSeconds": 0.032446375,
+          "medianSeconds": 0.013558562500000001,
+          "p95Seconds": 0.02530017115,
+          "maxPeakRssBytes": 47661056
+        },
+        "re_display": {
+          "maxSampleSeconds": 0.031169167,
+          "medianSeconds": 0.013152166,
+          "p95Seconds": 0.02511578955,
+          "maxPeakRssBytes": 48037888
+        },
+        "full_y": {
+          "maxSampleSeconds": 0.056552833,
+          "medianSeconds": 0.0,
+          "p95Seconds": 0.01796167739999999,
+          "maxPeakRssBytes": 48037888
+        },
+        "post_operation": {
+          "maxSampleSeconds": 0.105379083,
+          "medianSeconds": 0.0155693335,
+          "p95Seconds": 0.04827635865,
+          "maxPeakRssBytes": 48742400
+        },
+        "same_session_resize": {
+          "maxSampleSeconds": 0.029969125,
+          "medianSeconds": 0.0132941665,
+          "p95Seconds": 0.02507316395,
+          "maxPeakRssBytes": 48742400
+        }
+      },
+      "evidence": {
+        "summaryRun": "release-e4786001-html-performance-ovcsmmoh",
+        "summarySha256": "ffb56ebc8b5fbcdf473bdd8db1925359c79935584f1f24b376a3791960b56a65",
+        "verifierStdoutSha256": "3f226739db3e5a5b60de13f4fcd0cf845fe6718df8598a23e17469725d7a934f"
+      },
+      "reuseStatus": "historical-result; current-source eligibility must be verified separately",
+      "memoryPolicy": {
+        "version": "html-memory-v5",
+        "policySha256": "148cd00f908aec00e0ceefa29d5242cfcfc021ef3a63d98f0696b441664f88a0",
+        "retentionEvidenceSha256": "8852eb44a7205d0b0515935d4b06eda5c92d7b558bc622fb34e060b69530abd9",
         "candidateConditions": 84,
         "acceptedConditions": 84,
         "warmupCycles": 5,
