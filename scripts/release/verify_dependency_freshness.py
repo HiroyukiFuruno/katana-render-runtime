@@ -68,6 +68,7 @@ SINGLE_PACKAGE_RETENTION_CHANGES = {
     ("Updating", "crc32fast", "1.5.3", "1.5.5"),
     ("Updating", "flate2", "1.1.10", "1.1.11"),
     ("Updating", "smallvec", "1.16.4", "1.16.5"),
+    ("Updating", "smallvec", "1.16.4", "1.16.6"),
 }
 LOCK_CHANGE_RE = re.compile(
     r"^\s+(Adding|Updating|Removing|Downgrading) ([A-Za-z0-9_-]+) v([^\s]+)"

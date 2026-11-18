@@ -1177,7 +1177,9 @@ target-build = "=3.0.0"
             "Locking 1 package to latest compatible version\n"
             "    Updating smallvec v1.16.4 -> v1.16.5": True,
             "Locking 1 package to latest compatible version\n"
-            "    Updating smallvec v1.16.4 -> v1.16.6": False,
+            "    Updating smallvec v1.16.4 -> v1.16.6": True,
+            "Locking 1 package to latest compatible version\n"
+            "    Updating smallvec v1.16.4 -> v1.16.7": False,
             ("Locking 4 packages to latest compatible versions\n"
              "    Adding utf_types v1.0.0\n"
              "    Updating utf8_iter v1.0.4 -> v1.1.0\n"

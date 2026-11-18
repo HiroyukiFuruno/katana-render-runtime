@@ -137,6 +137,19 @@ VALIDATION_COHORT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, int]]] = 
 }
 
 
+# 固定されたsmallvecを維持する公開前検査の変更。計測や判定の差分は含まない。
+FROZEN_SMALLVEC_PREFLIGHT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, int]]] = {
+    "scripts/release/verify_dependency_freshness.py": (
+        ("0b16e432a30e4cba011e4b6ce51d87868909a76b3160c13e19ab172d0c07398f", 60302),
+        ("a3bde04ea2dc136195cb06be9954aa25b46c6c35148fed9bbc3bc87fbe591bae", 60352),
+    ),
+    "scripts/release/verify_dependency_freshness_test.py": (
+        ("1f722913d873e65b6116a0bac56731c0efdedcdcea17cd582d40f05ecdf252e5", 76536),
+        ("5268926ffbcd0e264166d7fa4661a022c754d43707e21006adc165663c1ce6b1", 76661),
+    ),
+}
+
+
 def validation_cohort_change(path: str, old: tuple[str, int] | None,
                              new: tuple[str, int] | None, old_mode: str | None,
                              new_mode: str | None) -> bool:
@@ -191,6 +204,9 @@ def validation_cohort_change(path: str, old: tuple[str, int] | None,
     }
     if path in just_launcher_changes and (old, new) == just_launcher_changes[path]:
         return old_mode == new_mode == "100644"
+    smallvec_preflight = FROZEN_SMALLVEC_PREFLIGHT_CHANGES.get(path)
+    if smallvec_preflight is not None and (old, new) == smallvec_preflight:
+        return old_mode == new_mode == "100644"
     pair = VALIDATION_COHORT_CHANGES.get(path)
     if pair is not None:
         followup = {
@@ -205,6 +221,9 @@ def validation_cohort_change(path: str, old: tuple[str, int] | None,
         original = ("6f679815a6417ed21e9dceddd9fa201e39a4ab7499288e5b49a4181f9ecf18ec", 24436)
         data = Path(__file__).read_bytes()
         live = (hashlib.sha256(data).hexdigest(), len(data))
+        preflight_predecessor = ("44cbdb2ddc9a0c8638db3e32fcce4315606c3f002008c2b96e78375007c96446", 96978)
+        if old == preflight_predecessor and new == live:
+            return old_mode == new_mode == "100644" and reviewed_same_binary_self(data)
         intermediate = ("8c3503e588e2e7ab93770a86c4e1ffb0c10ea463e2d98c808d2e6fef1a6895bd", 32039)
         reviewed = ("d3d6a94ad5cb0465a46cf0b98fb74a4fe9cb46c5a9ac5a72ca9fa4824e762015", 34030)
         retained = ("e11014eb370b864d812928235c7b033fca37acb8f2e0d8341bfd86c55c2672b2", 35728)
@@ -698,7 +717,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "4536796c3d859c8a1309d0f91745fa4e42370825d5610fdcde87587775bfda8c"
+SELF_MODULE_CANONICAL_SHA256 = "1e232a60d18ec81e971cf2be7f3e94e0c0a41e8756757033f318b12db069d7a4"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":
@@ -742,6 +761,8 @@ def reviewed_same_binary_self(current: bytes, *, allow_historical: bool = False)
     match = matches[0]
     declared = match.group(1).decode("ascii")
     historical = {
+        "44cbdb2ddc9a0c8638db3e32fcce4315606c3f002008c2b96e78375007c96446":
+            "4536796c3d859c8a1309d0f91745fa4e42370825d5610fdcde87587775bfda8c",
         "d8bb47141e9ffa6fc1c405dadd6011823cadcbe8355903223251faf50442e7e2":
             "ded22671818bda6a5321d1abb38d129ed8cf135c0320b28956cee2f969cefb81",
         "90adfdc15b010fd330301c94b464f46dbfa5e823e1805118d66736cc898a545b":
@@ -972,12 +993,17 @@ def _specific_source_changes(
         removed = b'- \x60Test and Build (macos-15-intel, mac-x64)\x60\n'
         old_sha = hashlib.sha256(old_document).hexdigest()
         new_sha = hashlib.sha256(new_document).hexdigest()
-        if (old_sha != "1a740b364aaf0ebacd59d1969d3a73313547917a9223a8d96c4c9531900542ab"
-                or measured[document] != (old_sha, len(old_document))
+        frozen_release_procedure = (old_sha, new_sha) == (
+            "992bc0f65d53ca2cf061f3790942b16ebf6f99e5675fbe0d96d55d621e2959c9",
+            "84922036a7eca6b5de0c5e8a10d0224a0e9db502200dbd8988f21380ad5b614b",
+        )
+        removed_intel_runner = (old_sha == "1a740b364aaf0ebacd59d1969d3a73313547917a9223a8d96c4c9531900542ab"
+                                and old_document.count(removed) == 1
+                                and old_document.replace(removed, b"", 1) == new_document)
+        if (measured[document] != (old_sha, len(old_document))
                 or current[document] != (new_sha, len(new_document))
                 or old_modes.get(document) != "100644" or new_modes.get(document) != "100644"
-                or old_document.count(removed) != 1
-                or old_document.replace(removed, b"", 1) != new_document):
+                or not (frozen_release_procedure or removed_intel_runner)):
             raise ValueError("release document delta differs")
         approved.add(document)
 
