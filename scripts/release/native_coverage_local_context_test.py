@@ -105,6 +105,20 @@ class LocalCoverageContextTests(unittest.TestCase):
         with self.assertRaisesRegex(local_context.LocalCoverageContextError, "unsupported_tool_override"):
             local_context._record_environment({"LLVM_COV": "/unreviewed/llvm-cov"})
 
+    def test_path_repetition_keeps_search_order_and_unknown_inputs_bound(self) -> None:
+        first = {"PATH": "/tools:/system::/local", "MOON_CACHE": "read-write"}
+        baseline = local_context._record_environment(first)
+        repeated = {**first, "PATH": "/tools:/system:/tools::/local:/system:"}
+        self.assertEqual(baseline, local_context._record_environment(repeated))
+        for change in ({"PATH": "/system:/tools::/local"},
+                       {"PATH": "/tools:/system:/local"},
+                       {"PATH": "/tools:/other::/local"},
+                       {"PATH": "/tools:/system::/local:/extra"},
+                       {"MOON_CACHE": "read"},
+                       {"UNKNOWN_RUNNER_INPUT": "value"}):
+            with self.subTest(key=next(iter(change))):
+                self.assertNotEqual(baseline, local_context._record_environment({**first, **change}))
+
     def test_cleanup_scope_is_volatile_but_other_inputs_remain_bound(self) -> None:
         first = {"WORKSPACE_RUST_CLEANUP_SCOPE": "run-one", "CARGO": "cargo",
                  "CARGO_TARGET_DIR": "/target", "CARGO_CAPACITY_PROTECTED_REFS": "refs-one"}

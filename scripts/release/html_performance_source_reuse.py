@@ -179,6 +179,14 @@ FROZEN_RELEASE_PREFLIGHT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, in
         ("55475198936a58997e908897f804882e70ba27a9e7091efb295215be2f6b7f64", 23859),
         ("be138e7fde10c9fdb36b9760519eda1d5ab9b2007a0da846a09c5832cc30f16a", 23879),
     ),
+    "scripts/release/native_coverage_local_context.py": (
+        ("2f8e966c2707bf3fdfecb60e46f5a0cccec671a2a47a96d9e8ca3d59db1d1e73", 36551),
+        ("6d56996d7f48092603897817268665d623257210b68dd2dc4cdaa6da0152ba2f", 36745),
+    ),
+    "scripts/release/native_coverage_local_context_test.py": (
+        ("fb475e0ac8ae8674513a94ef871c997fd0903c5e080d78b6700197b8b3780628", 36778),
+        ("abe52d859bd181a93e47f648d0f102b8923e8ec6ff5faa79601c54eee016e7c6", 37669),
+    ),
 }
 FROZEN_RELEASE_MEASURED_HEAD = "7588c71764c2a7002b67037dc244bb15e0ca316a"
 FROZEN_RELEASE_TARGET_GATE = "scripts/release/verify-release-target.py"
@@ -751,7 +759,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "cd79a74b5c52ff193c1d787d5888f1f76c53377582e3a9fea5985a306aef54cd"
+SELF_MODULE_CANONICAL_SHA256 = "d94560a435c7b5dd04870576c6fc48a8cff0ca7d1f84d3690c6b6b706a84b7b6"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":

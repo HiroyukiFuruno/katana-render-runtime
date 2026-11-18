@@ -137,7 +137,8 @@ def _record_environment(env: Mapping[str, str]) -> str:
     for name, value in env.items():
         if name in VOLATILE_ENV:
             continue
-        values[name] = value
+        # 同じ検索先の再登場はコマンドの選択順を変えず、Bun/Moonの入れ子で増える。
+        values[name] = os.pathsep.join(dict.fromkeys(value.split(os.pathsep))) if name == "PATH" else value
     return _sha256(_canonical(values))
 
 
