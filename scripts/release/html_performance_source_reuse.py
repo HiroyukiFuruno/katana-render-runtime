@@ -163,6 +163,14 @@ FROZEN_RELEASE_PREFLIGHT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, in
         ("ffc9f8dec7c6e6dbf2748d99aca8c894156b2aa31f99bee28d0809e4cf90fd4d", 87389),
         ("498e2f4125016df8aa7d5b06e2ee3837faead076414e7af4dcc11414fcc8a543", 87906),
     ),
+    "scripts/release/test_packaged_runtime.py": (
+        ("8cd9fb8aebca4a26926f9dcae9ea1793270afa8096f3c60aad3b99d39258dcc1", 11685),
+        ("159c5704233917083ffb438697486b2d9fe92d4e2fec24840d49cef652909272", 14303),
+    ),
+    "scripts/release/test_packaged_runtime_test.py": (
+        ("ff543ae2ad1442606b3cfa4280c2438c8fb98fa8541c4620929753e3826235be", 7010),
+        ("b40e3405d5c9f9e23e1c8ffcc57a4ef3b26d92b15258baca32222886faca0523", 8781),
+    ),
 }
 FROZEN_RELEASE_MEASURED_HEAD = "7588c71764c2a7002b67037dc244bb15e0ca316a"
 FROZEN_RELEASE_TARGET_GATE = "scripts/release/verify-release-target.py"
@@ -735,7 +743,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "7a3b44cef5123199e967ff994397b90b41fbe116a4ab2b8c9a7ede0e74cd7193"
+SELF_MODULE_CANONICAL_SHA256 = "a3b55d289b4c9702399afd3ca328523d0ef389fc0546fab4da82b2b1075ab15b"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":
@@ -996,6 +1004,9 @@ def _specific_source_changes(
         approved.update(("package.json", "bun.lock"))
 
     release_tooling_pairs = {
+        "crates/katana-render-runtime/Cargo.toml": (
+            "8c490a3bf10827f4dc8a40aae6689584eb87634cc4fb9a6b988af6357a36c8ff",
+            "0bf615e0716a0c5f33281b0550b29f24e5e3dbb0d6fb15ac0f174ff91b2b8b79"),
         "biome.json": (
             "05c126306e2458e596d5f79357439885f9800d58123a047ed6b706cd8a7c75e3",
             "cf4f78df9d8b5516556d008bd7abaafc57d9c5c66b50bf884023652a3c3aa420"),
@@ -1015,6 +1026,11 @@ def _specific_source_changes(
             "15cb452be9d9b0788eb887b22bd8cf7065800166e6c2f32efac5fe48986fb482",
             "a62ffe885b5e436571de07badb32cd6cee71d034bd2d5b37809d3f2e10a0c6f7"),
     }
+    if measured_head == FROZEN_RELEASE_MEASURED_HEAD:
+        release_tooling_pairs[".github/workflows/release.yml"] = (
+            "c62e9805030bf7f4f94e6af83ee2a62da042e738106208fed6f59ec0ecb0f504",
+            "e355b5be38f4dd91a3ab417cabf055165a6d5891ae7cfe3ad4f616630fca4c01",
+        )
     for path, (expected_old, expected_new) in release_tooling_pairs.items():
         if path in approved:
             continue
