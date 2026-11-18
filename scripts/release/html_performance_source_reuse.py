@@ -141,11 +141,11 @@ VALIDATION_COHORT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, int]]] = 
 FROZEN_RELEASE_PREFLIGHT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, int]]] = {
     "scripts/release/verify_dependency_freshness.py": (
         ("0b16e432a30e4cba011e4b6ce51d87868909a76b3160c13e19ab172d0c07398f", 60302),
-        ("d180612a8b10468e3d27518d9e51990e73b957d85e226295cb840947936b5fa5", 61265),
+        ("aa43d6b0413f7afe92e2ebe036299c41adad1aeaa3732ba6a233a791ad689da2", 62579),
     ),
     "scripts/release/verify_dependency_freshness_test.py": (
         ("1f722913d873e65b6116a0bac56731c0efdedcdcea17cd582d40f05ecdf252e5", 76536),
-        ("c758f6b3ea1b81d11d71f3e1861343d120a560e82974ee561f2a405bc6a10c9c", 78232),
+        ("03a4e4df3a5e55b99281868baf9a81001a23ca634d945632e9a6c80df7c8f36c", 79599),
     ),
     "scripts/release/html_performance_source_reuse_test.py": (
         ("056f2a9087dc2d353d984d6d5b03fb11e5d9afcc8a0702902f6bd32feaee7420", 72516),
@@ -175,9 +175,13 @@ FROZEN_RELEASE_PREFLIGHT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, in
         ("e5c9c9380b0529688bd3c155afe28bd414b70901ed16bb0473d801da7fdae1ce", 57715),
         ("0568acddc4fb26d0360e218ac22c4d312403fe23a596160d88879f2e9c278c66", 58875),
     ),
+    "scripts/release/verify_completed_release_context.py": (
+        ("2731ceb1db850a7af3bb6370253df76bac71722c7fec6ba6df5a5faec47092c1", 15766),
+        ("1d2ee085e688ad71fad7e69dd9e55b442f10336fb4c5945834a913568011ad8b", 15869),
+    ),
     "scripts/release/verify_completed_release_context_test.py": (
         ("55475198936a58997e908897f804882e70ba27a9e7091efb295215be2f6b7f64", 23859),
-        ("be138e7fde10c9fdb36b9760519eda1d5ab9b2007a0da846a09c5832cc30f16a", 23879),
+        ("18f74bb49035f76ee7068a8557f2c867a63a4a57b3d62d2e9c8d419eaaa1d0e0", 24198),
     ),
     "scripts/release/native_coverage_local_context.py": (
         ("2f8e966c2707bf3fdfecb60e46f5a0cccec671a2a47a96d9e8ca3d59db1d1e73", 36551),
@@ -759,7 +763,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "cd7201a8e73d2789a18020ebe4013f654dd51294824ecbbd164f3deb57690885"
+SELF_MODULE_CANONICAL_SHA256 = "1d2cc7013933c3139cf38e385ccc62a27d8efbd75b68f42b095b96ff92363928"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":
@@ -817,6 +821,8 @@ def reviewed_same_binary_self(current: bytes, *, allow_historical: bool = False)
             "84c6f083827bb1aeb1afc52fe41ed38444bf52bcce20da1394f63e3407fdd22a",
         "eb66cc3cc3f1cd46d56b8b0a73165e63c60b144c393d16cb37dbc62f84fab5f0":
             "56e7c64378ef26cbae040e53fbbdb117b4ba3cb77e5ad69b5a1d60a5868fec1d",
+        "428eb6ad0046064da0f3ecaf8ac117cc0259149f01b553ffb0c07e70d74ae455":
+            "cd7201a8e73d2789a18020ebe4013f654dd51294824ecbbd164f3deb57690885",
     }
     if declared != SELF_MODULE_CANONICAL_SHA256 and (
         not allow_historical or historical.get(hashlib.sha256(current).hexdigest()) != declared

@@ -1163,6 +1163,33 @@ target-build = "=3.0.0"
         self.assertIn("Rust Cargo.lock is not at the latest compatible resolution", stderr)
         self.assertIn("just depends-update-all", stderr)
 
+    def test_frozen_rust_requires_exact_manifests_and_lockfiles(self) -> None:
+        contents = {
+            name: name.as_posix().encode() for name in freshness.V0424_FROZEN_RUST_CURRENT
+        }
+        expected = {name: hashlib.sha256(data).hexdigest() for name, data in contents.items()}
+        for name, data in contents.items():
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+
+        with (patch.object(freshness, "V0424_FROZEN_RUST_CURRENT", expected),
+              patch.object(freshness.subprocess, "run") as resolver):
+            resolver.return_value.returncode = 0
+            resolver.return_value.stdout = ""
+            resolver.return_value.stderr = "Locking 1 package to latest compatible version"
+            self.assertTrue(freshness.rust_lock_is_latest_compatible(self.root))
+            resolver.assert_not_called()
+
+            for name, data in contents.items():
+                with self.subTest(path=name):
+                    path = self.root / name
+                    path.write_bytes(b"changed")
+                    self.assertFalse(freshness.rust_lock_is_latest_compatible(self.root))
+                    self.assertIn("--dry-run", resolver.call_args.args[0])
+                    path.write_bytes(data)
+                    resolver.reset_mock()
+
     def test_frozen_js_requires_exact_inputs_and_release_version(self) -> None:
         current = (b"current manifest", b"current lock")
         current_hashes = tuple(hashlib.sha256(data).hexdigest() for data in current)

@@ -5,6 +5,7 @@ import importlib.util
 from pathlib import Path
 import subprocess
 import tempfile
+import tomllib
 import unittest
 
 JsonObject = dict[str, object]
@@ -445,9 +446,12 @@ class CompletedReleaseContextTest(unittest.TestCase):
     def test_local_committed_tree_and_version_are_bound(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "Cargo.toml").write_text(
-                '[package]\nname="unit"\nversion="0.4.24"\n'
-            )
+            manifest = (Path(__file__).parents[2] / "Cargo.toml").read_bytes()
+            version = tomllib.loads(manifest.decode())["workspace"]["package"]["version"]
+            self.assertIsInstance(version, str)
+            release = "v" + version
+            different_release = "v" + version + "0"
+            (root / "Cargo.toml").write_bytes(manifest)
 
             def git(*args: str) -> str:
                 return subprocess.check_output(
@@ -470,15 +474,16 @@ class CompletedReleaseContextTest(unittest.TestCase):
                 "eligible": "true",
                 "sha": git("rev-parse", "HEAD"),
                 "tree": git("rev-parse", "HEAD^{tree}"),
-                "version": "v0.4.24",
+                "version": release,
             }
-            gate.bind_tree(root, context, "0.4.24")
+            gate.bind_tree(root, context, version)
+            gate.bind_tree(root, context, release)
             with self.assertRaisesRegex(ValueError, "requested"):
-                gate.bind_tree(root, context, "v0.4.25")
+                gate.bind_tree(root, context, different_release)
             with self.assertRaisesRegex(ValueError, "local tree"):
                 gate.bind_tree(root, {**context, "tree": TREE})
             with self.assertRaisesRegex(ValueError, "Cargo version"):
-                gate.bind_tree(root, {**context, "version": "v0.4.25"})
+                gate.bind_tree(root, {**context, "version": different_release})
 
 
 class ReleaseCompletionRoutingTest(unittest.TestCase):

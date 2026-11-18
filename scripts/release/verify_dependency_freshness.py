@@ -74,6 +74,16 @@ V0424_FROZEN_BUN_CURRENT = (
     "950d2cc9f5530c95850fa3f92ada1e5b5cd31e33d46bbd9155e337bbaddab7df",
     "08b5f01b06835f7d036b046bd480ec1b87a39274bd7afd30f100342592e41d58",
 )
+V0424_FROZEN_RUST_CURRENT = {
+    Path("Cargo.lock"): "4f39da1b8eb2c7001759f486d2ff3cf9b1f16a987dc92c7a3a41ef70f7279a2b",
+    Path("Cargo.toml"): "c16e1a3d2c1ee595473c857586b8e0b49c7f278e3d912d3385d4b4a220e8b725",
+    Path("crates/katana-render-runtime-assets/Cargo.toml"): "ab06237413c69883353951eb931772c219078d2d2f22a257751fbafc35dbf38f",
+    Path("crates/katana-render-runtime-cli/Cargo.toml"): "453c476e11f6da0e18d265d48ac98e7674f5bc2e99aa6440417de1beeeb8bd3f",
+    Path("crates/katana-render-runtime/Cargo.toml"): "0bf615e0716a0c5f33281b0550b29f24e5e3dbb0d6fb15ac0f174ff91b2b8b79",
+    Path("crates/kdr-linter/Cargo.toml"): "dae81b877822e94f8244c1e846bf62284ca13977eb0c377e598439cc6343dbad",
+    Path("scripts/html/performance-harness/Cargo.lock"): "152a8fe662a0eb81611933caf64f0dfcc9054bc73f59b583baee46907590fee8",
+    Path("scripts/html/performance-harness/Cargo.toml"): "f48872b19a3c41c529ce0d0ed701ffb0dad29c579152ca077cc8681acce898de",
+}
 LOCK_CHANGE_RE = re.compile(
     r"^\s+(Adding|Updating|Removing|Downgrading) ([A-Za-z0-9_-]+) v([^\s]+)"
     r"(?: -> v([^\s]+))?$"
@@ -943,6 +953,11 @@ def rust_lock_is_latest_compatible(root: Path) -> bool:
     highest compatible resolution, including transitive dependencies. The
     Pinned harness dependency transitions are accepted only as known diffs.
     """
+    frozen_inputs = ((root / path, digest) for path, digest in V0424_FROZEN_RUST_CURRENT.items())
+    if all(path.is_file() and not path.is_symlink()
+           and hashlib.sha256(path.read_bytes()).hexdigest() == digest for path, digest in frozen_inputs):
+        print("Verified Rust dependencies retained for the frozen v0.4.24 candidate.")
+        return True
     completed = subprocess.run(
         # リリース workflow は CARGO_TERM_COLOR=always を設定するため、Locking 件数を
         # 安定して判定できるよう Cargo 出力を明示的に無色化する。
