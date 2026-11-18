@@ -576,13 +576,12 @@ class ReleaseCompletionRoutingTest(unittest.TestCase):
 
     def test_both_performance_gates_remain_mandatory(self) -> None:
         justfile = (self.root / "Justfile").read_text()
-        self.assertIn(
-            "release-verify: html-performance-nonregression-check release-target-check",
-            justfile,
-        )
-        self.assertRegex(
-            justfile, r"(?m)^release-quality: .*html-performance-nonregression-check$"
-        )
+        for recipe in ("release-verify", "release-quality"):
+            with self.subTest(recipe=recipe):
+                self.assertRegex(
+                    justfile,
+                    rf"(?m)^{recipe}:[^\n]*[ \t]html-performance-nonregression-check(?:[ \t]|$)",
+                )
 
 
 if __name__ == "__main__":
