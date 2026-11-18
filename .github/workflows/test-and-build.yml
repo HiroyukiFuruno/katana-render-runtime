@@ -856,6 +856,11 @@ jobs:
         with:
           tool: cargo-llvm-cov@0.9.1
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: cargo-nextest@0.9.148
+
       - name: Acquire completed producer from this CI generation
         env:
           GH_TOKEN: ${{ github.token }}

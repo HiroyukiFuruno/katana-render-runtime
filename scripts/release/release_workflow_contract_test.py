@@ -858,6 +858,29 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("- name: Release quality gate", self.preflight)
         self.assertNotIn("- name: Release-specific verification", self.preflight)
 
+    def test_preflight_jobs_install_nextest_before_packaged_runtime_tests(self) -> None:
+        integrated_preflight = self.ci.split("\n  preflight:\n", 1)[1]
+        for workflow, verification, installation_condition in (
+            (integrated_preflight, "Release preflight checks", []),
+            (
+                self.preflight,
+                "Release check",
+                ["        if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')"],
+            ),
+            (self.release, "Verify release package", []),
+        ):
+            with self.subTest(verification=verification):
+                installation = self.workflow_step(workflow, "Install cargo-nextest")
+                self.assertIn("tool: cargo-nextest@0.9.148", installation)
+                self.assertEqual(
+                    [line for line in installation.splitlines() if line.startswith("        if:")],
+                    installation_condition,
+                )
+                self.assertLess(
+                    workflow.index(installation),
+                    workflow.index(f"      - name: {verification}\n"),
+                )
+
     def test_release_preflight_uses_read_only_permissions_for_api_lookups(self) -> None:
         permissions = self.preflight[
             self.preflight.index("permissions:") : self.preflight.index("\nenv:")

@@ -173,7 +173,7 @@ FROZEN_RELEASE_PREFLIGHT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, in
     ),
     "scripts/release/release_workflow_contract_test.py": (
         ("e5c9c9380b0529688bd3c155afe28bd414b70901ed16bb0473d801da7fdae1ce", 57715),
-        ("7931034d96f813527748ed8ce52b558dd950ab0a33d7d260d876ca7d288241e2", 57715),
+        ("0568acddc4fb26d0360e218ac22c4d312403fe23a596160d88879f2e9c278c66", 58875),
     ),
     "scripts/release/verify_completed_release_context_test.py": (
         ("55475198936a58997e908897f804882e70ba27a9e7091efb295215be2f6b7f64", 23859),
@@ -759,7 +759,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "56e7c64378ef26cbae040e53fbbdb117b4ba3cb77e5ad69b5a1d60a5868fec1d"
+SELF_MODULE_CANONICAL_SHA256 = "cd7201a8e73d2789a18020ebe4013f654dd51294824ecbbd164f3deb57690885"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":
@@ -815,6 +815,8 @@ def reviewed_same_binary_self(current: bytes, *, allow_historical: bool = False)
             "91b449135672db61560b1b749a9aad8a98511f5d8afcdcf40a59043d620e3fc7",
         "c2fb007d478dc3acc1996b9d91b189363a39c8d6f2e4be969f26046935dfec70":
             "84c6f083827bb1aeb1afc52fe41ed38444bf52bcce20da1394f63e3407fdd22a",
+        "eb66cc3cc3f1cd46d56b8b0a73165e63c60b144c393d16cb37dbc62f84fab5f0":
+            "56e7c64378ef26cbae040e53fbbdb117b4ba3cb77e5ad69b5a1d60a5868fec1d",
     }
     if declared != SELF_MODULE_CANONICAL_SHA256 and (
         not allow_historical or historical.get(hashlib.sha256(current).hexdigest()) != declared
@@ -1043,6 +1045,14 @@ def _specific_source_changes(
             "a62ffe885b5e436571de07badb32cd6cee71d034bd2d5b37809d3f2e10a0c6f7"),
     }
     if measured_head == FROZEN_RELEASE_MEASURED_HEAD:
+        release_tooling_pairs[".github/workflows/test-and-build.yml"] = (
+            "951967556058f38556ff04ceaaed3fdf1b57dad015ad893ee2b3ab42b7c5a0ac",
+            "c5b17c412e7685f1f6389de7b3429af7f760ed9bfb4284f71571b54d4902a65b",
+        )
+        release_tooling_pairs["scripts/release/local_macos_evidence.py"] = (
+            "71907038074a7059c12cfb01c8be71d538e92771458459dcd43f253fcabbc169",
+            "116ae9059ac05b4b20965288dd1f1ca12c8f0f3da0dd7a45b28964e72b8cb2f1",
+        )
         release_tooling_pairs[".github/workflows/release.yml"] = (
             "c62e9805030bf7f4f94e6af83ee2a62da042e738106208fed6f59ec0ecb0f504",
             "e355b5be38f4dd91a3ab417cabf055165a6d5891ae7cfe3ad4f616630fca4c01",
