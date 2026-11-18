@@ -48,7 +48,7 @@
         },
         "full_y": {
           "maxSampleSeconds": 0.026736,
-          "medianSeconds": 5e-07,
+          "medianSeconds": 5e-7,
           "p95Seconds": 0.017747746149999983,
           "maxPeakRssBytes": 55558144
         },
@@ -141,7 +141,7 @@
         },
         "full_y": {
           "maxSampleSeconds": 0.02726425,
-          "medianSeconds": 5e-07,
+          "medianSeconds": 5e-7,
           "p95Seconds": 0.018368799699999994,
           "maxPeakRssBytes": 53968896
         },
@@ -222,7 +222,7 @@
         },
         "full_y": {
           "maxSampleSeconds": 0.046331833,
-          "medianSeconds": 5e-07,
+          "medianSeconds": 5e-7,
           "p95Seconds": 0.01805963785,
           "maxPeakRssBytes": 53919744
         },
