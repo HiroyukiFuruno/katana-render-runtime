@@ -49,6 +49,17 @@ class ZeroScrollPolicyTransitionTest(unittest.TestCase):
 
 
 class SourceReuseTest(unittest.TestCase):
+    def test_release_manifest_pin_normalization_requires_unique_exact_declarations(self) -> None:
+        manifest = b'REQUIRED_RELEASE_MANIFEST_SHA256 = "' + b"a" * 64 + b'"\n'
+        snapshot = b'RELEASE_VALIDATION_SNAPSHOT = "' + b"b" * 40 + b'"\n'
+        old = manifest + snapshot + b"verify_release()\n"
+        updated = old.replace(b"a" * 64, b"c" * 64).replace(b"b" * 40, b"d" * 40)
+        self.assertEqual(reuse._release_manifest_pin_source(old), reuse._release_manifest_pin_source(updated))
+        self.assertNotEqual(reuse._release_manifest_pin_source(old),
+                            reuse._release_manifest_pin_source(updated.replace(b"verify_release", b"skip_release")))
+        self.assertIsNone(reuse._release_manifest_pin_source(updated + manifest))
+        self.assertIsNone(reuse._release_manifest_pin_source(updated.replace(b"d" * 40, b"d" * 39)))
+
     def test_parse5_cohort_requires_exact_pair_and_same_binary_scope(self) -> None:
         repository = Path(__file__).resolve().parents[2]
         measured_head = reuse.SAME_BINARY_REVIEWED_BASE

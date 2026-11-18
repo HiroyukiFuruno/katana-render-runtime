@@ -147,7 +147,13 @@ FROZEN_RELEASE_PREFLIGHT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, in
         ("1f722913d873e65b6116a0bac56731c0efdedcdcea17cd582d40f05ecdf252e5", 76536),
         ("46dbb34cf72b13cc4d3dce0a04fa440c9c06cecf760eee23eea89a8d286375f8", 77733),
     ),
+    "scripts/release/html_performance_source_reuse_test.py": (
+        ("056f2a9087dc2d353d984d6d5b03fb11e5d9afcc8a0702902f6bd32feaee7420", 72516),
+        ("eecbf9ed1571279b9ed7b3d1cb256a5df3f9a53b7c1ee362b2794ebc6ed360c3", 73390),
+    ),
 }
+FROZEN_RELEASE_MEASURED_HEAD = "7588c71764c2a7002b67037dc244bb15e0ca316a"
+FROZEN_RELEASE_TARGET_GATE = "scripts/release/verify-release-target.py"
 
 
 def validation_cohort_change(path: str, old: tuple[str, int] | None,
@@ -717,7 +723,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "2ad38c6b39f2b4849a40bdf920ba103517dfef9d7bee5209b9d05cc83797b578"
+SELF_MODULE_CANONICAL_SHA256 = "477b3e41fb1a39d8606f6fde0e33061b264c292252bb2f79419acc2027aa1778"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":
@@ -930,6 +936,35 @@ def _reviewed_parse5_cohort(
         if expected != new:
             return False
     return True
+
+
+def _release_manifest_pin_source(data: bytes) -> bytes | None:
+    for field, width in ((b"REQUIRED_RELEASE_MANIFEST_SHA256", 64), (b"RELEASE_VALIDATION_SNAPSHOT", 40)):
+        pattern = rb'(?m)^' + field + rb' = "[0-9a-f]{' + str(width).encode("ascii") + rb'}"$'
+        data, count = re.subn(pattern, field + b' = "' + b"0" * width + b'"', data)
+        if count != 1:
+            return None
+    return data
+
+
+def _reviewed_frozen_release_programs(
+    root: Path, measured_head: str, current: Records, measured: Records,
+    old_modes: Mapping[str, str], new_modes: Mapping[str, str], git_bytes: GitBytes,
+) -> set[str]:
+    if measured_head != FROZEN_RELEASE_MEASURED_HEAD:
+        return set()
+    programs = {*FROZEN_RELEASE_PREFLIGHT_CHANGES, ZERO_SCROLL_SELF}
+    if not all(validation_cohort_change(path, measured.get(path), current.get(path),
+                                        old_modes.get(path), new_modes.get(path)) for path in programs):
+        return set()
+    gate = FROZEN_RELEASE_TARGET_GATE
+    if old_modes.get(gate) != "100755" or new_modes.get(gate) != "100755":
+        return set()
+    old_gate = _release_manifest_pin_source(git_bytes(("show", measured_head + ":" + gate)))
+    new_gate = _release_manifest_pin_source((root / gate).read_bytes())
+    if old_gate is None or old_gate != new_gate:
+        return set()
+    return programs | {gate}
 
 
 def _specific_source_changes(
@@ -1161,6 +1196,9 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
     reassessment_changes = (_zero_scroll_policy_changes(
         measured_head, current, measured, old_modes, new_modes,
     ) if allow_zero_scroll_reassessment else set())
+    frozen_release_programs = (_reviewed_frozen_release_programs(
+        root, measured_head, current, measured, old_modes, new_modes, git_bytes,
+    ) if program_records is None else set())
     def binary_rust_path(path: str) -> bool:
         parts = path.split("/")
         product = len(parts) >= 4 and parts[0] == "crates" and parts[2] == "src"
@@ -1191,7 +1229,7 @@ def validate_reuse_source(root: Path, measured_head: str, current: Records,
     changed = tuple(sorted(path for path in set(current) | set(measured)
                            if current.get(path) != measured.get(path)
                            or old_modes.get(path) != new_modes.get(path)))
-    program_changes = reassessment_changes | {
+    program_changes = reassessment_changes | frozen_release_programs | {
         path for path in changed if program_records is not None and is_program(path)
     }
     test_changes = set(changed) - ALLOWED - program_changes - approved_changes - rust_changes - metadata_changes
