@@ -1,23 +1,54 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { expect, test } from "playwright/test";
+import { test as base, expect } from "playwright/test";
 import { DiagramTheme } from "../mermaid/diagram_theme";
 import { nativeFrameCaptureWrapper } from "../mermaid/native-frame-evidence";
 import type { PageHandle } from "../mermaid/official-renderer-types";
 import { assignStrictSvg, resizeSvgCapture } from "../mermaid/raster-capture-observation";
 import { rasterCaptureHtml } from "../mermaid/rasterize-svg-dir";
 import {
+  type CaptureBrowser,
   type CaptureOptions,
   createCaptureBrowser,
   runWithCaptureBrowser,
   sha256File,
 } from "./reference-capture";
 
-test("static capture isolates contexts, scores real PNGs, and survives a failed case", async () => {
-  // Chromeの起動、複数コンテキストの実描画、失敗後の再取得を一つのセッションで確認する。
-  test.slow();
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "krr-browser-reuse-"));
+type CaptureSite = {
+  directory: string;
+  htmlPath: string;
+  brokenHtmlPath: string;
+  missingHtmlPath: string;
+  krrPath: string;
+  options: (outputDir: string, htmlPathValue?: string) => CaptureOptions;
+};
+
+const test = base.extend<{ captureSite: CaptureSite & { captureBrowser: CaptureBrowser } }>({
+  captureSite: [
+    async ({ browserName }, use) => {
+      expect(browserName).toBe("chromium");
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), "krr-browser-reuse-"));
+      const captureBrowser = createCaptureBrowser();
+      try {
+        const site = prepareCaptureSite(directory);
+        const first = await captureBrowser.capture(site.options(path.join(directory, "first")));
+        fs.copyFileSync(first.capturePath, site.krrPath);
+        await use({ ...site, captureBrowser });
+      } finally {
+        try {
+          await captureBrowser.close();
+        } finally {
+          fs.rmSync(directory, { recursive: true, force: true });
+        }
+      }
+    },
+    // Chrome起動と初回の基準PNG取得に、操作・採点の検査とは別の時間枠を与える。
+    { timeout: 10_000 },
+  ],
+});
+
+function prepareCaptureSite(directory: string): CaptureSite {
   const htmlPath = path.join(directory, "fixture.html");
   const brokenHtmlPath = path.join(directory, "broken.html");
   const missingHtmlPath = path.join(directory, "missing.html");
@@ -42,37 +73,32 @@ test("static capture isolates contexts, scores real PNGs, and survives a failed 
     scrollY: 0,
     minScore: 99,
   });
-  const captureBrowser = createCaptureBrowser();
-  try {
-    const first = await captureBrowser.capture(options(path.join(directory, "first")));
-    fs.copyFileSync(first.capturePath, krrPath);
-    await expect(
-      runWithCaptureBrowser(
-        options(path.join(directory, "broken"), brokenHtmlPath),
-        captureBrowser,
-      ),
-    ).rejects.toThrow("asset loading failed");
-    const report = await runWithCaptureBrowser(
-      options(path.join(directory, "scored")),
+  return { directory, htmlPath, brokenHtmlPath, missingHtmlPath, krrPath, options };
+}
+
+test("static capture isolates contexts, scores real PNGs, and survives a failed case", async ({
+  captureSite: { directory, htmlPath, brokenHtmlPath, missingHtmlPath, options, captureBrowser },
+}) => {
+  await expect(
+    runWithCaptureBrowser(options(path.join(directory, "broken"), brokenHtmlPath), captureBrowser),
+  ).rejects.toThrow("asset loading failed");
+  const report = await runWithCaptureBrowser(
+    options(path.join(directory, "scored")),
+    captureBrowser,
+  );
+  const scores = JSON.parse(
+    fs.readFileSync(path.join(directory, "scored", "scores.json"), "utf8"),
+  ) as { score: number; browser: { actualScrollY: number }; input: { htmlSha256: string } };
+  expect(report.passed).toBe(true);
+  expect(scores.score).toBe(100);
+  expect(scores.browser.actualScrollY).toBe(0);
+  expect(scores.input.htmlSha256).toBe(sha256File(htmlPath));
+  await expect(
+    runWithCaptureBrowser(
+      options(path.join(directory, "missing"), missingHtmlPath),
       captureBrowser,
-    );
-    const scores = JSON.parse(
-      fs.readFileSync(path.join(directory, "scored", "scores.json"), "utf8"),
-    ) as { score: number; browser: { actualScrollY: number }; input: { htmlSha256: string } };
-    expect(report.passed).toBe(true);
-    expect(scores.score).toBe(100);
-    expect(scores.browser.actualScrollY).toBe(0);
-    expect(scores.input.htmlSha256).toBe(sha256File(htmlPath));
-    await expect(
-      runWithCaptureBrowser(
-        options(path.join(directory, "missing"), missingHtmlPath),
-        captureBrowser,
-      ),
-    ).rejects.toThrow("HTML input does not exist");
-  } finally {
-    await captureBrowser.close();
-    fs.rmSync(directory, { recursive: true, force: true });
-  }
+    ),
+  ).rejects.toThrow("HTML input does not exist");
 });
 
 const nativeFrameSizingCases = [

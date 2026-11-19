@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { chromium } from "playwright";
-import { expect, test } from "playwright/test";
+import { type Browser, chromium } from "playwright";
+import { test as base, expect } from "playwright/test";
 import { DiagramTheme } from "./diagram_theme";
 import { parsePaintProjectedReferenceEvidence } from "./managed-full-compare-results";
 import { fileSha256 } from "./mermaid-pair-manifest";
@@ -34,6 +34,29 @@ import { scorePaintProjectedReferenceTargets } from "./reference_svg_geometry_sc
 import { waitForStrictSvgExternalImages } from "./strict-svg-external-images";
 import { captureMarkerFixture } from "./svg-marker-browser-capture";
 import { rawHtmlSvgViewBoxSize } from "./svg-viewbox-size";
+
+type LowContrastC4 = {
+  root: string;
+  pair: ReferencePair;
+  projection: Awaited<ReturnType<typeof scorePaintProjectedReferenceTargets>>;
+};
+
+const test = base.extend<{ lowContrastC4: LowContrastC4 }>({
+  lowContrastC4: [
+    async ({ browser }, use) => {
+      const root = fs.realpathSync(
+        fs.mkdtempSync(path.join(os.tmpdir(), "krr-c4-low-contrast-control-")),
+      );
+      try {
+        await use(await prepareLowContrastC4(root, browser));
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+    // 実画像の取得とImageMagickの採点が終わるまで、一時ディレクトリを保持する。
+    { timeout: 10_000 },
+  ],
+});
 
 const naturalViewBoxSizingCases = [
   {
@@ -246,43 +269,30 @@ test("SVG tspan boundaries preserve within-span kerning with a bundled font", as
 });
 
 test.describe("low-contrast C4 color changes pass the paint-aligned actual PNG gate", () => {
-  test("keeps RGB below 99 while actual PNG shape passes", async ({ browser }) => {
-    // Chromeの実画像取得とImageMagickの採点を、同じ一時ディレクトリの所有期間に含める。
-    test.slow();
-    const fixtureRoot = fs.realpathSync(
-      fs.mkdtempSync(path.join(os.tmpdir(), "krr-c4-low-contrast-control-")),
-    );
-    try {
-      const page = await browser.newPage({
-        viewport: { width: 1520, height: 845 },
-        deviceScaleFactor: 1,
-      });
-      let fixturePair: ReferencePair;
-      try {
-        fixturePair = await captureLowContrastC4Control(fixtureRoot, page);
-      } finally {
-        await page.close();
-      }
-      const projectionDirectory = path.join(fixtureRoot, "projection");
-      fs.mkdirSync(projectionDirectory);
-      const projectionMagick = new MagickOps(
-        path.join(fixtureRoot, "projection-metrics"),
-        null,
-        "dark",
-      );
-      projectionMagick.prepare();
-      const projection = await scorePaintProjectedReferenceTargets(
-        [fixturePair],
-        projectionDirectory,
-        "dark",
-        projectionMagick,
-      );
-      expectLowContrastC4ProductScore(fixtureRoot, fixturePair, projection);
-    } finally {
-      fs.rmSync(fixtureRoot, { recursive: true, force: true });
-    }
+  test("keeps RGB below 99 while actual PNG shape passes", ({ lowContrastC4 }) => {
+    const { root, pair, projection } = lowContrastC4;
+    expectLowContrastC4ProductScore(root, pair, projection);
   });
 });
+
+async function prepareLowContrastC4(root: string, browser: Browser): Promise<LowContrastC4> {
+  const page = await browser.newPage({
+    viewport: { width: 1520, height: 845 },
+    deviceScaleFactor: 1,
+  });
+  let pair: ReferencePair;
+  try {
+    pair = await captureLowContrastC4Control(root, page);
+  } finally {
+    await page.close();
+  }
+  const output = path.join(root, "projection");
+  fs.mkdirSync(output);
+  const magick = new MagickOps(path.join(root, "projection-metrics"), null, "dark");
+  magick.prepare();
+  const projection = await scorePaintProjectedReferenceTargets([pair], output, "dark", magick);
+  return { root, pair, projection };
+}
 
 async function captureLowContrastC4Control(root: string, page: PageHandle): Promise<ReferencePair> {
   const sourcePath = path.resolve("tests/fixtures/mermaid/en/official-dark/08-04-c4-component.svg");
