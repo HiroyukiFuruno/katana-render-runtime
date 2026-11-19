@@ -372,27 +372,24 @@ mod tests {
     #[test]
     fn public_nested_anchor_text_preserves_br_and_nbsp() -> Result<(), String> {
         start_public_session(
-            "<main><a id='flat' href='/flat' style='display:inline-block;line-height:20px'>alpha beta<br>gamma&nbsp;&nbsp;delta</a><a id='nested' href='/nested' style='display:inline-block;line-height:20px'><span>alpha \n</span><span> beta</span><span><br></span><span>gamma&nbsp;&nbsp;delta</span></a><a id='nested-nbsp' href='/nested-nbsp' style='display:inline-block;line-height:20px'><span>gamma&nbsp;&nbsp;delta</span></a><a id='nested-space' href='/nested-space' style='display:inline-block;line-height:20px'><span>gamma  delta</span></a><a id='flat-nowrap' href='/flat-nowrap' style='display:inline-block;line-height:20px;white-space:nowrap'>alpha beta<br>gamma&nbsp;&nbsp;delta</a><a id='nested-nowrap' href='/nested-nowrap' style='display:inline-block;line-height:20px;white-space:nowrap'><span>alpha \n</span><span> beta</span><span><br></span><span>gamma&nbsp;&nbsp;delta</span></a></main>",
+            "<main>\
+            <div><a id='flat' href='/flat' style='display:inline-block;line-height:20px'>alpha beta<br>gamma&nbsp;&nbsp;delta</a></div>\
+            <div><a id='nested' href='/nested' style='display:inline-block;line-height:20px'><span>alpha \n</span><span> beta</span><span><br></span><span>gamma&nbsp;&nbsp;delta</span></a></div>\
+            <div><a id='nested-nbsp' href='/nested-nbsp' style='display:inline-block;line-height:20px'><span>gamma&nbsp;&nbsp;delta</span></a></div>\
+            <div><a id='nested-space' href='/nested-space' style='display:inline-block;line-height:20px'><span>gamma  delta</span></a></div>\
+            <div><a id='flat-nowrap' href='/flat-nowrap' style='display:inline-block;line-height:20px;white-space:nowrap'>alpha beta<br>gamma&nbsp;&nbsp;delta</a></div>\
+            <div><a id='nested-nowrap' href='/nested-nowrap' style='display:inline-block;line-height:20px;white-space:nowrap'><span>alpha \n</span><span> beta</span><span><br></span><span>gamma&nbsp;&nbsp;delta</span></a></div>\
+            </main>",
         )
         .and_then(|mut session| {
-            assert_eq!(anchor_height(&mut session, "nested")?, 40.0);
-            assert_eq!(
-                anchor_height(&mut session, "nested")?,
-                anchor_height(&mut session, "flat")?
-            );
-            assert_eq!(
-                anchor_width(&mut session, "nested")?,
-                anchor_width(&mut session, "flat")?
-            );
-            assert_eq!(
-                anchor_height(&mut session, "nested-nowrap")?,
-                anchor_height(&mut session, "flat-nowrap")?
-            );
-            assert_eq!(anchor_height(&mut session, "nested-nowrap")?, 40.0);
-            assert_eq!(
-                anchor_width(&mut session, "nested-nowrap")?,
-                anchor_width(&mut session, "flat-nowrap")?
-            );
+            for (nested, flat) in [("nested", "flat"), ("nested-nowrap", "flat-nowrap")] {
+                assert_eq!(anchor_height(&mut session, nested)?, 40.0);
+                assert_eq!(anchor_height(&mut session, flat)?, 40.0);
+                assert_eq!(
+                    anchor_width(&mut session, nested)?,
+                    anchor_width(&mut session, flat)?
+                );
+            }
             assert!(
                 anchor_width(&mut session, "nested-nbsp")?
                     > anchor_width(&mut session, "nested-space")?

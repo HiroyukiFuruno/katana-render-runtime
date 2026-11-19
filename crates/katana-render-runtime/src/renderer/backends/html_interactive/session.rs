@@ -78,10 +78,10 @@ impl HtmlInteractiveSession {
             .start_interactive_traced(&source, &trace)
             .map_err(runtime_failure)?;
         let mut session = Self::new(source, viewport, runtime, trace);
-        session.render_frame()?;
         if session.source.origin.url().fragment().is_some() {
             let origin = session.source.origin.clone();
-            session.apply_fragment_navigation(origin)?;
+            session.render_initial_fragment_frame(origin)?;
+        } else {
             session.render_frame()?;
         }
         Ok(session)

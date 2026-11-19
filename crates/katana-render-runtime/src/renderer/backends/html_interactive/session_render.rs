@@ -1,5 +1,5 @@
 use super::super::html_browser::{
-    HtmlBrowserFrame, HtmlBrowserPixelFormat, HtmlBrowserScrollMetrics,
+    HtmlBrowserFrame, HtmlBrowserOrigin, HtmlBrowserPixelFormat, HtmlBrowserScrollMetrics,
 };
 use super::session::HtmlInteractiveSession;
 use super::session_geometry::max_scroll_for;
@@ -10,6 +10,19 @@ use crate::markdown::svg_rasterize::SvgRasterizeOps;
 impl HtmlInteractiveSession {
     pub(super) fn render_frame(&mut self) -> Result<(), HtmlBrowserError> {
         self.render_frame_with_resize_resolution(false)
+    }
+
+    pub(super) fn render_initial_fragment_frame(
+        &mut self,
+        origin: HtmlBrowserOrigin,
+    ) -> Result<(), HtmlBrowserError> {
+        /* WHY: 開く位置は初期レイアウトで分かるため、画面外の先頭フレームは描画しない。 */
+        let layout = SvgRasterizeOps::with_html_font_face_cache_scope(|| {
+            self.layout_frame(self.generation + 1, false)
+        })?;
+        self.apply_fragment_navigation_in_layout(origin, Some(&layout))?;
+        drop(layout);
+        self.render_frame()
     }
 
     pub(super) fn render_resize_frame(&mut self) -> Result<(), HtmlBrowserError> {

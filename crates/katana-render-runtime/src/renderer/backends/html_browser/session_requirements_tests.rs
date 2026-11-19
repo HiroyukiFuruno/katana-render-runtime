@@ -69,7 +69,12 @@ fn requirements_fixture_returns_fragment_frame_with_sticky_sidebar_and_closes_wi
 
 fn run_requirements_fixture() -> TestResult {
     let started = Instant::now();
+    eprintln!("requirements fixture: starting initial frame");
     let mut session = open_requirements_fixture()?;
+    eprintln!(
+        "requirements fixture: initial frame ready in {:?}",
+        started.elapsed()
+    );
     assert_requirements_fragment_frame(&mut session)?;
     assert_requirements_close_within_budget(&mut session, started)
 }
@@ -133,6 +138,7 @@ fn assert_requirements_fragment_frame(session: &mut HtmlBrowserSession) -> TestR
     let frame = session
         .take_frame_update()
         .ok_or_else(|| "requirements fixture must produce its first frame".to_string())?;
+    assert_eq!(frame.generation, 1);
     assert_eq!(frame.origin.as_str(), REQUIREMENTS_ORIGIN);
     let sidebar_pixels = frame_matching_rgb_pixels(frame, STICKY_SIDEBAR_RGB);
     assert!(

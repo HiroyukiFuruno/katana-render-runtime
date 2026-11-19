@@ -133,19 +133,26 @@ fn invalid_navigation_inputs_are_rejected() -> TestResult {
 
 #[test]
 fn nonexistent_file_origin_allows_only_same_document_fragment() -> TestResult {
-    let origin = "file:///__krr_missing_fragment_origin__/index.html";
-    assert!(!std::path::Path::new("/__krr_missing_fragment_origin__").exists());
-    let source = HtmlBrowserSource::new("<p>ok</p>", origin).map_err(to_string)?;
+    let fixture = tempfile::tempdir().map_err(to_string)?;
+    let missing_parent = fixture.path().join("missing");
+    let missing = missing_parent.join("index.html");
+    assert!(!missing_parent.exists());
+    assert!(!missing.exists());
+    let origin = Url::from_file_path(&missing)
+        .map_err(|()| "missing file origin must be a valid URL".to_string())
+        .map(|url| url.to_string())?;
+    let source = HtmlBrowserSource::new("<p>ok</p>", origin.as_str()).map_err(to_string)?;
     let policy = HtmlSubresourcePolicy::from_source(&source);
     for fragment in ["#a", "#b", "#c"] {
         let url = policy.resolve_navigation(fragment).map_err(to_string)?;
         assert_eq!(url.as_str(), format!("{origin}{fragment}"));
     }
+    let absolute_same_document = format!("{origin}#a");
     for reference in [
         "index.html",
         "other.html#a",
         "../outside.html#a",
-        "file:///__krr_missing_fragment_origin__/index.html#a",
+        absolute_same_document.as_str(),
         "https://other.example/index.html#a",
         "about:blank#a",
     ] {

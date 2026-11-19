@@ -1783,7 +1783,7 @@ fn list_style_none_suppresses_markers_and_keeps_flex_item_children_aligned() -> 
 #[test]
 fn nested_bold_inline_content_uses_its_own_intrinsic_flex_width() -> TestResult {
     let mut session = start(
-        r#"<ul style="display:flex;flex-direction:column;gap:8px;list-style:none;width:280px">
+        r#"<ul style="display:flex;flex-direction:column;gap:8px;list-style:none;width:264px">
 <li style="display:flex;gap:14px"><span style="flex-shrink:0">③</span><span><b>Excel 帳票出力</b></span></li>
 <li style="display:flex;gap:14px"><span style="flex-shrink:0">④</span><span><b>市場レポート・キャンペーン情報等の横断参照</b></span></li>
 </ul>"#,

@@ -664,9 +664,15 @@ fn navigation_all_toc_links_composes_anchor_hash_and_target_lookup() -> TestResu
 
 #[test]
 fn nonexistent_file_origin_navigates_all_toc_fragments_without_host_navigation() -> TestResult {
-    let origin = "file:///__krr_missing_fragment_origin__/index.html";
-    assert!(!std::path::Path::new("/__krr_missing_fragment_origin__").exists());
-    let source = HtmlBrowserSource::new(NAVIGATION_DOCUMENT, origin).map_err(to_string)?;
+    let fixture = tempfile::tempdir().map_err(to_string)?;
+    let missing_parent = fixture.path().join("missing");
+    let missing = missing_parent.join("index.html");
+    assert!(!missing_parent.exists());
+    assert!(!missing.exists());
+    let origin = url::Url::from_file_path(&missing)
+        .map_err(|()| "missing file origin must be a valid URL".to_string())
+        .map(|url| url.to_string())?;
+    let source = HtmlBrowserSource::new(NAVIGATION_DOCUMENT, origin.as_str()).map_err(to_string)?;
     let viewport = HtmlBrowserViewport::new(TOC_VIEWPORT_WIDTH, TOC_VIEWPORT_HEIGHT, 1.0)
         .map_err(to_string)?;
     let mut session =
@@ -676,7 +682,7 @@ fn nonexistent_file_origin_navigates_all_toc_fragments_without_host_navigation()
         (TOC_SECOND_Y, "#b"),
         (TOC_THIRD_Y, "#c"),
     ] {
-        assert_toc_fragment(&mut session, origin, y, fragment)?;
+        assert_toc_fragment(&mut session, &origin, y, fragment)?;
     }
     Ok(())
 }
