@@ -13,14 +13,14 @@ use windows_snapshots::WindowsFontSnapshots;
 #[cfg(windows)]
 #[path = "svg_rasterize_text_stamp_batch_windows_adapter.rs"]
 mod windows_adapter;
-#[cfg(windows)]
-pub(in super::super) use windows_adapter::{
-    enable_windows_font_snapshots, windows_font_snapshot, windows_font_snapshot_glyph_support,
-};
 #[cfg(all(test, windows))]
 pub(super) use windows_adapter::windows_font_snapshot_glyph_support_diagnostics;
 #[cfg(windows)]
 pub(super) use windows_adapter::windows_font_snapshot_stamp;
+#[cfg(windows)]
+pub(in super::super) use windows_adapter::{
+    enable_windows_font_snapshots, windows_font_snapshot, windows_font_snapshot_glyph_support,
+};
 #[path = "svg_rasterize_text_stamp_batch_validation.rs"]
 mod validation;
 

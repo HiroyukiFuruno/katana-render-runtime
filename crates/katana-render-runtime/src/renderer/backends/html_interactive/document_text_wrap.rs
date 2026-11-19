@@ -118,13 +118,14 @@ pub(super) fn take_styled_line(text: &str, width: f32, style: &CssStyle) -> (Str
         return (trimmed_line.to_string(), consumed);
     }
     let break_ends = css_auto_linebreak_ends(forced_line);
-    let fitted_end = last_fitting_end(forced_line, &break_ends, width, style).unwrap_or_else(|| {
-        if style.allow_emergency_wrap {
-            fitted_character_end(forced_line, width, style)
-        } else {
-            break_ends.first().copied().unwrap_or(forced_end)
-        }
-    });
+    let fitted_end =
+        last_fitting_end(forced_line, &break_ends, width, style).unwrap_or_else(|| {
+            if style.allow_emergency_wrap {
+                fitted_character_end(forced_line, width, style)
+            } else {
+                break_ends.first().copied().unwrap_or(forced_end)
+            }
+        });
     (
         forced_line[..fitted_end]
             .trim_end_matches(layout_text::is_css_whitespace)

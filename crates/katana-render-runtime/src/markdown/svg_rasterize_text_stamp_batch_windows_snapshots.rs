@@ -1,5 +1,5 @@
-use super::MAX_BATCH_PATHS;
 use super::super::file_generation::{FileStamp, non_durable_file_stamp};
+use super::MAX_BATCH_PATHS;
 use std::{
     collections::{HashMap, HashSet},
     fs::File,

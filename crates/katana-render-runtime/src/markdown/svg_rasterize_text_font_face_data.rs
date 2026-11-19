@@ -7,11 +7,8 @@ pub(super) fn probe_font_has_char(
 ) -> Option<bool> {
     #[cfg(windows)]
     if let Some((usvg::fontdb::Source::File(path), face_index)) = database.face_source(face_id)
-        && let Some(supports) = super::windows_font_snapshot_glyph_support(
-            path.as_path(),
-            face_index,
-            character,
-        )
+        && let Some(supports) =
+            super::windows_font_snapshot_glyph_support(path.as_path(), face_index, character)
     {
         return Some(supports);
     }

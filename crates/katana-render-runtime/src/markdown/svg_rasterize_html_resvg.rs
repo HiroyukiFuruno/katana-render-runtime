@@ -18,8 +18,12 @@ pub(super) fn rasterize(
     let tree = SvgRasterizeOps::parse_compatible_tree(&compatible_svg, &options)?;
     #[cfg(all(test, windows))]
     let parsed = started.map(|_| Instant::now());
-    let result =
-        SvgRasterizeOps::render_html_tree_with_resvg_text(&tree, scale, &compatible_svg, provenance);
+    let result = SvgRasterizeOps::render_html_tree_with_resvg_text(
+        &tree,
+        scale,
+        &compatible_svg,
+        provenance,
+    );
     #[cfg(all(test, windows))]
     if let [Some(start), Some(fonts), Some(pre), Some(tree)] =
         [started, fonts_ready, preprocessed, parsed]

@@ -34,8 +34,8 @@ pub(in super::super) fn windows_font_snapshot_stamp(path: &Path) -> Option<FileS
 }
 
 #[cfg(test)]
-pub(in super::super) fn windows_font_snapshot_glyph_support_diagnostics(
-) -> Option<super::windows_snapshots::GlyphSupportDiagnostics> {
+pub(in super::super) fn windows_font_snapshot_glyph_support_diagnostics()
+-> Option<super::windows_snapshots::GlyphSupportDiagnostics> {
     with_windows_font_snapshots(|snapshots| snapshots.glyph_support_diagnostics())
 }
 

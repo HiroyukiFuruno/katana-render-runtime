@@ -93,7 +93,10 @@ pub(super) fn file_source_stamp(
     }
 }
 
-pub(in super::super) fn font_source_generation(database: &Database, id: ID) -> FontSourceGeneration {
+pub(in super::super) fn font_source_generation(
+    database: &Database,
+    id: ID,
+) -> FontSourceGeneration {
     file_source_stamp(database, id).2
 }
 

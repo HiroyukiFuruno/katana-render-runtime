@@ -47,7 +47,10 @@ fn assert_painted_button(
     if observed != Some(&[54, 154, 188, 255]) {
         let observed = observed.map(<[u8]>::to_vec);
         let layout = session.layout().map_err(test_error)?;
-        return Err(format!("button fill at ({x}, {y}): {observed:?}, SVG: {}", layout.svg));
+        return Err(format!(
+            "button fill at ({x}, {y}): {observed:?}, SVG: {}",
+            layout.svg
+        ));
     }
     Ok(())
 }

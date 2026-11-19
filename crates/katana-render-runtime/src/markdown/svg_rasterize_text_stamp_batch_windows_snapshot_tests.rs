@@ -1,9 +1,9 @@
+use super::super::file_generation::file_source_stamp;
 use super::{
     enable_windows_font_snapshots, memo_usable, windows_font_snapshot,
     windows_font_snapshot_glyph_support, windows_font_snapshot_glyph_support_diagnostics,
     with_validated_stamp_batch,
 };
-use super::super::file_generation::file_source_stamp;
 use resvg::usvg::fontdb::{Database, Source};
 use std::{
     fs::{self, OpenOptions},
@@ -111,7 +111,10 @@ fn admitted_snapshot_caches_repeated_true_and_false_glyph_support() -> Result<()
 
     assert_eq!((first, repeated), (Some(true), Some(true)));
     assert_eq!((absent, absent_repeated), (Some(false), Some(false)));
-    assert_eq!((diagnostics.hits, diagnostics.misses, diagnostics.entries), (2, 2, 2));
+    assert_eq!(
+        (diagnostics.hits, diagnostics.misses, diagnostics.entries),
+        (2, 2, 2)
+    );
     Ok(())
 }
 
