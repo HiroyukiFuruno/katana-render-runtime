@@ -5,6 +5,16 @@ pub(super) fn probe_font_has_char(
     face_id: usvg::fontdb::ID,
     character: char,
 ) -> Option<bool> {
+    #[cfg(windows)]
+    if let Some((usvg::fontdb::Source::File(path), face_index)) = database.face_source(face_id)
+        && let Some(supports) = super::windows_font_snapshot_glyph_support(
+            path.as_path(),
+            face_index,
+            character,
+        )
+    {
+        return Some(supports);
+    }
     with_layout_font_face_data(database, face_id, |data, face_index| {
         /* WHY: glyphの有無だけを調べるため、不要なGSUB/GPOS coverage構築を省く。 */
         rustybuzz::ttf_parser::Face::parse(data, face_index)

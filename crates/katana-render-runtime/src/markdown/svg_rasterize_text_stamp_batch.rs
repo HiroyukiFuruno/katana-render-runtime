@@ -10,6 +10,17 @@ use std::{
 mod windows_snapshots;
 #[cfg(windows)]
 use windows_snapshots::WindowsFontSnapshots;
+#[cfg(windows)]
+#[path = "svg_rasterize_text_stamp_batch_windows_adapter.rs"]
+mod windows_adapter;
+#[cfg(windows)]
+pub(in super::super) use windows_adapter::{
+    enable_windows_font_snapshots, windows_font_snapshot, windows_font_snapshot_glyph_support,
+};
+#[cfg(all(test, windows))]
+pub(super) use windows_adapter::windows_font_snapshot_glyph_support_diagnostics;
+#[cfg(windows)]
+pub(super) use windows_adapter::windows_font_snapshot_stamp;
 #[path = "svg_rasterize_text_stamp_batch_validation.rs"]
 mod validation;
 
@@ -119,27 +130,6 @@ pub(super) fn cached_stamp(path: &Path) -> Option<FileStamp> {
             .as_ref()
             .filter(|batch| !batch.memo_disabled)
             .and_then(|batch| batch.stamps.get(path).cloned())
-    })
-}
-
-#[cfg(windows)]
-pub(in super::super) fn enable_windows_font_snapshots() {
-    ACTIVE_BATCH.with(|active| {
-        if let Some(batch) = active.borrow_mut().as_mut() {
-            batch.windows_font_snapshots.get_or_insert_default();
-        }
-    });
-}
-
-#[cfg(windows)]
-pub(in super::super) fn windows_font_snapshot(path: &Path) -> Option<std::sync::Arc<Vec<u8>>> {
-    ACTIVE_BATCH.with(|active| {
-        active
-            .borrow_mut()
-            .as_mut()?
-            .windows_font_snapshots
-            .as_mut()?
-            .read(path)
     })
 }
 

@@ -68,6 +68,17 @@ pub(super) fn file_source_stamp(
     database: &Database,
     id: ID,
 ) -> (bool, Option<FileStamp>, FontSourceGeneration) {
+    #[cfg(windows)]
+    if let Some((Source::File(path), _)) = database.face_source(id)
+        && let Some(stamp) = super::stamp_batch::windows_font_snapshot_stamp(path.as_path())
+    {
+        super::stamp_batch::remember_stamp(path.as_path(), stamp.clone());
+        return (
+            true,
+            Some(stamp.clone()),
+            FontSourceGeneration(Generation::File(stamp)),
+        );
+    }
     match database.face_source(id) {
         Some((Source::File(path) | Source::SharedFile(path, _), _)) => match stamp_path(&path) {
             Ok(stamp) => (
@@ -82,11 +93,18 @@ pub(super) fn file_source_stamp(
     }
 }
 
-pub(in super::super) fn font_source_generation(
-    database: &Database,
-    id: ID,
-) -> FontSourceGeneration {
+pub(in super::super) fn font_source_generation(database: &Database, id: ID) -> FontSourceGeneration {
     file_source_stamp(database, id).2
+}
+
+#[cfg(windows)]
+pub(super) fn non_durable_file_stamp(metadata: &std::fs::Metadata) -> FileStamp {
+    FileStamp {
+        len: metadata.len(),
+        modified: metadata.modified().ok(),
+        created: metadata.created().ok(),
+        durable_reusable: false,
+    }
 }
 
 fn stamp_path(path: &std::path::Path) -> Result<FileStamp, ()> {

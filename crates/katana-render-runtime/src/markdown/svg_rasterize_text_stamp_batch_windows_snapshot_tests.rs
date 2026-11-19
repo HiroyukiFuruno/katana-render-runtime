@@ -1,4 +1,10 @@
-use super::{enable_windows_font_snapshots, windows_font_snapshot, with_validated_stamp_batch};
+use super::{
+    enable_windows_font_snapshots, memo_usable, windows_font_snapshot,
+    windows_font_snapshot_glyph_support, windows_font_snapshot_glyph_support_diagnostics,
+    with_validated_stamp_batch,
+};
+use super::super::file_generation::file_source_stamp;
+use resvg::usvg::fontdb::{Database, Source};
 use std::{
     fs::{self, OpenOptions},
     io::Write,
@@ -7,6 +13,7 @@ use std::{
 };
 
 static NEXT_FILE: AtomicUsize = AtomicUsize::new(0);
+const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 
 struct Fixture(PathBuf);
 
@@ -84,5 +91,47 @@ fn snapshots_are_released_with_the_render_scope() -> Result<(), String> {
         windows_font_snapshot(&fixture.0).map(|snapshot| snapshot.as_ref().clone())
     });
     assert_eq!(second, Some(b"other".to_vec()));
+    Ok(())
+}
+
+#[test]
+fn admitted_snapshot_caches_repeated_true_and_false_glyph_support() -> Result<(), String> {
+    let fixture = Fixture::new(FONT_BYTES)?;
+    let result = with_validated_stamp_batch(|| -> Result<_, String> {
+        enable_windows_font_snapshots();
+        let first = windows_font_snapshot_glyph_support(&fixture.0, 0, 'A');
+        let repeated = windows_font_snapshot_glyph_support(&fixture.0, 0, 'A');
+        let absent = windows_font_snapshot_glyph_support(&fixture.0, 0, '\u{10FFFF}');
+        let absent_repeated = windows_font_snapshot_glyph_support(&fixture.0, 0, '\u{10FFFF}');
+        let diagnostics = windows_font_snapshot_glyph_support_diagnostics()
+            .ok_or("glyph support diagnostics are unavailable")?;
+        Ok((first, repeated, absent, absent_repeated, diagnostics))
+    });
+    let (first, repeated, absent, absent_repeated, diagnostics) = result?;
+
+    assert_eq!((first, repeated), (Some(true), Some(true)));
+    assert_eq!((absent, absent_repeated), (Some(false), Some(false)));
+    assert_eq!((diagnostics.hits, diagnostics.misses, diagnostics.entries), (2, 2, 2));
+    Ok(())
+}
+
+#[test]
+fn admitted_snapshot_keeps_generation_nondurable_and_outer_memos_disabled() -> Result<(), String> {
+    let fixture = Fixture::new(FONT_BYTES)?;
+    let mut database = Database::new();
+    database.load_font_source(Source::File(fixture.0.clone()));
+    let face = database.faces().next().ok_or("fixture face is missing")?.id;
+    let result = with_validated_stamp_batch(|| -> Result<_, String> {
+        enable_windows_font_snapshots();
+        windows_font_snapshot(&fixture.0).ok_or("fixture snapshot is unavailable")?;
+        let (is_file, stamp, generation) = file_source_stamp(&database, face);
+        Ok((is_file, stamp, generation.durable_reusable(), memo_usable()))
+    });
+    let (is_file, stamp, durable_reusable, memo_usable) = result?;
+
+    assert!(is_file);
+    assert!(stamp.is_some_and(|value| !value.durable_reusable()));
+    assert!(!durable_reusable);
+    assert!(!memo_usable);
     Ok(())
 }
