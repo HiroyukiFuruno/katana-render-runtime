@@ -41,6 +41,11 @@ on:
           - both
           - linux
           - windows
+      verify_filter:
+        description: Optional cargo-nextest filterset for release/verify.
+        required: false
+        default: ''
+        type: string
 
 concurrency:
   group: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && format('native-verify-{0}-{1}', github.ref, inputs.verify_platform) || format('{0}-{1}', github.workflow, github.ref) }}
@@ -287,9 +292,23 @@ jobs:
         run: just plantuml-install
 
       - name: Run tests
-        if: (matrix.os != 'ubuntu-latest' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify')) && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: >-
+          (matrix.os != 'ubuntu-latest' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify')) &&
+          (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true') &&
+          (!(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') || inputs.verify_filter == '')
         timeout-minutes: 45
         run: just unit-test
+
+      - name: Run selected native tests
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_filter != ''
+        env:
+          KRR_VERIFY_FILTERSET: ${{ inputs.verify_filter }}
+        shell: bash
+        timeout-minutes: 45
+        run: >-
+          just --command cargo nextest run --workspace --all-targets --all-features
+          --locked --no-fail-fast --retries 0 --no-tests fail --test-threads "$TEST_THREADS"
+          --user-config-file scripts/release/nextest-local-user.toml -E "$KRR_VERIFY_FILTERSET"
 
       - name: Run PlantUML smoke check
         if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
