@@ -499,6 +499,11 @@ jobs:
           for family in system-ui Arial sans-serif; do
             fc-match --format='%{family}\t%{file}\n' "$family"
           done
+          for locale in en-US ja; do
+            for glyph in 540d 67b6 6a19 304b; do
+              fc-match --format="$locale $glyph %{family[0]}\t%{file}\n" ":lang=$locale:charset=$glyph:scalable=true"
+            done
+          done
           node --input-type=module <<'JS'
           import { chromium } from 'playwright';
           import { pathToFileURL } from 'node:url';
@@ -561,6 +566,10 @@ jobs:
             for (const [fixture, selectors] of fixtures) {
               await page.goto(pathToFileURL(`tests/fixtures/${fixture}.html`).href);
               await page.evaluate(() => document.fonts.ready);
+              if (fixture === 'html/aspects/input-state') {
+                const locales = await page.evaluate(() => ({ page: document.documentElement.lang, browser: navigator.language }));
+                console.log('LINUX_HTML_FONT_LOCALES', JSON.stringify(locales));
+              }
               const { root } = await cdp.send('DOM.getDocument');
               for (const selector of selectors.split(', ')) {
                 const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector });
