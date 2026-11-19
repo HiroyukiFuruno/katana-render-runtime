@@ -173,8 +173,7 @@ pub(super) fn font_for_face(
         }
         Source::File(path) => {
             #[cfg(windows)]
-            if let Some(snapshot) = super::super::super::font::windows_font_snapshot(path.as_path())
-            {
+            if let Some(snapshot) = super::super::font::windows_font_snapshot(path.as_path()) {
                 let data: Arc<dyn AsRef<[u8]> + Send + Sync> = snapshot;
                 return load::binary_font(data, face_index);
             }
