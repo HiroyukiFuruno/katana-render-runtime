@@ -1,6 +1,6 @@
-#[cfg(target_os = "macos")]
-use super::family::INTERFACE_BOLD_WEIGHT;
 use super::{FallbackAttributes, fallback_attributes, scan_fallback_faces, usvg};
+#[cfg(target_os = "macos")]
+use crate::markdown::svg_rasterize::font::platform::INTERFACE_BOLD_WEIGHT;
 
 #[cfg(not(target_os = "macos"))]
 pub(super) fn matching_fallback_nonmacos(

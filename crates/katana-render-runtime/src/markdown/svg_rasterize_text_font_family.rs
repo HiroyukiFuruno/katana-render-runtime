@@ -1,7 +1,6 @@
 use super::usvg;
-
-#[cfg(target_os = "macos")]
-pub(super) const INTERFACE_BOLD_WEIGHT: u16 = 700;
+use crate::markdown::svg_rasterize::font::platform::{PlatformFontStrategy, font_platform};
+use std::ops::ControlFlow;
 
 pub(in crate::markdown::svg_rasterize::text_shaping) fn matching_font_face(
     database: &usvg::fontdb::Database,
@@ -9,15 +8,12 @@ pub(in crate::markdown::svg_rasterize::text_shaping) fn matching_font_face(
     font_weight: u16,
     italic: bool,
 ) -> Option<usvg::fontdb::ID> {
-    #[cfg(target_os = "macos")]
-    if contains_internal_family_name(font_family) {
-        return None;
-    }
-    #[cfg(target_os = "macos")]
-    if let Some(selected) = interface_bold_override(database, font_family, font_weight, italic) {
-        return Some(selected);
-    }
     let names = css_font_family_names(font_family);
+    if let ControlFlow::Break(selection) =
+        font_platform().face_override(database, font_family, &names, font_weight, italic)
+    {
+        return selection;
+    }
     let families = names
         .iter()
         .map(|name| fontdb_family_for_database(database, name))
@@ -34,44 +30,14 @@ pub(in crate::markdown::svg_rasterize::text_shaping) fn matching_font_face(
     })
 }
 
-#[cfg(target_os = "macos")]
-fn contains_internal_family_name(name: &str) -> bool {
-    super::super::super::font::is_internal_family(name)
-        || css_font_family_names(name)
-            .iter()
-            .any(|family| super::super::super::font::is_internal_family(family))
-}
-
-#[cfg(target_os = "macos")]
-fn interface_bold_override(
-    database: &usvg::fontdb::Database,
-    name: &str,
-    weight: u16,
-    italic: bool,
-) -> Option<usvg::fontdb::ID> {
-    let name = name.trim().to_ascii_lowercase();
-    if weight != INTERFACE_BOLD_WEIGHT
-        || italic
-        || !matches!(
-            name.as_str(),
-            ".hiragino kaku gothic interface" | "hiragino kaku gothic interface"
-        )
-    {
-        return None;
-    }
-    super::super::super::font::bold_alias_id(database)
-}
-
 fn fontdb_family_for_database<'a>(
     database: &'a usvg::fontdb::Database,
     name: &'a str,
 ) -> usvg::fontdb::Family<'a> {
-    #[cfg(target_os = "linux")]
     if name.eq_ignore_ascii_case("system-ui")
-        && let Some(family) = super::super::super::font::linux_system_ui_family()
+        && let Some(family) = font_platform().installed_system_ui_family()
         && let Some(actual) = family_name_in_database(database, family)
     {
-        /* WHY: Linuxのsystem-uiはWeb用のsans-serifとは別にシステム書体を選ぶ。 */
         return usvg::fontdb::Family::Name(actual);
     }
     let family = fontdb_family(name);
@@ -107,20 +73,10 @@ pub(in crate::markdown::svg_rasterize::text_shaping) fn fontdb_family(
     match name.to_ascii_lowercase().as_str() {
         "serif" => usvg::fontdb::Family::Serif,
         "sans-serif" => usvg::fontdb::Family::SansSerif,
-        "system-ui" | "-apple-system" | "blinkmacsystemfont" => system_font_family(),
+        "system-ui" | "-apple-system" | "blinkmacsystemfont" => font_platform().system_alias(),
         "cursive" => usvg::fontdb::Family::Cursive,
         "fantasy" => usvg::fontdb::Family::Fantasy,
         "monospace" => usvg::fontdb::Family::Monospace,
         _ => usvg::fontdb::Family::Name(name),
     }
-}
-
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-fn system_font_family() -> usvg::fontdb::Family<'static> {
-    usvg::fontdb::Family::Name("System Font")
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn system_font_family() -> usvg::fontdb::Family<'static> {
-    usvg::fontdb::Family::SansSerif
 }

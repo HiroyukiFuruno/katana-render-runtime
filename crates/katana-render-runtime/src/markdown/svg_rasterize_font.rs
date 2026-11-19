@@ -14,11 +14,10 @@ pub(super) use html::{
 };
 
 pub(super) use html::HtmlFontRequest;
-#[cfg(target_os = "linux")]
-pub(super) use html::linux_system_ui_family;
 #[cfg(test)]
 pub(super) use html::html_font_db_for_text;
 pub(super) use html::html_rasterizer_options;
+pub(super) use html::platform;
 #[cfg(all(test, target_os = "macos"))]
 pub(super) use html::record_actual_selected_face;
 #[cfg(test)]

@@ -1,6 +1,6 @@
-use super::family::INTERFACE_BOLD_WEIGHT;
 use super::matching_font_face;
 use crate::markdown::svg_rasterize::font::html_font_db_for_text;
+use crate::markdown::svg_rasterize::font::platform::INTERFACE_BOLD_WEIGHT;
 use resvg::usvg::fontdb::{Database, ID, Source};
 
 #[path = "svg_rasterize_text_font_interface_bold_test_support.rs"]

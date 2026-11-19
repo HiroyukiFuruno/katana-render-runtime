@@ -1,6 +1,7 @@
 mod architecture;
 mod attributes;
 mod cli_duplication;
+mod font_platform_boundary;
 mod function_length;
 mod lazy_code;
 mod manifest_boundary;

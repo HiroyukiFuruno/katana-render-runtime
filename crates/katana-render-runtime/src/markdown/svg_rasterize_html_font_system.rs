@@ -1,6 +1,10 @@
 use resvg::usvg;
 use std::{collections::BTreeSet, path::PathBuf};
 
+#[path = "svg_rasterize_html_font_platform.rs"]
+pub(in crate::markdown::svg_rasterize) mod platform;
+use platform::{PlatformFontStrategy, font_platform};
+
 /* WHY: 任意のHTMLが大量のfamilyを指定しても、同期したfontconfig探索は描画ごとに1回・有限件にする。 */
 const MAX_SYSTEM_FONT_FAMILIES_PER_REQUEST: usize = 16;
 
@@ -61,25 +65,11 @@ fn requested_system_font_families<'a>(
 }
 
 fn requested_system_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
-    existing_system_font_paths(platform_font_paths(families))
+    existing_system_font_paths(font_platform().installed_paths(families))
 }
 
 fn existing_system_font_paths(paths: impl IntoIterator<Item = PathBuf>) -> BTreeSet<PathBuf> {
     paths.into_iter().filter(|path| path.is_file()).collect()
-}
-
-#[cfg(any(target_os = "windows", target_os = "macos", target_os = "ios"))]
-fn platform_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
-    let native_paths = native_system_font_paths(families);
-    if !native_paths.is_empty() {
-        return native_paths;
-    }
-    fontconfig_font_paths(families)
-}
-
-#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "ios")))]
-fn platform_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
-    fontconfig_font_paths(families)
 }
 
 #[cfg(any(target_os = "windows", target_os = "macos", target_os = "ios"))]
@@ -142,22 +132,6 @@ fn fontconfig_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
             .output(),
         families,
     )
-}
-
-#[cfg(target_os = "linux")]
-pub(in crate::markdown::svg_rasterize) fn linux_system_ui_family() -> Option<&'static str> {
-    static FAMILY: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-    FAMILY
-        .get_or_init(|| {
-            let output = crate::system::ProcessService::create_command("fc-match")
-                .args(["--format", "%{family[0]}", "system-ui"])
-                .output()
-                .ok()?;
-            let name = String::from_utf8(output.stdout).ok()?;
-            (output.status.success() && !name.trim().is_empty()).then_some(name)
-        })
-        .as_deref()
-        .map(str::trim)
 }
 
 fn parse_fontconfig_output(

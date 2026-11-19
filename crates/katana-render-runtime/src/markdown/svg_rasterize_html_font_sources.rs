@@ -1,4 +1,7 @@
-use super::request::HtmlFontRequest;
+use super::{
+    platform::{PlatformFontStrategy, font_platform},
+    request::HtmlFontRequest,
+};
 use resvg::usvg;
 use std::collections::BTreeSet;
 
@@ -61,18 +64,15 @@ pub(super) fn build_html_font_db(request: &HtmlFontRequest) -> usvg::fontdb::Dat
         .iter()
         .map(String::as_str)
         .filter(|family| !is_generic_font_family(family));
-    #[cfg(target_os = "linux")]
-    let installed_families = installed_families.chain(
-        request
-            .families
-            .iter()
-            .any(|family| family == "system-ui")
-            .then(super::system::linux_system_ui_family)
-            .flatten(),
-    );
+    let system_ui = request
+        .families
+        .iter()
+        .any(|family| family == "system-ui")
+        .then(|| font_platform().installed_system_ui_family())
+        .flatten();
     super::system::load_requested_system_font_families_once(
         &mut database,
-        installed_families,
+        system_ui.into_iter().chain(installed_families),
         &mut loaded_paths,
     );
     load_fallback_font_paths(request, &mut database, &mut loaded_paths);
