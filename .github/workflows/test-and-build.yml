@@ -60,7 +60,12 @@ on:
         type: boolean
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && format('native-verify-{0}-{1}{2}{3}', github.ref, inputs.verify_platform, inputs.verify_html_trace && '-html-trace' || '', inputs.verify_html_optimized && '-optimized' || '') || format('{0}-{1}', github.workflow, github.ref) }}
+  group: >-
+    ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
+    format('native-verify-{0}-{1}{2}{3}{4}', github.ref, inputs.verify_platform,
+    inputs.verify_html_trace && '-html-trace' || '', inputs.verify_html_optimized && '-optimized' || '',
+    inputs.verify_platform == 'linux-fidelity' && inputs.verify_filter != '' && format('-{0}', inputs.verify_filter) || '') ||
+    format('{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: true
 
 permissions:
