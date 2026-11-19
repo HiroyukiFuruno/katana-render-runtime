@@ -1,3 +1,5 @@
+#[cfg(windows)]
+use super::stamp_batch::windows_font_snapshot_glyph_support;
 use resvg::usvg;
 
 pub(super) fn probe_font_has_char(
@@ -8,7 +10,7 @@ pub(super) fn probe_font_has_char(
     #[cfg(windows)]
     if let Some((usvg::fontdb::Source::File(path), face_index)) = database.face_source(face_id)
         && let Some(supports) =
-            super::windows_font_snapshot_glyph_support(path.as_path(), face_index, character)
+            windows_font_snapshot_glyph_support(path.as_path(), face_index, character)
     {
         return Some(supports);
     }
