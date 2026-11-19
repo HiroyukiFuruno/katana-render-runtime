@@ -17,9 +17,8 @@ use interface_bold_support::{assert_coretext_interface_face, japanese_ui_font_pa
 fn linux_monospace_keeps_the_same_face_for_ascii_and_japanese_text() {
     use resvg::usvg::fontdb::Family;
 
-    let database = |text| {
-        super::build_html_font_db(&super::HtmlFontRequest::from_text("monospace", text))
-    };
+    let database =
+        |text| super::build_html_font_db(&super::HtmlFontRequest::from_text("monospace", text));
     let ascii = database("https://documents.example.invalid/preview/");
     let japanese = database("日本語");
     assert_eq!(
