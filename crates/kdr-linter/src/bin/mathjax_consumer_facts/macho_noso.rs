@@ -4,6 +4,8 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use super::canonical_path::CanonicalPath;
+
 const MANIFEST_SCHEMA: &str = "krr-macho-noso-input/v1";
 const REPORT_SCHEMA: &str = "kdr-linter/macho-noso-facts/v1";
 const SHA256_HEX_LENGTH: usize = 64;
@@ -80,8 +82,8 @@ fn input_path(value: &str, unique: &mut BTreeSet<PathBuf>) -> Result<PathBuf, St
     if !path.is_absolute() {
         return Err(INVALID_PATH.into());
     }
-    canonical_file(&path)?;
-    if !unique.insert(path.clone()) {
+    let canonical = canonical_file(&path)?;
+    if !unique.insert(CanonicalPath::for_comparison(&canonical)) {
         return Err(INVALID_PATH.into());
     }
     Ok(path)
@@ -141,7 +143,12 @@ fn exact_keys(value: &Value, expected: &[&str], label: &str) -> Result<(), Strin
 
 fn canonical_file(path: &Path) -> Result<PathBuf, String> {
     let canonical = path.canonicalize().map_err(|error| error.to_string())?;
-    if canonical != path || !read_metadata(path)?.is_file() {
+    if CanonicalPath::for_comparison(&canonical) != CanonicalPath::for_comparison(path)
+        || !fs::symlink_metadata(path)
+            .map_err(|error| error.to_string())?
+            .file_type()
+            .is_file()
+    {
         return Err("path is not a canonical regular file".into());
     }
     Ok(canonical)

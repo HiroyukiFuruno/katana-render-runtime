@@ -1,3 +1,4 @@
+use crate::canonical_path::CanonicalPath;
 use anyhow::{Context, ensure};
 use katana_render_runtime::RenderInput;
 use serde_json::{Value, json};
@@ -9,6 +10,11 @@ use std::path::{Path, PathBuf};
 const HASH_READ_BUFFER_SIZE: usize = 65_536;
 const HEX_NIBBLE_BITS: u32 = 4;
 const HEX_NIBBLE_MASK: u8 = 15;
+
+fn path_is_canonical(path: &Path) -> anyhow::Result<bool> {
+    Ok(CanonicalPath::for_comparison(&fs::canonicalize(path)?)
+        == CanonicalPath::for_comparison(path))
+}
 
 fn validate_existing(path: &Path) -> anyhow::Result<()> {
     ensure!(
@@ -22,7 +28,7 @@ fn validate_existing(path: &Path) -> anyhow::Result<()> {
         path.display()
     );
     ensure!(
-        fs::canonicalize(path)? == path,
+        path_is_canonical(path)?,
         "attestation path must be canonical: {}",
         path.display()
     );
@@ -73,7 +79,7 @@ pub(super) fn validate_destination(path: &Path) -> anyhow::Result<()> {
         .parent()
         .context("attestation destination has no parent")?;
     ensure!(
-        fs::canonicalize(parent)? == parent,
+        path_is_canonical(parent)?,
         "attestation destination parent must be canonical"
     );
     match fs::symlink_metadata(path) {

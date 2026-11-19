@@ -1,4 +1,5 @@
 use super::{Corruption, Fixture, MachoNosoFixture, input_rows, manifest, sha256, write_fixture};
+use crate::canonical_path::CanonicalPath;
 use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
@@ -7,6 +8,7 @@ use std::path::Path;
 fn input_rows_rejects_relative_noncanonical_and_duplicate_paths() -> Result<(), String> {
     let fixture = write_fixture()?;
     assert!(path_manifest_rejected(&duplicate_path_manifest(&fixture)));
+    assert!(path_manifest_rejected(&equivalent_path_manifest(&fixture)));
     assert_noncanonical_path_rejected(&fixture)?;
     let relative_fixture = write_relative_fixture()?;
     let relative = manifest(
@@ -34,6 +36,13 @@ fn duplicate_path_manifest(fixture: &Fixture) -> Value {
     json!({"schema": "krr-macho-noso-input/v1", "files": [row.clone(), row]})
 }
 
+fn equivalent_path_manifest(fixture: &Fixture) -> Value {
+    let first = manifest(&fixture.path, fixture.bytes.len(), &fixture.digest)["files"][0].clone();
+    let mut second = first.clone();
+    second["path"] = json!(CanonicalPath::for_comparison(&fixture.path));
+    json!({"schema": "krr-macho-noso-input/v1", "files": [first, second]})
+}
+
 fn assert_noncanonical_path_rejected(fixture: &Fixture) -> Result<(), String> {
     let path = path_with_parent_segment(&fixture.path)?;
     if !path.exists() || path.canonicalize().map_err(|error| error.to_string())? != fixture.path {
@@ -55,6 +64,7 @@ fn path_manifest_rejected(manifest: &Value) -> bool {
 }
 
 fn path_with_parent_segment(path: &Path) -> Result<std::path::PathBuf, String> {
+    let path = CanonicalPath::for_comparison(path);
     let parent = path.parent().ok_or("fixture parent")?;
     let parent_name = parent.file_name().ok_or("fixture directory name")?;
     let name = path.file_name().ok_or("fixture filename")?;

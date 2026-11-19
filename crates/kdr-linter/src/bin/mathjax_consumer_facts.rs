@@ -4,6 +4,8 @@ mod ast_lookup;
 mod bundle;
 #[path = "mathjax_consumer_facts/call_binding.rs"]
 mod call_binding;
+#[path = "../../../katana-render-runtime-cli/src/canonical_path.rs"]
+mod canonical_path;
 #[path = "mathjax_consumer_facts/consumer.rs"]
 mod consumer;
 #[path = "mathjax_consumer_facts/default_materialize.rs"]

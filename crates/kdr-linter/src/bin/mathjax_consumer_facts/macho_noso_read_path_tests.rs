@@ -1,5 +1,6 @@
 use super::super::{inspect_file, validate_read_at_path};
 use super::write_fixture;
+use crate::canonical_path::CanonicalPath;
 use std::fs;
 
 #[test]
@@ -25,12 +26,13 @@ fn read_validation_preserves_the_io_error_when_the_file_disappears()
 fn inspect_file_rejects_a_valid_macho_reached_via_a_noncanonical_path()
 -> Result<(), Box<dyn std::error::Error>> {
     let fixture = write_fixture()?;
-    let parent = fixture.path.parent().ok_or("missing fixture directory")?;
+    let fixture_path = CanonicalPath::for_comparison(&fixture.path);
+    let parent = fixture_path.parent().ok_or("missing fixture directory")?;
     let child = parent.join("subdirectory");
     fs::create_dir(&child)?;
     let alias = child
         .join("..")
-        .join(fixture.path.file_name().ok_or("missing fixture name")?);
+        .join(fixture_path.file_name().ok_or("missing fixture name")?);
     assert_eq!(alias.canonicalize()?, fixture.path);
     assert_eq!(
         inspect_file(alias, fixture.bytes.len() as u64, &fixture.digest)

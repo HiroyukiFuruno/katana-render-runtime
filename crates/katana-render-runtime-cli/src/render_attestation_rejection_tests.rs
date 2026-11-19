@@ -1,5 +1,6 @@
 use super::super::{FileRecord, create_artifacts, validate_destination};
 use super::{AttestationPaths, Fixture, RenderAttestation, unit_output};
+use crate::canonical_path::CanonicalPath;
 use crate::commands::DiagramInputFormat;
 use std::{fs, path::Path};
 
@@ -181,11 +182,7 @@ fn file_record_rejects_non_regular_and_noncanonical_paths() -> anyhow::Result<()
             .contains("attestation requires regular files")
     );
 
-    let child = fixture.root.join("child");
-    fs::create_dir(&child)?;
-    let noncanonical = child.join("..").join("input.mmd");
-    assert!(noncanonical.is_absolute());
-    assert_ne!(fs::canonicalize(&noncanonical)?, noncanonical);
+    let noncanonical = noncanonical_fixture_path(&fixture)?;
     let path_error = match FileRecord::read(&noncanonical) {
         Err(error) => error,
         Ok(_) => anyhow::bail!("noncanonical file path was accepted"),
@@ -196,6 +193,18 @@ fn file_record_rejects_non_regular_and_noncanonical_paths() -> anyhow::Result<()
             .contains("attestation path must be canonical")
     );
     Ok(())
+}
+
+fn noncanonical_fixture_path(fixture: &Fixture) -> anyhow::Result<std::path::PathBuf> {
+    let child = CanonicalPath::for_comparison(&fixture.root).join("child");
+    fs::create_dir(&child)?;
+    let path = child.join("..").join("input.mmd");
+    assert!(path.is_absolute());
+    assert_ne!(
+        CanonicalPath::for_comparison(&fs::canonicalize(&path)?),
+        CanonicalPath::for_comparison(&path)
+    );
+    Ok(path)
 }
 
 #[test]

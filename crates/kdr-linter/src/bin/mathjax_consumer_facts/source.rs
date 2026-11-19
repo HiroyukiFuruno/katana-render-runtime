@@ -1,6 +1,9 @@
 use sha2::{Digest, Sha256};
-use std::fs;
 use std::path::Path;
+
+#[path = "source_path.rs"]
+mod path;
+use path::SourcePath;
 
 pub(super) const RESOURCE_BYTES_INPUT_INDEX: usize = 12;
 
@@ -43,7 +46,7 @@ pub(super) use super::ast_lookup::{
 };
 
 pub(super) fn source(root: &Path, relative: &str) -> Result<Source, String> {
-    let bytes = opaque_bytes(root, relative)?;
+    let bytes = SourcePath::opaque_bytes(root, relative)?;
     let text = String::from_utf8(bytes.clone()).map_err(|_| format!("invalid-utf8:{relative}"))?;
     let sha256 = sha256(&bytes);
     let ast = syn::parse_file(&text).map_err(|error| format!("parse-source:{relative}:{error}"))?;
@@ -65,11 +68,12 @@ pub(super) fn parsed_block(text: &str, function: &str) -> Result<syn::Block, Str
 }
 
 pub(super) fn opaque_sha256(root: &Path, relative: &str) -> Result<String, String> {
-    Ok(sha256(&opaque_bytes(root, relative)?))
+    Ok(sha256(&SourcePath::opaque_bytes(root, relative)?))
 }
 
 pub(super) fn opaque_text(root: &Path, relative: &str) -> Result<String, String> {
-    String::from_utf8(opaque_bytes(root, relative)?).map_err(|_| format!("invalid-utf8:{relative}"))
+    String::from_utf8(SourcePath::opaque_bytes(root, relative)?)
+        .map_err(|_| format!("invalid-utf8:{relative}"))
 }
 
 pub(super) fn parser_pin(
@@ -167,17 +171,6 @@ fn string_array(value: Option<&toml::Value>) -> Result<Vec<&str>, String> {
                 .ok_or_else(|| "parser-pin:feature-type".to_string())
         })
         .collect()
-}
-
-fn opaque_bytes(root: &Path, relative: &str) -> Result<Vec<u8>, String> {
-    let candidate = root.join(relative);
-    let path = candidate
-        .canonicalize()
-        .map_err(|error| format!("missing-source:{relative}:{error}"))?;
-    if !path.starts_with(root) || path != candidate {
-        return Err(format!("unsafe-source-path:{relative}"));
-    }
-    fs::read(&path).map_err(|error| format!("read-source:{relative}:{error}"))
 }
 
 fn sha256(bytes: &[u8]) -> String {
