@@ -12,7 +12,7 @@ export const NATIVE_WIDTH_CONSUMER_PINS = {
   [`${directory}js_runtime_native_width_c4_tests.rs`]:
     "28610a5998405703b5a07c6c1023efbf4e3315b2eb5d93b56ad043f8dcef2ead",
   [`${directory}js_runtime_native_width_ishikawa_tests.rs`]:
-    "8d818595edc6750bafbead131fef9beea1987a9995a0a2613cabf1b2de3d5a9f",
+    "3857d92d2ea01c556b5fa0642b6c2d7123835f5435db5c8942493e0089f6cf47",
   [`${directory}js_runtime_native_width_oracle_boundary_tests.rs`]:
     "d99fb158de06b3d2b91dd20ea8350c902b6480a2076a92c4ec74c079cfa77f43",
   [`${directory}js_runtime_native_width_trace.js`]:
