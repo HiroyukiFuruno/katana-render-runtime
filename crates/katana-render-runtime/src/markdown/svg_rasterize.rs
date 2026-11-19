@@ -48,6 +48,9 @@ mod text;
 pub(in crate::markdown::svg_rasterize) use text::probe_test_support;
 #[path = "svg_rasterize_html_measurement.rs"]
 mod html_measurement;
+#[cfg(not(target_os = "macos"))]
+#[path = "svg_rasterize_html_resvg.rs"]
+mod html_resvg;
 #[path = "svg_rasterize_text_shaping.rs"]
 mod text_shaping;
 #[path = "svg_rasterize_tree_render.rs"]
@@ -140,10 +143,7 @@ impl SvgRasterizeOps {
         #[cfg(not(target_os = "macos"))]
         {
             let _ = html_text;
-            let options = html_rasterizer_options(svg_text);
-            let compatible_svg = Self::preprocess_for_rasterizer(svg_text);
-            let tree = Self::parse_compatible_tree(&compatible_svg, &options)?;
-            Self::render_html_tree_with_resvg_text(&tree, scale, &compatible_svg, provenance)
+            html_resvg::rasterize(svg_text, scale, provenance)
         }
     }
 
