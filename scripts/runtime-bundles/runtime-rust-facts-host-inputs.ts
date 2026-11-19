@@ -103,7 +103,7 @@ function configurationFiles(root: string, environment: NodeJS.ProcessEnv): strin
   return files;
 }
 
-function toolLocation(
+export function resolveRustFactsHostToolLocation(
   root: string,
   name: keyof RustFactsHostInputs["tools"],
   environment: NodeJS.ProcessEnv,
@@ -120,7 +120,7 @@ export function resolveRustFactsHostJust(
   root: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): RustFactsHostInputs["tools"]["just"] {
-  const invocationPath = toolLocation(root, "just", environment);
+  const invocationPath = resolveRustFactsHostToolLocation(root, "just", environment);
   if (
     !invocationPath ||
     !path.isAbsolute(invocationPath) ||
@@ -166,7 +166,7 @@ function currentTools(
       names.map((name) => {
         if (name === "just" && (!prepared || prepared.just.invocationPath !== undefined))
           return [name, resolveRustFactsHostJust(root, environment)];
-        const located = toolLocation(root, name, environment);
+        const located = resolveRustFactsHostToolLocation(root, name, environment);
         if (!located) {
           if (name === "rtk" && !environment.RTK) return [name, null];
           throw new Error(`missing Rust facts host tool: ${name}`);

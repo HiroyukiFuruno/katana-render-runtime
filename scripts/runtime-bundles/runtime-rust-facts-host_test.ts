@@ -136,6 +136,11 @@ function publishFixtureExecutable(f: ReturnType<typeof fixture>, executable: str
   return { target, binary };
 }
 
+test("fixture permits an explicitly unavailable optional rtk", () => {
+  const inputs = hostFixtureInputs(directory, { ...process.env, RTK: "" });
+  expect(inputs.tools.rtk).toBeNull();
+});
+
 test("physical unit receipt validation does not claim an actual host build or execution", () => {
   const f = fixture();
   expect(verifyRustFactsHost(f.root, f.receipt)).toEqual(f.value);
