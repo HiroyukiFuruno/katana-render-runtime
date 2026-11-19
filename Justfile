@@ -62,7 +62,7 @@ MERMAID_JS := env_var_or_default("MERMAID_JS", "crates/katana-render-runtime/ven
 MERMAID_ZENUML_JS := env_var_or_default("MERMAID_ZENUML_JS", "crates/katana-render-runtime/vendor/mermaid-zenuml/" + MERMAID_ZENUML_JS_VERSION + "/mermaid-zenuml.min.js")
 DRAWIO_JS := env_var_or_default("DRAWIO_JS", "crates/katana-render-runtime/vendor/drawio/" + DRAWIO_JS_VERSION + "/drawio.min.js")
 MATHJAX_JS := env_var_or_default("MATHJAX_JS", "crates/katana-render-runtime/vendor/mathjax/" + MATHJAX_JS_VERSION + "/tex-svg.js")
-PLANTUML_JAR_URL := "https://repo1.maven.org/maven2/net/sourceforge/plantuml/plantuml-lgpl/" + PLANTUML_JAR_VERSION + "/plantuml-lgpl-" + PLANTUML_JAR_VERSION + ".jar"
+PLANTUML_MAVEN_ROOT := "https://repo.maven.apache.org/maven2/net/sourceforge/plantuml/plantuml-lgpl"
 PLANTUML_CACHE_DIR := env_var_or_default("KRR_PLANTUML_CACHE_DIR", `bash scripts/plantuml/cache-dir.sh`)
 PLANTUML_CACHE_JAR := PLANTUML_CACHE_DIR + "/" + PLANTUML_JAR_VERSION + "/plantuml.jar"
 DRAWIO_RESOURCE_DIR := "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/resources"
@@ -827,7 +827,7 @@ depends-update-mutations:
 # Install pinned PlantUML LGPL JAR into the PlantUML cache
 plantuml-install version=PLANTUML_JAR_VERSION output=PLANTUML_CACHE_JAR:
     @set -euo pipefail; \
-    url="https://repo1.maven.org/maven2/net/sourceforge/plantuml/plantuml-lgpl/{{version}}/plantuml-lgpl-{{version}}.jar"; \
+    url="{{PLANTUML_MAVEN_ROOT}}/{{version}}/plantuml-lgpl-{{version}}.jar"; \
     target="{{output}}"; \
     expected="{{PLANTUML_JAR_CHECKSUM}}"; \
     if [ -f "$target" ] && [ ! -L "$target" ] && [ "$(bash scripts/plantuml/sha256-file.sh "$target")" = "$expected" ]; then exit 0; fi; \
