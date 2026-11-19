@@ -28,7 +28,7 @@ fn render_layout(html: &str) -> Result<(HtmlInteractiveSession, LayoutResult), S
 
 #[test]
 fn linux_font_geometry_reports_text_input_width() -> Result<(), String> {
-    let (session, layout) = render_layout(INPUT)?;
+    let (mut session, layout) = render_layout(INPUT)?;
     let input = session
         .runtime
         .node_for_element_id("name")
@@ -53,7 +53,7 @@ fn linux_font_geometry_reports_text_input_width() -> Result<(), String> {
 
 #[test]
 fn linux_font_geometry_reports_reservation_baseline() -> Result<(), String> {
-    let (session, layout) = render_layout(RESERVATION)?;
+    let (mut session, layout) = render_layout(RESERVATION)?;
     let target = session
         .runtime
         .node_for_element_id("column-p1")
