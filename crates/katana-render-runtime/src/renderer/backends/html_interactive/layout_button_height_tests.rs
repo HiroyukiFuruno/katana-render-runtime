@@ -6,7 +6,8 @@ use crate::renderer::backends::html_interactive::tests::test_error;
 
 const BOTTOM_PADDING_TEST_OFFSET: f32 = 2.5;
 const HTML: &str = r#"<style>
-    button { display:block; font:14px/28px Arial; padding:3px 4px 5px; border:2px solid; }
+    button { display:block; font-family:Arial; font-size:14px; line-height:28px;
+        padding:3px 4px 5px; border:2px solid; }
     #auto { background:#369abc; }
     #fixed { height:50px; } #minimum { min-height:45px; }
 </style><button id="auto">保存</button><button id="fixed">固定</button>
