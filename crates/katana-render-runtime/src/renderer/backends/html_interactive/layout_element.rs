@@ -116,6 +116,7 @@ impl HtmlLayoutRenderer {
 
     fn element_style(&self, element: ElementRenderContext<'_>, inherited: &CssStyle) -> CssStyle {
         let mut style = CssStyle::from_element(element.tag, element.attributes, inherited);
+        style.resolve_min_content_width(element.children);
         style.resolve_text_line_height(element.children);
         style
     }

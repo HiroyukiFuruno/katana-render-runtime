@@ -4,7 +4,6 @@ use taffy::style::{AlignItems, Display, FlexDirection, FlexWrap, JustifyContent}
 #[path = "style_border_style.rs"]
 mod border_style;
 pub(in crate::renderer::backends::html_interactive) use border_style::CssBorderStyle;
-
 #[path = "style_value_types.rs"]
 mod value_types;
 pub(in crate::renderer::backends::html_interactive) use value_types::{
@@ -152,6 +151,7 @@ pub(in crate::renderer::backends::html_interactive) struct CssStyle {
     pub(in crate::renderer::backends::html_interactive) min_height: f32,
     pub(in crate::renderer::backends::html_interactive) automatic_min_height: bool,
     pub(in crate::renderer::backends::html_interactive) width: Option<CssLength>,
+    pub(in crate::renderer::backends::html_interactive) width_min_content: bool,
     pub(in crate::renderer::backends::html_interactive) min_width: Option<CssLength>,
     pub(in crate::renderer::backends::html_interactive) max_width: Option<CssLength>,
     pub(in crate::renderer::backends::html_interactive) height: Option<f32>,

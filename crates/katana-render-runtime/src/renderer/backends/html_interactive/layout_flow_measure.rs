@@ -111,6 +111,7 @@ pub(super) fn item_style(
             ..
         } => {
             let mut style = CssStyle::from_element(tag, attributes, inherited);
+            style.resolve_min_content_width(children);
             style.resolve_text_line_height(children);
             style
         }

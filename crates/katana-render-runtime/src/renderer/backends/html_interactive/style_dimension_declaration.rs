@@ -26,8 +26,13 @@ impl CssStyle {
         );
         match name {
             "width" => {
-                self.explicit_width = resolved.is_some();
-                self.width = resolved;
+                let keyword = value.trim();
+                let min_content = keyword.eq_ignore_ascii_case("min-content");
+                if resolved.is_some() || min_content || keyword.eq_ignore_ascii_case("auto") {
+                    self.explicit_width = resolved.is_some() || min_content;
+                    self.width_min_content = min_content;
+                    self.width = resolved;
+                }
             }
             "min-width" => self.min_width = resolved,
             "max-width" => self.max_width = resolved,

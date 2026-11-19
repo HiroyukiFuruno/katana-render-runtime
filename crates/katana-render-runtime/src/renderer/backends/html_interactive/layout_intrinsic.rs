@@ -160,6 +160,9 @@ fn intrinsic_flex_child_width(
     Some(width + style.margin_left + style.margin_right)
 }
 
+#[path = "layout_min_content.rs"]
+mod min_content;
+
 pub(in crate::renderer::backends::html_interactive) fn min_content_text_width(
     node: &HtmlDocumentNode,
     style: &CssStyle,
