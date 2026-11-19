@@ -3,6 +3,7 @@ use super::{
     sorted_blob_directory, static_library_metrics,
 };
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
+use crate::markdown::svg_rasterize::text_shaping::font::file_stamp_durable_reusable;
 use read_fonts::FontRef;
 use resvg::usvg::fontdb::{Database, ID, Source};
 use std::sync::Arc;
@@ -97,21 +98,26 @@ fn line_metrics_require_a_render_scope_for_both_readers() -> TestResult {
 fn static_library_metrics_match_full_face_bits_for_real_sources() -> TestResult {
     let path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/NotoSans-Regular.ttf");
-    for source in [
-        Source::File(path.clone()),
-        Source::Binary(Arc::new(FONT_BYTES.to_vec())),
-        Source::SharedFile(path, Arc::new(FONT_BYTES.to_vec())),
+    let file_is_durable = file_stamp_durable_reusable(&path);
+    for (source, durable) in [
+        (Source::File(path.clone()), file_is_durable),
+        (Source::Binary(Arc::new(FONT_BYTES.to_vec())), true),
+        (
+            Source::SharedFile(path, Arc::new(FONT_BYTES.to_vec())),
+            file_is_durable,
+        ),
     ] {
         let database = database(source)?;
         let id = database.faces().next().ok_or("source face absent")?.id;
         SvgRasterizeOps::with_html_font_render_scope(|| -> TestResult {
-            for size in SIZES {
+            for (attempt, size) in SIZES.into_iter().enumerate() {
                 let expected = oracle(FONT_BYTES, size);
                 assert!(expected.is_some());
                 assert_bits(static_library_metrics(&font(FONT_BYTES)?, size), expected);
                 let actual = cached_face_line_metrics(&database, id, size)
                     .map_err(|()| "source commit rejected")?;
-                assert_bits(actual, expected);
+                /* WHY: 非永続ファイルの初回計測値は有効で、同じバッチ内の再利用を止める。 */
+                assert_bits(actual, expected.filter(|_| attempt == 0 || durable));
             }
             Ok(())
         })?;
