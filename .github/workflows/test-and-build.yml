@@ -44,7 +44,7 @@ on:
           - linux-fidelity
           - windows
       verify_filter:
-        description: Optional cargo-nextest filterset, or Bun test-name pattern with linux-assets.
+        description: Optional nextest filter, linux-assets test pattern, or linux-fidelity selection (samples or marker-css).
         required: false
         default: ''
         type: string
@@ -436,6 +436,15 @@ jobs:
         timeout-minutes: 15
         run: just check-contracts
 
+      - name: Build Linux HTML comparison probes
+        if: >-
+          matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-assets' &&
+          (inputs.verify_platform != 'linux-fidelity' || inputs.verify_filter != 'marker-css')
+        timeout-minutes: 15
+        run: |
+          just html-fidelity-probe-build
+          just --command cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > "$RUNNER_TEMP/krr-html-toc-build.jsonl"
+
       - name: Select authorized HTML release phase
         id: html_policy
         if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify')
@@ -457,14 +466,43 @@ jobs:
       - name: Compare HTML against Chrome on the manual v0.4.24 candidate
         if: >-
           matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
-          github.ref == 'refs/heads/release/verify' && inputs.verify_platform != 'linux-assets'
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform != 'linux-assets' &&
+          (inputs.verify_platform != 'linux-fidelity' || inputs.verify_filter == '')
         timeout-minutes: 15
         run: |
           python3 -c 'from scripts.release.html_fidelity_policy import workspace_version; raise SystemExit(workspace_version() != "0.4.24")'
           just html-fidelity-interim-check
 
+      - name: Capture Linux HTML samples that scored below 90
+        if: >-
+          matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
+          inputs.verify_filter == 'samples'
+        timeout-minutes: 15
+        run: |
+          result=0
+          for fixture in anonymized-requirements aspects/input-state aspects/layout; do
+            bun scripts/html/fidelity-suite.ts --phase interim --min-score 90 --viewport 620x900 \
+              --input "tests/fixtures/html/$fixture.html" --output "tmp/verify-html-samples/$fixture" \
+              --binary target/release/examples/html_fidelity_probe \
+              --toc-build-report "$RUNNER_TEMP/krr-html-toc-build.jsonl" || result=1
+          done
+          exit "$result"
+
+      - name: Check the Chrome CSS marker against direct geometry
+        if: >-
+          matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
+          inputs.verify_filter == 'marker-css'
+        timeout-minutes: 5
+        run: >-
+          node node_modules/playwright/cli.js test --config scripts/html/playwright.config.ts
+          scripts/mermaid/reference_svg_geometry_browser_test.ts --grep 'the-marker-property-in-CSS.svg'
+
       - name: Compare HTML interactions against Google Chrome
-        if: matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-assets'
+        if: >-
+          matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-assets' &&
+          (inputs.verify_platform != 'linux-fidelity' || inputs.verify_filter == '')
         timeout-minutes: 15
         run: just html-interaction-check
 
@@ -490,7 +528,8 @@ jobs:
       - name: Upload manual HTML comparison evidence
         if: >-
           matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
-          github.ref == 'refs/heads/release/verify' && inputs.verify_platform != 'linux-assets'
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform != 'linux-assets' &&
+          (inputs.verify_platform != 'linux-fidelity' || inputs.verify_filter == '')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: verify-html-chrome-fidelity-interim-v0.4.24
@@ -500,8 +539,22 @@ jobs:
             tmp/html-fidelity/input-state-interim
           if-no-files-found: error
 
+      - name: Upload Linux HTML diagnosis images
+        if: >-
+          always() && matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
+          inputs.verify_filter == 'samples'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verify-linux-html-samples
+          path: tmp/verify-html-samples/**/*.png
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload HTML interaction evidence
-        if: matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-assets' && always()
+        if: >-
+          always() && matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-assets' &&
+          (inputs.verify_platform != 'linux-fidelity' || inputs.verify_filter == '')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: html-chrome-interactions
