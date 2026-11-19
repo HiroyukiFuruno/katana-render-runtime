@@ -144,8 +144,8 @@
 - 動作保証のCI対象はLinux x64、Windows x64、macOS Apple Silicon。Intel Macは保証対象外とし、必須matrixとrequired status checkへ戻さない。
 - ローカルmacOS検査証跡は任意。有効な同一PR/base/HEAD・全macOS検査範囲の保守者証跡があれば再利用し、未提出・不一致・失効・取得失敗ならApple SiliconのCIで実検査する。証跡提出をReadyやリリースの前提にしない。
 - Draft で最新 HEAD に対する `@codex review` と自己レビューを実施し、GitHub APIで Issue コメント、formal reviews、review threads を全ページ取得する。初回と再レビュー2回を通常目安とする。
-- 各指摘を個別に分類し、P0/P1は必ず修正、P2/P3は要件・互換性・DoDへの影響を根拠付きで判断する。不要な改善は理由を記録し後続patchへ送れる。修正後は自己レビュー、関連する静的検査と回帰確認を行い、push、該当threadへのreply、threadのresolveを個別に完了する。静的解析だけで実動作を保証したとは扱わない。
-- レビュー回数を理由に未解決P0/P1、DoD違反、最新HEADのPR review、個別reply/resolve、required native checks、expected SHA付きprotected mergeを省略しない。
+- PRレビューの指摘は [リリース手順のコードフリーズ規則](docs/release.md#prレビューのコードフリーズ) で分類する。修正後は自己レビュー、関連する静的検査と回帰確認、push、各スレッドへの返信と解決を行う。後続対応する指摘にも、各スレッドへIssueのリンクを返信してから解決する。
+- 未修正のP0、初回から残るP1、DoD違反は公開を止める。最新HEADのPRレビュー、個別の返信と解決、必須CI、HEADを指定した保護マージを維持する。
 - 最新 HEAD のレビュー結果、未解決thread 0、Issue/DoDを確認してからReady化し、Readyで起動したrequired CI checksの成功を確認する。その後は保護されたPR mergeを、merge直前に再取得したexpected HEAD SHAで実行し、人間による直接master更新やadmin bypassを使わない。
 
 ## Orchestration Gate

@@ -82,7 +82,7 @@ Draft PRを作成し、最新 HEAD に対して `@codex review` と自己レビ�
 
 ## Phase 5: PR gate
 
-各指摘を個別に修正・検証・pushし、該当threadへreplyしてresolveする。P0/P1は必須対応、P2/P3は要件・互換性・DoDへの影響を根拠付きで判断する。HEADが変わった場合は最新 HEADでレビューをやり直す。
+[リリース手順のコードフリーズ規則](../../../docs/release.md#prレビューのコードフリーズ)に従って今回修正する指摘と後続Issueへ送る指摘を決め、該当スレッドに修正結果またはIssueのリンクを返信してから解決する。HEADが変わった場合は最新HEADでレビューをやり直す。
 
 ## Phase 6: Ready 化と merge 承認
 
