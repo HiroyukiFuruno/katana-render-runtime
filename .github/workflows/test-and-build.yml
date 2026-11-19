@@ -31,9 +31,19 @@ on:
     branches: [master]
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
+    inputs:
+      verify_platform:
+        description: Native platform for release/verify.
+        required: false
+        default: both
+        type: choice
+        options:
+          - both
+          - linux
+          - windows
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && format('native-verify-{0}', github.ref) || format('{0}-{1}', github.workflow, github.ref) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && format('native-verify-{0}-{1}', github.ref, inputs.verify_platform) || format('{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: true
 
 permissions:
@@ -94,7 +104,7 @@ jobs:
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && '{"include":[{"os":"ubuntu-latest","platform":"linux64"},{"os":"windows-latest","platform":"win64"}]}' || '{"include":[{"os":"ubuntu-latest","platform":"linux64"},{"os":"macos-15","platform":"mac-arm64"},{"os":"windows-latest","platform":"win64"}]}') }}
+      matrix: ${{ fromJSON(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && (inputs.verify_platform == 'linux' && '{"include":[{"os":"ubuntu-latest","platform":"linux64"}]}' || inputs.verify_platform == 'windows' && '{"include":[{"os":"windows-latest","platform":"win64"}]}' || '{"include":[{"os":"ubuntu-latest","platform":"linux64"},{"os":"windows-latest","platform":"win64"}]}') || '{"include":[{"os":"ubuntu-latest","platform":"linux64"},{"os":"macos-15","platform":"mac-arm64"},{"os":"windows-latest","platform":"win64"}]}') }}
     runs-on: ${{ matrix.os }}
     permissions:
       actions: read
