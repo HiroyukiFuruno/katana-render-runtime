@@ -1894,7 +1894,7 @@ fn collect_text_fragments_for_fill(
     {
         let text = text_content(element);
         if text.is_empty() {
-            return Err(format!("text element with fill {fill} has no content").into());
+            return Err(format!("text element with fill {fill} has no content"));
         }
         fragments.push(text);
     }
