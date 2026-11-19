@@ -52,9 +52,14 @@ on:
         required: false
         default: false
         type: boolean
+      verify_html_optimized:
+        description: Use the release build profile for the Windows HTML requirements timing.
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && format('native-verify-{0}-{1}{2}', github.ref, inputs.verify_platform, inputs.verify_html_trace && '-html-trace' || '') || format('{0}-{1}', github.workflow, github.ref) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && format('native-verify-{0}-{1}{2}{3}', github.ref, inputs.verify_platform, inputs.verify_html_trace && '-html-trace' || '', inputs.verify_html_optimized && '-optimized' || '') || format('{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: true
 
 permissions:
@@ -330,12 +335,14 @@ jobs:
         env:
           DEBUG: 'true'
           KRR_HTML_REQUIREMENTS_CHILD: '1'
+          KRR_VERIFY_BUILD_PROFILE: ${{ inputs.verify_html_optimized && 'release' || 'dev' }}
           KRR_VERIFY_FILTERSET: ${{ inputs.verify_filter }}
           NEXTEST_SUCCESS_OUTPUT: immediate
         shell: bash
         timeout-minutes: 20
         run: >-
           just --command cargo nextest run --package katana-render-runtime --lib --all-features
+          --cargo-profile "$KRR_VERIFY_BUILD_PROFILE"
           --locked --no-fail-fast --retries 0 --no-tests fail --test-threads "$TEST_THREADS"
           --user-config-file scripts/release/nextest-local-user.toml -E "$KRR_VERIFY_FILTERSET"
 
