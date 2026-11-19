@@ -6,6 +6,8 @@ import threading
 import time
 from dataclasses import dataclass
 
+import psutil
+
 VERSION = "7.2.2"
 INTERVAL_SECONDS = 1.0
 OBSERVATION_LIMIT_SECONDS = 2.0
@@ -63,8 +65,6 @@ def ratio_from_times(value: object) -> float:
 
 
 def _sample(interval: float | None) -> tuple[float, dict[str, float]]:
-    import psutil
-
     raw = psutil.cpu_times_percent(interval=interval, percpu=False)
     values = dict(raw._asdict())
     return ratio_from_times(values), values
@@ -78,8 +78,6 @@ def _duration(start: float, end: float) -> float:
 
 
 def start() -> Probe:
-    import psutil
-
     if psutil.__version__ != VERSION:
         raise ValueError("host CPU observer version differs")
     last = _timestamp()
@@ -104,8 +102,6 @@ def start() -> Probe:
 
 
 def finish(probe: Probe) -> tuple[float, float, dict[str, float]]:
-    import psutil
-
     if psutil.__version__ != VERSION or threading.get_ident() != probe.thread_id:
         raise ValueError("host CPU observer identity differs")
     now = _timestamp()
