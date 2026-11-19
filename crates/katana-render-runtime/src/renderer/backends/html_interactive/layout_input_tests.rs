@@ -32,3 +32,35 @@ fn checkbox_type_attribute_is_detected() {
 
     assert!(is_checkbox(&attrs));
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_text_input_uses_the_resolved_arial_stack_for_intrinsic_width() -> Result<(), String> {
+    use crate::renderer::backends::html_browser::{HtmlBrowserSource, HtmlBrowserViewport};
+    use crate::renderer::backends::html_interactive::HtmlInteractiveSession;
+    use crate::renderer::backends::html_interactive::tests::test_error;
+    use crate::renderer::backends::html_interactive::types::HitTargetKind;
+
+    const VIEWPORT_WIDTH: u32 = 620;
+    const VIEWPORT_HEIGHT: u32 = 900;
+    let html = r#"<style>.reference {font-family:Arial, 'Liberation Sans', sans-serif}</style>
+        <label>名称<input id="default"></label><input id="reference" class="reference">
+        <input id="short" size="10"><input id="short-reference" size="10" class="reference">"#;
+    let source = HtmlBrowserSource::new(html, "https://example.test/inputs").map_err(test_error)?;
+    let viewport =
+        HtmlBrowserViewport::new(VIEWPORT_WIDTH, VIEWPORT_HEIGHT, 1.0).map_err(test_error)?;
+    let mut session = HtmlInteractiveSession::start(source, viewport).map_err(test_error)?;
+    let mut width = |id: &str| -> Result<f32, String> {
+        let node = session.runtime.node_for_element_id(id).ok_or(id)?;
+        session
+            .hit_targets
+            .iter()
+            .find(|target| target.node_id == node.0 && matches!(target.kind, HitTargetKind::Input))
+            .map(|target| target.width)
+            .ok_or_else(|| format!("input target missing: {id}"))
+    };
+    assert_eq!(width("default")?, width("reference")?);
+    assert_eq!(width("short")?, width("short-reference")?);
+    assert!(width("default")? > width("short")?);
+    Ok(())
+}

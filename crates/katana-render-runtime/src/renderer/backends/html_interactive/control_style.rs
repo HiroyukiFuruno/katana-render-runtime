@@ -20,6 +20,20 @@ pub(super) fn ua_control_style(style: &CssStyle) -> CssStyle {
     style
 }
 
+pub(super) fn text_input_control_style(style: &CssStyle) -> CssStyle {
+    let mut style = ua_control_style(style);
+    if cfg!(target_os = "linux")
+        && style
+            .font_family
+            .trim_matches(['\'', '"'])
+            .eq_ignore_ascii_case("Arial")
+    {
+        /* WHY: Linuxでは実Arialを優先し、未導入時も入力幅と描画で同じ代替書体を使う。 */
+        style.font_family.push_str(", Liberation Sans, sans-serif");
+    }
+    style
+}
+
 pub(super) fn button_width(children: &[HtmlDocumentNode], width: f32, style: &CssStyle) -> f32 {
     if style.explicit_width {
         return style.explicit_width(width).unwrap_or(width);
