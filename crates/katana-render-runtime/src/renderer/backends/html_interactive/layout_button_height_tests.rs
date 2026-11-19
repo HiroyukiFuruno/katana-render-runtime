@@ -4,6 +4,7 @@ use crate::renderer::backends::html_browser::{
 use crate::renderer::backends::html_interactive::HtmlInteractiveSession;
 use crate::renderer::backends::html_interactive::tests::test_error;
 
+const BOTTOM_PADDING_TEST_OFFSET: f32 = 2.5;
 const HTML: &str = r#"<style>
     button { display:block; font:14px/28px Arial; padding:3px 4px 5px; border:2px solid; }
     #auto { background:#369abc; }
@@ -52,5 +53,6 @@ fn assert_button_box(
         .find(|target| target.node_id == node_id)
         .ok_or("missing button target")?;
     assert_eq!(target.height, height, "{id}");
-    Ok((target.x + target.width / 2.0, target.y + height - 2.5))
+    let y = target.y + height - BOTTOM_PADDING_TEST_OFFSET;
+    Ok((target.x + target.width / 2.0, y))
 }
