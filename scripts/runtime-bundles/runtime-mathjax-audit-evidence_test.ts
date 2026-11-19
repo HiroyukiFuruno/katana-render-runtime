@@ -1,4 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -78,7 +79,18 @@ test("actual current MathJax evidence revalidates physical provenance and both d
 test("MathJax evidence fingerprint is stable after complete validation", () => {
   const first = mathJaxEvidenceFingerprint(root);
   expect(first).toMatch(/^[a-f0-9]{64}$/);
-  expect(mathJaxEvidenceFingerprint(root)).toBe(first);
+  const receipt = currentReceipt();
+  expect(first).toBe(
+    createHash("sha256")
+      .update(
+        JSON.stringify({
+          inputsAfter: receipt.inputsAfter,
+          environment: receipt.environment,
+          bunVersion: receipt.bunVersion,
+        }),
+      )
+      .digest("hex"),
+  );
 });
 
 test("MathJax evidence fingerprint CLI emits the stable schema", () => {
