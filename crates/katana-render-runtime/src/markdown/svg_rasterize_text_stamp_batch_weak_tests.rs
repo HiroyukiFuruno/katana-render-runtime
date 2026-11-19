@@ -1,3 +1,4 @@
+use super::super::super::file_generation::stamp_path_uncached;
 use super::*;
 use std::fs::{self, FileTimes, OpenOptions};
 
