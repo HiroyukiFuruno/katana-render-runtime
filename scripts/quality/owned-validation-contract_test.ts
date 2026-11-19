@@ -92,7 +92,7 @@ const rootLintRecipe = [
   'retained_profile_arg="$retained_profile"; \\',
   "fi; \\",
   "just capacity-admission; \\",
-  `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity; \\`,
+  `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py \${retained_args[@]+"\${retained_args[@]}"} --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity; \\`,
   "just capacity-admission; \\",
   'just performance-harness-lint "$retained_profile_arg"',
 ].join("\n");
@@ -4212,7 +4212,7 @@ test.each([
   ["required admission", "--require-capacity", ""],
   ["JSON observation", "--print-json", ""],
   ["extra command", "--print-json", "--print-json; echo success"],
-  ["retained args forwarding", `"\${retained_args[@]}"`, '""'],
+  ["retained args forwarding", `\${retained_args[@]+"\${retained_args[@]}"}`, '""'],
 ])("capacity admission rejects changed COV retention contract: %s", (_label, before, after) => {
   const root = performanceHarnessFixture();
   const actual = actualRecipeBody("capacity-admission", true);

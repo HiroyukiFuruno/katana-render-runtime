@@ -1604,7 +1604,7 @@ function expectedRootLintRecipeLines(): string[] {
     'retained_profile_arg="$retained_profile"; \\',
     "fi; \\",
     "just capacity-admission; \\",
-    `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- ${deny}; \\`,
+    `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py \${retained_args[@]+"\${retained_args[@]}"} --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- ${deny}; \\`,
     "just capacity-admission; \\",
     'just performance-harness-lint "$retained_profile_arg"',
   ];
@@ -1617,7 +1617,10 @@ function expectedCapacityAdmissionRecipeLines(): string[] {
     'if [[ -d "$retained_profile" && ! -L "$retained_profile" ]]; then \\',
     'retained_args=(--retain-profile "$retained_profile"); \\',
     "fi; \\",
-    `python3 scripts/build/cargo_capacity_guard.py --root "{{REPO_ROOT}}" --target "{{REPO_ROOT}}/target" --state "{{REPO_ROOT}}/tmp/.cargo-capacity-guard.json" --require-capacity --print-json "\${retained_args[@]}"`,
+    'if [[ "${GITHUB_ACTIONS:-}" == true && ! -e "{{REPO_ROOT}}/tmp/.cargo-capacity-guard.json" ]]; then \\',
+    'python3 scripts/build/initialize_ci_capacity_state.py --root "{{REPO_ROOT}}" >&2; \\',
+    "fi; \\",
+    `python3 scripts/build/cargo_capacity_guard.py --root "{{REPO_ROOT}}" --target "{{REPO_ROOT}}/target" --state "{{REPO_ROOT}}/tmp/.cargo-capacity-guard.json" --require-capacity --print-json \${retained_args[@]+"\${retained_args[@]}"}`,
   ];
 }
 function rootLintCargoCommand(context: ContractContext): string | undefined {
@@ -1642,9 +1645,9 @@ function performanceRecipeCommands(): Record<string, string[]> {
       "@set -euo pipefail; \\",
       "retained_args=(); \\",
       "if [[ -n {{quote(retained_profile)}} ]]; then retained_args=(--retain-profile {{quote(retained_profile)}}); fi; \\",
-      `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain performance-baseline -- {{CARGO}} clippy -j {{JOBS}} --manifest-path ${PERFORMANCE_MANIFEST} --all-targets --no-default-features --features baseline --locked -- ${deny}; \\`,
+      `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py \${retained_args[@]+"\${retained_args[@]}"} --check-domain performance-baseline -- {{CARGO}} clippy -j {{JOBS}} --manifest-path ${PERFORMANCE_MANIFEST} --all-targets --no-default-features --features baseline --locked -- ${deny}; \\`,
       "just capacity-admission; \\",
-      `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "\${retained_args[@]}" --check-domain performance-candidate -- {{CARGO}} clippy -j {{JOBS}} --manifest-path ${PERFORMANCE_MANIFEST} --all-targets --no-default-features --features candidate --locked -- ${deny}; \\`,
+      `RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py \${retained_args[@]+"\${retained_args[@]}"} --check-domain performance-candidate -- {{CARGO}} clippy -j {{JOBS}} --manifest-path ${PERFORMANCE_MANIFEST} --all-targets --no-default-features --features candidate --locked -- ${deny}; \\`,
       "just capacity-admission",
     ],
     [PERFORMANCE_RECIPES.coverage]: [PERFORMANCE_COVERAGE_WRAPPER],
@@ -2032,7 +2035,7 @@ function rustStatic(context: ContractContext, name: string, members: string[]): 
   const lintBody = rootLintCargoCommand(context) ?? "";
   const lint = shellWords(lintBody);
   const command =
-    /^RUSTFLAGS="-D warnings"\s+CARGO_TARGET_DIR="\{\{REPO_ROOT\}\}\/target"\s+python3 scripts\/build\/cargo_capacity_guard\.py (?:"\$\{retained_args\[@\]\}" )?--check-domain root -- (?:cargo|\{\{CARGO\}\}) clippy(?:\s|$)/.test(
+    /^RUSTFLAGS="-D warnings"\s+CARGO_TARGET_DIR="\{\{REPO_ROOT\}\}\/target"\s+python3 scripts\/build\/cargo_capacity_guard\.py \$\{retained_args\[@\]\+"\$\{retained_args\[@\]\}"\} --check-domain root -- (?:cargo|\{\{CARGO\}\}) clippy(?:\s|$)/.test(
       lintBody,
     );
   if (

@@ -19,8 +19,6 @@ from types import FrameType
 from typing import BinaryIO
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "release"))
-import produce_html_performance_evidence as native_owner
-import verify_html_performance_evidence as rust_tools
 from cargo_capacity_guard import (
     JsonObject, _array, _integer, _number, _object, _text,
     _cargo_configuration, cargo_configuration_paths, collect_protected_references, load_state,
@@ -101,6 +99,9 @@ def cargo_proxy_command(environment: Mapping[str, str]) -> list[str]:
 
 
 def validate_rust_tool_launcher(request: JsonObject, name: str, attempt: Path) -> None:
+    import produce_html_performance_evidence as native_owner
+    import verify_html_performance_evidence as rust_tools
+
     global RUSTUP_QUERY_ATTEMPT
     environment = environment_record(request["environment"])
     executable_pin = validate_record(request[name])

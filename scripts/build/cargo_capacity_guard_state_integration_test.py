@@ -71,7 +71,7 @@ class CapacityStateIntegrationTest(unittest.TestCase):
         env.update(environment)
         script = Path(__file__).with_name("initialize_ci_capacity_state.py")
         return subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root), *arguments],
+            [sys.executable, "-S", str(script), "--root", str(self.root), *arguments],
             cwd=self.root,
             env=env,
             text=True,

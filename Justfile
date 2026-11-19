@@ -109,7 +109,7 @@ lint:
         retained_profile_arg="$retained_profile"; \
       fi; \
       just capacity-admission; \
-      RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "${retained_args[@]}" --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity; \
+      RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py ${retained_args[@]+"${retained_args[@]}"} --check-domain root -- {{CARGO}} clippy -j {{JOBS}} --workspace --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity; \
       just capacity-admission; \
       just performance-harness-lint "$retained_profile_arg"
 
@@ -149,7 +149,7 @@ native-nextest-diagnostic filter="": plantuml-install runtime-bundle-check
       retain_profile="{{REPO_ROOT}}/target/llvm-cov-target/krr-coverage"; \
       retain_args=(); \
       if [[ -d "$retain_profile" && ! -L "$retain_profile" ]]; then retain_args=(--retain-profile "$retain_profile"); fi; \
-      CARGO_BUILD_JOBS={{quote(JOBS)}} NEXTEST_STATE_DIR="{{REPO_ROOT}}/target/nextest-diagnostic-state" LLVM_PROFILE_FILE_NAME="krr-nextest-diagnostic-${diagnostic_run_id}-%4m.profraw" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-diagnostic-domain root "${retain_args[@]}" -- {{CARGO}} llvm-cov nextest --workspace --all-targets --all-features --locked --cargo-profile krr-coverage --no-report --no-fail-fast --retries 0 --user-config-file "{{REPO_ROOT}}/scripts/release/nextest-local-user.toml"{{NEXTEST_THREAD_ARGS}}{{if filter == "" { "" } else { " -E " + quote(filter) }}}
+      CARGO_BUILD_JOBS={{quote(JOBS)}} NEXTEST_STATE_DIR="{{REPO_ROOT}}/target/nextest-diagnostic-state" LLVM_PROFILE_FILE_NAME="krr-nextest-diagnostic-${diagnostic_run_id}-%4m.profraw" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" CARGO_LLVM_COV_TARGET_DIR="{{REPO_ROOT}}/target/llvm-cov-target" python3 scripts/build/cargo_capacity_guard.py --coverage-diagnostic-domain root ${retain_args[@]+"${retain_args[@]}"} -- {{CARGO}} llvm-cov nextest --workspace --all-targets --all-features --locked --cargo-profile krr-coverage --no-report --no-fail-fast --retries 0 --user-config-file "{{REPO_ROOT}}/scripts/release/nextest-local-user.toml"{{NEXTEST_THREAD_ARGS}}{{if filter == "" { "" } else { " -E " + quote(filter) }}}
 
 root-test-and-coverage: plantuml-install
     CARGO={{quote(CARGO)}} CARGO_BUILD_JOBS={{quote(JOBS)}} TEST_THREADS={{quote(TEST_THREADS)}} python3 scripts/release/native_nextest_root_coverage.py --repo "{{REPO_ROOT}}"
@@ -212,9 +212,9 @@ performance-harness-lint retained_profile="":
     @set -euo pipefail; \
       retained_args=(); \
       if [[ -n {{quote(retained_profile)}} ]]; then retained_args=(--retain-profile {{quote(retained_profile)}}); fi; \
-      RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "${retained_args[@]}" --check-domain performance-baseline -- {{CARGO}} clippy -j {{JOBS}} --manifest-path scripts/html/performance-harness/Cargo.toml --all-targets --no-default-features --features baseline --locked -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity; \
+      RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py ${retained_args[@]+"${retained_args[@]}"} --check-domain performance-baseline -- {{CARGO}} clippy -j {{JOBS}} --manifest-path scripts/html/performance-harness/Cargo.toml --all-targets --no-default-features --features baseline --locked -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity; \
       just capacity-admission; \
-      RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py "${retained_args[@]}" --check-domain performance-candidate -- {{CARGO}} clippy -j {{JOBS}} --manifest-path scripts/html/performance-harness/Cargo.toml --all-targets --no-default-features --features candidate --locked -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity; \
+      RUSTFLAGS="-D warnings" CARGO_TARGET_DIR="{{REPO_ROOT}}/target" python3 scripts/build/cargo_capacity_guard.py ${retained_args[@]+"${retained_args[@]}"} --check-domain performance-candidate -- {{CARGO}} clippy -j {{JOBS}} --manifest-path scripts/html/performance-harness/Cargo.toml --all-targets --no-default-features --features candidate --locked -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::panic -D clippy::wildcard_imports -D clippy::too_many_lines -D clippy::cognitive_complexity; \
       just capacity-admission
 
 # profileは分離し、全出力は同じroot targetの固定aggregate容量へ含める。
@@ -454,7 +454,10 @@ capacity-admission:
       if [[ -d "$retained_profile" && ! -L "$retained_profile" ]]; then \
         retained_args=(--retain-profile "$retained_profile"); \
       fi; \
-      python3 scripts/build/cargo_capacity_guard.py --root "{{REPO_ROOT}}" --target "{{REPO_ROOT}}/target" --state "{{REPO_ROOT}}/tmp/.cargo-capacity-guard.json" --require-capacity --print-json "${retained_args[@]}"
+      if [[ "${GITHUB_ACTIONS:-}" == true && ! -e "{{REPO_ROOT}}/tmp/.cargo-capacity-guard.json" ]]; then \
+        python3 scripts/build/initialize_ci_capacity_state.py --root "{{REPO_ROOT}}" >&2; \
+      fi; \
+      python3 scripts/build/cargo_capacity_guard.py --root "{{REPO_ROOT}}" --target "{{REPO_ROOT}}/target" --state "{{REPO_ROOT}}/tmp/.cargo-capacity-guard.json" --require-capacity --print-json ${retained_args[@]+"${retained_args[@]}"}
 
 mathjax-owned-evidence:
     NODE_ENV=test bun scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts
@@ -768,7 +771,7 @@ html-performance-evidence-produce catalog_manifest max_conditions='' condition_i
       if [[ -n "$max_conditions" ]]; then batch_args+=(--max-conditions "$max_conditions"); fi; \
       if [[ -n "$condition_id" ]]; then batch_args+=(--condition-id "$condition_id"); fi; \
       if [[ -n "$resume_batch" ]]; then batch_args+=(--resume-batch "$resume_batch"); fi; \
-      {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap produce --repo "{{REPO_ROOT}}" "${capacity_args[@]}" --catalog-plan "$manifest" "${batch_args[@]}"
+      {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap produce --repo "{{REPO_ROOT}}" "${capacity_args[@]}" --catalog-plan "$manifest" ${batch_args[@]+"${batch_args[@]}"}
 
 # HTML受入れとは独立にcandidate build proofだけを生成・検証する。
 html-performance-candidate-build-proof output capacity_binding capacity_binding_sha256:
