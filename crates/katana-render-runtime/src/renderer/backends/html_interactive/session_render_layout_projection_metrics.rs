@@ -42,7 +42,22 @@ pub(super) fn projection_fingerprint(nodes: &[HtmlDocumentNode]) -> u64 {
     hasher.finish()
 }
 
-pub(super) fn traced_node_count(trace: &HtmlDebugTrace, nodes: &[HtmlDocumentNode]) -> usize {
+pub(super) fn finish_projection_trace(
+    trace: &HtmlDebugTrace,
+    generation: u64,
+    started: Option<std::time::Instant>,
+    nodes: &[HtmlDocumentNode],
+) {
+    let node_count = traced_node_count(trace, nodes);
+    trace.finish(
+        generation,
+        "dom_css_projection",
+        started,
+        &[("nodes", node_count)],
+    );
+}
+
+fn traced_node_count(trace: &HtmlDebugTrace, nodes: &[HtmlDocumentNode]) -> usize {
     if trace.enabled() {
         node_count(nodes)
     } else {

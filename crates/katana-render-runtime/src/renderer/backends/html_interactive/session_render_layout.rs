@@ -11,7 +11,7 @@ use super::text_measurement_diagnostic::{
 use super::types::LayoutResult;
 use super::{HtmlBrowserError, runtime_failure};
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
-use projection_metrics::{projection_fingerprint, traced_node_count};
+use projection_metrics::{finish_projection_trace, projection_fingerprint};
 use std::collections::HashSet;
 
 impl HtmlInteractiveSession {
@@ -27,13 +27,7 @@ impl HtmlInteractiveSession {
         #[cfg(all(test, target_os = "macos"))]
         font_work::projection(&nodes, self, generation);
         self.invalidate_flow_measurements_if_projection_changed(&nodes);
-        let node_count = traced_node_count(&self.trace, &nodes);
-        self.trace.finish(
-            generation,
-            "dom_css_projection",
-            started,
-            &[("nodes", node_count)],
-        );
+        finish_projection_trace(&self.trace, generation, started, &nodes);
         let clickable_nodes = self.clickable_nodes(generation)?;
         let rendered = self.render_layout_svg(generation, &nodes, &clickable_nodes)?;
         finish_layout_total_trace(

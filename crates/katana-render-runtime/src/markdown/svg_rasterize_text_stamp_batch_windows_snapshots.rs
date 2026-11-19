@@ -8,6 +8,7 @@ use std::{
 };
 
 const MAX_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
+const VALIDATION_CHUNK_BYTES: usize = 8192;
 
 #[derive(Default)]
 pub(super) struct WindowsFontSnapshots {
@@ -72,7 +73,7 @@ fn regular_font_file_matches(path: &Path, expected: &[u8]) -> bool {
     if usize::try_from(metadata.len()).ok() != Some(expected.len()) {
         return false;
     }
-    let mut chunk = [0_u8; 8192];
+    let mut chunk = [0_u8; VALIDATION_CHUNK_BYTES];
     for expected_chunk in expected.chunks(chunk.len()) {
         let len = expected_chunk.len();
         if file.read_exact(&mut chunk[..len]).is_err() || &chunk[..len] != expected_chunk {

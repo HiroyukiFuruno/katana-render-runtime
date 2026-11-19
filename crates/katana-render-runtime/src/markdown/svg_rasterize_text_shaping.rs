@@ -37,8 +37,7 @@ mod fallback_memo;
 #[path = "svg_rasterize_text_usvg_cmap.rs"]
 mod usvg_cmap;
 
-pub(super) use super::font::HtmlFontRequest;
-pub(super) use super::font::html_font_db_for_measured_text;
+pub(super) use super::font::{HtmlFontRequest, html_font_db_for_measured_text};
 use resvg::usvg;
 #[path = "svg_rasterize_text_variations.rs"]
 mod variations;
@@ -180,8 +179,7 @@ pub(super) use harfrust::shape_run_character_metrics_with_trim;
 mod svg_fragments;
 #[path = "svg_rasterize_text_shaping_svg_metrics.rs"]
 mod svg_metrics;
-pub(super) use svg_fragments::SvgTextFragmentLayout;
-pub(super) use svg_fragments::shaped_svg_fragment_layout;
+pub(super) use svg_fragments::{SvgTextFragmentLayout, shaped_svg_fragment_layout};
 #[cfg(target_os = "macos")]
 pub(super) use svg_metrics::macos_svg_dom_layout_ascent;
 #[cfg(target_os = "macos")]
