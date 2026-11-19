@@ -1,7 +1,5 @@
-use super::{
-    StampBatch,
-    file_generation::{FileStamp, stamp_path_uncached},
-};
+use super::super::file_generation::{FileStamp, stamp_path_uncached};
+use super::StampBatch;
 
 pub(super) fn validate_batch(batch: Option<StampBatch>) -> bool {
     let Some(batch) = batch else {

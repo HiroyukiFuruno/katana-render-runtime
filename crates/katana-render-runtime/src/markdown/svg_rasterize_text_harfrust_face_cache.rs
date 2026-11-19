@@ -171,15 +171,22 @@ pub(super) fn font_for_face(
                 retained_source_bytes: data_len,
             })
         }
-        Source::File(path) => {
-            #[cfg(windows)]
-            if let Some(snapshot) = super::super::font::windows_font_snapshot(path.as_path()) {
-                let data: Arc<dyn AsRef<[u8]> + Send + Sync> = snapshot;
-                return load::binary_font(data, face_index);
-            }
-            load::file_font(database, face_id, path, face_index)
-        }
+        Source::File(path) => font_from_file_source(database, face_id, path, face_index),
     }
+}
+
+fn font_from_file_source(
+    database: &Database,
+    face_id: resvg::usvg::fontdb::ID,
+    path: std::path::PathBuf,
+    face_index: u32,
+) -> Option<FontHandle> {
+    #[cfg(windows)]
+    if let Some(snapshot) = super::super::font::windows_font_snapshot(path.as_path()) {
+        let data: Arc<dyn AsRef<[u8]> + Send + Sync> = snapshot;
+        return load::binary_font(data, face_index);
+    }
+    load::file_font(database, face_id, path, face_index)
 }
 
 #[cfg(test)]
