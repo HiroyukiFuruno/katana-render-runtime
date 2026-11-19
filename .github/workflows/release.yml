@@ -107,7 +107,7 @@ jobs:
       - name: Install Linux runtime test prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y fonts-noto-cjk graphviz
+          sudo apt-get install -y fonts-noto-cjk graphviz libfontconfig-dev libfreetype-dev
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable

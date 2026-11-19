@@ -34,6 +34,19 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             encoding="utf-8"
         )
 
+    def test_linux_native_and_publication_jobs_install_font_link_dependencies(self) -> None:
+        workflows = (
+            ("ci", self.ci, 2),
+            ("preflight", self.preflight, 1),
+            ("release", self.release, 1),
+            ("retry", self.retry, 1),
+        )
+        for name, workflow, installs in workflows:
+            with self.subTest(workflow=name):
+                commands = re.findall(r"^\s*sudo apt-get install -y ([^\n]+)$", workflow, re.MULTILINE)
+                packages = {"libfontconfig-dev", "libfreetype-dev"}
+                self.assertEqual(sum(packages.issubset(shlex.split(command)) for command in commands), installs)
+
     def test_owned_svg_model_tests_are_in_both_rustfmt_recipes(self) -> None:
         root = Path(__file__).parents[2]
         vendor = root / "crates/katana-render-runtime/vendor/svg-engine"
