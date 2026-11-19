@@ -9,6 +9,8 @@ use super::types::{
     ControlLayout, DetailsContext, ElementRenderContext, HitTargetKind, LayoutContext,
 };
 
+const BUTTON_UA_VERTICAL_PADDING: f32 = 1.0;
+
 impl HtmlLayoutRenderer {
     pub(super) fn render_button(
         &mut self,
@@ -125,13 +127,35 @@ fn button_dimensions(
     let available_width =
         (layout.width - layout.style.margin_left - layout.style.margin_right).max(MIN_LAYOUT_WIDTH);
     let button_width = button_width(element.children, available_width, &style);
-    let height = button_height(layout.style);
+    let height = button_height(element, layout.style, &mut style);
     apply_disabled_button_style(&mut style, element.attributes);
     (x, button_width, height, style)
 }
 
-fn button_height(style: &CssStyle) -> f32 {
-    style.height.unwrap_or(CONTROL_HEIGHT).max(style.min_height)
+fn button_height(
+    element: ElementRenderContext<'_>,
+    computed: &CssStyle,
+    style: &mut CssStyle,
+) -> f32 {
+    if let Some(height) = style.height {
+        return height.max(style.min_height);
+    }
+    if !style.explicit_padding {
+        style.padding_top = BUTTON_UA_VERTICAL_PADDING;
+        style.padding_bottom = BUTTON_UA_VERTICAL_PADDING;
+    }
+    style.normal_line_height = computed.normal_line_height;
+    if !computed.normal_line_height {
+        style.line_height = computed.line_height;
+        style.line_height_factor = computed.line_height_factor;
+    }
+    style.resolve_text_line_height(element.children);
+    (style.line_height
+        + style.padding_top
+        + style.padding_bottom
+        + style.border_top_width()
+        + style.border_bottom_width())
+    .max(style.min_height)
 }
 
 fn apply_disabled_button_style(style: &mut CssStyle, attributes: &[(String, String)]) {
@@ -152,6 +176,10 @@ fn summary_layout(layout: LayoutContext<'_>) -> ControlLayout<'_> {
         style: layout.style,
     }
 }
+
+#[cfg(test)]
+#[path = "layout_button_height_tests.rs"]
+mod button_height_tests;
 
 #[cfg(test)]
 mod tests {
