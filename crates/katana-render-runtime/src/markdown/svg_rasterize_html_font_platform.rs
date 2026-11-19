@@ -15,6 +15,10 @@ pub(in crate::markdown::svg_rasterize) trait PlatformFontStrategy {
         Family::SansSerif
     }
 
+    fn localized_sans_serif(&self, _: &str) -> Option<&'static str> {
+        None
+    }
+
     fn face_override(
         &self,
         _: &Database,
@@ -35,6 +39,27 @@ pub(in crate::markdown::svg_rasterize) fn font_platform() -> impl PlatformFontSt
     selected
 }
 
+pub(in crate::markdown::svg_rasterize) fn localized_font_family(
+    family: &str,
+    localized: &str,
+) -> Option<String> {
+    let is_generic = |name: &str| name.trim().eq_ignore_ascii_case("sans-serif");
+    family.split(',').any(is_generic).then(|| {
+        family
+            .split(',')
+            .map(str::trim)
+            .filter(|name| {
+                !matches!(
+                    name.to_ascii_lowercase().as_str(),
+                    "-apple-system" | "blinkmacsystemfont"
+                )
+            })
+            .map(|name| if is_generic(name) { localized } else { name })
+            .collect::<Vec<_>>()
+            .join(", ")
+    })
+}
+
 struct FontconfigFonts;
 
 impl PlatformFontStrategy for FontconfigFonts {
@@ -46,6 +71,15 @@ impl PlatformFontStrategy for FontconfigFonts {
     fn installed_system_ui_family(&self) -> Option<&'static str> {
         static FAMILY: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
         FAMILY.get_or_init(fontconfig_system_ui_family).as_deref()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn localized_sans_serif(&self, language: &str) -> Option<&'static str> {
+        let primary = language.split('-').next()?;
+        /* WHY: Linux Chromeの日本語sans-serifは、欧文を含めて日本語用の書体リストを使う。 */
+        primary
+            .eq_ignore_ascii_case("ja")
+            .then_some("Noto Sans JP, Noto Sans CJK JP, sans-serif")
     }
 }
 

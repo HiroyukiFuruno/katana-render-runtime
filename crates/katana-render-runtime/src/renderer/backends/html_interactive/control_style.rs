@@ -12,7 +12,7 @@ pub(super) fn ua_control_style(style: &CssStyle) -> CssStyle {
         return style.clone();
     }
     let mut style = style.clone();
-    style.font_family = "Arial".to_string();
+    style.set_font_family("Arial".to_string());
     style.font_size = UA_CONTROL_FONT_SIZE;
     style.line_height = UA_CONTROL_LINE_HEIGHT;
     style.line_height_factor = None;
@@ -29,7 +29,8 @@ pub(super) fn text_input_control_style(style: &CssStyle) -> CssStyle {
             .eq_ignore_ascii_case("Arial")
     {
         /* WHY: Linuxでは実Arialを優先し、未導入時も入力幅と描画で同じ代替書体を使う。 */
-        style.font_family.push_str(", Liberation Sans, sans-serif");
+        let family = format!("{}, Liberation Sans, sans-serif", style.font_family);
+        style.set_font_family(family);
     }
     style
 }

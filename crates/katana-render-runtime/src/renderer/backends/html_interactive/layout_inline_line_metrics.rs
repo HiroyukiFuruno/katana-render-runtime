@@ -32,7 +32,7 @@ impl InlineLineMetrics {
         }
         if let Some(baseline) = SvgRasterizeOps::html_text_baseline_for_text(
             text,
-            &style.font_family,
+            style.used_font_family(),
             style.font_size,
             style.font_weight,
             style.italic,

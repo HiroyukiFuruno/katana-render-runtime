@@ -75,7 +75,7 @@ fn character_width_for_size(size: usize, style: &CssStyle) -> f32 {
     let representative =
         text_width("0", style).max(style.font_size * style.text_character_width_factor());
     let measured = SvgRasterizeOps::html_input_character_metrics(
-        &style.font_family,
+        style.used_font_family(),
         style.font_size,
         style.font_weight,
         style.italic,

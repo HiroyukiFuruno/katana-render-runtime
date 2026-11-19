@@ -85,7 +85,7 @@ fn text_baseline_offset(line: &str, style: &CssStyle) -> f32 {
     style.text_baseline_offset.unwrap_or_else(|| {
         SvgRasterizeOps::html_text_baseline_for_text(
             line,
-            &style.font_family,
+            style.used_font_family(),
             style.font_size,
             style.font_weight,
             style.italic,
@@ -158,7 +158,7 @@ fn font_feature_settings(style: &CssStyle) -> String {
 fn font_feature_dx(text: &str, style: &CssStyle) -> Option<String> {
     let dx = SvgRasterizeOps::shape_html_text_dx_with_trim(
         text,
-        &style.font_family,
+        style.used_font_family(),
         style.font_size,
         style.font_weight,
         style.italic,

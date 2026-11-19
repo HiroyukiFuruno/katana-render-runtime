@@ -15,6 +15,8 @@ mod declaration;
 mod declaration_element;
 #[path = "style_dimension_declaration.rs"]
 mod dimension_declaration;
+#[path = "style_font_context.rs"]
+mod font_context;
 #[cfg(test)]
 #[path = "style_property_case_tests.rs"]
 mod property_case_tests;

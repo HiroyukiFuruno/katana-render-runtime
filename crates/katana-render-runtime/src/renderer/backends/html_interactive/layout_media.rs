@@ -166,7 +166,7 @@ fn position_embedded_svg(markup: &str, x: f32, y: f32, width: f32, height: f32) 
 }
 
 fn inherit_svg_text_style(markup: &str, style: &CssStyle) -> String {
-    let family = escape_xml(&style.font_family);
+    let family = escape_xml(style.used_font_family());
     let color = escape_xml(&style.color);
     let size = SvgRasterizeOps::effective_html_font_size(style.font_size);
     let font_style = if style.italic { "italic" } else { "normal" };

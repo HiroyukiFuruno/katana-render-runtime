@@ -111,6 +111,8 @@ pub(in crate::renderer::backends::html_interactive) struct CssStyle {
     pub(in crate::renderer::backends::html_interactive) normal_line_height: bool,
     pub(in crate::renderer::backends::html_interactive) text_baseline_offset: Option<f32>,
     pub(in crate::renderer::backends::html_interactive) font_family: String,
+    pub(in crate::renderer::backends::html_interactive) font_context:
+        super::font_context::FontContext,
     pub(in crate::renderer::backends::html_interactive) font_feature_settings: Option<String>,
     pub(in crate::renderer::backends::html_interactive) text_spacing_trim: CssTextSpacingTrim,
     pub(in crate::renderer::backends::html_interactive) italic: bool,

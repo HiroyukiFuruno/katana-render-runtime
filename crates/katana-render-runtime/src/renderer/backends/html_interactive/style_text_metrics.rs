@@ -10,7 +10,7 @@ impl CssStyle {
         self.font_size != other.font_size
             || self.line_height != other.line_height
             || self.line_height_factor != other.line_height_factor
-            || self.font_family != other.font_family
+            || self.used_font_family() != other.used_font_family()
             || self.font_weight != other.font_weight
             || self.italic != other.italic
             || self.letter_spacing != other.letter_spacing
@@ -43,7 +43,11 @@ impl CssStyle {
     pub(in crate::renderer::backends::html_interactive) fn text_character_width_factor(
         &self,
     ) -> f32 {
-        if self.font_family.to_ascii_lowercase().contains("mono") {
+        if self
+            .used_font_family()
+            .to_ascii_lowercase()
+            .contains("mono")
+        {
             MONOSPACE_CHARACTER_WIDTH_FACTOR
         } else {
             TEXT_CHARACTER_WIDTH_FACTOR
@@ -61,7 +65,7 @@ impl CssStyle {
         let text = super::super::document::node_text(children);
         let measured = crate::markdown::svg_rasterize::SvgRasterizeOps::html_line_metrics(
             &text,
-            &self.font_family,
+            self.used_font_family(),
             self.font_size,
             self.font_weight,
             self.italic,
@@ -130,7 +134,7 @@ impl CssStyle {
         }
         let measured = crate::markdown::svg_rasterize::SvgRasterizeOps::html_line_metrics(
             &super::super::document::node_text(children),
-            &control.font_family,
+            control.used_font_family(),
             control.font_size,
             control.font_weight,
             control.italic,

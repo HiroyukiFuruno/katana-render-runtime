@@ -92,7 +92,7 @@ fn flex_cross_alignment(style: &CssStyle, height: f32, content_height: f32) -> f
 fn inline_flex_baseline(text: &str, style: &CssStyle) -> Option<f32> {
     SvgRasterizeOps::html_text_baseline_for_text(
         text,
-        &style.font_family,
+        style.used_font_family(),
         style.font_size,
         style.font_weight,
         style.italic,

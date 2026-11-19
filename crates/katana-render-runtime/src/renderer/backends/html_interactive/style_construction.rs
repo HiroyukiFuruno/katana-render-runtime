@@ -81,7 +81,8 @@ impl CssStyle {
         inherited: &Self,
     ) -> Self {
         let started = super::super::text_measurement_diagnostic::start_style_timing();
-        let style = Self::from_element_attributes_body(tag, attributes, inherited);
+        let mut style = Self::from_element_attributes_body(tag, attributes, inherited);
+        style.resolve_font_context(attribute(attributes, "lang"), inherited);
         super::super::text_measurement_diagnostic::record_style_timing(started);
         style
     }
@@ -139,6 +140,13 @@ impl CssStyle {
             viewport_width: self.viewport_width,
             viewport_height: self.viewport_height,
             percentage_height_basis: self.percentage_height_basis,
+            ..self.child_style_defaults()
+        }
+    }
+
+    fn child_style_defaults(&self) -> Self {
+        Self {
+            font_context: self.font_context.clone(),
             ..Self::default_with_text_defaults(
                 self.viewport_width,
                 self.viewport_height,

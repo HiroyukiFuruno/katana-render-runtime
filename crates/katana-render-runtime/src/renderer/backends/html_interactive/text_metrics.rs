@@ -37,7 +37,7 @@ impl TextMeasurementKey {
     fn new(text: &str, style: &CssStyle) -> Self {
         Self {
             text_sha256: Sha256::digest(text.as_bytes()).into(),
-            font_family_sha256: Sha256::digest(style.font_family.as_bytes()).into(),
+            font_family_sha256: Sha256::digest(style.used_font_family().as_bytes()).into(),
             font_size: style.font_size.to_bits(),
             font_weight: style.font_weight,
             italic: style.italic,
@@ -99,7 +99,7 @@ fn text_width_after_cache_miss(text: &str, style: &CssStyle, key: TextMeasuremen
     let preparation_started = start_preparation_timing();
     let prepared = SvgRasterizeOps::prepare_html_text_measurement_with_trim(
         text,
-        &style.font_family,
+        style.used_font_family(),
         style.font_size,
         (style.font_weight, style.italic),
         style.letter_spacing,
@@ -194,7 +194,7 @@ mod tests {
     fn measured_text_width(text: &str, style: &CssStyle) -> f32 {
         match SvgRasterizeOps::measure_html_text_with_cache_status(
             text,
-            &style.font_family,
+            style.used_font_family(),
             style.font_size,
             style.font_weight,
             style.italic,
@@ -226,7 +226,7 @@ mod tests {
         let style = CssStyle::browser_default();
         let legacy = SvgRasterizeOps::measure_html_text(
             "status probe",
-            &style.font_family,
+            style.used_font_family(),
             style.font_size,
             style.font_weight,
             style.italic,
@@ -235,7 +235,7 @@ mod tests {
         );
         let status = SvgRasterizeOps::measure_html_text_with_cache_status(
             "status probe",
-            &style.font_family,
+            style.used_font_family(),
             style.font_size,
             style.font_weight,
             style.italic,
@@ -255,7 +255,7 @@ mod tests {
         let style = CssStyle::browser_default();
         let empty = SvgRasterizeOps::measure_html_text_with_cache_status(
             "",
-            &style.font_family,
+            style.used_font_family(),
             style.font_size,
             style.font_weight,
             style.italic,

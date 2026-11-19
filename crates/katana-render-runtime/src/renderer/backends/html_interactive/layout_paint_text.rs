@@ -41,7 +41,7 @@ impl FontMarkupCache {
     ) -> (String, String) {
         let key = FontMarkupKey {
             text: text.to_string(),
-            font_family: style.font_family.clone(),
+            font_family: style.used_font_family().to_owned(),
             font_weight: style.font_weight,
             italic: style.italic,
             x: x.to_bits(),
@@ -88,7 +88,7 @@ fn retained_markup_bytes(key: &FontMarkupKey, markup: &(String, String)) -> usiz
 fn resolved_font_markup(text: &str, style: &CssStyle, x: f32) -> (String, String) {
     let runs = SvgRasterizeOps::html_text_font_runs(
         text,
-        &style.font_family,
+        style.used_font_family(),
         style.font_weight,
         style.italic,
     );
@@ -101,7 +101,7 @@ fn resolved_font_markup(text: &str, style: &CssStyle, x: f32) -> (String, String
     let markup = font_runs_markup(text, style, runs, x);
     #[cfg(all(test, target_os = "macos"))]
     SvgRasterizeOps::record_actual_html_font_markup(
-        &style.font_family,
+        style.used_font_family(),
         style.font_weight,
         run_families.as_deref(),
         &markup.0,
@@ -179,7 +179,7 @@ fn multi_run_markup(
 fn author_family_markup(style: &CssStyle) -> String {
     format!(
         "font-family=\"{}\"",
-        super::super::svg::escape_xml(&style.font_family)
+        super::super::svg::escape_xml(style.used_font_family())
     )
 }
 

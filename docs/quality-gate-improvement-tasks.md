@@ -13,6 +13,8 @@
 - [/] フォント探索とシステム書体の選択をFactoryとStrategyへ移し、共通の選択・文字組みにOS分岐が戻った場合に必須AST検査で検知する。分岐を埋め込んだ負例の検査とLinuxの書体回帰1件、Windowsの関連9件が成功した。最終候補での3 OS検査は残る。[Linux検証](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44625584540)・[Windows回帰](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44624997720)
 - [/] Linuxの同じ25画像で合格は4から16に増えた。HTML内のMermaidとdraw.ioは5／5ずつ（最低92.44・91.01）、文字組みは2／2（最低90.94）。入力状態2画像（最低89.64）と長文資料7画像（最低87.84）が残る。長文の本文は同じ画像で文字が代表的に1 px上へ寄っており、入力幅と本文基準線のChrome／KRR実測で原因を絞る。[Linux比較](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44625584540)
 - [/] 入力欄の寸法はChrome／KRRとも185×21 px。日本語はChromeがWenQuanYi Zen Hei、KRRがNoto Sans CJK JPを選ぶ。長文の段落上端はどちらも約2161.656 px、字形はNoto Sans CJK JP。段落上端からの基準線はChrome 21 px、KRR 20 px。Chromeで書体指定と実際の文字を切り替え、基準線を選ぶ条件を分離する。[座標計測](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44630445528/attempts/2)
+- [/] Linux Chromeの日本語文書では、文章が和文でも欧文でも、`sans-serif`とNoto Sans CJK JPの基準線は21 px、Arialの基準線は20 px。書体を解く際にHTMLの`lang`を継承し、日本語の汎用書体候補をStrategyで選ぶ。明示した書体の順序と子要素の言語上書きは保持し、測定・描画・キャッシュに同じ結果を使う。[書体別の実測](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44634737694)
+- [/] `f9e0dfda` のLinux限定比較で動的画像15／15が90点以上（最低94.29583）、スクリプト23機能が合格。入力操作は18／18で状態一致し、画像は9／18が90点以上（最低88.65970）。620 px幅の6条件と960 px幅の3条件で画像差が残る。[動的HTMLと入力状態の比較](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44634905507)
 - [/] 全画像・操作・集計を含む正式比較には1138.188秒と1698.068秒を要した過去の実行記録がある。CIの上限を35分に設定し、既存の入力・閾値・失敗判定を維持する。現行候補での完走を確認する。
 
 - [x] `9b9f5836` の完全品質ゲートは6,720件成功、製品カバレッジ87,815／87,815行。Mermaid製品PNGは独立raw JS基準で全117件が99以上。15 GiBの固定上限でLinux CIは旧上限に阻まれた工程を通過した。原ログは `tmp/quality/resumed-owner-r3509/release-9b9f5836-json-and-capacity-GTU6lwJM/`。
