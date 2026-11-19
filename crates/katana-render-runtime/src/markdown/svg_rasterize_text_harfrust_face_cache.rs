@@ -1,6 +1,8 @@
 use harfrust::font::Font;
 use resvg::usvg::fontdb::{Database, Source};
 use std::cell::RefCell;
+#[cfg(windows)]
+use std::sync::Arc;
 
 #[path = "svg_rasterize_text_harfrust_face_cache_entry.rs"]
 mod entry;
@@ -169,7 +171,15 @@ pub(super) fn font_for_face(
                 retained_source_bytes: data_len,
             })
         }
-        Source::File(path) => load::file_font(database, face_id, path, face_index),
+        Source::File(path) => {
+            #[cfg(windows)]
+            if let Some(snapshot) = super::super::super::font::windows_font_snapshot(path.as_path())
+            {
+                let data: Arc<dyn AsRef<[u8]> + Send + Sync> = snapshot;
+                return load::binary_font(data, face_index);
+            }
+            load::file_font(database, face_id, path, face_index)
+        }
     }
 }
 

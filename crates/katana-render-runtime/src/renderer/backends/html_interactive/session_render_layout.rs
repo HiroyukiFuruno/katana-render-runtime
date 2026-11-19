@@ -102,7 +102,17 @@ impl HtmlInteractiveSession {
         nodes: &[HtmlDocumentNode],
         clickable_nodes: &HashSet<u64>,
     ) -> Result<LayoutResult, HtmlBrowserError> {
+        #[cfg(windows)]
+        let mut retry = false;
         SvgRasterizeOps::with_html_font_render_scope(|| {
+            #[cfg(windows)]
+            {
+                if std::mem::replace(&mut retry, true) {
+                    /* WHY: フォントが変わった再試行では、前のフォントで測定した高さを使わない。 */
+                    self.flow_measurements.borrow_mut().clear();
+                }
+                SvgRasterizeOps::enable_windows_font_snapshots();
+            }
             HtmlLayoutRenderer::render_with_clickable_nodes_and_cache(
                 nodes,
                 self.viewport,

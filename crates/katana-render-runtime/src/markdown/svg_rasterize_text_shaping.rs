@@ -74,6 +74,8 @@ pub(super) use usvg_cmap::loaded_html_font;
 
 #[path = "svg_rasterize_text_shaping_scope.rs"]
 mod scope;
+#[cfg(windows)]
+pub(super) use font::enable_windows_font_snapshots;
 pub(super) use scope::{with_font_face_cache_scope, with_render_scoped_stamp_batch};
 
 #[cfg(test)]

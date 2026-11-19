@@ -141,7 +141,9 @@ fn resolve_face_line_metrics(
 }
 
 fn legacy_line_metrics(database: &Database, id: ID, size: f32) -> Option<(f32, f32)> {
-    database.with_face_data(id, |data, index| face_line_metrics(data, index, size))?
+    super::font::with_layout_font_face_data(database, id, |data, index| {
+        face_line_metrics(data, index, size)
+    })?
 }
 
 fn face_line_metrics(data: &[u8], index: u32, size: f32) -> Option<(f32, f32)> {

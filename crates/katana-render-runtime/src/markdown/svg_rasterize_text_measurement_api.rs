@@ -64,6 +64,11 @@ impl SvgRasterizeOps {
         text_shaping::with_render_scoped_stamp_batch(operation)
     }
 
+    #[cfg(windows)]
+    pub(crate) fn enable_windows_font_snapshots() {
+        text_shaping::enable_windows_font_snapshots();
+    }
+
     pub(crate) fn clear_html_line_metrics_cache() {
         text_shaping::clear_html_line_metrics_cache();
     }

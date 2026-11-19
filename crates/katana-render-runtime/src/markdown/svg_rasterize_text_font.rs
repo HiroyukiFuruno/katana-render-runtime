@@ -18,6 +18,8 @@ pub(super) use file_generation::{
     observe_file_face_generation,
 };
 pub(super) use glyph_cache::cached_font_has_char_with_generation;
+#[cfg(windows)]
+pub(super) use stamp_batch::{enable_windows_font_snapshots, windows_font_snapshot};
 pub(super) use stamp_batch::{memo_usable, with_reusable_stamp_batch, with_validated_stamp_batch};
 
 pub(super) fn with_render_scoped_stamp_batch<T>(operation: impl FnMut() -> T) -> T {
@@ -185,14 +187,27 @@ fn probe_font_has_char(
     face_id: usvg::fontdb::ID,
     character: char,
 ) -> Option<bool> {
-    database
-        .with_face_data(face_id, |data, face_index| {
-            /* WHY: glyphの有無だけを調べるため、不要なGSUB/GPOS coverage構築を省く。 */
-            rustybuzz::ttf_parser::Face::parse(data, face_index)
-                .ok()
-                .map(|face| face.glyph_index(character).is_some())
-        })
-        .flatten()
+    with_layout_font_face_data(database, face_id, |data, face_index| {
+        /* WHY: glyphの有無だけを調べるため、不要なGSUB/GPOS coverage構築を省く。 */
+        rustybuzz::ttf_parser::Face::parse(data, face_index)
+            .ok()
+            .map(|face| face.glyph_index(character).is_some())
+    })
+    .flatten()
+}
+
+pub(super) fn with_layout_font_face_data<T>(
+    database: &usvg::fontdb::Database,
+    face_id: usvg::fontdb::ID,
+    operation: impl FnOnce(&[u8], u32) -> T,
+) -> Option<T> {
+    #[cfg(windows)]
+    if let Some((usvg::fontdb::Source::File(path), face_index)) = database.face_source(face_id)
+        && let Some(bytes) = windows_font_snapshot(path.as_path())
+    {
+        return Some(operation(bytes.as_slice(), face_index));
+    }
+    database.with_face_data(face_id, operation)
 }
 #[cfg(test)]
 #[path = "svg_rasterize_text_font_db_token_tests.rs"]

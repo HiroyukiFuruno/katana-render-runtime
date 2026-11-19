@@ -5,11 +5,19 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(windows)]
+#[path = "svg_rasterize_text_stamp_batch_windows_snapshots.rs"]
+mod windows_snapshots;
+#[cfg(windows)]
+use windows_snapshots::WindowsFontSnapshots;
+
 const MAX_BATCH_PATHS: usize = 256;
 
 #[derive(Default)]
 struct StampBatch {
     stamps: HashMap<PathBuf, FileStamp>,
+    #[cfg(windows)]
+    windows_font_snapshots: Option<WindowsFontSnapshots>,
     invalid: bool,
     overflow: bool,
     memo_disabled: bool,
@@ -112,6 +120,27 @@ pub(super) fn cached_stamp(path: &Path) -> Option<FileStamp> {
     })
 }
 
+#[cfg(windows)]
+pub(in super::super) fn enable_windows_font_snapshots() {
+    ACTIVE_BATCH.with(|active| {
+        if let Some(batch) = active.borrow_mut().as_mut() {
+            batch.windows_font_snapshots.get_or_insert_default();
+        }
+    });
+}
+
+#[cfg(windows)]
+pub(in super::super) fn windows_font_snapshot(path: &Path) -> Option<std::sync::Arc<Vec<u8>>> {
+    ACTIVE_BATCH.with(|active| {
+        active
+            .borrow_mut()
+            .as_mut()?
+            .windows_font_snapshots
+            .as_mut()?
+            .read(path)
+    })
+}
+
 pub(super) fn remember_stamp(path: &Path, stamp: FileStamp) {
     ACTIVE_BATCH.with(|active| {
         let mut active = active.borrow_mut();
@@ -165,9 +194,20 @@ fn validate_batch(batch: Option<StampBatch>) -> bool {
             valid = false;
         }
     }
+    #[cfg(windows)]
+    if batch
+        .windows_font_snapshots
+        .as_ref()
+        .is_some_and(|snapshots| !snapshots.matches_current())
+    {
+        valid = false;
+    }
     valid
 }
 
 #[cfg(test)]
 #[path = "svg_rasterize_text_stamp_batch_tests.rs"]
 mod tests;
+#[cfg(all(test, windows))]
+#[path = "svg_rasterize_text_stamp_batch_windows_snapshot_tests.rs"]
+mod windows_snapshot_tests;
