@@ -15,6 +15,8 @@ import {
 } from "./reference-capture";
 
 test("static capture isolates contexts, scores real PNGs, and survives a failed case", async () => {
+  // Chromeの起動、複数コンテキストの実描画、失敗後の再取得を一つのセッションで確認する。
+  test.slow();
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "krr-browser-reuse-"));
   const htmlPath = path.join(directory, "fixture.html");
   const brokenHtmlPath = path.join(directory, "broken.html");

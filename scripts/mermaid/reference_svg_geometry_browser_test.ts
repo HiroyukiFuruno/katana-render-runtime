@@ -246,54 +246,41 @@ test("SVG tspan boundaries preserve within-span kerning with a bundled font", as
 });
 
 test.describe("low-contrast C4 color changes pass the paint-aligned actual PNG gate", () => {
-  let root: string | undefined;
-  let pair: ReferencePair | undefined;
-  let projected: Awaited<ReturnType<typeof scorePaintProjectedReferenceTargets>> | undefined;
-
-  test.beforeAll(async ({ browser }) => {
+  test("keeps RGB below 99 while actual PNG shape passes", async ({ browser }) => {
+    // Chromeの実画像取得とImageMagickの採点を、同じ一時ディレクトリの所有期間に含める。
+    test.slow();
     const fixtureRoot = fs.realpathSync(
       fs.mkdtempSync(path.join(os.tmpdir(), "krr-c4-low-contrast-control-")),
     );
-    root = fixtureRoot;
-    const page = await browser.newPage({
-      viewport: { width: 1520, height: 845 },
-      deviceScaleFactor: 1,
-    });
-    let fixturePair: ReferencePair;
     try {
-      fixturePair = await captureLowContrastC4Control(fixtureRoot, page);
-      pair = fixturePair;
+      const page = await browser.newPage({
+        viewport: { width: 1520, height: 845 },
+        deviceScaleFactor: 1,
+      });
+      let fixturePair: ReferencePair;
+      try {
+        fixturePair = await captureLowContrastC4Control(fixtureRoot, page);
+      } finally {
+        await page.close();
+      }
+      const projectionDirectory = path.join(fixtureRoot, "projection");
+      fs.mkdirSync(projectionDirectory);
+      const projectionMagick = new MagickOps(
+        path.join(fixtureRoot, "projection-metrics"),
+        null,
+        "dark",
+      );
+      projectionMagick.prepare();
+      const projection = await scorePaintProjectedReferenceTargets(
+        [fixturePair],
+        projectionDirectory,
+        "dark",
+        projectionMagick,
+      );
+      expectLowContrastC4ProductScore(fixtureRoot, fixturePair, projection);
     } finally {
-      await page.close();
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
     }
-    const projectionDirectory = path.join(fixtureRoot, "projection");
-    fs.mkdirSync(projectionDirectory);
-    const projectionMagick = new MagickOps(
-      path.join(fixtureRoot, "projection-metrics"),
-      null,
-      "dark",
-    );
-    projectionMagick.prepare();
-    projected = await scorePaintProjectedReferenceTargets(
-      [fixturePair],
-      projectionDirectory,
-      "dark",
-      projectionMagick,
-    );
-  });
-
-  test.afterAll(() => {
-    if (root !== undefined) fs.rmSync(root, { recursive: true, force: true });
-  });
-
-  test("keeps RGB below 99 while actual PNG shape passes", () => {
-    const fixtureRoot = root,
-      fixturePair = pair,
-      projection = projected;
-    if (fixtureRoot === undefined || fixturePair === undefined || projection === undefined) {
-      throw new Error("Low-contrast C4 fixture was not initialized");
-    }
-    expectLowContrastC4ProductScore(fixtureRoot, fixturePair, projection);
   });
 });
 
