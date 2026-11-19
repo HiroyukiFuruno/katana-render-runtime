@@ -1,6 +1,9 @@
 # 品質ゲート改善の作業台帳
 
-## 公開候補の現在地点（2026-11-19）
+## 公開候補の現在地点（2026-11-20）
+
+- [x] `9b9f5836` の完全品質ゲートは6,720件成功、製品カバレッジ87,815／87,815行。Mermaid製品PNGは独立raw JS基準で全117件が99以上。15 GiBの固定上限でLinux CIは旧上限に阻まれた工程を通過した。原ログは `tmp/quality/resumed-owner-r3509/release-9b9f5836-json-and-capacity-GTU6lwJM/`。
+- [ ] PR #120の同HEADではLinuxがテスト用Chromiumの未導入、macOSがブラウザ証跡の採取準備の時間超過、Windowsが5,922件中51件の失敗で停止した。`48bdb6f8` でブラウザ準備を修正した。Windowsのパス・資源キャッシュ・SVG合成・回帰入力と、HTMLの初回フラグメント表示を修正し、macOSの関連56件、書式・AST・重複検査、性能ハーネスの固定依存検査が成功した。表示と終了を含む目次fixtureは3.864秒だった。最新候補の完全品質ゲート、描画と性能、PRレビューと必須CIは未完了。
 
 - [x] `47d5fee1` の完全ローカル品質ゲートと通常pushが成功。製品87,815／87,815行。Mermaid製品PNGは独立raw JS比較で117／117件が99以上、最低99.085711。必須CIではLinuxの固定容量上限、WindowsのUnix専用インポート、macOSのImageMagick未導入で失敗した。
 - [/] 実測最大7.11 GiBを基に容量の固定上限を15 GiBへ更新し、過去の証跡が参照する旧stateを元のパスに保持した。容量管理476件、Mermaid関連188件、Windows向け対象コンパイル、macOS実ブラウザとCI構成の回帰が成功。最新候補の完全検査、レビュー、必須CIと公開は未完了。証跡は `tmp/quality/resumed-owner-r3509/release-capacity-15g-and-native-ci-B6kB6ei5/`。
