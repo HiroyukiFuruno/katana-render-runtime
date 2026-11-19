@@ -44,7 +44,7 @@ on:
           - linux-fidelity
           - windows
       verify_filter:
-        description: Optional nextest filter, linux-assets test pattern, or linux-fidelity selection (samples, visual-fixes, remaining-html, marker-css, code-width, font-stack, font-geometry).
+        description: Optional nextest filter, linux-assets test pattern, or linux-fidelity selection (samples, visual-fixes, remaining-html, marker-css, code-width, font-stack, font-geometry, dynamic-html).
         required: false
         default: ''
         type: string
@@ -582,7 +582,8 @@ jobs:
         if: >-
           matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-assets' &&
           (inputs.verify_platform != 'linux-fidelity' ||
-            (inputs.verify_filter != 'marker-css' && inputs.verify_filter != 'font-stack' && inputs.verify_filter != 'font-geometry'))
+            (inputs.verify_filter != 'marker-css' && inputs.verify_filter != 'font-stack' &&
+              inputs.verify_filter != 'font-geometry' && inputs.verify_filter != 'dynamic-html'))
         timeout-minutes: 15
         run: |
           just html-fidelity-probe-build
@@ -686,6 +687,32 @@ jobs:
           (inputs.verify_platform != 'linux-fidelity' || inputs.verify_filter == '')
         timeout-minutes: 15
         run: just html-interaction-check
+
+      - name: Check Linux dynamic HTML and input operations independently
+        if: >-
+          matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
+          inputs.verify_filter == 'dynamic-html'
+        timeout-minutes: 15
+        run: |
+          result=0
+          just html-dynamic-fidelity-interim-check || result=1
+          just html-input-state-fidelity-interim-check || result=1
+          exit "$result"
+
+      - name: Upload manual dynamic HTML comparison evidence
+        if: >-
+          always() && matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
+          inputs.verify_filter == 'dynamic-html'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verify-html-dynamic-interim
+          path: |
+            tmp/html-fidelity/dynamic-interim
+            tmp/html-fidelity/input-state-interim
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload independent HTML comparison evidence
         if: matrix.os == 'ubuntu-latest' && steps.html_policy.outputs.phase == 'final' && always()
