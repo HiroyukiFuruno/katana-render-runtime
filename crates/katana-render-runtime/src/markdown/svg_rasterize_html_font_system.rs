@@ -144,6 +144,22 @@ fn fontconfig_font_paths(families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
     )
 }
 
+#[cfg(target_os = "linux")]
+pub(in crate::markdown::svg_rasterize) fn linux_system_ui_family() -> Option<&'static str> {
+    static FAMILY: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    FAMILY
+        .get_or_init(|| {
+            let output = crate::system::ProcessService::create_command("fc-match")
+                .args(["--format", "%{family[0]}", "system-ui"])
+                .output()
+                .ok()?;
+            let name = String::from_utf8(output.stdout).ok()?;
+            (output.status.success() && !name.trim().is_empty()).then_some(name)
+        })
+        .as_deref()
+        .map(str::trim)
+}
+
 fn parse_fontconfig_output(
     output: std::io::Result<std::process::Output>,
     families: &BTreeSet<&str>,

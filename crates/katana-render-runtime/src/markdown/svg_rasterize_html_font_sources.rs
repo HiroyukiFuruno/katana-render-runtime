@@ -56,13 +56,23 @@ pub(super) fn build_html_font_db(request: &HtmlFontRequest) -> usvg::fontdb::Dat
     for family in &request.families {
         load_requested_font_family(&mut database, family, &mut loaded_paths);
     }
-    super::system::load_requested_system_font_families_once(
-        &mut database,
+    let installed_families = request
+        .families
+        .iter()
+        .map(String::as_str)
+        .filter(|family| !is_generic_font_family(family));
+    #[cfg(target_os = "linux")]
+    let installed_families = installed_families.chain(
         request
             .families
             .iter()
-            .map(String::as_str)
-            .filter(|family| !is_generic_font_family(family)),
+            .any(|family| family == "system-ui")
+            .then(super::system::linux_system_ui_family)
+            .flatten(),
+    );
+    super::system::load_requested_system_font_families_once(
+        &mut database,
+        installed_families,
         &mut loaded_paths,
     );
     load_fallback_font_paths(request, &mut database, &mut loaded_paths);

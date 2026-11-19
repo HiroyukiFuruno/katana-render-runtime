@@ -27,6 +27,19 @@ fn linux_monospace_keeps_the_same_face_for_ascii_and_japanese_text() {
     );
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_system_ui_shapes_with_the_family_selected_by_fontconfig() -> Result<(), String> {
+    use crate::markdown::svg_rasterize::SvgRasterizeOps;
+
+    let family = super::super::linux_system_ui_family().ok_or("fontconfig system-ui missing")?;
+    let sample = "Mermaid Draw.io";
+    let actual = SvgRasterizeOps::html_text_font_runs(sample, "system-ui, sans-serif", 700, false)
+        .ok_or("system-ui did not resolve")?;
+    assert_eq!(actual, vec![(family.to_string(), sample.to_string())]);
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn cjk_fallback_registers_w4_in_eager_and_known_databases() -> Result<(), String> {

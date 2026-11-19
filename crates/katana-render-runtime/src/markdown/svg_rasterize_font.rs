@@ -14,6 +14,8 @@ pub(super) use html::{
 };
 
 pub(super) use html::HtmlFontRequest;
+#[cfg(target_os = "linux")]
+pub(super) use html::linux_system_ui_family;
 #[cfg(test)]
 pub(super) use html::html_font_db_for_text;
 pub(super) use html::html_rasterizer_options;

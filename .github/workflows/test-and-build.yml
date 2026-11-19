@@ -599,7 +599,10 @@ jobs:
             remaining-html) fixtures=(
               html/aspects/input-state html/aspects/typography html/library-reservation-fidelity
               html-diagram-consumer/mermaid-class-diagram html-diagram-consumer/drawio-class-diagram
-            ) ;;
+            )
+              just --command cargo nextest run --release --lib -p katana-render-runtime --locked \
+                --no-tests fail -E 'test(linux_system_ui_shapes_with_the_family_selected_by_fontconfig)' || result=1
+              ;;
           esac
           for fixture in "${fixtures[@]}"; do
             bun scripts/html/fidelity-suite.ts --phase interim --min-score 90 --viewport 620x900 \

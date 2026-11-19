@@ -21,6 +21,8 @@ pub(in crate::markdown::svg_rasterize) use sources::{
 };
 #[path = "svg_rasterize_html_font_system.rs"]
 mod system;
+#[cfg(target_os = "linux")]
+pub(in crate::markdown::svg_rasterize) use system::linux_system_ui_family;
 
 #[cfg(target_os = "macos")]
 #[path = "svg_rasterize_html_font_known_admission.rs"]

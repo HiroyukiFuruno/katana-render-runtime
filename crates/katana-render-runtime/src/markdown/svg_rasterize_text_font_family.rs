@@ -66,15 +66,30 @@ fn fontdb_family_for_database<'a>(
     database: &'a usvg::fontdb::Database,
     name: &'a str,
 ) -> usvg::fontdb::Family<'a> {
+    #[cfg(target_os = "linux")]
+    if name.eq_ignore_ascii_case("system-ui")
+        && let Some(family) = super::super::super::font::linux_system_ui_family()
+        && let Some(actual) = family_name_in_database(database, family)
+    {
+        /* WHY: Linuxのsystem-uiはWeb用のsans-serifとは別にシステム書体を選ぶ。 */
+        return usvg::fontdb::Family::Name(actual);
+    }
     let family = fontdb_family(name);
     let usvg::fontdb::Family::Name(requested) = family else {
         return family;
     };
+    family_name_in_database(database, requested).map_or(family, usvg::fontdb::Family::Name)
+}
+
+fn family_name_in_database<'a>(
+    database: &'a usvg::fontdb::Database,
+    requested: &str,
+) -> Option<&'a str> {
     database
         .faces()
         .flat_map(|face| face.families.iter())
         .find(|(actual, _)| actual.eq_ignore_ascii_case(requested))
-        .map_or(family, |(actual, _)| usvg::fontdb::Family::Name(actual))
+        .map(|(actual, _)| actual.as_str())
 }
 pub(in crate::markdown::svg_rasterize::text_shaping) fn css_font_family_names(
     value: &str,
