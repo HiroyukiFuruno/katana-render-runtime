@@ -37,7 +37,7 @@ else:
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/test-and-build.yml"
-SUPPORTED_WORKFLOW_SHA256 = "733479d93de314c15f5078c0f998fd43cbfa962b5920adcf9b2ed9d18ef4e064"
+SUPPORTED_WORKFLOW_SHA256 = "32fd8a2eb947222a0ede840edb0f3be5f617c5bf2b035a11bc3044a4e8ad6716"
 SCHEMA = 1
 FRESHNESS_SECONDS = 24 * 60 * 60
 MARKER = "<!-- krr-local-macos-evidence:v1 -->"
@@ -162,6 +162,7 @@ MAC_WORKFLOW_STEP_COMMANDS: dict[str, tuple[str, ...]] = {
     "Install cargo-nextest": (),
     "Install just": (),
     "Install Chrome for the macOS official producer browser test": (),
+    "Install ImageMagick for the macOS browser test": (),
     "Run macOS official producer browser test": (),
     "Rebuild V8 static archive on macOS arm64": ("rebuild-v8", "build-cli"),
     "Check Rust types": ("rust-check",),

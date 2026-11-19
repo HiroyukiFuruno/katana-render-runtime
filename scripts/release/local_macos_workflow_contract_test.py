@@ -24,6 +24,7 @@ MACOS_REUSE_REQUIRED_STEPS = {
     "Install JavaScript dependencies",
     "Install just",
     "Install Chrome for the macOS official producer browser test",
+    "Install ImageMagick for the macOS browser test",
     "Run macOS official producer browser test",
 }
 
@@ -468,6 +469,15 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
         ):
             with self.subTest(native_step=name):
                 self.assertLess(max(quality_positions), names.index(name))
+
+    def test_macos_installs_imagemagick_before_the_browser_test(self) -> None:
+        name = "Install ImageMagick for the macOS browser test"
+        names = [step.get("name", "") for step in self.steps]
+        self.assertLess(names.index(name), names.index("Run macOS official producer browser test"))
+        install = self.steps[names.index(name)]
+        self.assertEqual(install["if"], "matrix.platform == 'mac-arm64'")
+        self.assertEqual(install["run"], "brew install imagemagick")
+        self.assertNotIn("continue-on-error", install)
 
     def test_linux_imagemagick_installation_is_outside_mac_reuse_scope(self) -> None:
         install = next(
