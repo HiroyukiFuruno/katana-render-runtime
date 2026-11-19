@@ -1,9 +1,10 @@
 use super::super::super::table_cell_horizontal_inset;
 use crate::renderer::backends::html_browser::HtmlBrowserViewport;
 use crate::renderer::backends::html_document::{HtmlDocument, HtmlDocumentNode};
-use crate::renderer::backends::html_interactive::{
-    layout::HtmlLayoutRenderer, layout_inline::InlineMeasurement, style::CssStyle,
-};
+use crate::renderer::backends::html_interactive::layout::HtmlLayoutRenderer;
+use crate::renderer::backends::html_interactive::layout_inline::InlineMeasurement;
+use crate::renderer::backends::html_interactive::style::CssStyle;
+use crate::renderer::backends::html_interactive::types::LayoutResult;
 use std::collections::HashMap;
 
 const DIAGNOSTIC_ENV: &str = "KRR_HTML_RICH_CODE_DIAGNOSTIC";
@@ -71,16 +72,7 @@ fn reports_anonymized_rich_code_width_metrics_when_requested() -> Result<(), Str
 }
 
 fn rich_code_metrics() -> Result<RichCodeMetrics, String> {
-    let document = HtmlDocument::parse(FIXTURE);
-    let nodes =
-        document.interactive_nodes_with_styles_at_width(&HashMap::new(), VIEWPORT_WIDTH as f32);
-    let inherited =
-        CssStyle::browser_default_for_viewport(VIEWPORT_WIDTH as f32, VIEWPORT_HEIGHT as f32);
-    let context = rich_code_context(&nodes, &inherited, None)
-        .ok_or("public rich code cell was not projected")?;
-    let viewport = HtmlBrowserViewport::new(VIEWPORT_WIDTH, VIEWPORT_HEIGHT, 1.0)
-        .map_err(|error| error.to_string())?;
-    let layout = HtmlLayoutRenderer::render(&nodes, viewport, 0.0, &HashMap::new(), None)?;
+    let (layout, context) = public_fixture_layout()?;
     let cell = layout
         .element_boxes
         .iter()
@@ -104,6 +96,20 @@ fn rich_code_metrics() -> Result<RichCodeMetrics, String> {
         suffix_positions: marked_positions(&painted_text, SUFFIX),
         line_count: cell_line_count(&painted_text, cell.x, cell.y, cell.width, cell.height),
     })
+}
+
+fn public_fixture_layout() -> Result<(LayoutResult, RichCodeContext), String> {
+    let document = HtmlDocument::parse(FIXTURE);
+    let nodes =
+        document.interactive_nodes_with_styles_at_width(&HashMap::new(), VIEWPORT_WIDTH as f32);
+    let inherited =
+        CssStyle::browser_default_for_viewport(VIEWPORT_WIDTH as f32, VIEWPORT_HEIGHT as f32);
+    let context = rich_code_context(&nodes, &inherited, None)
+        .ok_or("public rich code cell was not projected")?;
+    let viewport = HtmlBrowserViewport::new(VIEWPORT_WIDTH, VIEWPORT_HEIGHT, 1.0)
+        .map_err(|error| error.to_string())?;
+    let layout = HtmlLayoutRenderer::render(&nodes, viewport, 0.0, &HashMap::new(), None)?;
+    Ok((layout, context))
 }
 
 fn rich_code_context(
