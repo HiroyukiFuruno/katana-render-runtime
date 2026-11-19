@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { digestFileRecords, type FileRecord } from "../mermaid/native-build-receipt";
@@ -1386,46 +1386,65 @@ test("accepts every catalog state and viewport as an independent stage condition
   }
 }, 30000);
 
-test("strict suite rejects missing, unknown, swapped, reused and candidate-sourced raw receipts", () => {
-  const fixture = suiteFixture();
+function withRewrittenReceipt(file: string, receipt: JsonObject, verify: () => void): void {
+  const original = fs.readFileSync(file);
   try {
-    const first = objectConditions(fixture.value)[0];
-    const second = objectConditions(fixture.value)[1];
-    const trustedFirst = objectConditions(fixture.trustedPlan)[0];
-    const trustedSecond = objectConditions(fixture.trustedPlan)[1];
-    if (!first || !second || !trustedFirst || !trustedSecond) throw new Error("missing test tuple");
+    fs.writeFileSync(file, JSON.stringify(receipt));
+    verify();
+  } finally {
+    fs.writeFileSync(file, original);
+  }
+}
+
+describe("strict suite rejects missing, unknown, swapped, reused and candidate-sourced raw receipts", () => {
+  let fixture: ReturnType<typeof suiteFixture>;
+  beforeAll(() => {
+    fixture = suiteFixture();
+  });
+  afterAll(() => fixture.cleanup());
+
+  test("missing KRR raw report", () => {
     const missingReceipt = structuredClone(fixture.value);
     delete (objectConditions(missingReceipt)[0] as JsonObject).rawKrrReportPath;
     expect(() => assertStageScoreSuite(missingReceipt, fixture.trustedPlan as JsonValue)).toThrow(
       /KRR raw report path/,
     );
+  });
+
+  test("candidate-sourced Chrome receipt", () => {
     const candidateSourced = structuredClone(fixture.value);
     (objectConditions(candidateSourced)[0] as JsonObject).chromeReceiptPath =
       "candidate-derived.json";
     expect(() => assertStageScoreSuite(candidateSourced, fixture.trustedPlan as JsonValue)).toThrow(
       /unknown candidate condition fields/,
     );
+  });
+
+  test("reused Chrome raw receipt SHA", () => {
     const reused = structuredClone(fixture.trustedPlan);
     (objectConditions(reused)[1] as JsonObject).chromeReceiptSha256 =
       (objectConditions(reused)[0] as JsonObject).chromeReceiptSha256 ?? "";
     expect(() => assertStageScoreSuite(fixture.value as JsonValue, reused)).toThrow(
       /reused Chrome raw receipt SHA/,
     );
+  });
+
+  test("unknown Chrome receipt", () => {
     const chromeUnknown = structuredClone(fixture.trustedPlan);
     const chromePath = objectConditions(chromeUnknown)[0]?.chromeReceiptPath as string;
-    const originalChromeContents = fs.readFileSync(chromePath, "utf8");
-    const originalChromeSha = sha256File(chromePath);
-    const chromeReceipt = JSON.parse(originalChromeContents) as JsonObject;
+    const chromeReceipt = readJsonObject(chromePath);
     chromeReceipt.status = "unknown";
     chromeReceipt.unknownReason = "font source not physically bound";
-    fs.writeFileSync(chromePath, JSON.stringify(chromeReceipt));
-    (objectConditions(chromeUnknown)[0] as JsonObject).chromeReceiptSha256 = sha256File(chromePath);
-    expect(() => assertStageScoreSuite(fixture.value as JsonValue, chromeUnknown)).toThrow(
-      /identity differs/,
-    );
-    fs.writeFileSync(chromePath, originalChromeContents);
-    (objectConditions(fixture.trustedPlan)[0] as JsonObject).chromeReceiptSha256 =
-      originalChromeSha;
+    withRewrittenReceipt(chromePath, chromeReceipt, () => {
+      (objectConditions(chromeUnknown)[0] as JsonObject).chromeReceiptSha256 =
+        sha256File(chromePath);
+      expect(() => assertStageScoreSuite(fixture.value as JsonValue, chromeUnknown)).toThrow(
+        /identity differs/,
+      );
+    });
+  });
+
+  test("swapped Chrome receipt identities", () => {
     const swappedChrome = structuredClone(fixture.trustedPlan);
     const firstChrome = objectConditions(swappedChrome)[0] as JsonObject;
     const secondChrome = objectConditions(swappedChrome)[1] as JsonObject;
@@ -1438,20 +1457,25 @@ test("strict suite rejects missing, unknown, swapped, reused and candidate-sourc
     expect(() => assertStageScoreSuite(fixture.value as JsonValue, swappedChrome)).toThrow(
       /identity differs/,
     );
+  });
+
+  test("reused KRR execution nonce", () => {
     const reusedNonce = structuredClone(fixture.value);
     const nonceConditions = objectConditions(reusedNonce);
     const firstRawPath = nonceConditions[0]?.rawKrrReportPath as string;
     const secondRawPath = nonceConditions[1]?.rawKrrReportPath as string;
-    const firstRaw = JSON.parse(fs.readFileSync(firstRawPath, "utf8")) as JsonObject;
-    const originalSecondRawContents = fs.readFileSync(secondRawPath, "utf8");
-    const secondRaw = JSON.parse(originalSecondRawContents) as JsonObject;
+    const firstRaw = readJsonObject(firstRawPath);
+    const secondRaw = readJsonObject(secondRawPath);
     secondRaw.executionNonce = firstRaw.executionNonce as string;
-    fs.writeFileSync(secondRawPath, JSON.stringify(secondRaw));
-    (nonceConditions[1] as JsonObject).rawKrrReportSha256 = sha256File(secondRawPath);
-    expect(() => assertStageScoreSuite(reusedNonce, fixture.trustedPlan as JsonValue)).toThrow(
-      /reused KRR execution nonce/,
-    );
-    fs.writeFileSync(secondRawPath, originalSecondRawContents);
+    withRewrittenReceipt(secondRawPath, secondRaw, () => {
+      (nonceConditions[1] as JsonObject).rawKrrReportSha256 = sha256File(secondRawPath);
+      expect(() => assertStageScoreSuite(reusedNonce, fixture.trustedPlan as JsonValue)).toThrow(
+        /reused KRR execution nonce/,
+      );
+    });
+  });
+
+  test("swapped KRR report identities", () => {
     const swapped = structuredClone(fixture.value);
     const rawPath = (objectConditions(swapped)[0] as JsonObject).rawKrrReportPath as string;
     const otherPath = (objectConditions(swapped)[1] as JsonObject).rawKrrReportPath as string;
@@ -1462,9 +1486,12 @@ test("strict suite rejects missing, unknown, swapped, reused and candidate-sourc
     expect(() => assertStageScoreSuite(swapped, fixture.trustedPlan as JsonValue)).toThrow(
       /identity mismatch/,
     );
+  });
+
+  test("unknown KRR operation", () => {
     const unknown = structuredClone(fixture.value);
     const unknownPath = (objectConditions(unknown)[0] as JsonObject).rawKrrReportPath as string;
-    const report = JSON.parse(fs.readFileSync(unknownPath, "utf8")) as JsonObject;
+    const report = readJsonObject(unknownPath);
     report.status = "unknown";
     report.unknownReason = "observer API unavailable";
     report.operationEvidence = {
@@ -1473,14 +1500,13 @@ test("strict suite rejects missing, unknown, swapped, reused and candidate-sourc
       status: "unknown",
       reason: report.unknownReason as string,
     };
-    fs.writeFileSync(unknownPath, JSON.stringify(report));
-    (objectConditions(unknown)[0] as JsonObject).rawKrrReportSha256 = sha256File(unknownPath);
-    expect(() => assertStageScoreSuite(unknown, fixture.trustedPlan as JsonValue)).toThrow(
-      /unknown/,
-    );
-  } finally {
-    fixture.cleanup();
-  }
+    withRewrittenReceipt(unknownPath, report, () => {
+      (objectConditions(unknown)[0] as JsonObject).rawKrrReportSha256 = sha256File(unknownPath);
+      expect(() => assertStageScoreSuite(unknown, fixture.trustedPlan as JsonValue)).toThrow(
+        /unknown/,
+      );
+    });
+  });
 });
 
 test("rejects missing, duplicate, unrecognized, and mismatched condition provenance", () => {
