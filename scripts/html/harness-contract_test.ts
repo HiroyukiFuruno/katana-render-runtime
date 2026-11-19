@@ -3677,6 +3677,7 @@ function localCoverageMoonFixture(): HarnessSnapshot {
     ...runtimeImportSources.filter((name) => !canonicalRecipeSourcePaths.has(name)),
     ...NATIVE_WIDTH_HASH_INPUTS,
     ...MATHJAX_UNUSED_INPUTS,
+    "scripts/build/initialize_ci_capacity_state.py",
     "scripts/quality/duplication-check_test.ts",
     ...fixtureCrateScriptPaths,
     "scripts/quality/moon_cache_contract_test.py",

@@ -365,6 +365,10 @@ FROZEN_RELEASE_CI_CHANGES: dict[str, tuple[tuple[str, int] | None, tuple[str, in
         None,
         ("73d24a1e07ec142e575e2097b7d1bf57c1c7b261497bca73d80ee3a85feac5ad", 620),
     ),
+    "scripts/html/harness-contract_test.ts": (
+        ("e15ddfaad6ca26e9ba6c5dbf8ac545b62fe6bfc0c896bb469bbc9e888e5e249b", 267573),
+        ("0d84cda60102f0fa91549525c98bd7b30af6582a837222c55a7fe9b48d884911", 267626),
+    ),
     "scripts/mermaid/native_cli_build_producer_test.py": (
         ("8ab429d6b676153745f5a3e2b75a43b3f0171e7a68b721caae84ce72c1cb83d6", 40840),
         ("2a38cc9682492b3c32308fb49e9fa425d514fe84eead99376c146d5c2a7c598a", 41380),
@@ -973,7 +977,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "bd49f5514237a5fdd132283f29d74de4e64a8b76f5baac6f37b6b3629a926570"
+SELF_MODULE_CANONICAL_SHA256 = "19cdfc8f6c480fa25e5994f337f52da09d4b486d2dcc238491de27306e343ff0"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":
