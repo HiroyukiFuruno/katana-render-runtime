@@ -34,8 +34,8 @@ const test = base.extend<{ capturedRaster: CapturedRaster }>({
         fs.rmSync(root, { recursive: true, force: true });
       }
     },
-    // 公式プロデューサーの別Chrome起動と実プロセスの証跡取得を、再現描画の制限時間から分離する。
-    { timeout: 10_000 },
+    // 開始・終了時のOS観測に各10秒、ブラウザ起動と画像取得に10秒を割り当てる。
+    { timeout: 30_000 },
   ],
 });
 

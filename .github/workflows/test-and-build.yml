@@ -189,7 +189,7 @@ jobs:
 
       - name: Install Chrome for the macOS official producer browser test
         if: matrix.platform == 'mac-arm64'
-        run: bunx playwright install chrome
+        run: bunx playwright install chrome chromium
 
       - name: Install capacity cleanup tool
         if: matrix.os == 'ubuntu-latest'
@@ -323,7 +323,7 @@ jobs:
 
       - name: Install Google Chrome for independent HTML reference
         if: matrix.os == 'ubuntu-latest'
-        run: bunx playwright install --with-deps chrome
+        run: bunx playwright install --with-deps chrome chromium
 
       - name: Install pinned ImageMagick for HTML comparison
         if: matrix.os == 'ubuntu-latest'

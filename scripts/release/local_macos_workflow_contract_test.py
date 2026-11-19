@@ -479,6 +479,19 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
         self.assertEqual(install["run"], "brew install imagemagick")
         self.assertNotIn("continue-on-error", install)
 
+    def test_browser_tests_install_both_required_browser_channels(self) -> None:
+        names = [step.get("name", "") for step in self.steps]
+        for name, browser_test, command in (
+            ("Install Chrome for the macOS official producer browser test",
+             "Run macOS official producer browser test", "bunx playwright install chrome chromium"),
+            ("Install Google Chrome for independent HTML reference",
+             "Run runtime asset script tests", "bunx playwright install --with-deps chrome chromium"),
+        ):
+            with self.subTest(step=name):
+                index = names.index(name)
+                self.assertLess(index, names.index(browser_test))
+                self.assertEqual(self.steps[index]["run"], command)
+
     def test_linux_imagemagick_installation_is_outside_mac_reuse_scope(self) -> None:
         install = next(
             step for step in self.steps

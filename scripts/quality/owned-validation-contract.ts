@@ -2437,7 +2437,7 @@ function playwrightMacosWorkflowRegistered(context: ContractContext): boolean {
         "      - name: Install just\n        uses: taiki-e/install-action@4ccefd7d26b61bbb81f4ff01165e8a6880a1bd59 # just\n\n      - name: Install Chrome for the macOS official producer browser test",
       ) &&
       workflow.includes(
-        "      - name: Install Chrome for the macOS official producer browser test\n        if: matrix.platform == 'mac-arm64'\n        run: bunx playwright install chrome",
+        "      - name: Install Chrome for the macOS official producer browser test\n        if: matrix.platform == 'mac-arm64'\n        run: bunx playwright install chrome chromium",
       )
     );
   } catch {
