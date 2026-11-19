@@ -44,7 +44,7 @@ on:
           - linux-fidelity
           - windows
       verify_filter:
-        description: Optional nextest filter, linux-assets test pattern, or linux-fidelity selection (samples, visual-fixes, remaining-html, marker-css, code-width, font-stack).
+        description: Optional nextest filter, linux-assets test pattern, or linux-fidelity selection (samples, visual-fixes, remaining-html, marker-css, code-width, font-stack, font-geometry).
         required: false
         default: ''
         type: string
@@ -491,21 +491,48 @@ jobs:
         if: >-
           matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
           github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
-          inputs.verify_filter == 'font-stack'
+          (inputs.verify_filter == 'font-stack' || inputs.verify_filter == 'font-geometry')
+        env:
+          KRR_LINUX_FONT_SCOPE: ${{ inputs.verify_filter }}
         timeout-minutes: 5
         run: |
-          fc-match --format='%{family}\t%{file}\n' system-ui
+          for family in system-ui Arial sans-serif; do
+            fc-match --format='%{family}\t%{file}\n' "$family"
+          done
           node --input-type=module <<'JS'
           import { chromium } from 'playwright';
           import { pathToFileURL } from 'node:url';
 
-          const fixtures = [
+          const fixtures = process.env.KRR_LINUX_FONT_SCOPE === 'font-geometry' ? [
+            ['html/library-reservation-fidelity', '#column-p1'],
+            ['html/aspects/input-state', '#name, #state-summary'],
+          ] : [
             ['html-diagram-consumer/mermaid-class-diagram', 'main h1, main > p, .notes li'],
             ['html-diagram-consumer/drawio-class-diagram', 'main h1, main > p, .notes li'],
             ['html/library-reservation-fidelity', 'h1, p'],
             ['html/aspects/input-state', 'h1, #state-summary, #name'],
             ['html/aspects/typography', 'h1, p'],
           ];
+          function geometry(node) {
+            const style = getComputedStyle(node);
+            const { top, width, height } = node.getBoundingClientRect();
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+            const latin = context.measureText('0');
+            let baseline = null;
+            if (node.id === 'column-p1') {
+              const marker = document.createElement('span');
+              marker.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline';
+              node.prepend(marker);
+              baseline = marker.getBoundingClientRect().top - top;
+              marker.remove();
+            }
+            return { top, width, height, baseline, fontFamily: style.fontFamily, fontSize: style.fontSize,
+              fontWeight: style.fontWeight, lineHeight: style.lineHeight, zeroWidth: latin.width,
+              ascent: latin.fontBoundingBoxAscent, descent: latin.fontBoundingBoxDescent,
+              padding: [style.paddingLeft, style.paddingRight], border: [style.borderLeftWidth, style.borderRightWidth] };
+          }
           const browser = await chromium.launch({ channel: 'chrome' });
           try {
             const page = await browser.newPage({ viewport: { width: 620, height: 900 } });
@@ -520,11 +547,7 @@ jobs:
                 const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector });
                 if (!nodeId) continue;
                 const { fonts } = await cdp.send('CSS.getPlatformFontsForNode', { nodeId });
-                const style = await page.locator(selector).first().evaluate((node) => {
-                  const { fontFamily, fontSize, fontWeight } = getComputedStyle(node);
-                  const { width, height } = node.getBoundingClientRect();
-                  return { fontFamily, fontSize, fontWeight, width, height };
-                });
+                const style = await page.locator(selector).first().evaluate(geometry);
                 console.log('LINUX_CHROME_HTML_FONTS', JSON.stringify({ fixture, selector, style, fonts }));
               }
             }
@@ -536,11 +559,24 @@ jobs:
       - name: Build Linux HTML comparison probes
         if: >-
           matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-assets' &&
-          (inputs.verify_platform != 'linux-fidelity' || (inputs.verify_filter != 'marker-css' && inputs.verify_filter != 'font-stack'))
+          (inputs.verify_platform != 'linux-fidelity' ||
+            (inputs.verify_filter != 'marker-css' && inputs.verify_filter != 'font-stack' && inputs.verify_filter != 'font-geometry'))
         timeout-minutes: 15
         run: |
           just html-fidelity-probe-build
           just --command cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > "$RUNNER_TEMP/krr-html-toc-build.jsonl"
+
+      - name: Measure Linux KRR input width and paragraph baseline
+        if: >-
+          matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
+          inputs.verify_filter == 'font-geometry'
+        env:
+          NEXTEST_SUCCESS_OUTPUT: immediate
+        timeout-minutes: 15
+        run: >-
+          just --command cargo nextest run --release --lib -p katana-render-runtime --locked
+          --no-tests fail -E 'test(linux_font_geometry_reports_)'
 
       - name: Measure the inline code in Linux KRR
         if: >-

@@ -10,7 +10,8 @@
 - [x] `b2977f4f` のWindows x64手動CIで実行した5,939件がすべて成功し、別に7件がスキップされた。PlantUMLのスモークとWindowsのプロセスツリー検査も成功した。[Windows手動CI](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44618667297)
 - [/] Linux全体比較は15分で停止し、採点済み222画像のうち29画像が90点未満だった。最小実測はHTML内のMermaid図を含む画像の81.29点。入力状態2画像、文字組み2画像、貸出予約ページ17画像、HTML内Mermaid図8画像が不合格。draw.ioと残る動的比較は未完了。再現には該当入力と各画像だけを先に使い、修正後に全対象を再検証する。[Linux手動CI](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44613432945)
 - [/] 620×900の5入力で計25画像を再現し、4画像が90点以上だった。HTML内のMermaidとdraw.ioはそれぞれ5画像とも90点未満。図形の位置は概ね一致し、文書本文と見出しの文字幅に差があった。LinuxのChromeは両図の周囲でDejaVu SansとNoto Sans CJK JPを使用した。言語指定のない入力状態・文字組みではWenQuanYi Zen Heiも選択された。Linuxの`system-ui`をFontconfigで解決し、同じ25画像で改善幅を確認する。[限定比較](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44619615839)・[フォント観測](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44621397277)
-- [ ] フォント探索とシステム書体の選択をFactoryとStrategyへ移し、共通の選択・文字組みにOS分岐が戻った場合に必須AST検査で検知する。OS別の既存動作を保持し、Linuxの書体回帰と画像比較、最終候補の3 OS検査で確認する。
+- [/] フォント探索とシステム書体の選択をFactoryとStrategyへ移し、共通の選択・文字組みにOS分岐が戻った場合に必須AST検査で検知する。分岐を埋め込んだ負例の検査とLinuxの書体回帰1件、Windowsの関連9件が成功した。最終候補での3 OS検査は残る。[Linux検証](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44625584540)・[Windows回帰](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44624997720)
+- [/] Linuxの同じ25画像で合格は4から16に増えた。HTML内のMermaidとdraw.ioは5／5ずつ（最低92.44・91.01）、文字組みは2／2（最低90.94）。入力状態2画像（最低89.64）と長文資料7画像（最低87.84）が残る。長文の本文は同じ画像で文字が代表的に1 px上へ寄っており、入力幅と本文基準線のChrome／KRR実測で原因を絞る。[Linux比較](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44625584540)
 - [/] 全画像・操作・集計を含む正式比較には1138.188秒と1698.068秒を要した過去の実行記録がある。CIの上限を35分に設定し、既存の入力・閾値・失敗判定を維持する。現行候補での完走を確認する。
 
 - [x] `9b9f5836` の完全品質ゲートは6,720件成功、製品カバレッジ87,815／87,815行。Mermaid製品PNGは独立raw JS基準で全117件が99以上。15 GiBの固定上限でLinux CIは旧上限に阻まれた工程を通過した。原ログは `tmp/quality/resumed-owner-r3509/release-9b9f5836-json-and-capacity-GTU6lwJM/`。
