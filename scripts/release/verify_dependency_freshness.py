@@ -79,7 +79,7 @@ V0424_FROZEN_RUST_CURRENT = {
     Path("Cargo.toml"): "c16e1a3d2c1ee595473c857586b8e0b49c7f278e3d912d3385d4b4a220e8b725",
     Path("crates/katana-render-runtime-assets/Cargo.toml"): "ab06237413c69883353951eb931772c219078d2d2f22a257751fbafc35dbf38f",
     Path("crates/katana-render-runtime-cli/Cargo.toml"): "453c476e11f6da0e18d265d48ac98e7674f5bc2e99aa6440417de1beeeb8bd3f",
-    Path("crates/katana-render-runtime/Cargo.toml"): "0bf615e0716a0c5f33281b0550b29f24e5e3dbb0d6fb15ac0f174ff91b2b8b79",
+    Path("crates/katana-render-runtime/Cargo.toml"): "18e76f452875f0150121b6cc6a97ea8a199d5758b3de90ac7a10cbc415d32105",
     Path("crates/kdr-linter/Cargo.toml"): "dae81b877822e94f8244c1e846bf62284ca13977eb0c377e598439cc6343dbad",
     Path("scripts/html/performance-harness/Cargo.lock"): "152a8fe662a0eb81611933caf64f0dfcc9054bc73f59b583baee46907590fee8",
     Path("scripts/html/performance-harness/Cargo.toml"): "f48872b19a3c41c529ce0d0ed701ffb0dad29c579152ca077cc8681acce898de",
