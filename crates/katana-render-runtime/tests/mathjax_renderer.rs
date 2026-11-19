@@ -62,13 +62,11 @@ fn mathjax_missing_runtime_path_returns_raw_string() -> Result<(), Box<dyn std::
 
 #[test]
 fn mathjax_empty_or_unreadable_keeps_source() -> Result<(), Box<dyn std::error::Error>> {
+    let unreadable = TempMathJaxRuntime::create([0xff])?;
+    let read_error = "MathJax runtime asset could not be read";
     let cases = [
         ("unused.js".into(), " \t", "MathJax source is empty"),
-        (
-            std::env::temp_dir(),
-            "x",
-            "MathJax runtime asset could not be read",
-        ),
+        (unreadable.path.clone(), "x", read_error),
     ];
     for (path, source, diagnostic) in cases {
         let output = MathJaxRenderer::with_runtime_path(path).render(&input(source, false))?;
@@ -78,7 +76,9 @@ fn mathjax_empty_or_unreadable_keeps_source() -> Result<(), Box<dyn std::error::
                 .diagnostics
                 .errors
                 .iter()
-                .any(|error| error.contains(diagnostic))
+                .any(|error| error.contains(diagnostic)),
+            "expected MathJax diagnostic {diagnostic:?}; actual diagnostics: {:?}",
+            output.diagnostics.errors
         );
     }
     Ok(())
@@ -241,7 +241,7 @@ struct TempMathJaxRuntime {
 }
 
 impl TempMathJaxRuntime {
-    fn create(source: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    fn create(source: impl AsRef<[u8]>) -> Result<Self, Box<dyn std::error::Error>> {
         let id = TEMP_ID.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
             "katana-render-runtime-mathjax-custom-{}-{id}.js",
