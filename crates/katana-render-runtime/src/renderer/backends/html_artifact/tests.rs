@@ -10,11 +10,13 @@ use std::process::Command;
 mod scroll_restore;
 #[path = "test_support.rs"]
 mod test_support;
+#[cfg(unix)]
+use test_support::assert_dangling_symlink_is_rejected;
 use test_support::{
-    artifact, assert_dangling_symlink_is_rejected, assert_explicit_lock_recovery,
-    assert_hit_miss_and_corrupt, assert_invalid_resume_provenance, assert_other_origin_rejected,
-    assert_stale_temp_is_preserved, assert_store_capacity_and_clear, exercise_resumed_interactions,
-    html, provenance, root, save_initial_and_updated, source,
+    artifact, assert_explicit_lock_recovery, assert_hit_miss_and_corrupt,
+    assert_invalid_resume_provenance, assert_other_origin_rejected, assert_stale_temp_is_preserved,
+    assert_store_capacity_and_clear, exercise_resumed_interactions, html, provenance, root,
+    save_initial_and_updated, source,
 };
 
 const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -191,6 +193,7 @@ fn store_hit_miss_corrupt_and_explicit_lock_recovery() -> Result<(), Box<dyn std
     let expected = artifact.provenance.clone();
     assert_stale_temp_is_preserved(&root, &store, &artifact)?;
     assert_hit_miss_and_corrupt(&root, &store, &expected)?;
+    #[cfg(unix)]
     assert_dangling_symlink_is_rejected(&root, &store, &expected)?;
     assert_explicit_lock_recovery(&root, &store, &artifact)?;
     Ok(())

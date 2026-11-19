@@ -12,9 +12,11 @@ mod interaction;
 mod store;
 
 pub(super) use interaction::{exercise_resumed_interactions, save_initial_and_updated};
+#[cfg(unix)]
+pub(super) use store::assert_dangling_symlink_is_rejected;
 pub(super) use store::{
-    assert_dangling_symlink_is_rejected, assert_explicit_lock_recovery,
-    assert_hit_miss_and_corrupt, assert_stale_temp_is_preserved, assert_store_capacity_and_clear,
+    assert_explicit_lock_recovery, assert_hit_miss_and_corrupt, assert_stale_temp_is_preserved,
+    assert_store_capacity_and_clear,
 };
 
 pub(super) fn assert_other_origin_rejected(

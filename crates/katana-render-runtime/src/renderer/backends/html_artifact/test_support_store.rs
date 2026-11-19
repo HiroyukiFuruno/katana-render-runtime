@@ -92,22 +92,20 @@ pub(in super::super) fn assert_hit_miss_and_corrupt(
     Ok(())
 }
 
+#[cfg(unix)]
 pub(in super::super) fn assert_dangling_symlink_is_rejected(
     root: &std::path::Path,
     store: &HtmlArtifactStore,
     expected: &HtmlArtifactProvenance,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(unix)]
-    {
-        std::os::unix::fs::symlink(
-            "/missing-krr-artifact",
-            root.join("dangling.krr-frame.json"),
-        )?;
-        assert!(matches!(
-            store.load("dangling", expected),
-            Err(HtmlArtifactError::SymlinkPath)
-        ));
-    }
+    std::os::unix::fs::symlink(
+        "/missing-krr-artifact",
+        root.join("dangling.krr-frame.json"),
+    )?;
+    assert!(matches!(
+        store.load("dangling", expected),
+        Err(HtmlArtifactError::SymlinkPath)
+    ));
     Ok(())
 }
 

@@ -1,4 +1,6 @@
-use super::{TextSpacingTrim, fallback_text_width, measure_html_text};
+#[cfg(unix)]
+use super::TextSpacingTrim;
+use super::{fallback_text_width, measure_html_text};
 
 #[cfg(unix)]
 const MEASUREMENT_SIZE: f32 = 16.0;

@@ -9,6 +9,7 @@ const TEXT: &str = "AVoffice";
 const FAMILY: &str = "Noto Sans";
 const SIZE: f32 = 18.25;
 const BOLD_FONT_WEIGHT: u16 = 700;
+#[cfg(unix)]
 const EVICTION_REQUEST_COUNT: usize = 9;
 const WEIGHT: u16 = 400;
 
