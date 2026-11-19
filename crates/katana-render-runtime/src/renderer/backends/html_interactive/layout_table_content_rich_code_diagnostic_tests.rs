@@ -72,14 +72,10 @@ fn reports_anonymized_rich_code_width_metrics_when_requested() -> Result<(), Str
 
 fn rich_code_metrics() -> Result<RichCodeMetrics, String> {
     let document = HtmlDocument::parse(FIXTURE);
-    let nodes = document.interactive_nodes_with_styles_at_width(
-        &HashMap::new(),
-        VIEWPORT_WIDTH as f32,
-    );
-    let inherited = CssStyle::browser_default_for_viewport(
-        VIEWPORT_WIDTH as f32,
-        VIEWPORT_HEIGHT as f32,
-    );
+    let nodes =
+        document.interactive_nodes_with_styles_at_width(&HashMap::new(), VIEWPORT_WIDTH as f32);
+    let inherited =
+        CssStyle::browser_default_for_viewport(VIEWPORT_WIDTH as f32, VIEWPORT_HEIGHT as f32);
     let context = rich_code_context(&nodes, &inherited, None)
         .ok_or("public rich code cell was not projected")?;
     let viewport = HtmlBrowserViewport::new(VIEWPORT_WIDTH, VIEWPORT_HEIGHT, 1.0)
@@ -135,9 +131,7 @@ fn rich_code_context_for_node(
         return None;
     };
     let style = CssStyle::from_element(tag, attributes, inherited);
-    let cell = (tag == "td")
-        .then(|| (*node_id, style.clone()))
-        .or(cell);
+    let cell = (tag == "td").then(|| (*node_id, style.clone())).or(cell);
     if tag == "code" && contains_url(children) {
         let (cell_node_id, cell_style) = cell?;
         return Some(RichCodeContext {
@@ -163,13 +157,7 @@ fn marked_positions(text: &[(f32, f32, String)], marker: &str) -> Vec<(f32, f32)
         .collect()
 }
 
-fn cell_line_count(
-    text: &[(f32, f32, String)],
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-) -> usize {
+fn cell_line_count(text: &[(f32, f32, String)], x: f32, y: f32, width: f32, height: f32) -> usize {
     let mut lines = text
         .iter()
         .filter_map(|(text_x, text_y, _)| {
