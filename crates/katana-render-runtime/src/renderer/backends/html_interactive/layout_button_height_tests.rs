@@ -22,9 +22,9 @@ fn auto_button_uses_label_line_box_and_receives_click_at_bottom_padding() -> Res
         HtmlBrowserSource::new(HTML, "https://example.test/buttons").map_err(test_error)?;
     let viewport = HtmlBrowserViewport::new(320, 240, 1.0).map_err(test_error)?;
     let mut session = HtmlInteractiveSession::start(source, viewport).map_err(test_error)?;
-    let (x, y) = assert_button_box(&session, "auto", 40.0)?;
-    assert_button_box(&session, "fixed", 50.0)?;
-    assert_button_box(&session, "minimum", 45.0)?;
+    let (x, y) = assert_button_box(&mut session, "auto", 40.0)?;
+    assert_button_box(&mut session, "fixed", 50.0)?;
+    assert_button_box(&mut session, "minimum", 45.0)?;
     let frame = session.latest_frame().ok_or("missing button frame")?;
     let offset = (y as usize * frame.viewport.width as usize + x as usize) * 4;
     assert_eq!(
@@ -42,7 +42,7 @@ fn auto_button_uses_label_line_box_and_receives_click_at_bottom_padding() -> Res
 }
 
 fn assert_button_box(
-    session: &HtmlInteractiveSession,
+    session: &mut HtmlInteractiveSession,
     id: &str,
     height: f32,
 ) -> Result<(f32, f32), String> {
