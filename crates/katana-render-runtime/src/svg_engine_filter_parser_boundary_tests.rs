@@ -191,7 +191,7 @@ fn stitched_turbulence_seed_boundaries_preserve_rendered_pixels(
     let expected = render(normalized_seed)?;
 
     assert_eq!(actual.data(), expected.data());
-    assert!(actual.data().chunks_exact(4).any(|pixel| pixel[3] > 0));
+    assert!(actual.pixels().iter().any(|pixel| pixel.alpha() > 0));
     Ok(())
 }
 

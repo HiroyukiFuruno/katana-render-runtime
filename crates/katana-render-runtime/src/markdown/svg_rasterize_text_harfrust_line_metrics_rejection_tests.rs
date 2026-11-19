@@ -218,8 +218,10 @@ fn sfnt_records(bytes: &[u8]) -> Result<Vec<Vec<u8>>, String> {
     ]));
     let end = SFNT_HEADER_LENGTH + count * SFNT_TABLE_RECORD_LENGTH;
     Ok(bytes[SFNT_HEADER_LENGTH..end]
-        .chunks_exact(SFNT_TABLE_RECORD_LENGTH)
-        .map(<[u8]>::to_vec)
+        .as_chunks::<SFNT_TABLE_RECORD_LENGTH>()
+        .0
+        .iter()
+        .map(|record| record.to_vec())
         .collect())
 }
 

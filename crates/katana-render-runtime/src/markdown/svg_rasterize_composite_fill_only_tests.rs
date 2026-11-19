@@ -101,7 +101,7 @@ fn render_skia_fill(
 
 fn solid_pixmap(color: [u8; RGBA_CHANNELS]) -> Result<Pixmap, String> {
     let mut pixmap = allocate_pixmap()?;
-    for pixel in pixmap.data_mut().chunks_exact_mut(RGBA_CHANNELS) {
+    for pixel in pixmap.data_mut().as_chunks_mut::<RGBA_CHANNELS>().0 {
         pixel.copy_from_slice(&color);
     }
     Ok(pixmap)

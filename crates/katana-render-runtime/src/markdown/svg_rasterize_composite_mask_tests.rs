@@ -155,9 +155,11 @@ fn fractional_generated_clip_preserves_uniform_backdrop() -> Result<(), String> 
         ("background only", background_only),
     ] {
         if let Some((index, pixel)) = pixels
-            .chunks_exact(RGBA_CHANNELS)
+            .as_chunks::<RGBA_CHANNELS>()
+            .0
+            .iter()
             .enumerate()
-            .find(|(_, pixel)| *pixel != FRACTIONAL_BACKDROP)
+            .find(|(_, pixel)| **pixel != FRACTIONAL_BACKDROP)
         {
             let x = index as u32 % FRACTIONAL_SIZE;
             let y = index as u32 / FRACTIONAL_SIZE;
@@ -192,7 +194,7 @@ fn solid_pixmap_size(
     color: [u8; RGBA_CHANNELS],
 ) -> Result<tiny_skia::Pixmap, String> {
     let mut pixmap = tiny_skia::Pixmap::new(width, height).ok_or("failed to create pixmap")?;
-    for pixel in pixmap.data_mut().chunks_exact_mut(RGBA_CHANNELS) {
+    for pixel in pixmap.data_mut().as_chunks_mut::<RGBA_CHANNELS>().0 {
         pixel.copy_from_slice(&color);
     }
     Ok(pixmap)
@@ -208,8 +210,10 @@ fn assert_crop(
         let start = (((y as u32 + row) * CANVAS_WIDTH + x as u32) * RGBA_CHANNELS as u32) as usize;
         let end = start + (CROP_WIDTH as usize * RGBA_CHANNELS);
         if pixmap.data()[start..end]
-            .chunks_exact(RGBA_CHANNELS)
-            .any(|pixel| pixel != expected)
+            .as_chunks::<RGBA_CHANNELS>()
+            .0
+            .iter()
+            .any(|pixel| *pixel != expected)
         {
             return Err("cropped pixels differ".to_string());
         }
@@ -218,12 +222,18 @@ fn assert_crop(
 }
 
 fn assert_guards(pixmap: &tiny_skia::Pixmap, expected: [u8; RGBA_CHANNELS]) -> Result<(), String> {
-    for (index, pixel) in pixmap.data().chunks_exact(RGBA_CHANNELS).enumerate() {
+    for (index, pixel) in pixmap
+        .data()
+        .as_chunks::<RGBA_CHANNELS>()
+        .0
+        .iter()
+        .enumerate()
+    {
         let x = (index as u32) % CANVAS_WIDTH;
         let y = (index as u32) / CANVAS_WIDTH;
         let in_crop = (CROP_X as u32..CROP_X as u32 + CROP_WIDTH).contains(&x)
             && (CROP_Y as u32..CROP_Y as u32 + CROP_HEIGHT).contains(&y);
-        if !in_crop && pixel != expected {
+        if !in_crop && *pixel != expected {
             return Err("crop guard pixel changed".to_string());
         }
     }
@@ -249,8 +259,10 @@ fn assert_pixel(
 ) -> Result<(), String> {
     if pixmap
         .data()
-        .chunks_exact(RGBA_CHANNELS)
-        .any(|pixel| pixel != expected)
+        .as_chunks::<RGBA_CHANNELS>()
+        .0
+        .iter()
+        .any(|pixel| *pixel != expected)
     {
         return Err(format!("unexpected pixel at coverage {coverage}"));
     }

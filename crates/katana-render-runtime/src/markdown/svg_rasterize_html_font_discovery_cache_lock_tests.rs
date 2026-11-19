@@ -68,7 +68,14 @@ fn verify_raster_fallback(request: &HtmlFontRequest) -> Result<(), String> {
     let observer = raster_observer::Scope::enter();
     let image =
         SvgRasterizeOps::rasterize_html_svg(FONT_SVG, 1.0).map_err(|error| error.to_string())?;
-    assert!(image.rgba.chunks_exact(4).any(|pixel| pixel[3] != 0));
+    assert!(
+        image
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[3] != 0)
+    );
     let events = observer.snapshot().events;
     assert!(
         events

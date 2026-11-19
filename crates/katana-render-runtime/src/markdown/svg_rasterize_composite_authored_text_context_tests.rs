@@ -155,7 +155,14 @@ fn assert_same_visible_render(candidate: &str, control: &str) -> Result<(), Stri
         assert_eq!((frame.width, frame.height), AUTHORED_FRAME_SIZE);
     }
     assert_eq!(candidate.rgba, control.rgba);
-    assert!(control.rgba.chunks_exact(4).any(|pixel| pixel[3] != 0));
+    assert!(
+        control
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[3] != 0)
+    );
     Ok(())
 }
 

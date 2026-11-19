@@ -49,15 +49,15 @@ fn render_red_band_width(align_items: &str) -> Result<usize, String> {
 fn red_band_width(frame: &HtmlBrowserFrame) -> Result<usize, String> {
     let width = frame.viewport.width as usize;
     let expected_pixels = width * frame.viewport.height as usize;
-    let pixels = frame.pixels.chunks_exact(RGBA_CHANNELS);
-    if width == 0 || !pixels.remainder().is_empty() || pixels.len() != expected_pixels {
+    let (pixels, remainder) = frame.pixels.as_chunks::<RGBA_CHANNELS>();
+    if width == 0 || !remainder.is_empty() || pixels.len() != expected_pixels {
         return Err("flex frame pixel dimensions are invalid".to_owned());
     }
     let mut left = usize::MAX;
     let mut right = 0;
     let mut count = 0;
-    for (index, pixel) in pixels.enumerate() {
-        if pixel == RED {
+    for (index, pixel) in pixels.iter().enumerate() {
+        if *pixel == RED {
             let x = index % width;
             left = left.min(x);
             right = right.max(x);

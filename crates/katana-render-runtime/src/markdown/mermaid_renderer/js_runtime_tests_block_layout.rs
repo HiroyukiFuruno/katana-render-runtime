@@ -133,9 +133,7 @@ pub(super) fn svg_number(node: SvgNode<'_, '_>, name: &str) -> Result<f64, Strin
 }
 
 pub(super) fn assert_label_style(label_rect: SvgNode<'_, '_>) -> Result<(), String> {
-    let style = label_rect
-        .attribute("style")
-        .map_or("", std::convert::identity);
+    let style = label_rect.attribute("style").unwrap_or("");
     for declaration in ["fill:#969", "stroke:#333", "stroke-width:4px"] {
         if !style.contains(declaration) {
             return Err(format!("missing label style {declaration:?}"));

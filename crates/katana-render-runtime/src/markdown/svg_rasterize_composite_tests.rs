@@ -128,14 +128,17 @@ fn generated_viewport_blend_preserves_parent_transform_and_dpr() -> Result<(), S
         assert!(
             pixmap
                 .data()
-                .chunks_exact(4)
-                .any(|pixel| pixel == [28, 28, 28, 255]),
+                .as_chunks::<4>()
+                .0
+                .contains(&[28, 28, 28, 255]),
             "nested clip blend missing at scale {scale}"
         );
         assert!(
             pixmap
                 .data()
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .any(|pixel| { pixel[3] == 255 && (29..32).contains(&pixel[0]) }),
             "fractional opaque clip coverage missing at scale {scale}"
         );
@@ -192,7 +195,9 @@ fn assert_fractional_alpha(pixmap: &tiny_skia::Pixmap) {
     assert!(
         pixmap
             .data()
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| { (129..255).contains(&pixel[3]) && (17..126).contains(&pixel[0]) })
     );
 }

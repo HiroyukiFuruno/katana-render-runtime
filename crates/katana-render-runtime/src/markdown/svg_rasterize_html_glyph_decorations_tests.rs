@@ -71,7 +71,9 @@ fn render_sized(
     assert!(
         pixmap
             .data()
-            .chunks_exact(RGBA_CHANNELS)
+            .as_chunks::<RGBA_CHANNELS>()
+            .0
+            .iter()
             .any(|pixel| pixel[ALPHA_CHANNEL] != 0)
     );
     Ok(pixmap)
@@ -132,7 +134,13 @@ fn stroke_extents_survive_crop_and_translate_with_text() -> Result<(), String> {
 fn alpha_bounds(pixmap: &Pixmap) -> Option<(u32, u32)> {
     let mut min = WIDTH;
     let mut max = 0;
-    for (index, pixel) in pixmap.data().chunks_exact(RGBA_CHANNELS).enumerate() {
+    for (index, pixel) in pixmap
+        .data()
+        .as_chunks::<RGBA_CHANNELS>()
+        .0
+        .iter()
+        .enumerate()
+    {
         if pixel[ALPHA_CHANNEL] != 0 {
             let x = index as u32 % pixmap.width();
             min = min.min(x);

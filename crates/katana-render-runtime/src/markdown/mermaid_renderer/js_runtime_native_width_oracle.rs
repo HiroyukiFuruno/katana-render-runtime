@@ -158,7 +158,7 @@ pub(super) fn call_text(call: &Value) -> &str {
         .and_then(Value::as_array)
         .and_then(|args| args.first())
         .and_then(Value::as_str)
-        .map_or("", std::convert::identity)
+        .unwrap_or("")
 }
 
 pub(super) fn call_weight(call: &Value) -> Option<u64> {

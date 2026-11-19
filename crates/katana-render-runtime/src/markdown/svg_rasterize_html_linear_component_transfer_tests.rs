@@ -197,7 +197,9 @@ fn render_svg(svg: &str) -> Result<RenderResult, String> {
     )?;
     let pixels = pixmap
         .data()
-        .chunks_exact(CHANNEL_COUNT)
+        .as_chunks::<CHANNEL_COUNT>()
+        .0
+        .iter()
         .map(|pixel| {
             [
                 pixel[RED_INDEX],

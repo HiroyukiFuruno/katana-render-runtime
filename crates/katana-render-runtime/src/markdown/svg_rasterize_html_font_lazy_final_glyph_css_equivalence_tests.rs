@@ -187,7 +187,14 @@ fn assert_html_frame(session: &crate::HtmlBrowserSession) -> Result<(), String> 
         frame.pixels.len(),
         VIEWPORT_WIDTH as usize * VIEWPORT_HEIGHT as usize * 4
     );
-    assert!(frame.pixels.chunks_exact(4).any(|pixel| pixel[3] != 0));
+    assert!(
+        frame
+            .pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[3] != 0)
+    );
     Ok(())
 }
 fn assert_valid_paint_evidence(audit: &serde_json::Value) -> Result<(), String> {

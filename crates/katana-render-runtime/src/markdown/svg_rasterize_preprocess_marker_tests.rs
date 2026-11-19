@@ -265,14 +265,18 @@ fn rendered_pixels(svg: &str) -> Option<(u32, u32, Vec<u8>)> {
 }
 
 fn has_color(pixels: &[u8], color: [u8; RGB_CHANNEL_COUNT]) -> bool {
-    pixels.chunks_exact(RGBA_CHANNEL_COUNT).any(|pixel| {
-        pixel
-            .get(..RGB_CHANNEL_COUNT)
-            .is_some_and(|channels| channels == color)
-            && pixel
-                .get(ALPHA_CHANNEL_INDEX)
-                .is_some_and(|alpha| *alpha > 0)
-    })
+    pixels
+        .as_chunks::<RGBA_CHANNEL_COUNT>()
+        .0
+        .iter()
+        .any(|pixel| {
+            pixel
+                .get(..RGB_CHANNEL_COUNT)
+                .is_some_and(|channels| channels == color)
+                && pixel
+                    .get(ALPHA_CHANNEL_INDEX)
+                    .is_some_and(|alpha| *alpha > 0)
+        })
 }
 
 #[path = "svg_rasterize_preprocess_marker_exact_public_tests.rs"]

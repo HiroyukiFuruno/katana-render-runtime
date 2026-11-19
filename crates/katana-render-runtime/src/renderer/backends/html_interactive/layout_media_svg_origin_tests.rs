@@ -151,7 +151,8 @@ fn red_bounds(frame: &HtmlBrowserFrame) -> Result<PixelBounds, String> {
         bottom: 0,
         count: 0,
     };
-    for (index, pixel) in frame.pixels.chunks_exact(RGBA_CHANNELS).enumerate() {
+    let (pixels, _) = frame.pixels.as_chunks::<RGBA_CHANNELS>();
+    for (index, pixel) in pixels.iter().enumerate() {
         if pixel[0] > pixel[1] && pixel[0] > pixel[2] {
             let x = index % width;
             let y = index / width;

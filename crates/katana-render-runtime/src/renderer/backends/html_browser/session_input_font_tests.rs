@@ -171,7 +171,7 @@ fn red_input_width(frame: &HtmlBrowserFrame) -> Option<f32> {
 
 fn update_widest_red_run(row: &[u8], widest: &mut usize) {
     let mut run = EMPTY_PIXEL_RUN;
-    for pixel in row.chunks_exact(PIXEL_BYTES) {
+    for pixel in row.as_chunks::<PIXEL_BYTES>().0 {
         let pixel_rgb = [
             pixel[RED_CHANNEL],
             pixel[GREEN_CHANNEL],

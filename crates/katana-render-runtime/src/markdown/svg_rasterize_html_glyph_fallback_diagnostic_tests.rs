@@ -48,7 +48,9 @@ fn assert_resvg_text_matches_normal() -> TestResult {
 }
 
 fn probe_has_glyph_pixels(rgba: &[u8]) -> bool {
-    rgba.chunks_exact(RGBA_CHANNELS)
+    rgba.as_chunks::<RGBA_CHANNELS>()
+        .0
+        .iter()
         .skip(RESVG_PROBE_CONTROL_ROWS * RESVG_PROBE_WIDTH as usize)
         .any(|pixel| pixel[ALPHA_CHANNEL] > 0)
 }

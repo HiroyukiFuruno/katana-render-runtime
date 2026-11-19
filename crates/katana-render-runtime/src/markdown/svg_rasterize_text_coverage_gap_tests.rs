@@ -166,7 +166,14 @@ fn assert_same_real_pixels(tree: &resvg::usvg::Tree) -> Result<(), String> {
     let expected = SvgRasterizeOps::rasterize_with_options(SVG, 1.0, &eager)
         .map_err(|error| error.to_string())?;
     assert_eq!((actual.width, actual.height), (120, 40));
-    assert!(actual.rgba.chunks_exact(4).any(|pixel| pixel[3] != 0));
+    assert!(
+        actual
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[3] != 0)
+    );
     assert_eq!(
         (actual.width, actual.height, actual.rgba),
         (expected.width, expected.height, expected.rgba)

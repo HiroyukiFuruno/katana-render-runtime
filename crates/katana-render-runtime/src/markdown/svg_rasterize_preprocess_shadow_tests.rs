@@ -90,7 +90,9 @@ fn shadow_svg(style: &str, extra_attribute: &str) -> String {
 }
 
 fn has_shadow_pixels(rgba: &[u8], width: u32) -> bool {
-    rgba.chunks_exact(RGBA_CHANNEL_COUNT)
+    rgba.as_chunks::<RGBA_CHANNEL_COUNT>()
+        .0
+        .iter()
         .enumerate()
         .any(|(index, pixel)| {
             let x = index as u32 % width;

@@ -45,7 +45,7 @@ fn colored_bounds(frame: &katana_render_runtime::HtmlBrowserFrame) -> Option<(u3
     let mut max_x = 0;
     let mut max_y = 0;
     let mut found = false;
-    for (index, pixel) in frame.pixels.chunks_exact(4).enumerate() {
+    for (index, pixel) in frame.pixels.as_chunks::<4>().0.iter().enumerate() {
         if pixel[..3] != [255, 0, 0] {
             continue;
         }

@@ -32,7 +32,9 @@ fn styled_paths_and_gradient_spread_survive_writer_roundtrip() -> Result<(), Str
     assert!(
         first
             .data()
-            .chunks_exact(RGBA_CHANNELS)
+            .as_chunks::<RGBA_CHANNELS>()
+            .0
+            .iter()
             .any(|pixel| pixel[ALPHA_CHANNEL] != 0)
     );
     Ok(())
@@ -220,8 +222,10 @@ pub(super) fn assert_pixmaps_equal(
 ) {
     let first_difference = before
         .data()
-        .chunks_exact(RGBA_CHANNELS)
-        .zip(after.data().chunks_exact(RGBA_CHANNELS))
+        .as_chunks::<RGBA_CHANNELS>()
+        .0
+        .iter()
+        .zip(after.data().as_chunks::<RGBA_CHANNELS>().0)
         .position(|(left, right)| left != right);
     assert!(
         before.width() == after.width()

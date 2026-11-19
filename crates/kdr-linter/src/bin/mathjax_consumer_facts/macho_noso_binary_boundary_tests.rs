@@ -37,7 +37,7 @@ fn reads_big_endian_thin_macho_symbols() -> Result<(), String> {
     for (is_64, format) in [(false, "MachO32"), (true, "MachO64")] {
         let mut bytes = MachoNosoFixture::thin_macho(is_64, Corruption::None);
         let symbol_offset = header_bytes(is_64) + SYMTAB_COMMAND_BYTES;
-        for word in bytes[..symbol_offset + 4].chunks_exact_mut(4) {
+        for word in bytes[..symbol_offset + 4].as_chunks_mut::<4>().0 {
             word.reverse();
         }
         let (actual_format, records) = MachOReader::records(&bytes)?;

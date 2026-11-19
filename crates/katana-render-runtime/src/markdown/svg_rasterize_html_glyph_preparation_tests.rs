@@ -76,7 +76,9 @@ fn assert_gradient_fallback(tree: &Tree, text: &resvg::usvg::Text) -> Result<(),
     assert!(
         pixmap
             .data()
-            .chunks_exact(super::RGBA_CHANNELS)
+            .as_chunks::<{ super::RGBA_CHANNELS }>()
+            .0
+            .iter()
             .any(|pixel| pixel[super::ALPHA_CHANNEL] != 0)
     );
     Ok(())

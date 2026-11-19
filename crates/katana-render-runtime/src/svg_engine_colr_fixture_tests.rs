@@ -288,6 +288,8 @@ fn assert_render_roundtrip(
 }
 
 fn has_opaque_pixels(data: &[u8]) -> bool {
-    data.chunks_exact(RGBA_CHANNELS)
+    data.as_chunks::<RGBA_CHANNELS>()
+        .0
+        .iter()
         .any(|pixel| pixel[ALPHA_CHANNEL] != 0)
 }

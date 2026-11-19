@@ -67,7 +67,7 @@ fn assert_real_ink(pixels: &[u8], empty: &[u8]) -> TestResult {
     if pixels == empty {
         return Err("whitespace regression frame is empty".into());
     }
-    if pixels.chunks_exact(CHANNEL_COUNT).all(|pixel| {
+    if pixels.as_chunks::<CHANNEL_COUNT>().0.iter().all(|pixel| {
         pixel[ALPHA_INDEX] == 0
             || pixel[..RGB_CHANNEL_COUNT]
                 .iter()

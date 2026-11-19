@@ -64,7 +64,13 @@ fn fixture_svg(family: &str, weight: u16, stroke: bool, content: &str, attribute
 fn alpha_bounds(pixmap: &Pixmap) -> Option<(u32, u32)> {
     let mut min_x = pixmap.width();
     let mut max_x = 0;
-    for (index, pixel) in pixmap.data().chunks_exact(RGBA_CHANNELS).enumerate() {
+    for (index, pixel) in pixmap
+        .data()
+        .as_chunks::<RGBA_CHANNELS>()
+        .0
+        .iter()
+        .enumerate()
+    {
         if pixel[ALPHA_CHANNEL] == 0 {
             continue;
         }

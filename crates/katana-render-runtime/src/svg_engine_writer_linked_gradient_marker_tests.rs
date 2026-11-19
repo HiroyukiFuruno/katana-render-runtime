@@ -47,7 +47,9 @@ fn marker_svg(gradient_definition: &str) -> String {
 
 fn has_visible_color(pixels: &[u8]) -> bool {
     pixels
-        .chunks_exact(RGBA_CHANNELS)
+        .as_chunks::<RGBA_CHANNELS>()
+        .0
+        .iter()
         .any(|rgba| rgba[ALPHA_CHANNEL] > 0 && (rgba[0] != rgba[1] || rgba[1] != rgba[2]))
 }
 

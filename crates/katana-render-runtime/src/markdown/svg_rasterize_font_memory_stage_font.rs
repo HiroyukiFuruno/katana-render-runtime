@@ -84,7 +84,9 @@ pub(super) fn draw_first_glyph(
     let mut pixels = vec![0; PIXEL_WIDTH as usize * PIXEL_HEIGHT as usize * PIXEL_CHANNELS];
     let rendered = render_glyph(typeface, &mut pixels)?;
     if !pixels
-        .chunks_exact(PIXEL_CHANNELS)
+        .as_chunks::<PIXEL_CHANNELS>()
+        .0
+        .iter()
         .any(|pixel| pixel[ALPHA_CHANNEL] != 0)
     {
         return Err("first glyph draw produced an empty pixel buffer".into());

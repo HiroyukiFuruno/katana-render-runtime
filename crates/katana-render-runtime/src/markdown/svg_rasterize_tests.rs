@@ -86,14 +86,11 @@ fn html_svg_keeps_both_lines_of_authored_middle_baseline_text() -> Result<(), St
 
     let image = SvgRasterizeOps::rasterize_html_svg(svg, 1.0).map_err(|error| error.to_string())?;
     assert_eq!((image.width as usize, image.height), (WIDTH, HEIGHT));
-    let rows = image
-        .rgba
-        .as_chunks::<RGBA_CHANNELS>()
-        .0
-        .chunks_exact(WIDTH);
-    let row_has_ink = |pixels: &[[u8; RGBA_CHANNELS]]| pixels.iter().any(|pixel| pixel[3] != 0);
-    assert!(rows.clone().take(32).any(row_has_ink));
-    assert!(rows.skip(32).any(row_has_ink));
+    let (pixels, _) = image.rgba.as_chunks::<RGBA_CHANNELS>();
+    let (rows, _) = pixels.as_chunks::<WIDTH>();
+    let row_has_ink = |row: &[[u8; RGBA_CHANNELS]; WIDTH]| row.iter().any(|pixel| pixel[3] != 0);
+    assert!(rows.iter().take(32).any(row_has_ink));
+    assert!(rows.iter().skip(32).any(row_has_ink));
     Ok(())
 }
 

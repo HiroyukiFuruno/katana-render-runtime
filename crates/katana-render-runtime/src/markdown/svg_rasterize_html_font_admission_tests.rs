@@ -48,7 +48,14 @@ fn assert_images_equal(actual: &RasterizedSvg, expected: &RasterizedSvg) {
         (expected.width, expected.height)
     );
     assert_eq!(actual.rgba, expected.rgba);
-    assert!(actual.rgba.chunks_exact(4).any(|pixel| pixel[3] > 0));
+    assert!(
+        actual
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[3] > 0)
+    );
 }
 
 fn face_metrics(database: &Database, id: ID) -> Result<(u16, i16, i16), String> {

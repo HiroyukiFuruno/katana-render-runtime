@@ -37,7 +37,9 @@ fn marker_selector_six_digit_css_escape_matches_entity_pixels() {
             width == 24
                 && height == 16
                 && rgba
-                    .chunks_exact(RGBA_CHANNEL_COUNT)
+                    .as_chunks::<RGBA_CHANNEL_COUNT>()
+                    .0
+                    .iter()
                     .any(|pixel| pixel[..3] == RED && pixel[3] == u8::MAX)
         }),
         "expected visible opaque red pixels"

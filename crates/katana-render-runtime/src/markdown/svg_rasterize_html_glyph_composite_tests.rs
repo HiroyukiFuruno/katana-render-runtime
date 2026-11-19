@@ -114,7 +114,7 @@ fn fixture_tree(fixture: &Fixture) -> Result<Tree, String> {
 
 fn backdrop(color: [u8; RGBA_CHANNELS]) -> Result<Pixmap, String> {
     let mut pixels = Pixmap::new(WIDTH, HEIGHT).ok_or("composite surface allocation failed")?;
-    for pixel in pixels.data_mut().chunks_exact_mut(RGBA_CHANNELS) {
+    for pixel in pixels.data_mut().as_chunks_mut::<RGBA_CHANNELS>().0 {
         pixel.copy_from_slice(&color);
     }
     Ok(pixels)
@@ -187,8 +187,10 @@ fn assert_compositing(
 
 fn pixel_delta(left: &Pixmap, right: &Pixmap) -> (usize, u8) {
     left.data()
-        .chunks_exact(RGBA_CHANNELS)
-        .zip(right.data().chunks_exact(RGBA_CHANNELS))
+        .as_chunks::<RGBA_CHANNELS>()
+        .0
+        .iter()
+        .zip(right.data().as_chunks::<RGBA_CHANNELS>().0)
         .fold((0, 0), |(count, maximum), (a, b)| {
             let delta = a
                 .iter()

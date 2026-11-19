@@ -84,6 +84,8 @@ fn assert_input(tree: &usvg::Tree, expected: &usvg::filter::Input, case: &str) {
 
 fn has_visible_pixel(pixels: &[u8]) -> bool {
     pixels
-        .chunks_exact(RGBA_CHANNELS)
+        .as_chunks::<RGBA_CHANNELS>()
+        .0
+        .iter()
         .any(|pixel| pixel[ALPHA_CHANNEL] > TRANSPARENT_ALPHA)
 }

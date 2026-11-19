@@ -100,8 +100,10 @@ fn modified_real_font(duplicate: bool) -> Result<Vec<u8>, String> {
     let mut entries = data
         .get(SFNT_HEADER_LENGTH..directory_end)
         .ok_or("real SFNT directory absent")?
-        .chunks_exact(SFNT_TABLE_RECORD_LENGTH)
-        .map(<[u8]>::to_vec)
+        .as_chunks::<SFNT_TABLE_RECORD_LENGTH>()
+        .0
+        .iter()
+        .map(|record| record.to_vec())
         .collect::<Vec<_>>();
     if duplicate {
         duplicate_os2_record(&mut entries)?;

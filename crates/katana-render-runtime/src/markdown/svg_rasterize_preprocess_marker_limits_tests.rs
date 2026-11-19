@@ -181,7 +181,9 @@ fn assert_visible_color(
                 && image.height == SVG_HEIGHT
                 && image
                     .rgba
-                    .chunks_exact(RGBA_CHANNELS)
+                    .as_chunks::<RGBA_CHANNELS>()
+                    .0
+                    .iter()
                     .any(|pixel| pixel[..RGB_CHANNELS] == color && pixel[RGB_CHANNELS] > 0)
         }),
         "expected visible {color:?} for {context}"

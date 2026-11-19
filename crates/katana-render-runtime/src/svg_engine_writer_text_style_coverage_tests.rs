@@ -188,7 +188,9 @@ fn text_style_survives_preserving_writer(
     assert!(
         rendered
             .data()
-            .chunks_exact(RGBA_CHANNELS)
+            .as_chunks::<RGBA_CHANNELS>()
+            .0
+            .iter()
             .any(|pixel| pixel[ALPHA_CHANNEL] != 0)
     );
     Ok(())

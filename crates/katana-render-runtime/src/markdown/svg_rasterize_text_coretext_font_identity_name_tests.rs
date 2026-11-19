@@ -35,7 +35,7 @@ fn with_postscript_records(mut change: impl FnMut(&mut [u8])) -> Result<Vec<u8>,
     let start = name.offset() as usize + NAME_TABLE_HEADER_BYTES;
     let end = start + postscript_record_count(name.offset() as usize) * NAME_RECORD_BYTES;
     let mut changed = 0;
-    for record in font[start..end].chunks_exact_mut(NAME_RECORD_BYTES) {
+    for record in font[start..end].as_chunks_mut::<NAME_RECORD_BYTES>().0 {
         let id = u16::from_be_bytes([record[NAME_ID_OFFSET], record[NAME_ID_OFFSET + 1]]);
         if id == name_id::POST_SCRIPT_NAME {
             change(record);

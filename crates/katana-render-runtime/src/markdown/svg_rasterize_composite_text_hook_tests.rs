@@ -120,7 +120,14 @@ fn text_rasterizer_false_preserves_existing_resvg_pixels() -> Result<(), String>
         &AuthoredClipInfo::default(),
         Some(&FallbackTextRasterizer),
     )?;
-    assert!(expected.data().chunks_exact(4).any(|pixel| pixel[3] != 0));
+    assert!(
+        expected
+            .data()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[3] != 0)
+    );
     assert_eq!(actual.data(), expected.data());
     Ok(())
 }

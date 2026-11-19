@@ -81,7 +81,9 @@ fn assert_visible_control(
     assert!(
         visible
             .data()
-            .chunks_exact(super::super::RGBA_CHANNELS)
+            .as_chunks::<{ super::super::RGBA_CHANNELS }>()
+            .0
+            .iter()
             .any(|pixel| pixel[super::super::ALPHA_CHANNEL] != 0)
     );
     Ok(())

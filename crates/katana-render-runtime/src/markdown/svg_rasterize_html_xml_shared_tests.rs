@@ -156,7 +156,14 @@ fn shared_xml_dtd_empty_provenance_keeps_eager_rendering() -> Result<(), String>
         .map_err(|error| error.to_string())?;
     assert!(!routing.all_text_verified);
     let rendered = shared_render(DTD_SVG, &provenance).map_err(|error| error.to_string())?;
-    assert!(rendered.rgba.chunks_exact(4).any(|pixel| pixel[3] != 0));
+    assert!(
+        rendered
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[3] != 0)
+    );
     Ok(())
 }
 

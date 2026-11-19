@@ -25,21 +25,14 @@ fn natural_svg_keeps_attribute_dimensions_in_body_and_centered_flex() -> TestRes
     ] {
         assert_geometry(&html, 80.0, 50.0)?;
         let pixels = capture_pixels(&html)?;
-        let changed = pixels
-            .chunks_exact(4)
-            .filter(|pixel| *pixel != BACKGROUND_RGBA)
+        let (rgba, _) = pixels.as_chunks::<4>();
+        let changed = rgba
+            .iter()
+            .filter(|pixel| **pixel != BACKGROUND_RGBA)
             .count();
         assert!(changed >= 4_000, "natural SVG lost visible area: {changed}");
-        assert!(
-            pixels
-                .chunks_exact(4)
-                .any(|pixel| pixel == [255, 0, 0, 255])
-        );
-        assert!(
-            pixels
-                .chunks_exact(4)
-                .any(|pixel| pixel == [0, 0, 255, 255])
-        );
+        assert!(rgba.contains(&[255, 0, 0, 255]));
+        assert!(rgba.contains(&[0, 0, 255, 255]));
     }
     Ok(())
 }

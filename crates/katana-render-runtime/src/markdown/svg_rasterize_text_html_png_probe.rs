@@ -45,7 +45,9 @@ fn html_raster_contract_encodes_a_self_contained_svg_to_fresh_png() -> ProbeResu
     assert!(
         raster
             .rgba
-            .chunks_exact(RGBA_CHANNEL_COUNT)
+            .as_chunks::<RGBA_CHANNEL_COUNT>()
+            .0
+            .iter()
             .any(|pixel| pixel[3] > 0)
     );
     assert_eq!(sha256(&png).len(), 64);

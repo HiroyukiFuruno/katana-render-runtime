@@ -252,7 +252,9 @@ fn font_metadata(
 fn has_nonwhite_pixel(pixmap: &Pixmap) -> bool {
     pixmap
         .data()
-        .chunks_exact(RGBA_CHANNELS)
+        .as_chunks::<RGBA_CHANNELS>()
+        .0
+        .iter()
         .any(|pixel| pixel[..RGB_CHANNELS] != WHITE_RGB)
 }
 

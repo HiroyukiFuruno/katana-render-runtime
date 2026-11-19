@@ -226,10 +226,8 @@ pub(super) fn draw_pixels(
             .ok_or("pixel surface allocation failed")?;
     paint::draw_span(surface.canvas(), span, typeface, 1.0)?;
     drop(surface);
-    if !pixels
-        .chunks_exact(RGBA_CHANNELS)
-        .any(|pixel| pixel[ALPHA_CHANNEL] != 0)
-    {
+    let (rgba, _) = pixels.as_chunks::<RGBA_CHANNELS>();
+    if !rgba.iter().any(|pixel| pixel[ALPHA_CHANNEL] != 0) {
         return Err("typeface produced an empty glyph mask".to_string());
     }
     Ok(pixels)

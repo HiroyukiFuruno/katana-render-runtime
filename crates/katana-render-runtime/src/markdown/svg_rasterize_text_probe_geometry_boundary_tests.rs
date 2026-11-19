@@ -81,7 +81,9 @@ fn assert_real_nested_text(snapshot: &Snapshot, id: usvg::fontdb::ID) -> ProbeRe
 fn alpha_pixels(snapshot: &Snapshot) -> usize {
     snapshot
         .rgba
-        .chunks_exact(PIXEL_CHANNELS)
+        .as_chunks::<PIXEL_CHANNELS>()
+        .0
+        .iter()
         .filter(|pixel| pixel[ALPHA_CHANNEL_INDEX] > 0)
         .count()
 }

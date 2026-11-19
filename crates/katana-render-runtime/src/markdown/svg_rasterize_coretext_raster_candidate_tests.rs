@@ -224,7 +224,7 @@ fn assert_glyph_contract(
 }
 
 fn assert_premultiplied(label: &str, pixels: &[u8]) -> Result<(), String> {
-    if pixels.chunks_exact(CHANNELS).any(|pixel| {
+    if pixels.as_chunks::<CHANNELS>().0.iter().any(|pixel| {
         pixel[..ALPHA_CHANNEL]
             .iter()
             .any(|channel| *channel > pixel[ALPHA_CHANNEL])
@@ -239,7 +239,9 @@ fn assert_pixels(label: &str, pixels: &[u8]) -> Result<(), String> {
         return Err(format!("{label} canvas size changed"));
     }
     if !pixels
-        .chunks_exact(CHANNELS)
+        .as_chunks::<CHANNELS>()
+        .0
+        .iter()
         .any(|pixel| pixel[ALPHA_CHANNEL] != 0)
     {
         return Err(format!("{label} produced no ink"));

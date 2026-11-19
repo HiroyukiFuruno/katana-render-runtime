@@ -4,6 +4,7 @@ use crate::{HtmlBrowserSession, HtmlBrowserSessionState, HtmlBrowserSource, Html
 use resvg::usvg::fontdb::{Database, FaceInfo, Family, Query, Source};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, sync::Arc};
+use tiny_skia::BYTES_PER_PIXEL;
 
 #[path = "svg_rasterize_html_font_public_route_phases.rs"]
 mod phases;
@@ -35,7 +36,8 @@ fn record_phase(
     let frame = session.latest_frame().ok_or("fixture frame missing")?;
     assert_eq!((frame.viewport.width, frame.viewport.height), (1280, 900));
     assert_eq!(frame.pixels.len(), 1280 * 900 * 4);
-    assert!(frame.pixels.chunks_exact(4).any(|pixel| pixel[3] > 0));
+    let (rgba, _) = frame.pixels.as_chunks::<BYTES_PER_PIXEL>();
+    assert!(rgba.iter().any(|pixel| pixel[3] > 0));
     let snapshot = observer.snapshot();
     let (counts, selections) = route_events(&snapshot.events);
     println!(

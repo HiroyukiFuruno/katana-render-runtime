@@ -57,12 +57,7 @@ fn explicit_zero_rotation_preserves_text_pixels(#[case] body: &str) -> Result<()
     let reference = parse_writer_svg(&wrap(""), "implicit-rotation")?;
     let rendered =
         writer_coverage_tests::assert_pixels_equal(&rotated, &reference, "zero rotation")?;
-    assert!(
-        rendered
-            .data()
-            .chunks_exact(RGBA_CHANNELS)
-            .any(|pixel| pixel[ALPHA_CHANNEL] != 0)
-    );
+    assert!(has_visible_pixels(&rendered));
     Ok(())
 }
 
@@ -198,13 +193,14 @@ fn assert_render_determinism(
 fn assert_filter_visible(case_name: &str, original: &Pixmap) {
     if case_name == "filter-with-object-units-multi-use" {
         assert!(
-            original
-                .data()
-                .chunks_exact(RGBA_CHANNELS)
-                .any(|pixel| pixel[ALPHA_CHANNEL] != 0),
+            has_visible_pixels(original),
             "filter control is transparent"
         );
     }
+}
+
+fn has_visible_pixels(pixmap: &Pixmap) -> bool {
+    pixmap.pixels().iter().any(|pixel| pixel.alpha() != 0)
 }
 
 fn render_tree(tree: &usvg::Tree) -> Result<Pixmap, String> {
@@ -242,7 +238,9 @@ fn assert_rgba_pixel(
 fn pixel_preview(pixmap: &Pixmap) -> String {
     pixmap
         .data()
-        .chunks_exact(RGBA_CHANNELS)
+        .as_chunks::<RGBA_CHANNELS>()
+        .0
+        .iter()
         .take(PIXEL_DIAGNOSTIC_PREVIEW_LIMIT)
         .enumerate()
         .map(|(index, rgba)| {

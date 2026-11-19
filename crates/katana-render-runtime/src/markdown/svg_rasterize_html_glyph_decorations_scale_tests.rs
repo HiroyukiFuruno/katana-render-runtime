@@ -52,8 +52,10 @@ fn glyph_fill_and_stroke_follow_svg_paint_order() -> Result<(), String> {
     assert!(
         fill_first
             .data()
-            .chunks_exact(RGBA_CHANNELS)
-            .zip(stroke_first.data().chunks_exact(RGBA_CHANNELS))
+            .as_chunks::<RGBA_CHANNELS>()
+            .0
+            .iter()
+            .zip(stroke_first.data().as_chunks::<RGBA_CHANNELS>().0)
             .any(|(a, b)| { a[BLUE] > 200 && a[RED] < 30 && b[RED] > 200 && b[BLUE] < 30 })
     );
     Ok(())
@@ -69,7 +71,13 @@ fn bounds_2d(pixmap: &Pixmap) -> Option<[u32; BOUNDS_COMPONENTS]> {
     let width = pixmap.width();
     let mut bounds = [width, pixmap.height(), 0, 0];
     let mut found = false;
-    for (i, pixel) in pixmap.data().chunks_exact(RGBA_CHANNELS).enumerate() {
+    for (i, pixel) in pixmap
+        .data()
+        .as_chunks::<RGBA_CHANNELS>()
+        .0
+        .iter()
+        .enumerate()
+    {
         if pixel[ALPHA_CHANNEL] != 0 {
             expand_bounds(&mut bounds, i as u32, width);
             found = true;
@@ -84,8 +92,10 @@ fn difference_bounds(a: &Pixmap, b: &Pixmap) -> Option<[u32; BOUNDS_COMPONENTS]>
     let mut found = false;
     for (i, (left, right)) in a
         .data()
-        .chunks_exact(RGBA_CHANNELS)
-        .zip(b.data().chunks_exact(RGBA_CHANNELS))
+        .as_chunks::<RGBA_CHANNELS>()
+        .0
+        .iter()
+        .zip(b.data().as_chunks::<RGBA_CHANNELS>().0)
         .enumerate()
     {
         if left != right {

@@ -27,7 +27,9 @@ pub(super) fn red_pixel_count(html: &str) -> TestResult<usize> {
     const RGBA_CHANNELS: usize = 4;
     const OPAQUE_RED: [u8; RGBA_CHANNELS] = [u8::MAX, 0, 0, u8::MAX];
     Ok(capture_pixels(html)?
-        .chunks_exact(RGBA_CHANNELS)
-        .filter(|pixel| *pixel == OPAQUE_RED)
+        .as_chunks::<RGBA_CHANNELS>()
+        .0
+        .iter()
+        .filter(|pixel| **pixel == OPAQUE_RED)
         .count())
 }

@@ -42,7 +42,12 @@ fn viewport() -> Result<HtmlBrowserViewport, Box<dyn std::error::Error>> {
 }
 
 fn contains_rgb(frame: &katana_render_runtime::HtmlBrowserFrame, rgb: [u8; 3]) -> bool {
-    frame.pixels.chunks_exact(4).any(|pixel| pixel[..3] == rgb)
+    frame
+        .pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .any(|pixel| pixel[..3] == rgb)
 }
 
 fn full_frame_similarity(left: &[u8], right: &[u8]) -> f64 {

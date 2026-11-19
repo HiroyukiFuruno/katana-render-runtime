@@ -196,7 +196,14 @@ fn embedded_svg_inherits_parent_font_without_rewriting_explicit_child_font() -> 
     let raster =
         crate::markdown::svg_rasterize::SvgRasterizeOps::rasterize_html_svg(&document, 1.0)
             .map_err(|error| error.to_string())?;
-    assert!(raster.rgba.chunks_exact(4).any(|pixel| pixel[3] != 0));
+    assert!(
+        raster
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[3] != 0)
+    );
     Ok(())
 }
 

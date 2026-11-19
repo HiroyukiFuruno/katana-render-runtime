@@ -43,6 +43,8 @@ fn changed_frame_reuses_pixels_without_mutating_user_owned_snapshot() {
 fn solid_color(pixels: &[u8], expected: [u8; RGBA_CHANNELS]) -> bool {
     !pixels.is_empty()
         && pixels
-            .chunks_exact(RGBA_CHANNELS)
-            .all(|pixel| pixel == expected)
+            .as_chunks::<RGBA_CHANNELS>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == expected)
 }

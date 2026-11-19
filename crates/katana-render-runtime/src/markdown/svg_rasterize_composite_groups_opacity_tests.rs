@@ -74,8 +74,10 @@ fn zero_opacity_text_group_leaves_the_destination_unchanged() -> Result<(), Stri
         rendered
             .pixmap
             .data()
-            .chunks_exact(RGBA_CHANNELS)
-            .all(|pixel| pixel == [255, 255, 255, 255])
+            .as_chunks::<RGBA_CHANNELS>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == [255, 255, 255, 255])
     );
     Ok(())
 }

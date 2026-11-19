@@ -1,6 +1,7 @@
+use super::super::has_visible_pixels;
 use super::{
-    ALPHA_CHANNEL, RGBA_CHANNELS, assert_image_size, assert_rgba_pixel, image_node, inline_png_svg,
-    parse_writer_svg, render_tree, usvg, writer_options,
+    assert_image_size, assert_rgba_pixel, image_node, inline_png_svg, parse_writer_svg,
+    render_tree, usvg, writer_options,
 };
 
 const IMAGE_FIXTURE_DIRECTORY: &str = concat!(
@@ -31,10 +32,7 @@ pub(super) fn assert_embedded_raster_roundtrip(
 
     let before = render_tree(&original)?;
     assert!(
-        before
-            .data()
-            .chunks_exact(RGBA_CHANNELS)
-            .any(|pixel| pixel[ALPHA_CHANNEL] != 0),
+        has_visible_pixels(&before),
         "{fixture_name} should render visible raster pixels"
     );
     assert_rgba_pixel(&before, (0, 0), (0, 0, 0, 0))?;
@@ -100,10 +98,7 @@ fn render_raster_mode(mode: &str, expected_mode: usvg::ImageRendering) -> Result
     assert_raster_mode_image(&tree, mode, expected_mode)?;
     let before = render_tree(&tree)?;
     assert!(
-        before
-            .data()
-            .chunks_exact(RGBA_CHANNELS)
-            .any(|pixel| pixel[ALPHA_CHANNEL] != 0),
+        has_visible_pixels(&before),
         "image-rendering={mode} must paint pixels"
     );
     let serialized = tree.to_string(&writer_options(mode));

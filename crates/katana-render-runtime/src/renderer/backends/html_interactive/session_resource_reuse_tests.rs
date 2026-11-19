@@ -41,10 +41,7 @@ fn audit(scope: ResourceAuditScope, root: &Path, name: &str) -> TestResult<Inven
 
 fn assert_color(frame: &HtmlBrowserFrame, color: [u8; RGBA_CHANNELS], present: bool) {
     assert_eq!(
-        frame
-            .pixels
-            .chunks_exact(RGBA_CHANNELS)
-            .any(|pixel| pixel == color),
+        frame.pixels.as_chunks::<RGBA_CHANNELS>().0.contains(&color),
         present
     );
 }

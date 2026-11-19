@@ -148,7 +148,9 @@ fn hidden_embedded_image_does_not_paint() -> Result<(), String> {
     assert!(
         rendered
             .data()
-            .chunks_exact(RGBA_CHANNELS)
+            .as_chunks::<RGBA_CHANNELS>()
+            .0
+            .iter()
             .all(|pixel| pixel[ALPHA_CHANNEL] == 0),
         "hidden image must leave the target transparent"
     );

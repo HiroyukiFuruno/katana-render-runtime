@@ -55,8 +55,10 @@ fn different_pixels(left: &Pixmap, right: &Pixmap) -> Result<usize, String> {
     }
     Ok(left
         .data()
-        .chunks_exact(CHANNELS)
-        .zip(right.data().chunks_exact(CHANNELS))
+        .as_chunks::<CHANNELS>()
+        .0
+        .iter()
+        .zip(right.data().as_chunks::<CHANNELS>().0)
         .filter(|(a, b)| a != b)
         .count())
 }

@@ -72,7 +72,8 @@ fn uniform_backdrop() -> Result<Pixmap, String> {
     };
     for pixel in pixmap
         .data_mut()
-        .chunks_exact_mut(FRACTIONAL_BACKDROP.len())
+        .as_chunks_mut::<{ FRACTIONAL_BACKDROP.len() }>()
+        .0
     {
         pixel.copy_from_slice(&FRACTIONAL_BACKDROP);
     }
