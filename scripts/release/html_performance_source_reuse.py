@@ -371,7 +371,7 @@ FROZEN_RELEASE_CI_CHANGES: dict[str, tuple[tuple[str, int] | None, tuple[str, in
     ),
     "scripts/quality/owned-validation-contract.ts": (
         ("5d54691383820cf69afeab163ebcceab672862024aa851d7960bed0e5630e8f2", 220078),
-        ("de68a299f818d9462d3a3a5fc1a0513d0abbc7c6d6f0e8fa6e70f222415d30a0", 220812),
+        ("7597b6349c74cf07f1843e353e007770ca6d10d60593530215eeea77ece8714a", 220813),
     ),
     "scripts/quality/owned-validation-contract_test.ts": (
         ("fc9b237e2f8b54442d0d7960c2dc2416bbce30c3822aa5f5fb13d73ad016590e", 258364),
@@ -973,7 +973,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "78c9879636ae9077dee1e98edc182eabb13d45e9bf4017b3c8b171b7170124e1"
+SELF_MODULE_CANONICAL_SHA256 = "bd49f5514237a5fdd132283f29d74de4e64a8b76f5baac6f37b6b3629a926570"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":
