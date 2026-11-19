@@ -212,7 +212,7 @@ fn render_and_validate_attestation(
 fn noncanonical_alias(path: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let runtime_path = PathBuf::from(path);
     let runtime_parent = runtime_path.parent().ok_or("runtime parent missing")?;
-    let alias = runtime_parent
+    let alias = nonverbatim_path(runtime_parent)
         .join("..")
         .join(
             runtime_parent
@@ -223,6 +223,23 @@ fn noncanonical_alias(path: &str) -> Result<PathBuf, Box<dyn std::error::Error>>
     assert_ne!(alias, runtime_path);
     assert_eq!(std::fs::canonicalize(&alias)?, runtime_path);
     Ok(alias)
+}
+
+#[cfg(windows)]
+fn nonverbatim_path(path: &Path) -> PathBuf {
+    let path = path.to_string_lossy();
+    let Some(path) = path.strip_prefix(r"\\?\") else {
+        return PathBuf::from(path.as_ref());
+    };
+    let path = path
+        .strip_prefix("UNC\\")
+        .map_or_else(|| path.to_owned(), |unc| format!(r"\\{unc}"));
+    PathBuf::from(path)
+}
+
+#[cfg(not(windows))]
+fn nonverbatim_path(path: &Path) -> PathBuf {
+    path.to_path_buf()
 }
 
 fn receipt_path_runtime(receipt_path: &Path) -> Result<String, Box<dyn std::error::Error>> {
