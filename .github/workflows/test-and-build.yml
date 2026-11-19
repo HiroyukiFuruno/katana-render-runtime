@@ -44,7 +44,7 @@ on:
           - linux-fidelity
           - windows
       verify_filter:
-        description: Optional nextest filter, linux-assets test pattern, or linux-fidelity selection (samples or marker-css).
+        description: Optional nextest filter, linux-assets test pattern, or linux-fidelity selection (samples, visual-fixes, marker-css).
         required: false
         default: ''
         type: string
@@ -482,11 +482,17 @@ jobs:
         if: >-
           matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
           github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
-          inputs.verify_filter == 'samples'
+          (inputs.verify_filter == 'samples' || inputs.verify_filter == 'visual-fixes')
+        env:
+          KRR_VERIFY_HTML_SAMPLE_SCOPE: ${{ inputs.verify_filter }}
         timeout-minutes: 15
         run: |
           result=0
-          for fixture in anonymized-requirements aspects/input-state aspects/layout; do
+          fixtures=(aspects/input-state aspects/layout)
+          if [[ "$KRR_VERIFY_HTML_SAMPLE_SCOPE" == samples ]]; then
+            fixtures=(anonymized-requirements "${fixtures[@]}")
+          fi
+          for fixture in "${fixtures[@]}"; do
             bun scripts/html/fidelity-suite.ts --phase interim --min-score 90 --viewport 620x900 \
               --input "tests/fixtures/html/$fixture.html" --output "tmp/verify-html-samples/$fixture" \
               --binary target/release/examples/html_fidelity_probe \
@@ -548,7 +554,7 @@ jobs:
         if: >-
           always() && matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
           github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
-          inputs.verify_filter == 'samples'
+          (inputs.verify_filter == 'samples' || inputs.verify_filter == 'visual-fixes')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: verify-linux-html-samples
