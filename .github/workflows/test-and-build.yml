@@ -533,6 +533,25 @@ jobs:
               ascent: latin.fontBoundingBoxAscent, descent: latin.fontBoundingBoxDescent,
               padding: [style.paddingLeft, style.paddingRight], border: [style.borderLeftWidth, style.borderRightWidth] };
           }
+          async function compareParagraphBaselines(page) {
+            return page.locator('#column-p1').evaluate((source) => {
+              const families = ['inherit', 'Arial', 'sans-serif', 'Noto Sans CJK JP'];
+              const variants = families.flatMap((family) => ['日本語', 'Latin'].map((value) => [family, value]));
+              return variants.map(([family, value]) => {
+                const paragraph = source.cloneNode(false);
+                paragraph.removeAttribute('id');
+                paragraph.style.fontFamily = family;
+                paragraph.textContent = value;
+                const marker = document.createElement('span');
+                marker.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline';
+                paragraph.prepend(marker);
+                source.after(paragraph);
+                const baseline = marker.getBoundingClientRect().top - paragraph.getBoundingClientRect().top;
+                paragraph.remove();
+                return { family, value, baseline };
+              });
+            });
+          }
           const browser = await chromium.launch({ channel: 'chrome' });
           try {
             const page = await browser.newPage({ viewport: { width: 620, height: 900 } });
@@ -549,6 +568,9 @@ jobs:
                 const { fonts } = await cdp.send('CSS.getPlatformFontsForNode', { nodeId });
                 const style = await page.locator(selector).first().evaluate(geometry);
                 console.log('LINUX_CHROME_HTML_FONTS', JSON.stringify({ fixture, selector, style, fonts }));
+              }
+              if (fixture === 'html/library-reservation-fidelity') {
+                console.log('LINUX_CHROME_PARAGRAPH_BASELINES', JSON.stringify(await compareParagraphBaselines(page)));
               }
             }
           } finally {
