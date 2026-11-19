@@ -104,7 +104,10 @@ fn static_library_metrics_match_full_face_bits_for_real_sources() -> TestResult 
         (Source::File(path.clone()), file_is_durable),
         (Source::Binary(Arc::new(FONT_BYTES.to_vec())), true),
         /* WHY: SharedFileの所有済みbytesはパスを再読込せずに測定する。 */
-        (Source::SharedFile(path, Arc::new(FONT_BYTES.to_vec())), true),
+        (
+            Source::SharedFile(path, Arc::new(FONT_BYTES.to_vec())),
+            true,
+        ),
     ] {
         let database = database(source)?;
         let id = database.faces().next().ok_or("source face absent")?.id;
