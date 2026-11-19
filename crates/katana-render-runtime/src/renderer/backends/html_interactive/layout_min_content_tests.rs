@@ -47,7 +47,10 @@ fn min_content_uses_css_breaks_and_preserves_nonbreaking_spaces() {
 fn min_content_respects_box_constraints_and_the_last_valid_width() {
     let text = &[HtmlDocumentNode::Text("unbreakabletoken".into())];
     for (declarations, expected) in [
-        ("width:min-content;max-width:25%;box-sizing:border-box", 50.0),
+        (
+            "width:min-content;max-width:25%;box-sizing:border-box",
+            50.0,
+        ),
         ("width:min-content;max-width:25%;padding:5px", 60.0),
         ("width:min-content;min-width:150px", 150.0),
         ("width:min-content;width:60px;width:invalid", 60.0),

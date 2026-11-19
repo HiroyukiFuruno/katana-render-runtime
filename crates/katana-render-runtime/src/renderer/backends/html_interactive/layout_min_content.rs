@@ -1,4 +1,6 @@
-use super::{CssStyle, HtmlDocumentNode, child_style, collapsed_anonymous_text, measured_text_width};
+use super::{
+    CssStyle, HtmlDocumentNode, child_style, collapsed_anonymous_text, measured_text_width,
+};
 use crate::renderer::backends::html_interactive::document::css_auto_linebreak_ends;
 use crate::renderer::backends::html_interactive::layout_text::is_css_whitespace;
 use crate::renderer::backends::html_interactive::style::{CssBoxSizing, CssLength, CssWhiteSpace};

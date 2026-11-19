@@ -17,7 +17,8 @@ const HTML: &str = r#"<style>
 
 #[test]
 fn auto_button_uses_label_line_box_and_receives_click_at_bottom_padding() -> Result<(), String> {
-    let source = HtmlBrowserSource::new(HTML, "https://example.test/buttons").map_err(test_error)?;
+    let source =
+        HtmlBrowserSource::new(HTML, "https://example.test/buttons").map_err(test_error)?;
     let viewport = HtmlBrowserViewport::new(320, 240, 1.0).map_err(test_error)?;
     let mut session = HtmlInteractiveSession::start(source, viewport).map_err(test_error)?;
     let (x, y) = assert_button_box(&session, "auto", 40.0)?;
