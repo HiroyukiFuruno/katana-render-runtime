@@ -14,7 +14,9 @@ fn admitted_file_snapshot_preserves_face_metadata_and_generic_aliases()
     let mut fixture = font_file_fixture::create(directory.path().join("font.ttf"), FONT_BYTES)?;
     let original = &mut fixture.database;
     original.set_sans_serif_family("Noto Sans");
-    let expected = original.face(fixture.face_id).ok_or("missing fixture face")?;
+    let expected = original
+        .face(fixture.face_id)
+        .ok_or("missing fixture face")?;
     let snapshot = text_shaping::with_validated_tree_parse(|| snapshot_database(original))
         .ok_or("admitted file did not produce a snapshot database")?;
     let actual = snapshot.faces().next().ok_or("snapshot face is missing")?;
@@ -33,7 +35,8 @@ fn admitted_file_snapshot_preserves_face_metadata_and_generic_aliases()
 }
 
 #[test]
-fn inactive_snapshot_scope_keeps_original_file_database() -> Result<(), Box<dyn std::error::Error>> {
+fn inactive_snapshot_scope_keeps_original_file_database() -> Result<(), Box<dyn std::error::Error>>
+{
     let directory = tempfile::tempdir()?;
     let fixture = font_file_fixture::create(directory.path().join("font.ttf"), FONT_BYTES)?;
     assert!(snapshot_database(&fixture.database).is_none());
