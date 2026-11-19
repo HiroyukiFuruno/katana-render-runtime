@@ -633,7 +633,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
         workflow = EVIDENCE.WORKFLOW.read_text(encoding="utf-8")
         steps = {
             "Install Chrome for the macOS official producer browser test":
-                "bunx playwright install chrome",
+                "bunx playwright install chrome chromium",
             "Run macOS official producer browser test": "just macos-browser-contract-test",
         }
         def assert_chrome_lane(source: str) -> None:
