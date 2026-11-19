@@ -44,7 +44,7 @@ on:
           - linux-fidelity
           - windows
       verify_filter:
-        description: Optional nextest filter, linux-assets test pattern, or linux-fidelity selection (samples, visual-fixes, marker-css).
+        description: Optional nextest filter, linux-assets test pattern, or linux-fidelity selection (samples, visual-fixes, marker-css, code-width).
         required: false
         default: ''
         type: string
@@ -441,6 +441,52 @@ jobs:
         timeout-minutes: 15
         run: just check-contracts
 
+      - name: Measure the inline code in Linux Chrome
+        if: >-
+          matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
+          inputs.verify_filter == 'code-width'
+        timeout-minutes: 5
+        run: |
+          node --input-type=module <<'JS'
+          import { resolve } from 'node:path';
+          import { pathToFileURL } from 'node:url';
+          import { chromium } from 'playwright';
+          const browser = await chromium.launch({ channel: 'chrome' });
+          try {
+            const page = await browser.newPage({ viewport: { width: 620, height: 900 } });
+            await page.goto(pathToFileURL(resolve('tests/fixtures/html/anonymized-requirements.html')).href);
+            const code = page.locator('td code');
+            if (await code.count() !== 1) throw new Error('inline code selection changed');
+            await code.scrollIntoViewIfNeeded();
+            const geometry = await code.evaluate(async (element) => {
+              await document.fonts.ready;
+              const cell = element.closest('td');
+              const previous = element.previousSibling;
+              if (!cell || !(previous instanceof Text)) throw new Error('table row shape changed');
+              const prefix = document.createRange();
+              prefix.setStart(previous, previous.length - 'URLの例は '.length);
+              prefix.setEnd(previous, previous.length);
+              const codeStyle = getComputedStyle(element);
+              const cellStyle = getComputedStyle(cell);
+              const rect = (value) => ({ x: value.x, y: value.y, width: value.width, height: value.height });
+              return { code: rect(element.getBoundingClientRect()), codeFontSize: codeStyle.fontSize,
+                codeFontFamily: codeStyle.fontFamily, cell: rect(cell.getBoundingClientRect()),
+                padding: [cellStyle.paddingLeft, cellStyle.paddingRight],
+                prefix: [...prefix.getClientRects()].map(rect) };
+            });
+            const cdp = await page.context().newCDPSession(page);
+            await cdp.send('DOM.enable');
+            await cdp.send('CSS.enable');
+            const { root } = await cdp.send('DOM.getDocument');
+            const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: 'td code' });
+            const { fonts } = await cdp.send('CSS.getPlatformFontsForNode', { nodeId });
+            console.log('HTML_INTERACTION_CODE_CHROME', JSON.stringify({ geometry, fonts }));
+          } finally {
+            await browser.close();
+          }
+          JS
+
       - name: Build Linux HTML comparison probes
         if: >-
           matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-assets' &&
@@ -449,6 +495,18 @@ jobs:
         run: |
           just html-fidelity-probe-build
           just --command cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > "$RUNNER_TEMP/krr-html-toc-build.jsonl"
+
+      - name: Measure the inline code in Linux KRR
+        if: >-
+          matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
+          inputs.verify_filter == 'code-width'
+        env:
+          KRR_HTML_RICH_CODE_DIAGNOSTIC: "1"
+        timeout-minutes: 5
+        run: >-
+          just --command cargo test --release -p katana-render-runtime --lib --locked
+          reports_anonymized_rich_code_width_metrics_when_requested -- --nocapture
 
       - name: Select authorized HTML release phase
         id: html_policy

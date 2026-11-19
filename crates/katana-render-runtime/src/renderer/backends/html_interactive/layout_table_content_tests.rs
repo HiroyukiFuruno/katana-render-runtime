@@ -3,6 +3,9 @@ use super::accept_table_content_measurement;
 use super::support::*;
 use crate::renderer::backends::html_document::HtmlDocumentNode;
 
+#[path = "layout_table_content_rich_code_diagnostic_tests.rs"]
+mod rich_code_diagnostic_tests;
+
 #[test]
 fn rich_cell_with_narrow_width_keeps_content_measurement_non_negative() {
     let mut renderer = renderer();
