@@ -108,9 +108,8 @@ jobs:
     name: Test and Build
     needs: static-quality
     if: >-
-      always() &&
-      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') ||
-      needs.static-quality.result == 'success') &&
+      (success() || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
+      needs.static-quality.result == 'skipped')) &&
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     strategy:
       fail-fast: false
