@@ -185,7 +185,7 @@ FROZEN_RELEASE_PREFLIGHT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, in
     ),
     "scripts/release/local_macos_workflow_contract_test.py": (
         ("c6b4cc6bfb0e77cdcdb39a86c81179c0eba0c7c0332333bcb79efc2ce4af2e9f", 22757),
-        ("f0fc0d9b0095026d0d5e64f023ecb927da3a57debc3dae60fb56bc72ca680994", 23196),
+        ("f8bfaee0ee5f54b378c9b98f1143d10ae56313accf463e0d2725c2c63f3cbd4c", 23158),
     ),
     "scripts/release/native_coverage_local_context.py": (
         ("2f8e966c2707bf3fdfecb60e46f5a0cccec671a2a47a96d9e8ca3d59db1d1e73", 36551),
@@ -767,7 +767,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "62ad97ca01918f8983b253ffe693d678d616ca5a0c0d6be0efba500b30dc773b"
+SELF_MODULE_CANONICAL_SHA256 = "639840b8a4018040f9e32a7ff97f0390447a4cbb1014c32264e50e217572b782"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":
@@ -1059,11 +1059,11 @@ def _specific_source_changes(
     if measured_head == FROZEN_RELEASE_MEASURED_HEAD:
         release_tooling_pairs[".github/workflows/test-and-build.yml"] = (
             "951967556058f38556ff04ceaaed3fdf1b57dad015ad893ee2b3ab42b7c5a0ac",
-            "4178a6e2f9f039b79aaea9293b73712b497dd5f79ffab36cbbaeb17cba82a40c",
+            "58d2f2be83743292f924fe8fcf583e0cffc3bf2c65026d5a8db8241f9ee8f908",
         )
         release_tooling_pairs["scripts/release/local_macos_evidence.py"] = (
             "71907038074a7059c12cfb01c8be71d538e92771458459dcd43f253fcabbc169",
-            "42aa22ba6acc3a95c2cf88243af71270b28d5440821a2c40792e1226adb1bed0",
+            "d37b960ec672d670ba388633a43338d6be9396314ffcc7d4efefee14f6564698",
         )
         release_tooling_pairs[".github/workflows/release.yml"] = (
             "c62e9805030bf7f4f94e6af83ee2a62da042e738106208fed6f59ec0ecb0f504",

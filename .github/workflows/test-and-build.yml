@@ -80,8 +80,8 @@ jobs:
         run: bun scripts/html/harness-contract-cli.ts
       - name: Run independent source checks
         env:
-          KRR_CI_SOURCE_BASE: ${{ github.event.pull_request.base.sha || github.sha }}
-        run: bun run moon --concurrency 3 exec krr:source-static --base "$KRR_CI_SOURCE_BASE" --on-failure continue --no-actions
+          MOON_BASE: ${{ github.event.pull_request.base.sha || github.sha }}
+        run: bun run moon --concurrency 3 exec krr:source-static --on-failure continue --no-actions
 
   test:
     name: Test and Build
