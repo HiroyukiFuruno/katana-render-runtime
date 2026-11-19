@@ -10,11 +10,14 @@ const RESERVATION: &str = include_str!(concat!(
     "/../../tests/fixtures/html/library-reservation-fidelity.html"
 ));
 const BODY_MARKER: &str = "検索結果は通信環境";
+const VIEWPORT_WIDTH: u32 = 620;
+const VIEWPORT_HEIGHT: u32 = 900;
 
 fn render_layout(html: &str) -> Result<(HtmlInteractiveSession, LayoutResult), String> {
     let source = HtmlBrowserSource::new(html, "https://example.invalid/font-geometry")
         .map_err(|error| error.to_string())?;
-    let viewport = HtmlBrowserViewport::new(620, 900, 1.0).map_err(|error| error.to_string())?;
+    let viewport = HtmlBrowserViewport::new(VIEWPORT_WIDTH, VIEWPORT_HEIGHT, 1.0)
+        .map_err(|error| error.to_string())?;
     let mut session =
         HtmlInteractiveSession::start(source, viewport).map_err(|error| error.to_string())?;
     let layout = session
