@@ -264,6 +264,7 @@ mod selector_tests;
 
 #[path = "svg_rasterize_text_usvg_cmap_probe_file_io_tests.rs"]
 mod file_io_tests;
+#[cfg(target_os = "macos")]
 #[path = "svg_rasterize_text_usvg_cmap_probe_weight_tests.rs"]
 mod weight_tests;
 

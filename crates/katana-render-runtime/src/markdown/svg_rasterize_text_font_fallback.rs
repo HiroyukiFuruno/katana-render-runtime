@@ -1,5 +1,5 @@
 #[cfg(target_os = "macos")]
-use super::INTERFACE_BOLD_WEIGHT;
+use super::family::INTERFACE_BOLD_WEIGHT;
 use super::{FallbackAttributes, fallback_attributes, scan_fallback_faces, usvg};
 
 #[cfg(not(target_os = "macos"))]

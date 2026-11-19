@@ -221,13 +221,14 @@ fn missing_face_clears_previous_real_entry() -> Result<(), String> {
 #[path = "svg_rasterize_text_harfrust_face_cache_file_tests.rs"]
 mod file_tests;
 use file_tests::{
-    BACKED_FONT_COUNT, FIRST_BACKED_FONT_BYTES, FIRST_BACKED_FONT_COUNT, FontHandle, FontShape,
-    NEXT_BACKED_FONT_BYTES, POISON_WEIGHT, SFNT_NUM_TABLES_FIELD_OFFSET,
-    SFNT_TABLE_DIRECTORY_START, SFNT_TABLE_LENGTH_FIELD_END, SFNT_TABLE_LENGTH_FIELD_START,
-    SFNT_TABLE_OFFSET_FIELD_END, SFNT_TABLE_OFFSET_FIELD_START, SFNT_TABLE_RECORD_SIZE,
-    SFNT_TAG_BYTE_LENGTH, TRUNCATION_DIVISOR, TTC_SIZE, TTC_TEXT, TTC_WEIGHT,
-    assert_all_handles_cleared, font_source_generation, shape_and_commit, shape_font,
+    BACKED_FONT_COUNT, FIRST_BACKED_FONT_BYTES, FIRST_BACKED_FONT_COUNT, FontHandle,
+    NEXT_BACKED_FONT_BYTES, SFNT_NUM_TABLES_FIELD_OFFSET, SFNT_TABLE_DIRECTORY_START,
+    SFNT_TABLE_LENGTH_FIELD_END, SFNT_TABLE_LENGTH_FIELD_START, SFNT_TABLE_OFFSET_FIELD_END,
+    SFNT_TABLE_OFFSET_FIELD_START, SFNT_TABLE_RECORD_SIZE, SFNT_TAG_BYTE_LENGTH,
+    TRUNCATION_DIVISOR, assert_all_handles_cleared, font_source_generation, shape_and_commit,
 };
+#[cfg(target_os = "macos")]
+use file_tests::{FontShape, POISON_WEIGHT, TTC_SIZE, TTC_TEXT, TTC_WEIGHT, shape_font};
 
 #[path = "svg_rasterize_text_harfrust_face_cache_file_budget_tests.rs"]
 mod file_budget_tests;
@@ -237,6 +238,7 @@ mod file_generation_failure_tests;
 mod file_mutation_tests;
 #[path = "svg_rasterize_text_harfrust_face_cache_file_reuse_tests.rs"]
 mod file_reuse_tests;
+#[cfg(target_os = "macos")]
 #[path = "svg_rasterize_text_harfrust_face_cache_file_ttc_tests.rs"]
 mod file_ttc_tests;
 

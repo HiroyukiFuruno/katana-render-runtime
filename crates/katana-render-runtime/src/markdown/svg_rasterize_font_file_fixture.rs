@@ -1,8 +1,9 @@
-use resvg::usvg::{
-    self,
-    fontdb::{Database, ID, Source},
-};
-use std::{path::PathBuf, sync::Arc};
+#[cfg(target_os = "macos")]
+use resvg::usvg;
+use resvg::usvg::fontdb::{Database, ID, Source};
+use std::path::PathBuf;
+#[cfg(target_os = "macos")]
+use std::sync::Arc;
 
 pub(super) const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 
@@ -12,6 +13,7 @@ pub(super) struct FontFileFixture {
     pub(super) path: PathBuf,
 }
 
+#[cfg(target_os = "macos")]
 impl FontFileFixture {
     pub(super) fn parse_svg(&self, source: &str) -> Result<usvg::Tree, usvg::Error> {
         usvg::Tree::from_str(

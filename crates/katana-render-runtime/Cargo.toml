@@ -121,9 +121,11 @@ nix = { version = "0.32.0", default-features = false, features = ["fs", "mount"]
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dev-dependencies]
 nix = { version = "0.32.0", default-features = false, features = ["resource"] }
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'.dependencies]
 # 公開済みCPU SDKの最小構成に合わせ、ローカルSkia改変や独自SDKへ依存しない。
 skia-safe = { version = "=0.156.0", default-features = false, features = ["binary-cache", "pdf"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
 fontique = { version = "=0.13.0", default-features = false, features = ["std"] }
 objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std", "CFString", "CFURL"] }
 objc2-core-text = { version = "=0.3.2", default-features = false, features = ["CTFont", "CTFontDescriptor", "CTFontTraits"] }

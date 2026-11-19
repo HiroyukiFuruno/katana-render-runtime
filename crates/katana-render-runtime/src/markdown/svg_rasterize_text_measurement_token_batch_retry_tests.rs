@@ -1,10 +1,6 @@
 use super::super::font_file_fixture::{self as shared_font_file_fixture, FontFileFixture};
 use super::HtmlTextMeasurementToken;
-use resvg::usvg::fontdb::Source;
-use std::{
-    path::PathBuf,
-    sync::atomic::{AtomicUsize, Ordering},
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
 static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
@@ -67,8 +63,10 @@ fn windows_file_generation_keeps_nondurable_token_policy() -> TestResult<()> {
 
 #[cfg(target_os = "macos")]
 mod overflow_tests {
-    use super::{FontFileFixture, HtmlTextMeasurementToken, PathBuf, Source, TestResult};
+    use super::{FontFileFixture, HtmlTextMeasurementToken, TestResult};
     use crate::markdown::svg_rasterize::text_shaping::font;
+    use resvg::usvg::fontdb::Source;
+    use std::path::PathBuf;
 
     const STAMP_CAPACITY: usize = 256;
     const FAMILY: &str = "Helvetica Neue";

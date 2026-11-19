@@ -66,9 +66,10 @@ mod family_scope_cache;
 pub(super) use fallback_memo::{install as install_html_fallback_memo, with_validated_tree_parse};
 use family_runs::resolved_font_runs;
 use font::matching_font_face;
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 pub(super) use tests::diagnostic_resolved_font_runs;
 pub(super) use usvg_cmap::install as install_html_font_resolver;
+#[cfg(target_os = "macos")]
 pub(super) use usvg_cmap::loaded_html_font;
 
 #[path = "svg_rasterize_text_shaping_scope.rs"]
@@ -168,6 +169,7 @@ mod harfrust;
 pub(super) mod test_font_data;
 #[cfg(target_os = "macos")]
 pub(in crate::markdown::svg_rasterize) use harfrust::eligible_immutable_system_path;
+#[cfg(target_os = "macos")]
 pub(super) use harfrust::shape_run_character_metrics_with_trim;
 #[path = "svg_rasterize_text_shaping_svg_fragments.rs"]
 mod svg_fragments;
@@ -177,6 +179,7 @@ pub(super) use svg_fragments::SvgTextFragmentLayout;
 pub(super) use svg_fragments::shaped_svg_fragment_layout;
 #[cfg(target_os = "macos")]
 pub(super) use svg_metrics::macos_svg_dom_layout_ascent;
+#[cfg(target_os = "macos")]
 pub(super) use svg_metrics::svg_dom_layout_ascent;
 #[path = "svg_rasterize_text_shaping_x_height.rs"]
 mod svg_x_height;

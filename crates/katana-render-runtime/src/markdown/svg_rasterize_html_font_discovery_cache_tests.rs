@@ -28,10 +28,10 @@ fn value_with_source(source: Source) -> Result<CacheValue, String> {
     })
 }
 
+#[cfg(target_os = "macos")]
 fn empty_value() -> CacheValue {
     CacheValue {
         database: Arc::new(Database::new()),
-        #[cfg(target_os = "macos")]
         proof: None,
     }
 }

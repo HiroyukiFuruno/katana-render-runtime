@@ -7,6 +7,7 @@ use super::Database;
 pub(super) const TTC_TEXT: &str = "日本語 ABC";
 pub(super) const TTC_SIZE: f32 = 16.0;
 pub(super) const TTC_WEIGHT: u16 = 700;
+#[cfg(target_os = "macos")]
 pub(super) const POISON_WEIGHT: u16 = 400;
 pub(super) const TRUNCATION_DIVISOR: usize = 2;
 pub(super) const SFNT_NUM_TABLES_FIELD_OFFSET: usize = 4;
@@ -28,7 +29,7 @@ pub(super) fn shape_and_commit(
     font: &FontHandle,
     label: &str,
 ) -> Result<(), String> {
-    super::super::super::shape_font(
+    shape_font(
         font,
         TTC_TEXT,
         FontShape::new(TTC_SIZE, TTC_WEIGHT, false),

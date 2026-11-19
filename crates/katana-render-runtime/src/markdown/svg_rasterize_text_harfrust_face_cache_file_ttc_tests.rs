@@ -1,6 +1,5 @@
 use super::*;
 
-#[cfg(target_os = "macos")]
 #[test]
 fn real_ttc_faces_match_owned_glyphs_when_available() -> Result<(), String> {
     let path = Path::new("/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc");

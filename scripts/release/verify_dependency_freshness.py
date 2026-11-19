@@ -697,8 +697,11 @@ def _load_manifest_payload(root: Path, manifest: Path) -> dict[str, object]:
     return _string_keyed_object(payload, f"Rust manifest must be a table: {manifest}")
 
 
+KRR_SKIA_TARGET = 'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'
+
+
 def _verified_skia_hold(root: Path, metadata: dict[str, object]) -> bool:
-    """認証されたmacOS依存だけを性能上の保留候補にする。"""
+    """認証されたKRRのSkia依存だけを性能上の保留候補にする。"""
     try:
         runtime, node = _runtime_metadata(metadata)
     except ValueError:
@@ -709,7 +712,7 @@ def _verified_skia_hold(root: Path, metadata: dict[str, object]) -> bool:
     dependencies, edges, packages = runtime.get("dependencies"), node.get("deps"), metadata.get("packages")
     if not isinstance(dependencies, list) or not isinstance(edges, list) or not isinstance(packages, list):
         return False
-    target = 'cfg(target_os = "macos")'
+    target = KRR_SKIA_TARGET
     registry = "registry+https://github.com/rust-lang/crates.io-index"
     direct = [d for d in dependencies if isinstance(d, dict) and d.get("name") == "skia-safe"
               and d.get("rename") is None and d.get("kind") is None and d.get("target") == target]
@@ -847,7 +850,7 @@ def rust_manifest_dependencies(root: Path, coupled_skrifa_manifest: Path | None 
                         f"unsupported Cargo version requirement in {manifest}: {declared_name} = {version!r}"
                     ) from exc
                 if (metadata is not None and manifest.resolve() == (root / KRR_SKRIFA_MANIFEST).resolve()
-                        and scope == 'target.cfg(target_os = "macos").dependencies'
+                        and scope == f"target.{KRR_SKIA_TARGET}.dependencies"
                         and declared_name == "skia-safe"
                         and declaration == {"version": "=0.156.0", "default-features": False,
                                             "features": ["binary-cache", "pdf"]}

@@ -1,8 +1,8 @@
-use resvg::usvg::{
-    self,
-    fontdb::{Database, ID},
-};
+use resvg::usvg;
+#[cfg(target_os = "macos")]
+use resvg::usvg::fontdb::{Database, ID};
 
+#[cfg(target_os = "macos")]
 pub(in crate::markdown::svg_rasterize) fn loaded_html_font(
     font: &usvg::Font,
     database: &Database,

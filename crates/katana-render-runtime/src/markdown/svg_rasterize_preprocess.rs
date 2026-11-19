@@ -27,6 +27,7 @@ pub(super) fn preprocess_for_rasterizer(svg_text: &str) -> String {
     geometry::materialize_geometry_properties(with_normalized_markers)
 }
 
+#[cfg(target_os = "macos")]
 pub(super) fn source_selector_matches(
     node: resvg::usvg::roxmltree::Node<'_, '_>,
     selector: &simplecss::Selector<'_>,

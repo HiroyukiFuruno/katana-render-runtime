@@ -36,7 +36,6 @@ use resvg::usvg;
 use score::fallback_face_attribute_score;
 #[cfg(test)]
 use score::{css_stretch_match_rank, css_style_match_rank, fallback_attribute_score};
-const INTERFACE_BOLD_WEIGHT: u16 = 700;
 #[derive(Clone, Copy)]
 struct FallbackAttributes {
     weight: u16,
@@ -53,9 +52,11 @@ fn fallback_attributes(weight: u16, italic: bool) -> FallbackAttributes {
 }
 #[path = "svg_rasterize_text_font_family.rs"]
 mod family;
+#[cfg(any(test, target_os = "macos"))]
+pub(super) use family::css_font_family_names;
 #[cfg(test)]
 pub(super) use family::fontdb_family;
-pub(super) use family::{css_font_family_names, matching_font_face};
+pub(super) use family::matching_font_face;
 
 #[cfg(test)]
 pub(super) fn font_runs(

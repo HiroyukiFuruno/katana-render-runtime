@@ -180,7 +180,7 @@ impl SvgRasterizeOps {
         Self::render_tree_with_provenance(&tree, scale, &compatible_svg, provenance)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     fn render_tree(
         tree: &usvg::Tree,
         scale: f32,

@@ -1,4 +1,4 @@
-use super::INTERFACE_BOLD_WEIGHT;
+use super::family::INTERFACE_BOLD_WEIGHT;
 use super::matching_font_face;
 use crate::markdown::svg_rasterize::font::html_font_db_for_text;
 use resvg::usvg::fontdb::{Database, ID, Source};
@@ -185,7 +185,7 @@ fn interface_fallback_is_excluded_only_when_required() -> Result<(), String> {
     );
     let character = alias_character(&database, alias, true)?;
     retain_primary_and_alias(&mut database, base, alias);
-    let attributes = super::fallback_attributes(super::INTERFACE_BOLD_WEIGHT, false);
+    let attributes = super::fallback_attributes(INTERFACE_BOLD_WEIGHT, false);
     let selected = |required| {
         super::matching_fallback_regular(
             &database,

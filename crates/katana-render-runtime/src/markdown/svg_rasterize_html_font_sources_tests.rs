@@ -1,6 +1,8 @@
+#[cfg(target_os = "macos")]
+use super::canonical_font_source_path;
 use super::{
-    build_html_font_db, canonical_font_source_path, cjk_fallback_font_paths, load_font_paths,
-    load_font_paths_once, paths_for_font_family,
+    build_html_font_db, cjk_fallback_font_paths, load_font_paths, load_font_paths_once,
+    paths_for_font_family,
 };
 use crate::markdown::svg_rasterize::font::BUNDLED_SANS_SERIF_FONT;
 use crate::markdown::svg_rasterize::font::html::request::HtmlFontRequest;

@@ -35,10 +35,12 @@ impl GeneratedHtmlTextProvenance {
         #[cfg(not(any(target_os = "macos", test)))]
         {
             let _ = self;
-            return markup;
+            markup
         }
         #[cfg(any(target_os = "macos", test))]
-        return self.record_text_markup(markup);
+        {
+            self.record_text_markup(markup)
+        }
     }
 
     #[cfg(any(target_os = "macos", test))]

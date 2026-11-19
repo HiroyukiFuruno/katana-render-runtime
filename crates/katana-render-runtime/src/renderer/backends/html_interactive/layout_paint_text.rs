@@ -92,14 +92,14 @@ fn resolved_font_markup(text: &str, style: &CssStyle, x: f32) -> (String, String
         style.font_weight,
         style.italic,
     );
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     let run_families = runs.as_ref().map(|runs| {
         runs.iter()
             .map(|(family, _)| family.clone())
             .collect::<Vec<_>>()
     });
     let markup = font_runs_markup(text, style, runs, x);
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     SvgRasterizeOps::record_actual_html_font_markup(
         &style.font_family,
         style.font_weight,

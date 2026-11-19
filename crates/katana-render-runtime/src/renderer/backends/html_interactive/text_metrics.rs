@@ -191,7 +191,6 @@ mod tests {
     use crate::renderer::backends::html_interactive::style::CssStyle;
     use std::collections::HashMap;
 
-    #[cfg(target_os = "macos")]
     fn measured_text_width(text: &str, style: &CssStyle) -> f32 {
         match SvgRasterizeOps::measure_html_text_with_cache_status(
             text,

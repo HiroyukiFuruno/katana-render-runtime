@@ -256,6 +256,7 @@ fn collect_rustybuzz_character_metrics(
     })
 }
 
+#[cfg(target_os = "macos")]
 pub(in crate::markdown::svg_rasterize) fn diagnostic_resolved_font_runs(
     database: &std::sync::Arc<usvg::fontdb::Database>,
     base: usvg::fontdb::ID,

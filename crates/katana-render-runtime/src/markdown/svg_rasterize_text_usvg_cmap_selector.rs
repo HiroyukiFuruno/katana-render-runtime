@@ -12,8 +12,10 @@ mod requested_weight_tests;
 mod styled;
 pub(in super::super) use styled::html_styled_selector;
 
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 #[path = "svg_rasterize_text_usvg_cmap_selector_loaded.rs"]
 mod loaded;
+#[cfg(target_os = "macos")]
 pub(in crate::markdown::svg_rasterize) use loaded::loaded_html_font;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use loaded::requests_system_font;

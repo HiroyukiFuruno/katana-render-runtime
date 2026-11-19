@@ -1,4 +1,4 @@
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 use super::sources;
 use super::{
     CacheValue, DatabaseKey, HtmlFontDatabaseCache, HtmlFontRequest,

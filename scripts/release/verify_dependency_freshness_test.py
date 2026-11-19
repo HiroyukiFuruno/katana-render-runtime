@@ -417,15 +417,15 @@ class DependencyFreshnessTest(unittest.TestCase):
         metadata["packages"][0]["name"] = "other"
         self.assertFalse(held())
 
-    def test_skia_hold_is_scoped_to_verified_macos_dependency_and_known_version(self) -> None:
+    def test_skia_hold_is_scoped_to_verified_native_dependency_and_known_version(self) -> None:
         manifest = self.root / "crates/katana-render-runtime/Cargo.toml"
         manifest.parent.mkdir(parents=True)
         declaration = 'skia-safe = { version = "=0.156.0", default-features = false, features = ["binary-cache", "pdf"] }\n'
+        target = 'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'
         manifest.write_text('[package]\nname = "katana-render-runtime"\nversion = "0.1.0"\n'
-                            '[target.\'cfg(target_os = "macos")\'.dependencies]\n' + declaration,
+                            f"[target.'{target}'.dependencies]\n" + declaration,
                             encoding="utf-8")
         registry = "registry+https://github.com/rust-lang/crates.io-index"
-        target = 'cfg(target_os = "macos")'
         runtime_id = "runtime"
         skia_id = registry + "#skia-safe@0.156.0"
         metadata: CargoMetadata = {

@@ -135,10 +135,12 @@ fn audit_ishikawa_svg_metrics(
     weight: u16,
     italic: bool,
 ) -> Result<(crate::markdown::svg_rasterize::SvgTextRunMetrics, Value), String> {
-    let (metrics, audit) = SvgRasterizeOps::with_actual_font_source_audit(|| {
-        SvgRasterizeOps::measure_svg_text_metrics(text, family, size, weight, italic)
-    })
-    .map_err(|error| error.to_string())?;
+    let measure = || SvgRasterizeOps::measure_svg_text_metrics(text, family, size, weight, italic);
+    #[cfg(target_os = "macos")]
+    let (metrics, audit) = SvgRasterizeOps::with_actual_font_source_audit(measure)
+        .map_err(|error| error.to_string())?;
+    #[cfg(not(target_os = "macos"))]
+    let (metrics, audit) = (measure(), Value::Null);
     Ok((metrics.map_err(|error| error.to_string())?, audit))
 }
 

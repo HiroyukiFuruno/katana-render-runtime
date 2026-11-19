@@ -1,6 +1,7 @@
-#[cfg(target_os = "macos")]
-use super::INTERFACE_BOLD_WEIGHT;
 use super::usvg;
+
+#[cfg(target_os = "macos")]
+pub(super) const INTERFACE_BOLD_WEIGHT: u16 = 700;
 
 pub(in crate::markdown::svg_rasterize::text_shaping) fn matching_font_face(
     database: &usvg::fontdb::Database,

@@ -103,6 +103,7 @@ fn resolve_changed_property(
     }
 }
 
+#[cfg(target_os = "macos")]
 pub(super) fn selector_matches_source_node(
     node: Node<'_, '_>,
     selector: &simplecss::Selector<'_>,

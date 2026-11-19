@@ -1,10 +1,8 @@
 use super::*;
 
-#[cfg(target_os = "macos")]
 #[path = "svg_rasterize_text_usvg_cmap_probe_weight_trace.rs"]
 mod trace;
 
-#[cfg(target_os = "macos")]
 #[test]
 fn html_system_ui_mixed_japanese_spans_trace_actual_usvg_faces() -> Result<(), String> {
     let trace = trace::run()?;

@@ -25,7 +25,7 @@ pub(in super::super) fn clear_html_line_metrics_cache() {
     primary_baseline::clear_primary_baseline_cache();
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 fn html_line_metrics_cache_len() -> usize {
     LINE_METRIC_CACHE.with(|cache| cache.borrow().len())
 }
@@ -150,7 +150,7 @@ fn face_line_metrics(data: &[u8], index: u32, size: f32) -> Option<(f32, f32)> {
     Some(super::harfrust::parsed_face_line_metrics(&face, size))
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 fn html_text_baseline(
     family: &str,
     size: f32,
