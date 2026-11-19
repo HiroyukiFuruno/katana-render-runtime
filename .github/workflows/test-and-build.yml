@@ -46,6 +46,11 @@ on:
         required: false
         default: ''
         type: string
+      verify_html_trace:
+        description: Enable HTML phase timings in selected native test output.
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && format('native-verify-{0}-{1}', github.ref, inputs.verify_platform) || format('{0}-{1}', github.workflow, github.ref) }}
@@ -302,7 +307,9 @@ jobs:
       - name: Run selected native tests
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_filter != ''
         env:
+          DEBUG: ${{ inputs.verify_html_trace && 'true' || 'false' }}
           KRR_VERIFY_FILTERSET: ${{ inputs.verify_filter }}
+          NEXTEST_SUCCESS_OUTPUT: ${{ inputs.verify_html_trace && 'immediate' || 'never' }}
         shell: bash
         timeout-minutes: 45
         run: >-
