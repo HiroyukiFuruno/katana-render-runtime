@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { type Browser, chromium } from "playwright";
+import { type Browser, chromium, type Page } from "playwright";
 import { test as base, expect } from "playwright/test";
 import { DiagramTheme } from "./diagram_theme";
 import { parsePaintProjectedReferenceEvidence } from "./managed-full-compare-results";
@@ -107,8 +107,10 @@ const markerBoundaryCases = [
       [21, 127],
       [261, 127],
       [66, 277],
+      [143, 35],
+      [143, 38],
     ],
-    expected: [0, 0, 96, 96],
+    control: "scripts/mermaid/marker-direct-triangles.control.svg",
   },
   { path: "context/in-marker.svg", points: [[150, 15]], expected: [0, 0, 255, 255] },
   { path: "context/in-nested-use-and-marker.svg", points: [[150, 15]], expected: [0, 0, 255, 255] },
@@ -118,6 +120,42 @@ const markerBoundaryCases = [
     expected: [0, 64, 0, 128],
   },
 ] as const;
+
+async function markerPixelSamples(
+  page: Page,
+  bytes: Buffer,
+  points: readonly (readonly [number, number])[],
+) {
+  return page.evaluate(
+    async ({ source, points }) => {
+      const bytes = Uint8Array.from(atob(source), (character) => character.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: "image/svg+xml" }));
+      try {
+        const image = new Image();
+        image.src = url;
+        await image.decode();
+        const canvas = document.createElement("canvas");
+        canvas.width = 300;
+        canvas.height = 300;
+        const context = canvas.getContext("2d");
+        if (context === null) throw new Error("Canvas 2D context unavailable");
+        context.drawImage(image, 0, 0, 300, 300);
+        return points.map(([x, y]) => {
+          const raw = Array.from(context.getImageData(x, y, 1, 1).data);
+          const alpha = raw[3];
+          if (alpha === undefined) throw new Error("RGBA alpha unavailable");
+          const premultiplied = raw.map((channel, index) =>
+            index === 3 ? channel : Math.round((channel * alpha) / 255),
+          );
+          return { x, y, raw, premultiplied };
+        });
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    },
+    { source: bytes.toString("base64"), points },
+  );
+}
 
 for (const fixture of markerBoundaryCases) {
   test(`Chrome observes original SVG marker boundary: ${fixture.path}`, async ({
@@ -134,35 +172,12 @@ for (const fixture of markerBoundaryCases) {
       deviceScaleFactor: 1,
     });
     try {
-      const samples = await page.evaluate(
-        async ({ source, points }) => {
-          const bytes = Uint8Array.from(atob(source), (character) => character.charCodeAt(0));
-          const url = URL.createObjectURL(new Blob([bytes], { type: "image/svg+xml" }));
-          try {
-            const image = new Image();
-            image.src = url;
-            await image.decode();
-            const canvas = document.createElement("canvas");
-            canvas.width = 300;
-            canvas.height = 300;
-            const context = canvas.getContext("2d");
-            if (context === null) throw new Error("Canvas 2D context unavailable");
-            context.drawImage(image, 0, 0, 300, 300);
-            return points.map(([x, y]) => {
-              const raw = Array.from(context.getImageData(x, y, 1, 1).data);
-              const alpha = raw[3];
-              if (alpha === undefined) throw new Error("RGBA alpha unavailable");
-              const premultiplied = raw.map((channel, index) =>
-                index === 3 ? channel : Math.round((channel * alpha) / 255),
-              );
-              return { x, y, raw, premultiplied };
-            });
-          } finally {
-            URL.revokeObjectURL(url);
-          }
-        },
-        { source: bytes.toString("base64"), points: fixture.points },
-      );
+      const samples = await markerPixelSamples(page, bytes, fixture.points);
+      const controlBytes = "control" in fixture ? fs.readFileSync(fixture.control) : undefined;
+      const control = controlBytes && {
+        sourceSha256: createHash("sha256").update(controlBytes).digest("hex"),
+        samples: await markerPixelSamples(page, controlBytes, fixture.points),
+      };
       await testInfo.attach("marker-boundary-observation", {
         body: Buffer.from(
           JSON.stringify(
@@ -173,6 +188,7 @@ for (const fixture of markerBoundaryCases) {
               width: 300,
               height: 300,
               samples,
+              control,
             },
             null,
             2,
@@ -180,10 +196,23 @@ for (const fixture of markerBoundaryCases) {
         ),
         contentType: "application/json",
       });
-      for (const sample of samples) {
-        expect(sample.premultiplied, `${fixture.path} (${sample.x}, ${sample.y})`).toEqual(
-          fixture.expected,
+      if ("expected" in fixture) {
+        for (const sample of samples) {
+          expect(sample.premultiplied, `${fixture.path} (${sample.x}, ${sample.y})`).toEqual(
+            fixture.expected,
+          );
+        }
+      } else {
+        if (!control) throw new Error("Missing direct-triangle control");
+        expect(samples.map(({ premultiplied }) => premultiplied)).toEqual(
+          control.samples.map(({ premultiplied }) => premultiplied),
         );
+        expect(samples.find(({ x, y }) => x === 143 && y === 35)?.premultiplied).toEqual([
+          0, 0, 191, 191,
+        ]);
+        expect(samples.find(({ x, y }) => x === 143 && y === 38)?.premultiplied).toEqual([
+          0, 0, 0, 0,
+        ]);
       }
     } finally {
       await page.close();
