@@ -126,7 +126,7 @@ fn needs_unicode_fallback(character: char) -> bool {
     !character.is_ascii() && !is_cjk_character(character) && !is_emoji_character(character)
 }
 
-fn is_cjk_character(character: char) -> bool {
+pub(super) fn is_cjk_character(character: char) -> bool {
     matches!(
         character as u32,
         0x2E80..=0x2EFF

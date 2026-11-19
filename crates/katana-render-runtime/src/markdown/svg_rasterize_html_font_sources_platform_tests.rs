@@ -9,6 +9,8 @@ use super::{bold_alias_id, register_interface_bold};
 #[cfg(target_os = "macos")]
 #[path = "svg_rasterize_html_font_interface_bold_test_support.rs"]
 mod interface_bold_support;
+#[cfg(target_os = "linux")]
+use crate::markdown::svg_rasterize::font::platform::{PlatformFontStrategy, font_platform};
 #[cfg(target_os = "macos")]
 use interface_bold_support::{assert_coretext_interface_face, japanese_ui_font_pair};
 
@@ -30,15 +32,32 @@ fn linux_monospace_keeps_the_same_face_for_ascii_and_japanese_text() {
 #[cfg(target_os = "linux")]
 #[test]
 fn linux_system_ui_shapes_with_the_family_selected_by_fontconfig() -> Result<(), String> {
-    use crate::markdown::svg_rasterize::SvgRasterizeOps;
-    use crate::markdown::svg_rasterize::font::platform::{PlatformFontStrategy, font_platform};
-
     let family = font_platform()
         .installed_system_ui_family()
         .ok_or("fontconfig system-ui missing")?;
-    let sample = "Mermaid Draw.io";
-    let actual = SvgRasterizeOps::html_text_font_runs(sample, "system-ui, sans-serif", 700, false)
-        .ok_or("system-ui did not resolve")?;
+    assert_system_ui_font_runs("Mermaid Draw.io", family, "system-ui, sans-serif", 700)
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_cjk_fallback_shapes_missing_system_ui_glyphs_with_fontconfig() -> Result<(), String> {
+    let family = font_platform()
+        .cjk_fallback_family()
+        .ok_or("fontconfig CJK fallback missing")?;
+    assert_system_ui_font_runs("名称架空", family, "system-ui", 400)
+}
+
+#[cfg(target_os = "linux")]
+fn assert_system_ui_font_runs(
+    sample: &str,
+    family: &str,
+    style: &str,
+    weight: u16,
+) -> Result<(), String> {
+    let actual = crate::markdown::svg_rasterize::SvgRasterizeOps::html_text_font_runs(
+        sample, style, weight, false,
+    )
+    .ok_or("system-ui font runs did not resolve")?;
     assert_eq!(actual, vec![(family.to_string(), sample.to_string())]);
     Ok(())
 }

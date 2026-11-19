@@ -59,7 +59,7 @@ pub(super) fn build_html_font_db(request: &HtmlFontRequest) -> usvg::fontdb::Dat
     }
     system::load_requested_system_font_families_once(
         &mut database,
-        system::installed_family_requests(&request.families),
+        system::installed_family_requests(&request.families, request.needs_cjk),
         &mut loaded_paths,
     );
     load_fallback_font_paths(request, &mut database, &mut loaded_paths);

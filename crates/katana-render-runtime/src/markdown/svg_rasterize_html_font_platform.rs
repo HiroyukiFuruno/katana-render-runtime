@@ -1,4 +1,6 @@
 use resvg::usvg::fontdb::{Database, Family, ID};
+#[cfg(not(target_os = "macos"))]
+use resvg::usvg::fontdb::{Query, Style, Weight};
 use std::{collections::BTreeSet, ops::ControlFlow, path::PathBuf};
 
 #[cfg(target_os = "macos")]
@@ -9,6 +11,30 @@ pub(in crate::markdown::svg_rasterize) trait PlatformFontStrategy {
 
     fn installed_system_ui_family(&self) -> Option<&'static str> {
         None
+    }
+
+    fn cjk_fallback_family(&self) -> Option<&'static str> {
+        None
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn cjk_fallback_face(
+        &self,
+        database: &Database,
+        character: char,
+        weight: u16,
+        style: Style,
+    ) -> Option<ID> {
+        if !super::super::request::is_cjk_character(character) {
+            return None;
+        }
+        let family = self.cjk_fallback_family()?;
+        database.query(&Query {
+            families: &[Family::Name(family)],
+            weight: Weight(weight),
+            style,
+            ..Query::default()
+        })
     }
 
     fn system_alias(&self) -> Family<'static> {
@@ -70,7 +96,19 @@ impl PlatformFontStrategy for FontconfigFonts {
     #[cfg(target_os = "linux")]
     fn installed_system_ui_family(&self) -> Option<&'static str> {
         static FAMILY: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-        FAMILY.get_or_init(fontconfig_system_ui_family).as_deref()
+        FAMILY
+            .get_or_init(|| fontconfig_matched_family("system-ui"))
+            .as_deref()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn cjk_fallback_family(&self) -> Option<&'static str> {
+        static FAMILY: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+        /* WHY: ひらがな・カタカナ・漢字を扱えるOS標準の候補を一度だけ取得し、個々の字形は既存の検査で確認する。 */
+        const CJK_SCALABLE_PATTERN: &str = ":scalable=true:charset=3042 30a2 4e00";
+        FAMILY
+            .get_or_init(|| fontconfig_matched_family(CJK_SCALABLE_PATTERN))
+            .as_deref()
     }
 
     #[cfg(target_os = "linux")]
@@ -84,9 +122,9 @@ impl PlatformFontStrategy for FontconfigFonts {
 }
 
 #[cfg(target_os = "linux")]
-fn fontconfig_system_ui_family() -> Option<String> {
+fn fontconfig_matched_family(pattern: &str) -> Option<String> {
     let output = crate::system::ProcessService::create_command("fc-match")
-        .args(["--format", "%{family[0]}", "system-ui"])
+        .args(["--format", "%{family[0]}", pattern])
         .output()
         .ok()?;
     let name = String::from_utf8(output.stdout).ok()?;

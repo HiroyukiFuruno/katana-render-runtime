@@ -1,6 +1,8 @@
 use super::{FallbackAttributes, fallback_attributes, scan_fallback_faces, usvg};
 #[cfg(target_os = "macos")]
 use crate::markdown::svg_rasterize::font::platform::INTERFACE_BOLD_WEIGHT;
+#[cfg(not(target_os = "macos"))]
+use crate::markdown::svg_rasterize::font::platform::{PlatformFontStrategy, font_platform};
 
 #[cfg(not(target_os = "macos"))]
 pub(super) fn matching_fallback_nonmacos(
@@ -9,19 +11,22 @@ pub(super) fn matching_fallback_nonmacos(
     character: char,
     requested_weight: u16,
     requested_italic: bool,
-    probe: impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
+    mut probe: impl FnMut(usvg::fontdb::ID, char) -> Option<bool>,
 ) -> (Option<usvg::fontdb::ID>, bool) {
     if database.face(base_face_id).is_none() {
         return (None, false);
     }
-    matching_fallback_regular(
-        database,
-        base_face_id,
-        character,
-        fallback_attributes(requested_weight, requested_italic),
-        false,
-        probe,
-    )
+    let attributes = fallback_attributes(requested_weight, requested_italic);
+    let preferred = font_platform()
+        .cjk_fallback_face(database, character, requested_weight, attributes.style)
+        .filter(|id| *id != base_face_id)
+        .map(|id| (id, probe(id, character)));
+    if let Some((id, Some(true))) = preferred {
+        return (Some(id), true);
+    }
+    let (id, cacheable) =
+        matching_fallback_regular(database, base_face_id, character, attributes, false, probe);
+    (id, cacheable && !matches!(preferred, Some((_, None))))
 }
 
 #[cfg(target_os = "macos")]
