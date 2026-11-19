@@ -2,6 +2,9 @@ use super::{GeneratedClipProvenance, RasterizedSvg, SvgRasterizeError, SvgRaster
 #[cfg(all(test, windows))]
 use std::time::Instant;
 
+#[cfg(all(test, windows))]
+const RASTER_STAGE_TIMESTAMPS: usize = 5;
+
 pub(super) fn rasterize(
     svg_text: &str,
     scale: f32,
@@ -41,7 +44,10 @@ fn diagnostic_start() -> Option<Instant> {
 }
 
 #[cfg(all(test, windows))]
-fn report(svg_bytes: usize, [start, fonts, preprocessed, parsed, painted]: [Instant; 5]) {
+fn report(
+    svg_bytes: usize,
+    [start, fonts, preprocessed, parsed, painted]: [Instant; RASTER_STAGE_TIMESTAMPS],
+) {
     eprintln!(
         "[krr-html-trace] phase=svg_raster_stages svg_bytes={svg_bytes} font_prepare_us={} preprocess_us={} parse_shape_us={} viewport_paint_us={}",
         (fonts - start).as_micros(),

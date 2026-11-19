@@ -7,7 +7,7 @@ pub(in crate::renderer::backends::html_interactive) use border_style::CssBorderS
 #[path = "style_value_types.rs"]
 mod value_types;
 pub(in crate::renderer::backends::html_interactive) use value_types::{
-    CssGridTrack, CssGridTrackBreadth, CssLength,
+    CssGridTrack, CssGridTrackBreadth, CssLength, CssTextTransform, CssWhiteSpace,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -49,22 +49,6 @@ pub(in crate::renderer::backends::html_interactive) enum CssVerticalAlign {
     Top,
     Middle,
     Bottom,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(in crate::renderer::backends::html_interactive) enum CssTextTransform {
-    #[default]
-    None,
-    Uppercase,
-    Lowercase,
-    Capitalize,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(in crate::renderer::backends::html_interactive) enum CssWhiteSpace {
-    #[default]
-    Normal,
-    NoWrap,
 }
 
 #[derive(Debug, Clone, PartialEq)]

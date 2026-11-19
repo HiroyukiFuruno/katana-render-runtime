@@ -4,6 +4,29 @@ use super::paths::{
     LIBERATION_SANS_FONT_PATHS, MONOSPACE_FONT_PATHS, SYSTEM_CJK_FONT_PATHS, SYSTEM_FONT_PATHS,
     TIMES_FONT_PATHS, TREBUCHET_FONT_PATHS,
 };
+use super::{configured_html_sans_serif_family, load_font_paths_once};
+use resvg::usvg;
+use std::{collections::BTreeSet, path::PathBuf};
+
+pub(super) fn load_requested_font_family(
+    database: &mut usvg::fontdb::Database,
+    family: &str,
+    loaded_paths: &mut BTreeSet<PathBuf>,
+) {
+    #[cfg(target_os = "linux")]
+    if family == "monospace" {
+        /* WHY: 日本語文中のASCII断片でも、描画全体と同じ等幅書体を候補にする。 */
+        load_font_paths_once(database, CJK_FONT_PATHS, loaded_paths);
+    }
+    if family == "sans-serif" {
+        let configured = configured_html_sans_serif_family().to_ascii_lowercase();
+        load_font_paths_once(database, paths_for_font_family(&configured), loaded_paths);
+        load_font_paths_once(database, ARIAL_FONT_PATHS, loaded_paths);
+        load_font_paths_once(database, LIBERATION_SANS_FONT_PATHS, loaded_paths);
+    } else {
+        load_font_paths_once(database, paths_for_font_family(family), loaded_paths);
+    }
+}
 
 pub(super) fn paths_for_font_family(family: &str) -> &'static [&'static str] {
     match family {

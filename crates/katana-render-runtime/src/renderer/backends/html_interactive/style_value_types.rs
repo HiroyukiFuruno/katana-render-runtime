@@ -33,3 +33,19 @@ pub(in crate::renderer::backends::html_interactive) enum CssGridTrackBreadth {
     MinContent,
     MaxContent,
 }
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(in crate::renderer::backends::html_interactive) enum CssTextTransform {
+    #[default]
+    None,
+    Uppercase,
+    Lowercase,
+    Capitalize,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(in crate::renderer::backends::html_interactive) enum CssWhiteSpace {
+    #[default]
+    Normal,
+    NoWrap,
+}

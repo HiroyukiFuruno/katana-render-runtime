@@ -300,9 +300,6 @@ mod tests {
             ]
         );
         assert_eq!(wrap_text_with_style("abcdef", 1.0, &style), ["abcdef"]);
-        let mut break_word = style.clone();
-        break_word.apply_typography_property("overflow-wrap", "break-word");
-        assert_eq!(wrap_text_with_style("abcdef", 1.0, &break_word).len(), 6);
         assert_eq!(
             wrap_text_with_style("first\n\nthird", 1230.0, &style),
             ["first", "", "third"]
@@ -357,6 +354,9 @@ mod tests {
             wrap_text_with_style(&format!("短い {token}\n次"), width, &style),
             ["短い", token, "次"]
         );
+        let mut break_word = style;
+        break_word.apply_typography_property("overflow-wrap", "break-word");
+        assert_eq!(wrap_text_with_style("abcdef", 1.0, &break_word).len(), 6);
     }
 
     #[test]

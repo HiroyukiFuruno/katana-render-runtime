@@ -5,6 +5,8 @@ use crate::renderer::backends::html_interactive::HtmlInteractiveSession;
 use crate::renderer::backends::html_interactive::tests::test_error;
 
 const BOTTOM_PADDING_TEST_OFFSET: f32 = 2.5;
+const RGBA_CHANNELS: usize = 4;
+const BUTTON_BACKGROUND_RGBA: [u8; RGBA_CHANNELS] = [54, 154, 188, 255];
 const HTML: &str = r#"<style>
     button { display:block; font-family:Arial; font-size:14px; line-height:28px;
         padding:3px 4px 5px; border:2px solid; }
@@ -42,9 +44,9 @@ fn assert_painted_button(
     y: f32,
 ) -> Result<(), String> {
     let frame = session.latest_frame().ok_or("missing button frame")?;
-    let offset = (y as usize * frame.viewport.width as usize + x as usize) * 4;
-    let observed = frame.pixels.get(offset..offset + 4);
-    if observed != Some(&[54, 154, 188, 255]) {
+    let offset = (y as usize * frame.viewport.width as usize + x as usize) * RGBA_CHANNELS;
+    let observed = frame.pixels.get(offset..offset + RGBA_CHANNELS);
+    if observed != Some(BUTTON_BACKGROUND_RGBA.as_slice()) {
         let observed = observed.map(<[u8]>::to_vec);
         let layout = session.layout().map_err(test_error)?;
         return Err(format!(

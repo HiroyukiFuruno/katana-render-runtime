@@ -10,12 +10,14 @@ mod generic_families;
 mod paths;
 #[path = "svg_rasterize_html_font_source_identity.rs"]
 mod source_identity;
+use family_paths::load_requested_font_family;
+#[cfg(any(test, target_os = "macos"))]
 use family_paths::paths_for_font_family;
 use generic_families::configure_html_generic_families;
 pub(super) use generic_families::configured_html_sans_serif_family;
 use paths::{
-    ARIAL_FONT_PATHS, CJK_FONT_PATHS, CJK_SERIF_FONT_PATHS, EMOJI_FONT_PATHS,
-    LIBERATION_SANS_FONT_PATHS, SYSTEM_CJK_FONT_PATHS, UNICODE_FALLBACK_FONT_PATHS,
+    CJK_FONT_PATHS, CJK_SERIF_FONT_PATHS, EMOJI_FONT_PATHS, SYSTEM_CJK_FONT_PATHS,
+    UNICODE_FALLBACK_FONT_PATHS,
 };
 use source_identity::bundled_font_source;
 pub(super) use source_identity::canonical_font_source_path;
@@ -141,26 +143,6 @@ fn load_fallback_font_paths(
     }
     if request.needs_unicode_fallback {
         load_font_paths_once(database, UNICODE_FALLBACK_FONT_PATHS, loaded_paths);
-    }
-}
-
-fn load_requested_font_family(
-    database: &mut usvg::fontdb::Database,
-    family: &str,
-    loaded_paths: &mut BTreeSet<std::path::PathBuf>,
-) {
-    #[cfg(target_os = "linux")]
-    if family == "monospace" {
-        /* WHY: 日本語文中のASCII断片でも、描画全体と同じ等幅書体を候補にする。 */
-        load_font_paths_once(database, CJK_FONT_PATHS, loaded_paths);
-    }
-    if family == "sans-serif" {
-        let configured = configured_html_sans_serif_family().to_ascii_lowercase();
-        load_font_paths_once(database, paths_for_font_family(&configured), loaded_paths);
-        load_font_paths_once(database, ARIAL_FONT_PATHS, loaded_paths);
-        load_font_paths_once(database, LIBERATION_SANS_FONT_PATHS, loaded_paths);
-    } else {
-        load_font_paths_once(database, paths_for_font_family(family), loaded_paths);
     }
 }
 
