@@ -192,8 +192,8 @@ fn c4_relation_svg_widths_preserve_native_raw_advance() -> Result<(), String> {
         ("[HTTPS]", "Open Sans, sans-serif", 12.0),
         ("Reads from and writes to", "Open Sans, sans-serif", 12.0),
         ("利用する", "Open Sans, sans-serif", 12.0),
-        ("AVATAR", "Arial", 14.0),
-        ("日本語の幅", "Hiragino Sans, sans-serif", 16.0),
+        ("AVATAR", "Arial, Noto Sans, sans-serif", 14.0),
+        ("日本語の幅", "Noto Sans, sans-serif", 16.0),
     ])
 }
 

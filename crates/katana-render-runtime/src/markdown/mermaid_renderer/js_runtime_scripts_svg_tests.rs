@@ -68,16 +68,20 @@ globalThis.mermaid = {
     const parent = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     const child = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     parent.textContent = 'RenderedSection';
+    child.style.setProperty('font-family', 'Noto Sans');
     child.textContent = 'A';
     parent.appendChild(child);
     const box = parent.getBBox();
-    return { svg: '<svg data-group-box="' + box.width.toFixed(3) + '"></svg>' };
+    const childBox = child.getBBox();
+    const matchesChild = childBox.width > 0 && childBox.height > 0 &&
+      ['x', 'y', 'width', 'height'].every((key) => box[key] === childBox[key]);
+    return { svg: '<svg data-group-box="' + matchesChild + '"></svg>' };
   }
 };
 "##;
     let rendered = render_svg_fixture(mermaid)?;
     assert!(
-        rendered.contains(r##"data-group-box="9.438"##),
+        rendered.contains(r##"data-group-box="true"##),
         "{rendered}"
     );
     Ok(())
