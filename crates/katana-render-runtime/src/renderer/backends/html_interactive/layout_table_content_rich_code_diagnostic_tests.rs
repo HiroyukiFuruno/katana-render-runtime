@@ -2,8 +2,8 @@ use super::super::super::table_cell_horizontal_inset;
 use crate::renderer::backends::html_browser::HtmlBrowserViewport;
 use crate::renderer::backends::html_document::{HtmlDocument, HtmlDocumentNode};
 use crate::renderer::backends::html_interactive::layout::HtmlLayoutRenderer;
-use crate::renderer::backends::html_interactive::layout_inline::InlineMeasurement;
 use crate::renderer::backends::html_interactive::style::CssStyle;
+use crate::renderer::backends::html_interactive::text_metrics::text_width;
 use crate::renderer::backends::html_interactive::types::LayoutResult;
 use std::collections::HashMap;
 
@@ -86,9 +86,9 @@ fn rich_code_metrics() -> Result<RichCodeMetrics, String> {
         cell_width: cell.width,
         cell_height: cell.height,
         available_width: (cell.width - table_cell_horizontal_inset(&context.cell_style)).max(0.0),
-        prefix_width: InlineMeasurement::text_width(PREFIX, &context.cell_style),
-        code_width: InlineMeasurement::text_width(URL, &context.code_style),
-        suffix_width: InlineMeasurement::text_width(SUFFIX, &context.cell_style),
+        prefix_width: text_width(PREFIX, &context.cell_style),
+        code_width: text_width(URL, &context.code_style),
+        suffix_width: text_width(SUFFIX, &context.cell_style),
         code_font_family: context.code_style.font_family.clone(),
         code_font_size: context.code_style.font_size,
         prefix_positions: marked_positions(&painted_text, PREFIX),
@@ -159,7 +159,7 @@ fn contains_url(nodes: &[HtmlDocumentNode]) -> bool {
 fn marked_positions(text: &[(f32, f32, String)], marker: &str) -> Vec<(f32, f32)> {
     text.iter()
         .filter(|(_, _, content)| content.contains(marker))
-        .map(|(x, y, _)| (x, y))
+        .map(|(x, y, _)| (*x, *y))
         .collect()
 }
 
@@ -177,7 +177,8 @@ fn cell_line_count(text: &[(f32, f32, String)], x: f32, y: f32, width: f32, heig
 }
 
 fn svg_text_positions(svg: &str) -> Vec<(f32, f32, String)> {
-    let document = roxmltree::Document::parse(&format!("<svg>{svg}</svg>"));
+    let source = format!("<svg>{svg}</svg>");
+    let document = roxmltree::Document::parse(&source);
     let Ok(document) = document else {
         return Vec::new();
     };
