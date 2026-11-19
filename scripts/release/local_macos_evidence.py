@@ -37,7 +37,7 @@ else:
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/test-and-build.yml"
-SUPPORTED_WORKFLOW_SHA256 = "58d2f2be83743292f924fe8fcf583e0cffc3bf2c65026d5a8db8241f9ee8f908"
+SUPPORTED_WORKFLOW_SHA256 = "eec95a6d44a3c19bd9d366bbd86883a4d0e6d366fdce0f2bc0690eefd5c3fb33"
 SCHEMA = 1
 FRESHNESS_SECONDS = 24 * 60 * 60
 MARKER = "<!-- krr-local-macos-evidence:v1 -->"
@@ -110,7 +110,8 @@ SYSTEM_COMMAND_PATH = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
 HOMEBREW_ROOT = Path("/opt/homebrew")
 JAVA_INSTALL_ROOT = Path("/Library/Java/JavaVirtualMachines")
 PREPARATION_COMMANDS = {"bun-install", "graphviz-install", "plantuml-install"}
-RUST_STABLE_MANIFEST_URL = "https://static.rust-lang.org/dist/channel-rust-stable.toml"
+SUPPORTED_RUST_RELEASE = "1.99.1"
+RUST_RELEASE_MANIFEST_URL = f"https://static.rust-lang.org/dist/channel-rust-{SUPPORTED_RUST_RELEASE}.toml"
 MAX_RUST_STABLE_MANIFEST_BYTES = 8 * 1024 * 1024
 MAX_RUST_COMPONENT_ARCHIVE_BYTES = 128 * 1024 * 1024
 MAX_RUST_COMPONENT_ENTRIES = 100_000
@@ -529,7 +530,7 @@ def command_binding(
     bootstrap_env = dict(environment)
     bootstrap_env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
     bootstrap_env["RUSTUP_HOME"] = str(rustup_home)
-    rust_root = (rustup_home / "toolchains/stable-aarch64-apple-darwin").resolve(strict=True)
+    rust_root = (rustup_home / "toolchains" / f"{SUPPORTED_RUST_RELEASE}-{RUST_HOST}").resolve(strict=True)
     verify_installed_rust_components(rust_root, rust_proof)
     rust_paths = {}
     for name, relative_path in RUST_EXECUTABLE_PATHS.items():
@@ -1442,19 +1443,30 @@ def parse_stable_manifest_versions(manifest: str) -> dict[str, str]:
     return result
 
 
-def fetch_stable_manifest_versions() -> dict[str, str]:
+def read_release_manifest() -> tuple[str, dict[str, str]]:
     req = request.Request(
-        RUST_STABLE_MANIFEST_URL,
+        RUST_RELEASE_MANIFEST_URL,
         headers={"Accept": "text/plain", "User-Agent": "katana-render-runtime-local-macos-evidence"},
     )
     try:
         with request.urlopen(req, timeout=15) as response:
+            if response.geturl() != RUST_RELEASE_MANIFEST_URL:
+                raise EvidenceError("official Rust manifest redirected to an untrusted URL")
             body = response.read(MAX_RUST_STABLE_MANIFEST_BYTES + 1)
         if not body or len(body) > MAX_RUST_STABLE_MANIFEST_BYTES:
             raise EvidenceError("official Rust stable manifest is empty or too large")
-        return parse_stable_manifest_versions(body.decode("utf-8"))
+        manifest = body.decode("utf-8")
     except (error.URLError, error.HTTPError, TimeoutError, OSError, UnicodeDecodeError) as exc:
         raise EvidenceError("official Rust stable manifest is unavailable") from exc
+    versions = parse_stable_manifest_versions(manifest)
+    if versions["rustc"].split(" ", 1)[0] != SUPPORTED_RUST_RELEASE:
+        raise EvidenceError("official Rust manifest does not match the CI toolchain")
+    return manifest, versions
+
+
+def fetch_stable_manifest_versions() -> dict[str, str]:
+    _, versions = read_release_manifest()
+    return versions
 
 
 def parse_stable_rust_components(manifest: str) -> tuple[RustComponent, ...]:
@@ -1630,22 +1642,10 @@ def derive_rust_component_proof(
 
 
 def fetch_official_rust_component_proof() -> RustComponentProof:
-    req = request.Request(
-        RUST_STABLE_MANIFEST_URL,
-        headers={"Accept": "text/plain", "User-Agent": "katana-render-runtime-local-macos-evidence"},
-    )
-    try:
-        with request.urlopen(req, timeout=15) as response:
-            if response.geturl() != RUST_STABLE_MANIFEST_URL:
-                raise EvidenceError("official Rust manifest redirected to an untrusted URL")
-            body = response.read(MAX_RUST_STABLE_MANIFEST_BYTES + 1)
-        if not body or len(body) > MAX_RUST_STABLE_MANIFEST_BYTES:
-            raise EvidenceError("official Rust stable manifest is empty or too large")
-        components = parse_stable_rust_components(body.decode("utf-8"))
-        archives = {component.name: download_rust_component(component) for component in components}
-        return derive_rust_component_proof(components, archives)
-    except (error.URLError, error.HTTPError, TimeoutError, OSError, UnicodeDecodeError) as exc:
-        raise EvidenceError("official Rust stable component metadata is unavailable") from exc
+    manifest, _ = read_release_manifest()
+    components = parse_stable_rust_components(manifest)
+    archives = {component.name: download_rust_component(component) for component in components}
+    return derive_rust_component_proof(components, archives)
 
 
 def verify_installed_rust_components(rust_root: Path, proof: RustComponentProof) -> None:

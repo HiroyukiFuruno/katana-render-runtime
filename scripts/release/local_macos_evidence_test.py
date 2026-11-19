@@ -1650,6 +1650,22 @@ version = "1.10.0"
 git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
 '''
         self.assertEqual(EVIDENCE.parse_stable_manifest_versions(fixture), STABLE_RUST)
+        fixed = STABLE_RUST["rustc"].replace("1.99.0", EVIDENCE.SUPPORTED_RUST_RELEASE)
+        manifest = fixture.replace(STABLE_RUST["rustc"], fixed)
+        with patch.object(EVIDENCE.request, "urlopen") as open_manifest:
+            response = open_manifest.return_value.__enter__.return_value
+            response.geturl.return_value = EVIDENCE.RUST_RELEASE_MANIFEST_URL
+            response.read.return_value = manifest.encode()
+            self.assertEqual(EVIDENCE.read_release_manifest()[1]["rustc"], fixed)
+            self.assertEqual(open_manifest.call_args.args[0].full_url, EVIDENCE.RUST_RELEASE_MANIFEST_URL)
+
+            response.read.return_value = fixture.encode()
+            with self.assertRaisesRegex(EVIDENCE.EvidenceError, "does not match the CI toolchain"):
+                EVIDENCE.read_release_manifest()
+
+            response.geturl.return_value = "https://static.rust-lang.org/dist/channel-rust-stable.toml"
+            with self.assertRaisesRegex(EVIDENCE.EvidenceError, "redirected"):
+                EVIDENCE.read_release_manifest()
 
     def test_missing_proof_skips_official_manifest_network_lookup(self) -> None:
         with patch.object(EVIDENCE, "fetch_stable_manifest_versions") as fetch_manifest:
@@ -2225,7 +2241,7 @@ class TrustedJustTest(unittest.TestCase):
 
             account = root / "account"
             rustup_home = account / ".rustup"
-            rust_bin = rustup_home / "toolchains/stable-aarch64-apple-darwin/bin"
+            rust_bin = rustup_home / "toolchains" / f"{EVIDENCE.SUPPORTED_RUST_RELEASE}-{EVIDENCE.RUST_HOST}/bin"
             rust_bin.mkdir(parents=True)
             rustup = account / ".cargo/bin/rustup"
             rustup.parent.mkdir(parents=True)
