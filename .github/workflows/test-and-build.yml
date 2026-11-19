@@ -53,7 +53,7 @@ on:
         type: boolean
 
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && format('native-verify-{0}-{1}', github.ref, inputs.verify_platform) || format('{0}-{1}', github.workflow, github.ref) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && format('native-verify-{0}-{1}{2}', github.ref, inputs.verify_platform, inputs.verify_html_trace && '-html-trace' || '') || format('{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: true
 
 permissions:
