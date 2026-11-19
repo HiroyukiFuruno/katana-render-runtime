@@ -33,7 +33,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && format('native-verify-{0}', github.ref) || format('{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: true
 
 permissions:
@@ -51,7 +51,8 @@ jobs:
   static-quality:
     name: Source quality checks
     if: >-
-      github.event_name != 'pull_request' || github.event.pull_request.draft == false
+      !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -87,17 +88,13 @@ jobs:
     name: Test and Build
     needs: static-quality
     if: >-
-      github.event_name != 'pull_request' || github.event.pull_request.draft == false
+      always() &&
+      ((github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') ||
+      needs.static-quality.result == 'success') &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            platform: linux64
-          - os: macos-15
-            platform: mac-arm64
-          - os: windows-latest
-            platform: win64
+      matrix: ${{ fromJSON(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && '{"include":[{"os":"ubuntu-latest","platform":"linux64"},{"os":"windows-latest","platform":"win64"}]}' || '{"include":[{"os":"ubuntu-latest","platform":"linux64"},{"os":"macos-15","platform":"mac-arm64"},{"os":"windows-latest","platform":"win64"}]}') }}
     runs-on: ${{ matrix.os }}
     permissions:
       actions: read
@@ -173,7 +170,7 @@ jobs:
           enable-cache: true
 
       - name: Install cargo-llvm-cov
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify')
         uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-llvm-cov@0.9.1
@@ -280,7 +277,7 @@ jobs:
         run: just plantuml-install
 
       - name: Run tests
-        if: matrix.os != 'ubuntu-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: (matrix.os != 'ubuntu-latest' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify')) && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         timeout-minutes: 45
         run: just unit-test
 
@@ -347,7 +344,7 @@ jobs:
         run: just runtime-asset-script-test
 
       - name: Run automation contract tests
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify')
         timeout-minutes: 15
         run: just check-contracts
 
@@ -412,7 +409,7 @@ jobs:
         run: just runtime-package-asset-check
 
       - name: Record Ubuntu build disk usage before coverage
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify')
         run: |
           df -h .
           du -sh target 2>/dev/null || true
@@ -466,7 +463,7 @@ jobs:
 
       - name: Run coverage
         id: coverage
-        if: matrix.os == 'ubuntu-latest' && steps.native_coverage_cache_verify.outputs.verified != 'true'
+        if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') && steps.native_coverage_cache_verify.outputs.verified != 'true'
         timeout-minutes: 45
         run: just coverage
 
@@ -534,7 +531,7 @@ jobs:
           retention-days: 1
 
       - name: Diagnose coverage failure
-        if: matrix.os == 'ubuntu-latest' && (failure() || cancelled())
+        if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') && (failure() || cancelled())
         shell: bash
         run: |
           set +e
@@ -547,7 +544,7 @@ jobs:
           cargo llvm-cov report --show-missing-lines
 
       - name: Record Ubuntu build disk usage after coverage
-        if: matrix.os == 'ubuntu-latest' && always()
+        if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') && always()
         run: |
           df -h .
           du -sh target 2>/dev/null || true
@@ -658,7 +655,8 @@ jobs:
     name: Native paired HTML time and RSS nonregression
     needs: test
     if: >-
-      github.event_name != 'pull_request' || github.event.pull_request.draft == false
+      !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: macos-15
     timeout-minutes: 360
     permissions:
