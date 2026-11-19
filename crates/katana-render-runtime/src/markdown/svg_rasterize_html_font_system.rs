@@ -8,6 +8,19 @@ use platform::{PlatformFontStrategy, font_platform};
 /* WHY: 任意のHTMLが大量のfamilyを指定しても、同期したfontconfig探索は描画ごとに1回・有限件にする。 */
 const MAX_SYSTEM_FONT_FAMILIES_PER_REQUEST: usize = 16;
 
+pub(super) fn installed_family_requests(families: &[String]) -> impl Iterator<Item = &str> {
+    let installed_families = families
+        .iter()
+        .map(String::as_str)
+        .filter(|family| !super::sources::is_generic_font_family(family));
+    let system_ui = families
+        .iter()
+        .any(|family| family == "system-ui")
+        .then(|| font_platform().installed_system_ui_family())
+        .flatten();
+    installed_families.chain(system_ui)
+}
+
 #[cfg(test)]
 pub(super) fn load_requested_system_font_families<'a>(
     database: &mut usvg::fontdb::Database,
