@@ -61,21 +61,30 @@ fn oversized_file_is_read_but_not_retained() -> Result<(), Box<dyn std::error::E
 
 #[cfg(unix)]
 #[test]
-fn pipe_snapshot_rejects_stream_bytes_that_disagree_with_metadata()
--> Result<(), Box<dyn std::error::Error>> {
-    use std::io::Write;
-
-    let (reader, writer) = nix::unistd::pipe()?;
+fn pipe_snapshot_rejects_non_regular_input_before_reading() -> Result<(), Box<dyn std::error::Error>>
+{
+    let (reader, _writer) = nix::unistd::pipe()?;
     let reader = std::fs::File::from(reader);
-    let before = super::Identity::from_metadata(&reader.metadata()?);
-    let mut writer = std::fs::File::from(writer);
-    writer.write_all(b"resource bytes")?;
-    drop(writer);
+    assert!(
+        super::Identity::from_file(&reader)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidInput)
+    );
+    Ok(())
+}
 
-    let result = ResourceBytes::read_snapshot(reader, before);
-    assert_eq!(
-        result.err().map(|error| error.kind()),
-        Some(std::io::ErrorKind::Other)
+#[test]
+fn snapshot_rejects_a_regular_file_that_changes_after_open()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("changing-resource");
+    std::fs::write(&path, b"old")?;
+    let reader = std::fs::File::open(&path)?;
+    let before = super::Identity::from_file(&reader)?;
+    std::fs::write(&path, b"new resource bytes")?;
+
+    assert!(
+        ResourceBytes::read_snapshot(reader, before)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::Other)
     );
     Ok(())
 }

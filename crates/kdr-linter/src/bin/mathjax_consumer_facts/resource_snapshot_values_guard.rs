@@ -8,6 +8,7 @@ pub(super) use accessors::require_snapshot_accessors;
 
 const SNAPSHOT_FIELDS: usize = 3;
 const READ_CONTENT_STATEMENTS: usize = 3;
+const READ_FILE_STATEMENTS: usize = 3;
 pub(super) fn require_snapshot_digest(expression: &Expr) -> Result<(), String> {
     let Some(collect) = method_call(expression) else {
         return Err("resource-loader:digest".into());
@@ -41,13 +42,18 @@ pub(super) fn require_snapshot_digest(expression: &Expr) -> Result<(), String> {
 
 fn require_binary_wrapper(file: &syn::File) -> Result<(), String> {
     let read = method(file, "ResourceBytes", "read_file")?;
-    if read.block.stmts.len() != 2
+    if read.block.stmts.len() != READ_FILE_STATEMENTS
         || !super::super::super::super::syntax::call_expr_path(
             local(&read.block, 0, "file")?,
             "File::open",
             &["path"],
         )
         || !read_contents_call(tail(&read.block)?)
+        || !matches!(&read.block.stmts[1], syn::Stmt::Expr(Expr::Try(result), Some(_))
+            if matches!(call(&result.expr), Some(check)
+                if ident(&check.func, "regular_file_metadata") && check.args.len() == 1
+                    && matches!(&check.args[0], Expr::Reference(reference)
+                        if reference.mutability.is_none() && ident(&reference.expr, "file"))))
     {
         return Err("resource-loader:bytes-read".into());
     }

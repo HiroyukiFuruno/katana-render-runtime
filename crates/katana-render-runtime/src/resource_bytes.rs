@@ -12,20 +12,23 @@ const CACHE_BYTES: u64 = 16 * 1024 * 1024;
 const ENTRY_OVERHEAD: usize = 512;
 static CACHE: OnceLock<Cache<PathBuf, Arc<ResourceSnapshot>>> = OnceLock::new();
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 struct Identity {
     len: u64,
     modified: Option<SystemTime>,
     created: Option<SystemTime>,
     #[cfg(unix)]
     unix: (u64, u64, i64, i64),
+    #[cfg(windows)]
+    windows: same_file::Handle,
 }
 
 impl Identity {
-    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
+    fn from_file(file: &File) -> std::io::Result<Self> {
+        let metadata = regular_file_metadata(file)?;
         #[cfg(unix)]
         use std::os::unix::fs::MetadataExt;
-        Self {
+        Ok(Self {
             len: metadata.len(),
             modified: metadata.modified().ok(),
             created: metadata.created().ok(),
@@ -36,8 +39,21 @@ impl Identity {
                 metadata.ctime(),
                 metadata.ctime_nsec(),
             ),
-        }
+            #[cfg(windows)]
+            windows: same_file::Handle::from_file(file.try_clone()?)?,
+        })
     }
+}
+
+fn regular_file_metadata(file: &File) -> std::io::Result<std::fs::Metadata> {
+    let metadata = file.metadata()?;
+    if metadata.is_file() {
+        return Ok(metadata);
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "resource path is not a regular file",
+    ))
 }
 
 pub(crate) struct ResourceSnapshot {
@@ -94,7 +110,7 @@ pub(crate) struct ResourceBytes;
 impl ResourceBytes {
     pub(crate) fn snapshot(path: &Path) -> std::io::Result<Arc<ResourceSnapshot>> {
         let file = File::open(path)?;
-        let before = Identity::from_metadata(&file.metadata()?);
+        let before = Identity::from_file(&file)?;
         let cache = CACHE.get_or_init(Self::cache);
         if let Some(snapshot) = Self::cached(cache, path, &before) {
             return Ok(snapshot);
@@ -133,7 +149,7 @@ impl ResourceBytes {
 
     fn read_snapshot(mut file: File, before: Identity) -> std::io::Result<Arc<ResourceSnapshot>> {
         let bytes = Self::read_contents(&mut file)?;
-        let after = Identity::from_metadata(&file.metadata()?);
+        let after = Identity::from_file(&file)?;
         if before != after || before.len != bytes.len() as u64 {
             return Err(std::io::Error::other("resource changed while reading"));
         }
@@ -165,6 +181,7 @@ impl ResourceBytes {
 
     pub(crate) fn read_file(path: &Path) -> std::io::Result<Vec<u8>> {
         let mut file = File::open(path)?;
+        regular_file_metadata(&file)?;
         Self::read_contents(&mut file)
     }
 

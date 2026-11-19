@@ -250,6 +250,11 @@ const SNAPSHOT_IDENTITY_SHAPE_MUTATIONS: &[(&str, &str, &str)] = &[
         "os_identity: (\n                metadata.dev(),",
         "resource-loader:metadata",
     ),
+    (
+        "windows: same_file::Handle::from_file(file.try_clone()?)?,",
+        "windows: same_file::Handle::from_file(other.try_clone()?)?,",
+        "resource-loader:metadata",
+    ),
 ];
 
 #[test]

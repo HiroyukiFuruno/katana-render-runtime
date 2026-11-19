@@ -45,6 +45,7 @@ impl HtmlArtifactStore {
 
     pub fn save(&self, key: &str, artifact: &HtmlFrameArtifact) -> Result<(), HtmlArtifactError> {
         self.require_enabled()?;
+        self.reject_root_replacement()?;
         validate_key(key)?;
         artifact.provenance.validate_current_runtime()?;
         let limit = self.capacity.min(MAX_ARTIFACT_BYTES);
@@ -71,6 +72,7 @@ impl HtmlArtifactStore {
         expected: &HtmlArtifactProvenance,
     ) -> Result<Option<HtmlFrameArtifact>, HtmlArtifactError> {
         self.require_enabled()?;
+        self.reject_root_replacement()?;
         expected.validate_current_runtime()?;
         let path = self.path_for(key)?;
         let file = match fs::File::open(&path) {
@@ -90,6 +92,7 @@ impl HtmlArtifactStore {
 
     pub fn clear(&self, key: &str) -> Result<bool, HtmlArtifactError> {
         self.require_enabled()?;
+        self.reject_root_replacement()?;
         let _lock = StoreLock::acquire(&self.root)?;
         let path = self.path_for(key)?;
         match fs::remove_file(path) {
@@ -105,6 +108,7 @@ impl HtmlArtifactStore {
     pub fn recover_lock(&self) -> Result<bool, HtmlArtifactError> {
         /* WHY: 稼働中ロックの削除は同時書込みとquota計算の破綻を招くため、host確認を要求する。 */
         self.require_enabled()?;
+        self.reject_root_replacement()?;
         let path = self.root.join(LOCK_NAME);
         ArtifactFilesystem::reject_symlink(&path)?;
         match fs::remove_file(path) {
@@ -120,6 +124,19 @@ impl HtmlArtifactStore {
         } else {
             Err(HtmlArtifactError::Disabled)
         }
+    }
+    fn reject_root_replacement(&self) -> Result<(), HtmlArtifactError> {
+        let Some(metadata) = ArtifactFilesystem::metadata_without_symlink(&self.root)? else {
+            return Ok(());
+        };
+        if metadata.is_dir() {
+            return Ok(());
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotADirectory,
+            "HTML artifact store root is not a directory",
+        )
+        .into())
     }
     fn path_for(&self, key: &str) -> Result<PathBuf, HtmlArtifactError> {
         validate_key(key)?;

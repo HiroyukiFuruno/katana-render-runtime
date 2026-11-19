@@ -104,6 +104,7 @@ fn root_replacement_is_rejected_before_artifact_io() -> Result<(), Box<dyn std::
     let artifact = test_artifact()?;
     let store = HtmlArtifactStore::new(&root, MAX_ARTIFACT_BYTES, true)?;
     std::fs::remove_dir(&root)?;
+    assert!(store.load("frame", &artifact.provenance)?.is_none());
     std::fs::write(&root, b"root replacement")?;
 
     assert!(matches!(

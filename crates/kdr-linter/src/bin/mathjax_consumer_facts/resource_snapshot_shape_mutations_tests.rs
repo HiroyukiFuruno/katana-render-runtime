@@ -20,7 +20,7 @@ pub(super) const CASES: &[(&str, &str, &str)] = &[
         "resource-loader:cache",
     ),
     (
-        "Self {\n            len: metadata.len(),\n            modified: metadata.modified().ok(),\n            created: metadata.created().ok(),\n            #[cfg(unix)]\n            unix: (\n                metadata.dev(),\n                metadata.ino(),\n                metadata.ctime(),\n                metadata.ctime_nsec(),\n            ),\n        }",
+        "Self {\n            len: metadata.len(),\n            modified: metadata.modified().ok(),\n            created: metadata.created().ok(),\n            #[cfg(unix)]\n            unix: (\n                metadata.dev(),\n                metadata.ino(),\n                metadata.ctime(),\n                metadata.ctime_nsec(),\n            ),\n            #[cfg(windows)]\n            windows: same_file::Handle::from_file(file.try_clone()?)?,\n        }",
         "Self::default()",
         "resource-loader:metadata",
     ),

@@ -1096,6 +1096,7 @@ dependencies = [
  "rgb",
  "roxmltree 0.21.2",
  "rustybuzz",
+ "same-file",
  "serde",
  "serde_json",
  "sha2",

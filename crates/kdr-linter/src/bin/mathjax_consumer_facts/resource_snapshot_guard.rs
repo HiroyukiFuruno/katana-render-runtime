@@ -45,7 +45,7 @@ fn require_snapshot(file: &syn::File) -> Result<(), String> {
     {
         return Err("resource-loader:snapshot".into());
     }
-    require_metadata(local(block, 1, "before")?)?;
+    require_file_identity(local(block, 1, "before")?)?;
     if !matches!(method_call(local(block, 2, "cache")?), Some(cache)
         if cache.method == "get_or_init" && ident(&cache.receiver, "CACHE")
             && cache.args.len() == 1 && ident(&cache.args[0], "Self::cache"))
@@ -56,15 +56,16 @@ fn require_snapshot(file: &syn::File) -> Result<(), String> {
     Ok(())
 }
 
-fn require_metadata(expression: &Expr) -> Result<(), String> {
-    let Some(metadata) = call(expression) else {
+fn require_file_identity(expression: &Expr) -> Result<(), String> {
+    let Expr::Try(value) = expression else {
         return Err("resource-loader:metadata".into());
     };
-    if !ident(&metadata.func, "Identity::from_metadata")
-        || metadata.args.len() != 1
-        || !matches!(&metadata.args[0], Expr::Reference(value)
-            if matches!(method_call(&value.expr), Some(read)
-                if read.method == "metadata" && read.args.is_empty() && ident(&read.receiver, "file")))
+    let Some(identity) = call(&value.expr) else {
+        return Err("resource-loader:metadata".into());
+    };
+    if !ident(&identity.func, "Identity::from_file")
+        || identity.args.len() != 1
+        || !ident(&identity.args[0], "file")
     {
         return Err("resource-loader:metadata".into());
     }
@@ -99,7 +100,7 @@ fn require_snapshot_read(file: &syn::File) -> Result<(), String> {
     {
         return Err("resource-loader:bytes-read".into());
     }
-    require_metadata(local(block, 1, "after")?)?;
+    require_file_identity(local(block, 1, "after")?)?;
     require_stable_check(&block.stmts[SNAPSHOT_STABILITY_INDEX])?;
     values::require_snapshot_content(local(block, SNAPSHOT_STABILITY_INDEX + 1, "content")?)?;
     values::require_snapshot_result(tail(block)?)

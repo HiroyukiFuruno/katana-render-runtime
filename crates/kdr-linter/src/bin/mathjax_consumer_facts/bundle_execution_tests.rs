@@ -42,8 +42,8 @@ fn mathjax_loader_rejects_changed_source_and_digest_binding()
 
 const RESOURCE_BYTES_MUTATIONS: &[(&str, &str, &str)] = &[
     (
-        "#[derive(Clone, PartialEq, Eq)]",
-        "#[derive(Clone)]",
+        "#[derive(PartialEq, Eq)]",
+        "#[derive(PartialEq)]",
         "resource-loader:metadata",
     ),
     (
@@ -92,8 +92,13 @@ const RESOURCE_BYTES_MUTATIONS: &[(&str, &str, &str)] = &[
         "resource-loader:snapshot",
     ),
     (
-        "let after = Identity::from_metadata(&file.metadata()?);",
-        "let after = Identity::from_metadata(&other.metadata()?);",
+        "let after = Identity::from_file(&file)?;",
+        "let after = Identity::from_file(&other)?;",
+        "resource-loader:metadata",
+    ),
+    (
+        "let after = Identity::from_file(&file)?;",
+        "let after = Identity::from_file(&file).unwrap();",
         "resource-loader:metadata",
     ),
     (

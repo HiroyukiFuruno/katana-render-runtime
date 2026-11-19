@@ -46,8 +46,13 @@ fn snapshot_loader_rejects_missing_identity_and_cache_hit_guards()
     let input = RUST_INPUTS[super::super::super::source::RESOURCE_BYTES_INPUT_INDEX];
     fixture.reject_unique_mutations(input, &[
         (
-            "let before = Identity::from_metadata(&file.metadata()?);",
+            "let before = Identity::from_file(&file)?;",
             "let before = file;",
+            "resource-loader:metadata",
+        ),
+        (
+            "let before = Identity::from_file(&file)?;",
+            "let before = Identity::from_file(&file).unwrap();",
             "resource-loader:metadata",
         ),
         (
@@ -61,6 +66,33 @@ fn snapshot_loader_rejects_missing_identity_and_cache_hit_guards()
             "resource-loader:changed",
         ),
     ])
+}
+
+#[test]
+fn snapshot_identity_rejects_handle_and_regular_file_guard_drift()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = mathjax_fixture()?;
+    fixture.reject_unique_mutations(
+        RUST_INPUTS[super::super::super::source::RESOURCE_BYTES_INPUT_INDEX],
+        &[
+            (
+                "same_file::Handle::from_file(file.try_clone()?)?",
+                "same_file::Handle::from_file(other.try_clone()?)?",
+                "resource-loader:metadata",
+            ),
+            (
+                "regular_file_metadata(file)?",
+                "file.metadata()?",
+                "resource-loader:metadata",
+            ),
+            ("metadata.is_file()", "true", "resource-loader:metadata"),
+            (
+                "std::io::ErrorKind::InvalidInput",
+                "std::io::ErrorKind::Other",
+                "resource-loader:metadata",
+            ),
+        ],
+    )
 }
 
 #[test]
