@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { expect, test } from "playwright/test";
+import { test as base, expect } from "playwright/test";
 import { FixtureRepository } from "./diagram_update_fixtures";
 import { OfficialMermaidRenderer } from "./official-renderer";
 import { resolveOfficialRendererAssetInputs } from "./official-renderer-asset-inputs";
@@ -14,8 +14,32 @@ import {
 import { RasterProductionSession } from "./raster-production-session";
 import { waitForStrictSvgExternalImages } from "./strict-svg-external-images";
 
-test("official raw producer captures on a freshly prepared viewport", async ({ browser }) => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "krr-official-viewport-")));
+type CapturedRaster = {
+  outputDir: string;
+  receiptPath: string;
+  renderer: OfficialMermaidRenderer;
+  slug: string;
+};
+
+const test = base.extend<{ capturedRaster: CapturedRaster }>({
+  capturedRaster: [
+    async ({ browserName }, use) => {
+      expect(browserName).toBe("chromium");
+      const root = fs.realpathSync(
+        fs.mkdtempSync(path.join(os.tmpdir(), "krr-official-viewport-")),
+      );
+      try {
+        await use(await captureOfficialRaster(root));
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+    // 公式プロデューサーの別Chrome起動と実プロセスの証跡取得を、再現描画の制限時間から分離する。
+    { timeout: 10_000 },
+  ],
+});
+
+async function captureOfficialRaster(root: string): Promise<CapturedRaster> {
   const outputDir = path.join(root, "output"),
     attempt = path.join(root, "attempt");
   fs.mkdirSync(outputDir);
@@ -57,48 +81,55 @@ test("official raw producer captures on a freshly prepared viewport", async ({ b
   try {
     renderer.prepareRasterInputs([fixture]);
     await renderer.start();
-    try {
-      await renderer.render(fixture);
-    } finally {
-      await renderer.stop();
-    }
-    const receiptPath = renderer.finishRasterReceipt();
-    if (receiptPath === undefined) throw new Error("Official raster receipt missing");
-    const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8"));
-    const manifest = JSON.parse(
-      fs.readFileSync(path.join(outputDir, `${fixture.slug}.pair.json`), "utf8"),
-    );
-    const provenanceRoot = path.join(outputDir, ".provenance");
-    const provenanceDirectory = fs.readdirSync(provenanceRoot)[0];
-    if (provenanceDirectory === undefined) throw new Error("Official raw stage missing");
-    const raw = fs.readFileSync(path.join(provenanceRoot, provenanceDirectory, "raw-mermaid.svg"));
-    expect(fs.readFileSync(path.join(outputDir, `${fixture.slug}.svg`))).toEqual(raw);
-    expect(fs.readFileSync(path.join(outputDir, `${fixture.slug}.rendered.svg`))).toEqual(raw);
-    expect(manifest.config.captureResize).toBe("raw-svg-viewbox-viewport-before-assignment-v1");
-    expect(manifest.config.initialViewport).toEqual({
-      width: 1520,
-      height: 845,
-      deviceScaleFactor: 1,
-    });
-    const page = await browser.newPage({
-      viewport: { width: 1520, height: 845 },
-      deviceScaleFactor: 1,
-    });
-    try {
-      await page.setContent(renderer.baseHtml(), { waitUntil: "load" });
-      const viewport = await prepareStrictSvgCapture(page, raw.toString("utf8"));
-      expect(manifest.config.viewport).toEqual({ ...viewport, deviceScaleFactor: 1 });
-      expect(receipt.rows[0].capture.viewport).toEqual(viewport);
-      await assignStrictSvg(page, raw.toString("utf8"));
-      await resizeSvgCapture(page, true, "strictViewBox");
-      await waitForStrictSvgExternalImages(page);
-      await page.evaluate(() => (document as FontReadyDocument).fonts.ready);
-      const expected = await page.locator("#capture").screenshot({ omitBackground: false });
-      expect(fs.readFileSync(path.join(outputDir, `${fixture.slug}.png`))).toEqual(expected);
-    } finally {
-      await page.close();
-    }
+    await renderer.render(fixture);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    await renderer.stop();
+  }
+  const receiptPath = renderer.finishRasterReceipt();
+  if (receiptPath === undefined) throw new Error("Official raster receipt missing");
+  return { outputDir, receiptPath, renderer, slug: fixture.slug };
+}
+
+test("official raw producer captures on a freshly prepared viewport", async ({
+  browser,
+  capturedRaster: { outputDir, receiptPath, renderer, slug },
+}, testInfo) => {
+  const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8"));
+  const manifest = JSON.parse(fs.readFileSync(path.join(outputDir, `${slug}.pair.json`), "utf8"));
+  const provenanceRoot = path.join(outputDir, ".provenance");
+  const provenanceDirectory = fs.readdirSync(provenanceRoot)[0];
+  if (provenanceDirectory === undefined) throw new Error("Official raw stage missing");
+  const raw = fs.readFileSync(path.join(provenanceRoot, provenanceDirectory, "raw-mermaid.svg"));
+  expect(fs.readFileSync(path.join(outputDir, `${slug}.svg`))).toEqual(raw);
+  expect(fs.readFileSync(path.join(outputDir, `${slug}.rendered.svg`))).toEqual(raw);
+  expect(manifest.config.captureResize).toBe("raw-svg-viewbox-viewport-before-assignment-v1");
+  expect(manifest.config.initialViewport).toEqual({
+    width: 1520,
+    height: 845,
+    deviceScaleFactor: 1,
+  });
+  const page = await browser.newPage({
+    viewport: { width: 1520, height: 845 },
+    deviceScaleFactor: 1,
+  });
+  try {
+    await page.setContent(renderer.baseHtml(), { waitUntil: "load" });
+    const viewport = await prepareStrictSvgCapture(page, raw.toString("utf8"));
+    expect(manifest.config.viewport).toEqual({ ...viewport, deviceScaleFactor: 1 });
+    expect(receipt.rows[0].capture.viewport).toEqual(viewport);
+    await assignStrictSvg(page, raw.toString("utf8"));
+    await resizeSvgCapture(page, true, "strictViewBox");
+    await waitForStrictSvgExternalImages(page);
+    await page.evaluate(() => (document as FontReadyDocument).fonts.ready);
+    const expected = await page.locator("#capture").screenshot({ omitBackground: false });
+    const actual = fs.readFileSync(path.join(outputDir, `${slug}.png`));
+    const samePng = actual.equals(expected);
+    if (!samePng) {
+      await testInfo.attach("official-producer-png", { body: actual, contentType: "image/png" });
+      await testInfo.attach("fresh-viewport-png", { body: expected, contentType: "image/png" });
+    }
+    expect(samePng, "The official and independently captured PNG bytes match").toBe(true);
+  } finally {
+    await page.close();
   }
 });
