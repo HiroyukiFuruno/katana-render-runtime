@@ -199,10 +199,80 @@ FROZEN_RELEASE_PREFLIGHT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, in
 FROZEN_RELEASE_MEASURED_HEAD = "7588c71764c2a7002b67037dc244bb15e0ca316a"
 FROZEN_RELEASE_TARGET_GATE = "scripts/release/verify-release-target.py"
 
+# Linuxの検査を修正した差分とレビュー手順の変更を、既存計測の入力から固定する。
+FROZEN_RELEASE_CI_CHANGES: dict[str, tuple[tuple[str, int] | None, tuple[str, int]]] = {
+    ".codex/skills/create_pull_request/SKILL.md": (
+        ("b489e41550dfc6d069fc9cbf933427f72bad725185b78ec0907bd95cb5ac9a08", 5087),
+        ("7f10a49b6a8578c9199e350245f3c41b62e56f8f6993d68a350aa226c1253ecb", 5023),
+    ),
+    ".codex/skills/gh-address-comments/SKILL.md": (
+        ("a076a9df5bf4da6da3d72cbcae8a1f2b649db67621e78eaf0278a90c50ee44fe", 6964),
+        ("2ee9cfb9689871371031eee39e1ab528cf0a2888875bad19939c4fbc1eed649a", 7222),
+    ),
+    ".codex/skills/impl-release/SKILL.md": (
+        ("cb645f6071cc22a766a70d8f0a9f114c262ed2ad6d601d0c999fa8e934156ed6", 7465),
+        ("9776681377d5afb6bc383851201bf5a657496efca007b5a91545f0b5c2660d4b", 7560),
+    ),
+    "AGENTS.md": (
+        ("c56a222ad753ae4183c86f59c4222ec04dbbc2d1a1c22ceb6636c5552d13ab38", 30428),
+        ("9e49d5309be1236b3aa87224a111f30517bff1c3c3e9060441c004bba11f5d10", 30401),
+    ),
+    "Justfile": (
+        ("ffc9f8dec7c6e6dbf2748d99aca8c894156b2aa31f99bee28d0809e4cf90fd4d", 87389),
+        ("c7354e1c6b1faca070fccee4338cab6f36d92f40b10f87df7c6599e16ebc1125", 88082),
+    ),
+    "docs/release.md": (
+        ("992bc0f65d53ca2cf061f3790942b16ebf6f99e5675fbe0d96d55d621e2959c9", 14759),
+        ("7ef501f3b972592c03230d4990dd08f344645708b77a0774ae93bde459698885", 16856),
+    ),
+    "scripts/build/cargo_capacity_guard_build_script_ownership_test.py": (
+        ("58bf94a3be86afd9099a409be4d5adda09d84de22f76848db8ea4b3fa89c413d", 12494),
+        ("ac75b54380ec25d9db33e02a9dd5daeb1b968e7e8d41ac9258be1dcf6ee9493c", 12483),
+    ),
+    "scripts/build/cargo_capacity_guard_selected_cache_ownership_test.py": (
+        ("1edcadd87d0f7e579b3588ec0f66729917ca1a4a271ae7ba99346049d3b52a54", 31717),
+        ("df7711cc9d361be3c45c4fab95b822e1705a798863f12365cc84278df3964564", 31651),
+    ),
+    "scripts/build/cargo_capacity_guard_test.py": (
+        ("5921ebf8ae93b7ca838bd7a2c66ac6436ba979f94f615ed18983eb1b5f84acef", 320240),
+        ("9e4d04ccbe6f268629032ec6b5510218a521a990496a24321a7d56046d624f02", 320247),
+    ),
+    "scripts/build/cargo_capacity_guard_test_flags.py": (
+        None,
+        ("73d24a1e07ec142e575e2097b7d1bf57c1c7b261497bca73d80ee3a85feac5ad", 620),
+    ),
+    "scripts/mermaid/native_cli_build_producer_test.py": (
+        ("8ab429d6b676153745f5a3e2b75a43b3f0171e7a68b721caae84ce72c1cb83d6", 40840),
+        ("2a38cc9682492b3c32308fb49e9fa425d514fe84eead99376c146d5c2a7c598a", 41380),
+    ),
+    "scripts/quality/owned-validation-contract.ts": (
+        ("5d54691383820cf69afeab163ebcceab672862024aa851d7960bed0e5630e8f2", 220078),
+        ("6670c1d33579e45683f4a246f101ea353e4bc48cdd9784e8f1f09a329a6a1ed7", 220491),
+    ),
+    "scripts/quality/owned-validation-contract_test.ts": (
+        ("fc9b237e2f8b54442d0d7960c2dc2416bbce30c3822aa5f5fb13d73ad016590e", 258364),
+        ("84d2d386a84225ef1f40f05fa048a545e511f902b615a275191ad1caf5f941af", 259481),
+    ),
+    "scripts/release/release_workflow_contract_test.py": (
+        ("e5c9c9380b0529688bd3c155afe28bd414b70901ed16bb0473d801da7fdae1ce", 57715),
+        ("5ffe5c31c4332a71ada27b24a124f09162ba52e50b9a774816e92d16a9395ef4", 59058),
+    ),
+}
+
+
+def frozen_release_ci_change(path: str, old: tuple[str, int] | None,
+                             new: tuple[str, int] | None, old_mode: str | None,
+                             new_mode: str | None) -> bool:
+    release_ci = FROZEN_RELEASE_CI_CHANGES.get(path)
+    return (release_ci is not None and (old, new) == release_ci
+            and old_mode == (None if old is None else "100644") and new_mode == "100644")
+
 
 def validation_cohort_change(path: str, old: tuple[str, int] | None,
                              new: tuple[str, int] | None, old_mode: str | None,
                              new_mode: str | None) -> bool:
+    if frozen_release_ci_change(path, old, new, old_mode, new_mode):
+        return True
     if path in VALIDATION_COHORT_ADDITIONS:
         if path == "scripts/drawio/candidate-svg-rasterize.ts":
             formatted = ("96244e3710fd8b69307ad6da002cc67487bc6f55f43ed87d87eee7211e3ffbad", 3651)
@@ -767,7 +837,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "639840b8a4018040f9e32a7ff97f0390447a4cbb1014c32264e50e217572b782"
+SELF_MODULE_CANONICAL_SHA256 = "cd2b882d40c3de6af072becc40d3c24fe0a6af67b298a564adcbb0df7e54a127"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":
@@ -829,6 +899,8 @@ def reviewed_same_binary_self(current: bytes, *, allow_historical: bool = False)
             "cd7201a8e73d2789a18020ebe4013f654dd51294824ecbbd164f3deb57690885",
         "c09fd37553d2bed93ac31153c7cc7407bf8865225b221470a6de85cbb29e4163":
             "1d2cc7013933c3139cf38e385ccc62a27d8efbd75b68f42b095b96ff92363928",
+        "155abe7add643c802c5ac71642a17fcc6b452e7ad490ed0f4ae762fb95ea1f4b":
+            "639840b8a4018040f9e32a7ff97f0390447a4cbb1014c32264e50e217572b782",
     }
     if declared != SELF_MODULE_CANONICAL_SHA256 and (
         not allow_historical or historical.get(hashlib.sha256(current).hexdigest()) != declared
@@ -1086,7 +1158,15 @@ def _specific_source_changes(
             raise ValueError("release tooling source delta differs")
         approved.add(path)
 
-    if measured.get(document) != current.get(document):
+    if measured_head == FROZEN_RELEASE_MEASURED_HEAD and all(
+        frozen_release_ci_change(path, measured.get(path), current.get(path),
+                                 old_modes.get(path), new_modes.get(path))
+        for path in FROZEN_RELEASE_CI_CHANGES
+    ):
+        approved.update(FROZEN_RELEASE_CI_CHANGES)
+        added_tests.update(path for path, (old, _) in FROZEN_RELEASE_CI_CHANGES.items() if old is None)
+
+    if document not in approved and measured.get(document) != current.get(document):
         if document not in measured or document not in current:
             raise ValueError("release document membership differs")
         old_document = git_bytes(("show", measured_head + ":" + document))

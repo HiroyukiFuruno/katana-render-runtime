@@ -733,6 +733,11 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
                 "--failfast",
             ],
             [
+                "uv",
+                "run",
+                "--no-project",
+                "--with-requirements",
+                "{{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}}",
                 "python3",
                 "-m",
                 "unittest",
