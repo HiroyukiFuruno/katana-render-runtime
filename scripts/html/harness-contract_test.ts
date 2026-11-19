@@ -329,15 +329,22 @@ function moonFixture(): HarnessSnapshot {
   return snapshot;
 }
 
-function changeMoon(
+function editedMoonSource(
   snapshot: HarnessSnapshot,
   edit: (tasks: Record<string, TestMoonTask>) => void,
-): void {
+): string {
   const config = JSON.parse(snapshot.read("moon.yml") ?? "") as {
     tasks: Record<string, TestMoonTask>;
   };
   edit(config.tasks);
-  replaceSources(snapshot, { "moon.yml": JSON.stringify(config) });
+  return JSON.stringify(config);
+}
+
+function changeMoon(
+  snapshot: HarnessSnapshot,
+  edit: (tasks: Record<string, TestMoonTask>) => void,
+): void {
+  replaceSources(snapshot, { "moon.yml": editedMoonSource(snapshot, edit) });
 }
 
 const nativeRouteProducer = `
@@ -3780,7 +3787,7 @@ function localCoverageMoonFixture(): HarnessSnapshot {
     "performance-coverage",
     "coverage",
   ];
-  changeMoon(snapshot, (tasks) => {
+  const moonSource = editedMoonSource(snapshot, (tasks) => {
     const format = actualTasks["fmt-check"];
     if (!format || typeof format !== "object") throw new Error("current Moon fmt-check missing");
     const qualityInputs = z.object({ inputs: z.array(z.string()) }).parse(format).inputs;
@@ -3835,6 +3842,7 @@ function localCoverageMoonFixture(): HarnessSnapshot {
     }
   });
   replaceSources(snapshot, {
+    "moon.yml": moonSource,
     [snapshot.policy.localBridge.source]: fs.readFileSync(
       path.join(import.meta.dir, "../hooks/run_parallel_checks.py"),
       "utf8",

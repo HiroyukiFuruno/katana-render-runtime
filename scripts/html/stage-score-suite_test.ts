@@ -115,6 +115,9 @@ function suiteFixture(): { value: JsonObject; trustedPlan: JsonObject; cleanup: 
   const catalog = loadFeatureCatalog();
   const conditions: JsonObject[] = [];
   const trustedConditions: JsonObject[] = [];
+  const operations = requiredStageScoreTuples(catalog);
+  fs.writeFileSync(path.join(temporary, "font-bytes.bin"), "selected font bytes");
+  fs.writeFileSync(path.join(temporary, "resource-bytes.bin"), "loaded resource bytes");
   let index = 0;
   for (const entry of [...catalog.visualAspects, ...catalog.scriptCases]) {
     const states =
@@ -132,6 +135,7 @@ function suiteFixture(): { value: JsonObject; trustedPlan: JsonObject; cleanup: 
           sourceRoot,
           binaryPath,
           binarySha,
+          operations,
         );
         conditions.push(condition.candidate);
         trustedConditions.push(condition.trusted);
@@ -166,11 +170,13 @@ function conditionFixture(
   sourceRoot: string,
   binaryPath: string,
   binarySha: string,
+  operations: ReturnType<typeof requiredStageScoreTuples>,
 ): { candidate: JsonObject; trusted: JsonObject } {
   const png = viewportPng(temporary, viewport);
+  const pngSha = sha256File(png);
   const sourceSha = sha256File(path.resolve(sourceRoot, entry.fixture));
   const nonce = `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`;
-  const operation = requiredStageScoreTuples().find(
+  const operation = operations.find(
     (tuple) =>
       tuple.caseId === entry.id &&
       tuple.state === state &&
@@ -205,7 +211,7 @@ function conditionFixture(
     maxScrollY: Math.max(actualScrollY, 0),
     targetVisible: true,
     nonce,
-    candidateSha256: sha256File(png),
+    candidateSha256: pngSha,
     key,
     kind: "scroll",
     viewport,
@@ -229,9 +235,9 @@ function conditionFixture(
     nonce,
     observedHash: "#target",
     referencePath: png,
-    referenceSha256: sha256File(png),
+    referenceSha256: pngSha,
     candidatePath: png,
-    candidateSha256: sha256File(png),
+    candidateSha256: pngSha,
     rmseScore: 100,
     maeScore: 100,
     operationEvidencePath: evidencePath,
@@ -250,7 +256,7 @@ function conditionFixture(
         actualScrollY: 0,
         requestedY: 0,
         key: topKey,
-        candidateSha256: sha256File(png),
+        candidateSha256: pngSha,
       }),
     );
     images.unshift({
@@ -288,9 +294,6 @@ function conditionFixture(
   const chromeReceiptPath = path.join(temporary, `chrome-${index}.json`);
   const sourceFile = path.resolve(sourceRoot, entry.fixture);
   const fontPath = path.join(temporary, "font-bytes.bin");
-  const resourcePath = path.join(temporary, "resource-bytes.bin");
-  fs.writeFileSync(fontPath, "selected font bytes");
-  fs.writeFileSync(resourcePath, "loaded resource bytes");
   const canonicalFontPath = fs.realpathSync(fontPath);
   const rawState: JsonValue =
     entry.mode === "script"
@@ -303,7 +306,7 @@ function conditionFixture(
         {
           url: `file://${sourceFile}`,
           bodyPath: sourceFile,
-          bytesSha256: sha256File(sourceFile),
+          bytesSha256: sourceSha,
           loaded: true,
         },
       ],
@@ -347,7 +350,7 @@ function conditionFixture(
     htmlSha256: sourceSha,
     binarySha256: binarySha,
     capturePath: png,
-    captureSha256: sha256File(png),
+    captureSha256: pngSha,
     viewport,
     state: rawState,
     geometry: [{ nodeId: 1, x: 1, y: 1, width: 10, height: 10 }],
@@ -373,7 +376,7 @@ function conditionFixture(
     browserExecutablePath: binaryPath,
     browserExecutableSha256: binarySha,
     capturePath: png,
-    captureSha256: sha256File(png),
+    captureSha256: pngSha,
     fontReadiness: { status: "loaded" },
     state: rawState,
     boundary: { state },
@@ -1440,13 +1443,15 @@ test("strict suite rejects missing, unknown, swapped, reused and candidate-sourc
     const firstRawPath = nonceConditions[0]?.rawKrrReportPath as string;
     const secondRawPath = nonceConditions[1]?.rawKrrReportPath as string;
     const firstRaw = JSON.parse(fs.readFileSync(firstRawPath, "utf8")) as JsonObject;
-    const secondRaw = JSON.parse(fs.readFileSync(secondRawPath, "utf8")) as JsonObject;
+    const originalSecondRawContents = fs.readFileSync(secondRawPath, "utf8");
+    const secondRaw = JSON.parse(originalSecondRawContents) as JsonObject;
     secondRaw.executionNonce = firstRaw.executionNonce as string;
     fs.writeFileSync(secondRawPath, JSON.stringify(secondRaw));
     (nonceConditions[1] as JsonObject).rawKrrReportSha256 = sha256File(secondRawPath);
     expect(() => assertStageScoreSuite(reusedNonce, fixture.trustedPlan as JsonValue)).toThrow(
       /reused KRR execution nonce/,
     );
+    fs.writeFileSync(secondRawPath, originalSecondRawContents);
     const swapped = structuredClone(fixture.value);
     const rawPath = (objectConditions(swapped)[0] as JsonObject).rawKrrReportPath as string;
     const otherPath = (objectConditions(swapped)[1] as JsonObject).rawKrrReportPath as string;

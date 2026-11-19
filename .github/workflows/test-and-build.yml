@@ -41,9 +41,10 @@ on:
           - both
           - linux
           - linux-assets
+          - linux-fidelity
           - windows
       verify_filter:
-        description: Optional cargo-nextest filterset for release/verify.
+        description: Optional cargo-nextest filterset, or Bun test-name pattern with linux-assets.
         required: false
         default: ''
         type: string
@@ -241,11 +242,11 @@ jobs:
         run: python3 scripts/build/initialize_ci_capacity_state.py --root "$PWD"
 
       - name: Check Rust types
-        if: inputs.verify_platform != 'linux-assets' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: (!startsWith(inputs.verify_platform, 'linux-')) && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: cargo check --workspace --locked
 
       - name: Run linter
-        if: inputs.verify_platform != 'linux-assets' && matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: (!startsWith(inputs.verify_platform, 'linux-')) && matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: just lint
 
       - name: Run AST linter
@@ -253,7 +254,7 @@ jobs:
         run: just ast-lint
 
       - name: Check dependency boundary
-        if: inputs.verify_platform != 'linux-assets' && matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: (!startsWith(inputs.verify_platform, 'linux-')) && matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: just dependency-leak
 
       - name: Install ImageMagick for the macOS browser test
@@ -304,7 +305,7 @@ jobs:
 
       - name: Run tests
         if: >-
-          (matrix.os != 'ubuntu-latest' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform != 'linux-assets')) &&
+          (matrix.os != 'ubuntu-latest' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && !startsWith(inputs.verify_platform, 'linux-'))) &&
           (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true') &&
           (!(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') || inputs.verify_filter == '')
         timeout-minutes: 45
@@ -313,7 +314,7 @@ jobs:
       - name: Run selected native tests
         if: >-
           github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
-          inputs.verify_platform != 'linux-assets' && inputs.verify_filter != '' &&
+          !startsWith(inputs.verify_platform, 'linux-') && inputs.verify_filter != '' &&
           !(inputs.verify_platform == 'windows' && inputs.verify_html_trace &&
           inputs.verify_filter == 'test(=renderer::backends::html_browser::session::requirements_tests::requirements_fixture_returns_fragment_frame_with_sticky_sidebar_and_closes_within_budget)')
         env:
@@ -347,7 +348,7 @@ jobs:
           --user-config-file scripts/release/nextest-local-user.toml -E "$KRR_VERIFY_FILTERSET"
 
       - name: Run PlantUML smoke check
-        if: inputs.verify_platform != 'linux-assets' && matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: (!startsWith(inputs.verify_platform, 'linux-')) && matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: |
           cargo run -p katana-render-runtime-cli -- plantuml render --input tests/fixtures/plantuml/representative/01-sequence.puml --output "$RUNNER_TEMP/plantuml-sequence.svg"
           grep -q '<svg' "$RUNNER_TEMP/plantuml-sequence.svg"
@@ -404,7 +405,11 @@ jobs:
           bin/magick -version
 
       - name: Run runtime asset script tests
-        if: matrix.os == 'ubuntu-latest'
+        if: >-
+          matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-fidelity' &&
+          (inputs.verify_platform != 'linux-assets' || inputs.verify_filter == '')
+        env:
+          MOON_CONCURRENCY: "1"
         timeout-minutes: 15
         run: |
           asset_python="$RUNNER_TEMP/krr-asset-python"
@@ -413,6 +418,19 @@ jobs:
           export PATH="$asset_python/bin:$PATH"
           just runtime-asset-script-test
 
+      - name: Run selected Linux asset regressions
+        if: >-
+          matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' &&
+          inputs.verify_filter != ''
+        env:
+          KRR_VERIFY_ASSET_TEST_PATTERN: ${{ inputs.verify_filter }}
+        timeout-minutes: 5
+        run: >-
+          bun test --path-ignore-patterns 'tmp/**' --test-name-pattern "$KRR_VERIFY_ASSET_TEST_PATTERN"
+          ./scripts/html/harness-contract_test.ts ./scripts/html/stage-score-suite_test.ts
+          ./scripts/html/compare-toc-evidence_test.ts
+
       - name: Run automation contract tests
         if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify')
         timeout-minutes: 15
@@ -420,7 +438,7 @@ jobs:
 
       - name: Select authorized HTML release phase
         id: html_policy
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-assets'
         run: |
           python3 scripts/release/html_fidelity_policy.py > "$RUNNER_TEMP/html-fidelity-policy.json"
           python3 - <<'PY_PHASE'
@@ -432,12 +450,12 @@ jobs:
           PY_PHASE
 
       - name: Compare HTML against Google Chrome for authorized release phase
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-assets'
         timeout-minutes: 15
         run: just html-release-fidelity-check
 
       - name: Compare HTML interactions against Google Chrome
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-assets'
         timeout-minutes: 15
         run: just html-interaction-check
 
@@ -461,7 +479,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload HTML interaction evidence
-        if: matrix.os == 'ubuntu-latest' && always()
+        if: matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-assets' && always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: html-chrome-interactions
