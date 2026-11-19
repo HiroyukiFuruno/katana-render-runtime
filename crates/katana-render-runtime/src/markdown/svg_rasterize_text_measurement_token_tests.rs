@@ -24,10 +24,7 @@ fn windows_file_font_generation_disables_token_reuse() {
     super::super::with_render_scoped_stamp_batch(|| {
         assert!(!super::super::font::file_stamp_durable_reusable(&path));
         assert!(super::render_generations(&database).is_none());
-        let key = super::super::DatabaseKey::eager(super::super::HtmlFontRequest::from_text(
-            "Noto Sans",
-            "A",
-        ));
+        let key = super::DatabaseKey::eager(super::HtmlFontRequest::from_text("Noto Sans", "A"));
         assert!(
             HtmlTextMeasurementToken::for_selected_database("Noto Sans", &key, &database).is_none()
         );
