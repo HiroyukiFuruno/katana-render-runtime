@@ -523,7 +523,8 @@ jobs:
 
       - name: Compare HTML against Google Chrome for authorized release phase
         if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify')
-        timeout-minutes: 15
+        # 全画像・操作・集計までの既存一括検証は実測で約28分かかった。
+        timeout-minutes: 35
         run: just html-release-fidelity-check
 
       - name: Compare HTML against Chrome on the manual v0.4.24 candidate
@@ -531,7 +532,7 @@ jobs:
           matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
           github.ref == 'refs/heads/release/verify' && inputs.verify_platform != 'linux-assets' &&
           (inputs.verify_platform != 'linux-fidelity' || inputs.verify_filter == '')
-        timeout-minutes: 15
+        timeout-minutes: 35
         run: |
           python3 -c 'from scripts.release.html_fidelity_policy import workspace_version; raise SystemExit(workspace_version() != "0.4.24")'
           just html-fidelity-interim-check
