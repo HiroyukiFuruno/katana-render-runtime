@@ -149,6 +149,11 @@ fn load_requested_font_family(
     family: &str,
     loaded_paths: &mut BTreeSet<std::path::PathBuf>,
 ) {
+    #[cfg(target_os = "linux")]
+    if family == "monospace" {
+        /* WHY: 日本語文中のASCII断片でも、描画全体と同じ等幅書体を候補にする。 */
+        load_font_paths_once(database, CJK_FONT_PATHS, loaded_paths);
+    }
     if family == "sans-serif" {
         let configured = configured_html_sans_serif_family().to_ascii_lowercase();
         load_font_paths_once(database, paths_for_font_family(&configured), loaded_paths);

@@ -12,6 +12,22 @@ mod interface_bold_support;
 #[cfg(target_os = "macos")]
 use interface_bold_support::{assert_coretext_interface_face, japanese_ui_font_pair};
 
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_monospace_keeps_the_same_face_for_ascii_and_japanese_text() {
+    use resvg::usvg::fontdb::Family;
+
+    let database = |text| {
+        super::build_html_font_db(&super::HtmlFontRequest::from_text("monospace", text))
+    };
+    let ascii = database("https://documents.example.invalid/preview/");
+    let japanese = database("日本語");
+    assert_eq!(
+        ascii.family_name(&Family::Monospace),
+        japanese.family_name(&Family::Monospace)
+    );
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn cjk_fallback_registers_w4_in_eager_and_known_databases() -> Result<(), String> {
