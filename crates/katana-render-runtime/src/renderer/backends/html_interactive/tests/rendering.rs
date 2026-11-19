@@ -1892,10 +1892,11 @@ fn collect_text_fragments_for_fill(
             .get("fill")
             .is_some_and(|value| value == fill)
     {
-        let text = element
-            .get_text()
-            .ok_or_else(|| format!("text element with fill {fill} has no content"))?;
-        fragments.push(text.into_owned());
+        let text = text_content(element);
+        if text.is_empty() {
+            return Err(format!("text element with fill {fill} has no content").into());
+        }
+        fragments.push(text);
     }
     for child in &element.children {
         if let xmltree::XMLNode::Element(child) = child {
@@ -1903,6 +1904,18 @@ fn collect_text_fragments_for_fill(
         }
     }
     Ok(())
+}
+
+fn text_content(element: &xmltree::Element) -> String {
+    element
+        .children
+        .iter()
+        .map(|child| match child {
+            xmltree::XMLNode::Element(child) => text_content(child),
+            xmltree::XMLNode::Text(text) | xmltree::XMLNode::CData(text) => text.clone(),
+            _ => String::new(),
+        })
+        .collect()
 }
 
 fn rect_width_for_fill(svg: &str, fill: &str) -> TestResult<f32> {
