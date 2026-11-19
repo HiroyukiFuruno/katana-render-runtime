@@ -134,6 +134,7 @@ pub(in crate::renderer::backends::html_interactive) struct CssStyle {
     pub(in crate::renderer::backends::html_interactive) vertical_align: CssVerticalAlign,
     pub(in crate::renderer::backends::html_interactive) text_transform: CssTextTransform,
     pub(in crate::renderer::backends::html_interactive) white_space: CssWhiteSpace,
+    pub(in crate::renderer::backends::html_interactive) allow_emergency_wrap: bool,
     pub(in crate::renderer::backends::html_interactive) list_style_none: bool,
     pub(in crate::renderer::backends::html_interactive) letter_spacing: f32,
     pub(in crate::renderer::backends::html_interactive) padding_top: f32,

@@ -24,6 +24,11 @@ impl CssStyle {
             "text-align" => self.apply_text_align(value),
             "text-transform" => self.apply_text_transform(value),
             "white-space" => self.apply_white_space(value),
+            "overflow-wrap" | "word-wrap" => match value.trim().to_ascii_lowercase().as_str() {
+                "break-word" => self.allow_emergency_wrap = true,
+                "normal" => self.allow_emergency_wrap = false,
+                _ => {}
+            },
             "letter-spacing" => self.apply_letter_spacing(value),
             _ => return false,
         }

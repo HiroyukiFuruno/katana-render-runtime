@@ -275,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn styled_wrapping_uses_shaped_font_width_and_splits_long_segments() {
+    fn styled_wrapping_uses_shaped_font_width_and_preserves_unbreakable_segments() {
         let mut style = CssStyle::browser_default();
         style.font_family = "Noto Sans".to_string();
         style.font_size = 42.842;
@@ -299,7 +299,10 @@ mod tests {
                 "for public browsing"
             ]
         );
-        assert_eq!(wrap_text_with_style("abcdef", 1.0, &style).len(), 6);
+        assert_eq!(wrap_text_with_style("abcdef", 1.0, &style), ["abcdef"]);
+        let mut break_word = style.clone();
+        break_word.apply_typography_property("overflow-wrap", "break-word");
+        assert_eq!(wrap_text_with_style("abcdef", 1.0, &break_word).len(), 6);
         assert_eq!(
             wrap_text_with_style("first\n\nthird", 1230.0, &style),
             ["first", "", "third"]
@@ -342,6 +345,17 @@ mod tests {
         assert_eq!(
             wrap_text_with_initial_width("v3.0", initial_width, continuing_width, &style),
             ["", "v3.0"]
+        );
+    }
+
+    #[test]
+    fn overwide_output_token_overflows_once_and_consumes_a_following_newline() {
+        let style = CssStyle::browser_default();
+        let width = text_width("短い", &style) + TEXT_FIT_EPSILON;
+        let token = "focusVisibleKeyboard";
+        assert_eq!(
+            wrap_text_with_style(&format!("短い {token}\n次"), width, &style),
+            ["短い", token, "次"]
         );
     }
 

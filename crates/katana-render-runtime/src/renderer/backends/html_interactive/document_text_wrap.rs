@@ -92,7 +92,8 @@ fn should_defer_unbreakable_line(
         let first_segment =
             forced_line[..first_break_end].trim_end_matches(layout_text::is_css_whitespace);
         !first_segment.is_empty()
-            && text_width(first_segment, style) <= continuing_width + TEXT_FIT_EPSILON
+            && (!style.allow_emergency_wrap
+                || text_width(first_segment, style) <= continuing_width + TEXT_FIT_EPSILON)
     })
 }
 
@@ -117,15 +118,18 @@ pub(super) fn take_styled_line(text: &str, width: f32, style: &CssStyle) -> (Str
         return (trimmed_line.to_string(), consumed);
     }
     let break_ends = css_auto_linebreak_ends(forced_line);
-    let mut fitted_end = last_fitting_end(forced_line, &break_ends, width, style).unwrap_or(0);
-    if fitted_end == 0 {
-        fitted_end = fitted_character_end(forced_line, width, style);
-    }
+    let fitted_end = last_fitting_end(forced_line, &break_ends, width, style).unwrap_or_else(|| {
+        if style.allow_emergency_wrap {
+            fitted_character_end(forced_line, width, style)
+        } else {
+            break_ends.first().copied().unwrap_or(forced_end)
+        }
+    });
     (
         forced_line[..fitted_end]
             .trim_end_matches(layout_text::is_css_whitespace)
             .to_string(),
-        fitted_end,
+        fitted_end + usize::from(fitted_end == forced_end && forced_end < text.len()),
     )
 }
 

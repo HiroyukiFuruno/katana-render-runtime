@@ -133,6 +133,7 @@ impl CssStyle {
             text_align: self.text_align,
             text_transform: self.text_transform,
             white_space: self.white_space,
+            allow_emergency_wrap: self.allow_emergency_wrap,
             list_style_none: self.list_style_none,
             letter_spacing: self.letter_spacing,
             viewport_width: self.viewport_width,
