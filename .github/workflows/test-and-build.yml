@@ -410,7 +410,8 @@ jobs:
           asset_python="$RUNNER_TEMP/krr-asset-python"
           uv venv --python 3.13 "$asset_python"
           uv pip sync --python "$asset_python/bin/python3" --require-hashes scripts/release/html-performance-requirements.lock
-          PATH="$asset_python/bin:$PATH" just runtime-asset-script-test
+          export PATH="$asset_python/bin:$PATH"
+          just runtime-asset-script-test
 
       - name: Run automation contract tests
         if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify')
