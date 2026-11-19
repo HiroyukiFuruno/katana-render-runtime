@@ -89,6 +89,34 @@ class RuntimeScriptResultTests(unittest.TestCase):
         self.assertEqual(
             junit.parse_junit(quality_grouped, (quality_path,))["tests"], 2
         )
+        quality_properties = quality_grouped.replace(
+            b"><testcase",
+            b"><properties><property name='ci' value='true'/><property name='commit' value='pinned'/></properties><testcase",
+        )
+        self.assertEqual(
+            junit.parse_junit(quality_properties, (quality_path,))["tests"], 2
+        )
+        invalid_properties = (
+            quality_properties.replace(
+                b"<property name='ci' value='true'/>", b"<property name='ci'/>"
+            ),
+            quality_properties.replace(
+                b"<property name='ci' value='true'/>",
+                b"<property name='ci' value='true'><testcase name='hidden'/></property>",
+            ),
+            quality_properties.replace(
+                b"<property name='commit' value='pinned'/>",
+                b"<property name='ci' value='other'/>",
+            ),
+            quality_properties.replace(
+                b"</properties>",
+                b"</properties><properties><property name='ci' value='other'/></properties>",
+            ),
+        )
+        for invalid in invalid_properties:
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(junit.RuntimeScriptJUnitError, "suite child shape"):
+                    junit.parse_junit(invalid)
         with self.assertRaisesRegex(junit.RuntimeScriptJUnitError, "declared test files"):
             junit.parse_junit(
                 quality_grouped,

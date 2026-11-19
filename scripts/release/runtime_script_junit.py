@@ -105,9 +105,9 @@ def parse_junit(
         totals["skipped"] += len(case.findall("skipped"))
     for suite in suites:
         if any(
-            child.tag not in {"testsuite", "testcase", "system-out", "system-err"}
+            child.tag not in {"properties", "testsuite", "testcase", "system-out", "system-err"}
             for child in suite
-        ):
+        ) or not _suite_properties_are_supported(suite):
             raise RuntimeScriptJUnitError("JUnit suite child shape is unsupported")
         cases = list(suite.iter("testcase"))
         if not cases:
@@ -147,6 +147,30 @@ def _normalize_suite_file(path: str) -> str:
     ):
         raise RuntimeScriptJUnitError("JUnit suite file path is unsupported")
     return normalized
+
+
+def _suite_properties_are_supported(suite: ET.Element) -> bool:
+    containers = [child for child in suite if child.tag == "properties"]
+    if len(containers) > 1:
+        return False
+    if not containers:
+        return True
+    container = containers[0]
+    if container.attrib or (container.text and container.text.strip()):
+        return False
+    names: list[str] = []
+    for entry in container:
+        if (
+            entry.tag != "property"
+            or set(entry.attrib) != {"name", "value"}
+            or entry.attrib["name"] not in {"ci", "commit"}
+            or len(entry) != 0
+            or (entry.text and entry.text.strip())
+            or (entry.tail and entry.tail.strip())
+        ):
+            return False
+        names.append(entry.attrib["name"])
+    return bool(names) and len(names) == len(set(names))
 
 
 def _suite_count(suite: ET.Element, key: str) -> int:
