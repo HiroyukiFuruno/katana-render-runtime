@@ -4,7 +4,7 @@ use resvg::usvg::fontdb::{Database, ID, Source};
 use std::{
     io::Write,
     path::PathBuf,
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
@@ -42,21 +42,30 @@ impl Drop for Fixture {
     }
 }
 
-fn poison_during_measurement(fixture: &Fixture, poisoned: &AtomicBool) -> TestResult<()> {
+fn poison_during_measurement(fixture: &Fixture) -> TestResult<()> {
     let mut reached_commit = false;
+    let mut poisoned_active_handle = false;
     let result = combined_run_with_hook(
         &fixture.database,
         fixture.id,
         "Animal",
         FontShape::new(18.25, 700, false),
         None,
-        || {
+        |active| {
             reached_commit = true;
-            /* WHY: 既存Arc flagを使い、同handleのcommit拒否と公開抑止を観測する。 */
+            let Some(poisoned) = active.poisoned.as_ref() else {
+                return;
+            };
+            /* WHY: 実際に計測したhandleを毒化し、commit時の公開抑止を観測する。 */
             poisoned.store(true, Ordering::Release);
+            poisoned_active_handle = poisoned.load(Ordering::Acquire);
         },
     );
     assert!(reached_commit);
+    assert!(
+        poisoned_active_handle,
+        "poison flag missing for the measured handle"
+    );
     assert!(result.is_none());
     assert!(super::ACTIVE_SCOPE.with(|cache| cache.borrow().entry.is_none()));
     Ok(())
@@ -70,7 +79,7 @@ fn generation_change_after_both_measurements_publishes_no_combined_result() -> T
     let mut mutation = Ok(());
     let mut reached_commit = false;
     let result =
-        combined_run_with_hook(&fixture.database, fixture.id, "Animal", shape, None, || {
+        combined_run_with_hook(&fixture.database, fixture.id, "Animal", shape, None, |_| {
             reached_commit = true;
             /* WHY: 完了した幅とセルを、異なる世代へ誤って公開する経路を再現する。 */
             let mut changed = BYTES.to_vec();
@@ -85,7 +94,7 @@ fn generation_change_after_both_measurements_publishes_no_combined_result() -> T
     assert!(result.is_none());
     assert!(super::ACTIVE_SCOPE.with(|cache| cache.borrow().entry.is_none()));
     assert!(
-        combined_run_with_hook(&fixture.database, fixture.id, "Animal", shape, None, || {})
+        combined_run_with_hook(&fixture.database, fixture.id, "Animal", shape, None, |_| {})
             .is_some()
     );
     Ok(())
@@ -95,15 +104,7 @@ fn generation_change_after_both_measurements_publishes_no_combined_result() -> T
 fn poisoned_same_file_handle_publishes_no_width_or_cell_and_reloads() -> TestResult<()> {
     let fixture = Fixture::new()?;
     let _scope = FontFaceCacheScope::enter();
-    let handle = font_for_face(&fixture.database, fixture.id).ok_or("file handle missing")?;
-    let poisoned = handle
-        .poisoned
-        .as_ref()
-        .ok_or("lazy file poison flag missing")?;
-    assert!(commit_file_font(&fixture.database, fixture.id, &handle));
-    poison_during_measurement(&fixture, poisoned)?;
-    assert!(poisoned.load(Ordering::Acquire));
-    assert!(!commit_file_font(&fixture.database, fixture.id, &handle));
+    poison_during_measurement(&fixture)?;
     let fresh = font_for_face(&fixture.database, fixture.id).ok_or("fresh handle missing")?;
     assert!(
         !fresh

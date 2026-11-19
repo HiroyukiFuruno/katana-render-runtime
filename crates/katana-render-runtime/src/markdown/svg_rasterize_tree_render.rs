@@ -7,6 +7,21 @@ use super::{
 #[cfg(target_os = "macos")]
 use super::{GeneratedHtmlTextProvenance, html_glyph, html_text_provenance};
 
+#[cfg(not(target_os = "macos"))]
+struct ResvgText;
+
+#[cfg(not(target_os = "macos"))]
+impl composite::TextRasterizer for ResvgText {
+    fn render(
+        &self,
+        _text: &usvg::Text,
+        _transform: tiny_skia::Transform,
+        _pixmap: &mut tiny_skia::PixmapMut<'_>,
+    ) -> Result<bool, String> {
+        Ok(false)
+    }
+}
+
 impl SvgRasterizeOps {
     pub(crate) fn render_tree_with_provenance(
         tree: &usvg::Tree,
@@ -15,6 +30,24 @@ impl SvgRasterizeOps {
         provenance: &GeneratedClipProvenance,
     ) -> Result<RasterizedSvg, SvgRasterizeError> {
         Self::render_tree_with_text(tree, scale, compatible_svg, provenance, None, None)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub(super) fn render_html_tree_with_resvg_text(
+        tree: &usvg::Tree,
+        scale: f32,
+        compatible_svg: &str,
+        provenance: &GeneratedClipProvenance,
+    ) -> Result<RasterizedSvg, SvgRasterizeError> {
+        /* WHY: 描画済みHTMLの図形とクリップは全OSで同じ合成器を通し、文字はresvgで描画する。 */
+        Self::render_tree_with_text(
+            tree,
+            scale,
+            compatible_svg,
+            provenance,
+            Some(&ResvgText),
+            None,
+        )
     }
 
     #[cfg(all(test, target_os = "macos"))]

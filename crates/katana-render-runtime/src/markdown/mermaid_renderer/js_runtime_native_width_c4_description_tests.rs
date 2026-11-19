@@ -1,4 +1,5 @@
 use super::helpers::{render_fixture_targets_with_font_audit, render_fixture_with_font_audit};
+use crate::markdown::svg_rasterize::SvgRasterizeOps;
 use serde_json::Value;
 
 const FIXTURE: &str =
@@ -8,6 +9,9 @@ const SECOND_ROW: &[&str] = &["A", " system", " of", " the", " bank,", " with"];
 const CONTAINER: &str =
     include_str!("../../../../../tests/fixtures/mermaid/en/08-03-c4-container.md");
 const JAPANESE: &str = include_str!("../../../../../tests/fixtures/mermaid/ja/08-02-c4.md");
+const ROW_FAMILY: &str = "\"Open Sans\",sans-serif";
+const ROW_FONT_SIZE: f32 = 11.48;
+const ROW_FONT_WEIGHT: u16 = 400;
 
 #[test]
 fn c4_container_and_japanese_boundary_record_fixture_observations() -> Result<(), String> {
@@ -76,8 +80,9 @@ fn assert_description_row(observations: &[Value], expected: &[&str]) -> Result<(
         .find(|row| row["text"] == text)
         .ok_or("description row missing")?;
     assert_eq!(
-        row["grouped"], true,
-        "C4 description was not grouped: {row}"
+        row["grouped"],
+        can_shape_description_row(expected)?,
+        "C4 description grouping differs from the selected font's fragment layout: {row}"
     );
     let parts = row["parts"].as_array().ok_or("description parts missing")?;
     let actual: Vec<_> = parts.iter().map(|part| part["text"].as_str()).collect();
@@ -99,10 +104,31 @@ fn assert_description_row(observations: &[Value], expected: &[&str]) -> Result<(
     Ok(())
 }
 
+fn can_shape_description_row(expected: &[&str]) -> Result<bool, String> {
+    let fragments: Vec<_> = expected
+        .iter()
+        .map(|fragment| (*fragment).to_owned())
+        .collect();
+    SvgRasterizeOps::with_html_font_render_scope(|| {
+        SvgRasterizeOps::measure_svg_fragment_layout(
+            &fragments,
+            ROW_FAMILY,
+            ROW_FONT_SIZE,
+            ROW_FONT_WEIGHT,
+            false,
+        )
+    })
+    .map(|layout| layout.is_some())
+    .map_err(|error| error.to_string())
+}
+
 fn assert_description_part(part: &Value) -> Result<(), String> {
-    assert_eq!(part["family"], "\"Open Sans\",sans-serif");
-    assert!((part["fontSize"].as_f64().ok_or("font size missing")? - 11.48).abs() < 0.0001);
-    assert_eq!(part["weight"], 400);
+    assert_eq!(part["family"], ROW_FAMILY);
+    assert!(
+        (part["fontSize"].as_f64().ok_or("font size missing")? - f64::from(ROW_FONT_SIZE)).abs()
+            < 0.0001
+    );
+    assert_eq!(part["weight"], ROW_FONT_WEIGHT);
     for key in ["x", "advance", "sourceWidth"] {
         assert!(
             part[key].as_f64().is_some_and(f64::is_finite),

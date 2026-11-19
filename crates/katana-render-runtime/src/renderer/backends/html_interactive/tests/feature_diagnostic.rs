@@ -11,6 +11,14 @@ mod operation_contract_tests;
 
 const MAX_JS_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
+#[cfg(test)]
+pub(super) fn fixture_absolute_font_path() -> String {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("assets/fonts/NotoSans-Regular.ttf")
+        .to_string_lossy()
+        .into_owned()
+}
+
 #[test]
 fn delayed_timer_requires_host_time_advance() -> TestResult {
     let source = HtmlBrowserSource::new(
@@ -2574,7 +2582,7 @@ mod tests {
 
     fn complete_catalog_font_audit() -> serde_json::Value {
         let source = json!({
-            "kind":"File", "path":"/font.ttf",
+            "kind":"File", "path":super::fixture_absolute_font_path(),
             "bytes_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "index":0, "families":["Example"]
         });

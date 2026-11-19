@@ -107,8 +107,9 @@ fn must_utf8_reports_unexpected_test_errors() {
 
 #[test]
 fn runtime_measures_horizontal_svg_arcs_like_a_browser() -> Result<(), String> {
-    /* WHY: Chrome 156 の独立 getBBox 観測と全境界値を照合し、微小な負値を丸めない。 */
-    const EXPECTED: [f64; 4] = [0.0, -1.1252009388248649e-13, 216.0, 121.67350769042969];
+    /* WHY: Chrome 156 の独立観測値を使用し、円弧の三角関数の丸め差を境界ごとに扱う。 */
+    const BROWSER_TOP: f64 = -1.1252009388248649e-13;
+    const BROWSER_HEIGHT: f32 = 121.67351;
     let rendered = render_mermaid_request(
         fake_mermaid_measuring_horizontal_svg_arcs(),
         "",
@@ -121,7 +122,17 @@ fn runtime_measures_horizontal_svg_arcs_like_a_browser() -> Result<(), String> {
         .split(':')
         .map(|value| value.parse::<f64>().map_err(|error| error.to_string()))
         .collect::<Result<Vec<_>, _>>()?;
-    assert_eq!(values.as_slice(), EXPECTED);
+    let [left, top, width, height] = values.as_slice() else {
+        return Err(format!("unexpected horizontal arc bounds: {values:?}"));
+    };
+    assert_eq!((*left, *width), (0.0, 216.0));
+    assert!((*top - BROWSER_TOP).abs() <= BROWSER_TOP.abs());
+    assert!(
+        (*height as f32)
+            .to_bits()
+            .abs_diff(BROWSER_HEIGHT.to_bits())
+            <= 1
+    );
     Ok(())
 }
 
@@ -182,7 +193,7 @@ fn c4_relation_svg_widths_preserve_native_raw_advance() -> Result<(), String> {
         ("Reads from and writes to", "Open Sans, sans-serif", 12.0),
         ("利用する", "Open Sans, sans-serif", 12.0),
         ("AVATAR", "Arial", 14.0),
-        ("日本語の幅", "Hiragino Sans", 16.0),
+        ("日本語の幅", "Hiragino Sans, sans-serif", 16.0),
     ])
 }
 

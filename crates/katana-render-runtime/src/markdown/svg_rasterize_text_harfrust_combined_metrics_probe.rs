@@ -56,7 +56,7 @@ fn combined_run(
     shape: FontShape,
     features: Option<&str>,
 ) -> Option<(f32, RawRunCell)> {
-    combined_run_with_hook(database, face_id, text, shape, features, || {})
+    combined_run_with_hook(database, face_id, text, shape, features, |_| {})
 }
 
 pub(super) fn combined_run_with_hook(
@@ -65,7 +65,7 @@ pub(super) fn combined_run_with_hook(
     text: &str,
     shape: FontShape,
     features: Option<&str>,
-    before_commit: impl FnOnce(),
+    before_commit: impl FnOnce(&face_cache::FontHandle),
 ) -> Option<(f32, RawRunCell)> {
     let face = face_cache::font_for_face(database, face_id)?;
     let instance = face
@@ -79,7 +79,7 @@ pub(super) fn combined_run_with_hook(
         .iter()
         .map(|position| position.x_advance as f32 / HARFRUST_SCALE)
         .sum();
-    before_commit();
+    before_commit(&face);
     face_cache::commit_file_font(database, face_id, &face).then_some((advance, cell))
 }
 

@@ -15,9 +15,22 @@ fn token_key_is_cloneable_and_usable_inside_scope() {
 
 #[cfg(windows)]
 #[test]
-fn windows_system_font_generation_disables_token_reuse() {
+fn windows_file_font_generation_disables_token_reuse() {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/NotoSans-Regular.ttf");
+    let mut database = resvg::usvg::fontdb::Database::new();
+    database.load_font_source(resvg::usvg::fontdb::Source::File(path.clone()));
+    let database = std::sync::Arc::new(database);
     super::super::with_render_scoped_stamp_batch(|| {
-        assert!(HtmlTextMeasurementToken::for_request("A", "Noto Sans").is_none());
+        assert!(!super::super::font::file_stamp_durable_reusable(&path));
+        assert!(super::render_generations(&database).is_none());
+        let key = super::super::DatabaseKey::eager(super::super::HtmlFontRequest::from_text(
+            "Noto Sans",
+            "A",
+        ));
+        assert!(
+            HtmlTextMeasurementToken::for_selected_database("Noto Sans", &key, &database).is_none()
+        );
     });
 }
 

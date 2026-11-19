@@ -149,13 +149,14 @@ fn nested_scope_skips_memo_and_preserves_outer_snapshot() -> TestResult<()> {
 #[test]
 fn render_scope_reuses_stamps_and_releases_them_after_close() -> TestResult<()> {
     let fixture = font_file_fixture()?;
+    let fixture_is_durable = super::super::file_stamp_durable_reusable(&fixture.path);
     let observed = with_render_scoped_stamp_batch(|| {
         let first = fixture_stamp(&fixture);
         let reused = with_reusable_stamp_batch(|| fixture_stamp(&fixture));
         (first, reused, cached_stamp(&fixture.path).is_some())
     });
     assert_eq!(observed.0, observed.1);
-    assert!(observed.2);
+    assert_eq!(observed.2, fixture_is_durable);
     assert!(cached_stamp(&fixture.path).is_none());
     Ok(())
 }

@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 pub(super) fn font_source(family: &str) -> Value {
     json!({
-        "kind":"File", "path":"/font.ttf",
+        "kind":"File", "path":super::super::fixture_absolute_font_path(),
         "bytes_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "index":0, "families":[family]
     })

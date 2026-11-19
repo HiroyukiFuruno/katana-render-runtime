@@ -140,12 +140,10 @@ impl SvgRasterizeOps {
         #[cfg(not(target_os = "macos"))]
         {
             let _ = html_text;
-            Self::rasterize_with_options_and_provenance(
-                svg_text,
-                scale,
-                &html_rasterizer_options(svg_text),
-                provenance,
-            )
+            let options = html_rasterizer_options(svg_text);
+            let compatible_svg = Self::preprocess_for_rasterizer(svg_text);
+            let tree = Self::parse_compatible_tree(&compatible_svg, &options)?;
+            Self::render_html_tree_with_resvg_text(&tree, scale, &compatible_svg, provenance)
         }
     }
 
@@ -169,15 +167,22 @@ impl SvgRasterizeOps {
         provenance: &GeneratedClipProvenance,
     ) -> Result<RasterizedSvg, SvgRasterizeError> {
         let compatible_svg = Self::preprocess_for_rasterizer(svg_text);
-        let tree = text_shaping::with_validated_tree_parse(|| {
+        let tree = Self::parse_compatible_tree(&compatible_svg, options)?;
+        Self::render_tree_with_provenance(&tree, scale, &compatible_svg, provenance)
+    }
+
+    fn parse_compatible_tree(
+        compatible_svg: &str,
+        options: &usvg::Options<'_>,
+    ) -> Result<usvg::Tree, SvgRasterizeError> {
+        text_shaping::with_validated_tree_parse(|| {
             #[cfg(all(test, target_os = "macos"))]
-            let result = font::observation::eager_tree(&compatible_svg, options);
+            let result = font::observation::eager_tree(compatible_svg, options);
             #[cfg(not(all(test, target_os = "macos")))]
-            let result = usvg::Tree::from_str(&compatible_svg, options);
+            let result = usvg::Tree::from_str(compatible_svg, options);
             result
         })
-        .map_err(SvgRasterizeError::parse_failed)?;
-        Self::render_tree_with_provenance(&tree, scale, &compatible_svg, provenance)
+        .map_err(SvgRasterizeError::parse_failed)
     }
 
     #[cfg(all(test, target_os = "macos"))]
