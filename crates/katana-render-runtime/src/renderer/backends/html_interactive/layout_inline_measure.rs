@@ -60,6 +60,16 @@ impl InlineMeasurement {
         if !style.inline_block || style.display == taffy::style::Display::None {
             return None;
         }
+        if tag == "a" && style.width.is_none() && style.max_width.is_none() {
+            let box_width = style.intrinsic_outer_width(
+                super::super::layout_text::link_intrinsic_content_width(children, &style),
+            );
+            return Some(
+                (box_width + style.margin_left + style.margin_right)
+                    .min(available)
+                    .max(MIN_LAYOUT_WIDTH),
+            );
+        }
         Some(Self::inline_element_width(children, &style, available))
     }
 

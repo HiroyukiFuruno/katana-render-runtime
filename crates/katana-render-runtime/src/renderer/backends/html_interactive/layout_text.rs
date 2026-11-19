@@ -99,6 +99,10 @@ fn normalized_link_text(nodes: &[HtmlDocumentNode]) -> String {
         .join("\n")
 }
 
+pub(super) fn link_intrinsic_content_width(nodes: &[HtmlDocumentNode], style: &CssStyle) -> f32 {
+    forced_line_text_width(&normalized_link_text(nodes), style)
+}
+
 fn append_link_text(
     node: &HtmlDocumentNode,
     current_line: &mut String,
@@ -142,11 +146,17 @@ fn text_box_width(text: &str, available: f32, style: &CssStyle) -> f32 {
     if !style.inline_block || style.width.is_some() || style.max_width.is_some() {
         return explicit.max(MIN_LAYOUT_WIDTH);
     }
-    let content = text_width(text, style);
+    let content = forced_line_text_width(text, style);
     style
         .intrinsic_outer_width(content)
         .min(available)
         .max(MIN_LAYOUT_WIDTH)
+}
+
+fn forced_line_text_width(text: &str, style: &CssStyle) -> f32 {
+    text.split('\n')
+        .map(|line| text_width(line, style))
+        .fold(0.0, f32::max)
 }
 
 fn text_box_height(lines: &[String], style: &CssStyle) -> f32 {
@@ -375,27 +385,28 @@ mod tests {
             "<main>\
             <div><a id='flat' href='/flat' style='display:inline-block;line-height:20px'>alpha beta<br>gamma&nbsp;&nbsp;delta</a></div>\
             <div><a id='nested' href='/nested' style='display:inline-block;line-height:20px'><span>alpha \n</span><span> beta</span><span><br></span><span>gamma&nbsp;&nbsp;delta</span></a></div>\
+            <div><a id='first-line' href='/first-line' style='display:inline-block;line-height:20px'>alpha beta</a></div>\
             <div><a id='nested-nbsp' href='/nested-nbsp' style='display:inline-block;line-height:20px'><span>gamma&nbsp;&nbsp;delta</span></a></div>\
             <div><a id='nested-space' href='/nested-space' style='display:inline-block;line-height:20px'><span>gamma  delta</span></a></div>\
             <div><a id='flat-nowrap' href='/flat-nowrap' style='display:inline-block;line-height:20px;white-space:nowrap'>alpha beta<br>gamma&nbsp;&nbsp;delta</a></div>\
             <div><a id='nested-nowrap' href='/nested-nowrap' style='display:inline-block;line-height:20px;white-space:nowrap'><span>alpha \n</span><span> beta</span><span><br></span><span>gamma&nbsp;&nbsp;delta</span></a></div>\
             </main>",
         )
-        .and_then(|mut session| {
-            for (nested, flat) in [("nested", "flat"), ("nested-nowrap", "flat-nowrap")] {
-                assert_eq!(anchor_height(&mut session, nested)?, 40.0);
-                assert_eq!(anchor_height(&mut session, flat)?, 40.0);
-                assert_eq!(
-                    anchor_width(&mut session, nested)?,
-                    anchor_width(&mut session, flat)?
-                );
-            }
-            assert!(
-                anchor_width(&mut session, "nested-nbsp")?
-                    > anchor_width(&mut session, "nested-space")?
-            );
-            Ok(())
-        })
+        .and_then(|mut session| assert_nested_link_intrinsic_widths(&mut session))
+    }
+
+    fn assert_nested_link_intrinsic_widths(
+        session: &mut HtmlInteractiveSession,
+    ) -> Result<(), String> {
+        let first = anchor_width(session, "first-line")?;
+        let second = anchor_width(session, "nested-nbsp")?;
+        let expected = first.max(second);
+        for id in ["nested", "flat", "nested-nowrap", "flat-nowrap"] {
+            assert_eq!(anchor_height(session, id)?, 40.0);
+            assert_eq!(anchor_width(session, id)?, expected);
+        }
+        assert!(second > anchor_width(session, "nested-space")?);
+        Ok(())
     }
 
     #[test]
