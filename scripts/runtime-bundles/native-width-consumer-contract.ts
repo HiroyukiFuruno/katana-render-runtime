@@ -8,7 +8,7 @@ export const NATIVE_WIDTH_CONSUMER_PINS = {
   [`${directory}js_runtime_native_width_tests.rs`]:
     "c91969f55fdfca06b1444f6f538bddc07c982e7251f5af4b2a2e48f311cfdf60",
   [`${directory}js_runtime_native_width_c4_description_tests.rs`]:
-    "b5a7e3e5ffb73a22ad6df961f46ad915debb6590d4b7c984a4ceb9e8aa62e6e2",
+    "e58c77083bbe9865b42e8c6fad3cb07f6c197ecb332686c980ceeabe69a8dbe3",
   [`${directory}js_runtime_native_width_c4_tests.rs`]:
     "28610a5998405703b5a07c6c1023efbf4e3315b2eb5d93b56ad043f8dcef2ead",
   [`${directory}js_runtime_native_width_ishikawa_tests.rs`]:
