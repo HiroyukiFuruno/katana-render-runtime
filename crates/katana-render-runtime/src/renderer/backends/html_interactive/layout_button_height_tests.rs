@@ -5,6 +5,8 @@ use crate::renderer::backends::html_interactive::HtmlInteractiveSession;
 use crate::renderer::backends::html_interactive::tests::test_error;
 
 const BOTTOM_PADDING_TEST_OFFSET: f32 = 2.5;
+const OUTSIDE_BUTTON_OFFSET: f32 = 4.0;
+const BUTTON_CENTER_DIVISOR: f32 = 2.0;
 const RGBA_CHANNELS: usize = 4;
 const BUTTON_BACKGROUND_RGBA: [u8; RGBA_CHANNELS] = [54, 154, 188, 255];
 const HTML: &str = r#"<style>
@@ -24,17 +26,24 @@ fn auto_button_uses_label_line_box_and_receives_click_at_bottom_padding() -> Res
         HtmlBrowserSource::new(HTML, "https://example.test/buttons").map_err(test_error)?;
     let viewport = HtmlBrowserViewport::new(320, 240, 1.0).map_err(test_error)?;
     let mut session = HtmlInteractiveSession::start(source, viewport).map_err(test_error)?;
-    let (x, y) = assert_button_box(&mut session, "auto", 40.0)?;
+    let (x, y, right) = assert_button_box(&mut session, "auto", 40.0)?;
     assert_button_box(&mut session, "fixed", 50.0)?;
     assert_button_box(&mut session, "minimum", 45.0)?;
     assert_painted_button(&mut session, x, y)?;
+    click(&mut session, right + OUTSIDE_BUTTON_OFFSET, y)?;
+    assert!(session.runtime.node_for_element_id("auto").is_some());
+    click(&mut session, x, y)?;
+    assert!(session.runtime.node_for_element_id("activated").is_some());
+    Ok(())
+}
+
+fn click(session: &mut HtmlInteractiveSession, x: f32, y: f32) -> Result<(), String> {
     for input in [
         HtmlBrowserInput::PointerDown { x, y, button: 0 },
         HtmlBrowserInput::PointerUp { x, y, button: 0 },
     ] {
         session.dispatch_input(input).map_err(test_error)?;
     }
-    assert!(session.runtime.node_for_element_id("activated").is_some());
     Ok(())
 }
 
@@ -61,14 +70,28 @@ fn assert_button_box(
     session: &mut HtmlInteractiveSession,
     id: &str,
     height: f32,
-) -> Result<(f32, f32), String> {
+) -> Result<(f32, f32, f32), String> {
     let node_id = session.runtime.node_for_element_id(id).ok_or(id)?.0;
-    let target = session
+    let mut targets = session
         .hit_targets
         .iter()
-        .find(|target| target.node_id == node_id)
-        .ok_or("missing button target")?;
+        .filter(|target| target.node_id == node_id);
+    let target = targets.next().ok_or("missing button target")?;
+    assert!(targets.next().is_none(), "{id} has multiple targets");
+    let bounds = session
+        .element_boxes
+        .iter()
+        .find(|bounds| bounds.node_id == node_id)
+        .ok_or("missing button bounds")?;
+    assert_eq!(
+        (bounds.x, bounds.y, bounds.width, bounds.height),
+        (target.x, target.y, target.width, target.height)
+    );
     assert_eq!(target.height, height, "{id}");
     let y = target.y + height - BOTTOM_PADDING_TEST_OFFSET;
-    Ok((target.x + target.width / 2.0, y))
+    Ok((
+        target.x + target.width / BUTTON_CENTER_DIVISOR,
+        y,
+        target.x + target.width,
+    ))
 }

@@ -8,6 +8,9 @@ impl HtmlLayoutRenderer {
         &mut self,
         element: ElementRenderContext<'_>,
     ) -> Option<usize> {
+        if element.tag == "button" {
+            return None;
+        }
         let clickable = self.clickable_nodes.contains(&element.node_id)
             || attribute(element.attributes, "onclick").is_some();
         clickable.then(|| {

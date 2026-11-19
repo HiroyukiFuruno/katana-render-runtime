@@ -119,7 +119,7 @@ fn finish_styled_element(
     element_box_index: usize,
     target_index: Option<usize>,
 ) {
-    renderer.finish_element_box(element_box_index, element.node_id, layout, bottom);
+    renderer.finish_element_box(element_box_index, element, layout, bottom);
     if let Some(index) = target_index {
         renderer.finish_click_target(index, element.node_id, layout, bottom);
     }
