@@ -76,11 +76,7 @@ pub(crate) fn is_condition_passed(node: SvgNode, opt: &Options) -> bool {
         }
     }
 
-    if !is_valid_sys_lang(node, opt) {
-        return false;
-    }
-
-    true
+    is_valid_sys_lang(node, opt)
 }
 
 /// SVG spec 5.8.5

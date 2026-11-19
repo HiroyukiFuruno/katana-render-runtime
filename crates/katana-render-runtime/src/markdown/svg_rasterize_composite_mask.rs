@@ -56,8 +56,10 @@ fn validate_crop(
 
 fn blend_row(destination: &mut [u8], source: &[u8], mask: &[u8]) {
     for ((destination, source), coverage) in destination
-        .chunks_exact_mut(RGBA_CHANNELS)
-        .zip(source.chunks_exact(RGBA_CHANNELS))
+        .as_chunks_mut::<RGBA_CHANNELS>()
+        .0
+        .iter_mut()
+        .zip(source.as_chunks::<RGBA_CHANNELS>().0)
         .zip(mask)
     {
         blend_pixel(destination, source, *coverage);

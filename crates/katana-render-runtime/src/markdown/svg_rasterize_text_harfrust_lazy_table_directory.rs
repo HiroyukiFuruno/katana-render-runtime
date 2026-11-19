@@ -133,7 +133,7 @@ fn parse_table_records(
 ) -> std::io::Result<BTreeMap<[u8; TABLE_TAG_BYTES], TableRecord>> {
     let mut tables = BTreeMap::new();
     let mut total_table_bytes = 0_u64;
-    for record in records.chunks_exact(TABLE_RECORD_BYTES) {
+    for record in records.as_chunks::<TABLE_RECORD_BYTES>().0 {
         insert_table_record(&mut tables, &mut total_table_bytes, file_length, record)?;
     }
     Ok(tables)

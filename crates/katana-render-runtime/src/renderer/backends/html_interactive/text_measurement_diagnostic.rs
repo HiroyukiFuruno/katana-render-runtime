@@ -64,8 +64,10 @@ impl TextMeasurementDiagnosticScope {
         self.finished = true;
         ACTIVE.with(|active| {
             let mut active = active.borrow_mut();
-            let current = std::mem::replace(&mut *active, self.previous.take());
-            current.map_or(TextMeasurementDiagnosticStats::default(), |stats| stats)
+            let Some(stats) = std::mem::replace(&mut *active, self.previous.take()) else {
+                return TextMeasurementDiagnosticStats::default();
+            };
+            stats
         })
     }
 }

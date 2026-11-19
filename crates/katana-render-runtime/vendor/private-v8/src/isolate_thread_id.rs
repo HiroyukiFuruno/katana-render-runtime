@@ -24,7 +24,7 @@ pub(super) fn current_thread_id() -> usize {
     /* from another TLS destructor, where panicking would abort the process. */
     /* A relaxed global counter is sufficient because IDs are only compared. */
     let id = NEXT_THREAD_ID
-      .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
+      .try_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
         next.checked_add(1)
       })
       .unwrap_or_else(|_| std::process::abort());
