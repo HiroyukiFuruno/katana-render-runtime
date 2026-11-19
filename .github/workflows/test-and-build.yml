@@ -515,7 +515,7 @@ jobs:
             ['html-diagram-consumer/mermaid-class-diagram', 'main h1, main > p, .notes li'],
             ['html-diagram-consumer/drawio-class-diagram', 'main h1, main > p, .notes li'],
             ['html/library-reservation-fidelity', 'h1, p'],
-            ['html/aspects/input-state', 'h1, #state-summary, #name'],
+            ['html/aspects/input-state', 'h1, #state-summary, #name, #save, #accordion, #accordion-panel'],
             ['html/aspects/typography', 'h1, p'],
           ];
           function geometry(node) {
@@ -557,6 +557,34 @@ jobs:
               });
             });
           }
+          async function compareButtonLineBoxes(page) {
+            await page.locator('#accordion').click();
+            return page.locator('#save').evaluate((source) => {
+              const variants = [
+                ['', '保存'],
+                ['', 'OK'],
+                ['WenQuanYi Zen Hei', '保存'],
+                ['Liberation Sans', '保存'],
+              ];
+              return variants.map(([family, label]) => {
+                const button = source.cloneNode(false);
+                button.removeAttribute('id');
+                if (family) button.style.fontFamily = family;
+                button.textContent = label;
+                source.after(button);
+                const style = getComputedStyle(button);
+                const size = button.getBoundingClientRect();
+                const range = document.createRange();
+                range.selectNodeContents(button);
+                const labelRect = range.getBoundingClientRect();
+                button.remove();
+                return { family: style.fontFamily, label, height: size.height,
+                  labelHeight: labelRect.height, labelOffset: labelRect.top - size.top,
+                  padding: [style.paddingTop, style.paddingBottom],
+                  border: [style.borderTopWidth, style.borderBottomWidth] };
+              });
+            });
+          }
           const browser = await chromium.launch({ channel: 'chrome' });
           try {
             const page = await browser.newPage({ viewport: { width: 620, height: 900 } });
@@ -569,6 +597,7 @@ jobs:
               if (fixture === 'html/aspects/input-state') {
                 const locales = await page.evaluate(() => ({ page: document.documentElement.lang, browser: navigator.language }));
                 console.log('LINUX_HTML_FONT_LOCALES', JSON.stringify(locales));
+                console.log('LINUX_CHROME_BUTTON_LINE_BOXES', JSON.stringify(await compareButtonLineBoxes(page)));
               }
               const { root } = await cdp.send('DOM.getDocument');
               for (const selector of selectors.split(', ')) {
