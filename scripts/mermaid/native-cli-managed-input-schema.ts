@@ -1,6 +1,6 @@
 import path from "node:path";
 import { z } from "zod";
-import capacityReference from "../build/capacity-reference.json";
+import capacityReference from "../build/capacity-reference.json" with { type: "json" };
 
 export const capacityThresholdBytes = capacityReference.baseline_bytes * capacityReference.factor;
 export const capacityPolicyFields = {
