@@ -24,6 +24,7 @@ fn oracle(data: &[u8], size: f32) -> Option<(f32, f32)> {
     super::tests::legacy_metrics(data, 0, size)
 }
 
+#[track_caller]
 fn assert_bits(actual: Option<(f32, f32)>, expected: Option<(f32, f32)>) {
     assert_eq!(
         actual.map(|(a, d)| (a.to_bits(), d.to_bits())),
@@ -99,13 +100,11 @@ fn static_library_metrics_match_full_face_bits_for_real_sources() -> TestResult 
     let path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/NotoSans-Regular.ttf");
     let file_is_durable = file_stamp_durable_reusable(&path);
-    for (source, durable) in [
+    for (source, keeps_metrics) in [
         (Source::File(path.clone()), file_is_durable),
         (Source::Binary(Arc::new(FONT_BYTES.to_vec())), true),
-        (
-            Source::SharedFile(path, Arc::new(FONT_BYTES.to_vec())),
-            file_is_durable,
-        ),
+        /* WHY: SharedFileの所有済みbytesはパスを再読込せずに測定する。 */
+        (Source::SharedFile(path, Arc::new(FONT_BYTES.to_vec())), true),
     ] {
         let database = database(source)?;
         let id = database.faces().next().ok_or("source face absent")?.id;
@@ -117,7 +116,7 @@ fn static_library_metrics_match_full_face_bits_for_real_sources() -> TestResult 
                 let actual = cached_face_line_metrics(&database, id, size)
                     .map_err(|()| "source commit rejected")?;
                 /* WHY: 非永続ファイルの初回計測値は有効で、同じバッチ内の再利用を止める。 */
-                assert_bits(actual, expected.filter(|_| attempt == 0 || durable));
+                assert_bits(actual, expected.filter(|_| attempt == 0 || keeps_metrics));
             }
             Ok(())
         })?;
