@@ -40,6 +40,7 @@ on:
         options:
           - both
           - linux
+          - linux-assets
           - windows
       verify_filter:
         description: Optional cargo-nextest filterset for release/verify.
@@ -113,7 +114,7 @@ jobs:
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && (inputs.verify_platform == 'linux' && '{"include":[{"os":"ubuntu-latest","platform":"linux64"}]}' || inputs.verify_platform == 'windows' && '{"include":[{"os":"windows-latest","platform":"win64"}]}' || '{"include":[{"os":"ubuntu-latest","platform":"linux64"},{"os":"windows-latest","platform":"win64"}]}') || '{"include":[{"os":"ubuntu-latest","platform":"linux64"},{"os":"macos-15","platform":"mac-arm64"},{"os":"windows-latest","platform":"win64"}]}') }}
+      matrix: ${{ fromJSON(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && (startsWith(inputs.verify_platform, 'linux') && '{"include":[{"os":"ubuntu-latest","platform":"linux64"}]}' || inputs.verify_platform == 'windows' && '{"include":[{"os":"windows-latest","platform":"win64"}]}' || '{"include":[{"os":"ubuntu-latest","platform":"linux64"},{"os":"windows-latest","platform":"win64"}]}') || '{"include":[{"os":"ubuntu-latest","platform":"linux64"},{"os":"macos-15","platform":"mac-arm64"},{"os":"windows-latest","platform":"win64"}]}') }}
     runs-on: ${{ matrix.os }}
     permissions:
       actions: read
@@ -235,19 +236,19 @@ jobs:
         run: python3 scripts/build/initialize_ci_capacity_state.py --root "$PWD"
 
       - name: Check Rust types
-        if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: inputs.verify_platform != 'linux-assets' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: cargo check --workspace --locked
 
       - name: Run linter
-        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: inputs.verify_platform != 'linux-assets' && matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: just lint
 
       - name: Run AST linter
-        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: inputs.verify_platform != 'linux-assets' && matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: just ast-lint
 
       - name: Check dependency boundary
-        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: inputs.verify_platform != 'linux-assets' && matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: just dependency-leak
 
       - name: Install ImageMagick for the macOS browser test
@@ -298,14 +299,14 @@ jobs:
 
       - name: Run tests
         if: >-
-          (matrix.os != 'ubuntu-latest' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify')) &&
+          (matrix.os != 'ubuntu-latest' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform != 'linux-assets')) &&
           (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true') &&
           (!(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') || inputs.verify_filter == '')
         timeout-minutes: 45
         run: just unit-test
 
       - name: Run selected native tests
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_filter != ''
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform != 'linux-assets' && inputs.verify_filter != ''
         env:
           DEBUG: ${{ inputs.verify_html_trace && 'true' || 'false' }}
           KRR_VERIFY_FILTERSET: ${{ inputs.verify_filter }}
@@ -324,7 +325,7 @@ jobs:
             --user-config-file scripts/release/nextest-local-user.toml -E "$KRR_VERIFY_FILTERSET"
 
       - name: Run PlantUML smoke check
-        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: inputs.verify_platform != 'linux-assets' && matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: |
           cargo run -p katana-render-runtime-cli -- plantuml render --input tests/fixtures/plantuml/representative/01-sequence.puml --output "$RUNNER_TEMP/plantuml-sequence.svg"
           grep -q '<svg' "$RUNNER_TEMP/plantuml-sequence.svg"
