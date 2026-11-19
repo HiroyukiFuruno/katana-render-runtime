@@ -145,7 +145,8 @@ jobs:
         if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
-          toolchain: stable
+          # Cargo 1.100 の中間成果物配置に容量管理が対応するまでは互換版を使う。
+          toolchain: "1.99.1"
           components: clippy, rustfmt, llvm-tools-preview
 
       - name: Cache Rust build outputs
@@ -695,7 +696,7 @@ jobs:
         if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
         uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
-          toolchain: stable
+          toolchain: "1.99.1"
 
       - name: Install just
         if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
@@ -827,7 +828,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
-          toolchain: stable
+          toolchain: "1.99.1"
           components: clippy, rustfmt, llvm-tools-preview
 
       - name: Cache cargo

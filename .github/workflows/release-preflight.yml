@@ -54,7 +54,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'release/v')
         uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
-          toolchain: stable
+          toolchain: "1.99.1"
           components: clippy, rustfmt, llvm-tools-preview
 
       - name: Cache cargo
