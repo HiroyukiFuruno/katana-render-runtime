@@ -219,7 +219,123 @@ FROZEN_RELEASE_CI_CHANGES: dict[str, tuple[tuple[str, int] | None, tuple[str, in
     ),
     "Justfile": (
         ("ffc9f8dec7c6e6dbf2748d99aca8c894156b2aa31f99bee28d0809e4cf90fd4d", 87389),
-        ("c7354e1c6b1faca070fccee4338cab6f36d92f40b10f87df7c6599e16ebc1125", 88082),
+        ("0b717520315fe953b233911031a1a5e46f9ec0b955854b995d110f7f762ad821", 88409),
+    ),
+    "crates/katana-render-runtime/Cargo.toml": (
+        ("8c490a3bf10827f4dc8a40aae6689584eb87634cc4fb9a6b988af6357a36c8ff", 4940),
+        ("18e76f452875f0150121b6cc6a97ea8a199d5758b3de90ac7a10cbc415d32105", 5288),
+    ),
+    "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime_native_width_ishikawa_tests.rs": (
+        ("8d818595edc6750bafbead131fef9beea1987a9995a0a2613cabf1b2de3d5a9f", 7986),
+        ("3857d92d2ea01c556b5fa0642b6c2d7123835f5435db5c8942493e0089f6cf47", 8123),
+    ),
+    "crates/katana-render-runtime/src/markdown/mermaid_renderer/js_runtime_reference_score_tests.rs": (
+        ("12d3ca17d8a5fd56c212dad77f2c3cb78efc4450b43ec376cde219115a2d4f15", 11028),
+        ("3dbcb26b2089ef743fb0beea8815e261a24653b482bcd0b23e8181fa11339bc4", 11056),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize.rs": (
+        ("64ac3d624620a540f48b3eee2d40dae195197c0a9b98ea80b0aa212473803fd0", 6444),
+        ("0d06e68ac5e5b3e966699cf6fd763a2b578983f6cb31aa486d0c6f87f2c6228d", 6470),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_font_file_fixture.rs": (
+        ("1b122d8e055bccd8e118ee8c052292fe0730ff14522734c5efdfc8080cd1df64", 1236),
+        ("b32d0d458f3d3b16c76ee40fb742c608f2c0c090889efdec9c1cc1c049e53fa4", 1325),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_html_font_discovery_cache.rs": (
+        ("3fedecc3ded38ecdd41d3eaf72193d22700d72c5133a5285373e6dd57ffbf7c2", 4643),
+        ("2a1d7729d5afd723462c41490735f7734f89f8cbf6f48fdabde14eeed5f61e2c", 4669),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_html_font_discovery_cache_tests.rs": (
+        ("62edf12c2c81c754754359055ec2c24c35de29529db6e34894cc4529b8a5af45", 9663),
+        ("b3dbcdde78aa30d90894cb8c20018bd533617ca6e6e9a3dd4409e8b689dccf05", 9655),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_html_font_sources_tests.rs": (
+        ("20c2642318df9f1d3558a01d960a4fa31bbcfbfa81f2cfeed22c350e26ed38d0", 10203),
+        ("9c13ead70083f46f548ec0c73c5489952d4c27480e0d41d7ad239a991381a97f", 10242),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_html_line_metrics.rs": (
+        ("ac5aa0d04dd6ef57f49becc17f437e4ca072ea058fd3250dc85134cb1780a28a", 5984),
+        ("ed2e495d0b9b02f3e2a9b87f3f2cd5dbc06ac861196f16538d8640812732072f", 6036),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_html_text_provenance.rs": (
+        ("1236ab4cca5454c7fff6431e7a8bc45a68fda4fa1f27073cb082e05cf19080f8", 2374),
+        ("6d60190d7eda2c0e960e26bc3d3e3069ffec7e62d2ccf43bce16df1a180b03d7", 2382),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_preprocess.rs": (
+        ("b5ed894abf37dbf58600f9aa432c11b14b38d2f8990b47734a19c10ef4fdaa17", 5924),
+        ("f3ff0b95350e1964a5aac0dcf4495b38075476dbe71a37ed8057cd22579eb1d0", 5952),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_preprocess_geometry.rs": (
+        ("8592b32514d660352e957dc4bf3be99cf051d5a85c10ffa28fce947373232ae9", 5414),
+        ("bf253dccda22368266cf9f24d8095c89a1240816ce21840087d791db376e23e9", 5442),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_text_font.rs": (
+        ("7fdda75488554bc6c7160860bd361c989966bd7bfdba359dfaaf6746ff40b7b6", 24973),
+        ("854785f0aa28f266cc9b47ec2a765f51a574c5ce03a5c41c7b0e5acc9e0b6ebd", 24993),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_text_font_fallback.rs": (
+        ("f774952583953f1fcfda8f42d3389b0d0d3ce060ac5551eb2519f63d98902491", 4493),
+        ("0c5472ef488250536ea7a3c500e6b1efdfbf06698a60ae38b8aa276899ba3718", 4501),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_text_font_family.rs": (
+        ("9bd7bad393c4c48e31a8335d97f4a1691bc819d96774f254e75ab97cc098e682", 3528),
+        ("41f23ae6ca2fbc014339071622e18c3c167b7c2cc97e1a757de852b1017d2a47", 3546),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_text_font_interface_bold_tests.rs": (
+        ("5f3c1d6de03cad9418863192a78b8bdccec2b38d8b2bedd7a064ecf315ec17e0", 9595),
+        ("d9ee42821f56a21c1527c1865e383c5dc79b7c2bccb4be56edec6fd424da74eb", 9596),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_text_harfrust_face_cache_file_tests.rs": (
+        ("2123adad36310b430b40039f0204f1ec114e127909cfefbbf7f0720267273351", 1869),
+        ("b3fa6ce27c7e95713a340fc3846211214640b6c12ac293d9289f47581a19fa08", 1876),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_text_harfrust_face_cache_file_ttc_tests.rs": (
+        ("844f3e0a85b0eb13dc6a3ba0c08ac0e808271ec6f5a987e5bc0617ea298d1838", 3026),
+        ("5fbb790a3da0ea65ee146c5f3c22c4ec25ab82eca5e551f5e92b05bcc5add8c6", 2998),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_text_harfrust_face_cache_tests.rs": (
+        ("8348ec8c3d3d0df3f5f10ba3f6f2a56140b10a3feff33a6016864d13b0debd09", 11264),
+        ("9c571f0e08986e4571e55bf959922940dba483a2d926b77a55833ce0384c9e5a", 11334),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_text_measurement_token_batch_retry_tests.rs": (
+        ("16839790e925047a6d3be15883821329ab6a025ccd7ed92c8c6dc54ff11f6d73", 5395),
+        ("47edf41bb7e69bc03d59f90656d9eef43363b9c3f988560c10a9b1fd6a20c61e", 5382),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_text_shaping.rs": (
+        ("62defeae947d9e86853ab21e52ac37eb314b5a8ac7c535d67ac73417d303d948", 6278),
+        ("79a8980c7f7f0991819ac83ffa86edbeffdfc8bc8498839396413b9174245eae", 6388),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_text_shaping_tests.rs": (
+        ("62b2208df0268e6f981e87f2355f086282d127fd58b48bfa4f4b9ac78fa04e48", 9458),
+        ("799eccaabc8b9cbe5164fc9f2ca4eaf659a8f9d72453a6e2dc3e4f938ab4095e", 9486),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_text_usvg_cmap.rs": (
+        ("f320a8c8e4ffa6e6d865423d5889583f94afa9bc144f3488bc916d5637864fad", 1077),
+        ("df295b4ed93489fdd25ebf1e6705901277c47ea711881a348fda53e4361482aa", 1105),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_text_usvg_cmap_probe_tests.rs": (
+        ("0d93c9fcb614464f87b2ca0c1cf0920cffe7664e5862ff49e70cdd206400a6c2", 10303),
+        ("54b15e6877168f8155ba62443999c9baaf3d082deb700ca169de6b68edb2c6ca", 10331),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_text_usvg_cmap_probe_weight_tests.rs": (
+        ("1fe8ba6452a7b012f8721c88888126368e5904a05930dee9cff2ab42adee1f2a", 816),
+        ("a708a694a1196a476a2cac167cd59c6ab28b24326d87936e0b66cd2ae739c8d4", 760),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_text_usvg_cmap_selector.rs": (
+        ("8ae52f87b3c516cb05ed9405b4fab01debee322204797ed2cdb5ff040bf8904b", 7161),
+        ("7b6ad04bdf7f87a25d0b27934cad0aa5814ed9e321be3b60243bf0abe3cdd4d3", 7241),
+    ),
+    "crates/katana-render-runtime/src/markdown/svg_rasterize_text_usvg_cmap_selector_loaded.rs": (
+        ("1aa6f44174785bd5147ca7a4f65ccc57f4beb201464f976a13837e37680a3570", 892),
+        ("bb5e54e0748d1925c9b15a868bc062060f6bf03b0cbbeb4aaea1e3d19105b35f", 946),
+    ),
+    "crates/katana-render-runtime/src/renderer/backends/html_interactive/layout_paint_text.rs": (
+        ("74c2985338f77a26ca4693c7c65167eb8a0b9683661313365ca2fe43f393d666", 12487),
+        ("836d37a0d230b6c57744990012a0a0051b48ae72f69f4628412794fe425beaa4", 12539),
+    ),
+    "crates/katana-render-runtime/src/renderer/backends/html_interactive/text_metrics.rs": (
+        ("8911449831fede02ac95b9c6d7c05f4f878fcc650b5ed19658ef9360083a9828", 14590),
+        ("5657f8734a3c9fdd044ae403d367339b132d76f74c326a712b9f59d6f4ab8356", 14558),
     ),
     "docs/release.md": (
         ("992bc0f65d53ca2cf061f3790942b16ebf6f99e5675fbe0d96d55d621e2959c9", 14759),
@@ -229,9 +345,17 @@ FROZEN_RELEASE_CI_CHANGES: dict[str, tuple[tuple[str, int] | None, tuple[str, in
         ("58bf94a3be86afd9099a409be4d5adda09d84de22f76848db8ea4b3fa89c413d", 12494),
         ("ac75b54380ec25d9db33e02a9dd5daeb1b968e7e8d41ac9258be1dcf6ee9493c", 12483),
     ),
+    "scripts/build/cargo_capacity_guard_native_cli_observation.py": (
+        ("ff7b9b550b714ebeb8b1e3d383485172e0898c98023f3a44a9968f0b80a60c1d", 41830),
+        ("1ea51ef32fd412cc74e9a759c6b3622b4c71fcb4ffa37620dc980971b93444d9", 41839),
+    ),
     "scripts/build/cargo_capacity_guard_selected_cache_ownership_test.py": (
         ("1edcadd87d0f7e579b3588ec0f66729917ca1a4a271ae7ba99346049d3b52a54", 31717),
         ("df7711cc9d361be3c45c4fab95b822e1705a798863f12365cc84278df3964564", 31651),
+    ),
+    "scripts/build/cargo_capacity_guard_state_integration_test.py": (
+        ("bef4beae4fd33c3e90535c7784a3d2d8e8ca708511031e362c8f8a3cd39613d4", 26035),
+        ("2323cedcc48b9b33de06a88b1516c5b4f621610553d1b9dbcbc9ab7446abc2cb", 26041),
     ),
     "scripts/build/cargo_capacity_guard_test.py": (
         ("5921ebf8ae93b7ca838bd7a2c66ac6436ba979f94f615ed18983eb1b5f84acef", 320240),
@@ -247,15 +371,23 @@ FROZEN_RELEASE_CI_CHANGES: dict[str, tuple[tuple[str, int] | None, tuple[str, in
     ),
     "scripts/quality/owned-validation-contract.ts": (
         ("5d54691383820cf69afeab163ebcceab672862024aa851d7960bed0e5630e8f2", 220078),
-        ("6670c1d33579e45683f4a246f101ea353e4bc48cdd9784e8f1f09a329a6a1ed7", 220491),
+        ("de68a299f818d9462d3a3a5fc1a0513d0abbc7c6d6f0e8fa6e70f222415d30a0", 220812),
     ),
     "scripts/quality/owned-validation-contract_test.ts": (
         ("fc9b237e2f8b54442d0d7960c2dc2416bbce30c3822aa5f5fb13d73ad016590e", 258364),
-        ("84d2d386a84225ef1f40f05fa048a545e511f902b615a275191ad1caf5f941af", 259481),
+        ("bafe3c134879d592eda72b221a8d3dc828bdef35780107fa2764ef948a2e37ed", 259523),
     ),
     "scripts/release/release_workflow_contract_test.py": (
         ("e5c9c9380b0529688bd3c155afe28bd414b70901ed16bb0473d801da7fdae1ce", 57715),
         ("5ffe5c31c4332a71ada27b24a124f09162ba52e50b9a774816e92d16a9395ef4", 59058),
+    ),
+    "scripts/release/verify_dependency_freshness.py": (
+        ("0b16e432a30e4cba011e4b6ce51d87868909a76b3160c13e19ab172d0c07398f", 60302),
+        ("9226f1f5b79d794cd1b2951ed58ff906a58ce4d4e4c9a52f9941401c88d3b44c", 62663),
+    ),
+    "scripts/release/verify_dependency_freshness_test.py": (
+        ("1f722913d873e65b6116a0bac56731c0efdedcdcea17cd582d40f05ecdf252e5", 76536),
+        ("7e75f813a434ca53ca52021072ffc46a01a15538cbb825ce092bd11438d0710b", 79632),
     ),
 }
 
@@ -837,7 +969,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "cd2b882d40c3de6af072becc40d3c24fe0a6af67b298a564adcbb0df7e54a127"
+SELF_MODULE_CANONICAL_SHA256 = "772a8d9afd7848d014e4bbc3d0e3f92bbeb09c53dbc14801669108433169b9fe"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":
@@ -881,6 +1013,8 @@ def reviewed_same_binary_self(current: bytes, *, allow_historical: bool = False)
     match = matches[0]
     declared = match.group(1).decode("ascii")
     historical = {
+        "1ab73de116c87a794a450d93144e07f6151350c186e163b1108c7292c5aeb492":
+            "cd2b882d40c3de6af072becc40d3c24fe0a6af67b298a564adcbb0df7e54a127",
         "44cbdb2ddc9a0c8638db3e32fcce4315606c3f002008c2b96e78375007c96446":
             "4536796c3d859c8a1309d0f91745fa4e42370825d5610fdcde87587775bfda8c",
         "d8bb47141e9ffa6fc1c405dadd6011823cadcbe8355903223251faf50442e7e2":
@@ -1105,6 +1239,14 @@ def _specific_source_changes(
     ):
         approved.update(("package.json", "bun.lock"))
 
+    if measured_head == FROZEN_RELEASE_MEASURED_HEAD and all(
+        frozen_release_ci_change(path, measured.get(path), current.get(path),
+                                 old_modes.get(path), new_modes.get(path))
+        for path in FROZEN_RELEASE_CI_CHANGES
+    ):
+        approved.update(FROZEN_RELEASE_CI_CHANGES)
+        added_tests.update(path for path, (old, _) in FROZEN_RELEASE_CI_CHANGES.items() if old is None)
+
     release_tooling_pairs = {
         "crates/katana-render-runtime/Cargo.toml": (
             "8c490a3bf10827f4dc8a40aae6689584eb87634cc4fb9a6b988af6357a36c8ff",
@@ -1157,14 +1299,6 @@ def _specific_source_changes(
                 or current[path] != (expected_new, len(new_bytes))):
             raise ValueError("release tooling source delta differs")
         approved.add(path)
-
-    if measured_head == FROZEN_RELEASE_MEASURED_HEAD and all(
-        frozen_release_ci_change(path, measured.get(path), current.get(path),
-                                 old_modes.get(path), new_modes.get(path))
-        for path in FROZEN_RELEASE_CI_CHANGES
-    ):
-        approved.update(FROZEN_RELEASE_CI_CHANGES)
-        added_tests.update(path for path, (old, _) in FROZEN_RELEASE_CI_CHANGES.items() if old is None)
 
     if document not in approved and measured.get(document) != current.get(document):
         if document not in measured or document not in current:
