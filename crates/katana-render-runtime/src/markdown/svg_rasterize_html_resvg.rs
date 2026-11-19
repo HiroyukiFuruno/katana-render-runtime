@@ -1,4 +1,7 @@
 use super::{GeneratedClipProvenance, RasterizedSvg, SvgRasterizeError, SvgRasterizeOps};
+#[cfg(windows)]
+#[path = "svg_rasterize_html_resvg_windows_snapshots.rs"]
+mod windows_snapshots;
 #[cfg(all(test, windows))]
 use std::time::Instant;
 
@@ -18,7 +21,7 @@ pub(super) fn rasterize(
     let compatible_svg = SvgRasterizeOps::preprocess_for_rasterizer(svg_text);
     #[cfg(all(test, windows))]
     let preprocessed = started.map(|_| Instant::now());
-    let tree = SvgRasterizeOps::parse_compatible_tree(&compatible_svg, &options)?;
+    let tree = parse_tree(&compatible_svg, options)?;
     #[cfg(all(test, windows))]
     let parsed = started.map(|_| Instant::now());
     let result = SvgRasterizeOps::render_html_tree_with_resvg_text(
@@ -34,6 +37,22 @@ pub(super) fn rasterize(
         report(svg_text.len(), [start, fonts, pre, tree, Instant::now()]);
     }
     result
+}
+
+#[cfg(windows)]
+fn parse_tree(
+    svg: &str,
+    options: resvg::usvg::Options<'static>,
+) -> Result<resvg::usvg::Tree, SvgRasterizeError> {
+    windows_snapshots::parse(svg, options).map_err(SvgRasterizeError::parse_failed)
+}
+
+#[cfg(not(windows))]
+fn parse_tree(
+    svg: &str,
+    options: resvg::usvg::Options<'static>,
+) -> Result<resvg::usvg::Tree, SvgRasterizeError> {
+    SvgRasterizeOps::parse_compatible_tree(svg, &options)
 }
 
 #[cfg(all(test, windows))]

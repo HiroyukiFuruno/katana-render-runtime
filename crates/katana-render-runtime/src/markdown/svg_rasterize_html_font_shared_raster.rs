@@ -1,5 +1,6 @@
 use super::super::super::text_shaping::FileStamp;
-use resvg::usvg::fontdb::{Database, FaceInfo, Family, ID, Source};
+use super::super::copy_generic_families;
+use resvg::usvg::fontdb::{Database, FaceInfo, ID, Source};
 use std::{collections::BTreeMap, path::PathBuf};
 
 #[cfg(test)]
@@ -83,14 +84,6 @@ fn remap_prefix(
             database.face(*fresh).cloned()
         })
         .collect()
-}
-
-pub(super) fn copy_generic_families(original: &Database, database: &mut Database) {
-    database.set_serif_family(original.family_name(&Family::Serif).to_owned());
-    database.set_sans_serif_family(original.family_name(&Family::SansSerif).to_owned());
-    database.set_cursive_family(original.family_name(&Family::Cursive).to_owned());
-    database.set_fantasy_family(original.family_name(&Family::Fantasy).to_owned());
-    database.set_monospace_family(original.family_name(&Family::Monospace).to_owned());
 }
 
 #[cfg(test)]

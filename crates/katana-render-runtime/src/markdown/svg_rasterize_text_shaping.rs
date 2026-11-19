@@ -80,6 +80,11 @@ pub(super) fn enable_windows_font_snapshots() {
     font::enable_windows_font_snapshots();
 }
 
+#[cfg(windows)]
+pub(super) fn windows_font_snapshot(path: &std::path::Path) -> Option<std::sync::Arc<Vec<u8>>> {
+    font::windows_font_snapshot(path)
+}
+
 #[cfg(test)]
 pub(super) fn shaped_text_width(
     text: &str,

@@ -100,6 +100,20 @@ pub(super) fn configure_generic_families(database: &mut usvg::fontdb::Database) 
     database.set_fantasy_family(first_available_family(database, FANTASY_FAMILIES));
 }
 
+#[cfg(any(target_os = "macos", windows))]
+pub(super) fn copy_generic_families(
+    original: &usvg::fontdb::Database,
+    database: &mut usvg::fontdb::Database,
+) {
+    use usvg::fontdb::Family;
+
+    database.set_serif_family(original.family_name(&Family::Serif).to_owned());
+    database.set_sans_serif_family(original.family_name(&Family::SansSerif).to_owned());
+    database.set_cursive_family(original.family_name(&Family::Cursive).to_owned());
+    database.set_fantasy_family(original.family_name(&Family::Fantasy).to_owned());
+    database.set_monospace_family(original.family_name(&Family::Monospace).to_owned());
+}
+
 fn first_available_family(
     database: &usvg::fontdb::Database,
     candidates: &'static [&'static str],
