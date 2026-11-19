@@ -47,7 +47,7 @@ on:
         default: ''
         type: string
       verify_html_trace:
-        description: Enable HTML phase timings in selected native test output.
+        description: Enable HTML phase timings in selected native test output. The requirements fixture emits its full timings even if it exceeds 60 seconds.
         required: false
         default: false
         type: boolean
@@ -311,10 +311,16 @@ jobs:
           NEXTEST_SUCCESS_OUTPUT: ${{ inputs.verify_html_trace && 'immediate' || 'never' }}
         shell: bash
         timeout-minutes: 45
-        run: >-
-          just --command cargo nextest run --workspace --all-targets --all-features
-          --locked --no-fail-fast --retries 0 --no-tests fail --test-threads "$TEST_THREADS"
-          --user-config-file scripts/release/nextest-local-user.toml -E "$KRR_VERIFY_FILTERSET"
+        run: |
+          targets=(--workspace --all-targets)
+          if [[ "$DEBUG" == true && "$KRR_VERIFY_FILTERSET" == 'test(=renderer::backends::html_browser::session::requirements_tests::requirements_fixture_returns_fragment_frame_with_sticky_sidebar_and_closes_within_budget)' ]]; then
+            # The child still asserts the same budget after emitting all phase timings.
+            export KRR_HTML_REQUIREMENTS_CHILD=1
+            targets=(--package katana-render-runtime --lib)
+          fi
+          just --command cargo nextest run "${targets[@]}" --all-features \
+            --locked --no-fail-fast --retries 0 --no-tests fail --test-threads "$TEST_THREADS" \
+            --user-config-file scripts/release/nextest-local-user.toml -E "$KRR_VERIFY_FILTERSET"
 
       - name: Run PlantUML smoke check
         if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
