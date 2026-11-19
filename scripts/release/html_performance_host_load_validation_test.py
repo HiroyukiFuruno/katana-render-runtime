@@ -195,6 +195,7 @@ class HostLoadValidationTest(unittest.TestCase):
 class CurrentHostLoadPreflightTest(unittest.TestCase):
     def test_previous_current_cpu_producer_is_historical_and_unknown_is_rejected(self) -> None:
         previous_versions = (
+            "903e06b4a0667eba4a4009accafc3b0adb14cc68db087aeb07a3369b0478a4a2",
             "213afcfcf895ee1f048564e70d10668187e0829eee49cbb3fbdc384648777e1b",
             "43d967863089f9c2267326f2dde177db898861d1c0634f2e951eda7b212cbbff",
             "b8e3fdbc94a9f397051a1268060efb1f0ffe1604e2f0adda0f89afa779bdb359",
