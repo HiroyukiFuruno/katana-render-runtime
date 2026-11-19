@@ -20,6 +20,8 @@ import {
   managedOwnedSchema,
 } from "./native-cli-managed-build-schema";
 import {
+  capacityStatePath,
+  capacityThresholdBytes,
   cargoArtifactSchema,
   cargoMetadataSchema,
   managedCapacitySchema,
@@ -37,8 +39,8 @@ export function validateManagedCliArtifact(
 
 export function verifyManagedCapacity(root: string, before: FileRecord, after: FileRecord): void {
   const measurement = managedCapacitySchema.shape.capacityPolicy.extend({
-    state: z.literal(path.join(root, "tmp/.cargo-capacity-guard.json")),
-    current_bytes: z.number().int().nonnegative().max(4726095872),
+    state: z.literal(path.join(root, capacityStatePath)),
+    current_bytes: z.number().int().nonnegative().max(capacityThresholdBytes),
     over_capacity: z.literal(false),
     metric_available: z.literal(true),
   });
@@ -171,7 +173,7 @@ function verifyPreflightCommand(evidence: CapacityEvidence, root: string, python
     "--target",
     path.join(root, "target"),
     "--state",
-    path.join(root, "tmp/.cargo-capacity-guard.json"),
+    path.join(root, capacityStatePath),
     "--require-capacity",
     "--print-json",
   ];

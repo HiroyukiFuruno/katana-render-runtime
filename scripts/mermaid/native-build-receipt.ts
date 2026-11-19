@@ -7,6 +7,7 @@ import {
   frozenManagedBuildSchemaName,
   managedBuildSchemaName,
 } from "./native-cli-managed-build-schema";
+import { capacityPolicyFields, capacityThresholdBytes } from "./native-cli-managed-input-schema";
 import { declaresManagedReceipt, parseManagedJson } from "./native-cli-managed-json";
 
 export interface NativeBuildReceiptSummary {
@@ -938,11 +939,8 @@ export function validateNativeCapacityProtection(
   const proof = objectValue(value, "native capacity protection");
   const policy = objectValue(proof.capacityPolicy, "protected capacity policy");
   const expectedPolicy = {
-    metric: "unique-inode-allocated-bytes",
-    metric_version: 1,
-    baseline_bytes: 2363047936,
-    threshold_bytes: 4726095872,
-    factor: 2,
+    ...capacityPolicyFields,
+    threshold_bytes: capacityThresholdBytes,
     target: path.join(stringValue(build.cwd, "protected build cwd"), "target"),
   };
   if (
@@ -1293,12 +1291,14 @@ function verifyConfigPins(value: JsonValue | undefined, label: string) {
 export function validateCapacityReport(value: JsonValue | undefined, label: string, root: string) {
   const report = objectValue(value, label);
   if (
-    stringValue(report.metric, `${label} metric`) !== "unique-inode-allocated-bytes" ||
-    integerValue(report.metric_version, `${label} metric version`) !== 1 ||
-    integerValue(report.baseline_bytes, `${label} baseline`) !== 2363047936 ||
-    numberValue(report.factor, `${label} factor`) !== 2 ||
-    integerValue(report.threshold_bytes, `${label} threshold`) !== 4726095872 ||
-    integerValue(report.current_bytes, `${label} current bytes`) > 4726095872 ||
+    stringValue(report.metric, `${label} metric`) !== capacityPolicyFields.metric ||
+    integerValue(report.metric_version, `${label} metric version`) !==
+      capacityPolicyFields.metric_version ||
+    integerValue(report.baseline_bytes, `${label} baseline`) !==
+      capacityPolicyFields.baseline_bytes ||
+    numberValue(report.factor, `${label} factor`) !== capacityPolicyFields.factor ||
+    integerValue(report.threshold_bytes, `${label} threshold`) !== capacityThresholdBytes ||
+    integerValue(report.current_bytes, `${label} current bytes`) > capacityThresholdBytes ||
     report.over_capacity !== false ||
     report.metric_available !== true ||
     stringValue(report.target, `${label} target`) !== path.join(root, "target")

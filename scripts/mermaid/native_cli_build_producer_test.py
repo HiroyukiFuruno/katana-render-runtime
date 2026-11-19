@@ -407,7 +407,7 @@ class InputAdmissionTests(unittest.TestCase):
 
     def _capacity_registry(self) -> tuple[Path, list[JsonObject], Path]:
         (self.root / "tmp").mkdir(exist_ok=True)
-        state = self.root / "tmp/.cargo-capacity-guard.json"
+        state = self.root / "tmp/.cargo-capacity-guard-v2.json"
         state.write_text(json.dumps(guard.policy(self.root / "target")))
         other = self.root / "other"
         other.write_text("other protected bytes")
@@ -496,7 +496,7 @@ class InputAdmissionTests(unittest.TestCase):
         (self.root / "Justfile").write_bytes((Path(__file__).resolve().parents[2] / "Justfile").read_bytes())
         expected = self.root / "tmp/expected.json"
         expected.write_text(json.dumps(self.expected))
-        (self.root / "tmp/.cargo-capacity-guard.json").write_text(json.dumps(guard.policy(self.root / "target")))
+        (self.root / "tmp/.cargo-capacity-guard-v2.json").write_text(json.dumps(guard.policy(self.root / "target")))
         stat = self.source.stat()
         registry = self.root / "tmp/registry.json"
         registry.write_text(json.dumps({"schema": "krr-protected-refs-successor-v1", "physicalRefCount": 1,
@@ -573,9 +573,9 @@ class InputAdmissionTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "executable differs"):
                 validate_build_executable(
                     self.root, [str(toolchain / "cargo"), *guard.BUILD_FLAGS], result.child_environment)
-            state_path = self.root / "tmp/.cargo-capacity-guard.json"
+            state_path = self.root / "tmp/.cargo-capacity-guard-v2.json"
             for key, invalid in (("metric", "wrong"), ("metric_version", True),
-                                 ("baseline_bytes", 2363047937), ("factor", 3), ("target", str(self.root))):
+                                 ("baseline_bytes", 8053063681), ("factor", 3), ("target", str(self.root))):
                 state = {**guard.policy(self.root / "target"), key: invalid}
                 state_path.write_text(json.dumps(state))
                 with self.subTest(saved_state=key), patch.object(owner, "observe_native_cli_command") as run:

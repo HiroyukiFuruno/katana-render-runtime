@@ -38,6 +38,7 @@ import html_performance_epoch_reuse as epoch_reuse
 import html_performance_remote_evidence as remote_evidence
 import html_performance_source_materialization as source_materialization
 import verify_html_performance_evidence as gate
+from cargo_capacity_guard_state import REFERENCE_BASELINE_BYTES
 
 producer = typed_producer
 
@@ -4016,7 +4017,7 @@ class CapacityBindingUnitTests(unittest.TestCase):
         self.environment = {"PATH": str(self.root), "CARGO_HOME": str(self.home), "CARGO_CAPACITY_FACTOR": "2"}
         self.state = self.root / "state.json"
         self.saved: dict[str, object] = {
-            "target": str(self.target), "baseline_bytes": typed_producer.LOCAL_CAPACITY_BASELINE,
+            "target": str(self.target), "baseline_bytes": REFERENCE_BASELINE_BYTES,
             "factor": 2, "metric": "unique-inode-allocated-bytes", "metric_version": 1,
         }
         self.registry = self.root / "refs.json"
@@ -4414,7 +4415,7 @@ class CapacityBindingUnitTests(unittest.TestCase):
         self.assertEqual(len(self.commands), 3)
 
     def test_canonical_build_admission_retains_pins_and_stops_cargo_when_rejected(self) -> None:
-        canonical = self.root / "tmp/.cargo-capacity-guard.json"
+        canonical = self.root / "tmp/.cargo-capacity-guard-v2.json"
         canonical.parent.mkdir(exist_ok=True)
         canonical.write_bytes(self.state.read_bytes())
         self.state = canonical

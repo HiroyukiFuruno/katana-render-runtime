@@ -1617,10 +1617,10 @@ function expectedCapacityAdmissionRecipeLines(): string[] {
     'if [[ -d "$retained_profile" && ! -L "$retained_profile" ]]; then \\',
     'retained_args=(--retain-profile "$retained_profile"); \\',
     "fi; \\",
-    `if [[ "\${GITHUB_ACTIONS:-}" == true && ! -e "{{REPO_ROOT}}/tmp/.cargo-capacity-guard.json" ]]; then \\`,
-    'python3 scripts/build/initialize_ci_capacity_state.py --root "{{REPO_ROOT}}" >&2; \\',
+    `if [[ ! -e "{{REPO_ROOT}}/tmp/.cargo-capacity-guard-v2.json" ]]; then \\`,
+    'python3 scripts/build/initialize_ci_capacity_state.py --root "{{REPO_ROOT}}" --repository-reference >&2; \\',
     "fi; \\",
-    `python3 scripts/build/cargo_capacity_guard.py --root "{{REPO_ROOT}}" --target "{{REPO_ROOT}}/target" --state "{{REPO_ROOT}}/tmp/.cargo-capacity-guard.json" --require-capacity --print-json \${retained_args[@]+"\${retained_args[@]}"}`,
+    `python3 scripts/build/cargo_capacity_guard.py --root "{{REPO_ROOT}}" --target "{{REPO_ROOT}}/target" --state "{{REPO_ROOT}}/tmp/.cargo-capacity-guard-v2.json" --require-capacity --print-json \${retained_args[@]+"\${retained_args[@]}"}`,
   ];
 }
 function rootLintCargoCommand(context: ContractContext): string | undefined {

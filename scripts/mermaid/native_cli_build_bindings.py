@@ -25,6 +25,7 @@ from cargo_capacity_guard import (
     cargo_configuration_paths,
     load_state,
 )
+from cargo_capacity_guard_state import REFERENCE_STATE_PATH
 
 SCHEMA = "krr-native-cli-managed-build-v3"
 CONTROL_MANIFEST_SCHEMA = "krr-native-cli-managed-control-inputs-v1"
@@ -234,8 +235,9 @@ class Bindings:
 
 
 def capacity_admission(root: Path, registry_path: Path) -> JsonObject:
-    state = guard.file_record(root / "tmp/.cargo-capacity-guard.json")
-    saved = load_state(root / "tmp/.cargo-capacity-guard.json", _text(state["sha256"], "state SHA"))
+    state_path = root / REFERENCE_STATE_PATH
+    state = guard.file_record(state_path)
+    saved = load_state(state_path, _text(state["sha256"], "state SHA"))
     for key, expected in guard.policy(root / "target").items():
         if key != "threshold_bytes":
             guard.require(saved.get(key) == expected and not isinstance(saved.get(key), bool),

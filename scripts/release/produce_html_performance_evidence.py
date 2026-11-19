@@ -37,8 +37,12 @@ import html_performance_remote_evidence as remote_evidence
 import html_performance_transport_scratch as transport_scratch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "build"))
-LOCAL_CAPACITY_BASELINE = 2363047936
-LOCAL_CAPACITY_THRESHOLD = 4726095872
+from cargo_capacity_guard_state import (
+    REFERENCE_BASELINE_BYTES as LOCAL_CAPACITY_BASELINE, REFERENCE_FACTOR, REFERENCE_STATE_PATH,
+    REFERENCE_THRESHOLD_BYTES as LOCAL_CAPACITY_THRESHOLD,
+)
+
+HISTORICAL_CAPACITY_BASELINE = 2_363_047_936
 PROTECTED_REGISTRY_SCHEMA = "krr-protected-refs-successor-v1"
 
 
@@ -359,8 +363,10 @@ def load_capacity_binding(root: Path, document: Path, checksum: str, *,
                  "capacity state target/metric differs")
     gate.require(gate._integer(saved["metric_version"], "capacity metric version") == capacity.CAPACITY_METRIC_VERSION,
                  "capacity metric version differs")
-    gate.require(gate._integer(saved["baseline_bytes"], "capacity baseline") == LOCAL_CAPACITY_BASELINE
-                 and gate._numeric(saved["factor"], "capacity factor") == 2,
+    baseline = gate._integer(saved["baseline_bytes"], "capacity baseline")
+    historical = reader is not None and baseline == HISTORICAL_CAPACITY_BASELINE
+    gate.require((baseline == LOCAL_CAPACITY_BASELINE or historical)
+                 and gate._numeric(saved["factor"], "capacity factor") == REFERENCE_FACTOR,
                  "fixed capacity baseline/factor differs")
     registry_value = _pinned_json(payload(registry, registry_sha), registry_sha)
     gate.require(set(registry_value) == {"schema", "physicalRefCount", "refs"},
@@ -568,7 +574,7 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
     guard_python = _guard_python_pin()
     argv = gate.guarded_build_argv(root, harness, cargo_tool.launcher, arm, binding.state, binding.state_sha256,
                                    references, [str(profile) for profile in retained])
-    if binding.state == root / "tmp/.cargo-capacity-guard.json":
+    if binding.state == root / REFERENCE_STATE_PATH:
         # WHY: 先行ビルドで容量が増えても、固定上限まで整理してから次のCargoを起動する。
         admission = argv[:argv.index("--")]
         admission[admission.index("--target-dir")] = "--target"
@@ -2699,7 +2705,7 @@ def write_build_source_inputs(root: Path, output: Path, initial: gate.JsonObject
         "stateRef": {"path": str(binding.state), "sha256": binding.state_sha256},
         "protectedRegistryRef": {"path": str(binding.registry), "sha256": binding.registry_sha256},
         "protectedReferenceCount": len(binding.references), "target": str(root / "target"),
-        "baselineBytes": LOCAL_CAPACITY_BASELINE, "factor": 2, "thresholdBytes": LOCAL_CAPACITY_THRESHOLD,
+        "baselineBytes": LOCAL_CAPACITY_BASELINE, "factor": REFERENCE_FACTOR, "thresholdBytes": LOCAL_CAPACITY_THRESHOLD,
     }
     if extra_capacity_inputs is not None:
         capacity_input_value.update(extra_capacity_inputs)

@@ -10,15 +10,17 @@ from pathlib import Path
 from typing import cast
 
 SCHEMA = "krr-capacity-state-v2"
-REFERENCE_SCHEMA = "krr-capacity-reference-v1"
+REFERENCE_SCHEMA = "krr-capacity-reference-v2"
 METRIC = "unique-inode-allocated-bytes"
 METRIC_VERSION = 1
 REFERENCE_POLICY = "scripts/build/capacity-reference.json"
-REFERENCE_ID = "krr-v0.4.24-fixed-capacity-v1"
-REFERENCE_BASELINE_BYTES = 2_363_047_936
+REFERENCE_ID = "krr-v0.4.24-fixed-capacity-v2"
+REFERENCE_STATE_PATH = "tmp/.cargo-capacity-guard-v2.json"
+REFERENCE_BASELINE_BYTES = 7_680 * 1024**2
 REFERENCE_FACTOR = 2.0
-REFERENCE_OBSERVED_AT = 1_791_358_141.1059809
-REFERENCE_SOURCE_STATE_SHA256 = "b623867f57b0d00a08838e11e8fb7d83f461daf2cdb03a82b94dccae4ffb7188"
+REFERENCE_THRESHOLD_BYTES = int(REFERENCE_BASELINE_BYTES * REFERENCE_FACTOR)
+REFERENCE_OBSERVED_AT = 1_795_088_119.546789
+REFERENCE_SOURCE_SAMPLES_SHA256 = "17d79da95608a345358f86cfe0d943518127e23a4d6e4248950cf8f3e5025034"
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 JsonObject = dict[str, object]
 
@@ -114,7 +116,7 @@ def _load_policy(root: Path) -> tuple[JsonObject, str]:
         raise ValueError("reference policy is not valid JSON") from error
     expected_keys = {
         "schema", "id", "baseline_bytes", "factor", "metric", "metric_version",
-        "baseline_observed_at", "source_state_sha256",
+        "baseline_observed_at", "source_samples_sha256",
     }
     _exact_keys(policy, expected_keys, "reference policy")
     if policy["schema"] != REFERENCE_SCHEMA or policy["id"] != REFERENCE_ID:
@@ -128,10 +130,10 @@ def _load_policy(root: Path) -> tuple[JsonObject, str]:
     metric_version = _integer(policy["metric_version"], "reference metric version")
     if policy["metric"] != METRIC or metric_version != METRIC_VERSION:
         raise ValueError("reference metric differs")
-    source_sha = policy["source_state_sha256"]
+    source_sha = policy["source_samples_sha256"]
     if (not isinstance(source_sha, str) or _SHA256.fullmatch(source_sha) is None
-            or source_sha != REFERENCE_SOURCE_STATE_SHA256):
-        raise ValueError("reference source state digest is invalid")
+            or source_sha != REFERENCE_SOURCE_SAMPLES_SHA256):
+        raise ValueError("reference source samples digest is invalid")
     return policy, hashlib.sha256(raw).hexdigest()
 
 

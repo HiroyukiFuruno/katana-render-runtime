@@ -13,6 +13,7 @@ from native_cli_build_bindings import Bindings, construct_bindings
 import cargo_capacity_guard_native_cli_observation as guard
 from cargo_capacity_guard_lock import retained_profile_paths
 from cargo_capacity_guard import JsonObject, _array, _object, _text
+from cargo_capacity_guard_state import REFERENCE_STATE_PATH
 import produce_html_performance_evidence as owner
 
 
@@ -22,7 +23,7 @@ def _capacity_preflight(bindings: Bindings, root: Path, attempt: Path) -> JsonOb
     python = _text(_object(tools["python3"], "python3 tool")["path"], "python3 path")
     argv = [python, str(root / "scripts/build/cargo_capacity_guard.py"),
             "--root", str(root), "--target", str(root / "target"),
-            "--state", str(root / "tmp/.cargo-capacity-guard.json"),
+            "--state", str(root / REFERENCE_STATE_PATH),
             "--require-capacity", "--print-json"]
     debug_profile = root / "target" / "debug"
     if debug_profile.exists() or debug_profile.is_symlink():

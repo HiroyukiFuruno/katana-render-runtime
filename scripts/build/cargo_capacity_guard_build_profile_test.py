@@ -249,7 +249,7 @@ class CheckDomainTests(unittest.TestCase):
 
     @staticmethod
     def capacity_state(root: Path, target: Path, baseline: int) -> bytes:
-        state = root / "tmp/.cargo-capacity-guard.json"
+        state = root / "tmp/.cargo-capacity-guard-v2.json"
         state.parent.mkdir(parents=True, exist_ok=True)
         content = json.dumps({
             "baseline_bytes": baseline,
@@ -311,7 +311,7 @@ class CheckDomainTests(unittest.TestCase):
             after = self.target_snapshot(target)
             self.assertTrue(set(target_before).issubset(after))
             self.assertEqual({name: after[name] for name in target_before}, target_before)
-            self.assertEqual((root / "tmp/.cargo-capacity-guard.json").read_bytes(), state_before)
+            self.assertEqual((root / "tmp/.cargo-capacity-guard-v2.json").read_bytes(), state_before)
 
     @unittest.skipIf(os.name == "nt", "isolated Cargo fixture uses POSIX allocated-byte accounting")
     def test_explicit_cli_and_environment_references_remain_protected(self) -> None:

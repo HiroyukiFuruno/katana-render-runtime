@@ -1,5 +1,15 @@
 import path from "node:path";
 import { z } from "zod";
+import capacityReference from "../build/capacity-reference.json";
+
+export const capacityThresholdBytes = capacityReference.baseline_bytes * capacityReference.factor;
+export const capacityPolicyFields = {
+  metric: capacityReference.metric,
+  metric_version: capacityReference.metric_version,
+  baseline_bytes: capacityReference.baseline_bytes,
+  factor: capacityReference.factor,
+};
+export const capacityStatePath = "tmp/.cargo-capacity-guard-v2.json";
 
 export const digest = z.string().regex(/^[0-9a-f]{64}$/);
 export const natural = z.number().int().nonnegative().safe();
@@ -90,11 +100,11 @@ export const managedSourceSchema = z
   .strict();
 const policy = z
   .object({
-    metric: z.literal("unique-inode-allocated-bytes"),
-    metric_version: z.literal(1),
-    baseline_bytes: z.literal(2363047936),
-    factor: z.literal(2),
-    threshold_bytes: z.literal(4726095872),
+    metric: z.literal(capacityPolicyFields.metric),
+    metric_version: z.literal(capacityPolicyFields.metric_version),
+    baseline_bytes: z.literal(capacityPolicyFields.baseline_bytes),
+    factor: z.literal(capacityPolicyFields.factor),
+    threshold_bytes: z.literal(capacityThresholdBytes),
     target: z.string(),
   })
   .strict();

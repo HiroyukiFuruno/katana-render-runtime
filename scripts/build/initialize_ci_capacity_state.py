@@ -50,8 +50,10 @@ def _existing_state(state_path: Path, root: Path, target: Path) -> bool:
     return True
 
 
-def initialize(root_argument: str) -> str:
-    if os.environ.get("CI") != "true" or os.environ.get("GITHUB_ACTIONS") != "true":
+def initialize(root_argument: str, *, repository_reference: bool = False) -> str:
+    if not repository_reference and (
+        os.environ.get("CI") != "true" or os.environ.get("GITHUB_ACTIONS") != "true"
+    ):
         raise RuntimeError("CI=true and GITHUB_ACTIONS=true are required")
 
     root = Path(root_argument)
@@ -61,7 +63,7 @@ def initialize(root_argument: str) -> str:
     # 既存factoryでroot、target、policyを検証する。
     reference_state = capacity_state.create_repository_reference(root, target)
     temporary = _validate_tmp(root)
-    state_path = root / "tmp/.cargo-capacity-guard.json"
+    state_path = root / capacity_state.REFERENCE_STATE_PATH
     write_path = state_path.with_suffix(state_path.suffix + ".tmp")
     lock_path = root / "tmp/.cargo-capacity-guard.lock"
     if temporary.exists():
@@ -69,7 +71,7 @@ def initialize(root_argument: str) -> str:
     if write_path.exists() or write_path.is_symlink():
         raise RuntimeError("capacity state temporary path already exists")
 
-    # CI markerとpolicyの確認後にtmpを作成する。
+    # 固定ポリシーの確認後にtmpを作成する。
     temporary.mkdir(parents=True, exist_ok=True)
     with GuardLock(lock_path):
         if _existing_state(state_path, root, target):
@@ -82,7 +84,7 @@ def initialize(root_argument: str) -> str:
             capacity_state.validate_state(saved, root, target)
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
             raise RuntimeError("initialized capacity state failed validation") from error
-    return "initialized historical repository capacity reference"
+    return "initialized repository capacity reference"
 
 
 def _protected_report_identity(report_path: Path) -> dict[str, object]:
@@ -137,7 +139,7 @@ def write_html_performance_binding(root_argument: str, report_argument: Path, *,
     expected_report = root / "tmp/html-interaction-suite/krr.json"
     if report_argument != expected_report:
         raise RuntimeError("interaction report must be the producer's canonical current-run report")
-    state_path = root / "tmp/.cargo-capacity-guard.json"
+    state_path = root / capacity_state.REFERENCE_STATE_PATH
     if not _existing_state(state_path, root, root / "target"):
         raise RuntimeError("current-run capacity state is missing")
     return _write_performance_binding(root, state_path, _protected_report_identity(report_argument),
@@ -147,7 +149,12 @@ def write_html_performance_binding(root_argument: str, report_argument: Path, *,
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True, help="canonical absolute repository root")
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--repository-reference", action="store_true",
+        help="initialize the current fixed reference for a local checkout",
+    )
+    mode.add_argument(
         "--interaction-report",
         type=Path,
         help="write a fresh binding for the exact producer interaction report",
@@ -157,7 +164,7 @@ def main() -> int:
         message = (
             write_html_performance_binding(args.root, args.interaction_report)
             if args.interaction_report is not None
-            else initialize(args.root)
+            else initialize(args.root, repository_reference=args.repository_reference)
         )
     except (OSError, RuntimeError, ValueError) as error:
         print(f"capacity state initialization failed: {error}", file=sys.stderr)

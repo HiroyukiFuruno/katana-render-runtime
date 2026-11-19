@@ -1961,7 +1961,7 @@ def run(args: argparse.Namespace) -> int:
     if check_value is not None and (
             args.factor != DEFAULT_FACTOR
             or configured_factor != DEFAULT_FACTOR
-            or args.state not in (None, str(_root() / "tmp/.cargo-capacity-guard.json"))
+            or args.state not in (None, str(_root() / capacity_state.REFERENCE_STATE_PATH))
             or getattr(args, "expected_state_sha256", None) is not None):
         raise RuntimeError("check domain requires the existing canonical capacity state and factor")
     expected_value: object = getattr(args, "expected_state_sha256", None)
@@ -1982,7 +1982,7 @@ def run(args: argparse.Namespace) -> int:
     root = _root()
     if require_capacity:
         canonical_target = root / "target"
-        canonical_state = root / "tmp/.cargo-capacity-guard.json"
+        canonical_state = root / capacity_state.REFERENCE_STATE_PATH
         configured_factor = float(os.environ.get("CARGO_CAPACITY_FACTOR", str(DEFAULT_FACTOR)))
         if (not isinstance(args.target, str) or not isinstance(args.state, str)
                 or Path(args.target).resolve() != canonical_target or args.target_dir is not None
@@ -2068,7 +2068,7 @@ def run(args: argparse.Namespace) -> int:
         selected_input_check = library_alias.verify
         selected_cache = library_alias.cache
         selected_package_profiles = verified_build_profiles
-    state_path = Path(args.state or root / "tmp/.cargo-capacity-guard.json")
+    state_path = Path(args.state or root / capacity_state.REFERENCE_STATE_PATH)
     if state_path.is_symlink():
         raise RuntimeError(f"refusing symlink state: {state_path}")
     factor = float(os.environ.get("CARGO_CAPACITY_FACTOR", args.factor))
@@ -2084,7 +2084,7 @@ def run(args: argparse.Namespace) -> int:
             collection=coverage_collection,
         )
     if (coverage is not None or coverage_diagnostic_inputs is not None) and (
-            state_path != root / "tmp/.cargo-capacity-guard.json" or factor != DEFAULT_FACTOR):
+            state_path != root / capacity_state.REFERENCE_STATE_PATH or factor != DEFAULT_FACTOR):
         raise RuntimeError("coverage requires the canonical state and existing capacity factor")
     lock_path = root / "tmp/.cargo-capacity-guard.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)

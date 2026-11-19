@@ -37,7 +37,7 @@ class CapacityStateIntegrationTest(unittest.TestCase):
         (self.target / "fixture.bin").write_bytes(b"measured target data")
         self.state_path = self.root / "tmp" / "capacity-state.json"
         self.state_path.parent.mkdir()
-        self.bootstrap_state_path = self.root / "tmp" / ".cargo-capacity-guard.json"
+        self.bootstrap_state_path = self.root / "tmp" / ".cargo-capacity-guard-v2.json"
         self.policy_path = self.root / capacity_state.REFERENCE_POLICY
         self.policy_path.parent.mkdir(parents=True)
         self.write_policy()
@@ -57,7 +57,7 @@ class CapacityStateIntegrationTest(unittest.TestCase):
             "metric": capacity_state.METRIC,
             "metric_version": capacity_state.METRIC_VERSION,
             "baseline_observed_at": capacity_state.REFERENCE_OBSERVED_AT,
-            "source_state_sha256": capacity_state.REFERENCE_SOURCE_STATE_SHA256,
+            "source_samples_sha256": capacity_state.REFERENCE_SOURCE_SAMPLES_SHA256,
         }
         policy.update(overrides)
         self.policy_path.write_text(json.dumps(policy), encoding="utf-8")
@@ -223,6 +223,18 @@ class CapacityStateIntegrationTest(unittest.TestCase):
         self.assertEqual(state["metric"], capacity_state.METRIC)
         self.assertEqual(state["reference"]["id"], capacity_state.REFERENCE_ID)
         self.assertNotIn("measured_bytes", state)
+
+    def test_local_reference_preserves_legacy_state_and_its_identity(self) -> None:
+        legacy = self.root / "tmp/.cargo-capacity-guard.json"
+        legacy.write_bytes(b'{"baseline_bytes": 2363047936}\n')
+        saved = (legacy.stat().st_ino, legacy.read_bytes())
+
+        result = self.run_initializer("--repository-reference")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((legacy.stat().st_ino, legacy.read_bytes()), saved)
+        report = guard.inspect(self.root, self.target, self.bootstrap_state_path, 2.0)
+        self.assertEqual(report["threshold_bytes"], 15 * 1024**3)
 
     def test_ci_initializer_binds_only_the_physical_interaction_report(self) -> None:
         initialized = self.run_initializer(CI="true", GITHUB_ACTIONS="true")
@@ -525,7 +537,7 @@ class CapacityStateIntegrationTest(unittest.TestCase):
         temporary.symlink_to(target_tmp, target_is_directory=True)
         result = self.run_initializer(CI="true", GITHUB_ACTIONS="true")
         self.assertNotEqual(result.returncode, 0)
-        self.assertFalse((target_tmp / ".cargo-capacity-guard.json").exists())
+        self.assertFalse((target_tmp / ".cargo-capacity-guard-v2.json").exists())
 
         temporary.unlink()
         temporary.mkdir()

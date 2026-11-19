@@ -1370,7 +1370,7 @@ class GuardTests(unittest.TestCase):
             target.mkdir()
             protected = root / "protected.bin"
             protected.write_bytes(b"protected")
-            state = root / "tmp/.cargo-capacity-guard.json"
+            state = root / "tmp/.cargo-capacity-guard-v2.json"
             environment = dict(os.environ, CARGO_CAPACITY_PROTECTED_REFS=json.dumps([str(protected)]))
             empty = subprocess.run(
                 [sys.executable, str(Path(__file__).resolve().parent / "cargo_capacity_guard.py"),
@@ -1401,7 +1401,7 @@ class GuardTests(unittest.TestCase):
         target.mkdir()
         if over_capacity:
             (target / "over-capacity").write_bytes(b"x" * 8192)
-        state = root / "tmp/.cargo-capacity-guard.json"
+        state = root / "tmp/.cargo-capacity-guard-v2.json"
         state.parent.mkdir()
         state.write_text(json.dumps({
             "baseline_bytes": 1,
@@ -1442,8 +1442,8 @@ class GuardTests(unittest.TestCase):
                 evict.assert_not_called()
 
     def test_fixed_capacity_boundary_keeps_threshold_and_low_water_goal(self) -> None:
-        baseline = 2_363_047_936
-        threshold = 4_726_095_872
+        baseline = 7_680 * 1024**2
+        threshold = 15 * 1024**3
         for current, expected_goal, expected_status in (
             (threshold, None, "not-needed"),
             (threshold + 1, baseline, "completed"),
@@ -1530,7 +1530,7 @@ class GuardTests(unittest.TestCase):
             fingerprint.mkdir(parents=True)
             for index in (1, 2):
                 (candidate / f"libfixture-{index:016d}.rlib").write_bytes(b"c" * 8192)
-            state = root / "tmp/.cargo-capacity-guard.json"
+            state = root / "tmp/.cargo-capacity-guard-v2.json"
             state.parent.mkdir(parents=True)
             state.write_text(json.dumps({
                 "baseline_bytes": 8192, "metric": "unique-inode-allocated-bytes",
@@ -1604,7 +1604,7 @@ class GuardTests(unittest.TestCase):
         root = Path(directory).resolve()
         target = root / "target"
         target.mkdir()
-        state = root / "tmp/.cargo-capacity-guard.json"
+        state = root / "tmp/.cargo-capacity-guard-v2.json"
         state.parent.mkdir(parents=True)
         state.write_text(json.dumps({
             "baseline_bytes": 100, "factor": 2.0, "target": str(target),
@@ -4211,7 +4211,7 @@ class CoverageDomainUnitTests(unittest.TestCase):
                 subprocess.run(["git", "init", "-q"], cwd=root, check=True)
                 subprocess.run(["git", "add", "--", *scope.ROOT_TEST_ONLY_SHA256],
                                cwd=root, check=True)
-            state = root / "tmp/.cargo-capacity-guard.json"
+            state = root / "tmp/.cargo-capacity-guard-v2.json"
             state.parent.mkdir()
             state.write_text(json.dumps({"baseline_bytes": 16777216, "factor": 2.0,
                                          "target": str(target), "metric": "unique-inode-allocated-bytes",
@@ -4340,7 +4340,7 @@ class CoverageDomainUnitTests(unittest.TestCase):
         for domain in ("root", "performance-baseline", "performance-candidate"):
             for action in ("clean", "test"):
                 with self.subTest(domain=domain, action=action), self.fixture(domain, action) as (root, args, environment):
-                    state = root / "tmp/.cargo-capacity-guard.json"
+                    state = root / "tmp/.cargo-capacity-guard-v2.json"
                     before = state.read_bytes()
                     self.assertEqual(self.execute(root, args, environment, code=7), 7)
                     self.assertEqual(self.calls[-1], args.command)
@@ -5002,7 +5002,7 @@ class CoverageDomainUnitTests(unittest.TestCase):
     def test_coverage_invalid_or_missing_baseline_and_noncanonical_state_reject(self) -> None:
         for kind in ("missing", "empty", "other-state", "metric"):
             with self.subTest(kind=kind), self.fixture() as (root, args, environment):
-                state = root / "tmp/.cargo-capacity-guard.json"
+                state = root / "tmp/.cargo-capacity-guard-v2.json"
                 if kind == "missing":
                     state.unlink()
                 elif kind == "empty":
@@ -5018,7 +5018,7 @@ class CoverageDomainUnitTests(unittest.TestCase):
     def test_coverage_scalar_expected_state_environment_binds_and_rejects_conflict(self) -> None:
         for kind in ("environment", "same-cli", "invalid", "conflict", "mismatch"):
             with self.subTest(kind=kind), self.fixture() as (root, args, environment):
-                state = root / "tmp/.cargo-capacity-guard.json"
+                state = root / "tmp/.cargo-capacity-guard-v2.json"
                 checksum = hashlib.sha256(state.read_bytes()).hexdigest()
                 environment["CARGO_CAPACITY_EXPECTED_STATE_SHA256"] = checksum
                 if kind == "same-cli":

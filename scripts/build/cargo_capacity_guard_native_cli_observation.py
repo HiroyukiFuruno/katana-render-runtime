@@ -24,6 +24,10 @@ from cargo_capacity_guard import (
     _cargo_configuration, cargo_configuration_paths, collect_protected_references, load_state,
     validate_build_executable, validate_build_profile, validate_build_selection,
 )
+from cargo_capacity_guard_state import (
+    REFERENCE_BASELINE_BYTES as BASELINE, REFERENCE_FACTOR,
+    REFERENCE_STATE_PATH, REFERENCE_THRESHOLD_BYTES as THRESHOLD,
+)
 
 REQUEST_ENV = "KRR_NATIVE_CLI_GUARD_REQUEST"
 REQUEST_SHA_ENV = "KRR_NATIVE_CLI_GUARD_REQUEST_SHA256"
@@ -39,8 +43,6 @@ REQUEST_FIELDS = frozenset((
 ))
 BUILD_FLAGS = ["build", "-p", "katana-render-runtime-cli"]
 JSON_FLAG = "--message-format=json-render-diagnostics"
-BASELINE = 2363047936
-THRESHOLD = 4726095872
 REQUEST_TTL_NS = 120_000_000_000
 BUILD_LIMIT_SECONDS = 1800
 TERMINATE_LIMIT_SECONDS = 2
@@ -206,7 +208,7 @@ def protected_identity(value: object) -> JsonObject:
 
 def policy(target: Path) -> JsonObject:
     return {"metric": "unique-inode-allocated-bytes", "metric_version": 1,
-            "baseline_bytes": BASELINE, "factor": 2, "threshold_bytes": THRESHOLD,
+            "baseline_bytes": BASELINE, "factor": int(REFERENCE_FACTOR), "threshold_bytes": THRESHOLD,
             "target": str(target)}
 
 
@@ -431,7 +433,8 @@ def validate_request(root: Path, command: list[str], environment: Mapping[str, s
     expected_features = validate_metadata(request, root, attempt)
     admission = exact(request["capacityAdmission"], {"state", "protectedRegistry", "refs", "capacityPolicy",
                       "environmentValue", "environmentSha256"}, "capacity admission")
-    state = validate_record(admission["state"], expected=root / "tmp/.cargo-capacity-guard.json")
+    state_path = root / REFERENCE_STATE_PATH
+    state = validate_record(admission["state"], expected=state_path)
     registry = validate_record(admission["protectedRegistry"])
     registry_path = Path(_text(registry["path"], "registry path"))
     require(registry_path.is_relative_to(root / "tmp") and not registry_path.is_relative_to(attempt),
@@ -455,7 +458,7 @@ def validate_request(root: Path, command: list[str], environment: Mapping[str, s
         else:
             require(fixed_policy[name] == wanted, "fixed capacity policy differs")
     state_sha = digest(state["sha256"])
-    saved = load_state(root / "tmp/.cargo-capacity-guard.json", state_sha)
+    saved = load_state(state_path, state_sha)
     for key, policy_value in policy(root / "target").items():
         if key != "threshold_bytes":
             require(saved.get(key) == policy_value and not isinstance(saved.get(key), bool), "fixed capacity state differs")
@@ -472,7 +475,7 @@ def validate_request(root: Path, command: list[str], environment: Mapping[str, s
                  Path(_text(row["path"], "role path")).stat().st_ino) for row in roles]
     require(len(set(role_ids)) == len(role_ids), "input roles alias inodes")
     return Admission(request, pin, attempt, child_environment, records, protected,
-                     root / "tmp/.cargo-capacity-guard.json", state_sha, expected_features)
+                     state_path, state_sha, expected_features)
 
 
 def validate_cli_artifact_configuration(artifact: JsonObject, expected_features: tuple[str, ...]) -> None:

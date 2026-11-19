@@ -179,12 +179,12 @@ export function createManagedReaderInputs(withJustDispatcher = false) {
   const policy = {
     metric: "unique-inode-allocated-bytes",
     metric_version: 1,
-    baseline_bytes: 2363047936,
+    baseline_bytes: 8053063680,
     factor: 2,
-    threshold_bytes: 4726095872,
+    threshold_bytes: 16106127360,
     target: path.join(root, "target"),
   };
-  const state = json("tmp/.cargo-capacity-guard.json", policy),
+  const state = json("tmp/.cargo-capacity-guard-v2.json", policy),
     protectedEnv = JSON.stringify(refs.map((pin) => pin.path));
   const capacity = {
     state,

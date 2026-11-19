@@ -218,7 +218,7 @@ for (const phase of ["capacityBefore", "capacityAfter"] as const) {
     [
       "raised baseline",
       (r: Record<string, unknown>) => {
-        r.baseline_bytes = 2363047937;
+        r.baseline_bytes = 8053063681;
       },
     ],
     [
@@ -230,13 +230,13 @@ for (const phase of ["capacityBefore", "capacityAfter"] as const) {
     [
       "raised threshold",
       (r: Record<string, unknown>) => {
-        r.threshold_bytes = 4726095873;
+        r.threshold_bytes = 16106127361;
       },
     ],
     [
       "over threshold",
       (r: Record<string, unknown>) => {
-        r.current_bytes = 4726095873;
+        r.current_bytes = 16106127361;
       },
     ],
     [
@@ -766,7 +766,7 @@ const negatives: Array<[string, (fixture: Fixture) => void, RegExp]> = [
     (f) => {
       const pin = f.receipt.snapshotAfter.capacityAdmission.state;
       const state = JSON.parse(fs.readFileSync(pin.path, "utf8")) as { [key: string]: unknown };
-      state.baseline_bytes = 2363047937;
+      state.baseline_bytes = 8053063681;
       const current = writeFile(pin.path, JSON.stringify(state));
       f.receipt.snapshotBefore.capacityAdmission.state = current;
       f.receipt.snapshotAfter.capacityAdmission.state = current;
@@ -804,7 +804,7 @@ const negatives: Array<[string, (fixture: Fixture) => void, RegExp]> = [
     (f) => {
       const pin = f.observation.capacityBefore;
       const report = JSON.parse(fs.readFileSync(pin.path, "utf8")) as { [key: string]: unknown };
-      report.current_bytes = 4726095873;
+      report.current_bytes = 16106127361;
       f.observation.capacityBefore = writeFile(pin.path, JSON.stringify(report));
       observation(f);
     },

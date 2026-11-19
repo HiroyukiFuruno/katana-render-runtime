@@ -11,6 +11,7 @@ import {
   verifyFileRecord,
 } from "./native-build-receipt";
 import { type ManagedReceipt, managedSourceSchema } from "./native-cli-managed-build-schema";
+import { capacityPolicyFields, capacityStatePath } from "./native-cli-managed-input-schema";
 import { parseManagedJson } from "./native-cli-managed-json";
 import { read, requireBound, same } from "./native-cli-managed-process";
 
@@ -141,7 +142,7 @@ export function verifyManagedInputs(receipt: ManagedReceipt): void {
   verifyFileRecord(capacity.state, "capacity state");
   verifyFileRecord(capacity.protectedRegistry, "current protected registry");
   requireBound(
-    capacity.state.path === path.join(root, "tmp/.cargo-capacity-guard.json"),
+    capacity.state.path === path.join(root, capacityStatePath),
     "capacity state path differs",
   );
   const registry = z
@@ -178,10 +179,10 @@ export function verifyManagedInputs(receipt: ManagedReceipt): void {
     "capacity input bindings differ",
   );
   z.object({
-    metric: z.literal("unique-inode-allocated-bytes"),
-    metric_version: z.literal(1),
-    baseline_bytes: z.literal(2363047936),
-    factor: z.literal(2),
+    metric: z.literal(capacityPolicyFields.metric),
+    metric_version: z.literal(capacityPolicyFields.metric_version),
+    baseline_bytes: z.literal(capacityPolicyFields.baseline_bytes),
+    factor: z.literal(capacityPolicyFields.factor),
     target: z.literal(path.join(root, "target")),
   })
     .passthrough()

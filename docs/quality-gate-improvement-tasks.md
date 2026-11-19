@@ -2,6 +2,9 @@
 
 ## 公開候補の現在地点（2026-11-19）
 
+- [x] `47d5fee1` の完全ローカル品質ゲートと通常pushが成功。製品87,815／87,815行。Mermaid製品PNGは独立raw JS比較で117／117件が99以上、最低99.085711。必須CIではLinuxの固定容量上限、WindowsのUnix専用インポート、macOSのImageMagick未導入で失敗した。
+- [/] 実測最大7.11 GiBを基に容量の固定上限を15 GiBへ更新し、過去の証跡が参照する旧stateを元のパスに保持した。容量管理476件、Mermaid関連188件、Windows向け対象コンパイル、macOS実ブラウザとCI構成の回帰が成功。最新候補の完全検査、レビュー、必須CIと公開は未完了。証跡は `tmp/quality/resumed-owner-r3509/release-capacity-15g-and-native-ci-B6kB6ei5/`。
+
 - [x] `4c2403ba` の完全ローカル品質ゲートと通常pushが成功し、Draft PR #120のHEADと一致した。製品87,821/87,821行、性能基盤baseline 1,163/1,163行・candidate 1,218/1,218行で100%。原ログは `tmp/quality/resumed-owner-r3509/release-4c2403ba-clean-launch-normal-push-qtqemgtc/push/`。成功したソース以後の変更は次の候補として扱う。
 - [x] 同HEADでHTML性能の全84条件を正式に再検証した。同じ実行ファイルに束縛されたv5原結果を再利用し、元結果を書き換えていない。原ログは `tmp/quality/resumed-owner-r3509/release-4c2403ba-evidence-and-package-85z3nvge/reuse/`。
 - [/] 配布前検査は、フリーズ後に公開されたsource-map-js 1.2.3の提案を理由に停止した。検証済みのpackage.json・bun.lockの完全SHAと版0.4.24を照合し、同じ候補がregistryの変化だけで失効し続ける処理を修正する。現依存と製品実装は固定したまま進める。直近の配布アーカイブ検査成功は `09d1ddd6` の3 crate・6,284件成功、別14件skip。

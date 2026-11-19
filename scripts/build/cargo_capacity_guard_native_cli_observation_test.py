@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 import cargo_capacity_guard_native_cli_observation as observation
 from cargo_capacity_guard import JsonObject, _array, _object, _text, inspect
+from cargo_capacity_guard_state import REFERENCE_THRESHOLD_BYTES
 
 
 def fixture_rtk() -> Path:
@@ -127,7 +128,7 @@ class Fixture:
         self.source = self.attempt / "source.json"
         self.write_json(self.source, {"schema": "krr-native-build-source-manifest-v1",
                                      "files": rows, "digest": observation.source_digest(rows)})
-        self.state = self.root / "tmp/.cargo-capacity-guard.json"
+        self.state = self.root / "tmp/.cargo-capacity-guard-v2.json"
         self.write_json(self.state, {key: value for key, value in observation.policy(self.target).items()
                                      if key != "threshold_bytes"})
         metadata = self.attempt / "metadata.json"
@@ -686,7 +687,7 @@ class NativeObservationTests(unittest.TestCase):
                     if variation == "metric":
                         report["metric_available"] = False
                     elif variation == "capacity":
-                        report["current_bytes"] = observation.THRESHOLD + 1
+                        report["current_bytes"] = REFERENCE_THRESHOLD_BYTES + 1
                         report["over_capacity"] = True
                     code = observation.observe(admission, fixture.command, fixture.root, report, partial(dict, report))
                 output = observation.parse_json((fixture.attempt / "observation.json").read_bytes())
@@ -750,7 +751,7 @@ class NativeObservationTests(unittest.TestCase):
                     report = inspect(fixture.root, fixture.target, fixture.state, 2, admission.state_sha256)
                     post = dict(report)
                     if variation == "capacity":
-                        post["current_bytes"] = observation.THRESHOLD + 1
+                        post["current_bytes"] = REFERENCE_THRESHOLD_BYTES + 1
                         post["over_capacity"] = True
                     code = observation.observe(admission, fixture.command, fixture.root, report, partial(dict, post))
                 self.assertEqual(code, 1)

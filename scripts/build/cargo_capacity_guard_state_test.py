@@ -37,7 +37,7 @@ class CapacityStateSchemaTest(unittest.TestCase):
             "metric": state_schema.METRIC,
             "metric_version": state_schema.METRIC_VERSION,
             "baseline_observed_at": state_schema.REFERENCE_OBSERVED_AT,
-            "source_state_sha256": state_schema.REFERENCE_SOURCE_STATE_SHA256,
+            "source_samples_sha256": state_schema.REFERENCE_SOURCE_SAMPLES_SHA256,
         }
         path.write_text(json.dumps(policy), encoding="utf-8")
         return path
@@ -94,9 +94,9 @@ class CapacityStateSchemaTest(unittest.TestCase):
         self.target.rmdir()
         self.write_policy()
         result = state_schema.create_repository_reference(self.root, self.target)
-        self.assertEqual(result["baseline_bytes"], 2_363_047_936)
+        self.assertEqual(result["baseline_bytes"], 7_680 * 1024**2)
         self.assertEqual(result["factor"], 2.0)
-        self.assertEqual(result["baseline_observed_at"], 1_791_358_141.1059809)
+        self.assertEqual(result["baseline_observed_at"], 1_795_088_119.546789)
         reference = state_schema._object(result["reference"], "reference")
         self.assertEqual(reference["sha256"], hashlib.sha256(
             (self.root / state_schema.REFERENCE_POLICY).read_bytes()
@@ -142,7 +142,7 @@ class CapacityStateSchemaTest(unittest.TestCase):
         mutations: tuple[Callable[[dict[str, object]], None], ...] = (
             lambda value: value.update(extra=True),
             lambda value: value.update(kind="runner_measurement"),
-            lambda value: value.update(baseline_bytes=2_363_047_937),
+            lambda value: value.update(baseline_bytes=state_schema.REFERENCE_BASELINE_BYTES + 1),
             lambda value: value.update(factor=3.0),
             lambda value: value.update(baseline_observed_at=1),
             lambda value: value.update(metric="other"),
@@ -162,13 +162,13 @@ class CapacityStateSchemaTest(unittest.TestCase):
         policy_path = self.root / state_schema.REFERENCE_POLICY
         policy_original = json.loads(policy_path.read_text(encoding="utf-8"))
         policy_mutations: tuple[Callable[[dict[str, object]], None], ...] = (
-            lambda value: value.update(baseline_bytes=2_363_047_937),
+            lambda value: value.update(baseline_bytes=state_schema.REFERENCE_BASELINE_BYTES + 1),
             lambda value: value.update(factor=3.0),
             lambda value: value.update(baseline_observed_at=1),
             lambda value: value.update(metric="other"),
             lambda value: value.update(metric_version=True),
-            lambda value: value.update(source_state_sha256="invalid"),
-            lambda value: value.update(source_state_sha256="c" * 64),
+            lambda value: value.update(source_samples_sha256="invalid"),
+            lambda value: value.update(source_samples_sha256="c" * 64),
             lambda value: value.update(extra="rejected"),
         )
         for index, mutate in enumerate(policy_mutations):

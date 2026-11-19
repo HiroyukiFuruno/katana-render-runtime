@@ -368,7 +368,7 @@ test("native build receipt rejects over-capacity while allowing an attested cach
       capacityPreflight: { current_bytes: number };
       binaryProvenance: { binaryBefore: Identity | null; binaryAfter: Identity };
     };
-    receipt.capacityPreflight.current_bytes = 4726095873;
+    receipt.capacityPreflight.current_bytes = 16106127361;
     fs.writeFileSync(fixture.receiptPath, JSON.stringify(receipt));
     expect(() =>
       verifyNativeBuildReceipt(
@@ -828,8 +828,8 @@ function createCapacityProtectionFixture(refCount = 34) {
     capacityPolicy: {
       metric: "unique-inode-allocated-bytes",
       metric_version: 1,
-      baseline_bytes: 2363047936,
-      threshold_bytes: 4726095872,
+      baseline_bytes: 8053063680,
+      threshold_bytes: 16106127360,
       factor: 2,
       target: path.join(root, "target"),
     },
@@ -1076,7 +1076,7 @@ const capacityProtectionNegatives: [
   [
     "raised threshold",
     (f) => {
-      capacityObject(f.proof.capacityPolicy).threshold_bytes = 4726095873;
+      capacityObject(f.proof.capacityPolicy).threshold_bytes = 16106127361;
     },
   ],
   [
@@ -1609,9 +1609,9 @@ function capacityReport(repository: string) {
   return {
     metric: "unique-inode-allocated-bytes",
     metric_version: 1,
-    baseline_bytes: 2363047936,
+    baseline_bytes: 8053063680,
     factor: 2,
-    threshold_bytes: 4726095872,
+    threshold_bytes: 16106127360,
     current_bytes: 1024,
     over_capacity: false,
     metric_available: true,

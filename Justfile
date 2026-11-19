@@ -454,10 +454,10 @@ capacity-admission:
       if [[ -d "$retained_profile" && ! -L "$retained_profile" ]]; then \
         retained_args=(--retain-profile "$retained_profile"); \
       fi; \
-      if [[ "${GITHUB_ACTIONS:-}" == true && ! -e "{{REPO_ROOT}}/tmp/.cargo-capacity-guard.json" ]]; then \
-        python3 scripts/build/initialize_ci_capacity_state.py --root "{{REPO_ROOT}}" >&2; \
+      if [[ ! -e "{{REPO_ROOT}}/tmp/.cargo-capacity-guard-v2.json" ]]; then \
+        python3 scripts/build/initialize_ci_capacity_state.py --root "{{REPO_ROOT}}" --repository-reference >&2; \
       fi; \
-      python3 scripts/build/cargo_capacity_guard.py --root "{{REPO_ROOT}}" --target "{{REPO_ROOT}}/target" --state "{{REPO_ROOT}}/tmp/.cargo-capacity-guard.json" --require-capacity --print-json ${retained_args[@]+"${retained_args[@]}"}
+      python3 scripts/build/cargo_capacity_guard.py --root "{{REPO_ROOT}}" --target "{{REPO_ROOT}}/target" --state "{{REPO_ROOT}}/tmp/.cargo-capacity-guard-v2.json" --require-capacity --print-json ${retained_args[@]+"${retained_args[@]}"}
 
 mathjax-owned-evidence:
     NODE_ENV=test bun scripts/runtime-bundles/runtime-mathjax-audit-evidence.ts
@@ -743,7 +743,7 @@ html-performance-catalog-captures output_root prior_observation='' prior_finaliz
       mkdir "$run_root"; \
       bun scripts/html/fidelity-acceptance-cli.ts catalog-stage90-plan "$run_root/plan.json"; \
       just capacity-admission; \
-      python3 scripts/build/cargo_capacity_guard.py --root {{quote(REPO_ROOT)}} --target {{quote(REPO_ROOT + "/target")}} --state {{quote(REPO_ROOT + "/tmp/.cargo-capacity-guard.json")}} -- {{HTML84_CARGO}} test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > "$run_root/test-build.jsonl"; \
+      python3 scripts/build/cargo_capacity_guard.py --root {{quote(REPO_ROOT)}} --target {{quote(REPO_ROOT + "/target")}} --state {{quote(REPO_ROOT + "/tmp/.cargo-capacity-guard-v2.json")}} -- {{HTML84_CARGO}} test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > "$run_root/test-build.jsonl"; \
       capture_args=(catalog-stage90-capture "$run_root/test-build.jsonl" "$run_root/plan.json" "$run_root/captures"); \
       if [[ -n "$prior_observation" ]]; then capture_args+=("$prior_observation" "$prior_finalized"); fi; \
       if [[ -n "$chrome_executable" ]]; then capture_args+=(--chrome-executable "$chrome_executable" --chrome-executable-sha256 "$chrome_sha256"); fi; \
