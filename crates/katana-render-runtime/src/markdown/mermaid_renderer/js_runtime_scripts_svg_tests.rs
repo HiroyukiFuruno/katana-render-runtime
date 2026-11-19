@@ -80,10 +80,7 @@ globalThis.mermaid = {
 };
 "##;
     let rendered = render_svg_fixture(mermaid)?;
-    assert!(
-        rendered.contains(r##"data-group-box="true"##),
-        "{rendered}"
-    );
+    assert!(rendered.contains(r##"data-group-box="true"##), "{rendered}");
     Ok(())
 }
 
