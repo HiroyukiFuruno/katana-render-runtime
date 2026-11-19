@@ -8,9 +8,8 @@ const BOTTOM_PADDING_TEST_OFFSET: f32 = 2.5;
 const HTML: &str = r#"<style>
     button { display:block; font-family:Arial; font-size:14px; line-height:28px;
         padding:3px 4px 5px; border:2px solid; }
-    #auto { background:#369abc; }
     #fixed { height:50px; } #minimum { min-height:45px; }
-</style><button id="auto">保存</button><button id="fixed">固定</button>
+</style><button id="auto" style="background-color:#369abc">保存</button><button id="fixed">固定</button>
 <button id="minimum">最小</button><script>
     document.getElementById('auto').addEventListener('click', function () {
         this.setAttribute('id', 'activated');
@@ -26,12 +25,7 @@ fn auto_button_uses_label_line_box_and_receives_click_at_bottom_padding() -> Res
     let (x, y) = assert_button_box(&mut session, "auto", 40.0)?;
     assert_button_box(&mut session, "fixed", 50.0)?;
     assert_button_box(&mut session, "minimum", 45.0)?;
-    let frame = session.latest_frame().ok_or("missing button frame")?;
-    let offset = (y as usize * frame.viewport.width as usize + x as usize) * 4;
-    assert_eq!(
-        frame.pixels.get(offset..offset + 4),
-        Some(&[54, 154, 188, 255][..])
-    );
+    assert_painted_button(&mut session, x, y)?;
     for input in [
         HtmlBrowserInput::PointerDown { x, y, button: 0 },
         HtmlBrowserInput::PointerUp { x, y, button: 0 },
@@ -39,6 +33,22 @@ fn auto_button_uses_label_line_box_and_receives_click_at_bottom_padding() -> Res
         session.dispatch_input(input).map_err(test_error)?;
     }
     assert!(session.runtime.node_for_element_id("activated").is_some());
+    Ok(())
+}
+
+fn assert_painted_button(
+    session: &mut HtmlInteractiveSession,
+    x: f32,
+    y: f32,
+) -> Result<(), String> {
+    let frame = session.latest_frame().ok_or("missing button frame")?;
+    let offset = (y as usize * frame.viewport.width as usize + x as usize) * 4;
+    let observed = frame.pixels.get(offset..offset + 4);
+    if observed != Some(&[54, 154, 188, 255]) {
+        let observed = observed.map(<[u8]>::to_vec);
+        let layout = session.layout().map_err(test_error)?;
+        return Err(format!("button fill at ({x}, {y}): {observed:?}, SVG: {}", layout.svg));
+    }
     Ok(())
 }
 
