@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { RustFactsHostInputs } from "./runtime-rust-facts-host-inputs";
-import { hostFileRecord, resolveRustFactsHostToolLocation } from "./runtime-rust-facts-host-inputs";
+import { hostFileRecord } from "./runtime-rust-facts-host-inputs";
 
 export function hostFixtureInputs(root: string, environment: NodeJS.ProcessEnv = process.env) {
   const metadata = {
@@ -28,7 +28,11 @@ export function hostFixtureInputs(root: string, environment: NodeJS.ProcessEnv =
   const names = ["just", "cargo", "rustc", "rtk", "python3", "bun"] as const;
   const tools = Object.fromEntries(
     names.map((name) => {
-      const located = resolveRustFactsHostToolLocation(root, name, environment);
+      const executable = name === "rtk" ? (environment.RTK ?? name) : name;
+      const located =
+        name === "bun" && environment === process.env
+          ? process.execPath
+          : executable && Bun.which(executable, { cwd: root, PATH: environment.PATH ?? "" });
       if (!located) {
         if (name === "rtk" && !environment.RTK) return [name, null];
         throw new Error(`missing fixture tool ${name}`);
