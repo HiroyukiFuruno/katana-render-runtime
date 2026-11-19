@@ -4086,6 +4086,7 @@ COVERAGE_TEST_ONLY_IGNORE_FILENAME_REGEX = (
 `,
   );
   for (const source of [
+    "scripts/build/initialize_ci_capacity_state.py",
     "scripts/hooks/local_review_state.py",
     "scripts/hooks/local_review_lock.py",
     "scripts/hooks/run_locked_command.py",
