@@ -55,6 +55,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - name: Install Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -77,7 +79,9 @@ jobs:
       - name: Verify validation registration before scheduling checks
         run: bun scripts/html/harness-contract-cli.ts
       - name: Run independent source checks
-        run: bun run moon --concurrency 3 exec krr:source-static --on-failure continue --no-actions
+        env:
+          KRR_CI_SOURCE_BASE: ${{ github.event.pull_request.base.sha || github.sha }}
+        run: bun run moon --concurrency 3 exec krr:source-static --base "$KRR_CI_SOURCE_BASE" --on-failure continue --no-actions
 
   test:
     name: Test and Build

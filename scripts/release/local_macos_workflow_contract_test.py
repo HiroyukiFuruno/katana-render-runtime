@@ -363,6 +363,10 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("continue-on-error:", self.test_job.split("    steps:\n", 1)[0])
 
         static_steps = workflow_steps(static_job)
+        self.assertRegex(
+            static_job,
+            r"(?m)^      - uses: actions/checkout@[^\n]+\n        with:\n          fetch-depth: 0$",
+        )
         registration = next(
             step for step in static_steps
             if step.get("name") == "Verify validation registration before scheduling checks"
@@ -375,7 +379,13 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
         self.assertEqual(registration.get("run"), "bun scripts/html/harness-contract-cli.ts")
         self.assertEqual(
             checks.get("run"),
-            "bun run moon --concurrency 3 exec krr:source-static --on-failure continue --no-actions",
+            'bun run moon --concurrency 3 exec krr:source-static --base "$KRR_CI_SOURCE_BASE" --on-failure continue --no-actions',
+        )
+        self.assertIn(
+            "      - name: Run independent source checks\n"
+            "        env:\n"
+            "          KRR_CI_SOURCE_BASE: ${{ github.event.pull_request.base.sha || github.sha }}\n",
+            static_job,
         )
         for step in static_steps:
             self.assertNotIn("if", step)

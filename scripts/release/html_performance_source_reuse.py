@@ -183,6 +183,10 @@ FROZEN_RELEASE_PREFLIGHT_CHANGES: dict[str, tuple[tuple[str, int], tuple[str, in
         ("55475198936a58997e908897f804882e70ba27a9e7091efb295215be2f6b7f64", 23859),
         ("18f74bb49035f76ee7068a8557f2c867a63a4a57b3d62d2e9c8d419eaaa1d0e0", 24198),
     ),
+    "scripts/release/local_macos_workflow_contract_test.py": (
+        ("c6b4cc6bfb0e77cdcdb39a86c81179c0eba0c7c0332333bcb79efc2ce4af2e9f", 22757),
+        ("f0fc0d9b0095026d0d5e64f023ecb927da3a57debc3dae60fb56bc72ca680994", 23196),
+    ),
     "scripts/release/native_coverage_local_context.py": (
         ("2f8e966c2707bf3fdfecb60e46f5a0cccec671a2a47a96d9e8ca3d59db1d1e73", 36551),
         ("6d56996d7f48092603897817268665d623257210b68dd2dc4cdaa6da0152ba2f", 36745),
@@ -763,7 +767,7 @@ def known_auth_program_change(path: str, old: bytes, current: bytes) -> bool:
 
 
 # この定数だけをゼロへ正規化してモジュール全体を固定する。
-SELF_MODULE_CANONICAL_SHA256 = "1d2cc7013933c3139cf38e385ccc62a27d8efbd75b68f42b095b96ff92363928"
+SELF_MODULE_CANONICAL_SHA256 = "62ad97ca01918f8983b253ffe693d678d616ca5a0c0d6be0efba500b30dc773b"
 SAME_BINARY_REVIEWED_BASE = "81570a15263b2d47206c2d953e8721f55e255eb3"
 SAME_BINARY_REVIEWED_ADDITIONS: dict[str, tuple[str, int]] = {
     "scripts/build/cargo_capacity_guard_root_scope_test.py":
@@ -823,6 +827,8 @@ def reviewed_same_binary_self(current: bytes, *, allow_historical: bool = False)
             "56e7c64378ef26cbae040e53fbbdb117b4ba3cb77e5ad69b5a1d60a5868fec1d",
         "428eb6ad0046064da0f3ecaf8ac117cc0259149f01b553ffb0c07e70d74ae455":
             "cd7201a8e73d2789a18020ebe4013f654dd51294824ecbbd164f3deb57690885",
+        "c09fd37553d2bed93ac31153c7cc7407bf8865225b221470a6de85cbb29e4163":
+            "1d2cc7013933c3139cf38e385ccc62a27d8efbd75b68f42b095b96ff92363928",
     }
     if declared != SELF_MODULE_CANONICAL_SHA256 and (
         not allow_historical or historical.get(hashlib.sha256(current).hexdigest()) != declared
@@ -1053,11 +1059,11 @@ def _specific_source_changes(
     if measured_head == FROZEN_RELEASE_MEASURED_HEAD:
         release_tooling_pairs[".github/workflows/test-and-build.yml"] = (
             "951967556058f38556ff04ceaaed3fdf1b57dad015ad893ee2b3ab42b7c5a0ac",
-            "c5b17c412e7685f1f6389de7b3429af7f760ed9bfb4284f71571b54d4902a65b",
+            "4178a6e2f9f039b79aaea9293b73712b497dd5f79ffab36cbbaeb17cba82a40c",
         )
         release_tooling_pairs["scripts/release/local_macos_evidence.py"] = (
             "71907038074a7059c12cfb01c8be71d538e92771458459dcd43f253fcabbc169",
-            "116ae9059ac05b4b20965288dd1f1ca12c8f0f3da0dd7a45b28964e72b8cb2f1",
+            "42aa22ba6acc3a95c2cf88243af71270b28d5440821a2c40792e1226adb1bed0",
         )
         release_tooling_pairs[".github/workflows/release.yml"] = (
             "c62e9805030bf7f4f94e6af83ee2a62da042e738106208fed6f59ec0ecb0f504",
