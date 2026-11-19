@@ -306,23 +306,38 @@ jobs:
         run: just unit-test
 
       - name: Run selected native tests
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform != 'linux-assets' && inputs.verify_filter != ''
+        if: >-
+          github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
+          inputs.verify_platform != 'linux-assets' && inputs.verify_filter != '' &&
+          !(inputs.verify_platform == 'windows' && inputs.verify_html_trace &&
+          inputs.verify_filter == 'test(=renderer::backends::html_browser::session::requirements_tests::requirements_fixture_returns_fragment_frame_with_sticky_sidebar_and_closes_within_budget)')
         env:
           DEBUG: ${{ inputs.verify_html_trace && 'true' || 'false' }}
           KRR_VERIFY_FILTERSET: ${{ inputs.verify_filter }}
           NEXTEST_SUCCESS_OUTPUT: ${{ inputs.verify_html_trace && 'immediate' || 'never' }}
         shell: bash
         timeout-minutes: 45
-        run: |
-          targets=(--workspace --all-targets)
-          if [[ "$DEBUG" == true && "$KRR_VERIFY_FILTERSET" == 'test(=renderer::backends::html_browser::session::requirements_tests::requirements_fixture_returns_fragment_frame_with_sticky_sidebar_and_closes_within_budget)' ]]; then
-            # The child still asserts the same budget after emitting all phase timings.
-            export KRR_HTML_REQUIREMENTS_CHILD=1
-            targets=(--package katana-render-runtime --lib)
-          fi
-          just --command cargo nextest run "${targets[@]}" --all-features \
-            --locked --no-fail-fast --retries 0 --no-tests fail --test-threads "$TEST_THREADS" \
-            --user-config-file scripts/release/nextest-local-user.toml -E "$KRR_VERIFY_FILTERSET"
+        run: >-
+          just --command cargo nextest run --workspace --all-targets --all-features
+          --locked --no-fail-fast --retries 0 --no-tests fail --test-threads "$TEST_THREADS"
+          --user-config-file scripts/release/nextest-local-user.toml -E "$KRR_VERIFY_FILTERSET"
+
+      - name: Collect complete HTML requirements timings
+        if: >-
+          github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
+          inputs.verify_platform == 'windows' && inputs.verify_html_trace &&
+          inputs.verify_filter == 'test(=renderer::backends::html_browser::session::requirements_tests::requirements_fixture_returns_fragment_frame_with_sticky_sidebar_and_closes_within_budget)'
+        env:
+          DEBUG: 'true'
+          KRR_HTML_REQUIREMENTS_CHILD: '1'
+          KRR_VERIFY_FILTERSET: ${{ inputs.verify_filter }}
+          NEXTEST_SUCCESS_OUTPUT: immediate
+        shell: bash
+        timeout-minutes: 20
+        run: >-
+          just --command cargo nextest run --package katana-render-runtime --lib --all-features
+          --locked --no-fail-fast --retries 0 --no-tests fail --test-threads "$TEST_THREADS"
+          --user-config-file scripts/release/nextest-local-user.toml -E "$KRR_VERIFY_FILTERSET"
 
       - name: Run PlantUML smoke check
         if: inputs.verify_platform != 'linux-assets' && matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
