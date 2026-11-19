@@ -12,6 +12,7 @@ from cargo_capacity_guard_build_script_ownership import (
     BuildScriptOwnership, build_script_ownership, orphan_build_scripts, verify_orphan_build_scripts,
 )
 from cargo_capacity_guard_lock import ProfileLocks, evict_artifacts
+from cargo_capacity_guard_test_flags import native_file_flags
 
 
 class BuildScriptOwnershipTests(unittest.TestCase):
@@ -175,15 +176,12 @@ class BuildScriptOwnershipTests(unittest.TestCase):
                 target, directory, metadata = self.fixture(root)
                 proof = self.proof(root, target, metadata)
                 flagged = directory if directory_flag else directory / "build-script-build"
-                os.chflags(flagged, stat.UF_IMMUTABLE)
-                try:
+                with native_file_flags((flagged,), stat.UF_IMMUTABLE):
                     if directory_flag:
                         with self.assertRaises(RuntimeError):
                             self.candidates(proof)
                     else:
                         self.assertEqual(self.candidates(proof), 0)
-                finally:
-                    os.chflags(flagged, 0)
 
     def test_partial_purge_fails_closed_without_changing_fingerprints_or_consumers(self) -> None:
         with tempfile.TemporaryDirectory() as value:

@@ -22,8 +22,18 @@ import produce_native_cli_build_receipt as producer
 import produce_html_performance_evidence as owner
 
 
+def provide_rtk(test: unittest.TestCase) -> Path:
+    directory = Path(test.enterContext(tempfile.TemporaryDirectory())).resolve()
+    executable = directory / ("rtk.exe" if os.name == "nt" else "rtk")
+    executable.write_text("RTK identity fixture; execution is handled by the unit observer\n")
+    executable.chmod(0o700)
+    test.enterContext(patch.dict(os.environ, {"PATH": str(directory) + os.pathsep + os.environ["PATH"]}))
+    return executable
+
+
 class InputAdmissionTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.rtk = provide_rtk(self)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
@@ -39,7 +49,7 @@ class InputAdmissionTests(unittest.TestCase):
             producer.validate_build_admission(self.root, environment)
         validate.assert_called_once_with(
             self.root,
-            [*guard.cargo_proxy_command(environment), *guard.BUILD_FLAGS],
+            [str(self.rtk), "proxy", "cargo", *guard.BUILD_FLAGS],
             environment,
         )
 
@@ -601,6 +611,9 @@ class InputAdmissionTests(unittest.TestCase):
 
 
 class JustEnvironmentTests(unittest.TestCase):
+    def setUp(self) -> None:
+        provide_rtk(self)
+
     def test_exact_environment_overlay_and_no_parent_mutation(self) -> None:
         base = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"], "SHLVL": "0"}
         original = dict(base)

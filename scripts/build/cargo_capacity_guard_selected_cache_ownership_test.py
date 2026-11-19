@@ -14,6 +14,7 @@ from unittest.mock import patch
 from cargo_capacity_guard import _array, _object
 from cargo_capacity_guard_build_script_ownership import BuildScriptOwnership, SourcePin, source_pin
 from cargo_capacity_guard_lock import ProfileLocks, evict_artifacts
+from cargo_capacity_guard_test_flags import native_file_flags
 from cargo_capacity_guard_selected_cache_ownership import (
     SelectedCacheOwnership,
     _tool_pin,
@@ -509,16 +510,11 @@ class SelectedCacheOwnershipTest(unittest.TestCase):
         needed = self.cache_index_bytes(sessions)
         indices = [session / "query-cache.bin" for session in sessions]
         before = self.cache_tree(root / "target")
-        try:
-            for index in indices:
-                os.chflags(index, stat.UF_NODUMP)
+        with native_file_flags(indices, stat.UF_NODUMP):
             code, report, _proof = self.evict_library_test_cache(root, metadata, protected, tool, needed)
             self.assertEqual(code, 1, report)
             self.assertEqual(report["deleted_files"], 0)
             self.assertEqual(self.cache_tree(root / "target"), before)
-        finally:
-            for index in indices:
-                os.chflags(index, 0)
 
 
 if __name__ == "__main__":

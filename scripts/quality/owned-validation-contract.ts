@@ -2128,7 +2128,20 @@ function pythonDiscoveryOptions(words: string[]): boolean {
   return true;
 }
 
-function pythonSelection(context: ContractContext, words: string[], name: string): boolean {
+const PINNED_PYTHON_DISCOVERY_PREFIX = [
+  "uv",
+  "run",
+  "--no-project",
+  "--with-requirements",
+  "{{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}}",
+] as const;
+
+function pythonSelection(context: ContractContext, command: string[], name: string): boolean {
+  const pinned = PINNED_PYTHON_DISCOVERY_PREFIX.every((word, index) => word === command[index]);
+  const words =
+    pinned && pythonRuntimeBindingsVerified(context)
+      ? command.slice(PINNED_PYTHON_DISCOVERY_PREFIX.length)
+      : command;
   if (
     !["python", "python3"].includes(words[0] ?? "") ||
     words[1] !== "-m" ||

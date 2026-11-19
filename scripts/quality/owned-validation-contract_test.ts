@@ -949,6 +949,33 @@ test("owned Python registration accepts capacity tests with the exact RTK proxy 
 });
 
 test.each([
+  ["{{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}}", true],
+  ["scripts/release/unlocked-requirements.txt", false],
+] as const)(
+  "owned Python discovery verifies the uv requirements binding: %s",
+  (requirements, accepted) => {
+    const root = fixture();
+    const justfilePath = path.join(root, "Justfile");
+    const justfile = fs.readFileSync(justfilePath, "utf8");
+    const discovery = "python3 -m unittest discover -s scripts -p '*_test.py'";
+    const next = justfile.replace(
+      discovery,
+      `uv run --no-project --with-requirements ${requirements} ${discovery}`,
+    );
+    expect(next).not.toBe(justfile);
+    write(root, "Justfile", next);
+    track(root);
+    const report = inspectOwnedValidationContract(root);
+    const codes = report.issues
+      .filter(
+        ({ path: source, code }) => source === "scripts/tool_test.py" && code.startsWith("unit-"),
+      )
+      .map(({ code }) => code);
+    expect(codes).toEqual(accepted ? [] : ["unit-local-missing", "unit-ci-missing"]);
+  },
+);
+
+test.each([
   [
     "RTK default changed",
     'RTK := env_var_or_default("RTK", `command -v rtk 2> /dev/null || true`)',
@@ -1589,7 +1616,7 @@ test("the NativeWidth facts recipe requires its canonical root parameters and sa
 test("owned validation checks root and standalone Cargo lock resolution before heavy lanes", () => {
   expect(actualRecipeBody("owned-validation-contract-check").split("\n")).toEqual([
     "bun scripts/quality/owned-validation-contract.ts",
-    "python3 -m unittest discover -s scripts/mermaid -p native_cli_build_producer_test.py --failfast",
+    "uv run --no-project --with-requirements {{quote(HTML_PERFORMANCE_PYTHON_REQUIREMENTS)}} python3 -m unittest discover -s scripts/mermaid -p native_cli_build_producer_test.py --failfast",
     '{{CARGO}} metadata --locked --all-features --format-version 1 --manifest-path "{{REPO_ROOT}}/Cargo.toml" > /dev/null',
     '{{CARGO}} metadata --locked --no-default-features --features baseline --format-version 1 --manifest-path "{{REPO_ROOT}}/scripts/html/performance-harness/Cargo.toml" > /dev/null',
     '{{CARGO}} metadata --locked --no-default-features --features candidate --format-version 1 --manifest-path "{{REPO_ROOT}}/scripts/html/performance-harness/Cargo.toml" > /dev/null',

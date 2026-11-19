@@ -23,6 +23,7 @@ from types import SimpleNamespace
 from typing import IO, Literal, TextIO
 
 import cargo_capacity_guard as guard
+from cargo_capacity_guard_test_flags import native_file_flags
 from cargo_capacity_guard_debug_object_ownership import PROGRESS_LOGGER_NAME
 from cargo_capacity_guard import inspect as inspect_capacity
 from cargo_capacity_guard import (
@@ -3730,17 +3731,14 @@ class GuardTests(unittest.TestCase):
                            else session / ("metadata.rmeta" if kind == "metadata" else "query-cache.bin"))
                 needed = sum((item / name).stat().st_blocks * 512 for item in sessions
                              for name in ("dep-graph.bin", "query-cache.bin", "work-products.bin"))
-                os.chflags(flagged, stat.UF_IMMUTABLE)
-                try:
+                with native_file_flags((flagged,), stat.UF_IMMUTABLE):
                     before = self.file_tree_identity_bytes(target)
                     code, report = self.metadata_leaf_evict(root, target, protected, needed)
                     self.assertEqual(code, 0 if kind in ("metadata", "protected") else 1, report)
-                    self.assertEqual(flagged.stat().st_flags, stat.UF_IMMUTABLE)
+                    self.assertEqual(getattr(flagged.stat(), "st_flags", None), stat.UF_IMMUTABLE)
                     if kind not in ("metadata", "protected"):
                         self.assertEqual(report["deleted_files"], 0)
                         self.assertEqual(self.file_tree_identity_bytes(target), before)
-                finally:
-                    os.chflags(flagged, 0)
 
     @unittest.skipIf(os.name == "nt", "POSIX metadata cache leaf fixture")
     def test_metadata_cache_leaf_interruption_is_graph_first_and_retryable(self) -> None:
