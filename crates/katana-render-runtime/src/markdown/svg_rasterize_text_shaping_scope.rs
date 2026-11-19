@@ -1,4 +1,16 @@
 use super::{family_scope_cache, font, harfrust, measurement_token};
+#[cfg(windows)]
+use std::{path::Path, sync::Arc};
+
+#[cfg(windows)]
+pub(in super::super) fn enable_windows_font_snapshots() {
+    font::enable_windows_font_snapshots();
+}
+
+#[cfg(windows)]
+pub(in super::super) fn windows_font_snapshot(path: &Path) -> Option<Arc<Vec<u8>>> {
+    font::windows_font_snapshot(path)
+}
 
 pub(in crate::markdown::svg_rasterize) fn with_font_face_cache_scope<T>(
     operation: impl FnOnce() -> T,
