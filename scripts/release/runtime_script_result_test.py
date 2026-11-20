@@ -91,7 +91,9 @@ class RuntimeScriptResultTests(unittest.TestCase):
         )
         quality_properties = quality_grouped.replace(
             b"><testcase",
-            b"><properties><property name='ci' value='true'/><property name='commit' value='pinned'/></properties><testcase",
+            b"><properties><property name='ci' value='true'/>"
+            b"<property name='commit' value='pinned'/></properties><testcase",
+            1,
         )
         self.assertEqual(
             junit.parse_junit(quality_properties, (quality_path,))["tests"], 2
