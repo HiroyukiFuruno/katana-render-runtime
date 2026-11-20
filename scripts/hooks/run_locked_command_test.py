@@ -3,7 +3,6 @@ from __future__ import annotations
 import io
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -87,7 +86,7 @@ class LockedCommandTest(unittest.TestCase):
     def _run_clean_with_refs(
         self,
         root: Path,
-        executable: str,
+        launcher: list[str],
         options: list[str],
         producer_lock: Path,
         protected_refs: list[Path],
@@ -105,8 +104,7 @@ class LockedCommandTest(unittest.TestCase):
                 [
                     "--protect-root-producer",
                     "--",
-                    executable,
-                    "proxy",
+                    *launcher,
                     "cargo",
                     "clean",
                     *options,
@@ -129,7 +127,7 @@ class LockedCommandTest(unittest.TestCase):
             "--profile", "dev", "-p", "katana-render-runtime", "-p", "katana-render-runtime-assets",
         ]
         with patch.object(subprocess, "run", side_effect=run):
-            status = self._run_clean_with_refs(root, "rtk", selected, root / "producer/lock",
+            status = self._run_clean_with_refs(root, ["rtk", "proxy"], selected, root / "producer/lock",
                                                [root / "target/debug/krr"])
         return status, observed
 
@@ -257,7 +255,7 @@ class LockedCommandTest(unittest.TestCase):
             rtk = self._fake_rtk(root, marker)
             status = self._run_clean_with_refs(
                 root,
-                str(rtk),
+                [str(rtk), "proxy"],
                 ["--profile", "dev"],
                 root / "producer/lock",
                 [reserved],
@@ -309,18 +307,20 @@ class LockedCommandTest(unittest.TestCase):
             )
             (root / "src/main.rs").write_text("fn main() {}\n", encoding="utf-8")
             target = root / "target"
+            subprocess.run(
+                ["cargo", "check", "--offline", "--target-dir", str(target)],
+                cwd=root,
+                check=True,
+                capture_output=True,
+            )
             debug_marker = target / "debug/probe"
             coverage_marker = target / "llvm-cov-target/krr-coverage/probe"
-            debug_marker.parent.mkdir(parents=True)
             coverage_marker.parent.mkdir(parents=True)
             debug_marker.write_text("debug", encoding="utf-8")
             coverage_marker.write_text("coverage", encoding="utf-8")
-            rtk = shutil.which("rtk")
-            if rtk is None:
-                self.fail("rtk executable missing for the real Cargo clean regression")
             status = self._run_clean_with_refs(
                 root,
-                rtk,
+                [],
                 ["--profile", "dev"],
                 root / "producer/lock",
                 [coverage_marker],
