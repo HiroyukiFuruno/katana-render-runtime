@@ -345,7 +345,8 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         env:
           MOON_CONCURRENCY: "1"
-        timeout-minutes: 15
+        # 依存する準備とテスト全体を含むため、個々のBunテストの時間制限とは分ける。
+        timeout-minutes: 30
         run: |
           asset_python="$RUNNER_TEMP/krr-asset-python"
           uv venv --python 3.13 "$asset_python"

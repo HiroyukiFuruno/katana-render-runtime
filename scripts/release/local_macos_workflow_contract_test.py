@@ -440,6 +440,7 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
             "3079f7d72844b4d7f5c0bcb6308a552715302b3840b205fb51f19e139da22c50",
             "44d135c35f89f5865af191b12cead8c3f45749272268a12efd1394c3a290b36a",
             "a632de2fa6c15e435dd820bcdd0eca7f2f8c08d8ec7a5a6ecbd4055d55de8290",
+            "ae6a1e690eda17aed4d42a13145c29c1b9869301c2aadeeddbaf60366c4013be",
             "b7226b9b6c7cc4d5b7e4e43d198fd934fff68e165d4f148202f9d1ba86ded672",
             "eeb6ee4a7b8941b543715f07596c47f0bee8563d25450ef640176390fbad8502",
         )
