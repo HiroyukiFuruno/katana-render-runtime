@@ -25,7 +25,7 @@ fn linux_arial_compatibility_preserves_named_family_precedence() -> Result<(), S
     let family = "Arial, Noto Sans";
     let mut database = Database::new();
     let fallback = insert_test_family(&mut database, source, "Noto Sans");
-    let selected = |db| matching_font_face(db, family, TEST_NORMAL_WEIGHT, false);
+    let selected = |db: &Database| matching_font_face(db, family, TEST_NORMAL_WEIGHT, false);
     assert_eq!(selected(&database), Some(fallback));
     let compatible = insert_test_family(&mut database, source, "Liberation Sans");
     assert_eq!(selected(&database), Some(compatible));

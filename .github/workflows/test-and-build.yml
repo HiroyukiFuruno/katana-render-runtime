@@ -629,7 +629,7 @@ jobs:
         timeout-minutes: 15
         run: |
           just html-fidelity-probe-build
-          just --command cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > "$RUNNER_TEMP/krr-html-toc-build.jsonl"
+          just --command cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json-render-diagnostics > "$RUNNER_TEMP/krr-html-toc-build.jsonl"
 
       - name: Measure Linux KRR input width and paragraph baseline
         if: >-
@@ -703,7 +703,7 @@ jobs:
               viewport=()
               fixtures=(html/anonymized-requirements html/library-reservation-fidelity)
               just --command cargo nextest run --release --lib -p katana-render-runtime --locked \
-                --no-tests fail -E 'test(linux_arial_compatibility_preserves_named_family_precedence)' || result=1
+                --no-tests fail -E 'test(linux_arial_compatibility_preserves_named_family_precedence)'
               python3 -m unittest discover -s scripts/release -p release_workflow_contract_test.py \
                 -k test_plantuml_install || result=1
               ;;
@@ -749,7 +749,7 @@ jobs:
         run: |
           result=0
           just --command cargo nextest run --release --lib -p katana-render-runtime --locked \
-            --no-tests fail -E 'test(linux_default_button_height_uses_the_same_font_as_its_label) | test(auto_button_uses_label_line_box) | test(ua_control_typography_is_used_only_without_author_typography) | test(button_ua_box_metrics_include_padding_and_border)' || result=1
+            --no-tests fail -E 'test(linux_default_button_height_uses_the_same_font_as_its_label) | test(auto_button_uses_label_line_box) | test(ua_control_typography_is_used_only_without_author_typography) | test(button_ua_box_metrics_include_padding_and_border)'
           just html-dynamic-fidelity-interim-check || result=1
           just html-input-state-fidelity-interim-check || result=1
           exit "$result"
