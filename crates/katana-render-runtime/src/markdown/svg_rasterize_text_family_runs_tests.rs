@@ -15,6 +15,40 @@ const KNOWN_AND_NEW_TEXT: &str = "A日本Ж😀";
 type FontRuns = Vec<(ID, String)>;
 type RunTriplet = (FontRuns, FontRuns, FontRuns);
 
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_arial_compatibility_preserves_named_family_precedence() -> Result<(), String> {
+    let bundled = html_font_db_for_text("Noto Sans", "0");
+    let source = matching_font_face(&bundled, "Noto Sans", TEST_NORMAL_WEIGHT, false)
+        .and_then(|id| bundled.face(id))
+        .ok_or("bundled test family missing")?;
+    let family = "Arial, Noto Sans";
+    let mut database = Database::new();
+    let fallback = insert_test_family(&mut database, source, "Noto Sans");
+    let selected = |db| matching_font_face(db, family, TEST_NORMAL_WEIGHT, false);
+    assert_eq!(selected(&database), Some(fallback));
+    let compatible = insert_test_family(&mut database, source, "Liberation Sans");
+    assert_eq!(selected(&database), Some(compatible));
+    let requested = insert_test_family(&mut database, source, "Arial");
+    assert_eq!(selected(&database), Some(requested));
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn insert_test_family(
+    database: &mut Database,
+    source: &resvg::usvg::fontdb::FaceInfo,
+    family: &str,
+) -> ID {
+    let mut face = source.clone();
+    face.id = ID::dummy();
+    face.families = vec![(
+        family.to_string(),
+        resvg::usvg::fontdb::Language::English_UnitedStates,
+    )];
+    database.push_face_info(face)
+}
+
 fn per_character_oracle(
     database: &Arc<Database>,
     base: ID,

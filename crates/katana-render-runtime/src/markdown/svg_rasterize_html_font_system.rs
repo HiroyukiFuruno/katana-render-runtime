@@ -15,7 +15,14 @@ pub(super) fn installed_family_requests(
     let installed_families = families
         .iter()
         .map(String::as_str)
-        .filter(|family| !super::sources::is_generic_font_family(family));
+        .filter(|family| !super::sources::is_generic_font_family(family))
+        .flat_map(|family| {
+            [
+                Some(family),
+                font_platform().compatible_named_family(family),
+            ]
+        })
+        .flatten();
     let system_ui = families
         .iter()
         .any(|family| family == "system-ui")

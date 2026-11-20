@@ -45,6 +45,10 @@ pub(in crate::markdown::svg_rasterize) trait PlatformFontStrategy {
         "Arial"
     }
 
+    fn compatible_named_family(&self, _: &str) -> Option<&'static str> {
+        None
+    }
+
     fn localized_sans_serif(&self, _: &str) -> Option<&'static str> {
         None
     }
@@ -99,8 +103,15 @@ impl PlatformFontStrategy for FontconfigFonts {
 
     #[cfg(target_os = "linux")]
     fn control_arial_family(&self) -> &'static str {
-        /* WHY: Arial未導入時も主書体を解決してから、実際の字形に合わせて代替できるようにする。 */
-        "Arial, Liberation Sans, sans-serif"
+        "Arial, sans-serif"
+    }
+
+    #[cfg(target_os = "linux")]
+    fn compatible_named_family(&self, requested: &str) -> Option<&'static str> {
+        /* WHY: FontconfigのArial互換書体を日本語用の汎用書体より先に試し、明示された書体の優先順を保つ。 */
+        requested
+            .eq_ignore_ascii_case("Arial")
+            .then_some("Liberation Sans")
     }
 
     #[cfg(target_os = "linux")]

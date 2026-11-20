@@ -44,7 +44,12 @@ fn fontdb_family_for_database<'a>(
     let usvg::fontdb::Family::Name(requested) = family else {
         return family;
     };
-    family_name_in_database(database, requested).map_or(family, usvg::fontdb::Family::Name)
+    family_name_in_database(database, requested)
+        .or_else(|| {
+            let compatible = font_platform().compatible_named_family(requested)?;
+            family_name_in_database(database, compatible)
+        })
+        .map_or(family, usvg::fontdb::Family::Name)
 }
 
 fn family_name_in_database<'a>(
