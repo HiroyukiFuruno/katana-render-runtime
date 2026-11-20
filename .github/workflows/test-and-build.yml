@@ -412,6 +412,24 @@ jobs:
           echo "$IMAGEMAGICK_DIR/bin" >> "$GITHUB_PATH"
           bin/magick -version
 
+      - name: Run recent Linux asset regressions
+        if: >-
+          matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' &&
+          inputs.verify_filter == 'full-runtime-assets'
+        timeout-minutes: 5
+        run: |
+          asset_python="$RUNNER_TEMP/krr-asset-python"
+          uv venv --python 3.13 "$asset_python"
+          uv pip sync --python "$asset_python/bin/python3" --require-hashes scripts/release/html-performance-requirements.lock
+          export PATH="$asset_python/bin:$PATH"
+          bun test --path-ignore-patterns 'tmp/**' \
+            --test-name-pattern '^(the actual repository binds the MathJax standard gate and retains the audit ledger|Moon fixture itself must consume both owner environment values)$' \
+            ./scripts/quality/owned-validation-contract_test.ts
+          bun test --path-ignore-patterns 'tmp/**' \
+            --test-name-pattern '^(does not include ignored private tmp or target files|実utility sourceとstrict設定に束縛したcompilerが誤入力とDOMを拒否する|MathJax actual source rejects owned ABI, library, unknown and DOM misuse under strict compiler)$' \
+            ./scripts/mermaid/native-source-manifest_test.ts ./scripts/runtime-bundles/runtime-bundle-checks_test.ts
+
       - name: Run runtime asset script tests
         if: >-
           matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-fidelity' &&
@@ -425,17 +443,11 @@ jobs:
               (inputs.verify_filter == 'full-runtime-assets' && 35 || 21) || 15 }}
         run: |
           asset_python="$RUNNER_TEMP/krr-asset-python"
-          uv venv --python 3.13 "$asset_python"
-          uv pip sync --python "$asset_python/bin/python3" --require-hashes scripts/release/html-performance-requirements.lock
-          export PATH="$asset_python/bin:$PATH"
-          if [[ "$KRR_VERIFY_LINUX_ASSET_ALL" == true ]]; then
-            bun test --path-ignore-patterns 'tmp/**' \
-              --test-name-pattern '^the actual repository binds the MathJax standard gate and retains the audit ledger$' \
-              ./scripts/quality/owned-validation-contract_test.ts
-            bun test --path-ignore-patterns 'tmp/**' \
-              --test-name-pattern '^(does not include ignored private tmp or target files|実utility sourceとstrict設定に束縛したcompilerが誤入力とDOMを拒否する|MathJax actual source rejects owned ABI, library, unknown and DOM misuse under strict compiler)$' \
-              ./scripts/mermaid/native-source-manifest_test.ts ./scripts/runtime-bundles/runtime-bundle-checks_test.ts
+          if [[ "$KRR_VERIFY_LINUX_ASSET_ALL" != true ]]; then
+            uv venv --python 3.13 "$asset_python"
+            uv pip sync --python "$asset_python/bin/python3" --require-hashes scripts/release/html-performance-requirements.lock
           fi
+          export PATH="$asset_python/bin:$PATH"
           if [[ "$KRR_VERIFY_LINUX_VALIDATION" == true ]]; then
             bun run moon exec krr:runtime-quality-owned-validation-contract-producer
           else
@@ -467,7 +479,9 @@ jobs:
                       failures.add(case.get("name", "unnamed"))
 
           ansi = re.compile(r"\x1b\[[0-9;]*m")
-          failed_case = re.compile(r"\(fail\) ([^\r\n]+?)(?: +\[[0-9.]+m?s\])?\s*")
+          failed_case = re.compile(r"\(fail\) ([^\r\n]+?)(?: +\[([0-9.]+m?s)\])?\s*")
+          timeout = re.compile(r"\s*\^ this test timed out after [0-9]+ms\.\s*")
+          timed_out = {}
           for command in sorted(root.glob("raw/run-*/group-001-command.json")):
               argv = json.loads(command.read_text())["argv"]
               if "./scripts/quality/owned-validation-contract_test.ts" not in argv:
@@ -476,14 +490,24 @@ jobs:
               if not stderr.is_file() or stderr.is_symlink():
                   continue
               with stderr.open(errors="replace") as stream:
+                  prior_failure = None
                   for line in stream:
-                      match = failed_case.fullmatch(ansi.sub("", line).rstrip("\r\n"))
+                      clean = ansi.sub("", line).rstrip("\r\n")
+                      match = failed_case.fullmatch(clean)
                       if match:
                           failures.add(match[1])
+                      if prior_failure and timeout.fullmatch(clean):
+                          timed_out[prior_failure[1]] = prior_failure[2] or "unknown"
+                      prior_failure = match
 
-          names = {"".join(ch for ch in name if ch.isprintable()).strip()[:240] for name in failures}
+          def safe_name(name):
+              return "".join(ch for ch in name if ch.isprintable()).strip()[:240]
+
+          names = {safe_name(name) for name in failures}
           for name in sorted(names):
               print(f"FAILED_CASE {name}")
+          for name, elapsed in sorted(timed_out.items()):
+              print(f"TIMED_OUT_CASE {elapsed} {safe_name(name)}")
           print(f"FAILED_CASE_COUNT {len(names)}")
           PY
 
