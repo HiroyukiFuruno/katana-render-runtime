@@ -73,7 +73,7 @@ function compilerVersion(): string {
 }
 
 test("実utility sourceとstrict設定に束縛したcompilerが誤入力とDOMを拒否する", () => {
-  const version = spawnSync("rtk", ["proxy", "bunx", "--no-install", "tsc", "--version"], {
+  const version = spawnSync("bunx", ["--no-install", "tsc", "--version"], {
     cwd: root,
     encoding: "utf8",
   });
@@ -156,11 +156,7 @@ test("実utility sourceとstrict設定に束縛したcompilerが誤入力とDOM�
     );
     for (const { valid, source, diagnostic } of inputs) {
       fs.writeFileSync(input, source);
-      const result = spawnSync(
-        "rtk",
-        ["proxy", "bunx", "--no-install", "tsc", "--noEmit", "-p", project],
-        { cwd: root, encoding: "utf8" },
-      );
+      const result = compileStrictProject(project);
       expect(result.error).toBeUndefined();
       expect(result.status, source).toBe(valid ? 0 : 1);
       if (!valid) {
@@ -348,10 +344,10 @@ test("実pie legendの色補正はroot属性と図形geometryを保持する", (
   }
 });
 
-function compileMathJaxProject(project: string) {
+function compileStrictProject(project: string) {
   return spawnSync(
-    "rtk",
-    ["proxy", "bunx", "--no-install", "tsc", "--noEmit", "--pretty", "false", "-p", project],
+    "bunx",
+    ["--no-install", "tsc", "--noEmit", "--pretty", "false", "-p", project],
     { cwd: root, encoding: "utf8" },
   );
 }
@@ -466,7 +462,7 @@ test("MathJax actual source rejects owned ABI, library, unknown and DOM misuse u
     ] as const;
     for (const [valid, diagnostic, source] of cases) {
       fs.writeFileSync(input, source);
-      const result = compileMathJaxProject(project);
+      const result = compileStrictProject(project);
       expect(result.error).toBeUndefined();
       if (valid) expect(result.status).toBe(0);
       else {
@@ -490,7 +486,7 @@ test("MathJax actual source rejects owned ABI, library, unknown and DOM misuse u
               : [mathJaxHost, poison],
         }),
       );
-      const result = compileMathJaxProject(project);
+      const result = compileStrictProject(project);
       expect(result.error).toBeUndefined();
       if (expected === 0) expect(result.status).toBe(0);
       else {
