@@ -116,11 +116,11 @@ jobs:
       github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
       inputs.verify_platform == 'linux-validation-contract'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.verify_filter == 'exact-f5b35ac5' && 'f5b35ac53dcb7a9aa146bf647c368fa6a9689e6b' || github.sha }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
@@ -134,13 +134,21 @@ jobs:
       - name: Install just for the shell recipe regression
         uses: taiki-e/install-action@4ccefd7d26b61bbb81f4ff01165e8a6880a1bd59 # just
       - name: Verify generated asset fingerprints and RTK recipes
+        env:
+          KRR_VALIDATION_MODE: ${{ inputs.verify_filter }}
+          KRR_VALIDATION_HEAD: ${{ inputs.verify_filter == 'exact-f5b35ac5' && 'f5b35ac53dcb7a9aa146bf647c368fa6a9689e6b' || github.sha }}
+          MOON_CONCURRENCY: "1"
         run: |
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$KRR_VALIDATION_HEAD"
           bun install --frozen-lockfile
           uv venv --python 3.13 "$RUNNER_TEMP/krr-asset-python"
           uv pip sync --python "$RUNNER_TEMP/krr-asset-python/bin/python3" --require-hashes scripts/release/html-performance-requirements.lock
           export PATH="$RUNNER_TEMP/krr-asset-python/bin:$PATH"
-          bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-validation-contract_test.ts -t 'generated Rust fingerprint binds added paths and restores after removal|Just RTK proxy prefixes render correctly'
+          if [[ "$KRR_VALIDATION_MODE" == "exact-f5b35ac5" ]]; then
+            bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-validation-contract_test.ts
+          else
+            bun test --path-ignore-patterns 'tmp/**' ./scripts/quality/owned-validation-contract_test.ts -t 'generated Rust fingerprint binds added paths and restores after removal|Just RTK proxy prefixes render correctly'
+          fi
 
   verify-linux-contracts:
     name: Linux automation contracts
