@@ -305,7 +305,10 @@ jobs:
         run: brew install graphviz
 
       - name: Install PlantUML runtime
-        if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: >-
+          (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true') &&
+          !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
+          inputs.verify_platform == 'linux-fidelity' && inputs.verify_filter == 'font-stack')
         run: just plantuml-install
 
       - name: Run tests
@@ -816,7 +819,10 @@ jobs:
         run: python -m unittest discover -s scripts/hooks -p local_review_windows_job_test.py -v
 
       - name: Run runtime package asset check
-        if: matrix.os == 'ubuntu-latest'
+        if: >-
+          matrix.os == 'ubuntu-latest' &&
+          !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
+          inputs.verify_platform == 'linux-fidelity' && inputs.verify_filter == 'font-stack')
         timeout-minutes: 15
         run: just runtime-package-asset-check
 
