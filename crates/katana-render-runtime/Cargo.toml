@@ -126,6 +126,7 @@ nix = { version = "0.32.0", default-features = false, features = ["resource"] }
 skia-safe = { version = "=0.156.0", default-features = false, features = ["binary-cache", "pdf"] }
 
 [target.'cfg(windows)'.dependencies]
+fontique = { version = "=0.13.0", default-features = false, features = ["system"] }
 same-file = "=1.0.6"
 
 [target.'cfg(target_os = "macos")'.dependencies]

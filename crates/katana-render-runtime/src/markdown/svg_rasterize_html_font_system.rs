@@ -4,13 +4,18 @@ use std::{collections::BTreeSet, path::PathBuf};
 #[path = "svg_rasterize_html_font_platform.rs"]
 pub(in crate::markdown::svg_rasterize) mod platform;
 use platform::{PlatformFontStrategy, font_platform};
-#[cfg(any(test, windows, target_os = "macos", target_os = "ios"))]
+#[cfg(any(test, target_os = "macos", target_os = "ios"))]
 #[path = "svg_rasterize_html_font_native_paths.rs"]
 mod native_paths;
 #[cfg(test)]
 use native_paths::named_font_paths;
-#[cfg(any(windows, target_os = "macos", target_os = "ios"))]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 use native_paths::native_system_font_paths;
+#[cfg(windows)]
+#[path = "svg_rasterize_html_font_windows_paths.rs"]
+mod windows_paths;
+#[cfg(windows)]
+use windows_paths::windows_system_font_paths as native_system_font_paths;
 
 /* WHY: 任意のHTMLが大量のfamilyを指定しても、同期したfontconfig探索は描画ごとに1回・有限件にする。 */
 const MAX_SYSTEM_FONT_FAMILIES_PER_REQUEST: usize = 16;
