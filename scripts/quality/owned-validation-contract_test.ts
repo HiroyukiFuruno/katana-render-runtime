@@ -5288,21 +5288,23 @@ const classicGenerationRecipeMutations = [
   ],
 ] satisfies readonly RecipeMutation[];
 
+const classicGenerationCommandIssue = "moon-cache-fixture-owner-command-unverified";
+
+test("classic generation evidence registration accepts the canonical commands", () => {
+  const root = strictUnusedRegistrationFixture();
+  const issueCodes = inspectMoonCacheFixtureRoute(root).issues.map((issue) => issue.code);
+  expect(issueCodes).not.toContain(classicGenerationCommandIssue);
+});
+
 test.each(classicGenerationRecipeMutations)(
   "classic generation evidence registration rejects changed %s",
   (_label, before, after, recipeName) => {
     const root = strictUnusedRegistrationFixture();
-    const commandIssue = "moon-cache-fixture-owner-command-unverified";
-    expect(inspectMoonCacheFixtureRoute(root).issues.map((issue) => issue.code)).not.toContain(
-      commandIssue,
-    );
-    const body = actualRecipeBody(recipeName ?? "runtime-asset-script-test");
+    const body = actualRecipeBody(recipeName);
     expect(body).toContain(before);
-    recipes(root, { [recipeName ?? "runtime-asset-script-test"]: body.replace(before, after) });
-    track(root);
-    expect(inspectMoonCacheFixtureRoute(root).issues.map((issue) => issue.code)).toContain(
-      commandIssue,
-    );
+    recipes(root, { [recipeName]: body.replace(before, after) });
+    const issueCodes = inspectMoonCacheFixtureRoute(root).issues.map((issue) => issue.code);
+    expect(issueCodes).toContain(classicGenerationCommandIssue);
   },
 );
 
