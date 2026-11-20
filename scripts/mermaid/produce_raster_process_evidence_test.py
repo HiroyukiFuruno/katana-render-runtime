@@ -24,6 +24,7 @@ class RasterProcessEvidenceTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
         self.repo_root = Path(__file__).resolve().parents[2]
+        self.executable = Path("/bin/sh").resolve(strict=True)
         self.attempt = self.root / "attempt"
         self.attempt.mkdir()
         self.config = self.root / "config.json"
@@ -52,7 +53,7 @@ class RasterProcessEvidenceTests(unittest.TestCase):
         }))
         lifecycle = native_guard.file_record(lifecycle_path)
         observation = {
-            "argv": ["/bin/sh", "run", "scripts/mermaid/diagram-update.ts"],
+            "argv": [str(self.executable), "run", "scripts/mermaid/diagram-update.ts"],
             "stdout": {"path": str(self.attempt / "stdout.raw"), "sha256": "0" * 64, "size": 0},
             "stderr": {"path": str(self.attempt / "stderr.raw"), "sha256": "0" * 64, "size": 0},
             "label": "mermaid-raster-official", "cwd": str(self.root), "attemptToken": "a" * 64,
@@ -66,10 +67,10 @@ class RasterProcessEvidenceTests(unittest.TestCase):
                       collector_reaped: bool = True, distinct_collectors: bool = True) -> None:
         browser = {
             "pid": 103, "parentPid": producer_pid, "startIdentity": "1770000001.000000",
-            "executablePath": "/bin/sh", "argv": ["/bin/sh", "--headless"],
+            "executablePath": str(self.executable), "argv": [str(self.executable), "--headless"],
         }
         producer_row: dict[str, object] = {"pid": producer_pid, "parentPid": 1, "startIdentity": producer_start}
-        endpoint_identity = {"path": "/bin/sh", "canonical": "/bin/sh", "sha256": "0" * 64,
+        endpoint_identity = {"path": str(self.executable), "canonical": str(self.executable), "sha256": "0" * 64,
                              "size": 1, "dev": "1", "ino": "1", "mode": 0o100755}
         for index in range(2):
             collector_pid = 104 + index if distinct_collectors else 104
@@ -101,8 +102,8 @@ class RasterProcessEvidenceTests(unittest.TestCase):
             return result
         with patch.object(owner, "observe_native_cli_command", side_effect=run_owner):
             producer.bind_process_evidence(
-                self.repo_root, self.config, str(self.config_sha), "official", Path("/bin/sh"),
-                self.root, self.root, self.root / "output", "*.md", Path("/bin/sh"), Path("/bin/sh"),
+                self.repo_root, self.config, str(self.config_sha), "official", self.executable,
+                self.root, self.root, self.root / "output", "*.md", self.executable, self.executable,
             )
 
     def test_binds_direct_owner_and_keeps_collector_reap_separate(self) -> None:
@@ -136,8 +137,8 @@ class RasterProcessEvidenceTests(unittest.TestCase):
     def test_controlled_official_command_has_no_markdown_rewrite(self) -> None:
         command = producer._known_command(
             self.repo_root, producer._load_session(self.config, str(self.config_sha)),
-            self.config, str(self.config_sha), "official", Path("/bin/sh"), self.root,
-            self.root, self.root / "output", "*.md", Path("/bin/sh"), Path("/bin/sh"),
+            self.config, str(self.config_sha), "official", self.executable, self.root,
+            self.root, self.root / "output", "*.md", self.executable, self.executable,
         )
         self.assertNotIn("--markdown-output", command)
 
@@ -216,8 +217,8 @@ class RasterProcessEvidenceTests(unittest.TestCase):
         with patch.dict("os.environ", supplied, clear=True):
             with patch.object(owner, "observe_native_cli_command", side_effect=run_owner):
                 producer.bind_process_evidence(
-                    self.repo_root, self.config, str(self.config_sha), "official", Path("/bin/sh"),
-                    self.root, self.root, self.root / "output", "*.md", Path("/bin/sh"), Path("/bin/sh"),
+                    self.repo_root, self.config, str(self.config_sha), "official", self.executable,
+                    self.root, self.root, self.root / "output", "*.md", self.executable, self.executable,
                 )
 
     def test_unsupported_render_environment_fails_before_observer(self) -> None:
@@ -226,8 +227,8 @@ class RasterProcessEvidenceTests(unittest.TestCase):
             with patch.object(owner, "observe_native_cli_command") as observed:
                 with self.assertRaisesRegex(RuntimeError, "unsupported raster environment keys"):
                     producer.bind_process_evidence(
-                        self.repo_root, self.config, str(self.config_sha), "official", Path("/bin/sh"),
-                        self.root, self.root, self.root / "output", "*.md", Path("/bin/sh"), Path("/bin/sh"),
+                        self.repo_root, self.config, str(self.config_sha), "official", self.executable,
+                        self.root, self.root, self.root / "output", "*.md", self.executable, self.executable,
                     )
                 observed.assert_not_called()
 
@@ -237,8 +238,8 @@ class RasterProcessEvidenceTests(unittest.TestCase):
         with patch.object(owner, "observe_native_cli_command") as observed:
             with self.assertRaisesRegex(RuntimeError, "already contains"):
                 producer.bind_process_evidence(
-                    self.repo_root, self.config, str(self.config_sha), "official", Path("/bin/sh"),
-                    self.root, self.root, self.root / "output", "*.md", Path("/bin/sh"), Path("/bin/sh"),
+                    self.repo_root, self.config, str(self.config_sha), "official", self.executable,
+                    self.root, self.root, self.root / "output", "*.md", self.executable, self.executable,
                 )
             observed.assert_not_called()
         owner_path.unlink()

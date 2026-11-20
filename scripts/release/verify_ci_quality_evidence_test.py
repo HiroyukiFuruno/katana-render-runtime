@@ -958,7 +958,9 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
         self.assertIn("--require-hashes scripts/release/html-performance-requirements.lock", contract)
         self.assertIn('export KRR_CONTRACT_RTK_DIRECTORY="$tool_dir"', contract)
         self.assertIn('export PATH="$tool_dir/python/bin:$PATH"', contract)
-        self.assertIn("if just check-contracts; then", contract)
+        self.assertIn("  just check-contracts\n  exit\n", contract)
+        self.assertIn("for suite in hooks release quality mermaid; do", contract)
+        self.assertIn("python3 -m unittest discover -s scripts/validation-timing -p test_measure.py", contract)
         self.assertTrue(contract.rstrip().endswith('exit "$status"'))
         for step in MODULE.REQUIRED_STEPS:
             self.assertIn(f"- name: {step}", workflow)

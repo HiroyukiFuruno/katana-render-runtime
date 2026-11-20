@@ -21,15 +21,16 @@ export PATH="$tool_dir/python/bin:$PATH"
 # Gitのファイル名処理に影響させず、必要な回帰だけに実物のRTKを渡す。
 export KRR_CONTRACT_RTK_DIRECTORY="$tool_dir"
 
-if just check-contracts; then
-  exit 0
-else
-  status=$?
+if (( $# == 0 )); then
+  just check-contracts
+  exit
 fi
 
-if [[ ${1:-} == --collect-failures ]]; then
-  python3 -m unittest discover -s scripts/release -p '*_test.py' -v || \
-    printf 'Release test diagnostics exited %d\n' "$?" >&2
-  just build-capacity-check || printf 'Capacity test diagnostics exited %d\n' "$?" >&2
-fi
+# 失敗を調べる場合は、各スイートを中断せず一度ずつ実行する。
+status=0
+for suite in hooks release quality mermaid; do
+  python3 -m unittest discover -s "scripts/$suite" -p '*_test.py' -v || status=$?
+done
+python3 -m unittest discover -s scripts/validation-timing -p test_measure.py -v || status=$?
+just build-capacity-check || status=$?
 exit "$status"
