@@ -17,7 +17,7 @@ pub(in crate::markdown::svg_rasterize::text_shaping) fn matching_font_face(
     }
     let families = names
         .iter()
-        .map(|name| fontdb_family_for_database(database, name, &platform))
+        .map(|name| platform_font_family(database, name, &platform))
         .collect::<Vec<_>>();
     database.query(&usvg::fontdb::Query {
         families: &families,
@@ -31,14 +31,30 @@ pub(in crate::markdown::svg_rasterize::text_shaping) fn matching_font_face(
     })
 }
 
-fn fontdb_family_for_database<'a>(
+fn platform_font_family<'a>(
     database: &'a usvg::fontdb::Database,
     name: &'a str,
     platform: &impl PlatformFontStrategy,
 ) -> usvg::fontdb::Family<'a> {
-    if name.eq_ignore_ascii_case("system-ui")
-        && let Some(family) = platform.installed_system_ui_family()
-        && let Some(actual) = family_name_in_database(database, family)
+    let system_ui_family = name
+        .eq_ignore_ascii_case("system-ui")
+        .then(|| platform.installed_system_ui_family())
+        .flatten();
+    fontdb_family_for_database(
+        database,
+        name,
+        system_ui_family,
+        platform.compatible_named_family(name),
+    )
+}
+
+fn fontdb_family_for_database<'a>(
+    database: &'a usvg::fontdb::Database,
+    name: &'a str,
+    system_ui_family: Option<&str>,
+    compatible_family: Option<&str>,
+) -> usvg::fontdb::Family<'a> {
+    if let Some(actual) = system_ui_family.and_then(|name| family_name_in_database(database, name))
     {
         return usvg::fontdb::Family::Name(actual);
     }
@@ -47,10 +63,7 @@ fn fontdb_family_for_database<'a>(
         return family;
     };
     family_name_in_database(database, requested)
-        .or_else(|| {
-            let compatible = platform.compatible_named_family(requested)?;
-            family_name_in_database(database, compatible)
-        })
+        .or_else(|| compatible_family.and_then(|name| family_name_in_database(database, name)))
         .map_or(family, usvg::fontdb::Family::Name)
 }
 

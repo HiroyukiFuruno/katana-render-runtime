@@ -39,6 +39,10 @@ fn fallback_cache_stops_recording_after_the_file_dependency_limit() -> Result<()
 #[test]
 fn unavailable_generation_cannot_enter_or_reuse_durable_fallback_cache() -> Result<(), String> {
     let (database, face_id, generation) = unavailable_file_generation()?;
+    let mut observed = FileGenerationDependencies::new();
+    observed.observe(face_id, generation.clone(), generation.clone());
+    assert!(!observed.reusable);
+    assert!(observed.entries.is_empty());
     let key = HtmlFallbackKey {
         base_face_id: face_id,
         character: 'A',

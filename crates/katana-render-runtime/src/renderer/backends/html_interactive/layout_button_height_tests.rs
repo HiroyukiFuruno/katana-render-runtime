@@ -1,3 +1,4 @@
+use super::{CssStyle, ElementRenderContext, button_height, button_style};
 use crate::renderer::backends::html_browser::{
     HtmlBrowserInput, HtmlBrowserSource, HtmlBrowserViewport,
 };
@@ -20,6 +21,22 @@ const HTML: &str = r#"<style>
         this.setAttribute('id', 'activated');
     });
 </script>"#;
+
+#[test]
+fn button_height_supplies_vertical_padding_when_the_computed_style_has_none() {
+    let computed = CssStyle::browser_default();
+    let mut style = button_style(&computed);
+    assert!(!style.explicit_padding);
+    let element = ElementRenderContext {
+        node_id: 1,
+        tag: "button",
+        attributes: &[],
+        children: &[],
+    };
+    let height = button_height(element, &computed, &mut style);
+    assert_eq!((style.padding_top, style.padding_bottom), (1.0, 1.0));
+    assert_eq!(height, style.line_height + 6.0);
+}
 
 #[test]
 fn auto_button_uses_label_line_box_and_receives_click_at_bottom_padding() -> Result<(), String> {
