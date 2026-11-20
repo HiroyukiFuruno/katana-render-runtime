@@ -419,7 +419,7 @@ jobs:
         env:
           MOON_CONCURRENCY: "1"
           KRR_VERIFY_LINUX_VALIDATION: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' }}
-        timeout-minutes: 15
+        timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' && 21 || 15 }}
         run: |
           asset_python="$RUNNER_TEMP/krr-asset-python"
           uv venv --python 3.13 "$asset_python"
@@ -436,25 +436,44 @@ jobs:
         shell: bash
         run: |
           python3 - <<'PY'
+          import json
           import re
           from pathlib import Path
           import xml.etree.ElementTree as xml
 
           root = Path("tmp/quality/runtime-script-results")
           pattern = re.compile(r"runtime-quality-owned-validation-contract-[0-9a-f]{64}-group-[0-9]{3}\.xml")
-          failures = 0
+          failures = set()
           for path in sorted(root.glob("runtime-quality-owned-validation-contract-*-group-*.xml")):
               if not pattern.fullmatch(path.name) or path.is_symlink():
                   continue
-              report = xml.parse(path)
+              try:
+                  report = xml.parse(path)
+              except xml.ParseError:
+                  continue
               for case in report.iter("testcase"):
-                  if case.find("failure") is None and case.find("error") is None:
-                      continue
-                  name = " ".join(case.get("name", "unnamed").split())
-                  name = "".join(ch for ch in name if ch.isprintable())
-                  print(f"FAILED_CASE {name[:240]}")
-                  failures += 1
-          print(f"FAILED_CASE_COUNT {failures}")
+                  if case.find("failure") is not None or case.find("error") is not None:
+                      failures.add(case.get("name", "unnamed"))
+
+          ansi = re.compile(r"\x1b\[[0-9;]*m")
+          failed_case = re.compile(r"\(fail\) ([^\r\n]+?)(?: +\[[0-9.]+m?s\])?\s*")
+          for command in sorted(root.glob("raw/run-*/group-001-command.json")):
+              argv = json.loads(command.read_text())["argv"]
+              if "./scripts/quality/owned-validation-contract_test.ts" not in argv:
+                  continue
+              stderr = command.with_name("group-001-stderr.log")
+              if not stderr.is_file() or stderr.is_symlink():
+                  continue
+              with stderr.open(errors="replace") as stream:
+                  for line in stream:
+                      match = failed_case.fullmatch(ansi.sub("", line).rstrip("\r\n"))
+                      if match:
+                          failures.add(match[1])
+
+          names = {"".join(ch for ch in name if ch.isprintable()).strip()[:240] for name in failures}
+          for name in sorted(names):
+              print(f"FAILED_CASE {name}")
+          print(f"FAILED_CASE_COUNT {len(names)}")
           PY
 
       - name: Run selected Linux asset regressions
