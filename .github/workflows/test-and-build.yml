@@ -429,6 +429,9 @@ jobs:
           bun test --path-ignore-patterns 'tmp/**' \
             --test-name-pattern '^(does not include ignored private tmp or target files|実utility sourceとstrict設定に束縛したcompilerが誤入力とDOMを拒否する|MathJax actual source rejects owned ABI, library, unknown and DOM misuse under strict compiler)$' \
             ./scripts/mermaid/native-source-manifest_test.ts ./scripts/runtime-bundles/runtime-bundle-checks_test.ts
+          bun test --path-ignore-patterns 'tmp/**' \
+            --test-name-pattern '^(actual TypeScript calls use the pinned compiler without a wrapper|literal RTK proxy retains pinned TypeScript classification)$' \
+            ./scripts/html/harness-contract_test.ts
 
       - name: Run runtime asset script tests
         if: >-
