@@ -442,6 +442,7 @@ class LocalMacOSWorkflowContractTest(unittest.TestCase):
             "a632de2fa6c15e435dd820bcdd0eca7f2f8c08d8ec7a5a6ecbd4055d55de8290",
             "ae6a1e690eda17aed4d42a13145c29c1b9869301c2aadeeddbaf60366c4013be",
             "b7226b9b6c7cc4d5b7e4e43d198fd934fff68e165d4f148202f9d1ba86ded672",
+            "bfc837380ceca4025bf9f8e4c6fec7e666a74c25c8c242755de949dbc1d0718b",
             "eeb6ee4a7b8941b543715f07596c47f0bee8563d25450ef640176390fbad8502",
         )
         current_hash = EVIDENCE.workflow_digest(CI_PATH)
