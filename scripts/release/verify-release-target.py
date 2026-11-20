@@ -220,8 +220,8 @@ REQUIRED_RELEASE_BASE = PUBLISHED_V0423_SNAPSHOT
 # Gate 修正はこの digest から除外するため、squash 後の gate repair によって
 # 自己参照しない。候補source固定後にmanifest updateで新digestへ同期する。
 # raw diff は path、file mode、base/target blob を含む。
-REQUIRED_RELEASE_MANIFEST_SHA256 = "3cedc1b7839c6feaafc3596502023b45b183875d32ab8e3356833c388a22e0e9"
-RELEASE_VALIDATION_SNAPSHOT = "2e9bf2f385467311eeaf27713c06028353c5c2d5"
+REQUIRED_RELEASE_MANIFEST_SHA256 = "d939026ca6f794d62bfb3d00d788389190da1491f58252cb84fce1790576566c"
+RELEASE_VALIDATION_SNAPSHOT = "ff19e2e4dd8ad23a64b1024078127ccc1cfef20e"
 RELEASE_GATE_PATHS = frozenset(
     {
         "scripts/release/verify-release-target.py",
