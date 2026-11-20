@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { type JsonValue, jsonRecords } from "./dynamic-state";
-import { compareImages, sha256File } from "./reference-capture";
+import { compareImages, type ScoreReport, sha256File } from "./reference-capture";
 
 interface Options {
   krrRoot: string;
@@ -149,11 +149,12 @@ function compareViewport(
   const { viewport, krrEntries, chromeEntries } = validateViewport(width, krr, chrome);
   const rows: ReturnType<typeof compareEntry>[] = [];
   const failures: string[] = [];
+  const scores = new Map<string, ScoreReport>();
   for (const entry of krrEntries.values()) {
     const destination = text(entry.destination);
     const reference = chromeEntries.get(destination);
     if (!reference) throw new Error(`missing Chrome entry: ${width}/${destination}`);
-    const row = compareEntry(width, viewport, krr, entry, reference, destination);
+    const row = compareEntry(width, viewport, krr, entry, reference, destination, scores);
     rows.push(row);
     failures.push(...entryFailures(row, destination));
   }
@@ -210,6 +211,25 @@ function entryFailures(row: ReturnType<typeof compareEntry>, destination: string
   return failures;
 }
 
+function compareCaptures(
+  chromePath: string,
+  krrPath: string,
+  scores: Map<string, ScoreReport>,
+): { chromePngSha256: string; krrPngSha256: string; score: ScoreReport } {
+  const chromePngSha256 = sha256File(chromePath);
+  const krrPngSha256 = sha256File(krrPath);
+  // WHY: 目次の複数項目が同じ画像の組を参照しても、画像差分の外部コマンドは一度で足りる。
+  const key = JSON.stringify([chromePath, chromePngSha256, krrPath, krrPngSha256]);
+  let score = scores.get(key);
+  if (score === undefined) {
+    score = compareImages(chromePath, krrPath, 99);
+    if (sha256File(chromePath) !== chromePngSha256 || sha256File(krrPath) !== krrPngSha256)
+      throw new Error("TOC captures changed during comparison");
+    scores.set(key, score);
+  }
+  return { chromePngSha256, krrPngSha256, score };
+}
+
 function compareEntry(
   width: number,
   viewport: { width: number; height: number; scale: number },
@@ -217,6 +237,7 @@ function compareEntry(
   entry: { [key: string]: JsonValue },
   reference: { [key: string]: JsonValue },
   destination: string,
+  scores: Map<string, ScoreReport>,
 ): {
   viewport: string;
   destination: string;
@@ -234,7 +255,7 @@ function compareEntry(
   targetVisible: boolean;
   pointer: JsonValue;
   pointerValid: boolean;
-  score: ReturnType<typeof compareImages>;
+  score: ScoreReport;
 } {
   const krrPath = file(entry.capturePath);
   const chromePath = file(reference.capturePath);
@@ -247,7 +268,8 @@ function compareEntry(
     throw new Error(`invalid target visibility: ${destination}`);
   if (!pointerValid(entry.pointer, viewport.width, viewport.height))
     throw new Error(`invalid pointer: ${destination}`);
-  const score = compareImages(chromePath, krrPath, 99);
+  const captures = compareCaptures(chromePath, krrPath, scores);
+  const { score } = captures;
   if (
     score.dimensions.width !== viewport.width * viewport.scale ||
     score.dimensions.height !== viewport.height * viewport.scale
@@ -258,8 +280,7 @@ function compareEntry(
     destination,
     nonce: text(krr.executionNonce),
     sourceSha256: text(krr.htmlSha256),
-    chromePngSha256: sha256File(chromePath),
-    krrPngSha256: sha256File(krrPath),
+    ...captures,
     chromeScrollY,
     chromeRequestedScrollY,
     krrScrollY,
@@ -278,7 +299,6 @@ function compareEntry(
     ),
     pointer: entry.pointer ?? null,
     pointerValid: pointerValid(entry.pointer, viewport.width, viewport.height),
-    score,
   };
 }
 

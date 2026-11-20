@@ -164,6 +164,26 @@ test("accepts a complete 48-entry evidence fixture while keeping acceptance fals
   }
 }, 30_000);
 
+test("scores a different capture separately from repeated captures in the same viewport", () => {
+  const value = fixture();
+  try {
+    const different = path.join(value.root, "different.png");
+    const image = Bun.spawnSync(["magick", "-size", "1280x900", "xc:black", different]);
+    expect(image.exitCode).toBe(0);
+    mutateReport(value.root, 1280, (report) => {
+      const entry = (report.entries as JsonObject[]).at(1);
+      if (entry === undefined) throw new Error("fixture entry missing");
+      entry.capturePath = different;
+    });
+    expect(run(value.args).exitCode).toBe(0);
+    const report = JSON.parse(fs.readFileSync(path.join(value.root, "result.json"), "utf8"));
+    expect(report.count).toBe(48);
+    expect(report.failures).toEqual(["1280x900@1/s11:score90"]);
+  } finally {
+    value.cleanup();
+  }
+});
+
 test.each([
   [
     "viewport scale",
