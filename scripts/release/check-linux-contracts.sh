@@ -21,6 +21,11 @@ export PATH="$tool_dir/python/bin:$PATH"
 # Gitのファイル名処理に影響させず、必要な回帰だけに実物のRTKを渡す。
 export KRR_CONTRACT_RTK_DIRECTORY="$tool_dir"
 
+# CIの実行経路の静的検査に、テスト本体のJustレシピを明示する。
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  return 0
+fi
+
 if (( $# == 0 )); then
   just check-contracts
   exit

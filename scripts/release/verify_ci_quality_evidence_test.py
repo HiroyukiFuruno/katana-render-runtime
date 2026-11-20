@@ -950,7 +950,9 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
         self.assertLess(test_job.index("- name: Install capacity cleanup tool"), contract_start)
         self.assertLess(contract_start, test_job.index("- name: Check Rust types"))
         self.assertIn(
-            "run: bash scripts/release/check-linux-contracts.sh",
+            "run: |\n"
+            "          source scripts/release/check-linux-contracts.sh\n"
+            "          just check-contracts",
             test_job[contract_start:test_job.index("- name: Check formatting")],
         )
         contract = (self.ROOT / "scripts/release/check-linux-contracts.sh").read_text(encoding="utf-8")
@@ -958,6 +960,10 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
         self.assertIn("--require-hashes scripts/release/html-performance-requirements.lock", contract)
         self.assertIn('export KRR_CONTRACT_RTK_DIRECTORY="$tool_dir"', contract)
         self.assertIn('export PATH="$tool_dir/python/bin:$PATH"', contract)
+        source_mode = 'if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then\n  return 0\nfi'
+        self.assertIn(source_mode, contract)
+        self.assertLess(contract.index('export PATH="$tool_dir/python/bin:$PATH"'), contract.index(source_mode))
+        self.assertLess(contract.index(source_mode), contract.index("  just check-contracts\n  exit\n"))
         self.assertIn("  just check-contracts\n  exit\n", contract)
         self.assertIn("for suite in hooks release quality mermaid; do", contract)
         self.assertIn("python3 -m unittest discover -s scripts/validation-timing -p test_measure.py", contract)
