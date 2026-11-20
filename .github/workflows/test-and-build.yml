@@ -43,6 +43,7 @@ on:
           - linux-assets
           - linux-contracts
           - linux-fidelity
+          - linux-observer-access
           - linux-validation-contract
           - windows
       verify_filter:
@@ -82,6 +83,26 @@ env:
   TEST_THREADS: "1"
 
 jobs:
+  verify-linux-observer-access:
+    name: Read-only HTML font observer access
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
+      inputs.verify_platform == 'linux-observer-access'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Verify draft release observer download from a read-only workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          archive="$(mktemp "$RUNNER_TEMP/krr-observer.XXXXXXXX")"
+          trap 'rm -f "$archive"' EXIT
+          gh api -H 'Accept: application/octet-stream' "repos/$GITHUB_REPOSITORY/releases/assets/702068128" > "$archive"
+          printf '%s  %s\n' 92102a2dad3ef4c5f50e5581c7f12a2c7b4e291ee3c3a2804299690811e8a86f "$archive" | sha256sum --check
+
   verify-linux-validation-contract:
     name: Linux owned validation contract
     if: >-
@@ -171,7 +192,8 @@ jobs:
       (success() || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
       needs.static-quality.result == 'skipped')) &&
       !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
-      (inputs.verify_platform == 'linux-contracts' || inputs.verify_platform == 'linux-validation-contract')) &&
+      (inputs.verify_platform == 'linux-contracts' || inputs.verify_platform == 'linux-observer-access' ||
+      inputs.verify_platform == 'linux-validation-contract')) &&
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     strategy:
       fail-fast: false
