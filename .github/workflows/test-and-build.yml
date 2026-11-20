@@ -44,6 +44,7 @@ on:
           - linux-contracts
           - linux-fidelity
           - linux-observer-access
+          - linux-observer-stage
           - linux-validation-contract
           - windows
       verify_filter:
@@ -83,6 +84,33 @@ env:
   TEST_THREADS: "1"
 
 jobs:
+  verify-linux-observer-stage:
+    name: Stage the pinned HTML observer
+    if: >-
+      github.repository == 'HiroyukiFuruno/katana-render-runtime' &&
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
+      inputs.verify_platform == 'linux-observer-stage'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Copy the checksum-pinned draft asset into the workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/font-observer-macos-arm64.tar.gz"
+          gh api -H 'Accept: application/octet-stream' "repos/$GITHUB_REPOSITORY/releases/assets/702068128" > "$archive"
+          printf '%s  %s\n' 92102a2dad3ef4c5f50e5581c7f12a2c7b4e291ee3c3a2804299690811e8a86f "$archive" | sha256sum --check
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: krr-font-observer-v0.4.24-92102a2d
+          path: ${{ runner.temp }}/font-observer-macos-arm64.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
   verify-linux-observer-access:
     name: Read-only HTML font observer access
     if: >-
@@ -192,7 +220,7 @@ jobs:
       (success() || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
       needs.static-quality.result == 'skipped')) &&
       !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
-      (inputs.verify_platform == 'linux-contracts' || inputs.verify_platform == 'linux-observer-access' ||
+      (inputs.verify_platform == 'linux-contracts' || inputs.verify_platform == 'linux-observer-access' || inputs.verify_platform == 'linux-observer-stage' ||
       inputs.verify_platform == 'linux-validation-contract')) &&
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     strategy:
