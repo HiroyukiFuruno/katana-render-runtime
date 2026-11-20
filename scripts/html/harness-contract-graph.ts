@@ -869,7 +869,14 @@ function visitAstChildren(
   }
 }
 
-function astNodes(value: unknown): Record<string, unknown>[] {
+const moduleAstNodes = new WeakMap<object, readonly Record<string, unknown>[]>();
+
+function astNodes(value: unknown): readonly Record<string, unknown>[] {
+  const root = object(value);
+  // WHY: 同じ構文木をローカルとCIの経路検査で参照する間だけ、全ノードの走査結果を再利用する。
+  const module = root?.type === "Module" || root?.type === "Script" ? root : undefined;
+  const cached = module && moduleAstNodes.get(module);
+  if (cached) return cached;
   const nodes: Record<string, unknown>[] = [];
   const visit = (value: unknown): void => {
     if (Array.isArray(value)) {
@@ -882,6 +889,7 @@ function astNodes(value: unknown): Record<string, unknown>[] {
     visitAstChildren(node, visit);
   };
   visit(value);
+  if (module) moduleAstNodes.set(module, nodes);
   return nodes;
 }
 
@@ -1486,7 +1494,7 @@ function gitSourceInventoryCalls(
 }
 
 function reviewedFixtureVariables(
-  nodes: Record<string, unknown>[],
+  nodes: readonly Record<string, unknown>[],
   units: Readonly<Record<string, string>>,
 ): Record<string, unknown>[] | undefined {
   const selected: Record<string, unknown>[] = [];
