@@ -91,16 +91,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      actions: read
       contents: read
     steps:
-      - name: Verify draft release observer download from a read-only workflow
+      - name: Verify pinned observer download from a read-only workflow
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          archive="$(mktemp "$RUNNER_TEMP/krr-observer.XXXXXXXX")"
-          trap 'rm -f "$archive"' EXIT
-          gh api -H 'Accept: application/octet-stream' "repos/$GITHUB_REPOSITORY/releases/assets/702068128" > "$archive"
+          observer_work="$(mktemp -d "$RUNNER_TEMP/krr-observer.XXXXXXXX")"
+          trap 'rm -rf -- "$observer_work"' EXIT
+          archive="$observer_work/observer.tar.gz"
+          if ! gh api -H 'Accept: application/octet-stream' \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/702068128" > "$archive"; then
+            gh run download 44800513985 --repo "$GITHUB_REPOSITORY" \
+              --name krr-font-observer-v0.4.24-92102a2d --dir "$observer_work/staged"
+            mv "$observer_work/staged/font-observer-macos-arm64.tar.gz" "$archive"
+          fi
           printf '%s  %s\n' 92102a2dad3ef4c5f50e5581c7f12a2c7b4e291ee3c3a2804299690811e8a86f "$archive" | sha256sum --check
 
   verify-linux-validation-contract:
