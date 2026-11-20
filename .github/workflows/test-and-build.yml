@@ -179,11 +179,18 @@ jobs:
       - uses: taiki-e/install-action@4ccefd7d26b61bbb81f4ff01165e8a6880a1bd59 # just
         if: inputs.verify_filter == 'release-contracts'
       - name: Verify full automation contracts at release HEAD
+        id: release_contracts
         if: inputs.verify_filter == 'release-contracts'
         run: |
           test "$(git rev-parse HEAD)" = 'c7296254e9444299ae7ecd681f9b8a7a239a55b1'
           bun install --frozen-lockfile
           just check-contracts
+      - name: Collect all failing release contract tests
+        if: failure() && steps.release_contracts.outcome == 'failure'
+        run: tmp/html-performance-python-venv/bin/python -m unittest discover -s scripts/release -p '*_test.py' -v
+      - name: Check capacity contracts independently of release tests
+        if: failure() && steps.release_contracts.outcome == 'failure'
+        run: just build-capacity-check
 
   static-quality:
     name: Source quality checks
