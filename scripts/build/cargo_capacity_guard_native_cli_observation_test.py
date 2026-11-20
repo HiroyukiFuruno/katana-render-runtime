@@ -97,7 +97,9 @@ class Fixture:
         self.environment = {
             "PATH": os.pathsep.join((str(self.tools), os.defpath)),
             "HOME": str(self.home),
-            "RUSTFLAGS": "-D warnings", "LC_CTYPE": "UTF-8", "CARGO_TARGET_DIR": str(self.target),
+            "RUSTFLAGS": "-D warnings",
+            "LC_CTYPE": "C.UTF-8" if sys.platform.startswith("linux") else "UTF-8",
+            "CARGO_TARGET_DIR": str(self.target),
             "CARGO_CAPACITY_PROTECTED_REFS": json.dumps([str(self.protected)]),
         }
         self.environment.update({"CARGO": " ".join(observation.cargo_proxy_command(self.environment)),

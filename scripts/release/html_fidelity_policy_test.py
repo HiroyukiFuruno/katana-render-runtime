@@ -26,6 +26,13 @@ class HtmlPolicyTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "version differ"):
                 POLICY.select_html_policy("0.4.23", ref)
 
+    def test_manual_verification_refs_select_final(self) -> None:
+        for ref in ("release/verify", "refs/heads/release/verify"):
+            with self.subTest(ref=ref):
+                value = POLICY.select_html_policy("0.4.24", ref)
+                self.assertEqual((value["phase"], value["threshold"]), ("final", 99))
+                self.assertIsNone(value["authorization"])
+
     def test_policy_threshold_version_and_authorization_cannot_be_overridden(self) -> None:
         original = json.loads((POLICY.ROOT / POLICY.POLICY_PATH).read_text())
         for field, value in (("threshold", 89), ("version", "0.4.25"), ("authorization", "https://example.com/109")):

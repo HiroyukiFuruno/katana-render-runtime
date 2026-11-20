@@ -35,7 +35,8 @@ def select_html_policy(version: str, source_ref: str, root: Path = ROOT) -> dict
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise ValueError("invalid release version")
     allowed = {"release/v0.4.24", "refs/heads/release/v0.4.24", "master", "refs/heads/master", "refs/tags/v0.4.24"}
-    if source_ref.startswith(("release/v", "refs/heads/release/v", "refs/tags/v")):
+    verification_refs = {"release/verify", "refs/heads/release/verify"}
+    if source_ref not in verification_refs and source_ref.startswith(("release/v", "refs/heads/release/v", "refs/tags/v")):
         if source_ref.rsplit("v", 1)[1] != version:
             raise ValueError("release source ref and package version differ")
     interim = version == "0.4.24" and source_ref in allowed

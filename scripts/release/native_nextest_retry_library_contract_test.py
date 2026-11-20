@@ -113,6 +113,7 @@ class NativeNextestRetryLibraryContractTests(unittest.TestCase):
         environment["CARGO_TARGET_DIR"] = str(self.target)
         environment["CARGO_LLVM_COV_TARGET_DIR"] = str(self.cov_target)
         environment["NEXTEST_STATE_DIR"] = str(self.nextest_state)
+        environment["CARGO_TERM_COLOR"] = "never"
         environment["LLVM_PROFILE_FILE_NAME"] = f"retry-{attempt}-%4m.profraw"
         environment["RETRY_FIXTURE_STATE"] = str(self.state)
         return environment
@@ -338,7 +339,7 @@ fn executes_cli() {
         arguments = [
             "llvm-cov", "nextest", "--archive-file", str(archive), "--no-report",
             "--user-config-file", str(REPO / "scripts/release/nextest-local-user.toml"),
-            "--test-threads=1",
+            "--no-fail-fast", "--retries", "0", "--test-threads=1",
         ]
         first = self._run(arguments, "archive-first")
         self.assertEqual(first.returncode, 100, first.stdout + first.stderr)
