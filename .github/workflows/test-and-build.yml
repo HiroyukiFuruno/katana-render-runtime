@@ -41,6 +41,7 @@ on:
           - both
           - linux
           - linux-assets
+          - linux-contracts
           - linux-fidelity
           - windows
       verify_filter:
@@ -80,6 +81,20 @@ env:
   TEST_THREADS: "1"
 
 jobs:
+  verify-linux-contracts:
+    name: Linux automation contracts
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
+      inputs.verify_platform == 'linux-contracts'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: "1.99.1"
+      - name: Verify all Git hook contracts with real Cargo
+        run: python3 -m unittest discover -s scripts/hooks -p '*_test.py' --failfast
+
   static-quality:
     name: Source quality checks
     if: >-
@@ -122,6 +137,8 @@ jobs:
     if: >-
       (success() || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
       needs.static-quality.result == 'skipped')) &&
+      !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
+      inputs.verify_platform == 'linux-contracts') &&
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     strategy:
       fail-fast: false
