@@ -44,7 +44,7 @@ on:
           - linux-fidelity
           - windows
       verify_filter:
-        description: Optional nextest filter, linux-assets test pattern, or linux-fidelity selection (samples, visual-fixes, remaining-html, marker-css, code-width, font-stack, font-geometry, dynamic-html, requirements-fonts).
+        description: Optional nextest filter, linux-assets test pattern or full-runtime-assets, or linux-fidelity selection (samples, visual-fixes, remaining-html, marker-css, code-width, font-stack, font-geometry, dynamic-html, requirements-fonts).
         required: false
         default: ''
         type: string
@@ -415,11 +415,13 @@ jobs:
       - name: Run runtime asset script tests
         if: >-
           matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-fidelity' &&
-          (inputs.verify_platform != 'linux-assets' || inputs.verify_filter == '')
+          (inputs.verify_platform != 'linux-assets' || inputs.verify_filter == '' || inputs.verify_filter == 'full-runtime-assets')
         env:
           MOON_CONCURRENCY: "1"
-          KRR_VERIFY_LINUX_VALIDATION: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' }}
-        timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' && 21 || 15 }}
+          KRR_VERIFY_LINUX_VALIDATION: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' && inputs.verify_filter == '' }}
+        timeout-minutes: >-
+          ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' &&
+              (inputs.verify_filter == 'full-runtime-assets' && 35 || 21) || 15 }}
         run: |
           asset_python="$RUNNER_TEMP/krr-asset-python"
           uv venv --python 3.13 "$asset_python"
@@ -480,7 +482,7 @@ jobs:
         if: >-
           matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
           github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' &&
-          inputs.verify_filter != ''
+          inputs.verify_filter != '' && inputs.verify_filter != 'full-runtime-assets'
         env:
           KRR_VERIFY_ASSET_TEST_PATTERN: ${{ inputs.verify_filter }}
         timeout-minutes: 5
