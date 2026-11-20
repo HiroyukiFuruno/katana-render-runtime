@@ -205,6 +205,13 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: cargo install cargo-sweep --version 0.8.0 --locked
 
+      - name: Run automation contract tests
+        if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 15
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash scripts/release/check-linux-contracts.sh
+
       - name: Check formatting
         if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: just fmt-check
@@ -363,11 +370,6 @@ jobs:
           uv pip sync --python "$asset_python/bin/python3" --require-hashes scripts/release/html-performance-requirements.lock
           export PATH="$asset_python/bin:$PATH"
           just runtime-asset-script-test
-
-      - name: Run automation contract tests
-        if: matrix.os == 'ubuntu-latest'
-        timeout-minutes: 15
-        run: just check-contracts
 
       - name: Select authorized HTML release phase
         id: html_policy

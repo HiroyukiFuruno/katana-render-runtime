@@ -946,10 +946,17 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
             f"        {PINNED_SETUP_UV_STEP}",
             test_job,
         )
-        self.assertLess(
-            test_job.index("- name: Install Python analysis tools"),
-            test_job.index("run: just check-contracts"),
+        contract_start = test_job.index("- name: Run automation contract tests")
+        self.assertLess(test_job.index("- name: Install capacity cleanup tool"), contract_start)
+        self.assertLess(contract_start, test_job.index("- name: Check Rust types"))
+        self.assertIn(
+            "run: bash scripts/release/check-linux-contracts.sh",
+            test_job[contract_start:test_job.index("- name: Check formatting")],
         )
+        contract = (self.ROOT / "scripts/release/check-linux-contracts.sh").read_text(encoding="utf-8")
+        self.assertLess(contract.index("sha256sum --check"), contract.index("tar -xzf"))
+        self.assertIn("if just check-contracts; then", contract)
+        self.assertTrue(contract.rstrip().endswith('exit "$status"'))
         for step in MODULE.REQUIRED_STEPS:
             self.assertIn(f"- name: {step}", workflow)
         coverage = workflow[workflow.index("- name: Run coverage") :]

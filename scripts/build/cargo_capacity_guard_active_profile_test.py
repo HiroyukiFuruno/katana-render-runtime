@@ -100,6 +100,11 @@ class ActiveProfileTests(unittest.TestCase):
             target, inactive, active, baseline, _, _ = fixture(root)
             refs = protect_outputs(root, [inactive, active[1]])
             retained = [*active, inactive]
+            # ファイルシステムのブロック丸めに左右されず、保持出力だけで上限を超える。
+            with (inactive / "retained-floor.bin").open("xb") as retained_floor:
+                retained_floor.write(os.urandom(baseline * 2 + 4096))
+                retained_floor.flush()
+                os.fsync(retained_floor.fileno())
             old = identities([*active_files(retained), *refs])
             self.assertGreater(size_bytes(target), baseline * 2)
             sentinel = root / "child-ran"

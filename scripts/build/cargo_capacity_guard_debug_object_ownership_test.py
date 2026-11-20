@@ -927,6 +927,8 @@ class DebugObjectOwnershipTests(unittest.TestCase):
 
     def test_factory_resolves_archive_reader_only_when_enabled(self) -> None:
         calls: list[list[str]] = []
+        finder = self.root / "xcrun"
+        finder.write_bytes(b"finder")
 
         def query(argv: list[str]) -> str:
             calls.append(argv)
@@ -935,6 +937,10 @@ class DebugObjectOwnershipTests(unittest.TestCase):
         with (
             patch.object(sys, "platform", "darwin"),
             patch.object(shutil, "which", return_value="/usr/bin/tool"),
+            patch(
+                "cargo_capacity_guard_debug_object_ownership._official_tool_pin",
+                side_effect=lambda path: source_pin(finder if path == Path("/usr/bin/xcrun") else path),
+            ),
         ):
             ordinary = create_debug_object_ownership(self.target, query, lambda: None)
             self.assertIsNotNone(ordinary)

@@ -82,8 +82,6 @@ def producer_argv(
     env["MERMAID_RASTER_ARG_CANARY"] = "unexpected-shell-expansion"
     result = subprocess.run(
         [
-            "rtk",
-            "proxy",
             "just",
             "--dry-run",
             route.recipe,
@@ -104,8 +102,6 @@ def producer_argv(
     serializer = "import json, sys; print(json.dumps(sys.argv[1:]))"
     shell = subprocess.run(
         [
-            "rtk",
-            "proxy",
             "bash",
             "-uc",
             f"set -- {arguments}; exec python3 -c {shlex.quote(serializer)} \"$@\"",
@@ -186,7 +182,7 @@ class MermaidJustRasterComparisonContractTest(MermaidJustRasterSessionContractTe
 
     def test_score_only_recipe_does_not_render_or_capture(self) -> None:
         result = subprocess.run(
-            ["rtk", "proxy", "just", "--dry-run", "mermaid-score-strict", "tests/fixtures/mermaid/representative"],
+            ["just", "--dry-run", "mermaid-score-strict", "tests/fixtures/mermaid/representative"],
             cwd=ROOT, capture_output=True, text=True, check=True,
         )
         expanded = result.stdout + result.stderr
@@ -222,7 +218,7 @@ class MermaidFullComparisonDomainContractTest(unittest.TestCase):
         env.update(self.values)
         result = subprocess.run(
             [
-                "rtk", "proxy", "just", "--dry-run", "mermaid-compare-full", "99",
+                "just", "--dry-run", "mermaid-compare-full", "99",
                 "tmp/full output", "tmp/official output",
             ],
             cwd=ROOT,
@@ -241,7 +237,7 @@ class MermaidFullComparisonDomainContractTest(unittest.TestCase):
         for value in (*self.values.values(), "tmp/full output", "tmp/official output"):
             self.assertIn(value, expanded)
         defaults = subprocess.run(
-            ["rtk", "proxy", "just", "--dry-run", "mermaid-compare-full"],
+            ["just", "--dry-run", "mermaid-compare-full"],
             cwd=ROOT,
             env=env,
             capture_output=True,
@@ -273,7 +269,7 @@ class MermaidFullComparisonDomainContractTest(unittest.TestCase):
                 env["KRR_BUILD_RECEIPT"] = str(receipt)
                 env["RUNTIME_UPDATE_LOG_DIR"] = str(log_dir)
                 result = subprocess.run(
-                    ["rtk", "proxy", "just", "mermaid-compare-full", "tests/fixtures/mermaid/en"],
+                    ["just", "mermaid-compare-full", "tests/fixtures/mermaid/en"],
                     cwd=ROOT,
                     env=env,
                     capture_output=True,
