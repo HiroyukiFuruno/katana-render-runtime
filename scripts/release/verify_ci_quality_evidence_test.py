@@ -941,7 +941,8 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
         test_job = workflow[workflow.index("  test:\n") : workflow.index("  paired-performance:\n")]
         self.assertIn(
             "- name: Install Python analysis tools\n"
-            "        if: matrix.os == 'ubuntu-latest'\n"
+            "        if: matrix.os == 'ubuntu-latest' || (matrix.platform == 'mac-arm64' "
+            "&& (steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true'))\n"
             f"        {PINNED_SETUP_UV_STEP}",
             test_job,
         )
