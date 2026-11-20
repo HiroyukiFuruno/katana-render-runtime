@@ -81,7 +81,7 @@ V0424_FROZEN_RUST_CURRENT = {
     Path("crates/katana-render-runtime-cli/Cargo.toml"): "453c476e11f6da0e18d265d48ac98e7674f5bc2e99aa6440417de1beeeb8bd3f",
     Path("crates/katana-render-runtime/Cargo.toml"): "9bfd95f582101fb1c4fcebdc2522b217c43a8148e847b0e3f0568322817593f9",
     Path("crates/kdr-linter/Cargo.toml"): "dae81b877822e94f8244c1e846bf62284ca13977eb0c377e598439cc6343dbad",
-    Path("scripts/html/performance-harness/Cargo.lock"): "24e99d929e7aa2f3fa5cb39b898d45f71a22336625f629202b6784e03fc8a34d",
+    Path("scripts/html/performance-harness/Cargo.lock"): "9ab8ebfb396b6c0d4f336aba21b494e5f2b7b62abe740072d027e0d1c1c07189",
     Path("scripts/html/performance-harness/Cargo.toml"): "f48872b19a3c41c529ce0d0ed701ffb0dad29c579152ca077cc8681acce898de",
 }
 LOCK_CHANGE_RE = re.compile(
