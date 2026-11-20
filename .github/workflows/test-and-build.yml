@@ -160,7 +160,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.verify_filter == 'release-contracts' && 'c1100078765b244c3b20d6c1e67f69330c3bccd1' || github.sha }}
+          ref: ${{ inputs.verify_filter == 'release-contracts' && 'c7296254e9444299ae7ecd681f9b8a7a239a55b1' || github.sha }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
@@ -181,7 +181,7 @@ jobs:
       - name: Verify full automation contracts at release HEAD
         if: inputs.verify_filter == 'release-contracts'
         run: |
-          test "$(git rev-parse HEAD)" = 'c1100078765b244c3b20d6c1e67f69330c3bccd1'
+          test "$(git rev-parse HEAD)" = 'c7296254e9444299ae7ecd681f9b8a7a239a55b1'
           bun install --frozen-lockfile
           just check-contracts
 
