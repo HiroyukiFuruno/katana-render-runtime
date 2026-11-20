@@ -92,6 +92,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: "1.99.1"
+      - name: Install just for the hook contracts
+        uses: taiki-e/install-action@4ccefd7d26b61bbb81f4ff01165e8a6880a1bd59 # just
       - name: Verify all Git hook contracts with real Cargo
         run: python3 -m unittest discover -s scripts/hooks -p '*_test.py' --failfast
 
