@@ -419,6 +419,7 @@ jobs:
         env:
           MOON_CONCURRENCY: "1"
           KRR_VERIFY_LINUX_VALIDATION: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' && inputs.verify_filter == '' }}
+          KRR_VERIFY_LINUX_ASSET_ALL: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' && inputs.verify_filter == 'full-runtime-assets' }}
         timeout-minutes: >-
           ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' &&
               (inputs.verify_filter == 'full-runtime-assets' && 35 || 21) || 15 }}
@@ -427,6 +428,11 @@ jobs:
           uv venv --python 3.13 "$asset_python"
           uv pip sync --python "$asset_python/bin/python3" --require-hashes scripts/release/html-performance-requirements.lock
           export PATH="$asset_python/bin:$PATH"
+          if [[ "$KRR_VERIFY_LINUX_ASSET_ALL" == true ]]; then
+            bun test --path-ignore-patterns 'tmp/**' \
+              --test-name-pattern '^the actual repository binds the MathJax standard gate and retains the audit ledger$' \
+              ./scripts/quality/owned-validation-contract_test.ts
+          fi
           if [[ "$KRR_VERIFY_LINUX_VALIDATION" == true ]]; then
             bun run moon exec krr:runtime-quality-owned-validation-contract-producer
           else
