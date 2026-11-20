@@ -2,6 +2,10 @@ use super::super::tests::FONT_BYTES;
 use super::same_fallback_attributes;
 use resvg::usvg::fontdb::{Database, FaceInfo, Stretch, Style, Weight};
 
+#[cfg(target_os = "macos")]
+pub(super) const INTERNAL_INTERFACE_BOLD_FAMILY: &str =
+    "__krr_internal_system_ui_interface_bold_700";
+
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 #[test]
 fn browser_system_font_aliases_select_the_registered_system_face()
@@ -45,7 +49,6 @@ fn loaded_selector_defers_system_aliases_even_with_a_registered_face() -> Result
 #[cfg(target_os = "macos")]
 #[test]
 fn internal_interface_family_is_not_a_user_selectable_font() -> Result<(), String> {
-    const INTERNAL_INTERFACE_BOLD_FAMILY: &str = "__krr_internal_system_ui_interface_bold_700";
     let mut database = Database::new();
     let mut face = bundled_face()?;
     face.families = vec![(

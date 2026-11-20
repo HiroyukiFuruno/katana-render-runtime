@@ -1,4 +1,5 @@
-use resvg::usvg::fontdb::{Database, ID, Weight};
+use super::attribute_tests::INTERNAL_INTERFACE_BOLD_FAMILY;
+use resvg::usvg::fontdb::{Database, ID, Language, Weight};
 use resvg::usvg::{self, Node};
 use std::sync::Arc;
 
@@ -50,6 +51,14 @@ fn registered_weight_faces() -> Result<(Arc<Database>, ExpectedFaces), String> {
     let fallback = source.faces().next().ok_or("fixture fallback missing")?;
     let mut database = Database::new();
     database.load_font_data(super::super::tests::FONT_BYTES.to_vec());
+    /* WHY: 同じグリフを持つ内部書体を先に登録し、通常の代替選択から除外されることを確認する。 */
+    let mut internal = fallback.clone();
+    internal.weight = Weight(SEMIBOLD_WEIGHT);
+    internal.families = vec![(
+        INTERNAL_INTERFACE_BOLD_FAMILY.to_owned(),
+        Language::English_UnitedStates,
+    )];
+    database.push_face_info(internal);
     let faces = WEIGHTS.map(|weight| {
         let mut face = fallback.clone();
         face.weight = Weight(weight);
