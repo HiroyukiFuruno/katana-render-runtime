@@ -7,6 +7,10 @@ use super::types::LayoutResult;
 use super::{HtmlBrowserError, runtime_failure};
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
 
+#[cfg(test)]
+#[path = "session_render_tests.rs"]
+mod tests;
+
 impl HtmlInteractiveSession {
     pub(super) fn render_frame(&mut self) -> Result<(), HtmlBrowserError> {
         self.render_frame_with_resize_resolution(false)

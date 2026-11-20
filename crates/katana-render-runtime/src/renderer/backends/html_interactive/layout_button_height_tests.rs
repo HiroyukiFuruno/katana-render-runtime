@@ -11,10 +11,11 @@ const RGBA_CHANNELS: usize = 4;
 const BUTTON_BACKGROUND_RGBA: [u8; RGBA_CHANNELS] = [54, 154, 188, 255];
 const HTML: &str = r#"<style>
     button { display:block; font-family:Arial; font-size:14px; line-height:28px;
-        padding:3px 4px 5px; border:2px solid; }
+        border:2px solid; }
+    #auto, #fixed, #minimum { padding:3px 4px 5px; }
     #fixed { height:50px; } #minimum { min-height:45px; }
 </style><button id="auto" style="background-color:#369abc">保存</button><button id="fixed">固定</button>
-<button id="minimum">最小</button><script>
+<button id="minimum">最小</button><button id="default-padding">既定</button><script>
     document.getElementById('auto').addEventListener('click', function () {
         this.setAttribute('id', 'activated');
     });
@@ -29,6 +30,7 @@ fn auto_button_uses_label_line_box_and_receives_click_at_bottom_padding() -> Res
     let (x, y, right) = assert_button_box(&mut session, "auto", 40.0)?;
     assert_button_box(&mut session, "fixed", 50.0)?;
     assert_button_box(&mut session, "minimum", 45.0)?;
+    assert_button_box(&mut session, "default-padding", 34.0)?;
     assert_painted_button(&mut session, x, y)?;
     click(&mut session, right + OUTSIDE_BUTTON_OFFSET, y)?;
     assert!(session.runtime.node_for_element_id("auto").is_some());

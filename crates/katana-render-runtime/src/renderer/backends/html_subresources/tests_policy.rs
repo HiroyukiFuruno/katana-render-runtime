@@ -139,8 +139,9 @@ fn nonexistent_file_origin_allows_only_same_document_fragment() -> TestResult {
     assert!(!missing_parent.exists());
     assert!(!missing.exists());
     let origin = Url::from_file_path(&missing)
-        .map_err(|()| "missing file origin must be a valid URL".to_string())
-        .map(|url| url.to_string())?;
+        .ok()
+        .ok_or("missing file origin must be a valid URL")?
+        .to_string();
     let source = HtmlBrowserSource::new("<p>ok</p>", origin.as_str()).map_err(to_string)?;
     let policy = HtmlSubresourcePolicy::from_source(&source);
     for fragment in ["#a", "#b", "#c"] {

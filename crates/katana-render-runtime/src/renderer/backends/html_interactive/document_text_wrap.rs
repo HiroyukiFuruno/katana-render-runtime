@@ -166,3 +166,28 @@ fn last_fitting_end(
     }
     low.checked_sub(1).map(|index| candidate_ends[index])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{CssStyle, should_defer_unbreakable_line, text_width};
+
+    #[test]
+    fn emergency_wrap_defers_only_when_the_word_fits_the_next_line() {
+        let mut style = CssStyle::browser_default();
+        style.allow_emergency_wrap = true;
+        let text = "unbreakable";
+        let width = text_width(text, &style);
+        assert!(should_defer_unbreakable_line(
+            text,
+            width / 4.0,
+            width,
+            &style
+        ));
+        assert!(!should_defer_unbreakable_line(
+            text,
+            width / 4.0,
+            width / 2.0,
+            &style
+        ));
+    }
+}

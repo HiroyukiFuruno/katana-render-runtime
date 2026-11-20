@@ -188,8 +188,15 @@ mod tests {
     use super::super::super::html_browser::HtmlBrowserViewport;
     use super::super::session::HtmlInteractiveSession;
     use super::super::tests::test_error;
-    use super::{CssStyle, HtmlLayoutRenderer, text_box_width};
+    use super::{CssStyle, HtmlLayoutRenderer, collapsed_inline_whitespace, text_box_width};
     use std::collections::HashMap;
+
+    #[test]
+    fn collapsed_inline_whitespace_preserves_the_spacing_between_nodes() {
+        assert_eq!(collapsed_inline_whitespace("word\n \t"), "word ");
+        assert_eq!(collapsed_inline_whitespace("\tword\n"), " word ");
+        assert_eq!(collapsed_inline_whitespace("word"), "word");
+    }
 
     fn start_public_session(html: &str) -> Result<HtmlInteractiveSession, String> {
         let source =

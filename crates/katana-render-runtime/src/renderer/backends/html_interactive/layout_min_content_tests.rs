@@ -44,6 +44,21 @@ fn min_content_uses_css_breaks_and_preserves_nonbreaking_spaces() {
 }
 
 #[test]
+fn min_content_includes_the_nested_element_padding() {
+    let attributes = [("style".into(), "width:min-content".into())];
+    let mut style = CssStyle::from_element("div", &attributes, &CssStyle::browser_default());
+    let nested = HtmlDocumentNode::Element {
+        node_id: 1,
+        tag: "span".into(),
+        attributes: vec![("style".into(), "padding:0 7px".into())],
+        children: vec![HtmlDocumentNode::Text("word".into())],
+    };
+    let expected = measured_text_width("word", &style) + 14.0;
+    style.resolve_min_content_width(&[nested]);
+    assert_eq!(style.box_width(200.0), expected);
+}
+
+#[test]
 fn min_content_respects_box_constraints_and_the_last_valid_width() {
     let text = &[HtmlDocumentNode::Text("unbreakabletoken".into())];
     for (declarations, expected) in [
