@@ -160,11 +160,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.verify_filter == 'release-contracts' && 'c7296254e9444299ae7ecd681f9b8a7a239a55b1' || github.sha }}
+          ref: ${{ inputs.verify_filter == 'release-contracts' && 'df4960023dac135072e6af9d26f898cfea6b0f87' || github.sha }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: "1.99.1"
+          components: clippy, rustfmt, llvm-tools-preview
       - name: Verify guarded Cargo clean contracts
         if: inputs.verify_filter != 'release-contracts'
         run: python3 -m unittest discover -s scripts/hooks -p run_locked_command_test.py --failfast
@@ -176,21 +177,26 @@ jobs:
         if: inputs.verify_filter == 'release-contracts'
         with:
           version: "0.13.0"
+          enable-cache: true
       - uses: taiki-e/install-action@4ccefd7d26b61bbb81f4ff01165e8a6880a1bd59 # just
         if: inputs.verify_filter == 'release-contracts'
-      - name: Verify full automation contracts at release HEAD
-        id: release_contracts
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         if: inputs.verify_filter == 'release-contracts'
+        with:
+          tool: cargo-llvm-cov@0.9.1
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        if: inputs.verify_filter == 'release-contracts'
+        with:
+          tool: cargo-nextest@0.9.148
+      - name: Verify full automation contracts at release HEAD
+        if: inputs.verify_filter == 'release-contracts'
+        env:
+          PR_HEAD_SHA: df4960023dac135072e6af9d26f898cfea6b0f87
         run: |
-          test "$(git rev-parse HEAD)" = 'c7296254e9444299ae7ecd681f9b8a7a239a55b1'
+          test "$(git rev-parse HEAD)" = "$PR_HEAD_SHA"
           bun install --frozen-lockfile
-          just check-contracts
-      - name: Collect all failing release contract tests
-        if: failure() && steps.release_contracts.outcome == 'failure'
-        run: tmp/html-performance-python-venv/bin/python -m unittest discover -s scripts/release -p '*_test.py' -v
-      - name: Check capacity contracts independently of release tests
-        if: failure() && steps.release_contracts.outcome == 'failure'
-        run: just build-capacity-check
+          cargo install cargo-sweep --version 0.8.0 --locked
+          bash scripts/release/check-linux-contracts.sh --collect-failures
 
   static-quality:
     name: Source quality checks
