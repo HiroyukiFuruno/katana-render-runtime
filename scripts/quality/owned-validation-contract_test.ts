@@ -2582,21 +2582,19 @@ test("generated Rust fingerprint binds same-path resource bytes", () => {
 test("generated Rust fingerprint binds added paths and restores after removal", () => {
   const root = fixture();
   changeShapeResource(root);
-  const changed = inspectOwnedValidationContract(root);
+  const changed = inspectGeneratedRustCheckRoute(root);
   write(root, addedShapeResource, "additional same-group resource");
   track(root);
-  const withAdded = inspectOwnedValidationContract(root);
-  expect(withAdded.generatedRustAssets.inputCount).toBe(changed.generatedRustAssets.inputCount + 1);
-  expect(withAdded.generatedRustAssets.inputDigest).not.toBe(
-    changed.generatedRustAssets.inputDigest,
-  );
-  expect(withAdded.generatedRustAssets.paths).toEqual(changed.generatedRustAssets.paths);
+  const withAdded = inspectGeneratedRustCheckRoute(root);
+  expect(withAdded.inputCount).toBe(changed.inputCount + 1);
+  expect(withAdded.inputDigest).not.toBe(changed.inputDigest);
+  expect(withAdded.paths).toEqual(changed.paths);
 
   fs.rmSync(path.join(root, addedShapeResource));
   track(root);
-  const withRemoved = inspectOwnedValidationContract(root);
-  expect(withRemoved.generatedRustAssets.inputCount).toBe(changed.generatedRustAssets.inputCount);
-  expect(withRemoved.generatedRustAssets.inputDigest).toBe(changed.generatedRustAssets.inputDigest);
+  const withRemoved = inspectGeneratedRustCheckRoute(root);
+  expect(withRemoved.inputCount).toBe(changed.inputCount);
+  expect(withRemoved.inputDigest).toBe(changed.inputDigest);
 });
 test("generated Rust resource symlinks fail closed during source fingerprinting", () => {
   const root = fixture();
