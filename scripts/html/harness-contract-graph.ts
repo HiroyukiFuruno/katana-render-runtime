@@ -893,6 +893,65 @@ function astNodes(value: unknown): readonly Record<string, unknown>[] {
   return nodes;
 }
 
+interface SourceSyntaxNode {
+  node: Record<string, unknown>;
+  parent: Record<string, unknown> | undefined;
+  grandparent: Record<string, unknown> | undefined;
+}
+
+const sourceSyntaxNodes = new WeakMap<object, readonly SourceSyntaxNode[]>();
+const sourceSyntaxTypes = new Set([
+  "ImportDeclaration",
+  "TsImportEqualsDeclaration",
+  "ExportAllDeclaration",
+  "ExportNamedDeclaration",
+  "CallExpression",
+  "Identifier",
+  "MemberExpression",
+]);
+
+function sourceSyntax(module: Record<string, unknown>): readonly SourceSyntaxNode[] {
+  const cached = sourceSyntaxNodes.get(module);
+  if (cached) return cached;
+  const nodes: SourceSyntaxNode[] = [];
+  const visit = (
+    value: unknown,
+    parent?: Record<string, unknown>,
+    grandparent?: Record<string, unknown>,
+  ): void => {
+    if (Array.isArray(value)) {
+      for (const child of value) visit(child, parent, grandparent);
+      return;
+    }
+    const node = object(value);
+    if (!node) return;
+    const type = node.type;
+    if (typeof type === "string" && sourceSyntaxTypes.has(type))
+      nodes.push({ node, parent, grandparent });
+    if (type !== "ImportDeclaration" && type !== "TsTypeQuery")
+      visitAstChildren(node, visit, node, parent);
+  };
+  visit(module);
+  sourceSyntaxNodes.set(module, nodes);
+  return nodes;
+}
+
+function appendSyntaxReferences(
+  result: string[],
+  module: Record<string, unknown>,
+  referencesForCall: (node: Record<string, unknown>) => string[],
+  escaped: (syntax: SourceSyntaxNode) => boolean,
+): void {
+  // WHY: 呼出元ごとの判定は維持し、同じモジュールの構文と親子関係だけを再利用する。
+  for (const syntax of sourceSyntax(module)) {
+    const { node } = syntax;
+    if (node.type === "CallExpression") result.push(...referencesForCall(node));
+    else if (node.type === "Identifier" || node.type === "MemberExpression") {
+      if (escaped(syntax)) result.push("!unresolved-executable");
+    } else result.push(...declarationCode(node));
+  }
+}
+
 function functionNamed(
   module: Record<string, unknown>,
   name: string,
@@ -3812,32 +3871,15 @@ function sourceCodeFromModule(
     if (node === toolCall) return externalToolReferences(node);
     return regularCallReferences(node);
   };
-  const escaped = (
-    node: Record<string, unknown>,
-    parent?: Record<string, unknown>,
-    grandparent?: Record<string, unknown>,
-  ) =>
-    !preparedSource &&
-    !spyArguments.has(node) &&
-    processApiEscaped(node, parent, grandparent, processes);
-  const visit = (
-    value: unknown,
-    parent?: Record<string, unknown>,
-    grandparent?: Record<string, unknown>,
-  ): void => {
-    if (Array.isArray(value)) {
-      for (const child of value) visit(child, parent, grandparent);
-      return;
-    }
-    const node = object(value);
-    if (!node) return;
-    result.push(...declarationCode(node));
-    if (["ImportDeclaration", "TsTypeQuery"].includes(String(node.type))) return;
-    if (escaped(node, parent, grandparent)) result.push("!unresolved-executable");
-    if (node.type === "CallExpression") result.push(...referencesForCall(node));
-    visitAstChildren(node, visit, node, parent);
-  };
-  visit(module);
+  appendSyntaxReferences(
+    result,
+    moduleRecord,
+    referencesForCall,
+    ({ node, parent, grandparent }) =>
+      !preparedSource &&
+      !spyArguments.has(node) &&
+      processApiEscaped(node, parent, grandparent, processes),
+  );
   return result;
 }
 
