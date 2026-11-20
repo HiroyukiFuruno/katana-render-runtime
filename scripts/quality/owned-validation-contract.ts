@@ -5519,12 +5519,18 @@ export function inspectPlaywrightRoute(directory: string): {
 export function inspectGeneratedRustCheckRoute(directory: string): {
   local: boolean;
   ci: boolean;
+  paths: string[];
+  inputCount: number;
+  inputDigest: string;
   issues: OwnedValidationIssue[];
 } {
   const { context, verifyExternalTools } = routeMetadata(directory);
-  const route = generatedRustCheckRoute(context);
+  const { local, ci, paths, inputCount, inputDigest } = generatedRustContract(
+    context,
+    context.visible,
+  );
   verifyExternalTools();
-  return { ...route, issues: context.issues };
+  return { local, ci, paths, inputCount, inputDigest, issues: context.issues };
 }
 
 export function inspectMathJaxUnusedAuditRoute(directory: string): {
