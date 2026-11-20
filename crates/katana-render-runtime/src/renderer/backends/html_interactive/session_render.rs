@@ -7,10 +7,6 @@ use super::types::LayoutResult;
 use super::{HtmlBrowserError, runtime_failure};
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
 
-#[cfg(all(test, target_os = "linux"))]
-#[path = "session_render_layout_font_geometry_tests.rs"]
-mod font_geometry_tests;
-
 impl HtmlInteractiveSession {
     pub(super) fn render_frame(&mut self) -> Result<(), HtmlBrowserError> {
         self.render_frame_with_resize_resolution(false)

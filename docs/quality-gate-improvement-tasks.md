@@ -2,6 +2,11 @@
 
 ## 公開候補の現在地点（2026-11-20）
 
+- [x] Linux x64の手動候補 `b50f16fb` で、Chromeとの暫定公開用の全比較と操作検証が完了した。採点された236画像はすべて90点以上で最低90.52点。要件書91画像と長文33画像は全件合格し、動的HTML15画像、入力操作18画像、スクリプト機能23項目も合格した。Arialが入っていない環境では、後続の汎用書体より先に互換書体を選ぶ。[全比較](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44655479616)・[要件書と長文](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44653018398)
+- [x] Windows x64では `b50f16fb` を異なるランナーで計測した際に初回表示が5.038秒、うち176書体の走査が3.296秒だった。`efeea2a0` で既存のFontiqueを通じてDirectWriteから指定1ファミリーの4ファイルを取得するように変更した。書体探索0.095秒、要件書の初回表示1.326秒を計測し、関連12テストが合格した。[初回表示](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44658409469)・[回帰テスト](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44658409782)
+- [x] PlantUMLのMaven取得がGitHub Actionsで404を返したため、2回目だけ別の配布元を使う。両配布元の1.2026.10のJARが既存のSHA-256と一致することを確認し、代替配布元からの復旧、取得失敗、SHA-256の不一致、既存キャッシュの4テストをLinux手動CIで実行した。[取得契約の回帰](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44653018398)
+- [ ] 上記の変更を取り込んだ公開コミットの自己レビュー、完全品質ゲート、Draft PRの審査、3 OSの必須CI、保護マージと公開を確認する。手動検証結果にはそれぞれの実行コミットを記録した。
+
 - [x] Windows x64の同じ1280×900要件書を最適化ビルドで測定し、初回表示26.564秒と改善途中の3.827秒を記録した。後者のSVG画像化ではフォント準備1.825秒、解析・文字組み1.289秒、画素描画0.005秒を計測した。測定元は `8e786307` の [Windows手動CI](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44610967660)。
 - [/] 同じ候補のLinux x64では620×900の匿名化要件書47／47画像が90点以上で、最低91.04点。レイアウトは2／2画像が合格し、入力状態の2画像は89.62点だった。その後、入力欄の幅計算と描画に同じ代替書体を使う修正を加えた。
 - [x] ボタンの描画とクリック領域を一致させる修正 `4aba7eeb` で、外側のクリックが無効で下端の余白をクリックできることを [Windows手動CI](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44612405776) の実行テスト1件で確認した。
