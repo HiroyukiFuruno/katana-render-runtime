@@ -98,9 +98,8 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
         proof.require_fresh_measurement_if_local_expired([job])
 
     def test_paired_workflow_falls_back_when_local_evidence_is_missing(self) -> None:
-        from pathlib import Path
         from local_macos_workflow_contract_test import workflow_job, workflow_steps
-        workflow = (Path("/Users/hiroyuki_furuno/works/private/katana-render-runtime") / ".github/workflows/test-and-build.yml").read_text()
+        workflow = mac.WORKFLOW.read_text(encoding="utf8")
         steps = {step.get("name"): step for step in workflow_steps(workflow_job(workflow, "paired-performance"))}
         self.assertEqual(steps["Verify optional local HTML performance evidence"].get("continue-on-error"), "true")
         expected = "steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'"

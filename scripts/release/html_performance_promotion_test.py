@@ -411,7 +411,7 @@ class PromotionAtomicityTest(unittest.TestCase):
                     promotion.improvement_established(root, root)
 
     def test_promotion_records_every_accepted_candidate_and_updates_only_on_improvement(self) -> None:
-        repository = Path("/Users/hiroyuki_furuno/works/private/katana-render-runtime")
+        repository = runner.ROOT
         original = (repository / "docs/performance/html-performance-history.json").read_bytes()
         history = gate._object(json.loads(original), "test history")
         first = gate._objects(history["records"], "test records")[0]
@@ -587,9 +587,8 @@ class PromotionAtomicityTest(unittest.TestCase):
                               "2026-01-01T00:00:00Z")
 
     def test_history_schema_rejects_malformed_input(self) -> None:
-        root = Path("/Users/hiroyuki_furuno/works/private/katana-render-runtime")
         with self.assertRaises(subprocess.CalledProcessError):
-            promotion._schema_validate(root, b'{"schema":"invalid"}')
+            promotion._schema_validate(runner.ROOT, b'{"schema":"invalid"}')
 
     def test_direct_call_without_prepared_environment_is_rejected(self) -> None:
         with TemporaryDirectory() as directory:
