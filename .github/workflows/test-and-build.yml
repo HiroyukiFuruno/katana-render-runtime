@@ -44,7 +44,7 @@ on:
           - linux-fidelity
           - windows
       verify_filter:
-        description: Optional nextest filter, linux-assets test pattern or full-runtime-assets, or linux-fidelity selection (samples, visual-fixes, remaining-html, marker-css, code-width, font-stack, font-geometry, dynamic-html, requirements-fonts).
+        description: Optional nextest filter, linux-assets test pattern, full-runtime-assets or remaining-runtime-assets, or linux-fidelity selection.
         required: false
         default: ''
         type: string
@@ -416,7 +416,7 @@ jobs:
         if: >-
           matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
           github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' &&
-          inputs.verify_filter == 'full-runtime-assets'
+          (inputs.verify_filter == 'full-runtime-assets' || inputs.verify_filter == 'remaining-runtime-assets')
         timeout-minutes: 5
         run: |
           asset_python="$RUNNER_TEMP/krr-asset-python"
@@ -432,26 +432,32 @@ jobs:
           bun test --path-ignore-patterns 'tmp/**' \
             --test-name-pattern '^(actual TypeScript calls use the pinned compiler without a wrapper|literal RTK proxy retains pinned TypeScript classification)$' \
             ./scripts/html/harness-contract_test.ts
+          bun test --path-ignore-patterns 'tmp/**' \
+            --test-name-pattern '^(accepts a complete 48-entry evidence fixture while keeping acceptance false|scores a different capture separately from repeated captures in the same viewport)$' \
+            ./scripts/html/compare-toc-evidence_test.ts
 
       - name: Run runtime asset script tests
         if: >-
           matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-fidelity' &&
-          (inputs.verify_platform != 'linux-assets' || inputs.verify_filter == '' || inputs.verify_filter == 'full-runtime-assets')
+          (inputs.verify_platform != 'linux-assets' || inputs.verify_filter == '' || inputs.verify_filter == 'full-runtime-assets' || inputs.verify_filter == 'remaining-runtime-assets')
         env:
           MOON_CONCURRENCY: "1"
           KRR_VERIFY_LINUX_VALIDATION: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' && inputs.verify_filter == '' }}
-          KRR_VERIFY_LINUX_ASSET_ALL: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' && inputs.verify_filter == 'full-runtime-assets' }}
+          KRR_VERIFY_LINUX_ASSET_PREPARED: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' && (inputs.verify_filter == 'full-runtime-assets' || inputs.verify_filter == 'remaining-runtime-assets') }}
+          KRR_VERIFY_LINUX_ASSET_REMAINING: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' && inputs.verify_filter == 'remaining-runtime-assets' }}
         timeout-minutes: >-
           ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' &&
               (inputs.verify_filter == 'full-runtime-assets' && 35 || 21) || 15 }}
         run: |
           asset_python="$RUNNER_TEMP/krr-asset-python"
-          if [[ "$KRR_VERIFY_LINUX_ASSET_ALL" != true ]]; then
+          if [[ "$KRR_VERIFY_LINUX_ASSET_PREPARED" != true ]]; then
             uv venv --python 3.13 "$asset_python"
             uv pip sync --python "$asset_python/bin/python3" --require-hashes scripts/release/html-performance-requirements.lock
           fi
           export PATH="$asset_python/bin:$PATH"
-          if [[ "$KRR_VERIFY_LINUX_VALIDATION" == true ]]; then
+          if [[ "$KRR_VERIFY_LINUX_ASSET_REMAINING" == true ]]; then
+            bun run moon exec krr:runtime-asset-script-other
+          elif [[ "$KRR_VERIFY_LINUX_VALIDATION" == true ]]; then
             bun run moon exec krr:runtime-quality-owned-validation-contract-producer
           else
             just runtime-asset-script-test
@@ -518,7 +524,8 @@ jobs:
         if: >-
           matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
           github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' &&
-          inputs.verify_filter != '' && inputs.verify_filter != 'full-runtime-assets'
+          inputs.verify_filter != '' && inputs.verify_filter != 'full-runtime-assets' &&
+          inputs.verify_filter != 'remaining-runtime-assets'
         env:
           KRR_VERIFY_ASSET_TEST_PATTERN: ${{ inputs.verify_filter }}
         timeout-minutes: 5
