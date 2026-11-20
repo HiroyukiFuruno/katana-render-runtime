@@ -63,6 +63,7 @@ MERMAID_ZENUML_JS := env_var_or_default("MERMAID_ZENUML_JS", "crates/katana-rend
 DRAWIO_JS := env_var_or_default("DRAWIO_JS", "crates/katana-render-runtime/vendor/drawio/" + DRAWIO_JS_VERSION + "/drawio.min.js")
 MATHJAX_JS := env_var_or_default("MATHJAX_JS", "crates/katana-render-runtime/vendor/mathjax/" + MATHJAX_JS_VERSION + "/tex-svg.js")
 PLANTUML_MAVEN_ROOT := "https://repo.maven.apache.org/maven2/net/sourceforge/plantuml/plantuml-lgpl"
+PLANTUML_MAVEN_FALLBACK_ROOT := "https://maven-central.storage-download.googleapis.com/maven2/net/sourceforge/plantuml/plantuml-lgpl"
 PLANTUML_CACHE_DIR := env_var_or_default("KRR_PLANTUML_CACHE_DIR", `bash scripts/plantuml/cache-dir.sh`)
 PLANTUML_CACHE_JAR := PLANTUML_CACHE_DIR + "/" + PLANTUML_JAR_VERSION + "/plantuml.jar"
 DRAWIO_RESOURCE_DIR := "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/resources"
@@ -827,11 +828,12 @@ depends-update-mutations:
 # Install pinned PlantUML LGPL JAR into the PlantUML cache
 plantuml-install version=PLANTUML_JAR_VERSION output=PLANTUML_CACHE_JAR:
     @set -euo pipefail; \
-    url="{{PLANTUML_MAVEN_ROOT}}/{{version}}/plantuml-lgpl-{{version}}.jar"; \
+    artifact="{{version}}/plantuml-lgpl-{{version}}.jar"; \
+    urls=("{{PLANTUML_MAVEN_ROOT}}/$artifact" "{{PLANTUML_MAVEN_FALLBACK_ROOT}}/$artifact" "{{PLANTUML_MAVEN_ROOT}}/$artifact"); \
     target="{{output}}"; \
     expected="{{PLANTUML_JAR_CHECKSUM}}"; \
     if [ -f "$target" ] && [ ! -L "$target" ] && [ "$(bash scripts/plantuml/sha256-file.sh "$target")" = "$expected" ]; then exit 0; fi; \
-    max_attempts=3; \
+    max_attempts="${#urls[@]}"; \
     retry_delay="${KRR_PLANTUML_DOWNLOAD_RETRY_DELAY_SECONDS:-1}"; \
     case "$retry_delay" in ''|*[!0-9]*) echo "PlantUML retry delay must be a non-negative integer: $retry_delay" >&2; exit 1;; esac; \
     mkdir -p "$(dirname "$target")"; \
@@ -839,7 +841,7 @@ plantuml-install version=PLANTUML_JAR_VERSION output=PLANTUML_CACHE_JAR:
     trap 'rm -f -- "$tmp"' EXIT; \
     downloaded=false; \
     for attempt in $(seq 1 "$max_attempts"); do \
-      if curl --fail --silent --show-error --location "$url" --output "$tmp"; then downloaded=true; break; fi; \
+      if curl --fail --silent --show-error --location "${urls[attempt - 1]}" --output "$tmp"; then downloaded=true; break; fi; \
       if [ "$attempt" -lt "$max_attempts" ]; then echo "PlantUML download failed (attempt $attempt/$max_attempts); retrying" >&2; sleep "$retry_delay"; fi; \
     done; \
     if [ "$downloaded" != true ]; then echo "PlantUML download failed after $max_attempts attempts" >&2; exit 1; fi; \

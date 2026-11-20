@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import textwrap
 from pathlib import Path
+from urllib.parse import urlsplit
 
 PLANTUML_FIXTURE_SHA256 = hashlib.sha256(b"fixture").hexdigest()
 
@@ -1288,7 +1289,7 @@ katana-render-runtime = { workspace = true }
         *,
         payload: str = "fixture",
         cached_bytes: bytes | None = None,
-    ) -> tuple[subprocess.CompletedProcess[str], Path, int]:
+    ) -> tuple[subprocess.CompletedProcess[str], Path, tuple[str | None, ...]]:
         root = Path(__file__).parents[2]
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
@@ -1301,10 +1302,10 @@ katana-render-runtime = { workspace = true }
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
             f"attempts={attempts!s}\n"
-            "count=0\n"
-            'if [ -f "$attempts" ]; then count=$(cat "$attempts"); fi\n'
-            "count=$((count + 1))\n"
-            'printf \'%s\\n\' "$count" > "$attempts"\n'
+            'for argument in "$@"; do\n'
+            '  case "$argument" in https://*) printf \'%s\\n\' "$argument" >> "$attempts"; break;; esac\n'
+            "done\n"
+            'count=$(wc -l < "$attempts")\n'
             f'if [ "$count" -le {failures} ]; then exit 22; fi\n'
             'while [ "$#" -gt 0 ]; do\n'
             f'  if [ "$1" = "--output" ]; then printf %s {shlex.quote(payload)} > "$2"; exit 0; fi\n'
@@ -1338,9 +1339,10 @@ katana-render-runtime = { workspace = true }
             capture_output=True,
             check=False,
         )
-        count = int(attempts.read_text(encoding="utf-8")) if attempts.exists() else 0
+        attempted_urls = attempts.read_text(encoding="utf-8").splitlines() if attempts.exists() else []
+        hosts = tuple(urlsplit(url).hostname for url in attempted_urls)
         self.assertEqual(list(output.parent.glob("plantuml.jar.*")), [])
-        return completed, output, count
+        return completed, output, hosts
 
     def test_plantuml_install_recovers_from_a_transient_http_failure(self) -> None:
         completed, output, attempts = self.run_plantuml_install(
@@ -1348,7 +1350,10 @@ katana-render-runtime = { workspace = true }
             expected_checksum=PLANTUML_FIXTURE_SHA256,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(attempts, 2)
+        self.assertEqual(
+            attempts,
+            ("repo.maven.apache.org", "maven-central.storage-download.googleapis.com"),
+        )
         self.assertEqual(output.read_text(encoding="utf-8"), "fixture")
 
     def test_plantuml_install_fails_closed_after_bounded_retries(self) -> None:
@@ -1357,7 +1362,7 @@ katana-render-runtime = { workspace = true }
             expected_checksum=PLANTUML_FIXTURE_SHA256,
         )
         self.assertNotEqual(completed.returncode, 0)
-        self.assertEqual(attempts, 3)
+        self.assertEqual(len(attempts), 3)
         self.assertFalse(output.exists())
 
     def test_plantuml_install_keeps_checksum_validation_after_recovery(self) -> None:
@@ -1367,7 +1372,7 @@ katana-render-runtime = { workspace = true }
             payload="corrupt",
         )
         self.assertNotEqual(completed.returncode, 0)
-        self.assertEqual(attempts, 2)
+        self.assertEqual(len(attempts), 2)
         self.assertFalse(output.exists())
 
     def test_plantuml_install_reuses_only_a_checksum_verified_jar(self) -> None:
@@ -1379,7 +1384,7 @@ katana-render-runtime = { workspace = true }
                     cached_bytes=cached_bytes,
                 )
                 self.assertEqual(completed.returncode, 0, completed.stderr)
-                self.assertEqual(attempts, expected_attempts)
+                self.assertEqual(len(attempts), expected_attempts)
                 self.assertEqual(output.read_bytes(), b"fixture")
 
 
