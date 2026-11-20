@@ -5724,7 +5724,7 @@ test("external tool canonical query under another caller remains unresolved owne
   expect(references).toContain("!execute-local:../../node_modules/typescript/bin/tsc");
 });
 
-test("actual three RTK TypeScript calls retain finite external tool classification", () => {
+test("actual TypeScript calls use the pinned compiler without a wrapper", () => {
   const caller = path.join(import.meta.dir, "../runtime-bundles/runtime-bundle-checks_test.ts");
   const source = fs.readFileSync(caller, "utf8");
   const module = parseSync(source, { syntax: "typescript" });
@@ -5744,24 +5744,24 @@ test("actual three RTK TypeScript calls retain finite external tool classificati
         span: z.object({ start: z.number(), end: z.number() }),
       })
       .safeParse(node.data);
-    if (
-      call.success &&
-      z
-        .object({ type: z.literal("StringLiteral"), value: z.literal("rtk") })
-        .safeParse(call.data.arguments[0]?.expression).success
-    )
-      calls.push(call.data);
+    if (call.success) calls.push(call.data);
     for (const child of Object.values(node.data)) visit(child);
   };
   visit(module);
-  expect(calls.length).toBe(3);
+  expect(calls.length).toBe(2);
   for (const call of calls) {
     const actualCall = Buffer.from(source)
       .subarray(call.span.start - module.span.start, call.span.end - module.span.start)
       .toString();
+    expect(actualCall).toMatch(/^spawnSync\(\s*"bunx",\s*\["--no-install",\s*"tsc",/);
     const references = sourceCode(`import { spawnSync } from "node:child_process"; ${actualCall};`);
     expect(references).not.toContain("!unresolved-executable");
   }
+  expect(sourceCode(source)).not.toContain("!unresolved-executable");
+});
+
+test("literal RTK proxy retains pinned TypeScript classification", () => {
+  const source = 'Bun.spawnSync(["rtk", "proxy", "bunx", "--no-install", "tsc", "--version"]);';
   expect(sourceCode(source)).not.toContain("!unresolved-executable");
 });
 
