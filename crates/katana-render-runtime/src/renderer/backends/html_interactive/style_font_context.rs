@@ -47,10 +47,33 @@ impl CssStyle {
     }
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod tests {
     use super::CssStyle;
 
+    #[test]
+    fn font_family_recomputes_the_inherited_localized_fallback() {
+        let mut inherited = CssStyle::browser_default();
+        inherited.font_context.sans_serif = Some("Test Sans, sans-serif");
+        inherited.set_font_family(" -apple-system, Georgia, Sans-Serif ".into());
+        assert_eq!(
+            inherited.used_font_family(),
+            "Georgia, Test Sans, sans-serif"
+        );
+
+        let mut authored = inherited.clone();
+        authored.font_family = "blinkmacsystemfont, monospace, sans-serif".into();
+        authored.resolve_font_context(None, &inherited);
+        assert_eq!(
+            authored.used_font_family(),
+            "monospace, Test Sans, sans-serif"
+        );
+
+        authored.set_font_family("Arial".into());
+        assert_eq!(authored.used_font_family(), "Arial");
+    }
+
+    #[cfg(target_os = "linux")]
     #[test]
     fn linux_font_locale_localizes_inherited_generics_and_preserves_explicit_families() {
         let root = CssStyle::from_element(

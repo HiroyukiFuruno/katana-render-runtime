@@ -9,14 +9,15 @@ pub(in crate::markdown::svg_rasterize::text_shaping) fn matching_font_face(
     italic: bool,
 ) -> Option<usvg::fontdb::ID> {
     let names = css_font_family_names(font_family);
+    let platform = font_platform();
     if let ControlFlow::Break(selection) =
-        font_platform().face_override(database, font_family, &names, font_weight, italic)
+        platform.face_override(database, font_family, &names, font_weight, italic)
     {
         return selection;
     }
     let families = names
         .iter()
-        .map(|name| fontdb_family_for_database(database, name))
+        .map(|name| fontdb_family_for_database(database, name, &platform))
         .collect::<Vec<_>>();
     database.query(&usvg::fontdb::Query {
         families: &families,
@@ -33,9 +34,10 @@ pub(in crate::markdown::svg_rasterize::text_shaping) fn matching_font_face(
 fn fontdb_family_for_database<'a>(
     database: &'a usvg::fontdb::Database,
     name: &'a str,
+    platform: &impl PlatformFontStrategy,
 ) -> usvg::fontdb::Family<'a> {
     if name.eq_ignore_ascii_case("system-ui")
-        && let Some(family) = font_platform().installed_system_ui_family()
+        && let Some(family) = platform.installed_system_ui_family()
         && let Some(actual) = family_name_in_database(database, family)
     {
         return usvg::fontdb::Family::Name(actual);
@@ -46,11 +48,15 @@ fn fontdb_family_for_database<'a>(
     };
     family_name_in_database(database, requested)
         .or_else(|| {
-            let compatible = font_platform().compatible_named_family(requested)?;
+            let compatible = platform.compatible_named_family(requested)?;
             family_name_in_database(database, compatible)
         })
         .map_or(family, usvg::fontdb::Family::Name)
 }
+
+#[cfg(test)]
+#[path = "svg_rasterize_text_font_family_tests.rs"]
+mod tests;
 
 fn family_name_in_database<'a>(
     database: &'a usvg::fontdb::Database,

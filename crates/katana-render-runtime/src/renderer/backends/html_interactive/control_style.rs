@@ -10,7 +10,11 @@ const UA_CONTROL_LINE_HEIGHT: f32 = 15.3333;
 
 pub(super) fn ua_control_style(style: &CssStyle) -> CssStyle {
     let mut style = style.clone();
-    let family = SvgRasterizeOps::html_control_arial_family();
+    apply_control_typography(&mut style, SvgRasterizeOps::html_control_arial_family());
+    style
+}
+
+fn apply_control_typography(style: &mut CssStyle, family: &str) {
     if style.explicit_typography {
         if family != "Arial"
             && style
@@ -20,14 +24,13 @@ pub(super) fn ua_control_style(style: &CssStyle) -> CssStyle {
         {
             style.set_font_family(family.to_string());
         }
-        return style;
+        return;
     }
     style.set_font_family(family.to_string());
     style.font_size = UA_CONTROL_FONT_SIZE;
     style.line_height = UA_CONTROL_LINE_HEIGHT;
     style.line_height_factor = None;
     style.normal_line_height = false;
-    style
 }
 
 pub(super) fn button_width(children: &[HtmlDocumentNode], width: f32, style: &CssStyle) -> f32 {
@@ -114,7 +117,7 @@ fn is_summary(node: &&HtmlDocumentNode) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{CssStyle, button_style, button_width, ua_control_style};
+    use super::{CssStyle, apply_control_typography, button_style, button_width, ua_control_style};
     use crate::renderer::backends::html_document::HtmlDocumentNode;
 
     #[test]
@@ -146,6 +149,18 @@ mod tests {
         );
         let authored = ua_control_style(&authored);
         assert_eq!(authored.font_family, "Inter");
+        assert_eq!(authored.font_size, 20.0);
+    }
+
+    #[test]
+    fn arial_compatible_controls_preserve_the_authored_font_size() {
+        let mut authored = CssStyle::from_element(
+            "input",
+            &[("style".into(), "font: 20px 'Arial'".into())],
+            &CssStyle::browser_default(),
+        );
+        apply_control_typography(&mut authored, "Arial, sans-serif");
+        assert_eq!(authored.font_family, "Arial, sans-serif");
         assert_eq!(authored.font_size, 20.0);
     }
 

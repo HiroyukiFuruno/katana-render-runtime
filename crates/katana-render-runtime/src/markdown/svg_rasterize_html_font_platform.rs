@@ -145,3 +145,19 @@ impl PlatformFontStrategy for NativeFonts {
         ControlFlow::Continue(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Database, Family, FontconfigFonts, PlatformFontStrategy};
+    use std::ops::ControlFlow;
+
+    #[test]
+    fn fontconfig_keeps_generic_system_alias_and_ordinary_face_selection() {
+        let strategy = FontconfigFonts;
+        assert_eq!(strategy.system_alias(), Family::SansSerif);
+        assert_eq!(
+            strategy.face_override(&Database::new(), "Arial", &[], 400, false),
+            ControlFlow::Continue(())
+        );
+    }
+}
