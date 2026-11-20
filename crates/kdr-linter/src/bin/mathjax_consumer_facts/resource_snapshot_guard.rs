@@ -22,7 +22,7 @@ pub(super) fn inspect(file: &syn::File) -> Result<(), String> {
     require_snapshot_read(file)?;
     values::require_snapshot_accessors(file)?;
     cache::inspect(file)?;
-    values::require_read_wrappers(file)
+    values::require_binary_wrapper(file)
 }
 
 fn require_snapshot(file: &syn::File) -> Result<(), String> {

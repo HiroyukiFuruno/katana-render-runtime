@@ -43,15 +43,24 @@ fn tail(block: &Block) -> Result<&Expr, String> {
 fn require_external_reader(file: &syn::File) -> Result<(), String> {
     let read = method(file, "RuntimeResourceLoader", "read_file")?;
     if read.block.stmts.len() != 1
-        || !super::super::syntax::call_expr_path(
-            tail(&read.block)?,
-            "crate::resource_bytes::ResourceBytes::read_text",
-            &["path"],
-        )
+        || !matches!(method_call(tail(&read.block)?), Some(map)
+        if map.method == "map"
+            && super::super::syntax::call_expr_path(&map.receiver, "Self::load", &["path", "None"])
+            && map.args.len() == 1 && clones_loaded_text(&map.args[0]))
     {
         return Err("resource-loader:external-read".into());
     }
     Ok(())
+}
+
+fn clones_loaded_text(expression: &Expr) -> bool {
+    matches!(expression, Expr::Closure(closure)
+        if closure.inputs.len() == 1
+            && matches!(closure.inputs.first(), Some(syn::Pat::Ident(name)) if name.ident == "resource")
+            && matches!(method_call(&closure.body), Some(owned)
+                if owned.method == "to_owned" && owned.args.is_empty()
+                    && matches!(method_call(&owned.receiver), Some(text)
+                        if text.method == "text" && text.args.is_empty() && ident(&text.receiver, "resource"))))
 }
 
 fn require_load(file: &syn::File) -> Result<(), String> {

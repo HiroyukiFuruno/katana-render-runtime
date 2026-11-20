@@ -7,9 +7,14 @@ fn snapshot_cache_rejects_discarded_cache_lookup() -> Result<(), Box<dyn std::er
         RUST_INPUTS[super::super::super::source::RESOURCE_BYTES_INPUT_INDEX],
         &[
             (
-                ".filter(|snapshot| snapshot.identity == *identity)",
-                ".filter(|snapshot| snapshot.identity == *identity);",
+                "        Some(snapshot)\n    }\n\n    fn remember(",
+                "        Some(snapshot);\n    }\n\n    fn remember(",
                 "resource-loader:tail",
+            ),
+            (
+                ".filter(|snapshot| snapshot.identity == *identity)?;",
+                ".filter(|snapshot| snapshot.identity == *identity);",
+                "resource-loader:cache",
             ),
             (
                 ".filter(|snapshot| snapshot.identity == *identity)",
@@ -162,14 +167,14 @@ const ACCESSOR_MUTATIONS: &[(&str, &str, &str)] = &[
         "resource-loader:accessors",
     ),
     (
-        "ResourceContent::Text(text) => Ok(text.as_str()),\n            ResourceContent::Binary(_) => Err(Self::invalid_utf8()),",
-        "ResourceContent::Text(text) => Ok(text.as_str()),\n            ResourceContent::Binary(_) => Ok(\"\"),",
+        "ResourceContent::Binary(_) => Err(Self::invalid_utf8()),",
+        "ResourceContent::Binary(_) => Ok(Arc::new(String::new())),",
         "resource-loader:accessors",
     ),
     (
-        "Self::snapshot(path)?.text().map(str::to_owned)",
-        "Self::snapshot(path)?.text().map(|_| String::new())",
-        "resource-loader:bytes-text",
+        "Ok(Arc::clone(text))",
+        "Ok(Arc::new(String::new()))",
+        "resource-loader:accessors",
     ),
     (
         "std::io::Error::new(\n            std::io::ErrorKind::InvalidData,\n            \"stream did not contain valid UTF-8\",\n        )",
@@ -221,9 +226,9 @@ fn loader_guard_rejects_incomplete_digest_and_snapshot_wrappers()
             "resource-loader:result",
         ),
         (
-            "Self::snapshot(path)?.text().map(str::to_owned)",
-            "snapshot",
-            "resource-loader:bytes-text",
+            "Self::read_contents(&mut file)\n    }",
+            "snapshot\n    }",
+            "resource-loader:bytes-read",
         ),
     ];
     fixture.reject_unique_mutations(input, &cases)

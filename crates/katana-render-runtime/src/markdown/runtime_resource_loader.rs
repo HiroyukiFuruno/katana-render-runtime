@@ -84,7 +84,7 @@ impl RuntimeResourceLoader {
 
     #[cfg(test)]
     pub(crate) fn read_file(path: &Path) -> std::io::Result<String> {
-        crate::resource_bytes::ResourceBytes::read_text(path)
+        Self::load(path, None).map(|resource| resource.text().to_owned())
     }
 
     #[cfg(test)]

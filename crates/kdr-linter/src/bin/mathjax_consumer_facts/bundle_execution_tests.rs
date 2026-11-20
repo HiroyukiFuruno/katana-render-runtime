@@ -147,8 +147,8 @@ const RESOURCE_BYTES_MUTATIONS: &[(&str, &str, &str)] = &[
         "resource-loader:accessors",
     ),
     (
-        "ResourceContent::Text(text) => Ok(text.as_str()),",
-        "ResourceContent::Text(text) => Ok(other.as_str()),",
+        "ResourceContent::Text(text) => Ok(Arc::clone(text)),",
+        "ResourceContent::Text(text) => Ok(Arc::clone(other)),",
         "resource-loader:accessors",
     ),
     (

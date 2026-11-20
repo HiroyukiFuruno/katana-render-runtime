@@ -95,7 +95,7 @@ fn text_snapshot_digest_matches_its_bytes() -> Result<(), Box<dyn std::error::Er
     let path = dir.path().join("text");
     std::fs::write(&path, b"abc")?;
     let snapshot = ResourceBytes::snapshot(&path)?;
-    assert_eq!(snapshot.text()?, "abc");
+    assert_eq!(snapshot.text_handle()?.as_str(), "abc");
     assert!(snapshot.digest.get().is_none());
     assert_eq!(ResourceBytes::read_file(&path)?, b"abc");
     assert!(snapshot.digest.get().is_none());
@@ -113,13 +113,24 @@ fn reads_binary_and_observes_replacement_and_removal() -> Result<(), Box<dyn std
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("resource");
     std::fs::write(&path, b"\0\xff\x01")?;
+    #[cfg(windows)]
+    let original_modified = std::fs::metadata(&path)?.modified()?;
     assert_eq!(ResourceBytes::read_file(&path)?, b"\0\xff\x01");
     assert!(
-        ResourceBytes::read_text(&path)
+        ResourceBytes::snapshot(&path)?
+            .text_handle()
             .is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidData)
     );
     std::fs::write(&path, b"new")?;
-    assert_eq!(ResourceBytes::read_text(&path)?, "new");
+    #[cfg(windows)]
+    std::fs::File::options()
+        .write(true)
+        .open(&path)?
+        .set_modified(original_modified)?;
+    assert_eq!(
+        ResourceBytes::snapshot(&path)?.text_handle()?.as_str(),
+        "new"
+    );
     std::fs::remove_file(&path)?;
     assert!(
         ResourceBytes::read_file(&path)

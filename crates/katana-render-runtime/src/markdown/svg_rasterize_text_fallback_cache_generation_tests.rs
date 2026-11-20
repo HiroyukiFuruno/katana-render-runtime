@@ -23,7 +23,7 @@ fn fallback_cache_stops_recording_after_the_file_dependency_limit() -> Result<()
         .id;
     let generation = font_source_generation(&database, id);
     assert!(generation.is_file());
-    assert!(generation.durable_reusable());
+    assert!(generation.reusable());
 
     let mut dependencies = FileGenerationDependencies::new();
     for _ in 0..MAX_FILE_DEPENDENCIES {

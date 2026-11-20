@@ -82,9 +82,9 @@ pub(super) const CASES: &[(&str, &str, &str)] = &[
         "resource-loader:result",
     ),
     (
-        "Self::snapshot(path)?.text().map(str::to_owned)",
-        "other",
-        "resource-loader:bytes-text",
+        "Self::read_contents(&mut file)\n    }",
+        "Self::read_contents(other)\n    }",
+        "resource-loader:bytes-read",
     ),
     (
         "snapshot.identity.modified.is_some() && weight <= CACHE_BYTES as usize",

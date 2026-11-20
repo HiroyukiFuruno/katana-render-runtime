@@ -52,6 +52,27 @@ fn cache_guard_rejects_conditionally_removed_identity_check()
 }
 
 #[test]
+fn cache_guard_rejects_disabled_windows_content_check() -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = mathjax_fixture()?;
+    let input = RUST_INPUTS[super::super::source::RESOURCE_BYTES_INPUT_INDEX];
+    let statement = "if !Self::read_file(path).is_ok_and(|bytes| bytes == snapshot.bytes()) {\n            return None;\n        }";
+    let cases = [
+        (statement, "return None;", "resource-loader:cache"),
+        (
+            "#[cfg(windows)]\n        if !Self::read_file(path)",
+            "#[cfg(any())]\n        if !Self::read_file(path)",
+            "resource-loader:cache",
+        ),
+        (
+            "|bytes| bytes == snapshot.bytes()",
+            "|bytes| !bytes.is_empty()",
+            "resource-loader:cache",
+        ),
+    ];
+    fixture.reject_unique_mutations(input, &cases)
+}
+
+#[test]
 fn cache_guard_rejects_conditionally_removed_remember_branch()
 -> Result<(), Box<dyn std::error::Error>> {
     let fixture = mathjax_fixture()?;

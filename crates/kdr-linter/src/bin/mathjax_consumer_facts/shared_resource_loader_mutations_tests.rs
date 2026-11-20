@@ -35,8 +35,13 @@ pub(in super::super) const SHARED_RESOURCE_LOADER_MUTATIONS: &[(&str, &str, &str
         "resource-loader:source",
     ),
     (
-        "crate::resource_bytes::ResourceBytes::read_text(path)",
-        "crate::resource_bytes::ResourceBytes::read_text(other)",
+        "Self::load(path, None).map(|resource| resource.text().to_owned())",
+        "Self::load(other, None).map(|resource| resource.text().to_owned())",
+        "resource-loader:external-read",
+    ),
+    (
+        "Self::load(path, None).map(|resource| resource.text().to_owned())",
+        "Self::load(path, None).map(|_| String::new())",
         "resource-loader:external-read",
     ),
     (

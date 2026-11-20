@@ -40,7 +40,7 @@ pub(super) fn require_snapshot_digest(expression: &Expr) -> Result<(), String> {
     Ok(())
 }
 
-fn require_binary_wrapper(file: &syn::File) -> Result<(), String> {
+pub(super) fn require_binary_wrapper(file: &syn::File) -> Result<(), String> {
     let read = method(file, "ResourceBytes", "read_file")?;
     if read.block.stmts.len() != READ_FILE_STATEMENTS
         || !super::super::super::super::syntax::call_expr_path(
@@ -144,22 +144,4 @@ fn content_pattern(arm: &syn::Arm, variant: &str, name: &str) -> bool {
         if super::super::super::super::source::path_name(&pattern.path) == variant
             && pattern.elems.len() == 1
             && matches!(&pattern.elems[0], syn::Pat::Ident(value) if value.ident == name))
-}
-
-pub(super) fn require_read_wrappers(file: &syn::File) -> Result<(), String> {
-    let text = method(file, "ResourceBytes", "read_text")?;
-    let Some(mapped) = method_call(tail(&text.block)?) else {
-        return Err("resource-loader:bytes-text".into());
-    };
-    if text.block.stmts.len() != 1
-        || mapped.method != "map"
-        || mapped.args.len() != 1
-        || !ident(&mapped.args[0], "str::to_owned")
-        || !matches!(method_call(&mapped.receiver), Some(value)
-            if value.method == "text" && value.args.is_empty()
-                && super::super::super::super::syntax::call_expr_path(&value.receiver, "Self::snapshot", &["path"]))
-    {
-        return Err("resource-loader:bytes-text".into());
-    }
-    require_binary_wrapper(file)
 }

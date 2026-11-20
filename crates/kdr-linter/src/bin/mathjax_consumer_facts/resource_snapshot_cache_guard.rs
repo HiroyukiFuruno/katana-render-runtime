@@ -1,4 +1,5 @@
-use super::super::super::super::source::{ident, method};
+use super::super::super::super::source::{ident, local, method};
+use super::super::super::super::syntax::call_expr_path;
 use super::super::{method_call, tail};
 use syn::{Expr, Stmt};
 
@@ -8,16 +9,28 @@ mod attrs;
 mod constructor;
 #[path = "resource_snapshot_cache_weight_guard.rs"]
 mod weight;
+#[path = "resource_snapshot_windows_cache_guard.rs"]
+mod windows;
 
 use weight::valid_weight;
 
+const CACHE_LOOKUP_STATEMENTS: usize = 4;
+
 pub(super) fn inspect(file: &syn::File) -> Result<(), String> {
     let cached = method(file, "ResourceBytes", "cached")?;
-    if !attrs::valid(cached) || cached.block.stmts.len() != 2 {
+    let mut normalized = cached.clone();
+    if normalized.block.stmts.len() != CACHE_LOOKUP_STATEMENTS
+        || !windows::verify_and_remove_platform_attribute(&mut normalized.block.stmts[2])
+        || !attrs::valid(&normalized)
+        || !call_expr_path(tail(&cached.block)?, "Some", &["snapshot"])
+    {
         return Err("resource-loader:cache".into());
     }
     require_cache_disabled(&cached.block.stmts[0])?;
-    require_cache_filter(tail(&cached.block)?)?;
+    let Expr::Try(lookup) = local(&cached.block, 1, "snapshot")? else {
+        return Err("resource-loader:cache".into());
+    };
+    require_cache_filter(&lookup.expr)?;
     require_remember(file)?;
     constructor::inspect(file)
 }

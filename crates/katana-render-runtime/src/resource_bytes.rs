@@ -82,14 +82,6 @@ impl ResourceSnapshot {
                 .collect()
         })
     }
-    #[cfg(test)]
-    pub(crate) fn text(&self) -> std::io::Result<&str> {
-        match &self.content {
-            ResourceContent::Text(text) => Ok(text.as_str()),
-            ResourceContent::Binary(_) => Err(Self::invalid_utf8()),
-        }
-    }
-
     pub(crate) fn text_handle(&self) -> std::io::Result<Arc<String>> {
         match &self.content {
             ResourceContent::Text(text) => Ok(Arc::clone(text)),
@@ -126,9 +118,15 @@ impl ResourceBytes {
         identity: &Identity,
     ) -> Option<Arc<ResourceSnapshot>> {
         identity.modified?;
-        cache
+        let snapshot = cache
             .get(path)
-            .filter(|snapshot| snapshot.identity == *identity)
+            .filter(|snapshot| snapshot.identity == *identity)?;
+        /* WHY: Windowsでは同じ長さの上書きを更新日時だけでは判定できない。 */
+        #[cfg(windows)]
+        if !Self::read_file(path).is_ok_and(|bytes| bytes == snapshot.bytes()) {
+            return None;
+        }
+        Some(snapshot)
     }
 
     fn remember(
@@ -189,11 +187,6 @@ impl ResourceBytes {
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes)?;
         Ok(bytes)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn read_text(path: &Path) -> std::io::Result<String> {
-        Self::snapshot(path)?.text().map(str::to_owned)
     }
 }
 

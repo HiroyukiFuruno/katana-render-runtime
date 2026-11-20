@@ -6,7 +6,7 @@ use super::{
 pub(in super::super) fn require_snapshot_accessors(file: &syn::File) -> Result<(), String> {
     require_digest_accessor(file)?;
     require_invalid_utf8(file)?;
-    for name in ["bytes", "text", "text_handle"] {
+    for name in ["bytes", "text_handle"] {
         require_content_accessor(file, name)?;
     }
     Ok(())
@@ -71,10 +71,8 @@ fn require_content_accessor(file: &syn::File, name: &str) -> Result<(), String> 
 fn valid_text_accessor(expression: &Expr, name: &str) -> bool {
     matches!(expression, Expr::Call(ok)
                 if ident(&ok.func, "Ok") && ok.args.len() == 1
-                    && ((name == "text" && matches!(method_call(&ok.args[0]), Some(text)
-                        if text.method == "as_str" && text.args.is_empty() && ident(&text.receiver, "text")))
-                        || (name == "text_handle"
-                            && syntax::call_expr_path(&ok.args[0], "Arc::clone", &["text"]))))
+                    && name == "text_handle"
+                    && syntax::call_expr_path(&ok.args[0], "Arc::clone", &["text"]))
         || matches!(method_call(expression), Some(bytes)
                     if name == "bytes" && bytes.method == "as_bytes" && bytes.args.is_empty()
                         && ident(&bytes.receiver, "text"))
