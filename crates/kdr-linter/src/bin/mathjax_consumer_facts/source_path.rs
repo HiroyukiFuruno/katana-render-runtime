@@ -21,3 +21,21 @@ impl SourcePath {
         fs::read(&path).map_err(|error| format!("read-source:{relative}:{error}"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::SourcePath;
+
+    #[test]
+    fn existing_absolute_input_cannot_use_a_missing_source_root() -> std::io::Result<()> {
+        let temporary = tempfile::tempdir()?;
+        let input = temporary.path().join("source.rs");
+        std::fs::write(&input, b"fn example() {}")?;
+        let missing_root = temporary.path().join("missing");
+        assert!(
+            SourcePath::opaque_bytes(&missing_root, input.to_string_lossy().as_ref())
+                .is_err_and(|error| error.starts_with("missing-source-root:"))
+        );
+        Ok(())
+    }
+}

@@ -92,12 +92,13 @@ mod tests {
 
     #[test]
     fn ast_linter_font_platform_boundary_rejects_os_conditions() -> syn::Result<()> {
-        let syntax = syn::parse_file(
-            r#"#[cfg(all(test, target_os = "linux"))] fn first() {}
-#[cfg_attr(not(windows), inline)] fn second() {}
-fn third() { if cfg!(target_family = "unix") {} }
-#[cfg(test)] fn platform_independent_test() {}"#,
-        )?;
+        let source = concat!(
+            "#[cfg(all(test, target_os = \"linux\"))] fn first() {}\n",
+            "#[cfg_attr(not(windows), inline)] fn second() {}\n",
+            "fn third() { if cfg!(target_family = \"unix\") {} }\n",
+            "#[cfg(test)] fn platform_independent_test() {}",
+        );
+        let syntax = syn::parse_file(source)?;
         let found = violations(Path::new("shared_fonts.rs"), &syntax);
         assert_eq!(
             found

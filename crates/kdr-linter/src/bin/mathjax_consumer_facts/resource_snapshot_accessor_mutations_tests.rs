@@ -96,6 +96,28 @@ fn snapshot_identity_rejects_handle_and_regular_file_guard_drift()
 }
 
 #[test]
+fn snapshot_loader_rejects_non_call_identity_and_wrong_windows_field()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = mathjax_fixture()?;
+    fixture.reject_unique_mutations(
+        RUST_INPUTS[super::super::super::source::RESOURCE_BYTES_INPUT_INDEX],
+        &[
+            ("Ok(Self {", "return Ok(Self {", "resource-loader:metadata"),
+            (
+                "windows: same_file::Handle::from_file(file.try_clone()?)?,",
+                "incorrect_windows: same_file::Handle::from_file(file.try_clone()?)?,",
+                "resource-loader:metadata",
+            ),
+            (
+                "let before = Identity::from_file(&file)?;",
+                "let before = file?;",
+                "resource-loader:metadata",
+            ),
+        ],
+    )
+}
+
+#[test]
 fn snapshot_loader_rejects_missing_snapshot_and_cache_methods()
 -> Result<(), Box<dyn std::error::Error>> {
     let fixture = mathjax_fixture()?;

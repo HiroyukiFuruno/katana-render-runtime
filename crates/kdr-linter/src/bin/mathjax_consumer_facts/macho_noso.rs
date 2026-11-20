@@ -142,10 +142,10 @@ fn exact_keys(value: &Value, expected: &[&str], label: &str) -> Result<(), Strin
 }
 
 fn canonical_file(path: &Path) -> Result<PathBuf, String> {
-    let canonical = path.canonicalize().map_err(|error| error.to_string())?;
+    let canonical = path.canonicalize().map_err(io_error_message)?;
     if CanonicalPath::for_comparison(&canonical) != CanonicalPath::for_comparison(path)
         || !fs::symlink_metadata(path)
-            .map_err(|error| error.to_string())?
+            .map_err(io_error_message)?
             .file_type()
             .is_file()
     {
@@ -154,8 +154,12 @@ fn canonical_file(path: &Path) -> Result<PathBuf, String> {
     Ok(canonical)
 }
 
+fn io_error_message(error: std::io::Error) -> String {
+    error.to_string()
+}
+
 fn read_metadata(path: &Path) -> Result<fs::Metadata, String> {
-    fs::metadata(path).map_err(|error| error.to_string())
+    fs::metadata(path).map_err(io_error_message)
 }
 
 fn sha256(bytes: &[u8]) -> String {
