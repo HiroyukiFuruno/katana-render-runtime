@@ -512,6 +512,7 @@ jobs:
             ['html/library-reservation-fidelity', '#column-p1'],
             ['html/aspects/input-state', '#name, #state-summary'],
           ] : [
+            ['html/anonymized-requirements', '.doc-header h1, #s13 td:last-child, #s27 td:last-child'],
             ['html-diagram-consumer/mermaid-class-diagram', 'main h1, main > p, .notes li'],
             ['html-diagram-consumer/drawio-class-diagram', 'main h1, main > p, .notes li'],
             ['html/library-reservation-fidelity', 'h1, p'],
