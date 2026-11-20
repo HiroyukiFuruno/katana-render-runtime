@@ -2442,13 +2442,14 @@ test("Moon fixture itself must consume both owner environment values", () => {
   const fixturePath = "tests/fixtures/quality-cache/moon-cache-subject.test.ts";
   const source = fs.readFileSync(path.join(root, fixturePath), "utf8");
   write(root, fixturePath, source.replace("process.env.CONTRACT_PHASE", "process.env.WRONG_PHASE"));
-  expect(codes(root)).toContain(
+  const issueCodes = codes(root);
+  expect(issueCodes).toContain(
     "moon-cache-fixture-input-unverified:tests/fixtures/quality-cache/moon-cache-subject.test.ts",
   );
-  expect(codes(root)).toContain(
+  expect(issueCodes).toContain(
     "unit-local-missing:tests/fixtures/quality-cache/moon-cache-subject.test.ts",
   );
-  expect(codes(root)).toContain(
+  expect(issueCodes).toContain(
     "unit-ci-missing:tests/fixtures/quality-cache/moon-cache-subject.test.ts",
   );
 });
