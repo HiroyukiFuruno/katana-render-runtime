@@ -41,6 +41,10 @@ pub(in crate::markdown::svg_rasterize) trait PlatformFontStrategy {
         Family::SansSerif
     }
 
+    fn control_arial_family(&self) -> &'static str {
+        "Arial"
+    }
+
     fn localized_sans_serif(&self, _: &str) -> Option<&'static str> {
         None
     }
@@ -91,6 +95,12 @@ struct FontconfigFonts;
 impl PlatformFontStrategy for FontconfigFonts {
     fn installed_paths(&self, families: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
         super::fontconfig_font_paths(families)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn control_arial_family(&self) -> &'static str {
+        /* WHY: Arial未導入時も主書体を解決してから、実際の字形に合わせて代替できるようにする。 */
+        "Arial, Liberation Sans, sans-serif"
     }
 
     #[cfg(target_os = "linux")]

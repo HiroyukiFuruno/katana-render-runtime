@@ -1,4 +1,4 @@
-use super::super::control_style::{input_style, text_input_control_style};
+use super::super::control_style::{input_style, ua_control_style};
 use super::super::layout::HtmlLayoutRenderer;
 use super::super::style::CssStyle;
 use super::super::svg::escape_xml;
@@ -22,7 +22,7 @@ impl HtmlLayoutRenderer {
         if super::is_checkbox(attributes) {
             return self.render_checkbox(node_id, attributes, x, y, width, style);
         }
-        let control_style = text_input_control_style(style);
+        let control_style = ua_control_style(style);
         let geometry = input_geometry(x, y, width, attributes, &control_style);
         let value = super::values::input_value(self, node_id, attributes);
         let style = input_style(&control_style, self.focused_input == Some(node_id));

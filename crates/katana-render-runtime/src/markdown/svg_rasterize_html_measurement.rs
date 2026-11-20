@@ -1,6 +1,12 @@
 use super::{SvgRasterizeOps, TextSpacingTrim, text_shaping};
 
 impl SvgRasterizeOps {
+    pub(crate) fn html_control_arial_family() -> &'static str {
+        use super::font::platform::{PlatformFontStrategy, font_platform};
+
+        font_platform().control_arial_family()
+    }
+
     pub(crate) fn localized_html_sans_serif(language: &str) -> Option<&'static str> {
         use super::font::platform::{PlatformFontStrategy, font_platform};
 

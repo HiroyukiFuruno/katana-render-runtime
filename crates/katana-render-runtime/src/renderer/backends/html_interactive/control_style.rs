@@ -3,35 +3,30 @@ use super::constants::{BUTTON_UA_BORDER_WIDTH, BUTTON_UA_HORIZONTAL_PADDING};
 use super::document::{attribute, node_text};
 use super::style::{CssBorderStyle, CssStyle};
 use super::text_metrics::text_width;
+use crate::markdown::svg_rasterize::SvgRasterizeOps;
 
 const UA_CONTROL_FONT_SIZE: f32 = 13.3333;
 const UA_CONTROL_LINE_HEIGHT: f32 = 15.3333;
 
 pub(super) fn ua_control_style(style: &CssStyle) -> CssStyle {
-    if style.explicit_typography {
-        return style.clone();
-    }
     let mut style = style.clone();
-    style.set_font_family("Arial".to_string());
+    let family = SvgRasterizeOps::html_control_arial_family();
+    if style.explicit_typography {
+        if family != "Arial"
+            && style
+                .font_family
+                .trim_matches(['\'', '"'])
+                .eq_ignore_ascii_case("Arial")
+        {
+            style.set_font_family(family.to_string());
+        }
+        return style;
+    }
+    style.set_font_family(family.to_string());
     style.font_size = UA_CONTROL_FONT_SIZE;
     style.line_height = UA_CONTROL_LINE_HEIGHT;
     style.line_height_factor = None;
     style.normal_line_height = false;
-    style
-}
-
-pub(super) fn text_input_control_style(style: &CssStyle) -> CssStyle {
-    let mut style = ua_control_style(style);
-    if cfg!(target_os = "linux")
-        && style
-            .font_family
-            .trim_matches(['\'', '"'])
-            .eq_ignore_ascii_case("Arial")
-    {
-        /* WHY: Linuxでは実Arialを優先し、未導入時も入力幅と描画で同じ代替書体を使う。 */
-        let family = format!("{}, Liberation Sans, sans-serif", style.font_family);
-        style.set_font_family(family);
-    }
     style
 }
 
@@ -138,7 +133,10 @@ mod tests {
         let inherited = CssStyle::browser_default();
         let ua_input = CssStyle::from_element("input", &[], &inherited);
         let ua_input = ua_control_style(&ua_input);
-        assert_eq!(ua_input.font_family, "Arial");
+        assert_eq!(
+            ua_input.font_family,
+            super::SvgRasterizeOps::html_control_arial_family()
+        );
         assert!((ua_input.font_size - 13.3333).abs() < 0.001);
 
         let authored = CssStyle::from_element(

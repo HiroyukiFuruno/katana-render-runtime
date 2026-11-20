@@ -37,6 +37,33 @@ fn auto_button_uses_label_line_box_and_receives_click_at_bottom_padding() -> Res
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_default_button_height_uses_the_same_font_as_its_label() -> Result<(), String> {
+    use crate::markdown::svg_rasterize::SvgRasterizeOps;
+
+    let html = concat!(
+        "<style>button { display:block }</style>",
+        "<button id=\"latin\">OK</button><button id=\"japanese\">保存</button>",
+    );
+    let source =
+        HtmlBrowserSource::new(html, "https://example.test/buttons").map_err(test_error)?;
+    let viewport = HtmlBrowserViewport::new(320, 240, 1.0).map_err(test_error)?;
+    let mut session = HtmlInteractiveSession::start(source, viewport).map_err(test_error)?;
+    for (id, label) in [("latin", "OK"), ("japanese", "保存")] {
+        let metrics = SvgRasterizeOps::html_line_metrics(
+            label,
+            "Arial, Liberation Sans, sans-serif",
+            13.3333,
+            400,
+            false,
+        )
+        .ok_or("missing default control font metrics")?;
+        assert_button_box(&mut session, id, metrics.0 + metrics.1 + 6.0)?;
+    }
+    Ok(())
+}
+
 fn click(session: &mut HtmlInteractiveSession, x: f32, y: f32) -> Result<(), String> {
     for input in [
         HtmlBrowserInput::PointerDown { x, y, button: 0 },

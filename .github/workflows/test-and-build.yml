@@ -734,6 +734,8 @@ jobs:
         timeout-minutes: 15
         run: |
           result=0
+          just --command cargo nextest run --release --lib -p katana-render-runtime --locked \
+            --no-tests fail -E 'test(linux_default_button_height_uses_the_same_font_as_its_label) | test(auto_button_uses_label_line_box) | test(ua_control_typography_is_used_only_without_author_typography) | test(button_ua_box_metrics_include_padding_and_border)' || result=1
           just html-dynamic-fidelity-interim-check || result=1
           just html-input-state-fidelity-interim-check || result=1
           exit "$result"
