@@ -65,16 +65,10 @@ test("does not include ignored private tmp or target files", () => {
     commitFiles(root, [".gitignore", "source.rs"]);
 
     const manifest = captureNativeSourceManifest(root);
-    expect(manifest.files.map((file) => path.basename(file.path))).toEqual([
+    expect(manifest.files.map((file) => path.relative(root, file.path))).toEqual([
       ".gitignore",
       "source.rs",
     ]);
-    expect(manifest.files.some((file) => file.path.includes(`${path.sep}tmp${path.sep}`))).toBe(
-      false,
-    );
-    expect(manifest.files.some((file) => file.path.includes(`${path.sep}target${path.sep}`))).toBe(
-      false,
-    );
   });
 });
 
