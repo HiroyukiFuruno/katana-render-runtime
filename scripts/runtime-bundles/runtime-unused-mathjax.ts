@@ -380,14 +380,16 @@ function relativeModuleId(root: string, id: string): string {
   return relative;
 }
 
-function findGlobalAssignment(code: string): {
+function findGlobalAssignment(
+  code: string,
+  nodes: ReturnType<typeof browserAstNodes>,
+): {
   start: number;
   end: number;
   memberStart: number;
   memberEnd: number;
 } {
-  const ast = parseSync(code, { syntax: "ecmascript" });
-  const writes = browserAstNodes(ast).filter(({ node }) => {
+  const writes = nodes.filter(({ node }) => {
     if (node.type !== "AssignmentExpression" || node.operator !== "=") return false;
     const left = astObject.safeParse(node.left);
     if (!left.success || left.data.type !== "MemberExpression") return false;
@@ -451,19 +453,17 @@ function staticImports(code: string): string[] {
     });
 }
 
-function assertNoModuleTail(code: string): void {
-  const ast = parseSync(code, { syntax: "ecmascript" });
-  const nodes = browserAstNodes(ast).map(({ node }) => node);
+function assertNoModuleTail(nodes: ReturnType<typeof browserAstNodes>): void {
   if (
     nodes.some(
-      (node) =>
+      ({ node }) =>
         node.type === "ImportDeclaration" ||
         (typeof node.type === "string" && node.type.startsWith("Export")),
     )
   )
     throw new Error("MathJax output retains module syntax");
   if (
-    nodes.some((node) => {
+    nodes.some(({ node }) => {
       if (node.type !== "CallExpression") return false;
       const callee = astObject.safeParse(node.callee);
       return callee.success && callee.data.type === "Import";
@@ -623,8 +623,10 @@ function bindGlobal(
   renderPath: string,
 ): MathJaxGlobalBinding {
   const table = mapIndex(sourceMapSchema.parse(map), new Lines(outputCode), sourceLines);
-  const rawAssignment = findGlobalAssignment(raw.code);
-  const generatedAssignment = findGlobalAssignment(outputCode);
+  const rawNodes = browserAstNodes(parseSync(raw.code, { syntax: "ecmascript" }));
+  const generatedNodes = browserAstNodes(parseSync(outputCode, { syntax: "ecmascript" }));
+  const rawAssignment = findGlobalAssignment(raw.code, rawNodes);
+  const generatedAssignment = findGlobalAssignment(outputCode, generatedNodes);
   const mapped: { source: string; offset: number }[] = [];
   for (let offset = generatedAssignment.start; offset < generatedAssignment.end; offset += 1) {
     const link = table.get(offset);
@@ -636,6 +638,7 @@ function bindGlobal(
   const max = Math.max(...mapped.map((link) => link.offset));
   if (min < rawAssignment.start || max >= rawAssignment.end)
     throw new Error("MathJax global source map range drift");
+  assertNoModuleTail(generatedNodes);
   return {
     sourcePath: MATHJAX_SOURCE_PATH,
     sourceSha256: raw.sha256,
@@ -688,7 +691,6 @@ function validateTrustedMathJaxInspection(root: string, inspection: unknown): Ma
     throw new Error("changed MathJax resolved import contract");
   const { sources, global } = validateRawAndMap(repositoryRoot, value, renderId);
   const physicalInputPins = readInputPins(repositoryRoot);
-  assertNoModuleTail(value.output.code);
   return {
     acceptedConsumerClosure: false,
     auditOnly: true,
