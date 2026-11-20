@@ -42,8 +42,16 @@ def _owner_ast_shape(value: object) -> object:
             "fields": {
                 name: _owner_ast_shape(child)
                 for name, child in ast.iter_fields(value)
-                # 3.12 以降の空 type_params だけを 3.9 と同じ形へ正規化する。
-                if not (name == "type_params" and child == [])
+                # 旧版にない空の型引数と通常の import の既定値だけを揃える。
+                if not (
+                    (name == "type_params" and child == [])
+                    or (
+                        isinstance(value, (ast.Import, ast.ImportFrom))
+                        and name == "is_lazy"
+                        and type(child) is int
+                        and child == 0
+                    )
+                )
             },
         }
     if isinstance(value, list):

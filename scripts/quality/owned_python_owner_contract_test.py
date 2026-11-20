@@ -61,6 +61,13 @@ class MoonOwnerAstContractTests(unittest.TestCase):
         self.assertIs(result["valid"], True)
         self.assertEqual(result["contract"], "moon-owner-host-evidence-barrier-v3")
 
+    def test_owner_rejects_explicit_lazy_imports(self) -> None:
+        for statement in ("import argparse", "from typing import TypedDict"):
+            with self.subTest(statement=statement):
+                self.assertEqual(self.source.count(statement), 1)
+                mutated = self.source.replace(statement, f"lazy {statement}", 1)
+                self.assertIs(self.inspect(mutated)["valid"], False)
+
     def test_owner_rejects_obsolete_coverage_dependency_order(self) -> None:
         current = 'assert coverage.get("deps") == ["unit-test"]'
         obsolete = 'assert coverage.get("deps") == ["performance-coverage"]'
