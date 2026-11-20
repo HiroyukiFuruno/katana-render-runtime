@@ -1,6 +1,7 @@
 use super as sources;
 use super::super::shared_raster::shared_sources::{SharedSourceSeed, SharedSources};
 use super::super::{proof::CreationProof, request::HtmlFontRequest};
+use super::paths::{ARIAL_FONT_PATHS, LIBERATION_SANS_FONT_PATHS};
 use resvg::usvg::fontdb::Database;
 
 #[cfg(test)]
@@ -107,14 +108,14 @@ fn load_sans_serif_sources(
     load_paths(
         database,
         proof,
-        sources::ARIAL_FONT_PATHS,
+        ARIAL_FONT_PATHS,
         shared_sources,
         remaining_bytes,
     );
     load_paths(
         database,
         proof,
-        sources::LIBERATION_SANS_FONT_PATHS,
+        LIBERATION_SANS_FONT_PATHS,
         shared_sources,
         remaining_bytes,
     );
