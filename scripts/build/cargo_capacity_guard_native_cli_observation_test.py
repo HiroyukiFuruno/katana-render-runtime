@@ -22,7 +22,8 @@ from cargo_capacity_guard_state import REFERENCE_THRESHOLD_BYTES
 
 def fixture_rtk() -> Path:
     # WHY: シェルの起動設定ではなくRTK自身が子プロセスへ渡す環境を検証する。
-    for directory in os.get_exec_path():
+    pinned = os.environ.get("KRR_CONTRACT_RTK_DIRECTORY")
+    for directory in (pinned,) if pinned else os.get_exec_path():
         candidate = shutil.which("rtk", path=directory)
         if candidate is None:
             continue

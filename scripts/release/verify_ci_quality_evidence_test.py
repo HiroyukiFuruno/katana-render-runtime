@@ -955,6 +955,9 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
         )
         contract = (self.ROOT / "scripts/release/check-linux-contracts.sh").read_text(encoding="utf-8")
         self.assertLess(contract.index("sha256sum --check"), contract.index("tar -xzf"))
+        self.assertIn("--require-hashes scripts/release/html-performance-requirements.lock", contract)
+        self.assertIn('export KRR_CONTRACT_RTK_DIRECTORY="$tool_dir"', contract)
+        self.assertIn('export PATH="$tool_dir/python/bin:$PATH"', contract)
         self.assertIn("if just check-contracts; then", contract)
         self.assertTrue(contract.rstrip().endswith('exit "$status"'))
         for step in MODULE.REQUIRED_STEPS:

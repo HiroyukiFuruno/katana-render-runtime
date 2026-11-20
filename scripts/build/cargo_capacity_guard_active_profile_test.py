@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 import subprocess
@@ -57,9 +58,18 @@ class ActiveProfileTests(unittest.TestCase):
         return delta
 
     def real_workspace_closure(self, inactive: Path) -> tuple[Path, list[Path]]:
-        objects = list((inactive / "deps").glob("helper-*.rcgu.o"))
-        self.assertTrue(objects, "actual helper Cargo object required")
-        artifact = objects[0]
+        objects = sorted((inactive / "deps").glob("helper-*.rcgu.o"))
+        if objects:
+            artifact = objects[0]
+        else:
+            objects = sorted((inactive / "incremental").glob("helper-*/*/*.o"))
+            self.assertTrue(objects, "actual helper Cargo object required")
+            libraries = sorted((inactive / "deps").glob("libhelper-*.rlib"))
+            self.assertEqual(len(libraries), 1, "actual helper Cargo artifact hash required")
+            # Linuxでも実Cargoオブジェクトへの同一inodeのリンクを検査する。
+            unit = libraries[0].stem.removeprefix("lib")
+            artifact = inactive / "deps" / f"{unit}.{objects[0].stem}.rcgu.o"
+            os.link(objects[0], artifact)
         linked = [p for p in (inactive / "incremental").rglob("*.o")
                   if p.stat().st_ino == artifact.stat().st_ino]
         self.assertTrue(linked, "real deps/incremental inode alias required")
@@ -214,6 +224,12 @@ class OwnedBuildScriptNativeTests(unittest.TestCase):
             root = Path(value).resolve()
             target, orphan, refs, metadata = self.prepared(root)
             profile = target / "debug"
+            # この成功例は他の所有者と共有されない閉じた出力を用意する。
+            for path in orphan.iterdir():
+                if path.stat().st_nlink > 1:
+                    copied = path.with_suffix(".isolated")
+                    shutil.copy2(path, copied)
+                    copied.replace(path)
             proof = build_script_ownership(root, target, metadata, _selected_input_check(root, metadata))
             old_refs = identities(refs)
             fingerprint_files = active_files([profile / ".fingerprint"])

@@ -15,9 +15,11 @@ printf '%s  %s\n' 70fee7b4a548c43dde94c77e2335550981b0bc2fb013691d8c8109b5bd0eda
 tar -xzf "$archive" -C "$tool_dir" rtk
 test "$("$tool_dir/rtk" --version)" = 'rtk 1.2.0'
 
-# RTKの子プロセス契約は実物で検査し、既存レシピの実行コマンドは変えない。
-export PATH="$tool_dir:$PATH"
-export RTK=
+uv venv --python "$(command -v python3)" "$tool_dir/python"
+uv pip sync --python "$tool_dir/python/bin/python3" --require-hashes scripts/release/html-performance-requirements.lock
+export PATH="$tool_dir/python/bin:$PATH"
+# Gitのファイル名処理に影響させず、必要な回帰だけに実物のRTKを渡す。
+export KRR_CONTRACT_RTK_DIRECTORY="$tool_dir"
 
 if just check-contracts; then
   exit 0
@@ -26,11 +28,8 @@ else
 fi
 
 if [[ ${1:-} == --collect-failures ]]; then
-  test_python=tmp/html-performance-python-venv/bin/python
-  if [[ -x "$test_python" ]]; then
-    "$test_python" -m unittest discover -s scripts/release -p '*_test.py' -v || \
-      printf 'Release test diagnostics exited %d\n' "$?" >&2
-  fi
+  python3 -m unittest discover -s scripts/release -p '*_test.py' -v || \
+    printf 'Release test diagnostics exited %d\n' "$?" >&2
   just build-capacity-check || printf 'Capacity test diagnostics exited %d\n' "$?" >&2
 fi
 exit "$status"

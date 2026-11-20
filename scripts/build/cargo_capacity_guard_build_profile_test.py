@@ -206,6 +206,7 @@ class CheckDomainTests(unittest.TestCase):
         env.pop("CARGO_CAPACITY_PROTECTED_REFS", None)
         env["CARGO_HOME"] = str(root / ".cargo-home")
         env["CARGO_TARGET_DIR"] = str(root / "target")
+        env["CARGO_INCREMENTAL"] = "1"
         env["RUSTFLAGS"] = "-D warnings"
         for manifest in (root / "Cargo.toml", harness / "Cargo.toml"):
             lock = subprocess.run([cargo, "generate-lockfile", "--offline", "--manifest-path", str(manifest)],
@@ -328,9 +329,10 @@ class CheckDomainTests(unittest.TestCase):
             if cargo is None:
                 self.fail("real Cargo is required")
             release_build = subprocess.run(
-                [cargo, "build", "--offline", "--release", "--manifest-path",
+                [cargo, "build", "--offline", "--release", "--lib", "--manifest-path",
                  str(harness / "Cargo.toml"), "--message-format=json"],
-                cwd=root, env=environment, text=True, capture_output=True, timeout=120,
+                cwd=root, env={**environment, "CARGO_INCREMENTAL": "0"},
+                text=True, capture_output=True, timeout=120,
                 check=False,
             )
             self.assertEqual(release_build.returncode, 0,
@@ -338,6 +340,10 @@ class CheckDomainTests(unittest.TestCase):
             release_outputs = sorted((root / "target/release/deps").glob("libharness_fixture-*.rlib"))
             self.assertEqual(len(release_outputs), 1, "real Cargo must produce the inactive fixture rlib")
             self.assertGreater(release_outputs[0].stat().st_blocks * 512, 900_000)
+            release_alias = root / "target/release/libharness_fixture.rlib"
+            if release_alias.exists() and release_alias.samefile(release_outputs[0]):
+                # 有効な削除候補を確認するため、fixtureが所有する共有名だけを外す。
+                release_alias.unlink()
             debug_outputs = sorted(
                 (root / "target/debug/deps").glob("libkatana_render_runtime-*.r*")
             )

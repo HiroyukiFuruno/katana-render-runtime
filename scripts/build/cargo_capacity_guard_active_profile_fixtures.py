@@ -140,8 +140,7 @@ def size_bytes(target: Path) -> int:
 def cargo_env(target: Path, build: Path | None = None) -> dict[str, str]:
     env = {key: value for key, value in os.environ.items()
            if not key.startswith("CARGO_") and key not in {"RUSTFLAGS", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER"}}
-    env.update(CARGO_TARGET_DIR=str(target), CARGO_NET_OFFLINE="true", CARGO_BUILD_JOBS="2",
-               CARGO_PROFILE_DEV_INCREMENTAL="true")
+    env.update(CARGO_TARGET_DIR=str(target), CARGO_NET_OFFLINE="true", CARGO_BUILD_JOBS="2")
     env["CARGO_BUILD_BUILD_DIR"] = str(build if build is not None else target)
     env.update(RUSTFLAGS="", RUSTC_WRAPPER="", RUSTC_WORKSPACE_WRAPPER="")
     return env
@@ -151,6 +150,7 @@ def real_cargo(root: Path, args: Sequence[str], env: dict[str, str]) -> str:
     cargo = shutil.which("cargo")
     if cargo is None:
         raise AssertionError("real Cargo is required")
+    env = {**env, "CARGO_INCREMENTAL": "0" if "--release" in args else "1"}
     completed = subprocess.run([cargo, *args, "--manifest-path", str(root / "Cargo.toml")],
                                cwd=root, env=env, text=True, capture_output=True, timeout=60)
     log_cargo(root, args, env, completed)
