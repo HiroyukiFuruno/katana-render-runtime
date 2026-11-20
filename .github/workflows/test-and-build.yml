@@ -759,8 +759,13 @@ jobs:
           observer_work="$(mktemp -d "${RUNNER_TEMP}/krr-font-observer.XXXXXXXX")"
           observer_work="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve(strict=True))' "$observer_work")"
           archive="$observer_work/observer.tar.gz"
-          gh api -H 'Accept: application/octet-stream' \
-            "repos/${GITHUB_REPOSITORY}/releases/assets/702068128" > "$archive"
+          # 公開前は固定CI成果物から同一のアーカイブを取得できる。
+          if ! gh api -H 'Accept: application/octet-stream' \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/702068128" > "$archive"; then
+            gh run download 44800513985 --repo "$GITHUB_REPOSITORY" \
+              --name krr-font-observer-v0.4.24-92102a2d --dir "$observer_work/staged"
+            mv "$observer_work/staged/font-observer-macos-arm64.tar.gz" "$archive"
+          fi
           python3 scripts/release/html_performance_observer_unpack.py \
             --archive "$archive" \
             --archive-sha256 92102a2dad3ef4c5f50e5581c7f12a2c7b4e291ee3c3a2804299690811e8a86f \
