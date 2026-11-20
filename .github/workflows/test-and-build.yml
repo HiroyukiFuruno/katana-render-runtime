@@ -160,7 +160,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.verify_filter == 'release-contracts' && 'f9db3e89c2036b5c95e8b371d4060db92dd9434b' || github.sha }}
+          ref: ${{ inputs.verify_filter == 'release-contracts' && '33e1938cdb7b8da9ebc93dcadea1ed1e98a29ec6' || github.sha }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
@@ -191,17 +191,19 @@ jobs:
       - name: Verify full automation contracts at release HEAD
         id: release_contracts
         if: inputs.verify_filter == 'release-contracts'
+        shell: bash
         env:
-          PR_HEAD_SHA: f9db3e89c2036b5c95e8b371d4060db92dd9434b
+          PR_HEAD_SHA: 33e1938cdb7b8da9ebc93dcadea1ed1e98a29ec6
         run: |
           test "$(git rev-parse HEAD)" = "$PR_HEAD_SHA"
           bun install --frozen-lockfile
           cargo install cargo-sweep --version 0.8.0 --locked
-          bash scripts/release/check-linux-contracts.sh
+          source scripts/release/check-linux-contracts.sh
+          just check-contracts
       - name: Collect failing contract cases from every suite
         if: failure() && steps.release_contracts.outcome == 'failure'
         env:
-          PR_HEAD_SHA: f9db3e89c2036b5c95e8b371d4060db92dd9434b
+          PR_HEAD_SHA: 33e1938cdb7b8da9ebc93dcadea1ed1e98a29ec6
         run: bash scripts/release/check-linux-contracts.sh --collect-failures
 
   static-quality:
