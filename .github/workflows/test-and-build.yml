@@ -31,9 +31,41 @@ on:
     branches: [master]
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
+    inputs:
+      verify_platform:
+        description: Native platform for release/verify.
+        required: false
+        default: both
+        type: choice
+        options:
+          - both
+          - linux
+          - linux-assets
+          - linux-fidelity
+          - windows
+      verify_filter:
+        description: Optional nextest filter, linux-assets test pattern, or linux-fidelity selection (samples, visual-fixes, remaining-html, marker-css, code-width, font-stack, font-geometry, dynamic-html, requirements-fonts).
+        required: false
+        default: ''
+        type: string
+      verify_html_trace:
+        description: Enable HTML phase timings in selected native test output. The requirements fixture emits its full timings even if it exceeds 60 seconds.
+        required: false
+        default: false
+        type: boolean
+      verify_html_optimized:
+        description: Use the release build profile for the Windows HTML requirements timing.
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: >-
+    ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
+    format('native-verify-{0}-{1}{2}{3}{4}', github.ref, inputs.verify_platform,
+    inputs.verify_html_trace && '-html-trace' || '', inputs.verify_html_optimized && '-optimized' || '',
+    inputs.verify_platform == 'linux-fidelity' && inputs.verify_filter != '' && format('-{0}', inputs.verify_filter) || '') ||
+    format('{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: true
 
 permissions:
@@ -51,7 +83,8 @@ jobs:
   static-quality:
     name: Source quality checks
     if: >-
-      github.event_name != 'pull_request' || github.event.pull_request.draft == false
+      !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -87,17 +120,12 @@ jobs:
     name: Test and Build
     needs: static-quality
     if: >-
-      github.event_name != 'pull_request' || github.event.pull_request.draft == false
+      (success() || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
+      needs.static-quality.result == 'skipped')) &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            platform: linux64
-          - os: macos-15
-            platform: mac-arm64
-          - os: windows-latest
-            platform: win64
+      matrix: ${{ fromJSON(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && (startsWith(inputs.verify_platform, 'linux') && '{"include":[{"os":"ubuntu-latest","platform":"linux64"}]}' || inputs.verify_platform == 'windows' && '{"include":[{"os":"windows-latest","platform":"win64"}]}' || '{"include":[{"os":"ubuntu-latest","platform":"linux64"},{"os":"windows-latest","platform":"win64"}]}') || '{"include":[{"os":"ubuntu-latest","platform":"linux64"},{"os":"macos-15","platform":"mac-arm64"},{"os":"windows-latest","platform":"win64"}]}') }}
     runs-on: ${{ matrix.os }}
     permissions:
       actions: read
@@ -154,6 +182,7 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: ci-v2-${{ matrix.os }}-stable-default
+          cache-on-failure: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' }}
 
       - name: Install Bun
         if: matrix.os != 'windows-latest'
@@ -173,7 +202,7 @@ jobs:
           enable-cache: true
 
       - name: Install cargo-llvm-cov
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify')
         uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-llvm-cov@0.9.1
@@ -218,11 +247,11 @@ jobs:
         run: python3 scripts/build/initialize_ci_capacity_state.py --root "$PWD"
 
       - name: Check Rust types
-        if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: (!startsWith(inputs.verify_platform, 'linux-')) && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: cargo check --workspace --locked
 
       - name: Run linter
-        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: (!startsWith(inputs.verify_platform, 'linux-')) && matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: just lint
 
       - name: Run AST linter
@@ -230,7 +259,7 @@ jobs:
         run: just ast-lint
 
       - name: Check dependency boundary
-        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: (!startsWith(inputs.verify_platform, 'linux-')) && matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: just dependency-leak
 
       - name: Install ImageMagick for the macOS browser test
@@ -276,16 +305,58 @@ jobs:
         run: brew install graphviz
 
       - name: Install PlantUML runtime
-        if: (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: >-
+          (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true') &&
+          !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
+          inputs.verify_platform == 'linux-fidelity' && inputs.verify_filter == 'font-stack')
         run: just plantuml-install
 
       - name: Run tests
-        if: matrix.os != 'ubuntu-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: >-
+          (matrix.os != 'ubuntu-latest' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && !startsWith(inputs.verify_platform, 'linux-'))) &&
+          (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true') &&
+          (!(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') || inputs.verify_filter == '')
         timeout-minutes: 45
         run: just unit-test
 
+      - name: Run selected native tests
+        if: >-
+          github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
+          !startsWith(inputs.verify_platform, 'linux-') && inputs.verify_filter != '' &&
+          !(inputs.verify_platform == 'windows' && inputs.verify_html_trace &&
+          inputs.verify_filter == 'test(=renderer::backends::html_browser::session::requirements_tests::requirements_fixture_returns_fragment_frame_with_sticky_sidebar_and_closes_within_budget)')
+        env:
+          DEBUG: ${{ inputs.verify_html_trace && 'true' || 'false' }}
+          KRR_VERIFY_FILTERSET: ${{ inputs.verify_filter }}
+          NEXTEST_SUCCESS_OUTPUT: ${{ inputs.verify_html_trace && 'immediate' || 'never' }}
+        shell: bash
+        timeout-minutes: 45
+        run: >-
+          just --command cargo nextest run --workspace --all-targets --all-features
+          --locked --no-fail-fast --retries 0 --no-tests fail --test-threads "$TEST_THREADS"
+          --user-config-file scripts/release/nextest-local-user.toml -E "$KRR_VERIFY_FILTERSET"
+
+      - name: Collect complete HTML requirements timings
+        if: >-
+          github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
+          inputs.verify_platform == 'windows' && inputs.verify_html_trace &&
+          inputs.verify_filter == 'test(=renderer::backends::html_browser::session::requirements_tests::requirements_fixture_returns_fragment_frame_with_sticky_sidebar_and_closes_within_budget)'
+        env:
+          DEBUG: 'true'
+          KRR_HTML_REQUIREMENTS_CHILD: '1'
+          KRR_VERIFY_BUILD_PROFILE: ${{ inputs.verify_html_optimized && 'release' || 'dev' }}
+          KRR_VERIFY_FILTERSET: ${{ inputs.verify_filter }}
+          NEXTEST_SUCCESS_OUTPUT: immediate
+        shell: bash
+        timeout-minutes: 20
+        run: >-
+          just --command cargo nextest run --package katana-render-runtime --lib --all-features
+          --cargo-profile "$KRR_VERIFY_BUILD_PROFILE"
+          --locked --no-fail-fast --retries 0 --no-tests fail --test-threads "$TEST_THREADS"
+          --user-config-file scripts/release/nextest-local-user.toml -E "$KRR_VERIFY_FILTERSET"
+
       - name: Run PlantUML smoke check
-        if: matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: (!startsWith(inputs.verify_platform, 'linux-')) && matrix.os != 'windows-latest' && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: |
           cargo run -p katana-render-runtime-cli -- plantuml render --input tests/fixtures/plantuml/representative/01-sequence.puml --output "$RUNNER_TEMP/plantuml-sequence.svg"
           grep -q '<svg' "$RUNNER_TEMP/plantuml-sequence.svg"
@@ -342,25 +413,282 @@ jobs:
           bin/magick -version
 
       - name: Run runtime asset script tests
-        if: matrix.os == 'ubuntu-latest'
+        if: >-
+          matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-fidelity' &&
+          (inputs.verify_platform != 'linux-assets' || inputs.verify_filter == '')
         env:
           MOON_CONCURRENCY: "1"
+          KRR_VERIFY_LINUX_VALIDATION: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' }}
         timeout-minutes: 15
         run: |
           asset_python="$RUNNER_TEMP/krr-asset-python"
           uv venv --python 3.13 "$asset_python"
           uv pip sync --python "$asset_python/bin/python3" --require-hashes scripts/release/html-performance-requirements.lock
           export PATH="$asset_python/bin:$PATH"
-          just runtime-asset-script-test
+          if [[ "$KRR_VERIFY_LINUX_VALIDATION" == true ]]; then
+            bun run moon exec krr:runtime-quality-owned-validation-contract-producer
+          else
+            just runtime-asset-script-test
+          fi
+
+      - name: Summarize failed Linux validation cases
+        if: failure() && matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          import xml.etree.ElementTree as xml
+
+          root = Path("tmp/quality/runtime-script-results")
+          pattern = re.compile(r"runtime-quality-owned-validation-contract-[0-9a-f]{64}-group-[0-9]{3}\.xml")
+          failures = 0
+          for path in sorted(root.glob("runtime-quality-owned-validation-contract-*-group-*.xml")):
+              if not pattern.fullmatch(path.name) or path.is_symlink():
+                  continue
+              report = xml.parse(path)
+              for case in report.iter("testcase"):
+                  if case.find("failure") is None and case.find("error") is None:
+                      continue
+                  name = " ".join(case.get("name", "unnamed").split())
+                  name = "".join(ch for ch in name if ch.isprintable())
+                  print(f"FAILED_CASE {name[:240]}")
+                  failures += 1
+          print(f"FAILED_CASE_COUNT {failures}")
+          PY
+
+      - name: Run selected Linux asset regressions
+        if: >-
+          matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-assets' &&
+          inputs.verify_filter != ''
+        env:
+          KRR_VERIFY_ASSET_TEST_PATTERN: ${{ inputs.verify_filter }}
+        timeout-minutes: 5
+        run: >-
+          bun test --path-ignore-patterns 'tmp/**' --test-name-pattern "$KRR_VERIFY_ASSET_TEST_PATTERN"
+          ./scripts/html/harness-contract_test.ts ./scripts/html/stage-score-suite_test.ts
+          ./scripts/html/compare-toc-evidence_test.ts
 
       - name: Run automation contract tests
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify')
         timeout-minutes: 15
         run: just check-contracts
 
+      - name: Measure the inline code in Linux Chrome
+        if: >-
+          matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
+          inputs.verify_filter == 'code-width'
+        timeout-minutes: 5
+        run: |
+          node --input-type=module <<'JS'
+          import { resolve } from 'node:path';
+          import { pathToFileURL } from 'node:url';
+          import { chromium } from 'playwright';
+          const browser = await chromium.launch({ channel: 'chrome' });
+          try {
+            const page = await browser.newPage({ viewport: { width: 620, height: 900 } });
+            await page.goto(pathToFileURL(resolve('tests/fixtures/html/anonymized-requirements.html')).href);
+            const code = page.locator('td code');
+            if (await code.count() !== 1) throw new Error('inline code selection changed');
+            await code.scrollIntoViewIfNeeded();
+            const geometry = await code.evaluate(async (element) => {
+              await document.fonts.ready;
+              const cell = element.closest('td');
+              const previous = element.previousSibling;
+              if (!cell || !(previous instanceof Text)) throw new Error('table row shape changed');
+              const prefix = document.createRange();
+              prefix.setStart(previous, previous.length - 'URLの例は '.length);
+              prefix.setEnd(previous, previous.length);
+              const codeStyle = getComputedStyle(element);
+              const cellStyle = getComputedStyle(cell);
+              const rect = (value) => ({ x: value.x, y: value.y, width: value.width, height: value.height });
+              return { code: rect(element.getBoundingClientRect()), codeFontSize: codeStyle.fontSize,
+                codeFontFamily: codeStyle.fontFamily, cell: rect(cell.getBoundingClientRect()),
+                padding: [cellStyle.paddingLeft, cellStyle.paddingRight],
+                prefix: [...prefix.getClientRects()].map(rect) };
+            });
+            const cdp = await page.context().newCDPSession(page);
+            await cdp.send('DOM.enable');
+            await cdp.send('CSS.enable');
+            const { root } = await cdp.send('DOM.getDocument');
+            const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: 'td code' });
+            const { fonts } = await cdp.send('CSS.getPlatformFontsForNode', { nodeId });
+            console.log('HTML_INTERACTION_CODE_CHROME', JSON.stringify({ geometry, fonts }));
+          } finally {
+            await browser.close();
+          }
+          JS
+
+      - name: Identify fonts used by Linux Chrome for HTML
+        if: >-
+          matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
+          (inputs.verify_filter == 'font-stack' || inputs.verify_filter == 'font-geometry')
+        env:
+          KRR_LINUX_FONT_SCOPE: ${{ inputs.verify_filter }}
+        timeout-minutes: 5
+        run: |
+          for family in system-ui Arial sans-serif; do
+            fc-match --format='%{family}\t%{file}\n' "$family"
+          done
+          for locale in en-US ja; do
+            for glyph in 540d 67b6 6a19 304b; do
+              fc-match --format="$locale $glyph %{family[0]}\t%{file}\n" ":lang=$locale:charset=$glyph:scalable=true"
+            done
+          done
+          node --input-type=module <<'JS'
+          import { chromium } from 'playwright';
+          import { pathToFileURL } from 'node:url';
+
+          const fixtures = process.env.KRR_LINUX_FONT_SCOPE === 'font-geometry' ? [
+            ['html/library-reservation-fidelity', '#column-p1'],
+            ['html/aspects/input-state', '#name, #state-summary'],
+          ] : [
+            ['html/anonymized-requirements', '.doc-header h1, #s13 td:last-child, #s27 td:last-child'],
+            ['html-diagram-consumer/mermaid-class-diagram', 'main h1, main > p, .notes li'],
+            ['html-diagram-consumer/drawio-class-diagram', 'main h1, main > p, .notes li'],
+            ['html/library-reservation-fidelity', 'h1, p'],
+            ['html/aspects/input-state', 'h1, #state-summary, #name, #save, #accordion, #accordion-panel'],
+            ['html/aspects/typography', 'h1, p'],
+          ];
+          function geometry(node) {
+            const style = getComputedStyle(node);
+            const { top, width, height } = node.getBoundingClientRect();
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+            const latin = context.measureText('0');
+            let baseline = null;
+            if (node.id === 'column-p1') {
+              const marker = document.createElement('span');
+              marker.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline';
+              node.prepend(marker);
+              baseline = marker.getBoundingClientRect().top - top;
+              marker.remove();
+            }
+            return { top, width, height, baseline, fontFamily: style.fontFamily, fontSize: style.fontSize,
+              fontWeight: style.fontWeight, lineHeight: style.lineHeight, zeroWidth: latin.width,
+              ascent: latin.fontBoundingBoxAscent, descent: latin.fontBoundingBoxDescent,
+              padding: [style.paddingLeft, style.paddingRight], border: [style.borderLeftWidth, style.borderRightWidth] };
+          }
+          async function compareParagraphBaselines(page) {
+            return page.locator('#column-p1').evaluate((source) => {
+              const families = ['inherit', 'Arial', 'sans-serif', 'Noto Sans CJK JP'];
+              const variants = families.flatMap((family) => ['日本語', 'Latin'].map((value) => [family, value]));
+              return variants.map(([family, value]) => {
+                const paragraph = source.cloneNode(false);
+                paragraph.removeAttribute('id');
+                paragraph.style.fontFamily = family;
+                paragraph.textContent = value;
+                const marker = document.createElement('span');
+                marker.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline';
+                paragraph.prepend(marker);
+                source.after(paragraph);
+                const baseline = marker.getBoundingClientRect().top - paragraph.getBoundingClientRect().top;
+                paragraph.remove();
+                return { family, value, baseline };
+              });
+            });
+          }
+          async function compareButtonLineBoxes(page) {
+            await page.locator('#accordion').click();
+            return page.locator('#save').evaluate((source) => {
+              const variants = [
+                ['', '保存'],
+                ['', 'OK'],
+                ['WenQuanYi Zen Hei', '保存'],
+                ['Liberation Sans', '保存'],
+              ];
+              return variants.map(([family, label]) => {
+                const button = source.cloneNode(false);
+                button.removeAttribute('id');
+                if (family) button.style.fontFamily = family;
+                button.textContent = label;
+                source.after(button);
+                const style = getComputedStyle(button);
+                const size = button.getBoundingClientRect();
+                const range = document.createRange();
+                range.selectNodeContents(button);
+                const labelRect = range.getBoundingClientRect();
+                button.remove();
+                return { family: style.fontFamily, label, height: size.height,
+                  labelHeight: labelRect.height, labelOffset: labelRect.top - size.top,
+                  padding: [style.paddingTop, style.paddingBottom],
+                  border: [style.borderTopWidth, style.borderBottomWidth] };
+              });
+            });
+          }
+          const browser = await chromium.launch({ channel: 'chrome' });
+          try {
+            const page = await browser.newPage({ viewport: { width: 620, height: 900 } });
+            const cdp = await page.context().newCDPSession(page);
+            await cdp.send('DOM.enable');
+            await cdp.send('CSS.enable');
+            for (const [fixture, selectors] of fixtures) {
+              await page.goto(pathToFileURL(`tests/fixtures/${fixture}.html`).href);
+              await page.evaluate(() => document.fonts.ready);
+              if (fixture === 'html/aspects/input-state') {
+                const locales = await page.evaluate(() => ({ page: document.documentElement.lang, browser: navigator.language }));
+                console.log('LINUX_HTML_FONT_LOCALES', JSON.stringify(locales));
+                console.log('LINUX_CHROME_BUTTON_LINE_BOXES', JSON.stringify(await compareButtonLineBoxes(page)));
+              }
+              const { root } = await cdp.send('DOM.getDocument');
+              for (const selector of selectors.split(', ')) {
+                const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector });
+                if (!nodeId) continue;
+                const { fonts } = await cdp.send('CSS.getPlatformFontsForNode', { nodeId });
+                const style = await page.locator(selector).first().evaluate(geometry);
+                console.log('LINUX_CHROME_HTML_FONTS', JSON.stringify({ fixture, selector, style, fonts }));
+              }
+              if (fixture === 'html/library-reservation-fidelity') {
+                console.log('LINUX_CHROME_PARAGRAPH_BASELINES', JSON.stringify(await compareParagraphBaselines(page)));
+              }
+            }
+          } finally {
+            await browser.close();
+          }
+          JS
+
+      - name: Build Linux HTML comparison probes
+        if: >-
+          matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-assets' &&
+          (inputs.verify_platform != 'linux-fidelity' ||
+            (inputs.verify_filter != 'marker-css' && inputs.verify_filter != 'font-stack' &&
+              inputs.verify_filter != 'font-geometry' && inputs.verify_filter != 'dynamic-html'))
+        timeout-minutes: 15
+        run: |
+          just html-fidelity-probe-build
+          just --command cargo test --release -p katana-render-runtime --lib --no-run --locked --message-format=json-render-diagnostics > "$RUNNER_TEMP/krr-html-toc-build.jsonl"
+
+      - name: Measure Linux KRR input width and paragraph baseline
+        if: >-
+          matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
+          inputs.verify_filter == 'font-geometry'
+        env:
+          NEXTEST_SUCCESS_OUTPUT: immediate
+        timeout-minutes: 15
+        run: >-
+          just --command cargo nextest run --release --lib -p katana-render-runtime --locked
+          --no-tests fail -E 'test(linux_font_geometry_reports_)'
+
+      - name: Measure the inline code in Linux KRR
+        if: >-
+          matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
+          inputs.verify_filter == 'code-width'
+        env:
+          KRR_HTML_RICH_CODE_DIAGNOSTIC: "1"
+        timeout-minutes: 5
+        run: >-
+          just --command cargo test --release -p katana-render-runtime --lib --locked
+          reports_anonymized_rich_code_width_metrics_when_requested -- --nocapture
+
       - name: Select authorized HTML release phase
         id: html_policy
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify')
         run: |
           python3 scripts/release/html_fidelity_policy.py > "$RUNNER_TEMP/html-fidelity-policy.json"
           python3 - <<'PY_PHASE'
@@ -371,23 +699,105 @@ jobs:
               output.write(f"phase={policy['phase']}\n")
           PY_PHASE
 
-      - name: Build Linux HTML comparison probes
-        if: matrix.os == 'ubuntu-latest'
-        timeout-minutes: 15
-        run: |
-          just html-fidelity-probe-build
-          just --command cargo test --release -p katana-render-runtime --lib --no-run --locked
-
       - name: Compare HTML against Google Chrome for authorized release phase
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify')
         # 全画像・操作・集計までの既存一括検証は実測で約28分かかった。
         timeout-minutes: 35
         run: just html-release-fidelity-check
 
+      - name: Compare HTML against Chrome on the manual v0.4.24 candidate
+        if: >-
+          matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform != 'linux-assets' &&
+          (inputs.verify_platform != 'linux-fidelity' || inputs.verify_filter == '')
+        timeout-minutes: 35
+        run: |
+          python3 -c 'from scripts.release.html_fidelity_policy import workspace_version; raise SystemExit(workspace_version() != "0.4.24")'
+          just html-fidelity-interim-check
+
+      - name: Capture Linux HTML samples that scored below 90
+        if: >-
+          matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
+          (inputs.verify_filter == 'samples' || inputs.verify_filter == 'visual-fixes' ||
+            inputs.verify_filter == 'remaining-html' || inputs.verify_filter == 'requirements-fonts')
+        env:
+          KRR_VERIFY_HTML_SAMPLE_SCOPE: ${{ inputs.verify_filter }}
+        timeout-minutes: 15
+        run: |
+          result=0
+          viewport=(--viewport 620x900)
+          fixtures=(html/aspects/input-state html/aspects/layout)
+          case "$KRR_VERIFY_HTML_SAMPLE_SCOPE" in
+            samples) fixtures=(html/anonymized-requirements "${fixtures[@]}") ;;
+            requirements-fonts)
+              viewport=()
+              fixtures=(html/anonymized-requirements html/library-reservation-fidelity)
+              just --command cargo nextest run --release --lib -p katana-render-runtime --locked \
+                --no-tests fail -E 'test(linux_arial_compatibility_preserves_named_family_precedence)'
+              python3 -m unittest discover -s scripts/release -p release_workflow_contract_test.py \
+                -k test_plantuml_install || result=1
+              ;;
+            remaining-html) fixtures=(
+              html/aspects/input-state html/aspects/typography html/library-reservation-fidelity
+              html-diagram-consumer/mermaid-class-diagram html-diagram-consumer/drawio-class-diagram
+            )
+              just --command cargo nextest run --release --lib -p katana-render-runtime --locked \
+                --no-tests fail -E 'test(linux_system_ui_shapes_with_the_family_selected_by_fontconfig) | test(linux_font_locale_localizes_inherited_generics) | test(linux_cjk_fallback_shapes)' || result=1
+              ;;
+          esac
+          for fixture in "${fixtures[@]}"; do
+            bun scripts/html/fidelity-suite.ts --phase interim --min-score 90 "${viewport[@]}" \
+              --input "tests/fixtures/$fixture.html" --output "tmp/verify-html-samples/${fixture#html/}" \
+              --binary target/release/examples/html_fidelity_probe \
+              --toc-build-report "$RUNNER_TEMP/krr-html-toc-build.jsonl" || result=1
+          done
+          exit "$result"
+
+      - name: Check the Chrome CSS marker against direct geometry
+        if: >-
+          matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
+          inputs.verify_filter == 'marker-css'
+        timeout-minutes: 5
+        run: >-
+          node node_modules/playwright/cli.js test --config scripts/html/playwright.config.ts
+          scripts/mermaid/reference_svg_geometry_browser_test.ts --grep 'the-marker-property-in-CSS.svg'
+
       - name: Compare HTML interactions against Google Chrome
-        if: matrix.os == 'ubuntu-latest'
+        if: >-
+          matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-assets' &&
+          (inputs.verify_platform != 'linux-fidelity' || inputs.verify_filter == '')
         timeout-minutes: 15
         run: just html-interaction-check
+
+      - name: Check Linux dynamic HTML and input operations independently
+        if: >-
+          matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
+          inputs.verify_filter == 'dynamic-html'
+        timeout-minutes: 15
+        run: |
+          result=0
+          just --command cargo nextest run --release --lib -p katana-render-runtime --locked \
+            --no-tests fail -E 'test(linux_default_button_height_uses_the_same_font_as_its_label) | test(auto_button_uses_label_line_box) | test(ua_control_typography_is_used_only_without_author_typography) | test(button_ua_box_metrics_include_padding_and_border)'
+          just html-dynamic-fidelity-interim-check || result=1
+          just html-input-state-fidelity-interim-check || result=1
+          exit "$result"
+
+      - name: Upload manual dynamic HTML comparison evidence
+        if: >-
+          always() && matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
+          inputs.verify_filter == 'dynamic-html'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verify-html-dynamic-interim
+          path: |
+            tmp/html-fidelity/dynamic-interim
+            tmp/html-fidelity/input-state-interim
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload independent HTML comparison evidence
         if: matrix.os == 'ubuntu-latest' && steps.html_policy.outputs.phase == 'final' && always()
@@ -408,8 +818,37 @@ jobs:
             tmp/html-fidelity/input-state-interim
           if-no-files-found: error
 
+      - name: Upload manual HTML comparison evidence
+        if: >-
+          always() && matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform != 'linux-assets' &&
+          (inputs.verify_platform != 'linux-fidelity' || inputs.verify_filter == '')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verify-html-chrome-fidelity-interim-v0.4.24
+          path: |
+            tmp/html-fidelity/interim
+            tmp/html-fidelity/dynamic-interim
+            tmp/html-fidelity/input-state-interim
+          if-no-files-found: error
+
+      - name: Upload Linux HTML diagnosis images
+        if: >-
+          always() && matrix.os == 'ubuntu-latest' && github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'linux-fidelity' &&
+          (inputs.verify_filter == 'samples' || inputs.verify_filter == 'visual-fixes' ||
+            inputs.verify_filter == 'remaining-html' || inputs.verify_filter == 'requirements-fonts')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verify-linux-html-samples
+          path: tmp/verify-html-samples/**/*.png
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload HTML interaction evidence
-        if: matrix.os == 'ubuntu-latest' && always()
+        if: >-
+          always() && matrix.os == 'ubuntu-latest' && inputs.verify_platform != 'linux-assets' &&
+          (inputs.verify_platform != 'linux-fidelity' || inputs.verify_filter == '')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: html-chrome-interactions
@@ -422,12 +861,15 @@ jobs:
         run: python -m unittest discover -s scripts/hooks -p local_review_windows_job_test.py -v
 
       - name: Run runtime package asset check
-        if: matrix.os == 'ubuntu-latest'
+        if: >-
+          matrix.os == 'ubuntu-latest' &&
+          !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
+          inputs.verify_platform == 'linux-fidelity' && inputs.verify_filter == 'font-stack')
         timeout-minutes: 15
         run: just runtime-package-asset-check
 
       - name: Record Ubuntu build disk usage before coverage
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify')
         run: |
           df -h .
           du -sh target 2>/dev/null || true
@@ -481,7 +923,7 @@ jobs:
 
       - name: Run coverage
         id: coverage
-        if: matrix.os == 'ubuntu-latest' && steps.native_coverage_cache_verify.outputs.verified != 'true'
+        if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') && steps.native_coverage_cache_verify.outputs.verified != 'true'
         timeout-minutes: 45
         run: just coverage
 
@@ -549,7 +991,7 @@ jobs:
           retention-days: 1
 
       - name: Diagnose coverage failure
-        if: matrix.os == 'ubuntu-latest' && (failure() || cancelled())
+        if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') && (failure() || cancelled())
         shell: bash
         run: |
           set +e
@@ -562,7 +1004,7 @@ jobs:
           cargo llvm-cov report --show-missing-lines
 
       - name: Record Ubuntu build disk usage after coverage
-        if: matrix.os == 'ubuntu-latest' && always()
+        if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') && always()
         run: |
           df -h .
           du -sh target 2>/dev/null || true
@@ -673,7 +1115,8 @@ jobs:
     name: Native paired HTML time and RSS nonregression
     needs: test
     if: >-
-      github.event_name != 'pull_request' || github.event.pull_request.draft == false
+      !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: macos-15
     timeout-minutes: 360
     permissions:
