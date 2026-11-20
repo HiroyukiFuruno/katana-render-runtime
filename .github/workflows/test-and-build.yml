@@ -487,7 +487,7 @@ jobs:
         run: >-
           bun test --path-ignore-patterns 'tmp/**' --test-name-pattern "$KRR_VERIFY_ASSET_TEST_PATTERN"
           ./scripts/html/harness-contract_test.ts ./scripts/html/stage-score-suite_test.ts
-          ./scripts/html/compare-toc-evidence_test.ts
+          ./scripts/html/compare-toc-evidence_test.ts ./scripts/quality/owned-validation-contract_test.ts
 
       - name: Run automation contract tests
         if: matrix.os == 'ubuntu-latest' && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify')
