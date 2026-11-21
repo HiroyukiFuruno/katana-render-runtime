@@ -94,7 +94,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 89c0ef420e998b016912bf82db9cd518d33ac2f7
+          ref: 4c6372d2133cb2c14a22d1f5f52b453097c534cb
           fetch-depth: 0
       - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
@@ -122,7 +122,7 @@ jobs:
       - name: Prepare Linux root coverage environment
         shell: bash
         run: |
-          test "$(git rev-parse HEAD)" = "89c0ef420e998b016912bf82db9cd518d33ac2f7"
+          test "$(git rev-parse HEAD)" = "4c6372d2133cb2c14a22d1f5f52b453097c534cb"
           bun install --frozen-lockfile
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk graphviz libfontconfig-dev libfreetype-dev
@@ -157,6 +157,56 @@ jobs:
           import subprocess
           import tempfile
           from native_coverage_result import _collected_line_totals, _line_totals, _tracked_rust_source_paths
+
+
+          def show_incomplete_function_totals(approved, root, env, directory, collected):
+              if not approved or any(any(char.isspace() for char in str(path)) for path in approved):
+                  return
+              env = {**env, "LLVM_COV_FLAGS": "--show-functions --sources " + " ".join(map(str, sorted(approved)))}
+              report = Path(directory) / "functions.raw"
+              errors = Path(directory) / "functions.stderr"
+              command = ["cargo", "llvm-cov", "report", "--workspace", "--profile", "krr-coverage", "--locked"]
+              with report.open("xb") as out, errors.open("xb") as err:
+                  result = subprocess.run(command, cwd=root, env=env, stdout=out, stderr=err)
+              print(f"LLVM function summary diagnostic exit: {result.returncode}")
+              if result.returncode == 0:
+                  anchors = approved_function_anchors(collected, approved, root)
+                  for line in project_missing_function_totals(report, approved, root, anchors):
+                      print(line)
+
+
+          def approved_function_anchors(collected, approved, root):
+              anchors = {}
+              for mapping in collected["data"]:
+                  for function in mapping.get("functions", []):
+                      if not function["filenames"] or not function["regions"]:
+                          continue
+                      path = Path(os.path.normpath(root / function["filenames"][0]))
+                      if path not in approved:
+                          continue
+                      position = function["regions"][0][:2]
+                      anchors[(path.relative_to(root), function["name"])] = tuple(position)
+              return anchors
+
+
+          def project_missing_function_totals(report, approved, root, anchors):
+              current = None
+              with report.open(encoding="utf-8", errors="replace") as rows:
+                  for row in rows:
+                      header = re.fullmatch(r"File '(.+\.rs)':", row.strip())
+                      if header:
+                          path = Path(os.path.normpath(root / header[1]))
+                          current = path.relative_to(root) if path in approved else None
+                          continue
+                      parts = row.split()
+                      if current is None or len(parts) != 10 or not re.fullmatch(r"_R[A-Za-z0-9_.$]+", parts[0]):
+                          continue
+                      lines, missed = parts[4:6]
+                      if not lines.isdecimal() or not missed.isdecimal() or not 0 <= int(missed) <= int(lines):
+                          continue
+                      location = ":".join(map(str, anchors.get((current, parts[0]), ())))
+                      yield f"LLVM function lines {current}:{location} {parts[0]} {missed}/{lines} missed"
+
 
           path = Path("tmp/quality/standalone-performance-coverage/root.json")
           report = json.loads(path.read_bytes())
@@ -207,6 +257,7 @@ jobs:
                               if match and current in approved and (current, match[2], kind) not in seen:
                                   seen.add((current, match[2], kind))
                                   print(f"{kind} {current.relative_to(root)}:{match[2]}")
+                  show_incomplete_function_totals(approved, root, env, directory, report)
           _line_totals(report, "root", root)
           PY
 
