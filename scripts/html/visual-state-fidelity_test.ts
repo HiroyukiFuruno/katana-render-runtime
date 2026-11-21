@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { catalogStage90RejectionDiagnostics } from "./catalog-stage90-rejection-diagnostics";
 import { loadFeatureCatalog } from "./feature-catalog";
 import { fidelityThresholdForPhase } from "./fidelity-phase";
 import { createCatalogStage90ConditionPlan } from "./stage-score-suite";
@@ -167,6 +168,74 @@ describe("Chrome font identity request", () => {
         ["condition-a"],
       ),
     ).toThrow(/invalid evidence/);
+  });
+});
+
+describe("catalog stage90 rejection diagnostics", () => {
+  const completeRow = {
+    status: "unverified",
+    krrReportPath: "/private/krr.json",
+    krrReportSha256: "a".repeat(64),
+    krrCapturePath: "/private/krr.png",
+    krrCaptureSha256: "b".repeat(64),
+    fontIdentityObservation: { status: "observed", unknownReasons: [] },
+    resourceProvenance: { inventoryComplete: true },
+  };
+
+  test("emits only canonical unverified condition IDs with fixed categories", () => {
+    expect(
+      catalogStage90RejectionDiagnostics(
+        ["canonical-capture", "canonical-font", "canonical-captured"],
+        [
+          { ...completeRow, error: "secret path /private/error" },
+          {
+            ...completeRow,
+            unknownReason: "Error: physical font file and face identities differ",
+          },
+          { ...completeRow, status: "captured" },
+        ],
+      ),
+    ).toEqual({
+      schema: "krr-html84-stage90-rejection-diagnostics-v1",
+      conditions: [
+        { conditionId: "canonical-capture", category: "capture-exception" },
+        { conditionId: "canonical-font", category: "krr-chrome-mismatch" },
+      ],
+    });
+  });
+
+  test("classifies capture boundaries and redacts arbitrary rejection text", () => {
+    const diagnostics = catalogStage90RejectionDiagnostics(
+      ["missing-krr", "resource", "observer", "fallback"],
+      [
+        {
+          status: "unverified",
+          krrReportPath: "/private/krr.json",
+          krrReportSha256: "a".repeat(64),
+        },
+        {
+          ...completeRow,
+          fontIdentityObservation: { status: "unknown", unknownReasons: ["sensitive CDP detail"] },
+          resourceProvenance: { inventoryComplete: false },
+        },
+        {
+          ...completeRow,
+          unknownReason: "Error: trace SHA256 mismatch",
+        },
+        {
+          ...completeRow,
+          unknownReason: "malicious /private/path with coordinates 12,34",
+        },
+      ],
+    );
+    expect(diagnostics.conditions.map((condition) => condition.category)).toEqual([
+      "missing-krr-capture",
+      "resource-or-cdp-problem",
+      "rejected-observer",
+      "generic-verification-rejection",
+    ]);
+    expect(JSON.stringify(diagnostics)).not.toContain("sensitive CDP detail");
+    expect(JSON.stringify(diagnostics)).not.toContain("/private/path");
   });
 });
 

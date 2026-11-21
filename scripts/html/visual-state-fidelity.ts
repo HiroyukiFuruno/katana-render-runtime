@@ -15,6 +15,7 @@ import {
   catalogProducerContextChanges,
   sameCatalogProducerContext,
 } from "./catalog-capture-producer-context";
+import { catalogStage90RejectionDiagnostics } from "./catalog-stage90-rejection-diagnostics";
 import { withObserverBrowser } from "./chromium-font-capture";
 import { assertCoreTextPostScriptOrder, validateFontProvenance } from "./coretext-font-provenance";
 import { applyEventsInteraction } from "./dynamic-events";
@@ -748,8 +749,17 @@ export async function runCatalogStage90Captures(
   if (
     conditionsWithRequest.length !== 84 ||
     finalizedConditions.some((condition) => !isCapturedCondition(condition))
-  )
+  ) {
+    console.error(
+      JSON.stringify(
+        catalogStage90RejectionDiagnostics(
+          plan.conditions.map((condition) => condition.conditionId),
+          finalizedConditions,
+        ),
+      ),
+    );
     throw new Error("Catalog stage90 capture has unverified conditions; acceptance remains false");
+  }
   return finalized;
 }
 
