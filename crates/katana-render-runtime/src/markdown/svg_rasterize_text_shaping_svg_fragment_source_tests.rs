@@ -1,7 +1,8 @@
 use super::{
-    Database, FONT, JAPANESE_FONT, SvgRasterizeError, layout_for_face, layout_in_database,
-    resolved_font_runs, svg_font_shape,
+    super::validated_fragment_metrics, Database, FONT, JAPANESE_FONT, SvgRasterizeError,
+    layout_for_face, layout_in_database, resolved_font_runs, svg_font_shape,
 };
+use crate::markdown::svg_rasterize::text_shaping::SvgTextRunMetrics;
 use resvg::usvg::fontdb::{ID, Source};
 use std::sync::Arc;
 
@@ -26,6 +27,21 @@ fn assert_valid_layout(database: &Database, base: ID, face: ID) -> Result<(), St
     assert_eq!(layout.advances.len(), 1);
     assert!(layout.metrics.advance > 0.0);
     Ok(())
+}
+
+#[test]
+fn invalid_svg_metrics_return_the_fragment_rasterization_error() {
+    let metrics = SvgTextRunMetrics {
+        advance: f32::NAN,
+        ascent: 10.0,
+        descent: 2.0,
+        layout_ascent: None,
+        ink_bounds: None,
+    };
+    assert!(matches!(
+        validated_fragment_metrics(metrics),
+        Err(SvgRasterizeError::RasterizeFailed(message)) if message == "invalid SVG metrics"
+    ));
 }
 
 #[test]

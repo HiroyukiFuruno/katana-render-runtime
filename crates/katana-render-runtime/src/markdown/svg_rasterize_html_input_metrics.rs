@@ -1,4 +1,5 @@
 use super::{html_font_db_for_measured_text, matching_font_face};
+use resvg::usvg::fontdb::{Database, ID};
 use rustybuzz::ttf_parser::{Face, Tag};
 
 #[cfg(not(target_os = "macos"))]
@@ -33,6 +34,16 @@ pub(in super::super) fn html_input_character_metrics(
     let size = super::effective_html_font_size(size);
     let database = html_font_db_for_measured_text(family, "x0", weight, italic);
     let id = matching_font_face(&database, family, weight, italic)?;
+    input_character_metrics_for_face(&database, id, size, weight, italic)
+}
+
+fn input_character_metrics_for_face(
+    database: &Database,
+    id: ID,
+    size: f32,
+    weight: u16,
+    italic: bool,
+) -> Option<InputCharacterMetrics> {
     database.with_face_data(id, |data, index| {
         let mut face = Face::parse(data, index).ok()?;
         for (tag, value) in [

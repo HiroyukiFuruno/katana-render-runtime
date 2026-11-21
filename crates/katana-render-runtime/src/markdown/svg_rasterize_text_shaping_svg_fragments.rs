@@ -109,8 +109,7 @@ fn layout_for_face(
         svg_metrics::svg_dom_layout_ascent(database.face(face), metrics.ascent, metrics.descent);
     svg_metrics::include_svg_primary_strut(database, base, font, face == base, &mut metrics)
         .ok_or_else(|| error("SVG primary font metrics unavailable"))?;
-    let metrics = svg_metrics::validated_svg_run_metrics(metrics)
-        .ok_or_else(|| error("invalid SVG metrics"))?;
+    let metrics = validated_fragment_metrics(metrics)?;
     if !ink_inside_advance(&metrics) {
         return Ok(None);
     }
@@ -121,6 +120,12 @@ fn layout_for_face(
         return Ok(None);
     }
     Ok(Some(SvgTextFragmentLayout { metrics, advances }))
+}
+
+fn validated_fragment_metrics(
+    metrics: SvgTextRunMetrics,
+) -> Result<SvgTextRunMetrics, SvgRasterizeError> {
+    svg_metrics::validated_svg_run_metrics(metrics).ok_or_else(|| error("invalid SVG metrics"))
 }
 
 fn rounded_advances_cover_full(advances: &[f32], full: f32) -> bool {

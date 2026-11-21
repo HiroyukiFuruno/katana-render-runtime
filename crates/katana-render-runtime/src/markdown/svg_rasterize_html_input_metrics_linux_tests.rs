@@ -1,6 +1,6 @@
-use super::{Face, character_metrics};
+use super::{Face, character_metrics, input_character_metrics_for_face};
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
-use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
+use crate::markdown::svg_rasterize::font_file_fixture::{self, FONT_BYTES};
 use read_fonts::FontRef;
 use read_fonts::types::Tag;
 
@@ -20,6 +20,36 @@ fn linux_input_metrics_reject_an_unresolvable_font_family() {
         )
         .is_none()
     );
+}
+
+#[test]
+fn linux_input_metrics_reject_a_missing_selected_font_source() -> Result<(), String> {
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let fixture = font_file_fixture::create(directory.path().join("font.ttf"), FONT_BYTES)
+        .map_err(|error| error.to_string())?;
+    assert!(
+        input_character_metrics_for_face(
+            &fixture.database,
+            fixture.face_id,
+            INPUT_FONT_SIZE,
+            400,
+            false,
+        )
+        .is_some()
+    );
+
+    std::fs::remove_file(&fixture.path).map_err(|error| error.to_string())?;
+    assert_eq!(
+        input_character_metrics_for_face(
+            &fixture.database,
+            fixture.face_id,
+            INPUT_FONT_SIZE,
+            400,
+            false,
+        ),
+        None
+    );
+    Ok(())
 }
 
 #[test]

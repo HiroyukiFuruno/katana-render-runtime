@@ -1,5 +1,8 @@
 use super::layout_ascent::{chromium_legacy_ascent_adjustment, is_legacy_blink_family_name};
-use super::{include_layout_ascent, translate_ink_bounds, union_ink_bounds};
+use super::{
+    include_layout_ascent, translate_ink_bounds, union_ink_bounds, validated_svg_run_metrics,
+};
+use crate::markdown::svg_rasterize::text_shaping::SvgTextRunMetrics;
 
 #[cfg(not(target_os = "macos"))]
 use super::svg_dom_layout_ascent;
@@ -21,6 +24,32 @@ fn empty_run_ink_does_not_discard_the_advance_offset() {
     let offset = 4.0 + 2.0;
     let second = translate_ink_bounds(Some([0.0, -1.0, 1.0, 1.0]), offset);
     assert_eq!(second, Some([6.0, -1.0, 7.0, 1.0]));
+}
+
+#[test]
+fn validated_metrics_accept_and_reject_optional_layout_ascent() {
+    let metrics = SvgTextRunMetrics {
+        advance: 5.0,
+        ascent: 10.0,
+        descent: 2.0,
+        layout_ascent: None,
+        ink_bounds: None,
+    };
+    assert!(validated_svg_run_metrics(metrics).is_some());
+    assert!(
+        validated_svg_run_metrics(SvgTextRunMetrics {
+            layout_ascent: Some(10.0),
+            ..metrics
+        })
+        .is_some()
+    );
+    assert!(
+        validated_svg_run_metrics(SvgTextRunMetrics {
+            layout_ascent: Some(f32::NAN),
+            ..metrics
+        })
+        .is_none()
+    );
 }
 
 #[test]

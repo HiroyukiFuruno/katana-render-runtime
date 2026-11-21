@@ -72,6 +72,15 @@ fn measure_primary_baseline_body(
 ) -> Option<f32> {
     let database = html_font_db_for_measured_text(family, "x0", weight, italic);
     let primary = matching_font_face(&database, family, weight, italic)?;
+    measure_primary_baseline_for_face(&database, primary, size, line_height)
+}
+
+fn measure_primary_baseline_for_face(
+    database: &resvg::usvg::fontdb::Database,
+    primary: resvg::usvg::fontdb::ID,
+    size: f32,
+    line_height: f32,
+) -> Option<f32> {
     database.with_face_data(primary, |data, index| {
         let face = rustybuzz::ttf_parser::Face::parse(data, index).ok()?;
         let scale = size / face.units_per_em() as f32;
@@ -84,6 +93,7 @@ fn measure_primary_baseline_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown::svg_rasterize::font_file_fixture::{self, FONT_BYTES};
 
     #[test]
     fn primary_baseline_cache_is_bounded_and_released() {
@@ -110,5 +120,23 @@ mod tests {
         PRIMARY_BASELINE_CACHE.with(|cache| assert!(cache.borrow().is_empty()));
 
         assert!(primary_baseline("sans-serif", 12.0, 400, false, 18.0).is_some_and(f32::is_finite));
+    }
+
+    #[test]
+    fn missing_primary_font_source_returns_no_baseline() -> Result<(), String> {
+        let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+        let fixture = font_file_fixture::create(directory.path().join("font.ttf"), FONT_BYTES)
+            .map_err(|error| error.to_string())?;
+        assert!(
+            measure_primary_baseline_for_face(&fixture.database, fixture.face_id, 12.0, 18.0)
+                .is_some()
+        );
+
+        std::fs::remove_file(&fixture.path).map_err(|error| error.to_string())?;
+        assert_eq!(
+            measure_primary_baseline_for_face(&fixture.database, fixture.face_id, 12.0, 18.0),
+            None
+        );
+        Ok(())
     }
 }

@@ -208,7 +208,7 @@ JSON.stringify({rawAdvance: witnessAdvance, width, calls});
         ];
         SvgRasterizeOps::with_html_font_render_scope(|| {
             let rendered = DiagramV8Runtime::render(&scripts)?;
-            let rows = decode_c4_native_width_response(&rendered)?;
+            let rows: Vec<serde_json::Value> = decode_c4_native_width_response(&rendered)?;
             assert_c4_native_width_rows(cases, &rows)
         })
     }
@@ -223,8 +223,7 @@ JSON.stringify({rawAdvance: witnessAdvance, width, calls});
         ];
         SvgRasterizeOps::with_html_font_render_scope(|| {
             let rendered = DiagramV8Runtime::render(&scripts)?;
-            let witness: serde_json::Value =
-                serde_json::from_str(&rendered).map_err(|error| error.to_string())?;
+            let witness: serde_json::Value = decode_c4_native_width_response(&rendered)?;
             let raw_advance = 17.0001_f64;
             let expected = (raw_advance * CSS_SUBPIXELS).ceil() / CSS_SUBPIXELS;
             assert_ne!(raw_advance, expected);
@@ -235,7 +234,9 @@ JSON.stringify({rawAdvance: witnessAdvance, width, calls});
         })
     }
 
-    fn decode_c4_native_width_response(response: &str) -> Result<Vec<serde_json::Value>, String> {
+    fn decode_c4_native_width_response<T: serde::de::DeserializeOwned>(
+        response: &str,
+    ) -> Result<T, String> {
         serde_json::from_str(response).map_err(|error| error.to_string())
     }
 
@@ -268,7 +269,7 @@ JSON.stringify({rawAdvance: witnessAdvance, width, calls});
                 script,
             )];
             let response = DiagramV8Runtime::render(&scripts)?;
-            let error = decode_c4_native_width_response(&response).err();
+            let error = decode_c4_native_width_response::<Vec<serde_json::Value>>(&response).err();
             assert!(
                 error
                     .as_deref()
@@ -276,6 +277,7 @@ JSON.stringify({rawAdvance: witnessAdvance, width, calls});
                 "{error:?}"
             );
         }
+        assert!(decode_c4_native_width_response::<serde_json::Value>("[").is_err());
         Ok(())
     }
 

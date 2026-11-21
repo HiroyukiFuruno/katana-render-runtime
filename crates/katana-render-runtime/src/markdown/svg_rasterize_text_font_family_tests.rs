@@ -1,4 +1,7 @@
-use super::{fontdb_family_for_database, matching_font_face_with_platform, usvg::fontdb::Family};
+use super::{
+    fontdb_family_for_database, matching_font_face, matching_font_face_with_platform,
+    usvg::fontdb::Family,
+};
 use crate::markdown::svg_rasterize::font::{bundled_font_db, platform::PlatformFontStrategy};
 use resvg::usvg::fontdb::{Database, ID};
 use std::{collections::BTreeSet, ops::ControlFlow, path::PathBuf};
@@ -65,17 +68,36 @@ fn platform_override_can_select_or_reject_before_database_query() {
 #[test]
 fn platform_continue_falls_through_to_the_requested_bundled_family() {
     let database = bundled_font_db();
-    let selected = matching_font_face_with_platform(
-        &database,
-        "Noto Sans",
-        400,
-        false,
-        &OverridePlatform(ControlFlow::Continue(())),
+    for italic in [false, true] {
+        let selected = matching_font_face_with_platform(
+            &database,
+            "Noto Sans",
+            400,
+            italic,
+            &OverridePlatform(ControlFlow::Continue(())),
+        );
+        let face = selected.and_then(|id| database.face(id));
+        assert!(face.is_some_and(|face| {
+            face.families
+                .iter()
+                .any(|(family, _)| family.eq_ignore_ascii_case("Noto Sans"))
+        }));
+    }
+}
+
+#[test]
+fn platform_selection_falls_back_to_the_bundled_regular_face_for_both_styles() {
+    let database = bundled_font_db();
+    let regular = matching_font_face(&database, "Noto Sans", 400, false);
+    let italic = matching_font_face(&database, "Noto Sans", 400, true);
+    assert_eq!(italic, regular);
+    assert!(
+        regular
+            .and_then(|id| database.face(id))
+            .is_some_and(|face| {
+                face.families
+                    .iter()
+                    .any(|(family, _)| family.eq_ignore_ascii_case("Noto Sans"))
+            })
     );
-    let face = selected.and_then(|id| database.face(id));
-    assert!(face.is_some_and(|face| {
-        face.families
-            .iter()
-            .any(|(family, _)| family.eq_ignore_ascii_case("Noto Sans"))
-    }));
 }

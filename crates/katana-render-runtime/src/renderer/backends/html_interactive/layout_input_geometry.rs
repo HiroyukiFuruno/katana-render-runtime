@@ -128,7 +128,8 @@ pub(super) const fn checkbox_check_ratio_top() -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{INPUT_HEIGHT, input_geometry};
+    use super::{INPUT_HEIGHT, character_width_for_size, input_geometry};
+    use crate::markdown::svg_rasterize::SvgRasterizeOps;
     use crate::renderer::backends::html_interactive::control_style::ua_control_style;
     use crate::renderer::backends::html_interactive::style::CssStyle;
 
@@ -166,6 +167,29 @@ mod tests {
         );
 
         assert_eq!(invalid_geometry.width, default_geometry.width);
+    }
+
+    #[test]
+    fn unavailable_input_font_uses_the_text_width_fallback() {
+        let mut style = CssStyle::browser_default();
+        style.font_family = "KRR Unavailable Input Font 7f91".to_string();
+        let size = 10;
+        assert!(
+            SvgRasterizeOps::html_input_character_metrics(
+                style.used_font_family(),
+                style.font_size,
+                style.font_weight,
+                style.italic,
+            )
+            .is_none()
+        );
+
+        let representative = super::text_width("0", &style)
+            .max(style.font_size * style.text_character_width_factor());
+        assert_eq!(
+            character_width_for_size(size, &style),
+            (representative * size as f32).ceil()
+        );
     }
 
     #[test]
