@@ -16,6 +16,7 @@ const CBDT_FONT: &[u8] = include_bytes!(
 const SBIX_FONT: &[u8] = include_bytes!(
     "../../../tests/fixtures/svg-engine/upstream/resvg/tests/fonts/CFF-and-SBIX.otf"
 );
+const SBIX_TEXT_SOURCE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><text id="sbix" x="4" y="36" font-size="32">A</text></svg>"#;
 const COLR_FONT: &[u8] =
     include_bytes!("../../../tests/fixtures/svg-engine/colr-public-fonts/colr_1.ttf");
 const COLR_GLYPH: u32 = 9;
@@ -209,12 +210,30 @@ fn svg_in_ot_emoji_flattens_and_renders_through_the_text_route() -> TestResult<(
 #[test]
 fn sbix_text_glyph_renders_through_the_layout_route() -> TestResult<()> {
     let options = bitmap_options(SBIX_FONT)?;
-    let tree = usvg::Tree::from_str(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><text x="4" y="36" font-size="32">A</text></svg>"#,
-        &options,
-    )?;
+    let tree = usvg::Tree::from_str(SBIX_TEXT_SOURCE, &options)?;
     let pixmap = render_clip_fixture(&tree)?;
     assert!(pixmap.pixels().iter().any(|pixel| pixel.alpha() != 0));
+    Ok(())
+}
+
+#[test]
+fn sbix_zero_y_min_applies_the_platform_vertical_adjustment() -> TestResult<()> {
+    let tree = usvg::Tree::from_str(SBIX_TEXT_SOURCE, &bitmap_options(SBIX_FONT)?)?;
+    let Some(usvg::Node::Text(text)) = tree.node_by_id("sbix") else {
+        return Err("SBIX font text node missing".into());
+    };
+    let glyph = text
+        .layouted()
+        .iter()
+        .flat_map(|span| span.positioned_glyphs.iter())
+        .next()
+        .ok_or("SBIX font glyph was not shaped")?;
+    let scale = glyph.transform().sx;
+    let units_per_em = glyph.font_size() / scale;
+    let zero = glyph.sbix_transform(0.0, 0.0, 0.0, 0.0, units_per_em, 0.0);
+    let nonzero = glyph.sbix_transform(0.0, 0.0, 0.0, 1.0, units_per_em, 0.0);
+    let expected_delta = 0.128 * glyph.font_size() + scale;
+    assert!(((zero.ty - nonzero.ty) - expected_delta).abs() < 0.001);
     Ok(())
 }
 
