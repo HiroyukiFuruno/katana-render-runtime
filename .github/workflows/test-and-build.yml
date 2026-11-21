@@ -94,7 +94,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: f8e811677b8489a1797b828ff24fc2e6e9cf7423
+          ref: d77b863e27407c8c66e5a93a25ed328a2d752f41
           fetch-depth: 0
       - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
@@ -121,7 +121,7 @@ jobs:
       - name: Prepare Linux root coverage environment
         shell: bash
         run: |
-          test "$(git rev-parse HEAD)" = "f8e811677b8489a1797b828ff24fc2e6e9cf7423"
+          test "$(git rev-parse HEAD)" = "d77b863e27407c8c66e5a93a25ed328a2d752f41"
           bun install --frozen-lockfile
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk graphviz libfontconfig-dev libfreetype-dev
@@ -156,27 +156,28 @@ jobs:
         run: |
           python3 - <<'PY'
           import json
+          import os
           from pathlib import Path
           import re
-          from native_coverage_result import _collected_line_totals, _require_complete_line_totals
+          from native_coverage_result import _collected_line_totals, _line_totals, _tracked_rust_source_paths
 
           path = Path("tmp/quality/standalone-performance-coverage/root.json")
-          totals = _collected_line_totals(json.loads(path.read_bytes()), "root")
+          report = json.loads(path.read_bytes())
+          totals = _collected_line_totals(report, "root")
           print(json.dumps(totals))
+          root = Path.cwd().resolve()
           if totals["unmeasured"]:
               logs = tuple((path.parent / "root-nextest-attempts").glob("*/report/stdout.raw"))
               if len(logs) != 1:
                   raise ValueError("expected one report from this isolated root run")
-              root = Path.cwd().resolve()
+              tracked = _tracked_rust_source_paths(root)
               for line in logs[0].read_text(encoding="utf-8").splitlines():
                   match = re.fullmatch(r"(.+\.rs): ([0-9,-]+(?: [0-9,-]+)*)", line)
                   if match:
-                      path = Path(match[1])
-                      if path.is_absolute() and path.is_relative_to(root):
-                          path = path.relative_to(root)
-                      if not path.is_absolute() and ".." not in path.parts:
-                          print(f"Uncovered {path}: {match[2]}")
-          _require_complete_line_totals(totals, "root")
+                      source = Path(os.path.normpath(root / match[1]))
+                      if source.is_relative_to(root) and source.relative_to(root) in tracked:
+                          print(f"Uncovered {source.relative_to(root)}: {match[2]}")
+          _line_totals(report, "root", root)
           PY
 
   verify-linux-observer-access:
