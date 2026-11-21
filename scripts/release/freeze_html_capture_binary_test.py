@@ -8,6 +8,8 @@ import io
 import json
 from pathlib import Path
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -27,10 +29,18 @@ class CaptureBinaryFreezeTest(unittest.TestCase):
         return ["--source", str(self.source), "--destination", str(self.destination)]
 
     def test_capture_uses_frozen_bytes_after_build_artifact_is_retired(self) -> None:
-        output = io.StringIO()
-        with redirect_stdout(output):
-            self.assertEqual(bridge.main(self.arguments()), 0)
-        report = json.loads(output.getvalue())
+        launcher = Path(__file__).with_name("run_html_performance.py")
+        captured = subprocess.run(
+            [
+                sys.executable, "-E", "-S", str(launcher),
+                "--bootstrap", "freeze-capture", *self.arguments(),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(captured.returncode, 0, captured.stderr)
+        report = json.loads(captured.stdout)
         self.assertEqual(report, {"source": str(self.source),
                                  "path": str(self.destination),
                                  "sha256": hashlib.sha256(self.source.read_bytes()).hexdigest()})
