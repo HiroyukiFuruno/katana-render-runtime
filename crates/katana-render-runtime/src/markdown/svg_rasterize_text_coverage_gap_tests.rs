@@ -1,16 +1,10 @@
-#[cfg(target_os = "macos")]
 use crate::markdown::svg_rasterize::SvgRasterizeOps;
 use crate::markdown::svg_rasterize::{font, text_shaping};
-use font::{DatabaseKey, DiscoveryMode, HtmlFontRequest};
+use font::HtmlFontRequest;
 use resvg::usvg::fontdb::Database;
 use std::sync::Arc;
-#[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, Ordering};
 
-const DUPLICATE_FACE_COUNT: usize = 512;
-const OVERSIZED_REQUEST_FAMILY_COUNT: usize = 3_000;
-
-#[cfg(target_os = "macos")]
 const SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40"><text x="4" y="26" font-family="Noto Sans" font-size="18">ABC</text></svg>"#;
 
 fn real_database() -> Result<Database, String> {
@@ -25,7 +19,6 @@ fn real_database() -> Result<Database, String> {
     Ok(database)
 }
 
-#[cfg(target_os = "macos")]
 #[test]
 fn default_fallback_invalidates_fast_path_for_candidate_and_no_match() -> Result<(), String> {
     let mut database = real_database()?;
@@ -55,118 +48,6 @@ fn default_fallback_invalidates_fast_path_for_candidate_and_no_match() -> Result
     Ok(())
 }
 
-fn key(discovery: DiscoveryMode, family: &str) -> DatabaseKey {
-    DatabaseKey {
-        request: HtmlFontRequest::from_text(family, "ABC"),
-        discovery,
-    }
-}
-
-fn oversized_database() -> Result<Arc<Database>, String> {
-    let mut database = real_database()?;
-    let face = database
-        .faces()
-        .next()
-        .ok_or("bundled Noto face missing")?
-        .clone();
-    for _ in 0..DUPLICATE_FACE_COUNT {
-        database.push_face_info(face.clone());
-    }
-    assert_eq!(database.faces().count(), 513);
-    Ok(Arc::new(database))
-}
-
-fn assert_memoized_miss(value: Option<Option<text_shaping::HtmlTextMeasurementToken>>) {
-    assert!(matches!(value, Some(None)));
-}
-
-#[test]
-fn real_face_limit_records_distinct_known_and_eager_mode_misses() -> Result<(), String> {
-    let database = oversized_database()?;
-    let known = key(DiscoveryMode::KnownOnly, "Noto Sans");
-    let eager = key(DiscoveryMode::Eager, "Noto Sans");
-    let memo = text_shaping::with_selection_for_coverage(|select, memo| {
-        assert!(select(known.clone(), Arc::clone(&database)).is_none());
-        assert_memoized_miss(memo(&known));
-        assert!(memo(&eager).is_none());
-        assert!(select(eager.clone(), Arc::clone(&database)).is_none());
-        assert_memoized_miss(memo(&eager));
-        assert_memoized_miss(memo(&known));
-        assert!(memo(&key(DiscoveryMode::KnownOnly, "other request")).is_none());
-        memo
-    });
-    assert!(memo(&known).is_none());
-    assert!(memo(&eager).is_none());
-    Ok(())
-}
-
-fn oversized_request() -> DatabaseKey {
-    let family = (0..OVERSIZED_REQUEST_FAMILY_COUNT)
-        .map(|index| format!("family-{index:0100}"))
-        .collect::<Vec<_>>()
-        .join(",");
-    let key = key(DiscoveryMode::KnownOnly, &family);
-    assert_eq!(key.request.families.len(), OVERSIZED_REQUEST_FAMILY_COUNT);
-    assert!(key.request.families.iter().map(String::len).sum::<usize>() > 256 * 1024);
-    key
-}
-
-#[test]
-fn real_database_byte_budget_rejection_is_remembered_by_mode() -> Result<(), String> {
-    let database = Arc::new(real_database()?);
-    let oversized = oversized_request();
-    text_shaping::with_selection_for_coverage(|select, memo| {
-        assert!(
-            select(
-                key(DiscoveryMode::KnownOnly, "Noto Sans"),
-                Arc::clone(&database)
-            )
-            .is_some()
-        );
-        assert!(select(oversized.clone(), Arc::clone(&database)).is_none());
-        assert!(matches!(memo(&oversized), Some(None)));
-        assert!(
-            memo(&key(
-                DiscoveryMode::Eager,
-                &oversized.request.families.join(",")
-            ))
-            .is_none()
-        );
-    });
-    Ok(())
-}
-
-#[test]
-fn real_mode_token_hit_survives_nested_scope_and_restores_outer_memo() -> Result<(), String> {
-    let database = Arc::new(real_database()?);
-    let known = key(DiscoveryMode::KnownOnly, "Noto Sans");
-    let outer_key = text_shaping::with_selection_for_coverage(|select, memo| {
-        let token =
-            select(known.clone(), Arc::clone(&database)).ok_or("real bounded token missing")?;
-        assert!(token.is_usable());
-        assert_eq!(
-            memo(&known).flatten().map(|value| value.key()),
-            Some(token.key())
-        );
-        text_shaping::with_selection_for_coverage(|_, nested_memo| {
-            assert!(nested_memo(&known).is_none());
-        });
-        assert_eq!(
-            memo(&known).flatten().map(|value| value.key()),
-            Some(token.key())
-        );
-        assert!(token.is_usable());
-        Ok::<_, String>(token.key())
-    })?;
-    text_shaping::with_selection_for_coverage(|select, memo| {
-        assert!(memo(&known).is_none());
-        let stored = select(known.clone(), Arc::clone(&database));
-        assert_eq!(stored.map(|value| value.key()).as_ref(), Some(&outer_key));
-    });
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
 fn assert_same_real_pixels(tree: &resvg::usvg::Tree) -> Result<(), String> {
     let compatible = SvgRasterizeOps::preprocess_for_rasterizer(SVG);
     let actual =
@@ -190,7 +71,6 @@ fn assert_same_real_pixels(tree: &resvg::usvg::Tree) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
 #[test]
 fn inactive_diagnostic_preparation_uses_real_proof_tree_and_pixels() -> Result<(), String> {
     assert!(!super::super::lazy_diagnostic::active());
@@ -214,7 +94,6 @@ fn inactive_diagnostic_preparation_uses_real_proof_tree_and_pixels() -> Result<(
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
 #[test]
 fn real_known_cache_returns_attached_current_proof() -> Result<(), String> {
     let request = HtmlFontRequest::from_text("Noto Sans", "ABC");

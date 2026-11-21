@@ -179,14 +179,5 @@ mod lifecycle_tests;
 mod batch_retry_tests;
 
 #[cfg(all(test, unix))]
-pub(in crate::markdown::svg_rasterize) fn with_selection_for_coverage<T>(
-    mut operation: impl FnMut(
-        fn(DatabaseKey, Arc<Database>) -> Option<HtmlTextMeasurementToken>,
-        fn(&DatabaseKey) -> Option<Option<HtmlTextMeasurementToken>>,
-    ) -> T,
-) -> T {
-    super::font::with_validated_stamp_batch(|| {
-        let _scope = Scope::enter();
-        operation(token_for_selected, mode_memo_result)
-    })
-}
+#[path = "svg_rasterize_text_measurement_token_selection_tests.rs"]
+mod selection_tests;
