@@ -250,6 +250,28 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_measured_text_width_uses_the_shaped_measurement() -> Result<(), String> {
+        let style = CssStyle::browser_default();
+        let direct = SvgRasterizeOps::measure_html_text_with_cache_status(
+            "Linux text measurement",
+            style.used_font_family(),
+            style.font_size,
+            style.font_weight,
+            style.italic,
+            style.letter_spacing,
+            style.font_feature_settings.as_deref(),
+        )
+        .map_err(status_measurement_error)?;
+        assert!(direct.1);
+        assert_eq!(
+            measured_text_width("Linux text measurement", &style),
+            direct.0
+        );
+        Ok(())
+    }
+
     #[test]
     fn measurement_status_marks_empty_and_fallback() -> Result<(), String> {
         let style = CssStyle::browser_default();

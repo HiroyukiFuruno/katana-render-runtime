@@ -148,3 +148,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "svg_rasterize_html_input_metrics_linux_tests.rs"]
+mod linux_tests;

@@ -193,7 +193,7 @@ pub(super) use super::font::html_font_db_for_text;
 #[path = "svg_rasterize_text_shaping_tests.rs"]
 mod tests;
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(all(test, unix))]
 pub(super) use measurement_token::with_selection_for_coverage;
 
 #[cfg(all(test, target_os = "macos"))]

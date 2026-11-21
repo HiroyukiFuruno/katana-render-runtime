@@ -146,7 +146,7 @@ fn empty_provenance_never_claims_complete_text_routing() -> Result<(), String> {
 fn unrelated_duplicate_ids_do_not_disable_generated_text_routing() -> Result<(), String> {
     let mut provenance = GeneratedHtmlTextProvenance::default();
     let markup = recorded_markup(&mut provenance);
-    let duplicate_paths = r#"<path id="shared" d="M0 0"/><path id="shared" d="M1 1"/>"#;
+    let duplicate_paths = r#"<path id="shared" d="M1 1H5V5Z"/><path id="shared" d="M2 2H6V6Z"/>"#;
     let svg = wrap(&format!("{markup}{duplicate_paths}"));
     assert_eq!(
         validated(&provenance, &svg)?,

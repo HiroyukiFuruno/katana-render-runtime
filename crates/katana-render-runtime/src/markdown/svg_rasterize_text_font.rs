@@ -192,6 +192,9 @@ mod db_token_tests;
 #[cfg(all(test, target_os = "macos"))]
 #[path = "svg_rasterize_text_font_interface_bold_tests.rs"]
 mod interface_bold_tests;
+#[cfg(test)]
+#[path = "svg_rasterize_text_font_requested_tests.rs"]
+mod requested_tests;
 
 #[cfg(test)]
 mod tests {
@@ -326,6 +329,17 @@ mod tests {
             requested_weight,
             requested_italic,
         )
+    }
+
+    #[test]
+    fn html_cjk_fallback_oracle_uses_generic_scan_without_platform_candidate() -> Result<(), String>
+    {
+        let fixture = fallback_fixture()?;
+        assert_eq!(
+            expected_html_cjk_fallback(&fixture.database, fixture.base, '\u{10ffff}', 400, false),
+            full_scan_shaping_fallback(&fixture.database, fixture.base, '\u{10ffff}', 400, false)
+        );
+        Ok(())
     }
 
     struct FallbackFixture {

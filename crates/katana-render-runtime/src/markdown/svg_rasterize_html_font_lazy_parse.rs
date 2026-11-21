@@ -284,7 +284,7 @@ mod diagnostic {
     }
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(all(test, unix))]
 #[path = "svg_rasterize_text_coverage_gap_tests.rs"]
 mod coverage_gap_tests;
 

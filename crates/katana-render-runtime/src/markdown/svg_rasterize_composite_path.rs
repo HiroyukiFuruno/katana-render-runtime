@@ -9,7 +9,7 @@ pub(in crate::markdown::svg_rasterize) mod style;
 #[path = "svg_rasterize_composite_path_tile.rs"]
 mod tile;
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(test)]
 #[path = "svg_rasterize_composite_path_tests.rs"]
 mod tests;
 

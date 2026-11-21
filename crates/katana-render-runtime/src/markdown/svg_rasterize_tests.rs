@@ -9,8 +9,24 @@ use crate::markdown::runtime_assets::RuntimeAsset;
 use crate::markdown::{DiagramBlock, DiagramKind, DiagramResult};
 use resvg::usvg;
 
+struct NoTextRasterizer;
+
+impl super::composite::TextRasterizer for NoTextRasterizer {
+    fn render(
+        &self,
+        _: &usvg::Text,
+        _: tiny_skia::Transform,
+        _: &mut tiny_skia::PixmapMut<'_>,
+    ) -> Result<bool, String> {
+        Ok(false)
+    }
+}
+
 #[path = "svg_rasterize_font_memory_tests.rs"]
 mod font_memory_tests;
+
+#[path = "svg_rasterize_raster_target_tests.rs"]
+mod raster_target_tests;
 
 const RGBA_CHANNELS: usize = 4;
 
@@ -42,6 +58,30 @@ fn rasterize_svg_renders_text_with_the_bundled_font() -> Result<(), String> {
             .0
             .iter()
             .any(|pixel| *pixel != [255, 255, 255, 255])
+    );
+    Ok(())
+}
+
+#[test]
+fn raster_target_uses_explicit_authored_clip_context_for_svg_painting()
+-> Result<(), Box<dyn std::error::Error>> {
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="#ff0000"/></svg>"##;
+    let compatible_svg = SvgRasterizeOps::preprocess_for_rasterizer(svg);
+    let tree = usvg::Tree::from_str(&compatible_svg, &rasterizer_options())
+        .map_err(|error| error.to_string())?;
+    let pixmap = RasterTarget::new(tree.size(), 1.0).render_with_text(
+        &tree,
+        &compatible_svg,
+        &Default::default(),
+        Some(&NoTextRasterizer),
+        Some(&super::provenance::AuthoredClipInfo::default()),
+    )?;
+    let pixel = pixmap
+        .pixel(5, 5)
+        .ok_or("explicit-context SVG pixel missing")?;
+    assert_eq!(
+        [pixel.red(), pixel.green(), pixel.blue(), pixel.alpha()],
+        [255, 0, 0, 255]
     );
     Ok(())
 }
@@ -247,24 +287,4 @@ fn render_zenuml_test_svg() -> Result<String, ()> {
         return Err(());
     };
     Ok(svg)
-}
-
-#[test]
-fn raster_target_reports_pixmap_allocation_failure() {
-    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>"##;
-    let compatible_svg = SvgRasterizeOps::preprocess_for_rasterizer(svg);
-    let tree = resvg::usvg::Tree::from_str(&compatible_svg, &rasterizer_options());
-    let target = RasterTarget {
-        display_width: 1.0,
-        display_height: 1.0,
-        effective_scale: 1.0,
-        width: 0,
-        height: 0,
-    };
-
-    assert!(tree.as_ref().is_ok_and(|it| {
-        target
-            .render(it, &compatible_svg, &Default::default())
-            .is_err()
-    }));
 }

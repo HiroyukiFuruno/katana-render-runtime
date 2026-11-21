@@ -71,10 +71,13 @@ fn svg_font_x_height_callback(
         request.weight,
         request.italic,
     );
-    match measured {
-        Ok(Some(x_height)) => return_value.set(v8::Number::new(scope, f64::from(x_height)).into()),
-        Ok(None) => return_value.set(v8::Primitive::undefined(scope).into()),
-        Err(_) => throw_bridge_error(scope, "SVG font x-height measurement failed"),
+    let Ok(x_height) = measured else {
+        throw_bridge_error(scope, "SVG font x-height measurement failed");
+        return;
+    };
+    /* WHY: 計測値がない場合はV8のコールバックが初期化したundefinedを返す。 */
+    if let Some(x_height) = x_height {
+        return_value.set(v8::Number::new(scope, f64::from(x_height)).into());
     }
 }
 

@@ -50,3 +50,29 @@ fn has_family(database: &usvg::fontdb::Database, family: &str) -> bool {
         })
         .is_some()
 }
+
+#[cfg(all(test, not(target_os = "macos")))]
+mod tests {
+    use super::configure_html_sans_serif_family;
+    use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
+    use resvg::usvg::fontdb::{Database, Family, Language};
+
+    #[test]
+    fn html_sans_serif_prefers_the_configured_family_when_it_is_available() -> Result<(), String> {
+        let mut source = Database::new();
+        source.load_font_data(FONT_BYTES.to_vec());
+        let mut face = source
+            .faces()
+            .next()
+            .ok_or("bundled sans face missing")?
+            .clone();
+        face.families = vec![("Arial".to_owned(), Language::English_UnitedStates)];
+        let mut database = Database::new();
+        database.push_face_info(face);
+
+        configure_html_sans_serif_family(&mut database);
+
+        assert_eq!(database.family_name(&Family::SansSerif), "Arial");
+        Ok(())
+    }
+}

@@ -59,6 +59,7 @@ const TEXT_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" he
 const TEXT_VIEWPORT_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><svg x="5" y="5" width="30" height="30"><text x="2" y="20" font-size="12">text</text></svg></svg>"##;
 const ROOT_TRANSFORM_TEXT_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" transform="translate(3 4)"><text x="2" y="20" font-size="12">text</text></svg>"##;
 const FILTER_TEXT_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><defs><filter id="blur"><feGaussianBlur stdDeviation="0"/></filter></defs><g filter="url(#blur)"><text x="2" y="20" font-size="12">text</text></g></svg>"##;
+const OPACITY_TEXT_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><g opacity="0.5"><text x="2" y="20" font-size="12">text</text></g></svg>"##;
 
 struct CountingTextRasterizer {
     calls: Cell<usize>,
@@ -170,5 +171,35 @@ fn text_rasterizer_skips_unsupported_filter_groups() -> Result<(), String> {
     )?;
     assert_eq!(rasterizer.calls.get(), 0);
     assert_eq!(actual.data(), expected.data());
+    Ok(())
+}
+
+#[test]
+fn translucent_text_group_composites_the_text_layer_with_group_opacity() -> Result<(), String> {
+    assert_eq!(observe_text_hook(OPACITY_TEXT_SVG)?.calls, 1);
+    let (tree, mut actual) =
+        parse_svg_pixmap_with_bundled_fonts(OPACITY_TEXT_SVG, SVG_CANVAS_SIZE, SVG_CANVAS_SIZE)?;
+    let expected = render_existing_svg_with_bundled_fonts(
+        OPACITY_TEXT_SVG,
+        SVG_CANVAS_SIZE,
+        SVG_CANVAS_SIZE,
+        tiny_skia::Transform::identity(),
+    )?;
+    SvgCompositeRenderer::render_with_text(
+        &tree,
+        tiny_skia::Transform::identity(),
+        &mut actual.as_mut(),
+        &AuthoredClipInfo::default(),
+        Some(&FallbackTextRasterizer),
+    )?;
+    assert_eq!(actual.data(), expected.data());
+    assert!(
+        actual
+            .data()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[3] > 0 && pixel[3] < u8::MAX)
+    );
     Ok(())
 }

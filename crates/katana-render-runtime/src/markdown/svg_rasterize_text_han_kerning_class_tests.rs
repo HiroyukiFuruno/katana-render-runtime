@@ -88,6 +88,29 @@ fn hiragino_sans_gb_classifies_fullwidth_quotes_by_open_and_close_roles() -> Res
     assert_quote_classes(&font, &metrics, HanClass::Open, HanClass::Close)
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn noto_sans_cjk_sc_classifies_fullwidth_quotes_by_open_and_close_roles() -> Result<(), String> {
+    use crate::markdown::svg_rasterize::font::html_font_db_for_text;
+    use resvg::usvg::fontdb::{Family, Query};
+
+    const FAMILY: &str = "Noto Sans CJK SC";
+    let database = html_font_db_for_text(FAMILY, "‘“’”");
+    let face = database
+        .query(&Query {
+            families: &[Family::Name(FAMILY)],
+            ..Query::default()
+        })
+        .ok_or("Noto Sans CJK SC from fonts-noto-cjk is missing")?;
+    database
+        .with_face_data(face, |bytes, index| {
+            let font = FontRef::from_index(bytes, index).map_err(|error| error.to_string())?;
+            let metrics = font.glyph_metrics(Size::unscaled(), LocationRef::default());
+            assert_quote_classes(&font, &metrics, HanClass::Open, HanClass::Close)
+        })
+        .ok_or("Noto Sans CJK SC face data unavailable")?
+}
+
 fn assert_quote_classes(
     font: &FontRef<'_>,
     metrics: &skrifa::metrics::GlyphMetrics<'_>,

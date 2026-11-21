@@ -87,6 +87,22 @@ fn negative_os2_x_height_is_rejected_for_a_parseable_font() -> TestResult {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn missing_os2_x_height_uses_the_lowercase_x_outline_metric() -> TestResult {
+    let (database, id) = loaded_font(font_with_empty_table(FONT_BYTES, Tag::from_bytes(b"OS/2"))?)?;
+    let height = svg_run_x_height_with_face(
+        &database,
+        id,
+        FontShape::new(METRIC_TEST_SIZE, METRIC_TEST_WEIGHT, false),
+    )
+    .flatten()
+    .ok_or("lowercase x outline metric unavailable")?;
+
+    assert!(height.is_finite() && height > 0.0);
+    Ok(())
+}
+
 #[test]
 fn equal_line_endpoints_are_rejected_for_a_parseable_font() -> TestResult {
     let shape = FontShape::new(METRIC_TEST_SIZE, METRIC_TEST_WEIGHT, false);

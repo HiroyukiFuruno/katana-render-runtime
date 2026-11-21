@@ -5,7 +5,7 @@ use tiny_skia::{PixmapMut, Transform};
 #[path = "svg_rasterize_composite_opacity.rs"]
 mod opacity;
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(test)]
 #[path = "svg_rasterize_composite_groups_opacity_tests.rs"]
 mod opacity_tests;
 

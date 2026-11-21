@@ -149,7 +149,16 @@ impl PlatformFontStrategy for NativeFonts {
 #[cfg(test)]
 mod tests {
     use super::{Database, Family, FontconfigFonts, PlatformFontStrategy};
+    use std::collections::BTreeSet;
     use std::ops::ControlFlow;
+
+    struct DefaultPlatform;
+
+    impl PlatformFontStrategy for DefaultPlatform {
+        fn installed_paths(&self, _: &BTreeSet<&str>) -> BTreeSet<std::path::PathBuf> {
+            BTreeSet::new()
+        }
+    }
 
     #[test]
     fn fontconfig_keeps_generic_system_alias_and_ordinary_face_selection() {
@@ -159,5 +168,15 @@ mod tests {
             strategy.face_override(&Database::new(), "Arial", &[], 400, false),
             ControlFlow::Continue(())
         );
+    }
+
+    #[test]
+    fn default_platform_keeps_optional_families_unconfigured() {
+        let strategy = DefaultPlatform;
+        assert_eq!(strategy.installed_system_ui_family(), None);
+        assert_eq!(strategy.cjk_fallback_family(), None);
+        assert_eq!(strategy.control_arial_family(), "Arial");
+        assert_eq!(strategy.compatible_named_family("Arial"), None);
+        assert_eq!(strategy.localized_sans_serif("ja-JP"), None);
     }
 }

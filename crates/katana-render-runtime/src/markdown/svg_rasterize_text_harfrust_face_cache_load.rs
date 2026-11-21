@@ -130,14 +130,11 @@ pub(in super::super) fn commit_file_font(
     let Some(key @ CacheKey::File { generation, .. }) = font.key.as_ref() else {
         return true;
     };
-    if !generation.reusable() || !font.clean(database, face_id) {
+    let clean = generation.reusable() && font.clean(database, face_id);
+    if clean && generation.durable_reusable() {
+        cache_font(key.clone(), font.clone());
+    } else {
         clear_cache();
-        return false;
     }
-    if !generation.durable_reusable() {
-        clear_cache();
-        return true;
-    }
-    cache_font(key.clone(), font.clone());
-    true
+    clean
 }

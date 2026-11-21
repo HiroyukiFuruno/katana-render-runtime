@@ -193,6 +193,29 @@ fn lazy_font_rejects_missing_ttc_offset_and_face_header() -> Result<(), Box<dyn 
 }
 
 #[test]
+fn lazy_font_rejects_unsupported_ttc_version_and_out_of_range_index()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("malformed.ttc");
+    let mut bytes = SINGLE_FACE_TTC_HEADER.to_vec();
+    bytes.extend_from_slice(&16_u32.to_be_bytes());
+    bytes[5] = 3;
+    std::fs::write(&path, &bytes)?;
+    let error = super::lazy_table::load(&path, 0)
+        .err()
+        .ok_or("unsupported TTC version was accepted")?;
+    assert_eq!(error.to_string(), "unsupported TTC version");
+
+    bytes[5] = SINGLE_FACE_TTC_HEADER[5];
+    std::fs::write(&path, &bytes)?;
+    let error = super::lazy_table::load(&path, 1)
+        .err()
+        .ok_or("single-face TTC accepted a second face")?;
+    assert_eq!(error.to_string(), "TTC face index out of range");
+    Ok(())
+}
+
+#[test]
 fn lazy_font_rejects_invalid_sfnt_header_index_and_table_range()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

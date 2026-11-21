@@ -35,6 +35,11 @@ pub(in super::super) fn observed_system_face_resolves_to_its_physical_file_and_i
     Ok(())
 }
 
+#[test]
+fn cached_system_face_verifies_the_physical_input() -> Result<(), String> {
+    observed_system_face_resolves_to_its_physical_file_and_index()
+}
+
 fn assert_cache_rejects_different_database(
     selected: &SelectedFont,
     cache: &mut FontResolutionCache<'_>,

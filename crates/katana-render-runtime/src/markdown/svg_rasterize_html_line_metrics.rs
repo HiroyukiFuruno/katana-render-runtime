@@ -183,3 +183,7 @@ pub(in super::super) fn html_text_baseline_for_text(
 #[cfg(all(test, target_os = "macos"))]
 #[path = "svg_rasterize_html_line_metrics_tests.rs"]
 mod tests;
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "svg_rasterize_html_line_metrics_linux_tests.rs"]
+mod linux_tests;

@@ -178,7 +178,7 @@ mod lifecycle_tests;
 #[path = "svg_rasterize_text_measurement_token_batch_retry_tests.rs"]
 mod batch_retry_tests;
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(all(test, unix))]
 pub(in crate::markdown::svg_rasterize) fn with_selection_for_coverage<T>(
     mut operation: impl FnMut(
         fn(DatabaseKey, Arc<Database>) -> Option<HtmlTextMeasurementToken>,

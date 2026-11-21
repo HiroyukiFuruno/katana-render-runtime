@@ -8,8 +8,17 @@ pub(in crate::markdown::svg_rasterize::text_shaping) fn matching_font_face(
     font_weight: u16,
     italic: bool,
 ) -> Option<usvg::fontdb::ID> {
+    matching_font_face_with_platform(database, font_family, font_weight, italic, &font_platform())
+}
+
+fn matching_font_face_with_platform(
+    database: &usvg::fontdb::Database,
+    font_family: &str,
+    font_weight: u16,
+    italic: bool,
+    platform: &impl PlatformFontStrategy,
+) -> Option<usvg::fontdb::ID> {
     let names = css_font_family_names(font_family);
-    let platform = font_platform();
     if let ControlFlow::Break(selection) =
         platform.face_override(database, font_family, &names, font_weight, italic)
     {
@@ -17,7 +26,7 @@ pub(in crate::markdown::svg_rasterize::text_shaping) fn matching_font_face(
     }
     let families = names
         .iter()
-        .map(|name| platform_font_family(database, name, &platform))
+        .map(|name| platform_font_family(database, name, platform))
         .collect::<Vec<_>>();
     database.query(&usvg::fontdb::Query {
         families: &families,

@@ -225,3 +225,6 @@ fn sha256(bytes: &[u8]) -> String {
 
 #[path = "svg_rasterize_composite_path_arc_probe_public_fixture_tests.rs"]
 mod public_fixture_tests;
+
+#[path = "svg_rasterize_composite_path_adapter_tests.rs"]
+mod path_adapter_tests;
