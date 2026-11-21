@@ -18,6 +18,7 @@ import uuid
 
 import native_coverage_local_anchor as anchor
 import native_coverage_local_result as local
+from native_coverage_result import _tracked_rust_source_paths
 from native_nextest_coverage_commands import REPORT_DIRECTORY, clean_arguments, nextest_arguments, report_arguments
 import native_nextest_retry_artifacts as artifacts
 import native_nextest_retry_checkpoint as checkpoint
@@ -31,6 +32,8 @@ _NEXT_TEST_SUMMARY = re.compile(
     r"Summary\s+\[\s*[\d.]+s\]\s+\d+ tests run: \d+ passed"
     r"(?: \(\d+ slow\))?, \d+ failed, \d+ skipped"
 )
+_RUSTC_ERROR = re.compile(r"error(?:\[(E\d{4})\])?: .+")
+_RUSTC_LOCATION = re.compile(r"--> (.+\.rs):([1-9]\d*):[1-9]\d*")
 
 @contextmanager
 def _root_lock(path: Path) -> Iterator[None]:
@@ -96,6 +99,40 @@ def _print_failed_nextest_results(logs: Path) -> None:
                     print(result, flush=True)
 
 
+def _rustc_error_locations(
+    lines: Iterator[str], repo: Path, tracked: frozenset[Path]
+) -> Iterator[tuple[str, Path, int]]:
+    code = ""
+    for line in lines:
+        value = _ANSI_SEQUENCE.sub("", line).strip()
+        error = _RUSTC_ERROR.fullmatch(value)
+        if error is not None:
+            code = error.group(1) or "rustc"
+            continue
+        if not code:
+            continue
+        location = _RUSTC_LOCATION.fullmatch(value)
+        if location is not None:
+            source = Path(os.path.normpath(repo / location.group(1)))
+            if source.is_relative_to(repo):
+                relative = source.relative_to(repo)
+                if relative in tracked:
+                    yield code, relative, int(location.group(2))
+        code = ""
+
+
+def _print_compile_error_locations(logs: Path, repo: Path) -> None:
+    tracked = _tracked_rust_source_paths(repo)
+    found: set[tuple[str, Path, int]] = set()
+    for name in ("stderr.raw", "stdout.raw"):
+        with (logs / name).open(encoding="utf-8", errors="replace") as output:
+            found.update(_rustc_error_locations(output, repo, tracked))
+    for code, source, line in sorted(found):
+        print(json.dumps({"rootCoverageCompileError": {
+            "code": code, "path": source.as_posix(), "line": line,
+        }}), flush=True)
+
+
 def _execute(directory: Path, name: str, argv: list[str], repo: Path,
              environment: dict[str, str]) -> int:
     logs = directory / name
@@ -115,6 +152,11 @@ def _execute(directory: Path, name: str, argv: list[str], repo: Path,
     print(json.dumps({"rootCoverageStage": name, "exit": code, "logs": str(logs)}), flush=True)
     if name == "tests" and code != 0:
         _print_failed_nextest_results(logs)
+    if name == "tests" and code == 101:
+        try:
+            _print_compile_error_locations(logs, repo)
+        except (OSError, ValueError):
+            print("root coverage compiler diagnostics unavailable", flush=True)
     return code
 
 

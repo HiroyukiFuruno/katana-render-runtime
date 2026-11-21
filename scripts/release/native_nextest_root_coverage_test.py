@@ -60,6 +60,25 @@ class RootCoverageCommandTests(unittest.TestCase):
 
 
 class RootCoverageExecutionTests(unittest.TestCase):
+    def test_rustc_errors_emit_only_codes_and_tracked_relative_locations(self) -> None:
+        repo = Path.cwd()
+        source = Path("crates/runtime/src/lib.rs")
+        other = Path("crates/runtime/src/layout.rs")
+        rows = iter((
+            "\x1b[91merror[E0432]\x1b[0m: private compiler detail\n",
+            f"  --> {repo / source}:35:7\n",
+            "error: private uncoded detail\n",
+            f"  --> {other}:19:1\n",
+            "error[E0107]: fixture outside the repository\n",
+            f"  --> {repo.parent / 'private.rs'}:5:2\n",
+            "error[E0599]: untracked source\n",
+            "  --> crates/runtime/src/uncommitted.rs:6:3\n",
+        ))
+        self.assertEqual(
+            list(root_coverage._rustc_error_locations(rows, repo, frozenset({source, other}))),
+            [("E0432", source, 35), ("rustc", other, 19)],
+        )
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="krr-root-retry-unit-")
         self.addCleanup(self.temporary.cleanup)
