@@ -226,7 +226,8 @@ mod tests {
         style.italic = true;
         style.underline = true;
         style.font_family =
-            "\"Noto Sans JP\", \"Hiragino Sans\", \"Yu Gothic\", sans-serif".to_string();
+            "\"Noto Sans JP\", \"Noto Sans CJK JP\", \"Hiragino Sans\", \"Yu Gothic\", sans-serif"
+                .to_string();
         style.font_feature_settings = Some(r#""palt" 1"#.to_string());
         style
     }

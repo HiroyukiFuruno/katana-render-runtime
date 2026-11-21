@@ -186,7 +186,7 @@ fn production_feature_bridge_preserves_explicit_settings_and_skips_latin_tables(
 fn shaped_dx_applies_palt_without_expanding_text_nodes() {
     let dx = shaped_html_text_dx(
         "（JSC 案件）",
-        "\"Noto Sans JP\", \"Hiragino Sans\", \"Yu Gothic\", sans-serif",
+        "\"Noto Sans JP\", \"Noto Sans CJK JP\", \"Hiragino Sans\", \"Yu Gothic\", sans-serif",
         48.0,
         700,
         false,

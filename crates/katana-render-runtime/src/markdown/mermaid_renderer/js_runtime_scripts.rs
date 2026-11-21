@@ -176,7 +176,31 @@ const rows = CASES.map(([text, family, size]) => {
 JSON.stringify(rows);
 "#;
 
-    fn assert_c4_native_width_contract(cases: &[(&str, &str, f32)]) -> Result<(), String> {
+    const C4_NATIVE_WIDTH_FRACTIONAL_WITNESS: &str = r#"
+globalThis.__katanaMermaidDiagramType = 'c4';
+const witnessAdvance = 17.0001;
+const originalMeasure = globalThis.__katanaMeasureSvgTextMetrics;
+let calls = 0;
+globalThis.__katanaMeasureSvgTextMetrics = (...args) => {
+  const metrics = originalMeasure(...args);
+  calls++;
+  return {
+    ...metrics,
+    advance: witnessAdvance,
+    inkRight: Math.min(metrics.inkRight ?? witnessAdvance, witnessAdvance),
+  };
+};
+const tspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+tspan.style.setProperty('font-family', 'sans-serif');
+tspan.style.setProperty('font-size', '12px');
+tspan.style.setProperty('font-weight', '400');
+tspan.style.setProperty('font-style', 'normal');
+tspan.textContent = 'C4 raw advance witness';
+const width = tspan.getComputedTextLength();
+JSON.stringify({rawAdvance: witnessAdvance, width, calls});
+"#;
+
+    fn assert_c4_native_width_contract(cases: &[(&str, &str, f32)]) -> Result<bool, String> {
         let probe = c4_native_width_probe(cases);
         let scripts = [
             DiagramRuntimeScript::borrowed("mermaid-runtime.min.js", super::MERMAID_RUNTIME),
@@ -186,6 +210,28 @@ JSON.stringify(rows);
             let rendered = DiagramV8Runtime::render(&scripts)?;
             let rows = decode_c4_native_width_response(&rendered)?;
             assert_c4_native_width_rows(cases, &rows)
+        })
+    }
+
+    fn assert_c4_native_width_fractional_witness() -> Result<(), String> {
+        let scripts = [
+            DiagramRuntimeScript::borrowed("mermaid-runtime.min.js", super::MERMAID_RUNTIME),
+            DiagramRuntimeScript::borrowed(
+                "c4-native-width-fractional-witness.js",
+                C4_NATIVE_WIDTH_FRACTIONAL_WITNESS,
+            ),
+        ];
+        SvgRasterizeOps::with_html_font_render_scope(|| {
+            let rendered = DiagramV8Runtime::render(&scripts)?;
+            let witness: serde_json::Value =
+                serde_json::from_str(&rendered).map_err(|error| error.to_string())?;
+            let raw_advance = 17.0001_f64;
+            let expected = (raw_advance * CSS_SUBPIXELS).ceil() / CSS_SUBPIXELS;
+            assert_ne!(raw_advance, expected);
+            assert_eq!(witness["rawAdvance"].as_f64(), Some(raw_advance));
+            assert_eq!(witness["width"].as_f64(), Some(expected));
+            assert_eq!(witness["calls"].as_u64(), Some(1));
+            Ok(())
         })
     }
 

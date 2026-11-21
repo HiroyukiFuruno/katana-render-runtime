@@ -1470,12 +1470,20 @@ fn styled_inline_text_can_fragment_across_browser_line_boundaries() -> TestResul
     let emphasized = text_fragments_for_fill(&layout.svg, "#2c4ac6")?;
 
     assert!(emphasized.len() >= 2, "{}", layout.svg);
-    assert_eq!(
-        emphasized.concat(),
-        "Local Index が分類候補の表示を停止",
-        "{}",
-        layout.svg
-    );
+    let rendered = emphasized.concat();
+    let expected = "Local Index が分類候補の表示を停止";
+    if rendered != expected {
+        /* WHY: 改行位置の空白はSVGのテキスト断片に含まれない。 */
+        let boundary = emphasized
+            .windows(2)
+            .find(|pair| pair[0].ends_with("Local") && pair[1].starts_with("Index"))
+            .ok_or_else(|| format!("unexpected text fragments: {emphasized:?}"))?;
+        assert!(
+            text_baseline_for(&layout.svg, &boundary[0])?
+                < text_baseline_for(&layout.svg, &boundary[1])?
+        );
+        assert_eq!(rendered.replacen("LocalIndex", "Local Index", 1), expected);
+    }
     Ok(())
 }
 

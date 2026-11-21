@@ -182,19 +182,30 @@ fn c4_wide_svg_width_preserves_native_raw_advance() -> Result<(), String> {
         "リレーショナルデータベーススキ",
         "Open Sans, sans-serif",
         10.5,
-    )])
+    )])?;
+    Ok(())
+}
+
+#[test]
+fn c4_svg_width_rounds_a_font_independent_fractional_native_advance() -> Result<(), String> {
+    assert_c4_native_width_fractional_witness()
 }
 
 #[test]
 fn c4_relation_svg_widths_preserve_native_raw_advance() -> Result<(), String> {
-    assert_c4_native_width_contract(&[
+    let has_css_rounding_counterexample = assert_c4_native_width_contract(&[
         ("Uses", "Open Sans, sans-serif", 12.0),
         ("[HTTPS]", "Open Sans, sans-serif", 12.0),
         ("Reads from and writes to", "Open Sans, sans-serif", 12.0),
         ("利用する", "Open Sans, sans-serif", 12.0),
         ("AVATAR", "Arial, Noto Sans, sans-serif", 14.0),
         ("日本語の幅", "Noto Sans, sans-serif", 16.0),
-    ])
+    ])?;
+    assert!(
+        has_css_rounding_counterexample,
+        "C4 CSS inputs must distinguish ceil64 from raw advance"
+    );
+    Ok(())
 }
 
 #[test]

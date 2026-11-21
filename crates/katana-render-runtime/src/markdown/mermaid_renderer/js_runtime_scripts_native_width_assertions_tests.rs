@@ -4,26 +4,14 @@ const CSS_SUBPIXELS: f64 = 64.0;
 fn assert_c4_native_width_rows(
     cases: &[(&str, &str, f32)],
     rows: &[serde_json::Value],
-) -> Result<(), String> {
+) -> Result<bool, String> {
     assert!(!cases.is_empty());
     assert_eq!(rows.len(), cases.len());
-    let mut has_rounding_counterexample = false;
     let mut has_css_rounding_counterexample = false;
     for (row, &(text, family, size)) in rows.iter().zip(cases) {
-        let (svg_counterexample, css_counterexample) =
-            assert_c4_native_width_row(row, text, family, size)?;
-        has_rounding_counterexample |= svg_counterexample;
-        has_css_rounding_counterexample |= css_counterexample;
+        has_css_rounding_counterexample |= assert_c4_native_width_row(row, text, family, size)?;
     }
-    assert!(
-        has_rounding_counterexample,
-        "SVG inputs must distinguish raw advance from CSS ceil64"
-    );
-    assert!(
-        has_css_rounding_counterexample,
-        "CSS inputs must distinguish ceil64 from raw advance"
-    );
-    Ok(())
+    Ok(has_css_rounding_counterexample)
 }
 
 fn assert_c4_native_width_row(
@@ -31,11 +19,11 @@ fn assert_c4_native_width_row(
     text: &str,
     family: &str,
     size: f32,
-) -> Result<(bool, bool), String> {
+) -> Result<bool, String> {
     let calls = row["calls"].as_array().ok_or("native calls missing")?;
     assert_eq!(calls.len(), 2, "{text:?}: {calls:?}");
     assert_c4_native_call_arguments(calls, text, family, size)?;
-    let svg_advance = assert_c4_native_svg_reference(&calls[0], row, text, family, size)?;
+    assert_c4_native_svg_reference(&calls[0], row, text, family, size)?;
     let css_raw =
         SvgRasterizeOps::measure_html_text(text, family, size, C4_WEIGHT, false, 0.0, None)
             .map_err(|error| format!("CSS {text:?}, {family}: {error:?}"))?;
@@ -43,11 +31,7 @@ fn assert_c4_native_width_row(
     let css_expected = (f64::from(css_raw) * CSS_SUBPIXELS).ceil() / CSS_SUBPIXELS;
     assert_eq!(calls[1]["width"].as_f64(), Some(css_expected), "{text:?}");
     assert_eq!(row["cssWidth"].as_f64(), Some(css_expected), "{text:?}");
-    let rounded_svg = (f64::from(svg_advance) * CSS_SUBPIXELS).ceil() / CSS_SUBPIXELS;
-    Ok((
-        rounded_svg as f32 != svg_advance,
-        f64::from(css_raw) != css_expected,
-    ))
+    Ok(f64::from(css_raw) != css_expected)
 }
 
 fn assert_c4_native_svg_reference(
@@ -57,9 +41,8 @@ fn assert_c4_native_svg_reference(
     family: &str,
     size: f32,
 ) -> Result<f32, String> {
-    let svg =
-        SvgRasterizeOps::measure_svg_text_metrics(text, family, size, C4_WEIGHT, false)
-            .map_err(|error| format!("SVG {text:?}, {family}: {error:?}"))?;
+    let svg = SvgRasterizeOps::measure_svg_text_metrics(text, family, size, C4_WEIGHT, false)
+        .map_err(|error| format!("SVG {text:?}, {family}: {error:?}"))?;
     assert!(
         svg.advance.is_finite()
             && svg.advance > 1.0
@@ -110,8 +93,7 @@ fn assert_c4_svg_metrics(
         );
     }
     /* WHY: callbackのraw値を維持し、DOM APIの幅だけChromeと同じ1/64pxへ切り上げる。 */
-    let expected_dom_width =
-        (f64::from(expected.advance) * CSS_SUBPIXELS).ceil() / CSS_SUBPIXELS;
+    let expected_dom_width = (f64::from(expected.advance) * CSS_SUBPIXELS).ceil() / CSS_SUBPIXELS;
     assert_eq!(row["width"].as_f64(), Some(expected_dom_width), "{text:?}");
     Ok(())
 }

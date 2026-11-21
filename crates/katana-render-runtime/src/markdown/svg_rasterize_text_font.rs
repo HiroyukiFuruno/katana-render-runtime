@@ -199,6 +199,8 @@ mod tests {
         css_stretch_match_rank, css_style_match_rank, fallback_attribute_score, font_has_char,
         matching_fallback_face, matching_font_face,
     };
+    #[cfg(not(target_os = "macos"))]
+    use crate::markdown::svg_rasterize::font::platform::{PlatformFontStrategy, font_platform};
     use crate::markdown::svg_rasterize::font::{bundled_font_db, html_font_db_for_text};
     use resvg::usvg;
     use resvg::usvg::fontdb::{Database, ID, Source, Stretch, Style, Weight};
@@ -293,6 +295,37 @@ mod tests {
                 )
             })
             .map(|face| face.id)
+    }
+
+    fn expected_html_cjk_fallback(
+        database: &Database,
+        base_face_id: ID,
+        character: char,
+        requested_weight: u16,
+        requested_italic: bool,
+    ) -> Option<ID> {
+        #[cfg(not(target_os = "macos"))]
+        {
+            let requested_style = if requested_italic {
+                Style::Italic
+            } else {
+                Style::Normal
+            };
+            if let Some(preferred) = font_platform()
+                .cjk_fallback_face(database, character, requested_weight, requested_style)
+                .filter(|id| *id != base_face_id)
+                .filter(|id| shaping_face_has_char(database, *id, character))
+            {
+                return Some(preferred);
+            }
+        }
+        full_scan_shaping_fallback(
+            database,
+            base_face_id,
+            character,
+            requested_weight,
+            requested_italic,
+        )
     }
 
     struct FallbackFixture {
@@ -467,7 +500,7 @@ mod tests {
             assert!(font_has_char(database, fallback, '日'));
             assert_eq!(
                 Some(fallback),
-                full_scan_shaping_fallback(database, base, '日', weight, italic)
+                expected_html_cjk_fallback(database, base, '日', weight, italic)
             );
             for character in ['A', '日', '😀', '\u{10ffff}'] {
                 assert_eq!(
