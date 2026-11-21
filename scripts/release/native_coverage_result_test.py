@@ -273,6 +273,35 @@ class NativeCoverageResultTests(unittest.TestCase):
         with self.assertRaisesRegex(coverage_result.CoverageResultError, "100/0"):
             coverage_result._line_totals(report, "root")
 
+    def test_root_policy_failure_reports_only_tracked_rust_source_counts(self) -> None:
+        tracked = self.root / "crates/katana-render-runtime/src/coverage_fixture.rs"
+        tracked.parent.mkdir(parents=True)
+        tracked.write_text("fn covered_fixture() {}\n", encoding="utf-8")
+        self.git("add", str(tracked.relative_to(self.root)))
+        report = {
+            "type": "llvm.coverage.json.export",
+            "version": "2.0.1",
+            "data": [{
+                "files": [
+                    {"filename": str(tracked),
+                     "summary": {"lines": {"count": 7, "covered": 5}}},
+                    {"filename": "private/untracked.rs", "summary": {"lines": {"count": 9, "covered": 1}}},
+                    {"filename": "/private/unapproved.rs", "summary": {"lines": {"count": 8, "covered": 1}}},
+                ],
+                "totals": {"lines": {"count": 7, "covered": 5, "percent": 71.428571}},
+            }],
+        }
+        with self.assertRaisesRegex(
+            coverage_result.CoveragePolicyError,
+            r"root coverage does not satisfy 100/0; uncovered tracked Rust sources: "
+            r"crates/katana-render-runtime/src/coverage_fixture\.rs 5/7 \(2 uncovered\)",
+        ) as raised:
+            coverage_result._line_totals(report, "root", self.root)
+        message = str(raised.exception)
+        self.assertNotIn(str(self.root), message)
+        self.assertNotIn("private/untracked.rs", message)
+        self.assertNotIn("/private/unapproved.rs", message)
+
     def test_collected_root_lines_accept_full_export_with_function_details(self) -> None:
         report = {
             "type": "llvm.coverage.json.export",

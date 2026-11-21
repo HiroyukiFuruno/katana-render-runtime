@@ -217,9 +217,15 @@ def _collected_line_totals(report: object, domain: str) -> JsonObject:
             "percent": percent}
 
 
-def _line_totals(report: object, domain: str) -> JsonObject:
+def _line_totals(report: object, domain: str, root: Path | None = None) -> JsonObject:
     totals = _collected_line_totals(report, domain)
-    _require_complete_line_totals(totals, domain)
+    try:
+        _require_complete_line_totals(totals, domain)
+    except CoveragePolicyError as error:
+        summary = _root_uncovered_source_summary(root, report) if domain == "root" and root else None
+        if summary is not None:
+            raise CoveragePolicyError(f"{error}; {summary}") from error
+        raise
     totals["percent"] = 100.0
     return totals
 
@@ -358,6 +364,62 @@ def _validate_root_source_mappings(root: Path, report: object) -> None:
             _validate_source_segments(file.get("segments"), _read_repo_file(root, str(relative)), relative)
 
 
+def _tracked_rust_source_paths(root: Path) -> frozenset[Path]:
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "-z", "--", "*.rs"],
+            cwd=root,
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return frozenset()
+    if result.returncode != 0:
+        return frozenset()
+    return frozenset(
+        Path(name.decode("utf-8", "surrogateescape"))
+        for name in result.stdout.split(b"\0")
+        if name
+    )
+
+
+def _root_uncovered_source_summary(root: Path, report: object) -> str | None:
+    tracked = _tracked_rust_source_paths(root)
+    uncovered: dict[Path, tuple[int, int]] = {}
+    export = _object(report, "root llvm-cov report")
+    for item in _array(export.get("data"), "root report data"):
+        data = _object(item, "root report mapping")
+        for value in _array(data.get("files"), "root coverage source files"):
+            file = _object(value, "root coverage source file")
+            filename = file.get("filename")
+            if not isinstance(filename, str) or not filename or "\0" in filename:
+                continue
+            path = Path(os.path.normpath(root / filename))
+            if path.suffix != ".rs" or not path.is_relative_to(root):
+                continue
+            relative = path.relative_to(root)
+            if relative not in tracked:
+                continue
+            summary = file.get("summary")
+            if not isinstance(summary, dict):
+                continue
+            lines = summary.get("lines")
+            if not isinstance(lines, dict):
+                continue
+            count = lines.get("count")
+            covered = lines.get("covered")
+            if type(count) is not int or type(covered) is not int or count <= covered or covered < 0:
+                continue
+            uncovered[relative] = (count, covered)
+    if not uncovered:
+        return None
+    entries = ", ".join(
+        f"{path.as_posix()} {covered}/{count} ({count - covered} uncovered)"
+        for path, (count, covered) in sorted(uncovered.items())
+    )
+    return f"uncovered tracked Rust sources: {entries}"
+
+
 def _report_record(root: Path, domain: str, threads: str, *, collection: bool = False) -> JsonObject:
     name = "root.json" if domain == "root" else f"{domain.removeprefix('performance-')}.json"
     relative = f"{REPORT_DIRECTORY}/{name}"
@@ -373,7 +435,8 @@ def _report_record(root: Path, domain: str, threads: str, *, collection: bool = 
         "sha256": _sha256(raw),
         "bytes": len(raw),
         "command": _domain_command(root, domain, name, threads),
-        "lines": (_collected_line_totals if collection else _line_totals)(report, domain),
+        "lines": (_collected_line_totals(report, domain) if collection
+                  else _line_totals(report, domain, root)),
     }
 
 
