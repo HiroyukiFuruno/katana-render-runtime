@@ -157,11 +157,25 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
+          import re
           from native_coverage_result import _collected_line_totals, _require_complete_line_totals
 
           path = Path("tmp/quality/standalone-performance-coverage/root.json")
           totals = _collected_line_totals(json.loads(path.read_bytes()), "root")
           print(json.dumps(totals))
+          if totals["unmeasured"]:
+              logs = tuple((path.parent / "root-nextest-attempts").glob("*/report/stdout.raw"))
+              if len(logs) != 1:
+                  raise ValueError("expected one report from this isolated root run")
+              root = Path.cwd().resolve()
+              for line in logs[0].read_text(encoding="utf-8").splitlines():
+                  match = re.fullmatch(r"(.+\.rs): ([0-9,-]+(?: [0-9,-]+)*)", line)
+                  if match:
+                      path = Path(match[1])
+                      if path.is_absolute() and path.is_relative_to(root):
+                          path = path.relative_to(root)
+                      if not path.is_absolute() and ".." not in path.parts:
+                          print(f"Uncovered {path}: {match[2]}")
           _require_complete_line_totals(totals, "root")
           PY
 
