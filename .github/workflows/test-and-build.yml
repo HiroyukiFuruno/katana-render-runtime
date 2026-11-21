@@ -334,9 +334,8 @@ jobs:
     if: >-
       (success() || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
       needs.static-quality.result == 'skipped')) &&
-      !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
-      (inputs.verify_platform == 'linux-contracts' || inputs.verify_platform == 'linux-observer-access' ||
-      inputs.verify_platform == 'linux-validation-contract')) &&
+      (!(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') ||
+      contains(fromJSON('["both","linux","linux-assets","linux-fidelity","windows"]'), inputs.verify_platform)) &&
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     strategy:
       fail-fast: false
