@@ -17,7 +17,7 @@ mod token_store;
 use token_store::TokenStore;
 #[path = "svg_rasterize_text_measurement_token_selection.rs"]
 mod selection;
-use selection::{mode_memo_result, token_for_selected};
+use selection::token_for_selected;
 
 #[path = "svg_rasterize_text_measurement_token_key.rs"]
 mod key;
@@ -35,10 +35,8 @@ pub(crate) struct HtmlTextMeasurementToken {
 }
 
 enum MemoEntry {
-    Miss(HtmlFontRequest),
-    Hit(HtmlFontRequest, HtmlTextMeasurementToken),
-    ModeMiss(DatabaseKey),
-    ModeHit(DatabaseKey, HtmlTextMeasurementToken),
+    Miss(DatabaseKey),
+    Hit(DatabaseKey, HtmlTextMeasurementToken),
 }
 
 thread_local! {
@@ -100,7 +98,7 @@ impl HtmlTextMeasurementToken {
         if family.len() > MAX_FAMILY_BYTES || !super::font::memo_usable() {
             return None;
         }
-        if let Some(result) = mode_memo_result(key) {
+        if let Some(result) = active_memo_result(key) {
             return result.filter(|token| {
                 token
                     .proof
@@ -116,14 +114,14 @@ impl HtmlTextMeasurementToken {
     }
 }
 
-fn active_memo_result(request: &HtmlFontRequest) -> Option<Option<HtmlTextMeasurementToken>> {
+fn active_memo_result(key: &DatabaseKey) -> Option<Option<HtmlTextMeasurementToken>> {
     ACTIVE_RENDER_MEMO.with(|memo| {
         memo.borrow()
             .as_ref()?
             .iter()
             .find_map(|entry| match entry {
-                MemoEntry::Miss(cached) if cached == request => Some(None),
-                MemoEntry::Hit(cached, token) if cached == request => Some(Some(token.clone())),
+                MemoEntry::Miss(cached) if cached == key => Some(None),
+                MemoEntry::Hit(cached, token) if cached == key => Some(Some(token.clone())),
                 _ => None,
             })
     })
@@ -178,6 +176,6 @@ mod lifecycle_tests;
 #[path = "svg_rasterize_text_measurement_token_batch_retry_tests.rs"]
 mod batch_retry_tests;
 
-#[cfg(all(test, unix))]
+#[cfg(all(test, target_os = "macos"))]
 #[path = "svg_rasterize_text_measurement_token_selection_tests.rs"]
 mod selection_tests;

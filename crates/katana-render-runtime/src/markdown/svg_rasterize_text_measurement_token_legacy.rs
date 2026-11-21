@@ -9,16 +9,13 @@ impl HtmlTextMeasurementToken {
         if font_family.len() > MAX_FAMILY_BYTES || !super::super::font::memo_usable() {
             return None;
         }
-        let request = HtmlFontRequest::from_text(font_family, text);
-        if let Some(result) = active_memo_result(&request) {
+        let key = DatabaseKey::eager(HtmlFontRequest::from_text(font_family, text));
+        if let Some(result) = active_memo_result(&key) {
             return result;
         }
         if active_memo_full() {
             return None;
         }
-        token_for_selected(
-            DatabaseKey::eager(request),
-            html_font_db_for_text(font_family, text),
-        )
+        token_for_selected(key, html_font_db_for_text(font_family, text))
     }
 }

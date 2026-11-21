@@ -1,11 +1,10 @@
 use super::{
-    Database, DatabaseKey, HtmlFontRequest, HtmlTextMeasurementToken, Scope, mode_memo_result,
-    token_for_selected,
+    Database, DatabaseKey, HtmlFontRequest, HtmlTextMeasurementToken, Scope, active_memo_result,
+    tests::oversized_database, token_for_selected,
 };
 use crate::markdown::svg_rasterize::font::{DiscoveryMode, bundled_font_db};
 use std::sync::Arc;
 
-const DUPLICATE_FACE_COUNT: usize = 512;
 const OVERSIZED_REQUEST_FAMILY_COUNT: usize = 3_000;
 
 fn with_selection<T>(
@@ -16,7 +15,7 @@ fn with_selection<T>(
 ) -> T {
     super::super::font::with_validated_stamp_batch(|| {
         let _scope = Scope::enter();
-        operation(token_for_selected, mode_memo_result)
+        operation(token_for_selected, active_memo_result)
     })
 }
 
@@ -25,20 +24,6 @@ fn key(discovery: DiscoveryMode, family: &str) -> DatabaseKey {
         request: HtmlFontRequest::from_text(family, "ABC"),
         discovery,
     }
-}
-
-fn oversized_database() -> Result<Arc<Database>, String> {
-    let mut database = Arc::unwrap_or_clone(bundled_font_db());
-    let face = database
-        .faces()
-        .next()
-        .ok_or("bundled Noto face missing")?
-        .clone();
-    for _ in 0..DUPLICATE_FACE_COUNT {
-        database.push_face_info(face.clone());
-    }
-    assert_eq!(database.faces().count(), 513);
-    Ok(Arc::new(database))
 }
 
 fn assert_memoized_miss(value: Option<Option<HtmlTextMeasurementToken>>) {

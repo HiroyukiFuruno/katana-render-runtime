@@ -47,14 +47,64 @@ fn token_factory_rejects_outside_nested_and_oversize_requests() {
 fn remembered_miss_is_returned_without_constructing_a_token() {
     super::super::font::with_validated_stamp_batch(|| {
         let _scope = super::Scope::enter();
-        let request = super::HtmlFontRequest::from_text("Noto Sans", "A");
-        super::remember_active(super::MemoEntry::Miss(request));
+        let key = super::DatabaseKey::eager(super::HtmlFontRequest::from_text("Noto Sans", "A"));
+        super::remember_active(super::MemoEntry::Miss(key));
         assert!(HtmlTextMeasurementToken::for_request("A", "Noto Sans").is_none());
     });
 }
 
+#[cfg(unix)]
+#[test]
+fn eager_raw_database_memoizes_the_second_selection() -> Result<(), String> {
+    let key = super::DatabaseKey::eager(super::HtmlFontRequest::from_text("Noto Sans", "A"));
+    let database = super::super::super::font::bundled_font_db();
+    let select = || HtmlTextMeasurementToken::for_selected_database("Noto Sans", &key, &database);
+    let first_key = super::super::font::with_validated_stamp_batch(|| {
+        let _scope = super::Scope::enter();
+        let first = select().ok_or("first eager raw database selection failed")?;
+        let second = select().ok_or("second eager raw database selection failed")?;
+        assert_eq!(first.key(), second.key());
+        assert_eq!(
+            super::active_memo_result(&key)
+                .flatten()
+                .map(|token| token.key()),
+            Some(first.key())
+        );
+        Ok::<_, String>(first.key())
+    })?;
+    super::super::font::with_validated_stamp_batch(|| {
+        let _scope = super::Scope::enter();
+        assert!(super::active_memo_result(&key).is_none());
+        assert_eq!(select().map(|token| token.key()).as_ref(), Some(&first_key));
+    });
+    Ok(())
+}
+
+#[test]
+fn eager_raw_database_remembers_an_unusable_selection() -> Result<(), String> {
+    let database = oversized_database()?;
+    super::super::font::with_validated_stamp_batch(|| {
+        let _scope = super::Scope::enter();
+        let key = super::DatabaseKey::eager(super::HtmlFontRequest::from_text("Noto Sans", "A"));
+        assert!(
+            HtmlTextMeasurementToken::for_selected_database("Noto Sans", &key, &database).is_none()
+        );
+        assert!(matches!(super::active_memo_result(&key), Some(None)));
+        assert!(
+            HtmlTextMeasurementToken::for_selected_database("Noto Sans", &key, &database).is_none()
+        );
+    });
+    Ok(())
+}
+
 #[test]
 fn render_generations_rejects_more_than_the_face_limit() -> Result<(), String> {
+    assert!(super::render_generations(&oversized_database()?).is_none());
+    Ok(())
+}
+
+pub(super) fn oversized_database() -> Result<std::sync::Arc<resvg::usvg::fontdb::Database>, String>
+{
     let mut database = resvg::usvg::fontdb::Database::new();
     database.load_font_data(include_bytes!("../../assets/fonts/NotoSans-Regular.ttf").to_vec());
     let face = database.faces().next().ok_or("real face missing")?.clone();
@@ -63,8 +113,7 @@ fn render_generations_rejects_more_than_the_face_limit() -> Result<(), String> {
     }
     let database = std::sync::Arc::new(database);
     assert_eq!(database.faces().count(), super::MAX_TOKEN_FACES + 1);
-    assert!(super::render_generations(&database).is_none());
-    Ok(())
+    Ok(database)
 }
 
 #[test]
@@ -91,6 +140,7 @@ fn bounded_family_input_rejects_oversized_normalized_token() {
     let family = format!("{}Noto Sans", "font-family=".repeat(300));
     assert!(family.len() <= MAX_FAMILY_BYTES);
     let request = super::HtmlFontRequest::from_text(&family, "A");
+    let key = super::DatabaseKey::eager(request.clone());
     assert_eq!(request.families.len(), 300);
     assert_eq!(
         request.families.iter().map(String::len).sum::<usize>(),
@@ -100,6 +150,6 @@ fn bounded_family_input_rejects_oversized_normalized_token() {
         let database = super::super::html_font_db_for_text(&family, "A");
         assert!(super::render_generations(&database).is_some());
         assert!(HtmlTextMeasurementToken::for_request("A", &family).is_none());
-        assert!(matches!(super::active_memo_result(&request), Some(None)));
+        assert!(matches!(super::active_memo_result(&key), Some(None)));
     });
 }
