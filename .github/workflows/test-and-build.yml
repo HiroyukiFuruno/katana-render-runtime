@@ -94,7 +94,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 8709d3e47e91bd0fc147460ceb4cfffc1bfb7045
+          ref: f8e811677b8489a1797b828ff24fc2e6e9cf7423
           fetch-depth: 0
       - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
@@ -121,7 +121,7 @@ jobs:
       - name: Prepare Linux root coverage environment
         shell: bash
         run: |
-          test "$(git rev-parse HEAD)" = "8709d3e47e91bd0fc147460ceb4cfffc1bfb7045"
+          test "$(git rev-parse HEAD)" = "f8e811677b8489a1797b828ff24fc2e6e9cf7423"
           bun install --frozen-lockfile
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk graphviz libfontconfig-dev libfreetype-dev
@@ -140,18 +140,12 @@ jobs:
           cargo install cargo-sweep --version 0.8.0 --locked
           python3 scripts/build/initialize_ci_capacity_state.py --root "$PWD"
           just plantuml-install
-      - name: Run seven selected Linux regressions
+      - name: Run the remaining Linux regression
         if: inputs.verify_filter == 'verify-fix'
         timeout-minutes: 25
         run: >-
           just native-nextest-diagnostic
-          'test(=markdown::mermaid_renderer::js_runtime_scripts::tests::c4_wide_svg_width_preserves_native_raw_advance)
-          | test(=markdown::mermaid_renderer::js_runtime_scripts::tests::c4_svg_width_rounds_a_font_independent_fractional_native_advance)
-          | test(=markdown::mermaid_renderer::js_runtime_scripts::tests::c4_relation_svg_widths_preserve_native_raw_advance)
-          | test(=markdown::svg_rasterize::text_shaping::font::tests::glyph_probe_preserves_latin_cjk_and_styled_fallback_selection)
-          | test(=markdown::svg_rasterize::text_shaping::tests::shaped_dx_applies_palt_without_expanding_text_nodes)
-          | test(=renderer::backends::html_interactive::layout_paint_lines::tests::text_alignment_and_typography_attributes_are_written_to_svg)
-          | test(=renderer::backends::html_interactive::tests::rendering::styled_inline_text_can_fragment_across_browser_line_boundaries)'
+          'test(=renderer::backends::html_interactive::tests::rendering::styled_inline_text_can_fragment_across_browser_line_boundaries)'
       - name: Run the exact Linux root coverage producer
         id: root_coverage
         timeout-minutes: 45
@@ -163,10 +157,12 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
-          from native_coverage_result import _line_totals
+          from native_coverage_result import _collected_line_totals, _require_complete_line_totals
 
           path = Path("tmp/quality/standalone-performance-coverage/root.json")
-          print(json.dumps(_line_totals(json.loads(path.read_bytes()), "root")))
+          totals = _collected_line_totals(json.loads(path.read_bytes()), "root")
+          print(json.dumps(totals))
+          _require_complete_line_totals(totals, "root")
           PY
 
   verify-linux-observer-access:
