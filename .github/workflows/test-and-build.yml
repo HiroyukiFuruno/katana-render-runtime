@@ -46,6 +46,7 @@ on:
           - linux-observer-access
           - linux-root-coverage
           - linux-validation-contract
+          - macos-stage90
           - windows
       verify_filter:
         description: Optional nextest filter, linux-assets test pattern, full-runtime-assets or remaining-runtime-assets, or linux-fidelity selection.
@@ -1485,8 +1486,10 @@ jobs:
     name: Native paired HTML time and RSS nonregression
     needs: test
     if: >-
-      !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') &&
-      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+      (success() && !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify') &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)) ||
+      (!cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' &&
+      inputs.verify_platform == 'macos-stage90' && needs.test.result == 'skipped')
     runs-on: macos-15
     timeout-minutes: 360
     permissions:
@@ -1500,12 +1503,14 @@ jobs:
       - name: Checkout exact measurement source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'macos-stage90' && 'e01610090ee6d9024688c58e066f5296c0f7d0bb' || github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Record actual source HEAD
         id: source
-        run: echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "diagnostic=${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'macos-stage90' }}" >> "$GITHUB_OUTPUT"
 
       - name: Verify optional local HTML performance evidence
         id: html_local_proof
@@ -1561,8 +1566,13 @@ jobs:
           observer_work="$(mktemp -d "${RUNNER_TEMP}/krr-font-observer.XXXXXXXX")"
           observer_work="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve(strict=True))' "$observer_work")"
           archive="$observer_work/observer.tar.gz"
-          gh api -H 'Accept: application/octet-stream' \
-            "repos/${GITHUB_REPOSITORY}/releases/assets/702068128" > "$archive"
+          # 公開前は固定CI成果物から同一のアーカイブを取得できる。
+          if ! gh api -H 'Accept: application/octet-stream' \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/702068128" > "$archive"; then
+            gh run download 44800513985 --repo "$GITHUB_REPOSITORY" \
+              --name krr-font-observer-v0.4.24-92102a2d --dir "$observer_work/staged"
+            mv "$observer_work/staged/font-observer-macos-arm64.tar.gz" "$archive"
+          fi
           python3 scripts/release/html_performance_observer_unpack.py \
             --archive "$archive" \
             --archive-sha256 92102a2dad3ef4c5f50e5581c7f12a2c7b4e291ee3c3a2804299690811e8a86f \
@@ -1598,11 +1608,11 @@ jobs:
           echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
 
       - name: Measure all 84 catalog conditions against baseline
-        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        if: steps.source.outputs.diagnostic != 'true' && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
         run: just html-performance-evidence-produce "${{ steps.html84.outputs.manifest }}"
 
       - name: Upload immutable source and run bound paired evidence
-        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        if: steps.source.outputs.diagnostic != 'true' && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
         id: paired_performance_upload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -1612,14 +1622,14 @@ jobs:
           retention-days: 14
 
       - name: Attest immutable paired performance artifact
-        if: steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'
+        if: steps.source.outputs.diagnostic != 'true' && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-name: html-performance-paired-${{ steps.source.outputs.head }}-${{ github.run_id }}-${{ github.run_attempt }}
           subject-digest: sha256:${{ steps.paired_performance_upload.outputs.artifact-digest }}
 
       - name: Upload failed measurement diagnostics
-        if: failure() && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
+        if: failure() && steps.source.outputs.diagnostic != 'true' && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: html-performance-diagnostics-${{ steps.source.outputs.head }}-${{ github.run_id }}-${{ github.run_attempt }}
