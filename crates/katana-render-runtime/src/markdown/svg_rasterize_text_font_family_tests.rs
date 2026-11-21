@@ -3,7 +3,7 @@ use crate::markdown::svg_rasterize::font::{bundled_font_db, platform::PlatformFo
 use resvg::usvg::fontdb::{Database, ID};
 use std::{collections::BTreeSet, ops::ControlFlow, path::PathBuf};
 
-struct OverridePlatform(Option<ID>);
+struct OverridePlatform(ControlFlow<Option<ID>>);
 
 impl PlatformFontStrategy for OverridePlatform {
     fn installed_paths(&self, _: &BTreeSet<&str>) -> BTreeSet<PathBuf> {
@@ -18,7 +18,7 @@ impl PlatformFontStrategy for OverridePlatform {
         _: u16,
         _: bool,
     ) -> ControlFlow<Option<ID>> {
-        ControlFlow::Break(self.0)
+        self.0
     }
 }
 
@@ -46,12 +46,36 @@ fn platform_override_can_select_or_reject_before_database_query() {
             "ignored",
             400,
             false,
-            &OverridePlatform(selected)
+            &OverridePlatform(ControlFlow::Break(selected))
         ),
         selected
     );
     assert_eq!(
-        matching_font_face_with_platform(&database, "ignored", 400, false, &OverridePlatform(None)),
+        matching_font_face_with_platform(
+            &database,
+            "ignored",
+            400,
+            false,
+            &OverridePlatform(ControlFlow::Break(None)),
+        ),
         None
     );
+}
+
+#[test]
+fn platform_continue_falls_through_to_the_requested_bundled_family() {
+    let database = bundled_font_db();
+    let selected = matching_font_face_with_platform(
+        &database,
+        "Noto Sans",
+        400,
+        false,
+        &OverridePlatform(ControlFlow::Continue(())),
+    );
+    let face = selected.and_then(|id| database.face(id));
+    assert!(face.is_some_and(|face| {
+        face.families
+            .iter()
+            .any(|(family, _)| family.eq_ignore_ascii_case("Noto Sans"))
+    }));
 }

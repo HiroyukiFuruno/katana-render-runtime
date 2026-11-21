@@ -25,7 +25,7 @@ pub(in super::super) fn clear_html_line_metrics_cache() {
     primary_baseline::clear_primary_baseline_cache();
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
 fn html_line_metrics_cache_len() -> usize {
     LINE_METRIC_CACHE.with(|cache| cache.borrow().len())
 }
@@ -187,3 +187,7 @@ mod tests;
 #[cfg(all(test, target_os = "linux"))]
 #[path = "svg_rasterize_html_line_metrics_linux_tests.rs"]
 mod linux_tests;
+
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
+#[path = "svg_rasterize_html_line_metrics_shared_tests.rs"]
+mod shared_tests;

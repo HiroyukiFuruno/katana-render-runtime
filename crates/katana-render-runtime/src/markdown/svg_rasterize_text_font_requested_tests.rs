@@ -1,22 +1,48 @@
-use super::matching_fallback_with_request;
+use super::{matching_fallback_with_request, probe_font_has_char};
 use crate::markdown::svg_rasterize::font_file_fixture::FONT_BYTES;
-use resvg::usvg::{self, fontdb::Database};
+use resvg::usvg::{
+    self,
+    fontdb::{Database, ID, Source},
+};
 use std::sync::Arc;
 
 #[test]
 fn requested_fallback_rejects_a_removed_base_face() -> Result<(), String> {
-    let mut database = Database::new();
-    database.load_font_data(FONT_BYTES.to_vec());
-    let face = database.faces().next().ok_or("bundled face missing")?.id;
-    let mut database = Arc::new(database);
+    let mut database = Arc::new(Database::new());
+    let base = load_face(&mut database)?;
+    let fallback = load_face(&mut database)?;
+    assert_ne!(base, fallback, "separate font loads must have distinct IDs");
     let requested = requested_font(&database)?;
-    Arc::make_mut(&mut database).remove_face(face);
+    assert_eq!(probe_font_has_char(&database, fallback, 'A'), Some(true));
+    assert_eq!(
+        requested_fallback(&database, base, &requested),
+        (Some(fallback), true)
+    );
+    Arc::make_mut(&mut database).remove_face(base);
 
     assert_eq!(
-        matching_fallback_with_request(&database, face, 'A', &requested, |_, _| Some(true)),
+        requested_fallback(&database, base, &requested),
         (None, false)
     );
     Ok(())
+}
+
+fn load_face(database: &mut Arc<Database>) -> Result<ID, String> {
+    Arc::make_mut(database)
+        .load_font_source(Source::Binary(Arc::new(FONT_BYTES)))
+        .first()
+        .copied()
+        .ok_or("bundled face missing".to_owned())
+}
+
+fn requested_fallback(
+    database: &Arc<Database>,
+    base: ID,
+    requested: &usvg::Font,
+) -> (Option<ID>, bool) {
+    matching_fallback_with_request(database, base, 'A', requested, |id, character| {
+        probe_font_has_char(database, id, character)
+    })
 }
 
 fn requested_font(database: &Arc<Database>) -> Result<usvg::Font, String> {
