@@ -1470,18 +1470,18 @@ fn styled_inline_text_can_fragment_across_browser_line_boundaries() -> TestResul
     let emphasized = text_fragments_for_fill(&layout.svg, "#2c4ac6")?;
 
     assert!(emphasized.len() >= 2, "{}", layout.svg);
-    let rendered = emphasized.concat();
+    let rendered = emphasized
+        .iter()
+        .map(|part| part.text.as_str())
+        .collect::<String>();
     let expected = "Local Index が分類候補の表示を停止";
     if rendered != expected {
         /* WHY: 改行位置の空白はSVGのテキスト断片に含まれない。 */
         let boundary = emphasized
             .windows(2)
-            .find(|pair| pair[0].ends_with("Local") && pair[1].starts_with("Index"))
+            .find(|pair| pair[0].text.ends_with("Local") && pair[1].text.starts_with("Index"))
             .ok_or_else(|| format!("unexpected text fragments: {emphasized:?}"))?;
-        assert!(
-            text_baseline_for(&layout.svg, &boundary[0])?
-                < text_baseline_for(&layout.svg, &boundary[1])?
-        );
+        assert!(boundary[0].baseline < boundary[1].baseline);
         assert_eq!(rendered.replacen("LocalIndex", "Local Index", 1), expected);
     }
     Ok(())
@@ -1882,7 +1882,13 @@ fn rect_y_for_fill(svg: &str, fill: &str) -> TestResult<f32> {
     rect_attribute_for_fill(svg, fill, "y")
 }
 
-fn text_fragments_for_fill(svg: &str, fill: &str) -> TestResult<Vec<String>> {
+#[derive(Debug)]
+struct TextFragment {
+    text: String,
+    baseline: f32,
+}
+
+fn text_fragments_for_fill(svg: &str, fill: &str) -> TestResult<Vec<TextFragment>> {
     let root = xmltree::Element::parse(svg.as_bytes()).map_err(|error| error.to_string())?;
     let mut fragments = Vec::new();
     collect_text_fragments_for_fill(&root, fill, &mut fragments)?;
@@ -1892,7 +1898,7 @@ fn text_fragments_for_fill(svg: &str, fill: &str) -> TestResult<Vec<String>> {
 fn collect_text_fragments_for_fill(
     element: &xmltree::Element,
     fill: &str,
-    fragments: &mut Vec<String>,
+    fragments: &mut Vec<TextFragment>,
 ) -> TestResult {
     if element.name == "text"
         && element
@@ -1904,7 +1910,13 @@ fn collect_text_fragments_for_fill(
         if text.is_empty() {
             return Err(format!("text element with fill {fill} has no content"));
         }
-        fragments.push(text);
+        let baseline = element
+            .attributes
+            .get("y")
+            .ok_or("text fragment is missing its baseline")?
+            .parse::<f32>()
+            .map_err(to_string)?;
+        fragments.push(TextFragment { text, baseline });
     }
     for child in &element.children {
         if let xmltree::XMLNode::Element(child) = child {
