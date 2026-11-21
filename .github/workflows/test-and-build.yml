@@ -94,7 +94,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 58c8fcb2fff1c08be87419fe434ff3e234188440
+          ref: 1634dd134b623aff8dd03b10c4a3863e47d76068
           fetch-depth: 0
       - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
@@ -121,7 +121,7 @@ jobs:
       - name: Prepare Linux root coverage environment
         shell: bash
         run: |
-          test "$(git rev-parse HEAD)" = "58c8fcb2fff1c08be87419fe434ff3e234188440"
+          test "$(git rev-parse HEAD)" = "1634dd134b623aff8dd03b10c4a3863e47d76068"
           bun install --frozen-lockfile
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk graphviz libfontconfig-dev libfreetype-dev
@@ -159,6 +159,8 @@ jobs:
           import os
           from pathlib import Path
           import re
+          import subprocess
+          import tempfile
           from native_coverage_result import _collected_line_totals, _line_totals, _tracked_rust_source_paths
 
           path = Path("tmp/quality/standalone-performance-coverage/root.json")
@@ -177,6 +179,38 @@ jobs:
                       source = Path(os.path.normpath(root / match[1]))
                       if source.is_relative_to(root) and source.relative_to(root) in tracked:
                           print(f"Uncovered {source.relative_to(root)}: {match[2]}")
+              incomplete = {
+                  Path(os.path.normpath(root / file["filename"]))
+                  for mapping in report["data"]
+                  for file in mapping["files"]
+                  if file["summary"]["lines"]["count"] != file["summary"]["lines"]["covered"]
+              }
+              approved = {root / name for name in tracked} & incomplete
+              with tempfile.TemporaryDirectory(dir=os.environ["RUNNER_TEMP"]) as directory:
+                  annotation = Path(directory) / "annotated.txt"
+                  env = dict(os.environ)
+                  env["CARGO_TARGET_DIR"] = str(root / "target")
+                  env["CARGO_LLVM_COV_TARGET_DIR"] = str(root / "target/llvm-cov-target")
+                  command = [
+                      "cargo", "llvm-cov", "report", "--workspace", "--profile", "krr-coverage",
+                      "--locked", "--text", "--output-path", str(annotation),
+                  ]
+                  with (Path(directory) / "annotator.raw").open("xb") as diagnostic:
+                      result = subprocess.run(command, cwd=root, env=env, stdout=diagnostic, stderr=subprocess.STDOUT)
+                  print(f"LLVM annotated diagnostics exit: {result.returncode}")
+                  if result.returncode == 0 and annotation.is_file():
+                      current = root
+                      seen = set()
+                      with annotation.open(encoding="utf-8", errors="replace") as rows:
+                          for row in rows:
+                              header = re.fullmatch(r"([^|]+\.rs):", row.strip())
+                              if header:
+                                  current = Path(os.path.normpath(root / header[1]))
+                                  continue
+                              match = re.match(r"^\s*(\d+)\|\s*0\|", row)
+                              if match and current in approved and (current, match[1]) not in seen:
+                                  seen.add((current, match[1]))
+                                  print(f"Uncovered annotated {current.relative_to(root)}:{match[1]}")
           _line_totals(report, "root", root)
           PY
 
