@@ -94,7 +94,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: 33e1938cdb7b8da9ebc93dcadea1ed1e98a29ec6
+          ref: 8709d3e47e91bd0fc147460ceb4cfffc1bfb7045
           fetch-depth: 0
       - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
@@ -121,7 +121,7 @@ jobs:
       - name: Prepare Linux root coverage environment
         shell: bash
         run: |
-          test "$(git rev-parse HEAD)" = "33e1938cdb7b8da9ebc93dcadea1ed1e98a29ec6"
+          test "$(git rev-parse HEAD)" = "8709d3e47e91bd0fc147460ceb4cfffc1bfb7045"
           bun install --frozen-lockfile
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk graphviz libfontconfig-dev libfreetype-dev
@@ -140,41 +140,33 @@ jobs:
           cargo install cargo-sweep --version 0.8.0 --locked
           python3 scripts/build/initialize_ci_capacity_state.py --root "$PWD"
           just plantuml-install
-      - name: Run the exact Linux root coverage producer
-        id: root_coverage
-        if: inputs.verify_filter == ''
-        timeout-minutes: 45
-        run: just root-test-and-coverage
-      - name: Reproduce only the five failed Linux coverage cases
-        if: inputs.verify_filter == 'failed-root-cases'
+      - name: Run seven selected Linux regressions
+        if: inputs.verify_filter == 'verify-fix'
         timeout-minutes: 25
         run: >-
           just native-nextest-diagnostic
           'test(=markdown::mermaid_renderer::js_runtime_scripts::tests::c4_wide_svg_width_preserves_native_raw_advance)
+          | test(=markdown::mermaid_renderer::js_runtime_scripts::tests::c4_svg_width_rounds_a_font_independent_fractional_native_advance)
+          | test(=markdown::mermaid_renderer::js_runtime_scripts::tests::c4_relation_svg_widths_preserve_native_raw_advance)
           | test(=markdown::svg_rasterize::text_shaping::font::tests::glyph_probe_preserves_latin_cjk_and_styled_fallback_selection)
           | test(=markdown::svg_rasterize::text_shaping::tests::shaped_dx_applies_palt_without_expanding_text_nodes)
           | test(=renderer::backends::html_interactive::layout_paint_lines::tests::text_alignment_and_typography_attributes_are_written_to_svg)
           | test(=renderer::backends::html_interactive::tests::rendering::styled_inline_text_can_fragment_across_browser_line_boundaries)'
-      - name: Print failed Nextest case names
-        if: failure() && steps.root_coverage.outcome == 'failure'
-        shell: bash
+      - name: Run the exact Linux root coverage producer
+        id: root_coverage
+        timeout-minutes: 45
+        run: just root-test-and-coverage
+      - name: Verify collected Linux line totals
+        env:
+          PYTHONPATH: scripts/release
         run: |
           python3 - <<'PY'
+          import json
           from pathlib import Path
-          import re
+          from native_coverage_result import _line_totals
 
-          ansi = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
-          report = re.compile(r"^\s*(?:FAIL|TIMEOUT|ABORT|Summary)\s+\[[^\]]+\]")
-          root = Path("tmp/quality/standalone-performance-coverage/root-nextest-attempts")
-          for logs in sorted(root.glob("*/tests")):
-              print("Nextest result for", logs.parent.name)
-              for name in ("stderr.raw", "stdout.raw"):
-                  source = logs / name
-                  if source.is_file():
-                      for line in source.read_text(errors="replace").splitlines():
-                          clean = ansi.sub("", line)
-                          if report.match(clean):
-                              print(clean[:600])
+          path = Path("tmp/quality/standalone-performance-coverage/root.json")
+          print(json.dumps(_line_totals(json.loads(path.read_bytes()), "root")))
           PY
 
   verify-linux-observer-access:
