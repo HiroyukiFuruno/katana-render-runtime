@@ -37,9 +37,9 @@ mod proof;
 #[path = "svg_rasterize_html_font_shared_raster.rs"]
 mod shared_raster;
 use discovery::CacheValue;
-pub(in crate::markdown::svg_rasterize) use discovery::{
-    DatabaseKey, DiscoveryMode, MeasuredDatabase,
-};
+#[cfg(target_os = "macos")]
+pub(in crate::markdown::svg_rasterize) use discovery::DiscoveryMode;
+pub(in crate::markdown::svg_rasterize) use discovery::{DatabaseKey, MeasuredDatabase};
 pub(in super::super) use discovery_cache::{html_font_db_for_measured_text, measured_database};
 #[cfg(all(test, target_os = "macos"))]
 pub(in crate::markdown::svg_rasterize) use shared_raster::render_html_with_options;
