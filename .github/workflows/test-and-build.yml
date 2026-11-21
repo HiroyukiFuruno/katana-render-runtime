@@ -142,8 +142,19 @@ jobs:
           just plantuml-install
       - name: Run the exact Linux root coverage producer
         id: root_coverage
+        if: inputs.verify_filter == ''
         timeout-minutes: 45
         run: just root-test-and-coverage
+      - name: Reproduce only the five failed Linux coverage cases
+        if: inputs.verify_filter == 'failed-root-cases'
+        timeout-minutes: 25
+        run: >-
+          just native-nextest-diagnostic
+          'test(=markdown::mermaid_renderer::js_runtime_scripts::tests::c4_wide_svg_width_preserves_native_raw_advance)
+          | test(=markdown::svg_rasterize::text_shaping::font::tests::glyph_probe_preserves_latin_cjk_and_styled_fallback_selection)
+          | test(=markdown::svg_rasterize::text_shaping::tests::shaped_dx_applies_palt_without_expanding_text_nodes)
+          | test(=renderer::backends::html_interactive::layout_paint_lines::tests::text_alignment_and_typography_attributes_are_written_to_svg)
+          | test(=renderer::backends::html_interactive::tests::rendering::styled_inline_text_can_fragment_across_browser_line_boundaries)'
       - name: Print failed Nextest case names
         if: failure() && steps.root_coverage.outcome == 'failure'
         shell: bash
