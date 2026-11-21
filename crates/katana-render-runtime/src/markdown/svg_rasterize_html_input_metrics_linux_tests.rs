@@ -10,6 +10,19 @@ const NARROW_INPUT_SIZE: u16 = 4;
 const WIDE_INPUT_SIZE: u16 = 12;
 
 #[test]
+fn linux_input_metrics_reject_an_unresolvable_font_family() {
+    assert!(
+        SvgRasterizeOps::html_input_character_metrics(
+            "KRR Unavailable Input Font 7f91",
+            INPUT_FONT_SIZE,
+            400,
+            false,
+        )
+        .is_none()
+    );
+}
+
+#[test]
 fn linux_input_metrics_use_real_primary_font_measurements() -> Result<(), String> {
     let metrics = SvgRasterizeOps::html_input_character_metrics(
         "Noto Sans, sans-serif",

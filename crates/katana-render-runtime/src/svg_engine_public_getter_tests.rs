@@ -77,6 +77,26 @@ fn text_span_length_adjust_matches_authored_value() -> Result<(), String> {
 }
 
 #[test]
+fn text_span_exposes_authored_offsets_and_optical_sizing() -> Result<(), String> {
+    let source = r#"<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40"><text id="text" x="4" y="20" font-family="Noto Sans"><tspan dx="2 3" dy="4 5" font-optical-sizing="none">AV</tspan></text></svg>"#;
+    let options = usvg::Options {
+        fontdb: upstream_writer_font_database()?,
+        ..usvg::Options::default()
+    };
+    let tree = usvg::Tree::from_str(source, &options).map_err(|error| error.to_string())?;
+    let text = text_node(&tree, "text")?;
+    let span = text
+        .chunks()
+        .first()
+        .and_then(|chunk| chunk.spans().first())
+        .ok_or("text span missing")?;
+    assert_eq!(text.dx(), &[2.0, 3.0]);
+    assert_eq!(text.dy(), &[4.0, 5.0]);
+    assert_eq!(span.font_optical_sizing(), usvg::FontOpticalSizing::None);
+    Ok(())
+}
+
+#[test]
 fn embedded_webp_image_exposes_its_public_kind() -> Result<(), String> {
     let tree = parse_fixture("structure/image/embedded-webp.svg")?;
     let group = match tree.node_by_id("image1") {

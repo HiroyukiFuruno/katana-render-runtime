@@ -206,6 +206,18 @@ fn svg_in_ot_emoji_flattens_and_renders_through_the_text_route() -> TestResult<(
     Ok(())
 }
 
+#[test]
+fn sbix_text_glyph_renders_through_the_layout_route() -> TestResult<()> {
+    let options = bitmap_options(SBIX_FONT)?;
+    let tree = usvg::Tree::from_str(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><text x="4" y="36" font-size="32">A</text></svg>"#,
+        &options,
+    )?;
+    let pixmap = render_clip_fixture(&tree)?;
+    assert!(pixmap.pixels().iter().any(|pixel| pixel.alpha() != 0));
+    Ok(())
+}
+
 fn assert_shared_svg_rejection(bytes: &[u8], sibling: Option<&str>) -> TestResult<()> {
     let (database, face) = fixture_database(bytes)?;
     let requested = fixture_glyph(bytes, TestGlyph::Character('🌓'))?;

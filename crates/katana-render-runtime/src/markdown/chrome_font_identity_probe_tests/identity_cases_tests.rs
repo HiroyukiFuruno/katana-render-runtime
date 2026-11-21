@@ -30,6 +30,13 @@ pub(in super::super) fn observed_system_face_resolves_to_its_physical_file_and_i
     assert_eq!(first.identity, expected);
     assert!(first.core_text_descriptor.is_none());
     assert_cache_rejects_different_database(&selected, &mut cache)?;
+    let alias = SelectedFont {
+        family_name: format!("{} alias", selected.family_name),
+        ..selected
+    };
+    let alias_resolution =
+        resolve_font_with_cache(&database, &Database::new(), &[], &alias, &mut cache)?;
+    assert_eq!(alias_resolution.identity, expected);
     cache.verify_physical_inputs()?;
     cached_direct_face_rejects_physical_mutation(&source_path)?;
     Ok(())

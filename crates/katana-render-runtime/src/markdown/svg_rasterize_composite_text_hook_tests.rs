@@ -217,3 +217,21 @@ fn offscreen_translucent_text_group_skips_the_text_rasterizer() -> Result<(), St
     assert_eq!(observe_text_hook(OFFSCREEN_OPACITY_TEXT_SVG)?.calls, 0);
     Ok(())
 }
+
+#[test]
+fn translucent_text_group_propagates_text_rasterizer_failure() -> Result<(), String> {
+    let (tree, mut pixmap) =
+        parse_svg_pixmap_with_bundled_fonts(OPACITY_TEXT_SVG, SVG_CANVAS_SIZE, SVG_CANVAS_SIZE)?;
+    let rasterizer = FailingTextRasterizer::default();
+    let result = SvgCompositeRenderer::render_with_text(
+        &tree,
+        tiny_skia::Transform::identity(),
+        &mut pixmap.as_mut(),
+        &AuthoredClipInfo::default(),
+        Some(&rasterizer),
+    );
+    assert_eq!(result.err().as_deref(), Some(TEXT_RASTERIZER_FAILURE));
+    assert_eq!(rasterizer.calls(), 1);
+    assert!(pixmap.data().iter().all(|channel| *channel == 0));
+    Ok(())
+}

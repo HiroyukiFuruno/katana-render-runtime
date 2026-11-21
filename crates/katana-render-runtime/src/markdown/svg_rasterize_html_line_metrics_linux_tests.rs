@@ -11,9 +11,11 @@ fn linux_invalid_face_metric_is_recorded_without_legacy_fallback() -> Result<(),
     let id = database.faces().next().ok_or("fixture face missing")?.id;
     let detail = FaceMetricScope::new(true);
 
-    assert_eq!(
-        super::resolve_face_line_metrics(Err(()), &database, id, FONT_SIZE, Some(&detail)),
-        None
-    );
+    for detail in [None, Some(&detail)] {
+        assert_eq!(
+            super::resolve_face_line_metrics(Err(()), &database, id, FONT_SIZE, detail),
+            None
+        );
+    }
     Ok(())
 }

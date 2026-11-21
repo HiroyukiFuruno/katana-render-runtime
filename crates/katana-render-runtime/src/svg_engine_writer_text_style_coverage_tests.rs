@@ -3,7 +3,7 @@ use std::path::Path;
 
 use super::{
     ALPHA_CHANNEL, RGBA_CHANNELS, first_text, parse_writer_svg, usvg,
-    writer_coverage_tests::assert_pixels_equal,
+    writer_coverage_tests::{assert_attribute, assert_pixels_equal},
 };
 
 #[path = "svg_engine_writer_text_path_roundtrip_tests.rs"]
@@ -13,6 +13,29 @@ const TEXT_PATH_FIXTURE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../tests/fixtures/svg-engine/upstream/resvg/tests/tests/text/textPath/startOffset=30.svg"
 );
+
+#[test]
+fn preserved_text_spacing_weight_and_length_attributes_roundtrip() -> Result<(), String> {
+    let input = r#"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60"><text x="12" y="32" font-family="Noto Sans" font-size="18"><tspan font-weight="600" letter-spacing="1.5" word-spacing="2.5" textLength="70" lengthAdjust="spacingAndGlyphs">Writer text</tspan></text></svg>"#;
+    let original = parse_writer_svg(input, "writer-text-spacing")?;
+    let options = usvg::WriteOptions {
+        preserve_text: true,
+        ..usvg::WriteOptions::default()
+    };
+    let serialized = original.to_string(&options);
+    for (attribute, value) in [
+        ("font-weight", "600"),
+        ("letter-spacing", "1.5"),
+        ("word-spacing", "2.5"),
+        ("textLength", "70"),
+        ("lengthAdjust", "spacingAndGlyphs"),
+    ] {
+        assert_attribute(&serialized, "tspan", attribute, value)?;
+    }
+    let parsed = parse_writer_svg(&serialized, "writer-text-spacing")?;
+    assert_pixels_equal(&original, &parsed, "writer text spacing")?;
+    Ok(())
+}
 
 #[test]
 fn nonzero_text_path_offset_survives_preserving_writer() -> Result<(), String> {

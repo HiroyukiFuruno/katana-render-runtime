@@ -154,6 +154,21 @@ mod tests {
     }
 
     #[test]
+    fn invalid_input_size_uses_the_default_intrinsic_width() {
+        let style = CssStyle::browser_default();
+        let default_geometry = input_geometry(0.0, 0.0, 500.0, &[], &style);
+        let invalid_geometry = input_geometry(
+            0.0,
+            0.0,
+            500.0,
+            &[("size".to_string(), "invalid".to_string())],
+            &style,
+        );
+
+        assert_eq!(invalid_geometry.width, default_geometry.width);
+    }
+
+    #[test]
     fn author_width_and_height_override_intrinsic_control_size() {
         let style = CssStyle::from_element(
             "input",

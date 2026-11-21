@@ -121,6 +121,31 @@ fn path_adapter_rejects_non_solid_stroke_and_miter_clip_join() -> Result<(), Str
     Ok(())
 }
 
+#[test]
+fn path_adapter_reports_short_pixel_storage_before_painting() -> Result<(), String> {
+    let tree = parse(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><path d="M4 4H20V20H4Z" fill="#ff0000"/></svg>"##,
+    )?;
+    let path = only_path(tree.root())?;
+    let prepared =
+        super::super::prepare_path(path).ok_or("opaque path was unexpectedly rejected")?;
+    let mut pixels = vec![0; 24 * 24 * 4 - 1];
+    assert_eq!(
+        super::super::paint_path_pixels(
+            (24, 24),
+            &mut pixels,
+            &prepared,
+            tiny_skia::Transform::identity(),
+            path.paint_order(),
+        )
+        .err()
+        .as_deref(),
+        Some("Skia SVG path surface creation failed")
+    );
+    assert!(pixels.iter().all(|pixel| *pixel == 0));
+    Ok(())
+}
+
 fn render_adapter_svg(svg: &str) -> Result<(bool, Pixmap), String> {
     let tree = parse(svg)?;
     let size = tree.size().to_int_size();

@@ -173,6 +173,11 @@ mod tests {
     #[test]
     fn default_platform_keeps_optional_families_unconfigured() {
         let strategy = DefaultPlatform;
+        assert!(
+            strategy
+                .installed_paths(&BTreeSet::from(["Arial"]))
+                .is_empty()
+        );
         assert_eq!(strategy.installed_system_ui_family(), None);
         assert_eq!(strategy.cjk_fallback_family(), None);
         assert_eq!(strategy.control_arial_family(), "Arial");
