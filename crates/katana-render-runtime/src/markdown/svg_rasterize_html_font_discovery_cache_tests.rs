@@ -51,9 +51,12 @@ fn retained_mapping_bytes_deduplicates_shared_arc_identity() -> Result<(), Strin
         PathBuf::from("/System/Library/Fonts/two.ttc"),
         Arc::new(vec![0_u8; 512]),
     ))?;
+    let owned = value_with_source(Source::Binary(Arc::new(
+        crate::markdown::svg_rasterize::font::BUNDLED_SANS_SERIF_FONT.to_vec(),
+    )))?;
 
     assert_eq!(
-        retained_mapping_bytes([&first, &second, &distinct].into_iter()),
+        retained_mapping_bytes([&first, &second, &distinct, &owned].into_iter()),
         1536
     );
     Ok(())

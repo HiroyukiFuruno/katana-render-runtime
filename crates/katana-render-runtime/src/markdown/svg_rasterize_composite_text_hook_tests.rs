@@ -60,6 +60,8 @@ const TEXT_VIEWPORT_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" widt
 const ROOT_TRANSFORM_TEXT_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" transform="translate(3 4)"><text x="2" y="20" font-size="12">text</text></svg>"##;
 const FILTER_TEXT_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><defs><filter id="blur"><feGaussianBlur stdDeviation="0"/></filter></defs><g filter="url(#blur)"><text x="2" y="20" font-size="12">text</text></g></svg>"##;
 const OPACITY_TEXT_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><g opacity="0.5"><text x="2" y="20" font-size="12">text</text></g></svg>"##;
+const NESTED_OPACITY_TEXT_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><g opacity="0.5"><g opacity="0.5"><text x="2" y="20" font-size="12">text</text></g></g></svg>"##;
+const OFFSCREEN_OPACITY_TEXT_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><g opacity="0.5" transform="translate(1000 0)"><text x="2" y="20" font-size="12">text</text></g></svg>"##;
 
 struct CountingTextRasterizer {
     calls: Cell<usize>,
@@ -201,5 +203,17 @@ fn translucent_text_group_composites_the_text_layer_with_group_opacity() -> Resu
             .iter()
             .any(|pixel| pixel[3] > 0 && pixel[3] < u8::MAX)
     );
+    Ok(())
+}
+
+#[test]
+fn nested_translucent_text_groups_reach_the_text_rasterizer() -> Result<(), String> {
+    assert_eq!(observe_text_hook(NESTED_OPACITY_TEXT_SVG)?.calls, 1);
+    Ok(())
+}
+
+#[test]
+fn offscreen_translucent_text_group_skips_the_text_rasterizer() -> Result<(), String> {
+    assert_eq!(observe_text_hook(OFFSCREEN_OPACITY_TEXT_SVG)?.calls, 0);
     Ok(())
 }
