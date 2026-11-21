@@ -422,6 +422,7 @@ jobs:
             tmp/html-fidelity/interim
             tmp/html-fidelity/dynamic-interim
             tmp/html-fidelity/input-state-interim
+          retention-days: 14
           if-no-files-found: error
 
       - name: Upload HTML interaction evidence

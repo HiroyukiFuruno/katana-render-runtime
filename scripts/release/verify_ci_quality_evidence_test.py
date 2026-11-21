@@ -988,6 +988,7 @@ class WorkflowAndJustfileContractTest(unittest.TestCase):
                 "tmp/html-fidelity/interim",
                 "tmp/html-fidelity/dynamic-interim",
                 "tmp/html-fidelity/input-state-interim",
+                "retention-days: 14",
                 "if-no-files-found: error",
             ),
             "Upload HTML interaction evidence": (
