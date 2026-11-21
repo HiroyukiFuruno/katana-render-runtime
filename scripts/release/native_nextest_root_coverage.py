@@ -8,6 +8,7 @@ from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import sys
@@ -20,6 +21,16 @@ import native_coverage_local_result as local
 from native_nextest_coverage_commands import REPORT_DIRECTORY, clean_arguments, nextest_arguments, report_arguments
 import native_nextest_retry_artifacts as artifacts
 import native_nextest_retry_checkpoint as checkpoint
+
+_ANSI_SEQUENCE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_FAILED_NEXT_TEST = re.compile(
+    r"(?:FAIL|TIMEOUT|ABORT)\s+\[\s*[\d.]+s\]\s+\(\s*\d+/\d+\)\s+"
+    r"[\w:./+-]+\s+[\w:./^+-]+"
+)
+_NEXT_TEST_SUMMARY = re.compile(
+    r"Summary\s+\[\s*[\d.]+s\]\s+\d+ tests run: \d+ passed"
+    r"(?: \(\d+ slow\))?, \d+ failed, \d+ skipped"
+)
 
 @contextmanager
 def _root_lock(path: Path) -> Iterator[None]:
@@ -72,6 +83,19 @@ def _attempt_directory(repo: Path) -> Path:
     return directory
 
 
+def _print_failed_nextest_results(logs: Path) -> None:
+    seen: set[str] = set()
+    for name in ("stderr.raw", "stdout.raw"):
+        with (logs / name).open(encoding="utf-8", errors="replace") as output:
+            for line in output:
+                result = _ANSI_SEQUENCE.sub("", line).strip()
+                if result in seen:
+                    continue
+                if _FAILED_NEXT_TEST.fullmatch(result) or _NEXT_TEST_SUMMARY.fullmatch(result):
+                    seen.add(result)
+                    print(result, flush=True)
+
+
 def _execute(directory: Path, name: str, argv: list[str], repo: Path,
              environment: dict[str, str]) -> int:
     logs = directory / name
@@ -89,6 +113,8 @@ def _execute(directory: Path, name: str, argv: list[str], repo: Path,
     with (logs / "result.json").open("x") as output:
         json.dump({"exit": code, "seconds": time.monotonic() - started}, output)
     print(json.dumps({"rootCoverageStage": name, "exit": code, "logs": str(logs)}), flush=True)
+    if name == "tests" and code != 0:
+        _print_failed_nextest_results(logs)
     return code
 
 

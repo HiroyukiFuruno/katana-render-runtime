@@ -66,6 +66,24 @@ class RootCoverageExecutionTests(unittest.TestCase):
         self.repo = Path(self.temporary.name).resolve()
         (self.repo / commands.REPORT_DIRECTORY).mkdir(parents=True)
 
+    def test_failed_root_tests_report_only_the_nextest_status(self) -> None:
+        directory = root_coverage._attempt_directory(self.repo)
+        status = "FAIL [   0.073s] ( 5/12) kdr-linter::bin/mathjax_consumer_facts module::failing_case"
+        summary = "Summary [ 1.000s] 12 tests run: 11 passed (1 slow), 1 failed, 7 skipped"
+        argv = [sys.executable, "-c", (
+            "import sys; status='\\x1b[31;1m'+sys.argv[1]+'\\x1b[0m';"
+            "print(status); print(status,file=sys.stderr);"
+            "print(sys.argv[2]); print('private test output',file=sys.stderr); sys.exit(100)"
+        ), status, summary]
+        output = io.StringIO()
+        with redirect_stdout(output):
+            code = root_coverage._execute(directory, "tests", argv, self.repo, dict(os.environ))
+        self.assertEqual(code, 100)
+        lines = output.getvalue().splitlines()
+        self.assertEqual(lines.count(status), 1)
+        self.assertIn(summary, lines)
+        self.assertNotIn("private test output", output.getvalue())
+
     def test_attempts_and_process_evidence_are_distinct_and_exact(self) -> None:
         first = root_coverage._attempt_directory(self.repo)
         second = root_coverage._attempt_directory(self.repo)
