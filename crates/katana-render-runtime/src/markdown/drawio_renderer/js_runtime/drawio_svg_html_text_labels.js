@@ -47,9 +47,7 @@ function katanaDrawioHtmlTextNormalizedLabelHtml(html) {
 }
 
 function katanaTrimDrawioEdgeHtmlTextBreaks(html) {
-  return katanaTrimDrawioTrailingHtmlTextBreaks(
-    katanaTrimDrawioLeadingHtmlTextBreaks(html),
-  );
+  return katanaTrimDrawioTrailingHtmlTextBreaks(katanaTrimDrawioLeadingHtmlTextBreaks(html));
 }
 
 function katanaTrimDrawioLeadingHtmlTextBreaks(html) {
@@ -67,16 +65,13 @@ function katanaTrimDrawioTrailingHtmlTextBreaks(html) {
 }
 
 function katanaDrawioHtmlTextHasMarkup(html) {
-  return [
-    !katanaDrawioIsStereotypeLabel(html),
-    /<\/?[a-zA-Z][^>]*>/.test(String(html)),
-  ].every(Boolean);
+  return [!katanaDrawioIsStereotypeLabel(html), /<\/?[a-zA-Z][^>]*>/.test(String(html))].every(
+    Boolean,
+  );
 }
 
 function katanaDrawioEscapedPlainHtmlText(html) {
-  return katanaDrawioPlainHtmlTextLines(html)
-    .map(katanaDrawioEscapePlainHtmlTextLine)
-    .join("<br>");
+  return katanaDrawioPlainHtmlTextLines(html).map(katanaDrawioEscapePlainHtmlTextLine).join("<br>");
 }
 
 function katanaDrawioPlainHtmlTextLines(html) {
@@ -97,10 +92,7 @@ function katanaTrimDrawioEmptyEdgeTextLines(lines) {
 }
 
 function katanaDrawioEscapePlainHtmlTextLine(line) {
-  return String(line)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+  return String(line).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
 function katanaShouldReplaceDrawioHtmlTextLabel(html, style) {
@@ -110,35 +102,27 @@ function katanaShouldReplaceDrawioHtmlTextLabel(html, style) {
   ].some(Boolean);
 }
 
-function katanaShouldForceReplaceDrawioHtmlTextLabel(html, style) {
+function katanaShouldForceReplaceDrawioHtmlTextLabel(_html, style) {
   return katanaDrawioIsFillHtmlTextLabel(style);
 }
 
 function katanaHasDrawioHtmlTextLabel(entry) {
-  return [
-    entry.id,
-    entry.html,
-    entry.label,
-    katanaShouldInstallDrawioHtmlTextLabel(entry),
-  ].every(Boolean);
+  return [entry.id, entry.html, entry.label, katanaShouldInstallDrawioHtmlTextLabel(entry)].every(
+    Boolean,
+  );
 }
 
 function katanaShouldInstallDrawioHtmlTextLabel(entry) {
   if (katanaDrawioShouldKeepNativeEdgeHtmlTextLabel(entry)) {
     return false;
   }
-  return [
-    katanaDrawioStyleValue(entry.style, "html") === "1",
-    entry.replaceExisting,
-  ].some(Boolean);
+  return [katanaDrawioStyleValue(entry.style, "html") === "1", entry.replaceExisting].some(Boolean);
 }
 
 function katanaDrawioShouldKeepNativeEdgeHtmlTextLabel(entry) {
-  return [
-    entry.edge,
-    katanaDrawioHtmlTextHasMarkup(entry.html),
-    !entry.replaceExisting,
-  ].every(Boolean);
+  return [entry.edge, katanaDrawioHtmlTextHasMarkup(entry.html), !entry.replaceExisting].every(
+    Boolean,
+  );
 }
 
 function katanaNormalizeDrawioNativeEdgeHtmlTextLabels(svg) {
@@ -316,10 +300,7 @@ function katanaDrawioHtmlTextFallbackY(style, box, lineCount) {
 
 function katanaCreateDrawioHtmlTextForeignObject(entry, box) {
   const foreignObject = katanaCreateDrawioSvgElement("foreignObject");
-  foreignObject.setAttribute(
-    "style",
-    "overflow: visible; text-align: left;",
-  );
+  foreignObject.setAttribute("style", "overflow: visible; text-align: left;");
   foreignObject.setAttribute("pointer-events", "none");
   foreignObject.setAttribute("width", "100%");
   foreignObject.setAttribute("height", "100%");
@@ -359,7 +340,10 @@ function katanaCreateDrawioHtmlTextContentDiv(entry) {
 function katanaPreserveDrawioHtmlTextDarkBackgroundColor(element, style) {
   const color = katanaDrawioColorKey(katanaDrawioTextColor(style));
   if (katanaDrawioKeepsLightHtmlTextOnDarkBackground(style, color)) {
-    element.setAttribute("style", katanaDrawioHtmlStyleWithColor(element.getAttribute("style"), "#ffffff"));
+    element.setAttribute(
+      "style",
+      katanaDrawioHtmlStyleWithColor(element.getAttribute("style"), "#ffffff"),
+    );
   }
 }
 
@@ -382,7 +366,10 @@ function katanaDrawioHtmlTextContentDescendants(root) {
 function katanaApplyDrawioHtmlTextColorAttribute(element) {
   const color = katanaDrawioHtmlTextExplicitColor(element.getAttribute("color"));
   if (color) {
-    element.setAttribute("style", katanaDrawioHtmlStyleWithColor(element.getAttribute("style"), color));
+    element.setAttribute(
+      "style",
+      katanaDrawioHtmlStyleWithColor(element.getAttribute("style"), color),
+    );
     katanaMarkDrawioHtmlTextExplicitColor(element);
   }
 }

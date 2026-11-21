@@ -23,10 +23,18 @@ class PrePushDispatcherTest(unittest.TestCase):
         self.issue_arguments = self.root / "issue-arguments.log"
         self.remote_log = self.root / "review-remote.log"
         self.remote_url_log = self.root / "review-remote-url.log"
+        self.origin_url = "https://example.test/repository.git"
         self.repository.mkdir()
         self.bin_directory.mkdir()
         subprocess.run(
             ["git", "init", "--initial-branch=master"],
+            cwd=self.repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "remote", "add", "origin", self.origin_url],
             cwd=self.repository,
             check=True,
             capture_output=True,
@@ -104,6 +112,33 @@ class PrePushDispatcherTest(unittest.TestCase):
             check=False,
         )
 
+    def head_sha(self) -> str:
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=self.repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    def switch_to_release_verify(self) -> None:
+        subprocess.run(
+            ["git", "switch", "-c", "release/verify"],
+            cwd=self.repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def assert_quality_check_runs(
+        self, push_input: str, dispatcher_arguments: tuple[str, ...] = ()
+    ) -> None:
+        result = self.run_dispatcher(
+            push_input=push_input, dispatcher_arguments=dispatcher_arguments
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("check:unset:unset", self.log.read_text(encoding="utf-8"))
+
     def test_issue_contract_and_head_binding_run_before_and_after_repository_check(self) -> None:
         result = self.run_dispatcher()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -166,6 +201,40 @@ class PrePushDispatcherTest(unittest.TestCase):
             self.log.read_text(encoding="utf-8").splitlines(),
             ["issue", "head-guard", "check:unset:unset", "head-guard"],
         )
+
+    def test_release_verify_single_matching_head_push_skips_quality_check(self) -> None:
+        self.switch_to_release_verify()
+        head = self.head_sha()
+        update = f"refs/heads/release/verify {head} refs/heads/release/verify {'0' * 40}\n"
+        result = self.run_dispatcher(
+            push_input=update,
+            dispatcher_arguments=("origin", self.origin_url),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.log.exists())
+
+    def test_release_verify_exceptions_keep_quality_check_for_other_push_shapes(self) -> None:
+        self.switch_to_release_verify()
+        head = self.head_sha()
+        zero = "0" * 40
+        cases = (
+            f"refs/heads/release/verify {head} refs/heads/release/v0.4.24 {zero}\n",
+            f"refs/tags/v0.4.24 {head} refs/tags/v0.4.24 {zero}\n",
+            f"refs/heads/release/verify {zero} refs/heads/release/verify {head}\n",
+            f"refs/heads/release/verify {head} refs/heads/release/verify {zero}\n"
+            f"refs/heads/other {head} refs/heads/other {zero}\n",
+            f"refs/heads/release/verify {head} refs/heads/release/verify {zero}\nextra",
+        )
+        for update in cases:
+            with self.subTest(update=update):
+                self.assert_quality_check_runs(update, ("origin", self.origin_url))
+                self.log.unlink()
+
+    def test_release_verify_push_with_unconfigured_origin_url_keeps_quality_check(self) -> None:
+        self.switch_to_release_verify()
+        head = self.head_sha()
+        update = f"refs/heads/release/verify {head} refs/heads/release/verify {'0' * 40}\n"
+        self.assert_quality_check_runs(update, ("origin", "https://example.test/other.git"))
 
     def test_remote_name_is_forwarded_to_issue_contract(self) -> None:
         result = self.run_dispatcher(

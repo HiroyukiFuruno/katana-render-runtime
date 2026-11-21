@@ -3,11 +3,11 @@ use std::collections::BTreeSet;
 use super::entities::decode_xml_entities;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(super) struct HtmlFontRequest {
-    pub(super) families: Vec<String>,
-    pub(super) needs_cjk: bool,
-    pub(super) needs_emoji: bool,
-    pub(super) needs_unicode_fallback: bool,
+pub(in super::super::super) struct HtmlFontRequest {
+    pub(in super::super::super) families: Vec<String>,
+    pub(in super::super::super) needs_cjk: bool,
+    pub(in super::super::super) needs_emoji: bool,
+    pub(in super::super::super) needs_unicode_fallback: bool,
 }
 
 impl HtmlFontRequest {
@@ -30,7 +30,7 @@ impl HtmlFontRequest {
         }
     }
 
-    pub(super) fn from_text(font_family: &str, text: &str) -> Self {
+    pub(in super::super::super) fn from_text(font_family: &str, text: &str) -> Self {
         let mut request = Self::from_markup(font_family);
         if request.families.is_empty() {
             request.families = normalized_font_families(font_family);
@@ -126,7 +126,7 @@ fn needs_unicode_fallback(character: char) -> bool {
     !character.is_ascii() && !is_cjk_character(character) && !is_emoji_character(character)
 }
 
-fn is_cjk_character(character: char) -> bool {
+pub(super) fn is_cjk_character(character: char) -> bool {
     matches!(
         character as u32,
         0x2E80..=0x2EFF

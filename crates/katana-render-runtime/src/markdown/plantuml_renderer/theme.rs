@@ -1,3 +1,4 @@
+use super::config::PlantUmlConfigOps;
 use crate::markdown::color_preset::DiagramColorPreset;
 use serde::Deserialize;
 
@@ -54,13 +55,7 @@ impl PlantUmlThemeOps {
 
 impl PlantUmlThemeConfig {
     pub(crate) fn from_value(value: &serde_json::Value) -> Result<Self, String> {
-        if value.is_null() {
-            return Ok(Self::default());
-        }
-        let config: Self =
-            serde_json::from_value(value.clone()).map_err(|error| error.to_string())?;
-        config.validate()?;
-        Ok(config)
+        PlantUmlConfigOps::from_value(value, Self::validate)
     }
 
     fn validate(&self) -> Result<(), String> {

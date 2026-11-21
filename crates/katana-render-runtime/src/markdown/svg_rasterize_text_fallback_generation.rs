@@ -42,8 +42,13 @@ pub(super) fn probe_with_generation(
     dependencies: &mut FileGenerationDependencies,
 ) -> Option<bool> {
     let (support, before) = cached_font_has_char_with_generation(database, face_id, character);
-    let after = font_source_generation(database, face_id);
-    dependencies.observe(face_id, before, after);
+    if dependencies.reusable && before.durable_reusable() {
+        let after = font_source_generation(database, face_id);
+        dependencies.observe(face_id, before, after);
+    } else {
+        /* WHY: 永続キャッシュへ保存できない選択は、保存用の世代を再取得しない。 */
+        dependencies.reusable = false;
+    }
     support
 }
 

@@ -3,18 +3,18 @@
 ~~~mermaid
 requirementDiagram
 
-    requirement テスト要件 {
+    requirement "テスト要件" {
     id: 1
-    text: テストのテキスト。
+    text: "テストのテキスト。"
     risk: high
     verifymethod: test
     }
 
-    element テストエンティティ {
+    element "テストエンティティ" {
     type: simulation
     }
 
-    テストエンティティ - satisfies -> テスト要件
+    "テストエンティティ" - satisfies -> "テスト要件"
 ~~~
 
 <!-- katana-mermaid-official:start -->

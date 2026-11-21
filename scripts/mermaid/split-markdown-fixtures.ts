@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { getOptionValue, printHelpIfRequested } from "../shared/cli-options";
 import {
   type MarkdownMermaidFixture,
   MarkdownMermaidFixtures,
@@ -12,25 +13,18 @@ interface CliParsedOptions {
 
 const CliOptions = {
   parse(argv: string[]): CliParsedOptions {
-    CliOptions.exitIfHelp(argv);
-    return {
-      inputPath: path.resolve(CliOptions.get(argv, "--input", "assets/fixtures/sample_mermaid.md")),
-      outputDir: path.resolve(CliOptions.get(argv, "--output", "tests/fixtures/mermaid/en")),
-    };
-  },
-
-  get(argv: string[], name: string, fallback: string): string {
-    const index = argv.indexOf(name);
-    return index >= 0 ? (argv.at(index + 1) ?? fallback) : fallback;
-  },
-
-  exitIfHelp(argv: string[]) {
-    if (argv.includes("--help")) {
-      console.log(
+    if (
+      printHelpIfRequested(
+        argv,
         "Usage: bun run scripts/mermaid/split-markdown-fixtures.ts [--input FILE] [--output DIR]",
-      );
+      )
+    ) {
       process.exit(0);
     }
+    return {
+      inputPath: path.resolve(getOptionValue(argv, "--input", "assets/fixtures/sample_mermaid.md")),
+      outputDir: path.resolve(getOptionValue(argv, "--output", "tests/fixtures/mermaid/en")),
+    };
   },
 };
 

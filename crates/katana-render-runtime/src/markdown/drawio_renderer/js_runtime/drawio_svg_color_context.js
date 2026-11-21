@@ -1,12 +1,5 @@
 const KATANA_DRAWIO_LARGE_WHITE_PATH_AREA = 10000;
 const KATANA_DRAWIO_ANDROID_DEVICE_SCREEN_PATH_AREA = 10000;
-const KATANA_DRAWIO_AWS_SHAPE_PREFIXES = [
-  "mxgraph.aws.",
-  "mxgraph.aws2.",
-  "mxgraph.aws3.",
-  "mxgraph.aws4.",
-  "mxgraph.aws3d.",
-];
 const KATANA_DRAWIO_AZURE_SHAPE_PREFIXES = ["mxgraph.azure.", "mxgraph.mscae.", "mxgraph.office."];
 const KATANA_DRAWIO_VISUAL_SHAPE_TAGS = new Set([
   "circle",
@@ -30,13 +23,15 @@ const KATANA_DRAWIO_ANDROID_DEVICE_SCREEN_COLORS = new Set([
   "rgb(32, 32, 32)",
 ]);
 
-function katanaDrawioForcedAttributeColor(element, name, value) {
-  return katanaDrawioAndroidDeviceScreenFillColor(element, name, value);
-}
-
 function katanaNormalizeDrawioAndroidDeviceScreens(svg) {
   Array.from(svg.querySelectorAll("path"))
-    .filter((path) => katanaDrawioIsAndroidDeviceScreenFill(path, "fill", katanaDrawioColorKey(path.getAttribute("fill"))))
+    .filter((path) =>
+      katanaDrawioIsAndroidDeviceScreenFill(
+        path,
+        "fill",
+        katanaDrawioColorKey(path.getAttribute("fill")),
+      ),
+    )
     .forEach((path) => {
       path.setAttribute("fill", "transparent");
     });
@@ -111,10 +106,6 @@ function katanaDrawioIsPidWhiteFillSourceElement(element) {
   return [shape.startsWith("mxgraph.pid."), style.has("ellipse")].some(Boolean);
 }
 
-function katanaDrawioAndroidDeviceScreenFillColor(element, name, value) {
-  return katanaDrawioIsAndroidDeviceScreenFill(element, name, value) ? "transparent" : "";
-}
-
 function katanaDrawioIsAndroidDeviceScreenFill(element, name, value) {
   return [
     katanaDrawioIsDarkMode(),
@@ -138,8 +129,11 @@ function katanaDrawioPathDataArea(element) {
   if (coordinates.length < 8) {
     return 0;
   }
-  const axisCoordinates = (offset) => coordinates.filter((_coordinate, index) => index % 2 === offset);
-  return katanaDrawioCoordinateSpan(axisCoordinates(0)) * katanaDrawioCoordinateSpan(axisCoordinates(1));
+  const axisCoordinates = (offset) =>
+    coordinates.filter((_coordinate, index) => index % 2 === offset);
+  return (
+    katanaDrawioCoordinateSpan(axisCoordinates(0)) * katanaDrawioCoordinateSpan(axisCoordinates(1))
+  );
 }
 
 function katanaDrawioCoordinateSpan(coordinates) {

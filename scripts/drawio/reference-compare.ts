@@ -1,9 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { type CliParsedOptions, CropRect } from "../mermaid/reference_compare_options";
-import { MagickOps } from "../mermaid/reference_image_ops";
-import { ReferencePairRepository } from "../mermaid/reference_pair_repository";
+import {
+  prepareReferenceImageOps,
+  renderAndScoreReferencePairs,
+} from "../mermaid/reference_image_ops";
 import { ReferenceCompareReport, ReferenceCompareReportLabels } from "../mermaid/reference_report";
+import { DrawioReferencePairRepository } from "./reference-pairs";
 import {
   type DrawioReferenceScoreBaseline,
   type DrawioReferenceScoreRow,
@@ -50,20 +53,16 @@ class ReferenceCompare {
   constructor(private options: CliParsedOptions) {}
 
   run() {
-    const pairs = new ReferencePairRepository(this.options).list();
-    const magick = new MagickOps(
-      this.options.outputDir,
-      this.options.katanaCrop,
-      this.options.theme,
-    );
-    magick.prepare();
+    const pairs = new DrawioReferencePairRepository(this.options).list();
+    const magick = prepareReferenceImageOps(this.options);
 
-    const normalized = pairs.map((pair) => magick.renderPair(pair));
-    const baselines = this.options.baselineScoresPath
-      ? this.loadBaselines(this.options.baselineScoresPath)
-      : [];
-    const scores = new DrawioReferenceScorer(magick, this.options.minScore, baselines).score(
-      normalized,
+    const { normalized, scores } = renderAndScoreReferencePairs(
+      pairs,
+      magick,
+      () =>
+        this.options.baselineScoresPath ? this.loadBaselines(this.options.baselineScoresPath) : [],
+      (normalized, baselines) =>
+        new DrawioReferenceScorer(magick, this.options.minScore, baselines).score(normalized),
     );
     const contactSheet = magick.renderContactSheet(normalized.map((it) => it.pairImagePath));
 

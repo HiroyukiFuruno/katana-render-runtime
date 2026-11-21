@@ -3,7 +3,11 @@ use kdr_linter::KdrLintError;
 use kdr_linter::{KdrLinter, ViolationReport};
 use std::path::{Path, PathBuf};
 
-type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+mod support;
+
+use support::{TestResult, write_file};
+#[cfg(unix)]
+use support::{blocked_directory, set_mode};
 
 #[test]
 fn accepts_complete_runtime_bundle_layout() -> TestResult<()> {
@@ -27,6 +31,43 @@ fn reports_runtime_bundle_boundary_violations() -> TestResult<()> {
     for message in required_messages() {
         assert!(report.contains(message), "{report}");
     }
+    Ok(())
+}
+
+#[test]
+fn allows_unknown_types_at_node_validation_boundaries() -> TestResult<()> {
+    let root = temp_root("unknown-validation-boundary");
+    write_clean_fixture(&root)?;
+    write_unknown_validation_boundary(&root)?;
+
+    let report = runtime_report(&root)?;
+
+    assert!(
+        !report.contains("TypeScript runtime gate forbids `unknown`"),
+        "{report}"
+    );
+    assert!(
+        !report.contains("TypeScript runtime gate forbids `Record<string, unknown>`"),
+        "{report}"
+    );
+    Ok(())
+}
+
+fn write_unknown_validation_boundary(root: &Path) -> TestResult<()> {
+    write_file(
+        root,
+        "scripts/html/input-boundary.ts",
+        concat!(
+            "function record(value: unknown): Record<string, unknown> {\n",
+            "  if (!value || typeof value !== \"object\" || Array.isArray(value)) throw new Error(\"object required\");\n",
+            "  return value as Record<string, unknown>;\n",
+            "}\n",
+            "function strings(value: unknown): string[] {\n",
+            "  if (!Array.isArray(value) || !value.every((item) => typeof item === \"string\")) throw new Error(\"strings required\");\n",
+            "  return value as string[];\n",
+            "}\n"
+        ),
+    )?;
     Ok(())
 }
 
@@ -62,7 +103,12 @@ fn write_unsafe_type_script(root: &Path) -> TestResult<()> {
     write_file(
         root,
         "scripts/runtime-bundles/unsafe.ts",
-        "// @ts-expect-error\n",
+        concat!(
+            "const unsafe: any = value as any;\n",
+            "// @ts-ignore\n",
+            "// @ts-expect-error\n",
+            "// biome-ignore lint/suspicious/noExplicitAny: fixture\n"
+        ),
     )?;
     Ok(())
 }
@@ -117,10 +163,10 @@ fn reports_runtime_script_read_error() -> TestResult<()> {
 fn reports_runtime_source_walk_error() -> TestResult<()> {
     let root = temp_root("source-walk");
     write_clean_fixture(&root)?;
-    let blocked =
-        root.join("crates/katana-render-runtime/src/markdown/diagram_runtime/source/blocked");
-    std::fs::create_dir_all(&blocked)?;
-    set_mode(&blocked, 0o000)?;
+    let blocked = blocked_directory(
+        &root,
+        "crates/katana-render-runtime/src/markdown/diagram_runtime/source/blocked",
+    )?;
 
     let result = KdrLinter::lint_workspace(&root);
 
@@ -134,9 +180,7 @@ fn reports_runtime_source_walk_error() -> TestResult<()> {
 fn reports_runtime_script_walk_error() -> TestResult<()> {
     let root = temp_root("script-walk");
     write_clean_fixture(&root)?;
-    let blocked = root.join("scripts/runtime-bundles/blocked");
-    std::fs::create_dir_all(&blocked)?;
-    set_mode(&blocked, 0o000)?;
+    let blocked = blocked_directory(&root, "scripts/runtime-bundles/blocked")?;
 
     let result = KdrLinter::lint_workspace(&root);
 
@@ -145,7 +189,7 @@ fn reports_runtime_script_walk_error() -> TestResult<()> {
     Ok(())
 }
 
-fn required_messages() -> [&'static str; 7] {
+fn required_messages() -> [&'static str; 10] {
     [
         "V8 runtime code must be included from generated bundles",
         "Mermaid render script must not call the ZenUML adapter installer directly",
@@ -153,7 +197,10 @@ fn required_messages() -> [&'static str; 7] {
         "runtime source imports must use package imports for approved boundaries",
         "TypeScript runtime gate forbids `unknown`",
         "TypeScript runtime gate forbids ` as any`",
+        "TypeScript runtime gate forbids `: any`",
+        "TypeScript runtime gate forbids `@ts-ignore`",
         "TypeScript runtime gate forbids `@ts-expect-error`",
+        "TypeScript runtime gate forbids `biome-ignore`",
     ]
 }
 
@@ -236,42 +283,13 @@ fn write_bundle(root: &Path, bundle: &str, entrypoint: &str) -> TestResult<()> {
 }
 
 fn write_manifests(root: &Path) -> TestResult<()> {
-    write_file(
+    support::write_manifest_pair(
         root,
-        "crates/katana-render-runtime/Cargo.toml",
         "[package]\nname = \"katana-render-runtime\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
-    )?;
-    write_file(
-        root,
-        "crates/katana-render-runtime-cli/Cargo.toml",
         "[package]\nname = \"katana-render-runtime-cli\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\nkatana-render-runtime = { path = \"../katana-render-runtime\" }\n",
-    )?;
-    Ok(())
-}
-
-fn write_file(root: &Path, relative: &str, content: &str) -> TestResult<PathBuf> {
-    let path = root.join(relative);
-    let Some(parent) = path.parent() else {
-        return Err(Box::new(std::io::Error::other("path has no parent")));
-    };
-    std::fs::create_dir_all(parent)?;
-    std::fs::write(&path, content)?;
-    Ok(path)
+    )
 }
 
 fn temp_root(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "kdr-linter-runtime-bundle-{name}-{}",
-        std::process::id()
-    ))
-}
-
-#[cfg(unix)]
-fn set_mode(path: &Path, mode: u32) -> TestResult<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let mut permissions = std::fs::metadata(path)?.permissions();
-    permissions.set_mode(mode);
-    std::fs::set_permissions(path, permissions)?;
-    Ok(())
+    support::temp_root("kdr-linter-runtime-bundle", name)
 }

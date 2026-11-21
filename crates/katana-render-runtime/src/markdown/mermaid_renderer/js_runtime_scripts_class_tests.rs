@@ -1,5 +1,7 @@
 use super::MermaidRuntimeScripts;
-use crate::markdown::{diagram_js_runtime::DiagramV8Runtime, runtime_assets::RuntimeAsset};
+use crate::markdown::diagram_js_runtime::DiagramV8Runtime;
+
+const RAW_CLASS_PATH_COUNT: i32 = 20;
 
 const CLASS_DIAGRAM_10_3: &str = r#"classDiagram
     class PreviewPane {
@@ -33,148 +35,154 @@ const CLASS_DIAGRAM_ENUMERATION_FIXTURE: &str = r#"classDiagram
     PreviewPane --> RenderedSection"#;
 
 #[test]
-fn runtime_keeps_large_class_diagram_without_fixture_coordinate_patch() {
-    let request = serde_json::json!({
-        "source": CLASS_DIAGRAM_10_3,
-        "svgId": "id",
-        "theme": "dark",
-        "background": "#000",
-        "fill": "#111",
-        "text": "#fff",
-        "stroke": "#fff",
-        "arrow": "#fff",
-    })
-    .to_string();
-    let scripts = MermaidRuntimeScripts::build_with_zenuml(
-        fake_mermaid_with_large_class_enumeration_layout(),
-        "",
-        &request,
-    );
-
-    let rendered = DiagramV8Runtime::render(&scripts);
-
-    assert!(
-        rendered
-            .as_ref()
-            .is_ok_and(|it| it.contains(r#"max-width: 420px;"#)
-                && it.contains(r#"viewBox="-8 -8 420 620""#)
-                && it.contains("M14-source")
-                && !it.contains("M117.59,146L117.59,150.167")),
-        "{rendered:?}"
-    );
+fn runtime_preserves_raw_enumeration_geometry_across_viewbox_variants() -> Result<(), String> {
+    for (view_box, offset) in [
+        ("0 0 231.55450000000002 377", 3),
+        ("4 4 231.55450000000002 367", 19),
+    ] {
+        let raw = raw_class_svg(
+            &["PreviewPane", "RenderedSection"],
+            view_box,
+            "231.55450000000002",
+            offset,
+            true,
+        );
+        assert_raw_class_geometry_preserved(CLASS_DIAGRAM_ENUMERATION_FIXTURE, &raw)?;
+    }
+    Ok(())
 }
 
 #[test]
-fn runtime_applies_enumeration_fixture_coordinate_patch_to_v11_and_v12_raw_viewboxes() {
-    for (raw_view_box, expected_path) in [
-        ("0 0 231.55450000000002 377", "M117.59,146L117.59,150.167"),
-        (
-            "4 4 231.55450000000002 367",
-            "M121.58984375,150L121.58984375,184",
-        ),
-    ] {
-        assert_enumeration_patch_applies(raw_view_box, expected_path);
-    }
-}
-
-fn assert_enumeration_patch_applies(raw_view_box: &str, expected_path: &str) {
-    let mermaid = fake_mermaid_with_enumeration_fixture_layout(raw_view_box);
-    let rendered = render_class_fixture(&mermaid);
-    assert!(
-        rendered
-            .as_ref()
-            .is_ok_and(|it| it.contains(expected_path) && !it.contains("M14-source")),
-        "raw_view_box={raw_view_box}, rendered={rendered:?}"
+fn runtime_preserves_raw_geometry_with_renamed_source_and_dimensions() -> Result<(), String> {
+    let source = CLASS_DIAGRAM_ENUMERATION_FIXTURE
+        .replace("PreviewPane", "OtherPreview")
+        .replace("RenderedSection", "OtherSection");
+    let raw = raw_class_svg(
+        &["OtherPreview", "OtherSection"],
+        "-7 -11 311.5 509.25",
+        "311.5",
+        43,
+        true,
     );
+    assert_raw_class_geometry_preserved(&source, &raw)
 }
 
-fn render_class_fixture(mermaid: &str) -> Result<String, String> {
-    let scripts = MermaidRuntimeScripts::build_with_zenuml(mermaid, "", &class_request());
+#[test]
+fn runtime_preserves_large_enumeration_raw_geometry() -> Result<(), String> {
+    let raw = raw_class_svg(
+        &[
+            "PreviewPane",
+            "RenderedSection",
+            "CommandNotFound",
+            "Pending",
+        ],
+        "-8 -8 420 620",
+        "420",
+        71,
+        true,
+    );
+    assert_raw_class_geometry_preserved(CLASS_DIAGRAM_10_3, &raw)
+}
+
+#[test]
+fn runtime_preserves_raw_inheritance_geometry() -> Result<(), String> {
+    for (names, offset) in [
+        (vec!["Animal", "Duck", "Fish", "Zebra"], 97),
+        (vec!["動物", "アヒル", "魚", "シマウマ"], 113),
+    ] {
+        let raw = raw_class_svg(&names, "0 0 620.40625 390", "620.40625", offset, false);
+        let source = format!(
+            "classDiagram\n{} <|-- {}\n{} <|-- {}\n{} <|-- {}",
+            names[0], names[1], names[0], names[2], names[0], names[3]
+        );
+        assert_raw_class_geometry_preserved(&source, &raw)?;
+    }
+    Ok(())
+}
+
+fn assert_raw_class_geometry_preserved(source: &str, raw: &str) -> Result<(), String> {
+    let rendered = render_raw_class_svg(source, raw)?;
+    /* WHY: 正しい座標表を仮定せず、独立した入力SVGの形状を保持する契約を検査する。 */
+    for attribute in ["viewBox", "width", "height", "transform", "d"] {
+        assert_eq!(
+            attribute_values(&rendered, attribute)?,
+            attribute_values(raw, attribute)?,
+            "source={source}, attribute={attribute}, rendered={rendered}"
+        );
+    }
+    let max_width = raw
+        .split_once("max-width: ")
+        .and_then(|(_, rest)| rest.split_once(';'))
+        .map(|(value, _)| value)
+        .ok_or_else(|| "入力SVGにmax-widthの終端がない".to_string())?;
+    assert!(rendered.contains(&format!("max-width: {max_width};")));
+    Ok(())
+}
+
+fn render_raw_class_svg(source: &str, raw: &str) -> Result<String, String> {
+    let request = serde_json::json!({
+        "source": source, "svgId": "id", "theme": "dark",
+        "background": "#000", "fill": "#111", "text": "#fff",
+        "stroke": "#fff", "arrow": "#fff",
+    })
+    .to_string();
+    let serialized = serde_json::to_string(raw).map_err(|error| error.to_string())?;
+    let mermaid = format!(
+        "globalThis.mermaid = {{initialize() {{}}, render: async () => ({{svg: {serialized}}})}};",
+    );
+    let scripts = MermaidRuntimeScripts::build_with_zenuml(&mermaid, "", &request);
     DiagramV8Runtime::render(&scripts)
 }
 
-fn class_request() -> String {
-    serde_json::json!({
-        "source": CLASS_DIAGRAM_10_3,
-        "svgId": "id",
-        "theme": "dark",
-        "background": "#000",
-        "fill": "#111",
-        "text": "#fff",
-        "stroke": "#fff",
-        "arrow": "#fff",
-    })
-    .to_string()
+fn attribute_values<'a>(svg: &'a str, attribute: &str) -> Result<Vec<&'a str>, String> {
+    svg.split(&format!(" {attribute}=\""))
+        .skip(1)
+        .map(|part| {
+            part.split_once('"')
+                .map(|(value, _)| value)
+                .ok_or_else(|| format!("SVG属性{attribute}の終端引用符がない"))
+        })
+        .collect()
 }
 
-#[test]
-fn mermaid12_enumeration_fixture_raw_viewbox_is_covered_by_the_coordinate_patch() {
-    let request = serde_json::json!({
-        "source": CLASS_DIAGRAM_ENUMERATION_FIXTURE,
-        "svgId": "id",
-        "theme": "dark",
-        "background": "#000",
-        "fill": "#111",
-        "text": "#fff",
-        "stroke": "#fff",
-        "arrow": "#fff",
-    })
-    .to_string();
-    let mermaid = mermaid12_bundle_that_returns_raw_viewbox();
-    let scripts = MermaidRuntimeScripts::build_with_zenuml(&mermaid, "", &request);
-
-    let rendered = DiagramV8Runtime::render(&scripts);
-
-    assert!(
-        rendered
-            .as_ref()
-            .is_ok_and(|it| it == "4 4 231.55450000000002 367"),
-        "{rendered:?}"
-    );
-}
-
-fn fake_mermaid_with_large_class_enumeration_layout() -> &'static str {
-    r##"
-globalThis.mermaid = {
-  initialize() {},
-  render: async (id) => {
-    const paths = Array.from({ length: 15 }, (_, index) => `<path d="M${index}-source"></path>`).join("");
-    return { svg: `<svg id="${id}" width="100%" class="classDiagram" style="max-width: 420px;" viewBox="-8 -8 420 620" role="graphics-document document" aria-roledescription="class"><g class="root" transform="translate(9, 9)"><g transform="translate(10, 10)"><text>PreviewPane RenderedSection «enumeration» CommandNotFound NotInstalled Pending</text></g>${paths}</g></svg>` };
-  }
-};
-"##
-}
-
-fn mermaid12_bundle_that_returns_raw_viewbox() -> String {
-    let bytes = match RuntimeAsset::mermaid().bytes() {
-        Ok(bytes) => bytes,
-        Err(_) => return String::new(),
-    };
-    let mermaid = match std::str::from_utf8(bytes) {
-        Ok(mermaid) => mermaid,
-        Err(_) => return String::new(),
+fn raw_class_svg(
+    names: &[&str],
+    view_box: &str,
+    max_width: &str,
+    offset: i32,
+    enumeration: bool,
+) -> String {
+    let paths = raw_class_paths(offset);
+    let nodes = raw_class_nodes(names, offset);
+    let stereotype = if enumeration {
+        "<text>«enumeration»</text>"
+    } else {
+        ""
     };
     format!(
-        r#"{mermaid}
-const katanaOriginalMermaidRender = globalThis.mermaid.render.bind(globalThis.mermaid);
-globalThis.mermaid.render = async (...args) => {{
-  const result = await katanaOriginalMermaidRender(...args);
-  return {{ svg: result.svg.match(/<svg\b[^>]*\bviewBox="([^"]+)"/)?.[1] ?? "missing" }};
-}};
-"#
+        "<svg id=\"id\" width=\"100%\" height=\"100%\" class=\"classDiagram\" style=\"max-width: {max_width}px;\" viewBox=\"{view_box}\" role=\"graphics-document document\" aria-roledescription=\"class\"><g class=\"root\" transform=\"translate(9, 9)\">{paths}<g class=\"nodes\">{nodes}</g>{stereotype}</g></svg>"
     )
 }
 
-fn fake_mermaid_with_enumeration_fixture_layout(raw_view_box: &str) -> String {
-    format!(
-        r##"
-globalThis.mermaid = {{
-  initialize() {{}},
-  render: async (id) => {{
-    const paths = Array.from({{ length: 15 }}, (_, index) => `<path d="M${{index}}-source"></path>`).join("");
-    return {{ svg: `<svg id="${{id}}" width="100%" class="classDiagram" style="max-width: 231.55450000000002px;" viewBox="{raw_view_box}" role="graphics-document document" aria-roledescription="class"><g class="root" transform="translate(9, 9)"><g transform="translate(10, 10)"><text>PreviewPane RenderedSection «enumeration»</text></g>${{paths}}</g></svg>` }};
-  }}
-}};
-"##
-    )
+fn raw_class_paths(offset: i32) -> String {
+    (0..RAW_CLASS_PATH_COUNT)
+        .map(|index| {
+            format!(
+                "<path d=\"M{} {} L{} {}\"></path>",
+                offset + index,
+                offset + index + 1,
+                offset + index + 2,
+                offset + index + 3,
+            )
+        })
+        .collect()
+}
+
+fn raw_class_nodes(names: &[&str], offset: i32) -> String {
+    names.iter().enumerate().map(|(index, name)| {
+        format!(
+            "<g class=\"node default \" id=\"classId-{name}-{index}\" transform=\"translate({}, {})\"><g transform=\"translate({}, {})\"><text>{name}</text><g class=\"methods-group text\" transform=\"translate(1, 2)\"><text>+method()</text></g></g></g>",
+            offset + index as i32 * 7, offset + index as i32 * 11, offset + 5, offset - 9,
+        )
+    }).collect()
 }

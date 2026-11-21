@@ -1,0 +1,342 @@
+{
+  "schema": "krr-svg-marker-capture-cases-v1",
+  "requestedWidth": 300,
+  "cases": [
+    {
+      "input": "tests/painting/context/in-marker.svg",
+      "inputSha256": "097b9b1843c26d026d6d890a811cd2600b6492684f6f55c29b1fe7a6438f0ad2",
+      "upstreamPngSha256": "ca4cae69f1de68777437ae7ff816e48cbc5469cf052753b1e12bfce372add93c",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/context/in-nested-use-and-marker.svg",
+      "inputSha256": "e907dca21b3fda7815532814e1707b78951e1c8f01c0b1f3df7c70b7deb80b93",
+      "upstreamPngSha256": "ca4cae69f1de68777437ae7ff816e48cbc5469cf052753b1e12bfce372add93c",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/context/on-shape-with-zero-size-bbox.svg",
+      "inputSha256": "e1923bbec749fee1609130950616eace3f038439702ea16bd793396ed666bde4",
+      "upstreamPngSha256": "4262ebd92d204e8fa87b48a138bf1d03560294724dc8fa19049e37b735be0c66",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/default-clip.svg",
+      "inputSha256": "2c9c26328dd70b054cdd00384797ed19fd05f96e50a5bcdc3929c5e48b1a4a81",
+      "upstreamPngSha256": "3318ff43a46c80cf7616bd27ab7e4e3726d5453c7981003644a8a0dd8c6cc330",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/inheritance-1.svg",
+      "inputSha256": "e9e9488b30ba8bad9ada2bb8c4d6222d80e786672dbf1bcfaaeb0493af7f2475",
+      "upstreamPngSha256": "2e119283217edc86ae0905eaed530e40ecb5e4b26e12fda75cd906b7c8411438",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/inheritance-2.svg",
+      "inputSha256": "6a56c0915c2ccb9d912f9ed4521fe7788603b1418ab392ce20aab980453e2af7",
+      "upstreamPngSha256": "2e119283217edc86ae0905eaed530e40ecb5e4b26e12fda75cd906b7c8411438",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/marker-on-rounded-rect.svg",
+      "inputSha256": "bee0fcfd253747ad6f33a2c6b1bae889977d5e8d4622539b3da412c277f66bc4",
+      "upstreamPngSha256": "46a205e96a5a5a7b1f0a3dae1e8d83fdaaaa6b9fb90aace0cca8b0953bcab2bd",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/no-stroke-on-target.svg",
+      "inputSha256": "f94233306c0183306d524ec90c475809010b27ba0dc6ae1d202cf54c8b6463b0",
+      "upstreamPngSha256": "0dd9dfa829d0d5119ba1462255bd1a97a2c5bd45db2cf3f29c92dea2b67ae595",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/on-ArcTo.svg",
+      "inputSha256": "64af39616996e73ece542b53da3dae862bd27f2be800e7421af9bacf3ad1ac6e",
+      "upstreamPngSha256": "5f0bf846e816ac97f9fb681f625b7274ea6566df3263549c86ab815bd4c465f0",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/only-marker-end.svg",
+      "inputSha256": "27c50d860ad97e70f56115356a0b4e8f703fd724b6c7b20ddbda99a6ad7c4664",
+      "upstreamPngSha256": "326d449c9ec3833ed623c9bbfcb1427291e96f5c7ac23b140f74d1b65d62f52f",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/only-marker-start.svg",
+      "inputSha256": "1d7977b5a0e18e2907f4a0eda80c4efe776497d2f3cf722a476e55810a44e327",
+      "upstreamPngSha256": "5ce187861cc146ae61e34ff2c275900ae9baff2b72ace2ce7e70bb782d76c6ce",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/only-marker-mid.svg",
+      "inputSha256": "dfb95b9d8efab513da1c239229f703b01fb6af7dbfa7196eb7ed1cbc36be3769",
+      "upstreamPngSha256": "a2cca921435b54a38f4e659e104e10ffc7f5a431a10c3483b9502586ba74d424",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=-45.svg",
+      "inputSha256": "b55fd0dfbbd759b08d5d0b3fd772e93b81fa57d411c290d9b2e78a7ade091ee7",
+      "upstreamPngSha256": "d25a2c9e1648ac27bae070790ae383086e12c6d41ae18974bb50aae78852fc39",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=1.5rad.svg",
+      "inputSha256": "4b73cf90ab4d85911c48a55a7734628065684e73d2ccf6753ff1b02effcf32c6",
+      "upstreamPngSha256": "082ba96c589f57487ae34fd9e40a4e27c7f80d701bfd30dfe80224fc7b9e3c5c",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=30.svg",
+      "inputSha256": "974af821e7975c02b5c9a6b17a168a224f2ef24311b550ad4b91f945b7986ed9",
+      "upstreamPngSha256": "44321026e86696692a7b715b42a285c353b44d43037ebc2781c2e6fa0cce23f4",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=9999.svg",
+      "inputSha256": "90af0c2b24068488f466f3a1ea719740444a2052e39c63b016163714b6d02c4e",
+      "upstreamPngSha256": "ebd4bbe00935d552cf6e931b07194786c0a2c4aec58ffb0a1199a47ae51caae8",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=40grad.svg",
+      "inputSha256": "ac6b947ce20d27318718b37a3fae029054bc7449cb8af184143a94ce52195509",
+      "upstreamPngSha256": "d3f020d7af74e29b00c2694acb504df85fad454ffc5011cb03b056504d4e7462",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=auto-on-M-C-C-1.svg",
+      "inputSha256": "198034e486da4a60dd0ef56d1b9644c2d92cfab9c68bfd2db555b649be30cbba",
+      "upstreamPngSha256": "66d924766aa05f2d64884000b9ff882d3e039e52add537874d5aa0acceb72ca4",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=auto-on-M-C-C-2.svg",
+      "inputSha256": "470757598f081dfd01eb5acfa0469a7502b66b63ea674ac6d69d0fce2dc7380e",
+      "upstreamPngSha256": "e3d18ea6d2cd784b867b85eb0f02b0d8e7e69eba5b0040b99c174d88b9987e6e",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=auto-on-M-C-C-3.svg",
+      "inputSha256": "9a5a4e0150e05fa8cb72ffca12103931c65393a1fc497d4e0c3da1d7002e7074",
+      "upstreamPngSha256": "97582d70fc79cf9931264422b368cd437e8c2fae2b09df4e892e27e42b4cfde4",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=auto-on-M-C-C-4.svg",
+      "inputSha256": "ecfab08c09d75dbad83415555e8e68077a35e5769416c703593f277d4ce53491",
+      "upstreamPngSha256": "a57328003a3b7cfe151877cd1e8249f20b0c3b12eb59b7bad54999a158dbc4ac",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=auto-on-M-C-C-5.svg",
+      "inputSha256": "2db5022f9af113decd44bccb922cb9ff75d9998d25bf8ceae8c0392a9f2d493e",
+      "upstreamPngSha256": "43dc080d278b7b93353aaa05474550e119684d8f0c745aba40ab359e19e02a1b",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=auto-on-M-C-C-6.svg",
+      "inputSha256": "71c120e2848da9f99918ef5e51ab1d4beaf1b83e32d107dc58904b8fc52d9751",
+      "upstreamPngSha256": "de00782ea7ddb1d21fefa36f6d5af64285b1341e6d55ce76a350251ef203fbb2",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=auto-on-M-C-C-8.svg",
+      "inputSha256": "e35c051e7675ed92e04f6b1870effe3fd1123812d650ddf465e46020ea722cf8",
+      "upstreamPngSha256": "d38beaceb603ed1faff2435f646147e2351c904bd6be559728665cf475cd0874",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=auto-on-M-C-C-7.svg",
+      "inputSha256": "30cc3db15c3eda980dcee890d0a0b5a6c6da7fb91c1b3152f5edf5153af68b06",
+      "upstreamPngSha256": "72c6f32d5655ad2331afddc124c10ae20da9780cb1522d7c6ee8443bda58e627",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=auto-on-M-C-L.svg",
+      "inputSha256": "4de4671d7c01f2b014cb760fa32ddd57dc89de2239a9935f60ee30a930edbbbd",
+      "upstreamPngSha256": "4c882e55884b491874e8416121a97fac601bb23d71b6fa0ef303f50875f621e3",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=auto-on-M-C-M-L.svg",
+      "inputSha256": "46c0bbf73038bc438c70faf18a57f9e9719e4c2173b98c0fafa988b0002155b0",
+      "upstreamPngSha256": "c5e45bf6edae23c75992187c861aed83c1c8fe9479994641c88f5d1c9c67e48b",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=auto-on-M-L-C.svg",
+      "inputSha256": "d0f8e09fa5683b81a637c85e9f5077cbf3d39665b1e56e04a9ec1a138ebf010a",
+      "upstreamPngSha256": "d9294918ed991570dd7931efca4a5bb440f754fbe8979190c4a98f04772b3c15",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=auto-on-M-L-L-Z-Z-Z.svg",
+      "inputSha256": "8157002788eb9798522c37ddbac16cf70e4c778db95853131e950bb53f89b22c",
+      "upstreamPngSha256": "83f8ea81604b91b3b4f21b0337409766ab3bcbc216857c7b5f811a9a052fa343",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=auto-on-M-L-M-C.svg",
+      "inputSha256": "406d72103cc97711168d278013499f0ce1f108fa67a7ce739f30a6ddc6f8e684",
+      "upstreamPngSha256": "a50eb477785fe5ce0b9d2306bc808d744927856207d45666081b9d1d78f596f9",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/orient=auto-on-M-L-L.svg",
+      "inputSha256": "b584a28378baf1937dbc67e20282dc6501e28a826da73a715f4bda59b47a7dfc",
+      "upstreamPngSha256": "46534e2e8c9745f28ba730b5669501fc8f152471caaed919ba9becc2e473f64d",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/percent-values.svg",
+      "inputSha256": "23c85a760671e1497ee5c712f24be4451ae94ff4f0f11ab60da12b8edd6d7138",
+      "upstreamPngSha256": "5ed0dd0dd64559914a7ece9b6b54eb1fead5845d13b57070d2d5f890d3c8f9b4",
+      "requestedWidth": 300,
+      "requestedHeight": 150
+    },
+    {
+      "input": "tests/painting/marker/orient=auto-start-reverse.svg",
+      "inputSha256": "270a6978c1e4fae55e6c5abe5ef2fc3cd878f4259de7aa6c61e8e731db395f38",
+      "upstreamPngSha256": "dc3c54df3f4c5cddaf84fb7de86eea348554a9d1a6c42a06b0ba0a443d5c0928",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/recursive-1.svg",
+      "inputSha256": "71c8e7ee511cd84bdbeb01eacabaa72c1dc425d925bf2909520c75a86a540eda",
+      "upstreamPngSha256": "2e119283217edc86ae0905eaed530e40ecb5e4b26e12fda75cd906b7c8411438",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/recursive-2.svg",
+      "inputSha256": "365838aa3e71fc86cea13cf51d179627a002aac4223f8c955ce2645941683e80",
+      "upstreamPngSha256": "2e119283217edc86ae0905eaed530e40ecb5e4b26e12fda75cd906b7c8411438",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/recursive-3.svg",
+      "inputSha256": "dc0953cc819bd09e7768f6d0b42b4c6e55b805d1fd22a94e6c4ded57bbc6ef3d",
+      "upstreamPngSha256": "2e119283217edc86ae0905eaed530e40ecb5e4b26e12fda75cd906b7c8411438",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/recursive-4.svg",
+      "inputSha256": "526da2b5d10b92d3380fc0e0cb7f0cf5e7e8bb9e11e9ac7d48d5206a4be8b67a",
+      "upstreamPngSha256": "2e119283217edc86ae0905eaed530e40ecb5e4b26e12fda75cd906b7c8411438",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/recursive-5.svg",
+      "inputSha256": "910ac5d00c2fc0b2d007822841954f5d9f75e2a6be6f9b6a54e88725dbaddef4",
+      "upstreamPngSha256": "081f948a9be729c017b10da366ea8c5e3ce7941ad877ca0597f26b2c5a8aa092",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/target-with-subpaths-1.svg",
+      "inputSha256": "55472bc7108eec63cf2d29afc6f62d2a228570fe9c76b47626d2bd705fcbfca5",
+      "upstreamPngSha256": "e3a04234579e979898d26c8b8c56d916a38b3768691951684d6da68fee3dd460",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/the-marker-property-in-CSS.svg",
+      "inputSha256": "f626b4fa0f34a096de0af0a84b4de1ac16c9d820d3d8c3d089e05af0bbb90838",
+      "upstreamPngSha256": "2e119283217edc86ae0905eaed530e40ecb5e4b26e12fda75cd906b7c8411438",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/target-with-subpaths-2.svg",
+      "inputSha256": "ccc8c7304fca779b0dd41afcbf5f21a9218a27e2bf3d72d65146eddf53df3274",
+      "upstreamPngSha256": "e3a04234579e979898d26c8b8c56d916a38b3768691951684d6da68fee3dd460",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/with-a-large-stroke.svg",
+      "inputSha256": "fd28722898e99e7c4bda0441479459b1551404c7512e0f04ec89edeea45fa32b",
+      "upstreamPngSha256": "3318ff43a46c80cf7616bd27ab7e4e3726d5453c7981003644a8a0dd8c6cc330",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/with-a-text-child.svg",
+      "inputSha256": "322f5a085c18d64ae4d8649b93e7ea2172f85d5a7362a64241d2ef90a239877b",
+      "upstreamPngSha256": "8eef09ae54bd15073f910d9d437afc054823a90f5a056c7de4fcf08d2f965957",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/with-an-image-child.svg",
+      "inputSha256": "9df13c78770729838091757e4dc85b08daf1378dd7dbb02530b548f7600a78cb",
+      "upstreamPngSha256": "b76276635fd32035a44e59882f8da0c9b84ec7bcca14dd7b0f6797a91e06a7df",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/with-invalid-markerUnits.svg",
+      "inputSha256": "1c24c46d72c87ad1007cb3fd6ec1285bd9f007514ed59aef5056e65f6840367b",
+      "upstreamPngSha256": "3318ff43a46c80cf7616bd27ab7e4e3726d5453c7981003644a8a0dd8c6cc330",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/with-markerUnits=userSpaceOnUse.svg",
+      "inputSha256": "8f246567365f52d7c81d0d67a6468e87764106457e994c6323995f1c15fca1df",
+      "upstreamPngSha256": "3318ff43a46c80cf7616bd27ab7e4e3726d5453c7981003644a8a0dd8c6cc330",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/marker/with-viewBox-2.svg",
+      "inputSha256": "a01dcb33fb7d26d39a74b789d156ea7f1cc39c567b8cbb6f6495e4964187b81b",
+      "upstreamPngSha256": "324da0874f7ae70f61f44d28e26bc43b9c7330549182abe80b86a2d8b69b996b",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    },
+    {
+      "input": "tests/painting/overflow/scroll-on-marker.svg",
+      "inputSha256": "1a368871ea6dd67f44f6585daf5f2449dcb5b1af434dbc0b1d624ad3d16f43af",
+      "upstreamPngSha256": "c013116e57259cf168d16fa06987038ea167ddc6a6f6aee4567ae314bde65754",
+      "requestedWidth": 300,
+      "requestedHeight": 300
+    }
+  ]
+}

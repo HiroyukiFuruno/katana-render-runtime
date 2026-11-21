@@ -1,13 +1,18 @@
 globalThis.getComputedStyle = (node) => katanaComputedStyle(node);
 
 function katanaComputedStyle(node) {
-  const box = katanaComputedStyleBox(node);
   return {
-    width: `${box.width}px`,
-    height: `${box.height}px`,
+    get width() {
+      return `${katanaComputedStyleBox(node).width}px`;
+    },
+    get height() {
+      return `${katanaComputedStyleBox(node).height}px`;
+    },
     display: "block",
     fontSize: katanaComputedFontSize(node),
-    fontFamily: katanaComputedFontFamily(node),
+    get fontFamily() {
+      return katanaComputedFontFamily(node);
+    },
     getPropertyValue(name) {
       return katanaComputedPropertyValue(node, this, name);
     },
@@ -19,12 +24,11 @@ function katanaComputedFontSize(node) {
 }
 
 function katanaComputedFontFamily(node) {
-  return (
-    katanaComputedStyleValue(node, "font-family") || "trebuchet ms, verdana, arial, sans-serif"
-  );
+  return katanaResolvedNodeTextFamily(node);
 }
 
 function katanaComputedPropertyValue(node, style, name) {
+  if (name === "font-family") return style.fontFamily;
   return katanaComputedStyleValue(node, name) || style[name] || "";
 }
 
@@ -37,14 +41,10 @@ function katanaComputedStyleBox(node) {
 
 function katanaComputedStyleValue(node, name) {
   return (
-    [katanaRawComputedStyleValue(node, name), katanaCssComputedStyleValue(node, name)]
+    [katanaCascadedStyleValue(node, name, katanaCssText(node))]
       .filter(Boolean)
       .concat([katanaDefaultComputedStyleValue(name)])[0] ?? ""
   );
-}
-
-function katanaRawComputedStyleValue(node, name) {
-  return node?.style?.getPropertyValue?.(name) ?? "";
 }
 
 function katanaDefaultComputedStyleValue(name) {

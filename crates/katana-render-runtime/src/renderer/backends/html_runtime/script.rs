@@ -1,6 +1,7 @@
 use super::bridge::dom_callback;
 use super::dom_state::HtmlDomBridgeState;
 use super::types::HtmlRuntimeError;
+use crate::private_v8 as v8;
 
 pub(super) use super::evaluation::{evaluate, evaluate_value, perform_microtask_checkpoint};
 pub(super) use super::promise::evaluate_and_wait_for_promise;
@@ -49,13 +50,34 @@ fn install_location(
     evaluate(
         scope,
         "krr-html-location",
-        &format!("globalThis.location = Object.freeze({location});"),
+        &format!(
+            "let __krrLocationValue = {location};
+            globalThis.location = Object.freeze(Object.defineProperties({{}},
+                Object.fromEntries(Object.keys(__krrLocationValue).map(key =>
+                    [key, {{enumerable:true, get:() => __krrLocationValue[key]}}]))));"
+        ),
     )
 }
 
+pub(super) fn update_location(
+    scope: &mut HtmlTryCatchScope<'_, '_, '_, '_>,
+    document_url: &str,
+) -> Result<(), HtmlRuntimeError> {
+    let location = location_value(document_url)?;
+    evaluate(
+        scope,
+        "krr-html-location-update",
+        &format!("__krrLocationValue = {location};"),
+    )
+}
+
+pub(super) fn parse_document_url(document_url: &str) -> Result<url::Url, HtmlRuntimeError> {
+    url::Url::parse(document_url)
+        .map_err(|error| HtmlRuntimeError::DomBridge(format!("invalid document URL: {error}")))
+}
+
 fn location_value(document_url: &str) -> Result<serde_json::Value, HtmlRuntimeError> {
-    let parsed = url::Url::parse(document_url)
-        .map_err(|error| HtmlRuntimeError::DomBridge(format!("invalid document URL: {error}")))?;
+    let parsed = parse_document_url(document_url)?;
     Ok(serde_json::json!({
         "hash": parsed.fragment().map(|value| format!("#{value}")).unwrap_or_default(),
         "host": parsed.host_str().unwrap_or_default(),

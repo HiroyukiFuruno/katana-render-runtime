@@ -1,20 +1,21 @@
+use super::style_box_declaration_overflow::parse_overflow_declaration;
 use crate::renderer::backends::html_interactive::document::css_px;
 use crate::renderer::backends::html_interactive::style::value::box_sides;
 use crate::renderer::backends::html_interactive::style::{
-    CssBoxSizing, CssLength, CssOverflow, CssStyle,
+    CssBoxSizing, CssLength, CssOverflow, CssOverflowAxis, CssStyle, normalized_property_name,
 };
 
 impl CssStyle {
     pub(crate) fn apply_box_property(&mut self, name: &str, value: &str) -> bool {
-        let name = name.to_ascii_lowercase();
-        self.apply_box_property_with_name(&name, value)
+        let name = normalized_property_name(name);
+        self.apply_box_property_with_name(name.as_ref(), value)
     }
 
     fn apply_box_property_with_name(&mut self, name: &str, value: &str) -> bool {
         match name {
             "box-sizing" => return self.apply_simple_box_property("box-sizing", value),
             "overflow" | "overflow-x" | "overflow-y" => {
-                return self.apply_simple_box_property("overflow", value);
+                return self.apply_overflow_property(name, value);
             }
             _ => {}
         }
@@ -42,6 +43,23 @@ impl CssStyle {
             }
             _ => false,
         }
+    }
+
+    fn apply_overflow_property(&mut self, name: &str, value: &str) -> bool {
+        if !matches!(name, "overflow" | "overflow-x" | "overflow-y") {
+            return false;
+        }
+        let Some(assignment) = parse_overflow_declaration(name, value) else {
+            return true;
+        };
+        if let Some(axis) = assignment.x {
+            self.overflow_x = axis;
+        }
+        if let Some(axis) = assignment.y {
+            self.overflow_y = axis;
+        }
+        self.sync_legacy_overflow();
+        true
     }
 
     fn apply_border_box_property(&mut self, name: &str, value: &str) -> bool {
@@ -145,17 +163,26 @@ impl CssStyle {
     }
 
     fn apply_overflow(&mut self, value: &str) {
-        self.overflow = match value.trim().to_ascii_lowercase().as_str() {
-            "hidden" | "clip" | "auto" | "scroll" => CssOverflow::Clip,
-            "visible" => CssOverflow::Visible,
-            _ => self.overflow,
+        let _ = self.apply_overflow_property("overflow", value);
+    }
+
+    fn sync_legacy_overflow(&mut self) {
+        self.overflow = CssOverflow::Visible;
+        let (x, y) = self.computed_overflow_axes();
+        self.overflow = if [x, y]
+            .into_iter()
+            .any(|axis| axis != CssOverflowAxis::Visible)
+        {
+            CssOverflow::Clip
+        } else {
+            CssOverflow::Visible
         };
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CssBoxSizing, CssOverflow, CssStyle};
+    use super::{CssBoxSizing, CssOverflow, CssOverflowAxis, CssStyle};
 
     #[test]
     fn overflow_axis_properties_reuse_the_main_overflow_parser() {
@@ -163,10 +190,19 @@ mod tests {
 
         assert!(style.apply_box_property("overflow-x", "scroll"));
         assert_eq!(style.overflow, CssOverflow::Clip);
+        assert_eq!(style.overflow_x, CssOverflowAxis::Scroll);
         assert!(style.apply_box_property("overflow-y", "visible"));
-        assert_eq!(style.overflow, CssOverflow::Visible);
+        assert_eq!(style.overflow, CssOverflow::Clip);
+        assert_eq!(
+            style.computed_overflow_axes(),
+            (CssOverflowAxis::Scroll, CssOverflowAxis::Auto)
+        );
         assert!(style.apply_box_property("overflow", "unsupported"));
-        assert_eq!(style.overflow, CssOverflow::Visible);
+        assert_eq!(style.overflow, CssOverflow::Clip);
+        assert_eq!(
+            style.specified_overflow_axes(),
+            (CssOverflowAxis::Scroll, CssOverflowAxis::Visible)
+        );
     }
 
     #[test]
@@ -202,5 +238,20 @@ mod tests {
 
         style.apply_border_side_width("width", "12px");
         assert_eq!(style.border_top_width, Some(9.0));
+    }
+
+    #[test]
+    fn maintained_simple_overflow_helper_preserves_axis_contract_and_rejects_other_names() {
+        let mut style = CssStyle::browser_default();
+        assert!(style.apply_simple_box_property("overflow", "scroll hidden"));
+        assert_eq!(
+            style.specified_overflow_axes(),
+            (CssOverflowAxis::Scroll, CssOverflowAxis::Hidden)
+        );
+        assert!(!style.apply_overflow_property("width", "scroll"));
+        assert_eq!(
+            style.specified_overflow_axes(),
+            (CssOverflowAxis::Scroll, CssOverflowAxis::Hidden)
+        );
     }
 }

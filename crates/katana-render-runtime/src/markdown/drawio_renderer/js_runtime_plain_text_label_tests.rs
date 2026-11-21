@@ -1,4 +1,5 @@
 use super::DrawioJsRuntimeOps;
+use super::test_support::{assert_render_contains, assert_render_not_contains, temp_runtime_path};
 use crate::markdown::color_preset::DiagramColorPreset;
 
 const PLAIN_TEXT_LABEL_SOURCE: &str = r#"<mxGraphModel><root>
@@ -54,10 +55,6 @@ fn fake_bundle_trims_padding_newlines_before_plain_text_html_label() {
     assert_render_not_contains(&rendered, "Second line<br/>");
 }
 
-fn temp_runtime_path(prefix: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("{prefix}-{}.js", std::process::id()))
-}
-
 fn fake_bundle_with_truncated_plain_text() -> &'static str {
     FAKE_BUNDLE_WITH_TRUNCATED_PLAIN_TEXT
 }
@@ -69,20 +66,6 @@ fn assert_plain_text_svg_contains(rendered: &Result<String, String>) {
     assert_render_contains(rendered, "width: 118px");
     assert_render_contains(rendered, "padding-top: 32px");
     assert_render_contains(rendered, "margin-left: 22px");
-}
-
-fn assert_render_contains(rendered: &Result<String, String>, marker: &str) {
-    assert!(
-        rendered.as_ref().is_ok_and(|svg| svg.contains(marker)),
-        "{rendered:?}"
-    );
-}
-
-fn assert_render_not_contains(rendered: &Result<String, String>, marker: &str) {
-    assert!(
-        rendered.as_ref().is_ok_and(|svg| !svg.contains(marker)),
-        "{rendered:?}"
-    );
 }
 
 const FAKE_BUNDLE_WITH_TRUNCATED_PLAIN_TEXT: &str = r#"

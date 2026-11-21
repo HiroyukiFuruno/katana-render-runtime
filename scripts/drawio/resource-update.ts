@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { getOptionValue, printHelpIfRequested } from "./cli-options";
 import { DrawioResourceInventory } from "./resource-common";
 
 interface CliParsedOptions {
@@ -9,9 +10,16 @@ interface CliParsedOptions {
 
 const CliOptions = {
   parse(argv: string[]): CliParsedOptions {
-    CliOptions.exitIfHelp(argv);
+    if (
+      printHelpIfRequested(
+        argv,
+        "Usage: bun run scripts/drawio/resource-update.ts [--resources DIR] [--manifest FILE]",
+      )
+    ) {
+      process.exit(0);
+    }
     const resourcesDir = path.resolve(
-      CliOptions.get(
+      getOptionValue(
         argv,
         "--resources",
         "crates/katana-render-runtime/src/markdown/drawio_renderer/js_runtime/resources",
@@ -20,27 +28,13 @@ const CliOptions = {
     return {
       resourcesDir,
       manifestPath: path.resolve(
-        CliOptions.get(
+        getOptionValue(
           argv,
           "--manifest",
           path.join(resourcesDir, "drawio-resource-manifest.json"),
         ),
       ),
     };
-  },
-
-  get(argv: string[], name: string, fallback: string): string {
-    const index = argv.indexOf(name);
-    return index >= 0 ? (argv.at(index + 1) ?? fallback) : fallback;
-  },
-
-  exitIfHelp(argv: string[]) {
-    if (argv.includes("--help")) {
-      console.log(
-        "Usage: bun run scripts/drawio/resource-update.ts [--resources DIR] [--manifest FILE]",
-      );
-      process.exit(0);
-    }
   },
 };
 

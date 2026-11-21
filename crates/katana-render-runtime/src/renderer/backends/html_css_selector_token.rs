@@ -139,3 +139,23 @@ impl SelectorTokenizer {
         matches!(self.tokens.last(), Some(SelectorToken::Compound(_))).then_some(self.tokens)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::CssSelector;
+
+    #[test]
+    fn selectors_reject_unmatched_brackets_and_parentheses() {
+        for source in ["div]", "div[", "span)", "span:nth-child("] {
+            assert!(CssSelector::parse(source).is_none(), "{source}");
+        }
+    }
+
+    #[test]
+    fn selectors_require_a_right_hand_side_after_child_combinators() {
+        for source in ["main >", "main > > p"] {
+            assert!(CssSelector::parse(source).is_none(), "{source}");
+        }
+        assert!(CssSelector::parse("main > p").is_some());
+    }
+}

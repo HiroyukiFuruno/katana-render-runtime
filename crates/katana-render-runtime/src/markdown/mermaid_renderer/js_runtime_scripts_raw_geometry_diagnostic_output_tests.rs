@@ -1,0 +1,165 @@
+use super::{DiagnosticOutput, workspace_tmp};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use crate::system::file_size_limit_test_support::FileSizeLimitTest;
+use std::{ffi::OsString, path::Path};
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn diagnostic_write_failure_cleans_owned_output() -> Result<(), Box<dyn std::error::Error>> {
+    FileSizeLimitTest::run_in_child(
+        module_path!(),
+        "diagnostic_write_failure_cleans_owned_output",
+        || {
+            let output = DiagnosticOutput::from_override(None)?;
+            let path = output.path.clone();
+            let write_result = FileSizeLimitTest::with_zero_limit(|| output.write(b"diagnostic"))?;
+            assert_eq!(
+                write_result,
+                Err(FileSizeLimitTest::limit_error().to_string())
+            );
+            assert_eq!(std::fs::metadata(&path)?.len(), 0);
+            drop(output);
+            assert!(!path.exists());
+            Ok(())
+        },
+    )
+}
+
+#[test]
+fn automatic_output_is_fresh_and_removed_on_drop() -> Result<(), String> {
+    let output = DiagnosticOutput::from_override(None)?;
+    let path = output.path.clone();
+    output.write(b"diagnostic")?;
+    assert!(path.is_file());
+    assert!(output.write(b"replacement").is_err());
+    drop(output);
+    assert!(!path.exists());
+    Ok(())
+}
+
+#[test]
+fn automatic_output_rejects_a_file_at_the_temporary_root() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = owned_output_directory("raw-geometry-blocked-tmp-")?;
+    let occupied = directory.path().join("tmp");
+    std::fs::write(&occupied, b"existing")?;
+    let expected = std::fs::create_dir_all(&occupied)
+        .err()
+        .ok_or("existing file accepted as a directory")?;
+    let error = DiagnosticOutput::in_workspace_tmp(&occupied).err();
+    assert_eq!(error, Some(expected.to_string()));
+    assert_eq!(std::fs::read(occupied)?, b"existing");
+    Ok(())
+}
+
+#[test]
+fn explicit_output_is_exclusive_and_remains_on_drop() -> Result<(), String> {
+    let directory = owned_output_directory("raw-geometry-override-")?;
+    let path = directory.path().join("result.json");
+    let output = DiagnosticOutput::from_override(Some(path.clone().into_os_string()))?;
+    output.write(b"diagnostic")?;
+    assert!(output.write(b"replacement").is_err());
+    drop(output);
+    assert_eq!(
+        std::fs::read(path).map_err(|error| error.to_string())?,
+        b"diagnostic"
+    );
+    Ok(())
+}
+
+#[test]
+fn invalid_explicit_relative_path_is_rejected() {
+    assert!(DiagnosticOutput::from_override(Some(OsString::from("relative.json"))).is_err());
+}
+
+#[test]
+fn filesystem_root_is_rejected_without_a_parent() -> Result<(), String> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .last()
+        .ok_or("workspace filesystem root missing")?;
+    assert!(root.is_absolute() && root.parent().is_none());
+    let output = DiagnosticOutput::from_override(Some(root.as_os_str().to_owned()))?;
+    assert_eq!(
+        output.write(b"diagnostic"),
+        Err("diagnostic output parent is missing".to_owned())
+    );
+    Ok(())
+}
+
+#[test]
+fn missing_parent_under_owned_tmp_is_not_created() -> Result<(), String> {
+    let directory = owned_output_directory("raw-geometry-missing-parent-")?;
+    let missing_parent = directory.path().join("missing");
+    let expected = std::fs::canonicalize(&missing_parent)
+        .err()
+        .ok_or("missing output parent unexpectedly canonicalized")?;
+    assert_eq!(expected.kind(), std::io::ErrorKind::NotFound);
+    let output =
+        DiagnosticOutput::from_override(Some(missing_parent.join("result.json").into_os_string()))?;
+    assert_eq!(output.write(b"diagnostic"), Err(expected.to_string()));
+    assert!(!missing_parent.exists());
+    Ok(())
+}
+
+#[test]
+fn existing_child_parent_path_without_filename_is_rejected() -> Result<(), String> {
+    let directory = owned_output_directory("raw-geometry-parent-path-")?;
+    let child = directory.path().join("child");
+    std::fs::create_dir(&child).map_err(|error| error.to_string())?;
+    let output = DiagnosticOutput::from_override(Some(child.join("..").into_os_string()))?;
+    assert_eq!(
+        output.write(b"diagnostic"),
+        Err("diagnostic output filename is missing".to_owned())
+    );
+    assert!(
+        std::fs::read_dir(child)
+            .map_err(|error| error.to_string())?
+            .next()
+            .is_none()
+    );
+    Ok(())
+}
+
+fn owned_output_directory(prefix: &str) -> Result<tempfile::TempDir, String> {
+    let tmp = workspace_tmp()?;
+    std::fs::create_dir_all(&tmp).map_err(|error| error.to_string())?;
+    tempfile::Builder::new()
+        .prefix(prefix)
+        .tempdir_in(tmp)
+        .map_err(|error| error.to_string())
+}
+
+#[test]
+fn explicit_path_outside_workspace_tmp_is_rejected() -> Result<(), String> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("diagnostic.json");
+    let output = DiagnosticOutput::from_override(Some(path.into_os_string()))?;
+    assert!(output.write(b"diagnostic").is_err());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_output_parent_is_checked_after_resolution() -> Result<(), String> {
+    let directory = owned_output_directory("raw-geometry-symlink-parent-")?;
+    let outside = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let inside = directory.path().join("inside");
+    std::fs::create_dir(&inside).map_err(|error| error.to_string())?;
+    let inside_link = directory.path().join("inside-link");
+    let outside_link = directory.path().join("outside-link");
+    std::os::unix::fs::symlink(&inside, &inside_link).map_err(|error| error.to_string())?;
+    std::os::unix::fs::symlink(outside.path(), &outside_link).map_err(|error| error.to_string())?;
+    let allowed = DiagnosticOutput::from_override(Some(inside_link.join("result.json").into()))?;
+    allowed.write(b"diagnostic")?;
+    assert_eq!(
+        std::fs::read(inside.join("result.json")).map_err(|error| error.to_string())?,
+        b"diagnostic"
+    );
+    let rejected = DiagnosticOutput::from_override(Some(outside_link.join("result.json").into()))?;
+    assert_eq!(
+        rejected.write(b"diagnostic"),
+        Err("diagnostic output must be under workspace tmp".to_owned())
+    );
+    assert!(!outside.path().join("result.json").exists());
+    Ok(())
+}

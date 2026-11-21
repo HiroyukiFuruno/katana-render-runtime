@@ -1,7 +1,11 @@
 use kdr_linter::{KdrLintError, KdrLinter, workspace::WorkspaceModel};
 use std::path::{Path, PathBuf};
 
-type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+mod support;
+
+use support::{TestResult, write_file};
+#[cfg(unix)]
+use support::{blocked_directory, set_mode};
 
 #[test]
 fn reports_rust_parse_error() -> TestResult<()> {
@@ -76,9 +80,7 @@ fn reports_source_read_error() -> TestResult<()> {
 fn reports_workspace_walk_error() -> TestResult<()> {
     let root = temp_root("walk");
     write_valid_manifests(&root)?;
-    let blocked = root.join("crates/katana-render-runtime/src/blocked");
-    std::fs::create_dir_all(&blocked)?;
-    set_mode(&blocked, 0o000)?;
+    let blocked = blocked_directory(&root, "crates/katana-render-runtime/src/blocked")?;
 
     let result = KdrLinter::lint_workspace(&root);
     set_mode(&blocked, 0o755)?;
@@ -118,17 +120,7 @@ fn workspace_model_exposes_loaded_source() -> TestResult<()> {
 }
 
 fn write_valid_manifests(root: &Path) -> TestResult<()> {
-    write_file(
-        root,
-        "crates/katana-render-runtime/Cargo.toml",
-        lib_manifest(),
-    )?;
-    write_file(
-        root,
-        "crates/katana-render-runtime-cli/Cargo.toml",
-        cli_manifest(),
-    )?;
-    Ok(())
+    support::write_manifest_pair(root, lib_manifest(), cli_manifest())
 }
 
 fn lib_manifest() -> &'static str {
@@ -152,26 +144,6 @@ katana-render-runtime = { path = "../katana-render-runtime" }
 "#
 }
 
-fn write_file(root: &Path, relative: &str, content: &str) -> TestResult<PathBuf> {
-    let path = root.join(relative);
-    let Some(parent) = path.parent() else {
-        return Err(Box::new(std::io::Error::other("path has no parent")));
-    };
-    std::fs::create_dir_all(parent)?;
-    std::fs::write(&path, content)?;
-    Ok(path)
-}
-
-#[cfg(unix)]
-fn set_mode(path: &Path, mode: u32) -> TestResult<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let mut permissions = std::fs::metadata(path)?.permissions();
-    permissions.set_mode(mode);
-    std::fs::set_permissions(path, permissions)?;
-    Ok(())
-}
-
 fn temp_root(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("kdr-linter-error-{name}-{}", std::process::id()))
+    support::temp_root("kdr-linter-error", name)
 }

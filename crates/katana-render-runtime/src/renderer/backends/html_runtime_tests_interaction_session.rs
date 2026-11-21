@@ -1,7 +1,5 @@
-use crate::renderer::backends::html_runtime::StaticHtmlRuntimeSession;
-use crate::renderer::backends::{
-    HtmlNodeId, HtmlRuntimeError, HtmlRuntimeEvent, StaticHtmlRuntime,
-};
+use super::{must_node, must_session};
+use crate::renderer::backends::{HtmlNodeId, HtmlRuntimeError, HtmlRuntimeEvent};
 
 #[test]
 fn invalid_click_target_reports_dom_bridge_error() {
@@ -65,17 +63,6 @@ fn window_scroll_timeout_discards_the_v8_session() {
     ));
 }
 
-fn must_session(source: &str) -> StaticHtmlRuntimeSession {
-    must_result(StaticHtmlRuntime.start(source))
-}
-
-fn must_node(session: &mut StaticHtmlRuntimeSession, element_id: &str) -> HtmlNodeId {
-    let node = session.node_for_element_id(element_id);
-    assert!(node.is_some());
-    let mut nodes = node.into_iter().collect::<Vec<_>>();
-    nodes.remove(0)
-}
-
 fn assert_timeout_discards_session(source: &str, element_id: &str) {
     let mut session = must_session(source);
     let action = must_node(&mut session, element_id);
@@ -86,10 +73,4 @@ fn assert_timeout_discards_session(source: &str, element_id: &str) {
         session.snapshot(),
         Err(HtmlRuntimeError::DomBridge(message)) if message.contains("discarded")
     ));
-}
-
-fn must_result<T, E>(result: Result<T, E>) -> T {
-    assert!(result.is_ok());
-    let mut values = result.into_iter().collect::<Vec<_>>();
-    values.remove(0)
 }

@@ -45,6 +45,7 @@ const KATANA_ASCII_KERNING_PAIRS = {
 
 const KATANA_ASCII_TEXT_WIDTHS = {
   " ": 4.82,
+  "+": 8.391,
   "'": 3.547,
   $: 8.391,
   "(": 5.875,

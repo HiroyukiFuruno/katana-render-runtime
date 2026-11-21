@@ -5,6 +5,7 @@ pub(super) fn fallback_face_attribute_score(
     face: &usvg::fontdb::FaceInfo,
     requested_style: usvg::fontdb::Style,
     requested_weight: usvg::fontdb::Weight,
+    requested_stretch: usvg::fontdb::Stretch,
 ) -> (u8, u8, u8, u16) {
     fallback_attribute_score(
         face.style,
@@ -12,7 +13,7 @@ pub(super) fn fallback_face_attribute_score(
         face.stretch,
         requested_style,
         requested_weight,
-        usvg::fontdb::Stretch::Normal,
+        requested_stretch,
     )
 }
 pub(super) fn fallback_attribute_score(

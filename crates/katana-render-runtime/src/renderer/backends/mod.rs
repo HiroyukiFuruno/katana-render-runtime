@@ -1,5 +1,6 @@
 mod drawio;
 mod html;
+mod html_artifact;
 mod html_browser;
 mod html_css;
 mod html_css_cascade;
@@ -9,6 +10,7 @@ mod html_css_sources;
 mod html_debug_trace;
 mod html_document;
 mod html_document_fragment;
+mod html_document_serialization;
 mod html_dom_helpers;
 mod html_interactive;
 mod html_runtime;
@@ -42,9 +44,13 @@ mod plantuml;
 
 pub use drawio::DrawioRenderer;
 pub use html::{HtmlRenderInput, HtmlRenderOutput, HtmlRenderer};
+pub use html_artifact::{
+    HtmlArtifactError, HtmlArtifactProvenance, HtmlArtifactStore, HtmlFrameArtifact,
+};
 pub use html_browser::{
     HTML_BROWSER_MAX_SOURCE_BYTES, HtmlBrowserError, HtmlBrowserFrame, HtmlBrowserInput,
-    HtmlBrowserNavigation, HtmlBrowserNavigationEvent, HtmlBrowserOrigin, HtmlBrowserPixelFormat,
+    HtmlBrowserNavigation, HtmlBrowserNavigationEvent, HtmlBrowserOrigin,
+    HtmlBrowserOverflowPolicy, HtmlBrowserPixelFormat, HtmlBrowserScrollMetrics,
     HtmlBrowserSession, HtmlBrowserSessionState, HtmlBrowserSource, HtmlBrowserViewport,
     HtmlRuntime, HtmlRuntimeSession,
 };

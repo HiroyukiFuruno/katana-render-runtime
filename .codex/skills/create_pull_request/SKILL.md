@@ -78,8 +78,8 @@ gh pr view "<pr-number>" --json isDraft --jq '.isDraft'
 1. Draftではremoteの完全CIを起動しない。通常の `just check` と pre-push は品質laneを維持し、ローカルHigh reviewを自動で繰り返さない。必要時だけ `just local-review` を使う。
 2. Draft の最新 HEAD に対して `@codex review` を依頼し、自己レビューも実施する。初回と再レビュー2回を通常の目安とする。
 3. GitHub APIで Issue コメント、formal reviews、review threads を全ページ取得し、P0/P1/P2/P3に分類する。
-4. 各指摘を個別に修正・検証し、push後に該当threadへreplyしてresolveする。P0/P1は必須対応、P2/P3は要件・互換性・DoDへの影響を根拠付きで判断する。不要な改善は理由を記録して後続patchへ送れる。修正時は自己レビュー、関連する静的検査と回帰確認を行い、静的解析だけで実動作を保証したとは扱わない。
-5. HEADが変わった場合は最新 HEAD に対するPR reviewを取得する。レビュー回数だけを理由に最新HEAD review、未解決P0/P1、DoD違反、各threadのreply/resolve、required native checks、expected SHA付きmerge確認を省略しない。
+4. [リリース手順のコードフリーズ規則](../../../docs/release.md#prレビューのコードフリーズ)に従って分類する。修正した場合は自己レビュー、静的検査、関連する回帰テストを済ませてpushする。該当スレッドに修正結果または後続Issueのリンクを返信してから解決する。
+5. HEADが変わった場合は最新HEADに対するPRレビューを取得する。未修正のP0、初回から残るP1、DoD違反は公開を止める。各スレッドへの返信と解決、必須CI、HEADを指定した保護マージを維持する。
 
 
 

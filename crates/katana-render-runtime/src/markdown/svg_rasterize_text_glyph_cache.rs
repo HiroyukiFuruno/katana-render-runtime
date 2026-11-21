@@ -91,7 +91,7 @@ fn probe_font_with_cmap(
     character: char,
     generation: &FontSourceGeneration,
 ) -> Option<bool> {
-    if !generation.is_file() {
+    if !generation.is_file() || !generation.durable_reusable() {
         return probe_font_has_char(database, id, character);
     }
     match cmap_cache::probe_file(database, id, generation, character) {

@@ -1,0 +1,12 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <path fill="green" d="M 100 15 l 50 160 l -130 -100 l 160 0 l -130 100"/>
+    <!-- refX/refY=(10,10)、向き0度の三角形を、元のパスの5頂点に直接置く。 -->
+    <g fill="blue">
+        <path opacity="0.75" d="M 100 5 L 106 25 H 94 Z"/>
+        <path opacity="0.75" d="M 150 165 L 156 185 H 144 Z"/>
+        <path opacity="0.75" d="M 20 65 L 26 85 H 14 Z"/>
+        <path opacity="0.75" d="M 180 65 L 186 85 H 174 Z"/>
+        <path opacity="0.75" d="M 50 165 L 56 185 H 44 Z"/>
+    </g>
+    <rect x="1" y="1" width="198" height="198" fill="none" stroke="black"/>
+</svg>

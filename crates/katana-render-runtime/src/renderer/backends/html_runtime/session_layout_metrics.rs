@@ -4,10 +4,13 @@ use super::super::script::{
 };
 use super::StaticHtmlRuntimeSession;
 use super::session_interaction::discarded_runtime_error;
-use crate::renderer::backends::html_runtime::dom_state::HtmlDomBridgeState;
+use crate::private_v8 as v8;
+#[cfg(test)]
+use crate::renderer::backends::html_runtime::dom_state::LayoutMetric;
+use crate::renderer::backends::html_runtime::dom_state::{
+    HtmlDomBridgeState, LayoutMetricWithIntersection,
+};
 use crate::renderer::backends::html_runtime::types::HtmlRuntimeError;
-
-type LayoutMetric = (u64, f32, f32, f32, f32, f32);
 
 impl StaticHtmlRuntimeSession {
     #[cfg(test)]
@@ -16,31 +19,35 @@ impl StaticHtmlRuntimeSession {
         viewport_width: f32,
         viewport_height: f32,
         scroll_y: f32,
-        boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>,
+        boxes: impl IntoIterator<Item = LayoutMetric>,
     ) -> Result<bool, HtmlRuntimeError> {
-        self.update_layout_metrics_with_intersection_metadata(
+        self.update_layout_metrics_xy_with_intersection_metadata(
             viewport_width,
             viewport_height,
-            scroll_y,
-            boxes,
-            [],
+            (0.0, scroll_y),
+            boxes.into_iter().map(|geometry| (geometry, None)),
         )
     }
 
-    pub(in crate::renderer::backends) fn update_layout_metrics_with_intersection_metadata(
+    pub(in crate::renderer::backends) fn update_layout_metrics_xy_with_intersection_metadata(
         &mut self,
         viewport_width: f32,
         viewport_height: f32,
-        scroll_y: f32,
-        boxes: impl IntoIterator<Item = (u64, f32, f32, f32, f32, f32)>,
-        metadata: impl IntoIterator<Item = (u64, String)>,
+        scroll_offset: (f32, f32),
+        boxes: impl IntoIterator<Item = LayoutMetricWithIntersection>,
     ) -> Result<bool, HtmlRuntimeError> {
+        if self.scriptless_document.is_some() {
+            #[cfg(test)]
+            if let Some(observer) = &mut self.scriptless_observer {
+                observer.record_geometry(viewport_width, viewport_height, scroll_offset, boxes);
+            }
+            return Ok(false);
+        }
         self.update_layout_metrics_from_boxes(
             viewport_width,
             viewport_height,
-            scroll_y,
+            scroll_offset,
             boxes.into_iter().collect(),
-            metadata.into_iter().collect(),
         )
     }
 
@@ -48,24 +55,17 @@ impl StaticHtmlRuntimeSession {
         &mut self,
         viewport_width: f32,
         viewport_height: f32,
-        scroll_y: f32,
-        boxes: Vec<LayoutMetric>,
-        metadata: Vec<(u64, String)>,
+        scroll_offset: (f32, f32),
+        boxes: Vec<LayoutMetricWithIntersection>,
     ) -> Result<bool, HtmlRuntimeError> {
-        self.set_layout_metrics(viewport_width, viewport_height, scroll_y, boxes, metadata)?;
+        self.set_layout_metrics(viewport_width, viewport_height, scroll_offset, boxes)?;
         let observer_work = self.has_intersection_observer_work();
-        if matches!(observer_work, Err(HtmlRuntimeError::ExecutionTimeout)) {
-            self.discard();
-        }
-        if !observer_work? {
+        if !self.discard_on_timeout(observer_work)? {
             return Ok(false);
         }
         let before = self.snapshot()?;
         let refresh_result = self.refresh_intersection_observers();
-        if matches!(refresh_result, Err(HtmlRuntimeError::ExecutionTimeout)) {
-            self.discard();
-        }
-        refresh_result?;
+        self.discard_on_timeout(refresh_result)?;
         self.snapshot_changed(&before)
     }
 
@@ -79,7 +79,7 @@ impl StaticHtmlRuntimeSession {
         let has_work = evaluate_value(
             scope,
             "krr-html-intersection-observer-work",
-            "globalThis.__krrPrepareIntersectionObservers();",
+            "globalThis.__krrPrepareIntersectionObservers() || globalThis.__krrPrepareResizeObservers?.();",
         )?
         .is_true();
         check_bridge_error(scope)?;
@@ -90,16 +90,14 @@ impl StaticHtmlRuntimeSession {
         &mut self,
         viewport_width: f32,
         viewport_height: f32,
-        scroll_y: f32,
-        boxes: Vec<LayoutMetric>,
-        metadata: Vec<(u64, String)>,
+        scroll_offset: (f32, f32),
+        boxes: Vec<LayoutMetricWithIntersection>,
     ) -> Result<(), HtmlRuntimeError> {
         let isolate = self.isolate.as_mut().ok_or_else(discarded_runtime_error)?;
         let state = isolate
             .get_slot::<HtmlDomBridgeState>()
             .ok_or_else(dom_state_unavailable_error)?;
-        state.set_layout_metrics(viewport_width, viewport_height, scroll_y, boxes);
-        state.set_intersection_metadata(metadata);
+        state.set_layout_metrics_xy(viewport_width, viewport_height, scroll_offset, boxes);
         Ok(())
     }
 
@@ -113,7 +111,7 @@ impl StaticHtmlRuntimeSession {
         evaluate(
             scope,
             "krr-html-intersection-layout-sync",
-            "globalThis.__krrRefreshIntersectionObservers();",
+            "globalThis.__krrRefreshResizeObservers?.();globalThis.__krrRefreshIntersectionObservers();",
         )
         .and_then(|()| perform_microtask_checkpoint(scope))
         .and_then(|()| check_bridge_error(scope))
@@ -265,16 +263,18 @@ mod tests {
     ) {
         assert!(
             session
-                .update_layout_metrics_with_intersection_metadata(
+                .update_layout_metrics_xy_with_intersection_metadata(
                     100.0,
                     100.0,
-                    0.0,
+                    (0.0, 0.0),
                     [
-                        (root, 0.0, 0.0, 100.0, 100.0, 0.0),
-                        (clip, 0.0, 0.0, 10.0, 10.0, 0.0),
-                        (target, 10.0, 0.0, 10.0, 10.0, 0.0),
+                        ((root, 0.0, 0.0, 100.0, 100.0, 0.0), None),
+                        ((clip, 0.0, 0.0, 10.0, 10.0, 0.0), None),
+                        (
+                            (target, 10.0, 0.0, 10.0, 10.0, 0.0),
+                            Some(root_clip_edge_contact_metadata(clip))
+                        ),
                     ],
-                    [(target, root_clip_edge_contact_metadata(clip))],
                 )
                 .is_ok(),
             "layout metrics must accept root clip metadata"
@@ -283,7 +283,7 @@ mod tests {
 
     fn root_clip_edge_contact_metadata(clip: u64) -> String {
         format!(
-            r#"{{"positioning":"in-flow","viewportEscape":false,"clips":[{{"owner":{clip},"x":0,"y":0,"width":10,"height":10}}],"fragments":[]}}"#
+            r#"{{"positioning":"in-flow","viewportEscape":false,"clips":[{{"owner":{clip},"x":0,"y":0,"width":10,"height":10,"activeAxes":[true,true]}}],"fragments":[]}}"#
         )
     }
 
@@ -341,7 +341,7 @@ mod tests {
 
     #[test]
     fn layout_metrics_rejects_a_discarded_runtime() {
-        let mut session = start("<p>content</p>");
+        let mut session = start(SCRIPTED_CONTENT);
         session.isolate = None;
         let result = session.update_layout_metrics(320.0, 240.0, 0.0, []);
         assert!(matches!(result, Err(HtmlRuntimeError::DomBridge(_))));
@@ -349,7 +349,7 @@ mod tests {
 
     #[test]
     fn layout_metrics_rejects_a_runtime_without_context() {
-        let mut session = start("<p>content</p>");
+        let mut session = start(SCRIPTED_CONTENT);
         session.context = None;
         let result = session.update_layout_metrics(320.0, 240.0, 0.0, []);
         assert!(matches!(result, Err(HtmlRuntimeError::DomBridge(_))));
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn snapshot_changed_surfaces_a_discarded_runtime() {
-        let mut session = start("<p>content</p>");
+        let mut session = start(SCRIPTED_CONTENT);
         session.isolate = None;
         let result = session.snapshot_changed("");
         assert!(matches!(result, Err(HtmlRuntimeError::DomBridge(_))));
@@ -365,11 +365,13 @@ mod tests {
 
     #[test]
     fn observer_work_rejects_a_discarded_runtime() {
-        let mut session = start("<p>content</p>");
+        let mut session = start(SCRIPTED_CONTENT);
         session.isolate = None;
         assert!(matches!(
             session.has_intersection_observer_work(),
             Err(HtmlRuntimeError::DomBridge(_))
         ));
     }
+
+    const SCRIPTED_CONTENT: &str = "<p>content</p><script>void 0</script>";
 }

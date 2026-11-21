@@ -59,12 +59,8 @@ function katanaSvgDimensionScale() {
 }
 
 function katanaNormalizeFinalSvg(svg, request) {
-  return katanaNormalizeErViewBox(
-    katanaNormalizeIshikawaSvg(
-      katanaEscapeTextMarkers(
-        katanaNormalizeEmptyTextFill(katanaNormalizeFontFamilyAttributes(svg), request),
-      ),
-    ),
+  return katanaEscapeTextMarkers(
+    katanaNormalizeEmptyTextFill(katanaNormalizeFontFamilyAttributes(svg), request),
   );
 }
 
@@ -73,10 +69,8 @@ function katanaNormalizeDiagramSpecificSvg(svg, request) {
   normalized = katanaNormalizeTreeViewSvg(normalized, request);
   normalized = katanaNormalizeTreemapSvg(normalized, request);
   normalized = katanaNormalizeClassSvg(normalized);
-  normalized = katanaNormalizeErSvg(normalized);
   normalized = katanaNormalizeFlowchartEdgeLabelSvg(normalized, request);
   normalized = katanaNormalizeFlowchartViewBoxSvg(normalized);
-  normalized = katanaNormalizeFlowchartFixtureLayout(normalized);
   normalized = katanaNormalizeStateEdgeLabelSvg(normalized, request);
   normalized = katanaNormalizeRequirementEdgeLabelSvg(normalized);
   normalized = katanaNormalizeJourneySvg(normalized, request);
@@ -87,13 +81,11 @@ function katanaNormalizeDiagramSpecificSvg(svg, request) {
   normalized = katanaNormalizeGitGraphSvg(normalized);
   normalized = katanaNormalizeKanbanSvg(normalized, request);
   normalized = katanaNormalizeSankeySvg(normalized);
-  normalized = katanaNormalizeMindmapSvg(normalized);
   normalized = katanaNormalizeBlockSvg(normalized);
   normalized = katanaNormalizeWardleySvg(normalized, request);
-  normalized = katanaNormalizeIshikawaSvg(normalized);
   normalized = katanaNormalizeZenumlRuntimeSvg(normalized, request);
-  normalized = katanaNormalizeReviewFeedbackSvg(normalized, request);
-  normalized = katanaNormalizeSequenceActivationSvg(normalized);
+  // review 補正 helper の大域定義を保ち、描画ごとの関数生成を防ぐ。
+  normalized = /*@__NOINLINE__*/ katanaNormalizeReviewFeedbackSvg(normalized, request);
   return normalized;
 }
 

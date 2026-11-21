@@ -7,7 +7,7 @@ KatanaNode.prototype.getBBox = function getBBox() {
 };
 
 function katanaNodeTextForBox(node) {
-  return String(katanaFirstTextValue([node.textContent, node.innerText]));
+  return String(katanaFirstTextValue([katanaTextContent(node), katanaInnerText(node)]));
 }
 
 function katanaFirstTextValue(values) {
@@ -45,14 +45,18 @@ KatanaNode.prototype.getContext = function getContext() {
 Object.defineProperty(KatanaNode.prototype, "innerHTML", {
   configurable: true,
   get() {
-    if (this.children.length === 0) {
-      return this.textContent;
-    }
-    return this.children.map((child) => child.outerHTML ?? child.textContent ?? "").join("");
+    const ownText = katanaEscapeSvgText(katanaOwnText(this));
+    const children = this.children
+      .map((child) => child.outerHTML ?? child.textContent ?? "")
+      .join("");
+    return `${ownText}${children}`;
   },
   set(value) {
     katanaClearInnerHtml(this);
-    katanaApplyInnerHtml(this, parseInnerHtml(String(value)));
+    katanaApplyInnerHtml(
+      this,
+      parseInnerHtml(String(value), false, this.namespaceURI, this.localName),
+    );
   },
 });
 
@@ -122,6 +126,7 @@ function katanaShallowCloneNode(node) {
     clone.setAttribute(attribute.name, attribute.value);
   });
   clone.style = node.style.clone();
+  clone.style.ownerNode = clone;
   clone._textContent = node._textContent ?? "";
   clone.className = node.className;
   clone.id = node.id;

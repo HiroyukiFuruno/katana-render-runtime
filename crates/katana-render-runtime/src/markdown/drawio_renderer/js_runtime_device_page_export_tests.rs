@@ -24,13 +24,11 @@ fn fake_bundle_preserves_aws_device_page_when_rendered_content_fills_canvas() {
     let path = temp_runtime_path("krr-drawio-aws-full-page-canvas-unit");
     assert!(std::fs::write(&path, aws_full_page_bundle()).is_ok());
 
-    let source = r#"<mxfile type="device"><diagram><mxGraphModel page="1"><root>
-<mxCell id="1" parent="0"/>
-<mxCell id="shape" style="shape=rect;mxgraph.aws;mxgraph.aws;mxgraph.aws;mxgraph.aws;mxgraph.aws;mxgraph.aws;mxgraph.aws;mxgraph.aws;mxgraph.aws;mxgraph.aws;mxgraph.aws;mxgraph.aws;" vertex="1" parent="1">
-  <mxGeometry width="100" height="60" as="geometry"/>
-</mxCell>
-</root></mxGraphModel></diagram></mxfile>"#;
-    let rendered = DrawioJsRuntimeOps::render(source, &path, DiagramColorPreset::dark());
+    let source = device_page_source_with_shape(
+        "shape=rect;mxgraph.aws;mxgraph.aws;mxgraph.aws;mxgraph.aws;mxgraph.aws;mxgraph.aws;mxgraph.aws;mxgraph.aws;mxgraph.aws;mxgraph.aws;mxgraph.aws;mxgraph.aws;",
+        "<mxGeometry width=\"100\" height=\"60\" as=\"geometry\"/>",
+    );
+    let rendered = DrawioJsRuntimeOps::render(&source, &path, DiagramColorPreset::dark());
 
     assert!(
         rendered.as_ref().is_ok_and(|svg| {
@@ -60,13 +58,11 @@ fn fake_bundle_does_not_pad_intentional_negative_source_origin() {
     let path = temp_runtime_path("krr-drawio-negative-source-page-origin-unit");
     assert!(std::fs::write(&path, negative_source_origin_bundle()).is_ok());
 
-    let source = r#"<mxfile type="device"><diagram><mxGraphModel page="1"><root>
-<mxCell id="1" parent="0"/>
-<mxCell id="shape" style="shape=rect;" vertex="1" parent="1">
-  <mxGeometry y="-40" width="300" height="200" as="geometry"/>
-</mxCell>
-</root></mxGraphModel></diagram></mxfile>"#;
-    let rendered = DrawioJsRuntimeOps::render(source, &path, DiagramColorPreset::dark());
+    let source = device_page_source_with_shape(
+        "shape=rect;",
+        "<mxGeometry y=\"-40\" width=\"300\" height=\"200\" as=\"geometry\"/>",
+    );
+    let rendered = DrawioJsRuntimeOps::render(&source, &path, DiagramColorPreset::dark());
 
     assert!(
         rendered.as_ref().is_ok_and(|svg| {
@@ -92,6 +88,17 @@ fn negative_source_origin_bundle() -> String {
             r#"rect.setAttribute("height", "60");"#,
             r#"rect.setAttribute("height", "212");"#,
         )
+}
+
+fn device_page_source_with_shape(style: &str, geometry: &str) -> String {
+    format!(
+        r#"<mxfile type="device"><diagram><mxGraphModel page="1"><root>
+<mxCell id="1" parent="0"/>
+<mxCell id="shape" style="{style}" vertex="1" parent="1">
+  {geometry}
+</mxCell>
+</root></mxGraphModel></diagram></mxfile>"#
+    )
 }
 
 #[test]

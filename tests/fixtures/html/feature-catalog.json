@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "repository": "katana-render-runtime",
+    "references": [
+      { "name": "MUI component catalogue", "url": "https://mui.com/material-ui/all-components/", "use": "visual component vocabulary" },
+      { "name": "Radix accessibility overview", "url": "https://www.radix-ui.com/primitives/docs/overview/accessibility", "use": "interaction and focus states" },
+      { "name": "USWDS side navigation", "url": "https://designsystem.digital.gov/components/side-navigation/", "use": "document navigation states" },
+      { "name": "CSS Tables Level 3", "url": "https://www.w3.org/TR/css-tables-3/", "use": "table sizing and border behavior" },
+      { "name": "Web Platform Tests test writing", "url": "https://web-platform-tests.org/writing-tests/", "use": "reftest and script-lane separation" }
+    ]
+  },
+  "threshold": 99,
+  "visualAspects": [
+    { "id": "typography", "fixture": "aspects/typography.html", "mode": "visual", "features": ["font-family", "font-weight", "font-size", "line-height", "inline-wrap", "white-space", "writing-mode"], "boundaryStates": ["ja-en-mixed", "fractional-metrics", "nowrap", "long-line"] },
+    { "id": "layout", "fixture": "aspects/layout.html", "mode": "visual", "features": ["block-flow", "flex", "grid", "intrinsic-size", "margin", "padding", "viewport-width"], "boundaryStates": ["narrow-viewport", "multi-column", "min-content"] },
+    { "id": "table", "fixture": "aspects/table.html", "mode": "visual", "features": ["table-layout", "min-content", "percentage-columns", "border-collapse", "colspan", "rowspan", "mixed-cell-content"], "boundaryStates": ["long-status", "collapsed-border", "rich-cell"] },
+    { "id": "navigation", "fixture": "aspects/navigation.html", "mode": "visual", "features": ["anchor", "sidebar", "fixed-navigation", "nested-links", "scroll-target"], "boundaryStates": ["top", "middle", "bottom", "all-toc-links"] },
+    { "id": "input-state", "fixture": "aspects/input-state.html", "mode": "visual", "features": ["input", "select", "tabs", "accordion", "disabled", "focus-visible", "keyboard"], "boundaryStates": ["empty", "filled", "selected", "expanded", "disabled", "focus-visible"] },
+    { "id": "decoration", "fixture": "aspects/decoration.html", "mode": "visual", "features": ["surface", "alert", "border-radius", "box-shadow", "gradient", "clip", "opacity", "paint-order"], "boundaryStates": ["stacked", "clipped", "translucent"] }
+  ],
+  "scriptCases": [
+    { "id": "dynamic-dom", "fixture": "aspects/script-dynamic-dom.html", "mode": "script", "features": ["append", "remove", "attribute", "text", "style", "class"], "expectedStateId": "expected-state" },
+    { "id": "events", "fixture": "aspects/script-events.html", "mode": "script", "features": ["click", "input", "form", "capture", "bubble", "keyboard"], "expectedStateId": "expected-state" },
+    { "id": "async", "fixture": "aspects/script-async.html", "mode": "script", "features": ["promise", "microtask", "timer", "DOMContentLoaded"], "expectedStateId": "expected-state" },
+    { "id": "observers", "fixture": "aspects/script-observers.html", "mode": "script", "features": ["MutationObserver", "ResizeObserver", "IntersectionObserver"], "expectedStateId": "expected-state" },
+    { "id": "resources", "fixture": "aspects/script-resources.html", "mode": "script", "features": ["data-image", "load", "resource-addition", "font-ready"], "expectedStateId": "expected-state" }
+  ],
+  "coveragePolicy": { "representativeSamplesAreInsufficient": true, "unmappedFixtureIsFailure": true, "unrunCaseIsFailure": true, "unsupportedIsUnverified": true, "wptFullConformanceClaim": false }
+}

@@ -1,3 +1,6 @@
+use super::super::super::super::fallback::test_support::{
+    b_cmap, sfnt_checksum, write_file_with_new_modified_time,
+};
 use super::super::{MAX_FILE_STAMPS, cached_font_has_char, file_source_stamp, insert, lookup};
 use crate::markdown::svg_rasterize::font::bundled_font_db;
 use resvg::usvg::fontdb::{Database, Source};
@@ -138,21 +141,6 @@ fn file_fixture(prefix: &str) -> FixtureResult<FileFixture> {
     Ok((database, file_id, fallback_id, path, guard, replacement))
 }
 
-fn write_file_with_new_modified_time(path: &std::path::Path, bytes: &[u8]) -> FixtureResult<()> {
-    let before = std::fs::metadata(path)?;
-    let replacement_len = u64::try_from(bytes.len())?;
-    assert_eq!(before.len(), replacement_len);
-    let before_modified = before.modified()?;
-    std::fs::write(path, bytes)?;
-    let modified = before_modified + std::time::Duration::from_secs(1);
-    std::fs::OpenOptions::new()
-        .write(true)
-        .open(path)?
-        .set_times(std::fs::FileTimes::new().set_modified(modified))?;
-    assert_ne!(std::fs::metadata(path)?.modified()?, before_modified);
-    Ok(())
-}
-
 fn file_and_binary_database(
     face: TestFace,
     original: Vec<u8>,
@@ -221,17 +209,7 @@ fn single_b_cmap(font: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         .glyph_index('B')
         .ok_or("bundled font has no B glyph")?
         .0;
-    let mut cmap = Vec::with_capacity(40);
-    cmap.extend_from_slice(&[0, 0, 0, 1, 0, 3, 0, 10, 0, 0, 0, 12]);
-    cmap.extend_from_slice(&12_u16.to_be_bytes());
-    cmap.extend_from_slice(&0_u16.to_be_bytes());
-    cmap.extend_from_slice(&28_u32.to_be_bytes());
-    cmap.extend_from_slice(&0_u32.to_be_bytes());
-    cmap.extend_from_slice(&1_u32.to_be_bytes());
-    cmap.extend_from_slice(&u32::from('B').to_be_bytes());
-    cmap.extend_from_slice(&u32::from('B').to_be_bytes());
-    cmap.extend_from_slice(&u32::from(glyph_id).to_be_bytes());
-    Ok(cmap)
+    Ok(b_cmap(glyph_id))
 }
 
 fn table_record(font: &[u8], tag: &[u8; 4]) -> Result<(usize, usize), Box<dyn std::error::Error>> {
@@ -281,14 +259,6 @@ fn temp_font(prefix: &str, bytes: &[u8]) -> Result<(PathBuf, TempFontFile), std:
     ));
     std::fs::write(&path, bytes)?;
     Ok((path.clone(), TempFontFile(path)))
-}
-
-fn sfnt_checksum(bytes: &[u8]) -> u32 {
-    bytes.chunks(4).fold(0_u32, |sum, chunk| {
-        let mut word = [0; 4];
-        word[..chunk.len()].copy_from_slice(chunk);
-        sum.wrapping_add(u32::from_be_bytes(word))
-    })
 }
 
 #[path = "svg_rasterize_text_glyph_cache_generation_tests.rs"]

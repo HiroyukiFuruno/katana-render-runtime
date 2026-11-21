@@ -1,0 +1,20 @@
+{
+  "distribution": "tomli",
+  "version": "2.5.0",
+  "requiresPython": ">=3.8",
+  "source": "https://pypi.org/pypi/tomli/2.5.0/json",
+  "wheel": {
+    "filename": "tomli-2.5.0-py3-none-any.whl",
+    "url": "https://files.pythonhosted.org/packages/60/3f/3e3f8fd0919249b0200c80fbc4f9a1e70be19f9883da71dfb7f8b9ab8aca/tomli-2.5.0-py3-none-any.whl",
+    "sha256": "32a7b79ac57a2e83670ce329ccf675798bc5a2094783a63676866b70503f2e2b"
+  },
+  "files": {
+    "scripts/release/_tomli/__init__.py": "7182927b251660b7d649eec79e0dcaf03a59973793400990a693d9f6f8b73eca",
+    "scripts/release/_tomli/_parser.py": "3e782f1bc85639ecef630ae686df3d849f2bedd2e9c987d8f5109a5a154df131",
+    "scripts/release/_tomli/_re.py": "a12359fe294523a72112e434d58452a14c9d050affa2417f9927474e4166bfdd",
+    "scripts/release/_tomli/_types.py": "f864c6d9552a929c7032ace654ee05ef26ca75d21b027b801d77e65907138b74",
+    "scripts/release/_tomli/py.typed": "f0f8f2675695a10a5156fb7bd66bafbaae6a13e8d315990af862c792175e6e67"
+  },
+  "licenseSHA256": "b80816b0d530b8accb4c2211783790984a6e3b61922c2b5ee92f3372ab2742fe",
+  "preservation": "Unmodified official package bytes; import package directory named _tomli uses upstream relative imports."
+}

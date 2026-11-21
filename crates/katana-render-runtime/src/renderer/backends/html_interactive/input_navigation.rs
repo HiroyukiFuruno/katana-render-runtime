@@ -1,7 +1,9 @@
 use percent_encoding::percent_decode_str;
 
-use super::super::super::html_browser::HtmlBrowserNavigationEvent;
+use super::super::super::html_browser::{HtmlBrowserNavigationEvent, HtmlBrowserOrigin};
 use super::super::runtime_failure;
+use super::super::session_geometry::max_scroll_for;
+use super::super::types::LayoutResult;
 use super::super::{HtmlBrowserError, HtmlInteractiveSession};
 
 impl HtmlInteractiveSession {
@@ -30,7 +32,15 @@ impl HtmlInteractiveSession {
 
     pub(crate) fn apply_fragment_navigation(
         &mut self,
-        url: super::super::super::html_browser::HtmlBrowserOrigin,
+        url: HtmlBrowserOrigin,
+    ) -> Result<(), HtmlBrowserError> {
+        self.apply_fragment_navigation_in_layout(url, None)
+    }
+
+    pub(in crate::renderer::backends::html_interactive) fn apply_fragment_navigation_in_layout(
+        &mut self,
+        url: HtmlBrowserOrigin,
+        layout: Option<&LayoutResult>,
     ) -> Result<(), HtmlBrowserError> {
         let fragment = url
             .url()
@@ -38,15 +48,33 @@ impl HtmlInteractiveSession {
             .map(|value| percent_decode_str(value).decode_utf8_lossy().into_owned());
         let (next_scroll, resize_anchor) = match fragment.as_deref() {
             None | Some("") => (0.0, None),
-            Some(fragment) => match self.layout()?.anchor_positions.get(fragment).copied() {
-                Some(position) => (position, Some(fragment.to_string())),
-                None => (self.scroll_y, None),
+            Some(fragment) => match self.fragment_position(fragment, layout)? {
+                Some(position) => (position.round(), Some(fragment.to_string())),
+                None => (self.scroll_geometry.scroll_y, None),
             },
         };
+        self.runtime
+            .update_document_url(url.as_str())
+            .map_err(runtime_failure)?;
         self.source.origin = url;
-        self.scroll_y = next_scroll.clamp(0.0, self.max_scroll());
+        let limit = layout.map_or_else(
+            || self.max_scroll(),
+            |layout| max_scroll_for(layout, self.viewport),
+        );
+        self.scroll_geometry.scroll_y = next_scroll.clamp(0.0, limit);
         self.resize_anchor = resize_anchor;
         Ok(())
+    }
+
+    fn fragment_position(
+        &mut self,
+        fragment: &str,
+        layout: Option<&LayoutResult>,
+    ) -> Result<Option<f32>, HtmlBrowserError> {
+        match layout {
+            Some(layout) => Ok(layout.anchor_positions.get(fragment).copied()),
+            None => Ok(self.layout()?.anchor_positions.get(fragment).copied()),
+        }
     }
 }
 

@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Independent interaction fidelity fixture</title>
+<style>
+  html, body { margin: 0; padding: 0; font: 16px sans-serif; }
+  main { position: relative; min-height: 2200px; padding: 20px; }
+  a, button, input { display: block; box-sizing: border-box; margin: 0 0 20px; height: 40px; }
+  a { width: 260px; padding: 10px; }
+  button { width: 220px; }
+  input { width: 220px; padding: 8px; }
+  #result { min-height: 24px; }
+</style>
+<main>
+  <a id="link" data-krr-link href="interaction-fidelity.html?linked=1">Open linked page</a>
+  <button id="action" data-krr-action aria-expanded="false" type="button">Toggle panel</button>
+  <form><input id="value" aria-label="interaction input" name="value"><button id="submit" type="submit">Submit</button></form>
+  <output id="result" data-krr-result></output>
+  <div style="height:1800px"></div>
+</main>
+<script>
+  const result = document.querySelector("[data-krr-result]");
+  const action = document.querySelector("[data-krr-action]");
+  action.addEventListener("click", () => {
+    const expanded = action.getAttribute("aria-expanded") !== "true";
+    action.setAttribute("aria-expanded", String(expanded));
+    result.textContent = expanded ? "opened" : "closed";
+  });
+  document.querySelector("#value").addEventListener("input", () => {
+    result.textContent = "submitted";
+  });
+  document.querySelector("form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    result.textContent = "submitted";
+  });
+</script>

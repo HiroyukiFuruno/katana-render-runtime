@@ -2,6 +2,7 @@ use super::evaluation::{evaluate_value, perform_microtask_checkpoint};
 use super::execution::ExecutionBudget;
 use super::script::HtmlTryCatchScope;
 use super::types::HtmlRuntimeError;
+use crate::private_v8 as v8;
 
 const MAX_PROMISE_CHECKPOINTS: usize = 64;
 

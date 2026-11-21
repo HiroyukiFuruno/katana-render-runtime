@@ -6,15 +6,18 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import tomllib
 from collections.abc import Callable, Sequence
 from pathlib import Path, PurePosixPath
-from typing import Union
+from typing import TypedDict
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -22,8 +25,13 @@ ASSET_CRATE = "katana-render-runtime-assets"
 RUNTIME_CRATE = "katana-render-runtime"
 REGISTRY_SOURCE = "registry+https://github.com/rust-lang/crates.io-index"
 CommandRunner = Callable[
-    ..., Union[subprocess.CompletedProcess[bytes], subprocess.CompletedProcess[str]]
+    ..., subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]
 ]
+
+
+class VendorManifest(TypedDict):
+    files: dict[str, str]
+    package: str
 
 
 def sha256_bytes(content: bytes) -> str:
@@ -50,9 +58,12 @@ def _safe_archive_path(name: str, crate_dir: str) -> PurePosixPath:
 
 
 def asset_archive_members(archive: Path, version: str) -> dict[str, bytes]:
-    """展開時に危険な経路や特殊ファイルを含まない通常ファイルだけを読む。"""
+    return _crate_archive_members(archive, ASSET_CRATE, version)
 
-    crate_dir = f"{ASSET_CRATE}-{version}"
+
+def _crate_archive_members(archive: Path, crate: str, version: str) -> dict[str, bytes]:
+    """展開時に危険な経路や特殊ファイルを含まない通常ファイルだけを読む。"""
+    crate_dir = f"{crate}-{version}"
     files: dict[str, bytes] = {}
     with tarfile.open(archive, mode="r:gz") as tar:
         for member in tar.getmembers():
@@ -109,7 +120,7 @@ def verify_asset_lock_entry(lock_path: Path, archive: Path, version: str) -> str
     return archive_sha
 
 
-def _read_owned_vendor_manifest(destination: Path) -> dict[str, object] | None:
+def _read_owned_vendor_manifest(destination: Path) -> VendorManifest | None:
     if not destination.exists():
         return None
     if destination.is_symlink() or not destination.is_dir():
@@ -143,6 +154,7 @@ def _read_owned_vendor_manifest(destination: Path) -> dict[str, object] | None:
             "existing vendor directory has files outside its checksum manifest: "
             f"{destination}"
         )
+    checked_files: dict[str, str] = {}
     for relative, expected in manifest["files"].items():
         relative_path = PurePosixPath(relative)
         try:
@@ -152,7 +164,8 @@ def _read_owned_vendor_manifest(destination: Path) -> dict[str, object] | None:
         path = destination.joinpath(*relative_path.parts)
         if not isinstance(expected, str) or sha256_bytes(path.read_bytes()) != expected:
             raise ValueError(f"existing vendor file does not match its checksum manifest: {path}")
-    return manifest
+        checked_files[relative] = expected
+    return {"files": checked_files, "package": manifest["package"]}
 
 
 def stage_asset_archive(archive: Path, destination: Path, version: str) -> str:
@@ -194,24 +207,97 @@ def parse_cargo_command(value: str) -> list[str]:
 
 
 def packaged_test_command(
-    cargo: Sequence[str], manifest: Path, vendor: Path, test_threads: int
+    cargo: Sequence[str], manifest: Path, vendor: Path, test_threads: int, target: Path,
 ) -> list[str]:
+    workspace = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
+    debug = workspace.get("profile", {}).get("dev", {}).get("debug", 2)
     return [
         *cargo,
-        "test",
+        "nextest",
+        "run",
         "--manifest-path",
         str(manifest),
+        "--target-dir",
+        str(target),
         "--lib",
         "--locked",
         "--offline",
         "--config",
+        "profile.dev.debug=" + json.dumps(debug),
+        "--config",
         'source.crates-io.replace-with="packaged-runtime-test-vendor"',
         "--config",
         "source.packaged-runtime-test-vendor.directory=" + json.dumps(str(vendor)),
-        "--",
+        "--no-fail-fast",
+        "--retries",
+        "0",
         "--test-threads",
         str(test_threads),
     ]
+
+
+def _extract_public_fixtures(archive: Path, workspace: Path) -> None:
+    fixture_count = 0
+    with tarfile.open(archive, mode="r:") as source:
+        for member in source:
+            relative = PurePosixPath(member.name)
+            _safe_relative_path(relative, member.name)
+            if relative.parts == ("tests",) and member.isdir():
+                continue
+            if relative.parts[:2] != ("tests", "fixtures"):
+                raise ValueError(f"packaged test fixture is outside tests/fixtures: {member.name}")
+            if member.isdir():
+                continue
+            if not member.isfile() or len(relative.parts) < 3:
+                raise ValueError(f"packaged test fixture is not a regular file: {member.name}")
+            fixture = source.extractfile(member)
+            if fixture is None:
+                raise ValueError(f"could not read packaged test fixture: {member.name}")
+            destination = workspace.joinpath(*relative.parts)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with fixture, destination.open("xb") as output:
+                shutil.copyfileobj(fixture, output)
+            if member.mode & 0o111:
+                destination.chmod(member.mode & 0o777)
+            fixture_count += 1
+    if fixture_count == 0:
+        raise ValueError("packaged test fixture archive is empty")
+
+
+def _run_in_packaged_workspace(
+    workspace: Path, package_dir: Path, version: str, cargo: Sequence[str],
+    test_threads: int, target: Path, runner: CommandRunner,
+) -> int:
+    package = workspace / "crates" / RUNTIME_CRATE
+    runtime_archive = package_dir / f"{RUNTIME_CRATE}-{version}.crate"
+    asset_archive = package_dir / f"{ASSET_CRATE}-{version}.crate"
+    for name, content in _crate_archive_members(runtime_archive, RUNTIME_CRATE, version).items():
+        file = package / name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_bytes(content)
+    lock = package / "Cargo.lock"
+    verify_asset_lock_entry(lock, asset_archive, version)
+    lock_before = lock.read_bytes()
+    vendor = package_dir / "packaged-test-vendor"
+    vendor_command = [*cargo, "vendor", "--locked", "--versioned-dirs", str(vendor)]
+    result = runner(vendor_command, cwd=ROOT, check=False)
+    if result.returncode:
+        return result.returncode
+    stage_asset_archive(asset_archive, vendor / f"{ASSET_CRATE}-{version}", version)
+    fixtures = workspace / "public-fixtures.tar"
+    with fixtures.open("xb") as output:
+        result = runner(["git", "archive", "--format=tar", "HEAD", "tests/fixtures"],
+                        cwd=ROOT, stdout=output, check=False)
+    if result.returncode:
+        return result.returncode
+    _extract_public_fixtures(fixtures, workspace)
+    fixtures.unlink()
+    status = runner(packaged_test_command(cargo, package / "Cargo.toml", vendor, test_threads, target),
+                    cwd=ROOT, check=False).returncode
+    if lock.read_bytes() != lock_before:
+        print("packaged runtime Cargo.lock changed during test", file=sys.stderr)
+        return status or 1
+    return status
 
 
 def run_packaged_test(
@@ -227,38 +313,11 @@ def run_packaged_test(
     if re.fullmatch(version_pattern, version) is None:
         raise ValueError(f"invalid bare crate version: {version}")
     package_dir = ROOT / "target" / "package"
-    asset_archive = package_dir / f"{ASSET_CRATE}-{version}.crate"
-    runtime_dir = package_dir / f"{RUNTIME_CRATE}-{version}"
-    runtime_manifest = runtime_dir / "Cargo.toml"
-    runtime_lock = runtime_dir / "Cargo.lock"
-    vendor_dir = package_dir / "packaged-test-vendor"
-    if not asset_archive.is_file():
-        raise ValueError(f"packaged asset crate not found: {asset_archive}")
-    if not runtime_manifest.is_file() or not runtime_lock.is_file():
-        raise ValueError(f"packaged runtime manifest or lockfile not found under {runtime_dir}")
-
-    verify_asset_lock_entry(runtime_lock, asset_archive, version)
-    lock_before = runtime_lock.read_bytes()
-
-    vendor_command = [
-        *cargo,
-        "vendor",
-        "--locked",
-        "--versioned-dirs",
-        str(vendor_dir),
-    ]
-    vendor_result = runner(vendor_command, cwd=ROOT, check=False)
-    if vendor_result.returncode:
-        return vendor_result.returncode
-
-    staged_asset = vendor_dir / f"{ASSET_CRATE}-{version}"
-    stage_asset_archive(asset_archive, staged_asset, version)
-    test_command = packaged_test_command(cargo, runtime_manifest, vendor_dir, test_threads)
-    test_result = runner(test_command, cwd=ROOT, check=False)
-    if runtime_lock.read_bytes() != lock_before:
-        print(f"packaged runtime Cargo.lock changed during test: {runtime_lock}", file=sys.stderr)
-        return test_result.returncode or 1
-    return test_result.returncode
+    cached_target = package_dir / f"{RUNTIME_CRATE}-{version}" / "target"
+    target = Path(os.environ.get("CARGO_TARGET_DIR", str(cached_target)))
+    with tempfile.TemporaryDirectory(prefix="packaged-runtime-test-", dir=package_dir) as directory:
+        return _run_in_packaged_workspace(Path(directory), package_dir, version, cargo,
+                                          test_threads, target, runner)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

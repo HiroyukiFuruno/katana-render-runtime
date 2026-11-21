@@ -1,0 +1,398 @@
+toolchains:
+  default: system
+
+# 出力・環境・出所の受入検証を統合するまで結果を再利用しない。
+taskOptions:
+  cache: false
+  runInCI: always
+  shell: false
+
+tasks:
+  fmt-check:
+    command: ['just', 'fmt-check']
+    inputs: &quality-inputs
+      - '**/*'
+      # 人間向けの進捗記録は実装・検査の入力ではない。
+      - '!/docs/quality-gate-improvement-tasks.md'
+      - '!/tmp/**'
+      - '!/.moon/cache/**'
+      - '!/target/**'
+      - '!/crates/katana-render-runtime/target/**'
+      - '!**/.ruff_cache/**'
+      - '!**/.mypy_cache/**'
+      - '!**/.pytest_cache/**'
+      - '!**/__pycache__/**'
+      - '!/tests/fixtures/quality-cache/.moon/cache/**'
+      - '!/tests/fixtures/quality-cache/.outputs/**'
+
+  lint:
+    command: ['just', 'lint']
+    deps: ['ast-lint']
+    inputs: *quality-inputs
+
+  ast-lint:
+    command: ['just', 'ast-lint']
+    deps: ['fmt-check', 'source-static']
+    inputs: *quality-inputs
+
+  dependency-leak:
+    command: ['just', 'dependency-leak']
+    deps: ['lint']
+    inputs: *quality-inputs
+
+  runtime-bundle-check:
+    command: ['just', 'runtime-bundle-check']
+    inputs: *quality-inputs
+    options:
+      cache: true
+    checks:
+      - check: fingerprint
+        script: bun scripts/runtime-bundles/runtime-bundle-tool-fingerprint.ts
+        hash: stdout
+
+  runtime-asset-check:
+    command: ['just', 'runtime-asset-check']
+    inputs: *quality-inputs
+
+  biome:
+    command: ['just', 'biome-run']
+    deps: ['rust-facts-host-prebuild']
+    inputs: *quality-inputs
+
+  typecheck:
+    command: ['just', 'typecheck']
+    inputs: *quality-inputs
+
+  python-lint:
+    command: ['just', 'python-lint']
+    inputs: *quality-inputs
+
+  python-typecheck:
+    command: ['just', 'python-typecheck']
+    inputs: *quality-inputs
+
+  shell-lint:
+    command: ['just', 'shell-lint']
+    inputs: *quality-inputs
+
+  html-performance-lock-pin-check:
+    command: ['just', 'html-performance-lock-pin-check']
+    inputs: *quality-inputs
+
+  duplication-check:
+    command: ['just', 'duplication-check']
+    inputs: *quality-inputs
+
+  owned-validation-contract-check:
+    command: ['just', 'owned-validation-contract-check']
+    inputs: *quality-inputs
+
+  # hostを必要としない検査を先に完了し、検査toolの準備を許可する。
+  source-static-foundation:
+    command: noop
+    inputs: *quality-inputs
+    deps:
+      - runtime-bundle-check
+      - runtime-asset-check
+      - fmt-check
+      - typecheck
+      - python-lint
+      - python-typecheck
+      - shell-lint
+      - html-performance-lock-pin-check
+      - duplication-check
+      - html-harness-contract-check
+      - owned-validation-contract-check
+      - mathjax-import-pin-preflight
+
+  source-static:
+    command: noop
+    inputs: *quality-inputs
+    deps: ['source-static-foundation', 'biome']
+
+  mathjax-import-pin-preflight:
+    command: ['just', 'mathjax-import-pin-preflight']
+    inputs: *quality-inputs
+
+  # Cargoの共有出力を使う解析も成功してから重い検査を許可する。
+  static:
+    command: noop
+    deps: ['source-static', 'dependency-leak']
+    inputs: *quality-inputs
+
+  unit-test:
+    command: ['just', 'root-test-and-coverage']
+    deps: ['performance-coverage']
+    inputs: *quality-inputs
+    outputs:
+      - 'tmp/quality/standalone-performance-coverage/root.json'
+      - 'tmp/quality/standalone-performance-coverage/root-local-result.json'
+    options:
+      cache: local
+    checks:
+      - check: fingerprint
+        script: just native-coverage-cache-key root
+        hash: stdout
+
+  native-coverage-cache-diagnose:
+    command: ['just', 'native-coverage-cache-diagnose', 'root']
+    inputs: *quality-inputs
+    options:
+      cache: false
+
+  runtime-package-asset-check:
+    command: ['just', 'runtime-package-asset-check']
+    deps: ['runtime-asset-script-test']
+    inputs: *quality-inputs
+
+  runtime-bundle-package-check:
+    command: ['just', 'runtime-bundle-package-check']
+    deps: ['runtime-package-asset-check']
+    inputs: *quality-inputs
+
+  html-runtime-package-check:
+    command: ['just', 'html-runtime-package-check']
+    deps: ['runtime-bundle-package-check']
+    inputs: *quality-inputs
+
+  plantuml-runtime-package-check:
+    command: ['just', 'plantuml-runtime-package-check']
+    deps: ['html-runtime-package-check']
+    inputs: *quality-inputs
+
+  # CargoとPlantUMLの共有出力を触る検査は直接依存で順序を固定する。
+  heavy-native:
+    command: noop
+    deps: ['plantuml-runtime-package-check']
+    inputs: *quality-inputs
+
+  runtime-asset-script-test:
+    command: ['just', 'runtime-asset-script-aggregate-run']
+    deps:
+      - runtime-asset-script-other
+      - runtime-unused-script-regression
+    inputs: *quality-inputs
+
+  runtime-classic-generation-evidence:
+    command: ['just', 'runtime-classic-generation-evidence']
+    deps: ['runtime-asset-script-preflight']
+    inputs: *quality-inputs
+    outputs:
+      - 'tmp/quality/classic-generation-evidence/current.json'
+
+  runtime-asset-script-preflight:
+    command: ['just', 'runtime-asset-script-preflight-run']
+    deps: ['mathjax-owned-evidence']
+    inputs: *quality-inputs
+
+  runtime-asset-script-other:
+    command: ['just', 'runtime-asset-script-other-run']
+    deps: ['runtime-classic-generation-evidence']
+    inputs: *quality-inputs
+
+  runtime-unused-script-regression:
+    command: ['just', 'runtime-unused-script-final-verify-run']
+    # 全プロファイルのロックを取るため、並列の個別検査が終わってから実行する。
+    deps:
+      - runtime-quality-owned-source-inventory-producer
+      - runtime-quality-owned-validation-contract-producer
+    inputs: *quality-inputs
+    options:
+      cache: false
+
+  runtime-script-cas-diagnostic:
+    command: ['just', 'runtime-script-cas-diagnostic-run']
+    deps: ['runtime-unused-script-regression']
+    inputs: *quality-inputs
+    options:
+      cache: false
+
+  runtime-unused-fragment-loader-producer:
+    command: ['just', 'runtime-unused-script-verify-run', 'runtime-unused-fragment-loader']
+    deps: ['runtime-classic-generation-evidence']
+    inputs: *quality-inputs
+    outputs:
+      - 'tmp/quality/runtime-script-results/runtime-unused-fragment-loader.json'
+      - 'tmp/quality/runtime-script-results/runtime-unused-fragment-loader-current-group-001.xml'
+    options:
+      cache: local
+    checks:
+      - check: fingerprint
+        script: just runtime-unused-script-cache-key runtime-unused-fragment-loader
+        hash: stdout
+
+  runtime-unused-bundle-definitions-producer:
+    command: ['just', 'runtime-unused-script-verify-run', 'runtime-unused-bundle-definitions']
+    deps: ['runtime-unused-fragment-loader-producer']
+    inputs: *quality-inputs
+    outputs:
+      - 'tmp/quality/runtime-script-results/runtime-unused-bundle-definitions.json'
+      - 'tmp/quality/runtime-script-results/runtime-unused-bundle-definitions-current-group-001.xml'
+    options:
+      cache: local
+    checks:
+      - check: fingerprint
+        script: just runtime-unused-script-cache-key runtime-unused-bundle-definitions
+        hash: stdout
+
+  runtime-unused-check-producer:
+    command: ['just', 'runtime-unused-script-verify-run', 'runtime-unused-check']
+    deps: ['runtime-unused-bundle-definitions-producer']
+    inputs: *quality-inputs
+    outputs:
+      - 'tmp/quality/runtime-script-results/runtime-unused-check.json'
+      - 'tmp/quality/runtime-script-results/runtime-unused-check-current-group-001.xml'
+    options:
+      cache: local
+    checks:
+      - check: fingerprint
+        script: just runtime-unused-script-cache-key runtime-unused-check
+        hash: stdout
+
+  runtime-unused-tool-fingerprint-producer:
+    command: ['just', 'runtime-unused-script-verify-run', 'runtime-unused-tool-fingerprint']
+    deps: ['runtime-unused-check-producer']
+    inputs: *quality-inputs
+    outputs:
+      - 'tmp/quality/runtime-script-results/runtime-unused-tool-fingerprint.json'
+      - 'tmp/quality/runtime-script-results/runtime-unused-tool-fingerprint-current-group-001.xml'
+    options:
+      cache: local
+    checks:
+      - check: fingerprint
+        script: just runtime-unused-script-cache-key runtime-unused-tool-fingerprint
+        hash: stdout
+
+  runtime-unused-mathjax-producer:
+    command: ['just', 'runtime-unused-script-verify-run', 'runtime-unused-mathjax']
+    deps: ['runtime-unused-tool-fingerprint-producer']
+    inputs: *quality-inputs
+    outputs:
+      - 'tmp/quality/runtime-script-results/runtime-unused-mathjax.json'
+      - 'tmp/quality/runtime-script-results/runtime-unused-mathjax-current-group-001.xml'
+    options:
+      cache: local
+    checks:
+      - check: fingerprint
+        script: just runtime-unused-script-cache-key runtime-unused-mathjax
+        hash: stdout
+
+  runtime-unused-native-width-producer:
+    command: ['just', 'runtime-unused-script-verify-run', 'runtime-unused-native-width']
+    deps: ['runtime-unused-mathjax-producer']
+    inputs: *quality-inputs
+    outputs:
+      - 'tmp/quality/runtime-script-results/runtime-unused-native-width.json'
+      - 'tmp/quality/runtime-script-results/runtime-unused-native-width-current-group-001.xml'
+    options:
+      cache: local
+    checks:
+      - check: fingerprint
+        script: just runtime-unused-script-cache-key runtime-unused-native-width
+        hash: stdout
+
+  runtime-unused-rust-classic-producer:
+    command: ['just', 'runtime-unused-script-verify-run', 'runtime-unused-rust-classic']
+    deps: ['runtime-unused-native-width-producer']
+    inputs: *quality-inputs
+    outputs:
+      - 'tmp/quality/runtime-script-results/runtime-unused-rust-classic.json'
+      - 'tmp/quality/runtime-script-results/runtime-unused-rust-classic-current-group-001.xml'
+    options:
+      cache: local
+    checks:
+      - check: fingerprint
+        script: just runtime-unused-script-cache-key runtime-unused-rust-classic
+        hash: stdout
+
+  runtime-quality-owned-source-inventory-producer:
+    command: ['just', 'runtime-unused-script-verify-run', 'runtime-quality-owned-source-inventory']
+    deps: ['runtime-classic-generation-evidence']
+    inputs: *quality-inputs
+    outputs:
+      - 'tmp/quality/runtime-script-results/runtime-quality-owned-source-inventory.json'
+      - 'tmp/quality/runtime-script-results/runtime-quality-owned-source-inventory-current-group-001.xml'
+    options:
+      cache: local
+    checks:
+      - check: fingerprint
+        script: just runtime-unused-script-cache-key runtime-quality-owned-source-inventory
+        hash: stdout
+
+  runtime-quality-owned-validation-contract-producer:
+    command: ['just', 'runtime-unused-script-verify-run', 'runtime-quality-owned-validation-contract']
+    deps: ['runtime-classic-generation-evidence']
+    inputs: *quality-inputs
+    outputs:
+      - 'tmp/quality/runtime-script-results/runtime-quality-owned-validation-contract.json'
+      - 'tmp/quality/runtime-script-results/runtime-quality-owned-validation-contract-current-group-001.xml'
+    options:
+      cache: local
+    checks:
+      - check: fingerprint
+        script: just runtime-unused-script-cache-key runtime-quality-owned-validation-contract
+        hash: stdout
+
+  rust-facts-host-prebuild:
+    command: ['just', 'rust-facts-host-prebuild']
+    deps: ['capacity-admission']
+    inputs: *quality-inputs
+
+  capacity-admission:
+    command: ['just', 'capacity-admission']
+    deps: ['source-static-foundation']
+    inputs: *quality-inputs
+
+  mathjax-owned-evidence:
+    command: ['just', 'mathjax-owned-evidence']
+    deps: ['static', 'rust-facts-host-prebuild']
+    inputs: *quality-inputs
+
+  automation-contract-test:
+    command: ['just', 'automation-contract-test']
+    deps: ['static']
+    inputs: *quality-inputs
+
+  build-capacity-check:
+    command: ['just', 'build-capacity-check']
+    deps: ['static']
+    inputs: *quality-inputs
+
+  html-harness-contract-check:
+    command: ['just', 'html-harness-contract-check']
+    inputs: *quality-inputs
+
+  check:
+    command: noop
+    inputs: *quality-inputs
+    deps:
+      - heavy-native
+      - runtime-asset-script-test
+      - automation-contract-test
+      - build-capacity-check
+
+  # WHY: producerごとの出力だけ再利用し、合算の受入検証は必ず実行する。
+  performance-coverage:
+    command: ['just', 'performance-harness-coverage']
+    deps: ['heavy-native', 'check']
+    inputs: *quality-inputs
+    outputs:
+      - 'tmp/quality/standalone-performance-coverage/baseline.json'
+      - 'tmp/quality/standalone-performance-coverage/candidate.json'
+      - 'tmp/quality/standalone-performance-coverage/performance-local-result.json'
+    options:
+      cache: local
+    checks:
+      - check: fingerprint
+        script: just native-coverage-cache-key performance
+        hash: stdout
+
+  performance-coverage-acceptance:
+    command: ['just', 'performance-coverage-result-check']
+    deps: ['performance-coverage']
+    inputs: *quality-inputs
+
+  coverage:
+    command: ['just', 'coverage-result-check']
+    deps: ['unit-test']
+    inputs: *quality-inputs

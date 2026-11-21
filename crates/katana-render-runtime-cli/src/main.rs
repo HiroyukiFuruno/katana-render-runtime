@@ -1,3 +1,4 @@
+mod canonical_path;
 mod commands;
 mod diagram_cmd;
 mod diagram_source;

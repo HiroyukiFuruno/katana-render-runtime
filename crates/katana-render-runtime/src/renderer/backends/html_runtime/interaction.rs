@@ -1,5 +1,6 @@
 use super::script::{HtmlTryCatchScope, evaluate_value};
 use super::types::HtmlRuntimeError;
+use crate::private_v8 as v8;
 
 pub(super) fn event<'scope>(
     scope: &mut HtmlTryCatchScope<'scope, '_, '_, '_>,

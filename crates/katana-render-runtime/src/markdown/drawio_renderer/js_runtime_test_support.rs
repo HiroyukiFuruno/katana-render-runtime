@@ -1,186 +1,185 @@
-pub(super) const OFFICIAL_REFERENCE_VIEWPORT_BUNDLE_HOOK: &str = r#"  svg.setAttribute("viewBox", "0 0 1600 10");
-  _container.appendChild(svg);
-  svg.setAttribute("data-viewport", `${window.innerWidth}x${window.innerHeight}`);
-  svg.setAttribute("data-initial-container", initialContainer);
-  svg.setAttribute("data-constrained-container", `${_container.clientWidth}x${_container.clientHeight}`);
-  _container.style.width = "1126px";
-  _container.style.height = "665px";
-  _container.style.minWidth = "100%";
-  svg.setAttribute("data-min-width-container", `${_container.clientWidth}x${_container.clientHeight}`);
-  _container.style.minWidth = "";
-  svg.setAttribute("data-explicit-container", `${_container.clientWidth}x${_container.clientHeight}`);"#;
+#[path = "js_runtime_bundle_fixture_data.rs"]
+mod fixture_data;
 
-pub(super) const HTML_WRAP_BUNDLE_HOOK: &str = r#"  svg.appendChild(text);
-  const foreignObject = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
-  const frame = document.createElement("div");
-  frame.setAttribute("style", "display: flex; width: 198px; height: 1px;");
-  const box = document.createElement("div");
-  box.setAttribute("style", "box-sizing: border-box; font-size: 0;");
-  const label = document.createElement("div");
-  label.setAttribute(
-    "style",
-    "display: inline-block; font-size: 12px; font-family: Helvetica; line-height: 1.2; white-space: normal; word-wrap: normal;",
-  );
-  label.textContent = "Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.";
-  box.appendChild(label);
-  frame.appendChild(box);
-  foreignObject.appendChild(frame);
-  svg.appendChild(foreignObject);
-  svg.setAttribute(
-    "data-wrapped-client",
-    `${box.clientWidth}x${box.clientHeight}:${label.clientWidth}x${label.clientHeight}`,
-  );"#;
+use fixture_data::{
+    FAKE_BUNDLE_BODY, FAKE_BUNDLE_EDITOR_BODY, FAKE_BUNDLE_EDITOR_PREFIX, FAKE_BUNDLE_FOOTER,
+    FAKE_BUNDLE_HEADER_HEIGHT, FAKE_BUNDLE_HEADER_MIDDLE, FAKE_BUNDLE_HEADER_PREFIX,
+    FAKE_BUNDLE_VAR_EDITOR_PREFIX, FAKE_BUNDLE_VIEWBOX_PREFIX, FAKE_BUNDLE_VIEWBOX_SUFFIX,
+    FAKE_BUNDLE_WITH_HTML_COMMENT_LABEL_BODY, FAKE_BUNDLE_WITH_LIGHT_DARK_SVG_PAINT_BODY,
+    FAKE_SHADOW_BODY,
+};
+
+pub(super) const OFFICIAL_REFERENCE_VIEWPORT_BUNDLE_HOOK: &str =
+    fixture_data::OFFICIAL_REFERENCE_VIEWPORT_BUNDLE_HOOK;
+pub(super) const HTML_WRAP_BUNDLE_HOOK: &str = fixture_data::HTML_WRAP_BUNDLE_HOOK;
+pub(super) const FAKE_BUNDLE_WITH_FOREIGN_OBJECT: &str =
+    fixture_data::FAKE_BUNDLE_WITH_FOREIGN_OBJECT;
 
 pub(super) fn temp_runtime_path(prefix: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("{prefix}-{}.js", std::process::id()))
 }
 
-pub(super) fn fake_bundle() -> &'static str {
-    FAKE_BUNDLE
+pub(super) fn assert_render_contains(rendered: &Result<String, String>, marker: &str) {
+    assert!(
+        rendered.as_ref().is_ok_and(|svg| svg.contains(marker)),
+        "{rendered:?}"
+    );
 }
 
-const FAKE_BUNDLE: &str = r#"
-function Graph() {}
-const Editor = {
-  convertHtmlToText(value) {
-    return String(value);
-  },
-};
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "20");
-  svg.setAttribute("height", "10");
-  svg.setAttribute("viewBox", "0 0 20 10");
-  const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-  text.textContent = "drawio";
-  svg.appendChild(text);
-  callback({
-    graph: {
-      getSvg() {
-        return svg;
-      },
-    },
-  });
-};
-"#;
+pub(super) fn assert_render_not_contains(rendered: &Result<String, String>, marker: &str) {
+    assert!(
+        rendered.as_ref().is_ok_and(|svg| !svg.contains(marker)),
+        "{rendered:?}"
+    );
+}
+
+pub(super) fn fake_bundle() -> &'static str {
+    static BUNDLE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BUNDLE
+        .get_or_init(|| fake_html_label_bundle("20", "10", FAKE_BUNDLE_BODY, ""))
+        .as_str()
+}
+
+pub(super) fn fake_html_label_bundle(
+    width: &str,
+    height: &str,
+    svg_body: &str,
+    after_callback: &str,
+) -> String {
+    fake_html_bundle(
+        (width, width),
+        (height, height),
+        "",
+        FAKE_BUNDLE_EDITOR_PREFIX,
+        FAKE_BUNDLE_EDITOR_BODY,
+        svg_body,
+        after_callback,
+    )
+}
+
+pub(super) fn fake_color_bundle(mx_utils: &str, svg_body: &str) -> String {
+    fake_html_bundle(
+        ("80", "80"),
+        ("30", "30"),
+        mx_utils,
+        FAKE_BUNDLE_EDITOR_PREFIX,
+        FAKE_BUNDLE_EDITOR_BODY,
+        svg_body,
+        "",
+    )
+}
+
+pub(super) fn fake_html_text_color_bundle(mx_utils: &str, svg_body: &str) -> String {
+    fake_html_bundle(
+        ("80", "80"),
+        ("30", "30"),
+        mx_utils,
+        FAKE_BUNDLE_VAR_EDITOR_PREFIX,
+        FAKE_BUNDLE_EDITOR_BODY,
+        svg_body,
+        "",
+    )
+}
+
+pub(super) fn fake_color_shape_group(fill: &str) -> String {
+    [
+        r#"  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  group.setAttribute("data-cell-id", "cell");
+  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  rect.setAttribute("x", "0");
+  rect.setAttribute("y", "0");
+  rect.setAttribute("width", "80");
+  rect.setAttribute("height", "30");
+  rect.setAttribute("fill", ""#,
+        fill,
+        r#"");
+  group.appendChild(rect);
+  svg.appendChild(group);
+"#,
+    ]
+    .concat()
+}
+
+pub(super) fn fake_pixel_svg_bundle(
+    width: &str,
+    height: &str,
+    svg_body: &str,
+    after_callback: &str,
+) -> String {
+    let pixel_width = format!("{width}px");
+    let pixel_height = format!("{height}px");
+    fake_html_bundle(
+        (&pixel_width, width),
+        (&pixel_height, height),
+        "",
+        FAKE_BUNDLE_EDITOR_PREFIX,
+        FAKE_BUNDLE_EDITOR_BODY,
+        svg_body,
+        after_callback,
+    )
+}
+
+fn fake_html_bundle(
+    (width, viewbox_width): (&str, &str),
+    (height, viewbox_height): (&str, &str),
+    mx_utils: &str,
+    editor_prefix: &str,
+    editor_body: &str,
+    svg_body: &str,
+    after_callback: &str,
+) -> String {
+    [
+        FAKE_BUNDLE_HEADER_PREFIX,
+        mx_utils,
+        editor_prefix,
+        editor_body,
+        FAKE_BUNDLE_HEADER_MIDDLE,
+        width,
+        FAKE_BUNDLE_HEADER_HEIGHT,
+        height,
+        FAKE_BUNDLE_VIEWBOX_PREFIX,
+        "0 0 ",
+        viewbox_width,
+        " ",
+        viewbox_height,
+        FAKE_BUNDLE_VIEWBOX_SUFFIX,
+        svg_body,
+        FAKE_BUNDLE_FOOTER,
+        after_callback,
+    ]
+    .concat()
+}
+
+pub(super) fn fake_shadow_bundle() -> String {
+    fake_html_label_bundle("20", "10", FAKE_SHADOW_BODY, "")
+}
 
 pub(super) fn fake_bundle_with_foreign_object() -> &'static str {
     FAKE_BUNDLE_WITH_FOREIGN_OBJECT
 }
 
 pub(super) fn fake_bundle_with_html_comment_label() -> &'static str {
-    FAKE_BUNDLE_WITH_HTML_COMMENT_LABEL
+    static BUNDLE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BUNDLE
+        .get_or_init(|| {
+            fake_html_bundle(
+                ("20", "20"),
+                ("10", "10"),
+                "",
+                FAKE_BUNDLE_EDITOR_PREFIX,
+                "    return katanaDrawioHtmlLabelText(value);\n",
+                FAKE_BUNDLE_WITH_HTML_COMMENT_LABEL_BODY,
+                "",
+            )
+        })
+        .as_str()
 }
-
-const FAKE_BUNDLE_WITH_HTML_COMMENT_LABEL: &str = r#"
-function Graph() {}
-const Editor = {
-  convertHtmlToText(value) {
-    return katanaDrawioHtmlLabelText(value);
-  },
-};
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "20");
-  svg.setAttribute("height", "10");
-  svg.setAttribute("viewBox", "0 0 20 10");
-  const foreignObject = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
-  foreignObject.appendChild(document.createComment("hidden label"));
-  const commentSwitch = document.createElementNS("http://www.w3.org/2000/svg", "switch");
-  const artifactForeignObject = document.createElementNS(
-    "http://www.w3.org/2000/svg",
-    "foreignObject",
-  );
-  artifactForeignObject.textContent = "!-->";
-  const artifactText = document.createElementNS("http://www.w3.org/2000/svg", "text");
-  artifactText.textContent = "!-->";
-  commentSwitch.appendChild(artifactForeignObject);
-  commentSwitch.appendChild(artifactText);
-  svg.appendChild(foreignObject);
-  svg.appendChild(commentSwitch);
-  callback({
-    graph: {
-      getSvg() {
-        return svg;
-      },
-    },
-  });
-};
-"#;
-
-pub(super) const FAKE_BUNDLE_WITH_FOREIGN_OBJECT: &str = r#"
-function Graph() {}
-const Editor = {
-  convertHtmlToText(value) {
-    return String(value);
-  },
-};
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "20");
-  svg.setAttribute("height", "10");
-  svg.setAttribute("viewBox", "0 0 20 10");
-  const foreignObject = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
-  foreignObject.setAttribute("width", "100%");
-  foreignObject.setAttribute("height", "100%");
-  const div = document.createElement("div");
-  div.setAttribute("style", "color: light-dark(#000000, #ffffff)");
-  div.textContent = "html label";
-  div.appendChild(document.createElement("br"));
-  div.appendChild(document.createElement("hr"));
-  foreignObject.appendChild(div);
-  svg.appendChild(foreignObject);
-  callback({
-    graph: {
-      getSvg() {
-        return svg;
-      },
-    },
-  });
-};
-"#;
 
 pub(super) fn fake_bundle_with_light_dark_svg_paint() -> &'static str {
-    FAKE_BUNDLE_WITH_LIGHT_DARK_SVG_PAINT
+    static BUNDLE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BUNDLE
+        .get_or_init(|| {
+            fake_html_label_bundle("20", "10", FAKE_BUNDLE_WITH_LIGHT_DARK_SVG_PAINT_BODY, "")
+        })
+        .as_str()
 }
-
-const FAKE_BUNDLE_WITH_LIGHT_DARK_SVG_PAINT: &str = r#"
-function Graph() {}
-const Editor = {
-  convertHtmlToText(value) {
-    return String(value);
-  },
-};
-function GraphViewer() {}
-GraphViewer.createViewerForElement = function createViewerForElement(_container, callback) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("width", "20");
-  svg.setAttribute("height", "10");
-  svg.setAttribute("viewBox", "0 0 20 10");
-  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  rect.setAttribute("width", "20");
-  rect.setAttribute("height", "10");
-  rect.setAttribute(
-    "style",
-    "fill: light-dark(rgb(255, 255, 255), rgb(18, 18, 18)); stroke: light-dark(#000000, #ffffff)",
-  );
-  svg.appendChild(rect);
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  path.setAttribute("d", "M 0 0 L 20 10");
-  path.setAttribute(
-    "style",
-    "fill: light-dark(white, #000000); stroke: light-dark(black, #000000)",
-  );
-  svg.appendChild(path);
-  callback({
-    graph: {
-      getSvg() {
-        return svg;
-      },
-    },
-  });
-};
-"#;

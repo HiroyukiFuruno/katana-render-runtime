@@ -1,3 +1,22 @@
+macro_rules! create_rect_group_js {
+    () => {
+        r#"function createRectGroup(id, x, y, width, height) {
+  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  group.setAttribute("data-cell-id", id);
+  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  rect.setAttribute("x", String(x));
+  rect.setAttribute("y", String(y));
+  rect.setAttribute("width", String(width));
+  rect.setAttribute("height", String(height));
+  group.appendChild(rect);
+  return group;
+}
+"#
+    };
+}
+
+pub(super) use create_rect_group_js;
+
 pub(super) fn temp_runtime_path(prefix: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("{prefix}-{}.js", std::process::id()))
 }
@@ -63,7 +82,8 @@ GraphViewer.createViewerForElement = function createViewerForElement(_container,
 };
 "#;
 
-pub(super) const FAKE_BUNDLE_WITH_LEFT_TEXT_OVERFLOW: &str = r#"
+pub(super) const FAKE_BUNDLE_WITH_LEFT_TEXT_OVERFLOW: &str = concat!(
+    r#"
 function Graph() {}
 const Editor = {
   convertHtmlToText(value) {
@@ -93,18 +113,10 @@ GraphViewer.createViewerForElement = function createViewerForElement(_container,
     },
   });
 };
-function createRectGroup(id, x, y, width, height) {
-  const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-  group.setAttribute("data-cell-id", id);
-  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  rect.setAttribute("x", String(x));
-  rect.setAttribute("y", String(y));
-  rect.setAttribute("width", String(width));
-  rect.setAttribute("height", String(height));
-  group.appendChild(rect);
-  return group;
-}
-"#;
+"#,
+    create_rect_group_js!(),
+    r#""#
+);
 
 pub(super) const FAKE_BUNDLE_WITH_WIDE_WHITE_RECTANGLES: &str = r##"
 function Graph() {}

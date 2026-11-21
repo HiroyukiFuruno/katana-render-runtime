@@ -80,7 +80,7 @@ function katanaRequiredDrawioViewer(state, container) {
 }
 
 function katanaDrawioViewerError(container) {
-  const message = container.innerText || "Draw.io viewer did not produce SVG";
+  const message = katanaInnerText(container) || "Draw.io viewer did not produce SVG";
   return `Draw.io viewer failed: ${message}`;
 }
 

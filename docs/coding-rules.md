@@ -178,7 +178,7 @@ fn process(&self, path: &Path) -> Result<Output, MyError> {
 
 ### 5.1 Prohibited Types
 
-The use of the following types equivalent to TypeScript's `any` / `unknown` / `Record<string, unknown>` is prohibited:
+Unrestricted TypeScript `any`, `as any`, and lint suppressions are prohibited. `unknown` and `Record<string, unknown>` are permitted at external-input, JSON, and compiler-AST boundaries when runtime checks narrow values before internal use; prefer concrete types for internal data. The Rust equivalents below remain prohibited except where an external boundary contract requires them:
 
 | Prohibited | Reason | Alternative |
 |------|------|------|

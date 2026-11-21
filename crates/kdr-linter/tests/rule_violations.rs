@@ -3,7 +3,10 @@ use katana_ast_lint::config::KalConfig;
 use kdr_linter::{KdrLinter, ViolationReport};
 use std::path::{Path, PathBuf};
 
-type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+#[path = "support/files.rs"]
+mod fixture_files;
+
+use fixture_files::TestResult;
 
 #[test]
 fn reports_kal_shared_rule_families() -> TestResult<()> {
@@ -228,15 +231,9 @@ clap = "4"
 }
 
 fn write_file(root: &Path, relative: &str, content: &str) -> TestResult<()> {
-    let path = root.join(relative);
-    let Some(parent) = path.parent() else {
-        return Err(Box::new(std::io::Error::other("path has no parent")));
-    };
-    std::fs::create_dir_all(parent)?;
-    std::fs::write(path, content)?;
-    Ok(())
+    fixture_files::write_file(root, relative, content).map(|_| ())
 }
 
 fn temp_root(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("kdr-linter-{name}-{}", std::process::id()))
+    fixture_files::temp_root("kdr-linter", name)
 }

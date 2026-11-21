@@ -6,15 +6,18 @@ use crate::markdown::diagram_runtime::DiagramRuntimeMode;
 use crate::markdown::runtime_assets::{
     MERMAID_DOWNLOAD_URL, MERMAID_ZENUML_JS_CHECKSUM, MERMAID_ZENUML_JS_VERSION,
 };
+use crate::markdown::runtime_resource_loader::{
+    BundledResource, LoadedResource, RuntimeResourceLoader as runtime_resource_loader,
+};
 use crate::markdown::{DiagramBlock, DiagramResult};
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
 };
 
-static MERMAID_SVG_RENDER_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+#[path = "render_instance.rs"]
+mod render_instance;
 const MERMAID_RENDER_CACHE_SCHEMA: &str = "mermaid-render-theme-v128-zenuml-mermaid-plugin";
 const MERMAID_RUNTIME_BUNDLE_CHECKSUMS: &str =
     include_str!("../diagram_runtime/generated/runtime-bundles.sha256");
@@ -27,11 +30,20 @@ impl MermaidRenderOps {
         mermaid_js: &Path,
         preset: &DiagramColorPreset,
     ) -> DiagramResult {
+        Self::render_mermaid_with_origin(block, mermaid_js, preset, false)
+    }
+
+    pub(crate) fn render_mermaid_with_origin(
+        block: &DiagramBlock,
+        mermaid_js: &Path,
+        preset: &DiagramColorPreset,
+        bundled: bool,
+    ) -> DiagramResult {
         if block.source.trim().is_empty() {
             return DiagramResult::Ok(String::new());
         }
 
-        if !mermaid_js.exists() {
+        if !bundled && !mermaid_js.exists() {
             return DiagramResult::NotInstalled {
                 kind: "Mermaid".to_string(),
                 download_url: MERMAID_DOWNLOAD_URL.to_string(),
@@ -39,11 +51,39 @@ impl MermaidRenderOps {
             };
         }
 
-        let mode = DiagramRuntimeMode::current();
-        let cache_file = Self::cache_file_path(&block.source, mermaid_js, preset, mode);
-        Self::render_mermaid_with_cache_file(block, mermaid_js, preset, &cache_file)
+        let bundle = match runtime_resource_loader::load(
+            mermaid_js,
+            bundled.then_some(BundledResource::Mermaid),
+        ) {
+            Ok(bundle) => bundle,
+            Err(error) => {
+                return Self::error(block, format!("Failed to read Mermaid.js bundle: {error}"));
+            }
+        };
+        Self::render_mermaid_with_loaded(block, mermaid_js, preset, &bundle)
     }
 
+    pub(crate) fn render_mermaid_with_loaded(
+        block: &DiagramBlock,
+        mermaid_js: &Path,
+        preset: &DiagramColorPreset,
+        bundle: &LoadedResource,
+    ) -> DiagramResult {
+        if block.source.trim().is_empty() {
+            return DiagramResult::Ok(String::new());
+        }
+        let mode = DiagramRuntimeMode::current();
+        let mut cache_file = Self::cache_file_path(&block.source, mermaid_js, preset, mode);
+        if let Some(digest) = bundle.digest() {
+            cache_file.set_extension(format!("{digest}.{}", mode.mermaid_cache_extension()));
+        }
+        if let Err(error) = MermaidSvgCache::ensure_parent(&cache_file) {
+            return Self::error(block, error);
+        }
+        Self::render_svg_with_bundle(block, bundle.text(), preset, &cache_file)
+    }
+
+    #[cfg(test)]
     fn render_mermaid_with_cache_file(
         block: &DiagramBlock,
         mermaid_js: &Path,
@@ -64,6 +104,7 @@ impl MermaidRenderOps {
         DiagramRuntimeMode::current().mermaid_cache_profile()
     }
 
+    #[cfg(test)]
     fn render_svg(
         block: &DiagramBlock,
         mermaid_js: &Path,
@@ -78,6 +119,23 @@ impl MermaidRenderOps {
             }
         }
         match MermaidJsRuntimeOps::render(&block.source, mermaid_js, preset) {
+            Ok(svg) => Self::write_cached_svg(block, cache_file, svg),
+            Err(error) => Self::error(block, error),
+        }
+    }
+
+    fn render_svg_with_bundle(
+        block: &DiagramBlock,
+        bundle: &str,
+        preset: &DiagramColorPreset,
+        cache_file: &Path,
+    ) -> DiagramResult {
+        match MermaidSvgCache::read(cache_file) {
+            Ok(Some(svg)) => return DiagramResult::Ok(Self::unique_svg_instance(svg)),
+            Ok(None) => {}
+            Err(error) => return Self::error(block, error),
+        }
+        match MermaidJsRuntimeOps::render_bundle(&block.source, bundle, preset) {
             Ok(svg) => Self::write_cached_svg(block, cache_file, svg),
             Err(error) => Self::error(block, error),
         }
@@ -111,13 +169,7 @@ impl MermaidRenderOps {
         zenuml_plugin_key.hash(&mut hasher);
         mermaid_js.hash(&mut hasher);
         mode.mermaid_cache_profile().hash(&mut hasher);
-        source.hash(&mut hasher);
-        preset.mermaid_theme.hash(&mut hasher);
-        preset.background.hash(&mut hasher);
-        preset.text.hash(&mut hasher);
-        preset.fill.hash(&mut hasher);
-        preset.stroke.hash(&mut hasher);
-        preset.arrow.hash(&mut hasher);
+        super::hash_mermaid_source_and_preset(&mut hasher, source, preset);
         preset.dark_mode.hash(&mut hasher);
         std::env::temp_dir()
             .join("katana_mermaid_cache")
@@ -140,24 +192,6 @@ impl MermaidRenderOps {
             source: block.source.clone(),
             error,
         }
-    }
-
-    fn unique_svg_instance(svg: String) -> String {
-        let Some(root_id) = Self::root_svg_id(&svg) else {
-            return svg;
-        };
-        let sequence = MERMAID_SVG_RENDER_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let unique_id = format!("{root_id}-{sequence:016x}");
-        svg.replace(&root_id, &unique_id)
-    }
-
-    fn root_svg_id(svg: &str) -> Option<String> {
-        let svg_start = svg.find("<svg")?;
-        let open_end = svg_start + svg[svg_start..].find('>')?;
-        let marker = r#"id="katana-mermaid-svg-"#;
-        let start = svg_start + svg[svg_start..open_end].find(marker)? + r#"id=""#.len();
-        let end = start + svg[start..open_end].find('"')?;
-        Some(svg[start..end].to_string())
     }
 }
 

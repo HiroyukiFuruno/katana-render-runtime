@@ -34,10 +34,11 @@ impl HtmlLayoutRenderer {
 
     fn paint_summary_marker(&mut self, layout: ControlLayout<'_>, open: bool) -> f32 {
         let marker_x = layout.x + layout.style.padding_left;
+        let marker_view_x = marker_x - self.scroll_x;
         let marker_y = layout.y + (layout.height - SUMMARY_MARKER_SIZE) / 2.0 - self.scroll_y;
         self.svg.push_str(&format!(
             r#"<path d="{}" fill="{}"/>"#,
-            disclosure_marker_path(marker_x, marker_y, open),
+            disclosure_marker_path(marker_view_x, marker_y, open),
             escape_xml(&layout.style.color),
         ));
         marker_x

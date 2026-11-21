@@ -9,13 +9,39 @@ from pathlib import Path
 import subprocess
 import sys
 import time
-from typing import Protocol
+from collections.abc import Callable
+from typing import Protocol, TextIO, runtime_checkable
 
 
 LAUNCHER_ARGUMENT = "--local-review-launcher"
 JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
 JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION = 1
 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+
+
+@runtime_checkable
+class _KernelFunction(Protocol):
+    argtypes: list[type[object]] | None
+    restype: type[object] | None
+
+    def __call__(self, *arguments: object) -> object: ...
+
+
+@runtime_checkable
+class _Kernel32(Protocol):
+    CreateJobObjectW: _KernelFunction
+    SetInformationJobObject: _KernelFunction
+    AssignProcessToJobObject: _KernelFunction
+    TerminateJobObject: _KernelFunction
+    QueryInformationJobObject: _KernelFunction
+    CloseHandle: _KernelFunction
+
+
+@runtime_checkable
+class _WindowsCtypes(Protocol):
+    def WinDLL(self, name: str, *, use_last_error: bool) -> object: ...
+    def WinError(self, code: int) -> object: ...
+    def get_last_error(self) -> object: ...
 
 
 class _BasicLimitInformation(ctypes.Structure):
@@ -67,7 +93,25 @@ class _JobApi:
     def __init__(self) -> None:
         if os.name != "nt":
             raise OSError("Windows Job Objects are unavailable")
-        self.kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        windows_ctypes: object = ctypes
+        if not isinstance(windows_ctypes, _WindowsCtypes) or not all((
+            callable(windows_ctypes.WinDLL), callable(windows_ctypes.WinError),
+            callable(windows_ctypes.get_last_error),
+        )):
+            raise OSError("Windows ctypes API is unavailable")
+        self.windows_ctypes = windows_ctypes
+        kernel32 = windows_ctypes.WinDLL("kernel32", use_last_error=True)
+        # ctypesはAPIを遅延生成するため、静的なProtocol照合より先に実関数を取得する。
+        for name in (
+            "CreateJobObjectW", "SetInformationJobObject", "AssignProcessToJobObject",
+            "TerminateJobObject", "QueryInformationJobObject", "CloseHandle",
+        ):
+            function: object = getattr(kernel32, name, None)
+            if not isinstance(function, _KernelFunction) or not callable(function):
+                raise TypeError("invalid kernel32 function")
+        if not isinstance(kernel32, _Kernel32):
+            raise TypeError("invalid kernel32 Job Object API")
+        self.kernel32 = kernel32
         self.kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
         self.kernel32.CreateJobObjectW.restype = ctypes.c_void_p
         self.kernel32.SetInformationJobObject.argtypes = [
@@ -85,9 +129,12 @@ class _JobApi:
         self.kernel32.QueryInformationJobObject.restype = ctypes.c_int
         self.kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
         self.kernel32.CloseHandle.restype = ctypes.c_int
-        self.handle = self.kernel32.CreateJobObjectW(None, None)
+        handle = self.kernel32.CreateJobObjectW(None, None)
+        if handle is not None and type(handle) is not int:
+            raise TypeError("invalid Job Object handle")
+        self.handle: int | None = handle
         if not self.handle:
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise self.windows_error()
         limits = _ExtendedLimitInformation()
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
         if not self.kernel32.SetInformationJobObject(
@@ -96,17 +143,28 @@ class _JobApi:
             ctypes.byref(limits),
             ctypes.sizeof(limits),
         ):
-            error = ctypes.WinError(ctypes.get_last_error())
-            self.close()
+            try:
+                error = self.windows_error()
+            finally:
+                self.close()
             raise error
 
-    def assign(self, process_handle: int) -> None:
+    def windows_error(self) -> OSError:
+        code = self.windows_ctypes.get_last_error()
+        if type(code) is not int:
+            raise TypeError("invalid Windows last-error code")
+        error = self.windows_ctypes.WinError(code)
+        if not isinstance(error, OSError):
+            raise TypeError("invalid Windows error")
+        return error
+
+    def assign(self, process_handle: object) -> None:
         if not self.kernel32.AssignProcessToJobObject(self.handle, process_handle):
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise self.windows_error()
 
     def terminate(self) -> None:
         if not self.kernel32.TerminateJobObject(self.handle, 1):
-            raise ctypes.WinError(ctypes.get_last_error())
+            raise self.windows_error()
 
     def wait_empty(self) -> None:
         while True:
@@ -118,7 +176,7 @@ class _JobApi:
                 ctypes.sizeof(info),
                 None,
             ):
-                raise ctypes.WinError(ctypes.get_last_error())
+                raise self.windows_error()
             if info.ActiveProcesses == 0:
                 return
             time.sleep(0.01)
@@ -127,15 +185,41 @@ class _JobApi:
         if self.handle:
             handle = self.handle
             if not self.kernel32.CloseHandle(handle):
-                raise ctypes.WinError(ctypes.get_last_error())
+                raise self.windows_error()
             self.handle = None
 
 
 class _Job(Protocol):
-    def assign(self, process_handle: int) -> None: ...
+    def assign(self, process_handle: object) -> None: ...
     def terminate(self) -> None: ...
     def wait_empty(self) -> None: ...
     def close(self) -> None: ...
+
+
+class _Closable(Protocol):
+    def close(self) -> None: ...
+
+
+class _ProcessHandle(Protocol):
+    def Close(self) -> None: ...
+
+
+@runtime_checkable
+class _ReviewProcess(Protocol):
+    _handle: _ProcessHandle
+    stdin: _Closable
+    returncode: object
+
+    def communicate(self, input: str | None = None, timeout: float | None = None) -> object: ...
+    def poll(self) -> object: ...
+    def kill(self) -> None: ...
+
+
+class _PopenFactory(Protocol):
+    def __call__(
+        self, args: list[str], *, cwd: Path, env: dict[str, str], stdin: int,
+        stdout: int, stderr: TextIO, text: bool, encoding: str,
+    ) -> object: ...
 
 
 def _launcher() -> int:
@@ -157,7 +241,8 @@ def _launcher() -> int:
 
 def run_review_process(
     arguments: list[str], root: Path, environment: dict[str, str], prompt: str,
-    diagnostic: Path, timeout: float, *, job_factory=_JobApi, popen_factory=subprocess.Popen,
+    diagnostic: Path, timeout: float, *, job_factory: Callable[[], _Job] = _JobApi,
+    popen_factory: _PopenFactory = subprocess.Popen,
 ) -> int:
     """Job割当より前にレビュー本体を起動しないlauncherを実行する。
 
@@ -169,17 +254,23 @@ def run_review_process(
     assigned = False
     try:
         with diagnostic.open("w") as errors:
-            process = popen_factory(
+            candidate = popen_factory(
                 [sys.executable, str(Path(__file__).resolve()), LAUNCHER_ARGUMENT],
                 cwd=root, env=environment, stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL, stderr=errors, text=True, encoding="utf-8",
             )
+            if not isinstance(candidate, _ReviewProcess):
+                raise TypeError("invalid Windows review launcher process")
+            process = candidate
             job.assign(process._handle)
             assigned = True
             process.communicate(
                 json.dumps({"arguments": arguments, "prompt": prompt}), timeout=timeout
             )
-            return process.returncode
+            returncode = process.returncode
+            if type(returncode) is not int:
+                raise TypeError("invalid Windows review launcher exit code")
+            return returncode
     finally:
         try:
             job.terminate()

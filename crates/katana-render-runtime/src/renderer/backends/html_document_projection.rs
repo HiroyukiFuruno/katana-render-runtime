@@ -1,17 +1,23 @@
 use super::super::html_css::{HtmlAttributes, StaticCss};
-use super::super::html_css_selector::{CssAncestor, CssPseudoElement};
+use super::super::html_css_selector::CssAncestor;
 use super::{HtmlDocument, HtmlDocumentNode};
-use html5ever::Attribute;
 use markup5ever_rcdom::{Handle, NodeData};
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 
+#[path = "html_document_projection_children.rs"]
+mod children;
+#[path = "html_document_projection_elements.rs"]
+mod elements;
 #[path = "html_document_projection_svg.rs"]
 mod embedded_svg;
 #[path = "html_document_projection_generated.rs"]
 mod generated;
+#[path = "html_document_projection_siblings.rs"]
+mod sibling_positions;
+#[path = "html_document_projection_tags.rs"]
+mod tags;
 
-use embedded_svg::embedded_svg_node;
+pub(in crate::renderer::backends) use elements::attributes;
 
 struct InteractiveElementProjection<'a> {
     node: &'a Handle,
@@ -20,7 +26,16 @@ struct InteractiveElementProjection<'a> {
     css: &'a StaticCss,
     ancestors: &'a [CssAncestor],
     sibling_index: usize,
-    hovered_nodes: &'a HashSet<u64>,
+    sibling_type_index: usize,
+    sibling_type_count: usize,
+    state: ProjectionState<'a>,
+}
+
+#[derive(Clone, Copy)]
+struct ProjectionState<'a> {
+    hovered: &'a HashSet<u64>,
+    focused: &'a HashSet<u64>,
+    focus_visible: &'a HashSet<u64>,
 }
 
 impl HtmlDocument {
@@ -51,12 +66,48 @@ impl HtmlDocument {
         viewport_width: f32,
         hovered_nodes: &HashSet<u64>,
     ) -> Vec<HtmlDocumentNode> {
+        self.interactive_nodes_with_styles_at_width_and_state(
+            external_stylesheets,
+            viewport_width,
+            ProjectionState {
+                hovered: hovered_nodes,
+                focused: &HashSet::new(),
+                focus_visible: &HashSet::new(),
+            },
+        )
+    }
+
+    pub(in crate::renderer::backends) fn interactive_nodes_with_styles_at_width_and_focus(
+        &self,
+        external_stylesheets: &HashMap<String, String>,
+        viewport_width: f32,
+        hovered_nodes: &HashSet<u64>,
+        focused_nodes: &HashSet<u64>,
+        focus_visible_nodes: &HashSet<u64>,
+    ) -> Vec<HtmlDocumentNode> {
+        self.interactive_nodes_with_styles_at_width_and_state(
+            external_stylesheets,
+            viewport_width,
+            ProjectionState {
+                hovered: hovered_nodes,
+                focused: focused_nodes,
+                focus_visible: focus_visible_nodes,
+            },
+        )
+    }
+
+    fn interactive_nodes_with_styles_at_width_and_state(
+        &self,
+        external_stylesheets: &HashMap<String, String>,
+        viewport_width: f32,
+        state: ProjectionState<'_>,
+    ) -> Vec<HtmlDocumentNode> {
         let css = StaticCss::for_interactive_document_with_styles_at_width(
             &self.document,
             external_stylesheets,
             viewport_width,
         );
-        self.interactive_children(&self.document, &css, &[], hovered_nodes)
+        self.interactive_children(&self.document, &css, &[], state)
     }
 
     fn interactive_children(
@@ -64,127 +115,148 @@ impl HtmlDocument {
         node: &Handle,
         css: &StaticCss,
         ancestors: &[CssAncestor],
-        hovered_nodes: &HashSet<u64>,
+        state: ProjectionState<'_>,
     ) -> Vec<HtmlDocumentNode> {
-        let mut sibling_index = 0;
-        node.children
-            .borrow()
-            .iter()
-            .filter_map(|child| {
-                if matches!(child.data, NodeData::Element { .. }) {
-                    sibling_index += 1;
-                }
-                self.interactive_node(child, css, ancestors, sibling_index, hovered_nodes)
-            })
-            .collect()
+        elements::project_interactive_children(self, node, css, ancestors, state)
     }
 
-    pub(super) fn interactive_node(
+    fn interactive_node_with_state(
         &self,
         node: &Handle,
         css: &StaticCss,
         ancestors: &[CssAncestor],
-        sibling_index: usize,
-        hovered_nodes: &HashSet<u64>,
+        sibling_positions: (usize, usize, usize),
+        state: ProjectionState<'_>,
     ) -> Option<HtmlDocumentNode> {
         match &node.data {
             NodeData::Text { contents } => {
                 let text = contents.borrow().to_string();
                 (!text.is_empty()).then_some(HtmlDocumentNode::Text(text))
             }
-            NodeData::Element { name, attrs, .. } => InteractiveElementProjection {
-                node,
-                tag: name.local.to_string().to_ascii_lowercase(),
-                source_attributes: attributes(&attrs.borrow()),
-                css,
-                ancestors,
-                sibling_index,
-                hovered_nodes,
+            NodeData::Element { .. } => {
+                self.project_element_node(node, css, ancestors, sibling_positions, state)
             }
-            .project(self),
             NodeData::Document => None,
             _ => None,
         }
     }
-}
 
-impl InteractiveElementProjection<'_> {
-    fn project(self, document: &HtmlDocument) -> Option<HtmlDocumentNode> {
-        if is_non_rendered_tag(&self.tag) {
-            return None;
-        }
-        let node_id = document
-            .node_ids
-            .get(&(Rc::as_ptr(self.node) as usize))
-            .copied()?;
-        let hovered = self.hovered_nodes.contains(&node_id);
-        let (attributes, child_ancestors) = self.attributes_and_ancestors(hovered);
-        if self.tag == "svg" {
-            return Some(embedded_svg_node(node_id, self.tag, attributes, self.node));
-        }
-        let children = self.children_with_pseudo(document, node_id, hovered, &child_ancestors);
-        Some(HtmlDocumentNode::Element {
-            node_id,
-            tag: self.tag,
-            attributes,
-            children,
-        })
-    }
-
-    fn children_with_pseudo(
+    fn project_element_node(
         &self,
-        document: &HtmlDocument,
-        node_id: u64,
-        hovered: bool,
-        child_ancestors: &[CssAncestor],
-    ) -> Vec<HtmlDocumentNode> {
-        let before = self.pseudo_node(node_id, CssPseudoElement::Before, hovered, child_ancestors);
-        let after = self.pseudo_node(node_id, CssPseudoElement::After, hovered, child_ancestors);
-        let mut children =
-            document.interactive_children(self.node, self.css, child_ancestors, self.hovered_nodes);
-        if let Some(before) = before {
-            children.insert(0, before);
+        node: &Handle,
+        css: &StaticCss,
+        ancestors: &[CssAncestor],
+        sibling_positions: (usize, usize, usize),
+        state: ProjectionState<'_>,
+    ) -> Option<HtmlDocumentNode> {
+        let NodeData::Element { name, attrs, .. } = &node.data else {
+            return None;
+        };
+        let (sibling_index, sibling_type_index, sibling_type_count) = sibling_positions;
+        InteractiveElementProjection {
+            node,
+            tag: name.local.to_string().to_ascii_lowercase(),
+            source_attributes: attributes(&attrs.borrow()),
+            css,
+            ancestors,
+            sibling_index,
+            sibling_type_index,
+            sibling_type_count,
+            state,
         }
-        if let Some(after) = after {
-            children.push(after);
-        }
-        children
+        .project(self)
     }
+}
 
-    fn attributes_and_ancestors(&self, hovered: bool) -> (HtmlAttributes, Vec<CssAncestor>) {
-        let attributes = self.css.apply_with_ancestors_at_state(
-            &self.tag,
-            &self.source_attributes,
-            self.ancestors,
-            self.sibling_index,
-            hovered,
+#[cfg(test)]
+mod tests {
+    use super::super::{HtmlDocument, HtmlDocumentNode};
+    use super::ProjectionState;
+    use crate::renderer::backends::html_css::StaticCss;
+    use markup5ever_rcdom::{Handle, NodeData};
+    use std::collections::{HashMap, HashSet};
+
+    #[test]
+    fn interactive_projection_keeps_rendered_children_and_drops_non_rendered_tags() {
+        let document = HtmlDocument::parse(
+            "<main><p id=target>Text</p><script>ignored()</script><template>hidden</template></main>",
         );
-        let mut child_ancestors = self.ancestors.to_vec();
-        child_ancestors.push(CssAncestor::new_at_state(
-            &self.tag,
-            &attributes,
-            self.sibling_index,
-            hovered,
-        ));
-        (attributes, child_ancestors)
+        let nodes = document.interactive_nodes_with_styles(&HashMap::new());
+        assert!(contains_tag(&nodes, "p"));
+        assert!(!contains_tag(&nodes, "script"));
+        assert!(!contains_tag(&nodes, "template"));
     }
-}
 
-pub(in crate::renderer::backends) fn attributes(source: &[Attribute]) -> HtmlAttributes {
-    source
-        .iter()
-        .map(|attribute| {
-            (
-                attribute.name.local.to_string().to_ascii_lowercase(),
-                attribute.value.to_string(),
-            )
+    #[test]
+    fn element_projection_guard_rejects_a_text_handle() -> Result<(), String> {
+        let document = HtmlDocument::parse("<main>text</main>");
+        let text = find_text(&document.document).ok_or("text node")?;
+        let css = StaticCss::for_interactive_document_with_styles_at_width(
+            &document.document,
+            &HashMap::new(),
+            1024.0,
+        );
+        let hovered = HashSet::new();
+        let focused = HashSet::new();
+        let focus_visible = HashSet::new();
+        assert!(
+            document
+                .project_element_node(
+                    &text,
+                    &css,
+                    &[],
+                    (1, 1, 1),
+                    ProjectionState {
+                        hovered: &hovered,
+                        focused: &focused,
+                        focus_visible: &focus_visible,
+                    },
+                )
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn interactive_projection_omits_the_document_root() {
+        let document = HtmlDocument::parse("<main><p>text</p></main>");
+        let css = StaticCss::for_interactive_document_with_styles_at_width(
+            &document.document,
+            &HashMap::new(),
+            1024.0,
+        );
+        let empty = HashSet::new();
+
+        assert!(
+            document
+                .interactive_node_with_state(
+                    &document.document,
+                    &css,
+                    &[],
+                    (0, 0, 0),
+                    ProjectionState {
+                        hovered: &empty,
+                        focused: &empty,
+                        focus_visible: &empty,
+                    },
+                )
+                .is_none()
+        );
+    }
+
+    fn find_text(node: &Handle) -> Option<Handle> {
+        if matches!(node.data, NodeData::Text { .. }) {
+            return Some(node.clone());
+        }
+        node.children.borrow().iter().find_map(find_text)
+    }
+
+    fn contains_tag(nodes: &[HtmlDocumentNode], expected: &str) -> bool {
+        nodes.iter().any(|node| match node {
+            HtmlDocumentNode::Element { tag, children, .. } => {
+                tag == expected || contains_tag(children, expected)
+            }
+            HtmlDocumentNode::Text(_) => false,
         })
-        .collect()
-}
-
-fn is_non_rendered_tag(tag: &str) -> bool {
-    matches!(
-        tag,
-        "head" | "link" | "meta" | "script" | "style" | "template" | "title"
-    )
+    }
 }

@@ -131,6 +131,37 @@ fn invalid_navigation_inputs_are_rejected() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn nonexistent_file_origin_allows_only_same_document_fragment() -> TestResult {
+    let fixture = tempfile::tempdir().map_err(to_string)?;
+    let missing_parent = fixture.path().join("missing");
+    let missing = missing_parent.join("index.html");
+    assert!(!missing_parent.exists());
+    assert!(!missing.exists());
+    let origin = Url::from_file_path(&missing)
+        .ok()
+        .ok_or("missing file origin must be a valid URL")?
+        .to_string();
+    let source = HtmlBrowserSource::new("<p>ok</p>", origin.as_str()).map_err(to_string)?;
+    let policy = HtmlSubresourcePolicy::from_source(&source);
+    for fragment in ["#a", "#b", "#c"] {
+        let url = policy.resolve_navigation(fragment).map_err(to_string)?;
+        assert_eq!(url.as_str(), format!("{origin}{fragment}"));
+    }
+    let absolute_same_document = format!("{origin}#a");
+    for reference in [
+        "index.html",
+        "other.html#a",
+        "../outside.html#a",
+        absolute_same_document.as_str(),
+        "https://other.example/index.html#a",
+        "about:blank#a",
+    ] {
+        assert!(policy.resolve_navigation(reference).is_err(), "{reference}");
+    }
+    Ok(())
+}
+
 fn assert_page_survives_blocked_resources(fixture: &LocalFixture) -> TestResult {
     let source = must_source(
         fixture,

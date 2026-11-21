@@ -10,6 +10,9 @@ type ObservedSelections = Arc<Mutex<Vec<(char, Vec<ID>)>>>;
 type SelectionResults = (Option<ID>, Option<ID>, Option<ID>, Option<ID>, Option<ID>);
 type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
 
+#[path = "svg_rasterize_text_fallback_memo_styled_tests.rs"]
+mod styled_tests;
+
 struct FontFile(std::path::PathBuf);
 
 impl FontFile {

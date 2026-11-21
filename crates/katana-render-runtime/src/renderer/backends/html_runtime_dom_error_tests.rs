@@ -48,3 +48,58 @@ fn assert_dom_bridge_errors(operations: &[&str]) {
         );
     }
 }
+
+const DOM_FAILURE_CASES: &[(&str, &str)] = &[
+    (
+        "document.createElement('bad name')",
+        "unsupported element name: bad name",
+    ),
+    (
+        "document.createElement('div').insertAdjacentText('beforebegin', 'x')",
+        "insertAdjacentHTML beforebegin requires a parent",
+    ),
+    (
+        "__krr_dom('setTextContent', '999999', 'x')",
+        "HTML node 999999 does not exist",
+    ),
+    (
+        "__krr_dom('appendChild', document.getElementById('target').__krrNodeId, '999999')",
+        "HTML node 999999 does not exist",
+    ),
+    (
+        "__krr_dom('boundingClientRect', 'not-a-node')",
+        "invalid HTML node id: not-a-node",
+    ),
+    (
+        "__krr_dom('layoutBoxPresent', 'not-a-node')",
+        "invalid HTML node id: not-a-node",
+    ),
+    (
+        "__krr_dom('intersectionMetadata', 'not-a-node')",
+        "invalid HTML node id: not-a-node",
+    ),
+    ("__krr_dom('boundingClientRect')", "missing DOM argument 0"),
+    ("__krr_dom('layoutBoxPresent')", "missing DOM argument 0"),
+    (
+        "__krr_dom('intersectionMetadata')",
+        "missing DOM argument 0",
+    ),
+    ("__krr_dom('eventPath')", "missing DOM argument 0"),
+    (
+        "__krr_dom('closest', document.getElementById('target').__krrNodeId)",
+        "missing DOM argument 1",
+    ),
+];
+
+#[test]
+fn javascript_dom_operations_propagate_native_failures() {
+    for &(operation, expected) in DOM_FAILURE_CASES {
+        let output = HtmlRenderer.render(&HtmlRenderInput {
+            source: format!("<p id=target>Visible</p><script>{operation}</script>"),
+        });
+        assert!(
+            matches!(output, Err(HtmlRuntimeError::DomBridge(ref message)) if message == expected),
+            "unexpected result for {operation}: {output:?}"
+        );
+    }
+}

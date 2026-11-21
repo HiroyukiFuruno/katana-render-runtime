@@ -26,9 +26,33 @@ fn source_origin_and_size_validation_are_strict() {
 }
 
 #[test]
-fn serialized_origins_keep_url_validation() {
+fn serialized_origins_keep_url_validation() -> Result<(), String> {
     let origin: Result<HtmlBrowserOrigin, _> = serde_json::from_str("\"not a url\"");
     assert!(origin.is_err());
+    assert_eq!(
+        HtmlBrowserOrigin::parse("DATA:text/html,hello"),
+        Err(HtmlBrowserError::UnsupportedOriginScheme {
+            origin: "DATA:text/html,hello".to_owned(),
+        }),
+    );
+    let mut source: HtmlBrowserSource =
+        serde_json::from_str(r#"{"raw_html":"ok","origin":"DATA:text/html,hello"}"#)
+            .map_err(|error| error.to_string())?;
+    assert_eq!(
+        source.validate(),
+        Err(HtmlBrowserError::UnsupportedOriginScheme {
+            origin: "data:text/html,hello".to_owned(),
+        }),
+    );
+    source.raw_html = "x".repeat(HTML_BROWSER_MAX_SOURCE_BYTES + 1);
+    assert_eq!(
+        source.validate(),
+        Err(HtmlBrowserError::SourceTooLarge {
+            actual_bytes: HTML_BROWSER_MAX_SOURCE_BYTES + 1,
+            max_bytes: HTML_BROWSER_MAX_SOURCE_BYTES,
+        }),
+    );
+    Ok(())
 }
 
 #[test]

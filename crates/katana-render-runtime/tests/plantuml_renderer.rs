@@ -1,3 +1,7 @@
+#[path = "../src/markdown/plantuml_renderer/test_env_override.rs"]
+mod test_env_override;
+use test_env_override::EnvOverride;
+
 use katana_render_runtime::{
     DiagramKind, PLANTUML_DOWNLOAD_URL, PLANTUML_JAR_CHECKSUM, PLANTUML_JAR_VERSION,
     PlantUmlRenderer, PlantUmlThemeCatalog, RenderConfig, RenderContext, RenderError, RenderInput,
@@ -204,11 +208,9 @@ fn plantuml_missing_runtime_returns_raw_code_with_warning() -> Result<(), Box<dy
 fn plantuml_renders_svg_when_local_runtime_is_available() -> Result<(), Box<dyn std::error::Error>>
 {
     let _guard = PLANTUML_ENV_LOCK.lock()?;
-    let jar_path = RuntimePathResolver::resolve(DiagramKind::PlantUml, None)?;
-    if !jar_path.exists() {
+    let Some(renderer) = local_runtime_renderer()? else {
         return Ok(());
-    }
-    let renderer = PlantUmlRenderer::with_runtime_path(jar_path);
+    };
     let output = renderer.render(&input("@startuml\nAlice -> Bob: hello\n@enduml"))?;
 
     if output.diagnostics.warnings.is_empty() {
@@ -227,59 +229,29 @@ fn plantuml_renders_svg_when_local_runtime_is_available() -> Result<(), Box<dyn 
 fn plantuml_representative_fixtures_render_when_local_runtime_is_available()
 -> Result<(), Box<dyn std::error::Error>> {
     let _guard = PLANTUML_ENV_LOCK.lock()?;
-    let jar_path = RuntimePathResolver::resolve(DiagramKind::PlantUml, None)?;
-    if !jar_path.exists() {
+    let Some(renderer) = local_runtime_renderer()? else {
         return Ok(());
-    }
-    let renderer = PlantUmlRenderer::with_runtime_path(jar_path);
-    for fixture in representative_fixtures() {
-        let source = std::fs::read_to_string(fixture)?;
-        let output = renderer.render(&input(&source))?;
-        if output.diagnostics.warnings.is_empty() {
-            assert!(
-                output.svg.contains("<svg"),
-                "fixture should render: {fixture}"
-            );
-            assert!(output.width > 0.0, "fixture should have width: {fixture}");
-            assert!(output.height > 0.0, "fixture should have height: {fixture}");
-        }
-    }
-    Ok(())
+    };
+    assert_fixtures_render(&renderer, &representative_fixtures())
 }
 
 #[test]
 fn plantuml_official_fixtures_render_when_local_runtime_is_available()
 -> Result<(), Box<dyn std::error::Error>> {
     let _guard = PLANTUML_ENV_LOCK.lock()?;
-    let jar_path = RuntimePathResolver::resolve(DiagramKind::PlantUml, None)?;
-    if !jar_path.exists() {
+    let Some(renderer) = local_runtime_renderer()? else {
         return Ok(());
-    }
-    let renderer = PlantUmlRenderer::with_runtime_path(jar_path);
-    for fixture in OFFICIAL_FIXTURES {
-        let source = std::fs::read_to_string(fixture)?;
-        let output = renderer.render(&input(&source))?;
-        if output.diagnostics.warnings.is_empty() {
-            assert!(
-                output.svg.contains("<svg"),
-                "fixture should render: {fixture}"
-            );
-            assert!(output.width > 0.0, "fixture should have width: {fixture}");
-            assert!(output.height > 0.0, "fixture should have height: {fixture}");
-        }
-    }
-    Ok(())
+    };
+    assert_fixtures_render(&renderer, &OFFICIAL_FIXTURES)
 }
 
 #[test]
 fn plantuml_dark_mode_uses_official_color_mapper_when_local_runtime_is_available()
 -> Result<(), Box<dyn std::error::Error>> {
     let _guard = PLANTUML_ENV_LOCK.lock()?;
-    let jar_path = RuntimePathResolver::resolve(DiagramKind::PlantUml, None)?;
-    if !jar_path.exists() {
+    let Some(renderer) = local_runtime_renderer()? else {
         return Ok(());
-    }
-    let renderer = PlantUmlRenderer::with_runtime_path(jar_path);
+    };
     let source = std::fs::read_to_string(representative_fixtures()[1])?;
     let output = renderer.render(&input(&source))?;
     if !output.diagnostics.warnings.is_empty() {
@@ -297,11 +269,9 @@ fn plantuml_dark_mode_uses_official_color_mapper_when_local_runtime_is_available
 fn plantuml_theme_option_uses_official_theme_directive_when_local_runtime_is_available()
 -> Result<(), Box<dyn std::error::Error>> {
     let _guard = PLANTUML_ENV_LOCK.lock()?;
-    let jar_path = RuntimePathResolver::resolve(DiagramKind::PlantUml, None)?;
-    if !jar_path.exists() {
+    let Some(renderer) = local_runtime_renderer()? else {
         return Ok(());
-    }
-    let renderer = PlantUmlRenderer::with_runtime_path(jar_path);
+    };
     let source = std::fs::read_to_string(representative_fixtures()[1])?;
     let default_output = renderer.render(&input(&source))?;
     let themed_output = renderer.render(&input_with_theme(&source, "cyborg"))?;
@@ -324,17 +294,41 @@ fn plantuml_theme_option_uses_official_theme_directive_when_local_runtime_is_ava
 fn plantuml_invalid_source_returns_runtime_error_when_runtime_is_available()
 -> Result<(), Box<dyn std::error::Error>> {
     let _guard = PLANTUML_ENV_LOCK.lock()?;
-    let jar_path = RuntimePathResolver::resolve(DiagramKind::PlantUml, None)?;
-    if !jar_path.exists() {
+    let Some(renderer) = local_runtime_renderer()? else {
         return Ok(());
-    }
-    let renderer = PlantUmlRenderer::with_runtime_path(jar_path);
+    };
     let result = renderer.render(&input("@startuml\n!error forced test failure\n@enduml"));
 
     assert!(matches!(
         result,
         Err(RenderError::Runtime(message)) if message.contains("PlantUML render failed")
     ));
+    Ok(())
+}
+
+fn local_runtime_renderer() -> Result<Option<PlantUmlRenderer>, Box<dyn std::error::Error>> {
+    let jar_path = RuntimePathResolver::resolve(DiagramKind::PlantUml, None)?;
+    Ok(jar_path
+        .exists()
+        .then(|| PlantUmlRenderer::with_runtime_path(jar_path)))
+}
+
+fn assert_fixtures_render(
+    renderer: &PlantUmlRenderer,
+    fixtures: &[&str],
+) -> Result<(), Box<dyn std::error::Error>> {
+    for &fixture in fixtures {
+        let source = std::fs::read_to_string(fixture)?;
+        let output = renderer.render(&input(&source))?;
+        if output.diagnostics.warnings.is_empty() {
+            assert!(
+                output.svg.contains("<svg"),
+                "fixture should render: {fixture}"
+            );
+            assert!(output.width > 0.0, "fixture should have width: {fixture}");
+            assert!(output.height > 0.0, "fixture should have height: {fixture}");
+        }
+    }
     Ok(())
 }
 
@@ -385,33 +379,5 @@ fn input_with_vendor_config(source: &str, vendor_config: serde_json::Value) -> R
         config: RenderConfig { vendor_config },
         policy: RenderPolicy::default(),
         context: RenderContext::default(),
-    }
-}
-
-struct EnvOverride {
-    key: &'static str,
-    original: Option<std::ffi::OsString>,
-}
-
-impl EnvOverride {
-    fn set(key: &'static str, value: &std::ffi::OsStr) -> Self {
-        let original = std::env::var_os(key);
-        unsafe { std::env::set_var(key, value) };
-        Self { key, original }
-    }
-
-    fn unset(key: &'static str) -> Self {
-        let original = std::env::var_os(key);
-        unsafe { std::env::remove_var(key) };
-        Self { key, original }
-    }
-}
-
-impl Drop for EnvOverride {
-    fn drop(&mut self) {
-        match &self.original {
-            Some(value) => unsafe { std::env::set_var(self.key, value) },
-            None => unsafe { std::env::remove_var(self.key) },
-        }
     }
 }

@@ -6,4 +6,4 @@ mod transport;
 mod iframe;
 mod network_iframe;
 #[path = "test_support.rs"]
-mod support;
+pub(in crate::renderer::backends::html_subresources) mod support;

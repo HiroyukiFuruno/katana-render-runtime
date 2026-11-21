@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { DrawioWarExtractor } from "./drawio-war-extractor";
 import {
+  isPatchedRuntimeAsset,
   RuntimeAssetCatalog,
   RuntimeAssetCatalogSource,
   RuntimeAssetChecksum,
@@ -11,24 +12,45 @@ import {
 } from "./runtime-asset-common";
 import { RuntimePackageAssetCompressor } from "./runtime-package-asset-compressor";
 
+export const drawioLicenseUrl = (version: string): string =>
+  `https://raw.githubusercontent.com/jgraph/drawio/v${version}/LICENSE`;
+
+type LicenseFetcher = (url: string) => Promise<Response>;
+
+async function downloadFileFromUrl(
+  url: string,
+  target: string,
+  fetcher: LicenseFetcher = fetch,
+): Promise<void> {
+  const response = await fetcher(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${url}: ${response.status}`);
+  }
+  fs.writeFileSync(target, Buffer.from(await response.arrayBuffer()));
+}
+
+export async function downloadOfficialDrawioLicense(
+  version: string,
+  target: string,
+  fetcher: LicenseFetcher = fetch,
+): Promise<void> {
+  await downloadFileFromUrl(drawioLicenseUrl(version), target, fetcher);
+}
+
 class RuntimeAssetDownloader {
   async download(definition: RuntimeAssetDefinition, version: string): Promise<void> {
     const target = RuntimeAssetPaths.assetFile(definition, version);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     if (definition.kind === "drawio") {
       await this.downloadDrawio(definition.downloadUrl(version), target);
+      await this.downloadDrawioLicense(version);
       return;
     }
     await this.downloadFile(definition.downloadUrl(version), target);
   }
 
   private async downloadFile(url: string, target: string) {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch ${url}: ${response.status}`);
-    }
-    const bytes = Buffer.from(await response.arrayBuffer());
-    fs.writeFileSync(target, bytes);
+    await downloadFileFromUrl(url, target);
   }
 
   private async downloadDrawio(url: string, target: string) {
@@ -40,6 +62,14 @@ class RuntimeAssetDownloader {
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  }
+
+  private async downloadDrawioLicense(version: string): Promise<void> {
+    const license = path.join(
+      RuntimeAssetPaths.vendorDir(RuntimeAssetCatalog.byKind("drawio"), version),
+      "LICENSE",
+    );
+    await downloadOfficialDrawioLicense(version, license);
   }
 }
 
@@ -224,6 +254,11 @@ class UpdateCommand {
   ) {}
 
   async run() {
+    if (isPatchedRuntimeAsset(this.definition)) {
+      throw new Error(
+        `Patched runtime asset ${this.definition.version} requires explicit patched adoption; ordinary CDN updates are refused`,
+      );
+    }
     await new RuntimeAssetDownloader().download(this.definition, this.version);
     const checksum = RuntimeAssetChecksum.writeChecksumFile(this.definition, this.version);
     if (RuntimePackageAssetCompressor.supports(this.definition)) {

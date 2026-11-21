@@ -1,0 +1,674 @@
+"""Create fail-closed local receipts for the existing KRR coverage producers."""
+
+from __future__ import annotations
+
+import hashlib
+import importlib
+import json
+import os
+import re
+import secrets
+import subprocess
+import sys
+import uuid
+from pathlib import Path
+from typing import cast
+
+import native_coverage_result as coverage_result
+import native_coverage_local_anchor as local_anchor
+
+
+KEY_SCHEMA = "krr-native-local-coverage-key-v2"
+RUN_SCHEMA = "krr-native-local-coverage-run-v2"
+COLLECTION_RECEIPT_SCHEMA = "krr-native-local-coverage-collection-receipt-v2"
+PROBE_SCHEMA = "krr-native-local-coverage-probe-v2"
+SOURCE_INPUTS_SCHEMA = "krr-native-coverage-source-inputs-v1"
+LOCAL_CONTEXT_SCHEMA = "krr-native-local-coverage-context-v1"
+LOCAL_HOST_KEYS = {"os", "productVersion", "buildVersion", "architecture"}
+LOCAL_TOOL_KEYS = {
+    "rustc",
+    "cargo",
+    "cargoLlvmCov",
+    "cargoNextest",
+    "llvm",
+    "java",
+    "bun",
+    "node",
+    "python",
+    "graphviz",
+    "plantuml",
+}
+AUTHENTICITY = "unsigned-local-moon-cache"
+SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+SAFE_REASON_RE = re.compile(r"[a-z0-9_]{1,80}\Z")
+PRODUCERS = {
+    "root": ("root",),
+    "performance": ("performance-baseline", "performance-candidate"),
+}
+REPORT_NAMES = {
+    "root": "root.json",
+    "performance-baseline": "baseline.json",
+    "performance-candidate": "candidate.json",
+}
+
+JsonObject = dict[str, object]
+
+
+class LocalCoverageError(ValueError):
+    """Raised when a local coverage producer receipt cannot be trusted."""
+
+
+def _json_bytes(value: object) -> bytes:
+    return (
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        + "\n"
+    ).encode()
+
+
+def _digest(value: object) -> str:
+    canonical = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode()
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _producer_domains(producer: object) -> tuple[str, ...]:
+    if not isinstance(producer, str) or producer not in PRODUCERS:
+        raise LocalCoverageError("producer must be root or performance")
+    return PRODUCERS[producer]
+
+
+def _source_query(repo: Path, *, coverage_inputs: bool) -> object:
+    script = Path(__file__).resolve().parents[1] / "mermaid/native-source-manifest.ts"
+    command = ["bun", "run", str(script), "--root", str(repo)]
+    if coverage_inputs:
+        command.append("--coverage-inputs")
+    label = "native coverage source inputs" if coverage_inputs else "native source manifest"
+    try:
+        result = subprocess.run(
+            command,
+            cwd=repo,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError as error:
+        raise LocalCoverageError(
+            "canonical native source manifest command is unavailable"
+        ) from error
+    if result.returncode != 0:
+        diagnostic = result.stderr.strip()
+        truncated = len(diagnostic) > 2048
+        if truncated:
+            diagnostic = diagnostic[-2048:]
+        suffix = " [stderr tail truncated]" if truncated else ""
+        raise LocalCoverageError(
+            f"canonical {label} command failed with exit {result.returncode}: "
+            f"{diagnostic}{suffix}"
+        )
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise LocalCoverageError(
+            f"canonical {label} is invalid JSON"
+        ) from error
+
+
+def _source_state(repo: Path) -> JsonObject:
+    source_state = _source_query(repo, coverage_inputs=True)
+    if (
+        not isinstance(source_state, dict)
+        or set(source_state) != {"schema", "sourceDigest", "coverageInputDigest"}
+        or source_state.get("schema") != SOURCE_INPUTS_SCHEMA
+        or not isinstance(source_state.get("sourceDigest"), str)
+        or SHA256_RE.fullmatch(source_state["sourceDigest"]) is None
+        or not isinstance(source_state.get("coverageInputDigest"), str)
+        or SHA256_RE.fullmatch(source_state["coverageInputDigest"]) is None
+    ):
+        raise LocalCoverageError("canonical native coverage source inputs have an invalid shape")
+    return cast(JsonObject, source_state)
+
+
+def _source_digest(repo: Path) -> str:
+    manifest = _source_query(repo, coverage_inputs=False)
+    if (
+        not isinstance(manifest, dict)
+        or set(manifest) != {"schema", "digest", "files"}
+        or manifest.get("schema") != "krr-native-build-source-manifest-v1"
+        or not isinstance(manifest.get("files"), list)
+        or not manifest["files"]
+    ):
+        raise LocalCoverageError("canonical native source manifest has an invalid shape")
+    digest = manifest.get("digest")
+    if not isinstance(digest, str) or SHA256_RE.fullmatch(digest) is None:
+        raise LocalCoverageError("canonical native source manifest has an invalid shape")
+    return digest
+
+
+def _local_context(repo: Path) -> JsonObject:
+    try:
+        module = importlib.import_module("native_coverage_local_context")
+        context = module.collect_local_context(repo)
+    except (ImportError, OSError, ValueError) as error:
+        raise LocalCoverageError(
+            "live local coverage context is unavailable"
+        ) from error
+    if (
+        not isinstance(context, dict)
+        or set(context)
+        != {
+            "schema",
+            "cacheable",
+            "missReasons",
+            "host",
+            "tools",
+            "environmentSha256",
+            "resourcesSha256",
+            "hostContextSha256",
+        }
+        or context.get("schema") != LOCAL_CONTEXT_SCHEMA
+        or type(context.get("cacheable")) is not bool
+        or not isinstance(context.get("missReasons"), list)
+        or any(
+            not isinstance(item, str) or SAFE_REASON_RE.fullmatch(item) is None
+            for item in context["missReasons"]
+        )
+    ):
+        raise LocalCoverageError("live local coverage context has an invalid schema")
+    host = context.get("host")
+    tools = context.get("tools")
+    if (
+        not isinstance(host, dict)
+        or set(host) != LOCAL_HOST_KEYS
+        or any(not isinstance(value, str) or not value for value in host.values())
+        or not isinstance(tools, dict)
+        or set(tools) != LOCAL_TOOL_KEYS
+        or any(not isinstance(value, str) or not value for value in tools.values())
+    ):
+        raise LocalCoverageError(
+            "live local coverage context has invalid host or tool identity"
+        )
+    for key in ("environmentSha256", "resourcesSha256", "hostContextSha256"):
+        if (
+            not isinstance(context.get(key), str)
+            or SHA256_RE.fullmatch(context[key]) is None
+        ):
+            raise LocalCoverageError(
+                f"live local coverage context has an invalid {key}"
+            )
+    if context["cacheable"] is True and context["missReasons"]:
+        raise LocalCoverageError("cacheable local context contains miss reasons")
+    if context["cacheable"] is False and not context["missReasons"]:
+        raise LocalCoverageError(
+            "non-cacheable local context must explain the cache miss"
+        )
+    digest_input = {
+        key: value for key, value in context.items() if key != "hostContextSha256"
+    }
+    if context["hostContextSha256"] != _digest(digest_input):
+        raise LocalCoverageError(
+            "live local coverage context digest does not match its fields"
+        )
+    return cast(JsonObject, context)
+
+
+def _threads() -> str:
+    value = os.environ.get("TEST_THREADS", "1")
+    if value == "":
+        return "default"
+    if value != "default" and (not value.isdecimal() or int(value) < 1):
+        raise LocalCoverageError("TEST_THREADS must be positive or empty")
+    return value
+
+
+def _fixed_coverage_policy() -> None:
+    if os.environ.get("COVERAGE_MIN_LINES", "100") != "100":
+        raise LocalCoverageError("COVERAGE_MIN_LINES must remain 100")
+    if os.environ.get("COVERAGE_MAX_UNCOVERED_LINES", "0") != "0":
+        raise LocalCoverageError("COVERAGE_MAX_UNCOVERED_LINES must remain 0")
+
+
+def _commands(repo: Path, producer: str) -> list[JsonObject]:
+    threads = _threads()
+    return [
+        {
+            "domain": domain,
+            **coverage_result._domain_command(
+                repo,
+                domain,
+                REPORT_NAMES[domain],
+                threads,
+            ),
+        }
+        for domain in _producer_domains(producer)
+    ]
+
+
+def _collection_report_records(repo: Path, producer: str) -> list[JsonObject]:
+    threads = _threads()
+    return [
+        {"domain": domain, **coverage_result._collection_report_record(repo, domain, threads)}
+        for domain in _producer_domains(producer)
+    ]
+
+
+def _execution_environment_digest() -> str:
+    keys = (
+        "CARGO",
+        "RTK",
+        "RUSTFLAGS",
+        "TEST_THREADS",
+        "CARGO_BUILD_JOBS",
+        "CARGO_HOME",
+        "CARGO_TARGET_DIR",
+        "CARGO_LLVM_COV_TARGET_DIR",
+    )
+    values = {key: os.environ.get(key) for key in keys}
+    return _digest(values)
+
+
+def _identity(repo: Path, producer: str, source_state: JsonObject, *,
+              context_phase: str | None = None) -> JsonObject:
+    _producer_domains(producer)
+    _fixed_coverage_policy()
+    context = _local_context(repo)
+    if context_phase is not None:
+        print(json.dumps({"coverageContext": {
+            "producer": producer,
+            "phase": context_phase,
+            "cacheable": context["cacheable"],
+            "hostSha256": _digest(context["host"]),
+            "toolsSha256": _digest(context["tools"]),
+            "environmentSha256": context["environmentSha256"],
+            "resourcesSha256": context["resourcesSha256"],
+            "hostContextSha256": context["hostContextSha256"],
+        }}), file=sys.stderr, flush=True)
+    command_rows = _commands(repo, producer)
+    context_digest = cast(str, context["hostContextSha256"])
+    payload: JsonObject = {
+        "schema": KEY_SCHEMA,
+        "producer": producer,
+        "coverageInputDigest": source_state["coverageInputDigest"],
+        "contextDigest": context_digest,
+        "environmentDigest": _execution_environment_digest(),
+        "commands": command_rows,
+        "coveragePolicy": {"linePercent": 100, "unmeasuredLines": 0},
+    }
+    return {
+        **payload,
+        "identitySha256": _digest(payload),
+        "cacheable": context["cacheable"],
+    }
+
+
+def _bound_identity(repo: Path, producer: str, source_state: JsonObject, *,
+                    prepare_anchor: bool = True, context_phase: str | None = None) -> JsonObject:
+    base = _identity(repo, producer, source_state, context_phase=context_phase)
+    base_digest = cast(str, base["identitySha256"])
+    try:
+        epoch = ((local_anchor.prepare if prepare_anchor else local_anchor.read_epoch)(
+            repo, producer, base_digest) if base["cacheable"] is True else None)
+    except ValueError as error:
+        raise LocalCoverageError("local coverage anchor identity differs") from error
+    payload = {
+        key: value
+        for key, value in base.items()
+        if key not in {"identitySha256", "cacheable"}
+    }
+    payload.update(
+        {
+            "baseIdentitySha256": base_digest,
+            "anchorEpoch": epoch,
+            "cacheable": base["cacheable"] is True and epoch is not None,
+        }
+    )
+    return {**payload, "identitySha256": _digest(payload)}
+
+
+def _paths(repo: Path, producer: str) -> dict[str, Path]:
+    stem = producer
+    directory = repo / coverage_result.REPORT_DIRECTORY
+    return {
+        "probe": directory / f"{stem}-local-probe.json",
+        "run": directory / f"{stem}-local-run.json",
+        "receipt": directory / f"{stem}-local-result.json",
+    }
+
+
+def _ensure_report_directory(repo: Path) -> None:
+    cursor = repo
+    for part in Path(coverage_result.REPORT_DIRECTORY).parts:
+        cursor /= part
+        try:
+            cursor.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+        except OSError as error:
+            raise LocalCoverageError(
+                "local coverage output directory is unavailable"
+            ) from error
+        try:
+            cursor.lstat()
+        except OSError as error:
+            raise LocalCoverageError(
+                "local coverage output directory is unavailable"
+            ) from error
+        if cursor.is_symlink() or not cursor.is_dir():
+            raise LocalCoverageError(
+                "local coverage output path must contain only real directories"
+            )
+
+
+def _read_json_bytes(path: Path, label: str) -> bytes:
+    try:
+        if path.is_symlink() or not path.is_file():
+            raise LocalCoverageError(f"{label} must be a regular non-symlink file")
+        return path.read_bytes()
+    except OSError as error:
+        raise LocalCoverageError(f"{label} is unavailable or invalid JSON") from error
+
+
+def _read_json(path: Path, label: str) -> object:
+    try:
+        return json.loads(_read_json_bytes(path, label))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise LocalCoverageError(f"{label} is unavailable or invalid JSON") from error
+
+
+def _write_atomic(path: Path, value: object) -> None:
+    directory = path.parent
+    if directory.is_symlink() or not directory.is_dir():
+        raise LocalCoverageError(
+            "local coverage output directory must be a real directory"
+        )
+    if path.is_symlink():
+        raise LocalCoverageError("local coverage output must not be a symlink")
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(temporary, flags, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(_json_bytes(value))
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def local_key(repo: Path, producer: str) -> JsonObject:
+    source_state = _source_state(repo)
+    identity = _bound_identity(repo, producer, source_state)
+    fingerprint = cast(str, identity["identitySha256"])
+    if identity["cacheable"] is False:
+        _ensure_report_directory(repo)
+        token = secrets.token_hex(32)
+        fingerprint = token
+    else:
+        _ensure_report_directory(repo)
+        token = None
+    _write_atomic(
+        _paths(repo, producer)["probe"],
+        {
+            "schema": PROBE_SCHEMA,
+            "producer": producer,
+            "identitySha256": identity["identitySha256"],
+            "cacheable": identity["cacheable"],
+            "token": token,
+        },
+    )
+    return {
+        "schema": KEY_SCHEMA,
+        "producer": producer,
+        "cacheable": identity["cacheable"],
+        "fingerprint": fingerprint,
+        "coverageInputDigest": identity["coverageInputDigest"],
+        "contextDigest": identity["contextDigest"],
+        "commandDigest": _digest(identity["commands"]),
+    }
+
+
+def _read_key_probe(repo: Path, producer: str, identity: JsonObject) -> str | None:
+    probe = _read_json(_paths(repo, producer)["probe"], "local probe token")
+    if (
+        not isinstance(probe, dict)
+        or set(probe) != {"schema", "producer", "identitySha256", "cacheable", "token"}
+        or probe.get("schema") != PROBE_SCHEMA
+        or probe.get("producer") != producer
+        or probe.get("identitySha256") != identity["identitySha256"]
+        or probe.get("cacheable") is not identity["cacheable"]
+    ):
+        raise LocalCoverageError(
+            "current non-cacheable probe token does not match this run"
+        )
+    token = probe.get("token")
+    if identity["cacheable"] is True:
+        if token is not None:
+            raise LocalCoverageError(
+                "cacheable key probe unexpectedly contains a token"
+            )
+        return None
+    if not isinstance(token, str) or SHA256_RE.fullmatch(token) is None:
+        raise LocalCoverageError("non-cacheable key probe token is invalid")
+    return token
+
+
+def _probe_token(repo: Path, producer: str, identity: JsonObject) -> str | None:
+    if identity["cacheable"] is True:
+        return None
+    return _read_key_probe(repo, producer, identity)
+
+
+def local_begin(repo: Path, producer: str) -> JsonObject:
+    _ensure_report_directory(repo)
+    source_state = _source_state(repo)
+    identity = _bound_identity(repo, producer, source_state, context_phase="begin")
+    if identity["cacheable"] is True and producer == "performance":
+        if not local_anchor.begin_coverage_collection(
+            repo,
+            producer,
+            cast(str, identity["baseIdentitySha256"]),
+            cast(str, identity["anchorEpoch"]),
+        ):
+            raise LocalCoverageError(
+                "performance collection anchor could not be marked pending"
+            )
+    moon_managed = "MOON_TASK_ID" in os.environ or "MOON_TASK_HASH" in os.environ
+    probe_path = _paths(repo, producer)["probe"]
+    if not moon_managed:
+        token = secrets.token_hex(32) if identity["cacheable"] is False else None
+        _write_atomic(
+            probe_path,
+            {
+                "schema": PROBE_SCHEMA,
+                "producer": producer,
+                "identitySha256": identity["identitySha256"],
+                "cacheable": identity["cacheable"],
+                "token": token,
+            },
+        )
+    else:
+        token = _read_key_probe(repo, producer, identity)
+    run: JsonObject = {
+        "schema": RUN_SCHEMA,
+        "producer": producer,
+        "runId": uuid.uuid4().hex,
+        "probeToken": token,
+        "sourceManifestDigest": source_state["sourceDigest"],
+        "identity": identity,
+    }
+    _write_atomic(_paths(repo, producer)["run"], run)
+    return {"schema": RUN_SCHEMA, "producer": producer, "started": True}
+
+
+def _current_run(repo: Path, producer: str) -> tuple[JsonObject, JsonObject, str | None]:
+    source_state = _source_state(repo)
+    identity = _bound_identity(repo, producer, source_state, prepare_anchor=False,
+                               context_phase="current")
+    token = _probe_token(repo, producer, identity)
+    run = coverage_result._object(
+        _read_json(_paths(repo, producer)["run"], "local run"), "local run"
+    )
+    if (
+        set(run)
+        != {
+            "schema",
+            "producer",
+            "runId",
+            "probeToken",
+            "sourceManifestDigest",
+            "identity",
+        }
+        or run.get("schema") != RUN_SCHEMA
+        or run.get("producer") != producer
+        or run.get("sourceManifestDigest") != source_state["sourceDigest"]
+        or run.get("identity") != identity
+        or run.get("probeToken") != token
+    ):
+        raise LocalCoverageError("producer inputs changed between begin and finish")
+    return run, identity, token
+
+
+def _commit_receipt(
+    repo: Path, producer: str, identity: JsonObject, receipt: JsonObject
+) -> None:
+    receipt_path = _paths(repo, producer)["receipt"]
+    _write_atomic(receipt_path, receipt)
+    epoch = identity["anchorEpoch"]
+    if epoch is None:
+        return
+    receipt_bytes = receipt_path.read_bytes()
+    if not local_anchor.commit(
+        repo,
+        producer,
+        cast(str, identity["baseIdentitySha256"]),
+        cast(str, epoch),
+        receipt_bytes,
+    ):
+        raise LocalCoverageError("trusted local coverage anchor could not be committed")
+
+
+def _collection_receipt(
+    repo: Path, producer: str, identity: JsonObject, token: str | None,
+    receipt: object,
+) -> JsonObject:
+    receipt = coverage_result._object(receipt, "collection receipt")
+    required = {
+        "schema", "role", "authenticity", "producer", "producerExit", "cacheable",
+        "probeToken", "sourceManifestDigest", "identity", "domains",
+    }
+    source_manifest_digest = receipt.get("sourceManifestDigest")
+    if (
+        not isinstance(source_manifest_digest, str)
+        or SHA256_RE.fullmatch(source_manifest_digest) is None
+    ):
+        raise LocalCoverageError("collection receipt identity or report differs")
+    if (
+        set(receipt) != required
+        or receipt.get("schema") != COLLECTION_RECEIPT_SCHEMA
+        or receipt.get("role") != "collection"
+        or receipt.get("authenticity") != AUTHENTICITY
+        or receipt.get("producer") != producer
+        or type(receipt.get("producerExit")) is not int
+        or receipt.get("producerExit") != 0
+        or receipt.get("cacheable") is not identity["cacheable"]
+        or receipt.get("probeToken") != token
+        or receipt.get("identity") != identity
+    ):
+        raise LocalCoverageError("collection receipt identity or report differs")
+    if receipt.get("domains") != _collection_report_records(repo, producer):
+        raise LocalCoverageError("coverage reports changed or no longer satisfy collection totals")
+    return receipt
+
+
+def _authenticated_collection(
+    repo: Path, producer: str
+) -> tuple[JsonObject, JsonObject]:
+    source_state = _source_state(repo)
+    identity = _bound_identity(repo, producer, source_state, prepare_anchor=False)
+    token = _probe_token(repo, producer, identity)
+    receipt_path = _paths(repo, producer)["receipt"]
+    try:
+        receipt_bytes = _read_json_bytes(receipt_path, "collection receipt")
+        receipt_value = json.loads(receipt_bytes)
+    except (LocalCoverageError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        if identity["anchorEpoch"] is not None:
+            local_anchor.invalidate(
+                repo, producer, cast(str, identity["baseIdentitySha256"]),
+                cast(str, identity["anchorEpoch"]),
+            )
+        raise LocalCoverageError("collection receipt is unavailable or invalid") from error
+    if identity["anchorEpoch"] is not None:
+        if not local_anchor.verify(
+            repo,
+            producer,
+            cast(str, identity["baseIdentitySha256"]),
+            cast(str, identity["anchorEpoch"]),
+            receipt_bytes,
+        ):
+            local_anchor.invalidate(
+                repo,
+                producer,
+                cast(str, identity["baseIdentitySha256"]),
+                cast(str, identity["anchorEpoch"]),
+            )
+            raise LocalCoverageError("trusted collection anchor does not match receipt bytes")
+    try:
+        receipt = _collection_receipt(repo, producer, identity, token, receipt_value)
+    except (LocalCoverageError, coverage_result.CoverageResultError):
+        if identity["anchorEpoch"] is not None:
+            local_anchor.invalidate(
+                repo,
+                producer,
+                cast(str, identity["baseIdentitySha256"]),
+                cast(str, identity["anchorEpoch"]),
+            )
+        raise
+    return receipt, identity
+
+
+def local_finish(repo: Path, producer: str, producer_exit: int) -> JsonObject:
+    """Collect the receipt, then apply strict 100/0 policy without invalidating it."""
+    result = local_collect_finish(repo, producer, producer_exit)
+    receipt, _identity = _authenticated_collection(repo, producer)
+    coverage_result.validate_collection_policy(receipt["domains"], _producer_domains(producer))
+    return result
+
+
+def local_collect_finish(repo: Path, producer: str, producer_exit: int) -> JsonObject:
+    """Record a successful test/report collection without accepting coverage policy."""
+    _ensure_report_directory(repo)
+    if type(producer_exit) is not int or producer_exit != 0:
+        raise LocalCoverageError("coverage collection producer did not exit successfully")
+    run, identity, token = _current_run(repo, producer)
+    receipt: JsonObject = {
+        "schema": COLLECTION_RECEIPT_SCHEMA,
+        "role": "collection",
+        "authenticity": AUTHENTICITY,
+        "producer": producer,
+        "producerExit": 0,
+        "cacheable": identity["cacheable"],
+        "probeToken": token,
+        "sourceManifestDigest": run["sourceManifestDigest"],
+        "identity": identity,
+        "domains": _collection_report_records(repo, producer),
+    }
+    _commit_receipt(repo, producer, identity, receipt)
+    return {"schema": COLLECTION_RECEIPT_SCHEMA, "created": True, "cacheable": identity["cacheable"]}
+
+
+def local_validate(repo: Path, producer: str) -> JsonObject:
+    _ensure_report_directory(repo)
+    receipt, identity = _authenticated_collection(repo, producer)
+    coverage_result.validate_collection_policy(receipt["domains"], _producer_domains(producer))
+    return {"schema": COLLECTION_RECEIPT_SCHEMA, "valid": True,
+            "cacheable": identity["cacheable"], "producer": producer}
+
+
+def local_collection_validate(repo: Path, producer: str) -> JsonObject:
+    """Validate collection authenticity while leaving coverage policy to aggregate."""
+    _ensure_report_directory(repo)
+    _receipt, identity = _authenticated_collection(repo, producer)
+    return {"schema": COLLECTION_RECEIPT_SCHEMA, "valid": True, "cacheable": identity["cacheable"],
+            "producer": producer}

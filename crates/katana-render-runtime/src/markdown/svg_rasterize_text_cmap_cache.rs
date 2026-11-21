@@ -23,7 +23,7 @@ pub(super) fn probe_file(
     if !generation.is_file() || !generation.reusable() {
         return ProbeResult::UseOriginal;
     }
-    let Some((Source::File(_), face_index)) = database.face_source(face_id) else {
+    let Some(face_index) = file_backed_face_index(database, face_id) else {
         return ProbeResult::UseOriginal;
     };
 
@@ -42,6 +42,13 @@ pub(super) fn probe_file(
     }
 
     load_cmap(database, face_id, face_index, generation, character)
+}
+
+fn file_backed_face_index(database: &Database, face_id: ID) -> Option<u32> {
+    match database.face_source(face_id) {
+        Some((Source::File(_) | Source::SharedFile(_, _), index)) => Some(index),
+        _ => None,
+    }
 }
 
 fn cached_file_cmap(
@@ -160,6 +167,9 @@ fn cache() -> &'static Mutex<Cache> {
 #[cfg(test)]
 #[path = "svg_rasterize_text_cmap_cache_fault_tests.rs"]
 mod fault_tests;
+#[cfg(test)]
+#[path = "svg_rasterize_text_cmap_file_test_support.rs"]
+mod file_test_support;
 #[cfg(test)]
 #[path = "svg_rasterize_text_cmap_cache_tests.rs"]
 mod tests;

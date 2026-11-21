@@ -12,7 +12,7 @@ impl HtmlLayoutRenderer {
             "html" | "body" => self.render_viewport_container(element, layout),
             "main" => self.render_container_element(element.children, layout),
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "p" => {
-                self.render_label_element(element, layout)
+                self.render_container_element(element.children, layout)
             }
             "label" => self.render_label_container_element(element, layout),
             "a" => self.render_link_element(element, layout),
@@ -26,6 +26,7 @@ impl HtmlLayoutRenderer {
             ),
             "svg" => self.render_embedded_svg(element.attributes, layout),
             "input" | "textarea" => self.render_input_element(element, layout),
+            "select" => self.render_select(element, layout),
             "details" => self.render_details(element, layout),
             "summary" => self.render_summary(element, layout),
             _ => self.render_structural_tag(element, layout),
@@ -78,20 +79,6 @@ impl HtmlLayoutRenderer {
             layout.width,
             &style,
             layout.details,
-        )
-    }
-
-    fn render_label_element(
-        &mut self,
-        element: ElementRenderContext<'_>,
-        layout: LayoutContext<'_>,
-    ) -> f32 {
-        self.render_label(
-            element.children,
-            layout.x,
-            layout.y,
-            layout.width,
-            layout.style,
         )
     }
 

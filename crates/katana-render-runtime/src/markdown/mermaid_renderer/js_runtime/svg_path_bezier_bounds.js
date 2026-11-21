@@ -26,7 +26,9 @@ function katanaAddCubicBezierExtrema(points, start, first, second, end) {
     const parameters = katanaCubicBezierExtremaParameters(start, first, second, end, axis);
     parameters
       .filter((parameter) => parameter > 0 && parameter < 1)
-      .forEach((parameter) => points.push(...katanaCubicBezierPoint(start, first, second, end, parameter)));
+      .forEach((parameter) => {
+        points.push(...katanaCubicBezierPoint(start, first, second, end, parameter));
+      });
   }
 }
 

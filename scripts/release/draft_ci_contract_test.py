@@ -5,6 +5,7 @@ import importlib.util
 import re
 import unittest
 from pathlib import Path
+from typing import ClassVar
 
 
 ROOT = Path(__file__).parents[2]
@@ -110,23 +111,26 @@ def context(
             "repository": repository,
             "head_ref": head_ref,
         },
-        "needs": {"evidence": {"result": evidence_result}},
+        "needs": {"test": {"result": evidence_result}, "paired_performance": {"result": evidence_result}},
     }
 
 
 class DraftCiContractTest(unittest.TestCase):
+    ci_test: ClassVar[str]
+    preflight: ClassVar[str]
+
     ci_path = ".github/workflows/test-and-build.yml"
     preflight_path = ".github/workflows/release-preflight.yml"
 
     @classmethod
     def setUpClass(cls) -> None:
         cls.ci_test = workflow_job_if(cls.ci_path, "test")
-        cls.evidence = workflow_job_if(cls.preflight_path, "evidence")
-        cls.preflight = workflow_job_if(cls.preflight_path, "preflight")
+        cls.preflight = workflow_job_if(cls.ci_path, "preflight")
 
     def test_pull_request_triggers_cover_ready_and_head_updates(self) -> None:
         self.assertEqual(trigger_types(self.ci_path), PR_EVENTS)
-        self.assertEqual(trigger_types(self.preflight_path), PR_EVENTS)
+        self.assertNotIn("  pull_request:", (ROOT / self.preflight_path).read_text())
+        self.assertIn("  workflow_dispatch:", (ROOT / self.preflight_path).read_text())
 
     def test_ci_job_truth_table_preserves_draft_and_push_behavior(self) -> None:
         draft_events = ("opened", "synchronize", "converted_to_draft")
@@ -139,23 +143,23 @@ class DraftCiContractTest(unittest.TestCase):
             for action in ready_events
         ) + (
             (context("push"), True),
-            (context("push", push_message="Merge pull request #12 from owner/topic"), False),
-            (context("push", push_message="fix: merged (#12)"), False),
+            (context("push", push_message="Merge pull request #12 from owner/topic"), True),
+            (context("push", push_message="fix: merged (#12)"), True),
         )
         for event, expected in cases:
             with self.subTest(event=event):
                 self.assertEqual(evaluate(self.ci_test, event), expected)
 
         mutant = self.ci_test.replace(
-            "(github.event_name != 'pull_request' || github.event.pull_request.draft == false) && ",
-            "",
+            "github.event_name != 'pull_request' || github.event.pull_request.draft == false",
+            "true",
         )
         self.assertTrue(evaluate(mutant, context("pull_request", draft=True)))
 
     def test_evidence_and_preflight_truth_table_gates_draft_and_release_eligibility(self) -> None:
         draft_events = ("opened", "synchronize", "converted_to_draft")
         ready_events = ("opened", "synchronize", "reopened", "ready_for_review")
-        evidence_cases = tuple(
+        release_cases = tuple(
             (context("pull_request", draft=True, action=action), False)
             for action in draft_events
         ) + tuple(
@@ -164,30 +168,17 @@ class DraftCiContractTest(unittest.TestCase):
         ) + (
             (context("pull_request", head_repo="fork/repo"), False),
             (context("pull_request", head_ref="feature/work"), False),
-            (context("workflow_dispatch"), False),
-        )
-        for event, expected in evidence_cases:
-            with self.subTest(job="evidence", event=event):
-                self.assertEqual(evaluate(self.evidence, event), expected)
-
-        release_cases = (
-            (context("pull_request", draft=True), False),
-            (context("pull_request", draft=False), True),
-            (context("pull_request", head_repo="fork/repo"), False),
-            (context("pull_request", head_ref="feature/work"), False),
             (context("pull_request", evidence_result="failure"), False),
             (context("pull_request", evidence_result="skipped"), False),
-            (context("workflow_dispatch"), True),
+            (context("workflow_dispatch"), False),
         )
         for event, expected in release_cases:
             with self.subTest(job="preflight", event=event):
                 self.assertEqual(evaluate(self.preflight, event), expected)
 
         draft_guard = "github.event.pull_request.draft == false && "
-        evidence_mutant = self.evidence.replace(draft_guard, "")
         preflight_mutant = self.preflight.replace(draft_guard, "")
         draft_event = context("pull_request", draft=True)
-        self.assertTrue(evaluate(evidence_mutant, draft_event))
         self.assertTrue(evaluate(preflight_mutant, draft_event))
 
     def test_skipped_or_missing_ubuntu_job_cannot_satisfy_quality_evidence(self) -> None:

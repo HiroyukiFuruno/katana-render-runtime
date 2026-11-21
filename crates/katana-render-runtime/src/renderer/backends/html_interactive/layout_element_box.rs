@@ -1,7 +1,8 @@
 use super::super::layout_container::horizontal_box_geometry;
 use super::super::style::CssStyle;
 use super::super::types::{
-    ELEMENT_BOX_CORNER_COUNT, ElementBox, ElementPositioningContext, LayoutContext, OverflowClip,
+    ELEMENT_BOX_CORNER_COUNT, ElementBox, ElementPositioningContext, ElementRenderContext,
+    LayoutContext, OverflowClip,
 };
 use super::HtmlLayoutRenderer;
 
@@ -27,7 +28,7 @@ impl HtmlLayoutRenderer {
             participates_in_flow,
             ancestor_node_ids: self.ancestor_node_ids(positioning_context),
             overflow_clips: Vec::new(),
-            clips_overflow: false,
+            overflow_clip_axes: (false, false),
             padding_edge: OverflowClip::new(node_id, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
             inline_fragments: Vec::new(),
         });
@@ -49,13 +50,13 @@ impl HtmlLayoutRenderer {
     pub(super) fn finish_element_box(
         &mut self,
         index: usize,
-        node_id: u64,
+        element: ElementRenderContext<'_>,
         layout: LayoutContext<'_>,
         bottom: f32,
     ) {
-        let (x, width) = horizontal_box_geometry(layout.x, layout.width, layout.style);
-        let y = layout.y + layout.style.margin_top;
-        let height = (bottom - y - layout.style.margin_bottom).max(0.0);
+        let node_id = element.node_id;
+        let (x, y, width, height) = self.element_border_box(element, layout, bottom);
+        let overflow_clip_axes = self.element_overflow_clip_axes(node_id, layout.style);
         let element_box = &mut self.element_boxes[index];
         debug_assert_eq!(element_box.node_id, node_id);
         element_box.x = x;
@@ -63,12 +64,32 @@ impl HtmlLayoutRenderer {
         element_box.width = width;
         element_box.height = height;
         element_box.transformed_corners = ElementBox::rectangle_corners(x, y, width, height);
-        element_box.clips_overflow = layout.style.clips_overflow();
-        element_box.padding_edge = padding_edge(node_id, x, y, width, height, layout.style);
+        element_box.overflow_clip_axes = overflow_clip_axes;
+        element_box.padding_edge = padding_edge(node_id, x, y, width, height, layout.style)
+            .with_active_axes(overflow_clip_axes);
+    }
+
+    fn element_border_box(
+        &self,
+        element: ElementRenderContext<'_>,
+        layout: LayoutContext<'_>,
+        bottom: f32,
+    ) -> (f32, f32, f32, f32) {
+        /* WHY: ボタン描画が最後に登録する実矩形を再利用し、文字幅を二重に測定しない。 */
+        if element.tag == "button"
+            && let Some(target) = self.hit_targets.last()
+            && target.node_id == element.node_id
+        {
+            return (target.x, target.y, target.width, target.height);
+        }
+        let (x, width) = horizontal_box_geometry(layout.x, layout.width, layout.style);
+        let y = layout.y + layout.style.margin_top;
+        let height = (bottom - y - layout.style.margin_bottom).max(0.0);
+        (x, y, width, height)
     }
 }
 
-fn padding_edge(
+pub(in crate::renderer::backends::html_interactive) fn padding_edge(
     node_id: u64,
     x: f32,
     y: f32,

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>地域図書館の予約システム 要件仕様</title>
+  <style>
+    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-width: 320px; background: #f3f6fa; color: #182433; }
+    .app { display: flex; align-items: flex-start; min-height: 3000px; }
+    .sidebar { position: sticky; top: 0; flex: 0 0 236px; min-height: 100vh; padding: 28px 20px; background: #17324d; color: #fff; }
+    .brand { margin: 0 0 24px; font-size: 20px; line-height: 1.35; }
+    .badge { display: inline-block; border-radius: 999px; padding: 4px 10px; background: #e5a93d; color: #2e2410; font-size: 12px; font-weight: 700; }
+    .sidebar ul { display: grid; gap: 10px; margin: 24px 0 0; padding: 0; list-style: none; }
+    .sidebar a { display: block; padding: 9px 10px; border-radius: 6px; color: #dce9f5; text-decoration: none; }
+    .sidebar a:hover { background: #254d70; }
+    main { flex: 1; min-width: 0; padding: 34px 42px 120px; }
+    header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 8px; font-size: 30px; line-height: 1.25; }
+    h2 { margin-bottom: 14px; font-size: 22px; }
+    h3 { margin-bottom: 8px; font-size: 17px; }
+    .lead { max-width: 720px; margin-bottom: 0; color: #536375; line-height: 1.8; }
+    .panel { margin-bottom: 26px; padding: 22px; border: 1px solid #d4dee8; border-radius: 10px; background: #fff; box-shadow: 0 3px 12px rgba(23, 50, 77, .07); }
+    .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .card { min-height: 142px; padding: 16px; border: 1px solid #dce5ed; border-radius: 8px; background: #f9fbfd; }
+    .card p { margin-bottom: 0; color: #536375; line-height: 1.65; }
+    .status { color: #166044; font-weight: 700; }
+    .spec-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .spec-table th, .spec-table td { padding: 12px 10px; border-bottom: 1px solid #dce5ed; text-align: left; vertical-align: top; line-height: 1.6; }
+    .spec-table th { width: 23%; background: #edf3f8; color: #27445f; }
+    .notice { border-left: 4px solid #e5a93d; background: #fff9eb; }
+    .notice p { margin-bottom: 0; line-height: 1.8; }
+    .steps { display: flex; gap: 12px; flex-wrap: wrap; }
+    .step { flex: 1 1 180px; padding: 14px; border-radius: 8px; background: #e9f2fb; }
+    .step strong { display: block; margin-bottom: 5px; color: #1d527d; }
+    .step span { color: #536375; line-height: 1.55; }
+    .long-copy { min-height: 430px; columns: 2 280px; column-gap: 32px; color: #536375; line-height: 1.85; }
+    .long-copy p { break-inside: avoid; }
+    footer { padding: 28px 0 0; color: #68798a; font-size: 13px; }
+    @media (max-width: 900px) {
+      .app { display: block; }
+      .sidebar { position: relative; min-height: auto; }
+      .sidebar ul { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      main { padding: 26px 22px 90px; }
+      .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 620px) {
+      header { display: block; }
+      .badge { margin-top: 14px; }
+      .cards { grid-template-columns: 1fr; }
+      .sidebar ul { grid-template-columns: 1fr 1fr; }
+      .panel { padding: 16px; }
+      .spec-table { font-size: 13px; }
+      .spec-table th { width: 31%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <h2 class="brand">地域図書館<br>予約システム</h2>
+      <span class="badge">要件仕様 v1</span>
+      <nav aria-label="仕様目次">
+        <ul>
+          <li><a href="#purpose">目的</a></li>
+          <li><a href="#overview">概要</a></li>
+          <li><a href="#records">項目</a></li>
+          <li><a href="#flow">利用手順</a></li>
+          <li><a href="#notes">補足</a></li>
+        </ul>
+      </nav>
+    </aside>
+    <main>
+      <header>
+        <div>
+          <h1>地域図書館の予約システム 要件仕様</h1>
+          <p class="lead">利用者が蔵書を探し、受取館と期間を選択して予約できる画面の構成と表示ルールを定義します。職員の確認作業も同じ情報を参照します。</p>
+        </div>
+        <span class="badge">レビュー中</span>
+      </header>
+      <section id="purpose" class="panel">
+        <h2>1. 目的</h2>
+        <p>複数の館に分散する資料を一つの検索画面から探せるようにし、予約状況と受取方法を分かりやすく提示します。</p>
+        <div class="cards">
+          <article class="card"><h3>探す</h3><p>タイトル、著者、分類から候補を絞り込みます。</p></article>
+          <article class="card"><h3>選ぶ</h3><p>受取館と取り置き期間を確認して登録します。</p></article>
+          <article class="card"><h3>知らせる</h3><p>準備完了や期限の案内を画面に表示します。</p></article>
+        </div>
+      </section>
+      <section id="overview" class="panel">
+        <h2>2. 画面の概要</h2>
+        <table class="spec-table">
+          <thead><tr><th>領域</th><th>表示内容</th><th>確認事項</th></tr></thead>
+          <tbody>
+            <tr><th>検索条件</th><td>キーワード、資料種別、所蔵館</td><td>条件を変更しても結果の見出しを保持する</td></tr>
+            <tr><th>検索結果</th><td>資料名、著者、貸出状態、予約ボタン</td><td>利用できない資料には理由を添える</td></tr>
+            <tr><th>予約確認</th><td>受取館、連絡方法、取り置き期限</td><td>登録前に選択内容をまとめて表示する</td></tr>
+          </tbody>
+        </table>
+      </section>
+      <section id="records" class="panel">
+        <h2>3. 管理する項目</h2>
+        <div class="notice"><p><strong>表示ルール：</strong>状態を色だけで表さず、短いラベルと説明文を併記します。読み上げ順は見出し、状態、操作の順にします。</p></div>
+        <div class="steps">
+          <div class="step"><strong>受付中</strong><span>通常の予約操作を受け付けます。</span></div>
+          <div class="step"><strong>準備中</strong><span>受取館への搬送を待っています。</span></div>
+          <div class="step"><strong>受取可能</strong><span>指定した窓口で受け取れます。</span></div>
+        </div>
+      </section>
+      <section id="flow" class="panel">
+        <h2>4. 利用手順</h2>
+        <ol>
+          <li>検索語と資料種別を入力し、結果一覧を表示する。</li>
+          <li>資料の詳細と貸出状態を確認し、予約操作を選択する。</li>
+          <li>受取館と連絡方法を選び、確認画面で登録を完了する。</li>
+          <li>登録後は予約番号と期限を画面上で確認する。</li>
+        </ol>
+      </section>
+      <section id="notes" class="panel">
+        <h2>5. 補足説明</h2>
+        <div class="long-copy">
+          <p id="column-p1">検索結果は通信環境や蔵書の更新状況によって表示順が変わる場合があります。利用者が操作を繰り返しても、現在の検索条件と結果件数を画面上部に残します。</p>
+          <p id="column-p2">受取館を変更したときは、取り置き可能な期間を再計算します。期間の変更が必要な場合は、登録ボタンの近くに理由を表示し、利用者が戻ることなく選び直せるようにします。</p>
+          <p id="column-p3">資料に付属するメディアや参考資料がある場合は、詳細欄にまとまりとして表示します。本文の長さが異なるカードでも、操作部の位置が揃うように余白を確保します。</p>
+          <p id="column-p4">職員向けの確認では、予約番号、資料識別子、受取館、期限を同じ順序で表示します。状態の更新日時は補足情報として添え、主要な操作を妨げない大きさにします。</p>
+          <p id="column-p5">画面幅が狭い場合は目次を上部へ移し、表の列を読みやすい順に縦へ並べます。広い画面では目次を左側に固定し、本文の読み幅を制限して長文の行が過度に伸びないようにします。</p>
+          <p id="column-p6">キーボード操作では、検索、結果、確認の順に移動できることを前提とします。フォーカス位置が画面外になった場合は対象を見える範囲へ移動し、操作結果を短い状態文で知らせます。</p>
+        </div>
+      </section>
+      <footer>この画面は架空の図書館サービスを用いた描画検証用fixtureです。</footer>
+    </main>
+  </div>
+</body>
+</html>

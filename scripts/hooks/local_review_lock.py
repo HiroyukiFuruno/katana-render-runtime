@@ -4,9 +4,17 @@ from contextlib import contextmanager
 import errno
 import os
 from pathlib import Path
-from typing import Iterator
+from collections.abc import Iterator
+from typing import Protocol, runtime_checkable
 
 from local_review_state import ReviewError
+
+
+@runtime_checkable
+class _WindowsLockApi(Protocol):
+    LK_NBLCK: int
+
+    def locking(self, descriptor: int, mode: int, count: int) -> None: ...
 
 
 @contextmanager
@@ -17,7 +25,12 @@ def review_lock(path: Path) -> Iterator[None]:
             if os.name == "nt":
                 import msvcrt
 
-                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+                windows_lock: object = msvcrt
+                if (not isinstance(windows_lock, _WindowsLockApi)
+                        or type(windows_lock.LK_NBLCK) is not int
+                        or not callable(windows_lock.locking)):
+                    raise OSError("Windows file-lock API is unavailable")
+                windows_lock.locking(descriptor, windows_lock.LK_NBLCK, 1)
             else:
                 import fcntl
 

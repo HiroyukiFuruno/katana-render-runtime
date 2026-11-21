@@ -1,56 +1,30 @@
+use super::super::file_test_support::CmapFileFixture;
 use super::{Cache, MAX_CACHE_BYTES, MAX_CACHE_ENTRIES, MAX_ENTRY_BYTES};
-use crate::markdown::svg_rasterize::font::bundled_font_db;
-use resvg::usvg::fontdb::{Database, Source};
-use std::path::PathBuf;
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
+use resvg::usvg::fontdb::{Database, ID};
+use std::sync::{Arc, atomic::AtomicUsize};
 
 static TEMP_FILE: AtomicUsize = AtomicUsize::new(0);
-struct TempFile(PathBuf);
-impl Drop for TempFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
+const FILES: CmapFileFixture = CmapFileFixture::new("krr-cmap-storage", &TEMP_FILE);
+
+fn insert_for_file(cache: &mut Cache, database: &Arc<Database>, id: ID, bytes: Arc<[u8]>) {
+    let generation = super::super::super::file_generation::file_source_stamp(database, id).2;
+    cache.insert(database, id, 0, generation, bytes);
 }
-fn file_database(
-    bytes: &[u8],
-) -> Result<(Arc<Database>, resvg::usvg::fontdb::ID, TempFile), String> {
-    let mut face = bundled_font_db()
-        .faces()
-        .next()
-        .ok_or("bundled face missing")?
-        .clone();
-    let path = std::env::temp_dir().join(format!(
-        "krr-cmap-storage-{}-{}.ttf",
-        std::process::id(),
-        TEMP_FILE.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
-    face.source = Source::File(path.clone());
-    let mut database = Database::new();
-    let id = database.push_face_info(face);
-    Ok((Arc::new(database), id, TempFile(path)))
-}
-fn bundled_bytes() -> Result<Vec<u8>, String> {
-    let db = bundled_font_db();
-    let face = db.faces().next().ok_or("bundled face missing")?;
-    db.with_face_data(face.id, |data, _| data.to_vec())
-        .ok_or_else(|| "bundled bytes missing".into())
+
+#[test]
+fn file_backed_cmap_fixture_rejects_an_invalid_destination() {
+    let files = CmapFileFixture::new("krr-cmap-invalid\0path", &TEMP_FILE);
+    assert!(files.bundled_database().is_err());
 }
 
 #[test]
 fn cache_rejects_an_oversized_cmap_entry() -> Result<(), String> {
-    let bytes = bundled_bytes()?;
-    let (database, id, _guard) = file_database(&bytes)?;
-    let generation = super::super::super::file_generation::file_source_stamp(&database, id).2;
+    let (database, id, _guard) = FILES.bundled_database()?;
     let mut cache = Cache::default();
-    cache.insert(
+    insert_for_file(
+        &mut cache,
         &database,
         id,
-        0,
-        generation,
         Arc::from(vec![0; MAX_ENTRY_BYTES + 1]),
     );
     assert!(cache.entries.is_empty());
@@ -60,8 +34,7 @@ fn cache_rejects_an_oversized_cmap_entry() -> Result<(), String> {
 
 #[test]
 fn cache_enforces_entry_and_byte_limits() -> Result<(), String> {
-    let bytes = bundled_bytes()?;
-    let (database, first_id, _guard) = file_database(&bytes)?;
+    let (database, first_id, _guard) = FILES.bundled_database()?;
     let generation = super::super::super::file_generation::file_source_stamp(&database, first_id).2;
     let mut cache = Cache::default();
     let face = database.face(first_id).ok_or("face missing")?.clone();
@@ -82,22 +55,14 @@ fn cache_enforces_entry_and_byte_limits() -> Result<(), String> {
 
 #[test]
 fn cache_purges_dropped_databases_and_removes_a_face() -> Result<(), String> {
-    let bytes = bundled_bytes()?;
-    let (database, id, _guard) = file_database(&bytes)?;
-    let generation = super::super::super::file_generation::file_source_stamp(&database, id).2;
+    let (database, id, _guard) = FILES.bundled_database()?;
     let mut cache = Cache::default();
-    cache.insert(&database, id, 0, generation, Arc::from([1_u8, 2, 3]));
+    insert_for_file(&mut cache, &database, id, Arc::from([1_u8, 2, 3]));
     cache.remove_face(&database, id);
     assert!(cache.entries.is_empty());
-    cache.insert(
-        &database,
-        id,
-        0,
-        super::super::super::file_generation::file_source_stamp(&database, id).2,
-        Arc::from([1_u8]),
-    );
+    insert_for_file(&mut cache, &database, id, Arc::from([1_u8]));
     drop(database);
-    let (other, other_id, _other_guard) = file_database(&bytes)?;
+    let (other, other_id, _other_guard) = FILES.bundled_database()?;
     let generation = super::super::super::file_generation::file_source_stamp(&other, other_id).2;
     assert!(cache.lookup(&other, other_id, 0, &generation).is_none());
     assert!(cache.entries.is_empty());

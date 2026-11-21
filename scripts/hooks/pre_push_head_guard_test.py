@@ -398,13 +398,7 @@ class PrePushHeadGuardTest(unittest.TestCase):
                 self.update(local_sha=current_head), current_head, self.repository
             )
 
-    def test_rejects_crlf_for_control_heavy_text_auto_blob(self) -> None:
-        content = bytes(range(1, 32)) + b"\ntext\n"
-        (self.repository / "tracked.txt").write_bytes(content)
-        self.git("add", "tracked.txt")
-        self.commit("store control-heavy content")
-        self.git("config", "core.autocrlf", "true")
-        current_head = self.git("rev-parse", "HEAD")
+    def assert_binary_crlf_checkout_is_rejected(self, content: bytes, current_head: str) -> None:
         eol = self.git("ls-files", "--eol", "-z")
         self.assertIn("i/-text", eol)
         (self.repository / "tracked.txt").write_bytes(content.replace(b"\n", b"\r\n"))
@@ -413,6 +407,15 @@ class PrePushHeadGuardTest(unittest.TestCase):
             subject.validate_push_head(
                 self.update(local_sha=current_head), current_head, self.repository
             )
+
+    def test_rejects_crlf_for_control_heavy_text_auto_blob(self) -> None:
+        content = bytes(range(1, 32)) + b"\ntext\n"
+        (self.repository / "tracked.txt").write_bytes(content)
+        self.git("add", "tracked.txt")
+        self.commit("store control-heavy content")
+        self.git("config", "core.autocrlf", "true")
+        current_head = self.git("rev-parse", "HEAD")
+        self.assert_binary_crlf_checkout_is_rejected(content, current_head)
 
     def test_accepts_text_auto_when_git_classifies_blob_as_text(self) -> None:
         (self.repository / ".gitattributes").write_bytes(b"tracked.txt text=auto\n")
@@ -434,14 +437,7 @@ class PrePushHeadGuardTest(unittest.TestCase):
         self.git("add", ".")
         self.commit("declare automatic CRLF checkout for control data")
         current_head = self.git("rev-parse", "HEAD")
-        eol = self.git("ls-files", "--eol", "-z")
-        self.assertIn("i/-text", eol)
-        (self.repository / "tracked.txt").write_bytes(content.replace(b"\n", b"\r\n"))
-
-        with self.assertRaisesRegex(ContractViolation, "HEADと一致しません"):
-            subject.validate_push_head(
-                self.update(local_sha=current_head), current_head, self.repository
-            )
+        self.assert_binary_crlf_checkout_is_rejected(content, current_head)
 
     @unittest.skipUnless(os.linesep == "\r\n", "native CRLF requires Windows")
     def test_accepts_fresh_checkout_with_native_core_eol_on_windows(self) -> None:

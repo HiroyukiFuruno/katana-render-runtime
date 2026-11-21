@@ -38,13 +38,16 @@ function katanaDrawioHtmlTextContentStyle(style) {
 
 function katanaDrawioHtmlTextAlignItems(style) {
   return (
-    KATANA_DRAWIO_HTML_TEXT_ALIGN_ITEMS.get(katanaDrawioHtmlTextVerticalAlign(style)) ??
-    "center"
+    KATANA_DRAWIO_HTML_TEXT_ALIGN_ITEMS.get(katanaDrawioHtmlTextVerticalAlign(style)) ?? "center"
   );
 }
 
 function katanaDrawioHtmlTextVerticalAlign(style) {
-  return katanaDrawioStyleValueFromMap(style, "verticalAlign", katanaDrawioDefaultVerticalAlign(style));
+  return katanaDrawioStyleValueFromMap(
+    style,
+    "verticalAlign",
+    katanaDrawioDefaultVerticalAlign(style),
+  );
 }
 
 function katanaDrawioHtmlTextJustifyContent(style) {
@@ -87,9 +90,7 @@ function katanaDrawioHtmlTextTop(style, box) {
     return Math.round(box.y);
   }
   if (katanaDrawioIsBottomHtmlTextLabel(style)) {
-    return Math.round(
-      box.y + box.height + 7 + katanaDrawioHtmlTextSpacingTop(style),
-    );
+    return Math.round(box.y + box.height + 7 + katanaDrawioHtmlTextSpacingTop(style));
   }
   if (katanaDrawioUsesExplicitLeftTopHtmlTextLabel(style)) {
     return Math.round(box.y - katanaDrawioHtmlTextSpacingBottom(style) - 3);
@@ -107,8 +108,9 @@ function katanaDrawioHtmlTextTop(style, box) {
     );
   }
   const alignment = katanaDrawioHtmlTextVerticalAlign(style);
-  const textTop = (KATANA_DRAWIO_HTML_TEXT_TOP_BY_ALIGNMENT.get(alignment) ??
-    katanaDrawioMiddleHtmlTextTop)(box);
+  const textTop = (
+    KATANA_DRAWIO_HTML_TEXT_TOP_BY_ALIGNMENT.get(alignment) ?? katanaDrawioMiddleHtmlTextTop
+  )(box);
   return Math.round(textTop + katanaDrawioMiddleHtmlTextSpacingTop(style, alignment));
 }
 
@@ -185,19 +187,12 @@ function katanaDrawioHtmlTextLeft(style, box) {
     );
   }
   if (katanaDrawioIsBottomHtmlTextLabel(style)) {
-    return Math.round(
-      box.x + box.width / 2 - katanaDrawioAppliedLeftPadding(),
-    );
+    return Math.round(box.x + box.width / 2 - katanaDrawioAppliedLeftPadding());
   }
   return Math.round(
-    (
-      katanaDrawioIsRightHtmlTextLabel(style)
-        ? box.x +
-          box.width +
-          2 +
-          katanaDrawioHtmlTextSpacingLeft(style)
-        : box.x + KATANA_DRAWIO_HTML_TEXT_LEFT_PADDING
-    ) - katanaDrawioAppliedLeftPadding(),
+    (katanaDrawioIsRightHtmlTextLabel(style)
+      ? box.x + box.width + 2 + katanaDrawioHtmlTextSpacingLeft(style)
+      : box.x + KATANA_DRAWIO_HTML_TEXT_LEFT_PADDING) - katanaDrawioAppliedLeftPadding(),
   );
 }
 
@@ -210,19 +205,15 @@ function katanaDrawioHtmlTextBoxSizeStyle(style, box) {
     ];
   }
   if (katanaDrawioStyleValue(style, "overflow") === "hidden") {
-    return [
-      `max-height: ${Math.max(1, Math.round(box.height))}px`,
-      "overflow: hidden",
-    ];
+    return [`max-height: ${Math.max(1, Math.round(box.height))}px`, "overflow: hidden"];
   }
   return [];
 }
 
 function katanaDrawioHtmlTextWhiteSpace(style) {
-  return [
-    katanaDrawioIsFillHtmlTextLabel(style),
-    katanaDrawioIsBottomHtmlTextLabel(style),
-  ].some(Boolean)
+  return [katanaDrawioIsFillHtmlTextLabel(style), katanaDrawioIsBottomHtmlTextLabel(style)].some(
+    Boolean,
+  )
     ? "nowrap"
     : "normal";
 }
@@ -244,7 +235,9 @@ function katanaDrawioIsLeftHtmlTextLabel(style) {
 }
 
 function katanaDrawioIsSideHtmlTextLabel(style) {
-  return [katanaDrawioIsLeftHtmlTextLabel(style), katanaDrawioIsRightHtmlTextLabel(style)].some(Boolean);
+  return [katanaDrawioIsLeftHtmlTextLabel(style), katanaDrawioIsRightHtmlTextLabel(style)].some(
+    Boolean,
+  );
 }
 
 function katanaDrawioIsBottomHtmlTextLabel(style) {
@@ -266,10 +259,7 @@ function katanaDrawioUsesDefaultBottomImageHtmlTextLabel(style) {
 
 function katanaDrawioIsImageStyle(style) {
   const styleMap = katanaDrawioStyleMap(style);
-  return [
-    styleMap.has("image"),
-    styleMap.get("shape") === "image",
-  ].some(Boolean);
+  return [styleMap.has("image"), styleMap.get("shape") === "image"].some(Boolean);
 }
 
 function katanaDrawioUsesExplicitLeftTopHtmlTextLabel(style) {
@@ -311,7 +301,9 @@ function katanaDrawioHasExplicitHtmlTextFontColor(style) {
 }
 
 function katanaDrawioHtmlTextUsesDarkBackground(style) {
-  return [katanaDrawioHtmlTextUsesTransparentFill(style), katanaDrawioIsTextShapeStyle(style)].some(Boolean);
+  return [katanaDrawioHtmlTextUsesTransparentFill(style), katanaDrawioIsTextShapeStyle(style)].some(
+    Boolean,
+  );
 }
 
 function katanaDrawioHtmlTextUsesTransparentFill(style) {
@@ -328,8 +320,9 @@ function katanaDrawioHtmlTextAdaptiveColor(color) {
   return (
     katanaDrawioColorMapForTheme().get(katanaDrawioColorKey(color)) ||
     katanaDrawioColorMapForTheme().get(katanaDrawioColorKey(adaptiveColor)) ||
-    adaptiveColor
-  ) || undefined;
+    adaptiveColor ||
+    undefined
+  );
 }
 
 function katanaDrawioCanUseAdaptiveSourceColor(color) {
@@ -370,8 +363,4 @@ const KATANA_DRAWIO_HTML_TEXT_DARK_COLOR = new Map([
   ["#000000", "light-dark(#000000, #ffffff)"],
   ["default", "light-dark(#000000, #ffffff)"],
 ]);
-const KATANA_DRAWIO_HTML_TEXT_LIGHT_ON_DARK_BACKGROUND = new Set([
-  "#000000",
-  "#ffffff",
-  "default",
-]);
+const KATANA_DRAWIO_HTML_TEXT_LIGHT_ON_DARK_BACKGROUND = new Set(["#000000", "#ffffff", "default"]);

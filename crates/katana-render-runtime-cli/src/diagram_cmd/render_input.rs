@@ -1,10 +1,60 @@
-use crate::commands::ThemeModeArg;
+use crate::commands::{DiagramInputFormat, DiagramSourceOptions, ThemeModeArg};
 use katana_render_runtime::{DiagramKind, RenderConfig, RenderContext, RenderInput, RenderPolicy};
 use std::path::PathBuf;
+
+pub(super) struct DiagramRenderRequest {
+    pub(super) input_path: PathBuf,
+    pub(super) output_path: Option<PathBuf>,
+    pub(super) runtime: Option<PathBuf>,
+    pub(super) theme: Option<String>,
+    pub(super) theme_from: Option<String>,
+    pub(super) theme_mode: Option<ThemeModeArg>,
+    pub(super) cache_dir: Option<PathBuf>,
+    pub(super) source_options: DiagramSourceOptions,
+}
+
+impl DiagramRenderRequest {
+    pub(super) fn validate_input_options(&self, kind: DiagramKind) -> anyhow::Result<()> {
+        if kind != DiagramKind::Mermaid
+            && (self.source_options.input_format != DiagramInputFormat::Auto
+                || self.source_options.render_attestation.is_some()
+                || self.source_options.attempt_token.is_some())
+        {
+            anyhow::bail!("--input-format and render attestation are supported only for mermaid");
+        }
+        if self.source_options.render_attestation.is_none()
+            && self.source_options.attempt_token.is_some()
+        {
+            anyhow::bail!("--attempt-token requires --render-attestation");
+        }
+        Ok(())
+    }
+
+    pub(super) fn vendor_config(&self, kind: DiagramKind) -> anyhow::Result<serde_json::Value> {
+        RenderInputFactory::vendor_config(
+            kind,
+            self.theme.clone(),
+            self.theme_from.clone(),
+            self.theme_mode,
+            self.cache_dir.clone(),
+        )
+    }
+}
 
 pub(super) struct RenderInputFactory;
 
 impl RenderInputFactory {
+    pub(super) fn validate_runtime_options(
+        kind: DiagramKind,
+        runtime: Option<&PathBuf>,
+        cache_dir: Option<&PathBuf>,
+    ) -> anyhow::Result<()> {
+        if kind == DiagramKind::PlantUml && runtime.is_some() && cache_dir.is_some() {
+            anyhow::bail!("--runtime and --cache-dir cannot be used together for plantuml");
+        }
+        Ok(())
+    }
+
     pub(super) fn create(
         kind: DiagramKind,
         source: String,

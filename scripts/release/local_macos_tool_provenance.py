@@ -11,8 +11,9 @@ import re
 import stat
 import struct
 import tarfile
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, NamedTuple
+from typing import Any, NamedTuple
 from urllib import error, parse, request
 
 
@@ -91,7 +92,7 @@ def _read_url(url: str, limit: int, headers: dict[str, str] | None = None) -> by
             value = response.read(limit + 1)
     except (OSError, error.URLError) as exc:
         raise ProvenanceError("official artifact could not be retrieved") from exc
-    if not value or len(value) > limit:
+    if not isinstance(value, bytes) or not value or len(value) > limit:
         raise ProvenanceError("official artifact exceeds its bounded size")
     return value
 
@@ -245,12 +246,16 @@ def _archive_inventory(
     entries: dict[str, InventoryEntry] = {}
     natives: dict[str, tuple[list[str], list[str]]] = {}
     seen: set[str] = set()
-    class BoundedGzip:
+    class BoundedGzip(io.RawIOBase):
         def __init__(self) -> None:
+            super().__init__()
             self.source = gzip.GzipFile(fileobj=io.BytesIO(archive))
             self.consumed = 0
 
-        def read(self, size: int) -> bytes:
+        def readable(self) -> bool:
+            return True
+
+        def read(self, size: int = -1) -> bytes:
             if not 0 <= size <= MAX_FILE_BYTES:
                 raise ProvenanceError("official archive requests an unsupported read size")
             content = self.source.read(min(size, MAX_UNCOMPRESSED_ARCHIVE_BYTES - self.consumed + 1))

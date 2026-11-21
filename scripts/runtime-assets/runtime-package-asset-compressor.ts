@@ -8,9 +8,26 @@ import {
 } from "./runtime-asset-common";
 
 type CompressionMode = "--check" | "--write";
+type CompressionScope = "all" | "zenuml-only";
+interface CompressionOptions {
+  readonly mode: CompressionMode;
+  readonly scope: CompressionScope;
+}
 
 const COMPRESSED_RUNTIME_ASSET_KINDS = new Set(["mermaid", "drawio"]);
 const ZENUML_RUNTIME_ASSET_KINDS = ["zenuml-core", "mermaid-zenuml"] as const;
+const DRAWIO_LICENSE_SOURCE = path.join(
+  RuntimeAssetPaths.vendorDir(RuntimeAssetCatalog.byKind("drawio")),
+  "LICENSE",
+);
+const DRAWIO_LICENSE_TARGET = path.join(
+  "crates",
+  "katana-render-runtime-assets",
+  "assets",
+  "licenses",
+  "drawio",
+  "LICENSE",
+);
 const DRAWIO_RESOURCE_ROOT = path.join(
   "crates",
   "katana-render-runtime",
@@ -89,6 +106,21 @@ export interface ZenumlRuntimeAssetArchiveFile {
 export interface ZenumlRuntimeAssetArchive {
   readonly compressedBytes: Buffer;
   readonly indexSource: string;
+}
+
+export function syncDrawioLicenseFromVendor(repositoryRoot: string, mode: CompressionMode): void {
+  const source = path.join(repositoryRoot, DRAWIO_LICENSE_SOURCE);
+  const target = path.join(repositoryRoot, DRAWIO_LICENSE_TARGET);
+  const expected = fs.readFileSync(source);
+  if (mode === "--write") {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, expected);
+    return;
+  }
+  const actual = fs.existsSync(target) ? fs.readFileSync(target) : undefined;
+  if (actual === undefined || !actual.equals(expected)) {
+    throw new Error(`Draw.io package license is missing or differs from vendor source: ${target}`);
+  }
 }
 
 export function compressRuntimePackageAsset(bytes: Uint8Array): Buffer {
@@ -207,6 +239,14 @@ function drawioResourceArchiveIndexName(group: string): string {
   return `DRAWIO_RESOURCE_ARCHIVE_${group.toUpperCase().replaceAll("-", "_")}_INDEX`;
 }
 
+export function generatedRuntimeRustAssetPaths(repositoryRoot: string): string[] {
+  return new RuntimePackageAssetCompressor().generatedRustAssetPaths(repositoryRoot);
+}
+
+export function generatedRuntimeRustAssetInputPaths(repositoryRoot: string): string[] {
+  return new RuntimePackageAssetCompressor().generatedRustAssetInputPaths(repositoryRoot);
+}
+
 function indexArraySource(name: string, entries: readonly string[]): string {
   return [
     `pub(super) const ${name}: &[DrawioResourceArchiveEntry] = &[`,
@@ -252,6 +292,41 @@ export function buildZenumlRuntimeAssetArchive(
 }
 
 export class RuntimePackageAssetCompressor {
+  generatedRustAssetInputPaths(repositoryRoot: string): string[] {
+    const repository = path.resolve(repositoryRoot);
+    this.assertCanonicalDirectory(repository, DRAWIO_RESOURCE_ROOT);
+    const resourcesRoot = path.join(repository, DRAWIO_RESOURCE_ROOT);
+    const drawioInputs = this.drawioResourceFileNames(resourcesRoot).map((filePath) =>
+      path.posix.join(DRAWIO_RESOURCE_ROOT.split(path.sep).join("/"), filePath),
+    );
+    const zenumlInputs = ZENUML_RUNTIME_ASSET_KINDS.map((kind) =>
+      RuntimeAssetPaths.assetFile(RuntimeAssetCatalog.byKind(kind)).split(path.sep).join("/"),
+    );
+    return [...drawioInputs, ...zenumlInputs].sort();
+  }
+
+  generatedRustAssetPaths(repositoryRoot: string): string[] {
+    const resourcesRoot = path.join(repositoryRoot, DRAWIO_RESOURCE_ROOT);
+    const indexNames = new Set(
+      this.walkFiles(resourcesRoot)
+        .filter((filePath) => {
+          const rootEntry = path.relative(resourcesRoot, filePath).split(path.sep).at(0);
+          return (
+            rootEntry !== undefined && !DRAWIO_RESOURCE_ARCHIVE_EXCLUDED_ROOT_ENTRIES.has(rootEntry)
+          );
+        })
+        .map((filePath) => path.relative(resourcesRoot, filePath).split(path.sep).join("/"))
+        .map((filePath) => `drawio-resources-${drawioResourceArchiveGroup(filePath)}-index.rs`),
+    );
+    const repositoryPaths = (names: string[]): string[] =>
+      names.map((name) => name.split(path.sep).join("/"));
+    return repositoryPaths([
+      path.join(DRAWIO_RESOURCE_GENERATED_DIR, "drawio-resources-index.rs"),
+      ...[...indexNames].sort().map((name) => path.join(DRAWIO_RESOURCE_GENERATED_DIR, name)),
+      ZENUML_RUNTIME_ASSET_INDEX,
+    ]).sort();
+  }
+
   static supports(definition: RuntimeAssetDefinition): boolean {
     return COMPRESSED_RUNTIME_ASSET_KINDS.has(definition.kind);
   }
@@ -274,7 +349,11 @@ export class RuntimePackageAssetCompressor {
     }
   }
 
-  run(mode: CompressionMode): void {
+  run(mode: CompressionMode, scope: CompressionScope = "all"): void {
+    if (scope === "zenuml-only") {
+      this.syncZenumlRuntimeAssets(mode);
+      return;
+    }
     for (const definition of RuntimeAssetCatalog.all().filter((it) =>
       RuntimePackageAssetCompressor.supports(it),
     )) {
@@ -284,6 +363,7 @@ export class RuntimePackageAssetCompressor {
         this.check(definition);
       }
     }
+    syncDrawioLicenseFromVendor(process.cwd(), mode);
     this.syncDrawioResources(mode);
     this.syncZenumlRuntimeAssets(mode);
   }
@@ -329,6 +409,13 @@ export class RuntimePackageAssetCompressor {
   }
 
   private drawioResourceFiles(root: string): DrawioResourceArchiveFile[] {
+    return this.drawioResourceFileNames(root).map((filePath) => ({
+      path: filePath,
+      bytes: fs.readFileSync(path.join(root, filePath)),
+    }));
+  }
+
+  private drawioResourceFileNames(root: string): string[] {
     return this.walkFiles(root)
       .filter((filePath) => {
         const rootEntry = path.relative(root, filePath).split(path.sep).at(0);
@@ -336,10 +423,31 @@ export class RuntimePackageAssetCompressor {
           rootEntry !== undefined && !DRAWIO_RESOURCE_ARCHIVE_EXCLUDED_ROOT_ENTRIES.has(rootEntry)
         );
       })
-      .map((filePath) => ({
-        path: path.relative(root, filePath).split(path.sep).join("/"),
-        bytes: fs.readFileSync(filePath),
-      }));
+      .map((filePath) => path.relative(root, filePath).split(path.sep).join("/"));
+  }
+
+  private assertCanonicalDirectory(repositoryRoot: string, relativePath: string): void {
+    const canonicalRoot = fs.realpathSync(repositoryRoot);
+    if (
+      fs.lstatSync(repositoryRoot).isSymbolicLink() ||
+      !fs.lstatSync(repositoryRoot).isDirectory() ||
+      canonicalRoot !== repositoryRoot
+    )
+      throw new Error(`Repository root is not a canonical directory: ${repositoryRoot}`);
+    let current = repositoryRoot;
+    for (const part of relativePath.split(path.sep)) {
+      current = path.join(current, part);
+      const stat = fs.lstatSync(current);
+      const physical = fs.realpathSync(current);
+      if (
+        stat.isSymbolicLink() ||
+        !stat.isDirectory() ||
+        (physical !== canonicalRoot && !physical.startsWith(`${canonicalRoot}${path.sep}`))
+      )
+        throw new Error(
+          `Resource directory is not a canonical in-repository directory: ${current}`,
+        );
+    }
   }
 
   private walkFiles(directory: string): string[] {
@@ -386,14 +494,22 @@ export class RuntimePackageAssetCompressor {
   }
 }
 
-function compressionMode(argv: readonly string[]): CompressionMode {
-  const mode = argv.at(0);
-  if (argv.length !== 1 || (mode !== "--check" && mode !== "--write")) {
-    throw new Error("Usage: runtime-package-asset-compressor.ts <--check|--write>");
+export function parseCompressionOptions(argv: readonly string[]): CompressionOptions {
+  const modes = argv.filter(
+    (arg): arg is CompressionMode => arg === "--check" || arg === "--write",
+  );
+  const scopes = argv.filter((arg) => arg === "--zenuml-only");
+  if (argv.length !== modes.length + scopes.length || modes.length !== 1 || scopes.length > 1) {
+    throw new Error("Usage: runtime-package-asset-compressor.ts <--check|--write> [--zenuml-only]");
   }
-  return mode;
+  const mode = modes[0];
+  if (mode === undefined) {
+    throw new Error("Compression mode is missing");
+  }
+  return { mode, scope: scopes.length === 1 ? "zenuml-only" : "all" };
 }
 
 if (import.meta.main) {
-  new RuntimePackageAssetCompressor().run(compressionMode(process.argv.slice(2)));
+  const options = parseCompressionOptions(process.argv.slice(2));
+  new RuntimePackageAssetCompressor().run(options.mode, options.scope);
 }

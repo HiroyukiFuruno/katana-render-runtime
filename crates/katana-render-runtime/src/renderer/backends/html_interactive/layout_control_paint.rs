@@ -5,7 +5,7 @@ use super::layout::HtmlLayoutRenderer;
 use super::style::CssStyle;
 use super::text_metrics::text_width;
 use super::types::{ControlLayout, ElementRenderContext, HitTarget, HitTargetKind};
-use taffy::style::{AlignItems, Display, FlexDirection, JustifyContent};
+use taffy::style::{AlignContentKeyword, AlignItemsKeyword, Display, FlexDirection};
 
 #[derive(Clone, Copy)]
 struct ControlTextLayout {
@@ -61,7 +61,7 @@ impl HtmlLayoutRenderer {
         height: f32,
         style: &CssStyle,
     ) {
-        let baseline = start + (height + style.font_size) / 2.0 - 2.0;
+        let baseline = start + (height - style.line_height) / 2.0 + style.font_size;
         self.paint_text_lines(&[text.to_string()], x, width, baseline, style);
     }
 
@@ -116,26 +116,97 @@ fn flex_center_axes(style: &CssStyle) -> Option<(bool, bool)> {
             style.flex_direction,
             FlexDirection::Row | FlexDirection::RowReverse
         );
+        /* WHY: 従来の安全指定による配置を変えないため、既定と unsafe の中心位置だけを同じ軸へ投影する。 */
+        let main_centered = style.justify_content.is_some_and(|alignment| {
+            !alignment.is_safe() && alignment.keyword() == AlignContentKeyword::Center
+        });
+        let cross_centered = style.align_items.is_some_and(|alignment| {
+            !alignment.is_safe() && alignment.keyword() == AlignItemsKeyword::Center
+        });
         if row_axis {
-            (
-                style.justify_content == Some(JustifyContent::CENTER),
-                style.align_items == Some(AlignItems::CENTER),
-            )
+            (main_centered, cross_centered)
         } else {
-            (
-                style.align_items == Some(AlignItems::CENTER),
-                style.justify_content == Some(JustifyContent::CENTER),
-            )
+            (cross_centered, main_centered)
         }
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ControlLayout, button_text_layout};
+    use super::{ControlLayout, button_text_layout, flex_center_axes};
     use crate::renderer::backends::html_interactive::constants::BUTTON_TEXT_LEFT_PADDING;
-    use crate::renderer::backends::html_interactive::{style::CssStyle, text_metrics::text_width};
+    use crate::renderer::backends::html_interactive::{
+        style::{CssBorderStyle, CssStyle},
+        text_metrics::text_width,
+    };
     use taffy::style::{AlignItems, Display, FlexDirection, JustifyContent};
+
+    #[test]
+    fn parsed_center_axes_preserve_safety_and_direction() {
+        let alignments = [
+            (None, false),
+            (Some("center"), true),
+            (Some("unsafe center"), true),
+            (Some("safe center"), false),
+            (Some("end"), false),
+            (Some("unsafe end"), false),
+            (Some("safe end"), false),
+            (Some("flex-end"), false),
+            (Some("unsafe flex-end"), false),
+            (Some("safe flex-end"), false),
+        ];
+        for (direction, row_axis) in [
+            ("row", true),
+            ("row-reverse", true),
+            ("column", false),
+            ("column-reverse", false),
+        ] {
+            for property in ["align-items", "justify-content"] {
+                for (alignment, centered) in alignments {
+                    assert_parsed_center_case(direction, row_axis, property, alignment, centered);
+                }
+            }
+        }
+    }
+
+    fn assert_parsed_center_case(
+        direction: &str,
+        row_axis: bool,
+        property: &str,
+        alignment: Option<&str>,
+        centered: bool,
+    ) {
+        let mut style = parsed_center_style(direction, property, alignment);
+        let horizontal = row_axis == (property == "justify-content");
+        let expected = if horizontal {
+            (centered, false)
+        } else {
+            (false, centered)
+        };
+        assert_eq!(
+            flex_center_axes(&style),
+            Some(expected),
+            "{direction} {property}: {alignment:?}"
+        );
+        style.apply("display", "block");
+        assert_eq!(flex_center_axes(&style), None);
+    }
+
+    fn parsed_center_style(direction: &str, property: &str, alignment: Option<&str>) -> CssStyle {
+        let mut style = CssStyle::browser_default();
+        style.apply("display", "flex");
+        style.apply("flex-direction", direction);
+        assert_eq!(style.align_items, None);
+        assert_eq!(style.justify_content, None);
+        if let Some(alignment) = alignment {
+            style.apply(property, alignment);
+            assert!(
+                style.align_items.is_some() || style.justify_content.is_some(),
+                "{property}: {alignment}"
+            );
+        }
+        style
+    }
 
     #[test]
     fn column_flex_centers_button_text_on_cross_and_main_axes() {
@@ -145,6 +216,7 @@ mod tests {
         style.align_items = Some(AlignItems::CENTER);
         style.justify_content = Some(JustifyContent::CENTER);
         style.border_width = 1.0;
+        style.border_style = CssBorderStyle::Solid;
         let layout = ControlLayout {
             x: 0.0,
             y: 0.0,

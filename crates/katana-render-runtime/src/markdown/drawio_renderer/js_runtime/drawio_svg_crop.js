@@ -126,10 +126,7 @@ function katanaDrawioIsStackedSketchSwimlaneFrameElement(element, board) {
     element.localName === "rect",
     Math.abs(box.height - board.height) <= Math.max(4, board.height * 0.02),
   ].every(Boolean);
-  return [
-    hasSourceWidth,
-    isTransparentHitRegion || isPlainBoardRect,
-  ].every(Boolean);
+  return [hasSourceWidth, isTransparentHitRegion || isPlainBoardRect].every(Boolean);
 }
 
 function katanaDrawioStackedSketchSwimlaneBoardEntry() {
@@ -152,13 +149,6 @@ function katanaDrawioCropBoxContainsContent(cropBox, contentBox) {
     katanaDrawioBoxRight(contentBox) <= katanaDrawioBoxRight(exportBox),
     katanaDrawioBoxBottom(contentBox) <= katanaDrawioBoxBottom(exportBox),
   ].every(Boolean);
-}
-
-function katanaDrawioCropContentBox(svg) {
-  const boxes = katanaDrawioCropContentElements(svg)
-    .map(katanaDrawioElementBox)
-    .filter(katanaDrawioHasArea);
-  return katanaDrawioUnionBox(boxes) ?? katanaDrawioEmptyContentBox();
 }
 
 function katanaDrawioStackedSketchSwimlaneCropContentBox(
@@ -287,9 +277,7 @@ function katanaDrawioMeasuredContentBox(svg) {
 }
 
 function katanaDrawioPreferredContentBox(svg) {
-  const sourceBox = katanaDrawioSourceBoxWithLeftLabelPadding(
-    katanaDrawioPreferredSourceBox(svg),
-  );
+  const sourceBox = katanaDrawioSourceBoxWithLeftLabelPadding(katanaDrawioPreferredSourceBox(svg));
   if (katanaDrawioIsKanbanExamplesSource()) {
     return sourceBox ?? katanaDrawioContentBox(svg);
   }
@@ -385,10 +373,9 @@ function katanaDrawioNeedsMeasuredContentBox(svg) {
     contentBox,
     sourceBox.width > 0,
     contentBox.width > 0,
-    [
-      contentBox.width > sourceBox.width * 1.03,
-      contentBox.height > sourceBox.height * 1.03,
-    ].some(Boolean),
+    [contentBox.width > sourceBox.width * 1.03, contentBox.height > sourceBox.height * 1.03].some(
+      Boolean,
+    ),
   ].every(Boolean);
 }
 
@@ -485,9 +472,8 @@ function katanaDrawioTransformMatrix(match) {
 }
 
 function katanaDrawioTransformNumbers(value) {
-  return Array.from(
-    String(value).matchAll(/[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?/gi),
-    (match) => Number(match[0]),
+  return Array.from(String(value).matchAll(/[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?/gi), (match) =>
+    Number(match[0]),
   );
 }
 
@@ -566,46 +552,6 @@ function katanaDrawioTransformPoint(point, matrix) {
     x: a * point.x + c * point.y + e,
     y: b * point.x + d * point.y + f,
   };
-}
-
-function katanaDrawioTranslatedBox(box, translate) {
-  return {
-    x: box.x + translate.x,
-    y: box.y + translate.y,
-    width: box.width,
-    height: box.height,
-  };
-}
-
-function katanaDrawioTranslate(element) {
-  return katanaDrawioParentTranslate(element.parentNode);
-}
-
-function katanaDrawioParentTranslate(node) {
-  return node
-    ? katanaDrawioAddTranslate(katanaDrawioParentTranslate(node.parentNode), node)
-    : { x: 0, y: 0 };
-}
-
-function katanaDrawioAddTranslate(translate, node) {
-  const next = katanaDrawioNodeTranslate(node);
-  return { x: translate.x + next.x, y: translate.y + next.y };
-}
-
-function katanaDrawioNodeTranslate(node) {
-  return katanaDrawioTranslateMatch(String(node?.getAttribute?.("transform") ?? ""));
-}
-
-function katanaDrawioTranslateMatch(transform) {
-  const match = transform.match(/translate\(([-\d.]+)(?:[,\s]+([-\d.]+))?\)/);
-  return [match]
-    .filter(Boolean)
-    .map(katanaDrawioTranslateFromMatch)
-    .concat([{ x: 0, y: 0 }])[0];
-}
-
-function katanaDrawioTranslateFromMatch(match) {
-  return { x: Number(match[1]), y: Number(match[2] ?? 0) };
 }
 
 function katanaDrawioUnionBox(boxes) {
@@ -718,11 +664,9 @@ function katanaDrawioHasFractionalNegativeContentOrigin(svg, axis) {
 }
 
 function katanaDrawioHasPreservedTopPadding(box) {
-  return [
-    Math.abs(box.x) <= 1,
-    box.y > 0,
-    box.y <= KATANA_DRAWIO_SOURCE_TOP_PADDING_LIMIT,
-  ].every(Boolean);
+  return [Math.abs(box.x) <= 1, box.y > 0, box.y <= KATANA_DRAWIO_SOURCE_TOP_PADDING_LIMIT].every(
+    Boolean,
+  );
 }
 
 function katanaDrawioHasOnePixelTopLeftCrop(box) {
@@ -775,7 +719,8 @@ function katanaDrawioRenderedContentOverflowsSourcePaint(svg, edge) {
   return [
     sourceBox,
     contentBox,
-    edge(contentBox) > edge(sourceBox ?? katanaDrawioEmptyContentBox()) + KATANA_DRAWIO_PAINT_EDGE_TOLERANCE,
+    edge(contentBox) >
+      edge(sourceBox ?? katanaDrawioEmptyContentBox()) + KATANA_DRAWIO_PAINT_EDGE_TOLERANCE,
   ].every(Boolean);
 }
 

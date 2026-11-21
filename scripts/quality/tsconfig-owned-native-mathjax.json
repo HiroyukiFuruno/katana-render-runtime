@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2024"],
+    "types": [],
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "useUnknownInCatchVariables": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "skipLibCheck": true
+  },
+  "files": [
+    "../../crates/katana-render-runtime/src/markdown/mathjax_renderer/js_runtime/render_mathjax.js",
+    "../../crates/katana-render-runtime/src/markdown/mathjax_renderer/js_runtime/host_mathjax.d.ts"
+  ]
+}
