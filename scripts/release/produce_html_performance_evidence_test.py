@@ -29,6 +29,7 @@ from collections.abc import Callable, Mapping, Sequence
 from types import FrameType
 
 import psutil
+import html_performance_frozen_binary as binary_freeze
 from html_performance_host_load_test_support import cpu_times
 import produce_html_performance_evidence as typed_producer
 import html_performance_host_load as host_load
@@ -990,7 +991,7 @@ class TransportBundleUnitTests(unittest.TestCase):
             before = source.lstat()
             producer._clone_transport_file(source, target, gate.sha256(source))
             after = source.lstat()
-            self.assertEqual(producer._file_identity(before), producer._file_identity(after))
+            self.assertEqual(binary_freeze.file_identity(before), binary_freeze.file_identity(after))
             self.assertEqual(before.st_mode, after.st_mode)
             self.assertNotEqual((before.st_dev, before.st_ino), (target.stat().st_dev, target.stat().st_ino))
             target.write_bytes(b"clone changed")
@@ -1024,7 +1025,7 @@ class TransportBundleUnitTests(unittest.TestCase):
             target = Path(temporary).resolve() / "system-version-copy.plist"
             producer._clone_transport_file(source, target, checksum)
             after = source.lstat()
-            self.assertEqual(producer._file_identity(before), producer._file_identity(after))
+            self.assertEqual(binary_freeze.file_identity(before), binary_freeze.file_identity(after))
             self.assertEqual(before.st_mode, after.st_mode)
             self.assertNotEqual((before.st_dev, before.st_ino),
                                 (target.stat().st_dev, target.stat().st_ino))
@@ -4147,7 +4148,7 @@ class CapacityBindingUnitTests(unittest.TestCase):
             destination.write_bytes(b"unit binary")
             return gate.sha256(destination)
         with patch.dict(os.environ, self.environment, clear=True), \
-                patch.object(typed_producer, "freeze_binary", side_effect=frozen_fixture), \
+                patch.object(binary_freeze, "freeze_binary", side_effect=frozen_fixture), \
                 patch.object(shutil, "which", return_value=str(self.cargo)), \
                 patch.object(gate, "LOCK_SHA", self.lock_sha), \
                 patch.object(typed_producer, "_measurement_command", side_effect=execute):
@@ -4508,7 +4509,7 @@ class CapacityBindingUnitTests(unittest.TestCase):
         self.assertEqual(selected, executable)
         self.assertFalse(executable.exists())
         with self.assertRaisesRegex(ValueError, "selected binary must be a canonical regular file"):
-            typed_producer.freeze_binary(selected, self.root / "tmp/missing-target/frozen")
+            binary_freeze.freeze_binary(selected, self.root / "tmp/missing-target/frozen")
 
     def test_observed_candidate_version_cannot_replace_fixed_lock_binding(self) -> None:
         metadata = self.arm_metadata("candidate")
@@ -4618,7 +4619,7 @@ class ProducerJsonBoundaryUnitTests(unittest.TestCase):
                 with self.subTest(value=value), patch.object(os, "O_NOFOLLOW", value, create=True), \
                         patch.object(os, "open") as opened:
                     with self.assertRaisesRegex(ValueError, "no-follow"):
-                        typed_producer.freeze_binary(source, root / "frozen/binary")
+                        binary_freeze.freeze_binary(source, root / "frozen/binary")
                     opened.assert_not_called()
                     self.assertFalse((root / "frozen").exists())
 
@@ -4700,7 +4701,7 @@ class BinaryFreezeUnitTests(unittest.TestCase):
         self.frozen = self.root / "frozen/binary"
 
     def test_regular_single_fd_copy_keeps_bytes_sha_and_readonly_mode(self) -> None:
-        checksum = typed_producer.freeze_binary(self.binary, self.frozen)
+        checksum = binary_freeze.freeze_binary(self.binary, self.frozen)
         self.assertEqual(checksum, gate.sha256(self.binary))
         self.assertEqual(checksum, gate.sha256(self.frozen))
         self.assertEqual(self.frozen.read_bytes(), self.binary.read_bytes())
@@ -4710,11 +4711,11 @@ class BinaryFreezeUnitTests(unittest.TestCase):
         link = self.root / "link"
         link.symlink_to(self.binary)
         with self.assertRaises(ValueError):
-            typed_producer.freeze_binary(link, self.frozen)
+            binary_freeze.freeze_binary(link, self.frozen)
         link.unlink()
         link.symlink_to(self.root, target_is_directory=True)
         with self.assertRaises(ValueError):
-            typed_producer.freeze_binary(self.binary, link / "frozen/binary")
+            binary_freeze.freeze_binary(self.binary, link / "frozen/binary")
         self.assertFalse(self.frozen.exists())
 
     def test_identity_hash_and_read_failures_close_real_source_fd(self) -> None:
@@ -4748,11 +4749,12 @@ class BinaryFreezeUnitTests(unittest.TestCase):
             with self.subTest(failure=failure), patch.object(os, "open", side_effect=opened), \
                     patch.object(os, "fstat", side_effect=status):
                 if failure == "hash":
-                    with patch.object(gate, "sha256", return_value="0" * 64), self.assertRaisesRegex(ValueError, "SHA differs"):
-                        typed_producer.freeze_binary(self.binary, destination)
+                    with patch.object(hashlib, "file_digest", return_value=hashlib.sha256(b"incorrect bytes")), \
+                            self.assertRaisesRegex(ValueError, "SHA differs"):
+                        binary_freeze.freeze_binary(self.binary, destination)
                 else:
                     with self.assertRaises((ValueError, OSError)):
-                        typed_producer.freeze_binary(self.binary, destination)
+                        binary_freeze.freeze_binary(self.binary, destination)
             with self.assertRaises(OSError):
                 original_fstat(descriptors[-1])
 

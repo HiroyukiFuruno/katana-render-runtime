@@ -48,8 +48,6 @@ def _command(mode: str, arguments: Sequence[str]) -> list[str]:
         program = ROOT / "scripts/release/verify_html_performance_portable.py"
     elif mode == "local-proof":
         program = ROOT / "scripts/release/local_html_performance_evidence.py"
-    elif mode == "freeze-capture":
-        program = ROOT / "scripts/release/freeze_html_capture_binary.py"
     elif mode == "test":
         return [sys.executable, "-m", "unittest", "discover", "-s", "scripts/release", "-p", "*_test.py", "--failfast", *arguments]
     else:
@@ -166,10 +164,7 @@ def main() -> int:
     parser.add_argument("--capture-launch-environment", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--replay-launch-environment", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--replay-launch-environment-sha256", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument(
-        "mode",
-        choices=("verify", "verify-portable", "produce", "reuse", "promote", "local-proof", "freeze-capture", "test"),
-    )
+    parser.add_argument("mode", choices=("verify", "verify-portable", "produce", "reuse", "promote", "local-proof", "test"))
     args, arguments = parser.parse_known_args()
     if args.capture_launch_environment or args.replay_launch_environment or args.replay_launch_environment_sha256:
         parser.error("launch environment options require --bootstrap")

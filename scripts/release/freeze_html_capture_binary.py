@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import cast
 
-from produce_html_performance_evidence import freeze_binary
+from html_performance_frozen_binary import freeze_binary
 
 
 def main(arguments: Sequence[str] | None = None) -> int:

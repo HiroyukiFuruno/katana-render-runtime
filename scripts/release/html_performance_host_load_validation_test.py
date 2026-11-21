@@ -71,7 +71,8 @@ class HostLoadValidationTest(unittest.TestCase):
                                               "workerLoads": [{"before": 0.1, "after": 0.2}
                                                               for _ in range(5)]}]
         self.bundle = cast(gate.Bundle, FixtureBundle(self.order, {"samples": [{"sample": i} for i in range(5)]}))
-        self.records = {host.PRODUCER: ("p" * 64, 1), host.ADAPTER: ("a" * 64, 1)}
+        self.records = {host.PRODUCER: ("p" * 64, 1), host.ADAPTER: ("a" * 64, 1),
+                        host.FREEZE_HELPER: (host.FREEZE_HELPER_SHA256, 1)}
         self.pins = patch.multiple(host, CPU_PRODUCER_SHA256="p" * 64, CPU_ADAPTER_SHA256="a" * 64)
         self.pins.start()
         self.addCleanup(self.pins.stop)
@@ -193,8 +194,19 @@ class HostLoadValidationTest(unittest.TestCase):
 
 
 class CurrentHostLoadPreflightTest(unittest.TestCase):
+    def write_sources(self, root: Path, producer_content: bytes) -> tuple[Path, Path, Path]:
+        producer = root / host.PRODUCER
+        adapter = root / host.ADAPTER
+        freeze_helper = root / host.FREEZE_HELPER
+        producer.parent.mkdir(parents=True)
+        producer.write_bytes(producer_content)
+        adapter.write_bytes(b"reviewed-adapter")
+        freeze_helper.write_bytes(b"reviewed-freeze")
+        return producer, adapter, freeze_helper
+
     def test_previous_current_cpu_producer_is_historical_and_unknown_is_rejected(self) -> None:
         previous_versions = (
+            "d85831696766a9087f9c589c2bc3a545ce918e40d7d79094ee769824f236dc4e",
             "903e06b4a0667eba4a4009accafc3b0adb14cc68db087aeb07a3369b0478a4a2",
             "213afcfcf895ee1f048564e70d10668187e0829eee49cbb3fbdc384648777e1b",
             "43d967863089f9c2267326f2dde177db898861d1c0634f2e951eda7b212cbbff",
@@ -228,11 +240,7 @@ class CurrentHostLoadPreflightTest(unittest.TestCase):
     def test_historical_cpu_producer_is_not_a_current_observer(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory).resolve()
-            producer = root / host.PRODUCER
-            adapter = root / host.ADAPTER
-            producer.parent.mkdir(parents=True)
-            producer.write_bytes(b"historical-cpu-producer")
-            adapter.write_bytes(b"reviewed-adapter")
+            producer, adapter, _ = self.write_sources(root, b"historical-cpu-producer")
             with patch.multiple(host, HISTORICAL_CPU_PRODUCER_SHA256=frozenset({gate.sha256(producer)}),
                                 CPU_ADAPTER_SHA256=gate.sha256(adapter)):
                 with self.assertRaisesRegex(ValueError, "not the CPU observer"):
@@ -251,21 +259,21 @@ class CurrentHostLoadPreflightTest(unittest.TestCase):
     def test_current_reviewed_sources_pass(self) -> None:
         host.require_current_cpu_observer_sources(Path(__file__).resolve().parents[2])
 
-    def test_modified_or_legacy_producer_is_rejected(self) -> None:
+    def test_modified_observer_sources_and_legacy_producer_are_rejected(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory).resolve()
-            producer = root / host.PRODUCER
-            adapter = root / host.ADAPTER
-            producer.parent.mkdir(parents=True)
-            producer.write_bytes(b"reviewed-producer")
-            adapter.write_bytes(b"reviewed-adapter")
+            producer, adapter, freeze_helper = self.write_sources(root, b"reviewed-producer")
             with patch.multiple(host, CPU_PRODUCER_SHA256=gate.sha256(producer),
-                                CPU_ADAPTER_SHA256=gate.sha256(adapter)):
+                                CPU_ADAPTER_SHA256=gate.sha256(adapter),
+                                FREEZE_HELPER_SHA256=gate.sha256(freeze_helper)):
                 host.require_current_cpu_observer_sources(root)
-                adapter.write_bytes(b"changed")
-                with self.assertRaisesRegex(ValueError, "unreviewed"):
-                    host.require_current_cpu_observer_sources(root)
-                adapter.write_bytes(b"reviewed-adapter")
+                for dependency in (adapter, freeze_helper):
+                    with self.subTest(dependency=dependency.name):
+                        original = dependency.read_bytes()
+                        dependency.write_bytes(b"changed")
+                        with self.assertRaisesRegex(ValueError, "unreviewed"):
+                            host.require_current_cpu_observer_sources(root)
+                        dependency.write_bytes(original)
                 producer.write_bytes(b"changed")
                 with patch.object(host, "LEGACY_PRODUCER_SHA256", frozenset({gate.sha256(producer)})):
                     with self.assertRaisesRegex(ValueError, "not the CPU observer"):

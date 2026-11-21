@@ -14,9 +14,10 @@ LEGACY_PRODUCER_SHA256 = frozenset({
     "fd6e1083df03cc7dc8f016e847337aa7c7d3c50d16ac57bfa016d6641468b6f5",
     "721ec42d4ba7ce2e06beba9cda6458e68f7b0e27222b3f9cd1fb16e6eec63736",
 })
-# The producer and its adapter must be independently reviewed and fixed together.
-CPU_PRODUCER_SHA256 = "d85831696766a9087f9c589c2bc3a545ce918e40d7d79094ee769824f236dc4e"
+# 現行の測定には実行ファイルの固定処理も含めて照合する。
+CPU_PRODUCER_SHA256 = "9ba41f12d73e0e9afaab9ca3d6f94d3c25860fb6bffae6e24fffb6841fae6b5a"
 HISTORICAL_CPU_PRODUCER_SHA256 = frozenset({
+    "d85831696766a9087f9c589c2bc3a545ce918e40d7d79094ee769824f236dc4e",
     "903e06b4a0667eba4a4009accafc3b0adb14cc68db087aeb07a3369b0478a4a2",
     "3d5f1ea31349e7633771dd25e7c9e89659323423cf5f8ccd84406fb8468df577",
     "85e747448ab4620fb4b652bbbdb199a9eba16842d5a9783dbdd8bb61160dc40b",
@@ -51,28 +52,33 @@ HISTORICAL_CPU_PRODUCER_SHA256 = frozenset({
     "bb32d7d43a89547da501aa69a379ab69f929cd214111808a758ea94ff07ea753",
 })
 CPU_ADAPTER_SHA256 = "bbfc04542a16b94527431f3288f2f303c34b7940b6ef675f1fab44b94edbd5e2"
+FREEZE_HELPER_SHA256 = "f1af786e65b005b7d1b7ac238455d922fd2d0bbaf456652cf95c12596161f42b"
 PRODUCER = "scripts/release/produce_html_performance_evidence.py"
 ADAPTER = "scripts/release/html_performance_host_load.py"
+FREEZE_HELPER = "scripts/release/html_performance_frozen_binary.py"
 
 
 def _method(records: Mapping[str, tuple[str, int]]) -> str:
     producer = records.get(PRODUCER, ("", 0))[0]
     if producer in LEGACY_PRODUCER_SHA256:
         return "legacy-load-average"
-    if ((producer == CPU_PRODUCER_SHA256 or producer in HISTORICAL_CPU_PRODUCER_SHA256)
-            and records.get(ADAPTER, ("", 0))[0] == CPU_ADAPTER_SHA256):
-        return "cpu-busy"
+    if records.get(ADAPTER, ("", 0))[0] == CPU_ADAPTER_SHA256:
+        if producer in HISTORICAL_CPU_PRODUCER_SHA256:
+            return "cpu-busy"
+        if (producer == CPU_PRODUCER_SHA256
+                and records.get(FREEZE_HELPER, ("", 0))[0] == FREEZE_HELPER_SHA256):
+            return "cpu-busy"
     raise ValueError("unreviewed host-load producer source")
 
 
 def require_current_cpu_observer_sources(root: Path) -> None:
-    """Fail before measurement unless both current observer sources are reviewed."""
+    """観測と実行ファイル固定に使う現行ソースを計測前に照合する。"""
     from verify_html_performance_evidence import sha256
 
     if not root.is_absolute() or root.resolve(strict=True) != root:
         raise ValueError("host-load source root differs")
     records: dict[str, tuple[str, int]] = {}
-    for name in (PRODUCER, ADAPTER):
+    for name in (PRODUCER, ADAPTER, FREEZE_HELPER):
         path = root / name
         if not path.is_file() or path.is_symlink() or path.resolve(strict=True) != path:
             raise ValueError("host-load source is not a canonical regular file")

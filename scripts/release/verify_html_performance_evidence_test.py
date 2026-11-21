@@ -2269,7 +2269,8 @@ class PerformanceEvidenceTest(unittest.TestCase):
     def test_v3_host_load_uses_authenticated_program_instead_of_legacy_sdk(self) -> None:
         legacy = {host_load_validation.PRODUCER: (next(iter(host_load_validation.LEGACY_PRODUCER_SHA256)), 1)}
         cpu = {host_load_validation.PRODUCER: (host_load_validation.CPU_PRODUCER_SHA256, 1),
-               host_load_validation.ADAPTER: (host_load_validation.CPU_ADAPTER_SHA256, 1)}
+               host_load_validation.ADAPTER: (host_load_validation.CPU_ADAPTER_SHA256, 1),
+               host_load_validation.FREEZE_HELPER: (host_load_validation.FREEZE_HELPER_SHA256, 1)}
         self.assertEqual(host_load_validation._method(legacy), "legacy-load-average")
         self.assertEqual(host_load_validation._method(cpu), "cpu-busy")
         fixed: JsonObject = {"programSource": {"head": "b" * 40}}

@@ -200,9 +200,7 @@ export function freezeCatalogBinary(buildReport: string, output: string): Catalo
   const frozen = path.resolve(`${output}-binary`, "runtime-tests");
   const result = Bun.spawnSync([
     "python3",
-    path.join(import.meta.dir, "../release/run_html_performance.py"),
-    "--bootstrap",
-    "freeze-capture",
+    path.join(import.meta.dir, "../release/freeze_html_capture_binary.py"),
     "--source",
     source,
     "--destination",

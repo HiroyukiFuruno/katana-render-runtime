@@ -26,6 +26,7 @@ from typing import BinaryIO, Literal, NamedTuple, NoReturn, TypedDict, cast, ove
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 
 import verify_html_performance_evidence as gate
+import html_performance_frozen_binary as binary_freeze
 import html_performance_inventory as inventory_ops
 import html_performance_memory_policy as memory_policy
 import html_performance_host_load as host_load
@@ -409,19 +410,10 @@ def _bytes(value: object, label: str) -> bytes:
     return value
 
 
-def _canonical_file(value: object, label: str) -> Path:
-    path = Path(gate._text(value, label))
-    gate.require(path.is_absolute() and path.resolve() == path and not path.is_symlink()
-                 and path.is_file(), label + " must be a canonical regular file")
-    return path
-
-
 expected_build = gate.expected_build
 cargo_build_artifacts = gate.cargo_build_artifacts
-
-
-def _file_identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
-    return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns
+# Mermaidのビルド証跡からも同じ実行ファイル固定処理を利用する。
+freeze_binary = binary_freeze.freeze_binary
 
 
 def _guard_python_pin() -> gate.JsonObject:
@@ -432,45 +424,6 @@ def _guard_python_pin() -> gate.JsonObject:
     gate.require(executable.is_file() and not executable.is_symlink() and os.access(executable, os.X_OK),
                  "guard Python executable is invalid")
     return {"launcher": str(launcher), "executable": {"path": str(executable), "sha256": gate.sha256(executable)}}
-
-
-def freeze_binary(source: Path, destination: Path) -> str:
-    _canonical_file(str(source), "selected binary")
-    gate.require(destination.is_absolute() and destination.parent.resolve() == destination.parent, "frozen destination must be canonical")
-    no_follow: object = getattr(os, "O_NOFOLLOW", None)
-    if isinstance(no_follow, bool) or not isinstance(no_follow, int) or no_follow <= 0:
-        raise ValueError("binary freeze requires a no-follow file API")
-    flags = os.O_RDONLY | no_follow
-    descriptor = os.open(source, flags)
-    try:
-        with os.fdopen(descriptor, "rb") as reader:
-            descriptor = -1
-            before = os.fstat(reader.fileno())
-            gate.require(stat.S_ISREG(before.st_mode), "selected binary must be regular")
-            destination.parent.mkdir(parents=True, exist_ok=False)
-            checksum = hashlib.sha256()
-            with destination.open("xb") as writer:
-                while block := reader.read(1024 * 1024):
-                    checksum.update(block)
-                    writer.write(block)
-            _canonical_file(str(destination), "frozen binary")
-            frozen_identity = _file_identity(destination.lstat())
-            after = os.fstat(reader.fileno())
-            gate.require(_file_identity(before) == _file_identity(after) == _file_identity(source.lstat()), "selected binary identity changed during freeze")
-            reader.seek(0)
-            original_hash = hashlib.sha256()
-            while block := reader.read(1024 * 1024):
-                original_hash.update(block)
-            original_checksum = original_hash.hexdigest()
-            gate.require(_file_identity(before) == _file_identity(os.fstat(reader.fileno()))
-                         == _file_identity(source.lstat()), "selected binary identity changed during freeze")
-            gate.require(original_checksum == checksum.hexdigest() == gate.sha256(destination), "frozen binary SHA differs")
-            gate.require(_file_identity(destination.lstat()) == frozen_identity, "frozen binary identity changed")
-            destination.chmod(0o555)
-            return checksum.hexdigest()
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
 
 
 def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBinding,
@@ -629,7 +582,7 @@ def guarded_arm_build(root: Path, harness: Path, arm: str, binding: CapacityBind
                  and gate.sha256(cargo) == cargo_info["sha256"] and gate.sha256(rustc) == rustc_info["sha256"],
                  "Cargo/Rustc executable changed during build")
     frozen = output / "binary" / "krr-html-performance-harness"
-    checksum = freeze_binary(binary, frozen)
+    checksum = binary_freeze.freeze_binary(binary, frozen)
     proof: gate.JsonObject = {"schema": "krr-html-performance-build-artifact-v3", "arm": arm,
         "argv": argv, "buildExit": build_exit, "expectedHarness": expected.harness,
         "guardPython": guard_python, "guardLifecycleRef": lifecycle_pin,
@@ -788,13 +741,15 @@ def _clone_transport_file(source: Path, destination: Path, checksum: str) -> Non
     reflink_or_copy(source, destination)
     after = source.lstat()
     target = destination.lstat()
-    gate.require(_file_identity(before) == _file_identity(after) and before.st_mode == after.st_mode,
+    gate.require(binary_freeze.file_identity(before) == binary_freeze.file_identity(after)
+                 and before.st_mode == after.st_mode,
                  "transport source identity changed")
     gate.require(stat.S_ISREG(target.st_mode) and (target.st_dev, target.st_ino) != (before.st_dev, before.st_ino)
                  and target.st_size == before.st_size and gate.sha256(destination) == checksum,
                  "transport clone identity differs")
     final = source.lstat()
-    gate.require(_file_identity(before) == _file_identity(final) and before.st_mode == final.st_mode,
+    gate.require(binary_freeze.file_identity(before) == binary_freeze.file_identity(final)
+                 and before.st_mode == final.st_mode,
                  "transport source changed during validation")
 
 
@@ -2566,6 +2521,7 @@ def _make_git_query(log_directory: Path, *, scratch_root: Path) -> gate.GitQuery
     stable_paths = frozenset({
         "scripts/release/html_performance_source_reuse.py",
         "scripts/release/html_performance_epoch_reuse.py",
+        "scripts/release/html_performance_frozen_binary.py",
         "scripts/release/html_performance_host_load_validation.py",
         "scripts/release/html_performance_host_load_validation_test.py",
         "scripts/release/produce_html_performance_evidence.py",
