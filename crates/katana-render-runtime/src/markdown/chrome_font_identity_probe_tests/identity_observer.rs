@@ -1,9 +1,9 @@
-use super::{PhysicalFace, ResolvedFont, face_identity, physical_file, verify_physical_face};
+use super::{PhysicalFace, ResolvedFont, face_identity, physical_file};
 use crate::markdown::chrome_font_identity_probe_tests::{ObserverFace, SelectedFont};
 use resvg::usvg::fontdb::Database;
 use std::path::PathBuf;
 
-pub(super) fn resolve_observer_face(
+pub(in crate::markdown::chrome_font_identity_probe_tests) fn resolve_observer_face(
     selected: &SelectedFont,
     observer_faces: &[ObserverFace],
 ) -> Result<ResolvedFont, String> {
@@ -39,7 +39,7 @@ fn verified_observer_identity(
     {
         return Err("Chrome retained font observation physical face differs".to_string());
     }
-    verify_physical_face(&identity)
+    verified_observer_file(observer)
         .map_err(|_| "Chrome retained font observation changed before verification".to_string())?;
     Ok(identity)
 }

@@ -1,4 +1,4 @@
-use super::{CoreTextDescriptorEvidence, ObserverFace, ResourceFile, SelectedFont};
+use super::{CoreTextDescriptorEvidence, ResourceFile};
 use resvg::usvg::fontdb::{Database, FaceInfo, Source};
 use sha2::{Digest, Sha256};
 use std::{
