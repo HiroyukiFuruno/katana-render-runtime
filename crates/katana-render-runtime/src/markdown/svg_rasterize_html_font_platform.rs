@@ -198,11 +198,10 @@ mod tests {
 
     #[test]
     fn selected_platform_owns_html_generic_sans_serif_family() {
-        let expected = if cfg!(target_os = "macos") {
-            "Helvetica"
-        } else {
-            "Arial"
-        };
+        #[cfg(target_os = "macos")]
+        let expected = "Helvetica";
+        #[cfg(not(target_os = "macos"))]
+        let expected = "Arial";
         assert_eq!(font_platform().html_sans_serif_family(), expected);
     }
 }
