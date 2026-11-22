@@ -1,4 +1,5 @@
 use super::super::super::configure_generic_families;
+use crate::markdown::svg_rasterize::font::platform::{PlatformFontStrategy, font_platform};
 use resvg::usvg;
 
 pub(super) fn configure_html_generic_families(database: &mut usvg::fontdb::Database) {
@@ -22,15 +23,7 @@ fn configure_html_sans_serif_family(database: &mut usvg::fontdb::Database) {
 }
 
 pub(in super::super) fn configured_html_sans_serif_family() -> &'static str {
-    /* WHY: macOSのHTML sans-serifはChromeの実選択に合わせる。 */
-    #[cfg(target_os = "macos")]
-    {
-        "Helvetica"
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        "Arial"
-    }
+    font_platform().html_sans_serif_family()
 }
 
 fn configure_html_serif_family(database: &mut usvg::fontdb::Database) {

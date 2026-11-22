@@ -45,6 +45,10 @@ pub(in crate::markdown::svg_rasterize) trait PlatformFontStrategy {
         Family::SansSerif
     }
 
+    fn html_sans_serif_family(&self) -> &'static str {
+        "Arial"
+    }
+
     fn control_arial_family(&self) -> &'static str {
         "Arial"
     }
@@ -118,6 +122,12 @@ impl PlatformFontStrategy for NativeFonts {
     }
 
     #[cfg(target_os = "macos")]
+    fn html_sans_serif_family(&self) -> &'static str {
+        /* WHY: macOSのHTML sans-serifはChromeの実選択に合わせる。 */
+        "Helvetica"
+    }
+
+    #[cfg(target_os = "macos")]
     fn face_override(
         &self,
         database: &Database,
@@ -148,7 +158,7 @@ impl PlatformFontStrategy for NativeFonts {
 
 #[cfg(test)]
 mod tests {
-    use super::{Database, Family, FontconfigFonts, PlatformFontStrategy};
+    use super::{Database, Family, FontconfigFonts, PlatformFontStrategy, font_platform};
     use std::collections::BTreeSet;
     use std::ops::ControlFlow;
 
@@ -180,8 +190,19 @@ mod tests {
         );
         assert_eq!(strategy.installed_system_ui_family(), None);
         assert_eq!(strategy.cjk_fallback_family(), None);
+        assert_eq!(strategy.html_sans_serif_family(), "Arial");
         assert_eq!(strategy.control_arial_family(), "Arial");
         assert_eq!(strategy.compatible_named_family("Arial"), None);
         assert_eq!(strategy.localized_sans_serif("ja-JP"), None);
+    }
+
+    #[test]
+    fn selected_platform_owns_html_generic_sans_serif_family() {
+        let expected = if cfg!(target_os = "macos") {
+            "Helvetica"
+        } else {
+            "Arial"
+        };
+        assert_eq!(font_platform().html_sans_serif_family(), expected);
     }
 }
