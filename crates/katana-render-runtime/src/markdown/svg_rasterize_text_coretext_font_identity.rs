@@ -1,9 +1,48 @@
 use objc2_core_foundation::{CFRetained, CFType, CFURL};
-use objc2_core_text::{CTFont, kCTFontURLAttribute};
+use objc2_core_text::{CTFont, CTFontTableOptions, kCTFontTableName, kCTFontURLAttribute};
 use resvg::usvg::fontdb::{Database, ID, Source};
 use rustybuzz::ttf_parser::{self, name_id};
+use std::{io::Read, path::PathBuf};
 
 const MAX_POSTSCRIPT_NAME_BYTES: usize = 63;
+const MAX_FONT_FILE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_FONT_TABLE_BYTES: usize = 1024 * 1024;
+const MAX_COLLECTION_FACES: u32 = 128;
+
+#[derive(Clone)]
+pub(in crate::markdown::svg_rasterize) struct ActualCoreTextFontMetadata {
+    pub(in crate::markdown::svg_rasterize) canonical_path: PathBuf,
+    pub(in crate::markdown::svg_rasterize) post_script_name: String,
+}
+
+pub(in crate::markdown::svg_rasterize) struct ActualCoreTextFace {
+    pub(in crate::markdown::svg_rasterize) canonical_path: PathBuf,
+    pub(in crate::markdown::svg_rasterize) face_index: u32,
+    pub(in crate::markdown::svg_rasterize) post_script_name: String,
+}
+
+pub(in crate::markdown::svg_rasterize) fn actual_font_metadata(
+    font: &CTFont,
+) -> Option<ActualCoreTextFontMetadata> {
+    Some(ActualCoreTextFontMetadata {
+        canonical_path: canonical_file_path(font)?,
+        post_script_name: coretext_postscript_name(font)?,
+    })
+}
+
+pub(in crate::markdown::svg_rasterize) fn resolve_actual_face(
+    font: &CTFont,
+) -> Option<ActualCoreTextFace> {
+    let metadata = actual_font_metadata(font)?;
+    let bytes = read_font_bytes(&metadata.canonical_path)?;
+    let face_index = unique_postscript_index(&bytes, &metadata.post_script_name)
+        .or_else(|| unique_name_table_index(&bytes, font))?;
+    Some(ActualCoreTextFace {
+        canonical_path: metadata.canonical_path,
+        face_index,
+        post_script_name: metadata.post_script_name,
+    })
+}
 
 pub(super) fn matches(database: &Database, id: ID, font: &CTFont) -> bool {
     let Some(face) = database.face(id) else {
@@ -38,28 +77,37 @@ pub(super) fn matches(database: &Database, id: ID, font: &CTFont) -> bool {
 
 fn same_file(font: &CTFont, path: &std::path::Path) -> bool {
     /* WHY: CoreText descriptor が指す file と DB source の物理 path を照合する。 */
-    let descriptor = unsafe { font.font_descriptor() };
-    let attribute = unsafe { descriptor.attribute(kCTFontURLAttribute) };
-    let Some(coretext_path) = file_path_from_url_attribute(attribute) else {
-        return false;
-    };
-    match (
-        std::fs::canonicalize(path),
-        std::fs::canonicalize(coretext_path),
-    ) {
-        (Ok(left), Ok(right)) => left == right,
+    match (std::fs::canonicalize(path), canonical_file_path(font)) {
+        (Ok(left), Some(right)) => left == right,
         _ => false,
     }
 }
 
-fn file_path_from_url_attribute(
-    attribute: Option<CFRetained<CFType>>,
-) -> Option<std::path::PathBuf> {
+fn canonical_file_path(font: &CTFont) -> Option<PathBuf> {
+    let descriptor = unsafe { font.font_descriptor() };
+    let attribute = unsafe { descriptor.attribute(kCTFontURLAttribute) };
+    let path = file_path_from_url_attribute(attribute)?;
+    std::fs::canonicalize(path).ok()
+}
+
+fn file_path_from_url_attribute(attribute: Option<CFRetained<CFType>>) -> Option<PathBuf> {
     attribute?.downcast::<CFURL>().ok()?.to_file_path()
 }
 
+fn read_font_bytes(path: &std::path::Path) -> Option<Vec<u8>> {
+    let length = usize::try_from(std::fs::metadata(path).ok()?.len()).ok()?;
+    (length <= MAX_FONT_FILE_BYTES).then_some(())?;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut bytes = Vec::with_capacity(length);
+    file.by_ref()
+        .take((MAX_FONT_FILE_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (bytes.len() <= MAX_FONT_FILE_BYTES).then_some(bytes)
+}
+
 fn unique_postscript_index(bytes: &[u8], name: &str) -> Option<u32> {
-    let count = ttf_parser::fonts_in_collection(bytes).unwrap_or(1);
+    let count = collection_face_count(bytes)?;
     let mut matched = None;
     for index in 0..count {
         let face = ttf_parser::Face::parse(bytes, index).ok()?;
@@ -82,6 +130,28 @@ fn unique_postscript_index(bytes: &[u8], name: &str) -> Option<u32> {
     matched
 }
 
+fn unique_name_table_index(bytes: &[u8], font: &CTFont) -> Option<u32> {
+    let table = unsafe { font.table(kCTFontTableName, CTFontTableOptions::empty()) }?;
+    (table.len() <= MAX_FONT_TABLE_BYTES).then_some(())?;
+    let table = table.to_vec();
+    let mut matched = None;
+    for index in 0..collection_face_count(bytes)? {
+        let face = ttf_parser::Face::parse(bytes, index).ok()?;
+        if face.raw_face().table(ttf_parser::Tag::from_bytes(b"name")) != Some(table.as_slice()) {
+            continue;
+        }
+        if matched.replace(index).is_some() {
+            return None;
+        }
+    }
+    matched
+}
+
+fn collection_face_count(bytes: &[u8]) -> Option<u32> {
+    let count = ttf_parser::fonts_in_collection(bytes).unwrap_or(1);
+    (count <= MAX_COLLECTION_FACES).then_some(count)
+}
+
 fn postscript_name(item: ttf_parser::name::Name<'_>) -> Option<String> {
     let name = if let Some(name) = item.to_string() {
         name
@@ -93,6 +163,14 @@ fn postscript_name(item: ttf_parser::name::Name<'_>) -> Option<String> {
     } else {
         return None;
     };
+    validated_postscript_name(name)
+}
+
+fn coretext_postscript_name(font: &CTFont) -> Option<String> {
+    validated_postscript_name(unsafe { font.post_script_name() }.to_string())
+}
+
+fn validated_postscript_name(name: String) -> Option<String> {
     if name.is_empty()
         || name.len() > MAX_POSTSCRIPT_NAME_BYTES
         || !name

@@ -7,7 +7,7 @@ use fontdb::{Database, ID};
 use svgtypes::FontFamily;
 
 use self::layout::DatabaseExt;
-use crate::svg_engine::usvg::{Cache, Font, FontStretch, FontStyle, Text};
+use crate::svg_engine::usvg::{Cache, Font, FontStretch, FontStyle, FontVariation, Text};
 
 pub(crate) mod flatten;
 mod transform;
@@ -68,6 +68,14 @@ pub type FallbackSelectionFn<'a> =
 pub type StyledFallbackSelectionFn<'a> =
     Box<dyn Fn(&Font, char, &[ID], &mut Arc<Database>) -> Option<ID> + Send + Sync + 'a>;
 
+/// An optional outline provider used only when the standard font outline is unavailable.
+pub type GlyphOutlineFallbackFn<'a> = Box<
+    dyn Fn(&fontdb::Database, fontdb::ID, GlyphId, &[FontVariation]) -> Option<tiny_skia_path::Path>
+        + Send
+        + Sync
+        + 'a,
+>;
+
 /// A font resolver for `<text>` elements.
 ///
 /// This type can be useful if you want to have an alternative font handling to
@@ -85,6 +93,8 @@ pub struct FontResolver<'a> {
     pub select_fallback: FallbackSelectionFn<'a>,
     /// 設定時のみ既存fallbackより優先する属性付きresolver。
     pub select_styled_fallback: Option<StyledFallbackSelectionFn<'a>>,
+    /// 標準outlineを取得できないglyphだけを補う任意provider。
+    pub glyph_outline_fallback: Option<GlyphOutlineFallbackFn<'a>>,
 }
 
 impl Default for FontResolver<'_> {
@@ -93,6 +103,7 @@ impl Default for FontResolver<'_> {
             select_font: FontResolver::default_font_selector(),
             select_fallback: FontResolver::default_fallback_selector(),
             select_styled_fallback: None,
+            glyph_outline_fallback: None,
         }
     }
 }
@@ -244,7 +255,8 @@ pub(crate) fn convert(text: &mut Text, resolver: &FontResolver, cache: &mut Cach
     text.bounding_box = bbox.to_rect();
     text.abs_bounding_box = bbox.transform(text.abs_transform)?.to_rect();
 
-    let (group, stroke_bbox) = flatten::flatten(text, cache)?;
+    let (group, stroke_bbox) =
+        flatten::flatten(text, cache, resolver.glyph_outline_fallback.as_ref())?;
     text.flattened = Box::new(group);
     text.stroke_bounding_box = stroke_bbox.to_rect();
     text.abs_stroke_bounding_box = stroke_bbox.transform(text.abs_transform)?.to_rect();

@@ -1,5 +1,5 @@
 use super::super::style::CssStyle;
-use crate::markdown::svg_rasterize::SvgRasterizeOps;
+use crate::markdown::svg_rasterize::{HtmlPaintFontRun, SvgRasterizeOps};
 use std::{
     collections::HashMap,
     fmt::{Display, Formatter},
@@ -89,16 +89,11 @@ fn retained_markup_bytes(key: &FontMarkupKey, markup: &(String, String)) -> usiz
 }
 
 fn resolved_font_markup(text: &str, style: &CssStyle, x: f32) -> (String, String) {
-    let runs = SvgRasterizeOps::html_text_font_runs(
-        text,
-        style.used_font_family(),
-        style.font_weight,
-        style.italic,
-    );
+    let runs = SvgRasterizeOps::html_text_paint_runs(text, style.raster_font_style());
     #[cfg(all(test, target_os = "macos"))]
     let run_families = runs.as_ref().map(|runs| {
         runs.iter()
-            .map(|(family, _)| family.clone())
+            .map(|run| run.family.clone())
             .collect::<Vec<_>>()
     });
     let markup = font_runs_markup(text, style, runs, x);
@@ -115,24 +110,41 @@ fn resolved_font_markup(text: &str, style: &CssStyle, x: f32) -> (String, String
 fn font_runs_markup(
     text: &str,
     style: &CssStyle,
-    runs: Option<Vec<(String, String)>>,
+    runs: Option<Vec<HtmlPaintFontRun>>,
     x: f32,
 ) -> (String, String) {
     match runs {
         None => single_run_markup(text, style, None),
-        Some(runs) if runs.len() <= 1 => {
-            single_run_markup(text, style, runs.first().map(|(family, _)| family))
-        }
+        Some(runs) if runs.len() <= 1 => single_run_markup(text, style, runs.first()),
         Some(runs) => multi_run_markup(style, runs, x),
     }
 }
 
-fn single_run_markup(text: &str, style: &CssStyle, family: Option<&String>) -> (String, String) {
-    let family_markup = family.map_or_else(
-        || author_family_markup(style),
-        |family| resolved_family_markup(family),
-    );
+fn single_run_markup(
+    text: &str,
+    style: &CssStyle,
+    run: Option<&HtmlPaintFontRun>,
+) -> (String, String) {
+    let family_markup = run.map_or_else(|| author_family_markup(style), resolved_run_markup);
     (family_markup, super::super::svg::escape_xml(text))
+}
+
+fn resolved_run_markup(run: &HtmlPaintFontRun) -> String {
+    let family = resolved_family_markup(&run.family);
+    if run.variations.is_empty() {
+        return family;
+    }
+    let settings = run
+        .variations
+        .iter()
+        .filter_map(|variation| {
+            let tag = std::str::from_utf8(&variation.tag).ok()?;
+            Some(format!("{} {}", CssStringLiteral(tag), variation.value))
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let settings = super::super::svg::escape_xml(&settings);
+    format!("{family} font-optical-sizing=\"none\" font-variation-settings=\"{settings}\"")
 }
 
 fn resolved_family_markup(family: &str) -> String {
@@ -154,25 +166,25 @@ impl Display for CssStringLiteral<'_> {
 
 fn multi_run_markup(
     style: &CssStyle,
-    runs: Vec<(String, String)>,
+    runs: Vec<HtmlPaintFontRun>,
     origin_x: f32,
 ) -> (String, String) {
     /* WHY: 明示xでusvgのtext chunkを分け、別faceの欠落glyphがLatin runまで置換するのを防ぐ。 */
     let mut prefix = String::new();
     let content = runs
         .into_iter()
-        .map(|(family, run)| {
+        .map(|run| {
             let x = if prefix.is_empty() {
                 0.0
             } else {
                 super::super::text_metrics::text_width(&prefix, style) + style.letter_spacing
             };
             let x = origin_x + x;
-            prefix.push_str(&run);
+            prefix.push_str(&run.text);
             format!(
                 "<tspan x=\"{x}\" {}>{}</tspan>",
-                resolved_family_markup(&family),
-                super::super::svg::escape_xml(&run)
+                resolved_run_markup(&run),
+                super::super::svg::escape_xml(&run.text)
             )
         })
         .collect::<String>();
@@ -188,7 +200,7 @@ fn author_family_markup(style: &CssStyle) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{CssStyle, FontMarkupCache};
+    use super::{CssStyle, FontMarkupCache, HtmlPaintFontRun};
 
     #[test]
     fn single_face_uses_resolved_family_and_escapes_text() {
@@ -276,7 +288,10 @@ mod tests {
             let single = super::font_runs_markup(
                 "x",
                 &style,
-                Some(vec![(family.to_string(), "x".to_string())]),
+                Some(vec![HtmlPaintFontRun::plain(
+                    family.to_string(),
+                    "x".to_string(),
+                )]),
                 0.0,
             );
             assert_eq!(single.0, expected_attribute);
@@ -285,8 +300,8 @@ mod tests {
                 "xy",
                 &style,
                 Some(vec![
-                    (family.to_string(), "x".to_string()),
-                    ("Other Face".to_string(), "y".to_string()),
+                    HtmlPaintFontRun::plain(family.to_string(), "x".to_string()),
+                    HtmlPaintFontRun::plain("Other Face".to_string(), "y".to_string()),
                 ]),
                 0.0,
             );

@@ -160,8 +160,13 @@ fn shaped_runs_advance(
 
 #[path = "svg_rasterize_text_shaping_font_runs.rs"]
 mod font_runs;
+#[cfg(target_os = "macos")]
+#[path = "svg_rasterize_text_native_html_runs.rs"]
+mod native_html_runs;
 use font_runs::advance_runs;
 pub(super) use font_runs::html_text_font_runs;
+#[cfg(target_os = "macos")]
+pub(super) use native_html_runs::RunPlan as NativeHtmlRunPlan;
 
 #[path = "svg_rasterize_text_harfrust.rs"]
 mod harfrust;

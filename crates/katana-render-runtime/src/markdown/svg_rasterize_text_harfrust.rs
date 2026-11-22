@@ -35,6 +35,13 @@ mod source_tests;
 #[path = "svg_rasterize_text_harfrust_fragment_tests.rs"]
 mod fragment_tests;
 
+#[cfg(any(target_os = "macos", test))]
+#[path = "svg_rasterize_text_harfrust_native_variations.rs"]
+pub(super) mod native_variations;
+#[cfg(test)]
+#[path = "svg_rasterize_text_harfrust_native_variations_tests.rs"]
+mod native_variations_tests;
+
 #[cfg(test)]
 #[path = "svg_rasterize_text_harfrust_combined_metrics_probe.rs"]
 mod combined_metrics_probe;
@@ -112,7 +119,7 @@ pub(super) fn shape_run_character_metrics_without_features(
     committed_character_metrics(database, face_id, &face, &glyphs, text)
 }
 
-fn committed_character_metrics(
+pub(super) fn committed_character_metrics(
     database: &usvg::fontdb::Database,
     face_id: usvg::fontdb::ID,
     face: &face_cache::FontHandle,
@@ -153,7 +160,6 @@ pub(super) fn shape_face_character_metrics(
 
 #[path = "svg_rasterize_text_harfrust_buffer.rs"]
 mod buffer;
-#[cfg(test)]
 use buffer::shape_buffer;
 pub(super) use buffer::shape_buffer_with_features;
 use buffer::{font_variations, is_left_to_right, shape_font, shape_font_with_features};

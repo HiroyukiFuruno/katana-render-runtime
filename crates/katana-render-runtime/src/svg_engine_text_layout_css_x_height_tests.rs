@@ -16,6 +16,7 @@ const MAXIMUM: f32 = 570.0;
 fn selected_face_resolver(id: Option<usvg::fontdb::ID>) -> usvg::FontResolver<'static> {
     usvg::FontResolver {
         select_font: Box::new(move |_, _| id),
+        glyph_outline_fallback: None,
         ..Default::default()
     }
 }

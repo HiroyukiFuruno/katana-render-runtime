@@ -36,6 +36,7 @@ fn shape(text: &str) -> TestResult<(Vec<usvg::layout::Glyph>, usvg::fontdb::ID, 
                 && !used.contains(&fallback_id))
             .then_some(fallback_id)
         }),
+        glyph_outline_fallback: None,
         ..usvg::FontResolver::default()
     };
     let glyphs = shape_with_font(text, database, primary_id, &resolver)?;
@@ -118,6 +119,7 @@ fn fallback_replaces_differently_shaped_indic_clusters() -> TestResult<()> {
     let (database, primary_id, fallback_id) = fallback_font_database();
     let resolver = usvg::FontResolver {
         select_fallback: Box::new(|_, _, _| None),
+        glyph_outline_fallback: None,
         ..usvg::FontResolver::default()
     };
     let primary = shape_with_font(text, database.clone(), primary_id, &resolver)?;
@@ -198,6 +200,7 @@ fn verify_partial_indic_shaping(
     let (database, primary_id, fallback_id) = fallback_font_database();
     let no_fallback = usvg::FontResolver {
         select_fallback: Box::new(|_, _, _| None),
+        glyph_outline_fallback: None,
         ..usvg::FontResolver::default()
     };
     let primary = shape_with_font(text, database.clone(), primary_id, &no_fallback)?;

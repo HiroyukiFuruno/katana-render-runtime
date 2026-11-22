@@ -34,6 +34,9 @@ mod measurement_api;
 #[path = "svg_rasterize_measurement_diagnostic.rs"]
 pub(crate) mod measurement_diagnostic;
 #[cfg(target_os = "macos")]
+#[path = "svg_rasterize_native_html_face_registry.rs"]
+mod native_html_faces;
+#[cfg(target_os = "macos")]
 #[path = "svg_rasterize_html_glyph_ttc.rs"]
 mod physical_font_face;
 #[path = "svg_rasterize_preprocess.rs"]
@@ -48,6 +51,8 @@ mod text;
 pub(in crate::markdown::svg_rasterize) use text::probe_test_support;
 #[path = "svg_rasterize_html_measurement.rs"]
 mod html_measurement;
+pub(crate) use html_measurement::{HtmlFontStyle, HtmlPaintFontRun};
+pub(crate) use text::PreparedHtmlTextMeasurement;
 #[cfg(not(target_os = "macos"))]
 #[path = "svg_rasterize_html_resvg.rs"]
 mod html_resvg;

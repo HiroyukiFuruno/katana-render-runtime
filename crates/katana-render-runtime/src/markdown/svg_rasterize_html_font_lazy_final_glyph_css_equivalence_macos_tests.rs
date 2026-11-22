@@ -3,6 +3,11 @@ use super::{
     assert_html_frame, assert_valid_paint_evidence, open_html_with_audit,
 };
 
+const ZH_HANS_PAGE_START: &str = "<!doctype html><html lang=\"zh-Hans\"><body>";
+const ZH_HANS_BOLD: &str =
+    "<h1 style=\"font-family:system-ui,sans-serif;font-size:32px;font-weight:700\">装</h1>";
+const ZH_HANS_PAGE_END: &str = "</body></html>";
+
 #[test]
 fn actual_layout_regular_system_ui_raster_uses_w4_and_latin_sfns() -> Result<(), String> {
     assert_actual_layout_weight_faces(NORMAL_WEIGHT, ".HiraKakuInterface-W4")
@@ -11,6 +16,87 @@ fn actual_layout_regular_system_ui_raster_uses_w4_and_latin_sfns() -> Result<(),
 #[test]
 fn actual_layout_bold_system_ui_raster_uses_w6_and_latin_sfns() -> Result<(), String> {
     assert_actual_layout_weight_faces(BOLD_WEIGHT, ".HiraKakuInterface-W6")
+}
+
+#[test]
+fn actual_layout_zh_hans_system_ui_uses_coretext_han_and_kana_faces() -> Result<(), String> {
+    let html = [
+        ZH_HANS_PAGE_START,
+        "<p style=\"font-family:system-ui,sans-serif;font-weight:400\">装を</p>",
+        ZH_HANS_BOLD,
+        ZH_HANS_PAGE_END,
+    ]
+    .concat();
+    let (session, audit) =
+        open_html_with_audit(&html, FINAL_GLYPH_ORIGIN, VIEWPORT_WIDTH, VIEWPORT_HEIGHT)?;
+    assert_html_frame(&session)?;
+    assert_valid_paint_evidence(&audit)?;
+    assert_computed_weight(&audit, NORMAL_WEIGHT)?;
+    assert_computed_weight(&audit, BOLD_WEIGHT)?;
+    let trees = audit["finalGlyphTrees"]
+        .as_array()
+        .ok_or_else(|| "final glyph tree evidence is absent".to_owned())?;
+    for (weight, face, axis_weight) in [
+        (NORMAL_WEIGHT, ".PingFangUITextSC-Regular", 400.0),
+        (NORMAL_WEIGHT, ".CJKSymbolsFallbackSC-Regular", 542.0),
+        (BOLD_WEIGHT, ".PingFangUIDisplaySC-Bold", 700.0),
+    ] {
+        assert_uses_expected_face(&audit, trees, weight, face, axis_weight);
+    }
+    Ok(())
+}
+
+#[test]
+fn actual_layout_single_native_display_glyph_paints_ink() -> Result<(), String> {
+    const DARK_INK_LIMIT: u8 = 127;
+    let html = [ZH_HANS_PAGE_START, ZH_HANS_BOLD, ZH_HANS_PAGE_END].concat();
+    let (session, audit) =
+        open_html_with_audit(&html, FINAL_GLYPH_ORIGIN, VIEWPORT_WIDTH, VIEWPORT_HEIGHT)?;
+    assert_valid_paint_evidence(&audit)?;
+    let frame = session.latest_frame().ok_or("initial frame is absent")?;
+    assert!(
+        frame
+            .pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[0] < DARK_INK_LIMIT),
+        "the standalone Chinese glyph painted no dark pixels"
+    );
+    Ok(())
+}
+
+fn assert_uses_expected_face(
+    audit: &serde_json::Value,
+    trees: &[serde_json::Value],
+    weight: u64,
+    expected: &str,
+    axis_weight: f32,
+) {
+    assert!(
+        final_span_uses_face_matching(trees, weight, |name| name == expected, Some(axis_weight)),
+        "missing {expected} at weight {weight}; requested {:?}; glyph errors {:?}; observed faces {:?}",
+        rows_for_weight(audit, weight),
+        trees
+            .iter()
+            .map(|tree| &tree["glyphLayoutErrors"])
+            .collect::<Vec<_>>(),
+        trees
+            .iter()
+            .filter_map(|tree| tree["faces"].as_array())
+            .flatten()
+            .filter_map(|face| face["source"]["post_script_name"].as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+fn rows_for_weight(audit: &serde_json::Value, weight: u64) -> Vec<&serde_json::Value> {
+    audit["htmlFontMarkups"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|row| row["computedWeight"] == weight)
+        .collect()
 }
 
 fn assert_actual_layout_weight_faces(

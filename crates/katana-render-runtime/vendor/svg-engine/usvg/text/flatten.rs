@@ -17,7 +17,7 @@ use svgtypes::Color;
 use tiny_skia_path::{NonZeroRect, Size, Transform};
 use xmlwriter::XmlWriter;
 
-use crate::svg_engine::usvg::text::OPSZ;
+use crate::svg_engine::usvg::text::{GlyphOutlineFallbackFn, OPSZ};
 use crate::svg_engine::usvg::text::colr::GlyphPainter;
 use crate::svg_engine::usvg::*;
 
@@ -74,7 +74,11 @@ fn push_outline_paths(
     }
 }
 
-pub(crate) fn flatten(text: &mut Text, cache: &mut Cache) -> Option<(Group, NonZeroRect)> {
+pub(crate) fn flatten(
+    text: &mut Text,
+    cache: &mut Cache,
+    glyph_outline_fallback: Option<&GlyphOutlineFallbackFn<'_>>,
+) -> Option<(Group, NonZeroRect)> {
     let mut new_children = vec![];
     let abs_transform = text.abs_transform;
     let rendering_mode = resolve_rendering_mode(text);
@@ -84,6 +88,7 @@ pub(crate) fn flatten(text: &mut Text, cache: &mut Cache) -> Option<(Group, NonZ
             cache,
             rendering_mode,
             abs_transform,
+            glyph_outline_fallback,
             &mut new_children,
         );
     }
@@ -107,6 +112,7 @@ fn flatten_span(
     cache: &mut Cache,
     rendering_mode: ShapeRendering,
     abs_transform: Transform,
+    glyph_outline_fallback: Option<&GlyphOutlineFallbackFn<'_>>,
     children: &mut Vec<Node>,
 ) {
     push_decoration(span.overline.as_ref(), rendering_mode, children);
@@ -119,7 +125,7 @@ fn flatten_span(
         abs_transform,
     };
     for glyph in &span.positioned_glyphs {
-        flattener.append_glyph(glyph, cache);
+        flattener.append_glyph(glyph, cache, glyph_outline_fallback);
     }
     flattener.flush_outline();
     push_decoration(
@@ -146,7 +152,12 @@ struct SpanFlattener<'a> {
 }
 
 impl SpanFlattener<'_> {
-    fn append_glyph(&mut self, glyph: &layout::PositionedGlyph, cache: &mut Cache) {
+    fn append_glyph(
+        &mut self,
+        glyph: &layout::PositionedGlyph,
+        cache: &mut Cache,
+        glyph_outline_fallback: Option<&GlyphOutlineFallbackFn<'_>>,
+    ) {
         let variations = effective_variations(cache, self.span, glyph);
         if let Some(tree) = cache.fontdb_colr(glyph.font, glyph.id, &variations) {
             self.append_group(glyph.colr_transform(), Node::Group(Box::new(tree.root)));
@@ -158,7 +169,7 @@ impl SpanFlattener<'_> {
             let transform = bitmap_transform(&image, glyph);
             self.append_group(transform, Node::Image(Box::new(image.image)));
         } else {
-            self.append_outline(glyph, &variations, cache);
+            self.append_outline(glyph, &variations, cache, glyph_outline_fallback);
         }
     }
 
@@ -167,8 +178,14 @@ impl SpanFlattener<'_> {
         glyph: &layout::PositionedGlyph,
         variations: &[FontVariation],
         cache: &mut Cache,
+        glyph_outline_fallback: Option<&GlyphOutlineFallbackFn<'_>>,
     ) {
-        let outline = cache.fontdb_outline(glyph.font, glyph.id, variations);
+        let outline = cache.fontdb_outline(
+            glyph.font,
+            glyph.id,
+            variations,
+            glyph_outline_fallback,
+        );
         if let Some(outline) = outline.and_then(|path| path.transform(glyph.outline_transform())) {
             self.builder.push_path(&outline);
         }

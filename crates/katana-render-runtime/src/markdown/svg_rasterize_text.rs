@@ -51,7 +51,7 @@ impl<'a> HtmlTextMeasure<'a> {
 
 #[path = "svg_rasterize_text_prepared.rs"]
 mod prepared;
-pub(super) use prepared::PreparedHtmlTextMeasurement;
+pub(crate) use prepared::PreparedHtmlTextMeasurement;
 
 pub(super) fn measure_html_text(
     text: &str,

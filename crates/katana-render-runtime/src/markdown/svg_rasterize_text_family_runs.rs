@@ -1,11 +1,16 @@
 use super::fallback::html_font_runs;
 use super::family_scope_cache::{self, MAX_CONTEXT_CHARS as MAX_SELECTED_FONT_MEMO_ENTRIES};
 use super::font::{
-    append_font_run, cached_font_has_char_with_generation, matching_font_face,
-    with_reusable_stamp_batch,
+    append_font_run, cached_font_has_char_with_generation, with_reusable_stamp_batch,
 };
 use resvg::usvg::fontdb::{Database, ID};
 use std::{collections::HashMap, sync::Arc};
+
+#[path = "svg_rasterize_text_family_candidates.rs"]
+pub(super) mod candidates;
+#[cfg(test)]
+use super::font::matching_font_face;
+use candidates::family_candidates;
 
 pub(super) fn resolved_font_runs(
     database: &Arc<Database>,
@@ -161,33 +166,6 @@ fn cached_font_runs(
     italic: bool,
 ) -> Option<Vec<(ID, String)>> {
     family_scope_cache::lookup_runs(database, base, family, weight, italic, text)
-}
-
-fn family_candidates(database: &Database, family: &str, weight: u16, italic: bool) -> Vec<ID> {
-    let mut candidates = family
-        .split(',')
-        .filter_map(|name| matching_font_face(database, name.trim(), weight, italic))
-        .collect::<Vec<_>>();
-    if family.split(',').any(is_system_family) {
-        /* WHY: 日本語のsystem fallbackは、明示されたauthor familyをすべて試した後に使う。 */
-        candidates.extend(matching_font_face(
-            database,
-            ".Hiragino Kaku Gothic Interface",
-            weight,
-            italic,
-        ));
-    }
-    candidates
-}
-
-fn is_system_family(name: &str) -> bool {
-    matches!(
-        name.trim()
-            .trim_matches(['\'', '"'])
-            .to_ascii_lowercase()
-            .as_str(),
-        "system-ui" | "-apple-system" | "blinkmacsystemfont"
-    )
 }
 
 #[cfg(test)]

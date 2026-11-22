@@ -156,12 +156,9 @@ fn font_feature_settings(style: &CssStyle) -> String {
 }
 
 fn font_feature_dx(text: &str, style: &CssStyle) -> Option<String> {
-    let dx = SvgRasterizeOps::shape_html_text_dx_with_trim(
+    let dx = SvgRasterizeOps::shape_html_paint_dx(
         text,
-        style.used_font_family(),
-        style.font_size,
-        style.font_weight,
-        style.italic,
+        style.raster_font_style(),
         style.font_feature_settings.as_deref(),
         match style.text_spacing_trim {
             CssTextSpacingTrim::Normal => TextSpacingTrim::Normal,

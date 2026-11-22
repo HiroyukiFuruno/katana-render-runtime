@@ -1,17 +1,16 @@
 use super::document::text_display_columns;
 use super::style::{CssStyle, CssTextSpacingTrim};
-use super::text_measurement_diagnostic::{
-    record_lookup, record_preparation_timing, record_text_total_timing, start_measurement,
-    start_preparation_timing, start_text_total_timing,
-};
-use crate::markdown::svg_rasterize::{HtmlTextMeasurementToken, SvgRasterizeOps, TextSpacingTrim};
+use super::text_measurement_diagnostic::{record_text_total_timing, start_text_total_timing};
+use crate::markdown::svg_rasterize::SvgRasterizeOps;
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
 #[path = "text_width_persistent.rs"]
 mod persistent;
-use persistent::{PersistentTextWidthCache, PersistentTextWidthKey};
+use persistent::PersistentTextWidthCache;
+#[path = "text_metrics_width.rs"]
+mod width;
 
 const MAX_CACHED_MEASUREMENTS: usize = 4096;
 const SHA256_DIGEST_BYTES: usize = 32;
@@ -88,84 +87,9 @@ fn clear_measurements() {
 
 pub(super) fn text_width(text: &str, style: &CssStyle) -> f32 {
     let started = start_text_total_timing();
-    let width = text_width_body(text, style);
+    let width = width::text_width_body(text, style);
     record_text_total_timing(started);
     width
-}
-
-fn text_width_body(text: &str, style: &CssStyle) -> f32 {
-    let transformed = style.transformed_text(text);
-    if transformed.is_empty() {
-        return 0.0;
-    }
-    let key = TextMeasurementKey::new(&transformed, style);
-    if let Some(width) = TEXT_WIDTH_CACHE.with(|cache| cache.borrow().get(&key).copied()) {
-        record_lookup(true, None);
-        return width;
-    }
-    text_width_after_cache_miss(&transformed, style, key)
-}
-
-fn text_width_after_cache_miss(text: &str, style: &CssStyle, key: TextMeasurementKey) -> f32 {
-    let preparation_started = start_preparation_timing();
-    let prepared = SvgRasterizeOps::prepare_html_text_measurement_with_trim(
-        text,
-        style.used_font_family(),
-        style.font_size,
-        (style.font_weight, style.italic),
-        style.letter_spacing,
-        style.font_feature_settings.as_deref(),
-        match style.text_spacing_trim {
-            CssTextSpacingTrim::Normal => TextSpacingTrim::Normal,
-            CssTextSpacingTrim::SpaceAll => TextSpacingTrim::SpaceAll,
-        },
-    );
-    let token = prepared.token();
-    record_preparation_timing(preparation_started);
-    if let Some(width) = persistent_width(&key, token) {
-        record_lookup(false, None);
-        cache_ephemeral_width(key, width);
-        return width;
-    }
-    let measured_started = start_measurement();
-    let (width, shaping_succeeded) = prepared
-        .measure_with_cache_status()
-        .unwrap_or_else(|_| (heuristic_text_width(text, style), false));
-    record_lookup(false, measured_started);
-    cache_ephemeral_width(key.clone(), width);
-    persist_shaped_width(key, token, width, shaping_succeeded);
-    width
-}
-
-fn persistent_width(
-    key: &TextMeasurementKey,
-    token: Option<&HtmlTextMeasurementToken>,
-) -> Option<f32> {
-    let token = token.filter(|token| token.is_usable())?;
-    let persistent_key = PersistentTextWidthKey::new(key.clone(), token.key());
-    PERSISTENT_TEXT_WIDTH_CACHE.with(|cache| cache.borrow().get(&persistent_key))
-}
-
-fn cache_ephemeral_width(key: TextMeasurementKey, width: f32) {
-    TEXT_WIDTH_CACHE.with(|cache| {
-        insert_bounded_measurement(&mut cache.borrow_mut(), key, width, MAX_CACHED_MEASUREMENTS);
-    });
-}
-
-fn persist_shaped_width(
-    key: TextMeasurementKey,
-    token: Option<&HtmlTextMeasurementToken>,
-    width: f32,
-    shaping_succeeded: bool,
-) {
-    if !shaping_succeeded {
-        return;
-    }
-    let Some(token) = token.filter(|token| token.is_usable()) else {
-        return;
-    };
-    let persistent_key = PersistentTextWidthKey::new(key, token.key());
-    PERSISTENT_TEXT_WIDTH_CACHE.with(|cache| cache.borrow_mut().insert(persistent_key, width));
 }
 
 fn insert_bounded_measurement(

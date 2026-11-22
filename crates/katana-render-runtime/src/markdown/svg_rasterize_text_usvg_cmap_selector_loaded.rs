@@ -8,7 +8,7 @@ pub(in crate::markdown::svg_rasterize) fn loaded_html_font(
     database: &Database,
 ) -> Option<ID> {
     #[cfg(target_os = "macos")]
-    if let Some(selection) = super::select_macos_html_font_override(font, database) {
+    if let Some(selection) = super::macos::select(font, database) {
         return selection;
     }
     #[cfg(any(target_os = "macos", target_os = "ios"))]

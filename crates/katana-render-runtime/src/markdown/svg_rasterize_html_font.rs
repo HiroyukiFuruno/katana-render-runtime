@@ -48,6 +48,8 @@ pub(in crate::markdown::svg_rasterize) use shared_raster::render_html_with_optio
 mod request_tests;
 
 pub(in super::super) use request::HtmlFontRequest;
+#[cfg(target_os = "macos")]
+pub(in crate::markdown::svg_rasterize) use request::is_cjk_character;
 use resvg::usvg;
 use std::{
     collections::VecDeque,
@@ -67,8 +69,21 @@ impl HtmlFontDatabaseCache {
 }
 
 pub(in super::super) fn html_rasterizer_options(markup: &str) -> usvg::Options<'static> {
-    let mut options = super::rasterizer_options_with_font_db(html_font_db_for_markup(markup));
+    let database = html_font_db_for_markup(markup);
+    #[cfg(target_os = "macos")]
+    let (database, use_native_outline) = {
+        let extended = crate::markdown::svg_rasterize::native_html_faces::apply(markup, &database);
+        let use_native_outline = !Arc::ptr_eq(&extended, &database);
+        (extended, use_native_outline)
+    };
+    let mut options = super::rasterizer_options_with_font_db(database);
     super::super::text_shaping::install_html_font_resolver(&mut options);
+    #[cfg(target_os = "macos")]
+    if use_native_outline {
+        options.font_resolver.glyph_outline_fallback = Some(Box::new(
+            crate::markdown::svg_rasterize::native_html_faces::glyph_outline,
+        ));
+    }
     options
 }
 

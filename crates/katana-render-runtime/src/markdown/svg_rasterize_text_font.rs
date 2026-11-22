@@ -31,7 +31,7 @@ pub(super) fn file_stamp_durable_reusable(path: &std::path::Path) -> bool {
 }
 #[cfg(target_os = "macos")]
 #[path = "svg_rasterize_text_font_platform_fallback.rs"]
-mod platform_fallback;
+pub(super) mod platform_fallback;
 #[path = "svg_rasterize_text_font_score.rs"]
 mod score;
 use resvg::usvg;

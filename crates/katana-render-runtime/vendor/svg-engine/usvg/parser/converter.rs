@@ -8,6 +8,7 @@ use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use crate::svg_engine::usvg::text::GlyphOutlineFallbackFn;
 use crate::svg_engine::usvg::{FontVariation, GlyphId};
 use fontdb::Database;
 use fontdb::ID;
@@ -209,12 +210,16 @@ impl Cache {
         font: ID,
         glyph: GlyphId,
         variations: &[FontVariation],
+        glyph_outline_fallback: Option<&GlyphOutlineFallbackFn<'_>>,
     ) -> Option<tiny_skia_path::Path> {
         let key = (font, glyph, variations.to_vec());
         match self.cache_outline.get(&key) {
             Some(cache_hit) => cache_hit.clone(),
             None => {
-                let lookup = self.fontdb.outline(font, glyph, variations);
+                let lookup = self.fontdb.outline(font, glyph, variations).or_else(|| {
+                    glyph_outline_fallback
+                        .and_then(|fallback| fallback(&self.fontdb, font, glyph, variations))
+                });
                 self.cache_outline.insert(key, lookup.clone());
                 lookup
             }

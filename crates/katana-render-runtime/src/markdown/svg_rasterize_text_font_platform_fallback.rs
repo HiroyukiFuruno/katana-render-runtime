@@ -1,10 +1,10 @@
 use super::FallbackAttributes;
-use objc2_core_foundation::{CFRange, CFString};
-use objc2_core_text::CTFont;
 use resvg::usvg::fontdb::{Database, ID};
 
 const FALLBACK_FONT_SIZE: f64 = 16.0;
 
+#[path = "svg_rasterize_text_coretext_actual_fallback.rs"]
+pub(in crate::markdown::svg_rasterize::text_shaping) mod actual_fallback;
 #[cfg(test)]
 #[path = "svg_rasterize_text_coretext_fallback_diagnostic_tests.rs"]
 mod coretext_diagnostic_tests;
@@ -15,26 +15,8 @@ mod font_identity;
 mod tests;
 
 fn fallback_family(database: &Database, base_id: ID, character: char) -> Option<String> {
-    let base_name = &database.face(base_id)?.post_script_name;
-    if base_name.is_empty() {
-        return None;
-    }
-    let name = CFString::from_str(base_name);
-    /* WHY: CoreText が別の base へ置換した場合は誤った cascade を使わない。 */
-    let base = unsafe { CTFont::with_name(&name, FALLBACK_FONT_SIZE, std::ptr::null()) };
-    if unsafe { base.post_script_name() }.to_string() != base_name.as_str() {
-        return None;
-    }
-    if !font_identity::matches(database, base_id, &base) {
-        return None;
-    }
-    let text = CFString::from_str(&character.to_string());
-    let range = CFRange {
-        location: 0,
-        length: text.length(),
-    };
-    /* WHY: CFString の UTF-16 長を使い、補助平面文字も範囲に収める。 */
-    let fallback = unsafe { base.for_string(&text, range) };
+    let fallback =
+        actual_fallback::default_fallback_font(database, base_id, character, FALLBACK_FONT_SIZE)?;
     Some(unsafe { fallback.family_name() }.to_string())
 }
 

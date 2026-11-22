@@ -1,5 +1,9 @@
 use super::super::features::harfrust_features;
 use super::{FONT_VARIATION_COUNT, FontShape, HARFRUST_SCALE};
+#[cfg(any(target_os = "macos", test))]
+use resvg::usvg::FontVariation;
+#[cfg(any(target_os = "macos", test))]
+use std::collections::BTreeSet;
 
 pub(super) fn shape_font(
     face: &harfrust::font::Font,
@@ -36,6 +40,19 @@ pub(super) fn shape_font_with_features(
     shape_buffer_with_features(&instance, text, font, features)
 }
 
+#[cfg(any(target_os = "macos", test))]
+pub(super) fn shape_font_with_features_and_variations(
+    face: &harfrust::font::Font,
+    text: &str,
+    font: FontShape,
+    features: &[harfrust::Feature],
+    variations: &[FontVariation],
+) -> Option<harfrust::Buffer> {
+    let variations = native_variations(variations)?;
+    let instance = face.instance_builder().variations(variations).build();
+    shape_buffer_with_features(&instance, text, font, features)
+}
+
 pub(super) fn is_left_to_right(text: &str) -> bool {
     let mut buffer = harfrust::Buffer::new();
     buffer.push_str(text);
@@ -49,6 +66,19 @@ pub(super) fn font_variations(font: FontShape) -> [(&'static str, f32); FONT_VAR
         ("opsz", font.size),
         ("ital", if font.italic { 1.0 } else { 0.0 }),
     ]
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn native_variations(variations: &[FontVariation]) -> Option<Vec<(&str, f32)>> {
+    let mut tags = BTreeSet::new();
+    variations
+        .iter()
+        .map(|variation| {
+            let tag = std::str::from_utf8(&variation.tag).ok()?;
+            (variation.value.is_finite() && tags.insert(variation.tag))
+                .then_some((tag, variation.value))
+        })
+        .collect()
 }
 
 pub(super) fn shape_buffer(

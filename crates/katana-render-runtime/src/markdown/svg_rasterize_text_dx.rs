@@ -8,7 +8,7 @@ use super::harfrust::{
 use super::{FontShape, TextSpacingTrim};
 use resvg::usvg;
 
-struct TextDxState {
+pub(super) struct TextDxState {
     values: Vec<f32>,
     cumulative_advance_delta: f32,
     current_shift: f32,
@@ -78,7 +78,7 @@ impl TextDxState {
         Some(())
     }
 
-    fn new(capacity: usize) -> Self {
+    pub(super) fn new(capacity: usize) -> Self {
         Self {
             values: Vec::with_capacity(capacity),
             cumulative_advance_delta: 0.0,
@@ -86,7 +86,7 @@ impl TextDxState {
         }
     }
 
-    fn append_run(
+    pub(super) fn append_run(
         &mut self,
         database: &usvg::fontdb::Database,
         face_id: usvg::fontdb::ID,
@@ -100,7 +100,7 @@ impl TextDxState {
         Some(())
     }
 
-    fn append_metrics(&mut self, natural: Vec<(f32, f32)>, featured: Vec<(f32, f32)>) {
+    pub(super) fn append_metrics(&mut self, natural: Vec<(f32, f32)>, featured: Vec<(f32, f32)>) {
         for (natural, featured) in natural.into_iter().zip(featured) {
             let desired_shift = self.cumulative_advance_delta + featured.1 - natural.1;
             self.values.push(desired_shift - self.current_shift);
@@ -109,7 +109,7 @@ impl TextDxState {
         }
     }
 
-    fn finish(self) -> Option<Vec<f32>> {
+    pub(super) fn finish(self) -> Option<Vec<f32>> {
         self.values
             .iter()
             .any(|value| value.abs() > f32::EPSILON)

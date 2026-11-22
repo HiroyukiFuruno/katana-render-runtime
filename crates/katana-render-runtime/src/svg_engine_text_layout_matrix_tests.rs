@@ -255,6 +255,7 @@ fn no_fallback_resolver(
             count.fetch_add(1, Ordering::Relaxed);
             None
         }),
+        glyph_outline_fallback: None,
         ..usvg::FontResolver::default()
     }
 }

@@ -1,5 +1,5 @@
 use super::CssStyle;
-use crate::markdown::svg_rasterize::SvgRasterizeOps;
+use crate::markdown::svg_rasterize::{HtmlFontStyle, SvgRasterizeOps};
 use std::sync::Arc;
 
 #[derive(Clone, Debug, Default)]
@@ -21,6 +21,18 @@ impl CssStyle {
         &self,
     ) -> Option<&str> {
         self.font_context.language.as_deref()
+    }
+
+    pub(in crate::renderer::backends::html_interactive) fn raster_font_style(
+        &self,
+    ) -> HtmlFontStyle<'_> {
+        HtmlFontStyle {
+            family: self.used_font_family(),
+            size: self.font_size,
+            weight: self.font_weight,
+            italic: self.italic,
+            language: self.effective_font_language(),
+        }
     }
 
     pub(super) fn resolve_font_context(&mut self, language: Option<&str>, inherited: &Self) {

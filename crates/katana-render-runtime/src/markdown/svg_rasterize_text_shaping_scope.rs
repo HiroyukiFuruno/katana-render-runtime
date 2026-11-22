@@ -17,6 +17,10 @@ pub(in crate::markdown::svg_rasterize) fn with_font_face_cache_scope<T>(
 ) -> T {
     /* WHY: 同一frameのlayoutからraster完了までlibrary-owned metricsを共有する。 */
     let _font_scope = harfrust::face_cache::FontFaceCacheScope::enter();
+    #[cfg(target_os = "macos")]
+    let _fallback_scope = super::native_html_runs::Scope::enter();
+    #[cfg(target_os = "macos")]
+    let _native_html_faces = super::super::native_html_faces::Scope::enter();
     operation()
 }
 

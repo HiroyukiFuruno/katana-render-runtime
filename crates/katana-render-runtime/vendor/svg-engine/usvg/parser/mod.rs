@@ -159,6 +159,12 @@ fn nested_font_resolver<'a>(opt: &'a Options<'_>) -> crate::svg_engine::usvg::Fo
                 Box::new(move |font, c, used_fonts, db| selector(font, c, used_fonts, db));
             forward
         }),
+        glyph_outline_fallback: opt.font_resolver.glyph_outline_fallback.as_ref().map(|fallback| {
+            let forward: crate::svg_engine::usvg::GlyphOutlineFallbackFn<'_> = Box::new(
+                move |database, id, glyph, variations| fallback(database, id, glyph, variations),
+            );
+            forward
+        }),
     }
 }
 
