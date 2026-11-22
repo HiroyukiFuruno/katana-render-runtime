@@ -6,7 +6,7 @@ use resvg::usvg::fontdb::{Database, FaceInfo, ID};
 use std::collections::BTreeMap;
 
 pub(in crate::markdown::svg_rasterize) use font_identity::{
-    ActualCoreTextFace, ActualCoreTextFontMetadata, name_table,
+    ActualCoreTextFace, ActualCoreTextFontMetadata, face_index, name_table,
 };
 
 #[path = "svg_rasterize_text_coretext_scaler.rs"]

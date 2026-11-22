@@ -10,6 +10,7 @@ use super::{
     with_current,
 };
 use crate::markdown::svg_rasterize::HtmlFontFrameCache;
+use crate::markdown::svg_rasterize::font_file_fixture::FontFileFixture;
 use resvg::usvg::fontdb::{Database, ID};
 use std::error::Error;
 
@@ -53,10 +54,11 @@ fn frame_face(
             let face = memo
                 .physical_face(&selection.font)
                 .ok_or("physical face missing")?;
+            let face_identity = (Arc::clone(&face.database), face.id, empty);
             if mark_glyph {
                 memo.glyphs.insert(selection_key(), HashMap::new());
             }
-            Ok((face.0, face.1, empty))
+            Ok(face_identity)
         })
         .ok_or("native frame memo missing")?
     })
@@ -71,29 +73,34 @@ fn system_query(database: &Database) -> SelectionQuery<'_> {
     }
 }
 
+fn fixture_face(fixture: &FontFileFixture) -> Result<FileFace, Box<dyn Error>> {
+    Ok(FileFace {
+        path: fixture.path.clone(),
+        name: "Roboto Flex".into(),
+        stamp: observe_path_stamp(&fixture.path).map_err(|()| "fixture stamp unavailable")?,
+        database: Arc::new(fixture.database.clone()),
+        id: fixture.face_id,
+        name_table: None,
+        mapped: None,
+    })
+}
+
 #[test]
 fn native_face_cache_rejects_new_entries_at_the_physical_face_limit() -> Result<(), Box<dyn Error>>
 {
     let directory = tempfile::tempdir()?;
     let fixture = roboto_flex(&directory)?;
-    let stamp = observe_path_stamp(&fixture.path).map_err(|()| "fixture stamp unavailable")?;
-    let database = Arc::new(fixture.database.clone());
+    let face = fixture_face(&fixture)?;
     let mut memo = Memo {
-        faces: (0..MAX_PHYSICAL_FONTS)
-            .map(|_| FileFace {
-                path: fixture.path.clone(),
-                name: "Roboto Flex".into(),
-                stamp: stamp.clone(),
-                database: Arc::clone(&database),
-                id: fixture.face_id,
-                name_table: None,
-            })
-            .collect(),
+        faces: vec![face.clone(); MAX_PHYSICAL_FONTS],
         ..Memo::default()
     };
     let selection = system_selection()?;
     let metadata = actual_font_metadata_for(&selection.font).ok_or("physical metadata missing")?;
-    assert!(memo.load_face(&selection.font, &metadata, stamp).is_none());
+    assert!(
+        memo.load_face(&selection.font, &metadata, face.stamp)
+            .is_none()
+    );
     Ok(())
 }
 
@@ -218,14 +225,23 @@ fn selected_face_rejects_physical_axes_for_a_missing_roboto_flex_glyph()
                 .is_some_and(|face| face.glyph_index('装').is_none())
         });
     assert_eq!(missing, Some(true));
-    assert!(
-        selected_face(
-            Arc::new(fixture.database.clone()),
-            fixture.face_id,
-            selection,
-            '装'
-        )
-        .is_none()
+    let face = fixture_face(&fixture)?;
+    assert!(selected_face(&face, selection, '装').is_none());
+    Ok(())
+}
+
+#[test]
+fn mapped_font_bytes_preserve_the_physical_face_index() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let fixture = roboto_flex(&directory)?;
+    let mut face = fixture_face(&fixture)?;
+    let physical = face.with_face_data(|bytes, index| (bytes.to_vec(), index));
+    let bytes = std::fs::read(&fixture.path)?;
+    face.mapped = Some(Arc::new(bytes));
+    assert!(physical.is_some());
+    assert_eq!(
+        physical,
+        face.with_face_data(|bytes, index| (bytes.to_vec(), index))
     );
     Ok(())
 }

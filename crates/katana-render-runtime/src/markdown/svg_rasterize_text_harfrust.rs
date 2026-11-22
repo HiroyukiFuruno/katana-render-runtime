@@ -9,6 +9,10 @@ pub(super) mod face_cache;
 mod line_metrics;
 #[cfg(target_os = "macos")]
 pub(in crate::markdown::svg_rasterize) use face_cache::immutable_mapping::eligible_path as eligible_immutable_system_path;
+#[cfg(target_os = "macos")]
+pub(in crate::markdown::svg_rasterize) use face_cache::immutable_mapping::{
+    MappedFontBytes, map_immutable_font_data,
+};
 pub(super) use line_metrics::{
     cached_face_line_metrics, diagnosed_cached_face_line_metrics, parsed_face_line_metrics,
 };

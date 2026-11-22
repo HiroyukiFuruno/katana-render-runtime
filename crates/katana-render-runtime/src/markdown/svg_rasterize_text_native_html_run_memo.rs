@@ -104,21 +104,21 @@ impl Memo {
             query.key.weight,
             query.key.language.as_deref(),
         )?;
-        let (database, id) = self.physical_face(&result.font)?;
-        selected_face(database, id, result, ch)
+        let file = self.physical_face(&result.font)?;
+        selected_face(file, result, ch)
     }
 
-    fn physical_face(&mut self, font: &objc2_core_text::CTFont) -> Option<(Arc<Database>, ID)> {
+    fn physical_face(&mut self, font: &objc2_core_text::CTFont) -> Option<&FileFace> {
         let metadata = actual_font_metadata_for(font)?;
         let stamp = observe_path_stamp(&metadata.canonical_path).ok()?;
-        let file = self
+        if let Some(index) = self
             .faces
             .iter()
-            .find(|file| file.matches(&metadata, &stamp));
-        match file {
-            Some(face) => Some((Arc::clone(&face.database), face.id)),
-            None => self.load_face(font, &metadata, stamp),
+            .position(|file| file.matches(&metadata, &stamp))
+        {
+            return self.faces.get(index);
         }
+        self.load_face(font, &metadata, stamp)
     }
 
     fn load_face(
@@ -126,31 +126,25 @@ impl Memo {
         font: &objc2_core_text::CTFont,
         metadata: &ActualCoreTextFontMetadata,
         stamp: FileStamp,
-    ) -> Option<(Arc<Database>, ID)> {
+    ) -> Option<&FileFace> {
         if self.faces.len() >= MAX_PHYSICAL_FONTS {
             return None;
         }
         let face = self.files.resolve(font, metadata, stamp)?;
-        let resolved = (Arc::clone(&face.database), face.id);
         self.faces.push(face);
-        Some(resolved)
+        self.faces.last()
     }
 }
 
-fn selected_face(
-    database: Arc<Database>,
-    id: ID,
-    result: NativeHtmlFallback,
-    ch: char,
-) -> Option<SelectedFace> {
-    let face = database.face(id)?;
-    let (variations, outline) = database.with_face_data(id, |bytes, index| {
+fn selected_face(file: &FileFace, result: NativeHtmlFallback, ch: char) -> Option<SelectedFace> {
+    let face = file.database.face(file.id)?;
+    let (variations, outline) = file.with_face_data(|bytes, index| {
         axes::selected_font_axes(result, face, bytes, index, ch)
     })??;
     let alias = native_html_faces::register(face, outline)?;
     Some(SelectedFace {
-        database,
-        id,
+        database: Arc::clone(&file.database),
+        id: file.id,
         alias,
         variations,
     })

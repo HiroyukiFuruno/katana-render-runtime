@@ -1,14 +1,23 @@
 use super::super::super::font::platform_fallback::actual_fallback::{
-    ActualCoreTextFace, ActualCoreTextFontMetadata, actual_face_for, name_table,
+    ActualCoreTextFace, ActualCoreTextFontMetadata, actual_face_for, face_index, name_table,
 };
 use super::super::super::font::{FileStamp, observe_path_stamp};
+use super::super::super::harfrust::{
+    MappedFontBytes, eligible_immutable_system_path, map_immutable_font_data,
+};
 use super::MAX_PHYSICAL_FONTS;
 use objc2_core_text::CTFont;
 use resvg::usvg::fontdb::{Database, ID};
 use sha2::{Digest, Sha256};
-use std::{cell::RefCell, path::PathBuf, rc::Rc, sync::Arc};
+use std::{
+    cell::RefCell,
+    path::{Path, PathBuf},
+    rc::Rc,
+    sync::Arc,
+};
 
 const SHA256_DIGEST_BYTES: usize = 32;
+const MAPPED_FONT_SESSION_BYTES: u64 = 64 * 1024 * 1024;
 type NameTableDigest = [u8; SHA256_DIGEST_BYTES];
 
 #[derive(Clone)]
@@ -19,13 +28,48 @@ pub(super) struct FileFace {
     pub(super) database: Arc<Database>,
     pub(super) id: ID,
     pub(super) name_table: Option<NameTableDigest>,
+    pub(super) mapped: Option<MappedFontBytes>,
 }
 
 impl FileFace {
+    fn from_actual(
+        actual: ActualCoreTextFace,
+        stamp: FileStamp,
+        name_table: Option<NameTableDigest>,
+        mapped: Option<MappedFontBytes>,
+    ) -> Option<Self> {
+        let (database, id) = verified_database(&actual, &stamp)?;
+        Some(Self {
+            path: actual.canonical_path,
+            name: actual.post_script_name,
+            stamp,
+            database,
+            id,
+            name_table,
+            mapped,
+        })
+    }
+
     pub(super) fn matches(&self, metadata: &ActualCoreTextFontMetadata, stamp: &FileStamp) -> bool {
         self.path == metadata.canonical_path
             && self.name == metadata.post_script_name
             && &self.stamp == stamp
+    }
+
+    pub(super) fn with_face_data<T>(&self, inspect: impl FnOnce(&[u8], u32) -> T) -> Option<T> {
+        if let Some(bytes) = &self.mapped {
+            return Some(inspect(
+                bytes.as_ref().as_ref(),
+                self.database.face(self.id)?.index,
+            ));
+        }
+        self.database.with_face_data(self.id, inspect)
+    }
+
+    fn mapped_bytes(&self) -> u64 {
+        self.mapped
+            .as_ref()
+            .map_or(0, |data| data.as_ref().as_ref().len() as u64)
     }
 }
 
@@ -49,20 +93,31 @@ impl NativeFontFileCache {
         if let Some(face) = name_table.and_then(|digest| self.find(metadata, &stamp, digest)) {
             return Some(face);
         }
-        let actual = actual_face_for(font)?;
-        let (database, id) = verified_database(&actual, &stamp)?;
-        let face = FileFace {
-            path: actual.canonical_path,
-            name: actual.post_script_name,
-            stamp,
-            database,
-            id,
-            name_table,
-        };
+        let mapped = name_table.and_then(|_| self.map_face(metadata, &stamp));
+        let actual = actual_face(font, metadata, mapped.as_ref())?;
+        let face = FileFace::from_actual(actual, stamp, name_table, mapped)?;
         if name_table.is_some() {
             self.store(face.clone());
         }
         Some(face)
+    }
+
+    fn map_face(
+        &self,
+        metadata: &ActualCoreTextFontMetadata,
+        stamp: &FileStamp,
+    ) -> Option<MappedFontBytes> {
+        let resident = self
+            .0
+            .borrow()
+            .iter()
+            .map(FileFace::mapped_bytes)
+            .sum::<u64>();
+        map_source(
+            &metadata.canonical_path,
+            stamp,
+            MAPPED_FONT_SESSION_BYTES.saturating_sub(resident),
+        )
     }
 
     pub(super) fn find(
@@ -88,6 +143,31 @@ impl NativeFontFileCache {
     }
 }
 
+fn map_source(path: &Path, stamp: &FileStamp, remaining: u64) -> Option<MappedFontBytes> {
+    let length = std::fs::metadata(path).ok()?.len();
+    if length > remaining || !eligible_immutable_system_path(path, length).ok()? {
+        return None;
+    }
+    let bytes = map_immutable_font_data(path, length).ok()?;
+    (observe_path_stamp(path).as_ref() == Ok(stamp)).then_some(bytes)
+}
+
+fn actual_face(
+    font: &CTFont,
+    metadata: &ActualCoreTextFontMetadata,
+    mapped: Option<&MappedFontBytes>,
+) -> Option<ActualCoreTextFace> {
+    let Some(bytes) = mapped else {
+        return actual_face_for(font);
+    };
+    let face_index = face_index(bytes.as_ref().as_ref(), &metadata.post_script_name, font)?;
+    Some(ActualCoreTextFace {
+        canonical_path: metadata.canonical_path.clone(),
+        face_index,
+        post_script_name: metadata.post_script_name.clone(),
+    })
+}
+
 pub(super) fn name_table_digest(font: &CTFont) -> Option<NameTableDigest> {
     Some(Sha256::digest(name_table(font)?).into())
 }
@@ -111,3 +191,7 @@ pub(super) fn verified_database(
     let id = database.push_face_info(face);
     Some((Arc::new(database), id))
 }
+
+#[cfg(test)]
+#[path = "svg_rasterize_text_native_html_run_files_tests.rs"]
+mod tests;

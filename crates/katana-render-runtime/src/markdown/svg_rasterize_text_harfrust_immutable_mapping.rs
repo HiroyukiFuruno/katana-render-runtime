@@ -8,6 +8,8 @@ use std::{os::unix::fs::MetadataExt, path::Path, sync::Arc};
 const SYSTEM_FONT_ROOT: &str = "/System/Library/Fonts/";
 const MAX_SOURCE_BYTES: u64 = 64 * 1024 * 1024;
 
+pub(in crate::markdown::svg_rasterize) type MappedFontBytes = Arc<dyn AsRef<[u8]> + Send + Sync>;
+
 fn filesystem_error_to_string<E: std::fmt::Display>(error: E) -> String {
     error.to_string()
 }
@@ -25,6 +27,18 @@ pub(super) fn try_load(
         return Ok(None);
     }
     super::admit_source_budget(length as usize);
+    let bytes = map_immutable_font_data(path, length)?;
+    let font = Font::new(bytes, face_index).ok_or("immutable font mapping invalid")?;
+    if font_source_generation_uncached(database, face_id) != generation {
+        return Err("immutable font generation changed".to_owned());
+    }
+    Ok(Some(mapped_handle(font, key, length)))
+}
+
+pub(in crate::markdown::svg_rasterize) fn map_immutable_font_data(
+    path: &Path,
+    length: u64,
+) -> Result<MappedFontBytes, String> {
     let source = SourceInfo::new(SourceId::new(), SourceKind::Path(Arc::from(path)));
     let mut cache = SourceCache::default();
     let blob = cache.get(&source).ok_or("immutable font mapping missing")?;
@@ -32,11 +46,7 @@ pub(super) fn try_load(
     if bytes.as_ref().as_ref().len() as u64 != length {
         return Err("immutable font mapping length changed".to_owned());
     }
-    let font = Font::new(bytes, face_index).ok_or("immutable font mapping invalid")?;
-    if font_source_generation_uncached(database, face_id) != generation {
-        return Err("immutable font generation changed".to_owned());
-    }
-    Ok(Some(mapped_handle(font, key, length)))
+    Ok(bytes)
 }
 
 fn mapped_handle(font: Font, key: CacheKey, length: u64) -> FontHandle {

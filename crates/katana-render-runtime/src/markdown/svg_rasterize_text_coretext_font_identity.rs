@@ -43,7 +43,11 @@ pub(in crate::markdown::svg_rasterize) fn resolve_actual_face(
     })
 }
 
-pub(super) fn face_index(bytes: &[u8], name: &str, font: &CTFont) -> Option<u32> {
+pub(in crate::markdown::svg_rasterize) fn face_index(
+    bytes: &[u8],
+    name: &str,
+    font: &CTFont,
+) -> Option<u32> {
     unique_postscript_index(bytes, name).or_else(|| unique_name_table_index(bytes, font))
 }
 
