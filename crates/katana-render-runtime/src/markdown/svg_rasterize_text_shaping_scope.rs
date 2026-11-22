@@ -12,16 +12,22 @@ pub(in super::super) fn windows_font_snapshot(path: &Path) -> Option<Arc<Vec<u8>
     font::windows_font_snapshot(path)
 }
 
-pub(in crate::markdown::svg_rasterize) fn with_font_face_cache_scope<T>(
-    operation: impl FnOnce() -> T,
-) -> T {
-    /* WHY: 同一frameのlayoutからraster完了までlibrary-owned metricsを共有する。 */
-    let _font_scope = harfrust::face_cache::FontFaceCacheScope::enter();
+#[derive(Clone, Default)]
+pub(crate) struct HtmlFontFrameCache {
     #[cfg(target_os = "macos")]
-    let _fallback_scope = super::native_html_runs::Scope::enter();
-    #[cfg(target_os = "macos")]
-    let _native_html_faces = super::super::native_html_faces::Scope::enter();
-    operation()
+    native_files: super::native_html_runs::NativeFontFileCache,
+}
+
+impl HtmlFontFrameCache {
+    pub(crate) fn with_frame<T>(&self, operation: impl FnOnce() -> T) -> T {
+        /* WHY: layoutとrasterで共有する書体の選択結果はframeごとに再評価する。 */
+        let _font_scope = harfrust::face_cache::FontFaceCacheScope::enter();
+        #[cfg(target_os = "macos")]
+        let _fallback_scope = super::native_html_runs::Scope::enter(&self.native_files);
+        #[cfg(target_os = "macos")]
+        let _native_html_faces = super::super::native_html_faces::Scope::enter();
+        operation()
+    }
 }
 
 pub(in crate::markdown::svg_rasterize) fn with_render_scoped_stamp_batch<T>(

@@ -5,7 +5,6 @@ use super::session::HtmlInteractiveSession;
 use super::session_geometry::max_scroll_for;
 use super::types::LayoutResult;
 use super::{HtmlBrowserError, runtime_failure};
-use crate::markdown::svg_rasterize::SvgRasterizeOps;
 
 #[cfg(test)]
 #[path = "session_render_tests.rs"]
@@ -21,9 +20,10 @@ impl HtmlInteractiveSession {
         origin: HtmlBrowserOrigin,
     ) -> Result<(), HtmlBrowserError> {
         /* WHY: 開く位置は初期レイアウトで分かるため、画面外の先頭フレームは描画しない。 */
-        let layout = SvgRasterizeOps::with_html_font_face_cache_scope(|| {
-            self.layout_frame(self.generation + 1, false)
-        })?;
+        let layout = self
+            .font_cache
+            .clone()
+            .with_frame(|| self.layout_frame(self.generation + 1, false))?;
         self.apply_fragment_navigation_in_layout(origin, Some(&layout))?;
         drop(layout);
         self.render_frame()
@@ -42,7 +42,7 @@ impl HtmlInteractiveSession {
             crate::markdown::svg_rasterize::SvgRasterizeOps::font_work_frame_scope();
         let generation = self.generation + 1;
         let total_started = self.trace.start();
-        let (render, pixels) = SvgRasterizeOps::with_html_font_face_cache_scope(|| {
+        let (render, pixels) = self.font_cache.clone().with_frame(|| {
             self.render_frame_layout_and_rasterize(generation, resolve_resize_scroll)
         })?;
         let started = self.trace.start();

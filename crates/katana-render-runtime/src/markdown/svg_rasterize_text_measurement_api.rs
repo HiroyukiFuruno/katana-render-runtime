@@ -56,8 +56,9 @@ impl SvgRasterizeOps {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn with_html_font_face_cache_scope<T>(operation: impl FnOnce() -> T) -> T {
-        text_shaping::with_font_face_cache_scope(operation)
+        text_shaping::HtmlFontFrameCache::default().with_frame(operation)
     }
 
     pub(crate) fn with_html_font_render_scope<T>(operation: impl FnMut() -> T) -> T {

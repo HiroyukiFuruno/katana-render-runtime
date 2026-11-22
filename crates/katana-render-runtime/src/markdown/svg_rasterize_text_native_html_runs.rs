@@ -11,8 +11,8 @@ use std::{path::Path, sync::Arc};
 mod memo;
 #[path = "svg_rasterize_text_native_html_run_metrics.rs"]
 mod metrics;
-pub(super) use memo::Scope;
 use memo::{Memo, SelectedFace, SelectionKey};
+pub(super) use memo::{NativeFontFileCache, Scope};
 
 enum RunFace {
     Existing(ID),

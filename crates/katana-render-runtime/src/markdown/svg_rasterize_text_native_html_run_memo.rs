@@ -1,6 +1,5 @@
 use super::super::font::platform_fallback::actual_fallback::{
-    ActualCoreTextFace, NativeHtmlFallback, actual_face_for, actual_font_metadata_for,
-    native_html_fallback,
+    ActualCoreTextFontMetadata, NativeHtmlFallback, actual_font_metadata_for, native_html_fallback,
 };
 use super::super::font::{FileStamp, observe_path_stamp};
 use super::SelectionQuery;
@@ -9,10 +8,14 @@ use resvg::usvg::{
     FontVariation,
     fontdb::{Database, ID},
 };
-use std::{cell::RefCell, collections::HashMap, path::PathBuf, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, sync::Arc};
 
 #[path = "svg_rasterize_text_native_html_run_axes.rs"]
 mod axes;
+#[path = "svg_rasterize_text_native_html_run_files.rs"]
+mod files;
+use files::FileFace;
+pub(in crate::markdown::svg_rasterize::text_shaping) use files::NativeFontFileCache;
 
 const MAX_STYLE_QUERIES: usize = 32;
 const MAX_GLYPH_QUERIES: usize = 2048;
@@ -24,6 +27,7 @@ type GlyphSelections = HashMap<char, Option<Arc<SelectedFace>>>;
 pub(super) struct Memo {
     glyphs: HashMap<SelectionKey, GlyphSelections>,
     faces: Vec<FileFace>,
+    files: NativeFontFileCache,
 }
 
 thread_local! {
@@ -33,8 +37,15 @@ thread_local! {
 pub(in crate::markdown::svg_rasterize::text_shaping) struct Scope(Option<Memo>);
 
 impl Scope {
-    pub(in crate::markdown::svg_rasterize::text_shaping) fn enter() -> Self {
-        Self(MEMO.with(|cache| cache.replace(Some(Memo::default()))))
+    pub(in crate::markdown::svg_rasterize::text_shaping) fn enter(
+        files: &NativeFontFileCache,
+    ) -> Self {
+        let frame = Memo {
+            glyphs: HashMap::new(),
+            faces: Vec::new(),
+            files: files.clone(),
+        };
+        Self(MEMO.with(|cache| cache.replace(Some(frame))))
     }
 }
 
@@ -52,14 +63,6 @@ pub(super) struct SelectionKey {
     pub(super) size: u32,
     pub(super) weight: u16,
     pub(super) language: Option<String>,
-}
-
-struct FileFace {
-    path: PathBuf,
-    name: String,
-    stamp: FileStamp,
-    database: Arc<Database>,
-    id: ID,
 }
 
 pub(super) struct SelectedFace {
@@ -108,35 +111,29 @@ impl Memo {
     fn physical_face(&mut self, font: &objc2_core_text::CTFont) -> Option<(Arc<Database>, ID)> {
         let metadata = actual_font_metadata_for(font)?;
         let stamp = observe_path_stamp(&metadata.canonical_path).ok()?;
-        let file = self.faces.iter().find(|file| {
-            file.path == metadata.canonical_path
-                && file.name == metadata.post_script_name
-                && file.stamp == stamp
-        });
+        let file = self
+            .faces
+            .iter()
+            .find(|file| file.matches(&metadata, &stamp));
         match file {
             Some(face) => Some((Arc::clone(&face.database), face.id)),
-            None => self.load_face(font, stamp),
+            None => self.load_face(font, &metadata, stamp),
         }
     }
 
     fn load_face(
         &mut self,
         font: &objc2_core_text::CTFont,
+        metadata: &ActualCoreTextFontMetadata,
         stamp: FileStamp,
     ) -> Option<(Arc<Database>, ID)> {
         if self.faces.len() >= MAX_PHYSICAL_FONTS {
             return None;
         }
-        let actual = actual_face_for(font)?;
-        let (database, id) = verified_database(&actual, &stamp)?;
-        self.faces.push(FileFace {
-            path: actual.canonical_path,
-            name: actual.post_script_name,
-            stamp,
-            database: Arc::clone(&database),
-            id,
-        });
-        Some((database, id))
+        let face = self.files.resolve(font, metadata, stamp)?;
+        let resolved = (Arc::clone(&face.database), face.id);
+        self.faces.push(face);
+        Some(resolved)
     }
 }
 
@@ -157,27 +154,6 @@ fn selected_face(
         alias,
         variations,
     })
-}
-
-fn verified_database(
-    actual: &ActualCoreTextFace,
-    stamp: &FileStamp,
-) -> Option<(Arc<Database>, ID)> {
-    let mut database = Database::new();
-    database.load_font_file(&actual.canonical_path).ok()?;
-    let id = database
-        .faces()
-        .find(|face| face.index == actual.face_index)?
-        .id;
-    if &observe_path_stamp(&actual.canonical_path).ok()? != stamp {
-        return None;
-    }
-    let mut face = database.face(id)?.clone();
-    database.remove_face(id);
-    face.post_script_name.clone_from(&actual.post_script_name);
-    let id = database.push_face_info(face);
-    let database = Arc::new(database);
-    Some((database, id))
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 use super::{
-    CTFont, Database, Source, mac_roman_name, matches, name_id, postscript_name, same_file,
-    ttf_parser, unique_name_table_index, unique_postscript_index,
+    CTFont, Database, Source, matches, name_id, postscript_name, same_file, ttf_parser,
+    unique_name_table_index, unique_postscript_index,
 };
 use core_foundation::base::TCFType;
 use core_graphics::{data_provider::CGDataProvider, font::CGFont};
@@ -34,6 +34,16 @@ fn normal_file_face(database: &Database, family: &str) -> Option<resvg::usvg::fo
                 && matches!(&face.source, Source::File(_) | Source::SharedFile(_, _))
         })
         .map(|face| face.id)
+}
+
+fn mac_roman_name(name: &[u8]) -> ttf_parser::name::Name<'_> {
+    ttf_parser::name::Name {
+        platform_id: ttf_parser::PlatformId::Macintosh,
+        encoding_id: 0,
+        language_id: 0,
+        name_id: name_id::POST_SCRIPT_NAME,
+        name,
+    }
 }
 
 #[test]

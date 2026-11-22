@@ -74,7 +74,8 @@ mod html_text_provenance;
 pub(crate) use html_text_provenance::GeneratedHtmlTextProvenance;
 use render::RasterTarget;
 pub(crate) use text_shaping::{
-    HtmlTextMeasurementToken, HtmlTextMeasurementTokenKey, SvgTextRunMetrics, TextSpacingTrim,
+    HtmlFontFrameCache, HtmlTextMeasurementToken, HtmlTextMeasurementTokenKey, SvgTextRunMetrics,
+    TextSpacingTrim,
 };
 pub use types::{RasterizedSvg, SvgRasterizeError, SvgRasterizeOps};
 

@@ -9,6 +9,7 @@ use super::layout_measurement_cache::FlowMeasurementCache;
 use super::session_scroll_geometry::HtmlInteractiveScrollGeometry;
 use super::types::{ElementBox, HitTarget};
 use super::{HtmlBrowserError, runtime_failure};
+use crate::markdown::svg_rasterize::HtmlFontFrameCache;
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -27,6 +28,7 @@ pub(in crate::renderer::backends) struct HtmlInteractiveSession {
     pub(super) trace: HtmlDebugTrace,
     pub(super) flow_measurements: Rc<RefCell<FlowMeasurementCache>>,
     pub(super) flow_projection_fingerprint: Option<u64>,
+    pub(super) font_cache: HtmlFontFrameCache,
 }
 
 #[derive(Default)]
@@ -103,6 +105,7 @@ impl HtmlInteractiveSession {
             trace,
             flow_measurements: Rc::new(RefCell::new(FlowMeasurementCache::default())),
             flow_projection_fingerprint: None,
+            font_cache: HtmlFontFrameCache::default(),
         }
     }
 

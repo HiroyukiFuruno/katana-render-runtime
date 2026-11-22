@@ -134,9 +134,7 @@ fn unique_postscript_index(bytes: &[u8], name: &str) -> Option<u32> {
 }
 
 fn unique_name_table_index(bytes: &[u8], font: &CTFont) -> Option<u32> {
-    let table = unsafe { font.table(kCTFontTableName, CTFontTableOptions::empty()) }?;
-    (table.len() <= MAX_FONT_TABLE_BYTES).then_some(())?;
-    let table = table.to_vec();
+    let table = name_table(font)?;
     let mut matched = None;
     for index in 0..collection_face_count(bytes)? {
         let face = ttf_parser::Face::parse(bytes, index).ok()?;
@@ -148,6 +146,12 @@ fn unique_name_table_index(bytes: &[u8], font: &CTFont) -> Option<u32> {
         }
     }
     matched
+}
+
+pub(in crate::markdown::svg_rasterize) fn name_table(font: &CTFont) -> Option<Vec<u8>> {
+    let table = unsafe { font.table(kCTFontTableName, CTFontTableOptions::empty()) }?;
+    (table.len() <= MAX_FONT_TABLE_BYTES).then_some(())?;
+    Some(table.to_vec())
 }
 
 fn collection_face_count(bytes: &[u8]) -> Option<u32> {
@@ -188,14 +192,3 @@ fn validated_postscript_name(name: String) -> Option<String> {
 #[cfg(test)]
 #[path = "svg_rasterize_text_coretext_font_identity_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-fn mac_roman_name(name: &[u8]) -> ttf_parser::name::Name<'_> {
-    ttf_parser::name::Name {
-        platform_id: ttf_parser::PlatformId::Macintosh,
-        encoding_id: 0,
-        language_id: 0,
-        name_id: name_id::POST_SCRIPT_NAME,
-        name,
-    }
-}

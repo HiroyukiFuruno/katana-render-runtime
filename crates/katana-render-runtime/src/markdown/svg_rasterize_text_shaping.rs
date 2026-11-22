@@ -73,9 +73,10 @@ pub(super) use usvg_cmap::loaded_html_font;
 
 #[path = "svg_rasterize_text_shaping_scope.rs"]
 mod scope;
+pub(crate) use scope::HtmlFontFrameCache;
+pub(super) use scope::with_render_scoped_stamp_batch;
 #[cfg(windows)]
 pub(super) use scope::{enable_windows_font_snapshots, windows_font_snapshot};
-pub(super) use scope::{with_font_face_cache_scope, with_render_scoped_stamp_batch};
 
 #[cfg(test)]
 pub(super) fn shaped_text_width(

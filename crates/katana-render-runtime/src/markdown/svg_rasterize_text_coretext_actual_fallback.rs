@@ -5,7 +5,9 @@ use objc2_core_text::{CTFont, CTFontUIFontType};
 use resvg::usvg::fontdb::{Database, FaceInfo, ID};
 use std::collections::BTreeMap;
 
-pub(in crate::markdown::svg_rasterize) use font_identity::ActualCoreTextFace;
+pub(in crate::markdown::svg_rasterize) use font_identity::{
+    ActualCoreTextFace, ActualCoreTextFontMetadata, name_table,
+};
 
 #[path = "svg_rasterize_text_coretext_scaler.rs"]
 mod scaler;
@@ -51,7 +53,7 @@ pub(in crate::markdown::svg_rasterize) fn actual_face_for(
 
 pub(in crate::markdown::svg_rasterize) fn actual_font_metadata_for(
     font: &CTFont,
-) -> Option<font_identity::ActualCoreTextFontMetadata> {
+) -> Option<ActualCoreTextFontMetadata> {
     font_identity::actual_font_metadata(font)
 }
 
