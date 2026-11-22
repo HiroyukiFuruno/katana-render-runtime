@@ -44,6 +44,19 @@ const actualFontSchema = z
     axisInventoryAvailable: z.boolean().optional(),
   })
   .passthrough();
+const coreTextCoordinatesSchema = z
+  .object({
+    axisInventoryRawCount: z.number().int().nonnegative().optional(),
+    invalidAxisCount: z.number().int().nonnegative().optional(),
+    coordinateDictionaryAvailable: z.boolean().optional(),
+    coordinateDictionaryRawCount: z.number().int().nonnegative().optional(),
+    invalidCoordinateCount: z.number().int().nonnegative().optional(),
+    coordinatesAvailable: z.boolean().optional(),
+    coordinatesStatus: z.string().optional(),
+    coordinatesSource: z.string().optional(),
+    coordinates: z.array(coordinateSchema).optional(),
+  })
+  .passthrough();
 const variationPositionSchema = z
   .object({
     available: z.boolean(),
@@ -62,6 +75,7 @@ export type ChromiumFontInstance = {
   processId: number;
   processRole: ProcessRole;
   physicalFileSHA256: string;
+  physicalFilePath?: string;
   physicalFaceTtcIndex: number;
   postScriptName: string;
   fvarTablePresent: boolean;
@@ -146,6 +160,10 @@ export const OBSERVER_SCALER_REJECTION_CODES = [
   "observer-scaler-excess-coordinate",
   "observer-scaler-duplicate-coordinate",
   "observer-scaler-out-of-range-coordinate",
+  "observer-scaler-skia-position-contradictory",
+  "observer-scaler-coretext-coordinates-origin-invalid",
+  "observer-scaler-coretext-coordinates-incomplete",
+  "observer-scaler-coretext-coordinates-count-invalid",
 ] as const;
 
 type ScalerRejectionToken = (typeof OBSERVER_SCALER_REJECTION_CODES)[number];
@@ -177,6 +195,55 @@ function validateStatic(
 }
 
 type ValidatedVariation = { axes: FontAxis[]; coordinates: FontCoordinate[] };
+
+type ActualFont = z.infer<typeof actualFontSchema>;
+
+function hasCoreTextCoordinateFields(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  return [
+    "coordinatesAvailable",
+    "coordinatesStatus",
+    "coordinatesSource",
+    "coordinateDictionaryAvailable",
+    "coordinateDictionaryRawCount",
+    "invalidCoordinateCount",
+    "axisInventoryRawCount",
+    "invalidAxisCount",
+    "coordinates",
+  ].some((field) => field in value);
+}
+
+function directCoreTextCoordinates(
+  actual: ActualFont,
+  actualValue: unknown,
+  position: z.infer<typeof variationPositionSchema>,
+): FontCoordinate[] | ScalerRejectionToken | undefined {
+  if (position.coordinates !== undefined || position.axisCount !== undefined)
+    return "observer-scaler-skia-position-contradictory";
+  if (!hasCoreTextCoordinateFields(actualValue)) return undefined;
+  const directResult = coreTextCoordinatesSchema.safeParse(actualValue);
+  if (!directResult.success) return "observer-scaler-coretext-coordinates-incomplete";
+  const direct = directResult.data;
+  if (direct.coordinatesSource !== "CoreText.CTFontCopyVariation(raw-sparse)")
+    return "observer-scaler-coretext-coordinates-origin-invalid";
+  if (
+    actual.axes.length === 0 ||
+    direct.coordinatesAvailable !== true ||
+    direct.coordinatesStatus !== "observed:complete-coordinate-dictionary" ||
+    direct.coordinateDictionaryAvailable !== true ||
+    direct.invalidAxisCount !== 0 ||
+    direct.invalidCoordinateCount !== 0 ||
+    direct.coordinates === undefined
+  )
+    return "observer-scaler-coretext-coordinates-incomplete";
+  if (
+    direct.axisInventoryRawCount !== actual.axes.length ||
+    direct.coordinateDictionaryRawCount !== actual.axes.length ||
+    direct.coordinates.length !== actual.axes.length
+  )
+    return "observer-scaler-coretext-coordinates-count-invalid";
+  return direct.coordinates;
+}
 
 function validateVariablePosition(
   position: z.infer<typeof variationPositionSchema>,
@@ -221,12 +288,22 @@ function validateVariableCoordinates(
 }
 
 function validateVariable(
-  actual: z.infer<typeof actualFontSchema>,
+  actual: ActualFont,
+  actualValue: unknown,
   position: z.infer<typeof variationPositionSchema>,
 ): ValidatedVariation | ScalerRejectionToken {
   if (actual.physicalFaceFvarTablePresent !== true)
     return "observer-scaler-static-fvar-inconsistent";
   if (actual.axisInventoryAvailable !== true) return "observer-scaler-fvar-inventory-unavailable";
+  if (position.available === false) {
+    const directCoordinates = directCoreTextCoordinates(actual, actualValue, position);
+    if (typeof directCoordinates === "string") return directCoordinates;
+    if (directCoordinates === undefined) return "observer-scaler-skia-position-unavailable";
+    const axes = validateVariableAxes(actual.axes);
+    if (typeof axes === "string") return axes;
+    const coordinates = validateVariableCoordinates(axes, directCoordinates);
+    return typeof coordinates === "string" ? coordinates : { axes, coordinates };
+  }
   const coordinates = validateVariablePosition(position, actual.axes.length);
   if (typeof coordinates === "string") return coordinates;
   const axes = validateVariableAxes(actual.axes);
@@ -262,6 +339,16 @@ function descriptorPathRejection(
   }
 }
 
+function canonicalPhysicalFilePath(descriptorURL: string): string | undefined {
+  if (!path.isAbsolute(descriptorURL)) return undefined;
+  try {
+    const canonical = fs.realpathSync(descriptorURL);
+    return path.isAbsolute(canonical) && fs.statSync(canonical).isFile() ? canonical : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function parseFontIdentity(args: EventArgs): ParsedFontIdentity {
   const actualValue = parseJsonValue(stringArg(args, "actualFont"));
   const actualResult = actualFontSchema.safeParse(actualValue);
@@ -284,16 +371,18 @@ function parseFontIdentity(args: EventArgs): ParsedFontIdentity {
   let axes: FontAxis[] = [];
   let coordinates: FontCoordinate[] = [];
   if (!validateStatic(actual, position)) {
-    const variable = validateVariable(actual, position);
+    const variable = validateVariable(actual, actualValue, position);
     if (typeof variable === "string") return { rejection: variable };
     axes = variable.axes;
     coordinates = variable.coordinates;
   }
+  const physicalFilePath = canonicalPhysicalFilePath(actual.descriptorURL);
   return {
     identity: {
       processId: args.processId as number,
       processRole: args.processRole as ProcessRole,
       physicalFileSHA256: actual.physicalFileSHA256,
+      ...(physicalFilePath === undefined ? {} : { physicalFilePath }),
       physicalFaceTtcIndex: actual.physicalFaceTtcIndex,
       postScriptName: actual.postScriptName,
       fvarTablePresent: actual.physicalFaceFvarTablePresent === true,
@@ -380,6 +469,11 @@ function recordScaler(state: TraceState, args: EventArgs): void {
     state.conflictingDescriptors.add(key);
     state.scalers.delete(key);
   } else if (previous === undefined) state.scalers.set(key, { identity });
+  else if (
+    previous.identity.physicalFilePath !== identity.physicalFilePath ||
+    previous.identity.postScriptName !== identity.postScriptName
+  )
+    delete previous.identity.physicalFilePath;
 }
 
 function collectState(events: z.infer<typeof traceEventSchema>[]): TraceState {
@@ -411,34 +505,61 @@ function missingScalerError(state: TraceState, key: string): Error {
   return new Error(`used strike has no joined scaler: ${ordered.join(" ")}`);
 }
 
+function usedStrikeSerials(state: TraceState, key: string, serials: ReadonlySet<number>): number[] {
+  const [processId, processRole] = key.split(":");
+  return [...serials].filter((serial) =>
+    state.retained.has(`${processId}:${processRole}:${serial}`),
+  );
+}
+
+function mergeJoinedInstance(
+  instances: Map<string, ChromiumFontInstance>,
+  identity: FontIdentity,
+  serial: number,
+): void {
+  const key = identityKey(identity);
+  const prior = instances.get(key);
+  const physicalFilePath =
+    prior === undefined ||
+    (prior.physicalFilePath === identity.physicalFilePath &&
+      prior.postScriptName === identity.postScriptName)
+      ? identity.physicalFilePath
+      : undefined;
+  const { physicalFilePath: _discardedPhysicalFilePath, ...identityWithoutPhysicalPath } = identity;
+  instances.set(key, {
+    ...identityWithoutPhysicalPath,
+    ...(physicalFilePath === undefined ? {} : { physicalFilePath }),
+    paintSerials: [...(prior?.paintSerials ?? []), serial].sort((a, b) => a - b),
+    join: {
+      retainedPaintCount: (prior?.join.retainedPaintCount ?? 0) + 1,
+      strikeCacheCount: (prior?.join.strikeCacheCount ?? 0) + 1,
+      scalerFontCount: 1,
+    },
+  });
+}
+
+function joinUsedStrikes(
+  instances: Map<string, ChromiumFontInstance>,
+  retained: TraceState["retained"],
+  identity: FontIdentity,
+  serials: readonly number[],
+): void {
+  for (const serial of serials) {
+    const paint = retained.get(`${identity.processId}:${identity.processRole}:${serial}`);
+    if (paint?.begin !== true || paint.end !== true)
+      throw new Error("used strike has incomplete retained paint");
+    mergeJoinedInstance(instances, identity, serial);
+  }
+}
+
 function joinInstances(state: TraceState): ChromiumFontInstance[] {
   const instances = new Map<string, ChromiumFontInstance>();
   for (const [key, serials] of state.strikes) {
     const scaler = state.scalers.get(key);
-    const [processId, processRole] = key.split(":");
-    const usedSerials = [...serials].filter((serial) =>
-      state.retained.has(`${processId}:${processRole}:${serial}`),
-    );
+    const usedSerials = usedStrikeSerials(state, key, serials);
     if (usedSerials.length === 0) continue;
     if (scaler === undefined) throw missingScalerError(state, key);
-    for (const serial of usedSerials) {
-      const retained = state.retained.get(
-        `${scaler.identity.processId}:${scaler.identity.processRole}:${serial}`,
-      );
-      if (retained?.begin !== true || retained.end !== true)
-        throw new Error("used strike has incomplete retained paint");
-      const identity = identityKey(scaler.identity);
-      const prior = instances.get(identity);
-      instances.set(identity, {
-        ...scaler.identity,
-        paintSerials: [...(prior?.paintSerials ?? []), serial].sort((a, b) => a - b),
-        join: {
-          retainedPaintCount: (prior?.join.retainedPaintCount ?? 0) + 1,
-          strikeCacheCount: (prior?.join.strikeCacheCount ?? 0) + 1,
-          scalerFontCount: 1,
-        },
-      });
-    }
+    joinUsedStrikes(instances, state.retained, scaler.identity, usedSerials);
   }
   return [...instances.values()];
 }

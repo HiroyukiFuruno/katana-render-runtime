@@ -214,8 +214,12 @@ test("Chromium font trace join is strict and table-driven", () => {
         expect(result.instances).toHaveLength(1);
         expect(result.instances[0]?.paintSerials).toEqual([1]);
         expect(result.instances[0]?.fvarTablePresent).toBe(fixture.expectedFvar);
-        if (fixture.name === "joined static instance")
+        if (fixture.name === "joined static instance") {
+          expect(result.instances[0]?.physicalFilePath).toBe(fontPath);
           assertCaptureBinding(fontPath, physicalSha, tracePath, traceSha256);
+        }
+        if (fixture.name === "relative existing path")
+          expect(result.instances[0]?.physicalFilePath).toBeUndefined();
       } else {
         expect(() => readChromiumFontTrace({ tracePath, traceSha256, sessionId })).toThrow();
       }
@@ -286,6 +290,24 @@ test("used scaler rejections are granular and redact trace values", () => {
           positionMutation(JSON.parse(args.skiaVariationPosition as string)),
         ),
       }));
+    const completeCoreText = mutateActual(
+      mutateScaler(variable, (args) => ({
+        ...args,
+        skiaVariationPosition: JSON.stringify({ available: false }),
+      })),
+      (actual) => ({
+        ...actual,
+        axisInventoryRawCount: 1,
+        invalidAxisCount: 0,
+        coordinateDictionaryAvailable: true,
+        coordinateDictionaryRawCount: 1,
+        invalidCoordinateCount: 0,
+        coordinatesAvailable: true,
+        coordinatesStatus: "observed:complete-coordinate-dictionary",
+        coordinatesSource: "CoreText.CTFontCopyVariation(raw-sparse)",
+        coordinates: [coordinate],
+      }),
+    );
     const conflicting = [
       ...valid,
       ...mutateActual([valid[2] as Record<string, unknown>], (actual) => ({
@@ -294,6 +316,16 @@ test("used scaler rejections are granular and redact trace values", () => {
       })),
     ];
     const cases = [
+      { name: "complete-coretext", events: completeCoreText, ok: true },
+      {
+        name: "skia-available-ignores-extra-coretext-fields",
+        events: mutateActual(variable, (actual) => ({
+          ...actual,
+          coordinatesAvailable: "not-a-boolean",
+          coordinatesSource: 7,
+        })),
+        ok: true,
+      },
       {
         name: "no-event",
         events: valid.filter((item) => item.name !== "scaler-font"),
@@ -357,10 +389,10 @@ test("used scaler rejections are granular and redact trace values", () => {
       },
       {
         name: "position-unavailable",
-        events: mutateVariable(
-          (actual) => actual,
-          (position) => ({ ...position, available: false }),
-        ),
+        events: mutateScaler(variable, (args) => ({
+          ...args,
+          skiaVariationPosition: JSON.stringify({ available: false }),
+        })),
         code: "observer-scaler-skia-position-unavailable",
       },
       {
@@ -433,8 +465,65 @@ test("used scaler rejections are granular and redact trace values", () => {
         ),
         code: "observer-scaler-out-of-range-coordinate",
       },
+      {
+        name: "incomplete-coretext",
+        events: mutateActual(completeCoreText, (actual) => ({
+          ...actual,
+          coordinatesAvailable: false,
+        })),
+        code: "observer-scaler-coretext-coordinates-incomplete",
+      },
+      {
+        name: "empty-axis-coretext",
+        events: mutateActual(completeCoreText, (actual) => ({
+          ...actual,
+          axes: [],
+          axisInventoryRawCount: 0,
+          coordinateDictionaryRawCount: 0,
+          coordinates: [],
+        })),
+        code: "observer-scaler-coretext-coordinates-incomplete",
+      },
+      {
+        name: "spoofed-coretext",
+        events: mutateActual(completeCoreText, (actual) => ({
+          ...actual,
+          coordinatesSource: "spoofed",
+        })),
+        code: "observer-scaler-coretext-coordinates-origin-invalid",
+      },
+      {
+        name: "improper-coretext-count",
+        events: mutateActual(completeCoreText, (actual) => ({
+          ...actual,
+          coordinateDictionaryRawCount: 0,
+        })),
+        code: "observer-scaler-coretext-coordinates-count-invalid",
+      },
+      {
+        name: "conflicting-skia-position",
+        events: mutateScaler(completeCoreText, (args) => ({
+          ...args,
+          skiaVariationPosition: JSON.stringify({
+            available: false,
+            axisCount: 1,
+            coordinates: [coordinate],
+          }),
+        })),
+        code: "observer-scaler-skia-position-contradictory",
+      },
     ];
     for (const fixture of cases) {
+      if (fixture.ok) {
+        const tracePath = path.join(root, `${fixture.name}.json`);
+        const trace = JSON.stringify({ traceEvents: fixture.events });
+        fs.writeFileSync(tracePath, trace);
+        const traceSha256 = createHash("sha256").update(trace).digest("hex");
+        expect(readChromiumFontTrace({ tracePath, traceSha256, sessionId }).instances).toHaveLength(
+          1,
+        );
+        continue;
+      }
       const message = traceRejection(root, fixture.name, fixture.events);
       expect(message).toBe(`used strike has no joined scaler: ${fixture.code}`);
       expect(message).not.toContain(root);
@@ -442,6 +531,51 @@ test("used scaler rejections are granular and redact trace values", () => {
       expect(message).not.toContain("Fixture-Regular");
       expect(message).not.toContain("1196445523");
     }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("accepted physical aliases retain the render proof without a supplemental path", () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "krr-font-trace-")));
+  try {
+    const fontPath = path.join(root, "font.bin");
+    const aliasPath = path.join(root, "font-alias.bin");
+    const fontBytes = Buffer.from("fixture-font-bytes");
+    fs.writeFileSync(fontPath, fontBytes);
+    fs.linkSync(fontPath, aliasPath);
+    const physicalSha = createHash("sha256").update(fontBytes).digest("hex");
+    const events = buildJoinedStaticFontTrace({
+      sessionId,
+      processId,
+      physicalFilePath: fontPath,
+      physicalFileSha256: physicalSha,
+      descriptorSha256: "c".repeat(64),
+      descriptorLength: fontBytes.length,
+    }).events;
+    const scaler = events[2] as Record<string, unknown>;
+    const aliasScaler = {
+      ...scaler,
+      args: {
+        ...(scaler.args as Record<string, unknown>),
+        actualFont: JSON.stringify({
+          ...(JSON.parse((scaler.args as Record<string, unknown>).actualFont as string) as Record<
+            string,
+            unknown
+          >),
+          postScriptName: "Fixture-Alias",
+          descriptorURL: aliasPath,
+        }),
+      },
+    };
+    const tracePath = path.join(root, "aliases.json");
+    const trace = JSON.stringify({ traceEvents: [...events, aliasScaler] });
+    fs.writeFileSync(tracePath, trace);
+    const traceSha256 = createHash("sha256").update(trace).digest("hex");
+    const result = readChromiumFontTrace({ tracePath, traceSha256, sessionId });
+    expect(result.instances).toHaveLength(1);
+    expect(result.instances[0]?.paintSerials).toEqual([1]);
+    expect(result.instances[0]?.physicalFilePath).toBeUndefined();
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
