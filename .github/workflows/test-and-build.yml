@@ -1591,6 +1591,64 @@ jobs:
           "$OBSERVER_EXECUTABLE"
           031c93c5e822ffd8d22121bb41ed139fb6fcc4e96f6aa1f43ea31ec36fb9242c
 
+      - name: Inspect selected CoreText variation defaults
+        if: steps.source.outputs.font_metadata == 'true'
+        run: |
+          xcrun swift - <<'SWIFT'
+          import Foundation
+          import CoreText
+
+          func nativeCoordinates(_ dictionary: CFTypeRef?) -> [String: Double] {
+              let values = dictionary as? [NSNumber: NSNumber] ?? [:]
+              return Dictionary(uniqueKeysWithValues: values.map { (String($0.key.uint32Value), $0.value.doubleValue) })
+          }
+
+          func nativeDefaults(_ value: CFTypeRef?) -> [String: Double] {
+              let axes = value as? [[String: Any]] ?? []
+              return Dictionary(uniqueKeysWithValues: axes.compactMap { axis in
+                  guard let tag = axis[kCTFontVariationAxisIdentifierKey as String] as? NSNumber,
+                        let value = axis[kCTFontVariationAxisDefaultValueKey as String] as? NSNumber else { return nil }
+                  return (String(tag.uint32Value), value.doubleValue)
+              })
+          }
+
+          func snapshot(_ font: CTFont, label: String, request: String, character: String, size: Double) -> [String: Any] {
+              let descriptor = CTFontCopyFontDescriptor(font)
+              return [
+                  "language": label,
+                  "request": request,
+                  "character": character,
+                  "size": size,
+                  "postScriptName": CTFontCopyPostScriptName(font) as String,
+                  "explicit": nativeCoordinates(CTFontCopyVariation(font)),
+                  "descriptorVariation": nativeCoordinates(CTFontDescriptorCopyAttribute(descriptor, kCTFontVariationAttribute)),
+                  "axisDefaults": nativeDefaults(CTFontCopyVariationAxes(font)),
+                  "descriptorAxisDefaults": nativeDefaults(CTFontDescriptorCopyAttribute(descriptor, kCTFontVariationAxesAttribute)),
+              ]
+          }
+
+          let languages: [(String, CFString?)] = [("system", nil), ("zh-Hans", "zh-Hans" as CFString)]
+          var rows: [[String: Any]] = []
+          for (label, language) in languages {
+              for size in [16.0, 19.0] {
+                  guard let base = CTFontCreateUIFontForLanguage(CTFontUIFontType(rawValue: 2)!, size, language) else {
+                      fatalError("CoreText system-ui request failed")
+                  }
+                  for character in ["を", "り"] {
+                      let text = character as CFString
+                      let range = CFRange(location: 0, length: CFStringGetLength(text))
+                      rows.append(snapshot(CTFontCreateForStringWithLanguage(base, text, range, language), label: label, request: "with-language", character: character, size: size))
+                      rows.append(snapshot(CTFontCreateForString(base, text, range), label: label, request: "for-string", character: character, size: size))
+                  }
+              }
+          }
+          let output = try JSONSerialization.data(withJSONObject: [
+              "schema": "krr-macos-native-font-axes-diagnostic-v1",
+              "rows": rows,
+          ], options: [.sortedKeys])
+          print(String(decoding: output, as: UTF8.self))
+          SWIFT
+
       - name: Install Python analysis tools
         if: steps.source.outputs.font_metadata != 'true' && (steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true')
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
