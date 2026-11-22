@@ -64,6 +64,10 @@ const DIAGNOSTIC_MARKERS = [
   ["Operation evidence does not prove", "krr-operation-evidence"],
   ["actual font audit is incomplete", "krr-font-audit-incomplete"],
   [
+    "Chrome retained font observation face index is invalid",
+    "font-probe-observer-invalid-face-index",
+  ],
+  [
     "Chrome retained font observation has no unique matching face",
     "font-probe-observer-no-unique-face",
   ],

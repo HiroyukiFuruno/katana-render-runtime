@@ -20,6 +20,21 @@ fn retained_observer_face_requires_the_selected_physical_font() -> Result<(), St
 }
 
 #[test]
+fn retained_observer_face_accepts_a_trace_proven_named_alias() -> Result<(), String> {
+    let (temp, _, mut selected) = physical_font_fixture()?;
+    let (file_path, file_sha256, _) = physical_file(&temp.path().join("physical-font.ttf"))?;
+    selected.post_script_name = "Chrome-retained-named-instance".to_string();
+    let face = ObserverFace {
+        post_script_name: selected.post_script_name.clone(),
+        file_path,
+        file_sha256,
+        face_index: 0,
+    };
+    assert!(resolve_observer_face(&selected, &[face]).is_ok());
+    Ok(())
+}
+
+#[test]
 fn retained_observer_face_rejects_changed_or_wrong_face_proofs() -> Result<(), String> {
     let (temp, _, selected) = physical_font_fixture()?;
     let (file_path, file_sha256, _) = physical_file(&temp.path().join("physical-font.ttf"))?;

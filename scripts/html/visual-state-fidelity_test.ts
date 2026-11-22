@@ -240,6 +240,15 @@ describe("retained Chrome system font face evidence", () => {
     expect(() =>
       assertChromeObserverFontFaceBindings(faces, [selected], trace, [{ ...font, faceIndex: 2 }]),
     ).toThrow(/selected physical face/);
+    const forgedName = "Unobserved-NamedInstance";
+    expect(() =>
+      assertChromeObserverFontFaceBindings(
+        faces.map((face) => ({ ...face, postScriptName: forgedName })),
+        [{ ...selected, postScriptName: forgedName }],
+        trace,
+        [font],
+      ),
+    ).toThrow(/retained trace/);
   });
 });
 
