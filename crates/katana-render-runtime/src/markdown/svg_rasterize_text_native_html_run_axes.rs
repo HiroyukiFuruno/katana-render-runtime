@@ -70,3 +70,7 @@ fn platform_outline_units(font: &FontRef<'_>, variations: &[FontVariation]) -> O
     );
     Some(font.metrics(Size::unscaled(), &location).units_per_em)
 }
+
+#[cfg(test)]
+#[path = "svg_rasterize_text_native_html_run_axes_tests.rs"]
+mod tests;

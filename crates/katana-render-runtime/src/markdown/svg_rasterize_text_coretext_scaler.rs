@@ -60,10 +60,13 @@ fn font_size(font: &CTFont) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::scaler_font;
+    use super::{CTFont, matches_copied_face, scaler_font};
     use objc2_core_foundation::CFString;
-    use objc2_core_text::{CTFont, CTFontUIFontType};
+    use objc2_core_text::CTFontUIFontType;
+    use resvg::usvg::fontdb::{Database, FaceInfo, Source};
+    use std::{path::Path, sync::Arc};
 
+    const HELVETICA_FAMILY: &str = "Helvetica";
     const TEST_POINT_SIZE: f64 = 16.0;
 
     #[test]
@@ -88,5 +91,70 @@ mod tests {
             return Err("CoreText scaler copy changed the requested size".to_string());
         }
         Ok(())
+    }
+
+    #[test]
+    fn scaler_copy_binds_the_physical_face_and_rejects_unbound_variants() -> Result<(), String> {
+        let original = helvetica_font();
+        let actual = super::super::font_identity::resolve_actual_face(&original)
+            .ok_or("CoreText font has no physical face")?;
+        let scaler = scaler_font(&original).ok_or("CoreText scaler copy unavailable")?;
+        let mut database = Database::new();
+        database.load_font_source(Source::File(actual.canonical_path.clone()));
+        let id = database
+            .faces()
+            .find(|face| {
+                face.index == actual.face_index && face.post_script_name == actual.post_script_name
+            })
+            .map(|face| face.id)
+            .ok_or("CoreText physical face missing from its file")?;
+        let face = database.face(id).ok_or("physical face unavailable")?;
+        database
+            .with_face_data(id, |bytes, index| {
+                assert!(matches_copied_face(&scaler, face, bytes, index));
+                assert_unbound_variants_rejected(
+                    &scaler,
+                    face,
+                    bytes,
+                    index,
+                    &actual.canonical_path,
+                )
+            })
+            .ok_or("physical face bytes unavailable")?
+    }
+
+    fn assert_unbound_variants_rejected(
+        scaler: &CTFont,
+        face: &FaceInfo,
+        bytes: &[u8],
+        index: u32,
+        path: &Path,
+    ) -> Result<(), String> {
+        let mut renamed = face.clone();
+        renamed.post_script_name = "invalid-Helvetica-name".to_string();
+        let mut moved = face.clone();
+        moved.source = Source::File(path.with_extension("mismatch"));
+        let mut binary = face.clone();
+        binary.source = Source::Binary(Arc::new(bytes.to_vec()));
+        let other_index = index.checked_add(1).ok_or("physical face index overflow")?;
+        for (case, candidate, candidate_bytes, candidate_index) in [
+            ("name", &renamed, bytes, index),
+            ("path", &moved, bytes, index),
+            ("index", face, bytes, other_index),
+            ("bytes", face, &[][..], index),
+            ("binary source", &binary, bytes, index),
+        ] {
+            assert!(
+                !matches_copied_face(scaler, candidate, candidate_bytes, candidate_index),
+                "CoreText scaler copy accepted a mismatch in {case}"
+            );
+        }
+        Ok(())
+    }
+
+    fn helvetica_font() -> objc2_core_foundation::CFRetained<CTFont> {
+        let name = CFString::from_str(HELVETICA_FAMILY);
+        /* SAFETY: CoreTextへ固定の既知family名・正のpoint size・null transformだけを渡す。 */
+        unsafe { CTFont::with_name(&name, TEST_POINT_SIZE, std::ptr::null()) }
     }
 }
