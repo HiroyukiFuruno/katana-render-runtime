@@ -6,6 +6,7 @@ use std::sync::Arc;
 pub(in crate::renderer::backends::html_interactive) struct FontContext {
     sans_serif: Option<&'static str>,
     localized_family: Option<Arc<str>>,
+    language: Option<Arc<str>>,
 }
 
 impl CssStyle {
@@ -16,10 +17,16 @@ impl CssStyle {
             .unwrap_or(&self.font_family)
     }
 
+    pub(in crate::renderer::backends::html_interactive) fn effective_font_language(
+        &self,
+    ) -> Option<&str> {
+        self.font_context.language.as_deref()
+    }
+
     pub(super) fn resolve_font_context(&mut self, language: Option<&str>, inherited: &Self) {
-        if let Some(language) = language {
-            self.font_context.sans_serif =
-                SvgRasterizeOps::localized_html_sans_serif(language.trim());
+        if let Some(language) = language.map(str::trim) {
+            self.font_context.language = (!language.is_empty()).then(|| Arc::from(language));
+            self.font_context.sans_serif = SvgRasterizeOps::localized_html_sans_serif(language);
         }
         let previous = inherited.font_context.sans_serif;
         let current = self.font_context.sans_serif;
@@ -71,6 +78,24 @@ mod tests {
 
         authored.set_font_family("Arial".into());
         assert_eq!(authored.used_font_family(), "Arial");
+    }
+
+    #[test]
+    fn effective_language_inherits_trims_and_clears_on_an_empty_override() {
+        let root = CssStyle::from_element(
+            "html",
+            &[("lang".into(), " ja-JP ".into())],
+            &CssStyle::browser_default(),
+        );
+        let inherited = CssStyle::from_element("p", &[], &root);
+        let overridden =
+            CssStyle::from_element("span", &[("lang".into(), "zh-Hans".into())], &inherited);
+        let empty = CssStyle::from_element("em", &[("lang".into(), "  ".into())], &overridden);
+
+        assert_eq!(root.effective_font_language(), Some("ja-JP"));
+        assert_eq!(inherited.effective_font_language(), Some("ja-JP"));
+        assert_eq!(overridden.effective_font_language(), Some("zh-Hans"));
+        assert_eq!(empty.effective_font_language(), None);
     }
 
     #[cfg(target_os = "linux")]

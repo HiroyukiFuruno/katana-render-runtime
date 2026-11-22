@@ -24,7 +24,7 @@ thread_local! {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct TextMeasurementKey {
     text_sha256: [u8; SHA256_DIGEST_BYTES],
-    font_family_sha256: [u8; SHA256_DIGEST_BYTES],
+    font_context_sha256: [u8; SHA256_DIGEST_BYTES],
     font_size: u32,
     font_weight: u16,
     italic: bool,
@@ -37,7 +37,7 @@ impl TextMeasurementKey {
     fn new(text: &str, style: &CssStyle) -> Self {
         Self {
             text_sha256: Sha256::digest(text.as_bytes()).into(),
-            font_family_sha256: Sha256::digest(style.used_font_family().as_bytes()).into(),
+            font_context_sha256: font_context_digest(style),
             font_size: style.font_size.to_bits(),
             font_weight: style.font_weight,
             italic: style.italic,
@@ -52,6 +52,17 @@ impl TextMeasurementKey {
             },
         }
     }
+}
+
+fn font_context_digest(style: &CssStyle) -> [u8; SHA256_DIGEST_BYTES] {
+    let family = style.used_font_family().as_bytes();
+    let mut digest = Sha256::new();
+    digest.update(family.len().to_be_bytes());
+    digest.update(family);
+    if let Some(language) = style.effective_font_language() {
+        digest.update(language.as_bytes());
+    }
+    digest.finalize().into()
 }
 
 pub(super) struct TextMeasurementCacheScope;
@@ -204,6 +215,27 @@ mod tests {
             Ok((width, _)) => width,
             Err(_) => heuristic_text_width(text, style),
         }
+    }
+
+    #[test]
+    fn measurement_key_separates_languages_with_the_same_author_family() {
+        let style_for_language = |language: &str| {
+            CssStyle::from_element(
+                "p",
+                &[
+                    ("lang".into(), language.into()),
+                    ("style".into(), "font-family: Arial".into()),
+                ],
+                &CssStyle::browser_default(),
+            )
+        };
+        let japanese = style_for_language("ja");
+        let chinese = style_for_language("zh-Hans");
+        assert_eq!(japanese.used_font_family(), chinese.used_font_family());
+        assert_ne!(
+            TextMeasurementKey::new("装", &japanese),
+            TextMeasurementKey::new("装", &chinese),
+        );
     }
 
     #[test]

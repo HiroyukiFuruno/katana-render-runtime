@@ -13,6 +13,7 @@ const MAX_CACHED_FONT_MARKUP_BYTES: usize = 4 * 1024 * 1024;
 struct FontMarkupKey {
     text: String,
     font_family: String,
+    language: Option<String>,
     font_weight: u16,
     italic: bool,
     x: u32,
@@ -42,6 +43,7 @@ impl FontMarkupCache {
         let key = FontMarkupKey {
             text: text.to_string(),
             font_family: style.used_font_family().to_owned(),
+            language: style.effective_font_language().map(str::to_owned),
             font_weight: style.font_weight,
             italic: style.italic,
             x: x.to_bits(),
@@ -80,6 +82,7 @@ impl FontMarkupCache {
 fn retained_markup_bytes(key: &FontMarkupKey, markup: &(String, String)) -> usize {
     key.text.capacity()
         + key.font_family.capacity()
+        + key.language.as_ref().map_or(0, String::capacity)
         + key.features.as_ref().map_or(0, String::capacity)
         + markup.0.capacity()
         + markup.1.capacity()
@@ -307,6 +310,7 @@ mod tests {
         let key = super::FontMarkupKey {
             text: "Document line".to_string(),
             font_family: "Example".to_string(),
+            language: None,
             font_weight: CssStyle::browser_default().font_weight,
             italic: false,
             x: 0.0_f32.to_bits(),
@@ -333,6 +337,7 @@ mod tests {
                 super::FontMarkupKey {
                     text: text.to_string(),
                     font_family: "Example".to_string(),
+                    language: None,
                     font_weight: CssStyle::browser_default().font_weight,
                     italic: false,
                     x: 0.0_f32.to_bits(),
