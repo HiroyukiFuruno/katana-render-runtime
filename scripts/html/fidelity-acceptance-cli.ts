@@ -31,6 +31,7 @@ import {
   type CatalogStage90ResumeOptions,
   jsonResourceFiles,
   runCatalogStage90Captures,
+  runCatalogStage90DiagnosticCaptures,
   runInputStateFidelity,
 } from "./visual-state-fidelity";
 
@@ -45,6 +46,7 @@ const modeSchema = z.enum([
   "reports-interim",
   "catalog-stage90-plan",
   "catalog-stage90-capture",
+  "catalog-stage90-diagnostic-capture",
   "catalog-stage90-validate",
   "catalog-stage90-validate-captures",
   "catalog-stage90-validate-binary-closure",
@@ -56,6 +58,7 @@ type LegacyCaptureMode = Exclude<
   | "reports-interim"
   | "catalog-stage90-plan"
   | "catalog-stage90-capture"
+  | "catalog-stage90-diagnostic-capture"
   | "catalog-stage90-validate"
   | "catalog-stage90-validate-captures"
   | "catalog-stage90-validate-binary-closure"
@@ -85,6 +88,13 @@ interface CatalogCapturePlan {
   acceptance: false;
   resume?: CatalogStage90ResumeOptions;
   chromeExecutable?: CatalogStage90ChromeExecutablePin;
+}
+
+interface CatalogDiagnosticCapturePlan
+  extends Omit<CatalogCapturePlan, "kind" | "resume" | "chromeExecutable"> {
+  kind: "catalog-stage90-diagnostic-capture";
+  diagnosticConditions: string[];
+  chromeExecutable: CatalogStage90ChromeExecutablePin & { fontObserver: true };
 }
 
 interface CatalogPlanWrite {
@@ -128,6 +138,7 @@ export type FidelityAcceptancePlan =
   | CapturePlan
   | ReportsPlan
   | CatalogPlanWrite
+  | CatalogDiagnosticCapturePlan
   | CatalogCapturePlan
   | CatalogValidatePlan
   | CatalogValidateCapturesPlan
@@ -211,6 +222,7 @@ function catalogModePlan(
       throw new Error("catalog stage90 plan requires one output path");
     return { kind: mode, output, acceptance: false };
   }
+  if (mode === "catalog-stage90-diagnostic-capture") return catalogDiagnosticCapturePlan(argv);
   if (mode === "catalog-stage90-capture" || mode === "catalog-stage90-validate")
     return catalogAcceptancePlan(mode, argv);
   if (mode === "catalog-stage90-validate-captures") {
@@ -321,6 +333,28 @@ function catalogCapturePlan(argv: readonly string[]): CatalogCapturePlan {
   };
 }
 
+function catalogDiagnosticCapturePlan(argv: readonly string[]): CatalogDiagnosticCapturePlan {
+  const marker = argv.indexOf("--diagnostic-conditions");
+  if (marker < 4) throw new Error("catalog diagnostic capture requires condition selections");
+  const optionIndex = argv.findIndex((value, index) => index > marker && value.startsWith("--"));
+  const end = optionIndex < 0 ? argv.length : optionIndex;
+  const diagnosticConditions = argv.slice(marker + 1, end);
+  if (
+    diagnosticConditions.length === 0 ||
+    new Set(diagnosticConditions).size !== diagnosticConditions.length
+  )
+    throw new Error("catalog diagnostic capture requires unique condition selections");
+  const plan = catalogObserverCapturePlan([...argv.slice(0, marker), ...argv.slice(end)]);
+  if (plan.resume || !plan.chromeExecutable?.fontObserver)
+    throw new Error("catalog diagnostic capture requires a pinned font observer without resume");
+  return {
+    ...plan,
+    kind: "catalog-stage90-diagnostic-capture",
+    diagnosticConditions,
+    chromeExecutable: { ...plan.chromeExecutable, fontObserver: true },
+  };
+}
+
 function catalogObserverCapturePlan(argv: readonly string[]): CatalogCapturePlan {
   if (
     argv.at(-1) !== "--font-observer" ||
@@ -364,6 +398,10 @@ export async function runFidelityAcceptance(argv: readonly string[]): Promise<vo
     await runCatalogCapture(plan);
     return;
   }
+  if (plan.kind === "catalog-stage90-diagnostic-capture") {
+    await runCatalogDiagnosticCapture(plan);
+    return;
+  }
   const binary = tocBinaryFromBuildReport(plan.buildReport);
   const capture = plan.kind === "input-state" ? runInputStateFidelity : runDynamicFidelity;
   if (plan.options) await capture(binary, plan.output, plan.threshold, plan.options);
@@ -388,6 +426,21 @@ async function runCatalogCapture(plan: CatalogCapturePlan): Promise<void> {
     plan.conditionPlan,
     plan.output,
     plan.resume,
+    plan.chromeExecutable,
+    binaryProof,
+    currentBuild,
+  );
+}
+
+async function runCatalogDiagnosticCapture(plan: CatalogDiagnosticCapturePlan): Promise<void> {
+  const binaryProof = freezeCatalogBinary(plan.buildReport, path.resolve(plan.output));
+  const binary = path.join(path.dirname(binaryProof.path), "runtime-tests");
+  const currentBuild = currentCatalogBuild(plan.buildReport);
+  await runCatalogStage90DiagnosticCaptures(
+    binary,
+    plan.conditionPlan,
+    plan.output,
+    plan.diagnosticConditions,
     plan.chromeExecutable,
     binaryProof,
     currentBuild,

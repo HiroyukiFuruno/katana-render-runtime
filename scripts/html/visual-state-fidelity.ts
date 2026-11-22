@@ -660,6 +660,121 @@ export async function runCatalogStage90Captures(
   currentBuild: CatalogCurrentBuild,
 ): Promise<JsonValue> {
   outputDirectory = path.resolve(outputDirectory);
+  assertCatalogCaptureAdmission(binary, binaryProof, currentBuild);
+  const capture = await captureCatalogStage90(
+    binary,
+    planPath,
+    outputDirectory,
+    resume,
+    chromeExecutable,
+    undefined,
+  );
+  const observation = writeCatalogStage90Observation(
+    capture,
+    binary,
+    planPath,
+    outputDirectory,
+    binaryProof,
+    currentBuild,
+    "catalog-stage90-captures",
+  );
+  runChromeFontIdentityProbe(
+    binary,
+    observation.requestPath,
+    observation.responsePath,
+    outputDirectory,
+  );
+  const finalized = finalizeCatalogStage90FontIdentity(
+    observation.captureManifestPath,
+    path.resolve(planPath),
+    observation.responsePath,
+    path.join(outputDirectory, "catalog-stage90-captures.json"),
+  );
+  const finalizedManifest = jsonRecord(finalized, "final catalog stage90 manifest");
+  const finalizedConditions = jsonArray(
+    finalizedManifest.conditions,
+    "final catalog stage90 conditions",
+  );
+  if (
+    observation.conditionsWithRequest.length !== 84 ||
+    finalizedConditions.some((condition) => !isCapturedCondition(condition))
+  ) {
+    console.error(
+      JSON.stringify(
+        catalogStage90RejectionDiagnostics(
+          capture.plan.conditions.map((condition) => condition.conditionId),
+          finalizedConditions,
+        ),
+      ),
+    );
+    throw new Error("Catalog stage90 capture has unverified conditions; acceptance remains false");
+  }
+  return finalized;
+}
+
+export async function runCatalogStage90DiagnosticCaptures(
+  binary: string,
+  planPath: string,
+  outputDirectory: string,
+  diagnosticConditions: readonly string[],
+  chromeExecutable: CatalogStage90ChromeExecutablePin,
+  binaryProof: CatalogBinaryProofRef,
+  currentBuild: CatalogCurrentBuild,
+): Promise<JsonValue> {
+  outputDirectory = path.resolve(outputDirectory);
+  assertCatalogCaptureAdmission(binary, binaryProof, currentBuild);
+  const capture = await captureCatalogStage90(
+    binary,
+    planPath,
+    outputDirectory,
+    undefined,
+    chromeExecutable,
+    diagnosticConditions,
+  );
+  const observation = writeCatalogStage90Observation(
+    capture,
+    binary,
+    planPath,
+    outputDirectory,
+    binaryProof,
+    currentBuild,
+    "catalog-stage90-diagnostic-captures",
+  );
+  runChromeFontIdentityProbe(
+    binary,
+    observation.requestPath,
+    observation.responsePath,
+    outputDirectory,
+  );
+  const finalized = finalizeCatalogStage90DiagnosticFontIdentity(
+    observation.captureManifestPath,
+    path.resolve(planPath),
+    observation.responsePath,
+    path.join(outputDirectory, "catalog-stage90-diagnostic-captures.json"),
+    diagnosticConditions,
+  );
+  const conditions = jsonArray(
+    jsonRecord(finalized, "final catalog stage90 diagnostic manifest").conditions,
+    "final catalog stage90 diagnostic conditions",
+  );
+  const testedConditionIds = capture.plan.conditions.map((condition) => condition.conditionId);
+  const rejections = catalogStage90RejectionDiagnostics(testedConditionIds, conditions);
+  console.info(
+    JSON.stringify({
+      ...rejections,
+      profile: "selected-conditions",
+      acceptance: false,
+      testedConditionIds,
+    }),
+  );
+  return finalized;
+}
+
+function assertCatalogCaptureAdmission(
+  binary: string,
+  binaryProof: CatalogBinaryProofRef,
+  currentBuild: CatalogCurrentBuild,
+): void {
   assertCatalogManifestBinaryProof({
     schema: CATALOG_CAPTURE_SCHEMA,
     binaryProof,
@@ -667,13 +782,22 @@ export async function runCatalogStage90Captures(
     binaryPath: path.resolve(binary),
     binarySha256: sha256File(binary),
   });
-  const capture = await captureCatalogStage90(
-    binary,
-    planPath,
-    outputDirectory,
-    resume,
-    chromeExecutable,
-  );
+}
+
+function writeCatalogStage90Observation(
+  capture: CatalogStage90Capture,
+  binary: string,
+  planPath: string,
+  outputDirectory: string,
+  binaryProof: CatalogBinaryProofRef,
+  currentBuild: CatalogCurrentBuild,
+  profile: "catalog-stage90-captures" | "catalog-stage90-diagnostic-captures",
+): {
+  captureManifestPath: string;
+  conditionsWithRequest: JsonValue[];
+  requestPath: string;
+  responsePath: string;
+} {
   const {
     catalogSha256,
     binarySha256,
@@ -710,7 +834,7 @@ export async function runCatalogStage90Captures(
   });
   const manifest = {
     schema: CATALOG_CAPTURE_SCHEMA,
-    profile: "catalog-stage90-captures" as const,
+    profile,
     threshold: 90 as const,
     acceptance: false as const,
     catalogPath: path.resolve("tests/fixtures/html/feature-catalog.json"),
@@ -730,37 +854,13 @@ export async function runCatalogStage90Captures(
   };
   const captureManifestPath = path.join(
     outputDirectory,
-    "catalog-stage90-capture-observation.json",
+    profile === "catalog-stage90-captures"
+      ? "catalog-stage90-capture-observation.json"
+      : "catalog-stage90-diagnostic-capture-observation.json",
   );
   fs.writeFileSync(captureManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, { flag: "wx" });
   const responsePath = path.join(outputDirectory, "chrome-font-identity-response.json");
-  runChromeFontIdentityProbe(binary, requestPath, responsePath, outputDirectory);
-  const finalized = finalizeCatalogStage90FontIdentity(
-    captureManifestPath,
-    path.resolve(planPath),
-    responsePath,
-    path.join(outputDirectory, "catalog-stage90-captures.json"),
-  );
-  const finalizedManifest = jsonRecord(finalized, "final catalog stage90 manifest");
-  const finalizedConditions = jsonArray(
-    finalizedManifest.conditions,
-    "final catalog stage90 conditions",
-  );
-  if (
-    conditionsWithRequest.length !== 84 ||
-    finalizedConditions.some((condition) => !isCapturedCondition(condition))
-  ) {
-    console.error(
-      JSON.stringify(
-        catalogStage90RejectionDiagnostics(
-          plan.conditions.map((condition) => condition.conditionId),
-          finalizedConditions,
-        ),
-      ),
-    );
-    throw new Error("Catalog stage90 capture has unverified conditions; acceptance remains false");
-  }
-  return finalized;
+  return { captureManifestPath, conditionsWithRequest, requestPath, responsePath };
 }
 
 interface CatalogStage90Capture {
@@ -774,18 +874,36 @@ interface CatalogStage90Capture {
   chromeRuntimeVersion: string;
 }
 
+function selectCatalogDiagnosticConditions(
+  fullPlan: CatalogStage90ConditionPlan,
+  conditionIds: readonly string[],
+): CatalogStage90ConditionPlan {
+  if (conditionIds.length === 0 || new Set(conditionIds).size !== conditionIds.length)
+    throw new Error("catalog diagnostic conditions must be non-empty and unique");
+  const selected = conditionIds.map((conditionId) => {
+    const condition = fullPlan.conditions.find((row) => row.conditionId === conditionId);
+    if (!condition) throw new Error("catalog diagnostic condition is not in the full plan");
+    return condition;
+  });
+  return { ...fullPlan, conditions: selected };
+}
+
 async function captureCatalogStage90(
   binary: string,
   planPath: string,
   outputDirectory: string,
   resume: CatalogStage90ResumeOptions | undefined,
   chromeExecutable: CatalogStage90ChromeExecutablePin | undefined,
+  diagnosticConditions: readonly string[] | undefined,
 ): Promise<CatalogStage90Capture> {
   const catalog = loadFeatureCatalog();
   assertCatalogComplete(catalog);
-  const plan = assertCatalogStage90ConditionPlan(
+  const fullPlan = assertCatalogStage90ConditionPlan(
     JSON.parse(fs.readFileSync(path.resolve(planPath), "utf8")) as JsonValue,
   );
+  const plan = diagnosticConditions
+    ? selectCatalogDiagnosticConditions(fullPlan, diagnosticConditions)
+    : fullPlan;
   const binarySha256 = sha256File(binary);
   const catalogSha256 = sha256File("tests/fixtures/html/feature-catalog.json");
   if (fs.existsSync(outputDirectory))
@@ -1396,16 +1514,57 @@ export function finalizeCatalogStage90FontIdentity(
   responsePath: string,
   outputManifestPath: string,
 ): JsonValue {
+  const plan = assertCatalogStage90ConditionPlan(
+    JSON.parse(fs.readFileSync(conditionPlanPath, "utf8")) as JsonValue,
+  );
+  return finalizeCatalogFontIdentity(
+    captureManifestPath,
+    conditionPlanPath,
+    responsePath,
+    outputManifestPath,
+    plan,
+    "catalog-stage90-captures",
+  );
+}
+
+function finalizeCatalogStage90DiagnosticFontIdentity(
+  captureManifestPath: string,
+  conditionPlanPath: string,
+  responsePath: string,
+  outputManifestPath: string,
+  diagnosticConditions: readonly string[],
+): JsonValue {
+  const plan = selectCatalogDiagnosticConditions(
+    assertCatalogStage90ConditionPlan(
+      JSON.parse(fs.readFileSync(conditionPlanPath, "utf8")) as JsonValue,
+    ),
+    diagnosticConditions,
+  );
+  return finalizeCatalogFontIdentity(
+    captureManifestPath,
+    conditionPlanPath,
+    responsePath,
+    outputManifestPath,
+    plan,
+    "catalog-stage90-diagnostic-captures",
+  );
+}
+
+function finalizeCatalogFontIdentity(
+  captureManifestPath: string,
+  conditionPlanPath: string,
+  responsePath: string,
+  outputManifestPath: string,
+  plan: CatalogStage90ConditionPlan,
+  profile: "catalog-stage90-captures" | "catalog-stage90-diagnostic-captures",
+): JsonValue {
   const captureManifest = jsonRecord(
     JSON.parse(fs.readFileSync(captureManifestPath, "utf8")) as JsonValue,
     "catalog capture manifest",
   );
   assertCatalogManifestBinaryProof(captureManifest);
-  const plan = assertCatalogStage90ConditionPlan(
-    JSON.parse(fs.readFileSync(conditionPlanPath, "utf8")) as JsonValue,
-  );
   if (
-    captureManifest.profile !== "catalog-stage90-captures" ||
+    captureManifest.profile !== profile ||
     captureManifest.threshold !== 90 ||
     captureManifest.acceptance !== false ||
     captureManifest.planPath !== path.resolve(conditionPlanPath) ||

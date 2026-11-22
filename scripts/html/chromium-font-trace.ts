@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import { z } from "zod";
 
 const TRACE_CATEGORY = "katana.font-observer";
@@ -124,6 +125,25 @@ const parseTransform = (args: EventArgs): boolean => {
 
 type FontIdentity = Omit<ChromiumFontInstance, "paintSerials" | "join">;
 
+export const OBSERVER_SCALER_REJECTION_CODES = [
+  "observer-scaler-no-event",
+  "observer-scaler-conflicting-descriptor",
+  "observer-scaler-invalid-font-schema",
+  "observer-scaler-invalid-variation-schema",
+  "observer-scaler-missing-descriptor-path",
+  "observer-scaler-file-uri-needs-normalization",
+  "observer-scaler-unavailable-absolute-file",
+  "observer-scaler-file-read-failed",
+  "observer-scaler-file-digest-mismatch",
+  "observer-scaler-variation-mismatch",
+] as const;
+
+type ScalerRejectionToken = (typeof OBSERVER_SCALER_REJECTION_CODES)[number];
+
+type ParsedFontIdentity =
+  | { identity: FontIdentity; rejection?: undefined }
+  | { identity?: undefined; rejection: ScalerRejectionToken };
+
 const identityKey = (instance: FontIdentity): string =>
   JSON.stringify([
     instance.processId,
@@ -185,38 +205,69 @@ function validateVariable(
   return seen.size === ids.size ? { axes, coordinates } : undefined;
 }
 
-function parseFontIdentity(args: EventArgs): FontIdentity | undefined {
-  const actualResult = actualFontSchema.safeParse(parseJsonValue(stringArg(args, "actualFont")));
+function hasMissingDescriptorPath(actual: unknown): boolean {
+  if (typeof actual !== "object" || actual === null || Array.isArray(actual)) return true;
+  const descriptorURL = (actual as Record<string, unknown>).descriptorURL;
+  return typeof descriptorURL !== "string" || descriptorURL.length === 0;
+}
+
+function descriptorPathRejection(
+  descriptorURL: string,
+  physicalFileSha256: string,
+): ScalerRejectionToken | undefined {
+  if (!fs.existsSync(descriptorURL)) {
+    if (descriptorURL.startsWith("file:")) return "observer-scaler-file-uri-needs-normalization";
+    if (path.isAbsolute(descriptorURL)) return "observer-scaler-unavailable-absolute-file";
+    return "observer-scaler-missing-descriptor-path";
+  }
+  try {
+    const bytes = fs.readFileSync(descriptorURL);
+    return createHash("sha256").update(bytes).digest("hex") === physicalFileSha256
+      ? undefined
+      : "observer-scaler-file-digest-mismatch";
+  } catch {
+    throw new Error("observer-scaler-file-read-failed");
+  }
+}
+
+function parseFontIdentity(args: EventArgs): ParsedFontIdentity {
+  const actualValue = parseJsonValue(stringArg(args, "actualFont"));
+  const actualResult = actualFontSchema.safeParse(actualValue);
   const positionResult = variationPositionSchema.safeParse(
     parseJsonValue(stringArg(args, "skiaVariationPosition")),
   );
   const descriptor = parseDescriptor(args);
-  if (!actualResult.success || !positionResult.success || descriptor === undefined)
-    return undefined;
+  if (!actualResult.success)
+    return {
+      rejection: hasMissingDescriptorPath(actualValue)
+        ? "observer-scaler-missing-descriptor-path"
+        : "observer-scaler-invalid-font-schema",
+    };
+  if (!positionResult.success) return { rejection: "observer-scaler-invalid-variation-schema" };
+  if (descriptor === undefined) return { rejection: "observer-scaler-invalid-font-schema" };
   const actual = actualResult.data;
   const position = positionResult.data;
-  const physicalPath = actual.descriptorURL;
-  if (typeof physicalPath !== "string" || !fs.existsSync(physicalPath)) return undefined;
-  const bytes = fs.readFileSync(physicalPath);
-  if (createHash("sha256").update(bytes).digest("hex") !== actual.physicalFileSHA256)
-    return undefined;
+  const pathRejection = descriptorPathRejection(actual.descriptorURL, actual.physicalFileSHA256);
+  if (pathRejection !== undefined) return { rejection: pathRejection };
   let axes: FontAxis[] = [];
   let coordinates: FontCoordinate[] = [];
   if (!validateStatic(actual, position)) {
     const variable = validateVariable(actual, position);
-    if (variable === undefined) return undefined;
+    if (variable === undefined) return { rejection: "observer-scaler-variation-mismatch" };
     axes = variable.axes;
     coordinates = variable.coordinates;
   }
   return {
-    processId: args.processId as number,
-    processRole: args.processRole as ProcessRole,
-    physicalFileSHA256: actual.physicalFileSHA256,
-    physicalFaceTtcIndex: actual.physicalFaceTtcIndex,
-    postScriptName: actual.postScriptName,
-    fvarTablePresent: actual.physicalFaceFvarTablePresent === true,
-    axes,
-    coordinates,
+    identity: {
+      processId: args.processId as number,
+      processRole: args.processRole as ProcessRole,
+      physicalFileSHA256: actual.physicalFileSHA256,
+      physicalFaceTtcIndex: actual.physicalFaceTtcIndex,
+      postScriptName: actual.postScriptName,
+      fvarTablePresent: actual.physicalFaceFvarTablePresent === true,
+      axes,
+      coordinates,
+    },
   };
 }
 
@@ -253,6 +304,8 @@ type TraceState = {
   retained: Map<string, { begin: boolean; end: boolean }>;
   strikes: Map<string, Set<number>>;
   scalers: Map<string, { identity: FontIdentity }>;
+  scalerEvents: Set<string>;
+  scalerRejections: Map<string, Set<ScalerRejectionToken>>;
   conflictingDescriptors: Set<string>;
 };
 
@@ -278,9 +331,17 @@ function recordStrike(state: TraceState, args: EventArgs, serial: number): void 
 
 function recordScaler(state: TraceState, args: EventArgs): void {
   const descriptor = parseDescriptor(args);
-  const identity = parseFontIdentity(args);
-  if (descriptor === undefined || identity === undefined) return;
+  if (descriptor === undefined) return;
   const key = descriptorKey(args, descriptor);
+  state.scalerEvents.add(key);
+  const parsed = parseFontIdentity(args);
+  if (parsed.identity === undefined) {
+    const rejections = state.scalerRejections.get(key) ?? new Set<ScalerRejectionToken>();
+    rejections.add(parsed.rejection);
+    state.scalerRejections.set(key, rejections);
+    return;
+  }
+  const identity = parsed.identity;
   if (state.conflictingDescriptors.has(key)) return;
   const previous = state.scalers.get(key);
   if (previous !== undefined && identityKey(previous.identity) !== identityKey(identity)) {
@@ -294,6 +355,8 @@ function collectState(events: z.infer<typeof traceEventSchema>[]): TraceState {
     retained: new Map(),
     strikes: new Map(),
     scalers: new Map(),
+    scalerEvents: new Set(),
+    scalerRejections: new Map(),
     conflictingDescriptors: new Set(),
   };
   for (const event of events) {
@@ -306,6 +369,16 @@ function collectState(events: z.infer<typeof traceEventSchema>[]): TraceState {
   return state;
 }
 
+function missingScalerError(state: TraceState, key: string): Error {
+  const tokens = new Set<ScalerRejectionToken>();
+  if (!state.scalerEvents.has(key)) tokens.add("observer-scaler-no-event");
+  if (state.conflictingDescriptors.has(key)) tokens.add("observer-scaler-conflicting-descriptor");
+  for (const token of state.scalerRejections.get(key) ?? []) tokens.add(token);
+  if (tokens.size === 0) tokens.add("observer-scaler-no-event");
+  const ordered = OBSERVER_SCALER_REJECTION_CODES.filter((token) => tokens.has(token));
+  return new Error(`used strike has no joined scaler: ${ordered.join(" ")}`);
+}
+
 function joinInstances(state: TraceState): ChromiumFontInstance[] {
   const instances = new Map<string, ChromiumFontInstance>();
   for (const [key, serials] of state.strikes) {
@@ -315,7 +388,7 @@ function joinInstances(state: TraceState): ChromiumFontInstance[] {
       state.retained.has(`${processId}:${processRole}:${serial}`),
     );
     if (usedSerials.length === 0) continue;
-    if (scaler === undefined) throw new Error("used strike has no joined scaler");
+    if (scaler === undefined) throw missingScalerError(state, key);
     for (const serial of usedSerials) {
       const retained = state.retained.get(
         `${scaler.identity.processId}:${scaler.identity.processRole}:${serial}`,

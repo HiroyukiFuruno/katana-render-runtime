@@ -103,6 +103,21 @@ test("Chromium font trace join is strict and table-driven", () => {
           }
         : item,
     );
+    const relativePath = path.relative(process.cwd(), fontPath);
+    const relativePathValid = valid.map((item) =>
+      item.name === "scaler-font"
+        ? {
+            ...item,
+            args: {
+              ...(item.args as Record<string, unknown>),
+              actualFont: JSON.stringify({
+                ...(JSON.parse(base.actualFont as string) as Record<string, unknown>),
+                descriptorURL: relativePath,
+              }),
+            },
+          }
+        : item,
+    );
     const unknownFvar = valid.map((item) =>
       item.name === "scaler-font"
         ? {
@@ -156,6 +171,7 @@ test("Chromium font trace join is strict and table-driven", () => {
         ok: true,
         expectedFvar: false,
       },
+      { name: "relative existing path", events: relativePathValid, ok: true, expectedFvar: false },
       { name: "joined variable instance", events: variableValid, ok: true, expectedFvar: true },
       { name: "duplicate variable axis is rejected", events: variableDuplicateAxis, ok: false },
       { name: "unknown fvar is rejected", events: unknownFvar, ok: false },
@@ -208,6 +224,182 @@ test("Chromium font trace join is strict and table-driven", () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("used scaler rejections are granular and redact trace values", () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "krr-font-trace-")));
+  try {
+    const fontPath = path.join(root, "font.bin");
+    const fontBytes = Buffer.from("fixture-font-bytes");
+    fs.writeFileSync(fontPath, fontBytes);
+    const physicalSha = createHash("sha256").update(fontBytes).digest("hex");
+    const descriptorSha = "d".repeat(64);
+    const valid = buildJoinedStaticFontTrace({
+      sessionId,
+      processId,
+      physicalFilePath: fontPath,
+      physicalFileSha256: physicalSha,
+      descriptorSha256: descriptorSha,
+      descriptorLength: fontBytes.length,
+    }).events;
+    const mutateScaler = (
+      events: Record<string, unknown>[],
+      mutation: (args: Record<string, unknown>) => Record<string, unknown>,
+    ): Record<string, unknown>[] =>
+      events.map((item) =>
+        item.name === "scaler-font"
+          ? { ...item, args: mutation(item.args as Record<string, unknown>) }
+          : item,
+      );
+    const mutateActual = (
+      events: Record<string, unknown>[],
+      mutation: (actual: Record<string, unknown>) => Record<string, unknown>,
+    ): Record<string, unknown>[] =>
+      mutateScaler(events, (args) => ({
+        ...args,
+        actualFont: JSON.stringify(mutation(JSON.parse(args.actualFont as string))),
+      }));
+    const variableMismatch = mutateActual(valid, (actual) => ({
+      ...actual,
+      physicalFaceFvarTablePresent: true,
+      axisInventoryAvailable: true,
+      axes: [
+        { identifier: 1196445523, minimum: 100, maximum: 900 },
+        { identifier: 1196445523, minimum: 100, maximum: 900 },
+      ],
+    }));
+    const invalidVariation = mutateScaler(valid, (args) => ({
+      ...args,
+      skiaVariationPosition: "not-json",
+    }));
+    const conflicting = [
+      ...valid,
+      ...mutateActual([valid[2] as Record<string, unknown>], (actual) => ({
+        ...actual,
+        physicalFaceTtcIndex: 1,
+      })),
+    ];
+    const cases = [
+      {
+        name: "no-event",
+        events: valid.filter((item) => item.name !== "scaler-font"),
+        code: "observer-scaler-no-event",
+      },
+      { name: "conflict", events: conflicting, code: "observer-scaler-conflicting-descriptor" },
+      {
+        name: "invalid-font",
+        events: mutateActual(valid, (actual) => ({ ...actual, postScriptName: "" })),
+        code: "observer-scaler-invalid-font-schema",
+      },
+      {
+        name: "invalid-variation",
+        events: invalidVariation,
+        code: "observer-scaler-invalid-variation-schema",
+      },
+      {
+        name: "missing-descriptor-path",
+        events: mutateActual(valid, (actual) => {
+          const { descriptorURL: _descriptorURL, ...withoutPath } = actual;
+          return withoutPath;
+        }),
+        code: "observer-scaler-missing-descriptor-path",
+      },
+      {
+        name: "file-uri",
+        events: mutateActual(valid, (actual) => ({
+          ...actual,
+          descriptorURL: `file://${fontPath}`,
+        })),
+        code: "observer-scaler-file-uri-needs-normalization",
+      },
+      {
+        name: "unavailable-file",
+        events: mutateActual(valid, (actual) => ({
+          ...actual,
+          descriptorURL: "/unavailable/fixture-font.bin",
+        })),
+        code: "observer-scaler-unavailable-absolute-file",
+      },
+      {
+        name: "digest-mismatch",
+        events: mutateActual(valid, (actual) => ({
+          ...actual,
+          physicalFileSHA256: "e".repeat(64),
+        })),
+        code: "observer-scaler-file-digest-mismatch",
+      },
+      {
+        name: "variation-mismatch",
+        events: variableMismatch,
+        code: "observer-scaler-variation-mismatch",
+      },
+    ];
+    for (const fixture of cases) {
+      const message = traceRejection(root, fixture.name, fixture.events);
+      expect(message).toBe(`used strike has no joined scaler: ${fixture.code}`);
+      expect(message).not.toContain(root);
+      expect(message).not.toContain(fontPath);
+      expect(message).not.toContain("Fixture-Regular");
+      expect(message).not.toContain("1196445523");
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("existing unreadable descriptor rejects without exposing its path", () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "krr-font-trace-")));
+  try {
+    const fontPath = path.join(root, "font.bin");
+    const fontBytes = Buffer.from("fixture-font-bytes");
+    fs.writeFileSync(fontPath, fontBytes);
+    const physicalSha = createHash("sha256").update(fontBytes).digest("hex");
+    const events = buildJoinedStaticFontTrace({
+      sessionId,
+      processId,
+      physicalFilePath: fontPath,
+      physicalFileSha256: physicalSha,
+      descriptorSha256: "f".repeat(64),
+      descriptorLength: fontBytes.length,
+    }).events.map((item) =>
+      item.name === "scaler-font"
+        ? {
+            ...item,
+            args: {
+              ...(item.args as Record<string, unknown>),
+              actualFont: JSON.stringify({
+                ...(JSON.parse(
+                  (item.args as Record<string, unknown>).actualFont as string,
+                ) as Record<string, unknown>),
+                descriptorURL: root,
+              }),
+            },
+          }
+        : item,
+    );
+    const message = traceRejection(root, "unreadable", events);
+    expect(message).toBe("observer-scaler-file-read-failed");
+    expect(message).not.toContain(root);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+function traceRejection(
+  directory: string,
+  name: string,
+  events: readonly Record<string, unknown>[],
+): string {
+  const tracePath = path.join(directory, `${name}.json`);
+  const trace = JSON.stringify({ traceEvents: events });
+  fs.writeFileSync(tracePath, trace);
+  const traceSha256 = createHash("sha256").update(trace).digest("hex");
+  try {
+    readChromiumFontTrace({ tracePath, traceSha256, sessionId });
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  throw new Error("expected Chromium font trace rejection");
+}
 
 function assertCaptureBinding(
   filePath: string,

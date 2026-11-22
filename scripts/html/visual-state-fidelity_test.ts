@@ -196,10 +196,14 @@ describe("catalog stage90 rejection diagnostics", () => {
         ],
       ),
     ).toEqual({
-      schema: "krr-html84-stage90-rejection-diagnostics-v1",
+      schema: "krr-html84-stage90-rejection-diagnostics-v2",
       conditions: [
         { conditionId: "canonical-capture", category: "capture-exception" },
-        { conditionId: "canonical-font", category: "krr-chrome-mismatch" },
+        {
+          conditionId: "canonical-font",
+          category: "krr-chrome-mismatch",
+          detail: "chrome-krr-face-mismatch",
+        },
       ],
     });
   });
@@ -236,6 +240,36 @@ describe("catalog stage90 rejection diagnostics", () => {
     ]);
     expect(JSON.stringify(diagnostics)).not.toContain("sensitive CDP detail");
     expect(JSON.stringify(diagnostics)).not.toContain("/private/path");
+  });
+
+  test("identifies an observer failure and a font-probe failure using fixed details", () => {
+    const diagnostics = catalogStage90RejectionDiagnostics(
+      ["visual", "events"],
+      [
+        {
+          error:
+            "ObserverBrowserFailure: observer Chrome evidence validation failed: Error: used strike has no joined scaler: observer-scaler-file-uri-needs-normalization\n/private/trace.json",
+        },
+        {
+          ...completeRow,
+          fontIdentityUnknownReasons: [
+            "private-name: no exact physical face matched the CDP PostScript name",
+          ],
+        },
+      ],
+    );
+    expect(diagnostics.conditions).toEqual([
+      {
+        conditionId: "visual",
+        category: "capture-exception",
+        detail: "observer-scaler-file-uri-needs-normalization",
+      },
+      {
+        conditionId: "events",
+        category: "generic-verification-rejection",
+        detail: "font-probe-no-physical-face",
+      },
+    ]);
   });
 });
 

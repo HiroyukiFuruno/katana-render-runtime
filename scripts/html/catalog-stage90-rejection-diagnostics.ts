@@ -1,3 +1,4 @@
+import { OBSERVER_SCALER_REJECTION_CODES } from "./chromium-font-trace";
 import type { JsonValue } from "./dynamic-state";
 
 const CAPTURE_EXCEPTION = "capture-exception";
@@ -46,6 +47,41 @@ type FixedReasonCategory =
 
 type JsonRecord = Record<string, JsonValue>;
 
+const DIAGNOSTIC_MARKERS = [
+  ["used strike has no joined scaler", "observer-strike-missing-scaler"],
+  ["used strike has incomplete retained paint", "observer-incomplete-retained-paint"],
+  ["no joined retained-paint font instance", "observer-no-font-instance"],
+  ["font observer event schema mismatch", "observer-event-schema"],
+  ["font observer event process binding mismatch", "observer-event-process-binding"],
+  ["observer Chrome evidence validation failed:", "observer-evidence-validation"],
+  ["page.goto:", "chrome-navigation"],
+  ["page.screenshot:", "chrome-screenshot"],
+  ["page.evaluate:", "chrome-page-evaluation"],
+  ["locator.click:", "chrome-click"],
+  ["observer Chrome capture failed:", "observer-capture"],
+  ["test result: FAILED.", "krr-native-test-failed"],
+  ["Catalog target geometry is missing:", "krr-target-geometry"],
+  ["Operation evidence does not prove", "krr-operation-evidence"],
+  ["actual font audit is incomplete", "krr-font-audit-incomplete"],
+  ["no exact physical face matched the CDP PostScript name", "font-probe-no-physical-face"],
+  ["CoreText URL descriptors expose no collection index", "font-probe-collection-index"],
+  ["CoreText URL descriptors cannot prove nonzero face index", "font-probe-collection-index"],
+  ["Chrome and KRR state differ after font provenance resolution", "chrome-krr-state-mismatch"],
+  ["physical font file and face identities differ", "chrome-krr-face-mismatch"],
+  ["Chrome and KRR font instance sets differ", "chrome-krr-instance-mismatch"],
+  ["applied design coordinates differ", "chrome-krr-design-coordinate-mismatch"],
+] as const;
+
+type FailureDetail =
+  | (typeof DIAGNOSTIC_MARKERS)[number][1]
+  | (typeof OBSERVER_SCALER_REJECTION_CODES)[number];
+
+interface Diagnosis {
+  conditionId: string;
+  category: FixedReasonCategory;
+  detail?: FailureDetail;
+}
+
 function record(value: JsonValue | undefined): JsonRecord | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as JsonRecord)
@@ -90,6 +126,17 @@ function rejectionReasons(row: JsonRecord): string[] {
   ];
 }
 
+function failureDetail(row: JsonRecord): FailureDetail | undefined {
+  const error = text(row.error);
+  const reports = [...rejectionReasons(row), ...(error === undefined ? [] : [error])];
+  return (
+    OBSERVER_SCALER_REJECTION_CODES.find((token) =>
+      reports.some((report) => report.includes(token)),
+    ) ??
+    DIAGNOSTIC_MARKERS.find(([marker]) => reports.some((report) => report.includes(marker)))?.[1]
+  );
+}
+
 function categoryFor(row: JsonRecord): FixedReasonCategory {
   if (text(row.error) !== undefined) return CAPTURE_EXCEPTION;
   if (!hasKrrCapture(row)) return MISSING_KRR_CAPTURE;
@@ -104,16 +151,17 @@ export function catalogStage90RejectionDiagnostics(
   canonicalConditionIds: readonly string[],
   finalizedConditions: readonly JsonValue[],
 ): {
-  schema: "krr-html84-stage90-rejection-diagnostics-v1";
-  conditions: Array<{ conditionId: string; category: FixedReasonCategory }>;
+  schema: "krr-html84-stage90-rejection-diagnostics-v2";
+  conditions: Diagnosis[];
 } {
   return {
-    schema: "krr-html84-stage90-rejection-diagnostics-v1",
+    schema: "krr-html84-stage90-rejection-diagnostics-v2",
     conditions: finalizedConditions.flatMap((value, index) => {
       const conditionId = canonicalConditionIds[index];
       const row = record(value);
       if (!conditionId || row?.status === "captured") return [];
-      return [{ conditionId, category: categoryFor(row ?? {}) }];
+      const detail = row && failureDetail(row);
+      return [{ conditionId, category: categoryFor(row ?? {}), ...(detail && { detail }) }];
     }),
   };
 }

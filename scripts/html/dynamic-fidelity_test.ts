@@ -1688,6 +1688,35 @@ describe("fixed fidelity acceptance CLI routes", () => {
     ).toThrow();
   });
 
+  test("catalog diagnostic capture accepts unique observer selections for canonical plan validation", () => {
+    const argv = [
+      "catalog-stage90-diagnostic-capture",
+      "build.jsonl",
+      "plan.json",
+      "out",
+      "--diagnostic-conditions",
+      "decoration/translucent/960x720@1",
+      "events/expected-state/960x720@1",
+      "--chrome-executable",
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "--chrome-executable-sha256",
+      "a".repeat(64),
+      "--font-observer",
+    ];
+    expect(fidelityAcceptancePlan(argv)).toMatchObject({
+      kind: "catalog-stage90-diagnostic-capture",
+      acceptance: false,
+      diagnosticConditions: argv.slice(5, 7),
+      chromeExecutable: { fontObserver: true },
+    });
+    expect(
+      fidelityAcceptancePlan(argv.filter((value) => value !== "events/expected-state/960x720@1")),
+    ).toMatchObject({ diagnosticConditions: ["decoration/translucent/960x720@1"] });
+    const duplicate = [...argv];
+    duplicate.splice(7, 0, "events/expected-state/960x720@1");
+    expect(() => fidelityAcceptancePlan(duplicate)).toThrow();
+  });
+
   test("catalog resume requires both prior manifests and preserves the complete capture contract", () => {
     const argv = ["catalog-stage90-capture", "build.jsonl", "plan.json", "out"];
     const original = fidelityAcceptancePlan(argv);

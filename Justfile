@@ -715,7 +715,7 @@ html-performance-evidence-promote evidence_dir promotion_evidence_dir run_id reu
     {{HTML_PERFORMANCE_SCIPY_ENV}} python3 scripts/release/run_html_performance.py --bootstrap promote --repo {{quote(REPO_ROOT)}} --evidence-dir {{quote(evidence_dir)}} --promotion-evidence-dir {{quote(promotion_evidence_dir)}} --run-id {{quote(run_id)}}{{if reuse_request == "" { "" } else { " --reuse-request " + quote(reuse_request) }}}
 
 # 既存catalog CLIで84条件のstage90 raw capture manifestを作る。
-html-performance-catalog-captures output_root prior_observation='' prior_finalized='' chrome_executable='' chrome_sha256='' font_observer='false':
+html-performance-catalog-captures output_root prior_observation='' prior_finalized='' chrome_executable='' chrome_sha256='' font_observer='false' diagnostic_conditions='':
     @set -euo pipefail; \
       output_relative={{quote(output_root)}}; \
       prior_observation={{quote(prior_observation)}}; \
@@ -723,6 +723,7 @@ html-performance-catalog-captures output_root prior_observation='' prior_finaliz
       chrome_executable={{quote(chrome_executable)}}; \
       chrome_sha256={{quote(chrome_sha256)}}; \
       font_observer={{quote(font_observer)}}; \
+      diagnostic_conditions={{quote(diagnostic_conditions)}}; \
       if [[ "$font_observer" != true && "$font_observer" != false ]]; then echo "font observer must be true or false" >&2; exit 2; fi; \
       if [[ -n "$chrome_executable" || -n "$chrome_sha256" ]]; then \
         if [[ "$chrome_executable" != /* || ! -f "$chrome_executable" || ! "$chrome_sha256" =~ ^[a-f0-9]{64}$ ]]; then echo "Chrome requires an absolute executable path and SHA-256 pin" >&2; exit 2; fi; \
@@ -730,6 +731,7 @@ html-performance-catalog-captures output_root prior_observation='' prior_finaliz
       if [[ -n "$prior_observation" || -n "$prior_finalized" ]]; then \
         if [[ -z "$prior_observation" || -z "$prior_finalized" || ! -f "$prior_observation" || ! -f "$prior_finalized" || -L "$prior_observation" || -L "$prior_finalized" ]]; then echo "resume requires both regular prior observation and finalized manifests" >&2; exit 2; fi; \
       fi; \
+      if [[ -n "$diagnostic_conditions" && ( "$font_observer" != true || -n "$prior_observation" ) ]]; then echo "selected condition diagnostics require a pinned observer and a fresh capture" >&2; exit 2; fi; \
       if [[ ! "$output_relative" =~ ^tmp/html-performance-stage90/[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then echo "output root must be tmp/html-performance-stage90/<run-id>" >&2; exit 2; fi; \
       run_root={{quote(REPO_ROOT)}}/"$output_relative"; \
       tmp_root={{quote(REPO_ROOT + "/tmp")}}; \
@@ -745,6 +747,12 @@ html-performance-catalog-captures output_root prior_observation='' prior_finaliz
       bun scripts/html/fidelity-acceptance-cli.ts catalog-stage90-plan "$run_root/plan.json"; \
       just capacity-admission; \
       python3 scripts/build/cargo_capacity_guard.py --root {{quote(REPO_ROOT)}} --target {{quote(REPO_ROOT + "/target")}} --state {{quote(REPO_ROOT + "/tmp/.cargo-capacity-guard-v2.json")}} -- {{HTML84_CARGO}} test --release -p katana-render-runtime --lib --no-run --locked --message-format=json > "$run_root/test-build.jsonl"; \
+      if [[ -n "$diagnostic_conditions" ]]; then \
+        read -r -a selected <<< "$diagnostic_conditions"; \
+        bun scripts/html/fidelity-acceptance-cli.ts catalog-stage90-diagnostic-capture "$run_root/test-build.jsonl" "$run_root/plan.json" "$run_root/captures" --diagnostic-conditions "${selected[@]}" --chrome-executable "$chrome_executable" --chrome-executable-sha256 "$chrome_sha256" --font-observer; \
+        test -s "$run_root/captures/catalog-stage90-diagnostic-captures.json"; \
+        exit; \
+      fi; \
       capture_args=(catalog-stage90-capture "$run_root/test-build.jsonl" "$run_root/plan.json" "$run_root/captures"); \
       if [[ -n "$prior_observation" ]]; then capture_args+=("$prior_observation" "$prior_finalized"); fi; \
       if [[ -n "$chrome_executable" ]]; then capture_args+=(--chrome-executable "$chrome_executable" --chrome-executable-sha256 "$chrome_sha256"); fi; \
