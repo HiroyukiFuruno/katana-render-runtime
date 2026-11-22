@@ -87,6 +87,22 @@ V0424_FROZEN_RUST_CURRENT = {
     Path("scripts/html/performance-harness/Cargo.lock"): "4f6ca91c2ae671ed63404ff22952936fab476e568f69d8cdc295c0898bfca5de",
     Path("scripts/html/performance-harness/Cargo.toml"): "f48872b19a3c41c529ce0d0ed701ffb0dad29c579152ca077cc8681acce898de",
 }
+# WHY: 公開候補の依存検査を通過した資産を、版名と内容の両方で固定する。
+V0424_FROZEN_RUNTIME_CURRENT = {
+    RUNTIME_CATALOG: "6fd45da6cca6211d8f1d50c9a3c91e4328a60142cf53352151a98b474d1640bb",
+    Path("crates/katana-render-runtime/vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js"): "2c1ab92dfbd9149c5eec9c1f9c18999063b1721ad7868163ea3f4fe4e9231eaf",
+    Path("crates/katana-render-runtime/vendor/mermaid/12.3.0-krr.pr6823.1/mermaid.min.js.sha256"): "1b95f18b54ccc312be5d63d9f9eb61ac3565ee1789dc789ffd0c6acab535e77f",
+    Path("crates/katana-render-runtime/vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js"): "f75662869d22aac58870e52370fe4c46b89b9710bf4b03df93b3227b5e18e730",
+    Path("crates/katana-render-runtime/vendor/mermaid-zenuml/1.0.1/mermaid-zenuml.min.js.sha256"): "0731f20d153f2192d9acb02c5c26e45fd442d8b657d13c492e2706835248780d",
+    Path("crates/katana-render-runtime/vendor/zenuml-core/4.14.0/zenuml.js"): "78bd3a39c2b9b20ca50ce99d5af4e1bd28dc3b3b5112470e067ba477864369fa",
+    Path("crates/katana-render-runtime/vendor/zenuml-core/4.14.0/zenuml.js.sha256"): "53d28580a99b6809ac0a512cb3a5ec6698c8e890ce431f41f26b01d8a79ede22",
+    Path("crates/katana-render-runtime/vendor/drawio/32.7.4/drawio.min.js"): "6b9c79325113f1599c2a64aae284fc700c35c12e7b4bb3ab789014c1ed335aa1",
+    Path("crates/katana-render-runtime/vendor/drawio/32.7.4/drawio.min.js.sha256"): "437068a2202d861382bafaeebadbd8c6f6b8fb3b36cf152cd227fc5710d4ddb0",
+    Path("crates/katana-render-runtime/vendor/mathjax/4.1.3/tex-svg.js"): "23c036deccc0f2374834a47e4032e452419f3ac027bf17e17c104e2746b19f4c",
+    Path("crates/katana-render-runtime/vendor/mathjax/4.1.3/tex-svg.js.sha256"): "d124370804cea655570d714ff771e3466555ed0903b6823744baf2c45175eaf7",
+    # PlantUML本体はこのチェックサムを照合して取得する。
+    Path("crates/katana-render-runtime/vendor/plantuml/1.2026.10/plantuml.jar.sha256"): "69f3f9bd9e171f1fa2d6ae39c9e354f87a36b836d9aee161b4b29a14ff495eb3",
+}
 LOCK_CHANGE_RE = re.compile(
     r"^\s+(Adding|Updating|Removing|Downgrading) ([A-Za-z0-9_-]+) v([^\s]+)"
     r"(?: -> v([^\s]+))?$"
@@ -959,9 +975,7 @@ def rust_lock_is_latest_compatible(root: Path) -> bool:
     highest compatible resolution, including transitive dependencies. The
     Pinned harness dependency transitions are accepted only as known diffs.
     """
-    frozen_inputs = ((root / path, digest) for path, digest in V0424_FROZEN_RUST_CURRENT.items())
-    if all(path.is_file() and not path.is_symlink()
-           and hashlib.sha256(path.read_bytes()).hexdigest() == digest for path, digest in frozen_inputs):
+    if _is_verified_frozen_rust_resolution(root):
         print("Verified Rust dependencies retained for the frozen v0.4.24 candidate.")
         return True
     completed = subprocess.run(
@@ -980,6 +994,25 @@ def rust_lock_is_latest_compatible(root: Path) -> bool:
     changes = _cargo_lock_changes(output)
     return changes is not None and changes - SINGLE_PACKAGE_RETENTION_CHANGES in (
         set(), UTF8_ITER_RETENTION_CHANGES,
+    )
+
+
+def _has_exact_frozen_inputs(root: Path, expected: dict[Path, str]) -> bool:
+    for relative_path, digest in expected.items():
+        path = root / relative_path
+        if not path.is_file() or path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            return False
+    return True
+
+
+def _is_verified_frozen_rust_resolution(root: Path) -> bool:
+    return _has_exact_frozen_inputs(root, V0424_FROZEN_RUST_CURRENT)
+
+
+def _is_verified_frozen_runtime_assets(root: Path) -> bool:
+    return (
+        _is_verified_frozen_rust_resolution(root)
+        and _has_exact_frozen_inputs(root, V0424_FROZEN_RUNTIME_CURRENT)
     )
 
 
@@ -1238,7 +1271,13 @@ def main(argv: list[str] | None = None) -> int:
             print("Run `just depends-update-all`, review its generated changes, then rerun `just release-check`.", file=sys.stderr)
             return 1
         packages = runtime_assets(args.root)
-        freshness_packages = [*rust_manifest, *packages]
+        freshness_packages = []
+        if not _is_verified_frozen_rust_resolution(args.root):
+            freshness_packages.extend(rust_manifest)
+        if _is_verified_frozen_runtime_assets(args.root):
+            print("Verified runtime asset inputs retained for the frozen v0.4.24 candidate.")
+        else:
+            freshness_packages.extend(packages)
         with ThreadPoolExecutor(max_workers=8) as executor:
             latest_versions = executor.map(
                 latest,

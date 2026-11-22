@@ -1190,6 +1190,46 @@ target-build = "=3.0.0"
                     path.write_bytes(data)
                     resolver.reset_mock()
 
+    def test_frozen_v0424_inputs_require_exact_rust_and_runtime_closures(self) -> None:
+        rust_contents = {
+            path: path.as_posix().encode() for path in freshness.V0424_FROZEN_RUST_CURRENT
+        }
+        runtime_contents = {
+            path: path.as_posix().encode() for path in freshness.V0424_FROZEN_RUNTIME_CURRENT
+        }
+        for path, data in {**rust_contents, **runtime_contents}.items():
+            destination = self.root / path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(data)
+        rust_hashes = {
+            path: hashlib.sha256(data).hexdigest() for path, data in rust_contents.items()
+        }
+        runtime_hashes = {
+            path: hashlib.sha256(data).hexdigest() for path, data in runtime_contents.items()
+        }
+
+        with (patch.object(freshness, "V0424_FROZEN_RUST_CURRENT", rust_hashes),
+              patch.object(freshness, "V0424_FROZEN_RUNTIME_CURRENT", runtime_hashes)):
+            self.assertTrue(freshness._is_verified_frozen_rust_resolution(self.root))
+            self.assertTrue(freshness._is_verified_frozen_runtime_assets(self.root))
+            for path, data in rust_contents.items():
+                with self.subTest(rust_path=path):
+                    (self.root / path).write_bytes(b"changed")
+                    self.assertFalse(freshness._is_verified_frozen_rust_resolution(self.root))
+                    self.assertFalse(freshness._is_verified_frozen_runtime_assets(self.root))
+                    (self.root / path).write_bytes(data)
+            for path, data in runtime_contents.items():
+                with self.subTest(runtime_path=path):
+                    (self.root / path).write_bytes(b"changed")
+                    self.assertFalse(freshness._is_verified_frozen_runtime_assets(self.root))
+                    (self.root / path).write_bytes(data)
+
+    def test_frozen_v0424_candidate_skips_direct_and_runtime_latest_queries(self) -> None:
+        with (patch.object(freshness, "_is_verified_frozen_rust_resolution", return_value=True),
+              patch.object(freshness, "_is_verified_frozen_runtime_assets", return_value=True)):
+            result, _, stderr = self.run_check({})
+        self.assertEqual(result, 0, stderr)
+
     def test_frozen_js_requires_exact_inputs_and_release_version(self) -> None:
         current = (b"current manifest", b"current lock")
         current_hashes = tuple(hashlib.sha256(data).hexdigest() for data in current)
