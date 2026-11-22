@@ -1503,7 +1503,7 @@ jobs:
       - name: Checkout exact measurement source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'macos-stage90' && 'e01610090ee6d9024688c58e066f5296c0f7d0bb' || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'macos-stage90' && '864819ac4a330b03ef5b9ad7358c9f80ab915ea9' || github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Record actual source HEAD
@@ -1602,9 +1602,13 @@ jobs:
         run: |
           output_root="tmp/html-performance-stage90/${{ github.run_id }}-${{ github.run_attempt }}"
           manifest="$output_root/captures/catalog-stage90-captures.json"
+          diagnostic_conditions=()
+          if [[ "${{ steps.source.outputs.diagnostic }}" == 'true' ]]; then
+            diagnostic_conditions+=('decoration/translucent/960x720@1 events/expected-state/960x720@1')
+          fi
           just html-performance-catalog-captures "$output_root" '' '' \
             "${{ steps.font_observer.outputs.executable }}" \
-            031c93c5e822ffd8d22121bb41ed139fb6fcc4e96f6aa1f43ea31ec36fb9242c true
+            031c93c5e822ffd8d22121bb41ed139fb6fcc4e96f6aa1f43ea31ec36fb9242c true "${diagnostic_conditions[@]}"
           echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
 
       - name: Measure all 84 catalog conditions against baseline
