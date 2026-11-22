@@ -55,7 +55,7 @@ HTML_PERFORMANCE_REPLAY_SHA256 := env_var_or_default("KRR_HTML_PERFORMANCE_REPLA
 HTML_PERFORMANCE_REPLAY_ARGS := if HTML_PERFORMANCE_REPLAY_PATH + HTML_PERFORMANCE_REPLAY_SHA256 == "" { "" } else { "--replay-launch-environment " + quote(HTML_PERFORMANCE_REPLAY_PATH) + " --replay-launch-environment-sha256 " + quote(HTML_PERFORMANCE_REPLAY_SHA256) + " " }
 HTML_PERFORMANCE_TYPING_PATH := "scripts/release/typings"
 HTML_PERFORMANCE_PYTHON_REQUIREMENTS := REPO_ROOT + "/scripts/release/html-performance-requirements.lock"
-ZENUML_CORE_JS_VERSION := "4.13.2"
+ZENUML_CORE_JS_VERSION := "4.14.0"
 PLANTUML_JAR_VERSION := "1.2026.10"
 PLANTUML_JAR_CHECKSUM := "fb9e2711a860400317106bcbeb37f57595e7d1803af3b9d7892241fa3d2bddb8"
 MERMAID_JS := env_var_or_default("MERMAID_JS", "crates/katana-render-runtime/vendor/mermaid/" + MERMAID_JS_VERSION + "/mermaid.min.js")
