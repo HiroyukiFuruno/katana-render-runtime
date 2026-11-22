@@ -1503,7 +1503,7 @@ jobs:
       - name: Checkout exact measurement source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'macos-stage90' && '8ad55f01f91bcb09d074e96932c327415107435d' || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.ref == 'refs/heads/release/verify' && inputs.verify_platform == 'macos-stage90' && 'ac63c801aac2bcd414482e698a3679fcf55ed35c' || github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Record actual source HEAD
@@ -1633,6 +1633,7 @@ jobs:
               "identity::observer_tests::retained_observer_face_rejects_changed_or_wrong_face_proofs",
               "identity::observer_tests::retained_observer_face_requires_one_matching_proof",
               "test_support::observer_contract_tests::font_probe_rejects_duplicate_observer_font_identities",
+              "identity::observer_tests::retained_observer_face_accepts_a_trace_proven_named_alias",
           ]
           catalog = subprocess.check_output([binary, "--list"], text=True).splitlines()
           for case in cases:
