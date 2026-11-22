@@ -68,3 +68,16 @@ fn retained_observer_face_requires_one_matching_proof() -> Result<(), String> {
     assert!(resolve_observer_face(&selected, &[face.clone(), face]).is_err());
     Ok(())
 }
+
+#[test]
+fn retained_observer_face_rejects_a_noncanonical_path() -> Result<(), String> {
+    let (_temp, _, selected) = physical_font_fixture()?;
+    let face = ObserverFace {
+        post_script_name: selected.post_script_name.clone(),
+        file_path: std::path::PathBuf::from("physical-font.ttf"),
+        file_sha256: "0".repeat(64),
+        face_index: 0,
+    };
+    assert!(resolve_observer_face(&selected, &[face]).is_err());
+    Ok(())
+}

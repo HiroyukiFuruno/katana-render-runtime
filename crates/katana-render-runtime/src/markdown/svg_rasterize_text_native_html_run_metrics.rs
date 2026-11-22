@@ -77,3 +77,7 @@ fn append_native_metrics(
     state.append_metrics(natural, featured);
     Some(())
 }
+
+#[cfg(test)]
+#[path = "svg_rasterize_text_native_html_run_metrics_tests.rs"]
+mod tests;

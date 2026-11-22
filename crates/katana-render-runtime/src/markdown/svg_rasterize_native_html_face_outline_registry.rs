@@ -51,3 +51,32 @@ pub(in crate::markdown::svg_rasterize) fn same_variations(
         .map(coordinates)
         .eq(right.iter().map(coordinates))
 }
+
+#[cfg(test)]
+mod tests {
+    use objc2_core_foundation::CFString;
+    use objc2_core_text::CTFont;
+
+    use super::{OutlineInstance, OutlineInstances};
+
+    #[test]
+    fn duplicate_variations_reuse_the_first_native_outline() {
+        let name = CFString::from_str("Helvetica");
+        /* WHY: null は CoreText が文書化する identity transform を選ぶ。 */
+        let font = unsafe { CTFont::with_name(&name, 12.0, std::ptr::null()) };
+        let mut instances = OutlineInstances::default();
+
+        for _ in 0..2 {
+            assert!(
+                instances
+                    .insert(OutlineInstance {
+                        font: font.clone(),
+                        variations: Vec::new(),
+                        units_per_em: 1_000,
+                    })
+                    .is_some()
+            );
+        }
+        assert_eq!(instances.0.len(), 1);
+    }
+}

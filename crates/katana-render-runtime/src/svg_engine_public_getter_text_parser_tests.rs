@@ -18,6 +18,8 @@ fn parse_svg(input: &str) -> Result<usvg::Tree, String> {
     usvg::Tree::from_str(input, &options).map_err(|error| error.to_string())
 }
 
+#[path = "svg_engine_public_getter_nested_outline_tests.rs"]
+mod nested_outline_tests;
 #[path = "svg_engine_public_getter_text_span_tests.rs"]
 mod text_span_tests;
 

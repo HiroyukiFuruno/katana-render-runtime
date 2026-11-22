@@ -53,6 +53,23 @@ fn native_variations_reject_duplicate_axes_before_shaping() -> Result<(), String
     Ok(())
 }
 
+#[test]
+fn native_variation_character_metrics_reject_right_to_left_text() -> Result<(), String> {
+    let (database, face) = variable_face()?;
+    let metrics = SvgRasterizeOps::with_html_font_render_scope(|| {
+        shape_run_character_metrics_with_variations_with_trim(
+            &database,
+            face,
+            "אב",
+            FontShape::new(FONT_SIZE, FONT_WEIGHT, false),
+            None,
+            &[],
+        )
+    });
+    assert_eq!(metrics, None);
+    Ok(())
+}
+
 fn native_variation_measurements(
     database: &Database,
     face: resvg::usvg::fontdb::ID,

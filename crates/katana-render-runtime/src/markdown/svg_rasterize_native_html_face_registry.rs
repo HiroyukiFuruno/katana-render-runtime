@@ -175,3 +175,41 @@ fn source_path(face: &fontdb::FaceInfo) -> Option<&std::path::Path> {
         fontdb::Source::Binary(_) => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::{MAX_FACES, RegisteredFace, canonical_system_face, registered_face, source_path};
+
+    fn system_face() -> Result<resvg::usvg::fontdb::FaceInfo, String> {
+        crate::markdown::svg_rasterize::font::html_font_db_for_text("Helvetica", "A")
+            .faces()
+            .next()
+            .cloned()
+            .ok_or_else(|| "system font database is empty".into())
+    }
+
+    #[test]
+    fn registered_faces_stop_at_the_native_alias_limit() -> Result<(), String> {
+        let face = system_face()?;
+        let mut faces = Vec::<RegisteredFace>::new();
+        for index in 0..MAX_FACES {
+            let mut distinct = face.clone();
+            distinct.post_script_name = format!("coverage-{index}");
+            assert!(registered_face(&mut faces, &distinct).is_some());
+        }
+        assert!(registered_face(&mut faces, &face).is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn binary_font_sources_cannot_be_registered_as_system_faces() -> Result<(), String> {
+        let mut face = system_face()?;
+        face.source = resvg::usvg::fontdb::Source::Binary(Arc::new(Vec::<u8>::new()));
+
+        assert!(canonical_system_face(&face).is_none());
+        assert!(source_path(&face).is_none());
+        Ok(())
+    }
+}

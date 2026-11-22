@@ -61,12 +61,16 @@ fn font_size(font: &CTFont) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::{CTFont, matches_copied_face, scaler_font};
+    use core_foundation::base::TCFType;
+    use core_graphics::{data_provider::CGDataProvider, font::CGFont};
+    use core_text::font::new_from_CGFont;
     use objc2_core_foundation::CFString;
     use objc2_core_text::CTFontUIFontType;
     use resvg::usvg::fontdb::{Database, FaceInfo, Source};
     use std::{path::Path, sync::Arc};
 
     const HELVETICA_FAMILY: &str = "Helvetica";
+    const NOTO_FONT: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
     const TEST_POINT_SIZE: f64 = 16.0;
 
     #[test]
@@ -84,12 +88,14 @@ mod tests {
         let scaler = scaler_font(&font).ok_or("CoreText scaler copy unavailable")?;
         /* SAFETY: scalerは直前のCoreText copy APIが返した有効なCTFontである。 */
         let copied_size = unsafe { scaler.size() };
-        if !copied_size.is_finite() || copied_size <= 0.0 {
-            return Err("CoreText scaler copy returned an invalid size".to_string());
-        }
-        if (copied_size - TEST_POINT_SIZE).abs() > f64::EPSILON {
-            return Err("CoreText scaler copy changed the requested size".to_string());
-        }
+        assert!(
+            copied_size.is_finite() && copied_size > 0.0,
+            "CoreText scaler copy returned an invalid size"
+        );
+        assert!(
+            (copied_size - TEST_POINT_SIZE).abs() <= f64::EPSILON,
+            "CoreText scaler copy changed the requested size"
+        );
         Ok(())
     }
 
@@ -121,6 +127,31 @@ mod tests {
                 )
             })
             .ok_or("physical face bytes unavailable")?
+    }
+
+    #[test]
+    fn scaler_copy_rejects_a_memory_backed_coretext_font() -> Result<(), String> {
+        let provider = CGDataProvider::from_buffer(Arc::new(NOTO_FONT.to_vec()));
+        let graphics_font =
+            CGFont::from_data_provider(provider).map_err(|_| "CGFont creation failed")?;
+        let memory_font = new_from_CGFont(&graphics_font, TEST_POINT_SIZE);
+        /* WHY: CGFont所有者が生存する間だけ、同じCTFontをobjc2側で借用する。 */
+        let font = unsafe { &*memory_font.as_concrete_TypeRef().cast::<CTFont>() };
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/NotoSans-Regular.ttf");
+        let mut database = Database::new();
+        database.load_font_source(Source::File(path));
+        let id = database
+            .faces()
+            .next()
+            .ok_or("bundled font face missing")?
+            .id;
+        let face = database.face(id).ok_or("bundled font face unavailable")?;
+        database
+            .with_face_data(id, |bytes, index| {
+                assert!(!matches_copied_face(font, face, bytes, index));
+            })
+            .ok_or("bundled font bytes unavailable")?;
+        Ok(())
     }
 
     fn assert_unbound_variants_rejected(

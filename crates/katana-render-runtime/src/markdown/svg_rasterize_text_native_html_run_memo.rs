@@ -179,3 +179,7 @@ fn verified_database(
     let database = Arc::new(database);
     Some((database, id))
 }
+
+#[cfg(test)]
+#[path = "svg_rasterize_text_native_html_run_memo_tests.rs"]
+mod tests;

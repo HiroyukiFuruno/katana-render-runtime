@@ -108,10 +108,12 @@ fn point(element: &CGPathElement, index: usize) -> Option<(f32, f32)> {
 
 #[cfg(test)]
 mod tests {
-    use objc2_core_foundation::CFString;
+    use objc2_core_foundation::{CFString, CGPoint};
+    use objc2_core_graphics::{CGPathElement, CGPathElementType};
     use objc2_core_text::CTFont;
+    use tiny_skia_path::PathBuilder;
 
-    use super::outline;
+    use super::{append_path_element, outline};
 
     const FONT_NAME: &str = "Helvetica";
     const GLYPH_NAME: &str = "A";
@@ -122,6 +124,7 @@ mod tests {
     const INVALID_UNITS_PER_EM: u16 = 0;
     const EXPECTED_SCALE_RATIO: f32 = 2.0;
     const SCALE_TOLERANCE: f32 = 0.01;
+    const UNKNOWN_PATH_ELEMENT_TYPE: i32 = 99;
 
     fn test_font() -> objc2_core_foundation::CFRetained<CTFont> {
         let name = CFString::from_str(FONT_NAME);
@@ -165,5 +168,61 @@ mod tests {
         assert!(outline(&font, MISSING_GLYPH_ID, FULL_UNITS_PER_EM).is_none());
         assert!(outline(&font, glyph, INVALID_UNITS_PER_EM).is_none());
         Ok(())
+    }
+
+    fn element(kind: CGPathElementType, points: &mut [CGPoint]) -> CGPathElement {
+        CGPathElement {
+            r#type: kind,
+            points: std::ptr::NonNull::from(&mut points[0]),
+        }
+    }
+
+    #[test]
+    fn appends_each_core_graphics_element_kind() {
+        let mut builder = PathBuilder::new();
+        let mut move_to = [CGPoint { x: 0.0, y: 0.0 }];
+        let mut line_to = [CGPoint { x: 1.0, y: 0.0 }];
+        let mut quadratic = [CGPoint { x: 1.0, y: 1.0 }, CGPoint { x: 2.0, y: 0.0 }];
+        let mut cubic = [
+            CGPoint { x: 2.0, y: 1.0 },
+            CGPoint { x: 3.0, y: 1.0 },
+            CGPoint { x: 3.0, y: 0.0 },
+        ];
+        let mut close = [CGPoint { x: 0.0, y: 0.0 }];
+
+        for (kind, points) in [
+            (CGPathElementType::MoveToPoint, &mut move_to[..]),
+            (CGPathElementType::AddLineToPoint, &mut line_to[..]),
+            (CGPathElementType::AddQuadCurveToPoint, &mut quadratic[..]),
+            (CGPathElementType::AddCurveToPoint, &mut cubic[..]),
+            (CGPathElementType::CloseSubpath, &mut close[..]),
+        ] {
+            assert!(append_path_element(&mut builder, &element(kind, points)));
+        }
+        assert_eq!(builder.len(), 5);
+        assert!(builder.finish().is_some_and(|path| !path.is_empty()));
+    }
+
+    #[test]
+    fn rejects_invalid_or_unknown_core_graphics_elements() {
+        let mut builder = PathBuilder::new();
+        let mut invalid = [CGPoint {
+            x: f64::NAN,
+            y: 0.0,
+        }; 3];
+        let mut unknown = [CGPoint { x: 0.0, y: 0.0 }];
+
+        assert!(!append_path_element(
+            &mut builder,
+            &element(CGPathElementType::AddQuadCurveToPoint, &mut invalid),
+        ));
+        assert!(!append_path_element(
+            &mut builder,
+            &element(CGPathElementType::AddCurveToPoint, &mut invalid),
+        ));
+        assert!(!append_path_element(
+            &mut builder,
+            &element(CGPathElementType(UNKNOWN_PATH_ELEMENT_TYPE), &mut unknown),
+        ));
     }
 }

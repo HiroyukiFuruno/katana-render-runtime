@@ -173,3 +173,11 @@ fn source_path(face: &FaceInfo) -> Option<&Path> {
         Source::Binary(_) => None,
     }
 }
+
+#[cfg(test)]
+#[path = "svg_rasterize_text_native_html_runs_tests.rs"]
+mod tests;
+
+#[cfg(test)]
+#[path = "svg_rasterize_text_native_html_run_test_support.rs"]
+mod test_support;

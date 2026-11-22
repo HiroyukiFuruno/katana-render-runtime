@@ -191,6 +191,10 @@ mod tests {
         Database, ID, INTERFACE_BOLD_WEIGHT, NativeHtmlFallback, NativeHtmlFallbackBase,
         actual_face_for, native_html_fallback,
     };
+    use objc2_core_foundation::CFString;
+    use objc2_core_text::CTFont;
+    use resvg::usvg::fontdb::Source;
+    use std::collections::BTreeMap;
 
     #[test]
     fn native_fallback_requires_a_verified_named_base() {
@@ -200,6 +204,45 @@ mod tests {
             id: ID::dummy(),
         };
         assert!(native_html_fallback(base, '装', 16.0, 400, Some("zh-Hans")).is_none());
+    }
+
+    #[test]
+    fn native_ui_fallback_rejects_an_unsupported_weight() {
+        assert!(
+            native_html_fallback(NativeHtmlFallbackBase::SystemUi, 'A', 16.0, 500, None,).is_none()
+        );
+    }
+
+    #[test]
+    fn optical_scaler_rejects_a_mismatched_physical_face() -> Result<(), String> {
+        let name = CFString::from_str("Helvetica");
+        /* SAFETY: 固定のPostScript名・正のサイズ・null変換だけをCoreTextへ渡す。 */
+        let font = unsafe { CTFont::with_name(&name, 16.0, std::ptr::null()) };
+        let actual = actual_face_for(&font).ok_or("Helvetica physical face unavailable")?;
+        let mut database = Database::new();
+        database.load_font_source(Source::File(actual.canonical_path));
+        let mut mismatched = database
+            .faces()
+            .find(|face| {
+                face.index == actual.face_index && face.post_script_name == actual.post_script_name
+            })
+            .cloned()
+            .ok_or("Helvetica physical face missing from its file")?;
+        mismatched.post_script_name = "invalid-Helvetica-name".to_string();
+        let fallback = NativeHtmlFallback {
+            font,
+            explicit_variations: BTreeMap::new(),
+        };
+        database
+            .with_face_data(mismatched.id, |bytes, index| {
+                assert!(
+                    fallback
+                        .into_optical_scaler(&mismatched, bytes, index)
+                        .is_none()
+                );
+            })
+            .ok_or("Helvetica face bytes unavailable")?;
+        Ok(())
     }
 
     #[test]

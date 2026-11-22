@@ -1,6 +1,6 @@
 use super::{
-    CTFont, Database, Source, mac_roman_name, matches, name_id, postscript_name, same_file,
-    ttf_parser, unique_postscript_index,
+    CTFont, Database, Source, actual_font_metadata, mac_roman_name, matches, name_id,
+    postscript_name, same_file, ttf_parser, unique_name_table_index, unique_postscript_index,
 };
 use core_foundation::base::TCFType;
 use core_graphics::{data_provider::CGDataProvider, font::CGFont};
@@ -80,6 +80,16 @@ fn bundled_font_postscript_identity_rejects_missing_name_and_truncated_font() ->
         unique_postscript_index(&FONT[..SFNT_HEADER_BYTES], &name),
         None
     );
+    Ok(())
+}
+
+#[test]
+fn duplicate_coretext_name_tables_do_not_identify_one_face() -> Result<(), String> {
+    let font = helvetica_coretext_font();
+    let metadata = actual_font_metadata(&font).ok_or("Helvetica physical metadata unavailable")?;
+    let bytes = std::fs::read(metadata.canonical_path).map_err(|error| error.to_string())?;
+    let collection = super::super::super::tests::duplicate_sfnt_as_two_face_ttc(&bytes)?;
+    assert_eq!(unique_name_table_index(&collection, &font), None);
     Ok(())
 }
 
