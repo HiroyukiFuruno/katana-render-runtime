@@ -1627,6 +1627,16 @@ jobs:
               ]
           }
 
+          func scalerCopy(_ font: CTFont, size: Double) -> CTFont {
+              let opticalKey = "NSCTFontOpticalSizeAttribute"
+              let trackingKey = "NSCTFontUnscaledTrackingAttribute"
+              let configured = (CTFontCopyAttribute(font, opticalKey as CFString) as? NSNumber)?.doubleValue
+              let optical = configured.flatMap { $0 > 0 ? $0 : nil } ?? CTFontGetSize(font)
+              let attributes = [opticalKey: NSNumber(value: optical), trackingKey: NSNumber(value: 0)]
+              let descriptor = CTFontDescriptorCreateWithAttributes(attributes as CFDictionary)
+              return CTFontCreateCopyWithAttributes(font, size, nil, descriptor)
+          }
+
           let languages: [(String, CFString?)] = [("system", nil), ("zh-Hans", "zh-Hans" as CFString)]
           var rows: [[String: Any]] = []
           for (label, language) in languages {
@@ -1637,13 +1647,15 @@ jobs:
                   for character in ["を", "り"] {
                       let text = character as CFString
                       let range = CFRange(location: 0, length: CFStringGetLength(text))
-                      rows.append(snapshot(CTFontCreateForStringWithLanguage(base, text, range, language), label: label, request: "with-language", character: character, size: size))
-                      rows.append(snapshot(CTFontCreateForString(base, text, range), label: label, request: "for-string", character: character, size: size))
+                      let selected = CTFontCreateForStringWithLanguage(base, text, range, language)
+                      rows.append(snapshot(selected, label: label, request: "selected", character: character, size: size))
+                      rows.append(snapshot(CTFontCreateCopyWithAttributes(selected, size, nil, nil), label: label, request: "plain-copy", character: character, size: size))
+                      rows.append(snapshot(scalerCopy(selected, size: size), label: label, request: "scaler-copy", character: character, size: size))
                   }
               }
           }
           let output = try JSONSerialization.data(withJSONObject: [
-              "schema": "krr-macos-native-font-axes-diagnostic-v1",
+              "schema": "krr-macos-native-font-scaler-copy-diagnostic-v1",
               "rows": rows,
           ], options: [.sortedKeys])
           print(String(decoding: output, as: UTF8.self))
