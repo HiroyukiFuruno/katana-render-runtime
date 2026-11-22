@@ -16,6 +16,8 @@ const TEXT: &str = "A";
 const FONT_SIZE: f32 = 18.0;
 const FONT_WEIGHT: u16 = 400;
 
+type VariationMeasurements = (f32, Vec<(f32, f32)>);
+
 #[test]
 fn native_variations_shape_the_loaded_variable_face_for_width_and_character_metrics()
 -> Result<(), String> {
@@ -55,7 +57,7 @@ fn native_variation_measurements(
     database: &Database,
     face: resvg::usvg::fontdb::ID,
     variations: &[FontVariation],
-) -> Result<(f32, Vec<(f32, f32)>), String> {
+) -> Result<VariationMeasurements, String> {
     SvgRasterizeOps::with_html_font_render_scope(|| {
         let shape = FontShape::new(FONT_SIZE, FONT_WEIGHT, false);
         let width = shape_text_with_face_variations_with_trim(

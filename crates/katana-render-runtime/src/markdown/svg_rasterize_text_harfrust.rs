@@ -160,7 +160,6 @@ pub(super) fn shape_face_character_metrics(
 
 #[path = "svg_rasterize_text_harfrust_buffer.rs"]
 mod buffer;
-use buffer::shape_buffer;
 pub(super) use buffer::shape_buffer_with_features;
 use buffer::{font_variations, is_left_to_right, shape_font, shape_font_with_features};
 

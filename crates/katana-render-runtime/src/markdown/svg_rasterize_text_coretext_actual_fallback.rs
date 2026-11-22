@@ -159,7 +159,7 @@ fn explicit_variations(font: &CTFont) -> Option<BTreeMap<[u8; OPENTYPE_TAG_BYTES
     /* WHY: CoreText契約の数値dictionaryだけを、有限個のOpenType軸へ絞る。 */
     let variations = unsafe { variations.cast_unchecked::<CFNumber, CFNumber>() };
     (variations.len() <= MAX_EXPLICIT_VARIATIONS).then_some(())?;
-    variation_pairs(&variations)
+    variation_pairs(variations)
 }
 
 fn variation_pairs(

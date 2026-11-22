@@ -1,4 +1,4 @@
-use super::{FontShape, HARFRUST_SCALE, face_cache, font_variations, shape_buffer};
+use super::{FontShape, HARFRUST_SCALE, buffer::shape_buffer, face_cache, font_variations};
 use harfrust::font::{Font, metrics::ScaleF32};
 use resvg::usvg::fontdb::{Database, ID, Source};
 use std::sync::Arc;

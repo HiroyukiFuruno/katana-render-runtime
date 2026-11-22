@@ -18,9 +18,11 @@ const MAX_STYLE_QUERIES: usize = 32;
 const MAX_GLYPH_QUERIES: usize = 2048;
 const MAX_PHYSICAL_FONTS: usize = 16;
 
+type GlyphSelections = HashMap<char, Option<Arc<SelectedFace>>>;
+
 #[derive(Default)]
 pub(super) struct Memo {
-    glyphs: HashMap<SelectionKey, HashMap<char, Option<Arc<SelectedFace>>>>,
+    glyphs: HashMap<SelectionKey, GlyphSelections>,
     faces: Vec<FileFace>,
 }
 
