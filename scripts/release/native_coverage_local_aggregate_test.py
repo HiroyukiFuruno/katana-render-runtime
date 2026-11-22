@@ -25,15 +25,33 @@ class LocalCoverageAggregateUnitTests(unittest.TestCase):
 
     def test_authenticated_policy_failure_does_not_refresh(self) -> None:
         outputs = [
-            subprocess.CompletedProcess[str]([], 1, '{"valid":false,"failure":"coverage-policy"}', ""),
+            subprocess.CompletedProcess[str](
+                [], 1, '{"valid":false,"failure":"coverage-policy"}',
+                "coverage result: root coverage does not satisfy 100/0; crates/a.rs:12=1\n",
+            ),
         ]
-        with patch("native_coverage_local_aggregate.subprocess.run", side_effect=outputs) as run:
+        error = io.StringIO()
+        with patch("native_coverage_local_aggregate.subprocess.run", side_effect=outputs) as run, \
+             redirect_stderr(error):
             row = aggregate.validate_or_refresh(Path("/fixture"), "root")
         self.assertFalse(row["valid"])
         self.assertFalse(row["refreshed"])
         self.assertEqual(row["failure"], "coverage-policy")
+        self.assertEqual(error.getvalue(),
+                         "coverage result: root coverage does not satisfy 100/0; crates/a.rs:12=1\n")
         self.assertEqual(run.call_count, 1)
         self.assertEqual(run.call_args_list[0].args[0][4], "local-validate")
+
+    def test_policy_failure_suppresses_unrelated_or_multiline_stderr(self) -> None:
+        outputs = [
+            subprocess.CompletedProcess[str]([], 1, '{"valid":false,"failure":"coverage-policy"}',
+                                            "warning: unrelated\ncoverage result: should not leak\n"),
+        ]
+        error = io.StringIO()
+        with patch("native_coverage_local_aggregate.subprocess.run", side_effect=outputs), \
+             redirect_stderr(error):
+            aggregate.validate_or_refresh(Path("/fixture"), "root")
+        self.assertEqual(error.getvalue(), "")
 
     def test_invalid_collection_refreshes_then_requires_one_strict_readback(self) -> None:
         outputs = [

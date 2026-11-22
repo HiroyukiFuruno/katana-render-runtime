@@ -14,6 +14,13 @@ AGGREGATE_SCHEMA = "krr-native-local-coverage-aggregate-v1"
 PRODUCER_VALIDATION_SCHEMA = "krr-native-local-coverage-producer-validation-v1"
 
 
+def _coverage_policy_diagnostic(stderr: str) -> str | None:
+    lines = stderr.splitlines()
+    if len(lines) != 1 or not lines[0].startswith("coverage result: "):
+        return None
+    return lines[0]
+
+
 def _cli(root: Path, command: str, producer: str) -> tuple[int, dict[str, object]]:
     result = subprocess.run(
         [sys.executable, str(root / "scripts/release/native_coverage_result_cli.py"),
@@ -26,6 +33,10 @@ def _cli(root: Path, command: str, producer: str) -> tuple[int, dict[str, object
         payload = {"valid": False, "failure": "invalid-collection", "stderr": result.stderr.strip()}
     if not isinstance(payload, dict):
         payload = {"valid": False, "failure": "invalid-collection"}
+    if (result.returncode != 0 and payload.get("failure") == "coverage-policy"):
+        diagnostic = _coverage_policy_diagnostic(result.stderr)
+        if diagnostic is not None:
+            print(diagnostic, file=sys.stderr)
     return result.returncode, payload
 
 
