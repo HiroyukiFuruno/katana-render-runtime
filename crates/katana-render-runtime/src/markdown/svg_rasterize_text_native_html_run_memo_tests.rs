@@ -43,10 +43,16 @@ fn stored_face() -> Result<(Memo, FileFace), Box<dyn Error>> {
     Ok((memo, face))
 }
 
+struct FrameFontState {
+    database: Arc<Database>,
+    face_id: ID,
+    glyphs_were_empty: bool,
+}
+
 fn frame_face(
     cache: &HtmlFontFrameCache,
     mark_glyph: bool,
-) -> Result<(Arc<Database>, ID, bool), Box<dyn Error>> {
+) -> Result<FrameFontState, Box<dyn Error>> {
     let selection = system_selection()?;
     cache.with_frame(|| {
         with_current(|memo| {
@@ -54,11 +60,15 @@ fn frame_face(
             let face = memo
                 .physical_face(&selection.font)
                 .ok_or("physical face missing")?;
-            let face_identity = (Arc::clone(&face.database), face.id, empty);
+            let frame = FrameFontState {
+                database: Arc::clone(&face.database),
+                face_id: face.id,
+                glyphs_were_empty: empty,
+            };
             if mark_glyph {
                 memo.glyphs.insert(selection_key(), HashMap::new());
             }
-            Ok(face_identity)
+            Ok(frame)
         })
         .ok_or("native frame memo missing")?
     })
@@ -110,10 +120,10 @@ fn physical_font_database_reuses_only_session_cache_between_frames() -> Result<(
     let first = frame_face(&cache, true)?;
     let second = frame_face(&cache, false)?;
     let fresh = frame_face(&HtmlFontFrameCache::default(), false)?;
-    assert!(first.2 && second.2, "frame glyph memo must reset");
-    assert!(Arc::ptr_eq(&first.0, &second.0));
-    assert_eq!(first.1, second.1);
-    assert!(!Arc::ptr_eq(&first.0, &fresh.0));
+    assert!(first.glyphs_were_empty && second.glyphs_were_empty);
+    assert!(Arc::ptr_eq(&first.database, &second.database));
+    assert_eq!(first.face_id, second.face_id);
+    assert!(!Arc::ptr_eq(&first.database, &fresh.database));
     Ok(())
 }
 
