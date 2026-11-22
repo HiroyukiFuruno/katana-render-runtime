@@ -6,6 +6,7 @@ pub(crate) struct HtmlFontStyle<'a> {
     pub(crate) size: f32,
     pub(crate) weight: u16,
     pub(crate) italic: bool,
+    #[cfg(target_os = "macos")]
     pub(crate) language: Option<&'a str>,
 }
 
@@ -41,6 +42,7 @@ impl SvgRasterizeOps {
         })
     }
 
+    #[cfg(target_os = "macos")]
     pub(crate) fn native_html_text_advance(
         text: &str,
         style: HtmlFontStyle<'_>,
@@ -48,27 +50,12 @@ impl SvgRasterizeOps {
         features: Option<&str>,
         trim: TextSpacingTrim,
     ) -> Option<f32> {
-        #[cfg(target_os = "macos")]
-        {
-            let plan = text_shaping::NativeHtmlRunPlan::build(text, style)?;
-            let shape = text_shaping::FontShape::new(style.size, style.weight, style.italic)
-                .with_trim(trim);
-            let spacing = text.chars().count().saturating_sub(1) as f32 * letter_spacing;
-            plan.advance(shape, features)
-                .map(|advance| advance + spacing)
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (
-                text,
-                style.size,
-                style.language,
-                letter_spacing,
-                features,
-                trim,
-            );
-            None
-        }
+        let plan = text_shaping::NativeHtmlRunPlan::build(text, style)?;
+        let shape =
+            text_shaping::FontShape::new(style.size, style.weight, style.italic).with_trim(trim);
+        let spacing = text.chars().count().saturating_sub(1) as f32 * letter_spacing;
+        plan.advance(shape, features)
+            .map(|advance| advance + spacing)
     }
 
     pub(crate) fn html_control_arial_family() -> &'static str {

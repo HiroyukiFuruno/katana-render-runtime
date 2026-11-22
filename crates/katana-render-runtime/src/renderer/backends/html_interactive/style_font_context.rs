@@ -31,6 +31,7 @@ impl CssStyle {
             size: self.font_size,
             weight: self.font_weight,
             italic: self.italic,
+            #[cfg(target_os = "macos")]
             language: self.effective_font_language(),
         }
     }

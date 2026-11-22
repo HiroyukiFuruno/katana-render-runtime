@@ -27,6 +27,7 @@ pub(super) fn text_width_body(text: &str, style: &CssStyle) -> f32 {
 fn text_width_after_cache_miss(text: &str, style: &CssStyle, key: TextMeasurementKey) -> f32 {
     let preparation_started = start_preparation_timing();
     let trim = text_spacing_trim(style);
+    #[cfg(target_os = "macos")]
     if let Some(width) = native_width(text, style, trim) {
         record_preparation_timing(preparation_started);
         record_lookup(false, None);
@@ -45,6 +46,7 @@ fn text_spacing_trim(style: &CssStyle) -> TextSpacingTrim {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn native_width(text: &str, style: &CssStyle, trim: TextSpacingTrim) -> Option<f32> {
     SvgRasterizeOps::native_html_text_advance(
         text,
