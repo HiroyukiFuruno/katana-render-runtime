@@ -1,5 +1,11 @@
 # 品質ゲート改善の作業台帳
 
+## macOSの対象変更（2026-11-22）
+
+- [ ] 対象を最新安定版のmacOS 27系 Apple Siliconに絞る。macOS 15は対象から外す。ローカルのmacOS 27.2.1で同じ候補の必須検査を通し、検証済み証跡がある場合はCI側で同じ検査を繰り返さない。
+- [ ] GitHubのmacOS 27ランナーと必須チェックを照合する。新しい名前の同等チェックが成功してから、既存の保護設定を維持したままmacOSチェックの名前だけを更新する。
+- [ ] 対象変更後の候補で完全品質ゲート、独立raw JSを基準にしたMermaid全117図、Chrome比較と性能のHTML全84条件、PRレビュー、必須CIと公開を確認する。
+
 ## 公開候補の現在地点（2026-11-22）
 
 - [x] PR #120の `56a8d3b4` はLinux x64、Windows x64、macOS Apple Siliconのビルド・テストが通過した。HTML84条件の採取工程は書体の厳密照合で停止した。[必須CIの実行結果](https://github.com/HiroyukiFuruno/katana-render-runtime/actions/runs/44922928856)

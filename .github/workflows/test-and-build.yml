@@ -84,7 +84,7 @@ jobs:
         run: bun run moon --concurrency 3 exec krr:source-static --on-failure continue --no-actions
 
   test:
-    name: Test and Build
+    name: Test and Build (${{ matrix.check_name }})
     needs: static-quality
     if: >-
       github.event_name != 'pull_request' || github.event.pull_request.draft == false
@@ -94,10 +94,13 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux64
-          - os: macos-15
+            check_name: ubuntu-latest, linux64
+          - os: xcode-27
             platform: mac-arm64
+            check_name: mac-arm64
           - os: windows-latest
             platform: win64
+            check_name: windows-latest, win64
     runs-on: ${{ matrix.os }}
     permissions:
       actions: read
@@ -292,7 +295,7 @@ jobs:
           sudo apt-get install -y fonts-noto-cjk graphviz libfontconfig-dev libfreetype-dev
 
       - name: Install Graphviz for PlantUML on macOS
-        if: startsWith(matrix.os, 'macos-') && (matrix.platform != 'mac-arm64' || steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
+        if: matrix.platform == 'mac-arm64' && (steps.mac_proof.outcome != 'success' || steps.mac_proof.outputs.reuse != 'true')
         run: brew install graphviz
 
       - name: Install PlantUML runtime
@@ -691,7 +694,7 @@ jobs:
     needs: test
     if: >-
       github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    runs-on: macos-15
+    runs-on: xcode-27
     timeout-minutes: 360
     permissions:
       actions: read

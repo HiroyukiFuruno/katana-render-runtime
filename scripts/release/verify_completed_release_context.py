@@ -16,7 +16,7 @@ from datetime import datetime
 CI_PATH = ".github/workflows/test-and-build.yml"
 NATIVE_JOBS = (
     "Test and Build (ubuntu-latest, linux64)",
-    "Test and Build (macos-15, mac-arm64)",
+    "Test and Build (mac-arm64)",
     "Test and Build (windows-latest, win64)",
 )
 PAIRED_JOB = "Native paired HTML time and RSS nonregression"

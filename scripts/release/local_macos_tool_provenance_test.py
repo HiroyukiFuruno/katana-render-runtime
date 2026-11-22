@@ -96,7 +96,7 @@ def formula(name: str, bottle: bytes, dependencies: list[str]) -> dict[str, obje
         "bottle": {"stable": {"root_url": "https://ghcr.io/v2/homebrew/core", "files": {
             tag: {"cellar": PROVENANCE.CELLAR, "sha256": sha,
                   "url": f"https://ghcr.io/v2/homebrew/core/{name.replace('@', '/')}/blobs/sha256:{sha}"}
-            for tag in ("arm64_sequoia", "arm64_tahoe")
+            for tag in ("arm64_golden_gate",)
         }}},
     }
 
@@ -143,11 +143,11 @@ class OfficialFixture:
         if url == self.java_url:
             return self.java_archive
         for name, value in self.formulas.items():
-            if url == fixture_object(bottle_files(value)["arm64_sequoia"])["url"]:
+            if url == fixture_object(bottle_files(value)["arm64_golden_gate"])["url"]:
                 return self.bottles[name]
         raise AssertionError(f"unexpected official archive: {url}")
 
-    def proof(self, version: object = "15.7") -> HostToolProof:
+    def proof(self, version: object = "27.2.1") -> HostToolProof:
         proof: object = PROVENANCE.fetch_official_host_tool_proof(version, fetch_json=self.json, fetch_archive=self.download)
         if not isinstance(proof, HostToolProof):
             raise AssertionError("official proof must use the loaded provenance type")
@@ -209,27 +209,26 @@ class ToolProvenanceTest(unittest.TestCase):
     def test_current_official_formula_revision_and_versioned_namespace_are_supported(self) -> None:
         value = formula("openssl@3", b"fixture", [])
         value["revision"] = 2
-        identity, _ = PROVENANCE._formula(value, "openssl@3", "arm64_sequoia")
+        identity, _ = PROVENANCE._formula(value, "openssl@3", "arm64_golden_gate")
         self.assertEqual(identity["version"], "1.0_2")
         self.assertIn("/openssl/3/", identity["url"])
 
     def test_supported_os_selects_native_bottle_and_unknown_os_declines(self) -> None:
-        proof = OfficialFixture().proof("26.0")
-        self.assertTrue(all(value["bottle_tag"] == "arm64_tahoe" for value in proof.identities["graphviz"]))
-        for version in ("14.7", "27", "15;evil", "", None):
+        proof = OfficialFixture().proof("27.2.1")
+        self.assertTrue(all(value["bottle_tag"] == "arm64_golden_gate" for value in proof.identities["graphviz"]))
+        for version in ("14.7", "26.0", "27", "15;evil", "", None):
             with self.subTest(version=version), self.assertRaises(PROVENANCE.ProvenanceError):
                 OfficialFixture().proof(version)
 
     def test_official_all_bottle_is_supported_but_linux_only_is_not(self) -> None:
         value = formula("certificates", b"official certificates", [])
         files = bottle_files(value)
-        files["all"] = files.pop("arm64_sequoia")
-        files.pop("arm64_tahoe")
-        identity, _ = PROVENANCE._formula(value, "certificates", "arm64_sequoia")
+        files["all"] = files.pop("arm64_golden_gate")
+        identity, _ = PROVENANCE._formula(value, "certificates", "arm64_golden_gate")
         self.assertEqual(identity["bottle_tag"], "all")
         files["arm64_linux"] = files.pop("all")
         with self.assertRaises(PROVENANCE.ProvenanceError):
-            PROVENANCE._formula(value, "certificates", "arm64_sequoia")
+            PROVENANCE._formula(value, "certificates", "arm64_golden_gate")
 
     def test_metadata_url_digest_name_and_runtime_classes_fail_closed(self) -> None:
         for field, replacement in (("full_name", "foreign/graphviz"), ("dependencies", ["../../foreign"]),
@@ -250,7 +249,7 @@ class ToolProvenanceTest(unittest.TestCase):
             fixture.proof()
         for field, replacement in (("url", "https://evil.example/archive"), ("sha256", "f" * 63), ("cellar", "/untrusted/Cellar")):
             fixture = OfficialFixture()
-            fixture_object(bottle_files(fixture.formulas["graphviz"])["arm64_sequoia"])[field] = replacement
+            fixture_object(bottle_files(fixture.formulas["graphviz"])["arm64_golden_gate"])[field] = replacement
             with self.subTest(field=field), self.assertRaises(PROVENANCE.ProvenanceError):
                 fixture.proof()
 
@@ -380,11 +379,11 @@ class ToolProvenanceTest(unittest.TestCase):
 
     def test_missing_official_artifact_or_metadata_declines_without_executing_installer(self) -> None:
         fixture = OfficialFixture()
-        bottle_files(fixture.formulas["graphviz"]).pop("arm64_sequoia")
+        bottle_files(fixture.formulas["graphviz"]).pop("arm64_golden_gate")
         with self.assertRaises(PROVENANCE.ProvenanceError):
             fixture.proof()
         with self.assertRaises(PROVENANCE.ProvenanceError):
-            PROVENANCE.fetch_official_host_tool_proof("15.7", fetch_json=lambda _url: None,
+            PROVENANCE.fetch_official_host_tool_proof("27.2.1", fetch_json=lambda _url: None,
                                                      fetch_archive=lambda _url: self.fail("must not download"))
 
     def test_duplicate_json_keys_are_rejected(self) -> None:

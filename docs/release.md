@@ -30,9 +30,11 @@ Linuxで検査環境に依存する失敗を直す場合は、固定した公開
 GitHub のブランチ保護（branch protection）では、少なくとも次を必須検査（required check）にする。
 
 - `Test and Build (ubuntu-latest, linux64)`
-- `Test and Build (macos-15, mac-arm64)`
+- `Test and Build (mac-arm64)`
 - `Test and Build (windows-latest, win64)`
 - `preflight`
+
+macOSは27系のApple Siliconを対象とする。CIでは `xcode-27` を使う。同じPR・ベース・候補コミットのローカル証跡が検証を通過した場合、CIは該当するmacOS検査を省略する。証跡が有効でない場合はCIで検査する。
 
 ## リリース前検査
 

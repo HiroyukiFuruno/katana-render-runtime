@@ -4314,7 +4314,7 @@ def latest_acquisition_generation(runs: list[JsonObject]) -> JsonObject:
 def _require_acquisition_jobs(jobs: JsonObject, run_id: int) -> list[JsonObject]:
     rows = _objects(jobs["jobs"], "CI jobs")
     require(jobs["total_count"] == len(rows), "incomplete current CI jobs")
-    for name in ("Test and Build (ubuntu-latest, linux64)", "Test and Build (macos-15, mac-arm64)",
+    for name in ("Test and Build (ubuntu-latest, linux64)", "Test and Build (mac-arm64)",
                  "Test and Build (windows-latest, win64)", "Native paired HTML time and RSS nonregression"):
         matches = [job for job in rows if job["name"] == name]
         require(len(matches) == 1 and matches[0]["run_id"] == run_id

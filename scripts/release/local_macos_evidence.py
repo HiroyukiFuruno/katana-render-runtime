@@ -37,7 +37,7 @@ else:
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/test-and-build.yml"
-SUPPORTED_WORKFLOW_SHA256 = "5aca450338319a4187176d11c8a0be59ab604d12ff7bf5fb653f647c6eafbff4"
+SUPPORTED_WORKFLOW_SHA256 = "698da7536b76a695e9b17246e4b3eff11d9d71353f18c9e8bcef9ca0c7334ae3"
 SCHEMA = 1
 FRESHNESS_SECONDS = 24 * 60 * 60
 MARKER = "<!-- krr-local-macos-evidence:v1 -->"
@@ -422,8 +422,8 @@ def macos_product_version() -> str:
     return version
 
 
-def is_macos_15(value: Any) -> bool:
-    return isinstance(value, str) and re.fullmatch(r"15\.\d+(?:\.\d+)?", value.strip()) is not None
+def is_macos_27(value: Any) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"27\.\d+(?:\.\d+)?", value.strip()) is not None
 
 
 def java_home_from_settings(output: str) -> str:
@@ -1210,8 +1210,8 @@ def tool_versions(
         raise EvidenceError("local proof requires Apple Silicon (arm64)")
     if platform.system() != "Darwin":
         raise EvidenceError("local proof requires macOS")
-    if not is_macos_15(found["macos"]):
-        raise EvidenceError("local proof requires macOS 15, matching the hosted macOS runner")
+    if not is_macos_27(found["macos"]):
+        raise EvidenceError("local proof requires macOS 27, matching the hosted macOS runner")
     assert_command_binding(binding, just_binding)
     rust_verbose = subprocess.run(
         ("rustc", "-vV"), cwd=ROOT, env=environment,
@@ -1248,7 +1248,7 @@ def validate_pinned_tools(versions: Any) -> None:
         "command_binding", "graphviz",
     }:
         raise EvidenceError("local proof tool inventory is incomplete or unsupported")
-    if (not is_macos_15(versions.get("macos")) or versions.get("architecture") != "arm64"
+    if (not is_macos_27(versions.get("macos")) or versions.get("architecture") != "arm64"
             or versions.get("rust_host") != SCOPE_PARAMETERS["CARGO_BUILD_TARGET"]):
         raise EvidenceError("local proof host does not match the Apple Silicon CI platform")
     if not java_is_21(versions.get("java")):
@@ -1314,7 +1314,7 @@ def validate_pinned_tools(versions: Any) -> None:
     identities = host_tools.get("identities")
     formulae = identities.get("graphviz") if isinstance(identities, dict) else None
     java_identity = identities.get("java") if isinstance(identities, dict) else None
-    expected_tag = "arm64_sequoia" if str(versions.get("macos", "")).startswith("15.") else "arm64_tahoe"
+    expected_tag = "arm64_golden_gate"
     if (set(host_tools) != {
             "policy", "identities", "graphviz_inventory_sha256", "java_inventory_sha256", "dot_path",
     }
@@ -1741,7 +1741,7 @@ def valid_payload(
         return False
     if not Path(tools["java_home"]).is_absolute():
         return False
-    if (tools.get("architecture") != "arm64" or not is_macos_15(tools.get("macos"))
+    if (tools.get("architecture") != "arm64" or not is_macos_27(tools.get("macos"))
             or tools.get("rust_host") != SCOPE_PARAMETERS["CARGO_BUILD_TARGET"]):
         return False
     if (not java_is_21(tools.get("java")) or tools.get("java_vendor") != JAVA_VENDOR
@@ -1981,8 +1981,8 @@ def output_reuse(value: bool, output_path: str | None) -> None:
 def collect(repository: str, number: int, publish: bool) -> int:
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise EvidenceError("local collection requires macOS Apple Silicon")
-    if not is_macos_15(macos_product_version()):
-        raise EvidenceError("local collection requires macOS 15, matching the hosted macOS runner")
+    if not is_macos_27(macos_product_version()):
+        raise EvidenceError("local collection requires macOS 27, matching the hosted macOS runner")
     require_standard_index_flags()
     if git_status():
         raise EvidenceError("working tree must be clean before collection")

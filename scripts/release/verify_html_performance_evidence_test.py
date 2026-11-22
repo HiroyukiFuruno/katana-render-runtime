@@ -4960,7 +4960,7 @@ class PerformanceAcquisitionTest(unittest.TestCase):
                         new.update(run_started_at=run["run_started_at"], status="in_progress", conclusion=None)
                     payload = {"total_count": 1, "workflow_runs": [new]} if case.endswith("same_id_rerun") else {"total_count": 2, "workflow_runs": [run, new]}
             elif path.endswith("/attempts/1/jobs?per_page=100"):
-                jobs: list[JsonObject] = [{"name": name, "run_id": 101, "status": "completed", "conclusion": "success"} for name in ("Test and Build (ubuntu-latest, linux64)", "Test and Build (macos-15, mac-arm64)", "Test and Build (windows-latest, win64)", "Native paired HTML time and RSS nonregression")]
+                jobs: list[JsonObject] = [{"name": name, "run_id": 101, "status": "completed", "conclusion": "success"} for name in ("Test and Build (ubuntu-latest, linux64)", "Test and Build (mac-arm64)", "Test and Build (windows-latest, win64)", "Native paired HTML time and RSS nonregression")]
                 if case in {"producer_skipped_dependency", "producer_local_skipped_dependency",
                             "manual_local_skipped_dependency"}:
                     jobs[-1]["conclusion"] = "skipped"

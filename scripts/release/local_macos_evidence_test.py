@@ -159,7 +159,7 @@ def collector_validation_patches(
             {"number": 7, "state": "open", "base": {"sha": BASE, "ref": "master", "repo": {"full_name": REPOSITORY}},
              "head": {"sha": HEAD, "repo": {"full_name": REPOSITORY}}},
         ]),
-        patch.object(EVIDENCE, "macos_product_version", return_value="15.0"),
+        patch.object(EVIDENCE, "macos_product_version", return_value="27.2.1"),
         patch.object(EVIDENCE, "require_standard_index_flags"),
         patch.object(EVIDENCE, "head_worktree_bytes_digest", return_value="source-hash"),
         patch.object(EVIDENCE, "tool_versions", return_value=versions),
@@ -255,7 +255,7 @@ def fixture_host_tool_proof() -> HostToolProof:
             "bin/java": EVIDENCE.TOOL_PROVENANCE.InventoryEntry("file", 0o111, "d" * 64),
         }, {
             "graphviz": [{
-                "name": "graphviz", "version": "12.0.0", "bottle_tag": "arm64_sequoia",
+                "name": "graphviz", "version": "12.0.0", "bottle_tag": "arm64_golden_gate",
                 "url": "https://ghcr.io/v2/homebrew/core/graphviz/blobs/sha256:" + "a" * 64,
                 "sha256": "a" * 64,
             }],
@@ -384,7 +384,7 @@ def valid_comment() -> dict[str, object]:
         "completed_at": "2027-01-15T08:00:00Z",
         "platform": "macos-arm64",
         "tools": {
-            "macos": "15.0", "architecture": "arm64", "rust_host": "aarch64-apple-darwin",
+            "macos": "27.2.1", "architecture": "arm64", "rust_host": "aarch64-apple-darwin",
             "rustc": f"rustc {STABLE_RUST['rustc']}",
             "cargo": f"cargo {STABLE_RUST['cargo_cli']}", "java": 'openjdk version "21.0.12" 2025-01-21', "bun": "1.4.4",
             "clippy": f"clippy {STABLE_RUST['clippy_cli']}",
@@ -573,7 +573,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                     EVIDENCE, "command_binding", return_value=command_binding,
                 ) as command_binding_mock,
                 patch.object(
-                    EVIDENCE, "macos_product_version", return_value="15.0",
+                    EVIDENCE, "macos_product_version", return_value="27.2.1",
                 ) as macos_version_mock,
                 patch.object(
                     EVIDENCE.subprocess, "run",
@@ -869,13 +869,13 @@ class LocalMacosEvidenceTest(unittest.TestCase):
                 with self.assertRaisesRegex(EVIDENCE.EvidenceError, "no PlantUML JVM library"):
                     EVIDENCE.detect_java_home({"PATH": "/safe/bin"})
 
-    def test_only_macos_15_and_arm64_rust_host_are_accepted(self) -> None:
+    def test_only_macos_27_and_arm64_rust_host_are_accepted(self) -> None:
         good = valid_comment()
         payload = json.loads(comment_body(good).split("\n", 1)[1])
         for macos, rust_host in (
             ("13.7.8", "aarch64-apple-darwin"),
             ("14.7.8", "aarch64-apple-darwin"),
-            ("27.0", "aarch64-apple-darwin"),
+            ("26.0", "aarch64-apple-darwin"),
             ("15.foo", "aarch64-apple-darwin"),
             ("15.7junk", "aarch64-apple-darwin"),
             ("15.0", "x86_64-apple-darwin"),
@@ -1355,7 +1355,7 @@ class LocalMacosEvidenceTest(unittest.TestCase):
             patch.object(EVIDENCE, "macos_product_version", return_value="14.7.8"),
             patch.object(EVIDENCE.subprocess, "run") as run,
         ):
-            with self.assertRaisesRegex(EVIDENCE.EvidenceError, "requires macOS 15"):
+            with self.assertRaisesRegex(EVIDENCE.EvidenceError, "requires macOS 27"):
                 EVIDENCE.collect(REPOSITORY, 7, publish=False)
         run.assert_not_called()
 
@@ -2001,7 +2001,7 @@ git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
             require_object_dict(json.loads(comment_body(valid_comment()).split("\n", 1)[1]))["tools"],
         )
         versions = {**valid_tools,
-            "macos": "15.0", "architecture": "arm64", "rustc": "rustc stable",
+            "macos": "27.2.1", "architecture": "arm64", "rustc": "rustc stable",
             "cargo": "cargo stable", "java": 'openjdk version "17.0.13"',
             "java_home": "/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home",
             "java_vendor": "Eclipse Adoptium",
@@ -2020,7 +2020,7 @@ git_commit_hash = "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"
             require_object_dict(json.loads(comment_body(valid_comment()).split("\n", 1)[1]))["tools"],
         )
         versions = {**valid_tools,
-            "macos": "15.0", "architecture": "arm64",
+            "macos": "27.2.1", "architecture": "arm64",
             "rustc": "rustc 1.91.0-nightly (nightly-hash 2025-09-14)",
             "cargo": f"cargo {STABLE_RUST['cargo_cli']}", "java": 'openjdk version "21.0.12"',
             "java_home": "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
