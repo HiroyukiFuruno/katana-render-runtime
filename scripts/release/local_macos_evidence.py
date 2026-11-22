@@ -37,7 +37,7 @@ else:
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/test-and-build.yml"
-SUPPORTED_WORKFLOW_SHA256 = "7c2898104574724e694c99613c8f85d3e95bddddfd877ecadfc04ac0ff706d38"
+SUPPORTED_WORKFLOW_SHA256 = "8840314e973333983ccae5b338338dfde0c19c264ac16f4d7662aecf5fbcc795"
 SCHEMA = 1
 FRESHNESS_SECONDS = 24 * 60 * 60
 MARKER = "<!-- krr-local-macos-evidence:v1 -->"
@@ -766,9 +766,14 @@ def base_is_merged(compare_payload: Any, base_sha: str) -> bool:
     return isinstance(merge_base, dict) and merge_base.get("sha") == base_sha
 
 
-def validate_pr(value: Any, repository: str, number: int) -> tuple[str, str]:
-    if not isinstance(value, dict) or value.get("number") != number or value.get("state") != "open":
+def validate_pr(value: Any, repository: str, number: int, *,
+                merge_head: str | None = None) -> tuple[str, str]:
+    state = "open" if merge_head is None else "closed"
+    if not isinstance(value, dict) or value.get("number") != number or value.get("state") != state:
         raise EvidenceError("pull request identity or state is invalid")
+    if merge_head is not None and (value.get("merged") is not True or value.get("draft") is not False
+                                   or value.get("merge_commit_sha") != merge_head):
+        raise EvidenceError("merged pull request identity is invalid")
     base, head = value.get("base"), value.get("head")
     if not isinstance(base, dict) or not isinstance(head, dict):
         raise EvidenceError("pull request SHAs are missing")

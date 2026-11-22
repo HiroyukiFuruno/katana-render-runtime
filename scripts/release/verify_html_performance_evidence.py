@@ -4409,6 +4409,29 @@ def acquire(directory: Path, root: Path, repository: str, current_producer: bool
             }))
             return {"head": head, "kind": "owner-local-html-performance", "conditions": 84,
                     "memoryPolicyVersion": "html-memory-v5"}
+    elif (run.get("event") in ("push", "workflow_dispatch")
+          and run.get("head_branch") == "master"):
+        from local_html_performance_evidence import ci_reused_local_evidence, verify_merged_from_api
+        run_id = _integer(run.get("id"), "CI run id")
+        attempt = _integer(run.get("run_attempt"), "CI attempt")
+        completed_jobs = _require_acquisition_jobs(
+            api(f"repos/{repository}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100"), run_id)
+        if ci_reused_local_evidence(completed_jobs):
+            require(verify_merged_from_api(repository, head),
+                    "completed master CI local evidence is invalid")
+            latest = api(f"repos/{repository}/actions/runs/{run_id}")
+            require(current_latest() == run and all(latest.get(key) == run.get(key) for key in
+                    ("id", "head_sha", "run_attempt", "status", "conclusion", "event", "head_branch")),
+                    "completed CI generation changed")
+            require(verify_merged_from_api(repository, head),
+                    "completed master CI local evidence changed")
+            directory.mkdir(parents=True)
+            (directory / "acquisition.json").write_text(json.dumps({
+                "repository": repository, "head": head, "runId": run_id, "runAttempt": attempt,
+                "kind": "owner-local-html-performance",
+            }))
+            return {"head": head, "kind": "owner-local-html-performance", "conditions": 84,
+                    "memoryPolicyVersion": "html-memory-v5"}
     elif (pr_binding := _completed_pr_binding(run, repository, head)) is not None:
         number, base = pr_binding
         from local_html_performance_evidence import ci_reused_local_evidence, verify_from_api

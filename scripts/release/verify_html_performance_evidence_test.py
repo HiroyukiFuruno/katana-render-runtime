@@ -4882,6 +4882,9 @@ class PerformanceAcquisitionTest(unittest.TestCase):
             json_object_at(run, "head_repository")["full_name"] = "foreign/repo"
         producer = case.startswith("producer_")
         manual_local = case.startswith("manual_local_")
+        master_local = case.startswith("master_local_")
+        if master_local:
+            run.update(event="push", head_branch="master")
         if manual_local:
             run.update(event="pull_request", repository={"full_name": self.repository},
                        pull_requests=[{"number": 7, "head": {"sha": self.fixture.head},
@@ -4964,7 +4967,8 @@ class PerformanceAcquisitionTest(unittest.TestCase):
                 if case in {"producer_skipped_dependency", "producer_local_skipped_dependency",
                             "manual_local_skipped_dependency"}:
                     jobs[-1]["conclusion"] = "skipped"
-                if case in {"producer_local_success", "manual_local_success"}:
+                if case in {"producer_local_success", "manual_local_success", "master_local_success",
+                            "master_local_invalid"}:
                     jobs[-1]["steps"] = [{"name": "Report local HTML performance evidence",
                                           "conclusion": "success"}]
                 payload = {"total_count": len(jobs), "jobs": jobs}
@@ -4988,6 +4992,8 @@ class PerformanceAcquisitionTest(unittest.TestCase):
         with patch.object(gate.subprocess, "check_output", synthetic_api), \
              patch.object(local_html, "verify_from_api", return_value=(case.startswith("producer_local")
                  or (manual_local and case not in {"manual_local_expired", "manual_local_api_failure"}))), \
+             patch.object(local_html, "verify_merged_from_api", create=True,
+                          return_value=case == "master_local_success"), \
              patch.object(attestation, "verify_remote_attestation"), \
              patch.object(remote_evidence, "validate_producer_verification_receipt", return_value={}), \
              patch.object(canonical_gate, "_require_catalog_attempt_set"), \
@@ -5066,6 +5072,22 @@ class PerformanceAcquisitionTest(unittest.TestCase):
         self.assertEqual(gate.read_json(self.destination / "acquisition.json")["kind"],
                          "owner-local-html-performance")
         self.assertFalse(any(path.endswith("/artifacts?per_page=100") for path in self.calls))
+
+    def test_completed_master_can_use_verified_merged_local_evidence(self) -> None:
+        self.acquire_case("master_local_success")
+        self.assertEqual(gate.read_json(self.destination / "acquisition.json"), {
+            "repository": self.repository,
+            "head": self.fixture.head,
+            "runId": 101,
+            "runAttempt": 1,
+            "kind": "owner-local-html-performance",
+        })
+        self.assertFalse(any(path.endswith("/artifacts?per_page=100") for path in self.calls))
+
+    def test_completed_master_rejects_invalid_reported_local_evidence(self) -> None:
+        with self.assertRaisesRegex(ValueError, "master CI local evidence is invalid"):
+            self.acquire_case("master_local_invalid")
+        self.assertFalse(self.destination.exists())
 
     def test_completed_pr_local_proof_requires_matching_pr_and_successful_jobs(self) -> None:
         with self.assertRaises(ValueError):

@@ -137,6 +137,59 @@ def preflight_generation(fetch: Fetch, base: str, repository: str, pull: JsonObj
     return run
 
 
+def _merged_release_pr(fetch: Fetch, base: str, repository: str, head: str, pulls: list[JsonObject] | None = None) -> tuple[JsonObject, str, re.Match[str]]:
+    if pulls is None:
+        pulls = pages(fetch, f"{base}/commits/{head}/pulls")
+    releases = [pull for pull in pulls if RELEASE.fullmatch(string_field(object_field(pull, "head", "invalid release branch"), "ref", "invalid release branch"))]
+    require(len(releases) == 1, "expected one merged release PR for exact source")
+    pull = json_object(fetch(f"{base}/pulls/{releases[0]['number']}"), "release PR is not merged and ready")
+    require(pull.get("state") == "closed" and pull.get("merged") is True and pull.get("draft") is False and bool(pull.get("merged_at")), "release PR is not merged and ready")
+    require(pull.get("merge_commit_sha") == head, "release PR merge SHA differs from measured source")
+    pull_base = object_field(pull, "base", "release PR repository/base mismatch")
+    pull_base_repo = object_field(pull_base, "repo", "release PR repository/base mismatch")
+    pull_head = object_field(pull, "head", "release PR repository/base mismatch")
+    pull_head_repo = object_field(pull_head, "repo", "release PR repository/base mismatch")
+    require(pull_base.get("ref") == "master" and pull_base_repo.get("full_name") == repository and pull_head_repo.get("full_name") == repository, "release PR repository/base mismatch")
+    branch = json_string(pull_head.get("ref"), "invalid release branch")
+    match = RELEASE.fullmatch(branch)
+    if match is None:
+        raise ValueError("invalid release branch")
+    return pull, branch, match
+
+
+def verified_merged_pr_binding(fetch: Fetch, repository: str, head: str) -> tuple[int, str, str]:
+    """Return the immutable base/head binding for a merged release PR after preflight."""
+    require(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is not None, "invalid repository")
+    require(SHA.fullmatch(head) is not None, "invalid source SHA")
+    base = f"repos/{repository}"
+    workflow = json_object(fetch(f"{base}/actions/workflows/test-and-build.yml"), "unexpected CI workflow")
+    require(workflow.get("path") == CI_PATH and workflow.get("state") == "active", "unexpected CI workflow")
+    pull, _branch, _version = _merged_release_pr(fetch, base, repository, head)
+    commit = json_object(fetch(f"{base}/git/commits/{head}"), "merge commit/tree identity mismatch")
+    parents = json_object_rows(commit.get("parents"), "merge commit parent identity mismatch")
+    require(len(parents) == 2 and commit.get("sha") == head, "merge commit must have exactly two parents")
+    base_sha = json_string(parents[0].get("sha"), "invalid merge base SHA")
+    pr_head_sha = json_string(parents[1].get("sha"), "invalid merged PR head SHA")
+    require(SHA.fullmatch(base_sha) is not None and SHA.fullmatch(pr_head_sha) is not None, "invalid merge parent SHA")
+    pull_base = object_field(pull, "base", "release PR repository/base mismatch")
+    pull_head = object_field(pull, "head", "release PR repository/base mismatch")
+    require(pull_base.get("sha") == base_sha and pull_head.get("sha") == pr_head_sha, "merge parent differs from release PR refs")
+    merge_tree = string_field(object_field(commit, "tree", "merge commit/tree identity mismatch"), "sha", "merge commit/tree identity mismatch")
+    require(SHA.fullmatch(merge_tree) is not None, "merge commit/tree identity mismatch")
+    pr_head_commit = json_object(fetch(f"{base}/git/commits/{pr_head_sha}"), "merged PR head/tree identity mismatch")
+    pr_head_tree = string_field(object_field(pr_head_commit, "tree", "merged PR head/tree identity mismatch"), "sha", "merged PR head/tree identity mismatch")
+    require(pr_head_commit.get("sha") == pr_head_sha and SHA.fullmatch(pr_head_tree) is not None and merge_tree == pr_head_tree, "merge tree differs from merged PR head tree")
+    preflight = preflight_generation(fetch, base, repository, pull, workflow)
+    preflight_jobs = pages(fetch, f"{base}/actions/runs/{preflight['id']}/attempts/{preflight['run_attempt']}/jobs", "jobs")
+    matching_jobs = [job for job in preflight_jobs if job.get("name") == "preflight"]
+    require(len(matching_jobs) == 1 and matching_jobs[0].get("run_id") == preflight["id"] and matching_jobs[0].get("head_sha") == preflight["head_sha"], "required preflight job absent/foreign/duplicate")
+    complete(matching_jobs[0], "release PR preflight")
+    require(fetch(f"{base}/pulls/{pull['number']}") == pull, "release PR changed during verification")
+    require(fetch(f"{base}/actions/runs/{preflight['id']}") == preflight, "PR preflight generation changed")
+    require(preflight_generation(fetch, base, repository, pull, workflow) == preflight, "latest PR preflight generation changed during verification")
+    return positive_integer(pull.get("number"), "invalid release PR number"), base_sha, pr_head_sha
+
+
 def verify(fetch: Fetch, repository: str, head: str, run_id: int | None = None, run_attempt: int | None = None, automatic: bool = False) -> JsonObject:
     require(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) is not None, "invalid repository")
     require(SHA.fullmatch(head) is not None, "invalid source SHA")
@@ -152,18 +205,7 @@ def verify(fetch: Fetch, repository: str, head: str, run_id: int | None = None, 
     if not releases and automatic:
         return {"eligible": "false"}
     require(len(releases) == 1, "expected one merged release PR for exact source")
-    pull = json_object(fetch(f"{base}/pulls/{releases[0]['number']}"), "release PR is not merged and ready")
-    require(pull.get("state") == "closed" and pull.get("merged") is True and pull.get("draft") is False and bool(pull.get("merged_at")), "release PR is not merged and ready")
-    require(pull.get("merge_commit_sha") == head, "release PR merge SHA differs from measured source")
-    pull_base = object_field(pull, "base", "release PR repository/base mismatch")
-    pull_base_repo = object_field(pull_base, "repo", "release PR repository/base mismatch")
-    pull_head = object_field(pull, "head", "release PR repository/base mismatch")
-    pull_head_repo = object_field(pull_head, "repo", "release PR repository/base mismatch")
-    require(pull_base.get("ref") == "master" and pull_base_repo.get("full_name") == repository and pull_head_repo.get("full_name") == repository, "release PR repository/base mismatch")
-    branch = json_string(pull_head.get("ref"), "invalid release branch")
-    match = RELEASE.fullmatch(branch)
-    if match is None:
-        raise ValueError("invalid release branch")
+    pull, branch, match = _merged_release_pr(fetch, base, repository, head, releases)
     jobs = pages(fetch, f"{base}/actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs", "jobs")
     for name in (*NATIVE_JOBS, PAIRED_JOB):
         matches = [job for job in jobs if job.get("name") == name]

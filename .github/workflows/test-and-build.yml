@@ -716,16 +716,21 @@ jobs:
 
       - name: Verify optional local HTML performance evidence
         id: html_local_proof
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/master'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          python3 scripts/release/local_html_performance_evidence.py --verify
-          --repository "${{ github.repository }}"
-          --pr "${{ github.event.pull_request.number }}"
-          --base "${{ github.event.pull_request.base.sha }}"
-          --head "${{ github.event.pull_request.head.sha }}"
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            python3 scripts/release/local_html_performance_evidence.py --repository "$GITHUB_REPOSITORY" \
+              --verify --pr "$PR_NUMBER" --base "$PR_BASE_SHA" --head "$PR_HEAD_SHA"
+          else
+            python3 scripts/release/local_html_performance_evidence.py --repository "$GITHUB_REPOSITORY" \
+              --verify-merged-head "$GITHUB_SHA"
+          fi
 
       - name: Report local HTML performance evidence
         if: steps.html_local_proof.outcome == 'success' && steps.html_local_proof.outputs.reuse == 'true'

@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import tomllib
+from typing import cast
 import unittest
 
 JsonObject = dict[str, object]
@@ -46,6 +47,8 @@ REPO = "Owner/repository"
 HEAD = "a" * 40
 PR_HEAD = "b" * 40
 TREE = "c" * 40
+BASE_SHA = "e" * 40
+PR_HEAD_TREE = TREE
 BASE = "repos/" + REPO
 
 
@@ -80,7 +83,7 @@ class CompletedReleaseContextTest(unittest.TestCase):
             "draft": False,
             "merge_commit_sha": HEAD,
             "head": {"ref": "release/v0.4.24", "sha": PR_HEAD, "repo": repo},
-            "base": {"ref": "master", "repo": repo},
+            "base": {"ref": "master", "sha": BASE_SHA, "repo": repo},
         }
         self.preflight = {
             "workflow_id": 2,
@@ -133,12 +136,18 @@ class CompletedReleaseContextTest(unittest.TestCase):
                     {
                         "name": "preflight",
                         "run_id": 19,
+                        "head_sha": "d" * 40,
                         "status": "completed",
                         "conclusion": "success",
                     }
                 ],
             },
-            f"{BASE}/git/commits/{HEAD}": {"sha": HEAD, "tree": {"sha": TREE}},
+            f"{BASE}/git/commits/{HEAD}": {
+                "sha": HEAD,
+                "tree": {"sha": TREE},
+                "parents": [{"sha": BASE_SHA}, {"sha": PR_HEAD}],
+            },
+            f"{BASE}/git/commits/{PR_HEAD}": {"sha": PR_HEAD, "tree": {"sha": PR_HEAD_TREE}},
             f"{BASE}/actions/runs/20": self.merge_run,
             f"{BASE}/actions/runs/19": self.preflight,
         }
@@ -179,6 +188,9 @@ class CompletedReleaseContextTest(unittest.TestCase):
             gate.verify(self.fetch, REPO, HEAD, run_id, run_attempt, automatic)
         )
 
+    def binding(self) -> tuple[int, str, str]:
+        return cast(tuple[int, str, str], gate.verified_merged_pr_binding(self.fetch, REPO, HEAD))
+
     def test_success_emits_exact_merge_tree_branch_and_generation(self) -> None:
         self.assertEqual(
             self.verify(run_id=20, run_attempt=1, automatic=True),
@@ -193,6 +205,30 @@ class CompletedReleaseContextTest(unittest.TestCase):
                 "run_attempt": "1",
             },
         )
+
+    def test_verified_merged_pr_binding_returns_parent_identity_after_preflight(self) -> None:
+        self.assertEqual(self.binding(), (7, BASE_SHA, PR_HEAD))
+
+    def test_verified_merged_pr_binding_rejects_parent_tree_and_preflight_mismatches(self) -> None:
+        commit = self.response_object(f"{BASE}/git/commits/{HEAD}")
+        variants = (
+            ("parent_count", "parents", [{"sha": BASE_SHA}]),
+            ("parent_ref", "parents", [{"sha": "f" * 40}, {"sha": PR_HEAD}]),
+            ("tree", "tree", {"sha": "f" * 40}),
+        )
+        for case, key, value in variants:
+            with self.subTest(case=case):
+                original = commit[key]
+                commit[key] = value
+                with self.assertRaises(ValueError):
+                    self.binding()
+                commit[key] = original
+        preflight = self.preflight
+        original = preflight["conclusion"]
+        preflight["conclusion"] = "failure"
+        with self.assertRaises(ValueError):
+            self.binding()
+        preflight["conclusion"] = original
 
     def test_nonrelease_master_is_skipped_only_automatically(self) -> None:
         self.responses[f"{BASE}/commits/{HEAD}/pulls?per_page=100&page=1"] = []

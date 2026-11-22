@@ -108,8 +108,12 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
     def test_paired_workflow_falls_back_when_local_evidence_is_missing(self) -> None:
         from local_macos_workflow_contract_test import workflow_job, workflow_steps
         workflow = mac.WORKFLOW.read_text(encoding="utf8")
-        steps = {step.get("name"): step for step in workflow_steps(workflow_job(workflow, "paired-performance"))}
+        paired = workflow_job(workflow, "paired-performance")
+        steps = {step.get("name"): step for step in workflow_steps(paired)}
         self.assertEqual(steps["Verify optional local HTML performance evidence"].get("continue-on-error"), "true")
+        self.assertEqual(steps["Verify optional local HTML performance evidence"].get("if"),
+                         "github.event_name == 'pull_request' || github.ref == 'refs/heads/master'")
+        self.assertIn('--verify-merged-head "$GITHUB_SHA"', paired)
         expected = "steps.html_local_proof.outcome != 'success' || steps.html_local_proof.outputs.reuse != 'true'"
         for name in ("Install Rust toolchain", "Capture all 84 HTML catalog conditions",
                      "Measure all 84 catalog conditions against baseline",
@@ -117,6 +121,37 @@ class LocalHtmlPerformanceEvidenceTests(unittest.TestCase):
                      "Attest immutable paired performance artifact"):
             self.assertEqual(steps[name].get("if"), expected)
         self.assertIn("needs: [test, paired-performance]", workflow_job(workflow, "preflight"))
+
+    def test_merged_proof_reuses_the_exact_binding_and_host_policy(self) -> None:
+        base, head, merge = "b" * 40, "c" * 40, "d" * 40
+        binding = 3, base, head
+        with (patch.object(mac, "workflow_scope_supported", return_value=True),
+              patch.object(mac, "gh_token", return_value="token"),
+              patch.object(proof, "verified_merged_pr_binding", return_value=binding) as resolved,
+              patch.object(proof, "verify_from_api", return_value=True) as verify):
+            self.assertTrue(proof.verify_merged_from_api("owner/repo", merge, hosted_macos="26.7.2"))
+            verify.assert_called_once_with("owner/repo", 3, base, head, hosted_macos="26.7.2", merge_head=merge)
+            self.assertEqual(resolved.call_count, 2)
+            resolved.side_effect = [binding, (4, base, head)]
+            self.assertFalse(proof.verify_merged_from_api("owner/repo", merge))
+            resolved.side_effect = ValueError("different tree")
+            verify.reset_mock()
+            self.assertFalse(proof.verify_merged_from_api("owner/repo", merge))
+            verify.assert_not_called()
+
+    def test_merged_proof_rejects_a_closed_unmerged_or_different_pull(self) -> None:
+        base, head, merge = "b" * 40, "c" * 40, "d" * 40
+        repository = {"full_name": "owner/repo"}
+        pull = {"number": 3, "state": "closed", "merged": True, "draft": False,
+                "merge_commit_sha": merge,
+                "base": {"ref": "master", "sha": base, "repo": repository},
+                "head": {"ref": "release/v0.4.24", "sha": head, "repo": repository}}
+        self.assertEqual(mac.validate_pr(pull, "owner/repo", 3, merge_head=merge), (base, head))
+        with self.assertRaises(mac.EvidenceError):
+            mac.validate_pr(pull, "owner/repo", 3)
+        for change in ({"merged": False}, {"draft": True}, {"merge_commit_sha": head}, {"state": "open"}):
+            with self.assertRaises(mac.EvidenceError):
+                mac.validate_pr({**pull, **change}, "owner/repo", 3, merge_head=merge)
 
     def test_collector_never_accepts_failed_formal_verification(self) -> None:
         from contextlib import ExitStack

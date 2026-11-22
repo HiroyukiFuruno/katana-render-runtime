@@ -13,6 +13,7 @@ from typing import cast
 import local_macos_evidence as mac
 import html_performance_source_reuse_cli as reuse_cli
 from html_performance_python_identity import installed_identity
+from verify_completed_release_context import verified_merged_pr_binding
 import verify_html_performance_evidence as gate
 
 MARKER = "<!-- krr-local-html-performance:v1 -->"
@@ -119,7 +120,7 @@ def valid(comment: object, repository: str, number: int, base: str, head: str,
 
 
 def verify_from_api(repository: str, number: int, base: str, head: str, *,
-                    hosted_macos: str | None = None) -> bool:
+                    hosted_macos: str | None = None, merge_head: str | None = None) -> bool:
     try:
         if not mac.workflow_scope_supported():
             return False
@@ -127,7 +128,7 @@ def verify_from_api(repository: str, number: int, base: str, head: str, *,
         def snapshot() -> tuple[str, object, object, list[object]]:
             owner = mac.canonical_owner(mac.api_request(token, "GET", f"repos/{repository}"), repository)
             pr = mac.api_request(token, "GET", f"repos/{repository}/pulls/{number}")
-            if mac.validate_pr(pr, repository, number) != (base, head):
+            if mac.validate_pr(pr, repository, number, merge_head=merge_head) != (base, head):
                 raise mac.EvidenceError("PR changed")
             compare = mac.api_request(token, "GET", f"repos/{repository}/compare/{base}...{head}")
             if not mac.base_is_merged(compare, base):
@@ -150,6 +151,25 @@ def verify_from_api(repository: str, number: int, base: str, head: str, *,
                    and not mac.is_expired_receipt(item, p, now)]
         return len(current) == 1 and valid(current[0], repository, number, base, head,
                                            workflow_sha, first[0], now, hosted_macos=hosted_macos)
+    except (mac.EvidenceError, ValueError, TypeError, KeyError, OSError, RuntimeError,
+            subprocess.SubprocessError):
+        return False
+
+
+def verify_merged_from_api(repository: str, merge_head: str, *,
+                           hosted_macos: str | None = None) -> bool:
+    try:
+        if not mac.workflow_scope_supported():
+            return False
+        token = mac.gh_token()
+
+        def fetch(path: str) -> object:
+            return mac.api_request(token, "GET", path)
+
+        binding = verified_merged_pr_binding(fetch, repository, merge_head)
+        if not verify_from_api(repository, *binding, hosted_macos=hosted_macos, merge_head=merge_head):
+            return False
+        return verified_merged_pr_binding(fetch, repository, merge_head) == binding
     except (mac.EvidenceError, ValueError, TypeError, KeyError, OSError, RuntimeError,
             subprocess.SubprocessError):
         return False
@@ -258,15 +278,26 @@ def main() -> int:
     import sys
     parser = argparse.ArgumentParser()
     parser.add_argument("--repository", required=True)
-    parser.add_argument("--pr", type=int, required=True)
+    parser.add_argument("--pr", type=int)
     parser.add_argument("--base")
     parser.add_argument("--head")
     parser.add_argument("--bundle", type=Path)
     parser.add_argument("--reuse-request", type=Path)
     parser.add_argument("--verify", action="store_true")
+    parser.add_argument("--verify-merged-head")
     parser.add_argument("--publish", action="store_true")
     args = parser.parse_args()
     try:
+        if args.verify_merged_head is not None:
+            if args.verify or args.publish or args.bundle or args.reuse_request or args.pr is not None or args.base or args.head:
+                raise mac.EvidenceError("invalid merged verification arguments")
+            accepted = (platform.system() == "Darwin" and platform.machine() == "arm64"
+                        and verify_merged_from_api(args.repository, args.verify_merged_head,
+                                                   hosted_macos=mac.macos_product_version()))
+            mac.output_reuse(accepted, __import__("os").environ.get("GITHUB_OUTPUT"))
+            return 0
+        if args.pr is None:
+            raise mac.EvidenceError("PR number is required")
         if args.verify:
             if args.publish or args.bundle or args.reuse_request or not args.base or not args.head:
                 raise mac.EvidenceError("invalid verification arguments")
